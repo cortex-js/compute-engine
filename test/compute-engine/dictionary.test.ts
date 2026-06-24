@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { Expression } from '../../src/math-json/types.ts';
 import { engine, exprToString } from '../utils';
 import { isDictionary } from '../../src/compute-engine/boxed-expression/utils';
@@ -473,5 +474,45 @@ describe('dictionaryFromExpression (REVIEW.md C8)', () => {
   it('wraps the KeyValuePair branch in a { dict } object', () => {
     const d = dictionaryFromExpression(['Tuple', { str: 'k' }, 9] as any);
     expect(d).toEqual({ dict: { k: 9 } });
+  });
+});
+
+describe('Dictionary key access via At', () => {
+  const dict: Expression = { dict: { height: 42, width: 7 } } as any;
+
+  it('reads a value by string key', () => {
+    expect(box(['At', dict, { str: 'height' }] as any).evaluate().valueOf()).toBe(
+      42
+    );
+  });
+
+  it('returns Nothing for a missing key', () => {
+    expect(box(['At', dict, { str: 'depth' }] as any).evaluate().symbol).toBe(
+      'Nothing'
+    );
+  });
+
+  it('leaves a non-string index unevaluated (string keys only)', () => {
+    expect(box(['At', dict, 2] as any).evaluate().operator).toBe('At');
+  });
+
+  it('parses bracket key-access LaTeX to At', () => {
+    // CE strings are `\text{…}`; the postfix `[` accepts a string key.
+    const ce = new ComputeEngine();
+    const data = ce.box(dict);
+    ce.declare('data', data.type);
+    ce.assign('data', data);
+    expect(ce.parse('\\mathrm{data}[\\text{height}]', { form: 'raw' }).json).toEqual(
+      ['At', 'data', "'height'"]
+    );
+    expect(
+      ce.parse('\\mathrm{data}[\\text{width}]').evaluate().valueOf()
+    ).toBe(7);
+  });
+
+  it('still indexes an indexed collection positionally', () => {
+    expect(box(['At', ['List', 7, 13, 5], 1] as any).evaluate().valueOf()).toBe(
+      7
+    );
   });
 });

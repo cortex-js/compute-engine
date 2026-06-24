@@ -913,13 +913,54 @@ export interface Expression {
    * Complements {@link freeVariables} (the symbols an expression
    * *references*). A tool that builds a dependency graph keyed on cells —
    * e.g. a notebook — can use `defines` for the out-edges and
-   * `freeVariables` minus `defines` for the in-edges.
+   * {@link references} for the in-edges.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
    * :::
    */
   readonly defines: ReadonlyArray<string>;
+
+  /**
+   * The user functions **applied** in this expression: the operator head of
+   * a function application when that head is a user-definable symbol — `f` in
+   * `f(x)`, `g` in `g(x) := f(x) + 1`. Built-in operators (`Add`, `Sin`, …),
+   * constants, and names bound to a value or by an enclosing scope (function
+   * parameters, summation indices, `Block` locals) are excluded — the same
+   * predicate {@link freeVariables} applies to ordinary symbols.
+   *
+   * Operator heads are not symbols of the expression, so they appear in
+   * neither {@link symbols} nor {@link freeVariables}. This accessor recovers
+   * the function-call dependency edges those views miss.
+   *
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
+   */
+  readonly referencedFunctions: ReadonlyArray<string>;
+
+  /**
+   * The symbols this expression **references** but does not itself define:
+   * the union of {@link freeVariables} (referenced values) and
+   * {@link referencedFunctions} (applied user functions), minus
+   * {@link defines}.
+   *
+   * This is the complete in-edge set for a dependency graph keyed on cells
+   * (e.g. a notebook): pair it with {@link defines} for the out-edges.
+   * Subtracting `defines` drops self-references, so a recursive
+   * `g(x) := g(x - 1)` reports no dependency on itself.
+   *
+   * ```js
+   * const cell = ce.parse('g(x) := f(x) + a', { canonical: false });
+   * cell.defines;    // -> ['g']
+   * cell.references; // -> ['a', 'f']
+   * ```
+   *
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
+   */
+  readonly references: ReadonlyArray<string>;
 
   /**
    * Attempt to factor a numeric coefficient `c` and a `rest` out of a

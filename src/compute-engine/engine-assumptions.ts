@@ -270,7 +270,15 @@ export function assumeFn(
     const parsedPred = isLatexString(predicate)
       ? parseLatex(predicate as string)
       : null;
-    const pred = ce.expr(parsedPred ?? predicate, { form: 'raw' });
+    // Canonicalize the predicate so the assumption machinery sees a normalized
+    // form regardless of how the caller boxed it (e.g. `Negate(ImaginaryUnit)`
+    // folded to the complex literal `-i`). Canonicalization normalizes
+    // structure without evaluating the predicate, so `Greater(x, 0)` etc. stay
+    // intact. (Historically this boxed with `{ canonical: false }`, which was
+    // silently ignored and so always produced a canonical predicate; a later
+    // refactor swapped it to `{ form: 'raw' }`, inadvertently feeding raw
+    // predicates through.)
+    const pred = ce.expr(parsedPred ?? predicate);
 
     // The new assumption could affect existing expressions
     ce._generation += 1;

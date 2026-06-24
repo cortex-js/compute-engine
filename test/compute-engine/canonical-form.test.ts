@@ -1125,6 +1125,80 @@ describe('POLYNOMIAL ORDER', () => {
   });
 });
 
+describe('`canonical` / `structural` options on parse/expr/function', () => {
+  // Regression: these convenience keys used to be silently ignored on
+  // parse()/expr()/function() (only `form` was honored), so `canonical:false`
+  // still produced a canonical, symbol-auto-declaring expression. They are now
+  // resolved the same way as `form`.
+
+  test('parse({ canonical: false }) is non-canonical', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('a + 1', { canonical: false }).isCanonical).toBe(false);
+  });
+
+  test('parse({ canonical: false }) does not auto-declare symbols', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.parse('a + 1', { canonical: false });
+    expect(ce.context.lexicalScope.bindings.has('a')).toBe(false);
+  });
+
+  test('parse() default still canonicalizes and auto-declares', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    const expr = ce.parse('a + 1');
+    expect(expr.isCanonical).toBe(true);
+    expect(ce.context.lexicalScope.bindings.has('a')).toBe(true);
+  });
+
+  test('parse({ structural: true }) is structural', () => {
+    const ce = new ComputeEngine();
+    expect((ce.parse('x^{1/3}', { structural: true }) as any).isStructural).toBe(
+      true
+    );
+  });
+
+  test('expr({ canonical: false }) is non-canonical', () => {
+    const ce = new ComputeEngine();
+    expect(ce.expr(['Add', 'a', 1], { canonical: false }).isCanonical).toBe(
+      false
+    );
+  });
+
+  test('function({ structural: true }) keeps Power instead of folding to Root', () => {
+    const ce = new ComputeEngine();
+    const p = ce.function('Power', [ce.symbol('x'), ce.number([1, 3])], {
+      structural: true,
+    });
+    expect((p as any).isStructural).toBe(true);
+    expect(p.json).toEqual(['Power', 'x', ['Rational', 1, 3]]);
+  });
+
+  test('explicit `form` takes precedence over `canonical`', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.expr(['Add', 'a', 1], {
+        form: 'canonical',
+        canonical: false,
+      } as any).isCanonical
+    ).toBe(true);
+  });
+
+  test('assume() canonicalizes a non-canonical predicate', () => {
+    // The RHS `Subtract(3, 3)` must fold to `0` for the bound-extraction to
+    // record `x > 0`, even though the caller boxed the predicate
+    // non-canonically. Without canonicalization in assume() the raw
+    // `Greater(x, Subtract(3, 3))` does not yield a numeric bound.
+    const ce = new ComputeEngine();
+    const pred = ce.expr(['Greater', 'x', ['Subtract', 3, 3]], {
+      canonical: false,
+    });
+    expect(pred.isCanonical).toBe(false);
+    expect(ce.assume(pred)).toBe('ok');
+    expect(ce.expr('x').isPositive).toBe(true);
+  });
+});
+
 // describe('OBJECT LITERAL FORM', () => {
 //   test('Shorthand parse', () => {
 //     expect(

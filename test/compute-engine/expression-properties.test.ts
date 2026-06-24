@@ -415,6 +415,80 @@ describe('DEFINES', () => {
   });
 });
 
+describe('REFERENCED_FUNCTIONS / REFERENCES', () => {
+  // Fresh engine per test: `f`/`g`/`h` must be functions so calls parse as
+  // applications rather than implicit multiplication.
+  const fnEngine = () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', 'function');
+    ce.declare('g', 'function');
+    ce.declare('h', 'function');
+    return ce;
+  };
+
+  it('reports the applied function head (excluded from symbols/freeVariables)', () => {
+    const expr = fnEngine().parse('f(1024)');
+    expect(expr.symbols).toEqual([]);
+    expect(expr.freeVariables).toEqual([]);
+    expect(expr.referencedFunctions).toEqual(['f']);
+    expect(expr.references).toEqual(['f']);
+  });
+
+  it('recovers the call edge a definition references', () => {
+    const cell = fnEngine().parse('g(x) := f(x) + 1', { strict: false });
+    expect(cell.defines).toEqual(['g']);
+    expect(cell.referencedFunctions).toEqual(['f']);
+    expect(cell.references).toEqual(['f']);
+  });
+
+  it('references unions value and function dependencies', () => {
+    const cell = fnEngine().parse('g(x) := f(x) + a', { strict: false });
+    expect(cell.references).toEqual(['a', 'f']);
+  });
+
+  it('excludes built-in operators', () => {
+    const expr = fnEngine().parse('\\sin(x) + \\cos(x)');
+    expect(expr.referencedFunctions).toEqual([]);
+    expect(expr.references).toEqual(['x']);
+  });
+
+  it('reports nested call heads', () => {
+    expect(fnEngine().parse('f(g(h(x)))').referencedFunctions).toEqual([
+      'f',
+      'g',
+      'h',
+    ]);
+  });
+
+  it('drops self-reference of a recursive definition', () => {
+    const cell = fnEngine().parse('g(x) := g(x - 1)', { strict: false });
+    expect(cell.defines).toEqual(['g']);
+    expect(cell.referencedFunctions).toEqual(['g']);
+    expect(cell.references).toEqual([]);
+  });
+
+  it('excludes a function-typed parameter bound by an enclosing scope', () => {
+    // ["Function", ["p", "x"], "p"] — p is the bound parameter, not a free
+    // function reference.
+    const ce = new ComputeEngine();
+    const lambda = ce.function(
+      'Function',
+      [ce.function('p', [ce.symbol('x')], { canonical: false }), ce.symbol('p')],
+      { canonical: false }
+    );
+    expect(lambda.referencedFunctions).toEqual([]);
+  });
+
+  it('works on raw (non-canonical) cells', () => {
+    const cell = fnEngine().parse('g(x) := f(x) + 1', {
+      form: 'raw',
+      strict: false,
+    });
+    expect(cell.referencedFunctions).toEqual(['f']);
+    expect(cell.references).toEqual(['f']);
+  });
+});
+
 describe('APPLIED_NON_FUNCTIONS', () => {
   it('reports an undefined function application, not a declared one', () => {
     const ce = new ComputeEngine();

@@ -36,6 +36,30 @@ describe('DECLARING', () => {
     );
   });
 
+  test('declare() refines an auto-declared (inferred) binding', () => {
+    // A declare-first flow: parsing auto-declares names; an explicit declare
+    // must then refine them on the same engine without throwing.
+    const ce2 = new ComputeEngine();
+    ce2.parse('g(x) := f(x) + 1', { strict: false }); // auto-declares g and f
+    expect(() => ce2.declare('g', 'function')).not.toThrow();
+    expect(() => ce2.declare('f', 'function')).not.toThrow();
+  });
+
+  test('declare() refines an inferred type', () => {
+    const ce2 = new ComputeEngine();
+    ce2.parse('a + 1'); // a inferred as number
+    ce2.declare('a', 'integer');
+    expect(ce2.expr('a').type.toString()).toEqual('integer');
+  });
+
+  test('re-declaring an explicit binding still throws', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('e', { type: 'number' });
+    expect(() => ce2.declare('e', { type: 'boolean' })).toThrow(
+      `The symbol "e" is already declared`
+    );
+  });
+
   test('Declare a variable and widen type', () => {
     ce.declare('g', { value: 5 }); // Inferred as finite_integer
     expect(ce.expr('g').type.toString()).toEqual('integer');

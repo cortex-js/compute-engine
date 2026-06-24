@@ -116,6 +116,31 @@ export function formToInternal(form?: FormOption): {
   return { canonical: form, structural: false };
 }
 
+/**
+ * Resolve the internal `{ canonical, structural }` boxing form from the
+ * options accepted by the public creation/parsing entry points
+ * (`parse()`, `expr()`, `function()`).
+ *
+ * The canonical way to specify the form is the `form` option. As a
+ * convenience — and to match the creation modes documented for these
+ * methods — the `canonical` and `structural` boolean shortcuts are also
+ * accepted. An explicit `form` takes precedence; otherwise `structural`
+ * takes precedence over `canonical` (structural form is non-canonical but
+ * bound).
+ */
+export function optionsToInternal(options?: {
+  form?: FormOption;
+  canonical?: CanonicalOptions;
+  structural?: boolean;
+}): { canonical: CanonicalOptions; structural: boolean } {
+  if (!options) return { canonical: true, structural: false };
+  const { form, canonical, structural } = options;
+  if (form !== undefined) return formToInternal(form);
+  if (structural === true) return { canonical: false, structural: true };
+  if (canonical !== undefined) return { canonical, structural: false };
+  return { canonical: true, structural: false };
+}
+
 function boxHold(
   ce: ComputeEngine,
   expr: ExpressionInput | null,

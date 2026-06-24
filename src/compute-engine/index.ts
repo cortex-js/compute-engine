@@ -72,7 +72,7 @@ import { ExactNumericValue } from './numeric-value/exact-numeric-value';
 import { BigNumericValue } from './numeric-value/big-numeric-value';
 import { MachineNumericValue } from './numeric-value/machine-numeric-value';
 
-import { box, boxFunction, formToInternal } from './boxed-expression/box';
+import { box, boxFunction, optionsToInternal } from './boxed-expression/box';
 import type { FormOption } from './types-serialization';
 import { boxRules } from './boxed-expression/rules';
 import { aggregateHotHeadDispatch } from './boxed-expression/rule-index';
@@ -1562,10 +1562,12 @@ export class ComputeEngine implements IComputeEngine {
     expr: NumericValue | ExpressionInput,
     options?: {
       form?: FormOption;
+      canonical?: CanonicalOptions;
+      structural?: boolean;
       scope?: Scope | undefined;
     }
   ): Expression {
-    const { canonical, structural } = formToInternal(options?.form);
+    const { canonical, structural } = optionsToInternal(options);
     return box(this, expr, { canonical, structural, scope: options?.scope });
   }
 
@@ -1574,6 +1576,8 @@ export class ComputeEngine implements IComputeEngine {
     expr: NumericValue | ExpressionInput,
     options?: {
       form?: FormOption;
+      canonical?: CanonicalOptions;
+      structural?: boolean;
       scope?: Scope | undefined;
     }
   ): Expression {
@@ -1640,15 +1644,27 @@ export class ComputeEngine implements IComputeEngine {
    */
   parse(
     latex: string,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+    options?: Partial<ParseLatexOptions> & {
+      form?: FormOption;
+      canonical?: CanonicalOptions;
+      structural?: boolean;
+    }
   ): Expression;
   parse(
     latex: string | null,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+    options?: Partial<ParseLatexOptions> & {
+      form?: FormOption;
+      canonical?: CanonicalOptions;
+      structural?: boolean;
+    }
   ): Expression | null;
   parse(
     latex: string | null,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+    options?: Partial<ParseLatexOptions> & {
+      form?: FormOption;
+      canonical?: CanonicalOptions;
+      structural?: boolean;
+    }
   ): Expression | null {
     if (latex === null || latex === undefined) return null;
     if (typeof latex !== 'string')
@@ -1656,7 +1672,10 @@ export class ComputeEngine implements IComputeEngine {
 
     const syntax = this._requireLatexSyntax();
 
-    const { form, ...parseOpts } = options ?? {};
+    // `form` / `canonical` / `structural` control how the parsed MathJSON is
+    // boxed; they are not LaTeX-parser options, so keep them out of
+    // `parseOpts` (which is forwarded to the LaTeX parser).
+    const { form, canonical, structural, ...parseOpts } = options ?? {};
 
     const result = syntax.parse(latex, {
       getSymbolType: (id) => {
@@ -1677,8 +1696,7 @@ export class ComputeEngine implements IComputeEngine {
 
     if (result === null) return null;
 
-    const { canonical, structural } = formToInternal(form);
-    return box(this, result, { canonical, structural });
+    return box(this, result, optionsToInternal({ form, canonical, structural }));
   }
 
   /**
@@ -1723,10 +1741,12 @@ export class ComputeEngine implements IComputeEngine {
     options?: {
       metadata?: Metadata;
       form?: FormOption;
+      canonical?: CanonicalOptions;
+      structural?: boolean;
       scope?: Scope | undefined;
     }
   ): Expression {
-    const { canonical, structural } = formToInternal(options?.form);
+    const { canonical, structural } = optionsToInternal(options);
     return boxFunction(this, name, ops, {
       metadata: options?.metadata,
       canonical,

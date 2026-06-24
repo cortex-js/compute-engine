@@ -707,6 +707,22 @@ export abstract class _BoxedExpression implements Expression {
     return Array.from(set).sort();
   }
 
+  get referencedFunctions(): ReadonlyArray<string> {
+    const set = new Set<string>();
+    getReferencedFunctions(this, set);
+    return Array.from(set).sort();
+  }
+
+  get references(): ReadonlyArray<string> {
+    const defined = new Set<string>();
+    getDefines(this, defined);
+    const set = new Set<string>();
+    getReferences(this, set, set);
+    const result: string[] = [];
+    for (const s of set) if (!defined.has(s)) result.push(s);
+    return result.sort();
+  }
+
   get errors(): ReadonlyArray<Expression> {
     return this.getSubexpressions('Error');
   }
@@ -1012,6 +1028,66 @@ function getSymbols(expr: Expression, result: Set<string>): void {
  *
  */
 function getUnknowns(expr: Expression, result: Set<string>): void {
+  getReferences(expr, result, new Set<string>());
+}
+
+/**
+ * Return the applied user functions in the expression, recursively. See
+ * {@link getReferences} for the shared traversal and scoping rules.
+ */
+function getReferencedFunctions(expr: Expression, result: Set<string>): void {
+  getReferences(expr, new Set<string>(), result);
+}
+
+/**
+ * Is `head` (the operator of a function application) a *user-definable*
+ * function reference, as opposed to a built-in operator, a constant, or a
+ * name already bound to a value?
+ *
+ * Mirrors the free-variable predicate used for ordinary symbols in
+ * {@link getReferences}, but for the operator head (which is a bare string,
+ * not a boxed symbol). The def-kind checks are inlined rather than using the
+ * `isValueDef`/`isOperatorDef` guards from `./utils` to avoid an import cycle
+ * (`utils` imports this module).
+ */
+function isReferencedFunctionHead(
+  engine: ComputeEngine,
+  head: string
+): boolean {
+  if (head === 'Unknown' || head === 'Undefined' || head === 'Nothing')
+    return false;
+
+  const def = engine.lookupDefinition(head);
+  if (def !== undefined) {
+    // A built-in or explicitly-declared operator (`Add`, `Sin`, …).
+    if ('operator' in def) return false;
+    // A constant value (`Pi`, `ExponentialE`, …).
+    if ('value' in def && def.value.isConstant) return false;
+  }
+
+  // A name already bound to a value is resolved, not a free reference.
+  if (engine._getSymbolValue(head) !== undefined) return false;
+
+  return true;
+}
+
+/**
+ * Shared traversal that collects, in a single pass, both the free variables
+ * (operand symbols not bound to a value or by an enclosing scope) into
+ * `freeVars` and the applied user functions (operator heads) into `refFns`.
+ *
+ * The two are kept in separate sets so {@link getUnknowns} /
+ * `freeVariables` stay unchanged while {@link getReferencedFunctions} can
+ * recover the operator-head edges. Both sets are subject to the same scoping
+ * rules (`Function` parameters, `Sum`/`Product`/`Integrate` index variables,
+ * `Block` locals). Passing the same set for both arguments yields their union
+ * (used by the `references` accessor).
+ */
+function getReferences(
+  expr: Expression,
+  freeVars: Set<string>,
+  refFns: Set<string>
+): void {
   if (isSymbol(expr)) {
     const s = expr.symbol;
     if (s === 'Unknown' || s === 'Undefined' || s === 'Nothing') return;
@@ -1021,11 +1097,18 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
     if (expr.operatorDefinition) return;
 
     const value = expr.engine._getSymbolValue(s);
-    if (value === undefined) result.add(s);
+    if (value === undefined) freeVars.add(s);
     return;
   }
 
   if (!isFunction(expr)) return;
+
+  // The operator head is an applied user function when it passes the same
+  // predicate a free variable would. It is referenced at *this* level, so it
+  // is added directly (an enclosing binder filters it via the inner-set
+  // threading below, exactly like a free variable).
+  if (isReferencedFunctionHead(expr.engine, expr.operator))
+    refFns.add(expr.operator);
 
   // A `Function` literal `["Function", body, ...params]` binds its trailing
   // operands (the parameters) in the body. Recurse into the body and drop the
@@ -1038,9 +1121,11 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
       const p = ops[i];
       if (isSymbol(p)) params.add(p.symbol);
     }
-    const inner = new Set<string>();
-    if (ops.length > 0) getUnknowns(ops[0], inner);
-    for (const s of inner) if (!params.has(s)) result.add(s);
+    const innerFree = new Set<string>();
+    const innerRef = new Set<string>();
+    if (ops.length > 0) getReferences(ops[0], innerFree, innerRef);
+    for (const s of innerFree) if (!params.has(s)) freeVars.add(s);
+    for (const s of innerRef) if (!params.has(s)) refFns.add(s);
     return;
   }
 
@@ -1066,7 +1151,8 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
       localVars.add(op.op1.symbol);
   }
 
-  const inner = new Set<string>();
+  const innerFree = new Set<string>();
+  const innerRef = new Set<string>();
   for (const op of expr.ops) {
     // When this expression has index variables (e.g. an `Integrate`), a
     // `Function` operand is the integrand. `Integrate` over-lists *every*
@@ -1080,15 +1166,18 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
       op.operator === 'Function' &&
       op.ops.length > 0
     )
-      getUnknowns(op.ops[0], inner);
-    else getUnknowns(op, inner);
+      getReferences(op.ops[0], innerFree, innerRef);
+    else getReferences(op, innerFree, innerRef);
   }
 
   if (indexVars.size === 0 && localVars.size === 0) {
-    for (const s of inner) result.add(s);
+    for (const s of innerFree) freeVars.add(s);
+    for (const s of innerRef) refFns.add(s);
   } else {
-    for (const s of inner)
-      if (!indexVars.has(s) && !localVars.has(s)) result.add(s);
+    for (const s of innerFree)
+      if (!indexVars.has(s) && !localVars.has(s)) freeVars.add(s);
+    for (const s of innerRef)
+      if (!indexVars.has(s) && !localVars.has(s)) refFns.add(s);
   }
 }
 

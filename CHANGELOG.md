@@ -1,12 +1,62 @@
+## [Unreleased]
+
+### New Features
+
+- **Dictionary values can be read by key with `At`.** `["At", dict, "key"]`
+  (string key) now returns the value of that entry in a dictionary — e.g.
+  `["At", { dict: { height: 42 } }, "height"]` → `42`. A missing key yields
+  `Nothing`. Previously `At` was restricted to _indexed_ (positional)
+  collections and rejected dictionaries with an `incompatible-type` error; its
+  value type is now `indexed_collection | dictionary`. In LaTeX, the postfix
+  bracket form accepts a string key too: `\mathrm{data}[\text{height}]` parses
+  to `["At", "data", "height"]` (strings in LaTeX are written `\text{…}`).
+  Positional indexing of indexed collections is unchanged.
+
+- **`BoxedExpression.referencedFunctions` and `BoxedExpression.references`.** Two
+  accessors aimed at dependency graphs (e.g. notebooks). The operator head of a
+  function application — the `f` in `f(x)` or `g(x) := f(x) + 1` — is not a symbol
+  of the expression, so it appears in neither `symbols` nor `freeVariables`;
+  `referencedFunctions` recovers those applied user-function names (excluding
+  built-in operators, constants, and names bound by an enclosing scope, using the
+  same predicate `freeVariables` applies to ordinary symbols). `references` is the
+  complete in-edge set — `freeVariables` ∪ `referencedFunctions`, minus
+  `defines` — so it pairs with `defines` (the out-edges) to build a use/def graph
+  in one call. Subtracting `defines` drops self-references, so a recursive
+  `g(x) := g(x - 1)` reports no dependency on itself.
+
+- **`ce.declare()` refines an auto-declared binding instead of throwing.** Parsing
+  auto-declares the names it encounters (a free variable `a` in `a + 1`, a called
+  function `f` in `f(x)`), recording an _inferred_ binding. Calling
+  `ce.declare(name, …)` for such a name now refines that inferred binding rather
+  than throwing `"… already declared in this scope"` — which is exactly what the
+  `inferred` flag is for. This lets a declare-first workflow parse cells to
+  discover names and then declare them on the **same** engine. Re-declaring an
+  _explicit_ binding still throws, and a name bound to a value (e.g. a function
+  argument) is still a genuine conflict.
+
+### Resolved Issues
+
+- **`canonical` and `structural` options are now honored by `parse()`, `expr()`,
+  and `function()`.** These methods only consulted the `form` option when
+  deciding how to box their result, so the documented `canonical` / `structural`
+  shortcuts were silently ignored: `ce.parse(latex, { canonical: false })`
+  returned a _canonical_ expression (and, as a side effect of canonicalization,
+  auto-declared its symbols), and `ce.function('Power', ops, { structural: true })`
+  returned canonical `Root` instead of a structural `Power`. The keys now resolve
+  the same way `form` does, with an explicit `form` taking precedence. As part of
+  this, `ce.assume()` now canonicalizes its predicate so the assumption machinery
+  always sees a normalized form (e.g. `Negate(ImaginaryUnit)` folded to the
+  complex literal `-i`) regardless of how the caller boxed it.
+
 ## 0.62.1 _2026-06-22_
 
 ### New Features
 
 - **`indexStyle` serialization option for collection indexing.** The `At`
   operator (e.g. `["At", v, 1]`) can now be serialized either as a subscript
-  (`v_1`, `M_{i,j}`) or with programming-style brackets (`v[1]`, `M[i,j]`).
-  Like the other style options (`fractionStyle`, `rootStyle`, …) it is a
-  callback `(expr, level) => 'subscript' | 'bracket'`, settable engine-wide via
+  (`v_1`, `M_{i,j}`) or with programming-style brackets (`v[1]`, `M[i,j]`). Like
+  the other style options (`fractionStyle`, `rootStyle`, …) it is a callback
+  `(expr, level) => 'subscript' | 'bracket'`, settable engine-wide via
   `ce.latexOptions.indexStyle` or per-call via `expr.toLatex({ indexStyle })`.
   The default is `'subscript'`.
 
@@ -15,16 +65,16 @@
 - **Collection indexing (`At`) now serializes to valid, round-tripping LaTeX.**
   `["At", v, 1]` previously serialized to `\lbrack v, 1\rbrack` — i.e. the
   _list_ `[v, 1]`, which re-parsed as `["List", v, 1]`, silently changing the
-  meaning on a serialize→parse cycle. It now serializes as `v_1` (or `v[1]`
-  with `indexStyle: 'bracket'`), both of which parse back to `At`.
+  meaning on a serialize→parse cycle. It now serializes as `v_1` (or `v[1]` with
+  `indexStyle: 'bracket'`), both of which parse back to `At`.
 
 - **Accents and decorations serialize with brace notation and round-trip.**
   `OverHat`, `OverVector`, `OverTilde`, `OverBar`, `UnderBar`, the over-arrows,
   `OverBrace`, etc. had no serializer and fell back to function-call notation —
   `\hat{x}` came back out as `\hat(x)`, which re-parsed to
   `["Multiply", x, ["OverHat"]]` instead of `["OverHat", x]`. They now serialize
-  as `\hat{x}`, `\vec{v}`, `\overline{x}`, … and round-trip correctly,
-  including when subscripted (`\hat{x}_0`).
+  as `\hat{x}`, `\vec{v}`, `\overline{x}`, … and round-trip correctly, including
+  when subscripted (`\hat{x}_0`).
 
 - **Subscripted single-letter symbols serialize with an italic base instead of
   an upright one.** When a symbol name carried a subscript (e.g. `a_1`, `x_n`,
@@ -33,11 +83,12 @@
   rule wrapped the whole thing in `\mathrm{…}` and rendered the base letter
   upright (`\mathrm{a_1}`). A single-letter variable with a subscript is now
   rendered italic, as a variable should be — `a_1` serializes to `a_1`, not
-  `\mathrm{a_1}`. The font style is now decided from the base alone: multi-letter
-  bases are still upright with the wrapper enclosing the whole symbol, so
-  descriptive subscripts stay roman (`speed_max → \mathrm{speed_{max}}`), and
-  explicit style modifiers (`\mathbf`, `\mathbb`, …) are unchanged. Greek
-  single-letter bases are likewise rendered with their default (italic) style.
+  `\mathrm{a_1}`. The font style is now decided from the base alone:
+  multi-letter bases are still upright with the wrapper enclosing the whole
+  symbol, so descriptive subscripts stay roman
+  (`speed_max → \mathrm{speed_{max}}`), and explicit style modifiers (`\mathbf`,
+  `\mathbb`, …) are unchanged. Greek single-letter bases are likewise rendered
+  with their default (italic) style.
 
 ## 0.62.0 _2026-06-20_
 

@@ -2908,7 +2908,10 @@ function parseAt(
 
     if (close.length > 0 && !parser.matchAll(close)) return null;
 
-    if (stringValue(rhs) !== null) return null;
+    // A string index is a dictionary key (`data["x"]` → `At(data, "x")`), valid
+    // only for the bracketed forms. In the close-less (subscript) mode a string
+    // rhs is rejected so it falls back to `Subscript` (regression #201).
+    if (close.length === 0 && stringValue(rhs) !== null) return null;
 
     if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? 'Nothing';
     if (operator(rhs) === 'Sequence') return ['At', lhs, ...operands(rhs)];

@@ -181,11 +181,32 @@ export function declareFn(
   scope ??= ce.context.lexicalScope;
 
   //
-  // Check the id is not already declared in the current scope
+  // Check the id is not already declared in the current scope.
+  //
+  // Tolerate re-declaring a name that was only *auto-declared* (its type or
+  // signature inferred from usage, e.g. by `ce.parse('f(x)')` or
+  // `ce.parse('a + 1')`). An explicit declaration is allowed to refine an
+  // inferred one — that is precisely what the `inferred` flag exists for — so
+  // a declare-first flow can parse cells to discover names and then declare
+  // them on the same engine without throwing. Re-declaring an *explicit*
+  // binding still throws. The declaration below overwrites the inferred one.
   //
   const bindings = scope.bindings;
-  if (bindings.has(id))
-    throw new Error(`The symbol "${id}" is already declared in this scope`);
+  const existing = bindings.get(id);
+  if (existing !== undefined) {
+    // Only a *value-less* inferred binding is upgradable: it was auto-declared
+    // from usage (e.g. a free variable or function call seen by `parse`). A
+    // binding that carries a value — a function argument, or an outer explicit
+    // declaration — is a genuine conflict and still throws. This mirrors the
+    // upgrade rule in the `Declare` operator handler (library/core.ts).
+    const inferred =
+      (isValueDef(existing) &&
+        existing.value.inferredType &&
+        existing.value.value === undefined) ||
+      (isOperatorDef(existing) && existing.operator.inferredSignature);
+    if (!inferred)
+      throw new Error(`The symbol "${id}" is already declared in this scope`);
+  }
 
   //
   // Declaring a symbol or function with a definition or type

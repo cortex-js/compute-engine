@@ -37,6 +37,7 @@ import { typeToString } from '../../common/type/serialize';
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils';
 import {
+  isDictionary,
   isFunction,
   isNumber,
   isString,
@@ -1161,7 +1162,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature:
-      '(value: indexed_collection, index: (number|string|indexed_collection)+) -> unknown',
+      '(value: indexed_collection | dictionary, index: (number|string|indexed_collection)+) -> unknown',
     type: ([xs]) =>
       xs.operatorDefinition?.collection?.elttype?.(xs) ??
       collectionElementType(xs.type.type) ??
@@ -1172,10 +1173,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       let expr = ops[0];
       let index = 1;
       while (ops[index]) {
+        const opAtIndex = ops[index];
+
+        // Dictionary key access: a `dictionary` is a keyed (not indexed)
+        // collection with no `collection.at` handler, so look the value up by
+        // its string key directly. Only string keys are supported; a missing
+        // key yields `Nothing`, a non-string index leaves `At` unevaluated.
+        if (isDictionary(expr)) {
+          if (!isString(opAtIndex)) return undefined;
+          expr = expr.get(opAtIndex.string) ?? ce.Nothing;
+          index += 1;
+          continue;
+        }
+
         const def = expr.baseDefinition;
         const at = def?.collection?.at;
         if (!at) return undefined;
-        const opAtIndex = ops[index];
 
         // Case A: string key (dictionary-style access).
         const s = isString(opAtIndex) ? opAtIndex.string : undefined;
