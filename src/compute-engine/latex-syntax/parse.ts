@@ -1324,6 +1324,30 @@ export class _Parser implements Parser {
     return null;
   }
 
+  /**
+   * Parse an ASCII double-quoted string literal, e.g. `"hello"`, into a
+   * MathJSON string. The content is read verbatim up to the closing quote,
+   * with LaTeX commands normalized to Unicode (e.g. `"\alpha"` → `α`), matching
+   * `\text{…}`. There is no escaping — a `"` cannot appear inside the string
+   * (use `\text{…}` for content containing a quote). An unterminated string is
+   * an error.
+   *
+   * Note: a `"` inside `\unicode{…}` / `\char` is a hex prefix consumed by the
+   * number parser on a separate path, so it is unaffected by this.
+   */
+  parseDoubleQuoteString(): MathJsonExpression | null {
+    if (this.peek !== '"') return null;
+    const start = this.index;
+    this.nextToken(); // Consume the opening `"`
+    this.addBoundary(['"']);
+    const s = this.parseStringGroupContent();
+    if (!this.matchBoundary()) {
+      this.removeBoundary();
+      return this.error('expected-closing-delimiter', start);
+    }
+    return { str: s };
+  }
+
   /** Parse an environment: `\begin{env}...\end{end}`
    */
   private parseEnvironment(
@@ -2376,6 +2400,11 @@ export class _Parser implements Parser {
     // 2. Is it a number?
     //
     result ??= this.parseNumber();
+
+    //
+    // 2b. Is it a double-quoted string literal? (e.g. `"hello"`)
+    //
+    result ??= this.parseDoubleQuoteString();
 
     //
     // 3. Is it an enclosure, i.e. a matchfix expression?

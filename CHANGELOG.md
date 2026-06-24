@@ -2,14 +2,21 @@
 
 ### New Features
 
+- **Double-quoted string literals in LaTeX.** `"hello"` now parses to a string
+  (previously `"` was an `unexpected-token`). Content is read verbatim up to the
+  closing quote, with LaTeX commands normalized to Unicode like `\text{…}`
+  (`"\alpha"` → `α`); there is no escaping (use `\text{…}` for a string that
+  must contain a `"`). Strings still serialize back to `\text{…}`. A `"` inside
+  `\unicode{…}`/`\char` remains a hex prefix and is unaffected.
+
 - **Dictionary values can be read by key with `At`.** `["At", dict, "key"]`
   (string key) now returns the value of that entry in a dictionary — e.g.
   `["At", { dict: { height: 42 } }, "height"]` → `42`. A missing key yields
   `Nothing`. Previously `At` was restricted to _indexed_ (positional)
   collections and rejected dictionaries with an `incompatible-type` error; its
   value type is now `indexed_collection | dictionary`. In LaTeX, the postfix
-  bracket form accepts a string key too: `\mathrm{data}[\text{height}]` parses
-  to `["At", "data", "height"]` (strings in LaTeX are written `\text{…}`).
+  bracket form accepts a string key, so `\mathrm{data}["height"]` (or
+  `\mathrm{data}[\text{height}]`) parses to `["At", "data", "height"]`.
   Positional indexing of indexed collections is unchanged.
 
 - **`BoxedExpression.referencedFunctions` and `BoxedExpression.references`.** Two
