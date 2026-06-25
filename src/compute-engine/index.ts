@@ -1696,7 +1696,11 @@ export class ComputeEngine implements IComputeEngine {
 
     if (result === null) return null;
 
-    return box(this, result, optionsToInternal({ form, canonical, structural }));
+    return box(
+      this,
+      result,
+      optionsToInternal({ form, canonical, structural })
+    );
   }
 
   /**
