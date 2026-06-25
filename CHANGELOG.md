@@ -2,6 +2,19 @@
 
 ### New Features
 
+- **Long numerators over a single power serialize as a product with a negative
+  exponent.** When prettifying, a large numerator divided by a single power with
+  a small base — e.g. `(3x^4 + 2x^3 + x + 5) · x^{-23}` — now serializes as
+  `(3x^4+2x^3+x+5)x^{-23}` instead of the tall, lopsided fraction
+  `\frac{3x^4+2x^3+x+5}{x^{23}}`. This rounds out the existing prettify
+  heuristics, which already factor a small denominator out of a large numerator
+  (`\frac{1}{x}(…)`) and write a small numerator over a large denominator with a
+  negative exponent (`(a)(…)^{-1}`). The new form applies only when the
+  numerator is large and the denominator is a single power `base^{k}` with a
+  small base and integer exponent `k ≥ 2`; lone negative powers (`x^{-23}` →
+  `\frac{1}{x^{23}}`) and all other shapes are unchanged. As with the other
+  rewrites, it is disabled by `prettify: false`.
+
 - **Double-quoted string literals in LaTeX.** `"hello"` now parses to a string
   (previously `"` was an `unexpected-token`). Content is read verbatim up to the
   closing quote, with LaTeX commands normalized to Unicode like `\text{…}`
