@@ -7,7 +7,7 @@ set -e
 # the removed node10 resolution; --types node restores @types/node (no longer
 # auto-discovered); strict is on by default.
 echo "Running TypeScript type check..."
-tsc --target es2022 --module es2022 --moduleResolution bundler --types node \
+npx tsc --target es2022 --module es2022 --moduleResolution bundler --types node \
   --skipLibCheck -d --allowImportingTsExtensions true --emitDeclarationOnly \
   --ignoreConfig --outDir /tmp/typecheck ./src/compute-engine.ts
 
