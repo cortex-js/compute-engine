@@ -392,7 +392,10 @@ describe('DELIMITERS PARSING', () => {
         "Delimiter",
         [
           "Sequence",
-          ["Error", "'missing'", ["LatexString", ";"]],
+          {
+            fn: ["Error", "'missing'", ["LatexString", ";"]];
+                sourceOffsets: [1, 1]
+          },
           "Nothing",
           "a",
           "Nothing"

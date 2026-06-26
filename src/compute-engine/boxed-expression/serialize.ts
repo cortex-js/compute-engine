@@ -470,16 +470,28 @@ function serializeJsonFunction(
   // Determine if we have some wikidata metadata
   if (!options.metadata.includes('wikidata')) md.wikidata = '';
 
+  const sourceOffsets = md.sourceOffsets;
+
   //  Is shorthand allowed, and no metadata to include
-  if (!md.latex && !md.wikidata && options.shorthands.includes('function'))
+  if (
+    !md.latex &&
+    !md.wikidata &&
+    !sourceOffsets &&
+    options.shorthands.includes('function')
+  )
     return fn;
 
   // No shorthand allowed, or some metadata to include
-  if (md.latex && md.wikidata)
-    return { fn, latex: md.latex, wikidata: md.wikidata } as MathJsonExpression;
-  if (md.latex) return { fn, latex: md.latex } as MathJsonExpression;
-  if (md.wikidata) return { fn, wikidata: md.wikidata } as MathJsonExpression;
-  return { fn } as MathJsonExpression;
+  const result = { fn } as {
+    fn: MathJsonExpression;
+    latex?: string;
+    wikidata?: string;
+    sourceOffsets?: [start: number, end: number];
+  };
+  if (md.latex) result.latex = md.latex;
+  if (md.wikidata) result.wikidata = md.wikidata;
+  if (sourceOffsets) result.sourceOffsets = sourceOffsets;
+  return result as MathJsonExpression;
 }
 
 function serializeJsonString(
@@ -923,11 +935,13 @@ export function serializeJson(
         {
           latex: expr.verbatimLatex,
           wikidata,
+          sourceOffsets: expr.sourceOffsets,
         }
       );
     return serializeJsonFunction(ce, expr.operator, structuralOps, options, {
       latex: expr.verbatimLatex,
       wikidata,
+      sourceOffsets: expr.sourceOffsets,
     });
   }
 

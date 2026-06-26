@@ -418,11 +418,14 @@ describe('SYMBOLS', () => {
   describe('PARSING ERRORS', () => {
     test('Math operators are not valid symbols', () => {
       expect(parse('\\mathrm{=}')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "invalid-symbol", "invalid-first-char"],
-          ["LatexString", "\\mathrm{=}"]
-        ]
+        {
+          fn: [
+            "Error",
+            ["ErrorCode", "invalid-symbol", "invalid-first-char"],
+            ["LatexString", "\\mathrm{=}"]
+          ];
+          sourceOffsets: [0, 10]
+        }
       `);
     });
     test('Braille via \\char are now encoded as valid symbols', () => {
@@ -434,11 +437,14 @@ describe('SYMBOLS', () => {
     test('Egyptians Hieroglyphs are not valid symbols', () => {
       // Egyptian hieroglyphs are XIDC but rejected by isValidSymbol's script check
       expect(parse('\\mathrm{\\char"13000}')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "invalid-symbol", "unexpected-script"],
-          ["LatexString", "\\mathrm{\\char"13000}"]
-        ]
+        {
+          fn: [
+            "Error",
+            ["ErrorCode", "invalid-symbol", "unexpected-script"],
+            ["LatexString", "\\mathrm{\\char"13000}"]
+          ];
+          sourceOffsets: [0, 20]
+        }
       `);
     });
 
@@ -449,18 +455,24 @@ describe('SYMBOLS', () => {
 
     test('Symbols should not mix emojis and non-emojis', () => {
       expect(parse('\\mathrm{👨🏻‍🎤DavidBowie}')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
-          ["LatexString", "\\mathrm{👨🏻‍🎤DavDavidBowie}"]
-        ]
+        {
+          fn: [
+            "Error",
+            ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
+            ["LatexString", "\\mathrm{👨🏻‍🎤DavDavidBowie}"]
+          ];
+          sourceOffsets: [0, 29]
+        }
       `);
       expect(parse('\\mathrm{DavidBowie👨🏻‍🎤}')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
-          ["LatexString", "\\mathrm{DavidBowie👨🏻‍🎤}}"]
-        ]
+        {
+          fn: [
+            "Error",
+            ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
+            ["LatexString", "\\mathrm{DavidBowie👨🏻‍🎤}}"]
+          ];
+          sourceOffsets: [0, 27]
+        }
       `);
     });
   });
@@ -587,9 +599,7 @@ describe('SYMBOLS', () => {
         `x____002012y`
       );
       expect(
-        parse(
-          '\\operatorname{speed\\unicode{"2012}of\\unicode{"2012}sound}'
-        )
+        parse('\\operatorname{speed\\unicode{"2012}of\\unicode{"2012}sound}')
       ).toMatchInlineSnapshot(`speed____002012of____002012sound`);
       // Leading unicode escape
       expect(
@@ -610,7 +620,8 @@ describe('SYMBOLS', () => {
     });
 
     test('Round-trip: parse -> serialize -> parse', () => {
-      const input = '\\operatorname{speed\\unicode{"2012}of\\unicode{"2012}sound}';
+      const input =
+        '\\operatorname{speed\\unicode{"2012}of\\unicode{"2012}sound}';
       const parsed = ce.parse(input);
       // Use .latex property to serialize back
       const serialized = ce.expr(parsed).latex;

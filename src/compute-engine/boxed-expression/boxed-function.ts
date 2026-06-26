@@ -319,13 +319,23 @@ export class BoxedFunction
         this.isValid ? sortOperands(this._operator, ys) : ys,
         {
           form: 'structural',
+          metadata: {
+            latex: this.verbatimLatex,
+            sourceOffsets: this.sourceOffsets,
+          },
         }
       );
     }
     return this.engine.function(
       this._operator,
       this.ops.map((x) => x.structural),
-      { form: 'structural' }
+      {
+        form: 'structural',
+        metadata: {
+          latex: this.verbatimLatex,
+          sourceOffsets: this.sourceOffsets,
+        },
+      }
     );
   }
 

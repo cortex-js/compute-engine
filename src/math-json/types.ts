@@ -64,7 +64,16 @@ export type MathJsonAttributes = {
 
   /**
    * A character offset in `sourceContent` or `sourceUrl` from which this
-   * expression was generated.
+   * expression was generated. Offsets are zero-based and the end offset is
+   * exclusive.
+   *
+   * When present on a parser-generated `Error` expression from LaTeX parsing,
+   * offsets refer to the serialized LaTeX of the parsed tokens. Missing-token
+   * diagnostics use a collapsed (zero-width) range at the parser position
+   * where the token was expected. For input that round-trips through the
+   * tokenizer unchanged (no comments, Unicode normalization, or macro
+   * expansion) — such as editor-generated LaTeX — these offsets match the
+   * original input string.
    */
   sourceOffsets?: [start: number, end: number];
 };

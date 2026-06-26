@@ -609,6 +609,20 @@ export class _Parser implements Parser {
     return tokensToString(this._tokens.slice(start, end));
   }
 
+  sourceOffsets(
+    startToken: number,
+    endToken: number = this.index
+  ): [start: number, end: number] {
+    // Map token indices to character offsets in the serialized LaTeX by
+    // measuring the length of the token prefix. For input that round-trips
+    // through `tokensToString` unchanged (e.g. editor-generated LaTeX, which
+    // has no comments or Unicode normalization), these offsets match the
+    // original input string.
+    const start = this.latex(0, startToken).length;
+    const end = this.latex(0, endToken).length;
+    return start <= end ? [start, end] : [end, start];
+  }
+
   // latexBefore(): string {
   //   return this.latex(0, this.index);
   // }
@@ -2678,9 +2692,14 @@ export class _Parser implements Parser {
     }
 
     const latex = this.latex(fromToken, this.index);
-    return latex
+    const fn: [MathJsonSymbol, ...MathJsonExpression[]] = latex
       ? ['Error', msg, ['LatexString', { str: latex }]]
       : ['Error', msg];
+    const isMissing = typeof code === 'string' && code === 'missing';
+    const sourceOffsets = isMissing
+      ? this.sourceOffsets(this.index, this.index)
+      : this.sourceOffsets(fromToken, this.index);
+    return { fn, sourceOffsets };
   }
 
   private isFunctionOperator(id: MathJsonSymbol | null): boolean {
