@@ -908,8 +908,9 @@ export interface Parser {
    * Return an error expression with the specified code and arguments.
    *
    * The returned `Error` expression includes `sourceOffsets` metadata with
-   * zero-based, end-exclusive offsets into the serialized LaTeX. Missing-token
-   * errors use a collapsed range at the parser position.
+   * zero-based, end-exclusive offsets into the serialized LaTeX. Missing-operand
+   * errors use a collapsed (zero-width) range at the position where the operand
+   * was expected.
    */
   error(
     code: string | [string, ...MathJsonExpression[]],

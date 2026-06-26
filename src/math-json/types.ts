@@ -68,9 +68,9 @@ export type MathJsonAttributes = {
    * exclusive.
    *
    * When present on a parser-generated `Error` expression from LaTeX parsing,
-   * offsets refer to the serialized LaTeX of the parsed tokens. Missing-token
-   * diagnostics use a collapsed (zero-width) range at the parser position
-   * where the token was expected. For input that round-trips through the
+   * offsets refer to the serialized LaTeX of the parsed tokens. Missing-operand
+   * diagnostics use a collapsed (zero-width) range at the position where the
+   * operand was expected. For input that round-trips through the
    * tokenizer unchanged (no comments, Unicode normalization, or macro
    * expansion) — such as editor-generated LaTeX — these offsets match the
    * original input string.

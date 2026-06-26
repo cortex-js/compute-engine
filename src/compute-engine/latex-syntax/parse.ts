@@ -2735,9 +2735,14 @@ export class _Parser implements Parser {
     const fn: [MathJsonSymbol, ...MathJsonExpression[]] = latex
       ? ['Error', msg, ['LatexString', { str: latex }]]
       : ['Error', msg];
+    // A `missing` operand has no extent: report a zero-width caret at
+    // `fromToken`, the position where the operand was expected (e.g. before the
+    // orphaned operator in `=x` or `! 3`). Other errors span the offending
+    // tokens, matching the `LatexString` above. When `fromToken === this.index`
+    // (e.g. an empty `\sqrt{}`), both branches collapse to the same caret.
     const isMissing = typeof code === 'string' && code === 'missing';
     const sourceOffsets = isMissing
-      ? this.sourceOffsets(this.index, this.index)
+      ? this.sourceOffsets(fromToken, fromToken)
       : this.sourceOffsets(fromToken, this.index);
     return { fn, sourceOffsets };
   }

@@ -104,6 +104,19 @@ describe('Parser Error source offsets', () => {
     expect(error.sourceOffsets).toEqual([2, 4]);
   });
 
+  test('missing operand before an infix operator points at the insertion slot', () => {
+    // The left operand of `=` is missing: the caret sits before the `=`, where
+    // the operand belongs, not after it.
+    const expr = new LatexSyntax().parse('=x')!;
+    expect(findError(expr, 'missing').sourceOffsets).toEqual([0, 0]);
+  });
+
+  test('missing operand of a postfix operator points at the insertion slot', () => {
+    // The operand of `!` is missing: the caret sits before the `!`.
+    const expr = new LatexSyntax().parse('! 3')!;
+    expect(findError(expr, 'missing').sourceOffsets).toEqual([0, 0]);
+  });
+
   test('source offsets are opt-in metadata: omitted from the default boxed serialization', () => {
     // The raw parser always carries offsets...
     const raw = new LatexSyntax().parse('\\foo')!;
