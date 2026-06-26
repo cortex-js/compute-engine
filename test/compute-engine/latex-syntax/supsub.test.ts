@@ -69,23 +69,13 @@ describe('SUPSUB', () => {
     expect(ce.parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       [
         "Superscript",
-        {
-          fn: ["Error", "'missing'", ["LatexString", "^"]];
-            sourceOffsets: [1, 1]
-        },
+        ["Error", "'missing'", ["LatexString", "^"]],
         ["Error", "'missing'"]
       ]
     `); // @fixme: nope...
-    expect(ce.parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(`
-      [
-        "Superscript",
-        {
-          fn: ["Error", "'missing'", ["LatexString", "^"]];
-            sourceOffsets: [1, 1]
-        },
-        12
-      ]
-    `); // @fixme: nope...
+    expect(ce.parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(
+      `["Superscript", ["Error", "'missing'", ["LatexString", "^"]], 12]`
+    ); // @fixme: nope...
   });
   test('Accents', () => {
     expect(ce.parse('\\vec{x}')).toMatchInlineSnapshot(`["OverVector", "x"]`);

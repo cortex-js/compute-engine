@@ -411,6 +411,12 @@ export class _Parser implements Parser {
   private _lookAheadCache: [count: number, tokens: string][] | null = null;
   private _lookAheadIndex = -1;
 
+  // Cache for `sourceOffsets()`: cumulative character offset of each token
+  // prefix. Entry `k` is the length of `tokensToString(this._tokens.slice(0,
+  // k))`, so the array has `this._tokens.length + 1` entries. The token stream
+  // is immutable, so this is built once on demand.
+  private _tokenPrefixOffsets: number[] | null = null;
+
   constructor(
     tokens: LatexToken[],
     dictionary: IndexedLatexDictionary,
@@ -613,14 +619,48 @@ export class _Parser implements Parser {
     startToken: number,
     endToken: number = this.index
   ): [start: number, end: number] {
-    // Map token indices to character offsets in the serialized LaTeX by
-    // measuring the length of the token prefix. For input that round-trips
-    // through `tokensToString` unchanged (e.g. editor-generated LaTeX, which
-    // has no comments or Unicode normalization), these offsets match the
-    // original input string.
-    const start = this.latex(0, startToken).length;
-    const end = this.latex(0, endToken).length;
+    // Map token indices to character offsets in the serialized LaTeX. The
+    // cumulative prefix lengths are computed once and cached (the token stream
+    // is immutable), so each call is O(1) instead of re-serializing the prefix
+    // on every error. For input that round-trips through `tokensToString`
+    // unchanged (e.g. editor-generated LaTeX, which has no comments or Unicode
+    // normalization), these offsets match the original input string.
+    const offsets = this.tokenPrefixOffsets();
+    const n = this._tokens.length;
+    const start = offsets[Math.max(0, Math.min(startToken, n))];
+    const end = offsets[Math.max(0, Math.min(endToken, n))];
     return start <= end ? [start, end] : [end, start];
+  }
+
+  /**
+   * Cumulative character offsets of the token prefixes, built once and cached.
+   * Entry `k` is the length of `tokensToString(this._tokens.slice(0, k))`.
+   *
+   * This replicates the `tokensToString()`/`joinLatex()` join semantics in a
+   * single pass (the same approach as `lookAhead()`), so all prefix lengths are
+   * available in O(1) without re-joining a token slice for each lookup.
+   */
+  private tokenPrefixOffsets(): number[] {
+    if (this._tokenPrefixOffsets !== null) return this._tokenPrefixOffsets;
+
+    const tokens = this._tokens;
+    const offsets = new Array<number>(tokens.length + 1);
+    offsets[0] = 0;
+    let len = 0;
+    let sep = '';
+    for (let i = 0; i < tokens.length; i++) {
+      const segment = LOOKAHEAD_TOKEN_TO_STRING[tokens[i]] ?? tokens[i];
+      // If the segment begins with a char that *could* be in a command name,
+      // insert the pending separator (see `joinLatex()`)
+      if (/[a-zA-Z]/.test(segment[0])) len += sep.length;
+      // If the segment ends in a command, a space precedes the next segment
+      sep = /\\[a-zA-Z]+\*?$/.test(segment) ? ' ' : '';
+      len += segment.length;
+      offsets[i + 1] = len;
+    }
+
+    this._tokenPrefixOffsets = offsets;
+    return offsets;
   }
 
   // latexBefore(): string {

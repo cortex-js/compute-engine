@@ -2,6 +2,27 @@
 
 ### New Features
 
+- **LaTeX parse errors carry their source location.** The `Error` expressions
+  produced by the LaTeX parser now include a `sourceOffsets: [start, end]`
+  character range identifying where in the input the error occurred, so a
+  consumer can map a parse error back to the offending span — e.g. to highlight
+  an invalid token in a mathfield. Offsets are zero-based and end-exclusive into
+  the serialized LaTeX (`tokensToString`); for input that round-trips through the
+  tokenizer unchanged — editor-generated LaTeX, with no comments, Unicode
+  normalization, or macro expansion — they match the original input string.
+  Missing-operand errors (an empty `\sqrt{}` or `\frac{}{}`) use a zero-width
+  range at the position where the token was expected. The new
+  `Parser.sourceOffsets(startToken, endToken?)` helper lets custom dictionary
+  entries attach a range to errors they raise. The raw parser output
+  (`LatexSyntax().parse()`) always carries these offsets, so an `Error` node is
+  now emitted in object form (`{ fn: ["Error", …], sourceOffsets }`) rather than
+  the bare `["Error", …]` array whenever a range is available — a consumer
+  matching `expr[0] === "Error"` should also handle `expr.fn?.[0] === "Error"`.
+  Through the boxed path (`ce.parse(latex).toMathJson()`), source offsets are
+  opt-in metadata like `latex` and `wikidata`: included with
+  `metadata: ['sourceOffsets']` or `metadata: 'all'`, and omitted from the
+  default serialization.
+
 - **Long numerators over a single power serialize as a product with a negative
   exponent.** When prettifying, a large numerator divided by a single power with
   a small base — e.g. `(3x^4 + 2x^3 + x + 5) · x^{-23}` — now serializes as

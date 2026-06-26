@@ -470,6 +470,10 @@ function serializeJsonFunction(
   // Determine if we have some wikidata metadata
   if (!options.metadata.includes('wikidata')) md.wikidata = '';
 
+  // Source offsets are opt-in metadata (like `latex`/`wikidata`): only emit
+  // them when explicitly requested (`metadata: 'sourceOffsets'` or `'all'`).
+  if (!options.metadata.includes('sourceOffsets')) md.sourceOffsets = undefined;
+
   const sourceOffsets = md.sourceOffsets;
 
   //  Is shorthand allowed, and no metadata to include

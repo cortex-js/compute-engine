@@ -87,14 +87,8 @@ describe('LATEX SERIALIZING', () => {
     expect(ce.parse('\\foo[0]{1}{2}')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        {
-          fn: ["Error", "unexpected-command", ["LatexString", "\\foo"]];
-            sourceOffsets: [0, 4]
-        },
-        {
-          fn: ["Error", "unexpected-operator", ["LatexString", "["]];
-            sourceOffsets: [4, 5]
-        }
+        ["Error", "unexpected-command", ["LatexString", "\\foo"]],
+        ["Error", "unexpected-operator", ["LatexString", "["]]
       ]
     `);
   });

@@ -418,14 +418,11 @@ describe('SYMBOLS', () => {
   describe('PARSING ERRORS', () => {
     test('Math operators are not valid symbols', () => {
       expect(parse('\\mathrm{=}')).toMatchInlineSnapshot(`
-        {
-          fn: [
-            "Error",
-            ["ErrorCode", "invalid-symbol", "invalid-first-char"],
-            ["LatexString", "\\mathrm{=}"]
-          ];
-          sourceOffsets: [0, 10]
-        }
+        [
+          "Error",
+          ["ErrorCode", "invalid-symbol", "invalid-first-char"],
+          ["LatexString", "\\mathrm{=}"]
+        ]
       `);
     });
     test('Braille via \\char are now encoded as valid symbols', () => {
@@ -437,14 +434,11 @@ describe('SYMBOLS', () => {
     test('Egyptians Hieroglyphs are not valid symbols', () => {
       // Egyptian hieroglyphs are XIDC but rejected by isValidSymbol's script check
       expect(parse('\\mathrm{\\char"13000}')).toMatchInlineSnapshot(`
-        {
-          fn: [
-            "Error",
-            ["ErrorCode", "invalid-symbol", "unexpected-script"],
-            ["LatexString", "\\mathrm{\\char"13000}"]
-          ];
-          sourceOffsets: [0, 20]
-        }
+        [
+          "Error",
+          ["ErrorCode", "invalid-symbol", "unexpected-script"],
+          ["LatexString", "\\mathrm{\\char"13000}"]
+        ]
       `);
     });
 
@@ -455,24 +449,18 @@ describe('SYMBOLS', () => {
 
     test('Symbols should not mix emojis and non-emojis', () => {
       expect(parse('\\mathrm{👨🏻‍🎤DavidBowie}')).toMatchInlineSnapshot(`
-        {
-          fn: [
-            "Error",
-            ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
-            ["LatexString", "\\mathrm{👨🏻‍🎤DavDavidBowie}"]
-          ];
-          sourceOffsets: [0, 29]
-        }
+        [
+          "Error",
+          ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
+          ["LatexString", "\\mathrm{👨🏻‍🎤DavDavidBowie}"]
+        ]
       `);
       expect(parse('\\mathrm{DavidBowie👨🏻‍🎤}')).toMatchInlineSnapshot(`
-        {
-          fn: [
-            "Error",
-            ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
-            ["LatexString", "\\mathrm{DavidBowie👨🏻‍🎤}}"]
-          ];
-          sourceOffsets: [0, 27]
-        }
+        [
+          "Error",
+          ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
+          ["LatexString", "\\mathrm{DavidBowie👨🏻‍🎤}}"]
+        ]
       `);
     });
   });

@@ -187,39 +187,24 @@ describe('MATCHFIX no redundant wrapping', () => {
 
 describe('MATCHFIX invalid', () => {
   test('( // missing closing fence', () =>
-    expect(check('(')).toMatchInlineSnapshot(`
-      invalid   ={
-        fn: ["Error", "unexpected-delimiter", ["LatexString", "("]];
-        sourceOffsets: [0, 1]
-      }
-    `));
+    expect(check('(')).toMatchInlineSnapshot(
+      `invalid   =["Error", "unexpected-delimiter", ["LatexString", "("]]`
+    ));
   test(') // missing opening fence', () => {
-    expect(check(')')).toMatchInlineSnapshot(`
-      invalid   ={
-        fn: ["Error", "unexpected-delimiter", ["LatexString", ")"]];
-        sourceOffsets: [0, 1]
-      }
-    `);
+    expect(check(')')).toMatchInlineSnapshot(
+      `invalid   =["Error", "unexpected-delimiter", ["LatexString", ")"]]`
+    );
   });
 
   test('-( // missing closing fence', () => {
-    expect(engine.parse('-(')).toMatchInlineSnapshot(`
-      [
-        "Negate",
-        {
-          fn: ["Error", "'missing'", ["LatexString", "-"]];
-            sourceOffsets: [1, 1]
-        }
-      ]
-    `);
+    expect(engine.parse('-(')).toMatchInlineSnapshot(
+      `["Negate", ["Error", "'missing'", ["LatexString", "-"]]]`
+    );
   });
 
   test('(3+x // missing closing fence', () => {
-    expect(engine.parse('(3+x')).toMatchInlineSnapshot(`
-      {
-        fn: ["Error", "unexpected-delimiter", ["LatexString", "("]];
-        sourceOffsets: [0, 1]
-      }
-    `);
+    expect(engine.parse('(3+x')).toMatchInlineSnapshot(
+      `["Error", "unexpected-delimiter", ["LatexString", "("]]`
+    );
   });
 });

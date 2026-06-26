@@ -23,19 +23,16 @@ describe('ROOT FUNCTION', () => {
 describe('ROOT FUNCTION (INVALID FORMS)', () => {
   test('Invalid forms', () => {
     expect(parse('\\sqrt')).toMatchInlineSnapshot(
-      `["Sqrt", {fn: ["Error", "'missing'"]; sourceOffsets: [5, 5]}]`
+      `["Sqrt", ["Error", "'missing'"]]`
     );
     expect(parse('\\sqrt{}')).toMatchInlineSnapshot(
-      `["Sqrt", {fn: ["Error", "'missing'"]; sourceOffsets: [7, 7]}]`
+      `["Sqrt", ["Error", "'missing'"]]`
     );
     expect(parse('\\sqrt{5}[3]')).toMatchInlineSnapshot(`
       [
         "Sequence",
         ["Sqrt", 5],
-        {
-          fn: ["Error", "unexpected-operator", ["LatexString", "["]];
-            sourceOffsets: [8, 9]
-        }
+        ["Error", "unexpected-operator", ["LatexString", "["]]
       ]
     `);
   });
