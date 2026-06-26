@@ -553,7 +553,11 @@ function serializeFraction(
     // of the 'reciprocal' style.)
     const base = operand(denom, 1);
     const expVal = machineValue(operand(denom, 2)) ?? 1;
-    const power = supsub('^', serializer.wrapShort(base), serializer.serialize(-expVal));
+    const power = supsub(
+      '^',
+      serializer.wrapShort(base),
+      serializer.serialize(-expVal)
+    );
     if (machineValue(numer) === 1) return power;
     return serializer.wrap(numer) + power;
   } else if (style === 'factor') {
