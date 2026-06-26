@@ -378,7 +378,6 @@ export class Serializer {
     | 'inline-solidus'
     | 'nice-solidus'
     | 'reciprocal'
-    | 'negative-power'
     | 'factor' {
     return this.options.fractionStyle(expr, level);
   }

@@ -470,3 +470,53 @@ describe('HORIZONTAL SPACING SERIALIZE', () => {
     );
   });
 });
+
+describe('STYLE - LONG NUMERATOR OVER A SINGLE POWER', () => {
+  // A long numerator over a single power of a small base serializes with an
+  // inline solidus rather than a tall, lopsided fraction.
+  const numer = '3x^4+2x^3+x+5';
+  const frac = (denom: string) => engine.parse(`\\frac{${numer}}{${denom}}`).latex;
+
+  test('large integer power', () => {
+    expect(frac('x^{23}')).toBe('(3x^4+2x^3+x+5)/x^{23}');
+    expect(frac('x^{3}')).toBe('(3x^4+2x^3+x+5)/x^3');
+  });
+
+  test('Square (exponent 2) is covered', () => {
+    // `Power(x, 2)` is rewritten to `Square(x)` while prettifying; it still
+    // takes the solidus path.
+    expect(frac('x^{2}')).toBe('(3x^4+2x^3+x+5)/x^2');
+  });
+
+  test('Sqrt (exponent 1/2) is covered', () => {
+    expect(frac('\\sqrt{x}')).toBe('(3x^4+2x^3+x+5)/\\sqrt{x}');
+  });
+
+  test('only a small base qualifies', () => {
+    // A compound base stays a quotient.
+    expect(frac('(x+1)^{23}')).toBe('\\frac{3x^4+2x^3+x+5}{(x+1)^{23}}');
+    expect(frac('\\sqrt{x+1}')).toBe('\\frac{3x^4+2x^3+x+5}{\\sqrt{x+1}}');
+  });
+
+  test('only a single power qualifies', () => {
+    // `a·x^n` is a product, not a single power, so it stays a quotient.
+    expect(frac('2x^{23}')).toBe('\\frac{3x^4+2x^3+x+5}{2x^{23}}');
+  });
+
+  test('a small numerator is unaffected', () => {
+    // `1/x^{23}` keeps its fraction; the rewrite needs a long numerator.
+    expect(engine.parse('\\frac{1}{x^{23}}').latex).toBe('\\frac{1}{x^{23}}');
+    expect(engine.parse('\\frac{1}{\\sqrt{x}}').latex).toBe(
+      '\\frac{1}{\\sqrt{x}}'
+    );
+  });
+
+  test('disabled by prettify: false', () => {
+    expect(
+      engine.parse(`\\frac{${numer}}{x^{23}}`).toLatex({ prettify: false })
+    ).toBe('\\frac{3x^4+2x^3+x+5}{x^{23}}');
+    expect(
+      engine.parse(`\\frac{${numer}}{\\sqrt{x}}`).toLatex({ prettify: false })
+    ).toBe('\\frac{3x^4+2x^3+x+5}{\\sqrt{x}}');
+  });
+});

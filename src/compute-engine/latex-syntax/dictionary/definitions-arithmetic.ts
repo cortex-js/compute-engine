@@ -546,20 +546,6 @@ function serializeFraction(
   } else if (style === 'reciprocal') {
     if (machineValue(numer) === 1) return serializer.wrap(denom) + '^{-1}';
     return serializer.wrap(numer) + serializer.wrap(denom) + '^{-1}';
-  } else if (style === 'negative-power') {
-    // The denominator is a single power `base^{k}`; render the whole thing as
-    // a product with a negative exponent, `(numer)·base^{-k}`, rather than a
-    // tall fraction. (The push-into-exponent avoids the uglier `(base^k)^{-1}`
-    // of the 'reciprocal' style.)
-    const base = operand(denom, 1);
-    const expVal = machineValue(operand(denom, 2)) ?? 1;
-    const power = supsub(
-      '^',
-      serializer.wrapShort(base),
-      serializer.serialize(-expVal)
-    );
-    if (machineValue(numer) === 1) return power;
-    return serializer.wrap(numer) + power;
   } else if (style === 'factor') {
     if (machineValue(denom) === 1) return serializer.wrap(numer);
     return (

@@ -40,34 +40,51 @@ export function getFractionStyle(
   | 'inline-solidus'
   | 'nice-solidus'
   | 'reciprocal'
-  | 'negative-power'
   | 'factor' {
   if (level > 3) return 'inline-solidus';
 
   if (operator(expr) === 'Divide') {
     const [op1, op2] = operands(expr);
     const [n, d] = [countLeaves(op1), countLeaves(op2)];
+    // A long numerator over a single power of a small base reads better with an
+    // inline solidus — `(...)/x^{23}`, `(...)/x^2`, `(...)/\sqrt{x}` — than as a
+    // tall fraction with a tiny denominator. Covers `Power(b, k≥2)`,
+    // `Square(b)` and `Sqrt(b)`. Checked before the `factor` branch below so a
+    // `Sqrt` denominator (which `factor` would otherwise peel off as
+    // `\frac{1}{\sqrt{x}}(...)`) takes this path instead.
+    if (n > 5 && isSinglePowerDenominator(op2)) return 'inline-solidus';
     if (d <= 2 && n > 5) return 'factor';
     const denomOp = operator(op2);
-    // A long numerator over a single power with a small base (e.g. `x^{23}`)
-    // reads better as a product with a negative exponent — `(...)x^{-23}` —
-    // than as a tall fraction with a tiny denominator.
-    if (n > 5 && denomOp === 'Power') {
-      const exp = machineValue(operand(op2, 2));
-      if (
-        exp !== null &&
-        Number.isInteger(exp) &&
-        exp >= 2 &&
-        countLeaves(operand(op2, 1)) <= 2
-      )
-        return 'negative-power';
-    }
     // Prefer quotient over reciprocal when denominator is Sqrt/Root
     // so that 1/sqrt(x) displays as \frac{1}{\sqrt{x}} not \sqrt{x}^{-1}
     if (n <= 2 && d > 5 && denomOp !== 'Sqrt' && denomOp !== 'Root')
       return 'reciprocal';
   }
   return 'quotient';
+}
+
+/**
+ * True if `denom` is a single power of a *small* base — `Power(base, k)` with
+ * an integer `k ≥ 2`, `Square(base)` (k = 2), or `Sqrt(base)` (k = 1/2), where
+ * `base` is at most two leaves (e.g. `x`, `2x` is excluded as a product). Used
+ * to pick the inline-solidus fraction style for a long numerator over such a
+ * denominator.
+ */
+function isSinglePowerDenominator(denom: MathJsonExpression | null): boolean {
+  if (denom === null) return false;
+  const base = operand(denom, 1);
+  if (base === null || countLeaves(base) > 2) return false;
+  switch (operator(denom)) {
+    case 'Power': {
+      const exp = machineValue(operand(denom, 2));
+      return exp !== null && Number.isInteger(exp) && exp >= 2;
+    }
+    case 'Square':
+    case 'Sqrt':
+      return true;
+    default:
+      return false;
+  }
 }
 
 // https://en.wikipedia.org/wiki/Logical_connective

@@ -1203,7 +1203,6 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
     | 'inline-solidus'
     | 'nice-solidus'
     | 'reciprocal'
-    | 'negative-power'
     | 'factor';
 
   logicStyle: (
@@ -1425,7 +1424,6 @@ export interface Serializer {
     | 'inline-solidus'
     | 'nice-solidus'
     | 'reciprocal'
-    | 'negative-power'
     | 'factor';
 
   logicStyle: (
