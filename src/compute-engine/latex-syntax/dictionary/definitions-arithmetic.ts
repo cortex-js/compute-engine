@@ -81,8 +81,9 @@ function parseRoot(parser: Parser): MathJsonExpression | null {
   const degree = parser.parseOptionalGroup();
   const base = parser.parseGroup() ?? parser.parseToken();
   if (isEmptySequence(base)) {
-    if (degree !== null) return ['Root', MISSING, missingIfEmpty(degree)];
-    return ['Sqrt', MISSING];
+    const missing = parser.error('missing', parser.index);
+    if (degree !== null) return ['Root', missing, missingIfEmpty(degree)];
+    return ['Sqrt', missing];
   }
   if (degree !== null) return ['Root', base, degree];
   return ['Sqrt', base];
@@ -422,11 +423,21 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
   if (numer === null) {
     numer = parser.parseToken();
     denom = parser.parseToken();
+    numer = missingIfEmpty(numer);
+    denom = missingIfEmpty(denom);
   } else {
+    // Report an empty numerator/denominator (e.g. `\frac{}{}`) as a
+    // missing-operand error positioned at the empty group, so the editor can
+    // flag it. `error('missing', …)` is emitted right after each group is
+    // consumed, while the parser is positioned at that group.
+    numer = isEmptySequence(numer)
+      ? parser.error('missing', parser.index)
+      : numer;
     denom = parser.parseGroup();
+    denom = isEmptySequence(denom)
+      ? parser.error('missing', parser.index)
+      : denom;
   }
-  numer = missingIfEmpty(numer);
-  denom = missingIfEmpty(denom);
   if (
     operator(numer) === 'PartialDerivative' &&
     (operator(denom) === 'PartialDerivative' ||

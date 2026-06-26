@@ -77,7 +77,7 @@ export function isExpressionObject(
 
 /**
  * Returns true if `expr` has at least one recognized metadata property
- * (`latex` or `wikidata`) with a non-undefined value.
+ * with a non-undefined value.
  */
 export function hasMetaData(
   expr: MathJsonExpression | null
@@ -85,7 +85,8 @@ export function hasMetaData(
   return (
     isExpressionObject(expr) &&
     ((expr as MathJsonAttributes).latex !== undefined ||
-      (expr as MathJsonAttributes).wikidata !== undefined)
+      (expr as MathJsonAttributes).wikidata !== undefined ||
+      (expr as MathJsonAttributes).sourceOffsets !== undefined)
   );
 }
 

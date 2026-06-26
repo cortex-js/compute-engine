@@ -132,10 +132,13 @@ export abstract class _BoxedExpression implements Expression {
    *  not generated synthetically
    */
   readonly verbatimLatex?: string;
+  readonly sourceOffsets?: [start: number, end: number];
 
   constructor(ce: ComputeEngine, metadata?: Metadata) {
     this.engine = ce;
     if (metadata?.latex !== undefined) this.verbatimLatex = metadata.latex;
+    if (metadata?.sourceOffsets !== undefined)
+      this.sourceOffsets = metadata.sourceOffsets;
   }
 
   /**
@@ -336,7 +339,7 @@ export abstract class _BoxedExpression implements Expression {
         (typeof options.metadata === 'string' && options.metadata === 'all') ||
         options.metadata?.includes('all')
       ) {
-        defaultOptions.metadata = ['latex', 'wikidata'];
+        defaultOptions.metadata = ['latex', 'wikidata', 'sourceOffsets'];
       } else if (Array.isArray(options.metadata)) {
         defaultOptions.metadata = options.metadata;
       }

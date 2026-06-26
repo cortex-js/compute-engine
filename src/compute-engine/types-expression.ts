@@ -706,6 +706,9 @@ export interface Expression {
    */
   verbatimLatex?: string;
 
+  /** Source offsets in the original source string, when available. */
+  sourceOffsets?: [start: number, end: number];
+
   /** If `true`, this expression is in a canonical form. */
   get isCanonical(): boolean;
 

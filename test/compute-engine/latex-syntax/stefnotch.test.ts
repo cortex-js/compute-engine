@@ -14,8 +14,14 @@ describe('STEFNOTCH #9', () => {
         [
           "Limits",
           "Nothing",
-          ["Error", "expected-closing-delimiter", ["LatexString", "{⬚}"]],
-          ["Error", "expected-closing-delimiter", ["LatexString", "{⬚}"]]
+          {
+            fn: ["Error", "expected-closing-delimiter", ["LatexString", "{⬚}"]];
+                sourceOffsets: [18, 21]
+          },
+          {
+            fn: ["Error", "expected-closing-delimiter", ["LatexString", "{⬚}"]];
+                sourceOffsets: [36, 39]
+          }
         ]
       ]
     `);

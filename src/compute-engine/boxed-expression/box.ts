@@ -478,6 +478,11 @@ export function box(
       ? {
           latex: (expr as ExpressionObject & { latex?: string }).latex,
           wikidata: (expr as ExpressionObject & { wikidata?: string }).wikidata,
+          sourceOffsets: (
+            expr as ExpressionObject & {
+              sourceOffsets?: [start: number, end: number];
+            }
+          ).sourceOffsets,
         }
       : undefined;
 

@@ -38,7 +38,7 @@ export type JsonSerializationOptions = {
    * Metadata fields to include. When metadata is included, shorthand notation
    * is disabled for affected nodes.
    */
-  metadata: ('all' | 'wikidata' | 'latex')[];
+  metadata: ('all' | 'wikidata' | 'latex' | 'sourceOffsets')[];
 
   /**
    * If true, detect and serialize repeating decimals (for example `0.(3)`).
@@ -237,6 +237,8 @@ export type FormOption =
 export type Metadata = {
   latex?: string | undefined;
   wikidata?: string | undefined;
+  /** Zero-based, end-exclusive offsets into the original source string. */
+  sourceOffsets?: [start: number, end: number] | undefined;
 };
 
 /**

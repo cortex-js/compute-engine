@@ -904,11 +904,28 @@ export interface Parser {
    */
   latex(start: number, end?: number): string;
 
-  /** Return an error expression with the specified code and arguments */
+  /**
+   * Return an error expression with the specified code and arguments.
+   *
+   * The returned `Error` expression includes `sourceOffsets` metadata with
+   * zero-based, end-exclusive offsets into the serialized LaTeX. Missing-token
+   * errors use a collapsed range at the parser position.
+   */
   error(
     code: string | [string, ...MathJsonExpression[]],
     fromToken: number
   ): MathJsonExpression;
+
+  /**
+   * Return source offsets for a token range, as zero-based, end-exclusive
+   * character offsets into the serialized LaTeX (`tokensToString`). For input
+   * that round-trips unchanged (e.g. editor-generated LaTeX), these match the
+   * original input string.
+   */
+  sourceOffsets(
+    startToken: number,
+    endToken?: number
+  ): [start: number, end: number];
 
   /** If there are any space, advance the index until a non-space is encountered */
   skipSpace(): boolean;

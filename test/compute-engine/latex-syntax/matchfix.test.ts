@@ -177,9 +177,7 @@ describe('MATCHFIX no redundant wrapping', () => {
   });
 
   test('Floor serializes without extra parens', () => {
-    expect(latex(['Floor', 'x'])).toMatchInlineSnapshot(
-      `\\lfloor x\\rfloor`
-    );
+    expect(latex(['Floor', 'x'])).toMatchInlineSnapshot(`\\lfloor x\\rfloor`);
   });
 
   test('Ceil serializes without extra parens', () => {
@@ -189,24 +187,39 @@ describe('MATCHFIX no redundant wrapping', () => {
 
 describe('MATCHFIX invalid', () => {
   test('( // missing closing fence', () =>
-    expect(check('(')).toMatchInlineSnapshot(
-      `invalid   =["Error", "unexpected-delimiter", ["LatexString", "("]]`
-    ));
+    expect(check('(')).toMatchInlineSnapshot(`
+      invalid   ={
+        fn: ["Error", "unexpected-delimiter", ["LatexString", "("]];
+        sourceOffsets: [0, 1]
+      }
+    `));
   test(') // missing opening fence', () => {
-    expect(check(')')).toMatchInlineSnapshot(
-      `invalid   =["Error", "unexpected-delimiter", ["LatexString", ")"]]`
-    );
+    expect(check(')')).toMatchInlineSnapshot(`
+      invalid   ={
+        fn: ["Error", "unexpected-delimiter", ["LatexString", ")"]];
+        sourceOffsets: [0, 1]
+      }
+    `);
   });
 
   test('-( // missing closing fence', () => {
-    expect(engine.parse('-(')).toMatchInlineSnapshot(
-      `["Negate", ["Error", "'missing'", ["LatexString", "-"]]]`
-    );
+    expect(engine.parse('-(')).toMatchInlineSnapshot(`
+      [
+        "Negate",
+        {
+          fn: ["Error", "'missing'", ["LatexString", "-"]];
+            sourceOffsets: [1, 1]
+        }
+      ]
+    `);
   });
 
   test('(3+x // missing closing fence', () => {
-    expect(engine.parse('(3+x')).toMatchInlineSnapshot(
-      `["Error", "unexpected-delimiter", ["LatexString", "("]]`
-    );
+    expect(engine.parse('(3+x')).toMatchInlineSnapshot(`
+      {
+        fn: ["Error", "unexpected-delimiter", ["LatexString", "("]];
+        sourceOffsets: [0, 1]
+      }
+    `);
   });
 });

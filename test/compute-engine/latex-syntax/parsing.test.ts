@@ -16,9 +16,17 @@ describe('ADVANCED PARSING', () => {
   // Empty argument should not be interpreted as space group when argument is
   // expected
   test('\\frac{x}{} y', () =>
-    expect(parse('\\frac{x}{} \\text{ cm}')).toMatchInlineSnapshot(
-      `["Tuple", ["Divide", "x", ["Error", "'missing'"]], "cm"]`
-    ));
+    expect(parse('\\frac{x}{} \\text{ cm}')).toMatchInlineSnapshot(`
+      [
+        "Tuple",
+        [
+          "Divide",
+          "x",
+          {fn: ["Error", "'missing'"]; sourceOffsets: [10, 10]}
+        ],
+        "cm"
+      ]
+    `));
 
   // REVIEW.md C4: parseTextRun joined nested-brace runs with Array.join()
   // (default ',' separator), so `\text{hello {world}}` became 'hello ,world'.
@@ -80,14 +88,24 @@ describe('CUSTOM SYMBOL TYPE CALLBACK', () => {
 
 describe('UNKNOWN COMMANDS', () => {
   test('Parse', () => {
-    expect(parse('\\foo')).toMatchInlineSnapshot(
-      `["Error", "unexpected-command", ["LatexString", "\\foo"]]`
-    );
+    expect(parse('\\foo')).toMatchInlineSnapshot(`
+      {
+        fn: ["Error", "unexpected-command", ["LatexString", "\\foo"]];
+        sourceOffsets: [0, 4]
+      }
+    `);
     expect(parse('x=\\foo+1')).toMatchInlineSnapshot(`
       [
         "Equal",
         "x",
-        ["Add", ["Error", "unexpected-command", ["LatexString", "\\foo"]], 1]
+        [
+          "Add",
+          {
+            fn: ["Error", "unexpected-command", ["LatexString", "\\foo"]];
+                sourceOffsets: [2, 6]
+          },
+          1
+        ]
       ]
     `);
     expect(parse('x=\\foo   {1}  {x+1}+1')).toMatchInlineSnapshot(`
@@ -98,7 +116,10 @@ describe('UNKNOWN COMMANDS', () => {
           "Add",
           [
             "InvisibleOperator",
-            ["Error", "unexpected-command", ["LatexString", "\\foo"]],
+            {
+              fn: ["Error", "unexpected-command", ["LatexString", "\\foo"]];
+                    sourceOffsets: [2, 6]
+            },
             1,
             ["Add", "x", 1]
           ],
@@ -116,7 +137,10 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       expect(parse('x^(n+1)')).toMatchInlineSnapshot(`
         [
           "Tuple",
-          ["Error", "'missing'", ["LatexString", "^"]],
+          {
+            fn: ["Error", "'missing'", ["LatexString", "^"]];
+              sourceOffsets: [2, 2]
+          },
           ["Add", "n", 1]
         ]
       `);
