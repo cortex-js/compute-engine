@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.63.0 _2026-06-26_
 
 ### New Features
 
