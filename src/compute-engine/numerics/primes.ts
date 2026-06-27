@@ -143,7 +143,18 @@ const MILLER_RABIN_THRESHOLD = 1n << 32n;
 // n < 3.3·10²⁴, so `isPrimeBigint` is exact across that range (and an
 // extremely reliable probable-prime test beyond it).
 const MILLER_RABIN_BASES = [
-  2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n,
+  2n,
+  3n,
+  5n,
+  7n,
+  11n,
+  13n,
+  17n,
+  19n,
+  23n,
+  29n,
+  31n,
+  37n,
 ];
 
 export function isPrimeBigint(n: bigint): boolean {

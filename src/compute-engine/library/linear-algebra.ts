@@ -805,7 +805,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           }
           rows.push(ce.function('List', row));
         }
-        return ce.function('Determinant', [ce.function('List', rows)]).evaluate();
+        return ce
+          .function('Determinant', [ce.function('List', rows)])
+          .evaluate();
       },
     },
 

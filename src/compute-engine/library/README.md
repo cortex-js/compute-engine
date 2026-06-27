@@ -23,8 +23,8 @@ Primes:
 - NextPrime: the smallest prime larger than `n` (with an optional `k` for the
   kth prime after `n`, or before it when `k < 0`)
 - PrimePi: the prime-counting function π(n)
-- RandomPrime: a random prime in a range
-  (primality: trial division for small `n`, Miller–Rabin above 2³²)
+- RandomPrime: a random prime in a range (primality: trial division for small
+  `n`, Miller–Rabin above 2³²)
 
 Factorization & divisors:
 

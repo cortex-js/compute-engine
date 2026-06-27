@@ -305,7 +305,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     CarmichaelLambda: {
       description:
-        "Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. Defined for `n ≥ 1`.",
+        'Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. Defined for `n ≥ 1`.',
       signature: '(integer) -> integer',
       type: () => 'finite_integer',
       examples: ['CarmichaelLambda(15)  // 4'],
@@ -502,7 +502,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         }
         // List form: counts of 1..base-1, then the count of 0 last.
         const list: ReturnType<typeof ce.number>[] = [];
-        for (let d = 1n; d < base; d++) list.push(ce.number(counts.get(d) ?? 0));
+        for (let d = 1n; d < base; d++)
+          list.push(ce.number(counts.get(d) ?? 0));
         list.push(ce.number(counts.get(0n) ?? 0));
         return ce.function('List', list);
       },
@@ -579,9 +580,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (k === 1n) return ce.number(-1).div(ce.number(2));
         if (k % 2n === 1n) return ce.number(0);
         const [num, den] = bernoulliNumber(Number(k), ce._deadline);
-        return den === 1n
-          ? ce.number(num)
-          : ce.number(num).div(ce.number(den));
+        return den === 1n ? ce.number(num) : ce.number(num).div(ce.number(den));
       },
     },
 
@@ -671,8 +670,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const a = toBigint(aOp);
         const p = toBigint(pOp);
         if (a === null || p === null) return undefined;
-        if (p <= 2n || p % 2n === 0n || !isPrimeBigint(p))
-          return undefined;
+        if (p <= 2n || p % 2n === 0n || !isPrimeBigint(p)) return undefined;
         return ce.number(jacobiSymbol(a, p));
       },
     },
@@ -1033,10 +1031,7 @@ function bigintSqrt(n: bigint): bigint {
  * non-negative solution modulo lcm(moduli), or `null` if inconsistent or a
  * modulus is not positive.
  */
-function chineseRemainder(
-  residues: bigint[],
-  moduli: bigint[]
-): bigint | null {
+function chineseRemainder(residues: bigint[], moduli: bigint[]): bigint | null {
   let x = 0n;
   let m = 1n; // current solution: x (mod m)
   for (let i = 0; i < residues.length; i++) {
@@ -1048,7 +1043,7 @@ function chineseRemainder(
     const lcmMN = (m / g) * ni;
     const mod2 = ni / g;
     const lambda = (((((ri - x) / g) * p) % mod2) + mod2) % mod2;
-    x = ((x + m * lambda) % lcmMN + lcmMN) % lcmMN;
+    x = (((x + m * lambda) % lcmMN) + lcmMN) % lcmMN;
     m = lcmMN;
   }
   return x;
@@ -1113,10 +1108,7 @@ function randomBigintBelow(n: bigint): bigint {
  * out ascending and the large ones descending, so reversing the latter yields
  * a single ascending list.
  */
-function divisorsAscending(
-  m: bigint,
-  deadline: number | undefined
-): bigint[] {
+function divisorsAscending(m: bigint, deadline: number | undefined): bigint[] {
   const small: bigint[] = [];
   const large: bigint[] = [];
   let steps = 0;
