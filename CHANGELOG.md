@@ -10,6 +10,20 @@
   `FactorInteger(1)` → `[(1, 1)]`, and a negative integer carries its sign in a
   leading `[-1, 1]` tuple (`FactorInteger(-12)` → `[(-1, 1), (2, 2), (3, 1)]`).
 
+- **`Divisors(n)` returns the sorted positive divisors of an integer.** For
+  example `Divisors(12)` → `[1, 2, 3, 4, 6, 12]`. The sign of `n` is ignored;
+  `Divisors(0)` is left unevaluated since 0 has infinitely many divisors.
+
+- **`NthPrime(n)` returns the nth prime number** (1-based): `NthPrime(1)` → 2,
+  `NthPrime(10)` → 29. (Mathematica names this `Prime`, but in the Compute
+  Engine `Prime` denotes derivative notation, so the prime-number function is
+  `NthPrime`.)
+
+- **`NextPrime(n)` returns the smallest prime greater than `n`** — e.g.
+  `NextPrime(10)` → 11. An optional second argument `k` returns the kth prime
+  after `n`, or the |k|th prime before `n` when `k < 0`: `NextPrime(10, 3)` →
+  17, `NextPrime(10, -1)` → 7.
+
 ## 0.63.0 _2026-06-26_
 
 ### New Features

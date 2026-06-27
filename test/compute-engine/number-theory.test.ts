@@ -98,3 +98,83 @@ describe('FactorInteger', () => {
     }
   });
 });
+
+const divisors = (n: number | bigint) =>
+  ce.expr(['Divisors', ce.number(n)]).evaluate().toString();
+
+describe('Divisors', () => {
+  test('returns the sorted positive divisors', () => {
+    expect(divisors(12)).toEqual('[1,2,3,4,6,12]');
+    expect(divisors(28)).toEqual('[1,2,4,7,14,28]');
+    expect(divisors(1)).toEqual('[1]');
+  });
+
+  test('a prime has exactly two divisors', () => {
+    expect(divisors(17)).toEqual('[1,17]');
+  });
+
+  test('a perfect square includes its middle divisor once', () => {
+    expect(divisors(16)).toEqual('[1,2,4,8,16]');
+    expect(divisors(36)).toEqual('[1,2,3,4,6,9,12,18,36]');
+  });
+
+  test('the sign of n is ignored', () => {
+    expect(divisors(-12)).toEqual('[1,2,3,4,6,12]');
+  });
+
+  test('0 is left unevaluated (infinitely many divisors)', () => {
+    expect(divisors(0)).toEqual('Divisors(0)');
+  });
+});
+
+const nthPrime = (n: number) =>
+  ce.expr(['NthPrime', ce.number(n)]).evaluate().toString();
+
+describe('NthPrime', () => {
+  test('returns the nth prime (1-based)', () => {
+    expect(nthPrime(1)).toEqual('2');
+    expect(nthPrime(2)).toEqual('3');
+    expect(nthPrime(10)).toEqual('29');
+    expect(nthPrime(100)).toEqual('541');
+    expect(nthPrime(1000)).toEqual('7919');
+  });
+
+  test('non-positive indices are left unevaluated', () => {
+    expect(nthPrime(0)).toEqual('NthPrime(0)');
+    expect(nthPrime(-3)).toEqual('NthPrime(-3)');
+  });
+});
+
+const nextPrime = (n: number, k?: number) =>
+  ce
+    .expr(k === undefined ? ['NextPrime', n] : ['NextPrime', n, k])
+    .evaluate()
+    .toString();
+
+describe('NextPrime', () => {
+  test('returns the smallest prime strictly greater than n', () => {
+    expect(nextPrime(10)).toEqual('11');
+    expect(nextPrime(11)).toEqual('13');
+    expect(nextPrime(2)).toEqual('3');
+    expect(nextPrime(1)).toEqual('2');
+  });
+
+  test('works for non-positive n (smallest prime is 2)', () => {
+    expect(nextPrime(-5)).toEqual('2');
+    expect(nextPrime(0)).toEqual('2');
+  });
+
+  test('a positive k gives the kth prime after n', () => {
+    expect(nextPrime(10, 1)).toEqual('11');
+    expect(nextPrime(10, 3)).toEqual('17');
+  });
+
+  test('a negative k gives the |k|th prime before n', () => {
+    expect(nextPrime(10, -1)).toEqual('7');
+    expect(nextPrime(100, -5)).toEqual('73');
+  });
+
+  test('no prime below 2 leaves a backward search unevaluated', () => {
+    expect(nextPrime(2, -1)).toEqual('NextPrime(2, -1)');
+  });
+});

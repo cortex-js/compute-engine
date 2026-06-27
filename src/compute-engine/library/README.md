@@ -19,12 +19,14 @@
 
 ### Prime Numbers:
 
-- Prime: gives the nth prime number
-- NextPrime: the smallest prime larger than `n`
+- NthPrime: gives the nth prime number (the name `Prime` is reserved for
+  derivative notation)
+- NextPrime: the smallest prime larger than `n` (with an optional `k` for the
+  kth prime after `n`, or before it when `k < 0`)
 - FactorInteger: the prime factorization of `n` as a list of `[prime, exponent]`
   tuples
+- Divisors: the sorted list of positive divisors of `n`
 - PrimeFactors
-- Divisors
 
 ### Combinatorials
 

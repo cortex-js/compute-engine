@@ -48,6 +48,98 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Divisors: {
+      description:
+        'Return the sorted list of positive divisors of an integer `n`. The sign of `n` is ignored.',
+      signature: '(integer) -> list<integer>',
+      examples: ['Divisors(12)  // [1, 2, 3, 4, 6, 12]'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null) return undefined;
+        // 0 has infinitely many divisors; leave it unevaluated.
+        const m = k < 0n ? -k : k;
+        if (m === 0n) return undefined;
+
+        // Collect divisor pairs (i, m/i) by trial division up to √m: the small
+        // divisors come out ascending, the large ones descending, so reversing
+        // the latter yields a single ascending list.
+        const small: bigint[] = [];
+        const large: bigint[] = [];
+        let steps = 0;
+        for (let i = 1n; i * i <= m; i++) {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          if (m % i === 0n) {
+            small.push(i);
+            const j = m / i;
+            if (j !== i) large.push(j);
+          }
+        }
+        large.reverse();
+        return ce.function(
+          'List',
+          [...small, ...large].map((d) => ce.number(d))
+        );
+      },
+    },
+
+    NthPrime: {
+      description:
+        'Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, …',
+      signature: '(integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['NthPrime(10)  // 29'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null || k < 1n) return undefined;
+        if (k === 1n) return ce.number(2);
+        // 2 is already counted; scan the odd candidates 3, 5, 7, … until the
+        // kth prime is reached.
+        let count = 1n;
+        let candidate = 1n;
+        let steps = 0;
+        while (count < k) {
+          candidate += 2n;
+          if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+          if (isPrimeTrial(candidate, ce._deadline)) count += 1n;
+        }
+        return ce.number(candidate);
+      },
+    },
+
+    NextPrime: {
+      description:
+        'Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`).',
+      signature: '(integer, integer?) -> integer',
+      type: () => 'finite_integer',
+      examples: ['NextPrime(10)  // 11', 'NextPrime(10, -1)  // 7'],
+      evaluate: ([n, kArg], { engine: ce }) => {
+        const start = toBigint(n);
+        if (start === null) return undefined;
+        const k = kArg === undefined ? 1n : toBigint(kArg);
+        if (k === null || k === 0n) return undefined;
+
+        let p = start;
+        let steps = 0;
+        if (k > 0n) {
+          for (let i = 0n; i < k; i++) {
+            do {
+              p += 1n;
+              if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+            } while (!isPrimeTrial(p, ce._deadline));
+          }
+        } else {
+          for (let i = 0n; i > k; i--) {
+            do {
+              p -= 1n;
+              if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+              if (p < 2n) return undefined; // no prime below 2
+            } while (!isPrimeTrial(p, ce._deadline));
+          }
+        }
+        return ce.number(p);
+      },
+    },
+
     Totient: {
       wikidata: 'Q190026',
       description:
@@ -311,6 +403,23 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+/**
+ * Deterministic primality test by 6k±1 trial division. Exact for every input,
+ * and adequate for the magnitudes reachable before the evaluation deadline
+ * fires (the loop is guarded by `checkDeadline`).
+ */
+function isPrimeTrial(n: bigint, deadline: number | undefined): boolean {
+  if (n < 2n) return false;
+  if (n < 4n) return true; // 2 and 3
+  if (n % 2n === 0n || n % 3n === 0n) return false;
+  let steps = 0;
+  for (let i = 5n; i * i <= n; i += 6n) {
+    if ((++steps & 0xfff) === 0) checkDeadline(deadline);
+    if (n % i === 0n || n % (i + 2n) === 0n) return false;
+  }
+  return true;
+}
 
 function sumSquareDigits(k: bigint): bigint {
   return k
