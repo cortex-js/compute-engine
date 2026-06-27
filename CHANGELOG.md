@@ -3,15 +3,15 @@
 ### New Features
 
 - **Expanded number-theory library.** A set of standard number-theoretic
-  functions has been added to the `number-theory` library. Integer arguments
-  use arbitrary-precision (bigint) arithmetic, and long-running cases honor the
+  functions has been added to the `number-theory` library. Integer arguments use
+  arbitrary-precision (bigint) arithmetic, and long-running cases honor the
   evaluation deadline.
 
   _Factorization & divisors:_
 
-  - **`FactorInteger(n)`** — prime factorization as a list of `[prime, exponent]`
-    tuples ordered by ascending prime: `FactorInteger(360)` →
-    `[(2, 3), (3, 2), (5, 1)]`. Following Mathematica's conventions,
+  - **`FactorInteger(n)`** — prime factorization as a list of
+    `[prime, exponent]` tuples ordered by ascending prime: `FactorInteger(360)`
+    → `[(2, 3), (3, 2), (5, 1)]`. Following Mathematica's conventions,
     `FactorInteger(0)` → `[(0, 1)]`, `FactorInteger(1)` → `[(1, 1)]`, and a
     negative integer carries its sign in a leading `[-1, 1]` tuple.
   - **`PrimeFactors(n)`** — the sorted distinct prime factors:
@@ -23,6 +23,8 @@
   - **`PrimeNu(n)`** / **`PrimeOmega(n)`** — the number of prime factors without
     / with multiplicity (ω and Ω).
   - **`MoebiusMu(n)`** — the Möbius function μ(n).
+  - **`DivisorSigma(k, n)`** — the divisor function σ_k(n) (generalizes the
+    existing `Sigma0`/`Sigma1`).
   - **`IsSquareFree(n)`** — whether `n` is square-free.
   - **`IsPerfectPower(n)`** — whether `n = a^b` for integers `a`, `b ≥ 2`.
 
@@ -32,9 +34,15 @@
     (Mathematica names this `Prime`, but in the Compute Engine `Prime` denotes
     derivative notation, so the prime-number function is `NthPrime`.)
   - **`NextPrime(n)`** / **`NextPrime(n, k)`** — the smallest prime greater than
-    `n`; with `k`, the kth prime after `n` (or the |k|th before it when `k < 0`).
+    `n`; with `k`, the kth prime after `n` (or the |k|th before it when
+    `k < 0`).
   - **`PrimePi(n)`** — the prime-counting function π(n): `PrimePi(10)` → 4.
-  - **`RandomPrime(n)`** / **`RandomPrime(m, n)`** — a random prime in the range.
+  - **`RandomPrime(n)`** / **`RandomPrime(m, n)`** — a random prime in the
+    range.
+
+    Primality for these uses exact 6k±1 trial division for small `n` and
+    switches to Miller–Rabin above 2³² (deterministic for the supported range),
+    so `NextPrime` and `RandomPrime` are fast even for very large arguments.
 
   _Modular arithmetic & GCD:_
 
@@ -43,6 +51,10 @@
   - **`ExtendedGCD(a, b)`** — the GCD with Bézout coefficients, as `(g, x, y)`.
   - **`ChineseRemainder(residues, moduli)`** — solves a system of simultaneous
     congruences (moduli need not be coprime).
+  - **`MultiplicativeOrder(a, n)`** — the order of `a` modulo `n`;
+    **`PrimitiveRoot(n)`** — the smallest primitive root mod `n`.
+  - **`JacobiSymbol(a, n)`** / **`LegendreSymbol(a, p)`** — the Jacobi and
+    Legendre symbols.
 
   _Other primitives:_
 
@@ -50,16 +62,15 @@
   - **`CarmichaelLambda(n)`** — the reduced totient λ(n).
   - **`LucasL(n)`** — the nth Lucas number; **`CatalanNumber(n)`** — the nth
     Catalan number.
-  - **`BernoulliB(n)`** — the nth Bernoulli number as an exact rational, with the
-    convention B₁ = -1/2.
+  - **`BernoulliB(n)`** — the nth Bernoulli number as an exact rational, with
+    the convention B₁ = -1/2.
   - **`ContinuedFraction(x, n?)`** / **`FromContinuedFraction(list)`** — the
     continued-fraction expansion of a number (exact for rationals) and its
     inverse.
-  - **`IntegerDigits(n, base?, length?)`** / **`DigitCount(n, base?, digit?)`** —
-    the digits of `n` in a given base, and digit-occurrence counts.
-
-  `PrimePi`, `BernoulliB`, and `Divisors` were previously uninterpreted Fungrim
-  shell heads; they are now evaluatable built-ins.
+  - **`IntegerDigits(n, base?, length?)`** / **`FromDigits(list, base?)`** — the
+    digits of `n` in a given base, and its inverse.
+    **`DigitCount(n, base?, digit?)`** — digit-occurrence counts;
+    **`DigitSum(n, base?)`** — the digit sum.
 
 - **`N(expr, precision)` evaluates to a requested number of significant
   digits.** The `N` function (and the `["N", expr]` MathJSON form) now accepts

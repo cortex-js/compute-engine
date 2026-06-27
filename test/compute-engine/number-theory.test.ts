@@ -441,3 +441,126 @@ describe('RandomPrime', () => {
     ).toEqual('RandomPrime');
   });
 });
+
+describe('large primes use the Miller-Rabin path (n ≥ 2^32)', () => {
+  const bn = (e: any[]) => BigInt(ce.box(e).evaluate().toString());
+  test('NextPrime of large values is exact', () => {
+    expect(bn(['NextPrime', ce.number(10n ** 12n)])).toEqual(1000000000039n);
+    expect(bn(['NextPrime', ce.number(10n ** 20n)])).toEqual(
+      100000000000000000039n
+    );
+  });
+  test('a large Mersenne prime is recognized', () => {
+    // 2^61 - 1 is prime; NextPrime(2^61 - 2) must return it.
+    const m61 = 2n ** 61n - 1n;
+    expect(bn(['NextPrime', ce.number(m61 - 1n)])).toEqual(m61);
+  });
+  test('RandomPrime in a large window returns a prime in range', () => {
+    const lo = 10n ** 18n;
+    const hi = lo + 100000n;
+    const p = bn(['RandomPrime', ce.number(lo), ce.number(hi)]);
+    expect(p).toBeGreaterThanOrEqual(lo);
+    expect(p).toBeLessThanOrEqual(hi);
+    // `p` is prime iff the next prime at or above `p` is `p` itself.
+    expect(bn(['NextPrime', ce.number(p - 1n)])).toEqual(p);
+  });
+});
+
+describe('FromDigits', () => {
+  test('reconstructs an integer from its digits', () => {
+    expect(evalStr(['FromDigits', ['List', 1, 2, 3, 4]])).toEqual('1234');
+    expect(evalStr(['FromDigits', ['List', 15, 15], 16])).toEqual('255');
+    expect(evalStr(['FromDigits', ['List', 1, 0, 1], 2])).toEqual('5');
+  });
+  test('round-trips with IntegerDigits', () => {
+    const d = ce.box(['IntegerDigits', 987654321, 7]).evaluate();
+    expect(ce.box(['FromDigits', d, 7]).evaluate().toString()).toEqual(
+      '987654321'
+    );
+  });
+});
+
+describe('DigitSum', () => {
+  test('sum of digits in a base; sign ignored', () => {
+    expect(evalStr(['DigitSum', 1234])).toEqual('10');
+    expect(evalStr(['DigitSum', 255, 16])).toEqual('30'); // FF → 15+15
+    expect(evalStr(['DigitSum', -9999])).toEqual('36');
+  });
+});
+
+describe('DivisorSigma', () => {
+  test('σ_0 and σ_1 agree with Sigma0/Sigma1', () => {
+    expect(evalStr(['DivisorSigma', 0, 6])).toEqual('4');
+    expect(evalStr(['DivisorSigma', 1, 6])).toEqual('12');
+    expect(evalStr(['DivisorSigma', 1, 28])).toEqual('56'); // perfect: 2·28
+  });
+  test('higher powers', () => {
+    expect(evalStr(['DivisorSigma', 2, 6])).toEqual('50'); // 1+4+9+36
+    expect(evalStr(['DivisorSigma', 2, 10])).toEqual('130'); // 1+4+25+100
+    expect(evalStr(['DivisorSigma', 0, 1])).toEqual('1');
+  });
+});
+
+describe('JacobiSymbol', () => {
+  test('values', () => {
+    expect(evalStr(['JacobiSymbol', 5, 21])).toEqual('1');
+    expect(evalStr(['JacobiSymbol', 1001, 9907])).toEqual('-1');
+    expect(evalStr(['JacobiSymbol', 3, 9])).toEqual('0'); // gcd > 1
+  });
+  test('even or non-positive n is unevaluated', () => {
+    expect(ce.box(['JacobiSymbol', 4, 8]).evaluate().operator).toEqual(
+      'JacobiSymbol'
+    );
+  });
+});
+
+describe('LegendreSymbol', () => {
+  test('quadratic residue / non-residue', () => {
+    expect(evalStr(['LegendreSymbol', 2, 7])).toEqual('1'); // 3^2 ≡ 2
+    expect(evalStr(['LegendreSymbol', 3, 7])).toEqual('-1');
+  });
+  test('non-prime modulus is unevaluated', () => {
+    expect(ce.box(['LegendreSymbol', 2, 9]).evaluate().operator).toEqual(
+      'LegendreSymbol'
+    );
+  });
+});
+
+describe('MultiplicativeOrder', () => {
+  test('order modulo n', () => {
+    expect(evalStr(['MultiplicativeOrder', 2, 7])).toEqual('3');
+    expect(evalStr(['MultiplicativeOrder', 3, 7])).toEqual('6');
+    expect(evalStr(['MultiplicativeOrder', 2, 9])).toEqual('6');
+  });
+  test('undefined when a and n are not coprime', () => {
+    expect(ce.box(['MultiplicativeOrder', 6, 9]).evaluate().operator).toEqual(
+      'MultiplicativeOrder'
+    );
+  });
+});
+
+describe('PrimitiveRoot', () => {
+  test('smallest primitive root when one exists', () => {
+    expect(evalStr(['PrimitiveRoot', 7])).toEqual('3');
+    expect(evalStr(['PrimitiveRoot', 9])).toEqual('2');
+    expect(evalStr(['PrimitiveRoot', 14])).toEqual('3');
+    expect(evalStr(['PrimitiveRoot', 4])).toEqual('3');
+  });
+  test('a returned root generates the full group', () => {
+    // ord_n(g) must equal φ(n).
+    const g = Number(ce.box(['PrimitiveRoot', 18]).evaluate().re);
+    const ord = Number(
+      ce.box(['MultiplicativeOrder', g, 18]).evaluate().re
+    );
+    const phi = Number(ce.box(['Totient', 18]).evaluate().re);
+    expect(ord).toEqual(phi);
+  });
+  test('undefined when no primitive root exists', () => {
+    expect(ce.box(['PrimitiveRoot', 8]).evaluate().operator).toEqual(
+      'PrimitiveRoot'
+    );
+    expect(ce.box(['PrimitiveRoot', 15]).evaluate().operator).toEqual(
+      'PrimitiveRoot'
+    );
+  });
+});

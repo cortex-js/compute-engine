@@ -19,11 +19,12 @@
 Primes:
 
 - NthPrime: gives the nth prime number (the name `Prime` is reserved for
-  derivative notation)
+  derivative notation; `PrimeNumber` is an alias for `NthPrime`)
 - NextPrime: the smallest prime larger than `n` (with an optional `k` for the
   kth prime after `n`, or before it when `k < 0`)
 - PrimePi: the prime-counting function π(n)
 - RandomPrime: a random prime in a range
+  (primality: trial division for small `n`, Miller–Rabin above 2³²)
 
 Factorization & divisors:
 
@@ -31,6 +32,7 @@ Factorization & divisors:
   tuples
 - PrimeFactors: the sorted distinct prime factors of `n`
 - Divisors: the sorted list of positive divisors of `n`
+- DivisorSigma: the divisor function σ_k(n) (generalizes Sigma0/Sigma1)
 - Radical: the square-free kernel (product of distinct primes)
 - PrimeNu / PrimeOmega: count of prime factors without / with multiplicity
 - MoebiusMu: the Möbius function μ(n)
@@ -41,12 +43,14 @@ Modular arithmetic & GCD:
 - PowerMod: modular exponentiation (negative exponent → modular inverse)
 - ExtendedGCD: GCD with Bézout coefficients
 - ChineseRemainder: solve simultaneous congruences
+- MultiplicativeOrder, PrimitiveRoot
+- JacobiSymbol, LegendreSymbol
 
 Other primitives:
 
 - IntegerSqrt, CarmichaelLambda, LucasL, CatalanNumber, BernoulliB
 - ContinuedFraction / FromContinuedFraction
-- IntegerDigits / DigitCount
+- IntegerDigits / FromDigits, DigitCount, DigitSum
 
 ### Combinatorials
 

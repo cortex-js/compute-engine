@@ -59,25 +59,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         // 0 has infinitely many divisors; leave it unevaluated.
         const m = k < 0n ? -k : k;
         if (m === 0n) return undefined;
-
-        // Collect divisor pairs (i, m/i) by trial division up to √m: the small
-        // divisors come out ascending, the large ones descending, so reversing
-        // the latter yields a single ascending list.
-        const small: bigint[] = [];
-        const large: bigint[] = [];
-        let steps = 0;
-        for (let i = 1n; i * i <= m; i++) {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
-          if (m % i === 0n) {
-            small.push(i);
-            const j = m / i;
-            if (j !== i) large.push(j);
-          }
-        }
-        large.reverse();
         return ce.function(
           'List',
-          [...small, ...large].map((d) => ce.number(d))
+          divisorsAscending(m, ce._deadline).map((d) => ce.number(d))
         );
       },
     },
@@ -100,7 +84,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         while (count < k) {
           candidate += 2n;
           if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
-          if (isPrimeTrial(candidate, ce._deadline)) count += 1n;
+          if (isPrimeFast(candidate, ce._deadline)) count += 1n;
         }
         return ce.number(candidate);
       },
@@ -125,7 +109,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
             do {
               p += 1n;
               if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
-            } while (!isPrimeTrial(p, ce._deadline));
+            } while (!isPrimeFast(p, ce._deadline));
           }
         } else {
           for (let i = 0n; i > k; i--) {
@@ -133,7 +117,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
               p -= 1n;
               if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
               if (p < 2n) return undefined; // no prime below 2
-            } while (!isPrimeTrial(p, ce._deadline));
+            } while (!isPrimeFast(p, ce._deadline));
           }
         }
         return ce.number(p);
@@ -328,16 +312,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1n) return undefined;
-        if (k === 1n) return ce.number(1);
-        let result = 1n;
-        for (const [p, e] of bigPrimeFactors(k)) {
-          let lambda: bigint;
-          if (p === 2n)
-            lambda = e === 1 ? 1n : e === 2 ? 2n : 1n << BigInt(e - 2);
-          else lambda = p ** BigInt(e - 1) * (p - 1n);
-          result = lcm(result, lambda);
-        }
-        return ce.number(result);
+        return ce.number(carmichaelLambda(k));
       },
     },
 
@@ -558,13 +533,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const attempts = 100 + 20 * hi.toString().length;
         for (let i = 0; i < attempts; i++) {
           const r = lo + randomBigintBelow(range);
-          if (isPrimeTrial(r, ce._deadline)) return ce.number(r);
+          if (isPrimeFast(r, ce._deadline)) return ce.number(r);
         }
         // Safety net: a deterministic scan guarantees a result when the range
         // does contain a prime (only reached when sampling keeps missing).
         for (let p = lo; p <= hi; p++) {
           checkDeadline(ce._deadline);
-          if (isPrimeTrial(p, ce._deadline)) return ce.number(p);
+          if (isPrimeFast(p, ce._deadline)) return ce.number(p);
         }
         return undefined;
       },
@@ -585,7 +560,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         let steps = 0;
         for (let k = 3n; k <= bound; k += 2n) {
           if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
-          if (isPrimeTrial(k, ce._deadline)) count++;
+          if (isPrimeFast(k, ce._deadline)) count++;
         }
         return ce.number(count);
       },
@@ -608,6 +583,152 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           ? ce.number(num)
           : ce.number(num).div(ce.number(den));
       },
+    },
+
+    FromDigits: {
+      description:
+        'Reconstruct an integer from its list of digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally (Horner evaluation).',
+      signature: '(collection, integer?) -> integer',
+      type: () => 'finite_integer',
+      examples: ['FromDigits([1, 2, 3, 4])  // 1234'],
+      evaluate: ([digitsOp, baseOp], { engine: ce }) => {
+        const digits = Array.from(digitsOp?.each() ?? []).map(toBigint);
+        if (digits.length === 0 || digits.includes(null)) return undefined;
+        const base = baseOp === undefined ? 10n : toBigint(baseOp);
+        if (base === null || base < 2n) return undefined;
+        let result = 0n;
+        for (const d of digits) result = result * base + d!;
+        return ce.number(result);
+      },
+    },
+
+    DigitSum: {
+      description:
+        'Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored.',
+      signature: '(integer, integer?) -> integer',
+      type: () => 'finite_integer',
+      examples: ['DigitSum(1234)  // 10'],
+      evaluate: ([nOp, baseOp], { engine: ce }) => {
+        const k = toBigint(nOp);
+        if (k === null) return undefined;
+        const base = baseOp === undefined ? 10n : toBigint(baseOp);
+        if (base === null || base < 2n) return undefined;
+        let m = k < 0n ? -k : k;
+        let sum = 0n;
+        while (m > 0n) {
+          sum += m % base;
+          m /= base;
+        }
+        return ce.number(sum);
+      },
+    },
+
+    DivisorSigma: {
+      description:
+        'The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. Defined for `n ≥ 1`.',
+      signature: '(integer, integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['DivisorSigma(2, 6)  // 50'],
+      evaluate: ([kOp, nOp], { engine: ce }) => {
+        const k = toBigint(kOp);
+        const n = toBigint(nOp);
+        if (k === null || n === null || k < 0n || n < 1n) return undefined;
+        if (n === 1n) return ce.number(1);
+        let result = 1n;
+        for (const [p, e] of bigPrimeFactors(n)) {
+          if (k === 0n) result *= BigInt(e + 1);
+          else {
+            const pk = p ** k;
+            result *= (pk ** BigInt(e + 1) - 1n) / (pk - 1n);
+          }
+        }
+        return ce.number(result);
+      },
+    },
+
+    JacobiSymbol: {
+      description:
+        'The Jacobi symbol (a/n) for an odd `n > 0`. Returns -1, 0, or 1. Undefined when `n` is even or non-positive.',
+      signature: '(integer, integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['JacobiSymbol(5, 21)  // 1'],
+      evaluate: ([aOp, nOp], { engine: ce }) => {
+        const a = toBigint(aOp);
+        const n = toBigint(nOp);
+        if (a === null || n === null) return undefined;
+        if (n <= 0n || n % 2n === 0n) return undefined;
+        return ce.number(jacobiSymbol(a, n));
+      },
+    },
+
+    LegendreSymbol: {
+      description:
+        'The Legendre symbol (a/p) for an odd prime `p`. Returns -1, 0, or 1. Undefined when `p` is not an odd prime.',
+      signature: '(integer, integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['LegendreSymbol(3, 7)  // -1'],
+      evaluate: ([aOp, pOp], { engine: ce }) => {
+        const a = toBigint(aOp);
+        const p = toBigint(pOp);
+        if (a === null || p === null) return undefined;
+        if (p <= 2n || p % 2n === 0n || !isPrimeFast(p, ce._deadline))
+          return undefined;
+        return ce.number(jacobiSymbol(a, p));
+      },
+    },
+
+    MultiplicativeOrder: {
+      description:
+        'The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime.',
+      signature: '(integer, integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['MultiplicativeOrder(2, 7)  // 3'],
+      evaluate: ([aOp, nOp], { engine: ce }) => {
+        const a0 = toBigint(aOp);
+        const n = toBigint(nOp);
+        if (a0 === null || n === null || n < 1n) return undefined;
+        if (n === 1n) return ce.number(1);
+        const a = ((a0 % n) + n) % n;
+        if (gcd(a, n) !== 1n) return undefined;
+        // The order divides λ(n); the smallest such divisor is the order.
+        for (const d of divisorsAscending(carmichaelLambda(n), ce._deadline)) {
+          checkDeadline(ce._deadline);
+          if (modPow(a, d, n) === 1n) return ce.number(d);
+        }
+        return undefined;
+      },
+    },
+
+    PrimitiveRoot: {
+      description:
+        'The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p).',
+      signature: '(integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['PrimitiveRoot(7)  // 3'],
+      evaluate: ([nOp], { engine: ce }) => {
+        const n = toBigint(nOp);
+        if (n === null || n < 1n) return undefined;
+        if (n === 1n) return ce.number(0);
+        if (n === 2n) return ce.number(1);
+        if (n === 4n) return ce.number(3);
+        if (!hasPrimitiveRoot(n)) return undefined;
+        const phi = eulerPhi(n);
+        const phiFactors = [...bigPrimeFactors(phi).keys()];
+        for (let a = 2n; a < n; a++) {
+          checkDeadline(ce._deadline);
+          if (gcd(a, n) !== 1n) continue;
+          if (phiFactors.every((q) => modPow(a, phi / q, n) !== 1n))
+            return ce.number(a);
+        }
+        return undefined;
+      },
+    },
+
+    PrimeNumber: {
+      description:
+        'The nth prime number. `PrimeNumber` is an alias for `NthPrime`, which is the preferred name.',
+      signature: '(integer) -> integer',
+      canonical: ([n], { engine }) => engine._fn('NthPrime', [n]),
     },
 
     Totient: {
@@ -874,6 +995,47 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
   },
 ];
 
+// Above this bound, primality switches from O(√n) trial division to
+// Miller–Rabin.
+const MILLER_RABIN_THRESHOLD = 1n << 32n;
+
+// The first 12 primes are a deterministic Miller–Rabin witness set for every
+// n < 3.3·10²⁴ — far beyond the threshold — so `isPrimeFast` stays exact
+// across the practical range.
+const MILLER_RABIN_BASES = [
+  2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n,
+];
+
+/**
+ * Primality test: exact 6k±1 trial division below `MILLER_RABIN_THRESHOLD`,
+ * Miller–Rabin above it (see `MILLER_RABIN_BASES` for the determinism range).
+ */
+function isPrimeFast(n: bigint, deadline: number | undefined): boolean {
+  if (n < MILLER_RABIN_THRESHOLD) return isPrimeTrial(n, deadline);
+  return millerRabin(n, deadline);
+}
+
+function millerRabin(n: bigint, deadline: number | undefined): boolean {
+  for (const p of MILLER_RABIN_BASES) if (n % p === 0n) return n === p;
+  let d = n - 1n;
+  let s = 0n;
+  while (d % 2n === 0n) {
+    d /= 2n;
+    s += 1n;
+  }
+  WitnessLoop: for (const a of MILLER_RABIN_BASES) {
+    checkDeadline(deadline);
+    let x = modPow(a, d, n);
+    if (x === 1n || x === n - 1n) continue;
+    for (let r = 1n; r < s; r++) {
+      x = (x * x) % n;
+      if (x === n - 1n) continue WitnessLoop;
+    }
+    return false;
+  }
+  return true;
+}
+
 /**
  * Deterministic primality test by 6k±1 trial division. Exact for every input,
  * and adequate for the magnitudes reachable before the evaluation deadline
@@ -1014,6 +1176,91 @@ function randomBigintBelow(n: bigint): bigint {
     r &= (1n << BigInt(bits)) - 1n;
   } while (r >= n);
   return r;
+}
+
+/**
+ * The sorted ascending list of positive divisors of `m ≥ 1`. Divisor pairs
+ * `(i, m/i)` are collected by trial division up to √m: the small divisors come
+ * out ascending and the large ones descending, so reversing the latter yields
+ * a single ascending list.
+ */
+function divisorsAscending(
+  m: bigint,
+  deadline: number | undefined
+): bigint[] {
+  const small: bigint[] = [];
+  const large: bigint[] = [];
+  let steps = 0;
+  for (let i = 1n; i * i <= m; i++) {
+    if ((++steps & 0xfff) === 0) checkDeadline(deadline);
+    if (m % i === 0n) {
+      small.push(i);
+      const j = m / i;
+      if (j !== i) large.push(j);
+    }
+  }
+  large.reverse();
+  return [...small, ...large];
+}
+
+/** Euler's totient φ(n) computed from the prime factorization (`n ≥ 1`). */
+function eulerPhi(n: bigint): bigint {
+  if (n <= 1n) return 1n;
+  let result = n;
+  for (const p of bigPrimeFactors(n).keys()) result = (result / p) * (p - 1n);
+  return result;
+}
+
+/** Carmichael's reduced totient λ(n) from the prime factorization (`n ≥ 1`). */
+function carmichaelLambda(n: bigint): bigint {
+  if (n <= 1n) return 1n;
+  let result = 1n;
+  for (const [p, e] of bigPrimeFactors(n)) {
+    const lambda =
+      p === 2n
+        ? e === 1
+          ? 1n
+          : e === 2
+            ? 2n
+            : 1n << BigInt(e - 2)
+        : p ** BigInt(e - 1) * (p - 1n);
+    result = lcm(result, lambda);
+  }
+  return result;
+}
+
+/** The Jacobi symbol (a/n) for odd `n > 0`; returns -1, 0, or 1. */
+function jacobiSymbol(a: bigint, n: bigint): number {
+  a = ((a % n) + n) % n;
+  let result = 1;
+  while (a !== 0n) {
+    while (a % 2n === 0n) {
+      a /= 2n;
+      const r = n % 8n;
+      if (r === 3n || r === 5n) result = -result;
+    }
+    [a, n] = [n, a];
+    if (a % 4n === 3n && n % 4n === 3n) result = -result;
+    a %= n;
+  }
+  return n === 1n ? result : 0;
+}
+
+/**
+ * Does a primitive root modulo `n` exist? True iff `n` is 1, 2, 4, pᵏ, or 2pᵏ
+ * for an odd prime p (callers handle the small cases 1, 2, 4 directly).
+ */
+function hasPrimitiveRoot(n: bigint): boolean {
+  if (n === 1n || n === 2n || n === 4n) return true;
+  let m = n;
+  let twos = 0;
+  while (m % 2n === 0n) {
+    m /= 2n;
+    twos++;
+  }
+  if (twos > 1) return false; // divisible by 4 (and > 4)
+  if (m === 1n) return false; // a pure power of two > 4
+  return bigPrimeFactors(m).size === 1; // odd part is a single prime power
 }
 
 /** Reduce a fraction to lowest terms with a positive denominator. */

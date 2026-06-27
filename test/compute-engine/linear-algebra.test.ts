@@ -1946,3 +1946,66 @@ describe('MatrixPower', () => {
     ).toBe(false);
   });
 });
+
+describe('CharacteristicPolynomial', () => {
+  const m: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];
+
+  it('computes the monic characteristic polynomial', () => {
+    expect(
+      ce.expr(['CharacteristicPolynomial', m]).evaluate().isSame(ce.parse('x^2-5x-2'))
+    ).toBe(true);
+  });
+
+  it('is monic for a 3×3 diagonal matrix (roots are the diagonal)', () => {
+    const diag3: Expression = [
+      'List',
+      ['List', 1, 0, 0],
+      ['List', 0, 2, 0],
+      ['List', 0, 0, 3],
+    ];
+    expect(
+      ce
+        .expr(['CharacteristicPolynomial', diag3])
+        .evaluate()
+        .isSame(ce.parse('x^3-6x^2+11x-6'))
+    ).toBe(true);
+  });
+
+  it('accepts a custom variable', () => {
+    expect(
+      ce.expr(['CharacteristicPolynomial', m, 't']).evaluate().toString()
+    ).toBe('t^2 - 5t - 2');
+  });
+
+  it('errors on a non-square matrix', () => {
+    expect(
+      ce
+        .expr(['CharacteristicPolynomial', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]])
+        .evaluate().isValid
+    ).toBe(false);
+  });
+});
+
+describe('RowReduce', () => {
+  it('reduces a full-rank matrix to the identity', () => {
+    expect(
+      ce.expr(['RowReduce', ['List', ['List', 1, 2], ['List', 3, 4]]]).evaluate().toString()
+    ).toBe('[[1,0],[0,1]]');
+  });
+
+  it('reduces a rank-deficient matrix', () => {
+    expect(
+      ce.expr(['RowReduce', ['List', ['List', 1, 2], ['List', 2, 4]]]).evaluate().toString()
+    ).toBe('[[1,2],[0,0]]');
+  });
+
+  it('reduces a non-square matrix', () => {
+    expect(
+      ce.expr(['RowReduce', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]]).evaluate().toString()
+    ).toBe('[[1,0,-1],[0,1,2]]');
+  });
+
+  it('errors on a vector', () => {
+    expect(ce.expr(['RowReduce', ['List', 1, 2, 3]]).evaluate().isValid).toBe(false);
+  });
+});
