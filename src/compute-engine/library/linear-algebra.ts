@@ -777,6 +777,63 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    CharacteristicPolynomial: {
+      description:
+        'Characteristic polynomial det(x·I − A) of a square matrix (monic).',
+      complexity: 8700,
+      // The variable is accepted as `any` (not `symbol`): an undeclared symbol
+      // is inferred to have a numeric type, which would fail a `symbol`
+      // signature check. The evaluate handler validates it with `isSymbol`.
+      signature: '(matrix, any?) -> expression',
+      evaluate: ([mat, variable], { engine: ce }) => {
+        const A = mat.evaluate();
+        if (!isTensor(A)) return undefined;
+        if (!A.tensor.isSquare)
+          return ce.error('expected-square-matrix', A.toString());
+
+        const x = variable && isSymbol(variable) ? variable : ce.symbol('x');
+        const n = A.shape[0];
+
+        // Build x·I − A symbolically, then take its determinant (which already
+        // returns an expanded polynomial for symbolic entries).
+        const rows: Expression[] = [];
+        for (let i = 0; i < n; i++) {
+          const row: Expression[] = [];
+          for (let j = 0; j < n; j++) {
+            const entry = ce.expr(A.tensor.at(i + 1, j + 1) ?? ce.Zero);
+            row.push(i === j ? x.sub(entry) : entry.neg());
+          }
+          rows.push(ce.function('List', row));
+        }
+        return ce.function('Determinant', [ce.function('List', rows)]).evaluate();
+      },
+    },
+
+    RowReduce: {
+      description: 'Reduced row echelon form (RREF) of a matrix.',
+      complexity: 8200,
+      signature: '(matrix) -> matrix',
+      evaluate: ([m], { engine: ce }) => {
+        const op = m.evaluate();
+        if (!isTensor(op)) return undefined;
+
+        const shape = op.shape;
+        if (shape.length !== 2)
+          return ce.error('expected-matrix', op.toString());
+
+        const matrix = tensorToNumericMatrix(op, shape[0], shape[1]);
+        if (!matrix) return undefined;
+
+        const { matrix: reduced } = rref(matrix);
+        return ce.expr([
+          'List',
+          ...reduced.map((row) =>
+            ce.expr(['List', ...row.map((value) => ce.number(ce.chop(value)))])
+          ),
+        ]);
+      },
+    },
+
     // Diagonal can be used to:
     // 1. Create a diagonal matrix from a vector
     // 2. Extract the diagonal from a matrix as a vector

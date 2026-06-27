@@ -79,6 +79,9 @@
   - **`MatrixPower(m, n)`** — a square matrix raised to an integer power (the
     repeated matrix product `A·A·…`, with negative powers using the inverse).
     Distinct from `["Power", m, n]`, which threads element-wise.
+  - **`CharacteristicPolynomial(m, x?)`** — the monic characteristic polynomial
+    `det(x·I − A)` (variable defaults to `x`): `[[1,2],[3,4]]` → `x² − 5x − 2`.
+  - **`RowReduce(m)`** — the reduced row echelon form (RREF) of a matrix.
   - **`IsSymmetric(m)`** / **`IsDiagonal(m)`** / **`IsSquareMatrix(m)`** —
     matrix-shape predicates returning `True`/`False`.
 
