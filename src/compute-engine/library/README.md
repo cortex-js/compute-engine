@@ -21,6 +21,8 @@
 
 - Prime: gives the nth prime number
 - NextPrime: the smallest prime larger than `n`
+- FactorInteger: the prime factorization of `n` as a list of `[prime, exponent]`
+  tuples
 - PrimeFactors
 - Divisors
 

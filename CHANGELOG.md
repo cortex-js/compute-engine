@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### New Features
+
+- **`FactorInteger(n)` returns the prime factorization of an integer.** The
+  result is a list of `[prime, exponent]` tuples ordered by ascending prime —
+  e.g. `FactorInteger(360)` → `[(2, 3), (3, 2), (5, 1)]`. Large values use the
+  arbitrary-precision (bigint) factorization path. Following Mathematica's
+  conventions, the degenerate inputs return `FactorInteger(0)` → `[(0, 1)]`,
+  `FactorInteger(1)` → `[(1, 1)]`, and a negative integer carries its sign in a
+  leading `[-1, 1]` tuple (`FactorInteger(-12)` → `[(-1, 1), (2, 2), (3, 1)]`).
+
 ## 0.63.0 _2026-06-26_
 
 ### New Features
@@ -7,8 +19,8 @@
   character range identifying where in the input the error occurred, so a
   consumer can map a parse error back to the offending span — e.g. to highlight
   an invalid token in a mathfield. Offsets are zero-based and end-exclusive into
-  the serialized LaTeX (`tokensToString`); for input that round-trips through the
-  tokenizer unchanged — editor-generated LaTeX, with no comments, Unicode
+  the serialized LaTeX (`tokensToString`); for input that round-trips through
+  the tokenizer unchanged — editor-generated LaTeX, with no comments, Unicode
   normalization, or macro expansion — they match the original input string.
   Missing-operand errors (an empty `\sqrt{}` or `\frac{}{}`) use a zero-width
   range at the position where the token was expected. The new
@@ -52,26 +64,27 @@
   bracket form accepts a string key, so `\mathrm{data}["height"]` (or
   `\mathrm{data}[\text{height}]`) parses to `["At", "data", "height"]`.
   Dot-notation also works when the base is a symbol declared as a dictionary:
-  `\mathrm{data}.height` → `["At", "data", "height"]` (the key is an
-  alphabetic, space-free name; for a dictionary base, `.x` / `.real` are key
-  lookups, not `First` / `Real` component access). Positional indexing of
-  indexed collections is unchanged.
+  `\mathrm{data}.height` → `["At", "data", "height"]` (the key is an alphabetic,
+  space-free name; for a dictionary base, `.x` / `.real` are key lookups, not
+  `First` / `Real` component access). Positional indexing of indexed collections
+  is unchanged.
 
-- **`BoxedExpression.referencedFunctions` and `BoxedExpression.references`.** Two
-  accessors aimed at dependency graphs (e.g. notebooks). The operator head of a
-  function application — the `f` in `f(x)` or `g(x) := f(x) + 1` — is not a symbol
-  of the expression, so it appears in neither `symbols` nor `freeVariables`;
-  `referencedFunctions` recovers those applied user-function names (excluding
-  built-in operators, constants, and names bound by an enclosing scope, using the
-  same predicate `freeVariables` applies to ordinary symbols). `references` is the
-  complete in-edge set — `freeVariables` ∪ `referencedFunctions`, minus
-  `defines` — so it pairs with `defines` (the out-edges) to build a use/def graph
-  in one call. Subtracting `defines` drops self-references, so a recursive
-  `g(x) := g(x - 1)` reports no dependency on itself.
+- **`BoxedExpression.referencedFunctions` and `BoxedExpression.references`.**
+  Two accessors aimed at dependency graphs (e.g. notebooks). The operator head
+  of a function application — the `f` in `f(x)` or `g(x) := f(x) + 1` — is not a
+  symbol of the expression, so it appears in neither `symbols` nor
+  `freeVariables`; `referencedFunctions` recovers those applied user-function
+  names (excluding built-in operators, constants, and names bound by an
+  enclosing scope, using the same predicate `freeVariables` applies to ordinary
+  symbols). `references` is the complete in-edge set — `freeVariables` ∪
+  `referencedFunctions`, minus `defines` — so it pairs with `defines` (the
+  out-edges) to build a use/def graph in one call. Subtracting `defines` drops
+  self-references, so a recursive `g(x) := g(x - 1)` reports no dependency on
+  itself.
 
-- **`ce.declare()` refines an auto-declared binding instead of throwing.** Parsing
-  auto-declares the names it encounters (a free variable `a` in `a + 1`, a called
-  function `f` in `f(x)`), recording an _inferred_ binding. Calling
+- **`ce.declare()` refines an auto-declared binding instead of throwing.**
+  Parsing auto-declares the names it encounters (a free variable `a` in `a + 1`,
+  a called function `f` in `f(x)`), recording an _inferred_ binding. Calling
   `ce.declare(name, …)` for such a name now refines that inferred binding rather
   than throwing `"… already declared in this scope"` — which is exactly what the
   `inferred` flag is for. This lets a declare-first workflow parse cells to
@@ -86,10 +99,11 @@
   deciding how to box their result, so the documented `canonical` / `structural`
   shortcuts were silently ignored: `ce.parse(latex, { canonical: false })`
   returned a _canonical_ expression (and, as a side effect of canonicalization,
-  auto-declared its symbols), and `ce.function('Power', ops, { structural: true })`
-  returned canonical `Root` instead of a structural `Power`. The keys now resolve
-  the same way `form` does, with an explicit `form` taking precedence. As part of
-  this, `ce.assume()` now canonicalizes its predicate so the assumption machinery
+  auto-declared its symbols), and
+  `ce.function('Power', ops, { structural: true })` returned canonical `Root`
+  instead of a structural `Power`. The keys now resolve the same way `form`
+  does, with an explicit `form` taking precedence. As part of this,
+  `ce.assume()` now canonicalizes its predicate so the assumption machinery
   always sees a normalized form (e.g. `Negate(ImaginaryUnit)` folded to the
   complex literal `-i`) regardless of how the caller boxed it.
 

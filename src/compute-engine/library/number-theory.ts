@@ -1,10 +1,53 @@
-import type { SymbolDefinitions } from '../global-types';
+import type { Expression, SymbolDefinitions } from '../global-types';
 import { toBigint } from '../boxed-expression/numerics';
 import { gcd } from '../numerics/numeric-bigint';
+import { bigPrimeFactors } from '../numerics/primes';
 import { checkDeadline } from '../../common/interruptible';
 
 export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
   {
+    FactorInteger: {
+      description:
+        'Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign.',
+      signature: '(integer) -> list<tuple<integer, integer>>',
+      examples: ['FactorInteger(360)  // [(2, 3), (3, 2), (5, 1)]'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null) return undefined;
+
+        const tuple = (prime: bigint, exponent: number) =>
+          ce._fn('Tuple', [ce.number(prime), ce.number(exponent)]);
+
+        // Match Mathematica's conventions for the degenerate inputs:
+        //   FactorInteger(0)  -> [(0, 1)]
+        //   FactorInteger(1)  -> [(1, 1)]
+        //   FactorInteger(-1) -> [(-1, 1)]
+        if (k === 0n) return ce.function('List', [tuple(0n, 1)]);
+        if (k === 1n) return ce.function('List', [tuple(1n, 1)]);
+
+        const result: Expression[] = [];
+        let m = k;
+        if (m < 0n) {
+          result.push(tuple(-1n, 1));
+          m = -m;
+        }
+
+        // `m` is now >= 1; when it is 1 (i.e. k === -1) there are no prime
+        // factors and only the leading `[-1, 1]` tuple remains.
+        if (m > 1n) {
+          const factors = bigPrimeFactors(m);
+          // Sort by ascending prime so the result is canonical regardless of
+          // the order in which the factors were discovered.
+          const primes = [...factors.keys()].sort((a, b) =>
+            a < b ? -1 : a > b ? 1 : 0
+          );
+          for (const p of primes) result.push(tuple(p, factors.get(p)!));
+        }
+
+        return ce.function('List', result);
+      },
+    },
+
     Totient: {
       wikidata: 'Q190026',
       description:

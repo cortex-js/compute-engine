@@ -48,3 +48,53 @@ describe('IsHappy on non-positive input (REVIEW.md B21)', () => {
     expect(ce.expr(['IsHappy', 4]).evaluate().json).toBe('False');
   });
 });
+
+const factorInteger = (n: number | bigint) =>
+  ce.expr(['FactorInteger', ce.number(n)]).evaluate().toString();
+
+describe('FactorInteger', () => {
+  test('factors a composite into ascending [prime, exponent] tuples', () => {
+    expect(factorInteger(360)).toEqual('[(2, 3),(3, 2),(5, 1)]');
+    expect(factorInteger(12)).toEqual('[(2, 2),(3, 1)]');
+    expect(factorInteger(100)).toEqual('[(2, 2),(5, 2)]');
+  });
+
+  test('a prime factors as itself with exponent 1', () => {
+    expect(factorInteger(17)).toEqual('[(17, 1)]');
+    expect(factorInteger(999983)).toEqual('[(999983, 1)]');
+  });
+
+  test('a prime power factors as a single tuple', () => {
+    expect(factorInteger(1024)).toEqual('[(2, 10)]');
+  });
+
+  test('degenerate inputs follow Mathematica conventions', () => {
+    expect(factorInteger(0)).toEqual('[(0, 1)]');
+    expect(factorInteger(1)).toEqual('[(1, 1)]');
+    expect(factorInteger(-1)).toEqual('[(-1, 1)]');
+  });
+
+  test('a negative integer carries the sign in a leading [-1, 1] tuple', () => {
+    expect(factorInteger(-12)).toEqual('[(-1, 1),(2, 2),(3, 1)]');
+    expect(factorInteger(-360)).toEqual('[(-1, 1),(2, 3),(3, 2),(5, 1)]');
+  });
+
+  test('factors large integers exactly (bigint path)', () => {
+    // Project Euler #3: 600851475143 = 71 · 839 · 1471 · 6857.
+    expect(factorInteger(600851475143n)).toEqual(
+      '[(71, 1),(839, 1),(1471, 1),(6857, 1)]'
+    );
+  });
+
+  test('the factorization multiplies back to the original integer', () => {
+    for (const n of [2, 84, 360, 1000000, 999983]) {
+      const factors = ce.expr(['FactorInteger', n]).evaluate();
+      let product = 1n;
+      for (const tuple of factors.ops!) {
+        const [p, e] = tuple.ops!;
+        product *= BigInt(p.re) ** BigInt(e.re);
+      }
+      expect(product).toEqual(BigInt(n));
+    }
+  });
+});
