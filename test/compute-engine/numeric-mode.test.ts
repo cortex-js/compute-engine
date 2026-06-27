@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine, check } from '../utils';
 
 function N(s: string) {
@@ -119,4 +120,97 @@ describe('NUMERIC MODE bignum 7', () => {
     expect(N('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`0.7853981633974483`));
 
   test('e^{i\\pi}', () => expect(N('e^{i\\pi}')).toMatchInlineSnapshot(`-1`));
+});
+
+//
+// Regression: the `["N", expr]` operator must numerically evaluate its
+// operand, just like the `.N()` method. The operator is lazy, so its operand
+// is held unbound; previously the handler called `.N()` on that unbound
+// expression, which is a no-op (e.g. `["N", "Pi"]` returned `Pi` unchanged).
+// The handler now canonicalizes (binds) the operand first.
+//
+describe('N OPERATOR numericizes its operand', () => {
+  test('["N", "Pi"]', () => {
+    const result = engine.box(['N', 'Pi']).evaluate();
+    expect(result.isNumberLiteral).toBe(true);
+    expect(result.re).toBeCloseTo(Math.PI, 10);
+  });
+
+  test('["N", ["Sqrt", 2]]', () => {
+    const result = engine.box(['N', ['Sqrt', 2]]).evaluate();
+    expect(result.isNumberLiteral).toBe(true);
+    expect(result.re).toBeCloseTo(Math.SQRT2, 10);
+  });
+
+  test('["N", ["Sin", 1]]', () => {
+    const result = engine.box(['N', ['Sin', 1]]).evaluate();
+    expect(result.isNumberLiteral).toBe(true);
+    expect(result.re).toBeCloseTo(Math.sin(1), 10);
+  });
+
+  test('["N", expr] matches expr.N()', () => {
+    expect(engine.box(['N', 'Pi']).evaluate().isSame(engine.box('Pi').N())).toBe(
+      true
+    );
+  });
+});
+
+//
+// `["N", expr, precision]`: the optional precision argument is a count of
+// significant digits. When it exceeds the engine's working precision, the
+// working precision is raised (and kept, since display precision is global);
+// when it is at or below the working precision, the result is rounded down to
+// that many significant digits without touching the global precision.
+// Fresh engines isolate the (intentional) global precision mutation.
+//
+describe('N OPERATOR with a precision argument', () => {
+  afterAll(() => {
+    engine.precision = 'auto'; // reset process-global bignum precision
+  });
+
+  test('precision above working precision raises and keeps it', () => {
+    const ce = new ComputeEngine();
+    const result = ce.box(['N', 'Pi', 50]).evaluate();
+    expect(result.toString()).toBe(
+      '3.1415926535897932384626433832795028841971693993751'
+    );
+    expect(ce.precision).toBe(50);
+  });
+
+  test('precision at or below working precision rounds the value down', () => {
+    const ce = new ComputeEngine();
+    const before = ce.precision;
+    expect(ce.box(['N', 'Pi', 5]).evaluate().toString()).toBe('3.1416');
+    expect(ce.box(['N', 'Pi', 3]).evaluate().toString()).toBe('3.14');
+    expect(ce.box(['N', ['Rational', 1, 3], 4]).evaluate().toString()).toBe(
+      '0.3333'
+    );
+    expect(ce.precision).toBe(before); // global precision untouched
+  });
+
+  test('the precision argument may be a non-literal expression', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['N', 'Pi', ['Add', 2, 3]]).evaluate().toString()).toBe(
+      '3.1416'
+    );
+  });
+
+  test('complex operand rounds each component', () => {
+    const ce = new ComputeEngine();
+    const result = ce.box(['N', ['Complex', 3.14159, 2.71828], 3]).evaluate();
+    expect(result.re).toBeCloseTo(3.14, 6);
+    expect(result.im).toBeCloseTo(2.72, 6);
+  });
+
+  test('symbolic operand is unaffected by the precision argument', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['N', 'x', 5]).evaluate().toString()).toBe('x');
+  });
+
+  test('an invalid precision is ignored', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['N', 'Pi', 0]).evaluate().toString()).toBe(
+      ce.box('Pi').N().toString()
+    );
+  });
 });

@@ -927,21 +927,57 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     N: {
-      description: 'Numerically evaluate an expression',
+      description: [
+        'N(expr): numerically evaluate an expression',
+        'N(expr, precision): evaluate to `precision` significant digits',
+      ],
       lazy: true,
-      signature: '(any) -> unknown',
+      signature: '(any, integer?) -> unknown',
       type: ([x]) => x.type,
       canonical: (ops, { engine: ce }) => {
-        // Only call checkArity (which canonicalize) if the
-        // argument length is invalid
-        if (ops.length !== 1) return ce._fn('N', checkArity(ce, ops, 1));
+        // Accept one or two arguments: N(expr) or N(expr, precision).
+        if (ops.length === 0) return ce._fn('N', checkArity(ce, ops, 1));
+        if (ops.length > 2) return ce._fn('N', checkArity(ce, ops, 2));
 
-        const h = ops[0].operator;
-        if (h === 'N' || h === 'Evaluate') return ops[0].canonical;
+        // Collapse nested `N(N(x))` / `N(Evaluate(x))` for the single-arg form.
+        if (ops.length === 1) {
+          const h = ops[0].operator;
+          if (h === 'N' || h === 'Evaluate') return ops[0].canonical;
+        }
 
         return ce._fn('N', ops);
       },
-      evaluate: ([x]) => x.N(),
+      evaluate: (ops, { engine: ce }) => {
+        // `N` is lazy, so its operand is held unbound. Calling `.N()` on an
+        // unbound expression is a no-op (e.g. an unbound `Pi` symbol returns
+        // itself), so canonicalize (bind) the operand first. This makes
+        // `["N", expr]` equivalent to `expr.N()`.
+        const x = ops[0];
+
+        // Single-argument form: evaluate at the engine's current precision.
+        if (ops.length < 2) return x.canonical.N();
+
+        // Optional precision argument: the requested number of significant
+        // digits. Resolve it numerically (it may be `2 + 3` or a bound symbol).
+        let p = ops[1].canonical.N().re;
+        if (!Number.isFinite(p) || p < 1) return x.canonical.N();
+        p = Math.min(Math.trunc(p), 1000); // cap to avoid runaway precision
+
+        const global = ce.precision;
+        if (p > global) {
+          // Display precision is global, so to *show* more than `global`
+          // digits the engine's working precision must be raised — and left
+          // raised. Recompute the (still raw) operand at the new precision so
+          // constants like `Pi` materialize to `p` digits.
+          ce.precision = p;
+          return x.canonical.N();
+        }
+
+        // `p <= global`: leave the global precision untouched and round the
+        // result down to `p` significant digits (precision has a machine-digit
+        // floor, so lowering the global precision can't reach small `p`).
+        return roundToSignificantDigits(x.canonical.N(), p);
+      },
     },
 
     Random: {
@@ -1612,3 +1648,35 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+/**
+ * Round a numeric result to `p` significant digits at the *value* level, so
+ * the returned number genuinely carries `p` digits (independent of whatever
+ * precision a downstream consumer serializes at). Used by `N(expr, p)` when
+ * the requested precision is at or below the engine's working precision.
+ *
+ * Non-numeric results (symbolic expressions, collections) are returned
+ * unchanged.
+ */
+function roundToSignificantDigits(value: Expression, p: number): Expression {
+  const ce = value.engine;
+  const re = value.re;
+  const im = value.im;
+  // Only round concrete finite numbers; leave symbolic results / non-numbers
+  // (where `re`/`im` are `NaN`) and infinities unchanged.
+  if (!Number.isFinite(re) || !Number.isFinite(im)) return value;
+
+  // Complex: round each component (machine precision is enough here; JS
+  // `toPrecision` caps at 100 significant digits).
+  if (im !== 0) {
+    const clamp = Math.min(p, 100);
+    return ce.number(
+      ce.complex(Number(re.toPrecision(clamp)), Number(im.toPrecision(clamp)))
+    );
+  }
+
+  // Real: round the bignum to `p` significant digits (preserving large `p`).
+  // `ce.bignum(re)` covers the machine-float case where there is no `bignumRe`.
+  const bd = value.bignumRe ?? ce.bignum(re);
+  return ce.number(bd.toPrecision(p));
+}

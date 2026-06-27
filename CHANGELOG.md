@@ -61,6 +61,24 @@
   `PrimePi`, `BernoulliB`, and `Divisors` were previously uninterpreted Fungrim
   shell heads; they are now evaluatable built-ins.
 
+- **`N(expr, precision)` evaluates to a requested number of significant
+  digits.** The `N` function (and the `["N", expr]` MathJSON form) now accepts
+  an optional precision argument: `["N", "Pi", 50]` returns π to 50 significant
+  digits. When the requested precision exceeds the engine's working precision,
+  the working precision is raised to match — and kept, since display precision
+  is a global setting. When it is at or below the working precision, the result
+  is rounded to that many significant digits without changing the global
+  precision (`N(1/3, 4)` → `0.3333`).
+
+### Resolved Issues
+
+- **`["N", expr]` now numerically evaluates its operand.** The `N` operator
+  holds its argument unevaluated and previously called `.N()` on the still
+  unbound operand — a no-op for symbolic constants — so `["N", "Pi"]` returned
+  `Pi` unchanged (and `["N", ["Sqrt", 2]]` returned `Sqrt(2)`) instead of a
+  numeric value. The operand is now bound before evaluation, making
+  `["N", expr]` equivalent to `expr.N()`.
+
 ## 0.63.0 _2026-06-26_
 
 ### New Features
