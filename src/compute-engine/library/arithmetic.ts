@@ -521,6 +521,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
 
         const x = ops[0];
+        // The double factorial of a non-integer is an exact constant with no
+        // simple closed form here, so stay symbolic rather than rounding the
+        // argument to an integer (which non-strict mode would otherwise allow).
+        if (x.isInteger !== true) return undefined;
         const n = toInteger(x);
         if (n === null) return undefined;
         const ce = x.engine;

@@ -83,6 +83,12 @@
   safe-integer range, so this class of silent-rounding bug cannot recur in the
   operators that use it for counts and indices.
 
+- **`Factorial2`, `Subfactorial`, and `BellNumber` no longer round a
+  non-integer argument.** These are defined only on integers; in non-strict
+  mode they previously rounded a non-integer (e.g. `Factorial2(5.5)` returned
+  `6!!`). They now stay symbolic for non-integer arguments. (In strict mode the
+  `(integer)` signature already rejected such inputs.)
+
 - **`N(expr, precision)` evaluates to a requested number of significant
   digits.** The `N` function (and the `["N", expr]` MathJSON form) now accepts
   an optional precision argument: `["N", "Pi", 50]` returns π to 50 significant

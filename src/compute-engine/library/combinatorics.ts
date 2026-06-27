@@ -224,6 +224,9 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       type: () => 'finite_integer',
       evaluate: ([n], { engine: ce }) => {
+        // Derangements are defined only for non-negative integers; stay
+        // symbolic for anything else rather than rounding the argument.
+        if (n.isInteger !== true) return undefined;
         const k = toInteger(n);
         if (k === null || k < 0) return undefined;
         // Recurrence (exact, in bigint): !0 = 1, !m = m·!(m−1) + (−1)^m.
@@ -246,6 +249,9 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       signature: '(integer) -> integer',
       type: () => 'finite_integer',
       evaluate: ([n], { engine: ce }) => {
+        // Bell numbers count set partitions, defined only for non-negative
+        // integers; stay symbolic rather than rounding the argument.
+        if (n.isInteger !== true) return undefined;
         const k = toInteger(n);
         if (k === null || k < 0) return undefined;
 

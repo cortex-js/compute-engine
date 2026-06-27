@@ -1,6 +1,28 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 
 const evalN = (expr: any) => ce.expr(expr).evaluate().toString();
+
+// In strict mode the `(integer)` signature rejects a non-integer argument, but
+// the evaluate handlers must not silently round it in non-strict mode either.
+describe('integer-only functions stay symbolic for non-integer args', () => {
+  const loose = new ComputeEngine();
+  loose.strict = false;
+  const ev = (expr: any) => loose.box(expr).evaluate().toString();
+
+  test('Factorial2/Subfactorial/BellNumber do not round non-integers', () => {
+    expect(ev(['Factorial2', 5.5])).toEqual('Factorial2(5.5)');
+    expect(ev(['Subfactorial', 5.5])).toEqual('Subfactorial(5.5)');
+    expect(ev(['BellNumber', 5.5])).toEqual('BellNumber(5.5)');
+  });
+
+  test('integer arguments (incl. integer-valued floats) still evaluate', () => {
+    expect(ev(['Factorial2', 5])).toEqual('15');
+    expect(ev(['Factorial2', 6.0])).toEqual('48');
+    expect(ev(['Subfactorial', 4])).toEqual('9');
+    expect(ev(['BellNumber', 5])).toEqual('52');
+  });
+});
 
 describe('Subfactorial (derangements) — REVIEW.md B9', () => {
   // !n = n·!(n−1) + (−1)^n, with !0 = 1 (OEIS A000166). The previous
