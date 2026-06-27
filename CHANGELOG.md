@@ -70,6 +70,18 @@
   is rounded to that many significant digits without changing the global
   precision (`N(1/3, 4)` → `0.3333`).
 
+- **New linear-algebra operators.**
+  - **`Dot(a, b)`** — vector inner product / matrix product (Mathematica's `.`):
+    `Dot([1,2,3], [4,5,6])` → `32`.
+  - **`Cross(a, b)`** — cross product of two 3-vectors.
+  - **`MatrixRank(m)`** — the rank (number of linearly independent rows/columns)
+    via the rank–nullity theorem.
+  - **`MatrixPower(m, n)`** — a square matrix raised to an integer power (the
+    repeated matrix product `A·A·…`, with negative powers using the inverse).
+    Distinct from `["Power", m, n]`, which threads element-wise.
+  - **`IsSymmetric(m)`** / **`IsDiagonal(m)`** / **`IsSquareMatrix(m)`** —
+    matrix-shape predicates returning `True`/`False`.
+
 ### Resolved Issues
 
 - **`["N", expr]` now numerically evaluates its operand.** The `N` operator

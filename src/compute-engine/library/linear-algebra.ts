@@ -630,6 +630,153 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Dot: {
+      description: 'Dot product (vector inner product) or matrix product.',
+      complexity: 8300,
+      signature: '(matrix|vector, matrix|vector) -> value',
+      // `Dot` is Mathematica's `.`: it reduces to the inner product for two
+      // vectors and to the matrix product otherwise — exactly what
+      // `MatrixMultiply` already computes.
+      evaluate: (ops, { engine: ce }) =>
+        ce.function('MatrixMultiply', ops).evaluate(),
+    },
+
+    MatrixRank: {
+      description:
+        'Rank of a matrix (number of linearly independent rows/columns).',
+      complexity: 8200,
+      signature: '(value) -> integer',
+      sgn: (): Sign => 'non-negative',
+      evaluate: ([map], { engine: ce }) => {
+        const op = map.evaluate();
+
+        // Rank of a scalar map x ↦ a·x: 1 if non-zero, 0 if zero.
+        if (op.isNumber) return ce.number(op.isSame(0) ? 0 : 1);
+
+        if (!isTensor(op)) return undefined;
+
+        const shape = op.shape;
+        if (shape.length > 2) return ce.error('expected-matrix', op.toString());
+
+        // Interpret a vector as a 1×n matrix (linear form), as `Kernel` does.
+        const rowCount = shape.length === 1 ? 1 : shape[0];
+        const columnCount = shape.length === 1 ? shape[0] : shape[1];
+        const matrix = tensorToNumericMatrix(op, rowCount, columnCount);
+        if (!matrix) return undefined;
+
+        // Rank–nullity theorem: rank = (number of columns) − dim(kernel).
+        const nullity = computeNullSpaceBasis(matrix).length;
+        return ce.number(columnCount - nullity);
+      },
+    },
+
+    IsSquareMatrix: {
+      description: 'Whether the value is a square matrix.',
+      complexity: 8200,
+      signature: '(value) -> boolean',
+      evaluate: ([m], { engine: ce }) => {
+        const op = m.evaluate();
+        if (!isTensor(op)) return ce.False;
+        return op.tensor.isSquare ? ce.True : ce.False;
+      },
+    },
+
+    IsSymmetric: {
+      description: 'Whether the matrix is symmetric (A equals its transpose).',
+      complexity: 8200,
+      signature: '(value) -> boolean',
+      evaluate: ([m], { engine: ce }) => {
+        const op = m.evaluate();
+        if (!isTensor(op)) return ce.False;
+        return op.tensor.isSymmetric ? ce.True : ce.False;
+      },
+    },
+
+    IsDiagonal: {
+      description:
+        'Whether the matrix is diagonal (all off-diagonal entries are zero).',
+      complexity: 8200,
+      signature: '(value) -> boolean',
+      evaluate: ([m], { engine: ce }) => {
+        const op = m.evaluate();
+        if (!isTensor(op)) return ce.False;
+        return op.tensor.isDiagonal ? ce.True : ce.False;
+      },
+    },
+
+    Cross: {
+      description: 'Cross product of two 3-vectors.',
+      complexity: 8300,
+      signature: '(vector, vector) -> vector',
+      evaluate: ([a, b], { engine: ce }) => {
+        const A = a.evaluate();
+        const B = b.evaluate();
+        if (!isTensor(A) || !isTensor(B)) return undefined;
+        if (
+          A.shape.length !== 1 ||
+          A.shape[0] !== 3 ||
+          B.shape.length !== 1 ||
+          B.shape[0] !== 3
+        )
+          return ce.error(
+            'incompatible-dimensions',
+            'cross product requires two 3-vectors'
+          );
+
+        const a1 = ce.expr(A.tensor.at(1) ?? ce.Zero);
+        const a2 = ce.expr(A.tensor.at(2) ?? ce.Zero);
+        const a3 = ce.expr(A.tensor.at(3) ?? ce.Zero);
+        const b1 = ce.expr(B.tensor.at(1) ?? ce.Zero);
+        const b2 = ce.expr(B.tensor.at(2) ?? ce.Zero);
+        const b3 = ce.expr(B.tensor.at(3) ?? ce.Zero);
+
+        return ce
+          .function('List', [
+            a2.mul(b3).sub(a3.mul(b2)),
+            a3.mul(b1).sub(a1.mul(b3)),
+            a1.mul(b2).sub(a2.mul(b1)),
+          ])
+          .evaluate();
+      },
+    },
+
+    MatrixPower: {
+      description:
+        'Square matrix raised to an integer power (repeated matrix product).',
+      complexity: 8300,
+      signature: '(matrix, integer) -> matrix',
+      evaluate: ([mat, exponent], { engine: ce }) => {
+        const A = mat.evaluate();
+        if (!isTensor(A)) return undefined;
+        if (!A.tensor.isSquare)
+          return ce.error('expected-square-matrix', A.toString());
+
+        const n = exponent.re;
+        if (n === undefined || !Number.isInteger(n)) return undefined;
+
+        const size = A.shape[0];
+        if (n === 0)
+          return ce.function('IdentityMatrix', [ce.number(size)]).evaluate();
+
+        // Negative power: raise the inverse to |n|.
+        let base: Expression = A;
+        let k = n;
+        if (n < 0) {
+          const inv = ce.function('Inverse', [A]).evaluate();
+          if (!isTensor(inv)) return inv; // propagate Error / undefined
+          base = inv;
+          k = -n;
+        }
+
+        // Repeated multiplication. Exponents are small in practice; a simple
+        // loop keeps results exact for symbolic/rational entries.
+        let result: Expression = base;
+        for (let i = 1; i < k; i++)
+          result = ce.function('MatrixMultiply', [result, base]).evaluate();
+        return result;
+      },
+    },
+
     // Diagonal can be used to:
     // 1. Create a diagonal matrix from a vector
     // 2. Extract the diagonal from a matrix as a vector

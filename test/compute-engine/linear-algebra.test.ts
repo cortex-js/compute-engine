@@ -1840,3 +1840,109 @@ describe('Tensor helpers (REVIEW.md F9, F15, F16)', () => {
     expect((r3 as any).diagonal(1, 4)).toBeUndefined();
   });
 });
+
+describe('Dot / Cross', () => {
+  const m: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];
+
+  it('computes the dot (inner) product of two vectors', () => {
+    expect(
+      ce.expr(['Dot', ['List', 1, 2, 3], ['List', 4, 5, 6]]).evaluate().toString()
+    ).toBe('32');
+  });
+
+  it('reduces to the matrix product for two matrices', () => {
+    expect(ce.expr(['Dot', m, m]).evaluate().toString()).toBe('[[7,10],[15,22]]');
+  });
+
+  it('computes the cross product of two 3-vectors', () => {
+    expect(
+      ce.expr(['Cross', ['List', 1, 0, 0], ['List', 0, 1, 0]]).evaluate().toString()
+    ).toBe('[0,0,1]');
+    expect(
+      ce.expr(['Cross', ['List', 1, 2, 3], ['List', 4, 5, 6]]).evaluate().toString()
+    ).toBe('[-3,6,-3]');
+  });
+
+  it('errors when a cross product operand is not a 3-vector', () => {
+    expect(
+      ce.expr(['Cross', ['List', 1, 2], ['List', 3, 4]]).evaluate().isValid
+    ).toBe(false);
+  });
+});
+
+describe('MatrixRank', () => {
+  it('returns the rank of a full-rank matrix', () => {
+    expect(
+      ce.expr(['MatrixRank', ['List', ['List', 1, 2], ['List', 3, 4]]]).evaluate().toString()
+    ).toBe('2');
+  });
+
+  it('returns the rank of a rank-deficient matrix', () => {
+    expect(
+      ce.expr(['MatrixRank', ['List', ['List', 1, 2], ['List', 2, 4]]]).evaluate().toString()
+    ).toBe('1');
+  });
+
+  it('returns 0 for the zero matrix', () => {
+    expect(
+      ce.expr(['MatrixRank', ['List', ['List', 0, 0], ['List', 0, 0]]]).evaluate().toString()
+    ).toBe('0');
+  });
+
+  it('handles non-square matrices', () => {
+    expect(
+      ce.expr(['MatrixRank', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]]).evaluate().toString()
+    ).toBe('2');
+  });
+});
+
+describe('Matrix predicates', () => {
+  const m: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];
+  const sym: Expression = ['List', ['List', 1, 2], ['List', 2, 1]];
+  const diag: Expression = ['List', ['List', 5, 0], ['List', 0, 3]];
+  const nonsquare: Expression = ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]];
+
+  it('IsSquareMatrix', () => {
+    expect(ce.expr(['IsSquareMatrix', m]).evaluate().symbol).toBe('True');
+    expect(ce.expr(['IsSquareMatrix', nonsquare]).evaluate().symbol).toBe('False');
+    expect(ce.expr(['IsSquareMatrix', ['List', 1, 2, 3]]).evaluate().symbol).toBe('False');
+  });
+
+  it('IsSymmetric', () => {
+    expect(ce.expr(['IsSymmetric', sym]).evaluate().symbol).toBe('True');
+    expect(ce.expr(['IsSymmetric', m]).evaluate().symbol).toBe('False');
+  });
+
+  it('IsDiagonal', () => {
+    expect(ce.expr(['IsDiagonal', diag]).evaluate().symbol).toBe('True');
+    expect(ce.expr(['IsDiagonal', sym]).evaluate().symbol).toBe('False');
+  });
+});
+
+describe('MatrixPower', () => {
+  const m: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];
+
+  it('to the 0th power is the identity', () => {
+    expect(ce.expr(['MatrixPower', m, 0]).evaluate().toString()).toBe('[[1,0],[0,1]]');
+  });
+
+  it('to the 1st power is the matrix itself', () => {
+    expect(ce.expr(['MatrixPower', m, 1]).evaluate().toString()).toBe('[[1,2],[3,4]]');
+  });
+
+  it('to the 2nd/3rd power is the repeated matrix product', () => {
+    expect(ce.expr(['MatrixPower', m, 2]).evaluate().toString()).toBe('[[7,10],[15,22]]');
+    expect(ce.expr(['MatrixPower', m, 3]).evaluate().toString()).toBe('[[37,54],[81,118]]');
+  });
+
+  it('to a negative power equals the inverse', () => {
+    const inverse = ce.expr(['Inverse', m]).evaluate().toString();
+    expect(ce.expr(['MatrixPower', m, -1]).evaluate().toString()).toBe(inverse);
+  });
+
+  it('errors on a non-square matrix', () => {
+    expect(
+      ce.expr(['MatrixPower', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]], 2]).evaluate().isValid
+    ).toBe(false);
+  });
+});
