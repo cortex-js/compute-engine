@@ -2,27 +2,64 @@
 
 ### New Features
 
-- **`FactorInteger(n)` returns the prime factorization of an integer.** The
-  result is a list of `[prime, exponent]` tuples ordered by ascending prime —
-  e.g. `FactorInteger(360)` → `[(2, 3), (3, 2), (5, 1)]`. Large values use the
-  arbitrary-precision (bigint) factorization path. Following Mathematica's
-  conventions, the degenerate inputs return `FactorInteger(0)` → `[(0, 1)]`,
-  `FactorInteger(1)` → `[(1, 1)]`, and a negative integer carries its sign in a
-  leading `[-1, 1]` tuple (`FactorInteger(-12)` → `[(-1, 1), (2, 2), (3, 1)]`).
+- **Expanded number-theory library.** A set of standard number-theoretic
+  functions has been added to the `number-theory` library. Integer arguments
+  use arbitrary-precision (bigint) arithmetic, and long-running cases honor the
+  evaluation deadline.
 
-- **`Divisors(n)` returns the sorted positive divisors of an integer.** For
-  example `Divisors(12)` → `[1, 2, 3, 4, 6, 12]`. The sign of `n` is ignored;
-  `Divisors(0)` is left unevaluated since 0 has infinitely many divisors.
+  _Factorization & divisors:_
 
-- **`NthPrime(n)` returns the nth prime number** (1-based): `NthPrime(1)` → 2,
-  `NthPrime(10)` → 29. (Mathematica names this `Prime`, but in the Compute
-  Engine `Prime` denotes derivative notation, so the prime-number function is
-  `NthPrime`.)
+  - **`FactorInteger(n)`** — prime factorization as a list of `[prime, exponent]`
+    tuples ordered by ascending prime: `FactorInteger(360)` →
+    `[(2, 3), (3, 2), (5, 1)]`. Following Mathematica's conventions,
+    `FactorInteger(0)` → `[(0, 1)]`, `FactorInteger(1)` → `[(1, 1)]`, and a
+    negative integer carries its sign in a leading `[-1, 1]` tuple.
+  - **`PrimeFactors(n)`** — the sorted distinct prime factors:
+    `PrimeFactors(360)` → `[2, 3, 5]`.
+  - **`Divisors(n)`** — the sorted positive divisors: `Divisors(12)` →
+    `[1, 2, 3, 4, 6, 12]`. `Divisors(0)` is left unevaluated.
+  - **`Radical(n)`** — the square-free kernel (product of distinct primes):
+    `Radical(360)` → `30`.
+  - **`PrimeNu(n)`** / **`PrimeOmega(n)`** — the number of prime factors without
+    / with multiplicity (ω and Ω).
+  - **`MoebiusMu(n)`** — the Möbius function μ(n).
+  - **`IsSquareFree(n)`** — whether `n` is square-free.
+  - **`IsPerfectPower(n)`** — whether `n = a^b` for integers `a`, `b ≥ 2`.
 
-- **`NextPrime(n)` returns the smallest prime greater than `n`** — e.g.
-  `NextPrime(10)` → 11. An optional second argument `k` returns the kth prime
-  after `n`, or the |k|th prime before `n` when `k < 0`: `NextPrime(10, 3)` →
-  17, `NextPrime(10, -1)` → 7.
+  _Primes:_
+
+  - **`NthPrime(n)`** — the nth prime (1-based): `NthPrime(10)` → 29.
+    (Mathematica names this `Prime`, but in the Compute Engine `Prime` denotes
+    derivative notation, so the prime-number function is `NthPrime`.)
+  - **`NextPrime(n)`** / **`NextPrime(n, k)`** — the smallest prime greater than
+    `n`; with `k`, the kth prime after `n` (or the |k|th before it when `k < 0`).
+  - **`PrimePi(n)`** — the prime-counting function π(n): `PrimePi(10)` → 4.
+  - **`RandomPrime(n)`** / **`RandomPrime(m, n)`** — a random prime in the range.
+
+  _Modular arithmetic & GCD:_
+
+  - **`PowerMod(a, b, m)`** — modular exponentiation `a^b mod m`; a negative `b`
+    uses the modular inverse (undefined when `a` and `m` are not coprime).
+  - **`ExtendedGCD(a, b)`** — the GCD with Bézout coefficients, as `(g, x, y)`.
+  - **`ChineseRemainder(residues, moduli)`** — solves a system of simultaneous
+    congruences (moduli need not be coprime).
+
+  _Other primitives:_
+
+  - **`IntegerSqrt(n)`** — the integer (floor) square root.
+  - **`CarmichaelLambda(n)`** — the reduced totient λ(n).
+  - **`LucasL(n)`** — the nth Lucas number; **`CatalanNumber(n)`** — the nth
+    Catalan number.
+  - **`BernoulliB(n)`** — the nth Bernoulli number as an exact rational, with the
+    convention B₁ = -1/2.
+  - **`ContinuedFraction(x, n?)`** / **`FromContinuedFraction(list)`** — the
+    continued-fraction expansion of a number (exact for rationals) and its
+    inverse.
+  - **`IntegerDigits(n, base?, length?)`** / **`DigitCount(n, base?, digit?)`** —
+    the digits of `n` in a given base, and digit-occurrence counts.
+
+  `PrimePi`, `BernoulliB`, and `Divisors` were previously uninterpreted Fungrim
+  shell heads; they are now evaluatable built-ins.
 
 ## 0.63.0 _2026-06-26_
 

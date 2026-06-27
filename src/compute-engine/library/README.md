@@ -12,21 +12,41 @@
   - See https://numerics.diploid.ca/floating-point-part-4.html, regarding
     'remainder' and 'truncatingRemainder'
 - Zeta function
-- Random() -> random number between 0 and 1
-- Random(n) -> random integer between 1 and n
-- Random(n, m) -> random integer between n and m
 - Hash
 
-### Prime Numbers:
+### Number Theory:
+
+Primes:
 
 - NthPrime: gives the nth prime number (the name `Prime` is reserved for
   derivative notation)
 - NextPrime: the smallest prime larger than `n` (with an optional `k` for the
   kth prime after `n`, or before it when `k < 0`)
+- PrimePi: the prime-counting function π(n)
+- RandomPrime: a random prime in a range
+
+Factorization & divisors:
+
 - FactorInteger: the prime factorization of `n` as a list of `[prime, exponent]`
   tuples
+- PrimeFactors: the sorted distinct prime factors of `n`
 - Divisors: the sorted list of positive divisors of `n`
-- PrimeFactors
+- Radical: the square-free kernel (product of distinct primes)
+- PrimeNu / PrimeOmega: count of prime factors without / with multiplicity
+- MoebiusMu: the Möbius function μ(n)
+- IsSquareFree, IsPerfectPower: predicates
+
+Modular arithmetic & GCD:
+
+- PowerMod: modular exponentiation (negative exponent → modular inverse)
+- ExtendedGCD: GCD with Bézout coefficients
+- ChineseRemainder: solve simultaneous congruences
+
+Other primitives:
+
+- IntegerSqrt, CarmichaelLambda, LucasL, CatalanNumber, BernoulliB
+- ContinuedFraction / FromContinuedFraction
+- IntegerDigits / DigitCount
 
 ### Combinatorials
 

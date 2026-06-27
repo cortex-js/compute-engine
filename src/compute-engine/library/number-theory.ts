@@ -1,6 +1,6 @@
 import type { Expression, SymbolDefinitions } from '../global-types';
 import { toBigint } from '../boxed-expression/numerics';
-import { gcd } from '../numerics/numeric-bigint';
+import { gcd, lcm } from '../numerics/numeric-bigint';
 import { bigPrimeFactors } from '../numerics/primes';
 import { checkDeadline } from '../../common/interruptible';
 
@@ -137,6 +137,476 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           }
         }
         return ce.number(p);
+      },
+    },
+
+    PrimeFactors: {
+      description:
+        'Return the sorted list of distinct prime factors of an integer `n`. The sign of `n` is ignored; `PrimeFactors(1)` is the empty list.',
+      signature: '(integer) -> list<integer>',
+      examples: ['PrimeFactors(360)  // [2, 3, 5]'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null) return undefined;
+        const m = k < 0n ? -k : k;
+        if (m === 0n) return undefined; // 0 has no well-defined factorization
+        const primes = [...bigPrimeFactors(m).keys()]
+          .filter((p) => p !== 1n)
+          .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+        return ce.function(
+          'List',
+          primes.map((p) => ce.number(p))
+        );
+      },
+    },
+
+    PrimeNu: {
+      description:
+        'Return ω(n), the number of distinct prime factors of `n`. The sign of `n` is ignored; `PrimeNu(1)` is 0.',
+      signature: '(integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['PrimeNu(360)  // 3'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null) return undefined;
+        const m = k < 0n ? -k : k;
+        if (m === 0n) return undefined;
+        if (m === 1n) return ce.number(0);
+        return ce.number(bigPrimeFactors(m).size);
+      },
+    },
+
+    PrimeOmega: {
+      description:
+        'Return Ω(n), the number of prime factors of `n` counted with multiplicity. The sign of `n` is ignored; `PrimeOmega(1)` is 0.',
+      signature: '(integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['PrimeOmega(360)  // 6'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null) return undefined;
+        const m = k < 0n ? -k : k;
+        if (m === 0n) return undefined;
+        if (m === 1n) return ce.number(0);
+        let total = 0;
+        for (const e of bigPrimeFactors(m).values()) total += e;
+        return ce.number(total);
+      },
+    },
+
+    MoebiusMu: {
+      description:
+        'Return the Möbius function μ(n): 0 if `n` is divisible by a perfect square > 1, otherwise (-1) raised to the number of distinct prime factors. The sign of `n` is ignored.',
+      signature: '(integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['MoebiusMu(30)  // -1'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null) return undefined;
+        const m = k < 0n ? -k : k;
+        if (m === 0n) return undefined;
+        if (m === 1n) return ce.number(1);
+        const factors = bigPrimeFactors(m);
+        for (const e of factors.values()) if (e > 1) return ce.number(0);
+        return ce.number(factors.size % 2 === 0 ? 1 : -1);
+      },
+    },
+
+    IsSquareFree: {
+      description:
+        'Return `"True"` if `n` is square-free (not divisible by any perfect square > 1). The sign of `n` is ignored.',
+      signature: '(integer) -> boolean',
+      examples: ['IsSquareFree(30)  // "True"'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null) return undefined;
+        const m = k < 0n ? -k : k;
+        if (m === 0n) return ce.False;
+        if (m === 1n) return ce.True;
+        const factors = bigPrimeFactors(m);
+        for (const e of factors.values()) if (e > 1) return ce.False;
+        return ce.True;
+      },
+    },
+
+    Radical: {
+      description:
+        'Return the radical of `n` (its square-free kernel): the product of its distinct prime factors. The sign of `n` is ignored; `Radical(1)` is 1.',
+      signature: '(integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['Radical(360)  // 30'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null) return undefined;
+        const m = k < 0n ? -k : k;
+        if (m === 0n) return undefined;
+        if (m === 1n) return ce.number(1);
+        let product = 1n;
+        for (const p of bigPrimeFactors(m).keys()) product *= p;
+        return ce.number(product);
+      },
+    },
+
+    PowerMod: {
+      description:
+        'Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m).',
+      signature: '(integer, integer, integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['PowerMod(2, 10, 1000)  // 24'],
+      evaluate: ([aOp, bOp, mOp], { engine: ce }) => {
+        const a = toBigint(aOp);
+        const b = toBigint(bOp);
+        const m = toBigint(mOp);
+        if (a === null || b === null || m === null) return undefined;
+        if (m <= 0n) return undefined; // modulus must be positive
+        if (m === 1n) return ce.number(0);
+        if (b >= 0n) return ce.number(modPow(a, b, m));
+        // Negative exponent: invert `a` modulo `m`, then raise to `-b`.
+        const base = ((a % m) + m) % m;
+        const [g, s] = extGcd(base, m);
+        if (g !== 1n) return undefined; // inverse does not exist
+        const inv = ((s % m) + m) % m;
+        return ce.number(modPow(inv, -b, m));
+      },
+    },
+
+    ExtendedGCD: {
+      description:
+        'Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients).',
+      signature: '(integer, integer) -> tuple<integer, integer, integer>',
+      examples: ['ExtendedGCD(12, 18)  // (6, -1, 1)'],
+      evaluate: ([aOp, bOp], { engine: ce }) => {
+        const a = toBigint(aOp);
+        const b = toBigint(bOp);
+        if (a === null || b === null) return undefined;
+        let [g, x, y] = extGcd(a, b);
+        if (g < 0n) {
+          g = -g;
+          x = -x;
+          y = -y;
+        }
+        return ce._fn('Tuple', [ce.number(g), ce.number(x), ce.number(y)]);
+      },
+    },
+
+    IntegerSqrt: {
+      description:
+        'Return the integer square root of `n`, i.e. the largest integer `m` such that `m² ≤ n`. Undefined for negative `n`.',
+      signature: '(integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['IntegerSqrt(17)  // 4'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null || k < 0n) return undefined;
+        return ce.number(bigintSqrt(k));
+      },
+    },
+
+    ChineseRemainder: {
+      description:
+        'Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. Undefined if the system is inconsistent or the two lists differ in length.',
+      signature: '(collection, collection) -> integer',
+      examples: ['ChineseRemainder([2, 3, 2], [3, 5, 7])  // 23'],
+      evaluate: ([residuesOp, moduliOp], { engine: ce }) => {
+        const residues = Array.from(residuesOp?.each() ?? []).map(toBigint);
+        const moduli = Array.from(moduliOp?.each() ?? []).map(toBigint);
+        if (residues.length === 0 || residues.length !== moduli.length)
+          return undefined;
+        if (residues.includes(null) || moduli.includes(null)) return undefined;
+        const x = chineseRemainder(residues as bigint[], moduli as bigint[]);
+        if (x === null) return undefined;
+        return ce.number(x);
+      },
+    },
+
+    CarmichaelLambda: {
+      description:
+        "Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. Defined for `n ≥ 1`.",
+      signature: '(integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['CarmichaelLambda(15)  // 4'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null || k < 1n) return undefined;
+        if (k === 1n) return ce.number(1);
+        let result = 1n;
+        for (const [p, e] of bigPrimeFactors(k)) {
+          let lambda: bigint;
+          if (p === 2n)
+            lambda = e === 1 ? 1n : e === 2 ? 2n : 1n << BigInt(e - 2);
+          else lambda = p ** BigInt(e - 1) * (p - 1n);
+          result = lcm(result, lambda);
+        }
+        return ce.number(result);
+      },
+    },
+
+    LucasL: {
+      description:
+        'Return the nth Lucas number: `LucasL(0)` is 2, `LucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. Negative indices follow `LucasL(-n) = (-1)^n · LucasL(n)`.',
+      signature: '(integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['LucasL(10)  // 123'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null) return undefined;
+        const neg = k < 0n;
+        const kk = neg ? -k : k;
+        let a = 2n;
+        let b = 1n;
+        let steps = 0;
+        for (let i = 0n; i < kk; i++) {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          [a, b] = [b, a + b];
+        }
+        return ce.number(neg && kk % 2n === 1n ? -a : a);
+      },
+    },
+
+    CatalanNumber: {
+      description:
+        'Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`.',
+      signature: '(integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['CatalanNumber(5)  // 42'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null || k < 0n) return undefined;
+        let c = 1n;
+        let steps = 0;
+        for (let i = 0n; i < k; i++) {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          c = (c * 2n * (2n * i + 1n)) / (i + 2n);
+        }
+        return ce.number(c);
+      },
+    },
+
+    IsPerfectPower: {
+      description:
+        'Return `"True"` if `n` is a perfect power `a^b` for integers `a` and `b ≥ 2` (a negative `n` requires an odd exponent). The smallest perfect power is 4.',
+      signature: '(integer) -> boolean',
+      examples: ['IsPerfectPower(64)  // "True"'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null) return undefined;
+        const m = k < 0n ? -k : k;
+        if (m < 4n) return ce.False;
+        return ce.symbol(
+          isPerfectPowerBigint(m, k < 0n, ce._deadline) ? 'True' : 'False'
+        );
+      },
+    },
+
+    ContinuedFraction: {
+      description:
+        'Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully; for an inexact value the expansion is truncated to the optional `n` terms (default 20).',
+      signature: '(number, integer?) -> list<integer>',
+      examples: ['ContinuedFraction(43/19)  // [2, 3, 1, 4]'],
+      evaluate: ([xOp, nOp], { engine: ce }) => {
+        if (xOp === undefined) return undefined;
+        const maxTerms =
+          nOp === undefined ? undefined : Number(toBigint(nOp) ?? 0n);
+        if (maxTerms !== undefined && maxTerms < 1) return undefined;
+
+        const terms: bigint[] = [];
+        if (xOp.isRational) {
+          // Exact: Euclidean expansion of numerator/denominator.
+          let a = toBigint(xOp.numerator);
+          let b = toBigint(xOp.denominator);
+          if (a === null || b === null || b === 0n) return undefined;
+          if (b < 0n) {
+            a = -a;
+            b = -b;
+          }
+          while (b !== 0n) {
+            // Floor division (bigint `/` truncates toward zero).
+            let q: bigint = a / b;
+            if (a % b !== 0n && a < 0n !== b < 0n) q -= 1n;
+            terms.push(q);
+            [a, b] = [b, a - q * b];
+            if (maxTerms !== undefined && terms.length >= maxTerms) break;
+          }
+        } else {
+          // Inexact: expand the float value to a bounded number of terms.
+          let val = xOp.re;
+          if (!Number.isFinite(val)) return undefined;
+          const cap = maxTerms ?? 20;
+          for (let i = 0; i < cap; i++) {
+            const fl = Math.floor(val);
+            terms.push(BigInt(fl));
+            const frac = val - fl;
+            if (frac < 1e-12) break;
+            val = 1 / frac;
+            if (!Number.isFinite(val)) break;
+          }
+        }
+        return ce.function(
+          'List',
+          terms.map((t) => ce.number(t))
+        );
+      },
+    },
+
+    FromContinuedFraction: {
+      description:
+        'Reconstruct the (rational) value of a continued fraction given its list of integer terms `[a0, a1, …]`.',
+      signature: '(collection) -> number',
+      examples: ['FromContinuedFraction([2, 3, 1, 4])  // 43/19'],
+      evaluate: ([listOp], { engine: ce }) => {
+        const terms = Array.from(listOp?.each() ?? []).map(toBigint);
+        if (terms.length === 0 || terms.includes(null)) return undefined;
+        let p = 1n;
+        let q = 0n;
+        for (let i = terms.length - 1; i >= 0; i--)
+          [p, q] = [terms[i]! * p + q, p];
+        if (q === 0n) return undefined;
+        return ce.number(p).div(ce.number(q));
+      },
+    },
+
+    IntegerDigits: {
+      description:
+        'Return the digits of `n` in the given `base` (default 10), most-significant first. The sign of `n` is ignored. With a third argument `length`, the result is zero-padded on the left (or truncated to its least-significant digits) to that length.',
+      signature: '(integer, integer?, integer?) -> list<integer>',
+      examples: ['IntegerDigits(255, 16)  // [15, 15]'],
+      evaluate: ([nOp, baseOp, lenOp], { engine: ce }) => {
+        const k = toBigint(nOp);
+        if (k === null) return undefined;
+        const base = baseOp === undefined ? 10n : toBigint(baseOp);
+        if (base === null || base < 2n) return undefined;
+
+        let m = k < 0n ? -k : k;
+        const digits: bigint[] = [];
+        if (m === 0n) digits.push(0n);
+        while (m > 0n) {
+          digits.push(m % base);
+          m = m / base;
+        }
+        digits.reverse();
+
+        if (lenOp !== undefined) {
+          const len = toBigint(lenOp);
+          if (len === null || len < 0n) return undefined;
+          const L = Number(len);
+          while (digits.length < L) digits.unshift(0n);
+          if (digits.length > L) digits.splice(0, digits.length - L);
+        }
+        return ce.function(
+          'List',
+          digits.map((d) => ce.number(d))
+        );
+      },
+    },
+
+    DigitCount: {
+      description:
+        'Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`.',
+      signature: '(integer, integer?, integer?) -> integer | list<integer>',
+      type: ([, , digit]) => (digit !== undefined ? 'finite_integer' : 'list'),
+      examples: ['DigitCount(122, 10, 2)  // 2'],
+      evaluate: ([nOp, baseOp, digitOp], { engine: ce }) => {
+        const k = toBigint(nOp);
+        if (k === null) return undefined;
+        const base = baseOp === undefined ? 10n : toBigint(baseOp);
+        if (base === null || base < 2n) return undefined;
+
+        const counts = new Map<bigint, number>();
+        let m = k < 0n ? -k : k;
+        if (m === 0n) counts.set(0n, 1);
+        while (m > 0n) {
+          const d = m % base;
+          counts.set(d, (counts.get(d) ?? 0) + 1);
+          m = m / base;
+        }
+
+        if (digitOp !== undefined) {
+          const d = toBigint(digitOp);
+          if (d === null || d < 0n || d >= base) return undefined;
+          return ce.number(counts.get(d) ?? 0);
+        }
+        // List form: counts of 1..base-1, then the count of 0 last.
+        const list: ReturnType<typeof ce.number>[] = [];
+        for (let d = 1n; d < base; d++) list.push(ce.number(counts.get(d) ?? 0));
+        list.push(ce.number(counts.get(0n) ?? 0));
+        return ce.function('List', list);
+      },
+    },
+
+    RandomPrime: {
+      description:
+        'Return a random prime. `RandomPrime(n)` draws a prime in [2, n]; `RandomPrime(m, n)` draws a prime in [m, n]. Undefined if the range contains no prime.',
+      pure: false,
+      signature: '(integer, integer?) -> integer',
+      type: () => 'finite_integer',
+      examples: ['RandomPrime(100)  // e.g. 47'],
+      evaluate: ([aOp, bOp], { engine: ce }) => {
+        let lo: bigint | null;
+        let hi: bigint | null;
+        if (bOp === undefined) {
+          lo = 2n;
+          hi = toBigint(aOp);
+        } else {
+          lo = toBigint(aOp);
+          hi = toBigint(bOp);
+        }
+        if (lo === null || hi === null) return undefined;
+        if (lo < 2n) lo = 2n;
+        if (hi < lo) return undefined;
+
+        const range = hi - lo + 1n;
+        const attempts = 100 + 20 * hi.toString().length;
+        for (let i = 0; i < attempts; i++) {
+          const r = lo + randomBigintBelow(range);
+          if (isPrimeTrial(r, ce._deadline)) return ce.number(r);
+        }
+        // Safety net: a deterministic scan guarantees a result when the range
+        // does contain a prime (only reached when sampling keeps missing).
+        for (let p = lo; p <= hi; p++) {
+          checkDeadline(ce._deadline);
+          if (isPrimeTrial(p, ce._deadline)) return ce.number(p);
+        }
+        return undefined;
+      },
+    },
+
+    PrimePi: {
+      description:
+        'Return π(n), the prime-counting function: the number of primes less than or equal to `n`.',
+      signature: '(real) -> integer',
+      type: () => 'finite_integer',
+      examples: ['PrimePi(10)  // 4'],
+      evaluate: ([n], { engine: ce }) => {
+        const x = n?.re;
+        if (x === undefined || !Number.isFinite(x)) return undefined;
+        const bound = BigInt(Math.floor(x));
+        if (bound < 2n) return ce.number(0);
+        let count = 1; // 2 is prime
+        let steps = 0;
+        for (let k = 3n; k <= bound; k += 2n) {
+          if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+          if (isPrimeTrial(k, ce._deadline)) count++;
+        }
+        return ce.number(count);
+      },
+    },
+
+    BernoulliB: {
+      description:
+        'Return the nth Bernoulli number Bₙ as an exact rational, using the convention B₁ = -1/2. Odd `n > 1` give 0.',
+      signature: '(integer) -> finite_rational',
+      type: () => 'finite_rational',
+      examples: ['BernoulliB(2)  // 1/6'],
+      evaluate: ([n], { engine: ce }) => {
+        const k = toBigint(n);
+        if (k === null || k < 0n) return undefined;
+        if (k === 0n) return ce.number(1);
+        if (k === 1n) return ce.number(-1).div(ce.number(2));
+        if (k % 2n === 1n) return ce.number(0);
+        const [num, den] = bernoulliNumber(Number(k), ce._deadline);
+        return den === 1n
+          ? ce.number(num)
+          : ce.number(num).div(ce.number(den));
       },
     },
 
@@ -419,6 +889,171 @@ function isPrimeTrial(n: bigint, deadline: number | undefined): boolean {
     if (n % i === 0n || n % (i + 2n) === 0n) return false;
   }
   return true;
+}
+
+/** Modular exponentiation `base^exp mod mod` for `exp ≥ 0`, `mod ≥ 1`. */
+function modPow(base: bigint, exp: bigint, mod: bigint): bigint {
+  if (mod === 1n) return 0n;
+  let result = 1n;
+  base = ((base % mod) + mod) % mod;
+  while (exp > 0n) {
+    if (exp & 1n) result = (result * base) % mod;
+    base = (base * base) % mod;
+    exp >>= 1n;
+  }
+  return result;
+}
+
+/**
+ * Extended Euclidean algorithm: returns `[g, x, y]` with `a·x + b·y = g`,
+ * where `g = gcd(a, b)` (its sign follows `a`/`b`; callers that need a
+ * non-negative `g` normalize the triple).
+ */
+function extGcd(a: bigint, b: bigint): [bigint, bigint, bigint] {
+  let [oldR, r] = [a, b];
+  let [oldS, s] = [1n, 0n];
+  let [oldT, t] = [0n, 1n];
+  while (r !== 0n) {
+    const q = oldR / r;
+    [oldR, r] = [r, oldR - q * r];
+    [oldS, s] = [s, oldS - q * s];
+    [oldT, t] = [t, oldT - q * t];
+  }
+  return [oldR, oldS, oldT];
+}
+
+/** Integer (floor) square root of `n ≥ 0` via Newton's method on bigints. */
+function bigintSqrt(n: bigint): bigint {
+  if (n < 2n) return n;
+  // Start from a value guaranteed to be ≥ √n (half the bit length, rounded up).
+  let x = 1n << ((BigInt(n.toString(2).length) + 1n) / 2n);
+  for (;;) {
+    const y = (x + n / x) >> 1n;
+    if (y >= x) break;
+    x = y;
+  }
+  while (x * x > n) x -= 1n;
+  return x;
+}
+
+/**
+ * General Chinese Remainder: merge the congruences `x ≡ residues[i]
+ * (mod moduli[i])` pairwise. Moduli need not be coprime. Returns the least
+ * non-negative solution modulo lcm(moduli), or `null` if inconsistent or a
+ * modulus is not positive.
+ */
+function chineseRemainder(
+  residues: bigint[],
+  moduli: bigint[]
+): bigint | null {
+  let x = 0n;
+  let m = 1n; // current solution: x (mod m)
+  for (let i = 0; i < residues.length; i++) {
+    const ni = moduli[i];
+    if (ni <= 0n) return null;
+    const ri = ((residues[i] % ni) + ni) % ni;
+    const [g, p] = extGcd(m, ni);
+    if ((ri - x) % g !== 0n) return null; // inconsistent
+    const lcmMN = (m / g) * ni;
+    const mod2 = ni / g;
+    const lambda = (((((ri - x) / g) * p) % mod2) + mod2) % mod2;
+    x = ((x + m * lambda) % lcmMN + lcmMN) % lcmMN;
+    m = lcmMN;
+  }
+  return x;
+}
+
+/** Floor of the integer `b`-th root of `n ≥ 0`. */
+function iroot(n: bigint, b: number): bigint {
+  if (n < 2n) return n;
+  const bb = BigInt(b);
+  // Initial estimate; fall back to a bit-length bound when `n` overflows a float.
+  const approx = Math.pow(Number(n), 1 / b);
+  let x = Number.isFinite(approx)
+    ? BigInt(Math.round(approx))
+    : 1n << (BigInt(n.toString(2).length) / bb + 1n);
+  if (x < 1n) x = 1n;
+  while (x ** bb > n) x -= 1n;
+  while ((x + 1n) ** bb <= n) x += 1n;
+  return x;
+}
+
+/**
+ * Is `m ≥ 4` a perfect power `a^b` with `b ≥ 2`? When `oddOnly` is set (the
+ * argument was negative) only odd exponents are admissible. Testing every
+ * exponent up to `log2(m)` is sufficient (and the redundant composite
+ * exponents are cheap).
+ */
+function isPerfectPowerBigint(
+  m: bigint,
+  oddOnly: boolean,
+  deadline: number | undefined
+): boolean {
+  const bits = m.toString(2).length;
+  for (let b = oddOnly ? 3 : 2; b <= bits; b++) {
+    if (oddOnly && b % 2 === 0) continue;
+    checkDeadline(deadline);
+    const r = iroot(m, b);
+    if (r >= 2n && r ** BigInt(b) === m) return true;
+  }
+  return false;
+}
+
+/** Uniform random bigint in `[0, n)` (for `n > 0`). */
+function randomBigintBelow(n: bigint): bigint {
+  if (n <= 1n) return 0n;
+  if (n <= BigInt(Number.MAX_SAFE_INTEGER))
+    return BigInt(Math.floor(Math.random() * Number(n)));
+  // Rejection-sample enough random 30-bit chunks to cover `n`'s bit length.
+  const bits = n.toString(2).length;
+  let r: bigint;
+  do {
+    r = 0n;
+    for (let i = 0; i < bits; i += 30)
+      r = (r << 30n) | BigInt(Math.floor(Math.random() * (1 << 30)));
+    r &= (1n << BigInt(bits)) - 1n;
+  } while (r >= n);
+  return r;
+}
+
+/** Reduce a fraction to lowest terms with a positive denominator. */
+function reduceRat(num: bigint, den: bigint): [bigint, bigint] {
+  if (den < 0n) {
+    num = -num;
+    den = -den;
+  }
+  const g = gcd(num < 0n ? -num : num, den);
+  return g > 1n ? [num / g, den / g] : [num, den];
+}
+
+/**
+ * The nth Bernoulli number as a reduced rational `[num, den]` (den > 0), with
+ * the convention B₁ = -1/2, via the recurrence
+ * `Bₘ = -1/(m+1) · Σ_{k<m} C(m+1, k)·Bₖ`. Exact rational arithmetic throughout.
+ */
+function bernoulliNumber(
+  n: number,
+  deadline: number | undefined
+): [bigint, bigint] {
+  const B: [bigint, bigint][] = [[1n, 1n]]; // B₀ = 1
+  for (let m = 1; m <= n; m++) {
+    checkDeadline(deadline);
+    let sNum = 0n;
+    let sDen = 1n;
+    let c = 1n; // binomial C(m+1, k), starting at k = 0
+    for (let k = 0; k < m; k++) {
+      const tNum = c * B[k][0];
+      const tDen = B[k][1];
+      const g = gcd(sDen, tDen);
+      sNum = sNum * (tDen / g) + tNum * (sDen / g);
+      sDen = (sDen / g) * tDen;
+      [sNum, sDen] = reduceRat(sNum, sDen);
+      // C(m+1, k+1) = C(m+1, k) · (m+1-k) / (k+1)
+      c = (c * BigInt(m + 1 - k)) / BigInt(k + 1);
+    }
+    B.push(reduceRat(-sNum, sDen * BigInt(m + 1)));
+  }
+  return B[n];
 }
 
 function sumSquareDigits(k: bigint): bigint {

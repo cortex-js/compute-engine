@@ -178,3 +178,266 @@ describe('NextPrime', () => {
     expect(nextPrime(2, -1)).toEqual('NextPrime(2, -1)');
   });
 });
+
+const evalStr = (expr: any[]) => ce.expr(expr).evaluate().toString();
+
+describe('PrimeFactors', () => {
+  test('returns distinct prime factors, ascending', () => {
+    expect(evalStr(['PrimeFactors', 360])).toEqual('[2,3,5]');
+    expect(evalStr(['PrimeFactors', 17])).toEqual('[17]');
+    expect(evalStr(['PrimeFactors', 1024])).toEqual('[2]');
+  });
+  test('1 has no prime factors; sign is ignored; 0 is unevaluated', () => {
+    expect(evalStr(['PrimeFactors', 1])).toEqual('[]');
+    expect(evalStr(['PrimeFactors', -12])).toEqual('[2,3]');
+    expect(evalStr(['PrimeFactors', 0])).toEqual('PrimeFactors(0)');
+  });
+});
+
+describe('PrimeNu and PrimeOmega', () => {
+  test('PrimeNu counts distinct prime factors', () => {
+    expect(evalStr(['PrimeNu', 360])).toEqual('3'); // 2,3,5
+    expect(evalStr(['PrimeNu', 1])).toEqual('0');
+    expect(evalStr(['PrimeNu', 17])).toEqual('1');
+  });
+  test('PrimeOmega counts prime factors with multiplicity', () => {
+    expect(evalStr(['PrimeOmega', 360])).toEqual('6'); // 2^3·3^2·5
+    expect(evalStr(['PrimeOmega', 1024])).toEqual('10'); // 2^10
+    expect(evalStr(['PrimeOmega', 1])).toEqual('0');
+  });
+});
+
+describe('MoebiusMu', () => {
+  test('square-free with an even/odd number of primes', () => {
+    expect(evalStr(['MoebiusMu', 1])).toEqual('1');
+    expect(evalStr(['MoebiusMu', 2])).toEqual('-1');
+    expect(evalStr(['MoebiusMu', 6])).toEqual('1'); // 2·3
+    expect(evalStr(['MoebiusMu', 30])).toEqual('-1'); // 2·3·5
+  });
+  test('0 when divisible by a square; sign ignored', () => {
+    expect(evalStr(['MoebiusMu', 12])).toEqual('0'); // 2^2·3
+    expect(evalStr(['MoebiusMu', -30])).toEqual('-1');
+  });
+});
+
+describe('IsSquareFree', () => {
+  test('true for square-free, false otherwise', () => {
+    expect(evalStr(['IsSquareFree', 30])).toEqual('"True"');
+    expect(evalStr(['IsSquareFree', 1])).toEqual('"True"');
+    expect(evalStr(['IsSquareFree', 12])).toEqual('"False"');
+    expect(evalStr(['IsSquareFree', 0])).toEqual('"False"');
+  });
+});
+
+describe('Radical', () => {
+  test('product of distinct prime factors', () => {
+    expect(evalStr(['Radical', 360])).toEqual('30'); // 2·3·5
+    expect(evalStr(['Radical', 1])).toEqual('1');
+    expect(evalStr(['Radical', 17])).toEqual('17');
+    expect(evalStr(['Radical', -360])).toEqual('30');
+  });
+});
+
+describe('PowerMod', () => {
+  test('modular exponentiation', () => {
+    expect(evalStr(['PowerMod', 2, 10, 1000])).toEqual('24'); // 1024 mod 1000
+    expect(evalStr(['PowerMod', 7, 256, 13])).toEqual('9');
+    expect(evalStr(['PowerMod', 5, 3, 1])).toEqual('0'); // anything mod 1
+  });
+  test('negative exponent uses the modular inverse', () => {
+    expect(evalStr(['PowerMod', 3, -1, 7])).toEqual('5'); // 3·5 ≡ 1 mod 7
+    expect(evalStr(['PowerMod', 3, -2, 7])).toEqual('4'); // 5^2 mod 7
+  });
+  test('undefined when the inverse does not exist or modulus ≤ 0', () => {
+    expect(evalStr(['PowerMod', 2, -1, 4])).toEqual('PowerMod(2, -1, 4)');
+    expect(evalStr(['PowerMod', 2, 10, 0])).toEqual('PowerMod(2, 10, 0)');
+  });
+});
+
+describe('ExtendedGCD', () => {
+  test('returns (g, x, y) with a·x + b·y = g', () => {
+    expect(evalStr(['ExtendedGCD', 12, 18])).toEqual('(6, -1, 1)');
+    expect(evalStr(['ExtendedGCD', 240, 46])).toEqual('(2, -9, 47)');
+    expect(evalStr(['ExtendedGCD', 0, 5])).toEqual('(5, 0, 1)');
+  });
+  test('g is non-negative even for negative inputs', () => {
+    const r = ce.box(['ExtendedGCD', -12, 18]).evaluate();
+    const [g, x, y] = r.ops!.map((o) => BigInt(o.re));
+    expect(g).toEqual(6n);
+    expect(-12n * x + 18n * y).toEqual(6n);
+  });
+});
+
+describe('IntegerSqrt', () => {
+  test('floor of the square root', () => {
+    expect(evalStr(['IntegerSqrt', 17])).toEqual('4');
+    expect(evalStr(['IntegerSqrt', 16])).toEqual('4');
+    expect(evalStr(['IntegerSqrt', 0])).toEqual('0');
+  });
+  test('exact for large integers (bigint)', () => {
+    // 10^24 = (10^12)^2.
+    const r = ce.box(['IntegerSqrt', ce.number(10n ** 24n)]).evaluate();
+    expect(r.is(10n ** 12n)).toBe(true);
+  });
+  test('negative input is left unevaluated', () => {
+    expect(evalStr(['IntegerSqrt', -4])).toEqual('IntegerSqrt(-4)');
+  });
+});
+
+describe('ChineseRemainder', () => {
+  test('solves a consistent system', () => {
+    expect(
+      evalStr(['ChineseRemainder', ['List', 2, 3, 2], ['List', 3, 5, 7]])
+    ).toEqual('23');
+  });
+  test('inconsistent systems and length mismatches are unevaluated', () => {
+    expect(
+      ce
+        .box(['ChineseRemainder', ['List', 1, 2], ['List', 4, 6]])
+        .evaluate()
+        .operator
+    ).toEqual('ChineseRemainder');
+    expect(
+      ce
+        .box(['ChineseRemainder', ['List', 2], ['List', 3, 5]])
+        .evaluate()
+        .operator
+    ).toEqual('ChineseRemainder');
+  });
+});
+
+describe('CarmichaelLambda', () => {
+  test('reduced totient', () => {
+    expect(evalStr(['CarmichaelLambda', 1])).toEqual('1');
+    expect(evalStr(['CarmichaelLambda', 8])).toEqual('2'); // 2^(3-2)
+    expect(evalStr(['CarmichaelLambda', 15])).toEqual('4'); // lcm(λ3,λ5)=lcm(2,4)
+    expect(evalStr(['CarmichaelLambda', 561])).toEqual('80'); // Carmichael number
+  });
+});
+
+describe('LucasL', () => {
+  test('Lucas numbers', () => {
+    expect(evalStr(['LucasL', 0])).toEqual('2');
+    expect(evalStr(['LucasL', 1])).toEqual('1');
+    expect(evalStr(['LucasL', 10])).toEqual('123');
+  });
+  test('negative index uses L(-n) = (-1)^n L(n)', () => {
+    expect(evalStr(['LucasL', -1])).toEqual('-1');
+    expect(evalStr(['LucasL', -2])).toEqual('3');
+  });
+});
+
+describe('CatalanNumber', () => {
+  test('Catalan numbers', () => {
+    expect(evalStr(['CatalanNumber', 0])).toEqual('1');
+    expect(evalStr(['CatalanNumber', 1])).toEqual('1');
+    expect(evalStr(['CatalanNumber', 5])).toEqual('42');
+    expect(evalStr(['CatalanNumber', 10])).toEqual('16796');
+  });
+  test('negative input is left unevaluated', () => {
+    expect(evalStr(['CatalanNumber', -1])).toEqual('CatalanNumber(-1)');
+  });
+});
+
+describe('IsPerfectPower', () => {
+  test('true for perfect powers', () => {
+    expect(evalStr(['IsPerfectPower', 64])).toEqual('"True"'); // 2^6, 4^3, 8^2
+    expect(evalStr(['IsPerfectPower', 9])).toEqual('"True"');
+    expect(evalStr(['IsPerfectPower', 1000000])).toEqual('"True"'); // 10^6
+  });
+  test('false for non-powers and small values', () => {
+    expect(evalStr(['IsPerfectPower', 12])).toEqual('"False"');
+    expect(evalStr(['IsPerfectPower', 2])).toEqual('"False"');
+    expect(evalStr(['IsPerfectPower', 1])).toEqual('"False"');
+  });
+  test('negative inputs require an odd exponent', () => {
+    expect(evalStr(['IsPerfectPower', -8])).toEqual('"True"'); // (-2)^3
+    expect(evalStr(['IsPerfectPower', -27])).toEqual('"True"'); // (-3)^3
+    expect(evalStr(['IsPerfectPower', -4])).toEqual('"False"'); // no odd power
+  });
+});
+
+describe('ContinuedFraction', () => {
+  test('exact rationals expand fully', () => {
+    expect(evalStr(['ContinuedFraction', ['Rational', 43, 19]])).toEqual(
+      '[2,3,1,4]'
+    );
+    expect(evalStr(['ContinuedFraction', ['Rational', 22, 7]])).toEqual(
+      '[3,7]'
+    );
+    expect(evalStr(['ContinuedFraction', 7])).toEqual('[7]');
+  });
+  test('negative rationals use a floor first term', () => {
+    expect(evalStr(['ContinuedFraction', ['Rational', -7, 3]])).toEqual(
+      '[-3,1,2]'
+    );
+  });
+  test('inexact values truncate to n terms', () => {
+    expect(
+      evalStr(['ContinuedFraction', ce.parse('\\pi').N(), 5])
+    ).toEqual('[3,7,15,1,292]');
+  });
+});
+
+describe('FromContinuedFraction', () => {
+  test('reconstructs the rational value', () => {
+    expect(evalStr(['FromContinuedFraction', ['List', 2, 3, 1, 4]])).toEqual(
+      '43/19'
+    );
+    expect(evalStr(['FromContinuedFraction', ['List', 5]])).toEqual('5');
+  });
+  test('round-trips with ContinuedFraction for a rational', () => {
+    const cf = ce.box(['ContinuedFraction', ['Rational', 355, 113]]).evaluate();
+    expect(ce.box(['FromContinuedFraction', cf]).evaluate().toString()).toEqual(
+      '355/113'
+    );
+  });
+});
+
+describe('IntegerDigits', () => {
+  test('digits most-significant first, default base 10', () => {
+    expect(evalStr(['IntegerDigits', 1234])).toEqual('[1,2,3,4]');
+    expect(evalStr(['IntegerDigits', 0])).toEqual('[0]');
+  });
+  test('other bases; sign ignored', () => {
+    expect(evalStr(['IntegerDigits', 255, 16])).toEqual('[15,15]');
+    expect(evalStr(['IntegerDigits', 5, 2])).toEqual('[1,0,1]');
+    expect(evalStr(['IntegerDigits', -255, 16])).toEqual('[15,15]');
+  });
+  test('length pads or truncates to the least-significant digits', () => {
+    expect(evalStr(['IntegerDigits', 1234, 10, 6])).toEqual('[0,0,1,2,3,4]');
+    expect(evalStr(['IntegerDigits', 1234, 10, 2])).toEqual('[3,4]');
+  });
+});
+
+describe('DigitCount', () => {
+  test('count of a specific digit', () => {
+    expect(evalStr(['DigitCount', 122, 10, 2])).toEqual('2');
+  });
+  test('list form: counts of 1..base-1 then 0 last', () => {
+    expect(evalStr(['DigitCount', 100])).toEqual('[1,0,0,0,0,0,0,0,0,2]');
+    expect(evalStr(['DigitCount', 0])).toEqual('[0,0,0,0,0,0,0,0,0,1]');
+  });
+});
+
+describe('RandomPrime', () => {
+  test('returns a prime in range', () => {
+    for (let i = 0; i < 20; i++) {
+      const p = Number(ce.box(['RandomPrime', 50]).evaluate().re);
+      expect(p).toBeGreaterThanOrEqual(2);
+      expect(p).toBeLessThanOrEqual(50);
+      expect(ce.box(['IsPrime', p]).evaluate().toString()).toEqual('"True"');
+    }
+  });
+  test('two-argument range', () => {
+    for (let i = 0; i < 20; i++) {
+      const p = Number(ce.box(['RandomPrime', 10, 20]).evaluate().re);
+      expect([11, 13, 17, 19]).toContain(p);
+    }
+  });
+  test('a range with no prime is unevaluated', () => {
+    expect(
+      ce.box(['RandomPrime', 24, 28]).evaluate().operator
+    ).toEqual('RandomPrime');
+  });
+});
