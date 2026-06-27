@@ -1,7 +1,5 @@
 import { bigint } from './bigint';
 
-const LARGE_PRIME = 1125899906842597; // Largest prime < 2^50
-
 // prettier-ignore
 const SMALL_PRIMES = new Set<number>([
   2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
@@ -132,151 +130,72 @@ export function primeFactors(n: number): { [factor: number]: number } {
   return result;
 }
 
-export function isPrime(n: number): boolean | undefined {
-  if (
-    !Number.isInteger(n) ||
-    !Number.isFinite(n) ||
-    Number.isNaN(n) ||
-    n <= 1
-  ) {
-    return false;
-  }
-
-  // Is it a known small prime?
-  if (n <= LARGEST_SMALL_PRIME) return SMALL_PRIMES.has(n);
-
-  // Is it a factor of a small known prime?
-  for (const smallPrime of SMALL_PRIMES) {
-    if (n % smallPrime === 0) return false;
-  }
-
-  if (n < LARGE_PRIME) return n === leastFactor(n) || undefined;
-
-  return probablyPrime(n, 30) ? undefined : false;
+export function isPrime(n: number): boolean {
+  if (!Number.isInteger(n) || !Number.isFinite(n) || n <= 1) return false;
+  return isPrimeBigint(BigInt(n));
 }
 
-function leastFactor(n: number): number {
-  if (n === 1) return 1;
-  if (n % 2 === 0) return 2;
-  if (n % 3 === 0) return 3;
-  if (n % 5 === 0) return 5;
-  const m = Math.floor(Math.sqrt(n));
-  let i = 7;
-  while (i <= m) {
-    if (n % i === 0) return i;
-    if (n % (i + 4) === 0) return i + 4;
-    if (n % (i + 6) === 0) return i + 6;
-    if (n % (i + 10) === 0) return i + 10;
-    if (n % (i + 12) === 0) return i + 12;
-    if (n % (i + 16) === 0) return i + 16;
-    if (n % (i + 22) === 0) return i + 22;
-    if (n % (i + 24) === 0) return i + 24;
-    i += 30;
+// Above this bound, primality is decided by Miller–Rabin rather than trial
+// division.
+const MILLER_RABIN_THRESHOLD = 1n << 32n;
+
+// The first 12 primes are a deterministic Miller–Rabin witness set for every
+// n < 3.3·10²⁴, so `isPrimeBigint` is exact across that range (and an
+// extremely reliable probable-prime test beyond it).
+const MILLER_RABIN_BASES = [
+  2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n,
+];
+
+export function isPrimeBigint(n: bigint): boolean {
+  if (n < 2n) return false;
+  if (n <= LARGEST_SMALL_PRIME) return SMALL_PRIMES.has(Number(n));
+  if (n < MILLER_RABIN_THRESHOLD) {
+    // Exact 6k±1 trial division.
+    if (n % 2n === 0n || n % 3n === 0n) return false;
+    for (let i = 5n; i * i <= n; i += 6n)
+      if (n % i === 0n || n % (i + 2n) === 0n) return false;
+    return true;
   }
-  return n;
+  return millerRabin(n);
 }
 
-export function isPrimeBigint(n: bigint): boolean | undefined {
-  if (n <= 1) return false;
-
-  // Is it a known small prime?
-  if (n <= LARGEST_SMALL_PRIME) return isPrime(Number(n));
-
-  // Is it a factor of a small known prime?
-  for (const smallPrime of SMALL_PRIMES) {
-    if (n % BigInt(smallPrime) === BigInt(0)) return false;
+/** Modular exponentiation `base^exp mod mod` for `exp ≥ 0`, `mod ≥ 1`. */
+export function modPow(base: bigint, exp: bigint, mod: bigint): bigint {
+  if (mod === 1n) return 0n;
+  let result = 1n;
+  base = ((base % mod) + mod) % mod;
+  while (exp > 0n) {
+    if (exp & 1n) result = (result * base) % mod;
+    base = (base * base) % mod;
+    exp >>= 1n;
   }
-
-  if (n < LARGE_PRIME) n = leastBigFactor(n);
-
-  return probablyPrimeBigint(n, 30) ? undefined : false;
-}
-
-function leastBigFactor(n: bigint): bigint {
-  if (n === BigInt(1)) return BigInt(1);
-  if (n % BigInt(2) === BigInt(0)) return BigInt(2);
-  if (n % BigInt(3) === BigInt(0)) return BigInt(3);
-  if (n % BigInt(5) === BigInt(0)) return BigInt(5);
-  const m = BigInt(Math.floor(Math.sqrt(Number(n))));
-  let i = BigInt(7);
-  while (i <= m) {
-    if (n % i === BigInt(0)) return i;
-    if (n % (i + BigInt(4)) === BigInt(0)) return i + BigInt(4);
-    if (n % (i + BigInt(6)) === BigInt(0)) return i + BigInt(6);
-    if (n % (i + BigInt(10)) === BigInt(0)) return i + BigInt(10);
-    if (n % (i + BigInt(12)) === BigInt(0)) return i + BigInt(12);
-    if (n % (i + BigInt(16)) === BigInt(0)) return i + BigInt(16);
-    if (n % (i + BigInt(22)) === BigInt(0)) return i + BigInt(22);
-    if (n % (i + BigInt(24)) === BigInt(0)) return i + BigInt(24);
-    i += BigInt(30);
-  }
-  return n;
+  return result;
 }
 
 /**
- *  Miller-Rabin primality test
+ * Deterministic Miller–Rabin primality test (exact for n < 3.3·10²⁴; see
+ * `MILLER_RABIN_BASES`). This is the single Miller–Rabin implementation used
+ * across the engine — `isPrime`/`isPrimeBigint` reach it above the trial-
+ * division threshold, and the number-theory library shares it via
+ * `isPrimeBigint`.
  */
-function probablyPrime(n: number, k: number): boolean {
-  // if (n === 2 || n === 3)
-  // 	return true;
-  // if (n % 2 === 0 || n < 2)
-  // 	return false;
-
-  // Write (n - 1) as 2^s * d
-  let s = 0;
-  let d = n - 1;
-  while (d % 2 === 0) {
-    d /= 2;
-    ++s;
+function millerRabin(n: bigint): boolean {
+  for (const p of MILLER_RABIN_BASES) if (n % p === 0n) return n === p;
+  let d = n - 1n;
+  let s = 0n;
+  while (d % 2n === 0n) {
+    d /= 2n;
+    s += 1n;
   }
-
-  WitnessLoop: do {
-    // A base between 2 and n - 2
-    let x = Math.pow(2 + Math.floor(Math.random() * (n - 3)), d) % n;
-
-    if (x === 1 || x === n - 1) continue;
-
-    for (let i = s - 1; i--; ) {
+  WitnessLoop: for (const a of MILLER_RABIN_BASES) {
+    let x = modPow(a, d, n);
+    if (x === 1n || x === n - 1n) continue;
+    for (let r = 1n; r < s; r++) {
       x = (x * x) % n;
-      if (x === 1) return false;
-      if (x === n - 1) continue WitnessLoop;
+      if (x === n - 1n) continue WitnessLoop;
     }
-
     return false;
-  } while (--k);
-
-  return true;
-}
-
-function probablyPrimeBigint(n: bigint, k: number): boolean {
-  // if (n === 2 || n === 3)
-  // 	return true;
-  // if (n % 2 === 0 || n < 2)
-  // 	return false;
-
-  // Write (n - 1) as 2^s * d
-  let s = 0;
-  let d = n - BigInt(1);
-  while (d % BigInt(2) === BigInt(0)) {
-    d = d / BigInt(2);
-    ++s;
   }
-
-  WitnessLoop: do {
-    // A base between 2 and n - 2
-    let x = BigInt(2 + Math.floor(Math.random() * (Number(n) - 3))) ** d % n;
-
-    if (x === BigInt(1) || x === n - BigInt(1)) continue;
-
-    for (let i = s - 1; i--; ) {
-      x = (x * x) % n;
-      if (x === BigInt(1)) return false;
-      if (x === n - BigInt(1)) continue WitnessLoop;
-    }
-
-    return false;
-  } while (--k);
-
   return true;
 }
 

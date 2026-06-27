@@ -1,7 +1,7 @@
 import type { Expression, SymbolDefinitions } from '../global-types';
 import { toBigint } from '../boxed-expression/numerics';
 import { gcd, lcm } from '../numerics/numeric-bigint';
-import { bigPrimeFactors } from '../numerics/primes';
+import { bigPrimeFactors, isPrimeBigint, modPow } from '../numerics/primes';
 import { checkDeadline } from '../../common/interruptible';
 
 export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
@@ -84,7 +84,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         while (count < k) {
           candidate += 2n;
           if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
-          if (isPrimeFast(candidate, ce._deadline)) count += 1n;
+          if (isPrimeBigint(candidate)) count += 1n;
         }
         return ce.number(candidate);
       },
@@ -109,7 +109,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
             do {
               p += 1n;
               if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
-            } while (!isPrimeFast(p, ce._deadline));
+            } while (!isPrimeBigint(p));
           }
         } else {
           for (let i = 0n; i > k; i--) {
@@ -117,7 +117,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
               p -= 1n;
               if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
               if (p < 2n) return undefined; // no prime below 2
-            } while (!isPrimeFast(p, ce._deadline));
+            } while (!isPrimeBigint(p));
           }
         }
         return ce.number(p);
@@ -533,13 +533,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const attempts = 100 + 20 * hi.toString().length;
         for (let i = 0; i < attempts; i++) {
           const r = lo + randomBigintBelow(range);
-          if (isPrimeFast(r, ce._deadline)) return ce.number(r);
+          if (isPrimeBigint(r)) return ce.number(r);
         }
         // Safety net: a deterministic scan guarantees a result when the range
         // does contain a prime (only reached when sampling keeps missing).
         for (let p = lo; p <= hi; p++) {
           checkDeadline(ce._deadline);
-          if (isPrimeFast(p, ce._deadline)) return ce.number(p);
+          if (isPrimeBigint(p)) return ce.number(p);
         }
         return undefined;
       },
@@ -560,7 +560,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         let steps = 0;
         for (let k = 3n; k <= bound; k += 2n) {
           if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
-          if (isPrimeFast(k, ce._deadline)) count++;
+          if (isPrimeBigint(k)) count++;
         }
         return ce.number(count);
       },
@@ -671,7 +671,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const a = toBigint(aOp);
         const p = toBigint(pOp);
         if (a === null || p === null) return undefined;
-        if (p <= 2n || p % 2n === 0n || !isPrimeFast(p, ce._deadline))
+        if (p <= 2n || p % 2n === 0n || !isPrimeBigint(p))
           return undefined;
         return ce.number(jacobiSymbol(a, p));
       },
@@ -994,77 +994,6 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
-
-// Above this bound, primality switches from O(√n) trial division to
-// Miller–Rabin.
-const MILLER_RABIN_THRESHOLD = 1n << 32n;
-
-// The first 12 primes are a deterministic Miller–Rabin witness set for every
-// n < 3.3·10²⁴ — far beyond the threshold — so `isPrimeFast` stays exact
-// across the practical range.
-const MILLER_RABIN_BASES = [
-  2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n,
-];
-
-/**
- * Primality test: exact 6k±1 trial division below `MILLER_RABIN_THRESHOLD`,
- * Miller–Rabin above it (see `MILLER_RABIN_BASES` for the determinism range).
- */
-function isPrimeFast(n: bigint, deadline: number | undefined): boolean {
-  if (n < MILLER_RABIN_THRESHOLD) return isPrimeTrial(n, deadline);
-  return millerRabin(n, deadline);
-}
-
-function millerRabin(n: bigint, deadline: number | undefined): boolean {
-  for (const p of MILLER_RABIN_BASES) if (n % p === 0n) return n === p;
-  let d = n - 1n;
-  let s = 0n;
-  while (d % 2n === 0n) {
-    d /= 2n;
-    s += 1n;
-  }
-  WitnessLoop: for (const a of MILLER_RABIN_BASES) {
-    checkDeadline(deadline);
-    let x = modPow(a, d, n);
-    if (x === 1n || x === n - 1n) continue;
-    for (let r = 1n; r < s; r++) {
-      x = (x * x) % n;
-      if (x === n - 1n) continue WitnessLoop;
-    }
-    return false;
-  }
-  return true;
-}
-
-/**
- * Deterministic primality test by 6k±1 trial division. Exact for every input,
- * and adequate for the magnitudes reachable before the evaluation deadline
- * fires (the loop is guarded by `checkDeadline`).
- */
-function isPrimeTrial(n: bigint, deadline: number | undefined): boolean {
-  if (n < 2n) return false;
-  if (n < 4n) return true; // 2 and 3
-  if (n % 2n === 0n || n % 3n === 0n) return false;
-  let steps = 0;
-  for (let i = 5n; i * i <= n; i += 6n) {
-    if ((++steps & 0xfff) === 0) checkDeadline(deadline);
-    if (n % i === 0n || n % (i + 2n) === 0n) return false;
-  }
-  return true;
-}
-
-/** Modular exponentiation `base^exp mod mod` for `exp ≥ 0`, `mod ≥ 1`. */
-function modPow(base: bigint, exp: bigint, mod: bigint): bigint {
-  if (mod === 1n) return 0n;
-  let result = 1n;
-  base = ((base % mod) + mod) % mod;
-  while (exp > 0n) {
-    if (exp & 1n) result = (result * base) % mod;
-    base = (base * base) % mod;
-    exp >>= 1n;
-  }
-  return result;
-}
 
 /**
  * Extended Euclidean algorithm: returns `[g, x, y]` with `a·x + b·y = g`,

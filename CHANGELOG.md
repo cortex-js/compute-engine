@@ -72,6 +72,14 @@
     **`DigitCount(n, base?, digit?)`** — digit-occurrence counts;
     **`DigitSum(n, base?)`** — the digit sum.
 
+- **`IsPrime` is now reliable for large integers.** Primality was previously
+  left unevaluated above ~10¹⁵ and could silently round integers beyond 2⁵³ to a
+  wrong machine value. `IsPrime` (and `IsComposite`) now route through a single
+  deterministic Miller–Rabin implementation shared with the number-theory
+  library, so e.g. `IsPrime(2^61 - 1)` correctly returns `True`. (The previous
+  duplicate Miller–Rabin code, which used random bases and overflowed for large
+  inputs, has been removed.)
+
 - **`N(expr, precision)` evaluates to a requested number of significant
   digits.** The `N` function (and the `["N", expr]` MathJSON form) now accepts
   an optional precision argument: `["N", "Pi", 50]` returns π to 50 significant

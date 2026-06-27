@@ -466,6 +466,20 @@ describe('large primes use the Miller-Rabin path (n ≥ 2^32)', () => {
   });
 });
 
+describe('IsPrime is reliable for large n (shared Miller-Rabin)', () => {
+  const ip = (n: bigint) =>
+    ce.box(['IsPrime', ce.number(n)]).evaluate().toString();
+  test('large primes beyond 2^53 are recognized exactly', () => {
+    expect(ip(2305843009213693951n)).toEqual('"True"'); // 2^61 - 1 (Mersenne)
+    expect(ip(1000000000039n)).toEqual('"True"');
+    expect(ip(1000000000000000009n)).toEqual('"True"'); // prime
+  });
+  test('large composites are rejected', () => {
+    expect(ip(2305843009213693953n)).toEqual('"False"'); // 2^61 + 1
+    expect(ip(1000000000040n)).toEqual('"False"');
+  });
+});
+
 describe('FromDigits', () => {
   test('reconstructs an integer from its digits', () => {
     expect(evalStr(['FromDigits', ['List', 1, 2, 3, 4]])).toEqual('1234');
