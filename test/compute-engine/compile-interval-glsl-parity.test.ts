@@ -32,7 +32,7 @@ type Entry = {
 };
 
 const corpus = JSON.parse(
-  readFileSync(join(process.cwd(), 'interval-glsl-parity-corpus.json'), 'utf-8')
+  readFileSync(join(process.cwd(), 'docs/interval-glsl-parity-corpus.json'), 'utf-8')
 ) as { entries: Entry[] };
 
 const ce = new ComputeEngine();
