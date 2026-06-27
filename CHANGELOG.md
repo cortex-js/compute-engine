@@ -1,3 +1,30 @@
+## [Unreleased]
+
+### New Features
+
+- **Differential equation solvers.** Two new functions in the calculus library
+  provide an initial slice of ordinary differential equation (ODE) support:
+
+  - **`DSolve(eq, y, x)`** — symbolic solver for **first-order linear scalar**
+    equations of the form `y'(x) + p(x)·y(x) = q(x)`. It returns a `List` of
+    solutions, each an `Equal` expression for `y(x)`, introducing an integration
+    constant `C` (a fresh name is chosen if `C` is already in use). For example,
+    `DSolve(y'(x) = y(x), y, x)` → `[y(x) = C·e^x]` and
+    `DSolve(y'(x) + y(x) = x, y, x)` → `[y(x) = x - 1 + C·e^{-x}]`. Nonlinear or
+    higher-order equations are left unevaluated (inert).
+
+  - **`NDSolve(eq, y, limits, y0, steps?)`** — numerical solver for **explicit
+    scalar first-order** initial value problems `y'(x) = f(x, y)`, `y(x0) = y0`,
+    using a fixed-step fourth-order Runge–Kutta (RK4) method. It returns a
+    `List` of `[x, y]` sample pairs over the interval given by `limits` (a
+    `Limits` or `Tuple` of `(x, x0, x1)`); the number of steps defaults to 100.
+    It handles integrands with no elementary antiderivative (e.g. a Gaussian
+    IVP whose solution is expressed with `Erf`).
+
+  This slice is intentionally narrow so the API and result shape can get
+  feedback before broader ODE support (adaptive RK45, systems, higher-order
+  reductions, stiff and implicit solvers) is added.
+
 ## 0.64.0 _2026-06-27_
 
 ### New Features
@@ -83,11 +110,11 @@
   safe-integer range, so this class of silent-rounding bug cannot recur in the
   operators that use it for counts and indices.
 
-- **`Factorial2`, `Subfactorial`, and `BellNumber` no longer round a
-  non-integer argument.** These are defined only on integers; in non-strict
-  mode they previously rounded a non-integer (e.g. `Factorial2(5.5)` returned
-  `6!!`). They now stay symbolic for non-integer arguments. (In strict mode the
-  `(integer)` signature already rejected such inputs.)
+- **`Factorial2`, `Subfactorial`, and `BellNumber` no longer round a non-integer
+  argument.** These are defined only on integers; in non-strict mode they
+  previously rounded a non-integer (e.g. `Factorial2(5.5)` returned `6!!`). They
+  now stay symbolic for non-integer arguments. (In strict mode the `(integer)`
+  signature already rejected such inputs.)
 
 - **`N(expr, precision)` evaluates to a requested number of significant
   digits.** The `N` function (and the `["N", expr]` MathJSON form) now accepts
