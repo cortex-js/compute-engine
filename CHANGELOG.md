@@ -78,7 +78,10 @@
   deterministic Miller–Rabin implementation shared with the number-theory
   library, so e.g. `IsPrime(2^61 - 1)` correctly returns `True`. (The previous
   duplicate Miller–Rabin code, which used random bases and overflowed for large
-  inputs, has been removed.)
+  inputs, has been removed.) Relatedly, the internal `toInteger` helper now
+  returns `null` instead of a precision-lost value for integers beyond the
+  safe-integer range, so this class of silent-rounding bug cannot recur in the
+  operators that use it for counts and indices.
 
 - **`N(expr, precision)` evaluates to a requested number of significant
   digits.** The `N` function (and the `["N", expr]` MathJSON form) now accepts

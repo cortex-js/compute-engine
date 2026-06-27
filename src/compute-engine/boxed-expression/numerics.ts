@@ -140,21 +140,30 @@ export function asSmallInteger(
 }
 
 /**
- * Convert a boxed expression to an integer.
+ * Convert a boxed expression to a machine integer.
  * Returns null if the expression cannot be converted to an integer.
  * If the expression is a complex number, only the real part is considered.
  * If the real part is not an integer, it is rounded to the nearest integer.
  *
- * Unlike `asSmallInteger()`, this function does not check if the integer is
- * within the range of -SMALL_INTEGER to SMALL_INTEGER, and it rounds the
- * value to the nearest integer if it is a number.
+ * Unlike `asSmallInteger()`, this function does not restrict the result to
+ * [-SMALL_INTEGER, SMALL_INTEGER], and it rounds a non-integer real part to
+ * the nearest integer.
  *
+ * Returns null when the result is not finite or exceeds the safe-integer range
+ * (|n| > 2^53): a machine `number` cannot represent such an integer exactly, so
+ * returning a rounded value would silently lose precision. Callers that need
+ * the exact value of a large integer must use `toBigint()`/`asBigint()`
+ * instead. (This is what makes `toInteger` unsuitable for value-semantic uses
+ * such as primality testing — see `isPrime` in predicates.ts.)
  */
 export function toInteger(expr: Expression | undefined): number | null {
   if (!isNumber(expr)) return null;
   const num = expr.numericValue;
-
-  return Math.round(typeof num === 'number' ? num : num.re);
+  const re = typeof num === 'number' ? num : num.re;
+  if (!Number.isFinite(re)) return null;
+  const n = Math.round(re);
+  if (!Number.isSafeInteger(n)) return null;
+  return n;
 }
 
 /** Convert a boxed expression to a bigint.
