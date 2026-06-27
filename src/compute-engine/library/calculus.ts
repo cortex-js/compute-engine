@@ -13,11 +13,10 @@ import {
 import { monteCarloEstimate } from '../numerics/monte-carlo';
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature';
 import { centeredDiff8thOrder, limit } from '../numerics/numeric';
-import { nDSolve } from '../numerics/differential-equations';
 import { derivative, differentiate } from '../symbolic/derivative';
 import { antiderivative } from '../symbolic/antiderivative';
 import { dSolve } from '../symbolic/differential-equations';
-import { symbolArg } from '../differential-equation-utils';
+import { nDSolve, symbolArg } from '../differential-equation-utils';
 import { symbolicLimit } from '../symbolic/limit';
 import { residue } from '../symbolic/residue';
 import { canonicalLimits, canonicalLimitsSequence } from './utils';

@@ -2,8 +2,10 @@
 
 ### New Features
 
-- **Differential equation solvers.** Two new functions in the calculus library
-  provide an initial slice of ordinary differential equation (ODE) support:
+- **Differential equation solvers.** (contributed by
+  [KingArth0r](https://github.com/KingArth0r)) Two new functions in the calculus
+  library provide an initial slice of ordinary differential equation (ODE)
+  support:
 
   - **`DSolve(eq, y, x)`** — symbolic solver for **first-order linear scalar**
     equations of the form `y'(x) + p(x)·y(x) = q(x)`. It returns a `List` of
@@ -18,8 +20,8 @@
     using a fixed-step fourth-order Runge–Kutta (RK4) method. It returns a
     `List` of `[x, y]` sample pairs over the interval given by `limits` (a
     `Limits` or `Tuple` of `(x, x0, x1)`); the number of steps defaults to 100.
-    It handles integrands with no elementary antiderivative (e.g. a Gaussian
-    IVP whose solution is expressed with `Erf`).
+    It handles integrands with no elementary antiderivative (e.g. a Gaussian IVP
+    whose solution is expressed with `Erf`).
 
   This slice is intentionally narrow so the API and result shape can get
   feedback before broader ODE support (adaptive RK45, systems, higher-order
@@ -153,16 +155,17 @@
 
 ### New Features
 
-- **LaTeX parse errors carry their source location.** The `Error` expressions
-  produced by the LaTeX parser now include a `sourceOffsets: [start, end]`
-  character range identifying where in the input the error occurred, so a
-  consumer can map a parse error back to the offending span — e.g. to highlight
-  an invalid token in a mathfield. Offsets are zero-based and end-exclusive into
-  the serialized LaTeX (`tokensToString`); for input that round-trips through
-  the tokenizer unchanged — editor-generated LaTeX, with no comments, Unicode
-  normalization, or macro expansion — they match the original input string.
-  Missing-operand errors (an empty `\sqrt{}` or `\frac{}{}`) use a zero-width
-  range at the position where the token was expected. The new
+- **LaTeX parse errors carry their source location.** (contributed by
+  [zojize](https://github.com/zojize)) The `Error` expressions produced by the
+  LaTeX parser now include a `sourceOffsets: [start, end]` character range
+  identifying where in the input the error occurred, so a consumer can map a
+  parse error back to the offending span — e.g. to highlight an invalid token in
+  a mathfield. Offsets are zero-based and end-exclusive into the serialized
+  LaTeX (`tokensToString`); for input that round-trips through the tokenizer
+  unchanged — editor-generated LaTeX, with no comments, Unicode normalization,
+  or macro expansion — they match the original input string. Missing-operand
+  errors (an empty `\sqrt{}` or `\frac{}{}`) use a zero-width range at the
+  position where the token was expected. The new
   `Parser.sourceOffsets(startToken, endToken?)` helper lets custom dictionary
   entries attach a range to errors they raise. The raw parser output
   (`LatexSyntax().parse()`) always carries these offsets, so an `Error` node is
