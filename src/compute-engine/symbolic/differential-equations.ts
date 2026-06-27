@@ -1,6 +1,10 @@
 import { antiderivative } from './antiderivative';
 import type { Expression } from '../global-types';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
+import {
+  isDependentFunction,
+  isDerivativeOfDependent,
+} from '../differential-equation-utils';
 
 interface LinearTermCoefficients {
   derivative: Expression;
@@ -11,43 +15,6 @@ interface LinearTermCoefficients {
 function functionName(expr: Expression): string | undefined {
   if (!isFunction(expr)) return undefined;
   return expr.operator;
-}
-
-function isDependentFunction(
-  expr: Expression,
-  dependentName: string,
-  independentName: string
-): boolean {
-  return (
-    isFunction(expr) &&
-    expr.operator === dependentName &&
-    expr.nops === 1 &&
-    isSymbol(expr.op1, independentName)
-  );
-}
-
-function isDerivativeOfDependent(
-  expr: Expression,
-  dependentName: string,
-  independentName: string
-): boolean {
-  if (isFunction(expr, 'D')) {
-    return (
-      isDependentFunction(expr.op1, dependentName, independentName) &&
-      isSymbol(expr.op2, independentName)
-    );
-  }
-
-  if (isFunction(expr, 'Apply') && isFunction(expr.op1, 'Derivative')) {
-    const derivativeTarget = expr.op1.op1;
-    return (
-      isSymbol(derivativeTarget, dependentName) &&
-      expr.nops === 2 &&
-      isSymbol(expr.op2, independentName)
-    );
-  }
-
-  return false;
 }
 
 function splitTerm(
@@ -206,13 +173,37 @@ function expressionForDependent(
   };
 }
 
+function collectSymbols(
+  expr: Expression,
+  symbols = new Set<string>()
+): Set<string> {
+  if (isSymbol(expr)) symbols.add(expr.symbol);
+  if (isFunction(expr)) {
+    for (const op of expr.ops) collectSymbols(op, symbols);
+  }
+  return symbols;
+}
+
+function integrationConstant(equation: Expression): Expression {
+  const ce = equation.engine;
+  const usedSymbols = collectSymbols(equation);
+
+  for (let i = 0; ; i++) {
+    const name = i === 0 ? 'C' : 'c'.repeat(i);
+    if (usedSymbols.has(name)) continue;
+    if (ce.context.lexicalScope.bindings.has(name)) continue;
+    return ce.symbol(name);
+  }
+}
+
 /**
  * Solve a small first-order linear ODE subset:
  *
  *   y'(x) + p(x)y(x) = q(x)
  *
- * The returned expression is an `Equal` expression for `y(x)`. Unsupported
- * equations return `undefined`, allowing the `DSolve` operator to remain inert.
+ * The returned expression is a `List` of `Equal` expressions for `y(x)`.
+ * Unsupported equations return `undefined`, allowing the `DSolve` operator to
+ * remain inert.
  */
 export function dSolve(
   equation: Expression,
@@ -249,7 +240,7 @@ export function dSolve(
 
   const p = coefficients.dependent.div(coefficients.derivative).simplify();
   const q = coefficients.rest.neg().div(coefficients.derivative).simplify();
-  const c = ce.symbol('C');
+  const c = integrationConstant(equation);
 
   let solution: Expression;
   if (p.isSame(0)) {
@@ -263,5 +254,5 @@ export function dSolve(
     solution = c.add(integral).div(integratingFactor).simplify();
   }
 
-  return ce.function('Equal', [dependentCall, solution]);
+  return ce.function('List', [ce.function('Equal', [dependentCall, solution])]);
 }

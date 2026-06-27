@@ -1,6 +1,10 @@
 import { checkDeadline } from '../../common/interruptible';
 import type { Expression } from '../global-types';
-import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
+import { isFunction, sym } from '../boxed-expression/type-guards';
+import {
+  isDependentFunction,
+  isDerivativeOfDependent,
+} from '../differential-equation-utils';
 
 export type RK4Options = {
   steps: number;
@@ -51,42 +55,6 @@ export function rk4(
   }
 
   return samples;
-}
-
-function isDependentFunction(
-  expr: Expression,
-  dependentName: string,
-  independentName: string
-): boolean {
-  return (
-    isFunction(expr) &&
-    expr.operator === dependentName &&
-    expr.nops === 1 &&
-    isSymbol(expr.op1, independentName)
-  );
-}
-
-function isDerivativeOfDependent(
-  expr: Expression,
-  dependentName: string,
-  independentName: string
-): boolean {
-  if (isFunction(expr, 'D')) {
-    return (
-      isDependentFunction(expr.op1, dependentName, independentName) &&
-      isSymbol(expr.op2, independentName)
-    );
-  }
-
-  if (isFunction(expr, 'Apply') && isFunction(expr.op1, 'Derivative')) {
-    return (
-      isSymbol(expr.op1.op1, dependentName) &&
-      expr.nops === 2 &&
-      isSymbol(expr.op2, independentName)
-    );
-  }
-
-  return false;
 }
 
 function explicitRhs(
@@ -161,6 +129,7 @@ export function nDSolve(
     stateName
   );
   const compiled = ce._compile(compiledRhs, { realOnly: true });
+  if (!compiled.success) return undefined;
   const run = compiled.run as (vars: Record<string, number>) => number;
 
   const samples = rk4(

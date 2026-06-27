@@ -11,17 +11,11 @@ function ndsolve(
   dependent = 'y',
   independent = 'x',
   lower = 0,
-  upper = 1
+  upper = 1,
+  limits: unknown = ['Limits', independent, lower, upper]
 ) {
   return engine
-    .expr([
-      'NDSolve',
-      equation,
-      dependent,
-      ['Limits', independent, lower, upper],
-      initialValue,
-      steps,
-    ])
+    .expr(['NDSolve', equation, dependent, limits, initialValue, steps])
     .evaluate();
 }
 
@@ -34,7 +28,8 @@ function verifyFirstOrderSolution(
   solution: ReturnType<typeof dsolve>,
   rhs: unknown
 ): boolean {
-  const yValue = solution.op2;
+  const solutionEquation = solution.op1;
+  const yValue = solutionEquation.op2;
   const derivative = engine
     .expr(['D', yValue, 'x'])
     .evaluate()
@@ -58,7 +53,7 @@ describe('DSolve', () => {
   test('solves y prime equals y', () => {
     const solution = dsolve(['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']]);
 
-    expect(solution.toString()).toMatchInlineSnapshot(`y(x) === C * e^x`);
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === C * e^x]`);
     expect(verifyFirstOrderSolution(solution, ['y', 'x'])).toBe(true);
   });
 
@@ -69,7 +64,7 @@ describe('DSolve', () => {
       ['Multiply', 3, ['y', 'x']],
     ]);
 
-    expect(solution.toString()).toMatchInlineSnapshot(`y(x) === C / e^(-3x)`);
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === C / e^(-3x)]`);
     expect(
       verifyFirstOrderSolution(solution, ['Multiply', 3, ['y', 'x']])
     ).toBe(true);
@@ -82,7 +77,9 @@ describe('DSolve', () => {
       ['Power', 'x', 2],
     ]);
 
-    expect(solution.toString()).toMatchInlineSnapshot(`y(x) === 1/3 * x^3 + C`);
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === 1/3 * x^3 + C]`
+    );
     expect(verifyFirstOrderSolution(solution, ['Power', 'x', 2])).toBe(true);
   });
 
@@ -94,7 +91,7 @@ describe('DSolve', () => {
     ]);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `y(x) === x + C / e^x - 1`
+      `[y(x) === x + C / e^x - 1]`
     );
     expect(
       verifyFirstOrderSolution(solution, ['Subtract', 'x', ['y', 'x']])
@@ -108,13 +105,25 @@ describe('DSolve', () => {
       0,
     ]);
 
-    expect(solution.toString()).toMatchInlineSnapshot(`y(x) === C / e^(x^2)`);
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === C / e^(x^2)]`);
     expect(
       verifyFirstOrderSolution(solution, [
         'Negate',
         ['Multiply', 2, 'x', ['y', 'x']],
       ])
     ).toBe(true);
+  });
+
+  test('uses a fallback integration constant when C is already declared', () => {
+    engine.declare('C', 'real');
+    try {
+      const solution = dsolve(['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']]);
+
+      expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === c * e^x]`);
+      expect(verifyFirstOrderSolution(solution, ['y', 'x'])).toBe(true);
+    } finally {
+      engine.forget('C');
+    }
   });
 
   test('stays inert for unsupported nonlinear first-order equations', () => {
@@ -146,6 +155,25 @@ describe('NDSolve', () => {
 
     expect(result.operator).toBe('List');
     expect(result.ops.length).toBe(101);
+    expect(x).toBeCloseTo(1, 12);
+    expect(y).toBeCloseTo(expected, 8);
+  });
+
+  test('accepts tuple limits', () => {
+    const result = ndsolve(
+      ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+      1,
+      100,
+      'y',
+      'x',
+      0,
+      1,
+      ['Tuple', 'x', 0, 1]
+    );
+    const [x, y] = finalSample(result);
+    const expected = engine.expr(['Exp', 1]).N().re;
+
+    expect(result.operator).toBe('List');
     expect(x).toBeCloseTo(1, 12);
     expect(y).toBeCloseTo(expected, 8);
   });

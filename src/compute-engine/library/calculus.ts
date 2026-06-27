@@ -17,6 +17,7 @@ import { nDSolve } from '../numerics/differential-equations';
 import { derivative, differentiate } from '../symbolic/derivative';
 import { antiderivative } from '../symbolic/antiderivative';
 import { dSolve } from '../symbolic/differential-equations';
+import { symbolArg } from '../differential-equation-utils';
 import { symbolicLimit } from '../symbolic/limit';
 import { residue } from '../symbolic/residue';
 import { canonicalLimits, canonicalLimitsSequence } from './utils';
@@ -473,12 +474,6 @@ volumes
       lazy: true,
       signature: '(expression, symbol, symbol) -> expression',
       canonical: (ops, { engine }) => {
-        const symbolArg = (arg: Expression | undefined): Expression => {
-          if (arg === undefined) return engine.error('missing');
-          if (!isSymbol(arg)) return engine.typeError('symbol', arg.type, arg);
-          return arg;
-        };
-
         if (ops.length === 0)
           return engine._fn('DSolve', [
             engine.error('missing'),
@@ -494,14 +489,14 @@ volumes
         if (ops.length === 2)
           return engine._fn('DSolve', [
             ops[0],
-            symbolArg(ops[1]),
+            symbolArg(engine, ops[1]),
             engine.error('missing'),
           ]);
 
         return engine._fn('DSolve', [
           ops[0],
-          symbolArg(ops[1]),
-          symbolArg(ops[2]),
+          symbolArg(engine, ops[1]),
+          symbolArg(engine, ops[2]),
         ]);
       },
       evaluate: ([equation, dependent, independent]) =>
@@ -515,17 +510,16 @@ volumes
       signature:
         '(expression, symbol, limits:(tuple|symbol), number, number?) -> list',
       canonical: (ops, { engine }) => {
-        const symbolArg = (arg: Expression | undefined): Expression => {
-          if (arg === undefined) return engine.error('missing');
-          if (!isSymbol(arg)) return engine.typeError('symbol', arg.type, arg);
-          return arg;
-        };
-
         const missing = engine.error('missing');
+        const limits =
+          ops[2] && isFunction(ops[2])
+            ? canonicalLimits(ops[2].ops, { engine })
+            : canonicalLimits(ops[2] ? [ops[2]] : [], { engine });
+
         return engine._fn('NDSolve', [
           ops[0] ?? missing,
-          symbolArg(ops[1]),
-          ops[2] ?? missing,
+          symbolArg(engine, ops[1]),
+          limits ?? missing,
           ops[3]?.canonical ?? missing,
           ...(ops[4] ? [ops[4].canonical] : []),
         ]);
