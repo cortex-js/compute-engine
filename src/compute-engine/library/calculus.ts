@@ -13,8 +13,10 @@ import {
 import { monteCarloEstimate } from '../numerics/monte-carlo';
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature';
 import { centeredDiff8thOrder, limit } from '../numerics/numeric';
+import { nDSolve } from '../numerics/differential-equations';
 import { derivative, differentiate } from '../symbolic/derivative';
 import { antiderivative } from '../symbolic/antiderivative';
+import { dSolve } from '../symbolic/differential-equations';
 import { symbolicLimit } from '../symbolic/limit';
 import { residue } from '../symbolic/residue';
 import { canonicalLimits, canonicalLimitsSequence } from './utils';
@@ -463,6 +465,73 @@ volumes
           ).estimate
         );
       },
+    },
+
+    DSolve: {
+      description: 'Symbolic differential equation solver.',
+      broadcastable: false,
+      lazy: true,
+      signature: '(expression, symbol, symbol) -> expression',
+      canonical: (ops, { engine }) => {
+        const symbolArg = (arg: Expression | undefined): Expression => {
+          if (arg === undefined) return engine.error('missing');
+          if (!isSymbol(arg)) return engine.typeError('symbol', arg.type, arg);
+          return arg;
+        };
+
+        if (ops.length === 0)
+          return engine._fn('DSolve', [
+            engine.error('missing'),
+            engine.error('missing'),
+            engine.error('missing'),
+          ]);
+        if (ops.length === 1)
+          return engine._fn('DSolve', [
+            ops[0],
+            engine.error('missing'),
+            engine.error('missing'),
+          ]);
+        if (ops.length === 2)
+          return engine._fn('DSolve', [
+            ops[0],
+            symbolArg(ops[1]),
+            engine.error('missing'),
+          ]);
+
+        return engine._fn('DSolve', [
+          ops[0],
+          symbolArg(ops[1]),
+          symbolArg(ops[2]),
+        ]);
+      },
+      evaluate: ([equation, dependent, independent]) =>
+        dSolve(equation, dependent, independent),
+    },
+
+    NDSolve: {
+      description: 'Numerical differential equation solver.',
+      broadcastable: false,
+      lazy: true,
+      signature:
+        '(expression, symbol, limits:(tuple|symbol), number, number?) -> list',
+      canonical: (ops, { engine }) => {
+        const symbolArg = (arg: Expression | undefined): Expression => {
+          if (arg === undefined) return engine.error('missing');
+          if (!isSymbol(arg)) return engine.typeError('symbol', arg.type, arg);
+          return arg;
+        };
+
+        const missing = engine.error('missing');
+        return engine._fn('NDSolve', [
+          ops[0] ?? missing,
+          symbolArg(ops[1]),
+          ops[2] ?? missing,
+          ops[3]?.canonical ?? missing,
+          ...(ops[4] ? [ops[4].canonical] : []),
+        ]);
+      },
+      evaluate: ([equation, dependent, limits, initialValue, steps]) =>
+        nDSolve(equation, dependent, limits, initialValue, steps),
     },
 
     // This is used to represent the indexing set/limits (i.e.
