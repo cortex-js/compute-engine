@@ -11,7 +11,7 @@
 - LogOnePlus: { domain: 'Numbers' },
   - See https://numerics.diploid.ca/floating-point-part-4.html, regarding
     'remainder' and 'truncatingRemainder'
-- Zeta function
+
 - Hash
 
 ### Number Theory:
