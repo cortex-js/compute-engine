@@ -1106,7 +1106,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (mag !== undefined)
             return engine._fn('Quantity', [engine.number(-mag), evalX.op2]);
         }
-        return x.neg();
+        const neg = evalX.neg();
+        // If the operand only became a collection (vector/matrix) *after*
+        // evaluation — e.g. `Negate(Multiply(A, B))` — the broadcast path was
+        // skipped (the raw operand wasn't yet a collection), leaving an
+        // undistributed `Negate(matrix)`. A later matrix `Add`/`Subtract` would
+        // then misclassify it as a scalar and broadcast it over the other
+        // matrix, producing a bogus higher-rank result. Evaluating the negation
+        // distributes it element-wise. (Guarded so symbolic scalars like
+        // `Negate(a)` don't recurse.)
+        return evalX.isIndexedCollection ? neg.evaluate() : neg;
       },
     },
 

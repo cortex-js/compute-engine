@@ -218,6 +218,14 @@ export function canonicalInvisibleOperator(
   // Is it an invisible multiplication?
   // (are all argument numeric or indexable collections?)
   //
+  // A `Matrix(…)` operand is matched explicitly so that juxtaposed matrices
+  // (e.g. `\begin{pmatrix}…\end{pmatrix}\begin{pmatrix}…\end{pmatrix}`) and
+  // scalar·matrix (`2\begin{pmatrix}…\end{pmatrix}`) become a `Multiply` (the
+  // matrix product / scaling) rather than a `Tuple`. The `Matrix(…)` wrapper —
+  // which `Vector(…)` also canonicalizes to — reports
+  // `isIndexedCollection === false`, so the collection test below misses it
+  // (raw `List` vectors/matrices are caught by that test).
+  //
   if (
     ops.every(
       (x) =>
@@ -226,6 +234,7 @@ export function canonicalInvisibleOperator(
           x.type.type === 'any' ||
           x.type.type === 'expression' ||
           x.type.matches('number') ||
+          isFunction(x, 'Matrix') ||
           (x.isIndexedCollection && !isString(x)))
     )
   ) {

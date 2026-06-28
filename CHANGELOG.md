@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+### Resolved Issues
+
+- **Juxtaposed matrices now form the matrix product.** Writing two matrices
+  next to each other (`\begin{pmatrix}…\end{pmatrix}\begin{pmatrix}…\end{pmatrix}`),
+  or a scalar next to a matrix (`2\begin{pmatrix}…\end{pmatrix}`), previously
+  produced a `Tuple` instead of a product, because the `Matrix(…)` wrapper is
+  not reported as an indexed collection. The invisible (implicit) operator now
+  treats matrix operands as multiplication, consistent with `*`/`\cdot`/`\times`.
+
+- **`Negate` (and hence `Subtract`) of a matrix-valued product is distributed
+  correctly.** A negation whose operand only became a vector/matrix after
+  evaluation — e.g. `Negate(Multiply(A, B))` from `A B - A B` — was left
+  undistributed, so the following `Add`/`Subtract` misclassified it as a scalar
+  and broadcast it over the other matrix, yielding a bogus higher-rank result.
+  Matrix subtraction (e.g. the commutator `AB - BA`) now evaluates correctly.
+
 ### New Features
 
 - **`Multiply` now operates on vectors and matrices.** Previously a product with

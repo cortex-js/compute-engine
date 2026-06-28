@@ -561,6 +561,46 @@ describe('Hadamard product (\\odot)', () => {
   });
 });
 
+describe('Matrix juxtaposition and subtraction', () => {
+  const M = String.raw`\begin{pmatrix}1&2\\3&4\end{pmatrix}`;
+  const N = String.raw`\begin{pmatrix}5&6\\7&8\end{pmatrix}`;
+  const evL = (latex: string) => ce.parse(latex).evaluate().toString();
+
+  // Juxtaposed matrices form the matrix product (not a Tuple). The
+  // `Matrix(…)` wrapper reports `isIndexedCollection === false`, so
+  // `InvisibleOperator` used to fall through to `Tuple`.
+  it('parses juxtaposed matrices as a product', () => {
+    expect(ce.parse(M + N).json[0]).toBe('Multiply');
+  });
+
+  it('evaluates juxtaposed matrices to the matrix product', () => {
+    expect(evL(M + N)).toMatchInlineSnapshot(`[[19,22],[43,50]]`);
+  });
+
+  it('scales a juxtaposed scalar·matrix', () => {
+    expect(evL('2' + M)).toMatchInlineSnapshot(`[[2,4],[6,8]]`);
+  });
+
+  // Matrix subtraction (regression: `Negate` of a matrix-valued product was
+  // left undistributed, so `Add`/`Subtract` broadcast it into a bogus
+  // rank-4 result).
+  it('subtracts two matrix products to zero', () => {
+    expect(
+      evL(M + N + '-' + M + String.raw`\cdot ` + N)
+    ).toMatchInlineSnapshot(`[[0,0],[0,0]]`);
+  });
+
+  it('computes the commutator AB - BA', () => {
+    expect(evL(M + N + '-' + N + M)).toMatchInlineSnapshot(`[[-4,-12],[12,4]]`);
+  });
+
+  it('negates a matrix product element-wise', () => {
+    expect(
+      ce.box(['Negate', ['Multiply', sq2_n, sq2_n2]]).evaluate().toString()
+    ).toMatchInlineSnapshot(`[[-19,-22],[-43,-50]]`);
+  });
+});
+
 describe('Flatten', () => {
   it('should flatten a scalar', () => {
     const result = ce.expr(['Flatten', 42]).evaluate();
