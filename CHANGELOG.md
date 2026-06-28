@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.65.0 _2026-06-28_
 
 ### New Features
@@ -28,10 +30,9 @@
   reductions, stiff and implicit solvers) is added.
 
 - **`\keyword{…}` command for control-flow and logic keywords.** Keyword
-  constructs — `if`/`then`/`else`, `for`/`from`/`to`/`do`, `where`,
-  `such that`, `and`, `or`, `iff`, `for all`, `there exists`, `break`,
-  `continue`, `return` — can now be written with a dedicated `\keyword{…}`
-  command, for example:
+  constructs — `if`/`then`/`else`, `for`/`from`/`to`/`do`, `where`, `such that`,
+  `and`, `or`, `iff`, `for all`, `there exists`, `break`, `continue`, `return` —
+  can now be written with a dedicated `\keyword{…}` command, for example:
 
   ```latex
   \keyword{if} x > 0 \keyword{then} 1 \keyword{else} 0
@@ -45,9 +46,9 @@
   also serve as the default-branch marker inside a `cases` environment.
 
   A new `keywordStyle` serialization option — `"text"` (default), `"keyword"`,
-  or `"operatorname"` — selects which spelling is emitted when serializing
-  `If`, `Loop`, `Break`, `Continue`, and `Return` back to LaTeX. The default
-  preserves the previous `\text{…}` output.
+  or `"operatorname"` — selects which spelling is emitted when serializing `If`,
+  `Loop`, `Break`, `Continue`, and `Return` back to LaTeX. The default preserves
+  the previous `\text{…}` output.
 
 ## 0.64.0 _2026-06-27_
 
