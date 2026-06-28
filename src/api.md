@@ -555,7 +555,7 @@ The symbols that appear in function-application syntax `f(…)` in `latex`
 but are not defined as functions in the current scope (so they parse as
 implicit multiplication or are left unresolved). Scope-aware and
 side-effect-free. Intended to flag calls to undefined functions in tools
-such as notebooks; intersect with BoxedExpression.freeVariables
+such as notebooks; intersect with [Expression.freeVariables](#freevariables)
 to drop deliberate multiplication of defined values.
 
 ####### latex
@@ -7115,7 +7115,7 @@ The symbols that appear in function-application syntax `f(…)` in `latex`
 but are not defined as functions in the current scope (so they parse as
 implicit multiplication or are left unresolved). Scope-aware and
 side-effect-free. Intended to flag calls to undefined functions in tools
-such as notebooks; intersect with BoxedExpression.freeVariables
+such as notebooks; intersect with [Expression.freeVariables](#freevariables)
 to drop deliberate multiplication of defined values.
 
 ####### latex

@@ -1713,7 +1713,7 @@ export class ComputeEngine implements IComputeEngine {
    * This is a parse-time signal — the application-vs-multiplication
    * distinction is erased by canonicalization — and the call has no side
    * effects (it does not declare symbols). Intended to be intersected with
-   * {@link BoxedExpression.freeVariables} / unresolved symbols to warn that,
+   * {@link Expression.freeVariables} / unresolved symbols to warn that,
    * say, `f(x)` looks like a call to an undefined function.
    *
    * ```js

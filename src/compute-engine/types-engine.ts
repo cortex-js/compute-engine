@@ -253,7 +253,7 @@ export interface IComputeEngine {
    * but are not defined as functions in the current scope (so they parse as
    * implicit multiplication or are left unresolved). Scope-aware and
    * side-effect-free. Intended to flag calls to undefined functions in tools
-   * such as notebooks; intersect with {@link BoxedExpression.freeVariables}
+   * such as notebooks; intersect with {@link Expression.freeVariables}
    * to drop deliberate multiplication of defined values.
    */
   appliedNonFunctions(latex: string): string[];
