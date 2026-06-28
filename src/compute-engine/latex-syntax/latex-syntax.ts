@@ -174,6 +174,7 @@ function defaultSerializeOptions(
     invisiblePlus: '',
     multiply: '\\times',
     missingSymbol: '\\blacksquare',
+    keywordStyle: 'text' as const,
 
     dotNotation: false,
     dmsFormat: false,

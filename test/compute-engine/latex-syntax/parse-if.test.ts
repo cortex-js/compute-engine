@@ -75,4 +75,26 @@ describe('IF - PARSING', () => {
       `["If", ["Less", 0, "x"], ["Square", "x"], ["Negate", "x"]]`
     );
   });
+
+  test('\\keyword{if} expression', () => {
+    expect(
+      ce.parse(
+        '\\keyword{if} x > 0 \\keyword{then} x^2 \\keyword{else} -x'
+      )
+    ).toMatchInlineSnapshot(
+      `["If", ["Less", 0, "x"], ["Square", "x"], ["Negate", "x"]]`
+    );
+  });
+
+  test('Mixed \\keyword, \\text and \\operatorname keywords', () => {
+    expect(
+      ce.parse('\\keyword{if} x > 0 \\text{ then } x^2 \\operatorname{else} -x')
+    ).toMatchInlineSnapshot(
+      `["If", ["Less", 0, "x"], ["Square", "x"], ["Negate", "x"]]`
+    );
+  });
+
+  test('\\keyword{iffy} is still parsed as String (text run)', () => {
+    expect(ce.parse('\\keyword{iffy}')).toMatchInlineSnapshot(`'iffy'`);
+  });
 });

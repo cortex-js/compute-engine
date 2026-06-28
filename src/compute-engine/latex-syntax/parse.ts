@@ -2636,10 +2636,14 @@ export class _Parser implements Parser {
           const opDefs = this.peekDefinitions('operator');
           if (
             opDefs.length === 0 ||
-            opDefs.every(([def]) => def.latexTrigger === '\\text')
+            opDefs.every(
+              ([def]) =>
+                def.latexTrigger === '\\text' ||
+                def.latexTrigger === '\\keyword'
+            )
           ) {
-            // All operator defs ahead are \text entries. Check if any of
-            // them would match an infix keyword (e.g. "and", "or", "where").
+            // All operator defs ahead are \text / \keyword entries. Check if
+            // any would match an infix keyword (e.g. "and", "or", "where").
             // If so, this is a real operator that was skipped due to
             // precedence — do NOT enter InvisibleOperator.
             if (

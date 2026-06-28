@@ -19,4 +19,28 @@ describe('WHICH', () => {
       ]
     `);
   });
+
+  test('\\keyword{otherwise} / \\keyword{else} act as the default branch', () => {
+    const withText = ce.parse(
+      '\\begin{cases} x & x > 0 \\\\ -x & \\text{otherwise} \\end{cases}'
+    ).json;
+    const withKeywordOtherwise = ce.parse(
+      '\\begin{cases} x & x > 0 \\\\ -x & \\keyword{otherwise} \\end{cases}'
+    ).json;
+    const withKeywordElse = ce.parse(
+      '\\begin{cases} x & x > 0 \\\\ -x & \\keyword{else} \\end{cases}'
+    ).json;
+
+    // The default branch is marked by a `True` condition.
+    expect(withKeywordOtherwise).toEqual([
+      'Which',
+      ['Less', 0, 'x'],
+      'x',
+      'True',
+      ['Negate', 'x'],
+    ]);
+    // All spellings produce the same expression.
+    expect(withKeywordOtherwise).toEqual(withText);
+    expect(withKeywordElse).toEqual(withText);
+  });
 });

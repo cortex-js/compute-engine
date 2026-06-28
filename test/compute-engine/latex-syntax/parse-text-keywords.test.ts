@@ -108,3 +108,61 @@ describe('TEXT KEYWORDS', () => {
     `);
   });
 });
+
+describe('KEYWORD COMMAND (\\keyword{…})', () => {
+  test('\\keyword{and} as logical conjunction', () => {
+    expect(ce.parse('x > 0 \\keyword{and} x < 10').json).toEqual([
+      'And',
+      ['Less', 0, 'x'],
+      ['Less', 'x', 10],
+    ]);
+  });
+
+  test('\\keyword{or} as logical disjunction', () => {
+    expect(ce.parse('x = 0 \\keyword{or} x = 1').json).toEqual([
+      'Or',
+      ['Equal', 'x', 0],
+      ['Equal', 'x', 1],
+    ]);
+  });
+
+  test('\\keyword{iff} as biconditional', () => {
+    expect(ce.parse('P \\keyword{iff} Q').json).toEqual(['Equivalent', 'P', 'Q']);
+  });
+
+  test('\\keyword{if and only if} (multi-word, one token)', () => {
+    expect(ce.parse('P \\keyword{if and only if} Q').json).toEqual([
+      'Equivalent',
+      'P',
+      'Q',
+    ]);
+  });
+
+  test('\\keyword{for all} quantifier', () => {
+    expect(ce.parse('\\keyword{for all} x, x > 0').json).toEqual([
+      'ForAll',
+      'x',
+      ['Greater', 'x', 0],
+    ]);
+  });
+
+  test('\\keyword{where} binding', () => {
+    expect(ce.parse('x \\keyword{where} x = 2').json).toEqual([
+      'Block',
+      ['Equal', 'x', 2],
+      'x',
+    ]);
+  });
+
+  test('mixed \\keyword and \\text spellings interoperate', () => {
+    expect(
+      ce.parse('x > 0 \\keyword{and} x < 10 \\text{ or } x = -1').json
+    ).toEqual(
+      ce.parse('x > 0 \\text{ and } x < 10 \\text{ or } x = -1').json
+    );
+  });
+
+  test('\\keyword{andy} is NOT a keyword (text run)', () => {
+    expect(ce.parse('\\keyword{andy}').json).toMatchInlineSnapshot(`'andy'`);
+  });
+});

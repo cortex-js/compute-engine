@@ -1181,6 +1181,23 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    */
   missingSymbol: LatexString; // e.g. '\\placeholder{}'
 
+  /**
+   * How to serialize keyword constructs (`if`/`then`/`else`, `for`, `where`,
+   * `and`, `or`, the quantifiers, …).
+   *
+   * - `'text'` (default): `\text{if }`, `\text{ then }`, … — the conventional
+   *   spelling. Spacing is encoded manually inside the braces.
+   * - `'keyword'`: `\keyword{if}`, `\keyword{then}`, … — a math-mode command
+   *   whose renderer applies symmetric keyword spacing. Requires the rendering
+   *   environment to define `\keyword`.
+   * - `'operatorname'`: `\operatorname{if}`, … — operator-name spacing.
+   *
+   * All three spellings parse back to the same expression.
+   *
+   * @default 'text'
+   */
+  keywordStyle: 'text' | 'keyword' | 'operatorname';
+
   // Styles
   applyFunctionStyle: (
     expr: MathJsonExpression,

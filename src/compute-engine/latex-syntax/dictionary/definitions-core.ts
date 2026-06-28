@@ -19,6 +19,7 @@ import {
   ARROW_PRECEDENCE,
   ASSIGNMENT_PRECEDENCE,
   LatexDictionary,
+  LatexDictionaryEntry,
   Parser,
   PostfixEntry,
   Serializer,
@@ -240,6 +241,302 @@ function serializeOps(sep = '') {
 
     return joinLatex(ys);
   };
+}
+
+//
+// Keyword constructs
+//
+// Several control-flow / logic keywords (`if`/`then`/`else`, `for`/`from`/
+// `to`/`do`, `where`, `and`, `or`, the quantifiers, …) can be written three
+// equivalent ways:
+//   - `\text{if}`        — text-mode spelling (conventional, but switches the
+//                          editor to text mode, which is awkward to input)
+//   - `\keyword{if}`     — math-mode keyword command, with symmetric keyword
+//                          spacing on both sides (unlike `\operatorname`, whose
+//                          spacing is tuned for function application)
+//   - `\operatorname{if}` / `\mathrm{if}` — operator-name spelling
+//
+// Rather than hand-writing an entry per (keyword × spelling), the KEYWORDS
+// table below is the single source of truth, and `keywordEntries()` generates
+// the `\text`- and `\keyword`-triggered entries (plus an `\operatorname`/symbol
+// entry where `operatorname` is set) for each. Inner keywords (`then`, `else`,
+// `from`, `to`, `do`, `with`) are matched on demand by `matchKeyword()`, which
+// accepts all three spellings.
+//
+
+type KeywordPrefixBuild = (
+  parser: Parser,
+  until?: Readonly<Terminator>
+) => MathJsonExpression | null;
+
+type KeywordInfixBuild = (
+  parser: Parser,
+  lhs: MathJsonExpression,
+  until: Readonly<Terminator>
+) => MathJsonExpression | null;
+
+type KeywordDef =
+  | {
+      surface: string;
+      kind: 'prefix';
+      precedence: number;
+      operatorname?: boolean;
+      build: KeywordPrefixBuild;
+    }
+  | {
+      surface: string;
+      kind: 'infix';
+      precedence: number;
+      associativity?: 'right' | 'none';
+      operatorname?: boolean;
+      build: KeywordInfixBuild;
+    };
+
+const KEYWORDS: KeywordDef[] = [
+  // Control flow
+  {
+    surface: 'if',
+    kind: 'prefix',
+    precedence: 245,
+    operatorname: true,
+    build: parseIfExpression,
+  },
+  {
+    surface: 'for',
+    kind: 'prefix',
+    precedence: 245,
+    operatorname: true,
+    build: parseForExpression,
+  },
+  {
+    surface: 'for',
+    kind: 'infix',
+    precedence: 19, // Just below comma (20), so the body is captured whole
+    associativity: 'none',
+    operatorname: true,
+    build: (parser, lhs, until) => parseForComprehension(parser, lhs, until),
+  },
+  {
+    surface: 'break',
+    kind: 'prefix',
+    precedence: 245,
+    operatorname: true,
+    build: () => ['Break'] as MathJsonExpression,
+  },
+  {
+    surface: 'continue',
+    kind: 'prefix',
+    precedence: 245,
+    operatorname: true,
+    build: () => ['Continue'] as MathJsonExpression,
+  },
+  {
+    surface: 'return',
+    kind: 'prefix',
+    precedence: 245,
+    operatorname: true,
+    build: (parser, until) =>
+      [
+        'Return',
+        parser.parseExpression(until) ?? 'Nothing',
+      ] as MathJsonExpression,
+  },
+
+  // Quantifiers
+  {
+    surface: 'for all',
+    kind: 'prefix',
+    precedence: 200, // Same as \forall
+    build: (parser, until) => parseQuantifier('ForAll')(parser, until!),
+  },
+  {
+    surface: 'there exists',
+    kind: 'prefix',
+    precedence: 200, // Same as \exists
+    build: (parser, until) => parseQuantifier('Exists')(parser, until!),
+  },
+
+  // Variable binding / constraints
+  {
+    surface: 'where',
+    kind: 'infix',
+    precedence: 21, // Above ; (19) and , (20), very low binding
+    associativity: 'none',
+    operatorname: true,
+    build: (parser, lhs, until) => parseWhereExpression(parser, lhs, until),
+  },
+  {
+    surface: 'such that',
+    kind: 'infix',
+    precedence: 21, // Low precedence to capture full condition (like 'where')
+    associativity: 'right',
+    build: (parser, lhs, until) =>
+      [
+        'Colon',
+        lhs,
+        parser.parseExpression({ ...until, minPrec: 21 }) ?? 'Nothing',
+      ] as MathJsonExpression,
+  },
+
+  // Logical connectives
+  {
+    surface: 'and',
+    kind: 'infix',
+    precedence: 235, // Same as \land
+    associativity: 'right',
+    build: (parser, lhs, until) =>
+      [
+        'And',
+        lhs,
+        parser.parseExpression({ ...until, minPrec: 235 }) ?? 'Nothing',
+      ] as MathJsonExpression,
+  },
+  {
+    surface: 'or',
+    kind: 'infix',
+    precedence: 230, // Same as \lor
+    associativity: 'right',
+    build: (parser, lhs, until) =>
+      [
+        'Or',
+        lhs,
+        parser.parseExpression({ ...until, minPrec: 230 }) ?? 'Nothing',
+      ] as MathJsonExpression,
+  },
+  {
+    surface: 'iff',
+    kind: 'infix',
+    precedence: 219, // Same as \iff
+    associativity: 'right',
+    build: (parser, lhs, until) =>
+      [
+        'Equivalent',
+        lhs,
+        parser.parseExpression({ ...until, minPrec: 219 }) ?? 'Nothing',
+      ] as MathJsonExpression,
+  },
+  {
+    surface: 'if and only if',
+    kind: 'infix',
+    precedence: 219,
+    associativity: 'right',
+    build: (parser, lhs, until) =>
+      [
+        'Equivalent',
+        lhs,
+        parser.parseExpression({ ...until, minPrec: 219 }) ?? 'Nothing',
+      ] as MathJsonExpression,
+  },
+];
+
+/**
+ * Generate the LaTeX dictionary entries for every keyword in `KEYWORDS`.
+ *
+ * For each keyword we emit a `\text{…}`- and a `\keyword{…}`-triggered entry of
+ * the keyword's kind/precedence, and — when `operatorname` is set — an
+ * `\operatorname{…}` / `\mathrm{…}` (symbol-trigger) entry. The `\text`/
+ * `\keyword` entries match the braced surface form (the framework has already
+ * consumed the trigger token) before delegating to the keyword's `build`.
+ *
+ * A final catch-all routes `\keyword{…}` whose content is not a known keyword
+ * to a plain text run (a `String`), mirroring `\text{…}`. That is what lets
+ * `\keyword{otherwise}` / `\keyword{else}` act as `cases` default markers
+ * without any special-casing in the `cases` parser.
+ */
+function keywordEntries(): LatexDictionary {
+  const entries: Partial<LatexDictionaryEntry>[] = [];
+
+  for (const kw of KEYWORDS) {
+    const surface = kw.surface;
+    for (const trigger of ['\\text', '\\keyword'] as const) {
+      if (kw.kind === 'prefix') {
+        const build = kw.build;
+        entries.push({
+          latexTrigger: [trigger],
+          kind: 'prefix',
+          precedence: kw.precedence,
+          parse: (parser, until) => {
+            const start = parser.index;
+            if (!matchBracedKeyword(parser, surface)) {
+              parser.index = start;
+              return null;
+            }
+            return build(parser, until);
+          },
+        });
+      } else {
+        const build = kw.build;
+        entries.push({
+          latexTrigger: [trigger],
+          kind: 'infix',
+          associativity: kw.associativity ?? 'right',
+          precedence: kw.precedence,
+          parse: (parser, lhs, until) => {
+            const start = parser.index;
+            if (!matchBracedKeyword(parser, surface)) {
+              parser.index = start;
+              return null;
+            }
+            return build(parser, lhs, until);
+          },
+        });
+      }
+    }
+
+    // \operatorname{…} / \mathrm{…} spelling (single-word keywords only).
+    if (kw.operatorname) {
+      if (kw.kind === 'prefix') {
+        const build = kw.build;
+        entries.push({
+          symbolTrigger: surface,
+          kind: 'prefix',
+          precedence: kw.precedence,
+          parse: (parser, until) => build(parser, until),
+        });
+      } else {
+        const build = kw.build;
+        entries.push({
+          symbolTrigger: surface,
+          kind: 'infix',
+          associativity: kw.associativity ?? 'right',
+          precedence: kw.precedence,
+          parse: (parser, lhs, until) => build(parser, lhs, until),
+        });
+      }
+    }
+  }
+
+  // Catch-all: `\keyword{…}` with non-keyword content parses as a text run,
+  // exactly like `\text{…}`. (Known keywords are handled by the prefix/infix
+  // entries above, which are tried first.)
+  entries.push({
+    latexTrigger: ['\\keyword'],
+    parse: (parser: Parser) => parseTextRun(parser),
+  });
+
+  return entries;
+}
+
+/**
+ * Serialize a keyword (`if`, `then`, `else`, `for`, …) according to the
+ * `keywordStyle` serialization option.
+ *
+ * `lead`/`trail` request a surrounding space. For the `'text'` style the space
+ * is placed inside the braces (the conventional spelling, e.g. `\text{ then }`);
+ * for `'keyword'`/`'operatorname'` the renderer applies keyword spacing, so the
+ * braces hold only the word.
+ */
+function serializeKeyword(
+  serializer: Serializer,
+  word: string,
+  opts?: { lead?: boolean; trail?: boolean }
+): string {
+  const style = serializer.options.keywordStyle ?? 'text';
+  if (style === 'keyword') return `\\keyword{${word}}`;
+  if (style === 'operatorname') return `\\operatorname{${word}}`;
+  const lead = opts?.lead ? ' ' : '';
+  const trail = opts?.trail ? ' ' : '';
+  return `\\text{${lead}${word}${trail}}`;
 }
 
 export const DEFINITIONS_CORE: LatexDictionary = [
@@ -1002,171 +1299,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return ['Delimiter', ['Sequence', ...seq], "';'"] as MathJsonExpression;
     },
   },
-  // \text{where} — variable binding infix
-  {
-    latexTrigger: ['\\text'],
-    kind: 'infix',
-    associativity: 'none',
-    precedence: 21, // Above ; (19) and , (20), very low binding
-    parse: (
-      parser: Parser,
-      lhs: MathJsonExpression,
-      until: Readonly<Terminator>
-    ): MathJsonExpression | null => {
-      const start = parser.index;
-      if (!matchTextKeyword(parser, 'where')) {
-        parser.index = start;
-        return null;
-      }
-      return parseWhereExpression(parser, lhs, until);
-    },
-  },
-  // \operatorname{where}
-  {
-    symbolTrigger: 'where',
-    kind: 'infix',
-    associativity: 'none',
-    precedence: 21,
-    parse: (
-      parser: Parser,
-      lhs: MathJsonExpression,
-      until: Readonly<Terminator>
-    ): MathJsonExpression | null => parseWhereExpression(parser, lhs, until),
-  },
-  // \text{and} — logical conjunction infix
-  {
-    latexTrigger: ['\\text'],
-    kind: 'infix',
-    associativity: 'right',
-    precedence: 235, // Same as \land
-    parse: (
-      parser: Parser,
-      lhs: MathJsonExpression,
-      until: Readonly<Terminator>
-    ): MathJsonExpression | null => {
-      const start = parser.index;
-      if (!matchTextKeyword(parser, 'and')) {
-        parser.index = start;
-        return null;
-      }
-      const rhs = parser.parseExpression({ ...until, minPrec: 235 });
-      return ['And', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
-    },
-  },
-  // \text{or} — logical disjunction infix
-  {
-    latexTrigger: ['\\text'],
-    kind: 'infix',
-    associativity: 'right',
-    precedence: 230, // Same as \lor
-    parse: (
-      parser: Parser,
-      lhs: MathJsonExpression,
-      until: Readonly<Terminator>
-    ): MathJsonExpression | null => {
-      const start = parser.index;
-      if (!matchTextKeyword(parser, 'or')) {
-        parser.index = start;
-        return null;
-      }
-      const rhs = parser.parseExpression({ ...until, minPrec: 230 });
-      return ['Or', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
-    },
-  },
-  // \text{iff} — biconditional (if and only if)
-  {
-    latexTrigger: ['\\text'],
-    kind: 'infix',
-    associativity: 'right',
-    precedence: 219, // Same as \iff
-    parse: (
-      parser: Parser,
-      lhs: MathJsonExpression,
-      until: Readonly<Terminator>
-    ): MathJsonExpression | null => {
-      const start = parser.index;
-      if (!matchTextKeyword(parser, 'iff')) {
-        parser.index = start;
-        return null;
-      }
-      const rhs = parser.parseExpression({ ...until, minPrec: 219 });
-      return ['Equivalent', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
-    },
-  },
-  // \text{if and only if} — verbose biconditional
-  {
-    latexTrigger: ['\\text'],
-    kind: 'infix',
-    associativity: 'right',
-    precedence: 219,
-    parse: (
-      parser: Parser,
-      lhs: MathJsonExpression,
-      until: Readonly<Terminator>
-    ): MathJsonExpression | null => {
-      const start = parser.index;
-      if (!matchTextKeyword(parser, 'if and only if')) {
-        parser.index = start;
-        return null;
-      }
-      const rhs = parser.parseExpression({ ...until, minPrec: 219 });
-      return ['Equivalent', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
-    },
-  },
-  // \text{such that} — constraint separator (like : in set-builder notation)
-  {
-    latexTrigger: ['\\text'],
-    kind: 'infix',
-    associativity: 'right',
-    precedence: 21, // Low precedence to capture full condition (same as 'where')
-    parse: (
-      parser: Parser,
-      lhs: MathJsonExpression,
-      until: Readonly<Terminator>
-    ): MathJsonExpression | null => {
-      const start = parser.index;
-      if (!matchTextKeyword(parser, 'such that')) {
-        parser.index = start;
-        return null;
-      }
-      const rhs = parser.parseExpression({ ...until, minPrec: 21 });
-      return ['Colon', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
-    },
-  },
-  // \text{for all} — universal quantifier
-  {
-    latexTrigger: ['\\text'],
-    kind: 'prefix',
-    precedence: 200, // Same as \forall
-    parse: (
-      parser: Parser,
-      until?: Readonly<Terminator>
-    ): MathJsonExpression | null => {
-      const start = parser.index;
-      if (!matchTextKeyword(parser, 'for all')) {
-        parser.index = start;
-        return null;
-      }
-      return parseQuantifier('ForAll')(parser, until!);
-    },
-  },
-  // \text{there exists} — existential quantifier
-  {
-    latexTrigger: ['\\text'],
-    kind: 'prefix',
-    precedence: 200, // Same as \exists
-    parse: (
-      parser: Parser,
-      until?: Readonly<Terminator>
-    ): MathJsonExpression | null => {
-      const start = parser.index;
-      if (!matchTextKeyword(parser, 'there exists')) {
-        parser.index = start;
-        return null;
-      }
-      return parseQuantifier('Exists')(parser, until!);
-    },
-  },
+  // Keyword constructs (`if`/`then`/`else`, `for`, `where`, `and`, `or`,
+  // quantifiers, …) parsed from `\text{…}`, `\keyword{…}`, and
+  // `\operatorname{…}`. Generated from the KEYWORDS table above.
+  ...keywordEntries(),
   // Block serializer — used by both `where` and semicolon blocks
   {
     name: 'Block',
@@ -1188,11 +1324,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const args = operands(expr);
       if (!args || args.length < 3) return '';
       return joinLatex([
-        '\\text{if }',
+        serializeKeyword(serializer, 'if', { trail: true }),
         serializer.serialize(args[0]),
-        '\\text{ then }',
+        serializeKeyword(serializer, 'then', { lead: true, trail: true }),
         serializer.serialize(args[1]),
-        '\\text{ else }',
+        serializeKeyword(serializer, 'else', { lead: true, trail: true }),
         serializer.serialize(args[2]),
       ]);
     },
@@ -1229,13 +1365,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           const lo = operand(coll, 1);
           const hi = operand(coll, 2);
           return joinLatex([
-            '\\text{for }',
+            serializeKeyword(serializer, 'for', { trail: true }),
             serializer.serialize(index),
-            '\\text{ from }',
+            serializeKeyword(serializer, 'from', { lead: true, trail: true }),
             serializer.serialize(lo),
-            '\\text{ to }',
+            serializeKeyword(serializer, 'to', { lead: true, trail: true }),
             serializer.serialize(hi),
-            '\\text{ do }',
+            serializeKeyword(serializer, 'do', { lead: true, trail: true }),
             serializer.serialize(body),
           ]);
         }
@@ -1269,82 +1405,29 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   // Serializer for Break
-  { name: 'Break', serialize: (): string => '\\text{break}' },
+  {
+    name: 'Break',
+    serialize: (serializer: Serializer): string =>
+      serializeKeyword(serializer, 'break'),
+  },
   // Serializer for Continue
-  { name: 'Continue', serialize: (): string => '\\text{continue}' },
+  {
+    name: 'Continue',
+    serialize: (serializer: Serializer): string =>
+      serializeKeyword(serializer, 'continue'),
+  },
   // Serializer for Return
   {
     name: 'Return',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const arg = operand(expr, 1);
-      if (!arg || symbol(arg) === 'Nothing') return '\\text{return}';
-      return joinLatex(['\\text{return }', serializer.serialize(arg)]);
+      if (!arg || symbol(arg) === 'Nothing')
+        return serializeKeyword(serializer, 'return');
+      return joinLatex([
+        serializeKeyword(serializer, 'return', { trail: true }),
+        serializer.serialize(arg),
+      ]);
     },
-  },
-  // Also match `\operatorname{if}` / `\mathrm{if}`
-  {
-    symbolTrigger: 'if',
-    kind: 'prefix',
-    precedence: 245,
-    parse: (
-      parser: Parser,
-      until?: Readonly<Terminator>
-    ): MathJsonExpression | null => {
-      return parseIfExpression(parser, until);
-    },
-  },
-  // \operatorname{for}
-  {
-    symbolTrigger: 'for',
-    kind: 'prefix',
-    precedence: 245,
-    parse: (
-      parser: Parser,
-      until?: Readonly<Terminator>
-    ): MathJsonExpression | null => parseForExpression(parser, until),
-  },
-  // \operatorname{for} as postfix infix (list comprehension):
-  //   `body \operatorname{for} x = L_1, y = L_2`
-  // Precedence 19 — just below comma (20) so the body is allowed to use
-  // any operator (including comma sequencing) up to the keyword, and the
-  // bindings can be comma-separated below us.
-  {
-    symbolTrigger: 'for',
-    kind: 'infix',
-    associativity: 'none',
-    precedence: 19,
-    parse: (
-      parser: Parser,
-      lhs: MathJsonExpression,
-      until: Readonly<Terminator>
-    ): MathJsonExpression | null => parseForComprehension(parser, lhs, until),
-  },
-  // \operatorname{break}
-  {
-    symbolTrigger: 'break',
-    kind: 'prefix',
-    precedence: 245,
-    parse: (): MathJsonExpression => ['Break'],
-  },
-  // \operatorname{continue}
-  {
-    symbolTrigger: 'continue',
-    kind: 'prefix',
-    precedence: 245,
-    parse: (): MathJsonExpression => ['Continue'],
-  },
-  // \operatorname{return}
-  {
-    symbolTrigger: 'return',
-    kind: 'prefix',
-    precedence: 245,
-    parse: (
-      parser: Parser,
-      until?: Readonly<Terminator>
-    ): MathJsonExpression => [
-      'Return',
-      parser.parseExpression(until) ?? 'Nothing',
-    ],
   },
 
   // Text serializer — reconstructs \text{...} with inline $...$ for math
@@ -1399,28 +1482,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'String',
     latexTrigger: ['\\text'],
-    parse: (parser: Parser, until?: Readonly<Terminator>) => {
-      const start = parser.index;
-      if (matchTextKeyword(parser, 'if'))
-        return parseIfExpression(parser, until);
-      parser.index = start;
-      if (matchTextKeyword(parser, 'for'))
-        return parseForExpression(parser, until);
-      parser.index = start;
-      if (matchTextKeyword(parser, 'break'))
-        return ['Break'] as MathJsonExpression;
-      parser.index = start;
-      if (matchTextKeyword(parser, 'continue'))
-        return ['Continue'] as MathJsonExpression;
-      parser.index = start;
-      if (matchTextKeyword(parser, 'return'))
-        return [
-          'Return',
-          parser.parseExpression(until) ?? 'Nothing',
-        ] as MathJsonExpression;
-      parser.index = start;
-      return parseTextRun(parser);
-    },
+    // Keyword constructs spelled `\text{if}`, `\text{for}`, etc. are handled
+    // by the generated prefix/infix keyword entries (see `keywordEntries()`),
+    // which are tried before this `expression`-kind entry. Non-keyword
+    // `\text{…}` content falls through to here and parses as a text run.
+    parse: (parser: Parser) => parseTextRun(parser),
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (args.length === 0) return '\\text{}';
@@ -2543,14 +2609,15 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
 }
 
 /**
- * Try to match `\text{keyword}` where `keyword` is the content between braces.
- * Handles optional surrounding spaces: `\text{ if }` matches "if".
+ * Try to match `{keyword}`, where `keyword` is the content between braces,
+ * after the brace-introducing command (`\text` or `\keyword`) has already been
+ * consumed. Handles optional surrounding spaces: `{ if }` matches "if".
  * If matched, tokens are consumed. If not, parser index is unchanged.
  */
-function matchTextKeyword(parser: Parser, keyword: string): boolean {
+function matchBracedKeyword(parser: Parser, keyword: string): boolean {
   const start = parser.index;
 
-  // We expect <{> after \text (the latexTrigger already consumed \text)
+  // We expect <{> after the trigger (the trigger command was already consumed)
   if (!parser.match('<{>')) {
     parser.index = start;
     return false;
@@ -2591,17 +2658,18 @@ function matchTextKeyword(parser: Parser, keyword: string): boolean {
 }
 
 /**
- * Match either `\text{keyword}` or `\operatorname{keyword}` (and variants
- * like `\mathrm{keyword}`).
+ * Match `\text{keyword}`, `\keyword{keyword}`, or `\operatorname{keyword}`
+ * (and variants like `\mathrm{keyword}`).
  * Consumes tokens on success, leaves parser unchanged on failure.
  */
 function matchKeyword(parser: Parser, keyword: string): boolean {
   const start = parser.index;
   parser.skipVisualSpace();
 
-  // Try \text{keyword} — need to check for \text trigger first
-  if (parser.match('\\text')) {
-    if (matchTextKeyword(parser, keyword)) return true;
+  // Try \text{keyword} or \keyword{keyword} — consume the brace-introducing
+  // command first, then match the braced content.
+  if (parser.match('\\text') || parser.match('\\keyword')) {
+    if (matchBracedKeyword(parser, keyword)) return true;
     parser.index = start;
   }
 
