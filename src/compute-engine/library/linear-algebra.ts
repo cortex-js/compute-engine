@@ -641,6 +641,34 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         ce.function('MatrixMultiply', ops).evaluate(),
     },
 
+    HadamardProduct: {
+      description:
+        'Hadamard (element-wise) product of two vectors or matrices of the same shape.',
+      complexity: 8300,
+      signature: '(matrix|vector, matrix|vector) -> matrix|vector',
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
+        const A = ops[0].evaluate();
+        const B = ops[1].evaluate();
+
+        // Both operands must be tensors of the same shape.
+        if (!isTensor(A) || !isTensor(B)) return undefined;
+
+        const shapeA = A.shape;
+        const shapeB = B.shape;
+        if (
+          shapeA.length !== shapeB.length ||
+          shapeA.some((d, i) => d !== shapeB[i])
+        )
+          return ce.error(
+            'incompatible-dimensions',
+            `${shapeA.join('x')} vs ${shapeB.join('x')}`
+          );
+
+        // Element-wise product (reuses the tensor field's broadcast multiply).
+        return A.tensor.multiply(B.tensor).expression;
+      },
+    },
+
     MatrixRank: {
       description:
         'Rank of a matrix (number of linearly independent rows/columns).',

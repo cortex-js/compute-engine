@@ -488,14 +488,76 @@ describe('Multiply with tensors (matrix-product semantics)', () => {
 
   // Incompatible dimensions: left inert (input preserved, not dropped)
   it('stays inert on incompatible dimensions', () => {
-    expect(
-      ev(['Multiply', ['List', 1, 2, 3], sq2_n])
-    ).toMatchInlineSnapshot(`[1,2,3] * [[1,2],[3,4]]`);
+    expect(ev(['Multiply', ['List', 1, 2, 3], sq2_n])).toMatchInlineSnapshot(
+      `[1,2,3] * [[1,2],[3,4]]`
+    );
   });
 
   // Pure scalar multiplication is unaffected
   it('does not affect scalar multiplication', () => {
     expect(ev(['Multiply', 2, 3, 'x'])).toMatchInlineSnapshot(`6x`);
+  });
+});
+
+describe('Hadamard product (\\odot)', () => {
+  const ev = (expr: Expression) => ce.expr(expr).evaluate().toString();
+
+  it('parses `\\odot` to HadamardProduct', () => {
+    expect(ce.parse('[1,2,3] \\odot [4,5,6]').json).toMatchInlineSnapshot(`
+      [
+        HadamardProduct,
+        [
+          List,
+          1,
+          2,
+          3,
+        ],
+        [
+          List,
+          4,
+          5,
+          6,
+        ],
+      ]
+    `);
+  });
+
+  it('multiplies vectors element-wise', () => {
+    expect(
+      ev(['HadamardProduct', ['List', 1, 2, 3], ['List', 4, 5, 6]])
+    ).toMatchInlineSnapshot(`[4,10,18]`);
+  });
+
+  it('multiplies matrices element-wise', () => {
+    expect(ev(['HadamardProduct', sq2_n, sq2_n2])).toMatchInlineSnapshot(
+      `[[5,12],[21,32]]`
+    );
+  });
+
+  it('multiplies symbolic entries element-wise', () => {
+    expect(
+      ev(['HadamardProduct', ['List', 'a', 'b'], ['List', 'c', 'd']])
+    ).toMatchInlineSnapshot(`[a * c,b * d]`);
+  });
+
+  it('errors on incompatible shapes', () => {
+    expect(
+      ev(['HadamardProduct', ['List', 1, 2, 3], ['List', 1, 2]])
+    ).toMatchInlineSnapshot(`Error("incompatible-dimensions", "3 vs 2")`);
+  });
+
+  it('differs from the matrix product', () => {
+    // Hadamard is element-wise; `*` is the matrix product.
+    expect(ev(['HadamardProduct', sq2_n, sq2_n2])).toMatchInlineSnapshot(
+      `[[5,12],[21,32]]`
+    );
+    expect(ev(['Multiply', sq2_n, sq2_n2])).toMatchInlineSnapshot(
+      `[[19,22],[43,50]]`
+    );
+  });
+
+  it('round-trips through LaTeX', () => {
+    expect(ce.parse('[1,2,3] \\odot [4,5,6]').latex).toContain('\\odot');
   });
 });
 
@@ -1902,18 +1964,34 @@ describe('Tensor helpers (REVIEW.md F9, F15, F16)', () => {
   // F9: element-wise broadcast over incompatible shapes produced silent
   // garbage (`[…, null]`); it now throws.
   it('F9: broadcasting incompatible shapes throws (was silent garbage)', () => {
-    const m = makeTensor(ce, { dtype: 'float64', shape: [2, 2], data: [1, 2, 3, 4] });
-    const v = makeTensor(ce, { dtype: 'float64', shape: [3], data: [10, 20, 30] });
+    const m = makeTensor(ce, {
+      dtype: 'float64',
+      shape: [2, 2],
+      data: [1, 2, 3, 4],
+    });
+    const v = makeTensor(ce, {
+      dtype: 'float64',
+      shape: [3],
+      data: [10, 20, 30],
+    });
     expect(() => (m as any).add(v)).toThrow(/incompatible shapes/);
     // Equal shapes still work.
-    const m2 = makeTensor(ce, { dtype: 'float64', shape: [2, 2], data: [10, 20, 30, 40] });
+    const m2 = makeTensor(ce, {
+      dtype: 'float64',
+      shape: [2, 2],
+      data: [10, 20, 30, 40],
+    });
     expect((m as any).add(m2).data).toEqual([11, 22, 33, 44]);
   });
 
   // F15: diagonal() ignored its axis arguments (always `data[i*n+i]`); it now
   // steps along the strides of the two requested axes.
   it('F15: diagonal respects the requested axes', () => {
-    const m = makeTensor(ce, { dtype: 'float64', shape: [2, 2], data: [1, 2, 3, 4] });
+    const m = makeTensor(ce, {
+      dtype: 'float64',
+      shape: [2, 2],
+      data: [1, 2, 3, 4],
+    });
     expect((m as any).diagonal()).toEqual([1, 4]); // rank-2 unchanged
 
     const r3 = makeTensor(ce, {
@@ -1934,20 +2012,31 @@ describe('Dot / Cross', () => {
 
   it('computes the dot (inner) product of two vectors', () => {
     expect(
-      ce.expr(['Dot', ['List', 1, 2, 3], ['List', 4, 5, 6]]).evaluate().toString()
+      ce
+        .expr(['Dot', ['List', 1, 2, 3], ['List', 4, 5, 6]])
+        .evaluate()
+        .toString()
     ).toBe('32');
   });
 
   it('reduces to the matrix product for two matrices', () => {
-    expect(ce.expr(['Dot', m, m]).evaluate().toString()).toBe('[[7,10],[15,22]]');
+    expect(ce.expr(['Dot', m, m]).evaluate().toString()).toBe(
+      '[[7,10],[15,22]]'
+    );
   });
 
   it('computes the cross product of two 3-vectors', () => {
     expect(
-      ce.expr(['Cross', ['List', 1, 0, 0], ['List', 0, 1, 0]]).evaluate().toString()
+      ce
+        .expr(['Cross', ['List', 1, 0, 0], ['List', 0, 1, 0]])
+        .evaluate()
+        .toString()
     ).toBe('[0,0,1]');
     expect(
-      ce.expr(['Cross', ['List', 1, 2, 3], ['List', 4, 5, 6]]).evaluate().toString()
+      ce
+        .expr(['Cross', ['List', 1, 2, 3], ['List', 4, 5, 6]])
+        .evaluate()
+        .toString()
     ).toBe('[-3,6,-3]');
   });
 
@@ -1961,25 +2050,37 @@ describe('Dot / Cross', () => {
 describe('MatrixRank', () => {
   it('returns the rank of a full-rank matrix', () => {
     expect(
-      ce.expr(['MatrixRank', ['List', ['List', 1, 2], ['List', 3, 4]]]).evaluate().toString()
+      ce
+        .expr(['MatrixRank', ['List', ['List', 1, 2], ['List', 3, 4]]])
+        .evaluate()
+        .toString()
     ).toBe('2');
   });
 
   it('returns the rank of a rank-deficient matrix', () => {
     expect(
-      ce.expr(['MatrixRank', ['List', ['List', 1, 2], ['List', 2, 4]]]).evaluate().toString()
+      ce
+        .expr(['MatrixRank', ['List', ['List', 1, 2], ['List', 2, 4]]])
+        .evaluate()
+        .toString()
     ).toBe('1');
   });
 
   it('returns 0 for the zero matrix', () => {
     expect(
-      ce.expr(['MatrixRank', ['List', ['List', 0, 0], ['List', 0, 0]]]).evaluate().toString()
+      ce
+        .expr(['MatrixRank', ['List', ['List', 0, 0], ['List', 0, 0]]])
+        .evaluate()
+        .toString()
     ).toBe('0');
   });
 
   it('handles non-square matrices', () => {
     expect(
-      ce.expr(['MatrixRank', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]]).evaluate().toString()
+      ce
+        .expr(['MatrixRank', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]])
+        .evaluate()
+        .toString()
     ).toBe('2');
   });
 });
@@ -1992,8 +2093,12 @@ describe('Matrix predicates', () => {
 
   it('IsSquareMatrix', () => {
     expect(ce.expr(['IsSquareMatrix', m]).evaluate().symbol).toBe('True');
-    expect(ce.expr(['IsSquareMatrix', nonsquare]).evaluate().symbol).toBe('False');
-    expect(ce.expr(['IsSquareMatrix', ['List', 1, 2, 3]]).evaluate().symbol).toBe('False');
+    expect(ce.expr(['IsSquareMatrix', nonsquare]).evaluate().symbol).toBe(
+      'False'
+    );
+    expect(
+      ce.expr(['IsSquareMatrix', ['List', 1, 2, 3]]).evaluate().symbol
+    ).toBe('False');
   });
 
   it('IsSymmetric', () => {
@@ -2011,16 +2116,24 @@ describe('MatrixPower', () => {
   const m: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];
 
   it('to the 0th power is the identity', () => {
-    expect(ce.expr(['MatrixPower', m, 0]).evaluate().toString()).toBe('[[1,0],[0,1]]');
+    expect(ce.expr(['MatrixPower', m, 0]).evaluate().toString()).toBe(
+      '[[1,0],[0,1]]'
+    );
   });
 
   it('to the 1st power is the matrix itself', () => {
-    expect(ce.expr(['MatrixPower', m, 1]).evaluate().toString()).toBe('[[1,2],[3,4]]');
+    expect(ce.expr(['MatrixPower', m, 1]).evaluate().toString()).toBe(
+      '[[1,2],[3,4]]'
+    );
   });
 
   it('to the 2nd/3rd power is the repeated matrix product', () => {
-    expect(ce.expr(['MatrixPower', m, 2]).evaluate().toString()).toBe('[[7,10],[15,22]]');
-    expect(ce.expr(['MatrixPower', m, 3]).evaluate().toString()).toBe('[[37,54],[81,118]]');
+    expect(ce.expr(['MatrixPower', m, 2]).evaluate().toString()).toBe(
+      '[[7,10],[15,22]]'
+    );
+    expect(ce.expr(['MatrixPower', m, 3]).evaluate().toString()).toBe(
+      '[[37,54],[81,118]]'
+    );
   });
 
   it('to a negative power equals the inverse', () => {
@@ -2030,7 +2143,13 @@ describe('MatrixPower', () => {
 
   it('errors on a non-square matrix', () => {
     expect(
-      ce.expr(['MatrixPower', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]], 2]).evaluate().isValid
+      ce
+        .expr([
+          'MatrixPower',
+          ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]],
+          2,
+        ])
+        .evaluate().isValid
     ).toBe(false);
   });
 });
@@ -2040,7 +2159,10 @@ describe('CharacteristicPolynomial', () => {
 
   it('computes the monic characteristic polynomial', () => {
     expect(
-      ce.expr(['CharacteristicPolynomial', m]).evaluate().isSame(ce.parse('x^2-5x-2'))
+      ce
+        .expr(['CharacteristicPolynomial', m])
+        .evaluate()
+        .isSame(ce.parse('x^2-5x-2'))
     ).toBe(true);
   });
 
@@ -2068,7 +2190,10 @@ describe('CharacteristicPolynomial', () => {
   it('errors on a non-square matrix', () => {
     expect(
       ce
-        .expr(['CharacteristicPolynomial', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]])
+        .expr([
+          'CharacteristicPolynomial',
+          ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]],
+        ])
         .evaluate().isValid
     ).toBe(false);
   });
@@ -2077,23 +2202,34 @@ describe('CharacteristicPolynomial', () => {
 describe('RowReduce', () => {
   it('reduces a full-rank matrix to the identity', () => {
     expect(
-      ce.expr(['RowReduce', ['List', ['List', 1, 2], ['List', 3, 4]]]).evaluate().toString()
+      ce
+        .expr(['RowReduce', ['List', ['List', 1, 2], ['List', 3, 4]]])
+        .evaluate()
+        .toString()
     ).toBe('[[1,0],[0,1]]');
   });
 
   it('reduces a rank-deficient matrix', () => {
     expect(
-      ce.expr(['RowReduce', ['List', ['List', 1, 2], ['List', 2, 4]]]).evaluate().toString()
+      ce
+        .expr(['RowReduce', ['List', ['List', 1, 2], ['List', 2, 4]]])
+        .evaluate()
+        .toString()
     ).toBe('[[1,2],[0,0]]');
   });
 
   it('reduces a non-square matrix', () => {
     expect(
-      ce.expr(['RowReduce', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]]).evaluate().toString()
+      ce
+        .expr(['RowReduce', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]])
+        .evaluate()
+        .toString()
     ).toBe('[[1,0,-1],[0,1,2]]');
   });
 
   it('errors on a vector', () => {
-    expect(ce.expr(['RowReduce', ['List', 1, 2, 3]]).evaluate().isValid).toBe(false);
+    expect(ce.expr(['RowReduce', ['List', 1, 2, 3]]).evaluate().isValid).toBe(
+      false
+    );
   });
 });

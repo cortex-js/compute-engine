@@ -5,7 +5,12 @@ import {
   operand,
   operator,
 } from '../../../math-json/utils';
-import { LatexDictionary, Parser, Serializer } from '../types';
+import {
+  LatexDictionary,
+  MULTIPLICATION_PRECEDENCE,
+  Parser,
+  Serializer,
+} from '../types';
 import { joinLatex } from '../tokenizer';
 import { DELIMITERS_SHORTHAND } from './definitions-core';
 
@@ -384,6 +389,18 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const rhs = serializer.serialize(operand(expr, 2));
       return `${lhs} \\cdot ${rhs}`;
     },
+  },
+
+  // `\odot` is the Hadamard (element-wise) product. Unlike `*`/`\cdot`/`\times`
+  // (which form the matrix product for tensor operands), `\odot` multiplies two
+  // same-shape tensors entry by entry. Binds like multiplication and serializes
+  // back to `\odot`.
+  {
+    name: 'HadamardProduct',
+    latexTrigger: ['\\odot'],
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
   },
 ];
 

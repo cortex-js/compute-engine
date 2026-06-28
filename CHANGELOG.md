@@ -24,6 +24,15 @@
   **not** what `*` does; tensors of incompatible dimensions are left
   unevaluated, and symbolic operands of unknown shape are unaffected.
 
+- **Hadamard (element-wise) product `\odot`.** A new `HadamardProduct` operator,
+  written `\odot`, multiplies two vectors or matrices of the same shape entry by
+  entry: `[1,2,3] \odot [4,5,6]` → `[4,10,18]` and
+  `\begin{pmatrix}1&2\\3&4\end{pmatrix} \odot \begin{pmatrix}5&6\\7&8\end{pmatrix}`
+  → `\begin{pmatrix}5&12\\21&32\end{pmatrix}` (compare the matrix product `*`,
+  which gives `\begin{pmatrix}19&22\\43&50\end{pmatrix}`). Operands of
+  incompatible shape report an `incompatible-dimensions` error. It binds like
+  multiplication and round-trips through LaTeX as `\odot`.
+
 ### Resolved Issues
 
 - **A `\textcolor` wrapping a bare operator now parses as that operator.**
