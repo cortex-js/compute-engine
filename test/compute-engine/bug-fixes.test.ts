@@ -75,3 +75,44 @@ describe('BUG FIXES', () => {
     });
   });
 });
+
+// Regressions distilled from test/playground.ts: behaviors that were once
+// broken there and are now fixed. Kept here so they don't silently regress.
+describe('Playground regressions', () => {
+  test('-i evaluates to the imaginary unit, not NaN (machine precision)', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    const r = ce.expr(['Negate', 'i']).evaluate();
+    expect(r.isNaN).toBe(false);
+    expect(r.json).toEqual(['Complex', 0, -1]);
+  });
+
+  test('\\lbrack and \\left\\lbrack parse as half-open intervals', () => {
+    // Previously these errored; they should match the ASCII `[` behavior.
+    const ce = new ComputeEngine();
+    const expected = ['Interval', 5, ['Open', 7]];
+    expect(ce.parse('[5,7)').json).toEqual(expected);
+    expect(ce.parse('\\lbrack5,7)').json).toEqual(expected);
+    expect(ce.parse('\\left\\lbrack5,7\\right)').json).toEqual(expected);
+  });
+
+  test('1/(2 sqrt 3) is rationalized to sqrt(3)/6', () => {
+    // The 1/2 should be distributed and the denominator rationalized, rather
+    // than left as 1/(2√3).
+    const ce = new ComputeEngine();
+    const canonical = ce.parse('\\frac{1}{2\\sqrt{3}}').canonical;
+    expect(canonical.json).toEqual(['Divide', ['Sqrt', 3], 6]);
+    expect(canonical.latex).toBe('\\frac{\\sqrt{3}}{6}');
+  });
+
+  test('subscript of a list parses as element access (At) inside a sum', () => {
+    // When the subscripted base is a collection, `e_p` is At, not a product.
+    const ce = new ComputeEngine();
+    ce.declare('e', 'list');
+    expect(ce.parse('\\sum_{p=0}^3x_{p}e_{p}').json).toEqual([
+      'Sum',
+      ['Multiply', 'x_p', ['At', 'e', 'p']],
+      ['Limits', 'p', 0, 3],
+    ]);
+  });
+});
