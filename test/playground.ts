@@ -22,15 +22,6 @@ const ce = new ComputeEngine();
 // ACTIVE — parsing & serialization
 // =============================================================================
 
-// Matrix multiplication: `\times` maps to Multiply, which does not implement
-// matrix multiplication, so the product stays unevaluated.
-// Expected: [[15, 13], [29, 23]].
-ce.parse(
-  String.raw`\begin{pmatrix}2 & 3\\ 4 & 5\end{pmatrix}\times\begin{pmatrix}6 & 2\\ 1 & 3\end{pmatrix}`
-)
-  .evaluate()
-  .print();
-
 // Contents of \mathrm collapse into a single symbol "xplusalpha" instead of
 // the sum x + α.
 console.log(ce.parse('\\mathrm{x+\\alpha}').json);

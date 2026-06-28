@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+### New Features
+
+- **`Multiply` now operates on vectors and matrices.** Previously a product with
+  any list/matrix operand was left unevaluated — even `2 * [1, 2, 3]`. `Multiply`
+  (i.e. `*`, `\cdot`, `\times`, and implicit products) now follows
+  matrix-product / scalar-scaling semantics, matching `Add`'s existing
+  element-wise threading:
+
+  - **Scalar × tensor** scales every element: `2 * [1, 2, 3]` → `[2, 4, 6]`,
+    `2 * \begin{pmatrix}1&2\\3&4\end{pmatrix}` →
+    `\begin{pmatrix}2&4\\6&8\end{pmatrix}` (exact values are preserved, e.g.
+    `\frac12 [2, 4, 6]` → `[1, 2, 3]`).
+  - **Two or more matrices/vectors** form the **matrix product**, folded
+    left-to-right in the written order:
+    `\begin{pmatrix}1&2\\3&4\end{pmatrix}\begin{pmatrix}5&6\\7&8\end{pmatrix}`
+    → `\begin{pmatrix}19&22\\43&50\end{pmatrix}`. The product is **not**
+    commutative — operand order is preserved (including for `matrix·vector` vs
+    `vector·matrix`), and `vector·vector` reduces to the dot product. This
+    reuses the existing `MatrixMultiply` implementation.
+
+  Element-wise (Hadamard) multiplication of two same-shape tensors is therefore
+  **not** what `*` does; tensors of incompatible dimensions are left
+  unevaluated, and symbolic operands of unknown shape are unaffected.
+
 ### Resolved Issues
 
 - **A `\textcolor` wrapping a bare operator now parses as that operator.**

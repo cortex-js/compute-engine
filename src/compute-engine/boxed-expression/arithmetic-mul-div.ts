@@ -2,8 +2,10 @@ import { isSubtype } from '../../common/type/subtype';
 
 import type {
   Expression,
+  TensorInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
+import { isTensor } from './boxed-tensor';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
 import { NumericValue } from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
@@ -1092,7 +1094,29 @@ export function canonicalMultiply(
 
   if (ys.length === 0) return ce.number(1);
   if (ys.length === 1) return ys[0];
+
+  // Matrix product is not commutative. When two or more operands are tensors
+  // (vectors/matrices), keep them in their written order and sort only the
+  // (commutative) scalar factors around them — otherwise the `order` sort would
+  // collapse `A·v` and `v·A` (different ranks sort differently) into the same
+  // expression. With 0 or 1 tensor the product is order-independent, so the
+  // normal canonical sort applies.
+  if (ys.filter(isTensorOperand).length >= 2) {
+    const scalars = ys.filter((y) => !isTensorOperand(y)).sort(order);
+    const tensors = ys.filter(isTensorOperand);
+    return ce._fn('Multiply', [...scalars, ...tensors]);
+  }
   return ce._fn('Multiply', [...ys].sort(order));
+}
+
+/**
+ * Whether `x` is a concrete tensor operand (a vector/matrix literal or a
+ * `Matrix(...)` wrapper) — i.e. something that participates in matrix-product
+ * semantics rather than scalar multiplication. Symbolic operands of unknown
+ * shape are intentionally excluded.
+ */
+function isTensorOperand(x: Expression): boolean {
+  return isTensor(x) || isFunction(x, 'Matrix');
 }
 
 function unnegate(op: Expression): [Expression, sign: number] {
@@ -1192,6 +1216,10 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
 
   const ce = xs[0].engine;
 
+  // Tensor (matrix/vector) operands follow matrix-product / scalar-scaling
+  // semantics rather than the scalar Product machinery.
+  if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs);
+
   const exp = expandProducts(ce, xs);
   if (exp) {
     if (exp.operator !== 'Multiply') return exp;
@@ -1204,6 +1232,7 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
 export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   const ce = xs[0].engine;
+  if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs, true);
   xs = xs.map((x) => x.N());
   const exp = expandProducts(ce, xs);
   if (exp) {
@@ -1212,4 +1241,100 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   }
 
   return new Product(ce, xs).asExpression({ numericApproximation: true });
+}
+
+/**
+ * Multiply operands when at least one is a tensor (vector or matrix),
+ * following the matrix-product convention:
+ *
+ * - **Scalar × tensor**: scale every element by the product of the scalar
+ *   factors (`2 * [1,2,3]` → `[2,4,6]`).
+ * - **Two or more tensors**: matrix/dot product, folded left-to-right in the
+ *   given order — `matrix·matrix`, `matrix·vector`, `vector·matrix`, and
+ *   `vector·vector` (which reduces to the dot product). Matrix product is *not*
+ *   commutative, so order matters: the canonical form of `Multiply` floats
+ *   scalar factors to the front while preserving the relative order of the
+ *   tensor operands, so `xs` is already in the order the user wrote.
+ *
+ * Element-wise (Hadamard) multiplication is intentionally *not* what `Multiply`
+ * does here. Returns an inert `Multiply` when the tensors have incompatible
+ * dimensions (so the input is preserved rather than silently dropped).
+ */
+function mulTensors(
+  ce: ComputeEngine,
+  xs: ReadonlyArray<Expression>,
+  numericApproximation = false
+): Expression {
+  // Separate evaluated operands into tensors and scalars, preserving order.
+  const tensors: (Expression & TensorInterface)[] = [];
+  const scalars: Expression[] = [];
+  for (const op of xs) {
+    const x = numericApproximation ? op.N() : op.evaluate();
+    if (isTensor(x)) tensors.push(x);
+    else scalars.push(x);
+  }
+
+  // No tensors survived evaluation: fall back to an ordinary scalar product.
+  if (tensors.length === 0)
+    return numericApproximation ? mulN(...scalars) : mul(...scalars);
+
+  // Combine the scalar factors (these are commutative).
+  let scalar: Expression | null = null;
+  for (const s of scalars) scalar = scalar === null ? s : scalar.mul(s);
+
+  // Fold the tensors as matrix/dot products, left to right, in order.
+  let product: Expression = tensors[0];
+  for (let i = 1; i < tensors.length; i++) {
+    const next = ce.function('MatrixMultiply', [product, tensors[i]]).evaluate();
+    // Incompatible dimensions, or a partial fold that didn't reduce (e.g. a
+    // scalar dot-product result followed by another matrix): stay inert.
+    if (!next.isValid || next.operator === 'MatrixMultiply')
+      return ce._fn('Multiply', xs);
+    product = next;
+  }
+
+  // Apply the combined scalar factor.
+  if (scalar !== null && !scalar.isSame(1)) {
+    product = isTensor(product)
+      ? scaleTensor(ce, product, scalar)
+      : scalar.mul(product);
+  }
+  return product;
+}
+
+/** Scale every element of a vector or matrix `tensor` by the scalar `scalar`. */
+function scaleTensor(
+  ce: ComputeEngine,
+  tensor: Expression & TensorInterface,
+  scalar: Expression
+): Expression {
+  const shape = tensor.shape;
+
+  // Vector (rank 1)
+  if (shape.length === 1) {
+    const result: Expression[] = [];
+    for (let i = 0; i < shape[0]; i++) {
+      const val = ce.expr(tensor.tensor.at(i + 1) ?? ce.Zero);
+      result.push(scalar.mul(val).evaluate());
+    }
+    return ce.function('List', result);
+  }
+
+  // Matrix (rank 2)
+  if (shape.length === 2) {
+    const [m, n] = shape;
+    const rows: Expression[] = [];
+    for (let i = 0; i < m; i++) {
+      const row: Expression[] = [];
+      for (let j = 0; j < n; j++) {
+        const val = ce.expr(tensor.tensor.at(i + 1, j + 1) ?? ce.Zero);
+        row.push(scalar.mul(val).evaluate());
+      }
+      rows.push(ce.function('List', row));
+    }
+    return ce.function('List', rows);
+  }
+
+  // Higher-rank tensors: leave the scaling inert.
+  return ce._fn('Multiply', [scalar, tensor]);
 }

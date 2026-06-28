@@ -411,6 +411,94 @@ describe('MatrixMultiply', () => {
   });
 });
 
+describe('Multiply with tensors (matrix-product semantics)', () => {
+  const ev = (expr: Expression) => ce.expr(expr).evaluate().toString();
+
+  // Scalar × tensor: element-wise scaling (broadcast)
+  it('scales a vector by a scalar', () => {
+    expect(ev(['Multiply', 2, ['List', 1, 2, 3]])).toMatchInlineSnapshot(
+      `[2,4,6]`
+    );
+  });
+
+  it('scales a matrix by a scalar', () => {
+    expect(ev(['Multiply', 2, sq2_n])).toMatchInlineSnapshot(`[[2,4],[6,8]]`);
+  });
+
+  it('keeps scalar scaling exact (rational)', () => {
+    expect(
+      ev(['Multiply', ['Rational', 1, 2], ['List', 2, 4, 6]])
+    ).toMatchInlineSnapshot(`[1,2,3]`);
+  });
+
+  it('scales a vector of symbols', () => {
+    expect(ev(['Multiply', 2, ['List', 'a', 'b', 'c']])).toMatchInlineSnapshot(
+      `[2a,2b,2c]`
+    );
+  });
+
+  // Two matrices: matrix product (not Hadamard)
+  it('multiplies two matrices (matrix product)', () => {
+    expect(ev(['Multiply', sq2_n, sq2_n2])).toMatchInlineSnapshot(
+      `[[19,22],[43,50]]`
+    );
+  });
+
+  // Matrix product is not commutative — order must be preserved
+  it('preserves operand order (A·B ≠ B·A)', () => {
+    expect(ev(['Multiply', sq2_n, sq2_n2])).toMatchInlineSnapshot(
+      `[[19,22],[43,50]]`
+    );
+    expect(ev(['Multiply', sq2_n2, sq2_n])).toMatchInlineSnapshot(
+      `[[23,34],[31,46]]`
+    );
+  });
+
+  // Matrix × vector vs vector × matrix (different ranks, must not be reordered)
+  it('distinguishes matrix·vector from vector·matrix', () => {
+    expect(ev(['Multiply', sq2_n, ['List', 1, 1]])).toMatchInlineSnapshot(
+      `[3,7]`
+    );
+    expect(ev(['Multiply', ['List', 1, 1], sq2_n])).toMatchInlineSnapshot(
+      `[4,6]`
+    );
+  });
+
+  // Vector × vector reduces to the dot product (a scalar)
+  it('computes the dot product of two vectors', () => {
+    expect(
+      ev(['Multiply', ['List', 1, 2, 3], ['List', 4, 5, 6]])
+    ).toMatchInlineSnapshot(`32`);
+  });
+
+  // Scalar factor applied to a matrix product
+  it('applies a scalar factor to a matrix product', () => {
+    expect(ev(['Multiply', 2, sq2_n, sq2_n2])).toMatchInlineSnapshot(
+      `[[38,44],[86,100]]`
+    );
+  });
+
+  // Three matrices fold left-to-right, in order
+  it('folds three matrices in order', () => {
+    const identity: Expression = ['List', ['List', 1, 0], ['List', 0, 1]];
+    expect(ev(['Multiply', sq2_n, sq2_n2, identity])).toMatchInlineSnapshot(
+      `[[19,22],[43,50]]`
+    );
+  });
+
+  // Incompatible dimensions: left inert (input preserved, not dropped)
+  it('stays inert on incompatible dimensions', () => {
+    expect(
+      ev(['Multiply', ['List', 1, 2, 3], sq2_n])
+    ).toMatchInlineSnapshot(`[1,2,3] * [[1,2],[3,4]]`);
+  });
+
+  // Pure scalar multiplication is unaffected
+  it('does not affect scalar multiplication', () => {
+    expect(ev(['Multiply', 2, 3, 'x'])).toMatchInlineSnapshot(`6x`);
+  });
+});
+
 describe('Flatten', () => {
   it('should flatten a scalar', () => {
     const result = ce.expr(['Flatten', 42]).evaluate();
