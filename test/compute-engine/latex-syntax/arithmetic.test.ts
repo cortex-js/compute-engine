@@ -195,6 +195,22 @@ describe('SUM parsing', () => {
       `["Sum", "K", ["Element", "d", "D"]]`
     );
   });
+
+  // A chained `\le` range as the index set. Previously the index was not
+  // recognized, so `i` fell through to the imaginary unit and no Limits were
+  // built (`["Sum", ["Power", ["Complex", 0, 1], 2]]`).
+  test('parsing of summation with `\\le` range', () => {
+    expect(ce.parse(`\\sum_{1 \\le i \\le 10} i^2`)).toMatchInlineSnapshot(
+      `["Sum", ["Square", "i"], ["Limits", "i", 1, 10]]`
+    );
+  });
+
+  test('parsing of summation with one-sided `i \\le upper` range', () => {
+    // Implied lower bound of 1.
+    expect(ce.parse(`\\sum_{i \\le 10} i`)).toMatchInlineSnapshot(
+      `["Sum", "i", ["Limits", "i", 1, 10]]`
+    );
+  });
 });
 
 describe('SUM evaluation', () => {
@@ -212,6 +228,10 @@ describe('SUM evaluation', () => {
     expect(
       evaluate(`\\sum_{n=0}^{4}(\\sum_{m=4}^{8}(\\sum_{l=0}^{2}{n+m})+n)`)
     ).toMatchInlineSnapshot(`610`);
+  });
+
+  test('summation over a `\\le` range evaluates (1^2+…+10^2 = 385)', () => {
+    expect(evaluate(`\\sum_{1 \\le i \\le 10} i^2`)).toMatchInlineSnapshot(`385`);
   });
 });
 

@@ -1729,6 +1729,26 @@ function getIndexAssignment(
     return { index, lower, upper };
   }
 
+  // We have a `\le` range in the subscript. The chained form
+  // `lower \le i \le upper` parses to a three-operand `LessEqual`; the
+  // one-sided forms `lower \le i` and `i \le upper` to a two-operand one.
+  // (Strict `<` chains and `Greater`/`Less` are intentionally not treated as
+  // index sets — mirroring the existing non-strict-only `GreaterEqual` case;
+  // their inclusive/exclusive bounds are a separate notation decision.)
+  if (operator(expr) === 'LessEqual') {
+    const ops = operands(expr) ?? [];
+    if (ops.length === 3) {
+      // lower \le index \le upper
+      const index = symbol(ops[1]) ?? 'Nothing';
+      return { index, lower: ops[0], upper: ops[2] };
+    }
+    if (ops.length === 2) {
+      // `index \le upper` (symbol on the left) or `lower \le index`
+      if (symbol(ops[0])) return { index: symbol(ops[0])!, upper: ops[1] };
+      if (symbol(ops[1])) return { index: symbol(ops[1])!, lower: ops[0], upper };
+    }
+  }
+
   // We have `i=1` or `i=1..10` in the subscript
   if (operator(expr) === 'Equal') {
     const index = symbol(operand(expr, 1)) ?? 'Nothing';

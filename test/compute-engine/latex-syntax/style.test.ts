@@ -2,7 +2,8 @@ import { check, engine, latex } from '../../utils';
 import { serialize } from '../../../src/compute-engine/latex-syntax/latex-syntax';
 
 describe('STYLE - MATH MODE', () => {
-  // Note: the \textcolor command must span a valid math expression, so for example, `x = \textcolor{red}{y + 1}` is valid but `x \textcolor{red}{=} y + 1}` is not valid.
+  // When `\textcolor` spans a math expression, its content is wrapped in an
+  // `Annotated` carrying the color.
   test('\\textcolor', () => {
     expect(check('x = \\textcolor{red}{y + 1} - z')).toMatchInlineSnapshot(`
       box       = [
@@ -15,6 +16,33 @@ describe('STYLE - MATH MODE', () => {
         ]
       ]
       eval-auto = "False"
+    `);
+  });
+
+  // A `\textcolor` wrapping a bare infix operator acts as that operator. Since
+  // MathJSON cannot annotate a lone operator glyph, the color is dropped and
+  // the result is the plain operator expression. (Previously this errored,
+  // yielding a Tuple wrapping an 'expected-closing-delimiter' error.)
+  test('\\textcolor wrapping an operator', () => {
+    expect(check('x \\textcolor{red}{=} y')).toMatchInlineSnapshot(`
+      box       = ["Equal", "x", "y"]
+      eval-auto = "False"
+    `);
+    expect(check('x \\textcolor{red}{+} y')).toMatchInlineSnapshot(
+      `["Add", "x", "y"]`
+    );
+    expect(check('a \\textcolor{blue}{\\le} b')).toMatchInlineSnapshot(
+      `["LessEqual", "a", "b"]`
+    );
+  });
+
+  // The operator wrapper must not disturb operand coloring: when the content
+  // is an operand (not a bare operator), it stays an `Annotated`.
+  test('\\textcolor wrapping an operand is unchanged', () => {
+    expect(check('x \\textcolor{red}{y}')).toMatchInlineSnapshot(`
+      box       = ["InvisibleOperator", "x", ["Annotated", "y", {dict: {color: "red"}}]]
+      canonical = ["Multiply", "x", ["Annotated", "y", {dict: {color: "red"}}]]
+      eval-auto = x * y
     `);
   });
 });
@@ -475,7 +503,8 @@ describe('STYLE - LONG NUMERATOR OVER A SINGLE POWER', () => {
   // A long numerator over a single power of a small base serializes with an
   // inline solidus rather than a tall, lopsided fraction.
   const numer = '3x^4+2x^3+x+5';
-  const frac = (denom: string) => engine.parse(`\\frac{${numer}}{${denom}}`).latex;
+  const frac = (denom: string) =>
+    engine.parse(`\\frac{${numer}}{${denom}}`).latex;
 
   test('large integer power', () => {
     expect(frac('x^{23}')).toBe('(3x^4+2x^3+x+5)/x^{23}');

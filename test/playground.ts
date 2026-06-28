@@ -31,11 +31,6 @@ ce.parse(
   .evaluate()
   .print();
 
-// A styled relational operator breaks parsing: instead of Equal(x, y) this
-// yields a Tuple wrapping an 'expected-closing-delimiter' error. See
-// parseTextRun.
-console.log(ce.parse('x \\textcolor{red}{=} y').json);
-
 // Contents of \mathrm collapse into a single symbol "xplusalpha" instead of
 // the sum x + α.
 console.log(ce.parse('\\mathrm{x+\\alpha}').json);
@@ -43,18 +38,6 @@ console.log(ce.parse('\\mathrm{x+\\alpha}').json);
 // \gamma(2, 1) parses as EulerGamma * (2, 1) instead of the incomplete gamma
 // function Gamma(2, 1).
 ce.parse('\\gamma(2, 1)').print();
-
-// `i` inside a summation index/body is treated as the imaginary unit
-// (i^2 -> Complex(0, 1)^2), and `1 <= i <= 10` is not turned into limits.
-// For contrast, `\sum_{i \in S} i^2` (below) parses `i` as a symbol correctly.
-console.log(ce.parse('\\sum_{1 \\le i \\le 10} i^2').json);
-console.log(ce.parse('\\sum_{i,j} j+i^2').json);
-console.log(ce.parse('\\sum_{i \\in S} i^2').json); // ok: Sum(i^2, Element(i, S))
-
-// No matchfix for `\left( ... \right.`; produces unexpected-command /
-// unexpected-delimiter errors.
-console.log(ce.parse('\\sin\\left(x\\right.').json);
-console.log(ce.parse('\\frac{\\left(w\\right.-x)\\times10^6}{v}').json);
 
 // =============================================================================
 // ACTIVE — pattern matching, replace & collections

@@ -1,5 +1,33 @@
 ## [Unreleased]
 
+### Resolved Issues
+
+- **A `\textcolor` wrapping a bare operator now parses as that operator.**
+  Input such as `x \textcolor{red}{=} y` previously failed — the `=` could not
+  be parsed as a standalone group, producing a `Tuple` around an
+  `expected-closing-delimiter` error. The color command is now transparent in
+  operator position, so `x \textcolor{red}{=} y` parses as `Equal(x, y)` (and
+  likewise for `+`, `<`, `\le`, `\times`, …). Because MathJSON has no way to
+  annotate a lone operator glyph, the operator's color is dropped; coloring an
+  operand (`\textcolor{red}{y}`, `\textcolor{red}{x+1}`) is unchanged and still
+  yields an `Annotated`.
+
+- **One-sided `\left( … \right.` enclosures now parse.** `\right.` (and the
+  `\bigr.`/`\Bigr.`/… variants) is a TeX _null delimiter_: a fence with no
+  visible closing glyph. Previously a one-sided group such as
+  `\sin\left(x\right.` was rejected, leaking the `\left` out as an
+  `unexpected-command` error; it now parses the same as `\sin\left(x\right)`
+  (→ `Sin(x)`). The null _open_ form (`\left.…\right|`, used by `EvaluateAt`)
+  and ordinary two-sided delimiters are unchanged.
+
+- **Summation/product indices written as a `\le` range are now recognized.** An
+  index set of the form `\sum_{1 \le i \le 10} i^2` (and the one-sided
+  `\sum_{i \le 10}`) is now turned into the expected `Limits`, so the index `i`
+  is bound by the sum instead of falling through to the imaginary unit. The
+  example above now evaluates to `385` rather than staying symbolic with
+  `i → Complex(0, 1)`. This mirrors the existing handling of `i \ge 1` and
+  `i = 1`; strict `<` chains are not yet treated as index sets.
+
 ## 0.65.0 _2026-06-28_
 
 ### New Features

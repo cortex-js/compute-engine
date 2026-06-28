@@ -109,6 +109,73 @@ describe('MATCHFIX synonyms', () => {
     ).toMatchInlineSnapshot(`["List", 1, 2]`));
 });
 
+describe('MATCHFIX null delimiter (\\right.)', () => {
+  // `\right.` is a TeX *null delimiter*: a one-sided enclosure with no visible
+  // closing fence. `\left(x\right.` should parse like `\left(x\right)`, not
+  // error on an unmatched `\left`.
+  test('\\sin\\left(x\\right.', () =>
+    expect(check(`\\sin\\left(x\\right.`)).toMatchInlineSnapshot(
+      `["Sin", "x"]`
+    ));
+
+  test('\\left(x\\right.', () =>
+    expect(check(`\\left(x\\right.`)).toMatchInlineSnapshot(`
+      box       = ["Delimiter", "x"]
+      canonical = x
+    `));
+
+  test('\\left(x+1\\right.', () =>
+    expect(check(`\\left(x+1\\right.`)).toMatchInlineSnapshot(`
+      box       = ["Delimiter", ["Add", "x", 1]]
+      canonical = ["Add", "x", 1]
+    `));
+
+  test('\\left[x\\right.', () =>
+    expect(check(`\\left[x\\right.`)).toMatchInlineSnapshot(`["List", "x"]`));
+
+  test('\\bigl(x\\bigr.', () =>
+    expect(check(`\\bigl(x\\bigr.`)).toMatchInlineSnapshot(`
+      box       = ["Delimiter", "x"]
+      canonical = x
+    `));
+
+  // Regression: the null *open* delimiter (`\left.…\right|`, EvaluateAt) and
+  // ordinary two-sided delimiters must keep working.
+  test('\\left(x\\right) (two-sided still works)', () =>
+    expect(check(`\\left(x\\right)`)).toMatchInlineSnapshot(`
+      box       = ["Delimiter", "x"]
+      canonical = x
+    `));
+
+  test('\\left.x^2\\right|_{x=2} (null open still works)', () =>
+    expect(engine.parse(`\\left.x^2\\right|_{x=2}`).json)
+      .toMatchInlineSnapshot(`
+      [
+        Subscript,
+        [
+          EvaluateAt,
+          [
+            Function,
+            [
+              Block,
+              [
+                Power,
+                x,
+                2,
+              ],
+            ],
+            x,
+          ],
+        ],
+        [
+          Equal,
+          x,
+          2,
+        ],
+      ]
+    `));
+});
+
 describe('MATCHFIX abs and norm', () => {
   test('1+|a|+2', () =>
     expect(check('1+|a|+2')).toMatchInlineSnapshot(`

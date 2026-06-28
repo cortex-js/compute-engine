@@ -231,6 +231,15 @@ const OPEN_DELIMITER_PREFIX: Record<string, string> = {
   '\\mleft': '\\mright',
 };
 
+/** The closing-delimiter commands (e.g. `\right`, `\bigr`) that pair with the
+ * `\left`-style open prefixes above. After one of these, a `.` is a TeX *null
+ * delimiter*: it produces no visible fence, so `\left(x\right.` is a valid,
+ * one-sided enclosure. Used to accept `\right.` when matching a close boundary.
+ */
+const CLOSE_DELIMITER_PREFIX = new Set<string>(
+  Object.values(OPEN_DELIMITER_PREFIX)
+);
+
 /** Commands that can be used with a middle delimiter */
 // const MIDDLE_DELIMITER_PREFIX = [
 //   '\\middle',
@@ -556,10 +565,31 @@ export class _Parser implements Parser {
     if (this.atEnd) return true;
     const start = this.index;
     for (const boundary of this._boundaries) {
-      if (this.matchAll(boundary.tokens)) {
+      if (this.matchBoundaryTokens(boundary.tokens)) {
         this.index = start;
         return true;
       }
+    }
+    return false;
+  }
+
+  /**
+   * Like `matchAll()`, but also accepts a TeX *null delimiter* as the close of
+   * a `\left`-style enclosure: a two-token close boundary `[closePrefix, X]`
+   * (e.g. `['\\right', ')']`) is matched by `[closePrefix, '.']` in the input
+   * (e.g. `\right.`). This makes one-sided enclosures such as
+   * `\left(x\right.` parse instead of erroring on the unmatched `\left`.
+   */
+  matchBoundaryTokens(tokens: LatexToken[]): boolean {
+    if (this.matchAll(tokens)) return true;
+    if (
+      tokens.length === 2 &&
+      CLOSE_DELIMITER_PREFIX.has(tokens[0]) &&
+      this._tokens[this.index] === tokens[0] &&
+      this._tokens[this.index + 1] === '.'
+    ) {
+      this.index += 2;
+      return true;
     }
     return false;
   }
@@ -574,7 +604,8 @@ export class _Parser implements Parser {
 
   matchBoundary(): boolean {
     const currentBoundary = this._boundaries[this._boundaries.length - 1];
-    const match = currentBoundary && this.matchAll(currentBoundary.tokens);
+    const match =
+      currentBoundary && this.matchBoundaryTokens(currentBoundary.tokens);
     if (match) this._boundaries.pop();
     return match;
   }
@@ -1494,6 +1525,66 @@ export class _Parser implements Parser {
       }
     }
     this.index = start;
+
+    // A color command wrapping a bare infix operator — e.g.
+    // `x \textcolor{red}{=} y` — acts as that operator (`Equal(x, y)`).
+    if (this.peek === '\\textcolor') {
+      const rhs = this.parseStyledInfixOperator(lhs, until);
+      if (rhs !== null) return rhs;
+      this.index = start;
+    }
+
+    return null;
+  }
+
+  /**
+   * Parse a color-wrapped infix operator such as `\textcolor{red}{=}` as the
+   * operator it contains, so `x \textcolor{red}{=} y` parses as `Equal(x, y)`
+   * rather than erroring on the bare `=`. The styling applies only to the
+   * operator glyph, which MathJSON has no way to represent, so the color is
+   * dropped and the plain operator expression is returned.
+   *
+   * Returns null (restoring the index) when the wrapper is absent or its
+   * braced content is not exactly a single infix operator.
+   */
+  private parseStyledInfixOperator(
+    lhs: MathJsonExpression,
+    until: Readonly<Terminator>
+  ): MathJsonExpression | null {
+    const start = this.index;
+    if (!this.match('\\textcolor')) return null;
+
+    // The color argument, e.g. `{red}`.
+    if (this.parseStringGroup() === null) {
+      this.index = start;
+      return null;
+    }
+
+    // The operator argument, e.g. `{=}`.
+    this.skipSpace();
+    if (!this.match('<{>')) {
+      this.index = start;
+      return null;
+    }
+    this.skipSpace();
+
+    const contentStart = this.index;
+    for (const [def, n] of this.peekDefinitions('infix')) {
+      if (def.precedence < until.minPrec) continue;
+      // The braced content must be exactly the operator: after its trigger
+      // tokens, the group must close.
+      this.index = contentStart + n;
+      this.skipSpace();
+      if (!this.match('<}>')) {
+        this.index = contentStart;
+        continue;
+      }
+      const rhs = def.parse(this, lhs, until);
+      if (rhs !== null) return rhs;
+      this.index = contentStart;
+    }
+
+    this.index = start;
     return null;
   }
 
@@ -1631,6 +1722,17 @@ export class _Parser implements Parser {
         const tokens = this._tokens;
         for (let i = start; i < tokens.length; i++) {
           if (def.closeTokens.has(tokens[i])) {
+            found = true;
+            break;
+          }
+          // A `\left`-style enclosure may be closed by a null delimiter
+          // (`\right.`), which uses none of the def's close tokens. Allow it
+          // when the open had such a prefix.
+          if (
+            hasPrefix &&
+            CLOSE_DELIMITER_PREFIX.has(tokens[i]) &&
+            tokens[i + 1] === '.'
+          ) {
             found = true;
             break;
           }
