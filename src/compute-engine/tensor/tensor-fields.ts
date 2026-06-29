@@ -528,6 +528,11 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
       case 'rational':
       case 'finite_real':
       case 'finite_rational':
+        // Preserve exactness: an exact rational (½) or radical (√2) stored as
+        // float64 would lose precision, so it uses the `expression` dtype. An
+        // inexact (machine/decimal) value uses float64.
+        return expr.isExact ? 'expression' : 'float64';
+
       case 'integer': // For NaN, Infinity, etc
         return 'float64';
 

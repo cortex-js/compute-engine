@@ -2,6 +2,14 @@
 
 ### Resolved Issues
 
+- **Matrix/vector arithmetic preserves exact entries.** A tensor with exact
+  rational or radical entries was stored with a `float64` element type, so
+  element-wise operations silently produced floats — e.g.
+  `\begin{pmatrix}½&⅓\end{pmatrix} + \begin{pmatrix}½&⅓\end{pmatrix}` returned
+  `[1, 0.666…]` instead of `[1, ⅔]`, and a matrix of `√2` entries decayed to
+  decimals. Exact entries now use the `expression` element type and stay exact;
+  inexact (machine/decimal) values continue to use `float64`.
+
 - **`A^n` is now the matrix power for an integer exponent.** A power of a matrix
   was element-wise for non-negative exponents (`A^2` squared each entry, `A^0`
   gave a matrix of ones) yet `A^{-1}` already returned the inverse, and
