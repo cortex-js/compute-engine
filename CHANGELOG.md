@@ -1,5 +1,38 @@
 ## 0.66.0 _2026-06-28_
 
+### New Features
+
+- **`Multiply` now operates on vectors and matrices.** Previously a product with
+  any list/matrix operand was left unevaluated — even `2 * [1, 2, 3]`.
+  `Multiply` (i.e. `*`, `\cdot`, `\times`, and implicit products) now follows
+  matrix-product / scalar-scaling semantics, matching `Add`'s existing
+  element-wise threading:
+
+  - **Scalar × tensor** scales every element: `2 * [1, 2, 3]` → `[2, 4, 6]`,
+    `2 * \begin{pmatrix}1&2\\3&4\end{pmatrix}` →
+    `\begin{pmatrix}2&4\\6&8\end{pmatrix}` (exact values are preserved, e.g.
+    `\frac12 [2, 4, 6]` → `[1, 2, 3]`).
+  - **Two or more matrices/vectors** form the **matrix product**, folded
+    left-to-right in the written order:
+    `\begin{pmatrix}1&2\\3&4\end{pmatrix}\begin{pmatrix}5&6\\7&8\end{pmatrix}` →
+    `\begin{pmatrix}19&22\\43&50\end{pmatrix}`. The product is **not**
+    commutative — operand order is preserved (including for `matrix·vector` vs
+    `vector·matrix`), and `vector·vector` reduces to the dot product. This
+    reuses the existing `MatrixMultiply` implementation.
+
+  Element-wise (Hadamard) multiplication of two same-shape tensors is therefore
+  **not** what `*` does; tensors of incompatible dimensions are left
+  unevaluated, and symbolic operands of unknown shape are unaffected.
+
+- **Hadamard (element-wise) product `\odot`.** A new `HadamardProduct` operator,
+  written `\odot`, multiplies two vectors or matrices of the same shape entry by
+  entry: `[1,2,3] \odot [4,5,6]` → `[4,10,18]` and
+  `\begin{pmatrix}1&2\\3&4\end{pmatrix} \odot \begin{pmatrix}5&6\\7&8\end{pmatrix}`
+  → `\begin{pmatrix}5&12\\21&32\end{pmatrix}` (compare the matrix product `*`,
+  which gives `\begin{pmatrix}19&22\\43&50\end{pmatrix}`). Operands of
+  incompatible shape report an `incompatible-dimensions` error. It binds like
+  multiplication and round-trips through LaTeX as `\odot`.
+
 ### Resolved Issues
 
 - **Mixed chained inequalities keep their middle term.** A chain combining
@@ -9,10 +42,10 @@
   Uniform chains (`5 \le b \le 7`) and the already-correct `a \lt b \le c` form
   are unchanged.
 
-- **A transcendental of an exact *constant expression* stays symbolic.** Per the
+- **A transcendental of an exact _constant expression_ stays symbolic.** Per the
   exactness contract, `evaluate()` of a transcendental of an exact argument
   returns a symbolic result and only `.N()` numericizes. This held for number
-  literals (`sin(2)` → `sin(2)`) but not for exact constant *expressions*:
+  literals (`sin(2)` → `sin(2)`) but not for exact constant _expressions_:
   `sin(\pi^2)` numericized to `-0.4303…` instead of staying `sin(π²)` (and
   likewise `cos(√2)`, etc.). These now stay symbolic under `evaluate()`; an
   inexact (float) argument such as `sin(2.5)` still numericizes.
@@ -21,8 +54,8 @@
   `\frac12 + i` evaluated to `0.5 + i`, and `\frac34\sqrt3 + i` to `1.299… + i`
   — the exact real part was floatified when folded with `i`. Exact reals
   (rationals, radicals) are now preserved alongside the imaginary unit
-  (`1/2 + i`, `3/4·√3 + i`); `.N()` still numericizes, and inexact reals (`1.5 + i`)
-  are unchanged.
+  (`1/2 + i`, `3/4·√3 + i`); `.N()` still numericizes, and inexact reals
+  (`1.5 + i`) are unchanged.
 
 - **Matrix/vector arithmetic preserves exact entries.** A tensor with exact
   rational or radical entries was stored with a `float64` element type, so
@@ -44,19 +77,20 @@
 
 - **Element-wise functions now distribute over matrix/vector-valued
   sub-expressions.** A broadcastable unary function applied to an operand that
-  only becomes a collection *after* evaluation — e.g. `\sqrt{AB}`, `\sin(AB)`,
+  only becomes a collection _after_ evaluation — e.g. `\sqrt{AB}`, `\sin(AB)`,
   `|AB|` where `AB` is a matrix product — was left unevaluated, because
   broadcasting was decided from the raw (un-evaluated) operand. It now also
   broadcasts over the evaluated operand, so these distribute element-wise like
   `\sqrt{M}` on a literal matrix already did. (`Add`/`Multiply` keep their
   dedicated tensor handling.)
 
-- **Juxtaposed matrices now form the matrix product.** Writing two matrices
-  next to each other (`\begin{pmatrix}…\end{pmatrix}\begin{pmatrix}…\end{pmatrix}`),
+- **Juxtaposed matrices now form the matrix product.** Writing two matrices next
+  to each other (`\begin{pmatrix}…\end{pmatrix}\begin{pmatrix}…\end{pmatrix}`),
   or a scalar next to a matrix (`2\begin{pmatrix}…\end{pmatrix}`), previously
   produced a `Tuple` instead of a product, because the `Matrix(…)` wrapper is
   not reported as an indexed collection. The invisible (implicit) operator now
-  treats matrix operands as multiplication, consistent with `*`/`\cdot`/`\times`.
+  treats matrix operands as multiplication, consistent with
+  `*`/`\cdot`/`\times`.
 
 - **`Negate` (and hence `Subtract`) of a matrix-valued product is distributed
   correctly.** A negation whose operand only became a vector/matrix after
@@ -65,44 +99,9 @@
   and broadcast it over the other matrix, yielding a bogus higher-rank result.
   Matrix subtraction (e.g. the commutator `AB - BA`) now evaluates correctly.
 
-### New Features
-
-- **`Multiply` now operates on vectors and matrices.** Previously a product with
-  any list/matrix operand was left unevaluated — even `2 * [1, 2, 3]`. `Multiply`
-  (i.e. `*`, `\cdot`, `\times`, and implicit products) now follows
-  matrix-product / scalar-scaling semantics, matching `Add`'s existing
-  element-wise threading:
-
-  - **Scalar × tensor** scales every element: `2 * [1, 2, 3]` → `[2, 4, 6]`,
-    `2 * \begin{pmatrix}1&2\\3&4\end{pmatrix}` →
-    `\begin{pmatrix}2&4\\6&8\end{pmatrix}` (exact values are preserved, e.g.
-    `\frac12 [2, 4, 6]` → `[1, 2, 3]`).
-  - **Two or more matrices/vectors** form the **matrix product**, folded
-    left-to-right in the written order:
-    `\begin{pmatrix}1&2\\3&4\end{pmatrix}\begin{pmatrix}5&6\\7&8\end{pmatrix}`
-    → `\begin{pmatrix}19&22\\43&50\end{pmatrix}`. The product is **not**
-    commutative — operand order is preserved (including for `matrix·vector` vs
-    `vector·matrix`), and `vector·vector` reduces to the dot product. This
-    reuses the existing `MatrixMultiply` implementation.
-
-  Element-wise (Hadamard) multiplication of two same-shape tensors is therefore
-  **not** what `*` does; tensors of incompatible dimensions are left
-  unevaluated, and symbolic operands of unknown shape are unaffected.
-
-- **Hadamard (element-wise) product `\odot`.** A new `HadamardProduct` operator,
-  written `\odot`, multiplies two vectors or matrices of the same shape entry by
-  entry: `[1,2,3] \odot [4,5,6]` → `[4,10,18]` and
-  `\begin{pmatrix}1&2\\3&4\end{pmatrix} \odot \begin{pmatrix}5&6\\7&8\end{pmatrix}`
-  → `\begin{pmatrix}5&12\\21&32\end{pmatrix}` (compare the matrix product `*`,
-  which gives `\begin{pmatrix}19&22\\43&50\end{pmatrix}`). Operands of
-  incompatible shape report an `incompatible-dimensions` error. It binds like
-  multiplication and round-trips through LaTeX as `\odot`.
-
-### Resolved Issues
-
-- **A `\textcolor` wrapping a bare operator now parses as that operator.**
-  Input such as `x \textcolor{red}{=} y` previously failed — the `=` could not
-  be parsed as a standalone group, producing a `Tuple` around an
+- **A `\textcolor` wrapping a bare operator now parses as that operator.** Input
+  such as `x \textcolor{red}{=} y` previously failed — the `=` could not be
+  parsed as a standalone group, producing a `Tuple` around an
   `expected-closing-delimiter` error. The color command is now transparent in
   operator position, so `x \textcolor{red}{=} y` parses as `Equal(x, y)` (and
   likewise for `+`, `<`, `\le`, `\times`, …). Because MathJSON has no way to
@@ -114,9 +113,9 @@
   `\bigr.`/`\Bigr.`/… variants) is a TeX _null delimiter_: a fence with no
   visible closing glyph. Previously a one-sided group such as
   `\sin\left(x\right.` was rejected, leaking the `\left` out as an
-  `unexpected-command` error; it now parses the same as `\sin\left(x\right)`
-  (→ `Sin(x)`). The null _open_ form (`\left.…\right|`, used by `EvaluateAt`)
-  and ordinary two-sided delimiters are unchanged.
+  `unexpected-command` error; it now parses the same as `\sin\left(x\right)` (→
+  `Sin(x)`). The null _open_ form (`\left.…\right|`, used by `EvaluateAt`) and
+  ordinary two-sided delimiters are unchanged.
 
 - **Summation/product indices written as a `\le` range are now recognized.** An
   index set of the form `\sum_{1 \le i \le 10} i^2` (and the one-sided
