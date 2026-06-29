@@ -280,3 +280,41 @@ describe('Congruent modular arithmetic (REVIEW.md B14)', () => {
     expect(ce.expr(['Congruent', -1, 13, 7]).evaluate().json).toBe('True');
   });
 });
+
+// A mixed chained inequality (different operators, e.g. `5 ≤ b < 7`) must keep
+// the middle term in both links. The canonicalizer used to splice the wrong
+// operand of the nested relation, dropping it: `5 ≤ b < 7` became
+// `And(5 ≤ 7, b < 7)`, which is true for any `b` (e.g. `3 ≤ 2 < 7` wrongly
+// evaluated to True).
+describe('Mixed chained inequalities (playground 5≤b<7)', () => {
+  it('keeps the middle term: a ≤ b < c', () => {
+    expect(ce.parse('5 \\le b \\lt 7').json).toEqual([
+      'And',
+      ['LessEqual', 5, 'b'],
+      ['Less', 'b', 7],
+    ]);
+  });
+
+  it('keeps the middle term: a < b ≤ c', () => {
+    expect(ce.parse('5 \\lt b \\le 7').json).toEqual([
+      'And',
+      ['LessEqual', 'b', 7],
+      ['Less', 5, 'b'],
+    ]);
+  });
+
+  it('handles a longer mixed chain: a ≤ b ≤ c < d', () => {
+    expect(ce.parse('a \\le b \\le c \\lt d').json).toEqual([
+      'And',
+      ['LessEqual', 'a', 'b', 'c'],
+      ['Less', 'c', 'd'],
+    ]);
+  });
+
+  it('evaluates to the correct truth value', () => {
+    expect(ce.parse('5 \\le 6 \\lt 7').evaluate().json).toBe('True');
+    expect(ce.parse('5 \\le 8 \\lt 7').evaluate().json).toBe('False');
+    // Regression: 3 ≤ 2 < 7 must be False (the first link 3 ≤ 2 is false)
+    expect(ce.parse('3 \\le 2 \\lt 7').evaluate().json).toBe('False');
+  });
+});

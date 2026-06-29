@@ -2,6 +2,13 @@
 
 ### Resolved Issues
 
+- **Mixed chained inequalities keep their middle term.** A chain combining
+  different operators — e.g. `5 \le b \lt 7` — canonicalized to
+  `And(5 \le 7, b \lt 7)`, dropping `b` from the first link (so `3 \le 2 \lt 7`
+  wrongly evaluated to `True`). It now canonicalizes to `And(5 \le b, b \lt 7)`.
+  Uniform chains (`5 \le b \le 7`) and the already-correct `a \lt b \le c` form
+  are unchanged.
+
 - **A transcendental of an exact *constant expression* stays symbolic.** Per the
   exactness contract, `evaluate()` of a transcendental of an exact argument
   returns a symbolic result and only `.N()` numericizes. This held for number

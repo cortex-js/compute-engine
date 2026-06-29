@@ -631,11 +631,18 @@ function canonicalRelational(
 
   const nestedRelational: Expression[] = [];
   const newOps: Expression[] = [];
-  // Separate any nested relational operators
-  for (const op of ops) {
+  // Separate any nested relational operator (a mixed chain, e.g. `a ≤ b < c`,
+  // parses as `LessEqual(a, Less(b, c))` or `LessEqual(Less(a, b), c)`). The
+  // outer relation links to the nested chain through their *shared* boundary
+  // term: when the nested operand is the first element of the chain, the outer
+  // connects to its last (rightmost) operand; otherwise the outer connects to
+  // its first (leftmost) operand. (Using the last operand unconditionally
+  // dropped the middle term, e.g. `5 ≤ b < 7` → `And(5 ≤ 7, b < 7)`.)
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
     if (isRelationalOperator(op.operator) && isFunction(op)) {
       nestedRelational.push(op);
-      newOps.push(op.ops[op.ops.length - 1]);
+      newOps.push(i === 0 ? op.ops[op.ops.length - 1] : op.ops[0]);
     } else newOps.push(op);
   }
 
