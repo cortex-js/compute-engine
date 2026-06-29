@@ -54,6 +54,17 @@ export function isFunction(
   );
 }
 
+export function assertIsFunction(
+  expr: Expression | null | undefined,
+  operator?: string
+): asserts expr is Expression & FunctionInterface {
+  if (!isFunction(expr, operator)) {
+    throw new Error(
+      `Expected function${operator ? ` with operator ${operator}` : ''}`
+    );
+  }
+}
+
 export function isString(
   expr: Expression | null | undefined
 ): expr is Expression & StringInterface {

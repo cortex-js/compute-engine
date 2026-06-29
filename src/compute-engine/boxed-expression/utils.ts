@@ -17,7 +17,13 @@ import { NumericValue } from '../numeric-value/types';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition';
 import { _BoxedValueDefinition } from './boxed-value-definition';
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
+import {
+  isNumber,
+  isFunction,
+  isSymbol,
+  numericValue,
+  assertIsFunction,
+} from './type-guards';
 
 /**
  * Check if an expression contains symbolic transcendental functions of constants
@@ -451,4 +457,24 @@ export function placeholderDef(
   return {
     value: new _BoxedValueDefinition(ce, name, { type: 'function' }),
   };
+}
+/**
+ * Get nth (1-based) operand of *expr*; or `null` if this does not exist (or expr is not a
+ * function).
+ * Further, if assert is true (**default**: false), will throw if expr. is not a function.
+ * 
+ * <!--
+ * @todo?: move to 'function-utils'?
+ * -->
+ *
+ */
+export function getOp(
+  expr: Expression,
+  index: number,
+  assert: boolean = false
+): Expression | null {
+  if (assert) assertIsFunction(expr);
+  else if (!isFunction(expr)) return null;
+
+  return expr.ops[index - 1] || null;
 }
