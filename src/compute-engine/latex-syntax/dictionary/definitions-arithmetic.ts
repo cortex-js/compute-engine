@@ -1745,7 +1745,8 @@ function getIndexAssignment(
     if (ops.length === 2) {
       // `index \le upper` (symbol on the left) or `lower \le index`
       if (symbol(ops[0])) return { index: symbol(ops[0])!, upper: ops[1] };
-      if (symbol(ops[1])) return { index: symbol(ops[1])!, lower: ops[0], upper };
+      if (symbol(ops[1]))
+        return { index: symbol(ops[1])!, lower: ops[0], upper };
     }
   }
 

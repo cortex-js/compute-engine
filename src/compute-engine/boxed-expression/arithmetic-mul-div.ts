@@ -1285,7 +1285,9 @@ function mulTensors(
   // Fold the tensors as matrix/dot products, left to right, in order.
   let product: Expression = tensors[0];
   for (let i = 1; i < tensors.length; i++) {
-    const next = ce.function('MatrixMultiply', [product, tensors[i]]).evaluate();
+    const next = ce
+      .function('MatrixMultiply', [product, tensors[i]])
+      .evaluate();
     // Incompatible dimensions, or a partial fold that didn't reduce (e.g. a
     // scalar dot-product result followed by another matrix): stay inert.
     if (!next.isValid || next.operator === 'MatrixMultiply')

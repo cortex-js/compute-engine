@@ -1303,7 +1303,9 @@ export class BoxedFunction
           while (true) {
             const { done, value } = items.next();
             if (done) break;
-            results.push(this.engine._fn(this.operator, value).evaluate(options));
+            results.push(
+              this.engine._fn(this.operator, value).evaluate(options)
+            );
           }
           if (results.length === 1) return results[0];
           if (results.length > 0) return this.engine._fn('List', results);
