@@ -2,6 +2,21 @@
 
 ### Resolved Issues
 
+- **A transcendental of an exact *constant expression* stays symbolic.** Per the
+  exactness contract, `evaluate()` of a transcendental of an exact argument
+  returns a symbolic result and only `.N()` numericizes. This held for number
+  literals (`sin(2)` → `sin(2)`) but not for exact constant *expressions*:
+  `sin(\pi^2)` numericized to `-0.4303…` instead of staying `sin(π²)` (and
+  likewise `cos(√2)`, etc.). These now stay symbolic under `evaluate()`; an
+  inexact (float) argument such as `sin(2.5)` still numericizes.
+
+- **An exact real added to the imaginary unit keeps its exact real part.**
+  `\frac12 + i` evaluated to `0.5 + i`, and `\frac34\sqrt3 + i` to `1.299… + i`
+  — the exact real part was floatified when folded with `i`. Exact reals
+  (rationals, radicals) are now preserved alongside the imaginary unit
+  (`1/2 + i`, `3/4·√3 + i`); `.N()` still numericizes, and inexact reals (`1.5 + i`)
+  are unchanged.
+
 - **Matrix/vector arithmetic preserves exact entries.** A tensor with exact
   rational or radical entries was stored with a `float64` element type, so
   element-wise operations silently produced floats — e.g.

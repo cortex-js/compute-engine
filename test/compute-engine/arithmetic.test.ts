@@ -114,6 +114,28 @@ describe('EXACT EVALUATION', () => {
   // √5 + √5 = 2√5
   test(`Square rationals are grouped together`, () =>
     expect(check('\\sqrt{5} + \\sqrt{5}')).toMatchSnapshot());
+
+  // A transcendental of an EXACT *constant expression* (π², not just a number
+  // literal) stays symbolic under evaluate(); only N() numericizes.
+  test(`Sin of an exact constant expression stays symbolic`, () => {
+    expect(ce.parse('\\sin(\\pi^2)').evaluate().toString()).toBe('sin(pi^2)');
+    expect(ce.parse('\\sin(\\pi^2)').N().toString()).toContain('-0.4303');
+    // An inexact (float) argument still numericizes under evaluate()
+    expect(ce.parse('\\sin(2.5)').evaluate().toString()).toContain('0.598');
+  });
+
+  // An exact real added to the imaginary unit keeps the real part exact
+  // (it is not folded into a machine complex that would floatify it).
+  test(`Exact real + i preserves the exact real part`, () => {
+    expect(ce.parse('\\frac12 + i').evaluate().toString()).toBe('1/2 + i');
+    expect(ce.parse('\\sqrt3 + i').evaluate().toString()).toBe('sqrt(3) + i');
+    expect(ce.parse('\\frac34\\sqrt3 + i').evaluate().toString()).toBe(
+      '3/4sqrt(3) + i'
+    );
+    // N() still numericizes; inexact reals + i are unaffected
+    expect(ce.parse('\\frac12 + i').N().toString()).toBe('(0.5 + i)');
+    expect(ce.parse('1.5 + i').evaluate().toString()).toBe('(1.5 + i)');
+  });
 });
 
 describe('ADD', () => {

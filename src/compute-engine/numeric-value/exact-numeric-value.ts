@@ -829,8 +829,18 @@ export class ExactNumericValue extends NumericValue {
   ): NumericValue[] {
     if (values.length === 1) return values;
 
-    // If we have some inexact values, just do a simple sum
-    if (values.some((x) => !x.isExact)) {
+    // A Gaussian integer (notably the imaginary unit `i = 0 + 1i`) is exact even
+    // though it is represented as a (non-`ExactNumericValue`) complex value.
+    // Treat it as exact here so it does not force the structured sum below into
+    // the inexact path — otherwise an exact real summed with it would floatify
+    // (`1/2 + i` → `0.5 + i`). The structured path tracks the imaginary part
+    // (`imSum`) and the exact real part separately, preserving both.
+    const isExactForSum = (x: NumericValue): boolean =>
+      x.isExact ||
+      (x.im !== 0 && Number.isInteger(x.re) && Number.isInteger(x.im));
+
+    // If we have some genuinely inexact values, just do a simple sum
+    if (values.some((x) => !isExactForSum(x))) {
       if (values.length === 2) return [values[0].add(values[1])];
       let sum = factory(0);
       for (const value of values) sum = sum.add(value);
@@ -867,7 +877,13 @@ export class ExactNumericValue extends NumericValue {
           }
         }
       } else {
-        console.assert(isSubtype(value.type, 'integer'));
+        // A non-`ExactNumericValue` value reaching the exact path is a real
+        // integer or a Gaussian integer (its imaginary part was already folded
+        // into `imSum` above; here we add its integer real part).
+        console.assert(
+          isSubtype(value.type, 'integer') ||
+            (Number.isInteger(value.re) && Number.isInteger(value.im))
+        );
         // Use bignumRe to avoid precision loss for large integers
         const intValue = BigInt(value.bignumRe!.toFixed(0));
         rationalSum = add(rationalSum, [intValue, BigInt(1)]);

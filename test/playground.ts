@@ -114,13 +114,6 @@ console.log(
 // `±` evaluates to a Tuple of the two values — is that the intended semantics?
 console.log(ce.parse('21\\pm1').evaluate().json); // -> Tuple(20, 22)
 
-// Exactness contract says a transcendental of an exact argument stays symbolic
-// (like Sin(Pi^2)), yet this numericizes.
-ce.parse('\\sin(\\pi^2)').evaluate().print();
-
-// The exact 3/4·√3 numericizes once an imaginary term is present.
-console.log(ce.parse('\\frac34 \\sqrt{3} + i').evaluate().toString());
-
 // `\degree` binds to the whole Tan(...) -> Degrees(Tan(90 - 1e-6)). Intended
 // precedence? (With explicit parens, `\tan((90-.000001)\degree)` works.)
 console.log(ce.parse('\\tan (90-0.000001)\\degree').json);

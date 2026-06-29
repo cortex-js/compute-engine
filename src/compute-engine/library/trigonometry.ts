@@ -509,14 +509,15 @@ function trigFunction(
       if (numericApproximation) return evalTrig(operator, x);
       const a = constructibleValues(operator, x);
       if (a) return a;
-      // No constructible value: keep the function of an EXACT numeric argument
-      // symbolic — `sin(2)` is an exact constant, so `evaluate()` returns
-      // `sin(2)` and only `.N()` numericizes. An INEXACT (float) argument has
-      // no exactness to preserve, so it falls through to `evalTrig` and
-      // numericizes (`sin(2.5) → 0.598…`); `evalTrig` also handles symbolic
-      // arguments (returning undefined, leaving the expression unevaluated).
-      if (isNumber(x) && x.isExact) return engine._fn(operator, [x]);
-      return evalTrig(operator, x);
+      // No constructible value: numericize ONLY an inexact (float) numeric
+      // argument — `sin(2.5) → 0.598…` — since a float has no exactness to
+      // preserve. Everything else stays symbolic so `evaluate()` honors the
+      // exactness contract and only `.N()` numericizes: an exact number
+      // (`sin(2)`), an exact *constant expression* (`sin(π²)`, `sin(√2)` — these
+      // have `isNumber` true but are not number literals), and a symbolic
+      // argument (`sin(x)`) all return the unevaluated function.
+      if (isNumber(x) && x.isExact === false) return evalTrig(operator, x);
+      return engine._fn(operator, [x]);
     },
   };
 }
