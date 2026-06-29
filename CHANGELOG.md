@@ -2,6 +2,25 @@
 
 ### Resolved Issues
 
+- **`A^n` is now the matrix power for an integer exponent.** A power of a matrix
+  was element-wise for non-negative exponents (`A^2` squared each entry, `A^0`
+  gave a matrix of ones) yet `A^{-1}` already returned the inverse, and
+  `\begin{pmatrix}…\end{pmatrix}^2` did not evaluate at all. `A^n` is now the
+  matrix power — repeated matrix multiplication — consistent with `*` being the
+  matrix product: `A^2 = A·A`, `A^0` is the identity, `A^{-1}` the inverse, and
+  `A^{-n} = (A^n)^{-1}`. A non-square base reports `expected-square-matrix`.
+  (Also fixes `MatrixPower(A, n)` for `n < -1`, which previously collapsed to
+  `A^{-1}`.)
+
+- **Element-wise functions now distribute over matrix/vector-valued
+  sub-expressions.** A broadcastable unary function applied to an operand that
+  only becomes a collection *after* evaluation — e.g. `\sqrt{AB}`, `\sin(AB)`,
+  `|AB|` where `AB` is a matrix product — was left unevaluated, because
+  broadcasting was decided from the raw (un-evaluated) operand. It now also
+  broadcasts over the evaluated operand, so these distribute element-wise like
+  `\sqrt{M}` on a literal matrix already did. (`Add`/`Multiply` keep their
+  dedicated tensor handling.)
+
 - **Juxtaposed matrices now form the matrix product.** Writing two matrices
   next to each other (`\begin{pmatrix}…\end{pmatrix}\begin{pmatrix}…\end{pmatrix}`),
   or a scalar next to a matrix (`2\begin{pmatrix}…\end{pmatrix}`), previously

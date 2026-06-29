@@ -1283,6 +1283,34 @@ export class BoxedFunction
       const tail = holdMap(this, (x) => x.evaluate(options));
 
       //
+      // 4b/ Broadcast over operands that only became collections *after*
+      // evaluation — e.g. `Sqrt(Multiply(A, B))`, where the product evaluates
+      // to a matrix. The pre-evaluation broadcast (step 2) misses these because
+      // the raw operand is not yet a collection. `Add`/`Multiply` are excluded:
+      // they have dedicated tensor handling (addTensors/mulTensors). This reuses
+      // the already-evaluated `tail`, so scalar calls (`Sin(x)`) pay only a
+      // cheap collection test.
+      //
+      if (
+        def.broadcastable &&
+        this.operator !== 'Add' &&
+        this.operator !== 'Multiply' &&
+        tail.some((x) => isFiniteIndexedCollection(x))
+      ) {
+        const items = zip(tail);
+        if (items) {
+          const results: Expression[] = [];
+          while (true) {
+            const { done, value } = items.next();
+            if (done) break;
+            results.push(this.engine._fn(this.operator, value).evaluate(options));
+          }
+          if (results.length === 1) return results[0];
+          if (results.length > 0) return this.engine._fn('List', results);
+        }
+      }
+
+      //
       // 5/ Create a scope if needed
       //
       const isScoped = this._localScope !== undefined;
@@ -1402,6 +1430,34 @@ export class BoxedFunction
         this,
         async (x) => await x.evaluateAsync(options)
       );
+
+      //
+      // 3b/ Broadcast over operands that only became collections after
+      // evaluation (mirrors `_computeValue` step 4b).
+      //
+      if (
+        def.broadcastable &&
+        this.operator !== 'Add' &&
+        this.operator !== 'Multiply' &&
+        tail.some((x) => isFiniteIndexedCollection(x))
+      ) {
+        const items = zip(tail);
+        if (items) {
+          const results: Promise<Expression>[] = [];
+          while (true) {
+            const { done, value } = items.next();
+            if (done) break;
+            results.push(
+              this.engine._fn(this.operator, value).evaluateAsync(options)
+            );
+          }
+          if (results.length === 1) return results[0];
+          if (results.length > 0)
+            return Promise.all(results).then((resolved) =>
+              this.engine._fn('List', resolved)
+            );
+        }
+      }
 
       // 4/ Create a scope if needed
       //

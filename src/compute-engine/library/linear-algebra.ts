@@ -786,21 +786,19 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (n === 0)
           return ce.function('IdentityMatrix', [ce.number(size)]).evaluate();
 
-        // Negative power: raise the inverse to |n|.
-        let base: Expression = A;
-        let k = n;
-        if (n < 0) {
-          const inv = ce.function('Inverse', [A]).evaluate();
-          if (!isTensor(inv)) return inv; // propagate Error / undefined
-          base = inv;
-          k = -n;
-        }
+        // Compute the positive power A^|n| by repeated multiplication, always
+        // multiplying by the original matrix `A` (a clean `matrix` operand).
+        // Exponents are small in practice; the loop keeps results exact for
+        // symbolic/rational entries.
+        let result: Expression = A;
+        for (let i = 1; i < Math.abs(n); i++)
+          result = ce.function('MatrixMultiply', [result, A]).evaluate();
 
-        // Repeated multiplication. Exponents are small in practice; a simple
-        // loop keeps results exact for symbolic/rational entries.
-        let result: Expression = base;
-        for (let i = 1; i < k; i++)
-          result = ce.function('MatrixMultiply', [result, base]).evaluate();
+        // Negative exponent: A^{-n} = (A^n)^{-1}. Inverting the final result
+        // (rather than threading the inverse back through MatrixMultiply, whose
+        // signature rejects the inverse's `list<list<…>>` type) keeps this
+        // exact and well-typed.
+        if (n < 0) return ce.function('Inverse', [result]).evaluate();
         return result;
       },
     },

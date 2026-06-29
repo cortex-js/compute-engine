@@ -601,6 +601,41 @@ describe('Matrix juxtaposition and subtraction', () => {
   });
 });
 
+describe('Element-wise functions over matrix-valued sub-expressions', () => {
+  // A unary broadcastable function applied to an operand that only becomes a
+  // collection *after* evaluation (e.g. a matrix product) must still
+  // distribute element-wise. `Multiply(M, I)` evaluates to `M` but reaches the
+  // function as an unevaluated `Multiply`, exercising the post-evaluation
+  // broadcast path.
+  const I: Expression = ['List', ['List', 1, 0], ['List', 0, 1]];
+  const prod = (m: Expression): Expression => ['Multiply', m, I];
+  const ev = (expr: Expression) => ce.box(expr).evaluate().toString();
+
+  it('Sqrt distributes over a matrix product', () => {
+    expect(
+      ev(['Sqrt', prod(['List', ['List', 4, 9], ['List', 16, 25]])])
+    ).toMatchInlineSnapshot(`[[2,3],[4,5]]`);
+  });
+
+  it('Sin distributes over a matrix product', () => {
+    expect(ev(['Sin', ['Multiply', sq2_n, sq2_n2]])).toMatchInlineSnapshot(
+      `[[sin(19),sin(22)],[sin(43),sin(50)]]`
+    );
+  });
+
+  it('Abs distributes over a matrix product', () => {
+    expect(
+      ev(['Abs', prod(['List', ['List', -1, 2], ['List', -3, 4]])])
+    ).toMatchInlineSnapshot(`[[1,2],[3,4]]`);
+  });
+
+  it('does not affect scalar function calls', () => {
+    expect(ev(['Sqrt', 9])).toMatchInlineSnapshot(`3`);
+    expect(ev(['Sin', 'x'])).toMatchInlineSnapshot(`sin(x)`);
+    expect(ev(['Abs', -3])).toMatchInlineSnapshot(`3`);
+  });
+});
+
 describe('Flatten', () => {
   it('should flatten a scalar', () => {
     const result = ce.expr(['Flatten', 42]).evaluate();
@@ -2181,6 +2216,14 @@ describe('MatrixPower', () => {
     expect(ce.expr(['MatrixPower', m, -1]).evaluate().toString()).toBe(inverse);
   });
 
+  it('to a negative power below -1 is (A^|n|)^{-1}', () => {
+    // Regression: the negative branch bailed early on a non-BoxedTensor
+    // inverse, collapsing A^{-2} to A^{-1}.
+    expect(ce.expr(['MatrixPower', m, -2]).evaluate().toString()).toBe(
+      '[[5.5,-2.5],[-3.75,1.75]]'
+    );
+  });
+
   it('errors on a non-square matrix', () => {
     expect(
       ce
@@ -2191,6 +2234,57 @@ describe('MatrixPower', () => {
         ])
         .evaluate().isValid
     ).toBe(false);
+  });
+});
+
+describe('Power of a matrix (^)', () => {
+  // `A^n` for an integer n is the matrix power (consistent with `*` being the
+  // matrix product), routed to MatrixPower at canonicalization so it does not
+  // broadcast element-wise.
+  const m: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];
+  const ev = (expr: Expression) => ce.box(expr).evaluate().toString();
+
+  it('A^2 is the matrix product A·A', () => {
+    expect(ev(['Power', m, 2])).toMatchInlineSnapshot(`[[7,10],[15,22]]`);
+  });
+
+  it('A^0 is the identity matrix', () => {
+    expect(ev(['Power', m, 0])).toMatchInlineSnapshot(`[[1,0],[0,1]]`);
+  });
+
+  it('A^1 is A', () => {
+    expect(ev(['Power', m, 1])).toMatchInlineSnapshot(`[[1,2],[3,4]]`);
+  });
+
+  it('A^{-1} is the inverse', () => {
+    expect(ev(['Power', m, -1])).toMatchInlineSnapshot(`[[-2,1],[1.5,-0.5]]`);
+    expect(ce.box(['Power', m, -1]).canonical.json[0]).toBe('Inverse');
+  });
+
+  it('A^{-2} is the inverse squared', () => {
+    expect(ev(['Power', m, -2])).toMatchInlineSnapshot(
+      `[[5.5,-2.5],[-3.75,1.75]]`
+    );
+  });
+
+  it('parses and evaluates from LaTeX', () => {
+    expect(
+      ce.parse(String.raw`\begin{pmatrix}1&2\\3&4\end{pmatrix}^2`).evaluate().toString()
+    ).toBe('[[7,10],[15,22]]');
+  });
+
+  it('errors on a non-square base', () => {
+    expect(
+      ce.box(['Power', ['List', ['List', 1, 2, 3]], 2]).evaluate().isValid
+    ).toBe(false);
+  });
+
+  it('does not change scalar or vector powers', () => {
+    expect(ev(['Power', 2, 3])).toMatchInlineSnapshot(`8`);
+    expect(ev(['Power', 'x', 2])).toMatchInlineSnapshot(`x^2`);
+    expect(ev(['Power', ['List', 1, 2, 3], 2])).toMatchInlineSnapshot(
+      `[1,4,9]`
+    );
   });
 });
 

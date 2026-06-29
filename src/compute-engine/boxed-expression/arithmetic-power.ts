@@ -138,6 +138,20 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   if (isFunction(b) || isSymbol(b) || !b.type.matches('number' as Type))
     return unchanged();
 
+  // Matrix power: `A^n` for an integer `n` is the *matrix* power — repeated
+  // matrix multiplication (`A·A·…`), the identity for `n = 0`, and the inverse
+  // for negative `n` — consistent with `*`/`\cdot`/`\times` being the matrix
+  // product. (Element-wise power of a matrix is not expressed via `^`.) Routing
+  // at canonicalization keeps `A^2` from element-wise broadcasting at
+  // evaluation. Vectors and non-integer exponents are left to other handling.
+  if (b.isInteger === true && a.type.matches(new BoxedType('matrix'))) {
+    const n = b.re;
+    if (n === 1) return a;
+    // Preserve the existing canonical form for the inverse.
+    if (n === -1) return ce.function('Inverse', [a]);
+    return ce.function('MatrixPower', [a, b]);
+  }
+
   // Zero as base
   if (isNumber(a) && a.isSame(0)) {
     if (b.type.matches('imaginary' as NumericPrimitiveType) || b.isNaN)
