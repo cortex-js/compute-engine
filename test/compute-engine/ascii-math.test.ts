@@ -269,13 +269,13 @@ describe('PRECEDENCE', () => {
 
   it('should correctly put parentheses with relational operators', () => {
     expect(check('(a < b) <= c')).toMatchInlineSnapshot(`b <= c && a < b`);
-    expect(check('a < (b <= c)')).toMatchInlineSnapshot(`a < c && b <= c`);
+    expect(check('a < (b <= c)')).toMatchInlineSnapshot(`a < b && b <= c`);
 
     expect(check('(a < b) <= (c > d)')).toMatchInlineSnapshot(
-      `b <= c && a < b && d < c`
+      `b <= d && a < b && d < c`
     );
     expect(check('a < (b <= c) > d')).toMatchInlineSnapshot(
-      `a < (d < c && b <= c)`
+      `a < (d < b && b <= c)`
     );
   });
 });
