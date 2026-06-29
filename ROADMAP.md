@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-06-16.
+**Last updated:** 2026-06-28.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -346,6 +346,34 @@ decomposition deliberately drops.
 splitting or watched-disjunct propagation), not an incremental patch. The guard
 census (`scripts/fungrim/guard-census.json`, currently 89.6% complex-domain
 dischargeable) quantifies exactly what it would buy. Let demand justify it.
+
+#### 9. Matrix/tensor value representation — unify `List` vs `BoxedTensor`
+
+**What:** tensor values exist in two forms — a `BoxedTensor` instance (the
+canonical `box`/`function` path) and a plain `List` `BoxedFunction` (broadcast /
+map results, `ce._fn('List', …)`). `isTensor` recognizes only the former, so a
+tensor-shaped plain list bypasses the tensor-arithmetic paths
+(`addTensors`/`mulTensors`, `MatrixMultiply`, `MatrixPower`). Visible residue:
+`Sqrt(M) − Sqrt(M)` (both operands broadcast-produced) stays symbolic instead of
+collapsing element-wise to `[[0,0]]`.
+
+**Status:** the *exactness* half of this cluster shipped — exact rational/radical
+tensor entries no longer floatify (`getExpressionDatatype` uses the `expression`
+dtype). The *detection* half is **deferred**: three normalization attempts
+(promote broadcast results to `BoxedTensor`; an `operator === 'List'` gate in
+`add`/`mul`; a dtype-aware "smart" promoter) each regressed on precision,
+performance, or correctness.
+
+**Why "strategic":** at the default precision a machine float and a
+high-precision bignum are both `BigNumericValue` / `isExact === false`, so the
+tensor dtype can't be chosen cheaply, and any per-broadcast normalization is hot
+enough to blow simplify/calculus deadlines. A real fix is a representation rework
+(normalize at construction, or make tensor detection/access work on plain
+`List`s without per-call re-boxing), not a patch — let demand justify it. The
+common cases are already covered by the landed per-site fixes (Negate over
+evaluated tensors, `MatrixPower` negative branch, matrix juxtaposition). Detailed
+findings — the three failed approaches and why — are in
+`docs/plans/2026-06-28-tensor-value-representation-design.md`.
 
 ### Review residue (open low-priority items)
 
