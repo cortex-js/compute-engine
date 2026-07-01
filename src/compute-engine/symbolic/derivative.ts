@@ -225,6 +225,73 @@ export function derivative(
 }
 
 /**
+ * Read the multi-index of differentiation orders from a
+ * `Derivative(f, n₁, …, n_k)` expression, padded/truncated to `arity` slots.
+ *
+ * Each order is the number of times `f` is differentiated with respect to the
+ * argument in that position. A bare `Derivative(f)` applied to a single
+ * argument denotes a first derivative. Returns `undefined` if any order is not
+ * a finite integer.
+ */
+function derivativeOrders(
+  derivativeFn: Expression,
+  arity: number
+): number[] | undefined {
+  if (!isFunction(derivativeFn)) return undefined;
+  const raw = derivativeFn.ops.slice(1);
+  const orders: number[] = [];
+  for (let i = 0; i < arity; i++) {
+    if (i < raw.length) {
+      const n = Math.floor(raw[i].N().re);
+      if (Number.isNaN(n)) return undefined;
+      orders.push(n);
+    } else {
+      // No explicit order for this slot: a bare `Derivative(f)` on a single
+      // argument means a first derivative; any other missing slot is order 0.
+      orders.push(raw.length === 0 && arity === 1 ? 1 : 0);
+    }
+  }
+  return orders;
+}
+
+/**
+ * Differentiate `Apply(Derivative(fn, orders), args)` with respect to `v` by
+ * the multivariate chain rule, bumping the multi-index one slot at a time:
+ *
+ *   Σᵢ Apply(Derivative(fn, orders + eᵢ), args) · d(argsᵢ)/dv
+ *
+ * Slots whose argument does not depend on `v` drop out (their partial is
+ * multiplied by zero). Returns `ce.Zero` when no slot depends on `v`, or
+ * `undefined` if some argument's derivative cannot be determined.
+ */
+function differentiateApplied(
+  fn: Expression,
+  orders: number[],
+  args: Expression[],
+  v: string,
+  depth: number
+): Expression | undefined {
+  const ce = fn.engine;
+  const terms: Expression[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const argPrime =
+      differentiate(arg, v, depth + 1) ?? ce._fn('D', [arg, ce.symbol(v)]);
+    if (!argPrime.isValid) return undefined;
+    if (argPrime.isSame(0)) continue;
+    const nextOrders = orders.slice();
+    nextOrders[i] = (nextOrders[i] ?? 0) + 1;
+    const nextDeriv = ce._fn('Derivative', [
+      fn,
+      ...nextOrders.map((n) => ce.number(n)),
+    ]);
+    terms.push(ce._fn('Apply', [nextDeriv, ...args]).mul(argPrime));
+  }
+  if (terms.length === 0) return ce.Zero;
+  return simplifyDerivative(add(...terms));
+}
+
+/**
  * Calculate the partial derivative of an expression with respect to a
  * variable, `v`.
  *
@@ -309,20 +376,24 @@ export function differentiate(
     return differentiate(evaluated, v, depth + 1);
   }
 
-  // d/dx Apply(Derivative(f, n), g(x)) = Apply(Derivative(f, n + 1), g(x)) g'(x)
+  // Differentiate an already-symbolic partial derivative, applying the chain
+  // rule and bumping the multi-index:
+  //
+  //   d/dv Apply(Derivative(f, α), g₁,…,g_k)
+  //     = Σᵢ Apply(Derivative(f, α+eᵢ), g₁,…,g_k) · gᵢ'
+  //
+  // For a univariate f this reduces to the familiar
+  //   d/dv Apply(Derivative(f, n), g) = Apply(Derivative(f, n+1), g) · g'.
   if (expr.operator === 'Apply' && isFunction(expr.op1, 'Derivative')) {
     const derivativeFn = expr.op1;
     const fn = derivativeFn.op1;
-    const arg = expr.op2;
-    if (!fn || !arg || expr.nops !== 2) return undefined;
+    const args = expr.ops.slice(1);
+    if (!fn || args.length === 0) return undefined;
 
-    const order = Math.floor(derivativeFn.op2?.N().re ?? 1);
-    if (Number.isNaN(order)) return undefined;
+    const orders = derivativeOrders(derivativeFn, args.length);
+    if (!orders) return undefined;
 
-    const argPrime =
-      differentiate(arg, v, depth + 1) ?? ce._fn('D', [arg, ce.symbol(v)]);
-    const nextDerivative = ce._fn('Derivative', [fn, ce.number(order + 1)]);
-    return simplifyDerivative(ce._fn('Apply', [nextDerivative, arg]).mul(argPrime));
+    return differentiateApplied(fn, orders, args, v, depth);
   }
 
   // Sum rule
@@ -546,16 +617,14 @@ export function differentiate(
       }
     }
 
-    if (expr.nops > 1) return undefined;
-
-    // If we don't know how to differentiate this one-argument function, keep
-    // the outer derivative symbolic and apply the chain rule.
-    const fPrime = ce._fn('Derivative', [ce.symbol(expr.operator), ce.One]);
-    const g = expr.ops[0];
-    const gPrime =
-      differentiate(g, v, depth + 1) ?? ce._fn('D', [g, ce.symbol(v)]);
-    if (!gPrime.isValid) return undefined;
-    return ce._fn('Apply', [fPrime, g]).mul(gPrime);
+    // Unknown function of one or more arguments: keep the outer derivative
+    // symbolic and apply the (multivariate) chain rule. The partial with
+    // respect to each argument slot is carried as a multi-index Derivative:
+    //   d/dv f(g₁,…,g_k) = Σᵢ Apply(Derivative(f, eᵢ), g₁,…,g_k) · gᵢ'
+    // For a univariate f this is the usual Apply(Derivative(f, 1), g) · g'.
+    const fSym = ce.symbol(expr.operator);
+    const baseOrders = expr.ops.map(() => 0);
+    return differentiateApplied(fSym, baseOrders, expr.ops.slice(), v, depth);
   }
 
   // Apply the chain rule:

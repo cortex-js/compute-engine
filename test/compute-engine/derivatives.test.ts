@@ -395,11 +395,11 @@ describe('Symbolic derivatives for unknown functions', () => {
     );
   });
 
-  it('d/dx of a sum preserves symbolic derivatives for unresolved terms', () => {
+  it('d/dx of a sum differentiates each term, including multivariate partials', () => {
     const expr = engine.expr(['D', ['Add', ['f', 'x'], ['h', 'x', 'y']], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Apply(Derivative(f, 1), x) + D(h(x, y), x)`
+      `Apply(Derivative(f, 1), x) + Apply(Derivative(h, 1, 0), x, y)`
     );
   });
 
@@ -421,6 +421,85 @@ describe('Symbolic derivatives for unknown functions', () => {
     expect(result.toString()).toMatchInlineSnapshot(
       `Apply(Derivative(g, 1), x) * Apply(Derivative(f, 2), g(x))`
     );
+  });
+});
+
+describe('Partial derivatives of unknown multivariate functions', () => {
+  it('∂/∂x f(x, y) is the partial with respect to the first argument', () => {
+    const expr = engine.expr(['D', ['f', 'x', 'y'], 'x']);
+    expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+      `Apply(Derivative(f, 1, 0), x, y)`
+    );
+  });
+
+  it('∂/∂y f(x, y) is the partial with respect to the second argument', () => {
+    const expr = engine.expr(['D', ['f', 'x', 'y'], 'y']);
+    expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+      `Apply(Derivative(f, 0, 1), x, y)`
+    );
+  });
+
+  it('mixed partial ∂²/∂x∂y f(x, y) accumulates the multi-index', () => {
+    const expr = engine.expr(['D', ['D', ['f', 'x', 'y'], 'x'], 'y']);
+    expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+      `Apply(Derivative(f, 1, 1), x, y)`
+    );
+  });
+
+  it('mixed partials commute (Clairaut): ∂²/∂y∂x == ∂²/∂x∂y', () => {
+    const dxy = engine.expr(['D', ['D', ['f', 'x', 'y'], 'x'], 'y']).evaluate();
+    const dyx = engine.expr(['D', ['D', ['f', 'x', 'y'], 'y'], 'x']).evaluate();
+    expect(dxy.isSame(dyx)).toBe(true);
+  });
+
+  it('repeated partial ∂²/∂x² f(x, y) raises the first-slot order', () => {
+    const expr = engine.expr(['D', ['D', ['f', 'x', 'y'], 'x'], 'x']);
+    expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+      `Apply(Derivative(f, 2, 0), x, y)`
+    );
+  });
+
+  it('applies the chain rule on a compound argument', () => {
+    const expr = engine.expr(['D', ['f', ['Square', 'x'], 'y'], 'x']);
+    expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+      `2x * Apply(Derivative(f, 1, 0), x^2, y)`
+    );
+  });
+
+  it('sums the chain rule over every argument that depends on the variable', () => {
+    const expr = engine.expr(['D', ['f', 'x', ['Square', 'x']], 'x']);
+    expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+      `2x * Apply(Derivative(f, 0, 1), x, x^2) + Apply(Derivative(f, 1, 0), x, x^2)`
+    );
+  });
+
+  it('composes with the product rule', () => {
+    const expr = engine.expr(['D', ['Multiply', 'x', ['f', 'x', 'y']], 'x']);
+    expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+      `x * Apply(Derivative(f, 1, 0), x, y) + f(x, y)`
+    );
+  });
+
+  it('a third-order mixed partial carries a length-3 multi-index', () => {
+    const expr = engine.expr([
+      'D',
+      ['D', ['D', ['f', 'x', 'y', 'z'], 'x'], 'y'],
+      'z',
+    ]);
+    expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+      `Apply(Derivative(f, 1, 1, 1), x, y, z)`
+    );
+  });
+
+  it('computes the mixed partial of a known bivariate function literal', () => {
+    // ∂²/∂x∂y (x²·y) = 2x
+    const expr = engine.expr([
+      'Derivative',
+      ['Function', ['Multiply', ['Square', 'x'], 'y'], 'x', 'y'],
+      1,
+      1,
+    ]);
+    expect(expr.evaluate().toString()).toMatchInlineSnapshot(`(x, y) |-> 2x`);
   });
 });
 

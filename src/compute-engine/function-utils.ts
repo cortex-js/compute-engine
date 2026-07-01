@@ -276,16 +276,12 @@ export function apply(
   // recursing forever (stack overflow). Instead, substitute the argument
   // structurally — swap the placeholder operand for the actual argument — so
   // `Apply(Derivative(f, n), 0)` is returned unevaluated.
-  if (args.length === 1 && isFunction(fn, 'Derivative')) {
-    return fn.engine._fn('Apply', [fn, args[0]]);
+  if (isFunction(fn, 'Derivative')) {
+    return fn.engine._fn('Apply', [fn, ...args]);
   }
 
-  if (
-    args.length === 1 &&
-    isFunction(fn, 'Apply') &&
-    fn.op1?.operator === 'Derivative'
-  ) {
-    return fn.engine._fn('Apply', [fn.op1, args[0]]);
+  if (isFunction(fn, 'Apply') && fn.op1?.operator === 'Derivative') {
+    return fn.engine._fn('Apply', [fn.op1, ...args]);
   }
 
   const result = makeLambda(fn)?.(args);

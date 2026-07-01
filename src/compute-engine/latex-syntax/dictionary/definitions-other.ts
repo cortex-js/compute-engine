@@ -179,10 +179,12 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     precedence: 780,
   },
   {
-    // Partial derivative using a variation of the Euler notation: `∂_xf(x)`
-    // (the Euler notation uses `D_1f(x)` where "1" is for the first variable
-    // For the Leibniz notation see 'Divide' that handles `∂f/∂x`
-    name: 'PartialDerivative', // PartialDerivative(expr, {lists of vars}, degree)
+    // Partial-derivative notation using the ∂ symbol. Both the Euler form
+    // `∂_x f(x)` and the Leibniz form `∂f/∂x` (assembled by `parseFraction`)
+    // canonicalize to the `D` operator. `PartialDerivative` is retained only as
+    // a transient parse marker for the Leibniz pieces — `['PartialDerivative',
+    // fnOrVar, degree]` — and is never emitted as a result.
+    name: 'PartialDerivative',
     latexTrigger: ['\\partial'],
     kind: 'prefix',
     parse: (parser: Parser) => {
@@ -199,37 +201,61 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
           done = true;
         }
       }
-      const seq = getSequence(sub);
-      if (seq) sub = ['List', ...seq];
-
       if (sub === null || sup === null) return null;
-      let rhs = parser.parseGroup() ?? 'Nothing';
-      if (!isEmptySequence(rhs)) {
-        const args = parser.parseArguments() ?? ['Nothing'];
-        rhs = [rhs as MathJsonSymbol, ...args];
-      }
-      return ['PartialDerivative', rhs, sub, sup] as MathJsonExpression;
-    },
-    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
-      let result = '\\partial';
-      const fn = operand(expr, 1);
-      const vars = operand(expr, 2);
-      const degree = operand(expr, 3);
-      if (vars !== null && vars !== 'Nothing') {
-        if (operator(vars) === 'List') {
-          result +=
-            '_{' + serializer.serialize(['Sequence', ...operands(vars)]) + '}';
-        } else {
-          result += '_{' + serializer.serialize(vars) + '}';
+
+      // Euler notation with an explicit subscript variable, e.g. `∂_x f(x)`,
+      // `∂_{x,y} f`, or `∂_x^2 f` — a complete derivative → `D`.
+      if (sub !== 'Nothing') {
+        const seq = getSequence(sub);
+        const vars = seq ?? [sub];
+        parser.skipSpace();
+        let rhs: MathJsonExpression = parser.parseGroup() ??
+          parser.parseSymbol() ??
+          'Nothing';
+        if (!isEmptySequence(rhs)) {
+          const args = parser.parseArguments();
+          if (args) rhs = [rhs as MathJsonSymbol, ...args];
         }
+        // A superscript degree repeats a single variable: ∂_x^2 f → D(f, x, x).
+        const degree = machineValue(sup) ?? 1;
+        const expanded: MathJsonExpression[] =
+          vars.length === 1 && degree > 1
+            ? Array.from({ length: degree }, () => vars[0])
+            : [...vars];
+        return ['D', rhs, ...expanded] as MathJsonExpression;
       }
 
-      if (degree !== null && degree !== 'Nothing')
-        result += '^{' + serializer.serialize(degree) + '}';
-
-      if (fn !== null && fn !== 'Nothing') result += serializer.serialize(fn);
-
-      return result;
+      // Bare ∂ (a Leibniz numerator or denominator piece). Greedily absorb a
+      // chain of ∂-terms in the same group, so a denominator like `∂x ∂y` or
+      // `∂x²` is captured by this single marker rather than tripping the group
+      // parser on the following prefix `∂`. Each term contributes a variable
+      // (a `∂xⁿ` exponent repeats it). The numerator forms `∂f` and bare `∂`
+      // yield a single item, left for `parseFraction` to interpret.
+      const items: MathJsonExpression[] = [];
+      const grabItem = () => {
+        parser.skipSpace();
+        let v: MathJsonExpression = parser.parseGroup() ??
+          parser.parseSymbol() ??
+          'Nothing';
+        let reps = 1;
+        if (operator(v) === 'Power') {
+          reps = machineValue(operand(v, 2)) ?? 1;
+          v = operand(v, 1) ?? v;
+        } else if (parser.match('^')) {
+          const e = parser.parseGroup() ?? parser.parseToken();
+          reps = machineValue(e) ?? 1;
+        }
+        for (let i = 0; i < reps; i++) items.push(v);
+      };
+      grabItem();
+      while (true) {
+        parser.skipSpace();
+        if (!parser.match('\\partial')) break;
+        grabItem();
+      }
+      if (items.length === 1)
+        return ['PartialDerivative', items[0], sup] as MathJsonExpression;
+      return ['PartialDerivative', ['List', ...items], sup] as MathJsonExpression;
     },
     precedence: 740,
   },

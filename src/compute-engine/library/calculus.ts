@@ -113,18 +113,43 @@ volumes
       broadcastable: false,
 
       lazy: true,
-      signature: '(function, order:number?) -> function',
+      // The order argument is a multi-index: one differentiation order per
+      // argument of the function. A single order is the ordinary (univariate)
+      // n-th derivative; `Derivative(f, 1, 0)` is ∂f/∂arg₁ of a bivariate f.
+      signature: '(function, order:number*) -> function',
       canonical: (ops, { engine }) => {
         const fn = canonicalFunctionLiteral(ops[0].canonical);
         if (!fn) return null;
-        if (!ops[1]) return engine._fn('Derivative', [fn]);
-        const order = checkType(engine, ops[1]?.canonical, 'number');
-        return engine._fn('Derivative', [fn, order]);
+        const orders = ops
+          .slice(1)
+          .map((o) => checkType(engine, o.canonical, 'number'));
+        return engine._fn('Derivative', [fn, ...orders]);
       },
-      evaluate: (ops) => {
+      evaluate: (ops, { engine: ce }) => {
         const op = ops[0].evaluate();
-        const degree = Math.floor(ops[1]?.N().re);
-        return derivative(op, isNaN(degree) ? 1 : degree);
+        const orders = ops.slice(1).map((o) => {
+          const n = Math.floor(o.N().re);
+          return Number.isNaN(n) ? 1 : n;
+        });
+
+        // Univariate (bare or single order): ordinary n-th derivative.
+        if (orders.length <= 1) return derivative(op, orders[0] ?? 1);
+
+        // Multi-index: mixed partial of a multivariate function. For a known
+        // function literal, differentiate the body the requested number of
+        // times with respect to each parameter; otherwise stay symbolic.
+        if (isFunction(op, 'Function')) {
+          const params = op.ops.slice(1).map((p) => sym(p));
+          if (params.length === orders.length && params.every((p) => !!p)) {
+            let body: Expression | undefined = op.op1;
+            for (let i = 0; i < orders.length && body; i++)
+              for (let d = 0; d < orders[i] && body; d++)
+                body = differentiate(body, params[i]!);
+            if (body) return ce._fn('Function', [body, ...op.ops.slice(1)]);
+          }
+        }
+
+        return ce._fn('Derivative', [op, ...orders.map((n) => ce.number(n))]);
       },
     },
 

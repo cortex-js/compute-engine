@@ -284,3 +284,82 @@ describe('DERIVATIVE EVALUATION', () => {
     expect(result.toString()).toBe('3x^2');
   });
 });
+
+describe('PARTIAL DERIVATIVE NOTATION (∂)', () => {
+  test('Euler ∂_x f(x, y) parses to a first-argument partial', () => {
+    const expr = ce.parse('\\partial_x f(x, y)');
+    expect(expr.json).toEqual(['D', ['f', 'x', 'y'], 'x']);
+    expect(expr.evaluate().json).toEqual([
+      'Apply',
+      ['Derivative', 'f', 1, 0],
+      'x',
+      'y',
+    ]);
+  });
+
+  test('Leibniz ∂/∂x f(x, y) parses to the D operator', () => {
+    const expr = ce.parse('\\frac{\\partial}{\\partial x} f(x, y)');
+    expect(expr.json).toEqual(['D', ['f', 'x', 'y'], 'x']);
+  });
+
+  test('Leibniz ∂/∂y f(x, y) selects the second argument', () => {
+    const expr = ce.parse('\\frac{\\partial}{\\partial y} f(x, y)');
+    expect(expr.json).toEqual(['D', ['f', 'x', 'y'], 'y']);
+  });
+
+  test('mixed Leibniz ∂²/∂x∂y f(x, y) collects both variables', () => {
+    const expr = ce.parse(
+      '\\frac{\\partial^2}{\\partial x \\partial y} f(x, y)'
+    );
+    expect(expr.json).toEqual(['D', ['f', 'x', 'y'], 'x', 'y']);
+    expect(expr.evaluate().json).toEqual([
+      'Apply',
+      ['Derivative', 'f', 1, 1],
+      'x',
+      'y',
+    ]);
+  });
+
+  test('repeated Leibniz ∂²/∂x² f(x, y) repeats the variable', () => {
+    const expr = ce.parse('\\frac{\\partial^2}{\\partial x^2} f(x, y)');
+    expect(expr.json).toEqual(['D', ['f', 'x', 'y'], 'x', 'x']);
+    expect(expr.evaluate().json).toEqual([
+      'Apply',
+      ['Derivative', 'f', 2, 0],
+      'x',
+      'y',
+    ]);
+  });
+
+  test('a first-order partial serializes to Leibniz ∂ notation', () => {
+    const expr = ce.box(['D', ['f', 'x', 'y'], 'x']).evaluate();
+    expect(expr.latex).toBe('\\frac{\\partial}{\\partial x} f(x, y)');
+  });
+
+  test('a mixed partial serializes to Leibniz ∂ notation', () => {
+    const expr = ce
+      .box(['D', ['D', ['f', 'x', 'y'], 'x'], 'y'])
+      .evaluate();
+    expect(expr.latex).toBe(
+      '\\frac{\\partial^{2}}{\\partial x \\partial y} f(x, y)'
+    );
+  });
+
+  test('partial derivative notation round-trips through LaTeX', () => {
+    for (const j of [
+      ['D', ['f', 'x', 'y'], 'x'],
+      ['D', ['f', 'x', 'y'], 'y'],
+      ['D', ['D', ['f', 'x', 'y'], 'x'], 'y'],
+      ['D', ['D', ['f', 'x', 'y'], 'x'], 'x'],
+    ] as const) {
+      const evaluated = ce.box(j).evaluate();
+      const reparsed = ce.parse(evaluated.latex).evaluate();
+      expect(reparsed.isSame(evaluated)).toBe(true);
+    }
+  });
+
+  test('the multi-index Derivative operator serializes as f^{(1,0)}', () => {
+    expect(ce.box(['Derivative', 'f', 1, 0]).latex).toBe('f^{(1, 0)}');
+    expect(ce.box(['Derivative', 'f', 2, 1]).latex).toBe('f^{(2, 1)}');
+  });
+});

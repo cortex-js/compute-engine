@@ -439,39 +439,43 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
       ? parser.error('missing', parser.index)
       : denom;
   }
-  if (
-    operator(numer) === 'PartialDerivative' &&
-    (operator(denom) === 'PartialDerivative' ||
-      (operator(denom) === 'Multiply' &&
-        operator(operand(denom, 1)) === 'PartialDerivative'))
-  ) {
-    // It's a Leibniz notation partial derivative
-    // `∂f(x)/∂x` or `∂^2f(x)/∂x∂y` or `∂/∂x f(x)`
-    const degree = operand(numer, 3) ?? null;
-    // Expect: getArg(numer, 2) === 'Nothing' -- no args
-    let fn = operand(numer, 1);
-    if (fn === null || fn === undefined)
-      fn = missingIfEmpty(parser.parseExpression());
+  // Leibniz partial-derivative notation, assembled from the ∂ markers emitted
+  // by the `\partial` parser: `∂f/∂x`, `∂/∂x f(x)`, `∂²f/∂x∂y`, `∂²f/∂x²`.
+  // Each `PartialDerivative(fnOrVar, degree)` marker carries the numerator
+  // function or a denominator variable; the result canonicalizes to `D`.
+  const denomPartials: MathJsonExpression[] =
+    operator(denom) === 'PartialDerivative'
+      ? [denom!]
+      : operator(denom) === 'Multiply' ||
+          operator(denom) === 'Sequence' ||
+          operator(denom) === 'InvisibleOperator'
+        ? operands(denom).filter((t) => operator(t) === 'PartialDerivative')
+        : [];
 
-    let vars: MathJsonExpression[] = [];
-    if (operator(denom) === 'Multiply') {
-      // ?/∂x∂y
-      for (const arg of operands(denom)) {
-        if (operator(arg) === 'PartialDerivative') {
-          const v = operand(arg, 2);
-          if (v) vars.push(v);
-        }
-      }
-    } else {
-      // ?/∂x
-      const v = operand(denom, 2);
-      if (v) vars.push(v);
-    }
-    if (vars.length > 1) {
-      vars = ['List', ...vars];
+  if (denomPartials.length > 0) {
+    // The function being differentiated: the numerator's captured operand for
+    // `∂f/∂x`, or — for the bare-numerator form `∂/∂x f(x)` — the expression
+    // that follows the fraction.
+    let fn: MathJsonExpression | null =
+      operator(numer) === 'PartialDerivative' ? operand(numer, 1) : null;
+    if (fn === null || fn === undefined || fn === 'Nothing')
+      fn = unwrapSingleItemList(missingIfEmpty(parser.parseExpression()));
+
+    // Differentiation variables from the denominator's ∂ markers. Each marker
+    // carries either a single variable or a `List` of them (a `∂x ∂y` chain).
+    const vars: MathJsonExpression[] = [];
+    for (const p of denomPartials) {
+      const arg = operand(p, 1);
+      const list = operator(arg) === 'List' ? operands(arg) : [arg];
+      for (const v of list) if (v && v !== 'Nothing') vars.push(v);
     }
 
-    return ['PartialDerivative', fn, ...vars, degree === null ? 1 : degree];
+    // A single variable with a numerator degree (∂²f/∂x²) repeats that variable.
+    const degree = machineValue(operand(numer, 2)) ?? 1;
+    if (vars.length === 1 && degree > 1)
+      for (let i = 1; i < degree; i++) vars.push(vars[0]);
+
+    if (vars.length > 0) return ['D', fn, ...vars] as MathJsonExpression;
   }
 
   // Handle ordinary (Leibniz) derivative notation: \frac{d}{dx} f

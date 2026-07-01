@@ -634,6 +634,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const lhs = operand(expr, 1); // The function body
 
       const h = operator(lhs);
+      if (h === 'Derivative') {
+        // A multi-index partial derivative applied to plain symbols reads best
+        // in Leibniz notation, e.g. ∂/∂x f(x,y). Univariate/prime derivatives
+        // and compound arguments fall through to the Lagrange form below.
+        const leibniz = serializeLeibnizPartial(serializer, expr);
+        if (leibniz !== null) return leibniz;
+      }
       if (h === 'InverseFunction' || h === 'Derivative') {
         // For inverse functions and derivatives display as a regular function,
         // e.g. \sin^{-1} x, f'(x) instead of x \rhd f' and x \rhd \sin^{-1}
@@ -1696,13 +1703,28 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'Derivative',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
-      const degree = machineValue(operand(expr, 2)) ?? 1;
       const base = serializer.serialize(operand(expr, 1));
+
+      // The multi-index of orders, one per argument of the function.
+      const orders = operands(expr).slice(1);
+
+      // Multi-index (mixed partial): f^{(1,0)}. There is no unapplied Lagrange
+      // prime notation for it, so use the parenthesized index list.
+      if (orders.length > 1)
+        return (
+          base +
+          '^{(' +
+          orders.map((o) => serializer.serialize(o)).join(', ') +
+          ')}'
+        );
+
+      // Univariate: ordinary Lagrange prime notation.
+      const degree = machineValue(orders[0]) ?? 1;
       if (degree === 1) return base + '^{\\prime}';
       if (degree === 2) return base + '^{\\doubleprime}';
       if (degree === 3) return base + '^{\\tripleprime}';
 
-      return base + '^{(' + serializer.serialize(operand(expr, 2)) + ')}';
+      return base + '^{(' + serializer.serialize(orders[0]) + ')}';
     },
   },
 
@@ -2127,6 +2149,52 @@ function errorContextAsLatex(
   if (operator(arg) === 'Hold') return serializer.serialize(operand(arg, 1));
 
   return serializer.serialize(arg);
+}
+
+/**
+ * Serialize an applied multi-index partial derivative in Leibniz notation, e.g.
+ * `Apply(Derivative(f, 1, 0), x, y)` → `\frac{\partial}{\partial x} f(x,y)`.
+ *
+ * Returns `null` (so the caller falls back to Lagrange `f^{(1,0)}(…)`) unless
+ * the derivative carries a genuine multi-index (two or more orders) and every
+ * differentiated slot is applied to a plain symbol — Leibniz notation needs a
+ * variable name for each `\partial`, which a compound argument (e.g. `x^2`)
+ * cannot supply.
+ */
+function serializeLeibnizPartial(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): string | null {
+  const deriv = operand(expr, 1); // Derivative(f, n₁, …, n_k)
+  if (operator(deriv) !== 'Derivative') return null;
+
+  const orders: number[] = [];
+  for (const o of operands(deriv).slice(1)) {
+    const n = machineValue(o);
+    if (n === null || !Number.isInteger(n) || n < 0) return null;
+    orders.push(n);
+  }
+  // A single order is ordinary (univariate) notation → keep Lagrange primes.
+  if (orders.length < 2) return null;
+
+  const args = operands(expr).slice(1) as MathJsonExpression[];
+  if (args.length !== orders.length) return null;
+
+  const total = orders.reduce((a, b) => a + b, 0);
+  if (total === 0) return null;
+
+  const denomParts: string[] = [];
+  for (let i = 0; i < orders.length; i++) {
+    if (orders[i] === 0) continue;
+    if (!symbol(args[i])) return null; // can't write ∂/∂(x²)
+    const v = serializer.serialize(args[i]);
+    denomParts.push(orders[i] === 1 ? `\\partial ${v}` : `\\partial ${v}^{${orders[i]}}`);
+  }
+
+  const numer = total === 1 ? '\\partial' : `\\partial^{${total}}`;
+  const fn = serializer.serialize(operand(deriv, 1));
+  const argList = args.map((a) => serializer.serialize(a)).join(', ');
+  return `\\frac{${numer}}{${denomParts.join(' ')}} ${fn}(${argList})`;
 }
 
 function parsePrime(

@@ -1,6 +1,33 @@
 ## [Unreleased]
 
+### New Features
+
+- **Partial derivatives of unknown multivariate functions.** Differentiating an
+  application of an undefined function of several arguments no longer stays
+  inert: `D(f(x, y), x)` now evaluates to `Apply(Derivative(f, 1, 0), x, y)`,
+  the partial with respect to the first argument. The order argument of
+  `Derivative` is now a **multi-index** — one differentiation order per argument
+  of the function, following Mathematica's `Derivative[n₁, n₂, …][f]`
+  convention — so higher-order and mixed partials accumulate on it:
+  `D(D(f(x, y), x), y)` → `Apply(Derivative(f, 1, 1), x, y)`, and mixed partials
+  commute. The multivariate chain, product, power, and quotient rules compose
+  over these, e.g. `D(f(x^2, y), x)` → `2x * Apply(Derivative(f, 1, 0), x^2, y)`.
+  When applied to plain symbols they serialize in Leibniz notation
+  (`\frac{\partial}{\partial x} f(x, y)`); the bare operator serializes as
+  `f^{(1,0)}`. `Derivative` of a **known** multivariate function literal computes
+  the mixed partial directly, e.g. `Derivative(Function(x^2·y, x, y), 1, 1)` →
+  `(x, y) |-> 2x`.
+
 ### Resolved Issues
+
+- **Partial-derivative notation (`∂`) now parses and evaluates.** The Euler form
+  `\partial_x f(x, y)` and the Leibniz forms `\frac{\partial}{\partial x} f`,
+  `\frac{\partial^2}{\partial x \partial y} f`, and
+  `\frac{\partial^2}{\partial x^2} f` now parse to the `D` operator and
+  differentiate correctly. Previously they produced a malformed
+  `PartialDerivative` expression — e.g. `\frac{\partial}{\partial x} f(x, y)`
+  evaluated to `f(x, y) / x`. The notation-only `PartialDerivative` operator has
+  been removed.
 
 - **Leibniz derivatives now treat single-item square brackets as grouping.**
   `\frac{d}{\,\mathrm{d}x}[\sin x]` now parses as
