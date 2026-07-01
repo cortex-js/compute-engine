@@ -1921,14 +1921,14 @@ export class _Parser implements Parser {
     if (args === null) return fn;
 
     // Predicates are wrapped in ["Predicate", name, ...args] to distinguish
-    // them from function applications. This is done:
-    // 1. Inside quantifier scopes (ForAll, Exists, etc.)
-    // 2. For "D" and "N" specifically, since D(f, x) and N(x) are not standard
-    //    math notation (D is derivative in MathJSON, N is numeric evaluation)
-    //    and could conflict with these library functions
+    // them from function applications. This is done only inside quantifier
+    // scopes (ForAll, Exists, etc.). Outside a quantifier scope, a
+    // predicate-looking name is treated as an ordinary function application
+    // (e.g. N(\sqrt{10}) -> ["N", ["Sqrt", 10]], D(f, x) -> ["D", f, x]) so
+    // that library functions like N (numeric evaluation) and D (derivative)
+    // behave as expected.
     if (isPredicate && typeof fn === 'string') {
-      if (this.inQuantifierScope || fn === 'D' || fn === 'N')
-        return ['Predicate', fn, ...args];
+      if (this.inQuantifierScope) return ['Predicate', fn, ...args];
     }
 
     return typeof fn === 'string' ? [fn, ...args] : ['Apply', fn!, ...args];

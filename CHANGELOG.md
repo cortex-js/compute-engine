@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`N(...)` and `D(...)` in LaTeX now parse as their library functions outside
+  quantifier scopes.** Previously `N` (numeric evaluation) and `D` (derivative)
+  were special-cased to always parse as first-order-logic predicates, so
+  `N(\sqrt{10})` parsed as `["Predicate", "N", ["Sqrt", 10]]` and never
+  evaluated. They now parse as ordinary function applications —
+  `N(\sqrt{10})` → `["N", ["Sqrt", 10]]` (evaluates to `3.162…`) and
+  `D(f, x)` → the derivative — matching every other name. Inside a quantifier
+  scope they are still wrapped as predicates (e.g. `\forall x, D(x)` →
+  `["ForAll", "x", ["Predicate", "D", "x"]]`).
+
 ## 0.66.0 _2026-06-28_
 
 ### New Features

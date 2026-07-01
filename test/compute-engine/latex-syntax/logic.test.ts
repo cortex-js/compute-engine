@@ -1105,19 +1105,26 @@ describe('Predicate', () => {
     expect(expr3.type.toString()).toBe('boolean');
   });
 
-  // D(f, x) should parse as Predicate, not derivative
-  it('should parse D(f, x) as Predicate, not derivative', () => {
-    // Outside quantifier scope - D is special-cased to always be Predicate
+  // D(f, x) parses as the derivative function outside quantifier scope,
+  // but as a Predicate inside one.
+  it('should parse D(f, x) as the derivative outside quantifier scope', () => {
+    // Outside quantifier scope - D is the derivative library function
     expect(ce.parse('D(f, x)').json).toMatchInlineSnapshot(`
       [
-        Predicate,
         D,
-        f,
+        [
+          Function,
+          [
+            Block,
+            f,
+          ],
+          x,
+        ],
         x,
       ]
     `);
 
-    // Inside quantifier scope
+    // Inside quantifier scope - D is treated as a Predicate
     expect(ce.parse('\\forall x, D(x)').json).toMatchInlineSnapshot(`
       [
         ForAll,
@@ -1151,20 +1158,17 @@ describe('Predicate', () => {
 });
 
 describe('Single-letter library functions', () => {
-  // N is a library function for numeric evaluation, but N(x) in LaTeX
-  // is not standard math notation. Like D, N is excluded from automatic
-  // function recognition so it can be used as a variable.
-  it('should parse N(x) as Predicate, not as numeric function', () => {
-    // N(x) should NOT be parsed as the numeric evaluation function
-    // Instead, it's parsed as a Predicate (like D)
+  // N is the library function for numeric evaluation. Outside a quantifier
+  // scope, N(x) in LaTeX parses as that function so it evaluates numerically.
+  it('should parse N(x) as the numeric evaluation function', () => {
     const expr = ce.parse('N(\\pi)');
     expect(expr.json).toMatchInlineSnapshot(`
       [
-        Predicate,
         N,
         Pi,
       ]
     `);
+    expect(expr.evaluate().re).toBeCloseTo(Math.PI, 10);
   });
 
   it('should allow N function via MathJSON', () => {

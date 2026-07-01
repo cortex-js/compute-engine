@@ -5,9 +5,9 @@ function parse(expr: string): Expression {
   return engine.parse(expr)!;
 }
 
-// Helper to create D expressions using MathJSON directly
-// Note: D(f, x) in LaTeX now parses as Predicate, not the derivative function.
-// Use this helper or Leibniz notation (\frac{d}{dx}) for derivatives.
+// Helper to create D expressions using MathJSON directly.
+// (D(f, x) in LaTeX parses as the derivative function outside a quantifier
+// scope, but this helper builds the D expression from an already-parsed body.)
 function D(expr: string, ...vars: string[]): Expression {
   return engine.expr(['D', engine.parse(expr), ...vars]);
 }
