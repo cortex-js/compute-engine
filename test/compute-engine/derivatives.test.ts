@@ -578,6 +578,32 @@ describe('Bessel function derivatives', () => {
       expect(result.toString()).toMatchInlineSnapshot(`0`);
     });
   });
+
+  describe('Bessel derivatives with respect to the order', () => {
+    it('d/dx J_x(2): order depends on the variable', () => {
+      // No closed form for the order derivative — keep it symbolic.
+      const expr = engine.expr(['D', ['BesselJ', 'x', 2], 'x']);
+      expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+        `Apply(Derivative("BesselJ", 1, 0), x, 2)`
+      );
+    });
+
+    it('d/dx J_x(x): both order and argument depend on the variable', () => {
+      // Full chain rule: the known argument recurrence plus the symbolic
+      // order derivative.
+      const expr = engine.expr(['D', ['BesselJ', 'x', 'x'], 'x']);
+      expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+        `-1/2 * BesselJ(x + 1, x) + 1/2 * BesselJ(x - 1, x) + Apply(Derivative("BesselJ", 1, 0), x, x)`
+      );
+    });
+
+    it('d/dx K_{x^2}(x): chain rule on both slots', () => {
+      const expr = engine.expr(['D', ['BesselK', ['Square', 'x'], 'x'], 'x']);
+      expect(expr.evaluate().toString()).toMatchInlineSnapshot(
+        `2x * Apply(Derivative("BesselK", 1, 0), x^2, x) - 1/2 * BesselK(x^2 - 1, x) - 1/2 * BesselK(x^2 + 1, x)`
+      );
+    });
+  });
 });
 
 describe('Multi-argument function derivatives', () => {
@@ -651,6 +677,46 @@ describe('Multi-argument function derivatives', () => {
       const expr = engine.expr(['D', ['LCM', 'x', 'y'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`0`);
+    });
+  });
+
+  describe('Root with a variable degree', () => {
+    // The degree of a radical may itself depend on the differentiation
+    // variable, e.g. Root(x, x) = x^(1/x). The rule must not treat the degree
+    // as constant. Verify against a central-difference numerical derivative.
+    const numericDerivative = (f: (x: number) => number, x: number) =>
+      (f(x + 1e-6) - f(x - 1e-6)) / 2e-6;
+
+    const checkAt = (mathJson: any, f: (x: number) => number, x0: number) => {
+      const symbolic = engine.box(mathJson).evaluate();
+      const atPoint = symbolic.subs({ x: x0 }).N().re;
+      expect(atPoint).toBeCloseTo(numericDerivative(f, x0), 6);
+    };
+
+    it('d/dx Root(x, x) = d/dx x^(1/x) accounts for the degree', () => {
+      const expr = engine.expr(['D', ['Root', 'x', 'x'], 'x']).evaluate();
+      expect(expr.toString()).toMatchInlineSnapshot(
+        `x^(1 / x) / x^2 - (ln(x) * x^(1 / x)) / x^2`
+      );
+      checkAt(['D', ['Root', 'x', 'x'], 'x'], (x) => Math.pow(x, 1 / x), 2);
+    });
+
+    it('d/dx Root(2, x) = d/dx 2^(1/x) is non-zero', () => {
+      checkAt(['D', ['Root', 2, 'x'], 'x'], (x) => Math.pow(2, 1 / x), 2);
+    });
+
+    it('d/dx Root(x^2, x) chains through base and degree', () => {
+      checkAt(
+        ['D', ['Root', ['Square', 'x'], 'x'], 'x'],
+        (x) => Math.pow(x * x, 1 / x),
+        2
+      );
+    });
+
+    it('d/dx Root(x, 3) (constant degree) is unchanged', () => {
+      const expr = engine.expr(['D', ['Root', 'x', 3], 'x']).evaluate();
+      expect(expr.toString()).toMatchInlineSnapshot(`1 / (3x^(2/3))`);
+      checkAt(['D', ['Root', 'x', 3], 'x'], (x) => Math.pow(x, 1 / 3), 2);
     });
   });
 });

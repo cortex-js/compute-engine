@@ -423,13 +423,24 @@ export function differentiate(
   }
 
   // Root rule: Root(base, n) = base^(1/n)
-  // d/dx Root(base, n) = d/dx base^(1/n) = (1/n) * base^((1/n) - 1) * d/dx base
   if (expr.operator === 'Root') {
     const [base, n] = expr.ops;
+
+    // If the degree depends on v, the constant-degree power rule below is
+    // invalid — it drops the ∂/∂n contribution (e.g. d/dx Root(x, x) would
+    // lose the (1 - ln x) factor, and Root(2, x) = 2^(1/x) would wrongly be
+    // 0). Differentiate the equivalent Power(base, 1/n) instead, whose rule
+    // handles dependence in both the base and the exponent.
+    if (n.has(v)) {
+      const power = ce.function('Power', [base, ce.One.div(n)], {
+        form: 'structural',
+      });
+      return differentiate(power, v, depth + 1);
+    }
+
     if (!base.has(v)) return ce.Zero;
 
-    // Compute derivative using the power rule
-    // d/dx base^(1/n) = (1/n) * base^((1/n) - 1) * base'
+    // Constant degree: d/dx base^(1/n) = (1/n) * base^((1/n) - 1) * base'
     const exponent = ce.One.div(n); // 1/n
     const basePrime =
       differentiate(base, v, depth + 1) ?? ce._fn('D', [base, ce.symbol(v)]);
@@ -557,39 +568,43 @@ export function differentiate(
       return ce.Zero;
     }
 
-    if (orderHasV) {
-      // If order depends on v, we can't compute a simple derivative
-      // Return symbolic derivative
-      return undefined;
-    }
-
-    // Only x depends on v - apply the standard Bessel derivative formulas
-    const xPrime =
-      differentiate(x, v, depth + 1) ?? ce._fn('D', [x, ce.symbol(v)]);
     const op = expr.operator;
-    const nMinus1 = order.sub(ce.One);
-    const nPlus1 = order.add(ce.One);
+    const terms: Expression[] = [];
 
-    let derivative: Expression;
-    if (op === 'BesselJ' || op === 'BesselY') {
-      // d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2
-      // d/dx Y_n(x) = (Y_{n-1}(x) - Y_{n+1}(x))/2
+    // ∂/∂x contribution: the standard recurrence formula, times x'.
+    if (xHasV) {
+      const xPrime =
+        differentiate(x, v, depth + 1) ?? ce._fn('D', [x, ce.symbol(v)]);
+      const nMinus1 = order.sub(ce.One);
+      const nPlus1 = order.add(ce.One);
       const fNMinus1 = ce._fn(op, [nMinus1, x]);
       const fNPlus1 = ce._fn(op, [nPlus1, x]);
-      derivative = fNMinus1.sub(fNPlus1).div(2);
-    } else if (op === 'BesselI') {
-      // d/dx I_n(x) = (I_{n-1}(x) + I_{n+1}(x))/2
-      const fNMinus1 = ce._fn(op, [nMinus1, x]);
-      const fNPlus1 = ce._fn(op, [nPlus1, x]);
-      derivative = fNMinus1.add(fNPlus1).div(2);
-    } else {
-      // BesselK: d/dx K_n(x) = -(K_{n-1}(x) + K_{n+1}(x))/2
-      const fNMinus1 = ce._fn(op, [nMinus1, x]);
-      const fNPlus1 = ce._fn(op, [nPlus1, x]);
-      derivative = fNMinus1.add(fNPlus1).div(2).neg();
+      let argDeriv: Expression;
+      if (op === 'BesselJ' || op === 'BesselY') {
+        // d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2 (same for Y)
+        argDeriv = fNMinus1.sub(fNPlus1).div(2);
+      } else if (op === 'BesselI') {
+        // d/dx I_n(x) = (I_{n-1}(x) + I_{n+1}(x))/2
+        argDeriv = fNMinus1.add(fNPlus1).div(2);
+      } else {
+        // BesselK: d/dx K_n(x) = -(K_{n-1}(x) + K_{n+1}(x))/2
+        argDeriv = fNMinus1.add(fNPlus1).div(2).neg();
+      }
+      terms.push(argDeriv.mul(xPrime));
     }
 
-    return simplifyDerivative(derivative.mul(xPrime));
+    // ∂/∂order contribution: the derivative with respect to the order has no
+    // elementary closed form, so keep it symbolic as the multi-index
+    // Apply(Derivative(op, 1, 0), order, x), times order'.
+    if (orderHasV) {
+      const orderPrime =
+        differentiate(order, v, depth + 1) ??
+        ce._fn('D', [order, ce.symbol(v)]);
+      const dOrder = ce._fn('Derivative', [ce.symbol(op), ce.One, ce.Zero]);
+      terms.push(ce._fn('Apply', [dOrder, order, x]).mul(orderPrime));
+    }
+
+    return simplifyDerivative(add(...terms));
   }
 
   const h = DERIVATIVES_TABLE[

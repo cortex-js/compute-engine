@@ -16,9 +16,19 @@
   (`\frac{\partial}{\partial x} f(x, y)`); the bare operator serializes as
   `f^{(1,0)}`. `Derivative` of a **known** multivariate function literal computes
   the mixed partial directly, e.g. `Derivative(Function(x^2·y, x, y), 1, 1)` →
-  `(x, y) |-> 2x`.
+  `(x, y) |-> 2x`. This also lets Bessel functions differentiate with respect to
+  their **order**: `D(BesselJ(x, x), x)` now combines the known argument
+  recurrence with a symbolic order derivative
+  `Apply(Derivative(BesselJ, 1, 0), x, x)` instead of staying inert.
 
 ### Resolved Issues
+
+- **Radicals with a variable degree now differentiate correctly.** The
+  derivative rule for `Root(base, n)` treated the degree `n` as constant, so
+  `D(Root(x, x), x)` (i.e. `x^{1/x}`) dropped the `(1 - \ln x)` term and
+  `D(Root(2, x), x)` (i.e. `2^{1/x}`) wrongly gave `0`. When the degree depends
+  on the differentiation variable the equivalent `Power(base, 1/n)` is now
+  differentiated, matching the numerical derivative.
 
 - **Partial-derivative notation (`∂`) now parses and evaluates.** The Euler form
   `\partial_x f(x, y)` and the Leibniz forms `\frac{\partial}{\partial x} f`,
