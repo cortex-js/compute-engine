@@ -49,6 +49,59 @@ function verifyFirstOrderSolution(
   return Math.abs(value) < 1e-10;
 }
 
+function verifyEquationSolution(
+  equation: unknown,
+  solution: ReturnType<typeof dsolve>,
+  sample: Record<string, number>
+): boolean {
+  const solutionEquation = solution.op1;
+  const yValue = solutionEquation.op2;
+  const maxOrder = maxDerivativeOrder(engine.expr(equation, { form: 'raw' }));
+  const derivatives = [yValue];
+  for (let i = 1; i <= maxOrder; i++)
+    derivatives.push(engine.expr(['D', derivatives[i - 1], 'x']).evaluate());
+  const equationExpr = engine.expr(equation, { form: 'raw' });
+  let substituted = equationExpr;
+  for (let order = maxOrder; order >= 1; order--) {
+    let match: unknown = ['y', 'x'];
+    for (let i = 0; i < order; i++) match = ['D', match, 'x'];
+    substituted =
+      substituted.replace(
+        { match, replace: derivatives[order] },
+        { recursive: true }
+      ) ?? substituted;
+  }
+  substituted =
+    substituted.replace(
+      { match: ['y', 'x'], replace: yValue },
+      { recursive: true }
+    ) ?? substituted;
+  if (substituted.operator !== 'Equal') return false;
+
+  const lhs = substituted.op1.evaluate().canonical;
+  const rhs = substituted.op2.evaluate().canonical;
+  const residual = lhs.sub(rhs).subs(sample).simplify();
+  const value = residual.N().re;
+  return Math.abs(value) < 1e-10;
+}
+
+function maxDerivativeOrder(expr: ReturnType<typeof engine.expr>): number {
+  if (expr.operator === 'D') {
+    let order = 1;
+    let inner = expr.op1;
+    while (inner.operator === 'D') {
+      order += 1;
+      inner = inner.op1;
+    }
+    return Math.max(order, maxDerivativeOrder(expr.op1));
+  }
+
+  return (expr.ops ?? []).reduce(
+    (max, op) => Math.max(max, maxDerivativeOrder(op)),
+    0
+  );
+}
+
 describe('DSolve', () => {
   test('solves y prime equals y', () => {
     const solution = dsolve(['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']]);
@@ -115,14 +168,15 @@ describe('DSolve', () => {
   });
 
   test('uses a fallback integration constant when C is already declared', () => {
-    engine.declare('C', 'real');
+    engine.pushScope();
     try {
+      engine.declare('C', 'real');
       const solution = dsolve(['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']]);
 
-      expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === c * e^x]`);
+      expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === K * e^x]`);
       expect(verifyFirstOrderSolution(solution, ['y', 'x'])).toBe(true);
     } finally {
-      engine.forget('C');
+      engine.popScope();
     }
   });
 
@@ -136,11 +190,179 @@ describe('DSolve', () => {
     expect(result.operator).toBe('DSolve');
   });
 
-  test('stays inert for unsupported higher-order equations', () => {
+  test('solves second-order homogeneous equation with distinct real roots', () => {
     const result = dsolve([
       'Equal',
       ['D', ['D', ['y', 'x'], 'x'], 'x'],
       ['y', 'x'],
+    ]);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * e^x + "c_2" * e^(-x)]`
+    );
+    expect(
+      verifyEquationSolution(
+        ['Equal', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['y', 'x']],
+        result,
+        { c_1: 2, c_2: 3, x: 0.75 }
+      )
+    ).toBe(true);
+  });
+
+  test('keeps irrational characteristic roots exact when possible', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['y', 'x'], 'x'], 'x'],
+        ['Negate', ['D', ['y', 'x'], 'x']],
+        ['Negate', ['y', 'x']],
+      ],
+      0,
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * e^(1/2 * x * (1 + sqrt(5))) + "c_2" * e^(1/2 * x * (1 - sqrt(5)))]`
+    );
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves second-order homogeneous equation with complex roots', () => {
+    const equation = [
+      'Equal',
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['y', 'x']],
+      0,
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * cos(x) + "c_2" * sin(x)]`
+    );
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves second-order homogeneous equation with a repeated root', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['y', 'x'], 'x'], 'x'],
+        ['Negate', ['Multiply', 2, ['D', ['y', 'x'], 'x']]],
+        ['y', 'x'],
+      ],
+      0,
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_2" * x * e^x + "c_1" * e^x]`
+    );
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves second-order homogeneous equation with zero repeated root', () => {
+    const equation = ['Equal', ['D', ['D', ['y', 'x'], 'x'], 'x'], 0];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_2" * x + "c_1"]`
+    );
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves third-order homogeneous equation with real roots', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'],
+        ['Negate', ['Multiply', 6, ['D', ['D', ['y', 'x'], 'x'], 'x']]],
+        ['Multiply', 11, ['D', ['y', 'x'], 'x']],
+        ['Negate', ['Multiply', 6, ['y', 'x']]],
+      ],
+      0,
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * e^x + "c_2" * e^(2x) + "c_3" * e^(3x)]`
+    );
+    expect(
+      verifyEquationSolution(equation, solution, {
+        c_1: 2,
+        c_2: 3,
+        c_3: 5,
+        x: 0.25,
+      })
+    ).toBe(true);
+  });
+
+  test('solves third-order homogeneous equation with repeated root', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'],
+        ['Negate', ['Multiply', 3, ['D', ['D', ['y', 'x'], 'x'], 'x']]],
+        ['Multiply', 3, ['D', ['y', 'x'], 'x']],
+        ['Negate', ['y', 'x']],
+      ],
+      0,
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_3" * x^2 * e^x + "c_2" * x * e^x + "c_1" * e^x]`
+    );
+    expect(
+      verifyEquationSolution(equation, solution, {
+        c_1: 2,
+        c_2: 3,
+        c_3: 5,
+        x: 0.25,
+      })
+    ).toBe(true);
+  });
+
+  test('solves third-order homogeneous equation with numeric complex roots', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'],
+        ['Negate', ['y', 'x']],
+      ],
+      0,
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * e^x + "c_2" * cos(0.8660254037844387 * x) * e^(-0.5 * x) + "c_3" * sin(0.8660254037844387 * x) * e^(-0.5 * x)]`
+    );
+    expect(
+      verifyEquationSolution(equation, solution, {
+        c_1: 2,
+        c_2: 3,
+        c_3: 5,
+        x: 0.25,
+      })
+    ).toBe(true);
+  });
+
+  test('stays inert for nonhomogeneous second-order equations', () => {
+    const result = dsolve([
+      'Equal',
+      ['D', ['D', ['y', 'x'], 'x'], 'x'],
+      ['Add', ['y', 'x'], 'x'],
     ]);
 
     expect(result.operator).toBe('DSolve');
@@ -215,6 +437,40 @@ describe('NDSolve', () => {
       .N().re;
 
     expect(y).toBeCloseTo(expected, 10);
+  });
+
+  test('solves second-order IVP with RK4 system samples', () => {
+    const result = ndsolve(
+      ['Equal', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['Negate', ['y', 'x']]],
+      ['List', 0, 1],
+      200
+    );
+    const [, y] = finalSample(result);
+
+    expect(result.operator).toBe('List');
+    expect(y).toBeCloseTo(Math.sin(1), 10);
+  });
+
+  test('solves third-order IVP with RK4 system samples', () => {
+    const result = ndsolve(
+      ['Equal', ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'], ['y', 'x']],
+      ['List', 1, 1, 1],
+      200
+    );
+    const [, y] = finalSample(result);
+
+    expect(result.operator).toBe('List');
+    expect(y).toBeCloseTo(Math.E, 10);
+  });
+
+  test('stays inert when higher-order IVP initial values have wrong length', () => {
+    const result = ndsolve(
+      ['Equal', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['Negate', ['y', 'x']]],
+      ['List', 0],
+      200
+    );
+
+    expect(result.operator).toBe('NDSolve');
   });
 
   test('stays inert for unsupported implicit equations', () => {
