@@ -255,6 +255,12 @@ describe('DERIVATIVE EVALUATION', () => {
     expect(result.toString()).toBe('cos(x)');
   });
 
+  test('D of square-bracketed sin(x) evaluates to cos(x)', () => {
+    const expr = ce.parse('\\frac{d}{\\,\\mathrm{d}x}[\\sin x]');
+    expect(expr.json).toEqual(['D', ['Sin', 'x'], 'x']);
+    expect(expr.evaluate().toString()).toBe('cos(x)');
+  });
+
   test('Newton notation evaluates correctly', () => {
     // \dot{t^2} with respect to t should be 2t
     const expr = ce.parse('\\dot{t^2}');

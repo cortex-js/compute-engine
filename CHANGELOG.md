@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **Leibniz derivatives now treat single-item square brackets as grouping.**
+  `\frac{d}{\,\mathrm{d}x}[\sin x]` now parses as
+  `["D", ["Sin", "x"], "x"]` and evaluates to `cos(x)` instead of treating
+  `[\sin x]` as a one-element list.
+
+- **Compact derivatives now preserve unknown-function chain rules.**
+  `d/dx(f(g(x)))` now parses as `["D", ["f", ["g", "x"]], "x"]` and
+  evaluates symbolically to `g'(x) * f'(g(x))` instead of collapsing to `0`.
+
 - **`N(...)` and `D(...)` in LaTeX now parse as their library functions outside
   quantifier scopes.** Previously `N` (numeric evaluation) and `D` (derivative)
   were special-cased to always parse as first-order-logic predicates, so

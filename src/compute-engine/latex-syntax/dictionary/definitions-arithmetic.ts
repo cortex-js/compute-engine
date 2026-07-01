@@ -515,13 +515,18 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
 
     if (vars.length > 0) {
       // Parse the expression to differentiate
-      const fn = missingIfEmpty(parser.parseExpression());
+      const fn = unwrapSingleItemList(missingIfEmpty(parser.parseExpression()));
       // D expects variables as separate arguments: ['D', f, x] or ['D', f, x, y]
       return ['D', fn, ...vars];
     }
   }
 
   return ['Divide', numer, denom];
+}
+
+function unwrapSingleItemList(expr: MathJsonExpression): MathJsonExpression {
+  if (operator(expr) === 'List' && nops(expr) === 1) return operand(expr, 1)!;
+  return expr;
 }
 
 function serializeFraction(
