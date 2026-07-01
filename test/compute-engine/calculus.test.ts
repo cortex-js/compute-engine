@@ -1042,6 +1042,49 @@ describe('DEFINITE INTEGRATION', () => {
       `1 / (n + 1) - (0^(n + 1)) / (n + 1)`
     ));
 
+  test('symbolic bounds', () =>
+    expect(evaluate('\\int_a^b x dx')).toMatchInlineSnapshot(
+      `-1/2 * a^2 + 1/2 * b^2`
+    ));
+
+  test('unknown integrand with symbolic bounds stays symbolic', () =>
+    expect(
+      engine.parse('\\int_a^b f(x)\\mathrm{d}x').evaluate().json
+    ).toMatchInlineSnapshot(`
+      [
+        EvaluateAt,
+        [
+          Function,
+          [
+            Block,
+            [
+              Integrate,
+              [
+                Function,
+                [
+                  Block,
+                  [
+                    f,
+                    x,
+                  ],
+                ],
+                x,
+              ],
+              [
+                Limits,
+                x,
+                Nothing,
+                Nothing,
+              ],
+            ],
+          ],
+          x,
+        ],
+        a,
+        b,
+      ]
+    `));
+
   test('sin', () =>
     expect(evaluate('\\int_0^1 \\sin x dx')).toMatchInlineSnapshot(
       `1 - cos(1)`

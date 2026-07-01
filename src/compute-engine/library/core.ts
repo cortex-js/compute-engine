@@ -772,7 +772,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     EvaluateAt: {
       description: 'Evaluate a function at one point or between two bounds.',
       lazy: true,
-      signature: '(function, lower:number, upper:number) -> number',
+      signature: '(function, lower:expression, upper:expression) -> unknown',
       type: ([x]) => functionResult(x.type.type) ?? 'number',
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0) return null;
@@ -780,7 +780,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (!fn) return null;
         return ce._fn('EvaluateAt', [
           fn,
-          ...ops.slice(1).map((x) => checkType(ce, x, 'value')),
+          ...ops.slice(1).map((x) => x.canonical),
         ]);
       },
       // EvaluateAt(F, a, b) = F(b) - F(a); it is how a definite integral applies

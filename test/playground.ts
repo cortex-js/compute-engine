@@ -18,6 +18,8 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
+console.log(ce.parse('\\int_a^b f(x)\\mathrm{d}x').evaluate().json);
+
 // =============================================================================
 // ACTIVE — parsing & serialization
 // =============================================================================
@@ -58,9 +60,16 @@ console.log(
 );
 
 // Filter is not evaluated when nested inside a List (works on its own).
-const filtered = ce.expr(['Filter', ce.function('List', [1, 2, 3, 4, 5]), ['IsOdd', '_']]);
+const filtered = ce.expr([
+  'Filter',
+  ce.function('List', [1, 2, 3, 4, 5]),
+  ['IsOdd', '_'],
+]);
 console.log('Filter alone:  ', filtered.evaluate().toString()); // [1, 3, 5]
-console.log('Filter in List:', ce.function('List', [filtered]).evaluate().toString());
+console.log(
+  'Filter in List:',
+  ce.function('List', [filtered]).evaluate().toString()
+);
 
 // =============================================================================
 // FEATURE — notation / simplifications not yet implemented (wishlist)
@@ -81,7 +90,9 @@ console.log(ce.parse('\\mathbb{1}_{\\N}\\left(x\\right)').json); // -> Boole(Ele
 // Knuth coprime notation: `\bot` parses as False (Tuple[m, False, n]).
 // Desired: Coprime(m, n) / Equal(Gcd(m, n), 1).
 console.log(ce.parse('m\\bot n').json);
-console.log(ce.parse('\\phi(n)=\\sum_{i=1}^n\\left\\lbrack i\\bot n\\right\\rbrack ').json);
+console.log(
+  ce.parse('\\phi(n)=\\sum_{i=1}^n\\left\\lbrack i\\bot n\\right\\rbrack ').json
+);
 
 // Congruence (mod) notation — a − b divisible by n.
 //   ce.parse('a\\equiv b(\\mod n)')  -> Equal(Mod(a, n), Mod(b, n))
