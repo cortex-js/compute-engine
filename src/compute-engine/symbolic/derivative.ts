@@ -309,11 +309,32 @@ export function differentiate(
     return differentiate(evaluated, v, depth + 1);
   }
 
+  // d/dx Apply(Derivative(f, n), g(x)) = Apply(Derivative(f, n + 1), g(x)) g'(x)
+  if (expr.operator === 'Apply' && isFunction(expr.op1, 'Derivative')) {
+    const derivativeFn = expr.op1;
+    const fn = derivativeFn.op1;
+    const arg = expr.op2;
+    if (!fn || !arg || expr.nops !== 2) return undefined;
+
+    const order = Math.floor(derivativeFn.op2?.N().re ?? 1);
+    if (Number.isNaN(order)) return undefined;
+
+    const argPrime =
+      differentiate(arg, v, depth + 1) ?? ce._fn('D', [arg, ce.symbol(v)]);
+    const nextDerivative = ce._fn('Derivative', [fn, ce.number(order + 1)]);
+    return simplifyDerivative(ce._fn('Apply', [nextDerivative, arg]).mul(argPrime));
+  }
+
   // Sum rule
   if (expr.operator === 'Add') {
-    const terms = expr.ops.map((op) => differentiate(op, v, depth + 1));
-    if (terms.some((term) => term === undefined)) return undefined;
-    return simplifyDerivative(add(...(terms as Expression[])));
+    const terms = expr.ops.map((op) => {
+      const term = differentiate(op, v, depth + 1);
+      if (term) return term;
+      if (!op.has(v)) return ce.Zero;
+      return ce._fn('D', [op, ce.symbol(v)]);
+    });
+    if (terms.some((term) => !term.isValid)) return undefined;
+    return simplifyDerivative(add(...terms));
   }
 
   // Product rule

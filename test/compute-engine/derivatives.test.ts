@@ -394,6 +394,34 @@ describe('Symbolic derivatives for unknown functions', () => {
       `Apply(Derivative(g, 1), x) * Apply(Derivative(f, 1), g(x))`
     );
   });
+
+  it('d/dx of a sum preserves symbolic derivatives for unresolved terms', () => {
+    const expr = engine.expr(['D', ['Add', ['f', 'x'], ['h', 'x', 'y']], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Apply(Derivative(f, 1), x) + D(h(x, y), x)`
+    );
+  });
+
+  it('d/dx of a symbolic derivative increments the derivative order', () => {
+    const expr = engine.expr(['D', ['D', ['f', 'x'], 'x'], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Apply(Derivative(f, 2), x)`
+    );
+  });
+
+  it('chain rule increments symbolic derivative order', () => {
+    const expr = engine.expr([
+      'D',
+      ['Apply', ['Derivative', 'f', 1], ['g', 'x']],
+      'x',
+    ]);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Apply(Derivative(g, 1), x) * Apply(Derivative(f, 2), g(x))`
+    );
+  });
 });
 
 describe('Bessel function derivatives', () => {

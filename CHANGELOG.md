@@ -10,6 +10,9 @@
 - **Compact derivatives now preserve unknown-function chain rules.**
   `d/dx(f(g(x)))` now parses as `["D", ["f", ["g", "x"]], "x"]` and
   evaluates symbolically to `g'(x) * f'(g(x))` instead of collapsing to `0`.
+  Sums with partially unresolved terms now preserve the reducible derivatives,
+  and differentiating symbolic derivative applications increments the
+  derivative order, e.g. `D(D(f(x), x), x)` now returns `f''(x)`.
 
 - **`N(...)` and `D(...)` in LaTeX now parse as their library functions outside
   quantifier scopes.** Previously `N` (numeric evaluation) and `D` (derivative)
