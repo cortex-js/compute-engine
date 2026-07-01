@@ -17,6 +17,7 @@ import {
 import {
   Serializer,
   Parser,
+  Terminator,
   LatexDictionary,
   MULTIPLICATION_PRECEDENCE,
   ADDITION_PRECEDENCE,
@@ -526,6 +527,87 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
 
 function unwrapSingleItemList(expr: MathJsonExpression): MathJsonExpression {
   if (operator(expr) === 'List' && nops(expr) === 1) return operand(expr, 1)!;
+  return expr;
+}
+
+function parseSlashDivide(
+  parser: Parser,
+  lhs: MathJsonExpression,
+  terminator: Readonly<Terminator>
+): MathJsonExpression | null {
+  const rhs = parser.parseExpression({
+    ...terminator,
+    minPrec: DIVISION_PRECEDENCE + 1,
+  });
+  if (rhs === null) return ['Divide', lhs, MISSING];
+
+  const derivative = parseCompactDerivative(lhs, rhs);
+  if (derivative) return derivative;
+
+  return ['Divide', lhs, rhs];
+}
+
+function parseCompactDerivative(
+  numer: MathJsonExpression,
+  denom: MathJsonExpression
+): MathJsonExpression | null {
+  const numerSym = symbol(numer);
+  if (
+    numerSym !== 'd' &&
+    numerSym !== 'd_upright' &&
+    numerSym !== 'differentialD'
+  )
+    return null;
+
+  const h = operator(denom);
+  if (h !== 'InvisibleOperator' && h !== 'Multiply') return null;
+
+  const terms = operands(denom);
+  if (terms.length < 3) return null;
+  const differential = symbol(terms[0]);
+  if (
+    differential !== 'd' &&
+    differential !== 'd_upright' &&
+    differential !== 'differentialD'
+  )
+    return null;
+
+  const variable = terms[1];
+  if (!symbol(variable)) return null;
+
+  const body: MathJsonExpression =
+    terms.length === 3
+      ? terms[2]
+      : (['InvisibleOperator', ...terms.slice(2)] as MathJsonExpression);
+  return ['D', normalizeCompactDerivativeBody(body), variable];
+}
+
+function normalizeCompactDerivativeBody(
+  expr: MathJsonExpression
+): MathJsonExpression {
+  if (operator(expr) === 'Delimiter')
+    return normalizeCompactDerivativeBody(operand(expr, 1)!);
+
+  if (operator(expr) === 'InvisibleOperator') {
+    const ops = operands(expr);
+    if (ops.length === 2 && symbol(ops[0]) && operator(ops[1]) === 'Delimiter')
+      return [symbol(ops[0])!, normalizeCompactDerivativeBody(ops[1])];
+
+    return [
+      'InvisibleOperator',
+      ...ops.map((op) => normalizeCompactDerivativeBody(op)),
+    ];
+  }
+
+  if (Array.isArray(expr)) {
+    const head = expr[0];
+    if (typeof head !== 'string') return expr;
+    const result: [string, ...MathJsonExpression[]] = [head];
+    for (let i = 1; i < expr.length; i++)
+      result.push(normalizeCompactDerivativeBody(expr[i] as MathJsonExpression));
+    return result;
+  }
+
   return expr;
 }
 
@@ -1049,7 +1131,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     associativity: 'left',
     precedence: DIVISION_PRECEDENCE,
-    parse: 'Divide',
+    parse: parseSlashDivide,
   },
   {
     latexTrigger: ['\\div'],

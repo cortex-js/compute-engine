@@ -199,6 +199,8 @@ export function derivative(
   if (isSymbol(fn) && fn.operatorDefinition) {
     // We have, e.g. fn = 'Sin"
     fn = apply(ce.symbol(fn.symbol), [ce.symbol('_')]);
+  } else if (isSymbol(fn)) {
+    return ce._fn('Derivative', [fn, ce.number(order)]);
   }
   if (isFunction(fn, 'Function')) {
     // We have, e.g. fn = ['Function', ['Sin', 'x'], 'x']
@@ -525,10 +527,9 @@ export function differentiate(
 
     if (expr.nops > 1) return undefined;
 
-    // If we don't know how to differentiate this function, assume it's a
-    // function of v and apply the chain rule.
+    // If we don't know how to differentiate this one-argument function, keep
+    // the outer derivative symbolic and apply the chain rule.
     const fPrime = ce._fn('Derivative', [ce.symbol(expr.operator), ce.One]);
-    if (!fPrime.isValid) return undefined;
     const g = expr.ops[0];
     const gPrime =
       differentiate(g, v, depth + 1) ?? ce._fn('D', [g, ce.symbol(v)]);

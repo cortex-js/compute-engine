@@ -261,6 +261,16 @@ describe('DERIVATIVE EVALUATION', () => {
     expect(expr.evaluate().toString()).toBe('cos(x)');
   });
 
+  test('compact d/dx notation applies chain rule to unknown functions', () => {
+    const expr = ce.parse('d/dx(f(g(x)))');
+    expect(expr.json).toEqual(['D', ['f', ['g', 'x']], 'x']);
+    expect(expr.evaluate().json).toEqual([
+      'Multiply',
+      ['Apply', ['Derivative', 'g', 1], 'x'],
+      ['Apply', ['Derivative', 'f', 1], ['g', 'x']],
+    ]);
+  });
+
   test('Newton notation evaluates correctly', () => {
     // \dot{t^2} with respect to t should be 2t
     const expr = ce.parse('\\dot{t^2}');

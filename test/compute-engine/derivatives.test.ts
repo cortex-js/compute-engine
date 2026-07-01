@@ -371,21 +371,28 @@ describe('Symbolic derivatives for unknown functions', () => {
     );
   });
 
-  // Note: Chain rule with unknown functions currently returns 0 because
-  // unknown function symbols fail the isValid check in derivative.ts.
-  // This is a known limitation that could be improved in the future.
-  it('d/dx f(x^2) - chain rule with unknown function (current limitation)', () => {
+  it('d/dx f(x^2) applies chain rule with unknown function', () => {
     const expr = engine.expr(['D', ['f', ['Square', 'x']], 'x']);
     const result = expr.evaluate();
-    // Ideally would return 2x * f'(x^2), currently returns 0
-    expect(result.toString()).toMatchInlineSnapshot(`0`);
+    expect(result.toString()).toMatchInlineSnapshot(
+      `2x * Apply(Derivative(f, 1), x^2)`
+    );
   });
 
-  it('d/dx g(sin(x)) - chain rule with unknown function (current limitation)', () => {
+  it('d/dx g(sin(x)) applies chain rule with unknown function', () => {
     const expr = engine.expr(['D', ['g', ['Sin', 'x']], 'x']);
     const result = expr.evaluate();
-    // Ideally would return cos(x) * g'(sin(x)), currently returns 0
-    expect(result.toString()).toMatchInlineSnapshot(`0`);
+    expect(result.toString()).toMatchInlineSnapshot(
+      `cos(x) * Apply(Derivative(g, 1), sin(x))`
+    );
+  });
+
+  it('d/dx f(g(x)) applies chain rule with nested unknown functions', () => {
+    const expr = engine.expr(['D', ['f', ['g', 'x']], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Apply(Derivative(g, 1), x) * Apply(Derivative(f, 1), g(x))`
+    );
   });
 });
 
