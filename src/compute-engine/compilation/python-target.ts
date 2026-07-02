@@ -10,6 +10,49 @@ import type {
 } from './types';
 import { BaseCompiler } from './base-compiler';
 import { tryGetConstant } from './constant-folding';
+import { isSymbol } from '../boxed-expression/type-guards';
+
+/**
+ * Python mathematical constants, keyed by MathJSON symbol.
+ *
+ * Referenced both by the target's `var` resolver and — so an assigned value is
+ * folded, matching the JavaScript target and `evaluate()` — by `compile()`.
+ */
+const PYTHON_CONSTANTS: Record<string, string> = {
+  Pi: 'np.pi',
+  ExponentialE: 'np.e',
+  ImaginaryUnit: '1j',
+  Infinity: 'np.inf',
+  NaN: 'np.nan',
+  GoldenRatio: '((1 + np.sqrt(5)) / 2)',
+  CatalanConstant: '0.915965594177219015054603514932384110774',
+  EulerGamma: '0.5772156649015328606065120900824024310421',
+};
+
+/**
+ * Emit a Python equality test with the engine's numeric tolerance baked in at
+ * compile time. The interpreter compares numbers within `engine.tolerance`
+ * (default 1e-10) — so `0.1 + 0.2 == 0.3` is *true* — while a raw `==` on
+ * floats is exact and would disagree. `kind` selects Equal (`<=`) vs NotEqual
+ * (`>`). Chained (N-ary) forms are conjoined pairwise with `and`.
+ */
+function compilePythonEquality(
+  kind: 'Equal' | 'NotEqual',
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string
+): string {
+  if (args.length < 2)
+    throw new Error(`${kind}: expected at least two arguments`);
+  const tol = args[0]?.engine?.tolerance ?? 1e-10;
+  const cmp = kind === 'Equal' ? '<=' : '>';
+  const pair = (a: Expression, b: Expression): string =>
+    `(abs((${compile(a)}) - (${compile(b)})) ${cmp} ${tol})`;
+  if (args.length === 2) return pair(args[0], args[1]);
+  const parts: string[] = [];
+  for (let i = 0; i < args.length - 1; i++)
+    parts.push(pair(args[i], args[i + 1]));
+  return `(${parts.join(' and ')})`;
+}
 
 /**
  * Python operator mappings
@@ -24,8 +67,9 @@ const PYTHON_OPERATORS: CompiledOperators = {
   Multiply: ['*', 12],
   Divide: ['/', 13],
   Power: ['**', 15], // Python exponentiation operator
-  Equal: ['==', 8],
-  NotEqual: ['!=', 8],
+  // Equal / NotEqual are NOT operators: a raw `==` on floats is exact, but the
+  // interpreter compares within `engine.tolerance`. They are handled as
+  // function forms (see `compilePythonEquality`) so the tolerance is honored.
   LessEqual: ['<=', 9],
   GreaterEqual: ['>=', 9],
   Less: ['<', 9],
@@ -297,9 +341,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Transpose: 'np.transpose',
   MatrixMultiply: 'np.matmul',
 
-  // Logic functions
-  Equal: 'np.equal',
-  NotEqual: 'np.not_equal',
+  // Comparison — tolerance-aware equality (see compilePythonEquality). The
+  // `abs(a - b) <= tol` form is element-wise for NumPy arrays too, so it also
+  // serves the collection-operand path (where the base compiler skips the infix
+  // operator). Less/Greater stay as the infix relational operators from
+  // PYTHON_OPERATORS; their function forms below serve the collection path.
+  Equal: (args, compile) => compilePythonEquality('Equal', args, compile),
+  NotEqual: (args, compile) => compilePythonEquality('NotEqual', args, compile),
   Less: 'np.less',
   LessEqual: 'np.less_equal',
   Greater: 'np.greater',
@@ -307,6 +355,36 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   And: 'np.logical_and',
   Or: 'np.logical_or',
   Not: 'np.logical_not',
+
+  // Control flow — the base compiler's default emits JS ternaries and a bare
+  // `NaN`, both of which are Python SyntaxErrors. Emit Python conditional
+  // expressions (`a if cond else b`) and `float('nan')`.
+  If: (args, compile) => {
+    if (args.length !== 3) throw new Error('If: wrong number of arguments');
+    return `((${compile(args[1])}) if (${compile(args[0])}) else (${compile(
+      args[2]
+    )}))`;
+  },
+  When: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error('When: expected exactly 2 arguments (expr, cond)');
+    if (isSymbol(args[1], 'True')) return `(${compile(args[0])})`;
+    if (isSymbol(args[1], 'False')) return "float('nan')";
+    return `((${compile(args[0])}) if (${compile(args[1])}) else float('nan'))`;
+  },
+  Which: (args, compile) => {
+    if (args.length < 2 || args.length % 2 !== 0)
+      throw new Error('Which: expected condition/value pairs');
+    const build = (i: number): string => {
+      if (i >= args.length) return "float('nan')";
+      const cond = args[i];
+      const val = args[i + 1];
+      // `True` marks the default (else) branch.
+      if (isSymbol(cond, 'True')) return `(${compile(val)})`;
+      return `((${compile(val)}) if (${compile(cond)}) else ${build(i + 2)})`;
+    };
+    return build(0);
+  },
 
   // Special functions
   Erf: 'scipy.special.erf',
@@ -373,24 +451,16 @@ export class PythonTarget implements LanguageTarget<Expression> {
   ): CompileTarget<Expression> {
     return {
       language: 'python',
+      // Chained relations join with Python's `and`, not `&&`.
+      chainOp: 'and',
       operators: (op) => PYTHON_OPERATORS[op],
       functions: (id) => PYTHON_FUNCTIONS[id],
-      var: (id) => {
-        // Python mathematical constants
-        const constants = {
-          Pi: 'np.pi',
-          ExponentialE: 'np.e',
-          ImaginaryUnit: '1j',
-          Infinity: 'np.inf',
-          NaN: 'np.nan',
-          // Compute other constants
-          GoldenRatio: '((1 + np.sqrt(5)) / 2)',
-          CatalanConstant: '0.915965594177219015054603514932384110774',
-          EulerGamma: '0.5772156649015328606065120900824024310421',
-        };
-        if (id in constants) return constants[id as keyof typeof constants];
-        return id; // Variables use their names directly
-      },
+      // Resolve a mathematical constant; otherwise return `undefined` so
+      // BaseCompiler folds an assigned value / declared constant into the code
+      // (matching `evaluate()` and the JavaScript target) and falls back to the
+      // bare identifier — a Python parameter name — only for a genuinely free
+      // symbol.
+      var: (id) => PYTHON_CONSTANTS[id],
       complex: (re, im) => `complex(${re}, ${im})`,
       string: (str) => JSON.stringify(str),
       number: (n) => {
@@ -410,6 +480,23 @@ export class PythonTarget implements LanguageTarget<Expression> {
   }
 
   /**
+   * Build a `var` resolver honoring, in order: shadowed parameters (kept bare),
+   * an explicit `vars` mapping (which always wins over folding — a per-call
+   * substitution), mathematical constants, then `undefined` so BaseCompiler
+   * folds an assigned value / emits the bare identifier for a free symbol.
+   */
+  private makeVarResolver(
+    vars?: Record<string, string>,
+    shadowed?: ReadonlyArray<string>
+  ): (id: string) => string | undefined {
+    return (id: string) => {
+      if (shadowed?.includes(id)) return id;
+      if (vars && id in vars) return JSON.stringify(vars[id]);
+      return PYTHON_CONSTANTS[id];
+    };
+  }
+
+  /**
    * Compile to Python source code (not executable in JavaScript)
    *
    * Returns Python code as a string. To execute it, use Python runtime.
@@ -418,7 +505,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'python'> {
-    const code = this.compileToSource(expr, options);
+    const vars = options.vars as Record<string, string> | undefined;
+    const target = this.createTarget({
+      var: this.makeVarResolver(vars),
+    });
+    let code = BaseCompiler.compile(expr, target);
+    if (this.includeImports) code = this.withImports(code);
+
     const result: CompilationResult<'python'> = {
       target: 'python',
       success: true,
@@ -427,33 +520,33 @@ export class PythonTarget implements LanguageTarget<Expression> {
     return BaseCompiler.withReferences(
       result,
       expr,
-      this.createTarget(),
-      options.vars ? new Set(Object.keys(options.vars)) : undefined
+      target,
+      vars ? new Set(Object.keys(vars)) : undefined
     );
+  }
+
+  /** Prepend the numpy / cmath / scipy imports when `includeImports` is set. */
+  private withImports(code: string): string {
+    let imports = 'import numpy as np\n';
+    imports += 'import cmath\n';
+    if (this.useScipy) imports += 'import scipy.special\n';
+    return `${imports}\n${code}`;
   }
 
   /**
    * Compile an expression to Python source code
    *
-   * Returns the Python code as a string.
+   * Returns the Python code as a string. Honors `options.vars` (per-call
+   * substitution) and folds assigned symbols.
    */
   compileToSource(
     expr: Expression,
-    _options: CompilationOptions<Expression> = {}
+    options: CompilationOptions<Expression> = {}
   ): string {
-    const target = this.createTarget();
+    const vars = options.vars as Record<string, string> | undefined;
+    const target = this.createTarget({ var: this.makeVarResolver(vars) });
     const code = BaseCompiler.compile(expr, target);
-
-    if (this.includeImports) {
-      let imports = 'import numpy as np\n';
-      imports += 'import cmath\n';
-      if (this.useScipy) {
-        imports += 'import scipy.special\n';
-      }
-      return `${imports}\n${code}`;
-    }
-
-    return code;
+    return this.includeImports ? this.withImports(code) : code;
   }
 
   /**
@@ -470,7 +563,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
     parameters: string[],
     docstring?: string
   ): string {
-    const target = this.createTarget();
+    // Shadow the declared parameters so they stay bare identifiers (never
+    // folded to an assigned engine value).
+    const target = this.createTarget({
+      var: this.makeVarResolver(undefined, parameters),
+    });
     const body = BaseCompiler.compile(expr, target);
 
     const params = parameters.join(', ');
@@ -534,7 +631,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
    * @param parameters - Parameter names
    */
   compileLambda(expr: Expression, parameters: string[]): string {
-    const target = this.createTarget();
+    const target = this.createTarget({
+      var: this.makeVarResolver(undefined, parameters),
+    });
     const body = BaseCompiler.compile(expr, target);
 
     const params = parameters.join(', ');

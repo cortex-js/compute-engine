@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { erfInv } from '../../src/compute-engine/numerics/special-functions';
 import { engine } from '../utils';
 
 const ce = engine;
@@ -1557,5 +1558,55 @@ describe('TIER-2 KERNELS: BIGNUM PRECISION', () => {
     expect(
       bigCe.expr(['Hypergeometric1F1', 1, 2, 2]).N().toString()
     ).toMatch(/^3\.194528049465325113615213730287503906590157785275/);
+  });
+});
+
+// Wave-4 NU-P1 numeric-precision fixes. References independently computed with
+// mpmath (≥25 guard digits). erfInv references are of the exact IEEE double
+// input (the value a machine kernel actually receives), not the exact real.
+describe('WAVE-4 NU-P1 numeric precision', () => {
+  let bigCe: InstanceType<typeof ComputeEngine>;
+  let saved: number;
+  beforeAll(() => {
+    saved = ce.precision;
+    bigCe = new ComputeEngine();
+    bigCe.precision = 50;
+  });
+  afterAll(() => {
+    // BigDecimal.precision is process-global: re-sync the shared engine.
+    ce.precision = saved;
+  });
+
+  test('NU-P1-9: erfInv near +1 recovers full machine precision', () => {
+    // Newton on erf(y)−ax cancels near ±1; the fix iterates on erfc.
+    expect(erfInv(1 - 1e-12)).toBeCloseTo(5.0420318985726961, 10);
+    expect(erfInv(1 - 1e-8)).toBeCloseTo(4.0522372432687634, 10);
+    expect(erfInv(-(1 - 1e-12))).toBeCloseTo(-5.0420318985726961, 10);
+    // Away from ±1 unchanged.
+    expect(erfInv(0.5)).toBeCloseTo(0.47693627620446987, 15);
+  });
+
+  test('NU-P1-10: high-precision LambertW is rounded to working precision', () => {
+    // Was printing 2× precision with a ~100-digit garbage tail.
+    const s = bigCe.expr(['LambertW', 3]).N().toString();
+    expect(s).toMatch(/^1\.0499088949640399599886970705528979045894669437063/);
+    // No garbage tail: at precision 50 the mantissa is ≤ ~51 digits.
+    expect(s.replace('.', '').length).toBeLessThanOrEqual(52);
+  });
+
+  test('NU-P1-2: 2F1 integer c−a−b, z near 1 (was NaN → symbolic)', () => {
+    // Direct series now covers z ∈ (0.95, 1) at full working precision.
+    expect(bigCe.expr(['Hypergeometric2F1', 1, 1, 2, 0.99]).N().toString()).toMatch(
+      /^4\.6516870565536276444807908175/
+    );
+    expect(bigCe.expr(['Hypergeometric2F1', 1, 2, 3, 0.97]).N().toString()).toMatch(
+      /^5\.3917693640556524107572274895/
+    );
+  });
+
+  test('NU-P1-2: 2F1 Pfaff image z ≲ −19 (was NaN → symbolic)', () => {
+    expect(bigCe.expr(['Hypergeometric2F1', 1, 1, 2, -40]).N().toString()).toMatch(
+      /^0\.0928393016676076950966690843259/
+    );
   });
 });

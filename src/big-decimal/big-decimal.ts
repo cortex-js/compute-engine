@@ -891,9 +891,17 @@ export class BigDecimal {
         return fromRaw(0n, 0);
       }
 
-      // Positive integer exponent: repeated squaring, truncated to working
+      // Positive integer exponent: repeated squaring, truncated to a *working*
       // precision after each multiply to prevent exponential significand growth.
+      // The square-and-multiply ladder chains ~2·log2(n) roundings, each adding
+      // up to ~1 ulp; truncating to the user precision after every step
+      // therefore accumulated ~n/2 ulp of error (e.g. 0.999999999999^1e6 at
+      // precision 34 was wrong from digit ~28). Carry ~2·log2(n) guard digits
+      // through the ladder and round once at the end. (NU-P1-4)
       const prec = BigDecimal.precision;
+      const ladderSteps = expValue.toString(2).length; // ≈ log2(n) + 1
+      const guard = Math.min(2 * ladderSteps + 5, 100);
+      const workPrec = prec + guard;
       let result: BigDecimal = fromRaw(1n, 0);
       // eslint-disable-next-line @typescript-eslint/no-this-alias
       let base: BigDecimal = this;
@@ -901,15 +909,15 @@ export class BigDecimal {
 
       while (exp > 0n) {
         if (exp & 1n) {
-          result = result.mul(base).toPrecision(prec);
+          result = result.mul(base).toPrecision(workPrec);
         }
         exp >>= 1n;
         if (exp > 0n) {
-          base = base.mul(base).toPrecision(prec);
+          base = base.mul(base).toPrecision(workPrec);
         }
       }
 
-      return result;
+      return result.toPrecision(prec);
     }
 
     // Non-integer exponent path: use exp(n * ln(base))

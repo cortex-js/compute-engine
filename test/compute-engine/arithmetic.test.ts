@@ -489,6 +489,46 @@ describe('ROOT', () => {
     ).toEqual(-2);
   });
 
+  // NU-P1-7: Root(x,n).N() used Math.pow / a.pow(1/n), rounding the reciprocal
+  // and printing a perfect root as 3.999…9. It now uses a snap-to-exact n-th
+  // root, so a perfect power numericizes to the exact integer.
+  test(`N() of a perfect n-th root snaps to the exact integer`, () => {
+    expect(ce.expr(['Root', 64, 3]).N().json).toEqual(4);
+    expect(ce.expr(['Root', 27, 3]).N().json).toEqual(3);
+    expect(ce.expr(['Root', 1000, 3]).N().json).toEqual(10);
+    expect(ce.expr(['Root', 1024, 10]).N().json).toEqual(2);
+    // Non-perfect roots keep full precision (√[3]{2}).
+    expect(ce.expr(['Root', 2, 3]).N().re).toBeCloseTo(1.2599210498948732, 14);
+  });
+
+  // NU-P1-8: an even root of a negative exact number has no real value, but a
+  // complex principal value exists (like Sqrt(-4) = 2i). evaluate() used to
+  // assert a NaN literal; it must stay symbolic instead (never NaN).
+  test(`Even root of a negative number stays symbolic (not NaN) under evaluate`, () => {
+    const r = ce.expr(['Root', -4, 4]).evaluate();
+    expect(r.isNaN).not.toBe(true);
+    expect(r.operator).toBe('Root');
+    const p = ce.expr(['Power', -4, ['Rational', 1, 4]]).evaluate();
+    expect(p.isNaN).not.toBe(true);
+    // N() produces the principal complex root (~1 + i).
+    const n = ce.expr(['Root', -4, 4]).N();
+    expect(n.re).toBeCloseTo(1, 12);
+    expect(n.im).toBeCloseTo(1, 12);
+    // Control: the odd-root convention is preserved.
+    expect(ce.expr(['Root', -8, 3]).evaluate().json).toEqual(-2);
+  });
+
+  // NU-P1-3: a complex value's imaginary part is always a machine double, so a
+  // full-precision bignum real part printed a garbage tail (50+ digits, ~16
+  // correct). The real part is now rounded to double precision.
+  test(`Complex numeric result prints an honest (machine-precision) real part`, () => {
+    const s = ce.expr(['Sqrt', ['Complex', 2, 3]]).N();
+    const reStr = ce.number(s.re).toString();
+    expect(reStr.replace('.', '').replace('-', '').length).toBeLessThanOrEqual(18);
+    expect(s.re).toBeCloseTo(1.6741492280355401, 12);
+    expect(s.im).toBeCloseTo(0.8959774761298381, 12);
+  });
+
   test(`Odd root of negative non-perfect cube N() is real`, () => {
     expect(ce.expr(['Root', -2, 3]).evaluate().isNaN).not.toBe(true);
     const n = ce.expr(['Power', ['Rational', -1, 8], ['Rational', 1, 3]]).N();

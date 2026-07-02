@@ -1944,9 +1944,9 @@ export class ComputeEngine implements IComputeEngine {
    * Return a list of all the assumptions that match a pattern.
    *
    * ```js
-   *  ce.assume(['Element', 'x', 'PositiveIntegers');
+   *  ce.assume(['Greater', 'x', 4]);
    *  ce.ask(['Greater', 'x', '_val'])
-   *  //  -> [{'val': 0}]
+   *  //  -> [{ _val: 4 }]
    * ```
    */
   ask(pattern: Expression): BoxedSubstitution[] {

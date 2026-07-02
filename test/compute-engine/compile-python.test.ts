@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 describe('PYTHON TARGET', () => {
@@ -439,6 +440,112 @@ describe('PYTHON TARGET', () => {
     it('odd roots are sign-corrected for negative bases (P0-42)', () => {
       const code = python.compile(ce.box(['Root', 'x', 5])).code;
       expect(code).toBe('(np.sign(x) * np.power(np.abs(x), 1.0 / 5))');
+    });
+  });
+
+  // CO-P1-1: the Python target emitted JS-style ternaries, bare `NaN`,
+  // `and(a, b)` keyword-as-function calls, and `&&` chains — all Python
+  // SyntaxErrors — and ignored `vars` / never folded assigned symbols.
+  describe('CO-P1-1 control flow, logic, folding', () => {
+    it('If emits a Python conditional expression', () => {
+      const code = python.compile(
+        ce.box(['If', ['Greater', 'x', 0], 1, ['Negate', 'x']])
+      ).code;
+      expect(code).toBe('((1) if (0 < x) else (-x))');
+    });
+
+    it('Which emits nested Python conditional expressions', () => {
+      const code = python.compile(
+        ce.box(['Which', ['Less', 'x', 0], -1, 'True', 1])
+      ).code;
+      expect(code).toBe('((-1) if (x < 0) else (1))');
+    });
+
+    it('When with no default uses float(nan), not a bare NaN', () => {
+      const code = python.compile(
+        ce.box(['When', 'x', ['Greater', 'x', 0]])
+      ).code;
+      expect(code).toBe("((x) if (0 < x) else float('nan'))");
+      expect(code).not.toContain('NaN');
+    });
+
+    it('And is an infix keyword, not an `and(a, b)` call', () => {
+      const code = python.compile(
+        ce.box(['And', ['Greater', 'x', 0], ['Less', 'x', 10]])
+      ).code;
+      expect(code).toBe('0 < x and x < 10');
+      expect(code).not.toContain('and(');
+    });
+
+    it('Or is an infix keyword', () => {
+      const code = python.compile(
+        ce.box(['Or', ['Greater', 'x', 0], ['Less', 'x', -10]])
+      ).code;
+      expect(code).toBe('0 < x or x < -10');
+    });
+
+    it('Not is a prefix keyword with a space', () => {
+      const code = python.compile(ce.box(['Not', ['Greater', 'x', 0]])).code;
+      expect(code).toBe('not (0 < x)');
+      expect(code).not.toContain('not(');
+    });
+
+    it('relational chains conjoin with `and`, not `&&`', () => {
+      const code = python.compile(ce.box(['Less', 'a', 'b', 'c'])).code;
+      expect(code).toBe('(a < b) and (b < c)');
+      expect(code).not.toContain('&&');
+    });
+
+    it('folds an assigned symbol into the code (like the JS target)', () => {
+      const scoped = new ComputeEngine();
+      scoped.assign('k', 5);
+      const code = python.compile(scoped.box(['Multiply', 'k', 'x'])).code;
+      expect(code).toBe('5 * x');
+    });
+
+    it('honors a `vars` mapping over folding', () => {
+      const scoped = new ComputeEngine();
+      scoped.assign('k', 5);
+      const code = python.compile(scoped.box(['Multiply', 'k', 'x']), {
+        vars: { k: 9 } as any,
+      }).code;
+      expect(code).toBe('9 * x');
+    });
+  });
+
+  // CO-P1-4: compiled Equal used exact `==`; the interpreter compares within
+  // engine.tolerance (default 1e-10).
+  describe('CO-P1-4 tolerance-aware equality', () => {
+    it('Equal bakes the engine tolerance', () => {
+      const code = python.compile(
+        ce.box(['Equal', ['Add', 0.1, 0.2], 0.3])
+      ).code;
+      expect(code).toBe('(abs((0.1 + 0.2) - (0.3)) <= 1e-10)');
+    });
+
+    it('NotEqual uses the tolerance complement', () => {
+      const code = python.compile(ce.box(['NotEqual', 'x', 0.3])).code;
+      expect(code).toBe('(abs((x) - (0.3)) > 1e-10)');
+    });
+  });
+
+  // CO-P1-3: a complex argument into a real-only helper returned garbage.
+  describe('CO-P1-3 complex into a real-only helper fails closed (D6)', () => {
+    it('Erf of a complex value throws with the offending head', () => {
+      const scoped = new ComputeEngine();
+      scoped.declare('z', 'complex');
+      expect(() => python.compile(scoped.box(['Erf', 'z'])).code).toThrow(
+        /Erf: real-only target helper/
+      );
+    });
+
+    it('Real / Conjugate of a complex value are allowed (complex-transparent)', () => {
+      const scoped = new ComputeEngine();
+      scoped.declare('z', 'complex');
+      expect(python.compile(scoped.box(['Real', 'z'])).code).toBe('np.real(z)');
+      expect(python.compile(scoped.box(['Conjugate', 'z'])).code).toBe(
+        'np.conj(z)'
+      );
     });
   });
 });

@@ -226,3 +226,87 @@ describe('ASSUMPTION-BASED SIMPLIFICATION', () => {
     expect(ce2.expr('x').isPositive).toBe(undefined);
   });
 });
+
+describe('CHAINED INEQUALITY ASSUMPTIONS (P1-2)', () => {
+  test('assume(0 < x < 1) establishes BOTH bounds', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.parse('0 < x < 1'))).toBe('ok');
+    // Both links of the chain must be established, not just the first pair.
+    expect(ce.verify(ce.expr(['Greater', 'x', 0]))).toBe(true);
+    expect(ce.verify(ce.expr(['Less', 'x', 1]))).toBe(true);
+  });
+
+  test('assume(1 <= y <= 3) establishes both (non-strict) bounds', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.parse('1 \\le y \\le 3'))).toBe('ok');
+    expect(ce.verify(ce.expr(['GreaterEqual', 'y', 1]))).toBe(true);
+    expect(ce.verify(ce.expr(['LessEqual', 'y', 3]))).toBe(true);
+  });
+
+  test('a self-contradictory chain reports a contradiction', () => {
+    const ce = new ComputeEngine();
+    // 5 < z < 1 has no solution: the second link contradicts the first.
+    expect(ce.assume(ce.parse('5 < z < 1'))).toBe('contradiction');
+  });
+});
+
+describe('MULTI-ROOT EQUALITY ASSUMPTIONS (P1-3)', () => {
+  test('assume(x^2 = 4) is ok (not a contradiction)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.parse('x^2 = 4'))).toBe('ok');
+  });
+
+  test('a multi-root equation does not bind the symbol to a List value', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x^2 = 4'));
+    // x is not uniquely determined by x^2 = 4, so it stays symbolic rather
+    // than evaluating to the list of roots List(2, -2).
+    expect(ce.expr('x').evaluate().json).toBe('x');
+    expect(ce.expr(['Add', 'x', 1]).evaluate().json).toEqual(['Add', 'x', 1]);
+    // The equation is recorded, so verifying it succeeds.
+    expect(ce.verify(ce.parse('x^2 = 4'))).toBe(true);
+  });
+
+  test('a single-root equation still binds the symbol to its value', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.parse('2x = 6'))).toBe('ok');
+    expect(ce.expr('x').evaluate().json).toBe(3);
+  });
+
+  test('a root incompatible with an explicit type is a contradiction', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'imaginary');
+    // Roots of x^2 = 4 are ±2 (real), incompatible with an imaginary x.
+    expect(ce.assume(ce.parse('x^2 = 4'))).toBe('contradiction');
+  });
+});
+
+describe('SCOPED INEQUALITY TYPE REFINEMENT DOES NOT LEAK (P1-6)', () => {
+  test('assume(x>0) in a pushed scope does not refine x in the outer scope', () => {
+    const ce = new ComputeEngine();
+    // Reference x in the outer scope so it is auto-declared there (inferred,
+    // unknown type). Historically this was the def that leaked.
+    expect(ce.expr('x').type.toString()).toBe('unknown');
+
+    ce.pushScope();
+    ce.assume(ce.parse('x > 0'));
+    expect(ce.expr('x').type.toString()).toBe('real');
+    ce.popScope();
+
+    // After popping, the outer-scope type refinement must be gone.
+    expect(ce.expr('x').type.toString()).toBe('unknown');
+    expect(ce.expr('x').isReal).toBe(undefined);
+  });
+
+  test('membership refinement in a pushed scope does not leak either', () => {
+    const ce = new ComputeEngine();
+    expect(ce.expr('w').type.toString()).toBe('unknown');
+
+    ce.pushScope();
+    ce.assume(ce.expr(['Element', 'w', 'Integers']));
+    expect(ce.expr('w').type.matches('integer')).toBe(true);
+    ce.popScope();
+
+    expect(ce.expr('w').type.toString()).toBe('unknown');
+  });
+});

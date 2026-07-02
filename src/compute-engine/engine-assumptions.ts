@@ -71,6 +71,21 @@ export function ask(
     expr: Expression
   ): Array<{ pattern: Expression; matchPermutations?: boolean }> => {
     const op = expr.operator;
+
+    // Equalities are stored as `Equal(lhs - rhs, 0)` (assume.ts, Cases 3 & 4:
+    // e.g. `x + y = 5` → `Equal(Add(x, y, −5), 0)`, `x² = 4` → `Equal(Add(x²,
+    // −4), 0)`). Try both the verbatim query and the normalized diff form so
+    // that `verify`/`ask` recover these stored equalities (P1-3, P1-4).
+    if (op === 'Equal') {
+      if (!isFunction(expr) || expr.ops.length !== 2)
+        return [{ pattern: expr }];
+      const diff = expr.op1.canonical.sub(expr.op2.canonical);
+      return [
+        { pattern: expr },
+        { pattern: ce.expr(['Equal', diff, 0]), matchPermutations: false },
+      ];
+    }
+
     if (
       op !== 'Less' &&
       op !== 'LessEqual' &&
@@ -88,16 +103,21 @@ export function ask(
     // Normalize to Less/LessEqual with RHS = 0, matching how assumptions are stored:
     //   Greater(a, b) -> Less(b - a, 0)
     //   Less(a, b)    -> Less(a - b, 0)
-    const diff = ce.expr(['Add', lhs, ['Negate', rhs]], {
-      form: 'raw',
-    });
+    //
+    // Build the difference with the same arithmetic `assumeInequality` uses to
+    // store the fact (P1-4): `.sub()` distributes the negation over a sum, so
+    // `x + y > 0` is stored as `Less(Add(Negate(x), Negate(y)), 0)`. A pattern
+    // built structurally (`Less(Negate(Add(x, y)), 0)`) would never
+    // `isSame`-match that with `matchPermutations: false`. Operate on canonical
+    // operands, as `assumeInequality` does.
+    const diff = lhs.canonical.sub(rhs.canonical);
     return [
       { pattern: expr },
       // For the normalized form, disable permutations: for commutative
       // subexpressions (notably Add), allowing permutations can lead to
       // ambiguous wildcard bindings and duplicate, surprising matches.
       {
-        pattern: ce.expr([normalizedOp, diff, 0], { form: 'raw' }),
+        pattern: ce.expr([normalizedOp, diff, 0]),
         matchPermutations: false,
       },
     ];
@@ -168,6 +188,32 @@ export function ask(
             });
           }
         }
+      }
+    }
+  }
+
+  // B2b: Flipped canonical bound queries (P1-5). Canonicalization normalizes
+  // `Greater(x, _k)` → `Less(_k, x)` and `GreaterEqual(x, _k)` →
+  // `LessEqual(_k, x)`, moving the wildcard bound onto op1 and the subject onto
+  // op2. A caller who pre-boxes the pattern (`ce.expr(['Greater','x','_k'])`)
+  // hits this form. `_k < x` (resp. `≤`) is a *lower*-bound query on `x`.
+  if (
+    (pat.operator === 'Less' || pat.operator === 'LessEqual') &&
+    isFunction(pat) &&
+    isWildcard(pat.op1) &&
+    !isWildcard(pat.op2)
+  ) {
+    const boundWildcard = wildcardName(pat.op1);
+    if (boundWildcard && !boundWildcard.startsWith('__')) {
+      const isStrict = pat.operator === 'Less';
+      const subject = subjectOf(pat.op2);
+      if (subject !== undefined) {
+        const bounds = getInequalityBoundsFromAssumptions(ce, subject);
+        if (
+          bounds.lower !== undefined &&
+          (!isStrict || bounds.lowerStrict === true)
+        )
+          pushResult({ [boundWildcard]: bounds.lower });
       }
     }
   }
@@ -256,10 +302,31 @@ export function verify(
       return hasUnknown ? undefined : false;
     }
 
+    // Direct assumption-DB lookup (P1-4): `assume(P) ⇒ verify(P)`. Some facts
+    // (opaque multi-symbol inequalities like `x·y > 0` or `x + y > 0`) are
+    // stored verbatim but cannot be decided by the evaluator, so the paths
+    // above leave them `undefined`. Consult the DB via `ask`, which matches
+    // the query against the stored (normalized) facts. `ask` runs with
+    // `_isVerifying` set, so its own closed-predicate `verify` fallback (B3)
+    // is disabled and cannot recurse back into this function. A closed
+    // predicate that is stored yields an empty-substitution match.
+    if (!exprHasWildcards(boxed)) {
+      const matches = ask(ce, boxed);
+      if (matches.some((m) => Object.keys(m).length === 0)) return true;
+    }
+
     return undefined;
   } finally {
     ce._isVerifying = false;
   }
+}
+
+/** True if `expr` contains a wildcard (a symbol/operator starting with `_`). */
+function exprHasWildcards(expr: Expression): boolean {
+  if (expr.operator.startsWith('_')) return true;
+  if (isWildcard(expr)) return true;
+  if (isFunction(expr)) return expr.ops.some(exprHasWildcards);
+  return false;
 }
 
 export function assumeFn(

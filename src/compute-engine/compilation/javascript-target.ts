@@ -109,8 +109,10 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
   Subtract: ['-', 11],
   Multiply: ['*', 12],
   Divide: ['/', 13],
-  Equal: ['===', 8],
-  NotEqual: ['!==', 8],
+  // Equal / NotEqual are NOT operators: a raw `===` is exact, but the
+  // interpreter compares numbers within `engine.tolerance`. They are handled as
+  // function forms (see `compileJSEquality`) so `0.1 + 0.2 === 0.3` matches the
+  // interpreter's `True`.
   LessEqual: ['<=', 9],
   GreaterEqual: ['>=', 9],
   Less: ['<', 9],
@@ -121,9 +123,56 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
 };
 
 /**
+ * Emit a JavaScript equality test with the engine's numeric tolerance baked in
+ * at compile time. The interpreter treats two numbers as equal when
+ * `|a − b| <= engine.tolerance` (default 1e-10) — so `0.1 + 0.2 === 0.3` is
+ * *true* — whereas a raw `===` is exact and would disagree. `kind` selects
+ * Equal (`<=`) vs NotEqual (`>`). Complex operands compare on the modulus of
+ * the difference (`_SYS.cabs`). Chained (N-ary) forms conjoin pairwise with
+ * `&&`.
+ */
+function compileJSEquality(
+  kind: 'Equal' | 'NotEqual',
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string
+): string {
+  if (args.length < 2)
+    throw new Error(`${kind}: expected at least two arguments`);
+  const tol = args[0]?.engine?.tolerance ?? 1e-10;
+  const cmp = kind === 'Equal' ? '<=' : '>';
+  const distance = (a: Expression, b: Expression): string => {
+    const anyComplex =
+      BaseCompiler.isComplexValued(a) || BaseCompiler.isComplexValued(b);
+    if (!anyComplex) return `Math.abs((${compile(a)}) - (${compile(b)}))`;
+    // Promote each operand to `{ re, im }` and take the modulus of the
+    // difference. A real operand contributes `re = code`, `im = 0`.
+    const part = (e: Expression): { re: string; im: string } => {
+      const c = compile(e);
+      return BaseCompiler.isComplexValued(e)
+        ? { re: `(${c}).re`, im: `(${c}).im` }
+        : { re: `(${c})`, im: '0' };
+    };
+    const pa = part(a);
+    const pb = part(b);
+    return `_SYS.cabs({ re: ${pa.re} - ${pb.re}, im: ${pa.im} - ${pb.im} })`;
+  };
+  const pair = (a: Expression, b: Expression): string =>
+    `(${distance(a, b)} ${cmp} ${tol})`;
+  if (args.length === 2) return pair(args[0], args[1]);
+  const parts: string[] = [];
+  for (let i = 0; i < args.length - 1; i++)
+    parts.push(pair(args[i], args[i + 1]));
+  return `(${parts.join(' && ')})`;
+}
+
+/**
  * JavaScript function implementations
  */
 const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+  // Tolerance-aware equality (see compileJSEquality). Not operators — a raw
+  // `===` is exact and disagrees with the interpreter's tolerant compare.
+  Equal: (args, compile) => compileJSEquality('Equal', args, compile),
+  NotEqual: (args, compile) => compileJSEquality('NotEqual', args, compile),
   Abs: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.cabs(${compile(args[0])})`;

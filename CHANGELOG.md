@@ -45,6 +45,86 @@
 
 ### Resolved Issues
 
+- **Assumptions: chained inequalities, multi-root equations, and the
+  `assume ⇒ verify` identity.** `assume("0 < x < 1")` silently dropped every
+  relation but the first (`verify(x < 1)` was unknown afterward); n-ary
+  relational assumptions now decompose into pairwise conjuncts.
+  `assume("x^2 = 4")` incorrectly returned `'contradiction'` for every
+  multi-root equation (a type comparison tested the roots-*list* type instead
+  of each root); it now succeeds, records the equation as a fact, and leaves
+  the symbol symbolic instead of binding it to a `List` of roots. Facts that
+  the evaluator cannot decide on its own (`x·y > 0`, `x + y > 0`) were
+  write-only — `ask` sometimes found them but `verify` never did; `verify()`
+  now consults the assumption database directly, making
+  `assume(P) ⇒ verify(P)` an identity. `ask()` bound queries also recognize
+  canonically-boxed patterns (`["Greater", "x", "_k"]`, which canonicalizes to
+  `Less(_k, x)`), and the documented `ask` example now actually works.
+
+- **Assumptions no longer mutate parent scopes.** `assume(x > 0)` inside a
+  pushed scope refined the type of `x` on its *parent-scope* definition, so
+  after `popScope()` the assumption was gone but `x` stayed typed `real`. The
+  refinement now shadows into the current scope, like `declare`.
+
+- **Python compilation target emits valid Python.** `If`/`When`/`Which`
+  compiled to JavaScript ternaries with bare `NaN` (a Python `SyntaxError`),
+  logical operators compiled to `and(a, b)` function calls, and relational
+  chains hardcoded `&&`; they now emit conditional expressions
+  (`a if cond else b`), `float('nan')`, and infix `and`/`or`/`not`. The target
+  also honors `vars` and options, folds assigned symbols like the JavaScript
+  target, and the documented `python` target name is registered. A new parity
+  suite executes the emitted source with a real Python interpreter and checks
+  the values against the engine.
+
+- **GPU compilation targets: no more invalid shaders.** A loop-form `Sum` used
+  as a sub-expression spliced a `return` statement mid-expression
+  (`return _acc; + 1.0`) with `success: true`; it now fails at compile time
+  with the offending head. `Loop` counters are converted to float where
+  consumed, WGSL `Argument` uses `select(…)` instead of the unsupported `?:`,
+  and `Min`/`Max` with three or more arguments fold to nested two-argument
+  builtins. Compiling a real-only helper (`Erf`, `Gamma`, Bessel, …) with a
+  complex-typed argument — which silently returned garbage (`Erf(z)` → −1) —
+  now also fails closed at compile time.
+
+- **Compiled `Equal` matches the interpreter's tolerance.** Compiled code
+  compared floats with exact `===`, so `0.1 + 0.2 == 0.3` was `false` compiled
+  but `True` interpreted. JavaScript and Python targets now bake the engine's
+  tolerance into equality comparisons.
+
+- **`Root(x, n).N()` computes a true n-th root.** `Root(64, 3).N()` returned
+  `3.999…9` (computed as `x^(1/n)` with a rounded reciprocal); both the
+  machine and arbitrary-precision paths now use a dedicated n-th-root kernel
+  (Newton-corrected, snapping exact integer roots), so `Root(64, 3).N()` is
+  exactly `4`. Non-integer degrees (`Root(2, 0.5)` = 4) continue to work as
+  powers. `Root(-4, 4).evaluate()` asserted a **NaN literal** where a complex
+  value exists; it now stays symbolic, with `.N()` returning the principal
+  complex root (odd roots of negatives keep the real-root convention:
+  `Root(-8, 3)` = −2).
+
+- **Arbitrary-precision kernels: no more silent digit loss.** `LambertW` read
+  its tolerance from the wrong precision setting and never rounded (printing
+  ~2× the working precision with a garbage tail); `acos` near ±1 lost half its
+  digits to cancellation (now computed via the half-angle identity); `cos` and
+  `tan` near their zeros used a fixed 15-digit guard against unbounded
+  cancellation (now sized dynamically); integer `BigDecimal.pow` accumulated
+  ~n/2 ulp of rounding through its squaring ladder (now carries guard digits,
+  rounding once); machine `erfInv` near ±1 lost all but ~5 digits (Newton now
+  iterates on the complement); and `Hypergeometric2F1` refused arguments near
+  `z = 1` (and their Pfaff images) that its series can in fact deliver at
+  working precision. All repaired paths are pinned against mpmath references.
+
+- **Complex arbitrary-precision results are correct to working precision.**
+  Complex operations mixed machine-double intermediates into full-precision
+  arithmetic — squaring the imaginary part as a double (`1.1²` →
+  `1.2100000000000002`) contaminated every modulus (`ln`, `exp`, `sqrt`,
+  `abs`, powers and roots of complex values), and the phase of a
+  negative-base power used machine `cos`, so `(-4)^{0.25}.N()` at 50 digits
+  printed garbage past digit 16. These now compute in decimal at working
+  precision: `Ln(1.1+1.1i)` at 21 digits agrees with mpmath to all 21,
+  `Sqrt(2+3i)` at 50 digits to all 50. Exact products are rounded back to
+  working precision so no digits beyond it are asserted. (The imaginary part
+  of a complex result remains machine precision by representation — a
+  documented limitation.)
+
 - **Floating-point arguments numericize under `evaluate()` everywhere.**
   About thirty special functions kept float arguments symbolic
   (`\Gamma(5.1)`, `e^{5.1}`, `\operatorname{erf}(1.5)`, Bessel, Airy,

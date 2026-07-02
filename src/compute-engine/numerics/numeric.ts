@@ -71,6 +71,41 @@ export function nextDown(x: number): number {
   return -nextUp(-x);
 }
 
+/**
+ * Accurate real n-th root of a non-negative machine double.
+ *
+ * `Math.pow(x, 1/n)` is not correctly rounded — the reciprocal `1/n` is itself
+ * rounded, so e.g. `Math.pow(64, 1/3)` = 3.9999999999999996 and
+ * `Math.pow(1000, 1/3)` = 9.999999999999998. Refine with one Newton step on
+ * `f(r) = rⁿ − x`, i.e. `r ← ((n−1)·r + x/r^{n−1}) / n`, then snap to the exact
+ * integer root when `x` is a perfect n-th power (so `Root(64,3).N()` prints 4,
+ * not 3.999…). Callers handle the sign of a negative radicand. (NU-P1-7)
+ */
+export function machineNthRoot(x: number, n: number): number {
+  if (n === 1) return x;
+  if (n === 2) return Math.sqrt(x);
+  if (n === 3) return Math.cbrt(x);
+  // Newton correction and integer snapping only make sense for an integer
+  // degree; a non-integer degree is just a power.
+  if (!Number.isInteger(n)) return Math.pow(x, 1 / n);
+  if (x === 0 || !Number.isFinite(x) || x < 0) return Math.pow(x, 1 / n);
+
+  let r = Math.pow(x, 1 / n);
+  if (!Number.isFinite(r) || r === 0) return r;
+
+  // One Newton correction step (the seed is already ~15 digits, so a single
+  // step reaches full double precision).
+  r = ((n - 1) * r + x / Math.pow(r, n - 1)) / n;
+
+  // Snap to an exact integer root: if `x` is a perfect n-th power, return the
+  // integer exactly rather than a value one ulp away.
+  const ri = Math.round(r);
+  if (ri > 0 && Math.abs(r - ri) <= 8 * Number.EPSILON * ri && ri ** n === x)
+    return ri;
+
+  return r;
+}
+
 /* @todo Consider https://cp-algorithms.com/algebra/factorization.html */
 
 /** Return `[factor, root]` such that

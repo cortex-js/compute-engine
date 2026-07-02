@@ -28,6 +28,53 @@ export class BaseCompiler {
   private static readonly FOLD_OPERAND_PREC = 1000;
 
   /**
+   * Operator heads that are word-spelled infix/prefix **keywords** in some
+   * targets (Python `and` / `or` / `not`), never function calls. The alphabetic
+   * op-string of these heads must NOT be treated as a function-call name — that
+   * would emit `and(a, b)` (a Python SyntaxError). This is distinct from a user
+   * override that intentionally maps an operator to a function name (e.g.
+   * `Add: ['add', 11]` → `add(x, y)`): those heads are not in this set.
+   */
+  private static readonly WORD_KEYWORD_OPERATORS: ReadonlySet<string> = new Set([
+    'And',
+    'Or',
+    'Not',
+  ]);
+
+  /**
+   * Compile `expr` as a **value operand** — a sub-expression spliced into a
+   * surrounding expression. Behaves like `compile`, but on targets whose
+   * multi-statement constructs are bare statement sequences
+   * (`target.bareStatementBlocks`, i.e. GLSL/WGSL), it **fails closed** (D6)
+   * when the operand compiled to such a block. A shader has no expression-level
+   * loop/IIFE, so a loop-form `Sum`/`Product`/`Loop`/`Block` cannot be a
+   * sub-expression; splicing it would emit invalid source (e.g.
+   * `return _acc; + 1.0`). The offending head is named in the error, which the
+   * engine-level `compile()` surfaces via `success: false` + `unsupported`.
+   */
+  static compileValueOperand(
+    expr: Expression | undefined,
+    target: CompileTarget<Expression>,
+    prec = 0
+  ): TargetSource {
+    const code = BaseCompiler.compile(expr, target, prec);
+    if (
+      target.bareStatementBlocks &&
+      typeof code === 'string' &&
+      code.includes('\n')
+    ) {
+      const head =
+        expr !== undefined && isFunction(expr) ? expr.operator : '?';
+      throw new Error(
+        `${head}: a multi-statement construct (loop-form Sum/Product, Loop, or Block) ` +
+          `cannot be used as a sub-expression in "${target.language ?? 'this'}" ` +
+          `— it is only valid as a top-level function body. Fail closed (D6).`
+      );
+    }
+    return code;
+  }
+
+  /**
    * Compile an expression to target language source code
    */
   static compile(
@@ -124,7 +171,7 @@ export class BaseCompiler {
       if (typeof sumProdFn === 'function') {
         return sumProdFn(
           args,
-          (expr) => BaseCompiler.compile(expr, target),
+          (expr) => BaseCompiler.compileValueOperand(expr, target),
           target
         );
       }
@@ -143,20 +190,31 @@ export class BaseCompiler {
       // Skip infix operators for complex operands — fall through to function dispatch
       const hasComplex = args.some((a) => BaseCompiler.isComplexValued(a));
       if (!hasComplex) {
-        // Check if this looks like a function name rather than an operator
-        // Function names are alphanumeric identifiers, operators are symbols
-        const isFunction = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(op[0]);
+        // Check if this looks like a function name rather than an operator.
+        // Function names are alphanumeric identifiers, operators are symbols.
+        // A word-spelled *keyword* operator (Python `and`/`or`/`not`) is
+        // alphabetic but still infix/prefix — never a function call — so it is
+        // excluded here (otherwise `And(a, b)` would emit `and(a, b)`).
+        const isFunction =
+          /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(op[0]) &&
+          !BaseCompiler.WORD_KEYWORD_OPERATORS.has(h);
+        // A word-spelled operator needs a separating space between the keyword
+        // and its operand (`not x`, `a and b`); a symbolic one does not (`!x`,
+        // `a && b`).
+        const isWordOp = /^[a-zA-Z_]/.test(op[0]);
 
         if (isFunction) {
           // Compile as a function call (works for both scalar and collection arguments)
           return `${op[0]}(${args
-            .map((arg) => BaseCompiler.compile(arg, target))
+            .map((arg) => BaseCompiler.compileValueOperand(arg, target))
             .join(', ')})`;
         } else {
           // Compile as an operator (only for non-collection arguments)
           if (args.every((x) => !x.isCollection)) {
             if (isRelationalOperator(h) && args.length > 2) {
-              // Chain relational operators
+              // Chain relational operators, conjoined with the target's chain
+              // operator (`&&` by default; Python `and`).
+              const chainOp = target.chainOp ?? '&&';
               const result: string[] = [];
               for (let i = 0; i < args.length - 1; i++) {
                 result.push(
@@ -169,13 +227,14 @@ export class BaseCompiler {
                   )
                 );
               }
-              return `(${result.join(') && (')})`;
+              return `(${result.join(`) ${chainOp} (`)})`;
             }
 
             let resultStr: string;
             if (args.length === 1) {
-              // Unary operator, assume prefix
-              resultStr = `${op[0]}${BaseCompiler.compile(
+              // Unary operator, assume prefix. Word operators get a space.
+              const sep = isWordOp ? ' ' : '';
+              resultStr = `${op[0]}${sep}${BaseCompiler.compileValueOperand(
                 args[0],
                 target,
                 op[1]
@@ -201,7 +260,11 @@ export class BaseCompiler {
                   if (rightAssoc && i < args.length - 1) operandPrec = op[1] + 1;
                   else if (leftAssocNonAssociative && i > 0)
                     operandPrec = op[1] + 1;
-                  return BaseCompiler.compile(arg, target, operandPrec);
+                  return BaseCompiler.compileValueOperand(
+                    arg,
+                    target,
+                    operandPrec
+                  );
                 })
                 .join(` ${op[0]} `);
             }
@@ -216,7 +279,7 @@ export class BaseCompiler {
       // Dispatch to target-specific handler if available (e.g. GPU throws)
       const fnFn = target.functions?.(h);
       if (typeof fnFn === 'function')
-        return fnFn(args, (expr) => BaseCompiler.compile(expr, target), target);
+        return fnFn(args, (expr) => BaseCompiler.compileValueOperand(expr, target), target);
       // Default: JavaScript arrow function
       const params = args.slice(1).map((x) => (isSymbol(x) ? x.symbol : '_'));
       return `((${params.join(', ')}) => ${BaseCompiler.compile(
@@ -246,7 +309,7 @@ export class BaseCompiler {
       if (typeof loopFn === 'function')
         return loopFn(
           args,
-          (expr) => BaseCompiler.compile(expr, target),
+          (expr) => BaseCompiler.compileValueOperand(expr, target),
           target
         );
       return BaseCompiler.compileForLoop(args, target);
@@ -257,7 +320,7 @@ export class BaseCompiler {
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
-          return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
+          return fn(args, (expr) => BaseCompiler.compileValueOperand(expr, target), target);
         }
         return `${fn}(${args
           .map((x) => BaseCompiler.compile(x, target))
@@ -280,7 +343,7 @@ export class BaseCompiler {
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
-          return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
+          return fn(args, (expr) => BaseCompiler.compileValueOperand(expr, target), target);
         }
         return `${fn}(${args
           .map((x) => BaseCompiler.compile(x, target))
@@ -309,7 +372,7 @@ export class BaseCompiler {
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
-          return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
+          return fn(args, (expr) => BaseCompiler.compileValueOperand(expr, target), target);
         }
         return `${fn}(${args
           .map((x) => BaseCompiler.compile(x, target))
@@ -345,17 +408,47 @@ export class BaseCompiler {
         const v = BaseCompiler.tempVar();
         return `(${BaseCompiler.compile(args[0], target)}).map((${v}) => ${fn(
           [args[0].engine.expr(v)],
-          (expr) => BaseCompiler.compile(expr, target),
+          (expr) => BaseCompiler.compileValueOperand(expr, target),
           target
         )})`;
       }
-      return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
+      return fn(
+        args,
+        (expr) => BaseCompiler.compileValueOperand(expr, target),
+        target
+      );
+    }
+
+    // `fn` is a plain string: the target maps this head to a real-only helper
+    // (e.g. JS `_SYS.erf`, Python `scipy.special.erf`). Such a helper takes a
+    // real scalar; handing it a complex value silently returns garbage (compiled
+    // `Erf(z)` for complex z → −1, not NaN). Fail closed (D6) with the offending
+    // head. Heads that legitimately consume complex (`Real`/`Imaginary`/
+    // `Argument`/`Conjugate`) are string-mapped in some targets but are exempt.
+    if (
+      target.language !== undefined &&
+      !target.language.startsWith('interval') &&
+      !BaseCompiler.COMPLEX_TRANSPARENT_HEADS.has(h) &&
+      args.some((a) => BaseCompiler.isComplexValued(a))
+    ) {
+      throw new Error(
+        `${h}: real-only target helper "${fn}" cannot represent a complex-valued argument. Fail closed (D6).`
+      );
     }
 
     return `${fn}(${args
-      .map((x) => BaseCompiler.compile(x, target))
+      .map((x) => BaseCompiler.compileValueOperand(x, target))
       .join(', ')})`;
   }
+
+  /**
+   * Function heads that consume a complex value and return a real (or complex)
+   * result. These are string-mapped to a complex-aware library routine in some
+   * targets (e.g. Python `Real: 'np.real'`), so — unlike a real-only helper —
+   * a complex argument is expected and must NOT trip the fail-closed guard.
+   */
+  private static readonly COMPLEX_TRANSPARENT_HEADS: ReadonlySet<string> =
+    new Set(['Real', 'Imaginary', 'Argument', 'Conjugate']);
 
   /**
    * Compile a block expression

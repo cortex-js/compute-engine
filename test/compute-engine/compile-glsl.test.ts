@@ -699,7 +699,9 @@ describe('GLSL COMPILATION', () => {
       ]);
       const code = glsl.compile(expr).code;
       expect(code).toContain('for (int i = 1; i <= 5; i++)');
-      expect(code).toContain('acc = acc + i');
+      // The int loop counter is consumed as a float in float math (CO-P1-2):
+      // `float(i)`, not a bare `i` (which is a GLSL int/float type mismatch).
+      expect(code).toContain('acc = acc + float(i)');
       expect(code).not.toContain('let ');
       expect(code).not.toContain('() =>');
       expect(code).not.toContain('})()');
@@ -743,6 +745,54 @@ describe('GLSL COMPILATION', () => {
       const code = glsl.compile(e).code;
       expect(code).toContain('0.0 / 0.0');
       expect(/\bNaN\b/.test(code)).toBe(false);
+    });
+  });
+
+  // CO-P1-2: GLSL/WGSL `min`/`max` are 2-argument builtins; 3+ args must fold
+  // into a nest of 2-argument calls (a variadic `max(a, b, c)` is invalid).
+  describe('CO-P1-2 min/max variadic folding', () => {
+    it('folds 3-arg Max into nested max()', () => {
+      const code = glsl.compile(ce.box(['Max', 'a', 'b', 'c'])).code;
+      expect(code).toBe('max(max(a, b), c)');
+    });
+
+    it('folds 4-arg Min into nested min()', () => {
+      const code = glsl.compile(ce.box(['Min', 'a', 'b', 'c', 'd'])).code;
+      expect(code).toBe('min(min(min(a, b), c), d)');
+    });
+
+    it('leaves 2-arg Max unchanged', () => {
+      const code = glsl.compile(ce.box(['Max', 'a', 'b'])).code;
+      expect(code).toBe('max(a, b)');
+    });
+  });
+
+  // CO-P1-2: a loop-form Sum (non-constant / large bounds) is a bare statement
+  // block, valid only as a top-level function body — never spliced into a
+  // sub-expression (which produced invalid `return _acc; + 1.0`). Fail closed.
+  describe('CO-P1-2 loop-form Sum cannot be spliced (D6)', () => {
+    const bigSum = ['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 1000]];
+
+    it('fails closed when a loop-form Sum is used mid-expression', () => {
+      expect(() => glsl.compile(ce.box(['Add', bigSum, 1]))).toThrow(
+        /multi-statement construct.*sub-expression/
+      );
+    });
+
+    it('never emits a spliced `return _acc; +`', () => {
+      let code = '';
+      try {
+        code = glsl.compile(ce.box(['Add', bigSum, 1])).code;
+      } catch {
+        /* fail-closed is the expected path */
+      }
+      expect(code).not.toMatch(/return\s+\w+;\s*\+/);
+    });
+
+    it('still compiles a loop-form Sum as a top-level function body', () => {
+      const fn = glsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', []);
+      expect(fn).toContain('for (int i = 1; i <= 1000; i++)');
+      expect(fn).toContain('sin(float(i))');
     });
   });
 });

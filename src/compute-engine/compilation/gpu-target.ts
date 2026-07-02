@@ -89,6 +89,25 @@ function gpuConditional(
 }
 
 /**
+ * Fold a variadic application of a 2-argument shader builtin (`min`/`max`)
+ * into a left-nested tree of 2-argument calls: `max(max(a, b), c)`. GLSL and
+ * WGSL do not accept a 3+-argument `min`/`max`, so emitting `max(a, b, c)`
+ * would be invalid shader source.
+ */
+function foldNaryBuiltin(
+  name: string,
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string
+): string {
+  if (args.length === 0) throw new Error(`${name}: needs at least one argument`);
+  if (args.length === 1) return compile(args[0]);
+  let acc = `${name}(${compile(args[0])}, ${compile(args[1])})`;
+  for (let i = 2; i < args.length; i++)
+    acc = `${name}(${acc}, ${compile(args[i])})`;
+  return acc;
+}
+
+/**
  * Extract a lowercase string literal from a boxed expression, or `null`
  * if it isn't a string literal. Operators that need to switch on a
  * colorspace name at compile time use this to peek at the argument.
@@ -419,8 +438,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `log(${compile(args[0])})`;
   },
   Log2: 'log2',
-  Max: 'max',
-  Min: 'min',
+  // GLSL/WGSL `min`/`max` are strictly 2-argument builtins; a variadic
+  // `max(a, b, c)` is invalid shader source. Fold 3+ arguments into a nest of
+  // 2-argument calls: `max(max(a, b), c)`.
+  Max: (args, compile) => foldNaryBuiltin('max', args, compile),
+  Min: (args, compile) => foldNaryBuiltin('min', args, compile),
   Mix: 'mix',
   // Control-flow forms — the base compiler's default emits a JS ternary and a
   // bare `NaN`, neither of which is valid GPU code (WGSL has no `?:`, and no
@@ -535,12 +557,20 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isComplexValued(args[0])) return `(${compile(args[0])}).y`;
     return '0.0';
   },
-  Argument: (args, compile) => {
+  Argument: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       const code = compile(args[0]);
       return `atan(${code}.y, ${code}.x)`;
     }
-    return `(${compile(args[0])} >= 0.0 ? 0.0 : 3.14159265359)`;
+    // A real value's argument is 0 (x ≥ 0) or π (x < 0). Use the
+    // target-appropriate conditional: WGSL has no `?:`, so this becomes
+    // `select(3.14159265359, 0.0, x >= 0.0)`.
+    return gpuConditional(
+      `${compile(args[0])} >= 0.0`,
+      '0.0',
+      '3.14159265359',
+      target
+    );
   },
   Conjugate: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
@@ -1056,9 +1086,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const isWGSL = target.language === 'wgsl';
     const intType = isWGSL ? 'i32' : 'int';
 
+    // The counter is declared as an integer (for `i++`), but shader scalar math
+    // is float. Consume the index as a float (`float(i)` / `f32(i)`) so it is
+    // type-consistent wherever the body uses it in float arithmetic — mirroring
+    // the Sum/Product for-loop path.
+    const indexAsFloat = isWGSL ? `f32(${index})` : `float(${index})`;
     const bodyCode = BaseCompiler.compile(args[0], {
       ...target,
-      var: (id) => (id === index ? index : target.var(id)),
+      var: (id) => (id === index ? indexAsFloat : target.var(id)),
     });
 
     const indexDecl = isWGSL
@@ -2998,6 +3033,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
     return {
       language: this.languageId,
+      // A shader has no expression-level loop or IIFE, so the multi-statement
+      // block forms (loop-form Sum/Product, Loop, Block) are only valid at
+      // statement position. Flag it so the base compiler fails closed (D6)
+      // rather than splice a bare block into a sub-expression. Gated to the pure
+      // GPU languages — the interval-glsl subclass keeps its own semantics.
+      bareStatementBlocks:
+        this.languageId === 'glsl' || this.languageId === 'wgsl',
       operators: (op) => GPU_OPERATORS[op],
       functions: (id) => functions[id],
       var: (id) => {

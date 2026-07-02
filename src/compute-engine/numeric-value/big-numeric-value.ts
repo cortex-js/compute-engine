@@ -414,9 +414,12 @@ export class BigNumericValue extends NumericValue {
         if (this.isZero) return re > 0 ? this.clone(0) : this.clone(NaN);
         const a = this.decimal;
         const b = this.im;
+        // `b` is a machine double: square it exactly in decimal — the double
+        // product `b * b` rounds (1.1² → 1.2100000000000002) and contaminates
+        // the full-precision modulus past digit ~16. (NU-P1-3)
         const lnMod = a
           .mul(a)
-          .add(b * b)
+          .add(new BigDecimal(b).mul(b))
           .sqrt()
           .ln();
         const arg = BigDecimal.atan2(b, a);
@@ -424,7 +427,8 @@ export class BigNumericValue extends NumericValue {
         const imagExp = arg.mul(re).add(lnMod.mul(im));
         const mag = realExp.exp();
         return this.clone({
-          re: mag.mul(imagExp.cos()),
+          // `mul` is exact (2P digits); round back to working precision.
+          re: mag.mul(imagExp.cos()).toPrecision(BigDecimal.precision),
           im: chop(mag.mul(imagExp.sin()).toNumber()),
         });
       }
@@ -461,15 +465,18 @@ export class BigNumericValue extends NumericValue {
 
     const a = this.decimal;
     const b = this.im;
+    // Exact decimal b² (a double `b * b` rounds and contaminates the
+    // full-precision modulus); round the exact final product back to
+    // working precision. (NU-P1-3)
     const modulus = a
       .mul(a)
-      .add(b * b)
+      .add(new BigDecimal(b).mul(b))
       .sqrt();
     const argument = BigDecimal.atan2(b, a);
     const newModulus = modulus.pow(exponent);
     const newArgument = argument.mul(exponent);
     return this.clone({
-      re: newModulus.mul(newArgument.cos()),
+      re: newModulus.mul(newArgument.cos()).toPrecision(BigDecimal.precision),
       im: chop(newModulus.mul(newArgument.sin()).toNumber()),
     });
   }
@@ -494,10 +501,11 @@ export class BigNumericValue extends NumericValue {
       }
       if (exp === 2) return this.clone(this.decimal.sqrt());
       if (exp === 3) return this.clone(this.decimal.cbrt());
-      // x^(1/n) as exp(ln(x)/n), computed in full precision. The previous
-      // `pow(1 / exp)` rounded the reciprocal to a machine double first, so the
-      // result had only ~17 correct digits regardless of working precision.
-      return this.clone(this.decimal.ln().div(exp).exp());
+      // x^(1/n) via `nthRoot`, which computes it at full working precision and
+      // snaps a perfect power to its exact integer root. (The earlier
+      // `ln(x)/n |> exp` neither snapped — `Root(64,3)` printed 3.999…9 — nor,
+      // before that, `pow(1/exp)` kept full precision.) (NU-P1-7)
+      return this.clone(this.decimal.nthRoot(exp));
     }
 
     // Complex root:
@@ -506,9 +514,12 @@ export class BigNumericValue extends NumericValue {
 
     const a = this.decimal;
     const b = this.im;
+    // Exact decimal b² (a double `b * b` rounds and contaminates the
+    // full-precision modulus); round the exact final product back to
+    // working precision. (NU-P1-3)
     const modulus = a
       .mul(a)
-      .add(b * b)
+      .add(new BigDecimal(b).mul(b))
       .sqrt();
     const argument = BigDecimal.atan2(b, a);
     // Full-precision modulus^(1/exp) = exp(ln(modulus)/exp); `pow(1/exp)`
@@ -518,7 +529,7 @@ export class BigNumericValue extends NumericValue {
 
     // Return the principal root
     return this.clone({
-      re: newModulus.mul(newArgument.cos()),
+      re: newModulus.mul(newArgument.cos()).toPrecision(BigDecimal.precision),
       im: chop(newModulus.mul(newArgument.sin()).toNumber()),
     });
   }
@@ -531,9 +542,11 @@ export class BigNumericValue extends NumericValue {
       // sqrt(a + bi) = sqrt((a + sqrt(a^2 + b^2)) / 2) + i * sign(b) * sqrt((sqrt(a^2 + b^2) - a) / 2)
       const a = this.decimal;
       const b = this.im;
+      // Exact decimal b²: a double `b * b` rounds and contaminates the
+      // full-precision modulus. (NU-P1-3)
       const modulus = a
         .mul(a)
-        .add(b * b)
+        .add(new BigDecimal(b).mul(b))
         .sqrt();
 
       // Both a + |z| and |z| − a are mathematically ≥ 0, but either can
@@ -579,7 +592,8 @@ export class BigNumericValue extends NumericValue {
     return this.clone(
       this.decimal
         .pow(2)
-        .add(this.im ** 2)
+        // Exact decimal im² — the double `im ** 2` rounds. (NU-P1-3)
+        .add(new BigDecimal(this.im).mul(this.im))
         .sqrt()
     );
   }
@@ -610,9 +624,11 @@ export class BigNumericValue extends NumericValue {
     // imaginary parts are divided by ln(b).
     const a = this.decimal;
     const b = this.im;
+    // Exact decimal b²: a double `b * b` rounds and contaminates the
+    // full-precision modulus past digit ~16. (NU-P1-3)
     const modulus = a
       .mul(a)
-      .add(b * b)
+      .add(new BigDecimal(b).mul(b))
       .sqrt();
     const argument = BigDecimal.atan2(b, a).toNumber();
 
@@ -630,9 +646,17 @@ export class BigNumericValue extends NumericValue {
     if (this.im !== 0) {
       // Complex exponential:
       // exp(a + bi) = exp(a) * (cos(b) + i * sin(b))
+      // cos(b) is computed at working precision — a machine cos would
+      // contaminate the full-precision magnitude past digit ~16. An exact
+      // zero (b near an odd multiple of π/2) still snaps via chop so that
+      // e^{iπ/2} stays exactly i. (NU-P1-3)
       const e = this.decimal.exp();
+      const cosIm =
+        chop(Math.cos(this.im)) === 0
+          ? BigDecimal.ZERO
+          : new BigDecimal(this.im).cos();
       return this.clone({
-        re: e.mul(chop(Math.cos(this.im))),
+        re: e.mul(cosIm).toPrecision(BigDecimal.precision),
         im: chop(e.mul(Math.sin(this.im)).toNumber()),
       });
     }

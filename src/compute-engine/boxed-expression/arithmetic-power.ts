@@ -1,7 +1,8 @@
 import type { NumericPrimitiveType, Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
+import { BigDecimal } from '../../big-decimal';
 import type { Expression } from '../global-types';
-import { SMALL_INTEGER } from '../numerics/numeric';
+import { SMALL_INTEGER, machineNthRoot } from '../numerics/numeric';
 import { rationalize } from '../numerics/rationals';
 import type { Rational } from '../numerics/types';
 
@@ -639,15 +640,47 @@ export function pow(
             return (p as number) % 2 !== 0 ? absPow.neg() : absPow;
           }
           // Even denominator or inexact exponent: principal complex value.
+          // The phase cos(eπ) is computed at working precision: a machine
+          // cos here would pollute the full-precision magnitude when they
+          // are multiplied (Power(-4,0.25).N() at precision 50 printed 50+
+          // digits with garbage past digit 16). The imaginary part is a
+          // machine double by representation, so machine sin is enough.
           const angle = eVal * Math.PI;
-          let re = Math.cos(angle);
+          const reBig = new BigDecimal(eVal)
+            .mul(BigDecimal.PI)
+            .cos()
+            .toPrecision(BigDecimal.precision);
+          let re: BigDecimal | number = reBig;
           let im = Math.sin(angle);
           // Snap the phase's exact zeros (e.g. half-integer e ⇒ ±i) so the
           // result is clean: cos/sin of pπ/q is exactly 0 only at odd
           // multiples of π/2, never merely small for a genuine value.
-          if (Math.abs(re) < 1e-12) re = 0;
+          if (Math.abs(reBig.toNumber()) < 1e-12) re = 0;
           if (Math.abs(im) < 1e-12) im = 0;
-          return absPow.mul(ce.number(ce.complex(re, im)));
+          // Form magnitude·phase manually, rounding the real product back to
+          // working precision: `BigDecimal.mul` is exact, so the product of
+          // two P-digit values carries 2P digits — the tail beyond P is
+          // noise and must not be asserted.
+          const magNV = numericValue(absPow);
+          if (
+            magNV !== null &&
+            magNV !== undefined &&
+            typeof magNV !== 'number' &&
+            magNV.im === 0 &&
+            magNV.bignumRe !== undefined
+          ) {
+            const magBig = magNV.bignumRe;
+            return ce.number(
+              ce._numericValue({
+                re:
+                  re === 0
+                    ? 0
+                    : magBig.mul(reBig).toPrecision(BigDecimal.precision),
+                im: im === 0 ? 0 : magNV.re * im,
+              })
+            );
+          }
+          return absPow.mul(ce.number(ce._numericValue({ re, im })));
         }
       }
 
@@ -915,13 +948,25 @@ export function root(
         apply2(
           a,
           b,
+          // Machine: Math.pow(a, 1/b) is not correctly rounded (e.g.
+          // Math.pow(64, 1/3) = 3.999…6); use a Newton-corrected, snap-to-exact
+          // n-th root instead. (NU-P1-7)
           (a, b) => {
-            const result = Math.pow(a, 1 / b);
+            const result = machineNthRoot(a, b);
             if (isNegative && !isEven) return -result;
             return result;
           },
+          // Bignum: `a.pow(b.pow(-1))` rounds the reciprocal 1/b to machine
+          // precision before the power, so a perfect root printed 3.999…9.
+          // `nthRoot` computes x^(1/n) directly and snaps perfect powers to the
+          // exact integer. `nthRoot` is integer-degree only — a non-integer
+          // degree (Root(2, 0.5)) falls back to the full-precision power.
+          // (NU-P1-7)
           (a, b) => {
-            const result = a.pow(b.pow(-1));
+            const n = b.toNumber();
+            const result = Number.isInteger(n)
+              ? a.nthRoot(n)
+              : a.pow(b.pow(-1));
             if (isNegative && !isEven) return result.neg();
             return result;
           },
@@ -940,14 +985,21 @@ export function root(
 
     // a^(1/b): evaluate if b is an integer and a is exact
 
+    // An even root of a negative real has no real value, but a complex
+    // principal value always exists (like Sqrt(-4) = 2i). Never assert a NaN
+    // literal here — stay symbolic so N() can produce the complex root.
+    // (`Root(-8,3)` = −2 is odd and still reduces below.) (NU-P1-8)
+    const evenRootOfNegative =
+      a.isNegative === true && e !== undefined && e > 0 && e % 2 === 0;
+
     // @todo the result should always be exact if e is an integer
-    if (e !== undefined) {
+    if (e !== undefined && !evenRootOfNegative) {
       if (typeof a.numericValue === 'number') {
         const v = a.engine._numericValue(a.numericValue).root(e);
-        if (v?.isExact) return a.engine.number(v);
+        if (v?.isExact && !v.isNaN) return a.engine.number(v);
       } else {
         const v = a.numericValue.asExact?.root(e);
-        if (v?.isExact) return a.engine.number(v);
+        if (v?.isExact && !v.isNaN) return a.engine.number(v);
       }
     }
   }

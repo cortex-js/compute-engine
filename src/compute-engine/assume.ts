@@ -290,26 +290,47 @@ function assumeEquality(proposition: Expression): AssumeResult {
   if (unknowns.length === 1) {
     const lhs = unknowns[0];
     const sols = findUnivariateRoots(proposition, lhs);
-    if (sols.length === 0) {
+    const def = ce.lookupDefinition(lhs);
+
+    // Contradiction check (P1-3): an *explicitly* typed symbol whose declared
+    // type is incompatible with every root is inconsistent with the equation.
+    // Compare *each root* against the definition's type; the earlier code
+    // compared the roots-`List` type (`list<…>`) against each root's type,
+    // which never matched and so always reported a contradiction for
+    // multi-root equations. A single compatible root suffices — with
+    // `x: natural`, `x² = 4` is satisfiable (x = 2) even though the root −2
+    // is not. As in Case 2, an *inferred* declared type is widened, not
+    // enforced.
+    if (
+      def &&
+      isValueDef(def) &&
+      def.value.type &&
+      !def.value.inferredType &&
+      sols.length > 0 &&
+      !sols.some((sol) => !sol.type || sol.type.matches(def.value.type!))
+    )
+      return 'contradiction';
+
+    // Zero or multiple roots: the symbol is *not* uniquely determined, so
+    // store the equation itself as an opaque fact (answered later by the
+    // `verify()` DB lookup) rather than assigning a value. (P1-3: the old
+    // code assigned `x := List(2, −2)` — a *list* — as the value of `x`,
+    // which then broadcast through arithmetic, e.g. `x + 1 → List(3, −1)`.)
+    if (sols.length !== 1) {
       ce.context.assumptions.set(
         ce.function('Equal', [proposition.op1.sub(proposition.op2), 0]),
         true
       );
+      return 'ok';
     }
 
-    const val = sols.length === 1 ? sols[0] : ce.function('List', sols);
-    const def = ce.lookupDefinition(lhs);
+    // Exactly one root: assign it as the symbol's value, scoped to the current
+    // context so it is reverted when this scope is popped.
+    const val = sols[0];
     if (!def || !isValueDef(def)) {
       ce.declare(lhs, { value: val });
       return 'ok';
     }
-    if (
-      def.value.type &&
-      !sols.every((sol) => !sol.type || val.type.matches(sol.type))
-    )
-      return 'contradiction';
-    // Set the value for the symbol, scoped to the current context so the
-    // assumed value is automatically reverted when this scope is popped.
     if (!ce.context.lexicalScope.bindings.has(lhs)) {
       ce.declare(lhs, { value: val });
     } else {
@@ -379,6 +400,26 @@ function assumeInequality(proposition: Expression): AssumeResult {
 
   // Normalize to Less, LessEqual
   if (!isFunction(proposition)) return 'internal-error';
+
+  // Chained comparison (P1-2): a same-operator n-ary chain `a < b < c` means
+  // `a < b ∧ b < c ∧ …`. Decompose into pairwise conjuncts and assume each,
+  // so that *every* link is established (not just the first pair). Mixed
+  // chains (`a ≤ b > c`) canonicalize to an explicit `And` and are handled by
+  // `assumeConjunction` before reaching here.
+  if (proposition.ops.length > 2) {
+    const chainOps = proposition.ops;
+    const chainOp = proposition.operator;
+    let sawOk = false;
+    for (let i = 0; i + 1 < chainOps.length; i++) {
+      const r = assumeInequality(
+        ce.function(chainOp, [chainOps[i], chainOps[i + 1]])
+      );
+      if (r === 'contradiction' || r === 'internal-error') return r;
+      if (r === 'ok') sawOk = true;
+    }
+    return sawOk ? 'ok' : 'tautology';
+  }
+
   let op = '';
   let lhs: Expression;
   let rhs: Expression;
@@ -623,8 +664,16 @@ function assumeInequality(proposition: Expression): AssumeResult {
       // Symbol not defined yet - declare with type 'real'
       ce.declare(symbol, { type: 'real' });
     } else if (isValueDef(def) && def.value.inferredType) {
-      // Symbol was auto-declared with inferred type - update to 'real'
-      def.value.type = ce.type('real');
+      // Symbol was auto-declared with inferred type - update to 'real'.
+      // If the definition lives in a parent scope, shadow it in the current
+      // scope first so the refinement is reverted when the scope is popped
+      // (P1-6). Mutating `def.value.type` directly would otherwise leak the
+      // `real` type into the parent scope after `popScope()`.
+      if (!ce.context?.lexicalScope?.bindings.has(symbol)) {
+        ce.declare(symbol, { type: 'real' });
+      } else {
+        def.value.type = ce.type('real');
+      }
     }
   }
 
@@ -1015,12 +1064,20 @@ function refineTypeIfUnknown(
   }
   if (!isValueDef(def) || def.value.isConstant) return;
   const current = def.value.type;
-  if (!current || current.isUnknown) {
-    def.value.type = ce.type(type);
+  const narrows =
+    !current ||
+    current.isUnknown ||
+    (def.value.inferredType && isSubtype(type, current.type));
+  if (!narrows) return;
+
+  // If the definition lives in a parent scope, shadow it in the current scope
+  // rather than mutating the parent definition (P1-6): the refinement must be
+  // reverted when the scope is popped.
+  if (!ce.context?.lexicalScope?.bindings.has(symbol)) {
+    ce.declare(symbol, type);
     return;
   }
-  if (def.value.inferredType && isSubtype(type, current.type))
-    def.value.type = ce.type(type);
+  def.value.type = ce.type(type);
 }
 
 function hasDef(ce: ComputeEngine, s: string): boolean {

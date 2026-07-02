@@ -225,7 +225,20 @@ export function erfInv(x: number): number {
 
   let y = erfInvApprox(ax);
   const c = Math.sqrt(Math.PI) / 2;
-  for (let i = 0; i < 4; i++) y -= (erf(y) - ax) * c * Math.exp(y * y);
+
+  // Newton on f(y) = erf(y) − ax, with step (erf(y) − ax)·(√π/2)·e^{y²}.
+  // Near ax = 1, erf(y) ≈ 1 ≈ ax, so the residual erf(y) − ax cancels
+  // catastrophically (only ~5 correct digits at ax = 1 − 1e-12). Rewrite it via
+  // the complementary function, which has no cancellation for large y:
+  //   erf(y) − ax = (1 − erfc(y)) − ax = (1 − ax) − erfc(y),
+  // computing 1 − ax once (exact) and erfc(y) directly (its own continued
+  // fraction). (NU-P1-9)
+  const q = 1 - ax; // complementary input, exact
+  const useComplement = ax > 0.9;
+  for (let i = 0; i < 5; i++) {
+    const residual = useComplement ? q - erfc(y) : erf(y) - ax;
+    y -= residual * c * Math.exp(y * y);
+  }
 
   return sign * y;
 }
@@ -987,8 +1000,13 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum): BigNum {
   const negInvE = invE.neg();
 
   // Branch point: W(-1/e) = -1
-  // Use a tolerance that accounts for machine-precision inputs
-  const tol = new BigDecimal(10).pow(-ce.precision);
+  // Use a tolerance that accounts for machine-precision inputs.
+  // The convergence tolerance is the *working* precision (BigDecimal.precision),
+  // not `ce.precision`: everything else in this iteration rounds to
+  // BigDecimal.precision, and reading a looser `ce.precision` here let Halley
+  // stop early (or, when the working precision was higher, left a garbage tail
+  // beyond the true precision). (NU-P1-10)
+  const tol = new BigDecimal(10).pow(-BigDecimal.precision);
   const branchTol = new BigDecimal(10).pow(-15); // machine precision tolerance
   if (x.sub(negInvE).abs().lt(branchTol)) return BigDecimal.NEGATIVE_ONE;
 
@@ -1024,7 +1042,10 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum): BigNum {
     if (delta.abs().lt(tol.mul(w.abs().add(1)))) break;
   }
 
-  return w;
+  // Round to working precision: `sub`/`mul` in the Halley loop don't round, so
+  // `w` carries digits beyond BigDecimal.precision that are not converged.
+  // (NU-P1-10)
+  return w.toPrecision(BigDecimal.precision);
 }
 
 // Euler-Mascheroni constant
@@ -3281,9 +3302,19 @@ export function hypergeometric2F1(
   // z ∈ (0.5, 1): connection formula at 1−z (DLMF 15.8.4), generic case
   const s = c - a - b;
   if (Number.isInteger(s)) {
-    // Degenerate case (the connection formula needs a limit): the direct
-    // series still converges for z < 1, just slowly near 1.
-    if (z <= 0.95) return gauss2F1Series(a, b, c, z, 1_000_000);
+    // Degenerate case (the connection formula needs a logarithmic limit): the
+    // direct series still converges for z < 1 (radius of convergence 1), just
+    // slowly near 1. The nth term decays ~zⁿ, so ⌈17 / −log10 z⌉ terms reach
+    // machine precision; use the series whenever that count is within a bound
+    // that keeps rounding accumulation acceptable, and stay symbolic (NaN)
+    // beyond it rather than returning a low-precision answer. Extends the
+    // former z ≤ 0.95 gate to ~0.999, closing the integer-(c−a−b) gap for
+    // z ∈ (0.95, 1) and its Pfaff images z ≲ −19. (NU-P1-2)
+    if (z < 1) {
+      const termsNeeded = Math.ceil(17 / -Math.log10(z));
+      if (termsNeeded <= 400_000)
+        return gauss2F1Series(a, b, c, z, termsNeeded + 10);
+    }
     return NaN;
   }
   const t1 =
@@ -3481,14 +3512,23 @@ export function bigHypergeometric2F1(
   // z ∈ (0.5, 1): connection formula at 1−z, generic case
   const s = c.sub(a).sub(b);
   if (s.isInteger()) {
-    // Degenerate case (the connection formula needs a logarithmic limit):
-    // the direct series still converges for z < 1, just slowly near 1.
+    // Degenerate case (the connection formula needs a logarithmic limit): the
+    // direct series still converges for z < 1 (radius 1), just slowly near 1.
+    // ⌈(p+guard) / −log10 z⌉ terms reach the working precision; the `guard`
+    // digits absorb the summation's rounding accumulation. Use the series when
+    // that count is within a bound, else stay symbolic (NaN) rather than
+    // return a low-precision answer. Extends the former z ≤ 0.95 gate,
+    // closing the integer-(c−a−b) gap for z ∈ (0.95, 1) and its Pfaff images
+    // z ≲ −19. (NU-P1-2)
     const zNum = z.toNumber();
-    if (zNum > 0.95) return BigDecimal.NAN; // too slow: stays symbolic
-    const slowMax = Math.ceil((p + guard + 2) / -Math.log10(zNum)) + 100;
-    return withExtraPrecision(guard, () =>
-      bigGauss2F1Series(ce, a, b, c, z, slowMax)
-    ).toPrecision(p);
+    if (zNum < 1) {
+      const slowMax = Math.ceil((p + guard + 2) / -Math.log10(zNum)) + 100;
+      if (slowMax <= 2_000_000)
+        return withExtraPrecision(guard, () =>
+          bigGauss2F1Series(ce, a, b, c, z, slowMax)
+        ).toPrecision(p);
+    }
+    return BigDecimal.NAN; // too slow: stays symbolic
   }
   return withExtraPrecision(guard, () => {
     const oneMinusZ = one.sub(z);

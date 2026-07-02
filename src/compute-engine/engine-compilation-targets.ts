@@ -8,6 +8,7 @@ import {
 import { JavaScriptTarget } from './compilation/javascript-target';
 import { GLSLTarget } from './compilation/glsl-target';
 import { WGSLTarget } from './compilation/wgsl-target';
+import { PythonTarget } from './compilation/python-target';
 import { IntervalJavaScriptTarget } from './compilation/interval-javascript-target';
 import { IntervalGLSLTarget } from './compilation/interval-glsl-target';
 
@@ -43,6 +44,9 @@ export class CompilationTargetRegistry {
     this.register('javascript', new JavaScriptTarget());
     this.register('glsl', new GLSLTarget());
     this.register('wgsl', new WGSLTarget());
+    // Source-only Python/NumPy target. Registered so the documented
+    // `compile({ to: 'python' })` name resolves; it produces `.code` (no `run`).
+    this.register('python', new PythonTarget());
     this.register('interval-js', new IntervalJavaScriptTarget());
     this.register('interval-glsl', new IntervalGLSLTarget());
   }

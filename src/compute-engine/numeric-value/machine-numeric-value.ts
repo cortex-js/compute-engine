@@ -6,6 +6,7 @@ import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
 import { NumericPrimitiveType } from '../../common/type/types';
 import { ExactNumericValue } from './exact-numeric-value';
+import { machineNthRoot } from '../numerics/numeric';
 
 export class MachineNumericValue extends NumericValue {
   declare __brand: 'MachineNumericValue';
@@ -425,9 +426,9 @@ export class MachineNumericValue extends NumericValue {
     if (this.im === 0) {
       if (this.decimal < 0) {
         if (exponent % 2 === 0) return this.clone(NaN);
-        return this.clone(-Math.pow(-this.decimal, 1 / exponent));
+        return this.clone(-machineNthRoot(-this.decimal, exponent));
       }
-      return this.clone(Math.pow(this.decimal, 1 / exponent));
+      return this.clone(machineNthRoot(this.decimal, exponent));
     }
 
     // Complex root:

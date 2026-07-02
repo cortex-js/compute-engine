@@ -73,6 +73,28 @@ export interface CompileTarget<Expr = unknown> {
    *  Default: JavaScript IIFE. */
   block?: (statements: string[]) => string;
 
+  /**
+   * The infix operator used to conjoin the pairs of a chained relational
+   * expression (e.g. `Less(a, b, c)` → `(a < b) && (b < c)`). Default: `'&&'`
+   * (JavaScript / GLSL / WGSL). Word-operator targets set this to their
+   * language keyword (e.g. Python `'and'`), so the emitted source is valid in
+   * that language.
+   */
+  chainOp?: string;
+
+  /**
+   * When `true`, this target's multi-statement constructs (loop-form
+   * `Sum`/`Product`, `Loop`, `Block`) are emitted as **bare statement
+   * sequences** — valid only at statement position (a function body), never
+   * as a sub-expression. GPU shader languages (GLSL/WGSL) set this: unlike the
+   * JavaScript target, which wraps such constructs in an IIFE (a self-contained
+   * expression), a shader has no expression-level loop or IIFE. The compiler
+   * uses this flag to **fail closed** (D6) rather than splice a bare statement
+   * block into the middle of an expression (which would emit invalid shader
+   * source such as `return _acc; + 1.0`).
+   */
+  bareStatementBlocks?: boolean;
+
   /** Target language identifier (for debugging/logging) */
   language?: string;
 }

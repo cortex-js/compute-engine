@@ -1390,3 +1390,100 @@ describe('D6: trig/hyperbolic large arguments', () => {
     expect(new BigDecimal('-1e6').sinh().eq(s.neg())).toBe(true);
   });
 });
+
+// Wave-4 NU-P1 numeric-precision fixes. References independently computed with
+// mpmath at ≥80 guard digits (from the exact decimal inputs), not from the code
+// under test. Each asserts full working precision where the old code lost
+// −log10(result) digits to cancellation.
+describe('NU-P1 precision fixes (mpmath-pinned)', () => {
+  test('NU-P1-4: pow integer path carries guard digits through the ladder', () => {
+    BigDecimal.precision = 34;
+    // 0.999999999999^1e6 was wrong from digit ~28 (per-squaring rounding).
+    const s = new BigDecimal('0.999999999999').pow(1000000).toString();
+    expect(s).toBe('0.9999990000004999993333338749994083');
+    BigDecimal.precision = 50;
+  });
+
+  test('NU-P1-5: acos near +1 is cancellation-free', () => {
+    // acos(1 − 1e-40): result ≈ 1.414e-20, needs the half-angle identity.
+    const s = new BigDecimal(
+      '0.9999999999999999999999999999999999999999'
+    )
+      .acos()
+      .toString();
+    expect(
+      digitsAgree(s, '1.41421356237309504880168872420969807856968366049e-20')
+    ).toBeGreaterThanOrEqual(47);
+  });
+
+  test('NU-P1-5: acos near +1 (1 − 1e-20)', () => {
+    const s = new BigDecimal('0.99999999999999999999').acos().toString();
+    expect(
+      digitsAgree(s, '1.4142135623730950488028672355116756577770092676309e-10')
+    ).toBeGreaterThanOrEqual(48);
+  });
+
+  test('NU-P1-5: acos near −1 via the mirror identity', () => {
+    const s = new BigDecimal('-0.999999999999999999999999999999')
+      .acos()
+      .toString();
+    expect(
+      digitsAgree(s, '3.1415926535897918242490810101844540825084451895592')
+    ).toBeGreaterThanOrEqual(48);
+  });
+
+  test('NU-P1-6: cos near a zero sizes the guard to the cancellation', () => {
+    // cos of π/2 truncated to 40 digits ≈ 5.8e-40; a fixed 15-digit guard left
+    // only ~22 correct digits.
+    const s = new BigDecimal('1.570796326794896619231321691639751442098')
+      .cos()
+      .toString();
+    expect(
+      digitsAgree(s, '5.8469968755291048747229615390820314310449931401741e-40')
+    ).toBeGreaterThanOrEqual(48);
+  });
+
+  test('NU-P1-6: tan near a pole sizes the guard to the cancellation', () => {
+    const s = new BigDecimal('1.570796326794896619231321691639751442098')
+      .tan()
+      .toString();
+    expect(
+      digitsAgree(s, '1710279689365334692301700436803735939673.6227591018')
+    ).toBeGreaterThanOrEqual(48);
+  });
+
+  test('NU-P1-6: cos/tan away from zeros unaffected', () => {
+    expect(
+      digitsAgree(
+        new BigDecimal('0.5').cos().toString(),
+        '0.87758256189037271611628158260382965199164519710974'
+      )
+    ).toBeGreaterThanOrEqual(48);
+    expect(
+      digitsAgree(
+        new BigDecimal('0.5').tan().toString(),
+        '0.54630248984379051325517946578028538329755172017979'
+      )
+    ).toBeGreaterThanOrEqual(48);
+  });
+
+  test('NU-P1-7: nthRoot snaps perfect powers and keeps full precision', () => {
+    // Perfect powers snap to the exact integer root (no 3.999…9 tail).
+    expect(new BigDecimal('64').nthRoot(3).toString()).toBe('4');
+    expect(new BigDecimal('64').cbrt().toString()).toBe('4');
+    expect(new BigDecimal('1024').nthRoot(10).toString()).toBe('2');
+    // Non-perfect roots keep full working precision.
+    expect(
+      digitsAgree(
+        new BigDecimal('2').nthRoot(3).toString(),
+        '1.2599210498948731647672106072782283505702514647015'
+      )
+    ).toBeGreaterThanOrEqual(48);
+    expect(
+      digitsAgree(
+        new BigDecimal('10').nthRoot(7).toString(),
+        '1.389495494373137637129985217353011622113046714491'
+      )
+    ).toBeGreaterThanOrEqual(48);
+  });
+});

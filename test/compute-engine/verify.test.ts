@@ -107,5 +107,60 @@ describe('VERIFY', () => {
     expect(ce.verify(ce.expr(['Greater', 'x', 0]))).toBe(undefined);
     expect(ce.expr(['Greater', 'x', 0]).evaluate().operator).toBe('Less'); // Canonical form
   });
+
+  // P1-4: opaque, multi-symbol facts that the evaluator cannot decide must
+  // still verify, via a direct assumption-DB lookup.
+  test('verifies an opaque product inequality the evaluator cannot decide', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x \\cdot y > 0'));
+    expect(ce.verify(ce.expr(['Greater', ['Multiply', 'x', 'y'], 0]))).toBe(
+      true
+    );
+  });
+
+  test('verifies an opaque sum inequality', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x + y > 0'));
+    expect(ce.verify(ce.expr(['Greater', ['Add', 'x', 'y'], 0]))).toBe(true);
+  });
+
+  test('verifies a stored multi-unknown equality', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x + y = 5'));
+    expect(ce.verify(ce.parse('x + y = 5'))).toBe(true);
+  });
+});
+
+// The identity property (P1-2..P1-6): a fact that was accepted by `assume`
+// must be verifiable afterwards. `assume(P) === 'ok'` ⇒ `verify(P) === true`.
+describe('VERIFY IS THE LEFT-INVERSE OF ASSUME', () => {
+  const cases: Array<[string, (ce: ComputeEngine) => any]> = [
+    ['x > 0', (ce) => ce.parse('x > 0')],
+    ['x >= 3', (ce) => ce.parse('x \\ge 3')],
+    ['x < 5', (ce) => ce.parse('x < 5')],
+    ['0 < x < 1 (lower)', (ce) => ce.expr(['Greater', 'x', 0])],
+    ['0 < x < 1 (upper)', (ce) => ce.expr(['Less', 'x', 1])],
+    ['x*y > 0', (ce) => ce.expr(['Greater', ['Multiply', 'x', 'y'], 0])],
+    ['x + y > 0', (ce) => ce.expr(['Greater', ['Add', 'x', 'y'], 0])],
+    ['x + y = 5', (ce) => ce.parse('x + y = 5')],
+    ['x^2 = 4', (ce) => ce.parse('x^2 = 4')],
+    ['n in integer', (ce) => ce.expr(['Element', 'n', 'integer'])],
+    ['x != 2', (ce) => ce.expr(['NotEqual', 'x', 2])],
+  ];
+
+  // The proposition actually asserted (chained assume needs its own source).
+  const propositionFor = (ce: ComputeEngine, label: string): any => {
+    if (label.startsWith('0 < x < 1')) return ce.parse('0 < x < 1');
+    return null;
+  };
+
+  for (const [label, build] of cases) {
+    test(`assume(${label}) ⇒ verify(${label})`, () => {
+      const ce = new ComputeEngine();
+      const asserted = propositionFor(ce, label) ?? build(ce);
+      expect(ce.assume(asserted)).toBe('ok');
+      expect(ce.verify(build(ce))).toBe(true);
+    });
+  }
 });
 

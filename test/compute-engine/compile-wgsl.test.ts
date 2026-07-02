@@ -496,7 +496,9 @@ describe('WGSL COMPILATION', () => {
       ]);
       const code = wgsl.compile(expr).code;
       expect(code).toContain('for (var i: i32 = 1; i <= 5; i++)');
-      expect(code).toContain('acc = acc + i');
+      // The i32 loop counter is consumed as a float in float math (CO-P1-2):
+      // `f32(i)`, not a bare `i` (which is a WGSL i32/f32 type mismatch).
+      expect(code).toContain('acc = acc + f32(i)');
       expect(code).not.toContain('let ');
       expect(code).not.toContain('() =>');
       expect(code).not.toContain('})()');
@@ -572,6 +574,47 @@ describe('WGSL COMPILATION', () => {
       const code = wgsl.compile(e).code;
       expect(code).toContain('select(');
       expect(code).not.toContain('?');
+    });
+  });
+
+  // CO-P1-2: WGSL has no ternary. The real-valued `Argument` branch emitted
+  // `(x >= 0.0 ? 0.0 : π)`, which is invalid WGSL — it must use `select(...)`.
+  describe('CO-P1-2 Argument uses select, never a ternary', () => {
+    it('compiles Argument of a real value to select(...)', () => {
+      const code = wgsl.compile(ce.box(['Argument', 'x'])).code;
+      expect(code).toBe('select(3.14159265359, 0.0, x >= 0.0)');
+      expect(code).not.toContain('?');
+    });
+  });
+
+  // CO-P1-2: `min`/`max` are 2-argument builtins in WGSL.
+  describe('CO-P1-2 min/max variadic folding', () => {
+    it('folds 3-arg Max into nested max()', () => {
+      const code = wgsl.compile(ce.box(['Max', 'a', 'b', 'c'])).code;
+      expect(code).toBe('max(max(a, b), c)');
+    });
+
+    it('folds 4-arg Min into nested min()', () => {
+      const code = wgsl.compile(ce.box(['Min', 'a', 'b', 'c', 'd'])).code;
+      expect(code).toBe('min(min(min(a, b), c), d)');
+    });
+  });
+
+  // CO-P1-2: a loop-form Sum is a bare statement block — fail closed rather
+  // than splice it mid-expression.
+  describe('CO-P1-2 loop-form Sum cannot be spliced (D6)', () => {
+    const bigSum = ['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 1000]];
+
+    it('fails closed when a loop-form Sum is used mid-expression', () => {
+      expect(() => wgsl.compile(ce.box(['Add', bigSum, 1]))).toThrow(
+        /multi-statement construct.*sub-expression/
+      );
+    });
+
+    it('still compiles a loop-form Sum as a top-level function body', () => {
+      const fn = wgsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', []);
+      expect(fn).toContain('for (var i: i32 = 1; i <= 1000; i++)');
+      expect(fn).toContain('sin(f32(i))');
     });
   });
 });

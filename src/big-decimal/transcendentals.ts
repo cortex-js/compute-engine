@@ -199,6 +199,25 @@ function decimalExponent(x: BigDecimal): number {
 }
 
 /**
+ * Number of leading decimal digits lost to cancellation for an O(1)
+ * fixed-point magnitude `fp / 2^bits` that is much smaller than 1 — i.e. how
+ * many decimal digits the fixed-point (absolute-precision) grid must carry
+ * *beyond* the target before the value has full relative precision.
+ *
+ * For a value ≈ 10^-m the grid resolves it to `workingPrec − m` significant
+ * digits, so a caller near a trig zero/pole sizes its guard to this `m`.
+ * Returns 0 for magnitudes of order 1; the caller handles `fp === 0` (the
+ * value underflowed the grid) separately.
+ */
+function cancellationLoss(fp: bigint, bits: number): number {
+  if (fp === 0n) return 0;
+  const absFp = fp < 0n ? -fp : fp;
+  // −log10(|fp| / 2^bits) = bits·log10(2) − log10(|fp|)
+  const loss = bits * LOG10_2 - (bigintDigits(absFp) - 1);
+  return loss > 0 ? Math.ceil(loss) : 0;
+}
+
+/**
  * The exponent of a BigDecimal is a JS number, so the largest decimal
  * exponent that is exactly representable is Number.MAX_SAFE_INTEGER.
  * Results whose exponent would exceed it saturate to ±Infinity / 0.
@@ -552,17 +571,36 @@ BigDecimal.prototype.cos = function (): BigDecimal {
   if (this.isZero()) return BigDecimal.ONE;
 
   const targetPrec = BigDecimal.precision;
-  const workingPrec = targetPrec + 15;
 
   // π-digit budget for the mod-2π reduction of huge arguments (see sin).
   // (Tiny arguments are fine here: the result is O(1), and a fixed-point
   // input that truncates to 0 yields cos = 1, the correctly rounded value.)
   const e = decimalExponent(this);
-  if (e + workingPrec + 30 > MAX_PI_DIGITS) return BigDecimal.NAN;
 
-  const [fp, bits] = toFixedPoint(this, workingPrec);
-  const [, cosFp] = fpsincos(fp, bits);
-  return fromFixedPoint(cosFp, bits, targetPrec);
+  // Adaptive guard: near a zero of cos (x ≈ (k+½)π) the result is tiny while
+  // the fixed-point grid carries only absolute precision, so the relative
+  // precision is workingPrec − (−log10|cos|). A fixed 15-digit guard lost the
+  // rest of the digits (cos of a 40-digit-π/2 argument @ 50 had ~22 correct);
+  // instead size the guard to the measured cancellation. (NU-P1-6)
+  let extra = 0;
+  for (let pass = 0; ; pass++) {
+    const workingPrec = targetPrec + 15 + extra;
+    if (e + workingPrec + 30 > MAX_PI_DIGITS) return BigDecimal.NAN;
+    const [fp, bits] = toFixedPoint(this, workingPrec);
+    const [, cosFp] = fpsincos(fp, bits);
+    if (cosFp === 0n) {
+      // cos underflowed the grid: the argument is a zero to within the current
+      // working precision. Grow the guard and retry (bounded); if it stays 0,
+      // the value is below what target precision can distinguish from 0.
+      if (pass >= 3) return BigDecimal.ZERO;
+      extra += targetPrec + 30;
+      continue;
+    }
+    const loss = cancellationLoss(cosFp, bits);
+    if (loss <= extra || pass >= 3)
+      return fromFixedPoint(cosFp, bits, targetPrec);
+    extra = loss + 5;
+  }
 };
 
 // ---------- tan ----------
@@ -580,23 +618,44 @@ BigDecimal.prototype.tan = function (): BigDecimal {
   if (e < 0 && -2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
 
   // Compensate small arguments; cap huge ones by the π-digit budget (see sin).
-  const workingPrec = targetPrec + 15 + (e < 0 ? -e : 0);
-  if (e + workingPrec + 30 > MAX_PI_DIGITS) return BigDecimal.NAN;
+  const smallArg = e < 0 ? -e : 0;
 
-  const [fp, bits] = toFixedPoint(this, workingPrec);
-  const [sinFp, cosFp] = fpsincos(fp, bits);
+  // Adaptive guard: tan cancels both near its zeros (x ≈ kπ, sin → 0) and near
+  // its poles (x ≈ (k+½)π, cos → 0). In either case the relative error is
+  // governed by the smaller of |sin|, |cos|, losing −log10(that) digits. A
+  // fixed 15-digit guard lost the rest (tan of a 40-digit-π/2 argument @ 50 had
+  // ~20 correct); size the guard to the measured cancellation instead. (NU-P1-6)
+  let extra = 0;
+  for (let pass = 0; ; pass++) {
+    const workingPrec = targetPrec + 15 + smallArg + extra;
+    if (e + workingPrec + 30 > MAX_PI_DIGITS) return BigDecimal.NAN;
 
-  // tan = sin / cos
-  if (cosFp === 0n) {
-    // cos = 0 means we're at π/2 + nπ → tan is ±Infinity
-    return sinFp > 0n
-      ? BigDecimal.POSITIVE_INFINITY
-      : BigDecimal.NEGATIVE_INFINITY;
+    const [fp, bits] = toFixedPoint(this, workingPrec);
+    const [sinFp, cosFp] = fpsincos(fp, bits);
+
+    // tan = sin / cos; cos = 0 means we're at a pole (π/2 + nπ) → ±Infinity.
+    if (cosFp === 0n) {
+      // cos underflowed the grid; grow the guard to confirm it is a genuine
+      // pole rather than merely a near-pole before committing to ±Infinity.
+      if (pass >= 3)
+        return sinFp > 0n
+          ? BigDecimal.POSITIVE_INFINITY
+          : BigDecimal.NEGATIVE_INFINITY;
+      extra += targetPrec + 30;
+      continue;
+    }
+
+    const loss = Math.max(
+      sinFp === 0n ? 0 : cancellationLoss(sinFp, bits),
+      cancellationLoss(cosFp, bits)
+    );
+    if (loss <= extra || pass >= 3) {
+      // Fixed-point division: (sinFp << bits) / cosFp
+      const tanFp = (sinFp << BigInt(bits)) / cosFp;
+      return fromFixedPoint(tanFp, bits, targetPrec);
+    }
+    extra = loss + 5;
   }
-
-  // Fixed-point division: (sinFp << bits) / cosFp
-  const tanFp = (sinFp << BigInt(bits)) / cosFp;
-  return fromFixedPoint(tanFp, bits, targetPrec);
 };
 
 // ---------- atan ----------
@@ -697,11 +756,29 @@ BigDecimal.prototype.acos = function (): BigDecimal {
   // acos(-1) = π
   if (this.eq(-1)) return BigDecimal.PI;
 
-  // acos(x) = π/2 - asin(x)
-  // Both asin and the subtraction are done at user precision,
-  // but asin already uses working precision internally.
-  const piHalf = BigDecimal.PI.div(BigDecimal.TWO);
-  return piHalf.sub(this.asin());
+  // The naive `acos(x) = π/2 − asin(x)` cancels catastrophically as x → ±1:
+  // both terms are ≈ π/2 while the result → 0, losing −log10(result) digits
+  // (acos(1−1e-40) had ~19 of 50 correct digits). Use the half-angle identity
+  //   acos(x) = 2·asin(√((1−x)/2))        (x ≥ 0)
+  //   acos(x) = π − 2·asin(√((1+x)/2))    (x < 0)
+  // which keeps the asin argument in [0, √½] — well away from asin's own ±1
+  // singularity — and computes the small result directly (no cancellation).
+  // `1∓x` is an *exact* BigDecimal subtraction, so it loses nothing even when
+  // x matches 1 to the full working precision. (NU-P1-5)
+  const targetPrec = BigDecimal.precision;
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = targetPrec + 10;
+  try {
+    const two = BigDecimal.TWO;
+    if (this.significand >= 0n) {
+      const t = BigDecimal.ONE.sub(this).div(two).sqrt();
+      return two.mul(t.asin()).toPrecision(targetPrec);
+    }
+    const t = BigDecimal.ONE.add(this).div(two).sqrt();
+    return BigDecimal.PI.sub(two.mul(t.asin())).toPrecision(targetPrec);
+  } finally {
+    BigDecimal.precision = saved;
+  }
 };
 
 // ---------- Static methods: sin, cos, tan, asin, acos, atan, atan2 ----------

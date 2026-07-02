@@ -881,3 +881,56 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
     expect(engine.box('x').value).toBeUndefined();
   });
 });
+
+// CO-P1-4: compiled `Equal`/`NotEqual` used exact `===`, disagreeing with the
+// interpreter, which compares numbers within `engine.tolerance` (default
+// 1e-10). Compiled equality must bake the tolerance and match the interpreter.
+describe('COMPILE Equal/NotEqual tolerance (CO-P1-4)', () => {
+  it('compiled Equal(0.1+0.2, 0.3) is true, matching the interpreter', () => {
+    const expr = ce.box(['Equal', ['Add', 0.1, 0.2], 0.3]);
+    const r = compile(expr)!;
+    expect(r.code).toContain('Math.abs');
+    expect(r.code).not.toContain('===');
+    expect(r.run!({})).toBe(true);
+    // Interpreter agrees.
+    expect(expr.evaluate().symbol).toBe('True');
+  });
+
+  it('compiled NotEqual(0.1+0.2, 0.3) is false, matching the interpreter', () => {
+    const expr = ce.box(['NotEqual', ['Add', 0.1, 0.2], 0.3]);
+    const r = compile(expr)!;
+    expect(r.run!({})).toBe(false);
+    expect(expr.evaluate().symbol).toBe('False');
+  });
+
+  it('genuinely different values are still not equal', () => {
+    const r = compile(ce.box(['Equal', 'x', 0.3]))!;
+    expect(r.run!({ x: 0.4 })).toBe(false);
+    expect(r.run!({ x: 0.3 })).toBe(true);
+  });
+});
+
+// CO-P1-3: a complex-typed argument into a real-only helper (`_SYS.erf`)
+// silently returned garbage (−1). It must fail closed (D6) with the head.
+describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
+  it('Erf of a complex value throws', () => {
+    const engine = new ComputeEngine();
+    engine.declare('z', 'complex');
+    expect(() =>
+      compile(engine.box(['Erf', 'z']), { fallback: false })
+    ).toThrow(/real-only target helper/);
+  });
+
+  it('the engine-level fallback reports success:false with the head unsupported', () => {
+    const engine = new ComputeEngine();
+    engine.declare('z', 'complex');
+    const r = compile(engine.box(['Erf', 'z']));
+    expect(r.success).toBe(false);
+  });
+
+  it('Erf of a real value still compiles', () => {
+    const r = compile(ce.box(['Erf', 'x']), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.erf');
+  });
+});

@@ -33,6 +33,20 @@ type CompileExpressionOptions<T extends string = string> = {
  * If the expression cannot be compiled, falls back to interpretation
  * (success: false, run: applicableN1) unless `options.fallback` is false,
  * in which case it throws.
+ *
+ * ## Real-only special functions (compile targets)
+ *
+ * The built-in targets implement most special functions (`Erf`, `Gamma`,
+ * `Zeta`, the Bessel/Airy family, …) with **real-only** library helpers
+ * (`_SYS.erf`, `scipy.special.erf`, GLSL `log2`, …). They accept a real scalar
+ * only. Elementary functions that *do* have a complex extension (`Sin`, `Exp`,
+ * `Sqrt`, `Power`, …) dispatch to a complex helper when an argument is
+ * complex-valued; the real-only special functions do not. Rather than hand a
+ * complex value to a real helper — which silently returns garbage (e.g. a
+ * compiled `Erf(z)` returning −1) — the compiler **fails closed** (D6) with the
+ * offending head. Compile such subexpressions numerically, or restrict them to
+ * real arguments. (`Real`/`Imaginary`/`Argument`/`Conjugate` are exempt: they
+ * consume a complex value by design.)
  */
 export function compile<T extends string = 'javascript'>(
   expr: Expression,
