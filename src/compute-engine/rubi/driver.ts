@@ -19,6 +19,7 @@ import {
   evalCondition,
   findFailingConjunct,
   installCaches,
+  getActiveCaches,
   polyCoeffsX,
   rationalFnQ,
   zeroQ,
@@ -117,9 +118,32 @@ export class RubiDriver {
    * expands products like (a+bx)(c+dx), destroying the structure the
    * rules match on. */
   int(integrand: Expression, variable: string): Expression | null {
-    this.deadline = Date.now() + (this.options.timeLimitMs ?? 30_000);
-    // fresh predicate caches per top-level call (zeroQ/simplify results
-    // recur heavily across the rule scan)
+    // The native-rational fallback re-enters this method via
+    // `ce.Integrate.evaluate()` (see nativeRationalFallback). A re-entrant
+    // call must NOT clobber the outer call's per-call state: resetting the
+    // deadline would grant the outer integration a fresh time budget
+    // (violating the interruptible-evaluation contract), and resetting
+    // `trigActive` (and the caches) would leak the subproblem's state back
+    // into the outer recursion — a trig integrand whose subproblem hits the
+    // fallback could otherwise emit inert lowercase trig heads. So: a
+    // re-entrant call inherits the outer deadline and memo, and its clobber
+    // of `trigActive`/caches is snapshotted and restored on the way out.
+    const reentrant = this.inNativeFallback;
+    const savedTrig = this.trigActive;
+    const savedCaches = getActiveCaches();
+    if (!reentrant) {
+      this.deadline = Date.now() + (this.options.timeLimitMs ?? 30_000);
+      // Bound the memo to a single top-level call: it is a per-call cache +
+      // cycle guard, not a cross-call one (rules don't consult assumptions
+      // today, but if they did, a stale pre-assumption result could be
+      // served verbatim). Clearing here caps its growth and sidesteps that
+      // staleness. Not cleared on re-entry — that would wipe the outer
+      // call's in-flight cycle-guard entries.
+      this.memo.clear();
+    }
+    // fresh predicate caches per call (zeroQ/simplify results recur heavily
+    // across the rule scan); the outer call's caches are restored below when
+    // this is a re-entrant call.
     installCaches({ zeroQ: new Map(), simplify: new Map() });
     // Chapter-4 rules match against inert trig (`cos`/`sin`); detect active
     // trig once so intRec can deactivate the integrand (and its recursive
@@ -136,7 +160,14 @@ export class RubiDriver {
         : e;
     try {
       const result = this.intRec(integrand, variable, 0);
-      if (result !== null) return activate(result);
+      // Fold the stray `ln(e)` (= `Log[ExponentialE]`, from Chapter-2 rules
+      // that emit `Log[F]` with base F = e) and any `e^(0·…)` the rule RHSs
+      // leave, so rule-driven results read cleanly even before a user
+      // simplify(). foldLnExponentialE rebuilds each node with ce.function,
+      // which also drops the non-canonical `·1` a folded `ln(e)` leaves
+      // behind. Value-preserving, structural, cheap.
+      if (result !== null)
+        return foldLnExponentialE(this.ce, activate(result)!);
       // No Rubi rule chain closed it. For a rational function of x, fall
       // back to the engine's native antiderivative: it does complete
       // partial-fraction integration (factor Q over ℚ, then linear and
@@ -153,6 +184,13 @@ export class RubiDriver {
       if (e instanceof Error && e.constructor.name === 'CancellationError')
         return null;
       throw e;
+    } finally {
+      // Restore the outer call's state clobbered by this re-entry (see the
+      // header comment); a genuine top-level call leaves its state in place.
+      if (reentrant) {
+        this.trigActive = savedTrig;
+        installCaches(savedCaches);
+      }
     }
   }
 

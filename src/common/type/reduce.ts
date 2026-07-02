@@ -134,15 +134,68 @@ function reduceMembers(types: Readonly<Type[]>): Type[] {
 function reduceNegationType(type: NegationType): Type {
   const reducedType = reduceType(type.type);
 
-  if (reducedType === 'nothing') return 'any';
+  // Complement of the bottom type `never` is the top type `any`.
+  // (SYM P2-21: `!never → any` — previously left unreduced.)
+  if (reducedType === 'never') return 'any';
 
-  if (reducedType === 'any') return 'nothing';
+  // Complement of the top type `any` is the bottom type `never`.
+  // (SYM P2-21: this previously returned `nothing`, the *unit* type,
+  // conflating "no value at all" (`never`, the bottom) with "the single
+  // `Nothing` value" (`nothing`, the unit). The complement of *everything* is
+  // *nothing at all* = `never`.)
+  if (reducedType === 'any') return 'never';
+
+  // Complement of the unit type `nothing` is "every value except `Nothing`".
+  // That set is not representable as a single primitive, and widening it to
+  // `any` (the previous behavior) is unsound — it would make
+  // `nothing <: !nothing` hold. We instead keep it as an explicit negation so
+  // the subtype machinery (`provablyDisjoint`) can still exclude the unit
+  // value. (SYM P2-21.)
 
   return decorate({ kind: 'negation', type: reducedType });
 }
 
+/**
+ * Recursively flatten nested unions and reduce + structurally de-duplicate the
+ * members. `(a | (b | c))` and `((a | b) | c)` yield the same flat member list,
+ * so union reduction and its canonical member order (SYM P2-20) are
+ * independent of how the union object was constructed.
+ */
+function flattenUnionMembers(types: Readonly<Type[]>): Type[] {
+  const result: Type[] = [];
+  const seen = new Set<string>();
+  const add = (t: Type): void => {
+    if (typeof t === 'object' && t.kind === 'union') {
+      for (const m of t.types) add(m);
+      return;
+    }
+    const key = typeof t === 'string' ? t : typeToString(t);
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(t);
+    }
+  };
+  for (const t of types) add(reduceType(t));
+  return result;
+}
+
+/**
+ * Canonical total order over union members (SYM P2-20). We order members
+ * lexicographically by their serialized form — a deterministic total order
+ * that makes the reduced union's `.type` string independent of member
+ * insertion order (so documented branch-on-`.type`-string usage is stable:
+ * `[1, "a"]` and `["a", 1]` now infer the *same* union string). Chosen over a
+ * lattice-rank order because it is total, cheap, and needs no tie-breaking.
+ */
+function sortUnionMembers(members: Type[]): Type[] {
+  return members
+    .map((t) => [typeof t === 'string' ? t : typeToString(t), t] as const)
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([, t]) => t);
+}
+
 function reduceUnionType(type: AlgebraicType): Type {
-  const reducedTypes = reduceMembers(type.types);
+  const reducedTypes = flattenUnionMembers(type.types);
 
   if (reducedTypes.length === 0) return 'never';
 
@@ -184,7 +237,7 @@ function reduceUnionType(type: AlgebraicType): Type {
   }
 
   if (acc.length === 1) return decorate(acc[0]);
-  return decorate({ kind: 'union', types: acc });
+  return decorate({ kind: 'union', types: sortUnionMembers(acc) });
 }
 
 /**
@@ -196,8 +249,9 @@ function reduceUnionType(type: AlgebraicType): Type {
  *   `integer ∧ finite_real` = `finite_integer` (`integer` admits ±∞, so the
  *   overlap is the finite integers), `finite_number ∧ real` = `finite_real`.
  *   When the maximal common subtypes are incomparable, the meet is their
- *   union, e.g. `real ∧ complex` = `finite_real | non_finite_number` (the
- *   lattice does not place the infinity-admitting `real` below `complex`).
+ *   union. Under D10 the numeric tower is a chain (`real ⊂ complex`), so
+ *   `real ∧ complex` = `real`; a union-meet arises only for genuinely
+ *   incomparable pairs (e.g. `finite_number ∧ real` = `finite_real`).
  * - Unions (which can arise from previous meets) distribute:
  *   `(a | b) ∧ c` = `(a ∧ c) | (b ∧ c)`.
  * - Incomparable non-primitive pairs are considered disjoint → `nothing`.

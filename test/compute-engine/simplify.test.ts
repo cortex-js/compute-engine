@@ -268,6 +268,16 @@ describe('Canonicalization: Ln', () => {
   test('ln(e) = 1', () => checkSimplify('\\ln(e)', 1));
   test('ln(e^x) = x', () => checkSimplify('\\ln(e^x)', 'x'));
   test('ln(e^x/y)+ln(y) = x', () => checkSimplify('\\ln(e^x/y)+\\ln(y)', 'x'));
+  // A constant ln(e) buried in a Divide numerator/denominator must fold the
+  // same way it does inside a bare Multiply (regression: the Divide operand
+  // path only ran the numeric-subexpression fold, which skipped Ln).
+  test('(y ln(e))/x = y/x', () =>
+    checkSimplify('\\frac{y\\ln(e)}{x}', '\\frac{y}{x}'));
+  test('y/(x ln(e)) = y/x', () =>
+    checkSimplify('\\frac{y}{x\\ln(e)}', '\\frac{y}{x}'));
+  // ...but a genuinely-symbolic ln(2) in a Divide stays put (no numericize).
+  test('(y ln(2))/x keeps ln(2)', () =>
+    checkSimplify('\\frac{y\\ln(2)}{x}', '\\frac{y\\ln(2)}{x}'));
 });
 
 describe('Canonicalization: Log', () => {

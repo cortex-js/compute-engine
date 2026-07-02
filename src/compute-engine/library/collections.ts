@@ -1654,11 +1654,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
+        // Walk `op1` from the last element to the first using negative
+        // (from-the-end) indices, so this works even when `op1.count` isn't
+        // known upfront. Termination must be based on `.at()` returning
+        // `undefined` (out of range), not on `index` reaching a sentinel
+        // value: previously this compared `index === 0`, but `index` starts
+        // at -1 and is decremented (-1, -2, -3, …), so it never equals 0 and
+        // the iterator ran past the end, yielding `undefined` "elements"
+        // forever (surfacing as a raw "Cannot read properties of undefined"
+        // once a consumer called `.evaluate()` on one of them).
         let index = -1;
         return {
           next: () => {
-            if (index === 0) return { value: undefined, done: true };
-            const value = expr.op1.at(index)!;
+            const value = expr.op1.at(index);
+            if (value === undefined) return { value: undefined, done: true };
             index -= 1;
             return { value, done: false };
           },

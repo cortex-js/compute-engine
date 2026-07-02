@@ -27,9 +27,13 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     const arg = x.op1;
     if (!arg) return undefined;
 
-    // ln(0) -> NaN
+    // ln(0) -> -inf (matches `evaluate()`/`BoxedNumber.ln()`, and Mathematica's
+    // `Log[0] == -Infinity`). This branch is currently shadowed by the
+    // unconditional "Ln, Log (basic evaluation)" rule in simplify-rules.ts,
+    // which calls `.ln()` and already reduces `Ln(0)` before this one runs —
+    // but keep this in sync with `evaluate()` in case that ordering changes.
     if (arg.isSame(0)) {
-      return { value: ce.NaN, because: 'ln(0) -> NaN' };
+      return { value: ce.NegativeInfinity, because: 'ln(0) -> -inf' };
     }
 
     // ln(+inf) -> +inf

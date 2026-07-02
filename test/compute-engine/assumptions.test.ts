@@ -310,3 +310,174 @@ describe('SCOPED INEQUALITY TYPE REFINEMENT DOES NOT LEAK (P1-6)', () => {
     expect(ce.expr('w').type.toString()).toBe('unknown');
   });
 });
+
+describe('SIGN PATH CONVERGES ON FACT INDEX (Perf P2-3 / SYM P2-7)', () => {
+  test('n ∈ Range(1, 10): isPositive agrees with verify(n > 0)', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.box(['Element', 'n', ['Range', 1, 10]]));
+    // Historically verify said `true` but the symbol sign said `undefined`.
+    expect(ce.verify(ce.box(['Greater', 'n', 0]))).toBe(true);
+    expect(ce.box('n').isPositive).toBe(true);
+  });
+
+  test('bounds are sharper than the legacy scan (lower bound 1 ⇒ positive)', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('n \\geq 1'));
+    expect(ce.box('n').isPositive).toBe(true);
+  });
+
+  test('legacy symbolic multi-term inference is preserved (superset)', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('y \\geq 0'));
+    ce.assume(ce.box(['Less', ['Add', 'x', 'y'], 0])); // x + y < 0, y ≥ 0
+    expect(ce.box('x').isNegative).toBe(true);
+  });
+
+  test('x ≥ 0 together with x ≠ 0 sharpens to positive', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x \\geq 0'));
+    ce.assume(ce.box(['NotEqual', 'x', 0]));
+    expect(ce.box('x').isPositive).toBe(true);
+  });
+
+  test('unconstrained sign stays undefined (fail closed)', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x > 4'));
+    expect(ce.box('unrelated').isPositive).toBe(undefined);
+  });
+
+  // Non-timing perf guard: many assumptions must not make a bounded-symbol
+  // sign query slow (the FactIndex is O(1) after building, vs. the O(N) scan).
+  test('sign queries stay fast under many assumptions', () => {
+    const ce = new ComputeEngine();
+    for (let i = 0; i < 200; i++) ce.assume(ce.box(['Greater', `v${i}`, 0]));
+    const sym = ce.box('v100');
+    const t0 = performance.now();
+    for (let i = 0; i < 1000; i++) expect(sym.isPositive).toBe(true);
+    const elapsed = performance.now() - t0;
+    // Extremely generous threshold: the linear scan took ~30ms+ here; the
+    // indexed path is several times faster. Guards against a regression to a
+    // per-query full scan without being flaky on slow CI.
+    expect(elapsed).toBeLessThan(500);
+  });
+});
+
+describe('BOUNDS REACH eq()/cmp() (SYM P2-8 / CORRECTNESS P2-14)', () => {
+  test('assume(x > 0) discharges x ≠ 0 in verify()', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x > 0'));
+    expect(ce.verify(ce.box(['NotEqual', 'x', 0]))).toBe(true);
+    expect(ce.box('x').isEqual(0)).toBe(false);
+  });
+
+  test('assume(w > 4) refutes w = 2', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('w > 4'));
+    expect(ce.box('w').isEqual(2)).toBe(false);
+  });
+
+  test('bounded-symbol vs bounded-symbol ordering', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('s > 4'));
+    ce.assume(ce.parse('t < 1'));
+    expect(ce.box('s').isGreater(ce.box('t'))).toBe(true);
+    expect(ce.box('t').isLess(ce.box('s'))).toBe(true);
+    expect(ce.box(['Greater', 's', 't']).evaluate().symbol).toBe('True');
+  });
+
+  test('overlapping symbol bounds stay undefined (fail closed)', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('s > 0'));
+    ce.assume(ce.parse('t > 0'));
+    expect(ce.box('s').isGreater(ce.box('t'))).toBe(undefined);
+    expect(ce.box('s').isEqual(ce.box('t'))).toBe(undefined);
+  });
+});
+
+describe('CONJUNCTION ATOMICITY (SYM P2-9)', () => {
+  test('a contradictory And leaves no residue', () => {
+    const ce = new ComputeEngine();
+    const r = ce.assume(ce.box(['And', ['Greater', 'p', 0], ['Less', 'p', -5]]));
+    expect(r).toBe('contradiction');
+    // The first conjunct must NOT have been applied.
+    expect(ce.box('p').isPositive).toBe(undefined);
+    expect(ce.box('p').sgn).toBe(undefined);
+  });
+
+  test('a consistent And still applies every conjunct', () => {
+    const ce = new ComputeEngine();
+    const r = ce.assume(ce.box(['And', ['Greater', 'a', 0], ['Less', 'b', 10]]));
+    expect(r).toBe('ok');
+    expect(ce.box('a').isPositive).toBe(true);
+    expect(ce.box('b').isLess(10)).toBe(true);
+  });
+});
+
+describe('NO-ARG forget() UNDOES ASSUMED VALUES (SYM P2-10)', () => {
+  test('assume(x = 5) is undone by a no-arg forget()', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x = 5'));
+    expect(ce.box('x').evaluate().json).toBe(5);
+    ce.forget();
+    expect(ce.box('x').evaluate().json).toBe('x');
+  });
+
+  test('a user assign() survives a no-arg forget()', () => {
+    const ce = new ComputeEngine();
+    ce.assign('y', 7);
+    ce.forget();
+    expect(ce.box('y').evaluate().json).toBe(7);
+  });
+
+  test('a user declared type survives; only the assumed value is cleared', () => {
+    const ce = new ComputeEngine();
+    ce.declare('z', 'real');
+    ce.assume(ce.parse('z = 3'));
+    ce.forget();
+    expect(ce.box('z').evaluate().json).toBe('z');
+    expect(ce.box('z').type.toString()).toBe('real');
+  });
+});
+
+describe('domainToType SIGNED-SET COVERAGE (SYM P2-11)', () => {
+  test('PositiveIntegers ⇒ integer and positive', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.box(['Element', 'k', 'PositiveIntegers']));
+    expect(ce.box('k').isInteger).toBe(true);
+    expect(ce.box('k').isPositive).toBe(true);
+  });
+
+  test('NegativeIntegers ⇒ integer and negative', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.box(['Element', 'g', 'NegativeIntegers']));
+    expect(ce.box('g').isInteger).toBe(true);
+    expect(ce.box('g').isNegative).toBe(true);
+  });
+
+  test('NonNegativeIntegers ⇒ integer and non-negative', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.box(['Element', 'h', 'NonNegativeIntegers']));
+    expect(ce.box('h').isInteger).toBe(true);
+    expect(ce.box('h').isNonNegative).toBe(true);
+  });
+
+  test('PositiveNumbers ⇒ real and positive', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.box(['Element', 'u', 'PositiveNumbers']));
+    expect(ce.box('u').type.matches('real')).toBe(true);
+    expect(ce.box('u').isPositive).toBe(true);
+  });
+
+  test('NonPositiveNumbers ⇒ real and non-positive', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.box(['Element', 'v', 'NonPositiveNumbers']));
+    expect(ce.box('v').type.matches('real')).toBe(true);
+    expect(ce.box('v').isNonPositive).toBe(true);
+  });
+
+  test('a signed-set membership can still be contradicted', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.box(['Element', 'm', 'PositiveIntegers']))).toBe('ok');
+    expect(ce.assume(ce.parse('m < 0'))).toBe('contradiction');
+  });
+});

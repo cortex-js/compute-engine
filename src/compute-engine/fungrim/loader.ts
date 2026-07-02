@@ -154,18 +154,16 @@ function buildGuardClosures(
           return (sub) => {
             const v = sub[g.wc];
             if (v === undefined) return false;
-            if (v.type.matches('finite_complex')) return true;
-            // The pack's RR/ZZ/QQ (like CC) are finite-domain, so a symbol
-            // declared real/rational/integer — or a finite_ variant, all
-            // subtypes of `real` — satisfies a `complex` (finite-complex)
-            // guard. In CE's lattice `real` admits ±∞ and is NOT a subtype
-            // of `complex`, so the Element(z, ℂ) fallback below stays
-            // undecided for these (fail-closed, blocking 68% of the pack
-            // under the most natural `declare(z,'real')`). Accept them here,
-            // but exclude a PROVABLY-infinite value (a ±∞ literal has
-            // isFinite === false; a plain real symbol's is undefined) — a
-            // genuine infinity is not a finite complex number.
-            if (v.isFinite !== false && v.type.matches('real')) return true;
+            // Fungrim CC = FINITE complex numbers. Under D10 (2026-07-02)
+            // `real ⊂ complex`, so a symbol declared complex — or
+            // real/rational/integer (or a finite_ variant, all subtypes of
+            // `real ⊂ complex`) — satisfies a complex guard through the normal
+            // subtype path (`type.matches('complex')`). Fungrim's CC is finite,
+            // so exclude a PROVABLY-infinite value (a ±∞ literal has
+            // isFinite === false; a plain real/complex symbol's is undefined
+            // and is accepted). This replaces the pre-D10 shim that had to
+            // special-case `type.matches('real')` because `real ⊄ complex`.
+            if (v.isFinite !== false && v.type.matches('complex')) return true;
             try {
               const r = pred.subs(sub).evaluate().json;
               if (r === 'True') return true;

@@ -63,10 +63,26 @@ function evaluateNumericSubexpressions(expr: Expression): Expression {
     }
   }
 
-  // If purely numeric (no unknowns), evaluate the whole expression
+  // If purely numeric (no unknowns), evaluate the whole expression.
   if (expr.unknowns.length === 0 && BASIC_ARITHMETIC.includes(expr.operator)) {
     const evaluated = expr.evaluate();
     if (isNumber(evaluated)) return evaluated;
+  }
+
+  // Constant logarithms are folded to their exact value even when they are
+  // not BASIC_ARITHMETIC and are buried inside another operand. This closes
+  // the Divide-context gap where `(ln(e)·y)/x` kept its `ln(e)` factor: the
+  // lazy-Multiply branch simplifies bare `Ln` operands, but the Divide
+  // branch only runs this numeric fold on its operands, so a constant `Ln`
+  // in a Divide numerator/denominator was never reduced. The exactness
+  // contract keeps genuinely-symbolic logs (Ln(2)) as non-literal, so only
+  // closed-form constants (Ln(e) -> 1, Log(1000,10) -> 3) fold here.
+  if (
+    (expr.operator === 'Ln' || expr.operator === 'Log') &&
+    expr.unknowns.length === 0
+  ) {
+    const evaluated = expr.evaluate();
+    if (isNumber(evaluated) && !evaluated.isSame(expr)) return evaluated;
   }
 
   // Otherwise, recursively process operands

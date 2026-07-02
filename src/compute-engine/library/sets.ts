@@ -16,10 +16,7 @@ import {
   subjectOf,
 } from '../boxed-expression/constraint-subject';
 import { domainToType } from '../boxed-expression/utils';
-import {
-  isFiniteIndexedCollection,
-  MAX_SIZE_EAGER_COLLECTION,
-} from '../collection-utils';
+import { MAX_SIZE_EAGER_COLLECTION } from '../collection-utils';
 import type {
   Expression,
   SymbolDefinitions,
@@ -1017,6 +1014,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     signature: '(set, set) -> set',
     description:
       'Return the symmetric difference of two sets (elements in either set but not both).',
+    evaluate: symmetricDifference,
     collection: {
       // Three-valued XOR: decided only when both member tests are decided.
       contains: (expr, x) => {
@@ -1086,12 +1084,17 @@ function intersection(
   const firstOps = isFunction(ops[0]) ? ops[0].ops : [];
   let elements: Expression[] = [...firstOps];
 
-  // Remove elements that are not in all the other sets
+  // Remove elements that are not in all the other sets. Use `.contains()`
+  // (not `isFiniteIndexedCollection` + `.each()`) since a `Set` is a finite
+  // collection but not an *indexed* one: `isFiniteIndexedCollection(Set(2))`
+  // is `false`, which previously fell through to the "not a collection"
+  // branch and compared each candidate element to the whole `Set` operand
+  // (never matching), so e.g. `Intersection(Set(1,2), Set(2))` always
+  // produced `EmptySet`. `.contains()` also works for non-indexed and
+  // infinite collections (e.g. `Integers`) without enumerating them.
   for (const op of ops.slice(1)) {
-    if (isFiniteIndexedCollection(op)) {
-      elements = elements.filter((element) =>
-        [...op.each()].some((op) => element.isSame(op))
-      );
+    if (op.isCollection) {
+      elements = elements.filter((element) => op.contains(element) === true);
     } else {
       // Not a collection, assume it's a collection made of this single element
       elements = elements.filter((element) => element.isSame(op));
@@ -1372,6 +1375,33 @@ function setMinus(
   const elements = [...col.each()].filter(
     (element) => !values.some((val) => isExcludedBy(val, element))
   );
+
+  if (elements.length === 0) return ce.symbol('EmptySet');
+  return ce._fn('Set', elements);
+}
+
+/** `SymmetricDifference(a, b)` = elements in `a` or `b` but not both. Only
+ * reduced to a literal `Set` when both operands are finite; otherwise stays
+ * symbolic (the `collection` handlers above provide membership/iteration
+ * semantics for the unevaluated form). */
+function symmetricDifference(
+  ops: ReadonlyArray<Expression>,
+  { engine: ce }: { engine: ComputeEngine }
+): Expression | undefined {
+  const [a, b] = ops;
+  if (!a || !b) return undefined;
+  if (a.isFiniteCollection !== true || b.isFiniteCollection !== true)
+    return undefined;
+
+  const elements: Expression[] = [];
+  for (const elem of a.each())
+    if (b.contains(elem) !== true) elements.push(elem);
+  for (const elem of b.each())
+    if (
+      a.contains(elem) !== true &&
+      elements.every((e) => !e.isSame(elem))
+    )
+      elements.push(elem);
 
   if (elements.length === 0) return ce.symbol('EmptySet');
   return ce._fn('Set', elements);

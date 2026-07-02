@@ -192,3 +192,69 @@ describe('SYM P1-20 — big-op / map validation gaps', () => {
     expect(m.toString()).toBe('[2,4,6]');
   });
 });
+
+describe('non-strict mode degrades missing arguments gracefully (not a raw JS undefined)', () => {
+  // Regression: the non-strict "fastpath" branches of `checkArity`,
+  // `checkNumericArgs`, and `validateArguments` (boxed-expression/validate.ts)
+  // used to return the operand array unpadded when an argument was missing.
+  // A fixed-arity `canonical`/`evaluate` handler that destructures `ops[0]`
+  // (or `ops[1]`) then got a raw JS `undefined` instead of a boxed
+  // `Error("missing")` expression. For `Sin()` this didn't even throw: the
+  // handler silently built a new `Sin` expression around that `undefined`,
+  // and printing it surfaced the operand as the literal text "[undefined]"
+  // (`ce.expr(['Sin']).evaluate().toString()` -> `"sin([undefined])"`)
+  // instead of an `Error` MathJSON node. Other operators (`Negate`, `Power`,
+  // `Arctan`, ...) crashed outright with "Cannot read properties of
+  // undefined".
+  function nonStrictEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.strict = false;
+    return ce;
+  }
+
+  it('Sin() does not surface a raw "undefined" operand', () => {
+    const ce = nonStrictEngine();
+    const e = ce.expr(['Sin']);
+    expect(() => e.evaluate().toString()).not.toThrow();
+    expect(e.evaluate().toString()).not.toContain('undefined');
+    expect(e.json).toEqual(['Sin', ['Error', "'missing'"]]);
+  });
+
+  it('Negate() does not throw and pads the missing operand', () => {
+    const ce = nonStrictEngine();
+    const e = ce.expr(['Negate']);
+    expect(() => e.evaluate()).not.toThrow();
+    expect(e.json).toEqual(['Negate', ['Error', "'missing'"]]);
+  });
+
+  it('Power(2) (missing exponent) does not throw and pads the missing operand', () => {
+    const ce = nonStrictEngine();
+    const e = ce.expr(['Power', 2]);
+    expect(() => e.evaluate()).not.toThrow();
+    expect(e.json).toEqual(['Power', 2, ['Error', "'missing'"]]);
+  });
+
+  it('Arctan() (generic signature-validated operator) does not throw', () => {
+    const ce = nonStrictEngine();
+    const e = ce.expr(['Arctan']);
+    expect(() => e.evaluate()).not.toThrow();
+    expect(e.json).toEqual(['Arctan', ['Error', "'missing'"]]);
+  });
+
+  it('Add() (variadic, no missing-arg case) still evaluates to the identity', () => {
+    // Sanity check: operators with no fixed minimum arity (Add, Multiply)
+    // are unaffected by the padding fix.
+    const ce = nonStrictEngine();
+    expect(ce.expr(['Add']).evaluate().isSame(0)).toBe(true);
+    expect(ce.expr(['Multiply']).evaluate().isSame(1)).toBe(true);
+  });
+
+  it('matches strict mode structurally (Error/Missing shape) for the same input', () => {
+    const strict = strictEngine();
+    const nonStrict = nonStrictEngine();
+    expect(nonStrict.expr(['Sin']).json).toEqual(strict.expr(['Sin']).json);
+    expect(nonStrict.expr(['Negate']).json).toEqual(
+      strict.expr(['Negate']).json
+    );
+  });
+});

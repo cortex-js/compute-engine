@@ -46,6 +46,10 @@ describe('DELIMITERS', () => {
   });
 
   test('Indexed access', () => {
+    // NOTE (SYM P2-20): the union type string in the incompatible-type error is
+    // now emitted in canonical (lexicographic) member order — `dictionary |
+    // indexed_collection` rather than the former construction-order
+    // `indexed_collection | dictionary`.
     expect(ce.parse('[2]').json).toMatchInlineSnapshot(`
       [
         List,
@@ -80,7 +84,7 @@ describe('DELIMITERS', () => {
           [
             ErrorCode,
             'incompatible-type',
-            'indexed_collection | dictionary',
+            'dictionary | indexed_collection',
             'function',
           ],
         ],
@@ -95,7 +99,7 @@ describe('DELIMITERS', () => {
           [
             ErrorCode,
             'incompatible-type',
-            'indexed_collection | dictionary',
+            'dictionary | indexed_collection',
             'function',
           ],
         ],

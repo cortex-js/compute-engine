@@ -372,6 +372,22 @@ export function forget(
   if (symbol === undefined) {
     ce.context.assumptions?.clear();
 
+    // Also undo value bindings installed by `assume(x = …)` (SYM P2-10): the
+    // docstring promises no-arg forget() removes *all* assumptions, but a
+    // value assigned via `assume` used to survive (so `x` still evaluated to
+    // its assumed value). Only assumption-installed values are cleared — user
+    // `declare()`/`assign()` values (never recorded in `assumptionBindings`)
+    // are left intact.
+    const installed = ce.context.assumptionBindings;
+    if (installed) {
+      for (const s of installed) {
+        const binding = ce.context.lexicalScope.bindings.get(s);
+        if (binding && isValueDef(binding) && !binding.value.isConstant)
+          binding.value.value = undefined;
+      }
+      installed.clear();
+    }
+
     // The removed assumptions could affect existing expressions
     ce._generation += 1;
 
@@ -406,6 +422,8 @@ export function forget(
     ) {
       scopeBinding.value.value = undefined;
     }
+    // Keep the provenance set accurate (SYM P2-10).
+    ce.context.assumptionBindings?.delete(symbol);
   }
   // The removed assumptions could affect existing expressions
   ce._generation += 1;

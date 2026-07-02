@@ -33,6 +33,14 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   complex: [
     'finite_complex',
     'imaginary',
+    // D10 (2026-07-02): `real ⊂ complex`, properly. `complex` admits ±∞ (it
+    // already listed `non_finite_number`), so the infinity-admitting
+    // `real`/`rational`/`integer` are genuine subtypes — the numeric tower is
+    // `integer ⊂ rational ⊂ real ⊂ complex ⊂ number`. (`isReal` still admits
+    // ±∞; D10 is about the LATTICE relation, not that predicate.)
+    'real',
+    'rational',
+    'integer',
     'finite_real',
     'finite_rational',
     'finite_integer',
@@ -121,15 +129,33 @@ export function isPrimitiveSubtype(
   lhs: PrimitiveType,
   rhs: PrimitiveType
 ): boolean {
+  // Mirror `isSubtype`'s special-type precedence EXACTLY so the two exported
+  // functions agree on the whole primitive lattice (SYM P2-22). They
+  // previously disagreed on `unknown`: `isPrimitiveSubtype` returned `false`
+  // for `X <: unknown` while `isSubtype` treats `unknown` as a top type. The
+  // ordering below (in particular `nothing` before `unknown`) reproduces
+  // `isSubtype` cell-for-cell.
+
   // `any` is the top type
   if (rhs === 'any') return true;
 
-  // 'never' is the bottom type
+  // `never` is the bottom type — a subtype of every type
   if (lhs === 'never') return true;
+  // No other type is a subtype of `never`
+  if (rhs === 'never') return false;
 
-  // 'unknown' is only a subtype of any (not of itself)
-  // No type is a subtype of `unknown`
-  if (lhs === 'unknown' || rhs === 'unknown') return false;
+  // No type is a subtype of `error`, except itself
+  if (rhs === 'error') return lhs === 'error';
+
+  // `nothing` (unit type) is a subtype only of `any` (handled above) and
+  // itself; nothing else is a subtype of `nothing`.
+  if (rhs === 'nothing') return lhs === 'nothing';
+  if (lhs === 'nothing') return false;
+
+  // `unknown` is a top type: every (remaining) type is a subtype of it, and it
+  // is a subtype only of `any`/`unknown`.
+  if (rhs === 'unknown') return true;
+  if (lhs === 'unknown') return false;
 
   // Identity
   if (lhs === rhs) return true;
@@ -144,10 +170,11 @@ export function isPrimitiveSubtype(
  * - If `a ⊑ b` (or `b ⊑ a`), the result is `[a]` (resp. `[b]`).
  * - For incomparable but overlapping types, the result is the set of maximal
  *   common subtypes, e.g. `meet(integer, finite_real)` = `[finite_integer]`
- *   (`integer` admits ±∞, so the overlap is the *finite* integers), and
- *   `meet(real, complex)` = `[finite_real, non_finite_number]` (the lattice
- *   does not place `real` below `complex`, so the overlap is expressed as a
- *   union of maximal common subtypes).
+ *   (`integer` admits ±∞, so the overlap is the *finite* integers). Under D10
+ *   the numeric tower is a chain (`integer ⊂ rational ⊂ real ⊂ complex ⊂
+ *   number`), so `meet(real, complex)` = `[real]` (real is now below complex);
+ *   the union-of-maximals case only arises for genuinely incomparable pairs
+ *   such as `meet(imaginary, finite_real)` = `[]`.
  * - For disjoint types (e.g. `meet(string, integer)`), the result is `[]`.
  *
  * The special types `any`, `unknown`, `never`, `nothing` and `error` must be
@@ -217,10 +244,11 @@ function finiteBaseType(t: NumericPrimitiveType): NumericPrimitiveType {
  * A union `finite_X | non_finite_number` covers exactly the same values as the
  * single type `X` (see the numeric tower in `types.ts`: `real = finite_real +
  * non_finite_number`, `integer = finite_integer + non_finite_number`, etc.).
- * The meet of two incomparable numeric types produces exactly such unions
- * (e.g. `real ∧ complex = finite_real | non_finite_number`), so recognizing the
- * equivalence lets those unions collapse to — and be seen as equal to — the
- * single covering type `X`.
+ * Such unions still arise (e.g. from `finite_number ∧ real = finite_real`, or
+ * directly-constructed unions), so recognizing the equivalence lets them
+ * collapse to — and be seen as equal to — the single covering type `X`. (Under
+ * D10 `real ⊂ complex`, so `real ∧ complex = real`; the covering-union map is
+ * unchanged and still governs the finite/non-finite collapse.)
  */
 export const COVERING_UNION_MAP: Record<string, NumericPrimitiveType> = {
   finite_number: 'number',

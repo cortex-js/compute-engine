@@ -461,6 +461,42 @@ export function decideComparisonFromBounds(
 }
 
 /**
+ * Order two subjects purely from their assumed interval bounds (design
+ * §5.1a, generalized to two bounded subjects).
+ *
+ * Returns a definite relation only when the bounds separate the two values;
+ * `undefined` otherwise. Strict three-valued / fail-closed discipline:
+ * - `'>'`/`'<'` when the separation is strict,
+ * - `'>='`/`'<='` when the values touch at a shared, non-strict endpoint,
+ * - `undefined` when the bounds overlap or don't separate.
+ */
+export function compareBounds(
+  a: IntervalBounds,
+  b: IntervalBounds
+): '<' | '>' | '<=' | '>=' | undefined {
+  const aLower = finiteNumericValue(a.lower);
+  const aUpper = finiteNumericValue(a.upper);
+  const bLower = finiteNumericValue(b.lower);
+  const bUpper = finiteNumericValue(b.upper);
+
+  // a > b (or a ≥ b): a's lower bound sits at/above b's upper bound.
+  if (aLower !== undefined && bUpper !== undefined) {
+    if (aLower > bUpper) return '>';
+    if (aLower === bUpper)
+      return a.lowerStrict === true || b.upperStrict === true ? '>' : '>=';
+  }
+
+  // a < b (or a ≤ b): a's upper bound sits at/below b's lower bound.
+  if (aUpper !== undefined && bLower !== undefined) {
+    if (aUpper < bLower) return '<';
+    if (aUpper === bLower)
+      return a.upperStrict === true || b.lowerStrict === true ? '<' : '<=';
+  }
+
+  return undefined;
+}
+
+/**
  * Derive a `Sign` from assumed interval bounds (design §5.1b — the
  * `Real`/`Imaginary`/`Abs`/`Argument` sgn fallbacks).
  *

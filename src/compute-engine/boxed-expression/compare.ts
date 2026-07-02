@@ -1,6 +1,7 @@
 import { NumericValue } from '../numeric-value/types';
 import type { Expression } from '../global-types';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds';
+import { compareBounds } from './constraint-subject';
 import {
   isNumber,
   isFunction,
@@ -530,6 +531,17 @@ export function cmp(
     if (cmpResult) return cmpResult;
     const eqResult = a.valueDefinition?.eq?.(b);
     if (eqResult === true) return '=';
+
+    // Symbol-vs-symbol ordering from assumed interval bounds (SYM P2-8):
+    // e.g. `assume(s > 4); assume(t < 1)` ⇒ `s > t`. Only a bounds separation
+    // decides the relation; overlapping bounds stay `undefined` (fail closed).
+    if (typeof b !== 'number' && isSymbol(b)) {
+      const rel = compareBounds(
+        getInequalityBoundsFromAssumptions(a.engine, a.symbol),
+        getInequalityBoundsFromAssumptions(a.engine, b.symbol)
+      );
+      if (rel !== undefined) return rel;
+    }
 
     // Check inequality assumptions for the symbol.
     // Only compare against a provably real number (a complex value is unordered

@@ -44,6 +44,16 @@ export class ExpressionMap<U> implements ExpressionMapInterface<U> {
   }
 
   delete(expr: Expression): void {
+    // Delete by value (`isSame`), consistent with `has`/`get`/`set` (which all
+    // key on `isSame`, not object identity). An identity-based delete would
+    // silently no-op when handed a structurally-equal but distinct instance
+    // (e.g. a re-boxed assumption), leaving stale entries behind.
+    for (const x of this._items.keys()) {
+      if (x.isSame(expr)) {
+        this._items.delete(x);
+        return;
+      }
+    }
     this._items.delete(expr);
   }
 

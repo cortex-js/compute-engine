@@ -38,12 +38,20 @@ export function typeToString(type: Type, precedence = 0): string {
       result = `!${typeToString(type.type, NEGATION_PRECEDENCE)}`;
       break;
 
-    case 'union':
-      // Serialize union types
-      result = type.types
-        .map((t) => typeToString(t, UNION_PRECEDENCE))
-        .join(' | ');
+    case 'union': {
+      // Serialize union types. Flatten nested unions and emit members in a
+      // canonical (lexicographic-by-serialized-form) order so the string is
+      // deterministic regardless of how the union object was built — even for
+      // unions that never went through `reduceType` (SYM P2-20).
+      const flat: string[] = [];
+      const pushMember = (t: Type): void => {
+        if (typeof t === 'object' && t.kind === 'union') t.types.forEach(pushMember);
+        else flat.push(typeToString(t, UNION_PRECEDENCE));
+      };
+      type.types.forEach(pushMember);
+      result = flat.sort().join(' | ');
       break;
+    }
 
     case 'intersection':
       // Serialize intersection types

@@ -592,9 +592,10 @@ describe('OPERATOR serialize, invalid', () => {
     ));
 
   test(`['Divide', 2, 3, 4] // Invalid form`, () =>
-    expect(latex(['Divide', 2, 3, 4])).toMatchInlineSnapshot(
-      `\\frac{\\frac{2}{3}}{4}`
-    ));
+    // The n-ary form left-folds to Divide(Divide(2,3),4); since the RT-P1-1
+    // exact-division fold (canonicalDivide: exact÷exact → exact literal),
+    // that canonicalizes to the literal 1/6.
+    expect(latex(['Divide', 2, 3, 4])).toMatchInlineSnapshot(`\\frac{1}{6}`));
 
   test(`['Divide', null] // Invalid form`, () =>
     expect(

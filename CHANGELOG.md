@@ -21,7 +21,35 @@
   recurrence with a symbolic order derivative
   `Apply(Derivative(BesselJ, 1, 0), x, x)` instead of staying inert.
 
+- **`real` is now a subtype of `complex` in the type lattice.** The numeric
+  tower is the chain `integer ⊂ rational ⊂ real ⊂ complex ⊂ number`, so a
+  real-typed symbol now satisfies complex-typed signatures and guards through
+  the ordinary subtype relation (previously `complex` effectively meant
+  "strictly complex" and real-typed arguments needed special-case handling).
+  `meet(real, complex)` is now `real`. The `isReal` predicate is unchanged
+  (real still admits ±∞). In addition, union types now flatten nested unions
+  and canonicalize member order — `integer | string` and `string | integer`
+  produce the same `.type` string — and type negation distinguishes `never`
+  (bottom) from `nothing` (unit): `!any` is `never`, `!never` is `any`.
+
+- **Assumptions are more capable.** `assume(x ∈ PositiveIntegers)` (and the
+  other signed integer/real sets) now decomposes into a type and a sign bound,
+  so `x.isInteger` and `x.isPositive` respond; inequality bounds now reach
+  equality checks (`assume(w > 4)` makes `w.isEqual(2)` false, and
+  `verify(x ≠ 0)` holds after `assume(x > 0)`); two bounded symbols compare
+  (`assume(s > 4); assume(t < 1)` makes `s > t` evaluate to `True`); a
+  contradictory conjunction such as `assume(p > 0 ∧ p < −5)` is now atomic —
+  it is rejected without leaving the earlier conjuncts applied; and a no-arg
+  `forget()` now also clears values installed by `assume('x = 5')` while
+  preserving values set with `assign()`.
+
 ### Performance
+
+- **Sign queries under assumptions are much faster and sharper.** `.sgn` /
+  `.isPositive` on a symbol constrained by assumptions now consults the
+  indexed bounds store (O(1) after indexing) instead of linearly re-matching
+  every assumption, and derives strictly more: `n ∈ Range(1, 10)` now yields
+  `isPositive === true` (previously undefined), agreeing with `verify(n > 0)`.
 
 - **Faster polynomial equation solving.** Solving a univariate polynomial of
   degree ≥ 2 now goes straight to a coefficient-based closed form (quadratic
@@ -44,6 +72,42 @@
   speeds up high-precision `N()`.
 
 ### Resolved Issues
+
+- **High-precision results were silently wrong after increasing `precision`.**
+  The internal table of Bernoulli numbers used by `Gamma`, `Digamma`,
+  `PolyGamma` and `Zeta` at high precision was built once per process and
+  never extended, so raising `ce.precision` after a first computation reused a
+  too-short table: a precision-300 `Gamma(1.23456789)` computed after a
+  precision-20 call diverged from the correct value around digit 170. The
+  table is now rebuilt when more terms are needed (results verified
+  bit-identical to a fresh engine and to mpmath).
+
+- **Finite set operations compute correct results.**
+  `Intersection({1,2}, {2})` returned `EmptySet` (elements were compared
+  against the whole second set rather than tested for membership) and
+  `SymmetricDifference` never evaluated at all. Both now reduce correctly,
+  with `Union`/`SetMinus` verified against value tables.
+
+- **`Reverse` no longer crashes on short lists.** Its iterator's termination
+  test could never be true, so `Reverse([1,2,3]).evaluate()` threw a raw
+  JavaScript error instead of returning `[3,2,1]`.
+
+- **Non-strict mode no longer crashes on missing arguments.** With
+  `ce.strict = false`, expressions missing required arguments — `Negate()`,
+  `Sqrt()`, `Power(2)`, `Arctan()` — threw raw JavaScript errors, and
+  `Sin()` printed `sin([undefined])`. The non-strict fast paths now pad
+  missing required arguments the same way strict mode does, producing
+  identical MathJSON.
+
+- **Rubi integration cleanups.** A rule-driven antiderivative could contain
+  unreduced `ln(e)` factors that `simplify()` couldn't fold inside a quotient
+  (`∫ e²ˣ/x³` now yields a clean `ExpIntegralEi(2x)` form, and
+  `(ln(e)·y)/x` simplifies to `y/x`); an internal re-entrant integration
+  no longer resets the evaluation deadline (a fallback could previously grant
+  the outer integral a fresh time budget); the rule-compilation report now
+  carries per-rule skip reasons and stays honest on cached reloads; and the
+  driver's memo table is cleared per top-level integration instead of growing
+  without bound.
 
 - **Integer-domain functions no longer crash on infinite arguments.**
   `Fibonacci(+∞)`, `BernoulliB(−∞)`, `MoebiusMu(∞)` and the rest of the

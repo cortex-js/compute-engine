@@ -543,11 +543,27 @@ function allParamsNumeric(signature: Type): boolean {
 }
 
 /**
- * True when a signature has a parameter of the `complex`-family — a type that
- * finite reals belong to but the (±∞-admitting) `real`/`number` do not. In the
- * current lattice such parameters make a strict signature check reject
- * legitimate real/integer/number arguments (SYM P1-21), so declared-signature
- * enforcement is skipped for them.
+ * True when a signature has a genuinely `complex`-family parameter — one that
+ * accepts a `finite_complex` value but is *narrower* than `finite_number`
+ * (i.e. `complex` / `finite_complex` / `imaginary`, but NOT `number` /
+ * `finite_number` / `real` / `integer`). Declared-signature enforcement is
+ * skipped for such parameters.
+ *
+ * Why this is still needed AFTER D10 (which made `real ⊂ complex`, retiring the
+ * pre-D10 `real`-arg motivation): CE's numeric type inference is lossy for
+ * complex-valued *constants*. A pure-imaginary product such as `√2·i` is a
+ * genuine complex number, but Multiply widens its inferred type to
+ * `finite_number` (not `imaginary`/`finite_complex`), and `finite_number ⊄
+ * complex` in the lattice (adding it there is unsound for the compiler's
+ * real/complex code-generation gate). So a strict `(complex) -> complex`
+ * signature would wrongly reject a legitimately-complex closed argument that CE
+ * merely typed as `finite_number`. Narrower parameters (`integer`, `real`,
+ * `string`, …) are unaffected, so `(integer) -> integer` is still enforced.
+ *
+ * D10 residual — the principled fix is to sharpen Multiply's type inference so
+ * `√2·i` infers `imaginary`, at which point this skip becomes truly
+ * unnecessary; that lives in the arithmetic type handlers, outside this
+ * change's scope.
  */
 function signatureHasComplexParam(signature: Type): boolean {
   if (typeof signature === 'string' || signature.kind !== 'signature')
@@ -558,7 +574,7 @@ function signatureHasComplexParam(signature: Type): boolean {
     ...(signature.variadicArg ? [signature.variadicArg.type] : []),
   ];
   return params.some(
-    (t) => isSubtype('finite_real', t) && !isSubtype('real', t)
+    (t) => isSubtype('finite_complex', t) && !isSubtype('finite_number', t)
   );
 }
 
@@ -638,13 +654,13 @@ function makeCanonicalFunction(
       !def.value.inferredType &&
       typeof valueType !== 'string' &&
       valueType.kind === 'signature' &&
-      // Skip enforcement for signatures with a `complex`-family parameter.
-      // In the current type lattice `real`/`integer`/`number` (all of which
-      // admit ±∞) are NOT subtypes of `complex` (SYM P1-21), so a strict
-      // signature check there would wrongly reject legitimate numeric
-      // arguments — this is the exact issue P1-21 tracks and it must not be
-      // pre-empted here. Narrower parameters (`integer`, `string`, …) are
-      // unaffected, so `(integer) -> integer` is still enforced.
+      // Under D10 (2026-07-02) `real ⊂ complex`, so real/integer/rational
+      // arguments now satisfy a `complex`-family parameter through the normal
+      // subtype path — the pre-D10 `real`-arg motivation for this skip is gone.
+      // A narrower residual remains: a complex-valued CONSTANT that CE types
+      // imprecisely as `finite_number` (e.g. `√2·i`) is still not `⊂ complex`,
+      // so genuinely-complex parameters are still skipped. See
+      // `signatureHasComplexParam`.
       !signatureHasComplexParam(valueType)
     ) {
       const invalid = validateArguments(ce, boxedOps, valueType);

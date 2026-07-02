@@ -70,7 +70,19 @@ export function checkArity(
   ops = flatten(ops);
 
   // @fastpath
-  if (!ce.strict) return ops;
+  if (!ce.strict) {
+    // Skip the "unexpected-argument" bookkeeping below, but still pad a
+    // missing *required* argument with an `Error("missing")` marker.
+    // Leaving it out entirely stores a raw JS `undefined` in the operand
+    // array once `count` operands are assumed downstream (e.g. `Sin()`
+    // canonicalizes to a zero-operand `Sin`, and `.evaluate()` then
+    // destructures `ops[0]` as `undefined`, producing the garbage
+    // expression `Sin([undefined])` instead of degrading gracefully).
+    if (ops.length >= count) return ops;
+    const xs = [...ops];
+    while (xs.length < count) xs.push(ce.error('missing'));
+    return xs;
+  }
 
   if (ops.length === count) return ops;
 
@@ -116,17 +128,30 @@ export function checkNumericArgs(
 
   // @fastpath
   if (!ce.strict) {
+    // Skip the full per-argument type checking below, but still pad a
+    // missing *required* argument (when a `count` is specified, e.g.
+    // `Negate`/`Power`/`Root`) with an `Error("missing")` marker. Leaving
+    // it out entirely stores a raw JS `undefined` in the operand array,
+    // which crashes the first time a `canonical`/`evaluate` handler
+    // destructures that fixed-arity operand (e.g. `Negate()`, `Power(2)`)
+    // instead of degrading gracefully like strict mode does.
+    let xs: ReadonlyArray<Expression> = ops;
+    if (count !== undefined && ops.length < count) {
+      const padded = [...ops];
+      while (padded.length < count) padded.push(ce.error('missing'));
+      xs = padded;
+    }
     let inferredType: Type = 'real';
     // If any of the arguments is a complex or imaginary number,
     // we'll infer the type as number
-    for (const x of ops)
+    for (const x of xs)
       if (isSubtype('complex', x.type.type)) {
         inferredType = 'number';
         break;
       }
-    for (const x of ops)
+    for (const x of xs)
       if (!isFiniteIndexedCollection(x)) x.infer(inferredType);
-    return ops;
+    return xs;
   }
 
   let isValid = true;
@@ -308,7 +333,24 @@ export function validateArguments(
   threadable?: boolean
 ): ReadonlyArray<Expression> | null {
   // @fastpath
-  if (!ce.strict) return null;
+  if (!ce.strict) {
+    // Skip the full per-parameter type checking below, but still pad a
+    // missing *required* argument with an `Error("missing")` marker.
+    // Returning `null` unconditionally here (the previous behavior) tells
+    // the caller "use the operands as-is", so a genuinely missing argument
+    // (e.g. `Arctan()`) left a fixed-arity `evaluate` handler destructuring
+    // past the end of the operand array — a raw JS `undefined` rather than
+    // a boxed error, which crashes instead of degrading gracefully.
+    if (typeof signature !== 'string' && signature.kind === 'signature') {
+      const requiredCount = signature.args?.length ?? 0;
+      if (ops.length < requiredCount) {
+        const xs = [...ops];
+        while (xs.length < requiredCount) xs.push(ce.error('missing'));
+        return xs;
+      }
+    }
+    return null;
+  }
 
   if (typeof signature === 'string') return null;
   if (signature.kind !== 'signature') return null;

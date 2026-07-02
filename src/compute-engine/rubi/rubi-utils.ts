@@ -415,6 +415,13 @@ export function installCaches(caches: Ctx['caches']): void {
   activeCaches = caches;
 }
 
+/** Snapshot the currently-installed caches so a re-entrant driver call can
+ * restore the outer call's warm caches after installing its own (see the
+ * native-rational fallback re-entry in driver.ts). */
+export function getActiveCaches(): Ctx['caches'] | undefined {
+  return activeCaches;
+}
+
 function safeSimplify(e: Expression): Expression {
   if (leafCount(e) > SIMPLIFY_LEAF_CAP) return e;
   const key = activeCaches ? e.toString() : '';

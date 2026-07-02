@@ -41,6 +41,16 @@ import { isSubtype } from '../../common/type/subtype';
 export class ExactNumericValue extends NumericValue {
   declare __brand: 'ExactNumericValue';
 
+  // NOTE (perf review, P2-5B): these are declared mutable (not `readonly`)
+  // and `normalize()` below does mutate them in place. As of this check
+  // (2026-07), the *only* call site for `normalize()` in the whole repo is
+  // the constructor itself (before `this` escapes to any caller), and no
+  // code anywhere assigns to `.rational`/`.radical` directly — so in
+  // practice instances are immutable post-construction. That is a
+  // convention, not a type-enforced guarantee: nothing stops a future
+  // `ev.radical = …` or a new `normalize()` call site from invalidating a
+  // cached derived value. `bignumRe` below deliberately stays uncached for
+  // that reason — see the note there before memoizing it.
   rational: Rational;
   radical: number; // An integer > 0
 
@@ -215,6 +225,19 @@ export class ExactNumericValue extends NumericValue {
     return rationalAsFloat(this.rational) * Math.sqrt(this.radical);
   }
 
+  // NOT memoized (perf review, P2-5B): this recomputes `new
+  // BigDecimal(p).div(q)` on every access, which is real but small
+  // repeated-conversion overhead. Verified (2026-07): `rational`/`radical`
+  // are only ever written by `normalize()`, which itself is only ever
+  // called from the constructor — so instances ARE immutable in current
+  // practice. But the fields are plain mutable properties, not `readonly`,
+  // and `normalize()` is a public method any future caller could invoke
+  // again (e.g. from a new call site added elsewhere) — a memo here would
+  // go stale silently in that case, with no invalidation hook to catch it.
+  // Do not memoize without first making `rational`/`radical` `readonly` (a
+  // separate, wider change — this class is constructed pervasively) so the
+  // immutability becomes a compiler-checked invariant instead of a
+  // convention.
   get bignumRe(): BigDecimal {
     let result: BigDecimal;
     const r = this.rational;

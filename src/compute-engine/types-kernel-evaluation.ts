@@ -251,4 +251,11 @@ export type EvalContext<Expr = unknown, Binding = unknown> = {
   lexicalScope: Scope<Binding>;
   assumptions: ExpressionMapInterface<boolean, Expr>;
   name: undefined | string;
+  /**
+   * Names of symbols in this context whose *value* was installed by
+   * `assume(x = …)` (as opposed to a user `declare()`/`assign()`). No-arg
+   * `forget()` clears these value bindings — but must leave user-assigned
+   * values intact — so their provenance is tracked here (SYM P2-10).
+   */
+  assumptionBindings?: Set<string>;
 };

@@ -29,8 +29,12 @@ import {
   type Subject,
   subjectOf,
   toSubject,
+  subjectKey,
   matchesSubject,
   boundsFromNormalizedInequality,
+  signFromBounds,
+  getFactIndex,
+  hasAssumptions,
 } from './boxed-expression/constraint-subject';
 
 /**
@@ -107,6 +111,30 @@ export function assume(proposition: Expression): AssumeResult {
  * structural-predicate layer cannot represent (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md
  * §7 non-goals). `assume()` reports these as `'not-a-predicate'`.
  */
+/**
+ * Signed number-set symbols (SYM P2-11) that decompose into a base type plus
+ * a single sign bound. `domainToType` only maps the *unsigned* primitive sets
+ * (ℂ, ℝ, ℚ, ℤ, …); these carry a sign that must also be stored as a bound
+ * fact for `isPositive`/`isNegative`/`isNonNegative`/`isNonPositive` to fire.
+ *
+ * Integer variants use ±1 rather than 0 for the strict cases so the bound is
+ * the tight integer bound (`PositiveIntegers` ⇒ `≥ 1`, `NegativeIntegers` ⇒
+ * `≤ −1`); the real variants use an open bound at 0.
+ */
+const SIGNED_NUMBER_SETS: Record<
+  string,
+  { type: Type; op: 'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual'; value: number }
+> = {
+  PositiveNumbers: { type: 'real', op: 'Greater', value: 0 },
+  NonNegativeNumbers: { type: 'real', op: 'GreaterEqual', value: 0 },
+  NegativeNumbers: { type: 'real', op: 'Less', value: 0 },
+  NonPositiveNumbers: { type: 'real', op: 'LessEqual', value: 0 },
+  PositiveIntegers: { type: 'integer', op: 'GreaterEqual', value: 1 },
+  NonNegativeIntegers: { type: 'integer', op: 'GreaterEqual', value: 0 },
+  NegativeIntegers: { type: 'integer', op: 'LessEqual', value: -1 },
+  NonPositiveIntegers: { type: 'integer', op: 'LessEqual', value: 0 },
+};
+
 const UNSUPPORTED_PREDICATE_OPERATORS = new Set<string>([
   'Or',
   'Not',
@@ -133,6 +161,35 @@ function assumeConjunction(proposition: Expression): AssumeResult {
   console.assert(proposition.operator === 'And');
   if (!isFunction(proposition)) return 'not-a-predicate';
 
+  const ce = proposition.engine;
+
+  // Atomicity (SYM P2-9): a conjunction must apply all-or-nothing when it
+  // contradicts. The historical loop applied each conjunct in turn, so a
+  // later contradictory conjunct left the earlier ones installed (e.g.
+  // `And(p > 0, p < −5)` reported `'contradiction'` yet left `p > 0`).
+  //
+  // Validate the whole conjunction in an isolated child scope first: the
+  // child inherits the caller's assumptions (copied) and symbol bindings (via
+  // the scope chain) but discards all of its own mutations on `popScope`. If
+  // the trial contradicts, nothing touched the caller's scope. Only a
+  // contradiction-free trial is replayed for real in the caller's scope,
+  // reproducing the historical `ok`/`tautology`/`not-a-predicate` outcome
+  // (including the partial application of the valid conjuncts in the
+  // `not-a-predicate` case).
+  ce.pushScope();
+  let trial: AssumeResult;
+  try {
+    trial = assumeConjunctionInner(proposition);
+  } finally {
+    ce.popScope();
+  }
+  if (trial === 'contradiction' || trial === 'internal-error') return trial;
+
+  return assumeConjunctionInner(proposition);
+}
+
+function assumeConjunctionInner(proposition: Expression): AssumeResult {
+  if (!isFunction(proposition)) return 'not-a-predicate';
   let sawOk = false;
   let sawNotAPredicate = false;
   for (const conjunct of proposition.ops) {
@@ -263,6 +320,7 @@ function assumeEquality(proposition: Expression): AssumeResult {
     const def = ce.lookupDefinition(lhs);
     if (!def || !isValueDef(def)) {
       ce.declare(lhs, { value: val });
+      markAssumptionValue(ce, lhs);
       return 'ok';
     }
     if (def.value.type && !val.type.matches(def.value.type))
@@ -272,6 +330,7 @@ function assumeEquality(proposition: Expression): AssumeResult {
     // assumed value is automatically reverted when this scope is popped.
     // If lhs is declared in a parent scope, shadow it in the current scope
     // so we don't permanently mutate the parent definition.
+    markAssumptionValue(ce, lhs);
     if (!ce.context.lexicalScope.bindings.has(lhs)) {
       ce.declare(lhs, { value: val });
     } else {
@@ -329,8 +388,10 @@ function assumeEquality(proposition: Expression): AssumeResult {
     const val = sols[0];
     if (!def || !isValueDef(def)) {
       ce.declare(lhs, { value: val });
+      markAssumptionValue(ce, lhs);
       return 'ok';
     }
+    markAssumptionValue(ce, lhs);
     if (!ce.context.lexicalScope.bindings.has(lhs)) {
       ce.declare(lhs, { value: val });
     } else {
@@ -759,6 +820,21 @@ function assumeElementOfSet(
   const type = domainToType(setExpr);
   if (type !== 'unknown') return refineSymbolType(ce, symbol, type);
 
+  // 1b. Signed number sets (SYM P2-11): the positive/negative/non-negative/
+  //     non-positive integer and real sets decompose into a base type
+  //     refinement *plus* a sign bound, so that `isInteger`/`isPositive` etc.
+  //     respond (e.g. `assume(k ∈ PositiveIntegers)` ⇒ `k` integer and > 0).
+  //     `domainToType` alone only yields a type, never the bound.
+  if (isSymbol(setExpr)) {
+    const signed = SIGNED_NUMBER_SETS[setExpr.symbol];
+    if (signed !== undefined) {
+      if (refineSymbolType(ce, symbol, signed.type) === 'contradiction')
+        return 'contradiction';
+      const b = assumeBound(ce, symbol, signed.op, ce.number(signed.value));
+      return b === 'contradiction' ? 'contradiction' : 'ok';
+    }
+  }
+
   // 2. Range(lo, hi[, step]): integer-valued (`ZZGreaterEqual(1)`
   //    translates to Range(1, +∞))
   if (isFunction(setExpr, 'Range') && setExpr.ops.length >= 2) {
@@ -1088,6 +1164,16 @@ function undefinedIdentifiers(expr: Expression): string[] {
   return expr.symbols.filter((x) => !hasDef(expr.engine, x));
 }
 
+/**
+ * Record that the *value* of `symbol` in the current context was installed by
+ * an `assume(symbol = …)` (SYM P2-10). No-arg `forget()` consults this set to
+ * clear assumption-installed values while leaving user `declare()`/`assign()`
+ * values untouched.
+ */
+function markAssumptionValue(ce: ComputeEngine, symbol: string): void {
+  (ce.context.assumptionBindings ??= new Set<string>()).add(symbol);
+}
+
 function hasValue(ce: ComputeEngine, s: string): boolean {
   const def = ce.lookupDefinition(s);
   if (!def) return false;
@@ -1123,10 +1209,51 @@ export function getSignFromAssumptions(
   ce: ComputeEngine,
   subject: string | Subject
 ): Sign | undefined {
-  const assumptions = ce.context?.assumptions;
-  if (!assumptions) return undefined;
+  if (!hasAssumptions(ce)) return undefined;
 
   const subj = toSubject(subject);
+
+  // Primary path (Perf P2-3 / SYM P2-7): answer from the cached FactIndex
+  // bounds, the same source of truth `verify()` uses. This is O(1) after the
+  // index is built (vs. the O(#assumptions) scan below), and it is strictly
+  // *sharper*: `n ∈ Range(1, 10)` yields a lower bound of 1 → `positive`,
+  // whereas the legacy scan only saw the *sign* of the constant (`≥ 0`) and
+  // returned `non-negative`, leaving `n.isPositive` undefined while
+  // `verify(n > 0)` was already `true`.
+  const facts = getFactIndex(ce).bySubject.get(subjectKey(subj));
+  if (facts !== undefined) {
+    let s = signFromBounds(facts.bounds);
+    // Refine a non-strict sign to strict using a disequality-from-zero fact
+    // (`x ≥ 0` together with `x ≠ 0` ⇒ `x > 0`). This is a sound superset of
+    // both the bounds path and the legacy scan (which handled neither).
+    if (
+      (s === 'non-negative' || s === 'non-positive') &&
+      facts.notEqual.some((v) => v.isSame(0))
+    )
+      s = s === 'non-negative' ? 'positive' : 'negative';
+    if (s !== undefined) return s;
+  }
+
+  // Fallback: the legacy linear scan. It is kept only for the cases the
+  // FactIndex bounds do not capture — chiefly multi-symbol inequalities whose
+  // sibling terms have a *known symbolic sign* but no numeric bound (e.g.
+  // `assume(x + y < 0)` with `y` non-negative ⇒ `x` negative). Every case it
+  // decides is decided identically or more sharply by the bounds path above,
+  // so this preserves the historical envelope as a strict superset.
+  return getSignFromAssumptionsLegacy(ce, subj);
+}
+
+/**
+ * Legacy linear-scan sign inference (superseded by the FactIndex bounds path
+ * in `getSignFromAssumptions`; retained only as a fallback for symbolic
+ * multi-term inequalities the index does not represent — see the note there).
+ */
+function getSignFromAssumptionsLegacy(
+  ce: ComputeEngine,
+  subj: Subject
+): Sign | undefined {
+  const assumptions = ce.context?.assumptions;
+  if (!assumptions) return undefined;
 
   for (const [assumption, _] of assumptions.entries()) {
     const op = assumption.operator;

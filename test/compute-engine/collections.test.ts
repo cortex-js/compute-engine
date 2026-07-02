@@ -547,6 +547,29 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     expect(evaluate(['Reverse', list])).toMatchInlineSnapshot(
       `["List", 11, 3, 2, 19, 5, 13, 7]`
     ));
+
+  // Regression: the `Reverse` iterator terminated on `index === 0`, but
+  // `index` starts at -1 and only ever decreases (-1, -2, -3, …), so it
+  // never equals 0. For a collection with no more elements than the default
+  // materialization head size (5), the head loop in `materialize()` never
+  // hits its own break condition either, so it kept consuming the iterator
+  // past the end: `.at()` returned `undefined` for the out-of-range index,
+  // and calling `.evaluate()` on that `undefined` "element" crashed with a
+  // raw "Cannot read properties of undefined" instead of a MathJSON error.
+  test('Reverse (short list, regression for out-of-range iterator crash)', () => {
+    expect(() =>
+      engine.box(['Reverse', ['List', 1, 2, 3]]).evaluate().toString()
+    ).not.toThrow();
+    expect(evaluate(['Reverse', ['List', 1, 2, 3]])).toMatchInlineSnapshot(
+      `["List", 3, 2, 1]`
+    );
+    expect(evaluate(['Reverse', ['List', 1]])).toMatchInlineSnapshot(
+      `["List", 1]`
+    );
+    expect(evaluate(['Reverse', emptyList])).toMatchInlineSnapshot(
+      `["List"]`
+    );
+  });
 });
 
 describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {

@@ -16,7 +16,10 @@ import {
 } from '../../../src/common/type/subtype';
 import { typeToString } from '../../../src/common/type/serialize';
 import { parseType } from '../../../src/common/type/parse';
-import { NUMERIC_TYPES } from '../../../src/common/type/primitive';
+import {
+  NUMERIC_TYPES,
+  PRIMITIVE_TYPES,
+} from '../../../src/common/type/primitive';
 import type {
   PrimitiveType,
   Type,
@@ -56,25 +59,17 @@ describe('Numeric primitive meets (G15)', () => {
   test('imaginary ∩ finite_number = imaginary (transitivity repair)', () =>
     expect(intersectStr('imaginary', 'finite_number')).toBe('imaginary'));
 
-  test('real ∩ complex = finite_real | non_finite_number', () => {
-    // The lattice does not place the infinity-admitting `real` below
-    // `complex`, so the meet is the union of the maximal common subtypes.
-    const t = intersect('real', 'complex');
-    expect(typeof t).toBe('object');
-    expect((t as any).kind).toBe('union');
-    expect([...(t as any).types].sort()).toEqual([
-      'finite_real',
-      'non_finite_number',
-    ]);
+  test('real ∩ complex = real (D10: real ⊂ complex)', () => {
+    // D10 (2026-07-02): `real ⊂ complex`, properly. Since `real` is now below
+    // `complex`, the meet is simply `real` (was `finite_real |
+    // non_finite_number` when the lattice kept `real` incomparable to
+    // `complex`).
+    expect(intersectStr('real', 'complex')).toBe('real');
   });
 
-  test('integer ∩ complex = finite_integer | non_finite_number', () => {
-    const t = intersect('integer', 'complex');
-    expect((t as any).kind).toBe('union');
-    expect([...(t as any).types].sort()).toEqual([
-      'finite_integer',
-      'non_finite_number',
-    ]);
+  test('integer ∩ complex = integer (D10: integer ⊂ real ⊂ complex)', () => {
+    // D10: the numeric tower is a chain, so the meet is the narrower operand.
+    expect(intersectStr('integer', 'complex')).toBe('integer');
   });
 
   test('subtype-related pairs reduce to the narrower type', () => {
@@ -147,6 +142,34 @@ describe('Meet property: greatest lower bound over the numeric chain', () => {
             if (u !== t) expect(isPrimitiveSubtype(t, u)).toBe(false);
         }
       }
+    }
+  });
+});
+
+describe('isPrimitiveSubtype and isSubtype agree (SYM P2-22)', () => {
+  // Both functions are exported and used for subtype checks; they must agree
+  // on the entire primitive lattice. They previously disagreed on `unknown`:
+  // `isSubtype(X, unknown)` was `true` (unknown is a top type) while
+  // `isPrimitiveSubtype(X, unknown)` was `false`. `unknown` is now a top type
+  // in both (`X <: unknown` for all X, reflexively; `unknown <: X` only for
+  // `any`/`unknown`).
+  for (const a of PRIMITIVE_TYPES) {
+    for (const b of PRIMITIVE_TYPES) {
+      test(`isPrimitiveSubtype(${a}, ${b}) === isSubtype(${a}, ${b})`, () => {
+        expect(isPrimitiveSubtype(a, b)).toBe(isSubtype(a, b));
+      });
+    }
+  }
+
+  test('the unknown cells (the P2-22 disagreement) now agree in both directions', () => {
+    for (const t of PRIMITIVE_TYPES) {
+      // `X <: unknown`: unknown is a top type for every primitive except the
+      // unit type `nothing` (which is a subtype only of `any` and itself).
+      expect(isPrimitiveSubtype(t, 'unknown')).toBe(isSubtype(t, 'unknown'));
+      expect(isPrimitiveSubtype(t, 'unknown')).toBe(t !== 'nothing');
+      // `unknown <: X`: only `any`/`unknown`.
+      expect(isPrimitiveSubtype('unknown', t)).toBe(isSubtype('unknown', t));
+      expect(isPrimitiveSubtype('unknown', t)).toBe(t === 'any' || t === 'unknown');
     }
   });
 });

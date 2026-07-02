@@ -286,3 +286,78 @@ describe('UPPER HALF-PLANE (\\mathbb{C}^+)', () => {
     expect(ce.expr('UpperHalfPlane').latex).toMatchInlineSnapshot(`\\mathbb{C}^+`);
   });
 });
+
+describe('FINITE SET OPERATIONS (value tables)', () => {
+  // Regression for: Intersection(Set(1,2), Set(2)) incorrectly evaluated to
+  // EmptySet. The bug: the implementation checked `isFiniteIndexedCollection`
+  // on the other operands, but a `Set` is finite and NOT indexed, so it fell
+  // into the "treat operand as a single scalar value" branch and compared
+  // each candidate element to the whole `Set` expression (never matching).
+  test('Intersection', () => {
+    expect(
+      ce.expr(['Intersection', ['Set', 1, 2], ['Set', 2]]).evaluate()
+    ).toMatchInlineSnapshot(`["Set", 2]`);
+    expect(
+      ce.expr(['Intersection', ['Set', 1, 2], ['Set', 2, 3]]).evaluate()
+    ).toMatchInlineSnapshot(`["Set", 2]`);
+    expect(
+      ce
+        .expr(['Intersection', ['Set', 1, 2], ['Set', 1, 2], ['Set', 2, 3]])
+        .evaluate()
+    ).toMatchInlineSnapshot(`["Set", 2]`);
+    // No overlap -> EmptySet
+    expect(
+      ce.expr(['Intersection', ['Set', 1, 2], ['Set', 3, 4]]).evaluate()
+    ).toMatchInlineSnapshot(`EmptySet`);
+    // Empty-set edge
+    expect(
+      ce.expr(['Intersection', ['Set', 1, 2], 'EmptySet']).evaluate()
+    ).toMatchInlineSnapshot(`EmptySet`);
+  });
+
+  test('Union', () => {
+    expect(
+      ce.expr(['Union', ['Set', 1, 2], ['Set', 2, 3]]).evaluate()
+    ).toMatchInlineSnapshot(`["Set", 1, 2, 3]`);
+    expect(
+      ce.expr(['Union', ['Set', 1, 2], 'EmptySet']).evaluate()
+    ).toMatchInlineSnapshot(`["Set", 1, 2]`);
+    expect(
+      ce.expr(['Union', 'EmptySet', 'EmptySet']).evaluate()
+    ).toMatchInlineSnapshot(`EmptySet`);
+  });
+
+  test('SetMinus', () => {
+    expect(
+      ce.expr(['SetMinus', ['Set', 1, 2], ['Set', 2]]).evaluate()
+    ).toMatchInlineSnapshot(`["Set", 1]`);
+    expect(
+      ce.expr(['SetMinus', ['Set', 1, 2], 2]).evaluate()
+    ).toMatchInlineSnapshot(`["Set", 1]`);
+    // Removing everything -> EmptySet
+    expect(
+      ce.expr(['SetMinus', ['Set', 1, 2], ['Set', 1, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`EmptySet`);
+    expect(
+      ce.expr(['SetMinus', 'EmptySet', ['Set', 1, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`EmptySet`);
+  });
+
+  // Regression: SymmetricDifference had no `evaluate` handler at all, so it
+  // never reduced finite literal-set operands to a `Set` result.
+  test('SymmetricDifference', () => {
+    expect(
+      ce.expr(['SymmetricDifference', ['Set', 1, 2], ['Set', 2, 3]]).evaluate()
+    ).toMatchInlineSnapshot(`["Set", 1, 3]`);
+    expect(
+      ce.expr(['SymmetricDifference', ['Set', 1, 2], 'EmptySet']).evaluate()
+    ).toMatchInlineSnapshot(`["Set", 1, 2]`);
+    // Identical sets -> EmptySet
+    expect(
+      ce.expr(['SymmetricDifference', ['Set', 1, 2], ['Set', 1, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`EmptySet`);
+    expect(
+      ce.expr(['SymmetricDifference', 'EmptySet', 'EmptySet']).evaluate()
+    ).toMatchInlineSnapshot(`EmptySet`);
+  });
+});

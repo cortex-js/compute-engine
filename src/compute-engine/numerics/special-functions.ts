@@ -636,18 +636,65 @@ export function computeBernoulliEven(
   return result;
 }
 
+/**
+ * Engine-scoped, monotonically-growing cache of even Bernoulli rationals.
+ *
+ * This deliberately bypasses `ce._cache`/`EngineCacheStore`. That mechanism
+ * only captures the `build`/`purge` callbacks passed on the *first* call that
+ * ever constructs a given named entry (`EngineCacheStore.getOrBuild` returns
+ * the cached value as-is on every later call, and `purgeValues()` — invoked
+ * on every `ce.precision` change — re-invokes only that *original*, now-stale
+ * closure). For a precision-driven size like this one, that means: build the
+ * table once at a low precision, then raise precision, and every later call
+ * silently keeps serving the too-short table forever (the per-call
+ * `minTerms` closure is never seen again). Verified with a probe: precision
+ * 20 → 300 followed by `Gamma(1.23456789)` produced digits that diverged from
+ * a fresh precision-300 engine starting at digit ~170 of a 300-digit result —
+ * a genuine correctness bug, not just a performance one. A `WeakMap` keyed on
+ * the engine instance is read/checked/rebuilt inline on every call, so it
+ * can never go stale; the entry is reclaimed automatically when the engine is
+ * garbage-collected (mirrors `factIndexCache` in
+ * `boxed-expression/constraint-subject.ts`).
+ */
+const bernoulliCache = new WeakMap<ComputeEngine, [bigint, bigint][]>();
+
 function getBernoulliRationals(
   ce: ComputeEngine,
   minTerms: number
 ): [bigint, bigint][] {
-  return ce._cache<[bigint, bigint][]>(
-    'bernoulli-even-rationals',
-    () => computeBernoulliEven(minTerms, ce._deadline),
-    (existing) => {
-      if (existing.length >= minTerms) return existing;
-      return computeBernoulliEven(minTerms, ce._deadline);
-    }
-  );
+  const existing = bernoulliCache.get(ce);
+  if (existing && existing.length >= minTerms)
+    return existing.length === minTerms ? existing : existing.slice(0, minTerms);
+
+  // Round the build size up (not just to the immediate `minTerms`) so that
+  // precision oscillation — e.g. alternating `ce.precision` between 50 and
+  // 200 — doesn't force a fresh `computeBernoulliEven` rebuild on every
+  // single call that needs marginally more terms than the last.
+  //
+  // The bonus is capped at a small ABSOLUTE amount (not a flat ×1.5, despite
+  // that being the initial idea): `computeBernoulliEven`'s cost is steeply
+  // superlinear in its term count (measured: 620 terms ≈ 0.56s, 900 ≈ 2.3s,
+  // 953 ≈ 2.9s — worse than quadratic, likely from BigInt operand growth), so
+  // a *proportional* 1.5× bonus is safe at the small term counts typical of
+  // everyday precision (tens to low hundreds) but turns dangerous at the
+  // term counts real high-precision requests already need on their own — a
+  // 1.5× bonus on the ~635 terms that `ce.precision = 1000` requires for
+  // Digamma/Gamma pushes the build to ~950 terms and ~2.9s, blowing the
+  // default 2s per-operation deadline (verified: this exact scenario timed
+  // out `Digamma`/`Trigamma`/`PolyGamma` tests at precision 1000). A capped
+  // absolute bonus keeps the *relative* overhead high where it's cheap
+  // (small term counts) and negligible where it's expensive (large term
+  // counts), so it can never turn an already-affordable request into one
+  // that blows the deadline.
+  const buildTerms = minTerms + Math.min(64, Math.ceil(minTerms / 2));
+  const table = computeBernoulliEven(buildTerms, ce._deadline);
+  bernoulliCache.set(ce, table);
+
+  // IMPORTANT: never hand callers more terms than they asked for. The
+  // Bernoulli expansions below are *asymptotic*, not convergent — past the
+  // optimal cutoff, Bernoulli-number growth overtakes the shrinking power of
+  // the expansion variable, so extra terms make the sum worse, not better.
+  return table.length === minTerms ? table : table.slice(0, minTerms);
 }
 
 /**

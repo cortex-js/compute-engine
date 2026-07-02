@@ -46,7 +46,6 @@ export type PrimitiveType =
   | 'set'
   | 'dictionary'
   | 'record'
-  | 'dictionary'
   | 'tuple'
   | 'value'
   | 'scalar'
@@ -63,18 +62,22 @@ export type PrimitiveType =
   | 'any';
 
 /**
- * - `number`: any numeric value = `complex` + `real` plus `NaN`
- * - `complex`: a number with non-zero real and imaginary parts = `finite_complex` plus `ComplexInfinity`
+ * The numeric tower (D10, 2026-07-02): `integer ⊂ rational ⊂ real ⊂ complex ⊂
+ * number`, with a parallel `finite_*` tower and a shared `non_finite_number`
+ * (±∞). `real` is a proper subtype of `complex`; both admit ±∞.
+ *
+ * - `number`: any numeric value = `complex` plus `NaN`
+ * - `complex`: a complex number (`real ⊂ complex`) = `finite_complex` + `non_finite_number`
  * - `finite_complex`: a finite complex number = `imaginary` + `finite_real`
  * - `imaginary`: a complex number with a real part of 0 (pure imaginary)
  * - `finite_number`: a finite numeric value = `finite_complex`
  * - `finite_real`: a finite real number = `finite_rational` + `finite_integer`
- * - `finite_rational`: a pure rational number
- * - `finite_integer`: a whole number
- * - `real`: a complex number with an imaginary part of 0 = `finite_real` + `non_finite_number`
+ * - `finite_rational`: a finite rational number (includes the finite integers)
+ * - `finite_integer`: a finite whole number
+ * - `real`: a real number (imaginary part 0), admits ±∞ = `finite_real` + `non_finite_number`
  * - `non_finite_number`: `PositiveInfinity`, `NegativeInfinity`
- * - `integer`: a whole number = `finite_integer` + `non_finite_number`
- * - `rational`: a pure rational number (not an integer) = `finite_rational` + `non_finite_number`
+ * - `integer`: a whole number, admits ±∞ = `finite_integer` + `non_finite_number`
+ * - `rational`: a rational number (includes the integers), admits ±∞ = `finite_rational` + `non_finite_number`
  *
  */
 export type NumericPrimitiveType =
@@ -303,10 +306,6 @@ export type Type =
  * <fixed_size> ::= <positive-integer_literal>
  *
  * <multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
- *
- * <map> ::= "map" | "map<" <map_elements> ">"
- *
- * <map_elements> ::= <name> <type> ("," <name> <type>)*
  *
  * <set> ::= "set<" <type> ">"
  *

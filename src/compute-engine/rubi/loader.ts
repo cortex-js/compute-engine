@@ -18,7 +18,7 @@ import RUBI_RULES_DATA from './rubi-rules-data.json';
 
 import type { IComputeEngine as ComputeEngine } from '../global-types';
 import type { Expr as Expression, RubiRuleDoc } from './types';
-import { compileRuleDocs, type CompiledRule } from './compile';
+import { compileRuleDocs, type CompileResult } from './compile';
 import { RubiDriver } from './driver';
 
 export interface IntegrationRulesLoadOptions {
@@ -33,11 +33,17 @@ export interface IntegrationRulesLoadReport {
   ruleCount: number;
   /** Number of corpus rules skipped at compile time. */
   skipped: number;
+  /** The skipped corpus rules, each with the reason it could not compile
+   * (e.g. `slots folded away by canonicalization`). Reported honestly on
+   * cached (idempotent re-load) calls too — the compile result is cached, so
+   * the reasons are not lost after the first call. */
+  skippedRules: { id: string; reason: string }[];
 }
 
-// Compiling the ~2.6k rules costs ~300 ms; cache per engine so repeated
-// `loadIntegrationRules(ce)` calls (idempotent) don't recompile.
-const compiledCache = new WeakMap<object, CompiledRule[]>();
+// Compiling the ~2.6k rules costs ~300 ms; cache the full compile result
+// (rules + skip reasons) per engine so repeated `loadIntegrationRules(ce)`
+// calls (idempotent) don't recompile AND still report the honest skip count.
+const compiledCache = new WeakMap<object, CompileResult>();
 
 /**
  * Compile the bundled Rubi rules and register them as the engine's symbolic
@@ -48,17 +54,13 @@ export function loadIntegrationRules(
   ce: ComputeEngine,
   options?: IntegrationRulesLoadOptions
 ): IntegrationRulesLoadReport {
-  let compiled = compiledCache.get(ce);
-  let skipped = 0;
-  if (!compiled) {
-    const result = compileRuleDocs(
-      ce,
-      RUBI_RULES_DATA as unknown as RubiRuleDoc[]
-    );
-    compiled = result.rules;
-    skipped = result.skipped.length;
-    compiledCache.set(ce, compiled);
+  let result = compiledCache.get(ce);
+  if (!result) {
+    result = compileRuleDocs(ce, RUBI_RULES_DATA as unknown as RubiRuleDoc[]);
+    compiledCache.set(ce, result);
   }
+  const compiled = result.rules;
+  const skipped = result.skipped;
 
   const driver = new RubiDriver(ce, compiled, {
     timeLimitMs: options?.timeLimitMs ?? 10_000,
@@ -83,7 +85,11 @@ export function loadIntegrationRules(
     return result;
   };
 
-  return { ruleCount: compiled.length, skipped };
+  return {
+    ruleCount: compiled.length,
+    skipped: skipped.length,
+    skippedRules: skipped,
+  };
 }
 
 /** True if the expression tree contains an `Integrate` node. */
