@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-06-28.
+**Last updated:** 2026-07-02.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -318,8 +318,11 @@ the store are only partially built:
   and its validity region (`xy < 1`) is an arithmetic condition, not an
   `onBranchCut` cut-membership test — so the store doesn't serve it.
   Complex-domain Fungrim rules already carry their own loader guards.
-  _(Deferred, churn: unconstrained `ln(x²)` stays the optimistic `2ln(x)` rather
-  than the always-sound `2ln|x|`, matching `ln(x)+ln(y) → ln(xy)`.)_
+  _(Landed since: even powers now use the always-sound `ln(x²) → 2ln|x|` and
+  `√(x²) → |x|`; odd and irrational exponents keep the optimistic generic-real
+  convention (`ln(x³) → 3ln(x)`) for unconstrained symbols, and symbols declared
+  `complex` are excluded from these rewrites entirely — see
+  [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md#generic-real-simplification-policy).)_
 
 - **(c) Exact asymptotics at special-function poles.** `Residue` and the limit
   engine currently _defer_ when a gamma/zeta-family function sits at a pole (the
@@ -374,6 +377,32 @@ common cases are already covered by the landed per-site fixes (Negate over
 evaluated tensors, `MatrixPower` negative branch, matrix juxtaposition). Detailed
 findings — the three failed approaches and why — are in
 `docs/plans/2026-06-28-tensor-value-representation-design.md`.
+
+### Correctness & symbolic findings (2026-07) — residue
+
+The July 2026 correctness and symbolic reviews are fully dispositioned: every
+verified P0 and P1 from both reviews landed across the Wave 1–4 commits. The
+findings docs are kept for the record — [`CORRECTNESS_FINDINGS.md`](./CORRECTNESS_FINDINGS.md),
+[`SYMBOLIC_FINDINGS.md`](./SYMBOLIC_FINDINGS.md), with the per-wave
+implementation log (decisions D1–D9, gate protocol, per-package status) in
+[`FINDINGS-TRACKER.md`](./FINDINGS-TRACKER.md). The condensed P2/P3 lists at the
+bottom of each findings doc are the remaining low-priority sweep. The
+opt-in/nightly harnesses that pin these fixes (exactness grid, type-soundness
+grid, mpmath kernel harness, JS/Python parity fuzz, round-trip battery) are being
+adopted from the archived sources in `reviews-archive/`.
+
+Two design-level residues are deliberately carried forward:
+
+- **D10 — `real ⊄ complex` in the type lattice.** `real` admits ±∞, so it is not
+  a subtype of `complex`; the Fungrim loader carries a real-symbol guard shim and
+  `box.ts` carries a `signatureHasComplexParam` skip to work around it. A lattice
+  decision that made the finite reals a subtype of `complex` would retire both
+  shims, but it interacts with the covering-union identities — a type-system
+  design choice, not a bug fix. Left for demand to justify.
+- **P1-19c — `Derivative(Sin).evaluate()` result typing.** The result type of an
+  evaluated derivative of a known function is not yet tightened (documented in
+  `library/calculus.ts`); it is blocked on evaluate-recursion and
+  underscore-lambda LaTeX serialization, so it waits on those.
 
 ### Review residue (open low-priority items)
 

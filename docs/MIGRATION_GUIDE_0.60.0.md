@@ -33,8 +33,9 @@ If you read nothing else, read the next section.
 
 4. **Compilation gained GPU/host parity for several heads you likely use**
    (component access `p.x`, `Range`, `Variance`/`GCD`/`Median`, seeded
-   `Random`, color values). Two JS compile cases remain broken — `Loop` and
-   `Integrate`. See [§7](#7-compilation).
+   `Random`, color values). `Loop` and definite `Integrate` now compile
+   correctly as well; only a *bounds-less* indefinite integral has no numeric
+   value to compile to. See [§7](#7-compilation).
 
 5. **Fungrim identities and the Rubi integrator are opt-in and off by default.**
    They cost nothing if you don't import them, and you almost certainly don't
@@ -84,7 +85,10 @@ correct", unlikely to need code changes):
 - `(aⁿ)ᵐ` no longer folds to `aⁿᵐ` based solely on an odd inner exponent
   (it was unsound on the principal branch for negative bases).
 - `ln(a) + ln(b) → ln(ab)` and friends no longer combine across the branch cut
-  (only for positive/unconstrained arguments).
+  (only for positive/unconstrained arguments). An unconstrained symbol is treated
+  as a generic real; a symbol *declared* `complex` is excluded from these
+  real-only rewrites. The authoritative statement of that policy is
+  [`docs/SIMPLIFY.md`](./SIMPLIFY.md#generic-real-simplification-policy).
 - `e^{iθ}` stays in exponential form for a symbolic angle under `evaluate()`.
   Convert on demand with the new `expr.simplify({ strategy: 'trig' })`.
 - `isFinite` is now known (`true`) for finite symbolic constants such as `√π`,
@@ -222,20 +226,19 @@ Python parentheses for `(a^b)^c`; GLSL/WGSL output for `Degrees`, complex
 multiplication, `Gamma`/`Factorial`/`Beta`/`Erf`, and `If`/`Which`/`When`; and
 symbolic derivatives of `Arcsec`/`Arccsc`.
 
-### ⚠️ Known compile limitations (still open in 0.60.0)
+### `Loop` and `Integrate` compilation
 
-Two JS compile cases produce wrong values and are tracked for a future release:
+Both of the JS compile cases that previously produced wrong values are resolved:
 
-- **`Loop` compiles to `undefined`.** The `for`-loop IIFE generated for
-  `Loop(body, Element(i, Range(lo, hi)))` has no `return`, so the compiled
-  function yields `undefined` instead of the list of body values.
-- **`Integrate` compiles to `NaN`.** When the integrand is a `Function`
-  expression (the common `\int x^2 dx` parse shape), the compiler emits a
-  double-lambda and `_SYS.integrate` returns `NaN`.
-
-**Workaround:** evaluate these in the interpreter (with `.N()` for a numeric
-result) rather than through a compiled function, or restructure the integrand to
-avoid the `Function`-wrapped shape.
+- **`Loop` compiles correctly.** The `for`-loop IIFE generated for
+  `Loop(body, Element(i, Range(lo, hi)))` now returns the list of body values —
+  `Loop(i², Element(i, Range(1, 4)))` compiles and runs to `[1, 4, 9, 16]`.
+- **Definite `Integrate` compiles and evaluates.** `\int_0^2 x^2\,dx` compiles to
+  a single-lambda `_SYS.integrate(…)` call and runs to `2.667`. Only a
+  *bounds-less indefinite* integral (`\int x^2\,dx`) has no numeric value to
+  compile to — its compiled function returns `null`. Evaluate an indefinite
+  integral symbolically in the interpreter (its antiderivative is not a number)
+  rather than through a compiled function.
 
 ---
 

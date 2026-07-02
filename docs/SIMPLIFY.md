@@ -34,6 +34,61 @@ Canonicalization now folds exact numeric operands in `Add` and `Multiply` expres
 - `Multiply(2, x, 5)` → `Multiply(10, x)`
 - `Multiply(1/2, x, 2)` → `x`
 
+A separate set of folds — `x/x → 1`, `1^x → 1`, `x/0`, `0/x`, `x/∞` — also fire
+at **canonicalization** (not simplify) for generic symbols. Their conventions and
+protections are documented in
+[`ARCHITECTURE.md`](../ARCHITECTURE.md#generic-symbol-conventions-at-canonicalization).
+
+---
+
+## Generic-real simplification policy
+
+This is the single authoritative statement of how `.simplify()` treats an
+**unknown** symbol.
+
+**An unknown is a generic real unless declared otherwise.** A symbol with no
+declared type (or a declared numeric supertype that admits ℝ) is assumed to
+stand for a generic real value. "Real-only" rewrites — identities that are valid
+on ℝ but change meaning on the complex plane — fire on such symbols. They can
+therefore change meaning at negative reals; this is an accepted convention, the
+price of simplifying unconstrained expressions.
+
+Concretely, for an unconstrained `x`:
+
+| Simplification        | Result         | Kind |
+| --------------------- | -------------- | ---- |
+| `ln x + ln y`         | `ln(xy)`       | generic-real |
+| `ln(x³)` (odd exp.)   | `3 ln(x)`      | generic-real (differs at negative reals) |
+| `ln(x²)` (even exp.)  | `2 ln(\|x\|)`  | always-sound `\|x\|` form |
+| `√(x²)`               | `\|x\|`        | always-sound `\|x\|` form |
+
+Even powers use the always-sound absolute-value form (`2 ln|x|`, `|x|`), valid
+for every real `x`. Odd and irrational exponents keep the optimistic generic-real
+convention (`ln(x³) → 3 ln(x)`, `ln(x^√2) → √2 ln(x)`), which is what changes
+meaning at negative reals.
+
+**When the rewrite bails.** A real-only rewrite is skipped when the operand's
+type admits genuinely non-real values — i.e. its type matches `complex` (or
+`imaginary`) but **not** `real`. This is the `isEligibleRealRewrite` gate
+(`src/compute-engine/function-properties/index.ts`). Detection is by *type*, so:
+
+- **Unconstrained** `x` — the rewrite fires (generic-real). `ln x + ln y → ln(xy)`,
+  `√(x²) → |x|`.
+- **Declared `complex`** (or `imaginary`) `x` — the rewrite does **not** fire at
+  all. `ln x + ln y`, `ln(x²)`, `√(z²)`, `|z|² → z²` are all left unchanged (each
+  is false at `z = i`).
+- **`assume(x > 0)`** (so `x.isReal === true` and `x > 0`) — the stronger,
+  abs-free form fires: `ln(x²) → 2 ln(x)` and `√(x²) → x`, with no `|·|`.
+
+Declared real subtypes behave like the generic real case: for `n : integer`,
+`√(n²) → |n|` and `ln(n²) → 2 ln(|n|)`.
+
+The branch-cut-sensitive log combinations (`ln a + ln b → ln(ab)` and the
+`ln(bⁿ)`/`ln(a/b)` expansions) additionally consult the `onBranchCut` guard and
+stay symbolic when an operand is provably on the negative-real cut. See the
+[0.60.0 migration guide](./MIGRATION_GUIDE_0.60.0.md#1-evaluate-stays-symbolic-for-exact-values--use-n)
+for the consumer-facing summary.
+
 ---
 
 ## 2. Remaining Tasks (Skipped Tests)

@@ -197,6 +197,47 @@ not canonicalized), and **non-canonical** (not bound, usable only for pattern
 matching/serialization). The distinctions and pitfalls are documented in detail
 in [CLAUDE.md](./CLAUDE.md#expression-creation-modes-canonical-vs-structural).
 
+### Generic-symbol conventions at canonicalization
+
+Canonicalization applies a small set of algebraic folds to **generic**
+(unconstrained) symbols — an operand that carries a free variable stands for a
+generic value of that variable. These are deliberate conventions, not bugs: they
+trade exactness at a measure-zero point for a simpler canonical form.
+
+| Input                    | Canonical form              |
+| ------------------------ | --------------------------- |
+| `x / x`, `(x + 1)/(x + 1)` | `1`                       |
+| `1 ^ x`                  | `1`                         |
+| `x / 0`                  | `~∞` (`ComplexInfinity`)    |
+| `0 / x`                  | `0`                         |
+| `x / ∞`                  | `0`                         |
+
+The cancellation **asserts genericity**: `x/x → 1` treats `x` as a generic
+(hence non-zero) value. This is why the fold survives a later substitution —
+`ce.parse('\\frac{x}{x}').subs({ x: 0 })` is `1`, not `NaN`, because the `.json`
+is already the literal `1` before the substitution reaches it. To recover the
+true value at an excluded point, keep the expression uncanonicalized
+(`{ canonical: false }`) and evaluate after substituting.
+
+**Constant operands are protected.** These folds fire only on operands that
+carry a free variable. A numerator or denominator that is a *constant
+expression* is never collapsed by the generic rules; it is evaluated instead, so
+a provably-zero constant denominator surfaces the true indeterminate:
+
+- `0 / (1 − 1)` canonicalizes to `NaN` — the denominator evaluates to `0`,
+  giving `0/0` — **not** to `0`: the `0/x → 0` fold does not reach a constant
+  zero.
+- `(1 − 1) / 0` and `0 / 0` likewise canonicalize to `NaN`.
+- `(π + 1)/(π + 1)` is left as a fraction at canonicalization (a constant, so the
+  identical-operand fold is skipped); it reduces to `1` only under `.simplify()`,
+  which first proves the denominator non-zero.
+
+Larger cancellations (`x²/(5x²) → 1/5`) and the wider policy that governs which
+`.simplify()` rewrites treat an unknown as a generic **real** (why
+`ln(x) + ln(y) → ln(xy)` fires for an unconstrained `x` but not for a
+declared-`complex` one) are **simplify-level**, documented in
+[`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md#generic-real-simplification-policy).
+
 ### Definitions: the semantics of symbols and operators
 
 Behavior is attached not to the expression but to its **definition**, resolved

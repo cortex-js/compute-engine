@@ -34,39 +34,32 @@ Specifically:
 - `x^(...)` -> `x^{...}`
   - Also `x^#` so `x^123` -> `x^{123}`
   - Also `x^-#` so `x^-1+2` -> `x^{-1}+2`
-  > [Review] `x^(...)` and `x_(...)` are already implemented in `parse.ts`
-  > (lines ~1685 and ~1704). The `x^#` (multi-digit) and `x^-#` (negative
-  > exponent) rules are new and would need implementation.
+  > [Review] `x^(...)` and `x_(...)` are already implemented in `parse.ts`.
+  > **Implemented.** `x^#` (multi-digit) and `x^-#` (negative exponent) now work:
+  > `x^123` -> `x^{123}`, `x^-1+2` -> `x^{-1}+2`, `x^-12` -> `x^{-12}`.
   >
-  > Consider adding the same rules for subscripts: `x_#` -> `x_{#}` (e.g.,
-  > `a_12` -> `a_{12}`). Users are likely to want both.
+  > The same rules apply to subscripts: `x_#` -> `x_{#}` — `a_12` -> `a_{12}`.
 - `*` -> `\times`
-  > [Review] Should `**` map to `\cdot` or to exponentiation (`^`)? Many
-  > programming languages use `**` for power. Worth deciding. I'd suggest:
-  > - `*` -> `\times` (multiplication)
-  > - `**` -> `^` (exponentiation, Python-style)
+  > [Review] **Implemented.** `*` -> `\times` (multiplication) and, Python-style,
+  > `**` -> `^` (exponentiation): `2**3` -> `8`, `x**2` -> `x^2`.
 - `oo` -> `\infty`
-  > [Review] Potential conflict: `oo` is two letters, which in strict LaTeX
-  > parsing would be the product `o \cdot o`. This is fine as long as we only
-  > apply this rule in non-strict mode. But consider: what about `foo`? The
-  > parser needs to ensure `oo` is only matched as a standalone token, not
-  > as a substring of an identifier. The bare function parser already does
-  > word-boundary detection, so this should use the same mechanism.
+  > [Review] **Implemented** in non-strict mode only: `oo` -> `\infty`
+  > (`PositiveInfinity`), while in strict mode it stays the product `o \cdot o`.
+  > Word boundaries are respected, so `foo` is *not* matched — it stays
+  > `f \cdot o \cdot o`.
 
 - The following sequence of characters would be interpreted as indicated:
   - `sqrt(...)` -> `\sqrt{...}`
   - `cbrt(...)` -> `\sqrt[3]{...}`
   - `sqrt#` -> `\sqrt{#}`, so `2+sqrt34-1` -> `2+\sqrt{34}-1`
   - `cbrt#` -> `\sqrt[3]{...}`
-  > [Review] `sqrt(...)` is already implemented via `BARE_FUNCTION_MAP`.
-  > `cbrt` is not in the map yet -- needs to be added with special handling
-  > for the optional `[3]` argument.
+  > [Review] **Implemented.** `sqrt(...)` and `cbrt(...)` both work
+  > (`cbrt(x)` -> `["Root", "x", 3]`), including the bare/digit forms:
+  > `2+sqrt34-1` -> `2 + \sqrt{34} - 1` and `cbrt8` -> `["Root", 8, 3]`.
   >
-  > The `sqrt#` (no parens, just digits) rule is tricky: how far does the
-  > digit run extend? `sqrt34` -> `\sqrt{34}` is clear, but what about
-  > `sqrt3x`? Is that `\sqrt{3}x` or `\sqrt{3x}`? I'd say digits-only:
-  > consume consecutive digits after `sqrt`/`cbrt`, stop at first non-digit.
-  > This matches the `#` notation in the spec.
+  > The `sqrt#`/`cbrt#` rule (no parens, just digits) is **digits-only**, as the
+  > review recommended: it consumes consecutive digits and stops at the first
+  > non-digit, so `sqrt34` -> `\sqrt{34}` and `sqrt4` -> `2`.
   - `cos`, `sin`, `tan`, `ln`, `log` -> `\cos`, `\sin`, `\tan`, `\ln`, `\log`
     - similarly for inverse and hyperbolic trig functions
   > [Review] Already implemented. `BARE_FUNCTION_MAP` in `parse.ts` covers:
