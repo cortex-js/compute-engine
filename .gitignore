@@ -81,5 +81,5 @@ typings/
 # next.js build output
 .next
 
-*-FINDINGS.md
-*-REVIEW.md
+*_FINDINGS.md
+*_REVIEW.md
