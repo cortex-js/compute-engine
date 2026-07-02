@@ -228,6 +228,32 @@ vec2 _iv_powf(vec2 a, float p) {
   return _iv_guard1(_iv_clamp(_iv_widen_pow(r)), a); // pow ~16 ulp
 }
 
+// Real value of x^(p/q) for an ODD denominator q (real for every real x),
+// mirroring the interpreter / interval-js \`powRational\` convention:
+//   - \`numer\` even → even function,  |x|^e (≥ 0)
+//   - \`numer\` odd  → odd function,   sign(x)·|x|^e
+// Only called for a POSITIVE exponent (e = numer/q > 0, guaranteed by the
+// caller), so x = 0 → 0.
+float _iv_pow_rat_scalar(float x, float numer, float e) {
+  if (x == 0.0) return 0.0;
+  float m = pow(abs(x), e);
+  return (mod(abs(numer), 2.0) == 1.0 && x < 0.0) ? -m : m;
+}
+
+// x^(numer/q), q ODD, numer/q = e > 0: real for every real base (e.g.
+// (-8)^(2/3) = 4, (-32)^(3/5) = -8) — unlike \`_iv_powf\`, which clamps a
+// negative base to empty. Monotone increasing everywhere when \`numer\` is odd;
+// decreasing on x<0 / increasing on x>0 (interior minimum of 0) when \`numer\`
+// is even — the endpoints, plus 0 when it is interior, bracket the range
+// (mirrors interval-js \`powRational\`).
+vec2 _iv_powrat(vec2 a, float numer, float e) {
+  float lo = _iv_pow_rat_scalar(a.x, numer, e);
+  float hi = _iv_pow_rat_scalar(a.y, numer, e);
+  vec2 r = vec2(min(lo, hi), max(lo, hi));
+  if (a.x <= 0.0 && a.y >= 0.0) r = vec2(min(r.x, 0.0), max(r.y, 0.0));
+  return _iv_guard1(_iv_clamp(_iv_widen_pow(r)), a); // pow ~16 ulp
+}
+
 // ── Phase 3: trigonometric & inverse-trigonometric functions ───────────────
 // Mirrors interval-js (interval/trigonometric.ts): endpoints with extremum
 // snapping, then outward-widened by the transcendental margin (\`_iv_widen_t\`).
@@ -314,7 +340,12 @@ vec2 _iv_atan(vec2 a) {
 
 vec2 _iv_floor(vec2 a) { return _iv_guard1(_iv_clamp(vec2(floor(a.x), floor(a.y))), a); }
 vec2 _iv_ceil(vec2 a) { return _iv_guard1(_iv_clamp(vec2(ceil(a.x), ceil(a.y))), a); }
-vec2 _iv_round(vec2 a) { return _iv_guard1(_iv_clamp(vec2(floor(a.x + 0.5), floor(a.y + 0.5))), a); }
+// Round half away from zero (Round(-2.5) = -3), matching the interpreter —
+// NOT GLSL \`round()\` (round-half-to-even) nor \`floor(x + 0.5)\` (half toward
+// +∞). Monotone non-decreasing like Floor/Ceil, so the pointwise endpoint
+// application is a sound, tight value-range enclosure.
+float _iv_round_half_away(float x) { return sign(x) * floor(abs(x) + 0.5); }
+vec2 _iv_round(vec2 a) { return _iv_guard1(_iv_clamp(vec2(_iv_round_half_away(a.x), _iv_round_half_away(a.y))), a); }
 vec2 _iv_trunc(vec2 a) { return _iv_guard1(_iv_clamp(vec2(trunc(a.x), trunc(a.y))), a); }
 vec2 _iv_sign(vec2 a) { return _iv_guard1(vec2(sign(a.x), sign(a.y)), a); }
 
@@ -345,10 +376,13 @@ vec2 _iv_max(vec2 a, vec2 b) {
 vec2 _iv_mod(vec2 a, vec2 b) {
   if (b.x <= 0.0 && b.y >= 0.0) return _iv_guard2(IV_ENTIRE, a, b);
   if (b.x == b.y) {
-    float p = abs(b.x);
+    // Signed modulus: floored mod's sign follows the DIVISOR (Mod(5,-3) = -1),
+    // matching the interpreter and interval-js. Using abs(b) here returned the
+    // nonnegative mod-by-abs value for a negative divisor — wrong sign.
+    float p = b.x;
     float flo = floor(a.x / p);
     vec2 r = (flo == floor(a.y / p)) ? vec2(a.x - p * flo, a.y - p * flo)
-                                     : vec2(0.0, p);
+                                     : vec2(min(p, 0.0), max(p, 0.0));
     return _iv_guard2(_iv_clamp(_iv_widen(r)), a, b);
   }
   // Composed path widens via the inner _iv_sub/_iv_mul/_iv_div/_iv_floor.
@@ -531,9 +565,24 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
       // Tight integer power (even/odd handled in _iv_powi).
       if (Number.isInteger(v) && v >= 0)
         return `_iv_powi(${compile(base)}, ${formatGPUNumber(v)})`;
-      // Positive non-integer (rational) power: real only for base ≥ 0.
-      if (!Number.isInteger(v) && v > 0)
+      // Positive non-integer (rational) power.
+      if (!Number.isInteger(v) && v > 0) {
+        // A rational exponent p/q (lowest terms) with an ODD denominator is
+        // real for a negative base too (e.g. (-8)^(2/3) = 4). Route through
+        // `_iv_powrat`, which applies the interpreter's real-root convention;
+        // `_iv_powf` clamps a negative base to empty.
+        const p = exp.numerator?.re;
+        const q = exp.denominator?.re;
+        if (
+          Number.isInteger(p) &&
+          Number.isInteger(q) &&
+          q > 1 &&
+          q % 2 !== 0
+        )
+          return `_iv_powrat(${compile(base)}, ${formatGPUNumber(p)}, ${formatGPUNumber(v)})`;
+        // Even denominator (or non-rational): real only for base ≥ 0.
         return `_iv_powf(${compile(base)}, ${formatGPUNumber(v)})`;
+      }
       // Negative exponents (reciprocal powers) are deferred → `unsupported`
       // → CPU `interval-js` fallback. (Reciprocals via `Divide` are supported.)
       throw new Error(

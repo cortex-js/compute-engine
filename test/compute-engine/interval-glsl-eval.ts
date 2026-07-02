@@ -133,6 +133,20 @@ const _iv_powf = (a: IV, p: number) => {
   if (a[1] < 0) r = IV_EMPTY;
   return g1(cl(wpow(r)), a);
 };
+// x^(numer/q), q ODD, e = numer/q > 0: real for every real base (mirrors
+// interval-js `powRational` / the preamble's `_iv_powrat`).
+const powRatScalar = (x: number, numer: number, e: number) => {
+  if (x === 0) return 0;
+  const m = Math.pow(Math.abs(x), e);
+  return Math.abs(numer) % 2 === 1 && x < 0 ? -m : m;
+};
+const _iv_powrat = (a: IV, numer: number, e: number): IV => {
+  const lo = powRatScalar(a[0], numer, e);
+  const hi = powRatScalar(a[1], numer, e);
+  let r: IV = [Math.min(lo, hi), Math.max(lo, hi)];
+  if (a[0] <= 0 && a[1] >= 0) r = [Math.min(r[0], 0), Math.max(r[1], 0)];
+  return g1(cl(wpow(r)), a);
+};
 const PI = Math.PI;
 const TWO_PI = 2 * Math.PI;
 const HALF_PI = Math.PI / 2;
@@ -192,8 +206,11 @@ const _iv_acos = (a: IV) => {
 const _iv_atan = (a: IV) => g1(cl(wdt([Math.atan(a[0]), Math.atan(a[1])])), a);
 const _iv_floor = (a: IV) => g1(cl([Math.floor(a[0]), Math.floor(a[1])]), a);
 const _iv_ceil = (a: IV) => g1(cl([Math.ceil(a[0]), Math.ceil(a[1])]), a);
+// Round half away from zero (Round(-2.5) = -3), mirroring the preamble's
+// `_iv_round_half_away` — NOT `Math.round`/`floor(x + 0.5)` (half toward +∞).
+const roundHalfAway = (x: number) => Math.sign(x) * Math.floor(Math.abs(x) + 0.5);
 const _iv_round = (a: IV) =>
-  g1(cl([Math.floor(a[0] + 0.5), Math.floor(a[1] + 0.5)]), a);
+  g1(cl([roundHalfAway(a[0]), roundHalfAway(a[1])]), a);
 const _iv_trunc = (a: IV) => g1(cl([Math.trunc(a[0]), Math.trunc(a[1])]), a);
 const _iv_sign = (a: IV) => g1([Math.sign(a[0]), Math.sign(a[1])], a);
 const _iv_heaviside = (a: IV) => {
@@ -212,10 +229,14 @@ const _iv_max = (a: IV, b: IV) =>
 const _iv_mod = (a: IV, b: IV): IV => {
   if (b[0] <= 0 && b[1] >= 0) return g2(IV_ENTIRE, a, b);
   if (b[0] === b[1]) {
-    const p = Math.abs(b[0]);
+    // Signed modulus (floored: sign follows the divisor, Mod(5,-3) = -1) —
+    // mirrors the preamble's `_iv_mod` fast path.
+    const p = b[0];
     const flo = Math.floor(a[0] / p);
     const r: IV =
-      flo === Math.floor(a[1] / p) ? [a[0] - p * flo, a[1] - p * flo] : [0, p];
+      flo === Math.floor(a[1] / p)
+        ? [a[0] - p * flo, a[1] - p * flo]
+        : [Math.min(p, 0), Math.max(p, 0)];
     return g2(cl(wd(r)), a, b);
   }
   return _iv_sub(a, _iv_mul(b, _iv_floor(_iv_div(a, b))));
@@ -237,6 +258,7 @@ const HELPERS = {
   _iv_log10,
   _iv_log2,
   _iv_powf,
+  _iv_powrat,
   _iv_sin,
   _iv_cos,
   _iv_tan,
