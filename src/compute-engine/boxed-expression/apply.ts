@@ -1,10 +1,38 @@
 import { Complex } from 'complex-esm';
 import { BigDecimal } from '../../big-decimal';
 
-import type { Expression } from '../global-types';
+import type { Expression, IComputeEngine } from '../global-types';
 
+import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
+import { SMALL_INTEGER } from '../numerics/numeric';
 import { bignumPreferred } from './utils';
 import { isNumber } from './type-guards';
+
+/**
+ * Box a kernel result that is a plain JS double.
+ *
+ * In an engine working above machine precision, a plain-double result means
+ * it was computed at machine precision (either no bignum kernel exists for
+ * the operator, or the bignum kernel signalled "out of domain" and the
+ * machine lane answered). Wrap it as a `MachineNumericValue` so it carries
+ * its true ~16-digit precision instead of impersonating a full-precision
+ * bignum: previously `BesselI(0, 100).N()` at 50 digits printed 43 digits
+ * of a 16-digit value. A machine-precision operand then contaminates
+ * downstream arithmetic to machine precision, mirroring float contagion.
+ *
+ * Small integers stay exact: machine kernels return them for exact special
+ * values (e.g. `BesselI(0, 0)` = 1), and `ce.number()` interns them.
+ * Non-finite values keep their canonical boxing (±oo, NaN).
+ */
+function boxMachineNumber(ce: IComputeEngine, value: number): Expression {
+  if (
+    bignumPreferred(ce) &&
+    Number.isFinite(value) &&
+    !(Number.isInteger(value) && Math.abs(value) <= SMALL_INTEGER)
+  )
+    return ce.number(new MachineNumericValue(value));
+  return ce.number(value);
+}
 
 export function apply(
   expr: Expression,
@@ -31,6 +59,7 @@ export function apply(
   if (result === undefined) return undefined;
   if (result instanceof Complex)
     return ce.number(ce._numericValue({ re: result.re, im: result.im }));
+  if (typeof result === 'number') return boxMachineNumber(ce, result);
   return ce.number(result);
 }
 
@@ -98,7 +127,7 @@ export function applyN(
   }
   if (typeof result === 'number') {
     if (Number.isNaN(result)) return undefined;
-    return ce.number(result);
+    return boxMachineNumber(ce, result);
   }
   if (result.isNaN()) return undefined;
   return ce.number(result);
@@ -158,5 +187,6 @@ export function apply2(
   // wrong and inconsistent with the single-argument `apply` above. (The
   // complex branch still chops each component, where a tiny re/im part is
   // typically trig roundoff.)
+  if (typeof result === 'number') return boxMachineNumber(ce, result);
   return ce.number(result);
 }

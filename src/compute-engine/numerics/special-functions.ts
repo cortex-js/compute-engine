@@ -789,26 +789,19 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
   // than running its full ≈π·w (see `gammalnCore`).
   const shift = Math.max(7, Math.ceil(p));
 
-  // Handle negative z via recurrence shift
+  // Poles at z = 0, −1, −2, …
   let w = z;
   let result = new BigDecimal(0);
-  const sign = nNum % 2 === 0 ? -1 : 1;
+  if (w.isNegative() && w.isInteger()) return BigDecimal.NAN;
 
-  if (w.isNegative()) {
-    if (w.isInteger()) return BigDecimal.NAN;
-    const negSign = nNum % 2 === 0 ? 1 : -1;
-    while (w.lt(1)) {
-      result = result.add(
-        new BigDecimal(negSign).mul(bigFactorial(nNum)).div(w.pow(nNum + 1))
-      );
-      w = w.add(BigDecimal.ONE);
-    }
-  }
-
-  // Recurrence: ψₙ(z+1) = ψₙ(z) + (-1)^n n! / z^{n+1}
+  // Recurrence (from ψ(z+1) = ψ(z) + 1/z differentiated n times, DLMF 5.15.5):
+  //   ψ⁽ⁿ⁾(z) = ψ⁽ⁿ⁾(z+1) + (−1)^{n+1} n!/z^{n+1}
+  // The single shift loop also lifts negative non-integer z past the poles.
+  const sign = nNum % 2 === 0 ? -1 : 1; // (−1)^{n+1}
+  const bigFactN = bigFactorial(nNum);
   while (w.lt(shift)) {
     result = result.add(
-      new BigDecimal(sign).mul(bigFactorial(nNum)).div(w.pow(nNum + 1))
+      new BigDecimal(sign).mul(bigFactN).div(w.pow(nNum + 1))
     );
     w = w.add(BigDecimal.ONE);
   }
@@ -816,14 +809,21 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
   const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
   const bernoulli = getBernoulliRationals(ce, maxTerms);
 
-  // Asymptotic: ψₙ(w) ~ (-1)^{n+1} [(n-1)!/w^n + n!/(2w^{n+1}) + Σ ...]
-  const signA = nNum % 2 === 0 ? -1 : 1;
+  // Asymptotic expansion (DLMF 5.15.9, extended to general n — obtained by
+  // differentiating DLMF 5.11.2 n times):
+  //   ψ⁽ⁿ⁾(w) ~ (−1)^{n−1} [ (n−1)!/wⁿ + n!/(2w^{n+1})
+  //             + Σ_{k≥1} B₂ₖ·(2k+n−1)!/((2k)!·w^{2k+n}) ]
+  const signA = nNum % 2 === 0 ? -1 : 1; // (−1)^{n−1}
   result = result.add(
     new BigDecimal(signA).mul(bigFactorial(nNum - 1)).div(w.pow(nNum))
   );
   result = result.add(
-    new BigDecimal(signA).mul(bigFactorial(nNum)).div(w.pow(nNum + 1).mul(2))
+    new BigDecimal(signA).mul(bigFactN).div(w.pow(nNum + 1).mul(2))
   );
+
+  // (n−1)! as bigint, for the Bernoulli-term coefficients below
+  let factNm1 = 1n;
+  for (let j = 2; j <= nNum - 1; j++) factNm1 *= BigInt(j);
 
   // Higher-order terms using Bernoulli numbers. Round the running power each
   // step (un-rounded `mul` grows the significand; see `gammalnCore`).
@@ -834,13 +834,14 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
   for (let k = 0; k < nTerms; k++) {
     const m = 2 * (k + 1);
     const [bNum, bDen] = bernoulli[k];
-    // Rising factorial: (n)(n+1)...(n+2k-1) = Π_{j=0}^{2k-1} (n+j)
-    let coeff = 1n;
+    // Coefficient (2k+n−1)!/(2k)! built as (n−1)!·n(n+1)⋯(n+2k−1)/(2k)!.
+    // (A previous version dropped the (n−1)! factor — wrong for n ≥ 3.)
+    let coeff = factNm1;
     for (let j = 0; j < m; j++) coeff *= BigInt(nNum + j);
     // (2k)! as bigint
     let factM = 1n;
     for (let j = 2; j <= m; j++) factM *= BigInt(j);
-    // term = signA * B_{2k} * coeff / (factM * w^{n+2k})
+    // term = signA * B_{2k} * (2k+n−1)! / ((2k)! * w^{n+2k})
     const term = new BigDecimal((BigInt(signA) * bNum * coeff).toString()).div(
       new BigDecimal((bDen * factM).toString()).mul(wPow)
     );
@@ -936,6 +937,14 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
       .mul(zetaCore(ce, BigDecimal.ONE.sub(s)));
   }
 
+  const wp = BigDecimal.precision;
+
+  // Huge s: ζ(s) − 1 = 2^{−s} + 3^{−s} + … < 10^{−(wp+10)}, so ζ(s) rounds
+  // to exactly 1 at this precision. Guard BEFORE the acceleration loop: its
+  // (k+1)^s powers are exact ~s-digit bigints, which for huge s (e.g. 1e9)
+  // exhaust the BigInt size limit (RangeError) long before any deadline.
+  if (s.gt((wp + 10) * 3.33)) return BigDecimal.ONE;
+
   // General case (Re(s) > 0, s ≠ 1): Cohen–Villegas–Zagier Algorithm 1.
   // Accelerates the Dirichlet eta series η(s) = Σ_{k≥0} (−1)^k/(k+1)^s with
   // error bounded by (3+√8)^{−n} ≈ 5.83^{−n} (≈0.766 digits/term), then
@@ -944,7 +953,6 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
   // working-precision guard alone secures the full requested precision.
   // (The earlier binomial-partial-sum form converged only as 2^{−n}, so the
   // 1.3·p term budget delivered only ~0.4·p correct digits.)
-  const wp = BigDecimal.precision;
   const n = Math.max(22, Math.ceil(1.32 * wp) + 3);
   const alpha = new BigDecimal(3).add(new BigDecimal(8).sqrt()); // 3 + √8
   const alphaN = alpha.pow(n);
@@ -1117,44 +1125,48 @@ export function polygamma(n: number, x: number): number {
   if (n === 1) return trigamma(x);
   if (!isFinite(x) || x === 0) return NaN;
 
-  // Reflection formula for negative x
-  if (x < 0) {
-    if (Number.isInteger(x)) return NaN;
-    // ψₙ(1-x) + (-1)^{n+1} ψₙ(x) = (-1)^n π dⁿ/dxⁿ cot(πx)
-    // This is complex for general n, so use recurrence to shift to positive
-    let result = 0;
-    let z = x;
-    const sign = n % 2 === 0 ? 1 : -1;
-    while (z < 1) {
-      // ψₙ(x) = ψₙ(x+1) + (-1)^{n+1} n! / x^{n+1}
-      result += (sign * factorial(n)) / Math.pow(z, n + 1);
-      z += 1;
-    }
-    return result + polygamma(n, z);
-  }
+  // Poles at x = 0, −1, −2, … (x === 0 is rejected above)
+  if (x < 0 && Number.isInteger(x)) return NaN;
 
-  // Recurrence: ψₙ(x+1) = ψₙ(x) + (-1)^n n! / x^{n+1}
+  // Recurrence (from ψ(x+1) = ψ(x) + 1/x differentiated n times, DLMF 5.15.5):
+  //   ψ⁽ⁿ⁾(x) = ψ⁽ⁿ⁾(x+1) + (−1)^{n+1} n!/x^{n+1}
+  // Shift upward (this also lifts negative non-integer x past the poles)
+  // until z ≥ n + 10, where the 10-term Bernoulli tail below reaches full
+  // double precision: the first omitted term, |B₂₂|·(n+21)!/(22!·(n−1)!·z²²)
+  // relative to the leading (n−1)!/zⁿ, is ≲ 1e−17 for z ≥ n + 10 (n ≲ 20).
   let result = 0;
   let z = x;
-  const sign = n % 2 === 0 ? -1 : 1;
-  while (z < 7) {
-    result += (sign * factorial(n)) / Math.pow(z, n + 1);
+  const factN = factorial(n);
+  const sign = n % 2 === 0 ? -1 : 1; // (−1)^{n+1}
+  const zMin = n + 10;
+  while (z < zMin) {
+    result += (sign * factN) / Math.pow(z, n + 1);
     z += 1;
   }
 
-  // Asymptotic: ψₙ(z) ~ (-1)^{n+1} [ (n-1)!/z^n + n!/(2z^{n+1}) + Σ ... ]
-  const signA = n % 2 === 0 ? -1 : 1;
+  // Asymptotic expansion (DLMF 5.15.9, extended to general n — obtained by
+  // differentiating DLMF 5.11.2 n times):
+  //   ψ⁽ⁿ⁾(z) ~ (−1)^{n−1} [ (n−1)!/zⁿ + n!/(2z^{n+1})
+  //             + Σ_{k≥1} B₂ₖ·(2k+n−1)!/((2k)!·z^{2k+n}) ]
+  const signA = n % 2 === 0 ? -1 : 1; // (−1)^{n−1}
   result += (signA * factorial(n - 1)) / Math.pow(z, n);
-  result += (signA * factorial(n)) / (2 * Math.pow(z, n + 1));
+  result += (signA * factN) / (2 * Math.pow(z, n + 1));
 
-  // Higher-order terms using Bernoulli numbers
-  let zPow = Math.pow(z, n + 2);
-  for (let k = 0; k < Math.min(BERNOULLI_2K.length, 6); k++) {
-    const m = 2 * (k + 1);
-    let coeff = 1;
-    for (let j = 0; j < m; j++) coeff *= n + j;
-    result += (signA * BERNOULLI_2K[k] * coeff) / (factorial(m) * zPow);
-    zPow *= z * z;
+  // Bernoulli tail. The k-th factor fₖ = (2k+n−1)!/((2k)!·z^{2k+n}) is built
+  // incrementally: f₁ = (n+1)!/(2!·z^{n+2}),
+  //   f_{k+1} = fₖ·(2k+n)(2k+n+1)/((2k+1)(2k+2)·z²).
+  // (A previous version used n(n+1)⋯(n+2k−1)/(2k)! — a factor (n−1)! too
+  // small; only n ≤ 2 was unaffected since 1! = 0! = 1.)
+  let f = (factN * (n + 1)) / (2 * Math.pow(z, n + 2));
+  let prevAbs = Infinity;
+  for (let k = 1; k <= BERNOULLI_2K.length; k++) {
+    const term = BERNOULLI_2K[k - 1] * f;
+    // The expansion is divergent: stop at the smallest term
+    if (Math.abs(term) >= prevAbs) break;
+    result += signA * term;
+    prevAbs = Math.abs(term);
+    const m = 2 * k;
+    f *= ((m + n) * (m + n + 1)) / ((m + 1) * (m + 2) * z * z);
   }
 
   return result;
@@ -1182,20 +1194,33 @@ export function beta(a: number, b: number): number {
 
 /**
  * Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s
- * Uses Borwein's algorithm for convergence acceleration.
+ *
+ * Uses the Cohen–Rodríguez Villegas–Zagier acceleration of the alternating
+ * Dirichlet eta series (same algorithm as `bigZeta`), direct summation for
+ * large s, and the functional equation for s < 0.
  */
 export function zeta(s: number): number {
   if (!isFinite(s)) return NaN;
   if (s === 1) return Infinity; // pole
 
-  // Special values for positive even integers
+  // Special values for small positive even integers (DLMF 25.6.1)
   if (s === 0) return -0.5;
   if (s === 2) return (Math.PI * Math.PI) / 6;
   if (s === 4) return Math.PI ** 4 / 90;
   if (s === 6) return Math.PI ** 6 / 945;
   if (s === 8) return Math.PI ** 8 / 9450;
 
-  // Functional equation for Re(s) < 0:
+  // Negative integers (DLMF 25.6.3): ζ(−n) = −B_{n+1}/(n+1).
+  // Even −n are the trivial zeros (odd Bernoulli numbers vanish); for odd −n
+  // down to −19 the closed form is exact to ≤1 ulp, avoiding the Γ and π-power
+  // roundings of the functional equation.
+  if (s < 0 && Number.isInteger(s)) {
+    if (s % 2 === 0) return 0;
+    const np1 = 1 - s; // n + 1, even
+    if (np1 / 2 <= BERNOULLI_2K.length) return -BERNOULLI_2K[np1 / 2 - 1] / np1;
+  }
+
+  // Functional equation for Re(s) < 0 (DLMF 25.4.2):
   // ζ(s) = 2^s π^{s-1} sin(πs/2) Γ(1-s) ζ(1-s)
   if (s < 0) {
     return (
@@ -1207,38 +1232,74 @@ export function zeta(s: number): number {
     );
   }
 
-  // Cohen-Villegas-Zagier acceleration for the Dirichlet eta function
-  // ζ(s) = -1/(d_{n}(1-2^{1-s})) Σ_{k=0}^{n} (-1)^k (d_k - d_n) / (k+1)^s
-  const n = 22;
-  const d = zetaCoefficients(n);
-  const dn = d[n];
+  // Large s: the Dirichlet series 1 + 2^{−s} + 3^{−s} + … converges to full
+  // double precision in ≤ ~10^{18/s} terms (tail Σ_{m>M} m^{−s} < M^{1−s}/(s−1)).
+  if (s >= 12) {
+    let sum = 1;
+    for (let m = 2; m <= 128; m++) {
+      const t = Math.pow(m, -s);
+      sum += t;
+      if (t < sum * 1e-18) break;
+    }
+    return sum;
+  }
+
+  // 0 < s < 12, s ≠ 1: Borwein's alternating-series acceleration
+  // (P. Borwein, "An efficient algorithm for the Riemann zeta function",
+  // CMS Conf. Proc. 27 (2000), Proposition 1; equivalently Cohen–Rodríguez
+  // Villegas–Zagier, Exp. Math. 9 (2000), Algorithm 1 — the same algorithm
+  // `zetaCore` uses for the bignum lane):
+  //   ζ(s) = [Σ_{k=0}^{n−1} (−1)^k (d_n − d_k)/(k+1)^s] / (d_n·(1 − 2^{1−s}))
+  // with error ≤ 3·(3+√8)^{−n}·|1−2^{1−s}|^{−1}: n = 28 gives ≈ 1e−21, so
+  // double rounding dominates. The weights d_n − d_k are exact integers,
+  // precomputed by `zetaBorweinWeights` and correctly rounded to doubles, and
+  // the sum is Kahan-compensated, leaving only the per-term Math.pow
+  // rounding (≲2 ulp total). (A previous version used binomial partial sums
+  // for d_k, which converge only as 2^{−n} ≈ 2.4e−7.)
+  const [ek, dn] = zetaBorweinWeights();
   let sum = 0;
-  for (let k = 0; k <= n; k++) {
-    sum += ((k % 2 === 0 ? 1 : -1) * (d[k] - dn)) / Math.pow(k + 1, s);
+  let comp = 0; // Kahan compensation
+  for (let k = 0; k < ZETA_BORWEIN_N; k++) {
+    const t = (k % 2 === 0 ? ek[k] : -ek[k]) * Math.pow(k + 1, -s);
+    const y = t - comp;
+    const u = sum + y;
+    comp = u - sum - y;
+    sum = u;
   }
-  return (-1 / (dn * (1 - Math.pow(2, 1 - s)))) * sum;
+  // 1 − 2^{1−s} = −expm1((1−s)·ln 2), computed without cancellation near s = 1
+  return sum / dn / -Math.expm1((1 - s) * Math.LN2);
 }
 
-/** Cohen-Villegas-Zagier coefficients for zeta function acceleration.
- * d_k = Σ_{i=0}^{k} C(n,i) for the partial sums of binomial coefficients. */
-function zetaCoefficients(n: number): number[] {
-  const d = new Array(n + 1);
-  d[0] = 1;
-  for (let i = 1; i <= n; i++) {
-    // C(n, i) = C(n, i-1) * (n-i+1) / i
-    // d[i] = d[i-1] + C(n, i)
-    d[i] = d[i - 1] + binomialCoeff(n, i);
-  }
-  return d;
-}
+const ZETA_BORWEIN_N = 28;
+let ZETA_BORWEIN_CACHE: [number[], number] | null = null;
 
-function binomialCoeff(n: number, k: number): number {
-  if (k > n - k) k = n - k;
-  let r = 1;
-  for (let i = 0; i < k; i++) {
-    r = (r * (n - i)) / (i + 1);
+/** Chebyshev weights for Borwein's ζ algorithm (Proposition 1):
+ *    d_k = n·Σ_{i=0}^{k} (n+i−1)!·4^i / ((n−i)!·(2i)!),   n = ZETA_BORWEIN_N.
+ *  Returns [e, d_n] with e[k] = d_n − d_k for k = 0..n−1.
+ *
+ *  The summands t_i = n·(n+i−1)!·4^i/((n−i)!·(2i)!) (t_0 = 1) satisfy
+ *    t_{i+1} = t_i · 4(n+i)(n−i) / ((2i+1)(2i+2)),
+ *  and are evaluated in 2^64-scaled bigint fixed point, so each weight is
+ *  exact to ~64 bits (≫ the 53 the doubles keep). Computed once, cached. */
+function zetaBorweinWeights(): [number[], number] {
+  if (ZETA_BORWEIN_CACHE) return ZETA_BORWEIN_CACHE;
+  const n = ZETA_BORWEIN_N;
+  const SCALE = 1n << 64n;
+  let t = SCALE; // t_0 = 1, scaled
+  let d = SCALE; // d_0 = 1, scaled
+  const dk: bigint[] = [d];
+  for (let i = 0; i < n; i++) {
+    t =
+      (t * BigInt(4 * (n + i) * (n - i))) / BigInt((2 * i + 1) * (2 * i + 2));
+    d += t;
+    dk.push(d);
   }
-  return r;
+  const dn = dk[n];
+  const scale = Math.pow(2, 64);
+  const e: number[] = [];
+  for (let k = 0; k < n; k++) e.push(Number(dn - dk[k]) / scale);
+  ZETA_BORWEIN_CACHE = [e, Number(dn) / scale];
+  return ZETA_BORWEIN_CACHE;
 }
 
 /**
@@ -1518,14 +1579,20 @@ export function besselI(n: number, x: number): number {
   // I_n(-x) = (-1)^n I_n(x)
   if (x < 0) return n % 2 === 0 ? besselI(n, -x) : -besselI(n, -x);
 
-  // For large x, use asymptotic: I_n(x) ~ e^x / sqrt(2πx)
-  if (x > 40) return besselIAsymptotic(n, x);
+  // For large x (and order small enough that the expansion's early terms
+  // aₖ(ν)/x^k decrease), use the asymptotic — its optimal-truncation error
+  // ~e^{−2x} ≤ e^{−40} is far below double ε for x > 20. Otherwise the
+  // all-positive power series is exact (no cancellation), just slower (its
+  // term recurrence accumulates ~½ ulp per term, so shorter is better).
+  if (x > 20 && x >= n * n) return besselIAsymptotic(n, x);
 
   // Power series: I_n(x) = (x/2)^n Σ_{k=0}^∞ (x²/4)^k / (k! (n+k)!)
   return besselISeries(n, x);
 }
 
-/** Power series for I_n(x) = (x/2)^n Σ (x²/4)^k / (k!(n+k)!) */
+/** Power series (DLMF 10.25.2): I_n(x) = (x/2)^n Σ (x²/4)^k / (k!(n+k)!).
+ *  All terms are positive — no cancellation at any x. Kahan-compensated:
+ *  near x = 30 the ~60 accumulations otherwise cost ~5 ulp. */
 function besselISeries(n: number, x: number): number {
   const halfX = x / 2;
   const quarter = (x * x) / 4;
@@ -1533,25 +1600,37 @@ function besselISeries(n: number, x: number): number {
   for (let i = 1; i <= n; i++) term /= i;
 
   let sum = term;
-  for (let k = 1; k <= 80; k++) {
+  let comp = 0; // Kahan compensation
+  for (let k = 1; k <= 500; k++) {
     term *= quarter / (k * (n + k));
-    sum += term;
-    if (Math.abs(term) < Math.abs(sum) * 1e-16) break;
+    const y = term - comp;
+    const u = sum + y;
+    comp = u - sum - y;
+    sum = u;
+    if (Math.abs(term) < Math.abs(sum) * 1e-17) break;
   }
   return sum * Math.pow(halfX, n);
 }
 
-/** Asymptotic expansion: I_n(x) ~ e^x/sqrt(2πx) [1 - (μ-1)/(8x) + ...]
- *  where μ = 4n² */
+/** Asymptotic expansion for large argument (DLMF 10.40.1):
+ *    I_ν(z) ~ e^z/√(2πz) · Σ_{k≥0} (−1)^k aₖ(ν)/z^k,
+ *    aₖ(ν) = (4ν²−1²)(4ν²−3²)⋯(4ν²−(2k−1)²)/(k!·8^k)
+ *  Note the (−1)^k: the aₖ are the same as for K_ν (DLMF 10.40.2) but the
+ *  I series alternates them. (A previous version reused the K signs — every
+ *  odd term flipped, ~1/(4z) relative error.) The expansion is divergent:
+ *  truncate at the smallest term (~e^{−2z} relative, ≪ ε for z > 20). */
 function besselIAsymptotic(n: number, x: number): number {
   const mu = 4 * n * n;
   let term = 1;
   let sum = 1;
-  for (let k = 1; k <= 12; k++) {
+  let prevAbs = Infinity;
+  for (let k = 1; k <= 40; k++) {
     const f = mu - (2 * k - 1) * (2 * k - 1);
-    term *= f / (k * 8 * x); // Note: no negation for I (vs J)
+    term *= -f / (k * 8 * x); // (−1)^k aₖ(ν)/z^k
+    if (Math.abs(term) >= prevAbs) break; // divergent tail: stop at min term
     sum += term;
-    if (Math.abs(term) < 1e-15) break;
+    prevAbs = Math.abs(term);
+    if (Math.abs(term) < 1e-17 * Math.abs(sum)) break;
   }
   return (Math.exp(x) / Math.sqrt(2 * Math.PI * x)) * sum;
 }
@@ -1571,16 +1650,32 @@ export function besselK(n: number, x: number): number {
   // K_{-n}(x) = K_n(x) for integer n
   if (n < 0) n = -n;
 
-  // For large x, use asymptotic expansion
-  if (x > 40) return besselKAsymptotic(n, x);
-
-  // Compute K_0 and K_1 via series
-  const k0 = besselK0(x);
-  if (n === 0) return k0;
-  const k1 = besselK1(x);
+  // Compute K_0 and K_1, then recur upward (stable: K_n grows with n).
+  // Three regimes for K_0/K_1:
+  // - x < 1.5: ascending series (DLMF 10.31.2); its e^{2x}-scale cancellation
+  //   is still benign here (< ~1 digit lost).
+  // - 1.5 ≤ x < 20: Steed's continued fraction CF2 (relative accuracy ~ε; the
+  //   series would lose ~0.87·x digits to cancellation in this range, and
+  //   CF2 stops converging below x ≈ 1.2).
+  // - x ≥ 20: asymptotic expansion (DLMF 10.40.2), optimal-truncation error
+  //   ~e^{−2x} ≤ e^{−40}, far below double ε.
+  let k0: number;
+  let k1: number;
+  if (x >= 20) {
+    k0 = besselKAsymptotic(0, x);
+    if (n === 0) return k0;
+    k1 = besselKAsymptotic(1, x);
+  } else if (x >= 1.5) {
+    [k0, k1] = besselK01CF2(x);
+    if (n === 0) return k0;
+  } else {
+    k0 = besselK0(x);
+    if (n === 0) return k0;
+    k1 = besselK1(x);
+  }
   if (n === 1) return k1;
 
-  // Forward recurrence: K_{n+1} = (2n/x) K_n + K_{n-1}
+  // Forward recurrence (DLMF 10.29.1): K_{n+1} = (2n/x) K_n + K_{n-1}
   let km1 = k0;
   let kk = k1;
   for (let k = 1; k < n; k++) {
@@ -1589,6 +1684,58 @@ export function besselK(n: number, x: number): number {
     kk = kp1;
   }
   return kk;
+}
+
+/**
+ * K_0(x) and K_1(x) for x ≥ 1.5 via Steed's continued fraction CF2, evaluated
+ * with the Thompson–Barnett recurrences (I.J. Thompson & A.R. Barnett,
+ * J. Comput. Phys. 64 (1986) 490; this is the `bessik` algorithm of
+ * Numerical Recipes §6.7, specialized to order μ = 0):
+ *    K_μ(x) = √(π/(2x))·e^{−x} / S,     K_{μ+1}(x) = K_μ(x)·(μ + x + ½ − h)/x
+ * where S and h are the CF2 sums, both accumulated with Kahan compensation
+ * (near x = 2 the ~100 iterations otherwise accumulate ~5–7 ulp of rounding).
+ * Converges for x ≳ 1.2 (~ε relative accuracy, no cancellation — unlike the
+ * ascending series); the iteration count grows as x decreases.
+ */
+function besselK01CF2(x: number): [number, number] {
+  const a1 = 0.25; // ¼ − μ² with μ = 0
+  let b = 2 * (1 + x);
+  let d = 1 / b;
+  let h = d;
+  let delh = d;
+  let q1 = 0;
+  let q2 = 1;
+  let a = -a1;
+  let c = a1;
+  let q = a1;
+  let s = 1 + q * delh;
+  let compS = 0; // Kahan compensation for s
+  let compH = 0; // Kahan compensation for h
+  for (let i = 2; i <= 10000; i++) {
+    a -= 2 * (i - 1);
+    c = (-a * c) / i;
+    const qnew = (q1 - b * q2) / a;
+    q1 = q2;
+    q2 = qnew;
+    q += c * qnew;
+    b += 2;
+    d = 1 / (b + a * d);
+    delh = (b * d - 1) * delh;
+    let y = delh - compH;
+    let u = h + y;
+    compH = u - h - y;
+    h = u;
+    const dels = q * delh;
+    y = dels - compS;
+    u = s + y;
+    compS = u - s - y;
+    s = u;
+    if (Math.abs(dels) < 1e-18 * Math.abs(s)) break;
+  }
+  h = a1 * h;
+  const k0 = (Math.sqrt(Math.PI / (2 * x)) * Math.exp(-x)) / s;
+  const k1 = (k0 * (x + 0.5 - h)) / x; // μ = 0
+  return [k0, k1];
 }
 
 /** K_0(x) = -(ln(x/2) + γ) I_0(x) + Σ_{k=1}^∞ H_k (x/2)^{2k} / (k!)² */
@@ -1621,157 +1768,283 @@ function besselK1(x: number): number {
   return (1 / x - i1 * k0) / i0;
 }
 
-/** Asymptotic expansion: K_n(x) ~ sqrt(π/(2x)) e^{-x} [1 + (μ-1)/(8x) + ...]
- *  where μ = 4n² */
+/** Asymptotic expansion for large argument (DLMF 10.40.2):
+ *    K_ν(z) ~ √(π/(2z))·e^{−z} · Σ_{k≥0} aₖ(ν)/z^k,
+ *    aₖ(ν) = (4ν²−1²)(4ν²−3²)⋯(4ν²−(2k−1)²)/(k!·8^k)
+ *  The expansion is divergent: truncate at the smallest term (~e^{−2z}
+ *  relative, below double ε for z ≥ 20). */
 function besselKAsymptotic(n: number, x: number): number {
   const mu = 4 * n * n;
   let term = 1;
   let sum = 1;
-  for (let k = 1; k <= 12; k++) {
+  let prevAbs = Infinity;
+  for (let k = 1; k <= 40; k++) {
     const f = mu - (2 * k - 1) * (2 * k - 1);
     term *= f / (k * 8 * x);
+    if (Math.abs(term) >= prevAbs) break; // divergent tail: stop at min term
     sum += term;
-    if (Math.abs(term) < 1e-15) break;
+    prevAbs = Math.abs(term);
+    if (Math.abs(term) < 1e-17 * Math.abs(sum)) break;
   }
   return Math.sqrt(Math.PI / (2 * x)) * Math.exp(-x) * sum;
+}
+
+// ────────────────────────────────────────────────────────────────
+// Double-double helpers (compensated arithmetic)
+//
+// Error-free transformations after T.J. Dekker, Numer. Math. 18 (1971)
+// 224–242, and J.R. Shewchuk, Discrete Comput. Geom. 18 (1997) 305–363.
+// A value is an unevaluated sum hi + lo with |lo| ≤ ½ ulp(hi), carrying
+// ~32 significant digits. Used below where a defining series suffers
+// catastrophic cancellation (the Airy Maclaurin series) or where an
+// exponent/phase needs absolute accuracy beyond one ulp (Airy asymptotics).
+// ────────────────────────────────────────────────────────────────
+
+type DD = [hi: number, lo: number];
+
+const DD_SPLITTER = 134217729; // 2^27 + 1 (Dekker splitting constant)
+
+/** Exact: a + b = s + e with s = fl(a+b) (Knuth two-sum) */
+function twoSum(a: number, b: number): DD {
+  const s = a + b;
+  const bb = s - a;
+  return [s, a - (s - bb) + (b - bb)];
+}
+
+/** Exact: a + b = s + e, assuming |a| ≥ |b| (fast two-sum) */
+function quickTwoSum(a: number, b: number): DD {
+  const s = a + b;
+  return [s, b - (s - a)];
+}
+
+/** Exact: a·b = p + e (Dekker two-product) */
+function twoProd(a: number, b: number): DD {
+  const p = a * b;
+  const ca = DD_SPLITTER * a;
+  const ahi = ca - (ca - a);
+  const alo = a - ahi;
+  const cb = DD_SPLITTER * b;
+  const bhi = cb - (cb - b);
+  const blo = b - bhi;
+  return [p, ahi * bhi - p + ahi * blo + alo * bhi + alo * blo];
+}
+
+function ddAdd(a: DD, b: DD): DD {
+  const [s1, s2] = twoSum(a[0], b[0]);
+  const [t1, t2] = twoSum(a[1], b[1]);
+  const [hi, lo] = quickTwoSum(s1, s2 + t1);
+  return quickTwoSum(hi, lo + t2);
+}
+
+function ddNeg(a: DD): DD {
+  return [-a[0], -a[1]];
+}
+
+function ddMul(a: DD, b: DD): DD {
+  const [p, e] = twoProd(a[0], b[0]);
+  return quickTwoSum(p, e + a[0] * b[1] + a[1] * b[0]);
+}
+
+function ddMulD(a: DD, b: number): DD {
+  const [p, e] = twoProd(a[0], b);
+  return quickTwoSum(p, e + a[1] * b);
+}
+
+function ddDivD(a: DD, b: number): DD {
+  const q1 = a[0] / b;
+  const [p, e] = twoProd(q1, b);
+  const r = ddAdd(a, [-p, -e]);
+  return quickTwoSum(q1, (r[0] + r[1]) / b);
+}
+
+/** √x as a double-double: one Newton correction of Math.sqrt,
+ *  √x ≈ s + (x − s²)/(2s) with x − s² computed exactly. */
+function ddSqrtD(x: number): DD {
+  const s = Math.sqrt(x);
+  const [p, e] = twoProd(s, s);
+  return quickTwoSum(s, (x - p - e) / (2 * s));
+}
+
+// ────────────────────────────────────────────────────────────────
+// Airy functions
+// ────────────────────────────────────────────────────────────────
+
+// Ai(0) = 3^{−2/3}/Γ(2/3) and −Ai′(0) = 3^{−1/3}/Γ(1/3) (DLMF 9.2.3–9.2.6),
+// √3 and π/4, all correctly rounded to double-double (via mpmath @ 60 digits)
+const AIRY_C1: DD = [0.3550280538878172, 2.05233632436212e-17];
+const AIRY_C2: DD = [0.2588194037928068, -2.522243111610832e-17];
+const SQRT3_DD: DD = [1.7320508075688772, 1.0035084221806903e-16];
+const PI_OVER_4_DD: DD = [0.7853981633974483, 3.061616997868383e-17];
+
+/**
+ * Maclaurin series for the Airy functions (DLMF 9.4.1/9.4.3):
+ *   Ai(x) = c₁·f(x) − c₂·g(x),   Bi(x) = √3·(c₁·f(x) + c₂·g(x))
+ * with termF_k = termF_{k−1}·x³/((3k−1)·3k) (f₀ = 1) and
+ * termG_k = termG_{k−1}·x³/(3k·(3k+1)) (g₀ = x).
+ *
+ * Everything is accumulated in double-double: the combinations cancel
+ * catastrophically — for x < 0 the partial sums reach ~e^{0.83ξ}·|result|
+ * and for Ai(x > 0) ~e^{2ξ}·|result| (ξ = ⅔|x|^{3/2}), which at |x| = 9
+ * (ξ = 18) costs up to ~16 of the 32 double-double digits, still leaving a
+ * full double. (In plain doubles, Ai(−10) had only 1.6 correct digits and
+ * Ai(5) only 8.9.)
+ */
+function airySeriesFG(x: number): [f: DD, g: DD] {
+  // x³ in double-double (exact products of the input double)
+  const x3 = ddMulD(twoProd(x, x), x);
+  let f: DD = [1, 0];
+  let g: DD = [x, 0];
+  let termF: DD = [1, 0];
+  let termG: DD = [x, 0];
+  for (let k = 1; k <= 200; k++) {
+    const k3 = 3 * k;
+    termF = ddDivD(ddMul(termF, x3), (k3 - 1) * k3);
+    termG = ddDivD(ddMul(termG, x3), k3 * (k3 + 1));
+    f = ddAdd(f, termF);
+    g = ddAdd(g, termG);
+    if (
+      Math.abs(termF[0]) + Math.abs(termG[0]) <
+      1e-34 * (Math.abs(f[0]) + Math.abs(g[0]))
+    )
+      break;
+  }
+  return [f, g];
+}
+
+/** ξ = ⅔·x^{3/2} in double-double. The exponent/phase must carry an
+ *  ABSOLUTE error ≲1e−17: a one-ulp relative error in ξ alone shifts
+ *  e^{∓ξ} — and the oscillatory phase — by ~ξ·2⁻⁵³, i.e. ~20 ulp of the
+ *  result at |x| = 10. */
+function airyXi(x: number): DD {
+  const x32 = ddMulD(ddSqrtD(x), x); // x^{3/2} = √x·x
+  return ddDivD(ddMulD(x32, 2), 3);
+}
+
+/** One factor of the u_k recurrence (DLMF 9.7.2):
+ *  u₀ = 1, u_k = u_{k−1}·(6k−5)(6k−3)(6k−1)/(216·k·(2k−1)) — so
+ *  u_k/ξ^k = (u_{k−1}/ξ^{k−1})·uRatio(k)/ξ. */
+function airyURatio(k: number): number {
+  return ((6 * k - 5) * (6 * k - 3) * (6 * k - 1)) / (216 * k * (2 * k - 1));
+}
+
+/** P/Q phase sums shared by Ai(−x) and Bi(−x), x > 9 (DLMF 9.7.9/9.7.11):
+ *    Ai(−x) = [cos(ξ−π/4)·P(ξ) + sin(ξ−π/4)·Q(ξ)] / (√π·x^{1/4})
+ *    Bi(−x) = [−sin(ξ−π/4)·P(ξ) + cos(ξ−π/4)·Q(ξ)] / (√π·x^{1/4})
+ *    P(ξ) = Σ (−1)^k u_{2k}/ξ^{2k},   Q(ξ) = Σ (−1)^k u_{2k+1}/ξ^{2k+1}
+ *  The u_j/ξ^j sequence is truncated at its smallest term (the expansions
+ *  are divergent; optimal truncation error ~e^{−2ξ} of the modulus, below
+ *  double ε for ξ ≥ 18, i.e. x ≥ 9). The phase ξ−π/4 is computed in
+ *  double-double, and cos/sin are corrected to first order in its low part.
+ */
+function airyNegParts(
+  x: number
+): [P: number, Q: number, cosA: number, sinA: number, pref: number] {
+  const xi = airyXi(x);
+  const xiHi = xi[0];
+  const A = ddAdd(xi, ddNeg(PI_OVER_4_DD)); // ξ − π/4
+  const c0 = Math.cos(A[0]);
+  const s0 = Math.sin(A[0]);
+  const cosA = c0 - s0 * A[1];
+  const sinA = s0 + c0 * A[1];
+  let P = 1; // j = 0 term
+  let Q = 0;
+  let t = 1; // u_j/ξ^j
+  let prevAbs = Infinity;
+  for (let j = 1; j <= 60; j++) {
+    t *= airyURatio(j) / xiHi;
+    const at = Math.abs(t);
+    if (at >= prevAbs) break; // divergent tail: stop at smallest term
+    prevAbs = at;
+    // sign (−1)^k for u_{2k} in P and u_{2k+1} in Q → +,+,−,− over j mod 4
+    const st = j % 4 === 0 || j % 4 === 1 ? t : -t;
+    if (j % 2 === 0) P += st;
+    else Q += st;
+    if (at < 1e-18) break;
+  }
+  const pref = 1 / (Math.sqrt(Math.PI) * Math.pow(x, 0.25));
+  return [P, Q, cosA, sinA, pref];
 }
 
 /**
  * Airy function of the first kind Ai(x).
  *
- * For x < 0 and small |x|, uses power series.
- * For large positive x, uses asymptotic: Ai(x) ~ e^{-ξ}/(2√π x^{1/4})
- * For large negative x, uses asymptotic oscillatory form.
- * For moderate x, uses power series with sufficient terms.
+ * - x > 9: asymptotic expansion (DLMF 9.7.5)
+ * - x < −9: oscillatory asymptotic P/Q form (DLMF 9.7.9)
+ * - |x| ≤ 9: Maclaurin series in double-double (DLMF 9.4.1)
  *
- * Reference: NIST DLMF 9.2, 9.7
+ * Reference: NIST DLMF 9.2, 9.4, 9.7
  */
 export function airyAi(x: number): number {
   if (!isFinite(x)) return NaN;
 
-  // For large positive x, use asymptotic to avoid series convergence issues
-  if (x > 5) {
-    const xi = (2 / 3) * Math.pow(x, 1.5);
-    return airyAiAsymptotic(x, xi);
+  if (x > 9) {
+    // Ai(x) ~ e^{−ξ}/(2√π·x^{1/4}) Σ (−1)^k u_k/ξ^k  (DLMF 9.7.5)
+    const xi = airyXi(x);
+    const xiHi = xi[0];
+    if (!Number.isFinite(xiHi)) return 0; // e^{−ξ} underflows long before
+    let sum = 1;
+    let t = 1;
+    let prevAbs = Infinity;
+    for (let k = 1; k <= 60; k++) {
+      t *= airyURatio(k) / xiHi;
+      if (t >= prevAbs) break; // divergent tail: stop at smallest term
+      sum += k % 2 === 0 ? t : -t;
+      prevAbs = t;
+      if (t < 1e-18 * sum) break;
+    }
+    // e^{−ξ} = e^{−hi}·e^{−lo} ≈ e^{−hi}·(1 − lo)
+    const expNegXi = Math.exp(-xiHi) * (1 - xi[1]);
+    return (expNegXi / (2 * Math.sqrt(Math.PI) * Math.pow(x, 0.25))) * sum;
   }
 
-  // For large negative x, use asymptotic oscillatory form
-  if (x < -5) {
-    const absX = -x;
-    const xi = (2 / 3) * Math.pow(absX, 1.5);
-    return airyAiNegAsymptotic(absX, xi);
+  if (x < -9) {
+    const [P, Q, cosA, sinA, pref] = airyNegParts(-x);
+    return pref * (cosA * P + sinA * Q); // DLMF 9.7.9
   }
 
-  // Power series: Ai(x) = c1 f(x) - c2 g(x)
-  // where f(x) = Σ 3^k x^{3k} / (3k)!  (scaled)
-  //       g(x) = Σ 3^k x^{3k+1} / (3k+1)!
-  // c1 = Ai(0) = 1/(3^{2/3} Γ(2/3)), c2 = -Ai'(0) = 1/(3^{1/3} Γ(1/3))
-  const c1 = 1 / (Math.pow(3, 2 / 3) * gamma(2 / 3)); // Ai(0)
-  const c2 = 1 / (Math.pow(3, 1 / 3) * gamma(1 / 3)); // -Ai'(0)
-
-  let f = 1;
-  let g = x;
-  let termF = 1;
-  let termG = x;
-  for (let k = 1; k <= 80; k++) {
-    const k3 = 3 * k;
-    termF *= (x * x * x) / ((k3 - 1) * k3);
-    termG *= (x * x * x) / (k3 * (k3 + 1));
-    f += termF;
-    g += termG;
-    if (Math.abs(termF) + Math.abs(termG) < 1e-16 * (Math.abs(f) + Math.abs(g)))
-      break;
-  }
-
-  return c1 * f - c2 * g;
-}
-
-/** Asymptotic Ai(x) for large positive x:
- *  Ai(x) ~ e^{-ξ} / (2√π x^{1/4}) where ξ = (2/3)x^{3/2} */
-function airyAiAsymptotic(x: number, xi: number): number {
-  const x14 = Math.pow(x, 0.25);
-  let sum = 1;
-  let term = 1;
-  // Asymptotic series coefficients: u_k/((-ξ)^k) ... simplified
-  const ck = [1, 5 / 72, 385 / 10368, 85085 / 2239488, 37182145 / 644972544];
-  for (let k = 1; k < ck.length; k++) {
-    term = ck[k] / Math.pow(xi, k);
-    sum += (k % 2 === 0 ? 1 : -1) * term;
-  }
-  return (Math.exp(-xi) / (2 * Math.sqrt(Math.PI) * x14)) * sum;
-}
-
-/** Asymptotic Ai(x) for large negative x (oscillatory):
- *  Ai(-x) ~ sin(ξ + π/4) / (√π x^{1/4}) */
-function airyAiNegAsymptotic(absX: number, xi: number): number {
-  const x14 = Math.pow(absX, 0.25);
-  return Math.sin(xi + Math.PI / 4) / (Math.sqrt(Math.PI) * x14);
+  const [f, g] = airySeriesFG(x);
+  return ddAdd(ddMul(AIRY_C1, f), ddNeg(ddMul(AIRY_C2, g)))[0];
 }
 
 /**
  * Airy function of the second kind Bi(x).
  *
- * Similar structure to Ai(x) but with different coefficients
- * and asymptotic behavior (Bi grows for positive x).
+ * - x > 9: asymptotic expansion (DLMF 9.7.7)
+ * - x < −9: oscillatory asymptotic P/Q form (DLMF 9.7.11)
+ * - |x| ≤ 9: Maclaurin series in double-double (DLMF 9.4.3)
  *
- * Reference: NIST DLMF 9.2, 9.7
+ * Reference: NIST DLMF 9.2, 9.4, 9.7
  */
 export function airyBi(x: number): number {
   if (!isFinite(x)) return NaN;
 
-  // For large positive x: Bi(x) ~ e^ξ / (√π x^{1/4})
-  if (x > 5) {
-    const xi = (2 / 3) * Math.pow(x, 1.5);
-    return airyBiAsymptotic(x, xi);
+  if (x > 9) {
+    // Bi(x) ~ e^{ξ}/(√π·x^{1/4}) Σ u_k/ξ^k  (DLMF 9.7.7; all terms positive)
+    const xi = airyXi(x);
+    const xiHi = xi[0];
+    if (!Number.isFinite(xiHi)) return Infinity; // e^{ξ} overflows first
+    let sum = 1;
+    let t = 1;
+    let prevAbs = Infinity;
+    for (let k = 1; k <= 60; k++) {
+      t *= airyURatio(k) / xiHi;
+      if (t >= prevAbs) break; // divergent tail: stop at smallest term
+      sum += t;
+      prevAbs = t;
+      if (t < 1e-18 * sum) break;
+    }
+    // e^{ξ} = e^{hi}·e^{lo} ≈ e^{hi}·(1 + lo)
+    const expXi = Math.exp(xiHi) * (1 + xi[1]);
+    return (expXi / (Math.sqrt(Math.PI) * Math.pow(x, 0.25))) * sum;
   }
 
-  // For large negative x: Bi(-x) ~ cos(ξ + π/4) / (√π x^{1/4})
-  if (x < -5) {
-    const absX = -x;
-    const xi = (2 / 3) * Math.pow(absX, 1.5);
-    return airyBiNegAsymptotic(absX, xi);
+  if (x < -9) {
+    const [P, Q, cosA, sinA, pref] = airyNegParts(-x);
+    return pref * (-sinA * P + cosA * Q); // DLMF 9.7.11
   }
 
-  // Power series: Bi(x) = √3 [c1 f(x) + c2 g(x)]
-  // Same f, g as Ai but with √3 factor and + sign
-  const c1 = 1 / (Math.pow(3, 2 / 3) * gamma(2 / 3)); // same as Ai
-  const c2 = 1 / (Math.pow(3, 1 / 3) * gamma(1 / 3));
-
-  let f = 1;
-  let g = x;
-  let termF = 1;
-  let termG = x;
-  for (let k = 1; k <= 80; k++) {
-    const k3 = 3 * k;
-    termF *= (x * x * x) / ((k3 - 1) * k3);
-    termG *= (x * x * x) / (k3 * (k3 + 1));
-    f += termF;
-    g += termG;
-    if (Math.abs(termF) + Math.abs(termG) < 1e-16 * (Math.abs(f) + Math.abs(g)))
-      break;
-  }
-
-  return Math.sqrt(3) * (c1 * f + c2 * g);
-}
-
-/** Asymptotic Bi(x) for large positive x: Bi(x) ~ e^ξ / (√π x^{1/4}) */
-function airyBiAsymptotic(x: number, xi: number): number {
-  const x14 = Math.pow(x, 0.25);
-  let sum = 1;
-  let term = 1;
-  const ck = [1, 5 / 72, 385 / 10368, 85085 / 2239488, 37182145 / 644972544];
-  for (let k = 1; k < ck.length; k++) {
-    term = ck[k] / Math.pow(xi, k);
-    sum += term; // All positive for Bi
-  }
-  return (Math.exp(xi) / (Math.sqrt(Math.PI) * x14)) * sum;
-}
-
-/** Asymptotic Bi(x) for large negative x (oscillatory):
- *  Bi(-x) ~ cos(ξ + π/4) / (√π x^{1/4}) */
-function airyBiNegAsymptotic(absX: number, xi: number): number {
-  const x14 = Math.pow(absX, 0.25);
-  return Math.cos(xi + Math.PI / 4) / (Math.sqrt(Math.PI) * x14);
+  const [f, g] = airySeriesFG(x);
+  return ddMul(SQRT3_DD, ddAdd(ddMul(AIRY_C1, f), ddMul(AIRY_C2, g)))[0];
 }
 
 // ──────────────────────────────────────────────────────────────────

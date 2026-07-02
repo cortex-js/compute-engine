@@ -45,6 +45,30 @@
 
 ### Resolved Issues
 
+- **Five special-function kernels returned wrong digits at every precision —
+  all repaired and verified digit-for-digit against mpmath.**
+  `\operatorname{PolyGamma}(n, x)` for `n \ge 3` was missing a factorial
+  factor in its asymptotic tail (3.7 correct digits at `\psi^{(3)}(2.5)`) and
+  had a sign error for negative arguments; machine-precision `\zeta(s)` used
+  broken series-acceleration coefficients (~7 correct digits everywhere;
+  `\zeta(30)` was on the wrong side of 1 — the compiled target shared the
+  same kernel); `\operatorname{BesselK}` used its small-argument series far
+  past its range (`K_2(20)` was a factor 21 too large);
+  `\operatorname{BesselI}`'s large-argument expansion had flipped signs
+  (2.6 digits at `I_0(100)`); and the Airy functions used a single
+  asymptotic term for negative arguments (1.6 digits at
+  `\operatorname{Ai}(-10)`). All five now agree with mpmath to a few ulp
+  across their ranges. Also fixed along the way: `\zeta(10^9)` crashed with
+  a BigInt overflow (now `1` immediately).
+
+- **High-precision `N()` no longer prints machine-precision values with
+  fake extra digits.** Special functions that only have a machine-precision
+  kernel (e.g. `\operatorname{BesselI}`) returned results dressed as
+  arbitrary-precision numbers — `N(\operatorname{BesselI}(0, 100))` at
+  50-digit precision printed ~43 digits of a 16-digit value. Machine-lane
+  results are now boxed as machine numbers, so downstream arithmetic and
+  printing honestly reflect their precision.
+
 - **`evaluate()` no longer returns floats for exact arguments across the
   library.** `\sqrt{-2}` numericized to `1.414…i` (it now stays symbolic,
   while `\sqrt{-4}` gives the exact `2i`); `\operatorname{Fract}(\frac12)`

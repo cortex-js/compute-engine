@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { engine } from '../utils';
 
 const ce = engine;
@@ -79,7 +80,29 @@ describe('POLYGAMMA FUNCTION', () => {
 
   test('ψ₂(1) = -2ζ(3) ≈ -2.404113806', () => {
     // ψ₂(1) = -2 * ζ(3) where ζ(3) ≈ 1.2020569031595942
-    expectApprox(ce.expr(['PolyGamma', 2, 1]), -2 * 1.2020569031595942, 1e-6);
+    // n = 2 is the one order that was unaffected by the missing (n−1)!
+    // factor (1! = 1); tightened from 1e-6 along with the n ≥ 3 fixes.
+    expectApprox(ce.expr(['PolyGamma', 2, 1]), -2.4041138063191885, 1e-12);
+  });
+
+  // Regressions for the Bernoulli-tail coefficient bug (P0-20): the
+  // asymptotic term is B₂ₖ·(2k+n−1)!/((2k)!·z^{2k+n}) (DLMF 5.15.9-class);
+  // both lanes omitted the (n−1)! factor, wrong from digit ~5–9 for n ≥ 3.
+  // References: mpmath @40 digits.
+  test('ψ⁽³⁾(2.5) ≈ 0.22390584881725206 (was 3.7 digits)', () => {
+    expectApprox(ce.expr(['PolyGamma', 3, 2.5]), 0.22390584881725206, 1e-12);
+  });
+
+  test('ψ⁽⁵⁾(10) ≈ 3.059451621172682e-4 (was 1.7 digits)', () => {
+    expectApprox(ce.expr(['PolyGamma', 5, 10]), 3.059451621172682e-4, 1e-12);
+  });
+
+  test('ψ⁽⁶⁾(0.5) ≈ -92203.45792380303', () => {
+    expectApprox(ce.expr(['PolyGamma', 6, 0.5]), -92203.45792380303, 1e-12);
+  });
+
+  test('ψ⁽⁴⁾(2.5) ≈ -0.3137559995067314', () => {
+    expectApprox(ce.expr(['PolyGamma', 4, 2.5]), -0.3137559995067314, 1e-12);
   });
 });
 
@@ -185,7 +208,9 @@ describe('ZETA FUNCTION', () => {
   });
 
   test('ζ(3) ≈ 1.2020569031595942 (Apery constant)', () => {
-    expectApprox(ce.expr(['Zeta', 3]), 1.2020569031595942, 1e-6);
+    // Was 1e-6, masking the broken machine-zeta acceleration coefficients
+    // (error floor ~2.4e-7); tightened after the Borwein d_k fix.
+    expectApprox(ce.expr(['Zeta', 3]), 1.2020569031595942, 1e-12);
   });
 
   test('ζ(0) = -1/2', () => {
@@ -198,6 +223,78 @@ describe('ZETA FUNCTION', () => {
 
   test('ζ(6) = π⁶/945', () => {
     expectApprox(ce.expr(['Zeta', 6]), Math.PI ** 6 / 945);
+  });
+
+  test('ζ(1e9) = 1 (huge-s guard: no bigint blowup)', () => {
+    // The bignum acceleration loop raises (k+1)^s as an exact bigint; for
+    // huge s this exceeded the BigInt size limit (RangeError). ζ(s) rounds
+    // to exactly 1 well before that.
+    expectApprox(ce.expr(['Zeta', 1e9]), 1, 1e-14);
+  });
+});
+
+describe('MACHINE-PRECISION KERNELS (P0-20/P0-21 regressions)', () => {
+  // The default engine works above machine precision, so Zeta/PolyGamma
+  // route to the (correct) bignum kernels. These tests pin the MACHINE
+  // kernels, which previously had wrong digits at every precision:
+  // - zeta: acceleration used binomial partial sums instead of the Borwein
+  //   Chebyshev d_k — error floor ~2.4e-7 for every non-hardcoded argument.
+  // - polygamma: Bernoulli tail missing the (n−1)! factor for n ≥ 3.
+  // References: mpmath @40 digits.
+  let mCe: InstanceType<typeof ComputeEngine>;
+  let savedPrecision: number;
+  beforeAll(() => {
+    savedPrecision = ce.precision;
+    mCe = new ComputeEngine();
+    mCe.precision = 'machine';
+  });
+  afterAll(() => {
+    // BigDecimal.precision is process-global: re-sync it for the shared engine
+    ce.precision = savedPrecision;
+  });
+
+  test('machine ζ(3) ≈ 1.2020569031595942 (was 7.1 digits)', () => {
+    expectApprox(mCe.expr(['Zeta', 3]), 1.2020569031595942, 1e-14);
+  });
+
+  test('machine ζ(0.5) ≈ -1.4603545088095868 (was 8.3 digits)', () => {
+    expectApprox(mCe.expr(['Zeta', 0.5]), -1.4603545088095868, 1e-14);
+  });
+
+  test('machine ζ(1.5) ≈ 2.612375348685488', () => {
+    expectApprox(mCe.expr(['Zeta', 1.5]), 2.612375348685488, 1e-14);
+  });
+
+  test('machine ζ(15) ≈ 1.000030588236307 (was 6.6 digits)', () => {
+    expectApprox(mCe.expr(['Zeta', 15]), 1.000030588236307, 1e-14);
+  });
+
+  test('machine ζ(30) ≈ 1.0000000009313275 (was on the wrong side of 1)', () => {
+    expectApprox(mCe.expr(['Zeta', 30]), 1.0000000009313275, 1e-14);
+  });
+
+  test('machine ζ(-11) = 691/32760 exactly (DLMF 25.6.3)', () => {
+    expectApprox(mCe.expr(['Zeta', -11]), 0.021092796092796094, 1e-14);
+  });
+
+  test('machine ψ⁽³⁾(2.5) ≈ 0.22390584881725206 (was 3.7 digits)', () => {
+    expectApprox(mCe.expr(['PolyGamma', 3, 2.5]), 0.22390584881725206, 1e-13);
+  });
+
+  test('machine ψ⁽⁵⁾(10) ≈ 3.059451621172682e-4 (was 1.7 digits)', () => {
+    expectApprox(mCe.expr(['PolyGamma', 5, 10]), 3.059451621172682e-4, 1e-13);
+  });
+
+  test('machine ψ⁽⁶⁾(0.5) ≈ -92203.45792380303', () => {
+    expectApprox(mCe.expr(['PolyGamma', 6, 0.5]), -92203.45792380303, 1e-13);
+  });
+
+  test('compiled Zeta uses the fixed kernel (CO-P1-5)', () => {
+    // The JavaScript compilation target imports the same machine `zeta`
+    // (compilation/javascript-target.ts), so the compiled copy is fixed too.
+    const out = compile(ce.expr(['Zeta', 3]))?.run?.({});
+    expect(typeof out).toBe('number');
+    expect(Math.abs((out as number) - 1.2020569031595942)).toBeLessThan(1e-14);
   });
 });
 
@@ -322,29 +419,74 @@ describe('BESSEL I FUNCTION', () => {
   });
 
   test('I_0(5) ≈ 27.239871823604447', () => {
-    expectApprox(ce.expr(['BesselI', 0, 5]), 27.239871823604447, 1e-8);
+    expectApprox(ce.expr(['BesselI', 0, 5]), 27.239871823604447, 1e-12);
   });
 
-  test('I_2(3) ≈ 2.24521244092995', () => {
-    expectApprox(ce.expr(['BesselI', 2, 3]), 2.24521244092995, 1e-8);
+  test('I_2(3) ≈ 2.245212440929951', () => {
+    expectApprox(ce.expr(['BesselI', 2, 3]), 2.245212440929951, 1e-12);
+  });
+
+  // Regressions for the large-x asymptotic sign bug (P0-23): the I expansion
+  // alternates the a_k(ν) terms (DLMF 10.40.1); reusing the K signs gave
+  // only 1.1–3.4 correct digits. References: mpmath @40 digits.
+  test('I_0(100) ≈ 1.0737517071310738e+42 (asymptotic, was 2.6 digits)', () => {
+    expectApprox(ce.expr(['BesselI', 0, 100]), 1.0737517071310738e42, 1e-12);
+  });
+
+  test('I_1(700) ≈ 1.5285003902339006e+302 (asymptotic, was 3.0 digits)', () => {
+    expectApprox(ce.expr(['BesselI', 1, 700]), 1.5285003902339006e302, 1e-12);
+  });
+
+  test('I_2(50) ≈ 2.816430640245194e+20 (asymptotic, was 1.1 digits)', () => {
+    expectApprox(ce.expr(['BesselI', 2, 50]), 2.816430640245194e20, 1e-12);
+  });
+
+  test('I_0(40) ≈ 1.48947747934199e+16 (series, near crossover)', () => {
+    expectApprox(ce.expr(['BesselI', 0, 40]), 1.48947747934199e16, 1e-12);
   });
 });
 
 describe('BESSEL K FUNCTION', () => {
   test('K_0(1) ≈ 0.42102443824070834', () => {
-    expectApprox(ce.expr(['BesselK', 0, 1]), 0.42102443824070834, 1e-6);
+    expectApprox(ce.expr(['BesselK', 0, 1]), 0.42102443824070834, 1e-12);
   });
 
-  test('K_1(1) ≈ 0.60190723019723457', () => {
-    expectApprox(ce.expr(['BesselK', 1, 1]), 0.60190723019723457, 1e-6);
+  test('K_1(1) ≈ 0.6019072301972346', () => {
+    expectApprox(ce.expr(['BesselK', 1, 1]), 0.6019072301972346, 1e-12);
   });
 
-  test('K_0(5) ≈ 0.0036910983120279868', () => {
-    expectApprox(ce.expr(['BesselK', 0, 5]), 0.0036910983120279868, 1e-6);
+  test('K_0(5) ≈ 0.0036910983340425942', () => {
+    // The previous expected value (0.0036910983120279868, tolerance 1e-6)
+    // was fitted to the cancellation-broken ascending series (P0-22).
+    expectApprox(ce.expr(['BesselK', 0, 5]), 0.0036910983340425942, 1e-12);
   });
 
-  test('K_2(3) ≈ 0.061510458286692960', () => {
-    expectApprox(ce.expr(['BesselK', 2, 3]), 0.061510458286692960, 1e-5);
+  test('K_2(3) ≈ 0.06151045847174204', () => {
+    expectApprox(ce.expr(['BesselK', 2, 3]), 0.06151045847174204, 1e-12);
+  });
+
+  // Regressions for the mid-range cancellation bug (P0-22): the ascending
+  // series was used to x = 40, losing ~0.87·x digits (K₂(20) was a factor
+  // 21 wrong). Now: CF2 for 1.5 ≤ x < 20, asymptotic beyond.
+  // References: mpmath @40 digits.
+  test('K_0(10) ≈ 1.778006231616765e-5 (CF2, was 6.7 digits)', () => {
+    expectApprox(ce.expr(['BesselK', 0, 10]), 1.778006231616765e-5, 1e-12);
+  });
+
+  test('K_2(20) ≈ 6.329543612292228e-10 (asymptotic, was 21× wrong)', () => {
+    expectApprox(ce.expr(['BesselK', 2, 20]), 6.329543612292228e-10, 1e-12);
+  });
+
+  test('K_3(15) ≈ 1.312086725377046e-7 (CF2 + recurrence, was 3.5 digits)', () => {
+    expectApprox(ce.expr(['BesselK', 3, 15]), 1.312086725377046e-7, 1e-12);
+  });
+
+  test('K_1(40) ≈ 8.497131954861039e-19 (asymptotic, was -19 digits)', () => {
+    expectApprox(ce.expr(['BesselK', 1, 40]), 8.497131954861039e-19, 1e-12);
+  });
+
+  test('K_0(100) ≈ 4.656628229175902e-45', () => {
+    expectApprox(ce.expr(['BesselK', 0, 100]), 4.656628229175902e-45, 1e-12);
   });
 });
 
@@ -354,19 +496,39 @@ describe('AIRY Ai FUNCTION', () => {
   });
 
   test('Ai(1) ≈ 0.13529241631288141', () => {
-    expectApprox(ce.expr(['AiryAi', 1]), 0.13529241631288141, 1e-6);
+    expectApprox(ce.expr(['AiryAi', 1]), 0.13529241631288141, 1e-12);
   });
 
-  test('Ai(-1) ≈ 0.53556088329235211', () => {
-    expectApprox(ce.expr(['AiryAi', -1]), 0.53556088329235211, 1e-6);
+  test('Ai(-1) ≈ 0.5355608832923521', () => {
+    expectApprox(ce.expr(['AiryAi', -1]), 0.5355608832923521, 1e-12);
   });
 
-  test('Ai(3) ≈ 0.006591139357460011', () => {
-    expectApprox(ce.expr(['AiryAi', 3]), 0.006591139357460011, 1e-5);
+  test('Ai(3) ≈ 0.006591139357460719', () => {
+    // Previous expected value (…7460011, tolerance 1e-5) was fitted to the
+    // plain-double series; the series now sums in double-double (P0-24).
+    expectApprox(ce.expr(['AiryAi', 3]), 0.006591139357460719, 1e-12);
   });
 
-  test('Ai(10) asymptotic (very small)', () => {
-    expectApprox(ce.expr(['AiryAi', 10]), 1.1047532552898687e-10, 1e-4);
+  test('Ai(10) ≈ 1.1047532552898686e-10 (asymptotic, was 7.6 digits)', () => {
+    // Was 1e-4, masking the 5-fixed-term truncation of the asymptotic
+    // series; now DLMF 9.7.5 with optimal truncation.
+    expectApprox(ce.expr(['AiryAi', 10]), 1.1047532552898686e-10, 1e-12);
+  });
+
+  // Regressions for the negative-x leading-term-only asymptotic (P0-24):
+  // Ai(−10) had 1.6 correct digits. Now DLMF 9.7.9 P/Q pairs for x < −9 and
+  // a double-double series for the cancelling mid-range.
+  // References: mpmath @40 digits.
+  test('Ai(-10) ≈ 0.04024123848644319 (P/Q asymptotic, was 1.6 digits)', () => {
+    expectApprox(ce.expr(['AiryAi', -10]), 0.04024123848644319, 1e-12);
+  });
+
+  test('Ai(-5) ≈ 0.35076100902411433 (dd series, was 13.5 digits)', () => {
+    expectApprox(ce.expr(['AiryAi', -5]), 0.35076100902411433, 1e-12);
+  });
+
+  test('Ai(5.1) ≈ 8.613242706478852e-5 (dd series, was 5.5 digits)', () => {
+    expectApprox(ce.expr(['AiryAi', 5.1]), 8.613242706478852e-5, 1e-12);
   });
 
   test('AiryAi without numericApproximation returns unevaluated', () => {
@@ -376,20 +538,34 @@ describe('AIRY Ai FUNCTION', () => {
 });
 
 describe('AIRY Bi FUNCTION', () => {
-  test('Bi(0) ≈ 0.61492662744600074', () => {
-    expectApprox(ce.expr(['AiryBi', 0]), 0.61492662744600074, 1e-8);
+  test('Bi(0) ≈ 0.6149266274460007', () => {
+    expectApprox(ce.expr(['AiryBi', 0]), 0.6149266274460007, 1e-12);
   });
 
   test('Bi(1) ≈ 1.2074235949528713', () => {
-    expectApprox(ce.expr(['AiryBi', 1]), 1.2074235949528713, 1e-6);
+    expectApprox(ce.expr(['AiryBi', 1]), 1.2074235949528713, 1e-12);
   });
 
-  test('Bi(-1) ≈ 0.10399738949694461', () => {
-    expectApprox(ce.expr(['AiryBi', -1]), 0.10399738949694461, 1e-6);
+  test('Bi(-1) ≈ 0.1039973894969446', () => {
+    expectApprox(ce.expr(['AiryBi', -1]), 0.1039973894969446, 1e-12);
   });
 
-  test('Bi(3) ≈ 14.037328963083232', () => {
-    expectApprox(ce.expr(['AiryBi', 3]), 14.037328963083232, 1e-5);
+  test('Bi(3) ≈ 14.037328963730232', () => {
+    // Previous expected value (14.037328963083232, tolerance 1e-5) was
+    // fitted to the plain-double series (P0-24).
+    expectApprox(ce.expr(['AiryBi', 3]), 14.037328963730232, 1e-12);
+  });
+
+  test('Bi(10) ≈ 455641153.54822516 (asymptotic, was 7.5 digits)', () => {
+    expectApprox(ce.expr(['AiryBi', 10]), 455641153.54822516, 1e-12);
+  });
+
+  test('Bi(-10) ≈ -0.3146798296438386 (P/Q asymptotic, was 3.3 digits)', () => {
+    expectApprox(ce.expr(['AiryBi', -10]), -0.3146798296438386, 1e-12);
+  });
+
+  test('Bi(-5) ≈ -0.13836913490160058 (dd series, was 13.2 digits)', () => {
+    expectApprox(ce.expr(['AiryBi', -5]), -0.13836913490160058, 1e-12);
   });
 });
 
