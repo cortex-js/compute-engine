@@ -1709,8 +1709,15 @@ function type(expr: BoxedFunction): Type {
   if (expr.operator === 'Function') {
     // What is the type of the body of the function?
     const body = expr.ops[0];
-    const bodyType = body.type;
     const args = expr.ops.slice(1);
+    let bodyType: Type | string = `${body.type}`;
+    // The parameters of a bare function literal have unknown type, so a
+    // finite-numeric body claim is unsound: the lambda may later be applied to
+    // a non-finite argument — `(x ↦ x²)(∞) = +∞` — so widen a finite-numeric
+    // result to the top numeric type `number`. (A nullary function has no such
+    // parameter, so its exact body type is kept.)
+    if (args.length > 0 && body.type.matches('finite_number'))
+      bodyType = 'number';
     return parseType(
       `(${args.map((_) => 'unknown').join(', ')}) -> ${bodyType}`,
       expr.engine._typeResolver

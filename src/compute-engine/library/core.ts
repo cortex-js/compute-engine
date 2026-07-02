@@ -857,6 +857,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       complexity: 9876,
       lazy: true,
       signature: '(expression, symbol*) -> function',
+      // NOTE: for a `Function` *expression* the type is actually computed by the
+      // special case in `boxed-function.ts` (`type()`), which bypasses this
+      // handler; the finite-numeric widening for unknown params lives there.
       type: ([body, ...args]) =>
         `(${args.map((x) => x.type.type)}) -> ${body.type.type}`,
 

@@ -516,3 +516,52 @@ describe('Dictionary key access via At', () => {
     );
   });
 });
+
+describe('Dictionary structural equality (RT-P1-2)', () => {
+  const d = (...pairs: [string, Expression][]) =>
+    box(['Dictionary', ...pairs.map(([k, v]) => ['Tuple', { str: k }, v])]);
+
+  test('equal dictionaries are isSame (same order)', () => {
+    expect(d(['a', 1], ['b', 2]).isSame(d(['a', 1], ['b', 2]))).toBe(true);
+  });
+
+  test('equal dictionaries are isSame regardless of key order', () => {
+    // A dictionary is a keyed collection; entry order is not significant.
+    expect(d(['a', 1], ['b', 2]).isSame(d(['b', 2], ['a', 1]))).toBe(true);
+  });
+
+  test('a differing value makes them not isSame', () => {
+    expect(d(['a', 1], ['b', 2]).isSame(d(['a', 1], ['b', 99]))).toBe(false);
+  });
+
+  test('a differing key makes them not isSame', () => {
+    expect(d(['a', 1], ['b', 2]).isSame(d(['a', 1], ['c', 2]))).toBe(false);
+  });
+
+  test('a differing key count makes them not isSame', () => {
+    expect(d(['a', 1], ['b', 2]).isSame(d(['a', 1]))).toBe(false);
+  });
+
+  test('a dictionary is not isSame as a non-dictionary (both directions)', () => {
+    const dict = d(['a', 1]);
+    expect(dict.isSame(box(1))).toBe(false);
+    expect(box(1).isSame(dict)).toBe(false);
+  });
+
+  test('nested dictionaries compare by structure', () => {
+    const nested = (leaf: Expression) =>
+      d(['x', box(['Dictionary', ['Tuple', { str: 'y' }, leaf]])]);
+    expect(nested(5).isSame(nested(5))).toBe(true);
+    expect(nested(5).isSame(nested(6))).toBe(false);
+  });
+
+  test('isEqual agrees with isSame for dictionaries', () => {
+    expect(d(['a', 1], ['b', 2]).isEqual(d(['a', 1], ['b', 2]))).toBe(true);
+    expect(d(['a', 1], ['b', 2]).isEqual(d(['a', 1], ['b', 99]))).toBe(false);
+  });
+
+  test('.json round-trips for a dictionary', () => {
+    const dict = d(['a', 1], ['b', 2]);
+    expect(engine.expr(dict.json).isSame(dict)).toBe(true);
+  });
+});

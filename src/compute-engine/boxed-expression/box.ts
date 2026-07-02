@@ -46,6 +46,8 @@ import { BoxedDictionary } from './boxed-dictionary';
 import { canonicalForm } from './canonical';
 import { sortOperands } from './order';
 import { validateArguments, checkNumericArgs } from './validate';
+import { isSubtype } from '../../common/type/subtype';
+import type { Type } from '../../common/type/types';
 import { flatten } from './flatten';
 import { isValueDef } from './utils';
 import { canonicalNegate } from './negate';
@@ -519,6 +521,47 @@ export function box(
   return ce.symbol('Undefined');
 }
 
+/**
+ * True when every declared parameter of a signature (required, optional and
+ * variadic) is a numeric type (a subtype of `number`). Used to restrict the
+ * post-canonical argument re-validation in `makeCanonicalFunction` to the
+ * pure-numeric operators (`Sin`, `Factorial`, …) whose custom canonical
+ * handlers historically only checked arity. A signature with no parameters, or
+ * any non-numeric parameter, returns `false` so structural/higher-order
+ * operators are left untouched.
+ */
+function allParamsNumeric(signature: Type): boolean {
+  if (typeof signature === 'string') return false;
+  if (signature.kind !== 'signature') return false;
+  const params: Type[] = [
+    ...(signature.args?.map((x) => x.type) ?? []),
+    ...(signature.optArgs?.map((x) => x.type) ?? []),
+    ...(signature.variadicArg ? [signature.variadicArg.type] : []),
+  ];
+  if (params.length === 0) return false;
+  return params.every((t) => isSubtype(t, 'number'));
+}
+
+/**
+ * True when a signature has a parameter of the `complex`-family — a type that
+ * finite reals belong to but the (±∞-admitting) `real`/`number` do not. In the
+ * current lattice such parameters make a strict signature check reject
+ * legitimate real/integer/number arguments (SYM P1-21), so declared-signature
+ * enforcement is skipped for them.
+ */
+function signatureHasComplexParam(signature: Type): boolean {
+  if (typeof signature === 'string' || signature.kind !== 'signature')
+    return false;
+  const params: Type[] = [
+    ...(signature.args?.map((x) => x.type) ?? []),
+    ...(signature.optArgs?.map((x) => x.type) ?? []),
+    ...(signature.variadicArg ? [signature.variadicArg.type] : []),
+  ];
+  return params.some(
+    (t) => isSubtype('finite_real', t) && !isSubtype('real', t)
+  );
+}
+
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
@@ -580,7 +623,59 @@ function makeCanonicalFunction(
     // The symbol is declared, but as a value.
     // We construct the function expression and will check its value
     // is a function literal when evaluating it.
-    return new BoxedFunction(ce, name, flatten(semiCanonical(ce, ops)), {
+    const boxedOps = flatten(semiCanonical(ce, ops));
+
+    // If the symbol was declared with an explicit *function* signature (e.g.
+    // `ce.declare('f', '(integer) -> integer')`), enforce the parameter types
+    // on application in strict mode: `f(0.5)` and `f("a")` are ill-typed. The
+    // value-def application path historically honored the *result* type but
+    // never validated the operands. An *inferred* signature carries no user
+    // constraint (and an assigned function literal validates its own params
+    // when applied), so skip those.
+    const valueType = def.value.type.type;
+    if (
+      ce.strict &&
+      !def.value.inferredType &&
+      typeof valueType !== 'string' &&
+      valueType.kind === 'signature' &&
+      // Skip enforcement for signatures with a `complex`-family parameter.
+      // In the current type lattice `real`/`integer`/`number` (all of which
+      // admit ±∞) are NOT subtypes of `complex` (SYM P1-21), so a strict
+      // signature check there would wrongly reject legitimate numeric
+      // arguments — this is the exact issue P1-21 tracks and it must not be
+      // pre-empted here. Narrower parameters (`integer`, `string`, …) are
+      // unaffected, so `(integer) -> integer` is still enforced.
+      !signatureHasComplexParam(valueType)
+    ) {
+      const invalid = validateArguments(ce, boxedOps, valueType);
+      if (invalid) {
+        // Only reject *closed* operands — literals and constant expressions
+        // whose type is definite (`0.5`, `"a"`). An operand with free
+        // variables (a bare symbol `x`, a pattern variable `_q`, or `x+1`)
+        // has a provisional/broad type and may satisfy the parameter at
+        // runtime, so it is not eagerly rejected; un-reject those and only
+        // keep an invalid result if a closed operand actually violated the
+        // signature.
+        const cleaned = invalid.map((r, i) => {
+          const orig = boxedOps[i];
+          if (
+            orig &&
+            orig.isValid &&
+            !r.isValid &&
+            orig.freeVariables.length > 0
+          )
+            return orig;
+          return r;
+        });
+        if (cleaned.some((r) => !r.isValid))
+          return new BoxedFunction(ce, name, cleaned, {
+            metadata,
+            canonical: true,
+          });
+      }
+    }
+
+    return new BoxedFunction(ce, name, boxedOps, {
       metadata,
       canonical: true,
     });
@@ -649,7 +744,51 @@ function makeCanonicalFunction(
   if (opDef.canonical) {
     try {
       const result = opDef.canonical(xs, { engine: ce, scope });
-      if (result) return result;
+      if (result) {
+        // In strict mode, validate the operands against the operator's declared
+        // signature *after* the canonical handler runs. Historically a custom
+        // canonical handler was the sole gate on argument validity, and most
+        // only check arity — so ill-typed calls such as `Sin("hello")` or
+        // `Factorial("x")` slipped through as `isValid`.
+        //
+        // The re-validation is deliberately narrow, gated on all of:
+        //  - the handler returned an expression with the *same* operator (a
+        //    handler that rewrote the head — `Rational`→`Divide`,
+        //    `Sqrt`→`Power` — or folded to a number made its own decision);
+        //  - that result is still valid (don't second-guess a handler that
+        //    already flagged an argument);
+        //  - the signature is not inferred (an inferred signature carries no
+        //    constraints; inference narrows it later);
+        //  - every declared parameter is numeric (subtype of `number`). This
+        //    restricts the check to the pure-numeric operators the finding
+        //    targets and leaves higher-order/structural operators — `Apply`
+        //    (`symbol` param), `Equivalent` (`boolean`), the big-ops — alone,
+        //    since their declared signatures are looser than what their
+        //    handlers legitimately accept.
+        //
+        // The check uses `checkNumericArgs` (not the exact-typed
+        // `validateArguments`) so it matches the leniency of the fast-path
+        // numeric operators: unknown symbols, `number | list` unions, tensors
+        // and numeric collections are all accepted (a numeric operator is
+        // threadable), and only a *provably* non-numeric operand — a string,
+        // a boolean — is rejected.
+        if (
+          ce.strict &&
+          !opDef.inferredSignature &&
+          isFunction(result, name) &&
+          result.isValid &&
+          allParamsNumeric(opDef.signature.type)
+        ) {
+          const checked = checkNumericArgs(ce, result.ops);
+          if (checked.some((x) => !x.isValid))
+            return new BoxedFunction(ce, name, checked, {
+              metadata,
+              canonical: true,
+              scope,
+            });
+        }
+        return result;
+      }
     } catch (e) {
       console.error(e instanceof Error ? e.message : e);
     }

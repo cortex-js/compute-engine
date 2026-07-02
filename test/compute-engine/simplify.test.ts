@@ -1050,6 +1050,39 @@ describe('PYTHAGOREAN IDENTITIES', () => {
     expect(simplify('a * \\sin(x)^2 + a * \\cos(x)^2')).toMatchInlineSnapshot(
       `a`
     ));
+
+  // SYM P1-13: the Pythagorean block used to be gated on exactly-two-term
+  // sums, so an identity buried in a larger n-ary sum never fired. It now
+  // scans pairwise on the trig argument and keeps the remaining terms.
+  test('sin^2(x) + cos^2(x) + y = 1 + y (n-ary sum)', () =>
+    checkSimplify('\\sin(x)^2 + \\cos(x)^2 + y', '1 + y'));
+
+  test('sin^2(x) + cos^2(x) + 5 = 6 (n-ary, constant folds)', () =>
+    checkSimplify('\\sin(x)^2 + \\cos(x)^2 + 5', '6'));
+
+  test('cos^2(x) + sin^2(x) + y = 1 + y (reversed, n-ary)', () =>
+    checkSimplify('\\cos(x)^2 + \\sin(x)^2 + y', '1 + y'));
+
+  test('sin^2(x) + cos^2(y) + z stays put (different arguments)', () =>
+    checkSimplify(
+      '\\sin(x)^2 + \\cos(y)^2 + z',
+      '\\sin(x)^2 + \\cos(y)^2 + z'
+    ));
+
+  test('1 + tan^2(x) + y = sec^2(x) + y (n-ary)', () =>
+    checkSimplify('1 + \\tan(x)^2 + y', '\\sec(x)^2 + y'));
+
+  test('1 + cot^2(x) + y = csc^2(x) + y (n-ary)', () =>
+    checkSimplify('1 + \\cot(x)^2 + y', '\\csc(x)^2 + y'));
+
+  test('a*sin^2(x) + a*cos^2(x) + y = a + y (n-ary with coefficient)', () =>
+    checkSimplify('a \\sin(x)^2 + a \\cos(x)^2 + y', 'a + y'));
+
+  test('two independent pairs collapse: sin²x+cos²x+sin²z+cos²z = 2', () =>
+    checkSimplify(
+      '\\sin(x)^2 + \\cos(x)^2 + \\sin(z)^2 + \\cos(z)^2',
+      2
+    ));
 });
 
 describe('NEGATIVE BASE POWER RULES', () => {

@@ -451,8 +451,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 9000,
 
-      signature: '(integer) -> integer',
-      type: () => 'finite_integer',
+      // `n!` extends to `Γ(n+1)` for real/complex arguments (as the `evaluate`
+      // handler computes), so the signature is the same as `Gamma`'s rather
+      // than `(integer) -> integer`. This keeps ill-typed calls (`Factorial("x")`)
+      // invalid while honestly typing `Factorial(1/2)` (= Γ(3/2), a real) and
+      // `Factorial(i)` (complex) instead of the unsound `finite_integer`.
+      signature: '(number) -> number',
+      type: ([x]) => {
+        // A non-negative integer factorial is a (finite) positive integer.
+        if (x?.isInteger === true && x.isNonNegative === true)
+          return 'finite_integer';
+        // Otherwise it is Γ(x+1); type it like `Gamma`.
+        return numericTypeHandler([x]);
+      },
 
       // Assumes that the inside of the factorial is an integer
       sgn: ([x]) =>

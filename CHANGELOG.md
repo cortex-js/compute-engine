@@ -45,6 +45,63 @@
 
 ### Resolved Issues
 
+- **Pythagorean identities fire inside larger sums.** `sin²x + cos²x + y`
+  simplified to nothing (every pattern in the block required exactly two
+  terms); the identities now scan n-ary sums pairwise, keyed on the trig
+  argument: `sin²x + cos²x + y` → `1 + y`, `3sin²x + 3cos²x + y` → `3 + y`,
+  and the `tan² + 1` / `cot² + 1` siblings likewise.
+
+- **Fungrim complex-domain rules usable with `real`-declared symbols.** A
+  `type: 'complex'` rule guard never discharged for a symbol declared `real`
+  (or `integer`, `rational`) because `real` — which admits ±∞ — is not a
+  subtype of `complex` in the type lattice. This silently blocked 68% of the
+  Fungrim pack under the most natural declaration. The guard now accepts
+  finitely-valued real-family symbols, consistent with the corpus's
+  finite-domain ℝ/ℤ/ℚ convention; guards that genuinely require non-real
+  arguments (e.g. `Im τ > 0`) still do not fire for plain reals.
+
+- **Strict mode validates arguments of numeric operators with custom
+  canonical handlers.** `Sin("hello")` and `Factorial("x")` were `isValid`
+  and evaluated to garbage — a custom canonical handler was the sole gate on
+  argument validity, and most only checked arity. In strict mode, operands of
+  pure-numeric operators are now re-validated after the canonical handler
+  (with the numeric fast-path's leniency: unknowns, lists, tensors are fine —
+  only provably non-numeric operands are rejected). `Factorial`'s signature
+  was aligned with what it computes (`Γ(x+1)` for non-integers).
+
+- **User-declared function signatures are enforced.** After
+  `declare('f', '(integer) -> integer')`, applying `f(0.5)` or `f("a")` was
+  silently valid. Ill-typed *closed* operands (literals, constants) are now
+  rejected in strict mode; operands with free variables defer to runtime.
+
+- **Validation gaps that let wrong results through.** `Sum(x, (x, "lo", 10))`
+  evaluated to 55 (a string bound silently treated as 1) — big-op bounds are
+  now type-checked. `Map([1,2,3], "nf")` broadcast the string — a string is
+  never a function literal. A function literal used as a big-op body
+  (`Sum(Function(_1,_1), …)`) is rejected instead of producing a mistyped
+  lambda, and a function literal's numeric result claim derived from unknown
+  parameters widens to `number` (a lambda applied to ∞ is not `finite_number`).
+
+- **Type lattice: covering unions, expression types, bounded numerics.**
+  `finite_real | non_finite_number` now reduces to `real` (and likewise
+  across the numeric tower), so types produced by `meet` compare equal to
+  what they cover. A bare symbol is no longer a subtype of every
+  `expression<Op>` (only of `expression<Symbol>`). Numeric value literals
+  check against bounded types (`7 ⊑ integer<5..10>`), and the meet of two
+  overlapping ranges is their intersection instead of an unsound `nothing`.
+
+- **`√3/2` MathJSON round-trips to the same number literal.** The `.json` of
+  a radical number literal like `√3/2` (`["Divide",["Sqrt",3],2]`) re-boxed
+  as a Divide *function* — `isSame` false against the value that produced it.
+  Canonicalization now folds exact ÷ exact quotients back to the exact number
+  literal (`Divide(√3, 3)`, `Divide(1/2, 3)` → literals; floats deliberately
+  keep not folding), so `ce.expr(x.json).isSame(x)` holds while the natural
+  Divide-form serialization — which rule patterns written as
+  `\frac{\sqrt3}{3}` match against — is preserved. Dictionaries also gained
+  structural `isSame` (previously always `false` for equal-but-distinct
+  dictionaries), and a stale code comment contradicting the documented
+  lossless-`.json` contract was corrected.
+
 - **Assumptions: chained inequalities, multi-root equations, and the
   `assume ⇒ verify` identity.** `assume("0 < x < 1")` silently dropped every
   relation but the first (`verify(x < 1)` was unknown afterward); n-ary

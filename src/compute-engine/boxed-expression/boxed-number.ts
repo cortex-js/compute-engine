@@ -102,12 +102,18 @@ export class BoxedNumber
   }
 
   get json(): MathJsonExpression {
-    // Note: the `.json` property outputs a "default" serialization
-    // which does not attempt to capture all the information in the
-    // expression.
-    // In particular for numbers, it may output a numeric approximation of
-    // the number that can be represented as a JSON number, rather than
-    // the exact value.
+    // `.json` is the lossless data-interchange serialization (see
+    // docs/NUMERIC-SERIALIZATION.md). It emits the value exactly, with no
+    // rounding to the working precision:
+    //  - exact values (integers, rationals, radicals, complex) serialize to
+    //    their exact MathJSON form (e.g. `(1/2)·√3` → the Multiply/Rational
+    //    form via `NumericValue.toJSON()`), which re-folds to the same number
+    //    literal when re-boxed — `ce.expr(x.json).isSame(x)` holds (RT-P1-1);
+    //  - machine floats serialize as JSON numbers, big floats keep every stored
+    //    digit, and non-finite values map to `NaN`/`PositiveInfinity`/
+    //    `NegativeInfinity`.
+    // (Historically this path could emit a rounded numeric approximation; the
+    // P0-32/P0-33 fidelity fixes made it lossless.)
 
     const value = this._value;
     if (typeof value === 'number') {

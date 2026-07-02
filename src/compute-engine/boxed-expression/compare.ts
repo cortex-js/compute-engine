@@ -7,6 +7,7 @@ import {
   isSymbol,
   isString,
   isTensor,
+  isDictionary,
 } from './type-guards';
 import { stochasticEqual } from './stochastic-equal';
 
@@ -99,6 +100,27 @@ export function same(a: Expression, b: Expression): boolean {
         if (a.shape[i] !== b.shape[i]) return false;
       return a.tensor.equals(b.tensor);
     }
+  }
+
+  //
+  // BoxedDictionary
+  // Two dictionaries are structurally equal when they have the same key set and
+  // recursively-same values. Keys are compared order-insensitively (a
+  // dictionary is a keyed collection, so entry order is not significant). This
+  // also makes `.json` round-trips verifiable for dictionaries (RT-P1-2);
+  // without it `same()` fell through to `false` for any two distinct dict
+  // objects, even structurally identical ones.
+  //
+  if (isDictionary(a)) {
+    if (!isDictionary(b)) return false;
+    const aKeys = a.keys;
+    if (aKeys.length !== b.keys.length) return false;
+    for (const key of aKeys) {
+      const bValue = b.get(key);
+      if (bValue === undefined) return false;
+      if (!same(a.get(key)!, bValue)) return false;
+    }
+    return true;
   }
 
   return false;

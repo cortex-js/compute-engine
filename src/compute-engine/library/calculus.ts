@@ -133,6 +133,14 @@ volumes
         });
 
         // Univariate (bare or single order): ordinary n-th derivative.
+        // NOTE (SYM P1-19c residual): the closed-form result (e.g. `cos(_)`)
+        // is a *function of the hole* yet is typed `finite_number`. Lifting it
+        // into a `Function` literal to make the type honest is deliberately
+        // NOT done here: it (1) re-enters `Derivative.evaluate` on symbolic
+        // residuals (e.g. `AiryAi`) causing evaluation recursion, and (2) an
+        // underscore-parameter lambda currently mis-serializes to LaTeX as
+        // `()\mapsto\cos`. The unevaluated `Derivative(f)` is already typed
+        // `function`; only the evaluated closed form under-reports.
         if (orders.length <= 1) return derivative(op, orders[0] ?? 1);
 
         // Multi-index: mixed partial of a multivariate function. For a known

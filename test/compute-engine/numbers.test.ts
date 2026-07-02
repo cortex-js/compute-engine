@@ -571,4 +571,42 @@ describe('JSON round-trip fidelity (lossless .json contract)', () => {
       expect(ce.expr(j).isNumber).toBe(true);
     }
   });
+
+  // RT-P1-1: an exact `(±p/q)·√r` number literal must serialize in the
+  // Multiply/Rational form that re-folds to a number literal. The Divide/Negate
+  // forms (`√3/2`, `-(√3/2)`) re-boxed as a *function*, so `.json` was not a
+  // round-trip-stable serialization of the value.
+  test('RT-P1-1: rational·radical number literals round-trip', () => {
+    const cases = [
+      '\\frac{\\sqrt3}{2}', // 1/2 · √3
+      '-\\frac{\\sqrt3}{2}', // -1/2 · √3
+      '\\frac{3\\sqrt2}{5}', // 3/5 · √2  (control: |numerator| > 1)
+      '-\\frac{3\\sqrt2}{5}', // -3/5 · √2
+      '\\frac{\\sqrt{35}}{7}', // √(5/7) normalizes to (1/7)·√35
+      '\\sqrt2', // control: pure radical
+      '-\\sqrt2', // control: negated pure radical
+      '\\frac12', // control: pure rational
+    ];
+    for (const src of cases) {
+      const x = ce.parse(src).evaluate();
+      // Sanity: these are number literals, not function expressions.
+      expect(x.isNumberLiteral).toBe(true);
+      const rt = ce.expr(x.json);
+      expect(rt.isNumberLiteral).toBe(true);
+      expect(rt.isSame(x)).toBe(true);
+    }
+  });
+
+  // `√3/2` keeps the natural Divide serialization: the structural view of a
+  // number literal is its `.json`, so patterns authored as `\frac{\sqrt3}{2}`
+  // (Divide MathJSON) must keep matching the literal. The round-trip identity
+  // is provided by `canonicalDivide` folding exact ÷ exact back to the same
+  // number literal (RT-P1-1).
+  test('RT-P1-1: √3/2 serializes in the Divide form and re-folds on boxing', () => {
+    const x = ce.parse('\\frac{\\sqrt3}{2}').evaluate();
+    expect(x.json).toEqual(['Divide', ['Sqrt', 3], 2]);
+    expect(ce.box(['Divide', ['Sqrt', 3], 2]).isNumberLiteral).toBe(true);
+    // `.json` and the max-fidelity toMathJson agree.
+    expect(x.toMathJson({ fractionalDigits: 'max' })).toEqual(x.json);
+  });
 });

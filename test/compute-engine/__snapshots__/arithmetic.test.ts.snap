@@ -259,7 +259,7 @@ canonical = ["Divide", ["Sqrt", 35], 7]
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
-N-mach    = 0.845154254728517
+N-mach    = 0.845154254728518
 `;
 
 exports[`EXACT EVALUATION Sqrt: Inexact Fractional part 1`] = `
@@ -1065,7 +1065,7 @@ canonical = ["Divide", ["Sqrt", 35], 7]
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
-N-mach    = 0.845154254728517
+N-mach    = 0.845154254728518
 `;
 
 exports[`SQRT √(5x(3+2)) 1`] = `

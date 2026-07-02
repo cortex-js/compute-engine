@@ -101,6 +101,8 @@ describe('Playground regressions', () => {
     // than left as 1/(2√3).
     const ce = new ComputeEngine();
     const canonical = ce.parse('\\frac{1}{2\\sqrt{3}}').canonical;
+    // `√3/6` is a number literal (an ExactNumericValue). It serializes in the
+    // natural Divide form, which re-boxes to the same literal (RT-P1-1).
     expect(canonical.json).toEqual(['Divide', ['Sqrt', 3], 6]);
     expect(canonical.latex).toBe('\\frac{\\sqrt{3}}{6}');
   });

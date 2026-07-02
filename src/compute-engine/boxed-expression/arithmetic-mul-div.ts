@@ -784,6 +784,22 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       }
     }
 
+    // Exact ÷ exact folds to an exact number literal (√3/3 → the literal
+    // (1/3)√3, (1/2)/3 → 1/6), mirroring the exact-operand folding that
+    // canonicalMultiply already does. This is what makes a serialized
+    // radical quotient like `["Divide",["Sqrt",3],3]` re-box to the same
+    // number literal that produced it (RT-P1-1 round-trip identity).
+    // Inexact (float) operands deliberately do not fold at canonicalization;
+    // division by an exact zero was handled above.
+    {
+      const nv1 = typeof v1 === 'number' ? ce._numericValue(v1) : v1;
+      const nv2 = typeof v2 === 'number' ? ce._numericValue(v2) : v2;
+      if (nv1.isExact && nv2.isExact && !nv2.isZero) {
+        const q = nv1.div(nv2);
+        if (q.isExact) return ce.number(q);
+      }
+    }
+
     return ce._fn('Divide', [op1, op2]);
   }
 

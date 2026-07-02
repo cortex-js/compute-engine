@@ -1281,6 +1281,82 @@ describe('Phase 3: guard-closure semantics (synthetic artifact)', () => {
     const inf = ce.expr(['ComplexF', 'PositiveInfinity']);
     expect(inf.simplify().isSame(inf)).toBe(true);
   });
+
+  it('type complex: real/rational/integer-declared symbols satisfy the guard (SYM P1-21)', () => {
+    // The pack's RR/ZZ/QQ are finite-domain like CC, so a symbol declared
+    // real/rational/integer (or a finite_ variant — all subtypes of `real`)
+    // now discharges a `complex` (finite-complex) guard. Previously the
+    // Element(z, ℂ) fallback stayed undecided (fail-closed), blocking the
+    // 68% complex-domain slice under the most natural `declare(z,'real')`.
+    for (const t of [
+      'real',
+      'integer',
+      'rational',
+      'finite_real',
+      'finite_integer',
+      'finite_rational',
+    ]) {
+      const ce = load();
+      ce.declare('z', t as Parameters<ComputeEngine['declare']>[1]);
+      expect(ce.expr(['ComplexF', 'z']).simplify().isSame(0)).toBe(true);
+    }
+  });
+
+  it('type complex: a PROVABLY-infinite literal (±∞, complex ∞) still stays undecided', () => {
+    // The real/rational/integer acceptance must not leak to genuine
+    // infinities: `non_finite_number` (±∞) matches `real` in the lattice but
+    // has isFinite === false, and ComplexInfinity is not finite either.
+    for (const inf of ['PositiveInfinity', 'NegativeInfinity', 'ComplexInfinity']) {
+      const ce = load();
+      const e = ce.expr(['ComplexF', inf]);
+      expect(e.simplify().isSame(e)).toBe(true);
+    }
+  });
+});
+
+describe('Phase 3: complex-guard rules under a real declaration (SYM P1-21)', () => {
+  // A complex-guarded corpus rule (fungrim:072166, Arctan(iz) → i·Artanh(z),
+  // whose only guard is a `type:complex` on the single wildcard) must fire
+  // for a real/integer/rational-declared subject, exactly as it does for a
+  // complex one — the pack treats RR/ZZ/QQ as finite-domain like CC.
+  const fires = (decl: string): boolean => {
+    const ce = new ComputeEngine();
+    loadIdentities(ce);
+    ce.declare('z', decl as Parameters<ComputeEngine['declare']>[1]);
+    const all = ce.rules(ce.simplificationRules);
+    const out = ce.expr(['Arctan', ['Multiply', 'ImaginaryUnit', 'z']]).replace(all);
+    return (
+      out !== null &&
+      out.isSame(ce.expr(['Multiply', 'ImaginaryUnit', ['Artanh', 'z']]))
+    );
+  };
+
+  it('fires for complex, real, integer and rational subjects  [fungrim:072166]', () => {
+    for (const d of ['complex', 'real', 'integer', 'rational'])
+      expect(fires(d)).toBe(true);
+  });
+
+  it('NO wrong result: a genuinely-non-real guard (Im(τ) > 0 / HH) still blocks a real τ', () => {
+    // fungrim:42a909 (j(τ+1) → j(τ)) carries an HH member guard that
+    // compiles to Im(τ) > 0. For a real τ, Im(τ) = 0, so the guard is
+    // definitively violated and the rule must not fire — the complex-guard
+    // relaxation above does not weaken the genuinely-complex requirement.
+    const ce = new ComputeEngine();
+    loadIdentities(ce);
+    ce.declare('tau', 'real');
+    const j = ce.expr(['ModularJ', ['Add', 'tau', 1]]);
+    expect(j.simplify().isSame(j)).toBe(true);
+    // …and it DOES fire once Im(τ) > 0 is known
+    const ce2 = new ComputeEngine();
+    loadIdentities(ce2);
+    ce2.declare('tau', 'complex');
+    ce2.assume(ce2.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false }));
+    expect(
+      ce2.expr(['ModularJ', ['Add', 'tau', 1]]).simplify().isSame(
+        ce2.expr(['ModularJ', 'tau'])
+      )
+    ).toBe(true);
+  });
 });
 
 describe('Phase 3: theta/modular acceptance (real corpus, Im(τ) > 0 assumptions)', () => {

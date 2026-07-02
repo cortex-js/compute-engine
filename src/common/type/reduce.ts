@@ -1,8 +1,10 @@
 import { typeToString } from './serialize';
-import { isSubtype, meetPrimitiveTypes } from './subtype';
+import { COVERING_UNION_MAP, isSubtype, meetPrimitiveTypes } from './subtype';
 import type {
   Type,
   PrimitiveType,
+  NumericPrimitiveType,
+  NumericType,
   AlgebraicType,
   CollectionType,
   ListType,
@@ -13,7 +15,7 @@ import type {
   DictionaryType,
   RecordType,
 } from './types';
-import { isValidPrimitiveType } from './primitive';
+import { isValidPrimitiveType, NUMERIC_TYPES_SET } from './primitive';
 
 /**
  * Reduce the input type
@@ -160,6 +162,27 @@ function reduceUnionType(type: AlgebraicType): Type {
     acc.push(current);
   }
 
+  // Covering-union collapse: `finite_X | non_finite_number ≡ X` for the
+  // infinity-admitting numeric tower (real, rational, integer, complex,
+  // number). The meet of two incomparable numeric types produces exactly such
+  // unions (e.g. `real ∧ complex = finite_real | non_finite_number`); collapse
+  // them so the union simplifies to the single covering type at construction.
+  // The `acc` members are now mutually incomparable, and the covering finite
+  // types form a chain, so at most one is present — a single collapse is
+  // deterministic and cannot leave a newly-subsumed sibling behind.
+  if (acc.indexOf('non_finite_number' as Type) !== -1) {
+    for (let i = 0; i < acc.length; i++) {
+      const m = acc[i];
+      if (typeof m !== 'string') continue;
+      const covered = COVERING_UNION_MAP[m];
+      if (covered) {
+        acc[i] = covered;
+        acc.splice(acc.indexOf('non_finite_number' as Type), 1);
+        break;
+      }
+    }
+  }
+
   if (acc.length === 1) return decorate(acc[0]);
   return decorate({ kind: 'union', types: acc });
 }
@@ -194,7 +217,64 @@ function meet2(a: Type, b: Type): Type {
     return { kind: 'union', types: maximals };
   }
 
+  // Two bounded numeric ranges (or a range and a bare numeric primitive): the
+  // meet is the intersection of their base kinds combined with the
+  // intersection of their intervals. Overlapping ranges no longer annihilate
+  // to `nothing` (an unsound refutation); only genuinely disjoint ranges do.
+  if (
+    (typeof a === 'object' && a.kind === 'numeric') ||
+    (typeof b === 'object' && b.kind === 'numeric')
+  ) {
+    const an = asNumericRange(a);
+    const bn = asNumericRange(b);
+    if (an && bn) return meetNumericRanges(an, bn);
+  }
+
   return 'nothing';
+}
+
+/** Coerce a numeric primitive string or numeric range object to a
+ *  `NumericType`; return `null` for any non-numeric type. */
+function asNumericRange(t: Type): NumericType | null {
+  if (typeof t === 'object') return t.kind === 'numeric' ? t : null;
+  if (NUMERIC_TYPES_SET.has(t as NumericPrimitiveType))
+    return { kind: 'numeric', type: t as NumericPrimitiveType };
+  return null;
+}
+
+/** The meet (intersection) of two bounded numeric types: the intersection of
+ *  their base kinds over the intersection of their intervals. An empty
+ *  interval or disjoint base kinds correctly yield `nothing`. */
+function meetNumericRanges(a: NumericType, b: NumericType): Type {
+  const bases = meetPrimitiveTypes(a.type, b.type);
+  if (bases.length === 0) return 'nothing';
+
+  const lower = Math.max(a.lower ?? -Infinity, b.lower ?? -Infinity);
+  const upper = Math.min(a.upper ?? Infinity, b.upper ?? Infinity);
+  if (lower > upper) return 'nothing';
+
+  const finite = lower !== -Infinity || upper !== Infinity;
+  const ranges: Type[] = [];
+  for (const base of bases) {
+    // A `non_finite_number` (±∞) cannot inhabit a finite interval.
+    if (base === 'non_finite_number' && finite) continue;
+    // `bases` are the meet of two numeric primitives, hence numeric.
+    ranges.push(makeNumericRange(base as NumericPrimitiveType, lower, upper));
+  }
+
+  if (ranges.length === 0) return 'nothing';
+  if (ranges.length === 1) return ranges[0];
+  return reduceUnionType({ kind: 'union', types: ranges });
+}
+
+/** Build a numeric range, collapsing an unbounded range to its base type. */
+function makeNumericRange(
+  type: NumericPrimitiveType,
+  lower: number,
+  upper: number
+): Type {
+  if (lower === -Infinity && upper === Infinity) return type;
+  return { kind: 'numeric', type, lower, upper };
 }
 
 function meetUnion(types: Readonly<Type[]>, b: Type): Type {

@@ -630,123 +630,117 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     }
   }
 
-  // Pythagorean identities
-  if (op === 'Add' && isFunction(x) && x.ops.length === 2) {
-    const [a, b] = x.ops;
+  // Pythagorean identities.
+  //
+  // Pairwise scan keyed on the trig argument: a matching pair (sin²/cos² of
+  // the same argument, tan²/cot² with a literal 1, or a·sin²/a·cos² with the
+  // same coefficient) is combined and the *rest* of the sum kept, so the
+  // identity fires even inside a larger n-ary sum (e.g. `sin²x + cos²x + y`
+  // -> `1 + y`, not just the exactly-two-term case). Mirrors the
+  // collect-then-combine shape of the ln/log combine in simplify-log.ts.
+  if (op === 'Add' && isFunction(x) && x.ops.length >= 2) {
+    const ops = x.ops;
 
-    // sin²(x) + cos²(x) -> 1
-    if (
-      isFunction(a, 'Power') &&
-      isFunction(b) &&
-      b.operator === 'Power' &&
-      a.op2?.isSame(2) &&
-      b.op2?.isSame(2)
-    ) {
-      const aBase = a.op1;
-      const bBase = b.op1;
-      const sinArg = isFunction(aBase, 'Sin') ? aBase.op1 : null;
-      const cosArg = isFunction(bBase, 'Cos') ? bBase.op1 : null;
-
-      if (sinArg && cosArg && sinArg.isSame(cosArg)) {
-        return { value: ce.One, because: 'sin²(x) + cos²(x) -> 1' };
+    // A bare squared trig term `f(u)²` -> { fn, arg: u }.
+    const squaredTrig = (
+      term: Expression
+    ): { fn: string; arg: Expression } | null => {
+      if (isFunction(term, 'Power') && term.op2?.isSame(2)) {
+        const base = term.op1;
+        if (isFunction(base) && TRIG_FUNCS.has(base.operator) && base.op1)
+          return { fn: base.operator, arg: base.op1 };
       }
+      return null;
+    };
 
-      // Also check reversed order
-      const sinArg2 = isFunction(bBase, 'Sin') ? bBase.op1 : null;
-      const cosArg2 = isFunction(aBase, 'Cos') ? aBase.op1 : null;
+    // Build the result of combining the pair at indices `i`, `j` into
+    // `replacement`, keeping every other operand of the sum.
+    const combinePair = (
+      i: number,
+      j: number,
+      replacement: Expression,
+      because: string
+    ): RuleStep => {
+      const rest = ops.filter((_, k) => k !== i && k !== j);
+      if (rest.length === 0) return { value: replacement, because };
+      return { value: ce._fn('Add', [replacement, ...rest]), because };
+    };
 
-      if (sinArg2 && cosArg2 && sinArg2.isSame(cosArg2)) {
-        return { value: ce.One, because: 'cos²(x) + sin²(x) -> 1' };
-      }
-    }
-
-    // tan²(x) + 1 -> sec²(x) and 1 + tan²(x) -> sec²(x)
-    // (one operand is Power, the other is 1)
-    if (isFunction(a, 'Power') && a.op2?.isSame(2) && b.isSame(1)) {
-      if (isFunction(a.op1, 'Tan')) {
-        return {
-          value: ce._fn('Sec', [a.op1.op1]).pow(2),
-          because: 'tan²(x) + 1 -> sec²(x)',
-        };
-      }
-    }
-    if (isFunction(b, 'Power') && b.op2?.isSame(2) && a.isSame(1)) {
-      if (isFunction(b.op1, 'Tan')) {
-        return {
-          value: ce._fn('Sec', [b.op1.op1]).pow(2),
-          because: '1 + tan²(x) -> sec²(x)',
-        };
-      }
-    }
-
-    // 1 + cot²(x) -> csc²(x) and cot²(x) + 1 -> csc²(x)
-    if (isFunction(a, 'Power') && a.op2?.isSame(2) && b.isSame(1)) {
-      if (isFunction(a.op1, 'Cot')) {
-        return {
-          value: ce._fn('Csc', [a.op1.op1]).pow(2),
-          because: 'cot²(x) + 1 -> csc²(x)',
-        };
-      }
-    }
-    if (isFunction(b, 'Power') && b.op2?.isSame(2) && a.isSame(1)) {
-      if (isFunction(b.op1, 'Cot')) {
-        return {
-          value: ce._fn('Csc', [b.op1.op1]).pow(2),
-          because: '1 + cot²(x) -> csc²(x)',
-        };
+    // -- sin²(u) + cos²(u) -> 1
+    for (let i = 0; i < ops.length; i++) {
+      const ti = squaredTrig(ops[i]);
+      if (!ti || (ti.fn !== 'Sin' && ti.fn !== 'Cos')) continue;
+      const wantFn = ti.fn === 'Sin' ? 'Cos' : 'Sin';
+      for (let j = 0; j < ops.length; j++) {
+        if (j === i) continue;
+        const tj = squaredTrig(ops[j]);
+        if (!tj || tj.fn !== wantFn || !tj.arg.isSame(ti.arg)) continue;
+        return combinePair(i, j, ce.One, 'sin²(x) + cos²(x) -> 1');
       }
     }
 
-    // a*sin²(x) + a*cos²(x) -> a (with coefficient)
-    if (
-      isFunction(a, 'Multiply') &&
-      isFunction(b) &&
-      b.operator === 'Multiply'
-    ) {
-      // Extract coefficient and trig functions
-      const extractCoeffAndTrig = (expr: Expression) => {
+    // -- a·sin²(u) + a·cos²(u) -> a (same coefficient, same argument)
+    const coeffSquaredTrig = (
+      term: Expression
+    ): { coeff: Expression; fn: string; arg: Expression } | null => {
+      if (!isFunction(term, 'Multiply') || term.ops.length !== 2) return null;
+      const [c, p] = term.ops;
+      const fromPower = (
+        pow: Expression,
+        coeff: Expression
+      ): { coeff: Expression; fn: string; arg: Expression } | null => {
         if (
-          !isFunction(expr) ||
-          expr.operator !== 'Multiply' ||
-          expr.ops.length !== 2
+          isFunction(pow, 'Power') &&
+          pow.op2?.isSame(2) &&
+          isFunction(pow.op1) &&
+          (pow.op1.operator === 'Sin' || pow.op1.operator === 'Cos') &&
+          pow.op1.op1
         )
-          return null;
-        const [c, p] = expr.ops;
-        if (
-          isFunction(p, 'Power') &&
-          p.op2?.isSame(2) &&
-          isFunction(p.op1) &&
-          (p.op1.operator === 'Sin' || p.op1.operator === 'Cos')
-        ) {
-          return { coeff: c, trigFunc: p.op1.operator, trigArg: p.op1.op1 };
-        }
-        // Try reversed
-        if (
-          isFunction(c, 'Power') &&
-          c.op2?.isSame(2) &&
-          isFunction(c.op1) &&
-          (c.op1.operator === 'Sin' || c.op1.operator === 'Cos')
-        ) {
-          return { coeff: p, trigFunc: c.op1.operator, trigArg: c.op1.op1 };
-        }
+          return { coeff, fn: pow.op1.operator, arg: pow.op1.op1 };
         return null;
       };
+      return fromPower(p, c) ?? fromPower(c, p);
+    };
 
-      const infoA = extractCoeffAndTrig(a);
-      const infoB = extractCoeffAndTrig(b);
+    for (let i = 0; i < ops.length; i++) {
+      const ti = coeffSquaredTrig(ops[i]);
+      if (!ti) continue;
+      const wantFn = ti.fn === 'Sin' ? 'Cos' : 'Sin';
+      for (let j = 0; j < ops.length; j++) {
+        if (j === i) continue;
+        const tj = coeffSquaredTrig(ops[j]);
+        if (
+          !tj ||
+          tj.fn !== wantFn ||
+          !tj.arg.isSame(ti.arg) ||
+          !tj.coeff.isSame(ti.coeff)
+        )
+          continue;
+        return combinePair(i, j, ti.coeff, 'a*sin²(x) + a*cos²(x) -> a');
+      }
+    }
 
-      if (
-        infoA &&
-        infoB &&
-        infoA.coeff.isSame(infoB.coeff) &&
-        infoA.trigArg?.isSame(infoB.trigArg) &&
-        ((infoA.trigFunc === 'Sin' && infoB.trigFunc === 'Cos') ||
-          (infoA.trigFunc === 'Cos' && infoB.trigFunc === 'Sin'))
-      ) {
-        return {
-          value: infoA.coeff,
-          because: 'a*sin²(x) + a*cos²(x) -> a',
-        };
+    // -- tan²(u) + 1 -> sec²(u); cot²(u) + 1 -> csc²(u) (needs a literal 1)
+    const oneIndex = ops.findIndex((t) => t.isSame(1));
+    if (oneIndex >= 0) {
+      for (let i = 0; i < ops.length; i++) {
+        if (i === oneIndex) continue;
+        const ti = squaredTrig(ops[i]);
+        if (!ti) continue;
+        if (ti.fn === 'Tan')
+          return combinePair(
+            i,
+            oneIndex,
+            ce._fn('Sec', [ti.arg]).pow(2),
+            'tan²(x) + 1 -> sec²(x)'
+          );
+        if (ti.fn === 'Cot')
+          return combinePair(
+            i,
+            oneIndex,
+            ce._fn('Csc', [ti.arg]).pow(2),
+            '1 + cot²(x) -> csc²(x)'
+          );
       }
     }
   }

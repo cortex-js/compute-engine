@@ -7,7 +7,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
 } from './global-types';
-import { isSymbol, isFunction } from './boxed-expression/type-guards';
+import { isSymbol, isFunction, isString } from './boxed-expression/type-guards';
 
 /***
  * ### THEORY OF OPERATIONS
@@ -112,6 +112,14 @@ export function canonicalFunctionLiteral(
   expr: Expression | undefined
 ): Expression | undefined {
   if (!expr) return undefined;
+
+  //
+  // 0/ A string literal is never a function. Without this guard a string
+  //    falls through to the shorthand path below and becomes a constant
+  //    nullary function `() ↦ "s"`, so e.g. `Map([1,2,3], "nf")` would map to
+  //    `["nf","nf","nf"]` instead of being rejected.
+  //
+  if (isString(expr)) return undefined;
 
   //
   // 1/ Canonical function literal

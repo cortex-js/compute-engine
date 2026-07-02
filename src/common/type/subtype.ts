@@ -212,6 +212,46 @@ function finiteBaseType(t: NumericPrimitiveType): NumericPrimitiveType {
 }
 
 /**
+ * The infinity-admitting numeric types, keyed by their *finite* counterpart.
+ *
+ * A union `finite_X | non_finite_number` covers exactly the same values as the
+ * single type `X` (see the numeric tower in `types.ts`: `real = finite_real +
+ * non_finite_number`, `integer = finite_integer + non_finite_number`, etc.).
+ * The meet of two incomparable numeric types produces exactly such unions
+ * (e.g. `real ∧ complex = finite_real | non_finite_number`), so recognizing the
+ * equivalence lets those unions collapse to — and be seen as equal to — the
+ * single covering type `X`.
+ */
+export const COVERING_UNION_MAP: Record<string, NumericPrimitiveType> = {
+  finite_number: 'number',
+  finite_complex: 'complex',
+  finite_real: 'real',
+  finite_rational: 'rational',
+  finite_integer: 'integer',
+};
+
+/**
+ * If a union contains `non_finite_number` together with a finite numeric type
+ * `finite_X`, it also covers the infinity-admitting `X`
+ * (`finite_X | non_finite_number ≡ X`). Return the union's members augmented
+ * with any such covered supertypes, so a member-wise subtype check can see
+ * unions that *cover* a single type (e.g. `real <: finite_real |
+ * non_finite_number`). Returns the input unchanged when there is nothing to
+ * add.
+ */
+function unionCoveringMembers(types: Readonly<Type[]>): Readonly<Type[]> {
+  if (!types.some((t) => t === 'non_finite_number')) return types;
+  let extra: Type[] | undefined;
+  for (const t of types) {
+    if (typeof t !== 'string') continue;
+    const covered = COVERING_UNION_MAP[t];
+    if (covered) (extra ??= []).push(covered);
+  }
+  if (!extra) return types;
+  return [...types, ...extra];
+}
+
+/**
  * True when `a` and `b` are *provably* disjoint (no value inhabits both).
  * Used for `A <: !B` (a subtype of a negation iff it is disjoint from the
  * negated type). Conservative: returns `false` (may overlap) whenever
@@ -396,15 +436,20 @@ export function isSubtype(
     return false;
   }
 
-  // A type is a subtype of a union if it is a subtype of any of the types in the union
+  // A type is a subtype of a union if it is a subtype of any of the types in
+  // the union. The member-wise check is incomplete for *covering* unions
+  // (e.g. `real <: finite_real | non_finite_number`, where `real` is a subtype
+  // of neither member individually), so augment the rhs members with any
+  // single type they jointly cover before probing.
   if (rhs.kind === 'union') {
+    const rhsMembers = unionCoveringMembers(rhs.types);
     if (typeof lhs !== 'string' && lhs.kind === 'union') {
       // lhs is a union, rhs is a union
       return lhs.types.every((lhsType) =>
-        rhs.types.some((rhsType) => isSubtype(lhsType, rhsType))
+        rhsMembers.some((rhsType) => isSubtype(lhsType, rhsType))
       );
     }
-    return rhs.types.some((t) => isSubtype(lhs, t));
+    return rhsMembers.some((t) => isSubtype(lhs, t));
   }
 
   //
@@ -425,13 +470,17 @@ export function isSubtype(
   // Handle expressions
   //
   if (rhs.kind === 'expression') {
-    if (lhs === 'symbol') return true;
+    // A symbol is a subtype of `expression<Op>` only when `Op` is `Symbol` — a
+    // symbol is an `expression<Symbol>`, not an `expression<Add>`. (Both symbol
+    // branches previously returned `true` for *every* operator, so any symbol
+    // matched `expression<Add>`, `expression<Limits>`, etc.)
+    if (lhs === 'symbol') return rhs.operator === 'Symbol';
     if (typeof lhs === 'string') return false;
     if (lhs.kind === 'expression') {
       if (rhs.operator === 'Symbol') return isSymbol(lhs);
       return lhs.operator === rhs.operator;
     }
-    if (lhs.kind === 'symbol') return true;
+    if (lhs.kind === 'symbol') return rhs.operator === 'Symbol';
   }
 
   // A primitive type is not a subtype of a composite type (except a union)
@@ -682,6 +731,22 @@ export function isSubtype(
   //
   // Handle numeric subsets
   //
+
+  // A numeric *value literal* is a subtype of a bounded numeric type when the
+  // value satisfies the base kind and lies within the bounds. (Without this,
+  // `value 7 <: integer<5..10>` fell through to the value fallback below,
+  // which tested `integer <: integer<5..10>` — always `false`.)
+  if (rhs.kind === 'numeric' && lhs.kind === 'value') {
+    if (typeof lhs.value !== 'number') return false;
+    const baseKind: NumericPrimitiveType = Number.isInteger(lhs.value)
+      ? 'finite_integer'
+      : 'finite_real';
+    if (!isPrimitiveSubtype(baseKind, rhs.type)) return false;
+    if (lhs.value < (rhs.lower ?? -Infinity)) return false;
+    if (lhs.value > (rhs.upper ?? Infinity)) return false;
+    return true;
+  }
+
   if (lhs.kind === 'numeric' && rhs.kind === 'numeric') {
     // Check that the types match
     if (!isSubtype(lhs.type, rhs.type)) return false;

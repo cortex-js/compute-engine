@@ -357,6 +357,26 @@ export function canonicalLimits(
  * Assume we are in the context of a big operator
  * (i.e. `pushScope()` has been called)
  */
+/**
+ * A summation/product limit (lower or upper bound) must be numeric. Accept a
+ * `Nothing` sentinel (an open bound), an already-invalid operand, and anything
+ * that could evaluate to a number (a number literal, a numeric expression, or
+ * an unknown symbol). Reject a *provably* non-numeric bound (a string, a
+ * boolean) with a type error so the enclosing big-op stays symbolic instead of
+ * silently coercing it — e.g. `Sum(x, (x, "lo", 10))` must not read "lo" as 1
+ * and evaluate to 55.
+ */
+function checkBound(bound: Expression | null): Expression | null {
+  if (bound === null) return null;
+  if (isSymbol(bound) && bound.symbol === 'Nothing') return bound;
+  if (!bound.isValid) return bound;
+  if (bound.isNumber) return bound;
+  const t = bound.type;
+  if (t.isUnknown || t.type === 'any') return bound;
+  if (t.matches('number')) return bound;
+  return bound.engine.typeError('number', t, bound);
+}
+
 export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   const ce = expr.engine;
   let index: Expression;
@@ -396,8 +416,8 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
         ce.declare(rawIndex.symbol, 'integer');
     }
     const canonicalIndex = expr.op1.canonical;
-    const canonicalLower = expr.op2?.canonical ?? ce.Nothing;
-    const canonicalUpper = expr.op3?.canonical ?? ce.Nothing;
+    const canonicalLower = checkBound(expr.op2?.canonical ?? null) ?? ce.Nothing;
+    const canonicalUpper = checkBound(expr.op3?.canonical ?? null) ?? ce.Nothing;
     if (!isSymbol(canonicalIndex))
       return ce.function('Limits', [
         ce.typeError('symbol', undefined, canonicalIndex),
@@ -417,8 +437,8 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   ) {
     if (!isFunction(expr)) return undefined;
     index = expr.op1;
-    lower = expr.ops[1]?.canonical ?? null;
-    upper = expr.ops[2]?.canonical ?? null;
+    lower = checkBound(expr.ops[1]?.canonical ?? null);
+    upper = checkBound(expr.ops[2]?.canonical ?? null);
   } else index = expr;
 
   if (isFunction(index, 'Hold')) index = index.op1;
@@ -481,6 +501,14 @@ export function canonicalBigop(
     ce.popScope();
     bigOpScope.noAutoDeclare = false;
   }
+
+  // A function-literal body (e.g. `Sum(n ↦ n, (n, 1, 3))`) is not a valid
+  // summand/factor: reducing lambdas produces a mistyped `k·λ`. Reject it with
+  // a type error so the big-op stays symbolic rather than silently evaluating
+  // to nonsense.
+  const bodyType = body.type.type;
+  if (typeof bodyType !== 'string' && bodyType.kind === 'signature')
+    body = ce.typeError('number', body.type, body);
 
   if (body.isCollection) {
     if (bigOp === 'Sum') return ce.expr(['Reduce', body, 'Add', 0]);

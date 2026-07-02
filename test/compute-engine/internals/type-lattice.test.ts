@@ -15,6 +15,7 @@ import {
   meetPrimitiveTypes,
 } from '../../../src/common/type/subtype';
 import { typeToString } from '../../../src/common/type/serialize';
+import { parseType } from '../../../src/common/type/parse';
 import { NUMERIC_TYPES } from '../../../src/common/type/primitive';
 import type {
   PrimitiveType,
@@ -209,4 +210,213 @@ describe('Type-based membership refutation is sound (G15 ↔ G3)', () => {
     expect(result.symbol).toBe('True');
     ce.popScope();
   });
+});
+
+const reduceStr = (s: string): string => {
+  const t = reduceType(parseType(s));
+  return typeof t === 'string' ? t : typeToString(t);
+};
+
+describe('Covering-union recognition (SYM P1-16)', () => {
+  // `finite_X | non_finite_number ≡ X` across the whole infinity-admitting
+  // numeric tower. The union must (a) collapse to `X` under `reduceUnionType`
+  // and (b) be recognized as equal to `X` in *both* subtype directions.
+  const COVERS: [string, string][] = [
+    ['finite_real | non_finite_number', 'real'],
+    ['finite_rational | non_finite_number', 'rational'],
+    ['finite_integer | non_finite_number', 'integer'],
+    ['finite_complex | non_finite_number', 'complex'],
+    ['finite_number | non_finite_number', 'number'],
+  ];
+
+  for (const [union, single] of COVERS) {
+    test(`reduceUnionType collapses "${union}" → "${single}"`, () =>
+      expect(reduceStr(union)).toBe(single));
+
+    test(`${single} <: ${union} (covering union covers the single type)`, () =>
+      expect(isSubtype(single, union)).toBe(true));
+
+    test(`${union} <: ${single} (members are all subtypes)`, () =>
+      expect(isSubtype(union, single)).toBe(true));
+  }
+
+  test('order-independent: "non_finite_number | finite_integer" → integer', () =>
+    expect(reduceStr('non_finite_number | finite_integer')).toBe('integer'));
+
+  test('collapse still folds a redundant subtype member', () =>
+    // finite_integer ⊑ finite_real, so only finite_real | non_finite_number
+    // remains, which collapses to real.
+    expect(reduceStr('finite_integer | finite_real | non_finite_number')).toBe(
+      'real'
+    ));
+
+  test('a non-covering union is left intact (no spurious collapse)', () => {
+    // imaginary is not infinity-admitting; the union does not cover a single
+    // numeric type.
+    const t = reduceType(parseType('finite_real | imaginary'));
+    expect(typeof t).toBe('object');
+    expect((t as any).kind).toBe('union');
+  });
+
+  test('non_finite_number alone is not spuriously widened', () => {
+    // `non_finite_number` without a paired finite type must not collapse.
+    const t = reduceType(parseType('non_finite_number | boolean'));
+    expect((t as any).kind).toBe('union');
+    expect([...(t as any).types].sort()).toEqual([
+      'boolean',
+      'non_finite_number',
+    ]);
+  });
+});
+
+describe('Symbol vs expression<Op> (SYM P1-17)', () => {
+  test('symbol <: expression<Symbol>', () =>
+    expect(isSubtype('symbol', 'expression<Symbol>')).toBe(true));
+
+  test('symbol ⊄ expression<Add>', () =>
+    expect(isSubtype('symbol', 'expression<Add>')).toBe(false));
+
+  test('symbol ⊄ expression<Limits>', () =>
+    expect(isSubtype('symbol', 'expression<Limits>')).toBe(false));
+
+  test('symbol ⊄ expression<ErrorCode>', () =>
+    expect(isSubtype('symbol', 'expression<ErrorCode>')).toBe(false));
+
+  test('symbol<True> <: expression<Symbol>', () =>
+    expect(isSubtype('symbol<True>', 'expression<Symbol>')).toBe(true));
+
+  test('symbol<True> ⊄ expression<Add>', () =>
+    expect(isSubtype('symbol<True>', 'expression<Add>')).toBe(false));
+
+  test('bare symbol <: bare expression is unchanged', () =>
+    expect(isSubtype('symbol', 'expression')).toBe(true));
+
+  test('expression<Symbol> <: expression<Symbol>', () =>
+    expect(isSubtype('expression<Symbol>', 'expression<Symbol>')).toBe(true));
+
+  test('expression<Add> ⊄ expression<Symbol>', () =>
+    expect(isSubtype('expression<Add>', 'expression<Symbol>')).toBe(false));
+});
+
+describe('Value literal vs bounded numeric (SYM P1-18a)', () => {
+  test('7 <: integer<5..10>', () =>
+    expect(isSubtype('7', 'integer<5..10>')).toBe(true));
+
+  test('5 <: integer<5..10> (inclusive lower)', () =>
+    expect(isSubtype('5', 'integer<5..10>')).toBe(true));
+
+  test('10 <: integer<5..10> (inclusive upper)', () =>
+    expect(isSubtype('10', 'integer<5..10>')).toBe(true));
+
+  test('3 ⊄ integer<5..10> (below range)', () =>
+    expect(isSubtype('3', 'integer<5..10>')).toBe(false));
+
+  test('12 ⊄ integer<5..10> (above range)', () =>
+    expect(isSubtype('12', 'integer<5..10>')).toBe(false));
+
+  test('7.5 ⊄ integer<5..10> (not an integer)', () =>
+    expect(isSubtype('7.5', 'integer<5..10>')).toBe(false));
+
+  test('7.5 <: real<5..10>', () =>
+    expect(isSubtype('7.5', 'real<5..10>')).toBe(true));
+
+  test('7 <: real<5..10> (an integer value is real)', () =>
+    expect(isSubtype('7', 'real<5..10>')).toBe(true));
+
+  test('half-open: 7 <: integer<5..>', () =>
+    expect(isSubtype('7', 'integer<5..>')).toBe(true));
+
+  test('half-open: 3 ⊄ integer<5..>', () =>
+    expect(isSubtype('3', 'integer<5..>')).toBe(false));
+
+  test('half-open: 3 <: integer<..10>', () =>
+    expect(isSubtype('3', 'integer<..10>')).toBe(true));
+});
+
+describe('Bounded numeric meets (SYM P1-18b)', () => {
+  const isect = (a: string, b: string): string => {
+    const t = reduceType({
+      kind: 'intersection',
+      types: [parseType(a), parseType(b)],
+    });
+    return typeof t === 'string' ? t : typeToString(t);
+  };
+
+  test('overlapping same-base ranges intersect', () =>
+    expect(isect('integer<0..10>', 'integer<5..20>')).toBe('integer<5..10>'));
+
+  test('nested ranges intersect to the inner range', () =>
+    expect(isect('integer<0..100>', 'integer<5..10>')).toBe('integer<5..10>'));
+
+  test('disjoint ranges meet to nothing', () =>
+    expect(isect('integer<0..3>', 'integer<5..10>')).toBe('nothing'));
+
+  test('ranges touching at a point meet to that point', () =>
+    expect(isect('integer<0..5>', 'integer<5..10>')).toBe('integer<5..5>'));
+
+  test('real range ∩ integer range narrows base kind to integer', () =>
+    expect(isect('real<0..100>', 'integer<5..10>')).toBe('integer<5..10>'));
+
+  test('range ∩ overlapping bare numeric primitive', () =>
+    expect(isect('real<0..10>', 'integer')).toBe('integer<0..10>'));
+
+  test('range ∩ disjoint primitive = nothing', () =>
+    expect(isect('integer<0..10>', 'boolean')).toBe('nothing'));
+
+  test('range ∩ non_finite_number (disjoint) = nothing', () =>
+    expect(isect('integer<0..10>', 'non_finite_number')).toBe('nothing'));
+
+  test('half-open intersection is bounded from both', () =>
+    expect(isect('integer<0..>', 'integer<..10>')).toBe('integer<0..10>'));
+
+  test('meet is symmetric', () => {
+    expect(isect('integer<0..10>', 'integer<5..20>')).toBe(
+      isect('integer<5..20>', 'integer<0..10>')
+    );
+    expect(isect('real<0..10>', 'integer')).toBe(isect('integer', 'real<0..10>'));
+  });
+});
+
+describe('Lattice property sanity: meet ⊑ operands, operand ⊑ union', () => {
+  const TYPES = [
+    'integer',
+    'real',
+    'rational',
+    'complex',
+    'number',
+    'finite_integer',
+    'finite_real',
+    'non_finite_number',
+    'boolean',
+    'string',
+    'integer<0..10>',
+    'integer<5..20>',
+    'real<0..1>',
+  ];
+
+  const meet = (a: string, b: string): Type =>
+    reduceType({ kind: 'intersection', types: [parseType(a), parseType(b)] });
+  const union = (a: string, b: string): Type =>
+    reduceType({ kind: 'union', types: [parseType(a), parseType(b)] });
+
+  for (const a of TYPES) {
+    for (const b of TYPES) {
+      test(`meet(${a}, ${b}) ⊑ both operands`, () => {
+        const m = meet(a, b);
+        // The empty type is modeled as `nothing`/`never` here; skip the
+        // soundness assertion for it (isSubtype('nothing', X) is false by
+        // design). A non-empty meet must be a subtype of both operands.
+        if (m !== 'nothing' && m !== 'never') {
+          expect(isSubtype(m, parseType(a))).toBe(true);
+          expect(isSubtype(m, parseType(b))).toBe(true);
+        }
+      });
+
+      test(`${a} ⊑ (${a} | ${b}) and ${b} ⊑ (${a} | ${b})`, () => {
+        const u = union(a, b);
+        expect(isSubtype(parseType(a), u)).toBe(true);
+        expect(isSubtype(parseType(b), u)).toBe(true);
+      });
+    }
+  }
 });
