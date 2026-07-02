@@ -117,4 +117,101 @@ describe('Playground regressions', () => {
       ['Limits', 'p', 0, 3],
     ]);
   });
+
+  describe('CORRECTNESS_FINDINGS #30: subs descends into collection/tensor elements', () => {
+    test('subs reaches List (BoxedTensor) elements — Median/Mean lists', () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce.box(['Median', ['List', 'a', 'b', 'c']]).subs({ a: ce.number(1) }).json
+      ).toEqual(['Median', ['List', 1, 'b', 'c']]);
+      expect(
+        ce.box(['Mean', ['List', 'a', 'b', 'c']]).subs({ a: ce.number(1) }).has('a')
+      ).toBe(false);
+    });
+
+    test('subs reaches a plain List and a nested matrix', () => {
+      const ce = new ComputeEngine();
+      expect(ce.box(['List', 'a', 'b']).subs({ a: ce.number(1) }).json).toEqual([
+        'List',
+        1,
+        'b',
+      ]);
+      expect(
+        ce
+          .box(['List', ['List', 'a', 'b'], ['List', 'c', 'd']])
+          .subs({ a: ce.number(1), d: ce.number(9) }).json
+      ).toEqual(['List', ['List', 1, 'b'], ['List', 'c', 9]]);
+    });
+
+    test('subs reaches definite-integral bounds', () => {
+      const ce = new ComputeEngine();
+      const r = ce.parse('\\int_a^b x \\, dx').subs({ a: ce.number(0) });
+      expect(r.has('a')).toBe(false);
+      expect(r.has('b')).toBe(true);
+    });
+  });
+
+  describe('CORRECTNESS_FINDINGS #30: interpreted Power(0,0) is consistently NaN', () => {
+    test('literal and value-bound-symbol 0^0 agree (NaN) under both evaluate() and N()', () => {
+      const ce = new ComputeEngine();
+      expect(ce.box(['Power', 0, 0]).evaluate().isNaN).toBe(true);
+      expect(ce.box(['Power', 0, 0]).N().isNaN).toBe(true);
+
+      const ce2 = new ComputeEngine();
+      ce2.assign('x', 0);
+      ce2.assign('y', 0);
+      expect(ce2.box(['Power', 'x', 'y']).evaluate().isNaN).toBe(true);
+      // Regression: this used to return 1 (Math.pow(0,0)) — inconsistent with
+      // the literal and the symbolic evaluate() result.
+      expect(ce2.box(['Power', 'x', 'y']).N().isNaN).toBe(true);
+    });
+
+    test('ordinary powers are unaffected', () => {
+      const ce = new ComputeEngine();
+      expect(ce.box(['Power', 2, 0]).N().re).toBe(1);
+      expect(ce.box(['Power', 0, 2]).N().re).toBe(0);
+      expect(ce.box(['Power', 2, 3]).N().re).toBe(8);
+    });
+  });
+
+  describe('CORRECTNESS_FINDINGS #29: timeouts are bounded and well-typed', () => {
+    // The public contract (locked by timeout.test.ts across the API): when the
+    // time limit expires, evaluate()/N() throw CancellationError — never a raw
+    // internal error, and never an unbounded hang. This case used to burn
+    // ~18 minutes of CPU in the limit engine before the deadline sweep.
+    test('a deliberately slow expression with a tiny time limit completes fast, inert or CancellationError', () => {
+      const ce = new ComputeEngine();
+      ce.timeLimit = 50;
+      // A hard iterated-exponential (Gruntz-class) limit the engine cannot
+      // resolve quickly: x·ln(x)·ln(x·eˣ − x²)² / ln(ln(x² + 2·exp(exp(3x³ln x)))).
+      const tower = ['Exp', ['Exp', ['Multiply', 3, ['Power', 'x', 3], ['Ln', 'x']]]];
+      const numer = [
+        'Multiply',
+        'x',
+        ['Ln', 'x'],
+        [
+          'Power',
+          ['Ln', ['Subtract', ['Multiply', 'x', ['Exp', 'x']], ['Power', 'x', 2]]],
+          2,
+        ],
+      ];
+      const denom = [
+        'Ln',
+        ['Ln', ['Add', ['Power', 'x', 2], ['Multiply', 2, tower]]],
+      ];
+      const body = ['Divide', numer, denom];
+      const slow = ce.box(['Limit', ['Function', body, 'x'], 'PositiveInfinity']);
+      // Bounded: returns (inert) or throws CancellationError — nothing else,
+      // and within a small multiple of the time limit (was an ~18 min hang).
+      const start = Date.now();
+      for (const run of [() => slow.evaluate(), () => slow.N()]) {
+        try {
+          run();
+        } catch (e) {
+          expect((e as Error).constructor.name).toBe('CancellationError');
+        }
+      }
+      expect(Date.now() - start).toBeLessThan(10_000);
+    });
+  });
 });

@@ -1058,8 +1058,25 @@ function union(
   ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
-  // ops should be collections. If there are scalars, convert them to singleton sets
-  const xs = ops.map((op) => (op.isCollection ? op : ce.function('Set', [op])));
+  // ops should be collections. Keep set-/collection-VALUED operands as sets —
+  // including inert set-valued shells whose `isCollection` is false because
+  // they carry no collection handler (e.g. `Interior(D)`, a Fungrim
+  // member-guard set): wrapping such an operand in `Set([op])` would collapse
+  // the whole set into a single literal element (SYM P3-10). Only a genuine
+  // scalar (neither a collection nor set-typed) is promoted to a singleton set.
+  const xs = ops.map((op) =>
+    op.isCollection || op.type.matches('set')
+      ? op
+      : ce.function('Set', [op])
+  );
+
+  // A Set literal can only be folded when every operand is a FINITE,
+  // enumerable collection. If any operand is infinite (Integers, Interval) or
+  // non-enumerable (an inert set shell, a set-builder), keep the union
+  // symbolic so the set-valued operand is preserved structurally rather than
+  // dropped or collapsed into a literal element (SYM P3-10).
+  if (!xs.every((op) => op.isFiniteCollection === true))
+    return ce._fn('Union', xs);
 
   const totalSize = xs.reduce((acc, op) => acc + (op.count ?? 0), 0);
   if (totalSize > MAX_SIZE_EAGER_COLLECTION) return ce._fn('Union', xs);

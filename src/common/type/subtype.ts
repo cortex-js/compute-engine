@@ -716,11 +716,17 @@ export function isSubtype(
     // Check they have the same number of elements
     if (lhs.elements.length !== rhs.elements.length) return false;
 
-    // Check that all the elements match by type and name
+    // Check that all the elements match by type (covariantly) and name.
+    // Names are erasable in the subtype direction: a *named* tuple is a
+    // subtype of a same-shape *unnamed* tuple (`tuple<x: integer, y: integer>
+    // <: tuple<integer, integer>`), but not the reverse — the unnamed tuple
+    // lacks the field names the named supertype guarantees. So only require a
+    // matching name when the rhs (supertype) element is itself named.
     for (let i = 0; i < lhs.elements.length; i++) {
       const a = lhs.elements[i];
       const b = rhs.elements[i];
-      if (!isSubtype(a.type, b.type) || a.name !== b.name) return false;
+      if (!isSubtype(a.type, b.type)) return false;
+      if (b.name !== undefined && a.name !== b.name) return false;
     }
     return true;
   }

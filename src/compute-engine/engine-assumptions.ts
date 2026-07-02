@@ -17,8 +17,52 @@ import {
   getInequalityBoundsFromAssumptions,
 } from './assume';
 
-import { isLatexString } from './latex-syntax/utils';
+import { asLatexString } from './latex-syntax/utils';
 import { parse as parseLatex } from './latex-syntax/latex-syntax';
+
+/**
+ * Normalize a predicate argument that may be a string.
+ *
+ * `assume()` and `verify()` accept a predicate as a `BoxedExpression`, a
+ * MathJSON expression, or a **string**. A string is parsed as LaTeX:
+ *
+ * - `$…$` / `$$…$$`-delimited: the delimiters are stripped, then parsed
+ *   (`asLatexString`).
+ * - any other string (a bare infix predicate like `'x > 0'`, or one
+ *   containing LaTeX commands like `'\\pi > 0'`): parsed directly as LaTeX —
+ *   `ce.parse` handles infix relational operators.
+ *
+ * Throws a clear error if the string cannot be parsed into a valid
+ * expression.
+ *
+ * A **non-string** input is boxed raw, exactly preserving the previous
+ * behavior (an already-canonical `BoxedExpression` stays canonical). A
+ * **string** is boxed CANONICALLY: a freshly parsed relational such as
+ * `Less(x, 0)` only reduces against the assumptions DB (`x < 0 → False` under
+ * `assume(x > 0)`) once its operator definition is bound, i.e. in canonical
+ * form — a raw parse would evaluate back to itself and `verify()` would return
+ * `undefined` where the boxed-expression path returns `false`.
+ */
+function predicateFromArg(
+  ce: IComputeEngine,
+  predicate: Expression | string,
+  who: 'assume' | 'verify'
+): Expression {
+  if (typeof predicate !== 'string')
+    return ce.expr(predicate, { form: 'raw' });
+
+  // `asLatexString` strips `$…$`/`$$…$$`; a plain string is used verbatim.
+  const latex = asLatexString(predicate) ?? predicate;
+  const parsed = parseLatex(latex);
+  const boxed = parsed === null ? null : ce.expr(parsed);
+  if (boxed === null || !boxed.isValid)
+    throw new Error(
+      `${who}(): cannot parse the predicate string ${JSON.stringify(
+        predicate
+      )} as a mathematical expression`
+    );
+  return boxed;
+}
 
 export function ask(
   ce: IComputeEngine,
@@ -250,75 +294,95 @@ export function ask(
 
 export function verify(
   ce: IComputeEngine,
-  query: Expression
+  query: Expression | string
 ): boolean | undefined {
-  // Prevent recursive verify() -> ask() -> verify() loops
+  // Prevent recursive verify() -> ask() -> verify() loops. The `_isVerifying`
+  // flag is set once, here, at the OUTERMOST call; the logical recursion below
+  // goes through `verifyInner`, which does NOT re-check the flag (SYM P3-2 —
+  // the previous `verify()`-recurses-into-`verify()` shape was dead code: the
+  // inner calls hit `ce._isVerifying === true` and returned `undefined`, so
+  // compound predicates were only ever decided by `evaluate()`'s own
+  // reduction). `ask()` still reads the flag to disable its B3 fallback.
   if (ce._isVerifying) return undefined;
 
   ce._isVerifying = true;
   try {
-    const parsed = isLatexString(query) ? parseLatex(query as string) : null;
-    const boxed = ce.expr(parsed ?? query, { form: 'raw' });
-
-    const expr = boxed.evaluate();
-    if (isSymbol(expr)) {
-      if (expr.symbol === 'True') return true;
-      if (expr.symbol === 'False') return false;
-    }
-
-    const op = expr.operator;
-
-    if (op === 'Not' && isFunction(expr)) {
-      const result = verify(ce, expr.op1);
-      if (result === undefined) return undefined;
-      return !result;
-    }
-
-    if (op === 'And' && isFunction(expr)) {
-      // Kleene 3-valued logic:
-      // - if any operand is false, the result is false
-      // - if all operands are true, the result is true
-      // - otherwise the result is unknown
-      let hasUnknown = false;
-      for (const x of expr.ops) {
-        const r = verify(ce, x);
-        if (r === false) return false;
-        if (r === undefined) hasUnknown = true;
-      }
-      return hasUnknown ? undefined : true;
-    }
-
-    if (op === 'Or' && isFunction(expr)) {
-      // Kleene 3-valued logic:
-      // - if any operand is true, the result is true
-      // - if all operands are false, the result is false
-      // - otherwise the result is unknown
-      let hasUnknown = false;
-      for (const x of expr.ops) {
-        const r = verify(ce, x);
-        if (r === true) return true;
-        if (r === undefined) hasUnknown = true;
-      }
-      return hasUnknown ? undefined : false;
-    }
-
-    // Direct assumption-DB lookup (P1-4): `assume(P) ⇒ verify(P)`. Some facts
-    // (opaque multi-symbol inequalities like `x·y > 0` or `x + y > 0`) are
-    // stored verbatim but cannot be decided by the evaluator, so the paths
-    // above leave them `undefined`. Consult the DB via `ask`, which matches
-    // the query against the stored (normalized) facts. `ask` runs with
-    // `_isVerifying` set, so its own closed-predicate `verify` fallback (B3)
-    // is disabled and cannot recurse back into this function. A closed
-    // predicate that is stored yields an empty-substitution match.
-    if (!exprHasWildcards(boxed)) {
-      const matches = ask(ce, boxed);
-      if (matches.some((m) => Object.keys(m).length === 0)) return true;
-    }
-
-    return undefined;
+    return verifyInner(ce, query);
   } finally {
     ce._isVerifying = false;
   }
+}
+
+/**
+ * The recursive core of `verify()`. Must only be reached while
+ * `ce._isVerifying` is already `true` (i.e. from `verify()` or from itself),
+ * so the Kleene `And`/`Or`/`Not` recursion runs instead of short-circuiting on
+ * the non-reentrant flag (SYM P3-2).
+ */
+function verifyInner(
+  ce: IComputeEngine,
+  query: Expression | string
+): boolean | undefined {
+  // Accept string predicates ('x > 0', '$x > 0$', '\\pi > 0'); throws on
+  // unparseable input (SYM P3-1).
+  const boxed = predicateFromArg(ce, query, 'verify');
+
+  const expr = boxed.evaluate();
+  if (isSymbol(expr)) {
+    if (expr.symbol === 'True') return true;
+    if (expr.symbol === 'False') return false;
+  }
+
+  const op = expr.operator;
+
+  if (op === 'Not' && isFunction(expr)) {
+    const result = verifyInner(ce, expr.op1);
+    if (result === undefined) return undefined;
+    return !result;
+  }
+
+  if (op === 'And' && isFunction(expr)) {
+    // Kleene 3-valued logic:
+    // - if any operand is false, the result is false
+    // - if all operands are true, the result is true
+    // - otherwise the result is unknown
+    let hasUnknown = false;
+    for (const x of expr.ops) {
+      const r = verifyInner(ce, x);
+      if (r === false) return false;
+      if (r === undefined) hasUnknown = true;
+    }
+    return hasUnknown ? undefined : true;
+  }
+
+  if (op === 'Or' && isFunction(expr)) {
+    // Kleene 3-valued logic:
+    // - if any operand is true, the result is true
+    // - if all operands are false, the result is false
+    // - otherwise the result is unknown
+    let hasUnknown = false;
+    for (const x of expr.ops) {
+      const r = verifyInner(ce, x);
+      if (r === true) return true;
+      if (r === undefined) hasUnknown = true;
+    }
+    return hasUnknown ? undefined : false;
+  }
+
+  // Direct assumption-DB lookup (P1-4): `assume(P) ⇒ verify(P)`. Some facts
+  // (opaque multi-symbol inequalities like `x·y > 0` or `x + y > 0`) are
+  // stored verbatim but cannot be decided by the evaluator, so the paths
+  // above leave them `undefined`. Consult the DB via `ask`, which matches
+  // the query against the stored (normalized) facts. `ask` runs with
+  // `_isVerifying` set, so its own closed-predicate `verify` fallback (B3)
+  // is disabled and cannot recurse back into this function. A closed
+  // predicate that is stored yields an empty-substitution match.
+  if (!exprHasWildcards(boxed)) {
+    const matches = ask(ce, boxed);
+    if (matches.some((m) => Object.keys(m).length === 0)) return true;
+  }
+
+  return undefined;
 }
 
 /** True if `expr` contains a wildcard (a symbol/operator starting with `_`). */
@@ -331,21 +395,20 @@ function exprHasWildcards(expr: Expression): boolean {
 
 export function assumeFn(
   ce: IComputeEngine,
-  predicate: Expression
+  predicate: Expression | string
 ): AssumeResult {
   try {
-    const parsedPred = isLatexString(predicate)
-      ? parseLatex(predicate as string)
-      : null;
-    // Canonicalize the predicate so the assumption machinery sees a normalized
-    // form regardless of how the caller boxed it (e.g. `Negate(ImaginaryUnit)`
-    // folded to the complex literal `-i`). Canonicalization normalizes
-    // structure without evaluating the predicate, so `Greater(x, 0)` etc. stay
-    // intact. (Historically this boxed with `{ canonical: false }`, which was
-    // silently ignored and so always produced a canonical predicate; a later
-    // refactor swapped it to `{ form: 'raw' }`, inadvertently feeding raw
-    // predicates through.)
-    const pred = ce.expr(parsedPred ?? predicate);
+    // Accept string predicates ('x > 0', '$x > 0$', '\\pi > 0') — parsed as
+    // LaTeX by the shared `predicateFromArg` helper, consistent with verify()
+    // (SYM P3-1). Then canonicalize the predicate so the assumption machinery
+    // sees a normalized form regardless of how the caller boxed it (e.g.
+    // `Negate(ImaginaryUnit)` folded to the complex literal `-i`).
+    // Canonicalization normalizes structure without evaluating the predicate,
+    // so `Greater(x, 0)` etc. stay intact. (Historically this boxed with
+    // `{ canonical: false }`, which was silently ignored and so always
+    // produced a canonical predicate; a later refactor swapped it to
+    // `{ form: 'raw' }`, inadvertently feeding raw predicates through.)
+    const pred = predicateFromArg(ce, predicate, 'assume').canonical;
 
     // The new assumption could affect existing expressions
     ce._generation += 1;

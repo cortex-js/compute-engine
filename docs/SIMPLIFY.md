@@ -93,15 +93,15 @@ for the consumer-facing summary.
 
 ## 2. Remaining Tasks (Skipped Tests)
 
-There are **19 skipped tests** remaining in `test/compute-engine/simplify.test.ts`. This list identifies items still requiring resolution.
+There are **14 skipped tests** remaining in `test/compute-engine/simplify.test.ts`. This list identifies items still requiring resolution.
 
 ### 2.1 Logarithm Rules
 - **Log of quotient involving e** (Line 498): `ln((x+1)/e^{2x})` → `ln(x+1) - 2x`. Operand simplification expands the fraction before the log quotient rule fires. Deep ordering issue.
-- **Mixed log product identity** (Line 548): `log_c(a) * ln(a)` → `ln(c)`. **Note**: This test is mathematically wrong. `log_c(a)*ln(a) = ln(a)²/ln(c)`, not `ln(c)`. Likely intended: `log_a(c)*ln(a) = ln(c)`.
+- ~~**Mixed log product identity**: `log_c(a) * ln(a)` → `ln(c)`.~~ **Resolved (test removed):** the identity is mathematically wrong — `log_c(a)·ln(a) = ln(a)²/ln(c)`, not `ln(c)` — so the skipped test was deleted rather than fixed.
 
 ### 2.2 Powers and Roots
 - **Negative base** (Line 404): `(-x)^{3/4}` → `x^{3/4}`. **Wrong test** — complex for x > 0.
-- **Symbolic exponent** (Line 441): `x^{sqrt(2)}/x^3` → `x^{sqrt(2)-3}`. `sqrt(2).sub(3)` evaluates to float.
+- ~~**Symbolic exponent**: `x^{sqrt(2)}/x^3` → `x^{sqrt(2)-3}`.~~ **Resolved:** now simplifies to `x^{-3+sqrt(2)}` (test unskipped).
 - **Root factoring** (Line 447): `root4(16b^4)` → `2|b|`. Factor numeric coefficients from roots.
 
 ### 2.3 Common Denominator (Lines 458, 460)
@@ -109,13 +109,12 @@ There are **19 skipped tests** remaining in `test/compute-engine/simplify.test.t
 - `1/x - 1/(x+1)` → `1/(x^2+x)`
 Requires finding a common denominator for fractions with polynomial denominators — a significant new capability.
 
-### 2.4 Multi-Variable Expansion (Line 466)
-- `2*(x+h)^2 - 2*x^2` → `4xh + 2h^2`. Single-variable `(x+1)^2 - x^2 = 2x+1` works. Multi-variable expansion (`(x+h)^2`) does not expand.
+### 2.4 Multi-Variable Expansion — RESOLVED
+- ~~`2*(x+h)^2 - 2*x^2` → `4xh + 2h^2`.~~ **Resolved:** now simplifies to `2h^2 + 4hx` (test unskipped).
 
-### 2.5 Float / Mixed Arithmetic (Lines 43, 58)
-- `sqrt(3.1)` → `1.76068168616590091458` (decimal)
-- `sqrt(3) + 0.3` → `2.0320508075688772` (decimal)
-`simplify()` should trigger numeric evaluation when floats are present.
+### 2.5 Float / Mixed Arithmetic — RESOLVED
+- ~~`sqrt(3.1)` → `1.76068168616590091458` (decimal)~~ **Resolved** (test unskipped).
+- ~~`sqrt(3) + 0.3` → `2.03205080756887729353` (decimal)~~ **Resolved** (test unskipped; expected value corrected to full precision).
 
 ### 2.6 Inequality Simplification (Line 113)
 - `(2*pi + 2*pi*e) < 4*pi` → `1 + e < 2`. Extend inequality GCD-factor-out to handle sums with common factors.
@@ -144,7 +143,7 @@ Checked using `ce.parse(<latex>, { canonical: false }).simplify()`.
 | Hard      | `\frac{0}{1-1}`                       | `\frac{0}{1-1}`                                            | No longer incorrectly simplifies to 0.                                                                       |
 | Hard      | `\frac{1-1}{0}`                       | `\tilde\infty`                                             | Requires explicit evaluation of (1-1) to reach 0/0.                                                          |
 | Hard      | `\frac{0}{0}`                         | `\operatorname{NaN}`                                       |                                                                                                              |
-| Hard      | `2(x+h)^2-2x^2`                       | `2(h+x)^2-2x^2`                                            | Default simplify does not expand powers.                                                                     |
+| Hard      | `2(x+h)^2-2x^2`                       | `2h^2+4hx`                                                 | Now expands and cancels (difference-of-squares style).                                                       |
 | Hard      | `\frac{\pi+1}{\pi+1}`                 | `1`                                                        |                                                                                                              |
 | Hard      | `\frac{x^2}{5x^2}`                    | `\frac{1}{5}`                                              |                                                                                                              |
 | Hard      | `(-1)^{3/5}`                          | `-1`                                                       |                                                                                                              |

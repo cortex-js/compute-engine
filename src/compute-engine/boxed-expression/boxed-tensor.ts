@@ -7,6 +7,8 @@ import type {
   BoxedBaseDefinition,
   BoxedOperatorDefinition,
   BoxedSubstitution,
+  Substitution,
+  CanonicalOptions,
   EvaluateOptions,
   TensorData,
   DataTypeMap,
@@ -422,6 +424,17 @@ export class BoxedTensor<T extends TensorDataType>
       pattern = this.engine.expr(pattern, { form: 'raw' });
     if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
     return this.structural.match(pattern, options);
+  }
+
+  subs(
+    sub: Substitution,
+    options?: { canonical?: CanonicalOptions }
+  ): Expression {
+    // A tensor stores its elements directly, so the inherited base `subs`
+    // (which returns `this`) would leave symbolic elements untouched — e.g.
+    // `Median([a, b, c]).subs({ a: 1 })` kept `a`. Descend through the
+    // structural (List) form so element substitution reaches the leaves.
+    return this.structural.subs(sub, options);
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {

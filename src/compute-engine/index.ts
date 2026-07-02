@@ -1941,24 +1941,52 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Return a list of all the assumptions that match a pattern.
+   * Return the assumption bindings that match a pattern.
+   *
+   * The `pattern` typically contains wildcards (symbols starting with `_`).
+   * Each returned substitution maps every wildcard to the value it captured
+   * from a matching assumption. A wildcard bound query (`Greater(x, _k)`)
+   * resolves against the derived bounds for the subject:
    *
    * ```js
    *  ce.assume(['Greater', 'x', 4]);
-   *  ce.ask(['Greater', 'x', '_val'])
+   *  ce.ask(['Greater', 'x', '_val']);
    *  //  -> [{ _val: 4 }]
    * ```
+   *
+   * A **closed** (wildcard-free) pattern degrades to an existence check: the
+   * result is a single empty substitution `[{}]` when the predicate is known
+   * to hold, or `[]` otherwise — so `ce.ask(P).length > 0` answers "is `P`
+   * known?". For a definite `true`/`false`/`undefined` answer use
+   * {@link verify} instead.
+   *
+   * @see verify
    */
   ask(pattern: Expression): BoxedSubstitution[] {
     return askImpl(this, pattern);
   }
 
   /**
-   * Answer a query based on the current assumptions.
+   * Check whether a predicate is entailed by the current assumptions.
    *
+   * Three-valued (Kleene): returns `true` when the predicate is provable,
+   * `false` when its negation is provable, and `undefined` when neither can be
+   * decided. `And`/`Or`/`Not` are combined three-valued.
+   *
+   * The `query` may be a `BoxedExpression`, a MathJSON expression, or a
+   * **string** parsed as LaTeX (`'x > 0'`, `'$x > 0$'`, or `'\\pi > 0'`); an
+   * unparseable string throws.
+   *
+   * ```js
+   *  ce.assume(['Greater', 'x', 0]);
+   *  ce.verify('x > 0');   // -> true
+   *  ce.verify('x < 0');   // -> false
+   *  ce.verify('x > 5');   // -> undefined
+   * ```
+   *
+   * @see ask
    */
-
-  verify(query: Expression): boolean | undefined {
+  verify(query: Expression | string): boolean | undefined {
     return verifyImpl(this, query);
   }
 
@@ -1975,7 +2003,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    *
    */
-  assume(predicate: Expression): AssumeResult {
+  assume(predicate: Expression | string): AssumeResult {
     return assumeFnImpl(this, predicate);
   }
 

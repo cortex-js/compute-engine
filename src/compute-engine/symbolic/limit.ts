@@ -9,6 +9,7 @@ import {
   getPolynomialCoefficients,
 } from '../boxed-expression/polynomials';
 import { limit as numericLimit } from '../numerics/numeric';
+import { checkDeadline, CancellationError } from '../../common/interruptible';
 
 // The base `Expression` type exposes operands only after a type-guard narrows it
 // to a function (`isFunction`). Internally we always hold real boxed expressions
@@ -81,7 +82,12 @@ export function symbolicLimit(
     if (r === undefined) return undefined;
     if (r.isNaN === true) return undefined;
     return r;
-  } catch {
+  } catch (e) {
+    // A deadline/interrupt must unwind to the public evaluate boundary rather
+    // than be swallowed as "couldn't determine the limit" (which would then
+    // launch the numeric fallback and blow the budget a second time). Only
+    // genuine internal errors are absorbed into an `undefined` (defer) result.
+    if (e instanceof CancellationError) throw e;
     return undefined;
   }
 }
@@ -110,6 +116,11 @@ function limitDispatch(
   depth: number
 ): Expression | undefined {
   if (depth > MAX_DEPTH) return undefined;
+  // The symbolic recursion (leading-order rewrites, L'Hôpital differentiation of
+  // exp/log towers, numeric growth probes) can grind for many minutes on hard
+  // Gruntz-class limits. Bound it by the engine evaluation deadline: the throw
+  // unwinds to the public boundary, which returns the inert `Limit` form.
+  checkDeadline(ce._deadline);
   if (!e.has(x)) return e.evaluate();
 
   if (point.isInfinity === true) {
@@ -200,6 +211,7 @@ function limitAtPosInf(
   depth: number
 ): Expression | undefined {
   if (depth > MAX_DEPTH) return undefined;
+  checkDeadline(ce._deadline);
   // Rewrite to leading asymptotic order (drop negligible additive terms), which
   // often collapses the expression to something a structural pass can finish.
   const e = leadingOrder(e0, x, ce, depth).simplify();
@@ -299,6 +311,7 @@ function limitRatioAtPosInf(
   ce: ComputeEngine,
   depth: number
 ): Expression | undefined {
+  checkDeadline(ce._deadline);
   // Bail on a numerator/denominator that suffers catastrophic cancellation or
   // overflow at the probe points (e.g. e^stuff − eˣ, whose huge terms cancel to
   // a far smaller value): neither the asymptotic nor the numeric pass can rank
@@ -444,6 +457,7 @@ function leadingOrder(
   depth: number
 ): Expression {
   if (depth > MAX_DEPTH || !e.has(x)) return e;
+  checkDeadline(ce._deadline);
   const op = e.operator;
 
   if (op === 'Add') {
@@ -520,6 +534,7 @@ function growthLevel(
   depth: number
 ): number | undefined {
   if (depth > MAX_DEPTH) return undefined;
+  checkDeadline(ce._deadline);
   if (!e.has(x)) return 0;
   const op = e.operator;
 
@@ -677,15 +692,64 @@ function tendsToInfinity(
 
 const PROBES = [8, 30, 120];
 
+// Compiled machine-float probe functions, keyed by the probed expression.
+// These oracles decide only order-of-growth / divergence (never the returned
+// limit value), so machine precision suffices — and, crucially, a compiled
+// tower overflows cleanly to ±Infinity instead of grinding. `null` marks an
+// expression that could not be compiled (fall back to interpreted `.N()`).
+const probeCache = new WeakMap<object, ((x: number) => number) | null>();
+
+function compiledProbe(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine
+): ((x: number) => number) | null {
+  const key = e as unknown as object;
+  let fn = probeCache.get(key);
+  if (fn !== undefined) return fn;
+  fn = null;
+  try {
+    const lit = ce.function('Function', [e, ce.symbol(x)]);
+    const compiled = ce._compile(lit) as { run?: (x: number) => number };
+    if (typeof compiled?.run === 'function') fn = compiled.run;
+  } catch {
+    fn = null;
+  }
+  probeCache.set(key, fn);
+  return fn;
+}
+
 function numericAt(
   e: Expression,
   x: string,
   xv: number,
   ce: ComputeEngine
 ): number {
+  checkDeadline(ce._deadline);
+  // Prefer a compiled MACHINE-float evaluation over arbitrary-precision `.N()`.
+  // On iterated-exponential (Gruntz-class) forms the interpreted BigDecimal path
+  // builds astronomically large intermediates and burns minutes of CPU per
+  // probe; the compiled path overflows to ±Infinity immediately. The growth
+  // oracles only read magnitude/trend, so this does not change any decision they
+  // could reliably make — and it matches the numeric-limit fallback's own
+  // machine-float behaviour. See CORRECTNESS_FINDINGS #28.
+  const fn = compiledProbe(e, x, ce);
+  if (fn) {
+    try {
+      const v = fn(xv);
+      return typeof v === 'number' ? v : NaN;
+    } catch (err) {
+      if (err instanceof CancellationError) throw err;
+      return NaN;
+    }
+  }
+  // Fallback: interpreted arbitrary-precision (only when compilation fails).
   try {
     return e.subs({ [x]: ce.number(xv) }).N().re;
-  } catch {
+  } catch (err) {
+    // A deadline interrupt must propagate; only genuine evaluation failures
+    // (overflow, domain) degrade to NaN so probing can bail gracefully.
+    if (err instanceof CancellationError) throw err;
     return NaN;
   }
 }

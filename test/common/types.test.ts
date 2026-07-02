@@ -829,6 +829,17 @@ describe('isSubtype of collections', () => {
     ).toBe(true);
   });
 
+  it('should erase names: a named tuple is a subtype of a same-shape unnamed tuple', () => {
+    // P3-6: name-erasure subtyping
+    expect(
+      isSubtype('tuple<x: integer, y: integer>', 'tuple<integer, integer>')
+    ).toBe(true);
+    // ...covariantly in the element types as well
+    expect(
+      isSubtype('tuple<x: integer, y: integer>', 'tuple<number, number>')
+    ).toBe(true);
+  });
+
   it('should match an indexed collection', () => {
     expect(isSubtype('list<integer>', 'indexed_collection<number>')).toBe(true);
     expect(isSubtype('list<integer>', 'collection<number>')).toBe(true);
@@ -919,6 +930,13 @@ describe('isSubtype Tests NEGATIVE', () => {
   it('should not match tuples with matching types but different names', () => {
     expect(
       isSubtype('tuple<x:integer, y:boolean>', 'tuple<y:integer, x:boolean>')
+    ).toBe(false);
+  });
+
+  it('should not erase names in the wrong direction: an unnamed tuple is not a subtype of a named one', () => {
+    // P3-6: name erasure is one-directional
+    expect(
+      isSubtype('tuple<integer, integer>', 'tuple<x: integer, y: integer>')
     ).toBe(false);
   });
 

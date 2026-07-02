@@ -1,6 +1,7 @@
 import type { Expression, RuleStep } from '../global-types';
 import { isFunction, sym } from '../boxed-expression/type-guards';
 import { isEligibleRealRewrite, onBranchCut } from '../function-properties';
+import { toBigint } from '../boxed-expression/numerics';
 
 /**
  * Logarithm simplification rules consolidated from simplify-rules.ts.
@@ -16,7 +17,27 @@ import { isEligibleRealRewrite, onBranchCut } from '../function-properties';
  * IMPORTANT: Do not call .simplify() on results to avoid infinite recursion.
  */
 
+/**
+ * Public entry point. The cost gate in `simplify.ts` exempts logarithm
+ * rewrites (e.g. `ln(x^n) -> n*ln(x)`) from its "not more than 30% more
+ * expensive" check because they are mathematically preferred even when
+ * structurally larger. That exemption used to be a fragile string match on the
+ * `because` label in the cost gate; it now travels with the step as a
+ * `purpose: 'transform'` tag. The set of exempted steps is preserved exactly:
+ * the same `ln(...)` / `log_...` label prefixes that the cost gate matched. The
+ * `combine ln/log terms`, `e^...`, `c^...` and `log base 0 or 1` steps were not
+ * exempt before and are not tagged now.
+ */
 export function simplifyLog(x: Expression): RuleStep | undefined {
+  const r = simplifyLogCore(x);
+  if (r === undefined) return r;
+  const b = r.because;
+  if (b === 'ln' || b?.startsWith('ln(') || b?.startsWith('log_'))
+    return { ...r, purpose: 'transform' };
+  return r;
+}
+
+function simplifyLogCore(x: Expression): RuleStep | undefined {
   const op = x.operator;
   const ce = x.engine;
 
@@ -850,16 +871,30 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
             bVal > 1 &&
             aVal > 0
           ) {
-            // Check if a = b^k for some integer k
-            // Use Math.round to handle floating-point imprecision,
-            // then verify with exact integer exponentiation
-            const kRaw = Math.log(aVal) / Math.log(bVal);
-            const k = Math.round(kRaw);
-            if (Math.abs(kRaw - k) < 1e-10 && Math.pow(bVal, k) === aVal) {
-              return {
-                value: ce.number(k),
-                because: 'ln(a)/ln(b) -> k when a = b^k',
-              };
+            // Check if a = b^k for some non-negative integer k.
+            //
+            // The machine-float `Math.log(a)/Math.log(b)` only supplies a
+            // *candidate* exponent: above 2^53 the float versions of `a`/`b`
+            // lose precision and `Math.pow(b, k) === a` can report a false
+            // equality (e.g. two distinct huge integers whose float images
+            // coincide). Verify the candidate with exact bigint exponentiation
+            // instead, so a match is only reported when `b^k === a` holds on the
+            // true integers. Probe a small window around the float guess to
+            // absorb the log's rounding error for very large operands.
+            const aBig = toBigint(a);
+            const bBig = toBigint(b);
+            if (aBig !== null && bBig !== null && bBig > 1n) {
+              const kRaw = Math.log(aVal) / Math.log(bVal);
+              const kGuess = Math.round(kRaw);
+              for (const k of [kGuess - 1, kGuess, kGuess + 1]) {
+                if (k < 0) continue;
+                if (bBig ** BigInt(k) === aBig) {
+                  return {
+                    value: ce.number(k),
+                    because: 'ln(a)/ln(b) -> k when a = b^k',
+                  };
+                }
+              }
             }
           }
         }

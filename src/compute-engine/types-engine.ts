@@ -498,7 +498,7 @@ export interface IComputeEngine {
     arg3?: Scope
   ): IComputeEngine;
 
-  assume(predicate: Expression): AssumeResult;
+  assume(predicate: Expression | string): AssumeResult;
 
   /**
    * Declare a sequence with a recurrence relation.
@@ -625,7 +625,7 @@ export interface IComputeEngine {
 
   ask(pattern: Expression): BoxedSubstitution[];
 
-  verify(query: Expression): boolean | undefined;
+  verify(query: Expression | string): boolean | undefined;
 
   /** @internal */
   _shouldContinueExecution(): boolean;

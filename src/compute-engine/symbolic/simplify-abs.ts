@@ -45,7 +45,24 @@ const ODD_HYPER = new Set([
 // Even functions: f(-x) = f(x), so f(|x|) = f(x)
 const EVEN_FUNCS = new Set(['Cos', 'Sec', 'Cosh', 'Sech']);
 
+// Abs identity rewrites (|xy| -> |x||y|, |x^n| -> ..., |x/y| -> ...) normalize
+// structure and are mathematically preferred even when structurally larger, so
+// the cost gate in `simplify.ts` exempts them. That exemption previously matched
+// the `because` label prefix `'|'` in the cost gate; it now travels with the
+// step as `purpose: 'transform'`, preserving exactly the same set (labels that
+// start with `'|'`). Even-function rewrites (`cos(|x|) -> cos(x)`,
+// simplifyEvenFunctionAbs) were never exempt and stay untagged.
+function stampAbsTransform(r: RuleStep | undefined): RuleStep | undefined {
+  if (r === undefined) return r;
+  if (r.because?.startsWith('|')) return { ...r, purpose: 'transform' };
+  return r;
+}
+
 export function simplifyAbs(x: Expression): RuleStep | undefined {
+  return stampAbsTransform(simplifyAbsCore(x));
+}
+
+function simplifyAbsCore(x: Expression): RuleStep | undefined {
   if (!isFunction(x, 'Abs')) return undefined;
 
   const op = x.op1;
@@ -240,6 +257,10 @@ export function simplifyAbs(x: Expression): RuleStep | undefined {
  * |x|^n -> x^n when n is even
  */
 export function simplifyAbsPower(x: Expression): RuleStep | undefined {
+  return stampAbsTransform(simplifyAbsPowerCore(x));
+}
+
+function simplifyAbsPowerCore(x: Expression): RuleStep | undefined {
   if (!isFunction(x, 'Power')) return undefined;
 
   const base = x.op1;

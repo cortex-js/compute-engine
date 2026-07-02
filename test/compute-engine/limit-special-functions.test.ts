@@ -131,3 +131,108 @@ describe('CANCELLING ln/√ DIFFERENCES (CORRECTNESS_FINDINGS P0-3)', () => {
     ).toBe(true);
   });
 });
+
+describe('HARD GRUNTZ LIMITS RESPECT THE DEADLINE (CORRECTNESS_FINDINGS #28)', () => {
+  // These iterated-exponential (Gruntz-class) limits used to burn ~18 min of CPU
+  // in `Limit.N()` — the symbolic recursion (L'Hôpital differentiation of
+  // exp/log towers) had no deadline check, and its numeric probes evaluated the
+  // towers with arbitrary-precision `.N()`, building 10-million-digit
+  // intermediates. The engine can't do these limits, but it must give up
+  // quickly (bounded by `ce.timeLimit`) rather than hang, and it must never
+  // throw a `CancellationError` at the caller.
+  const INF = { sym: 'PositiveInfinity' };
+
+  // Isolate the tight time budget from the shared engine.
+  const timedEngine = new ComputeEngine();
+  const limT = (body: any) =>
+    timedEngine.expr(['Limit', ['Function', timedEngine.expr(body), 'x'], INF]);
+
+  // Gruntz #1 (true value 1/3):
+  // (exp(x·exp(−x)/(exp(−x)+exp(−2x²/(x+1)))) − exp(x))/x
+  const gruntz1 = [
+    'Divide',
+    [
+      'Subtract',
+      [
+        'Exp',
+        [
+          'Divide',
+          ['Multiply', 'x', ['Exp', ['Negate', 'x']]],
+          [
+            'Add',
+            ['Exp', ['Negate', 'x']],
+            ['Exp', ['Divide', ['Multiply', -2, ['Power', 'x', 2]], ['Add', 'x', 1]]],
+          ],
+        ],
+      ],
+      ['Exp', 'x'],
+    ],
+    'x',
+  ];
+
+  // Gruntz #2 (true value 1/e):
+  // x·ln(x)·ln(x·eˣ − x²)² / ln(ln(x² + 2·exp(exp(3x³·ln x))))
+  const gruntz2 = [
+    'Divide',
+    [
+      'Multiply',
+      'x',
+      ['Ln', 'x'],
+      ['Power', ['Ln', ['Subtract', ['Multiply', 'x', ['Exp', 'x']], ['Power', 'x', 2]]], 2],
+    ],
+    [
+      'Ln',
+      [
+        'Ln',
+        [
+          'Add',
+          ['Power', 'x', 2],
+          ['Multiply', 2, ['Exp', ['Exp', ['Multiply', 3, ['Power', 'x', 3], ['Ln', 'x']]]]]],
+      ],
+    ],
+  ];
+
+  for (const [name, body] of [
+    ['Gruntz #1 (→1/3)', gruntz1],
+    ['Gruntz #2 (→1/e)', gruntz2],
+  ] as const) {
+    test(`${name}: N() returns within the time budget, no throw`, () => {
+      const saved = timedEngine.timeLimit;
+      timedEngine.timeLimit = 2000;
+      try {
+        const start = Date.now();
+        let result: any;
+        // Must not throw a CancellationError (or anything) at the caller.
+        expect(() => {
+          result = limT(body).N();
+        }).not.toThrow();
+        // Bounded by ~2× the time limit (generous wall-clock allowance).
+        expect(Date.now() - start).toBeLessThan(10000);
+        // Whatever it returns, it must not be a spuriously "confident" wrong
+        // finite value: an inert Limit, undefined-ish, or NaN is acceptable.
+        const isInert = result?.operator === 'Limit';
+        const isNaNish = result?.re === undefined || Number.isNaN(result?.re);
+        expect(isInert || isNaNish).toBe(true);
+      } finally {
+        timedEngine.timeLimit = saved;
+      }
+    });
+
+    test(`${name}: evaluate() stays symbolic within the time budget`, () => {
+      const saved = timedEngine.timeLimit;
+      timedEngine.timeLimit = 2000;
+      try {
+        const start = Date.now();
+        let result: any;
+        expect(() => {
+          result = limT(body).evaluate();
+        }).not.toThrow();
+        expect(Date.now() - start).toBeLessThan(10000);
+        // Symbolic path returns the inert Limit (no wrong closed form).
+        expect(result?.operator).toBe('Limit');
+      } finally {
+        timedEngine.timeLimit = saved;
+      }
+    });
+  }
+});

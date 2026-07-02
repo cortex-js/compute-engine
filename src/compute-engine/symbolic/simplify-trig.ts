@@ -745,6 +745,76 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     }
   }
 
+  // Angle-addition (sine): sin(a)cos(b) ± cos(a)sin(b) -> sin(a ± b).
+  // Gated strictly to a two-term sum where each term is a signed product of one
+  // Sin and one Cos (coefficient exactly ±1), so it never fires speculatively
+  // inside larger sums. `fu` already produced this rewrite; adding it to the
+  // default path closes the gap for the plain identity. The result is strictly
+  // cheaper than the product form, so the cost gate accepts it.
+  if (op === 'Add' && isFunction(x) && x.ops.length === 2) {
+    // Decompose a term into `sign · Sin(sinArg) · Cos(cosArg)` (sign ∈ {+1,-1}).
+    // Returns null for anything else (other coefficients, missing Sin or Cos,
+    // extra factors).
+    const sinCosProduct = (
+      term: Expression
+    ): { sign: number; sinArg: Expression; cosArg: Expression } | null => {
+      let sign = 1;
+      // Unwrap a leading Negate (the canonical form of a subtracted term is
+      // `Negate(Multiply(...))`, not a Multiply with a -1 factor).
+      while (isFunction(term, 'Negate') && term.op1) {
+        sign = -sign;
+        term = term.op1;
+      }
+      if (!isFunction(term, 'Multiply')) return null;
+      let sinArg: Expression | undefined;
+      let cosArg: Expression | undefined;
+      for (const f of term.ops) {
+        if (isNumber(f)) {
+          if (f.isSame(1)) continue;
+          if (f.isSame(-1)) {
+            sign = -sign;
+            continue;
+          }
+          return null;
+        }
+        if (isFunction(f, 'Sin') && f.op1 && sinArg === undefined)
+          sinArg = f.op1;
+        else if (isFunction(f, 'Cos') && f.op1 && cosArg === undefined)
+          cosArg = f.op1;
+        else return null;
+      }
+      if (sinArg === undefined || cosArg === undefined) return null;
+      return { sign, sinArg, cosArg };
+    };
+
+    const t0 = sinCosProduct(x.ops[0]);
+    const t1 = sinCosProduct(x.ops[1]);
+    // For the identity the two terms are sin(a)cos(b) and cos(a)sin(b), i.e.
+    // their sin/cos arguments are cross-matched.
+    if (
+      t0 &&
+      t1 &&
+      t0.sinArg.isSame(t1.cosArg) &&
+      t0.cosArg.isSame(t1.sinArg)
+    ) {
+      if (t0.sign === t1.sign) {
+        // sin(a)cos(b) + cos(a)sin(b) = sin(a+b) (overall sign carried through)
+        const res = ce._fn('Sin', [t0.sinArg.add(t0.cosArg)]);
+        return {
+          value: t0.sign === 1 ? res : res.neg(),
+          because: 'sin(x)cos(y)+cos(x)sin(y) -> sin(x+y)',
+        };
+      }
+      // Signs differ: the positive term is sin(a)cos(b), so
+      // sin(a)cos(b) - cos(a)sin(b) = sin(a-b).
+      const pos = t0.sign === 1 ? t0 : t1;
+      return {
+        value: ce._fn('Sin', [pos.sinArg.sub(pos.cosArg)]),
+        because: 'sin(x)cos(y)-cos(x)sin(y) -> sin(x-y)',
+      };
+    }
+  }
+
   // 1 - sin²(x) -> cos²(x) and similar subtractions
   // These are canonicalized as Add expressions:
   // - "1 - sin²(x)" becomes Add(Negate(Power(Sin(x), 2)), 1) or Add(1, Negate(Power(Sin(x), 2)))

@@ -101,6 +101,32 @@ import { simplifyBinomial, simplifyFactorialAdd } from './simplify-factorial';
  *
  * The helper functions below (toNaN, toZero, etc.) avoid creating new
  * expressions and improve performance for common constant replacements.
+ *
+ * ## 5. Sanctioned `.simplify()` calls inside rule-path code
+ *
+ * CLAUDE.md warns against calling `.simplify()` from code reachable by the
+ * simplification pipeline (each nested call opens a fresh context that bypasses
+ * the dedup / step-limit guards). A handful of sites here call `.simplify()`
+ * anyway; every one is a **sanctioned exception** because it recurses only into
+ * a *proper sub-expression* (so it terminates by structural induction) and,
+ * where the rule could otherwise re-fire, is guarded to emit a step only when
+ * the operand actually changes:
+ *
+ *   - Derivative rule (`f.simplify()`): the driver does not recurse into the
+ *     lazy Derivative operand, so this is the only place the body is reduced;
+ *     guarded by an `isSame` re-fire check.
+ *   - Congruent rule (`Mod(...).simplify()` ×2 and the outer `Equal`): operands
+ *     are the congruence arguments/modulus, never the Congruent itself.
+ *   - `simplifyRelationalOperator` (`expr.op1/op2.simplify()`): each side of the
+ *     relation is a proper sub-expression.
+ *   - `simplifySystemOfEquations` (`x.simplify()` per element): each list
+ *     element is a proper sub-expression; guarded by an `isSame` re-fire check.
+ *   - `simplifySum` / `simplifyProduct` (body / limit `.simplify()`): the
+ *     summand/factor body and the numeric limit expressions are proper
+ *     sub-expressions of the Sum/Product.
+ *
+ * The former `sqrt(-n) -> i·sqrt(n)` site was removed: canonicalization already
+ * folds `Sqrt` of the positive numeric operand, so no `.simplify()` was needed.
  */
 
 /**
@@ -452,11 +478,18 @@ export const SIMPLIFY_RULES: Rule[] = [
 
     if (x.operator === 'Sqrt') {
       // sqrt(-10) -> i*sqrt(10)
+      // Canonicalization already folds Sqrt of the (positive) numeric operand
+      // — Sqrt(4)→2, Sqrt(12)→2√3, Sqrt(10)→√10 — so the canonical Multiply is
+      // identical to the simplified form here. Dropping the `.simplify()` (a
+      // recursion-doctrine site reachable from the rule path) is behavior-
+      // preserving and avoids a nested simplification pass.
       if (x.op1.isNegative)
         return {
-          value: x.engine
-            .expr(['Multiply', ['Sqrt', x.op1.neg()], 'ImaginaryUnit'])
-            .simplify(),
+          value: x.engine.expr([
+            'Multiply',
+            ['Sqrt', x.op1.neg()],
+            'ImaginaryUnit',
+          ]),
           because: 'sqrt',
         };
       const val = x.op1.sqrt();
@@ -515,7 +548,12 @@ export const SIMPLIFY_RULES: Rule[] = [
       // Skip ln of non-integer rationals — simplifyLog decomposes ln(p/q) → ln(p) - ln(q)
       if (x.op1.operator === 'Rational' && x.op1.isInteger === false)
         return undefined;
-      return { value: x.op1.ln(x.ops[1]), because: 'ln' };
+      // Cost-gate exempt (log rewrites are mathematically preferred even when
+      // structurally larger, e.g. ln(x^√2) -> √2·ln(x)): the
+      // `purpose: 'transform'` tag replaces the former `because === 'ln'` match
+      // in simplify.ts. Note the sibling `Log` branch (because 'log') was never
+      // exempt and stays untagged.
+      return { value: x.op1.ln(x.ops[1]), because: 'ln', purpose: 'transform' };
     }
     if (x.operator === 'Log') {
       const logBase = x.ops[1] ?? 10;
@@ -650,6 +688,9 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!isFunction(x, 'Congruent')) return undefined;
     if (x.nops < 3) return undefined;
     const ce = x.engine;
+    // Sanctioned `.simplify()` (see the file header note): recurses only into
+    // the Mod of the congruence operands and the resulting Equal, never the
+    // Congruent itself, so it terminates.
     return {
       value: ce
         ._fn('Equal', [
@@ -1056,13 +1097,21 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
     }
 
+    // Cost-gate exempt (power combination is mathematically preferred even when
+    // structurally larger, e.g. -4·2^x -> -2^(x+2)): the `purpose: 'transform'`
+    // tag replaces the former `combined powers` label match in simplify.ts.
     if (resultTerms.length === 0)
-      return { value: ce.One, because: 'combined powers' };
+      return { value: ce.One, because: 'combined powers', purpose: 'transform' };
     if (resultTerms.length === 1)
-      return { value: resultTerms[0], because: 'combined powers' };
+      return {
+        value: resultTerms[0],
+        because: 'combined powers',
+        purpose: 'transform',
+      };
     return {
       value: ce._fn('Multiply', resultTerms),
       because: 'combined powers with same base',
+      purpose: 'transform',
     };
   },
 ];
@@ -1091,6 +1140,8 @@ function simplifyRelationalOperator(expr: Expression): RuleStep | undefined {
   //
 
   if (!isFunction(expr)) return undefined;
+  // Sanctioned `.simplify()` (see the file header note): each side of the
+  // relation is a proper sub-expression, so this terminates by induction.
   const op1 = expr.op1.simplify();
   const op2 = expr.op2.simplify();
   expr = ce._fn(expr.operator, [op1, op2]);

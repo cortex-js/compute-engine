@@ -40,7 +40,7 @@ describe('Canonicalization: Arithmetic operations', () => {
   test('3/4 + 2 = 11/4', () => checkSimplify('3/4 + 2', '11/4'));
   test('3/4 + 5/7 = 41/28', () => checkSimplify('3/4 + 5/7', '41/28'));
   test('sqrt(3) stays exact', () => checkSimplify('\\sqrt3', '\\sqrt3'));
-  test.skip('sqrt(3.1) is computed', () =>
+  test('sqrt(3.1) is computed', () =>
     checkSimplify('\\sqrt{3.1}', { num: '1.76068168616590091458' }));
   test('x+0 = x', () => checkSimplify('x+0', 'x'));
   test('-1234 - 5678 = -6912', () => checkSimplify('-1234 - 5678', -6912));
@@ -55,8 +55,8 @@ describe('Canonicalization: Arithmetic operations', () => {
     checkSimplify('\\sqrt3 + 3', '\\sqrt3 + 3'));
   test('sqrt(3) + 1/2 stays exact', () =>
     checkSimplify('\\sqrt3 + 1/2', '\\sqrt3 + 1/2'));
-  test.skip('sqrt(3) + 0.3 is computed', () =>
-    checkSimplify('\\sqrt3 + 0.3', { num: '2.0320508075688772' }));
+  test('sqrt(3) + 0.3 is computed', () =>
+    checkSimplify('\\sqrt3 + 0.3', { num: '2.03205080756887729353' }));
   test('3.1/2.8 = float', () =>
     checkSimplify('3.1/2.8', '1.10714285714285714286'));
   test('2x * x * 3 * x = 6x^3', () =>
@@ -456,7 +456,7 @@ describe('Rules: Powers and Denominators', () => {
 describe('Rules: Powers: Division (misc)', () => {
   test('pi^{0.2}/pi^{0.1} = pi^{0.1}', () =>
     checkSimplify('\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'));
-  test.skip('x^{sqrt(2)}/x^3 = x^{sqrt(2)-3}', () =>
+  test('x^{sqrt(2)}/x^3 = x^{sqrt(2)-3}', () =>
     checkSimplify('x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'));
   test('x^{0.3}/x = 1/x^{0.7}', () => checkSimplify('x^{0.3}/x', '1/x^{0.7}'));
 });
@@ -481,7 +481,7 @@ describe('Rules: Common Denominator', () => {
 
 describe('Rules: Distribute', () => {
   test('(x+1)^2-x^2 = 2x+1', () => checkSimplify('(x+1)^2-x^2', '2x+1'));
-  test.skip('2*(x+h)^2-2*x^2 = 4xh+2h^2', () =>
+  test('2*(x+h)^2-2*x^2 = 4xh+2h^2', () =>
     checkSimplify('2*(x+h)^2-2*x^2', '4xh+2h^2'));
 });
 
@@ -563,8 +563,9 @@ describe('Rules: Log', () => {
 });
 
 describe('Rules: Change of Base', () => {
-  test.skip('log_c(a)*ln(a) = ln(c)', () =>
-    checkSimplify('\\log_c(a)*\\ln(a)', '\\ln(c)'));
+  // NOTE: `log_c(a)·ln(a) = ln(c)` is mathematically false — log_c(a) = ln(a)/ln(c),
+  // so log_c(a)·ln(a) = ln(a)²/ln(c), not ln(c). (Removed a skipped test that
+  // asserted the wrong identity.)
   test('log_c(a)/log_c(b) = ln(a)/ln(b)', () =>
     checkSimplify('\\log_c(a)/\\log_c(b)', '\\ln(a)/\\ln(b)'));
   test('log_c(a)/ln(a) = 1/ln(c)', () =>
@@ -1569,4 +1570,70 @@ describe('Denest nested radicals: √(a+b√c) → √x+√y (ROADMAP B2)', () =
     checkSimplify('\\sqrt{1+\\sqrt2}', '\\sqrt{1+\\sqrt2}'));
   test('√(5+√2) stays nested (D not a perfect square)', () =>
     checkSimplify('\\sqrt{5+\\sqrt2}', '\\sqrt{5+\\sqrt2}'));
+});
+
+describe('SimplifyOptions.rules contract', () => {
+  // Per the documented contract (SimplifyOptions.rules): `null` means "use no
+  // rules", an omitted value means "use the default simplification rules". A
+  // truthiness check used to conflate `null` with omitted, applying the full
+  // default ruleset where the docs promise none.
+  const pythagorean = ce.box([
+    'Add',
+    ['Square', ['Sin', 'x']],
+    ['Square', ['Cos', 'x']],
+  ]);
+
+  test('default rules simplify sin^2+cos^2 to 1', () =>
+    expect(pythagorean.simplify().toString()).toBe('1'));
+
+  test('rules:null applies no rules (identity is not rewritten)', () =>
+    expect(pythagorean.simplify({ rules: null }).isSame(pythagorean)).toBe(
+      true
+    ));
+
+  test('rules:[] applies no rules (identity is not rewritten)', () =>
+    expect(pythagorean.simplify({ rules: [] }).isSame(pythagorean)).toBe(true));
+});
+
+describe('Rules: ln(a)/ln(b) -> k uses exact bigint verification', () => {
+  // Correct integer-power cases still reduce.
+  test('ln(8)/ln(2) = 3', () => checkSimplify('\\ln(8)/\\ln(2)', 3));
+  test('ln(81)/ln(3) = 4', () => checkSimplify('\\ln(81)/\\ln(3)', 4));
+
+  // Above 2^53 the float image of a non-power can collide with b^k
+  // (2^60 + 1 rounds to 2^60 as a double), which a `Math.pow` check would
+  // wrongly accept. The bigint check keeps it symbolic.
+  test('ln(2^60+1)/ln(2) stays symbolic (not 60)', () => {
+    const a = (2n ** 60n + 1n).toString();
+    const r = ce.parse(`\\ln(${a})/\\ln(2)`).simplify();
+    expect(r.isSame(ce.number(60))).toBe(false);
+  });
+
+  // A genuine huge power still reduces exactly.
+  test('ln(3^40)/ln(3) = 40', () => {
+    const p = (3n ** 40n).toString();
+    checkSimplify(`\\ln(${p})/\\ln(3)`, 40);
+  });
+});
+
+describe('Rules: sine angle-addition (default path)', () => {
+  test('sin(x)cos(y)+cos(x)sin(y) = sin(x+y)', () =>
+    checkSimplify(
+      '\\sin(x)\\cos(y)+\\cos(x)\\sin(y)',
+      ['Sin', ['Add', 'x', 'y']]
+    ));
+  test('sin(x)cos(y)-cos(x)sin(y) = sin(x-y)', () =>
+    checkSimplify(
+      '\\sin(x)\\cos(y)-\\cos(x)\\sin(y)',
+      ['Sin', ['Subtract', 'x', 'y']]
+    ));
+  // Strictly gated: a non-unit coefficient or a third term must not fire.
+  test('2sin(x)cos(y)+2cos(x)sin(y) stays a product sum (coeff != 1)', () => {
+    const r = ce.parse('2\\sin(x)\\cos(y)+2\\cos(x)\\sin(y)').simplify();
+    expect(r.isSame(ce.parse('\\sin(x+y)'))).toBe(false);
+  });
+  test('sin(x)cos(y)+cos(x)sin(y)+z is untouched (three terms)', () => {
+    const r = ce.parse('\\sin(x)\\cos(y)+\\cos(x)\\sin(y)+z').simplify();
+    expect(r.isSame(ce.parse('\\sin(x+y)+z'))).toBe(false);
+  });
 });

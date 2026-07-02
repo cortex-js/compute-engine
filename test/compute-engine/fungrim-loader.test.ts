@@ -333,6 +333,48 @@ describe('guard controls', () => {
     const result = ce.expr(['Conjugate', ['RiemannZetaZero', 'm']]).simplify();
     expect(result.operator).toBe('Conjugate');
   });
+
+  // SYM P3-7: every type guard (integer/rational/real/complex) requires
+  // `isFinite !== false`. Fungrim's declared domains ZZ/QQ/RR/CC are FINITE,
+  // so an identity guarded by them must not discharge at a ±∞ / ~∞ instance.
+  // The subtlety: `(+∞).isReal === true`, so a `real` type guard would
+  // fail-OPEN at infinity without the finiteness gate.
+  it('negative P3-7: real-guarded rule does NOT fire at +∞  [fungrim:299209]', () => {
+    // Im(e^{i·x}) → sin(x) is guarded `x : real`. A finite real fires (see
+    // the positive control below); the infinite instance must be blocked.
+    const inf = ce
+      .box(
+        [
+          'Imaginary',
+          ['Power', 'ExponentialE', ['Multiply', 'ImaginaryUnit', 'PositiveInfinity']],
+        ],
+        { canonical: false }
+      )
+      .simplify();
+    // The finite-domain identity did NOT rewrite to sin(+∞): the head stays
+    // Imaginary (fail-closed), it is not a Sin node.
+    expect(inf.operator).not.toBe('Sin');
+  });
+
+  it('positive P3-7 control: the same real-guarded rule fires for a finite real  [fungrim:299209]', () => {
+    ce.declare('r', 'real');
+    const finite = ce
+      .box([
+        'Imaginary',
+        ['Power', 'ExponentialE', ['Multiply', 'ImaginaryUnit', 'r']],
+      ])
+      .simplify();
+    expect(finite.isSame(ce.expr(['Sin', 'r']))).toBe(true);
+  });
+
+  it('negative P3-7: Sin(πk) does NOT collapse to 0 when k is +∞  [fungrim:c62afa]', () => {
+    // The integer type guard already excludes +∞ ((+∞).isInteger === false);
+    // this locks that the finite-domain identity never yields 0 at infinity.
+    const sinPiInf = ce
+      .box(['Sin', ['Multiply', 'Pi', 'PositiveInfinity']], { canonical: false })
+      .simplify();
+    expect(sinPiInf.isSame(0)).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -483,6 +525,38 @@ describe('per-engine isolation', () => {
     expect(reportB.loaded).toBe(
       FUNGRIM_CORE.rules.filter((r) => r.target === 'simplify').length
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SYM P3-8: shell declarations are scope-local (`ce.declare`), but rule
+// objects live in the engine-global rule store. A load inside a pushed scope
+// therefore leaves its rules alive after `popScope` while its shell heads go
+// out of scope. Because the per-engine idempotence WeakMap marks those rule
+// ids as already-loaded, the reload must NOT gate the shell pass on the
+// already-loaded set — it re-declares the (now out-of-scope) shell heads.
+// ---------------------------------------------------------------------------
+describe('shell declarations survive popScope via reload (P3-8)', () => {
+  it('re-declares shell heads on reload after the load scope is popped', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    const first = loadIdentities(ce);
+    expect(first.declared).toContain('CarlsonRF');
+    expect(ce.lookupDefinition('CarlsonRF')).toBeDefined();
+    expect(ce.expr(['CarlsonRF', 1, 2, 3]).isValid).toBe(true);
+
+    // Pop the scope the shells were declared in: the shell head is gone.
+    ce.popScope();
+    expect(ce.lookupDefinition('CarlsonRF')).toBeUndefined();
+
+    // Reload: the rule ids are already-loaded (loaded === 0), but the shell
+    // pass runs unconditionally and re-declares the out-of-scope heads so the
+    // still-registered rules remain usable.
+    const second = loadIdentities(ce);
+    expect(second.loaded).toBe(0);
+    expect(second.declared).toContain('CarlsonRF');
+    expect(ce.lookupDefinition('CarlsonRF')).toBeDefined();
+    expect(ce.expr(['CarlsonRF', 1, 2, 3]).isValid).toBe(true);
   });
 });
 

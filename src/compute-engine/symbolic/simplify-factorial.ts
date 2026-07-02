@@ -202,11 +202,19 @@ export function simplifyFactorialAdd(x: Expression): RuleStep | undefined {
   const factIndices = new Set(factTerms.map((f) => f.index));
   const nonFactTerms = ops.filter((_, i) => !factIndices.has(i));
 
+  // Cost-gate exempt (structurally preferred factoring): the
+  // `purpose: 'transform'` tag replaces the former `factor common factorial`
+  // label match in simplify.ts.
   if (nonFactTerms.length > 0)
     return {
       value: ce._fn('Add', [factored, ...nonFactTerms]),
       because: 'factor common factorial',
+      purpose: 'transform',
     };
 
-  return { value: factored, because: 'factor common factorial' };
+  return {
+    value: factored,
+    because: 'factor common factorial',
+    purpose: 'transform',
+  };
 }

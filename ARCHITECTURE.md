@@ -273,7 +273,7 @@ the types of mathematical expressions. It models:
   `integer ⊂ rational ⊂ real ⊂ complex ⊂ number`, with finite/non-finite
   variants and bounded ranges (e.g. `integer<5..10>`).
 - **Collections**: `list`, `set`, `tuple`, `record`, `dictionary`, with shapes
-  (e.g. `[number]^(2x3)` for a matrix).
+  (e.g. `matrix<number^(2x3)>` for a matrix).
 - **Function signatures**: `(x: number, number?) -> number`, including named,
   optional, and variadic arguments.
 - **Algebraic types**: union (`|`), intersection (`&`), negation (`!`), plus the
@@ -345,7 +345,66 @@ Internally these responsibilities are delegated to focused services
 **Scopes & assumptions.** Symbol and operator definitions live in lexical scopes
 with proper inheritance. Assumptions (e.g. "x > 0") are recorded per scope and
 consulted during simplification and three-valued (`true`/`false`/`undefined`)
-queries via `ask()` / `verify()`.
+queries via `ask()` / `verify()`. The contract is detailed in the next section.
+
+### Assumptions & reasoning
+
+The assumptions subsystem (`engine-assumptions.ts`, `assume.ts`,
+`boxed-expression/constraint-subject.ts`) lets callers state facts about
+otherwise-free symbols and query them back. Its public surface is `assume()`,
+`ask()`, `verify()`, and `forget()`.
+
+**Predicate forms.** `assume()` accepts a `BoxedExpression`, a MathJSON
+expression, or a **string** (parsed as LaTeX — `'x > 0'`, `'$x > 0$'`, or
+`'\pi > 0'`; `verify()` accepts the same three forms). The supported predicates
+are membership (`Element` / `NotElement`), (dis)equality (`Equal` / `NotEqual`),
+the inequalities (`Less` / `LessEqual` / `Greater` / `GreaterEqual`), and their
+conjunction (`And`). The predicate is canonicalized, then stored in a normalized
+shape: inequalities as `Less`/`LessEqual` against `0` (e.g. `x + y > 0` →
+`Less(Add(Negate(x), Negate(y)), 0)`), equalities as `Equal(lhs − rhs, 0)`. A
+value assumption (`assume(x = 5)`) additionally installs a value binding for the
+symbol. `assume()` returns `'ok'`, `'tautology'` (already implied), or
+`'contradiction'` (incompatible with existing facts).
+
+**Scoping.** Assumptions are recorded in the current lexical scope
+(`ce.context.assumptions`). A child scope sees the parent's facts (they are
+copied on push) but discards its own additions on `popScope()`; a
+subsequently-restored scope therefore recovers the parent's original facts. Any
+mutation bumps the engine generation counter (`ce._generation`), which
+invalidates the cached rule sets and the FactIndex (below) so stale sign/bound
+answers cannot survive a scope change.
+
+**Three-valued discharge.** `verify(P)` returns `true` when `P` is provable from
+the current assumptions, `false` when its negation is provable, and `undefined`
+when neither can be decided (Kleene semantics). It first evaluates the predicate
+(so `x < 0` reduces to `False` under `assume(x > 0)`), recurses through
+`And`/`Or`/`Not` with Kleene combination, and finally consults the assumptions
+DB directly (via `ask`) for opaque multi-symbol facts such as `x·y > 0` that the
+evaluator cannot reduce. `ask(pattern)` matches a pattern **containing
+wildcards** (`_k`, `_val`, …) against the stored facts and returns the list of
+binding substitutions; for a closed (wildcard-free) predicate it degrades to a
+`verify`-style existence check. Recursion between the two (`verify → ask →
+verify`) is broken by an `_isVerifying` re-entrancy flag: while it is set,
+`ask` skips its closed-predicate `verify` fallback.
+
+**Bounds & the FactIndex.** Sign and bound queries are answered from a cached
+`FactIndex` (`getFactIndex`, keyed on the generation counter, the assumptions
+map identity, and the fact count). It maps each **subject** — a bare symbol or a
+part extractor of one (`Re(z)`, `Im(τ)`, `Abs(q)`, `Argument(z)`) — to its
+numeric `lower`/`upper` bounds with strictness flags. `assume()` uses it for the
+tautology/contradiction checks; the sign getters (`isPositive`, `isNonNegative`,
+…) and `verify()` both read the same bounds, so they **converge**: an assumption
+that fixes a sign is reflected identically whether queried through `expr.sgn` /
+`isPositive` or through `verify(Greater(x, 0))`. A legacy linear scan remains
+only as a fallback for facts the index does not capture.
+
+**`forget()` and provenance.** `forget(symbol)` removes every stored fact that
+references the symbol and resets any value the symbol received **from an
+assumption** — `declare()` / `assign()` values are left intact. To tell the two
+apart, assume-installed value bindings are tracked in a per-scope provenance set
+(`context.assumptionBindings`); `forget()` (no argument) clears all facts and
+undoes exactly those bindings, so a symbol assigned only via `assume(x = …)`
+evaluates back to itself, while a user `assign()` survives.
 
 **Free functions.** `free-functions.ts` exports top-level `parse`, `simplify`,
 `evaluate`, `N`, `expand`, `factor`, `solve`, `assign`, etc., backed by a

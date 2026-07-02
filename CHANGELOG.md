@@ -21,6 +21,18 @@
   recurrence with a symbolic order derivative
   `Apply(Derivative(BesselJ, 1, 0), x, x)` instead of staying inert.
 
+- **`verify()` and `assume()` accept strings.** `ce.verify('x > 0')` and
+  `ce.assume('$x > 0$')` parse the predicate (LaTeX) and proceed; unparseable
+  input throws a clear error. In addition, `verify()` of compound predicates
+  now recurses properly: after `assume(x·y > 0)` and `assume(x + y > 0)`,
+  `verify(And(x·y > 0, x + y > 0))` is `true` and `verify(Not(x·y > 0))` is
+  `false` (the Kleene logic recursion was previously unreachable).
+
+- **New default simplification: sine addition.**
+  `sin(x)cos(y) + cos(x)sin(y)` → `sin(x + y)` (and the `−`/`sin(x−y)`
+  variant) now applies in the default `simplify()` path, not just under the
+  `fu` rule set.
+
 - **`\binom` is now supported.** `\binom{n}{k}` (and `\dbinom`/`\tbinom`)
   parses to `Binomial(n, k)`, and `Binomial` serializes back to `\binom` —
   previously `\binom` was a parse error.
@@ -87,6 +99,47 @@
   speeds up high-precision `N()`.
 
 ### Resolved Issues
+
+- **Hard limits no longer hang.** Nested-exponential (Gruntz-class) limits
+  such as `lim_{x→∞} e^{e^{e^x}}/e^{e^{e^{x-1}}}` burned ~18 minutes of CPU
+  in the limit engine before giving up; the engine now honors the evaluation
+  deadline and probes order-of-growth with machine floats instead of
+  building multi-million-digit intermediates — the same limits return
+  (symbolically inert) in milliseconds. The timeout contract is now
+  documented on `evaluate()`: exceeding `timeLimit` or the recursion limit
+  throws a `CancellationError` (with `cause` `'timeout'` or
+  `'recursion-depth-exceeded'`) — catch it to distinguish an interrupted
+  evaluation from a symbolic result.
+
+- **`subs()` reaches into collections.** `Median([a,b,c]).subs({a: 1})`
+  (and substitution into any list/tensor element) previously returned the
+  expression unchanged — `BoxedTensor` now delegates substitution to its
+  structural form. Explicit `Hold(…)` semantics are unchanged.
+
+- **`0^0` is NaN on every path.** The `.N()` path returned `1` (via
+  `Math.pow`) while `evaluate()` returned NaN; both now agree, matching the
+  compiled-JavaScript alignment from the previous round.
+
+- **`simplify({rules: null})` honors its contract.** It now applies no
+  rules (structural/numeric folding only) as documented, instead of
+  silently using the full default rule set. Also, `ln(a)/ln(b) → k` now
+  verifies `a = bᵏ` with exact bigint arithmetic — `ln(2⁶⁰+1)/ln(2)` no
+  longer falsely reduces to 60 — and the simplification cost-gate
+  exemptions moved from fragile label string-matching to explicit
+  `purpose: 'transform'` tags (no behavior change).
+
+- **Fungrim guards are uniformly finite.** Real/integer-typed rule guards
+  now require the argument not be known-infinite, matching the complex
+  guard: a real-guarded identity like `Im(e^{ix}) → sin(x)` no longer fires
+  for `x = +∞` (which produced NaN). Pack shell declarations also survive
+  scope pops and re-loads, and `Union` no longer collapses inert set-valued
+  operands (e.g. `Interior(…)`) into literal elements.
+
+- **Wester audit grading is honest.** A finite `.N()` value no longer
+  counts as correct for definite integrals and limits — results are graded
+  against an independent numeric reference; `±`-annotated outputs
+  (`PlusMinus`) are unwrapped instead of graded unsolved. (Harness only; no
+  report regenerated yet.)
 
 - **Numeric kernel accuracy.** Arbitrary-precision `log`/`log10`/`log2` now
   carry guard digits (`log10(10⁻⁷)` is exactly `−7`; `2^(−1/2)` is correctly

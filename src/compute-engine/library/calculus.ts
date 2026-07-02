@@ -371,6 +371,17 @@ volumes
             compiled.success ? 1e7 : 1e4,
             ce._deadline
           );
+          // KNOWN LIMITATION (CORRECTNESS_FINDINGS #29 / C15): the reported
+          // error bar is the Monte-Carlo standard error, which is *optimistic*
+          // (~1.3–1.6× too small) for endpoint-singular integrands such as
+          // ∫₋₁¹ √(1−x²)/(1+x²) dx or ∫₀¹ x^(−1/2) dx. Uniform sampling
+          // under-weights the neighborhood of the singularity, so the sample
+          // variance underestimates the true quadrature error and the ± bound
+          // can be tighter than the actual deviation from the exact value. A
+          // faithful bound needs singularity-aware quadrature (e.g. tanh-sinh
+          // with endpoint clustering); until then the estimate is sound but the
+          // uncertainty on singular integrands should be treated as a lower
+          // bound, not a guarantee.
           return ce.expr([
             'PlusMinus',
             ce.number(mce.estimate),

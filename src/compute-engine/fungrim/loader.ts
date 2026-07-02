@@ -177,6 +177,15 @@ function buildGuardClosures(
         return (sub) => {
           const v = sub[g.wc];
           if (v === undefined) return false;
+          // Fungrim's declared domains (ZZ/QQ/RR) are FINITE, matching the
+          // 'complex' guard's finiteness gate above (SYM P3-7). A value
+          // PROVABLY non-finite (a ±∞ or ~∞ literal has `isFinite === false`;
+          // note `(+∞).isReal === true`, so without this gate a real guard
+          // would fail-open at infinity) is blocked. Unknown finiteness
+          // (`isFinite === undefined`, e.g. a plain declared-real symbol)
+          // still passes — `!== false` — so ordinary symbols discharge as
+          // before; only a known-infinite instance is rejected.
+          if (v.isFinite === false) return false;
           if (g.t === 'integer') return v.isInteger;
           if (g.t === 'real') return v.isReal;
           return v.isRational;
@@ -688,7 +697,22 @@ export function loadIdentities(
   };
 
   // -- 1. Selection (each rule gets exactly one disposition)
+  //
+  //    `referenced` accumulates the shell heads of EVERY rule that passes the
+  //    class/topic/purpose/solve filters — including rules already loaded on
+  //    this engine. Shell declarations are scope-local (`ce.declare`), so a
+  //    rule loaded inside a since-popped scope leaves its rule object alive in
+  //    the engine-global rule store while its shell heads have gone out of
+  //    scope. Re-running the shell pass over the already-loaded rules too
+  //    (idempotent: `declare` skips names still defined) makes those heads
+  //    usable again on reload after a `popScope` (SYM P3-8).
   const selected: CompiledFungrimRule[] = [];
+  const referenced = new Set<string>();
+  const collectReferenced = (r: CompiledFungrimRule): void => {
+    collectSymbols(r.match, referenced);
+    collectSymbols(r.replace, referenced);
+    for (const g of r.guards) collectSymbols(guardJson(g), referenced);
+  };
   for (const r of data.rules) {
     if (classes !== null && !classes.has(r.class)) {
       report.skipped.push({ id: r.id, reason: 'filtered-class' });
@@ -706,6 +730,9 @@ export function loadIdentities(
       report.skipped.push({ id: r.id, reason: 'solve-disabled' });
       continue;
     }
+    // Reference-collect before the already-loaded gate so shell heads are
+    // re-declared on reload even when the rule itself is skipped.
+    collectReferenced(r);
     if (alreadyLoaded.has(r.id)) {
       report.skipped.push({ id: r.id, reason: 'already-loaded' });
       continue;
@@ -713,15 +740,9 @@ export function loadIdentities(
     selected.push(r);
   }
 
-  // -- 2. Shell declarations: only heads referenced by the selected rules,
+  // -- 2. Shell declarations: heads referenced by the selection (see above),
   //       in the current scope, skipping already-defined names (built-ins
-  //       are never widened).
-  const referenced = new Set<string>();
-  for (const r of selected) {
-    collectSymbols(r.match, referenced);
-    collectSymbols(r.replace, referenced);
-    for (const g of r.guards) collectSymbols(guardJson(g), referenced);
-  }
+  //       are never widened). Re-run unconditionally — idempotent-safe.
   for (const name of Object.keys(data.declarations).sort()) {
     if (!referenced.has(name)) continue;
     if (ce.lookupDefinition(name) !== undefined) continue; // never widen

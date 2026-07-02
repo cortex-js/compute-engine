@@ -65,12 +65,21 @@ try {
   loadIntegrationRules(ceRF, { timeLimitMs: 8000 });
 } catch (e: any) { console.error('Rubi/Fungrim setup failed (column dropped):', e?.message); ceRF = null; }
 
+// Extract the central real value from a `.N()` result. A numeric definite
+// integral / limit estimate comes back as `PlusMinus[value, error]` (its `.re`
+// is NaN), so unwrap it to `value` — otherwise every ±-annotated result graded
+// as "unsolved" (CORRECTNESS_FINDINGS #27, `numOf` mis-parse).
+const reOf = (r: any): number => {
+  if (r && r.operator === 'PlusMinus') r = r.op1 ?? r;
+  if (r && typeof r.re === 'number') return r.re;
+  return Number(String(r?.toString() ?? '').split('±')[0].trim());
+};
 const numAt = (engine: any, boxed: any, v: string, p: number): number | null => {
-  try { const r = boxed.subs({ [v]: engine.number(p) }).N(); const x = typeof r.re === 'number' ? r.re : Number(r.toString()); return isFinite(x) ? x : null; }
+  try { const x = reOf(boxed.subs({ [v]: engine.number(p) }).N()); return isFinite(x) ? x : null; }
   catch { return null; }
 };
 const numOf = (boxed: any): number | null => {
-  try { const r = boxed.N(); const x = typeof r.re === 'number' ? r.re : Number(r.toString()); return isFinite(x) ? x : null; }
+  try { const x = reOf(boxed.N()); return isFinite(x) ? x : null; }
   catch { return null; }
 };
 
@@ -406,11 +415,32 @@ const rows = cases.map((c) => {
     if (gcdSolved(ceRes) && gcdSolved(syRes) && !scalarMultiple(ceRes.values, syRes.values)) { ceV = { v: 'disagree' }; syV = { v: 'disagree' }; }
     if (gcdSolved(rfRes) && gcdSolved(syRes) && !scalarMultiple(rfRes!.values, syRes.values)) rfV = { v: 'disagree' };
   } else if (AGREE.has(c.op)) {
-    const sg = (res: any) => !res ? { v: 'na' } : res.status === 'error' ? { v: 'error', note: res.error } : solved(res) ? { v: 'correct' } : { v: 'unsolved' };
+    // A finite `.N()` value is NOT, by itself, correctness — that is exactly
+    // how the wrong-definite-integral class (P0-1) stayed invisible
+    // (CORRECTNESS_FINDINGS #27). When a trustworthy numeric reference exists
+    // (defint: composite Simpson of the integrand; limit: near-point estimate,
+    // when reliable) grade each config against it within tolerance. Only when
+    // no reference is available (resultant, or a limit whose near-point
+    // estimate was rejected as unreliable) do we fall back to solved-status +
+    // a CE-vs-SymPy cross-check.
+    const refVal = ref[0];
+    const hasRef = refVal != null && isFinite(refVal);
+    const sg = (res: any) => {
+      if (!res) return { v: 'na' };
+      if (res.status === 'error') return { v: 'error', note: res.error };
+      if (!solved(res)) return { v: 'unsolved' };
+      if (hasRef)
+        return Math.abs(res.values[0] - refVal) <= c.tol * (1 + Math.abs(refVal)) + 1e-9
+          ? { v: 'correct' }
+          : { v: 'wrong' };
+      return { v: 'correct' };
+    };
     ceV = sg(ceRes); rfV = sg(rfRes); syV = sg(syRes); woV = sg(woRes);
-    const disagree = (a: any, b: any) => solved(a) && solved(b) && Math.abs(a.values[0] - b.values[0]) > c.tol * (1 + Math.abs(b.values[0]));
-    if (disagree(ceRes, syRes)) { ceV = { v: 'disagree' }; syV = { v: 'disagree' }; }
-    if (disagree(rfRes, syRes)) rfV = { v: 'disagree' };
+    if (!hasRef) {
+      const disagree = (a: any, b: any) => solved(a) && solved(b) && Math.abs(a.values[0] - b.values[0]) > c.tol * (1 + Math.abs(b.values[0]));
+      if (disagree(ceRes, syRes)) { ceV = { v: 'disagree' }; syV = { v: 'disagree' }; }
+      if (disagree(rfRes, syRes)) rfV = { v: 'disagree' };
+    }
   } else {
     ceV = grade(c, ref, ceRes); rfV = rfRes ? grade(c, ref, rfRes) : { v: 'na' }; syV = grade(c, ref, syRes); woV = grade(c, ref, woRes);
   }

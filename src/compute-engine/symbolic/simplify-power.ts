@@ -145,9 +145,13 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
     // Sign extraction for odd roots: root(-a, n) -> -root(a, n) when n is odd
     if (rootIndex.isOdd === true && arg.isNegative === true) {
+      // Cost-gate exempt (mathematically preferred normalization): the
+      // `purpose: 'transform'` tag replaces the former `root(-` label match in
+      // simplify.ts.
       return {
         value: ce._fn('Root', [arg.neg(), rootIndex]).neg(),
         because: 'root(-a, n) -> -root(a, n) when n odd',
+        purpose: 'transform',
       };
     }
 
@@ -819,9 +823,13 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       const fracNum = denom.op1.op1;
       const fracDenom = denom.op1.op2;
       const exp = denom.op2;
+      // Cost-gate exempt (eliminates a nested fraction): the
+      // `purpose: 'transform'` tag replaces the former `a / (b/c)^d` label match
+      // in simplify.ts.
       return {
         value: num.mul(fracDenom.div(fracNum).pow(exp)),
         because: 'a / (b/c)^d -> a * (c/b)^d',
+        purpose: 'transform',
       };
     }
   }

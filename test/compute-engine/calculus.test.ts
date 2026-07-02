@@ -1564,6 +1564,19 @@ describe('LIMIT', () => {
 describe('DOUBLY-INFINITE SUMS', () => {
   // Regression: limits of n = −∞…∞ produced an empty iteration range, so
   // these sums evaluated to 0
+  //
+  // These tests assert VALUES, not timing. Under a fully-parallel jest sweep
+  // the default 2 s wall-clock deadline can expire from CPU contention alone
+  // (observed flake), so give them a generous limit.
+  let savedTimeLimit: number;
+  beforeAll(() => {
+    savedTimeLimit = engine.timeLimit;
+    engine.timeLimit = 20_000;
+  });
+  afterAll(() => {
+    engine.timeLimit = savedTimeLimit;
+  });
+
   test('Σ 2^−|n| over all integers = 3', () => {
     const r = engine
       .expr([

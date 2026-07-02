@@ -197,8 +197,16 @@ export function simplify(
   // excluded from simplify()'s scan (the 'standard-simplification' set is
   // already filtered in its build closure), but remain reachable via
   // `expr.replace()`.
+  // Ruleset selection per the documented `rules` contract
+  // (`SimplifyOptions.rules`): `null` means "use no rules" (structural /
+  // numeric folding only), an omitted (`undefined`) value means "use the
+  // default simplification rules", and any provided value is used as the custom
+  // ruleset. A truthy check conflated `null` with omitted, applying the full
+  // default ruleset where the docs promise none — so branch on the exact value.
   let rules: BoxedRuleSet;
-  if (options?.rules) {
+  if (options?.rules === null) {
+    rules = { rules: [] };
+  } else if (options?.rules !== undefined) {
     const boxed = ce.rules(options.rules, { canonical: true });
     rules = { rules: boxed.rules.filter((r) => r.purpose !== 'expand') };
   } else rules = ce.getRuleSet('standard-simplification')!;
@@ -454,26 +462,17 @@ function simplifyNonCommutativeFunction(
   last = simplifyOperands(last, options);
 
   // If the simplified expression is not cheaper, we're done.
-  // Exception: power combination results (e.g., -4·2^x → -2^(x+2)) may be
-  // structurally more expensive but are mathematically preferred.
+  //
+  // Exception 1: rules that are mathematically preferred even when structurally
+  // larger (power combination `-4·2^x → -2^(x+2)`, log rewrites `ln(x^n) →
+  // n·ln(x)`, odd-root sign extraction, Abs identities `|xy| → |x||y|`,
+  // quotient-power distribution, factorial factoring). Each such rule now tags
+  // its step with `purpose: 'transform'` at the source (simplify-log.ts,
+  // simplify-abs.ts, simplify-power.ts, simplify-factorial.ts,
+  // simplify-rules.ts) instead of the cost gate string-matching on the fragile
+  // `because` label. `isTransformPurpose` below is the single check that
+  // replaces those per-label predicates.
   const because = result.at(-1)!.because;
-  const isPowerCombination =
-    because === 'combined powers' ||
-    because === 'combined powers with same base';
-  // Log/ln rules from simplifyLog are always valid simplifications
-  // even if structurally more expensive (e.g., ln(x^n) -> n*ln(x))
-  const isLogRule =
-    because === 'ln' ||
-    because?.startsWith('ln(') ||
-    because?.startsWith('log_');
-  // Root sign extraction: root(-a, n) -> -root(a, n) for odd n
-  const isRootSignRule = because?.startsWith('root(-');
-  // Abs identity rules (|xy| -> |x||y|, |x/y| -> |x|/|y|) normalize structure
-  const isAbsRule = because?.startsWith('|');
-  // Quotient-power distribution: a/(b/c)^d -> a*(c/b)^d eliminates nested fractions
-  const isQuotientPowerRule = because === 'a / (b/c)^d -> a * (c/b)^d';
-  // Factorial factoring: n! - (n-1)! -> (n-1)! * (n-1) is structurally preferred
-  const isFactorialFactoring = because === 'factor common factorial';
   // Expand may produce more nodes but enables term cancellation
   // Accept when expansion reduces terms or eliminates Power-of-Add patterns
   const isExpandWithSimplification =
@@ -508,12 +507,6 @@ function simplifyNonCommutativeFunction(
   const isTransformPurpose = result.at(-1)!.purpose === 'transform';
   if (
     !isCheaper(expr, last, options?.costFunction) &&
-    !isPowerCombination &&
-    !isLogRule &&
-    !isRootSignRule &&
-    !isAbsRule &&
-    !isQuotientPowerRule &&
-    !isFactorialFactoring &&
     !isExpandWithSimplification &&
     !isTransformPurpose
   )

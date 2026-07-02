@@ -580,6 +580,20 @@ export function pow(
   // If a numeric approximation is requested, we try to evaluate the expression
   //
   if (numericApproximation) {
+    // 0^0 is indeterminate → NaN, matching the exact canonical fold
+    // (`canonicalPower` returns NaN for a literal 0^0). Under `.N()` a
+    // value-bound-symbol base/exponent (x=0, y=0) is pre-numericized to
+    // literal 0 before reaching here, where the machine/bignum path would
+    // otherwise return `Math.pow(0, 0) = 1` — diverging from both the literal
+    // and the symbolic `evaluate()` result. (CORRECTNESS_FINDINGS #30.)
+    if (
+      isNumber(x) &&
+      x.isSame(0) &&
+      ((typeof exp === 'number' && exp === 0) ||
+        (typeof exp !== 'number' && isNumber(exp) && exp.isSame(0)))
+    )
+      return x.engine.NaN;
+
     if (isNumber(x)) {
       // e^exp, fast path. Exp(x) canonicalizes to Power(E, x), and under N()
       // the E base is numericized to e *before* reaching pow(). Evaluating

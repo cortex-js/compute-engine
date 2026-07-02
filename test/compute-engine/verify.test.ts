@@ -129,6 +129,75 @@ describe('VERIFY', () => {
     ce.assume(ce.parse('x + y = 5'));
     expect(ce.verify(ce.parse('x + y = 5'))).toBe(true);
   });
+
+  // P3-1: verify() accepts string predicates (parsed as LaTeX), consistent
+  // with assume(). Previously a string silently returned `undefined`.
+  describe('string predicates (P3-1)', () => {
+    test('plain infix string', () => {
+      const ce = new ComputeEngine();
+      ce.assume(ce.parse('x > 0'));
+      expect(ce.verify('x > 0')).toBe(true);
+      expect(ce.verify('x < 0')).toBe(false);
+      expect(ce.verify('x > 5')).toBe(undefined);
+    });
+
+    test('$…$-delimited LaTeX string', () => {
+      const ce = new ComputeEngine();
+      ce.assume(ce.parse('x > 0'));
+      expect(ce.verify('$x > 0$')).toBe(true);
+      expect(ce.verify('$x < 0$')).toBe(false);
+    });
+
+    test('string agrees with the boxed-expression form', () => {
+      const ce = new ComputeEngine();
+      ce.assume(ce.parse('x > 4'));
+      expect(ce.verify('x < 0')).toBe(ce.verify(ce.expr(['Less', 'x', 0])));
+    });
+
+    test('assume() accepts the same string forms', () => {
+      const ce = new ComputeEngine();
+      expect(ce.assume('y > 3')).toBe('ok');
+      expect(ce.verify(ce.expr(['Greater', 'y', 1]))).toBe(true);
+      const ce2 = new ComputeEngine();
+      expect(ce2.assume('$z > 3$')).toBe('ok');
+      expect(ce2.verify('z > 1')).toBe(true);
+    });
+
+    test('unparseable string throws a clear error', () => {
+      const ce = new ComputeEngine();
+      expect(() => ce.verify('@@@ not math')).toThrow(/cannot parse/i);
+    });
+  });
+
+  // P3-2: the Kleene And/Or/Not recursion is live (routed through an inner
+  // helper), so compound predicates over OPAQUE assumption-DB facts — which
+  // the evaluator cannot reduce — now decide. Previously the recursive calls
+  // hit the `_isVerifying` re-entrancy flag and returned `undefined`, so these
+  // were only ever decided by evaluate()'s own reduction (i.e. undecided).
+  describe('compound predicates over opaque facts (P3-2)', () => {
+    test('And of two opaque inequalities → true', () => {
+      const ce = new ComputeEngine();
+      ce.assume(ce.parse('x \\cdot y > 0'));
+      ce.assume(ce.parse('x + y > 0'));
+      expect(
+        ce.verify(
+          ce.expr([
+            'And',
+            ['Greater', ['Multiply', 'x', 'y'], 0],
+            ['Greater', ['Add', 'x', 'y'], 0],
+          ])
+        )
+      ).toBe(true);
+    });
+
+    test('Not of an opaque inequality → false', () => {
+      const ce = new ComputeEngine();
+      ce.assume(ce.parse('x \\cdot y > 0'));
+      expect(
+        ce.verify(ce.expr(['Not', ['Greater', ['Multiply', 'x', 'y'], 0]]))
+      ).toBe(false);
+    });
+  });
 });
 
 // The identity property (P1-2..P1-6): a fact that was accepted by `assume`

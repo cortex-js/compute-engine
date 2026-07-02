@@ -299,6 +299,12 @@ export type Type =
  *            | <rest_argument>
  *
  * <list_type> ::= "list<" <type> <dimensions>? ">"
+ *            | "vector<" (<type> <dimensions>? | <dimensions>) ">"
+ *            | "matrix<" (<type> <dimensions>? | <dimensions>) ">"
+ *            | "tensor<" <type> ">"
+ *   Note: there is no `[type]` bracket shorthand; a list is always written with
+ *   one of the `list`/`vector`/`matrix`/`tensor` heads. The authoritative
+ *   grammar lives with the parser in `./parser.ts`.
  *
  * <dimensions> ::= "^" <fixed_size>
  *            | "^(" <multi_dimensional_size> ")"
@@ -326,9 +332,9 @@ export type Type =
  * - `"collection<integer>"` -- a collection type where all the elements are integers
  * - `"collection<(number, boolean)>"` -- a collection of tuples
  * - `"collection<(value:number, seen:boolean)>"` -- a collection of named tuples
- * - `"[boolean]^32"` -- a collection type with a fixed size of 32 elements
- * - `"[integer]^(2x3)"` -- an integer matrix of 2 columns and 3 rows
- * - `"[integer]^(2x3x4)"` -- a tensor of dimensions 2x3x4
+ * - `"vector<boolean^32>"` -- a list type with a fixed size of 32 elements
+ * - `"matrix<integer^(2x3)>"` -- an integer matrix of 2 columns and 3 rows
+ * - `"list<integer^(2x3x4)>"` -- a tensor of dimensions 2x3x4
  * - `"number -> number"` -- a signature with a single argument
  * - `"(x: number, number) -> number"` -- a signature with a named argument
  * - `"(number, y:number?) -> number"` -- a signature with an optional named argument (can have several optional arguments, at the end)
