@@ -30,7 +30,12 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
 
   Mod: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Mod: missing argument');
-    return `(${compile(a)} % ${compile(b)})`;
+    // WGSL `%` on floats is the *truncated* remainder (sign of the dividend);
+    // the interpreter's `Mod` is *floored* (sign of the divisor, D1). Convert
+    // truncated → floored with `((a % b) + b) % b`, matching the JS target.
+    const ca = compile(a);
+    const cb = compile(b);
+    return `(((${ca} % ${cb}) + ${cb}) % ${cb})`;
   },
 
   // Override Hypot to use vec2f instead of vec2

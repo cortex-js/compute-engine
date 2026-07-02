@@ -240,6 +240,78 @@ describe('COMPILE Product - interval-js', () => {
   });
 });
 
+// Regression: WP-2.8 / P0-43 — multi-index Sum/Product must honor *every*
+// indexing-set clause. Previously only the first Limits clause was read,
+// leaving the trailing indices dangling (`_.j` undefined → NaN) while the
+// result still reported success and an empty freeSymbols set.
+describe('COMPILE Sum/Product - multi-index (P0-43 regression)', () => {
+  const engine = new ComputeEngine();
+
+  test('JS: double-index sum ∑_{i=1}^{3} ∑_{j=1}^{3} i·j = 36', () => {
+    const expr = engine.box([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Limits', 'i', 1, 3],
+      ['Limits', 'j', 1, 3],
+    ]);
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.run!({})).toBe(36);
+    // No dangling free symbol — all indices are bound.
+    expect(result.freeSymbols).toEqual([]);
+  });
+
+  test('JS: triple-index sum ∑∑∑ i·j·k over 1..2 = 27', () => {
+    const expr = engine.box([
+      'Sum',
+      ['Multiply', 'i', ['Multiply', 'j', 'k']],
+      ['Limits', 'i', 1, 2],
+      ['Limits', 'j', 1, 2],
+      ['Limits', 'k', 1, 2],
+    ]);
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.run!({})).toBe(27);
+  });
+
+  test('JS: double-index product ∏_{i=1}^{2} ∏_{j=1}^{2} (i+j) = 72', () => {
+    const expr = engine.box([
+      'Product',
+      ['Add', 'i', 'j'],
+      ['Limits', 'i', 1, 2],
+      ['Limits', 'j', 1, 2],
+    ]);
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.run!({})).toBe(72);
+  });
+
+  test('JS: multi-index with a large outer (loop) range nests correctly', () => {
+    // Outer range exceeds the unroll limit → outer while-loop, inner unroll.
+    const expr = engine.box([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Limits', 'i', 1, 150],
+      ['Limits', 'j', 1, 3],
+    ]);
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    // (∑_{1..150} i)·(∑_{1..3} j) = 11325·6 = 67950
+    expect(result.run!({})).toBe(67950);
+  });
+
+  test('GPU: multi-index Sum fails closed (not silently wrong)', () => {
+    const expr = engine.box([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Limits', 'i', 1, 3],
+      ['Limits', 'j', 1, 3],
+    ]);
+    const result = compile(expr, { to: 'glsl' });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe('COMPILE Integrate - symbolic bounds', () => {
   test('JS: int_0^a x dx with a=2 => 2', () => {
     const expr = ce.parse('\\int_0^a x \\, dx');

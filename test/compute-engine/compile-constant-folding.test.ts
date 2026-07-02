@@ -304,9 +304,11 @@ describe('GPU HANDLER CONSTANT FOLDING', () => {
       expect(glsl.compile(ce.expr(['Root', 27, 3])).code).toBe('3.0');
     });
 
-    it('should compile Root(x, 3) as pow(x, 1.0 / 3.0)', () => {
+    it('should compile Root(x, 3) with the sign-corrected odd-root form', () => {
+      // GPU has no `cbrt`, and `pow` is NaN for a negative base. The odd-degree
+      // real root is `sign(x)·|x|^(1/3)`, matching the interpreter for x < 0.
       expect(glsl.compile(ce.expr(['Root', 'x', 3])).code).toBe(
-        'pow(x, 1.0 / 3.0)'
+        '(sign(x) * pow(abs(x), 0.3333333333333333))'
       );
     });
   });
@@ -436,6 +438,31 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
       expect(js.compile(ce.expr(['Square', ['Sin', 'x']])).code).toBe(
         'Math.pow(Math.sin(_.x), 2)'
       );
+    });
+  });
+
+  // GPU emission regressions for the WP-2.8 P0 cluster. No GPU available here,
+  // so these inspect the emitted GLSL — asserting the corrected, branch-safe
+  // formulas (matching the JS target's math) and no literal `NaN`.
+  describe('GPU P0 regressions (emission)', () => {
+    it('Arccot uses the branch-free (0, π) form', () => {
+      expect(glsl.compile(ce.expr(['Arccot', 'x'])).code).toBe(
+        '(1.5707963267948966 - atan(x))'
+      );
+    });
+
+    it('Round is half-away-from-zero', () => {
+      expect(glsl.compile(ce.expr(['Round', 'x'])).code).toBe(
+        '(sign(x) * floor(abs(x) + 0.5))'
+      );
+    });
+
+    it('odd root of a negative constant folds to the real value', () => {
+      expect(glsl.compile(ce.expr(['Root', -8, 3])).code).toBe('-2.0');
+    });
+
+    it('even root of a negative constant fails closed (no literal NaN)', () => {
+      expect(() => glsl.compile(ce.expr(['Sqrt', -4]))).toThrow(/non-finite/);
     });
   });
 });

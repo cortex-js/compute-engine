@@ -57,3 +57,77 @@ describe('LIMITS AT SPECIAL-FUNCTION POLES (soundness)', () => {
     });
   });
 });
+
+describe('CANCELLING ln/√ DIFFERENCES (CORRECTNESS_FINDINGS P0-3)', () => {
+  // The asymptotic pass ranked co-dominant differences like `ln(x+1) − ln x`
+  // by their (cancelling) leading terms and returned wrong finite limits.
+  // They are now combined (`ln(u/v)`, conjugate quotients) before ranking.
+  const INF = { sym: 'PositiveInfinity' };
+
+  test('x·(ln(x+1) − ln x) → 1', () => {
+    const e = lim(
+      ['Multiply', 'x', ['Subtract', ['Ln', ['Add', 'x', 1]], ['Ln', 'x']]],
+      INF
+    ).evaluate();
+    expect(e.isSame(ce.number(1))).toBe(true);
+  });
+
+  test('x·(ln(x+2) − ln x) → 2', () => {
+    const e = lim(
+      ['Multiply', 'x', ['Subtract', ['Ln', ['Add', 'x', 2]], ['Ln', 'x']]],
+      INF
+    ).evaluate();
+    expect(e.isSame(ce.number(2))).toBe(true);
+  });
+
+  test('x·(√(x+1) − √x) → +∞', () => {
+    const e = lim(
+      ['Multiply', 'x', ['Subtract', ['Sqrt', ['Add', 'x', 1]], ['Sqrt', 'x']]],
+      INF
+    ).evaluate();
+    expect(e.isSame(ce.PositiveInfinity)).toBe(true);
+  });
+
+  test('√x·(√(x+1) − √x) → 1/2 (exact)', () => {
+    const e = lim(
+      [
+        'Multiply',
+        ['Sqrt', 'x'],
+        ['Subtract', ['Sqrt', ['Add', 'x', 1]], ['Sqrt', 'x']],
+      ],
+      INF
+    ).evaluate();
+    expect(e.isSame(ce.expr(['Rational', 1, 2]))).toBe(true);
+  });
+
+  test('ln(2x) − ln x → ln 2 (exact); ln(x+1) − ln x → 0', () => {
+    expect(
+      lim(['Subtract', ['Ln', ['Multiply', 2, 'x']], ['Ln', 'x']], INF)
+        .evaluate()
+        .isSame(ce.expr(['Ln', 2]))
+    ).toBe(true);
+    expect(
+      lim(['Subtract', ['Ln', ['Add', 'x', 1]], ['Ln', 'x']], INF)
+        .evaluate()
+        .isSame(ce.number(0))
+    ).toBe(true);
+  });
+
+  test('controls unchanged: x²−x → +∞, ln x − x → −∞, x·e^{−x} → 0', () => {
+    expect(
+      lim(['Subtract', ['Power', 'x', 2], 'x'], INF)
+        .evaluate()
+        .isSame(ce.PositiveInfinity)
+    ).toBe(true);
+    expect(
+      lim(['Subtract', ['Ln', 'x'], 'x'], INF)
+        .evaluate()
+        .isSame(ce.NegativeInfinity)
+    ).toBe(true);
+    expect(
+      lim(['Multiply', 'x', ['Exp', ['Negate', 'x']]], INF)
+        .evaluate()
+        .isSame(ce.number(0))
+    ).toBe(true);
+  });
+});

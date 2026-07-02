@@ -114,8 +114,16 @@ function limitDispatch(
 
   if (point.isInfinity === true) {
     // Map x → −∞ onto x → +∞ via the substitution x ↦ −x.
-    const g =
+    let g =
       point.isNegative === true ? e.subs({ [x]: ce.symbol(x).neg() }) : e;
+    // Combine cancellation-prone `ln`/`√` differences BEFORE any leading-order
+    // or growth ranking: co-dominant pairs like `ln(x+1) − ln x` (~1/x) defeat
+    // the asymptotic pass, which ranked them by their (cancelling) leading
+    // terms and produced wrong finite limits — `x·(ln(x+1) − ln x)` → 0
+    // instead of 1 (CORRECTNESS_FINDINGS P0-3). The combined forms
+    // (`ln((x+1)/x)`, conjugate quotients) are handled exactly by the
+    // existing strategies.
+    g = combineCancellingPairs(g, x, ce);
     // Bail *before* simplify (which can distribute and mangle the structure) if
     // any subexpression cancels catastrophically or overflows at the probes —
     // the symbolic pass can't rank such a form, so defer to the numeric limit.
@@ -846,6 +854,91 @@ function baseEventuallyPositive(
   ce: ComputeEngine
 ): boolean {
   return numericAt(base, x, 120, ce) > 0;
+}
+
+/**
+ * Combine cancellation-prone pairs inside sums, recursively over the whole
+ * expression:
+ *
+ *   ln u − ln v  →  ln(u/v)                (u, v eventually positive)
+ *   √u − √v      →  (u − v)/(√u + √v)      (u, v eventually positive)
+ *
+ * Differences of co-dominant terms like these lose their magnitude to
+ * cancellation, so neither the leading-order rewrite nor the growth
+ * comparison can rank them (they see the individual terms, not the ~1/x
+ * difference). The combined forms are mathematically identical on the
+ * eventually-positive domain and are handled exactly by the existing
+ * strategies. Only unit-coefficient pairs are combined; anything else is
+ * left untouched (and remains protected by the fail-closed instability
+ * guards).
+ */
+function combineCancellingPairs(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine
+): Expression {
+  const eOps = oo(e);
+  if (eOps.length === 0 || !e.has(x)) return e;
+
+  // Rewrite operands first so nested sums (e.g. inside a product or an
+  // exponential) are covered.
+  const ops = eOps.map((op) => combineCancellingPairs(op, x, ce));
+  let changed = ops.some((op, k) => op !== eOps[k]);
+
+  if (e.operator !== 'Add') {
+    if (!changed) return e;
+    return ce.function(e.operator, ops);
+  }
+
+  // Decompose each term into (sign, core), pairing `Ln`/`Sqrt` terms of
+  // opposite sign.
+  const sign = (t: Expression): 1 | -1 => (t.operator === 'Negate' ? -1 : 1);
+  const core = (t: Expression): Expression =>
+    t.operator === 'Negate' ? o1(t) : t;
+
+  const used = ops.map(() => false);
+  const out: Expression[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    if (used[i]) continue;
+    let combined: Expression | undefined = undefined;
+    const si = sign(ops[i]);
+    const ci = core(ops[i]);
+    if (ci.operator === 'Ln' || ci.operator === 'Sqrt') {
+      for (let j = i + 1; j < ops.length; j++) {
+        if (used[j]) continue;
+        const sj = sign(ops[j]);
+        const cj = core(ops[j]);
+        if (si === sj || cj.operator !== ci.operator) continue;
+        // (u, v) so that the pair is `f(u) − f(v)`.
+        const [u, v] = si === 1 ? [o1(ci), o1(cj)] : [o1(cj), o1(ci)];
+        if (
+          !baseEventuallyPositive(u, x, ce) ||
+          !baseEventuallyPositive(v, x, ce)
+        )
+          continue;
+        if (ci.operator === 'Ln') {
+          combined = ce.function('Ln', [ce.function('Divide', [u, v])]);
+        } else {
+          combined = ce.function('Divide', [
+            ce.function('Subtract', [u, v]),
+            ce.function('Add', [
+              ce.function('Sqrt', [u]),
+              ce.function('Sqrt', [v]),
+            ]),
+          ]);
+        }
+        used[i] = used[j] = true;
+        changed = true;
+        break;
+      }
+    }
+    if (combined !== undefined) out.push(combined);
+    else if (!used[i]) out.push(ops[i]);
+  }
+
+  if (!changed) return e;
+  if (out.length === 1) return out[0];
+  return ce.function('Add', out);
 }
 
 /**

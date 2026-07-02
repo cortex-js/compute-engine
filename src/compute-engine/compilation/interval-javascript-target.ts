@@ -353,6 +353,13 @@ function compileIntervalSumProduct(
   if (!args[0]) throw new Error(`${kind}: no body`);
   if (!args[1]) throw new Error(`${kind}: no indexing set`);
 
+  // Multi-index Sum/Product would drop the trailing indexing sets. Fail closed
+  // (D6) rather than emit code with a dangling index.
+  if (args.length > 2)
+    throw new Error(
+      `${kind}: multi-index (${args.length - 1} indexing sets) is not supported in the interval target`
+    );
+
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } =
     extractIntervalLimits(args[1]);
   const isSum = kind === 'Sum';

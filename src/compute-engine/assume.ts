@@ -274,8 +274,13 @@ function assumeEquality(proposition: Expression): AssumeResult {
     if (!ce.context.lexicalScope.bindings.has(lhs)) {
       ce.declare(lhs, { value: val });
     } else {
-      ce._setSymbolValue(lhs, val);
+      // Set the (inferred) type *before* the value. The `set type` accessor
+      // resets `_value` when the new type is `unknown` (which `inferTypeFromValue`
+      // yields for a free-symbol rhs like `a = b`); doing it after
+      // `_setSymbolValue` would silently wipe the assigned value. Setting the
+      // value last guarantees it survives.
       if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
+      ce._setSymbolValue(lhs, val);
     }
     return 'ok';
   }
@@ -307,8 +312,10 @@ function assumeEquality(proposition: Expression): AssumeResult {
     if (!ce.context.lexicalScope.bindings.has(lhs)) {
       ce.declare(lhs, { value: val });
     } else {
-      ce._setSymbolValue(lhs, val);
+      // Set the (inferred) type before the value: see the note in Case 2. A
+      // `set type(unknown)` would otherwise wipe the value assigned just below.
       if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
+      ce._setSymbolValue(lhs, val);
     }
     return 'ok';
   }

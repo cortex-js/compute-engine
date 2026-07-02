@@ -112,11 +112,13 @@ describe('COMPILE COMPLEX - _SYS helpers (execution)', () => {
     expect(val.im).toBeCloseTo(1.1752011936438014, 10);
   });
 
-  it('should execute csqrt', () => {
-    // sqrt(-1) is real path: Math.sqrt(-1) = NaN
+  it('fails closed on Sqrt of a negative real constant', () => {
+    // sqrt(-1) has no real value. Per the fail-closed policy (D6), a real
+    // target refuses to fold it to a literal `NaN`: with `fallback: false` the
+    // compile throws; with the default fallback it reports `success: false`.
     const expr = ce.expr(['Sqrt', -1]);
-    const result = compile(expr, { fallback: false });
-    expect(result.run!()).toBeNaN();
+    expect(() => compile(expr, { fallback: false })).toThrow(/no real value/);
+    expect(compile(expr).success).toBe(false);
   });
 
   it('should execute csqrt on complex input', () => {

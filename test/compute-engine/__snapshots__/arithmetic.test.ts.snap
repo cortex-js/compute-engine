@@ -820,9 +820,9 @@ canonical = [
   "Multiply",
   2,
   3.1,
+  "PositiveInfinity",
+  "PositiveInfinity",
   "NaN",
-  "PositiveInfinity",
-  "PositiveInfinity",
   "x"
 ]
 simplify  = NaN

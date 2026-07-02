@@ -99,7 +99,11 @@ describe('exact integer powers stay exact (WP-2.16)', () => {
     // Was `1.70141183460469231732e+38` (rounded to `ce.precision` digits).
     const expected = '170141183460469231731687303715884105728'; // 2^127
     expect(evalStr(['Power', 2, 127])).toEqual(expected);
-    expect(jsonOf(['Power', 2, 127])).toEqual(`{"num":"${expected}"}`);
+    // `.json` must round-trip the exact value. The representation may be a
+    // plain JSON number (2^127 is a power of two, hence exactly
+    // float-representable) or a `{num}` string — assert value, not form.
+    const roundTripped = ce.box(ce.box(['Power', 2, 127]).evaluate().json);
+    expect(roundTripped.isSame(ce.number(2n ** 127n))).toBe(true);
     expect(ce.box(['Power', 2, 127]).evaluate().isInteger).toBe(true);
   });
 
@@ -209,5 +213,130 @@ describe('small/fractional integer powers unchanged (controls)', () => {
   test('radical base integer power stays exact: (√2)^4 → 4, (√2)^5 → 4√2', () => {
     expect(evalStr(['Power', ['Sqrt', 2], 4])).toEqual('4');
     expect(evalStr(['Power', ['Sqrt', 2], 5])).toEqual('4sqrt(2)');
+  });
+});
+
+/**
+ * Regressions for P0-7 (WP-2.5): `Mod`/`Remainder` semantics disagreed
+ * between the machine and bignum lanes.
+ *  - `Mod` is floored (sign follows the divisor): the bignum lane used a
+ *    truncated `a.mod(b)` while the machine lane already applied the
+ *    floored correction — `Mod(-7, 3)` was `-1` at default (bignum)
+ *    precision but `2` at machine precision.
+ *  - `Remainder` keeps its existing IEEE-style (round-to-nearest, ties
+ *    toward +Infinity) semantics in both lanes; the bignum lane's
+ *    `BigDecimal.round()` breaks ties away from zero, disagreeing with
+ *    `Math.round`'s ties-toward-+Infinity at half-integer quotients (e.g.
+ *    `Remainder(-5, 2)`).
+ *  - P0-16d (bonus): `Mod(1/2, 1/3)` numericized to a float instead of the
+ *    exact `1/6`.
+ *
+ * IMPORTANT: `ce.precision` mutates the process-global `BigDecimal.precision`
+ * — every machine-precision block below saves and restores it.
+ */
+describe('P0-7 — Mod/Remainder agree across lanes (WP-2.5)', () => {
+  // Floored: sign follows the divisor.
+  const modGrid: Array<[number, number, string]> = [
+    [7, 3, '1'],
+    [-7, 3, '2'],
+    [7, -3, '-2'],
+    [-7, -3, '-1'],
+  ];
+  // IEEE-style (round-to-nearest quotient): sign follows the sign of
+  // `a - b*round(a/b)`.
+  const remainderGrid: Array<[number, number, string]> = [
+    [7, 3, '1'],
+    [-7, 3, '-1'],
+    [7, -3, '1'],
+    [-7, -3, '-1'],
+  ];
+
+  function runSignGrid() {
+    test.each(modGrid)('Mod(%p, %p) = %p', (a, b, expected) => {
+      expect(evalStr(['Mod', a, b])).toEqual(expected);
+    });
+    test.each(remainderGrid)('Remainder(%p, %p) = %p', (a, b, expected) => {
+      expect(evalStr(['Remainder', a, b])).toEqual(expected);
+    });
+    test('Remainder tie-breaking agrees at half-integer quotients', () => {
+      // a/b = ±2.5: Math.round ties toward +Infinity (-2.5 → -2).
+      expect(evalStr(['Remainder', 5, 2])).toEqual('-1');
+      expect(evalStr(['Remainder', -5, 2])).toEqual('-1');
+      expect(evalStr(['Remainder', 5, -2])).toEqual('1');
+      expect(evalStr(['Remainder', -5, -2])).toEqual('1');
+    });
+    test('Mod(.sgn) agrees with Mod(...).evaluate().sgn', () => {
+      for (const [a, b] of modGrid) {
+        const e = ce.box(['Mod', a, b]);
+        expect(e.sgn).toEqual(e.evaluate().sgn);
+      }
+    });
+  }
+
+  describe('at default (bignum) precision', () => {
+    runSignGrid();
+  });
+
+  describe('at machine precision', () => {
+    let saved: number;
+    beforeAll(() => {
+      saved = ce.precision;
+      ce.precision = 'machine';
+    });
+    afterAll(() => {
+      ce.precision = saved;
+    });
+    runSignGrid();
+  });
+
+  test('Mod(10^21+3, 10) = 3 (regression, WP-2.2)', () => {
+    expect(evalStr(['Mod', ['Add', ['Power', 10, 21], 3], 10])).toEqual('3');
+  });
+
+  test('Mod(10^21+3, 10) = 3 at machine precision too', () => {
+    const saved = ce.precision;
+    ce.precision = 'machine';
+    try {
+      expect(evalStr(['Mod', ['Add', ['Power', 10, 21], 3], 10])).toEqual('3');
+    } finally {
+      ce.precision = saved;
+    }
+  });
+
+  test('huge negative exact integer stays exact (all sign combinations)', () => {
+    // -(10^21) mod 7, floored: 10^21 ≡ 6 (mod 7), so -(10^21) ≡ 1 (mod 7).
+    expect(
+      evalStr(['Mod', ['Negate', ['Power', 10, 21]], 7])
+    ).toEqual('1');
+  });
+
+  test('Mod(0.5, 0.3) float behavior unchanged across lanes', () => {
+    expect(evalStr(['Mod', 0.5, 0.3])).toEqual('0.2');
+    const saved = ce.precision;
+    ce.precision = 'machine';
+    try {
+      expect(evalStr(['Mod', 0.5, 0.3])).toEqual('0.2');
+    } finally {
+      ce.precision = saved;
+    }
+  });
+
+  test('Mod(1/2, 1/3) = 1/6 exact (P0-16d)', () => {
+    expect(
+      evalStr(['Mod', ['Rational', 1, 2], ['Rational', 1, 3]])
+    ).toEqual('1/6');
+    expect(
+      ce.box(['Mod', ['Rational', 1, 2], ['Rational', 1, 3]]).evaluate()
+        .isExact
+    ).toBe(true);
+  });
+
+  test('Mod(-1/2, 1/3) and Mod(1/2, -1/3) are exact and floored (sign follows divisor)', () => {
+    expect(
+      evalStr(['Mod', ['Rational', -1, 2], ['Rational', 1, 3]])
+    ).toEqual('1/6');
+    expect(
+      evalStr(['Mod', ['Rational', 1, 2], ['Rational', -1, 3]])
+    ).toEqual('-1/6');
   });
 });

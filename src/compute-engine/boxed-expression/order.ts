@@ -107,7 +107,9 @@ export function equalOrder(a: Expression, b: Expression): number {
     const bN = b.numericValue;
     const af = typeof aN === 'number' ? aN : aN.re;
     const bf = typeof bN === 'number' ? bN : bN.re;
-    return af - bf;
+    // Total order: `af - bf` yields `NaN` for NaN operands, making the
+    // comparator non-total. `compareFloat` sorts NaN deterministically last.
+    return compareFloat(af, bf);
   }
   return order(a, b);
 }
@@ -124,6 +126,7 @@ const RANKS = [
   'radical', // Square root of a rational literal
   'real',
   'complex',
+  'nan', // NaN: after all numbers, so it has a deterministic sort position
   'constant',
   'symbol',
   'multiply',
@@ -138,14 +141,36 @@ const RANKS = [
 export type Rank = (typeof RANKS)[number];
 
 /**
+ * Total three-way comparison of two floats suitable for a comparator.
+ *
+ * Unlike `af - bf`, this is a *total* order: it never returns `NaN`. Any
+ * `NaN` operand sorts after all real numbers (and two `NaN`s compare equal),
+ * so canonical ordering stays deterministic and permutation-invariant even
+ * when `NaN` is present.
+ */
+function compareFloat(a: number, b: number): number {
+  const aNaN = Number.isNaN(a);
+  const bNaN = Number.isNaN(b);
+  if (aNaN || bNaN) {
+    if (aNaN && bNaN) return 0;
+    return aNaN ? +1 : -1;
+  }
+  if (a < b) return -1;
+  if (a > b) return +1;
+  return 0;
+}
+
+/**
  * Return the "rank", the order in which the expression should be
  * sorted.
  */
 function rank(expr: Expression): Rank {
   if (isNumber(expr)) {
     if (typeof expr.numericValue === 'number') {
+      if (Number.isNaN(expr.numericValue)) return 'nan';
       return Number.isInteger(expr.numericValue) ? 'integer' : 'real';
     }
+    if (expr.numericValue.isNaN) return 'nan';
     const type = expr.numericValue.type;
     if (type === 'integer' || type === 'finite_integer') return 'integer';
     if (type === 'rational' || type === 'finite_rational') return 'rational';
@@ -238,14 +263,20 @@ export function order(a: Expression, b: Expression): number {
   const rankB = rank(b);
   if (rankA !== rankB) return RANKS.indexOf(rankA) - RANKS.indexOf(rankB);
 
+  // All NaN operands are equivalent for ordering purposes. Returning a fixed
+  // value (0) keeps the comparator total and deterministic — an `af - bf`
+  // subtraction would yield `NaN`, corrupting `Array.sort`.
+  if (rankA === 'nan') return 0;
+
   if (rankA === 'complex') {
     // If the rank is complex, the numericValues can't be a number
     const [reA, imA] = getComplex(a);
     const [reB, imB] = getComplex(b);
 
-    if (imA !== imB) return imA - imB;
+    const imCmp = compareFloat(imA, imB);
+    if (imCmp !== 0) return imCmp;
 
-    return reA - reB;
+    return compareFloat(reA, reB);
   }
 
   if (rankA === 'integer' || rankA === 'rational' || rankA === 'real') {
@@ -260,7 +291,7 @@ export function order(a: Expression, b: Expression): number {
     const af = typeof aN === 'number' ? aN : aN!.re;
     const bf = typeof bN === 'number' ? bN : bN!.re;
 
-    return af - bf;
+    return compareFloat(af, bf);
   }
 
   if (rankA === 'radical') {

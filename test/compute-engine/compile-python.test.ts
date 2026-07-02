@@ -410,4 +410,35 @@ describe('PYTHON TARGET', () => {
       expect(code).toBe('x ** 6');
     });
   });
+
+  // Regressions for the WP-2.8 compilation P0 cluster (Python target side).
+  describe('WP-2.8 P0 regressions', () => {
+    it('parenthesizes a negative base under ** (P0-46)', () => {
+      // `-2 ** x` parses as `-(2 ** x)` in Python — sign-flipped. Must emit
+      // `(-2) ** x`.
+      const code = python.compile(ce.box(['Power', -2, 'x'])).code;
+      expect(code).toBe('(-2) ** x');
+    });
+
+    it('Remainder is round-to-nearest, not np.remainder (P0-7)', () => {
+      const code = python.compile(ce.box(['Remainder', 'a', 'b'])).code;
+      expect(code).not.toContain('np.remainder');
+      expect(code).toBe('(a - b * np.round(a / b))');
+    });
+
+    it('Round is half-away-from-zero, not np.round banker (P0-41)', () => {
+      const code = python.compile(ce.box(['Round', 'x'])).code;
+      expect(code).toBe('(np.sign(x) * np.floor(np.abs(x) + 0.5))');
+    });
+
+    it('Arccot uses the (0, π) branch (P0-42)', () => {
+      const code = python.compile(ce.box(['Arccot', 'x'])).code;
+      expect(code).toBe('(np.pi / 2 - np.arctan(x))');
+    });
+
+    it('odd roots are sign-corrected for negative bases (P0-42)', () => {
+      const code = python.compile(ce.box(['Root', 'x', 5])).code;
+      expect(code).toBe('(np.sign(x) * np.power(np.abs(x), 1.0 / 5))');
+    });
+  });
 });

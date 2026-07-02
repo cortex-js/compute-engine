@@ -973,7 +973,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Mod: {
-      description: 'Modulo',
+      description:
+        'Modulo: the remainder of the floored division of x by y. The sign of the result follows the sign of the divisor y (floored-division convention, matching most CAS). For a truncated/round-to-nearest remainder, see `Remainder`.',
       wikidata: 'Q1799665',
       complexity: 2500,
       broadcastable: true,
@@ -989,9 +990,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ops[0],
             n,
             // In JavaScript, the % is remainder, not modulo
-            // so adapt it to return a modulo
+            // so adapt it to return a modulo (floored: sign follows the
+            // divisor). Both lanes must agree with the `evaluate` handler
+            // below, or `.sgn` and `.evaluate()` disagree on the same
+            // expression (P0-7).
             (a, b) => ((a % b) + b) % b,
-            (a, b) => a.mod(b)
+            (a, b) => a.mod(b).add(b).mod(b)
           );
           return v?.sgn ?? undefined;
         }
@@ -1009,13 +1013,44 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (ba !== null && bb !== null && bb !== BigInt(0))
             return ce.number(ba % bb);
         }
+
+        // Exact-rational fast path (any sign, integer or rational): compute
+        // the floored modulo exactly with bigint arithmetic. This subsumes
+        // the integer fast path above for negative operands (still exact,
+        // unlike the bignum float lane below, which rounds `a`/`b` through
+        // `bignumRe` at `ce.precision` digits) and also handles true
+        // rationals exactly (e.g. `Mod(1/2, 1/3) = 1/6`, P0-16d), which the
+        // float lanes below would otherwise numericize.
+        if (a.isRational && b.isRational) {
+          const ra = asRational(a);
+          const rb = asRational(b);
+          if (ra && rb) {
+            const an = BigInt(ra[0]);
+            const ad = BigInt(ra[1]); // > 0 by rational convention
+            const bn = BigInt(rb[0]);
+            const bd = BigInt(rb[1]); // > 0 by rational convention
+            if (bn !== BigInt(0)) {
+              // p = an/ad, q = bn/bd. floor(p/q) = floor((an·bd) / (ad·bn)).
+              const num = an * bd;
+              const den = ad * bn;
+              let k = num / den; // bigint division truncates toward zero
+              const r = num % den;
+              if (r !== BigInt(0) && r < BigInt(0) !== den < BigInt(0))
+                k -= BigInt(1); // truncated → floored correction
+              // Mod(p, q) = p - k·q = (an·bd − k·bn·ad) / (ad·bd)
+              return ce.number([an * bd - k * bn * ad, ad * bd]);
+            }
+          }
+        }
+
         return apply2(
           a,
           b,
           // In JavaScript, the % is remainder, not modulo
-          // so adapt it to return a modulo
+          // so adapt it to return a modulo (floored: sign follows the
+          // divisor, matching the machine lane and the fast paths above).
           (a, b) => ((a % b) + b) % b,
-          (a, b) => a.mod(b)
+          (a, b) => a.mod(b).add(b).mod(b)
         );
       },
     },
@@ -1341,7 +1376,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Remainder: {
       description:
-        'IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer',
+        'IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`)',
       complexity: 2500,
       broadcastable: true,
       signature: '(number, number) -> number',
@@ -1351,7 +1386,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           a,
           b,
           (a, b) => a - b * Math.round(a / b),
-          (a, b) => a.sub(b.mul(a.div(b).round()))
+          // `BigDecimal.round()` rounds ties away from zero, which disagrees
+          // with `Math.round`'s ties-toward-+Infinity at half-integer
+          // quotients (e.g. Remainder(-5, 2): machine lane rounds -2.5 to
+          // -2, bignum `.round()` would round it to -3, flipping the result
+          // sign). `floor(x + 0.5)` reproduces `Math.round`'s tie-breaking
+          // exactly, keeping both lanes in agreement.
+          (a, b) => a.sub(b.mul(a.div(b).add(0.5).floor()))
         ),
     },
 

@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
@@ -790,5 +791,93 @@ describe('COMPILE Tier-2 special functions (elliptic / AGM / hypergeometric / Er
     const k = compile(ce.box(['EllipticK', 'm']))!;
     expect(k.success).toBe(true);
     expect(k.run!({ m: 0.5 })).toBeCloseTo(ce.box(['EllipticK', 0.5]).N().re, 9);
+  });
+});
+
+// Regressions for the WP-2.8 compilation P0 cluster (CORRECTNESS_FINDINGS
+// P0-41…P0-46 + the Mod/Remainder target side of P0-7). Each asserts the
+// compiled JS agrees with the interpreter at the adversarial points that used
+// to diverge, or fails closed where no real value exists.
+describe('COMPILE — WP-2.8 P0 regressions', () => {
+  const parity = (src: any, vars: Record<string, number>, digits = 10) => {
+    const result = compile(ce.box(src))!;
+    expect(result.success).toBe(true);
+    const got = result.run!(vars) as number;
+    const want = ce.box(src).subs(vars).N().re;
+    expect(got).toBeCloseTo(want, digits);
+  };
+
+  it('Mod is floored for negative operands (P0-7)', () => {
+    for (const [x, y] of [
+      [-1, 3],
+      [7, -3],
+      [-7, -3],
+      [7.5, 2],
+      [-7.5, 2],
+    ])
+      parity(['Mod', 'x', 'y'], { x, y });
+  });
+
+  it('Remainder uses round-to-nearest quotient, not floored (P0-7)', () => {
+    for (const [x, y] of [
+      [7, 4],
+      [-7, 4],
+      [7, 3],
+      [-7, -3],
+    ])
+      parity(['Remainder', 'x', 'y'], { x, y });
+  });
+
+  it('Round is half-away-from-zero (P0-41)', () => {
+    for (const v of [0.5, -0.5, 1.5, -1.5, 2.5, -2.5]) parity(['Round', 'x'], { x: v });
+  });
+
+  it('Arccot uses the (0, π) branch for negative arguments (P0-42)', () => {
+    for (const v of [2, -2, 0.5, -0.5, 10, -10]) parity(['Arccot', 'x'], { x: v });
+  });
+
+  it('odd roots of negatives are real (P0-42)', () => {
+    for (const [x, n] of [
+      [-2, 5],
+      [-32, 5],
+      [8, 3],
+    ])
+      parity(['Root', 'x', n], { x });
+    // constant fold of an odd root of a negative stays real
+    expect(compile(ce.box(['Root', -8, 3]))!.code).toBe('-2');
+  });
+
+  it('non-real constant folds fail closed (P0-42, D6)', () => {
+    for (const src of [
+      ['Sqrt', -4],
+      ['Root', -4, 2],
+    ]) {
+      const result = compile(ce.box(src as any));
+      expect(result.success).toBe(false);
+      expect(() => compile(ce.box(src as any), { fallback: false })).toThrow(
+        /no real value/
+      );
+    }
+  });
+
+  it('non-canonical right-associative grouping is preserved (P0-45)', () => {
+    const div = compile(ce.box(['Divide', 'a', ['Divide', 'b', 'c']], { canonical: false }))!;
+    expect(div.success).toBe(true);
+    expect(div.run!({ a: 12, b: 6, c: 2 })).toBe(4);
+
+    const sub = compile(ce.box(['Subtract', 'a', ['Subtract', 'b', 'c']], { canonical: false }))!;
+    expect(sub.success).toBe(true);
+    expect(sub.run!({ a: 5, b: 3, c: 1 })).toBe(3);
+  });
+
+  it('fallback run() does not leak argument bindings into the engine (P0-44)', () => {
+    const engine = new ComputeEngine();
+    engine.declare('g', '(number) -> number');
+    const expr = engine.parse('g(x) + x');
+    const result = compile(expr);
+    expect(result.success).toBe(false); // falls back to interpretation
+    result.run!({ x: 5 });
+    // After the fallback call, `x` must still be a free symbol engine-wide.
+    expect(engine.box('x').value).toBeUndefined();
   });
 });

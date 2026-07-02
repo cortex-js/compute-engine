@@ -141,6 +141,14 @@ function compileGPUSumProduct(
       `${kind}: complex-valued body not supported in GPU targets`
     );
 
+  // Multi-index Sum/Product (more than one indexing set) would drop the
+  // trailing clauses. Fail closed (D6) rather than emit code with a dangling
+  // index.
+  if (args.length > 2)
+    throw new Error(
+      `${kind}: multi-index (${args.length - 1} indexing sets) is not supported in GPU targets`
+    );
+
   const limitsExpr = args[1];
   if (!isFunction(limitsExpr, 'Limits'))
     throw new Error(`${kind}: expected Limits indexing set`);
@@ -487,7 +495,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Radians: 'radians',
   Round: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
-    return `round(${compile(args[0])})`;
+    // GLSL/WGSL `round()` rounds half to even (implementation-defined ties);
+    // the interpreter rounds half away from zero (Round(-2.5) = -3).
+    // Reconstruct half-away as `sign(x)·floor(|x| + 0.5)`.
+    const c = compile(args[0]);
+    return `(sign(${c}) * floor(abs(${c}) + 0.5))`;
   },
   Sign: 'sign',
   Sin: (args, compile) => {
@@ -575,7 +587,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Inverse trigonometric (reciprocal)
   Arccot: ([x], compile) => {
     if (x === null) throw new Error('Arccot: no argument');
-    return `atan(1.0 / (${compile(x)}))`;
+    // `atan(1/x)` returns the wrong branch for x < 0. `π/2 - atan(x)` is
+    // branch-free and matches the interpreter's (0, π) range for all real x.
+    return `(1.5707963267948966 - atan(${compile(x)}))`;
   },
   Arccsc: ([x], compile) => {
     if (x === null) throw new Error('Arccsc: no argument');
@@ -760,8 +774,21 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const nConst = tryGetConstant(n);
     if (nConst === 2) return `sqrt(${compile(x)})`;
     const xConst = tryGetConstant(x);
-    if (xConst !== undefined && nConst !== undefined)
-      return formatFloat(Math.pow(xConst, 1 / nConst));
+    if (xConst !== undefined && nConst !== undefined) {
+      const r = Math.pow(xConst, 1 / nConst);
+      // Negative base with an odd integer degree has a real root (interpreter
+      // convention, e.g. Root(-8, 3) = -2). An even degree is complex, so let
+      // `formatFloat` reject the NaN (fail closed, D6).
+      if (Number.isNaN(r) && Number.isInteger(nConst) && nConst % 2 !== 0 && xConst < 0)
+        return formatFloat(-Math.pow(-xConst, 1 / nConst));
+      return formatFloat(r);
+    }
+    // Odd integer degree: GPU has no `cbrt`, and `pow` is NaN for a negative
+    // base. Emit the sign-corrected form `sign(x)·|x|^(1/n)`.
+    if (nConst !== undefined && Number.isInteger(nConst) && nConst % 2 !== 0) {
+      const c = compile(x);
+      return `(sign(${c}) * pow(abs(${c}), ${formatFloat(1 / nConst)}))`;
+    }
     return `pow(${compile(x)}, 1.0 / ${compile(n)})`;
   },
 

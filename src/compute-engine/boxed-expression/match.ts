@@ -1091,21 +1091,42 @@ function matchArguments(
               const savedSubstitution = result!;
 
               while (j <= ops.length) {
-                // Attempt the match of remaining patterns against remaining ops. after considering
-                // the total capture by this seq.-wildcard for this iteration.
-                const capturedOps = ops.slice(0, j);
+                // Snapshot the FULL remaining ops: the recursive `matchRemaining`
+                // below consumes from this same shared array (`captureOps`
+                // splices it, single wildcards shift it), so a failed attempt
+                // must roll back *everything* it consumed — not just this
+                // sequence's own capture. Restoring only the sequence capture
+                // left the recursive attempt's consumption applied, silently
+                // dropping operands from the match.
+                const savedOps = [...ops];
 
-                result = matchRemaining(
-                  patterns.slice(nextAppPatternIndex),
-                  captureWildcard(argName, captureOps(j), savedSubstitution) ??
-                    savedSubstitution
+                // Capture `j` operands for this sequence. `null` means the
+                // capture *conflicts* with an existing binding for this
+                // (repeated) wildcard: this split fails — a different `j` may
+                // still produce a capture consistent with the prior binding,
+                // so treat it like a failed recursive match, not a success
+                // with the capture silently dropped.
+                const capture = captureWildcard(
+                  argName,
+                  captureOps(j),
+                  savedSubstitution
                 );
+
+                result =
+                  capture === null
+                    ? null
+                    : matchRemaining(
+                        patterns.slice(nextAppPatternIndex),
+                        capture
+                      );
 
                 // A complete overall match with this sequence capturing 'j' operands.
                 if (result) break;
 
-                // No match: reset the potential modified ops. array
-                ops.unshift(...capturedOps);
+                // No match: restore the shared ops array to its exact
+                // pre-attempt state.
+                ops.length = 0;
+                ops.push(...savedOps);
 
                 j++;
                 if (j >= ops.length) break;

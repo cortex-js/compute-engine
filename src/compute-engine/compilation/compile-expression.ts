@@ -147,7 +147,18 @@ export function compile<T extends string = 'javascript'>(
         ce.pushScope();
         try {
           if (vars && typeof vars === 'object') {
-            for (const [k, v] of Object.entries(vars)) ce.assign(k, v);
+            for (const [k, v] of Object.entries(vars)) {
+              // Declare a fresh binding in the just-pushed scope *before*
+              // assigning. `ce.assign` mutates the binding in whatever scope the
+              // symbol was declared in; when the expression already boxed the
+              // symbol in an outer/global scope, a bare `assign` would mutate
+              // that outer binding and `popScope` could not restore it —
+              // permanently leaking the argument value engine-wide. Declaring a
+              // local shadow first makes `assign` target this scope, so
+              // `popScope` fully restores the previous state.
+              ce.declare(k, 'number');
+              ce.assign(k, v);
+            }
           }
           return expr.evaluate().re;
         } finally {

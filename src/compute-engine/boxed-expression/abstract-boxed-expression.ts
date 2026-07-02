@@ -580,6 +580,17 @@ export abstract class _BoxedExpression implements Expression {
       }
     }
 
+    // Follow the *other* side's symbol binding, mirroring `BoxedSymbol.is`.
+    // Without this, `.is()` is asymmetric for expression-valued bindings:
+    // with `g := x²+1`, `g.is(x²+1)` is `true` (BoxedSymbol.is follows `g`'s
+    // value) but `(x²+1).is(g)` would bail at the free-variable check below.
+    // Recursing on `other.value` restores the documented symmetry.
+    if (other instanceof _BoxedExpression && isSymbol(other)) {
+      const otherVal = other.value;
+      if (otherVal && otherVal !== (other as unknown))
+        return this.is(otherVal, tolerance);
+    }
+
     // Numeric fallback only when there are no free variables
     if (this.freeVariables.length > 0) return false;
 

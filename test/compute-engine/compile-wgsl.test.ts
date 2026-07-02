@@ -32,10 +32,12 @@ describe('WGSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`inverseSqrt(x)`);
     });
 
-    it('should compile mod using % operator', () => {
+    it('should compile mod as a floored helper (interpreter Mod is floored)', () => {
+      // WGSL `%` is truncated; the interpreter's Mod is floored (D1), so the
+      // target emits `((a % b) + b) % b` to convert truncated → floored.
       const expr = ce.expr(['Mod', 'x', 'y']);
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`(x % y)`);
+      expect(code).toMatchInlineSnapshot(`(((x % y) + y) % y)`);
     });
   });
 

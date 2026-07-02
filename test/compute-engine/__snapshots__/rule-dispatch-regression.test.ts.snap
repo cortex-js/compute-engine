@@ -8,7 +8,7 @@ exports[`simplify: absolute value \\left|x\\right|\\cdot\\left|y\\right| 1`] = `
 
 exports[`simplify: absolute value |\\pi - 4| 1`] = `["Abs", ["Subtract", "Pi", 4]]`;
 
-exports[`simplify: absolute value |\\sin(x)| 1`] = `["Sin", ["Abs", "x"]]`;
+exports[`simplify: absolute value |\\sin(x)| 1`] = `["Abs", ["Sin", "x"]]`;
 
 exports[`simplify: absolute value |-3| 1`] = `3`;
 

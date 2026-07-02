@@ -164,7 +164,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Arccot: ([x], compile) => {
     if (x === null) throw new Error('Arccot: no argument');
     if (BaseCompiler.isComplexValued(x)) return `_SYS.cacot(${compile(x)})`;
-    return `Math.atan(1 / (${compile(x)}))`;
+    // `Math.atan(1/x)` returns the wrong branch for x < 0 (range (-π/2, 0)
+    // instead of the interpreter's (0, π)). `π/2 - atan(x)` is branch-free and
+    // gives the full (0, π) range for all real x.
+    return `(Math.PI / 2 - Math.atan(${compile(x)}))`;
   },
   Arcoth: ([x], compile) => {
     if (x === null) throw new Error('Arcoth: no argument');
@@ -365,8 +368,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     const bConst = tryGetConstant(base);
     const eConst = tryGetConstant(exp);
-    if (bConst !== undefined && eConst !== undefined)
-      return String(Math.pow(bConst, eConst));
+    if (bConst !== undefined && eConst !== undefined) {
+      const r = Math.pow(bConst, eConst);
+      // A NaN fold means the real-valued result does not exist (e.g. a negative
+      // base with a fractional exponent → complex). Fail closed (D6) instead of
+      // emitting a literal `NaN` program with `success: true`.
+      if (Number.isNaN(r))
+        throw new Error(
+          `Power(${bConst}, ${eConst}) has no real value; cannot compile to a real target`
+        );
+      return String(r);
+    }
     if (eConst === 0) return '1';
     if (eConst === 1) return compile(base);
     if (eConst === 2 && (isSymbol(base) || isNumber(base))) {
@@ -428,10 +440,29 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (exp === null) return `Math.sqrt(${compile(arg)})`;
     const aConst = tryGetConstant(arg);
     const nConst = tryGetConstant(exp);
-    if (aConst !== undefined && nConst !== undefined && nConst !== 0)
-      return String(Math.pow(aConst, 1 / nConst));
+    if (aConst !== undefined && nConst !== undefined && nConst !== 0) {
+      const r = Math.pow(aConst, 1 / nConst);
+      if (Number.isNaN(r)) {
+        // Negative base. An odd integer degree has a real root (the
+        // interpreter's convention, e.g. Root(-8, 3) = -2); an even degree is
+        // complex, so fail closed (D6).
+        if (Number.isInteger(nConst) && nConst % 2 !== 0 && aConst < 0)
+          return String(-Math.pow(-aConst, 1 / nConst));
+        throw new Error(
+          `Root(${aConst}, ${nConst}) has no real value; cannot compile to a real target`
+        );
+      }
+      return String(r);
+    }
     if (nConst === 2) return `Math.sqrt(${compile(arg)})`;
     if (nConst === 3) return `Math.cbrt(${compile(arg)})`;
+    // Odd integer degree: `Math.pow` is NaN for a negative base, but the real
+    // root exists. Emit the sign-corrected form `sign(x)·|x|^(1/n)`.
+    if (nConst !== undefined && Number.isInteger(nConst) && nConst % 2 !== 0)
+      return BaseCompiler.inlineExpression(
+        `(Math.sign(\${x}) * Math.pow(Math.abs(\${x}), ${1 / nConst}))`,
+        compile(arg)
+      );
     if (nConst !== undefined) return `Math.pow(${compile(arg)}, ${1 / nConst})`;
     return `Math.pow(${compile(arg)}, 1 / (${compile(exp)}))`;
   },
@@ -456,7 +487,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Round: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
-    return `Math.round(${compile(args[0])})`;
+    // The interpreter rounds half away from zero (Round(-2.5) = -3); JS
+    // `Math.round` rounds half toward +∞ (Round(-2.5) = -2). Reconstruct
+    // half-away as `sign(x)·round(|x|)`.
+    return BaseCompiler.inlineExpression(
+      '(Math.sign(${x}) * Math.round(Math.abs(${x})))',
+      compile(args[0])
+    );
   },
   Square: (args, compile) => {
     const arg = args[0];
@@ -501,7 +538,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.csqrt(${compile(args[0])})`;
     const c = tryGetConstant(args[0]);
-    if (c !== undefined) return String(Math.sqrt(c));
+    if (c !== undefined) {
+      const r = Math.sqrt(c);
+      // A negative constant has no real square root (interpreter returns a
+      // complex value). Fail closed (D6) rather than fold to a literal `NaN`.
+      if (Number.isNaN(r))
+        throw new Error(
+          `Sqrt(${c}) has no real value; cannot compile to a real target`
+        );
+      return String(r);
+    }
     return `Math.sqrt(${compile(args[0])})`;
   },
   Tan: (args, compile) => {
@@ -1781,6 +1827,11 @@ function compileBound(
  * When both bounds are constant integers, small ranges (<=UNROLL_LIMIT terms)
  * are unrolled into explicit additions/multiplications. Larger ranges or
  * symbolic bounds emit a while-loop wrapped in an IIFE.
+ *
+ * Multi-index forms — `Sum(body, Limits(i,…), Limits(j,…), …)` — are compiled
+ * as nested single-index sums (`Σ_i Σ_j body`), so every indexing-set clause is
+ * honored. (Previously only the first clause was read, leaving the trailing
+ * indices dangling in the generated code.)
  */
 function compileSumProduct(
   kind: 'Sum' | 'Product',
@@ -1790,14 +1841,39 @@ function compileSumProduct(
 ): string {
   if (!args[0]) throw new Error(`${kind}: no body`);
   if (!args[1]) throw new Error(`${kind}: no indexing set`);
+  return emitSumProduct(kind, args[0], args.slice(1), target);
+}
 
+/**
+ * Emit one indexing-set clause of a Sum/Product, recursing into the remaining
+ * clauses for the innermost body. The "term" accumulated by this clause is the
+ * body itself for the last clause, or the nested sum/product over the remaining
+ * clauses otherwise.
+ */
+function emitSumProduct(
+  kind: 'Sum' | 'Product',
+  body: Expression,
+  clauses: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): string {
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(
-    args[1]
+    clauses[0]
   );
+  const rest = clauses.slice(1);
   const isSum = kind === 'Sum';
   const op = isSum ? '+' : '*';
   const identity = isSum ? '0' : '1';
-  const bodyIsComplex = BaseCompiler.isComplexValued(args[0]);
+  // Complexity is a property of the innermost body — a nested inner sum of a
+  // complex body is itself complex, so this stays consistent at every level.
+  const bodyIsComplex = BaseCompiler.isComplexValued(body);
+
+  // Compile the term this clause accumulates, under a target that binds this
+  // clause's index. For the last clause that's the body; otherwise it's the
+  // nested sum/product over the remaining clauses.
+  const compileTerm = (innerTarget: CompileTarget<Expression>): string =>
+    rest.length > 0
+      ? emitSumProduct(kind, body, rest, innerTarget)
+      : BaseCompiler.compile(body, innerTarget);
 
   const bothConstant = lowerNum !== undefined && upperNum !== undefined;
 
@@ -1814,7 +1890,7 @@ function compileSumProduct(
           ...target,
           var: (id) => (id === index ? String(k) : target.var(id)),
         };
-        terms.push(`(${BaseCompiler.compile(args[0], innerTarget)})`);
+        terms.push(`(${compileTerm(innerTarget)})`);
       }
 
       if (!bodyIsComplex) {
@@ -1849,7 +1925,7 @@ function compileSumProduct(
   const lowerCode = compileBound(lowerExpr, lowerNum, target);
   const upperCode = compileBound(upperExpr, upperNum, target);
 
-  const bodyCode = BaseCompiler.compile(args[0], {
+  const bodyCode = compileTerm({
     ...target,
     var: (id) => (id === index ? index : target.var(id)),
   });

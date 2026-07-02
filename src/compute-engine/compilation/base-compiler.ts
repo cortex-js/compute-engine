@@ -68,7 +68,17 @@ export class BaseCompiler {
           throw new Error('Complex numbers are not supported by this target');
         return target.complex(expr.re, expr.im);
       }
-      return target.number(expr.re);
+      const code = target.number(expr.re);
+      // A negative numeric literal (e.g. `-2`) has a leading unary minus, so it
+      // must be parenthesized wherever a unary `Negate(...)` would be: when
+      // spliced as an operand that binds tighter than unary negation. Otherwise
+      // Python `Power(-2, x)` emits `-2 ** x`, which parses as `-(2 ** x)`
+      // (sign-flipped). Mirror the Negate operator's own `op[1] < prec` wrap.
+      if (expr.re < 0) {
+        const negPrec = target.operators?.('Negate')?.[1] ?? 14;
+        if (negPrec < prec) return `(${code})`;
+      }
+      return code;
     }
 
     // Is it a string?
@@ -177,10 +187,20 @@ export class BaseCompiler {
               // right-associative `a ** b ** c` (wrong grouping in Python,
               // where `**` is the only right-associative arithmetic operator).
               const rightAssoc = h === 'Power';
+              // `Subtract`/`Divide` are left-associative and *non*-associative:
+              // `a - (b - c) ≠ (a - b) - c`. So a *right* operand of equal
+              // precedence must be parenthesized — otherwise a non-canonical
+              // `Divide(a, Divide(b, c))` would emit `a / b / c` (= `(a/b)/c`,
+              // wrong grouping). `Add`/`Multiply` are associative, so their
+              // operands need no extra parens.
+              const leftAssocNonAssociative =
+                h === 'Subtract' || h === 'Divide';
               resultStr = args
                 .map((arg, i) => {
-                  const operandPrec =
-                    rightAssoc && i < args.length - 1 ? op[1] + 1 : op[1];
+                  let operandPrec = op[1];
+                  if (rightAssoc && i < args.length - 1) operandPrec = op[1] + 1;
+                  else if (leftAssocNonAssociative && i > 0)
+                    operandPrec = op[1] + 1;
                   return BaseCompiler.compile(arg, target, operandPrec);
                 })
                 .join(` ${op[0]} `);
@@ -844,6 +864,15 @@ export class BaseCompiler {
     target: CompileTarget<Expression>
   ): string {
     if (!args[0]) throw new Error('Sum/Product: no body');
+
+    // Multi-index Sum/Product (more than one indexing-set clause) is not
+    // representable in this generic single-index loop. Fail closed (D6) rather
+    // than silently drop the trailing clauses and emit code with a dangling
+    // index variable.
+    if (args.length > 2)
+      throw new Error(
+        `${h}: multi-index (${args.length - 1} indexing sets) is not supported by this target`
+      );
 
     const {
       index,

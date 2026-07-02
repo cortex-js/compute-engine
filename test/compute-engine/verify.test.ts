@@ -56,8 +56,10 @@ describe('VERIFY', () => {
     // These should not cause infinite recursion
     expect(ce.verify(ce.expr(['Equal', 'x', 0]))).toBe(undefined);
     expect(ce.verify(ce.expr(['Equal', 'x', 1]))).toBe(undefined);
-    // Different symbols are not equal (they represent different entities)
-    expect(ce.verify(ce.expr(['Equal', 'x', 'y']))).toBe(false);
+    // Two distinct *free* symbols are not provably unequal — they could be
+    // constrained equal by an assumption (`assume(x = y)`). Equality of
+    // unconstrained symbols is indeterminate (WP-2.4 / P0-30), not `false`.
+    expect(ce.verify(ce.expr(['Equal', 'x', 'y']))).toBe(undefined);
     // Same symbol is equal to itself
     expect(ce.verify(ce.expr(['Equal', 'x', 'x']))).toBe(true);
   });
@@ -67,8 +69,10 @@ describe('VERIFY', () => {
     // These should not cause infinite recursion
     expect(ce.verify(ce.expr(['NotEqual', 'x', 0]))).toBe(undefined);
     expect(ce.verify(ce.expr(['NotEqual', 'x', 1]))).toBe(undefined);
-    // Different symbols are not equal (so NotEqual is true)
-    expect(ce.verify(ce.expr(['NotEqual', 'x', 'y']))).toBe(true);
+    // Two distinct *free* symbols are not provably unequal (they may be
+    // constrained equal by an assumption), so `NotEqual(x, y)` is
+    // indeterminate (WP-2.4 / P0-30), not `true`.
+    expect(ce.verify(ce.expr(['NotEqual', 'x', 'y']))).toBe(undefined);
     // Same symbol is equal to itself (so NotEqual is false)
     expect(ce.verify(ce.expr(['NotEqual', 'x', 'x']))).toBe(false);
   });

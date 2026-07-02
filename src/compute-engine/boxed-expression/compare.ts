@@ -156,7 +156,12 @@ export function eq(
     const cmp = b.valueDefinition?.eq?.(a);
     if (cmp !== undefined) return cmp;
   }
-  if (isSymbol(a) && isSymbol(b)) return a.symbol === b.symbol;
+  // Two symbols with the same name are equal. Distinct names, however, are
+  // NOT a definitive `false`: the symbols may be constrained equal by an
+  // assumption (e.g. `assume(a = b)`), or be entirely free (indeterminate).
+  // Fall through to the assumptions-DB consult below rather than deciding
+  // from the names alone.
+  if (isSymbol(a) && isSymbol(b) && a.symbol === b.symbol) return true;
 
   const ce = a.engine;
 

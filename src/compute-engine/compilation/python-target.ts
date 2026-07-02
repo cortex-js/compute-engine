@@ -9,6 +9,7 @@ import type {
   CompilationResult,
 } from './types';
 import { BaseCompiler } from './base-compiler';
+import { tryGetConstant } from './constant-folding';
 
 /**
  * Python operator mappings
@@ -133,7 +134,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Inverse trigonometric (reciprocal)
   Arccot: ([x], compile) => {
     if (x === null) throw new Error('Arccot: no argument');
-    return `np.arctan(1 / (${compile(x)}))`;
+    // `np.arctan(1/x)` returns the wrong branch for x < 0. `π/2 - arctan(x)` is
+    // branch-free and matches the interpreter's (0, π) range for all real x.
+    return `(np.pi / 2 - np.arctan(${compile(x)}))`;
   },
   Arccsc: ([x], compile) => {
     if (x === null) throw new Error('Arccsc: no argument');
@@ -223,7 +226,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Root: (args, compile) => {
     // Root(x, n) = x^(1/n)
     if (args.length !== 2) return 'np.power';
-    return `np.power(${compile(args[0])}, 1.0 / ${compile(args[1])})`;
+    const [x, n] = args;
+    const nConst = tryGetConstant(n);
+    // Odd integer degree: `np.power` is NaN for a negative base, but the real
+    // root exists (interpreter convention, e.g. Root(-8, 3) = -2). Emit the
+    // sign-corrected form `sign(x)·|x|^(1/n)`.
+    if (nConst !== undefined && Number.isInteger(nConst) && nConst % 2 !== 0) {
+      const c = compile(x);
+      return `(np.sign(${c}) * np.power(np.abs(${c}), 1.0 / ${compile(n)}))`;
+    }
+    return `np.power(${compile(x)}, 1.0 / ${compile(n)})`;
   },
 
   // Rounding and absolute value
@@ -235,16 +247,32 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Sign: 'np.sign',
   Floor: 'np.floor',
   Ceil: 'np.ceil',
-  Round: 'np.round',
+  // The interpreter rounds half away from zero (Round(-2.5) = -3, Round(2.5) =
+  // 3); `np.round` uses banker's rounding (Round(2.5) = 2). Reconstruct
+  // half-away as `sign(x)·floor(|x| + 0.5)`.
+  Round: ([x], compile) => {
+    if (x === null) throw new Error('Round: no argument');
+    const c = compile(x);
+    return `(np.sign(${c}) * np.floor(np.abs(${c}) + 0.5))`;
+  },
   Truncate: 'np.trunc',
 
   // Min/Max
   Min: 'np.minimum',
   Max: 'np.maximum',
 
-  // Modulo
+  // Modulo. `np.mod` is floored (matches the interpreter and D1). `Remainder`
+  // uses the interpreter's truncated/round-to-nearest-quotient semantics, NOT
+  // `np.remainder` (which is a floored modulo): mirror the JS target's
+  // `a - b·round(a/b)`.
   Mod: 'np.mod',
-  Remainder: 'np.remainder',
+  Remainder: ([a, b], compile) => {
+    if (a === null || b === null)
+      throw new Error('Remainder: missing argument');
+    const ca = compile(a);
+    const cb = compile(b);
+    return `(${ca} - ${cb} * np.round(${ca} / ${cb}))`;
+  },
 
   // Complex numbers
   Real: 'np.real',
