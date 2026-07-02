@@ -45,6 +45,17 @@ export function pushEvalContext(
 
 export function popEvalContext(ce: IComputeEngine): void {
   ce._evalContextStack.pop();
+
+  // Popping an eval context reverts the active assumptions and local
+  // declarations to the enclosing context. Per-expression caches keyed on
+  // `ce._generation` (e.g. `BoxedFunction.sgn`/`.type`) would otherwise keep
+  // returning values computed under the popped scope's assumptions — a stale
+  // read on any expression held across the scope. `assume()`/`forget()` bump
+  // the generation on the way in, but the revert on the way out is silent, so
+  // bump here to invalidate those caches. (A matching bump on push is not
+  // needed: `pushEvalContext` copies the current assumptions unchanged, and any
+  // assumption added inside the scope goes through `assume()`, which bumps.)
+  ce._generation += 1;
 }
 
 export function inScope<T>(

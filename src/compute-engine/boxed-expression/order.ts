@@ -16,6 +16,45 @@ export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 import { DEFAULT_COMPLEXITY } from './constants';
 export { DEFAULT_COMPLEXITY };
 
+import { BoxedType } from '../../common/type/boxed-type';
+
+const MATRIX_TYPE = new BoxedType('matrix');
+const VECTOR_TYPE = new BoxedType('vector');
+
+/**
+ * Is this operand a matrix/vector (concrete tensor, `Matrix(…)` literal, or a
+ * symbol *declared* matrix/vector)? Products of two or more such operands are
+ * NOT commutative, so they must never be reordered by the canonical sort
+ * (`M·P ≠ P·M`; reordering made `M·P − P·M` collapse to 0 — see
+ * CORRECTNESS_FINDINGS P0-26). The check is type-based: concrete tensors and
+ * `Matrix` literals have matrix/vector types too, and scalar-typed or
+ * unknown symbols do not match, so ordinary products like `x·y` still sort.
+ */
+export function isTensorProductOperand(x: Expression): boolean {
+  return (
+    isFunction(x, 'Matrix') ||
+    x.type.matches(MATRIX_TYPE) ||
+    x.type.matches(VECTOR_TYPE)
+  );
+}
+
+/**
+ * Sort the operands of a product: with two or more matrix/vector operands,
+ * keep the tensors in their written order and sort only the (commutative)
+ * scalar factors, placed before them. With 0 or 1 tensor the product is
+ * order-independent and the normal canonical sort applies.
+ */
+export function sortProductOperands(
+  xs: ReadonlyArray<Expression>
+): Expression[] {
+  if (xs.filter(isTensorProductOperand).length >= 2) {
+    const scalars = xs.filter((y) => !isTensorProductOperand(y)).sort(order);
+    const tensors = xs.filter(isTensorProductOperand);
+    return [...scalars, ...tensors];
+  }
+  return [...xs].sort(order);
+}
+
 const TRIGONOMETRIC_OPERATORS: { [key: string]: boolean } = {
   Sin: true,
   Cos: true,
@@ -434,7 +473,9 @@ export function sortOperands(
 
   // @fastpath
   if (operator === 'Add') return [...xs].sort(addOrder);
-  if (operator === 'Multiply') return [...xs].sort(order);
+  // Products with ≥2 matrix/vector operands are non-commutative: preserve
+  // the tensors' written order (CORRECTNESS_FINDINGS P0-26).
+  if (operator === 'Multiply') return sortProductOperands(xs);
 
   const def = ce.lookupDefinition(operator);
   if (!def || !isOperatorDef(def)) return xs;

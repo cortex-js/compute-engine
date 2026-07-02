@@ -333,6 +333,29 @@ function withGuardDigits(guard: number, fn: () => BigNum): BigNum {
 const SPECIAL_FN_GUARD = 24;
 
 /**
+ * Above this exact positive integer (or half-integer) argument, computing
+ * n! via a counting loop of bigint multiplications is too slow — and the
+ * result (an astronomically large exact integer) isn't any more useful than
+ * the general Stirling-series float anyway. Fall through to the
+ * precision-scaled, magnitude-independent general path instead of grinding.
+ * (`checkDeadline` calls in the loops below are a backstop for whatever
+ * slips under this threshold on a slow host.)
+ * See WP-2.11 / EX-14: `Gamma(1e300).N()`, `GammaLn(1e300).N()`, and
+ * `Gamma(1e7).N()` at high precision all hung in these loops.
+ */
+const MAX_EXACT_FACTORIAL_N = 20_000;
+
+/**
+ * Above this even, positive Zeta argument, the exact closed form (which
+ * needs the Bernoulli number B_s — itself an O(k²)-ish computation in the
+ * Bernoulli index k = s/2) is too slow. Beyond the cap, `zetaCore` falls
+ * through to the general Cohen–Villegas–Zagier series (precision-scaled,
+ * magnitude-independent). Also used as the magnitude cutoff for the
+ * trivial-zero shortcut on huge negative even integers (see `zetaCore`).
+ */
+const MAX_EXACT_ZETA_EVEN_N = 500;
+
+/**
  * Bignum log-Gamma via Stirling asymptotic series with runtime-computed
  * Bernoulli numbers.  Precision scales with BigDecimal.precision.
  *
@@ -359,13 +382,21 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
       .sub(gammalnCore(ce, BigDecimal.ONE.sub(z)));
   }
 
-  // Exact: positive integer z -> ln((z-1)!)
+  // Exact: positive integer z -> ln((z-1)!). Beyond MAX_EXACT_FACTORIAL_N,
+  // skip the O(n) factorial loop and fall through to the general Stirling
+  // path below (checkDeadline is a backstop under the threshold).
   if (z.isInteger() && z.isPositive()) {
     const n = z.toNumber();
     if (n <= 1) return BigDecimal.ZERO;
-    let fact = 1n;
-    for (let i = 2; i < n; i++) fact *= BigInt(i);
-    return new BigDecimal(fact.toString()).ln();
+    if (n <= MAX_EXACT_FACTORIAL_N) {
+      let fact = 1n;
+      let steps = 0;
+      for (let i = 2; i < n; i++) {
+        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+        fact *= BigInt(i);
+      }
+      return new BigDecimal(fact.toString()).ln();
+    }
   }
 
   // Exact: half-integer z = n + 1/2 -> ln((2n)! * sqrt(pi) / (4^n * n!))
@@ -376,16 +407,25 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
       // Gamma(1/2) = sqrt(pi), so ln(Gamma(1/2)) = ln(sqrt(pi)) = ln(pi)/2
       return BigDecimal.PI.ln().div(BigDecimal.TWO);
     }
-    let fact2n = 1n;
-    for (let i = 2; i <= 2 * n; i++) fact2n *= BigInt(i);
-    let factN = 1n;
-    for (let i = 2; i <= n; i++) factN *= BigInt(i);
-    const fourN = 4n ** BigInt(n);
-    return new BigDecimal(fact2n.toString())
-      .ln()
-      .add(BigDecimal.PI.ln().div(BigDecimal.TWO))
-      .sub(new BigDecimal(fourN.toString()).ln())
-      .sub(new BigDecimal(factN.toString()).ln());
+    if (n <= MAX_EXACT_FACTORIAL_N) {
+      let steps = 0;
+      let fact2n = 1n;
+      for (let i = 2; i <= 2 * n; i++) {
+        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+        fact2n *= BigInt(i);
+      }
+      let factN = 1n;
+      for (let i = 2; i <= n; i++) {
+        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+        factN *= BigInt(i);
+      }
+      const fourN = 4n ** BigInt(n);
+      return new BigDecimal(fact2n.toString())
+        .ln()
+        .add(BigDecimal.PI.ln().div(BigDecimal.TWO))
+        .sub(new BigDecimal(fourN.toString()).ln())
+        .sub(new BigDecimal(factN.toString()).ln());
+    }
   }
 
   // General: Stirling series with upward shift.
@@ -467,12 +507,19 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
  * bigGamma goes through exp(ln(...)) so the result is a full-precision float.
  */
 export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
-  // Exact: positive integer → (z-1)! (precision-independent, skip the guard).
+  // Exact: positive integer → (z-1)! (precision-independent, skip the
+  // guard). Beyond MAX_EXACT_FACTORIAL_N, fall through to the general path.
   if (z.isInteger() && z.isPositive()) {
     const n = z.toNumber();
-    let fact = 1n;
-    for (let i = 2; i < n; i++) fact *= BigInt(i);
-    return new BigDecimal(fact.toString());
+    if (n <= MAX_EXACT_FACTORIAL_N) {
+      let fact = 1n;
+      let steps = 0;
+      for (let i = 2; i < n; i++) {
+        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+        fact *= BigInt(i);
+      }
+      return new BigDecimal(fact.toString());
+    }
   }
   return withGuardDigits(SPECIAL_FN_GUARD, () => gammaCore(ce, z));
 }
@@ -513,7 +560,10 @@ function absBigint(x: bigint): bigint {
  * Since all odd Bernoulli numbers except B_1 = -1/2 are zero, we compute
  * all B_k (k=0,1,2,...,2n) but only return the even ones.
  */
-export function computeBernoulliEven(n: number): [bigint, bigint][] {
+export function computeBernoulliEven(
+  n: number,
+  deadline?: number
+): [bigint, bigint][] {
   // Store all Bernoulli numbers B_0..B_{2n} as [num, den] rationals
   const all: [bigint, bigint][] = [
     [1n, 1n], // B_0 = 1
@@ -521,6 +571,7 @@ export function computeBernoulliEven(n: number): [bigint, bigint][] {
   ];
 
   for (let m = 2; m <= 2 * n; m++) {
+    if ((m & 0xff) === 0) checkDeadline(deadline);
     // Odd m > 1: B_m = 0
     if (m % 2 === 1) {
       all.push([0n, 1n]);
@@ -578,10 +629,10 @@ function getBernoulliRationals(
 ): [bigint, bigint][] {
   return ce._cache<[bigint, bigint][]>(
     'bernoulli-even-rationals',
-    () => computeBernoulliEven(minTerms),
+    () => computeBernoulliEven(minTerms, ce._deadline),
     (existing) => {
       if (existing.length >= minTerms) return existing;
-      return computeBernoulliEven(minTerms);
+      return computeBernoulliEven(minTerms, ce._deadline);
     }
   );
 }
@@ -834,9 +885,13 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
   if (s.isZero()) return BigDecimal.HALF.neg();
 
   // Special values for positive even integers: ζ(2k) = (-1)^{k+1} B_{2k} (2π)^{2k} / (2(2k)!)
+  // Capped at MAX_EXACT_ZETA_EVEN_N: the Bernoulli-number computation is
+  // O(k²)-ish in the Bernoulli index k = s/2, so this closed form is only
+  // worth it for modest s — beyond the cap the general series below (which
+  // is precision-scaled and magnitude-independent) computes the same value.
   if (s.isInteger() && s.isPositive()) {
     const sn = s.toNumber();
-    if (sn % 2 === 0 && sn >= 2) {
+    if (sn % 2 === 0 && sn >= 2 && sn <= MAX_EXACT_ZETA_EVEN_N) {
       const k = sn / 2;
       const bernoulli = getBernoulliRationals(ce, k);
       const [bNum, bDen] = bernoulli[k - 1];
@@ -845,9 +900,29 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
       );
       const twoPi = pi.mul(2);
       let factVal: BigNum = BigDecimal.ONE;
-      for (let i = 2; i <= sn; i++) factVal = factVal.mul(i);
+      let steps = 0;
+      for (let i = 2; i <= sn; i++) {
+        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+        factVal = factVal.mul(i);
+      }
       return bernAbs.mul(twoPi.pow(sn)).div(factVal.mul(2));
     }
+  }
+
+  // Trivial zeros ζ(-2n) = 0 for huge negative even integers. Below the cap
+  // the functional equation right below computes this exactly (its
+  // sin(πs/2) factor is exactly 0), but for huge |s| that 0 meets an
+  // infinite Γ(1-s) (n past MAX_EXACT_FACTORIAL_N — see bigGamma) and the
+  // 0·∞ product rounds to NaN instead of the exact zero. Short-circuit with
+  // an exact bigint parity check (not `.toNumber()`, which loses precision
+  // at this magnitude).
+  if (
+    s.isNegative() &&
+    s.isInteger() &&
+    Math.abs(s.toNumber()) > MAX_EXACT_ZETA_EVEN_N &&
+    s.mod(BigDecimal.TWO).isZero()
+  ) {
+    return BigDecimal.ZERO;
   }
 
   // Functional equation for s < 0:

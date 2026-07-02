@@ -19,7 +19,7 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards';
-import { numericTypeHandler } from './type-handlers';
+import { numericTypeHandler, elementaryFunctionType } from './type-handlers';
 import { getUnitScale } from './unit-data';
 import {
   bigFresnelC,
@@ -158,8 +158,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q2257242',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> finite_real',
-      type: (ops) => numericTypeHandler(ops),
+      signature: '(number) -> number',
+      type: (ops) => elementaryFunctionType('Arctan', ops),
       sgn: ([x]) => trigSign('Arctan', x),
       evaluate: ([x], { numericApproximation, engine }) => {
         // arctan(±∞) = ±π/2 (the horizontal asymptotes). Needed for improper
@@ -517,7 +517,7 @@ function trigFunction(
     description,
     broadcastable: true,
     signature: '(number) -> number',
-    type: (ops) => numericTypeHandler(ops),
+    type: (ops) => elementaryFunctionType(operator, ops),
     sgn: ([x]) => trigSign(operator, x),
     canonical: (ops, { engine: ce }) => {
       if (ops.length === 1) {

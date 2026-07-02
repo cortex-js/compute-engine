@@ -149,9 +149,11 @@ describe('rule purpose: existing whitelist behaviors are unchanged', () => {
     expect(ce.parse('2\\cdot 2^x').simplify().latex).toBe('2^{x+1}');
   });
 
-  it('ln rule: ln(x^6) -> 6 ln(x)', () => {
+  it('ln rule: ln(x^6) -> 6 ln(|x|)', () => {
+    // Even exponent: the sound form is 6·ln|x| (6·ln(x) is wrong for x < 0).
+    // SYM P0-2 / D4.
     const ce = new ComputeEngine();
-    expect(ce.parse('\\ln(x^6)').simplify().latex).toBe('6\\ln(x)');
+    expect(ce.parse('\\ln(x^6)').simplify().latex).toBe('6\\ln(\\vert x\\vert)');
   });
 
   it('abs rule: |xy| - |x||y| -> 0', () => {

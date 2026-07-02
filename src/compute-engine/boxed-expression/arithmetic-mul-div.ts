@@ -1,4 +1,5 @@
 import { isSubtype } from '../../common/type/subtype';
+import { BoxedType } from '../../common/type/boxed-type';
 
 import type {
   Expression,
@@ -25,7 +26,7 @@ import {
 import { SMALL_INTEGER } from '../numerics/numeric';
 import { bigint } from '../numerics/bigint';
 
-import { order } from './order';
+import { order, sortProductOperands } from './order';
 import { asRadical } from './arithmetic-power';
 import { flatten } from './flatten';
 import { asRational, asSmallInteger } from './numerics';
@@ -585,7 +586,8 @@ function termsAsExpression(
 ): Expression {
   let result = terms.map(({ terms, exponent }) => {
     const t = flatten(terms, 'Multiply');
-    const base = t.length <= 1 ? t[0] : ce._fn('Multiply', [...t].sort(order));
+    const base =
+      t.length <= 1 ? t[0] : ce._fn('Multiply', sortProductOperands(t));
     return isOne(exponent) ? base : base.pow(ce.number(exponent));
   });
 
@@ -593,7 +595,7 @@ function termsAsExpression(
   if (result.length === 0) return ce.One;
   if (result.length === 1) return result[0];
 
-  return ce._fn('Multiply', result.sort(order));
+  return ce._fn('Multiply', sortProductOperands(result));
 }
 
 //
@@ -1095,29 +1097,12 @@ export function canonicalMultiply(
   if (ys.length === 0) return ce.number(1);
   if (ys.length === 1) return ys[0];
 
-  // Matrix product is not commutative. When two or more operands are tensors
-  // (vectors/matrices), keep them in their written order and sort only the
-  // (commutative) scalar factors around them — otherwise the `order` sort would
-  // collapse `A·v` and `v·A` (different ranks sort differently) into the same
-  // expression. With 0 or 1 tensor the product is order-independent, so the
-  // normal canonical sort applies.
-  if (ys.filter(isTensorOperand).length >= 2) {
-    const scalars = ys.filter((y) => !isTensorOperand(y)).sort(order);
-    const tensors = ys.filter(isTensorOperand);
-    return ce._fn('Multiply', [...scalars, ...tensors]);
-  }
-  return ce._fn('Multiply', [...ys].sort(order));
+  return ce._fn('Multiply', sortProductOperands(ys));
 }
 
-/**
- * Whether `x` is a concrete tensor operand (a vector/matrix literal or a
- * `Matrix(...)` wrapper) — i.e. something that participates in matrix-product
- * semantics rather than scalar multiplication. Symbolic operands of unknown
- * shape are intentionally excluded.
- */
-function isTensorOperand(x: Expression): boolean {
-  return isTensor(x) || isFunction(x, 'Matrix');
-}
+// Tensor-aware product ordering (matrix products are non-commutative) is
+// shared with the serializer and `negateProduct`: see `sortProductOperands`
+// and `isTensorProductOperand` in `./order` (CORRECTNESS_FINDINGS P0-26).
 
 function unnegate(op: Expression): [Expression, sign: number] {
   let sign = 1;

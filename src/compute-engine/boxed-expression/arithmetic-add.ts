@@ -148,7 +148,15 @@ export function canonicalAdd(
 export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   if (args.length === 0) return 'finite_integer'; // = 0
   if (args.length === 1) return args[0].type;
-  return widen(...args.map((x) => x.type.type));
+  if (args.some((x) => x.isNaN)) return 'number';
+  // (+∞) + (−∞) = NaN: two or more non-finite operands can cancel to NaN.
+  if (args.filter((x) => x.isFinite === false).length >= 2) return 'number';
+  const t = widen(...args.map((x) => x.type.type));
+  // `imaginary + imaginary` is not closed under addition: the imaginary parts
+  // can cancel to 0, which is *real* (P0-13). 0 is `finite_integer` and the
+  // non-cancelling sums stay `imaginary`, both covered by `finite_complex`.
+  if (t === 'imaginary') return 'finite_complex';
+  return t;
 }
 
 export function add(...xs: ReadonlyArray<Expression>): Expression {

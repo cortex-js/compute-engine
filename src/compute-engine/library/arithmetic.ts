@@ -84,7 +84,7 @@ import {
 } from '../boxed-expression/arithmetic-power';
 import { parseType } from '../../common/type/parse';
 import { widen } from '../../common/type/utils';
-import { numericTypeHandler } from './type-handlers';
+import { numericTypeHandler, elementaryFunctionType } from './type-handlers';
 import {
   isQuantity,
   quantityAdd,
@@ -320,8 +320,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: ([num, den]) => {
         if (den.isSame(1)) return num.type;
         if (den.isNaN || num.isNaN) return 'number';
-        if (den.isFinite === false || num.isFinite === false)
-          return 'non_finite_number';
+        // Division by zero: k/0 = ~oo, 0/0 = NaN — indeterminate.
+        if (den.isSame(0)) return 'number';
+        // A non-finite operand: `x/±∞ = 0`, `±∞/finite = ±∞`, but `∞/∞`,
+        // `∞/i`, `i/∞` give NaN/~oo. Widen to the top type (the old
+        // `non_finite_number` mis-typed `∞/i` and `∞/∞`).
+        if (den.isFinite === false || num.isFinite === false) return 'number';
         if (den.isInteger && num.isInteger) return 'finite_rational';
         if (den.isReal && num.isReal) return 'finite_real';
         return 'finite_number';
@@ -856,7 +860,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number, base: number?) -> number',
-      type: ([x]) => numericTypeHandler([x]),
+      type: (ops) => elementaryFunctionType('Ln', ops),
       sgn: ([x]) => lnSign(x),
       // @fastpath: this doesn't get called. See makeNumericFunction()
       evaluate: ([z], { numericApproximation, engine }) => {
@@ -889,7 +893,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number, base: number?) -> number',
-      type: ([x]) => numericTypeHandler([x]),
+      type: (ops) => elementaryFunctionType('Log', ops),
 
       sgn: ([x, base]) => {
         if (!base) return lnSign(x);
@@ -980,7 +984,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number, number) -> number',
-      type: ([a, b]) => widen(a.type.type, b.type.type),
+      type: ([a, b]) => {
+        if (!a || !b || a.isNaN || b.isNaN) return 'number';
+        // A floored remainder is defined only for a finite real dividend and a
+        // finite, non-zero real modulus. A zero/complex/infinite modulus, or an
+        // infinite dividend, yields NaN (the old `widen(...)` claimed e.g.
+        // `finite_rational` for `Mod(1/2, 0)` and `imaginary` for `Mod(i, i)`).
+        if (b.isSame(0)) return 'number';
+        if (
+          a.isReal === true &&
+          b.isReal === true &&
+          a.isFinite === true &&
+          b.isFinite === true
+        ) {
+          if (a.isInteger && b.isInteger) return 'finite_integer';
+          if (a.isRational && b.isRational) return 'finite_rational';
+          return 'finite_real';
+        }
+        return 'number';
+      },
       sgn: (ops) => {
         const n = ops[1]; //base of Mod
         if (n === undefined || n.isReal == false) return undefined;
@@ -1070,7 +1092,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.length === 0) return 'finite_integer'; // = 1
         if (ops.length === 1) return ops[0].type;
         if (ops.some((x) => x.isNaN)) return 'number';
-        if (ops.some((x) => x.isFinite === false)) return 'non_finite_number';
+        if (ops.some((x) => x.isFinite === false)) {
+          // 0 · ±∞ = NaN (indeterminate).
+          if (ops.some((x) => x.isSame(0))) return 'number';
+          // real · ±∞ = ±∞ (a non-finite real); a non-real factor (i, complex)
+          // with ∞ gives ~oo or NaN, so only claim `non_finite_number` when
+          // every operand is provably real.
+          if (ops.every((x) => x.isReal === true)) return 'non_finite_number';
+          return 'number';
+        }
+        // From here every operand is finite (no `isFinite === false`).
         if (ops.every((x) => x.isInteger)) return 'finite_integer';
         if (ops.every((x) => x.isReal)) return 'finite_real';
         if (ops.every((x) => x.isRational)) return 'finite_rational';
@@ -1188,11 +1219,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number) -> number',
       type: ([base, exp]) => {
         if (base.isNaN || exp.isNaN) return 'number';
+        // A non-finite base or exponent can produce ±∞ *or* NaN — `0^∞`,
+        // `∞^0`, `1^∞`, `i^∞`, `∞^i` are all indeterminate. Only a
+        // *non-negative real* base raised to a *positive finite real* exponent
+        // is guaranteed non-finite (`(+∞)^2 = +∞`); everything else widens to
+        // the top type (the old `non_finite_number` ignored the NaN forms).
         // `=== false` (not `!`): a symbolic operand has `isFinite ===
         // undefined`, which must not be treated as non-finite.
-        if (base.isFinite === false || exp.isFinite === false)
-          return 'non_finite_number';
-        if (base.isInteger && exp.isInteger) return 'finite_integer';
+        if (base.isFinite === false || exp.isFinite === false) {
+          if (
+            base.isFinite === false &&
+            base.isNonNegative === true &&
+            exp.isFinite === true &&
+            exp.isPositive === true
+          )
+            return 'non_finite_number';
+          return 'number';
+        }
+        // `0` raised to a non-positive power is a pole: `0^0` is indeterminate
+        // and `0^-k = ±∞` (P0-11: `0^(−0.5) = +∞`).
+        if (base.isSame(0) && exp.isPositive !== true) return 'number';
+        // `integer ^ (non-negative integer)` stays an integer; a possibly
+        // *negative* integer exponent yields a (non-integer) rational
+        // (P0-11: `2^-2 = 1/4`).
+        if (base.isInteger && exp.isInteger)
+          return exp.isNonNegative === true ? 'finite_integer' : 'finite_rational';
         if (base.isRational && exp.isInteger) return 'finite_rational';
         // A real result needs a non-negative base or an integer exponent;
         // otherwise the result may be complex (e.g. (−2)^0.5).
@@ -1328,13 +1379,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number) -> number',
       type: ([base, exp]) => {
         if (base.isNaN || exp.isNaN) return 'number';
-        if (base.isFinite === false || exp.isFinite === false)
-          return 'non_finite_number';
-        if (exp.isSame(0)) return 'finite_integer';
+        // Root(x, n) = x^(1/n). A non-finite base or index makes the result
+        // indeterminate: Root(±∞, n) ∈ {0, ±∞, complex}, Root(x, ±∞) = x^0
+        // (often 1 but 0^0/∞^0 are NaN). Widen to the top type.
+        if (base.isFinite === false || exp.isFinite === false) return 'number';
+        // Root(x, 0) = x^(1/0): a pole (the old `finite_integer` was wrong —
+        // Root(2,0), Root(0,0), Root(−2,0) all evaluate to NaN).
+        if (exp.isSame(0)) return 'number';
         if (exp.isSame(1)) return base.type;
+        // Root(0, n): 0 for n>0, a pole (±∞) for n≤0, NaN for a complex index.
+        if (base.isSame(0))
+          return exp.isPositive === true ? 'finite_integer' : 'number';
         if (base.isReal && exp.isReal) {
+          // A positive base always gives a positive real root.
           if (base.isPositive === true) return 'finite_real';
-          return 'finite_number';
+          // A negative real base: a positive index yields a finite (real or
+          // complex) value; a non-positive index can numericize to NaN in the
+          // current evaluate path (e.g. Root(−2,−2)), so widen to `number`.
+          if (exp.isPositive === true) return 'finite_number';
+          return 'number';
         }
         return 'finite_number';
       },
@@ -1497,7 +1560,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: ([x]) => {
         if (x.isNaN) return 'number';
-        if (x.isFinite === false) return 'non_finite_number';
+        if (x.isFinite === false) {
+          // √(−∞) = i·∞ = ~oo (complex infinity), not a real ±∞.
+          if (x.isNegative === true) return 'complex';
+          if (x.isNonNegative === true) return 'non_finite_number';
+          return 'number';
+        }
         if (x.isReal) return x.isNegative ? 'complex' : 'finite_real';
         return 'finite_number';
       },

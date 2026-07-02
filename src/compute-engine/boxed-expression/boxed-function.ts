@@ -75,7 +75,11 @@ import {
 import { cachedValue, CachedValue } from './cache';
 import { apply, lookup } from '../function-utils';
 import { checkDeadline } from '../../common/interruptible';
-import { applyPoleOverride, onBranchCut } from '../function-properties';
+import {
+  applyPoleOverride,
+  isEligibleRealRewrite,
+  onBranchCut,
+} from '../function-properties';
 
 /** When `materialization` is true, display 10 items if the collection is
  * infinite, otherwise 5 from the head and 5 from the tail
@@ -930,18 +934,36 @@ export class BoxedFunction
         if (!base) return exp; // natural log: ln(e^x) = x
         return exp.div(base.ln()); // log_c(e^x) = x / ln(c)
       }
-      // ln(b^n) = n·ln(b) only when b is off Ln's branch cut. On the negative
-      // real axis the principal values differ by a multiple of 2πi (e.g. for
-      // b < 0, ln(b²) = 2·ln|b| ≠ 2·ln(b)); leave it symbolic there so the
-      // guarded simplify-log rule can pick the correct form (ROADMAP 7a).
-      if (b.isNonNegative === true || !onBranchCut(this.engine, 'Ln', b))
+      // ln(bⁿ) → n·ln(b) is unconditionally sound when b ≥ 0.
+      if (b.isNonNegative === true) return exp.mul(b.ln(base));
+      // ln(b^{2k}) → 2k·ln(|b|) — sound for every real b (SYM P0-2); this was
+      // the fail-open bug (`2·ln(b)` instead of `2·ln|b|`). Independent of the
+      // branch cut. Requires a real-eligible base (bail on a declared-complex
+      // one, SYM P0-4 / D4).
+      if (exp.isEven === true && isEligibleRealRewrite(b))
+        return exp.mul(this.engine._fn('Abs', [b]).ln(base));
+      // ln(bⁿ) → n·ln(b) for a non-even exponent: the documented generic-real
+      // convention (D4) — fire for a real-eligible base unless it is provably on
+      // Ln's branch cut (the negative real axis, where the principal values
+      // differ by a multiple of 2πi, e.g. ln(b³) = 3ln(b) is wrong at b = -3).
+      // Three-valued (D3): `onBranchCut !== true` keeps the convention on
+      // unknown-sign bases while blocking provably-negative ones; the
+      // eligibility gate blocks a declared-complex base (SYM P0-4).
+      if (
+        isEligibleRealRewrite(b) &&
+        onBranchCut(this.engine, 'Ln', b) !== true
+      )
         return exp.mul(b.ln(base));
     }
 
-    // ln_c(a^(1/b)) = ln_c(root(a, b)) = 1/b ln_c(a) — only off the cut.
+    // ln_c(a^(1/b)) = ln_c(root(a, b)) = 1/b ln_c(a) — real-eligible base, not
+    // provably on the cut (D3/D4 generic-real convention).
     if (this.operator === 'Root') {
       const [a, b] = this.ops;
-      if (a.isNonNegative === true || !onBranchCut(this.engine, 'Ln', a))
+      if (
+        a.isNonNegative === true ||
+        (isEligibleRealRewrite(a) && onBranchCut(this.engine, 'Ln', a) !== true)
+      )
         return a.ln(base).div(b);
     }
 
@@ -949,13 +971,20 @@ export class BoxedFunction
     // principal branch, so ln(√a) and ½ln(a) agree even for a < 0).
     if (this.operator === 'Sqrt') return this.op1.ln(base).div(2);
 
-    // ln_c(a/b) = ln_c(a) - ln_c(b) — only when neither operand is on the cut.
+    // ln_c(a/b) = ln_c(a) - ln_c(b) — both operands real-eligible and not
+    // provably on the cut (D3/D4 generic-real convention). (Unconstrained
+    // operands round-trip through the ln-combine rule, so this leaves `ln(x/y)`
+    // unchanged; it drives `ln(1/x) → -ln(x)`.)
     if (this.operator === 'Divide') {
       const num = this.op1;
       const den = this.op2;
       if (
-        (num.isNonNegative === true || !onBranchCut(this.engine, 'Ln', num)) &&
-        (den.isNonNegative === true || !onBranchCut(this.engine, 'Ln', den))
+        (num.isNonNegative === true ||
+          (isEligibleRealRewrite(num) &&
+            onBranchCut(this.engine, 'Ln', num) !== true)) &&
+        (den.isNonNegative === true ||
+          (isEligibleRealRewrite(den) &&
+            onBranchCut(this.engine, 'Ln', den) !== true))
       )
         return num.ln(base).sub(den.ln(base));
     }

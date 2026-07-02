@@ -45,6 +45,54 @@
 
 ### Resolved Issues
 
+- **Type inference no longer over-claims — `Element`, `isInteger`, `isReal`
+  and friends answer soundly.** A family of type-system fixes: membership
+  checks on symbols with bounded types (`integer<0..10>`) no longer *throw*;
+  `Element(r^s, \mathbb{Z})` is no longer `True` for integer `r, s` (`r^s`
+  can be `1/4`); `\ln(-2)` is no longer typed as a finite real; the
+  difference of two imaginary quantities is no longer excluded from the reals
+  (it can be `0`); `0 \cdot \infty` and `k/0` forms no longer claim
+  finiteness; `assume(q \in \mathbb{Z})` no longer reports a spurious
+  contradiction for a `finite_number` symbol (it narrows the type); negated
+  types (`!string`) answer subtype questions correctly; and
+  `isInteger`/`isRational` on symbols are now three-valued — a `real` symbol
+  answers `undefined` (unknown) rather than a definitive `false`.
+
+- **`\ln(x^2)` simplifies to `2\ln(|x|)`, and real-only rewrites no longer
+  fire on complex symbols.** `\ln(x^2) \to 2\ln(x)` is wrong for every
+  negative `x` (a fail-open branch-cut guard); even powers now produce the
+  `|x|` form, valid for all real `x` (odd and irrational exponents keep the
+  documented generic-real convention for unconstrained symbols, and resolve
+  under `assume`). For symbols *declared* `complex`, identities such as
+  `\sqrt{z^2} \to |z|`, `|z|^2 \to z^2`, and `\ln(z^2) \to 2\ln(z)` no
+  longer apply at all (each is false at `z = i`).
+
+- **A family of non-terminating evaluations now completes.**
+  `\Gamma(10^{300})`, `\operatorname{GammaLn}(10^{300})`,
+  `\zeta(\pm 10^{300})`, `\Gamma(10^7)` at 500-digit precision,
+  `\operatorname{Fib}(10^9)`, `\binom{2 \times 10^9}{10^9}`,
+  `\operatorname{BellNumber}(20000)`, and `\operatorname{Subfactorial}(10^6)`
+  each ran forever, ignoring `timeLimit`. They now return in milliseconds
+  (an exact value, `\pm\infty`, or a symbolic form for astronomically large
+  results) or honor the time limit. Ordinary values are unchanged.
+
+- **Products of huge exact integers no longer collapse to NaN.**
+  `10^{200} \cdot 10^{200}` canonicalized to `NaN` (a machine-overflow check
+  fired before the exact big-integer path); finite inputs now always promote
+  to exact arithmetic.
+
+- **Symbolic matrix products preserve their order.** With `M` and `P`
+  declared `matrix`, canonical sorting commuted the product, so the
+  commutator `M P - P M` evaluated to `0`. Products with two or more
+  matrix/vector operands now keep their written order everywhere
+  (canonicalization, evaluation, negation, serialization); scalar factors
+  still sort.
+
+- **Assumptions no longer outlive their scope.** An expression evaluated
+  under `assume(x > 0)` inside a scope kept its assumption-derived sign and
+  type after `popScope()` (a held `|x^3|` kept simplifying to `x^3`); the
+  per-expression cache is now invalidated when a scope is popped.
+
 - **Radicals with a variable degree now differentiate correctly.** The
   derivative rule for `Root(base, n)` treated the degree `n` as constant, so
   `D(Root(x, x), x)` (i.e. `x^{1/x}`) dropped the `(1 - \ln x)` term and

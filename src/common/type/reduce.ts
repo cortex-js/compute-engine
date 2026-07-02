@@ -70,6 +70,26 @@ export function reduceType(type: Type): Type {
     case 'reference':
       return type;
 
+    case 'numeric':
+      // A bounded numeric range whose lower bound exceeds its upper bound is
+      // empty. (`integer<0..10>` and friends predate this switch; without a
+      // case here every number-set `contains` handler — reached via
+      // `library/sets.ts` `typeIntersection` — crashed with "Unknown type
+      // kind".)
+      if (
+        type.lower !== undefined &&
+        type.upper !== undefined &&
+        type.lower > type.upper
+      )
+        return 'never';
+      return type;
+
+    case 'symbol':
+      return type;
+
+    case 'expression':
+      return type;
+
     default:
       throw new Error(`Unknown type kind: ${type}`);
   }

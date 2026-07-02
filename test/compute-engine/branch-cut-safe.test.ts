@@ -38,8 +38,11 @@ describe('onBranchCut — store-driven branch-cut membership', () => {
     expect(onBranchCut(ce, 'Ln', ce.parse('\\imaginaryI'))).toBe(false);
   });
 
-  it('fails closed on undecidable / symbolic arguments', () => {
-    expect(onBranchCut(ce, 'Ln', ce.parse('x'))).toBe(false);
+  it('is three-valued: undefined on undecidable / symbolic arguments', () => {
+    // Three-valued (D3): an undecidable membership is `undefined`, not `false`.
+    // Guard sites still fail closed by comparing `=== false` / `=== true` and
+    // never treating `undefined` as "provably off the cut".
+    expect(onBranchCut(ce, 'Ln', ce.parse('x'))).toBe(undefined);
   });
 
   it('returns false for operators with no branch-cut record', () => {
@@ -130,9 +133,14 @@ describe('log-power expansion is blocked across a branch cut', () => {
     expect(neg.parse('\\ln(x^2)').simplify().toString()).toBe('2ln(-x)');
   });
 
-  it('ln(x^n) with x unconstrained keeps the optimistic n·ln(x) (no churn)', () => {
+  it('ln(x^n) with x unconstrained: even → sound |x| form, odd → convention', () => {
     const u = new ComputeEngine();
-    expect(u.parse('\\ln(x^2)').simplify().toString()).toBe('2ln(x)');
+    // Even exponent takes the sound |x| form (SYM P0-2) — 2ln(x) is wrong for
+    // x < 0. It is numerically faithful even at a negative sample.
+    expect(u.parse('\\ln(x^2)').simplify().toString()).toBe('2ln(|x|)');
+    expect(soundAt(u, '\\ln(x^2)', -3)).toBe(true);
+    // Odd exponent keeps the optimistic generic-real convention (D4): there is
+    // no |x| form for it, so the unconstrained rewrite stays n·ln(x).
     expect(u.parse('\\ln(x^3)').simplify().toString()).toBe('3ln(x)');
   });
 

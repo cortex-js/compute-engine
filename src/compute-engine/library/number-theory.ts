@@ -733,9 +733,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q190026',
       description:
         "Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n.",
-      signature: '(integer) -> integer',
+      // `(number)`, not `(integer)`: a strict integer parameter rejects
+      // symbolic operands at rule-boxing time — `Totient(2^n)` soundly types
+      // `finite_rational` since the WP-2.9 Power-type fix (n could be
+      // negative), which broke 4 Fungrim rules. The evaluate handler below
+      // validates integrality at runtime (`toBigint` → null keeps
+      // non-integers symbolic), same pattern as `Binomial` (WP-2.15).
+      signature: '(number) -> integer',
       type: () => 'finite_integer',
       evaluate: ([n], { engine: ce }) => {
+        // Runtime integrality guard (the signature is deliberately loose, see
+        // above; `toBigint` COERCES via rounding, so gate before it).
+        if (n.isInteger !== true) return undefined;
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
         let result = 1n;

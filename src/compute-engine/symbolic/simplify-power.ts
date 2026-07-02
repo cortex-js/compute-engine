@@ -6,6 +6,7 @@ import {
 } from '../boxed-expression/factor';
 import { isFunction, isNumber } from '../boxed-expression/type-guards';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { isEligibleRealRewrite } from '../function-properties';
 
 /**
  * Denest a nested square root √(a + b√c) → √x + sign(b)·√y.
@@ -315,14 +316,17 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       // Try perfect square trinomial: a² ± 2ab + b² → (a±b)²
       const perfectSquare = factorPerfectSquare(arg);
       if (perfectSquare !== null) {
-        // We have (a±b)², so sqrt((a±b)²) = |a±b|
+        // We have (a±b)², so sqrt((a±b)²) = |a±b| — valid only on the reals
+        // (D4); a complex factor bails (fall through).
         const base = isFunction(perfectSquare)
           ? perfectSquare.op1
           : perfectSquare;
-        return {
-          value: ce._fn('Abs', [base]),
-          because: 'sqrt(perfect square trinomial) -> |factor|',
-        };
+        if (isEligibleRealRewrite(base)) {
+          return {
+            value: ce._fn('Abs', [base]),
+            because: 'sqrt(perfect square trinomial) -> |factor|',
+          };
+        }
       }
 
       // Try difference of squares: a² - b² → (a-b)(a+b)
@@ -369,40 +373,49 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       const exp = arg.op2;
 
       if (base && exp) {
-        // sqrt(x^2) -> x when x is non-negative
+        // sqrt(x^2) -> x when x is non-negative (sound for any base)
         if (exp.isSame(2) && base.isNonNegative === true) {
           return { value: base, because: 'sqrt(x^2) -> x when x >= 0' };
         }
 
-        // sqrt(x^2) -> |x| (general case)
-        if (exp.isSame(2)) {
-          return { value: ce._fn('Abs', [base]), because: 'sqrt(x^2) -> |x|' };
-        }
-
-        // sqrt(x^{2n}) -> |x|^n for positive integer n
-        if (exp.isEven === true && exp.isPositive === true) {
-          return {
-            value: ce._fn('Abs', [base]).pow(exp.div(2)),
-            because: 'sqrt(x^{2n}) -> |x|^n',
-          };
-        }
-
-        // sqrt(x^{2n+1}) -> |x|^n * sqrt(x) for positive integer n
-        // e.g., sqrt(x^5) = sqrt(x^4 * x) = |x|^2 * sqrt(x)
-        if (
-          exp.isOdd === true &&
-          exp.isInteger === true &&
-          exp.isPositive === true
-        ) {
-          const n = exp.sub(ce.One).div(2);
-          if (n.isPositive === true) {
+        // The |x|-forms below are valid only on the reals: √(z²) = |z| fails
+        // for a complex base (√(i²) = i ≠ 1). Bail on a provably-non-real /
+        // declared-complex base (SYM P0-4 / D4); unconstrained bases keep the
+        // generic-real convention.
+        if (isEligibleRealRewrite(base)) {
+          // sqrt(x^2) -> |x| (general case)
+          if (exp.isSame(2)) {
             return {
-              value: ce
-                ._fn('Abs', [base])
-                .pow(n)
-                .mul(ce._fn('Sqrt', [base])),
-              because: 'sqrt(x^{2n+1}) -> |x|^n * sqrt(x)',
+              value: ce._fn('Abs', [base]),
+              because: 'sqrt(x^2) -> |x|',
             };
+          }
+
+          // sqrt(x^{2n}) -> |x|^n for positive integer n
+          if (exp.isEven === true && exp.isPositive === true) {
+            return {
+              value: ce._fn('Abs', [base]).pow(exp.div(2)),
+              because: 'sqrt(x^{2n}) -> |x|^n',
+            };
+          }
+
+          // sqrt(x^{2n+1}) -> |x|^n * sqrt(x) for positive integer n
+          // e.g., sqrt(x^5) = sqrt(x^4 * x) = |x|^2 * sqrt(x)
+          if (
+            exp.isOdd === true &&
+            exp.isInteger === true &&
+            exp.isPositive === true
+          ) {
+            const n = exp.sub(ce.One).div(2);
+            if (n.isPositive === true) {
+              return {
+                value: ce
+                  ._fn('Abs', [base])
+                  .pow(n)
+                  .mul(ce._fn('Sqrt', [base])),
+                because: 'sqrt(x^{2n+1}) -> |x|^n * sqrt(x)',
+              };
+            }
           }
         }
       }
@@ -416,7 +429,14 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       const remaining: Expression[] = [];
 
       for (const factor of arg.ops) {
-        if (isFunction(factor, 'Power') && factor.op1 && factor.op2) {
+        // The |x|-extraction below is valid only on the reals (D4): a complex
+        // factor is left inside the radical unchanged.
+        if (
+          isFunction(factor, 'Power') &&
+          factor.op1 &&
+          factor.op2 &&
+          isEligibleRealRewrite(factor.op1)
+        ) {
           const base = factor.op1;
           const exp = factor.op2;
           // x^2 -> |x| outside, nothing inside

@@ -1,6 +1,6 @@
 import type { Expression, RuleStep } from '../global-types';
 import { isFunction, sym } from '../boxed-expression/type-guards';
-import { onBranchCut } from '../function-properties';
+import { isEligibleRealRewrite, onBranchCut } from '../function-properties';
 
 /**
  * Logarithm simplification rules consolidated from simplify-rules.ts.
@@ -70,25 +70,33 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
       const base = arg.op1;
       const exp = arg.op2;
       if (base && exp) {
-        // ln(x^n) -> n*ln(x) when x is non-negative, or (n odd / irrational and
-        // x is off Ln's branch cut). For x on the negative real axis the odd /
-        // irrational cases differ by a multiple of 2πi (e.g. ln(x³) = 3ln(x) is
-        // wrong at x = -3), so they stay symbolic there (ROADMAP 7a).
-        if (
-          base.isNonNegative === true ||
-          ((exp.isOdd === true || exp.isRational === false) &&
-            !onBranchCut(ce, 'Ln', base))
-        ) {
+        // ln(x^n) -> n*ln(x) is unconditionally sound when x >= 0.
+        if (base.isNonNegative === true) {
           return {
             value: exp.mul(ce._fn('Ln', [base])),
             because: 'ln(x^n) -> n*ln(x)',
           };
         }
-        // ln(x^n) -> n*ln(|x|) when n is even
-        if (exp.isEven === true) {
+        // ln(x^n) -> n*ln(|x|) when n is even — sound for every real x (SYM
+        // P0-2); requires a real-eligible base (bail on declared complex, D4).
+        if (exp.isEven === true && isEligibleRealRewrite(base)) {
           return {
             value: exp.mul(ce._fn('Ln', [ce._fn('Abs', [base])])),
             because: 'ln(x^n) -> n*ln(|x|) when n even',
+          };
+        }
+        // ln(x^n) -> n*ln(x) for a non-even exponent: the documented generic-
+        // real convention (D4) for a real-eligible base not provably on the cut
+        // (D3). On the negative real axis the odd / irrational cases differ by a
+        // multiple of 2πi (e.g. ln(x³) = 3ln(x) is wrong at x = -3), so a
+        // provably-negative base stays symbolic; a declared-complex base bails.
+        if (
+          isEligibleRealRewrite(base) &&
+          onBranchCut(ce, 'Ln', base) !== true
+        ) {
+          return {
+            value: exp.mul(ce._fn('Ln', [base])),
+            because: 'ln(x^n) -> n*ln(x)',
           };
         }
       }
@@ -277,23 +285,28 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
       };
     }
 
-    // log_c(x^n) -> n*log_c(x) when x >= 0 or n is odd or n is irrational
+    // log_c(x^n) -> n*log_c(x) when x >= 0, or (n odd / irrational) under the
+    // generic-real convention (D4) for a real-eligible base not provably on the
+    // cut (D3). Mirrors the Ln power rule; a declared-complex base bails and a
+    // provably-negative base stays symbolic.
     if (isFunction(arg, 'Power')) {
       const powerBase = arg.op1;
       const exp = arg.op2;
       if (powerBase && exp) {
         if (
           powerBase.isNonNegative === true ||
-          exp.isOdd === true ||
-          exp.isRational === false
+          (isEligibleRealRewrite(powerBase) &&
+            (exp.isOdd === true || exp.isRational === false) &&
+            onBranchCut(ce, 'Ln', powerBase) !== true)
         ) {
           return {
             value: exp.mul(ce._fn('Log', [powerBase, logBase])),
             because: 'log_c(x^n) -> n*log_c(x)',
           };
         }
-        // log_c(x^n) -> n*log_c(|x|) when n is even
-        if (exp.isEven === true) {
+        // log_c(x^n) -> n*log_c(|x|) when n is even — sound for every real x;
+        // bail on a declared-complex base (D4).
+        if (exp.isEven === true && isEligibleRealRewrite(powerBase)) {
           return {
             value: exp.mul(
               ce._fn('Log', [ce._fn('Abs', [powerBase]), logBase])
@@ -301,8 +314,12 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
             because: 'log_c(x^n) -> n*log_c(|x|) when n even',
           };
         }
-        // log_c(x^{p/q}) for non-integer rational p/q
-        if (exp.isRational === true && exp.isInteger === false) {
+        // log_c(x^{p/q}) for non-integer rational p/q (real-eligible only, D4)
+        if (
+          exp.isRational === true &&
+          exp.isInteger === false &&
+          isEligibleRealRewrite(powerBase)
+        ) {
           const j = exp.json;
           if (Array.isArray(j) && j[0] === 'Rational') {
             const p = j[1] as number;
@@ -674,7 +691,11 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     // on the cut; positive and unconstrained-symbolic arguments are unaffected.
     if (
       lnTerms.length >= 2 &&
-      !lnTerms.some((t) => onBranchCut(ce, 'Ln', t.arg))
+      !lnTerms.some(
+        (t) =>
+          onBranchCut(ce, 'Ln', t.arg) === true ||
+          !isEligibleRealRewrite(t.arg)
+      )
     ) {
       // Combine all Ln terms: multiply positives, divide negatives
       // Result is ln(product of positives / product of negatives)
@@ -713,7 +734,11 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     for (const [, terms] of logTerms) {
       if (
         terms.length >= 2 &&
-        !terms.some((t) => onBranchCut(ce, 'Ln', t.arg))
+        !terms.some(
+          (t) =>
+            onBranchCut(ce, 'Ln', t.arg) === true ||
+            !isEligibleRealRewrite(t.arg)
+        )
       ) {
         let numerator = ce.One;
         let denominator = ce.One;

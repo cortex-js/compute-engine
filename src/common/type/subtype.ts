@@ -182,6 +182,95 @@ export function meetPrimitiveTypes(
 
 const MEET_CACHE = new Map<string, PrimitiveType[]>();
 
+/** True if a numeric type has both a finite lower and a finite upper bound. */
+function hasFiniteBounds(t: { lower?: number; upper?: number }): boolean {
+  return (
+    t.lower !== undefined &&
+    t.upper !== undefined &&
+    Number.isFinite(t.lower) &&
+    Number.isFinite(t.upper)
+  );
+}
+
+/** The *finite* counterpart of a numeric primitive type (the ±∞-admitting
+ *  types map to their finite subtype; already-finite types map to themselves). */
+function finiteBaseType(t: NumericPrimitiveType): NumericPrimitiveType {
+  switch (t) {
+    case 'number':
+      return 'finite_number';
+    case 'complex':
+      return 'finite_complex';
+    case 'real':
+      return 'finite_real';
+    case 'rational':
+      return 'finite_rational';
+    case 'integer':
+      return 'finite_integer';
+    default:
+      return t;
+  }
+}
+
+/**
+ * True when `a` and `b` are *provably* disjoint (no value inhabits both).
+ * Used for `A <: !B` (a subtype of a negation iff it is disjoint from the
+ * negated type). Conservative: returns `false` (may overlap) whenever
+ * disjointness cannot be established, so `isSubtype` never over-claims
+ * `A <: !B`.
+ */
+function provablyDisjoint(a: Type, b: Type): boolean {
+  if (a === 'never' || b === 'never') return true; // empty set
+  if (a === 'any' || b === 'any') return false;
+  if (a === 'unknown' || b === 'unknown') return false;
+  if (a === 'nothing' || b === 'nothing') return a !== b;
+
+  // If either is a subtype of the other, they share values (overlap).
+  if (isSubtype(a, b) || isSubtype(b, a)) return false;
+
+  // A value literal is a singleton `{v}`: having failed the subtype checks
+  // above (it is not contained in the other type), it must be disjoint from it.
+  if (
+    (typeof a === 'object' && a.kind === 'value') ||
+    (typeof b === 'object' && b.kind === 'value')
+  )
+    return true;
+
+  if (typeof a === 'string' && typeof b === 'string')
+    return meetPrimitiveTypes(a as PrimitiveType, b as PrimitiveType).length === 0;
+
+  // Two bounded numeric ranges: disjoint if their base types are disjoint or
+  // their intervals do not overlap.
+  if (
+    typeof a === 'object' &&
+    a.kind === 'numeric' &&
+    typeof b === 'object' &&
+    b.kind === 'numeric'
+  ) {
+    if (meetPrimitiveTypes(a.type, b.type).length === 0) return true;
+    const aLo = a.lower ?? -Infinity;
+    const aHi = a.upper ?? Infinity;
+    const bLo = b.lower ?? -Infinity;
+    const bHi = b.upper ?? Infinity;
+    return aHi < bLo || bHi < aLo;
+  }
+
+  // A numeric primitive/range and a non-numeric composite (or vice versa) are
+  // disjoint; a numeric vs. numeric-with-overlapping-base is handled above.
+  const aNumeric = isNumeric(a);
+  const bNumeric = isNumeric(b);
+  if (aNumeric !== bNumeric) {
+    // One is numeric, the other isn't numeric — but the non-numeric side could
+    // still be a broad category (value/scalar/any) that includes numbers.
+    // Only conclude disjoint when the non-numeric side is not itself a
+    // container of numbers.
+    const other = aNumeric ? b : a;
+    if (!isScalar(other) && !isValue(other) && !isNumeric(other)) return true;
+  }
+
+  // Conservative: assume they might overlap.
+  return false;
+}
+
 /** Return true if lhs is a subtype of rhs */
 export function isSubtype(
   lhs: Type | TypeString,
@@ -251,12 +340,23 @@ export function isSubtype(
     }
 
     if (lhs.kind === 'negation') {
-      // A negation is a subtype of a type if the negated type is not a subtype of the type
-      return !isSubtype(lhs.type, rhs);
+      // `!A` is the complement of `A` — everything *not* in `A`. It is a
+      // subtype of a concrete primitive `S` only when `S` is a top type
+      // (`any`/`unknown`), both already handled above. For any other primitive
+      // the complement spills outside `S`, so the answer is `false`. (The old
+      // `!isSubtype(lhs.type, rhs)` conflated "A ⊄ S" with "!A ⊆ S", making
+      // `!string <: integer` — hence `x:!string` `isInteger` — spuriously true.)
+      return false;
     }
 
     if (lhs.kind === 'numeric') {
-      if (!isSubtype(lhs.type, rhs)) return false;
+      // A range with finite numeric bounds cannot be ±∞, so it is a subtype of
+      // the *finite* counterpart of its base type even though the base type
+      // itself admits ±∞ (e.g. `integer<0..10> ⊑ finite_integer ⊑
+      // finite_real`). Without this, `Element(x:integer<0..10>, Integers)`
+      // (ℤ = `finite_integer`) was refuted.
+      const base = hasFiniteBounds(lhs) ? finiteBaseType(lhs.type) : lhs.type;
+      if (!isSubtype(base, rhs)) return false;
       // The bounds always match, since the bounds of the rhs are -∞ and +∞
       return true;
     }
@@ -305,6 +405,20 @@ export function isSubtype(
       );
     }
     return rhs.types.some((t) => isSubtype(lhs, t));
+  }
+
+  //
+  // Handle rhs negation: `A <: !B ⟺ A and B are disjoint` (no common value).
+  // This must precede the primitive fall-through below (a string `lhs` would
+  // otherwise short-circuit to `false`), and it handles the contravariant
+  // `!A <: !B ⟺ B <: A` case.
+  //
+  if (rhs.kind === 'negation') {
+    if (typeof lhs !== 'string' && lhs.kind === 'negation')
+      return isSubtype(rhs.type, lhs.type);
+    // `lhs` has been reduced to a `Type` (primitive string or object) at the
+    // top of the function.
+    return provablyDisjoint(lhs as Type, rhs.type);
   }
 
   //
@@ -583,13 +697,8 @@ export function isSubtype(
     return true;
   }
 
-  if (lhs.kind === 'negation' && rhs.kind === 'negation') {
-    return isSubtype(lhs.type, rhs.type);
-  }
-
-  if (rhs.kind === 'negation') {
-    return !isSubtype(lhs, rhs.type);
-  }
+  // Note: negation on the rhs (including the both-negation `!A <: !B ⟺ B <: A`
+  // case) is handled earlier, before the primitive fall-through.
 
   // Value types (strings, boolean, number)
   if (rhs.kind === 'value' && lhs.kind === 'value')

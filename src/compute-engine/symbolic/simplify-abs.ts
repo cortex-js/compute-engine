@@ -1,5 +1,6 @@
 import type { Expression, RuleStep } from '../global-types';
 import { isFunction } from '../boxed-expression/type-guards';
+import { isEligibleRealRewrite } from '../function-properties';
 
 /**
  * Abs simplification rules consolidated from simplify-rules.ts.
@@ -163,8 +164,10 @@ export function simplifyAbs(x: Expression): RuleStep | undefined {
     const exp = op.op2;
 
     if (base && exp) {
-      // |x^n| -> x^n when n is even integer (x^n is always non-negative)
-      if (exp.isEven === true) {
+      // |x^n| -> x^n when n is even integer (x^n is non-negative for real x).
+      // Dropping the Abs is valid only on the reals (|i²| = 1 ≠ i² = -1), so
+      // bail on a declared-complex / provably-non-real base (SYM P0-4 / D4).
+      if (exp.isEven === true && isEligibleRealRewrite(base)) {
         return {
           value: base.pow(exp),
           because: '|x^n| -> x^n when n is even',
@@ -193,7 +196,8 @@ export function simplifyAbs(x: Expression): RuleStep | undefined {
       if (exp.isRational === true && exp.isInteger === false) {
         const num = exp.numerator;
         if (num) {
-          if (num.isEven === true) {
+          // Dropping the Abs (p even) is valid only on the reals (D4).
+          if (num.isEven === true && isEligibleRealRewrite(base)) {
             return {
               value: base.pow(exp),
               because: '|x^(p/q)| -> x^(p/q) when p is even',
@@ -245,6 +249,11 @@ export function simplifyAbsPower(x: Expression): RuleStep | undefined {
 
   const innerBase = base.op1;
   if (!innerBase) return undefined;
+
+  // |x|^n -> x^n drops the Abs, which is valid only on the reals: |i|² = 1 but
+  // i² = -1. Bail on a declared-complex / provably-non-real base (SYM P0-4 / D4);
+  // unconstrained bases keep the generic-real convention.
+  if (!isEligibleRealRewrite(innerBase)) return undefined;
 
   // |x|^n -> x^n when n is even
   if (exp.isEven === true) {

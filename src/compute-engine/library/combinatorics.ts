@@ -2,7 +2,52 @@ import { toBigint, toInteger } from '../boxed-expression/numerics';
 import type { Expression, SymbolDefinitions } from '../global-types';
 import { isFunction, isNumber } from '../boxed-expression/type-guards';
 import { apply2 } from '../boxed-expression/apply';
-import { gamma, bigGamma } from '../numerics/special-functions';
+import { gamma, bigGamma, gammaln } from '../numerics/special-functions';
+import { checkDeadline } from '../../common/interruptible';
+
+/**
+ * Above this many decimal digits, an exact combinatorial result (Fibonacci,
+ * Binomial, BellNumber, Subfactorial) is impractical to materialize as a
+ * bigint — the loops below would grind for a very long time to build a
+ * multi-hundred-thousand-digit number nobody can use. Stay symbolic instead
+ * (mirrors `MAX_EXACT_POW_DIGITS` in boxed-expression/arithmetic-power.ts).
+ * The loops also carry `checkDeadline` calls as a backstop for whatever
+ * slips under this threshold on a slow host. See WP-2.11 / EX-14.
+ */
+const MAX_EXACT_COMBINATORICS_DIGITS = 1_000_000;
+
+/** log10(φ): F(n) has ≈ n·log10(φ) decimal digits (φ = golden ratio). */
+const LOG10_PHI = Math.log10((1 + Math.sqrt(5)) / 2);
+
+/** Rough estimate of the decimal digit count of n!, via lgamma(n+1). */
+function estimatedFactorialDigits(n: number): number {
+  if (!Number.isFinite(n) || n < 0) return Infinity;
+  if (n < 2) return 1;
+  const digits = gammaln(n + 1) / Math.LN10;
+  return Number.isFinite(digits) ? digits : Infinity;
+}
+
+/** Rough estimate of the decimal digit count of Binomial(n, k), via lgamma. */
+function estimatedBinomialDigits(n: bigint, k: bigint): number {
+  const nf = Number(n);
+  const kf = Number(k);
+  if (!Number.isFinite(nf) || !Number.isFinite(kf)) return Infinity;
+  const logC =
+    (gammaln(nf + 1) - gammaln(kf + 1) - gammaln(nf - kf + 1)) / Math.LN10;
+  return Number.isFinite(logC) ? logC : Infinity;
+}
+
+/**
+ * Rough estimate of the decimal digit count of the Bell number B(n), via the
+ * leading terms of the de Bruijn asymptotic: ln B(n) ≈ n·ln(n) − n·ln(ln(n)) − n.
+ */
+function estimatedBellDigits(n: number): number {
+  if (!Number.isFinite(n) || n < 0) return Infinity;
+  if (n < 3) return 1;
+  const lnN = Math.log(n);
+  const lnB = n * lnN - n * Math.log(lnN) - n;
+  return lnB > 0 ? lnB / Math.LN10 : 1;
+}
 
 /**
  * Exact binomial coefficient for bigint n, k.
@@ -12,19 +57,34 @@ import { gamma, bigGamma } from '../numerics/special-functions';
  * - n < 0 → the standard extension via Pascal's rule analytic continuation:
  *   Binomial(n, k) = (-1)^k · Binomial(k-n-1, k), e.g.
  *   Binomial(-2, 3) = (-1)³·Binomial(4, 3) = -4 (matches Mathematica/sympy).
+ *
+ * Returns `undefined` (stay symbolic) rather than an exact bigint when the
+ * result would exceed MAX_EXACT_COMBINATORICS_DIGITS decimal digits — e.g.
+ * `Binomial(2e9, 1e9)` has ~6×10⁸ digits, pathological to build.
  */
-function binomialBigint(n: bigint, k: bigint): bigint {
+function binomialBigint(
+  n: bigint,
+  k: bigint,
+  deadline?: number
+): bigint | undefined {
   if (k < 0n) return 0n;
   if (n < 0n) {
     const sign = k % 2n === 0n ? 1n : -1n;
-    return sign * binomialBigint(k - n - 1n, k);
+    const inner = binomialBigint(k - n - 1n, k, deadline);
+    return inner === undefined ? undefined : sign * inner;
   }
   if (k > n) return 0n;
   // Use the smaller of k and n-k to minimize the number of iterations.
   const kk = k < n - k ? k : n - k;
   if (kk === 0n) return 1n;
+  if (estimatedBinomialDigits(n, kk) > MAX_EXACT_COMBINATORICS_DIGITS)
+    return undefined;
   let result = 1n;
-  for (let i = 1n; i <= kk; i++) result = (result * (n - kk + i)) / i;
+  let steps = 0;
+  for (let i = 1n; i <= kk; i++) {
+    if ((++steps & 0xffff) === 0) checkDeadline(deadline);
+    result = (result * (n - kk + i)) / i;
+  }
   return result;
 }
 
@@ -59,7 +119,10 @@ function evaluateBinomial(
   ) {
     const n = toBigint(nExpr);
     const k = toBigint(kExpr);
-    if (n !== null && k !== null) return ce.number(binomialBigint(n, k));
+    if (n !== null && k !== null) {
+      const r = binomialBigint(n, k, ce._deadline);
+      return r === undefined ? undefined : ce.number(r);
+    }
   }
 
   // Complex operands: no closed form implemented here; stay symbolic.
@@ -115,13 +178,22 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
 
         // Compute F(|k|); negative indices use the reflection formula below.
         const m = k < 0n ? -k : k;
+
+        // F(m) has ~m·log10(φ) digits: for huge m (e.g. Fibonacci(1e9), a
+        // ~2×10⁸-digit result) the loop below would grind for a very long
+        // time to build an unusable number — stay symbolic instead.
+        if (Number(m) * LOG10_PHI > MAX_EXACT_COMBINATORICS_DIGITS)
+          return undefined;
+
         let result: bigint;
         if (m === 0n) result = 0n;
         else if (m === 1n) result = 1n;
         else {
           let a = 0n;
           let b = 1n;
+          let steps = 0;
           for (let i = 2n; i <= m; i++) {
+            if ((++steps & 0xffff) === 0) checkDeadline(ce._deadline);
             const next = a + b;
             a = b;
             b = next;
@@ -276,12 +348,23 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         if (ks.some((k) => k === null || k < 0)) return undefined;
         const n = ks.reduce((a, b) => a! + (b ?? 0), 0)!;
 
+        // n! dwarfs the individual k! factors, so its digit count bounds the
+        // whole computation — stay symbolic rather than grind through an
+        // unusably large exact factorial (same class of issue as
+        // Subfactorial/Fibonacci/BellNumber, see WP-2.11 / EX-14).
+        if (estimatedFactorialDigits(n) > MAX_EXACT_COMBINATORICS_DIGITS)
+          return undefined;
+
         // Use exact bigint arithmetic — the float version overflowed past
         // n ≈ 170 and lost precision (`Multinomial(20,20)` → …820.00003).
         // n! / (k1! · k2! · …) is always an integer, so the divisions are exact.
         const factorial = (m: number): bigint => {
           let r = 1n;
-          for (let i = 2n; i <= BigInt(m); i++) r *= i;
+          let steps = 0;
+          for (let i = 2n; i <= BigInt(m); i++) {
+            if ((++steps & 0xffff) === 0) checkDeadline(ce._deadline);
+            r *= i;
+          }
           return r;
         };
         let result = factorial(n);
@@ -302,12 +385,19 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         if (n.isInteger !== true) return undefined;
         const k = toInteger(n);
         if (k === null || k < 0) return undefined;
+        // !n has the same order of magnitude as n! (!n = round(n!/e)): for
+        // huge n (e.g. Subfactorial(1e6), a ~5.6×10⁶-digit result) the loop
+        // below would grind for a very long time — stay symbolic instead.
+        if (estimatedFactorialDigits(k) > MAX_EXACT_COMBINATORICS_DIGITS)
+          return undefined;
         // Recurrence (exact, in bigint): !0 = 1, !m = m·!(m−1) + (−1)^m.
         // The previous float formula reduced to result·(i−1), which is 0 at
         // i = 1 and pinned every !n≥1 to 0.
         let result = 1n;
         let sign = 1n;
+        let steps = 0;
         for (let i = 1; i <= k; i++) {
+          if ((++steps & 0xffff) === 0) checkDeadline(ce._deadline);
           sign = -sign;
           result = BigInt(i) * result + sign;
         }
@@ -328,13 +418,25 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         const k = toInteger(n);
         if (k === null || k < 0) return undefined;
 
+        // B(n) grows faster than exponentially (ln B(n) ≈ n·ln(n) −
+        // n·ln(ln(n)) − n, de Bruijn): for huge n (e.g. BellNumber(20000)
+        // already has ~57000 digits, and the O(n²) triangle cost grows much
+        // faster still) stay symbolic rather than grind. The `checkDeadline`
+        // below is the primary guard in the range this estimate misses.
+        if (estimatedBellDigits(k) > MAX_EXACT_COMBINATORICS_DIGITS)
+          return undefined;
+
         // Bell triangle (Aitken's array) in exact bigint — the float
         // recurrence lost precision past n ≈ 25 (`BellNumber(25)` was
         // …9000 instead of …9353). B(n) is the first entry of row n.
         let row: bigint[] = [1n];
+        let steps = 0;
         for (let i = 1; i <= k; i++) {
           const next: bigint[] = [row[row.length - 1]];
-          for (let j = 0; j < row.length; j++) next.push(next[j] + row[j]);
+          for (let j = 0; j < row.length; j++) {
+            if ((++steps & 0xffff) === 0) checkDeadline(ce._deadline);
+            next.push(next[j] + row[j]);
+          }
           row = next;
         }
         return ce.number(row[0]);

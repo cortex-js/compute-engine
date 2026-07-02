@@ -1,4 +1,5 @@
 import { isSubtype } from '../common/type/subtype';
+import { reduceType } from '../common/type/reduce';
 import { functionResult } from '../common/type/utils';
 import { BoxedType } from '../common/type/boxed-type';
 import type { Type } from '../common/type/types';
@@ -825,13 +826,27 @@ function refineSymbolType(
 
   const def = ce.lookupDefinition(symbol);
   if (isValueDef(def)) {
+    // An explicitly declared, known type is *narrowed* to the meet of the
+    // declared type and the assumed type. It is a contradiction only when
+    // that meet is empty. The old check (`!isSubtype(assumed, declared)`)
+    // misfired whenever the assumed type was not a *subtype* of the declared
+    // one even though they overlapped, e.g. `assume(q ∈ ℤ)` on a
+    // `finite_number`-declared `q` (`integer ⊄ finite_number` only because
+    // `integer` admits ±∞ — the meet is the satisfiable `finite_integer`).
     if (
       def.value.type &&
       !def.value.type.isUnknown &&
-      !def.value.inferredType &&
-      !isSubtype(type, def.value.type.type)
-    )
-      return 'contradiction';
+      !def.value.inferredType
+    ) {
+      const meet = reduceType({
+        kind: 'intersection',
+        types: [type, def.value.type.type],
+      });
+      if (meet === 'nothing') return 'contradiction';
+      def.value.type = new BoxedType(meet, ce._typeResolver);
+      def.value.inferredType = false;
+      return 'ok';
+    }
     def.value.type = new BoxedType(type, ce._typeResolver);
     // The type was explicitly asserted: it is no longer an inferred type
     // (so a subsequent bare-symbol inequality won't widen it to 'real')

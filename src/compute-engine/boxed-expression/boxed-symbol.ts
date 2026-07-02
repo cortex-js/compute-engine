@@ -3,6 +3,7 @@ import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
 
 import type { Type, TypeString } from '../../common/type/types';
 import { isSignatureType, widen, narrow } from '../../common/type/utils';
+import { reduceType } from '../../common/type/reduce';
 import type { OneOf } from '../../common/one-of';
 import { BoxedType } from '../../common/type/boxed-type';
 import { parseType } from '../../common/type/parse';
@@ -658,13 +659,39 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   get isInteger(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
-    return t.matches('integer');
+    // Three-valued discipline (D3), mirroring the repaired `isReal`:
+    //   entailed (`matches`) → true; overlap → undefined; disjoint → false.
+    if (t.matches('integer')) return true;
+    // A real-overlapping numeric type (`real`, `rational`, `finite_real`,
+    // `finite_rational`, …) could be an integer → indeterminate. `real` is
+    // checked before `complex` because `finite_real ⊑ complex` in this lattice.
+    if (t.matches('real')) return undefined;
+    // `number`/`finite_number` overlap the reals unless they are genuinely
+    // complex (`complex`/`imaginary`/`finite_complex`, which are non-integer
+    // by the same convention `isReal` uses).
+    if (t.matches('number')) return t.matches('complex') ? false : undefined;
+    // Non-numeric / composite types (e.g. `!string`): definitely-not only when
+    // provably disjoint from the integers.
+    if (
+      reduceType({ kind: 'intersection', types: [t.type, 'integer'] }) ===
+      'nothing'
+    )
+      return false;
+    return undefined;
   }
 
   get isRational(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
-    return t.matches('rational');
+    if (t.matches('rational')) return true;
+    if (t.matches('real')) return undefined;
+    if (t.matches('number')) return t.matches('complex') ? false : undefined;
+    if (
+      reduceType({ kind: 'intersection', types: [t.type, 'rational'] }) ===
+      'nothing'
+    )
+      return false;
+    return undefined;
   }
 
   get isReal(): boolean | undefined {

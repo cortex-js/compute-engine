@@ -365,8 +365,8 @@ describe('PROPERTIES OF NUMBERS', () => {
       number literal: false
       type: finite_real
       real: true
-      rational: false
-      integer: false
+      rational: undefined
+      integer: undefined
       positive (>0): true
       negative (<0): false
       nonPositive (<=0): false

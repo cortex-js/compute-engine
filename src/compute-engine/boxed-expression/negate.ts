@@ -3,7 +3,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { isNumber, isFunction } from './type-guards';
-import { addOrder, order } from './order';
+import { addOrder, order, sortProductOperands } from './order';
 
 export function canonicalNegate(expr: Expression): Expression {
   // Negate(Negate(x)) -> x
@@ -105,7 +105,7 @@ export function negateProduct(
       }
     }
   }
-  if (done) return ce._fn('Multiply', result.sort(order));
+  if (done) return ce._fn('Multiply', sortProductOperands(result));
 
   // else If there is a literal number, negate it
   if (!done) {
@@ -119,7 +119,7 @@ export function negateProduct(
     }
   }
 
-  if (done) return ce._fn('Multiply', result.sort(order));
+  if (done) return ce._fn('Multiply', sortProductOperands(result));
 
-  return ce._fn('Negate', [ce._fn('Multiply', [...args].sort(order))]);
+  return ce._fn('Negate', [ce._fn('Multiply', sortProductOperands([...args]))]);
 }

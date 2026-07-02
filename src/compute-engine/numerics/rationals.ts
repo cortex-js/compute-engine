@@ -96,7 +96,17 @@ export function add(lhs: Rational, rhs: Rational): Rational {
   if (n <= 9007199254740991 && n >= -9007199254740991 && d <= 9007199254740991)
     return [n, d];
 
-  if (!Number.isFinite(n) || !Number.isFinite(d)) return [NaN, 1];
+  // Only map to NaN when an *input* is non-finite (e.g. a `[1, Infinity]`
+  // denominator): those cannot be promoted to BigInt (`BigInt(Infinity)`
+  // throws). Finite inputs whose machine sum merely overflowed fall through
+  // to the exact BigInt promotion below.
+  if (
+    !Number.isFinite(lhs[0]) ||
+    !Number.isFinite(lhs[1]) ||
+    !Number.isFinite(rhsNum[0]) ||
+    !Number.isFinite(rhsNum[1])
+  )
+    return [NaN, 1];
 
   return [
     BigInt(rhsNum[1]) * BigInt(lhs[0]) + BigInt(rhsNum[0]) * BigInt(lhs[1]),
@@ -129,8 +139,11 @@ export function mul(lhs: Rational, rhs: Rational): Rational {
     )
       return [n, d];
 
-    if (!Number.isFinite(n) || !Number.isFinite(d)) return [NaN, 1];
-
+    // If we reach here, the machine product overflowed (n or d is non-finite)
+    // or exceeded the safe-integer range. The inputs are guaranteed finite
+    // (the non-finite guards above already returned), so promoting the finite
+    // integer operands to BigInt is exact. (Do NOT map overflow to NaN here:
+    // that conflates finite-input overflow with genuinely non-finite inputs.)
     return [BigInt(lhs[0]) * BigInt(rhs[0]), BigInt(lhs[1]) * BigInt(rhs[1])];
   }
 

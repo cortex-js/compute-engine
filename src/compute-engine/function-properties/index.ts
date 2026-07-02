@@ -173,41 +173,96 @@ const BRANCH_CUT_OPERATORS: ReadonlySet<string> = new Set(
 );
 
 /**
- * True when `arg` provably lies on a branch cut of `operator`, per the store's
- * `BranchCuts` record (ROADMAP item 7a). Used to block simplification rewrites
- * that would cross a branch cut — e.g. `ln(a) + ln(b) → ln(ab)` is unsound when
- * an operand is on the negative real axis (`ln(-2) + ln(-3) ≠ ln(6)`, they
- * differ by `2πi`).
+ * Three-valued branch-cut test (policy D3). Reports whether `arg` lies on a
+ * branch cut of `operator`, per the store's `BranchCuts` record (ROADMAP
+ * item 7a). Used to block simplification rewrites that would cross a branch
+ * cut — e.g. `ln(a) + ln(b) → ln(ab)` is unsound when an operand is on the
+ * negative real axis (`ln(-2) + ln(-3) ≠ ln(6)`, they differ by `2πi`).
  *
  * A `BranchCuts` value is a `Set` of cut regions (e.g. `Ln` ⇒
  * `Set(Interval(Open(-oo), 0))`); `arg` is on a cut when it is a member of any
- * region. Fail-closed: an undecidable / symbolic membership returns `false`
- * (treated as "not provably on the cut"), so the guard never blocks a rewrite
- * it cannot justify — it only ever stops a provably-unsound one.
+ * region.
+ *
+ * Returns:
+ *   - `true`      — `arg` is provably on a cut region.
+ *   - `false`     — `arg` is provably off *every* cut region (or the operator
+ *                   has no branch cuts at all).
+ *   - `undefined` — membership is undecidable for at least one region.
+ *
+ * IMPORTANT (D3): call sites must compare `=== false` (provably off the cut)
+ * or `=== true` (provably on it) and must never negate the result — the old
+ * two-valued form collapsed "unknown" into "off the cut", which turned
+ * `!onBranchCut(...)` into a fail-*open* guard.
  */
 export function onBranchCut(
   ce: IComputeEngine,
   operator: string,
   arg: Expression
-): boolean {
+): boolean | undefined {
+  // No branch cuts at all ⇒ `arg` is provably not on any cut.
   if (!BRANCH_CUT_OPERATORS.has(operator)) return false;
   const cuts = getFunctionProperties(ce, operator)?.branchCuts;
-  if (cuts === undefined) return false;
+  // The operator declares branch cuts but the record could not be boxed ⇒
+  // undecidable.
+  if (cuts === undefined) return undefined;
 
   // The value is a Set of cut regions; test membership in each region. (A bare
   // region — not wrapped in a Set — is treated as a single region.)
   const setOps = (cuts as { ops?: ReadonlyArray<Expression> }).ops;
   const regions =
     cuts.operator === 'Set' && setOps !== undefined ? setOps : [cuts];
+
+  // Three-valued membership across regions: `true` on the first provable
+  // member; otherwise `false` only when provably off *every* region, else
+  // `undefined` if any region's membership is undecidable.
+  let allProvablyOff = true;
   for (const region of regions) {
+    let member: boolean | undefined;
     try {
-      if (ce.function('Element', [arg, region]).evaluate().valueOf() === true)
-        return true;
+      const r = ce.function('Element', [arg, region]).evaluate().valueOf();
+      if (r === true) member = true;
+      else if (r === false) member = false;
+      else member = undefined;
     } catch {
-      /* undecidable region: fall through (fail-closed) */
+      member = undefined;
     }
+    if (member === true) return true;
+    if (member !== false) allProvablyOff = false;
   }
-  return false;
+  return allProvablyOff ? false : undefined;
+}
+
+/**
+ * Eligibility gate for **real-only** simplification rewrites (policy D4).
+ *
+ * Rewrites that are valid only on the reals — `√(x²) → |x|`, `|x²| → x²`,
+ * `|x|² → x²`, `ln(x^{2k}) → 2k·ln|x|` — must not fire when the operand was
+ * *declared* (or provably inferred) a complex or imaginary type. Although
+ * `complex ⊇ real`, an explicit `complex`/`imaginary` declaration signals a
+ * *general* complex value, so these rewrites bail on it (e.g.
+ * `z: complex ⇒ √(z²)` stays `√(z²)`, not `|z|`, since `√(i²) = i ≠ 1`).
+ *
+ * *Unconstrained* symbols (type `unknown`) — and composite expressions of them
+ * (`x·y`, `x+1`, which the engine types `number`/`finite_number`) — keep the
+ * documented generic-real convention and remain eligible.
+ *
+ * Detection is by **type**, not by `isReal`: for composite expressions the
+ * engine currently reports `isReal === false` for merely-*unknown* realness
+ * (the three-valued discipline is repaired for symbols but not yet for
+ * functions — SYM P0-12/P0-14), which would wrongly bail the generic-real
+ * convention on `ln(x)+ln(y) → ln(xy)` and friends. A type that matches
+ * `complex` but not `real` reliably identifies declared/inferred complex
+ * operands, which is what D4 targets.
+ *
+ * @returns `false` (bail) when `x`'s type admits genuinely non-real complex
+ *   values (`complex`/`imaginary`/`finite_complex`); `true` otherwise.
+ */
+export function isEligibleRealRewrite(x: Expression): boolean {
+  // A type that matches `complex` but not `real` admits genuinely non-real
+  // values (note `finite_real` matches `complex` too, hence `!matches('real')`).
+  const t = x.type;
+  if (t.matches('complex') && !t.matches('real')) return false;
+  return true;
 }
 
 // Operators that carry at least one Poles record — a cheap gate so the numeric
