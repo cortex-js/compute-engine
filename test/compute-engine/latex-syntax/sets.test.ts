@@ -825,3 +825,32 @@ describe('SET BUILDER NOTATION', () => {
     `);
   });
 });
+
+// A `+`/`-`/`*` superscript on a set symbol is a signed-set modifier, exactly
+// as the braced form — not a matrix pseudo-inverse. The unbraced `\Z^+` used to
+// misparse as `PseudoInverse(Integers)` (breaking `\sum_{n \in \Z^+}`).
+describe('PARSING SET SUPERSCRIPTS (signed sets, not PseudoInverse)', () => {
+  it('unbraced \\Z^+ matches braced \\Z^{+} → PositiveIntegers', () => {
+    expect(parse('\\Z^+').json).toBe('PositiveIntegers');
+    expect(parse('\\Z^{+}').json).toBe('PositiveIntegers');
+  });
+
+  it('\\N^+ and \\Z^- keep their signed-set meanings', () => {
+    expect(parse('\\N^+').json).toBe('PositiveIntegers');
+    expect(parse('\\Z^-').json).toBe('NegativeIntegers');
+    expect(parse('\\R^+').json).toBe('PositiveNumbers');
+  });
+
+  it('\\sum_{n \\in \\Z^+} n is valid (no PseudoInverse leak)', () => {
+    const sum = parse('\\sum_{n \\in \\Z^+} n');
+    expect(sum.isValid).toBe(true);
+    expect(JSON.stringify(sum.json)).not.toContain('PseudoInverse');
+  });
+
+  it('a non-set (e.g. matrix-typed) base still yields PseudoInverse', () => {
+    ce.pushScope();
+    ce.declare('M', 'matrix');
+    expect(ce.parse('M^+').json).toEqual(['PseudoInverse', 'M']);
+    ce.popScope();
+  });
+});

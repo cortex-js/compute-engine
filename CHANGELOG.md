@@ -45,6 +45,49 @@
 
 ### Resolved Issues
 
+- **Floating-point arguments numericize under `evaluate()` everywhere.**
+  About thirty special functions kept float arguments symbolic
+  (`\Gamma(5.1)`, `e^{5.1}`, `\operatorname{erf}(1.5)`, Bessel, Airy,
+  elliptic, hypergeometric, …) while `\cos(5.1)` numericized — the exactness
+  contract now applies uniformly: an inexact argument yields a numeric
+  result under plain `evaluate()`, at the engine's precision; exact
+  arguments are unaffected (`\Gamma(\frac12)`, `\ln 2` stay symbolic). Mixed
+  sums fold too (`0.5 + \pi` → `3.6415…`). Exact Gaussian-integer complex
+  values (`i`, `2+i`) are correctly treated as exact throughout.
+
+- **Lenient parsing: digit suffixes are subscripts, bare function names
+  apply.** In lenient mode `x2` parsed as `x^2` and `x1` *lost its index*
+  (→ `x`); per the documented recommendation they now parse as subscripts
+  (`x_2`, `x_1`, `x_{12}`). `sin x` without parentheses parsed as the
+  product `i \cdot n \cdot s \cdot x` (complex-valued!); known function
+  names now apply to the following factor, and `log2(8)` means
+  `\log_2 8 = 3`. Also: `[1,...,10]` no longer leaks an internal
+  placeholder (it is a `Range`), and an unbraced superscript on a set
+  symbol (`\Z^+`) now means the signed set (`PositiveIntegers`) — it parsed
+  as the matrix *pseudoinverse*, breaking `\sum_{n \in \Z^+}` —
+  while `M^+` on a matrix still means pseudoinverse.
+
+- **Chained `\ne` is pairwise.** `1 \ne 2 \ne 2` evaluated to True ("first
+  differs from the rest"); it now means `1 \ne 2 \wedge 2 \ne 2` → False,
+  consistent with the other chained relations.
+
+- **A scalar or matrix next to a function-valued or matrix-valued symbol
+  multiplies.** `2f`, `f\,x`, and `M\,P` (declared matrix symbols) silently
+  became `Tuple`s; they are now products.
+
+- **Equality and `isSame` are coherent relations.** `isSame` is now a true
+  equivalence relation (an exact rational no longer spuriously matched a
+  machine-precision decimal one-directionally); expression-valued bindings
+  compare symmetrically (`g := x^2+1` matches `x^2+1` from either side);
+  non-canonical but determinable forms compare correctly
+  (`["Add", 1, 1]` unevaluated `isEqual` 4/2… now `true` vs 2); ordering
+  and equality share one tolerance (a value can no longer be
+  simultaneously "equal to" and "less than" another); and equality with
+  free variables uniformly answers `undefined` unless provable — a sampled
+  counterexample no longer produces a definitive `false` (an assumption
+  could still make the equation true), while identities that hold at all
+  sample points remain `true`.
+
 - **Sums over infinite index sets evaluate (and can be interrupted).**
   `\sum_{n \in \mathbb{Z}^+} \frac{1}{n^2}` hung indefinitely under
   `evaluate()` — the set-domain iteration path never yielded to the

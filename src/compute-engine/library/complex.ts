@@ -8,6 +8,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { isNumber, isSymbol } from '../boxed-expression/type-guards';
+import { shouldNumericize } from '../boxed-expression/apply';
 import {
   type SubjectPart,
   hasAssumptions,
@@ -101,7 +102,11 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         if (typeof op === 'number' || op.im === 0) {
           const isNonNegative = typeof op === 'number' ? op >= 0 : op.re >= 0;
           const result = isNonNegative ? ce.Zero : ce.Pi;
-          return numericApproximation ? result.N() : result;
+          // D2: an inexact (float) argument numericizes even under plain
+          // evaluate() — `Argument(-5.1)` → 3.14159… (not the symbolic `Pi`).
+          return shouldNumericize(numericApproximation, ops[0])
+            ? result.N()
+            : result;
         }
         return ce
           .function('Arctan2', [op.im, op.re])

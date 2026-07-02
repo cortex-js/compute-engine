@@ -14,6 +14,35 @@ import {
 import { joinLatex } from '../tokenizer';
 import { DELIMITERS_SHORTHAND } from './definitions-core';
 
+/** Base number-set symbols. A `+`/`-`/`*` superscript on one of these is a
+ * signed-set modifier, not a matrix operation (see the `PseudoInverse`
+ * postfix). Includes the parsed names for `\Z`, `\N`, `\Q`, `\R`, `\C` and
+ * their extended/derived variants. */
+const KNOWN_SET_SYMBOLS = new Set<string>([
+  'Integers',
+  'RationalNumbers',
+  'RealNumbers',
+  'ComplexNumbers',
+  'NonNegativeIntegers', // \N
+  'AlgebraicNumbers',
+  'TranscendentalNumbers',
+  'ImaginaryNumbers',
+  'ExtendedRealNumbers',
+  'ExtendedIntegers',
+  'ExtendedRationalNumbers',
+  'ExtendedComplexNumbers',
+]);
+
+/** Positive-signed-set modifier for a base set (`\Z^+` → positive integers),
+ * mirroring the braced `\Z^{+}` triggers in `definitions-sets.ts`. Sets not
+ * listed here fall through to the general `Superplus` modifier. */
+const POSITIVE_SET_MODIFIER: Record<string, string> = {
+  Integers: 'PositiveIntegers',
+  NonNegativeIntegers: 'PositiveIntegers', // \N^+
+  RealNumbers: 'PositiveNumbers',
+  ComplexNumbers: 'UpperHalfPlane', // \C^+ (open upper half-plane)
+};
+
 export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   // The first argument is the matrix data.
   // The second, optional, argument are the delimiters.
@@ -267,6 +296,19 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     name: 'PseudoInverse',
     kind: 'postfix',
     latexTrigger: ['^', '+'],
+    // A `+` superscript on a *set* symbol is the positive-signed-set modifier
+    // (`\Z^+` = positive integers), exactly as the braced `\Z^{+}` form — not a
+    // matrix pseudo-inverse. `PseudoInverse` applies only to non-set (e.g.
+    // matrix-typed) bases. Sets without a dedicated positive set fall through to
+    // the general `Superplus` postfix (a signed-set modifier).
+    parse: (_parser: Parser, lhs: MathJsonExpression): MathJsonExpression | null => {
+      if (typeof lhs === 'string') {
+        if (lhs in POSITIVE_SET_MODIFIER)
+          return POSITIVE_SET_MODIFIER[lhs] as MathJsonExpression;
+        if (KNOWN_SET_SYMBOLS.has(lhs)) return null;
+      }
+      return ['PseudoInverse', lhs] as MathJsonExpression;
+    },
   },
 
   {

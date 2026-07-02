@@ -35,10 +35,8 @@ canonical = [
   ["Multiply", 2, ["Sqrt", 5]]
 ]
 simplify  = 16.6591489420125664058 + pi
-eval-auto = 16.6591489420125664058 + pi
-eval-mach = 16.65914894201257 + pi
-N-auto    = 19.8007415956023596443
-N-mach    = 19.800741595602364
+eval-auto = 19.8007415956023596443
+eval-mach = 19.800741595602364
 `;
 
 exports[`ADD Add '\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}' 1`] = `
@@ -178,10 +176,8 @@ box       = [
 ]
 canonical = ["Add", ["Rational", 535, 63], ["Sqrt", 2], 1.1, "Pi"]
 simplify  = 11.0062770544365871123 + pi
-eval-auto = 11.0062770544365871123 + pi
-eval-mach = 11.006277054436586 + pi
-N-auto    = 14.1478697080263803508
-N-mach    = 14.147869708026379
+eval-auto = 14.1478697080263803508
+eval-mach = 14.147869708026379
 `;
 
 exports[`EXACT EVALUATION Canceled inexact values are ignored 1`] = `
@@ -292,16 +288,15 @@ N-mach    = 23.140692632779263
 
 exports[`EXP Exp ['Complex', 1.1, 1.1] 1`] = `
 box       = ["Exp", ["Complex", 1.1, 1.1]]
-eval-auto = e^(1.1 + 1.1i)
-eval-mach = e^(1.1 + 1.1i)
+eval-auto = (1.36267805658060030031788875552347291661826 + 2.6773348713875595i)
+eval-mach = (1.3626780565806003 + 2.67733487138756i)
 N-auto    = (1.3626780565806003 + 2.67733487138756i)
-N-mach    = (1.3626780565806003 + 2.67733487138756i)
 `;
 
 exports[`EXP Exp ['List', 1.1, 2, 4] 1`] = `
 box       = ["Exp", ["List", 1.1, 2, 4]]
-eval-auto = [e^(1.1),e^2,e^4]
-eval-mach = [e^(1.1),e^2,e^4]
+eval-auto = [3.00416602394643311206,e^2,e^4]
+eval-mach = [3.0041660239464334,e^2,e^4]
 N-auto    = [3.00416602394643311206,7.38905609893065022723,54.5981500331442390781]
 N-mach    = [3.004166023946433,7.3890560989306495,54.59815003314423]
 `;
@@ -331,9 +326,8 @@ N-mach    = 2.718281828459045
 
 exports[`EXP Exp 1.1 1`] = `
 box       = ["Exp", 1.1]
-eval-auto = e^(1.1)
-eval-mach = e^(1.1)
-N-auto    = 3.00416602394643311206
+eval-auto = 3.00416602394643311206
+eval-mach = 3.0041660239464334
 N-mach    = 3.004166023946433
 `;
 
@@ -754,9 +748,8 @@ box       = [
 ]
 canonical = ["Multiply", ["Rational", 50, 9], ["Sqrt", 2], 1.1, "Pi"]
 simplify  = 8.64241621450224752045 * pi
-eval-auto = 8.64241621450224752045 * pi
-eval-mach = 8.642416214502248 * pi
-N-auto    = 27.1509512887455715095
+eval-auto = 27.1509512887455715095
+eval-mach = 27.15095128874557
 N-mach    = 27.15095128874569
 `;
 
@@ -935,9 +928,9 @@ exports[`POWER INVALID Power 2`] = `["Power", 2.5, -1.1, ["Error", "unexpected-a
 
 exports[`POWER Power with negative exponent 1`] = `0.064`;
 
-exports[`POWER Power with negative real exponent 1`] = `["Power", 2.5, -3.2]`;
+exports[`POWER Power with negative real exponent 1`] = `0.05328340527371988098661422197488939093657646678782278343299188469636634784287437258715408467395992243`;
 
-exports[`POWER Power with positive real exponent 1`] = `["Power", 2.5, 1.1]`;
+exports[`POWER Power with positive real exponent 1`] = `2.7398955659630432723875867857218476867044157347621247447752730386744038824670860397039286034821742`;
 
 exports[`RATIONAL Bignum rational 1`] = `
 box       = [
@@ -1023,13 +1016,13 @@ exports[`RELATIONAL OPERATOR NotEqual 1`] = `False`;
 
 exports[`RELATIONAL OPERATOR NotEqual 2`] = `True`;
 
-exports[`ROOT Root 2.5 1`] = `["Root", 2.5, 3]`;
+exports[`ROOT Root 2.5 1`] = `1.357208808297453285759044734839744602402553884744548478642182721401654278164382924743598688425750522`;
 
 exports[`ROOT Root 5/7 1`] = `["Root", ["Rational", 5, 7], 3]`;
 
 exports[`ROOT Root 1234567890987654321 1`] = `["Root", {num: "1234567890987654321"}, 3]`;
 
-exports[`ROOT Root 1234567890987654321.123456789 1`] = `["Root", "1234567890987654321.123456789", 3]`;
+exports[`ROOT Root 1234567890987654321.123456789 1`] = `1072765.97992715828121793352753971285101609945487595727773633036582273909092870301514355176627234341`;
 
 exports[`ROOT Root of negative number with even exponent 1`] = `["Complex", 0, 1.4142135623730951]`;
 

@@ -27,6 +27,21 @@ describe('Parser: list range ellipsis', () => {
     });
   });
 
+  // Single-anchor continuation `[1, ..., 10]`: one sample, so no step can be
+  // inferred — it means the same as the endpoint-only `[1...10]`, i.e.
+  // Range(1, 10). The internal `ContinuationPlaceholder` must never leak as a
+  // list element.
+  describe('single-anchor form [a, ..., b]', () => {
+    test('`[1, \\ldots, 10]` → Range(1, 10)', () => {
+      expect(parse('\\left[1, \\ldots, 10\\right]')).toEqual(['Range', 1, 10]);
+    });
+
+    test('does not leak ContinuationPlaceholder', () => {
+      const json = JSON.stringify(parse('\\left[1, \\ldots, 10\\right]'));
+      expect(json).not.toContain('ContinuationPlaceholder');
+    });
+  });
+
   describe('inferred-step form [a, b, ..., c]', () => {
     test('`[1, 3, ..., 9]` → Range(1, 9, 2)', () => {
       expect(parse('\\left[1, 3, \\ldots, 9\\right]')).toEqual(['Range', 1, 9, 2]);

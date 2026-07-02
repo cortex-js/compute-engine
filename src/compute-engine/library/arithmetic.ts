@@ -17,7 +17,13 @@ import {
 } from '../boxed-expression/numerics';
 import { addOrder } from '../boxed-expression/order';
 
-import { apply, apply2, applyN } from '../boxed-expression/apply';
+import {
+  apply,
+  apply2,
+  applyN,
+  shouldNumericize,
+  isExactNumber,
+} from '../boxed-expression/apply';
 import { flatten } from '../boxed-expression/flatten';
 
 import {
@@ -256,7 +262,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Do not evaluate in the case of numericApproximation
         // to avoid premature rounding errors.
         // For example: `\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}`
-        return numericApproximation ? addN(...ops) : add(...evaluated);
+        if (numericApproximation) return addN(...ops);
+        const result = add(...evaluated);
+        // D2: an inexact (float) operand has no exactness to preserve, so it
+        // numericizes the whole sum even when mixed with an exact symbolic
+        // constant that the numeric-literal fold above can't reach (`Pi`,
+        // `ExponentialE`, …) — `Add(0.5, Pi)` → 3.64…, matching
+        // `Add(0.5, Sqrt(2))` (which already folds via the numeric-literal
+        // path since `Sqrt(2)` is itself a number literal). Only when the
+        // sum has no free variables: `0.5 + x` must stay symbolic.
+        // `isExactNumber` (not plain `isExact`) protects an exact Gaussian
+        // complex term (`1/2 + i` stays `1/2 + i`, not `(0.5 + i)`).
+        if (
+          result.operator === 'Add' &&
+          result.unknowns.length === 0 &&
+          evaluated.some((x) => !isExactNumber(x))
+        )
+          return result.N();
+        return result;
       },
     },
 
@@ -626,7 +649,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return engine.function('Gamma', [s]).evaluate({
               numericApproximation,
             });
-          return numericApproximation
+          return shouldNumericize(numericApproximation, s, z)
             ? applyN(
                 [s, z],
                 (s, z) => incompleteGammaUpper(s, z),
@@ -641,7 +664,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // This is exact, so return it regardless of numericApproximation.
         if (isNumber(x) && x.im === 0 && x.isInteger && x.isNonPositive)
           return engine.ComplexInfinity;
-        return numericApproximation
+        return shouldNumericize(numericApproximation, x)
           ? apply(
               x,
               (x) => gamma(x),
@@ -660,7 +683,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops) => numericTypeHandler(ops),
 
       evaluate: (ops, { numericApproximation, engine }) =>
-        numericApproximation
+        shouldNumericize(numericApproximation, ops[0])
           ? apply(
               ops[0],
               (x) => gammaln(x),
@@ -681,7 +704,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([x], { numericApproximation, engine }) =>
-        numericApproximation
+        shouldNumericize(numericApproximation, x)
           ? apply(x, digamma, (x) => bigDigamma(engine, x))
           : undefined,
     },
@@ -696,7 +719,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([x], { numericApproximation, engine }) =>
-        numericApproximation
+        shouldNumericize(numericApproximation, x)
           ? apply(x, trigamma, (x) => bigTrigamma(engine, x))
           : undefined,
     },
@@ -713,7 +736,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(order: integer, number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([n, x], { numericApproximation, engine }) =>
-        numericApproximation
+        shouldNumericize(numericApproximation, n, x)
           ? apply2(
               n,
               x,
@@ -733,7 +756,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([x], { numericApproximation, engine }) => {
-        if (numericApproximation)
+        if (shouldNumericize(numericApproximation, x))
           return apply(x, zeta, (x) => bigZeta(engine, x));
 
         // Exact values at integer literals (via exact Bernoulli rationals):
@@ -771,7 +794,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([a, b], { numericApproximation, engine }) =>
-        numericApproximation
+        shouldNumericize(numericApproximation, a, b)
           ? apply2(a, b, beta, (a, b) => bigBeta(engine, a, b))
           : undefined,
     },
@@ -786,7 +809,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([x], { numericApproximation, engine }) =>
-        numericApproximation
+        shouldNumericize(numericApproximation, x)
           ? apply(x, lambertW, (x) => bigLambertW(engine, x))
           : undefined,
     },
@@ -801,7 +824,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(order: number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([n, x], { numericApproximation }) =>
-        numericApproximation ? apply2(n, x, besselJ) : undefined,
+        shouldNumericize(numericApproximation, n, x)
+          ? apply2(n, x, besselJ)
+          : undefined,
     },
 
     // Bessel function of the second kind Y_n(x)
@@ -814,7 +839,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(order: number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([n, x], { numericApproximation }) =>
-        numericApproximation ? apply2(n, x, besselY) : undefined,
+        shouldNumericize(numericApproximation, n, x)
+          ? apply2(n, x, besselY)
+          : undefined,
     },
 
     // Modified Bessel function of the first kind I_n(x)
@@ -826,7 +853,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(order: number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([n, x], { numericApproximation }) =>
-        numericApproximation ? apply2(n, x, besselI) : undefined,
+        shouldNumericize(numericApproximation, n, x)
+          ? apply2(n, x, besselI)
+          : undefined,
     },
 
     // Modified Bessel function of the second kind K_n(x)
@@ -840,7 +869,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(order: number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([n, x], { numericApproximation }) =>
-        numericApproximation ? apply2(n, x, besselK) : undefined,
+        shouldNumericize(numericApproximation, n, x)
+          ? apply2(n, x, besselK)
+          : undefined,
     },
 
     // Airy function of the first kind Ai(x)
@@ -853,7 +884,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([x], { numericApproximation }) =>
-        numericApproximation ? apply(x, airyAi) : undefined,
+        shouldNumericize(numericApproximation, x)
+          ? apply(x, airyAi)
+          : undefined,
     },
 
     // Airy function of the second kind Bi(x)
@@ -865,7 +898,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([x], { numericApproximation }) =>
-        numericApproximation ? apply(x, airyBi) : undefined,
+        shouldNumericize(numericApproximation, x)
+          ? apply(x, airyBi)
+          : undefined,
     },
 
     Ln: {
@@ -1184,7 +1219,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return quantityMultiply(engine!, evaluated);
         }
         // Use evaluate in both cases: do not introduce premature rounding errors
-        return numericApproximation ? mulN(...ops) : mul(...evaluated);
+        if (numericApproximation) return mulN(...ops);
+        const result = mul(...evaluated);
+        // D2: see the matching comment in `Add` — an inexact (float) operand
+        // numericizes the whole product even when mixed with an exact
+        // symbolic constant (`Multiply(0.5, Pi)` → 1.57…). Only when the
+        // product has no free variables: `0.5 * x` must stay symbolic.
+        if (
+          result.operator === 'Multiply' &&
+          result.unknowns.length === 0 &&
+          evaluated.some((x) => !isExactNumber(x))
+        )
+          return result.N();
+        return result;
       },
     },
 
@@ -1268,7 +1315,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // *negative* integer exponent yields a (non-integer) rational
         // (P0-11: `2^-2 = 1/4`).
         if (base.isInteger && exp.isInteger)
-          return exp.isNonNegative === true ? 'finite_integer' : 'finite_rational';
+          return exp.isNonNegative === true
+            ? 'finite_integer'
+            : 'finite_rational';
         if (base.isRational && exp.isInteger) return 'finite_rational';
         // A real result needs a non-negative base or an integer exponent;
         // otherwise the result may be complex (e.g. (−2)^0.5).
@@ -1335,8 +1384,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (evalBase.operator === 'Quantity') {
           return quantityPower(engine!, evalBase, n.evaluate());
         }
+        // D2: an inexact (float) base or exponent numericizes even under
+        // plain evaluate() — `Power(2, 5.1)` → 34.29…, matching `Cos(5.1)`.
+        // `isExactNumber` (not plain `isExact`) protects the exact
+        // Gaussian-integer power path, e.g. `(1+i)^3 = 2+11i` — WP-2.16.
         return pow(x, n, {
-          numericApproximation: numericApproximation ?? false,
+          numericApproximation: shouldNumericize(numericApproximation, x, n),
         });
       },
       // Defined as RealNumbers for all power in RealNumbers when base > 0;
@@ -1456,8 +1509,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (nVal !== undefined && nVal !== 0)
             return quantityPower(engine, evalX, engine.number(1 / nVal));
         }
+        // D2: an inexact (float) radicand or index numericizes even under
+        // plain evaluate() — `Root(5.1, 3)` → 1.721…; `isExactNumber`
+        // protects an exact Gaussian-integer radicand (see `Power`).
         return root(x, n, {
-          numericApproximation: numericApproximation ?? false,
+          numericApproximation: shouldNumericize(numericApproximation, x, n),
         });
       },
     },
@@ -2257,7 +2313,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (first.isFiniteCollection !== true) return undefined;
           const result = run(
             reduceCollection(first, engine.Zero, (acc, x) =>
-              sumAccumulate(acc, x.evaluate({ numericApproximation }), numericApproximation)
+              sumAccumulate(
+                acc,
+                x.evaluate({ numericApproximation }),
+                numericApproximation
+              )
             ),
             engine._timeRemaining
           );
@@ -2279,7 +2339,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             first,
             rest,
             (acc: Expression, x) =>
-              sumAccumulate(acc, x.evaluate({ numericApproximation: numeric }), numeric),
+              sumAccumulate(
+                acc,
+                x.evaluate({ numericApproximation: numeric }),
+                numeric
+              ),
             engine.Zero
           ),
           engine._timeRemaining
@@ -2287,7 +2351,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Non-enumerable domain: keep the expression symbolic.
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
         // Re-evaluate to combine numeric terms (e.g., 3x + 1 + 2 + 3 → 3x + 6).
-        return result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN;
+        return (
+          result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN
+        );
       },
 
       evaluateAsync: async (
@@ -2299,7 +2365,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (first.isFiniteCollection !== true) return undefined;
           const result = await runAsync(
             reduceCollection(first, engine.Zero, (acc, x) =>
-              sumAccumulate(acc, x.evaluate({ numericApproximation }), numericApproximation)
+              sumAccumulate(
+                acc,
+                x.evaluate({ numericApproximation }),
+                numericApproximation
+              )
             ),
             engine._timeRemaining,
             signal
@@ -2318,14 +2388,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             first,
             rest,
             (acc: Expression, x) =>
-              sumAccumulate(acc, x.evaluate({ numericApproximation: numeric }), numeric),
+              sumAccumulate(
+                acc,
+                x.evaluate({ numericApproximation: numeric }),
+                numeric
+              ),
             engine.Zero
           ),
           engine._timeRemaining,
           signal
         );
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
-        return result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN;
+        return (
+          result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN
+        );
       },
     },
   },
@@ -2398,7 +2474,11 @@ function evaluateAbs(
       const re = num.re;
       const im = num.im;
       const s = re * re + im * im;
-      if (Number.isInteger(re) && Number.isInteger(im) && Number.isSafeInteger(s))
+      if (
+        Number.isInteger(re) &&
+        Number.isInteger(im) &&
+        Number.isSafeInteger(s)
+      )
         return ce
           .function('Sqrt', [ce.number(s)])
           .evaluate({ numericApproximation });

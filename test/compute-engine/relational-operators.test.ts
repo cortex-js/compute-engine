@@ -367,3 +367,36 @@ describe('Mixed-DIRECTION chained inequalities', () => {
     expect(ce.parse('a > b > c').json).toEqual(['Less', 'c', 'b', 'a']);
   });
 });
+
+// `NotEqual` is not transitive, so a chained `a ≠ b ≠ c` means the pairwise
+// `a ≠ b ∧ b ≠ c` (NOT the n-ary "all distinct", which mis-evaluated `1 ≠ 2 ≠ 2`
+// to True). It participates in the same chain machinery as the other
+// relationals: `NotEqual` decomposes into an `And` of adjacent pairs.
+describe('Chained NotEqual (pairwise, not all-distinct)', () => {
+  it('a ≠ b ≠ c → And(a ≠ b, b ≠ c)', () => {
+    expect(ce.parse('a \\ne b \\ne c').json).toEqual([
+      'And',
+      ['NotEqual', 'a', 'b'],
+      ['NotEqual', 'b', 'c'],
+    ]);
+  });
+
+  it('a ≠ b (2-arg) stays a plain NotEqual', () => {
+    expect(ce.parse('a \\ne b').json).toEqual(['NotEqual', 'a', 'b']);
+  });
+
+  it('evaluates chained ≠ with pairwise semantics', () => {
+    // 1 ≠ 2 ≠ 2 is False (2 ≠ 2 fails), under pairwise semantics
+    expect(ce.parse('1 \\ne 2 \\ne 2').evaluate().json).toBe('False');
+    // 1 ≠ 2 ≠ 1 is True (1 ≠ 2 and 2 ≠ 1), even though 1 repeats
+    expect(ce.parse('1 \\ne 2 \\ne 1').evaluate().json).toBe('True');
+  });
+
+  it('mixes with directional links: a < b ≠ c → And(a < b, b ≠ c)', () => {
+    expect(ce.parse('a < b \\ne c').json).toEqual([
+      'And',
+      ['NotEqual', 'b', 'c'],
+      ['Less', 'a', 'b'],
+    ]);
+  });
+});

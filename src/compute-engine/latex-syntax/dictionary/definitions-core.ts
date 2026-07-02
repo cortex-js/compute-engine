@@ -2366,8 +2366,8 @@ function tryInferRangeFromElements(
   elems: readonly MathJsonExpression[],
   parser: Parser
 ): MathJsonExpression | null {
-  // Need at least 4 elements: s0, s1, ContinuationPlaceholder, end
-  if (elems.length < 4) return null;
+  // Need at least 3 elements: s0, ContinuationPlaceholder, end
+  if (elems.length < 3) return null;
 
   const penultimate = elems[elems.length - 2];
   // Check that the second-to-last element is ContinuationPlaceholder
@@ -2377,6 +2377,15 @@ function tryInferRangeFromElements(
   // end     = the last element
   const samples = elems.slice(0, -2);
   const endExpr = elems[elems.length - 1];
+
+  // Single-anchor continuation: `[1, ..., 10]` (no second sample to infer a
+  // step). Produce the default-step `Range(start, end)`, matching `[1...10]`.
+  // The `ContinuationPlaceholder` must never survive as a list element.
+  if (samples.length === 1) {
+    const start = machineValue(samples[0]);
+    if (start === null) return null;
+    return ['Range', start, endExpr];
+  }
 
   // Need at least 2 samples to infer a step
   if (samples.length < 2) return null;

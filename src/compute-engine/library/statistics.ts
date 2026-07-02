@@ -8,7 +8,7 @@ import {
   erfi,
   erfInv,
 } from '../numerics/special-functions';
-import { apply } from '../boxed-expression/apply';
+import { apply, shouldNumericize } from '../boxed-expression/apply';
 import { isNumber } from '../boxed-expression/type-guards';
 import {
   bigInterquartileRange,
@@ -99,11 +99,12 @@ function computeBinning(
 export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
   {
     //
-    // Note (REVIEW.md B23): Erf/Erfc/ErfInv follow the same pattern as
-    // Gamma/Zeta in `library/arithmetic.ts`: exact special values fold in
-    // `evaluate()`, anything else stays symbolic unless
-    // `numericApproximation` is set, in which case `apply()` dispatches to
-    // the machine kernel or, when the engine precision exceeds machine
+    // Erf/Erfc/ErfInv/Erfi follow the same pattern as Gamma/Zeta in
+    // `library/arithmetic.ts`: exact special values fold in `evaluate()`;
+    // an inexact (float) argument numericizes even under plain `evaluate()`
+    // (policy D2 — no exactness to preserve), and `numericApproximation`
+    // (`.N()`) always numericizes. `shouldNumericize()` dispatches to the
+    // machine kernel or, when the engine precision exceeds machine
     // precision, the bignum kernel. Complex arguments stay symbolic (no
     // complex kernel — previously the real part was used silently, which
     // was incorrect).
@@ -118,7 +119,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.Zero;
         if (x.isInfinity) return x.isPositive ? ce.One : ce.NegativeOne;
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
           x,
           (x) => erf(x),
@@ -137,7 +138,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.One;
         if (x.isInfinity) return x.isPositive ? ce.Zero : ce.number(2);
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
           x,
           (x) => erfc(x),
@@ -159,7 +160,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (x.isSame(1)) return ce.PositiveInfinity;
         if (x.isSame(-1)) return ce.NegativeInfinity;
         if (x.re < -1 || x.re > 1) return ce.NaN; // outside the domain
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
           x,
           (x) => erfInv(x),
@@ -180,7 +181,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (x.isSame(0)) return ce.Zero;
         if (x.isInfinity)
           return x.isPositive ? ce.PositiveInfinity : ce.NegativeInfinity;
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
           x,
           (x) => erfi(x),

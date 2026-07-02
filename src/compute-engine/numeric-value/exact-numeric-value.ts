@@ -791,7 +791,14 @@ export class ExactNumericValue extends NumericValue {
         this.rational[1] == other.rational[1]
       );
     }
-    return other.im === 0 && other.re === this.re;
+    // Compare against a non-exact `NumericValue` (e.g. a `BigNumericValue`) at
+    // working precision via `bignumRe`, mirroring `BigNumericValue.eq`. The
+    // previous `other.re === this.re` downcast both operands to a machine float,
+    // which made `eq` precision-dependent and *asymmetric* with the bignum path
+    // (`1/3` equalled a 30-digit `0.333…` in one direction only) and broke
+    // transitivity — isSame is a dedup/matching key, so it must be an
+    // equivalence relation (CM-P1-2 / SYMBOLIC P1-9).
+    return other.im === 0 && this.bignumRe.eq(other.bignumRe ?? other.re);
   }
 
   lt(other: number | NumericValue): boolean | undefined {

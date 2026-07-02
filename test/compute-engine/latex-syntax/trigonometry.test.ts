@@ -80,10 +80,8 @@ describe('TRIGONOMETRIC DEGREES', () => {
       box       = ["Degrees", ["Tan", ["Subtract", 90, 0.000001]]]
       canonical = ["Degrees", ["Tan", ["Add", 90, -0.000001]]]
       simplify  = Degrees(tan(89.999999))
-      eval-auto = -0.0110844744057936925899 * pi
-      eval-mach = -0.011084474405793623 * pi
-      N-auto    = -0.0348229033621455533306
-      N-mach    = -0.03482290336214534
+      eval-auto = -0.0348229033621455533306
+      eval-mach = -0.03482290336214534
     `));
 
   test('\\cos(30\\degree)', () =>

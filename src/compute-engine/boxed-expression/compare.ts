@@ -26,6 +26,27 @@ export function same(a: Expression, b: Expression): boolean {
   if (a === b) return true;
 
   //
+  // Follow symbol value bindings so that isSame is symmetric (it is used as a
+  // dedup/matching key and must be an equivalence relation). `BoxedSymbol.isSame`
+  // already follows the LHS binding; mirror it here for whichever side is a
+  // symbol when the *other* side is not. Two symbols are compared by name in the
+  // BoxedSymbol branch below (bindings are NOT followed for symbol-vs-symbol),
+  // so we only unwrap when exactly one operand is a symbol.
+  //
+  const aSym = isSymbol(a);
+  const bSym = isSymbol(b);
+  if (aSym !== bSym) {
+    if (bSym) {
+      const bv = b.value;
+      if (bv !== undefined && (bv as Expression) !== b) return same(a, bv);
+      return false;
+    }
+    const av = a.value;
+    if (av !== undefined && (av as Expression) !== a) return same(av, b);
+    return false;
+  }
+
+  //
   // BoxedFunction
   // Operator and operands must match
   //
@@ -106,8 +127,16 @@ export function eq(
   //
   // We want to compare the **value** of the boxed expressions.
   //
+  // Canonicalize non-canonical inputs first: a non-canonical (unbound)
+  // expression such as `Add(1, 1)` does not evaluate under `.N()` (it stays
+  // `1 + 1` with `isFinite === false`), which used to collapse to a spurious
+  // definitive `false` in the finiteness branch below (CM-P1-3).
+  //
+  if (!a.isCanonical) a = a.canonical;
   a = a.N();
-  let b = typeof inputB !== 'number' ? inputB.N() : a.engine.expr(inputB);
+  let b: Expression;
+  if (typeof inputB === 'number') b = a.engine.expr(inputB);
+  else b = (inputB.isCanonical ? inputB : inputB.canonical).N();
 
   //
   // Do we have at least one function expression?
@@ -133,7 +162,12 @@ export function eq(
       if (a.isFinite && b.isFinite) return isZeroWithTolerance(a.sub(b).N());
       if (a.isNaN || b.isNaN) return false;
       if (a.isInfinity && b.isInfinity && a.sgn === b.sgn) return true;
-      return false;
+      // One side is (determinately) infinite and it is not the same infinity
+      // as the other: they are provably unequal.
+      if (a.isInfinity || b.isInfinity) return false;
+      // Finiteness could not be determined (e.g. an inert expression whose
+      // value did not resolve to a number). Don't assert a definitive `false`.
+      return undefined;
     }
 
     // Try structural equality after expand+simplify first
@@ -141,8 +175,16 @@ export function eq(
     b = _expand(b).simplify();
     if (same(a, b)) return true;
 
-    // Fall back to stochastic evaluation at random sample points
-    return stochasticEqual(a, b);
+    // Fall back to stochastic evaluation at random sample points.
+    // A sampled *disagreement* refutes only identity-in-all-variables — under
+    // the engine's "truth under constraints" equality contract (an assumption
+    // such as `x = 4` could still make `x + 1 = 5` true), it is not a
+    // definitive `false`, so it degrades to `undefined`. Sampled *agreement*
+    // suggests an identity, which holds under any constraints — the pragmatic
+    // `true` is kept. (Decision D9, FINDINGS-TRACKER.md; makes free-variable
+    // answers uniform with `x.isEqual(2)` → undefined.)
+    const sampled = stochasticEqual(a, b);
+    return sampled === false ? undefined : sampled;
   }
 
   //
@@ -234,6 +276,12 @@ export function cmp(
       if (av.eq(b)) return '=';
       const lt = av.lt(b);
       if (lt === undefined) return undefined;
+      // Tolerance-aware equality, consistent with the machine path above and
+      // the symbol branches below: values within tolerance must not be ordered
+      // strictly, or `isEqual` and `isGreater`/`isLess` would both be true
+      // (CM-P1-4).
+      if (av.sub(a.engine._numericValue(b)).isZeroWithTolerance(a.engine.tolerance))
+        return '=';
       return lt ? '<' : '>';
     }
 
@@ -309,19 +357,28 @@ export function cmp(
 
     const av = a.numericValue;
     const bv = b.numericValue as NumericValue;
+    const tol = a.engine.tolerance;
     // NaN is unordered: comparisons involving it are indeterminate
     if (bv.isNaN) return undefined;
     if (typeof av === 'number') {
       if (Number.isNaN(av)) return undefined;
+      // Exact equality first: `Infinity - Infinity` is NaN, so the tolerance
+      // check below cannot detect equal infinities.
       if (bv.eq(av)) return '=';
-      const gt = bv.lt(av);
+      const gt = bv.lt(av); // is `bv < av`? undefined when unordered (complex)
       if (gt === undefined) return undefined;
+      // Tolerance-aware equality, consistent with the machine and symbol
+      // branches of cmp(): values within tolerance must not be ordered
+      // strictly, or `isEqual` and `isLess` would both be true (CM-P1-4).
+      if (bv.sub(a.engine._numericValue(av)).isZeroWithTolerance(tol))
+        return '=';
       return gt ? '>' : '<';
     }
     if (av.isNaN) return undefined;
     if (av.eq(bv)) return '=';
     const lt = av.lt(bv);
     if (lt === undefined) return undefined;
+    if (av.sub(bv).isZeroWithTolerance(tol)) return '=';
     return lt ? '<' : '>';
   }
 

@@ -284,6 +284,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
 
     signature: '(any, any) -> boolean',
+
+    // `lazy` so the `canonical` handler receives raw, direction-intact operands
+    // for chain decomposition (see `canonicalComparisonChain`); a chained
+    // `a ≠ b ≠ c` becomes `And(a ≠ b, b ≠ c)`.
+    lazy: true,
+
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'NotEqual', args),
 
@@ -300,7 +306,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       return false;
     },
 
-    evaluate: (ops, { engine: ce }) => {
+    evaluate: (rawOps, { engine: ce, numericApproximation }) => {
+      // `lazy` skips argument evaluation before this handler runs (see the
+      // `Less` handler): evaluate the operands here so compound operands fold.
+      const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
       if (ops.length < 2) return ce.False;
       let lhs: Expression | undefined = undefined;
       for (const arg of ops!) {
@@ -659,6 +668,7 @@ const CHAINABLE_COMPARISON = new Set([
   'Greater',
   'GreaterEqual',
   'Equal',
+  'NotEqual',
 ]);
 
 function canonicalRelational(
@@ -761,7 +771,12 @@ function canonicalComparisonChain(
   let i = 0;
   while (i < links.length) {
     let j = i;
-    while (j + 1 < links.length && links[j + 1] === links[i]) j++;
+    // Group maximal runs of the same operator into one n-ary segment — EXCEPT
+    // `NotEqual`, which is not transitive: `a ≠ b ≠ c` means `a ≠ b ∧ b ≠ c`
+    // (adjacent pairs), NOT the n-ary "all distinct". Keep each `NotEqual` link
+    // as its own pairwise segment so the chain decomposes into an `And`.
+    if (links[i] !== 'NotEqual')
+      while (j + 1 < links.length && links[j + 1] === links[i]) j++;
     segments.push(buildComparison(ce, links[i], terms.slice(i, j + 2)));
     i = j + 1;
   }

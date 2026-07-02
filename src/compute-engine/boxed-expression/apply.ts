@@ -34,6 +34,58 @@ function boxMachineNumber(ce: IComputeEngine, value: number): Expression {
   return ce.number(value);
 }
 
+/**
+ * True if a number literal has no exactness to lose under D2's "inexact
+ * argument numericizes" rule — the counterpart of `NumberLiteralInterface`'s
+ * `isExact`, patched for one architectural wrinkle.
+ *
+ * A *real* number's `isExact` getter is authoritative. A *complex* number
+ * literal, however, is never `isExact`: its `NumericValue` always lives in
+ * the `Big`/`MachineNumericValue` lane (never `ExactNumericValue`),
+ * regardless of whether its real and imaginary parts are individually exact
+ * — `i`, `1+i`, `1/2+i` all report `isExact === false`. Treat a complex
+ * literal with an *integer* real part and an *integer* imaginary part
+ * (a Gaussian integer) as exact too, so exact Gaussian arithmetic
+ * (`(1+i)^3 = 2+11i`, WP-2.16) and symbolic-stay identities keyed on an
+ * exact complex argument (e.g. an Eisenstein series at τ = i) are preserved.
+ * A non-Gaussian complex float (`1.5+2i`) still numericizes — it never was
+ * representable exactly, Gaussian or otherwise.
+ *
+ * Non-number-literal expressions (symbols like `Pi`, unevaluated functions)
+ * are treated as exact here: they have no float to lose, and any exact
+ * reduction for them is the caller's job, not this predicate's.
+ */
+export function isExactNumber(x: Expression): boolean {
+  if (!isNumber(x)) return true;
+  if (x.isExact) return true;
+  return x.im !== 0 && Number.isInteger(x.re) && Number.isInteger(x.im);
+}
+
+/**
+ * Decide whether a numeric `evaluate()` handler should numericize now
+ * (dispatch to `apply`/`apply2`/`applyN`) rather than stay symbolic.
+ *
+ * Per the exactness contract (CLAUDE.md "Evaluate vs. N"): a *numeric
+ * approximation* request (`numericApproximation`, i.e. `.N()`) always
+ * numericizes; otherwise an *inexact* (float) argument has no exactness to
+ * preserve and numericizes even under plain `evaluate()` — mirroring the
+ * `Cos`/`Sqrt`/`Power` convention (policy D2). Exact operands (integers,
+ * rationals, radicals, symbolic constants like `Pi`, Gaussian integers, or
+ * non-number-literal expressions — see `isExactNumber`) do not trigger this
+ * on their own; call sites should still run their own exact-value
+ * reductions (poles, `f(0)`, …) before consulting this.
+ *
+ * Mixing exact and inexact operands numericizes the whole call (float
+ * contagion), matching `Add`/`Multiply`'s numeric-literal folding.
+ */
+export function shouldNumericize(
+  numericApproximation: boolean | undefined,
+  ...ops: ReadonlyArray<Expression | undefined | null>
+): boolean {
+  if (numericApproximation) return true;
+  return ops.some((op) => op != null && !isExactNumber(op));
+}
+
 export function apply(
   expr: Expression,
   fn: (x: number) => number | Complex,

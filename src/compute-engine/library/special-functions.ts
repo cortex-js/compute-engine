@@ -1,5 +1,5 @@
 import type { SymbolDefinitions } from '../global-types';
-import { applyN } from '../boxed-expression/apply';
+import { applyN, shouldNumericize } from '../boxed-expression/apply';
 import { asSmallInteger } from '../boxed-expression/numerics';
 import { isNumber } from '../boxed-expression/type-guards';
 import { numericTypeHandler } from './type-handlers';
@@ -67,7 +67,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // K(1) = +∞ exactly (Fungrim 45b157)
         if (isNumber(m) && m.im === 0 && m.isSame(1))
           return engine.PositiveInfinity;
-        return numericApproximation
+        return shouldNumericize(numericApproximation, m)
           ? applyN(
               [m],
               ellipticK,
@@ -94,7 +94,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           const [phi, m] = ops;
           if (isNumber(phi) && phi.im === 0 && phi.isSame(0))
             return engine.Zero;
-          return numericApproximation
+          return shouldNumericize(numericApproximation, phi, m)
             ? applyN(
                 [phi, m],
                 ellipticEIncomplete,
@@ -106,7 +106,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const m = ops[0];
         // E(1) = 1 exactly
         if (isNumber(m) && m.im === 0 && m.isSame(1)) return engine.One;
-        return numericApproximation
+        return shouldNumericize(numericApproximation, m)
           ? applyN(
               [m],
               ellipticE,
@@ -130,7 +130,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([phi, m], { numericApproximation, engine }) => {
         // F(0|m) = 0 exactly
         if (isNumber(phi) && phi.im === 0 && phi.isSame(0)) return engine.Zero;
-        return numericApproximation
+        return shouldNumericize(numericApproximation, phi, m)
           ? applyN([phi, m], ellipticF, undefined, ellipticFComplex)
           : undefined;
       },
@@ -152,7 +152,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           // Π(n; 0|m) = 0 exactly
           if (isNumber(phi) && phi.im === 0 && phi.isSame(0))
             return engine.Zero;
-          return numericApproximation
+          return shouldNumericize(numericApproximation, n, phi, m)
             ? applyN(
                 [n, phi, m],
                 ellipticPiIncomplete,
@@ -161,7 +161,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               )
             : undefined;
         }
-        return numericApproximation
+        return shouldNumericize(numericApproximation, ...ops)
           ? applyN(
               ops,
               ellipticPiComplete,
@@ -180,7 +180,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number?) -> number',
       type: (ops) => numericTypeHandler(ops),
       evaluate: (ops, { numericApproximation, engine }) => {
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, ...ops)) return undefined;
         const args = ops.length === 1 ? [engine.One, ops[0]] : [...ops];
         return applyN(args, agm, bigAgm, agmComplex);
       },
@@ -196,7 +196,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // ₂F₁(a, b; c; 0) = 1 exactly
         const z = ops[3];
         if (isNumber(z) && z.im === 0 && z.isSame(0)) return engine.One;
-        return numericApproximation
+        return shouldNumericize(numericApproximation, ...ops)
           ? applyN(
               ops,
               hypergeometric2F1,
@@ -226,7 +226,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           y.isSame(0)
         )
           return engine.One;
-        return numericApproximation
+        return shouldNumericize(numericApproximation, ...ops)
           ? applyN(ops, appellF1, undefined, appellF1Complex)
           : undefined;
       },
@@ -243,7 +243,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // ₁F₁(a; b; 0) = 1 exactly
         const z = ops[2];
         if (isNumber(z) && z.im === 0 && z.isSame(0)) return engine.One;
-        return numericApproximation
+        return shouldNumericize(numericApproximation, ...ops)
           ? applyN(
               ops,
               hypergeometric1F1,
@@ -264,7 +264,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number, number, number?) -> number',
       type: () => 'finite_number',
       evaluate: (ops, { numericApproximation }) => {
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, ops[1], ops[2]))
+          return undefined;
         const j = asSmallInteger(ops[0]);
         if (j === null || j < 1 || j > 4) return undefined;
         // Derivative order r > 0 is not implemented: stay symbolic
@@ -290,7 +291,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: () => 'finite_number',
       evaluate: ([tau], { numericApproximation, engine }) =>
-        numericApproximation
+        shouldNumericize(numericApproximation, tau)
           ? applyN(
               [tau],
               (t) => dedekindEta(engine.complex(t, 0)),
@@ -310,7 +311,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number) -> number',
       type: () => 'finite_number',
       evaluate: (ops, { numericApproximation, engine }) => {
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, ops[1])) return undefined;
         const s = asSmallInteger(ops[0]);
         if (s === null || s < 2 || s % 2 !== 0) return undefined;
         return applyN(
@@ -335,7 +336,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (!isNumber(x) || x.im !== 0) return undefined;
         if (x.isSame(0)) return ce.NegativeInfinity;
         if (x.isInfinity) return x.isPositive ? ce.PositiveInfinity : ce.Zero;
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return applyN([x], expIntegralEi);
       },
     },
@@ -354,7 +355,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (x.isSame(0)) return ce.Zero;
         if (x.isSame(1)) return ce.NegativeInfinity;
         if (x.isInfinity && x.isPositive) return ce.PositiveInfinity;
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return applyN([x], logIntegral);
       },
     },

@@ -1950,6 +1950,15 @@ export interface Expression {
    *
    * ```
    *
+   * **Free variables — "truth under constraints" semantics.** When either
+   * expression has free variables, equality means "could these be equal
+   * under the current (and possible) constraints?": a fact in the
+   * assumptions database (`ce.assume(...)`) can decide it, an identity that
+   * holds for all values (`(x+1)^2` vs `x^2+2x+1`) is `true`, and anything
+   * else — including `x` vs `2`, or `x+1` vs `5`, which an assumption such
+   * as `x = 4` could make true — is `undefined`, never a definitive
+   * `false`.
+   *
    * @category Relational Operator
    */
   isEqual(other: number | Expression): boolean | undefined;

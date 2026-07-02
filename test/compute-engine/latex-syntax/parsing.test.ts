@@ -232,7 +232,7 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     test('Unknown function names are rejected', () => {
       // 'foo' is not a recognized function, should parse as individual symbols
       expect(ce.parse('foo(x)', { strict: false })).toMatchInlineSnapshot(
-        `["Tuple", "f", "o", "o", "x"]`
+        `["Multiply", "f", "o", "o", "x"]`
       );
     });
   });
@@ -253,6 +253,43 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     test('Nested bare functions', () => {
       expect(ce.parse('sin(cos(x))', { strict: false })).toMatchInlineSnapshot(
         `["Sin", ["Cos", "x"]]`
+      );
+    });
+  });
+
+  // In non-strict mode a bare function name applies to a following factor even
+  // without parentheses, the same way `\sin x` does. Previously `sin x` split
+  // into letters (`i·n·s·x`, including the imaginary unit).
+  describe('Bare function without parentheses (implicit argument)', () => {
+    test('sin x → Sin(x)', () => {
+      expect(ce.parse('sin x', { strict: false })).toMatchInlineSnapshot(
+        `["Sin", "x"]`
+      );
+    });
+
+    test('cos 2x → Cos(2x)', () => {
+      expect(ce.parse('cos 2x', { strict: false })).toMatchInlineSnapshot(
+        `["Cos", ["Multiply", 2, "x"]]`
+      );
+    });
+
+    test('sqrt4 → Sqrt(4) = 2', () => {
+      expect(ce.parse('sqrt4', { strict: false }).evaluate().json).toBe(2);
+    });
+
+    test('log2(8) → 3 (bare digit is the base)', () => {
+      expect(ce.parse('log2(8)', { strict: false }).evaluate().json).toBe(3);
+    });
+
+    test('another bare function stops the implicit argument', () => {
+      expect(ce.parse('sin x cos y', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", ["Sin", "x"], ["Cos", "y"]]`
+      );
+    });
+
+    test('loge is NOT log base e (unknown name, stays symbols)', () => {
+      expect(ce.parse('loge', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", "ExponentialE", "g", "l", "o"]`
       );
     });
   });
@@ -413,76 +450,68 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
   });
 
-  describe('Implicit superscript (non-strict)', () => {
-    // Single-letter variable followed by a single digit 2-9 should be
-    // interpreted as an implicit exponent in non-strict mode.
+  describe('Implicit subscript (non-strict)', () => {
+    // A single-letter variable immediately followed by one or more digits is
+    // interpreted as an implicit *subscript* in non-strict mode (`x2 → x_2`,
+    // `x12 → x_12`). This preserves the index (a flattened indexed variable is
+    // the common intent of ASCII/copy-paste input) and matches the strict `x_2`
+    // form, per docs/LENIENT_PARSER.md.
 
-    test('x2 → Square', () => {
-      expect(ce.parse('x2', { strict: false })).toMatchInlineSnapshot(
-        `["Square", "x"]`
-      );
+    test('x2 → x_2', () => {
+      expect(ce.parse('x2', { strict: false })).toMatchInlineSnapshot(`x_2`);
     });
 
-    test('y3 → Power(y, 3)', () => {
-      expect(ce.parse('y3', { strict: false })).toMatchInlineSnapshot(
-        `["Power", "y", 3]`
-      );
+    test('y3 → y_3', () => {
+      expect(ce.parse('y3', { strict: false })).toMatchInlineSnapshot(`y_3`);
     });
 
     test('x2 + y2 full expression', () => {
       expect(ce.parse('x2 + y2', { strict: false })).toMatchInlineSnapshot(
-        `["Add", ["Square", "x"], ["Square", "y"]]`
+        `["Add", "x_2", "y_2"]`
       );
     });
 
     test('a3b2 implicit multiply', () => {
       expect(ce.parse('a3b2', { strict: false })).toMatchInlineSnapshot(
-        `["Multiply", ["Power", "a", 3], ["Square", "b"]]`
+        `["Multiply", "a_3", "b_2"]`
       );
     });
 
     test('r2 = 1 equation', () => {
       expect(ce.parse('r2 = 1', { strict: false })).toMatchInlineSnapshot(
-        `["Equal", ["Square", "r"], 1]`
+        `["Equal", "r_2", 1]`
       );
     });
 
-    // Negative tests: these should NOT trigger implicit superscript
-
-    test('strict mode: x2 should NOT be implicit superscript', () => {
+    // In strict mode the digit is a separate factor (no implicit subscript).
+    test('strict mode: x2 is a product, not a subscript', () => {
       expect(parse('x2')).toMatchInlineSnapshot(`["Multiply", 2, "x"]`);
     });
 
-    test('x0 should NOT become x^0', () => {
-      expect(ce.parse('x0', { strict: false })).toMatchInlineSnapshot(
-        `["Multiply", 0, "x"]`
-      );
+    test('x0 → x_0', () => {
+      expect(ce.parse('x0', { strict: false })).toMatchInlineSnapshot(`x_0`);
     });
 
-    test('x1 should NOT become x^1', () => {
-      expect(ce.parse('x1', { strict: false })).toMatchInlineSnapshot(`x`);
+    test('x1 → x_1 (index preserved)', () => {
+      expect(ce.parse('x1', { strict: false })).toMatchInlineSnapshot(`x_1`);
     });
 
-    test('x12 multi-digit should NOT become implicit superscript', () => {
-      expect(ce.parse('x12', { strict: false })).toMatchInlineSnapshot(
-        `["Multiply", 12, "x"]`
-      );
+    test('x12 multi-digit → x_12', () => {
+      expect(ce.parse('x12', { strict: false })).toMatchInlineSnapshot(`x_12`);
     });
 
     test('22 non-letter lhs should not be affected', () => {
       expect(ce.parse('22', { strict: false })).toMatchInlineSnapshot(`22`);
     });
 
-    test('x 2 with space should NOT be implicit superscript', () => {
+    test('x 2 with space should NOT be an implicit subscript', () => {
       expect(ce.parse('x 2', { strict: false })).toMatchInlineSnapshot(
         `["Multiply", 2, "x"]`
       );
     });
 
-    test('x22 should become x^2 * 2', () => {
-      expect(ce.parse('x22', { strict: false })).toMatchInlineSnapshot(
-        `["Multiply", 2, ["Square", "x"]]`
-      );
+    test('x22 → x_22 (all trailing digits form the index)', () => {
+      expect(ce.parse('x22', { strict: false })).toMatchInlineSnapshot(`x_22`);
     });
   });
 
@@ -492,7 +521,7 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
         .toMatchInlineSnapshot(`
         [
           "Equal",
-          ["Add", ["Square", "x"], ["Square", "y"]],
+          ["Add", "x_2", "y_2"],
           ["Multiply", ["Sin", ["Multiply", 5, "x"]], ["Cos", "y"]]
         ]
       `);

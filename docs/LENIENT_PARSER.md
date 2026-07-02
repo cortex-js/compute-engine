@@ -74,10 +74,15 @@ Specifically:
   > `arcsin`/`asin`, `arccos`/`acos`, `arctan`/`atan`, `ln`, `log`, `exp`,
   > `lg`, `lb`, `abs`, `floor`, `ceil`, `round`, `gcd`, `lcm`, `det`.
   - `log#(...)` -> `log_{#}(...)`
-  > [Review] Useful for `log2(x)`, `log10(x)`. The tricky part: is `log2`
-  > a log-base-2, or the identifier "log2"? In non-strict mode, treating
-  > digit-suffixed `log` as a base seems reasonable. But `loge` should NOT
-  > be interpreted as `log_e` -- only digit suffixes.
+  > [Review] **Implemented.** A bare digit right after `log` is its base:
+  > `log2(8)` -> `log_2(8)` = 3, `log10(x)` -> base 10. Only `log` (which takes
+  > a variable base) does this; `loge` is NOT `log_e` — `loge` is not a known
+  > function name, so it stays as individual symbols.
+  >
+  > Also implemented: a bare function name applies to a following factor even
+  > *without* parentheses, exactly like `\sin x` (`sin x` -> `Sin(x)`,
+  > `cos 2x` -> `Cos(2x)`, `sqrt4` -> `Sqrt(4)`). The implicit argument stops
+  > before another bare function, so `sin x cos y` groups as `(sin x)(cos y)`.
   - `lim_...` -> `\lim_{...}`
   - `int_...^...` -> `\int_...^...`
   - `>=`, `<=`, `!=`, `≠` -> `\ge`, `\le`, `\neq`
@@ -142,12 +147,17 @@ Specifically:
 - `...` -> `\ldots`
 
 ### Subscript shorthand for common indexed variables
-- `x1`, `x2`, ... `x9` -> `x_1`, `x_2`, ... `x_9` (single-letter variable
-  followed by single digit)
+- `x0`, `x1`, `x2`, … -> `x_0`, `x_1`, `x_2`, … (single-letter variable
+  immediately followed by one or more digits).
 - This is extremely common in user input. `x1 + x2` is much more natural
   than `x_1 + x_2`.
-- Only applies to single-letter + single-digit to avoid ambiguity (e.g.,
-  `x12` would still need `x_{12}` or `x_(12)`).
+- Multi-digit indices are absorbed as a whole: `x12` -> `x_12`, `x22` -> `x_22`
+  (all consecutive trailing digits form the index).
+- **Implemented** in `parse.ts` (`parseSupsub`). Note this is a *subscript*, not
+  a superscript: a flattened index is the far more common intent, it preserves
+  the digit (`x1` -> `x_1`, not `x`), and it matches the strict `x_2` form. The
+  rule requires true adjacency — `x 2` (with a space) stays the product `2·x`.
+  In strict mode `x2` remains the product `2·x`.
 
 ### Factorial and combinatorics
 - `n!` -> already works (postfix `!`)

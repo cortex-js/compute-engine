@@ -19,10 +19,14 @@ describe('STOCHASTIC EQUALITY', () => {
     expect(a.isEqual(b)).toBe(true);
   });
 
-  it('not equal: x² ≠ x³', () => {
+  it('not an identity: x² vs x³ is undefined (not false)', () => {
+    // Sampling refutes only identity-in-all-variables. Under the
+    // "truth under constraints" contract (decision D9), `x² = x³` is
+    // satisfiable (e.g. assume(x = 1)), so the answer is indeterminate —
+    // never a definitive `false`.
     const a = ce.parse('x^2');
     const b = ce.parse('x^3');
-    expect(a.isEqual(b)).toBe(false);
+    expect(a.isEqual(b)).toBe(undefined);
   });
 
   it('different unknowns that cancel: x - x + y = y', () => {

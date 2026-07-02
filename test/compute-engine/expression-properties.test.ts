@@ -84,9 +84,12 @@ describe('IS_ZERO', () => {
     expect(expression.isEqual(0)).toBeUndefined();
   });
 
-  it('should return false for non-constant expressions not identically zero', () => {
+  it('is undefined for non-constant expressions not identically zero', () => {
+    // `x + 3` is satisfiably zero (assume(x = -3)): under the
+    // truth-under-constraints contract (D9) the answer is indeterminate,
+    // consistent with the adjacent non-constant cases above.
     const expression = engine.parse('x + 3');
-    expect(expression.isEqual(0)).toBe(false);
+    expect(expression.isEqual(0)).toBeUndefined();
   });
 
   it('should return false for constant expressions with function calls', () => {
@@ -141,9 +144,12 @@ describe('IS_NOT_ZERO', () => {
     expect(expression.isEqual(0)).toBeUndefined();
   });
 
-  it('should return false for non-constant expressions not identically zero', () => {
+  it('is undefined for non-constant expressions not identically zero', () => {
+    // `x + 3` is satisfiably zero (assume(x = -3)): under the
+    // truth-under-constraints contract (D9) the answer is indeterminate,
+    // consistent with the adjacent non-constant cases above.
     const expression = engine.parse('x + 3');
-    expect(expression.isEqual(0)).toBe(false);
+    expect(expression.isEqual(0)).toBeUndefined();
   });
 
   it('should return true for constant expressions with function calls', () => {

@@ -603,3 +603,179 @@ describe('SYM P0-15 residual — generic numeric fallback gates finiteness on op
     );
   });
 });
+
+//
+// D2 (EX-P1-2 / EX-16, Wave 4 batch 2) — inexact (float) arguments numericize
+// under evaluate() for ALL numeric operators, not just trig. Previously ~30
+// special functions (Gamma, Erf family, Exp/Power/Root, Bessel/Airy,
+// elliptic/hypergeometric, Zeta/Digamma/…) kept a float argument symbolic
+// under evaluate() and only numericized under `.N()`; `Cos`/`Sqrt` already
+// complied. REVIEW.md B23 (the old "documented as intended" comment in
+// `library/trigonometry.ts` and `library/statistics.ts`) is overruled by
+// this policy.
+//
+describe('D2 — inexact arguments numericize under evaluate() (all numeric operators)', () => {
+  // One representative case per family; the fix is the shared
+  // `shouldNumericize()` gate in `boxed-expression/apply.ts`.
+  const offenders: Array<[string, any]> = [
+    ['Exp(5.1)', ['Exp', 5.1]],
+    ['Gamma(5.1)', ['Gamma', 5.1]],
+    ['Gamma(2, 3.1) — incomplete', ['Gamma', 2, 3.1]],
+    ['GammaLn(5.1)', ['GammaLn', 5.1]],
+    ['Digamma(5.1)', ['Digamma', 5.1]],
+    ['Trigamma(5.1)', ['Trigamma', 5.1]],
+    ['PolyGamma(1, 5.1)', ['PolyGamma', 1, 5.1]],
+    ['Zeta(5.1)', ['Zeta', 5.1]],
+    ['Beta(2, 3.1)', ['Beta', 2, 3.1]],
+    ['LambertW(5.1)', ['LambertW', 5.1]],
+    ['BesselJ(0, 2.5)', ['BesselJ', 0, 2.5]],
+    ['BesselY(0, 2.5)', ['BesselY', 0, 2.5]],
+    ['BesselI(0, 2.5)', ['BesselI', 0, 2.5]],
+    ['BesselK(0, 2.5)', ['BesselK', 0, 2.5]],
+    ['AiryAi(2.5)', ['AiryAi', 2.5]],
+    ['AiryBi(2.5)', ['AiryBi', 2.5]],
+    ['Power(2, 5.1) — float exponent', ['Power', 2, 5.1]],
+    ['Root(5.1, 3)', ['Root', 5.1, 3]],
+    ['EllipticK(0.5)', ['EllipticK', 0.5]],
+    ['EllipticE(0.5)', ['EllipticE', 0.5]],
+    ['EllipticF(0.5, 0.5)', ['EllipticF', 0.5, 0.5]],
+    ['EllipticPi(0.5, 0.5)', ['EllipticPi', 0.5, 0.5]],
+    ['AGM(1.5, 2.5)', ['AGM', 1.5, 2.5]],
+    ['Hypergeometric2F1(1,1,2,0.5)', ['Hypergeometric2F1', 1, 1, 2, 0.5]],
+    ['AppellF1(1,1,1,2,0.3,0.3)', ['AppellF1', 1, 1, 1, 2, 0.3, 0.3]],
+    ['Hypergeometric1F1(1,2,0.5)', ['Hypergeometric1F1', 1, 2, 0.5]],
+    ['ExpIntegralEi(2.5)', ['ExpIntegralEi', 2.5]],
+    ['LogIntegral(2.5)', ['LogIntegral', 2.5]],
+    ['Erf(1.5)', ['Erf', 1.5]],
+    ['Erfc(1.5)', ['Erfc', 1.5]],
+    ['ErfInv(0.5)', ['ErfInv', 0.5]],
+    ['Erfi(1.5)', ['Erfi', 1.5]],
+    ['Sinc(1.5)', ['Sinc', 1.5]],
+    ['FresnelS(1.5)', ['FresnelS', 1.5]],
+    ['FresnelC(1.5)', ['FresnelC', 1.5]],
+    ['SinIntegral(1.5)', ['SinIntegral', 1.5]],
+    ['CosIntegral(1.5)', ['CosIntegral', 1.5]],
+  ];
+
+  test.each(offenders)('%s numericizes under evaluate()', (_label, expr) => {
+    const e = ce.box(expr);
+    const ev = e.evaluate();
+    const nv = e.N();
+    expect(ev.isNumberLiteral).toBe(true);
+    // evaluate() must agree with .N() (same numeric result, same precision
+    // lane — the fix routes through the same apply()/apply2()/applyN()
+    // dispatch either way).
+    expect(ev.toString()).toEqual(nv.toString());
+  });
+
+  test('DedekindEta/EisensteinE/JacobiTheta numericize on an in-domain complex tau', () => {
+    // Im(τ) > 0 is required (nome q = e^{iπτ} must have |q| < 1); a real τ is
+    // genuinely out of domain and stays symbolic in both lanes (not a D2 bug).
+    const tau = ['Complex', 0, 1.5];
+    for (const expr of [
+      ['DedekindEta', tau],
+      ['EisensteinE', 4, tau],
+      ['JacobiTheta', 3, 0.3, tau],
+    ]) {
+      const e = ce.box(expr);
+      expect(e.evaluate().isNumberLiteral).toBe(true);
+      expect(e.evaluate().toString()).toEqual(e.N().toString());
+    }
+  });
+
+  describe('mixed float + exact symbolic constant folds (Add/Multiply)', () => {
+    test('Add(0.5, Pi) numericizes, like Add(0.5, Sqrt(2))', () => {
+      const e = ce.box(['Add', 0.5, 'Pi']);
+      expect(e.evaluate().isNumberLiteral).toBe(true);
+      expect(e.evaluate().toString()).toEqual(e.N().toString());
+      const control = ce.box(['Add', 0.5, ['Sqrt', 2]]);
+      expect(control.evaluate().isNumberLiteral).toBe(true);
+    });
+    test('Multiply(0.5, Pi) numericizes', () => {
+      const e = ce.box(['Multiply', 0.5, 'Pi']);
+      expect(e.evaluate().isNumberLiteral).toBe(true);
+      expect(e.evaluate().toString()).toEqual(e.N().toString());
+    });
+    test('a free variable blocks the float-contagion fold (stays symbolic)', () => {
+      expect(num(['Add', 0.5, 'x']).isNumberLiteral).not.toBe(true);
+      expect(num(['Add', 0.5, 'x']).unknowns).toContain('x');
+      expect(num(['Multiply', 0.5, 'x']).isNumberLiteral).not.toBe(true);
+      expect(num(['Multiply', 0.5, 'x']).unknowns).toContain('x');
+    });
+    test('two exact operands (no float) do not numericize', () => {
+      expect(num(['Add', 1, 'GoldenRatio']).operator).toEqual('Add');
+      expect(num(['Add', 1, 'GoldenRatio']).isNumberLiteral).not.toBe(true);
+      expect(num(['Add', 'Pi', 'ExponentialE']).operator).toEqual('Add');
+      expect(num(['Add', 'Pi', 'ExponentialE']).isNumberLiteral).not.toBe(true);
+    });
+  });
+
+  describe('controls — exact arguments are unaffected (still stay symbolic under evaluate())', () => {
+    test('Gamma(5) — exact integer (not a D2 case; poles/exact folds unchanged)', () => {
+      expect(num(['Gamma', 5]).operator).toEqual('Gamma');
+    });
+    test('Gamma(1/2) — exact rational stays symbolic', () => {
+      expect(num(['Gamma', ['Rational', 1, 2]]).operator).toEqual('Gamma');
+      expect(nStr(['Gamma', ['Rational', 1, 2]]).startsWith('1.772')).toBe(true);
+    });
+    test('Cos(1/3) — exact rational stays symbolic (trig unchanged by D2)', () => {
+      expect(num(['Cos', ['Rational', 1, 3]]).operator).toEqual('Cos');
+    });
+    test('Ln(2) — exact integer argument stays symbolic', () => {
+      expect(evalStr(['Ln', 2])).toEqual('ln(2)');
+    });
+    test('Erf(0) / Erf(∞) — exact special values unaffected', () => {
+      expect(evalStr(['Erf', 0])).toEqual('0');
+      expect(evalStr(['Erf', 'PositiveInfinity'])).toEqual('1');
+    });
+  });
+
+  describe('precision follows the engine (D2 point 4)', () => {
+    test('Gamma(5.1) at high precision matches .N() beyond machine precision', () => {
+      // The shared test engine runs at precision 100 (see test/utils.ts):
+      // the bignum kernel must be used, not a machine-precision fallback
+      // silently truncated to ~16 digits.
+      const e = ce.box(['Gamma', 5.1]);
+      const s = e.evaluate().toString();
+      expect(s).toEqual(e.N().toString());
+      // ~16 significant digits would end well before position 40.
+      expect(s.replace(/[^0-9]/g, '').length).toBeGreaterThan(40);
+    });
+  });
+
+  test('a huge float argument stays fast (deadline guard unaffected)', () => {
+    const t0 = Date.now();
+    expect(ce.box(['Gamma', 1e15 + 0.5]).evaluate().toString()).toEqual('+oo');
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  describe('Gaussian-integer complex literals are exact (isExactNumber, not plain isExact)', () => {
+    // A complex `NumberLiteral` is never `isExact` — its `NumericValue`
+    // always lives in the Big/MachineNumericValue lane, even when both its
+    // real and imaginary parts are literal integers (`i`, `1+i`, `2+i`).
+    // A naive `isExact === false` D2 gate would wrongly float these; the
+    // shared `isExactNumber` helper (boxed-expression/apply.ts) exempts
+    // Gaussian integers. These are the regressions the exemption guards.
+    test('(2+i)^3 = 2+11i stays exact under evaluate() (WP-2.16)', () => {
+      expect(num(['Power', ['Complex', 2, 1], 3]).json).toEqual([
+        'Complex', 2, 11,
+      ]);
+    });
+    test('1/2 + i preserves the exact real part (no float residue)', () => {
+      expect(
+        ce.parse('\\frac12 + i').evaluate().toString()
+      ).toEqual('1/2 + i');
+    });
+    test('EisensteinE(4, i) stays symbolic under evaluate() (exact τ)', () => {
+      expect(num(['EisensteinE', 4, 'ImaginaryUnit']).operator).toEqual(
+        'EisensteinE'
+      );
+    });
+    test('a genuinely inexact complex argument still numericizes', () => {
+      // Not a Gaussian integer (1.5 is not an integer): D2 still applies.
+      expect(
+        num(['Gamma', ['Complex', 1.5, 2]]).isNumberLiteral
+      ).toBe(true);
+    });
+  });
+});

@@ -186,18 +186,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (other instanceof _BoxedExpression && isSymbol(other))
       return this.symbol === other.symbol;
 
-    const rhs = other instanceof _BoxedExpression ? other.value : other;
-    if (
-      typeof rhs === 'string' ||
-      typeof rhs === 'number' ||
-      typeof rhs === 'bigint' ||
-      typeof rhs === 'boolean' ||
-      rhs instanceof _BoxedExpression
-    ) {
-      return this.value?.isSame(rhs) ?? false;
-    }
-
-    return false;
+    // `other` is not a symbol. Follow *this* symbol's value binding and compare
+    // it against `other` directly (isSame follows symbol value bindings).
+    //
+    // Do NOT unwrap `other.value` here: for a function-valued expression (e.g.
+    // `g := x^2 + 1`) `other.value` is `undefined`, which used to drop the
+    // comparison to `false` even when the binding matched (CM-P1-1). `same()`
+    // follows the RHS binding for symmetry, so passing `other` unchanged is
+    // correct for numbers, strings and function expressions alike.
+    return this.value?.isSame(other) ?? false;
   }
 
   toNumericValue(): [NumericValue, Expression] {

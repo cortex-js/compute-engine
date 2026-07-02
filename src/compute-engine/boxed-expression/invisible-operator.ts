@@ -5,6 +5,10 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { isFunction, isSymbol, isString, isNumber } from './type-guards';
+import { BoxedType } from '../../common/type/boxed-type';
+
+const MATRIX_TYPE = new BoxedType('matrix');
+const FUNCTION_TYPE = new BoxedType('function');
 
 export function canonicalInvisibleOperator(
   ops: ReadonlyArray<Expression>,
@@ -234,6 +238,11 @@ export function canonicalInvisibleOperator(
           x.type.type === 'any' ||
           x.type.type === 'expression' ||
           x.type.matches('number') ||
+          // Matrix-typed symbols (`M P` → matrix product) and function-typed
+          // symbols (`2f`, `f x` → scaled/product) are value-like operands:
+          // juxtaposition is multiplication, not a silent `Tuple`.
+          x.type.matches(MATRIX_TYPE) ||
+          x.type.matches(FUNCTION_TYPE) ||
           isFunction(x, 'Matrix') ||
           (x.isIndexedCollection && !isString(x)))
     )

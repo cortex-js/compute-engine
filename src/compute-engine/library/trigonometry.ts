@@ -9,7 +9,7 @@ import {
   trigSign,
 } from '../boxed-expression/trigonometry';
 
-import { apply, apply2 } from '../boxed-expression/apply';
+import { apply, apply2, shouldNumericize } from '../boxed-expression/apply';
 
 import { reducedRational } from '../numerics/rationals';
 import type { OperatorDefinition, SymbolDefinitions } from '../global-types';
@@ -346,14 +346,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Coth: trigFunction('Coth', 6300),
 
     //
-    // Note (REVIEW.md B23): Sinc/FresnelS/FresnelC follow the same pattern
-    // as Gamma/Zeta in `library/arithmetic.ts`: exact special values fold
-    // in `evaluate()`, anything else stays symbolic unless
-    // `numericApproximation` is set, in which case `apply()` dispatches to
-    // the machine kernel or, when the engine precision exceeds machine
-    // precision, the bignum kernel. Complex arguments stay symbolic (no
-    // complex kernel — previously the real part was used silently, which
-    // was incorrect).
+    // Sinc/FresnelS/FresnelC/SinIntegral/CosIntegral follow the same pattern
+    // as Gamma/Zeta in `library/arithmetic.ts`: exact special values fold in
+    // `evaluate()`; an inexact (float) argument numericizes even under plain
+    // `evaluate()` (policy D2 — no exactness to preserve), and
+    // `numericApproximation` (`.N()`) always numericizes.
+    // `shouldNumericize()` dispatches to the machine kernel or, when the
+    // engine precision exceeds machine precision, the bignum kernel. Complex
+    // arguments stay symbolic (no complex kernel — previously the real part
+    // was used silently, which was incorrect).
     //
 
     /** sinc(x) = sin(x)/x with sinc(0) = 1 (unnormalized cardinal sine) */
@@ -368,7 +369,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.One;
         if (x.isInfinity) return ce.Zero;
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
           x,
           (x) => sinc(x),
@@ -389,7 +390,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.Zero;
         if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
           x,
           (x) => fresnelS(x),
@@ -410,7 +411,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.Zero;
         if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
           x,
           (x) => fresnelC(x),
@@ -439,7 +440,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           const v = x.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
           return numericApproximation ? v.N() : v;
         }
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(x, (x) => sinIntegral(x));
       },
     },
@@ -461,7 +462,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.NegativeInfinity;
         if (x.isInfinity && x.isPositive) return ce.Zero;
-        if (!numericApproximation) return undefined;
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(x, (x) => cosIntegral(x));
       },
     },

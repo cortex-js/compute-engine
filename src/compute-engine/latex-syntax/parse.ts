@@ -1965,8 +1965,26 @@ export class _Parser implements Parser {
   }
 
   /**
-   * In non-strict mode, try to parse a bare function name followed by parentheses.
-   * This allows syntax like `sin(x)` instead of requiring `\sin(x)`.
+   * Look ahead (without consuming any tokens) for a run of letters starting at
+   * the current position, skipping leading spaces. Used to detect an upcoming
+   * bare function name so that an implicit function argument stops before it
+   * (e.g. `sin x cos y` groups as `(sin x)(cos y)`).
+   */
+  private peekBareWord(): string {
+    let i = this.index;
+    while (this._tokens[i] === '<space>') i++;
+    let w = '';
+    while (i < this._tokens.length && /^[a-zA-Z]$/.test(this._tokens[i])) {
+      w += this._tokens[i];
+      i++;
+    }
+    return w;
+  }
+
+  /**
+   * In non-strict mode, try to parse a bare function name, either applied to a
+   * parenthesized argument list (`sin(x)`) or, without parentheses, to an
+   * implicit argument the way `\sin x` works (`sin x`, `cos 2x`, `sqrt4`).
    *
    * Returns the parsed function call or null if not a bare function.
    */
@@ -2021,6 +2039,25 @@ export class _Parser implements Parser {
       this.skipSpace();
     }
 
+    // In non-strict mode, a bare digit immediately after `log` is its base:
+    // `log2(8)` → `log_2(8)`. (Only `log` takes a variable base; other bare
+    // functions treat a following digit as an implicit argument, e.g.
+    // `sqrt4` → `sqrt(4)`.)
+    if (
+      subscript === null &&
+      name === 'log' &&
+      !this.atEnd &&
+      /^[0-9]$/.test(this.peek)
+    ) {
+      let digits = '';
+      while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
+        digits += this.peek;
+        this.index++;
+      }
+      subscript = parseInt(digits);
+      this.skipSpace();
+    }
+
     // Check for optional exponent: sin^2(x) or sin^{10}(x)
     let exponent: MathJsonExpression | null = null;
     if (this.peek === '^') {
@@ -2051,12 +2088,6 @@ export class _Parser implements Parser {
       this.skipSpace();
     }
 
-    // Check if followed by opening parenthesis
-    if (this.peek !== '(') {
-      this.index = start;
-      return null;
-    }
-
     const fnName = BARE_FUNCTION_MAP[name];
     if (!fnName) {
       // Not a recognized function name, backtrack
@@ -2064,8 +2095,27 @@ export class _Parser implements Parser {
       return null;
     }
 
-    // Parse the arguments in the enclosure (parentheses)
-    const args = this.parseArguments('enclosure', until);
+    // Parse the argument(s). With parentheses this is an ordinary call
+    // (`sin(x)`, `log_2(8)`). Without parentheses, in non-strict mode we accept
+    // an implicit argument the same way `\sin x` does (`sin x` → `Sin(x)`,
+    // `cos 2x` → `Cos(2x)`, `sqrt4` → `Sqrt(4)`), stopping before another bare
+    // function so `sin x cos y` groups as `(sin x)(cos y)`.
+    let args: ReadonlyArray<MathJsonExpression> | null;
+    if (this.peek === '(') {
+      args = this.parseArguments('enclosure', until);
+    } else {
+      args = this.parseArguments('implicit', {
+        ...until,
+        minPrec: MULTIPLICATION_PRECEDENCE,
+        condition: (p: Parser) => {
+          const w = this.peekBareWord();
+          return (
+            (w.length > 0 && BARE_FUNCTION_MAP[w] !== undefined) ||
+            (until?.condition?.(p) ?? false)
+          );
+        },
+      });
+    }
 
     if (args === null) {
       // No valid arguments found, backtrack
@@ -2190,20 +2240,26 @@ export class _Parser implements Parser {
 
     const index = this.index;
 
-    // In non-strict mode, a single letter immediately followed by a
-    // digit 2-9 is treated as an implicit superscript: x2 → x^2
-    // This handles common copy-paste from web pages.
+    // In non-strict mode, a single letter immediately followed by one or more
+    // digits is treated as an implicit *subscript*: `x2 → x_2`, `x1 → x_1`,
+    // `x12 → x_12`. Flattened subscripts (indexed variables such as `x1`, `x2`,
+    // …) are the common intent of ASCII/copy-paste input; producing a subscript
+    // (rather than a superscript power) preserves the index, matches the strict
+    // `x_2` form, and follows the recommendation in `docs/LENIENT_PARSER.md`.
     // Check before skipSpace() to require true adjacency.
     if (
       this.options.strict === false &&
       typeof lhs === 'string' &&
       lhs.length === 1 &&
       /^[a-zA-Z]$/.test(lhs) &&
-      /^[2-9]$/.test(this.peek)
+      /^[0-9]$/.test(this.peek)
     ) {
-      const digit = parseInt(this.peek);
-      this.index++;
-      return this.parseSupsub(['Power', lhs, digit]);
+      let digits = '';
+      while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
+        digits += this.peek;
+        this.index++;
+      }
+      return this.parseSupsub(['Subscript', lhs, parseInt(digits)]);
     }
 
     this.skipSpace();
