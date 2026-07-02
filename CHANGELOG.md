@@ -155,6 +155,85 @@
   They now parse like the trig functions: `\ln^2 x` → `(\ln x)^2`, and
   `^{-1}` yields the inverse (`\ln^{-1} x` → `e^x`).
 
+- **Pattern matching no longer drops operands.** A failed sequence-wildcard
+  match attempt did not fully roll back its consumption of the subject's
+  operands, so rules applied through `replace()` could silently delete terms:
+  `(w+x+y+z).replace(['...a + b -> a'])` returned `w + y` — `x` vanished. The
+  matcher now restores its state exactly between attempts (the example returns
+  `w+x+y`), and a repeated sequence wildcard (`__a … __a`) whose second
+  occurrence captures a *different* sequence now correctly fails to match
+  instead of proceeding with the inconsistent capture silently dropped.
+
+- **`Mod` and `Remainder` are consistent everywhere.** `Mod(-7, 3)` returned
+  `−1` at the default (bignum) precision but `2` at machine precision, and
+  each compiled target had its own convention (WGSL used the raw truncated
+  `%`; Python's `Remainder` used the floored `np.remainder`). `Mod` is now
+  **floored** (the sign follows the divisor) in both interpreter lanes, in
+  `sgn`, and in every compilation target; `Remainder` is round-to-nearest
+  consistently. `Mod` of exact rationals is now exact
+  (`Mod(\frac12, \frac13)` → `\frac16`, previously a float).
+
+- **MathJSON `.json` serialization is now lossless.** Four independent bugs
+  could silently change a value through a `.json` round-trip: exact big
+  integers emitted as JSON floats (`10^{23}` reconstructed off by 2²³);
+  16–17-digit values altered by one digit; the real part of high-precision
+  complex numbers truncated to machine precision on re-boxing; and the
+  repeating-decimal form `"0.(3)"` re-boxed as a *string*. Values that cannot
+  be represented exactly as a JSON float now emit the `{num: "…"}` form, and
+  the repeating-decimal syntax is accepted by the number parser.
+
+- **Repeating decimals and higher-order derivatives round-trip through
+  LaTeX.** `N(\frac13)` serialized as `0.333\,333` (six digits, no overline —
+  re-parsing lost 3.3×10⁻⁷); it now serializes as `0.\overline{3}`. `f''(x)`
+  serialized to Leibniz notation (`\frac{\mathrm{d}^2}{\mathrm{d}x^2}f(x)`)
+  that the parser could not read back (it re-parsed as a *product of
+  symbols*); degree-carrying Leibniz numerators, including the
+  single-fraction form `\frac{d^2f}{dx^2}`, now parse to properly nested
+  derivatives.
+
+- **NaN no longer corrupts canonical ordering.** Sorting operands with a NaN
+  used a comparator that returned NaN, so the canonical form of a sum or
+  product depended on the order its operands were written in (permutations of
+  `NaN + 0.5 + x + 3.7` produced different canonical forms). NaN now has a
+  deterministic place in the canonical order.
+
+- **`assume(a = b)` between two symbols is no longer silently dropped.** The
+  assumption reported `'ok'` but a type-inference side effect erased the
+  binding, so `a.isEqual(b)` stayed `false`. Additionally, `isEqual` on two
+  distinct *free* symbols returned a definitive `false` — it now consults the
+  assumptions database and returns `undefined` when equality is
+  indeterminate. `.is()` is now symmetric for expression-valued bindings
+  (with `g := x^2+1`, both `g.is(x^2+1)` and `(x^2+1).is(g)` are `true`).
+
+- **Limits of cancelling `\ln`/`\sqrt{}` differences are now exact.**
+  `\lim_{x\to\infty} x(\ln(x+1) - \ln x)` returned `0` (the true value is
+  `1`): the asymptotic ranking saw only the individual — cancelling — leading
+  terms. Such pairs are now combined before ranking (`\ln u - \ln v \to
+  \ln(u/v)`, conjugate quotients for square roots), and these limits evaluate
+  exactly: the example gives `1`, `x(\ln(x+2)-\ln x)` gives `2`,
+  `\sqrt{x}(\sqrt{x+1}-\sqrt{x})` gives `\frac12`, and `\ln(2x)-\ln x` gives
+  `\ln 2`.
+
+- **Compilation fails closed instead of emitting wrong code.** Compiled
+  output disagreed with the interpreter in several ways: `Round` at
+  half-values (three conventions across JS/Python/interpreter),
+  `\operatorname{arccot}` of negative arguments (wrong branch), odd roots of
+  negative numbers (`NaN` instead of `\sqrt[5]{-2} ≈ -1.149`), multi-index
+  `\sum`/`\prod` silently dropping all but the first index (returning NaN
+  with `success: true`), Python emitting `-2 ** x` (which is `-(2^x)`), and
+  missing parentheses when compiling non-canonical `a-(b-c)` / `a/(b/c)`.
+  All now compile to interpreter-matching code — and anything a target
+  *cannot* express correctly (such as constant folds with non-real values)
+  now fails at compile time rather than emitting `NaN` literals. The
+  compilation fallback runner also no longer leaks its argument bindings into
+  the global scope.
+
+- **Parenthesized relations are atomic operands.** In chains mixing
+  parenthesized relations, the canonical form fabricated relations between
+  incidental terms (`(a < b) \le (c > d)` produced a spurious `b \le d`). An
+  explicitly parenthesized relation is now an atomic term of the surrounding
+  chain: `a < (b \le c) > d` means `a < X \wedge d < X` with `X = (b \le c)`.
+
 - **`Choose` and `Binomial` now agree, and handle edge cases.**
   `Choose(2,3)` returned `NaN` (correct: `0`), `Choose(\frac12, \frac13)`
   threw an exception, and `Binomial(-2,3)` returned `0` (the standard

@@ -478,26 +478,55 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     if (vars.length > 0) return ['D', fn, ...vars] as MathJsonExpression;
   }
 
-  // Handle ordinary (Leibniz) derivative notation: \frac{d}{dx} f
-  // Accept forms like: `\frac{d}{dx} f`, `\frac{\mathrm{d}}{dx} f`
-  const numerSym = symbol(numer);
-  const isDifferential =
-    numerSym === 'd' ||
-    numerSym === 'd_upright' ||
-    numerSym === 'differentialD';
+  // Handle ordinary (Leibniz) derivative notation:
+  // - `\frac{d}{dx} f`, `\frac{\mathrm{d}}{dx} f`      (first order)
+  // - `\frac{d^n}{dx^n} f`, `\frac{\mathrm{d}^n}{\mathrm{d}x^n} f` (n-th order,
+  //   the form the serializer emits for `f''(x)` etc.)
+  // - `\frac{d^n f}{dx^n}`                              (single-fraction form)
+  const isDiffSym = (s: string | null): boolean =>
+    s === 'd' || s === 'd_upright' || s === 'differentialD';
 
-  if (isDifferential) {
+  // Extract the differential degree from the numerator, and — for the
+  // single-fraction form — the function folded into it. The numerator is one
+  // of: `d` (degree 1), `d^n` (degree n), or a product `d^n · f` / `d · f`.
+  let numerDegree: number | null = null;
+  let numerFn: MathJsonExpression | null = null;
+  {
+    const numerHead = operator(numer);
+    const factors =
+      numerHead === 'Multiply' ||
+      numerHead === 'InvisibleOperator' ||
+      numerHead === 'Sequence'
+        ? [...operands(numer!)]
+        : [numer!];
+    const head = factors[0];
+    if (isDiffSym(symbol(head))) {
+      numerDegree = 1;
+    } else if (operator(head) === 'Power' && isDiffSym(symbol(operand(head, 1)))) {
+      const deg = machineValue(operand(head, 2));
+      if (deg !== null && deg > 0) numerDegree = deg;
+    }
+    if (numerDegree !== null && factors.length > 1) {
+      const rest = factors.slice(1);
+      numerFn =
+        rest.length === 1
+          ? rest[0]
+          : (['Multiply', ...rest] as MathJsonExpression);
+    }
+  }
+
+  if (numerDegree !== null) {
     // Extract variable(s) from the denominator. Typical forms:
     // - 'dx' (single symbol)
-    // - ['Sequence', 'd', 'x']
-    // - ['Multiply', 'd', 'x']
+    // - ['Sequence', 'd', 'x'] / ['Multiply', 'd', 'x']
+    // - ['Multiply', 'd', ['Power', 'x', n]]  (n-th order denominator `dx^n`)
     const vars: MathJsonExpression[] = [];
 
     const collectVars = (expr: MathJsonExpression | null) => {
       if (!expr) return;
       const s = symbol(expr);
       // If it's a symbol that's not a differential operator, it's a variable
-      if (s && s !== 'd' && s !== 'd_upright' && s !== 'differentialD') {
+      if (s && !isDiffSym(s)) {
         vars.push(expr);
         return;
       }
@@ -505,6 +534,11 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
       const h = operator(expr);
       if (h === 'Sequence' || h === 'Multiply' || h === 'InvisibleOperator') {
         for (const op of operands(expr)) collectVars(op);
+      } else if (h === 'Power') {
+        // `dx^n`: the differentiation variable is the base of the power; the
+        // exponent restates the degree already carried by the numerator.
+        const base = operand(expr, 1);
+        if (base && !isDiffSym(symbol(base))) vars.push(base);
       }
     };
 
@@ -518,11 +552,24 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
       }
     }
 
+    // A single variable with a numerator degree (`d²/dx²`) repeats that
+    // variable, matching the nested `D` form (`D(D(f, x), x)`).
+    if (vars.length === 1 && numerDegree > 1)
+      for (let i = 1; i < numerDegree; i++) vars.push(vars[0]);
+
     if (vars.length > 0) {
-      // Parse the expression to differentiate
-      const fn = unwrapSingleItemList(missingIfEmpty(parser.parseExpression()));
-      // D expects variables as separate arguments: ['D', f, x] or ['D', f, x, y]
-      return ['D', fn, ...vars];
+      // The function being differentiated is either folded into the numerator
+      // (`\frac{d^n f}{dx^n}`) or follows the fraction (`\frac{d^n}{dx^n} f`).
+      const fn =
+        numerFn ??
+        unwrapSingleItemList(missingIfEmpty(parser.parseExpression()));
+      // Build the nested `D` form, e.g. `D(D(f, x), x)` for a second
+      // derivative. This matches the Lagrange (`f''(x)`) parse and the `D`
+      // serializer, which recovers the order by counting nested `D`s (a flat
+      // `['D', f, x, x]` would otherwise re-serialize as a first derivative).
+      let result: MathJsonExpression = fn;
+      for (const v of vars) result = ['D', result, v] as MathJsonExpression;
+      return result;
     }
   }
 

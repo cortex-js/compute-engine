@@ -28,8 +28,16 @@ export function* factorial2(n: BigNum): Generator<BigNum, BigNum> {
 }
 
 /**
- * If the BigDecimal can be faithfully represented as a machine number,
- * return true.
+ * If the BigDecimal can be *faithfully* (losslessly) represented as a machine
+ * number, return true.
+ *
+ * This is used to decide whether a value can be serialized as a plain JSON
+ * number without losing information. A ≤17-significant-digit heuristic is NOT
+ * sufficient: only decimals with ≤15 significant digits are guaranteed to
+ * round-trip through float64, and some 16–17 digit values silently change
+ * (e.g. `0.12345678901234567` → `0.12345678901234566`). So we test the exact
+ * round-trip condition: the value must equal the BigDecimal reconstructed from
+ * its own `toNumber()` (via the shortest-string form a JSON number would emit).
  */
 export function isInMachineRange(d: BigNum): boolean {
   if (!d.isFinite()) return true; // Infinity and NaN are in machine range
@@ -40,13 +48,16 @@ export function isInMachineRange(d: BigNum): boolean {
   const sigStr = absSig.toString();
   const digits = sigStr.length;
 
-  // Float64 has ~15.95 decimal digits of precision, but can represent
-  // up to 17 significant digits for some values
+  // A float64's shortest round-tripping decimal has at most 17 significant
+  // digits, so anything longer cannot be exactly represented.
   if (digits > 17) return false;
 
-  // Check the value is within float64 range
+  // Check the value is within float64 range (avoid overflow to Infinity and
+  // subnormal precision loss).
   // value = sig × 10^exp, order of magnitude ≈ digits + exponent - 1
   const orderOfMagnitude = digits + d.exponent - 1;
-  // Stay above subnormal range (-308) to avoid precision loss
-  return orderOfMagnitude < 309 && orderOfMagnitude > -308;
+  if (orderOfMagnitude >= 309 || orderOfMagnitude <= -308) return false;
+
+  // Exact round-trip test: representable iff it survives float64 conversion.
+  return d.eq(new BigDecimal(d.toNumber()));
 }

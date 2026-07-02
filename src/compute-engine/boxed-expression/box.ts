@@ -274,17 +274,28 @@ export function boxFunction(
         return ce.expr(op1).mul(ce.I);
       }
       if (ops.length === 2) {
-        const re =
-          ops[0] instanceof _BoxedExpression
-            ? ops[0].re
-            : machineValue(ops[0] as MathJsonExpression);
+        // Box the real operand so a high-precision bignum literal (e.g. a
+        // 50-digit √2) is not truncated to a machine float. When the operand
+        // arrives as raw MathJSON (`{ num: '1.414…' }`), reading `machineValue`
+        // alone would silently discard the extra digits on re-boxing
+        // (`ce.expr(z.json)`).
+        const reOp = ops[0] instanceof _BoxedExpression ? ops[0] : box(ce, ops[0], options);
+        const re = reOp.re;
         const im =
           ops[1] instanceof _BoxedExpression
             ? ops[1].re
             : machineValue(ops[1] as MathJsonExpression);
         if (im !== null && re !== null && !isNaN(im) && !isNaN(re)) {
           if (im === 0 && re === 0) return ce.Zero;
-          if (im !== 0) return ce.number(ce._numericValue({ re, im }), options);
+          if (im !== 0) {
+            const bignumRe = reOp.bignumRe;
+            return ce.number(
+              ce._numericValue(
+                bignumRe !== undefined ? { re: bignumRe, im } : { re, im }
+              ),
+              options
+            );
+          }
           return box(ce, ops[0], options);
         }
         return box(ce, ops[0], options).add(box(ce, ops[1], options).mul(ce.I));

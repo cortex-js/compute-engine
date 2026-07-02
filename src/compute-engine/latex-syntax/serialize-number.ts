@@ -157,10 +157,16 @@ export function serializeNumber(
   num = num.replace(/[nd]$/, '');
 
   // Do we have repeating digits?
-  // If so, "unrepeat" (expand) them
+  // If so, "unrepeat" (expand) them. Expand enough copies that
+  // `formatFractionalPart` can re-detect the repeating pattern (it needs the
+  // fractional part to exceed ~17 digits, with at least ~4 copies of the
+  // repetend) and emit a `\overline{…}` marker. A fixed 6 copies is too few for
+  // short repetends (e.g. `0.(3)` → `0.333333`, which reads as a terminating
+  // decimal and loses ~3e-7 on re-parse).
   if (/\([0-9]+\)/.test(num)) {
     const [_, body, repeat, trail] = num.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
-    num = body + repeat.repeat(6) + trail;
+    const copies = Math.max(6, Math.ceil(20 / repeat.length) + 2);
+    num = body + repeat.repeat(copies) + trail;
   }
 
   let sign = '';

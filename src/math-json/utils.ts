@@ -501,7 +501,13 @@ export function countLeaves(expr: MathJsonExpression | null): number {
 export function matchesNumber(s: string): boolean {
   return (
     /^(nan|oo|\+oo|-oo|infinity|\+infinity|-infinity)$/i.test(s) ||
-    /^[+-]?(0|[1-9][0-9]*)(\.[0-9]+)?(\([0-9]+\))?([eE][+-]?[0-9]+)?$/.test(s)
+    // Optional fraction part where, after the decimal point, at least one of
+    // {fractional digits, repeating-decimal group} is present. This accepts the
+    // digit-less repetend form `0.(3)` (per the MathJSON spec's `1.(3)` example)
+    // while still rejecting a bare trailing `.` (e.g. `5.`).
+    /^[+-]?(0|[1-9][0-9]*)(\.([0-9]+(\([0-9]+\))?|\([0-9]+\)))?([eE][+-]?[0-9]+)?$/.test(
+      s
+    )
   );
 }
 

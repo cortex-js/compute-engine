@@ -110,6 +110,30 @@ describe('PARSING OF NUMBER', () => {
     expect(parse('.\\overline{1234}\\ldots')).toMatchInlineSnapshot(`0.(1234)`);
   });
 
+  // RT-P0-5: short repetends (length 1-2) must serialize with a `\overline{…}`
+  // marker rather than a fixed 6-copy expansion (`0.333\,333`), which reads as
+  // a terminating decimal and changes the value by ~3e-7 on re-parse.
+  test('Serializing short repeating decimals uses \\overline', () => {
+    expect(ce.parse('1/3').N().latex).toMatchInlineSnapshot(`0.\\overline{3}`);
+    expect(ce.parse('2/3').N().latex).toMatchInlineSnapshot(`0.\\overline{6}`);
+    expect(ce.parse('1/6').N().latex).toMatchInlineSnapshot(`0.1\\overline{6}`);
+    expect(ce.parse('1/11').N().latex).toMatchInlineSnapshot(`0.\\overline{09}`);
+    // Longer repetends keep working
+    expect(ce.parse('1/7').N().latex).toMatchInlineSnapshot(
+      `0.\\overline{142857}`
+    );
+  });
+
+  test('Short repeating decimals round-trip through LaTeX', () => {
+    for (const src of ['1/3', '2/3', '1/6', '1/11', '5/6']) {
+      const original = ce.parse(src).N();
+      const back = ce.parse(original.latex).N();
+      const diff = Math.abs((back.sub(original).N().re as number) ?? 1);
+      // Round-trip is value-preserving (well within working precision).
+      expect(diff).toBeLessThan(1e-19);
+    }
+  });
+
   test('Parsing numbers with truncation mark', () => {
     expect(parse('x=.123\\ldots')).toMatchInlineSnapshot(
       `["Equal", "x", 0.123]`

@@ -501,3 +501,74 @@ describe('Rational with an infinite numerator/denominator (REVIEW.md A4)', () =>
     expect(ce.number([-Infinity, Infinity]).toString()).toEqual('NaN');
   });
 });
+
+describe('JSON round-trip fidelity (lossless .json contract)', () => {
+  // RT-P0-1: exact large integers with trailing zeros must not serialize to a
+  // JSON float. `Number(10n**23n).toString() === '1e+23'` is true, but the float
+  // ≠ 10^23; emitting it would corrupt the value on reconstruction.
+  test('RT-P0-1: exact big integers serialize losslessly', () => {
+    for (const b of [10n ** 23n, 10n ** 300n, 2n * 10n ** 300n, 7n * 10n ** 25n]) {
+      const orig = ce.box({ num: b.toString() });
+      // Emitted as string `{num}`, never a JSON number
+      expect(typeof orig.json).not.toBe('number');
+      const rt = ce.expr(orig.json);
+      expect(rt.isSame(orig)).toBe(true);
+      expect(rt.sub(orig).evaluate().isSame(0)).toBe(true);
+    }
+  });
+
+  // RT-P0-2: 16–17 significant-digit decimals are not guaranteed to round-trip
+  // through float64, so they must be emitted in `{num}` string form.
+  test('RT-P0-2: 16-17 digit decimals serialize losslessly', () => {
+    for (const s of ['0.12345678901234567', '9007199254740993.5']) {
+      const orig = ce.box({ num: s });
+      expect(typeof orig.json).not.toBe('number');
+      expect(ce.expr(orig.json).isSame(orig)).toBe(true);
+    }
+  });
+
+  // Control: genuine machine-range numbers stay compact JSON numbers.
+  test('RT-P0-2 control: machine-range numbers stay compact', () => {
+    for (const s of ['0.5', '3.14', '-2.5', '0.123456789012345', '100']) {
+      expect(typeof ce.box({ num: s }).json).toBe('number');
+    }
+  });
+
+  // RT-P0-2b: at precision ≤ 17 a plain .N() result must round-trip.
+  test('RT-P0-2b: .N() round-trips at precision 17', () => {
+    const saved = ce.precision;
+    try {
+      ce.precision = 17;
+      const x = ce.parse('2/3').N();
+      expect(ce.expr(x.json).isSame(x)).toBe(true);
+    } finally {
+      ce.precision = saved;
+    }
+  });
+
+  // RT-P0-3: high-precision complex numbers must keep the full bignum real part
+  // through the MathJSON re-boxing path.
+  test('RT-P0-3: high-precision complex round-trips', () => {
+    const saved = ce.precision;
+    try {
+      ce.precision = 50;
+      const z = ce.parse('\\sqrt{2}').N().add(ce.I).evaluate();
+      expect(ce.expr(z.json).isSame(z)).toBe(true);
+      // Direct MathJSON complex input keeps all digits
+      const c = ce.box(['Complex', { num: '1.' + '4'.repeat(40) }, 1]);
+      expect(JSON.stringify(c.json)).toContain('4'.repeat(40));
+    } finally {
+      ce.precision = saved;
+    }
+  });
+
+  // RT-P0-4: the bare-string repeating-decimal shorthand `0.(3)` (the default
+  // `toMathJson()` output) must re-box as a number, not a string.
+  test('RT-P0-4: repeating-decimal shorthand re-boxes as a number', () => {
+    for (const src of ['1/3', '4/3']) {
+      const j = ce.parse(src).N().toMathJson();
+      expect(ce.expr(j).type.toString()).not.toBe('string');
+      expect(ce.expr(j).isNumber).toBe(true);
+    }
+  });
+});

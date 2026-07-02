@@ -285,6 +285,41 @@ describe('DERIVATIVE EVALUATION', () => {
   });
 });
 
+// RT-P0-6: the higher-order Leibniz notation the `D` serializer emits
+// (`\frac{d^n}{dx^n} f`) must parse back to the same nested `D`. Previously the
+// `d`-branch only accepted a bare `d` numerator, so a `d^n` numerator fell
+// through to a `Divide` of symbols — a silent meaning change.
+describe('HIGHER-ORDER LEIBNIZ ROUND-TRIP', () => {
+  test("f''(x) round-trips through LaTeX", () => {
+    const d2 = ce.parse("f''(x)");
+    expect(ce.parse(d2.latex).isSame(d2)).toBe(true);
+  });
+
+  test("f'''(x) round-trips through LaTeX", () => {
+    const d3 = ce.parse("f'''(x)");
+    expect(ce.parse(d3.latex).isSame(d3)).toBe(true);
+  });
+
+  test('second-order Leibniz of sin round-trips', () => {
+    const d2 = ce.parse('\\frac{d^2}{dx^2}\\sin(x)');
+    expect(d2.json).toEqual(['D', ['D', ['Sin', 'x'], 'x'], 'x']);
+    expect(d2.evaluate().isSame(ce.parse('-\\sin(x)'))).toBe(true);
+  });
+
+  test('single-fraction second-derivative form parses', () => {
+    // `\frac{d^2 <fn>}{dx^2}` folds the degree and the function into the
+    // numerator; it must parse to the same nested `D` as the split form.
+    const d2 = ce.parse('\\frac{d^2 \\sin(x)}{dx^2}');
+    expect(d2.json).toEqual(['D', ['D', ['Sin', 'x'], 'x'], 'x']);
+    expect(d2.isSame(ce.parse('\\frac{d^2}{dx^2}\\sin(x)'))).toBe(true);
+    expect(d2.evaluate().isSame(ce.parse('-\\sin(x)'))).toBe(true);
+  });
+
+  test('first-order Leibniz is unchanged', () => {
+    expect(ce.parse('\\frac{d}{dx}f(x)').isSame(ce.parse("f'(x)"))).toBe(true);
+  });
+});
+
 describe('PARTIAL DERIVATIVE NOTATION (∂)', () => {
   test('Euler ∂_x f(x, y) parses to a first-argument partial', () => {
     const expr = ce.parse('\\partial_x f(x, y)');
