@@ -113,14 +113,9 @@ const ALLOW = new Set<string>([
   'Remainder([["Rational",1,2],2]):EXACT->FLOAT',
 ]);
 
-// EX-15 (documented finding, still OPEN): integer-domain combinatorial /
-// number-theory functions throw an uncaught RangeError on ±∞ instead of
-// returning NaN/symbolic. Tagged to WP-2.16 but only the Power-serialization
-// sub-part landed; the 12-function crash class remains. Matched by message so
-// the harness stays green while keeping the case live (reported as a residual).
-function isKnownEX15(err: unknown): boolean {
-  return String(err).includes('cannot be converted to a BigInt');
-}
+// EX-15 crash class (integer-domain functions throwing RangeError on ±∞)
+// FIXED: `toBigint` now returns null for non-finite values, so `evaluate()`
+// never throws — the cells below assert that directly (no allowlist).
 
 function checkCell(
   opName: string,
@@ -141,15 +136,13 @@ function checkCell(
   try {
     ev = expr.evaluate();
   } catch (err) {
-    if (!isKnownEX15(err))
-      violations.push(`${opName}(${argDesc}) evaluate-threw: ${err}`);
+    violations.push(`${opName}(${argDesc}) evaluate-threw: ${err}`);
     return;
   }
   try {
     n = expr.N();
   } catch (err) {
-    if (!isKnownEX15(err))
-      violations.push(`${opName}(${argDesc}) N-threw: ${err}`);
+    violations.push(`${opName}(${argDesc}) N-threw: ${err}`);
     return;
   }
   try {

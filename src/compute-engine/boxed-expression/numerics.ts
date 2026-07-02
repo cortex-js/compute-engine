@@ -203,7 +203,11 @@ export function toBigint(expr: Expression | undefined): bigint | null {
   if (!isNumber(expr)) return null;
   const num = expr.numericValue;
 
-  if (typeof num === 'number') return BigInt(Math.round(num));
+  // A non-finite value (±∞, NaN) has no bigint: return null per the
+  // documented contract — `BigInt(Infinity)` throws a RangeError that would
+  // escape `evaluate()` (EX-15: Fibonacci(+∞) & the integer-domain family).
+  if (typeof num === 'number')
+    return Number.isFinite(num) ? BigInt(Math.round(num)) : null;
 
   // Prefer an exact extraction for exact integers to avoid the
   // precision-limited `bignumRe` round-trip (see `asBigint`).
@@ -211,7 +215,8 @@ export function toBigint(expr: Expression | undefined): bigint | null {
   if (exact !== null) return exact;
 
   const n = num.bignumRe ?? num.re;
-  if (typeof n === 'number') return BigInt(Math.round(n));
+  if (typeof n === 'number')
+    return Number.isFinite(n) ? BigInt(Math.round(n)) : null;
 
   return bigint(n.round());
 }

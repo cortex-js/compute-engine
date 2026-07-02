@@ -45,6 +45,13 @@
 
 ### Resolved Issues
 
+- **Integer-domain functions no longer crash on infinite arguments.**
+  `Fibonacci(+∞)`, `BernoulliB(−∞)`, `MoebiusMu(∞)` and the rest of the
+  integer-domain family (a dozen combinatorial/number-theory operators) threw
+  an uncaught `RangeError` from `evaluate()` — `toBigint` converted ±∞/NaN
+  with `BigInt(Math.round(x))`. It now returns `null` for non-finite values
+  per its contract, so these expressions stay symbolic instead of throwing.
+
 - **Pythagorean identities fire inside larger sums.** `sin²x + cos²x + y`
   simplified to nothing (every pattern in the block required exactly two
   terms); the identities now scan n-ary sums pairwise, keyed on the trig

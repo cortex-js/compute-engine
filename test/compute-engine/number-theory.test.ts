@@ -614,3 +614,42 @@ describe('PrimitiveRoot', () => {
     );
   });
 });
+
+describe('EX-15: infinite arguments never throw (toBigint null on non-finite)', () => {
+  // `evaluate()` must never let a RangeError escape: BigInt(Infinity) threw
+  // for the whole integer-domain family. `toBigint` now returns null for
+  // non-finite values, so these stay symbolic (inert) instead of crashing.
+  const UNARY = [
+    'Fibonacci',
+    'CatalanNumber',
+    'LucasL',
+    'BernoulliB',
+    'MoebiusMu',
+    'EulerPhi',
+    'DivisorCount',
+  ];
+  for (const op of UNARY) {
+    test(`${op}(±∞) stays symbolic`, () => {
+      for (const inf of ['PositiveInfinity', 'NegativeInfinity']) {
+        expect(() => ce.box([op, inf]).evaluate()).not.toThrow();
+        expect(() => ce.box([op, inf]).N()).not.toThrow();
+      }
+    });
+  }
+  test('binary integer-domain operators with ∞ stay symbolic', () => {
+    for (const args of [
+      ['JacobiSymbol', 'PositiveInfinity', 3],
+      ['LegendreSymbol', 'PositiveInfinity', 3],
+      ['DivisorSigma', 'PositiveInfinity', 3],
+    ] as const) {
+      expect(() => ce.box(args as any).evaluate()).not.toThrow();
+    }
+  });
+  test('controls: finite values still compute', () => {
+    expect(ce.box(['Fibonacci', 10]).evaluate().re).toEqual(55);
+    expect(
+      ce.box(['IsPrime', ['Subtract', ['Power', 2, 127], 1]]).evaluate()
+        .symbol
+    ).toEqual('True');
+  });
+});
