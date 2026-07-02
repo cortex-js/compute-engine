@@ -4,6 +4,122 @@ import { gcd, lcm } from '../numerics/numeric-bigint';
 import { bigPrimeFactors, isPrimeBigint, modPow } from '../numerics/primes';
 import { checkDeadline } from '../../common/interruptible';
 
+/**
+ * Above this many digits (in the target base), materializing or iterating an
+ * integer's digit representation (`IntegerDigits`, `DigitCount`, `DigitSum`)
+ * is impractical — stay symbolic instead (mirrors `MAX_EXACT_POW_DIGITS` in
+ * `boxed-expression/arithmetic-power.ts` and
+ * `MAX_EXACT_COMBINATORICS_DIGITS` in `library/combinatorics.ts`). See
+ * WP-2.18 / P0-19 residual: `DigitSum(2^1000000)` (a real 301,030-digit
+ * bigint, itself under the exact-power guard) used to hang because the
+ * naive repeated mod/divide loop is O(digits²) — quadratic enough to turn
+ * that into a 30s+ hang.
+ */
+const MAX_DIGIT_ITERATION_DIGITS = 1_000_000;
+
+/**
+ * Cheap (O(digits), not O(digits²)) approximate bit length of a bigint's
+ * magnitude, via its hex string: each hex digit is a fixed-width
+ * reinterpretation of the underlying binary limbs (no arithmetic, unlike
+ * base-10 conversion), so this stays linear even for huge inputs.
+ */
+function approximateBitLength(m: bigint): number {
+  if (m === 0n) return 0;
+  const h = (m < 0n ? -m : m).toString(16);
+  return h.length * 4;
+}
+
+/**
+ * Approximate digit count of `m`'s magnitude in the given `base`, derived
+ * from the cheap bit-length estimate above. Used as a pre-check — before
+ * materializing a digit array or summing digits — so a pathologically large
+ * input stays symbolic rather than grinding through an O(digits) (or worse)
+ * loop.
+ */
+function approximateDigitCount(m: bigint, base: bigint): number {
+  const bits = approximateBitLength(m);
+  if (bits === 0) return 1;
+  return Math.ceil((bits * Math.LN2) / Math.log(Number(base))) + 1;
+}
+
+/** Decimal value of a base-36 digit character ('0'-'9', 'a'-'z'). */
+function charToDigit(code: number): bigint {
+  return BigInt(code <= 57 ? code - 48 : code - 87);
+}
+
+/**
+ * Decompose `|m|` into digits in the given `base`, least-significant first.
+ *
+ * For base 2..36 this delegates to bigint's native `toString(base)` — a
+ * linear-time, digit-by-digit reinterpretation of the binary representation
+ * — instead of the naive repeated-mod-and-divide loop, which is O(digits²):
+ * quadratic enough to turn a several-hundred-thousand-digit input into a
+ * many-second hang (WP-2.18). For base > 36 (not supported by `toString`),
+ * falls back to the mod/divide loop, guarded by `checkDeadline`.
+ */
+function bigintDigitsLSB(
+  m: bigint,
+  base: bigint,
+  deadline: number | undefined
+): bigint[] {
+  if (m === 0n) return [0n];
+  if (base <= 36n) {
+    const s = m.toString(Number(base));
+    const digits = new Array<bigint>(s.length);
+    for (let i = 0; i < s.length; i++) {
+      if ((i & 0xffff) === 0) checkDeadline(deadline);
+      digits[s.length - 1 - i] = charToDigit(s.charCodeAt(i));
+    }
+    return digits;
+  }
+  const digits: bigint[] = [];
+  let x = m;
+  // Unlike the base<=36 loop above, each step here is a bigint mod/div
+  // against an arbitrary (possibly itself huge) `base` — its cost is not a
+  // fixed small constant, so check the deadline every iteration rather than
+  // amortizing over a stride.
+  while (x > 0n) {
+    checkDeadline(deadline);
+    digits.push(x % base);
+    x /= base;
+  }
+  return digits;
+}
+
+/**
+ * Sum of the digits of `|m|` in the given base, in a single O(digits) pass
+ * (via native `toString(base)` for base 2..36, else a `checkDeadline`-
+ * guarded mod/divide loop for larger bases) — see `bigintDigitsLSB` for the
+ * same base-36 cutoff rationale. Avoids materializing an intermediate digit
+ * array since `DigitSum` only needs the running total.
+ */
+function bigintDigitSum(
+  m: bigint,
+  base: bigint,
+  deadline: number | undefined
+): bigint {
+  if (m === 0n) return 0n;
+  if (base <= 36n) {
+    const s = m.toString(Number(base));
+    let sum = 0n;
+    for (let i = 0; i < s.length; i++) {
+      if ((i & 0xffff) === 0) checkDeadline(deadline);
+      sum += charToDigit(s.charCodeAt(i));
+    }
+    return sum;
+  }
+  let sum = 0n;
+  let x = m;
+  // Same rationale as bigintDigitsLSB's fallback loop: check every
+  // iteration since `base` (and thus the per-step cost) is unbounded here.
+  while (x > 0n) {
+    checkDeadline(deadline);
+    sum += x % base;
+    x /= base;
+  }
+  return sum;
+}
+
 export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
   {
     FactorInteger: {
@@ -451,14 +567,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const base = baseOp === undefined ? 10n : toBigint(baseOp);
         if (base === null || base < 2n) return undefined;
 
-        let m = k < 0n ? -k : k;
-        const digits: bigint[] = [];
-        if (m === 0n) digits.push(0n);
-        while (m > 0n) {
-          digits.push(m % base);
-          m = m / base;
-        }
-        digits.reverse();
+        const m = k < 0n ? -k : k;
+        // Pre-check: stay symbolic rather than materialize a pathologically
+        // large digit list (see MAX_DIGIT_ITERATION_DIGITS).
+        if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
+          return undefined;
+        const digits = bigintDigitsLSB(m, base, ce._deadline).reverse();
 
         if (lenOp !== undefined) {
           const len = toBigint(lenOp);
@@ -486,14 +600,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const base = baseOp === undefined ? 10n : toBigint(baseOp);
         if (base === null || base < 2n) return undefined;
 
+        const m = k < 0n ? -k : k;
+        // Pre-check: stay symbolic rather than iterate a pathologically
+        // large number of digits (see MAX_DIGIT_ITERATION_DIGITS).
+        if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
+          return undefined;
         const counts = new Map<bigint, number>();
-        let m = k < 0n ? -k : k;
-        if (m === 0n) counts.set(0n, 1);
-        while (m > 0n) {
-          const d = m % base;
+        for (const d of bigintDigitsLSB(m, base, ce._deadline))
           counts.set(d, (counts.get(d) ?? 0) + 1);
-          m = m / base;
-        }
 
         if (digitOp !== undefined) {
           const d = toBigint(digitOp);
@@ -612,13 +726,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (k === null) return undefined;
         const base = baseOp === undefined ? 10n : toBigint(baseOp);
         if (base === null || base < 2n) return undefined;
-        let m = k < 0n ? -k : k;
-        let sum = 0n;
-        while (m > 0n) {
-          sum += m % base;
-          m /= base;
-        }
-        return ce.number(sum);
+        const m = k < 0n ? -k : k;
+        // Pre-check: stay symbolic rather than iterate a pathologically
+        // large number of digits (see MAX_DIGIT_ITERATION_DIGITS). Below
+        // the threshold, `bigintDigitSum` is a single O(digits) pass (not
+        // the O(digits²) naive mod/divide loop this used to be).
+        if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
+          return undefined;
+        return ce.number(bigintDigitSum(m, base, ce._deadline));
       },
     },
 

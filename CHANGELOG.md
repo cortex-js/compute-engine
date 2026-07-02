@@ -45,6 +45,46 @@
 
 ### Resolved Issues
 
+- **`evaluate()` no longer returns floats for exact arguments across the
+  library.** `\sqrt{-2}` numericized to `1.414…i` (it now stays symbolic,
+  while `\sqrt{-4}` gives the exact `2i`); `\operatorname{Fract}(\frac12)`
+  gave `0.5` (now `\frac12`); `\Re(\frac12)` gave `0.5`; `|1+i|` gave
+  `1.414…` (now the exact `\sqrt2`); `\log_2(\pi)` numericized (a symbolic
+  base is exact — it stays symbolic); `\operatorname{Distance}` numericized;
+  and every statistics function numericized exact data —
+  `\operatorname{Mean}([1,2,3,4])` is now `\frac52`,
+  `\operatorname{Variance}` `\frac53`, `\operatorname{StandardDeviation}`
+  `\frac{\sqrt{15}}{3}`, and so on. `N()` behavior is unchanged.
+
+- **Trig poles under `N()` no longer return huge garbage values.**
+  `N(\cot \pi)` returned `-2.6\times10^{24}` (and `\csc \pi`, `\sec \frac\pi2`
+  similar); they now return `\tilde\infty` like `\tan\frac\pi2` already did.
+
+- **Logarithms of negative numbers are consistent between `evaluate()` and
+  `N()`.** `\ln(-0.5)` evaluated to NaN while `N()` gave the complex value;
+  `N(\log_2(-1))` gave NaN while `N(\ln(-1))` gave `i\pi`. Policy now: an
+  inexact negative argument produces the principal complex value under both;
+  an exact negative argument stays symbolic under `evaluate()` and goes
+  complex under `N()` — uniformly across `\ln`, `\lg`, `\lb`, and `\log_b`.
+  Relatedly, `N()` of `\operatorname{Haversine}`/`\operatorname{Hypot}`
+  returned unevaluated symbolic expressions; they now return numbers, and
+  `\operatorname{InverseHaversine}(\frac12)` folds to `\frac\pi2`.
+
+- **Interval arithmetic agrees with the interpreter.** The interval runtime
+  (used by the interval-JS compilation target) computed `\operatorname{arccot}`
+  on the wrong branch for negative arguments, rounded halves toward `+\infty`,
+  mishandled a point exactly on a multiple of a negative modulus, and returned
+  empty intervals for odd roots of negative numbers (`\sqrt[3]{-8}`). All four
+  now match the interpreter's conventions while remaining sound enclosures.
+
+- **`\operatorname{DigitSum}(2^{10^6})` returned after 20+ seconds; printing
+  `\Gamma(10^7)` at high precision took 9 seconds.** The digit functions used
+  an O(digits²) divide loop (now a linear conversion, with a guard that keeps
+  >10⁶-digit inputs symbolic — `DigitSum(2^{10^6})` now answers `1351546` in
+  ~30 ms), and `toFixed` materialized `10^{\text{exponent}}` for a
+  ~65-million-digit exponent (now O(significand); `.toString()`/`.json` in
+  ~25 ms with identical output).
+
 - **Type inference no longer over-claims — `Element`, `isInteger`, `isReal`
   and friends answer soundly.** A family of type-system fixes: membership
   checks on symbols with bounded types (`integer<0..10>`) no longer *throw*;

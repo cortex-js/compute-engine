@@ -128,6 +128,21 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const expVal = exp.re;
       if (expVal === 0.5) return `_IA.sqrt(${compile(base)})`;
       if (expVal === 2) return `_IA.square(${compile(base)})`;
+      // Rational exponent p/q (in lowest terms) with an ODD denominator is real
+      // for a negative base too (e.g. (-8)^(2/3) = 4). Route through
+      // `powRational`, which applies the interpreter's real-root convention;
+      // plain `_IA.pow` would return `empty` for the negative part.
+      const p = exp.numerator?.re;
+      const q = exp.denominator?.re;
+      if (
+        !Number.isInteger(expVal) &&
+        Number.isInteger(p) &&
+        Number.isInteger(q) &&
+        q > 1 &&
+        q % 2 !== 0
+      ) {
+        return `_IA.powRational(${compile(base)}, ${p}, ${q})`;
+      }
       return `_IA.pow(${compile(base)}, ${expVal})`;
     }
     // Variable exponent - use powInterval
@@ -138,8 +153,13 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (arg === null) throw new Error('Root: no argument');
     if (exp === null) return `_IA.sqrt(${compile(arg)})`;
     if (exp?.re === 2) return `_IA.sqrt(${compile(arg)})`;
-    // nth root = x^(1/n)
     if (isNumber(exp) && exp.im === 0) {
+      // Integer degree: `nthRoot` gives the real root for an odd degree over a
+      // negative base (the interpreter's convention, e.g. Root(-8, 3) = -2);
+      // an even degree reduces to x^(1/n) (no real value for a negative base).
+      if (Number.isInteger(exp.re))
+        return `_IA.nthRoot(${compile(arg)}, ${exp.re})`;
+      // Non-integer degree: nth root = x^(1/n).
       return `_IA.pow(${compile(arg)}, ${1 / exp.re})`;
     }
     return `_IA.powInterval(${compile(arg)}, _IA.div(_IA.point(1), ${compile(

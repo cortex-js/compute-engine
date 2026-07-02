@@ -21,6 +21,9 @@ import {
   sqrt,
   square,
   pow,
+  powRational,
+  nthRoot,
+  remainder,
   exp,
   ln,
   abs,
@@ -523,13 +526,33 @@ describe('INTERVAL TRIGONOMETRIC FUNCTIONS', () => {
 
   // Inverse reciprocal trigonometric functions
   test('acot - safe interval (positive)', () => {
-    const result = acot({ lo: 1, hi: 2 });
-    expect(result.kind).toBe('interval');
+    // Continuous (0, π) convention: acot(x) = π/2 − atan(x), decreasing.
+    // acot(2) = π/2 − atan(2) ≈ 0.4636, acot(1) = π/4.
+    expectInterval(
+      acot({ lo: 1, hi: 2 }),
+      Math.PI / 2 - Math.atan(2),
+      Math.PI / 4,
+      1e-6
+    );
   });
 
-  test('acot - singular at zero', () => {
+  // acot uses the continuous (0, π) convention that matches the interpreter
+  // (Arccot(-2) = 2.678, Arccot(0) = π/2). It is therefore continuous through 0
+  // — NOT singular — so an interval straddling 0 yields a valid interval.
+  test('acot - continuous through zero (0, π) convention', () => {
+    // acot([-1, 1]) = [acot(1), acot(-1)] = [π/4, 3π/4], containing acot(0)=π/2.
     const result = acot({ lo: -1, hi: 1 });
-    expect(result.kind).toBe('singular');
+    expectInterval(result, Math.PI / 4, (3 * Math.PI) / 4, 1e-6);
+  });
+
+  test('acot - negative argument uses (0, π) range', () => {
+    // acot(-2) ≈ 2.678, NOT the atan(1/x) branch value −0.4636.
+    expectInterval(
+      acot({ lo: -2, hi: -2 }),
+      2.677945044588987,
+      2.677945044588987,
+      1e-9
+    );
   });
 
   test('acsc - safe interval', () => {
@@ -837,5 +860,67 @@ describe('INTERVAL ENCLOSURE REGRESSIONS (REVIEW.md E8–E12)', () => {
       expect(r.value.lo).toBeLessThanOrEqual(0.49);
       expect(r.value.hi).toBeGreaterThanOrEqual(0.54);
     }
+  });
+});
+
+// WP-2.17: align the interval runtime with the interpreter's real conventions
+// for odd roots / rational powers of negative bases and for Mod on a negative
+// divisor multiple.
+describe('INTERVAL RUNTIME ALIGNMENT (WP-2.17)', () => {
+  // nthRoot: an ODD degree over a negative base is real (Root(-8, 3) = -2), and
+  // the odd root is monotone increasing over all reals.
+  test('nthRoot - odd degree, negative point', () => {
+    expectInterval(nthRoot({ lo: -8, hi: -8 }, 3), -2, -2, 1e-9);
+    expectInterval(nthRoot({ lo: -32, hi: -32 }, 5), -2, -2, 1e-9);
+  });
+
+  test('nthRoot - odd degree, interval straddling zero (monotone increasing)', () => {
+    expectInterval(nthRoot({ lo: -8, hi: 27 }, 3), -2, 3, 1e-9);
+  });
+
+  test('nthRoot - odd degree, positive interval matches pow', () => {
+    expectInterval(nthRoot({ lo: 8, hi: 27 }, 3), 2, 3, 1e-9);
+  });
+
+  // An EVEN degree over a negative base has no real value.
+  test('nthRoot - even degree of negative base is empty', () => {
+    expect(nthRoot({ lo: -9, hi: -4 }, 4).kind).toBe('empty');
+    // Straddling zero → partial (real only on the non-negative part).
+    expect(nthRoot({ lo: -4, hi: 16 }, 4).kind).toBe('partial');
+  });
+
+  // powRational: q odd ⇒ real for negative bases too.
+  test('powRational - even numerator (|x|^(p/q), min 0 at origin)', () => {
+    // (-8)^(2/3) = 4
+    expectInterval(powRational({ lo: -8, hi: -8 }, 2, 3), 4, 4, 1e-9);
+    // straddling zero: even numerator ⇒ minimum 0 at x=0, max at an endpoint
+    expectInterval(powRational({ lo: -8, hi: 1 }, 2, 3), 0, 4, 1e-9);
+  });
+
+  test('powRational - odd numerator (sign-preserving, monotone increasing)', () => {
+    // (-32)^(3/5) = -8
+    expectInterval(powRational({ lo: -32, hi: -32 }, 3, 5), -8, -8, 1e-9);
+    expectInterval(powRational({ lo: -32, hi: 32 }, 3, 5), -8, 8, 1e-9);
+  });
+
+  test('powRational - even denominator of negative base has no real value', () => {
+    // e.g. x^(3/2) is complex for x < 0
+    expect(powRational({ lo: -4, hi: -1 }, 3, 2).kind).toBe('empty');
+  });
+
+  // Mod: a point exactly on a period multiple of a NEGATIVE divisor is a
+  // well-defined value (0, floored/sign-of-divisor), not a `singular` jump.
+  test('mod - point at a multiple of a negative divisor is 0, not singular', () => {
+    expectInterval(mod({ lo: 6, hi: 6 }, { lo: -3, hi: -3 }), 0, 0);
+    expectInterval(mod({ lo: 0, hi: 0 }, { lo: -3, hi: -3 }), 0, 0);
+    // And a point at a multiple of a positive divisor stays 0 as well.
+    expectInterval(mod({ lo: 6, hi: 6 }, { lo: 3, hi: 3 }), 0, 0);
+  });
+
+  // remainder composes div/round/mul/sub; the round() fix (half-away point
+  // rule) must flow through. remainder(7, 4) = 7 - 4·round(1.75) = 7 - 8 = -1.
+  test('remainder - IEEE, uses half-away round', () => {
+    expectInterval(remainder({ lo: 7, hi: 7 }, { lo: 4, hi: 4 }), -1, -1, 1e-9);
+    expectInterval(remainder({ lo: 5, hi: 5 }, { lo: 3, hi: 3 }), -1, -1, 1e-9);
   });
 });

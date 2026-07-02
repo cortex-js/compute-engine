@@ -210,7 +210,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (assumed !== undefined) return assumed;
         return 'non-negative'; //|x^2+1| fails
       },
-      evaluate: ([x]) => evaluateAbs(x),
+      evaluate: ([x], { numericApproximation }) =>
+        evaluateAbs(x, numericApproximation),
     },
 
     Add: {
@@ -575,13 +576,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonNegative) return 'non-negative';
         return undefined;
       },
-      evaluate: ([x]) =>
-        apply(
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        // Exact fractional part for an exact real argument: x - floor(x),
+        // computed exactly (rational arithmetic) so `Fract(1/2) → 1/2`, not
+        // `0.5`. Only an inexact (float) argument numericizes.
+        if (!numericApproximation && isNumber(x) && x.isExact && x.im === 0) {
+          const fl = ce.function('Floor', [x]).evaluate();
+          if (isNumber(fl) && fl.isExact)
+            return ce.function('Subtract', [x, fl]).evaluate();
+        }
+        return apply(
           x,
           (x) => x - Math.floor(x),
           (x) => x.sub(x.floor()),
           (z) => z.sub(z.floor(0))
-        ),
+        );
+      },
     },
 
     Gamma: {
@@ -930,8 +940,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return apply2(
           ops[0],
           ops[1],
-          (z, b) => Math.log(z) / Math.log(b),
-          (z, b) => z.log(b),
+          // A negative real argument has a complex logarithm; the one-arg
+          // path already falls back to `ce.complex(...).log()`, so the
+          // two-arg lanes must too (otherwise `Log(-2, 10).N()` → NaN while
+          // `Ln(-2).N()` → complex).
+          (z, b) =>
+            z < 0
+              ? ce.complex(z).log().div(Math.log(b))
+              : Math.log(z) / Math.log(b),
+          (z, b) =>
+            z.isNegative()
+              ? ce.complex(z.toNumber()).log().div(Math.log(b.toNumber()))
+              : z.log(b),
           (z, b) => z.log().div(typeof b === 'number' ? Math.log(b) : b.log())
         );
       },
@@ -2097,23 +2117,37 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Euclidean distance between two points (tuples of numbers).',
       complexity: 6000,
       signature: '(tuple, tuple) -> number',
-      evaluate: ([a, b], { engine: ce }) => {
+      evaluate: ([a, b], { engine: ce, numericApproximation }) => {
         if (!isFunction(a) || !isFunction(b))
           return ce.error('incompatible-type');
         if (a.operator !== 'Tuple' || b.operator !== 'Tuple')
           return ce.error('incompatible-type');
         if (a.ops!.length !== b.ops!.length || a.ops!.length === 0)
           return ce.error('incompatible-type');
-        let sumSq = 0;
+        // Build √(Σ (aᵢ − bᵢ)²) as an expression and evaluate it once, so the
+        // exact path is honored (`Distance((0,0),(1,1)) → √2`, not the machine
+        // float) — mirroring `Hypot`. `.N()` still numericizes.
+        const terms: Expression[] = [];
         for (let i = 0; i < a.ops!.length; i++) {
-          const ai = a.ops![i].re;
-          const bi = b.ops![i].re;
-          if (!Number.isFinite(ai) || !Number.isFinite(bi))
+          const ai = a.ops![i];
+          const bi = b.ops![i];
+          if (
+            !isNumber(ai) ||
+            !isNumber(bi) ||
+            ai.isFinite === false ||
+            bi.isFinite === false
+          )
             return ce.error('expected-value');
-          const d = ai - bi;
-          sumSq += d * d;
+          terms.push(
+            ce.function('Power', [
+              ce.function('Subtract', [ai, bi]),
+              ce.number(2),
+            ])
+          );
         }
-        return ce.number(Math.sqrt(sumSq));
+        return ce
+          .function('Sqrt', [ce.function('Add', terms)])
+          .evaluate({ numericApproximation });
       },
     },
 
@@ -2315,11 +2349,27 @@ function* reduceCollection(
   return acc;
 }
 
-function evaluateAbs(arg: Expression): Expression | undefined {
+function evaluateAbs(
+  arg: Expression,
+  numericApproximation?: boolean
+): Expression | undefined {
   const ce = arg.engine;
   if (isNumber(arg)) {
     const num = arg.numericValue;
     if (typeof num === 'number') return ce.number(Math.abs(num));
+    // Exact modulus of a Gaussian (integer) complex number:
+    // |a+bi| = √(a²+b²), built exactly (`|1+i| → √2`) instead of the machine
+    // hypot float. `Abs(3+4i)` already gave 5 because 25 is a perfect square;
+    // this extends the exact path to every integer a, b. `.N()` numericizes.
+    if (num.im !== 0) {
+      const re = num.re;
+      const im = num.im;
+      const s = re * re + im * im;
+      if (Number.isInteger(re) && Number.isInteger(im) && Number.isSafeInteger(s))
+        return ce
+          .function('Sqrt', [ce.number(s)])
+          .evaluate({ numericApproximation });
+    }
     return ce.number(num.abs());
   }
   if (arg.isNonNegative) return arg;

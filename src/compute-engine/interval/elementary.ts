@@ -233,6 +233,82 @@ export function powInterval(
 }
 
 /**
+ * Real value of `x^(p/q)` for an odd denominator `q` (so the root is real for
+ * every real `x`), following the interpreter's real convention:
+ *   - `p` even  → even function, `|x|^(p/q)` (≥ 0)
+ *   - `p` odd   → odd function,  `sign(x)·|x|^(p/q)`
+ * At `x = 0`: `0` for a positive exponent, `+∞` for a negative one.
+ */
+function realRatPow(x: number, p: number, exp: number): number {
+  if (x === 0) return exp > 0 ? 0 : exp < 0 ? Infinity : 1;
+  const m = Math.pow(Math.abs(x), exp);
+  return x < 0 && p % 2 !== 0 ? -m : m;
+}
+
+/**
+ * `base^(p/q)` on an interval where `q` is ODD, using the real-root convention
+ * (e.g. `(-8)^(2/3) = 4`, `(-32)^(3/5) = -8`). For a non-negative base this is
+ * identical to `pow(base, p/q)`; the extension only matters when the base is
+ * (partly) negative, where `Math.pow` would return `NaN` even though a real
+ * value exists.
+ *
+ * `x^(p/q)` (q odd) is monotone on each side of 0: increasing everywhere when
+ * `p` is odd; decreasing on `x < 0` and increasing on `x > 0` when `p` is even
+ * (a minimum of 0 at the origin for a positive exponent). The endpoints — plus
+ * the point 0 when it is interior and the exponent is positive — therefore
+ * bracket the range. A negative exponent has a pole at 0.
+ */
+export function powRational(
+  base: Interval | IntervalResult,
+  p: number,
+  q: number
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(base);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [b] = unwrapped;
+  const exp = p / q;
+
+  // Even denominator: real only for a non-negative base — `pow` already models
+  // the empty/partial/monotone cases correctly.
+  if (q % 2 === 0) return pow(ok(b), exp);
+
+  // Odd denominator, non-negative base: ordinary `pow` is exact.
+  if (b.lo >= 0) return pow(ok(b), exp);
+
+  const hasZero = b.lo <= 0 && b.hi >= 0;
+  // Negative exponent has a pole at 0.
+  if (p < 0 && hasZero) return { kind: 'singular', at: 0 };
+
+  const candidates = [realRatPow(b.lo, p, exp), realRatPow(b.hi, p, exp)];
+  // 0 is the interior minimum for an even numerator (positive exponent).
+  if (hasZero && p > 0) candidates.push(0);
+  return ok({ lo: Math.min(...candidates), hi: Math.max(...candidates) });
+}
+
+/**
+ * Integer nth root on an interval (`Root(x, n)`).
+ *
+ * For ODD `n` the root is real for every real `x` and monotonically increasing,
+ * so `[root(lo), root(hi)]` (matching the interpreter: `Root(-8, 3) = -2`). For
+ * EVEN `n` it reduces to `x^(1/n)`, which requires a non-negative base — a
+ * negative base has no real value (`empty`/`partial`), as with `sqrt`.
+ */
+export function nthRoot(
+  base: Interval | IntervalResult,
+  n: number
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(base);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [b] = unwrapped;
+  if (!Number.isInteger(n) || n === 0) return pow(ok(b), 1 / n);
+  if (n % 2 === 0) return pow(ok(b), 1 / n);
+  // Odd degree: real everywhere, monotone increasing.
+  const root = (x: number): number =>
+    Math.sign(x) * Math.pow(Math.abs(x), 1 / n);
+  return ok({ lo: root(b.lo), hi: root(b.hi) });
+}
+
+/**
  * Exponential function (e^x).
  *
  * Always valid, monotonically increasing.
@@ -370,26 +446,51 @@ export function ceil(x: Interval | IntervalResult): IntervalResult {
   return { kind: 'singular', at: clo, continuity: 'left' };
 }
 
+/** Round half away from zero (Round(-2.5) = -3) — the interpreter's convention.
+ *  This differs from JS `Math.round` (half toward +∞: Math.round(-2.5) = -2). */
+function roundHalfAway(n: number): number {
+  return Math.sign(n) * Math.round(Math.abs(n));
+}
+
 /**
- * Round to nearest integer.
+ * Sound enclosure of a step-rounding function on an interval, given its
+ * point-rounding rule. If both endpoints round to the same integer the function
+ * is constant on the interval; otherwise it spans a half-integer jump and the
+ * result is `singular` (mirrors the Floor/Ceil enclosure discipline).
  *
- * Has jump discontinuities at every half-integer.
+ * The first jump is at `rlo + 0.5`. Continuity is derived from the rule itself
+ * (`right` when the value at the jump matches the value just above it), so this
+ * is correct for both half-away (Round) and half-toward-+∞ (Remainder) rules.
+ */
+function roundStep(
+  x: Interval,
+  pointRound: (n: number) => number
+): IntervalResult {
+  const rlo = pointRound(x.lo);
+  const rhi = pointRound(x.hi);
+  if (rlo === rhi) return ok({ lo: rlo, hi: rhi });
+  const at = rlo + 0.5;
+  return {
+    kind: 'singular',
+    at,
+    continuity: pointRound(at) === rlo + 1 ? 'right' : 'left',
+  };
+}
+
+/**
+ * Round to nearest integer, half away from zero.
  *
- * Note: JS `Math.round` uses round-half-up, while GLSL `round()` uses
- * IEEE 754 round-half-to-even. They differ only AT half-integer values.
- * For discontinuity detection this is safe because any interval spanning
- * a half-integer returns `singular` regardless of the rounding convention.
+ * Matches the interpreter (Round(-2.5) = -3, Round(2.5) = 3), NOT JS
+ * `Math.round` (half toward +∞). Round is a step function with jump
+ * discontinuities at every half-integer (±0.5, ±1.5, …) and is continuous
+ * through 0; an interval that stays within one step returns that constant
+ * value, one that spans a half-integer returns `singular`.
  */
 export function round(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  const rlo = Math.round(xVal.lo);
-  const rhi = Math.round(xVal.hi);
-  if (rlo === rhi) return ok({ lo: rlo, hi: rhi });
-  // Interval spans a half-integer boundary — discontinuity
-  // round is right-continuous (with round-half-up convention)
-  return { kind: 'singular', at: rlo + 0.5, continuity: 'right' };
+  return roundStep(xVal, roundHalfAway);
 }
 
 /**
@@ -495,6 +596,18 @@ export function mod(
   // Division by zero in mod
   if (containsZero(bVal)) {
     return { kind: 'singular' };
+  }
+
+  // Degenerate point dividend and divisor: return the exact floored value
+  // (sign-of-divisor, D1). Handled up front so a point that sits exactly on a
+  // period multiple of a *negative* divisor — where `Mod` is well-defined (0),
+  // not spanning a jump — is not misreported as `singular` by the machinery
+  // below.
+  if (aVal.lo === aVal.hi && bVal.lo === bVal.hi) {
+    const b0 = bVal.lo;
+    // `+ 0` normalizes JS's `-0` (e.g. `-3 % -3`) to `+0`.
+    const m = (((aVal.lo % b0) + b0) % b0) + 0;
+    return ok({ lo: m, hi: m });
   }
 
   const period = Math.abs(

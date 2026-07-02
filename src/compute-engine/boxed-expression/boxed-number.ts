@@ -343,25 +343,50 @@ export class BoxedNumber
   }
 
   sqrt(): Expression {
+    const ce = this.engine;
     // @fastpath
     if (typeof this._value === 'number') {
-      if (this._value === 0 || this._value === 1) return this;
-      if (this._value === -1) return this.engine.I;
+      const v = this._value;
+      if (v === 0 || v === 1) return this;
+      if (v === -1) return ce.I;
 
-      if (
-        this._value > 0 &&
-        Number.isInteger(this._value) &&
-        this._value < SMALL_INTEGER
-      )
-        return this.engine.number(
-          this.engine._numericValue({ radical: this._value })
-        );
+      if (Number.isInteger(v)) {
+        const n = Math.abs(v);
+        // Exact radical for small magnitudes (auto-reduces perfect-square
+        // parts, e.g. √999999 → 3√111111).
+        if (n < SMALL_INTEGER) {
+          const r = ce.number(ce._numericValue({ radical: n }));
+          if (v >= 0) return r;
+          // Negative argument = i·√n. Fold a perfect square to an exact
+          // Gaussian integer (`√-4 → 2i`); otherwise stay symbolic (`√-2`).
+          // (A symbolic `i·√2` would carry a too-wide `finite_number` type and
+          // break the static-type soundness contract; `.N()` still gives the
+          // complex float.)
+          return r.isInteger === true
+            ? ce.number(ce.complex(0, r.re))
+            : ce._fn('Sqrt', [this]);
+        }
+        // Large integer: exact only when it is a perfect square; otherwise
+        // stay symbolic (never numericize an exact argument — the exactness
+        // contract; `.N()` still produces the float).
+        const root = Math.sqrt(n);
+        if (Number.isInteger(root))
+          return v < 0 ? ce.number(ce.complex(0, root)) : ce.number(root);
+        return ce._fn('Sqrt', [this]);
+      }
 
-      return this.engine.number(this.engine._numericValue(this._value).sqrt());
+      // Inexact machine float: numericize (inexact in → inexact out).
+      return ce.number(ce._numericValue(v).sqrt());
     }
     if (this.isSame(0) || this.isSame(1)) return this;
 
-    return this.engine.number(this._value.sqrt());
+    // Exact NumericValue (rational / radical / complex): if the value is
+    // exact but its square root is not, stay symbolic rather than numericize
+    // (`√(√2)`, `√(-3/2)` → symbolic; `√(1/4)` → 1/2 stays exact).
+    const r = ce.number(this._value.sqrt());
+    if (this.isExact && isNumber(r) && r.isExact === false)
+      return ce._fn('Sqrt', [this]);
+    return r;
   }
 
   ln(semiBase?: number | Expression): Expression {
@@ -399,25 +424,36 @@ export class BoxedNumber
     // either the argument or the base is INEXACT (a float, e.g. `log_2.5(8)`)
     // there is no exactness to preserve, so numericize — mirroring `√2.5 →
     // 1.58…`.
+    // A base is "inexact" only when it is an actual float literal (e.g.
+    // `log_2.5(8)`). A symbolic constant base (`π`, or any symbol/expression)
+    // is exact, so `log_π(2)` stays symbolic under `evaluate()` and only
+    // `.N()` numericizes — matching the argument side. Previously a symbol
+    // base failed the `isNumber(base)` test and was wrongly treated as inexact.
     const baseExact =
       base === undefined ||
       isSymbol(base, 'ExponentialE') ||
-      (isNumber(base) && base.isExact);
+      !(isNumber(base) && base.isExact === false);
     if (this.isExact && baseExact) {
       if (base === undefined || isSymbol(base, 'ExponentialE'))
         return ce._fn('Ln', [this]);
       return ce._fn('Log', [this, base]);
     }
 
-    // Inexact argument or base: numericize.
-    if (base !== undefined) {
-      if (typeof this._value === 'number')
-        return ce.number(Math.log(this._value) / Math.log(base.re));
-      return ce.number(this._value.ln(base.re));
+    // Inexact argument or base: numericize. A negative real argument has a
+    // complex principal logarithm (`ln x = ln|x| + iπ`); route it through the
+    // complex path so `evaluate()` agrees with `.N()` (which already returns
+    // the complex value) rather than returning NaN. The NumericValue lane
+    // relies on the numeric-value `ln` handling the negative-real branch.
+    if (typeof this._value === 'number') {
+      const lnBase = base !== undefined ? Math.log(base.re) : 1;
+      if (this._value < 0)
+        return ce.number(ce.complex(this._value).log().div(lnBase));
+      const l = Math.log(this._value);
+      return ce.number(base !== undefined ? l / lnBase : l);
     }
-    if (typeof this._value === 'number')
-      return ce.number(Math.log(this._value));
-    return ce.number(this._value.ln());
+    return ce.number(
+      base !== undefined ? this._value.ln(base.re) : this._value.ln()
+    );
   }
 
   get value(): Expression {

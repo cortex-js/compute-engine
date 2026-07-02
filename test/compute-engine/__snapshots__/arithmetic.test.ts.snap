@@ -394,8 +394,8 @@ box       = ["Lb", -1]
 canonical = ["Log", -1, 2]
 eval-auto = log(-1, 2)
 eval-mach = log(-1, 2)
-N-auto    = NaN
-N-mach    = NaN
+N-auto    = 4.532360141827194i
+N-mach    = 4.532360141827194i
 `;
 
 exports[`LB Lb -2 1`] = `
@@ -403,8 +403,8 @@ box       = ["Lb", -2]
 canonical = ["Log", -2, 2]
 eval-auto = log(-2, 2)
 eval-mach = log(-2, 2)
-N-auto    = NaN
-N-mach    = NaN
+N-auto    = (1 + 4.532360141827194i)
+N-mach    = (1 + 4.532360141827194i)
 `;
 
 exports[`LB Lb 0 1`] = `
@@ -547,8 +547,8 @@ exports[`LOG(a,b) Log -1, 5 1`] = `
 box       = ["Log", -1, 5]
 eval-auto = log(-1, 5)
 eval-mach = log(-1, 5)
-N-auto    = NaN
-N-mach    = NaN
+N-auto    = 1.9519812658311715i
+N-mach    = 1.9519812658311715i
 `;
 
 exports[`LOG(a,b) Log 0, 5 1`] = `
@@ -1091,14 +1091,18 @@ N-mach    = 13.22875655532295
 
 exports[`SQRT √(1000000/49) 1`] = `
 box       = ["Sqrt", ["Rational", 1000000, 49]]
-eval-auto = 142.857142857142857143
-eval-mach = 142.85714285714278
+eval-auto = sqrt(1000000/49)
+eval-mach = sqrt(1000000/49)
+N-auto    = 142.857142857142857143
+N-mach    = 142.85714285714278
 `;
 
 exports[`SQRT √(1000001/7) 1`] = `
 box       = ["Sqrt", ["Rational", 1000001, 7]]
-eval-auto = 377.964661991416486293
-eval-mach = 377.96466199141685
+eval-auto = sqrt(1000001/7)
+eval-mach = sqrt(1000001/7)
+N-auto    = 377.964661991416486293
+N-mach    = 377.96466199141685
 `;
 
 exports[`SQRT √(12345678901234567890/23456789012345678901) 1`] = `
@@ -1111,14 +1115,18 @@ box       = [
   ]
 ]
 canonical = ["Sqrt", ["Rational", 137174210, 260630989]]
-eval-auto = 0.725476264027701313101
-eval-mach = 0.7254762640277013
+eval-auto = sqrt(137174210/260630989)
+eval-mach = sqrt(137174210/260630989)
+N-auto    = 0.725476264027701313101
+N-mach    = 0.7254762640277013
 `;
 
 exports[`SQRT √(12345670000000000000000000) 1`] = `
 box       = ["Sqrt", {num: "1234567e+19"}]
-eval-auto = 3513640562152.02524805
-eval-mach = 3513640562152.0254
+eval-auto = sqrt(1234567e+19)
+eval-mach = sqrt(1234567e+19)
+N-auto    = 3513640562152.02524805
+N-mach    = 3513640562152.0254
 `;
 
 exports[`SQRT √0 1`] = `
@@ -1142,8 +1150,10 @@ eval-mach = 11111.11106111111
 
 exports[`SQRT √12345678901234567890 1`] = `
 box       = ["Sqrt", {num: "12345678901234567890"}]
-eval-auto = 3513641828.82014425309
-eval-mach = 3513641828.820149
+eval-auto = sqrt(12345678901234567890)
+eval-mach = sqrt(12345678901234567890)
+N-auto    = 3513641828.82014425309
+N-mach    = 3513641828.820149
 `;
 
 exports[`SUBTRACT Subtract 1`] = `2.5`;

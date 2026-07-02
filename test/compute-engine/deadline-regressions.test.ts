@@ -23,13 +23,23 @@ import { CancellationError } from '../../src/common/interruptible';
  * NOTE on large results: several of these produce BigDecimal values with
  * enormous *exponents* (e.g. Gamma(1e7) at precision 500 is a value with a
  * ~6.5×10⁷-digit exponent). Calling `.toString()`/`.json` on such a result
- * is itself extremely slow (a pre-existing, separate bug in the generic
- * BoxedNumber/BigNumericValue serialization path — same class as EX-15 —
- * `pow10(hugeExponent)`), so these tests deliberately assert on cheap
- * structural getters (`.re`, `.isFinite`, `.isInfinity`, `.operator`) and
- * `.bignumRe.toString()` (the raw BigDecimal formatter, which *is* cheap —
- * see BigDecimal.prototype.toString) rather than on `.toString()` /
- * `.json` of the boxed result.
+ * used to be extremely slow — `BigDecimal.prototype.toFixed`'s `shift >= 0`
+ * branch built `absSig * 10n ** BigInt(shift)` and then stringified that
+ * multi-million-digit bigint, even though the answer is just the
+ * significand's digits followed by `shift` zeros. `BigNumericValue`'s
+ * `decimalToString` helper (`numeric-value/big-numeric-value.ts`) calls
+ * `toFixed(0)` speculatively on every integer whose `toString()` used
+ * scientific notation, to decide whether a "few trailing zeros" fixed-point
+ * rendering would be nicer — so this fired on every `.toString()`/`.json`
+ * call for a huge-exponent bignum (WP-2.18, same class as EX-15). Fixed in
+ * `src/big-decimal/big-decimal.ts` (`toFixed`) by building the digit string
+ * directly instead of round-tripping through a bigint, mirroring the
+ * already-efficient equivalent branch in `toString()`. These tests still
+ * lean on the cheap structural getters (`.re`, `.isFinite`, `.isInfinity`,
+ * `.operator`) and `.bignumRe.toString()` where a value's *magnitude* (not
+ * its serialization performance) is what's being checked; the
+ * `.toString()`/`.json` serialization performance itself is covered by the
+ * "huge-exponent serialization" describe block below.
  */
 
 let ce: ComputeEngine;
@@ -171,14 +181,136 @@ describe('WP-2.11 / EX-14: combinatorics magnitude guards', () => {
     expect(r.operator).toBe('Subfactorial');
   });
 
-  // DigitSum(2^1e6): observed to hang (>20s) — the exact same class of bug
-  // (an unguarded O(digits) loop over the argument's own magnitude), but
-  // the implementation lives in `library/number-theory.ts`, which is
-  // outside this fix's file scope (combinatorics.ts / special-functions.ts
-  // only — see WP-2.11 hard constraints). Left unfixed and documented here
-  // rather than silently patched out of scope; tracked separately.
-  it.skip('DigitSum(Power(2, 1e6)) — known hang, out of scope for this fix (number-theory.ts)', () => {
-    ce.box(['DigitSum', ['Power', 2, 1_000_000]]).evaluate();
+});
+
+describe('WP-2.18 / P0-19 residual: DigitSum and siblings (library/number-theory.ts)', () => {
+  // DigitSum(2^1e6): used to hang (>20s). `Power(2, 1_000_000)` itself
+  // evaluates exactly (~301,030 digits, under `MAX_EXACT_POW_DIGITS`), so
+  // `DigitSum` received a real 301,030-digit bigint. The naive
+  // repeated-mod-and-divide loop is O(digits²) on a shrinking bigint —
+  // quadratic enough to turn that into a 30s+ hang. Fixed via a single
+  // O(digits) pass built on the bigint's own (efficient) `toString(base)`.
+  // Outcome: a correct finite value, well within the 2s time limit.
+  it('DigitSum(2^1000000) completes with the correct value instead of hanging', () => {
+    const start = Date.now();
+    const r = ce.box(['DigitSum', ['Power', 2, 1_000_000]]).evaluate();
+    expect(Date.now() - start).toBeLessThan(4000);
+    expect(r.operator).toBe('Integer');
+    expect(r.re).toBe(1351546);
+  });
+
+  // Above MAX_DIGIT_ITERATION_DIGITS the pre-check keeps the expression
+  // symbolic rather than even attempting the (now-fast, but still O(digits))
+  // pass — e.g. a base-2 DigitSum of a huge power has ~3.3× as many digits
+  // as the decimal count, so it can cross the threshold well before the
+  // decimal case does.
+  it('DigitSum(2^10000000, 2) stays symbolic instead of hanging', () => {
+    const start = Date.now();
+    const r = ce.box(['DigitSum', ['Power', 2, 10_000_000], 2]).evaluate();
+    expect(Date.now() - start).toBeLessThan(4000);
+    expect(r.operator).toBe('DigitSum');
+  });
+
+  // Control: a genuine 39-digit Mersenne prime (2^127 - 1) — same value
+  // exercised by test/compute-engine/number-theory.test.ts and
+  // exactness-regressions.test.ts — must still be exact and fast after the
+  // algorithm swap (not just the pathologically large cases).
+  it('DigitSum(2^127 - 1) is still exact (154)', () => {
+    const m127 = 2n ** 127n - 1n;
+    const r = ce.box(['DigitSum', ce.number(m127)]).evaluate();
+    expect(r.toString()).toBe('154');
+  });
+
+  // Control: a small, everyday case must remain trivially correct.
+  it('DigitSum(12345) is still exact (15)', () => {
+    expect(ce.box(['DigitSum', 12345]).evaluate().toString()).toBe('15');
+  });
+});
+
+describe('WP-2.18: huge-exponent BigDecimal serialization (src/big-decimal/big-decimal.ts)', () => {
+  // Gamma(1e7) = (1e7 - 1)!, an exact integer represented (at precision 500)
+  // by a ~500-digit significand and an exponent of ~6.5×10⁷. `.N()` itself
+  // is fast (the computation is precision-scaled, not magnitude-scaled);
+  // what used to be slow (~9s) was `.toString()`/`.json` afterwards, via
+  // `BigNumericValue`'s `decimalToString` helper speculatively calling
+  // `BigDecimal.toFixed(0)` — see the file-level NOTE. The fix keeps the
+  // *output* the same (scientific notation, since the number has far more
+  // than 5 trailing zeros) while making the underlying `toFixed` O(digits)
+  // instead of O(digits) BigInt-exponentiation-and-back-to-string.
+  describe('Gamma(1e7).N() at precision 500', () => {
+    const savedPrecision = { value: 21 };
+    beforeAll(() => {
+      savedPrecision.value = new ComputeEngine().precision;
+    });
+
+    it('.toString() and JSON.stringify(.json) are fast and use scientific notation', () => {
+      ce.precision = 500;
+      try {
+        const r = ce.box(['Gamma', 1e7]).N();
+
+        const t0 = Date.now();
+        const s = r.toString();
+        const toStringMs = Date.now() - t0;
+
+        const t1 = Date.now();
+        const j = JSON.stringify(r.json);
+        const jsonMs = Date.now() - t1;
+
+        // Output form: scientific notation (`d.ddd…e+N`), not a
+        // ~6.5×10⁷-character string of mostly zeros.
+        expect(s.startsWith('1.202423400515903456')).toBe(true);
+        expect(s.endsWith('e+65657052')).toBe(true);
+        expect(s.length).toBeLessThan(1000);
+
+        expect(j).toContain('"num"');
+        expect(j).toContain('e+65657052');
+        expect(j.length).toBeLessThan(1000);
+
+        // Wall-clock is a secondary signal here (the primary one is the
+        // output form above) — kept generous to avoid CI flakiness, but
+        // still tight enough to catch a regression back to the ~9s bug.
+        expect(toStringMs).toBeLessThan(1000);
+        expect(jsonMs).toBeLessThan(1000);
+      } finally {
+        ce.precision = savedPrecision.value; // BigDecimal.precision is process-global
+      }
+    });
+  });
+
+  // Ordinary (non-pathological) numbers must serialize byte-identically to
+  // before the `toFixed` change — the fast path only changes *how* the
+  // "shift >= 0, no rounding" digit string is built, not its value.
+  it('ordinary numbers still serialize the same, across precisions', () => {
+    const savedPrecision = ce.precision;
+    try {
+      const cases: Array<[number, number, string]> = [
+        [1, 15, '1'],
+        [0.5, 15, '0.5'],
+        [1e21, 15, '1e+21'],
+        [1e-300, 15, '1e-300'],
+        [123.456, 15, '123.456'],
+        [1, 21, '1'],
+        [0.5, 21, '0.5'],
+        [1e21, 21, '1e+21'],
+        [1e-300, 21, '1e-300'],
+        [123.456, 21, '123.456'],
+        [1, 50, '1'],
+        [0.5, 50, '0.5'],
+        [1e21, 50, '1e+21'],
+        [1e-300, 50, '1e-300'],
+        [123.456, 50, '123.456'],
+      ];
+      for (const [val, prec, expected] of cases) {
+        ce.precision = prec;
+        const r = ce.box(val).N();
+        expect(r.toString()).toBe(expected);
+        // At these precisions the value is in machine range, so `.json` is
+        // the plain JS number itself (not a `{num: "..."}` bignum literal).
+        expect(r.json).toBe(val);
+      }
+    } finally {
+      ce.precision = savedPrecision;
+    }
   });
 });
 

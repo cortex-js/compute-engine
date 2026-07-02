@@ -340,3 +340,263 @@ describe('P0-7 — Mod/Remainder agree across lanes (WP-2.5)', () => {
     ).toEqual('-1/6');
   });
 });
+
+//
+// WP-2.13 — the exactness sweep (P0-12, P0-16 b–h/j/k, P0-17, P0-18).
+//
+// The contract (CLAUDE.md "Evaluate vs. N"): under `evaluate()` an exact
+// argument yields an exact result or stays symbolic — never a float; `.N()`
+// produces the float; and `evaluate().N()` agrees with `.N()`.
+//
+
+const num = (e: any) => ce.box(e).evaluate();
+const closeN = (e: any) => {
+  const a = ce.box(e).evaluate().N().re;
+  const b = ce.box(e).N().re;
+  return Math.abs(a - b);
+};
+
+describe('P0-16b — Sqrt of exact arguments stays exact/symbolic', () => {
+  test('Sqrt(-2) stays symbolic (not a float); .N() → 1.414…i', () => {
+    expect(num(['Sqrt', -2]).operator).toEqual('Sqrt');
+    expect(nStr(['Sqrt', -2]).endsWith('i')).toBe(true); // .N() → 1.414…i
+  });
+  test('Sqrt(-4) → 2i exact (control, perfect square)', () => {
+    expect(evalStr(['Sqrt', -4])).toEqual('2i');
+  });
+  test('Sqrt(-3/2) stays symbolic', () => {
+    expect(num(['Sqrt', ['Rational', -3, 2]]).operator).toEqual('Sqrt');
+  });
+  test('Sqrt(√2) (nested radical) stays symbolic', () => {
+    expect(num(['Sqrt', ['Sqrt', 2]]).operator).toEqual('Sqrt');
+  });
+  test('Sqrt(1000003) (non-square past the 10^6 cliff) stays symbolic', () => {
+    expect(num(['Sqrt', 1000003]).operator).toEqual('Sqrt');
+    expect(nStr(['Sqrt', 1000003]).startsWith('1000.001')).toBe(true);
+  });
+  test('controls: Sqrt(4)→2, Sqrt(2) symbolic, Sqrt(999999)→3√111111', () => {
+    expect(evalStr(['Sqrt', 4])).toEqual('2');
+    expect(evalStr(['Sqrt', 2])).toEqual('sqrt(2)');
+    expect(evalStr(['Sqrt', 999999])).toEqual('3sqrt(111111)');
+    expect(evalStr(['Sqrt', ['Rational', 1, 4]])).toEqual('1/2');
+  });
+});
+
+describe('P0-16c — Fract of exact arguments is exact', () => {
+  test('Fract(1/2) → 1/2', () => {
+    expect(evalStr(['Fract', ['Rational', 1, 2]])).toEqual('1/2');
+  });
+  test('Fract(-3/2) → 1/2 (x − floor(x))', () => {
+    expect(evalStr(['Fract', ['Rational', -3, 2]])).toEqual('1/2');
+  });
+  test('Fract(√2) → √2 − 1 (exact)', () => {
+    expect(evalStr(['Fract', ['Sqrt', 2]])).toEqual('-1 + sqrt(2)');
+  });
+  test('Fract(0.5).N() unchanged (float)', () => {
+    expect(nStr(['Fract', 0.5])).toEqual('0.5');
+  });
+});
+
+describe('P0-16f — Log with a symbolic (exact) base stays symbolic', () => {
+  test('Log(2, Pi) stays symbolic under evaluate()', () => {
+    expect(num(['Log', 2, 'Pi']).operator).toEqual('Log');
+  });
+  test('Log(2, Pi).N() numericizes', () => {
+    expect(nStr(['Log', 2, 'Pi']).startsWith('0.605')).toBe(true);
+  });
+  test('Log(8, 2) → 3 exact (control)', () => {
+    expect(evalStr(['Log', 8, 2])).toEqual('3');
+  });
+});
+
+describe('P0-16g — Real/Imaginary/Conjugate keep exact real parts', () => {
+  test('Real(1/2) → 1/2', () => {
+    expect(evalStr(['Real', ['Rational', 1, 2]])).toEqual('1/2');
+  });
+  test('Real(√2) → √2', () => {
+    expect(evalStr(['Real', ['Sqrt', 2]])).toEqual('sqrt(2)');
+  });
+  test('Imaginary(1/2) → 0, Conjugate(1/2) → 1/2', () => {
+    expect(evalStr(['Imaginary', ['Rational', 1, 2]])).toEqual('0');
+    expect(evalStr(['Conjugate', ['Rational', 1, 2]])).toEqual('1/2');
+  });
+  test('Real(3+4i) → 3, Imaginary(3+4i) → 4 (control)', () => {
+    expect(evalStr(['Real', ['Complex', 3, 4]])).toEqual('3');
+    expect(evalStr(['Imaginary', ['Complex', 3, 4]])).toEqual('4');
+  });
+});
+
+describe('P0-16h — statistics of exact data stay exact under evaluate()', () => {
+  const d = ['List', 1, 2, 3, 4];
+  const d5 = ['List', 1, 2, 3, 4, 5];
+  test('Mean → 5/2', () => expect(evalStr(['Mean', d])).toEqual('5/2'));
+  test('Median → 5/2', () => expect(evalStr(['Median', d])).toEqual('5/2'));
+  test('Variance → 5/3', () => expect(evalStr(['Variance', d])).toEqual('5/3'));
+  test('PopulationVariance → 5/4', () =>
+    expect(evalStr(['PopulationVariance', d])).toEqual('5/4'));
+  test('Kurtosis → 41/25', () =>
+    expect(evalStr(['Kurtosis', d])).toEqual('41/25'));
+  test('InterquartileRange → 5/2', () =>
+    expect(evalStr(['InterquartileRange', d5])).toEqual('5/2'));
+  test('Mean of exact rationals → 1/3', () =>
+    expect(
+      evalStr([
+        'Mean',
+        ['List', ['Rational', 1, 2], ['Rational', 1, 3], ['Rational', 1, 6]],
+      ])
+    ).toEqual('1/3'));
+  test('StandardDeviation stays exact/symbolic (√)', () => {
+    // √(5/3) rationalized to the exact radical √15/3 — not a machine float.
+    expect(evalStr(['StandardDeviation', d])).toEqual('sqrt(15)/3');
+    expect(nStr(['StandardDeviation', d]).startsWith('1.29')).toBe(true);
+  });
+  test('evaluate().N() agrees with .N()', () => {
+    for (const op of [
+      'Mean',
+      'Median',
+      'Variance',
+      'PopulationVariance',
+      'StandardDeviation',
+      'Kurtosis',
+    ])
+      expect(closeN([op, d])).toBeLessThan(1e-9);
+  });
+  test('.N() of an exact list numericizes (unchanged)', () => {
+    expect(nStr(['Mean', d])).toEqual('2.5');
+  });
+  test('float data is unchanged (Mean([0.5,1.5,2.5]) → 1.5)', () => {
+    expect(evalStr(['Mean', ['List', 0.5, 1.5, 2.5]])).toEqual('1.5');
+  });
+});
+
+describe('P0-16j — Distance routes through the exact path', () => {
+  test('Distance((0,0),(1,1)) → √2', () => {
+    expect(
+      evalStr(['Distance', ['Tuple', 0, 0], ['Tuple', 1, 1]])
+    ).toEqual('sqrt(2)');
+  });
+  test('Distance((0,0),(3,4)) → 5 (control, perfect square)', () => {
+    expect(
+      evalStr(['Distance', ['Tuple', 0, 0], ['Tuple', 3, 4]])
+    ).toEqual('5');
+  });
+  test('Distance().N() numericizes', () => {
+    expect(
+      nStr(['Distance', ['Tuple', 0, 0], ['Tuple', 1, 1]]).startsWith('1.414')
+    ).toBe(true);
+  });
+});
+
+describe('P0-16k — Abs of an exact Gaussian integer is exact', () => {
+  test('Abs(1+i) → √2', () => {
+    expect(evalStr(['Abs', ['Complex', 1, 1]])).toEqual('sqrt(2)');
+  });
+  test('Abs(2+3i) → √13', () => {
+    expect(evalStr(['Abs', ['Complex', 2, 3]])).toEqual('sqrt(13)');
+  });
+  test('Abs(3+4i) → 5 (control)', () => {
+    expect(evalStr(['Abs', ['Complex', 3, 4]])).toEqual('5');
+  });
+  test('Abs(1+i).N() numericizes', () => {
+    expect(nStr(['Abs', ['Complex', 1, 1]]).startsWith('1.414')).toBe(true);
+  });
+});
+
+describe('P0-12 — trig poles under .N() return ~oo, not garbage', () => {
+  test('Cot(π).N() → ~oo', () => {
+    expect(nStr(['Cot', 'Pi'])).toEqual('~oo');
+  });
+  test('Csc(π).N() → ~oo', () => {
+    expect(nStr(['Csc', 'Pi'])).toEqual('~oo');
+  });
+  test('Sec(π/2).N() → ~oo', () => {
+    expect(nStr(['Sec', ['Divide', 'Pi', 2]])).toEqual('~oo');
+  });
+  test('evaluate() poles unchanged', () => {
+    expect(evalStr(['Cot', 'Pi'])).toEqual('~oo');
+  });
+  test('non-pole values unchanged (controls)', () => {
+    expect(nStr(['Cot', 1]).startsWith('0.642')).toBe(true);
+    expect(nStr(['Csc', 1]).startsWith('1.188')).toBe(true);
+    expect(nStr(['Sec', 1]).startsWith('1.850')).toBe(true);
+  });
+});
+
+describe('P0-17 — Haversine/InverseHaversine/Hypot .N() are fully evaluated', () => {
+  test('Haversine(0.5).N() is a number', () => {
+    expect(ce.box(['Haversine', 0.5]).N().isNumberLiteral).toBe(true);
+    expect(closeN(['Haversine', 0.5])).toBeLessThan(1e-9);
+  });
+  test('InverseHaversine(1/2).evaluate() → π/2 (fold)', () => {
+    expect(evalStr(['InverseHaversine', ['Rational', 1, 2]])).toEqual(
+      '1/2 * pi'
+    );
+  });
+  test('InverseHaversine(1/2).N() is a number', () => {
+    expect(ce.box(['InverseHaversine', ['Rational', 1, 2]]).N().isNumberLiteral).toBe(
+      true
+    );
+  });
+  test('Hypot(1/2,1/3).N() is a number; evaluate() → √13/6', () => {
+    expect(
+      evalStr(['Hypot', ['Rational', 1, 2], ['Rational', 1, 3]])
+    ).toEqual('sqrt(13)/6');
+    expect(
+      ce.box(['Hypot', ['Rational', 1, 2], ['Rational', 1, 3]]).N().isNumberLiteral
+    ).toBe(true);
+  });
+});
+
+describe('P0-18 — negative-argument logarithms are lane-consistent', () => {
+  // Exact negative → symbolic under evaluate(), complex under N().
+  test('Ln(-2) symbolic under evaluate(), complex under N()', () => {
+    expect(num(['Ln', -2]).operator).toEqual('Ln');
+    expect(ce.box(['Ln', -2]).N().im).toBeCloseTo(Math.PI, 10);
+  });
+  test('Log(-2, 2) symbolic under evaluate()', () => {
+    expect(num(['Log', -2, 2]).operator).toEqual('Log');
+  });
+  // Inexact negative → complex under BOTH evaluate() and N().
+  test('Ln(-0.5) complex under evaluate() (was NaN)', () => {
+    const e = num(['Ln', -0.5]);
+    expect(e.im).toBeCloseTo(Math.PI, 10);
+    expect(e.re).toBeCloseTo(Math.log(0.5), 10);
+  });
+  test('Log(-1.0, 2).N() is complex (was NaN); matches Ln(-1.0).N()/ln2', () => {
+    const lg = ce.box(['Log', -1.0, 2]).N();
+    expect(lg.re).toBeCloseTo(0, 10);
+    expect(lg.im).toBeCloseTo(Math.PI / Math.log(2), 8);
+  });
+  test('one-arg Lg(-2).N() and two-arg Log(-2,10).N() agree', () => {
+    const a = ce.box(['Log', -2]).N();
+    const b = ce.box(['Log', -2, 10]).N();
+    expect(a.re).toBeCloseTo(b.re, 10);
+    expect(a.im).toBeCloseTo(b.im, 10);
+    expect(Number.isNaN(b.re)).toBe(false); // was NaN
+  });
+  test('positive-argument logs unchanged (controls)', () => {
+    expect(evalStr(['Ln', 2])).toEqual('ln(2)');
+    expect(nStr(['Ln', 2]).startsWith('0.693')).toBe(true);
+  });
+});
+
+describe('SYM P0-15 residual — generic numeric fallback gates finiteness on operands', () => {
+  // `PreIncrement`/`PreDecrement` have a `(number) -> number` signature and no
+  // type handler, so they exercise the generic narrowing fallback.
+  test('non-finite operand is NOT narrowed to non_finite_number', () => {
+    // finite-in → finite-out is an unsound closure assumption for an unknown
+    // operator; with a non-finite operand the result finiteness must stay
+    // `number` (was `non_finite_number`).
+    expect(ce.box(['PreIncrement', 'PositiveInfinity']).type.toString()).toEqual(
+      'number'
+    );
+    expect(ce.box(['PreDecrement', 'NegativeInfinity']).type.toString()).toEqual(
+      'number'
+    );
+  });
+  test('finite operand still narrows (kind + finiteness justified)', () => {
+    expect(ce.box(['PreIncrement', 2]).type.toString()).toEqual(
+      'finite_integer'
+    );
+  });
+});

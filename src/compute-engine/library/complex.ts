@@ -58,7 +58,10 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }) => {
         if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
-        if (typeof op === 'number') return ops[0];
+        // A real value is its own real part: return the operand unchanged so an
+        // exact real (`1/2`, `√2`) stays exact instead of being rounded to a
+        // float. Only a genuinely complex value extracts a (machine) real part.
+        if (typeof op === 'number' || op.im === 0) return ops[0];
         return ce.number(op.bignumRe ?? op.re);
       },
     },
@@ -79,7 +82,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }) => {
         if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
-        if (typeof op === 'number') return ce.Zero;
+        if (typeof op === 'number' || op.im === 0) return ce.Zero;
         return ce.number(op.im);
       },
     },

@@ -442,18 +442,22 @@ export function atanh(x: Interval | IntervalResult): IntervalResult {
 }
 
 /**
- * Inverse cotangent: acot(x) = atan(1/x).
+ * Inverse cotangent (interval).
  *
- * Has a discontinuity at x = 0.
+ * Uses the continuous (0, π) convention that matches the interpreter
+ * (`Arccot(-2) = 2.678`, `Arccot(0) = π/2`): acot(x) = π/2 − atan(x). This is
+ * monotone DECREASING and continuous over ALL reals — there is NO singularity
+ * at 0 (unlike the `atan(1/x)` form, which is on (−π/2, π/2)\{0} and jumps at
+ * 0). Because it is decreasing, the endpoints swap.
  */
 export function acot(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  if (containsZero(xVal)) {
-    return { kind: 'singular', at: 0 };
-  }
-  return atan(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+  return ok({
+    lo: HALF_PI - Math.atan(xVal.hi),
+    hi: HALF_PI - Math.atan(xVal.lo),
+  });
 }
 
 /**

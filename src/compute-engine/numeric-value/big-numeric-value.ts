@@ -590,9 +590,16 @@ export class BigNumericValue extends NumericValue {
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
 
     if (this.im === 0) {
-      if (this.decimal.isNegative()) return this._makeExact(NaN);
       if (this.isOne) return this._makeExact(0);
-      if (this.isNegativeOne) return this.clone({ im: Math.PI });
+      // Negative real: principal branch ln(x) = ln|x| + iπ (both parts
+      // divided by ln(base) when a base is given). Previously every negative
+      // real except -1 returned NaN, disagreeing with the complex logarithm
+      // used on the .N() path and with the exact ln(-1) = iπ.
+      if (this.decimal.isNegative()) {
+        const neg = this.decimal.neg();
+        if (base === undefined) return this.clone({ re: neg.ln(), im: Math.PI });
+        return this.clone({ re: neg.log(base), im: Math.PI / Math.log(base) });
+      }
 
       if (base === undefined) return this.clone(this.decimal.ln());
       return this.clone(this.decimal.log(base));

@@ -500,9 +500,18 @@ export class MachineNumericValue extends NumericValue {
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
 
     if (this.im === 0) {
-      if (this.decimal < 0) return this._makeExact(NaN);
       if (this.isOne) return this._makeExact(0);
-      if (this.isNegativeOne) return this.clone({ im: Math.PI });
+      // Negative real: principal branch ln(x) = ln|x| + iπ (both parts
+      // divided by ln(base) when a base is given). Previously every negative
+      // real except -1 returned NaN, disagreeing with the complex logarithm
+      // used on the .N() path and with the exact ln(-1) = iπ.
+      if (this.decimal < 0) {
+        const lnBase = base === undefined ? 1 : Math.log(base);
+        return this.clone({
+          re: Math.log(-this.decimal) / lnBase,
+          im: Math.PI / lnBase,
+        });
+      }
 
       if (base === undefined) return this.clone(Math.log(this.decimal));
       return this.clone(Math.log(this.decimal) / Math.log(base));

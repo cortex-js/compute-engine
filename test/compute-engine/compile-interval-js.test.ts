@@ -756,3 +756,89 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
     expect(val.hi).toBeCloseTo(5, 10);
   });
 });
+
+// WP-2.17: the compiled interval runtime must agree with the interpreter's real
+// conventions for Arccot (continuous (0, π)), odd roots / rational powers of
+// negative bases, and Mod (floored) on a negative divisor multiple.
+describe('INTERVAL JS - WP-2.17 INTERPRETER ALIGNMENT', () => {
+  test('Arccot of a negative point uses the (0, π) branch', () => {
+    const fn = compile(ce.box(['Arccot', 'x']), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    // Arccot(-2) ≈ 2.678 (NOT the atan(1/x) value −0.4636).
+    const r = unwrapInterval(fn.run!({ x: { lo: -2, hi: -2 } }));
+    expect(r.lo).toBeCloseTo(2.677945044588987, 9);
+    expect(r.hi).toBeCloseTo(2.677945044588987, 9);
+  });
+
+  test('Arccot is continuous through zero (Arccot(0) = π/2, not singular)', () => {
+    const fn = compile(ce.box(['Arccot', 'x']), { to: 'interval-js' });
+    const r0 = fn.run!({ x: { lo: 0, hi: 0 } });
+    expect(r0.kind).toBe('interval');
+    expect(r0.value.lo).toBeCloseTo(Math.PI / 2, 9);
+    // An interval straddling 0 is a valid decreasing interval, not singular.
+    const r = unwrapInterval(fn.run!({ x: { lo: -1, hi: 1 } }));
+    expect(r.lo).toBeCloseTo(Math.PI / 4, 9);
+    expect(r.hi).toBeCloseTo((3 * Math.PI) / 4, 9);
+  });
+
+  test('odd Root of a negative base is real (Root(-8, 3) = -2)', () => {
+    const fn = compile(ce.box(['Root', 'x', 3]), { to: 'interval-js' });
+    expect(fn.code).toContain('_IA.nthRoot');
+    const r = unwrapInterval(fn.run!({ x: { lo: -8, hi: -8 } }));
+    expect(r.lo).toBeCloseTo(-2, 9);
+    expect(r.hi).toBeCloseTo(-2, 9);
+    // Interval straddling zero: monotone increasing.
+    const r2 = unwrapInterval(fn.run!({ x: { lo: -8, hi: 27 } }));
+    expect(r2.lo).toBeCloseTo(-2, 9);
+    expect(r2.hi).toBeCloseTo(3, 9);
+  });
+
+  test('even Root of a negative base has no real value (empty)', () => {
+    const fn = compile(ce.box(['Root', 'x', 4]), { to: 'interval-js' });
+    const r = fn.run!({ x: { lo: -16, hi: -1 } });
+    expect(r.kind).toBe('empty');
+  });
+
+  test('rational Power with odd denominator over a negative base', () => {
+    const f23 = compile(ce.box(['Power', 'x', ['Rational', 2, 3]]), {
+      to: 'interval-js',
+    });
+    expect(f23.code).toContain('_IA.powRational');
+    // (-8)^(2/3) = 4
+    const r = unwrapInterval(f23.run!({ x: { lo: -8, hi: -8 } }));
+    expect(r.lo).toBeCloseTo(4, 9);
+    expect(r.hi).toBeCloseTo(4, 9);
+
+    const f35 = compile(ce.box(['Power', 'x', ['Rational', 3, 5]]), {
+      to: 'interval-js',
+    });
+    // (-32)^(3/5) = -8
+    const r2 = unwrapInterval(f35.run!({ x: { lo: -32, hi: -32 } }));
+    expect(r2.lo).toBeCloseTo(-8, 9);
+    expect(r2.hi).toBeCloseTo(-8, 9);
+  });
+
+  test('Mod is floored: Mod(-1, 3) = 2, Mod(5, -3) = -1', () => {
+    const fn = compile(ce.box(['Mod', 'x', 'y']), { to: 'interval-js' });
+    const r1 = unwrapInterval(fn.run!({ x: { lo: -1, hi: -1 }, y: { lo: 3, hi: 3 } }));
+    expect(r1.lo).toBe(2);
+    expect(r1.hi).toBe(2);
+    const r2 = unwrapInterval(fn.run!({ x: { lo: 5, hi: 5 }, y: { lo: -3, hi: -3 } }));
+    expect(r2.lo).toBe(-1);
+    expect(r2.hi).toBe(-1);
+    // Point on a multiple of a negative divisor is 0 (well-defined), not singular.
+    const r3 = unwrapInterval(fn.run!({ x: { lo: 6, hi: 6 }, y: { lo: -3, hi: -3 } }));
+    expect(r3.lo).toBe(0);
+    expect(r3.hi).toBe(0);
+  });
+
+  test('Round rounds half away from zero (Round(-2.5) = -3)', () => {
+    const fn = compile(ce.box(['Round', 'x']), { to: 'interval-js' });
+    const rNeg = unwrapInterval(fn.run!({ x: { lo: -2.5, hi: -2.5 } }));
+    expect(rNeg.lo).toBe(-3);
+    expect(rNeg.hi).toBe(-3);
+    const rPos = unwrapInterval(fn.run!({ x: { lo: 2.5, hi: 2.5 } }));
+    expect(rPos.lo).toBe(3);
+    expect(rPos.hi).toBe(3);
+  });
+});

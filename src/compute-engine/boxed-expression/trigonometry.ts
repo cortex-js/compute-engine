@@ -419,10 +419,21 @@ export function evalTrig(
       );
 
     case 'Cot':
+      // Poles at multiples of π (tan → 0): detect the blow-up and return the
+      // pole `~oo`, mirroring `Tan` — otherwise `.N()` substitutes the float
+      // π and returns huge finite garbage (e.g. −2.6e24 for `Cot(π)`).
       return applyAngle(
         op,
-        (x) => 1 / Math.tan(x),
-        (x) => BigDecimal.ONE.div(x.tan()),
+        (x): number | Complex | Expression => {
+          const y = 1 / Math.tan(x);
+          if (y > 1e6 || y < -1e6) return ce.ComplexInfinity;
+          return y;
+        },
+        (x): BigDecimal | Complex | number | Expression => {
+          const y = BigDecimal.ONE.div(x.tan());
+          if (y.gt(1e6) || y.lt(-1e6)) return ce.ComplexInfinity;
+          return y;
+        },
         (x) => x.tan().inverse()
       );
     case 'Coth':
@@ -433,10 +444,20 @@ export function evalTrig(
         (x) => x.tanh().inverse()
       );
     case 'Csc':
+      // Poles at multiples of π (sin → 0): detect the blow-up and return `~oo`,
+      // mirroring `Tan` (otherwise `Csc(π).N()` → huge finite garbage).
       return applyAngle(
         op,
-        (x) => 1 / Math.sin(x),
-        (x) => BigDecimal.ONE.div(x.sin()),
+        (x): number | Complex | Expression => {
+          const y = 1 / Math.sin(x);
+          if (y > 1e6 || y < -1e6) return ce.ComplexInfinity;
+          return y;
+        },
+        (x): BigDecimal | Complex | number | Expression => {
+          const y = BigDecimal.ONE.div(x.sin());
+          if (y.gt(1e6) || y.lt(-1e6)) return ce.ComplexInfinity;
+          return y;
+        },
         (x) => x.sin().inverse()
       );
     case 'Csch':
@@ -447,10 +468,20 @@ export function evalTrig(
         (x) => x.sinh().inverse()
       );
     case 'Sec':
+      // Poles at π/2 + kπ (cos → 0): detect the blow-up and return `~oo`,
+      // mirroring `Tan` (otherwise `Sec(π/2).N()` → huge finite garbage).
       return applyAngle(
         op,
-        (x) => 1 / Math.cos(x),
-        (x) => BigDecimal.ONE.div(x.cos()),
+        (x): number | Complex | Expression => {
+          const y = 1 / Math.cos(x);
+          if (y > 1e6 || y < -1e6) return ce.ComplexInfinity;
+          return y;
+        },
+        (x): BigDecimal | Complex | number | Expression => {
+          const y = BigDecimal.ONE.div(x.cos());
+          if (y.gt(1e6) || y.lt(-1e6)) return ce.ComplexInfinity;
+          return y;
+        },
         (x) => x.cos().inverse()
       );
     case 'Sech':

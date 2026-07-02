@@ -1056,10 +1056,23 @@ export class BigDecimal {
     // Then the result is roundedInt with `d` decimal places.
 
     const shift = this.exponent + d;
-    let rounded: bigint;
+    let roundedStr: string;
+    let roundedIsZero: boolean;
     if (shift >= 0) {
-      // No rounding needed — we have enough (or more than enough) precision
-      rounded = absSig * pow10(shift);
+      // No rounding needed — we have enough (or more than enough) precision.
+      // Build the digit string directly (significand digits followed by
+      // `shift` zeros) instead of materializing `absSig * 10^shift` as a
+      // bigint and converting *that* back to a string: for a huge `shift`
+      // (a bignum result with a multi-million-digit exponent, e.g.
+      // `Gamma(1e7).N()` at precision 500) that round-trip — computing
+      // `10n ** BigInt(shift)` and then stringifying the resulting
+      // multi-million-digit product — dominates wall-clock time (multiple
+      // seconds, WP-2.18), even though the string form is a trivial
+      // O(digits) concatenation. Mirrors the equivalent, already-efficient
+      // branch in `toString()` ("Integer: significand followed by exponent
+      // zeros").
+      roundedIsZero = absSig === 0n;
+      roundedStr = roundedIsZero ? '0' : absSig.toString() + '0'.repeat(shift);
     } else {
       // Need to divide (and potentially round)
       const divisor = pow10(-shift);
@@ -1068,6 +1081,7 @@ export class BigDecimal {
 
       // Round half-to-even
       const half = divisor / 2n;
+      let rounded: bigint;
       if (remainder > half) {
         rounded = quotient + 1n;
       } else if (remainder < half) {
@@ -1083,10 +1097,11 @@ export class BigDecimal {
           rounded = quotient + 1n;
         }
       }
+      roundedIsZero = rounded === 0n;
+      roundedStr = rounded.toString();
     }
 
-    const sign = negative && rounded !== 0n ? '-' : '';
-    const roundedStr = rounded.toString();
+    const sign = negative && !roundedIsZero ? '-' : '';
 
     if (d === 0) {
       return `${sign}${roundedStr}`;

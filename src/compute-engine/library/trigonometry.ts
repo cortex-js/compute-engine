@@ -140,8 +140,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(real, real) -> real',
       type: () => 'finite_real',
       sgn: () => 'non-negative',
-      evaluate: ([x, y], { engine }) =>
-        engine.expr(['Sqrt', ['Add', ['Square', x], ['Square', y]]]),
+      // Evaluate the constructed √(x²+y²) so `.N()` returns a number, not an
+      // unevaluated expression (the handler result is not re-driven otherwise).
+      // Under `evaluate()` the exact folding still applies (`Hypot(1/2,1/3) →
+      // √13/6`); under `.N()` it numericizes.
+      evaluate: ([x, y], { engine, numericApproximation }) =>
+        engine
+          .expr(['Sqrt', ['Add', ['Square', x], ['Square', y]]])
+          .evaluate({ numericApproximation }),
     },
 
     // The definition of other trig functions may rely on Sin, so it is defined
@@ -290,8 +296,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(real) -> number',
       type: () => 'finite_real',
-      evaluate: ([z], { engine }) =>
-        engine.expr(['Divide', ['Subtract', 1, ['Cos', z]], 2]),
+      // Evaluate the constructed ½(1−cos z) so `.N()` returns a number, not the
+      // unevaluated expression; exact arguments still stay symbolic under
+      // `evaluate()` (e.g. `Haversine(2) → ½(1−cos 2)`).
+      evaluate: ([z], { engine, numericApproximation }) =>
+        engine
+          .expr(['Divide', ['Subtract', 1, ['Cos', z]], 2])
+          .evaluate({ numericApproximation }),
     },
 
     /** = 2 * Arcsin(Sqrt(z)) */
@@ -301,8 +312,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(real) -> real',
       type: () => 'finite_real',
-      evaluate: ([x], { engine }) =>
-        engine.expr(['Multiply', 2, ['Arcsin', ['Sqrt', x]]]),
+      // Evaluate the constructed 2·arcsin(√z): under `.N()` it numericizes,
+      // and under `evaluate()` the exact fold applies (`InverseHaversine(1/2) →
+      // 2·arcsin(√2/2) → 2·(π/4) → π/2`).
+      evaluate: ([x], { engine, numericApproximation }) =>
+        engine
+          .expr(['Multiply', 2, ['Arcsin', ['Sqrt', x]]])
+          .evaluate({ numericApproximation }),
     },
   },
   {

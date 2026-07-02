@@ -1747,8 +1747,17 @@ function type(expr: BoxedFunction): Type {
       // type: try to narrow based on argument types.
       // E.g., if signature says "number" but all args are "integer",
       // narrow result to "finite_integer".
+      //
+      // This is a closure assumption (the operator maps its argument kinds to
+      // the same kind) — sound only when the operands are provably finite. For
+      // an operator with no type handler we cannot assume finite-in → finite-out
+      // (e.g. an unknown `f` may send ∞ to a finite value), so a non-finite (or
+      // unknown-finiteness) operand must not narrow the result finiteness
+      // (SYMBOLIC P0-15). Gate the narrowing on every operand being provably
+      // finite.
       const argTypes = expr.ops.map((op) => op.type.type);
       if (
+        expr.ops.every((op) => op.isFinite === true) &&
         argTypes.every(
           (t) =>
             typeof t === 'string' &&
