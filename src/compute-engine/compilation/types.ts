@@ -83,6 +83,52 @@ export interface CompileTarget<Expr = unknown> {
   chainOp?: string;
 
   /**
+   * Bind one or more values to fresh temporaries in expression position, then
+   * evaluate `body` with those temporaries in scope, returning target source
+   * that is itself an expression. Used to evaluate a sub-expression exactly
+   * once when it would otherwise be spliced in multiple times — e.g. the shared
+   * middle operand of a chained relation `Less(a, m, b)` → `(a < m) && (m < b)`,
+   * where `m` must be drawn once (matching the interpreter) even if it is a
+   * non-deterministic `Random()` call.
+   *
+   * Targets that cannot express a value binding in expression position (GPU
+   * shaders) leave this undefined; the compiler then falls back to inlining the
+   * sub-expression — safe when it is deterministic, the only case those targets
+   * support (their `Random` requires an explicit deterministic seed).
+   *
+   * JavaScript emits an IIFE; Python a `lambda`.
+   */
+  bindExpr?: (
+    bindings: Array<[name: string, value: string]>,
+    body: string
+  ) => string;
+
+  /**
+   * Wrap a compiled `Which`/`When` condition that is **not** provably boolean so
+   * that a non-boolean value (notably `NaN`) fails closed at run time, matching
+   * the interpreter — which throws `Condition must evaluate to "True" or
+   * "False"` rather than silently taking the default branch. Only applied when
+   * the source condition is not a relational/logical/boolean expression (the
+   * common case emits a bare, unwrapped condition, so there is no overhead).
+   *
+   * Targets that cannot throw in expression position (GPU shaders) leave this
+   * undefined; they instead keep the documented fail-closed value (the default
+   * branch / NaN) — see the GPU `Which`/`When` handlers.
+   */
+  assertBoolean?: (code: string) => string;
+
+  /**
+   * Map a free (declarable) identifier to the source token emitted for it, or
+   * **throw to fail closed (D6)** when the identifier cannot be represented in
+   * the target — e.g. a GLSL/WGSL reserved keyword (`in`, `sample`, `filter`,
+   * `texture`, …) used as a user variable name, which would emit a shader that
+   * fails to compile. Applied by the base compiler only to the bare-symbol
+   * fallback: a genuinely free symbol with no engine value and no `vars`
+   * mapping. Default: identity.
+   */
+  mangleId?: (id: string) => string;
+
+  /**
    * When `true`, this target's multi-statement constructs (loop-form
    * `Sum`/`Product`, `Loop`, `Block`) are emitted as **bare statement
    * sequences** — valid only at statement position (a function body), never

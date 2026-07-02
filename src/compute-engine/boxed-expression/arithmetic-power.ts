@@ -409,6 +409,13 @@ export function canonicalRoot(
     return ce._fn('Sqrt', [a], { canonical: a.isCanonical || a.isStructural });
   }
 
+  // A negative root index denotes a reciprocal. Normalize to the
+  // reciprocal-of-(positive-index)-root form so a negative-index root
+  // (`Root(a, -n)`, which serializes as the nonstandard, unparseable
+  // `\sqrt[-n]{a}`) is never produced — uniform with `x^{-1/2} → 1/√x` (#13).
+  if (exp !== undefined && exp < 0 && Number.isInteger(exp))
+    return ce._fn('Divide', [ce.One, canonicalRoot(a, -exp)]);
+
   return ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b], {
     canonical:
       (a.isCanonical || a.isStructural) &&

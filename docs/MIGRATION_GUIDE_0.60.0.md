@@ -240,6 +240,15 @@ Both of the JS compile cases that previously produced wrong values are resolved:
   integral symbolically in the interpreter (its antiderivative is not a number)
   rather than through a compiled function.
 
+  > **The compiled definite integral is a Monte-Carlo estimate, not adaptive
+  > quadrature.** `_SYS.integrate` draws 1e7 uniform samples over `[a, b]`, so a
+  > compiled `Integrate` is **stochastic** (a different result each call, and
+  > unseeded), converges only at ~1/√N (typical error ≈ 1e-4), and is
+  > comparatively slow (≈ 200 ms/call). It exists so an expression *containing* a
+  > definite integral can still compile to a self-contained numeric function; for
+  > a deterministic or high-accuracy value use the interpreter's `.N()` (adaptive
+  > quadrature) instead. Only real, finite, constant bounds are meaningful.
+
 ---
 
 ## 8. New helpers worth knowing (additive)

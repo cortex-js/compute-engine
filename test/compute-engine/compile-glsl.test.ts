@@ -795,4 +795,39 @@ describe('GLSL COMPILATION', () => {
       expect(fn).toContain('sin(float(i))');
     });
   });
+
+  // CO-P2-23a: a Sum with a negative index unrolls `Negate(i)` at a negative
+  // index value (`-3`). Emitting `-` glued to `-3.0` yields `--3.0`, which is
+  // invalid GLSL. The base compiler now separates them (`- -3.0`).
+  describe('negative-index Sum unroll does not emit `--`', () => {
+    it('parenthesizes/spaces the negation (no `--`)', () => {
+      const expr = ce.box(['Sum', ['Negate', 'i'], ['Tuple', 'i', -3, 3]]);
+      const code = glsl.compile(expr).code;
+      expect(code).not.toContain('--');
+      expect(code).toContain('- -3.0');
+    });
+  });
+
+  // CO-P2-23b: a user variable named after a GLSL reserved word (`in`,
+  // `sample`, `filter`, `texture`, …) would emit a shader that fails to
+  // compile. Fail closed (D6) with a diagnostic naming the identifier.
+  describe('reserved-word variables fail closed', () => {
+    for (const kw of ['in', 'sample', 'filter', 'texture', 'sampler2D']) {
+      it(`rejects "${kw}" as a variable`, () => {
+        expect(() => glsl.compile(ce.box(['Add', kw, 1])).code).toThrow(
+          /reserved word/
+        );
+      });
+    }
+    it('rejects a reserved word used as a Sum index', () => {
+      expect(() =>
+        glsl.compile(
+          ce.box(['Sum', 'sample', ['Tuple', 'sample', 1, 1000]])
+        ).code
+      ).toThrow(/reserved word/);
+    });
+    it('still accepts a non-reserved variable', () => {
+      expect(glsl.compile(ce.box(['Add', 'inp', 1])).code).toContain('inp');
+    });
+  });
 });

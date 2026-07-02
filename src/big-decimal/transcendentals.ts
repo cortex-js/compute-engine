@@ -504,8 +504,21 @@ BigDecimal.prototype.ln = function (): BigDecimal {
 
 BigDecimal.prototype.log = function (base: BigDecimal | number): BigDecimal {
   // log_b(x) = ln(x) / ln(b)
+  //
+  // Computed with guard digits: each ln() rounds to the working precision,
+  // and the division rounds a third time — without the guard the result was
+  // off by up to ~3 ulp, and exactly-representable cases missed their exact
+  // value (log10(1e-7) at precision 50 returned −6.99…97 instead of −7).
+  // With the guard, an exact result at 10^-(P+8) relative error rounds to
+  // the exact value. (CORRECTNESS P2 #17)
   const b = base instanceof BigDecimal ? base : new BigDecimal(base);
-  return this.ln().div(b.ln());
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = saved + 10;
+  try {
+    return this.ln().div(b.ln()).toPrecision(saved);
+  } finally {
+    BigDecimal.precision = saved;
+  }
 };
 
 // ---------- Static methods: exp, ln, log10 ----------

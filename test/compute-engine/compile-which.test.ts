@@ -164,4 +164,34 @@ describe('COMPILE Which', () => {
       expect(negVal.hi).toBeCloseTo(6, 10);
     });
   });
+
+  // CO-P2-24: a non-boolean condition (notably one that evaluates to NaN) makes
+  // the interpreter throw ("Condition must evaluate to True or False"). A
+  // compiled ternary would silently treat it as falsy and take the default
+  // branch. The JS target guards a non-provably-boolean condition with
+  // `_SYS.cond`, which rethrows — matching the interpreter (D6).
+  describe('non-boolean condition (JS) fails closed like the interpreter', () => {
+    it('throws at run time on a NaN condition instead of taking the default', () => {
+      // The condition x/y is numeric, not boolean; at (0,0) it is NaN.
+      const expr = ce.expr(['Which', ['Divide', 'x', 'y'], 5, 'True', 9]);
+      const result = compile(expr, { fallback: false })!;
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('_SYS.cond(');
+      // Interpreter throws for a NaN / numeric condition …
+      expect(() => ce.box(['Which', ['Divide', 0, 0], 5, 'True', 9]).N()).toThrow();
+      // … and so does the compiled function (rather than returning 9).
+      expect(() => result.run!({ x: 0, y: 0 })).toThrow();
+      // A finite-but-numeric (non-boolean) condition also throws, matching the
+      // interpreter's "must be True or False" contract.
+      expect(() => result.run!({ x: 1, y: 1 })).toThrow();
+    });
+
+    it('leaves a provably-boolean condition unguarded (no overhead)', () => {
+      const expr = ce.expr(['Which', ['Greater', 'x', 0], 1, 'True', -1]);
+      const result = compile(expr, { fallback: false })!;
+      expect(result.code).not.toContain('_SYS.cond');
+      expect(result.run!({ x: 5 })).toBe(1);
+      expect(result.run!({ x: -3 })).toBe(-1);
+    });
+  });
 });

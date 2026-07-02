@@ -210,6 +210,30 @@ function parseSequence(
   return result;
 }
 
+/** Serialize a `Sequence`: juxtapose operands with a space, but fall back to a
+ *  comma at any boundary where the left side ends with a digit and the right
+ *  side starts with a digit or sign, which would otherwise fuse into a single
+ *  number on re-parse (e.g. `1 2` → `12`). */
+function serializeSequence(
+  serializer: Serializer,
+  expr: MathJsonExpression | null
+): string {
+  if (!expr) return '';
+  const xs = operands(expr);
+  if (xs.length === 0) return '';
+  if (xs.length === 1) return serializer.serialize(xs[0]);
+
+  const parts = xs.map((x) => serializer.serialize(x));
+  const ys: string[] = [parts[0]];
+  for (let i = 1; i < parts.length; i++) {
+    const prev = parts[i - 1];
+    const cur = parts[i];
+    const fuses = /[0-9]$/.test(prev) && /^[-+0-9]/.test(cur);
+    ys.push(fuses ? ', ' : ' ', cur);
+  }
+  return joinLatex(ys);
+}
+
 function serializeOps(sep = '') {
   return (serializer: Serializer, expr: MathJsonExpression | null): string => {
     if (!expr) return '';
@@ -869,9 +893,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     name: 'Sequence',
-    // Use a space as a separator, otherwise a sequence of numbers
-    // could be interpreted as a single number.
-    serialize: serializeOps(' '),
+    // A `Sequence` has no delimiters, so its operands are juxtaposed with a
+    // space. A plain space does NOT keep numeric neighbors apart, however:
+    // the number parser skips visual space between digits, so `1 2` would
+    // re-parse as the single number `12`. To keep the round-trip
+    // value-preserving, insert a comma wherever the boundary would otherwise
+    // fuse into one number (a digit followed by a digit or sign). Such a
+    // boundary re-parses as a `Tuple` — a different wrapper but the same
+    // ordered elements, never a corrupted value.
+    serialize: serializeSequence,
   },
   {
     name: 'InvisibleOperator',

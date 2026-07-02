@@ -533,7 +533,12 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     name: 'Element',
     latexTrigger: ['\\in'],
     kind: 'infix',
-    precedence: 240,
+    // Bind tighter than `Colon` (240) so set-builder notation with a domain,
+    // `{x \in \R : x > 0}`, parses as `Colon(Element(x, \R), x>0)` — the
+    // membership grouping first, the `:` condition attaching to the whole
+    // comprehension — rather than `Element(x, Colon(\R, x>0))`, which nested
+    // the condition inside the domain. Still below comparisons (245).
+    precedence: 241,
   },
   {
     name: 'NotElement',

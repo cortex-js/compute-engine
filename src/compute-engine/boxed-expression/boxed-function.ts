@@ -771,6 +771,9 @@ export class BoxedFunction
       return this.engine.function('Power', [this.op1, neg]);
     }
     if (this.operator === 'Root') {
+      // `root()` normalizes a negative index to the reciprocal-of-root form
+      // (see the `e < 0` chokepoint there), so `x.root(-n)` yields
+      // `Divide(1, Root(x, n))` — no negative-index `Root(a, -n)` (#13).
       const neg = this.op2.neg();
       if (neg.operator !== 'Negate') return this.op1.root(neg);
       return this.engine.function('Root', [this.op1, neg]);
@@ -893,6 +896,16 @@ export class BoxedFunction
         }
       }
     }
+
+    // A negative root index denotes a reciprocal. Normalize to the
+    // reciprocal-of-(positive-index)-root form so a negative-index root
+    // (`Root(a, -n)`, which serializes as the nonstandard, unparseable
+    // `\sqrt[-n]{a}`) is never produced. This makes negative unit-fraction
+    // exponents uniform with `x^{-1/2} → 1/√x`: `x^{-1/3} → 1/∛x` rather than
+    // `Root(x, -3)` (#13). Placed after the reduction cases above so nested
+    // radicals still combine first (`1/∛√x → 1/Root(x, 6)`).
+    if (e !== undefined && e < 0 && Number.isInteger(e))
+      return this.engine._fn('Divide', [this.engine.One, this.root(-e)]);
 
     return this.engine._fn('Root', [this, this.engine.expr(exp)]);
   }

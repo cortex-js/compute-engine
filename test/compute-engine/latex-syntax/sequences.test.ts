@@ -25,25 +25,30 @@ canonical = ${canonicalStr}`;
 }
 
 describe('SEQUENCES SERIALIZING', () => {
-  test('Simple sequence are serialized without separator', () =>
+  // A `Sequence` of numbers must NOT serialize with a bare space between the
+  // digits: the number parser skips visual space, so `1 2 3` would re-parse as
+  // the single number `123`. A comma is inserted at each digit/digit boundary
+  // to keep the round-trip value-preserving (it re-parses as a `Tuple` — same
+  // ordered elements, never a corrupted value). See definitions-core.ts.
+  test('Numeric sequences use a comma to avoid digit fusion', () =>
     expect(check(['Sequence', 1, 2, 3])).toMatchInlineSnapshot(`
       ["Sequence", 1, 2, 3]
-      box-latex = 1 2 3
-      latex     = 1 2 3
+      box-latex = 1, 2, 3
+      latex     = 1, 2, 3
     `));
   test('Sequences are automatically associative', () =>
     expect(check(['Sequence', 1, ['Sequence', 2, 3], 4]))
       .toMatchInlineSnapshot(`
       box       = ["Sequence", 1, ["Sequence", 2, 3], 4]
       canonical = ["Sequence", 1, 2, 3, 4]
-      box-latex = 1 2 3 4
-      latex     = 1 2 3 4
+      box-latex = 1, 2, 3, 4
+      latex     = 1, 2, 3, 4
     `));
   test('Sequences can be used as arguments', () =>
     expect(check(['Add', ['Sequence', 1, 2, 3]])).toMatchInlineSnapshot(`
       box       = ["Add", ["Sequence", 1, 2, 3]]
       canonical = 6
-      box-latex = 1 2 3
+      box-latex = 1, 2, 3
       latex     = 6
     `));
   test('Empty sequences are ignored', () =>

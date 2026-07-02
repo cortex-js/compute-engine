@@ -20,46 +20,26 @@ const lanczos_7_c = [
 // ];
 
 export function gammaln(z: number): number {
-  // Stirling's asymptotic series (below) is only accurate for large z — at
-  // z = 0.5 it is off by ~1.6e-2. For small z, shift upward via the recurrence
-  //   ln Γ(z) = ln Γ(z + n) − Σ_{k=0}^{n-1} ln(z + k)
-  // until the argument is large enough (z + n ≥ 10) for Stirling to be
-  // accurate to full machine precision.
+  // Lanczos (g = 7, 9 coefficients — same table as `gamma()` below) taken in
+  // log form:
+  //   ln Γ(z) = ln(2π)/2 + (z − 1/2)·ln(t) − t + ln(A(z)),  t = z + g − 1/2
+  // Accurate to ~1–2 ulp for all z > 0 (verified against mpmath.loggamma at
+  // z ∈ {1.5, 10, 50, 100, 170, 300}). The previous implementation used a
+  // 3-term Stirling series after a shift to z ≥ 10, which was only good for
+  // ~10.5 digits (Gamma(10) came out as 362880.0000000015), degrading
+  // machine gamma(z > 100) and beta for large arguments. (CORRECTNESS P2 #19)
   if (z < 0) return NaN;
 
-  let shift = 0;
-  while (z < 10) {
-    shift += Math.log(z);
-    z += 1;
-  }
+  // Exact zeros of ln Γ: Γ(1) = Γ(2) = 1.
+  if (z === 1 || z === 2) return 0;
 
-  // From WikiPedia:
-  // \ln \Gamma (z)=z\ln z-z-{\tfrac {1}{2}}\ln z+{\tfrac {1}{2}}\ln 2\pi +{\frac {1}{12z}}-{\frac {1}{360z^{3}}}+{\frac {1}{1260z^{5}}}+o\left({\frac {1}{z^{5}}}\right)
-  const pi = Math.PI;
-  const z3 = z * z * z;
+  const zz = z - 1;
+  let x = lanczos_7_c[0];
+  for (let i = 1; i < gammaG + 2; i++) x += lanczos_7_c[i] / (zz + i);
+  const t = zz + gammaG + 0.5;
   return (
-    z * Math.log(z) -
-    z -
-    0.5 * Math.log(z) +
-    0.5 * Math.log(2 * pi) +
-    1 / (12 * z) -
-    1 / (360 * z3) +
-    1 / (1260 * z3 * z * z) -
-    shift
+    0.5 * Math.log(2 * Math.PI) + (zz + 0.5) * Math.log(t) - t + Math.log(x)
   );
-
-  // Spouge approximation (suitable for large arguments)
-  // if (z < 0) return NaN;
-  // let x = gammaPLn[0];
-  // for (let i = gammaPLn.length - 1; i > 0; --i) x += gammaPLn[i] / (z + i);
-  // const t = z + gammaGLn + 0.5;
-  // return (
-  //   0.5 * Math.log(2 * Math.PI) +
-  //   (z + 0.5) * Math.log(t) -
-  //   t +
-  //   Math.log(x) -
-  //   Math.log(z)
-  // );
 }
 
 // From https://github.com/substack/gamma.js/blob/master/index.js
@@ -970,21 +950,16 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
     }
   }
 
-  // Trivial zeros ζ(-2n) = 0 for huge negative even integers. Below the cap
-  // the functional equation right below computes this exactly (its
-  // sin(πs/2) factor is exactly 0), but for huge |s| that 0 meets an
-  // infinite Γ(1-s) (n past MAX_EXACT_FACTORIAL_N — see bigGamma) and the
-  // 0·∞ product rounds to NaN instead of the exact zero. Short-circuit with
-  // an exact bigint parity check (not `.toNumber()`, which loses precision
-  // at this magnitude).
-  if (
-    s.isNegative() &&
-    s.isInteger() &&
-    Math.abs(s.toNumber()) > MAX_EXACT_ZETA_EVEN_N &&
-    s.mod(BigDecimal.TWO).isZero()
-  ) {
+  // Trivial zeros: ζ(−2n) = 0 exactly for every negative even integer.
+  // The functional equation below does NOT produce an exact zero: its
+  // sin(πs/2) factor is computed from a rounded π, leaving a ~10^-(P+26)
+  // residue (ζ(−2) returned ~2.7e-76 at precision 50). And for huge |s|
+  // that near-zero meets an infinite Γ(1−s) (past MAX_EXACT_FACTORIAL_N —
+  // see bigGamma) and the 0·∞ product rounds to NaN. Short-circuit
+  // unconditionally, with an exact `.mod` parity check (not `.toNumber()`,
+  // which loses precision at large magnitude). (CORRECTNESS P2 #18)
+  if (s.isNegative() && s.isInteger() && s.mod(BigDecimal.TWO).isZero())
     return BigDecimal.ZERO;
-  }
 
   // Functional equation for s < 0:
   // ζ(s) = 2^s π^{s-1} sin(πs/2) Γ(1-s) ζ(1-s)
@@ -2191,6 +2166,40 @@ function polevl(x: number, coef: number[]): number {
   return ans;
 }
 
+// Asymptotic cutoff for the Fresnel integrals: beyond this the oscillating
+// correction |f·cos + g·sin|/(πx) ≤ 1/(πx) < 5.3e-17 is below half an ulp of
+// 0.5, so S, C round to exactly ±1/2. (The previous Cephes-inherited cutoff
+// of 36974 — where the *naive* phase πx²/2 exhausts a double — was ~2000×
+// too early, an 8.6e-6 error cliff. The phase is now reduced exactly, see
+// `fresnelPhase`, so the asymptotic expansion stays usable to the cutoff
+// below. Also, 6e15 < 2^53, keeping the Dekker split exact.)
+// (CORRECTNESS P2 #19)
+const FRESNEL_ASYMPTOTIC_CUTOFF = 6e15;
+
+/**
+ * The Fresnel phase πx²/2 reduced mod 2π, computed as (π/2)·(x² mod 4).
+ *
+ * `x² mod 4` is computed exactly: x is Dekker-split into xh + xl so the
+ * partial products xh², xh·xl, xl² are each exactly representable, and the
+ * JS `%` operator on doubles is exact. A naive `(Math.PI / 2) * x * x`
+ * loses the phase progressively for x ≳ 1e5 (cos of it was 0.99999999 at
+ * x = 1e6, 0.88 at x = 7.5e7).
+ *
+ * Requires |x| < 2^53 (guaranteed by FRESNEL_ASYMPTOTIC_CUTOFF).
+ */
+function fresnelPhase(x: number): number {
+  const split = 134217729; // 2^27 + 1 (Veltkamp)
+  const t = split * x;
+  const xh = t - (t - x);
+  const xl = x - xh;
+  // x² = xh² + 2·xh·xl + xl², each product exact (Dekker).
+  // 2·(xh·xl) mod 4 = 2·((xh·xl) mod 2), keeping the doubled term exact too.
+  let r = ((xh * xh) % 4) + 2 * ((xh * xl) % 2) + ((xl * xl) % 4);
+  r %= 4;
+  if (r < 0) r += 4;
+  return (Math.PI / 2) * r;
+}
+
 /**
  * Fresnel sine integral: S(x) = ∫₀ˣ sin(π t²/2) dt
  *
@@ -2210,23 +2219,19 @@ export function fresnelS(x: number): number {
     return (sign * x * x2 * polevl(t, SN)) / polevl(t, SD);
   }
 
-  // Cephes threshold: beyond 36974 the phase πx²/2 is no longer
-  // representable in a double, so the oscillating terms are dropped.
-  // (Previously the cutoff was 36, which gave errors up to ~9e-3:
-  // |S(x) − 1/2| ~ 1/(πx) at the cutoff.)
-  if (x < 36974) {
+  if (x < FRESNEL_ASYMPTOTIC_CUTOFF) {
     const x2 = x * x;
     const t = Math.PI * x2; // πx²
     const u = 1 / (t * t); // 1/(π²x⁴)
     const f = 1 - (u * polevl(u, FN)) / polevl(u, FD);
     const g = ((1 / t) * polevl(u, GN)) / polevl(u, GD);
-    const z = (Math.PI / 2) * x2; // πx²/2
+    const z = fresnelPhase(x); // πx²/2 mod 2π, exactly reduced
     const c = Math.cos(z);
     const s = Math.sin(z);
     return sign * (0.5 - (f * c + g * s) / (Math.PI * x));
   }
 
-  // |x| >= 36974: S, C -> ±1/2 (phase not representable in a double)
+  // Beyond the cutoff the oscillation is below half an ulp of 1/2.
   return sign * 0.5;
 }
 
@@ -2249,20 +2254,19 @@ export function fresnelC(x: number): number {
     return (sign * x * polevl(t, CN)) / polevl(t, CD);
   }
 
-  // Cephes threshold: see fresnelS() above.
-  if (x < 36974) {
+  if (x < FRESNEL_ASYMPTOTIC_CUTOFF) {
     const x2 = x * x;
     const t = Math.PI * x2; // πx²
     const u = 1 / (t * t); // 1/(π²x⁴)
     const f = 1 - (u * polevl(u, FN)) / polevl(u, FD);
     const g = ((1 / t) * polevl(u, GN)) / polevl(u, GD);
-    const z = (Math.PI / 2) * x2; // πx²/2
+    const z = fresnelPhase(x); // πx²/2 mod 2π, exactly reduced
     const c = Math.cos(z);
     const s = Math.sin(z);
     return sign * (0.5 + (f * s - g * c) / (Math.PI * x));
   }
 
-  // |x| >= 36974: S, C -> ±1/2 (phase not representable in a double)
+  // Beyond the cutoff the oscillation is below half an ulp of 1/2.
   return sign * 0.5;
 }
 

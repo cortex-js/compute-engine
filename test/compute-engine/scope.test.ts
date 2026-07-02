@@ -67,6 +67,45 @@ describe('DECLARING', () => {
     expect(ce.expr('g').type.toString()).toEqual('real');
   });
 
+  // D11 (USER DECISION 2026-07-02): the juxtaposition parser's function-
+  // application auto-declaration is a heuristic guess, so it is marked
+  // INFERRED. A later scalar use / assign must be able to override it.
+  test('D11: strict-mode auto-declared function symbol widens to a scalar', () => {
+    const ce2 = new ComputeEngine();
+    expect(ce2.strict).toBe(true);
+    // `gcd(12,8)` misparses to `c·g·d(12,8)` — the `d` symbol is applied to
+    // (12,8) and auto-declared as a function. That declaration must be
+    // inferred (a guess), not a permanent assertion.
+    ce2.parse('gcd(12,8)');
+    const def: any = ce2.lookupDefinition('d');
+    expect(def && 'value' in def ? def.value.inferredType : false).toBe(true);
+    // Reassigning a scalar value must not throw and must take over the type…
+    expect(() => ce2.assign('d', 5)).not.toThrow();
+    // …so `d` now behaves as the number 5.
+    expect(ce2.parse('d+1').evaluate().isSame(6)).toBe(true);
+  });
+
+  test('D11: an auto-declared function symbol still works as a function', () => {
+    // The other direction of widening: a symbol genuinely used as a function
+    // (auto-declared inferred) must keep working when a function literal is
+    // assigned to it.
+    const ce2 = new ComputeEngine();
+    ce2.parse('f(x)'); // auto-declares f as an inferred function
+    ce2.assign('f', ce2.parse('x \\mapsto x + 1'));
+    expect(ce2.parse('f(2)').evaluate().isSame(3)).toBe(true);
+  });
+
+  test('D11: lenient-mode gcd(12,8) juxtaposition is unchanged', () => {
+    const ce2 = new ComputeEngine();
+    ce2.strict = false;
+    expect(ce2.parse('gcd(12,8)').json).toEqual([
+      'Multiply',
+      'c',
+      'g',
+      ['d', 12, 8],
+    ]);
+  });
+
   // test('Default value of declared variables', () => {
   //   ce.declare('d', { value: 42 });
   //   expect(ce.expr('d').value).toEqual(42);

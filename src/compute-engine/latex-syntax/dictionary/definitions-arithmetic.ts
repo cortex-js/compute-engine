@@ -707,6 +707,36 @@ function serializeFraction(
   return `${cmd}{${numerLatex}}{${denomLatex}}`;
 }
 
+/** Parse `\binom{n}{k}` (and the `\dbinom`/`\tbinom` display/text variants)
+ *  as `Binomial(n, k)`. Mirrors `parseFraction`'s two-group reading. */
+function parseBinomial(parser: Parser): MathJsonExpression | null {
+  let top: MathJsonExpression | null = parser.parseGroup();
+  let bottom: MathJsonExpression | null = null;
+  if (top === null) {
+    top = missingIfEmpty(parser.parseToken());
+    bottom = missingIfEmpty(parser.parseToken());
+  } else {
+    top = isEmptySequence(top)
+      ? parser.error('missing', parser.index)
+      : top;
+    bottom = parser.parseGroup();
+    bottom = isEmptySequence(bottom)
+      ? parser.error('missing', parser.index)
+      : bottom;
+  }
+  return ['Binomial', top, missingIfEmpty(bottom)];
+}
+
+function serializeBinomial(
+  serializer: Serializer,
+  expr: MathJsonExpression | null
+): string {
+  if (expr === null) return '';
+  const top = serializer.serialize(missingIfEmpty(operand(expr, 1)));
+  const bottom = serializer.serialize(missingIfEmpty(operand(expr, 2)));
+  return `\\binom{${top}}{${bottom}}`;
+}
+
 function serializePower(
   serializer: Serializer,
   expr: MathJsonExpression | null
@@ -960,6 +990,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'PositiveInfinity',
   },
   {
+    latexTrigger: ['∞'], // ∞ U+221E INFINITY
+    parse: 'PositiveInfinity',
+  },
+  {
     name: 'PositiveInfinity',
     serialize: (serializer) => serializer.options.positiveInfinity,
   },
@@ -1152,6 +1186,20 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: parseFraction,
   },
   {
+    name: 'Binomial',
+    latexTrigger: '\\binom',
+    parse: parseBinomial,
+    serialize: serializeBinomial,
+  },
+  {
+    latexTrigger: '\\dbinom',
+    parse: parseBinomial,
+  },
+  {
+    latexTrigger: '\\tbinom',
+    parse: parseBinomial,
+  },
+  {
     kind: 'infix',
     latexTrigger: '\\over',
     associativity: 'none', // In LaTeX, the \over command is not associative
@@ -1198,6 +1246,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['!'],
     kind: 'postfix',
     precedence: POSTFIX_PRECEDENCE,
+    parse: (parser: Parser, lhs: MathJsonExpression): MathJsonExpression | null => {
+      // Disambiguate `!` (factorial) from `!=` (not-equal): when a `!` is
+      // *immediately* followed by `=` (no intervening space), read it as the
+      // `!=` inequality operator, not `Factorial(lhs) = …`. `3!=2` is
+      // not-equal; `3! = 2` (with a space) stays factorial. Returning null
+      // lets the infix `!=` (`Unequal`) definition match instead.
+      if (parser.peek === '=') return null;
+      return ['Factorial', lhs];
+    },
   },
   {
     name: 'Factorial2',
@@ -1531,6 +1588,29 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       return foldAssociativeOperator('Multiply', lhs, rhs);
     },
   },
+  // Unicode multiplication-sign spellings (paste/keyboard input), parsed the
+  // same as `\times`/`\cdot`.
+  {
+    latexTrigger: ['×'], // × U+00D7 MULTIPLICATION SIGN
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+    parse: 'Multiply',
+  },
+  {
+    latexTrigger: ['·'], // · U+00B7 MIDDLE DOT
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+    parse: 'Multiply',
+  },
+  {
+    latexTrigger: ['⋅'], // ⋅ U+22C5 DOT OPERATOR
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+    parse: 'Multiply',
+  },
   {
     latexTrigger: ['*'],
     kind: 'infix',
@@ -1810,6 +1890,30 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\sqrt'],
     parse: parseRoot,
     serialize: serializePower,
+  },
+  {
+    latexTrigger: ['√'], // √ U+221A SQUARE ROOT (`√4`, `√{x+1}`)
+    parse: parseRoot,
+  },
+  {
+    latexTrigger: ['½'], // ½ U+00BD VULGAR FRACTION ONE HALF
+    parse: (): MathJsonExpression => ['Rational', 1, 2],
+  },
+  {
+    latexTrigger: ['⅓'], // ⅓ U+2153 VULGAR FRACTION ONE THIRD
+    parse: (): MathJsonExpression => ['Rational', 1, 3],
+  },
+  {
+    latexTrigger: ['¼'], // ¼ U+00BC VULGAR FRACTION ONE QUARTER
+    parse: (): MathJsonExpression => ['Rational', 1, 4],
+  },
+  {
+    latexTrigger: ['¾'], // ¾ U+00BE VULGAR FRACTION THREE QUARTERS
+    parse: (): MathJsonExpression => ['Rational', 3, 4],
+  },
+  {
+    latexTrigger: ['⅔'], // ⅔ U+2154 VULGAR FRACTION TWO THIRDS
+    parse: (): MathJsonExpression => ['Rational', 2, 3],
   },
   {
     name: 'Subtract',

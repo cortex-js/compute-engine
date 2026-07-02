@@ -820,6 +820,18 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
   const c = c1.div(c2);
 
+  // Float coefficients must not mint an exact cancellation. Binary `0.3/0.1`
+  // is not exactly `3`, yet `c1.div(c2)` on the decimal coefficients yields an
+  // exact `3` — so `(0.3x)/(0.1y)` used to fold to an *exact* `(3x)/y`, while
+  // `Divide(0.3, 0.1)` stays a float and `canonicalMultiply`/`canonicalAdd`
+  // exclude floats from folding. Align with that float-exclusion convention:
+  // only fold the extracted coefficient when both source coefficients are
+  // exact; otherwise keep the division as-is (#12).
+  // A unit coefficient (`c = ±1`) is only *removed* here, never minted, so it
+  // is safe to drop even for float coefficients (e.g. `0.2/0.2 = 1`). Only the
+  // coefficient-*minting* fold below is gated on exactness.
+  const coefExact = c1.isExact && c2.isExact;
+
   if (c.isOne) return t2.isSame(1) ? t1 : ce._fn('Divide', [t1, t2]);
 
   if (c.isNegativeOne)
@@ -827,7 +839,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
   // If c is exact, use as a product: `c * (t1/t2)`
   // So, π/4 -> 1/4 * π (prefer multiplication over division)
-  if (c.isExact) {
+  if (coefExact && c.isExact) {
     if (t1.isSame(1) && t2.isSame(1)) return ce.number(c);
     if (t2.isSame(1)) return canonicalMultiply(ce, [ce.number(c), t1]);
 

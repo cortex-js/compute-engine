@@ -20,6 +20,38 @@
   "d280c5": {
    "exclude": true,
    "note": "Phase 3 triage: nondeterministic self-test (random-probe isEqual over Coulomb shell expressions) \u2014 see 01af55."
+  },
+  "177de7": {
+   "purpose": "transform",
+   "note": "SYM P2-25: Digamma(1/6) specific value. Its closed form (a few Ln/Pi/Sqrt terms) is larger than the tiny Digamma(1/6) input, so simplify()'s 1.3x cost gate rejected it and the rule was a no-op. A specific value's closed form is always the desired answer, so tag 'transform' (cost-gate exempt)."
+  },
+  "45a969": {
+   "purpose": "transform",
+   "note": "SYM P2-25: Digamma(2/3) specific value \u2014 cost-gated no-op, see 177de7."
+  },
+  "7ec4f0": {
+   "purpose": "transform",
+   "note": "SYM P2-25: Digamma(1/4) specific value \u2014 cost-gated no-op, see 177de7."
+  },
+  "89bed3": {
+   "purpose": "transform",
+   "note": "SYM P2-25: Digamma(1/2) -> -2 ln 2 - EulerGamma. The flagged rule: cost-gated no-op, now 'transform' (cost-gate exempt). See 177de7."
+  },
+  "8c368f": {
+   "purpose": "transform",
+   "note": "SYM P2-25: Digamma(1/8) specific value \u2014 cost-gated no-op, see 177de7."
+  },
+  "967bbb": {
+   "purpose": "transform",
+   "note": "SYM P2-25: Digamma(5/6) specific value \u2014 cost-gated no-op, see 177de7."
+  },
+  "98f642": {
+   "purpose": "transform",
+   "note": "SYM P2-25: Digamma(1/3) specific value \u2014 cost-gated no-op, see 177de7."
+  },
+  "f93bae": {
+   "purpose": "transform",
+   "note": "SYM P2-25: Digamma(3/4) specific value \u2014 cost-gated no-op, see 177de7."
   }
  },
  "transformAllowlist": [],

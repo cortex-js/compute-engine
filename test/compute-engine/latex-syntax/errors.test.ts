@@ -496,7 +496,7 @@ check('Invalid delimiter', () =>
 
 check('Double superscript: threaded', () =>
   expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(
-    `["Power", "x", ["List", 1, 2]]`
+    `["Error", "unexpected-superscript", ["LatexString", "^1^2"]]`
   )
 );
 

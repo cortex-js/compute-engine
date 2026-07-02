@@ -66,4 +66,24 @@ describe('COMPILE When', () => {
       expect(code).toContain('x');
     });
   });
+
+  // CO-P2-24: like Which, a non-boolean When condition fails closed on the JS
+  // target (matching the interpreter's throw) rather than silently returning
+  // NaN via the else branch.
+  describe('non-boolean condition (JS) fails closed', () => {
+    it('guards a numeric/NaN condition with _SYS.cond and rethrows', () => {
+      const expr = ce.expr(['When', 5, ['Divide', 'x', 'y']]);
+      const result = compile(expr, { fallback: false })!;
+      expect(result.code).toContain('_SYS.cond(');
+      expect(() => result.run!({ x: 0, y: 0 })).toThrow();
+    });
+
+    it('leaves a relational condition unguarded', () => {
+      const expr = ce.expr(['When', 'x', ['Greater', 'x', 0]]);
+      const result = compile(expr, { fallback: false })!;
+      expect(result.code).not.toContain('_SYS.cond');
+      expect(result.run!({ x: 5 })).toBe(5);
+      expect(Number.isNaN(result.run!({ x: -1 }))).toBe(true);
+    });
+  });
 });

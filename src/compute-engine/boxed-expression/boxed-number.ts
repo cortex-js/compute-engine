@@ -336,6 +336,13 @@ export class BoxedNumber
     }
 
     const n = typeof exp === 'number' ? exp : exp.re;
+
+    // A negative root index denotes a reciprocal; normalize to `1/Root(a, n)`
+    // rather than the nonstandard `Root(a, -n)` (#13). Placed before the
+    // numeric computation below, which is defined for positive indices only.
+    if (typeof n === 'number' && n < 0 && Number.isInteger(n))
+      return this.engine._fn('Divide', [this.engine.One, this.root(-n)]);
+
     if (Number.isInteger(n)) {
       if (typeof this._value === 'number') {
         const r = this._value ** (1 / n);
@@ -704,9 +711,22 @@ export class BoxedNumber
 
   isSame(other: Expression | number | bigint | boolean | string): boolean {
     if (typeof other === 'number') {
-      if (typeof this._value === 'number') return Object.is(this._value, other);
-      if (this._value.isNaN) return Object.is(other, NaN);
-      return this._value.eq(other);
+      const v = this._value;
+      if (typeof v === 'number') {
+        // `===` treats +0 and -0 as equal (both normalize to +0 per the
+        // documented negative-zero convention), unlike `Object.is`; the
+        // explicit NaN check restores `NaN ~ NaN` so `isSame` stays reflexive
+        // on NaN and remains an equivalence relation (#15).
+        if (v === other) return true;
+        return Number.isNaN(v) && Number.isNaN(other);
+      }
+      if (v.isNaN) return Object.is(other, NaN);
+      // Delegate to the same `NumericValue` comparison as the boxed path
+      // (`same()`), so the primitive and boxed overloads agree — e.g.
+      // `Rational(1,2).isSame(0.5)` matches `.isSame(ce.number(0.5))` (#15).
+      // The fast integer path of `NumericValue.eq(number)` is tried first so
+      // hot `.isSame(0)`/`.isSame(1)` checks allocate nothing.
+      return v.eq(other) || v.eq(this.engine._numericValue(other));
     }
     if (typeof other === 'bigint') {
       if (typeof this._value === 'number') return bigint(this._value) === other;

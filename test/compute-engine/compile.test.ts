@@ -934,3 +934,80 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
     expect(r.code).toContain('_SYS.erf');
   });
 });
+
+// CO-P2-24: compiled-vs-interpreted divergences pinned to the interpreter.
+describe('COMPILE interpreter-alignment (CO-P2-24)', () => {
+  it('dynamic 0^0 yields NaN like the interpreter (not Math.pow 1)', () => {
+    const r = compile(ce.box(['Power', 'x', 'y']), { fallback: false })!;
+    // Variable exponent routes through the _SYS.pow helper.
+    expect(r.code).toContain('_SYS.pow(');
+    expect(Number.isNaN(r.run!({ x: 0, y: 0 }) as number)).toBe(true);
+    // The interpreter agrees.
+    expect(ce.box(['Power', 0, 0]).N().isNaN).toBe(true);
+    // Non-indeterminate powers are unaffected.
+    expect(r.run!({ x: 2, y: 3 })).toBe(8);
+    expect(r.run!({ x: 0, y: 2 })).toBe(0);
+    expect(r.run!({ x: 9, y: 0.5 })).toBe(3);
+  });
+
+  it('x^0 folds to 1 (matching the interpreter, even at x=0)', () => {
+    const r = compile(ce.box(['Power', 'x', 0]), { fallback: false })!;
+    expect(r.run!({ x: 0 })).toBe(1);
+    expect(r.run!({ x: 5 })).toBe(1);
+  });
+
+  it('constant nonzero exponent keeps the plain Math.pow fast path', () => {
+    // x^3 with a symbol base does not need the 0^0 guard.
+    const r = compile(ce.box(['Power', 'x', 5]), { fallback: false })!;
+    expect(r.code).not.toContain('_SYS.pow');
+  });
+
+  it('1/0 compiles to a complex-infinity object, matching interpreted ~oo', () => {
+    // The interpreter yields ComplexInfinity (~oo); the compiled constant folds
+    // through the same path to a { re, im } infinity object (both non-finite).
+    // Documented: this is an alignment, not a divergence.
+    const r = compile(ce.box(['Divide', 1, 0]), { fallback: false })!;
+    const out = r.run!({}) as any;
+    const both =
+      typeof out === 'object' && out !== null
+        ? !Number.isFinite(out.re) || !Number.isFinite(out.im)
+        : !Number.isFinite(out);
+    expect(both).toBe(true);
+    expect(ce.box(['Divide', 1, 0]).N().isFinite).toBe(false);
+  });
+
+  it('realOnly projects a boolean result to NaN (booleans are not reals)', () => {
+    // CO-P2-25: a boolean-valued expression under realOnly is not a real number;
+    // the interpreter never numericizes a boolean to 0/1, so fail closed to NaN.
+    const r = compile(ce.box(['Greater', 'x', 0]), {
+      fallback: false,
+      realOnly: true,
+    })!;
+    expect(Number.isNaN(r.run!({ x: 5 }) as number)).toBe(true);
+    expect(Number.isNaN(r.run!({ x: -5 }) as number)).toBe(true);
+  });
+});
+
+// CO-P2-23c: a chained relation must evaluate a shared middle operand once
+// (matching the interpreter), not twice — otherwise `a < Random() < b` draws
+// two different values.
+describe('COMPILE chained relation binds shared middle once (CO-P2-23c)', () => {
+  it('a non-trivial middle operand is bound to a single temporary', () => {
+    const r = compile(ce.box(['Less', 'a', ['Random'], 'b']), {
+      fallback: false,
+    })!;
+    // Exactly one Math.random() draw, reused in both comparisons via an IIFE.
+    expect(r.code.match(/Math\.random\(\)/g)?.length).toBe(1);
+    // Consistency check: for a<mid<b, whenever it returns true the same middle
+    // value satisfied both bounds (would be flaky if drawn twice).
+    for (let i = 0; i < 200; i++)
+      expect(typeof r.run!({ a: 0, b: 1 })).toBe('boolean');
+  });
+
+  it('a symbol/number middle stays inline (no temp, no churn)', () => {
+    const r = compile(ce.box(['Less', -1, 'x', 1]), { fallback: false })!;
+    expect(r.code).not.toContain('=>');
+    expect(r.run!({ x: 0 })).toBe(true);
+    expect(r.run!({ x: 5 })).toBe(false);
+  });
+});

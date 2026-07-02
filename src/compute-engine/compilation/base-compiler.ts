@@ -105,7 +105,12 @@ export class BaseCompiler {
       // an assigned value / declared constant, matching `evaluate()`. This also
       // covers the direct-target `compile(expr, { target })` path, where the
       // raw target has no engine context of its own.
-      return BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target) ?? s;
+      const folded = BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target);
+      if (folded !== undefined) return folded;
+      // Genuinely free symbol: emit its bare identifier. Give the target a
+      // chance to mangle it or fail closed (D6) — e.g. a GLSL/WGSL reserved
+      // keyword used as a variable name would emit invalid shader source.
+      return target.mangleId ? target.mangleId(s) : s;
     }
 
     // Is it a number?
@@ -214,31 +219,62 @@ export class BaseCompiler {
             if (isRelationalOperator(h) && args.length > 2) {
               // Chain relational operators, conjoined with the target's chain
               // operator (`&&` by default; Python `and`).
+              //
+              // A middle operand appears in TWO comparisons (`a < m < b` →
+              // `(a < m) && (m < b)`). Emitting it twice would evaluate it
+              // twice — drawing `Random()` twice, say — diverging from the
+              // interpreter, which evaluates each operand once. Bind each
+              // non-trivial middle operand (indices 1..n-2) to a temporary so it
+              // is evaluated exactly once. A symbol or number literal is safe to
+              // duplicate, so it is left inline (keeps output clean, no churn).
+              // Targets without `bindExpr` (GPU shaders) inline everything —
+              // safe there, since their `Random` requires a deterministic seed.
               const chainOp = target.chainOp ?? '&&';
-              const result: string[] = [];
-              for (let i = 0; i < args.length - 1; i++) {
-                result.push(
-                  BaseCompiler.compileExpr(
-                    engine,
-                    h,
-                    [args[i], args[i + 1]],
-                    op[1],
-                    target
-                  )
-                );
-              }
-              return `(${result.join(`) ${chainOp} (`)})`;
+              const bindings: Array<[name: string, value: string]> = [];
+              const codes = args.map((arg, i) => {
+                const code = BaseCompiler.compileValueOperand(arg, target, op[1]);
+                const isMiddle = i >= 1 && i <= args.length - 2;
+                if (
+                  target.bindExpr &&
+                  isMiddle &&
+                  !isSymbol(arg) &&
+                  !isNumber(arg)
+                ) {
+                  const name = BaseCompiler.tempVar();
+                  bindings.push([name, code]);
+                  return name;
+                }
+                return code;
+              });
+              const pairs: string[] = [];
+              for (let i = 0; i < codes.length - 1; i++)
+                pairs.push(`${codes[i]} ${op[0]} ${codes[i + 1]}`);
+              const body = `(${pairs.join(`) ${chainOp} (`)})`;
+              if (bindings.length > 0 && target.bindExpr)
+                return target.bindExpr(bindings, body);
+              return body;
             }
 
             let resultStr: string;
             if (args.length === 1) {
               // Unary operator, assume prefix. Word operators get a space.
-              const sep = isWordOp ? ' ' : '';
-              resultStr = `${op[0]}${sep}${BaseCompiler.compileValueOperand(
+              const operandCode = BaseCompiler.compileValueOperand(
                 args[0],
                 target,
                 op[1]
-              )}`;
+              );
+              // Insert a separating space when gluing the operator to an
+              // operand that begins with the same symbol would form a different
+              // token: `-` + `-3.0` must not become `--3.0` (invalid in
+              // GLSL/WGSL, a decrement in C-likes/JS). This arises when a
+              // negative value is spliced in (e.g. a Sum unroll substituting a
+              // negative index into `Negate(i)`). A leading `(` is already safe.
+              const glues =
+                !isWordOp &&
+                operandCode.length > 0 &&
+                operandCode[0] === op[0][op[0].length - 1];
+              const sep = isWordOp || glues ? ' ' : '';
+              resultStr = `${op[0]}${sep}${operandCode}`;
             } else {
               // `Power` is right-associative: `a ** b ** c` parses as
               // `a ** (b ** c)`. So a *left* operand of equal precedence must
@@ -358,7 +394,7 @@ export class BaseCompiler {
         if (isSymbol(cond, 'True')) {
           return `(${BaseCompiler.compile(val, target)})`;
         }
-        return `((${BaseCompiler.compile(
+        return `((${BaseCompiler.guardCondition(
           cond,
           target
         )}) ? (${BaseCompiler.compile(val, target)}) : ${compilePair(i + 2)})`;
@@ -384,7 +420,7 @@ export class BaseCompiler {
         return `(${BaseCompiler.compile(args[0], target)})`;
       if (isSymbol(args[1], 'False')) return 'NaN';
       const val = BaseCompiler.compile(args[0], target);
-      const cond = BaseCompiler.compile(args[1], target);
+      const cond = BaseCompiler.guardCondition(args[1], target);
       return `((${cond}) ? (${val}) : NaN)`;
     }
 
@@ -1072,6 +1108,53 @@ export class BaseCompiler {
     }
 
     return false;
+  }
+
+  /**
+   * True if the expression provably evaluates to a boolean (`True`/`False`) —
+   * a relational (`Less`, `Equal`, …) or logical (`And`/`Or`/`Not`) form, the
+   * `True`/`False` symbols, or anything declared `boolean`. Used to decide
+   * whether a `Which`/`When` condition needs the fail-closed guard: a provably
+   * boolean condition never diverges from the interpreter, so it is emitted
+   * bare.
+   */
+  static isBooleanValued(expr: Expression): boolean {
+    if (isSymbol(expr, 'True') || isSymbol(expr, 'False')) return true;
+    if (isFunction(expr)) {
+      const h = expr.operator;
+      if (
+        isRelationalOperator(h) ||
+        h === 'And' ||
+        h === 'Or' ||
+        h === 'Not'
+      )
+        return true;
+      const t = expr.type;
+      return t ? t.matches('boolean') : false;
+    }
+    if (isSymbol(expr)) {
+      const t = expr.type;
+      return t ? t.matches('boolean') : false;
+    }
+    return false;
+  }
+
+  /**
+   * Compile a `Which`/`When` condition, wrapping it in the target's fail-closed
+   * boolean guard (`target.assertBoolean`) when it is not provably boolean. The
+   * interpreter throws on a non-boolean (e.g. `NaN`) condition rather than
+   * silently taking the default branch; the guard makes the compiled code match
+   * that contract (D6) where the target can express it. A provably boolean
+   * condition — the common case — is emitted bare (no overhead, no churn).
+   */
+  static guardCondition(
+    cond: Expression,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    const code = BaseCompiler.compile(cond, target);
+    if (target.assertBoolean && !BaseCompiler.isBooleanValued(cond))
+      return target.assertBoolean(code);
+    return code;
   }
 
   /** True if the expression is provably integer-typed. */

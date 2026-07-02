@@ -101,6 +101,73 @@ const CASES: Case[] = [
     params: ['x'],
     inputs: [{ x: 0.3 }, { x: 0.4 }],
   },
+  // CO-P2-26: negative-operand / edge coverage — the axis whose absence let the
+  // Mod / Round / Arccot / odd-root convention splits (P0-41/42) survive review.
+  // Each is checked against the interpreter's `.N()`, so a convention mismatch
+  // (floored vs truncated Mod, banker's vs half-away Round, atan(1/x) vs (0,π)
+  // Arccot, NaN vs real odd-root of a negative) fails here.
+  {
+    name: 'mod_signs',
+    expr: ['Mod', 'x', 'y'],
+    params: ['x', 'y'],
+    inputs: [
+      { x: 7, y: 3 },
+      { x: -7, y: 3 },
+      { x: 7, y: -3 },
+      { x: -7, y: -3 },
+      { x: 5, y: 2.5 },
+      { x: -5, y: 2.5 },
+      { x: 0, y: 3 },
+    ],
+  },
+  {
+    name: 'round_half',
+    expr: ['Round', 'x'],
+    params: ['x'],
+    inputs: [
+      { x: 2.5 },
+      { x: -2.5 },
+      { x: 0.5 },
+      { x: -0.5 },
+      { x: 3.5 },
+      { x: -3.5 },
+      { x: 0 },
+      { x: -0 },
+    ],
+  },
+  {
+    name: 'sign_zero',
+    expr: ['Sign', 'x'],
+    params: ['x'],
+    inputs: [{ x: 0 }, { x: -0 }, { x: 3.2 }, { x: -3.2 }],
+  },
+  {
+    name: 'arccot_neg',
+    expr: ['Arccot', 'x'],
+    params: ['x'],
+    inputs: [{ x: -2 }, { x: -0.5 }, { x: 2 }, { x: 0.5 }, { x: -10 }],
+  },
+  {
+    name: 'root3_neg',
+    expr: ['Root', 'x', 3],
+    params: ['x'],
+    inputs: [{ x: -8 }, { x: -27 }, { x: 8 }, { x: 0 }, { x: -1 }],
+  },
+  {
+    name: 'root5_neg',
+    expr: ['Root', 'x', 5],
+    params: ['x'],
+    inputs: [{ x: -32 }, { x: 32 }, { x: -1 }, { x: 0 }],
+  },
+  // CO-P2-24: `x^0` folds to 1 even at x=0 (the interpreter simplifies it), so
+  // the compiled Python agrees. (The residual dynamic-`0^0` divergence is
+  // documented on the Python `Power` operator; not asserted here.)
+  {
+    name: 'pow_x_0',
+    expr: ['Power', 'x', 0],
+    params: ['x'],
+    inputs: [{ x: 0 }, { x: 5 }, { x: -3 }],
+  },
 ];
 
 const describeMaybe = venvHasNumpy() ? describe : describe.skip;

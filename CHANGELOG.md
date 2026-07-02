@@ -21,6 +21,21 @@
   recurrence with a symbolic order derivative
   `Apply(Derivative(BesselJ, 1, 0), x, x)` instead of staying inert.
 
+- **`\binom` is now supported.** `\binom{n}{k}` (and `\dbinom`/`\tbinom`)
+  parses to `Binomial(n, k)`, and `Binomial` serializes back to `\binom` —
+  previously `\binom` was a parse error.
+
+- **`==` and `!=` now evaluate.** `3 == 3` evaluates to `True` (previously an
+  inert `EqualEqual`) and `3!= 2` is a not-equal comparison (with `3! = 2`,
+  space before `=`, still parsed as a factorial equation). Additional unicode
+  operators are accepted in all modes: `≤ ≥ ≠ × · ∞ √ ½ ¼ ¾ ⅓ ⅔`.
+
+- **Misparse-driven auto-declarations are recoverable.** In strict mode,
+  parsing `gcd(12,8)` (an unknown multi-letter name applied to arguments)
+  auto-declares the applied symbol as a function; that declaration is now
+  marked *inferred*, so a later `ce.assign('d', 5)` overrides it and `d+1`
+  evaluates to `6` instead of erroring forever.
+
 - **`real` is now a subtype of `complex` in the type lattice.** The numeric
   tower is the chain `integer ⊂ rational ⊂ real ⊂ complex ⊂ number`, so a
   real-typed symbol now satisfies complex-typed signatures and guards through
@@ -72,6 +87,61 @@
   speeds up high-precision `N()`.
 
 ### Resolved Issues
+
+- **Numeric kernel accuracy.** Arbitrary-precision `log`/`log10`/`log2` now
+  carry guard digits (`log10(10⁻⁷)` is exactly `−7`; `2^(−1/2)` is correctly
+  rounded, was 2.35 ulp); `Zeta` at negative even integers returns exactly
+  `0` (was a ~1e-76 residue); machine `gammaln` was rewritten in Lanczos-log
+  form (~15.7 correct digits, was ~10.5, improving `Gamma`/`Beta` for large
+  arguments); the Fresnel integrals' asymptotic cutoff moved from 36,974 to
+  6×10¹⁵ with an exactly-computed phase (S(40,000) was returned as a flat
+  0.5, an 8.6e-6 error cliff); exact root extraction recognizes perfect
+  powers (`64^(1/3)` → `4`, `(27/8)^(1/3)` → `3/2` exact), no longer drops
+  the radical in products like `(8√3)^(1/3)`, and fixes a wrong half-integer
+  root decomposition; and exact rational×radical values now round to the
+  working precision when numericized (a precision-100 `(7/3)√3` printed 199
+  digits of which only ~103 were correct; machine-precision results are now
+  the correctly-rounded double).
+
+- **Negative fractional powers canonicalize uniformly.** `x^(−1/3)` becomes
+  `1/∛x` (matching `x^(−1/2)` → `1/√x`) instead of the anomalous
+  `Root(x, −3)` rendered as `\sqrt[-3]{x}`; also fixes a crash evaluating
+  numeric negative-index roots such as `8^(−1/3)`.
+
+- **Float coefficients no longer mint exact cancellations.** `(0.3x)/(0.1y)`
+  kept an exact coefficient `3` (binary `0.3/0.1` is not exactly 3); division
+  coefficient extraction now follows the same float-exclusion convention as
+  `Add`/`Multiply` folding.
+
+- **Comparison coherence.** The primitive overload of `isSame` agrees with
+  the boxed path (`Rational(1,2).isSame(0.5)` matches
+  `.isSame(ce.number(0.5))`), and collection `isEqual` uses the same
+  tolerance semantics as scalars (near-equal float vectors compare equal
+  within `ce.tolerance`; NaN-element behavior is now documented).
+
+- **Parse/serialize fidelity.** `x^2^3` is a "double superscript" parse error
+  (previously it silently became `Power(x, List(2,3))` and broadcast to a
+  list); `Sequence(1,2)` no longer serializes to `1 2`, which re-parsed as
+  the number `12`; set-builder notation `\{x \in \R : x > 0\}` attaches the
+  condition to the comprehension instead of nesting it inside the domain; and
+  `toMathJson({exclude: …})` now honors exclusions for number literals
+  (`Rational` → `Divide`, `Sqrt` → `Power`).
+
+- **Compiled code matches the interpreter more closely.** Negative-bound
+  `Sum` unrolls no longer emit `--3` (invalid in GLSL/WGSL); user variables
+  named after GLSL/WGSL reserved words (`sample`, `filter`, `in`, `texture`,
+  …) fail at compile time with a diagnostic instead of emitting invalid
+  shader code; chained relations evaluate their middle operands once
+  (`a < Random() < b` drew twice); dynamic `0^0` returns NaN in compiled
+  JavaScript (matching the interpreter) and non-boolean `Which`/`When`
+  conditions throw as the interpreter does; `realOnly` no longer passes
+  booleans through; and the compiled `Integrate` Monte-Carlo behavior
+  (~1e-4 error, 10⁷ samples) is now documented.
+
+- **Eight Fungrim `Digamma` special values now simplify.** `Digamma(1/2)` →
+  `−2 ln 2 − γ` and seven siblings (1/3, 1/4, 1/6, 1/8, 2/3, 3/4, 5/6) were
+  cost-gated into silent no-ops; they are now tagged as transforms and fire
+  when the Fungrim pack is loaded.
 
 - **High-precision results were silently wrong after increasing `precision`.**
   The internal table of Bernoulli numbers used by `Gamma`, `Digamma`,

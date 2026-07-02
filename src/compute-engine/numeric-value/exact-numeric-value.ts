@@ -239,12 +239,37 @@ export class ExactNumericValue extends NumericValue {
   // immutability becomes a compiler-checked invariant instead of a
   // convention.
   get bignumRe(): BigDecimal {
-    let result: BigDecimal;
     const r = this.rational;
-    if (isMachineRational(r)) result = new BigDecimal(r[0]).div(r[1]);
-    else result = new BigDecimal(r[0]).div(new BigDecimal(r[1]));
-    if (this.radical === 1) return result;
-    return result.mul(new BigDecimal(this.radical).sqrt());
+    if (this.radical === 1) {
+      if (isMachineRational(r)) return new BigDecimal(r[0]).div(r[1]);
+      return new BigDecimal(r[0]).div(new BigDecimal(r[1]));
+    }
+    // rational × √radical: compute the two rounded factors with guard
+    // digits, then round the (exact, ~2P-digit) product back to the working
+    // precision. Without the guard the product carried the full unrounded
+    // tail — `bignumRe` of (7/3)√3 at precision 100 printed ~200 digits of
+    // which only ~103 were correct — and even a rounded product of two
+    // P-digit factors is off by up to ~2.5 ulp (Power(2, -1/2) at 2.35 ulp).
+    //
+    // The output precision is floored at 25 digits: a machine-precision
+    // engine sets the global BigDecimal.precision to 15, and rounding the
+    // product to 15 digits before its `.toNumber()` conversion corrupted
+    // the double (√175 came out 265 ulp off). 25 digits keep the double
+    // exact (17 needed) with margin, while still cutting the garbage tail.
+    // (CORRECTNESS P2 #17/#21)
+    const saved = BigDecimal.precision;
+    const outPrec = Math.max(saved, 25);
+    BigDecimal.precision = outPrec + 10;
+    try {
+      const quotient = isMachineRational(r)
+        ? new BigDecimal(r[0]).div(r[1])
+        : new BigDecimal(r[0]).div(new BigDecimal(r[1]));
+      return quotient
+        .mul(new BigDecimal(this.radical).sqrt())
+        .toPrecision(outPrec);
+    } finally {
+      BigDecimal.precision = saved;
+    }
   }
 
   get numerator(): ExactNumericValue {
@@ -638,9 +663,12 @@ export class ExactNumericValue extends NumericValue {
 
     if (exponent < 0) return this.root(-exponent).inv();
 
-    // Is it a multiple of square root?
-    // Decompose to try to preserve the rational part
-    if (exponent % 1 === 0.5) return this.root(Math.floor(exponent)).sqrt();
+    // Half-integer exponent n + 1/2: x^(1/(n+1/2)) = x^(2/(2n+1)) =
+    // (x²)^(1/(2n+1)), and x² is exact for an ExactNumericValue.
+    // (The previous decomposition, `root(⌊exponent⌋).sqrt()`, computed
+    // x^(1/(2n)) — mathematically wrong: root(x, 2.5) returned x^(1/4)
+    // instead of x^(2/5).) (CORRECTNESS P2 #20)
+    if (exponent % 1 === 0.5) return this.pow(2).root(2 * exponent);
 
     // Odd root of a negative value: real-root convention,
     // (-x)^(1/n) = -(x^(1/n)), preserving exactness (e.g. (-8)^(1/3) = -2)
@@ -648,14 +676,20 @@ export class ExactNumericValue extends NumericValue {
       return this.neg().root(exponent).neg();
 
     if (this.radical === 1) {
-      if (this.sign > 0) {
-        const re = this.re;
-        if (Number.isInteger(re)) {
-          if (re > 0) {
-            const root = Math.pow(re, 1 / exponent);
-            if (Number.isInteger(root)) return this.clone(root);
-          }
-          return this.factory(this.bignumRe).root(exponent);
+      if (this.sign > 0 && Number.isInteger(exponent)) {
+        // Exact n-th root of a rational: snap when both the numerator and
+        // the denominator are perfect exponent-th powers. Round-then-verify
+        // with exact bigint arithmetic, so float dust in Math.pow can
+        // neither cause a miss (64^(1/3) = 3.9999999999999996 previously
+        // leaked the exact 4 to the float lane) nor a false snap on a
+        // near-power (e.g. (10¹⁰+1)² read back through an inexact float).
+        // (CORRECTNESS P2 #20)
+        const [n, d] = this.rational;
+        const rootN = integerNthRoot(n, exponent);
+        if (rootN !== null) {
+          const rootD = integerNthRoot(d, exponent);
+          if (rootD !== null)
+            return this.clone({ rational: [rootN, rootD] });
         }
       }
       return this.factory(this.bignumRe).root(exponent);
@@ -664,20 +698,12 @@ export class ExactNumericValue extends NumericValue {
     if (this.sign < 0)
       return this.factory({ im: Math.pow(-this.re, 1 / exponent) });
 
-    // If the parts (rational or radical) are too large, we convert to float
-    if (
-      this.radical > SMALL_INTEGER ||
-      this.rational[0] > SMALL_INTEGER ||
-      this.rational[0] < -SMALL_INTEGER ||
-      this.rational[1] > SMALL_INTEGER
-    )
-      return this.factory(this.bignumRe).root(exponent);
-
-    if (this.rational[1] == 1) {
-      const root = Math.pow(this.rational[0] as number, 1 / exponent);
-      if (Number.isInteger(root)) return this.clone(root);
-    }
-
+    // A radical (≠ 1) never yields an exact n-th root for n ≥ 2 (√radical is
+    // already irrational after normalize()), so the value cannot stay exact:
+    // use the float lane. (The previous code checked only the numerator for
+    // a perfect power and, on a hit, dropped the radical entirely:
+    // (8√3)^(1/3) returned 2 instead of 2·3^(1/6) ≈ 2.4019.)
+    // (CORRECTNESS P2 #20)
     return this.factory(this.bignumRe).root(exponent);
   }
 
@@ -951,4 +977,32 @@ export class ExactNumericValue extends NumericValue {
     }
     return result;
   }
+}
+
+/**
+ * Exact integer n-th root: returns the integer r with rⁿ = v exactly, or
+ * `null` when v is not a perfect n-th power (or is too large to verify
+ * exactly). The float `Math.pow` estimate is only a seed — it and its two
+ * neighbors are verified with exact bigint arithmetic, so float rounding can
+ * neither cause a miss (Math.pow(64, 1/3) = 3.9999999999999996) nor a false
+ * snap on a near-power. (CORRECTNESS P2 #20)
+ */
+function integerNthRoot(v: number | bigint, n: number): number | null {
+  if (typeof v === 'bigint') {
+    if (v < 0n || v > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    v = Number(v);
+  }
+  if (!Number.isSafeInteger(v) || v <= 0) return null;
+  if (v === 1) return 1;
+  // v ≤ 2^53, so a perfect n-th power with base ≥ 2 requires n ≤ 53 (and
+  // this also bounds the bigint exponentiation below).
+  if (n > 53) return null;
+  const est = Math.round(Math.pow(v, 1 / n));
+  const bn = BigInt(n);
+  const bv = BigInt(v);
+  for (const candidate of [est, est - 1, est + 1]) {
+    if (candidate < 2) continue;
+    if (BigInt(candidate) ** bn === bv) return candidate;
+  }
+  return null;
 }

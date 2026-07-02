@@ -66,7 +66,15 @@ const PYTHON_OPERATORS: CompiledOperators = {
   Subtract: ['-', 11], // Subtract canonicalizes to Add+Negate; kept as fallback
   Multiply: ['*', 12],
   Divide: ['/', 13],
-  Power: ['**', 15], // Python exponentiation operator
+  // Python exponentiation. A literal `0^0` is folded to NaN at canonicalization
+  // (matching the interpreter) before it reaches here, and `x^0` folds to 1
+  // (as the interpreter simplifies). The residual divergence is a *runtime*
+  // dynamic `0**0` (both operands 0 only at run time): Python yields 1, the
+  // interpreter NaN. Aligning that would require routing every power through a
+  // helper — disproportionate churn (breaks `**` right-associativity) for a
+  // rare edge — so it is left as a documented divergence. The JS target aligns
+  // it via `_SYS.pow`. See finding CO-P2-24.
+  Power: ['**', 15],
   // Equal / NotEqual are NOT operators: a raw `==` on floats is exact, but the
   // interpreter compares within `engine.tolerance`. They are handled as
   // function forms (see `compilePythonEquality`) so the tolerance is honored.
@@ -365,6 +373,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       args[2]
     )}))`;
   },
+  // DIVERGENCE (documented, CO-P2-24): a *non-boolean* condition (e.g. one that
+  // evaluates to NaN) makes the interpreter throw ("Condition must evaluate to
+  // True or False"), whereas this Python conditional expression treats it by
+  // truthiness and takes the else branch. Aligning would require an inline
+  // Python raise (no clean expression-position form) — left documented. The JS
+  // target aligns via `_SYS.cond`; conditions built from relational/logical
+  // operators (the common case) are already boolean, so no divergence arises.
   When: (args, compile) => {
     if (args.length !== 2)
       throw new Error('When: expected exactly 2 arguments (expr, cond)');
@@ -372,6 +387,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (isSymbol(args[1], 'False')) return "float('nan')";
     return `((${compile(args[0])}) if (${compile(args[1])}) else float('nan'))`;
   },
+  // See the divergence note on `When` above (non-boolean condition → else
+  // branch here vs interpreter throw).
   Which: (args, compile) => {
     if (args.length < 2 || args.length % 2 !== 0)
       throw new Error('Which: expected condition/value pairs');
@@ -453,6 +470,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
       language: 'python',
       // Chained relations join with Python's `and`, not `&&`.
       chainOp: 'and',
+      // Evaluate a shared middle operand of a chained relation exactly once
+      // (matching the interpreter) by binding it in an immediately-applied
+      // `lambda` — Python's expression-position value binding.
+      bindExpr: (bindings, body) =>
+        `(lambda ${bindings.map((b) => b[0]).join(', ')}: ${body})(${bindings
+          .map((b) => b[1])
+          .join(', ')})`,
       operators: (op) => PYTHON_OPERATORS[op],
       functions: (id) => PYTHON_FUNCTIONS[id],
       // Resolve a mathematical constant; otherwise return `undefined` so

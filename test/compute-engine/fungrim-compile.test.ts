@@ -797,9 +797,30 @@ describe('fungrim-core-data.json artifact', () => {
     }
   });
 
-  it('no machine-emitted transform rules (override-only)', () => {
-    // The shipped transform allowlist is empty, so no rule may carry it.
-    expect(artifact.rules.every((r) => r.purpose !== 'transform')).toBe(true);
+  it('transform rules are hand-curated only (override / allowlist)', () => {
+    // The machine policy never emits 'transform'; it only appears via
+    // hand-curation (transformAllowlist or a per-id purpose override). The
+    // shipped set is the 8 Digamma specific-value rules promoted to
+    // cost-gate-exempt 'transform' (SYM P2-25). Every transform rule must be
+    // a specific-value rule (never a machine-oriented identity).
+    const transformIds = artifact.rules
+      .filter((r) => r.purpose === 'transform')
+      .map((r) => r.id)
+      .sort();
+    expect(transformIds).toEqual(
+      [
+        'fungrim:177de7',
+        'fungrim:45a969',
+        'fungrim:7ec4f0',
+        'fungrim:89bed3',
+        'fungrim:8c368f',
+        'fungrim:967bbb',
+        'fungrim:98f642',
+        'fungrim:f93bae',
+      ].sort()
+    );
+    for (const r of artifact.rules)
+      if (r.purpose === 'transform') expect(r.class).toBe('specific-value');
   });
 
   it('declarations table is pruned to heads referenced by emitted rules', () => {

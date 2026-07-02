@@ -79,6 +79,16 @@ const CASES: Case[] = [
   { name: 'mod-x-y', src: ['Mod', 'x', 'y'], vars: ['x', 'y'], points: [[7, 3], [-7, 3], [7, -3], [-7, -3], [7.5, 2], [-7.5, 2], [5, 2.5], [-5, 2.5]] },
   { name: 'rem-x-y', src: ['Remainder', 'x', 'y'], vars: ['x', 'y'], points: [[7, 3], [-7, 3], [7, -3], [-7, -3], [7.5, 2], [-7.5, 2], [7, 4], [-7, 4]] },
   { name: 'gcd', src: ['GCD', 'x', 'y'], vars: ['x', 'y'], points: [[12, 8], [7, 3], [100, 36], [9, 81]] },
+  // CO-P2-26: explicit negative-operand / zero / signed-zero edge coverage —
+  // the axis whose absence let the Mod / Round / Arccot / odd-root convention
+  // splits (P0-41/42) survive to review. Each parity-checks vs the interpreter.
+  { name: 'mod-edges', src: ['Mod', 'x', 'y'], vars: ['x', 'y'], points: [[7, 3], [-7, 3], [7, -3], [-7, -3], [0, 3], [-0, 3], [5.5, 2], [-5.5, 2], [5, 2.5], [-5, 2.5]] },
+  { name: 'rem-edges', src: ['Remainder', 'x', 'y'], vars: ['x', 'y'], points: [[7, 3], [-7, 3], [7, -3], [-7, -3], [0, 3], [-0, 3], [7.5, 2], [-7.5, 2]] },
+  { name: 'round-halves', src: ['Round', 'x'], points: [[2.5], [-2.5], [0.5], [-0.5], [3.5], [-3.5], [1.5], [-1.5], [0], [-0], [12.5], [-6.5]] },
+  { name: 'sign-zero', src: ['Sign', 'x'], points: [[0], [-0], [3.2], [-3.2], [1e-12], [-1e-12]] },
+  { name: 'arccot-edges', src: ['Arccot', 'x'], points: [[-2], [-0.5], [2], [0.5], [0], [-0], [-10], [10]] },
+  { name: 'root3-neg', src: ['Root', 'x', 3], points: [[-8], [-27], [8], [27], [0], [-0], [-1], [1]] },
+  { name: 'root5-neg', src: ['Root', 'x', 5], points: [[-32], [32], [-1], [1], [0], [-0]] },
   { name: 'lcm', src: ['LCM', 'x', 'y'], vars: ['x', 'y'], points: [[12, 8], [7, 3], [4, 6]] },
   // trig
   { name: 'sin', src: ['Sin', 'x'] },
@@ -245,10 +255,12 @@ function isComplexOnly(
   });
 }
 
-// Documented compiler finding P2-1 (compile-findings.md): a Sum with a negative
-// index and a Negate summand unrolls to invalid JS (`--3` / `return -…`); with
-// fallback:false it throws. Compile-throw expected for these cases.
-const KNOWN_COMPILE_BUG = new Set(['sum-negate-i']);
+// Previously: a Sum with a negative index and a Negate summand unrolled to
+// invalid JS (`--3`). Fixed (CO-P2-23a): the base compiler now separates a
+// unary operator from an operand that begins with the same symbol (`- -3`), so
+// `sum-negate-i` compiles and paritys like any other case. No known compile
+// bug remains in this corpus.
+const KNOWN_COMPILE_BUG = new Set<string>([]);
 
 // Documented compiler finding CO-P0-2 (compile-findings.md, residual): a
 // rational exponent p/q of a NEGATIVE base has a real value via the odd-q branch

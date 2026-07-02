@@ -89,7 +89,12 @@ export function canonicalInvisibleOperator(
           // Uh. Oh. It's a symbol with a value that is not a function.
           return ce.typeError('function', def.value.type, lhsCanon);
         }
-        ce.declare(lhsCanon.symbol, 'function');
+        // Auto-declared function application is a heuristic guess, not an
+        // assertion by the user: mark the declaration INFERRED so a later
+        // scalar use or `ce.assign(sym, value)` can widen/override it
+        // (D11). A genuine function use keeps working — the inferred type
+        // still matches `function`.
+        ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
         return ce.expr([lhsCanon.symbol]);
       }
 
@@ -108,7 +113,10 @@ export function canonicalInvisibleOperator(
       // Multiple comma-separated args like `f(2, 1)` → always a function call,
       // since commas strongly signal function application, not multiplication.
       if (args.length > 1) {
-        if (!def) ce.declare(lhsCanon.symbol, 'function');
+        // Inferred (see above): a heuristic auto-declaration the user can
+        // later widen/override.
+        if (!def)
+          ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
         else if (!isOperatorDef(def) && def.value?.type?.isUnknown)
           lhsCanon.infer('function');
         return ce.function(lhsCanon.symbol, args);
@@ -127,7 +135,10 @@ export function canonicalInvisibleOperator(
       }
 
       // Non-numeric args → treat as function call
-      if (!def) ce.declare(lhsCanon.symbol, 'function');
+      // Inferred (see above): a heuristic auto-declaration the user can
+      // later widen/override.
+      if (!def)
+        ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
       else if (!isOperatorDef(def) && def.value?.type?.isUnknown)
         lhsCanon.infer('function');
       return ce.function(lhsCanon.symbol, args);
@@ -321,7 +332,9 @@ function combineFunctionApplications(
         let args: ReadonlyArray<Expression> = delim.op1.ops;
         args = flatten(args);
         if (args.length > 1) {
-          if (!def) ce.declare(symName, 'function');
+          // Inferred: a heuristic auto-declaration the user can later
+          // widen/override (D11).
+          if (!def) ce.declare(symName, { type: 'function', inferred: true });
           else if (!isOperatorDef(def) && def.value?.type?.isUnknown)
             op.canonical.infer('function');
           result.push(ce.function(symName, args));

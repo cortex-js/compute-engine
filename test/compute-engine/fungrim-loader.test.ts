@@ -103,8 +103,10 @@ describe('loadIdentities (full artifact)', () => {
       harmonization: 0,
     });
     expect(report.byPurpose).toEqual({
-      simplify: 1272,
-      transform: 0,
+      // 8 Digamma specific-value rules are tagged 'transform' (cost-gate
+      // exempt) so they fire in simplify() — SYM P2-25.
+      simplify: 1264,
+      transform: 8,
       expand: 111,
     });
     expect(
@@ -225,15 +227,21 @@ describe('loadIdentities (full artifact)', () => {
   });
 
   it('Digamma(1/2) → -2 ln 2 - EulerGamma  [fungrim:89bed3]', () => {
-    const result = ce.expr(['Digamma', ['Rational', 1, 2]]).simplify();
-    const expected = ce.expr([
-      'Subtract',
-      ['Negate', ['Multiply', 2, ['Ln', 2]]],
-      'EulerGamma',
+    // This specific-value rule is tagged `purpose: 'transform'` so it is
+    // exempt from simplify()'s cost gate (the closed form is larger than the
+    // tiny Digamma(1/2) input). Assert the EXACT symbolic form via isSame —
+    // no isEqual numeric fallback, which would pass whether or not the rule
+    // actually fired (SYM P2-25).
+    const input = ce.expr(['Digamma', ['Rational', 1, 2]]);
+    const result = input.simplify();
+    // The rule must have fired: the result is no longer the input.
+    expect(result.isSame(input)).toBe(false);
+    const expected = ce.box([
+      'Add',
+      ['Multiply', -2, ['Ln', 2]],
+      ['Negate', 'EulerGamma'],
     ]);
-    expect(result.isSame(expected) || result.isEqual(expected) === true).toBe(
-      true
-    );
+    expect(result.isSame(expected)).toBe(true);
   });
 
   it('Arctan(1 + √2) → 3π/8  [fungrim:c6c92a]', () => {

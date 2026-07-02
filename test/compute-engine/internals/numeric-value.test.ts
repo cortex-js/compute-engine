@@ -174,8 +174,10 @@ describe('power', () => {
 
     const b = a.pow(0.5);
     expect(b.re).toMatchInlineSnapshot(`4.36492369730075`);
+    // Correctly rounded at 100 digits (mpmath dps=110: …83679331); was …794
+    // (1 ulp off) before the bignumRe guard-digit fix (CORRECTNESS P2 #17/21).
     expect(b.toString()).toMatchInlineSnapshot(
-      `4.364923697300750093468524970855094140038109174685876230519106820203445844167467177594069909134836794`
+      `4.364923697300750093468524970855094140038109174685876230519106820203445844167467177594069909134836793`
     );
   });
   it('should stay exact', () => {

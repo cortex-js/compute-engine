@@ -274,6 +274,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (e === 2) return this.sqrt();
     if (e === -1) return this.inv();
 
+    // A negative root index denotes a reciprocal; normalize to
+    // `1/Root(a, n)` rather than the nonstandard `Root(a, -n)` (#13).
+    if (e !== undefined && e < 0 && Number.isInteger(e))
+      return ce._fn('Divide', [ce.One, this.root(-e)]);
+
     return ce._fn('Root', [this, ce.expr(n)]);
   }
 

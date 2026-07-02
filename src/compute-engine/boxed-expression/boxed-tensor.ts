@@ -250,11 +250,47 @@ export class BoxedTensor<T extends TensorDataType>
     return this.structural.json;
   }
 
-  /** Mathematical equality */
+  /**
+   * Mathematical (element-wise) equality.
+   *
+   * Unlike `isSame` — which uses the exact, structural `tensor.equals`
+   * (`field.equals`, i.e. `===`/`isSame`) and therefore treats identical `NaN`
+   * patterns as equal — `isEqual` compares elements with the same
+   * engine-tolerance semantics as scalar `isEqual`:
+   *
+   * - near-equal floats within `engine.tolerance` compare **equal**
+   *   (e.g. `[1,2,3]` vs `[1,2,3+1e-11]` → `true`);
+   * - a `NaN` element compares **unequal** (`NaN ≠ NaN`), so a tensor
+   *   containing `NaN` is never `isEqual` to itself — deliberately consistent
+   *   with scalar `isEqual`, and deliberately *inconsistent* with `isSame`/`is`
+   *   (which report structural equality for matching `NaN` patterns) (#16);
+   * - an indeterminate element comparison propagates as `undefined`.
+   */
   isEqual(rhs: number | Expression): boolean | undefined {
     if (this === rhs) return true;
+    if (typeof rhs === 'number') return false;
 
-    if (rhs instanceof BoxedTensor) return this.tensor.equals(rhs.tensor);
+    // Reduce the right-hand side to a rank-matched tensor when possible.
+    const rhsTensor = isTensor(rhs) && rhs.rank !== 0 ? rhs.tensor : undefined;
+    if (rhsTensor !== undefined) {
+      if (this.rank !== rhsTensor.rank) return false;
+      if (!this.shape.every((x, i) => x === rhsTensor.shape[i])) return false;
+
+      const a = this.tensor.data;
+      const b = rhsTensor.data;
+      const castA = this.tensor.field.cast.bind(this.tensor.field);
+      const castB = rhsTensor.field.cast.bind(rhsTensor.field);
+      const NaNExpr = this.engine.NaN;
+      let result: boolean | undefined = true;
+      for (let i = 0; i < a.length; i++) {
+        const ea = (castA(a[i], 'expression') as Expression) ?? NaNExpr;
+        const eb = (castB(b[i], 'expression') as Expression) ?? NaNExpr;
+        const eq = ea.isEqual(eb);
+        if (eq === false) return false;
+        if (eq === undefined) result = undefined;
+      }
+      return result;
+    }
 
     return this.structural.isEqual(rhs);
   }

@@ -303,8 +303,20 @@ export function assignFn(
       throw Error(`Cannot assign a value to the constant "${id}"`);
 
     // We have a value definition, update the inferred type...
-    if (def.value.inferredType)
-      def.value.type = ce.type(widen(def.value.type.type, value.type.type));
+    if (def.value.inferredType) {
+      const current = def.value.type.type;
+      const vt = value.type.type;
+      // Normally widen the inferred type to cover the assigned value (an
+      // `integer` guess refined by a `real` value widens to `real`). But when
+      // the guess is genuinely incompatible with the value — widening yields a
+      // union, e.g. a symbol heuristically auto-declared `function` by the
+      // juxtaposition parser now given a scalar value (`number | function`) —
+      // the guess was simply wrong: adopt the value's own type instead (D11).
+      const widened = widen(current, vt);
+      def.value.type = ce.type(
+        typeof widened === 'object' && widened.kind === 'union' ? vt : widened
+      );
+    }
 
     // ... and set the value
     ce._setSymbolValue(id, value);

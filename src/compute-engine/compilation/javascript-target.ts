@@ -438,6 +438,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (eConst === 0.5) return `Math.sqrt(${compile(base)})`;
     if (eConst === 1 / 3) return `Math.cbrt(${compile(base)})`;
     if (eConst === -0.5) return `(1 / Math.sqrt(${compile(base)}))`;
+    // Constant nonzero exponent: `Math.pow` matches the interpreter (0^k = 0
+    // for k > 0, etc.). A *variable* exponent could be 0 at run time against a
+    // 0 base — a genuine 0^0 — where `Math.pow` yields 1 but the interpreter
+    // yields NaN; route those through `_SYS.pow` to align (D6, CO-P2-24).
+    if (eConst === undefined)
+      return `_SYS.pow(${compile(base)}, ${compile(exp)})`;
     return `Math.pow(${compile(base)}, ${compile(exp)})`;
   },
   Range: (args, compile) => {
@@ -1425,7 +1431,24 @@ const SYS_HELPERS = {
   factorial2,
   gamma,
   gcd,
+  // Power with the interpreter's 0^0 = NaN convention. `Math.pow(0, 0)` is 1,
+  // but the interpreter treats a genuine 0^0 as indeterminate (NaN). Used only
+  // on the variable-exponent path — where the exponent could be 0 at run time
+  // (a constant nonzero exponent stays on the plain `Math.pow` fast path). See
+  // finding CO-P2-24.
+  pow: (base: number, exp: number): number =>
+    base === 0 && exp === 0 ? NaN : Math.pow(base, exp),
+  // Fail-closed Which/When condition guard. The interpreter requires a
+  // condition to evaluate to True/False and throws otherwise; a compiled
+  // ternary would silently treat a non-boolean (notably NaN) as falsy and take
+  // the default branch. Rethrow to match the interpreter (D6, CO-P2-24).
+  cond: (c: unknown): boolean => {
+    if (c === true || c === false) return c;
+    throw new Error('Condition must evaluate to "True" or "False".');
+  },
   heaviside: (x: number) => (x < 0 ? 0 : x === 0 ? 0.5 : 1),
+  // Definite integral via Monte-Carlo (1e7 uniform samples). STOCHASTIC and
+  // approximate (~1e-4 typical error, ~200 ms/call) — see `compileIntegrate`.
   integrate: (f: (x: number) => number, a: number, b: number) =>
     monteCarloEstimate(f, a, b, 10e6).estimate,
   lcm,
@@ -1637,6 +1660,15 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       string: (str) => JSON.stringify(str),
       number: (n) => n.toString(),
       complex: (re, im) => `({ re: ${re}, im: ${im} })`,
+      // Evaluate shared middle operands of a chained relation exactly once
+      // (matching the interpreter) by binding them in an IIFE.
+      bindExpr: (bindings, body) =>
+        `((${bindings.map((b) => b[0]).join(', ')}) => ${body})(${bindings
+          .map((b) => b[1])
+          .join(', ')})`,
+      // A non-boolean Which/When condition (e.g. NaN) fails closed at run time,
+      // matching the interpreter's throw (D6).
+      assertBoolean: (code) => `_SYS.cond(${code})`,
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',
@@ -1743,7 +1775,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
 }
 
 /**
- * Wrap a compiled result so complex values are flattened to real or NaN.
+ * Wrap a compiled result so non-real values are projected to a real number or,
+ * when they are not representable as one, `NaN` (fail closed, D6):
+ * - A complex `{ re, im }` collapses to `re` when `im === 0`, else `NaN`.
+ * - A boolean is NOT a real number — the interpreter never numericizes a
+ *   boolean-valued expression to 0/1 (`True.N()` stays `True`) — so it maps to
+ *   `NaN` rather than silently passing through as a non-number (CO-P2-25).
  */
 function wrapRealOnly(
   result: CompilationResult<'javascript'>
@@ -1752,8 +1789,9 @@ function wrapRealOnly(
   const realRun = ((...args: unknown[]) => {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     const r = (origRun as Function)(...args);
+    if (typeof r === 'boolean') return NaN;
     if (typeof r === 'object' && r !== null && 'im' in r)
-      return r.im === 0 ? r.re : NaN;
+      return (r as ComplexResult).im === 0 ? (r as ComplexResult).re : NaN;
     return r;
   }) as unknown as CompiledRunner<number>;
   return {
@@ -2008,6 +2046,21 @@ function emitSumProduct(
  * the bounds (correct for the discrete `Sum`/`Product` counters it also
  * serves, wrong for a continuous integral — it collapsed e.g. `∫₀^0.5` to
  * `∫₀^0`), so we compile the bound expressions directly instead.
+ */
+/**
+ * Compile `Integrate(f, (x, a, b))` to a call to the `_SYS.integrate` runtime
+ * helper.
+ *
+ * NOTE — the compiled definite integral is a **Monte-Carlo estimate**, not an
+ * exact/adaptive quadrature. `_SYS.integrate` draws 1e7 uniform samples over
+ * `[a, b]`, so a compiled `Integrate` is **stochastic** (a different result
+ * each call, unseeded), converges at only ~1/√N (typical error ~1e-4), and is
+ * comparatively slow (~200 ms/call). It exists so that an expression containing
+ * a definite integral can still be compiled to a self-contained numeric
+ * function; callers needing a deterministic or high-accuracy value should use
+ * the interpreter's `.N()` (adaptive quadrature) instead. Only real, finite,
+ * constant bounds are meaningful; an unbounded or symbolic-bound integral is
+ * out of scope for the compiled target.
  */
 function compileIntegrate(
   args: ReadonlyArray<Expression>,

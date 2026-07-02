@@ -2231,7 +2231,9 @@ export class _Parser implements Parser {
    * - they act mostly like an infix operator, but they are commutative, i.e.
    * `x_a^b` should be parsed identically to `x^b_a`.
    *
-   * - furthermore, in LaTeX `x^a^b` parses the same as `x^a{}^b`.
+   * - a second superscript on the same base (`x^a^b`) is a "Double
+   *   superscript" error in LaTeX; we surface it as an error rather than
+   *   gathering the scripts into a broadcasting `List` (see below).
    *
    */
   private parseSupsub(lhs: MathJsonExpression): MathJsonExpression | null {
@@ -2384,11 +2386,16 @@ export class _Parser implements Parser {
         const nonEmptySuperscripts = superscripts.filter(
           (x) => !isEmptySequence(x)
         ) as MathJsonExpression[];
+        // In LaTeX, a second superscript on the same base (e.g. `x^2^3`) is a
+        // "Double superscript" error. Previously these were gathered into a
+        // `List`, which then *broadcasts* under evaluation (`2^3^4` → [8, 16]),
+        // silently corrupting the value. Surface an error instead; the
+        // intended nesting is written explicitly as `x^{2^3}`.
+        if (nonEmptySuperscripts.length > 1)
+          return this.error('unexpected-superscript', index);
         if (nonEmptySuperscripts.length !== 0) {
           const superscriptExpression: MathJsonExpression =
-            nonEmptySuperscripts.length === 1
-              ? nonEmptySuperscripts[0]
-              : ['List', ...nonEmptySuperscripts];
+            nonEmptySuperscripts[0];
           const arg: MathJsonExpression = [
             'Superscript',
             result!,

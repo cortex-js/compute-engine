@@ -108,7 +108,7 @@ describe('CANONICAL FORMS', () => {
       eval-auto = 3sqrt(5) * x
       eval-mach = 3sqrt(5) * x
       N-auto    = 6.70820393249936908923 * x
-      N-mach    = 6.70820393249937 * x
+      N-mach    = 6.708203932499369 * x
     `);
   });
 
@@ -120,7 +120,7 @@ describe('CANONICAL FORMS', () => {
       eval-auto = 3/7sqrt(5) * x
       eval-mach = 3/7sqrt(5) * x
       N-auto    = 0.958314847499909869891 * x
-      N-mach    = 0.9583148474999109 * x
+      N-mach    = 0.9583148474999099 * x
     `);
   });
 
@@ -143,7 +143,7 @@ describe('CANONICAL FORMS', () => {
       eval-auto = -3sqrt(5) * x
       eval-mach = -3sqrt(5) * x
       N-auto    = -6.70820393249936908923 * x
-      N-mach    = -6.70820393249937 * x
+      N-mach    = -6.708203932499369 * x
     `);
   });
 
@@ -168,7 +168,7 @@ describe('CANONICAL FORMS', () => {
       eval-auto = 10/49sqrt(15)
       eval-mach = 10/49sqrt(15)
       N-auto    = 0.790404764532125894935
-      N-mach    = 0.7904047645321257
+      N-mach    = 0.7904047645321259
     `);
   });
 
@@ -1153,9 +1153,9 @@ describe('`canonical` / `structural` options on parse/expr/function', () => {
 
   test('parse({ structural: true }) is structural', () => {
     const ce = new ComputeEngine();
-    expect((ce.parse('x^{1/3}', { structural: true }) as any).isStructural).toBe(
-      true
-    );
+    expect(
+      (ce.parse('x^{1/3}', { structural: true }) as any).isStructural
+    ).toBe(true);
   });
 
   test('expr({ canonical: false }) is non-canonical', () => {

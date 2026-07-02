@@ -617,4 +617,23 @@ describe('WGSL COMPILATION', () => {
       expect(fn).toContain('sin(f32(i))');
     });
   });
+
+  // CO-P2-23a / 23b: negative-index Sum unroll must not emit `--`, and a user
+  // variable named after a WGSL reserved word fails closed (D6).
+  describe('CO-P2-23 emission fixes', () => {
+    it('negative-index Sum unroll spaces the negation (no `--`)', () => {
+      const code = wgsl.compile(
+        ce.box(['Sum', ['Negate', 'i'], ['Tuple', 'i', -3, 3]])
+      ).code;
+      expect(code).not.toContain('--');
+      expect(code).toContain('- -3.0');
+    });
+    for (const kw of ['sample', 'filter', 'texture', 'let', 'var', 'f32']) {
+      it(`rejects reserved word "${kw}" as a variable`, () => {
+        expect(() => wgsl.compile(ce.box(['Add', kw, 1])).code).toThrow(
+          /reserved word/
+        );
+      });
+    }
+  });
 });

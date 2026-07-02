@@ -333,7 +333,7 @@ describe('B23/G1: machine erfInv is full double precision', () => {
   });
 });
 
-describe('B23: machine Fresnel asymptotic cutoff (36 → 36974)', () => {
+describe('B23: machine Fresnel asymptotic cutoff (36 → 36974 → 6e15)', () => {
   // With the previous cutoff of 36, S(50) returned exactly 0.5 — an
   // absolute error of ~6.4e-3 (the dropped oscillating term ~1/(πx))
   test('fresnelS/fresnelC at x=50 keep the oscillating term', () => {
@@ -341,8 +341,18 @@ describe('B23: machine Fresnel asymptotic cutoff (36 → 36974)', () => {
     expect(fresnelC(50)).toBeCloseTo(0.49999918943072797, 12);
   });
 
-  test('beyond the cutoff S, C → ±0.5', () => {
-    expect(fresnelS(40000)).toBe(0.5);
-    expect(fresnelC(-40000)).toBe(-0.5);
+  // The 36974 Cephes cutoff was itself ~2000× too early (an 8.6e-6 cliff);
+  // with the exact mod-4 phase reduction the asymptotic expansion is kept
+  // to 6e15 (CORRECTNESS P2 #19).
+  test('past the old 36974 cutoff the oscillating term is kept', () => {
+    // mpmath dps=45: S(40000) = 0.4999920422528454052332,
+    //                C(40000) = 0.4999999999999984168565
+    expect(fresnelS(40000)).toBeCloseTo(0.4999920422528454, 15);
+    expect(fresnelC(-40000)).toBeCloseTo(-0.4999999999999984, 15);
+  });
+
+  test('beyond the 6e15 cutoff S, C → ±0.5', () => {
+    expect(fresnelS(7e15)).toBe(0.5);
+    expect(fresnelC(-7e15)).toBe(-0.5);
   });
 });

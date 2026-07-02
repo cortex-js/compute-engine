@@ -189,10 +189,12 @@ describe('SUM parsing', () => {
   });
 
   test('UNSUPPORTED summation with inequality constraint', () => {
-    // Inequality constraints like d != V are not currently supported
-    // The constraint is parsed but not applied during evaluation
+    // Inequality constraints like d != V are not currently applied during
+    // evaluation. `!=` now parses as `NotEqual` (previously the `!` was eaten
+    // as a factorial), so the constraint is carried on the `Element` but still
+    // ignored by the summation.
     expect(ce.parse(`\\sum_{d \\in D, d != V} K`)).toMatchInlineSnapshot(
-      `["Sum", "K", ["Element", "d", "D"]]`
+      `["Sum", "K", ["Element", "d", "D", ["NotEqual", "d", "V"]]]`
     );
   });
 

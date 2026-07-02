@@ -670,29 +670,37 @@ function serializeJsonNumber(
 
       // Note: implement same logic as in ExactNumericValue.toJSON()
 
-      const exactValue = value;
+      // Honor the `exclude` option for the heads emitted here. The default
+      // `.json` path (`ExactNumericValue.toJSON()`) always uses `Rational`/
+      // `Sqrt`; only `toMathJson({ exclude: […] })` diverges, so the default
+      // output is unchanged (exclusions default to `[]`).
+      const excludeRational = exclusions.includes('Rational');
+      const excludeSqrt = exclusions.includes('Sqrt');
       const rationalExpr = (r: Rational) => {
-        if (isInteger(r))
-          return serializeJsonNumber(ce, exactValue.rational[0], options);
+        if (isInteger(r)) return serializeJsonNumber(ce, r[0], options);
         return [
-          'Rational',
-          serializeJsonNumber(ce, exactValue.rational[0], options),
-          serializeJsonNumber(ce, exactValue.rational[1], options),
+          excludeRational ? 'Divide' : 'Rational',
+          serializeJsonNumber(ce, r[0], options),
+          serializeJsonNumber(ce, r[1], options),
         ] as MathJsonExpression;
       };
+      // `√r` as either `Sqrt(r)` or, when `Sqrt` is excluded, `Power(r, 1/2)`
+      // (with the `1/2` exponent itself honoring a `Rational` exclusion).
+      const sqrtExpr = (radical: number): MathJsonExpression =>
+        excludeSqrt ? ['Power', radical, rationalExpr([1, 2])] : ['Sqrt', radical];
 
       if (value.radical === 1) return rationalExpr(value.rational);
       // Only have a radical
-      if (isOne(value.rational)) return ['Sqrt', value.radical];
+      if (isOne(value.rational)) return sqrtExpr(value.radical);
       if (isNegativeOne(value.rational))
-        return ['Negate', ['Sqrt', value.radical]];
+        return ['Negate', sqrtExpr(value.radical)];
 
       // Have both a radical and a rational
 
       if (value.rational[0] == 1)
         return [
           'Divide',
-          ['Sqrt', value.radical],
+          sqrtExpr(value.radical),
           serializeJsonNumber(ce, value.rational[1], options),
         ];
       if (value.rational[0] == -1)
@@ -700,7 +708,7 @@ function serializeJsonNumber(
           'Negate',
           [
             'Divide',
-            ['Sqrt', value.radical],
+            sqrtExpr(value.radical),
             serializeJsonNumber(ce, value.rational[1], options),
           ],
         ];
@@ -708,7 +716,7 @@ function serializeJsonNumber(
       return [
         'Multiply',
         rationalExpr(value.rational),
-        ['Sqrt', value.radical],
+        sqrtExpr(value.radical),
       ];
     }
 

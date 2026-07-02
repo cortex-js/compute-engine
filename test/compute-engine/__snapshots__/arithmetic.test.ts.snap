@@ -143,7 +143,7 @@ canonical = ["Add", ["Rational", 47, 7], ["Sqrt", 2]]
 eval-auto = 47/7 + sqrt(2)
 eval-mach = 47/7 + sqrt(2)
 N-auto    = 8.12849927665880933451
-N-mach    = 8.128499276658815
+N-mach    = 8.12849927665881
 `;
 
 exports[`EXACT EVALUATION Add: All exact 2`] = `
@@ -151,7 +151,7 @@ box       = ["Add", 6, ["Sqrt", 2], ["Sqrt", 5]]
 eval-auto = 6 + sqrt(2) + sqrt(5)
 eval-mach = 6 + sqrt(2) + sqrt(5)
 N-auto    = 9.65028153987288474521
-N-mach    = 9.65028153987289
+N-mach    = 9.650281539872886
 `;
 
 exports[`EXACT EVALUATION Add: All exact 3`] = `
@@ -258,8 +258,8 @@ box       = ["Sqrt", ["Divide", 5, 7]]
 canonical = ["Divide", ["Sqrt", 35], 7]
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
-N-auto    = 0.845154254728516577511
-N-mach    = 0.845154254728518
+N-auto    = 0.84515425472851657751
+N-mach    = 0.8451542547285166
 `;
 
 exports[`EXACT EVALUATION Sqrt: Inexact Fractional part 1`] = `
@@ -345,7 +345,7 @@ box       = ["Ln", 3, 4]
 canonical = ["Log", 3, 4]
 eval-auto = log(3, 4)
 eval-mach = log(3, 4)
-N-auto    = 0.792481250360578090733
+N-auto    = 0.792481250360578090727
 N-mach    = 0.792481250360578
 `;
 
@@ -426,15 +426,15 @@ box       = ["Lg", "Pi"]
 canonical = ["Log", "Pi"]
 eval-auto = log(pi)
 eval-mach = log(pi)
-N-auto    = 0.497149872694133854349
+N-auto    = 0.497149872694133854351
 N-mach    = 0.4971498726941338
 `;
 
 exports[`LG LG ['Complex', 1.1, 1.1] 1`] = `
 box       = ["Lg", ["Complex", 1.1, 1.1]]
 canonical = ["Log", ["Complex", 1.1, 1.1]]
-simplify  = (0.191907682990215638356 + 0.3410940884604603i)
-eval-auto = (0.191907682990215638356 + 0.3410940884604603i)
+simplify  = (0.191907682990215638357 + 0.3410940884604603i)
+eval-auto = (0.191907682990215638357 + 0.3410940884604603i)
 eval-mach = (0.19190768299021568 + 0.3410940884604603i)
 N-auto    = (0.19190768299021566 + 0.3410940884604603i)
 N-mach    = (0.19190768299021566 + 0.3410940884604603i)
@@ -524,7 +524,7 @@ exports[`LOG(a,b) Log 'Pi', 5 1`] = `
 box       = ["Log", "Pi", 5]
 eval-auto = log(pi, 5)
 eval-mach = log(pi, 5)
-N-auto    = 0.71126066871266895533
+N-auto    = 0.711260668712668955332
 N-mach    = 0.711260668712669
 `;
 
@@ -557,8 +557,8 @@ canonical = 0
 
 exports[`LOG(a,b) Log 1.1, 5 1`] = `
 box       = ["Log", 1.1, 5]
-simplify  = 0.0592195443315850221292
-eval-auto = 0.0592195443315850221292
+simplify  = 0.0592195443315850221291
+eval-auto = 0.0592195443315850221291
 eval-mach = 0.05921954433158507
 `;
 
@@ -566,14 +566,14 @@ exports[`Log Log 'Pi' 1`] = `
 box       = ["Log", "Pi"]
 eval-auto = log(pi)
 eval-mach = log(pi)
-N-auto    = 0.497149872694133854349
+N-auto    = 0.497149872694133854351
 N-mach    = 0.4971498726941338
 `;
 
 exports[`Log Log ['Complex', 1.1, 1.1] 1`] = `
 box       = ["Log", ["Complex", 1.1, 1.1]]
-simplify  = (0.191907682990215638356 + 0.3410940884604603i)
-eval-auto = (0.191907682990215638356 + 0.3410940884604603i)
+simplify  = (0.191907682990215638357 + 0.3410940884604603i)
+eval-auto = (0.191907682990215638357 + 0.3410940884604603i)
 eval-mach = (0.19190768299021568 + 0.3410940884604603i)
 N-auto    = (0.19190768299021566 + 0.3410940884604603i)
 N-mach    = (0.19190768299021566 + 0.3410940884604603i)
@@ -732,7 +732,7 @@ canonical = ["Multiply", ["Rational", 50, 9], ["Sqrt", 2], "Pi"]
 eval-auto = 50/9sqrt(2) * pi
 eval-mach = 50/9sqrt(2) * pi
 N-auto    = 24.6826829897687013723
-N-mach    = 24.682682989768807
+N-mach    = 24.6826829897687
 `;
 
 exports[`MULTIPLY Multiply: One inexact 1`] = `
@@ -750,7 +750,7 @@ canonical = ["Multiply", ["Rational", 50, 9], ["Sqrt", 2], 1.1, "Pi"]
 simplify  = 8.64241621450224752045 * pi
 eval-auto = 27.1509512887455715095
 eval-mach = 27.15095128874557
-N-mach    = 27.15095128874569
+N-mach    = 27.150951288745574
 `;
 
 exports[`MULTIPLY with +Infinity 1`] = `
@@ -1039,7 +1039,7 @@ invalid   =[
 
 exports[`SQRT INVALID Sqrt 1`] = `invalid   =["Sqrt", 2.5, ["Error", "unexpected-argument", "'1.1'"]]`;
 
-exports[`SQRT √ of list 1`] = `[2,1,7.483314773547882771167497464633098603512039615557453892607490934640070312613878055953619790388759144,4.242640687119285146405066172629094235709015626130844219530039213972197435386321116551162602982924719]`;
+exports[`SQRT √ of list 1`] = `[2,1,7.483314773547882771167497464633098603512039615557453892607490934640070312613878055953619790388759143,4.242640687119285146405066172629094235709015626130844219530039213972197435386321116551162602982924718]`;
 
 exports[`SQRT √(3+4i) 1`] = `
 box       = ["Sqrt", ["Complex", 3, 4]]
@@ -1064,8 +1064,8 @@ box       = ["Sqrt", ["Rational", 5, 7]]
 canonical = ["Divide", ["Sqrt", 35], 7]
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
-N-auto    = 0.845154254728516577511
-N-mach    = 0.845154254728518
+N-auto    = 0.84515425472851657751
+N-mach    = 0.8451542547285166
 `;
 
 exports[`SQRT √(5x(3+2)) 1`] = `
@@ -1079,7 +1079,7 @@ canonical = ["Multiply", 5, ["Sqrt", 7]]
 eval-auto = 5sqrt(7)
 eval-mach = 5sqrt(7)
 N-auto    = 13.2287565553229529525
-N-mach    = 13.22875655532295
+N-mach    = 13.228756555322953
 `;
 
 exports[`SQRT √(1000000/49) 1`] = `

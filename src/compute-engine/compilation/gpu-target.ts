@@ -47,6 +47,92 @@ export const GPU_OPERATORS: CompiledOperators = {
   Not: ['!', 14],
 };
 
+/**
+ * GLSL reserved keywords (ES 3.x + desktop) and reserved-for-future-use words.
+ * A user variable carrying one of these names cannot be emitted as a bare
+ * identifier — the shader would fail to compile — so the target fails closed
+ * (D6) rather than silently emit invalid source. Includes type/qualifier
+ * keywords, control-flow keywords, and common built-in function names that a
+ * bare reference would shadow/collide with (`texture`, `sample`, …).
+ */
+const GLSL_RESERVED: ReadonlySet<string> = new Set([
+  // storage/parameter qualifiers
+  'attribute', 'const', 'uniform', 'varying', 'buffer', 'shared', 'coherent',
+  'volatile', 'restrict', 'readonly', 'writeonly', 'layout', 'centroid',
+  'flat', 'smooth', 'noperspective', 'patch', 'sample', 'in', 'out', 'inout',
+  'precision', 'invariant', 'precise', 'subroutine',
+  // control flow
+  'break', 'continue', 'do', 'for', 'while', 'switch', 'case', 'default',
+  'if', 'else', 'discard', 'return',
+  // scalar/vector/matrix types
+  'void', 'bool', 'int', 'uint', 'float', 'double',
+  'vec2', 'vec3', 'vec4', 'dvec2', 'dvec3', 'dvec4', 'bvec2', 'bvec3', 'bvec4',
+  'ivec2', 'ivec3', 'ivec4', 'uvec2', 'uvec3', 'uvec4',
+  'mat2', 'mat3', 'mat4', 'mat2x2', 'mat2x3', 'mat2x4', 'mat3x2', 'mat3x3',
+  'mat3x4', 'mat4x2', 'mat4x3', 'mat4x4',
+  'dmat2', 'dmat3', 'dmat4',
+  // opaque/sampler types
+  'sampler2D', 'sampler3D', 'samplerCube', 'sampler2DArray', 'sampler2DShadow',
+  'samplerCubeShadow', 'isampler2D', 'usampler2D', 'atomic_uint', 'image2D',
+  // literals
+  'true', 'false',
+  // reserved-for-future-use / common built-ins that a bare var would collide with
+  'filter', 'texture', 'asm', 'union', 'enum', 'typedef', 'template', 'this',
+  'packed', 'goto', 'inline', 'noinline', 'public', 'static', 'extern',
+  'external', 'interface', 'long', 'short', 'half', 'fixed', 'unsigned',
+  'superp', 'input', 'output', 'hvec2', 'hvec3', 'hvec4', 'fvec2', 'fvec3',
+  'fvec4', 'sizeof', 'cast', 'namespace', 'using',
+]);
+
+/**
+ * WGSL reserved words + keywords. As with GLSL, a user variable matching one of
+ * these cannot be emitted bare; the target fails closed (D6).
+ */
+const WGSL_RESERVED: ReadonlySet<string> = new Set([
+  // keywords
+  'alias', 'break', 'case', 'const', 'const_assert', 'continue', 'continuing',
+  'default', 'diagnostic', 'discard', 'else', 'enable', 'false', 'fn', 'for',
+  'if', 'let', 'loop', 'override', 'requires', 'return', 'struct', 'switch',
+  'true', 'var', 'while',
+  // types / type-generators
+  'bool', 'f16', 'f32', 'i32', 'u32', 'vec2', 'vec3', 'vec4', 'vec2f', 'vec3f',
+  'vec4f', 'vec2i', 'vec3i', 'vec4i', 'vec2u', 'vec3u', 'vec4u', 'mat2x2',
+  'mat2x3', 'mat2x4', 'mat3x2', 'mat3x3', 'mat3x4', 'mat4x2', 'mat4x3',
+  'mat4x4', 'array', 'atomic', 'ptr', 'sampler', 'sampler_comparison',
+  'texture_1d', 'texture_2d', 'texture_2d_array', 'texture_3d',
+  'texture_cube', 'texture_cube_array', 'texture_multisampled_2d',
+  // address spaces / builtins that a bare var would collide with
+  'function', 'private', 'workgroup', 'uniform', 'storage', 'read', 'write',
+  'read_write', 'texture', 'sample', 'filter',
+  // reserved words (subset of the WGSL reserved list)
+  'as', 'async', 'attribute', 'auto', 'binding', 'cast', 'compile', 'do',
+  'enum', 'extern', 'external', 'inline', 'instance', 'interface', 'match',
+  'namespace', 'new', 'null', 'of', 'operator', 'public', 'reference', 'self',
+  'set', 'shared', 'static', 'super', 'template', 'this', 'typedef', 'union',
+  'unless', 'using', 'virtual', 'where',
+]);
+
+/** The reserved-word set for a GPU shader language, or an empty set. */
+function gpuReservedWords(language?: string): ReadonlySet<string> {
+  if (language === 'wgsl') return WGSL_RESERVED;
+  if (language === 'glsl') return GLSL_RESERVED;
+  return new Set();
+}
+
+/**
+ * Fail closed (D6) if `id` is a reserved word in the target shader language.
+ * A user variable / loop index carrying a reserved name would emit source that
+ * fails to compile on the GPU — surface a clear diagnostic instead. Returns the
+ * identifier unchanged when it is safe.
+ */
+function gpuCheckIdentifier(id: string, language?: string): string {
+  if (gpuReservedWords(language).has(id))
+    throw new Error(
+      `"${id}" is a reserved word in ${language ?? 'this shader language'} and cannot be used as a variable name. Rename it before compiling to a GPU target (fail closed, D6).`
+    );
+  return id;
+}
+
 /** Return the vec2 constructor name for the target language. */
 function gpuVec2(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? 'vec2f' : 'vec2';
@@ -232,6 +318,9 @@ function compileGPUSumProduct(
       ? String(upperNum)
       : BaseCompiler.compile(limitsOps[2], target);
 
+  // The loop index is declared and referenced bare — reject a reserved name
+  // (fail closed, D6) rather than emit a shader that fails to compile.
+  gpuCheckIdentifier(index, target.language);
   const accDecl = isWGSL ? `var ${acc}: ${floatType}` : `${floatType} ${acc}`;
   const indexDecl = isWGSL ? `var ${index}: ${intType}` : `${intType} ${index}`;
 
@@ -448,6 +537,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // bare `NaN`, neither of which is valid GPU code (WGSL has no `?:`, and no
   // shader language has a `NaN` identifier). Emit `select(...)` for WGSL and a
   // language-appropriate NaN.
+  //
+  // DIVERGENCE (documented, CO-P2-24): a shader cannot throw. Where the
+  // interpreter throws on a non-boolean/NaN `Which`/`When` condition, the GPU
+  // target instead falls through to the documented fail-closed value (the else
+  // branch / NaN) — the JS target aligns via a runtime throw, which is not
+  // expressible here.
   If: (args, compile, target) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
     return gpuConditional(
@@ -512,6 +607,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     if (eConst === -1) return `(1.0 / ${compile(base)})`;
     if (eConst === 0.5) return `sqrt(${compile(base)})`;
+    // DIVERGENCE (documented, CO-P2-24): a literal `0^0` folds to NaN at
+    // canonicalization and then fails closed here (no GPU NaN literal); `x^0`
+    // folds to 1. A *runtime* dynamic `0^0` reaches `pow(0.0, 0.0)`, which is
+    // undefined in GLSL/WGSL and cannot be made to yield NaN (no NaN literal),
+    // so it is left to the hardware — the JS target aligns this via `_SYS.pow`.
     return `pow(${compile(base)}, ${compile(exp)})`;
   },
   Radians: 'radians',
@@ -1077,6 +1177,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Loop: expected Range(lo, hi)');
 
     const index = indexExpr.symbol;
+    // The loop index is declared and referenced bare — reject a reserved name.
+    gpuCheckIdentifier(index, target.language);
     const lower = Math.floor(rangeExpr.ops[0].re);
     const upper = Math.floor(rangeExpr.ops[1].re);
 
@@ -3040,6 +3142,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // GPU languages — the interval-glsl subclass keeps its own semantics.
       bareStatementBlocks:
         this.languageId === 'glsl' || this.languageId === 'wgsl',
+      // A free symbol emitted as a bare identifier must not be a reserved word
+      // of the shader language, or the generated shader fails to compile. Fail
+      // closed (D6) with a clear diagnostic naming the offending identifier.
+      mangleId: (id) => gpuCheckIdentifier(id, this.languageId),
       operators: (op) => GPU_OPERATORS[op],
       functions: (id) => functions[id],
       var: (id) => {
