@@ -795,26 +795,31 @@ export class ExactNumericValue extends NumericValue {
   }
 
   lt(other: number | NumericValue): boolean | undefined {
+    // Complex values are unordered: any non-real operand → indeterminate
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.re < other;
+    if (other.im !== 0) return undefined;
     return this.re < other.re;
   }
 
   lte(other: number | NumericValue): boolean | undefined {
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.re <= other;
+    if (other.im !== 0) return undefined;
     return this.re <= other.re;
   }
 
   gt(other: number | NumericValue): boolean | undefined {
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.re > other;
+    if (other.im !== 0) return undefined;
     return this.re > other.re;
   }
 
   gte(other: number | NumericValue): boolean | undefined {
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.re >= other;
+    if (other.im !== 0) return undefined;
     return this.re >= other.re;
   }
 

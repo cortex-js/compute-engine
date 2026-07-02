@@ -58,11 +58,18 @@ describe('NUMERIC MODE', () => {
       N-mach    = 0.142857142857143
     `));
 
+  // The exact result is finite but astronomically large (~4.6·10^20 digits),
+  // far beyond the exact-power materialization guard, so evaluate() keeps it
+  // symbolic (an inert Power) rather than falsely overflowing to +oo; only
+  // N() (a float approximation) overflows to +oo.
   test(`12345678901234567890^{23456789012345678901}`, () =>
     expect(check('12345678901234567890^{23456789012345678901}'))
       .toMatchInlineSnapshot(`
       box       = ["Power", {num: "12345678901234567890"}, {num: "23456789012345678901"}]
-      eval-auto = +oo
+      eval-auto = 12345678901234567890^(23456789012345678901)
+      eval-mach = 12345678901234567890^(23456789012345678901)
+      N-auto    = +oo
+      N-mach    = +oo
     `));
 
   test(`\\cos(555555^{-1})`, () =>

@@ -2257,7 +2257,10 @@ function processMinMaxItem(
     for (const op of item.each()) {
       const [val, others] = processMinMaxItem(op, mode);
       if (val) {
-        if (!result) result = val;
+        // A non-real (complex) value is unordered: keep it symbolic rather
+        // than silently absorbing it in an order-dependent way.
+        if (val.im !== 0) rest.push(val);
+        else if (!result) result = val;
         else {
           if (
             (upper && val.isGreater(result)) ||
@@ -2297,7 +2300,12 @@ function evaluateMinMax(
       // (Comparisons with NaN are themselves indeterminate, so without this
       // guard a NaN operand would be silently dropped.)
       if (val.isNaN) return ce.NaN;
-      if (!result) result = val;
+      // A non-real (complex) value is unordered. Ordering comparisons return
+      // `undefined` for it, which previously left it silently absorbed in an
+      // order-dependent way (Max(i, 2) = i but Max(2, i) = 2). Keep it symbolic
+      // instead so both operand orders agree.
+      if (val.im !== 0) rest.push(val);
+      else if (!result) result = val;
       else {
         if ((upper && val.isGreater(result)) || (!upper && val.isLess(result)))
           result = val;

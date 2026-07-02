@@ -599,6 +599,8 @@ export class BigNumericValue extends NumericValue {
     }
 
     // ln(a + bi) = ln(|a + bi|) + i * arg(a + bi)
+    // With a base b: log_b(z) = ln(z) / ln(b), so BOTH the real and the
+    // imaginary parts are divided by ln(b).
     const a = this.decimal;
     const b = this.im;
     const modulus = a
@@ -610,7 +612,7 @@ export class BigNumericValue extends NumericValue {
     if (base === undefined)
       return this.clone({ re: modulus.ln(), im: argument });
 
-    return this.clone({ re: modulus.log(base), im: argument });
+    return this.clone({ re: modulus.log(base), im: argument / Math.log(base) });
   }
 
   exp(): NumericValue {
@@ -660,26 +662,31 @@ export class BigNumericValue extends NumericValue {
   }
 
   lt(other: number | NumericValue): boolean | undefined {
+    // Complex values are unordered: any non-real operand → indeterminate
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal.lt(other);
+    if (other.im !== 0) return undefined;
     return this.decimal.lt(other.bignumRe ?? other.re);
   }
 
   lte(other: number | NumericValue): boolean | undefined {
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal.lte(other);
+    if (other.im !== 0) return undefined;
     return this.decimal.lte(other.bignumRe ?? other.re);
   }
 
   gt(other: number | NumericValue): boolean | undefined {
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal.gt(other);
+    if (other.im !== 0) return undefined;
     return this.decimal.gt(other.bignumRe ?? other.re);
   }
 
   gte(other: number | NumericValue): boolean | undefined {
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal.gte(other);
+    if (other.im !== 0) return undefined;
     return this.decimal.gte(other.bignumRe ?? other.re);
   }
 }

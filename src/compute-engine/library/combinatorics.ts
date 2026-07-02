@@ -1,24 +1,105 @@
 import { toBigint, toInteger } from '../boxed-expression/numerics';
 import type { Expression, SymbolDefinitions } from '../global-types';
-import { choose } from '../boxed-expression/expand';
-import { isFunction } from '../boxed-expression/type-guards';
+import { isFunction, isNumber } from '../boxed-expression/type-guards';
+import { apply2 } from '../boxed-expression/apply';
+import { gamma, bigGamma } from '../numerics/special-functions';
+
+/**
+ * Exact binomial coefficient for bigint n, k.
+ *
+ * - k < 0 → 0 (no combinatorial meaning, regardless of n).
+ * - n ≥ 0 and k > n → 0 (standard convention).
+ * - n < 0 → the standard extension via Pascal's rule analytic continuation:
+ *   Binomial(n, k) = (-1)^k · Binomial(k-n-1, k), e.g.
+ *   Binomial(-2, 3) = (-1)³·Binomial(4, 3) = -4 (matches Mathematica/sympy).
+ */
+function binomialBigint(n: bigint, k: bigint): bigint {
+  if (k < 0n) return 0n;
+  if (n < 0n) {
+    const sign = k % 2n === 0n ? 1n : -1n;
+    return sign * binomialBigint(k - n - 1n, k);
+  }
+  if (k > n) return 0n;
+  // Use the smaller of k and n-k to minimize the number of iterations.
+  const kk = k < n - k ? k : n - k;
+  if (kk === 0n) return 1n;
+  let result = 1n;
+  for (let i = 1n; i <= kk; i++) result = (result * (n - kk + i)) / i;
+  return result;
+}
+
+/**
+ * Shared evaluate logic for `Binomial` and `Choose` — the two names must
+ * agree everywhere both are defined, so both handlers delegate here.
+ *
+ * - Exact integers (any sign of n): exact bigint result (see
+ *   `binomialBigint`), regardless of `numericApproximation`.
+ * - Exact non-integers (rationals, radicals, symbolic constants like π):
+ *   no closed form, so stay symbolic under plain `evaluate()`; under `.N()`
+ *   numericize via the Gamma form Γ(n+1)/(Γ(k+1)·Γ(n−k+1)).
+ * - Inexact (float) operands numericize under both `evaluate()` and `.N()`,
+ *   per the exactness contract (an inexact argument always numericizes).
+ * - Complex or non-numeric (symbolic) operands: stay symbolic (no closed
+ *   form implemented for complex args; symbolic args can't be evaluated).
+ */
+function evaluateBinomial(
+  nExpr: Expression,
+  kExpr: Expression,
+  numericApproximation: boolean | undefined,
+  ce: Expression['engine']
+): Expression | undefined {
+  // Exact integers: exact bigint arithmetic (handles negative n).
+  if (
+    isNumber(nExpr) &&
+    isNumber(kExpr) &&
+    nExpr.im === 0 &&
+    kExpr.im === 0 &&
+    nExpr.isInteger &&
+    kExpr.isInteger
+  ) {
+    const n = toBigint(nExpr);
+    const k = toBigint(kExpr);
+    if (n !== null && k !== null) return ce.number(binomialBigint(n, k));
+  }
+
+  // Complex operands: no closed form implemented here; stay symbolic.
+  if (
+    (isNumber(nExpr) && nExpr.im !== 0) ||
+    (isNumber(kExpr) && kExpr.im !== 0)
+  )
+    return undefined;
+
+  // Inexact (float) operands numericize even under plain evaluate(); exact
+  // non-integer operands (rationals, radicals, π, ...) only numericize
+  // under .N() — and otherwise stay symbolic (no closed form).
+  const inexact =
+    (isNumber(nExpr) && !nExpr.isExact) || (isNumber(kExpr) && !kExpr.isExact);
+  if (numericApproximation || inexact) {
+    return apply2(
+      nExpr,
+      kExpr,
+      (n, k) => gamma(n + 1) / (gamma(k + 1) * gamma(n - k + 1)),
+      (n, k) =>
+        bigGamma(ce, n.add(1)).div(
+          bigGamma(ce, k.add(1)).mul(bigGamma(ce, n.sub(k).add(1)))
+        )
+    );
+  }
+
+  return undefined;
+}
 
 export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
   {
     Choose: {
       description:
-        'Binomial coefficient: number of ways to choose k items from n.',
+        'Binomial coefficient: number of ways to choose k items from n. Agrees with Binomial for all defined values.',
       complexity: 1200,
       signature: '(n:number, m:number) -> number',
       type: () => 'finite_integer',
 
-      evaluate: (ops, { engine: ce }) => {
-        const n = ops[0].re;
-        const k = ops[1].re;
-        if (!Number.isFinite(n) || !Number.isFinite(k)) return undefined;
-        if (n < 0 || k < 0 || k > n) return ce.NaN;
-        return ce.number(choose(n, k));
-      },
+      evaluate: ([n, k], { numericApproximation, engine: ce }) =>
+        evaluateBinomial(n, k, numericApproximation, ce),
     },
   },
 
@@ -57,24 +138,16 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
 
     Binomial: {
       description:
-        'Compute the binomial coefficient C(n, k) = n! / (k! (n-k)!).',
+        'Compute the binomial coefficient C(n, k) = n! / (k! (n-k)!). Agrees with Choose for all defined values.',
       wikidata: 'Q209875',
-      signature: '(integer, integer) -> integer',
+      // Was `(integer, integer) -> integer`: too strict — it turned any
+      // non-integer (rational, radical, symbolic n/k inferred as `number`)
+      // into an Error() at canonicalization time, before `evaluate` ever
+      // ran. Binomial is well-defined (via Gamma) for real n, k.
+      signature: '(number, number) -> number',
       type: () => 'finite_integer',
-      evaluate: ([nExpr, kExpr], { engine: ce }) => {
-        const n = toBigint(nExpr);
-        const k = toBigint(kExpr);
-        if (n === null || k === null) return undefined;
-        if (k < 0n || k > n) return ce.number(0);
-        if (k === 0n || k === n) return ce.number(1);
-
-        let result = 1n;
-        for (let i = 1n; i <= k; i++) {
-          result *= n - (k - i);
-          result /= i;
-        }
-        return ce.number(result);
-      },
+      evaluate: ([n, k], { numericApproximation, engine: ce }) =>
+        evaluateBinomial(n, k, numericApproximation, ce),
     },
     CartesianProduct: {
       description: 'Return the Cartesian product of input sets.',

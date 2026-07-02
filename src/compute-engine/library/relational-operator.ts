@@ -331,11 +331,17 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
     signature: '(any, any+) -> boolean',
 
+    lazy: true,
     canonical: (ops, { engine: ce }) => canonicalRelational(ce, 'Less', ops),
 
     eq: (a, b) => inequalityEq(a, b, 'Greater'),
 
-    evaluate: (ops, { engine: ce }) => {
+    evaluate: (rawOps, { engine: ce, numericApproximation }) => {
+      // This operator is `lazy` (so its `canonical` handler can see raw,
+      // direction-intact operands for chain decomposition). `lazy` also skips
+      // evaluating the arguments before this handler runs, so evaluate them
+      // here — otherwise a compound operand like `Im(𝑖)` never folds to `1`.
+      const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
       if (ops.length === 2) {
         const [lhs, rhs] = ops;
         // Try quantity comparison first
@@ -377,8 +383,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   Greater: {
     complexity: 11000,
     signature: '(any, any+) -> boolean',
-    canonical: (ops, { engine: ce }) =>
-      canonicalRelational(ce, 'Less', [...ops].reverse()),
+    lazy: true,
+    // Pass the operator through unchanged (rather than reversing to `Less`
+    // here). `canonicalRelational` needs the original direction to correctly
+    // decompose mixed-direction chains (e.g. `a ≤ b > c`); the Greater→Less
+    // normalization happens there, per chain segment.
+    canonical: (ops, { engine: ce }) => canonicalRelational(ce, 'Greater', ops),
   },
 
   NotGreater: {
@@ -392,12 +402,15 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
     signature: '(any, any+) -> boolean',
 
+    lazy: true,
     canonical: (ops, { engine: ce }) =>
       canonicalRelational(ce, 'LessEqual', ops),
 
     eq: (a, b) => inequalityEq(a, b, 'LessGreater'),
 
-    evaluate: (ops, { engine: ce }) => {
+    evaluate: (rawOps, { engine: ce, numericApproximation }) => {
+      // `lazy` skips argument evaluation (see `Less` above): evaluate here.
+      const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
       if (ops.length === 2) {
         const [lhs, rhs] = ops;
         const qcmp = quantityCompare(lhs, rhs);
@@ -440,8 +453,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
     signature: '(any, any+) -> boolean',
 
+    lazy: true,
+    // Pass the operator through unchanged (see `Greater` above): the
+    // GreaterEqual→LessEqual normalization is done per chain segment inside
+    // `canonicalRelational`.
     canonical: (args, { engine: ce }) =>
-      canonicalRelational(ce, 'LessEqual', [...args].reverse()),
+      canonicalRelational(ce, 'GreaterEqual', args),
   },
 
   NotGreaterNotEqual: {
@@ -622,22 +639,34 @@ function evaluateApproxChain(
   return ce.True;
 }
 
+// The comparison operators that participate in mixed-direction chains. These
+// are declared `lazy` so their `canonical` handler receives the *raw* operands
+// (with the written direction still intact), which is required to decompose a
+// chain like `a ≤ b > c` correctly. See `canonicalComparisonChain`.
+const CHAINABLE_COMPARISON = new Set([
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'Equal',
+]);
+
 function canonicalRelational(
   ce: ComputeEngine,
   operator: string,
   ops: ReadonlyArray<Expression>
 ): Expression {
+  // Direction-aware handling for the core comparison operators (see below).
+  if (CHAINABLE_COMPARISON.has(operator))
+    return canonicalComparisonChain(ce, operator, ops);
+
+  // Legacy path for the other relational operators (approx/precedes/…). These
+  // are not `lazy` and never flip direction, so the simple boundary-term
+  // splice below is adequate.
   ops = flatten(ops, operator);
 
   const nestedRelational: Expression[] = [];
   const newOps: Expression[] = [];
-  // Separate any nested relational operator (a mixed chain, e.g. `a ≤ b < c`,
-  // parses as `LessEqual(a, Less(b, c))` or `LessEqual(Less(a, b), c)`). The
-  // outer relation links to the nested chain through their *shared* boundary
-  // term: when the nested operand is the first element of the chain, the outer
-  // connects to its last (rightmost) operand; otherwise the outer connects to
-  // its first (leftmost) operand. (Using the last operand unconditionally
-  // dropped the middle term, e.g. `5 ≤ b < 7` → `And(5 ≤ 7, b < 7)`.)
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     if (isRelationalOperator(op.operator) && isFunction(op)) {
@@ -649,8 +678,86 @@ function canonicalRelational(
   if (nestedRelational.length === 0) return ce._fn(operator, newOps);
 
   return ce._fn('And', [ce._fn(operator, newOps), ...nestedRelational]);
+}
 
-  // if (!ops.every((op) => op.isValid))
+/**
+ * Flatten a (possibly nested) chain of comparison operators into an ordered
+ * list of `terms` and the `links` (operators) between them, in *reading*
+ * order. `terms.length === links.length + 1`.
+ *
+ * The parser nests mixed-operator chains, e.g. `a ≤ b > c` parses as
+ * `LessEqual(a, Greater(b, c))`, and same-operator chains are already n-ary,
+ * e.g. `Less(1, 2, 3)`. Because the comparison operators are `lazy`, the nested
+ * operands still carry their *original* direction here (a nested `>` is a
+ * `Greater`, not a reversed `Less`), so the chain can be reconstructed exactly
+ * as written.
+ */
+function flattenComparisonChain(
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): { terms: Expression[]; links: string[] } {
+  const terms: Expression[] = [];
+  const links: string[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    const sub =
+      isFunction(op) && CHAINABLE_COMPARISON.has(op.operator)
+        ? flattenComparisonChain(op.operator, op.ops)
+        : { terms: [op], links: [] as string[] };
+    if (i > 0) links.push(operator);
+    terms.push(...sub.terms);
+    links.push(...sub.links);
+  }
+  return { terms, links };
+}
+
+/** Build a single (n-ary) canonical comparison, normalizing the direction:
+ *  `Greater`→`Less` and `GreaterEqual`→`LessEqual` (with the terms reversed). */
+function buildComparison(
+  ce: ComputeEngine,
+  operator: string,
+  terms: ReadonlyArray<Expression>
+): Expression {
+  if (operator === 'Greater') return ce._fn('Less', [...terms].reverse());
+  if (operator === 'GreaterEqual')
+    return ce._fn('LessEqual', [...terms].reverse());
+  return ce._fn(operator, terms);
+}
+
+/**
+ * Canonicalize a chain of comparison operators.
+ *
+ * A same-operator chain stays n-ary (`1 < 2 < 3` → `Less(1, 2, 3)`). A chain
+ * that mixes operators — whether same-direction (`a ≤ b < c`) or opposite
+ * direction (`a ≤ b > c`) — is decomposed into an explicit `And` of pairwise
+ * (or n-ary same-operator) links that all share their boundary terms, e.g.
+ * `a ≤ b > c` → `And(a ≤ b, b > c)` = `And(LessEqual(a, b), Less(c, b))`.
+ */
+function canonicalComparisonChain(
+  ce: ComputeEngine,
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  const { terms: rawTerms, links } = flattenComparisonChain(operator, ops);
+  const terms = rawTerms.map((t) => t.canonical);
+
+  // Degenerate cases (fewer than two terms): nothing to chain.
+  if (links.length === 0) return buildComparison(ce, operator, terms);
+
+  // Group maximal runs of the *same* operator into n-ary segments, then `And`
+  // the segments together. Segment `i..j` (inclusive links) spans the terms
+  // `i..j+1`.
+  const segments: Expression[] = [];
+  let i = 0;
+  while (i < links.length) {
+    let j = i;
+    while (j + 1 < links.length && links[j + 1] === links[i]) j++;
+    segments.push(buildComparison(ce, links[i], terms.slice(i, j + 2)));
+    i = j + 1;
+  }
+
+  if (segments.length === 1) return segments[0];
+  return ce.function('And', segments);
 }
 
 function inequalityEq(

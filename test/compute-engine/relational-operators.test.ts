@@ -318,3 +318,52 @@ describe('Mixed chained inequalities (playground 5≤b<7)', () => {
     expect(ce.parse('3 \\le 2 \\lt 7').evaluate().json).toBe('False');
   });
 });
+
+// A chain that *flips direction* (e.g. `a ≤ b > c`) must decompose into the
+// pairwise `And` that shares the middle term `b` in each link. Previously the
+// Greater→Less normalization reversed the nested chain's operands, and the
+// canonicalizer spliced the wrong boundary term, producing wrong truth values
+// (e.g. `1 ≤ 2 > 0` — a true statement — evaluated to False).
+describe('Mixed-DIRECTION chained inequalities', () => {
+  it('a ≤ b > c → And(a ≤ b, b > c)', () => {
+    expect(ce.parse('a \\le b > c').json).toEqual([
+      'And',
+      ['LessEqual', 'a', 'b'],
+      ['Less', 'c', 'b'],
+    ]);
+  });
+
+  it('a > b < c → And(a > b, b < c)', () => {
+    expect(ce.parse('a > b < c').json).toEqual([
+      'And',
+      ['Less', 'b', 'a'],
+      ['Less', 'b', 'c'],
+    ]);
+  });
+
+  it('1 = 2 > 0 → And(1 = 2, 2 > 0)', () => {
+    expect(ce.parse('1 = 2 > 0').json).toEqual([
+      'And',
+      ['Less', 0, 2],
+      ['Equal', 1, 2],
+    ]);
+  });
+
+  it('evaluates flipped chains with the correct truth value', () => {
+    // 1 ≤ 2 > 0 is True (1 ≤ 2 and 2 > 0)
+    expect(ce.parse('1 \\le 2 > 0').evaluate().json).toBe('True');
+    // 3 ≥ 2 < 4 is True (3 ≥ 2 and 2 < 4)
+    expect(ce.parse('3 \\ge 2 < 4').evaluate().json).toBe('True');
+    // 5 > 4 < 2 is False (5 > 4 but not 4 < 2)
+    expect(ce.parse('5 > 4 < 2').evaluate().json).toBe('False');
+    // 1 = 2 > 0 is False (1 ≠ 2)
+    expect(ce.parse('1 = 2 > 0').evaluate().json).toBe('False');
+  });
+
+  it('same-direction chains keep their n-ary form', () => {
+    expect(ce.parse('1 < 2 < 3').json).toEqual(['Less', 1, 2, 3]);
+    expect(ce.parse('1 < 2 < 3').evaluate().json).toBe('True');
+    expect(ce.parse('3 < 2 < 1').evaluate().json).toBe('False');
+    expect(ce.parse('a > b > c').json).toEqual(['Less', 'c', 'b', 'a']);
+  });
+});

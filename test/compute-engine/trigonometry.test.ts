@@ -128,6 +128,102 @@ describe('Arctan2 quadrant correction (REVIEW.md B1)', () => {
   });
 });
 
+describe('Arctan2 three-valued sign discipline (P0-9 / SYMBOLIC P0-6)', () => {
+  // The evaluate handler (library/trigonometry.ts) and the simplify rule
+  // (symbolic/simplify-rules.ts) both had fail-open sign guards: a NaN operand
+  // slipped through the `isFinite === false` checks into a definite ±π/2/π
+  // branch, and the simplify rule fired the `Arctan(y/x)` fallback (only valid
+  // for x > 0) unconditionally. Both faces must now agree with Math.atan2.
+
+  // Full quadrant table: evaluate(), simplify().N(), and N() must all agree.
+  for (const [y, x] of [
+    [1, 1],
+    [1, -1],
+    [-1, -1],
+    [-1, 1],
+    [0, 1],
+    [0, -1],
+    [1, 0],
+    [-1, 0],
+    [0, 0],
+  ] as [number, number][]) {
+    const truth = Math.atan2(y, x);
+    test(`Arctan2(${y}, ${x}): evaluate / simplify().N() / N() agree with Math.atan2`, () => {
+      expect(engine.expr(['Arctan2', y, x]).evaluate().N().re).toBeCloseTo(
+        truth,
+        12
+      );
+      expect(engine.expr(['Arctan2', y, x]).simplify().N().re).toBeCloseTo(
+        truth,
+        12
+      );
+      expect(engine.expr(['Arctan2', y, x]).N().re).toBeCloseTo(truth, 12);
+    });
+  }
+
+  test('headline repro: Arctan2(1, -1).simplify() = 3π/4 (was −π/4)', () => {
+    // Fail-open fallback previously returned arctan(-1) = −π/4; the correct
+    // quadrant-II angle is 3π/4.
+    expect(engine.expr(['Arctan2', 1, -1]).simplify().N().re).toBeCloseTo(
+      (3 * Math.PI) / 4,
+      12
+    );
+  });
+
+  test('unknown-sign second argument stays symbolic under simplify', () => {
+    // Arctan2(0, x) with x of unknown sign must NOT collapse to π.
+    expect(engine.expr(['Arctan2', 0, 'x']).simplify().operator).toBe(
+      'Arctan2'
+    );
+    // Fully symbolic operands stay symbolic too.
+    expect(engine.expr(['Arctan2', 'x', 'y']).simplify().operator).toBe(
+      'Arctan2'
+    );
+  });
+
+  test('Arctan2(0, x) simplifies under a positive assumption', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.box(['Greater', 'x', 0]));
+    expect(ce.box(['Arctan2', 0, 'x']).simplify().N().re).toBeCloseTo(0, 12);
+  });
+
+  test('Arctan2(0, x) simplifies under a negative assumption', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.box(['Less', 'x', 0]));
+    expect(ce.box(['Arctan2', 0, 'x']).simplify().N().re).toBeCloseTo(
+      Math.PI,
+      12
+    );
+  });
+
+  // NaN in → NaN out, in evaluate, simplify, AND N (they previously disagreed:
+  // evaluate → −π/2 / π, N → symbolic).
+  for (const [y, x] of [
+    [NaN, 2],
+    [2, NaN],
+    [NaN, NaN],
+  ] as [number, number][]) {
+    test(`Arctan2(${y}, ${x}) → NaN in evaluate, simplify and N`, () => {
+      expect(engine.expr(['Arctan2', y, x]).evaluate().isNaN).toBe(true);
+      expect(engine.expr(['Arctan2', y, x]).simplify().isNaN).toBe(true);
+      expect(engine.expr(['Arctan2', y, x]).N().isNaN).toBe(true);
+    });
+  }
+
+  test('complex operand: evaluate and N behave identically (stay symbolic)', () => {
+    // atan2 is a real-plane function; a non-real operand has no well-defined
+    // quadrant. evaluate() previously continued analytically (0.549i) while
+    // N() silently dropped the imaginary part (0). Both must now stay symbolic.
+    const ev = engine.expr(['Arctan2', 'i', 2]).evaluate();
+    const n = engine.expr(['Arctan2', 'i', 2]).N();
+    expect(ev.operator).toBe('Arctan2');
+    expect(n.operator).toBe('Arctan2');
+    expect(engine.expr(['Arctan2', 'i', 2]).simplify().operator).toBe(
+      'Arctan2'
+    );
+  });
+});
+
 // ROADMAP B3: arctan's horizontal asymptotes, needed so improper integrals
 // of the 1/(a²+x²) family evaluate (∫₀^∞ 1/(1+x²) = arctan(∞) = π/2).
 describe('Arctan at ±∞', () => {

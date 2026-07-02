@@ -693,25 +693,73 @@ export const SIMPLIFY_RULES: Rule[] = [
   (expr): RuleStep | undefined => {
     if (!isFunction(expr, 'Arctan2')) return undefined;
     // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
+    // Mirror the evaluate handler (library/trigonometry.ts) with strict
+    // three-valued sign discipline: only act on an === true / === false sign,
+    // never collapse an undefined sign into a definite branch. When a needed
+    // sign is unknown, return undefined so the Arctan2 is left symbolic.
     const [y, x] = expr.ops;
     const ce = expr.engine;
+
+    // NaN in → NaN out.
+    if (y.isNaN === true || x.isNaN === true)
+      return { value: ce.NaN, because: 'arctan2' };
+
+    // atan2 is a real-plane function: leave non-real operands symbolic.
+    if ((isNumber(y) && y.im !== 0) || (isNumber(x) && x.im !== 0))
+      return undefined;
+
     if (y.isFinite === false && x.isFinite === false)
       return { value: ce.NaN, because: 'arctan2' };
     if (y.isSame(0) && x.isSame(0))
       return { value: ce.Zero, because: 'arctan2' };
-    if (x.isFinite === false)
-      return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
-    if (y.isFinite === false)
+    if (x.isFinite === false) {
+      if (x.isPositive === true) return { value: ce.Zero, because: 'arctan2' };
+      if (x.isNegative === true) return { value: ce.Pi, because: 'arctan2' };
+      return undefined;
+    }
+    if (y.isFinite === false) {
+      if (y.isPositive === true)
+        return { value: ce.Pi.div(2), because: 'arctan2' };
+      if (y.isNegative === true)
+        return { value: ce.Pi.div(-2), because: 'arctan2' };
+      return undefined;
+    }
+    if (y.isSame(0)) {
+      if (x.isPositive === true) return { value: ce.Zero, because: 'arctan2' };
+      if (x.isNegative === true) return { value: ce.Pi, because: 'arctan2' };
+      return undefined;
+    }
+    // x = 0 (and y ≠ 0): the angle is ±π/2
+    if (x.isSame(0)) {
+      if (y.isPositive === true)
+        return { value: ce.Pi.div(2), because: 'arctan2' };
+      if (y.isNegative === true)
+        return { value: ce.Pi.div(-2), because: 'arctan2' };
+      return undefined;
+    }
+
+    // General case: the bare Arctan(y/x) fallback is ONLY valid for x > 0.
+    //   atan2(y, x) = atan(y/x)        if x > 0
+    //               = atan(y/x) + π    if x < 0 and y ≥ 0
+    //               = atan(y/x) − π    if x < 0 and y < 0
+    // Reduce Arctan via evaluate (not simplify): evaluate folds constructible
+    // values (Arctan(1) → π/4) while keeping non-constructible exact args
+    // symbolic, matching the evaluate handler and avoiding awkward residues
+    // like `π + arctan(-1)` that .simplify() would leave.
+    if (x.isPositive === true)
       return {
-        value: y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2),
+        value: ce.function('Arctan', [y.div(x)]).evaluate(),
         because: 'arctan2',
       };
-    if (y.isSame(0))
-      return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
-    return {
-      value: ce.function('Arctan', [y.div(x)]).simplify(),
-      because: 'arctan2',
-    };
+    if (x.isNegative === true) {
+      const principal = ce.function('Arctan', [y.div(x)]).evaluate();
+      if (y.isNonNegative === true)
+        return { value: principal.add(ce.Pi), because: 'arctan2' };
+      if (y.isNegative === true)
+        return { value: principal.sub(ce.Pi), because: 'arctan2' };
+    }
+    // Sign of x (or of y, when x < 0) is indeterminate: leave as Arctan2.
+    return undefined;
   },
 
   //

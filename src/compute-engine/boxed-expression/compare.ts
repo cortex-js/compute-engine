@@ -235,6 +235,8 @@ export function cmp(
     if (!isNumber(b)) {
       // Check if b is a symbol with inequality assumptions
       if (isSymbol(b)) {
+        // A non-real (complex) number cannot be ordered against a real symbol
+        if (a.im !== 0) return undefined;
         const bounds = getInequalityBoundsFromAssumptions(a.engine, b.symbol);
         const aNum =
           typeof a.numericValue === 'number'
@@ -283,9 +285,14 @@ export function cmp(
             }
           }
 
-          // Fall back to the symbol's known numeric value
+          // Fall back to the symbol's known numeric value.
+          // Only order if the symbol's value is provably real.
           const bSymNum = b.re;
-          if (typeof bSymNum === 'number' && Number.isFinite(bSymNum)) {
+          if (
+            typeof bSymNum === 'number' &&
+            Number.isFinite(bSymNum) &&
+            b.im === 0
+          ) {
             const tol = a.engine.tolerance;
             if (Math.abs(aNum - bSymNum) <= tol) return '=';
             return aNum < bSymNum ? '<' : '>';
@@ -359,9 +366,10 @@ export function cmp(
         }
       }
 
-      // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE)
+      // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE).
+      // Only order if the symbol's value is provably real.
       const aNum = a.re;
-      if (typeof aNum === 'number' && Number.isFinite(aNum)) {
+      if (typeof aNum === 'number' && Number.isFinite(aNum) && a.im === 0) {
         const tol = a.engine.tolerance;
         if (Math.abs(aNum - b) <= tol) return '=';
         return aNum < b ? '<' : '>';
@@ -439,8 +447,10 @@ export function cmp(
     const eqResult = a.valueDefinition?.eq?.(b);
     if (eqResult === true) return '=';
 
-    // Check inequality assumptions for the symbol
-    if (isNumber(b)) {
+    // Check inequality assumptions for the symbol.
+    // Only compare against a provably real number (a complex value is unordered
+    // and its bounds relationship is indeterminate).
+    if (isNumber(b) && b.im === 0) {
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
       const bNum =
         typeof b.numericValue === 'number' ? b.numericValue : b.numericValue.re;
@@ -488,11 +498,13 @@ export function cmp(
       }
     }
 
-    // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE)
+    // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE).
+    // Only order if both sides are provably real.
     const aNum = a.re;
-    if (typeof aNum === 'number' && Number.isFinite(aNum)) {
+    if (typeof aNum === 'number' && Number.isFinite(aNum) && a.im === 0) {
       const bNum = typeof b === 'number' ? b : b.re;
-      if (typeof bNum === 'number' && Number.isFinite(bNum)) {
+      const bIm = typeof b === 'number' ? 0 : b.im;
+      if (typeof bNum === 'number' && Number.isFinite(bNum) && bIm === 0) {
         const tol = a.engine.tolerance;
         if (Math.abs(aNum - bNum) <= tol) return '=';
         return aNum < bNum ? '<' : '>';

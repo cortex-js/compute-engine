@@ -9,6 +9,7 @@ import { asRational } from './numerics';
 import { bignumPreferred, canonicalAngle, getImaginaryFactor } from './utils';
 import { apply, apply2 } from './apply';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
 function isSqrt(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
@@ -369,7 +370,12 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
         const result = Math.pow(n, e);
         if (Number.isSafeInteger(result)) return ce.number(result);
       } else if (n.isExact) {
-        return ce.number(n.pow(e));
+        // Compute the exact power with bigints (not `n.pow(e)`, whose
+        // ExactNumericValue guard floats — and rounds — a base larger than
+        // SMALL_INTEGER, e.g. `(2^127)^2`). Falls through if the result is too
+        // large to materialize (magnitude guard).
+        const folded = exactIntegerPow(a, e);
+        if (folded !== undefined) return folded;
       }
     }
   }
@@ -407,6 +413,139 @@ export function canonicalRoot(
       (a.isCanonical || a.isStructural) &&
       (typeof b === 'number' || b.isCanonical || b.isStructural),
   });
+}
+
+// Maximum number of decimal digits allowed in a *materialized* exact
+// integer/rational power. Beyond this the power is kept symbolic (an inert
+// `Power` node) instead of being computed: a multi-million-digit integer is
+// pathological to build and to serialize, and `.N()` still yields the float /
+// overflow-to-infinity. `Power(2, 1e15)` (≈ 3·10^14 digits) is well past this.
+const MAX_EXACT_POW_DIGITS = 1_000_000;
+
+/** (Rough upper bound on) the decimal digit count of an integer value. */
+function integerDigitCount(v: bigint | number): number {
+  if (typeof v === 'bigint') return (v < 0n ? -v : v).toString().length;
+  if (!Number.isFinite(v)) return Infinity;
+  const a = Math.abs(v);
+  return a < 1 ? 1 : Math.floor(Math.log10(a)) + 1;
+}
+
+/**
+ * `(a + b·i)^n` for a Gaussian-integer base (integer `a`, `b`) and integer
+ * `n ≥ 0`, computed by binary exponentiation with exact bigint component
+ * arithmetic — no `exp`/`ln` round-trip, so no float residue (`(1+i)^2 = 2i`,
+ * `(1+i)^4 = −4`, `(2+i)^3 = 2+11i`).
+ *
+ * Returns a clean complex/real number when both components fit exactly in a
+ * float (i.e. are safe integers), otherwise `undefined`: CE has no big
+ * Gaussian-integer representation, so the caller keeps the power symbolic
+ * rather than emitting a rounded float.
+ */
+function gaussianIntegerPow(
+  ce: Expression['engine'],
+  a: number,
+  b: number,
+  n: number
+): Expression | undefined {
+  // Magnitude guard: |(a+bi)^n| = (a²+b²)^(n/2). Bail before building bigints
+  // whose components could not fit a float anyway (this also bounds `n`, since
+  // for |z|² ≥ 2 the guard caps `n`, and for |z|² = 1 the components stay ±1).
+  const magLog10 = 0.5 * n * Math.log10(a * a + b * b);
+  if (!Number.isFinite(magLog10) || magLog10 > 15.9) return undefined;
+
+  let rre = 1n;
+  let rim = 0n;
+  let bre = BigInt(a);
+  let bim = BigInt(b);
+  let k = n;
+  while (k > 0) {
+    if (k % 2 === 1) {
+      const nr = rre * bre - rim * bim;
+      const ni = rre * bim + rim * bre;
+      rre = nr;
+      rim = ni;
+    }
+    k = Math.floor(k / 2);
+    if (k > 0) {
+      const nr = bre * bre - bim * bim;
+      const ni = 2n * bre * bim;
+      bre = nr;
+      bim = ni;
+    }
+  }
+
+  const MAX = BigInt(Number.MAX_SAFE_INTEGER);
+  if (rre > MAX || rre < -MAX || rim > MAX || rim < -MAX) return undefined;
+
+  // `ce.complex` normalizes a zero imaginary part back to an exact real
+  // (e.g. `(1+i)^4` → the exact integer `−4`).
+  return ce.number(ce.complex(Number(rre), Number(rim)));
+}
+
+/**
+ * `x^e` for an integer exponent `e` and an EXACT base `x`, computed exactly:
+ *  - integer / rational base → exact bigint rational power;
+ *  - Gaussian-integer base   → exact binary powering of the components;
+ *  - radical base (a/b·√c)   → `ExactNumericValue.pow` (exact for these).
+ *
+ * Returns `undefined` when the exact result would exceed the digit magnitude
+ * guard (huge power) or is not representable (e.g. a Gaussian rational from a
+ * negative Gaussian exponent) — the caller then keeps the power symbolic.
+ * Never returns a rounded / float-residue value.
+ */
+function exactIntegerPow(x: Expression, e: number): Expression | undefined {
+  const ce = x.engine;
+  if (!isNumber(x) || !Number.isSafeInteger(e)) return undefined;
+
+  //
+  // Gaussian-integer base (`a + b·i` with integer components)
+  //
+  if (x.im !== 0) {
+    // A negative exponent yields a Gaussian *rational* (e.g. (1+i)^-2 = -i/2),
+    // which CE cannot store exactly — stay symbolic instead of rounding.
+    if (e < 0) return undefined;
+    if (!Number.isSafeInteger(x.re) || !Number.isSafeInteger(x.im))
+      return undefined;
+    return gaussianIntegerPow(ce, x.re, x.im, e);
+  }
+
+  //
+  // Real exact base
+  //
+  const nv = x.numericValue;
+  const exact =
+    typeof nv === 'number' ? ce._numericValue(nv) : (nv.asExact ?? nv);
+  if (!(exact instanceof ExactNumericValue)) return undefined;
+  if (exact.isNaN || exact.isPositiveInfinity || exact.isNegativeInfinity)
+    return undefined;
+
+  const [num, den] = exact.rational;
+  const radical = exact.radical;
+
+  // Magnitude guard on the (approximate) result digit count. Include the
+  // radical so a huge exponent can't blow up the internal `radical^e`
+  // computation inside `ExactNumericValue.pow` (e.g. `Sqrt(2)^1e15`).
+  const baseDigits = Math.max(
+    integerDigitCount(num),
+    integerDigitCount(den),
+    integerDigitCount(radical)
+  );
+  if (baseDigits * Math.abs(e) > MAX_EXACT_POW_DIGITS) return undefined;
+
+  // Pure integer or rational base: exact bigint power (`bigint ** bigint`
+  // carries the sign, e.g. (−2)^3 = −8; `ce.number` normalizes the rational).
+  if (radical === 1) {
+    const absE = BigInt(Math.abs(e));
+    const numB = BigInt(num);
+    const denB = BigInt(den);
+    const [rn, rd] =
+      e >= 0 ? [numB ** absE, denB ** absE] : [denB ** absE, numB ** absE];
+    return rd === 1n ? ce.number(rn) : ce.number([rn, rd] as Rational);
+  }
+
+  // Radical base: `ExactNumericValue.pow` is exact here, and the guard above
+  // bounds the exponent so the internal computation can't explode.
+  return ce.number(exact.pow(e));
 }
 
 /**
@@ -681,8 +820,25 @@ export function pow(
   // so we evaluate a numeric expression only if exact
   //
   if (isNumber(x) && Number.isInteger(e)) {
-    // x^e: evaluate if e is an integer and x is exact
+    // x^e with an integer exponent.
+    //
+    // An EXACT base (integer/rational/radical, or a Gaussian integer) must
+    // yield an EXACT result — never a rounded bignum (`Power(2,127)`), a float
+    // (`Power(2,-2)`), or a float residue (`(1+i)^2`). That's the exactness
+    // contract: numericizing an exact argument is the `.N()` path's job.
+    const isGaussianInt =
+      x.im !== 0 && Number.isInteger(x.re) && Number.isInteger(x.im);
+    if (x.isExact || isGaussianInt) {
+      const exact = exactIntegerPow(x, e!);
+      if (exact !== undefined) return exact;
+      // The exact result is too large to materialize (magnitude guard) or is
+      // not representable (e.g. a big/negative Gaussian power): keep the power
+      // symbolic. `.N()` still produces the float / overflow-to-infinity.
+      return ce._fn('Power', [x, ce.expr(exp)]);
+    }
 
+    // An inexact base (a float, or a non-Gaussian complex) numericizes — an
+    // inexact argument is allowed to produce a float under `evaluate()`.
     const n = x.numericValue;
     if (typeof n === 'number') {
       return (

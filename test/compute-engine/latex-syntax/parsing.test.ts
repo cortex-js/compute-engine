@@ -513,35 +513,15 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('binom(n, k)', () => {
-      expect(ce.parse('binom(n, k)', { strict: false })).toMatchInlineSnapshot(`
-        [
-          "Binomial",
-          [
-            "Error",
-            ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
-          ],
-          [
-            "Error",
-            ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
-          ]
-        ]
-      `);
+      expect(ce.parse('binom(n, k)', { strict: false })).toMatchInlineSnapshot(
+        `["Binomial", "n", "k"]`
+      );
     });
 
     test('nCr(n, k)', () => {
-      expect(ce.parse('nCr(n, k)', { strict: false })).toMatchInlineSnapshot(`
-        [
-          "Binomial",
-          [
-            "Error",
-            ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
-          ],
-          [
-            "Error",
-            ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
-          ]
-        ]
-      `);
+      expect(ce.parse('nCr(n, k)', { strict: false })).toMatchInlineSnapshot(
+        `["Binomial", "n", "k"]`
+      );
     });
   });
 
@@ -593,6 +573,53 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       expect(ce.parse('log_b(x)', { strict: false })).toMatchInlineSnapshot(
         `["Log", "x", "b"]`
       );
+    });
+  });
+
+  // The superscript binds to the *applied* logarithm, like `\sin^2 x`, and a
+  // `^{-1}` superscript is the inverse function (not the reciprocal power).
+  // (This engine renders `Power(_, 2)` as `Square` and `Power(e, _)` as `Exp`.)
+  describe('Log/Ln/Exp superscript (power and inverse)', () => {
+    test('\\log_2^2 x → (log_2 x)^2', () => {
+      expect(ce.parse('\\log_2^2 x')).toMatchInlineSnapshot(
+        `["Square", ["Log", "x", 2]]`
+      );
+    });
+
+    test('\\log_2^2 8 evaluates to 9', () => {
+      expect(ce.parse('\\log_2^2 8').evaluate().json).toBe(9);
+    });
+
+    test('\\ln^2 x → (ln x)^2', () => {
+      expect(ce.parse('\\ln^2 x')).toMatchInlineSnapshot(
+        `["Square", ["Ln", "x"]]`
+      );
+    });
+
+    test('\\log^2 x → (log x)^2', () => {
+      expect(ce.parse('\\log^2 x')).toMatchInlineSnapshot(
+        `["Square", ["Log", "x"]]`
+      );
+    });
+
+    test('\\ln^{-1} x → exp(x)', () => {
+      expect(ce.parse('\\ln^{-1} x')).toMatchInlineSnapshot(`["Exp", "x"]`);
+    });
+
+    test('\\exp^2 x → (exp x)^2 = e^{2x}', () => {
+      expect(ce.parse('\\exp^2 x')).toMatchInlineSnapshot(
+        `["Exp", ["Multiply", 2, "x"]]`
+      );
+    });
+
+    test('\\lg^2 x → (log_10 x)^2', () => {
+      expect(ce.parse('\\lg^2 x')).toMatchInlineSnapshot(
+        `["Square", ["Log", "x", 10]]`
+      );
+    });
+
+    test('\\log_2 8 (no superscript) still evaluates to 3', () => {
+      expect(ce.parse('\\log_2 8').evaluate().json).toBe(3);
     });
   });
 

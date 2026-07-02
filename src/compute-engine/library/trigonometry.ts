@@ -187,24 +187,46 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(y:number, x: number) -> real',
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([y, x], { engine: ce, numericApproximation }) => {
+        // NaN in → NaN out, in BOTH the evaluate and the N() paths. A NaN
+        // operand is not finite, so without this early return it would slip
+        // through the isFinite/isPositive guards below (isPositive is
+        // undefined for NaN) and be assigned a spurious definite angle.
+        if (y.isNaN === true || x.isNaN === true) return ce.NaN;
+
+        // atan2 is a real-plane function; a non-real (complex) operand has no
+        // well-defined quadrant. Stay symbolic in BOTH paths — otherwise
+        // evaluate() would continue analytically via Arctan (e.g. 0.549i) while
+        // .N()/apply2 silently reads the real part (0), and the two disagree.
+        if ((isNumber(y) && y.im !== 0) || (isNumber(x) && x.im !== 0))
+          return undefined;
+
         if (numericApproximation)
           return apply2(y, x, Math.atan2, (a, b) => BigDecimal.atan2(a, b));
 
         // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
+        // Three-valued discipline throughout: only act on an === true / ===
+        // false sign, never on an undefined one (which stays symbolic).
         if (y.isFinite === false && x.isFinite === false) return ce.NaN;
         if (y.isSame(0) && x.isSame(0)) return ce.Zero;
-        if (x.isFinite === false) return x.isPositive ? ce.Zero : ce.Pi;
-        if (y.isFinite === false)
-          return y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
+        if (x.isFinite === false) {
+          if (x.isPositive === true) return ce.Zero;
+          if (x.isNegative === true) return ce.Pi;
+          return undefined;
+        }
+        if (y.isFinite === false) {
+          if (y.isPositive === true) return ce.Pi.div(2);
+          if (y.isNegative === true) return ce.Pi.div(-2);
+          return undefined;
+        }
         if (y.isSame(0)) {
-          if (x.isPositive) return ce.Zero;
-          if (x.isNegative) return ce.Pi;
+          if (x.isPositive === true) return ce.Zero;
+          if (x.isNegative === true) return ce.Pi;
           return undefined;
         }
         // x = 0 (and y ≠ 0): the angle is ±π/2
         if (x.isSame(0)) {
-          if (y.isPositive) return ce.Pi.div(2);
-          if (y.isNegative) return ce.Pi.div(-2);
+          if (y.isPositive === true) return ce.Pi.div(2);
+          if (y.isNegative === true) return ce.Pi.div(-2);
           return undefined;
         }
 
@@ -212,11 +234,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         //   atan2(y, x) = atan(y/x)        if x > 0
         //               = atan(y/x) + π    if x < 0 and y ≥ 0
         //               = atan(y/x) − π    if x < 0 and y < 0
-        if (x.isPositive) return ce.function('Arctan', [y.div(x)]).evaluate();
-        if (x.isNegative) {
+        if (x.isPositive === true)
+          return ce.function('Arctan', [y.div(x)]).evaluate();
+        if (x.isNegative === true) {
           const principal = ce.function('Arctan', [y.div(x)]).evaluate();
-          if (y.isNonNegative) return principal.add(ce.Pi);
-          if (y.isNegative) return principal.sub(ce.Pi);
+          if (y.isNonNegative === true) return principal.add(ce.Pi);
+          if (y.isNegative === true) return principal.sub(ce.Pi);
         }
         // Sign of x (or of y, when x < 0) is indeterminate: leave unevaluated.
         return undefined;

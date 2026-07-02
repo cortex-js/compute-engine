@@ -84,3 +84,130 @@ describe('P0-16i — Sum.evaluate() preserves exactness', () => {
     expect(Date.now() - t).toBeLessThan(5000);
   });
 });
+
+/**
+ * Regressions for the exact-integer-power P0 package (WP-2.16):
+ *  - P0-4 residual / EX-07a-large: `Power(2,127)` rounded to 21 digits.
+ *  - P0-16a  : `Power(2,-2)` numericized to a float (0.25 vs 1/4).
+ *  - P0-11   : integer powers of exact complex numbers via exp/ln → residue.
+ *  - EX-15   : `Power(2,1e15)` produced a value whose `.json` threw.
+ */
+const jsonOf = (e: any) => JSON.stringify(ce.box(e).evaluate().json);
+
+describe('exact integer powers stay exact (WP-2.16)', () => {
+  test('Power(2,127) is the exact 39-digit integer', () => {
+    // Was `1.70141183460469231732e+38` (rounded to `ce.precision` digits).
+    const expected = '170141183460469231731687303715884105728'; // 2^127
+    expect(evalStr(['Power', 2, 127])).toEqual(expected);
+    expect(jsonOf(['Power', 2, 127])).toEqual(`{"num":"${expected}"}`);
+    expect(ce.box(['Power', 2, 127]).evaluate().isInteger).toBe(true);
+  });
+
+  test('IsPrime(2^127−1) is True end-to-end (via Power)', () => {
+    // The Mersenne prime M127, reached by parsing/subtracting through Power.
+    expect(evalStr(['IsPrime', ['Subtract', ['Power', 2, 127], 1]])).toEqual(
+      '"True"'
+    );
+  });
+
+  test('(2^127)^2 = 2^254 is exact (large exact base, folded)', () => {
+    // Was rounded to 21 digits by the ExactNumericValue SMALL_INTEGER guard.
+    expect(evalStr(['Power', ce.number(2n ** 127n), 2])).toEqual(
+      (2n ** 254n).toString()
+    );
+  });
+
+  test('2^{100} parses+evaluates to the exact integer', () => {
+    expect(ce.parse('2^{100}').evaluate().toString()).toEqual(
+      '1267650600228229401496703205376'
+    );
+  });
+
+  test('Power(2,127).N() is unchanged (float approximation ≈ 1.7014e38)', () => {
+    const re = ce.box(['Power', 2, 127]).N().re;
+    expect(re / 2 ** 127 - 1).toBeCloseTo(0, 10);
+  });
+});
+
+describe('negative integer powers of exact bases are exact rationals (P0-16a)', () => {
+  test('Power(2,-2) → 1/4', () => {
+    // Was `0.25` (the Math.pow / bignum float lane).
+    expect(evalStr(['Power', 2, -2])).toEqual('1/4');
+    expect(jsonOf(['Power', 2, -2])).toEqual('["Rational",1,4]');
+    expect(ce.box(['Power', 2, -2]).evaluate().isExact).toBe(true);
+  });
+  test('Power(3,-2) → 1/9', () => {
+    expect(evalStr(['Power', 3, -2])).toEqual('1/9');
+  });
+  test('Power(-2,-3) → -1/8 (sign preserved)', () => {
+    expect(evalStr(['Power', -2, -3])).toEqual('-1/8');
+  });
+  test('Power(2/3,-2) → 9/4 (control, rational base already exact)', () => {
+    expect(evalStr(['Power', ['Rational', 2, 3], -2])).toEqual('9/4');
+  });
+});
+
+describe('integer powers of Gaussian integers are exact (P0-11)', () => {
+  test('(1+i)^2 = 2i (no float residue)', () => {
+    // Was `(-1.3566e-21 + 2i)` via the transcendental exp/ln path.
+    expect(jsonOf(['Power', ['Complex', 1, 1], 2])).toEqual('["Complex",0,2]');
+    const r = ce.box(['Power', ['Complex', 1, 1], 2]).evaluate();
+    expect(r.re).toBe(0);
+    expect(r.im).toBe(2);
+  });
+  test('(1+i)^4 = −4 (collapses to an exact real integer)', () => {
+    const r = ce.box(['Power', ['Complex', 1, 1], 4]).evaluate();
+    expect(r.re).toBe(-4);
+    expect(r.im).toBe(0);
+    expect(r.isExact).toBe(true);
+  });
+  test('(2+i)^3 = 2+11i', () => {
+    expect(jsonOf(['Power', ['Complex', 2, 1], 3])).toEqual('["Complex",2,11]');
+  });
+  test('Square(1+i) = 2i', () => {
+    expect(jsonOf(['Square', ['Complex', 1, 1]])).toEqual('["Complex",0,2]');
+  });
+  test('(1+i)^-2 stays symbolic (Gaussian rational, not representable exactly)', () => {
+    // Never a float residue under evaluate(); .N() still produces the value.
+    expect(ce.box(['Power', ['Complex', 1, 1], -2]).evaluate().operator).toEqual(
+      'Power'
+    );
+    const n = ce.box(['Power', ['Complex', 1, 1], -2]).N();
+    expect(n.re).toBe(0);
+    expect(n.im).toBeCloseTo(-0.5, 12);
+  });
+});
+
+describe('huge integer powers stay symbolic; .json never throws (EX-15)', () => {
+  test('Power(2,1e15).evaluate() stays an inert Power', () => {
+    const r = ce.box(['Power', 2, 1e15]).evaluate();
+    expect(r.operator).toEqual('Power');
+    // The crash class: serialization must not throw.
+    expect(() => JSON.stringify(r.json)).not.toThrow();
+  });
+  test('Power(2,1e15).N() overflows to infinity (unchanged)', () => {
+    expect(ce.box(['Power', 2, 1e15]).N().re).toBe(Infinity);
+  });
+  test('Power(10,1e300).evaluate() stays symbolic (no crash)', () => {
+    const r = ce.box(['Power', 10, 1e300]).evaluate();
+    expect(r.operator).toEqual('Power');
+    expect(() => JSON.stringify(r.json)).not.toThrow();
+  });
+});
+
+describe('small/fractional integer powers unchanged (controls)', () => {
+  test('Power(2,10) → 1024', () => {
+    expect(evalStr(['Power', 2, 10])).toEqual('1024');
+  });
+  test('Power(2,1/2) and Power(2,0.5) → sqrt(2)', () => {
+    expect(evalStr(['Power', 2, ['Rational', 1, 2]])).toEqual('sqrt(2)');
+    expect(evalStr(['Power', 2, 0.5])).toEqual('sqrt(2)');
+  });
+  test('inexact (float) base still numericizes: Power(2.5,3) → 15.625', () => {
+    expect(evalStr(['Power', 2.5, 3])).toEqual('15.625');
+  });
+  test('radical base integer power stays exact: (√2)^4 → 4, (√2)^5 → 4√2', () => {
+    expect(evalStr(['Power', ['Sqrt', 2], 4])).toEqual('4');
+    expect(evalStr(['Power', ['Sqrt', 2], 5])).toEqual('4sqrt(2)');
+  });
+});

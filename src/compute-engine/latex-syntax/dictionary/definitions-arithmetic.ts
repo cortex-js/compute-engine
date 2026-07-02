@@ -948,19 +948,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'function',
     symbolTrigger: 'exp',
-    parse: (parser: Parser) => {
-      const args = parser.parseArguments('implicit');
-      if (args === null) return 'Exp' as MathJsonExpression;
-      return ['Exp', ...args] as MathJsonExpression;
-    },
+    parse: (parser: Parser) => parseExp(parser),
   },
   {
     latexTrigger: '\\exp',
-    parse: (parser: Parser) => {
-      const args = parser.parseArguments('implicit');
-      if (args === null) return 'Exp' as MathJsonExpression;
-      return ['Exp', ...args] as MathJsonExpression;
-    },
+    parse: (parser: Parser) => parseExp(parser),
   },
   {
     name: 'ImaginaryUnit',
@@ -1326,9 +1318,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) =>
       '\\log_{10}' + serializer.wrapArguments(expr),
     parse: (parser: Parser) => {
+      const sup = parseFunctionSup(parser);
       const args = parser.parseArguments('implicit');
-      if (args === null) return 'Lg' as MathJsonExpression;
-      return ['Log', ...args, 10] as MathJsonExpression;
+      if (args === null)
+        return sup === null
+          ? ('Lg' as MathJsonExpression)
+          : (['Power', 'Lg', sup] as MathJsonExpression);
+      // `\lg^{-1} x` → `10^x` (inverse of base-10 log).
+      return applyFunctionSup(
+        ['Log', ...args, 10] as MathJsonExpression,
+        sup,
+        () => ['Power', 10, args[0]] as MathJsonExpression
+      );
     },
   },
   {
@@ -1779,7 +1780,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     },
     serialize: (serializer, expr) => {
       const lhs = serializer.wrap(operand(expr, 1), ADDITION_PRECEDENCE + 2);
-      const rhs = serializer.wrap(operand(expr, 2), ADDITION_PRECEDENCE + 3);
+      let rhs = serializer.wrap(operand(expr, 2), ADDITION_PRECEDENCE + 3);
+      // If the right operand serializes with a leading `-` (a `Negate` or a
+      // negative literal), wrap it in parentheses so we emit `x-(-y)` rather
+      // than `x--y`, which would otherwise re-parse as double negation of a
+      // different structure (and reads as a C-style decrement to a human).
+      if (rhs.startsWith('-')) rhs = serializer.wrapString(rhs, 'normal');
       return joinLatex([lhs, '-', rhs]);
     },
   },
@@ -2145,21 +2151,88 @@ function serializeBigOp(command: string) {
   };
 }
 
+/**
+ * Consume an optional power superscript following a function name, e.g. the
+ * `^2` in `\ln^2 x` or the `^{-1}` in `\ln^{-1} x`. Mirrors the handling in
+ * `parseTrig` (`definitions-trigonometry.ts`): the superscript binds to the
+ * *applied* function, so `\ln^2 x` reads as `(\ln x)^2`, not `\ln(x^2)`.
+ * Returns the parsed exponent, or `null` if there is no superscript.
+ */
+function parseFunctionSup(parser: Parser): MathJsonExpression | null {
+  parser.skipSpace();
+  if (!parser.match('^')) return null;
+  return parser.parseGroup() ?? parser.parseToken();
+}
+
+/** Whether a parsed superscript represents `-1` — either the literal `-1` or
+ *  the `\ln^{-1}`-style `["Negate", 1]` that `parseGroup` produces for `{-1}`. */
+function isMinusOneSup(sup: MathJsonExpression): boolean {
+  if (machineValue(sup) === -1) return true;
+  return operator(sup) === 'Negate' && machineValue(operand(sup, 1)) === 1;
+}
+
+/** Wrap an applied-function expression in a power, unless the exponent is
+ *  `-1` (an inverse function), in which case `makeInverse` supplies the
+ *  inverse form (e.g. `\ln^{-1} x` → `exp(x)`). */
+function applyFunctionSup(
+  applied: MathJsonExpression,
+  sup: MathJsonExpression | null,
+  makeInverse: () => MathJsonExpression
+): MathJsonExpression {
+  if (sup === null) return applied;
+  if (isMinusOneSup(sup)) return makeInverse();
+  return ['Power', applied, sup] as MathJsonExpression;
+}
+
+function parseExp(parser: Parser): MathJsonExpression {
+  const sup = parseFunctionSup(parser);
+  const args = parser.parseArguments('implicit');
+  if (args === null)
+    return sup === null
+      ? ('Exp' as MathJsonExpression)
+      : (['Power', 'Exp', sup] as MathJsonExpression);
+  // `\exp^{-1} x` → `\ln x` (inverse of the exponential).
+  return applyFunctionSup(['Exp', ...args] as MathJsonExpression, sup, () => [
+    'Ln',
+    args[0],
+  ] as MathJsonExpression);
+}
+
 function parseLog(command: string, parser: Parser): MathJsonExpression | null {
   let sub: MathJsonExpression | null = null;
 
   if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
 
+  // Optional power/inverse superscript, e.g. `\log_2^2 x` → `(\log_2 x)^2`,
+  // `\ln^2 x` → `(\ln x)^2`, `\ln^{-1} x` → the inverse (`exp`).
+  const sup = parseFunctionSup(parser);
+
   const args = parser.parseArguments('implicit');
 
-  if (args === null && sub === null) return [command] as MathJsonExpression;
-  if (args === null) return [command, sub] as MathJsonExpression;
+  if (args === null && sub === null)
+    return sup === null
+      ? ([command] as MathJsonExpression)
+      : (['Power', command, sup] as MathJsonExpression);
+  if (args === null)
+    return sup === null
+      ? ([command, sub] as MathJsonExpression)
+      : (['Power', [command, sub], sup] as MathJsonExpression);
 
-  if (sub === null) return [command, ...args] as MathJsonExpression;
+  // The natural log and the base-`b` log have well-defined inverses:
+  // `\ln^{-1} x` → `exp(x)`, `\log_b^{-1} x` → `b^x` (with `b` defaulting to
+  // 10, the base of a bare `\log`).
+  const inverse = (): MathJsonExpression =>
+    command === 'Ln'
+      ? (['Exp', args[0]] as MathJsonExpression)
+      : (['Power', sub ?? 10, args[0]] as MathJsonExpression);
 
-  if (sub === 10) return ['Log', args[0]] as MathJsonExpression;
-  if (sub === 2) return ['Lb', ...args] as MathJsonExpression;
-  return ['Log', args[0], sub] as MathJsonExpression;
+  let applied: MathJsonExpression;
+  if (sub === null) applied = [command, ...args] as MathJsonExpression;
+  else if (sub === 10) applied = ['Log', args[0]] as MathJsonExpression;
+  else if (sub === 2) applied = ['Lb', ...args] as MathJsonExpression;
+  else applied = ['Log', args[0], sub] as MathJsonExpression;
+
+  return applyFunctionSup(applied, sup, inverse);
 }
 
 /**

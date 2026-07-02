@@ -201,8 +201,14 @@ describe('OPERATOR prefix', () => {
       box       = ["Negate", ["Delimiter", ["InvisibleOperator", "a", "b"]]]
       canonical = ["Negate", ["Multiply", "a", "b"]]
     `));
-  test('--x // Predecrement', () =>
-    expect(check('--x')).toMatchInlineSnapshot(`["PreDecrement", "x"]`));
+  // In a mathematical context `--x` reads as double negation, not a C-style
+  // pre-decrement. (This also keeps serializer round-trips correct: e.g.
+  // `Subtract(x, Negate(y))` serializes and re-parses without meaning change.)
+  test('--x // Negate', () =>
+    expect(check('--x')).toMatchInlineSnapshot(`
+      box       = ["Negate", ["Negate", "x"]]
+      canonical = x
+    `));
   test('-(-x) // Negate', () =>
     expect(check('-(-x)')).toMatchInlineSnapshot(`
       box       = ["Negate", ["Delimiter", ["Negate", "x"]]]
@@ -618,5 +624,33 @@ describe('APPLY', () => {
     expect(latex(['Apply', ['InverseFunction', 'f']])).toMatchInlineSnapshot(
       `f^{-1}()`
     );
+  });
+});
+
+// `--`/`++` are read as repeated unary minus/plus (double negation), not as
+// C-style increment/decrement, and the serializer parenthesizes a negated
+// right operand of `Subtract` so round-trips preserve meaning.
+describe('Double negation (was C-style --/++)', () => {
+  test('x--y // Subtract of a Negate', () =>
+    expect(check('x--y')).toMatchInlineSnapshot(`
+      box       = ["Subtract", "x", ["Negate", "y"]]
+      canonical = ["Add", "x", "y"]
+    `));
+  test('x++y', () =>
+    expect(check('x++y')).toMatchInlineSnapshot(`["Add", "x", "y"]`));
+
+  test('Subtract(x, Negate(y)) serializes with parens', () =>
+    expect(
+      ce.box(['Subtract', 'x', ['Negate', 'y']], { canonical: false }).latex
+    ).toMatchInlineSnapshot(`x-(-y)`));
+
+  test('Subtract(x, Negate(y)) round-trips to the same value', () => {
+    const s = ce.box(['Subtract', 'x', ['Negate', 'y']], { canonical: false });
+    expect(ce.parse(s.latex).isSame(ce.box(['Add', 'x', 'y']))).toBe(true);
+  });
+
+  test('Negate(Negate(x)) round-trips to the same value', () => {
+    const s = ce.box(['Negate', ['Negate', 'x']], { canonical: false });
+    expect(ce.parse(s.latex).json).toBe('x');
   });
 });

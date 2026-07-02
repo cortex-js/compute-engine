@@ -82,9 +82,65 @@
   `FactorInteger`, `Mod`, and `DigitSum` could all return wrong answers on
   values they displayed correctly — e.g. `Mod(10^{21}+3, 10)` returned `0`
   instead of `3`, and `FactorInteger(10^{21}+3)` factored `10^{21}` instead.
-  The exact integer is now extracted losslessly. (Large powers written as
-  `2^{127}` can still evaluate to a rounded value before reaching these
-  functions; that remaining issue is tracked separately.)
+  The exact integer is now extracted losslessly.
+
+- **Integer powers of exact numbers are computed exactly.** `2^{127}`
+  evaluated to a value rounded to 21 significant digits (so
+  `IsPrime(2^{127}-1)` was wrong even after the fix above); it now evaluates
+  to the exact 39-digit integer. Negative integer exponents give exact
+  rationals (`2^{-2}` → `\frac14`, previously the float `0.25`), and integer
+  powers of Gaussian integers are computed exactly instead of through
+  `exp`/`ln` (`(1+i)^2` → `2i`, previously `-1.36×10^{-21} + 2i`).
+  Astronomically large powers (e.g. `2^{10^{15}}`, whose exact value has
+  ~3×10^{14} digits) now stay symbolic instead of producing a value that
+  crashed serialization — `N()` still returns the overflow.
+
+- **Complex numbers are no longer ordered against reals.** `1.5 < 2+3i`,
+  `i < 2`, and similar comparisons returned `true`/`false` by comparing only
+  the real parts; they now return `undefined` (unknown), and `Max`/`Min` with
+  a complex operand stay symbolic instead of silently absorbing or dropping
+  it (`Max(2, i)` returned `2`; `Max(i, 2)` returned `i`).
+
+- **Logarithms of complex numbers with a base are now correct.** The
+  imaginary part of `\log_b z` was not divided by `\ln b`, so
+  `evaluate()` and `N()` disagreed: `\operatorname{lb}(i)` evaluated to
+  `1.5707i` (= `\ln i`) but `N()` gave the correct `2.2662i`. Both now agree.
+
+- **`Arctan2` returns the correct quadrant under `simplify()`.**
+  `\operatorname{atan2}(1, -1)` simplified to `\arctan(-1)` = `-π/4` (the
+  true value is `3π/4`): the `arctan(y/x)` reduction fired for any `x` though
+  it is only valid for `x > 0`. It is now quadrant-corrected; operands with
+  unknown sign stay symbolic (and resolve under `assume(x > 0)` etc.), and
+  NaN operands yield NaN instead of a definite angle.
+
+- **Mixed-direction inequality chains now mean what they say.**
+  `1 \le 2 > 0` evaluated to **False** (it parsed as `1 ≤ 0 < 2`), and
+  `a > b < c` fabricated the chain `b < c < a`. Chains that mix directions or
+  operators now decompose into the explicit conjunction of their links
+  (`a \le b > c` → `a ≤ b \wedge b > c`); same-direction chains such as
+  `1 < 2 < 3` are unchanged.
+
+- **`--` is no longer parsed as a C-style decrement.** `x--y` parsed as
+  `Multiply(y, Decrement(x))` and `--x` as `PreDecrement(x)`; they now parse
+  as ordinary double negation (`x--y` → `x+y`). The serializer also
+  parenthesizes negated right operands (`x-(-y)`), so raw
+  `["Subtract", "x", ["Negate", "y"]]` no longer round-trips to a different
+  expression.
+
+- **Superscripts on `\log`, `\ln`, `\lg`, and `\exp` bind to the applied
+  function.** `\log_2^2 8` parsed as `8·(\log 2)^2` (silently — the correct
+  value is `(\log_2 8)^2 = 9`), and `\ln^2 x` produced an error expression.
+  They now parse like the trig functions: `\ln^2 x` → `(\ln x)^2`, and
+  `^{-1}` yields the inverse (`\ln^{-1} x` → `e^x`).
+
+- **`Choose` and `Binomial` now agree, and handle edge cases.**
+  `Choose(2,3)` returned `NaN` (correct: `0`), `Choose(\frac12, \frac13)`
+  threw an exception, and `Binomial(-2,3)` returned `0` (the standard
+  extension gives `-4`). Both operators now share one implementation:
+  integer cases follow the standard conventions (including negative upper
+  index), exact non-integer arguments stay symbolic under `evaluate()` and
+  numericize via the Gamma function under `N()`. `\binom{n}{k}` with
+  undeclared symbolic arguments also no longer produces an error expression.
 
 - **`Argument` (complex argument) now evaluates.** Due to an internal operator
   name mismatch, `Argument(1+i)` — and the second element of `AbsArg` —

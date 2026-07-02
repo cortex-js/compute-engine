@@ -9,7 +9,6 @@ import {
   operands,
   isEmptySequence,
   stringValue,
-  symbol,
 } from '../../../math-json/utils';
 import { MathJsonExpression, MathJsonSymbol } from '../../../math-json/types';
 import { joinLatex } from '../tokenizer';
@@ -114,50 +113,16 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     kind: 'infix',
     precedence: 700, // @todo: not in MathML
   },
-  {
-    name: 'Increment',
-    latexTrigger: ['+', '+'],
-    kind: 'postfix',
-    precedence: 880,
-    parse: (_parser: Parser, lhs: MathJsonExpression) => {
-      // If lhs is not a symbol, ignore it, i.e. "5++"
-      if (symbol(lhs) === null) return null;
-      return ['Increment', lhs] as MathJsonExpression;
-    },
-  },
-  {
-    name: 'Decrement',
-    latexTrigger: ['-', '-'],
-    kind: 'postfix',
-    precedence: 880,
-    parse: (_parser: Parser, lhs: MathJsonExpression) => {
-      // If lhs is not a symbol, ignore it, i.e. "5--"
-      if (symbol(lhs) === null) return null;
-      return ['Decrement', lhs] as MathJsonExpression;
-    },
-  },
-  {
-    name: 'PreIncrement',
-    latexTrigger: ['+', '+'],
-    kind: 'prefix',
-    precedence: 880,
-    parse: (parser, until): MathJsonExpression | null => {
-      const rhs = parser.parseExpression(until);
-      if (symbol(rhs) === null) return null;
-      return ['PreIncrement', rhs!];
-    },
-  },
-  {
-    name: 'PreDecrement',
-    latexTrigger: ['-', '-'],
-    kind: 'prefix',
-    precedence: 880,
-    parse: (parser, until): MathJsonExpression | null => {
-      const rhs = parser.parseExpression(until);
-      if (symbol(rhs) === null) return null;
-      return ['PreDecrement', rhs!];
-    },
-  },
+  // Note: the C-style `++`/`--` increment/decrement operators (`Increment`,
+  // `Decrement`, `PreIncrement`, `PreDecrement`) used to be parsed here, but in
+  // a mathematical context `--` and `++` are far more naturally read as double
+  // negation / repeated unary plus. Parsing `x--y` as `Decrement` also broke
+  // serializer round-trips: `Subtract(x, Negate(y))` serializes to `x--y`,
+  // which used to re-parse as `Multiply(y, Decrement(x))`. With these entries
+  // removed, `--` falls through to the arithmetic `-` operators, so `x--y`
+  // parses as `x-(-y)` = `x+y` and `--x` as `-(-x)` = `x`. (The `PreIncrement`
+  // / `PreDecrement` operator definitions remain in the arithmetic library for
+  // programmatic use; they simply no longer have a `++`/`--` LaTeX trigger.)
   {
     name: 'Ring', // Aka 'Composition', i.e. function composition
     latexTrigger: ['\\circ'],

@@ -1567,7 +1567,7 @@ describe('PRODUCT', () => {
     // (1-1/4)*(1-1/9)*(1-1/16) = (3/4)*(8/9)*(15/16) = 5/8 = 0.625
     expect(
       ce.parse('\\prod_{k=2}^{4}(1 - \\frac{1}{k^2})').evaluate().toString()
-    ).toMatchInlineSnapshot(`0.625`);
+    ).toMatchInlineSnapshot(`5/8`);
   });
 });
 
@@ -2057,6 +2057,53 @@ describe('Binomial/Choose simplification', () => {
       ce.expr(['Binomial', 5, 2]).evaluate().toString()
     ).toMatchInlineSnapshot(`10`);
   });
+});
+
+// Regression for WP-2.15 / CORRECTNESS_FINDINGS P0-10 (EX-06): `Choose` threw
+// or returned NaN for cases `Binomial` handled correctly (k > n, negative n),
+// and non-integer exact args (rationals, π) crashed `Choose` outright. Fix
+// unifies both operators on a single evaluate implementation.
+describe('Binomial/Choose value table (WP-2.15 / EX-06)', () => {
+  for (const op of ['Binomial', 'Choose']) {
+    describe(op, () => {
+      it(`${op}(5, 2) = 10`, () => {
+        expect(ce.expr([op, 5, 2]).evaluate().toString()).toBe('10');
+        expect(ce.expr([op, 5, 2]).N().toString()).toBe('10');
+      });
+
+      it(`${op}(2, 3) = 0  (k > n)`, () => {
+        expect(ce.expr([op, 2, 3]).evaluate().toString()).toBe('0');
+        expect(ce.expr([op, 2, 3]).N().toString()).toBe('0');
+      });
+
+      it(`${op}(0, 0) = 1`, () => {
+        expect(ce.expr([op, 0, 0]).evaluate().toString()).toBe('1');
+        expect(ce.expr([op, 0, 0]).N().toString()).toBe('1');
+      });
+
+      it(`${op}(-2, 3) = -4  (standard extension to negative n)`, () => {
+        expect(ce.expr([op, -2, 3]).evaluate().toString()).toBe('-4');
+        expect(ce.expr([op, -2, 3]).N().toString()).toBe('-4');
+      });
+
+      it(`${op}(5, -1) = 0  (k < 0)`, () => {
+        expect(ce.expr([op, 5, -1]).evaluate().toString()).toBe('0');
+        expect(ce.expr([op, 5, -1]).N().toString()).toBe('0');
+      });
+
+      it(`${op}(1/2, 2) stays symbolic under evaluate(), ≈ -0.125 under .N()`, () => {
+        const expr = ce.expr([op, ['Rational', 1, 2], 2]);
+        expect(expr.evaluate().operator).toBe(op);
+        expect(expr.N().re).toBeCloseTo(-0.125, 10);
+      });
+
+      it(`${op}(Pi, 2) never throws`, () => {
+        const expr = ce.expr([op, 'Pi', 2]);
+        expect(() => expr.evaluate()).not.toThrow();
+        expect(() => expr.N()).not.toThrow();
+      });
+    });
+  }
 });
 
 // REVIEW.md A6–A12: boxed-expression core arithmetic correctness fixes.
