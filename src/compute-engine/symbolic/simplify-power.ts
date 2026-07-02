@@ -824,15 +824,18 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
         const expB = b.op2;
 
         if (baseA?.isSame(baseB) && expA && expB) {
+          // Use symbolic Add to preserve exact forms (e.g., 1 + sqrt(2))
+          // instead of .add() which evaluates numerically
+          const sumExp = ce.function('Add', [expA, expB]);
           // Only combine if base is non-zero or sum of exponents is non-negative
           const canCombine =
             baseA.isPositive === true ||
             baseA.isNegative === true ||
-            expA.add(expB).isNonNegative === true;
+            sumExp.isNonNegative === true;
 
           if (canCombine) {
             return {
-              value: baseA.pow(expA.add(expB)),
+              value: baseA.pow(sumExp),
               because: 'x^n * x^m -> x^{n+m}',
             };
           }
@@ -846,7 +849,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
         if (canCombine) {
           return {
-            value: a.pow(b.op2.add(ce.One)),
+            value: a.pow(ce.function('Add', [b.op2, ce.One])),
             because: 'x * x^n -> x^{n+1}',
           };
         }
@@ -859,7 +862,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
         if (canCombine) {
           return {
-            value: b.pow(a.op2.add(ce.One)),
+            value: b.pow(ce.function('Add', [a.op2, ce.One])),
             because: 'x^n * x -> x^{n+1}',
           };
         }

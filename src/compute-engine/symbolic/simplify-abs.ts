@@ -13,17 +13,21 @@ import { isFunction } from '../boxed-expression/type-guards';
  * IMPORTANT: Do not call .simplify() on results to avoid infinite recursion.
  */
 
-// Odd trig functions: f(-x) = -f(x), so |f(x)| = f(|x|)
-const ODD_TRIG = new Set([
-  'Sin',
-  'Tan',
-  'Cot',
-  'Csc',
-  'Arcsin',
-  'Arctan',
-  'Arccot',
-  'Arccsc',
-]);
+// Odd trig functions for which |f(x)| = f(|x|) actually holds.
+//
+// Being odd (f(-x) = -f(x)) is necessary but NOT sufficient: the identity
+// also requires f to be sign-fixed on the positive axis (i.e. f(x) >= 0 for
+// x >= 0). Sin, Tan, Cot, and Csc are periodic and odd, but they oscillate
+// in sign on the positive axis (e.g. sin(4) < 0), so |sin(x)| != sin(|x|)
+// in general (counter-example: |sin(4)| = 0.757 but sin(|4|) = -0.757).
+// Arccot is odd, but under this engine's (0, pi) range convention it is NOT
+// sign-fixed on the positive axis for negative inputs reflected through
+// Abs (e.g. |Arccot(-2)| = 2.678 but Arccot(|-2|) = 0.464).
+//
+// Arcsin, Arctan, and Arccsc remain valid: they are odd AND non-negative for
+// non-negative arguments (within their principal branches), so |f(x)| = f(|x|)
+// holds.
+const ODD_TRIG = new Set(['Arcsin', 'Arctan', 'Arccsc']);
 
 // Odd hyperbolic functions: f(-x) = -f(x), so |f(x)| = f(|x|)
 const ODD_HYPER = new Set([

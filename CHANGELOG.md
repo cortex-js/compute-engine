@@ -61,6 +61,67 @@
   scope they are still wrapped as predicates (e.g. `\forall x, D(x)` →
   `["ForAll", "x", ["Predicate", "D", "x"]]`).
 
+- **Definite integrals with no closed-form antiderivative no longer return wrong
+  values.** When the antiderivative could not be found, `evaluate()` substituted
+  the integration bounds *into the integrand* and returned a spurious finite
+  result: `\int_{-1}^{1} \frac{\sqrt{1-x^2}}{1+x^2}\,dx` evaluated to `0` (the
+  true value is `π(√2−1) ≈ 1.3013`, and the integrand is strictly positive),
+  and adding `+ 5` to that integrand returned `10` — the hard part silently
+  vanished. Such integrals now stay symbolic under `evaluate()`; `N()` computes
+  them numerically, as before. Integrals with closed forms, symbolic bounds
+  (`\int_0^a x\,dx` → `a²/2`), and nested integrals are unaffected.
+
+- **`N()` no longer drops square roots of symbolic arguments.**
+  `N(\sqrt{y})` returned `y`, `N(\sqrt{4y})` returned `2y`, and
+  `N(y\sqrt{y})` returned `y^2`. The radical is now applied to the symbolic
+  part too: `N(\sqrt{4y})` → `2\sqrt{y}`, `N(y\sqrt{y})` → `y^{3/2}`.
+
+- **Number theory on large exact integers is now correct.** Integers longer
+  than the working precision (21 digits by default) were silently rounded when
+  operators extracted their integer value, so `IsPrime`, `IsOdd`/`IsEven`,
+  `FactorInteger`, `Mod`, and `DigitSum` could all return wrong answers on
+  values they displayed correctly — e.g. `Mod(10^{21}+3, 10)` returned `0`
+  instead of `3`, and `FactorInteger(10^{21}+3)` factored `10^{21}` instead.
+  The exact integer is now extracted losslessly. (Large powers written as
+  `2^{127}` can still evaluate to a rounded value before reaching these
+  functions; that remaining issue is tracked separately.)
+
+- **`Argument` (complex argument) now evaluates.** Due to an internal operator
+  name mismatch, `Argument(1+i)` — and the second element of `AbsArg` —
+  returned an inert, unrecognized expression. It now evaluates exactly
+  (`Argument(1+i)` → `π/4`) and numerically (`N(...)` → `0.7853…`).
+
+- **`|f(x)| → f(|x|)` is no longer applied to periodic or range-limited
+  functions.** `simplify()` rewrote `|\sin x|` to `\sin|x|` (and similarly for
+  `\tan`, `\cot`, `\csc`, and `\operatorname{arccot}`), which is incorrect —
+  e.g. `|\sin 4| = 0.757` but `\sin|4| = −0.757`. The rewrite now applies only
+  to odd functions that keep a fixed sign on the positive axis (`\sinh`,
+  `\arctan`, …). As a consequence, `\int \cot^3 x\,dx` now yields
+  `-\frac12\cot^2 x - \ln(|\sin x|)` instead of the incorrect
+  `\ln(\sin(|x|))` form.
+
+- **Multiplying a scalar by a complex literal like `1+i` no longer drops the
+  real part.** `["Multiply", 2, ["Complex", 1, 1]]` evaluated to `2i` instead
+  of `2+2i` (any complex literal with an imaginary part of exactly 1 was
+  mistaken for the imaginary unit). Parsed LaTeX like `2(1+\imaginaryI)` was
+  not affected.
+
+- **`simplify()` keeps exact exponents when combining powers.** Combining
+  same-base products folded exact irrational exponents to floats:
+  `x \cdot x^{\sqrt{2}}` simplified to `x^{2.4142…}`. It now yields
+  `x^{1+\sqrt{2}}`, and `x^{\sqrt2} \cdot x^{\sqrt3}` yields
+  `x^{\sqrt2+\sqrt3}`, matching the already-exact division direction.
+
+- **`Sum` keeps exact values.** Summing exact but non-combinable terms folded
+  the accumulator to a float: `\sum_{k=1}^{5} \sqrt{k}` evaluated to
+  `8.3823…`. It now evaluates to the exact `3+\sqrt2+\sqrt3+\sqrt5` (`N()`
+  still gives `8.3823…`), matching `Product`'s existing behavior. Purely
+  numeric sums such as `\sum_{k=1}^{100} k` → `5050` are unaffected.
+
+- **The derivative of `arcoth` has the correct sign.**
+  `D(\operatorname{arcoth}(x), x)` returned `-\frac{1}{1-x^2}`; the correct
+  derivative is `\frac{1}{1-x^2}` (at `x=2`: `−1/3`).
+
 ## 0.66.0 _2026-06-28_
 
 ### New Features

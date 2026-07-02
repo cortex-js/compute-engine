@@ -478,6 +478,42 @@ describe('IsPrime is reliable for large n (shared Miller-Rabin)', () => {
     expect(ip(2305843009213693953n)).toEqual('"False"'); // 2^61 + 1
     expect(ip(1000000000040n)).toEqual('"False"');
   });
+  // Regression for P0-4/EX-01: `asBigint` used to round any integer with more
+  // digits than `ce.precision` (21) through `bignumRe`, silently corrupting the
+  // value before the Miller-Rabin test. These values all exceed 21 digits.
+  test('integers beyond the 21-digit precision cliff are exact', () => {
+    expect(ip(2n ** 127n - 1n)).toEqual('"True"'); // M127, 39 digits (prime)
+    expect(ip(2n ** 89n - 1n)).toEqual('"True"'); // M89, 27 digits (prime)
+    expect(ip(2n ** 127n - 3n)).toEqual('"False"'); // 39-digit composite
+    expect(ip(10n ** 21n + 3n)).toEqual('"False"'); // 67 × 14925373134328358209
+    // 100000000000000000039 (2^61-ish is small); a 23-digit prime:
+    expect(ip(99999999999999999999977n)).toEqual('"True"');
+  });
+});
+
+describe('big-integer number theory is exact beyond ce.precision (P0-4)', () => {
+  const ev = (e: any[]) =>
+    ce.box(e).evaluate().toString().replace(/"/g, '');
+  const m127 = 2n ** 127n - 1n; // 39-digit Mersenne prime
+
+  test('IsOdd/IsEven of a 39-digit integer', () => {
+    expect(ev(['IsOdd', ce.number(m127)])).toEqual('True');
+    expect(ev(['IsEven', ce.number(m127)])).toEqual('False');
+  });
+  test('DigitSum of a 39-digit integer', () => {
+    // Σ digits of 170141183460469231731687303715884105727 = 154
+    expect(ev(['DigitSum', ce.number(m127)])).toEqual('154');
+  });
+  test('FactorInteger of a 22-digit composite', () => {
+    // 10^21 + 3 = 67 × 14925373134328358209 (not 2^21 · 5^21)
+    expect(ev(['FactorInteger', ['Add', ['Power', 10, 21], 3]])).toEqual(
+      '[(67, 1),(14925373134328358209, 1)]'
+    );
+  });
+  test('Mod of a 22-digit integer by a small modulus', () => {
+    expect(ev(['Mod', ['Add', ['Power', 10, 21], 3], 10])).toEqual('3');
+    expect(ev(['Mod', ce.number(123456789012345678901234n), 7])).toEqual('6');
+  });
 });
 
 describe('FromDigits', () => {

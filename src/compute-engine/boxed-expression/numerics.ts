@@ -50,6 +50,31 @@ export function asRational(expr: Expression): Rational | undefined {
   return undefined;
 }
 
+/**
+ * Extract the exact integer value of a `NumericValue`, or `null` if it does
+ * not represent an exact integer.
+ *
+ * This reads the exact underlying representation directly — the integer
+ * numerator of an `ExactNumericValue`, or the integer-valued `BigDecimal` of a
+ * `BigNumericValue` (via its exact significand) — and never round-trips through
+ * `bignumRe`, which is rendered at the engine's working precision and would
+ * silently round any integer with more digits than `ce.precision` (corrupting
+ * large-integer number theory: `IsPrime`, `FactorInteger`, `Mod`, …).
+ */
+function exactIntegerValue(num: NumericValue): bigint | null {
+  if (num.im !== 0) return null;
+  const exact = num.asExact;
+  if (!(exact instanceof ExactNumericValue)) return null;
+  // A value of the form a/b·√c is an integer only when c = 1 (no radical).
+  if (exact.radical !== 1) return null;
+  const [n, d] = exact.rational;
+  const bn = typeof n === 'bigint' ? n : BigInt(n);
+  const bd = typeof d === 'bigint' ? d : BigInt(d);
+  if (bd === BigInt(0)) return null;
+  if (bn % bd !== BigInt(0)) return null; // a non-integer rational
+  return bn / bd;
+}
+
 export function asBigint(
   x: Complex | BigDecimal | ExpressionInput | undefined
 ): bigint | null {
@@ -67,11 +92,13 @@ export function asBigint(
       return null;
     }
 
+    // Extract the exact integer without a precision-limited round-trip.
+    const exact = exactIntegerValue(num);
+    if (exact !== null) return exact;
+
     if (num.im !== 0) return null;
 
-    const n = num.bignumRe;
-    if (n?.isInteger()) return bigint(n);
-
+    // Not an exact integer: only accept a genuine integer-valued float.
     if (!Number.isInteger(num.re)) return null;
 
     return BigInt(num.re);
@@ -177,6 +204,11 @@ export function toBigint(expr: Expression | undefined): bigint | null {
   const num = expr.numericValue;
 
   if (typeof num === 'number') return BigInt(Math.round(num));
+
+  // Prefer an exact extraction for exact integers to avoid the
+  // precision-limited `bignumRe` round-trip (see `asBigint`).
+  const exact = exactIntegerValue(num);
+  if (exact !== null) return exact;
 
   const n = num.bignumRe ?? num.re;
   if (typeof n === 'number') return BigInt(Math.round(n));

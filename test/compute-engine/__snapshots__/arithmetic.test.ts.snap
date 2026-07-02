@@ -636,7 +636,7 @@ simplify  = (2 + 2.2i)
 
 exports[`MULTIPLY 2x(1+i) 1`] = `
 box       = ["Multiply", 2, ["Complex", 1, 1]]
-canonical = ["Complex", 0, 2]
+simplify  = (2 + 2i)
 `;
 
 exports[`MULTIPLY 2x(1.1+1.1i) 1`] = `
@@ -646,7 +646,7 @@ simplify  = (2.2 + 2.2i)
 
 exports[`MULTIPLY 2x(1.1+i) 1`] = `
 box       = ["Multiply", 2, ["Complex", 1.1, 1]]
-canonical = ["Complex", 0, 2]
+simplify  = (2.2 + 2i)
 `;
 
 exports[`MULTIPLY 2x(1.1i) 1`] = `
@@ -1062,8 +1062,8 @@ exports[`SQRT √(4x) 1`] = `
 box       = ["Sqrt", ["Multiply", 4, "x"]]
 eval-auto = sqrt(4x)
 eval-mach = sqrt(4x)
-N-auto    = 2x
-N-mach    = 2x
+N-auto    = 2sqrt(x)
+N-mach    = 2sqrt(x)
 `;
 
 exports[`SQRT √(5/7) 1`] = `

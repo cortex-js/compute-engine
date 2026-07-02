@@ -349,7 +349,7 @@ describe('MULTIPLY', () => {
     ).toMatchSnapshot());
 
   test(`2x(1+i)`, () =>
-    expect(checkJson(['Multiply', 2, ['Complex', 1, 1]])).toMatchSnapshot()); // @fixme should be NaN for mach, big
+    expect(checkJson(['Multiply', 2, ['Complex', 1, 1]])).toMatchSnapshot());
 
   test(`2x(1.1+1.1i)`, () =>
     expect(
@@ -363,6 +363,29 @@ describe('MULTIPLY', () => {
     expect(checkJson(['Multiply', 2, ['Complex', 1.1, 1]])).toMatchSnapshot());
   test(`2x(1+1.1i)`, () =>
     expect(checkJson(['Multiply', 2, ['Complex', 1, 1.1]])).toMatchSnapshot());
+
+  // Regression: a complex literal with im === 1 was treated as "the
+  // imaginary unit" without also requiring re === 0, so multiplying a
+  // number by a complex literal whose imaginary part is 1 silently
+  // dropped the real part (e.g. 2·(1+i) became 2i instead of 2+2i).
+  test(`Multiplying by a complex literal with im === 1 preserves the real part`, () => {
+    expect(ce.expr(['Multiply', 2, ['Complex', 1, 1]]).evaluate().toString()).toBe(
+      '(2 + 2i)'
+    );
+    expect(ce.expr(['Multiply', 5, ['Complex', 2, 1]]).evaluate().toString()).toBe(
+      '(10 + 5i)'
+    );
+    expect(
+      ce.expr(['Multiply', 2, ['Complex', 1.1, 1]]).evaluate().toString()
+    ).toBe('(2.2 + 2i)');
+    // Controls: still correct
+    expect(ce.expr(['Multiply', 2, ['Complex', 0, 1]]).evaluate().toString()).toBe(
+      '2i'
+    );
+    expect(ce.expr(['Multiply', 2, ['Complex', 1, 2]]).evaluate().toString()).toBe(
+      '(2 + 4i)'
+    );
+  });
 
   test(`2x(2/3)`, () =>
     expect(checkJson(['Multiply', 2, ['Rational', 2, 3]])).toMatchSnapshot());

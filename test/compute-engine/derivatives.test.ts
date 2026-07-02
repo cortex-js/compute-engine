@@ -237,10 +237,16 @@ describe('Inverse hyperbolic derivatives', () => {
     );
   });
 
-  it('d/dx arcoth(x) = -1/(1-x^2)', () => {
+  it('d/dx arcoth(x) = 1/(1-x^2)', () => {
     expect(D('\\arcoth(x)', 'x').evaluate().toString()).toMatchInlineSnapshot(
-      `-1 / (1 - x^2)`
+      `1 / (1 - x^2)`
     );
+  });
+
+  it('d/dx arcoth(x) at x=2 evaluates to -1/3', () => {
+    // mpmath-confirmed: d/dx arcoth(x) = 1/(1-x^2), so at x=2 the value is -1/3.
+    const result = D('\\arcoth(x)', 'x').evaluate();
+    expect(result.subs({ x: 2 }).N().re).toBeCloseTo(-1 / 3, 8);
   });
 
   it('d/dx arsech(x) = -1/(x*sqrt(1-x^2))', () => {

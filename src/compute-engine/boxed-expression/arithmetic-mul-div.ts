@@ -1061,7 +1061,7 @@ export function canonicalMultiply(
             i++;
             continue;
           }
-        } else if (nextNv.im === 1) {
+        } else if (nextNv.re === 0 && nextNv.im === 1) {
           // "Next" is an imaginary unit. Is it preceded by a real number?
           const nv = x.numericValue;
           if (typeof nv === 'number') {

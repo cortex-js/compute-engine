@@ -934,8 +934,8 @@ describe('COMMUTATIVE ORDER', () => {
       simplify  = -45/2 * pi * x * z * y^(3/2)
       eval-auto = -45/2 * pi * x * z * y^(3/2)
       eval-mach = -45/2 * pi * x * z * y^(3/2)
-      N-auto    = -70.6858347057703478654 * x * z * y^2
-      N-mach    = -70.68583470577035 * x * z * y^2
+      N-auto    = -70.6858347057703478654 * x * z * y^(3/2)
+      N-mach    = -70.68583470577035 * x * z * y^(3/2)
     `);
   });
 

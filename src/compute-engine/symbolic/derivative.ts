@@ -116,7 +116,8 @@ const DERIVATIVES_TABLE = {
       ['Multiply', ['Abs', '_'], ['Sqrt', ['Add', 1, ['Power', '_', 2]]]],
     ],
   ],
-  Arcoth: ['Negate', ['Power', ['Subtract', 1, ['Power', '_', 2]], -1]],
+  // d/dx arcoth(x) = 1 / (1 - x^2), same formula as Artanh on |x| > 1
+  Arcoth: ['Power', ['Subtract', 1, ['Power', '_', 2]], -1],
   // Exp: ['Exp', '_'],   // Gets canonicalized to Power
   Ln: ['Divide', 1, '_'],
   Log: ['Power', ['Multiply', '_', ['Ln', '10']], -1],

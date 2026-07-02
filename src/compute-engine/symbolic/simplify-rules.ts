@@ -965,8 +965,10 @@ export const SIMPLIFY_RULES: Rule[] = [
           hasCombinations = true;
         } else {
           // Check if sum of exponents is positive (safe even if base might be 0)
+          // Use symbolic Add to preserve exact forms (e.g., 1 + sqrt(2))
+          // instead of .add() which evaluates numerically
           const exponents = group.terms.map((t) => t.exp);
-          const summedExp = exponents.reduce((a, b) => a.add(b));
+          const summedExp = ce.function('Add', exponents);
           if (summedExp.isPositive === true) {
             hasCombinations = true;
           } else {
@@ -991,8 +993,10 @@ export const SIMPLIFY_RULES: Rule[] = [
         resultTerms.push(group.terms[0].term);
       } else {
         // Multiple terms with same base - combine exponents
+        // Use symbolic Add to preserve exact forms (e.g., 1 + sqrt(2))
+        // instead of .add() which evaluates numerically
         const exponents = group.terms.map((t) => t.exp);
-        const summedExp = exponents.reduce((a, b) => a.add(b));
+        const summedExp = ce.function('Add', exponents);
 
         if (summedExp.isSame(0)) {
           resultTerms.push(ce.One);

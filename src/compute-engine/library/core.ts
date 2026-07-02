@@ -786,6 +786,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // EvaluateAt(F, a, b) = F(b) - F(a); it is how a definite integral applies
       // its limits. See ../latex-syntax/dictionary/README.md (integral subsystem).
       evaluate: ([f, lower, upper], { engine: ce }) => {
+        // Defense in depth (see CORRECTNESS_FINDINGS P0-1): never beta-reduce
+        // a function whose body still contains an inert `Integrate` (an
+        // unresolved antiderivative). Substituting a bound for the parameter
+        // would capture the integration variable and collapse the integral to
+        // a wrong finite value. Keep the `EvaluateAt` form symbolic instead.
+        // The definite-integral evaluator no longer produces such a form, but
+        // any other caller is protected here too.
+        if (f.has('Integrate'))
+          return upper === undefined
+            ? ce._fn('EvaluateAt', [f, lower])
+            : ce._fn('EvaluateAt', [f, lower, upper]);
+
         if (upper === undefined) {
           //
           // f|_a

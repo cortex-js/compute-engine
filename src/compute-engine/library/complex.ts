@@ -92,12 +92,17 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // Sign from assumed bounds on `arg:op` (design §5.1b); values are
       // handled by `evaluate`
       sgn: ([op], { engine: ce }) => signFromAssumedPart(ce, op, 'arg'),
-      evaluate: (ops, { engine: ce }) => {
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
         if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
-        if (typeof op === 'number') return op >= 0 ? ce.Zero : ce.Pi;
-        if (op.im === 0) return op.re >= 0 ? ce.Zero : ce.Pi;
-        return ce.function('ArcTan2', [op.im, op.re]).evaluate();
+        if (typeof op === 'number' || op.im === 0) {
+          const isNonNegative = typeof op === 'number' ? op >= 0 : op.re >= 0;
+          const result = isNonNegative ? ce.Zero : ce.Pi;
+          return numericApproximation ? result.N() : result;
+        }
+        return ce
+          .function('Arctan2', [op.im, op.re])
+          .evaluate({ numericApproximation });
       },
     },
 
@@ -108,11 +113,11 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> tuple<real, real>',
-      evaluate: (ops, { engine: ce }) => {
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
         if (!isNumber(ops[0])) return undefined;
         return ce.tuple(
-          ce.function('Abs', ops).evaluate(),
-          ce.function('Argument', ops).evaluate()
+          ce.function('Abs', ops).evaluate({ numericApproximation }),
+          ce.function('Argument', ops).evaluate({ numericApproximation })
         );
       },
     },

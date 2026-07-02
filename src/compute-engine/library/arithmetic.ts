@@ -997,15 +997,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         return undefined;
       },
-      evaluate: ([a, b]) =>
-        apply2(
+      evaluate: ([a, b], { engine: ce }) => {
+        // Exact-integer fast path for a non-negative dividend and a positive
+        // modulus (where modulo and remainder coincide, so both `apply2` lanes
+        // agree). This avoids the bignum float lane, which extracts operands
+        // via `bignumRe` and rounds integers longer than `ce.precision` digits
+        // (e.g. Mod(10^21+3, 10) → 0 instead of 3).
+        if (a.isInteger && b.isInteger && a.isNonNegative && b.isPositive) {
+          const ba = asBigint(a);
+          const bb = asBigint(b);
+          if (ba !== null && bb !== null && bb !== BigInt(0))
+            return ce.number(ba % bb);
+        }
+        return apply2(
           a,
           b,
           // In JavaScript, the % is remainder, not modulo
           // so adapt it to return a modulo
           (a, b) => ((a % b) + b) % b,
           (a, b) => a.mod(b)
-        ),
+        );
+      },
     },
 
     Multiply: {
@@ -1470,8 +1482,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (!numericApproximation) return x.sqrt();
 
         const [c, rest] = x.toNumericValue();
-        if (rest.isSame(1)) return engine.number(c.sqrt().N());
-        return engine.number(c.sqrt().N()).mul(rest);
+        const cSqrt = engine.number(c.sqrt().N());
+        if (rest.isSame(1)) return cSqrt;
+        // √(c·rest) = √c · √rest. The square root must be applied to the
+        // symbolic part too — returning `rest` un-rooted dropped the radical
+        // (e.g. √(4y) → 2y instead of 2√y, and Sqrt(y).N() → y instead of √y).
+        return cSqrt.mul(rest.sqrt());
       },
       // evalDomain: Square root of a prime is irrational
       // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
@@ -2080,7 +2096,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (first.isFiniteCollection !== true) return undefined;
           const result = run(
             reduceCollection(first, engine.Zero, (acc, x) =>
-              acc.add(x.evaluate({ numericApproximation }))
+              sumAccumulate(acc, x.evaluate({ numericApproximation }), numericApproximation)
             ),
             engine._timeRemaining
           );
@@ -2093,7 +2109,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             first,
             rest,
             (acc: Expression, x) =>
-              acc.add(x.evaluate({ numericApproximation })),
+              sumAccumulate(acc, x.evaluate({ numericApproximation }), numericApproximation),
             engine.Zero
           ),
           engine._timeRemaining
@@ -2113,7 +2129,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (first.isFiniteCollection !== true) return undefined;
           const result = await runAsync(
             reduceCollection(first, engine.Zero, (acc, x) =>
-              acc.add(x.evaluate({ numericApproximation }))
+              sumAccumulate(acc, x.evaluate({ numericApproximation }), numericApproximation)
             ),
             engine._timeRemaining,
             signal
@@ -2126,7 +2142,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             first,
             rest,
             (acc: Expression, x) =>
-              acc.add(x.evaluate({ numericApproximation })),
+              sumAccumulate(acc, x.evaluate({ numericApproximation }), numericApproximation),
             engine.Zero
           ),
           engine._timeRemaining,
@@ -2138,6 +2154,40 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+/** Accumulate one term of a `Sum` without the `.add()` float-folding pitfall.
+ *
+ * The `.add()` **method** folds two exact-but-non-combinable number literals
+ * (e.g. `1 + √2`, `2 + √3`) into a machine float. For `Sum().evaluate()` we
+ * want to preserve exactness, so when both operands are exact literals whose
+ * sum is *not* exact we build a symbolic `Add` instead. A canonical `Add` still
+ * folds combinable exact operands (integers, rationals, like radicals), so a
+ * numeric sum such as `Sum(k, 1..n)` keeps the accumulator to a single literal
+ * (O(1) memory) while `Sum(√k, 1..5)` stays exact (`3 + √2 + √3 + √5`).
+ *
+ * Under `numericApproximation` (i.e. `.N()`), folding to a float is the desired
+ * behavior and no symbolic accumulation is done.
+ */
+function sumAccumulate(
+  acc: Expression,
+  term: Expression,
+  numericApproximation: boolean | undefined
+): Expression {
+  const sum = acc.add(term);
+  if (numericApproximation) return sum;
+  // Only two exact number literals can be silently floated by `.add()`. Once
+  // `acc` is a symbolic `Add`, `.add()` already keeps the result symbolic.
+  if (
+    isNumber(acc) &&
+    acc.isExact &&
+    isNumber(term) &&
+    term.isExact &&
+    isNumber(sum) &&
+    !sum.isExact
+  )
+    return acc.engine.function('Add', [acc, term]);
+  return sum;
+}
 
 /** Generator-based reducer over a finite collection. Yields between
  * iterations so callers can wrap it with `run`/`runAsync` for timeout

@@ -685,20 +685,37 @@ describe('Rules: Even Functions and Absolute Value', () => {
 });
 
 describe('Rules: Odd Functions and Absolute Value', () => {
-  test('|sin(x)| = sin(|x|)', () =>
-    checkSimplify('|\\sin(x)|', '\\sin(|x|)'));
-  test('|tan(x)| = tan(|x|)', () =>
-    checkSimplify('|\\tan(x)|', '\\tan(|x|)'));
-  test('|cot(x)| = cot(|x|)', () =>
-    checkSimplify('|\\cot(x)|', '\\cot(|x|)'));
-  test('|csc(x)| = csc(|x|)', () =>
-    checkSimplify('|\\csc(x)|', '\\csc(|x|)'));
+  // Sin, Tan, Cot, and Csc are odd but periodic: they are NOT sign-fixed on
+  // the positive axis (e.g. sin(4) < 0), so |f(x)| != f(|x|) in general.
+  // Counter-example: |sin(4)| = 0.757 but sin(|4|) = sin(4) = -0.757.
+  // These must stay unchanged under simplify.
+  test('|sin(x)| stays |sin(x)| (sin is periodic, not sign-fixed)', () =>
+    checkSimplify('|\\sin(x)|', '|\\sin(x)|'));
+  test('|tan(x)| stays |tan(x)| (tan is periodic, not sign-fixed)', () =>
+    checkSimplify('|\\tan(x)|', '|\\tan(x)|'));
+  test('|cot(x)| stays |cot(x)| (cot is periodic, not sign-fixed)', () =>
+    checkSimplify('|\\cot(x)|', '|\\cot(x)|'));
+  test('|csc(x)| stays |csc(x)| (csc is periodic, not sign-fixed)', () =>
+    checkSimplify('|\\csc(x)|', '|\\csc(x)|'));
+  test('|sin(4)| = sin(4) numerically (not sin(|4|))', () => {
+    const lhs = ce.parse('|\\sin(4)|').simplify().N();
+    const rhs = ce.parse('|\\sin(4)|').N();
+    expect(lhs.re).toBeCloseTo(rhs.re, 10);
+    expect(lhs.re).toBeCloseTo(0.7568024953, 8);
+  });
   test('|arcsin(x)| = arcsin(|x|)', () =>
     checkSimplify('|\\arcsin(x)|', '\\arcsin(|x|)'));
   test('|arctan(x)| = arctan(|x|)', () =>
     checkSimplify('|\\arctan(x)|', '\\arctan(|x|)'));
-  test('|arcctg(x)| = arcctg(|x|)', () =>
-    checkSimplify('|\\arcctg(x)|', '\\arcctg(|x|)'));
+  // Arccot is odd, but under this engine's (0, pi) range convention it is
+  // NOT sign-fixed on the positive axis when reflected through Abs.
+  // Counter-example: |Arccot(-2)| ~= 2.678 but Arccot(|-2|) = Arccot(2) ~= 0.464.
+  test('|arcctg(x)| stays |arcctg(x)| (arccot range is (0,pi), not sign-fixed)', () =>
+    checkSimplify('|\\arcctg(x)|', '|\\arcctg(x)|'));
+  test('|arcctg(-2)| = 2.678... numerically (not arcctg(2))', () => {
+    const lhs = ce.parse('|\\arcctg(-2)|').simplify().N();
+    expect(lhs.re).toBeCloseTo(2.6779450446, 8);
+  });
   test('|arccsc(x)| = arccsc(|x|)', () =>
     checkSimplify('|\\arccsc(x)|', '\\arccsc(|x|)'));
   test('|sinh(x)| = sinh(|x|)', () =>

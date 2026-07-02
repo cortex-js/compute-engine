@@ -827,7 +827,7 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
 
   test('∫cot³x dx', () => {
     expect(evaluate('\\int \\cot^3 x dx')).toMatchInlineSnapshot(
-      `-1/2 * cot(x)^2 - ln(sin(|x|))`
+      `-1/2 * cot(x)^2 - ln(|sin(x)|)`
     );
     checkDeriv('\\cot^3 x', '-\\frac12\\cot^2 x - \\ln|\\sin x|');
   });
@@ -1048,40 +1048,27 @@ describe('DEFINITE INTEGRATION', () => {
     ));
 
   test('unknown integrand with symbolic bounds stays symbolic', () =>
-    expect(
-      engine.parse('\\int_a^b f(x)\\mathrm{d}x').evaluate().json
-    ).toMatchInlineSnapshot(`
+    expect(engine.parse('\\int_a^b f(x)\\mathrm{d}x').evaluate().json)
+      .toMatchInlineSnapshot(`
       [
-        EvaluateAt,
+        Integrate,
         [
           Function,
           [
             Block,
             [
-              Integrate,
-              [
-                Function,
-                [
-                  Block,
-                  [
-                    f,
-                    x,
-                  ],
-                ],
-                x,
-              ],
-              [
-                Limits,
-                x,
-                Nothing,
-                Nothing,
-              ],
+              f,
+              x,
             ],
           ],
           x,
         ],
-        a,
-        b,
+        [
+          Limits,
+          x,
+          a,
+          b,
+        ],
       ]
     `));
 
@@ -1108,6 +1095,55 @@ describe('DEFINITE INTEGRATION', () => {
     expect(evaluate('\\int_0^1 \\frac{1}{x^2+1} dx')).toMatchInlineSnapshot(
       `1/4 * pi`
     ));
+});
+
+// Regression for CORRECTNESS_FINDINGS P0-1: when no antiderivative can be
+// found, `evaluate()` must keep the definite integral inert (symbolic) rather
+// than wrapping the inert `Integrate` in `EvaluateAt`. Beta-reducing the
+// integrand at the bounds used to capture the integration variable and
+// collapse the integral to a WRONG finite value (0 / 10 / NaN below), while
+// `.N()` (quadrature) stays correct.
+describe('UNINTEGRABLE DEFINITE INTEGRALS STAY SYMBOLIC (P0-1)', () => {
+  test('∫₋₁¹ √(1−x²)/(1+x²) dx stays symbolic (was 0)', () => {
+    const F = engine
+      .parse('\\int_{-1}^1 \\frac{\\sqrt{1-x^2}}{1+x^2} dx')
+      .evaluate();
+    expect(F.has('Integrate')).toBe(true); // inert, NOT the wrong value 0
+    expect(F.N().op1.re).toBeCloseTo(1.3012838, 1); // π(√2−1), via quadrature
+  });
+
+  test('∫₋₁¹ (√(1−x²)/(1+x²) + 5) dx stays symbolic (was 10)', () => {
+    const F = engine
+      .parse('\\int_{-1}^1 \\left(\\frac{\\sqrt{1-x^2}}{1+x^2} + 5\\right) dx')
+      .evaluate();
+    // The integrable `+5` term must NOT be silently dropped.
+    expect(F.has('Integrate')).toBe(true);
+    expect(F.N().op1.re).toBeCloseTo(11.3012838, 1);
+  });
+
+  test('∫₀¹ (1/ln t + 1/(1−t) − ln ln(1/t)) dt stays symbolic (was NaN)', () => {
+    const F = engine
+      .parse(
+        '\\int_0^1 \\left(\\frac{1}{\\ln t} + \\frac{1}{1-t} - \\ln\\ln\\frac{1}{t}\\right) dt'
+      )
+      .evaluate();
+    expect(F.has('Integrate')).toBe(true);
+    expect(F.N().op1.re).toBeCloseTo(1.1544313, 1); // 2·γ (Euler–Mascheroni)
+  });
+
+  // Controls: the found-antiderivative path (including symbolic bounds added
+  // in commit 9b818ec8) must keep producing exact closed forms.
+  test('control: ∫₀¹ x² dx = 1/3 (exact)', () =>
+    expect(evaluate('\\int_0^1 x^2 dx')).toBe('1/3'));
+
+  test('control: ∫₀^π sin x dx = 2 (exact)', () =>
+    expect(evaluate('\\int_0^{\\pi} \\sin x dx')).toBe('2'));
+
+  test('control: ∫₀^a x dx = a²/2 (symbolic bounds, exact)', () =>
+    expect(evaluate('\\int_0^a x dx')).toBe('1/2 * a^2'));
+
+  test('control: nested ∫₁²∫₃⁴ x·y dx dy = 21/4 (exact)', () =>
+    expect(evaluate('\\int_1^2\\int_3^4 x y \\, dx \\, dy')).toBe('21/4'));
 });
 
 describe('IMPROPER INTEGRATION (ROADMAP B3)', () => {

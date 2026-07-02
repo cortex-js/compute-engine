@@ -411,23 +411,35 @@ volumes
           if (!antideriv || antideriv.operator === 'Integrate')
             antideriv = antiderivative(expr, variable);
 
-          if (antideriv.operator !== 'Integrate') {
-            const fAntideriv = antideriv; // ce.expr(['Function', antideriv.op1, variable]);
-            if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
-              expr = fAntideriv;
-            } else {
-              isIndefinite = false;
-              const F = ce.expr(['Function', antideriv, variable]);
-              expr = ce.expr(['EvaluateAt', F, lower, upper]);
-            }
+          if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
+            // Indefinite integral: keep the antiderivative, whether it was
+            // resolved (a closed form) or left inert (an `Integrate` node, or
+            // an `Add` such as `5x + Integrate(g, x)` when only some terms
+            // integrate).
+            expr = antideriv;
+          } else if (antideriv.has('Integrate')) {
+            // The antiderivative could NOT be fully found — the result is
+            // either an inert `Integrate` (e.g. an unknown integrand, or
+            // `√(1−x²)/(1+x²)`) or an `Add` that still contains one (e.g.
+            // `∫ (g(x) + 5) dx → 5x + Integrate(g, x)`). Keep the definite
+            // integral inert; do NOT wrap it in `EvaluateAt`. Beta-reducing
+            // the integrand at the bounds would capture the integration
+            // variable and silently collapse the integral to a wrong finite
+            // value (∫₋₁¹ √(1−x²)/(1+x²) dx → 0, the `+5` case → 10, etc.).
+            // The `.N()` path (NIntegrate quadrature) still gives the value.
+            // See CORRECTNESS_FINDINGS P0-1.
+            isIndefinite = false;
+            expr = ce.function('Integrate', [
+              expr,
+              ce.function('Limits', [ce.symbol(variable), lower, upper]),
+            ]);
           } else {
-            if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
-              expr = antideriv;
-            } else {
-              isIndefinite = false;
-              const F = ce.expr(['Function', antideriv, variable]);
-              expr = ce.expr(['EvaluateAt', F, lower, upper]);
-            }
+            // The antiderivative was found in closed form. Apply the bounds
+            // via `EvaluateAt`, which also supports symbolic bounds
+            // (∫₀^a x dx → a²/2; see commit 9b818ec8).
+            isIndefinite = false;
+            const F = ce.expr(['Function', antideriv, variable]);
+            expr = ce.expr(['EvaluateAt', F, lower, upper]);
           }
         }
         if (expr.operator !== 'Integrate') {
