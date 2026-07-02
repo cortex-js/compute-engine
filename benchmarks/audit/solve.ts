@@ -23,8 +23,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ComputeEngine } from '../../src/compute-engine.ts';
-import { loadIdentities } from '../../src/identities.ts';
+// Import the MINIFIED production bundles, not `src/`, so live `console.assert`
+// (~2× overhead on the symbolic engine) is stripped and CE timings reflect
+// shipped code. Requires `npm run build production` first. See
+// PERFORMANCE_FINDINGS.md P0-2.
+import { ComputeEngine } from '../../dist/compute-engine.min.esm.js';
+import { loadIdentities } from '../../dist/identities.min.esm.js';
 import { mathJsonToWL } from '../runners/mathjson-to-wl.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -195,6 +199,11 @@ const tally = (sel: (r: (typeof rows)[number]) => Verdict, pred: (c: Case) => bo
 
 const md: string[] = [];
 md.push('# Univariate Equation-Solving Benchmark', '');
+md.push(
+  '_Runner: **minified production bundles** (`dist/*.min.esm.js`, `console.assert` stripped) — CE times reflect ' +
+    'shipped code. Rebuild with `npm run build production` before running._',
+  '',
+);
 md.push(
   'Adapted from SymPy’s `test_solveset.py` (univariate cases). Each returned ' +
     'root is graded **sound** by substitution (`|residual| < 1e-6`); `finite` ' +

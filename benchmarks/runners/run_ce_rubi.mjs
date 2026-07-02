@@ -1,22 +1,32 @@
-// Compute Engine + Rubi + Fungrim benchmark runner (minified bundles).
+// Compute Engine WARM single-process batch runner (minified bundles).
 //
-//   node run_ce_rubi.mjs
+//   node run_ce_rubi.mjs                 # packs ON  → tool "ce-rubi"  (CE+R/F)
+//   CE_LOAD_PACKS=0 node run_ce_rubi.mjs # packs OFF → tool "ce-warm" (base CE)
 //
-// Runs ALL cases in a single process and prints one JSON line per case
-// (tool: "ce-rubi"). It loads the published **integration-rules** (Rubi) and
-// **identities** (Fungrim) bundles onto one fresh engine, then runs every case
-// through the same op handling as run_ce.mjs. Because it uses the same minified
-// `compute-engine` bundle as the `ce-current` column — plus the rule packs —
-// its timings are directly comparable to the other tools (unlike the old
-// from-source/`tsx` runner, whose times read several× high).
+// Runs ALL cases in a single process and prints one JSON line per case. With
+// CE_LOAD_PACKS=1 (default) it loads the published **integration-rules** (Rubi)
+// and **identities** (Fungrim) bundles onto the engine; with CE_LOAD_PACKS=0 it
+// loads neither, giving a base-CE baseline measured through the *identical*
+// harness. Both modes use the same minified `compute-engine` bundle as the
+// `ce-current` column.
+//
+// IMPORTANT — comparability. These times are **warm steady-state** (one engine,
+// caches accumulate across the 55 cases), so they are directly comparable to
+// EACH OTHER (packs off vs on = true rule-pack overhead) but NOT to the
+// per-case *cold* `ce-current` / `ce-pub` columns produced by run_ce.mjs (one
+// fresh process per case). report.mjs runs this file in both modes and shows
+// the packs-off vs packs-on delta as the honest overhead figure.
 //
 // loadIntegrationRules registers an integration provider that is consulted
 // before the built-in integrator, so `Integrate(...).evaluate()` automatically
-// uses Rubi. We run all cases in one process so the (already fast, ~0.2 s) rule
-// load happens once.
+// uses Rubi. Running all cases in one process makes the (~0.2 s) rule load
+// happen once. Precision is reset to the engine default at the start of every
+// case so an arbitrary-precision `N` case cannot leak its precision into later
+// symbolic cases.
 //
 // Bundle paths default to ../../dist/* and can be overridden:
 //   CE_CURRENT_BUNDLE · CE_INTEGRATION_RULES_BUNDLE · CE_IDENTITIES_BUNDLE
+//   CE_LOAD_PACKS=0 disables both packs (base-CE-warm baseline)
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -30,23 +40,37 @@ const ID_BUNDLE = process.env.CE_IDENTITIES_BUNDLE || join(DIST, 'identities.min
 
 const suite = JSON.parse(readFileSync(join(__dirname, '..', 'cases.json'), 'utf8'));
 
+// CE_LOAD_PACKS=0 → base-CE-warm baseline only (no Rubi, no Fungrim). Default
+// builds BOTH engines in this one process and emits a `ce-warm` and a `ce-rubi`
+// line per case, so the packs-off/packs-on delta shares process warmth and is a
+// clean measure of rule-pack overhead (no cross-process JIT variance).
+const LOAD_PACKS = process.env.CE_LOAD_PACKS !== '0';
+
 const { ComputeEngine } = await import(CE_BUNDLE);
-const ce = new ComputeEngine();
-try {
-  const { loadIntegrationRules } = await import(IR_BUNDLE);
-  loadIntegrationRules(ce); // Rubi algebraic-integration corpus (~2,647 rules)
-} catch (e) {
-  console.error('integration-rules load failed:', e && e.message);
-}
-try {
-  const { loadIdentities } = await import(ID_BUNDLE);
-  loadIdentities(ce); // Fungrim identity corpus
-} catch (e) {
-  console.error('identities load failed:', e && e.message);
+const ceBase = new ComputeEngine();
+// Engine default precision — restored before every case so a high-precision `N`
+// case does not leak its precision into subsequent symbolic cases.
+const DEFAULT_PRECISION = ceBase.precision;
+
+let ceRubi = null;
+if (LOAD_PACKS) {
+  ceRubi = new ComputeEngine();
+  try {
+    const { loadIntegrationRules } = await import(IR_BUNDLE);
+    loadIntegrationRules(ceRubi); // Rubi algebraic-integration corpus (~2,647 rules)
+    const { loadIdentities } = await import(ID_BUNDLE);
+    loadIdentities(ceRubi); // Fungrim identity corpus
+  } catch (e) {
+    console.error('rule-pack load failed, emitting base-CE only:', e && e.message);
+    ceRubi = null;
+  }
 }
 
-function emit(o) {
-  process.stdout.write(JSON.stringify({ tool: 'ce-rubi', ...o }) + '\n');
+// Engines to measure, in a fixed order so both share the per-case warm-up state.
+const ENGINES = [['ce-warm', ceBase], ...(ceRubi ? [['ce-rubi', ceRubi]] : [])];
+
+function emit(tool, o) {
+  process.stdout.write(JSON.stringify({ tool, packs: tool === 'ce-rubi', ...o }) + '\n');
 }
 function median(xs) {
   const s = [...xs].sort((a, b) => a - b);
@@ -80,75 +104,74 @@ function realRootValues(roots) {
 const UNEVAL = /^(Limit|Integrate|Sum|Product)$/;
 const isUnevaluated = (r) => UNEVAL.test(r.operator ?? '') || /\b(int|lim|sum)\(/.test(r.toString());
 
-for (const kase of suite.cases) {
+// Run one case on one engine and return its result object (no id/tool — those
+// are added by emit). Precision is reset per call so cases stay independent.
+function runCase(ce, kase) {
   const input = kase.inputs.ce;
-  const id = kase.id;
+  ce.precision = DEFAULT_PRECISION; // reset per case (the N-decimal branch overrides it)
   try {
     if (input.op === 'N') {
       if (kase.verify.kind === 'integer') {
         const timing = timeit(() => ce.expr(input.mathjson).evaluate());
         const r = ce.expr(input.mathjson).evaluate();
-        emit({ id, status: 'ok', text: r.toString(), valueText: r.toString(), values: [], ...timing });
-      } else {
-        ce.precision = input.precision;
-        const timing = timeit(() => ce.expr(input.mathjson).N());
-        const r = ce.expr(input.mathjson).N();
-        emit({ id, status: 'ok', text: r.toString(), valueText: r.toString(), values: [], ...timing });
+        return { status: 'ok', text: r.toString(), valueText: r.toString(), values: [], ...timing };
       }
+      ce.precision = input.precision;
+      const timing = timeit(() => ce.expr(input.mathjson).N());
+      const r = ce.expr(input.mathjson).N();
+      return { status: 'ok', text: r.toString(), valueText: r.toString(), values: [], ...timing };
     } else if (input.op === 'simplify') {
       const timing = timeit(() => ce.expr(input.mathjson).simplify());
       const original = ce.expr(input.mathjson);
       const result = original.simplify();
       const pts = kase.verify.points.map(parseFloat);
       const values = pts.map((p) => num(result.subs({ [kase.verify.var]: ce.number(p) })));
-      emit({ id, status: 'ok', text: result.toString(), inputText: original.toString(), values, ...timing });
+      return { status: 'ok', text: result.toString(), inputText: original.toString(), values, ...timing };
     } else if (input.op === 'diff') {
       const build = () => ce.expr(['D', input.mathjson, input.var]).evaluate();
       const timing = timeit(build);
       const result = build();
       const pts = kase.verify.points.map(parseFloat);
       const values = pts.map((p) => num(result.subs({ [input.var]: ce.number(p) })));
-      emit({ id, status: 'ok', text: result.toString(), values, ...timing });
+      return { status: 'ok', text: result.toString(), values, ...timing };
     } else if (input.op === 'integrate') {
       // loadIntegrationRules routes Integrate through Rubi (then falls back to
       // the built-in integrator), so a plain evaluate() exercises the full stack.
       const build = () => ce.expr(['Integrate', input.mathjson, ['Tuple', input.var]]).evaluate();
       const timing = timeit(build);
       const result = build();
-      if (isUnevaluated(result)) {
-        emit({ id, status: 'unevaluated', text: result.toString(), values: [], ...timing });
-      } else {
-        const a = parseFloat(kase.verify.a);
-        const b = parseFloat(kase.verify.b);
-        const fb = num(result.subs({ [input.var]: ce.number(b) }));
-        const fa = num(result.subs({ [input.var]: ce.number(a) }));
-        emit({ id, status: 'ok', text: result.toString(), values: [fb - fa], ...timing });
-      }
+      if (isUnevaluated(result))
+        return { status: 'unevaluated', text: result.toString(), values: [], ...timing };
+      const a = parseFloat(kase.verify.a);
+      const b = parseFloat(kase.verify.b);
+      const fb = num(result.subs({ [input.var]: ce.number(b) }));
+      const fa = num(result.subs({ [input.var]: ce.number(a) }));
+      return { status: 'ok', text: result.toString(), values: [fb - fa], ...timing };
     } else if (input.op === 'evaluate') {
       const build = () => ce.expr(input.mathjson).evaluate();
       const timing = timeit(build);
       const result = build();
-      if (isUnevaluated(result)) {
-        emit({ id, status: 'unevaluated', text: result.toString(), values: [], ...timing });
-      } else {
-        emit({ id, status: 'ok', text: result.toString(), values: [num(result)], ...timing });
-      }
+      if (isUnevaluated(result))
+        return { status: 'unevaluated', text: result.toString(), values: [], ...timing };
+      return { status: 'ok', text: result.toString(), values: [num(result)], ...timing };
     } else if (input.op === 'solve') {
       const build = () => ce.expr(input.mathjson).solve(input.var);
       const timing = timeit(build);
       const roots = build();
       const values = realRootValues(roots);
-      emit({
-        id,
+      return {
         status: values.length ? 'ok' : 'unevaluated',
         text: (roots ?? []).map((r) => r.toString()).join(', '),
         values,
         ...timing,
-      });
-    } else {
-      emit({ id, status: 'error', error: `unknown op ${input.op}` });
+      };
     }
+    return { status: 'error', error: `unknown op ${input.op}` };
   } catch (e) {
-    emit({ id, status: 'error', error: String(e && e.message ? e.message : e) });
+    return { status: 'error', error: String(e && e.message ? e.message : e) };
   }
+}
+
+for (const kase of suite.cases) {
+  for (const [tool, ce] of ENGINES) emit(tool, { id: kase.id, ...runCase(ce, kase) });
 }

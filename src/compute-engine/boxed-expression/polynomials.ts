@@ -225,10 +225,14 @@ export function getPolynomialCoefficients(
   // Expand the expression to get standard form
   const expanded = expand(expr);
 
-  // Helper to add a term's coefficient at a specific degree
+  // Helper to add a term's coefficient at a specific degree. Uses a canonical
+  // `Add` (`ce.function`), which folds exact operands EXACTLY (integers,
+  // rationals, radicals); the `.add()` method folds two number literals to a
+  // float, which would numericize an irrational coefficient such as `(1−√5)/2`
+  // (e.g. from the power-gcd substitution x² = u).
   const addCoefficient = (coef: Expression, deg: number): boolean => {
     if (deg > degree) return false;
-    coeffs[deg] = coeffs[deg].add(coef);
+    coeffs[deg] = ce.function('Add', [coeffs[deg], coef]);
     return true;
   };
 
@@ -287,7 +291,9 @@ export function getPolynomialCoefficients(
 
       for (const factor of factors) {
         if (!factor.has(variable)) {
-          coef = coef.mul(factor);
+          // Canonical `Multiply` (folds exact operands exactly); `.mul()` would
+          // fold two number literals to a float (see `addCoefficient`).
+          coef = ce.function('Multiply', [coef, factor]);
         } else if (isSymbol(factor, variable)) {
           varDeg += 1;
         } else if (

@@ -137,9 +137,12 @@ export function apply2(
     const re2 = expr2.re;
     if (!isNaN(re1) && !isNaN(re2)) {
       if (bignumPreferred(ce) && bigFn)
+        // Use an existing `bignumRe` directly rather than re-wrapping it via
+        // `ce.bignum(...)` (a redundant BigDecimal copy); only convert the plain
+        // float when no bignum is available — matching `applyN`'s pattern above.
         result = bigFn(
-          ce.bignum(expr1.bignumRe ?? re1),
-          ce.bignum(expr2.bignumRe ?? re2)
+          expr1.bignumRe ?? ce.bignum(re1),
+          expr2.bignumRe ?? ce.bignum(re2)
         );
       else result = fn(re1, re2);
     }

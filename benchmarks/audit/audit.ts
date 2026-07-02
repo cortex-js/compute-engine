@@ -16,7 +16,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { ComputeEngine } from '../../src/compute-engine.ts';
+// Import the MINIFIED production bundle, not `src/`, so `console.assert` (live
+// from source, ~2× overhead on the symbolic engine) is stripped and CE timings
+// reflect shipped code. Requires `npm run build production` first (a stale
+// dist/ measures stale code). See PERFORMANCE_FINDINGS.md P0-2.
+import { ComputeEngine } from '../../dist/compute-engine.min.esm.js';
 import { mathJsonToWL } from '../runners/mathjson-to-wl.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -247,6 +251,9 @@ w(`_Issue-finder: CE (current build) vs SymPy and **Mathematica** (the reference
   'gcd → equals the true gcd), derivative-check (integration), or known value (limits). Each cell is the **median time per ' +
   'call in µs**; a mark appears **only when a result is not correct**: 🟡 value-correct but poor form · ❌ wrong · ∅ not ' +
   'solved · ⚠️ error._');
+w();
+w('_Runner: **minified production bundle** (`dist/compute-engine.min.esm.js`, `console.assert` stripped) — CE times ' +
+  'reflect shipped code, not the ~2×-slower from-source build. Rebuild with `npm run build production` before running._');
 w();
 
 // summary

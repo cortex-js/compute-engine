@@ -1,4 +1,6 @@
 import { BigDecimal } from '../../src/big-decimal';
+import { fromRaw } from '../../src/big-decimal/big-decimal';
+import { bigintDigits } from '../../src/big-decimal/utils';
 
 // Helper to check internal representation
 function rep(d: BigDecimal): { sig: bigint; exp: number } {
@@ -2096,5 +2098,55 @@ describe('Static constants', () => {
     BigDecimal.precision = 100;
     expect(BigDecimal.precision).toBe(100);
     BigDecimal.precision = original; // restore
+  });
+});
+
+// ================================================================
+// digitCount() — lazily-cached decimal digit count of |significand|
+// ================================================================
+
+describe('digitCount() cache', () => {
+  const abs = (n: bigint) => (n < 0n ? -n : n);
+
+  test('matches bigintDigits(|significand|) across constructions', () => {
+    const samples: BigDecimal[] = [
+      new BigDecimal('0'),
+      new BigDecimal('7'),
+      new BigDecimal('-7'),
+      new BigDecimal('123.456'), // sig 123456
+      new BigDecimal('-42.5'),
+      new BigDecimal('1000'), // normalizes to sig 1, exp 3
+      new BigDecimal(10n ** 99n),
+      new BigDecimal(-(10n ** 200n) - 1n),
+      fromRaw(999999999999999999999n, -5),
+      fromRaw(-(2n ** 400n), 3),
+    ];
+    for (const d of samples) {
+      const expected = bigintDigits(abs(d.significand));
+      // First call computes, second call returns the cached value.
+      expect(d.digitCount()).toBe(expected);
+      expect(d.digitCount()).toBe(expected);
+    }
+  });
+
+  test('frozen static constants return a digit count without throwing', () => {
+    const consts: BigDecimal[] = [
+      BigDecimal.ZERO,
+      BigDecimal.ONE,
+      BigDecimal.TWO,
+      BigDecimal.NEGATIVE_ONE,
+      BigDecimal.HALF,
+      BigDecimal.NAN,
+      BigDecimal.POSITIVE_INFINITY,
+      BigDecimal.NEGATIVE_INFINITY,
+    ];
+    for (const c of consts) {
+      expect(Object.isFrozen(c)).toBe(true);
+      const expected = bigintDigits(abs(c.significand)); // all single-digit → 1
+      // Must not throw a strict-mode "add property to frozen object" error.
+      expect(() => c.digitCount()).not.toThrow();
+      expect(c.digitCount()).toBe(expected);
+      expect(c.digitCount()).toBe(expected); // idempotent
+    }
   });
 });

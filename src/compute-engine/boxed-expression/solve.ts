@@ -1904,7 +1904,25 @@ export function findUnivariateRoots(
         { useVariations: true, form: 'canonical' }
       );
 
-    result = exprs.flatMap(matchRoots);
+    // FAST PATH: a univariate polynomial of degree ≥ 2 is solved directly from
+    // its coefficients (quadratic formula / rational-root + numeric), skipping
+    // the commutative pattern-matcher whose operand-permutation search dominates
+    // polynomial solving (P1-2). Non-polynomial shapes — and linear equations,
+    // whose rule is already cheap — fall through to the rule templates below.
+    // `originalExpr` is preferred (clean); when radical-clearing turned a
+    // non-polynomial original into a sqrt-free polynomial (`√(1−x²) = x²` →
+    // `1 − x² − x⁴`), the transformed `expr` is used and `validateRoots` drops
+    // any roots the squaring introduced.
+    const polyExpr =
+      polynomialDegree(originalExpr, x) >= 0
+        ? originalExpr
+        : polynomialDegree(expr, x) >= 0
+          ? expr
+          : null;
+    if (polyExpr !== null && polynomialDegree(polyExpr, x) >= 2)
+      result = solvePolynomialByCoefficients(polyExpr, x);
+
+    if (result.length === 0) result = exprs.flatMap(matchRoots);
 
     // If we didn't find a solution yet, try modifying the expression
     //expr.
@@ -1937,53 +1955,9 @@ export function findUnivariateRoots(
       ].flatMap(matchRoots);
     }
 
-    // Fallback: solve polynomials via coefficient extraction when the
-    // rule-based matching above didn't fire.
-    if (result.length === 0) {
-      // Prefer the original (clean) equation; but when radical-clearing above
-      // turned a non-polynomial original into a sqrt-free polynomial (e.g.
-      // `√(1−x²) = x²` → `1 − x² − x⁴`), solve that instead. `validateRoots`
-      // against the original drops any roots the squaring introduced.
-      const polyExpr =
-        polynomialDegree(originalExpr, x) >= 0
-          ? originalExpr
-          : polynomialDegree(expr, x) >= 0
-            ? expr
-            : originalExpr;
-      const deg = polynomialDegree(polyExpr, x);
-      if (deg === 2) {
-        // The quadratic rules match the surface form `Multiply(__b, _x)` for
-        // the middle term, but a negated symbolic/unit coefficient
-        // canonicalizes to `Negate(Multiply(b, x))` (or `Negate(x)`), which
-        // that pattern misses — so e.g. `x^2 - a x + 1 = 0` found no roots.
-        // Coefficient extraction handles every sign form uniformly (#300).
-        const quadraticRoots = solveQuadraticByCoefficients(polyExpr, x);
-        if (quadraticRoots.length > 0) result = quadraticRoots;
-      } else if (deg >= 3) {
-        // Exact rational roots first (rational-root theorem)…
-        const rationalRoots = findRationalRoots(polyExpr, x, ce);
-        result = [...rationalRoots];
-        // For the remaining (irrational) roots, prefer an exact reduction of a
-        // sparse polynomial (gcd of exponents > 1, e.g. a biquadratic via
-        // u = x²) over the numeric Durand–Kerner fallback (a general cubic or
-        // quartic, e.g. `3x³−18x²+33x−19`). Real roots not already found are
-        // added; `validateRoots` discards any spurious ones.
-        if (rationalRoots.length < deg) {
-          const extra =
-            solveByPowerGcdSubstitution(polyExpr, x) ??
-            numericRealRoots(polyExpr, x, ce);
-          for (const nr of extra) {
-            const v = nr.N().re;
-            if (
-              !result.some(
-                (r) => Math.abs(r.N().re - v) <= 1e-7 * (1 + Math.abs(v))
-              )
-            )
-              result.push(nr);
-          }
-        }
-      }
-    }
+    // (The polynomial coefficient solve that used to live here as a
+    // post-matcher fallback now runs as a fast path *before* the matcher — see
+    // `solvePolynomialByCoefficients` above.)
 
     // Single-sqrt elimination: A(x)·√R(x) + B(x) = 0 → A²R - B² = 0 (a √ term
     // with a non-constant coefficient, e.g. x·√(x²+1) = 1), which the
@@ -2037,6 +2011,74 @@ export function findUnivariateRoots(
 
   // Filter solutions by the declared type of the variable
   return filterRootsByType(ce, x, validatedRoots);
+}
+
+/**
+ * Closed-form roots of a univariate polynomial (degree ≥ 2) from its
+ * coefficients, bypassing the commutative pattern-matcher. Degree 2 uses the
+ * quadratic formula (exact — radicals preserved via canonical `Add`/`Multiply`);
+ * degree ≥ 3 uses the rational-root theorem, then an exact sparse-power
+ * reduction (biquadratic via u = x²) or the numeric Durand–Kerner fallback for
+ * the remaining real roots. Returns `[]` when no closed form is produced (the
+ * caller then falls back to the rule templates). Extracted from the former
+ * post-matcher fallback so it can run as a fast path *before* the matcher (P1-2).
+ */
+function solvePolynomialByCoefficients(
+  polyExpr: Expression,
+  x: string
+): Expression[] {
+  const ce = polyExpr.engine;
+  const deg = polynomialDegree(polyExpr, x);
+  if (deg === 2) {
+    // The quadratic rules match the surface form `Multiply(__b, _x)` for the
+    // middle term, but a negated symbolic/unit coefficient canonicalizes to
+    // `Negate(Multiply(b, x))` (or `Negate(x)`), which that pattern misses — so
+    // e.g. `x^2 - a x + 1 = 0` found no roots. Coefficient extraction handles
+    // every sign form uniformly (#300).
+    return [...solveQuadraticByCoefficients(polyExpr, x)];
+  }
+  if (deg >= 3) {
+    // Pure powers `x^n + c` (only the constant and leading coefficients are
+    // nonzero) are expressed EXACTLY as `Root(k, n)` by the rule templates —
+    // power-gcd declines them (reduced degree 1), so defer to the rules rather
+    // than numericize. General (dense) cubics/quartics with no closed form fall
+    // through to the numeric Durand–Kerner path below, matching prior behavior.
+    const coeffs = getPolynomialCoefficients(polyExpr, x);
+    if (coeffs !== null) {
+      let isPurePower = true;
+      for (let i = 1; i < coeffs.length - 1; i++)
+        if (!coeffs[i].isSame(0)) {
+          isPurePower = false;
+          break;
+        }
+      if (isPurePower) return [];
+    }
+
+    // Exact rational roots first (rational-root theorem)…
+    const rationalRoots = findRationalRoots(polyExpr, x, ce);
+    const result: Expression[] = [...rationalRoots];
+    // For the remaining (irrational) roots, prefer an exact reduction of a
+    // sparse polynomial (gcd of exponents > 1, e.g. a biquadratic via u = x²)
+    // over the numeric Durand–Kerner fallback (a general cubic or quartic, e.g.
+    // `3x³−18x²+33x−19`). Real roots not already found are added; `validateRoots`
+    // discards any spurious ones.
+    if (rationalRoots.length < deg) {
+      const extra =
+        solveByPowerGcdSubstitution(polyExpr, x) ??
+        numericRealRoots(polyExpr, x, ce);
+      for (const nr of extra) {
+        const v = nr.N().re;
+        if (
+          !result.some(
+            (r) => Math.abs(r.N().re - v) <= 1e-7 * (1 + Math.abs(v))
+          )
+        )
+          result.push(nr);
+      }
+    }
+    return result;
+  }
+  return [];
 }
 
 /** Harmonization rules transform an expr into one or more equivalent
@@ -2276,16 +2318,35 @@ function solveQuadraticByCoefficients(
   const [c, b, a] = coeffs;
   if (a.isSame(0)) return [];
 
-  // discriminant = b² - 4·a·c
-  const discriminant = b.mul(b).sub(ce.number(4).mul(a).mul(c));
+  // Pure quadratic (b = 0): x² = −c/a → x = ±√(−c/a), computed directly. The
+  // general formula's discriminant is −4ac here, and √(−4ac) fails to factor out
+  // its perfect-square 4 when c is itself a radical (e.g. √(2√5−2) arising from
+  // the power-gcd substitution x² = u), numericizing the root — √(−c/a) stays
+  // exact and matches the pure-power rule's output.
+  if (b.isSame(0)) {
+    const root = ce.function('Divide', [c.neg(), a]).sqrt();
+    return [root, root.neg()];
+  }
+
+  // discriminant = b² − 4ac, built with canonical `Multiply`/`Subtract`
+  // (`ce.function`), which fold exact operands EXACTLY; the `.mul()`/`.sub()`
+  // methods fold two number literals to a float, numericizing irrational roots.
+  const discriminant = ce.function('Subtract', [
+    ce.function('Multiply', [b, b]),
+    ce.function('Multiply', [ce.number(4), a, c]),
+  ]);
   const sqrtDiscriminant = discriminant.sqrt();
-  const twoA = a.mul(2);
+  const twoA = ce.function('Multiply', [a, ce.number(2)]);
   const negB = b.neg();
 
-  // x = (-b ± √(b² - 4ac)) / (2a)
+  // x = (-b ± √(b² - 4ac)) / (2a). Build the numerator with a canonical `Add`
+  // (`ce.function`), which folds exact operands EXACTLY (e.g. `-1 + √5`); the
+  // `.add()`/`.sub()` methods instead fold two number literals to a float, which
+  // would numericize every irrational root (a latent bug uncovered when the
+  // polynomial fast path routed all quadratics through here — P1-2).
   return [
-    negB.add(sqrtDiscriminant).div(twoA),
-    negB.sub(sqrtDiscriminant).div(twoA),
+    ce.function('Add', [negB, sqrtDiscriminant]).div(twoA),
+    ce.function('Subtract', [negB, sqrtDiscriminant]).div(twoA),
   ];
 }
 

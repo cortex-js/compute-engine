@@ -1,5 +1,7 @@
 # Univariate Equation-Solving Benchmark
 
+_Runner: **minified production bundles** (`dist/*.min.esm.js`, `console.assert` stripped) — CE times reflect shipped code. Rebuild with `npm run build production` before running._
+
 Adapted from SymPy’s `test_solveset.py` (univariate cases). Each returned root is graded **sound** by substitution (`|residual| < 1e-6`); `finite` solution sets must also be **complete** (cover the reference set), while `infinite` (periodic trig) sets ask only for one sound root. SymPy’s column is its `solve()` outcome; **Mathematica** (the reference baseline) runs `Solve[expr == 0, x]` live via `wolframscript`, graded by the same oracle.
 
 **✅ correct · 🟡 partial (sound but incomplete) · ❌ wrong · ∅ not solved · ⚠️ runtime error**

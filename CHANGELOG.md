@@ -21,6 +21,28 @@
   recurrence with a symbolic order derivative
   `Apply(Derivative(BesselJ, 1, 0), x, x)` instead of staying inert.
 
+### Performance
+
+- **Faster polynomial equation solving.** Solving a univariate polynomial of
+  degree ≥ 2 now goes straight to a coefficient-based closed form (quadratic
+  formula, then the rational-root theorem plus a numeric fallback for higher
+  degrees), bypassing the commutative pattern-matcher whose
+  operand-permutation search dominated the cost of polynomial solving. Roots
+  are unchanged — irrational roots such as `1 ± √2` stay exact.
+
+- **Faster `Factor`.** Detecting whether a term is a perfect square (for the
+  difference-of-squares and perfect-square factorings) is now computed
+  structurally instead of through a general `simplify()` call, which
+  previously accounted for roughly half of the factoring workload.
+
+- **Faster arbitrary-precision arithmetic.** The decimal digit count of a
+  `BigDecimal` value is now computed once and reused across `cmp`, `div`,
+  `pow`, `ln`, `sqrt`, and precision rounding (an O(log n) recomputation
+  becomes an O(1) reuse), `normalize` short-circuits the common case of a
+  value with no trailing decimal zero with a single test, and redundant
+  `BigDecimal` copies were removed from the binary numeric-function path. This
+  speeds up high-precision `N()`.
+
 ### Resolved Issues
 
 - **Radicals with a variable degree now differentiate correctly.** The

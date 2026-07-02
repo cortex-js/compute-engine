@@ -195,8 +195,7 @@ function fromFixedPoint(
  * in the working precision) before crossing the bridge.
  */
 function decimalExponent(x: BigDecimal): number {
-  const sig = x.significand < 0n ? -x.significand : x.significand;
-  return x.exponent + bigintDigits(sig) - 1;
+  return x.exponent + x.digitCount() - 1;
 }
 
 /**
@@ -407,8 +406,7 @@ BigDecimal.prototype.exp = function (): BigDecimal {
   // O(1), so the *result* never underflows the absolute-precision grid —
   // exp(-200) ≈ 1.38e-87 is recovered as exp(0.32)·10⁻⁸⁷ instead of rounding
   // to 0. The reduction is done in exact bigint fixed-point (no cancellation).
-  const absSig = this.significand < 0n ? -this.significand : this.significand;
-  const magnitude = Math.max(0, this.exponent + bigintDigits(absSig));
+  const magnitude = Math.max(0, this.exponent + this.digitCount());
   const workingPrec = targetPrec + 20 + magnitude;
 
   const [xFp, bits] = toFixedPoint(this, workingPrec);
@@ -468,7 +466,7 @@ BigDecimal.prototype.ln = function (): BigDecimal {
   // fixed-point input to 0 — which used to return −∞ (and previously hung in
   // the sqrt-reduction loop, `fpsqrt(0) = 0`).
   const sig = this.significand; // positive and finite here
-  const digits = bigintDigits(sig);
+  const digits = this.digitCount();
   const e = this.exponent + digits - 1;
   const m = fromRaw(sig, -(digits - 1)); // m ∈ [1, 10)
 

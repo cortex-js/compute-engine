@@ -147,6 +147,26 @@ export class BigDecimal {
   readonly significand: bigint;
   readonly exponent: number;
 
+  /** Lazily-cached decimal digit count of |significand| (see `digitCount`). */
+  private _digits?: number;
+
+  /**
+   * Number of decimal digits in |significand|, computed once and cached on this
+   * immutable value. `toPrecision`, `cmp`, `div`, `pow`, `ln` etc. all re-derive
+   * the order of magnitude from the (unchanging) significand; caching turns the
+   * O(log n) bigint `bigintDigits` count into an O(1) reuse.
+   *
+   * The frozen static constants (`ZERO`, `ONE`, …) can't take the cache write,
+   * so they recompute — trivially, since they are all single-digit.
+   * @internal
+   */
+  digitCount(): number {
+    if (this._digits !== undefined) return this._digits;
+    const d = bigintDigits(this.significand);
+    if (Object.isFrozen(this)) return d;
+    return (this._digits = d);
+  }
+
   constructor(value: string | number | bigint | BigDecimal) {
     if (value instanceof BigDecimal) {
       this.significand = value.significand;
@@ -278,8 +298,8 @@ export class BigDecimal {
     }
 
     // Same sign, different exponent: compare by order of magnitude
-    const thisDigits = bigintDigits(thisSig);
-    const otherDigits = bigintDigits(otherSig);
+    const thisDigits = this.digitCount();
+    const otherDigits = other.digitCount();
 
     const thisMag = thisDigits + thisExp;
     const otherMag = otherDigits + otherExp;
@@ -634,10 +654,8 @@ export class BigDecimal {
       // General case
       const prec = BigDecimal.precision;
       const guard = 10;
-      const absDividend = thisSig < 0n ? -thisSig : thisSig;
-      const absDivisor = otherSig < 0n ? -otherSig : otherSig;
-      const dividendDigits = bigintDigits(absDividend);
-      const divisorDigits = bigintDigits(absDivisor);
+      const dividendDigits = this.digitCount();
+      const divisorDigits = other.digitCount();
       const totalScale =
         prec + guard + Math.max(0, divisorDigits - dividendDigits);
       const scale = pow10(totalScale);
@@ -700,9 +718,7 @@ export class BigDecimal {
     const prec = BigDecimal.precision;
     const guard = 10;
     const totalScale =
-      prec +
-      guard +
-      Math.max(0, bigintDigits(absDivisor) - bigintDigits(absDividend));
+      prec + guard + Math.max(0, other.digitCount() - this.digitCount());
     const num = absDividend * pow10(totalScale);
     const q = num / absDivisor; // ≥ 1 given the guard digits
     const inexact = num % absDivisor !== 0n;
@@ -733,7 +749,7 @@ export class BigDecimal {
     const guard = 4;
     const sig = this.significand;
     const exp = this.exponent;
-    const decExp = exp + bigintDigits(sig) - 1; // ⌊log10 v⌋
+    const decExp = exp + this.digitCount() - 1; // ⌊log10 v⌋
     const halfExp = Math.floor(decExp / 2);
     // Scale v to an integer V = sig·10^(exp+2·shift) whose floor sqrt carries
     // ~prec+guard significant digits; sqrt(v) = isqrt(V)·10^(−shift).
@@ -858,7 +874,7 @@ export class BigDecimal {
       // `1^1e16` (digits=1, log10=0) was estimated at 1e16 > 9e15 → Infinity.
       // Use the leading ~15 digits for an accurate float log10 (avoids Number
       // overflow when the significand has more digits than a double can hold).
-      const sigDigits = bigintDigits(absSig);
+      const sigDigits = this.digitCount();
       const dropped = sigDigits > 15 ? sigDigits - 15 : 0;
       const lead =
         dropped > 0 ? Number(absSig / 10n ** BigInt(dropped)) : Number(absSig);
@@ -926,10 +942,8 @@ export class BigDecimal {
     // extra digits, capped at 20: beyond |n·ln(this)| ≈ 10^17 the result's
     // decimal exponent exceeds the representable bound and exp() saturates
     // to 0/Infinity anyway.
-    const baseSig = this.significand; // positive here
-    const decExpBase = this.exponent + bigintDigits(baseSig) - 1;
-    const nSig = n.significand < 0n ? -n.significand : n.significand;
-    const decExpN = n.exponent + bigintDigits(nSig) - 1;
+    const decExpBase = this.exponent + this.digitCount() - 1;
+    const decExpN = n.exponent + n.digitCount() - 1;
     const argMag = decExpN + Math.log10(Math.abs(decExpBase) * 2.303 + 3) + 1;
     const extra = Math.min(20, Math.max(2, Math.ceil(argMag) + 2));
 
@@ -1099,10 +1113,11 @@ export class BigDecimal {
     // NaN ({0n,NaN}), zero ({0n,0}), ±Inf all return as-is
     if (this.significand === 0n || !Number.isFinite(this.exponent)) return this;
 
-    const absSig = this.significand < 0n ? -this.significand : this.significand;
-    const digits = bigintDigits(absSig);
+    const digits = this.digitCount();
 
     if (digits <= n) return this; // already within precision
+
+    const absSig = this.significand < 0n ? -this.significand : this.significand;
 
     const shift = digits - n;
     const divisor = pow10(shift);
@@ -1278,6 +1293,14 @@ const _1e3 = 1000n;
 
 function normalize(sig: bigint, exp: number): [bigint, number] {
   if (sig === 0n) return [0n, 0];
+
+  // Fast exits for the common case of no trailing decimal zero (a trailing zero
+  // needs both a factor of 2 and a factor of 5). Odd significands can't have
+  // one — a single bit test, no bigint division. Even significands not divisible
+  // by 10 (ending in 2/4/6/8) can't either. Both short-circuit the mod loops
+  // below with identical output; ~half of all significands are odd.
+  if ((sig & 1n) !== 0n) return [sig, exp];
+  if (sig % 10n !== 0n) return [sig, exp];
 
   while (sig % _1e9 === 0n) {
     sig /= _1e9;

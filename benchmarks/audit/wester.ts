@@ -25,9 +25,13 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { parseWL } from '../../scripts/rubi/wl-parser.ts';
-import { ComputeEngine } from '../../src/compute-engine.ts';
-import { loadIdentities } from '../../src/identities.ts';
-import { loadIntegrationRules } from '../../src/integration-rules.ts';
+// Import the MINIFIED production bundles, not `src/`, so live `console.assert`
+// (~2× overhead on the symbolic engine) is stripped and CE timings reflect
+// shipped code. Requires `npm run build production` first. See
+// PERFORMANCE_FINDINGS.md P0-2.
+import { ComputeEngine } from '../../dist/compute-engine.min.esm.js';
+import { loadIdentities } from '../../dist/identities.min.esm.js';
+import { loadIntegrationRules } from '../../dist/integration-rules.min.esm.js';
 import { mathJsonToWL } from '../runners/mathjson-to-wl.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -428,6 +432,9 @@ const CATS: [string, string][] = [
 const count = (pred: (r: any) => boolean) => rows.filter(pred).length;
 
 w("# Wester suite — Compute Engine vs SymPy vs Mathematica");
+w();
+w('_Runner: **minified production bundles** (`dist/*.min.esm.js`, `console.assert` stripped) — CE times reflect shipped ' +
+  'code. Rebuild with `npm run build production` before running._');
 w();
 w(`_Michael Wester's CAS-review test suite (Mathematica form, GPL — \`benchmarks/wester/\`), parsed with the project ` +
   `\`wl-parser\` and graded by operation invariant (no reference answers needed). ${cases.length} runnable cases ` +

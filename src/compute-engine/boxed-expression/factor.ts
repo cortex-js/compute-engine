@@ -145,47 +145,75 @@ function isPolynomialForm(expr: Expression): boolean {
 }
 
 /**
- * Helper function to extract the polynomial square root of a term if it is a
- * perfect square. Returns null otherwise — crucially, it never returns an
- * expression containing `Sqrt`, `Abs`, `Root`, or a fractional power, so the
- * difference-of-squares / perfect-square factorings it feeds stay polynomial.
+ * The polynomial square root of a single term if it is a perfect square, else
+ * `null` — computed **structurally**, without a general `.simplify()` (which
+ * was ~half of the whole factoring workload). A product is a perfect square iff
+ * every factor is; a power `u^e` iff `e` is a non-negative even integer
+ * (`√(u^{2k}) = u^k`, the bare polynomial — no `Abs`); a number iff its exact
+ * `.sqrt()` leaves no radical (`√4 = 2`, `√(9/4) = 3/2`, but `√8 → null`). The
+ * caller passes a non-negative term.
  *
- * Examples:
- * - x² → x      (√(x²) = |x|, reduced to the polynomial root x)
- * - x⁶ → x³     (√(x⁶) = |x|³, reduced to x³)
- * - 4x² → 2x
- * - 9 → 3
- * - x³ → null   (√(x³) = x·√x is not a polynomial — odd exponent)
- * - 8 → null    (not a perfect square, would be √8)
- * - 2x → null   (not a perfect square)
- *
- * IMPORTANT: This function calls .simplify() on the sqrt result to extract
- * the square root properly. This is safe because:
- * 1. We're only simplifying individual term square roots, not the whole expression
- * 2. The sqrt simplification doesn't call factoring on Add expressions
- * 3. We're not in a simplification loop yet - we're in the factoring phase
+ * (`term.sqrt()` alone can't do the symbolic-monomial reduction: `root(2)`
+ * short-circuits to an unevaluated `Sqrt` before its own `Power`/`Multiply`
+ * decomposition — which is why the old code reached for `.simplify()`. Doing the
+ * decomposition here directly avoids that.)
  */
-function extractSquareRoot(term: Expression): Expression | null {
-  // Try taking the square root and simplifying it
-  // Using .simplify() here is safe - see comment above
-  const sqrt = term.sqrt().simplify();
+function perfectSquareRoot(term: Expression): Expression | null {
+  const ce = term.engine;
 
-  // Check if it's a non-canonical Sqrt operator (shouldn't happen with canonical input)
-  if (sqrt.operator === 'Sqrt') return null;
-
-  // Check if it's a Number with a radical component (like √8)
-  // These are represented as Number with numericValue.radical property
-  if (isNumber(sqrt)) {
-    if (hasNonTrivialRadical(sqrt.numericValue)) return null;
+  // Numeric: exact rational perfect square. `.sqrt()` already reduces √4→2,
+  // √(9/4)→3/2 and leaves a radical (radical≠1) for non-squares like √8.
+  if (isNumber(term)) {
+    if (term.isNegative === true) return null; // caller passes a non-negative term
+    const r = term.sqrt();
+    if (r.operator === 'Sqrt') return null;
+    if (isNumber(r) && hasNonTrivialRadical(r.numericValue)) return null;
+    return r;
   }
 
-  // `√(u²) = |u|`, but the polynomial factorization wants the bare polynomial
-  // root `u` (the identity `a² − b² = (a−b)(a+b)` holds for either sign).
-  const stripped = stripAbs(sqrt);
+  // `u^(2k) → u^k` (even non-negative integer exponent). `√(u²) = u` returns the
+  // bare polynomial base (no `Abs`); a non-polynomial base is rejected.
+  if (isFunction(term, 'Power')) {
+    const exp = asSmallInteger(term.op2);
+    if (exp === null || exp < 0 || exp % 2 !== 0) return null;
+    if (!isPolynomialForm(term.op1)) return null;
+    if (exp === 0) return ce.One;
+    if (exp === 2) return term.op1;
+    return ce.function('Power', [term.op1, ce.number(exp / 2)]);
+  }
 
-  // Gate to actual perfect-power exponents: a genuine polynomial perfect square
-  // has only non-negative integer exponents. Reject odd powers (`√(x³) = x·√x`)
-  // and any other non-polynomial root so factoring never emits radicals/Abs.
+  // `c·f·g·… → √c·√f·√g·…` — a product is a perfect square iff every factor is.
+  if (isFunction(term, 'Multiply')) {
+    const roots: Expression[] = [];
+    for (const factor of term.ops) {
+      const r = perfectSquareRoot(factor);
+      if (r === null) return null;
+      roots.push(r);
+    }
+    return ce.function('Multiply', roots);
+  }
+
+  // A bare symbol (exponent 1) or any other head is not a perfect square.
+  return null;
+}
+
+/**
+ * Extract the polynomial square root of a term if it is a perfect square,
+ * returning `null` otherwise — crucially never an expression containing `Sqrt`,
+ * `Abs`, `Root`, or a fractional power, so the difference-of-squares /
+ * perfect-square factorings it feeds stay polynomial.
+ *
+ * Examples: x²→x, x⁶→x³, 4x²→2x, 9→3, a²→a, 9/4→3/2; x³→null (odd exponent),
+ * 8→null (not a perfect square), 2x→null.
+ */
+function extractSquareRoot(term: Expression): Expression | null {
+  const root = perfectSquareRoot(term);
+  if (root === null) return null;
+
+  // Belt-and-suspenders: reduce `√(u²) = |u|` to the bare polynomial `u` and
+  // reject anything that still carries `Sqrt`/`Abs`/`Root` or a non-integer /
+  // negative exponent (the accept-set the difference-of-squares factoring wants).
+  const stripped = stripAbs(root);
   if (!isPolynomialForm(stripped)) return null;
 
   return stripped;
