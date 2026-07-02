@@ -258,13 +258,21 @@ export function bigMode(values: Iterable<BigDecimal>): BigDecimal {
   return mode;
 }
 
+// Quartile convention: Moore–McCabe (a.k.a. Tukey's exclusive hinges for the
+// "exclude the median" variant) — split the sorted sample at its median and
+// take Q1/Q3 as the medians of the *lower*/*upper* halves, excluding the
+// overall median itself from either half when n is odd. This keeps Q1 and Q3
+// symmetric around the median (Q1 + Q3 = 2·Q2 for symmetric data), unlike a
+// mixed slicing that includes the median in only one half.
 export function quartiles(values: Iterable<number>): [number, number, number] {
   const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
+  const n = sorted.length;
+  const mid = Math.floor(n / 2);
+  const upperStart = mid + (n % 2);
 
   const q1 = median(sorted.slice(0, mid));
   const q2 = median(sorted);
-  const q3 = median(sorted.slice(mid));
+  const q3 = median(sorted.slice(upperStart));
 
   return [q1, q2, q3];
 }
@@ -273,11 +281,13 @@ export function bigQuartiles(
   values: Iterable<BigDecimal>
 ): [BigDecimal, BigDecimal, BigDecimal] {
   const sorted = [...values].sort((a, b) => a.cmp(b));
-  const mid = Math.floor(sorted.length / 2);
+  const n = sorted.length;
+  const mid = Math.floor(n / 2);
+  const upperStart = mid + (n % 2);
 
   const q1 = bigMedian(sorted.slice(0, mid));
   const q2 = bigMedian(sorted);
-  const q3 = bigMedian(sorted.slice(mid));
+  const q3 = bigMedian(sorted.slice(upperStart));
 
   return [q1, q2, q3];
 }

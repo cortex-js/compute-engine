@@ -436,8 +436,11 @@ describe('P0-16h — statistics of exact data stay exact under evaluate()', () =
     expect(evalStr(['PopulationVariance', d])).toEqual('5/4'));
   test('Kurtosis → 41/25', () =>
     expect(evalStr(['Kurtosis', d])).toEqual('41/25'));
-  test('InterquartileRange → 5/2', () =>
-    expect(evalStr(['InterquartileRange', d5])).toEqual('5/2'));
+  // CORRECTNESS_FINDINGS.md CR-P1-2: Quartiles now uses the Moore–McCabe
+  // convention (median excluded from both halves for odd n): for [1..5],
+  // lower half {1,2} → Q1 = 3/2, upper half {4,5} → Q3 = 9/2, IQR = 3.
+  test('InterquartileRange → 3', () =>
+    expect(evalStr(['InterquartileRange', d5])).toEqual('3'));
   test('Mean of exact rationals → 1/3', () =>
     expect(
       evalStr([

@@ -661,16 +661,41 @@ describe('Multi-argument function derivatives', () => {
   });
 
   describe('Discrete functions (step functions)', () => {
-    it('d/dx mod(x, 5) = 0', () => {
+    // CORRECTNESS_FINDINGS.md CR-P1-1: CE's Mod is the real sawtooth
+    // ((u mod c) + c) mod c, piecewise-linear with slope u' almost
+    // everywhere in u, as long as the modulus does not itself depend on the
+    // differentiation variable. d/dx Mod(x, 5) = 1 a.e. (Mathematica:
+    // D[Mod[x,5],x] = 1), not 0.
+    it('d/dx mod(x, 5) = 1', () => {
       const expr = engine.expr(['D', ['Mod', 'x', 5], 'x']);
       const result = expr.evaluate();
-      expect(result.toString()).toMatchInlineSnapshot(`0`);
+      expect(result.toString()).toMatchInlineSnapshot(`1`);
     });
 
-    it('d/dx mod(x^2, y) = 0', () => {
+    it('d/dx mod(x, 5) = 1 (numeric slope check at x=2.3)', () => {
+      const f = (x: number) => ((x % 5) + 5) % 5;
+      const h = 1e-6;
+      const numericSlope = (f(2.3 + h) - f(2.3 - h)) / (2 * h);
+      const symbolic = engine.expr(['D', ['Mod', 'x', 5], 'x']).evaluate();
+      expect(symbolic.subs({ x: 2.3 }).N().re).toBeCloseTo(numericSlope, 5);
+    });
+
+    it('d/dx mod(x^2, 7) = 2x (constant modulus, non-trivial inner function)', () => {
+      const expr = engine.expr(['D', ['Mod', ['Square', 'x'], 7], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`2x`);
+    });
+
+    it('d/dx mod(x^2, y) = 2x (modulus y does not depend on x)', () => {
       const expr = engine.expr(['D', ['Mod', ['Square', 'x'], 'y'], 'x']);
       const result = expr.evaluate();
-      expect(result.toString()).toMatchInlineSnapshot(`0`);
+      expect(result.toString()).toMatchInlineSnapshot(`2x`);
+    });
+
+    it('d/dx mod(x, x^2) stays symbolic (modulus depends on x)', () => {
+      const expr = engine.expr(['D', ['Mod', 'x', ['Square', 'x']], 'x']);
+      const result = expr.evaluate();
+      expect(result.operator).toBe('D');
     });
 
     it('d/dx gcd(x, 6) = 0', () => {

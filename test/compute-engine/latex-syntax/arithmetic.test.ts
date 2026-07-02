@@ -599,6 +599,48 @@ describe('EL-4: Infinite series with Element notation', () => {
     expect(value).toBeGreaterThan(1.6);
     expect(value).toBeLessThan(1.7);
   }, 30000); // Allow 30 seconds for this computation
+
+  // Regression: an infinite (capped) domain must be accumulated *numerically*.
+  // Accumulating Σ 1/n² exactly builds a rational whose denominator is the LCM
+  // of 10⁴ squares — an intractable bigint that hung the thread (the Element
+  // iteration also bypassed the engine deadline, so `run()` never cancelled).
+  test('divergent series over PositiveIntegers terminates (does not hang)', () => {
+    const start = Date.now();
+    const expr = ce.expr([
+      'Sum',
+      ['Power', 'n', -1], // harmonic series — diverges
+      ['Element', 'n', 'PositiveIntegers'],
+    ]);
+    const result = expr.evaluate();
+    // Returns the truncated numeric partial sum, quickly, without hanging.
+    expect(result.isNumber).toBe(true);
+    expect(Number.isFinite(result.re)).toBe(true);
+    expect(Date.now() - start).toBeLessThan(5000);
+  }, 10000);
+
+  test('infinite series with a symbolic body stays symbolic', () => {
+    // Σ xⁿ has a free variable beyond the index, so a truncated partial value
+    // is meaningless: keep it symbolic instead of building a 10⁴-term polynomial.
+    const expr = ce.expr([
+      'Sum',
+      ['Power', 'x', 'n'],
+      ['Element', 'n', 'NonNegativeIntegers'],
+    ]);
+    const result = expr.evaluate();
+    expect(result.operator).toBe('Sum');
+    expect(result.isNaN).not.toBe(true);
+  }, 10000);
+
+  test('convergent series with traditional infinite bounds evaluates numerically', () => {
+    // Σ_{n=1}^{∞} 1/n² via `.evaluate()` (not just `.N()`) — the exact
+    // accumulation used to exceed the deadline and throw.
+    const result = ce
+      .parse('\\sum_{n=1}^{\\infty} \\frac{1}{n^2}')
+      .evaluate();
+    expect(result.isNumber).toBe(true);
+    expect(result.re).toBeGreaterThan(1.6);
+    expect(result.re).toBeLessThan(1.7);
+  }, 30000);
 });
 
 describe('PRODUCT', () => {

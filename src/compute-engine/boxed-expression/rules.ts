@@ -177,9 +177,14 @@ export const CONDITIONS = {
   },
   integer: (x: Expression) => x.isInteger,
   rational: (x: Expression) => x.isRational,
-  irrational: (x: Expression) => x.isRational === false,
+  // An irrational number is a *real* number that is not rational. Requiring
+  // provable realness keeps this fail-closed for unknowns and prevents a
+  // provably-complex value (`isRational === false`) from being misclassified.
+  irrational: (x: Expression) => x.isReal === true && x.isRational === false,
   real: (x: Expression) => x.isReal,
-  notreal: (x: Expression) => !x.isReal,
+  // Fail-closed: only when provably *not* real (an unknown `isReal` of
+  // `undefined` must NOT satisfy `:notreal`).
+  notreal: (x: Expression) => x.isReal === false,
 
   // number with a non-zero imaginary part:
   complex: (x: Expression) => x.type.matches('complex'),
@@ -195,10 +200,20 @@ export const CONDITIONS = {
   odd: (x: Expression) => x.isOdd,
 
   prime: (x: Expression) => isPrime(x) === true,
-  composite: (x: Expression) => isPrime(x) === false,
+  // A composite number is a positive integer greater than 1 that is not prime.
+  // `isPrime(1) === false`, so the previous `isPrime(x) === false` test wrongly
+  // classified 1 (and 0) as composite.
+  composite: (x: Expression) =>
+    x.isInteger === true &&
+    x.isPositive === true &&
+    x.isEqual(1) === false &&
+    isPrime(x) === false,
 
-  notzero: (x: Expression) => x.isSame(0) === false,
-  notone: (x: Expression) => x.isSame(1) === false,
+  // Fail-closed, three-valued: only when *provably* not equal to 0 / 1. The
+  // previous `isSame(0)` was a structural check, so an unknown symbol (never
+  // structurally `0`) vacuously satisfied `:notzero`.
+  notzero: (x: Expression) => x.isEqual(0) === false,
+  notone: (x: Expression) => x.isEqual(1) === false,
 
   finite: (x: Expression) => x.isFinite,
   infinite: (x: Expression) => x.isFinite === false,
@@ -240,6 +255,29 @@ export function checkConditions(x: Expression, conditions: string[]): boolean {
     if (CONDITIONS[cond as keyof typeof CONDITIONS](x) !== true) return false;
 
   return true;
+}
+
+/**
+ * Evaluate a rule-condition predicate and report whether it discharges.
+ *
+ * Rule guards must be *fail-closed*: an unprovable predicate (e.g. `w ≠ 0` for
+ * an unconstrained `w`) must NOT satisfy the guard. Plain `.evaluate()` applies
+ * the pragmatic top-level collapse where `Equal`/`NotEqual` of an undecided
+ * comparison return `False`/`True`, which would fire guards vacuously. Setting
+ * `_isVerifying` for the duration of the evaluation keeps those operators
+ * three-valued (unknown stays unknown), so the guard only discharges when the
+ * predicate provably evaluates to `True`. Assumption- and bounds-derived facts
+ * are still consulted (they read the fact index directly, independent of the
+ * pragmatic collapse), so `; z ≠ 0` still fires under `assume(z > 0)`.
+ */
+function conditionHolds(ce: ComputeEngine, condition: Expression): boolean {
+  const savedVerifying = ce._isVerifying;
+  ce._isVerifying = true;
+  try {
+    return isSymbol(condition.evaluate(), 'True');
+  } finally {
+    ce._isVerifying = savedVerifying;
+  }
 }
 
 function tokenizeLaTeX(input: string): string[] {
@@ -287,11 +325,11 @@ function parseModifier(parser: Parser): string | null {
       '\\in\\Q': 'rational',
       '\\in\\mathbb{Q}': 'rational',
       '\\in\\Z^+': 'integer,positive',
-      '\\in\\Z^-': 'intger,negative',
-      '\\in\\Z^*': 'nonzero',
+      '\\in\\Z^-': 'integer,negative',
+      '\\in\\Z^*': 'integer,notzero',
       '\\in\\R^+': 'positive',
       '\\in\\R^-': 'negative',
-      '\\in\\R^*': 'real,nonzero',
+      '\\in\\R^*': 'real,notzero',
       '\\in\\Z': 'integer',
       '\\in\\mathbb{Z}': 'integer',
       '\\in\\N': 'integer,nonnegative',
@@ -309,8 +347,13 @@ function parseModifier(parser: Parser): string | null {
   }
 
   if (!modifier) return null;
-  if (!Object.keys(CONDITIONS).includes(modifier))
-    throw new Error(`Unexpected condition "${modifier}" in a rule`);
+  // A shortcut may expand to several comma-separated conditions
+  // (e.g. `\in\Z^+` → `integer,positive`). Validate each part individually
+  // rather than looking up the whole comma-joined string as a single key.
+  for (const part of modifier.split(',')) {
+    if (!Object.keys(CONDITIONS).includes(part))
+      throw new Error(`Unexpected condition "${part}" in a rule`);
+  }
   return modifier;
 }
 
@@ -580,11 +623,10 @@ function parseRule(
           `Invalid rule "${rule}"\n|   The condition expression contains wildcards not present in the match expression`
         );
 
-      // Evaluate the condition as a predicate
-      condFn = (sub: BoxedSubstitution): boolean => {
-        const evaluated = condition.subs(sub).canonical.evaluate();
-        return isSymbol(evaluated, 'True');
-      };
+      // Evaluate the condition as a predicate, under verification semantics so
+      // an unprovable guard (e.g. `; w ≠ 0`) does not discharge vacuously.
+      condFn = (sub: BoxedSubstitution): boolean =>
+        conditionHolds(ce, condition.subs(sub).canonical);
     }
 
     return boxRule(
@@ -653,12 +695,11 @@ function boxRule(
     // (an expression with a Boolean value).
     const condPattern = ce.parse(condition) ?? ce.expr('Nothing');
 
-    // Substitute any unbound vars in the condition to a wildcard,
-    // then evaluate the condition
-    condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean => {
-      const evaluated = condPattern.subs(x).evaluate();
-      return isSymbol(evaluated, 'True');
-    };
+    // Substitute any unbound vars in the condition to a wildcard, then evaluate
+    // the condition under verification semantics (see `conditionHolds`) so an
+    // unprovable predicate guard does not discharge vacuously.
+    condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean =>
+      conditionHolds(ce, condPattern.subs(x));
   } else {
     if (condition !== undefined && typeof condition !== 'function')
       throw new Error(
@@ -795,8 +836,13 @@ export function boxRules(
     try {
       rules.push(boxRule(ce, rule, options));
     } catch (e) {
-      // There was a problem with a rule, skip it and continue
-      throw new Error(
+      // There was a problem with a rule: log it, skip that one rule, and
+      // continue boxing the rest. A single malformed rule must not take down
+      // the entire ruleset (e.g. one bad entry in the default simplify set, or
+      // an unsupported shortcut in a user ruleset). This matches the "Skipping
+      // rule" wording that was already printed here — previously the error was
+      // re-thrown despite the message, aborting the whole set.
+      console.error(
         `\n${e instanceof Error ? e.message : e}\n|   Skipping rule ${JSON.stringify(
           rule,
           undefined,
@@ -1001,12 +1047,26 @@ export function applyRule(
     formValue = replace.isCanonical ? 'canonical' : 'structural';
 
   //@note: '.subs()' acts like an expr. 'clone' here (in case of an empty substitution)
-  const result =
-    typeof replace === 'function'
-      ? replace(expr, sub)
-      : // @todo: 'expr.subs()' to eventually also assume a 'form' option
-        // : replace.subs(sub, { form: dynamicForm ? undefined : formValue });
-        replace.subs(sub, { canonical: getFormType() === 'canonical' });
+  // An exception thrown by a `replace` *function* is treated exactly like a
+  // condition exception (see above): log it and skip this one rule, rather than
+  // aborting the whole `replace()` pass. Deadline cancellations still propagate.
+  let result: Expression | RuleStep | null | undefined;
+  try {
+    result =
+      typeof replace === 'function'
+        ? replace(expr, sub)
+        : // @todo: 'expr.subs()' to eventually also assume a 'form' option
+          // : replace.subs(sub, { form: dynamicForm ? undefined : formValue });
+          replace.subs(sub, { canonical: getFormType() === 'canonical' });
+  } catch (e) {
+    if (e instanceof CancellationError) throw e;
+    console.error(
+      `\n|   Rule "${rule.id}"\n|   Error while applying replacement\n|    ${
+        e instanceof Error ? e.message : e
+      }`
+    );
+    return operandsMatched ? stepOf(expr) : null;
+  }
 
   if (!result) return operandsMatched ? stepOf(expr) : null;
 
@@ -1060,6 +1120,13 @@ export function applyRule(
  *
  * The `replace` function can be used to apply a rule to a non-canonical
  * expression.
+ *
+ * **Error handling contract.** A single misbehaving rule never aborts the
+ * whole pass. An exception thrown while checking a rule's `condition` or while
+ * running its `replace` function is logged and that one rule is skipped; the
+ * remaining rules are still tried (see `applyRule`). Only a
+ * `CancellationError` (deadline/interrupt) propagates out, so timeouts are not
+ * swallowed as "the rule failed".
  *
  */
 export function replace(

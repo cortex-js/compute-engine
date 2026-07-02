@@ -1098,18 +1098,53 @@ describe('SUM', () => {
     ).toMatchInlineSnapshot(`1/2 * (b^2 + b)`);
   });
 
-  // Alternating binomial sum: Sum((-1)^k * C(n,k), [k, 0, n]) = 0
-  it('should simplify alternating binomial sum to 0', () => {
+  // Alternating binomial sum: Sum((-1)^k * C(n,k), [k, 0, n]) = 0, valid only
+  // for n > 0 (at n = 0 the sum is 1). The rule fires only when the bound is
+  // *provably* positive (CORRECTNESS_FINDINGS.md CR-P1-4) — scope a local
+  // `b > 0` assumption so this test still exercises the closed form.
+  it('should simplify alternating binomial sum to 0 (n provably > 0)', () => {
+    ce.pushScope();
+    ce.assume(ce.parse('b > 0'));
+    try {
+      expect(
+        ce
+          .expr([
+            'Sum',
+            ['Multiply', ['Power', -1, 'k'], ['Binomial', 'b', 'k']],
+            ['Tuple', 'k', 0, 'b'],
+          ])
+          .simplify()
+          .toString()
+      ).toMatchInlineSnapshot(`0`);
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  it('should NOT apply the alternating binomial sum rule when n is not provably > 0 (CR-P1-4)', () => {
+    // `b` is only declared `integer` here (no positivity assumption), so the
+    // n=0 edge case (sum = 1, not 0) must not be silently assumed away.
+    const result = ce
+      .expr([
+        'Sum',
+        ['Multiply', ['Power', -1, 'k'], ['Binomial', 'b', 'k']],
+        ['Tuple', 'k', 0, 'b'],
+      ])
+      .simplify();
+    expect(result.has('Sum')).toBe(true);
+  });
+
+  it('alternating binomial sum at the n=0 boundary evaluates to 1, not 0 (CR-P1-4)', () => {
     expect(
       ce
         .expr([
           'Sum',
-          ['Multiply', ['Power', -1, 'k'], ['Binomial', 'b', 'k']],
-          ['Tuple', 'k', 0, 'b'],
+          ['Multiply', ['Power', -1, 'k'], ['Binomial', 0, 'k']],
+          ['Tuple', 'k', 0, 0],
         ])
-        .simplify()
+        .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`0`);
+    ).toBe('1');
   });
 
   it('should evaluate alternating binomial sum', () => {
@@ -1298,18 +1333,52 @@ describe('SUM', () => {
     ).toMatchInlineSnapshot(`50`);
   });
 
-  // Alternating weighted binomial: Sum((-1)^k * k * C(n,k)) = 0 for n >= 2
-  it('should simplify alternating weighted binomial sum to 0', () => {
+  // Alternating weighted binomial: Sum((-1)^k * k * C(n,k)) = 0, valid only
+  // for n >= 2 (n = 0 gives 0 trivially, but n = 1 gives -1). The rule fires
+  // only when the bound is *provably* >= 2 (CORRECTNESS_FINDINGS.md
+  // CR-P1-4) — scope a local `b >= 2` assumption so this test still
+  // exercises the closed form.
+  it('should simplify alternating weighted binomial sum to 0 (n provably >= 2)', () => {
+    ce.pushScope();
+    ce.assume(ce.parse('b \\ge 2'));
+    try {
+      expect(
+        ce
+          .expr([
+            'Sum',
+            ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 'b', 'k']],
+            ['Tuple', 'k', 0, 'b'],
+          ])
+          .simplify()
+          .toString()
+      ).toMatchInlineSnapshot(`0`);
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  it('should NOT apply the alternating weighted binomial sum rule when n is not provably >= 2 (CR-P1-4)', () => {
+    const result = ce
+      .expr([
+        'Sum',
+        ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 'b', 'k']],
+        ['Tuple', 'k', 0, 'b'],
+      ])
+      .simplify();
+    expect(result.has('Sum')).toBe(true);
+  });
+
+  it('alternating weighted binomial sum at the n=1 boundary evaluates to -1, not 0 (CR-P1-4)', () => {
     expect(
       ce
         .expr([
           'Sum',
-          ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 'b', 'k']],
-          ['Tuple', 'k', 0, 'b'],
+          ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 1, 'k']],
+          ['Tuple', 'k', 0, 1],
         ])
-        .simplify()
+        .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`0`);
+    ).toBe('-1');
   });
 
   it('should evaluate alternating weighted binomial sum', () => {
@@ -2234,12 +2303,53 @@ describe('Infinite-symbol times zero (REVIEW.md A13)', () => {
 
 // REVIEW.md D20: InterquartileRange used a different quartile slice than
 // Quartiles (`slice(mid+1)` vs `slice(mid)`), so IQR ≠ Q3 − Q1.
-describe('InterquartileRange consistent with Quartiles (REVIEW.md D20)', () => {
+//
+// CORRECTNESS_FINDINGS.md CR-P1-2: `Quartiles` itself mixed an
+// exclusive-of-median lower half with an inclusive-of-median upper half,
+// matching no standard convention. Fixed to the Moore–McCabe convention
+// (median excluded from both halves for odd n), which keeps Q1/Q3
+// symmetric around the median: Quartiles([1..9]) = (2.5, 5, 7.5).
+describe('InterquartileRange consistent with Quartiles (REVIEW.md D20, CR-P1-2)', () => {
   it('IQR equals Q3 − Q1', () => {
     const data = ['List', 1, 2, 3, 4, 5, 6, 7, 8, 9];
     const iqr = ce.expr(['InterquartileRange', data]).evaluate().re;
-    // Quartiles of [1..9] are (2.5, 5, 7) → Q3 − Q1 = 4.5
-    expect(iqr).toBeCloseTo(4.5, 10);
+    // Quartiles of [1..9] are (2.5, 5, 7.5) → Q3 − Q1 = 5
+    expect(iqr).toBeCloseTo(5, 10);
+  });
+
+  it('Quartiles([1..9]) = (2.5, 5, 7.5) (odd n, Moore–McCabe)', () => {
+    const data = ['List', 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    const [q1, q2, q3] = ce
+      .expr(['Quartiles', data])
+      .evaluate()
+      .ops!.map((x) => x.re);
+    expect(q1).toBeCloseTo(2.5, 10);
+    expect(q2).toBeCloseTo(5, 10);
+    expect(q3).toBeCloseTo(7.5, 10);
+  });
+
+  it('Quartiles([1..8]) = (2.5, 4.5, 6.5) (even n)', () => {
+    const data = ['List', 1, 2, 3, 4, 5, 6, 7, 8];
+    const [q1, q2, q3] = ce
+      .expr(['Quartiles', data])
+      .evaluate()
+      .ops!.map((x) => x.re);
+    expect(q1).toBeCloseTo(2.5, 10);
+    expect(q2).toBeCloseTo(4.5, 10);
+    expect(q3).toBeCloseTo(6.5, 10);
+  });
+
+  it('exact Quartiles path agrees with the numeric path on exact input', () => {
+    const data = ['List', 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    const exact = ce
+      .expr(['Quartiles', data])
+      .evaluate()
+      .ops!.map((x) => x.N().re);
+    const numeric = ce
+      .expr(['Quartiles', data])
+      .evaluate({ numericApproximation: true })
+      .ops!.map((x) => x.re);
+    expect(exact).toEqual(numeric);
   });
 });
 

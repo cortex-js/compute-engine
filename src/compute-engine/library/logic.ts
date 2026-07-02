@@ -204,11 +204,11 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   },
 
   KroneckerDelta: {
-    description: 'Return 1 if the arguments are equal, 0 otherwise',
+    description:
+      'Return 1 if the arguments are equal, 0 otherwise. With a single ' +
+      'argument n, this is δ_{n,0}: 1 if n = 0, 0 otherwise.',
     signature: '(value+) -> integer',
     evaluate: (args, { engine: ce }) => {
-      if (args.length === 1) return sym(args[0]) === 'True' ? ce.One : ce.Zero;
-
       // Three-valued equality of two arguments: 1 if equal, 0 if their
       // difference is a non-zero *constant*, and symbolic if the difference
       // still contains free variables (undetermined). Using `isEqual` directly
@@ -221,6 +221,13 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
         if (diff.unknowns.length === 0) return 0; // non-zero constant
         return undefined; // depends on free variables → stay symbolic
       };
+
+      if (args.length === 1) {
+        // Unary KroneckerDelta(n) = δ_{n,0}: 1 if n = 0, 0 otherwise
+        // (standard convention; matches Mathematica's KroneckerDelta[n]).
+        const r = kron(args[0], ce.Zero);
+        return r === undefined ? undefined : r === 1 ? ce.One : ce.Zero;
+      }
 
       if (args.length === 2) {
         const r = kron(args[0], args[1]);

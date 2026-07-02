@@ -292,9 +292,16 @@ export function simplifySum(x: Expression): RuleStep | undefined {
       }
     }
 
-    if (hasBinomial && hasAlternating && binomialN && upper.isSame(binomialN)) {
-      // For n > 0: sum = 0, for n = 0: sum = 1
-      // We return 0 for the general case; numeric evaluation handles n=0
+    if (
+      hasBinomial &&
+      hasAlternating &&
+      binomialN &&
+      upper.isSame(binomialN) &&
+      // Only valid for n > 0 (at n = 0 the sum is 1, not 0). Fail closed:
+      // require the bound to be *provably* positive; otherwise stay
+      // symbolic rather than risk a wrong answer at n = 0.
+      binomialN.isGreater(0) === true
+    ) {
       return { value: ce.Zero, because: 'alternating binomial sum' };
     }
 
@@ -425,9 +432,11 @@ export function simplifySum(x: Expression): RuleStep | undefined {
       hasBinomial &&
       binomialN &&
       upper.isSame(binomialN) &&
-      body.ops.length === 3
+      body.ops.length === 3 &&
+      // Only valid for n >= 2 (wrong at n = 0 and n = 1). Fail closed:
+      // require the bound to be provably >= 2.
+      binomialN.isGreaterEqual(2) === true
     ) {
-      // For n >= 2, sum = 0
       return { value: ce.Zero, because: 'alternating weighted binomial sum' };
     }
   }

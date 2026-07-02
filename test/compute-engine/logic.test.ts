@@ -122,9 +122,17 @@ describe('Logic', () => {
 });
 
 describe('Kronecker Delta', () => {
+  // CORRECTNESS_FINDINGS.md CR-P1-3: unary KroneckerDelta(n) = δ_{n,0}, so
+  // KroneckerDelta(0) = 1 (standard convention; matches Mathematica).
   it('should evaluate Kronecker Delta with one argument', () => {
     expect(box(['KroneckerDelta', 1])).toMatchInlineSnapshot(`0`);
-    expect(box(['KroneckerDelta', 0])).toMatchInlineSnapshot(`0`);
+    expect(box(['KroneckerDelta', 0])).toMatchInlineSnapshot(`1`);
+    expect(box(['KroneckerDelta', 3])).toMatchInlineSnapshot(`0`);
+  });
+  it('Kronecker Delta of a free symbol stays symbolic', () => {
+    expect(box(['KroneckerDelta', 'x'])).toMatchInlineSnapshot(
+      `KroneckerDelta(x)`
+    );
   });
   it('should evaluate Kronecker Delta with two arguments', () => {
     expect(box(['KroneckerDelta', 1, 1])).toMatchInlineSnapshot(`1`);

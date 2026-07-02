@@ -543,10 +543,25 @@ export function differentiate(
     return differentiate(lnX.div(lnBase), v, depth + 1);
   }
 
-  // Discrete functions: Mod, GCD, LCM
+  // Mod(u, c): CE's Mod is the real sawtooth ((u mod c) + c) mod c, which is
+  // piecewise-*linear* in u with slope 1 (jump discontinuities where u
+  // crosses a multiple of c). So d/dx Mod(u, c) = u' almost everywhere,
+  // provided the modulus c does not itself depend on the differentiation
+  // variable. If both operands depend on v there is no clean a.e. closed
+  // form (the jump locations themselves move with v) — stay symbolic.
+  if (expr.operator === 'Mod' && expr.nops === 2) {
+    const [u, c] = expr.ops;
+    if (c.has(v)) return undefined;
+    if (!u.has(v)) return ce.Zero;
+    const uPrime =
+      differentiate(u, v, depth + 1) ?? ce._fn('D', [u, ce.symbol(v)]);
+    return simplifyDerivative(uPrime);
+  }
+
+  // Discrete functions: GCD, LCM
   // These are step functions with derivative 0 almost everywhere
   // (undefined at discontinuities, but we return 0 as a useful approximation)
-  if (['Mod', 'GCD', 'LCM'].includes(expr.operator)) {
+  if (['GCD', 'LCM'].includes(expr.operator)) {
     return ce.Zero;
   }
 

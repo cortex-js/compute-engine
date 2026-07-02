@@ -312,14 +312,24 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           // Handle undefined (unknown) comparisons differently based on context:
           //
           // In verification mode (ce.isVerifying = true):
-          //   Return undefined to preserve 3-valued logic.
+          //   Preserve 3-valued logic — but first try to *prove* the two sides
+          //   distinct from assumed bounds. A proven strict inequality in
+          //   either direction entails ≠ (e.g. `assume(z > 0)` ⇒ `z ≠ 0`), so
+          //   rule guards like `; z ≠ 0` fire under such assumptions even
+          //   though the pragmatic collapse below is suppressed. If distinctness
+          //   is not provable, stay undefined.
           //
           // In normal evaluation mode:
           //   Return True because NotEqual(x, 1) should evaluate to True when we
           //   can't prove equality. This matches expected behavior (though note
           //   this is not strictly correct three-valued logic - it's a pragmatic
           //   choice for usability).
-          if (test === undefined && ce.isVerifying) return undefined;
+          if (test === undefined && ce.isVerifying) {
+            const distinct =
+              compareFromAssumedBounds(lhs, arg, true) === true ||
+              compareFromAssumedBounds(arg, lhs, true) === true;
+            if (!distinct) return undefined;
+          }
           // Continue the loop - if all comparisons are not equal, return True
         }
       }

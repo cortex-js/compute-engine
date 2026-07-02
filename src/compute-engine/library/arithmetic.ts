@@ -75,7 +75,12 @@ import {
   mulN,
   canonicalDivide,
 } from '../boxed-expression/arithmetic-mul-div';
-import { canonicalBigop, reduceBigOp, NON_ENUMERABLE_DOMAIN } from './utils';
+import {
+  canonicalBigop,
+  reduceBigOp,
+  NON_ENUMERABLE_DOMAIN,
+  classifyBigopDomain,
+} from './utils';
 import {
   canonicalPower,
   canonicalRoot,
@@ -2168,13 +2173,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       evaluate: (ops, options) => {
         const ce = options.engine;
-        const numericApproximation = options.numericApproximation;
+        // EL-4: see the matching comment in `Sum.evaluate` — an infinite
+        // (capped) domain is accumulated numerically; a symbolic body over one
+        // stays symbolic.
+        let numeric = options.numericApproximation;
+        if (!numeric) {
+          const mode = classifyBigopDomain(ops[0], ops.slice(1), ce);
+          if (mode === 'symbolic') return undefined;
+          if (mode === 'numeric') numeric = true;
+        }
         const result = run(
           reduceBigOp(
             ops[0],
             ops.slice(1),
             (acc: Expression, x) =>
-              acc.mul(x.evaluate({ numericApproximation })),
+              acc.mul(x.evaluate({ numericApproximation: numeric })),
             ce.One
           ),
           ce._timeRemaining
@@ -2184,18 +2197,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return undefined; // Return undefined to keep expression symbolic
         }
         // Evaluate the accumulated result to combine numeric factors
-        return result?.evaluate({ numericApproximation }) ?? ce.NaN;
+        return result?.evaluate({ numericApproximation: numeric }) ?? ce.NaN;
       },
 
       evaluateAsync: async (ops, options) => {
         const ce = options.engine;
-        const numericApproximation = options.numericApproximation;
+        let numeric = options.numericApproximation;
+        if (!numeric) {
+          const mode = classifyBigopDomain(ops[0], ops.slice(1), ce);
+          if (mode === 'symbolic') return undefined;
+          if (mode === 'numeric') numeric = true;
+        }
         const result = await runAsync(
           reduceBigOp(
             ops[0],
             ops.slice(1),
             (acc: Expression, x) =>
-              acc.mul(x.evaluate({ numericApproximation })),
+              acc.mul(x.evaluate({ numericApproximation: numeric })),
             ce.One
           ),
           ce._timeRemaining,
@@ -2205,7 +2223,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_DOMAIN) {
           return undefined; // Return undefined to keep expression symbolic
         }
-        return result?.evaluate({ numericApproximation }) ?? ce.NaN;
+        return result?.evaluate({ numericApproximation: numeric }) ?? ce.NaN;
       },
     },
 
@@ -2247,12 +2265,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
 
         // Big-op form: Sum(body, [i, a, b], …).
+        // EL-4: an infinite (capped) domain is a truncated approximation, so
+        // accumulate it numerically rather than building an intractable exact
+        // rational; a symbolic body over such a domain stays symbolic.
+        let numeric = numericApproximation;
+        if (!numeric) {
+          const mode = classifyBigopDomain(first, rest, engine);
+          if (mode === 'symbolic') return undefined;
+          if (mode === 'numeric') numeric = true;
+        }
         const result = run(
           reduceBigOp(
             first,
             rest,
             (acc: Expression, x) =>
-              sumAccumulate(acc, x.evaluate({ numericApproximation }), numericApproximation),
+              sumAccumulate(acc, x.evaluate({ numericApproximation: numeric }), numeric),
             engine.Zero
           ),
           engine._timeRemaining
@@ -2260,7 +2287,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Non-enumerable domain: keep the expression symbolic.
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
         // Re-evaluate to combine numeric terms (e.g., 3x + 1 + 2 + 3 → 3x + 6).
-        return result?.evaluate({ numericApproximation }) ?? engine.NaN;
+        return result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN;
       },
 
       evaluateAsync: async (
@@ -2280,19 +2307,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return result?.evaluate({ numericApproximation }) ?? engine.NaN;
         }
 
+        let numeric = numericApproximation;
+        if (!numeric) {
+          const mode = classifyBigopDomain(first, rest, engine);
+          if (mode === 'symbolic') return undefined;
+          if (mode === 'numeric') numeric = true;
+        }
         const result = await runAsync(
           reduceBigOp(
             first,
             rest,
             (acc: Expression, x) =>
-              sumAccumulate(acc, x.evaluate({ numericApproximation }), numericApproximation),
+              sumAccumulate(acc, x.evaluate({ numericApproximation: numeric }), numeric),
             engine.Zero
           ),
           engine._timeRemaining,
           signal
         );
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
-        return result?.evaluate({ numericApproximation }) ?? engine.NaN;
+        return result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN;
       },
     },
   },

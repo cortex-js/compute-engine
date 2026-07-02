@@ -1,3 +1,6 @@
+import { ComputeEngine } from '../../src/compute-engine';
+import { CONDITIONS } from '../../src/compute-engine/boxed-expression/rules';
+
 import { engine as ce } from '../utils';
 
 describe('RULES', () => {
@@ -102,47 +105,45 @@ describe('OBJECT RULES LITERAL MATCHING', () => {
 });
 
 describe('INVALID RULES', () => {
-  it('should handle shorthand rule with no replace', () => {
+  // A single malformed rule is skipped (logged via console.error) rather than
+  // aborting the whole pass — this keeps one bad rule from taking down an
+  // otherwise valid ruleset (see boxRules / the replace() error contract).
+  let errorSpy: ReturnType<typeof jest.spyOn>;
+  beforeEach(() => {
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it('should skip (not throw on) a shorthand rule with no replace', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '\\pi + a';
-    expect(() => expr.replace(rule)).toThrowErrorMatchingInlineSnapshot(`
-
-            Invalid rule "\\pi + a"
-            |   a + pi
-            |   A rule should be of the form:
-            |   <match> -> <replace>; <condition>
-            |   Skipping rule "\\\\pi + a"
-
-
-        `);
+    // Skipped: nothing matches, so the result is null.
+    expect(expr.replace(rule)).toBeNull();
+    expect(errorSpy).toHaveBeenCalled();
+    expect(String(errorSpy.mock.calls[0][0])).toContain('Skipping rule');
   });
 
-  it('should handle shorthand rule with incorrect wildcards replace', () => {
+  it('should skip a shorthand rule with incorrect wildcards replace', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '\\pi + a -> b';
-    expect(() => expr.replace(rule)).toThrowErrorMatchingInlineSnapshot(`
-
-      Invalid rule "\\pi + a -> b"
-      |   The replace expression contains wildcards not present in the match expression
-      |   Skipping rule "\\\\pi + a -> b"
-
-
-    `);
+    expect(expr.replace(rule)).toBeNull();
+    expect(errorSpy).toHaveBeenCalled();
+    expect(String(errorSpy.mock.calls[0][0])).toContain(
+      'wildcards not present in the match'
+    );
   });
 
-  it('should handle redundant rules with simplify', () => {
+  it('should skip a redundant rule with simplify (leaving the expression unchanged)', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '0 + a -> a';
-    expect(() => expr.simplify({ rules: rule }))
-      .toThrowErrorMatchingInlineSnapshot(`
-
-      Invalid rule "0 + a -> a"
-      |   The match and replace expressions are the same.
-      |   This may be because the rule is not necessary due to canonical simplification
-      |   Skipping rule "0 + a -> a"
-
-
-    `);
+    // The only rule is skipped, so simplify() returns the canonical input.
+    expect(expr.simplify({ rules: rule }).toString()).toBe('3 + pi');
+    expect(errorSpy).toHaveBeenCalled();
+    expect(String(errorSpy.mock.calls[0][0])).toContain(
+      'match and replace expressions are the same'
+    );
   });
 });
 
@@ -319,5 +320,188 @@ describe('ReplaceOptions direction', () => {
       direction: 'right-left',
     });
     expect(result?.json).toEqual(['List', 3, 2, 1]);
+  });
+});
+
+// Regression tests for the SYMBOLIC "fail-open rule-condition" cluster
+// (P1-1, P1-7, P1-8, P1-10). Guards must be fail-closed: an unprovable
+// predicate must NOT discharge the rule.
+describe('fail-open rule-condition guards', () => {
+  describe('P1-1: predicate `≠` guards are fail-closed', () => {
+    const rule = '\\lfloor z \\rfloor -> \\lceil z \\rceil; z \\ne 0';
+
+    it('does not fire for an unconstrained symbol', () => {
+      const engine = new ComputeEngine();
+      expect(engine.parse('\\lfloor z \\rfloor').replace([rule])).toBeNull();
+    });
+
+    it('fires under assume(z > 0) (bounds entail z ≠ 0)', () => {
+      const engine = new ComputeEngine();
+      engine.assume(engine.parse('z > 0'));
+      expect(
+        engine.parse('\\lfloor z \\rfloor').replace([rule])?.toString()
+      ).toBe('ceil(z)');
+    });
+
+    it('fires when the symbol has a definite nonzero value', () => {
+      const engine = new ComputeEngine();
+      engine.assign('z', 3);
+      expect(
+        engine.parse('\\lfloor z \\rfloor').replace([rule])?.toString()
+      ).toBe('ceil(z)');
+    });
+
+    it('does not fire when the value is zero', () => {
+      const engine = new ComputeEngine();
+      engine.assign('z', 0);
+      expect(engine.parse('\\lfloor z \\rfloor').replace([rule])).toBeNull();
+    });
+  });
+
+  describe('P1-7: shortcut wildcard conditions are fail-closed', () => {
+    it(':notzero does not fire for an unknown symbol', () => {
+      const engine = new ComputeEngine();
+      expect(engine.parse('q^2').replace(['x^2 -> 42; x:notzero'])).toBeNull();
+    });
+
+    it(':notzero fires for a nonzero value and not for zero', () => {
+      const e1 = new ComputeEngine();
+      e1.assign('q', 2);
+      expect(e1.parse('q^2').replace(['x^2 -> 42; x:notzero'])?.toString()).toBe(
+        '42'
+      );
+      const e0 = new ComputeEngine();
+      e0.assign('q', 0);
+      expect(e0.parse('q^2').replace(['x^2 -> 42; x:notzero'])).toBeNull();
+    });
+
+    it(':notone does not fire for an unknown symbol, fires only when ≠ 1', () => {
+      const engine = new ComputeEngine();
+      expect(engine.parse('q^2').replace(['x^2 -> 42; x:notone'])).toBeNull();
+      const e5 = new ComputeEngine();
+      e5.assign('q', 5);
+      expect(e5.parse('q^2').replace(['x^2 -> 42; x:notone'])?.toString()).toBe(
+        '42'
+      );
+      const e1 = new ComputeEngine();
+      e1.assign('q', 1);
+      expect(e1.parse('q^2').replace(['x^2 -> 42; x:notone'])).toBeNull();
+    });
+
+    it(':notreal does not fire for an unknown symbol, fires for i', () => {
+      const engine = new ComputeEngine();
+      expect(engine.parse('q^2').replace(['x^2 -> 42; x:notreal'])).toBeNull();
+      const ei = new ComputeEngine();
+      expect(ei.parse('i^2').replace(['x^2 -> 42; x:notreal'])?.toString()).toBe(
+        '42'
+      );
+    });
+
+    it(':composite does not classify 0 or 1 as composite', () => {
+      const c1 = new ComputeEngine();
+      expect((CONDITIONS as any).composite(c1.box(1))).toBe(false);
+      expect((CONDITIONS as any).composite(c1.box(0))).toBe(false);
+      expect((CONDITIONS as any).composite(c1.box(4))).toBe(true);
+      expect((CONDITIONS as any).composite(c1.box(9))).toBe(true);
+      expect((CONDITIONS as any).composite(c1.box(7))).toBe(false);
+    });
+
+    it(':positive control is unchanged (fail-closed)', () => {
+      const engine = new ComputeEngine();
+      expect(engine.parse('q^2').replace(['x^2 -> 42; x:positive'])).toBeNull();
+      const e3 = new ComputeEngine();
+      e3.assign('q', 3);
+      expect(
+        e3.parse('q^2').replace(['x^2 -> 42; x:positive'])?.toString()
+      ).toBe('42');
+    });
+  });
+
+  describe('P1-8: an exception in a replace function skips only that rule', () => {
+    it('a later rule still applies after an earlier replace-fn throws', () => {
+      const engine = new ComputeEngine();
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const r = engine.expr(['Sin', 'x']).replace([
+        {
+          match: ['Sin', '_x'],
+          replace: (() => {
+            throw new Error('boom-replace');
+          }) as any,
+        },
+        { match: ['Sin', '_x'], replace: ['Tan', '_x'] },
+      ]);
+      expect(r?.toString()).toBe('tan(x)');
+      expect(spy).toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it('a mid-ruleset throw does not discard earlier or later rewrites', () => {
+      const engine = new ComputeEngine();
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const r = engine.expr(['Sin', 'x']).replace([
+        { match: ['Sin', '_x'], replace: ['Cos', '_x'] },
+        {
+          match: ['Cos', '_x'],
+          replace: (() => {
+            throw new Error('boom-2');
+          }) as any,
+        },
+        { match: ['Cos', '_x'], replace: ['Tan', '_x'] },
+      ]);
+      expect(r?.toString()).toBe('tan(x)');
+      spy.mockRestore();
+    });
+  });
+
+  describe('P1-10: multi-condition LaTeX shortcuts parse and are fail-closed', () => {
+    const shortcuts = [
+      '\\in\\Z^+',
+      '\\in\\Z^-',
+      '\\in\\Z^*',
+      '\\in\\N',
+      '\\in\\N^*',
+      '\\in\\N_0',
+      '\\in\\R^*',
+    ];
+
+    it('every shortcut parses without throwing and is fail-closed', () => {
+      for (const sh of shortcuts) {
+        const engine = new ComputeEngine();
+        // Must not throw, and must not fire for an unconstrained symbol.
+        expect(engine.parse('q^2').replace([`x^2 -> 42; x:${sh}`])).toBeNull();
+      }
+    });
+
+    it('shortcuts fire only when the membership is provable', () => {
+      const zplus = new ComputeEngine();
+      zplus.assign('q', 3);
+      expect(
+        zplus.parse('q^2').replace(['x^2 -> 42; x:\\in\\Z^+'])?.toString()
+      ).toBe('42');
+
+      const zplusNonInt = new ComputeEngine();
+      zplusNonInt.assign('q', 2.5);
+      expect(
+        zplusNonInt.parse('q^2').replace(['x^2 -> 42; x:\\in\\Z^+'])
+      ).toBeNull();
+
+      const zstar = new ComputeEngine();
+      zstar.assign('q', 5);
+      expect(
+        zstar.parse('q^2').replace(['x^2 -> 42; x:\\in\\Z^*'])?.toString()
+      ).toBe('42');
+
+      const zstarZero = new ComputeEngine();
+      zstarZero.assign('q', 0);
+      expect(
+        zstarZero.parse('q^2').replace(['x^2 -> 42; x:\\in\\Z^*'])
+      ).toBeNull();
+
+      const nat = new ComputeEngine();
+      nat.assign('q', 0);
+      expect(nat.parse('q^2').replace(['x^2 -> 42; x:\\in\\N'])?.toString()).toBe(
+        '42'
+      );
+    });
   });
 });

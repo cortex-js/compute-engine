@@ -45,6 +45,40 @@
 
 ### Resolved Issues
 
+- **Sums over infinite index sets evaluate (and can be interrupted).**
+  `\sum_{n \in \mathbb{Z}^+} \frac{1}{n^2}` hung indefinitely under
+  `evaluate()` — the set-domain iteration path never yielded to the
+  time-limit check, and exact accumulation over the (truncated-infinite)
+  domain built rationals with tens of thousands of digits. Infinite domains
+  now accumulate numerically (≈1.6449 in ~40 ms), symbolic-parameter bodies
+  (`\sum x^n`) stay symbolic, divergent sums respect the time limit, and
+  finite sums remain exact.
+
+- **Rule conditions no longer discharge vacuously.** A rule guard such as
+  `x \ne 0` was satisfied by *any* unconstrained symbol (the pragmatic
+  unknown→True collapse of `Equal`/`NotEqual` leaked into rule matching);
+  guards now require provability (and a proven `z > 0` does prove
+  `z \ne 0`). The `:notzero`, `:notone`, `:notreal`, `:composite`, and
+  `:irrational` wildcard conditions were similarly fail-open for unknowns
+  and are now three-valued. A rule whose replacement function throws is
+  logged and skipped instead of silently aborting the whole `replace()`
+  pass, and the `\in\Z^+`-family condition shortcuts now work (they threw).
+
+- **`\operatorname{KroneckerDelta}(0)` is `1`.** The single-argument form
+  answered like a boolean test (`0 → 0`); it now implements `\delta_{n,0}`
+  and stays symbolic for undetermined arguments.
+
+- **`Quartiles` follows one convention.** Q1 and Q3 mixed
+  exclusive/inclusive conventions (`[1..9]` gave `(2.5, 5, 7)`, matching no
+  standard); all paths now use Moore–McCabe (median excluded):
+  `(2.5, 5, 7.5)`, with `InterquartileRange` consistent.
+
+- **`\frac{d}{dx}\operatorname{Mod}(x, 5)` is `1`, not `0`** (the sawtooth
+  has slope 1 almost everywhere); a modulus that itself depends on the
+  variable stays symbolic. Two alternating-binomial `\sum \to 0`
+  simplifications also fired outside their validity bounds (wrong at
+  `b = 0` and `b = 1`); they now require the bound to be provable.
+
 - **Five special-function kernels returned wrong digits at every precision —
   all repaired and verified digit-for-digit against mpmath.**
   `\operatorname{PolyGamma}(n, x)` for `n \ge 3` was missing a factorial

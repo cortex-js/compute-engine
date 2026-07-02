@@ -382,12 +382,16 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Quartiles: {
       description:
-        'Lower quartile, median, and upper quartile of a collection.',
+        'Lower quartile, median, and upper quartile of a collection. ' +
+        'Uses the Moore–McCabe (exclusive-hinges) convention: the sample is ' +
+        'split at its median, and Q1/Q3 are the medians of the lower/upper ' +
+        'halves with the overall median excluded from both halves when the ' +
+        'sample size is odd.',
       complexity: 1200,
       broadcastable: false,
       signature:
         '((collection|number)+) -> tuple<mid:number, lower:number, upper:number>',
-      examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (3, 2, 4)'],
+      examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)'],
       evaluate: (ops, { engine, numericApproximation }) => {
         if (!numericApproximation) {
           const vals = exactData(ops);
@@ -633,16 +637,21 @@ function sortExact(vals: Expression[]): Expression[] {
   return [...vals].sort((a, b) => a.re - b.re);
 }
 
+// Same Moore–McCabe convention as `quartiles()`/`bigQuartiles()` in
+// `numerics/statistics.ts`: exclude the overall median from both the lower
+// and upper half when the sample size is odd, so Q1/Q3 are symmetric.
 function exactQuartiles(
   ce: ComputeEngine,
   vals: Expression[]
 ): [Expression, Expression, Expression] {
   const sorted = sortExact(vals);
-  const mid = Math.floor(sorted.length / 2);
+  const n = sorted.length;
+  const mid = Math.floor(n / 2);
+  const upperStart = mid + (n % 2);
   return [
     exactMedianOf(ce, sorted.slice(0, mid)),
     exactMedianOf(ce, sorted),
-    exactMedianOf(ce, sorted.slice(mid)),
+    exactMedianOf(ce, sorted.slice(upperStart)),
   ];
 }
 

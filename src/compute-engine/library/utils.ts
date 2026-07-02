@@ -42,6 +42,68 @@ export function convertInfiniteSetToLimits(
   }
 }
 
+/**
+ * EL-4: Classify a big-op (`Sum`/`Product`) domain to decide how it should be
+ * accumulated under an *exact* `evaluate()` (i.e. not `numericApproximation`).
+ *
+ * An infinite integer domain — `n ∈ ℤ⁺`, `n ∈ ℕ₀`, or a `Limits` range with an
+ * infinite bound — is iterated up to `MAX_ITERATION` terms, so its value is only
+ * a *truncated numeric approximation*, never a closed form. Accumulating it
+ * exactly builds an intractable object that both hangs the thread and is
+ * meaningless:
+ *   - `Σ 1/n²` over ℤ⁺ becomes a rational whose denominator is the LCM of 10⁴
+ *     squares (a bigint with tens of thousands of digits);
+ *   - `Σ xⁿ` becomes a 10⁴-term symbolic polynomial.
+ *
+ * Returns:
+ *   - `'finite'`   — the domain is finite (or non-iterable / symbolic); evaluate
+ *                    normally, preserving exactness.
+ *   - `'numeric'`  — infinite domain with a numeric body; accumulate as floats
+ *                    (fast, and honest about the truncation).
+ *   - `'symbolic'` — infinite domain with a body that has free variables beyond
+ *                    the index (e.g. `Σ xⁿ`); a truncated partial value is
+ *                    meaningless, so keep the expression symbolic.
+ */
+export function classifyBigopDomain(
+  body: Expression | undefined,
+  indexes: ReadonlyArray<Expression>,
+  ce: ComputeEngine
+): 'finite' | 'numeric' | 'symbolic' {
+  let infinite = false;
+  const indexNames = new Set<string>();
+
+  for (const idx of indexes) {
+    if (!isFunction(idx)) continue;
+    const indexSym = isSymbol(idx.op1) ? idx.op1.symbol : undefined;
+    if (indexSym !== undefined) indexNames.add(indexSym);
+
+    if (idx.operator === 'Element') {
+      // Only ℕ₀ / ℤ⁺ are converted to a forward iteration (see
+      // `convertInfiniteSetToLimits`); other infinite sets stay symbolic on
+      // their own, so they don't need the numeric treatment here.
+      const r = extractFiniteDomainWithReason(idx, ce);
+      if (
+        r.status === 'non-enumerable' &&
+        r.reason === 'infinite-domain' &&
+        r.domain &&
+        isSymbol(r.domain) &&
+        convertInfiniteSetToLimits(r.domain.symbol)
+      )
+        infinite = true;
+    } else if (idx.operator === 'Limits') {
+      if (!normalizeIndexingSet(idx).isFinite) infinite = true;
+    }
+  }
+
+  if (!infinite) return 'finite';
+
+  // The body is numeric iff its only free variables are the index variables.
+  // (`unknowns` already excludes constants like `Pi` and any name bound to a
+  // value, and function heads are not counted as free variables.)
+  const numericBody = (body?.unknowns ?? []).every((s) => indexNames.has(s));
+  return numericBody ? 'numeric' : 'symbolic';
+}
+
 export type IndexingSet = {
   index: string | undefined;
   lower: number;
@@ -484,14 +546,17 @@ export function* reduceBigOp<T>(
     // Use the internal generator that returns detailed results
     const gen = reduceElementIndexingSets(body, indexes, fn, initial, true);
 
-    // Properly iterate the generator to capture both yielded values and the return value
+    // Properly iterate the generator to capture both yielded values and the
+    // return value. Re-yield each intermediate accumulator so a wrapping
+    // `run()` / `runAsync()` can enforce the engine deadline *between*
+    // iterations. The accumulators are `BoxedExpression` objects; an earlier
+    // `typeof result !== 'object'` guard here silently swallowed every one of
+    // them, so nothing was ever yielded, a single `gen.next()` ran the whole
+    // (possibly 10⁴-term) reduction to completion, and an infinite or
+    // expensive domain would hang past the timeout instead of being cancelled.
     let iterResult = gen.next();
     while (!iterResult.done) {
-      const result = iterResult.value;
-      // Yield intermediate results for progress tracking (skip object results)
-      if (result !== undefined && typeof result !== 'object') {
-        yield result;
-      }
+      yield iterResult.value;
       iterResult = gen.next();
     }
 
@@ -567,7 +632,11 @@ function* reduceElementIndexingSets<T>(
   fn: (acc: T, x: Expression) => T | null,
   initial: T,
   returnReason = false
-): Generator<T | ReduceElementResult<T> | undefined> {
+  // Yields only accumulator values (`T | undefined`) between iterations; the
+  // detailed `ReduceElementResult` classification is delivered as the *return*
+  // value. Splitting yield/return types lets `reduceBigOp` re-yield each
+  // accumulator (for deadline checks) without widening its own yield type.
+): Generator<T | undefined, T | ReduceElementResult<T> | undefined> {
   const ce = body.engine;
 
   // Separate Element and Limits indexing sets
