@@ -16,7 +16,7 @@
       "name": "Abs",
       "category": "Arithmetic",
       "arity": "1",
-      "signature": "(number) -> number",
+      "signature": "(number) -> real",
       "associative": false,
       "commutative": false,
       "idempotent": true,
@@ -61,6 +61,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Adjugate (classical adjoint) of a square matrix."
+    },
+    {
+      "name": "AGM",
+      "category": "special-functions",
+      "arity": "optional",
+      "signature": "(number, number?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Arithmetic-geometric mean. AGM(z) is shorthand for AGM(1, z) (Fungrim convention)."
     },
     {
       "name": "AiryAi",
@@ -111,6 +123,31 @@
       "lazy": true,
       "broadcastable": false,
       "description": "Attach metadata or style annotations to an expression."
+    },
+    {
+      "name": "Apart",
+      "category": "Polynomials",
+      "arity": "2",
+      "signature": "(value, symbol) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Alias for PartialFraction. Decompose a rational expression into partial fractions."
+    },
+    {
+      "name": "AppellF1",
+      "category": "special-functions",
+      "arity": "6",
+      "signature": "(number, number, number, number, number, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for |x|, |y| < 1.",
+      "wikidata": "Q2701540"
     },
     {
       "name": "Apply",
@@ -249,7 +286,7 @@
       "name": "Arctan",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(number) -> finite_real",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -317,6 +354,66 @@
       "broadcastable": true
     },
     {
+      "name": "AsHsl",
+      "category": "Colors",
+      "arity": "1",
+      "signature": "(color) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Convert any color to HSL (hue degrees, s/l 0-1)"
+    },
+    {
+      "name": "AsHsv",
+      "category": "Colors",
+      "arity": "1",
+      "signature": "(color) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Convert any color to HSV (hue degrees, s/v 0-1)"
+    },
+    {
+      "name": "AsOklab",
+      "category": "Colors",
+      "arity": "1",
+      "signature": "(color) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Convert any color to OKLab"
+    },
+    {
+      "name": "AsOklch",
+      "category": "Colors",
+      "arity": "1",
+      "signature": "(color) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Convert any color to OKLCh"
+    },
+    {
+      "name": "AsRgb",
+      "category": "Colors",
+      "arity": "1",
+      "signature": "(color) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Convert any color to sRGB (channels 0-1)"
+    },
+    {
       "name": "Assign",
       "category": "Core",
       "arity": "2",
@@ -326,7 +423,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Assign a value to a symbol or define a sequence"
+      "description": "Assign a value to a symbol or define a sequence. The RHS is evaluated immediately and `ce.assign(name, val)` mutates the binding in the current scope chain. When used inside a `Block`, the assignment is visible to subsequent statements in the block (sequential semantics)."
     },
     {
       "name": "Assume",
@@ -344,13 +441,13 @@
       "name": "At",
       "category": "Collections",
       "arity": "variadic",
-      "signature": "(value: indexed_collection, index: (number|string)+) -> unknown",
+      "signature": "(value: indexed_collection | dictionary, index: (number|string|indexed_collection)+) -> unknown",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Access an element of an indexed collection.\n\nIf the index is negative, it is counted from the end.\n\nMultiple indices can be provided to access nested collections (e.g., matrices)."
+      "description": "Access an element of an indexed collection.\n\nIf the index is negative, it is counted from the end.\n\nMultiple indices can be provided to access nested collections (e.g., matrices).\n\nIf the index is a finite collection of booleans, returns the elements where the mask is True.\n\nIf the index is a finite collection of integers, returns the elements at those indices."
     },
     {
       "name": "BaseForm",
@@ -376,6 +473,21 @@
       "broadcastable": false,
       "description": "Compute the Bell number B(n), the number of partitions of a set of n elements.",
       "wikidata": "Q816063"
+    },
+    {
+      "name": "BernoulliB",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> finite_rational",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the nth Bernoulli number Bₙ as an exact rational, using the convention B₁ = -1/2. Odd `n > 1` give 0.",
+      "examples": [
+        "BernoulliB(2)  // 1/6"
+      ]
     },
     {
       "name": "BesselI",
@@ -461,13 +573,13 @@
       "name": "Binomial",
       "category": "Combinatorics",
       "arity": "2",
-      "signature": "(integer, integer) -> integer",
+      "signature": "(number, number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Compute the binomial coefficient C(n, k) = n! / (k! (n-k)!).",
+      "description": "Compute the binomial coefficient C(n, k) = n! / (k! (n-k)!). Agrees with Choose for all defined values.",
       "wikidata": "Q209875"
     },
     {
@@ -480,7 +592,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Evaluate a sequence of expressions in a local scope."
+      "description": "Evaluate a sequence of expressions in a local scope, **sequentially**. Each operand is evaluated in order; later operands observe side effects (`Assign`, `Declare`) of earlier operands. The block's value is the value of the last expression. Short-circuiting heads (`Return`, `Break`, `Continue`) terminate the sequence early.\n\nIMPORTANT — consumers translating *simultaneous* action tuples (e.g. Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp first, then assign the temps to the LHS symbols. See `docs/architecture/actions-and-randomness.md` for the canonical recipe."
     },
     {
       "name": "Boole",
@@ -531,6 +643,21 @@
       "description": "Return the canonical form of an expression\n\nCan be used to sort arguments of an expression.\n\nSorting arguments of commutative functions is a weak form of canonicalization that can be useful in some cases, for example to accept \"x+1\" and \"1+x\" while rejecting \"x+1\" and \"2x-x+1\""
     },
     {
+      "name": "CarmichaelLambda",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. Defined for `n ≥ 1`.",
+      "examples": [
+        "CarmichaelLambda(15)  // 4"
+      ]
+    },
+    {
       "name": "CartesianProduct",
       "category": "Combinatorics",
       "arity": "variadic",
@@ -544,6 +671,21 @@
       "wikidata": "Q173740"
     },
     {
+      "name": "CatalanNumber",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`.",
+      "examples": [
+        "CatalanNumber(5)  // 42"
+      ]
+    },
+    {
       "name": "Ceil",
       "category": "Arithmetic",
       "arity": "1",
@@ -554,6 +696,33 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Rounds a number up to the next largest integer"
+    },
+    {
+      "name": "CharacteristicPolynomial",
+      "category": "Linear Algebra",
+      "arity": "optional",
+      "signature": "(matrix, any?) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Characteristic polynomial det(x·I − A) of a square matrix (monic)."
+    },
+    {
+      "name": "ChineseRemainder",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(collection, collection) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. Undefined if the system is inconsistent or the two lists differ in length.",
+      "examples": [
+        "ChineseRemainder([2, 3, 2], [3, 5, 7])  // 23"
+      ]
     },
     {
       "name": "CholeskyDecomposition",
@@ -577,7 +746,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Binomial coefficient: number of ways to choose k items from n."
+      "description": "Binomial coefficient: number of ways to choose k items from n. Agrees with Binomial for all defined values."
     },
     {
       "name": "Chop",
@@ -613,25 +782,37 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the list of coefficients of a polynomial, from lowest to highest degree. Example: CoefficientList(x³ + 2x + 1, x) → [1, 2, 0, 1]"
+      "description": "Return the list of coefficients of a polynomial, from highest to lowest degree. Example: CoefficientList(x³ + 2x + 1, x) → [1, 0, 2, 1]"
     },
     {
-      "name": "Color",
-      "category": "Colors",
-      "arity": "1",
-      "signature": "(string) -> tuple",
+      "name": "Colon",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(any, any) -> expression",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Convert a color string to a canonical sRGB tuple"
+      "description": "Type annotation (`a : b`) — opaque typed head."
+    },
+    {
+      "name": "Color",
+      "category": "Colors",
+      "arity": "1",
+      "signature": "(string) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Parse a CSS-style color string to an Oklch color"
     },
     {
       "name": "ColorContrast",
       "category": "Colors",
       "arity": "2",
-      "signature": "(any, any) -> number",
+      "signature": "(color | string | tuple, color | string | tuple) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -640,10 +821,22 @@
       "description": "APCA contrast ratio between two colors"
     },
     {
+      "name": "ColorDelta",
+      "category": "Colors",
+      "arity": "2",
+      "signature": "(color | string | tuple, color | string | tuple) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Perceptual color difference (ΔE_OK) between two colors"
+    },
+    {
       "name": "ColorFromColorspace",
       "category": "Colors",
       "arity": "2",
-      "signature": "(tuple, string) -> tuple",
+      "signature": "(color | tuple, string) -> tuple",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -655,7 +848,7 @@
       "name": "Colormap",
       "category": "Colors",
       "arity": "optional",
-      "signature": "(string, number?) -> any",
+      "signature": "(string, number?) -> color | list<color>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -667,7 +860,7 @@
       "name": "ColorMix",
       "category": "Colors",
       "arity": "optional",
-      "signature": "(any, any, number?) -> tuple",
+      "signature": "(color | string | tuple, color | string | tuple, number?) -> color",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -679,7 +872,7 @@
       "name": "ColorToColorspace",
       "category": "Colors",
       "arity": "2",
-      "signature": "(any, string) -> tuple",
+      "signature": "(color | string | tuple, string) -> tuple",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -691,7 +884,7 @@
       "name": "ColorToString",
       "category": "Colors",
       "arity": "optional",
-      "signature": "(any, string?) -> string",
+      "signature": "(color | string | tuple, string?) -> string",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -726,6 +919,19 @@
       "wikidata": "Q242767"
     },
     {
+      "name": "Complex",
+      "category": "Arithmetic",
+      "arity": "2",
+      "signature": "(real: number, imaginary: number) -> complex",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Construct a complex number from real and imaginary parts. Converted directly to a BoxedNumber during boxing; this entry exists so `operatorInfo(\"Complex\")` returns a signature.",
+      "wikidata": "Q11567"
+    },
+    {
       "name": "ComplexRoots",
       "category": "Arithmetic",
       "arity": "2",
@@ -740,8 +946,8 @@
     {
       "name": "Condition",
       "category": "Control Structures",
-      "arity": "2",
-      "signature": "(value, symbol) -> boolean",
+      "arity": "optional",
+      "signature": "(expression, symbol?) -> boolean",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -798,10 +1004,25 @@
       "description": "Return True if the collection contains the given element, False otherwise."
     },
     {
+      "name": "ContinuedFraction",
+      "category": "Number Theory",
+      "arity": "optional",
+      "signature": "(number, integer?) -> list<integer>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully; for an inexact value the expansion is truncated to the optional `n` terms (default 20).",
+      "examples": [
+        "ContinuedFraction(43/19)  // [2, 3, 1, 4]"
+      ]
+    },
+    {
       "name": "ContrastingColor",
       "category": "Colors",
       "arity": "optional",
-      "signature": "(any, any?, any?) -> tuple",
+      "signature": "(color | string | tuple, (color | string | tuple)?, (color | string | tuple)?) -> color",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -830,6 +1051,18 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true
+    },
+    {
+      "name": "CosIntegral",
+      "category": "Trigonometry",
+      "arity": "1",
+      "signature": "(number) -> real",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt."
     },
     {
       "name": "Cot",
@@ -876,6 +1109,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return the number of elements in the collection satisfying the predicate."
+    },
+    {
+      "name": "Cross",
+      "category": "Linear Algebra",
+      "arity": "2",
+      "signature": "(vector, vector) -> vector",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Cross product of two 3-vectors."
     },
     {
       "name": "Csc",
@@ -938,6 +1183,19 @@
       "description": "Declare a symbol and optionally assign a type."
     },
     {
+      "name": "DedekindEta",
+      "category": "special-functions",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Dedekind eta function η(τ), Im(τ) > 0.",
+      "wikidata": "Q1187208"
+    },
+    {
       "name": "Degree",
       "category": "Linear Algebra",
       "arity": "1",
@@ -988,8 +1246,8 @@
     {
       "name": "Derivative",
       "category": "Calculus",
-      "arity": "optional",
-      "signature": "(function, order:number?) -> function",
+      "arity": "variadic",
+      "signature": "(function, order:number*) -> function",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1047,6 +1305,21 @@
       "wikidata": "Q1142755"
     },
     {
+      "name": "DigitCount",
+      "category": "Number Theory",
+      "arity": "optional",
+      "signature": "(integer, integer?, integer?) -> integer | list<integer>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`.",
+      "examples": [
+        "DigitCount(122, 10, 2)  // 2"
+      ]
+    },
+    {
       "name": "DigitsFrom",
       "category": "Core",
       "arity": "optional",
@@ -1059,6 +1332,21 @@
       "description": "Return an integer representation of the string `s` in base `base`."
     },
     {
+      "name": "DigitSum",
+      "category": "Number Theory",
+      "arity": "optional",
+      "signature": "(integer, integer?) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored.",
+      "examples": [
+        "DigitSum(1234)  // 10"
+      ]
+    },
+    {
       "name": "Dimension",
       "category": "Linear Algebra",
       "arity": "1",
@@ -1069,6 +1357,30 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Dimension of an object"
+    },
+    {
+      "name": "Discriminant",
+      "category": "Polynomials",
+      "arity": "2",
+      "signature": "(value, symbol) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the discriminant of a polynomial. Example: Discriminant(x² - 5x + 6, x) → 1"
+    },
+    {
+      "name": "Distance",
+      "category": "Arithmetic",
+      "arity": "2",
+      "signature": "(tuple, tuple) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Euclidean distance between two points (tuples of numbers)."
     },
     {
       "name": "Distribute",
@@ -1096,6 +1408,36 @@
       "wikidata": "Q1226939"
     },
     {
+      "name": "Divisors",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> list<integer>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the sorted list of positive divisors of an integer `n`. The sign of `n` is ignored.",
+      "examples": [
+        "Divisors(12)  // [1, 2, 3, 4, 6, 12]"
+      ]
+    },
+    {
+      "name": "DivisorSigma",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(integer, integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. Defined for `n ≥ 1`.",
+      "examples": [
+        "DivisorSigma(2, 6)  // 50"
+      ]
+    },
+    {
       "name": "DMS",
       "category": "Trigonometry",
       "arity": "optional",
@@ -1108,6 +1450,18 @@
       "description": "Construct an angle from degrees, minutes, and seconds."
     },
     {
+      "name": "Dot",
+      "category": "Linear Algebra",
+      "arity": "2",
+      "signature": "(matrix|vector, matrix|vector) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Dot product (vector inner product) or matrix product."
+    },
+    {
       "name": "Drop",
       "category": "Collections",
       "arity": "2",
@@ -1118,6 +1472,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return the collection without the first n elements."
+    },
+    {
+      "name": "DSolve",
+      "category": "Calculus",
+      "arity": "3",
+      "signature": "(expression, symbol, symbol) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Symbolic differential equation solver."
     },
     {
       "name": "Eigen",
@@ -1156,6 +1522,18 @@
       "description": "Eigenvectors of a square matrix."
     },
     {
+      "name": "EisensteinE",
+      "category": "special-functions",
+      "arity": "2",
+      "signature": "(number, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Normalized Eisenstein series Eₛ(τ) of even weight s ≥ 2, Im(τ) > 0."
+    },
+    {
       "name": "Element",
       "category": "Collections",
       "arity": "optional",
@@ -1166,6 +1544,58 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Test whether a value is an element of a collection. Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.\n\nElement supports two modes of operation:\n1. Set membership: Element(3, [List, 1, 2, 3]) checks if 3 is in the list\n2. Type-style membership: Element(x, integer) checks if x has type integer\n\nType-style membership works with:\n- Mathematical sets: Integers, RealNumbers, ComplexNumbers, etc.\n- Type names: integer, real, number, finite_real, positive_integer, etc.\n- Invalid type names remain unevaluated (e.g., Element(2, \"Booleans\"))"
+    },
+    {
+      "name": "EllipticE",
+      "category": "special-functions",
+      "arity": "optional",
+      "signature": "(number, number?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Elliptic integral of the second kind: complete E(m) with one argument, incomplete E(φ|m) with two (amplitude first, parameter convention m = k², as in Mathematica).",
+      "wikidata": "Q1375529"
+    },
+    {
+      "name": "EllipticF",
+      "category": "special-functions",
+      "arity": "2",
+      "signature": "(number, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Incomplete elliptic integral of the first kind F(φ|m) (amplitude first, parameter convention m = k², as in Mathematica). F(π/2|m) = K(m).",
+      "wikidata": "Q1062952"
+    },
+    {
+      "name": "EllipticK",
+      "category": "special-functions",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Complete elliptic integral of the first kind K(m), parameter convention m = k².",
+      "wikidata": "Q1080993"
+    },
+    {
+      "name": "EllipticPi",
+      "category": "special-functions",
+      "arity": "optional",
+      "signature": "(number, number, number?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Elliptic integral of the third kind: complete Π(n|m) with two arguments, incomplete Π(n; φ|m) with three (characteristic first, amplitude second, parameter convention m = k², as in Mathematica).",
+      "wikidata": "Q1123360"
     },
     {
       "name": "Equal",
@@ -1213,6 +1643,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Complementary error function: 1 - Erf(x)"
+    },
+    {
+      "name": "Erfi",
+      "category": "Statistics",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Imaginary error function: -i·Erf(i·x)"
     },
     {
       "name": "ErfInv",
@@ -1278,7 +1720,7 @@
       "name": "EvaluateAt",
       "category": "Core",
       "arity": "3",
-      "signature": "(function, lower:number, upper:number) -> number",
+      "signature": "(function, lower:expression, upper:expression) -> unknown",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1358,6 +1800,34 @@
       "description": "Recursively expand out products and positive integer powers"
     },
     {
+      "name": "ExpIntegralEi",
+      "category": "special-functions",
+      "arity": "1",
+      "signature": "(number) -> real",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Exponential integral Ei(x) = PV ∫_{−∞}^x eᵗ/t dt.",
+      "wikidata": "Q1361401"
+    },
+    {
+      "name": "ExtendedGCD",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(integer, integer) -> tuple<integer, integer, integer>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients).",
+      "examples": [
+        "ExtendedGCD(12, 18)  // (6, -1, 1)"
+      ]
+    },
+    {
       "name": "Factor",
       "category": "Polynomials",
       "arity": "optional",
@@ -1373,7 +1843,7 @@
       "name": "Factorial",
       "category": "Arithmetic",
       "arity": "1",
-      "signature": "(integer) -> integer",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1393,6 +1863,21 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Double Factorial Function"
+    },
+    {
+      "name": "FactorInteger",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> list<tuple<integer, integer>>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign.",
+      "examples": [
+        "FactorInteger(360)  // [(2, 3), (3, 2), (5, 1)]"
+      ]
     },
     {
       "name": "Fibonacci",
@@ -1447,7 +1932,7 @@
       "name": "First",
       "category": "Collections",
       "arity": "1",
-      "signature": "(collection) -> any",
+      "signature": "(any) -> any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1539,6 +2024,36 @@
       "description": "Fresnel sine integral."
     },
     {
+      "name": "FromContinuedFraction",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(collection) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Reconstruct the (rational) value of a continued fraction given its list of integer terms `[a0, a1, …]`.",
+      "examples": [
+        "FromContinuedFraction([2, 3, 1, 4])  // 43/19"
+      ]
+    },
+    {
+      "name": "FromDigits",
+      "category": "Number Theory",
+      "arity": "optional",
+      "signature": "(collection, integer?) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Reconstruct an integer from its list of digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally (Horner evaluation).",
+      "examples": [
+        "FromDigits([1, 2, 3, 4])  // 1234"
+      ]
+    },
+    {
       "name": "Function",
       "category": "Core",
       "arity": "variadic",
@@ -1553,14 +2068,14 @@
     {
       "name": "Gamma",
       "category": "Arithmetic",
-      "arity": "1",
-      "signature": "(number) -> number",
+      "arity": "optional",
+      "signature": "(number, number?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Gamma function, extending factorial to complex numbers.",
+      "description": "Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt.",
       "wikidata": "Q190573"
     },
     {
@@ -1579,13 +2094,25 @@
       "name": "GCD",
       "category": "Arithmetic",
       "arity": "variadic",
-      "signature": "(any*) -> integer",
+      "signature": "(any*) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
       "description": "Greatest Common Divisor"
+    },
+    {
+      "name": "GeometricVector",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(any, any) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `Vector` operator."
     },
     {
       "name": "GraphemeClusters",
@@ -1607,7 +2134,7 @@
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false
     },
     {
@@ -1618,7 +2145,7 @@
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false
     },
     {
@@ -1632,6 +2159,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Partition the collection into a dictionary of lists based on the key returned by the function."
+    },
+    {
+      "name": "HadamardProduct",
+      "category": "Linear Algebra",
+      "arity": "2",
+      "signature": "(matrix|vector, matrix|vector) -> matrix|vector",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Hadamard (element-wise) product of two vectors or matrices of the same shape."
     },
     {
       "name": "Haversine",
@@ -1720,6 +2259,56 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Horizontal spacing annotation."
+    },
+    {
+      "name": "Hsl",
+      "category": "Colors",
+      "arity": "optional",
+      "signature": "(number, number, number, number?) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "HSL color (hue degrees, saturation/lightness 0-1, optional alpha)"
+    },
+    {
+      "name": "Hsv",
+      "category": "Colors",
+      "arity": "optional",
+      "signature": "(number, number, number, number?) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "HSV color (hue degrees, saturation/value 0-1, optional alpha)"
+    },
+    {
+      "name": "Hypergeometric1F1",
+      "category": "special-functions",
+      "arity": "3",
+      "signature": "(number, number, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Kummer confluent hypergeometric function ₁F₁(a; b; z) = M(a, b, z).",
+      "wikidata": "Q1331447"
+    },
+    {
+      "name": "Hypergeometric2F1",
+      "category": "special-functions",
+      "arity": "4",
+      "signature": "(number, number, number, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Gauss hypergeometric function ₂F₁(a, b; c; z).",
+      "wikidata": "Q672619"
     },
     {
       "name": "Hypot",
@@ -1828,6 +2417,36 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Like Min, but defined for open sets"
+    },
+    {
+      "name": "IntegerDigits",
+      "category": "Number Theory",
+      "arity": "optional",
+      "signature": "(integer, integer?, integer?) -> list<integer>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the digits of `n` in the given `base` (default 10), most-significant first. The sign of `n` is ignored. With a third argument `length`, the result is zero-padded on the left (or truncated to its least-significant digits) to that length.",
+      "examples": [
+        "IntegerDigits(255, 16)  // [15, 15]"
+      ]
+    },
+    {
+      "name": "IntegerSqrt",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the integer square root of `n`, i.e. the largest integer `m` such that `m² ≤ n`. Undefined for negative `n`.",
+      "examples": [
+        "IntegerSqrt(17)  // 4"
+      ]
     },
     {
       "name": "IntegerString",
@@ -1988,6 +2607,18 @@
       "description": "`IsComposite(n)` returns `True` if `n` is not a prime number"
     },
     {
+      "name": "IsDiagonal",
+      "category": "Linear Algebra",
+      "arity": "1",
+      "signature": "(value) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Whether the matrix is diagonal (all off-diagonal entries are zero)."
+    },
+    {
       "name": "IsEmpty",
       "category": "Collections",
       "arity": "1",
@@ -2062,6 +2693,21 @@
       "wikidata": "Q170043"
     },
     {
+      "name": "IsPerfectPower",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return `\"True\"` if `n` is a perfect power `a^b` for integers `a` and `b ≥ 2` (a negative `n` requires an odd exponent). The smallest perfect power is 4.",
+      "examples": [
+        "IsPerfectPower(64)  // \"True\""
+      ]
+    },
+    {
       "name": "IsPrime",
       "category": "Arithmetic",
       "arity": "1",
@@ -2111,6 +2757,45 @@
       "description": "True if n is a perfect square."
     },
     {
+      "name": "IsSquareFree",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return `\"True\"` if `n` is square-free (not divisible by any perfect square > 1). The sign of `n` is ignored.",
+      "examples": [
+        "IsSquareFree(30)  // \"True\""
+      ]
+    },
+    {
+      "name": "IsSquareMatrix",
+      "category": "Linear Algebra",
+      "arity": "1",
+      "signature": "(value) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Whether the value is a square matrix."
+    },
+    {
+      "name": "IsSymmetric",
+      "category": "Linear Algebra",
+      "arity": "1",
+      "signature": "(value) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Whether the matrix is symmetric (A equals its transpose)."
+    },
+    {
       "name": "IsTautology",
       "category": "Logic",
       "arity": "1",
@@ -2147,6 +2832,34 @@
       "description": "Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value."
     },
     {
+      "name": "JacobiSymbol",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(integer, integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The Jacobi symbol (a/n) for an odd `n > 0`. Returns -1, 0, or 1. Undefined when `n` is even or non-positive.",
+      "examples": [
+        "JacobiSymbol(5, 21)  // 1"
+      ]
+    },
+    {
+      "name": "JacobiTheta",
+      "category": "special-functions",
+      "arity": "optional",
+      "signature": "(number, number, number, number?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Jacobi theta function θⱼ(z, τ), j ∈ {1,2,3,4}, nome q = e^{iπτ} (Fungrim convention).",
+      "wikidata": "Q1154532"
+    },
+    {
       "name": "Join",
       "category": "Collections",
       "arity": "variadic",
@@ -2157,6 +2870,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Join the elements of some collections into a flat collection."
+    },
+    {
+      "name": "Julia",
+      "category": "fractals",
+      "arity": "3",
+      "signature": "(number, number, integer) -> real",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Smooth escape-time value for a Julia set with parameter c. Returns 1 for points inside the set, values in [0,1) for escaping points."
     },
     {
       "name": "Kernel",
@@ -2192,7 +2917,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return 1 if the arguments are equal, 0 otherwise"
+      "description": "Return 1 if the arguments are equal, 0 otherwise. With a single argument n, this is δ_{n,0}: 1 if n = 0, 0 otherwise."
     },
     {
       "name": "Kurtosis",
@@ -2280,6 +3005,33 @@
       "description": "Least Common Multiple"
     },
     {
+      "name": "LegendreSymbol",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(integer, integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The Legendre symbol (a/p) for an odd prime `p`. Returns -1, 0, or 1. Undefined when `p` is not an odd prime.",
+      "examples": [
+        "LegendreSymbol(3, 7)  // -1"
+      ]
+    },
+    {
+      "name": "Length",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(any) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Number of elements in a collection. Returns undefined for non-collections and for infinite collections."
+    },
+    {
       "name": "Less",
       "category": "Relational Operators",
       "arity": "variadic",
@@ -2287,7 +3039,7 @@
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false
     },
     {
@@ -2298,7 +3050,7 @@
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false
     },
     {
@@ -2423,16 +3175,44 @@
       "description": "Base-2 Logarithm"
     },
     {
+      "name": "LogIntegral",
+      "category": "special-functions",
+      "arity": "1",
+      "signature": "(number) -> real",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x).",
+      "wikidata": "Q853513"
+    },
+    {
       "name": "Loop",
       "category": "Control Structures",
-      "arity": "2",
-      "signature": "(body:expression, collection:expression) -> any",
+      "arity": "variadic",
+      "signature": "(body:expression, iterators:expression*) -> any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Evaluate a body expression over elements of a collection."
+      "description": "Evaluate a body expression in nested iteration over Element clauses. Later clauses see earlier bindings; independent clauses produce a Cartesian product."
+    },
+    {
+      "name": "LucasL",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the nth Lucas number: `LucasL(0)` is 2, `LucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. Negative indices follow `LucasL(-n) = (-1)^n · LucasL(n)`.",
+      "examples": [
+        "LucasL(10)  // 123"
+      ]
     },
     {
       "name": "LUDecomposition",
@@ -2445,6 +3225,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "LU decomposition of a square matrix."
+    },
+    {
+      "name": "Mandelbrot",
+      "category": "fractals",
+      "arity": "2",
+      "signature": "(number, integer) -> real",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Smooth escape-time value for the Mandelbrot set. Returns 1 for points inside the set, values in [0,1) for escaping points."
     },
     {
       "name": "Map",
@@ -2481,6 +3273,30 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Matrix and vector multiplication."
+    },
+    {
+      "name": "MatrixPower",
+      "category": "Linear Algebra",
+      "arity": "2",
+      "signature": "(matrix, integer) -> matrix",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Square matrix raised to an integer power (repeated matrix product)."
+    },
+    {
+      "name": "MatrixRank",
+      "category": "Linear Algebra",
+      "arity": "1",
+      "signature": "(value) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Rank of a matrix (number of linearly independent rows/columns)."
     },
     {
       "name": "Max",
@@ -2567,7 +3383,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Modulo",
+      "description": "Modulo: the remainder of the floored division of x by y. The sign of the result follows the sign of the divisor y (floored-division convention, matching most CAS). For a truncated/round-to-nearest remainder, see `Remainder`.",
       "wikidata": "Q1799665"
     },
     {
@@ -2581,6 +3397,21 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Most frequently occurring value in a collection."
+    },
+    {
+      "name": "MoebiusMu",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the Möbius function μ(n): 0 if `n` is divisible by a perfect square > 1, otherwise (-1) raised to the number of distinct prime factors. The sign of `n` is ignored.",
+      "examples": [
+        "MoebiusMu(30)  // -1"
+      ]
     },
     {
       "name": "Most",
@@ -2608,6 +3439,21 @@
       "wikidata": "Q20820114"
     },
     {
+      "name": "MultiplicativeOrder",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(integer, integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime.",
+      "examples": [
+        "MultiplicativeOrder(2, 7)  // 3"
+      ]
+    },
+    {
       "name": "Multiply",
       "category": "Arithmetic",
       "arity": "variadic",
@@ -2623,14 +3469,14 @@
     {
       "name": "N",
       "category": "Core",
-      "arity": "1",
-      "signature": "(any) -> unknown",
+      "arity": "optional",
+      "signature": "(any, integer?) -> unknown",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Numerically evaluate an expression"
+      "description": "N(expr): numerically evaluate an expression\n\nN(expr, precision): evaluate to `precision` significant digits"
     },
     {
       "name": "Nand",
@@ -2658,6 +3504,18 @@
       "description": "Numerical derivative evaluated at a point."
     },
     {
+      "name": "NDSolve",
+      "category": "Calculus",
+      "arity": "optional",
+      "signature": "(expression, symbol, limits:(tuple|symbol), number, number?) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Numerical differential equation solver."
+    },
+    {
       "name": "Negate",
       "category": "Arithmetic",
       "arity": "1",
@@ -2669,6 +3527,22 @@
       "broadcastable": true,
       "description": "Additive Inverse",
       "wikidata": "Q715358"
+    },
+    {
+      "name": "NextPrime",
+      "category": "Number Theory",
+      "arity": "optional",
+      "signature": "(integer, integer?) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`).",
+      "examples": [
+        "NextPrime(10)  // 11",
+        "NextPrime(10, -1)  // 7"
+      ]
     },
     {
       "name": "NIntegrate",
@@ -2784,7 +3658,7 @@
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false,
       "wikidata": "Q28113351"
     },
@@ -2947,6 +3821,21 @@
       "description": "Number of integer partitions of n."
     },
     {
+      "name": "NthPrime",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, …",
+      "examples": [
+        "NthPrime(10)  // 29"
+      ]
+    },
+    {
       "name": "Numerator",
       "category": "Arithmetic",
       "arity": "1",
@@ -2969,6 +3858,30 @@
       "lazy": true,
       "broadcastable": true,
       "description": "Sequence of Numerator and Denominator of an expression"
+    },
+    {
+      "name": "Oklab",
+      "category": "Colors",
+      "arity": "optional",
+      "signature": "(number, number, number, number?) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "OKLab color (L 0-1, a/b ~ -0.4..0.4, optional alpha)"
+    },
+    {
+      "name": "Oklch",
+      "category": "Colors",
+      "arity": "optional",
+      "signature": "(number, number, number, number?) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "OKLCh color (L 0-1, C 0-~0.4, hue degrees, optional alpha)"
     },
     {
       "name": "OnesMatrix",
@@ -3031,6 +3944,18 @@
       "description": "Parse a LaTeX string and evaluate to a corresponding expression"
     },
     {
+      "name": "PartialFraction",
+      "category": "Polynomials",
+      "arity": "2",
+      "signature": "(value, symbol) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Decompose a rational expression into partial fractions. Example: PartialFraction(1/((x+1)(x+2)), x) → 1/(x+1) - 1/(x+2)"
+    },
+    {
       "name": "Partition",
       "category": "Collections",
       "arity": "2",
@@ -3081,6 +4006,18 @@
       "wikidata": "Q1817679"
     },
     {
+      "name": "Polynomial",
+      "category": "Polynomials",
+      "arity": "2",
+      "signature": "(list<value>, symbol) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Construct a polynomial from a list of coefficients (highest to lowest degree) and a variable. Example: Polynomial([1, 0, 2, 1], x) → x³ + 2x + 1"
+    },
+    {
       "name": "PolynomialDegree",
       "category": "Polynomials",
       "arity": "2",
@@ -3127,6 +4064,18 @@
       "lazy": true,
       "broadcastable": false,
       "description": "Return the remainder of polynomial division of dividend by divisor. Example: PolynomialRemainder(x³ + 2x + 1, x + 1, x) → -2"
+    },
+    {
+      "name": "PolynomialRoots",
+      "category": "Polynomials",
+      "arity": "2",
+      "signature": "(value, symbol) -> set<value>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the roots of a polynomial expression. Example: PolynomialRoots(x² - 5x + 6, x) → {2, 3}"
     },
     {
       "name": "PopulationStandardDeviation",
@@ -3176,6 +4125,21 @@
       "broadcastable": true,
       "description": "Exponentiation: raise a base to a power.",
       "wikidata": "Q33456"
+    },
+    {
+      "name": "PowerMod",
+      "category": "Number Theory",
+      "arity": "3",
+      "signature": "(integer, integer, integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m).",
+      "examples": [
+        "PowerMod(2, 10, 1000)  // 24"
+      ]
     },
     {
       "name": "PowerSet",
@@ -3238,6 +4202,33 @@
       "description": "Increment a number by one."
     },
     {
+      "name": "Prime",
+      "category": "Core",
+      "arity": "optional",
+      "signature": "(any, integer?) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs."
+    },
+    {
+      "name": "PrimeFactors",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> list<integer>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the sorted list of distinct prime factors of an integer `n`. The sign of `n` is ignored; `PrimeFactors(1)` is the empty list.",
+      "examples": [
+        "PrimeFactors(360)  // [2, 3, 5]"
+      ]
+    },
+    {
       "name": "PrimeImplicants",
       "category": "Logic",
       "arity": "1",
@@ -3260,6 +4251,78 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Find all prime implicates using Quine-McCluskey. Max 12 variables."
+    },
+    {
+      "name": "PrimeNu",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return ω(n), the number of distinct prime factors of `n`. The sign of `n` is ignored; `PrimeNu(1)` is 0.",
+      "examples": [
+        "PrimeNu(360)  // 3"
+      ]
+    },
+    {
+      "name": "PrimeNumber",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The nth prime number. `PrimeNumber` is an alias for `NthPrime`, which is the preferred name."
+    },
+    {
+      "name": "PrimeOmega",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return Ω(n), the number of prime factors of `n` counted with multiplicity. The sign of `n` is ignored; `PrimeOmega(1)` is 0.",
+      "examples": [
+        "PrimeOmega(360)  // 6"
+      ]
+    },
+    {
+      "name": "PrimePi",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(real) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return π(n), the prime-counting function: the number of primes less than or equal to `n`.",
+      "examples": [
+        "PrimePi(10)  // 4"
+      ]
+    },
+    {
+      "name": "PrimitiveRoot",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p).",
+      "examples": [
+        "PrimitiveRoot(7)  // 3"
+      ]
     },
     {
       "name": "Product",
@@ -3345,22 +4408,37 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Lower quartile, median, and upper quartile of a collection.",
+      "description": "Lower quartile, median, and upper quartile of a collection. Uses the Moore–McCabe (exclusive-hinges) convention: the sample is split at its median, and Q1/Q3 are the medians of the lower/upper halves with the overall median excluded from both halves when the sample size is odd.",
       "examples": [
-        "Quartiles([1, 2, 3, 4, 5])  // Returns (3, 2, 4)"
+        "Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)"
+      ]
+    },
+    {
+      "name": "Radical",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the radical of `n` (its square-free kernel): the product of its distinct prime factors. The sign of `n` is ignored; `Radical(1)` is 1.",
+      "examples": [
+        "Radical(360)  // 30"
       ]
     },
     {
       "name": "Random",
       "category": "Core",
       "arity": "optional",
-      "signature": "(lower:integer?, upper:integer?) -> finite_number",
+      "signature": "(number?, integer?) -> finite_number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Random(): Return a random number between 0 and 1\n\nRandom(n): Return a random integer between 0 and n-1\n\nRandom(m, n): Return a random integer between m and n-1"
+      "description": "Random(): non-deterministic float in [0, 1)\n\nRandom(seed: real): deterministic float in [0, 1) from a real seed\n\nRandom(n: integer): non-deterministic integer in [0, n)\n\nRandom(m: integer, n: integer): non-deterministic integer in [m, n)"
     },
     {
       "name": "RandomExpression",
@@ -3375,10 +4453,25 @@
       "description": "Generate a random expression."
     },
     {
+      "name": "RandomPrime",
+      "category": "Number Theory",
+      "arity": "optional",
+      "signature": "(integer, integer?) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return a random prime. `RandomPrime(n)` draws a prime in [2, n]; `RandomPrime(m, n)` draws a prime in [m, n]. Undefined if the range contains no prime.",
+      "examples": [
+        "RandomPrime(100)  // e.g. 47"
+      ]
+    },
+    {
       "name": "Range",
       "category": "Collections",
       "arity": "optional",
-      "signature": "(number, number?, step: number?) -> indexed_collection<integer>",
+      "signature": "(number, number?, step: number?) -> indexed_collection<number>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3466,19 +4559,19 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer"
+      "description": "IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`)"
     },
     {
       "name": "Repeat",
       "category": "Collections",
-      "arity": "1",
-      "signature": "(value: any) -> list",
+      "arity": "optional",
+      "signature": "(value: any, count: integer?) -> list",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Produce an infinite sequence by repeating a single value."
+      "description": "Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies."
     },
     {
       "name": "Reshape",
@@ -3493,6 +4586,18 @@
       "description": "Reshape a tensor or collection to a target shape."
     },
     {
+      "name": "Residue",
+      "category": "Calculus",
+      "arity": "3",
+      "signature": "(expression, variable:symbol, point:value) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Residue of a function at a point (the coefficient of (x-a)⁻¹ in its Laurent expansion)"
+    },
+    {
       "name": "Rest",
       "category": "Collections",
       "arity": "1",
@@ -3505,6 +4610,18 @@
       "description": "Return the collection without the first element.\n\nIf the collection has only one element, return an empty collection."
     },
     {
+      "name": "Resultant",
+      "category": "Polynomials",
+      "arity": "3",
+      "signature": "(a: value, b: value, variable: symbol) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the resultant of two polynomials with respect to a variable. It is zero iff the polynomials share a common factor. Example: Resultant(x² - 1, x - 1, x) → 0"
+    },
+    {
       "name": "Reverse",
       "category": "Collections",
       "arity": "1",
@@ -3514,6 +4631,18 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false
+    },
+    {
+      "name": "Rgb",
+      "category": "Colors",
+      "arity": "optional",
+      "signature": "(number, number, number, number?) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "sRGB color (channels 0-1, optional alpha 0-1)"
     },
     {
       "name": "Root",
@@ -3564,6 +4693,18 @@
       "description": "Rounds a number to the nearest integer."
     },
     {
+      "name": "RowReduce",
+      "category": "Linear Algebra",
+      "arity": "1",
+      "signature": "(matrix) -> matrix",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Reduced row echelon form (RREF) of a matrix."
+    },
+    {
       "name": "Rule",
       "category": "Core",
       "arity": "optional",
@@ -3578,14 +4719,14 @@
     {
       "name": "Sample",
       "category": "Statistics",
-      "arity": "2",
-      "signature": "(collection, integer) -> list",
+      "arity": "optional",
+      "signature": "(collection, integer, real?) -> list",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a random sample of k elements from the collection, without replacement."
+      "description": "Return a random sample of k elements from the collection, without replacement. With an optional `seed` argument, the sample is deterministic."
     },
     {
       "name": "Sec",
@@ -3615,12 +4756,24 @@
       "name": "Second",
       "category": "Collections",
       "arity": "1",
-      "signature": "(collection) -> any",
+      "signature": "(any) -> any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false
+    },
+    {
+      "name": "Segment",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any+) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Segment primitive — opaque typed head."
     },
     {
       "name": "Sequence",
@@ -3642,7 +4795,7 @@
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false
     },
     {
@@ -3685,14 +4838,14 @@
     {
       "name": "Shuffle",
       "category": "Collections",
-      "arity": "1",
-      "signature": "(indexed_collection) -> indexed_collection",
+      "arity": "optional",
+      "signature": "(indexed_collection, real?) -> indexed_collection",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Randomize the order of the elements in the collection."
+      "description": "Randomize the order of the elements in the collection. With an optional `seed` argument, the shuffle is deterministic."
     },
     {
       "name": "Sigma0",
@@ -3813,6 +4966,18 @@
       "broadcastable": true
     },
     {
+      "name": "SinIntegral",
+      "category": "Trigonometry",
+      "arity": "1",
+      "signature": "(number) -> real",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Sine integral: ∫₀ˣ sin(t)/t dt."
+    },
+    {
       "name": "Skewness",
       "category": "Statistics",
       "arity": "variadic",
@@ -3852,6 +5017,18 @@
       ]
     },
     {
+      "name": "Solve",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(any, symbol) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Solve(equation, unknown): the list of solutions of an equation for the\n\nunknown. The equation may be an `Equal` expression or a bare expression\n\n(read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`."
+    },
+    {
       "name": "Sort",
       "category": "Collections",
       "arity": "optional",
@@ -3862,6 +5039,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return the elements of the collection sorted according to the given comparison function."
+    },
+    {
+      "name": "Sphere",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any+) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Sphere primitive — opaque typed head."
     },
     {
       "name": "Sqrt",
@@ -4014,13 +5203,13 @@
       "name": "Sum",
       "category": "Arithmetic",
       "arity": "variadic",
-      "signature": "((number) -> number, bounds:tuple+) -> number",
+      "signature": "(any, tuple*) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`",
+      "description": "`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`",
       "wikidata": "Q218005"
     },
     {
@@ -4171,13 +5360,24 @@
       "name": "Text",
       "category": "Core",
       "arity": "variadic",
-      "signature": "(any*) -> expression",
+      "signature": "(any*) -> string",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
       "description": "A sequence of strings, annotated expressions and other Text expressions"
+    },
+    {
+      "name": "Third",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(any) -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false
     },
     {
       "name": "TildeEqual",
@@ -4214,6 +5414,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "`Timing(expr)` evaluates `expr` and return a `Pair` of the number of second elapsed for the evaluation, and the value of the evaluation"
+    },
+    {
+      "name": "To",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(any, any) -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Action arrow / mapping (`a \\to b`) — opaque typed head."
     },
     {
       "name": "ToCNF",
@@ -4253,7 +5465,7 @@
       "name": "Totient",
       "category": "Number Theory",
       "arity": "1",
-      "signature": "(integer) -> integer",
+      "signature": "(number) -> integer",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4285,6 +5497,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Transpose a matrix or swap two tensor axes."
+    },
+    {
+      "name": "Triangle",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any+) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Triangle primitive — opaque typed head."
     },
     {
       "name": "Trigamma",
@@ -4505,6 +5729,18 @@
       "description": "Construct a column vector."
     },
     {
+      "name": "When",
+      "category": "Control Structures",
+      "arity": "2",
+      "signature": "(expression, boolean) -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Conditional/restriction value. `When(e, cond)` evaluates to:\n  - `e` when `cond` evaluates to `True`\n  - `Undefined` when `cond` evaluates to `False` (the \"masking rule\"; consumers like 2D plotters skip masked points)\n  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)\nStacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.\nCompiles to ternary `(cond) ? (e) : NaN` in JS and GLSL."
+    },
+    {
       "name": "Which",
       "category": "Control Structures",
       "arity": "variadic",
@@ -4666,8 +5902,7 @@
       "name": "EulerGamma",
       "category": "Arithmetic",
       "type": "finite_real",
-      "wikidata": "Q273023",
-      "value": "{\"num\":\"0.57721566490153286060651209008240243104215933593992359880576723488486772677766\\n          467093694706329174674951463144724980708248096050401448654283622417399764492353\\n          625350033374293733773767394279259525824709491600873520394816567085323315177661\\n          152862119950150798479374508570574002992135478614669402960432542151905877553526\\n          733139925401296742051375413954911168510280798423487758720503843109399736137255\\n          306088933126760017247953783675927135157722610273492913940798430103417771778088\\n          154957066107501016191663340152278935867965497252036212879226555953669628176388\\n          792726801324310104765059637039473949576389065729679296010090151251959509222435\\n          014093498712282479497471956469763185066761290638110518241974448678363808617494\\n          551698927923018773910729457815543160050021828440960537724342032854783670151773\\n          943987003023703395183286900015581939880427074115422278197165230110735658339673\"}"
+      "wikidata": "Q273023"
     },
     {
       "name": "ExponentialE",
