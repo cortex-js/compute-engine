@@ -643,8 +643,7 @@ function getBernoulliRationals(
   minTerms: number
 ): [bigint, bigint][] {
   const existing = bernoulliCache.get(ce);
-  if (existing && existing.length >= minTerms)
-    return existing.length === minTerms ? existing : existing.slice(0, minTerms);
+  if (existing && existing.length >= minTerms) return existing;
 
   // Round the build size up (not just to the immediate `minTerms`) so that
   // precision oscillation — e.g. alternating `ce.precision` between 50 and
@@ -670,11 +669,16 @@ function getBernoulliRationals(
   const table = computeBernoulliEven(buildTerms, ce._deadline);
   bernoulliCache.set(ce, table);
 
-  // IMPORTANT: never hand callers more terms than they asked for. The
-  // Bernoulli expansions below are *asymptotic*, not convergent — past the
-  // optimal cutoff, Bernoulli-number growth overtakes the shrinking power of
-  // the expansion variable, so extra terms make the sum worse, not better.
-  return table.length === minTerms ? table : table.slice(0, minTerms);
+  // Return the full cached table (length ≥ minTerms), NOT a `minTerms` slice.
+  // Every caller already clamps its own consumption — the four asymptotic
+  // series (gammaln/digamma/trigamma/polygamma) iterate to
+  // `Math.min(maxTerms, table.length)` and break at the tolerance well before
+  // that, and `zetaCore` indexes a single fixed element `table[k-1]` — so no
+  // caller ever over-sums past its requested `minTerms`. The asymptotic-series
+  // divergence trap (extra terms make the sum worse) is therefore handled at
+  // the caller's clamp, and the per-call `slice` copy is pure overhead. (The
+  // clamp, not the table length, is what enforces the asymptotic cutoff.)
+  return table;
 }
 
 /**

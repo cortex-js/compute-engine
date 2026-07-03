@@ -669,15 +669,29 @@ export class BigDecimal {
       const scale = pow10(totalScale);
       const quotient = (thisSig * scale) / otherSig;
       const resultExp = thisExp - otherExp - totalScale;
-      // The quotient carries `prec + guard` digits (guard = 10), so the
-      // `.toPrecision(prec)` below always rounds — it can never hit its
-      // `digits <= n → return this` short-circuit. That lets us skip
-      // normalizing the (large) quotient here: stripping z trailing zeros
-      // scales the significand, the rounding divisor, and the round-half-even
-      // tie point all by 10^z, so `toPrecision` produces the byte-identical
-      // rounded significand/exponent either way, and it re-normalizes its own
-      // (smaller) result. Saves one full-width normalize per division.
-      return rawUnnormalized(quotient, resultExp).toPrecision(prec);
+      // The quotient carries `prec + guard` digits (guard = 10), so rounding it
+      // to `prec` always happens — it can never hit the `digits <= n → return
+      // this` short-circuit. Two economies over `…toPrecision(prec)`:
+      //
+      // 1. Skip normalizing the (large) quotient: stripping z trailing zeros
+      //    scales the significand, the rounding divisor, and the round-half-even
+      //    tie point all by 10^z, so the rounded significand/exponent is
+      //    byte-identical either way, and the rounding re-normalizes its own
+      //    (smaller) result. Saves one full-width normalize per division.
+      // 2. Derive the quotient's digit count instead of recomputing it with a
+      //    `bigintDigits` bit-length scan. The numerator `thisSig·10^totalScale`
+      //    has exactly `dividendDigits + totalScale` digits; dividing by an
+      //    `otherSig` of `divisorDigits` digits yields a quotient of exactly
+      //    `lo` or `lo + 1` digits (integer division of an a-digit by a b-digit
+      //    value gives a−b or a−b+1 digits). Resolve the ±1 with one cached-pow10
+      //    boundary compare. `lo ≥ prec + guard > prec`, so it always rounds.
+      const absQuot = quotient < 0n ? -quotient : quotient;
+      const lo = dividendDigits + totalScale - divisorDigits;
+      const quotientDigits = absQuot >= pow10(lo) ? lo + 1 : lo;
+      return rawUnnormalized(quotient, resultExp).roundToPrecKnownDigits(
+        prec,
+        quotientDigits
+      );
     }
 
     // Slow path: NaN or Infinity
@@ -1156,6 +1170,20 @@ export class BigDecimal {
 
     if (digits <= n) return this; // already within precision
 
+    return this.roundToPrecKnownDigits(n, digits);
+  }
+
+  /**
+   * Round to `n` significant digits (round-half-to-even) given a *precomputed*
+   * decimal digit count of |significand|. Precondition: the value is finite and
+   * nonzero and `digits === digitCount() > n` (so it always rounds). Callers
+   * that already know the digit count (e.g. `div`, whose quotient digit count is
+   * derivable from the operand sizes) use this to skip the `bigintDigits` scan
+   * that `toPrecision` would otherwise run. Byte-identical to `toPrecision(n)`
+   * whenever `digits` equals the true digit count.
+   * @internal
+   */
+  private roundToPrecKnownDigits(n: number, digits: number): BigDecimal {
     const absSig = this.significand < 0n ? -this.significand : this.significand;
 
     const shift = digits - n;
