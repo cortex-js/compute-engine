@@ -131,6 +131,8 @@ export type ReplaceOptions = {
    * If false, continue applying remaining rules.
    */
   once: boolean;
+  //@consider:?
+  // once: 'one-rule' | 'one-replacement';
 
   /**
    * If true, rules may match equivalent variants.

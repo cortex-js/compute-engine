@@ -18,7 +18,6 @@ export type {
   OEISOptions,
   OperatorDefinition,
   BaseDefinition,
-  SimplifyOptions,
   SymbolDefinition,
   SymbolDefinitions,
   LibraryDefinition,

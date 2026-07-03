@@ -8,10 +8,13 @@ import type {
   BoxedRule as KernelBoxedRule,
   BoxedRuleSet as KernelBoxedRuleSet,
   EvaluateOptions as KernelEvaluateOptions,
+  SimplifyOptions as KernelSimplifyOptions,
+  TransformOptions as KernelTransformOptions,
   EvalContext as KernelEvalContext,
   ExpressionMapInterface as KernelExpressionMapInterface,
   Rule as KernelRule,
   RuleConditionFunction as KernelRuleConditionFunction,
+  MatchConditionFunction as KernelMatchConditionFunction,
   RuleFunction as KernelRuleFunction,
   RuleReplaceFunction as KernelRuleReplaceFunction,
   RuleStep as KernelRuleStep,
@@ -29,6 +32,18 @@ export type { AssumeResult };
  * @category Boxed Expression
  */
 export type EvaluateOptions = KernelEvaluateOptions;
+
+export type SimplifyOptions = KernelSimplifyOptions<
+  Expression,
+  ExpressionInput,
+  ComputeEngine
+>;
+
+export type TransformOptions = KernelTransformOptions<
+  Expression,
+  ExpressionInput,
+  ComputeEngine
+>;
 
 /**
  * Map-like interface keyed by boxed expressions.
@@ -69,6 +84,8 @@ export type RuleConditionFunction = KernelRuleConditionFunction<
   Expression,
   ComputeEngine
 >;
+
+export type MatchConditionFunction = KernelMatchConditionFunction<Expression>;
 
 /**
  * Dynamic rule callback.
