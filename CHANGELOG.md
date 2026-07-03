@@ -90,8 +90,10 @@
   seed) — `ln` is 1.9× faster at 21 digits rising to **10× at 500**, and
   a pre-existing accuracy loss near 1 was fixed along the way
   (`ln(1 − 10⁻²⁹)` at 60 digits previously lost its last ~3 digits).
-  Division by 2 in the sinh/arctanh/arccos paths became an exact
-  multiply-by-0.5. Net effect on a division-heavy series: ζ(3) at
+  The AGM crossover was re-measured for the new kernel and moved from
+  ~700 to ~12,000 digits — `ln` at precision 1000, previously AGM
+  territory, is another 5.6× faster (866 → 155 µs). Division by 2 in
+  the sinh/arctanh/arccos paths became an exact multiply-by-0.5. Net effect on a division-heavy series: ζ(3) at
   100–500 digits is over 2× faster than the previous release, with no
   kernel-specific changes. At 100 digits the field operations
   (add/sub/mul/div) are now 2.7–15× faster than Mathematica 14.3

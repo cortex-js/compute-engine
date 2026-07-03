@@ -142,8 +142,11 @@ _work_ p-digit-sized and the loop warm.
   log1p(v·e^(−y₀)−1)` with the 52-bit hardware `Math.log` seed, one
   √-reduced `fpexp`, and a ~bits/96-term series. **CE `ln` now matches
   mpmath at 100d and leads above it** (200d: 12.8 vs 16.1 µs; 500d: 47 vs
-  100 µs, 2.1×); at 21d the gap closed from 3.7× to 1.3×. The ≥2300-bit AGM
-  regime is unchanged (crossover re-tune is a deferred follow-up). A
+  100 µs, 2.1×); at 21d the gap closed from 3.7× to 1.3×. The AGM crossover
+  was re-tuned for the faster direct kernel: 2,300 → 40,000 bits (~12,040
+  digits; measured pure-speed crossover ≈43,000 bits) — ln at precision
+  1000, previously AGM territory, now takes the direct path (866→155 µs,
+  5.6×). A
   pre-existing near-1 accuracy loss (ln(1−10⁻²⁹)@60 kept ~57 digits, same
   in 0.66.0) was fixed with a cancellation-aware precision guard.
 
@@ -243,9 +246,15 @@ Chudnovsky π + base-2 kernels shipped in that window). No regression at HEAD.
 - **`sin`/`cos`/`tan`/`atan`: CE leads or ties even against raw mpmath** at most
   precisions (base-2 kernel + √p argument reduction). `atan` is strongest
   (1.4–1.7× vs mpmath).
-- **`ln` leads at 1000 digits** (1.1× mpmath) once the AGM path engages (~700
-  digits), but trails at 100–500 (below the AGM threshold; CE's Newton is slower
-  than mpmath's AGM there). An honest residual.
+- **`ln` at 1000 digits is now driven by the direct-log kernel** (`fplnDirect`),
+  not AGM: the AGM crossover (`LN_AGM_MIN_BITS`) was re-tuned from 2300 bits
+  (~700 digits) to 40000 bits (~12040 digits) once `fplnDirect` replaced the
+  giant_steps Newton — direct beats AGM by ~5.6× at 1000 digits and stays ahead
+  to ~13000 digits (crossover), so AGM only runs above ~12040 digits now. The
+  vs-mpmath figures in the table above were measured under the OLD ~700-digit
+  crossover (ln at 1000 digits ran AGM there, ~1.1× mpmath) and predate this
+  re-tune; a full table refresh on a quiet machine is still pending. CE `ln`
+  trails mpmath at 100–500 digits — an honest residual.
 - **`sqrt`/`asin` still trail mpmath at high precision** (0.4–0.5× at 1000
   digits): the giant-steps `isqrt` kernel is a small slice of `Sqrt(x).N()` —
   the decimal↔binary boundary conversion and boxing dominate, and mpmath stays

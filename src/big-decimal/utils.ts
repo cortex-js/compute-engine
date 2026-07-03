@@ -327,15 +327,26 @@ export function fpexp(x: bigint, bits: number): bigint {
 
 // AGM-vs-direct-log crossover, in bits. Below LN_AGM_MIN_BITS the direct-log
 // kernel (`fplnDirect`: one √-reduced fpexp + a short log1p series) wins; above
-// it AGM's O(M(p)·log p) cost (≈ log₂p square roots) pulls ahead. The threshold
-// was tuned for the giant_steps Newton that `fplnDirect` replaced; it is kept
-// unchanged so the validated ≥700-digit AGM regime (and the 1000-digit numbers
-// in BIGNUM-COMPARISON.md, where CE's ln leads) is untouched — `fplnDirect`,
-// being ~2–4× faster than that Newton, would compete with AGM to somewhat
-// higher bits, but re-tuning the crossover is deferred rather than risk the
-// high-precision path. (ln 2, which AGM needs, comes from the LN2_DIGITS table
-// or binary splitting, so there is no upper bound.)
-const LN_AGM_MIN_BITS = 2300; // ≈ 700 decimal digits
+// it AGM's O(M(p)·log p) cost (≈ log₂p square roots) pulls ahead.
+//
+// Re-tuned for `fplnDirect` (it had been left at 2300 bits ≈ 700 digits, the
+// value tuned for the giant_steps Newton `fplnDirect` replaced). `fplnDirect` is
+// far faster than that Newton, so it now beats AGM to MUCH higher precision.
+// Measured (warm, interleaved, median-of-5/7, distinct O(1) args), speed ratio
+// AGM_µs/direct_µs: 7.7× at 500 digits, 5.6× at 1000, 3.6× at 2000, 2.1× at
+// 5000, 1.4× at 8000, 1.29× at 10000, 1.23× at 11000, 1.04× at 12000, ~1.0× at
+// 13000, then AGM ahead: 1.03× at 14000, 1.15× at 16000, 1.38× at 20000. The
+// pure-speed crossover is ≈ 43000 bits (~13000 digits); the 40000–46000-bit band
+// is flat (within a few %). 40000 bits (≈ 12040 decimal digits) hands off with a
+// deliberate safety margin toward AGM — direct still wins by ~1.2× at 11000
+// digits and by a hair at 12000, but AGM's asymptotic advantage is real and the
+// boundary band is too flat to chase. Accuracy is not the bound: end-to-end
+// `.ln()` under `fplnDirect` is correctly rounded (min ≈ digits−0.6 relative
+// figures, ~1 ulp, near-1 args included) vs mpmath all the way to 14000 digits —
+// at the kernel level it is marginally MORE accurate than AGM (1025 vs 1023
+// figures at 1000 digits). (ln 2, which AGM needs, comes from the LN2_DIGITS
+// table or binary splitting, so there is no upper bound.)
+const LN_AGM_MIN_BITS = 40000; // ≈ 12040 decimal digits
 
 export function fpln(x: bigint, bits: number): bigint {
   const scale = 1n << BigInt(bits);
