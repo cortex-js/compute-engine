@@ -37,48 +37,56 @@ export class BigDecimal {
 
   static readonly ZERO: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
+      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
       significand: 0n,
       exponent: 0,
     })
   );
   static readonly ONE: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
+      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
       significand: 1n,
       exponent: 0,
     })
   );
   static readonly TWO: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
+      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
       significand: 2n,
       exponent: 0,
     })
   );
   static readonly NEGATIVE_ONE: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
+      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
       significand: -1n,
       exponent: 0,
     })
   );
   static readonly HALF: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
+      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
       significand: 5n,
       exponent: -1,
     })
   );
   static readonly NAN: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
+      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
       significand: 0n,
       exponent: NaN,
     })
   );
   static readonly POSITIVE_INFINITY: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
+      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
       significand: 1n,
       exponent: Infinity,
     })
   );
   static readonly NEGATIVE_INFINITY: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
+      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
       significand: -1n,
       exponent: Infinity,
     })
@@ -161,10 +169,10 @@ export class BigDecimal {
    * @internal
    */
   digitCount(): number {
-    if (this._digits !== undefined) return this._digits;
-    const d = bigintDigits(this.significand);
-    if (Object.isFrozen(this)) return d;
-    return (this._digits = d);
+    // The frozen static constants pre-seed `_digits` (see their definitions), so
+    // the cache-write below is only ever reached on non-frozen, mutable
+    // instances — no `Object.isFrozen` guard needed on this hot miss path.
+    return this._digits ?? (this._digits = bigintDigits(this.significand));
   }
 
   constructor(value: string | number | bigint | BigDecimal) {
@@ -661,7 +669,15 @@ export class BigDecimal {
       const scale = pow10(totalScale);
       const quotient = (thisSig * scale) / otherSig;
       const resultExp = thisExp - otherExp - totalScale;
-      return fromRaw(quotient, resultExp).toPrecision(prec);
+      // The quotient carries `prec + guard` digits (guard = 10), so the
+      // `.toPrecision(prec)` below always rounds — it can never hit its
+      // `digits <= n → return this` short-circuit. That lets us skip
+      // normalizing the (large) quotient here: stripping z trailing zeros
+      // scales the significand, the rounding divisor, and the round-half-even
+      // tie point all by 10^z, so `toPrecision` produces the byte-identical
+      // rounded significand/exponent either way, and it re-normalizes its own
+      // (smaller) result. Saves one full-width normalize per division.
+      return rawUnnormalized(quotient, resultExp).toPrecision(prec);
     }
 
     // Slow path: NaN or Infinity
@@ -1280,6 +1296,21 @@ export function fromRaw(sig: bigint, exp: number): BigDecimal {
   const bd = Object.create(BigDecimal.prototype) as BigDecimal;
   (bd as { significand: bigint }).significand = normSig;
   (bd as { exponent: number }).exponent = normExp;
+  return bd;
+}
+
+/**
+ * Construct a BigDecimal WITHOUT normalizing (trailing zeros not stripped).
+ * The result may violate the normalized-uniqueness invariant, so it must be
+ * consumed only by an operation that re-normalizes its own output (e.g.
+ * `toPrecision`, which rounds and then calls `fromRaw`). Used by `div` to avoid
+ * a redundant full-width normalize of the large pre-rounding quotient.
+ * @internal
+ */
+function rawUnnormalized(sig: bigint, exp: number): BigDecimal {
+  const bd = Object.create(BigDecimal.prototype) as BigDecimal;
+  (bd as { significand: bigint }).significand = sig;
+  (bd as { exponent: number }).exponent = exp;
   return bd;
 }
 
