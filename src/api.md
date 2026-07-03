@@ -1329,7 +1329,7 @@ assume(predicate): AssumeResult
 
 ####### predicate
 
-[`Expression`](#expression-3)
+`string` \| [`Expression`](#expression-3)
 
 </MemberCard>
 
@@ -1631,7 +1631,7 @@ verify(query): boolean | undefined
 
 ####### query
 
-[`Expression`](#expression-3)
+`string` \| [`Expression`](#expression-3)
 
 </MemberCard>
 
@@ -7889,7 +7889,7 @@ assume(predicate): AssumeResult
 
 ####### predicate
 
-[`Expression`](#expression-3)
+`string` \| [`Expression`](#expression-3)
 
 </MemberCard>
 
@@ -8191,7 +8191,7 @@ verify(query): boolean | undefined
 
 ####### query
 
-[`Expression`](#expression-3)
+`string` \| [`Expression`](#expression-3)
 
 </MemberCard>
 
@@ -9872,6 +9872,12 @@ It is possible that the result of `expr.evaluate()` may be the same as
 `expr.simplify()`.
 
 The result is in canonical form.
+
+**Time and recursion limits**: if the evaluation exceeds
+`engine.timeLimit` or the recursion limit, a `CancellationError` is
+thrown (its `cause` is `'timeout'` or `'recursion-depth-exceeded'`).
+Catch it to distinguish an interrupted evaluation from a symbolic
+(inert) result.
 
 ####### options?
 
@@ -12434,7 +12440,6 @@ type PrimitiveType =
   | "set"
   | "dictionary"
   | "record"
-  | "dictionary"
   | "tuple"
   | "value"
   | "scalar"
@@ -12509,18 +12514,22 @@ type NumericPrimitiveType =
   | "non_finite_number";
 ```
 
-- `number`: any numeric value = `complex` + `real` plus `NaN`
-- `complex`: a number with non-zero real and imaginary parts = `finite_complex` plus `ComplexInfinity`
+The numeric tower (D10, 2026-07-02): `integer ⊂ rational ⊂ real ⊂ complex ⊂
+number`, with a parallel `finite_*` tower and a shared `non_finite_number`
+(±∞). `real` is a proper subtype of `complex`; both admit ±∞.
+
+- `number`: any numeric value = `complex` plus `NaN`
+- `complex`: a complex number (`real ⊂ complex`) = `finite_complex` + `non_finite_number`
 - `finite_complex`: a finite complex number = `imaginary` + `finite_real`
 - `imaginary`: a complex number with a real part of 0 (pure imaginary)
 - `finite_number`: a finite numeric value = `finite_complex`
 - `finite_real`: a finite real number = `finite_rational` + `finite_integer`
-- `finite_rational`: a pure rational number
-- `finite_integer`: a whole number
-- `real`: a complex number with an imaginary part of 0 = `finite_real` + `non_finite_number`
+- `finite_rational`: a finite rational number (includes the finite integers)
+- `finite_integer`: a finite whole number
+- `real`: a real number (imaginary part 0), admits ±∞ = `finite_real` + `non_finite_number`
 - `non_finite_number`: `PositiveInfinity`, `NegativeInfinity`
-- `integer`: a whole number = `finite_integer` + `non_finite_number`
-- `rational`: a pure rational number (not an integer) = `finite_rational` + `non_finite_number`
+- `integer`: a whole number, admits ±∞ = `finite_integer` + `non_finite_number`
+- `rational`: a rational number (includes the integers), admits ±∞ = `finite_rational` + `non_finite_number`
 
 </MemberCard>
 
@@ -12860,6 +12869,12 @@ Types are described using the following BNF grammar:
            | <rest_argument>
 
 <list_type> ::= "list<" <type> <dimensions>? ">"
+           | "vector<" (<type> <dimensions>? | <dimensions>) ">"
+           | "matrix<" (<type> <dimensions>? | <dimensions>) ">"
+           | "tensor<" <type> ">"
+  Note: there is no `[type]` bracket shorthand; a list is always written with
+  one of the `list`/`vector`/`matrix`/`tensor` heads. The authoritative
+  grammar lives with the parser in `./parser.ts`.
 
 <dimensions> ::= "^" <fixed_size>
            | "^(" <multi_dimensional_size> ")"
@@ -12867,10 +12882,6 @@ Types are described using the following BNF grammar:
 <fixed_size> ::= <positive-integer_literal>
 
 <multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
-
-<map> ::= "map" | "map<" <map_elements> ">"
-
-<map_elements> ::= <name> <type> ("," <name> <type>)*
 
 <set> ::= "set<" <type> ">"
 
@@ -12891,9 +12902,9 @@ Examples of types strings:
 - `"collection<integer>"` -- a collection type where all the elements are integers
 - `"collection<(number, boolean)>"` -- a collection of tuples
 - `"collection<(value:number, seen:boolean)>"` -- a collection of named tuples
-- `"[boolean]^32"` -- a collection type with a fixed size of 32 elements
-- `"[integer]^(2x3)"` -- an integer matrix of 2 columns and 3 rows
-- `"[integer]^(2x3x4)"` -- a tensor of dimensions 2x3x4
+- `"vector<boolean^32>"` -- a list type with a fixed size of 32 elements
+- `"matrix<integer^(2x3)>"` -- an integer matrix of 2 columns and 3 rows
+- `"list<integer^(2x3x4)>"` -- a tensor of dimensions 2x3x4
 - `"number -> number"` -- a signature with a single argument
 - `"(x: number, number) -> number"` -- a signature with a named argument
 - `"(number, y:number?) -> number"` -- a signature with an optional named argument (can have several optional arguments, at the end)

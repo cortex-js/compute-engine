@@ -1,6 +1,6 @@
 # Compute Engine Benchmark Report
 
-_Generated 2026-06-16 · 39 cases across 4 capabilities._
+_Generated 2026-07-03 · 39 cases across 4 capabilities._
 
 This report compares the **current Compute Engine build** against the **last published release** (`0.59.0`) — plus an experimental **current + Rubi + Fungrim** configuration — and against three widely-used open-source tools (SymPy, math.js, NumPy) and the commercial **Wolfram** (Mathematica) kernel, along two axes: **correctness / usefulness** of the result and **performance**.
 
@@ -16,7 +16,7 @@ This report compares the **current Compute Engine build** against the **last pub
 
 | Tool | Version | Runtime |
 |---|---|---|
-| Compute Engine — current build | `0.59.0` @ `504cc0ee` (freshly built from `src/`) | Node v22.13.1 |
+| Compute Engine — current build | `0.66.0` @ `8667a0aa` (freshly built from `src/`) | Node v22.13.1 |
 | Compute Engine — current + Rubi + Fungrim | same minified bundle + published `integration-rules` (Rubi) + `identities` (Fungrim) packs | Node v22.13.1 |
 | Compute Engine — published | `0.59.0` (npm) | Node v22.13.1 |
 | SymPy | `1.14.0` | Python 3.14.2 |
@@ -34,7 +34,7 @@ This report compares the **current Compute Engine build** against the **last pub
   - *Simplify*: the result is sampled at 3 points (chosen in the expression's domain) and compared to the original expression's value; a result is **correct** only if it both matches numerically **and** actually changed the expression, otherwise **partial** ("value ok, not simplified").
   - *Derivative*: the result is sampled and compared to `f'(x)` (computed by `mpmath`).
   - *Antiderivative*: verified by the definite difference `F(b)−F(a)` over a per-case interval (inside the integrand's domain), which cancels the constant of integration and is compared to `∫f` (`mpmath` quadrature).
-- **Performance**: each operation is built **from its own source representation each call** and run repeatedly; we report the **median** wall-clock time per call (warm/steady-state, after warm-up), shown alongside the quality mark in each cell. Process start-up is excluded. The source form differs per tool — CE re-boxes its **MathJSON**, SymPy/NumPy re-parse a **Python** string (`sympify`/`eval`), math.js and Wolfram re-parse their own **language string** — so the per-call cost includes each tool's native build/parse. That structured-vs-text gap is real (boxing MathJSON or compiling a NumPy expression is cheaper than a full CAS text-parse) and is why the µs-scale numeric column should be read as *end-to-end per-call from source*, not pure kernel compute; at the fastest end (a stored constant) the number is parse-dominated. `CE+R/F` runs on the same minified bundle as `CE·cur` (plus the Rubi + Fungrim rule packs), so its times are directly comparable; for integrals they include the Rubi rule-match attempt made before the built-in fallback.
+- **Performance**: each operation is built **from its own source representation each call** and run repeatedly; we report the **median** wall-clock time per call (warm/steady-state, after warm-up), shown alongside the quality mark in each cell. Process start-up is excluded. The source form differs per tool — CE re-boxes its **MathJSON**, SymPy/NumPy re-parse a **Python** string (`sympify`/`eval`), math.js and Wolfram re-parse their own **language string** — so the per-call cost includes each tool's native build/parse. That structured-vs-text gap is real (boxing MathJSON or compiling a NumPy expression is cheaper than a full CAS text-parse) and is why the µs-scale numeric column should be read as *end-to-end per-call from source*, not pure kernel compute; at the fastest end (a stored constant) the number is parse-dominated. The `CE·warm` and `CE+R/F` columns are measured differently: they run **warm, back-to-back in one process** (`run_ce_rubi.mjs`), so caches accumulate across cases. That makes `CE·warm` vs `CE+R/F` a clean rule-pack overhead comparison, but neither is comparable to the **cold, per-case** `CE·cur`/`CE·pub` numbers — a warm steady-state call is faster than a cold single call regardless of packs. The honest pack overhead is in the "Rule packs" section below; for integrals `CE+R/F` includes the Rubi rule-match attempt made before the built-in fallback.
 - Each `(tool, case)` runs in its own subprocess with a 20s timeout, so a hang or crash is isolated to one cell.
 
 ## Summary scoreboard
@@ -52,78 +52,111 @@ Correct (✅) results per category (count varies by category). Cells in parenthe
 
 **Correctness is assumed:** a correct result shows only its **median time per call** (warm) — in **ms**, except the numeric table which is in **µs** (its per-call times run from ~0.1µs for a stored constant to a few hundred µs). A mark appears *only when a result is not fully correct*: 🟡 partial (limited precision, or value-correct but not simplified) · ❌ incorrect · ∅ returned unevaluated · — not supported · ⏱ timeout. **Bold** flags a Compute Engine outlier — the shipping `CE·cur` build being incorrect, or markedly slower than the fastest competitor on that row. Cases split into a **core** tier (textbook) and a **hard** tier (boundary-pushers).
 
-> `CE+R/F` (current minified bundle + the opt-in Rubi + Fungrim rule packs, loaded once via `loadIntegrationRules` / `loadIdentities`) **tries matching ~2,647 Rubi rules** before falling back to the built-in integrator — so its integral times include that match attempt even when no rule applies (e.g. `∫xeˣ`). Times are comparable to the other columns.
+> `CE+R/F` (current minified bundle + the opt-in Rubi + Fungrim rule packs, loaded once via `loadIntegrationRules` / `loadIdentities`) **tries matching ~2,647 Rubi rules** before falling back to the built-in integrator — so its integral times include that match attempt even when no rule applies (e.g. `∫xeˣ`). ⚠️ `CE+R/F` is measured **warm** (steady-state, caches accumulated), so its time is **not** comparable to the **cold** per-case `CE·cur` in the same row; for the honest warm-vs-warm pack overhead see the [Rule packs](#rule-packs--coverage--true-warm-overhead) section.
 
 ### Arbitrary-precision numeric evaluation — times in **µs**
 
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy | math.js | NumPy | Wolfram |
 |---|---|---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |  |  |
-| N01 | $\pi^2$ <sub>(50d)</sub> | 13 | 9.1 | 15 | 175 | 119 | 🟡 <sub>16 digits</sub> 3.8 | 3.8 |
-| N02 | $e$ <sub>(50d)</sub> | 0.83 | 0.33 | 0.67 | 161 | 11 | 🟡 <sub>16 digits</sub> 3.1 | 3.0 |
-| N03 | $\sqrt2$ <sub>(50d)</sub> | 11 | 7.5 | 11 | 226 | 117 | 🟡 <sub>17 digits</sub> 5.1 | 4.6 |
-| N04 | $100!$ <sub>(exact)</sub> | 10 | 7.5 | 10 | 258 | 218 | ❌ <sub>inexact</sub> 11 | 2.8 |
-| N05 | $e^{\pi}$ <sub>(40d)</sub> | 15 | 12 | 83 | 203 | 387 | 🟡 <sub>17 digits</sub> 5.0 | 4.0 |
+| N01 | $\pi^2$ <sub>(50d)</sub> | 19 | 8.9 | 15 | 178 | 49 | 🟡 <sub>16 digits</sub> 3.7 | 4.1 |
+| N02 | $e$ <sub>(50d)</sub> | 1 | 0.42 | 0.79 | 168 | 11 | 🟡 <sub>16 digits</sub> 3.6 | 2.9 |
+| N03 | $\sqrt2$ <sub>(50d)</sub> | 13 | 7.3 | 11 | 232 | 76 | 🟡 <sub>17 digits</sub> 5.0 | 3.9 |
+| N04 | $100!$ <sub>(exact)</sub> | 9.8 | 9.0 | 9.4 | 267 | 172 | ❌ <sub>inexact</sub> 10 | 2.4 |
+| N05 | $e^{\pi}$ <sub>(40d)</sub> | 18 | 11 | 77 | 195 | 533 | 🟡 <sub>17 digits</sub> 4.9 | 3.9 |
 | | **Hard tier** |  |  |  |  |  |  |  |
-| N06 | $\pi$ <sub>(200d)</sub> | 0.83 | 0.33 | 0.67 | 161 | 16 | 🟡 <sub>16 digits</sub> 3.3 | 3.0 |
-| N07 | $\zeta(3)$ <sub>(40d)</sub> | 505 | 520 | 🟡 <sub>17 digits</sub> 229 | 274 | ❌ <sub>8 digits</sub> 6969 | — | 15 |
-| N08 | $\Gamma(\tfrac13)$ <sub>(40d)</sub> | 337 | 304 | 2351 | 247 | ⚠️ | — | 46 |
-| N09 | $W(1)$ <sub>(40d)</sub> | 108 | 88 | 225 | 682 | — | — | 39 |
-|  | **median µs** | **13** | **9.1** | **15** | **226** | **119** | **5.0** | **4.0** |
+| N06 | $\pi$ <sub>(200d)</sub> | 0.83 | 0.37 | 0.67 | 160 | 14 | 🟡 <sub>16 digits</sub> 3.2 | 2.9 |
+| N07 | $\zeta(3)$ <sub>(40d)</sub> | 472 | 402 | 🟡 <sub>17 digits</sub> 214 | 269 | ❌ <sub>8 digits</sub> 3362 | — | 13 |
+| N08 | $\Gamma(\tfrac13)$ <sub>(40d)</sub> | 329 | 256 | 2245 | 243 | ⚠️ | — | 47 |
+| N09 | $W(1)$ <sub>(40d)</sub> | 116 | 79 | 218 | 683 | — | — | 39 |
+|  | **median µs** | **18** | **9.0** | **15** | **232** | **76** | **4.9** | **3.9** |
 
 ### Simplification
 
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy | math.js | Wolfram |
 |---|---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |  |
-| S01 | $\frac{x^2-1}{x-1}$ | 0.28 | 0.19 | 0.28 | 8.46 | 🟡 <sub>not simplified</sub> 1.03 | 0.17 |
-| S02 | $\sin^2 x+\cos^2 x$ | 0.25 | 0.26 | 0.21 | 18.3 | 🟡 <sub>not simplified</sub> 1.21 | 0.08 |
-| S03 | $(x+1)^2-(x-1)^2$ | 0.58 | 0.31 | 0.56 | 6.48 | 🟡 <sub>not simplified</sub> 1.54 | 0.17 |
-| S04 | $\frac{x^3-x}{x}$ | 0.37 | 0.13 | 0.31 | 4.96 | 1.40 | 0.70 |
-| S05 | $x^{-1/2}-\frac{1}{\sqrt x}$ | 0.35 | 0.08 | 🟡 <sub>not simplified</sub> 0.21 | 0.26 | 🟡 <sub>not simplified</sub> 1.70 | 0.03 |
+| S01 | $\frac{x^2-1}{x-1}$ | 0.34 | 0.18 | 0.28 | 8.67 | 🟡 <sub>not simplified</sub> 1.01 | 0.17 |
+| S02 | $\sin^2 x+\cos^2 x$ | 0.22 | 0.24 | 0.20 | 9.91 | 🟡 <sub>not simplified</sub> 0.92 | 0.08 |
+| S03 | $(x+1)^2-(x-1)^2$ | 0.60 | 0.28 | 0.50 | 6.26 | 🟡 <sub>not simplified</sub> 1.05 | 0.15 |
+| S04 | $\frac{x^3-x}{x}$ | 0.36 | 0.11 | 0.28 | 4.37 | 1.63 | 0.63 |
+| S05 | $x^{-1/2}-\frac{1}{\sqrt x}$ | 0.28 | 0.06 | 🟡 <sub>not simplified</sub> 0.22 | 0.24 | 🟡 <sub>not simplified</sub> 1.51 | 0.03 |
 | | **Hard tier** |  |  |  |  |  |  |
-| S06 | $\sqrt6\,x+\sqrt2\,x$ | 0.72 | 0.32 | 0.67 | 6.21 | 1.13 | 20.4 |
-| S07 | $\ln x+\ln(x+1)$ | 0.51 | 0.31 | 0.51 | 6.83 | 🟡 <sub>not simplified</sub> 1.54 | 1.39 |
-| S08 | $\sqrt{3+2\sqrt2}$ | 0.30 | 0.16 | 🟡 <sub>not simplified</sub> 0.19 | 🟡 <sub>not simplified</sub> 3.51 | 🟡 <sub>numeric only</sub> 0.87 | 3.29 |
-| S09 | $\frac{x^3-1}{x-1}$ | 0.35 | 0.11 | 0.33 | 9.08 | 🟡 <sub>not simplified</sub> 1.35 | 1.00 |
-|  | **median ms** | **0.35** | **0.19** | **0.31** | **6.48** | **1.35** | **0.70** |
+| S06 | $\sqrt6\,x+\sqrt2\,x$ | 0.64 | 0.36 | 0.64 | 5.83 | 1.17 | 17.9 |
+| S07 | $\ln x+\ln(x+1)$ | 0.54 | 0.30 | 0.36 | 6.19 | 🟡 <sub>not simplified</sub> 0.88 | 1.40 |
+| S08 | $\sqrt{3+2\sqrt2}$ | 0.29 | 0.11 | 🟡 <sub>not simplified</sub> 0.18 | 🟡 <sub>not simplified</sub> 3.52 | 🟡 <sub>numeric only</sub> 0.81 | 3.44 |
+| S09 | $\frac{x^3-1}{x-1}$ | 0.40 | 0.10 | 0.33 | 8.61 | 🟡 <sub>not simplified</sub> 1.08 | 1.02 |
+|  | **median ms** | **0.36** | **0.18** | **0.28** | **6.19** | **1.05** | **0.63** |
 
 ### Differentiation
 
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy | math.js | Wolfram |
 |---|---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |  |
-| D01 | $\tfrac{d}{dx}\sin x$ | 0.02 | 0.01 | 0.05 | 0.34 | 0.63 | 0.003 |
-| D02 | $\tfrac{d}{dx}x^5$ | 0.16 | 0.05 | 0.15 | 0.51 | 0.82 | 0.0038 |
-| D03 | $\tfrac{d}{dx}\tan x$ | 0.06 | 0.02 | 0.08 | 2.33 | 0.86 | 0.0036 |
-| D04 | $\tfrac{d}{dx}x^2\sin x$ | 0.36 | 0.13 | 0.40 | 2.06 | 2.06 | 0.0054 |
-| D05 | $\tfrac{d}{dx}\sin(x^2)$ | 0.17 | 0.06 | 0.19 | 1.40 | 1.19 | 0.0045 |
+| D01 | $\tfrac{d}{dx}\sin x$ | 0.03 | 0.01 | 0.05 | 0.33 | 0.65 | 0.0031 |
+| D02 | $\tfrac{d}{dx}x^5$ | 0.22 | 0.07 | 0.15 | 1.07 | 1.32 | 0.0031 |
+| D03 | $\tfrac{d}{dx}\tan x$ | 0.08 | 0.03 | 0.08 | 2.21 | 0.84 | 0.0036 |
+| D04 | $\tfrac{d}{dx}x^2\sin x$ | 0.67 | 0.14 | 0.43 | 2.03 | 1.91 | 0.0054 |
+| D05 | $\tfrac{d}{dx}\sin(x^2)$ | 0.20 | 0.06 | 0.19 | 1.44 | 1.11 | 0.0044 |
 | | **Hard tier** |  |  |  |  |  |  |
-| D06 | $\tfrac{d}{dx}x^x$ | 0.13 | 0.04 | 0.14 | 1.75 | 2.14 | 0.0048 |
-| D07 | $\tfrac{d}{dx}\arcsin x$ | 0.37 | 0.11 | 0.18 | 2.92 | 1.32 | 0.004 |
-| D08 | $\tfrac{d}{dx}\ln(\sin x)$ | 0.09 | 0.04 | 0.12 | 1.31 | 1.01 | 0.0043 |
-| D09 | $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.79 | 0.28 | 0.74 | 6.89 | 2.18 | 0.0079 |
-|  | **median ms** | **0.16** | **0.05** | **0.15** | **1.75** | **1.19** | **0.0043** |
+| D06 | $\tfrac{d}{dx}x^x$ | 0.15 | 0.04 | 0.15 | 1.76 | 1.93 | 0.0043 |
+| D07 | $\tfrac{d}{dx}\arcsin x$ | 0.43 | 0.12 | 0.19 | 2.88 | 1.34 | 0.0047 |
+| D08 | $\tfrac{d}{dx}\ln(\sin x)$ | 0.10 | 0.03 | 0.11 | 1.09 | 1.03 | 0.0043 |
+| D09 | $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.93 | 0.26 | 0.78 | 6.53 | 2.27 | 0.0078 |
+|  | **median ms** | **0.20** | **0.06** | **0.15** | **1.76** | **1.32** | **0.0043** |
 
 ### Antiderivation (symbolic integration)
 
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy | Wolfram |
 |---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |
-| A01 | $\int x^2\,dx$ | 0.34 | 0.10 | 0.23 | 0.37 | 0.03 |
-| A02 | $\int\sin x\,dx$ | 0.08 | 0.06 | 0.09 | 1.24 | 0.58 |
-| A03 | $\int x e^x\,dx$ | 0.39 | 0.36 | 0.36 | 6.24 | 0.57 |
-| A04 | $\int\frac{1}{1+x^2}\,dx$ | 0.20 | 0.06 | 0.20 | 9.63 | 0.86 |
-| A05 | $\int\frac{x}{x^2+1}\,dx$ | 0.66 | 0.23 | 0.63 | 7.02 | 0.59 |
+| A01 | $\int x^2\,dx$ | 0.41 | 0.14 | 0.23 | 0.39 | 0.03 |
+| A02 | $\int\sin x\,dx$ | 0.11 | 0.14 | 0.12 | 1.18 | 0.59 |
+| A03 | $\int x e^x\,dx$ | 0.45 | 1.01 | 0.37 | 7.06 | 0.58 |
+| A04 | $\int\frac{1}{1+x^2}\,dx$ | 0.27 | 0.18 | 0.22 | 9.52 | 0.87 |
+| A05 | $\int\frac{x}{x^2+1}\,dx$ | 0.87 | 1.06 | 0.66 | 7.10 | 0.59 |
 | | **Hard tier** |  |  |  |  |  |
-| A06 | $\int\frac{1}{x^3+1}\,dx$ | 3.66 | 0.71 | ∅ | 23.6 | 7.92 |
-| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 0.23 | 0.09 | ∅ | 0.72 | 0.35 |
-| A08 | $\int e^{-x^2}\,dx$ | 0.73 | 0.31 | ∅ | 24.0 | 0.44 |
-| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 0.83 | 0.81 | ∅ | 22.5 | 2.08 |
-| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | **∅** | 0.60 | ∅ | 21.2 | 2.19 |
-| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | **∅** | 0.28 | ∅ | 113 | 1.11 |
-| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | **∅** | 0.36 | ∅ | 201 | 1.46 |
-|  | **median ms** | **0.39** | **0.31** | **0.23** | **21.2** | **0.86** |
+| A06 | $\int\frac{1}{x^3+1}\,dx$ | 5.56 | 8.72 | ∅ | 24.5 | 8.14 |
+| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 0.29 | 0.13 | ∅ | 0.76 | 0.35 |
+| A08 | $\int e^{-x^2}\,dx$ | 1.02 | 0.50 | ∅ | 26.0 | 0.44 |
+| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 0.96 | 1.42 | ∅ | 24.3 | 2.11 |
+| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | **∅** | 1.14 | ∅ | 21.1 | 2.22 |
+| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | **∅** | 0.86 | ∅ | 117 | 1.13 |
+| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | **∅** | 1.04 | ∅ | 213 | 1.47 |
+|  | **median ms** | **0.45** | **1.01** | **0.23** | **21.1** | **0.87** |
+
+## Rule packs — coverage & true warm overhead
+
+`CE·warm` (base engine) and `CE+R/F` (Rubi + Fungrim) are timed **back-to-back in one warm process**, so their ratio is a clean per-call rule-pack overhead. The cold, per-case `CE·cur` column in the tables above is a different (single-call-latency) measurement — do **not** diff it against `CE+R/F`. Overhead is ≈1× wherever no rule can fire (numeric, differentiation); the packs cost real time on integrals they miss and *win* where a rule applies (e.g. `∫1/(x³+1)`).
+
+**Coverage gained** (∅/❌ → ✅ once the packs are enabled): CR1 ($\int\frac{\sqrt x}{1+x}\,dx$), CR2 ($\int\frac{x}{(1+x)^{1/3}}\,dx$), CR3 ($\int\frac{x^2}{(1+x)^{1/3}}\,dx$).
+
+| # | Case | CE·warm | CE+R/F | Overhead |
+|---|---|---|---|---|
+| A03 | $\int x e^x\,dx$ | 108 | 1012 | 9.39× |
+| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 210 | 1421 | 6.77× |
+| A06 | $\int\frac{1}{x^3+1}\,dx$ | 1496 | 8723 | 5.83× |
+| A05 | $\int\frac{x}{x^2+1}\,dx$ | 206 | 1058 | 5.14× |
+| A02 | $\int\sin x\,dx$ | 28 | 138 | 4.91× |
+| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | 247 | 1143 | 4.63× |
+| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | 255 | 1036 | 4.07× |
+| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | 269 | 862 | 3.20× |
+| A04 | $\int\frac{1}{1+x^2}\,dx$ | 70 | 183 | 2.62× |
+| CE4 | $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 175 | 413 | 2.36× |
+| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 59 | 126 | 2.15× |
+| CE1 | $\lim_{x\to0}\tfrac{\sin x}{x}$ | 37 | 79 | 2.12× |
+| S02 | $\sin^2 x+\cos^2 x$ | 123 | 239 | 1.93× |
+| A08 | $\int e^{-x^2}\,dx$ | 268 | 504 | 1.88× |
+| S06 | $\sqrt6\,x+\sqrt2\,x$ | 224 | 363 | 1.62× |
+| S08 | $\sqrt{3+2\sqrt2}$ | 69 | 109 | 1.57× |
+| S07 | $\ln x+\ln(x+1)$ | 197 | 304 | 1.55× |
+| CE2 | $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 591 | 904 | 1.53× |
+| A01 | $\int x^2\,dx$ | 89 | 136 | 1.52× |
+| CE3 | $\int_1^2\tfrac1x\,dx$ | 43 | 38 | **0.89× (win)** |
+| N01 | $\pi^2$ | 10 | 8.9 | **0.87× (win)** |
+| N07 | $\zeta(3)$ | 471 | 402 | **0.85× (win)** |
+
+_Times in µs (warm median). 31 row(s) within ±10% (no measurable pack overhead — numeric / differentiation) omitted._
 
 ## Current build vs published `0.59.0`
 
