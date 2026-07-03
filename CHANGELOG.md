@@ -98,6 +98,51 @@
   (measured; see `benchmarks/big-decimal/BIGNUM-COMPARISON.md`, the new
   durable primitive-operation benchmark).
 
+  **Arbitrary-precision arithmetic at 100 significant digits** (ns per
+  operation, lower is better; warm median, distinct operands per call):
+
+  | op | **CE (this release)** | CE 0.66.0 | math.js¹ | NumPy² | Mathematica³ |
+  |---|---:|---:|---:|---:|---:|
+  | `add` | **75** | 152 | 278 | — | 1,023 |
+  | `sub` | **91** | 167 | 329 | — | 1,212 |
+  | `mul` | **202** | 319 | 7,984 | — | 1,025 |
+  | `div` | **501** | 1,748 | 11,890 | — | 1,366 |
+  | `cmp` | **29** | 198 | 61 | — | 984 |
+  | `sqrt` | 3,163 | 4,018 | 54,696 | — | **1,055** |
+  | `exp` | 4,795 | 8,698 | 728,876 | — | **1,682** |
+  | `ln` | 5,887 | 32,398 | 670,206 | — | **1,353** |
+  | `cos` | 6,914 | 7,467 | 1,666,292 | — | **2,059** |
+
+  <small>¹ math.js `BigNumber` (decimal.js) at precision 100. ² NumPy is
+  float64-only (~16 digits); it has no arbitrary-precision mode. ³
+  Mathematica 14.3 timed inside the kernel with result caches disabled; its
+  ~1 µs per-call dispatch floor dominates its small-op rows. CE and 0.66.0
+  from `benchmarks/big-decimal/ops-results.json`; reproduce with
+  `node benchmarks/big-decimal/run-ops.mjs` and
+  `wolframscript -file benchmarks/big-decimal/ops-bench.wls`.</small>
+
+  **Symbolic operations** (ms per call, lower is better; warm median, from
+  the cross-library suite in `benchmarks/REPORT.md`):
+
+  | case | **CE (this release)** | CE 0.66.0 | math.js | NumPy⁴ | Mathematica |
+  |---|---:|---:|---:|---:|---:|
+  | simplify `√(3+2√2)` | **0.07** | 0.09 | 🟡 0.92 | — | 3.28 |
+  | simplify `√6·x + √2·x` | **0.16** | 0.19 | 1.13 | — | 18.0 |
+  | simplify `(x²−1)/(x−1)` | **0.10** | 0.15 | 🟡 0.99 | — | 0.17 |
+  | `d/dx √(1−x²)` | 0.22 | 0.21 | 2.13 | — | **0.008** |
+  | `d/dx xˣ` | 0.04 | 0.04 | 1.83 | — | **0.005** |
+  | `∫ x eˣ dx` | **0.08** | 0.09 | — | — | 0.57 |
+  | `∫ x/(x²+1) dx` | **0.16** | 0.18 | — | — | 0.60 |
+  | `lim sin(x)/x` | **0.03** | 0.04 | — | — | 1.93 |
+  | `lim (1+1/x)ˣ` | **0.55** | 1.13 | — | — | 5.81 |
+  | solve `x⁴+x²−1 = 0` | 1.88 | 4.65 | — | — | **0.55** |
+  | solve `x³−x−1 = 0` | **0.11** | 1.18 | — | — | 0.23 |
+
+  <small>⁴ NumPy is a numeric array library with no symbolic engine. 🟡 =
+  value-correct but not fully simplified. — = not supported. All engines
+  measured warm, per-call from source, same protocol
+  (`benchmarks/REPORT.md`, "Methodology").</small>
+
 - **The Rubi integration pack is much faster on integrals it cannot solve.**
   A second-level dispatch index (the set of operator heads a rule's pattern
   requires vs the heads present in the integrand) now screens the ~3,200
