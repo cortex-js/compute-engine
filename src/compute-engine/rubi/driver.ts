@@ -52,6 +52,13 @@ const DEBUG_FIRE = process.env.RUBI_DEBUG_FIRE;
 // RUBI_NO_NATIVE_RATIONAL: disable the engine-native rational-function
 // fallback (see int()) — for measuring the Rubi rules in isolation.
 const NO_NATIVE_RATIONAL = process.env.RUBI_NO_NATIVE_RATIONAL !== undefined;
+// RUBI_NO_SKELETON: disable the second-level integrand-skeleton dispatch
+// screen (the root-operator candidate buckets + `requiredHeads` feature
+// filter), falling back to a linear scan of every rule with only the
+// root-operator prescreen. The two paths MUST produce identical results
+// (the screen only drops rules that provably cannot match); this switch
+// exists to A/B that equivalence and to measure the screen's speedup.
+const NO_SKELETON = process.env.RUBI_NO_SKELETON !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -60,6 +67,18 @@ function hasInexactFloat(e: Expression): boolean {
 function containsIntegrate(e: Expression): boolean {
   if (e.operator === 'Integrate') return true;
   return e.ops?.some(containsIntegrate) ?? false;
+}
+
+/** All operator heads appearing in the (function nodes of the) expression
+ * tree — the integrand's "skeleton" feature set. Backs the second-level
+ * dispatch screen: a rule whose compiled `requiredHeads` are not all present
+ * here provably cannot match, so it is skipped without pattern-matching (see
+ * `compile.ts` `requiredHeads` for the soundness argument). Cheap: one walk
+ * per top-level integrand shape, reused across the whole rule scan. */
+function collectHeads(e: Expression, out: Set<string>): void {
+  if (!e.ops) return;
+  out.add(e.operator);
+  for (const op of e.ops) collectHeads(op, out);
 }
 
 /** Bottom-up application of the engine's trig simplifier — folds the
@@ -109,8 +128,33 @@ export class RubiDriver {
   constructor(
     private readonly ce: ComputeEngine,
     private readonly rules: CompiledRule[],
-    private readonly options: { timeLimitMs?: number; trace?: boolean } = {}
+    private readonly options: {
+      timeLimitMs?: number;
+      trace?: boolean;
+      /** @internal Force the legacy full-scan dispatch (root-operator
+       * prescreen only), bypassing the skeleton screen. Overrides the
+       * `RUBI_NO_SKELETON` env default. For the A/B equivalence harness. */
+      noSkeleton?: boolean;
+    } = {}
   ) {}
+
+  // Per-root-operator candidate lists: the rules whose root-operator prescreen
+  // admits an integrand with that operator (rootOp === op, plus the wildcard
+  // rootOp === null rules that can match any root). Built lazily and cached —
+  // the operator alphabet is tiny (Multiply/Power/a few heads), so this is
+  // effectively "once per bundle". Each list is a stable subsequence of the
+  // ordered `this.rules`, preserving the original priority order exactly.
+  private readonly candidateCache = new Map<string, CompiledRule[]>();
+  private candidatesFor(operator: string): CompiledRule[] {
+    let list = this.candidateCache.get(operator);
+    if (list === undefined) {
+      list = this.rules.filter(
+        (r) => r.rootOp === null || r.rootOp === operator
+      );
+      this.candidateCache.set(operator, list);
+    }
+    return list;
+  }
 
   /** Integrate `integrand` with respect to `variable`. Returns null when
    * no rule chain applies (caller decides on inert/fallback).
@@ -364,12 +408,40 @@ export class RubiDriver {
     const trace = (id: string, stage: string): void => {
       if (this.options.trace) this.stats.trace.push({ id, stage, depth });
     };
+    // Second-level dispatch screen: the candidate list for this integrand's
+    // root operator (root-operator prescreen, cached once per operator over
+    // the bundle) narrowed by the integrand-skeleton feature set. Both
+    // filters are NECESSARY conditions on a match (see compile.ts
+    // `requiredHeads`), so no rule that could fire is dropped; rule order
+    // within the candidate list is the original priority order (stable
+    // filtering — the buckets are built by a single ordered pass).
+    const integrandHeads = new Set<string>();
+    collectHeads(integrand, integrandHeads);
+    const noSkeleton = this.options.noSkeleton ?? NO_SKELETON;
+    const candidates = noSkeleton
+      ? this.rules
+      : this.candidatesFor(integrand.operator);
     const dispatch = (envCap: number): Expression | null => {
-      for (const rule of this.rules) {
+      for (const rule of candidates) {
         if (Date.now() > this.deadline) return null;
-        // dispatch pre-screen on the root operator
-        if (rule.rootOp !== null && rule.rootOp !== integrand.operator)
-          continue;
+        if (noSkeleton) {
+          // legacy path: root-operator prescreen only (A/B baseline)
+          if (rule.rootOp !== null && rule.rootOp !== integrand.operator)
+            continue;
+        } else {
+          // integrand-skeleton screen: skip when a head the pattern provably
+          // requires is absent from the integrand (conservative — fail-open
+          // on inclusion). The candidate bucket already enforced the
+          // root-operator match.
+          const req = rule.requiredHeads;
+          let skip = false;
+          for (let i = 0; i < req.length; i++)
+            if (!integrandHeads.has(req[i])) {
+              skip = true;
+              break;
+            }
+          if (skip) continue;
+        }
         // conditions participate in matching: enumerate alternative
         // assignments (factor-role swaps etc.) and try conditions per env.
         // Pass the driver deadline so a single rule's combinatorial match

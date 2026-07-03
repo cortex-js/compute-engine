@@ -29,6 +29,14 @@ export type CompiledRule = {
   /** root operator the pattern requires, or null when it can match any
    * expression (root slot, or a collapsible node) — dispatch pre-screen */
   rootOp: string | null;
+  /** Operator heads that MUST appear somewhere in ANY expression this
+   * pattern can match — the second-level ("integrand-skeleton") dispatch
+   * screen. Computed conservatively from the matcher's guarantees (see
+   * `requiredHeads`): a rule is skipped for an integrand only when one of
+   * these heads is provably absent from the integrand tree, so no rule that
+   * could match is ever excluded. Empty ⇒ the rule is a candidate for every
+   * integrand (root slot / fully-collapsible pattern). */
+  requiredHeads: string[];
   bindings: RubiRule['bindings'];
   condition: Json | null;
   innerCondition: Json | null;
@@ -93,6 +101,57 @@ function toPat(
     ops: expr.ops.map((op, i) => toPat(ce, op, expr.operator, i)),
     ac: expr.operator === 'Add' || expr.operator === 'Multiply',
   };
+}
+
+/**
+ * The operator heads guaranteed to appear in the matched expression's tree
+ * for EVERY successful match of `pat` — the conservative feature set backing
+ * the second-level dispatch screen (`CompiledRule.requiredHeads`).
+ *
+ * Soundness rests entirely on the Rubi matcher's guarantees (`match.ts`),
+ * which — unlike CE's general matcher — performs NO cross-head synthetic
+ * rebuilds. The only structural flexibility is node *collapse* (a node whose
+ * operands are all optional-default except one may match a non-node
+ * expression by defaulting the optionals) and AC reordering (same operator).
+ * Therefore:
+ *
+ *   - `slot` / `optslot` / `var` / `const` — bind arbitrary subexpressions;
+ *     guarantee no head (a `const` DOES fix its subtree, but requiring its
+ *     heads would only tighten the screen — we conservatively require none).
+ *   - a NON-collapsible `node` with operator O — the matcher requires
+ *     `expr.operator === O` on the only matching branch (`mCollapse` returns
+ *     false for it), so O is guaranteed; each operand pattern is assigned to
+ *     a distinct operand of `expr` (AC) or matched positionally (sequential),
+ *     so every operand's guaranteed heads also appear (as a subtree). An
+ *     `optslot` operand may default away — it contributes nothing regardless.
+ *   - a COLLAPSIBLE `node` (≥1 optslot, exactly one non-optslot operand) —
+ *     may match either structurally (op present) OR by collapsing to match
+ *     its single non-optslot operand pattern against the whole expression.
+ *     The node's own operator is therefore NOT guaranteed, but the surviving
+ *     operand's guaranteed heads appear on BOTH branches, so they carry over.
+ *
+ * The result is a NECESSARY condition on any matching integrand; ANDing it
+ * with the existing root-operator screen keeps both conservative.
+ */
+export function requiredHeads(pat: Pat): string[] {
+  const out = new Set<string>();
+  collectRequiredHeads(pat, out);
+  return [...out];
+}
+
+function collectRequiredHeads(pat: Pat, out: Set<string>): void {
+  if (pat.kind !== 'node') return;
+  const nonOpt = pat.ops.filter((p) => p.kind !== 'optslot');
+  const optionals = pat.ops.length - nonOpt.length;
+  const collapsible = optionals >= 1 && nonOpt.length === 1;
+  if (collapsible) {
+    // Only the surviving (non-optional) operand's guarantees carry over; the
+    // node's own operator can be defaulted away.
+    collectRequiredHeads(nonOpt[0], out);
+    return;
+  }
+  out.add(pat.op);
+  for (const p of pat.ops) collectRequiredHeads(p, out);
 }
 
 function hasPlaceholder(expr: Expression): boolean {
@@ -164,6 +223,7 @@ export function compileRule(
       variable: rule.variable,
       pat,
       rootOp,
+      requiredHeads: requiredHeads(pat),
       bindings: rule.bindings,
       condition: rule.condition,
       innerCondition: rule.innerCondition,

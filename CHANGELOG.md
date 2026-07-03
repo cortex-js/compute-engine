@@ -72,6 +72,14 @@
 
 ### Performance
 
+- **The Rubi integration pack is much faster on integrals it cannot solve.**
+  A second-level dispatch index (the set of operator heads a rule's pattern
+  requires vs the heads present in the integrand) now screens the ~3,200
+  rules before pattern-matching, cutting candidate scans ~10× on the miss
+  path — integrals that fall through to the built-in integrator spend less
+  than half the previous time in the pack, with byte-identical results
+  verified across the full 4,965-integral Rubi test corpus.
+
 - **Sign queries under assumptions are much faster and sharper.** `.sgn` /
   `.isPositive` on a symbol constrained by assumptions now consults the
   indexed bounds store (O(1) after indexing) instead of linearly re-matching
