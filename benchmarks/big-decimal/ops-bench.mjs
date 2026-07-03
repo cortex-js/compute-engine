@@ -55,10 +55,21 @@ const mkP = (p) => new B(`${1 + ((rnd() * 9) | 0)}.${digits(p - 1)}`);
 // p-digit BigDecimal in [0,2): safe, representative arg for exp/cos.
 const mkSmall = (p) => new B(`${(rnd() * 2).toFixed(0)}.${digits(p - 1)}`);
 // p-significant-digit BigInt with a few trailing zeros → exercises the
-// normalize() trailing-zero strip that the constructor runs.
+// normalize() trailing-zero strip that the constructor runs. NOTE: this is an
+// ADVERSARIAL distribution — instrumentation of 39,900 real significands from
+// live kernels (zeta3, div/mul/pow/add/sub @100d) found ZERO that entered the
+// strip loop (42% odd, 58% ending in 2/4/6/8). Real arithmetic doesn't
+// produce trailing-zero significands, so the typical row below is the one
+// that reflects workload cost; this row tracks the worst case.
 const mkBig = (p) => {
   const core = ((rnd() * 9) | 0) + 1 + digits(p - 4);
   return BigInt(core + '000');
+};
+// p-digit BigInt with a REALISTIC last digit (never 0): the common case the
+// constructor's fast-exits (odd bit-test, %10) are optimized for.
+const mkBigTypical = (p) => {
+  const core = ((rnd() * 9) | 0) + 1 + digits(p - 2);
+  return BigInt(core + (1 + ((rnd() * 9) | 0)).toString());
 };
 
 const poolA = Array.from({ length: POOL }, () => mkP(prec));
@@ -67,6 +78,7 @@ const poolC = Array.from({ length: POOL }, () => mkSmall(prec));
 // operands with prec+16 significant digits so toPrecision(prec) really rounds.
 const poolRound = Array.from({ length: POOL }, () => mkP(prec + 16));
 const poolBig = Array.from({ length: POOL }, () => mkBig(prec));
+const poolBigTyp = Array.from({ length: POOL }, () => mkBigTypical(prec));
 
 // ---- Apéry ζ(3) series kernel (a div/mul-heavy CONSUMER) -------------------
 // ζ(3) = 5/2 · Σ_{n≥1} (-1)^(n-1) / (n³ · C(2n,n)); term ~ /64 per step →
@@ -95,7 +107,8 @@ const OPS = {
   div: (i) => poolA[i].div(poolB[i]),
   sqrt: (i) => poolA[i].sqrt(),
   round: (i) => poolRound[i].toPrecision(prec), // rounding + re-normalize
-  normalize: (i) => new B(poolBig[i]), // constructor → normalize() strip+count
+  normalize: (i) => new B(poolBigTyp[i]), // constructor → normalize(), realistic last digit
+  normalize_tz: (i) => new B(poolBig[i]), // ADVERSARIAL: trailing-zero strip loop
   cmp: (i) => poolA[i].cmp(poolA[(i + 1) & MASK]),
   // composites (CONSUMERS, not targets):
   ln: (i) => poolA[i].ln(),

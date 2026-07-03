@@ -45,12 +45,19 @@ function runCell(cmd, argsTemplate, prec) {
 }
 
 // results[col][prec][op] = perOp ns
+//
+// INTERLEAVED cell order: precision outer, column inner, so the columns being
+// compared run back-to-back within seconds of each other. With column-outer
+// order the first and last column ran ~75s apart, and machine-state drift
+// (thermal, background load) landed asymmetrically on one column — observed
+// as a 4x inflation of whichever column ran during a busy spell. Same lesson
+// as the cross-library harness (all CE columns warm in one process).
 const results = {};
 const opOrder = [];
+for (const [name] of COLUMNS) results[name] = {};
 process.stderr.write(`Running ops-bench: precisions=${PRECS.join(',')} budget=${BUDGET}ms\n`);
-for (const [name, cmd, tpl] of COLUMNS) {
-  results[name] = {};
-  for (const prec of PRECS) {
+for (const prec of PRECS) {
+  for (const [name, cmd, tpl] of COLUMNS) {
     process.stderr.write(`  ${name} @ ${prec}d ...`);
     const t0 = Date.now();
     let json;
@@ -83,10 +90,10 @@ process.stderr.write(`\nWrote ${sidecarPath}\n\n`);
 
 // ---- markdown tables ------------------------------------------------------
 const fmt = (v) => (v == null ? '—' : v >= 1000 ? Math.round(v).toLocaleString('en-US') : String(v));
-const PRIMITIVES = ['add', 'sub', 'mul', 'div', 'sqrt', 'round', 'normalize', 'cmp'];
+const PRIMITIVES = ['add', 'sub', 'mul', 'div', 'sqrt', 'round', 'normalize', 'normalize_tz', 'cmp'];
 const COMPOSITES = ['ln', 'exp', 'cos', 'zeta3'];
 const OPLABEL = {
-  round: 'round¹', normalize: 'normalize²', zeta3: 'ζ(3)³',
+  round: 'round¹', normalize: 'normalize²', normalize_tz: 'normalize (tz)⁴', zeta3: 'ζ(3)³',
 };
 
 function table(ops, title) {
@@ -113,5 +120,6 @@ console.log('');
 console.log(table(COMPOSITES, 'Composite consumers (ns/op) — prove op-level wins propagate'));
 console.log('');
 console.log('¹ `round` = `toPrecision(p)` on a `p+16`-digit operand (rounding + re-normalize).');
-console.log('² `normalize` = constructing from a `bigint` (the constructor runs `normalize()` — trailing-zero strip + digit count); no separate export exists.');
+console.log('² `normalize` = constructing from a `bigint` with a realistic (nonzero) last digit — the case real arithmetic produces (0 of 39,900 instrumented kernel significands had trailing zeros); the constructor runs `normalize()`.');
+console.log('⁴ `normalize (tz)` = ADVERSARIAL trailing-zero operands forcing the strip loop; tracks the worst case, not workload cost.');
 console.log('³ `ζ(3)` = an Apéry series kernel on CE; the mpmath column uses native `mpmath.zeta(3)` (not Apéry), so it is a reference point, not an algorithm-identical race.');

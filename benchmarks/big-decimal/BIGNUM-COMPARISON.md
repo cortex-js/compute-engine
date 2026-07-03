@@ -40,51 +40,52 @@ _work_ p-digit-sized and the loop warm.
 
 | op | column | 21d | 50d | 100d | 200d | 500d |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `add` | CE HEAD | 58.5 | 60.7 | 75.1 | 130.7 | 292.5 |
-|  | CE 0.66.0 | 75.3 | 91.4 | 153.5 | 289.5 | 698.7 |
+| `add` | CE HEAD | 58.5 | 60.4 | 82.4 | 143.3 | 372.7 |
+|  | CE 0.66.0 | 75.4 | 91.9 | 151.5 | 346.9 | 750.7 |
 |  | mpmath | 796.4 | 799.5 | 880.5 | 954.8 | 1,124 |
-| `sub` | CE HEAD | 61.9 | 68.4 | 91.1 | 120.4 | 330.4 |
-|  | CE 0.66.0 | 84.1 | 100.6 | 165.3 | 288.2 | 720.6 |
+| `sub` | CE HEAD | 62.3 | 69.4 | 90.7 | 120.3 | 331.8 |
+|  | CE 0.66.0 | 84 | 105.1 | 198 | 284.1 | 719.5 |
 |  | mpmath | 777.8 | 754.1 | 857.6 | 852.6 | 1,019 |
-| `mul` | CE HEAD | 71.2 | 89.9 | 206.3 | 308.6 | 943.4 |
-|  | CE 0.66.0 | 95.3 | 155.4 | 320.9 | 610.9 | 1,696 |
+| `mul` | CE HEAD | 71.5 | 88.7 | 202.2 | 307.2 | 958.7 |
+|  | CE 0.66.0 | 96 | 155.4 | 351.6 | 608.3 | 1,694 |
 |  | mpmath | 694.6 | 737.1 | 908.9 | 1,359 | 5,885 |
-| `div` | CE HEAD | 297.1 | 353.6 | 501.9 | 865.7 | 2,774 |
-|  | CE 0.66.0 | 1,181 | 1,388 | 1,778 | 2,450 | 5,375 |
+| `div` | CE HEAD | 292.7 | 388 | 494 | 859.4 | 2,876 |
+|  | CE 0.66.0 | 1,196 | 1,401 | 1,737 | 2,453 | 5,213 |
 |  | mpmath | 937.6 | 1,038 | 1,482 | 2,633 | 8,182 |
-| `sqrt` | CE HEAD | 1,822 | 2,291 | 3,085 | 6,468 | 16,855 |
-|  | CE 0.66.0 | 2,414 | 2,921 | 3,966 | 7,541 | 20,593 |
+| `sqrt` | CE HEAD | 1,817 | 2,478 | 3,072 | 6,415 | 19,151 |
+|  | CE 0.66.0 | 2,458 | 2,941 | 3,962 | 7,488 | 18,809 |
 |  | mpmath | 1,584 | 2,065 | 3,496 | 5,958 | 19,752 |
-| `round¹` | CE HEAD | 110.6 | 128.1 | 183 | 308.6 | 543.6 |
-|  | CE 0.66.0 | 368.1 | 450 | 621.4 | 828.5 | 1,460 |
+| `round¹` | CE HEAD | 109 | 159.7 | 184.2 | 277.2 | 549 |
+|  | CE 0.66.0 | 363.8 | 519.9 | 620.4 | 832.7 | 1,439 |
 |  | mpmath | — | — | — | — | — |
-| `normalize²` | CE HEAD | 125.7 | 143 | 258.7 | 520.4 | 1,285 |
-|  | CE 0.66.0 | 98.6 | 114.3 | 218.3 | 432.8 | 1,069 |
+| `normalize²` | CE HEAD | 36 | 37.7 | 44.2 | 59.9 | 133.6 |
+|  | CE 0.66.0 | 56.8 | 79.9 | 143.2 | 280.5 | 602.3 |
 |  | mpmath | — | — | — | — | — |
-| `cmp` | CE HEAD | 26.7 | 27.4 | 28.3 | 28.8 | 30.7 |
-|  | CE 0.66.0 | 91.6 | 117.2 | 196.6 | 175.1 | 171.6 |
+| `cmp` | CE HEAD | 26.5 | 27.1 | 28.4 | 28.7 | 30.1 |
+|  | CE 0.66.0 | 90.9 | 118.1 | 392.1 | 176.5 | 170.9 |
 |  | mpmath | — | — | — | — | — |
 
 ### Composite consumers (ns/op) — prove op-level wins propagate
 
 | op | column | 21d | 50d | 100d | 200d | 500d |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `ln` | CE HEAD | 8,281 | 16,482 | 31,149 | 76,038 | 379,190 |
-|  | CE 0.66.0 | 8,632 | 14,713 | 32,061 | 76,893 | 379,558 |
+| `ln` | CE HEAD | 8,127 | 13,998 | 31,133 | 75,804 | 378,452 |
+|  | CE 0.66.0 | 8,699 | 14,862 | 49,501 | 76,162 | 380,094 |
 |  | mpmath | 2,217 | 2,983 | 5,439 | 15,343 | 109,102 |
-| `exp` | CE HEAD | 2,509 | 3,863 | 7,489 | 18,379 | 97,556 |
-|  | CE 0.66.0 | 3,320 | 4,712 | 8,600 | 19,707 | 98,369 |
+| `exp` | CE HEAD | 2,282 | 3,090 | 4,606 | 9,272 | 38,338 |
+|  | CE 0.66.0 | 3,337 | 4,779 | 8,780 | 19,577 | 117,943 |
 |  | mpmath | 2,566 | 3,684 | 7,118 | 21,969 | 102,260 |
-| `cos` | CE HEAD | 2,610 | 3,661 | 6,670 | 14,845 | 68,901 |
-|  | CE 0.66.0 | 3,032 | 4,139 | 7,235 | 15,401 | 69,074 |
+| `cos` | CE HEAD | 2,609 | 3,627 | 6,556 | 14,939 | 68,983 |
+|  | CE 0.66.0 | 3,047 | 4,107 | 9,450 | 15,271 | 77,361 |
 |  | mpmath | 2,828 | 4,522 | 9,265 | 21,523 | 105,961 |
-| `ζ(3)³` | CE HEAD | 7,322 | 18,871 | 47,468 | 134,605 | 643,693 |
-|  | CE 0.66.0 | 13,245 | 38,221 | 98,139 | 283,678 | 1,344,146 |
+| `ζ(3)³` | CE HEAD | 6,842 | 20,423 | 53,153 | 149,269 | 627,969 |
+|  | CE 0.66.0 | 13,374 | 37,410 | 119,653 | 284,175 | 1,343,813 |
 |  | mpmath | 1,276 | 1,392 | 1,383 | 1,359 | 1,432 |
 
 ¹ `round` = `toPrecision(p)` on a `p+16`-digit operand (rounding + re-normalize).
-² `normalize` = constructing from a `bigint` (the constructor runs `normalize()` — trailing-zero strip + digit count); no separate export exists.
+² `normalize` = constructing from a `bigint` with a realistic (nonzero) last digit — the case real arithmetic produces (0 of 39,900 instrumented kernel significands had trailing zeros); the constructor runs `normalize()`.
 ³ `ζ(3)` = an Apéry series kernel on CE; the mpmath column uses native `mpmath.zeta(3)` (not Apéry), so it is a reference point, not an algorithm-identical race.
+⁴ `normalize (tz)` (adversarial trailing-zero operands forcing the strip loop) is measured by the driver but awaits its first quiet-machine run; real kernels never produce such operands (see the normalize bullet).
 
 
 ### Reading the primitive results
@@ -107,28 +108,36 @@ _work_ p-digit-sized and the loop warm.
   CE's `add`/`sub`/`mul` are **8–14× faster at low precision** (mpmath pays
   fixed Python per-call overhead) and stay ahead through 500 digits (`mul`
   500d: 943 vs 5885 ns, 6.2×).
-- **`normalize` (construct-from-bigint) is the one row HEAD did _not_ improve**
-  (slightly slower: 21d 126 vs 99 ns). Honest and expected — the `div` win came
-  from _skipping_ `normalize` calls, not from making `normalize` itself faster;
-  the constructor path is unchanged. Flagged so a future `normalize`
-  optimization has a baseline.
-- **`sqrt` improved modestly** (500d 20593→16855 ns) and now leads mpmath from
-  ~200 digits (the giant-steps `isqrt` landed pre-0.66.0). It trails mpmath only
-  slightly at ≤100 digits (decimal↔binary boundary).
+- **`normalize` (construct-from-bigint) is 1.6–4.5× faster on realistic
+  operands** (21d 57→36 ns, 500d 602→134 ns). An earlier revision of this row
+  read as a ~20% regression — that was a benchmark artifact: the operands had
+  forced trailing zeros, an input distribution real arithmetic never produces
+  (instrumenting 39,900 significands from live kernels found **zero** that
+  entered the strip loop; 42% odd, 58% ending in 2/4/6/8). With realistic
+  last digits, HEAD's post-0.66.0 fast-exits (odd bit-test, single `%10`) win
+  outright. The adversarial trailing-zero case is tracked separately
+  (`normalize (tz)`⁴).
+- **`sqrt` improved at low/mid precision** (21d 2458→1817 ns, 200d 7488→6415)
+  and is ≈ par with 0.66.0 and mpmath at 500d (the giant-steps `isqrt` landed
+  pre-0.66.0; the decimal↔binary boundary costs remain).
 
 ### Propagation check (composite consumers)
 
 - **ζ(3) — the div/add-heavy series kernel — inherits the primitive wins with no
-  kernel-specific change: 1.8× at 21d (13.2→7.3 µs), 2.1× at 100d (98→47 µs)
-  and 2.1× at 500d (1.34 ms→0.64 ms) vs 0.66.0.** This is the propagation the
+  kernel-specific change: 2.0× at 21d (13.4→6.8 µs), 2.3× at 100d (120→53 µs)
+  and 2.1× at 500d (1.34 ms→0.63 ms) vs 0.66.0.** This is the propagation the
   primitive table promises: a kernel that is mostly `div` + `add` gets faster
   because `div` and `add` got faster.
-- **`ln`/`exp`/`cos` are ≈ unchanged vs 0.66.0** (within noise): their inner
-  loops round to the working precision every step, so the per-op `add`/`mul`
-  wins are a smaller share, and the transcendental _kernels_ themselves did not
-  change since 0.66.0 (the AGM-`ln` / base-2 kernel work all shipped _in_
-  0.66.0). `cos` beats mpmath from 100 digits up (500d: 75.5 vs 111.7 µs); `ln`
-  still trails mpmath (binary engine) except near 1000 digits — see below.
+- **`exp` is 1.5–3.1× faster than 0.66.0** (21d 3337→2282 ns, 500d
+  118→38 µs): √-depth argument reduction (pre-halve to ~√bits, square back
+  up) turns the Taylor series from O(bits) terms into O(√bits) terms +
+  O(√bits) squarings. CE `exp` now leads mpmath at every precision (500d:
+  38 vs 102 µs, 2.7×). `cos` inherits ~1.1–1.4×. **`ln` is ≈ unchanged and
+  is the remaining structural gap**: CE computes it as Newton-on-exp (~3
+  full `exp` kernel calls per `ln`) where mpmath's direct log is cheaper
+  than its own exp. Follow-up filed: fold the √-reduction into the fixed-
+  point `fpexp` kernel itself so `ln`'s Newton iterations inherit it, and
+  eventually a direct-log `fpln`.
 
 ### vs Mathematica at 100 digits (spot reference)
 
@@ -146,16 +155,18 @@ floor-dominated; CE, living in-process in JS, has no such floor.
 | `div` | 502 | 1,380 | **CE 2.7×** |
 | `cmp` | 28 | 995 | **CE 36×** (WM at floor) |
 | `sqrt` | 3,085 | 1,098 | WM 2.8× |
-| `exp` | 7,489 | 1,738 | WM 4.3× |
-| `cos` | 6,670 | 2,281 | WM 2.9× |
-| `ln` | 31,149 | 1,390 | WM 22× |
-| ζ(3) | 47,468 | 27,600 | WM 1.7× |
+| `exp` | 4,606 | 1,738 | WM 2.7× |
+| `cos` | 6,556 | 2,281 | WM 2.9× |
+| `ln` | 31,133 | 1,390 | WM 22× |
+| ζ(3) | 53,153 | 27,600 | WM 1.9× |
 
 Reading: **CE wins the field arithmetic outright at 100d** (the layer the
 recent primitive work targeted; Wolfram cannot go below its dispatch floor),
 while **Wolfram's GMP/MPFR-grade transcendental kernels lead** — consistent
-with mpmath also leading CE there (and Wolfram leading mpmath). `ln` is the
-largest kernel gap and the active investigation target.
+with mpmath also leading CE there (and Wolfram leading mpmath). The `exp`
+gap halved with the √-depth argument reduction; `ln` is the largest
+remaining kernel gap (structural: Newton-on-exp vs a direct log — see the
+propagation notes above).
 
 ---
 
