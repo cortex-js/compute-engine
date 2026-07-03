@@ -38,14 +38,20 @@ export function derivativeOrderOfDependent(
   independentName: string
 ): number | undefined {
   if (isFunction(expr, 'D')) {
-    if (!isSymbol(expr.op2, independentName)) return undefined;
+    const variables = expr.ops.slice(1);
+    if (
+      variables.length === 0 ||
+      !variables.every((op) => isSymbol(op, independentName))
+    )
+      return undefined;
     const innerOrder = derivativeOrderOfDependent(
       expr.op1,
       dependentName,
       independentName
     );
-    if (innerOrder !== undefined) return innerOrder + 1;
-    if (isDependentFunction(expr.op1, dependentName, independentName)) return 1;
+    if (innerOrder !== undefined) return innerOrder + variables.length;
+    if (isDependentFunction(expr.op1, dependentName, independentName))
+      return variables.length;
     return undefined;
   }
 

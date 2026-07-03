@@ -3,6 +3,10 @@ import type { Expression } from '../global-types';
 import { isValueDef } from '../boxed-expression/utils';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
 import {
+  getPolynomialCoefficients,
+  polynomialDegree,
+} from '../boxed-expression/polynomials';
+import {
   derivativeOrderOfDependent,
   isDependentFunction,
   isDerivativeOfDependent,
@@ -88,7 +92,7 @@ function hasDependentOrDerivative(
   independentName: string
 ): boolean {
   if (isDependentFunction(expr, dependentName, independentName)) return true;
-  if (isDerivativeOfDependent(expr, dependentName, independentName))
+  if (derivativeOrderOfDependent(expr, dependentName, independentName))
     return true;
   if (!isFunction(expr)) return false;
   return expr.ops.some((op) =>
@@ -199,44 +203,6 @@ function freshSymbolName(prefix: string, usedSymbols: Set<string>): string {
   }
 }
 
-function integrationConstant(equation: Expression): Expression {
-  const ce = equation.engine;
-  const usedSymbols = collectSymbols(equation);
-  const candidateNames = [
-    'C',
-    'K',
-    'L',
-    'M',
-    'N',
-    'A',
-    'B',
-    'D',
-    'E',
-    'F',
-    'G',
-    'H',
-    'J',
-    'P',
-    'Q',
-    'R',
-    'S',
-    'T',
-    'U',
-    'V',
-    'W',
-    'Z',
-  ];
-
-  for (const name of candidateNames) {
-    if (usedSymbols.has(name)) continue;
-    const binding = ce.context.lexicalScope.bindings.get(name);
-    if (isValueDef(binding) && !binding.value.inferredType) continue;
-    return ce.symbol(name);
-  }
-
-  return integrationConstants(equation, 1)[0];
-}
-
 function integrationConstants(
   equation: Expression,
   count: number
@@ -248,8 +214,8 @@ function integrationConstants(
   for (let i = 1; result.length < count; i++) {
     const name = `c_${i}`;
     if (usedSymbols.has(name)) continue;
-    const binding = ce.context.lexicalScope.bindings.get(name);
-    if (isValueDef(binding) && !binding.value.inferredType) continue;
+    const def = ce.lookupDefinition(name);
+    if (def && !(isValueDef(def) && def.value.inferredType)) continue;
     usedSymbols.add(name);
     result.push(ce.symbol(name));
   }
@@ -405,6 +371,94 @@ function expTerm(coefficient: Expression, root: Expression, variable: string) {
   return coefficient.mul(ce.function('Exp', [exponent])).simplify();
 }
 
+function hasOperator(expr: Expression, operator: string): boolean {
+  if (isFunction(expr, operator)) return true;
+  if (!isFunction(expr)) return false;
+  return expr.ops.some((op) => hasOperator(op, operator));
+}
+
+function dSolveAntiderivative(expr: Expression, variable: string): Expression {
+  const ce = expr.engine;
+  if (ce._integrationProvider) {
+    try {
+      const provided = ce._integrationProvider(expr, variable);
+      if (provided && !hasOperator(provided, 'Integrate')) return provided;
+    } catch {
+      // Fall through to the built-in antiderivative, matching Integrate.
+    }
+  }
+  return antiderivative(expr, variable);
+}
+
+function productExpression(ce: Expression['engine'], factors: Expression[]) {
+  if (factors.length === 0) return ce.One;
+  if (factors.length === 1) return factors[0];
+  return ce.function('Multiply', factors).simplify();
+}
+
+function sameArgument(
+  lhs: Expression | undefined,
+  rhs: Expression | undefined
+): boolean {
+  return lhs !== undefined && rhs !== undefined && lhs.isSame(rhs);
+}
+
+function normalizeVariationIntegrand(
+  expr: Expression,
+  independentName: string
+): Expression {
+  const ce = expr.engine;
+  if (isFunction(expr, 'Negate'))
+    return normalizeVariationIntegrand(expr.op1, independentName)
+      .neg()
+      .simplify();
+
+  if (!isFunction(expr, 'Multiply')) return expr;
+
+  const factors = expr.ops.map((op) =>
+    normalizeVariationIntegrand(op, independentName)
+  );
+
+  for (let i = 0; i < factors.length; i++) {
+    for (let j = i + 1; j < factors.length; j++) {
+      const a = factors[i];
+      const b = factors[j];
+      const rest = factors.filter((_, k) => k !== i && k !== j);
+      const trigProduct = normalizedTrigProduct(a, b, independentName);
+      if (!trigProduct) continue;
+      return productExpression(ce, [...rest, trigProduct]).simplify();
+    }
+  }
+
+  return ce.function('Multiply', factors).simplify();
+}
+
+function normalizedTrigProduct(
+  lhs: Expression,
+  rhs: Expression,
+  independentName: string
+): Expression | undefined {
+  const ce = lhs.engine;
+  const ordered =
+    isFunction(lhs, 'Tan') && !isFunction(rhs, 'Tan')
+      ? [rhs, lhs]
+      : [lhs, rhs];
+  const [a, b] = ordered;
+  if (!isFunction(b, 'Tan') || b.op1.has(independentName) === false)
+    return undefined;
+
+  if (isFunction(a, 'Cos') && sameArgument(a.op1, b.op1))
+    return ce.function('Sin', [a.op1]).simplify();
+
+  if (isFunction(a, 'Sin') && sameArgument(a.op1, b.op1)) {
+    const sec = ce.function('Sec', [a.op1]);
+    const cos = ce.function('Cos', [a.op1]);
+    return sec.sub(cos).simplify();
+  }
+
+  return undefined;
+}
+
 function characteristicPolynomial(
   coefficients: Map<number, Expression>,
   order: number,
@@ -507,6 +561,9 @@ function solveHigherOrderWithNumericRoots(
   const coeffs = numericCharacteristicCoefficients(coefficients, order, ce);
   if (!coeffs) return undefined;
 
+  // CE's exact polynomial root helper can miss complex roots in degree >= 3.
+  // When that happens, use numeric roots rather than returning no solution;
+  // exact recovery of values like sqrt(3)/2 is a future improvement.
   const roots = durandKernerRoots(coeffs, ce._deadline);
   if (!roots || roots.length !== order) return undefined;
 
@@ -663,7 +720,35 @@ function solveSecondOrderHomogeneousConstantCoefficient(
   dependentName: string,
   independentName: string
 ): Expression | undefined {
-  const ce = equation.engine;
+  const basis = secondOrderConstantCoefficientBasis(
+    equation,
+    dependentName,
+    independentName
+  );
+  if (!basis) return undefined;
+
+  const constants = integrationConstants(equation, 2);
+  const solution = constants[0]
+    .mul(basis[0])
+    .add(constants[1].mul(basis[1]))
+    .simplify();
+  return ceListSolution(dependentCall, solution);
+}
+
+function ceListSolution(
+  dependentCall: Expression,
+  solution: Expression
+): Expression {
+  return dependentCall.engine.function('List', [
+    dependentCall.engine.function('Equal', [dependentCall, solution]),
+  ]);
+}
+
+function secondOrderConstantCoefficientBasis(
+  equation: Expression,
+  dependentName: string,
+  independentName: string
+): [Expression, Expression] | undefined {
   const collected = equationDerivativeCoefficients(
     equation,
     dependentName,
@@ -674,9 +759,24 @@ function solveSecondOrderHomogeneousConstantCoefficient(
     if (order > 2) return undefined;
   }
 
-  const a = (collected.coefficients.get(2) ?? ce.Zero).simplify();
-  const b = (collected.coefficients.get(1) ?? ce.Zero).simplify();
-  const c0 = (collected.coefficients.get(0) ?? ce.Zero).simplify();
+  return secondOrderConstantCoefficientBasisFromCoefficients(
+    equation,
+    collected.coefficients,
+    dependentName,
+    independentName
+  );
+}
+
+function secondOrderConstantCoefficientBasisFromCoefficients(
+  equation: Expression,
+  coefficients: Map<number, Expression>,
+  dependentName: string,
+  independentName: string
+): [Expression, Expression] | undefined {
+  const ce = equation.engine;
+  const a = (coefficients.get(2) ?? ce.Zero).simplify();
+  const b = (coefficients.get(1) ?? ce.Zero).simplify();
+  const c0 = (coefficients.get(0) ?? ce.Zero).simplify();
   if (a.isSame(0)) return undefined;
   if (
     ![a, b, c0].every((coefficient) =>
@@ -685,47 +785,283 @@ function solveSecondOrderHomogeneousConstantCoefficient(
   )
     return undefined;
 
-  const [c1, c2] = integrationConstants(equation, 2);
   const x = ce.symbol(independentName);
   const twoA = a.mul(2).simplify();
   const discriminant = b.pow(2).sub(a.mul(c0).mul(4)).simplify();
 
-  let solution: Expression | undefined;
   if (discriminant.isSame(0)) {
     const root = b.neg().div(twoA).simplify();
-    const constantFactor = c1.add(c2.mul(x)).simplify();
-    solution = expTerm(constantFactor, root, independentName);
-  } else {
-    if (discriminant.isPositive === true) {
-      const sqrtDiscriminant = ce.function('Sqrt', [discriminant]).simplify();
-      const root1 = ce.function('Divide', [
-        ce.function('Add', [b.neg(), sqrtDiscriminant]),
-        twoA,
-      ]);
-      const root2 = ce.function('Divide', [
-        ce.function('Subtract', [b.neg(), sqrtDiscriminant]),
-        twoA,
-      ]);
-      solution = expTerm(c1, root1, independentName)
-        .add(expTerm(c2, root2, independentName))
-        .simplify();
-    } else if (discriminant.isNegative === true) {
-      const alpha = b.neg().div(twoA).simplify();
-      const beta = ce
-        .function('Sqrt', [discriminant.neg()])
-        .div(twoA)
-        .simplify();
-      const oscillatory = c1
-        .mul(ce.function('Cos', [beta.mul(x).simplify()]))
-        .add(c2.mul(ce.function('Sin', [beta.mul(x).simplify()])))
-        .simplify();
-      solution = expTerm(oscillatory, alpha, independentName);
-    } else return undefined;
+    const exponential = expTerm(ce.One, root, independentName);
+    return [exponential, x.mul(exponential).simplify()];
   }
 
-  return solution
-    ? ce.function('List', [ce.function('Equal', [dependentCall, solution])])
-    : undefined;
+  if (discriminant.isPositive === true) {
+    const sqrtDiscriminant = ce.function('Sqrt', [discriminant]).simplify();
+    const root1 = ce.function('Divide', [
+      ce.function('Add', [b.neg(), sqrtDiscriminant]),
+      twoA,
+    ]);
+    const root2 = ce.function('Divide', [
+      ce.function('Subtract', [b.neg(), sqrtDiscriminant]),
+      twoA,
+    ]);
+    return [
+      expTerm(ce.One, root1, independentName),
+      expTerm(ce.One, root2, independentName),
+    ];
+  }
+
+  if (discriminant.isNegative === true) {
+    const alpha = b.neg().div(twoA).simplify();
+    const beta = ce.function('Sqrt', [discriminant.neg()]).div(twoA).simplify();
+    const exponential = expTerm(ce.One, alpha, independentName);
+    return [
+      exponential.mul(ce.function('Cos', [beta.mul(x).simplify()])).simplify(),
+      exponential.mul(ce.function('Sin', [beta.mul(x).simplify()])).simplify(),
+    ];
+  }
+
+  return undefined;
+}
+
+function solveSecondOrderNonhomogeneousConstantCoefficient(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const ce = equation.engine;
+  const collected = equationDerivativeCoefficients(
+    equation,
+    dependentName,
+    independentName
+  );
+  const a = (collected.coefficients.get(2) ?? ce.Zero).simplify();
+  if (a.isSame(0) || collected.rest.isSame(0)) return undefined;
+  if ([...collected.coefficients.keys()].some((order) => order > 2))
+    return undefined;
+  if (
+    hasDependentOrDerivative(collected.rest, dependentName, independentName) ||
+    ![...collected.coefficients.values()].every((coefficient) =>
+      isConstantCoefficient(coefficient, dependentName, independentName)
+    )
+  )
+    return undefined;
+
+  const basis = secondOrderConstantCoefficientBasisFromCoefficients(
+    equation,
+    collected.coefficients,
+    dependentName,
+    independentName
+  );
+  if (!basis) return undefined;
+
+  const [y1, y2] = basis;
+  const [c1, c2] = integrationConstants(equation, 2);
+  const polynomialParticular = polynomialParticularSolution(
+    equation,
+    collected,
+    independentName
+  );
+  if (polynomialParticular) {
+    const solution = c1
+      .mul(y1)
+      .add(c2.mul(y2))
+      .add(polynomialParticular)
+      .simplify();
+    return ceListSolution(dependentCall, solution);
+  }
+
+  const y1Prime = ce.function('D', [y1, ce.symbol(independentName)]).evaluate();
+  const y2Prime = ce.function('D', [y2, ce.symbol(independentName)]).evaluate();
+  const wronskian = y1.mul(y2Prime).sub(y1Prime.mul(y2)).simplify();
+  if (wronskian.isSame(0)) return undefined;
+
+  const g = collected.rest.neg().simplify();
+  const denominator = a.mul(wronskian).simplify();
+  const u1Integrand = normalizeVariationIntegrand(
+    y2.neg().mul(g).div(denominator).simplify(),
+    independentName
+  );
+  const u2Integrand = normalizeVariationIntegrand(
+    y1.mul(g).div(denominator).simplify(),
+    independentName
+  );
+  const u1 = dSolveAntiderivative(u1Integrand, independentName);
+  const u2 = dSolveAntiderivative(u2Integrand, independentName);
+
+  if (hasOperator(u1, 'Integrate') || hasOperator(u2, 'Integrate'))
+    return undefined;
+
+  const solution = c1
+    .mul(y1)
+    .add(c2.mul(y2))
+    .add(y1.mul(u1))
+    .add(y2.mul(u2))
+    .simplify();
+  return ceListSolution(dependentCall, solution);
+}
+
+function polynomialParticularSolution(
+  equation: Expression,
+  collected: DerivativeTermCoefficients,
+  independentName: string
+): Expression | undefined {
+  const ce = equation.engine;
+  const rhs = collected.rest.neg().simplify();
+  const rhsDegree = polynomialDegree(rhs, independentName);
+  if (rhsDegree < 0) return undefined;
+
+  let zeroRootMultiplicity = 0;
+  while (
+    zeroRootMultiplicity <= 2 &&
+    (collected.coefficients.get(zeroRootMultiplicity) ?? ce.Zero)
+      .simplify()
+      .isSame(0)
+  )
+    zeroRootMultiplicity += 1;
+  if (zeroRootMultiplicity > 2) return undefined;
+
+  const usedSymbols = collectSymbols(equation);
+  const coefficientNames = Array.from(
+    { length: rhsDegree + 1 },
+    (_, i) => {
+      const name = freshSymbolName(`dsolvep_${i}`, usedSymbols);
+      usedSymbols.add(name);
+      return name;
+    }
+  );
+  const x = ce.symbol(independentName);
+  const terms = coefficientNames.map((name, i) =>
+    ce.symbol(name).mul(x.pow(i + zeroRootMultiplicity)).simplify()
+  );
+  const ansatz = ce.function('Add', terms).simplify();
+
+  const residual = [...collected.coefficients.entries()]
+    .reduce((sum, [order, coefficient]) => {
+      let derivative = ansatz;
+      for (let i = 0; i < order; i++)
+        derivative = ce.function('D', [derivative, x]).evaluate();
+      return sum.add(coefficient.mul(derivative)).simplify();
+    }, collected.rest)
+    .simplify();
+  const residualCoefficients = getPolynomialCoefficients(
+    residual,
+    independentName
+  );
+  if (!residualCoefficients) return undefined;
+
+  const equations = residualCoefficients.map((coefficient) =>
+    ce.function('Equal', [coefficient.simplify(), ce.Zero])
+  );
+  const result = ce.function('List', equations).solve(coefficientNames);
+  const solution = solutionRecord(result);
+  if (!solution) return undefined;
+
+  const particular = ansatz.subs(solution).simplify();
+  if (coefficientNames.some((name) => particular.has(name))) return undefined;
+  return particular;
+}
+
+function solutionRecord(
+  result:
+    | null
+    | ReadonlyArray<Expression>
+    | Record<string, Expression>
+    | Array<Record<string, Expression>>
+): Record<string, Expression> | undefined {
+  if (!result) return undefined;
+  if (!Array.isArray(result)) return result as Record<string, Expression>;
+  const [first] = result;
+  if (!first || 'operator' in first) return undefined;
+  return first as Record<string, Expression>;
+}
+
+function coefficientWithoutPowerOfX(
+  coefficient: Expression,
+  independentName: string,
+  power: number
+): Expression | undefined {
+  const ce = coefficient.engine;
+  const x = ce.symbol(independentName);
+  const xPower = power === 0 ? ce.One : power === 1 ? x : x.pow(power);
+  const scaled = coefficient.div(xPower).simplify();
+  if (scaled.has(independentName)) return undefined;
+  return scaled;
+}
+
+function solveSecondOrderCauchyEulerHomogeneous(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const ce = equation.engine;
+  const collected = equationDerivativeCoefficients(
+    equation,
+    dependentName,
+    independentName
+  );
+  if (!collected.rest.isSame(0)) return undefined;
+  if ([...collected.coefficients.keys()].some((order) => order > 2))
+    return undefined;
+
+  const a = coefficientWithoutPowerOfX(
+    collected.coefficients.get(2) ?? ce.Zero,
+    independentName,
+    2
+  )?.simplify();
+  const b = coefficientWithoutPowerOfX(
+    collected.coefficients.get(1) ?? ce.Zero,
+    independentName,
+    1
+  )?.simplify();
+  const c0 = coefficientWithoutPowerOfX(
+    collected.coefficients.get(0) ?? ce.Zero,
+    independentName,
+    0
+  )?.simplify();
+  if (!a || !b || !c0 || a.isSame(0)) return undefined;
+
+  const [c1, c2] = integrationConstants(equation, 2);
+  const x = ce.symbol(independentName);
+  const effectiveB = b.sub(a).simplify();
+  const twoA = a.mul(2).simplify();
+  const discriminant = effectiveB.pow(2).sub(a.mul(c0).mul(4)).simplify();
+
+  let solution: Expression | undefined;
+  if (discriminant.isSame(0)) {
+    const root = effectiveB.neg().div(twoA).simplify();
+    solution = c1
+      .add(c2.mul(ce.function('Ln', [x])))
+      .mul(x.pow(root))
+      .simplify();
+  } else if (discriminant.isPositive === true) {
+    const sqrtDiscriminant = ce.function('Sqrt', [discriminant]).simplify();
+    const root1 = ce.function('Divide', [
+      ce.function('Add', [effectiveB.neg(), sqrtDiscriminant]),
+      twoA,
+    ]);
+    const root2 = ce.function('Divide', [
+      ce.function('Subtract', [effectiveB.neg(), sqrtDiscriminant]),
+      twoA,
+    ]);
+    solution = c1
+      .mul(x.pow(root1))
+      .add(c2.mul(x.pow(root2)))
+      .simplify();
+  } else if (discriminant.isNegative === true) {
+    const alpha = effectiveB.neg().div(twoA).simplify();
+    const beta = ce.function('Sqrt', [discriminant.neg()]).div(twoA).simplify();
+    const logX = ce.function('Ln', [x]);
+    const oscillatory = c1
+      .mul(ce.function('Cos', [beta.mul(logX).simplify()]))
+      .add(c2.mul(ce.function('Sin', [beta.mul(logX).simplify()])))
+      .simplify();
+    solution = x.pow(alpha).mul(oscillatory).simplify();
+  }
+
+  return solution ? ceListSolution(dependentCall, solution) : undefined;
 }
 
 /**
@@ -757,6 +1093,25 @@ export function dSolve(
   );
   if (higherOrder) return higherOrder;
 
+  const cauchyEuler = solveSecondOrderCauchyEulerHomogeneous(
+    equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (cauchyEuler) return cauchyEuler;
+
+  const secondOrderNonhomogeneous =
+    solveSecondOrderNonhomogeneousConstantCoefficient(
+      equation,
+      dependentCall,
+      dependentName,
+      independentName
+    );
+  if (secondOrderNonhomogeneous) return secondOrderNonhomogeneous;
+
+  // Keep order 2 separate from the general constant-coefficient solver so
+  // quadratic radical and complex roots stay exact when possible.
   const secondOrder = solveSecondOrderHomogeneousConstantCoefficient(
     equation,
     dependentCall,
@@ -789,17 +1144,17 @@ export function dSolve(
 
   const p = coefficients.dependent.div(coefficients.derivative).simplify();
   const q = coefficients.rest.neg().div(coefficients.derivative).simplify();
-  const c = integrationConstant(equation);
+  const [c] = integrationConstants(equation, 1);
 
   let solution: Expression;
   if (p.isSame(0)) {
-    const integral = antiderivative(q, independentName);
+    const integral = dSolveAntiderivative(q, independentName);
     solution = c.add(integral).simplify();
   } else {
-    const integralP = antiderivative(p, independentName);
+    const integralP = dSolveAntiderivative(p, independentName);
     const integratingFactor = ce.function('Exp', [integralP]).simplify();
     const weightedRhs = integratingFactor.mul(q).simplify();
-    const integral = antiderivative(weightedRhs, independentName);
+    const integral = dSolveAntiderivative(weightedRhs, independentName);
     solution = c.add(integral).div(integratingFactor).simplify();
   }
 
