@@ -130,6 +130,33 @@ _work_ p-digit-sized and the loop warm.
   0.66.0). `cos` beats mpmath from 100 digits up (500d: 75.5 vs 111.7 µs); `ln`
   still trails mpmath (binary engine) except near 1000 digits — see below.
 
+### vs Mathematica at 100 digits (spot reference)
+
+Measured 2026-07-03 with `ops-bench.wls` (`wolframscript -file
+benchmarks/big-decimal/ops-bench.wls`, Mathematica 14.3, result caches
+disabled, warm median — same pool-of-distinct-operands discipline as
+`ops-bench.mjs`). Wolfram's kernel has a **~1 µs per-call dispatch floor**
+(its `Order`/cmp measures 995 ns — pure dispatch), so its sub-µs rows are
+floor-dominated; CE, living in-process in JS, has no such floor.
+
+| op (ns/op, 100d) | CE HEAD | Mathematica | ratio |
+|---|---:|---:|---|
+| `add` / `sub` | 75 / 91 | 1,141 / 1,229 | **CE 13–15×** |
+| `mul` | 206 | 1,017 | **CE 4.9×** |
+| `div` | 502 | 1,380 | **CE 2.7×** |
+| `cmp` | 28 | 995 | **CE 36×** (WM at floor) |
+| `sqrt` | 3,085 | 1,098 | WM 2.8× |
+| `exp` | 7,489 | 1,738 | WM 4.3× |
+| `cos` | 6,670 | 2,281 | WM 2.9× |
+| `ln` | 31,149 | 1,390 | WM 22× |
+| ζ(3) | 47,468 | 27,600 | WM 1.7× |
+
+Reading: **CE wins the field arithmetic outright at 100d** (the layer the
+recent primitive work targeted; Wolfram cannot go below its dispatch floor),
+while **Wolfram's GMP/MPFR-grade transcendental kernels lead** — consistent
+with mpmath also leading CE there (and Wolfram leading mpmath). `ln` is the
+largest kernel gap and the active investigation target.
+
 ---
 
 ## Whole transcendentals
