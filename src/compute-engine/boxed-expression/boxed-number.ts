@@ -726,7 +726,21 @@ export class BoxedNumber
       // `Rational(1,2).isSame(0.5)` matches `.isSame(ce.number(0.5))` (#15).
       // The fast integer path of `NumericValue.eq(number)` is tried first so
       // hot `.isSame(0)`/`.isSame(1)` checks allocate nothing.
-      return v.eq(other) || v.eq(this.engine._numericValue(other));
+      if (v.eq(other)) return true;
+      // The fallback below boxes `other` into a `NumericValue` (a BigDecimal
+      // round-trip at default precision) purely to catch a *non-integer exact*
+      // value — a rational or radical whose `eq(number)` overload
+      // conservatively returns `false` even when it equals the float (e.g.
+      // `Rational(1,2)` vs `0.5`). For an integer `ExactNumericValue`, and for
+      // `Machine`/`BigNumericValue` (whose `eq(number)` overload is already a
+      // complete, allocation-free float comparison), the check above is
+      // definitive — so skip the construction. This removes the ~7
+      // `isSame(0.5)`-driven BigDecimal builds per `d/dx xⁿ` iteration
+      // (integer exponents repeatedly probed against `0.5` in `canonicalPower`).
+      // (#15 / perf review)
+      if (v instanceof ExactNumericValue && v.type !== 'finite_integer')
+        return v.eq(this.engine._numericValue(other));
+      return false;
     }
     if (typeof other === 'bigint') {
       if (typeof this._value === 'number') return bigint(this._value) === other;

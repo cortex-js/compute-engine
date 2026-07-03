@@ -1487,3 +1487,99 @@ describe('NU-P1 precision fixes (mpmath-pinned)', () => {
     ).toBeGreaterThanOrEqual(48);
   });
 });
+
+// The cos/tan cancellation guard (NU-P1-6) escalates working precision only
+// when the result is near a zero/pole. This battery pins, at four precisions,
+// that (a) benign O(1) arguments stay full-precision on the single base-guard
+// pass (the fast path — no redundant escalation), and (b) near-cancellation
+// arguments still escalate to full precision. References independently computed
+// with mpmath at ≥ target+40 guard digits from the exact decimal inputs.
+describe('cos/tan conditional cancellation guard (mpmath-pinned, 15/21/50/100)', () => {
+  // [fn, input, { precision: expected-value }]
+  const CASES: [string, string, Record<number, string>][] = [
+    // Benign — must reach full precision on the base-guard pass alone.
+    [
+      'cos',
+      '1',
+      {
+        15: '0.540302305868140',
+        21: '0.540302305868139717401',
+        50: '0.54030230586813971740093660744297660373231042061792',
+        100: '0.5403023058681397174009366074429766037323104206179222276700972553811003947744717645179518560871830893',
+      },
+    ],
+    [
+      'sin',
+      '1',
+      {
+        15: '0.841470984807897',
+        21: '0.841470984807896506653',
+        50: '0.84147098480789650665250232163029899962256306079837',
+        100: '0.8414709848078965066525023216302989996225630607983710656727517099919104043912396689486397435430526959',
+      },
+    ],
+    [
+      'tan',
+      '1',
+      {
+        15: '1.55740772465490',
+        21: '1.55740772465490223051',
+        50: '1.5574077246549022305069748074583601730872507723815',
+        100: '1.557407724654902230506974807458360173087250772381520038383946605698861397151727289555099965202242984',
+      },
+    ],
+    // Near-cancellation — π/2 truncated to 20 digits; cos → 3.1e-20 (loss ≈ 20).
+    // The base 15-digit guard alone would leave < target correct digits, so the
+    // guard must escalate. tan at the same point cancels via cos → ±huge.
+    [
+      'cos',
+      '1.5707963267948966192',
+      {
+        15: '3.13216916397514e-20',
+        21: '3.13216916397514420986e-20',
+        50: '3.1321691639751442098584699687552910487467174804835e-20',
+        100: '3.132169163975144209858469968755291048746717480483481011732258821416887871047812359698146213069706542e-20',
+      },
+    ],
+    [
+      'tan',
+      '1.5707963267948966192',
+      {
+        15: '3.19267557928086e+19',
+        21: '3.19267557928086302882e+19',
+        50: '3.1926755792808630288234945910964343187344695164181e+19',
+        100: '3.192675579280863028823494591096434318734469516418107556059802200367660156971880415661214844125432664e+19',
+      },
+    ],
+    // Near a zero of sin — π truncated to 20 digits; sin → -3.7e-20 (loss ≈ 20).
+    [
+      'sin',
+      '3.1415926535897932385',
+      {
+        15: '-3.73566167204971e-20',
+        21: '-3.73566167204971158028e-20',
+        50: '-3.7356616720497115802830600624894179025046719061066e-20',
+        100: '-3.735661672049711580283060062489417902504671906106645059802258436714202294171520925220076732740613175e-20',
+      },
+    ],
+  ];
+
+  const saved = BigDecimal.precision;
+  afterAll(() => {
+    BigDecimal.precision = saved;
+  });
+
+  for (const [fn, input, refs] of CASES) {
+    for (const p of [15, 21, 50, 100]) {
+      test(`${fn}(${input}) @${p}`, () => {
+        BigDecimal.precision = p;
+        const x = new BigDecimal(input);
+        const got = (
+          fn === 'cos' ? x.cos() : fn === 'sin' ? x.sin() : x.tan()
+        ).toString();
+        // Allow a 2-ulp slack on the least-significant digits.
+        expect(digitsAgree(got, refs[p])).toBeGreaterThanOrEqual(p - 2);
+      });
+    }
+  }
+});

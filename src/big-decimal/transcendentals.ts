@@ -218,6 +218,28 @@ function cancellationLoss(fp: bigint, bits: number): number {
 }
 
 /**
+ * How much of the trig base guard (`targetPrec + 15`) we are willing to spend
+ * absorbing cancellation loss *before* recomputing at a wider precision.
+ *
+ * The base guard is 15 digits. Correct rounding of the fixed→decimal bridge in
+ * `fromFixedPoint` needs only a handful of guard digits (it carries 4 internal
+ * guard digits), so we keep a minimum of 10 retained guard digits and let the
+ * first `TRIG_GUARD_SLACK = 5` digits of measured loss be soaked up by the base
+ * guard instead of forcing a second `fpsincos` pass.
+ *
+ * Why this is sound (accuracy-neutral vs. the fixed-guard behaviour it replaces
+ * and strictly better than it near cancellation):
+ *  - An O(1) result (|cos|, |sin| ∈ [10⁻⁵, 1]) has `cancellationLoss ≤ 5`, so it
+ *    is accepted on the first pass — the *same* single computation at
+ *    `targetPrec + 15` the pre-adaptive build did, restoring its speed.
+ *  - A genuinely cancelling result (|value| < 10⁻⁵, `loss ≥ 6`) still escalates,
+ *    so every accepted result carries ≥ 10 guard digits beyond target — never
+ *    fewer than the previously-correct benign path, and far more than the
+ *    fixed-guard build gave near a zero/pole (where it silently lost digits).
+ */
+const TRIG_GUARD_SLACK = 5;
+
+/**
  * The exponent of a BigDecimal is a JS number, so the largest decimal
  * exponent that is exactly representable is Number.MAX_SAFE_INTEGER.
  * Results whose exponent would exceed it saturate to ±Infinity / 0.
@@ -610,7 +632,7 @@ BigDecimal.prototype.cos = function (): BigDecimal {
       continue;
     }
     const loss = cancellationLoss(cosFp, bits);
-    if (loss <= extra || pass >= 3)
+    if (loss <= extra + TRIG_GUARD_SLACK || pass >= 3)
       return fromFixedPoint(cosFp, bits, targetPrec);
     extra = loss + 5;
   }
@@ -662,7 +684,7 @@ BigDecimal.prototype.tan = function (): BigDecimal {
       sinFp === 0n ? 0 : cancellationLoss(sinFp, bits),
       cancellationLoss(cosFp, bits)
     );
-    if (loss <= extra || pass >= 3) {
+    if (loss <= extra + TRIG_GUARD_SLACK || pass >= 3) {
       // Fixed-point division: (sinFp << bits) / cosFp
       const tanFp = (sinFp << BigInt(bits)) / cosFp;
       return fromFixedPoint(tanFp, bits, targetPrec);
