@@ -180,8 +180,8 @@ mkdir -p benchmarks/.competitors/mathjs-host
 ( cd benchmarks/.competitors/mathjs-host && npm init -y >/dev/null && npm install mathjs )
 
 # the published Compute Engine release to compare against
-( cd benchmarks/.competitors && npm pack @cortex-js/compute-engine@0.59.0 \
-  && mkdir -p ce-0.59.0 && tar xzf cortex-js-compute-engine-0.59.0.tgz -C ce-0.59.0 --strip-components=1 )
+( cd benchmarks/.competitors && npm pack @cortex-js/compute-engine@0.66.0 \
+  && mkdir -p ce-0.66.0 && tar xzf cortex-js-compute-engine-0.66.0.tgz -C ce-0.66.0 --strip-components=1 )
 
 # Mathematica: a licensed `wolframscript` on PATH (nothing is vendored)
 wolframscript -version   # confirm it is available
@@ -208,7 +208,7 @@ of the report still builds.
 | Variable | Default | Purpose |
 |---|---|---|
 | `CE_CURRENT_BUNDLE` | `dist/compute-engine.min.esm.js` | Path to the "current build" ESM bundle. |
-| `CE_PUBLISHED_VERSION` | `0.59.0` | Label for the published column. |
+| `CE_PUBLISHED_VERSION` | `0.66.0` | Label for the published column. |
 | `CE_PUBLISHED_BUNDLE` | `.competitors/ce-<version>/dist/compute-engine.min.esm.js` | Path to the published bundle. |
 | `CE_CURRENT_LABEL` | `CE (current)` | Override the current column label in the CHANGELOG tables. |
 
@@ -287,7 +287,7 @@ capability:
 - `cell.mjs` (a CE bundle) + `cell.py` (SymPy / mpmath) — time **one**
   `(op, precision)` per process. Driven in a fresh-process-per-cell loop they
   feed **[`BIGNUM-COMPARISON.md`](./big-decimal/BIGNUM-COMPARISON.md)**, the
-  honest internal CE-vs-0.59.0-vs-SymPy-vs-mpmath report (where the bignum core
+  honest internal CE-vs-published-vs-SymPy-vs-mpmath report (where the bignum core
   leads and where it trails — pointing at ROADMAP item 17 follow-ups). The
   per-cell method avoids the cross-precision constant-cache thrash that a single
   multi-precision process suffers. Reproduce steps are in that file.
