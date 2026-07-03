@@ -31,14 +31,20 @@ function logType(ops: ReadonlyArray<Expression>): Type {
   const x = ops[0];
   const base = ops[1];
   if (!x || x.isNaN) return 'number';
-  // Provably non-positive (0 or negative) or non-finite argument → −∞ / complex
-  // / NaN (e.g. `ln(−2)`, `ln(0)`, `ln(+∞)`).
-  if (x.isPositive === false || x.isFinite === false) return 'number';
+  if (x.isFinite === false) return 'number';
+  // A provably *negative* (hence non-zero) finite real argument gives a
+  // finite complex value: `ln(x) = ln|x| + iπ` (e.g. `ln(−1) = iπ`). Note
+  // the base check below still applies before this claim is usable, so
+  // handle it after the base guard.
+  // A provably non-positive argument that may be 0 → −∞ pole (`ln(0)`).
+  if (x.isPositive === false && x.isNegative !== true) return 'number';
   if (
     base &&
     !(base.isPositive === true && base.isFinite === true && !base.isSame(1))
   )
     return 'number';
+  // Provably negative finite argument (see note above): finite complex.
+  if (x.isNegative === true) return 'finite_complex';
   // Positive, or unknown-sign real (generic-real convention for a symbol).
   if (x.type.matches('real')) return 'finite_real';
   return 'finite_number';

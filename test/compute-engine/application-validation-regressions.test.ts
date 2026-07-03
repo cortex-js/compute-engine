@@ -129,6 +129,52 @@ describe('SYM P1-15 — user-declared function signatures are enforced', () => {
   });
 });
 
+describe('complex-family parameters are enforced (D10 shim retired)', () => {
+  // Before, `signatureHasComplexParam` (box.ts) skipped declared-signature
+  // enforcement entirely for complex-family parameters, because Multiply
+  // widened a pure-imaginary product such as `√2·i` to `finite_number`,
+  // which is ⊄ `complex`. Now the arithmetic type handlers are
+  // complex-aware (`√2·i` types as `imaginary` ⊂ `complex`), so the skip is
+  // gone and `(complex) -> complex` signatures are enforced like any other.
+
+  it('f(√2·i) is valid under (complex) -> complex (the original shim motivation)', () => {
+    const ce = strictEngine();
+    ce.declare('f', '(complex) -> complex');
+    expect(
+      ce.box(['f', ['Multiply', 'ImaginaryUnit', ['Sqrt', 2]]]).isValid
+    ).toBe(true);
+  });
+
+  it('real/integer arguments satisfy a complex parameter (D10: real ⊂ complex)', () => {
+    const ce = strictEngine();
+    ce.declare('f', '(complex) -> complex');
+    expect(ce.box(['f', 3]).isValid).toBe(true);
+    expect(ce.box(['f', 0.5]).isValid).toBe(true);
+  });
+
+  it('other closed complex constants are accepted (i/2, e^i, i^3, ln(−1))', () => {
+    const ce = strictEngine();
+    ce.declare('f', '(complex) -> complex');
+    expect(ce.box(['f', ['Divide', 'ImaginaryUnit', 2]]).isValid).toBe(true);
+    expect(ce.box(['f', ['Exp', 'ImaginaryUnit']]).isValid).toBe(true);
+    expect(ce.box(['f', ['Power', 'ImaginaryUnit', 3]]).isValid).toBe(true);
+    expect(ce.box(['f', ['Ln', -1]]).isValid).toBe(true);
+  });
+
+  it('enforcement is actually active: f("a") is invalid under (complex) -> complex', () => {
+    // With the old skip, ANY argument — even a string — was accepted.
+    const ce = strictEngine();
+    ce.declare('f', '(complex) -> complex');
+    expect(ce.box(['f', "'a'"]).isValid).toBe(false);
+  });
+
+  it('a free-variable argument still defers', () => {
+    const ce = strictEngine();
+    ce.declare('f', '(complex) -> complex');
+    expect(ce.box(['f', 'someUnknown']).isValid).toBe(true);
+  });
+});
+
 describe('SYM P1-19 — higher-order result types are sound', () => {
   it('(a) a lambda over an unknown parameter does not claim a finite result', () => {
     // (x ↦ x²)(∞) = +∞, so the result type must widen to `number`.

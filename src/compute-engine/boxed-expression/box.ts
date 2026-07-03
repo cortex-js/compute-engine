@@ -542,42 +542,6 @@ function allParamsNumeric(signature: Type): boolean {
   return params.every((t) => isSubtype(t, 'number'));
 }
 
-/**
- * True when a signature has a genuinely `complex`-family parameter — one that
- * accepts a `finite_complex` value but is *narrower* than `finite_number`
- * (i.e. `complex` / `finite_complex` / `imaginary`, but NOT `number` /
- * `finite_number` / `real` / `integer`). Declared-signature enforcement is
- * skipped for such parameters.
- *
- * Why this is still needed AFTER D10 (which made `real ⊂ complex`, retiring the
- * pre-D10 `real`-arg motivation): CE's numeric type inference is lossy for
- * complex-valued *constants*. A pure-imaginary product such as `√2·i` is a
- * genuine complex number, but Multiply widens its inferred type to
- * `finite_number` (not `imaginary`/`finite_complex`), and `finite_number ⊄
- * complex` in the lattice (adding it there is unsound for the compiler's
- * real/complex code-generation gate). So a strict `(complex) -> complex`
- * signature would wrongly reject a legitimately-complex closed argument that CE
- * merely typed as `finite_number`. Narrower parameters (`integer`, `real`,
- * `string`, …) are unaffected, so `(integer) -> integer` is still enforced.
- *
- * D10 residual — the principled fix is to sharpen Multiply's type inference so
- * `√2·i` infers `imaginary`, at which point this skip becomes truly
- * unnecessary; that lives in the arithmetic type handlers, outside this
- * change's scope.
- */
-function signatureHasComplexParam(signature: Type): boolean {
-  if (typeof signature === 'string' || signature.kind !== 'signature')
-    return false;
-  const params: Type[] = [
-    ...(signature.args?.map((x) => x.type) ?? []),
-    ...(signature.optArgs?.map((x) => x.type) ?? []),
-    ...(signature.variadicArg ? [signature.variadicArg.type] : []),
-  ];
-  return params.some(
-    (t) => isSubtype('finite_complex', t) && !isSubtype('finite_number', t)
-  );
-}
-
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
@@ -653,15 +617,14 @@ function makeCanonicalFunction(
       ce.strict &&
       !def.value.inferredType &&
       typeof valueType !== 'string' &&
-      valueType.kind === 'signature' &&
-      // Under D10 (2026-07-02) `real ⊂ complex`, so real/integer/rational
-      // arguments now satisfy a `complex`-family parameter through the normal
-      // subtype path — the pre-D10 `real`-arg motivation for this skip is gone.
-      // A narrower residual remains: a complex-valued CONSTANT that CE types
-      // imprecisely as `finite_number` (e.g. `√2·i`) is still not `⊂ complex`,
-      // so genuinely-complex parameters are still skipped. See
-      // `signatureHasComplexParam`.
-      !signatureHasComplexParam(valueType)
+      valueType.kind === 'signature'
+      // Complex-family parameters (`(complex) -> complex`, …) are enforced
+      // like any other: under D10 (2026-07-02) `real ⊂ complex`, so
+      // real/integer/rational arguments satisfy them through the normal
+      // subtype path, and the arithmetic type handlers (Multiply, Divide,
+      // Power, Ln) are complex-aware for real × pure-imaginary operands (a
+      // pure-imaginary product such as `√2·i` types as `imaginary` ⊂
+      // `complex`), which retired the last `signatureHasComplexParam` skip.
     ) {
       const invalid = validateArguments(ce, boxedOps, valueType);
       if (invalid) {

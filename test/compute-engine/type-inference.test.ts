@@ -273,6 +273,103 @@ describe('TYPE INFERENCE FOR COMBINATORICS FUNCTIONS', () => {
   });
 });
 
+describe('TYPE INFERENCE FOR REAL × IMAGINARY ARITHMETIC (D10 shim retirement)', () => {
+  // Multiply/Divide/Power/Ln are complex-aware for real × pure-imaginary
+  // operands, so complex-valued constants infer a type ⊂ `complex` instead
+  // of the complex-unaware `finite_number`. This retired the
+  // `signatureHasComplexParam` skip in box.ts.
+  //
+  // Lattice note: `imaginary` is a *pure* imaginary number, disjoint from
+  // the real chain (`imaginary ∩ real = nothing`), so 0 — which is real —
+  // is NOT an `imaginary` value. `imaginary` is only claimed when the
+  // result is provably non-zero.
+
+  it('√2·i is imaginary', () => {
+    const e = ce.box(['Multiply', 'ImaginaryUnit', ['Sqrt', 2]]);
+    expect(e.type.toString()).toBe('imaginary');
+    expect(e.type.matches('complex')).toBe(true);
+  });
+
+  it('π·i is imaginary', () => {
+    expect(ce.box(['Multiply', 'Pi', 'ImaginaryUnit']).type.toString()).toBe(
+      'imaginary'
+    );
+  });
+
+  it('i·i is ⊂ real (even number of imaginary factors)', () => {
+    const e = ce.box(['Multiply', 'ImaginaryUnit', 'ImaginaryUnit']);
+    expect(e.type.toString()).toBe('finite_real');
+    expect(e.type.matches('real')).toBe(true);
+  });
+
+  it('i·i·i is imaginary (odd number of imaginary factors)', () => {
+    expect(
+      ce
+        .box(['Multiply', 'ImaginaryUnit', 'ImaginaryUnit', 'ImaginaryUnit'])
+        .type.toString()
+    ).toBe('imaginary');
+  });
+
+  it('x·i with a possibly-zero real x is finite_complex, not imaginary', () => {
+    // x may be 0, and 0 is real, not pure imaginary.
+    const localCe = new ComputeEngine();
+    localCe.declare('x', { type: 'real' });
+    expect(
+      localCe.box(['Multiply', 'x', 'ImaginaryUnit']).type.toString()
+    ).toBe('finite_complex');
+  });
+
+  it('3·i·x with an unconstrained x stays finite_number (no unsound narrowing)', () => {
+    const localCe = new ComputeEngine();
+    expect(
+      localCe.box(['Multiply', 3, 'ImaginaryUnit', 'x']).type.toString()
+    ).toBe('finite_number');
+  });
+
+  it('√2·(1+i) is finite_complex (product of finite complex factors)', () => {
+    expect(
+      ce
+        .box(['Multiply', ['Complex', 1, 1], ['Sqrt', 2]])
+        .type.matches('finite_complex')
+    ).toBe(true);
+  });
+
+  it('i/2 and 2/i are imaginary', () => {
+    expect(ce.box(['Divide', 'ImaginaryUnit', 2]).type.toString()).toBe(
+      'imaginary'
+    );
+    expect(ce.box(['Divide', 2, 'ImaginaryUnit']).type.toString()).toBe(
+      'imaginary'
+    );
+  });
+
+  it('0/i is not imaginary (it is 0, which is real)', () => {
+    expect(
+      ce.box(['Divide', 0, 'ImaginaryUnit']).type.matches('imaginary')
+    ).toBe(false);
+  });
+
+  it('i^2 is ⊂ real, i^3 is imaginary', () => {
+    expect(ce.box(['Power', 'ImaginaryUnit', 2]).type.toString()).toBe(
+      'finite_real'
+    );
+    expect(ce.box(['Power', 'ImaginaryUnit', 3]).type.toString()).toBe(
+      'imaginary'
+    );
+  });
+
+  it('e^i is finite_complex', () => {
+    expect(ce.box(['Exp', 'ImaginaryUnit']).type.toString()).toBe(
+      'finite_complex'
+    );
+  });
+
+  it('ln(−1) is finite_complex; ln(0) stays number (−∞ pole)', () => {
+    expect(ce.box(['Ln', -1]).type.toString()).toBe('finite_complex');
+    expect(ce.box(['Ln', 0]).type.toString()).toBe('number');
+  });
+});
+
 describe('SIGNATURE-BASED FALLBACK TYPE NARROWING', () => {
   it('Mod(integer, integer) narrows to integer', () => {
     const expr = ce.expr(['Mod', 7, 3]);

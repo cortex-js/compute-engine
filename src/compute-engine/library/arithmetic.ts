@@ -357,6 +357,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (den.isFinite === false || num.isFinite === false) return 'number';
         if (den.isInteger && num.isInteger) return 'finite_rational';
         if (den.isReal && num.isReal) return 'finite_real';
+        // Real/pure-imaginary quotients (mirrors the Multiply type handler;
+        // `imaginary`-typed operands are non-zero and non-real by type —
+        // `imaginary ∩ real = nothing` in the lattice, and 0 is real):
+        // - i/i → real; i/r → pure imaginary; r/i → pure imaginary iff
+        //   r ≠ 0 (0/i = 0, which is real, NOT `imaginary`).
+        // Possibly-zero *denominators* are treated like the real/real branch
+        // above (which claims `finite_real` even when `den` may be 0): only
+        // a literal 0 denominator (caught earlier) yields the top type.
+        {
+          const isImag = (x: Expression) => x.type.matches('imaginary');
+          if (isImag(num) && isImag(den)) return 'finite_real';
+          if (isImag(num) && den.isReal === true) return 'imaginary';
+          if (num.isReal === true && isImag(den)) {
+            const s = num.sgn;
+            return s === 'positive' || s === 'negative' || s === 'not-zero'
+              ? 'imaginary'
+              : 'finite_complex';
+          }
+          // A quotient of finite complex operands is a finite complex number.
+          if (
+            num.type.matches('finite_complex') &&
+            den.type.matches('finite_complex')
+          )
+            return 'finite_complex';
+        }
         return 'finite_number';
       },
 
@@ -1176,6 +1201,42 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.every((x) => x.isInteger)) return 'finite_integer';
         if (ops.every((x) => x.isReal)) return 'finite_real';
         if (ops.every((x) => x.isRational)) return 'finite_rational';
+
+        // Real × pure-imaginary products: at least one factor is typed
+        // `imaginary` and every other factor is provably real. Since
+        // i² = −1, the imaginary factors pair up:
+        // - even count → the product is real;
+        // - odd count → the product is pure imaginary *iff it is non-zero*.
+        //   In the lattice `imaginary` is a *pure* imaginary number,
+        //   disjoint from the real chain (`imaginary ∩ real = nothing`,
+        //   see `subtype.ts` / type-lattice tests), so 0 — which is real —
+        //   is NOT an `imaginary` value. We may only claim `imaginary`
+        //   when every real factor is provably non-zero (`imaginary`-typed
+        //   factors are non-zero by type); otherwise the sound answer is
+        //   `finite_complex` (e.g. `x·i` with real x ∋ 0 may be 0, which
+        //   is not `imaginary`).
+        const isImaginary = (x: Expression) => x.type.matches('imaginary');
+        const imaginaryCount = ops.filter(isImaginary).length;
+        if (
+          imaginaryCount > 0 &&
+          ops.every((x) => isImaginary(x) || x.isReal === true)
+        ) {
+          if (imaginaryCount % 2 === 0) return 'finite_real';
+          const isNonZero = (x: Expression) => {
+            const s = x.sgn;
+            return s === 'positive' || s === 'negative' || s === 'not-zero';
+          };
+          if (ops.every((x) => isImaginary(x) || isNonZero(x)))
+            return 'imaginary';
+          return 'finite_complex';
+        }
+
+        // A product of finite complex factors is itself a finite complex
+        // number (e.g. `√2·(1+i)`): claim `finite_complex` (⊂ `complex`)
+        // rather than the complex-unaware `finite_number`.
+        if (ops.every((x) => x.type.matches('finite_complex')))
+          return 'finite_complex';
+
         return 'finite_number';
       },
       // @fastpath: canonicalization is done in the function
@@ -1334,6 +1395,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // otherwise the result may be complex (e.g. (−2)^0.5).
         if (base.isReal && exp.isReal && (base.isNonNegative || exp.isInteger))
           return 'finite_real';
+        // A pure-imaginary base (non-zero by type: `imaginary ∩ real =
+        // nothing` in the lattice, and 0 is real) raised to an integer power:
+        // (bi)^n = bⁿ·iⁿ, so an even n is real, an odd n is pure imaginary
+        // (non-zero since b ≠ 0), and an unknown-parity integer is one of the
+        // two — both ⊂ `finite_complex`.
+        if (base.type.matches('imaginary') && exp.isInteger === true) {
+          if (exp.isEven === true) return 'finite_real';
+          if (exp.isOdd === true) return 'imaginary';
+          return 'finite_complex';
+        }
+        // A positive real base raised to a finite complex power is
+        // e^(exp·ln base): finite and non-zero, hence a finite complex
+        // number (e.g. `e^i`, on the unit circle).
+        if (
+          base.isReal === true &&
+          base.isPositive === true &&
+          exp.type.matches('finite_complex')
+        )
+          return 'finite_complex';
         return 'finite_number';
       },
       canonical: (args, { engine }) => {
