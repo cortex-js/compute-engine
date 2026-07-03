@@ -237,35 +237,75 @@ export function bigintDigits(n: bigint): number {
 }
 
 /**
+ * Extra argument-reduction depth for `fpexp`, as a multiple of √bits.
+ *
+ * The bare Taylor series for exp needs O(bits) terms once |r| is only reduced
+ * to O(1). Halving the argument a further ≈ `EXP_REDUCE_COEF·√bits` times and
+ * squaring the result back up trades those O(bits) full-width Taylor multiplies
+ * for O(√bits) terms plus O(√bits) cheap squarings — a net ~1.5–2.5× fewer
+ * full-width multiplies from 21 to 500 digits (the win grows with precision as
+ * the Taylor arm shrinks relative to the squaring arm). 0.7 sits at the flat
+ * top of the speed/accuracy curve: near-minimal total multiplies while keeping
+ * the squaring count — and thus the guard bits needed to absorb its ~2^k error
+ * amplification — modest. Formerly a wrapper (`fpexpReduced`) in
+ * transcendentals.ts; folded into the kernel so EVERY caller (exp(), fpln's
+ * Newton iterations, pow paths, gamma via exp) inherits it.
+ */
+const EXP_REDUCE_COEF = 0.7;
+
+/**
  * Fixed-point exponential: compute exp(x/2^bits) * 2^bits.
  *
- * Uses Taylor series with argument reduction (halving) and
- * repeated squaring to reconstruct the full result.
+ * Uses a Taylor series with √-depth argument reduction (halving) and repeated
+ * squaring to reconstruct the full result. The argument is brought down to
+ * ≈ 2^−targetHalvings (targetHalvings ≈ 0.7·√bits) so the series converges in
+ * O(√bits) terms, then squared back up `targetHalvings` times.
+ *
+ * Precision contract: the result is accurate to the requested scale `bits`.
+ * Each squaring amplifies rounding error ~2×, so the whole computation runs at
+ * an internally-elevated scale `bits + guard` (guard = targetHalvings + 8) and
+ * the result is downshifted (rounded) back to `bits`. This makes the reduction
+ * self-contained — callers pass their natural `bits` and inherit both the
+ * speedup and the guard, exactly as the old caller-carries-guard wrapper did,
+ * but without every caller having to size the guard itself.
  *
  * @param x  Fixed-point input (represents x/2^bits)
  * @param bits  The base-2 scale exponent
  * @returns  exp(x/2^bits) * 2^bits as a bigint
  */
 export function fpexp(x: bigint, bits: number): bigint {
-  const B = BigInt(bits);
-  const scale = 1n << B;
   // exp(0) = 1
-  if (x === 0n) return scale;
+  if (x === 0n) return 1n << BigInt(bits);
 
-  // Argument reduction: halve x until |r| < scale/2 (i.e., |r/scale| < 0.5).
-  let k = 0;
-  let r = x;
-  const half = scale >> 1n;
-  while (bigintAbs(r) > half) {
-    r = r / 2n;
-    k++;
-  }
+  // Elevated internal scale. `targetHalvings` extra halvings shorten the Taylor
+  // series to O(√bits) terms; `guard` guard bits absorb the ~2^targetHalvings
+  // error amplification of the squaring-back phase (and the final downshift's
+  // rounding).
+  const targetHalvings = Math.round(EXP_REDUCE_COEF * Math.sqrt(bits));
+  const guard = targetHalvings + 8;
+  const bits2 = bits + guard;
+  const B = BigInt(bits2);
+  const scale = 1n << B;
+
+  // Lift the input to the elevated scale.
+  const g = BigInt(guard);
+  let r = x << g;
+
+  // Argument reduction: halve until |r/scale| < 2^−targetHalvings. The shift
+  // count is derived from the ACTUAL magnitude of r, so a small argument (e.g.
+  // fpln's Newton seed near ln 1 = 0) is never over-reduced to 0 — the shift
+  // always leaves ~bits2 − targetHalvings significant bits. Sign is carried
+  // separately (a right-shift of a negative bigint would round toward −∞).
+  const neg = r < 0n;
+  let ra = neg ? -r : r;
+  const kExtra = Math.max(0, bitLength(ra) - bits2 + targetHalvings);
+  ra >>= BigInt(kExtra);
+  r = neg ? -ra : ra;
 
   // Taylor series: exp(r/scale) = 1 + r/scale + r²/(2!·scale²) + ...
   // In fixed-point: sum = scale + r + r²/(2·scale) + r³/(6·scale²) + ...
   // Incremental: term_n = term_{n-1} * r / (n * scale)
-  //   base-10:  (term * r) / (n * 10^p)    — one full-width division
-  //   base-2:   ((term * r) >> bits) / n   — shift + small-divisor division
+  //   base-2: ((term * r) >> bits2) / n   — shift + small-divisor division
   let sum = scale; // 1.0
   let term = r; // r/scale in fixed-point
   sum += term;
@@ -276,36 +316,25 @@ export function fpexp(x: bigint, bits: number): bigint {
     sum += term;
   }
 
-  // Squaring phase: exp(x/scale) = exp(r/scale)^(2^k)
-  for (let i = 0; i < k; i++) {
+  // Squaring phase: exp(x/scale) = exp((x/scale)/2^kExtra)^(2^kExtra).
+  for (let i = 0; i < kExtra; i++) {
     sum = (sum * sum) >> B;
   }
 
-  return sum;
+  // Downshift from the elevated scale back to `bits`, rounding to nearest.
+  return (sum + (1n << (g - 1n))) >> g;
 }
 
-/**
- * Fixed-point natural logarithm: compute ln(x/scale) * scale.
- *
- * Uses Newton's method on f(y) = exp(y) - x, where y = ln(x):
- *   y_{n+1} = y + x/exp(y) - 1
- *
- * Converges quadratically from a double-precision seed.
- *
- * @param x  Fixed-point input (represents x/2^bits), must be positive
- * @param bits  The base-2 scale exponent
- * @returns  ln(x/2^bits) * 2^bits as a bigint
- */
-// AGM-vs-Newton crossover, in bits. Below LN_AGM_MIN_BITS the float-seeded
-// giant_steps Newton converges in a few steps and wins; above it AGM's
-// O(M(p)·log p) cost (≈ log₂p square roots) pulls ahead. The crossover dropped
-// from ≈1250 to ≈700 decimal digits once `bigintSqrt` (the AGM inner loop) got
-// its giant-steps speedup (ROADMAP 17.11) — each AGM iteration is a sqrt, so a
-// ~2× faster sqrt shifts the balance. Measured (best-of-3): AGM wins reliably
-// and growingly from ~700 digits (1.3× at 700, 1.6× at 1000, 4.8× at 3000); the
-// 550–690-digit zone is mixed (Newton's giant_steps ladder is non-monotonic
-// there), so the threshold stays above it. (ln 2, which AGM needs, comes from
-// the LN2_DIGITS table or binary splitting, so there is no upper bound.)
+// AGM-vs-direct-log crossover, in bits. Below LN_AGM_MIN_BITS the direct-log
+// kernel (`fplnDirect`: one √-reduced fpexp + a short log1p series) wins; above
+// it AGM's O(M(p)·log p) cost (≈ log₂p square roots) pulls ahead. The threshold
+// was tuned for the giant_steps Newton that `fplnDirect` replaced; it is kept
+// unchanged so the validated ≥700-digit AGM regime (and the 1000-digit numbers
+// in BIGNUM-COMPARISON.md, where CE's ln leads) is untouched — `fplnDirect`,
+// being ~2–4× faster than that Newton, would compete with AGM to somewhat
+// higher bits, but re-tuning the crossover is deferred rather than risk the
+// high-precision path. (ln 2, which AGM needs, comes from the LN2_DIGITS table
+// or binary splitting, so there is no upper bound.)
 const LN_AGM_MIN_BITS = 2300; // ≈ 700 decimal digits
 
 export function fpln(x: bigint, bits: number): bigint {
@@ -318,130 +347,74 @@ export function fpln(x: bigint, bits: number): bigint {
   // ln(1) = 0
   if (x === scale) return 0n;
 
-  return bits >= LN_AGM_MIN_BITS ? fplnAGM(x, bits) : fplnNewton(x, bits);
+  return bits >= LN_AGM_MIN_BITS ? fplnAGM(x, bits) : fplnDirect(x, bits);
 }
 
 /**
- * Newton logarithm with giant_steps precision doubling: solves exp(y) = x for
- * y = ln(x), seeded from a float64 log. Fast at low/medium precision.
+ * Direct-log fixed-point natural logarithm (machine-seed + log1p correction).
+ *
+ * ln(v) = y₀ + log1p(v·e^{−y₀} − 1), where y₀ = Math.log(v) is a ~48-bit-accurate
+ * float64 seed. Because v·e^{−y₀} = 1 + ε with ε ≈ 2^{−48}, the correction
+ * log1p(ε) = 2·atanh(ε/(2+ε)) needs only ≈ bits/96 series terms (each step
+ * squares the tiny ratio u ≈ ε/2), so the whole kernel costs ONE fpexp(−y₀)
+ * plus that short series.
+ *
+ * With `fpexp` now carrying the √-depth argument reduction (O(√bits) terms),
+ * this measured 1.7–3.8× faster than the giant_steps Newton it replaced (which
+ * spent ~3 full fpexp evaluations per ln) across 21–500 digits, at ≤5 low bits
+ * of error vs an 80-guard-bit reference over the whole sub-AGM range
+ * (70–2299 bits) — well inside the ≥15 guard digits every caller carries.
+ *
+ * Rejected alternatives (both measured):
+ *  - giant_steps Newton on exp(y)=x, float-seeded: correct but ~2–4× slower here
+ *    (multiple fpexp evaluations per ln); superseded by this kernel.
+ *  - atanh of (m−1)/(m+1) with k sqrt-halvings of m: slower than Newton at every
+ *    precision (the sqrt-halvings dominate — the wrong trade now that fpexp is
+ *    cheap) and less accurate (8–18 low bits).
+ *
+ * @param x  Fixed-point input (represents x/2^bits), positive and O(1) (callers
+ *           range-reduce so the kernel only sees values ≈ [1, 10]).
+ * @param bits  The base-2 scale exponent.
+ * @returns  ln(x/2^bits) * 2^bits as a bigint.
  */
-function fplnNewton(x: bigint, bits: number): bigint {
+function fplnDirect(x: bigint, bits: number): bigint {
   const B = BigInt(bits);
   const scale = 1n << B;
 
-  // Try direct floating-point seed first (fast path for bits <= ~1000)
-  const xNum = Number(x);
-  const scaleNum = Number(scale);
-  let y: bigint;
-  let target = x; // the value we compute ln of (may be reduced)
-  let k = 0; // number of sqrt halvings applied
-  let seedAcc = 2; // bits of accuracy in the seed (crude estimate by default)
-
-  if (
-    Number.isFinite(xNum) &&
-    Number.isFinite(scaleNum) &&
-    xNum > 0 &&
-    scaleNum > 0
-  ) {
-    const ratio = xNum / scaleNum;
-    if (Number.isFinite(ratio) && ratio > 0) {
-      const approx = Math.log(ratio);
-      if (Number.isFinite(approx)) {
-        // Good ~15-digit seed from floating-point
-        y = BigInt(Math.round(approx * scaleNum));
-        seedAcc = 48; // ~48 bits of accuracy from a float64 log
-      } else {
-        y = estimateLnSeed(x, bits);
-      }
-    } else {
-      y = estimateLnSeed(x, bits);
-    }
+  // Overflow-safe ~48-bit float seed y₀ ≈ ln(x/scale)·scale. Extract the top
+  // ~52 bits of x so Number() stays finite even when 2^bits overflows a double
+  // (bits ≥ 1024); the log1p correction restores full precision regardless.
+  const topBits = 52;
+  const sh = bits - topBits;
+  let y0Fp: bigint;
+  if (sh > 0) {
+    const v = Number(x >> BigInt(sh)) / 2 ** topBits;
+    y0Fp = BigInt(Math.round(Math.log(v) * 2 ** topBits)) << BigInt(sh);
   } else {
-    // Floating-point overflows at this precision.
-    // Use argument reduction: reduce x/scale to [0.5, 2] by repeated sqrt.
-    // ln(x) = 2^k * ln(x^(1/2^k))
-    // This ensures Number(reduced)/Number(scale) gives a good ~15-digit seed.
-    target = x;
-    const twoScale = scale << 1n;
-    const halfScale = scale >> 1n;
-
-    while (target > twoScale || target < halfScale) {
-      target = fpsqrt(target, bits);
-      k++;
-    }
-
-    // Now target/scale is in [0.5, 2] — use a bit-count seed
-    // (Number(target) is still Infinity at this precision, but the
-    // estimate is accurate for values near 1)
-    y = estimateLnSeed(target, bits);
+    const v = Number(x) / Number(scale);
+    y0Fp = BigInt(Math.round(Math.log(v) * Number(scale)));
   }
 
-  // Newton iteration: y_{n+1} = y + x/exp(y) - 1 in fixed-point:
-  // y_{n+1} = y + (target * scale / ey) - scale, where ey = exp(y).
-  //
-  // giant_steps (precision doubling): exp(y) is the dominant cost and Newton
-  // doubles the correct bits each step, so the early steps only need low
-  // working precision. Run the ramp-up steps entirely at scale 2^wp (cheap
-  // fpexp + small division), doubling wp from the seed accuracy toward `bits`;
-  // the final full-precision steps below settle the last bits. This turns ~log p
-  // full-precision fpexp calls into ~2 (each halving of wp ~quarters the cost),
-  // which is the difference between ln being ~6× and ~2× the cost of one fpexp.
-  for (let wp = Math.min(bits, Math.max(8, 2 * seedAcc)); wp < bits; ) {
-    const wB = BigInt(wp);
-    const sh = BigInt(bits - wp);
-    const yW = y >> sh; // y at scale 2^wp
-    const eyW = fpexp(yW, wp);
-    if (eyW === 0n) {
-      y = y / 2n; // exp underflow: y too negative, back off and retry
-      continue;
-    }
-    const targetW = target >> sh; // target at scale 2^wp
-    const ynW = yW + (targetW << wB) / eyW - (1n << wB);
-    y = ynW << sh; // back to full scale (low bits below wp are not yet valid)
-    wp = Math.min(bits, 2 * wp);
+  // p = x·e^{−y₀} = (1 + ε)·scale, ε ≈ 2^{−48}. The single fpexp call.
+  const p = (x * fpexp(-y0Fp, bits)) >> B;
+  const eps = p - scale; // ε·scale (may be negative if y₀ overshot ln v)
+
+  // log1p(ε) = 2·atanh(u), u = ε/(2+ε). The atanh terms all share u's sign, so
+  // sum in magnitude: an arithmetic right-shift of a negative bigint floors
+  // toward −∞ and sticks at −1 instead of reaching 0, which would never
+  // terminate the loop.
+  const u = (eps << B) / (p + scale);
+  const uAbs = u < 0n ? -u : u;
+  const u2 = (uAbs * uAbs) >> B;
+  let term = uAbs;
+  let sum = uAbs;
+  for (let n = 3n; ; n += 2n) {
+    term = (term * u2) >> B;
+    if (term === 0n) break;
+    sum += term / n;
   }
 
-  // Full-precision settling.
-  // Convergence note: fpexp has O(1) ULP truncation error and the
-  // subsequent division adds another O(1) ULP, so the smallest
-  // achievable |delta| can be tens of ULPs rather than 0–1. A tight
-  // threshold of 1 causes limit-cycle oscillation at many precisions.
-  // We detect stalled convergence: once |delta| is small (<100000)
-  // AND the previous |delta| was also small AND delta didn't shrink
-  // by at least 4x, we've reached the truncation floor. The gate
-  // on both current and previous delta prevents false triggers during
-  // the initial slow convergence from a crude seed (sqrt-reduction
-  // path). Callers carry 15 guard digits, so 5 digits of noise
-  // (100000 ULP) leaves 10 digits of margin.
-  let prevAbsDelta = 0n;
-  for (let i = 0; i < 100; i++) {
-    const ey = fpexp(y, bits);
-    if (ey === 0n) {
-      // exp(y) underflowed to zero, y is too negative — adjust
-      y = y / 2n;
-      continue;
-    }
-    const yn = y + (target << B) / ey - scale;
-    const absDelta = bigintAbs(yn - y);
-    if (absDelta <= 1n) break;
-    // Detect limit cycle: both deltas are small and convergence stalled
-    if (
-      absDelta < 100000n &&
-      prevAbsDelta > 0n &&
-      prevAbsDelta < 100000n &&
-      absDelta * 4n >= prevAbsDelta
-    )
-      break;
-    prevAbsDelta = absDelta;
-    y = yn;
-  }
-
-  // Undo halvings: ln(x) = 2^k * ln(reduced)
-  for (let i = 0; i < k; i++) {
-    y = 2n * y;
-  }
-
-  return y;
+  return y0Fp + (u < 0n ? -2n : 2n) * sum;
 }
 
 /**
@@ -505,20 +478,6 @@ function fplnAGM(x: bigint, bits: number): bigint {
   const lnS = (fppi(bits) * Lfp) / (2n * a);
   // ln(value) = ln(s) − m·ln2.
   return lnS - BigInt(m) * lnTwoFixed(bits);
-}
-
-/** round(ln(2) · 2^53), for a base-2 ln seed without float overflow. */
-const LN2_Q53 = 6243314768165359n;
-
-/**
- * Estimate a seed for ln when floating-point conversion overflows.
- * Uses bit counting: ln(x/2^bits) ≈ (bitLength(x) - bits) · ln(2).
- * In fixed-point: seed = bitDiff · ln(2) · 2^bits = bitDiff · LN2_Q53 · 2^(bits-53).
- */
-function estimateLnSeed(x: bigint, bits: number): bigint {
-  const bitDiff = BigInt(bitLength(x) - bits);
-  if (bits >= 53) return (bitDiff * LN2_Q53) << BigInt(bits - 53);
-  return (bitDiff * LN2_Q53) >> BigInt(53 - bits);
 }
 
 // ================================================================

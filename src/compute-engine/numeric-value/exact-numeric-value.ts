@@ -264,9 +264,15 @@ export class ExactNumericValue extends NumericValue {
       const quotient = isMachineRational(r)
         ? new BigDecimal(r[0]).div(r[1])
         : new BigDecimal(r[0]).div(new BigDecimal(r[1]));
-      return quotient
-        .mul(new BigDecimal(this.radical).sqrt())
-        .toPrecision(outPrec);
+      // Fused multiply-and-round: rounds the raw product ONCE to outPrec
+      // instead of mul() rounding at the ambient guard precision (outPrec+10)
+      // and toPrecision() rounding again. Single rounding is at least as
+      // accurate as the previous double rounding (battery-verified vs
+      // mpmath), and skips a full-width normalize + digit re-scan.
+      return quotient.mulToPrecision(
+        new BigDecimal(this.radical).sqrt(),
+        outPrec
+      );
     } finally {
       BigDecimal.precision = saved;
     }

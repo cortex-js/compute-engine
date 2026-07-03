@@ -107,22 +107,6 @@ const LOG10_2 = Math.log10(2); // ≈ 0.30103
 const GUARD_BITS = 16;
 
 /**
- * Extra argument-reduction depth for `exp`, as a multiple of √bits.
- *
- * `fpexp` reduces its argument only until |r/2^bits| < ½, after which its
- * fixed-point Taylor series needs O(bits) terms. Reducing the argument by a
- * further ≈ `EXP_REDUCE_COEF·√bits` halvings and squaring the result back up
- * (`fpexpReduced`) trades those O(bits) Taylor terms for O(√bits) terms plus
- * O(√bits) cheap squarings — a net ~1.5–2.4× fewer full-width multiplies from
- * 21 to 500 digits (measured; the win grows with precision as the Taylor arm
- * shrinks relative to the squaring arm). 0.7 sits at the flat top of the
- * speed/accuracy curve: near-minimal total multiplies while keeping the
- * squaring count — and thus the guard bits needed to absorb its ~2^k error
- * amplification — modest.
- */
-const EXP_REDUCE_COEF = 0.7;
-
-/**
  * Safety cap on the number of π digits the trig mod-2π reduction will compute
  * on demand (via Chudnovsky in `fppi`). The hardcoded table is ~2370 digits;
  * beyond that π is computed on the fly, so the only limit is this cap, which
@@ -465,19 +449,10 @@ BigDecimal.prototype.exp = function (): BigDecimal {
   // to 0. The reduction is done in exact bigint fixed-point (no cancellation).
   const magnitude = Math.max(0, this.exponent + this.digitCount());
 
-  // √-reduction guard. `fpexpReduced` reduces the O(1) remainder r by ≈ √bits
-  // extra halvings so its Taylor series needs O(√bits) terms instead of
-  // O(bits), then squares the result back up. Each squaring roughly doubles the
-  // accumulated rounding error, so carry `reduceHalvings + 8` extra guard bits
-  // (validated accuracy-neutral vs the unreduced kernel across 15–500 digits at
-  // tiny/near-1/huge arguments). `reduceHalvings` is estimated from the base
-  // precision; it is insensitive to the small guard bump, so no fixpoint
-  // iteration is needed.
-  const baseWorkingPrec = targetPrec + 20 + magnitude;
-  const baseBits = Math.ceil(baseWorkingPrec * LOG2_10) + GUARD_BITS;
-  const reduceHalvings = Math.round(EXP_REDUCE_COEF * Math.sqrt(baseBits));
-  const workingPrec =
-    baseWorkingPrec + Math.ceil((reduceHalvings + 8) * LOG10_2);
+  // The √-depth argument reduction (and its guard bits) now live inside the
+  // `fpexp` kernel, so exp() is a thin caller again: pick the working precision
+  // for the mod-ln(10) reduction and hand the O(1) remainder to fpexp.
+  const workingPrec = targetPrec + 20 + magnitude;
 
   const [xFp, bits] = toFixedPoint(this, workingPrec);
   const l10 = ln10Fixed(bits);
@@ -498,11 +473,7 @@ BigDecimal.prototype.exp = function (): BigDecimal {
   if (k > MAX_SAFE_EXPONENT || k < -MAX_SAFE_EXPONENT)
     return k > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.ZERO;
 
-  const expR = fromFixedPoint(
-    fpexpReduced(rFp, bits, reduceHalvings),
-    bits,
-    targetPrec
-  );
+  const expR = fromFixedPoint(fpexp(rFp, bits), bits, targetPrec);
 
   // Multiply by 10^k by shifting the decimal exponent.
   const newExp = expR.exponent + Number(k);
@@ -545,7 +516,24 @@ BigDecimal.prototype.ln = function (): BigDecimal {
   const m = fromRaw(sig, -(digits - 1)); // m ∈ [1, 10)
 
   const eDigits = Math.abs(e).toString().length;
-  const workingPrec = targetPrec + 20 + eDigits;
+
+  // Near-1 relative-precision guard. For x → 1, ln(x) ≈ (x−1) is tiny, so the
+  // result has ≈ −log10|x−1| leading zeros. The fixed-point kernel is an
+  // *absolute*-precision grid (and for x just below 1 the value emerges as the
+  // cancelling difference ln(m) − |e|·ln10, both ≈ ln10), so without extra
+  // working precision those leading zeros eat the guard and the small result
+  // loses digits — ln(1 − 1e−29) at 60 digits kept only ~57 (pre-existing,
+  // present in 0.66.0 too). Size the guard to the closeness. Only x ∈ [0.1, 10)
+  // can be near 1, so the extra subtraction is skipped for every other x.
+  let nearOneGuard = 0;
+  if (e === 0 || e === -1) {
+    const xm1 = this.sub(BigDecimal.ONE);
+    if (!xm1.isZero()) {
+      const de = decimalExponent(xm1); // ≈ floor(log10|x − 1|)
+      if (de < 0) nearOneGuard = -de;
+    }
+  }
+  const workingPrec = targetPrec + 20 + eDigits + nearOneGuard;
 
   const [mFp, bits] = toFixedPoint(m, workingPrec);
   const l10 = ln10Fixed(bits);
@@ -839,10 +827,13 @@ BigDecimal.prototype.acos = function (): BigDecimal {
   try {
     const two = BigDecimal.TWO;
     if (this.significand >= 0n) {
-      const t = BigDecimal.ONE.sub(this).div(two).sqrt();
-      return two.mul(t.asin()).toPrecision(targetPrec);
+      const t = BigDecimal.ONE.sub(this).mulToPrecision(BigDecimal.HALF, targetPrec + 10).sqrt();
+      // Fused multiply-and-round (single rounding at targetPrec; the previous
+      // mul-then-toPrecision double-rounded through the +10 guard — battery-
+      // verified identical).
+      return two.mulToPrecision(t.asin(), targetPrec);
     }
-    const t = BigDecimal.ONE.add(this).div(two).sqrt();
+    const t = BigDecimal.ONE.add(this).mulToPrecision(BigDecimal.HALF, targetPrec + 10).sqrt();
     return BigDecimal.PI.sub(two.mul(t.asin())).toPrecision(targetPrec);
   } finally {
     BigDecimal.precision = saved;
@@ -944,7 +935,10 @@ BigDecimal.prototype.sinh = function (): BigDecimal {
     BigDecimal.precision = targetPrec - e + 5;
     try {
       const expX = this.exp();
-      return expX.sub(expX.inv()).div(BigDecimal.TWO).toPrecision(targetPrec);
+      // ×HALF is exact in decimal (0.5 = 5·10⁻¹), so this is value-identical
+      // to ÷2 while replacing the division machinery with a trivial ×5n; the
+      // fused round also skips the intermediate normalize.
+      return expX.sub(expX.inv()).mulToPrecision(BigDecimal.HALF, targetPrec);
     } finally {
       BigDecimal.precision = saved;
     }
@@ -1213,7 +1207,8 @@ BigDecimal.prototype.atanh = function (): BigDecimal {
   BigDecimal.precision = targetPrec - e + 5;
   try {
     const ratio = BigDecimal.ONE.add(this).div(BigDecimal.ONE.sub(this));
-    return ratio.ln().div(BigDecimal.TWO).toPrecision(targetPrec);
+    // ×HALF (exact in decimal) replaces ÷2; fused single round to targetPrec.
+    return ratio.ln().mulToPrecision(BigDecimal.HALF, targetPrec);
   } finally {
     BigDecimal.precision = saved;
   }
@@ -1288,37 +1283,6 @@ BigDecimal.prototype.nthRoot = function (n: number): BigDecimal {
 };
 
 // ---------- Internal helpers ----------
-
-/**
- * exp of an O(1) fixed-point remainder `rFp` (value r/2^bits ∈ [0, ln 10)),
- * with extra argument reduction beyond what `fpexp` does internally.
- *
- * `fpexp` only halves until |r/2^bits| < ½, leaving an O(bits)-term Taylor
- * series. Here we bring the value down to ≈ 2^−targetHalvings first, so the
- * series converges in O(√bits) terms, then square the result back up
- * (`fpmul`) `extra` times — reconstructing exp(r) = exp(r/2^extra)^(2^extra).
- * That is ~√bits cheap squarings in exchange for ~(bits − √bits) fewer
- * full-width Taylor multiplies.
- *
- * The halving count is derived from the *actual* magnitude of `rFp` (targeting
- * the reduced value to 2^−targetHalvings), so a small r is never over-reduced
- * to 0 — the shift always leaves ~bits − targetHalvings significant bits. The
- * caller carries `targetHalvings + 8` guard bits to absorb the ~2^k error
- * amplification of the k squarings, keeping the result as accurate as the
- * unreduced kernel.
- */
-function fpexpReduced(
-  rFp: bigint,
-  bits: number,
-  targetHalvings: number
-): bigint {
-  const extra = Math.max(0, bitLength(rFp) - bits + targetHalvings);
-  if (extra <= 0) return fpexp(rFp, bits);
-  const reduced = rFp >> BigInt(extra); // value / 2^extra (rFp ≥ 0 here)
-  let sum = fpexp(reduced, bits);
-  for (let i = 0; i < extra; i++) sum = fpmul(sum, sum, bits);
-  return sum;
-}
 
 /**
  * Bit-based seed for cbrt: approximate the integer cube root of `C`

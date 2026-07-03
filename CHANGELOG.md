@@ -80,15 +80,23 @@
   digit counting seeds from the hex-string length; comparison, rounding,
   addition and multiplication are 1.3–6× faster; a fused
   multiply-and-round (`mulToPrecision`) accelerates the integer power
-  ladder ~12–16%; and the exponential kernel uses √-depth argument
-  reduction (O(√bits) series terms instead of O(bits)) — `exp` is 1.3×
-  faster at 21 digits rising to 2.6× at 500, with `Gamma` inheriting
-  ~1.2–1.3×. Net effect on a division-heavy series: ζ(3) at 100–500 digits
-  is over 2× faster than the previous release, with no kernel-specific
-  changes. At 100 digits the field operations (add/sub/mul/div) are now
-  2.7–15× faster than Mathematica 14.3 (measured; see
-  `benchmarks/big-decimal/BIGNUM-COMPARISON.md`, the new durable
-  primitive-operation benchmark).
+  ladder ~12–16% and is adopted across the Gamma/digamma/Bessel series
+  ladders and complex rectangularization; the exponential kernel uses
+  √-depth argument reduction (O(√bits) series terms instead of O(bits)) —
+  `exp` is up to 2.6× faster at 500 digits, with `Gamma` inheriting
+  1.2–2×; and **the natural log was rewritten** from Newton-on-exp (three
+  full exponential evaluations per call) to a machine-seeded direct
+  series (`ln(v) = y₀ + log1p(v·e^(−y₀) − 1)` with the 52-bit hardware
+  seed) — `ln` is 1.9× faster at 21 digits rising to **10× at 500**, and
+  a pre-existing accuracy loss near 1 was fixed along the way
+  (`ln(1 − 10⁻²⁹)` at 60 digits previously lost its last ~3 digits).
+  Division by 2 in the sinh/arctanh/arccos paths became an exact
+  multiply-by-0.5. Net effect on a division-heavy series: ζ(3) at
+  100–500 digits is over 2× faster than the previous release, with no
+  kernel-specific changes. At 100 digits the field operations
+  (add/sub/mul/div) are now 2.7–15× faster than Mathematica 14.3
+  (measured; see `benchmarks/big-decimal/BIGNUM-COMPARISON.md`, the new
+  durable primitive-operation benchmark).
 
 - **The Rubi integration pack is much faster on integrals it cannot solve.**
   A second-level dispatch index (the set of operator heads a rule's pattern

@@ -575,6 +575,11 @@ describe('BIGNUM SPECIAL FUNCTIONS', () => {
   beforeAll(() => {
     bigCe = new ComputeEngine();
     bigCe.precision = 50;
+    // These tests assert VALUES, not timing. Under a fully-parallel jest
+    // sweep on a loaded machine the default 2 s wall-clock deadline can
+    // expire from CPU contention alone (observed at load ≥35), so give the
+    // high-precision computations a generous limit.
+    bigCe.timeLimit = 20_000;
   });
 
   // Helper to check that a bignum result starts with expected digits
@@ -608,6 +613,7 @@ describe('BIGNUM SPECIAL FUNCTIONS', () => {
     // must agree with -γ to the full working precision.
     const ce = new ComputeEngine();
     ce.precision = 1000;
+    ce.timeLimit = 20_000; // value test; see the beforeAll note on contention
     // γ is delivered to the full requested precision (was capped at ~858).
     expect(ce.expr('EulerGamma').N().toString().length).toBe(1002);
     const diff = ce

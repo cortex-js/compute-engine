@@ -428,7 +428,7 @@ export class BigNumericValue extends NumericValue {
         const mag = realExp.exp();
         return this.clone({
           // `mul` is exact (2P digits); round back to working precision.
-          re: mag.mul(imagExp.cos()).toPrecision(BigDecimal.precision),
+          re: mag.mulToPrecision(imagExp.cos(), BigDecimal.precision),
           im: chop(mag.mul(imagExp.sin()).toNumber()),
         });
       }
@@ -476,7 +476,7 @@ export class BigNumericValue extends NumericValue {
     const newModulus = modulus.pow(exponent);
     const newArgument = argument.mul(exponent);
     return this.clone({
-      re: newModulus.mul(newArgument.cos()).toPrecision(BigDecimal.precision),
+      re: newModulus.mulToPrecision(newArgument.cos(), BigDecimal.precision),
       im: chop(newModulus.mul(newArgument.sin()).toNumber()),
     });
   }
@@ -529,7 +529,7 @@ export class BigNumericValue extends NumericValue {
 
     // Return the principal root
     return this.clone({
-      re: newModulus.mul(newArgument.cos()).toPrecision(BigDecimal.precision),
+      re: newModulus.mulToPrecision(newArgument.cos(), BigDecimal.precision),
       im: chop(newModulus.mul(newArgument.sin()).toNumber()),
     });
   }
@@ -656,7 +656,7 @@ export class BigNumericValue extends NumericValue {
           ? BigDecimal.ZERO
           : new BigDecimal(this.im).cos();
       return this.clone({
-        re: e.mul(cosIm).toPrecision(BigDecimal.precision),
+        re: e.mulToPrecision(cosIm, BigDecimal.precision),
         im: chop(e.mul(Math.sin(this.im)).toNumber()),
       });
     }
