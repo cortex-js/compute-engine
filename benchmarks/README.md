@@ -319,6 +319,15 @@ capability:
 - `bignum-compare.mjs` / `bignum-compare.py` — the quicker whole-table variant
   (one process); convenient but its `exp`/`ln` cells are inflated by that cache
   thrash, so prefer `cell.*` for reportable numbers.
+- `ops-bench.mjs` (CE bundle) + `ops-bench.py` (mpmath) + `run-ops.mjs` (driver)
+  — the **primitive-operation** microbench: per-op cost (ns/op) of `add`/`sub`/
+  `mul`/`div`/`sqrt`/`round`/`normalize`/`cmp` plus composite consumers
+  (`ln`/`exp`/`cos`/Apéry ζ(3)) at 21/50/100/200/500 digits, comparing CE HEAD
+  vs published 0.66.0 vs mpmath. Where the transcendental tables measure whole
+  kernels, this isolates the primitives whose wins propagate to every kernel
+  (e.g. the `div` normalize-skip). One command: `node
+  big-decimal/run-ops.mjs` (writes `ops-results.json` + the Markdown tables that
+  feed `BIGNUM-COMPARISON.md`'s "Primitive operations" section).
 
 ---
 
