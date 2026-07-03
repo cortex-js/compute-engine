@@ -320,9 +320,11 @@ describe('PYTHON TARGET', () => {
     });
 
     it('should use ** for complex power', () => {
-      const expr = ce.expr(['Power', ['Complex', 1, 1], 2]);
+      // Use an inexact complex base: since D12-A an exact Gaussian power
+      // folds at canonicalization ((1+i)² → 2i), leaving no Power to compile.
+      const expr = ce.expr(['Power', ['Complex', 1.5, 1], 2]);
       const code = python.compile(expr).code;
-      expect(code).toContain('complex(1, 1)');
+      expect(code).toContain('complex(1.5, 1)');
       expect(code).toContain('**');
     });
 
@@ -343,11 +345,14 @@ describe('PYTHON TARGET', () => {
     });
 
     it('should compile complex addition (native operators)', () => {
-      const expr = ce.expr(['Add', ['Complex', 1, 2], ['Complex', 3, 4]]);
+      // Use inexact complex literals: since D12-A exact Gaussian operands
+      // fold to a single literal at canonicalization, leaving no addition
+      // to compile.
+      const expr = ce.expr(['Add', ['Complex', 1.5, 2], ['Complex', 3, 4.5]]);
       const code = python.compile(expr).code;
-      expect(code).toContain('complex(1, 2)');
+      expect(code).toContain('complex(1.5, 2)');
       expect(code).toContain('+');
-      expect(code).toContain('complex(3, 4)');
+      expect(code).toContain('complex(3, 4.5)');
     });
 
     it('should use cmath.asin for complex arcsin', () => {

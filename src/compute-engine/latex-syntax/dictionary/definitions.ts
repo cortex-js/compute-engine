@@ -313,6 +313,28 @@ function addEntry(
   //
   if (indexedEntry.latexTrigger && indexedEntry.latexTrigger !== '') {
     const trigger = indexedEntry.latexTrigger;
+
+    // Record the first token → max trigger token count, used by
+    // `lookAhead()` to bound the lookahead. Over-approximating (e.g. for
+    // the non-indexed environment/matchfix kinds) is harmless; missing an
+    // indexed trigger would be a correctness bug.
+    if (tokensTrigger.length > 0) {
+      const first = tokensTrigger[0];
+      const count = tokensTrigger.length;
+      const max = result.triggerStartMax.get(first);
+      if (max === undefined || count > max)
+        result.triggerStartMax.set(first, count);
+      // `$`/`$$` are the only tokens whose lookahead segments can alias
+      // (`<$>` + `<$>` joins to the same string as `<$$>`): register both
+      // spellings defensively, with a safe (over-approximated) count.
+      if (first === '<$>' || first === '<$$>') {
+        const alias = first === '<$>' ? '<$$>' : '<$>';
+        const aliasMax = result.triggerStartMax.get(alias);
+        if (aliasMax === undefined || count + 1 > aliasMax)
+          result.triggerStartMax.set(alias, count + 1);
+      }
+    }
+
     switch (indexedEntry.kind) {
       case 'infix':
         prependIndexedEntry(result.infixByTrigger, trigger, indexedEntry);
@@ -378,6 +400,7 @@ export function indexLatexDictionary(
     operatorByTrigger: new Map(),
     universalDefs: new Map(),
     symbolTriggerDefs: new Map(),
+    triggerStartMax: new Map(),
   };
 
   for (const entry of dic)

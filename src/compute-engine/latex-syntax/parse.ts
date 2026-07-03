@@ -339,14 +339,17 @@ export class _Parser implements Parser {
   };
 
   pushSymbolTable(): void {
+    this._symbolTableGen += 1;
     this.symbolTable = { parent: this.symbolTable, ids: {} };
   }
 
   popSymbolTable(): void {
+    this._symbolTableGen += 1;
     this.symbolTable = this.symbolTable.parent ?? this.symbolTable;
   }
 
   addSymbol(id: string, type: BoxedType | TypeString): void {
+    this._symbolTableGen += 1;
     if (typeof type === 'string') type = new BoxedType(type);
     // Conflict only when re-declaring with a *different* type. The check was
     // inverted (`.is()` is type-equality), so re-declaring with the same type
@@ -425,6 +428,19 @@ export class _Parser implements Parser {
   // k))`, so the array has `this._tokens.length + 1` entries. The token stream
   // is immutable, so this is built once on demand.
   private _tokenPrefixOffsets: number[] | null = null;
+
+  // Cache for the speculative `parseSymbol()` performed by the
+  // `symbolTrigger` path of `peekDefinitions()`. The parsed candidate
+  // depends only on the (immutable) token stream, the position, and the
+  // symbol table (tracked by `_symbolTableGen` — the engine scope consulted
+  // via `options.getSymbolType`/`options.hasSubscriptEvaluate` is stable
+  // for the duration of a parse), so it can be reused across the several
+  // `peekDefinitions()` calls made at the same position (once per kind).
+  private _symbolTableGen = 0;
+  private _symCandidateIndex = -1;
+  private _symCandidateGen = -1;
+  private _symCandidate: string | null = null;
+  private _symCandidateCount = 0;
 
   constructor(
     tokens: LatexToken[],
@@ -702,7 +718,9 @@ export class _Parser implements Parser {
   // }
 
   /**
-   * Return at most `this._dictionary.lookahead` LaTeX tokens.
+   * Return the LaTeX tokens ahead, joined incrementally: at most as many
+   * tokens as the longest dictionary trigger starting with the current
+   * token (see `triggerStartMax`), and none if no trigger starts with it.
    *
    * The index in the returned array correspond to the number of tokens.
    * Note that since a token can be longer than one char ('\\pi', but also
@@ -723,10 +741,13 @@ export class _Parser implements Parser {
     if (this._lookAheadIndex === this.index && this._lookAheadCache !== null)
       return this._lookAheadCache;
 
-    const n = Math.min(
-      this._dictionary.lookahead,
-      this._tokens.length - this.index
-    );
+    // Bound the lookahead by the longest trigger that starts with the
+    // current token (`triggerStartMax` is precomputed at indexing time).
+    // Most tokens start no trigger at all, in which case the lookahead is
+    // empty and no trigger can match.
+    const maxN =
+      this._dictionary.triggerStartMax.get(this._tokens[this.index]) ?? 0;
+    const n = Math.min(maxN, this._tokens.length - this.index);
 
     const result: [number, string][] = [];
 
@@ -832,10 +853,26 @@ export class _Parser implements Parser {
     //    time (instead of one speculative parse per symbolTrigger def)
     const symbolTriggerDefs = dictionary.symbolTriggerDefs.get(kind);
     if (symbolTriggerDefs) {
-      const start = this.index;
-      const candidate = parseSymbol(this)?.trim();
-      const n = this.index - start;
-      this.index = start;
+      let candidate: string | null;
+      let n: number;
+      if (
+        this._symCandidateIndex === this.index &&
+        this._symCandidateGen === this._symbolTableGen
+      ) {
+        // Reuse the candidate speculatively parsed at this position by a
+        // previous call (typically for another kind)
+        candidate = this._symCandidate;
+        n = this._symCandidateCount;
+      } else {
+        const start = this.index;
+        candidate = parseSymbol(this)?.trim() ?? null;
+        n = this.index - start;
+        this.index = start;
+        this._symCandidateIndex = start;
+        this._symCandidateGen = this._symbolTableGen;
+        this._symCandidate = candidate;
+        this._symCandidateCount = n;
+      }
       if (candidate && n > 0) {
         const defs = symbolTriggerDefs.get(candidate);
         if (defs) for (const def of defs) result.push([def, n]);

@@ -630,7 +630,7 @@ simplify  = (2 + 2.2i)
 
 exports[`MULTIPLY 2x(1+i) 1`] = `
 box       = ["Multiply", 2, ["Complex", 1, 1]]
-simplify  = (2 + 2i)
+canonical = ["Complex", 2, 2]
 `;
 
 exports[`MULTIPLY 2x(1.1+1.1i) 1`] = `

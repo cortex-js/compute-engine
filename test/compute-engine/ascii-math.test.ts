@@ -174,8 +174,9 @@ describe('ARITHMETIC OPERATORS', () => {
     expect(check('-1.23e30 - 2.3454e32 - 3.455e35')).toMatchInlineSnapshot(
       `-34573577e+28`
     );
-    expect(check('1 + (2+3i)')).toMatchInlineSnapshot(`1 + (2 + 3i)`);
-    expect(check('1 + (-2-3i)')).toMatchInlineSnapshot(`1 + (-2 - 3i)`);
+    // Exact Gaussian literals fold at canonicalization since D12-A
+    expect(check('1 + (2+3i)')).toMatchInlineSnapshot(`(3 + 3i)`);
+    expect(check('1 + (-2-3i)')).toMatchInlineSnapshot(`(-1 - 3i)`);
     expect(check('\\pi + (-2-3i)')).toMatchInlineSnapshot(`(-2 - 3i) + pi`);
     expect(check('x + (-2-3i)')).toMatchInlineSnapshot(`x + (-2 - 3i)`);
     expect(check('1+(-x)')).toMatchInlineSnapshot(`1 - x`);
@@ -216,10 +217,11 @@ describe('ARITHMETIC OPERATORS', () => {
     expect(check('4 \\times \\pi')).toMatchInlineSnapshot(`4pi`);
     expect(check('4 \\times \\pi \\times 3')).toMatchInlineSnapshot(`12pi`);
 
-    expect(check('4 \\times (2+3i)')).toMatchInlineSnapshot(`4(2 + 3i)`);
-    expect(check('(2+3i) \\times 4')).toMatchInlineSnapshot(`4(2 + 3i)`);
-    expect(check('-4 \\times (-2-3i)')).toMatchInlineSnapshot(`-4(-2 - 3i)`);
-    expect(check('(-2-3i) \\times -4')).toMatchInlineSnapshot(`-4(-2 - 3i)`);
+    // Exact Gaussian literals fold at canonicalization since D12-A
+    expect(check('4 \\times (2+3i)')).toMatchInlineSnapshot(`(8 + 12i)`);
+    expect(check('(2+3i) \\times 4')).toMatchInlineSnapshot(`(8 + 12i)`);
+    expect(check('-4 \\times (-2-3i)')).toMatchInlineSnapshot(`(8 + 12i)`);
+    expect(check('(-2-3i) \\times -4')).toMatchInlineSnapshot(`(8 + 12i)`);
     expect(check('\\pi \\times i')).toMatchInlineSnapshot(`i * pi`);
     expect(check('\\pi \\times -i')).toMatchInlineSnapshot(`-i * pi`);
 

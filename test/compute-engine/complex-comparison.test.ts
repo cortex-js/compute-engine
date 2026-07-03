@@ -96,9 +96,13 @@ describe('P0-27 — real-vs-real ordering controls are unchanged', () => {
 });
 
 describe('P0-6 — Log(z, b) with complex z divides the whole ln by ln(b)', () => {
-  test('Lb(i): evaluate() agrees with N() ≈ iπ/(2 ln 2)', () => {
+  // Since D12-A, `i` boxed from ['Complex', 0, 1] is an EXACT literal, so
+  // under the exactness contract evaluate() stays symbolic (like Ln(2)) and
+  // only N() numericizes. The base-division regression itself (P0-6) is
+  // covered by the inexact-argument tests below.
+  test('Lb(i): stays symbolic under evaluate(); N() ≈ iπ/(2 ln 2)', () => {
     const e = ce.box(['Lb', ['Complex', 0, 1]]);
-    expect(e.evaluate().im).toBeCloseTo(2.2661800709, 6);
+    expect(e.evaluate().operator).toEqual('Log');
     expect(e.N().im).toBeCloseTo(2.2661800709, 6);
   });
   test('Log(1.1+1.1i, 2): evaluate().im === N().im ≈ 1.13309', () => {

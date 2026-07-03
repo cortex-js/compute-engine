@@ -39,17 +39,18 @@ function boxMachineNumber(ce: IComputeEngine, value: number): Expression {
  * argument numericizes" rule — the counterpart of `NumberLiteralInterface`'s
  * `isExact`, patched for one architectural wrinkle.
  *
- * A *real* number's `isExact` getter is authoritative. A *complex* number
- * literal, however, is never `isExact`: its `NumericValue` always lives in
- * the `Big`/`MachineNumericValue` lane (never `ExactNumericValue`),
- * regardless of whether its real and imaginary parts are individually exact
- * — `i`, `1+i`, `1/2+i` all report `isExact === false`. Treat a complex
- * literal with an *integer* real part and an *integer* imaginary part
- * (a Gaussian integer) as exact too, so exact Gaussian arithmetic
- * (`(1+i)^3 = 2+11i`, WP-2.16) and symbolic-stay identities keyed on an
- * exact complex argument (e.g. an Eisenstein series at τ = i) are preserved.
- * A non-Gaussian complex float (`1.5+2i`) still numericizes — it never was
- * representable exactly, Gaussian or otherwise.
+ * A number's `isExact` getter is authoritative, and since D12-A
+ * `ExactNumericValue` represents exact complex values directly (Gaussian
+ * rationals like `1+i`, `1/2+i`; pure-imaginary radicals like `√2·i`), so
+ * those literals report `isExact === true` on their own. However a complex
+ * literal can still arrive through the inexact `Big`/`MachineNumericValue`
+ * lane with exactly-representable components — notably the engine's `i`
+ * constant itself (`ce.I` is a machine complex). Treat such a value with an
+ * *integer* real part and an *integer* imaginary part (a Gaussian integer)
+ * as exact too, so exact Gaussian arithmetic (`(1+i)^2 = 2i`, WP-2.16) and
+ * symbolic-stay identities keyed on an exact complex argument (e.g. an
+ * Eisenstein series at τ = i) are preserved. A non-Gaussian complex float
+ * (`1.5+2i`) still numericizes — it never was representable exactly.
  *
  * Non-number-literal expressions (symbols like `Pi`, unevaluated functions)
  * are treated as exact here: they have no float to lose, and any exact

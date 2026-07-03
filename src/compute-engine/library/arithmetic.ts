@@ -271,8 +271,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `Add(0.5, Sqrt(2))` (which already folds via the numeric-literal
         // path since `Sqrt(2)` is itself a number literal). Only when the
         // sum has no free variables: `0.5 + x` must stay symbolic.
-        // `isExactNumber` (not plain `isExact`) protects an exact Gaussian
-        // complex term (`1/2 + i` stays `1/2 + i`, not `(0.5 + i)`).
+        // `isExactNumber` (not plain `isExact`) additionally protects a
+        // Gaussian-integer term still carried by the inexact lane (e.g. the
+        // machine `i` constant); exact complex literals (`1/2 + i`, since
+        // D12-A an ExactNumericValue) are already covered by `isExact`.
         if (
           result.operator === 'Add' &&
           result.unknowns.length === 0 &&
@@ -1477,8 +1479,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // D2: an inexact (float) base or exponent numericizes even under
         // plain evaluate() — `Power(2, 5.1)` → 34.29…, matching `Cos(5.1)`.
-        // `isExactNumber` (not plain `isExact`) protects the exact
-        // Gaussian-integer power path, e.g. `(1+i)^3 = 2+11i` — WP-2.16.
+        // `isExactNumber` (not plain `isExact`) additionally protects the
+        // exact power path for a Gaussian-integer base still carried by the
+        // inexact lane (e.g. built from the machine `i` constant), so
+        // `(1+i)^2 = 2i` — WP-2.16. Exact complex literals (since D12-A)
+        // are already covered by `isExact`.
         return pow(x, n, {
           numericApproximation: shouldNumericize(numericApproximation, x, n),
         });

@@ -126,8 +126,12 @@ describe('EXACT EVALUATION', () => {
 
   // An exact real added to the imaginary unit keeps the real part exact
   // (it is not folded into a machine complex that would floatify it).
+  // Since D12-A, `1/2 + i` is a single EXACT Gaussian-rational number literal
+  // (printed in the parenthesized complex-literal style); a real with a
+  // radical stays an exact two-term sum (`√3 + i` is outside the exact
+  // complex representable set, so the radical term is kept separate).
   test(`Exact real + i preserves the exact real part`, () => {
-    expect(ce.parse('\\frac12 + i').evaluate().toString()).toBe('1/2 + i');
+    expect(ce.parse('\\frac12 + i').evaluate().toString()).toBe('(1/2 + i)');
     expect(ce.parse('\\sqrt3 + i').evaluate().toString()).toBe('sqrt(3) + i');
     expect(ce.parse('\\frac34\\sqrt3 + i').evaluate().toString()).toBe(
       '3/4sqrt(3) + i'

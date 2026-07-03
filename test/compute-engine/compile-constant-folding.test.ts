@@ -462,7 +462,11 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
     });
 
     it('even root of a negative constant fails closed (no literal NaN)', () => {
-      expect(() => glsl.compile(ce.expr(['Sqrt', -4]))).toThrow(/non-finite/);
+      // Since D12-A a perfect-square radicand canonicalizes to an exact
+      // complex literal, which GLSL emits as a vec2 constant:
+      expect(glsl.compile(ce.expr(['Sqrt', -4])).code).toBe('vec2(0.0, 2.0)');
+      // A non-square radicand still reaches the fold path and fails closed:
+      expect(() => glsl.compile(ce.expr(['Sqrt', -5]))).toThrow(/non-finite/);
     });
   });
 });

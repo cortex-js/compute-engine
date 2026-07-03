@@ -457,10 +457,13 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('should compile complex divide', () => {
+      // Use an inexact complex literal: since D12-A an exact Gaussian
+      // divisor folds at canonicalization (z/(1+2i) -> (1/5 - 2i/5)*z),
+      // which would compile to _gpu_cmul instead of exercising cdiv.
       const code = glsl.compile(
-        ce.expr(['Divide', 'z', ['Complex', 1, 2]])
+        ce.expr(['Divide', 'z', ['Complex', 1.5, 2]])
       ).code;
-      expect(code).toMatchInlineSnapshot(`_gpu_cdiv(z, vec2(1.0, 2.0))`);
+      expect(code).toMatchInlineSnapshot(`_gpu_cdiv(z, vec2(1.5, 2.0))`);
     });
 
     it('should compile complex / real (native)', () => {

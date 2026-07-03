@@ -848,9 +848,17 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
   });
 
   it('non-real constant folds fail closed (P0-42, D6)', () => {
+    // Since D12-A, a perfect-square negative radicand canonicalizes to an
+    // EXACT complex literal before compile (√-4 → 2i), which the JS target
+    // compiles as a complex constant — correct, interpreter-parity value:
+    const folded = compile(ce.box(['Sqrt', -4]));
+    expect(folded.success).toBe(true);
+    expect(folded.run!()).toEqual({ re: 0, im: 2 });
+    // A non-square radicand still reaches the real fold path symbolically
+    // and must keep failing closed (no literal NaN):
     for (const src of [
-      ['Sqrt', -4],
-      ['Root', -4, 2],
+      ['Sqrt', -5],
+      ['Root', -5, 2],
     ]) {
       const result = compile(ce.box(src as any));
       expect(result.success).toBe(false);

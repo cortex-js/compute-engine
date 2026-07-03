@@ -439,82 +439,51 @@ function integerDigitCount(v: bigint | number): number {
 }
 
 /**
- * `(a + b·i)^n` for a Gaussian-integer base (integer `a`, `b`) and integer
- * `n ≥ 0`, computed by binary exponentiation with exact bigint component
- * arithmetic — no `exp`/`ln` round-trip, so no float residue (`(1+i)^2 = 2i`,
- * `(1+i)^4 = −4`, `(2+i)^3 = 2+11i`).
- *
- * Returns a clean complex/real number when both components fit exactly in a
- * float (i.e. are safe integers), otherwise `undefined`: CE has no big
- * Gaussian-integer representation, so the caller keeps the power symbolic
- * rather than emitting a rounded float.
- */
-function gaussianIntegerPow(
-  ce: Expression['engine'],
-  a: number,
-  b: number,
-  n: number
-): Expression | undefined {
-  // Magnitude guard: |(a+bi)^n| = (a²+b²)^(n/2). Bail before building bigints
-  // whose components could not fit a float anyway (this also bounds `n`, since
-  // for |z|² ≥ 2 the guard caps `n`, and for |z|² = 1 the components stay ±1).
-  const magLog10 = 0.5 * n * Math.log10(a * a + b * b);
-  if (!Number.isFinite(magLog10) || magLog10 > 15.9) return undefined;
-
-  let rre = 1n;
-  let rim = 0n;
-  let bre = BigInt(a);
-  let bim = BigInt(b);
-  let k = n;
-  while (k > 0) {
-    if (k % 2 === 1) {
-      const nr = rre * bre - rim * bim;
-      const ni = rre * bim + rim * bre;
-      rre = nr;
-      rim = ni;
-    }
-    k = Math.floor(k / 2);
-    if (k > 0) {
-      const nr = bre * bre - bim * bim;
-      const ni = 2n * bre * bim;
-      bre = nr;
-      bim = ni;
-    }
-  }
-
-  const MAX = BigInt(Number.MAX_SAFE_INTEGER);
-  if (rre > MAX || rre < -MAX || rim > MAX || rim < -MAX) return undefined;
-
-  // `ce.complex` normalizes a zero imaginary part back to an exact real
-  // (e.g. `(1+i)^4` → the exact integer `−4`).
-  return ce.number(ce.complex(Number(rre), Number(rim)));
-}
-
-/**
  * `x^e` for an integer exponent `e` and an EXACT base `x`, computed exactly:
  *  - integer / rational base → exact bigint rational power;
- *  - Gaussian-integer base   → exact binary powering of the components;
+ *  - complex base (an exact Gaussian rational / pure-imaginary radical, or a
+ *    Gaussian-integer literal from the inexact lane) → `ExactNumericValue.pow`
+ *    (exact binary powering of the components — no `exp`/`ln` round-trip, so
+ *    no float residue: `(1+i)^2 = 2i`, `(2+i)^3 = 2+11i`; a negative exponent
+ *    yields an exact Gaussian rational, e.g. `(1+i)^-2 = -i/2`);
  *  - radical base (a/b·√c)   → `ExactNumericValue.pow` (exact for these).
  *
  * Returns `undefined` when the exact result would exceed the digit magnitude
- * guard (huge power) or is not representable (e.g. a Gaussian rational from a
- * negative Gaussian exponent) — the caller then keeps the power symbolic.
- * Never returns a rounded / float-residue value.
+ * guard (huge power) or is not representable — the caller then keeps the
+ * power symbolic. Never returns a rounded / float-residue value.
  */
 function exactIntegerPow(x: Expression, e: number): Expression | undefined {
   const ce = x.engine;
   if (!isNumber(x) || !Number.isSafeInteger(e)) return undefined;
 
   //
-  // Gaussian-integer base (`a + b·i` with integer components)
+  // Complex base: an exact complex value, or a machine/big Gaussian integer
   //
   if (x.im !== 0) {
-    // A negative exponent yields a Gaussian *rational* (e.g. (1+i)^-2 = -i/2),
-    // which CE cannot store exactly — stay symbolic instead of rounding.
-    if (e < 0) return undefined;
-    if (!Number.isSafeInteger(x.re) || !Number.isSafeInteger(x.im))
+    const nv = x.numericValue;
+    if (typeof nv === 'number') return undefined; // a JS number is never complex
+    let exact: ExactNumericValue | undefined;
+    if (nv instanceof ExactNumericValue) exact = nv;
+    else if (Number.isSafeInteger(nv.re) && Number.isSafeInteger(nv.im))
+      // A Gaussian-integer literal from the inexact lane is exactly
+      // representable: lift it so the powering is exact (WP-2.16)
+      exact = ce._numericValue({
+        rational: [nv.re, 1],
+        imRational: [nv.im, 1],
+      }) as ExactNumericValue;
+    if (exact === undefined) return undefined;
+
+    // Magnitude guard: |z^e| = |z|^e — keep pathological powers symbolic
+    // rather than materializing huge exact components.
+    const magLog10 = 0.5 * Math.abs(e) * Math.log10(x.re * x.re + x.im * x.im);
+    if (!Number.isFinite(magLog10) || magLog10 > MAX_EXACT_POW_DIGITS)
       return undefined;
-    return gaussianIntegerPow(ce, x.re, x.im, e);
+
+    const v = exact.pow(e);
+    // `pow` falls back to the float lane when the result leaves the exact
+    // representable set — keep the power symbolic in that case.
+    if (v.isExact && !v.isNaN) return ce.number(v);
+    return undefined;
   }
 
   //

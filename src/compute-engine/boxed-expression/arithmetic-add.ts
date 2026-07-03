@@ -43,8 +43,10 @@ export function canonicalAdd(
   if (ops.length === 1 && !ops[0].isIndexedCollection) return ops[0];
 
   //
-  // Fold exact numeric operands (integers, rationals, radicals)
-  // e.g. Add(2, x, 5) → Add(x, 7), Add(√2, x, √2) → Add(x, 2√2)
+  // Fold exact numeric operands (integers, rationals, radicals, exact
+  // complex values and Gaussian integers)
+  // e.g. Add(2, x, 5) → Add(x, 7), Add(√2, x, √2) → Add(x, 2√2),
+  //      Add(2, 3i, x) → Add(x, 2+3i) — with `2+3i` a single EXACT literal
   //
   {
     const exactNumerics: NumericValue[] = [];
@@ -55,6 +57,22 @@ export function canonicalAdd(
         if (typeof nv === 'number' || nv.isExact) {
           exactNumerics.push(
             typeof nv === 'number' ? ce._numericValue(nv) : nv
+          );
+          continue;
+        }
+        // A machine/big Gaussian integer (e.g. the literal `3i`, whose
+        // NumericValue lives in the inexact lane) is exactly representable:
+        // fold it as an exact value so `Add(2, 3i)` stays exact (CORR #11).
+        if (
+          nv.im !== 0 &&
+          Number.isSafeInteger(nv.re) &&
+          Number.isSafeInteger(nv.im)
+        ) {
+          exactNumerics.push(
+            ce._numericValue({
+              rational: [nv.re, 1],
+              imRational: [nv.im, 1],
+            })
           );
           continue;
         }
@@ -74,6 +92,14 @@ export function canonicalAdd(
   }
 
   // Combine pure-real and pure-imaginary BoxedNumber operands into complex numbers.
+  // Exact complex literals (already folded above) are NOT captured: routing
+  // them through the float `im` accessor would degrade them to inexact.
+  const isExactComplexLiteral = (op: Expression): boolean => {
+    if (!isNumber(op)) return false;
+    const nv = op.numericValue;
+    return typeof nv !== 'number' && nv.im !== 0 && nv.isExact;
+  };
+
   // First pass: check if there are any imaginary terms (otherwise skip entirely)
   const xs: Expression[] = [];
   {
@@ -81,7 +107,7 @@ export function canonicalAdd(
     let hasIm = false;
 
     for (const op of ops) {
-      if (isNumber(op)) {
+      if (isNumber(op) && !isExactComplexLiteral(op)) {
         const facExpr = getImaginaryFactor(op);
         if (facExpr !== undefined && isNumber(facExpr)) {
           const f = facExpr.numericValue;
@@ -100,7 +126,7 @@ export function canonicalAdd(
       let realFound = false;
 
       for (const op of ops) {
-        if (isNumber(op)) {
+        if (isNumber(op) && !isExactComplexLiteral(op)) {
           // Skip pure imaginary terms (already summed above)
           const facExpr = getImaginaryFactor(op);
           if (isNumber(facExpr)) {

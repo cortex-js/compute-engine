@@ -522,9 +522,11 @@ describe('OPERATOR serialize, valid', () => {
       `-x`
     ));
 
+  // Since D12-A `1+2i` is an EXACT Gaussian integer, so the subtraction
+  // folds at canonicalization: 1 - (1+2i) = -2i.
   test('1-(2i+1)', () =>
     expect(latex(['Subtract', 1, ['Complex', 1, 2]])).toMatchInlineSnapshot(
-      `1+(-1-2\\imaginaryI)`
+      `-2\\imaginaryI`
     ));
 
   test(`['Multiply', 2, 3]`, () =>

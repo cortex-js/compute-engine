@@ -27,7 +27,9 @@ import {
 } from '../../math-json/utils';
 import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
 
-import { isOne } from '../numerics/rationals';
+import { isOne, isZero } from '../numerics/rationals';
+import { SMALL_INTEGER } from '../numerics/numeric';
+import type { Rational } from '../numerics/types';
 import { asBigint } from './numerics';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 
@@ -281,12 +283,46 @@ export function boxFunction(
         // arrives as raw MathJSON (`{ num: '1.414…' }`), reading `machineValue`
         // alone would silently discard the extra digits on re-boxing
         // (`ce.expr(z.json)`).
-        const reOp = ops[0] instanceof _BoxedExpression ? ops[0] : box(ce, ops[0], options);
-        const re = reOp.re;
-        const im =
+        const reOp =
+          ops[0] instanceof _BoxedExpression
+            ? ops[0]
+            : box(ce, ops[0], options);
+        const imOp =
           ops[1] instanceof _BoxedExpression
-            ? ops[1].re
-            : machineValue(ops[1] as MathJsonExpression);
+            ? ops[1]
+            : box(ce, ops[1], options);
+
+        // Exact components (integers, rationals, radicals) reconstruct an
+        // EXACT complex value when the pair is representable (a Gaussian
+        // rational, or a pure-imaginary radical). This is what makes
+        // `ExactNumericValue.toJSON()` lossless: `['Complex', ['Rational',1,2], 3]`
+        // re-boxes to the exact `1/2 + 3i`, not a machine float.
+        {
+          const reC = exactRealComponent(reOp);
+          if (reC !== null) {
+            const imC = exactRealComponent(imOp);
+            if (imC !== null && !isZero(imC.rational)) {
+              const reIsZero = isZero(reC.rational);
+              if (
+                (reIsZero || (reC.radical === 1 && imC.radical === 1)) &&
+                imC.radical <= SMALL_INTEGER &&
+                reC.radical <= SMALL_INTEGER
+              )
+                return ce.number(
+                  ce._numericValue({
+                    rational: reC.rational,
+                    radical: reC.radical,
+                    imRational: imC.rational,
+                    imRadical: imC.radical,
+                  }),
+                  options
+                );
+            }
+          }
+        }
+
+        const re = reOp.re;
+        const im = imOp.re;
         if (im !== null && re !== null && !isNaN(im) && !isNaN(re)) {
           if (im === 0 && re === 0) return ce.Zero;
           if (im !== 0) {
@@ -908,6 +944,28 @@ function makeNumericFunction(
   return null;
 }
 
+/**
+ * The exact real component (`rational · √radical`) of a boxed expression that
+ * is an exact real number literal, or `null`. Used to reconstruct exact
+ * complex values when boxing `['Complex', re, im]`.
+ */
+function exactRealComponent(
+  op: Expression
+): { rational: Rational; radical: number } | null {
+  if (!isNumber(op)) return null;
+  const nv = op.numericValue;
+  if (typeof nv === 'number') {
+    if (!Number.isInteger(nv)) return null;
+    return { rational: [nv, 1], radical: 1 };
+  }
+  if (nv.im !== 0) return null;
+  const exact = nv.asExact;
+  if (!(exact instanceof ExactNumericValue)) return null;
+  if (exact.isNaN || exact.isPositiveInfinity || exact.isNegativeInfinity)
+    return null;
+  return { rational: exact.rational, radical: exact.radical };
+}
+
 function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
   if (value.isZero) return ce.Zero;
   if (value.isOne) return ce.One;
@@ -917,6 +975,13 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
   if (value.isPositiveInfinity) return ce.PositiveInfinity;
 
   value = value.asExact ?? value;
+
+  // An exact complex value is best represented as a number literal directly:
+  // decomposing it into `re + im·i` terms would only re-fold to the same
+  // literal (via canonicalAdd), and the machine-complex imaginary emission
+  // below would degrade it to an inexact float.
+  if (value.im !== 0 && value instanceof ExactNumericValue)
+    return ce.number(value);
 
   if (!value.isExact) {
     const im = value.im;

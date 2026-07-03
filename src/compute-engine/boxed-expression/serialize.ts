@@ -13,6 +13,7 @@ import {
   isRational,
   machineDenominator,
   machineNumerator,
+  isZero,
   neg,
 } from '../numerics/rationals';
 import { numberToString } from '../numerics/strings';
@@ -665,9 +666,6 @@ function serializeJsonNumber(
 
     // We have an exact numeric value
     if (value instanceof ExactNumericValue) {
-      // Exact numeric value never have an imaginary part.
-      console.assert(value.im === 0);
-
       // Note: implement same logic as in ExactNumericValue.toJSON()
 
       // Honor the `exclude` option for the heads emitted here. The default
@@ -687,37 +685,52 @@ function serializeJsonNumber(
       // `√r` as either `Sqrt(r)` or, when `Sqrt` is excluded, `Power(r, 1/2)`
       // (with the `1/2` exponent itself honoring a `Rational` exclusion).
       const sqrtExpr = (radical: number): MathJsonExpression =>
-        excludeSqrt ? ['Power', radical, rationalExpr([1, 2])] : ['Sqrt', radical];
+        excludeSqrt
+          ? ['Power', radical, rationalExpr([1, 2])]
+          : ['Sqrt', radical];
 
-      if (value.radical === 1) return rationalExpr(value.rational);
-      // Only have a radical
-      if (isOne(value.rational)) return sqrtExpr(value.radical);
-      if (isNegativeOne(value.rational))
-        return ['Negate', sqrtExpr(value.radical)];
+      const componentExpr = (
+        rational: Rational,
+        radical: number
+      ): MathJsonExpression => {
+        if (radical === 1) return rationalExpr(rational);
+        // Only have a radical
+        if (isOne(rational)) return sqrtExpr(radical);
+        if (isNegativeOne(rational)) return ['Negate', sqrtExpr(radical)];
 
-      // Have both a radical and a rational
+        // Have both a radical and a rational
 
-      if (value.rational[0] == 1)
-        return [
-          'Divide',
-          sqrtExpr(value.radical),
-          serializeJsonNumber(ce, value.rational[1], options),
-        ];
-      if (value.rational[0] == -1)
-        return [
-          'Negate',
-          [
+        if (rational[0] == 1)
+          return [
             'Divide',
-            sqrtExpr(value.radical),
-            serializeJsonNumber(ce, value.rational[1], options),
-          ],
+            sqrtExpr(radical),
+            serializeJsonNumber(ce, rational[1], options),
+          ];
+        if (rational[0] == -1)
+          return [
+            'Negate',
+            [
+              'Divide',
+              sqrtExpr(radical),
+              serializeJsonNumber(ce, rational[1], options),
+            ],
+          ];
+
+        return ['Multiply', rationalExpr(rational), sqrtExpr(radical)];
+      };
+
+      // Exact complex value: `['Complex', re, im]` with exact components
+      // (mirrors `ExactNumericValue.toJSON()`)
+      if (value.im !== 0)
+        return [
+          'Complex',
+          isZero(value.rational)
+            ? 0
+            : componentExpr(value.rational, value.radical),
+          componentExpr(value.imRational, value.imRadical),
         ];
 
-      return [
-        'Multiply',
-        rationalExpr(value.rational),
-        sqrtExpr(value.radical),
-      ];
+      return componentExpr(value.rational, value.radical);
     }
 
     // We have a real number (big or machine)

@@ -376,7 +376,9 @@ export class BoxedNumber
           // break the static-type soundness contract; `.N()` still gives the
           // complex float.)
           return r.isInteger === true
-            ? ce.number(ce.complex(0, r.re))
+            ? ce.number(
+                ce._numericValue({ rational: [0, 1], imRational: [r.re, 1] })
+              )
             : ce._fn('Sqrt', [this]);
         }
         // Large integer: exact only when it is a perfect square; otherwise
@@ -384,7 +386,11 @@ export class BoxedNumber
         // contract; `.N()` still produces the float).
         const root = Math.sqrt(n);
         if (Number.isInteger(root))
-          return v < 0 ? ce.number(ce.complex(0, root)) : ce.number(root);
+          return v < 0
+            ? ce.number(
+                ce._numericValue({ rational: [0, 1], imRational: [root, 1] })
+              )
+            : ce.number(root);
         return ce._fn('Sqrt', [this]);
       }
 

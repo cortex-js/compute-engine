@@ -170,4 +170,12 @@ export type IndexedLatexDictionary = {
   // entry. Lets `peekDefinitions` parse the symbol ahead once and look it
   // up, instead of one speculative parse per symbolTrigger definition.
   symbolTriggerDefs: Map<string, Map<string, IndexedLatexDictionaryEntry[]>>;
+
+  // Precomputed at indexing time: for each token that can *start* a
+  // `latexTrigger` of any indexed kind, the maximum token count of any
+  // trigger starting with that token. Used by `lookAhead()` to bound how
+  // many lookahead strings to build: most tokens start no multi-token
+  // trigger (or no trigger at all, in which case they have no entry and
+  // the lookahead is empty).
+  triggerStartMax: Map<string, number>;
 };

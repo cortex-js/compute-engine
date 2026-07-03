@@ -991,8 +991,9 @@ export function canonicalMultiply(
   xs = xs.filter((x) => !x.isSame(1));
 
   //
-  // Fold exact numeric operands (integers, rationals, radicals)
-  // e.g. Multiply(2, x, 5) → Multiply(10, x)
+  // Fold exact numeric operands (integers, rationals, radicals, exact
+  // complex values and Gaussian integers)
+  // e.g. Multiply(2, x, 5) → Multiply(10, x), Multiply(2, 3i) → 6i (exact)
   //
   {
     const exactNumerics: NumericValue[] = [];
@@ -1006,13 +1007,44 @@ export function canonicalMultiply(
           );
           continue;
         }
+        // A machine/big Gaussian integer (e.g. the literal `3i`) is exactly
+        // representable: fold it as an exact value.
+        if (
+          nv.im !== 0 &&
+          Number.isSafeInteger(nv.re) &&
+          Number.isSafeInteger(nv.im)
+        ) {
+          exactNumerics.push(
+            ce._numericValue({
+              rational: [nv.re, 1],
+              imRational: [nv.im, 1],
+            })
+          );
+          continue;
+        }
       }
       nonNumeric.push(x);
     }
     if (exactNumerics.length >= 2) {
       let product = exactNumerics[0];
-      for (let i = 1; i < exactNumerics.length; i++)
-        product = product.mul(exactNumerics[i]);
+      for (let i = 1; i < exactNumerics.length; i++) {
+        const next = exactNumerics[i];
+        const candidate = product.mul(next);
+        // Exactness guard for the complex extension: when a product with a
+        // complex operand leaves the representable set (e.g. √2·(1+i)), do
+        // NOT fold it into an inexact float at canonicalization — keep the
+        // operand as a separate term. (Real-only products keep the historical
+        // behavior: a radical-magnitude overflow still folds to a float.)
+        if (
+          !candidate.isExact &&
+          !candidate.isNaN &&
+          (product.im !== 0 || next.im !== 0)
+        ) {
+          nonNumeric.push(ce.number(next));
+          continue;
+        }
+        product = candidate;
+      }
       if (product.isZero) {
         // 0 * ±∞ = NaN, 0 * NaN = NaN
         if (nonNumeric.some((x) => x.isInfinity || x.isNaN)) return ce.NaN;
@@ -1095,12 +1127,28 @@ export function canonicalMultiply(
           // "Next" is an imaginary unit. Is it preceded by a real number?
           const nv = x.numericValue;
           if (typeof nv === 'number') {
-            ys.push(ce.number(ce.complex(0, nv)));
+            // An integer literal: exact pure-imaginary (`2·i` → the exact 2i)
+            ys.push(
+              ce.number(
+                ce._numericValue({ rational: [0, 1], imRational: [nv, 1] })
+              )
+            );
             i++;
             continue;
           } else if (nv.im === 0) {
-            if (Number.isInteger(nv.re)) {
-              ys.push(ce.number(ce.complex(0, nv.re)));
+            const exact = nv.asExact;
+            if (exact instanceof ExactNumericValue) {
+              // An exact real (integer, rational or radical): promote to an
+              // exact pure-imaginary value (`√2·i`, `(1/2)·i` stay exact)
+              ys.push(
+                ce.number(
+                  ce._numericValue({
+                    rational: [0, 1],
+                    imRational: exact.rational,
+                    imRadical: exact.radical,
+                  })
+                )
+              );
               i++;
               continue;
             } else if (!nv.isExact) {

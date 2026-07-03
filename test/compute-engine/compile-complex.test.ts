@@ -205,11 +205,14 @@ describe('COMPILE COMPLEX - inline arithmetic', () => {
   });
 
   it('should generate flat code for 3-operand multiply', () => {
+    // Use non-Gaussian-integer (inexact) complex literals: since D12-A,
+    // exact complex operands fold to a single literal at canonicalization,
+    // which would leave no 3-operand multiply to compile.
     const expr = ce.expr([
       'Multiply',
-      ['Complex', 1, 1],
-      ['Complex', 2, 1],
-      ['Complex', 1, -1],
+      ['Complex', 1.5, 1],
+      ['Complex', 2, 1.5],
+      ['Complex', 1, -1.5],
     ]);
     const result = compile(expr, { fallback: false });
     // Should be a single IIFE, not nested

@@ -5830,10 +5830,20 @@ a function of this type.
 type ExactNumericValueData = {
   rational: Rational;
   radical: number;
+  imRational: Rational;
+  imRadical: number;
 };
 ```
 
-The value is equal to `(decimal * rational * sqrt(radical)) + im * i`
+The value is equal to `rational * sqrt(radical) + imRational * sqrt(imRadical) * i`
+
+Representable set (enforced by `ExactNumericValue`):
+- real values: `rational * sqrt(radical)` (imaginary part 0);
+- Gaussian rationals: both `radical` and `imRadical` are 1 (e.g. `2+3i`, `1/2-5i/3`);
+- pure-imaginary radicals: the real part is 0 (e.g. `√2·i`).
+
+A value needing a radical on both a non-zero real AND a non-zero imaginary
+component (e.g. `√2 + √3·i`) is NOT representable exactly.
 
 </MemberCard>
 

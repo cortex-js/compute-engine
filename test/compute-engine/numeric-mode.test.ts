@@ -82,11 +82,17 @@ describe('NUMERIC MODE', () => {
       N-mach    = 0.99999999999838
     `));
 
+  // Since D12-A `3+4i` is an EXACT Gaussian integer literal, so under the
+  // exactness contract `evaluate()` stays symbolic (like `cos(2)`) and only
+  // `N()` numericizes.
   test(`\\cos(3+4i)`, () =>
     expect(check('\\cos(3+4i)')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Add", 3, ["InvisibleOperator", 4, "i"]]]
       canonical = ["Cos", ["Complex", 3, 4]]
-      eval-auto = (-27.034945603074224 - 3.851153334811777i)
+      eval-auto = cos((3 + 4i))
+      eval-mach = cos((3 + 4i))
+      N-auto    = (-27.034945603074224 - 3.851153334811777i)
+      N-mach    = (-27.034945603074224 - 3.851153334811777i)
     `));
 
   test(`\\sqrt{-1}`, () =>

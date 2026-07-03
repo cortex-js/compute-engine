@@ -220,17 +220,16 @@ describe('#16: tensor/list isEqual uses element-wise tolerance', () => {
 });
 
 //
-// #11 — ESCALATED: documents current (unfixed) behavior so a future fix is
-//       an intentional, test-visible change rather than a silent one.
+// #11 — FIXED by D12-A (exact Gaussian support in ExactNumericValue): the
+//       Add fold now produces a single EXACT complex literal.
 //
-describe('#11 (ESCALATED): Gaussian-integer capture in Add is inexact', () => {
+describe('#11 (FIXED): Gaussian-integer capture in Add is exact', () => {
   const ce = new ComputeEngine();
 
-  test('Add(2, 3i, x) carries an inexact complex constant (current behavior)', () => {
+  test('Add(2, 3i, x) carries an EXACT complex constant', () => {
     const e = ce.box(['Add', 2, ['Complex', 0, 3], 'x']);
     const num = (e.ops ?? []).find((op) => op.isNumberLiteral);
     expect(num?.isSame(ce.box(['Complex', 2, 3]))).toBe(true);
-    // Currently inexact — a fix would flip this to `true` (see report/escalation).
-    expect(num?.isExact).toBe(false);
+    expect(num?.isExact).toBe(true);
   });
 });

@@ -171,11 +171,12 @@ describe('integer powers of Gaussian integers are exact (P0-11)', () => {
   test('Square(1+i) = 2i', () => {
     expect(jsonOf(['Square', ['Complex', 1, 1]])).toEqual('["Complex",0,2]');
   });
-  test('(1+i)^-2 stays symbolic (Gaussian rational, not representable exactly)', () => {
-    // Never a float residue under evaluate(); .N() still produces the value.
-    expect(ce.box(['Power', ['Complex', 1, 1], -2]).evaluate().operator).toEqual(
-      'Power'
-    );
+  test('(1+i)^-2 = -i/2 exactly (Gaussian rational, representable since D12-A)', () => {
+    // Never a float residue under evaluate(): the negative power of a
+    // Gaussian integer is an exact Gaussian rational.
+    const e = ce.box(['Power', ['Complex', 1, 1], -2]).evaluate();
+    expect(e.operator).toEqual('Complex');
+    expect(e.json).toEqual(['Complex', 0, ['Rational', -1, 2]]);
     const n = ce.box(['Power', ['Complex', 1, 1], -2]).N();
     expect(n.re).toBe(0);
     expect(n.im).toBeCloseTo(-0.5, 12);
@@ -364,8 +365,11 @@ describe('P0-16b — Sqrt of exact arguments stays exact/symbolic', () => {
   test('Sqrt(-4) → 2i exact (control, perfect square)', () => {
     expect(evalStr(['Sqrt', -4])).toEqual('2i');
   });
-  test('Sqrt(-3/2) stays symbolic', () => {
-    expect(num(['Sqrt', ['Rational', -3, 2]]).operator).toEqual('Sqrt');
+  test('Sqrt(-3/2) = (√6/2)i exactly (pure-imaginary radical since D12-A)', () => {
+    const e = num(['Sqrt', ['Rational', -3, 2]]);
+    expect(e.operator).toEqual('Complex');
+    expect(e.json).toEqual(['Complex', 0, ['Divide', ['Sqrt', 6], 2]]);
+    expect(e.im).toBeCloseTo(Math.sqrt(1.5), 12);
   });
   test('Sqrt(√2) (nested radical) stays symbolic', () => {
     expect(num(['Sqrt', ['Sqrt', 2]]).operator).toEqual('Sqrt');
@@ -762,9 +766,11 @@ describe('D2 — inexact arguments numericize under evaluate() (all numeric oper
       ]);
     });
     test('1/2 + i preserves the exact real part (no float residue)', () => {
+      // Since D12-A this is a single EXACT Gaussian-rational literal
+      // (printed in the parenthesized complex-literal style)
       expect(
         ce.parse('\\frac12 + i').evaluate().toString()
-      ).toEqual('1/2 + i');
+      ).toEqual('(1/2 + i)');
     });
     test('EisensteinE(4, i) stays symbolic under evaluate() (exact τ)', () => {
       expect(num(['EisensteinE', 4, 'ImaginaryUnit']).operator).toEqual(
