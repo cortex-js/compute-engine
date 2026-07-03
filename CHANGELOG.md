@@ -108,6 +108,18 @@
 
 ### Resolved Issues
 
+- **Free functions accept the looser AsciiMath/Typst-like syntax they
+  document.** `simplify()`, `evaluate()`, `N()`, `expand()`, `expandAll()`,
+  `factor()`, `solve()`, and `compile()` now parse string input in non-strict
+  mode, so bare function names, multi-letter identifiers, and `**` for
+  exponentiation work — e.g.
+  `simplify("(sin(alpha)**2 + cos(alpha)**2) * (x**2 + 2*x + 1) / (x + 1)")`
+  returns `x + 1` and `N("(1+sqrt(5))/2")` returns the golden ratio.
+  Previously these were parsed as strict LaTeX and silently mangled
+  (`sqrt(5)` became `5·q·r·s·t`, the `i` in `sin` was read as the imaginary
+  unit). Canonical LaTeX input is unaffected. The standalone `parse(latex)`
+  entry point remains strict LaTeX.
+
 - **Hard limits no longer hang.** Nested-exponential (Gruntz-class) limits
   such as `lim_{x→∞} e^{e^{e^x}}/e^{e^{e^{x-1}}}` burned ~18 minutes of CPU
   in the limit engine before giving up; the engine now honors the evaluation

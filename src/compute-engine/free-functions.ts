@@ -39,11 +39,14 @@ export function getDefaultEngine(): IComputeEngine {
 }
 
 /** Convert a LatexString, Expression, or ExpressionInput to a boxed Expression.
- *  Strings are treated as LaTeX and parsed. */
+ *  Strings are parsed as LaTeX. Parsing is non-strict so the free functions
+ *  accept the looser AsciiMath/Typst-like syntax documented for them — bare
+ *  function names and multi-letter identifiers (`sqrt(5)`, `sin(alpha)`,
+ *  `alpha`), and `**` for exponentiation — in addition to canonical LaTeX. */
 function toExpression(input: LatexString | ExpressionInput): Expression {
   if (typeof input === 'string') {
     const ce = getDefaultEngine();
-    return ce.parse(input) ?? ce.expr('Nothing');
+    return ce.parse(input, { strict: false }) ?? ce.expr('Nothing');
   }
   if (isExpression(input)) return input;
   return getDefaultEngine().expr(input);

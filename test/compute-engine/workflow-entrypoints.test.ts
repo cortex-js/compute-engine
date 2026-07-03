@@ -31,6 +31,21 @@ describe('Free Functions', () => {
     expect(result.toString()).toBe('2x + 1');
   });
 
+  test('simplify() accepts loose AsciiMath/Typst-like syntax', () => {
+    // Bare function names, multi-letter identifiers, and `**` for exponent —
+    // the looser syntax the free functions document. Parsed non-strict.
+    const result = simplify(
+      '(sin(alpha)**2 + cos(alpha)**2) * (x**2 + 2*x + 1) / (x + 1)'
+    );
+    expect(result.toString()).toBe('x + 1');
+  });
+
+  test('N() accepts loose syntax (bare sqrt)', () => {
+    const result = N('(1+sqrt(5))/2');
+    expect(result.isNumber).toBe(true);
+    expect(result.re).toBeCloseTo(1.618033988, 6);
+  });
+
   test('evaluate() evaluates a LaTeX string', () => {
     const result = evaluate('2^{11} - 1');
     expect(result.toString()).toBe('2047');
