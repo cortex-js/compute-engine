@@ -44,11 +44,11 @@ const suite = JSON.parse(readFileSync(join(__dirname, 'cases.json'), 'utf8'));
 
 // Tool registry. `inputKey` selects the per-tool input block in a case;
 // `spawn(kase)` returns argv for the runner.
+// NOTE: the three Compute Engine columns (ce-current, ce-pub, ce-rubi) are NOT
+// spawned per case here — they are all measured together in ONE warm process by
+// runCeWarmBatch() below, so their per-call times share identical JIT/cache
+// warm-up and are mutually comparable. Only the non-CE tools spawn per case.
 const TOOLS = [
-  { key: 'ce-current', label: 'CE (current build)', short: 'CE·cur', inputKey: 'ce',
-    spawn: (k) => [NODE, [join(__dirname, 'runners', 'run_ce.mjs'), CE_CURRENT_BUNDLE, k.id]] },
-  { key: 'ce-pub', label: `CE ${PUBLISHED_VERSION} (published)`, short: `CE·${PUBLISHED_VERSION}`, inputKey: 'ce',
-    spawn: (k) => [NODE, [join(__dirname, 'runners', 'run_ce.mjs'), CE_PUBLISHED_BUNDLE, k.id]] },
   { key: 'sympy', label: 'SymPy', short: 'SymPy', inputKey: 'sympy',
     spawn: (k) => [PYTHON, [join(__dirname, 'runners', 'run_py.py'), 'sympy', k.id]] },
   { key: 'mathjs', label: 'math.js', short: 'math.js', inputKey: 'mathjs',
@@ -62,7 +62,6 @@ const TOOLS = [
   { key: 'wolfram', label: 'Wolfram', short: 'WL', inputKey: 'ce',
     spawn: (k) => [NODE, [join(__dirname, 'runners', 'run_wolfram.mjs'), k.id]] },
 ];
-const CE_TOOLS = ['ce-current', 'ce-pub'];
 
 // --- numeric helpers for the oracle ---------------------------------------
 
@@ -232,19 +231,22 @@ function getVersions() {
   return v;
 }
 
-// The warm batch runner measures TWO engines back-to-back in ONE node process:
-// `ce-warm` (base CE, no packs) and `ce-rubi` (CE + Rubi integration-rules +
-// Fungrim identities). Both run on the same minified bundle as `ce-current`, so
-// the ce-warm/ce-rubi delta (shared process warm-up) is a clean rule-pack
-// overhead figure. NOTE: these are WARM steady-state times and are NOT
-// comparable to the COLD per-case `ce-current`/`ce-pub` columns (run_ce.mjs,
-// one fresh process per case) — only ce-warm vs ce-rubi may be diffed.
+// The warm batch runner measures ALL THREE Compute Engine columns back-to-back
+// in ONE node process: `ce-current` (base CE, current bundle), `ce-pub` (base
+// CE, published bundle) and `ce-rubi` (current bundle + Rubi integration-rules +
+// Fungrim identities). Because every CE column is timed in the same long-lived
+// process, they share identical V8 JIT/cache warm-up, so all three are mutually
+// comparable: ce-current vs ce-pub is a true release-over-release delta, and
+// ce-current vs ce-rubi is a true rule-pack overhead figure. (Measuring each CE
+// column in its own COLD process — the previous topology — reported the same
+// engine as 1.5–2× slower when under-warmed, an artifact that made ce-current
+// look slower than the pack-loaded ce-rubi on pure numerics.)
 function runCeWarmBatch() {
-  const by = { 'ce-warm': {}, 'ce-rubi': {} };
+  const by = { 'ce-current': {}, 'ce-pub': {}, 'ce-rubi': {} };
   try {
     const out = execFileSync(NODE, [join(__dirname, 'runners', 'run_ce_rubi.mjs')],
       { timeout: RUBI_BATCH_TIMEOUT_MS, encoding: 'utf8', cwd: ROOT,
-        env: { ...process.env, CE_CURRENT_BUNDLE }, stdio: ['ignore', 'pipe', 'pipe'] });
+        env: { ...process.env, CE_CURRENT_BUNDLE, CE_PUBLISHED_BUNDLE }, stdio: ['ignore', 'pipe', 'pipe'] });
     for (const line of out.trim().split('\n')) {
       try { const o = JSON.parse(line); if (o.id && by[o.tool]) by[o.tool][o.id] = o; } catch { /* skip non-JSON */ }
     }
@@ -255,7 +257,7 @@ function runCeWarmBatch() {
 }
 
 console.error('Running benchmark suite — %d cases…', suite.cases.length);
-console.error('  building warm base-CE + CE+Rubi+Fungrim columns (one warm process, minified bundles)…');
+console.error('  building all three warm CE columns (ce-current / ce-pub / CE+Rubi+Fungrim) in one warm process (minified bundles)…');
 const warmBatch = runCeWarmBatch();
 const matrix = {}; // matrix[caseId][toolKey] = { res, verdict }
 let done = 0;
@@ -265,7 +267,8 @@ for (const kase of suite.cases) {
     const res = runOne(tool, kase);
     matrix[kase.id][tool.key] = { res, verdict: classify(kase, res) };
   }
-  for (const tk of ['ce-warm', 'ce-rubi']) {
+  // All three CE columns come from the single warm batch process above.
+  for (const tk of ['ce-current', 'ce-pub', 'ce-rubi']) {
     const r = warmBatch[tk][kase.id] || null;
     matrix[kase.id][tk] = { res: r || { status: 'error', error: 'no result' }, verdict: classify(kase, r) };
   }
@@ -283,8 +286,9 @@ writeFileSync(join(__dirname, 'results.json'),
 // --- markdown rendering ----------------------------------------------------
 
 const SYM = { correct: '✅', partial: '🟡', wrong: '❌', unsupported: '—', unevaluated: '∅', timeout: '⏱', error: '⚠️' };
-// Short labels (ce-warm / ce-rubi aren't in TOOLS — they're the warm batch columns).
-const LABELS = { 'ce-current': 'CE·cur', 'ce-warm': 'CE·warm', 'ce-rubi': 'CE+R/F', 'ce-pub': `CE·${PUBLISHED_VERSION}`, sympy: 'SymPy', mathjs: 'math.js', numpy: 'NumPy', wolfram: 'Wolfram' };
+// Short labels. All three CE columns (ce-current / ce-pub / ce-rubi) come from
+// the warm batch, not from TOOLS.
+const LABELS = { 'ce-current': 'CE·cur', 'ce-rubi': 'CE+R/F', 'ce-pub': `CE·${PUBLISHED_VERSION}`, sympy: 'SymPy', mathjs: 'math.js', numpy: 'NumPy', wolfram: 'Wolfram' };
 // `corr` = columns shown in correctness tables; `perf` = columns whose median
 // is summarized in the footer row (ce-rubi is timed and comparable now, but
 // kept out of the footer median so it doesn't double-count the CE engine).
@@ -423,7 +427,7 @@ w('  - *Simplify*: the result is sampled at 3 points (chosen in the expression\'
 w('  - *Derivative*: the result is sampled and compared to `f\'(x)` (computed by `mpmath`).');
 w('  - *Antiderivative*: verified by the definite difference `F(b)−F(a)` over a per-case interval (inside the integrand\'s domain), ' +
   'which cancels the constant of integration and is compared to `∫f` (`mpmath` quadrature).');
-w('- **Performance**: each operation is built **from its own source representation each call** and run repeatedly; we report the **median** wall-clock time per call (warm/steady-state, after warm-up), shown alongside the quality mark in each cell. Process start-up is excluded. The source form differs per tool — CE re-boxes its **MathJSON**, SymPy/NumPy re-parse a **Python** string (`sympify`/`eval`), math.js and Wolfram re-parse their own **language string** — so the per-call cost includes each tool\'s native build/parse. That structured-vs-text gap is real (boxing MathJSON or compiling a NumPy expression is cheaper than a full CAS text-parse) and is why the µs-scale numeric column should be read as *end-to-end per-call from source*, not pure kernel compute; at the fastest end (a stored constant) the number is parse-dominated. The `CE·warm` and `CE+R/F` columns are measured differently: they run **warm, back-to-back in one process** (`run_ce_rubi.mjs`), so caches accumulate across cases. That makes `CE·warm` vs `CE+R/F` a clean rule-pack overhead comparison, but neither is comparable to the **cold, per-case** `CE·cur`/`CE·pub` numbers — a warm steady-state call is faster than a cold single call regardless of packs. The honest pack overhead is in the "Rule packs" section below; for integrals `CE+R/F` includes the Rubi rule-match attempt made before the built-in fallback.');
+w('- **Performance**: each operation is built **from its own source representation each call** and run repeatedly; we report the **median** wall-clock time per call (warm/steady-state, after warm-up), shown alongside the quality mark in each cell. Process start-up is excluded. The source form differs per tool — CE re-boxes its **MathJSON**, SymPy/NumPy re-parse a **Python** string (`sympify`/`eval`), math.js and Wolfram re-parse their own **language string** — so the per-call cost includes each tool\'s native build/parse. That structured-vs-text gap is real (boxing MathJSON or compiling a NumPy expression is cheaper than a full CAS text-parse) and is why the µs-scale numeric column should be read as *end-to-end per-call from source*, not pure kernel compute; at the fastest end (a stored constant) the number is parse-dominated. **All three Compute Engine columns (`CE·cur`, `CE·' + PUBLISHED_VERSION + '`, `CE+R/F`) are measured warm, back-to-back in one long-lived process** (`run_ce_rubi.mjs`), so they share identical V8 JIT/cache warm-up and are **directly comparable to each other** — `CE·cur` vs `CE+R/F` is a true rule-pack overhead and `CE·cur` vs `CE·' + PUBLISHED_VERSION + '` a true release delta. (Earlier revisions measured `CE·cur`/`CE·pub` in a fresh COLD process per case; a fresh V8 that runs a case only ~50× never tiers up to the steady state a long-lived process reaches, so it reported the same engine 1.5–2× slower — which made `CE·cur` look slower than the pack-loaded `CE+R/F` on pure numerics, an impossibility. Warming all CE columns in one process removes that artifact.) SymPy/NumPy need no such treatment (interpreted, no JIT tiering, so a cold process is already at steady state) and Wolfram times warm inside its kernel; math.js (also V8) is still cold-per-process — the one remaining cross-tool warm-up asymmetry, which can make its numeric column read slightly high. For integrals `CE+R/F` includes the Rubi rule-match attempt made before the built-in fallback; the honest pack overhead is in the "Rule packs" section below.');
 w('- Each `(tool, case)` runs in its own subprocess with a ' + (PER_CASE_TIMEOUT_MS / 1000) + 's timeout, so a hang or crash is isolated to one cell.');
 w();
 
@@ -531,11 +535,12 @@ w('**Correctness is assumed:** a correct result shows only its **median time per
   '**Bold** flags a Compute Engine outlier — the shipping `CE·cur` build being incorrect, or markedly slower than ' +
   'the fastest competitor on that row. Cases split into a **core** tier (textbook) and a **hard** tier (boundary-pushers).');
 w();
-w('> `CE+R/F` (current minified bundle + the opt-in Rubi + Fungrim rule packs, loaded once via `loadIntegrationRules` / ' +
-  '`loadIdentities`) **tries matching ~2,647 Rubi rules** before falling back to the built-in integrator — so its integral ' +
-  'times include that match attempt even when no rule applies (e.g. `∫xeˣ`). ⚠️ `CE+R/F` is measured **warm** (steady-state, ' +
-  'caches accumulated), so its time is **not** comparable to the **cold** per-case `CE·cur` in the same row; for the honest ' +
-  'warm-vs-warm pack overhead see the [Rule packs](#rule-packs--coverage--true-warm-overhead) section.');
+w('> All three CE columns (`CE·cur`, `CE·' + PUBLISHED_VERSION + '`, `CE+R/F`) are measured **warm, in one shared process**, so ' +
+  'they are directly comparable to each other in every row. `CE+R/F` (current minified bundle + the opt-in Rubi + Fungrim rule ' +
+  'packs, loaded once via `loadIntegrationRules` / `loadIdentities`) **tries matching ~2,647 Rubi rules** before falling back to ' +
+  'the built-in integrator — so its integral times include that match attempt even when no rule applies (e.g. `∫xeˣ`); on rows ' +
+  'where no rule can fire (numeric, differentiation) `CE·cur` and `CE+R/F` should read ≈equal. The honest per-op pack overhead is ' +
+  'tabulated in the [Rule packs](#rule-packs--coverage--true-warm-overhead) section.');
 w();
 for (const cat of CATS) {
   w(`### ${cat.title}${cat.unit === 'µs' ? ' — times in **µs**' : ''}`);
@@ -568,18 +573,19 @@ for (const cat of CATS) {
   w();
 }
 
-// Rule-pack overhead — warm base-CE vs warm CE+R/F, measured back-to-back in
-// the SAME process (shared warm-up), so the ratio is a clean overhead figure.
+// Rule-pack overhead — base CE (CE·cur) vs CE+R/F, both measured warm and
+// back-to-back in the SAME process (shared warm-up), so the ratio is a clean
+// overhead figure.
 w('## Rule packs — coverage & true warm overhead');
 w();
-w('`CE·warm` (base engine) and `CE+R/F` (Rubi + Fungrim) are timed **back-to-back in one warm ' +
-  'process**, so their ratio is a clean per-call rule-pack overhead. The cold, per-case `CE·cur` ' +
-  'column in the tables above is a different (single-call-latency) measurement — do **not** diff it ' +
-  'against `CE+R/F`. Overhead is ≈1× wherever no rule can fire (numeric, differentiation); the packs ' +
+w('`CE·cur` (base engine) and `CE+R/F` (Rubi + Fungrim) are timed **back-to-back in one warm ' +
+  'process**, so their ratio is a clean per-call rule-pack overhead — the same warm process that ' +
+  'produces every CE column in the tables above, so this ratio and those columns are directly ' +
+  'comparable. Overhead is ≈1× wherever no rule can fire (numeric, differentiation); the packs ' +
   'cost real time on integrals they miss and *win* where a rule applies (e.g. `∫1/(x³+1)`).');
 w();
 const coverageWins = suite.cases.filter((c) =>
-  matrix[c.id]['ce-rubi'].verdict.v === 'correct' && matrix[c.id]['ce-warm'].verdict.v !== 'correct');
+  matrix[c.id]['ce-rubi'].verdict.v === 'correct' && matrix[c.id]['ce-current'].verdict.v !== 'correct');
 if (coverageWins.length) {
   w('**Coverage gained** (∅/❌ → ✅ once the packs are enabled): ' +
     coverageWins.map((c) => `${c.id} ($${c.latex}$)`).join(', ') + '.');
@@ -587,7 +593,7 @@ if (coverageWins.length) {
 }
 {
   const rows = suite.cases.map((c) => {
-    const wt = matrix[c.id]['ce-warm'].res?.timeMs ?? null;
+    const wt = matrix[c.id]['ce-current'].res?.timeMs ?? null;
     const rt = matrix[c.id]['ce-rubi'].res?.timeMs ?? null;
     return { c, wt, rt, ratio: (wt && rt) ? rt / wt : null };
   });
@@ -600,7 +606,7 @@ if (coverageWins.length) {
       return false;
     })
     .sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0));
-  w('| # | Case | CE·warm | CE+R/F | Overhead |');
+  w('| # | Case | CE·cur | CE+R/F | Overhead |');
   w('|---|---|---|---|---|');
   for (const r of shown) {
     const mark = r.ratio == null ? '—'

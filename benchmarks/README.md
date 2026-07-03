@@ -24,8 +24,10 @@ open-source comparators — against what a mature commercial CAS does.
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 
 The first six are the **release baseline** (see below). The capability harness
-spawns each `(tool, case)` in its own timed subprocess; the audit harnesses run
-CE in-process and spawn one batch subprocess per other tool.
+spawns each non-CE `(tool, case)` in its own timed subprocess, and measures all
+three Compute Engine columns together in **one warm batch process** (see
+*Measurement discipline* below); the audit harnesses run CE in-process and spawn
+one batch subprocess per other tool.
 
 ### How Mathematica is driven
 
@@ -129,8 +131,8 @@ exercise recently-fixed CE paths).
 |---|---|
 | `gen_cases.py` | Defines the cases (the four engineering categories — numeric / simplify / derivative / antiderivative — plus the changelog-only `cl-numeric` / `evaluate` / `solve` categories) and computes **independent reference values** with `mpmath`. Writes `cases.json`. |
 | `cases.json` | Language-neutral suite: per-tool input expression + reference values. The single contract every runner reads. Curated highlight cases carry a `changelog` tag for `report_changelog.mjs`. |
-| `runners/run_ce.mjs` | Runs one case on a given Compute Engine bundle (current build or a published release). |
-| `runners/run_ce_rubi.mjs` | The `CE+R/F` column: loads the published `integration-rules` (Rubi) + `identities` (Fungrim) bundles onto the same minified engine as `ce-current`, runs **all** cases in one process. Times are comparable to the other columns. |
+| `runners/run_ce.mjs` | Ad-hoc single-case runner for one Compute Engine bundle (handy for debugging one cell). **Not used by `report.mjs`** — all three CE columns now come from the warm batch below, to keep them mutually comparable. |
+| `runners/run_ce_rubi.mjs` | The **warm batch**: measures all three CE columns — `ce-current` (current bundle), `ce-pub` (`CE_PUBLISHED_BUNDLE`), and `ce-rubi` (`CE+R/F`, current bundle + the published `integration-rules`/Rubi + `identities`/Fungrim packs) — running **all** cases in **one long-lived, warmed process** so their per-call times are directly comparable. Emits one JSON line per `(engine, case)`. |
 | `runners/run_mathjs.mjs` | Runs one case on math.js. |
 | `runners/run_py.py` | Runs one case on SymPy or NumPy. |
 | `runners/run_wolfram.mjs` | Runs one case on Mathematica: translates the structural `ce` MathJSON into Wolfram Language (via `mathjson-to-wl.mjs`) and drives the system `wolframscript` kernel. Times warm inside the kernel; no per-case `wolfram` input needed in `cases.json`. |
@@ -142,6 +144,29 @@ exercise recently-fixed CE paths).
 Each runner emits a single line of JSON with the same shape, so the
 orchestrator treats every tool uniformly. Running one case per process keeps a
 hang or crash isolated to a single cell.
+
+### Measurement discipline (why all CE columns are warm, in one process)
+
+All three Compute Engine columns — `CE·cur`, `CE·<published>`, and `CE+R/F` —
+are timed **warm-median, back-to-back in a single long-lived process**
+(`run_ce_rubi.mjs`), the same protocol the SymPy and Wolfram runners use (warm
+median, caches disabled / reset so each iteration does real work). This matters
+because V8 tiers up its JIT (Ignition → Sparkplug → Maglev → TurboFan) only after
+a code path has run many times: a fresh process that runs one case ~50× never
+reaches the steady state a long-lived process reaches after 55 cases, so timing
+each CE column in its own **cold** process — the previous topology, one
+`run_ce.mjs` per `(bundle, case)` — reported the *same engine* 1.5–2× slower
+than a warm one. That artifact made `CE·cur` appear slower than the
+pack-loaded `CE+R/F` on pure numerics (impossible: loading Rubi/Fungrim rules
+cannot speed up `ζ(3)`). Measuring every CE column in one warm process, after a
+whole-suite warm-up pass that de-biases per-case JIT ordering, removes the
+asymmetry: `CE·cur` vs `CE+R/F` is now a true rule-pack overhead (≈1× where no
+rule fires) and `CE·cur` vs `CE·<published>` a true release-over-release delta.
+The Python comparators need no such treatment (interpreted, no JIT tiering, so a
+cold process is already at steady state) and Wolfram times warm inside its
+kernel; **math.js** (also V8) is still measured cold-per-process — the one
+remaining cross-tool warm-up asymmetry, which can make its numeric column read
+slightly high.
 
 ### How correctness is judged
 
