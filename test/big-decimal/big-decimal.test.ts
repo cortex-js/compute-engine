@@ -1403,6 +1403,107 @@ describe('trunc()', () => {
 });
 
 // ================================================================
+// mulToPrecision() — fused multiply-then-round
+// ================================================================
+
+describe('mulToPrecision()', () => {
+  let savedPrec: number;
+  beforeAll(() => {
+    savedPrec = BigDecimal.precision;
+  });
+  afterAll(() => {
+    BigDecimal.precision = savedPrec;
+  });
+
+  test('matches mul().toPrecision() on simple values', () => {
+    BigDecimal.precision = 50;
+    const a = new BigDecimal('1.234567890123456789');
+    const b = new BigDecimal('9.876543210987654321');
+    const fused = a.mulToPrecision(b, 20);
+    const plain = a.mul(b).toPrecision(20);
+    expect(fused.significand).toBe(plain.significand);
+    expect(fused.exponent).toBe(plain.exponent);
+  });
+
+  test('short-circuits when the product already fits in prec digits', () => {
+    // 3 * 4 = 12 (two digits) rounded to 20 sig digits is unchanged.
+    const r = new BigDecimal('3').mulToPrecision(new BigDecimal('4'), 20);
+    expect(r.eq(new BigDecimal('12'))).toBe(true);
+    expect(r.significand).toBe(12n);
+  });
+
+  test('handles trailing-zero products byte-identically (2 * 5 = 10)', () => {
+    const fused = new BigDecimal('2').mulToPrecision(new BigDecimal('5'), 10);
+    const plain = new BigDecimal('2').mul(new BigDecimal('5')).toPrecision(10);
+    expect(fused.significand).toBe(plain.significand);
+    expect(fused.exponent).toBe(plain.exponent);
+    expect(fused.eq(new BigDecimal('10'))).toBe(true);
+  });
+
+  test('accepts a number argument', () => {
+    const a = new BigDecimal('1.5');
+    expect(a.mulToPrecision(4, 10).eq(a.mul(4).toPrecision(10))).toBe(true);
+  });
+
+  test.each([
+    ['NaN', new BigDecimal(NaN)],
+    ['+Infinity', new BigDecimal(Infinity)],
+    ['-Infinity', new BigDecimal(-Infinity)],
+    ['zero', new BigDecimal(0)],
+  ])('falls back to mul().toPrecision() for %s operand', (_label, special) => {
+    const a = new BigDecimal('3.14159');
+    const fused = a.mulToPrecision(special, 10);
+    const plain = a.mul(special).toPrecision(10);
+    // NaN significand is 0n with NaN exponent; compare via toString for parity.
+    expect(fused.toString()).toBe(plain.toString());
+  });
+
+  test('byte-identical to mul().toPrecision() across a fuzz', () => {
+    let s = 0xc0ffee ^ 4242;
+    const rnd = () => {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 0x100000000;
+    };
+    const digs = (n: number) => {
+      let x = '';
+      for (let i = 0; i < n; i++) x += ((rnd() * 10) | 0).toString();
+      return x;
+    };
+    const precs = [8, 21, 50, 100, 200];
+    let mismatches = 0;
+    for (let i = 0; i < 20000; i++) {
+      const prec = precs[(rnd() * precs.length) | 0];
+      BigDecimal.precision = prec;
+      const len = 1 + ((rnd() * 40) | 0);
+      const sign = rnd() < 0.5 ? '-' : '';
+      // mix normal, trailing-zero-rich (even/mult-of-5), and single-digit operands
+      const kind = (rnd() * 3) | 0;
+      const mk = () => {
+        if (kind === 0)
+          return new BigDecimal(
+            `${sign}${1 + ((rnd() * 9) | 0)}.${digs(len)}e${((rnd() * 20) | 0) - 10}`
+          );
+        if (kind === 1)
+          return new BigDecimal(
+            `${sign}${(1 + ((rnd() * 9) | 0)) * 2}${'0'.repeat((rnd() * 6) | 0)}`
+          );
+        return new BigDecimal(`${sign}${5 + ((rnd() * 4) | 0)}`);
+      };
+      const a = mk();
+      const b = mk();
+      const fused = a.mulToPrecision(b, prec);
+      const plain = a.mul(b).toPrecision(prec);
+      if (
+        fused.significand !== plain.significand ||
+        !Object.is(fused.exponent, plain.exponent)
+      )
+        mismatches++;
+    }
+    expect(mismatches).toBe(0);
+  });
+});
+
+// ================================================================
 // div()
 // ================================================================
 

@@ -83,6 +83,33 @@ describe('bigintDigits', () => {
   test('power of 10', () => {
     expect(bigintDigits(1000n)).toBe(4);
   });
+
+  // Regression: the old `< 2^53` fast path used `Math.floor(Math.log10(x)) + 1`,
+  // and `Math.log10(999999999999999) === 15` (rounds up), so it returned 16 for
+  // these two fifteen-nines-class values — over-counting the digits by one. That
+  // corrupted magnitude-derived consumers (`cmp` ordering, `toPrecision`).
+  test('does not over-count at a power-of-ten boundary (log10 round-up)', () => {
+    expect(bigintDigits(999999999999999n)).toBe(15);
+    expect(bigintDigits(999999999999998n)).toBe(15);
+    expect(bigintDigits(999999999999997n)).toBe(15);
+    expect(bigintDigits(1000000000000000n)).toBe(16); // 10^15, genuinely 16
+  });
+
+  test('exact digit count across every power-of-ten boundary and the 2^53 seam', () => {
+    const oracle = (n: bigint) => (n < 0n ? -n : n).toString(10).length;
+    for (let k = 0n; k <= 30n; k++) {
+      const p = 10n ** k;
+      for (let d = -2n; d <= 2n; d++) {
+        const n = p + d;
+        if (n <= 0n) continue;
+        expect(bigintDigits(n)).toBe(oracle(n));
+      }
+    }
+    // Exact seam at 2^53 where the fast path hands off to the large path.
+    const seam = 0x20000000000000n;
+    for (let d = -3n; d <= 3n; d++)
+      expect(bigintDigits(seam + d)).toBe(oracle(seam + d));
+  });
 });
 
 // ================================================================

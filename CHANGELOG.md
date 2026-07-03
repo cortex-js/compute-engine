@@ -72,6 +72,24 @@
 
 ### Performance
 
+- **Arbitrary-precision arithmetic is substantially faster.** A sequence of
+  byte-identical optimizations to the `BigDecimal` core: division no longer
+  normalizes or re-scans its pre-rounding quotient (its digit count is
+  derived from the operand digit counts) — `div` is 1.9–4× faster than the
+  previous release and now outperforms raw mpmath at every precision;
+  digit counting seeds from the hex-string length; comparison, rounding,
+  addition and multiplication are 1.3–6× faster; a fused
+  multiply-and-round (`mulToPrecision`) accelerates the integer power
+  ladder ~12–16%; and the exponential kernel uses √-depth argument
+  reduction (O(√bits) series terms instead of O(bits)) — `exp` is 1.3×
+  faster at 21 digits rising to 2.6× at 500, with `Gamma` inheriting
+  ~1.2–1.3×. Net effect on a division-heavy series: ζ(3) at 100–500 digits
+  is over 2× faster than the previous release, with no kernel-specific
+  changes. At 100 digits the field operations (add/sub/mul/div) are now
+  2.7–15× faster than Mathematica 14.3 (measured; see
+  `benchmarks/big-decimal/BIGNUM-COMPARISON.md`, the new durable
+  primitive-operation benchmark).
+
 - **The Rubi integration pack is much faster on integrals it cannot solve.**
   A second-level dispatch index (the set of operator heads a rule's pattern
   requires vs the heads present in the integrand) now screens the ~3,200
@@ -119,6 +137,16 @@
   (`sqrt(5)` became `5·q·r·s·t`, the `i` in `sin` was read as the imaginary
   unit). Canonical LaTeX input is unaffected. The standalone `parse(latex)`
   entry point remains strict LaTeX.
+
+- **Two 15-digit values compared in the wrong order.** The digit-count fast
+  path returned 16 for the two largest 15-digit integers
+  (`999999999999998/9` — `Math.log10` lands exactly on 15.0), making the
+  magnitude early-out in `cmp` see them as an order of magnitude larger:
+  `999999999999999 < 999999999999999.1` compared as *greater*, and
+  `toPrecision(15)` of the exact value `999999999999999` corrupted it to
+  `1000000000000000`. The fast path now uses an exact comparison ladder
+  (and is faster than before). These were the only two affected inputs
+  below 2⁵³.
 
 - **Hard limits no longer hang.** Nested-exponential (Gruntz-class) limits
   such as `lim_{x→∞} e^{e^{e^x}}/e^{e^{e^{x-1}}}` burned ~18 minutes of CPU

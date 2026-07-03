@@ -107,6 +107,22 @@ const LOG10_2 = Math.log10(2); // ≈ 0.30103
 const GUARD_BITS = 16;
 
 /**
+ * Extra argument-reduction depth for `exp`, as a multiple of √bits.
+ *
+ * `fpexp` reduces its argument only until |r/2^bits| < ½, after which its
+ * fixed-point Taylor series needs O(bits) terms. Reducing the argument by a
+ * further ≈ `EXP_REDUCE_COEF·√bits` halvings and squaring the result back up
+ * (`fpexpReduced`) trades those O(bits) Taylor terms for O(√bits) terms plus
+ * O(√bits) cheap squarings — a net ~1.5–2.4× fewer full-width multiplies from
+ * 21 to 500 digits (measured; the win grows with precision as the Taylor arm
+ * shrinks relative to the squaring arm). 0.7 sits at the flat top of the
+ * speed/accuracy curve: near-minimal total multiplies while keeping the
+ * squaring count — and thus the guard bits needed to absorb its ~2^k error
+ * amplification — modest.
+ */
+const EXP_REDUCE_COEF = 0.7;
+
+/**
  * Safety cap on the number of π digits the trig mod-2π reduction will compute
  * on demand (via Chudnovsky in `fppi`). The hardcoded table is ~2370 digits;
  * beyond that π is computed on the fly, so the only limit is this cap, which
@@ -448,7 +464,20 @@ BigDecimal.prototype.exp = function (): BigDecimal {
   // exp(-200) ≈ 1.38e-87 is recovered as exp(0.32)·10⁻⁸⁷ instead of rounding
   // to 0. The reduction is done in exact bigint fixed-point (no cancellation).
   const magnitude = Math.max(0, this.exponent + this.digitCount());
-  const workingPrec = targetPrec + 20 + magnitude;
+
+  // √-reduction guard. `fpexpReduced` reduces the O(1) remainder r by ≈ √bits
+  // extra halvings so its Taylor series needs O(√bits) terms instead of
+  // O(bits), then squares the result back up. Each squaring roughly doubles the
+  // accumulated rounding error, so carry `reduceHalvings + 8` extra guard bits
+  // (validated accuracy-neutral vs the unreduced kernel across 15–500 digits at
+  // tiny/near-1/huge arguments). `reduceHalvings` is estimated from the base
+  // precision; it is insensitive to the small guard bump, so no fixpoint
+  // iteration is needed.
+  const baseWorkingPrec = targetPrec + 20 + magnitude;
+  const baseBits = Math.ceil(baseWorkingPrec * LOG2_10) + GUARD_BITS;
+  const reduceHalvings = Math.round(EXP_REDUCE_COEF * Math.sqrt(baseBits));
+  const workingPrec =
+    baseWorkingPrec + Math.ceil((reduceHalvings + 8) * LOG10_2);
 
   const [xFp, bits] = toFixedPoint(this, workingPrec);
   const l10 = ln10Fixed(bits);
@@ -469,7 +498,11 @@ BigDecimal.prototype.exp = function (): BigDecimal {
   if (k > MAX_SAFE_EXPONENT || k < -MAX_SAFE_EXPONENT)
     return k > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.ZERO;
 
-  const expR = fromFixedPoint(fpexp(rFp, bits), bits, targetPrec);
+  const expR = fromFixedPoint(
+    fpexpReduced(rFp, bits, reduceHalvings),
+    bits,
+    targetPrec
+  );
 
   // Multiply by 10^k by shifting the decimal exponent.
   const newExp = expR.exponent + Number(k);
@@ -1255,6 +1288,37 @@ BigDecimal.prototype.nthRoot = function (n: number): BigDecimal {
 };
 
 // ---------- Internal helpers ----------
+
+/**
+ * exp of an O(1) fixed-point remainder `rFp` (value r/2^bits ∈ [0, ln 10)),
+ * with extra argument reduction beyond what `fpexp` does internally.
+ *
+ * `fpexp` only halves until |r/2^bits| < ½, leaving an O(bits)-term Taylor
+ * series. Here we bring the value down to ≈ 2^−targetHalvings first, so the
+ * series converges in O(√bits) terms, then square the result back up
+ * (`fpmul`) `extra` times — reconstructing exp(r) = exp(r/2^extra)^(2^extra).
+ * That is ~√bits cheap squarings in exchange for ~(bits − √bits) fewer
+ * full-width Taylor multiplies.
+ *
+ * The halving count is derived from the *actual* magnitude of `rFp` (targeting
+ * the reduced value to 2^−targetHalvings), so a small r is never over-reduced
+ * to 0 — the shift always leaves ~bits − targetHalvings significant bits. The
+ * caller carries `targetHalvings + 8` guard bits to absorb the ~2^k error
+ * amplification of the k squarings, keeping the result as accurate as the
+ * unreduced kernel.
+ */
+function fpexpReduced(
+  rFp: bigint,
+  bits: number,
+  targetHalvings: number
+): bigint {
+  const extra = Math.max(0, bitLength(rFp) - bits + targetHalvings);
+  if (extra <= 0) return fpexp(rFp, bits);
+  const reduced = rFp >> BigInt(extra); // value / 2^extra (rFp ≥ 0 here)
+  let sum = fpexp(reduced, bits);
+  for (let i = 0; i < extra; i++) sum = fpmul(sum, sum, bits);
+  return sum;
+}
 
 /**
  * Bit-based seed for cbrt: approximate the integer cube root of `C`

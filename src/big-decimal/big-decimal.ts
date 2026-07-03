@@ -530,6 +530,65 @@ export class BigDecimal {
   }
 
   /**
+   * Fused multiply-then-round: equivalent to `this.mul(other).toPrecision(prec)`
+   * but skips the intermediate normalize of the full-width product and the
+   * `bigintDigits` re-scan that `toPrecision` would otherwise run on it — the
+   * same double-work class the `div` fix eliminated.
+   *
+   * The product of a `da`-digit and a `db`-digit significand has exactly
+   * `da+db-1` or `da+db` decimal digits, so the raw product's digit count is
+   * *derived* from the operands' (cached) `digitCount`s with a single
+   * cached-pow10 boundary compare instead of a fresh full-width scan. When the
+   * product already fits in `prec` digits the normalized product is returned
+   * (matching `toPrecision`'s `digits <= n` short-circuit); otherwise it rounds
+   * straight from the raw (un-normalized) product via the shared
+   * `roundToPrecKnownDigits`.
+   *
+   * Byte-identical to `mul(other).toPrecision(prec)` for finite, nonzero
+   * operands: as in `div`, rounding a raw significand of `rawDigits` digits
+   * yields the same (significand, exponent) as rounding the normalized one —
+   * stripping z trailing zeros scales the significand, the rounding divisor, and
+   * the round-half-even tie point all by 10^z. And when `rawDigits > prec` while
+   * the *normalized* count `≤ prec` (so plain `toPrecision` would short-circuit),
+   * the raw round divides out exactly to `normSig·10^(prec−normDigits)`, which
+   * `fromRaw` re-normalizes back to the normalized product — identical either
+   * way. Falls back to the plain composition for NaN/Infinity/zero.
+   * @internal
+   */
+  mulToPrecision(other: BigDecimal | number, prec: number): BigDecimal {
+    if (typeof other === 'number') other = new BigDecimal(other);
+
+    const thisExp = this.exponent;
+    const otherExp = other.exponent;
+    const thisSig = this.significand;
+    const otherSig = other.significand;
+
+    // Fast path: both finite and nonzero (the product is a plain integer
+    // multiply whose digit count is derivable from the operand sizes).
+    if (
+      thisSig !== 0n &&
+      otherSig !== 0n &&
+      Number.isFinite(thisExp) &&
+      Number.isFinite(otherExp)
+    ) {
+      const productSig = thisSig * otherSig;
+      const productExp = thisExp + otherExp;
+      // da+db-1 ≤ digits(|a·b|) ≤ da+db; one cached-pow10 compare resolves ±1.
+      const lo = this.digitCount() + other.digitCount() - 1;
+      const absProd = productSig < 0n ? -productSig : productSig;
+      const rawDigits = absProd >= pow10(lo) ? lo + 1 : lo;
+      if (rawDigits <= prec) return fromRaw(productSig, productExp);
+      return rawUnnormalized(productSig, productExp).roundToPrecKnownDigits(
+        prec,
+        rawDigits
+      );
+    }
+
+    // Slow path: NaN, Infinity, or a zero operand — defer to the plain path.
+    return this.mul(other).toPrecision(prec);
+  }
+
+  /**
    * Negate this value. Zero.neg() → Zero.
    */
   neg(): BigDecimal {
@@ -754,10 +813,25 @@ export class BigDecimal {
     const inexact = num % absDivisor !== 0n;
     const resultExp = thisExp - otherExp - totalScale;
 
+    // Derive q's digit count from the operand sizes (same identity as `div`):
+    // the numerator `absDividend·10^totalScale` has `dividendDigits+totalScale`
+    // digits, and dividing by a `divisorDigits`-digit divisor yields a quotient
+    // of `lo` or `lo+1` digits (one cached-pow10 compare resolves the ±1). This
+    // skips the full-width `bigintDigits` scan `roundMagnitudeToward` would run.
+    const lo = this.digitCount() + totalScale - other.digitCount();
+    const qDigits = q >= pow10(lo) ? lo + 1 : lo;
+
     // 'floor' rounds the true value toward −∞: round the magnitude away from
     // zero for negatives, toward zero for positives. 'ceiling' is the mirror.
     const up = negative ? direction === 'floor' : direction === 'ceiling';
-    const [m, e] = roundMagnitudeToward(q, inexact, resultExp, prec, up);
+    const [m, e] = roundMagnitudeToward(
+      q,
+      inexact,
+      resultExp,
+      prec,
+      up,
+      qDigits
+    );
     return fromRaw(negative ? -m : m, e);
   }
 
@@ -939,11 +1013,11 @@ export class BigDecimal {
 
       while (exp > 0n) {
         if (exp & 1n) {
-          result = result.mul(base).toPrecision(workPrec);
+          result = result.mulToPrecision(base, workPrec);
         }
         exp >>= 1n;
         if (exp > 0n) {
-          base = base.mul(base).toPrecision(workPrec);
+          base = base.mulToPrecision(base, workPrec);
         }
       }
 
@@ -1353,10 +1427,15 @@ function roundMagnitudeToward(
   inexact: boolean,
   exp: number,
   prec: number,
-  up: boolean
+  up: boolean,
+  knownDigits?: number
 ): [bigint, number] {
   if (mant === 0n) return [up && inexact ? 1n : 0n, exp];
-  const digits = bigintDigits(mant);
+  // `knownDigits`, when supplied, must equal `bigintDigits(mant)` exactly (the
+  // caller derived it from operand sizes — e.g. `divToward`, whose quotient
+  // digit count follows from the dividend/divisor digit counts). It lets us
+  // skip the full-width `bigintDigits` scan of the pre-round mantissa.
+  const digits = knownDigits ?? bigintDigits(mant);
   if (digits <= prec) return [up && inexact ? mant + 1n : mant, exp];
   const drop = digits - prec;
   const divisor = pow10(drop);
