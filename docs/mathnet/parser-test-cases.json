@@ -1,0 +1,1838 @@
+{
+ "$comment": "Parser regression corpus distilled from the 2026-07-04 MathNet sweep (see ce-mathnet-experiment.md). fragments = LaTeX from problem statements that did NOT parse clean; unicodeAnswers = non-prose final_answer strings (mixed Unicode/ASCII math) that failed. A case is FIXED when ce.parse() yields a valid expression with no Error subexpression (and no throw). Regenerate from scratch with scripts/ (see README.md).",
+ "date": "2026-07-04",
+ "engineVersion": "0.67.0",
+ "source": "huggingface.co/datasets/ShadenA/MathNet (800-row sample, offsets 0..24500 step 3500)",
+ "baseline": {
+  "fragments": 2295,
+  "clean": 1950,
+  "error": 336,
+  "throw": 9
+ },
+ "categoryCounts": {
+  "geometry-notation": 148,
+  "ellipsis": 51,
+  "trailing-punctuation": 47,
+  "sets-and-congruence": 36,
+  "other": 32,
+  "divisibility-bar": 12,
+  "crash": 9,
+  "environment": 6,
+  "set-minus": 2,
+  "logic-misc": 2
+ },
+ "fragments": [
+  {
+   "latex": "(1!)^2 + (2!)^2 + \\dots + (2018!)^2",
+   "category": "crash",
+   "observed": "throw",
+   "error": "The type of the constant \"ContinuationPlaceholder\" cannot be changed"
+  },
+  {
+   "latex": "1! + 2! + 3! + \\dots + 1013! + 2014!",
+   "category": "crash",
+   "observed": "throw",
+   "error": "The type of the constant \"ContinuationPlaceholder\" cannot be changed"
+  },
+  {
+   "latex": "1^{1987} + 2^{1987} + \\ldots + n^{1987}",
+   "category": "crash",
+   "observed": "throw",
+   "error": "The type of the constant \"ContinuationPlaceholder\" cannot be changed"
+  },
+  {
+   "latex": "\\frac{1 \\cdot 4}{2 \\cdot 5} + \\frac{2 \\cdot 7}{5 \\cdot 8} + \\dots + \\frac{k(3k+1)}{(3k-1)(3k+2)} + \\dots + \\frac{99 \\cdot 298}{296 \\cdot 299}",
+   "category": "crash",
+   "observed": "throw",
+   "error": "The type of the constant \"ContinuationPlaceholder\" cannot be changed"
+  },
+  {
+   "latex": "\\frac{1}{a_1b_1} + \\frac{1}{a_2b_2} + \\dots + \\frac{1}{a_{600}b_{600}}",
+   "category": "crash",
+   "observed": "throw",
+   "error": "The type of the constant \"ContinuationPlaceholder\" cannot be changed"
+  },
+  {
+   "latex": "a_1 + \\dots + a_n",
+   "category": "crash",
+   "observed": "throw",
+   "error": "The type of the constant \"ContinuationPlaceholder\" cannot be changed"
+  },
+  {
+   "latex": "a_1 + a_2 + \\dots + a_{2014}",
+   "category": "crash",
+   "observed": "throw",
+   "error": "The type of the constant \"ContinuationPlaceholder\" cannot be changed"
+  },
+  {
+   "latex": "a_1 \\cdot a_2 \\cdot \\dots \\cdot a_n",
+   "category": "crash",
+   "observed": "throw",
+   "error": "The type of the constant \"ContinuationPlaceholder\" cannot be changed"
+  },
+  {
+   "latex": "f^0 + \\dots + f^m",
+   "category": "crash",
+   "observed": "throw",
+   "error": "The type of the constant \"ContinuationPlaceholder\" cannot be changed"
+  },
+  {
+   "latex": "(n + m + 1)|2mn",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": "(n + m - 1)|(n^2 + m^2 - 1)",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": "\\max \\{0,25-\\lfloor 1000|A-N|\\rfloor\\}",
+   "category": "divisibility-bar",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "n = |S|",
+   "category": "divisibility-bar",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "p \\nmid ab",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "p|a+1",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": "p|a^q + 1",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": "q|a+1",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": "q|a^p + 1",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": "x_m \\nmid p",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "|N| = n > 2",
+   "category": "divisibility-bar",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "|S| \\ge N",
+   "category": "divisibility-bar",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "(2!+2)(3!+3)(4!+2)(5!+3) \\cdots (2018!+2)(2019!+3)",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "(a_{1}, \\cdots, a_{10})=(1,1,2,1,2,2,1,2,1,2)",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "(a_{1}, \\cdots, a_{10})=(1,2,1,2,2,1,1,1,2,2)",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "(a_{1}, \\cdots, a_{i})",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "(a_{1}, \\cdots, a_{n m})",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "(x + a_1) \\cdots (x + a_n)",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "(x_1 + x_2 + \\ldots + x_n)\\left(\\frac{1}{x_1} + \\frac{1}{x_2} + \\ldots + \\frac{1}{x_n}\\right) \\leq \\frac{n^2 (a + b)^2}{4ab}.",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "1 \\times 2 \\times 3 \\times \\cdots \\times n",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "1+\\frac{1}{\\sqrt{2}}+\\frac{1}{\\sqrt{3}}+\\cdots+\\frac{1}{\\sqrt{m^{2}-1}}+\\frac{1}{\\sqrt{m^{2}}}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "1^{2}-2^{2}+3^{2}-4^{2}+5^{2}-\\cdots+97^{2}-98^{2}+99^{2} .",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "9(1+2+\\cdots+n)",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "A_0A_1\\cdots A_5",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "A_1A_2 \\cdots A_{2n}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "C_{1} + \\cdots + C_{n}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "M = \\max \\left\\{ \\frac{x_1}{1+x_1}, \\frac{x_2}{1+x_1+x_2}, \\dots, \\frac{x_n}{1+x_1+x_2+\\dots+x_n} \\right\\}.",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "R_{1} + \\cdots + R_{n}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "S(n) = \\sum_{k=0}^{n} k^{d} = 0^{d} + 1^{d} + \\cdots + n^{d}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "[\\log_{2} 1]+[\\log_{2} 2]+[\\log_{2} 3]+\\cdots+[\\log_{2} 256]",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\alpha = 0, a_1a_2a_3 \\dots a_k \\dots",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\begin{aligned}\n& \\text{ I. } a_{i}=0 \\text{ or } 1 \\text{ for all } i \\\\\n& \\text{ II. } a_{i} \\cdot a_{i+1}=0 \\text{ for } i=1,2, \\ldots, 9 \\\\\n& \\text{ III. } a_{i} \\cdot a_{i+2}=0 \\text{ for } i=1,2, \\ldots, 8\n\\end{aligned}",
+   "category": "ellipsis",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\begin{array}{ccccccccccc}\na_{1} \\cdot 1 & + & a_{2} \\cdot 2 & + & a_{3} \\cdot 3 & + & \\cdots & + & a_{2005} \\cdot 2005 & = & 0 \\\\\na_{1} \\cdot 1^{2} & + & a_{2} \\cdot 2^{2} & + & a_{3} \\cdot 3^{2} & + & \\cdots & + & a_{2005} \\cdot 2005^{2} & = & 0 \\\\\na_{1} \\cdot 1^{3} & + & a_{2} \\cdot 2^{3} & + & a_{3} \\cdot 3^{3} & + & \\cdots & + & a_{2005} \\cdot 2005^{3} & = & 0 \\\\\n\\vdots & & \\vdots & & \\vdots & & & & \\vdots & & \\vdots \\\\\na_{1} \\cdot 1^{2004} & + & a_{2} \\cdot 2^{2004} & + & a_{3} \\cdot 3^{2004} & + & \\cdots & + & a_{2005} \\cdot 2005^{2004} & = & 0\n\\end{array}",
+   "category": "ellipsis",
+   "observed": "'unexpected-token'"
+  },
+  {
+   "latex": "\\frac{1}{1 + \\sqrt{3}} + \\frac{1}{\\sqrt{5} + \\sqrt{7}} + \\cdots + \\frac{1}{\\sqrt{97} + \\sqrt{99}}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\frac{1}{a_1} + \\frac{1}{a_2} + \\cdots + \\frac{1}{a_m} = 1,",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\frac{1}{a_{1}}+\\frac{1}{a_{2}}+\\ldots+\\frac{1}{a_{n}}=k \\quad \\text{ und } \\quad a_{1} a_{2} \\ldots a_{n}=M .",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\frac{1}{n} = \\frac{1}{a_1} - \\frac{1}{a_2} + \\frac{1}{a_3} - \\dots + (-1)^{m-1} \\frac{1}{a_m}.",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\frac{f(q^m)}{f(q)} = (px_1 + 1) \\cdots (px_n + 1) \\cdot p^m,",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\left( \\frac{n}{2(a_1 + a_2 + \\cdots + a_n)} - 1 \\right)^n \\le \\left[ \\frac{a_1 + a_2 + \\cdots + a_n}{n} \\right]^n \\left( \\frac{1}{a_1} - 1 \\right) \\left( \\frac{1}{a_2} - 1 \\right) \\cdots \\left( \\frac{1}{a_n} - 1 \\right).",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\lim_{n \\rightarrow \\infty} \\left( \\left(1+\\frac{1}{2}\\right) \\cdot \\left(1+\\frac{1}{2+3}\\right) \\cdot \\ldots \\cdot \\left(1+\\frac{1}{2+3+\\ldots+n}\\right) \\right).",
+   "category": "ellipsis",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\lim_{n \\rightarrow \\infty} \\left(2 a_{n} - a_{1} - a_{2}\\right) \\left(2 a_{n} - a_{2} - a_{3}\\right) \\cdots \\left(2 a_{n} - a_{n-2} - a_{n-1}\\right) \\left(2 a_{n} - a_{n-1} - a_{1}\\right)",
+   "category": "ellipsis",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\log_{n}\\left(\\frac{1}{2}\\right) \\log_{n-1}\\left(\\frac{1}{3}\\right) \\cdots \\log_{2}\\left(\\frac{1}{n}\\right)",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\underbrace{f(f(\\ldots f}_{2012\\ f\\text{'s}}(x) \\ldots))",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\{a_{1}, a_{2}, \\cdots, a_{n}\\}=\\{1,2, \\cdots, n\\}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "a_0 > a_1 + a_2 + \\dots + a_n.",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "a_1 > a_2 > \\cdots > a_m",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "a_1 \\cdots a_n",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "a_1^2 a_2^2 \\cdots a_n^2 - 4(a_1^2 + a_2^2 + \\cdots + a_n^2)",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "a_{1} \\cdot 1^{2005}+a_{2} \\cdot 2^{2005}+a_{3} \\cdot 3^{2005}+\\cdots+a_{2005} \\cdot 2005^{2005}=1 .",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "a_{1}+a_{2}+\\cdots+a_{100}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "a_{1}, a_{1}+a_{2}, a_{1}+a_{2}+a_{3}, \\cdots, a_{1}+a_{2}+\\cdots+a_{n}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "a_{1}, a_{2}, a_{3} \\ldots",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "a_{i}, a_{i}+a_{i+1}, \\ldots, a_{i}+\\cdots+a_{i+n-1}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "aab \\underbrace{cc\\dots c}_{2n \\text{ times}}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "b_i = \\left[ \\frac{a_1 + a_2 + \\dots + a_{i-1} + a_{i+1} + \\dots + a_n}{n-1} \\right], \\quad 1 \\leq i \\leq n.",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "c_{0} + c_{1}(2n+1) + c_{2}(2n+2)^{2} + \\cdots + c_{d+1}(2n+1)^{d+1}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "f(f(f(f(1)))) + f(f(f(f(2)))) + \\cdots + f(f(f(f(2014))))",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "f(f(f(f(1))))+f(f(f(f(2))))+\\cdots+f(f(f(f(2014))))",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "f(x) = (x - a_0)g(x) = x^{n+1} + b_1 x^n + b_2 x^{n-1} + \\dots + b_n x + b_{n+1}.",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "f^m(a_1, a_2, \\dots, a_n) = f(f^{m-1}(a_1, a_2, \\dots, a_n)),\\ m > 1",
+   "category": "ellipsis",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "f^n = \\underbrace{f \\circ \\dots \\circ f}_{n \\text{ times}}",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "g(x) = \\frac{1}{x-1} + \\frac{1}{x-3} + \\dots + \\frac{1}{x-2017}.",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "|f_1(x_1) + f_2(x_2) + \\dots + f_n(x_n) - x_1x_2\\dots x_n| \\ge C_n.",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\begin{aligned}\n& P(x)=x^{4}+a x^{3}+b x^{2}+c x+1 \\\\\n& Q(x)=x^{4}+c x^{3}+b x^{2}+a x+1\n\\end{aligned}",
+   "category": "environment",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\begin{aligned}\n& a^{2}+a b+c=0 \\\\\n& b^{2}+b c+a=0 \\\\\n& c^{2}+c a+b=0\n\\end{aligned}",
+   "category": "environment",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\begin{aligned}\nAB^2 + BC \\cdot CP &= BC^2 \\\\\n3AC^2 + 2BC \\cdot CQ &= BC^2\n\\end{aligned}",
+   "category": "environment",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\begin{aligned}\na+b+c+d & = 13 \\\\\na^{2}+b^{2}+c^{2}+d^{2} & = 43\n\\end{aligned}",
+   "category": "environment",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\begin{aligned}\nx^3 + 8y^3 &= x + 2y, \\\\\n2x^2y + 4xy^2 &= x + 2y.\n\\end{aligned}",
+   "category": "environment",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\begin{cases} x^2 + x y + x z = y, \\\\ y^2 + y z + y x = z, \\\\ z^2 + z x + z y = x. \\end{cases}",
+   "category": "environment",
+   "observed": "'unexpected-token'"
+  },
+  {
+   "latex": "0^{\\circ}<\\varangle X Y Z<180^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "AB \\parallel CD",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "BC \\parallel AD",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "BC \\subset \\alpha, \\alpha \\perp (SAB), AB \\subset \\beta",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "CM \\parallel BD",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "EF \\parallel DC",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "FG \\perp AO",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "GH \\parallel BC",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "MN \\parallel AB",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "NK \\perp AB",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "OP \\perp AB",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "PC \\perp AB",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "PQ \\parallel AC",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "PT \\perp DX",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "PX \\parallel BC",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "PY \\parallel AC",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "PY \\parallel BD",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "PZ \\parallel AC",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "S \\in \\widehat{EK}",
+   "category": "geometry-notation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "SP \\perp O_1O_2",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle A",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle A < \\angle B \\leq \\angle C",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle A = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle A = 90^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle A B C = 100^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle A C P=\\angle Q C B",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle A O B",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle A O B, \\angle B O C, \\angle C O D",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ABC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ABC + \\angle APC = 180^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ABC = 120^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ABC = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ABC = \\angle ADC = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ABD = 13^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ABD = 30^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ABD = 50^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ABD = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ACB",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ACB = 30^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ACD = 30^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ADB",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ADB = 150^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ADB = 45^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle AEB",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle AHC = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle AKL",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle AMN = 90^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle AOC < \\angle AOD = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle APD = \\angle XYZ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle AQP = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle ASB = \\angle ASC = \\angle BSC = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle AXD = \\angle BYC = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle A_1C_1B_1",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle B < \\angle C",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle B > \\angle C",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle B A F",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BA'C = \\angle BB'C",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAC = 120^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAC = 30^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAC = 45^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAC = \\angle ACB = 20^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAC = \\angle DAL",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAD",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAD = \\angle DEC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAE = \\angle ACD",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAM",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BAx = \\angle xAy = \\angle yAC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BCA",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BEC = \\angle AEF",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BEF + \\angle CEG",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BFD = \\angle DGC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BMP = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BPC = 85^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle BPC = \\angle BAC + \\angle EQD",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle C = 90^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle C D E = 80^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle C=90^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle CAD = 20^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle CAD = 40^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle CBD",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle CDA",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle CJB",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle D O A",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle DAB = \\angle CBE",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle DBC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle DBC = 30^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle DBC = \\angle DCB = \\angle BAC.",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle DCA = 30^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle DEB = \\angle DFC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle DEC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle LMB",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle M A N=45^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle MLK",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle PAB = \\angle PBC = \\angle PCA",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle PAQ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle PA_1A_2 = \\angle PA_2A_3 = \\cdots = \\angle PA_{2n-1}A_{2n} = \\angle PA_{2n}A_1.",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle PBM + \\angle CBM = \\angle PCA",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle PBQ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle SMK = 30^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle X I Y = 120^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\angle(\\alpha, \\beta) = 120^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\beta \\perp (SBC)",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\operatorname{arc}\\overparen{BC}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\overline{DP} \\perp \\overline{EF}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\square ABCD",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle A B C",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle A E C",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle ABC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle APB",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle A_1A_2A_3",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle BAD",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle BCG",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle BEA",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle BIC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle BMC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle BPC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle BXY",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle CPA",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle CYZ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle DBC'",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle EFH",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle MBC",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle MCD",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle MDA",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle N R A",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle N' R A'",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle P N R",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle PF_1F_2",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\triangle P_1P_2P_3",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\varangle B P C-\\varangle B A C=\\varangle C P A-\\varangle C B A=\\varangle A P B-\\varangle A C B .",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\varangle B P C=60^{\\circ}+\\alpha, \\varangle C P A=60^{\\circ}+\\beta, \\varangle A P B=60^{\\circ}+\\gamma",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\varangle X Y Z",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\varangle X Y Z=\\varangle X W Z",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\varangle Z Y X:= 180^{\\circ}-\\varangle X Y Z",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{A B Y}=\\mu",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{A C Y}=\\varphi",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{ABC} - \\widehat{ATD} = \\widehat{DAC}, \\quad \\widehat{ADC} - \\widehat{ATB} = \\widehat{BAC}.",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{AE} = \\widehat{BJ} = \\widehat{CK} = \\frac{1}{4}\\widehat{CE}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{B A X}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{BAC}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{BAT} = \\widehat{DAC}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{BCD}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{OAE}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{OBD}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\widehat{X A C}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "m(\\angle A) = 60^\\circ",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "m(\\angle EBF) = 45^{\\circ}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\forall n \\ge 1",
+   "category": "logic-misc",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\text{Show that } \\langle EMZ \\rangle = \\langle EYF \\rangle.",
+   "category": "logic-misc",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "(A,+)",
+   "category": "other",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": "(A,+, \\cdot)",
+   "category": "other",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": "(K, +, \\cdot)",
+   "category": "other",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": ". Let",
+   "category": "other",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "11 \\times 101 \\times 1001 \\times 10001 \\times 100001 \\times 1000001 \\times 111 ?",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "15\\,€",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "5^{x}-\\log_{2}(y+3)=3^{y} \\text{ şi } 5^{y}-\\log_{2}(x+3)=3^{x}",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "9\\,€",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "B D^{2} = \\frac{100}{\\sin 100^{\\circ}}",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "BD \\cdot CE = 2",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "N + M",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "N \\times N",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "N^2",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "OP^{4} + \\left(\\frac{MN}{2}\\right)^{4} = MP^{2} \\cdot NP^{2}",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "[AB), [AC)",
+   "category": "other",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\cdot",
+   "category": "other",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\frac{*}{*} = \\frac{*}{*} = \\frac{7*}{15*}",
+   "category": "other",
+   "observed": "'expected-closing-delimiter'"
+  },
+  {
+   "latex": "\\frac{1}{a} + \\frac{1}{b} = \\frac{4}{15} ?",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\frac{AB^2}{PC} + \\frac{AC^2}{PB} \\geq \\frac{BC^3}{PA^2 + PB \\cdot PC}",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\frac{ab}{c} \\cdot \\frac{ac}{b} \\quad \\text{and} \\quad \\frac{bc}{a}",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\ge 2015",
+   "category": "other",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\ge 9",
+   "category": "other",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\lfloor.\\rfloor",
+   "category": "other",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\sum_{n=5}^{N} \\frac{1}{n(n-2)} < \\frac{1}{4}",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\times",
+   "category": "other",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "and are flipping a fair coin. When the coin comes up heads Rosencrantz pays Guildenstern",
+   "category": "other",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "f(x - f(y)) \\le x - y f(x)?",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "f: S \\rightarrow T",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "f: S^{3} \\rightarrow S",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "flips. Compute the expected value of",
+   "category": "other",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "i^{\\text{th}}",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "j^{\\text{th}}",
+   "category": "other",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "A \\backslash B",
+   "category": "set-minus",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "B \\backslash A",
+   "category": "set-minus",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "(A \\backslash B) \\cup (B \\backslash A)",
+   "category": "sets-and-congruence",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "(\\mathbb{Z}_n, +, \\cdot)",
+   "category": "sets-and-congruence",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": "2 \\mathbb{Z} + 1",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "2^n \\equiv 1 \\pmod{p^{k+1}}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "2^{2^{m+1}} p^k \\equiv 1 \\pmod{p^{k+1}}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "A \\cap \\{1, 2, 3\\} \\neq \\emptyset, \\quad A \\cup \\{4, 5, 6\\} \\neq S.",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "AH \\cap CE = \\{K\\}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "EG \\cap HF = \\{O\\}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "GH \\cap EF = \\{M\\}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "K_{a} \\notin BC",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "K_{b} \\notin AC",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "K_{c} \\notin AB",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "M=\\{f: \\mathbb{R} \\rightarrow \\mathbb{R} \\mid f(2 f(x)+x)+f(x)=4 x-4\\}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "P = AC \\cap BD",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "X = AM \\cap BP",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "Y = BN \\cap AQ",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\left(\\square_{1}, \\square_{2}\\right) \\in \\{\\cup, \\cap\\}^{2}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\mathbb{N}_{>1}",
+   "category": "sets-and-congruence",
+   "observed": "'expected-closing-delimiter'"
+  },
+  {
+   "latex": "\\mathbb{R}_{>0}",
+   "category": "sets-and-congruence",
+   "observed": "'expected-closing-delimiter'"
+  },
+  {
+   "latex": "\\sum_{(a, b) \\in S}\\left\\lfloor\\frac{300}{2 a+3 b}\\right\\rfloor",
+   "category": "sets-and-congruence",
+   "observed": "'missing'"
+  },
+  {
+   "latex": "\\sum_{x \\in A} x = \\prod_{y \\in B} y.",
+   "category": "sets-and-congruence",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "a^{2}+b^{2}+c^{2} \\equiv d^{2}+e^{2}+f^{2} \\quad(\\bmod 12)",
+   "category": "sets-and-congruence",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "a^{\\sin x} \\cdot (a+1)^{\\cos x} \\ge a, \\quad \\forall x \\in [0, \\frac{\\pi}{2}].",
+   "category": "sets-and-congruence",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "f : \\mathbb{R}_{>0} \\to \\mathbb{R}_{>0}",
+   "category": "sets-and-congruence",
+   "observed": "'expected-closing-delimiter'"
+  },
+  {
+   "latex": "f, g: \\mathbb{R} \\rightarrow \\mathbb{R}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "f: \\mathbb{N}_{>1} \\rightarrow \\mathbb{N}_{>1}",
+   "category": "sets-and-congruence",
+   "observed": "'expected-closing-delimiter'"
+  },
+  {
+   "latex": "f: \\mathbb{R} \\rightarrow \\mathbb{R}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "f: \\mathbb{R}^{+} \\rightarrow \\mathbb{R}^{+}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "f: \\mathbb{R}_{>0} \\to \\mathbb{R}_{>0}",
+   "category": "sets-and-congruence",
+   "observed": "'expected-closing-delimiter'"
+  },
+  {
+   "latex": "f: \\mathbb{Z} \\rightarrow 2 \\mathbb{Z} + 1",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "f: \\mathbb{Z} \\rightarrow \\mathbb{Z}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "f: \\mathbb{Z}_{>0} \\to \\mathbb{Z}_{>0}",
+   "category": "sets-and-congruence",
+   "observed": "'expected-closing-delimiter'"
+  },
+  {
+   "latex": "g: \\mathbb{N} \\rightarrow \\mathbb{N}",
+   "category": "sets-and-congruence",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "m, n \\in \\mathbb{N}_{>1}",
+   "category": "sets-and-congruence",
+   "observed": "'expected-closing-delimiter'"
+  },
+  {
+   "latex": "x, y \\in \\mathbb{R}_{>0}",
+   "category": "sets-and-congruence",
+   "observed": "'expected-closing-delimiter'"
+  },
+  {
+   "latex": "x_n \\ge \\frac{x_{n-1} + x_{n+1}}{2}, \\quad \\text{for all } n \\in \\mathbb{N}.",
+   "category": "sets-and-congruence",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "(3) \\quad \\sum_{i=1}^{n} i^2 (a_i + b_i) = 10.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "(DB+BC)^2=AD^2+AC^2.",
+   "category": "trailing-punctuation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "(a^x + b^x + c^x) (a^{-x} + b^{-x} + c^{-x}) = 3 + \\frac{a^2 + b^2}{ab} + \\frac{b^2 + c^2}{bc} + \\frac{c^2 + a^2}{ca}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "(n-1)S^2 > 4n(A_1 + A_2).",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "(x^2 - 1)^2 (y^2 - 1)^2 + 16x^2 y^2 = z^2.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "1 + 5^{a} = 6^{b}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "21ab + 2bc + 8ca \\le 12.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "2f(ab) = (b+1)f(a) + (a+1)f(b).",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "3xy + 2x + y = 12.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "5^{x}-\\log_{2}(y+3)=3^{y} \\text{ és } 5^{y}-\\log_{2}(x+3)=3^{x}.",
+   "category": "trailing-punctuation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "C\\hat{D}F + C\\hat{E}F.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "M=N+1 .",
+   "category": "trailing-punctuation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "P(a, b, c) = \\frac{1}{a} + \\frac{2}{b} + \\frac{3}{c}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\frac{1}{(1-x^2)(1-y^2)(1-z^2)} + \\frac{2}{(1-xy)(1-yz)(1-zx)} \\geq \\\\\n\\frac{1}{(1-x^2)(1-yz)^2} + \\frac{1}{(1-y^2)(1-zx)^2} + \\frac{1}{(1-z^2)(1-xy)^2}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-command'"
+  },
+  {
+   "latex": "\\frac{1}{a} + \\frac{1}{b} + \\frac{1}{c} + \\frac{k}{a+b+c+1} \\ge \\frac{k}{4} + 3.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\frac{BD}{CD} = \\frac{CE}{AE} = \\frac{AF}{BF}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\frac{BP}{CP} = \\frac{BQ}{CQ} = \\frac{20}{19}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\frac{\\pi}{3} \\le \\arg(x) - \\arg(y) \\le \\frac{5\\pi}{3}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\frac{\\pi}{3} \\leq \\arg(x) - \\arg(y) \\leq \\frac{2\\pi}{3}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\frac{a}{a+b} + \\frac{b}{b+c} + \\frac{c}{c+a} \\ge \\frac{7}{5}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\frac{n}{m} \\ge 1 + \\frac{2m+4}{N}.",
+   "category": "trailing-punctuation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "\\left[ \\sum_{i=1}^{n} \\frac{1}{a_i^2 + x^2} \\right]^2 \\leq \\frac{1}{2} \\cdot \\frac{1}{a_1 (a_1 - 1) + x^2}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\lim_{n \\to \\infty} \\frac{1}{n} \\sum_{k=1}^{n} a_k f\\left(\\frac{k}{n}\\right) = a \\int_{0}^{1} f(x) dx.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\operatorname{gcd}(a, b) \\cdot a + b^2 = 10000.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\sum_{i=1}^{n} \\sum_{j=1}^{n}\\left|x_{i}+x_{j}\\right| \\geqslant n \\sum_{i=1}^{n}\\left|x_{i}\\right| .",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\sum_{k=0}^{2^n-1} 2^{r(k)} f(k + (-1)^k x) = (-1)^{x+n} \\quad \\text{for all integer } x.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\text{a) } b(n) = 12; \\quad \\text{b) } b(n) = 12^{12^{12}}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "a = \\frac{b+c}{x-2}, \\quad b = \\frac{c+a}{y-2}, \\quad c = \\frac{a+b}{z-2}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "a) a=3, b=5; \\qquad b) a=6, b=7.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-delimiter'"
+  },
+  {
+   "latex": "a^2 + ac + c^2 + 1 = b^2 + bd + d^2, \\quad \\text{and} \\quad 2ab + ad + 2cd + bc = 0.",
+   "category": "trailing-punctuation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "a^2 + b^2 + c^2 + d^2 = 4.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "a_0 = 9 \\quad \\text{and} \\quad a_{k+1} = 3a_k^4 + 4a_k^3 \\quad \\text{for all } k \\ge 0.",
+   "category": "trailing-punctuation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "ab + bc + ca = 16, \\quad a \\ge 3.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "c_n = \\max\\{a_i + b_{n-i} \\mid 0 \\le i \\le n\\}, \\quad n \\ge 0.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "f(2a) + 2f(b) = f(f(a+b)).",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "f(X) \\square_{1}\\left(f(Y) \\square_{2} f(Z)\\right)=f\\left(X \\square_{1}\\left(Y \\square_{2} Z\\right)\\right),",
+   "category": "trailing-punctuation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "f(f(b)) - f(f(a)) = (f'(c))^2 (b - a).",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "f(m) + f(n) = f(mn) + f(m + n + mn).",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "f(x + y)f(x^2 - xy + y^2) = x^3 + y^3.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "f(yf(x))(x + y) = x^2(f(x) + f(y)).",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "m^2 + 2 \\cdot 3^n = m(2^{n+1} - 1).",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "m_a \\left(\\frac{b}{a} - 1\\right) \\left(\\frac{c}{a} - 1\\right) + m_b \\left(\\frac{a}{b} - 1\\right) \\left(\\frac{c}{b} - 1\\right) + m_c \\left(\\frac{a}{c} - 1\\right) \\left(\\frac{b}{c} - 1\\right) \\geq 0.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "p(\\sqrt{2} + 1) = 2 - \\sqrt{2} \\quad \\text{und} \\quad p(\\sqrt{2} + 2) = a.",
+   "category": "trailing-punctuation",
+   "observed": "ErrorCode"
+  },
+  {
+   "latex": "x + \\frac{1}{y} = y + \\frac{2}{x} = 3.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "x=\\frac{\\left\\lceil x^{2}\\right\\rceil+\\lceil x\\rceil \\cdot\\lfloor x\\rfloor}{\\lceil x\\rceil+\\lfloor x\\rfloor} .",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "|y - x| \\geq \\sqrt{x + y}.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "|z| + |z - x| + |z - y| \\geq \\left| \\frac{\\sqrt{3}}{2}x + \\left(y - \\frac{1}{2}\\right)i \\right|.",
+   "category": "trailing-punctuation",
+   "observed": "'unexpected-operator'"
+  }
+ ],
+ "unicodeAnswers": [
+  {
+   "input": "n ≡ 1 (mod 3)",
+   "source_id": "009s"
+  },
+  {
+   "input": "A - B = m - ℓ + 1 = n - 1",
+   "source_id": "06op"
+  },
+  {
+   "input": "a. No. b. Yes.",
+   "source_id": "0g7r"
+  },
+  {
+   "input": "i) Yes. ii) No.",
+   "source_id": "0l9s"
+  },
+  {
+   "input": "n ∈ {3, 4, 5, 7, 8, 9, 10, 12, 15, 18, 24, 42}",
+   "source_id": "048d"
+  },
+  {
+   "input": "M = N + 1",
+   "source_id": "06si"
+  },
+  {
+   "input": "10^ℓ + 1",
+   "source_id": "0a2n"
+  },
+  {
+   "input": "If n is odd: (n^2 − 1)/2; if n is even: (n^2 − 4)/2.",
+   "source_id": "0bti"
+  },
+  {
+   "input": "[S] ∈ {2 m - 2, 2 m - 1}",
+   "source_id": "0du7"
+  },
+  {
+   "input": "n ≡ 1 (mod 32)",
+   "source_id": "006j"
+  },
+  {
+   "input": "Initial 2,2,2: No. Initial 3,3,3: No.",
+   "source_id": "0f5d"
+  },
+  {
+   "input": "10 ± 2√17",
+   "source_id": "0ji2"
+  },
+  {
+   "input": "∠A = 60°, ∠B = 30°, ∠C = 90°",
+   "source_id": "0e0j"
+  },
+  {
+   "input": "Yes. For example, P(x, y) = (3x − 2y)(3x − 4y + 1)(3x − 4y − 1).",
+   "source_id": "01yu"
+  },
+  {
+   "input": "[0, 1) ∪ {3, 4} ∪ (5, +∞)",
+   "source_id": "0975"
+  },
+  {
+   "input": "x = y = z = ± sqrt(2)/2",
+   "source_id": "04qx"
+  },
+  {
+   "input": "n ≡ 0, 4, 5 (mod 6)",
+   "source_id": "08rp"
+  },
+  {
+   "input": "((20k - 3) * 2^(4k) + 3) / 25",
+   "source_id": "09ng"
+  },
+  {
+   "input": "[N/2], [(N+1)/2], [N/2]",
+   "source_id": "0evv"
+  }
+ ]
+}
