@@ -103,6 +103,45 @@ function hasDependentOrDerivative(
   );
 }
 
+/**
+ * Whether `expr` mentions the dependent function head (or symbol) anywhere,
+ * regardless of its argument. Unlike `hasDependentOrDerivative`, this also
+ * matches non-standard occurrences such as `y(2x)`, which are not valid
+ * forcing terms for the linear first-order solver.
+ */
+function referencesDependent(expr: Expression, dependentName: string): boolean {
+  if (isSymbol(expr, dependentName)) return true;
+  if (isFunction(expr)) {
+    if (expr.operator === dependentName) return true;
+    return expr.ops.some((op) => referencesDependent(op, dependentName));
+  }
+  return false;
+}
+
+/**
+ * Build a sum of `terms` without canonicalizing them. Canonical `Add`/`Multiply`
+ * type-checks operands, and an unrecognized higher-order derivative term such as
+ * `x^2 * y''` (type `expression` when the dependent function is undeclared) would
+ * be rewritten to an `Error` node — silently dropping the derivative from the
+ * residual. Accumulating structurally preserves the derivative so the guard in
+ * `dSolve` can detect it and stay inert.
+ */
+function structuralSum(
+  ce: Expression['engine'],
+  terms: Expression[]
+): Expression {
+  const nonzero = terms.filter((t) => !t.isSame(0));
+  if (nonzero.length === 0) return ce.Zero;
+  if (nonzero.length === 1) return nonzero[0];
+  return ce.function('Add', nonzero, { form: 'structural' });
+}
+
+function structuralNeg(expr: Expression): Expression {
+  const ce = expr.engine;
+  if (expr.isSame(0)) return ce.Zero;
+  return ce.function('Negate', [expr], { form: 'structural' });
+}
+
 function collectLinearTerms(
   residual: Expression,
   dependentName: string,
@@ -116,7 +155,7 @@ function collectLinearTerms(
       : [residual];
   let derivative = ce.Zero;
   let dependent = ce.Zero;
-  let rest = ce.Zero;
+  const restTerms: Expression[] = [];
 
   for (const term of terms) {
     const split = splitTerm(term, dependentName, independentName);
@@ -124,20 +163,12 @@ function collectLinearTerms(
       derivative = derivative.add(split.coefficient);
     else if (split.kind === 'dependent')
       dependent = dependent.add(split.coefficient);
-    else rest = rest.add(split.coefficient);
+    // Keep the residual structural: a term may still contain a (higher-order)
+    // derivative that canonical `Add` would corrupt into an `Error` node.
+    else restTerms.push(split.coefficient);
   }
 
-  return { derivative, dependent, rest };
-}
-
-function negateCoefficients(
-  coefficients: LinearTermCoefficients
-): LinearTermCoefficients {
-  return {
-    derivative: coefficients.derivative.neg(),
-    dependent: coefficients.dependent.neg(),
-    rest: coefficients.rest.neg(),
-  };
+  return { derivative, dependent, rest: structuralSum(ce, restTerms) };
 }
 
 function equationCoefficients(
@@ -145,6 +176,7 @@ function equationCoefficients(
   dependentName: string,
   independentName: string
 ): LinearTermCoefficients {
+  const ce = equation.engine;
   if (!isFunction(equation, 'Equal'))
     return collectLinearTerms(
       equation.structural,
@@ -157,14 +189,18 @@ function equationCoefficients(
     dependentName,
     independentName
   );
-  const rhs = negateCoefficients(
-    collectLinearTerms(equation.op2.structural, dependentName, independentName)
+  const rhs = collectLinearTerms(
+    equation.op2.structural,
+    dependentName,
+    independentName
   );
 
   return {
-    derivative: lhs.derivative.add(rhs.derivative),
-    dependent: lhs.dependent.add(rhs.dependent),
-    rest: lhs.rest.add(rhs.rest),
+    derivative: lhs.derivative.sub(rhs.derivative),
+    dependent: lhs.dependent.sub(rhs.dependent),
+    // Combine residuals structurally so higher-order derivative terms survive
+    // for the guard rather than being canonicalized into `Error` nodes.
+    rest: structuralSum(ce, [lhs.rest, structuralNeg(rhs.rest)]),
   };
 }
 
@@ -551,6 +587,70 @@ function numericCharacteristicCoefficients(
   return result;
 }
 
+// Tolerance for treating a numeric root as real (|im| below this) and for
+// pairing conjugates. Kept consistent so a conjugate is never orphaned.
+const NUMERIC_ROOT_IM_TOL = 1e-7;
+
+interface NumericRootCluster {
+  re: number;
+  im: number;
+  multiplicity: number;
+}
+
+/**
+ * Group nearly-coincident numeric roots (as returned by Durand–Kerner for a
+ * multiple root) into (representative, multiplicity) clusters. A double or
+ * triple root shows up as several roots spread by numeric noise (~1e-8 for a
+ * double, larger for higher multiplicity); each cluster's representative is the
+ * mean of its members.
+ */
+function clusterNumericRoots(
+  roots: readonly { re: number; im: number }[]
+): NumericRootCluster[] {
+  const clusters: { sumRe: number; sumIm: number; count: number }[] = [];
+
+  for (const root of roots) {
+    let placed = false;
+    for (const cluster of clusters) {
+      const re = cluster.sumRe / cluster.count;
+      const im = cluster.sumIm / cluster.count;
+      const scale = Math.max(
+        1,
+        Math.hypot(re, im),
+        Math.hypot(root.re, root.im)
+      );
+      if (Math.hypot(root.re - re, root.im - im) < 1e-6 * scale) {
+        cluster.sumRe += root.re;
+        cluster.sumIm += root.im;
+        cluster.count += 1;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed)
+      clusters.push({ sumRe: root.re, sumIm: root.im, count: 1 });
+  }
+
+  return clusters.map((cluster) => ({
+    re: denoiseComponent(cluster.sumRe / cluster.count),
+    im: denoiseComponent(cluster.sumIm / cluster.count),
+    multiplicity: cluster.count,
+  }));
+}
+
+/**
+ * Snap a numeric root component to a nearby integer when it is within
+ * tolerance, removing Durand–Kerner noise. This turns a double root at
+ * `1 ± 1e-15` into `1` (so `e^x` rather than `e^(1.000000000000006x)`) and a
+ * spurious real part of `3.8e-9` on a `±i` pair into `0`.
+ */
+function denoiseComponent(value: number): number {
+  const rounded = Math.round(value);
+  if (Math.abs(value - rounded) < 1e-7 * Math.max(1, Math.abs(value)))
+    return rounded;
+  return value;
+}
+
 function solveHigherOrderWithNumericRoots(
   equation: Expression,
   dependentCall: Expression,
@@ -568,59 +668,74 @@ function solveHigherOrderWithNumericRoots(
   const roots = durandKernerRoots(coeffs, ce._deadline);
   if (!roots || roots.length !== order) return undefined;
 
-  const sortedRoots = [...roots].sort((a, b) => {
-    const aReal = Math.abs(a.im) < 1e-8;
-    const bReal = Math.abs(b.im) < 1e-8;
-    if (aReal !== bReal) return aReal ? -1 : 1;
-    if (Math.abs(a.re - b.re) > 1e-8) return a.re - b.re;
-    return a.im - b.im;
-  });
-  const used = Array(sortedRoots.length).fill(false);
-  const constants = integrationConstants(equation, order);
+  // Cluster coincident roots so a multiple root emits `x^k e^(rx)` modes
+  // instead of several numerically-dependent copies.
+  const clusters = clusterNumericRoots(roots);
+
+  const realClusters = clusters
+    .filter((c) => Math.abs(c.im) < NUMERIC_ROOT_IM_TOL)
+    .sort((a, b) => a.re - b.re);
+  const complexClusters = clusters
+    .filter((c) => Math.abs(c.im) >= NUMERIC_ROOT_IM_TOL)
+    .sort((a, b) => a.re - b.re || Math.abs(b.im) - Math.abs(a.im));
+
   const x = ce.symbol(independentName);
-  const terms: Expression[] = [];
-  let constantIndex = 0;
+  const basis: Expression[] = [];
 
-  for (let i = 0; i < sortedRoots.length; i++) {
-    if (used[i]) continue;
-    const root = sortedRoots[i];
-    used[i] = true;
-
-    if (Math.abs(root.im) < 1e-8) {
-      terms.push(
-        expTerm(
-          constants[constantIndex],
-          ce.number(ce.chop(root.re)),
-          independentName
-        )
-      );
-      constantIndex += 1;
-      continue;
+  // Real roots: x^k e^(rx), k = 0 .. multiplicity - 1.
+  for (const cluster of realClusters) {
+    const root = ce.number(cluster.re);
+    for (let k = 0; k < cluster.multiplicity; k++) {
+      const coefficient = k === 0 ? ce.One : x.pow(k);
+      basis.push(expTerm(coefficient, root, independentName));
     }
-
-    const conjugateIndex = sortedRoots.findIndex(
-      (candidate, j) =>
-        !used[j] &&
-        Math.abs(candidate.re - root.re) < 1e-7 &&
-        Math.abs(candidate.im + root.im) < 1e-7
-    );
-    if (conjugateIndex < 0 || constantIndex + 1 >= constants.length)
-      return undefined;
-    used[conjugateIndex] = true;
-
-    const alpha = ce.number(ce.chop(root.re));
-    const beta = ce.number(ce.chop(Math.abs(root.im)));
-    const betaX = beta.mul(x).simplify();
-    const oscillatory = constants[constantIndex]
-      .mul(ce.function('Cos', [betaX]))
-      .add(constants[constantIndex + 1].mul(ce.function('Sin', [betaX])))
-      .simplify();
-    terms.push(expTerm(oscillatory, alpha, independentName));
-    constantIndex += 2;
   }
 
-  if (constantIndex !== order) return undefined;
-  const solution = ce.function('Add', terms).simplify();
+  // Complex roots: pair each a+bi (b > 0) with its conjugate and emit
+  // x^k e^(ax) cos(bx) and x^k e^(ax) sin(bx), k = 0 .. multiplicity - 1.
+  const usedComplex = new Set<number>();
+  for (let i = 0; i < complexClusters.length; i++) {
+    if (usedComplex.has(i)) continue;
+    const cluster = complexClusters[i];
+    if (cluster.im <= 0) continue; // consumed via its positive-im conjugate
+
+    const conjugateIndex = complexClusters.findIndex(
+      (candidate, j) =>
+        j !== i &&
+        !usedComplex.has(j) &&
+        Math.abs(candidate.re - cluster.re) < NUMERIC_ROOT_IM_TOL &&
+        Math.abs(candidate.im + cluster.im) < NUMERIC_ROOT_IM_TOL &&
+        candidate.multiplicity === cluster.multiplicity
+    );
+    if (conjugateIndex < 0) return undefined;
+    usedComplex.add(i);
+    usedComplex.add(conjugateIndex);
+
+    const alpha = ce.number(cluster.re);
+    const beta = ce.number(Math.abs(cluster.im));
+    const betaX = beta.mul(x).simplify();
+    const cos = ce.function('Cos', [betaX]);
+    const sin = ce.function('Sin', [betaX]);
+    for (let k = 0; k < cluster.multiplicity; k++) {
+      const power = k === 0 ? ce.One : x.pow(k);
+      basis.push(expTerm(power.mul(cos).simplify(), alpha, independentName));
+      basis.push(expTerm(power.mul(sin).simplify(), alpha, independentName));
+    }
+  }
+
+  // Structural self-check: the basis must span exactly `order` distinct
+  // functions. If clustering mis-grouped roots (too few modes) or produced a
+  // duplicate, stay inert rather than return a degenerate general solution.
+  if (basis.length !== order) return undefined;
+  for (let i = 0; i < basis.length; i++)
+    for (let j = i + 1; j < basis.length; j++)
+      if (basis[i].isSame(basis[j])) return undefined;
+
+  const constants = integrationConstants(equation, order);
+  let solution = ce.Zero;
+  for (let i = 0; i < basis.length; i++)
+    solution = solution.add(constants[i].mul(basis[i]));
+  solution = solution.simplify();
   return ce.function('List', [ce.function('Equal', [dependentCall, solution])]);
 }
 
@@ -1128,6 +1243,15 @@ export function dSolve(
   );
 
   if (coefficients.derivative.isSame(0)) return undefined;
+  // An `Error` node anywhere in the collected coefficients means the linear
+  // split could not be trusted (e.g. a higher-order derivative term was
+  // corrupted). Stay inert rather than "solving" garbage.
+  if (
+    hasOperator(coefficients.derivative, 'Error') ||
+    hasOperator(coefficients.dependent, 'Error') ||
+    hasOperator(coefficients.rest, 'Error')
+  )
+    return undefined;
   if (
     hasDependentOrDerivative(
       coefficients.derivative,
@@ -1145,6 +1269,17 @@ export function dSolve(
 
   const p = coefficients.dependent.div(coefficients.derivative).simplify();
   const q = coefficients.rest.neg().div(coefficients.derivative).simplify();
+
+  // Forcing (or a variable coefficient) that references the dependent function
+  // with a non-standard argument, e.g. `y'(x) = y(2x)`, is not a supported
+  // linear ODE. `hasDependentOrDerivative` only matches the literal `y(x)`, so
+  // guard the broader case here.
+  if (
+    referencesDependent(p, dependentName) ||
+    referencesDependent(q, dependentName)
+  )
+    return undefined;
+
   const [c] = integrationConstants(equation, 1);
 
   let solution: Expression;
@@ -1158,6 +1293,15 @@ export function dSolve(
     const integral = dSolveAntiderivative(weightedRhs, independentName);
     solution = c.add(integral).div(integratingFactor).simplify();
   }
+
+  // A leftover, unresolved antiderivative that still references the dependent
+  // function is not a real solution — mirror the second-order path and stay
+  // inert.
+  if (
+    hasOperator(solution, 'Integrate') &&
+    referencesDependent(solution, dependentName)
+  )
+    return undefined;
 
   return ce.function('List', [ce.function('Equal', [dependentCall, solution])]);
 }

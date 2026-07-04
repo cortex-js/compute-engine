@@ -1,3 +1,23 @@
+## [Unreleased]
+
+### Lenient parsing and string helpers
+
+- **The string helpers take a `strict` option.** `simplify()`, `evaluate()`,
+  `N()`, `expand()`, `expandAll()`, `factor()`, `solve()`, and `compile()`
+  parse string input in lenient (non-strict) mode by default. Note that lenient
+  mode is not a pure superset of strict LaTeX: unbraced multi-digit scripts
+  change meaning — `x^23` is $x^{23}$ (not $3x^2$), and `x_23`/`a_12` are single
+  multi-digit subscripts. Pass `{ strict: true }` (e.g. `N('x^23', { strict:
+  true })`) to restore the strict LaTeX grammar.
+
+- **Lenient inverse functions, `atan2`, and letter runs parse correctly.**
+  `sin^-1 x` now means $\arcsin x$ (the inverse function), not $1/\sin x$
+  (matching strict `\sin^{-1}`); `sin^-2 x` stays $1/\sin^2 x$. `atan2(1, 2)`
+  parses as `Arctan2(1, 2)`, and `acot`/`asec`/`acsc` are recognized. A
+  multi-letter run with an embedded Greek constant is segmented (`2pix` →
+  $2\pi x$, `xpi` → $x\pi$) instead of injecting a spurious imaginary unit, and
+  an implicit subscript is accepted on a constant base (`alpha2` → $\alpha_2$).
+
 ## 0.67.0 _2026-07-03_
 
 This release improves correctness and predictability across the public Compute

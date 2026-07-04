@@ -2416,14 +2416,221 @@ function cosBaseToSin(
   return a.isSame(0) ? sinTerm : a.add(sinTerm);
 }
 
+// Inert trig heads (lowercase), as produced by DeactivateTrig.
+const INERT_TRIG = new Set(['sin', 'cos', 'tan', 'cot', 'sec', 'csc']);
+
+// A single trig monomial `coef·trig[arg]` (`{ head, coef, arg }`) or a binomial
+// `a + b·trig[arg]` (`{ head, a, b, arg }`), as recognized inside a product
+// factor's base. `coef`/`a`/`b` are x-free; `arg` is linear in x.
+type TrigMono = { head: string; coef: Expression; arg: Expression };
+type TrigBinom = { head: string; a: Expression; b: Expression; arg: Expression };
+
+/** `coef·trig[linear arg]` (or bare `trig[linear arg]`) → `{head, coef, arg}`,
+ * else null. `coef` must be x-free. */
+function trigMonoParts(e: Expression, x: string): TrigMono | null {
+  if (INERT_TRIG.has(e.operator) && e.ops) {
+    return polyDegreeX(e.ops[0], x) === 1
+      ? { head: e.operator, coef: e.engine.One, arg: e.ops[0] }
+      : null;
+  }
+  if (e.operator === 'Multiply' && e.ops) {
+    const trig = e.ops.filter((o) => INERT_TRIG.has(o.operator));
+    const rest = e.ops.filter((o) => !INERT_TRIG.has(o.operator));
+    if (trig.length !== 1 || rest.some((o) => o.has(x))) return null;
+    const t = trig[0];
+    if (!t.ops || polyDegreeX(t.ops[0], x) !== 1) return null;
+    const coef =
+      rest.length === 0
+        ? e.engine.One
+        : rest.length === 1
+          ? rest[0]
+          : e.engine.function('Multiply', rest);
+    return { head: t.operator, coef, arg: t.ops[0] };
+  }
+  return null;
+}
+
+/** `a + b·trig[linear arg]` (x-free constant part `a`, single trig term) →
+ * `{head, a, b, arg}`, else null. */
+function trigBinomParts(
+  ce: ComputeEngine,
+  e: Expression,
+  x: string
+): TrigBinom | null {
+  if (e.operator !== 'Add' || !e.ops) return null;
+  let a: Expression = ce.Zero;
+  let mono: TrigMono | null = null;
+  for (const t of e.ops) {
+    if (!t.has(x)) {
+      a = a.add(t);
+      continue;
+    }
+    if (mono !== null) return null; // a second x-dependent term ⇒ not a binomial
+    mono = trigMonoParts(t, x);
+    if (mono === null) return null;
+  }
+  if (mono === null) return null;
+  return { head: mono.head, a, b: mono.coef, arg: mono.arg };
+}
+
+// A product factor `(base)^exp` classified as monomial or binomial. `exp` is
+// x-free (default 1).
+type Factor =
+  | { kind: 'mono'; head: string; coef: Expression; arg: Expression; exp: Expression }
+  | {
+      kind: 'binom';
+      head: string;
+      a: Expression;
+      b: Expression;
+      arg: Expression;
+      exp: Expression;
+    };
+
+/** Classify a single product factor into a trig monomial or binomial power,
+ * else null. */
+function classifyFactor(
+  ce: ComputeEngine,
+  f: Expression,
+  x: string
+): Factor | null {
+  let exp: Expression = ce.One;
+  let base = f;
+  if (f.operator === 'Power' && f.ops) {
+    if (f.ops[1].has(x)) return null; // exponent must be x-free
+    exp = f.ops[1];
+    base = f.ops[0];
+  }
+  const m = trigMonoParts(base, x);
+  if (m) return { kind: 'mono', head: m.head, coef: m.coef, arg: m.arg, exp };
+  const bi = trigBinomParts(ce, base, x);
+  if (bi) return { kind: 'binom', head: bi.head, a: bi.a, b: bi.b, arg: bi.arg, exp };
+  return null;
+}
+
+/** Build `(coef·head[arg])^exp` (dropping a unit coefficient / exponent). */
+function buildMono(
+  ce: ComputeEngine,
+  coef: Expression,
+  head: string,
+  arg: Expression,
+  exp: Expression
+): Expression {
+  const node = ce.function(head, [arg]);
+  const base = coef.isSame(1) ? node : coef.mul(node);
+  return exp.isSame(1) ? base : ce.function('Power', [base, exp]);
+}
+
+/** Build `(a + b·head[arg])^exp` (dropping a zero constant / unit exponent). */
+function buildBinom(
+  ce: ComputeEngine,
+  a: Expression,
+  b: Expression,
+  head: string,
+  arg: Expression,
+  exp: Expression
+): Expression {
+  const node = ce.function(head, [arg]);
+  const term = b.isSame(1) ? node : b.mul(node);
+  const base = a.isSame(0) ? term : a.add(term);
+  return exp.isSame(1) ? base : ce.function('Power', [base, exp]);
+}
+
+// Two-factor cofunction-shift clauses (IntegrationUtilityFunctions.m §1.0,
+// 1.1.2, 1.1.3). Rubi has no Cosine chapter, so a cos *binomial* `(a+b·cos)` —
+// or a cos/cofunction *monomial* product (cos·csc, cos·sec) with no sine —
+// must be rewritten so the sine rules apply. The two factors share a single
+// linear argument θ; the shift θ→θ±π/2 turns cos into sin (or sin into cos)
+// while carrying the paired monomial along so both keep a common argument.
+function unifyProductClauses(
+  ce: ComputeEngine,
+  f1: Expression,
+  f2: Expression,
+  x: string
+): Expression | null {
+  const c1 = classifyFactor(ce, f1, x);
+  const c2 = classifyFactor(ce, f2, x);
+  if (c1 === null || c2 === null) return null;
+  if (!c1.arg.isSame(c2.arg)) return null;
+  const argP = c1.arg.add(ce.Pi.div(2)); // θ + π/2
+  const argM = c1.arg.sub(ce.Pi.div(2)); // θ − π/2
+
+  for (const [g, h] of [
+    [c1, c2],
+    [c2, c1],
+  ] as const) {
+    if (g.kind === 'mono' && h.kind === 'mono') {
+      // (a Cos)^m (b Csc)^n == (a Sin[θ+π/2])^m (-b Sec[θ+π/2])^n
+      if (g.head === 'cos' && h.head === 'csc')
+        return ce.function('Multiply', [
+          buildMono(ce, g.coef, 'sin', argP, g.exp),
+          buildMono(ce, h.coef.neg(), 'sec', argP, h.exp),
+        ]);
+      // (a Cos)^m (b Sec)^n == (a Sin[θ+π/2])^m (b Csc[θ+π/2])^n
+      if (g.head === 'cos' && h.head === 'sec')
+        return ce.function('Multiply', [
+          buildMono(ce, g.coef, 'sin', argP, g.exp),
+          buildMono(ce, h.coef, 'csc', argP, h.exp),
+        ]);
+    }
+    if (g.kind === 'mono' && h.kind === 'binom' && h.head === 'cos') {
+      const binomM = buildBinom(ce, h.a, h.b.neg(), 'sin', argM, h.exp); // a − b Sin[θ−π/2]
+      const binomP = buildBinom(ce, h.a, h.b, 'sin', argP, h.exp); //       a + b Sin[θ+π/2]
+      // (g Sin)^p (a+b Cos)^m == (g Cos[θ−π/2])^p (a−b Sin[θ−π/2])^m
+      if (g.head === 'sin')
+        return ce.function('Multiply', [
+          buildMono(ce, g.coef, 'cos', argM, g.exp),
+          binomM,
+        ]);
+      // (g Csc)^p (a+b Cos)^m == (g Sec[θ−π/2])^p (a−b Sin[θ−π/2])^m
+      if (g.head === 'csc')
+        return ce.function('Multiply', [
+          buildMono(ce, g.coef, 'sec', argM, g.exp),
+          binomM,
+        ]);
+      // (g Cot)^p (a+b Cos)^m == (-g Tan[θ−π/2])^p (a−b Sin[θ−π/2])^m
+      if (g.head === 'cot')
+        return ce.function('Multiply', [
+          buildMono(ce, g.coef.neg(), 'tan', argM, g.exp),
+          binomM,
+        ]);
+      // (g Tan)^p (a+b Cos)^m == (-g Cot[θ+π/2])^p (a+b Sin[θ+π/2])^m
+      if (g.head === 'tan')
+        return ce.function('Multiply', [
+          buildMono(ce, g.coef.neg(), 'cot', argP, g.exp),
+          binomP,
+        ]);
+    }
+  }
+  return null;
+}
+
 /** UnifyInertTrigFunction[u, x] (cofunction-shift subset): rewrites a
  * standalone inert cosine power/binomial `(a+b·cos)^n` to the sine cofunction
- * `(a+b·sin[arg+π/2])^n`. A no-op otherwise (incl. mixed sin·cos integrands). */
+ * `(a+b·sin[arg+π/2])^n`, and the two-factor cos/cofunction product clauses
+ * (`(a cos)^m (b csc/sec)^n`, `(g sin/csc/cot/tan)^p (a+b cos)^m`) to their
+ * sine-chapter forms. A no-op otherwise (incl. mixed sin·cos integrands that
+ * the sine rules already handle). */
 export function unifyInertTrig(
   ce: ComputeEngine,
   u: Expression,
   x: string
 ): Expression {
+  // Rubi: UnifyInertTrigFunction[a_*u_,x] := a*UnifyInertTrigFunction[u,x] /;
+  // FreeQ[a,x] — split off x-free factors, then match the two-factor product
+  // clauses on the x-dependent factors. Anything else falls through to the
+  // single-factor path below (which still handles a lone `coef·cos` monomial).
+  if (u.operator === 'Multiply' && u.ops) {
+    const xfree = u.ops.filter((o) => !o.has(x));
+    const dep = u.ops.filter((o) => o.has(x));
+    if (dep.length === 2) {
+      const conv = unifyProductClauses(ce, dep[0], dep[1], x);
+      if (conv !== null)
+        return xfree.length === 0
+          ? conv
+          : ce.function('Multiply', [...xfree, conv]);
+    }
+  }
+
   let base = u;
   let n: Expression | null = null;
   if (u.operator === 'Power' && u.ops) {

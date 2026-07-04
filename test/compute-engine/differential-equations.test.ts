@@ -506,6 +506,151 @@ describe('DSolve', () => {
 
     expect(result.operator).toBe('DSolve');
   });
+
+  // Regression: numeric-root fallback must cluster coincident Durand-Kerner
+  // roots by multiplicity instead of emitting numerically-dependent modes.
+  function solutionRhsTerms(solution: ReturnType<typeof dsolve>) {
+    const rhs = solution.op1.op2;
+    return rhs.operator === 'Add' ? [...rhs.ops] : [rhs];
+  }
+
+  function termHasFactors(
+    term: ReturnType<typeof dsolve>,
+    predicates: Array<(f: ReturnType<typeof dsolve>) => boolean>
+  ): boolean {
+    const factors = term.operator === 'Multiply' ? [...term.ops] : [term];
+    return predicates.every((p) => factors.some((f) => p(f)));
+  }
+
+  function hasNoErrorNode(expr: ReturnType<typeof dsolve>): boolean {
+    if (expr.operator === 'Error') return false;
+    return (expr.ops ?? []).every(hasNoErrorNode);
+  }
+
+  const isX = (f: ReturnType<typeof dsolve>) => f.symbol === 'x';
+  const isCos = (f: ReturnType<typeof dsolve>) => f.operator === 'Cos';
+  const isExp = (f: ReturnType<typeof dsolve>) => f.operator === 'Power';
+
+  test('solves fourth-order equation with a repeated complex-conjugate root', () => {
+    // y'''' + 2y'' + y = 0, characteristic (r^2 + 1)^2, roots +/-i (double).
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'], 'x'],
+        ['Multiply', 2, ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['y', 'x'],
+      ],
+      0,
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.operator).toBe('List');
+    const terms = solutionRhsTerms(solution);
+    // Four independent modes: cos x, sin x, x cos x, x sin x.
+    expect(terms.length).toBe(4);
+    // The repeated-root modes x*cos(x) and x*sin(x) must be present, and no
+    // spurious e^(3.8e-9 x) noise factors (checked via numeric verification).
+    expect(terms.some((t) => termHasFactors(t, [isX, isCos]))).toBe(true);
+    expect(
+      verifyEquationSolution(equation, solution, {
+        c_1: 2,
+        c_2: 3,
+        c_3: 5,
+        c_4: 7,
+        x: 0.6,
+      })
+    ).toBe(true);
+  });
+
+  test('solves fourth-order equation with a repeated real root and a complex pair', () => {
+    // y'''' - 2y''' + 2y'' - 2y' + y = 0, characteristic (r-1)^2 (r^2 + 1).
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'], 'x'],
+        ['Negate', ['Multiply', 2, ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x']]],
+        ['Multiply', 2, ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['Negate', ['Multiply', 2, ['D', ['y', 'x'], 'x']]],
+        ['y', 'x'],
+      ],
+      0,
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.operator).toBe('List');
+    const terms = solutionRhsTerms(solution);
+    // Four independent modes: e^x, x e^x, cos x, sin x.
+    expect(terms.length).toBe(4);
+    // The repeated real-root mode x*e^x must be present.
+    expect(terms.some((t) => termHasFactors(t, [isX, isExp]))).toBe(true);
+    expect(
+      verifyEquationSolution(equation, solution, {
+        c_1: 2,
+        c_2: 3,
+        c_3: 5,
+        c_4: 7,
+        x: 0.6,
+      })
+    ).toBe(true);
+  });
+
+  test('stays inert (no Error node) for nonhomogeneous Cauchy-Euler equation', () => {
+    // x^2 y'' + x y' = x. Previously produced a corrupted Error-node "solution".
+    const result = dsolve([
+      'Equal',
+      [
+        'Add',
+        ['Multiply', ['Power', 'x', 2], ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['Multiply', 'x', ['D', ['y', 'x'], 'x']],
+      ],
+      'x',
+    ]);
+
+    // Either inert, or a valid solution - but never an Error-bearing result.
+    expect(hasNoErrorNode(result)).toBe(true);
+    expect(result.operator).toBe('DSolve');
+  });
+
+  test('stays inert (no Error node) for variable-coefficient second-order equation', () => {
+    // sin(x) y'' + y' = cos(x).
+    const result = dsolve([
+      'Equal',
+      [
+        'Add',
+        ['Multiply', ['Sin', 'x'], ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['D', ['y', 'x'], 'x'],
+      ],
+      ['Cos', 'x'],
+    ]);
+
+    expect(hasNoErrorNode(result)).toBe(true);
+    expect(result.operator).toBe('DSolve');
+  });
+
+  test('stays inert for forcing that references the dependent function', () => {
+    // y'(x) = y(2x): not a supported linear ODE, must not return an unevaluated
+    // integral as a "solution".
+    const result = dsolve([
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['y', ['Multiply', 2, 'x']],
+    ]);
+
+    expect(result.operator).toBe('DSolve');
+  });
+
+  test('still solves first-order equation with non-elementary antiderivative (Erf)', () => {
+    const solution = dsolve([
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Exp', ['Negate', ['Power', 'x', 2]]],
+    ]);
+
+    expect(solution.operator).toBe('List');
+    expect(solution.toString()).toContain('Erf');
+  });
 });
 
 describe('NDSolve', () => {

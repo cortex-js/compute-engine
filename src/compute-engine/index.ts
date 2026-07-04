@@ -183,6 +183,7 @@ export {
   compile,
   getDefaultEngine,
 } from './free-functions';
+export type { FreeFunctionOptions } from './free-functions';
 import { _setDefaultEngineFactory } from './free-functions';
 
 export { validatePattern };

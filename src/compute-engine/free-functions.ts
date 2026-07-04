@@ -38,15 +38,30 @@ export function getDefaultEngine(): IComputeEngine {
   return _defaultEngine!;
 }
 
+/** Options accepted by the free functions that take a LaTeX/AsciiMath string. */
+export interface FreeFunctionOptions {
+  /** When `false` (the default for the free functions), the input string is
+   *  parsed with the looser AsciiMath/Typst-like syntax (bare function names,
+   *  multi-letter identifiers, `**`, unbraced multi-digit scripts, …). Set to
+   *  `true` to restore the strict LaTeX grammar, where, for example, `x^23` is
+   *  `3x²` (two adjacent scripts) rather than `x²³`. Ignored for non-string
+   *  inputs. */
+  strict?: boolean;
+}
+
 /** Convert a LatexString, Expression, or ExpressionInput to a boxed Expression.
- *  Strings are parsed as LaTeX. Parsing is non-strict so the free functions
- *  accept the looser AsciiMath/Typst-like syntax documented for them — bare
- *  function names and multi-letter identifiers (`sqrt(5)`, `sin(alpha)`,
- *  `alpha`), and `**` for exponentiation — in addition to canonical LaTeX. */
-function toExpression(input: LatexString | ExpressionInput): Expression {
+ *  Strings are parsed as LaTeX. Parsing defaults to non-strict so the free
+ *  functions accept the looser AsciiMath/Typst-like syntax documented for them
+ *  — bare function names and multi-letter identifiers (`sqrt(5)`, `sin(alpha)`,
+ *  `alpha`), and `**` for exponentiation — in addition to canonical LaTeX.
+ *  Pass `{ strict: true }` to opt back into the strict LaTeX grammar. */
+function toExpression(
+  input: LatexString | ExpressionInput,
+  options?: FreeFunctionOptions
+): Expression {
   if (typeof input === 'string') {
     const ce = getDefaultEngine();
-    return ce.parse(input, { strict: false }) ?? ce.expr('Nothing');
+    return ce.parse(input, { strict: options?.strict ?? false }) ?? ce.expr('Nothing');
   }
   if (isExpression(input)) return input;
   return getDefaultEngine().expr(input);
@@ -71,17 +86,23 @@ export function expr(
 
 export function simplify(
   expr: LatexString | ExpressionInput,
-  options?: Partial<SimplifyOptions>
+  options?: Partial<SimplifyOptions> & FreeFunctionOptions
 ): Expression {
-  return toExpression(expr).simplify(options);
+  return toExpression(expr, options).simplify(options);
 }
 
-export function evaluate(expr: LatexString | ExpressionInput): Expression {
-  return toExpression(expr).evaluate();
+export function evaluate(
+  expr: LatexString | ExpressionInput,
+  options?: FreeFunctionOptions
+): Expression {
+  return toExpression(expr, options).evaluate();
 }
 
-export function N(expr: LatexString | ExpressionInput): Expression {
-  return toExpression(expr).N();
+export function N(
+  expr: LatexString | ExpressionInput,
+  options?: FreeFunctionOptions
+): Expression {
+  return toExpression(expr, options).N();
 }
 
 export function declare(
@@ -109,32 +130,42 @@ export function assign(
   getDefaultEngine().assign(arg1 as any, arg2 as any);
 }
 
-export function expand(expr: LatexString | ExpressionInput): Expression {
-  return expandExpr(toExpression(expr));
+export function expand(
+  expr: LatexString | ExpressionInput,
+  options?: FreeFunctionOptions
+): Expression {
+  return expandExpr(toExpression(expr, options));
 }
 
 export function solve(
   expr: LatexString | ExpressionInput,
-  vars?: string | Iterable<string> | Expression | Iterable<Expression>
+  vars?: string | Iterable<string> | Expression | Iterable<Expression>,
+  options?: FreeFunctionOptions
 ):
   | null
   | ReadonlyArray<Expression>
   | Record<string, Expression>
   | Array<Record<string, Expression>> {
-  return toExpression(expr).solve(vars);
+  return toExpression(expr, options).solve(vars);
 }
 
-export function expandAll(expr: LatexString | ExpressionInput): Expression {
-  return expandAllExpr(toExpression(expr));
+export function expandAll(
+  expr: LatexString | ExpressionInput,
+  options?: FreeFunctionOptions
+): Expression {
+  return expandAllExpr(toExpression(expr, options));
 }
 
-export function factor(expr: LatexString | ExpressionInput): Expression {
-  return factorExpr(toExpression(expr));
+export function factor(
+  expr: LatexString | ExpressionInput,
+  options?: FreeFunctionOptions
+): Expression {
+  return factorExpr(toExpression(expr, options));
 }
 
 export function compile<T extends string = 'javascript'>(
   expr: LatexString | ExpressionInput,
-  options?: Parameters<typeof compileExpr>[1] & { to?: T }
+  options?: Parameters<typeof compileExpr>[1] & { to?: T } & FreeFunctionOptions
 ): ReturnType<typeof compileExpr> {
-  return compileExpr(toExpression(expr), options);
+  return compileExpr(toExpression(expr, options), options);
 }

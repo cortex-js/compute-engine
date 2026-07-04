@@ -118,6 +118,12 @@ const BARE_FUNCTION_MAP: Record<string, string> = {
   asin: 'Arcsin',
   acos: 'Arccos',
   atan: 'Arctan',
+  acot: 'Arccot',
+  asec: 'Arcsec',
+  acsc: 'Arccsc',
+  atan2: 'Arctan2', // Two-argument arctangent. Letter+digit name; see
+  // the longest-match in `tryParseBareFunction` (so `atan2(1,2)` is
+  // `Arctan2(1,2)`, not `Arctan` applied to `2·(1,2)`).
   // Inverse hyperbolic
   arcsinh: 'Arsinh',
   arccosh: 'Arcosh',
@@ -2048,6 +2054,29 @@ export class _Parser implements Parser {
       return null;
     }
 
+    // Longest-match for bare function names that embed a trailing digit, e.g.
+    // `atan2` → Arctan2. If the letter run followed by one or more digits forms
+    // a known function name, consume those digits as part of the name. This
+    // must run before the `log`-base and implicit-argument logic so that
+    // `atan2(1,2)` is `Arctan2(1,2)` rather than `Arctan(2·(1,2))`. (Prefer the
+    // longest matching name: only `atan2` is claimed, `atan` alone is not
+    // extended when no digit follows.)
+    if (!this.atEnd && /^[0-9]$/.test(this.peek)) {
+      let digits = '';
+      let j = this.index;
+      while (j < this._tokens.length && /^[0-9]$/.test(this._tokens[j])) {
+        digits += this._tokens[j];
+        j++;
+      }
+      for (let k = digits.length; k >= 1; k--) {
+        if (BARE_FUNCTION_MAP[name + digits.slice(0, k)] !== undefined) {
+          name += digits.slice(0, k);
+          this.index += k;
+          break;
+        }
+      }
+    }
+
     this.skipSpace();
 
     // Check for optional subscript: log_2(x) or log_{10}(x)
@@ -2177,6 +2206,16 @@ export class _Parser implements Parser {
       result = [fnName, ...args];
     }
 
+    // Mirror the strict `\sin^{-1}` convention: a `-1` exponent on a bare
+    // function denotes the inverse function, not a reciprocal. For trig and
+    // hyperbolic functions this canonicalizes to `Arcsin`, `Arsinh`, … so
+    // `sin^-1 1` → `Arcsin(1)` (not `1/sin(1)`). Other exponents (e.g. `-2`)
+    // stay a reciprocal power, matching strict `\sin^{-2}`.
+    if (exponent === -1 && Array.isArray(result)) {
+      const [head, ...callArgs] = result;
+      return ['Apply', ['InverseFunction', head], ...callArgs];
+    }
+
     return exponent !== null ? ['Power', result, exponent] : result;
   }
 
@@ -2260,6 +2299,113 @@ export class _Parser implements Parser {
     return symbolName;
   }
 
+  /** Named constants that may be recognized *inside* a longer letter run by
+   * `tryParseBareRun` (greedy longest-match). Only the spelled-out Greek
+   * letters qualify: `2pix` → `2·π·x`, `xpi` → `x·π`. The ASCII shorthands
+   * `oo`/`inf`/`ii` are deliberately excluded — they require word boundaries
+   * (so `foo` stays `f·o·o`, not `f·∞`) and are matched only as whole runs by
+   * `tryParseBareSymbol`. */
+  private static readonly SEGMENTABLE_SYMBOLS: Record<string, string> =
+    Object.fromEntries(
+      Object.entries(_Parser.BARE_SYMBOL_MAP).filter(
+        ([k]) => !['oo', 'inf', 'ii'].includes(k)
+      )
+    );
+
+  /** Length of the longest key in `SEGMENTABLE_SYMBOLS`, used to bound the
+   * greedy longest-match in `tryParseBareRun`. */
+  private static readonly MAX_SEGMENTABLE_LENGTH = Math.max(
+    ...Object.keys(_Parser.SEGMENTABLE_SYMBOLS).map((k) => k.length)
+  );
+
+  /** The MathJSON symbol names these constants map to (e.g. `alpha`, `Pi`).
+   * Used by `parseSupsub` to allow an implicit subscript on a recognized
+   * multi-letter constant base (`alpha2` → `alpha_2`). */
+  private static readonly SEGMENTABLE_SYMBOL_VALUES: Set<string> = new Set(
+    Object.values(_Parser.SEGMENTABLE_SYMBOLS)
+  );
+
+  /**
+   * In non-strict mode, handle a multi-letter run that is not itself a whole
+   * known word. This runs *after* `tryParseBareFunction` and
+   * `tryParseBareSymbol` have failed on the whole run.
+   *
+   * Two cases:
+   * - A run that is exactly a known function name but reached here (i.e. could
+   *   not be applied to an argument, e.g. `sin` in `sin*x` where the explicit
+   *   `*` blocks the implicit argument) is returned as a single unknown symbol
+   *   (`sin`), which is less surprising than the imaginary-unit letter soup
+   *   `i·n·s`.
+   * - Otherwise, greedily segment the run against the spelled-out Greek
+   *   constants (`2pix` → `2·π·x`, `xpi` → `x·π`). If no Greek constant is
+   *   found the run is left untouched (returns `null`) so the existing
+   *   per-letter parsing applies exactly as before.
+   */
+  private tryParseBareRun(): MathJsonExpression | null {
+    if (this.options.strict !== false) return null;
+
+    const start = this.index;
+
+    // Word boundary: don't match in the middle of a partially consumed word.
+    if (start > 0 && /^[a-zA-Z]$/.test(this._tokens[start - 1])) return null;
+
+    // Collect the letter run.
+    let name = '';
+    while (!this.atEnd && /^[a-zA-Z]$/.test(this.peek)) {
+      name += this.peek;
+      this.index++;
+    }
+
+    // Only handle multi-letter runs. Single letters (including a standalone
+    // `i`) are left to the existing symbol / imaginary-unit handling.
+    if (name.length < 2) {
+      this.index = start;
+      return null;
+    }
+
+    // A whole run that is a known function name but could not be applied is
+    // returned as a single unknown symbol (`sin*x` → `sin·x`).
+    if (BARE_FUNCTION_MAP[name] !== undefined) return name;
+
+    // Greedy longest-match segmentation against spelled-out Greek constants.
+    const symbols = _Parser.SEGMENTABLE_SYMBOLS;
+    const segments: MathJsonExpression[] = [];
+    let matchedConstant = false;
+    let i = 0;
+    while (i < name.length) {
+      let matched = false;
+      const maxLen = Math.min(name.length - i, _Parser.MAX_SEGMENTABLE_LENGTH);
+      // Segmentable constants are all at least 2 characters long.
+      for (let len = maxLen; len >= 2; len--) {
+        const candidate = name.slice(i, i + len);
+        if (symbols[candidate] !== undefined) {
+          segments.push(symbols[candidate]);
+          i += len;
+          matched = true;
+          matchedConstant = true;
+          break;
+        }
+      }
+      if (!matched) {
+        // A single leftover letter, emitted as-is. (The boxer still maps the
+        // identifiers `e`/`i` to `ExponentialE`/`ImaginaryUnit`, matching how
+        // they parse standalone — that is a symbol-level decision, not one the
+        // parser overrides here.)
+        segments.push(name[i]);
+        i += 1;
+      }
+    }
+
+    // Only take over the run when a Greek constant was actually recognized;
+    // otherwise leave it to the unchanged per-letter path.
+    if (!matchedConstant) {
+      this.index = start;
+      return null;
+    }
+
+    return segments.length === 1 ? segments[0] : ['Multiply', ...segments];
+  }
+
   /**
    * Parse a sequence superfix/subfix operator, e.g. `^{*}`
    *
@@ -2285,12 +2431,16 @@ export class _Parser implements Parser {
     // …) are the common intent of ASCII/copy-paste input; producing a subscript
     // (rather than a superscript power) preserves the index, matches the strict
     // `x_2` form, and follows the recommendation in `docs/LENIENT_PARSER.md`.
+    // The base may be a single letter (`x2`) or a recognized multi-letter
+    // constant name (`alpha2` → `alpha_2`, `Pi2` → `Pi_2`); an arbitrary
+    // multi-letter run never reaches here as a single string (it is a product),
+    // so this stays conservative.
     // Check before skipSpace() to require true adjacency.
     if (
       this.options.strict === false &&
       typeof lhs === 'string' &&
-      lhs.length === 1 &&
-      /^[a-zA-Z]$/.test(lhs) &&
+      ((lhs.length === 1 && /^[a-zA-Z]$/.test(lhs)) ||
+        _Parser.SEGMENTABLE_SYMBOL_VALUES.has(lhs)) &&
       /^[0-9]$/.test(this.peek)
     ) {
       let digits = '';
@@ -2697,6 +2847,10 @@ export class _Parser implements Parser {
 
     // In non-strict mode, try to parse bare symbol names like alpha, pi, oo
     result ??= this.tryParseBareSymbol();
+
+    // In non-strict mode, segment a multi-letter run that isn't a whole known
+    // word (e.g. `2pix` → `2·π·x`), avoiding stray imaginary-unit injection.
+    result ??= this.tryParseBareRun();
 
     // ParseGenericExpression() has priority. Some generic expressions
     // may include symbols which have not been explicitly defined

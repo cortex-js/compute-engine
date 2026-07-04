@@ -100,6 +100,7 @@ export {
   compile,
   getDefaultEngine,
 } from './compute-engine/free-functions';
+export type { FreeFunctionOptions } from './compute-engine/free-functions';
 
 // ── Type guards ─────────────────────────────────────────────────────
 export {

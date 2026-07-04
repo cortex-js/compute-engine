@@ -567,15 +567,139 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       );
     });
 
-    test('tan^-1(x)', () => {
+    test('tan^-1(x) → Arctan (inverse, not reciprocal)', () => {
+      // A `-1` exponent denotes the inverse function, mirroring strict
+      // `\tan^{-1}`. Other exponents remain a reciprocal power (see below).
       expect(ce.parse('tan^-1(x)', { strict: false })).toMatchInlineSnapshot(
-        `["Divide", 1, ["Tan", "x"]]`
+        `["Arctan", "x"]`
       );
     });
 
     test('sin^2(x) + cos^2(x) identity', () => {
       const a = ce.parse('sin^2(x) + cos^2(x)', { strict: false })!;
       expect(a.isEqual(1)).toBe(true);
+    });
+  });
+
+  // A `-1` exponent on a bare function denotes the inverse function, matching
+  // strict `\sin^{-1}`. Other exponents stay a reciprocal power.
+  describe('Bare inverse functions (^-1)', () => {
+    test('sin^-1 1 → Arcsin(1)', () => {
+      expect(ce.parse('sin^-1 1', { strict: false })).toMatchInlineSnapshot(
+        `["Arcsin", 1]`
+      );
+    });
+
+    test('cos^-1 x → Arccos(x)', () => {
+      expect(ce.parse('cos^-1 x', { strict: false })).toMatchInlineSnapshot(
+        `["Arccos", "x"]`
+      );
+    });
+
+    test('tan^-1 x → Arctan(x)', () => {
+      expect(ce.parse('tan^-1 x', { strict: false })).toMatchInlineSnapshot(
+        `["Arctan", "x"]`
+      );
+    });
+
+    test('sinh^-1 x → Arsinh(x)', () => {
+      expect(ce.parse('sinh^-1 x', { strict: false })).toMatchInlineSnapshot(
+        `["Arsinh", "x"]`
+      );
+    });
+
+    test('sin^-2 x stays a reciprocal power (matches strict)', () => {
+      // Only `-1` is the inverse function; `-2` is an ordinary reciprocal
+      // power, exactly as strict `\sin^{-2}` parses it.
+      const loose = ce.parse('sin^-2 x', { strict: false });
+      const strict = ce.parse('\\sin^{-2} x', { strict: true });
+      expect(loose.json).toEqual(strict.json);
+      expect(loose.operator).not.toBe('Arcsin');
+    });
+  });
+
+  // Function names that embed a trailing digit (`atan2`) and previously-missing
+  // inverse-trig aliases.
+  describe('Bare function name gaps', () => {
+    test('atan2(1, 2) → Arctan2(1, 2)', () => {
+      expect(ce.parse('atan2(1, 2)', { strict: false })).toMatchInlineSnapshot(
+        `["Arctan2", 1, 2]`
+      );
+    });
+
+    test('acot(x) → Arccot(x)', () => {
+      expect(ce.parse('acot(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Arccot", "x"]`
+      );
+    });
+
+    test('asec(x) → Arcsec(x)', () => {
+      expect(ce.parse('asec(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Arcsec", "x"]`
+      );
+    });
+
+    test('acsc(x) → Arccsc(x)', () => {
+      expect(ce.parse('acsc(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Arccsc", "x"]`
+      );
+    });
+
+    // `atan` alone is unaffected — the digit is only absorbed when it forms a
+    // known longer name (`atan2`).
+    test('atan(x) stays Arctan(x)', () => {
+      expect(ce.parse('atan(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Arctan", "x"]`
+      );
+    });
+  });
+
+  // Greedy segmentation of a multi-letter run that isn't a whole known word:
+  // embedded Greek constants are recognized and a stray `*`-blocked function
+  // name becomes a plain symbol rather than imaginary-unit letter soup.
+  describe('Bare letter-run segmentation', () => {
+    test('2pix → 2·π·x', () => {
+      expect(ce.parse('2pix', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", 2, "Pi", "x"]`
+      );
+    });
+
+    test('xpi → x·π', () => {
+      expect(ce.parse('xpi', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", "Pi", "x"]`
+      );
+    });
+
+    // `sin` cannot take an implicit argument across the explicit `*`, so it is
+    // returned as a plain symbol (not the letter soup `i·n·s`).
+    test('sin*x → sin·x (sin as unknown symbol)', () => {
+      expect(ce.parse('sin*x', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", "sin", "x"]`
+      );
+    });
+
+    // Word-bounded ASCII shorthands are NOT matched inside a run: `foo` keeps
+    // its letters and does not pick up `oo` → ∞.
+    test('foo(x) stays letters (oo not matched mid-run)', () => {
+      expect(ce.parse('foo(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", "f", "o", "o", "x"]`
+      );
+    });
+  });
+
+  // An implicit subscript is also accepted on a recognized multi-letter
+  // constant base (`alpha2` → `alpha_2`), not only single letters.
+  describe('Implicit subscript on constant base', () => {
+    test('alpha2 → alpha_2', () => {
+      expect(ce.parse('alpha2', { strict: false })).toMatchInlineSnapshot(
+        `alpha_2`
+      );
+    });
+
+    test('theta12 → theta_12', () => {
+      expect(ce.parse('theta12', { strict: false })).toMatchInlineSnapshot(
+        `theta_12`
+      );
     });
   });
 

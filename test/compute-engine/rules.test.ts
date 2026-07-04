@@ -453,6 +453,192 @@ describe('fail-open rule-condition guards', () => {
     });
   });
 
+  describe('condition must return exactly true (or boxed True) to fire', () => {
+    // A rule condition is typed to return a boolean. A boxed `False` is a
+    // truthy JS object: with the old `!condition(...)` check it satisfied
+    // the condition and the rule fired.
+    let warnSpy: ReturnType<typeof jest.spyOn>;
+    beforeEach(() => {
+      warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it('a condition returning boxed False does not fire the rule', () => {
+      const engine = new ComputeEngine();
+      const r = engine.expr(['Sin', 'x']).replace({
+        match: ['Sin', '_x'],
+        replace: ['Cos', '_x'],
+        condition: (() => engine.False) as any,
+      });
+      expect(r).toBeNull();
+      // A one-time warning teaches the user their condition is malformed
+      expect(warnSpy).toHaveBeenCalled();
+      expect(String(warnSpy.mock.calls[0][0])).toContain('non-boolean');
+    });
+
+    it('a condition returning boxed True still fires the rule', () => {
+      const engine = new ComputeEngine();
+      const r = engine.expr(['Sin', 'x']).replace({
+        match: ['Sin', '_x'],
+        replace: ['Cos', '_x'],
+        condition: (() => engine.True) as any,
+      });
+      expect(r?.toString()).toBe('cos(x)');
+    });
+
+    it('a condition returning true fires, false does not', () => {
+      const engine = new ComputeEngine();
+      const fire = engine.expr(['Sin', 'x']).replace({
+        match: ['Sin', '_x'],
+        replace: ['Cos', '_x'],
+        condition: () => true,
+      });
+      expect(fire?.toString()).toBe('cos(x)');
+      const noFire = engine.expr(['Sin', 'x']).replace({
+        match: ['Sin', '_x'],
+        replace: ['Cos', '_x'],
+        condition: () => false,
+      });
+      expect(noFire).toBeNull();
+    });
+
+    it('other truthy non-boolean returns do not fire the rule', () => {
+      const engine = new ComputeEngine();
+      const r = engine.expr(['Sin', 'x']).replace({
+        match: ['Sin', '_x'],
+        replace: ['Cos', '_x'],
+        condition: (() => 'yes') as any,
+      });
+      expect(r).toBeNull();
+      expect(warnSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('a throwing condition skips the rule without losing operand rewrites', () => {
+    it('operand-level rewrites survive a condition throw at the root', () => {
+      const engine = new ComputeEngine();
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      // One rule: matches the inner Add(y, z) (condition passes, rewritten to
+      // Multiply) and the outer Add (condition throws). The throw must mean
+      // "rule does not apply at this node", not "discard the subtree work".
+      const expr = engine.expr(['Add', 'x', ['Add', 'y', 'z']], {
+        form: 'raw',
+      });
+      const r = expr.replace(
+        {
+          match: ['Add', '_a', '_b'],
+          replace: ['Multiply', '_a', '_b'],
+          condition: (sub) => {
+            if ((sub._a as any)?.symbol === 'x') throw new Error('boom');
+            return true;
+          },
+        },
+        { recursive: true, matchPermutations: false }
+      );
+      spy.mockRestore();
+      expect(r).not.toBeNull();
+      expect(r?.toString()).toBe('x + y * z');
+    });
+  });
+
+  describe('single and sequence wildcards are distinct in condition substitutions', () => {
+    it('_x and __x are distinct keys, with the single wildcard providing the bare alias', () => {
+      const engine = new ComputeEngine();
+      let seen: Record<string, string | undefined> | null = null;
+      const r = engine.expr(['Add', 5, 7, 11], { form: 'raw' }).replace(
+        {
+          match: ['Add', '_x', '__x'],
+          replace: 42,
+          condition: (sub) => {
+            seen = {
+              single: (sub._x as any)?.toString(),
+              seq: (sub.__x as any)?.toString(),
+              bare: (sub.x as any)?.toString(),
+            };
+            return true;
+          },
+        },
+        { matchPermutations: false }
+      );
+      expect(r?.toString()).toBe('42');
+      expect(seen).not.toBeNull();
+      expect(seen!.single).toBe('5');
+      expect(seen!.seq).toBe('7 + 11');
+      // Bare alias comes from the single wildcard (most specific binding)
+      expect(seen!.bare).toBe('5');
+    });
+
+    it('a sequence wildcard __x does not create a phantom _x key', () => {
+      const engine = new ComputeEngine();
+      let keys: string[] = [];
+      let phantom: unknown = 'unset';
+      let bare: string | undefined;
+      engine.expr(['Add', 5, 7, 11], { form: 'raw' }).replace(
+        {
+          match: ['Add', '_a', '__x'],
+          replace: 42,
+          condition: (sub) => {
+            keys = Object.keys(sub).sort();
+            phantom = sub._x;
+            bare = (sub.x as any)?.toString();
+            return true;
+          },
+        },
+        { matchPermutations: false }
+      );
+      // Pre-fix: `k.slice(1)` turned '__x' into a phantom '_x' key
+      expect(keys).toEqual(['__x', '_a', 'a', 'x']);
+      expect(phantom).toBeUndefined();
+      // The bare alias strips the full wildcard prefix
+      expect(bare).toBe('7 + 11');
+    });
+  });
+
+  describe('constants e and i in string rules', () => {
+    it("string rule 'e^2 -> 7' matches the canonical ExponentialE power", () => {
+      const engine = new ComputeEngine();
+      expect(engine.parse('e^2').replace('e^2 -> 7')?.toString()).toBe('7');
+    });
+
+    it('e in a rule replacement produces the canonical constant', () => {
+      const engine = new ComputeEngine();
+      const r = engine.parse('\\pi').replace('\\pi -> e');
+      expect(r?.canonical.symbol).toBe('ExponentialE');
+    });
+
+    it('i in a string rule matches the canonical imaginary unit', () => {
+      const engine = new ComputeEngine();
+      expect(engine.parse('i^2').replace('i^2 -> 42')?.toString()).toBe('42');
+    });
+
+    it('e/i in object-rule LaTeX match strings are normalized too', () => {
+      const engine = new ComputeEngine();
+      expect(
+        engine.parse('e^2').replace({ match: 'e^2', replace: 7 })?.toString()
+      ).toBe('7');
+    });
+  });
+
+  describe('explicit wildcards in LaTeX match strings', () => {
+    it("{match: '_a + 1'} treats _a as a wildcard", () => {
+      const engine = new ComputeEngine();
+      const r = engine
+        .expr(['Add', 'y', 1], { form: 'raw' })
+        .replace({ match: '_a + 1', replace: ['Multiply', 2, '_a'] });
+      expect(r?.toString()).toBe('2y');
+    });
+
+    it("{match: '__a + 1'} treats __a as a sequence wildcard", () => {
+      const engine = new ComputeEngine();
+      const r = engine
+        .expr(['Add', 'y', 'z', 1], { form: 'raw' })
+        .replace({ match: '__a + 1', replace: 7 });
+      expect(r?.toString()).toBe('7');
+    });
+  });
+
   describe('P1-10: multi-condition LaTeX shortcuts parse and are fail-closed', () => {
     const shortcuts = [
       '\\in\\Z^+',

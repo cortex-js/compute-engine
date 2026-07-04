@@ -5,13 +5,13 @@
 //
 // Scope: all of Chapter 1 (algebraic), Chapter 2 (exponentials), and Chapter 6
 // (hyperbolics) — all fully ported (active heads, ~Chapter-1 difficulty;
-// docs/rubi/RUBI.md §5, Phase R3+) — plus the verified Chapter-4 trig slice.
-// The trig files are listed EXPLICITLY rather than walked: only the
-// `(a+b cos+c sin)^n` Weierstrass family is supported by the current inert-trig
-// bridge (RUBI.md §5, Phase R3 trig pilot); the rest of Chapter 4 needs the
-// ExpandTrig / FixInert / UnifyInert argument-unification layer, so bundling it
-// would only add dead compile weight. Append new files here as further trig
-// families are verified.
+// docs/rubi/RUBI.md §5, Phase R3+) — plus the full Chapter-4 §4.1 Sine family
+// (RUBI.md §5, Phase R4). The whole `4.1 Sine` section is walked (all 21 files
+// compile clean, 0 skips, 918 rules): the inert-trig bridge (deactivateTrig /
+// unifyInertTrig cofunction unification in rubi/rubi-utils.ts) now routes the
+// bare-sine/cosine and (a+b sin)^m·… families through these rules, so they are
+// live rather than dead compile weight. Append further Chapter-4 sections
+// (4.2 Cosine, …) here as they are verified.
 //
 // Chapter 6 also relies on driver-level fallbacks (rubi/driver.ts: the
 // hyperbolic→exponential expansion and the FunctionOfExponential substitution)
@@ -23,9 +23,7 @@ import { readCorpusDocs } from './compile';
 const ch1Dir = 'data/rubi/corpus/1 Algebraic functions';
 const ch2Dir = 'data/rubi/corpus/2 Exponentials';
 const ch6Dir = 'data/rubi/corpus/6 Hyperbolic functions';
-const trigFiles = [
-  'data/rubi/corpus/4 Trig functions/4.1 Sine/4.1.6 (a+b cos+c sin)^n.json',
-];
+const trigSineDir = 'data/rubi/corpus/4 Trig functions/4.1 Sine';
 const out = 'src/compute-engine/rubi/rubi-rules-data.json';
 
 // Strip the `source` (original WL text) field — it is runtime-dead (only the
@@ -34,7 +32,7 @@ const docs = [
   ...readCorpusDocs(ch1Dir),
   ...readCorpusDocs(ch2Dir),
   ...readCorpusDocs(ch6Dir),
-  ...trigFiles.map((f) => JSON.parse(fs.readFileSync(f, 'utf8'))),
+  ...readCorpusDocs(trigSineDir),
 ].map((d) => ({
   file: d.file,
   rules: d.rules.map(({ source, ...rest }) => rest),

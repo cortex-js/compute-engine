@@ -31,6 +31,11 @@ import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary'
 import { isPrime } from './predicates';
 import { isString, isNumber, isSymbol, isFunction } from './type-guards';
 import { getRuleIndex, candidateRules } from './rule-index';
+
+/** Condition functions that already triggered the one-time "non-boolean
+ * condition result" warning (see `applyRule`). */
+const _warnedNonBooleanCondition = new WeakSet<RuleConditionFunction>();
+
 // @todo:
 // export function fixPoint(rule: Rule);
 // export function chain(rules: RuleSet);
@@ -379,6 +384,57 @@ function parseModifierExpression(parser: Parser): string | null {
   return conditions;
 }
 
+/**
+ * `e` and `i` are declared with `holdUntil: 'never'` (see
+ * `library/arithmetic.ts`): any *canonical* occurrence is eagerly resolved to
+ * `ExponentialE` / `Complex(0, 1)`. Rule match/replace/condition patterns are
+ * parsed **raw** (canonicalization would collapse pattern structure and
+ * wildcards), which skips that definition lookup entirely — a bare `e` or
+ * `i` typed in a rule stays a literal, unbound symbol and can never
+ * structurally match (or serialize as) the canonical value real expressions
+ * use (e.g. `'e^2 -> 7'` never fires because the match pattern holds the
+ * literal symbol `e`, not `ExponentialE`). Both letters are deliberately
+ * excluded from this file's auto-wildcard letter list (`d`/`e`/`i` are
+ * skipped, see `parseRule`'s dictionary setup), so a literal `e`/`i` in a
+ * rule always denotes the constant, never a pattern variable — resolving
+ * them post-parse is therefore safe as well as necessary.
+ */
+function resolveRuleConstant(x: Expression): Expression {
+  if (isSymbol(x, 'e'))
+    return x.engine.symbol('ExponentialE', { canonical: false });
+  if (isSymbol(x, 'i')) return x.engine.I;
+  return x;
+}
+
+/** Rewrite literal `e` / `i` symbols anywhere in a raw (non-canonicalized)
+ * rule expression to their canonical constant. See `resolveRuleConstant`. */
+function normalizeRuleConstants(expr: Expression): Expression {
+  return expr.map(resolveRuleConstant, { canonical: false });
+}
+
+/**
+ * An explicit wildcard in a LaTeX match/replace string (e.g.
+ * `{match: '_a + 1'}`) is not valid LaTeX: the lenient parser reads `_a` as
+ * `InvisibleOperator('_', 'a')` and `__a` as `Subscript('_', 'a')`, so the
+ * pattern silently never matches. Recover the intended wildcard symbol from
+ * those two shapes. (A triple-underscore `___a` parses to a nested shape
+ * that is not recovered here — use MathJSON patterns for those.)
+ */
+function resolveWildcardShorthand(x: Expression): Expression {
+  if (isFunction(x, 'InvisibleOperator') && isSymbol(x.ops[0], '_')) {
+    // `_a` → InvisibleOperator('_', 'a'); `_ab` → InvisibleOperator('_', 'a', 'b')
+    const rest = x.ops.slice(1);
+    if (rest.length > 0 && rest.every((op) => isSymbol(op)))
+      return x.engine.symbol(
+        '_' + rest.map((op) => (op as Expression & { symbol: string }).symbol).join('')
+      );
+  }
+  // `__a` → Subscript('_', 'a'): a sequence wildcard
+  if (isFunction(x, 'Subscript') && isSymbol(x.op1, '_') && isSymbol(x.op2))
+    return x.engine.symbol('__' + x.op2.symbol);
+  return x;
+}
+
 /* Return an expression for a match/replace part of a rule if a LaTeX string
  or MathJSON expression.
 
@@ -402,6 +458,14 @@ function parseRulePart(
       ce.parse(rule, {
         form: options?.canonical ? 'canonical' : 'raw',
       }) ?? ce.expr('Nothing');
+    // Resolve literal `e` / `i` to their canonical constant (see
+    // `resolveRuleConstant`). A no-op when `options.canonical` is true: in
+    // that case `ce.parse` already canonicalized the constant at parse time.
+    expr = normalizeRuleConstants(expr);
+    // Recover explicit wildcards (`_a`, `__a`) that the lenient LaTeX parser
+    // fragments into InvisibleOperator/Subscript shapes (see
+    // `resolveWildcardShorthand`).
+    expr = expr.map(resolveWildcardShorthand, { canonical: false });
     // Only auto-wildcard when explicitly requested (e.g., when parsing
     // rule strings like "a*x -> 2*x"). For object rules, keep symbols literal.
     if (options?.autoWildcard) {
@@ -594,10 +658,23 @@ function parseRule(
     if (!isFunction(expr)) {
       throw new Error(`Invalid rule "${rule}"`);
     }
-    const [match_, replace_, condition] = expr.ops;
+    const [match_, replace_, condition_] = expr.ops;
 
-    let match = match_;
-    let replace = replace_;
+    // `e` and `i` are excluded from this file's auto-wildcard letter list
+    // (see the dictionary setup above) because they are reserved for the
+    // constants `ExponentialE` / the imaginary unit, never pattern
+    // variables. But match/replace/condition are parsed *raw* to preserve
+    // wildcard structure, which skips the `holdUntil: 'never'` definition
+    // lookup that normally resolves a bare `e`/`i` (see
+    // `library/arithmetic.ts`); normalize them explicitly here so a literal
+    // `e`/`i` in a rule structurally matches (and serializes as) the same
+    // canonical value ordinary (canonical) parsing produces.
+    let match = normalizeRuleConstants(match_);
+    let replace = normalizeRuleConstants(replace_);
+    const condition =
+      condition_ !== undefined
+        ? normalizeRuleConstants(condition_)
+        : undefined;
     if (canonical) {
       match = match.canonical;
       replace = replace.canonical;
@@ -986,24 +1063,62 @@ export function applyRule(
 
   // If the condition doesn't match, the rule doesn't apply
   if (typeof condition === 'function') {
-    // The substitution includes wildcards. Transform wildcards to their
-    // corresponding values.
-    // So if `sub = {_a: 2, _b: 3}`, then the substitution will be
-    // `{a: 2, b: 3, _a: 2, _b: 3}`
+    // The substitution includes wildcards. Also expose each capture under its
+    // bare name (full wildcard prefix stripped) so conditions written with
+    // plain symbols can read captures.
+    // So if `sub = {_a: 2, __b: 3}`, the substitution will be
+    // `{a: 2, b: 3, _a: 2, __b: 3}`
+    //
+    // The original wildcard keys are always kept and are authoritative:
+    // `_x` and `__x` remain distinct keys. Previously the bare aliases were
+    // computed with `k.slice(1)`, which turned the sequence wildcard `__x`
+    // into `_x` — colliding with (and clobbering) a distinct single wildcard
+    // `_x` captured by the same rule.
+    //
+    // If a rule captures wildcards of different arities with the same name
+    // (e.g. both `_x` and `__x`), the *single* wildcard provides the bare
+    // alias: aliases are added in decreasing prefix length, so the shortest
+    // prefix (the most specific binding) wins.
+    const conditionSub: BoxedSubstitution = { ...sub };
+    const prefixLen = (k: string): number => /^_*/.exec(k)![0].length;
+    for (const [k, v] of Object.entries(sub).sort(
+      (a, b) => prefixLen(b[0]) - prefixLen(a[0])
+    )) {
+      const bare = k.slice(prefixLen(k));
+      // Skip anonymous wildcards (nothing after the prefix) and any bare
+      // name that would collide with an actual capture key.
+      if (bare && !(bare in sub)) conditionSub[bare] = v;
+    }
 
-    // Because some substitution may be sequence wildcards (e.g. ...x)
-    // or optional sequence wildcards (e.g. ...x?) we keep them in the substitution as well
-    // @todo: shouldn't this check that the subs start with _?
-    const conditionSub = {
-      ...Object.fromEntries(
-        Object.entries(sub).map(([k, v]) => [k.slice(1), v])
-      ),
-      ...sub,
-    };
-
+    // Evaluate the condition. Fail-closed and non-destructive:
+    //
+    // - `RuleConditionFunction` is typed to return a `boolean`: only an exact
+    //   `true` — or, as a courtesy, the boxed symbol `True` (a common mistake
+    //   when returning an evaluated predicate) — satisfies the condition.
+    //   Anything else, *including truthy objects* (a boxed `False` is a
+    //   truthy JS object!), means the rule does not apply. A one-time
+    //   warning is emitted for non-boolean returns so a malformed condition
+    //   doesn't silently always-fire or never-fire.
+    //
+    // - A *throw* while evaluating the condition means "this rule does not
+    //   apply at this node" — exactly as if the condition returned `false`.
+    //   In particular it must NOT discard operand-level replacements already
+    //   performed by the recursive descent above (`operandsMatched`).
+    let conditionSatisfied: boolean;
     try {
-      if (!condition(conditionSub, ce))
-        return operandsMatched ? stepOf(expr) : null;
+      const outcome = condition(conditionSub, ce) as unknown;
+      if (typeof outcome === 'boolean') conditionSatisfied = outcome;
+      else {
+        if (!_warnedNonBooleanCondition.has(condition)) {
+          _warnedNonBooleanCondition.add(condition);
+          console.warn(
+            `\n|   Rule "${rule.id}"\n|   The condition function returned a non-boolean value (${
+              isExpression(outcome) ? outcome.toString() : String(outcome)
+            }).\n|   A rule condition must return true or false.\n|   Only \`true\` (or the boxed symbol \`True\`) satisfies the condition.`
+          );
+        }
+        conditionSatisfied = isExpression(outcome) && isSymbol(outcome, 'True');
+      }
     } catch (e) {
       // Propagate deadline cancellations: timeouts must not be swallowed
       // as "the condition failed".
@@ -1013,8 +1128,9 @@ export function applyRule(
           e instanceof Error ? e.message : e
         }`
       );
-      return null;
+      conditionSatisfied = false;
     }
+    if (!conditionSatisfied) return operandsMatched ? stepOf(expr) : null;
   }
 
   /** The computed form value to be assumed by the *directly replaced* expression: assuming either an
