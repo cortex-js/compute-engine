@@ -141,12 +141,25 @@ const BUILD_OPTIONS = {
 // Build all variants in parallel for maximum performance
 //
 await Promise.all([
-  // Build the library (non-minified)
+  // Build the library + the integration-rules plugin as ONE esbuild
+  // invocation with code splitting, so the shared engine core (BigDecimal,
+  // boxed expressions, numeric-value, latex-syntax, …) is emitted ONCE into a
+  // common chunk that both `compute-engine.esm.js` and
+  // `integration-rules.esm.js` import. Without this, the integration-rules
+  // bundle re-bundles the entire engine and its duplicate class definitions
+  // break cross-bundle `instanceof` checks (e.g. a host-created BigDecimal
+  // fails `instanceof BigDecimal` inside the plugin's statically-imported
+  // engine code). Splitting is ESM-only; the UMD variants below stay
+  // self-contained single files.
+  // (non-minified)
   esbuild.build({
     ...BUILD_OPTIONS,
-    entryPoints: ['./src/compute-engine.ts'],
-    outfile: './dist/compute-engine.esm.js',
+    entryPoints: ['./src/compute-engine.ts', './src/integration-rules.ts'],
+    outdir: './dist',
     format: 'esm',
+    splitting: true,
+    entryNames: '[name].esm',
+    chunkNames: 'chunks/[name]-[hash]',
   }),
 
   esbuild.build({
@@ -174,15 +187,21 @@ await Promise.all([
     globalName: 'MathJson',
   }),
 
-  // Build the minified library
+  // Build the minified library + integration-rules plugin with code splitting
+  // (see the non-minified split build above for the rationale). Emits
+  // `compute-engine.min.esm.js`, `integration-rules.min.esm.js`, and one or
+  // more shared `chunks/chunk-*.js` files.
   esbuild.build({
     ...BUILD_OPTIONS,
     drop: ['debugger'],
     pure: ['console.assert', 'console.log'],
     minify: true,
-    entryPoints: ['./src/compute-engine.ts'],
-    outfile: './dist/compute-engine.min.esm.js',
+    entryPoints: ['./src/compute-engine.ts', './src/integration-rules.ts'],
+    outdir: './dist',
     format: 'esm',
+    splitting: true,
+    entryNames: '[name].min.esm',
+    chunkNames: 'chunks/[name]-[hash]',
   }),
 
   esbuild.build({
@@ -459,14 +478,9 @@ await Promise.all([
     globalName: 'Identities',
   }),
 
-  // integration-rules (non-minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/integration-rules.ts'],
-    outfile: './dist/integration-rules.esm.js',
-    format: 'esm',
-  }),
-
+  // integration-rules ESM (both minified + non-minified) are built together
+  // with the main library via the code-splitting builds above so they share a
+  // single engine chunk. Only the self-contained UMD variants are built here.
   esbuild.build({
     ...BUILD_OPTIONS,
     entryPoints: ['./src/integration-rules.ts'],
@@ -474,17 +488,6 @@ await Promise.all([
     format: 'iife',
     ...INTEGRATION_RULES_UMD_OPTIONS,
     globalName: 'IntegrationRules',
-  }),
-
-  // integration-rules (minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/integration-rules.ts'],
-    outfile: './dist/integration-rules.min.esm.js',
-    format: 'esm',
   }),
 
   esbuild.build({
