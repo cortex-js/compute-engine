@@ -38,6 +38,12 @@ import type {
 import { bignumPreferred } from '../boxed-expression/utils';
 import { toInteger } from '../boxed-expression/numerics';
 import { deterministicRandom, nextSeed } from '../numerics/random';
+import {
+  distributionMean,
+  distributionStandardDeviation,
+  distributionVariance,
+  isDistributionExpression,
+} from './distributions';
 
 // Geometric mean:
 // Harmonic mean:
@@ -197,10 +203,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Mean: {
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection|number)+) -> number',
+      signature: '((collection|number|distribution)+) -> number',
       type: () => 'finite_real',
       description: 'Arithmetic mean of a collection of numbers.',
       evaluate: (ops, { engine, numericApproximation }) => {
+        if (ops.length === 1 && isDistributionExpression(ops[0])) {
+          const r = distributionMean(engine, ops[0]);
+          return numericApproximation ? r?.N() : r;
+        }
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactMean(engine, vals);
@@ -239,9 +249,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Sample variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection|number)+) -> number',
+      signature: '((collection|number|distribution)+) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine, numericApproximation }) => {
+        if (ops.length === 1 && isDistributionExpression(ops[0])) {
+          const r = distributionVariance(engine, ops[0]);
+          return numericApproximation ? r?.N() : r;
+        }
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactVariance(engine, vals, false);
@@ -279,9 +293,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       description: 'Sample Standard Deviation of a collection of numbers.',
-      signature: '((collection|number)+) -> number',
+      signature: '((collection|number|distribution)+) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine, numericApproximation }) => {
+        if (ops.length === 1 && isDistributionExpression(ops[0])) {
+          const r = distributionStandardDeviation(engine, ops[0]);
+          return numericApproximation ? r?.N() : r;
+        }
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals)

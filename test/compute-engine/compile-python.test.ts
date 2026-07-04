@@ -553,4 +553,22 @@ describe('PYTHON TARGET', () => {
       );
     });
   });
+
+  // GammaRegularized(a, z) = Q(a, z); scipy's gammaincc(a, z) matches our
+  // argument order directly. BetaRegularized(x, a, b) = I_x(a, b), but
+  // scipy.special.betainc(a, b, x) takes a DIFFERENT argument order — the
+  // Python target must reorder when emitting the call.
+  describe('Regularized incomplete gamma / beta', () => {
+    it('GammaRegularized maps straight through to scipy.special.gammaincc', () => {
+      const code = python.compile(ce.box(['GammaRegularized', 3, 'x'])).code;
+      expect(code).toBe('scipy.special.gammaincc(3, x)');
+    });
+
+    it('BetaRegularized reorders (x, a, b) to scipy.special.betainc(a, b, x)', () => {
+      const code = python.compile(
+        ce.box(['BetaRegularized', 'x', 2, 3])
+      ).code;
+      expect(code).toBe('scipy.special.betainc(2, 3, x)');
+    });
+  });
 });

@@ -842,3 +842,25 @@ describe('INTERVAL JS - WP-2.17 INTERPRETER ALIGNMENT', () => {
     expect(rPos.hi).toBe(3);
   });
 });
+
+// GammaRegularized/BetaRegularized have no interval kernel (`_IA` has no
+// gammaQ/betaRegularized equivalent). Compiling must fail closed — report
+// `success: false` with the offending head listed as unsupported — rather
+// than silently emit wrong (point-only) code.
+describe('INTERVAL JS - fails closed on regularized gamma/beta (no kernel)', () => {
+  test('GammaRegularized is reported unsupported', () => {
+    const fn = compile(ce.box(['GammaRegularized', 3, 'x']), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(false);
+    expect(fn.unsupported).toContain('GammaRegularized');
+  });
+
+  test('BetaRegularized is reported unsupported', () => {
+    const fn = compile(ce.box(['BetaRegularized', 'x', 2, 3]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(false);
+    expect(fn.unsupported).toContain('BetaRegularized');
+  });
+});

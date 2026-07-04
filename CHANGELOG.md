@@ -63,6 +63,38 @@
     `TrigReduce(\sin^2 x)` → $\tfrac{1 - \cos 2x}{2}$ and
     `TrigReduce(\sin x\cos x)` → $\tfrac{\sin 2x}{2}$.
 
+- **Probability distributions: `NormalDistribution`, `BinomialDistribution`,
+  `PoissonDistribution`, `UniformDistribution`, `ExponentialDistribution`,
+  consumed by the generic `PDF`, `CDF`, and `Quantile` operators.** A
+  distribution is a first-class value — assign it, pass it around, query it:
+  - `PDF(dist, x)`, `CDF(dist, x)` and `Quantile(dist, p)` evaluate to
+    **exact closed forms**: `CDF(NormalDistribution(0, 1), x)` →
+    $\tfrac12\left(1 + \operatorname{erf}\tfrac{x}{\sqrt2}\right)$, an
+    ordinary expression that can be simplified, differentiated, compiled and
+    plotted. Exact arguments give exact results —
+    `PDF(BinomialDistribution(4, \tfrac12), 2)` → $\tfrac38$ — and `.N()`
+    numericizes at machine or arbitrary precision.
+  - For discrete distributions `PDF` is the probability mass function, and
+    `Quantile` (the least $k$ with $\operatorname{CDF}(k) \ge p$) is computed
+    by exact search: `Quantile(PoissonDistribution(9), 0.95)` → `14`.
+  - `Mean`, `Variance`, and `StandardDeviation` now also accept a
+    distribution: `Mean(NormalDistribution(\mu, \sigma))` → $\mu$,
+    `Variance(BinomialDistribution(n, p))` → $np(1-p)$.
+  - `NormalDistribution(\mu, \sigma)` takes the standard deviation (not the
+    variance), and `ExponentialDistribution(\lambda)` the rate — the
+    Mathematica and scipy conventions.
+
+- **`GammaRegularized` and `BetaRegularized` — the regularized incomplete
+  gamma and beta functions.** `GammaRegularized(a, z)` is
+  $Q(a, z) = \Gamma(a, z)/\Gamma(a)$ and `BetaRegularized(x, a, b)` is
+  $I_x(a, b)$. They follow the exactness contract (special values fold —
+  `GammaRegularized(1, z)` → $e^{-z}$ — and exact arguments stay symbolic),
+  evaluate numerically at machine and arbitrary precision, and compile to
+  JavaScript and Python (`scipy.special.gammaincc`/`betainc`). The discrete
+  distribution CDFs evaluate to closed forms in these functions, e.g.
+  `CDF(PoissonDistribution(\lambda), k)` →
+  $\operatorname{GammaRegularized}(k+1, \lambda)$.
+
 - **`Divides` and `NotDivides` express divisibility.** `a \mid b` parses to
   `Divides(a, b)` and `p \nmid ab` to `NotDivides(...)`; both evaluate for
   concrete integers (`Divides(3, 12)` → `True`) and stay symbolic otherwise.
@@ -101,6 +133,29 @@
   and an extra condition can ride on the domain
   (`n \in 1..100, n > 5`-style, as in `Sum` indexing sets). The two-argument
   form is unchanged.
+
+- **Multiple unknowns enumerate over the product of their domains.**
+  `Solve(x^3+y^3=1729,\; x \in 1..12,\; y \in 1..12)` →
+  `[(1,12), (9,10), (10,9), (12,1)]` — a `List` of `Tuple`s in unknown
+  order, with the same budget, exact-confirmation, and interruption
+  guarantees as the univariate case.
+
+- **Periodic equations expand their root families over a bounded domain.**
+  `Solve(\sin x = \tfrac12,\; x \in [0, 4\pi])` returns all four exact
+  solutions $\tfrac{\pi}{6}, \tfrac{5\pi}{6}, \tfrac{13\pi}{6},
+  \tfrac{17\pi}{6}$ — not just the principal values. Scaled arguments work
+  too (`\sin 2x = 1` over $[0, 2\pi]$ → $\tfrac{\pi}{4}, \tfrac{5\pi}{4}$).
+  Expansion applies when the unknown appears only inside trigonometric
+  functions of linear arguments; each family member is verified by exact
+  substitution, and unreasonably large expansions degrade gracefully to the
+  principal roots.
+
+- **`assume()` bounds now filter solutions.** After `assume(n > 0)`,
+  `Solve(n^2 = 16, n)` (and `expr.solve("n")`) returns `[4]` instead of
+  `[4, -4]`; `assume(n \in 1..10)`, inequality, and `\ne` assumptions are
+  honored the same way, conjunctively with any explicit domain. Roots are
+  dropped only when an assumption definitely excludes them — symbolic roots
+  that cannot be decided are kept.
 
 ### Parsing Resilience
 

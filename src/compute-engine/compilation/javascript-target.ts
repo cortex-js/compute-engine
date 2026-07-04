@@ -70,6 +70,8 @@ import {
   ellipticPiIncomplete,
   hypergeometric2F1,
   hypergeometric1F1,
+  gammaQ,
+  betaRegularized,
 } from '../numerics/special-functions';
 import { choose } from '../boxed-expression/expand';
 import {
@@ -781,6 +783,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Special functions
   Beta: '_SYS.beta',
+  // Regularized incomplete gamma/beta. Argument order matches the kernels
+  // directly (GammaRegularized(a, z) = Q(a, z); BetaRegularized(x, a, b) =
+  // I_x(a, b)), so a plain name mapping suffices.
+  GammaRegularized: '_SYS.gammaQ',
+  BetaRegularized: '_SYS.betaRegularized',
   Digamma: '_SYS.digamma',
   Trigamma: '_SYS.trigamma',
   PolyGamma: (args, compile) =>
@@ -1469,6 +1476,8 @@ const SYS_HELPERS = {
   erfc,
   erfInv,
   beta,
+  gammaQ,
+  betaRegularized,
   digamma,
   trigamma,
   polygamma,

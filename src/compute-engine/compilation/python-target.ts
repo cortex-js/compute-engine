@@ -409,6 +409,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Gamma: 'scipy.special.gamma',
   GammaLn: 'scipy.special.loggamma',
   Factorial: 'scipy.special.factorial',
+  // Regularized upper incomplete gamma Q(a, z); scipy's argument order matches
+  // ours directly.
+  GammaRegularized: 'scipy.special.gammaincc',
+  // Regularized incomplete beta I_x(a, b); scipy.special.betainc(a, b, x)
+  // takes a DIFFERENT argument order than ours (x, a, b) — reorder here.
+  BetaRegularized: ([x, a, b], compile) => {
+    if (x === null || a === null || b === null)
+      throw new Error('BetaRegularized: missing argument');
+    return `scipy.special.betainc(${compile(a)}, ${compile(b)}, ${compile(x)})`;
+  },
 
   // Common patterns
   List: (args, compile) => {

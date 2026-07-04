@@ -409,3 +409,59 @@ describe('C1 — toSignedFunction()', () => {
     expect(result?.run?.({ x: 2, y: 0, z: 0 })).toBeCloseTo(3);
   });
 });
+
+// GammaRegularized / BetaRegularized — regularized incomplete gamma/beta
+// kernels backing the distribution CDFs. JS target maps directly to the
+// `gammaQ`/`betaRegularized` numeric kernels (no argument reordering); GLSL
+// and WGSL have no kernel for either, so compiling must fail closed (D6,
+// base-compiler.ts ~477) rather than silently emit wrong code.
+describe('GammaRegularized / BetaRegularized compile', () => {
+  const ce = new ComputeEngine();
+
+  test('GammaRegularized compiles to JS and matches N()', () => {
+    const expr = ce.box(['GammaRegularized', 3, 'x']);
+    const result = compile(expr);
+    expect(result?.success).toBe(true);
+    expect(result?.code).toContain('_SYS.gammaQ');
+    for (const x of [0.5, 2, 5, 10]) {
+      const want = ce.box(['GammaRegularized', 3, x]).N().re;
+      expect(result?.run?.({ x }) as number).toBeCloseTo(want, 12);
+    }
+  });
+
+  test('BetaRegularized compiles to JS and matches N()', () => {
+    const expr = ce.box(['BetaRegularized', 'x', 2, 3]);
+    const result = compile(expr);
+    expect(result?.success).toBe(true);
+    expect(result?.code).toContain('_SYS.betaRegularized');
+    for (const x of [0.1, 0.3, 0.5, 0.9]) {
+      const want = ce.box(['BetaRegularized', x, 2, 3]).N().re;
+      expect(result?.run?.({ x }) as number).toBeCloseTo(want, 12);
+    }
+  });
+
+  test('evaluated Poisson CDF closed form (GammaRegularized) compiles and matches N()', () => {
+    // CDF(PoissonDistribution(4), x) evaluates to GammaRegularized(x+1, 4);
+    // verify the *evaluated* closed form — not the CDF wrapper — compiles.
+    const closedForm = ce.box(['CDF', ['PoissonDistribution', 4], 'x']).evaluate();
+    expect(closedForm.operator).toBe('GammaRegularized');
+    const result = compile(closedForm);
+    expect(result?.success).toBe(true);
+    for (const k of [0, 2, 4, 6, 10]) {
+      const want = ce.box(['CDF', ['PoissonDistribution', 4], k]).N().re;
+      expect(result?.run?.({ x: k }) as number).toBeCloseTo(want, 9);
+    }
+  });
+
+  test('GammaRegularized fails closed (no kernel) in GLSL and WGSL', () => {
+    const expr = ce.box(['GammaRegularized', 3, 'x']);
+    expect(() => new GLSLTarget().compile(expr)).toThrow(/Unknown operator/);
+    expect(() => new WGSLTarget().compile(expr)).toThrow(/Unknown operator/);
+  });
+
+  test('BetaRegularized fails closed (no kernel) in GLSL and WGSL', () => {
+    const expr = ce.box(['BetaRegularized', 'x', 2, 3]);
+    expect(() => new GLSLTarget().compile(expr)).toThrow(/Unknown operator/);
+    expect(() => new WGSLTarget().compile(expr)).toThrow(/Unknown operator/);
+  });
+});

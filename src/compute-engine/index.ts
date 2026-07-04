@@ -540,6 +540,15 @@ export class ComputeEngine implements IComputeEngine {
 
     // Declare the standard types
     this.declareType('limits', 'expression<Limits>');
+    // `alias: true` makes `distribution` a *structural* type: a value whose
+    // type is `expression<NormalDistribution>` (etc.) is a subtype of the
+    // union. A nominal reference (the default) would not match, so `PDF`/
+    // `CDF`/`Mean`(distribution)… would reject their distribution argument.
+    this.declareType(
+      'distribution',
+      'expression<NormalDistribution> | expression<BinomialDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | expression<ExponentialDistribution>',
+      { alias: true }
+    );
 
     startup.bootstrapLibraries(options?.libraries);
 

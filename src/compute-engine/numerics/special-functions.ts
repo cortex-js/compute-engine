@@ -170,6 +170,141 @@ export function incompleteGammaUpper(s: number, z: number): number {
   return upperGammaCFReal(s, z);
 }
 
+// ---------------------------------------------------------------------------
+// Regularized incomplete gamma P(a,x)/Q(a,x) and beta I_x(a,b).
+//
+// Machine kernels follow Numerical Recipes (gammp/gammq/betacf): a power
+// series for the lower function when x < a+1, a Lentz continued fraction for
+// the upper function otherwise, sharing the exp(a·ln x − x − gammaln(a))
+// prefactor. The regularized beta uses the betacf continued fraction plus the
+// symmetry I_x(a,b) = 1 − I_{1−x}(b,a) so the CF is always evaluated in its
+// fast-converging half. Per the project policy on wrong-digit kernels, inputs
+// outside the validated domain return NaN rather than an inaccurate value.
+// ---------------------------------------------------------------------------
+
+/** Underflow floor for the machine Lentz continued fractions below. */
+const GAMMA_FPMIN = 1e-300;
+
+/** Lower regularized gamma P(a,x) via its power series (NR gser); valid for
+ *  x < a+1, where the series converges fastest. Requires a > 0, x ≥ 0. */
+function gammaPSeries(a: number, x: number): number {
+  if (x === 0) return 0;
+  let ap = a;
+  let del = 1 / a;
+  let sum = del;
+  for (let n = 0; n < 1000; n++) {
+    ap += 1;
+    del *= x / ap;
+    sum += del;
+    if (Math.abs(del) < Math.abs(sum) * 1e-16) break;
+  }
+  return sum * Math.exp(a * Math.log(x) - x - gammaln(a));
+}
+
+/** Upper regularized gamma Q(a,x) via the Legendre continued fraction (NR
+ *  gcf), evaluated with Lentz's algorithm; valid for x ≥ a+1. a > 0, x > 0. */
+function gammaQContinuedFraction(a: number, x: number): number {
+  let b = x + 1 - a;
+  let c = 1 / GAMMA_FPMIN;
+  let d = 1 / b;
+  let h = d;
+  for (let i = 1; i < 1000; i++) {
+    const an = -i * (i - a);
+    b += 2;
+    d = an * d + b;
+    if (Math.abs(d) < GAMMA_FPMIN) d = GAMMA_FPMIN;
+    c = b + an / c;
+    if (Math.abs(c) < GAMMA_FPMIN) c = GAMMA_FPMIN;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-16) break;
+  }
+  return Math.exp(a * Math.log(x) - x - gammaln(a)) * h;
+}
+
+/**
+ * Lower regularized incomplete gamma P(a,x) = γ(a,x)/Γ(a), for real a > 0 and
+ * x ≥ 0. Returns NaN outside that domain.
+ */
+export function gammaP(a: number, x: number): number {
+  if (Number.isNaN(a) || Number.isNaN(x)) return NaN;
+  if (a <= 0 || x < 0) return NaN;
+  if (x === 0) return 0;
+  if (x < a + 1) return gammaPSeries(a, x);
+  return 1 - gammaQContinuedFraction(a, x);
+}
+
+/**
+ * Upper regularized incomplete gamma Q(a,x) = Γ(a,x)/Γ(a) = 1 − P(a,x), for
+ * real a > 0 and x ≥ 0. Returns NaN outside that domain. The continued
+ * fraction is used directly for x ≥ a+1 so the tail keeps full relative
+ * precision instead of coming from 1 − P.
+ */
+export function gammaQ(a: number, x: number): number {
+  if (Number.isNaN(a) || Number.isNaN(x)) return NaN;
+  if (a <= 0 || x < 0) return NaN;
+  if (x === 0) return 1;
+  if (x < a + 1) return 1 - gammaPSeries(a, x);
+  return gammaQContinuedFraction(a, x);
+}
+
+/** Continued fraction for the regularized incomplete beta (NR betacf),
+ *  evaluated with Lentz's algorithm. Converges rapidly for x < (a+1)/(a+b+2);
+ *  the caller applies the reflection symmetry otherwise. */
+function betaContinuedFraction(a: number, b: number, x: number): number {
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < GAMMA_FPMIN) d = GAMMA_FPMIN;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m < 1000; m++) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < GAMMA_FPMIN) d = GAMMA_FPMIN;
+    c = 1 + aa / c;
+    if (Math.abs(c) < GAMMA_FPMIN) c = GAMMA_FPMIN;
+    d = 1 / d;
+    h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < GAMMA_FPMIN) d = GAMMA_FPMIN;
+    c = 1 + aa / c;
+    if (Math.abs(c) < GAMMA_FPMIN) c = GAMMA_FPMIN;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-16) break;
+  }
+  return h;
+}
+
+/**
+ * Regularized incomplete beta I_x(a,b) (Mathematica's BetaRegularized[x,a,b]),
+ * for real a > 0, b > 0 and 0 ≤ x ≤ 1. Returns NaN outside that domain, and
+ * the exact endpoints 0 (x=0) and 1 (x=1).
+ */
+export function betaRegularized(x: number, a: number, b: number): number {
+  if (Number.isNaN(x) || Number.isNaN(a) || Number.isNaN(b)) return NaN;
+  if (a <= 0 || b <= 0 || x < 0 || x > 1) return NaN;
+  if (x === 0) return 0;
+  if (x === 1) return 1;
+  const bt = Math.exp(
+    gammaln(a + b) -
+      gammaln(a) -
+      gammaln(b) +
+      a * Math.log(x) +
+      b * Math.log(1 - x)
+  );
+  if (x < (a + 1) / (a + b + 2))
+    return (bt * betaContinuedFraction(a, b, x)) / a;
+  return 1 - (bt * betaContinuedFraction(b, a, 1 - x)) / b;
+}
+
 /**
  * Winitzki's approximation for the inverse error function, accurate to
  * ~2e-3 relative over (-1, 1). Used as the Newton seed for `erfInv()` and
@@ -907,6 +1042,205 @@ export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
       .mul(gammaCore(ce, b))
       .div(gammaCore(ce, a.add(b)))
   );
+}
+
+// ---------------------------------------------------------------------------
+// Bignum regularized incomplete gamma P(a,x)/Q(a,x) and beta I_x(a,b). Same
+// algorithms as the machine kernels above (series for the lower gamma when
+// x < a+1, Lentz continued fractions otherwise, beta reflection symmetry),
+// carried out in BigDecimal at the working precision plus SPECIAL_FN_GUARD
+// guard digits. The prefactor uses `gammalnCore` (already inside the raised
+// precision). Convergence loops are capped and `checkDeadline`-guarded; inputs
+// outside the validated domain return a NaN BigNum rather than wrong digits.
+// ---------------------------------------------------------------------------
+
+/** Lower regularized gamma P(a,x) via the power series, in BigDecimal. Must be
+ *  called inside the guard-digit context with a > 0, 0 < x < a+1. */
+function bigGammaPSeries(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
+  const p = BigDecimal.precision;
+  const tol = new BigDecimal(10).pow(-p);
+  let ap = a;
+  let del = BigDecimal.ONE.div(a);
+  let sum = del;
+  const maxTerms = 2000 + 20 * Math.ceil(Math.abs(x.toNumber())) + 20 * p;
+  for (let n = 0; n < maxTerms; n++) {
+    if ((n & 0xff) === 0) checkDeadline(ce._deadline);
+    ap = ap.add(BigDecimal.ONE);
+    del = del.mul(x).div(ap);
+    sum = sum.add(del);
+    if (del.abs().lt(sum.abs().mul(tol))) break;
+  }
+  const prefactor = a.mul(x.ln()).sub(x).sub(gammalnCore(ce, a)).exp();
+  return sum.mul(prefactor);
+}
+
+/** Upper regularized gamma Q(a,x) via the Legendre continued fraction (Lentz),
+ *  in BigDecimal. Must be called inside the guard-digit context with a > 0,
+ *  x ≥ a+1. */
+function bigGammaQContinuedFraction(
+  ce: ComputeEngine,
+  a: BigNum,
+  x: BigNum
+): BigNum {
+  const p = BigDecimal.precision;
+  const tol = new BigDecimal(10).pow(-p);
+  const tiny = new BigDecimal(10).pow(-(2 * p));
+  let b = x.add(BigDecimal.ONE).sub(a);
+  let c = BigDecimal.ONE.div(tiny);
+  let d = BigDecimal.ONE.div(b);
+  let h = d;
+  const maxTerms = 2000 + 20 * p;
+  for (let i = 1; i < maxTerms; i++) {
+    if ((i & 0xff) === 0) checkDeadline(ce._deadline);
+    const an = new BigDecimal(i).sub(a).mul(-i); // −i·(i−a)
+    b = b.add(BigDecimal.TWO);
+    d = an.mul(d).add(b);
+    if (d.abs().lt(tiny)) d = tiny;
+    c = b.add(an.div(c));
+    if (c.abs().lt(tiny)) c = tiny;
+    d = BigDecimal.ONE.div(d);
+    const del = d.mul(c);
+    h = h.mul(del);
+    if (del.sub(BigDecimal.ONE).abs().lt(tol)) break;
+  }
+  const prefactor = a.mul(x.ln()).sub(x).sub(gammalnCore(ce, a)).exp();
+  return prefactor.mul(h);
+}
+
+/**
+ * Bignum lower regularized incomplete gamma P(a,x) = γ(a,x)/Γ(a), for a > 0
+ * and x ≥ 0. Precision scales with `BigDecimal.precision`. Returns a NaN
+ * BigNum outside the validated domain.
+ */
+export function bigGammaP(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
+  if (a.isNaN() || x.isNaN()) return BigDecimal.NAN;
+  if (!a.isFinite() || !x.isFinite()) return BigDecimal.NAN;
+  if (!a.isPositive()) return BigDecimal.NAN;
+  if (x.isNegative()) return BigDecimal.NAN;
+  if (x.isZero()) return BigDecimal.ZERO;
+  // Series when x < 2a+2, continued fraction otherwise. The band just above
+  // the machine boundary x = a+1 is where the continued fraction converges
+  // slowest (linearly, ~x/digit near x = a+1) — at high precision the power
+  // series, which needs only ≈(x−a)+O(p) terms there, is far cheaper, so this
+  // boundary is pushed out well past NR's machine-precision x = a+1.
+  return withGuardDigits(SPECIAL_FN_GUARD, () =>
+    x.lt(a.mul(2).add(BigDecimal.TWO))
+      ? bigGammaPSeries(ce, a, x)
+      : BigDecimal.ONE.sub(bigGammaQContinuedFraction(ce, a, x))
+  );
+}
+
+/**
+ * Bignum upper regularized incomplete gamma Q(a,x) = Γ(a,x)/Γ(a) = 1 − P(a,x),
+ * for a > 0 and x ≥ 0. Precision scales with `BigDecimal.precision`. The
+ * continued fraction is used directly for x ≥ a+1 so the tail keeps full
+ * relative precision. Returns a NaN BigNum outside the validated domain.
+ */
+export function bigGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
+  if (a.isNaN() || x.isNaN()) return BigDecimal.NAN;
+  if (!a.isFinite() || !x.isFinite()) return BigDecimal.NAN;
+  if (!a.isPositive()) return BigDecimal.NAN;
+  if (x.isNegative()) return BigDecimal.NAN;
+  if (x.isZero()) return BigDecimal.ONE;
+  // See bigGammaP for the x < 2a+2 series/continued-fraction boundary rationale.
+  return withGuardDigits(SPECIAL_FN_GUARD, () =>
+    x.lt(a.mul(2).add(BigDecimal.TWO))
+      ? BigDecimal.ONE.sub(bigGammaPSeries(ce, a, x))
+      : bigGammaQContinuedFraction(ce, a, x)
+  );
+}
+
+/** Continued fraction for the regularized incomplete beta (NR betacf, Lentz),
+ *  in BigDecimal. Must be called inside the guard-digit context with a,b > 0
+ *  and x in the fast-converging half x < (a+1)/(a+b+2). */
+function bigBetaContinuedFraction(
+  ce: ComputeEngine,
+  a: BigNum,
+  b: BigNum,
+  x: BigNum
+): BigNum {
+  const p = BigDecimal.precision;
+  const tol = new BigDecimal(10).pow(-p);
+  const tiny = new BigDecimal(10).pow(-(2 * p));
+  const qab = a.add(b);
+  const qap = a.add(BigDecimal.ONE);
+  const qam = a.sub(BigDecimal.ONE);
+  let c = BigDecimal.ONE;
+  let d = BigDecimal.ONE.sub(qab.mul(x).div(qap));
+  if (d.abs().lt(tiny)) d = tiny;
+  d = BigDecimal.ONE.div(d);
+  let h = d;
+  const maxTerms = 1000 + 10 * p;
+  for (let m = 1; m < maxTerms; m++) {
+    if ((m & 0xff) === 0) checkDeadline(ce._deadline);
+    const m2 = 2 * m;
+    // m·(b−m)·x / ((a−1+2m)·(a+2m))
+    let aa = b
+      .sub(m)
+      .mul(m)
+      .mul(x)
+      .div(qam.add(m2).mul(a.add(m2)));
+    d = BigDecimal.ONE.add(aa.mul(d));
+    if (d.abs().lt(tiny)) d = tiny;
+    c = BigDecimal.ONE.add(aa.div(c));
+    if (c.abs().lt(tiny)) c = tiny;
+    d = BigDecimal.ONE.div(d);
+    h = h.mul(d).mul(c);
+    // −(a+m)·(a+b+m)·x / ((a+2m)·(a+1+2m))
+    aa = a
+      .add(m)
+      .mul(qab.add(m))
+      .mul(x)
+      .neg()
+      .div(a.add(m2).mul(qap.add(m2)));
+    d = BigDecimal.ONE.add(aa.mul(d));
+    if (d.abs().lt(tiny)) d = tiny;
+    c = BigDecimal.ONE.add(aa.div(c));
+    if (c.abs().lt(tiny)) c = tiny;
+    d = BigDecimal.ONE.div(d);
+    const del = d.mul(c);
+    h = h.mul(del);
+    if (del.sub(BigDecimal.ONE).abs().lt(tol)) break;
+  }
+  return h;
+}
+
+/**
+ * Bignum regularized incomplete beta I_x(a,b) (Mathematica's
+ * BetaRegularized[x,a,b]), for a > 0, b > 0 and 0 ≤ x ≤ 1. Precision scales
+ * with `BigDecimal.precision`. Returns the exact endpoints 0/1, and a NaN
+ * BigNum outside the validated domain.
+ */
+export function bigBetaRegularized(
+  ce: ComputeEngine,
+  x: BigNum,
+  a: BigNum,
+  b: BigNum
+): BigNum {
+  if (x.isNaN() || a.isNaN() || b.isNaN()) return BigDecimal.NAN;
+  if (!x.isFinite() || !a.isFinite() || !b.isFinite()) return BigDecimal.NAN;
+  if (!a.isPositive() || !b.isPositive()) return BigDecimal.NAN;
+  if (x.isNegative() || x.gt(BigDecimal.ONE)) return BigDecimal.NAN;
+  if (x.isZero()) return BigDecimal.ZERO;
+  if (x.eq(BigDecimal.ONE)) return BigDecimal.ONE;
+  return withGuardDigits(SPECIAL_FN_GUARD, () => {
+    const bt = gammalnCore(ce, a.add(b))
+      .sub(gammalnCore(ce, a))
+      .sub(gammalnCore(ce, b))
+      .add(a.mul(x.ln()))
+      .add(b.mul(BigDecimal.ONE.sub(x).ln()))
+      .exp();
+    const boundary = a
+      .add(BigDecimal.ONE)
+      .div(a.add(b).add(BigDecimal.TWO));
+    if (x.lt(boundary))
+      return bt.mul(bigBetaContinuedFraction(ce, a, b, x)).div(a);
+    return BigDecimal.ONE.sub(
+      bt
+        .mul(bigBetaContinuedFraction(ce, b, a, BigDecimal.ONE.sub(x)))
+        .div(b)
+    );
+  });
 }
 
 /**

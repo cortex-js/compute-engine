@@ -36,6 +36,18 @@ function venvHasNumpy(): boolean {
   }
 }
 
+function venvHasScipy(): boolean {
+  try {
+    if (!fs.existsSync(VENV_PYTHON)) return false;
+    execFileSync(VENV_PYTHON, ['-c', 'import scipy.special'], {
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 type Case = {
   name: string;
   expr: any;
@@ -232,5 +244,82 @@ describeMaybe('PYTHON EXECUTION PARITY (venv)', () => {
         expect(Math.abs((a as number) - e)).toBeLessThanOrEqual(1e-10);
       }
     }
+  });
+});
+
+/**
+ * GammaRegularized / BetaRegularized execution parity — mapped to
+ * `scipy.special.gammaincc` / `scipy.special.betainc` (the latter with a
+ * reordered argument list, see `python-target.ts`). Gated on the venv having
+ * *scipy* (not just numpy), since scipy is not part of the base venv used by
+ * the suite above — skipped rather than failing when unavailable.
+ */
+const SPECIAL_CASES: Case[] = [
+  {
+    name: 'gamma_regularized',
+    expr: ['GammaRegularized', 3, 'x'],
+    params: ['x'],
+    inputs: [{ x: 0.5 }, { x: 2 }, { x: 5 }, { x: 10 }],
+  },
+  {
+    name: 'beta_regularized',
+    expr: ['BetaRegularized', 'x', 2, 3],
+    params: ['x'],
+    inputs: [{ x: 0.1 }, { x: 0.3 }, { x: 0.5 }, { x: 0.9 }],
+  },
+];
+
+const describeScipyMaybe =
+  venvHasNumpy() && venvHasScipy() ? describe : describe.skip;
+
+describeScipyMaybe('PYTHON EXECUTION PARITY — scipy special functions (venv)', () => {
+  const python = new PythonTarget();
+
+  it('GammaRegularized / BetaRegularized emitted Python matches interpreter .N()', () => {
+    let src = 'import numpy as np\nimport cmath\nimport scipy.special\nimport json\n\n';
+    const expected: number[] = [];
+
+    for (const c of SPECIAL_CASES) {
+      const fnName = `fn_${c.name}`;
+      const fn = python.compileFunction(ce.box(c.expr), fnName, c.params);
+      src += `${fn}\n`;
+
+      for (const inp of c.inputs) {
+        ce.pushScope();
+        for (const [k, v] of Object.entries(inp)) {
+          ce.declare(k, 'number');
+          ce.assign(k, v);
+        }
+        const iv = ce.box(c.expr).N();
+        ce.popScope();
+        expected.push(iv.re);
+      }
+    }
+
+    src += '\nresults = []\n';
+    for (const c of SPECIAL_CASES) {
+      for (const inp of c.inputs) {
+        const argStr = c.params.map((p) => inp[p]).join(', ');
+        src += `results.append(float(fn_${c.name}(${argStr})))\n`;
+      }
+    }
+    src += 'print(json.dumps(results))\n';
+
+    const file = path.join(
+      os.tmpdir(),
+      `ce-py-parity-special-${process.pid}.py`
+    );
+    fs.writeFileSync(file, src);
+    let out = '';
+    try {
+      out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+    const actual = JSON.parse(out) as number[];
+
+    expect(actual.length).toBe(expected.length);
+    for (let i = 0; i < expected.length; i++)
+      expect(Math.abs(actual[i] - expected[i])).toBeLessThanOrEqual(1e-10);
   });
 });

@@ -14,6 +14,7 @@ import { RELOP_LIBRARY } from './relational-operator';
 import { SETS_LIBRARY } from './sets';
 import { SPECIAL_FUNCTIONS_LIBRARY } from './special-functions';
 import { STATISTICS_LIBRARY } from './statistics';
+import { DISTRIBUTIONS_LIBRARY } from './distributions';
 import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 import { UNITS_LIBRARY } from './units';
 import { FRACTALS_LIBRARY } from './fractals';
@@ -116,7 +117,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
   {
     name: 'statistics',
     requires: ['arithmetic'],
-    definitions: STATISTICS_LIBRARY,
+    definitions: [...STATISTICS_LIBRARY, ...DISTRIBUTIONS_LIBRARY],
   },
   {
     name: 'units',

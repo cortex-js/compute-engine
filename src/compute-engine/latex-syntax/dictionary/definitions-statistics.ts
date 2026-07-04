@@ -1,8 +1,40 @@
 import type { MathJsonExpression } from '../../../math-json/types';
 import { symbol } from '../../../math-json/utils';
-import type { LatexDictionary, Parser, Terminator } from '../types';
+import type {
+  LatexDictionary,
+  Parser,
+  Serializer,
+  Terminator,
+} from '../types';
+
+// The distribution heads and `PDF`/`CDF`/`Quantile`/`GammaRegularized`/
+// `BetaRegularized` round-trip via the default `\operatorname{…}(…)` path
+// (the `Series` pattern). An explicit `kind: 'expression'` serialize entry is
+// needed for each so an unevaluated expression serializes with `\operatorname`
+// and re-parses to the same head.
+const OPERATORNAME_HEADS = [
+  'NormalDistribution',
+  'BinomialDistribution',
+  'PoissonDistribution',
+  'UniformDistribution',
+  'ExponentialDistribution',
+  'PDF',
+  'CDF',
+  'Quantile',
+  'GammaRegularized',
+  'BetaRegularized',
+];
 
 export const DEFINITIONS_STATISTICS: LatexDictionary = [
+  ...OPERATORNAME_HEADS.map(
+    (name) =>
+      ({
+        kind: 'expression',
+        name,
+        serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+          `\\operatorname{${name}}` + serializer.wrapArguments(expr),
+      }) as LatexDictionary[number]
+  ),
   {
     name: 'Mean',
     kind: 'function',
