@@ -24,6 +24,11 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards';
 import { numericTypeHandler, elementaryFunctionType } from './type-handlers';
+import {
+  trigExpand,
+  trigToExp,
+  trigReduce,
+} from '../symbolic/trig-rewrite';
 import { getUnitScale } from './unit-data';
 import {
   bigFresnelC,
@@ -489,6 +494,57 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         );
       },
       evaluate: (ops, { engine: ce }) => processInverseFunction(ce, ops),
+    },
+  },
+
+  //
+  // Trigonometric rewrite verbs (transformation functions like Expand/Factor).
+  // These are `lazy` so the operand is transformed structurally rather than
+  // evaluated first, then the result is canonicalized.
+  //
+  {
+    TrigExpand: {
+      description:
+        'Expand trigonometric and hyperbolic functions of sums and integer ' +
+        'multiples of angles. ' +
+        'Example: TrigExpand(sin(a+b)) → sin(a)cos(b) + cos(a)sin(b), ' +
+        'TrigExpand(sin(2x)) → 2 sin(x) cos(x)',
+      lazy: true,
+      signature: '(value) -> value',
+      evaluate: ([x], { numericApproximation }) => {
+        if (!x) return x;
+        const r = trigExpand(x.canonical);
+        return numericApproximation ? r.N() : r;
+      },
+    },
+
+    TrigToExp: {
+      description:
+        'Rewrite trigonometric and hyperbolic functions in terms of the ' +
+        'complex exponential, exactly. ' +
+        'Example: TrigToExp(sin(x)) → -(i/2) e^{ix} + (i/2) e^{-ix}',
+      lazy: true,
+      signature: '(value) -> value',
+      evaluate: ([x], { numericApproximation }) => {
+        if (!x) return x;
+        const r = trigToExp(x.canonical);
+        return numericApproximation ? r.N() : r;
+      },
+    },
+
+    TrigReduce: {
+      description:
+        'Rewrite products and integer powers of trigonometric and hyperbolic ' +
+        'functions as a linear combination of functions of multiple angles ' +
+        '(the inverse of TrigExpand). ' +
+        'Example: TrigReduce(sin(x)^2) → (1 - cos(2x))/2',
+      lazy: true,
+      signature: '(value) -> value',
+      evaluate: ([x], { numericApproximation }) => {
+        if (!x) return x;
+        const r = trigReduce(x.canonical);
+        return numericApproximation ? r.N() : r;
+      },
     },
   },
 ];

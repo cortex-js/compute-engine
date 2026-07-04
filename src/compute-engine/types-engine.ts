@@ -264,6 +264,7 @@ export interface IComputeEngine {
     options?: {
       metadata?: Metadata;
       form?: FormOption;
+      structural?: boolean;
       scope?: Scope;
     }
   ): Expression;

@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### New Operators
+
+- **`TrigExpand`, `TrigToExp`, and `TrigReduce` rewrite trigonometric and
+  hyperbolic expressions.** These are transformation verbs in the spirit of
+  `Expand`/`Factor` and preserve exactness.
+  - `TrigExpand` expands functions of sums and integer multiples of angles:
+    `TrigExpand(\sin(a+b))` → $\sin a\cos b + \cos a\sin b$ and
+    `TrigExpand(\cos(2x))` → $\cos^2 x - \sin^2 x$ (hyperbolic analogs, and
+    `\sec`/`\csc`/`\cot` as reciprocals of the expanded `\cos`/`\sin`, are also
+    handled).
+  - `TrigToExp` rewrites trigonometric and hyperbolic functions in terms of the
+    complex exponential, exactly:
+    `TrigToExp(\sin x)` → $-\tfrac{i}{2}e^{ix} + \tfrac{i}{2}e^{-ix}$.
+  - `TrigReduce` is the inverse of `TrigExpand`, rewriting products and integer
+    powers as functions of multiple angles:
+    `TrigReduce(\sin^2 x)` → $\tfrac{1 - \cos 2x}{2}$ and
+    `TrigReduce(\sin x\cos x)` → $\tfrac{\sin 2x}{2}$.
+
 ### Packaging
 
 - **The `integration-rules` plugin shares code with the main library.** The
