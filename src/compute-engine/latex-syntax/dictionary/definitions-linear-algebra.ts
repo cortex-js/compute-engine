@@ -301,7 +301,10 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     // matrix pseudo-inverse. `PseudoInverse` applies only to non-set (e.g.
     // matrix-typed) bases. Sets without a dedicated positive set fall through to
     // the general `Superplus` postfix (a signed-set modifier).
-    parse: (_parser: Parser, lhs: MathJsonExpression): MathJsonExpression | null => {
+    parse: (
+      _parser: Parser,
+      lhs: MathJsonExpression
+    ): MathJsonExpression | null => {
       if (typeof lhs === 'string') {
         if (lhs in POSITIVE_SET_MODIFIER)
           return POSITIVE_SET_MODIFIER[lhs] as MathJsonExpression;

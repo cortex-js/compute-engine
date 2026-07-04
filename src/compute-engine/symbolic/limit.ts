@@ -125,8 +125,7 @@ function limitDispatch(
 
   if (point.isInfinity === true) {
     // Map x → −∞ onto x → +∞ via the substitution x ↦ −x.
-    let g =
-      point.isNegative === true ? e.subs({ [x]: ce.symbol(x).neg() }) : e;
+    let g = point.isNegative === true ? e.subs({ [x]: ce.symbol(x).neg() }) : e;
     // Combine cancellation-prone `ln`/`√` differences BEFORE any leading-order
     // or growth ranking: co-dominant pairs like `ln(x+1) − ln x` (~1/x) defeat
     // the asymptotic pass, which ranked them by their (cancelling) leading

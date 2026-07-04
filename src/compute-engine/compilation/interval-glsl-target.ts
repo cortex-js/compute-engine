@@ -573,12 +573,7 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
         // `_iv_powf` clamps a negative base to empty.
         const p = exp.numerator?.re;
         const q = exp.denominator?.re;
-        if (
-          Number.isInteger(p) &&
-          Number.isInteger(q) &&
-          q > 1 &&
-          q % 2 !== 0
-        )
+        if (Number.isInteger(p) && Number.isInteger(q) && q > 1 && q % 2 !== 0)
           return `_iv_powrat(${compile(base)}, ${formatGPUNumber(p)}, ${formatGPUNumber(v)})`;
         // Even denominator (or non-rational): real only for base ≥ 0.
         return `_iv_powf(${compile(base)}, ${formatGPUNumber(v)})`;

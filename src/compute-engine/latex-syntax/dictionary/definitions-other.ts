@@ -174,9 +174,8 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
         const seq = getSequence(sub);
         const vars = seq ?? [sub];
         parser.skipSpace();
-        let rhs: MathJsonExpression = parser.parseGroup() ??
-          parser.parseSymbol() ??
-          'Nothing';
+        let rhs: MathJsonExpression =
+          parser.parseGroup() ?? parser.parseSymbol() ?? 'Nothing';
         if (!isEmptySequence(rhs)) {
           const args = parser.parseArguments();
           if (args) rhs = [rhs as MathJsonSymbol, ...args];
@@ -199,9 +198,8 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       const items: MathJsonExpression[] = [];
       const grabItem = () => {
         parser.skipSpace();
-        let v: MathJsonExpression = parser.parseGroup() ??
-          parser.parseSymbol() ??
-          'Nothing';
+        let v: MathJsonExpression =
+          parser.parseGroup() ?? parser.parseSymbol() ?? 'Nothing';
         let reps = 1;
         if (operator(v) === 'Power') {
           reps = machineValue(operand(v, 2)) ?? 1;
@@ -220,7 +218,11 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       }
       if (items.length === 1)
         return ['PartialDerivative', items[0], sup] as MathJsonExpression;
-      return ['PartialDerivative', ['List', ...items], sup] as MathJsonExpression;
+      return [
+        'PartialDerivative',
+        ['List', ...items],
+        sup,
+      ] as MathJsonExpression;
     },
     precedence: 740,
   },

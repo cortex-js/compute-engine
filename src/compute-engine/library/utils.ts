@@ -416,8 +416,10 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
         ce.declare(rawIndex.symbol, 'integer');
     }
     const canonicalIndex = expr.op1.canonical;
-    const canonicalLower = checkBound(expr.op2?.canonical ?? null) ?? ce.Nothing;
-    const canonicalUpper = checkBound(expr.op3?.canonical ?? null) ?? ce.Nothing;
+    const canonicalLower =
+      checkBound(expr.op2?.canonical ?? null) ?? ce.Nothing;
+    const canonicalUpper =
+      checkBound(expr.op3?.canonical ?? null) ?? ce.Nothing;
     if (!isSymbol(canonicalIndex))
       return ce.function('Limits', [
         ce.typeError('symbol', undefined, canonicalIndex),

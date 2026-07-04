@@ -827,13 +827,17 @@ BigDecimal.prototype.acos = function (): BigDecimal {
   try {
     const two = BigDecimal.TWO;
     if (this.significand >= 0n) {
-      const t = BigDecimal.ONE.sub(this).mulToPrecision(BigDecimal.HALF, targetPrec + 10).sqrt();
+      const t = BigDecimal.ONE.sub(this)
+        .mulToPrecision(BigDecimal.HALF, targetPrec + 10)
+        .sqrt();
       // Fused multiply-and-round (single rounding at targetPrec; the previous
       // mul-then-toPrecision double-rounded through the +10 guard — battery-
       // verified identical).
       return two.mulToPrecision(t.asin(), targetPrec);
     }
-    const t = BigDecimal.ONE.add(this).mulToPrecision(BigDecimal.HALF, targetPrec + 10).sqrt();
+    const t = BigDecimal.ONE.add(this)
+      .mulToPrecision(BigDecimal.HALF, targetPrec + 10)
+      .sqrt();
     return BigDecimal.PI.sub(two.mul(t.asin())).toPrecision(targetPrec);
   } finally {
     BigDecimal.precision = saved;

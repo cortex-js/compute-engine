@@ -718,8 +718,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       lnTerms.length >= 2 &&
       !lnTerms.some(
         (t) =>
-          onBranchCut(ce, 'Ln', t.arg) === true ||
-          !isEligibleRealRewrite(t.arg)
+          onBranchCut(ce, 'Ln', t.arg) === true || !isEligibleRealRewrite(t.arg)
       )
     ) {
       // Combine all Ln terms: multiply positives, divide negatives

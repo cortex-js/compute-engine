@@ -48,8 +48,7 @@ function predicateFromArg(
   predicate: Expression | string,
   who: 'assume' | 'verify'
 ): Expression {
-  if (typeof predicate !== 'string')
-    return ce.expr(predicate, { form: 'raw' });
+  if (typeof predicate !== 'string') return ce.expr(predicate, { form: 'raw' });
 
   // `asLatexString` strips `$…$`/`$$…$$`; a plain string is used verbatim.
   const latex = asLatexString(predicate) ?? predicate;

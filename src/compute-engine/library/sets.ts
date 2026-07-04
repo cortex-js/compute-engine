@@ -1065,9 +1065,7 @@ function union(
   // the whole set into a single literal element (SYM P3-10). Only a genuine
   // scalar (neither a collection nor set-typed) is promoted to a singleton set.
   const xs = ops.map((op) =>
-    op.isCollection || op.type.matches('set')
-      ? op
-      : ce.function('Set', [op])
+    op.isCollection || op.type.matches('set') ? op : ce.function('Set', [op])
   );
 
   // A Set literal can only be folded when every operand is a FINITE,
@@ -1414,10 +1412,7 @@ function symmetricDifference(
   for (const elem of a.each())
     if (b.contains(elem) !== true) elements.push(elem);
   for (const elem of b.each())
-    if (
-      a.contains(elem) !== true &&
-      elements.every((e) => !e.isSame(elem))
-    )
+    if (a.contains(elem) !== true && elements.every((e) => !e.isSame(elem)))
       elements.push(elem);
 
   if (elements.length === 0) return ce.symbol('EmptySet');

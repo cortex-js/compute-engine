@@ -123,7 +123,11 @@ export function assume(proposition: Expression): AssumeResult {
  */
 const SIGNED_NUMBER_SETS: Record<
   string,
-  { type: Type; op: 'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual'; value: number }
+  {
+    type: Type;
+    op: 'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual';
+    value: number;
+  }
 > = {
   PositiveNumbers: { type: 'real', op: 'Greater', value: 0 },
   NonNegativeNumbers: { type: 'real', op: 'GreaterEqual', value: 0 },

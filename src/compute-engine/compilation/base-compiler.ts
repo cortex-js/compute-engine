@@ -35,11 +35,9 @@ export class BaseCompiler {
    * override that intentionally maps an operator to a function name (e.g.
    * `Add: ['add', 11]` → `add(x, y)`): those heads are not in this set.
    */
-  private static readonly WORD_KEYWORD_OPERATORS: ReadonlySet<string> = new Set([
-    'And',
-    'Or',
-    'Not',
-  ]);
+  private static readonly WORD_KEYWORD_OPERATORS: ReadonlySet<string> = new Set(
+    ['And', 'Or', 'Not']
+  );
 
   /**
    * Compile `expr` as a **value operand** — a sub-expression spliced into a
@@ -63,8 +61,7 @@ export class BaseCompiler {
       typeof code === 'string' &&
       code.includes('\n')
     ) {
-      const head =
-        expr !== undefined && isFunction(expr) ? expr.operator : '?';
+      const head = expr !== undefined && isFunction(expr) ? expr.operator : '?';
       throw new Error(
         `${head}: a multi-statement construct (loop-form Sum/Product, Loop, or Block) ` +
           `cannot be used as a sub-expression in "${target.language ?? 'this'}" ` +
@@ -232,7 +229,11 @@ export class BaseCompiler {
               const chainOp = target.chainOp ?? '&&';
               const bindings: Array<[name: string, value: string]> = [];
               const codes = args.map((arg, i) => {
-                const code = BaseCompiler.compileValueOperand(arg, target, op[1]);
+                const code = BaseCompiler.compileValueOperand(
+                  arg,
+                  target,
+                  op[1]
+                );
                 const isMiddle = i >= 1 && i <= args.length - 2;
                 if (
                   target.bindExpr &&
@@ -293,7 +294,8 @@ export class BaseCompiler {
               resultStr = args
                 .map((arg, i) => {
                   let operandPrec = op[1];
-                  if (rightAssoc && i < args.length - 1) operandPrec = op[1] + 1;
+                  if (rightAssoc && i < args.length - 1)
+                    operandPrec = op[1] + 1;
                   else if (leftAssocNonAssociative && i > 0)
                     operandPrec = op[1] + 1;
                   return BaseCompiler.compileValueOperand(
@@ -315,7 +317,11 @@ export class BaseCompiler {
       // Dispatch to target-specific handler if available (e.g. GPU throws)
       const fnFn = target.functions?.(h);
       if (typeof fnFn === 'function')
-        return fnFn(args, (expr) => BaseCompiler.compileValueOperand(expr, target), target);
+        return fnFn(
+          args,
+          (expr) => BaseCompiler.compileValueOperand(expr, target),
+          target
+        );
       // Default: JavaScript arrow function
       const params = args.slice(1).map((x) => (isSymbol(x) ? x.symbol : '_'));
       return `((${params.join(', ')}) => ${BaseCompiler.compile(
@@ -356,7 +362,11 @@ export class BaseCompiler {
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
-          return fn(args, (expr) => BaseCompiler.compileValueOperand(expr, target), target);
+          return fn(
+            args,
+            (expr) => BaseCompiler.compileValueOperand(expr, target),
+            target
+          );
         }
         return `${fn}(${args
           .map((x) => BaseCompiler.compile(x, target))
@@ -379,7 +389,11 @@ export class BaseCompiler {
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
-          return fn(args, (expr) => BaseCompiler.compileValueOperand(expr, target), target);
+          return fn(
+            args,
+            (expr) => BaseCompiler.compileValueOperand(expr, target),
+            target
+          );
         }
         return `${fn}(${args
           .map((x) => BaseCompiler.compile(x, target))
@@ -408,7 +422,11 @@ export class BaseCompiler {
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
-          return fn(args, (expr) => BaseCompiler.compileValueOperand(expr, target), target);
+          return fn(
+            args,
+            (expr) => BaseCompiler.compileValueOperand(expr, target),
+            target
+          );
         }
         return `${fn}(${args
           .map((x) => BaseCompiler.compile(x, target))
@@ -1122,12 +1140,7 @@ export class BaseCompiler {
     if (isSymbol(expr, 'True') || isSymbol(expr, 'False')) return true;
     if (isFunction(expr)) {
       const h = expr.operator;
-      if (
-        isRelationalOperator(h) ||
-        h === 'And' ||
-        h === 'Or' ||
-        h === 'Not'
-      )
+      if (isRelationalOperator(h) || h === 'And' || h === 'Or' || h === 'Not')
         return true;
       const t = expr.type;
       return t ? t.matches('boolean') : false;

@@ -45,7 +45,8 @@ export function typeToString(type: Type, precedence = 0): string {
       // unions that never went through `reduceType` (SYM P2-20).
       const flat: string[] = [];
       const pushMember = (t: Type): void => {
-        if (typeof t === 'object' && t.kind === 'union') t.types.forEach(pushMember);
+        if (typeof t === 'object' && t.kind === 'union')
+          t.types.forEach(pushMember);
         else flat.push(typeToString(t, UNION_PRECEDENCE));
       };
       type.types.forEach(pushMember);

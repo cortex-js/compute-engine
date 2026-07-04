@@ -2218,7 +2218,9 @@ function serializeLeibnizPartial(
     if (orders[i] === 0) continue;
     if (!symbol(args[i])) return null; // can't write ∂/∂(x²)
     const v = serializer.serialize(args[i]);
-    denomParts.push(orders[i] === 1 ? `\\partial ${v}` : `\\partial ${v}^{${orders[i]}}`);
+    denomParts.push(
+      orders[i] === 1 ? `\\partial ${v}` : `\\partial ${v}^{${orders[i]}}`
+    );
   }
 
   const numer = total === 1 ? '\\partial' : `\\partial^{${total}}`;

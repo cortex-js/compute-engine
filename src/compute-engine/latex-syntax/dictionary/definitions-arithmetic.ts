@@ -502,7 +502,10 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     const head = factors[0];
     if (isDiffSym(symbol(head))) {
       numerDegree = 1;
-    } else if (operator(head) === 'Power' && isDiffSym(symbol(operand(head, 1)))) {
+    } else if (
+      operator(head) === 'Power' &&
+      isDiffSym(symbol(operand(head, 1)))
+    ) {
       const deg = machineValue(operand(head, 2));
       if (deg !== null && deg > 0) numerDegree = deg;
     }
@@ -655,7 +658,9 @@ function normalizeCompactDerivativeBody(
     if (typeof head !== 'string') return expr;
     const result: [string, ...MathJsonExpression[]] = [head];
     for (let i = 1; i < expr.length; i++)
-      result.push(normalizeCompactDerivativeBody(expr[i] as MathJsonExpression));
+      result.push(
+        normalizeCompactDerivativeBody(expr[i] as MathJsonExpression)
+      );
     return result;
   }
 
@@ -716,9 +721,7 @@ function parseBinomial(parser: Parser): MathJsonExpression | null {
     top = missingIfEmpty(parser.parseToken());
     bottom = missingIfEmpty(parser.parseToken());
   } else {
-    top = isEmptySequence(top)
-      ? parser.error('missing', parser.index)
-      : top;
+    top = isEmptySequence(top) ? parser.error('missing', parser.index) : top;
     bottom = parser.parseGroup();
     bottom = isEmptySequence(bottom)
       ? parser.error('missing', parser.index)
@@ -1246,7 +1249,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['!'],
     kind: 'postfix',
     precedence: POSTFIX_PRECEDENCE,
-    parse: (parser: Parser, lhs: MathJsonExpression): MathJsonExpression | null => {
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression
+    ): MathJsonExpression | null => {
       // Disambiguate `!` (factorial) from `!=` (not-equal): when a `!` is
       // *immediately* followed by `=` (no intervening space), read it as the
       // `!=` inequality operator, not `Factorial(lhs) = …`. `3!=2` is
@@ -2343,10 +2349,11 @@ function parseExp(parser: Parser): MathJsonExpression {
       ? ('Exp' as MathJsonExpression)
       : (['Power', 'Exp', sup] as MathJsonExpression);
   // `\exp^{-1} x` → `\ln x` (inverse of the exponential).
-  return applyFunctionSup(['Exp', ...args] as MathJsonExpression, sup, () => [
-    'Ln',
-    args[0],
-  ] as MathJsonExpression);
+  return applyFunctionSup(
+    ['Exp', ...args] as MathJsonExpression,
+    sup,
+    () => ['Ln', args[0]] as MathJsonExpression
+  );
 }
 
 function parseLog(command: string, parser: Parser): MathJsonExpression | null {

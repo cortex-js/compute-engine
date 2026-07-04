@@ -1101,7 +1101,11 @@ export const SIMPLIFY_RULES: Rule[] = [
     // structurally larger, e.g. -4·2^x -> -2^(x+2)): the `purpose: 'transform'`
     // tag replaces the former `combined powers` label match in simplify.ts.
     if (resultTerms.length === 0)
-      return { value: ce.One, because: 'combined powers', purpose: 'transform' };
+      return {
+        value: ce.One,
+        because: 'combined powers',
+        purpose: 'transform',
+      };
     if (resultTerms.length === 1)
       return {
         value: resultTerms[0],

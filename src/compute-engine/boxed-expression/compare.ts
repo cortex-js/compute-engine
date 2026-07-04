@@ -303,7 +303,11 @@ export function cmp(
       // the symbol branches below: values within tolerance must not be ordered
       // strictly, or `isEqual` and `isGreater`/`isLess` would both be true
       // (CM-P1-4).
-      if (av.sub(a.engine._numericValue(b)).isZeroWithTolerance(a.engine.tolerance))
+      if (
+        av
+          .sub(a.engine._numericValue(b))
+          .isZeroWithTolerance(a.engine.tolerance)
+      )
         return '=';
       return lt ? '<' : '>';
     }

@@ -1336,8 +1336,7 @@ function zetaBorweinWeights(): [number[], number] {
   let d = SCALE; // d_0 = 1, scaled
   const dk: bigint[] = [d];
   for (let i = 0; i < n; i++) {
-    t =
-      (t * BigInt(4 * (n + i) * (n - i))) / BigInt((2 * i + 1) * (2 * i + 2));
+    t = (t * BigInt(4 * (n + i) * (n - i))) / BigInt((2 * i + 1) * (2 * i + 2));
     d += t;
     dk.push(d);
   }

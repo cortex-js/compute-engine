@@ -304,7 +304,9 @@ function provablyDisjoint(a: Type, b: Type): boolean {
     return true;
 
   if (typeof a === 'string' && typeof b === 'string')
-    return meetPrimitiveTypes(a as PrimitiveType, b as PrimitiveType).length === 0;
+    return (
+      meetPrimitiveTypes(a as PrimitiveType, b as PrimitiveType).length === 0
+    );
 
   // Two bounded numeric ranges: disjoint if their base types are disjoint or
   // their intervals do not overlap.

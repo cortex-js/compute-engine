@@ -417,11 +417,7 @@ export class BigNumericValue extends NumericValue {
         // `b` is a machine double: square it exactly in decimal — the double
         // product `b * b` rounds (1.1² → 1.2100000000000002) and contaminates
         // the full-precision modulus past digit ~16. (NU-P1-3)
-        const lnMod = a
-          .mul(a)
-          .add(new BigDecimal(b).mul(b))
-          .sqrt()
-          .ln();
+        const lnMod = a.mul(a).add(new BigDecimal(b).mul(b)).sqrt().ln();
         const arg = BigDecimal.atan2(b, a);
         const realExp = lnMod.mul(re).sub(arg.mul(im));
         const imagExp = arg.mul(re).add(lnMod.mul(im));
@@ -468,10 +464,7 @@ export class BigNumericValue extends NumericValue {
     // Exact decimal b² (a double `b * b` rounds and contaminates the
     // full-precision modulus); round the exact final product back to
     // working precision. (NU-P1-3)
-    const modulus = a
-      .mul(a)
-      .add(new BigDecimal(b).mul(b))
-      .sqrt();
+    const modulus = a.mul(a).add(new BigDecimal(b).mul(b)).sqrt();
     const argument = BigDecimal.atan2(b, a);
     const newModulus = modulus.pow(exponent);
     const newArgument = argument.mul(exponent);
@@ -517,10 +510,7 @@ export class BigNumericValue extends NumericValue {
     // Exact decimal b² (a double `b * b` rounds and contaminates the
     // full-precision modulus); round the exact final product back to
     // working precision. (NU-P1-3)
-    const modulus = a
-      .mul(a)
-      .add(new BigDecimal(b).mul(b))
-      .sqrt();
+    const modulus = a.mul(a).add(new BigDecimal(b).mul(b)).sqrt();
     const argument = BigDecimal.atan2(b, a);
     // Full-precision modulus^(1/exp) = exp(ln(modulus)/exp); `pow(1/exp)`
     // rounded the reciprocal to machine precision first.
@@ -544,10 +534,7 @@ export class BigNumericValue extends NumericValue {
       const b = this.im;
       // Exact decimal b²: a double `b * b` rounds and contaminates the
       // full-precision modulus. (NU-P1-3)
-      const modulus = a
-        .mul(a)
-        .add(new BigDecimal(b).mul(b))
-        .sqrt();
+      const modulus = a.mul(a).add(new BigDecimal(b).mul(b)).sqrt();
 
       // Both a + |z| and |z| − a are mathematically ≥ 0, but either can
       // round epsilon-negative when |b| ≪ |a| — clamp to avoid a NaN from
@@ -611,7 +598,8 @@ export class BigNumericValue extends NumericValue {
       // used on the .N() path and with the exact ln(-1) = iπ.
       if (this.decimal.isNegative()) {
         const neg = this.decimal.neg();
-        if (base === undefined) return this.clone({ re: neg.ln(), im: Math.PI });
+        if (base === undefined)
+          return this.clone({ re: neg.ln(), im: Math.PI });
         return this.clone({ re: neg.log(base), im: Math.PI / Math.log(base) });
       }
 
@@ -626,10 +614,7 @@ export class BigNumericValue extends NumericValue {
     const b = this.im;
     // Exact decimal b²: a double `b * b` rounds and contaminates the
     // full-precision modulus past digit ~16. (NU-P1-3)
-    const modulus = a
-      .mul(a)
-      .add(new BigDecimal(b).mul(b))
-      .sqrt();
+    const modulus = a.mul(a).add(new BigDecimal(b).mul(b)).sqrt();
     const argument = BigDecimal.atan2(b, a).toNumber();
 
     if (base === undefined)
