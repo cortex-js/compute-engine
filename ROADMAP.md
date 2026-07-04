@@ -241,28 +241,56 @@ Trace[Rubi`Int[Cos[x]^4, x], HoldPattern[Rubi`Int[_, _]]]
 Rubi`Private`DeactivateTrig[Cos[x]^4, x]   (* -> sin[Pi/2 + x]^4 *)
 ```
 
-**Next rungs (priority order — start at R3).** Each is a self-contained work
-item: do the change, then verify with the benchmark command above (watch
-`solved-correct` climb while genuine `wrong`/`not-evaluable` stay 0 — but see
-the R2 note on hypergeometric verification false-wrongs). Diagnose any stall
-per the Method note — trace the residual integrand, don't trust the predicate
-census.
+**Landed (2026-07-04) — R3 base cofunction gap + R10 audit & ship.** The
+`√(b·sec)` half-integer family closed, and the mechanism is now understood
+correctly (the R10 audit corrected R3's first reading): **Rubi has no
+sec/cot/csc-of-cosecant chapters and no load-time rule generation** — its
+reciprocal-trig chapters are authored in ONE cofunction (`4.5 Secant` in inert
+`csc`, `4.3 Tangent` in `tan`), and `DeactivateTrig` maps the *other* head to
+the authored one at **integration time** via a π/2 reflection
+(`Sec[x] → csc[π/2+x]`, confirmed under `wolframscript`). CE's runtime
+deactivates `Sec→` inert `sec` instead, so the sec side had no reduction rules.
+Fix shipped: three branch-safe `sec` rules
+(`∫(b·sec)^n = (b·Sec)^n·Cos^n·∫1/Cos^n` form, wolframscript term-checked) in
+`4.5.1.1`, and **all of 4.5 Secant bundled** (13 files, 0 skips; bundle
+4,080 → 4,531 rules, 4.41 → 4.94 MB, rule-compile +~10%). Validation: 4.5
+Secant 20 → 31/120 (seed 5), 4.1 Sine 98/120 and ch1 180/200 unchanged,
+genuine wrongs 0 everywhere, shipped-path probe closes `√(sec x)` &co. via the
+real bundle. Audit table (per-section missing-cofunction counts for 4.5/4.3)
+is in `docs/rubi/RUBI.md` §5 Phase R10. 4.1 Sine benchmark: 96 → 98/120,
+288 → 293/400 (seed 5); the 3 sample-400 flags remain the documented
+hypergeometric false-wrongs.
 
-- **R3 — half-integer / elliptic powers** (4.1.7 and friends): `√(b·sec)`,
-  `(e·cos)^(7/2)`, `(c+d·sin)^(5/2)`, `(a+a·sin)^(3/2)`, `√(a+b·sin⁴)` — the
-  bulk of what R2 left unsolved, and several are exactly the false-wrong
-  hypergeometric class. The R1 probe showed converted 4.1.0 cases reaching the
-  sine rules but stalling on these shapes (`(d sin)^(±k/2)·sec^n` etc.); note
-  `reciprocalToPower` deliberately freezes csc/sec under *fractional* powers
-  (branch safety), so this rung needs the genuine half-integer rules, not a
-  normalization tweak.
+**Next rungs (priority order).** Each is a self-contained work item: do the
+change, then verify with the benchmark command above (watch `solved-correct`
+climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
+hypergeometric verification false-wrongs). Diagnose any stall per the Method
+note — trace the residual integrand, don't trust the predicate census.
+
+- **R11 — runtime cofunction deactivation shift (the durable fix).** Mirror
+  Rubi's `DeactivateTrig` faithfully in `rubi-utils.ts`: deactivate
+  `Sec → csc[π/2+·]` and `Cot → tan[π/2+·]` (argument reflection + the
+  sign flips the derivative factors imply — NOT a blind head swap), so every
+  authored-cofunction rule covers both heads with no per-section rule
+  duplication. This closes the whole class (~300 missing cofunction variants
+  across 4.5/4.3 per the RUBI.md §5 audit table) and is a **prerequisite for
+  bundling 4.3 Tangent** (authored in `tan`; `cot` has almost no rules).
+  Bounded but broad — validate against 4.5/4.3 samples with the genuine-wrong
+  gate at 0.
+- **R3′ — residual half-integer/elliptic chains.** What remains of R3 after the
+  base gap: `(e·cos)^(7/2)/(a+b·sin)^n` and `√(g·cos)·sin³/(a+b·sin)`
+  (#604/#609/#1395) need the `Rt[-a²+b²]` symbolic-radical `ArcTan`/`ArcTanh`
+  chains (15–18 Rubi steps — genuinely deep); plus the composite
+  `cot^m/(a+b·sin)^n` / `(a+b·sin²)^(p/2)` tan/cot-power recursions (4.1.1.3 /
+  4.1.7), which may fold into R5.
 - **R9 — polynomial×trig & nonlinear arguments** (4.1.10 / 4.1.11 / 4.1.12):
-  `(c+d·x)^m·(a+b·sin)^n`, `sin(a+b/x)`, `sin(a+b·xⁿ)^(1/3)` — a distinct
-  family from R3; several members are genuinely `Unintegrable` and correctly
-  stay inert, so grade against Rubi's own test-suite expectations.
+  `(c+d·x)^m·(a+b·sin)^n`, `sin(a+b/x)`, `sin(a+b·xⁿ)^(1/3)` — the largest
+  residual block (~76 of the 100 unsolved at sample 400); several members are
+  genuinely `Unintegrable` and correctly stay inert, so grade against Rubi's
+  own test-suite expectations.
 - **R5 — `TrigSimplify`/`TrigSimplifyQ`** (Pythagorean reductions). _Low value /
   optional:_ the predicate census over-weights it (it's a late catch-all, not a
-  blocker). Only pursue if R3/R9 leave a concrete residual class that needs it.
+  blocker). Only pursue if R3′/R9 leave a concrete residual class that needs it.
 
 **Exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules) are
 DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty). The

@@ -588,6 +588,75 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     capability gap); high-degree rationals (`1/(1−Sinh⁸)`); poly×reciprocal →
     by-parts; CoshIntegral/SinhIntegral for nonlinear-argument reciprocals.
     Each is a distinct, deeper effort — below the ≈72% Chapter-2 target.
+- **Phase R10 — cofunction-generation audit + §4.5 Secant BUNDLED
+  (2026-07-04).** _The cofunction mechanism, audited and empirically confirmed
+  under `wolframscript`:_ Rubi has **no Cosine, Cotangent, or Cosecant chapter**
+  and does **no load-time rule generation**. The reciprocal-trig chapter files
+  are authored in ONE function of each cofunction pair — the "4.5 Secant"
+  chapter is written almost entirely in inert `csc` (e.g. `4.5.1.1 (a+b sec)^n.m`
+  is 21 `csc` rules, 0 `sec`), the "4.3 Tangent" chapter in `tan`. At
+  **integration** time `DeactivateTrig` maps the active head to the AUTHORED
+  inert cofunction via a π/2 reflection — verified:
+  `DeactivateTrig[Sqrt[b*Sec[x]],x] → Sqrt[b*csc[π/2+x]]`,
+  `DeactivateTrig[(b*Sec[x])^n,x] → (b*csc[π/2+x])^n` — so the csc rules cover
+  sec with no separate sec rule. Live `DownValues[Int]` are correspondingly
+  asymmetric at the inert level (inert `csc` 427 vs `sec` 163; `tan` 371 vs
+  `cot` 97), NOT a generated mirror; the symmetric _active_-head counts
+  (`Sec`=`Csc`=45, `Tan`=`Cot`=60) are the small normalization/misc layer, not
+  the reduction rules. `FixIntRules[]` (the only load-time rule rewrite) merely
+  distributes coefficients over sums — it does not touch heads.
+  - **Why CE needs the rules the source omits:** CE's runtime deactivates active
+    `Sec` to inert **`sec`** (not `csc[π/2+·]`); its `unifyInertTrig` shifts only
+    `cos→sin[π/2+·]` (+ the cos·cofunction two-factor clauses), NOT standalone
+    `sec→csc`. So CE's `.m`→corpus translation faithfully inherited the source's
+    csc-only authoring and had **no `sec` reduction rules** for the
+    `(a+b·sec)^n` power family. Audit (LHS inert-head census, `.m` = CE corpus,
+    they match — translation preserves heads):
+
+    | 4.5 Secant section | authored (csc) | native sec | missing sec cofn |
+    |---|---|---|---|
+    | 4.5.1.1 (a+b sec)^n | 20 | 0→**3** (R10) | 17 |
+    | 4.5.1.2 (d sec)^n (a+b sec)^m | 84 | 1 | ~83 |
+    | 4.5.2.1 (a+b sec)^m (c+d sec)^n | 45 | 2 | ~43 |
+    | 4.5.2.2 (g sec)^p (a+b sec)^m (c+d sec)^n | 45 | 1 | ~44 |
+    | 4.5.3.1 (a+b sec)^m (d sec)^n (A+B sec) | 45 | 0 | 45 |
+    | 4.5.4.1 (a+b sec)^m (A+B sec+C sec^2) | 27 | 4 | ~23 |
+    | 4.5.4.2 …(A+B sec+C sec^2) | 44 | 4 | ~40 |
+    | 4.5.10 (c+d x)^m (a+b sec)^n | 14 | 0 | 14 |
+    | 4.5.7 / 4.5.9 (a+b (c sec)^n)^p | 15 (csc) | 48 (sec-authored) | — |
+
+    (4.3 Tangent has the mirror gap: `tan`-authored, `cot` cofunction absent —
+    e.g. 4.3.2.1 = 56 `tan`, 2 `cot`; 4.3.9 = 21/20. Not yet ported/bundled.)
+  - **Approach chosen — PER-SECTION, not a translator transform.** The reflection
+    is **messy/rule-specific**, not a clean head-swap: to turn a csc rule into a
+    sec rule you reflect the argument (`c+d·x → π/2−(c+d·x)`) AND flip signs via
+    the derivative factor (d/dx `Csc` = −`Csc·Cot` vs d/dx `Sec` = +`Sec·Tan`) —
+    "NOT a blind head swap." R3 instead used the cleaner branch-safe product
+    form `∫(b·sec)^n = (b·Sec)^n·Cos^n·∫1/Cos^n` (and the sign-flipped
+    reduction recurrences), each **verified vs `wolframscript`**. Generalizing
+    that programmatically across all ~17 families is a larger, higher-risk job
+    than the shipping win warrants; teaching CE's runtime to deactivate
+    `Sec→csc[π/2+·]` (the faithful mirror of Rubi) would close the whole class
+    but is a broad rubi-utils change deferred to a future rung. For now the
+    per-section `sec` cofunctions live in the corpus (`4.5.1.1`, ids #500/#501/
+    #502).
+  - **Ship result.** `4.5 Secant` added to `bundle-corpus.ts` (whole dir, 13
+    files, 0 compile skips); `rubi-rules-data.json` **4,080 → 4,531 rules
+    (+451), 4.41 → 4.94 MB, one-time compile 378 → 414 ms (~+10%)**. Benchmark
+    (`--rubi`, seed 5, sample 120): **4.5 Secant 20 → 31 correct, 0 genuine
+    wrong** (the +11 are all `(b·sec)^(half-integer)` power families the sec
+    rules close; 1 inconclusive `1/(a·sec³)^(5/2)`, not a wrong; 0 regressions).
+    4.1 Sine 98/120 and ch1 180/200 unchanged; rubi unit suites +
+    `integration-rules` green. Shipped-path probe (`loadIntegrationRules`, the
+    real bundle) closes `√(sec x)`, `√(3 sec x)`, `sec^(5/2)`, `1/sec^(3/2)`,
+    `sec³`.
+  - **Future chapter ports (the debt this audit surfaces):** every
+    reciprocal/cofunction chapter carries the same load-time gap. Before
+    bundling **4.3 Tangent** supply `cot` cofunctions (or route `cot→tan`);
+    **4.6 Cosecant / 4.2 Cosine / 4.4 Cotangent are not even translated** (Rubi
+    has no such source dirs — they are the auto-deactivated cofunctions). The
+    durable fix is the runtime `Sec→csc[π/2+·]` / `Cot→tan[π/2+·]` deactivation
+    shift in `rubi-utils.ts`, mirroring Rubi's `DeactivateTrig`.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the
