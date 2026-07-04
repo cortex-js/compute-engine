@@ -34,6 +34,22 @@
   the dependent function with a transformed argument (e.g. $y'(x) = y(2x)$)
   stay unevaluated instead of returning an unevaluated integral as "solved".
 
+- **Exponential forcing terms solve.** Variation of parameters was silently
+  disabled for exponential bases (an internal Wronskian stayed unsimplified):
+  $y'' - y = e^x$ now returns
+  $c_1 e^x + c_2 e^{-x} + \frac12 x e^x - \frac14 e^x$, and
+  $y'' + y = e^x$ returns $c_1 \cos x + c_2 \sin x + \frac12 e^x$, instead of
+  the equation unevaluated. Solutions are returned in collected form (no
+  $e^a \cdot e^b$ products or $A\sin^2 u + A\cos^2 u$ pairs).
+
+- **Parsed LaTeX input works end-to-end.** `ce.parse("y''(x)+y(x)=0")` no
+  longer canonicalizes the derivative of an undeclared function into an
+  `Error` node: a derivative now reports a numeric result type, so
+  prime/dot-notation equations flow from `parse()` through `DSolve`
+  ($\dot x + \ddot x$ expressions are likewise no longer corrupted). The
+  implicit first-order form `Apply(Derivative(y), x)` is also recognized
+  (order defaults to 1).
+
 ### Evaluation
 
 - **`Beta` is exact and pole-aware.** $\mathrm{B}(a, m)$ with a positive

@@ -651,6 +651,221 @@ describe('DSolve', () => {
     expect(solution.operator).toBe('List');
     expect(solution.toString()).toContain('Erf');
   });
+
+  //
+  // Variation of parameters with exponential forcing (regression: the
+  // Wronskian for {e^x, e^-x} was left as `-2 e^(x-x)` instead of `-2`,
+  // silently disabling variation of parameters; a later polish folded
+  // leftover `e^a·e^b` products such as `e^(-x)·e^(2x)` in the output).
+  //
+
+  // No `Multiply` in the tree may contain two or more exponential
+  // (`Power(ExponentialE, …)`) factors: they must be folded to a single
+  // `e^(a+b)`.
+  function hasUnfoldedExpProduct(expr: ReturnType<typeof dsolve>): boolean {
+    if (expr.operator === 'Multiply') {
+      const expFactors = expr.ops.filter(
+        (op) =>
+          op.operator === 'Power' && op.op1?.symbol === 'ExponentialE'
+      ).length;
+      if (expFactors >= 2) return true;
+    }
+    return (expr.ops ?? []).some(hasUnfoldedExpProduct);
+  }
+
+  // No `Add` in the tree may contain an uncollected Pythagorean pair
+  // `A·sin²(u) + A·cos²(u)` (same coefficient, same argument): variation of
+  // parameters with a trig basis produces this shape and it must have been
+  // collected to `A`.
+  function hasPythagoreanPair(expr: ReturnType<typeof dsolve>): boolean {
+    type Expr = ReturnType<typeof dsolve>;
+    const trigSquare = (x: Expr) =>
+      x.operator === 'Power' &&
+      x.op2?.isSame(2) &&
+      (x.op1?.operator === 'Sin' || x.op1?.operator === 'Cos')
+        ? { kind: x.op1.operator, arg: x.op1.op1 }
+        : undefined;
+    const split = (
+      t: Expr
+    ): { kind: string; arg: Expr; coef: Expr } | undefined => {
+      const direct = trigSquare(t);
+      if (direct) return { ...direct, coef: engine.One };
+      if (t.operator === 'Negate') {
+        const inner = split(t.op1);
+        return inner ? { ...inner, coef: inner.coef.neg() } : undefined;
+      }
+      if (t.operator === 'Multiply') {
+        let found: { kind: string; arg: Expr } | undefined;
+        const rest: Expr[] = [];
+        for (const op of t.ops) {
+          const ts = trigSquare(op);
+          if (ts) {
+            if (found) return undefined;
+            found = ts;
+          } else rest.push(op);
+        }
+        if (!found) return undefined;
+        const coef =
+          rest.length === 0
+            ? engine.One
+            : rest.length === 1
+              ? rest[0]
+              : engine.function('Multiply', rest);
+        return { ...found, coef };
+      }
+      return undefined;
+    };
+    if (expr.operator === 'Add') {
+      const splits = expr.ops.map(split);
+      for (let i = 0; i < splits.length; i++)
+        for (let j = i + 1; j < splits.length; j++) {
+          const a = splits[i];
+          const b = splits[j];
+          if (
+            a &&
+            b &&
+            a.kind !== b.kind &&
+            a.arg.isSame(b.arg) &&
+            a.coef.isSame(b.coef)
+          )
+            return true;
+        }
+    }
+    return (expr.ops ?? []).some(hasPythagoreanPair);
+  }
+
+  test('solves exponential-forced equation y-prime-prime minus y equals e^x', () => {
+    const equation = [
+      'Equal',
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['Negate', ['y', 'x']]],
+      ['Exp', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * e^x + "c_2" * e^(-x) + 1/2 * x * e^x - 1/4 * e^x]`
+    );
+    expect(hasUnfoldedExpProduct(result)).toBe(false);
+    expect(hasPythagoreanPair(result)).toBe(false);
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves exponential-forced equation (Subtract spelling) y-prime-prime minus y equals e^x', () => {
+    const equation = [
+      'Equal',
+      ['Subtract', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['y', 'x']],
+      ['Exp', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.operator).toBe('List');
+    expect(result.toString()).toContain('1/2 * x * e^x');
+    expect(hasUnfoldedExpProduct(result)).toBe(false);
+    expect(hasPythagoreanPair(result)).toBe(false);
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves exponential-forced equation y-prime-prime plus y equals e^x', () => {
+    const equation = [
+      'Equal',
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['y', 'x']],
+      ['Exp', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    // The ½eˣsin²x + ½eˣcos²x pair from variation of parameters must be
+    // collected to ½eˣ.
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * cos(x) + "c_2" * sin(x) + 1/2 * e^x]`
+    );
+    expect(hasUnfoldedExpProduct(result)).toBe(false);
+    expect(hasPythagoreanPair(result)).toBe(false);
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves exponential-forced equation y-prime-prime minus y equals e^(2x)', () => {
+    const equation = [
+      'Equal',
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['Negate', ['y', 'x']]],
+      ['Exp', ['Multiply', 2, 'x']],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * e^x + "c_2" * e^(-x) + 1/3 * e^(2x)]`
+    );
+    expect(hasUnfoldedExpProduct(result)).toBe(false);
+    expect(hasPythagoreanPair(result)).toBe(false);
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  //
+  // Parsed-LaTeX entry path (regression: the canonical `Add` typechecked the
+  // `D` term as `expression` and replaced it with an `Error` node before
+  // `DSolve` ran).
+  //
+  test('parses y\'\'(x) + y(x) = 0 without an Error node and solves it', () => {
+    const equation = engine.parse("y''(x)+y(x)=0");
+    expect(equation.isValid).toBe(true);
+    expect(hasNoErrorNode(equation)).toBe(true);
+
+    const result = dsolve(equation);
+    expect(result.operator).toBe('List');
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * cos(x) + "c_2" * sin(x)]`
+    );
+  });
+
+  test('parses and solves y\'\'(x) - y(x) = e^x end-to-end', () => {
+    const equation = engine.parse("y''(x) - y(x) = e^x");
+    expect(equation.isValid).toBe(true);
+    expect(hasNoErrorNode(equation)).toBe(true);
+
+    const result = dsolve(equation);
+    expect(result.operator).toBe('List');
+    expect(hasUnfoldedExpProduct(result)).toBe(false);
+    const rhs = result.op1.op2;
+    // ½·x·eˣ particular term survives the parse path.
+    const derivative1 = engine.expr(['D', rhs, 'x']).evaluate();
+    const derivative2 = engine.expr(['D', derivative1, 'x']).evaluate();
+    const residual = derivative2
+      .sub(rhs)
+      .sub(engine.box(['Exp', 'x']))
+      .subs({ c_1: 2, c_2: 3, x: 0.75 })
+      .N().re;
+    expect(Math.abs(residual)).toBeLessThan(1e-10);
+  });
+
+  //
+  // Implicit first-order derivative `Apply(Derivative(y), x)` (order defaults
+  // to 1) must be recognized just like the explicit `Apply(Derivative(y,1),x)`.
+  //
+  test('recognizes implicit-order Apply(Derivative(y), x) like the explicit form', () => {
+    const implicit = dsolve([
+      'Equal',
+      ['Apply', ['Derivative', 'y'], 'x'],
+      ['y', 'x'],
+    ]);
+    const explicit = dsolve([
+      'Equal',
+      ['Apply', ['Derivative', 'y', 1], 'x'],
+      ['y', 'x'],
+    ]);
+
+    expect(implicit.operator).toBe('List');
+    expect(implicit.toString()).toEqual(explicit.toString());
+    expect(implicit.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * e^x]`
+    );
+  });
 });
 
 describe('NDSolve', () => {

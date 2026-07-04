@@ -554,18 +554,12 @@ int_(1)^(2)(int_(0)^(1)(int_(3)^(4)(x^2 + y^2 + z^2 dx) dy) dz)
 `;
 
 exports[`NEWTON DOT NOTATION Dot notation with expression 1`] = `
-\\mathtip{\\error{\\blacksquare}}{\\in \\text{expression}\\notin \\text{number}}+\\mathtip{\\error{\\blacksquare}}{\\in \\text{expression}\\notin \\text{number}}
-Error(ErrorCode("incompatible-type", "number", "expression")) + Error(ErrorCode("incompatible-type", "number", "expression"))
+\\frac{\\mathrm{d}^{2}}{\\mathrm{d}t^{2}}x+\\frac{\\mathrm{d}}{\\mathrm{d}t}x
+D(D((t) |-> x, t), t) + D((t) |-> x, t)
 [
   "Add",
-  [
-    "Error",
-    ["ErrorCode", "incompatible-type", "'number'", "'expression'"]
-  ],
-  [
-    "Error",
-    ["ErrorCode", "incompatible-type", "'number'", "'expression'"]
-  ]
+  ["D", ["D", ["Function", "x", "t"], "t"], "t"],
+  ["D", ["Function", "x", "t"], "t"]
 ]
 `;
 

@@ -182,9 +182,22 @@ volumes
       signature:
         '(expression, variable:symbol, variables:symbol+) -> expression',
       type: ([body]) => {
-        // The derivative of a numeric expression is numeric
-        if (body && body.type.matches('number')) return body.type;
-        return undefined; // fall back to signature
+        if (!body) return undefined;
+        const t = body.type;
+        // The derivative of a numeric expression is numeric — preserve the
+        // concrete numeric type (e.g. `finite_number` for `D(Sin(x),x)`).
+        if (t.matches('number')) return t;
+        // A derivative is otherwise scalar-valued: report `number` rather than
+        // the signature's `expression`. This covers the derivative of an
+        // application of an undeclared function (`y(x)` has type `any`), a
+        // nested `D` (`D(D(y(x),x),x)` has type `expression`), and a function
+        // literal with an unknown codomain (`\dot{x}` → `D((t)↦x, t)`, type
+        // `(unknown) -> unknown`). Without this, such a `D(…)` term inside
+        // `Add`/`Multiply` is rejected and rewritten to an `Error` node,
+        // corrupting parsed input like `y''(x) + y(x) = 0` before `DSolve`
+        // ever runs — and leaving inconsistent trees (a bare application
+        // `y(x)` already reports `any` and composes fine there).
+        return body.engine.type('number');
       },
       canonical: (ops, { engine: ce, scope }) => {
         // If the first argument is a function symbol (e.g., f where f(x):=2x),

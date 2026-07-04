@@ -63,7 +63,15 @@ export function derivativeOrderOfDependent(
     )
       return undefined;
 
-    const order = expr.op1.op2 === undefined ? 1 : expr.op1.op2.N().re;
+    // `Derivative(y)` (no explicit order) has a single operand; a missing
+    // second operand surfaces as the `Nothing` symbol, not `undefined`, so
+    // testing `op2 === undefined` never fired and `Nothing.N().re` was `NaN`.
+    // Default the order to 1 when the order operand is absent.
+    const orderOp = expr.op1.op2;
+    const order =
+      orderOp === undefined || isSymbol(orderOp, 'Nothing')
+        ? 1
+        : orderOp.N().re;
     return Number.isInteger(order) && order > 0 ? order : undefined;
   }
 

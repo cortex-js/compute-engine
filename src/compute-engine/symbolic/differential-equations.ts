@@ -416,6 +416,168 @@ function hasOperator(expr: Expression, operator: string): boolean {
   return expr.ops.some((op) => hasOperator(op, operator));
 }
 
+/**
+ * Simplify `expr`, additionally collapsing "stuck" exponential products such as
+ * `e^x·e^-x → 1` and `e^-x·e^(2x) → e^x`. The general simplifier combines
+ * same-base powers (`e^a·e^b → e^(a+b)`) only when its rule scan visits the
+ * `Multiply` node — a `Multiply` nested inside an `Add` operand is never
+ * scanned (lazy operators only numeric-fold their operands) — and, even when
+ * it does fire, it preserves `Power(ExponentialE, …)` subtrees verbatim so the
+ * combined exponent's like terms are never collected. This left `y'' − y = eˣ`'s
+ * Wronskian as `-2·e^(x−x)` (disabling variation of parameters) and a
+ * `-¼·e^(−x)·e^(2x)` term unfolded in the final solution. So: combine every
+ * `e^a·e^b` product here directly, with the summed exponent simplified. This
+ * is only reached from the lazy `DSolve` handler, so the `.simplify()` calls
+ * are outside the simplify-rule recursion hazard.
+ */
+function foldExponentialExponents(expr: Expression): Expression {
+  const ce = expr.engine;
+  if (isFunction(expr, 'Power') && isSymbol(expr.op1, 'ExponentialE'))
+    return ce.function('Power', [
+      expr.op1,
+      foldExponentialExponents(expr.op2).simplify(),
+    ]);
+  if (isFunction(expr, 'Multiply')) {
+    // Combine all `e^…` factors into a single exponential with a simplified
+    // summed exponent (`e^a·e^b → e^(a+b)`); recurse into the other factors.
+    const exponents: Expression[] = [];
+    const rest: Expression[] = [];
+    for (const op of expr.ops) {
+      const folded = foldExponentialExponents(op);
+      if (isFunction(folded, 'Power') && isSymbol(folded.op1, 'ExponentialE'))
+        exponents.push(folded.op2);
+      else rest.push(folded);
+    }
+    if (exponents.length > 0) {
+      const exponent =
+        exponents.length === 1
+          ? exponents[0]
+          : ce.function('Add', exponents).simplify();
+      if (!exponent.isSame(0))
+        rest.push(
+          ce.function('Power', [ce.symbol('ExponentialE'), exponent])
+        );
+    }
+    if (rest.length === 0) return ce.One;
+    if (rest.length === 1) return rest[0];
+    return ce.function('Multiply', rest);
+  }
+  if (isFunction(expr))
+    return ce.function(
+      expr.operator,
+      expr.ops.map((op) => foldExponentialExponents(op))
+    );
+  return expr;
+}
+
+/**
+ * Decompose a product term into a single squared-trig factor and its
+ * coefficient: `½·eˣ·sin²(x)` → `{ kind: 'Sin', arg: x, coefficient: ½·eˣ }`.
+ * Returns `undefined` when the term is not of the form `A·sin²(u)` or
+ * `A·cos²(u)` (with exactly one squared-trig factor).
+ */
+function splitTrigSquareTerm(term: Expression):
+  | { kind: 'Sin' | 'Cos'; arg: Expression; coefficient: Expression }
+  | undefined {
+  const ce = term.engine;
+
+  const trigSquare = (
+    x: Expression
+  ): { kind: 'Sin' | 'Cos'; arg: Expression } | undefined => {
+    if (
+      isFunction(x, 'Power') &&
+      x.op2.isSame(2) &&
+      (isFunction(x.op1, 'Sin') || isFunction(x.op1, 'Cos'))
+    )
+      return { kind: x.op1.operator as 'Sin' | 'Cos', arg: x.op1.op1 };
+    return undefined;
+  };
+
+  const direct = trigSquare(term);
+  if (direct) return { ...direct, coefficient: ce.One };
+
+  if (isFunction(term, 'Negate')) {
+    const inner = splitTrigSquareTerm(term.op1);
+    if (!inner) return undefined;
+    return { ...inner, coefficient: inner.coefficient.neg() };
+  }
+
+  if (isFunction(term, 'Multiply')) {
+    let found: { kind: 'Sin' | 'Cos'; arg: Expression } | undefined;
+    const rest: Expression[] = [];
+    for (const op of term.ops) {
+      const ts = trigSquare(op);
+      if (ts) {
+        if (found) return undefined; // more than one squared-trig factor
+        found = ts;
+      } else rest.push(op);
+    }
+    if (!found) return undefined;
+    const coefficient =
+      rest.length === 0
+        ? ce.One
+        : rest.length === 1
+          ? rest[0]
+          : ce.function('Multiply', rest);
+    return { ...found, coefficient };
+  }
+
+  return undefined;
+}
+
+/**
+ * Within every `Add`, collect Pythagorean pairs `A·sin²(u) + A·cos²(u) → A`
+ * (same coefficient up to `isSame`, same argument). Variation of parameters
+ * with a trig homogeneous basis {cos ωx, sin ωx} structurally produces exactly
+ * this shape (y_p = −y₁∫(y₂g/W) + y₂∫(y₁g/W)), e.g. `y'' + y = eˣ` →
+ * `… + ½eˣsin²x + ½eˣcos²x`; the shared `½eˣ` factor hides the bare
+ * `sin² + cos²` sum from the general Pythagorean simplification rule.
+ */
+function collectPythagoreanPairs(expr: Expression): Expression {
+  const ce = expr.engine;
+  if (!isFunction(expr)) return expr;
+
+  const ops = expr.ops.map((op) => collectPythagoreanPairs(op));
+
+  if (isFunction(expr, 'Add')) {
+    const terms = [...ops];
+    let collected = false;
+    for (let i = 0; i < terms.length; i++) {
+      const a = splitTrigSquareTerm(terms[i]);
+      if (!a) continue;
+      for (let j = i + 1; j < terms.length; j++) {
+        const b = splitTrigSquareTerm(terms[j]);
+        if (
+          !b ||
+          b.kind === a.kind ||
+          !a.arg.isSame(b.arg) ||
+          !a.coefficient.isSame(b.coefficient)
+        )
+          continue;
+        // A·sin²(u) + A·cos²(u) → A
+        terms.splice(j, 1);
+        terms[i] = a.coefficient;
+        collected = true;
+        break;
+      }
+    }
+    if (collected) {
+      if (terms.length === 1) return terms[0];
+      return ce.function('Add', terms);
+    }
+  }
+
+  const changed = ops.some((op, i) => op !== expr.ops[i]);
+  if (!changed) return expr;
+  return ce.function(expr.operator, ops);
+}
+
+function simplifyFoldingExp(expr: Expression): Expression {
+  return collectPythagoreanPairs(
+    foldExponentialExponents(expr.simplify())
+  ).simplify();
+}
+
 function dSolveAntiderivative(expr: Expression, variable: string): Expression {
   const ce = expr.engine;
   if (ce._integrationProvider) {
@@ -990,17 +1152,20 @@ function solveSecondOrderNonhomogeneousConstantCoefficient(
 
   const y1Prime = ce.function('D', [y1, ce.symbol(independentName)]).evaluate();
   const y2Prime = ce.function('D', [y2, ce.symbol(independentName)]).evaluate();
-  const wronskian = y1.mul(y2Prime).sub(y1Prime.mul(y2)).simplify();
+  // Fold exponential products (`e^x·e^-x → 1`) that the general simplifier
+  // otherwise leaves as `e^(x−x)`, which would keep the Wronskian and the
+  // integrands from reducing and silently disable variation of parameters.
+  const wronskian = simplifyFoldingExp(y1.mul(y2Prime).sub(y1Prime.mul(y2)));
   if (wronskian.isSame(0)) return undefined;
 
   const g = collected.rest.neg().simplify();
   const denominator = a.mul(wronskian).simplify();
   const u1Integrand = normalizeVariationIntegrand(
-    y2.neg().mul(g).div(denominator).simplify(),
+    simplifyFoldingExp(y2.neg().mul(g).div(denominator)),
     independentName
   );
   const u2Integrand = normalizeVariationIntegrand(
-    y1.mul(g).div(denominator).simplify(),
+    simplifyFoldingExp(y1.mul(g).div(denominator)),
     independentName
   );
   const u1 = dSolveAntiderivative(u1Integrand, independentName);
@@ -1009,12 +1174,9 @@ function solveSecondOrderNonhomogeneousConstantCoefficient(
   if (hasOperator(u1, 'Integrate') || hasOperator(u2, 'Integrate'))
     return undefined;
 
-  const solution = c1
-    .mul(y1)
-    .add(c2.mul(y2))
-    .add(y1.mul(u1))
-    .add(y2.mul(u2))
-    .simplify();
+  const solution = simplifyFoldingExp(
+    c1.mul(y1).add(c2.mul(y2)).add(y1.mul(u1)).add(y2.mul(u2))
+  );
   return ceListSolution(dependentCall, solution);
 }
 
