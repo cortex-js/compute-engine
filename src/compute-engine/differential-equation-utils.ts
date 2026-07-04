@@ -1,6 +1,6 @@
 import type { Expression, IComputeEngine } from './global-types';
 import { isFunction, isSymbol, sym } from './boxed-expression/type-guards';
-import { rk4 } from './numerics/differential-equations';
+import { rk4, rk4System } from './numerics/differential-equations';
 
 export function symbolArg(
   engine: IComputeEngine,
@@ -29,34 +29,65 @@ export function isDerivativeOfDependent(
   dependentName: string,
   independentName: string
 ): boolean {
+  return derivativeOrderOfDependent(expr, dependentName, independentName) === 1;
+}
+
+export function derivativeOrderOfDependent(
+  expr: Expression,
+  dependentName: string,
+  independentName: string
+): number | undefined {
   if (isFunction(expr, 'D')) {
-    return (
-      isDependentFunction(expr.op1, dependentName, independentName) &&
-      isSymbol(expr.op2, independentName)
+    const variables = expr.ops.slice(1);
+    if (
+      variables.length === 0 ||
+      !variables.every((op) => isSymbol(op, independentName))
+    )
+      return undefined;
+    const innerOrder = derivativeOrderOfDependent(
+      expr.op1,
+      dependentName,
+      independentName
     );
+    if (innerOrder !== undefined) return innerOrder + variables.length;
+    if (isDependentFunction(expr.op1, dependentName, independentName))
+      return variables.length;
+    return undefined;
   }
 
   if (isFunction(expr, 'Apply') && isFunction(expr.op1, 'Derivative')) {
-    return (
-      isSymbol(expr.op1.op1, dependentName) &&
-      expr.nops === 2 &&
-      isSymbol(expr.op2, independentName)
-    );
+    if (
+      !isSymbol(expr.op1.op1, dependentName) ||
+      expr.nops !== 2 ||
+      !isSymbol(expr.op2, independentName)
+    )
+      return undefined;
+
+    const order = expr.op1.op2 === undefined ? 1 : expr.op1.op2.N().re;
+    return Number.isInteger(order) && order > 0 ? order : undefined;
   }
 
-  return false;
+  return undefined;
 }
 
-function explicitRhs(
+function explicitDerivativeRhs(
   equation: Expression,
   dependentName: string,
   independentName: string
-): Expression | undefined {
+): { order: number; rhs: Expression } | undefined {
   if (!isFunction(equation, 'Equal')) return undefined;
-  if (isDerivativeOfDependent(equation.op1, dependentName, independentName))
-    return equation.op2;
-  if (isDerivativeOfDependent(equation.op2, dependentName, independentName))
-    return equation.op1;
+  const lhsOrder = derivativeOrderOfDependent(
+    equation.op1,
+    dependentName,
+    independentName
+  );
+  if (lhsOrder !== undefined) return { order: lhsOrder, rhs: equation.op2 };
+  const rhsOrder = derivativeOrderOfDependent(
+    equation.op2,
+    dependentName,
+    independentName
+  );
+  if (rhsOrder !== undefined) return { order: rhsOrder, rhs: equation.op1 };
   return undefined;
 }
 
@@ -77,6 +108,32 @@ function substituteDependentCall(
   );
 }
 
+function substituteDependentState(
+  expr: Expression,
+  dependentName: string,
+  independentName: string,
+  stateNames: readonly string[]
+): Expression {
+  if (isDependentFunction(expr, dependentName, independentName))
+    return expr.engine.symbol(stateNames[0]);
+
+  const order = derivativeOrderOfDependent(
+    expr,
+    dependentName,
+    independentName
+  );
+  if (order !== undefined && order < stateNames.length)
+    return expr.engine.symbol(stateNames[order]);
+
+  if (!isFunction(expr)) return expr;
+  return expr.engine._fn(
+    expr.operator,
+    expr.ops.map((op) =>
+      substituteDependentState(op, dependentName, independentName, stateNames)
+    )
+  );
+}
+
 export function nDSolve(
   equation: Expression,
   dependent: Expression,
@@ -92,12 +149,8 @@ export function nDSolve(
   const independentName = sym(limits.op1);
   if (!independentName) return undefined;
 
-  const [x0, x1, y0] = [
-    limits.op2.N().re,
-    limits.op3.N().re,
-    initialValue.N().re,
-  ];
-  if (![x0, x1, y0].every(Number.isFinite)) return undefined;
+  const [x0, x1] = [limits.op2.N().re, limits.op3.N().re];
+  if (![x0, x1].every(Number.isFinite)) return undefined;
 
   const steps = stepsExpr === undefined ? 100 : stepsExpr.N().re;
   if (
@@ -108,12 +161,63 @@ export function nDSolve(
   )
     return undefined;
 
-  const rhs = explicitRhs(equation.structural, dependentName, independentName);
-  if (!rhs) return undefined;
+  const rhsInfo = explicitDerivativeRhs(
+    equation.structural,
+    dependentName,
+    independentName
+  );
+  if (!rhsInfo) return undefined;
+
+  const initialValues = isFunction(initialValue, 'List')
+    ? initialValue.ops.map((op) => op.N().re)
+    : [initialValue.N().re];
+  if (
+    rhsInfo.order !== initialValues.length ||
+    !initialValues.every(Number.isFinite)
+  )
+    return undefined;
+
+  if (rhsInfo.order > 1) {
+    const stateNames = Array.from(
+      { length: rhsInfo.order },
+      (_, i) => `ndsolve${dependentName}state${i}`
+    );
+    const compiledRhs = substituteDependentState(
+      rhsInfo.rhs,
+      dependentName,
+      independentName,
+      stateNames
+    );
+    const compiled = ce._compile(compiledRhs, { realOnly: true });
+    if (!compiled.success) return undefined;
+    const run = compiled.run as (vars: Record<string, number>) => number;
+
+    const samples = rk4System(
+      (x, y) => {
+        const vars: Record<string, number> = { [independentName]: x };
+        stateNames.forEach((name, i) => {
+          vars[name] = y[i];
+        });
+        const highest = run(vars);
+        if (!Number.isFinite(highest)) return undefined;
+        return [...y.slice(1), highest];
+      },
+      x0,
+      initialValues,
+      x1,
+      { steps, deadline: ce._deadline }
+    );
+    if (!samples) return undefined;
+
+    return ce._fn(
+      'List',
+      samples.map(([x, y]) => ce._fn('List', [ce.number(x), ce.number(y[0])]))
+    );
+  }
 
   const stateName = `ndsolve${dependentName}state`;
   const compiledRhs = substituteDependentCall(
-    rhs,
+    rhsInfo.rhs,
     dependentName,
     independentName,
     stateName
@@ -125,7 +229,7 @@ export function nDSolve(
   const samples = rk4(
     (x, y) => run({ [independentName]: x, [stateName]: y }),
     x0,
-    y0,
+    initialValues[0],
     x1,
     { steps, deadline: ce._deadline }
   );
