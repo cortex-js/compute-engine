@@ -62,7 +62,13 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      // K(1) = +∞ exactly — a *provably* non-finite (±∞) value, claimed as
+      // `non_finite_number` per the non-finite typing convention (mirrors the
+      // `evaluate` special case below).
+      type: ([m]) =>
+        isNumber(m) && m.im === 0 && m.isSame(1)
+          ? 'non_finite_number'
+          : numericTypeHandler([m]),
       evaluate: ([m], { numericApproximation, engine }) => {
         // K(1) = +∞ exactly (Fungrim 45b157)
         if (isNumber(m) && m.im === 0 && m.isSame(1))

@@ -364,9 +364,12 @@ describe('TYPE INFERENCE FOR REAL × IMAGINARY ARITHMETIC (D10 shim retirement)'
     );
   });
 
-  it('ln(−1) is finite_complex; ln(0) stays number (−∞ pole)', () => {
+  it('ln(−1) is finite_complex; ln(0) is non_finite_number (provable −∞ pole)', () => {
     expect(ce.box(['Ln', -1]).type.toString()).toBe('finite_complex');
-    expect(ce.box(['Ln', 0]).type.toString()).toBe('number');
+    // SYM P2-23 option b: `ln(0) = −∞` is *provably* ±∞, so the log type
+    // handler claims `non_finite_number` (see the non-finite typing
+    // convention in ARCHITECTURE.md).
+    expect(ce.box(['Ln', 0]).type.toString()).toBe('non_finite_number');
   });
 });
 

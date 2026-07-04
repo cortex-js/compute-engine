@@ -2,6 +2,21 @@ import type { Expression } from '../global-types';
 import type { Type } from '../../common/type/types';
 
 /**
+ * Type handlers for the standard library follow the **non-finite typing
+ * convention** documented in `ARCHITECTURE.md` (§ "Non-finite typing
+ * convention for type handlers"). In short:
+ *
+ * - Claim `non_finite_number` only when the value is PROVABLY `±∞`
+ *   (e.g. `Ln(0) = −∞`, `±∞ · (provably non-zero reals)`).
+ * - When a non-finite value (`±∞`, `~oo`) or NaN is merely POSSIBLE, claim
+ *   `number` — never `non_finite_number` speculatively, and never a finite
+ *   type. `~oo` and NaN are representable only by `number`.
+ * - An operand of *unknown* finiteness (a bare `real` symbol) is treated as a
+ *   generic (finite) point; zero-ness, by contrast, must be *proven* absent
+ *   (via `sgn`) for claims that depend on it.
+ */
+
+/**
  * Generic result type for a *total, real-closed* numeric function (sin, cos,
  * sinh, erf, …): a finite real (or real-symbol) argument maps to a finite real
  * result.
@@ -32,6 +47,18 @@ function logType(ops: ReadonlyArray<Expression>): Type {
   const base = ops[1];
   if (!x || x.isNaN) return 'number';
   if (x.isFinite === false) return 'number';
+  // A provably-zero argument is the log pole, with a *provably* ±∞ value:
+  // `ln(0) = −∞`, and `log_b(0) = ∓∞` for any valid base (positive, finite,
+  // ≠ 1). Per the non-finite typing convention this provable case claims
+  // `non_finite_number`; an unusable base widens to `number`.
+  if (x.isSame(0)) {
+    if (
+      base === undefined ||
+      (base.isPositive === true && base.isFinite === true && !base.isSame(1))
+    )
+      return 'non_finite_number';
+    return 'number';
+  }
   // A provably *negative* (hence non-zero) finite real argument gives a
   // finite complex value: `ln(x) = ln|x| + iπ` (e.g. `ln(−1) = iπ`). Note
   // the base check below still applies before this claim is usable, so
@@ -51,15 +78,18 @@ function logType(ops: ReadonlyArray<Expression>): Type {
 }
 
 /**
- * `Csc`/`Cot` (and other periodic reciprocals with poles at multiples of π):
- * a finite real argument can land on a pole (→ `~oo`, typed `complex`) or give
- * a finite value, and a ±∞ argument gives NaN. `complex` is the tightest type
- * covering `finite_real`, `finite_complex`, and complex infinity.
+ * `Tan`/`Sec`/`Csc`/`Cot` (and the hyperbolic reciprocals with a pole at 0):
+ * a finite real argument can land on a pole (→ `~oo`, e.g. `Csc(0)`,
+ * `Tan(π/2)`) or give a finite value, and a ±∞ argument gives NaN. Since
+ * `~oo` is representable only by the top type (the lattice's
+ * `non_finite_number` is ±∞ only), the sound claim is `number` per the
+ * non-finite typing convention. (Previously claimed `complex`, which does
+ * not admit `~oo`.)
  */
 function poleReciprocalType(ops: ReadonlyArray<Expression>): Type {
   const x = ops[0];
   if (!x || x.isNaN || x.isFinite === false) return 'number';
-  return 'complex';
+  return 'number';
 }
 
 /**
@@ -97,6 +127,39 @@ function arctanType(ops: ReadonlyArray<Expression>): Type {
 }
 
 /**
+ * Γ-family result type (`Gamma`, `GammaLn`, `Digamma`, `Trigamma`,
+ * `PolyGamma`): poles at the non-positive integers, where the value is `~oo`
+ * (`+∞` for `GammaLn`) — not representable by any finite type nor by
+ * `non_finite_number` (for `~oo`), so a *provably* non-positive-integer
+ * argument claims `number`. An integer of unknown sign keeps the
+ * generic-point convention (via `numericTypeHandler`).
+ */
+export function gammaPoleType(x: Expression | undefined): Type {
+  if (!x || x.isNaN) return 'number';
+  if (x.isInteger === true && x.isNonPositive === true) return 'number';
+  return numericTypeHandler([x]);
+}
+
+/**
+ * Rounding family (`Round`, `Ceil`, `Floor`, `Truncate`), which extends
+ * component-wise to complex arguments (Gaussian rounding):
+ * - NaN → NaN, and a non-finite argument that may be `~oo` (or a non-finite
+ *   complex) → `number`;
+ * - a provably real ±∞ maps to itself: `non_finite_number` (provable);
+ * - a finite non-real argument rounds component-wise → `finite_complex`;
+ * - otherwise (real or unknown, finiteness unknown = generic point) →
+ *   `finite_integer`.
+ */
+export function roundingFunctionType(x: Expression | undefined): Type {
+  if (!x || x.isNaN) return 'number';
+  if (x.isFinite === false)
+    return x.isReal === true ? 'non_finite_number' : 'number';
+  if (x.isReal === false)
+    return x.isFinite === true ? 'finite_complex' : 'number';
+  return 'finite_integer';
+}
+
+/**
  * Result type for the elementary/inverse trig and log functions, dispatched by
  * operator so that pole-capable and domain-restricted operators do not claim
  * `finite_real` where their values are complex/infinite/NaN (SYM P0-12).
@@ -114,6 +177,8 @@ export function elementaryFunctionType(
     case 'Log10':
       return logType(ops);
 
+    case 'Tan':
+    case 'Sec':
     case 'Csc':
     case 'Cot':
     case 'Coth':

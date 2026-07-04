@@ -2,6 +2,26 @@
 
 ### New Features
 
+- **Exact Gaussian (complex) arithmetic.** Exact complex values now stay exact
+  through arithmetic instead of degrading to machine floats: `(1+i)^3` →
+  `-2+2i`, `(1+i)^{-2}` → `-i/2`, `1/(1+i)` → `(1-i)/2`, `\sqrt{3+4i}` → `2+i`,
+  and `\sqrt{-4}` → `2i`, all exactly. Sums fold exact Gaussian terms
+  (`2 + 3i + x` carries a single exact `2+3i`, which previously became an
+  inexact machine complex), and pure-imaginary radicals such as `√2·i` are
+  representable exactly. Values whose exact form would need a radical on both
+  components (e.g. `√2 + √3·i`) stay symbolic rather than silently
+  approximating. Exact complex numbers serialize losslessly as
+  `["Complex", re, im]` with exact components and round-trip through MathJSON.
+
+- **Sharper type inference for complex arithmetic.** Products, quotients and
+  powers of real and pure-imaginary operands now infer precise types: `√2·i`
+  types as `imaginary` (previously the complex-blind `finite_number`), `i·i`
+  as `finite_real`, `i/2` and `i^3` as `imaginary`, `e^i` and `\ln(-1)` as
+  `finite_complex`. As a consequence, declared signatures with complex-family
+  parameters (`(complex) -> complex`) are now enforced in strict mode like any
+  other signature — previously they were skipped entirely to avoid wrongly
+  rejecting complex constants that the old inference mistyped.
+
 - **Partial derivatives of unknown multivariate functions.** Differentiating an
   application of an undefined function of several arguments no longer stays
   inert: `D(f(x, y), x)` now evaluates to `Apply(Derivative(f, 1, 0), x, y)`,
@@ -71,6 +91,13 @@
   preserving values set with `assign()`.
 
 ### Performance
+
+- **LaTeX parsing is 15–28% faster.** Dictionary lookahead is now bounded per
+  token (most tokens start no multi-token trigger, so no lookahead strings are
+  built at all), and the speculative symbol parse performed by the dictionary's
+  symbol-trigger path is cached across the per-kind definition lookups at each
+  position. Measured: −24–28% on derivative/polynomial/matrix inputs, −15% on
+  a definite integral; parse results are byte-identical.
 
 - **Arbitrary-precision arithmetic is substantially faster.** A sequence of
   byte-identical optimizations to the `BigDecimal` core: division no longer
@@ -177,6 +204,17 @@
   high-precision `N()`.
 
 ### Resolved Issues
+
+- **Non-finite typing is now consistent (and documented).** Type handlers
+  claimed finite types for values that evaluate to complex infinity:
+  `Tan(π/2)`, `Sec(π/2)`, `Csc(0)`, `Gamma(0)`, `Gamma(-2)`, `Zeta(1)`,
+  `Factorial(-2)` and `EllipticK(1)` all typed `finite_real`; `Round(i)` and
+  `Round(~oo)` typed `integer`. The convention is now: claim
+  `non_finite_number` only when non-finiteness is provable (`\ln(0)` and
+  `1+∞` now correctly type `non_finite_number`), and claim `number` when a
+  pole or NaN is merely possible (`x·∞` for real `x`, which is NaN at
+  `x = 0`). The convention is documented in ARCHITECTURE.md ("Non-finite
+  typing convention for type handlers") and pinned by a dedicated test suite.
 
 - **Free functions accept the looser AsciiMath/Typst-like syntax they
   document.** `simplify()`, `evaluate()`, `N()`, `expand()`, `expandAll()`,

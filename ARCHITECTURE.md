@@ -238,6 +238,48 @@ Larger cancellations (`x²/(5x²) → 1/5`) and the wider policy that governs wh
 declared-`complex` one) are **simplify-level**, documented in
 [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md#generic-real-simplification-policy).
 
+### Non-finite typing convention for type handlers
+
+The numeric lattice (D10) can name only some of the non-finite values:
+`non_finite_number` is **exactly `{+∞, −∞}`**; `real`/`rational`/`integer` and
+`complex` admit ±∞ on top of their finite tower; **`~oo` (`ComplexInfinity`)
+and NaN are admitted only by the top type `number`**. Since the lattice cannot
+distinguish "±∞" from "maybe `~oo`" from "maybe NaN" (SYM P2-23, resolved as a
+convention, not a lattice extension), every operator `type` handler follows
+these rules:
+
+1. **Claim `non_finite_number` only when the value is _provably_ `±∞`.**
+   Examples: `Ln(0) = −∞`; `Round/Ceil/Floor/Truncate` of a provably real ±∞;
+   `±∞ · (finite reals all provably non-zero)`; `EllipticK(1) = +∞`;
+   `(+∞)^p` for finite real `p > 0`; `±∞ + (real terms)`.
+2. **When a non-finite value or NaN is merely _possible_ — or the value is
+   provably `~oo` — claim `number`.** Do not claim `non_finite_number`
+   speculatively, do not claim a finite type, and do not claim `complex`
+   (which does not admit `~oo`/NaN). Examples: `x · ∞` with a possibly-zero
+   `x` (0·∞ = NaN); `∞/∞`, `k/0`; pole-capable operators at arguments that can
+   land on a pole (`Tan(π/2)`, `Csc(0)`, `Gamma(0)`, `Zeta(1)`,
+   `Factorial(−2)` — all `~oo`); `√(−∞) = i·∞ = ~oo`.
+3. **Unknown finiteness follows the generic-point convention; zero-ness must
+   be proven when a non-finite operand is present.** An operand whose
+   finiteness is _unknown_ (a bare `real` symbol; `isFinite === undefined`)
+   is treated as a generic (finite) point — `Sin(x)` claims `finite_real`,
+   and only a _provably_ non-finite operand (`isFinite === false`) triggers
+   the non-finite analysis. But once an operand is provably non-finite, a
+   claim that depends on another operand being non-zero (e.g. `x · ∞ = ±∞`,
+   where `x = 0` gives NaN) must _prove_ it (via `sgn`), never assume it.
+   (A possibly-zero _denominator_ with finite operands keeps `Divide`'s
+   documented generic-point behavior — see the handler's comment.)
+
+The **value** `~oo` itself currently reports type `complex` (the
+`ComplexInfinity` symbol declaration and the numeric-value `type` getters);
+this is a historical placement that the lattice cannot express better without
+the deferred `~oo`/NaN lattice refinement. Handlers must not rely on it: an
+expression that can evaluate to `~oo` is typed `number` per rule 2.
+
+The shared handler implementations (and per-operator dispatch) live in
+`src/compute-engine/library/type-handlers.ts`; the convention is pinned by
+`test/compute-engine/non-finite-typing.test.ts`.
+
 ### Definitions: the semantics of symbols and operators
 
 Behavior is attached not to the expression but to its **definition**, resolved

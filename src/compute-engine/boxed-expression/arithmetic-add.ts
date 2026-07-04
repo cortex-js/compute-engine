@@ -176,7 +176,20 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   if (args.length === 1) return args[0].type;
   if (args.some((x) => x.isNaN)) return 'number';
   // (+∞) + (−∞) = NaN: two or more non-finite operands can cancel to NaN.
-  if (args.filter((x) => x.isFinite === false).length >= 2) return 'number';
+  const nonFinite = args.filter((x) => x.isFinite === false);
+  if (nonFinite.length >= 2) return 'number';
+  if (nonFinite.length === 1) {
+    // Exactly one provably non-finite term (non-finite typing convention):
+    // - a real ±∞ plus terms that are all real and not provably non-finite
+    //   (unknown finiteness = generic point) is provably ±∞;
+    // - a non-real non-finite term (`~oo`, `∞ + i`, …), or a non-real
+    //   companion term, can produce `~oo`/NaN/non-finite complex values that
+    //   only the top type `number` admits.
+    const nf = nonFinite[0];
+    if (nf.isReal === true && args.every((x) => x === nf || x.isReal === true))
+      return 'non_finite_number';
+    return 'number';
+  }
   const t = widen(...args.map((x) => x.type.type));
   // `imaginary + imaginary` is not closed under addition: the imaginary parts
   // can cancel to 0, which is *real* (P0-13). 0 is `finite_integer` and the

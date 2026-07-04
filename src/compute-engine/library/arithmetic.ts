@@ -95,7 +95,12 @@ import {
 } from '../boxed-expression/arithmetic-power';
 import { parseType } from '../../common/type/parse';
 import { widen } from '../../common/type/utils';
-import { numericTypeHandler, elementaryFunctionType } from './type-handlers';
+import {
+  numericTypeHandler,
+  elementaryFunctionType,
+  gammaPoleType,
+  roundingFunctionType,
+} from './type-handlers';
 import {
   isQuantity,
   quantityAdd,
@@ -290,7 +295,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> integer',
-      type: ([x]) => (x.isFinite !== false ? 'finite_integer' : 'integer'),
+      type: ([x]) => roundingFunctionType(x),
       sgn: ([x]) => {
         if (x.isLessEqual(-1)) return 'negative';
         if (x.isPositive) return 'positive';
@@ -488,6 +493,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A non-negative integer factorial is a (finite) positive integer.
         if (x?.isInteger === true && x.isNonNegative === true)
           return 'finite_integer';
+        // A *negative* integer is a pole of Γ(x+1): the value is `~oo`,
+        // representable only by `number` (non-finite typing convention).
+        if (x?.isInteger === true && x.isNegative === true) return 'number';
         // Otherwise it is Γ(x+1); type it like `Gamma`.
         return numericTypeHandler([x]);
       },
@@ -613,7 +621,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number) -> integer',
-      type: ([x]) => (x.isFinite !== false ? 'finite_integer' : 'integer'),
+      type: ([x]) => roundingFunctionType(x),
       sgn: ([x]) => {
         if (x.isNegative) return 'negative';
         if (x.isGreaterEqual(1)) return 'positive';
@@ -667,7 +675,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8000,
       broadcastable: true,
       signature: '(number, number?) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      // Γ(z) has poles (value `~oo`) at the non-positive integers; the
+      // incomplete Γ(s, z) keeps the generic handler.
+      type: (ops) =>
+        ops.length === 1 ? gammaPoleType(ops[0]) : numericTypeHandler(ops),
 
       sgn: (ops) =>
         ops.length === 1
@@ -718,7 +729,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8000,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      type: (ops) => gammaPoleType(ops[0]),
 
       evaluate: (ops, { numericApproximation, engine }) =>
         shouldNumericize(numericApproximation, ops[0])
@@ -740,7 +751,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      type: (ops) => gammaPoleType(ops[0]),
       evaluate: ([x], { numericApproximation, engine }) =>
         shouldNumericize(numericApproximation, x)
           ? apply(x, digamma, (x) => bigDigamma(engine, x))
@@ -755,7 +766,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8400,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      type: (ops) => gammaPoleType(ops[0]),
       evaluate: ([x], { numericApproximation, engine }) =>
         shouldNumericize(numericApproximation, x)
           ? apply(x, trigamma, (x) => bigTrigamma(engine, x))
@@ -772,7 +783,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: integer, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      // ψⁿ(x) has poles (value `~oo`) at the non-positive integers.
+      type: ([n, x]) =>
+        x?.isInteger === true && x.isNonPositive === true
+          ? 'number'
+          : numericTypeHandler([n, x]),
       evaluate: ([n, x], { numericApproximation, engine }) =>
         shouldNumericize(numericApproximation, n, x)
           ? apply2(
@@ -792,7 +807,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      // ζ(1) is the pole (value `~oo`, representable only by `number`).
+      type: ([x]) => (x?.isSame(1) ? 'number' : numericTypeHandler([x])),
       evaluate: ([x], { numericApproximation, engine }) => {
         if (shouldNumericize(numericApproximation, x))
           return apply(x, zeta, (x) => bigZeta(engine, x));
@@ -1194,9 +1210,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // 0 · ±∞ = NaN (indeterminate).
           if (ops.some((x) => x.isSame(0))) return 'number';
           // real · ±∞ = ±∞ (a non-finite real); a non-real factor (i, complex)
-          // with ∞ gives ~oo or NaN, so only claim `non_finite_number` when
-          // every operand is provably real.
-          if (ops.every((x) => x.isReal === true)) return 'non_finite_number';
+          // with ∞ gives ~oo or NaN, and a *possibly-zero* factor gives NaN
+          // (0 · ∞), so only claim `non_finite_number` when every operand is
+          // provably real AND provably non-zero (non-finite typing
+          // convention: zero-ness must be proven absent, not assumed).
+          if (
+            ops.every((x) => {
+              if (x.isReal !== true) return false;
+              const s = x.sgn;
+              return s === 'positive' || s === 'negative' || s === 'not-zero';
+            })
+          )
+            return 'non_finite_number';
           return 'number';
         }
         // From here every operand is finite (no `isFinite === false`).
@@ -1641,12 +1666,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> integer',
-      type: ([x]) => {
-        if (x.isNaN) return 'number';
-        if (x.isFinite === false || x.isReal === false)
-          return 'non_finite_number';
-        return 'finite_integer';
-      },
+      type: ([x]) => roundingFunctionType(x),
       sgn: ([x]) => {
         if (x.isNaN) return 'unsigned';
         if (isNumber(x))
@@ -1738,8 +1758,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: ([x]) => {
         if (x.isNaN) return 'number';
         if (x.isFinite === false) {
-          // √(−∞) = i·∞ = ~oo (complex infinity), not a real ±∞.
-          if (x.isNegative === true) return 'complex';
+          // √(−∞) = i·∞ = ~oo (complex infinity), not a real ±∞ — and `~oo`
+          // is representable only by `number` (non-finite typing convention).
+          if (x.isNegative === true) return 'number';
           if (x.isNonNegative === true) return 'non_finite_number';
           return 'number';
         }
@@ -1827,7 +1848,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> integer',
-      type: ([x]) => (x.isFinite !== false ? 'finite_integer' : 'integer'),
+      type: ([x]) => roundingFunctionType(x),
       sgn: ([x]) => x.sgn,
       evaluate: ([x]) =>
         apply(
