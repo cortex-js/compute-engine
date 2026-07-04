@@ -92,7 +92,10 @@ function hasDependentOrDerivative(
   independentName: string
 ): boolean {
   if (isDependentFunction(expr, dependentName, independentName)) return true;
-  if (derivativeOrderOfDependent(expr, dependentName, independentName))
+  if (
+    derivativeOrderOfDependent(expr, dependentName, independentName) !==
+    undefined
+  )
     return true;
   if (!isFunction(expr)) return false;
   return expr.ops.some((op) =>

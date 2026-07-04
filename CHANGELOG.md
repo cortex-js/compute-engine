@@ -105,6 +105,22 @@ answer, lose exactness, hang, or silently accept invalid input.
   symbols satisfy them, and alternating-binomial sum simplifications now check
   their validity bounds.
 
+- **Differential equation solvers handle higher-order equations.** (contributed
+  by [KingArth0r](https://github.com/KingArth0r)) `DSolve` now solves **linear
+  constant-coefficient homogeneous** equations of any order via the
+  characteristic polynomial — distinct real, repeated, and complex roots — for
+  example `y''(x) = y(x)` → `[y(x) = c_1·e^x + c_2·e^{-x}]` and
+  `y''(x) + y(x) = 0` → `[y(x) = c_1·cos(x) + c_2·sin(x)]`. Roots are kept exact
+  when the characteristic polynomial factors and fall back to numeric roots
+  otherwise. It also solves **second-order constant-coefficient nonhomogeneous**
+  equations (undetermined coefficients for polynomial forcing, variation of
+  parameters otherwise) and **second-order Cauchy–Euler** equations. Integration
+  constants are now named `c_1`, `c_2`, … (fresh names are chosen if those are
+  already in use). Correspondingly, `NDSolve` now solves explicit **higher-order**
+  initial value problems `y⁽ⁿ⁾(x) = f(x, y, y', …, y⁽ⁿ⁻¹⁾)` by reducing them to a
+  first-order RK4 system, with the initial condition given as a list
+  `[y(x0), y'(x0), …]`. Equations outside these classes remain inert.
+
 ### Parsing and Serialization
 
 - **`\binom` is supported.** `\binom{n}{k}`, `\dbinom{n}{k}`, and
