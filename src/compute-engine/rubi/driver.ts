@@ -27,6 +27,7 @@ import {
   deactivateTrig,
   unifyInertTrig,
   activateTrig,
+  cofunctionShift,
   reciprocalToPower,
   containsHyperbolic,
   expandHyperbolicToExp,
@@ -63,6 +64,9 @@ const NO_SKELETON = process.env.RUBI_NO_SKELETON !== undefined;
 // RUBI_NO_RECIP: disable the csc/sec → sin^-1/cos^-1 reciprocal normalization
 // (for A/B measuring its effect on the benchmark).
 const NO_RECIP = process.env.RUBI_NO_RECIP !== undefined;
+// RUBI_NO_COFN: disable the sec→csc[+π/2] / cot→-tan[+π/2] cofunction
+// deactivation shift (A/B measuring its effect on the 4.5/4.3 benchmarks).
+const NO_COFN = process.env.RUBI_NO_COFN !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -319,6 +323,17 @@ export class RubiDriver {
     // not just at the top-level entry. Gated by trigActive so it is a strict
     // no-op for algebraic integrands.
     if (this.trigActive) integrand = deactivateTrig(ce, integrand);
+
+    // Rubi-faithful cofunction routing: reflect the UNAUTHORED head of each
+    // reciprocal-trig pair onto the AUTHORED one — `sec→csc[+π/2]`,
+    // `cot→-tan[+π/2]` (see cofunctionShift). Runs BEFORE reciprocalToPower:
+    // fractional-power sec (√sec, sec^(5/2)) reflects to csc[+π/2] and — because
+    // reciprocalToPower freezes fractional reciprocals — survives to hit the 4.5
+    // csc rule family; integer-power bare sec still folds through
+    // reciprocalToPower to the sine/cosine power rules as before. Value-exact
+    // for all powers; gated to a no-op when no sec/cot is present.
+    if (this.trigActive && !NO_COFN)
+      integrand = cofunctionShift(ce, integrand, variable);
 
     // Route reciprocal-head integrands (csc/sec) through the sine/cosine POWER
     // rules by rewriting `csc→sin^-1`, `sec→cos^-1` (see reciprocalToPower).

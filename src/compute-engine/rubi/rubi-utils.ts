@@ -2340,6 +2340,151 @@ export function activateTrig(ce: ComputeEngine, e: Expression): Expression {
   return mapTrigHeads(ce, e, TO_ACTIVE);
 }
 
+// ---------------------------------------------------------------------------
+// Cofunction deactivation shift (the runtime-faithful mirror of Rubi's
+// DeactivateTrig — ReduceInertTrig ∘ UnifyInertTrigFunction, verified under
+// wolframscript). Rubi authors the reciprocal-trig REDUCTION rules in ONE head
+// of each cofunction pair — the sec/csc pair in inert `csc` (the "4.5 Secant"
+// chapter), the tan/cot pair in inert `tan` (the "4.3 Tangent" chapter). It has
+// NO Cosine/Cotangent/Cosecant reduction chapter. At integration time the OTHER
+// head of each pair is reflected onto the authored one via a quarter-period
+// argument shift — the "Cosecant to secant" / "Cotangent to tangent" sections
+// of UnifyInertTrigFunction (IntegrationUtilityFunctions.m):
+//
+//   (a + b·sec[e+f·x])^n  →  (a + b·csc[e + π/2 + f·x])^n     (no sign flip)
+//   (a + b·cot[e+f·x])^n  →  (a − b·tan[e + π/2 + f·x])^n     (sign flip on b)
+//
+// These are pure functional identities — `sec θ = csc(θ+π/2)` and
+// `cot θ = −tan(θ+π/2)` — so they are value-exact for EVERY power (integer or
+// fractional; no branch hazard), which lets a bare node-level rewrite compose
+// correctly through Add / Multiply / Power: reflecting the `sec`/`cot` LEAF
+// carries the shift (and, for cot, the −1) into whatever binomial/product/power
+// context encloses it. So `(a+b·sec)^m (c+d·sec)^n → (a+b·csc[+π/2])^m
+// (c+d·csc[+π/2])^n` with a COMMON shifted argument, exactly matching the csc
+// rule family. Verified: DeactivateTrig[Sqrt[b*Sec[x]],x] → Sqrt[b*csc[π/2+x]].
+//
+// Only LINEAR arguments are reflected (Rubi's `LinearQ[u[[1]],x]` guard in
+// DeactivateTrigAux); an x-free or nonlinear-argument sec/cot is left as-is.
+//
+// LIMITATION vs. Rubi: a MIXED cross-pair integrand (e.g. `csc·cot`, a sec/csc
+// factor times a tan/cot factor) needs Rubi's per-clause ±π/2 choice to land
+// both factors on a COMMON argument; the uniform +π/2 leaf reflection here can
+// leave their arguments differing by π/2. Those cases (4.5.1.4 (d tan)^n(a+b
+// sec)^m and the like) also require the not-yet-bundled 4.3 Tangent rules, so
+// they decline cleanly rather than mis-routing.
+//
+// The shifted `csc[·+π/2]` / `tan[·+π/2]` RESULT reads back cleanly: results are
+// re-activated and run through `simplifyTrig`, whose PI_HALF_PLUS table already
+// folds `Csc(θ+π/2)→Sec(θ)` and `Tan(θ+π/2)→−Cot(θ)` (see driver `cleanTrig`).
+//
+// SCOPE (R11): only `sec→csc` is enabled by default. The `cot→tan` reflection
+// is CORRECT but PREMATURE — it regresses the bundled 4.1 Sine `cot`-with-`sin`
+// families (`(g·cot)^p (a+b·sin)^m`, 4.1.1.3), because those are MIXED cross-pair
+// integrands: Rubi's UnifyInertTrigFunction reflects BOTH factors with a matched
+// ±π/2 so they keep a common argument, whereas the uniform leaf reflection here
+// turns `cot[θ]→-tan[θ+π/2]` while the `sin[θ]` stays at `θ`, so the product no
+// longer matches the sine-chapter `(g cot)^p (a+b cos)^m` clause (`unifyInertTrig`)
+// nor a `tan` rule. Enabling `cot→tan` waits on bundling 4.3 Tangent together
+// with a mixed-argument reflection (the "Cotangent to tangent" product clauses).
+// Behind the `RUBI_COFN_COT` toggle for that future rung / --rubi measurement.
+const COFUNCTION_SHIFT_SEC: Record<string, { fn: string; sign: number }> = {
+  sec: { fn: 'csc', sign: 1 },
+};
+const COFUNCTION_SHIFT_ALL: Record<string, { fn: string; sign: number }> = {
+  sec: { fn: 'csc', sign: 1 },
+  cot: { fn: 'tan', sign: -1 },
+};
+const COFN_COT = process.env.RUBI_COFN_COT !== undefined;
+const COFUNCTION_SHIFT = COFN_COT
+  ? COFUNCTION_SHIFT_ALL
+  : COFUNCTION_SHIFT_SEC;
+
+/** True if a shiftable (`sec`, and — when enabled — `cot`) inert head appears
+ * anywhere (gates the shift to a strict no-op for integrands that carry none). */
+function hasCofunctionTrig(e: Expression): boolean {
+  if (COFUNCTION_SHIFT[e.operator] !== undefined) return true;
+  return e.ops?.some(hasCofunctionTrig) ?? false;
+}
+
+// CROSS-pair heads that, if present, make the integrand a MIXED form for which
+// the uniform leaf reflection would desynchronize arguments (see the block
+// comment's LIMITATION): a co-present `sin`/`cos` (the 4.1 `(d·sin)^n
+// (a+b·sec)^m` families) or `tan`/`cot` (4.5.1.4 `(d·tan)^n (a+b·sec)^m`) is
+// left to `unifyInertTrig`'s matched-±π/2 product clauses and the bundled mixed
+// rules — reflecting it here regresses those. The shift SOURCE(s) and TARGET(s)
+// of the active pair(s) are excluded (a pure-sec integrand reflects cleanly, and
+// its csc-bearing recursive subproblems still benefit — a large share of the
+// 4.5 win is in the recursion).
+const SHIFT_SOURCE_HEADS = new Set(Object.keys(COFUNCTION_SHIFT));
+const SHIFT_TARGET_HEADS = new Set(
+  Object.values(COFUNCTION_SHIFT).map((m) => m.fn)
+);
+const MIXED_TRIG_HEADS = new Set(
+  ['sin', 'cos', 'tan', 'cot', 'sec', 'csc'].filter(
+    (h) => !SHIFT_SOURCE_HEADS.has(h) && !SHIFT_TARGET_HEADS.has(h)
+  )
+);
+function hasMixedPartnerTrig(e: Expression): boolean {
+  if (MIXED_TRIG_HEADS.has(e.operator)) return true;
+  return e.ops?.some(hasMixedPartnerTrig) ?? false;
+}
+
+/** Collect the (stringified) arguments of every shift-TARGET head (`csc`, and —
+ * when cot enabled — `tan`) in the tree, into `out`. */
+function collectTargetArgs(e: Expression, out: Set<string>): void {
+  if (SHIFT_TARGET_HEADS.has(e.operator) && e.ops?.length === 1)
+    out.add(e.ops[0].toString());
+  if (e.ops) for (const o of e.ops) collectTargetArgs(o, out);
+}
+
+/** True if the tree carries a target head at 2+ DISTINCT arguments — the
+ * signature of a desynchronized within-pair reflection (`csc[θ]·csc[θ+π/2]`
+ * from `csc[θ]·sec[θ]`). A pure-source reflection lands every target on the SAME
+ * `arg+π/2`, so this stays false; a genuine `csc·sec` mix trips it and the
+ * reflection is reverted. */
+function hasDesyncedTargetArgs(e: Expression): boolean {
+  const args = new Set<string>();
+  collectTargetArgs(e, args);
+  return args.size >= 2;
+}
+
+function cofunctionShiftRec(
+  ce: ComputeEngine,
+  e: Expression,
+  x: string
+): Expression {
+  const map = COFUNCTION_SHIFT[e.operator];
+  if (map && e.ops?.length === 1 && polyDegreeX(e.ops[0], x) === 1) {
+    const shifted = ce.function(map.fn, [e.ops[0].add(ce.Pi.div(2))]);
+    return map.sign === 1 ? shifted : shifted.neg();
+  }
+  const ops = e.ops;
+  if (!ops || ops.length === 0) return e;
+  const newOps = ops.map((o) => cofunctionShiftRec(ce, o, x));
+  if (newOps.every((o, i) => o === ops[i])) return e;
+  return ce.function(e.operator, newOps);
+}
+
+/** Reflect an inert `sec` (and, under `RUBI_COFN_COT`, `cot`) onto the authored
+ * `csc`/`tan` cofunction via the quarter-period shift (identity when none
+ * appears). See the block comment. Runs at deactivation time, before
+ * `reciprocalToPower`, so a fractional-power `sec` reflects to a `csc` that
+ * survives to the 4.5 csc rule family. If the reflection would desynchronize a
+ * within-pair `csc·sec` mix into a target head at two different arguments (the
+ * 4.1.0 `Csc^2·(b·Sec)^(5/2)` case), it is reverted — leaving those to the
+ * fractional-reciprocal freeze and the bundled mixed rules. */
+export function cofunctionShift(
+  ce: ComputeEngine,
+  e: Expression,
+  x: string
+): Expression {
+  if (!hasCofunctionTrig(e)) return e;
+  if (hasMixedPartnerTrig(e)) return e; // mixed cross-pair: leave to unifyInertTrig
+  const shifted = cofunctionShiftRec(ce, e, x);
+  if (hasDesyncedTargetArgs(shifted)) return e; // within-pair arg desync: revert
+  return shifted;
+}
+
 // Reciprocal inert heads → negative power of their base cofunction: `csc→1/sin`,
 // `sec→1/cos`. Unlike Mathematica Rubi — which keeps `csc`/`sec` as distinct
 // inert heads and carries a full parallel family of `(b·csc)^n`/`(b·sec)^n`

@@ -657,6 +657,62 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     has no such source dirs — they are the auto-deactivated cofunctions). The
     durable fix is the runtime `Sec→csc[π/2+·]` / `Cot→tan[π/2+·]` deactivation
     shift in `rubi-utils.ts`, mirroring Rubi's `DeactivateTrig`.
+- **Phase R11 — runtime cofunction deactivation shift LANDED (2026-07-04).**
+  The durable fix R10 deferred: `cofunctionShift` in `rubi-utils.ts` now mirrors
+  Rubi's `DeactivateTrig` (`ReduceInertTrig` ∘ `UnifyInertTrigFunction`'s
+  "Cosecant to secant" / "Cotangent to tangent" sections, read from
+  `IntegrationUtilityFunctions.m`). It runs in `intRec` right after
+  `deactivateTrig`, before `reciprocalToPower`, and reflects the UNAUTHORED head
+  of each reciprocal-trig pair onto the AUTHORED one via a quarter-period shift:
+  - `sec[e+f·x] → csc[e+π/2+f·x]` (no sign; `sec θ = csc(θ+π/2)`)
+  - `cot[e+f·x] → −tan[e+π/2+f·x]` (sign flip; `cot θ = −tan(θ+π/2)`)
+
+  Both are pure functional identities (value-exact for EVERY power, no branch
+  hazard), so a bare node-level LEAF rewrite composes through Add/Multiply/Power:
+  `(a+b·sec)^m (c+d·sec)^n → (a+b·csc[+π/2])^m (c+d·csc[+π/2])^n` at a COMMON
+  shifted argument, matching the 4.5 csc rule family. Results read back cleanly —
+  `simplifyTrig`'s `PI_HALF_PLUS` already folds `Csc(θ+π/2)→Sec(θ)` /
+  `Tan(θ+π/2)→−Cot(θ)` via the driver's `cleanTrig` (verified: shipped answers
+  show `sec(x)`, not `csc(x+π/2)`).
+  - **Firing scope (the subtlety — NOT a blind global head swap).** The uniform
+    +π/2 leaf reflection is only valid where it doesn't DESYNCHRONIZE arguments,
+    so `cofunctionShift` fires only when the integrand is *pure-source*:
+    (1) it declines when a CROSS-pair head (`sin`/`cos`/`tan`/`cot`) is co-present
+    — the 4.1 `(d·sin)^n (a+b·sec)^m` and 4.5.1.4 `(d·tan)^n (a+b·sec)^m` mixes,
+    left to `unifyInertTrig`'s matched-±π/2 clauses; and (2) it reflects, then
+    REVERTS if the result carries the target head at ≥2 distinct arguments — the
+    WITHIN-pair `csc·sec` desync (`Csc^2·(b·Sec)^(5/2)` → `csc[θ]·csc[θ+π/2]`),
+    which would otherwise turn a solvable 4.1.0 integrand unsolvable. This
+    precise guard is what keeps 4.1 Sine at **zero** regression while admitting
+    the pure-sec reflections (including in recursive subproblems, where most of
+    the win lives).
+  - **`Cot→tan` is implemented but DEFAULT-OFF** (`RUBI_COFN_COT` toggle). It is
+    correct but PREMATURE: 4.3 Tangent is not bundled, and it regresses the
+    bundled 4.1 `(g·cot)^p (a+b·sin)^m` families (mixed cross-pair). Enabling it
+    is part of the 4.3-Tangent bundling rung, together with the mixed-argument
+    "Cotangent to tangent" product clauses.
+  - **Numbers (seed 5, `--rubi`).** 4.5 Secant 120: **31 → 56** correct (+25),
+    **0 genuine wrong** — the 3 flagged wrong (`4.5.3.1` #27/#30, `4.5.1.2` #333)
+    are verification-false-wrongs of the symbolic-exponent Hypergeometric2F1 /
+    AppellF1 + `√(Sin²)=|Sin|` class (idx #27 differentiates back EXACTLY at
+    integer m, rel ~1e-11; the harness mis-grades at its random non-integer m
+    where `(b·Sec)^(4/3)`/`√(Sin²)` flip branch — same class as the documented
+    4.1 #690/#205/#116). No regressions: 4.1 Sine 120 = 98, 400 = 293/3/0; ch1
+    200 = 180/6; ch2/ch6 (sample 60) unchanged (the shift is a strict no-op for
+    non-active-trig integrands, `RUBI_NO_COFN`-confirmed). The 3 hand-added
+    `sec` stopgap rules (4.5.1.1 #500/#501/#502) are now shadowed for pure-sec
+    inputs (removing them leaves 4.5 at 56) but KEPT as a fallback for the
+    reverted within-pair `sec` cases; no bundle change (the shift is runtime
+    code, `rubi-rules-data.json` stays fresh).
+  - **What ships vs awaits 4.3.** Shipped-bundle probe (`loadIntegrationRules`)
+    closes `√(sec x)`, `√(3 sec x)`, `sec^(5/2)`, `1/sec^(3/2)`, `sec³`, and the
+    new `sec²·(a+b·sec)`. Integer-power SYMBOLIC binomials (`1/(a+b·sec)`,
+    `(a+b·sec)^2`) still stay inert in the shipped bundle: `reciprocalToPower`
+    rewrites the reflected `csc` inside a summand to `1/sin` before a csc
+    binomial rule can match, and the Add-summand exemption that would fix it
+    regresses 4.1 Sine (−20, csc-binomial sine families) — so binomial routing
+    awaits a sec-specific (not global) fix. `cot` wins appear only in `--rubi`
+    corpus runs with `RUBI_COFN_COT` once 4.3 Tangent is bundled.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

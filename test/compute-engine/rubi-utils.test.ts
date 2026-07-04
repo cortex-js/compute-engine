@@ -11,7 +11,11 @@ import {
   containsHyperbolic,
   expandHyperbolicToExp,
   foldLnExponentialE,
+  deactivateTrig,
+  activateTrig,
+  cofunctionShift,
 } from '../../src/compute-engine/rubi/rubi-utils';
+import { loadIntegrationRules } from '../../src/integration-rules';
 import type { Ctx } from '../../src/compute-engine/rubi/rubi-utils';
 import type { Json } from '../../scripts/rubi/wl-parser';
 
@@ -345,4 +349,110 @@ describe('hyperbolic → exponential expansion (Chapter 6, ExpandTrigReduce)', (
     );
     expect(folded.isSame(ce.box(['Divide', 'y', 2]))).toBe(true);
   });
+});
+
+// R11: the runtime cofunction deactivation shift (docs/rubi/RUBI.md §5, Phase
+// R11). Rubi authors the sec/csc reduction rules in inert `csc`; at integration
+// time `Sec` is reflected onto `csc[·+π/2]` (sec θ = csc(θ+π/2)) so the csc rule
+// family covers sec. The shift is value-exact but only fires for pure-source
+// (sec-only) forms — mixed cross-pair (sin/cos/tan/cot co-present) and within-
+// pair arg desyncs (`csc·sec`) are left to the existing machinery.
+describe('cofunction deactivation shift (Sec → csc[·+π/2], R11)', () => {
+  const arg = ['Add', 'a', ['Multiply', 'b', 'x']] as Json; // a + b·x (linear)
+  const inertSec = (a: Json) => ce.box(['sec', a] as any);
+  // numeric agreement of two expressions (one may carry inert heads → activate)
+  const sameNumerically = (a: Expression, b: Expression): boolean => {
+    for (const xv of [0.3, 0.7, 1.2]) {
+      const subs = { a: 0.4, b: 1.1, x: xv };
+      const av = activateTrig(ce, a).subs(subs).N().re;
+      const bv = activateTrig(ce, b).subs(subs).N().re;
+      if (typeof av !== 'number' || typeof bv !== 'number') return false;
+      if (Math.abs(av - bv) > 1e-8 * Math.max(1, Math.abs(bv))) return false;
+    }
+    return true;
+  };
+
+  test('maps a bare inert sec to csc at the +π/2-shifted argument', () => {
+    const shifted = cofunctionShift(ce, inertSec(arg), 'x');
+    // head is now csc, no sec left, and value is preserved (sec θ = csc(θ+π/2))
+    expect(shifted.operator).toBe('csc');
+    expect(shifted.toString().includes('sec')).toBe(false);
+    expect(sameNumerically(shifted, inertSec(arg))).toBe(true);
+  });
+
+  test('reflects a sec POWER and a (a+b·sec) binomial, value-preserving', () => {
+    const p = ce.box(['Power', ['sec', arg], ['Rational', 5, 2]] as any); // sec^(5/2)
+    const sp = cofunctionShift(ce, p, 'x');
+    expect(sp.toString().includes('sec')).toBe(false);
+    expect(sp.toString().includes('csc')).toBe(true);
+    expect(sameNumerically(sp, p)).toBe(true);
+
+    const binom = ce.box(['Add', 2, ['Multiply', 3, ['sec', arg]]] as any); // 2 + 3·sec
+    const sb = cofunctionShift(ce, binom, 'x');
+    expect(sb.toString().includes('csc')).toBe(true);
+    expect(sameNumerically(sb, binom)).toBe(true);
+  });
+
+  test('composes with deactivateTrig: active Sec deactivates + reflects to csc', () => {
+    const active = ce.box(['Power', ['Sec', arg], 3] as any); // Sec[a+b x]^3
+    const shifted = cofunctionShift(ce, deactivateTrig(ce, active), 'x');
+    expect(shifted.toString().includes('csc')).toBe(true);
+    expect(sameNumerically(shifted, active)).toBe(true);
+  });
+
+  test('leaves a MIXED cross-pair integrand (sin·sec) untouched', () => {
+    // sin co-present ⇒ uniform +π/2 would desync arguments; unifyInertTrig owns it
+    const mixed = ce.box(['Multiply', ['sin', arg], ['sec', arg]] as any);
+    expect(cofunctionShift(ce, mixed, 'x')).toBe(mixed);
+  });
+
+  test('reverts a WITHIN-pair arg desync (csc·sec) rather than mis-routing', () => {
+    // csc[θ]·sec[θ] would reflect to csc[θ]·csc[θ+π/2] — two csc arguments
+    const within = ce.box(['Multiply', ['Power', ['csc', arg], 2], ['sec', arg]] as any);
+    expect(cofunctionShift(ce, within, 'x')).toBe(within);
+  });
+
+  test('no sec/cot present ⇒ strict no-op (identity)', () => {
+    const pureSin = ce.box(['Power', ['sin', arg], 2] as any);
+    expect(cofunctionShift(ce, pureSin, 'x')).toBe(pureSin);
+  });
+
+  test('does NOT reflect a non-linear-argument sec (Rubi LinearQ guard)', () => {
+    const nonlinear = ce.box(['sec', ['Power', 'x', 2]] as any); // sec(x²)
+    expect(cofunctionShift(ce, nonlinear, 'x')).toBe(nonlinear);
+  });
+});
+
+// End-to-end: the shipped bundle (ch1+ch2+ch6+4.1 Sine+4.5 Secant) closes secant
+// integrands via the reflected csc rule family. Differentiate the result and
+// compare to the integrand at sample points.
+describe('cofunction shift — end-to-end secant integrals (shipped bundle)', () => {
+  let engine: ComputeEngine;
+  beforeAll(() => {
+    engine = new ComputeEngine();
+    loadIntegrationRules(engine);
+  });
+
+  const closes = (latex: string): boolean => {
+    const integ = engine.parse(latex);
+    const F = engine.box(['Integrate', integ, 'x']).evaluate();
+    if (F.operator === 'Integrate') return false; // stayed inert
+    // verify d/dx F ≈ integrand at a few points
+    for (const xv of [0.4, 0.9, 1.3]) {
+      const h = 1e-6;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      const d = (fp(xv + h) - fp(xv - h)) / (2 * h);
+      const f = integ.subs({ x: xv }).N().re as number;
+      if (typeof d !== 'number' || typeof f !== 'number') return false;
+      if (Math.abs(d - f) > 1e-4 * Math.max(1, Math.abs(f))) return false;
+    }
+    return true;
+  };
+
+  test('closes √(sec x)', () => expect(closes('\\sqrt{\\sec x}')).toBe(true));
+  test('closes sec^(5/2)', () =>
+    expect(closes('\\sec(x)^{5/2}')).toBe(true));
+  test('closes 1/sec^(3/2)', () =>
+    expect(closes('\\frac{1}{\\sec(x)^{3/2}}')).toBe(true));
+  test('closes sec^3', () => expect(closes('\\sec(x)^3')).toBe(true));
 });

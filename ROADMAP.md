@@ -40,37 +40,44 @@ not here.
 
 ## Remaining work
 
-### Proposed product features (2026-07-04 — to review together)
+### Product feature track (agreed 2026-07-04)
 
 CE is the foundation for Tycho / Graph Paper: an app helping scientists,
 students and educators collaborate and communicate about scientific topics.
 The 2026-07-04 capability survey against that goal found the engine strong on
 plotting/compile targets, units & quantities, logic/sets, linear algebra,
 equation systems, and number formatting — and thin in the areas below.
-Prioritized proposal (effort S/M/L); items 1–2 are explicit Tycho asks
-(`tycho/roadmap/CE_AUTO_SUGGEST.md` §11).
+Items 1–4 were agreed and prioritized 2026-07-04; `Series` (Phases 1–2) and
+`TrigExpand`/`TrigToExp`/`TrigReduce` have landed and left this list. What
+remains (effort S/M/L):
 
-1. **`Series` — symbolic Taylor/Laurent expansion (M).** Explicit Tycho ask
-   for the notebook action pills (`["Series", e, x, x0, n]`); an educational
-   staple (approximation, error terms, limits). Doubles as the kernel that
-   Strategic item 7(c) needs — exact asymptotics at special-function poles are
-   Laurent expansions — so one design serves both.
-2. **`TrigExpand` / `TrigToExp` / `TrigReduce` operators (S).** Second explicit
-   Tycho ask. The machinery already exists inside the Rubi driver
-   (`ExpandTrigReduce`, trig→exp fallbacks); this is exposure as public
-   operators + LaTeX round-trip, not new algorithms. Quick win.
-3. **Statistics for real data work (M).** The library stops at descriptive
+1. **Statistics for real data work (M) — next up.** The library stops at descriptive
    stats (`Mean`…`Histogram`). Missing for a science app: probability
    distributions (Normal/Binomial/Poisson PDF/CDF/quantile),
    correlation/covariance, and least-squares fitting
    (`LinearRegression`/`PolynomialFit`). Highest-value analytical gap for
    scientists and stats students.
-4. **Step-by-step "explain" API (L).** The rule engine already threads a
+2. **Step-by-step "explain" API (L).** The rule engine already threads a
    `RuleSteps` trace (`{value, because, purpose}` per step) through
    simplify/rules internals, but it is not surfaced publicly and `solve` has
    no trace at all. An educator-facing differentiator no competing JS engine
    has. Design item: public API shape, coverage (simplify → solve → D), and
    human-readable step labeling.
+
+**Series residue (small follow-ups from the landed feature):**
+
+- Phase 3 (design-gated): wire the limit engine's pole-deferral slot
+  (`symbolic/limit.ts`) to the Laurent kernel — closes Strategic 7(c) — and
+  rebase `Residue` on it.
+- AsciiMath `toString()` still prints series in canonical (descending) order;
+  the LaTeX serializer has the textbook ascending/BigO-last rule
+  (`definitions-arithmetic.ts`), AsciiMath would need a parallel sort in
+  `ascii-math.ts`.
+- Bare `O(…)` parsing deferred (design doc §8 Q3); revisit for lenient mode
+  once the parser work settles.
+
+**Not yet agreed (proposed 2026-07-04, awaiting a call):**
+
 5. **Uncertainty type — value ± error propagation (M/L).** A measurement type
    (`5.1 ± 0.2 cm`) propagating through arithmetic, layered on the existing
    units/quantity arithmetic. Core lab-course and experimental-science need;
@@ -88,15 +95,28 @@ Prioritized proposal (effort S/M/L); items 1–2 are explicit Tycho asks
    reaction arrows. Only if chemistry is in scope for Graph Paper — decide
    before investing; `mol` exists solely as a unit dimension today.
 
-### Review findings (2026-07-04) — open
+### Review findings (2026-07-04) — residue
 
-A post-0.67.0 review of the higher-order ODE support, the loose-syntax free
-functions, and the P2/P3 residue found new open items — including two P0s in
-`DSolve` (repeated-complex-root general solutions are degenerate; a corrupted
-`Error`-node "solution" for `x²y''`-style inputs) and a missing strict opt-out
-on the loose-parsing free functions (silent meaning changes for valid LaTeX
-like `x^23`, plus `sin^-1` ≠ `\sin^{-1}`). Full detail and ranked list:
-[`docs/reviews/2026-07-04-review.md`](./docs/reviews/2026-07-04-review.md).
+The 2026-07-04 review's P0/P1 fixes all landed (DSolve repeated-root and
+Error-node bugs, the ODE P1 tail incl. the parsed-LaTeX path, the
+loose-parsing cluster with the `strict` escape hatch, and the top P2/P3
+items: Beta poles, `x·∞`, inverse-hyperbolic poles, the rules.ts edge bugs).
+Full record: [`docs/reviews/2026-07-04-review.md`](./docs/reviews/2026-07-04-review.md).
+Still open from its ranked list:
+
+- **Machine gamma accuracy at z ≳ 80** (~13 digits by z≈140; full precision
+  to z≈46) — snapshot-heavy, needs a careful lane fix.
+- **defint error bar 1.6× optimistic on endpoint-singular integrands** —
+  large (tanh-sinh quadrature).
+- **Perf tail** (measurement-gated): per-opDef `allParamsNumeric` cache,
+  cold-start bundle size, serialization cache / sort-comparator allocs.
+- **Loose-parsing low items:** `sqrt2x` → `√(2x)` divergence from AsciiMath
+  convention; `min x` → `Min(x)`; explicit `_a` wildcards in arrow-string
+  rules are a silent no-op (redundant there — auto-wildcarding covers it).
+- **Doc/cosmetic tail:** `5.` invalid while `.5` parses; `0.999\ldots` drops
+  the ellipsis; locale separators.
+- ODE P2s (all correctly inert, no wrong answers): sin/exp forcing via
+  undetermined coefficients, order ≥ 3 nonhomogeneous, tolerance hardening.
 
 ### Symbolic capability gaps
 
@@ -261,22 +281,44 @@ is in `docs/rubi/RUBI.md` §5 Phase R10. 4.1 Sine benchmark: 96 → 98/120,
 288 → 293/400 (seed 5); the 3 sample-400 flags remain the documented
 hypergeometric false-wrongs.
 
+**Landed (2026-07-04) — R11, runtime cofunction shift.** `cofunctionShift` in
+`rubi-utils.ts` (driver: after `deactivateTrig`, before `reciprocalToPower`)
+now mirrors Rubi's `DeactivateTrig` routing: `sec[e+f·x] → csc[e+π/2+f·x]`
+(no sign; `cot → −tan[θ+π/2]` implemented but default-OFF pending R12). NOT a
+blind swap — it fires only for pure-source forms: declines when a cross-pair
+head is co-present (that's `unifyInertTrig`'s job) and reverts if the result
+carries the target head at ≥2 distinct arguments (the within-pair `csc·sec`
+desync, which breaks in recursion). **4.5 Secant: 31 → 56/120 (seed 5), 0
+genuine wrong** (3 flags = the same verification-false-wrong class, incl. a
+`√(sin²)=|sin|` branch present in Rubi's own reference); 4.1 Sine (98/120,
+293/400), ch1, ch2/ch6 all byte-identical; strict no-op for non-trig
+integrands (`RUBI_NO_COFN` A/B). The three stopgap sec rules are shadowed for
+pure-sec inputs but kept as fallback for reverted within-pair cases. Shifted
+results read back cleanly (`simplifyTrig` folds `csc(θ+π/2)→sec θ`). Bundle
+untouched (runtime-only change).
+
 **Next rungs (priority order).** Each is a self-contained work item: do the
 change, then verify with the benchmark command above (watch `solved-correct`
 climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
 hypergeometric verification false-wrongs). Diagnose any stall per the Method
 note — trace the residual integrand, don't trust the predicate census.
 
-- **R11 — runtime cofunction deactivation shift (the durable fix).** Mirror
-  Rubi's `DeactivateTrig` faithfully in `rubi-utils.ts`: deactivate
-  `Sec → csc[π/2+·]` and `Cot → tan[π/2+·]` (argument reflection + the
-  sign flips the derivative factors imply — NOT a blind head swap), so every
-  authored-cofunction rule covers both heads with no per-section rule
-  duplication. This closes the whole class (~300 missing cofunction variants
-  across 4.5/4.3 per the RUBI.md §5 audit table) and is a **prerequisite for
-  bundling 4.3 Tangent** (authored in `tan`; `cot` has almost no rules).
-  Bounded but broad — validate against 4.5/4.3 samples with the genuine-wrong
-  gate at 0.
+- **R12 — bundle 4.3 Tangent.** Three parts, per the R11 landing (RUBI.md §5
+  Phase R11): (a) add the 4.3 corpus to the bundler allowlist; (b) turn on the
+  `cot → −tan[θ+π/2]` leaf shift (implemented in R11 but default-OFF behind
+  `RUBI_COFN_COT` — correct but premature while 4.3 is unbundled, and it
+  regresses 4.1's mixed `(g·cot)^p(a+b·sin)^m` families); (c) supply the
+  mixed-argument "cot→tan" `unifyInertTrigFunction`-style matched-±π/2
+  product clauses — the uniform leaf reflection desyncs mixed `sin·cot`
+  products, so (b) alone is not enough. Validate 4.3 + 4.1 with the
+  genuine-wrong gate at 0.
+- **R13 — sec-specific binomial routing.** Integer-power symbolic binomials
+  (`1/(a+b·sec)`, `(a+b·sec)²`) still stay inert in the shipped bundle: after
+  the R11 reflection, `reciprocalToPower` rewrites the reflected `csc` inside
+  a summand to `1/sin` before a csc *binomial* rule can match. The naive fix
+  (exempt Add-summands from `reciprocalToPower`) regresses 4.1 Sine by −20
+  (the csc-binomial sine families rely on that rewrite), so this needs a
+  sec-aware carve-out rather than a global ordering change.
 - **R3′ — residual half-integer/elliptic chains.** What remains of R3 after the
   base gap: `(e·cos)^(7/2)/(a+b·sin)^n` and `√(g·cos)·sin³/(a+b·sin)`
   (#604/#609/#1395) need the `Rt[-a²+b²]` symbolic-radical `ArcTan`/`ArcTanh`
