@@ -1223,6 +1223,34 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     closeTrigger: ')',
     parse: parseParenDelimiter,
   },
+  // Angle brackets `\langle ... \rangle` — inner-product / generated-group /
+  // tuple notation. Transcribed to an inert `AngleBracket` head (no evaluation
+  // semantics); the comma-separated body is flattened into its arguments. Only
+  // the explicit `\langle`/`\rangle` commands trigger this — the `<`/`>`
+  // comparison operators are untouched.
+  {
+    name: 'AngleBracket',
+    kind: 'matchfix',
+    openTrigger: ['\\langle'],
+    closeTrigger: ['\\rangle'],
+    parse: (_parser: Parser, body: MathJsonExpression) => {
+      if (body === null || isEmptySequence(body))
+        return ['AngleBracket'] as MathJsonExpression;
+      let inner = body;
+      if (operator(inner) === 'Delimiter') inner = operand(inner, 1) ?? inner;
+      if (operator(inner) === 'Sequence' || operator(inner) === 'List')
+        return ['AngleBracket', ...operands(inner)] as MathJsonExpression;
+      return ['AngleBracket', inner] as MathJsonExpression;
+    },
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      joinLatex([
+        '\\langle ',
+        operands(expr)
+          .map((x) => serializer.serialize(x))
+          .join(', '),
+        ' \\rangle',
+      ]),
+  },
   {
     latexTrigger: [','],
     kind: 'infix',
@@ -1943,6 +1971,68 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'environment',
     symbolTrigger: 'rcases',
     parse: parseCasesEnvironment,
+  },
+
+  // Alignment/multiline environments (`aligned`, `align`, `gather`, ...) are
+  // used in prose to lay out a *system* of equations (or a multi-line
+  // derivation), one equation per row. We parse them to the same convention as
+  // a single-column `cases`: a `List` of the row expressions (see
+  // `parseAlignedEnvironment`). The `&` alignment markers are not columns here,
+  // just typesetting hints, so they are stripped/merged within each row.
+  {
+    kind: 'environment',
+    symbolTrigger: 'aligned',
+    parse: parseAlignedEnvironment,
+  },
+  {
+    kind: 'environment',
+    symbolTrigger: 'aligned*',
+    parse: parseAlignedEnvironment,
+  },
+  {
+    kind: 'environment',
+    symbolTrigger: 'align',
+    parse: parseAlignedEnvironment,
+  },
+  {
+    kind: 'environment',
+    symbolTrigger: 'align*',
+    parse: parseAlignedEnvironment,
+  },
+  {
+    kind: 'environment',
+    symbolTrigger: 'gather',
+    parse: parseAlignedEnvironment,
+  },
+  {
+    kind: 'environment',
+    symbolTrigger: 'gather*',
+    parse: parseAlignedEnvironment,
+  },
+  {
+    kind: 'environment',
+    symbolTrigger: 'gathered',
+    parse: parseAlignedEnvironment,
+  },
+  {
+    kind: 'environment',
+    symbolTrigger: 'split',
+    parse: parseAlignedEnvironment,
+  },
+  {
+    kind: 'environment',
+    symbolTrigger: 'multline',
+    parse: parseAlignedEnvironment,
+  },
+  {
+    kind: 'environment',
+    symbolTrigger: 'multline*',
+    parse: parseAlignedEnvironment,
+  },
+  {
+    kind: 'environment',
+    symbolTrigger: 'eqnarray',
+    parse: parseAlignedEnvironment,
   },
 ];
 
@@ -2724,6 +2814,122 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
     }
   }
   return ['Which', ...result];
+}
+
+/**
+ * Relational LaTeX tokens that, when they immediately follow an `&` alignment
+ * marker (`x &= y`), split a relation from its left-hand side. Mapped to the
+ * corresponding MathJSON head so the row can be reassembled into a single
+ * relation. Restricted to equation/inequality operators — the ones that make a
+ * row of an alignment environment a member of a *system*.
+ */
+const ALIGNED_RELATION_TOKENS: Record<string, string> = {
+  '=': 'Equal',
+  '\\ne': 'NotEqual',
+  '\\neq': 'NotEqual',
+  '<': 'Less',
+  '\\lt': 'Less',
+  '>': 'Greater',
+  '\\gt': 'Greater',
+  '\\le': 'LessEqual',
+  '\\leq': 'LessEqual',
+  '\\ge': 'GreaterEqual',
+  '\\geq': 'GreaterEqual',
+};
+
+function atAlignedRowEnd(parser: Parser): boolean {
+  return (
+    parser.atBoundary || parser.peek === '\\\\' || parser.peek === '\\cr'
+  );
+}
+
+/**
+ * Parse a single row of an alignment environment into one expression. `&` is an
+ * alignment marker (not a column separator), so it is transparent: `x &= y`
+ * becomes the single relation `x = y` by reattaching the accumulated left-hand
+ * side `x` when a relational operator follows the `&`. A lone trailing sentence
+ * punctuation (`,` `.` `;`, e.g. `... = 0,`) is dropped.
+ */
+function parseAlignedRow(parser: Parser): MathJsonExpression | null {
+  // Stop a segment at `&`, a row break, or trailing sentence punctuation. The
+  // condition is only consulted at the top level of the expression, so commas
+  // *inside* a group (e.g. `f(x, y)`) are unaffected.
+  const rowCondition = (p: Parser) =>
+    p.peek === '&' ||
+    p.peek === '\\\\' ||
+    p.peek === '\\cr' ||
+    p.peek === ',' ||
+    p.peek === ';';
+
+  let acc: MathJsonExpression | null = null;
+
+  while (!atAlignedRowEnd(parser)) {
+    parser.skipSpace();
+    if (atAlignedRowEnd(parser)) break;
+
+    // `&` alignment marker: transparent.
+    if (parser.match('&')) continue;
+
+    // Trailing sentence punctuation inside a row.
+    if (parser.peek === ',' || parser.peek === '.' || parser.peek === ';') {
+      parser.nextToken();
+      continue;
+    }
+
+    // A relation right after an alignment marker (`x &= y`): reattach `acc` as
+    // the left-hand side. (`parseExpression` returns null on a leading infix
+    // operator, so this is reconstructed by hand.)
+    const rel = ALIGNED_RELATION_TOKENS[parser.peek];
+    if (rel !== undefined && acc !== null) {
+      parser.nextToken();
+      const rhs = parser.parseExpression({ minPrec: 0, condition: rowCondition });
+      acc = [rel, acc, missingIfEmpty(rhs)] as MathJsonExpression;
+      continue;
+    }
+
+    const seg = parser.parseExpression({ minPrec: 0, condition: rowCondition });
+    if (seg === null) {
+      // Unparseable token: make progress to avoid an infinite loop.
+      parser.nextToken();
+      continue;
+    }
+    acc =
+      acc === null
+        ? seg
+        : (['InvisibleOperator', acc, seg] as MathJsonExpression);
+  }
+  return acc;
+}
+
+/**
+ * Parse an alignment/multiline environment (`\begin{aligned}...\end{aligned}`,
+ * `align`, `gather`, `split`, ...) as a *system* of equations: a `List` with
+ * one entry per row. This mirrors the single-column `cases` convention (see
+ * `parseCasesEnvironment`), which `Solve` accepts as a system. `&` markers are
+ * alignment hints, not columns, so each row is merged back into a single
+ * expression (see `parseAlignedRow`).
+ */
+function parseAlignedEnvironment(parser: Parser): MathJsonExpression | null {
+  const result: MathJsonExpression[] = [];
+
+  while (!parser.atBoundary) {
+    const startIndex = parser.index;
+
+    const row = parseAlignedRow(parser);
+    if (row !== null) result.push(row);
+
+    parser.skipSpace();
+    if (parser.match('\\\\') || parser.match('\\cr'))
+      parser.parseOptionalGroup(); // drop optional line-spacing arg, e.g. `[2pt]`
+
+    // Safety: ensure forward progress even on unparseable input.
+    if (parser.index === startIndex) {
+      if (parser.atBoundary) break;
+      parser.nextToken();
+    }
+  }
+
+  return ['List', ...result];
 }
 
 /**

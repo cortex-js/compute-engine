@@ -215,3 +215,33 @@ describe('Inertness — geometry heads never reduce', () => {
     }
   });
 });
+
+describe('Similarity relation (\\sim / \\nsim / \\simeq)', () => {
+  test('triangle similarity', () => {
+    expect(json('\\triangle ABC \\sim \\triangle DEF')).toEqual([
+      'Tilde',
+      ['Triangle', 'A', 'B', 'C'],
+      ['Triangle', 'D', 'E', 'F'],
+    ]);
+  });
+
+  test('\\sim is a generic inert relation', () => {
+    expect(json('a \\sim b')).toEqual(['Tilde', 'a', 'b']);
+    // "is distributed as"
+    expect(isClean('X \\sim N(0,1)')).toBe(true);
+    // chained relation
+    expect(json('a \\sim b \\sim c')).toEqual(['Tilde', 'a', 'b', 'c']);
+    // inert: evaluation returns the expression unchanged
+    const boxed = ce.expr(['Tilde', 'a', 'b']);
+    expect(boxed.evaluate().json).toEqual(boxed.json);
+  });
+
+  test('\\nsim negates, \\simeq maps to TildeEqual', () => {
+    expect(json('a \\nsim b')).toEqual(['Not', ['Tilde', 'a', 'b']]);
+    expect(json('a \\simeq b')).toEqual(['TildeEqual', 'a', 'b']);
+  });
+
+  test('round-trip', () => {
+    expect(latex('a \\sim b')).toEqual('a\\sim b');
+  });
+});

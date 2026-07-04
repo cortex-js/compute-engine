@@ -34,8 +34,14 @@ npx tsx docs/mathnet/scripts/check-corpus.ts --failures  # list survivors
 
 Every corpus case failed when captured. A case is *fixed* when `ce.parse()`
 returns a valid expression with no `Error` subexpression and no throw.
-Baseline at capture: 3/345 fragments pass (a few cases are engine-state
-sensitive), 9 throws. `throws` must reach and stay 0.
+Baseline at capture: 3/345 fragments pass, 9 throws. `throws` must reach and
+stay 0. The checker parses each input in a **fresh engine**: a shared engine
+lets free-symbol type inference from one fragment contaminate another's
+parse, under-counting fixes.
+
+State after the 2026-07-04 hardening (Tiers 1–4): **265/345**, throws 0 —
+see the Status note in
+[parser-hardening-plan.md](./parser-hardening-plan.md).
 
 ## Regenerating from scratch
 

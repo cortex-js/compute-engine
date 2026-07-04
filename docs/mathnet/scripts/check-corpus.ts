@@ -18,9 +18,14 @@ const corpus = JSON.parse(
   fs.readFileSync(path.join(scriptDir, '..', 'parser-test-cases.json'), 'utf8')
 );
 const showFailures = process.argv.includes('--failures');
-const ce = new ComputeEngine();
 
 function outcome(input: string): 'fixed' | 'error' | 'throw' {
+  // A fresh engine per input: the engine narrows free-symbol types from
+  // usage persistently, so a shared engine lets one fragment's inference
+  // contaminate another's parse (e.g. an early `A \setminus B` narrows `A`
+  // to a set and breaks a later `\frac{AB^2}{PC}`). Fragments are
+  // independent inputs; measure them independently.
+  const ce = new ComputeEngine();
   try {
     const expr = ce.parse(input);
     if (expr.isValid && !JSON.stringify(expr.json).includes('"Error"'))

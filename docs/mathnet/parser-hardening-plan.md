@@ -10,16 +10,29 @@ Ranked by fragments recovered per unit of effort. Corpus category counts are
 from the corpus's heuristic classifier and differ slightly from the experiment
 report's hand counts; the corpus checker is the source of truth for progress.
 
-> **Status 2026-07-04: Tiers 1–3 executed.** Corpus 3/345 → **245/345**
-> (baseline 85.0% → ~95.6% clean on the original sweep), throws 9 → **0**.
-> Category state: crash 9/9 · geometry 148/148 · ellipsis 41/51 ·
-> trailing-punct 37/47 · sets-congruence 5/36 · divisibility 4/12 ·
-> unicode answers 8/19. Remaining failures are Tier 4 material (environments,
-> `\mathbb{Z}` arithmetic, `\mathbb{R}_{>0}`, ASCII-pipe divisibility),
-> `\text{...}` prose fragments, or intentionally-malformed input.
-> Notable: `\parallel` was remapped from logical `Or` to geometric
-> `Parallel` (breaking for anyone relying on `\parallel`-as-Or; `\lor`/`\vee`
-> unchanged) — flag in the CHANGELOG.
+> **Status 2026-07-04: ALL TIERS (1–4) executed**, plus `\sim`/`\nsim` →
+> `Tilde`/`NotTilde` and `\simeq` → `TildeEqual` (follow-up from review).
+> Corpus 3/345 → **265/345**, throws 9 → **0**. Category state:
+> crash 9/9 · geometry 148/148 · ellipsis 43/51 · trailing-punct 37/47 ·
+> sets-congruence 14/36 · divisibility 4/12 · environment 5/6 ·
+> logic-misc 2/2 · set-minus 2/2 · unicode answers 8/19.
+> `check-corpus.ts` now uses a fresh engine per input (a shared engine lets
+> free-symbol type inference from one fragment contaminate another's parse —
+> pre-fix shared-engine numbers under-counted by ~5).
+> Notable breaking change: `\parallel` remapped from logical `Or` to
+> geometric `Parallel` (`\lor`/`\vee` unchanged) — flag in the CHANGELOG.
+>
+> **Residual (decided or deferred):**
+> - `\rightarrow` parses as `Implies`, so `f: \mathbb{R} \rightarrow \mathbb{R}`
+>   only works with `\to` — remapping `\rightarrow` to `To` is a debatable
+>   semantic change, needs a decision.
+> - Set arithmetic (`2\mathbb{Z}+1`) — semantic (set ± scalar); not done.
+> - ASCII-pipe divisibility (`p|a+1`) — absolute-value collision; decided no.
+> - `(A \setminus B) \cup (B \setminus A)` errors: `SetMinus`'s
+>   `(set, value*)` signature narrows `B` to `value`, then the second use
+>   needs a `set` — pre-existing inference quirk, applies to `\backslash` too.
+> - Bare `N`/`D` bind to builtin heads in arithmetic contexts; stray tokens
+>   (`€`, `?`) and `\text{...}` prose fragments correctly stay errors.
 
 ## Tier 1 — bug fix (unconditional)
 

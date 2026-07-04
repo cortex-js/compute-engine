@@ -171,6 +171,29 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     precedence: COMPARISON_PRECEDENCE + 5,
   },
   {
+    name: 'Tilde', // Note: Mathematica Tilde — similarity (geometric figures),
+    // asymptotic equivalence, or "is distributed as". Inert relation.
+    latexTrigger: ['\\sim'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: COMPARISON_PRECEDENCE,
+  },
+  {
+    name: 'NotTilde',
+    latexTrigger: ['\\nsim'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: COMPARISON_PRECEDENCE,
+  },
+  {
+    name: 'TildeEqual', // Note: Mathematica TildeEqual — the library head
+    // existed without a LaTeX trigger; `\simeq` is its standard spelling.
+    latexTrigger: ['\\simeq'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: COMPARISON_PRECEDENCE,
+  },
+  {
     name: 'TildeFullEqual', // MathML: approximately equal to
     latexTrigger: ['\\cong'],
     kind: 'infix',

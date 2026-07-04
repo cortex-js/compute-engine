@@ -694,6 +694,17 @@ export function parseQuantifier(
       return [kind, condition, missingIfEmpty(body)] as MathJsonExpression;
     }
 
+    // No body separator or parenthesis followed. A standalone quantified
+    // *condition* — e.g. `\forall n \ge 1` ("for all n ≥ 1") — is transcribed
+    // structurally with a `True` body: `ForAll(n ≥ 1, True)`. (The 2-argument
+    // form is required — the canonical quantifier fills a missing body with an
+    // Error otherwise.) This is gated to a compound condition (a relation): a
+    // bare `\forall x`, with no condition and no body, remains incomplete and
+    // still errors, as before. This path previously returned an Error, so no
+    // valid parse changes meaning.
+    if (operator(condition) !== '')
+      return [kind, condition, 'True'] as MathJsonExpression;
+
     return null;
   };
 }

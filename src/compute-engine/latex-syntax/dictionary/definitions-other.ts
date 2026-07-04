@@ -319,6 +319,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   singleArgCommand('OverRightHarpoon', '\\overrightharpoon'),
   singleArgCommand('OverLeftRightArrow', '\\overleftrightarrow'),
   singleArgCommand('OverBrace', '\\overbrace'),
+  singleArgCommand('UnderBrace', '\\underbrace'),
   singleArgCommand('OverLineSegment', '\\overlinesegment'),
   singleArgCommand('OverGroup', '\\overgroup'),
 

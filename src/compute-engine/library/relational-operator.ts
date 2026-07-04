@@ -509,6 +509,21 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       ce._fn('Not', [canonicalRelational(ce, 'TildeFullEqual', args)]),
   },
 
+  Tilde: {
+    description:
+      'Generic similarity relation (`\\sim`): similar geometric figures, asymptotic equivalence, or "is distributed as". Inert: stays symbolic.',
+    complexity: 11000,
+    signature: '(any, any+) -> boolean',
+    canonical: (args, { engine: ce }) => canonicalRelational(ce, 'Tilde', args),
+  },
+
+  NotTilde: {
+    complexity: 11100,
+    signature: '(any, any+) -> boolean',
+    canonical: (args, { engine: ce }) =>
+      ce._fn('Not', [canonicalRelational(ce, 'Tilde', args)]),
+  },
+
   TildeEqual: {
     description: 'Approximately or asymptotically equal',
     complexity: 11000,

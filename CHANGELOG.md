@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`\parallel` now parses to the geometric relation `Parallel`, not logical
+  `Or`.** `AB \parallel CD` is the parallelism relation, consistent with
+  `\perp` → `Perpendicular`. Use `\lor` or `\vee` for disjunction (unchanged).
+
 ### New Operators
 
 - **`TrigExpand`, `TrigToExp`, and `TrigReduce` rewrite trigonometric and
@@ -17,6 +23,78 @@
     powers as functions of multiple angles:
     `TrigReduce(\sin^2 x)` → $\tfrac{1 - \cos 2x}{2}$ and
     `TrigReduce(\sin x\cos x)` → $\tfrac{\sin 2x}{2}$.
+
+- **`Divides` and `NotDivides` express divisibility.** `a \mid b` parses to
+  `Divides(a, b)` and `p \nmid ab` to `NotDivides(...)`; both evaluate for
+  concrete integers (`Divides(3, 12)` → `True`) and stay symbolic otherwise.
+
+- **Geometry notation is transcribed as inert heads.** `\angle ABC` →
+  `Angle(A, B, C)` (also `\varangle`, `∠`), `\triangle ABC` →
+  `Triangle(A, B, C)`, `\square ABCD` → `Quadrilateral(A, B, C, D)`,
+  `A \perp B` → `Perpendicular`, `AB \parallel CD` → `Parallel`,
+  `\widehat{ABC}` → `Arc`, `\overparen{BC}` → `OverParen`, and
+  `\langle a, b \rangle` → `AngleBracket`. These heads have no evaluation
+  semantics — the Compute Engine does not model geometry — but they parse and
+  serialize faithfully so downstream consumers (e.g. graphical clients) get
+  the structure instead of an error. Angle and arc measures are typed as
+  numbers, so `\angle A + \angle B + \angle C = 180^\circ` composes in
+  arithmetic.
+
+- **`\sim` parses to the generic similarity relation `Tilde`.** It covers
+  triangle similarity (`\triangle ABC \sim \triangle DEF`), asymptotic
+  equivalence, and "is distributed as" (`X \sim N(0, 1)`); `\nsim` negates
+  it, and `\simeq` now maps to the existing `TildeEqual` head (it previously
+  had no LaTeX trigger).
+
+### Parsing Resilience
+
+The parser was hardened against a corpus of ~2,300 math fragments extracted
+from real olympiad problems (the MathNet dataset); the clean-parse rate on
+that corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
+`docs/mathnet/` for the corpus, the regression checker, and the work plan.
+
+- **Ellipsis in a numeric context no longer throws.** `(1!)^2 + (2!)^2 +
+  \dots + (2018!)^2` crashed with `The type of the constant
+  "ContinuationPlaceholder" cannot be changed` (type inference attempted to
+  narrow a constant). Inference is now a no-op on constants.
+
+- **`\cdots`, `\dotsb`, `\dotsc`, `\dotsm`, and Unicode `…` parse as
+  ellipsis.** Previously only `\dots`/`\ldots`/`...` did; `(2!+2)(3!+3)
+  \cdots (2019!+3)` now parses with the placeholder as an inert operand
+  instead of erroring.
+
+- **A trailing sentence period no longer breaks an equation.** Input copied
+  from prose often ends in `.`, `;` or `,` (e.g. `... = z^2.`). When — and
+  only when — the parse would otherwise contain an error, the trailing
+  punctuation is dropped and the input re-parsed. Valid input is unaffected:
+  `5.` still parses as the decimal $5$.
+
+- **Congruences parse and evaluate.** `a \equiv b \pmod{n}` (also `\bmod`,
+  the parenthesized `(\bmod n)`, and the ASCII form `n ≡ 1 (mod 3)`) parse to
+  `Congruent(a, b, n)`, which evaluates for concrete integers
+  (`7 \equiv 1 \pmod{3}` → `True`) and now accepts symbolic moduli
+  (`2^n \equiv 1 \pmod{p^{k+1}}` stays symbolic instead of erroring).
+
+- **Common Unicode math symbols are accepted:** `≡` (congruence), `∈`, `∉`,
+  `∪`, `∩`, `≈`, `∠`, and `…` — useful when input comes from plain-text
+  sources rather than LaTeX.
+
+- **Alignment environments parse as systems.** `\begin{aligned} a^2+ab+c=0
+  \\ b^2+bc+a=0 \end{aligned}` (also `align`, `gather`, `split`, `multline`,
+  `eqnarray` and their starred variants) parses to a `List` of the row
+  expressions — the same convention as `\begin{cases}`, accepted by `solve()`.
+  Alignment markers are transparent: `x &= y` is `x = y`.
+
+- **Qualified number sets parse.** `\mathbb{R}_{>0}` → `PositiveNumbers`,
+  `\mathbb{Z}_{\ge0}` → `NonNegativeIntegers`, `\mathbb{N}^*` →
+  `PositiveIntegers`, etc., and they round-trip to canonical LaTeX. A
+  qualification with no named set (`\mathbb{N}_{>1}`) falls back to a
+  faithful set-builder.
+
+- **Structural odds and ends:** `A \backslash B` parses as `SetMinus` (the
+  common alternative spelling of `\setminus`); a standalone quantified
+  condition `\forall n \ge 1` parses instead of erroring; `\underbrace`
+  mirrors `\overbrace`.
 
 ### Packaging
 

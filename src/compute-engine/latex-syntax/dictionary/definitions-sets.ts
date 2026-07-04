@@ -207,6 +207,80 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\bar\\C', parse: 'ExtendedComplexNumbers' },
 
   //
+  // Subscript-/superscript-qualified blackboard-bold sets.
+  //
+  // The terse aliases (`\R_{>0}`, `\Z^+`, ...) above already map every common
+  // sign restriction to a named set. The `\mathbb{...}` spellings need their
+  // own multi-token triggers (each is longer than the bare `\mathbb{R}` etc.,
+  // so it wins the longest-match). Where a restriction names an existing set we
+  // map to it (round-trips to the canonical LaTeX); the one form with no named
+  // set — `\mathbb{N}_{>1}` — falls back to a faithful inert set-builder.
+  //
+
+  // Reals > 0 / >= 0 / < 0 / <= 0
+  { latexTrigger: '\\mathbb{R}_{>0}', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\mathbb{R}_{\\gt0}', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\mathbb{R}_+', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\mathbb{R}_{+}', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\mathbb{R}_{\\geq0}', parse: 'NonNegativeNumbers' },
+  { latexTrigger: '\\mathbb{R}_{\\ge0}', parse: 'NonNegativeNumbers' },
+  { latexTrigger: '\\mathbb{R}_{<0}', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\mathbb{R}_{\\lt0}', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\mathbb{R}_-', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\mathbb{R}_{-}', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\mathbb{R}_{\\leq0}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\mathbb{R}_{\\le0}', parse: 'NonPositiveNumbers' },
+
+  // Integers > 0 / >= 0 / < 0 / <= 0
+  { latexTrigger: '\\mathbb{Z}_{>0}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{\\gt0}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{Z}_+', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{+}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{Z}^+', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{Z}^{+}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{\\geq0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{\\ge0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{<0}', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{\\lt0}', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\mathbb{Z}_-', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{-}', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{\\leq0}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{\\le0}', parse: 'NonPositiveIntegers' },
+
+  // Naturals: > 0 is the positive integers; N_0 already includes 0.
+  { latexTrigger: '\\mathbb{N}_{>0}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{N}_{\\gt0}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{N}^+', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{N}^{+}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{N}^*', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{N}^{*}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{N}_0', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\mathbb{N}_{0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\mathbb{N}_1', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{N}_{1}', parse: 'PositiveIntegers' },
+
+  // `\mathbb{N}_{>1}` (integers strictly greater than 1) has no named set:
+  // transcribe it faithfully as an inert set-builder `{ n ∈ ℕ | n > 1 }`.
+  {
+    latexTrigger: '\\mathbb{N}_{>1}',
+    parse: () =>
+      [
+        'Set',
+        ['Element', 'n', 'NonNegativeIntegers'],
+        ['Condition', ['Greater', 'n', 1]],
+      ] as MathJsonExpression,
+  },
+  {
+    latexTrigger: '\\N_{>1}',
+    parse: () =>
+      [
+        'Set',
+        ['Element', 'n', 'NonNegativeIntegers'],
+        ['Condition', ['Greater', 'n', 1]],
+      ] as MathJsonExpression,
+  },
+
+  //
   // Set Expressions
   //
   // @todo: could also have a `CartesianPower` function with a number `rhs`
@@ -533,6 +607,17 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\setminus'],
     kind: 'infix',
     precedence: 650,
+  },
+  {
+    // `\backslash` between two expressions is a common spelling of set
+    // difference (`A \backslash B`). As an *infix* entry it only fires when a
+    // left-hand side is present, so a standalone `\backslash` (a literal
+    // backslash in text) is unaffected. The multi-token `\R\backslash\bar\Q`
+    // trigger (transcendental numbers) is longer and still wins.
+    latexTrigger: ['\\backslash'],
+    kind: 'infix',
+    precedence: 650,
+    parse: 'SetMinus',
   },
   {
     name: 'SymmetricDifference',
