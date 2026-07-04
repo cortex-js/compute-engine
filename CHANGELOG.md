@@ -26,8 +26,19 @@
     $\tfrac{\pi}{2} - \tfrac{1}{x} + \tfrac{1}{3x^3} - \dots$. Coefficients are
     exact (`Series(\sin x, x, \frac{\pi}{6})` gives $\tfrac12$, $\tfrac{\sqrt
     3}{2}$, …), and an undeclared `f` yields the textbook form $f(0) + f'(0)x +
-    \dots$. A pole or essential singularity (e.g. `Series(\frac{1}{\sin x}, x)`,
-    `Series(e^{1/x}, x)`) is left unevaluated rather than expanded incorrectly.
+    \dots$.
+  - At a **pole** the result is a Laurent expansion with a finite principal
+    part: `Series(\frac{1}{\sin x}, x)` → $\tfrac{1}{x} + \tfrac{x}{6} +
+    \tfrac{7x^3}{360} + O(x^7)$, `Series(\cot x, x)` →
+    $\tfrac{1}{x} - \tfrac{x}{3} - \tfrac{x^3}{45} + \dots$, and the special
+    functions expand at their poles with exact coefficients —
+    `Series(\Gamma(x), x)` → $\tfrac{1}{x} - \gamma + (\tfrac{\gamma^2}{2} +
+    \tfrac{\pi^2}{12})x + \dots$, `Series(\zeta(x), x, 1)` →
+    $\tfrac{1}{x-1} + \gamma + O(x-1)$. Poles at `±∞` are handled too
+    (`Series(\frac{x^2}{x-1}, x, +\infty)` → $x + 1 + \tfrac1x + \tfrac1{x^2} +
+    \dots$). An essential singularity or branch point (e.g. `Series(e^{1/x},
+    x)`, `Series(\ln x, x)`) is still left unevaluated rather than expanded
+    incorrectly.
   - `BigO(u)` is the inert Landau remainder, serialized `O\left(u\right)` and
     parsed from `\mathcal{O}(u)` and `\operatorname{O}(u)`. It is inert under
     `evaluate`/`simplify`; a numeric approximation (`.N()`) of any expression

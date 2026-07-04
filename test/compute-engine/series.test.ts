@@ -193,19 +193,24 @@ describe('Series — expansion at infinity', () => {
 //
 
 describe('Series — deferred singular cases', () => {
-  test('1/sin x at 0 stays unevaluated (pole; Laurent is Phase 2)', () => {
-    const s = series('\\frac{1}{\\sin x}');
-    expect(s.operator).toBe('Series');
-  });
-
   test('e^{1/x} at 0 stays unevaluated (essential singularity)', () => {
     const s = series('e^{1/x}');
     expect(s.operator).toBe('Series');
   });
 
+  test('ln x at 0 stays unevaluated (branch point)', () => {
+    const s = series('\\ln x');
+    expect(s.operator).toBe('Series');
+  });
+
+  test('sqrt(x) at 0 stays unevaluated (branch point)', () => {
+    const s = series('\\sqrt{x}');
+    expect(s.operator).toBe('Series');
+  });
+
   test('deferred result equals its input (pill guard: no expansion)', () => {
     const input = ce.function('Series', [
-      ce.parse('\\frac{1}{\\sin x}'),
+      ce.parse('e^{1/x}'),
       ce.symbol('x'),
     ]);
     expect(input.evaluate().isSame(input)).toBe(true);
@@ -393,5 +398,210 @@ describe('series display order', () => {
     // Regression guard: the display-order rule only applies to sums that
     // actually contain a `BigO` term.
     expect(ce.parse('x^5 - x^3 + x').latex).toBe('x^5-x^3+x');
+  });
+});
+
+//
+// §6 Laurent battery — expansions at poles (Phase 2)
+//
+
+/** The residue (coefficient of `(x−x0)⁻¹`) extracted from the Series: the
+ * constant term of `Series((x−x0)·f, x, x0, 0)`, which is `(x−x0)·f` evaluated
+ * at the (removable) pole. */
+function seriesResidue(fLatex: string, x0Latex: string): BoxedExpression {
+  const p = ce.parse(x0Latex);
+  const g = ce.function('Multiply', [ce.symbol('x').sub(p), ce.parse(fLatex)]);
+  const s = ce
+    .function('Normal', [ce.function('Series', [g, ce.symbol('x'), p, ce.Zero])])
+    .evaluate();
+  return s.subs({ x: p }).evaluate();
+}
+
+/** Assert `Normal(Series(f, x, x0, n))` matches `f` numerically at points near
+ * the pole, within a relative tolerance. */
+function expectNumericNearPole(
+  poly: BoxedExpression,
+  f: (x: number) => number,
+  x0: number,
+  dxs: number[],
+  relTol: number
+) {
+  for (const dx of dxs) {
+    const xv = x0 + dx;
+    const approx = poly.subs({ x: ce.number(xv) }).N().re;
+    const exact = f(xv);
+    const rel = Math.abs((approx - exact) / (exact || 1));
+    expect(rel).toBeLessThanOrEqual(relTol);
+  }
+}
+
+describe('Series — Laurent expansions at poles (§6)', () => {
+  test('1/sin x = 1/x + x/6 + 7x³/360 + …', () => {
+    expect(series('\\frac{1}{\\sin x}').latex).toBe(
+      '\\frac{1}{x}+\\frac{x}{6}+\\frac{7x^3}{360}+\\frac{31x^5}{15\\,120}+O\\left(x^7\\right)'
+    );
+  });
+
+  test('cot x = 1/x − x/3 − x³/45 + O(x⁵)', () => {
+    expect(series('\\cot x', '0', 3).latex).toBe(
+      '\\frac{1}{x}-\\frac{x}{3}-\\frac{x^3}{45}+O\\left(x^5\\right)'
+    );
+  });
+
+  test('1/(x²(1−x)) = x⁻² + x⁻¹ + 1 + x + …', () => {
+    const p = normal('\\frac{1}{x^2(1-x)}');
+    const expected = ce.parse('x^{-2} + x^{-1} + 1 + x + x^2 + x^3 + x^4 + x^5');
+    expect(p.sub(expected).simplify().isSame(0)).toBe(true);
+  });
+
+  test('tan at π/2 = −1/(x−π/2) + (x−π/2)/3 + …', () => {
+    // Simple pole with a −1/(x−π/2) principal part. (The Residue engine does
+    // not itself handle tan at π/2, and the (x−x0)·f residue trick leaves an
+    // unfolded π/2 constant here — see seriesResidue — so this is validated by
+    // the principal-part structure plus numeric equivalence.)
+    const s = normal('\\tan x', '\\frac{\\pi}{2}', 1);
+    expect(s.latex).toBe(
+      '\\frac{1}{3}(x-\\frac{\\pi}{2})-(x-\\frac{\\pi}{2})^{-1}'
+    );
+    const p = normal('\\tan x', '\\frac{\\pi}{2}', 3);
+    expectNumericNearPole(
+      p,
+      (x) => Math.tan(x),
+      Math.PI / 2,
+      [0.05, 0.1, 0.2],
+      1e-3
+    );
+  });
+
+  test('Γ(x) at 0 = 1/x − γ + (γ²/2 + π²/12)x + …', () => {
+    const p = normal('\\Gamma(x)', '0', 2);
+    // Residue 1, constant term −γ.
+    expect(seriesResidue('\\Gamma(x)', '0').isSame(1)).toBe(true);
+    expect(p.subs({ x: ce.number(0) })).toBeDefined(); // (has a pole term; sanity)
+    // Exact identity vs the textbook Laurent expansion.
+    const ref = ce.parse(
+      '\\frac{1}{x} - \\gamma + \\left(\\frac{\\gamma^2}{2} + \\frac{\\pi^2}{12}\\right)x' +
+        ' - \\left(\\frac{\\gamma^3}{6} + \\frac{\\gamma\\pi^2}{12} + \\frac{\\zeta(3)}{3}\\right)x^2'
+    );
+    expect(p.sub(ref).simplify().isSame(0)).toBe(true);
+    // Exact coefficients: EulerGamma/Pi present, no decimal literals.
+    expect(p.toString()).toContain('EulerGamma');
+    expect(p.toString()).toContain('pi');
+    expect(p.toString()).not.toMatch(/\d\.\d/);
+    // Numeric equivalence near the pole (n = 2, so a modest tolerance).
+    expectNumericNearPole(
+      p,
+      (x) => ce.function('Gamma', [ce.number(x)]).N().re,
+      0,
+      [0.05, 0.1, 0.2],
+      1e-2
+    );
+  });
+
+  test('Γ(x) at −1: residue −1, constant γ − 1', () => {
+    expect(seriesResidue('\\Gamma(x)', '-1').isSame(-1)).toBe(true);
+    const p = normal('\\Gamma(x)', '-1', 2);
+    // constant term (x → −1) of (x+1)·Γ − residue part is γ − 1; verify
+    // numerically near the pole instead of structurally.
+    expectNumericNearPole(
+      p,
+      (x) => ce.function('Gamma', [ce.number(x)]).N().re,
+      -1,
+      [0.05, 0.1, 0.2],
+      1e-2
+    );
+  });
+
+  test('ψ(x) (Digamma) at 0 = −1/x − γ + (π²/6)x − ζ(3)x² + …', () => {
+    expect(seriesResidue('\\operatorname{Digamma}(x)', '0').isSame(-1)).toBe(
+      true
+    );
+    const p = normal('\\operatorname{Digamma}(x)', '0', 3);
+    const ref = ce.parse(
+      '-\\frac{1}{x} - \\gamma + \\frac{\\pi^2}{6}x - \\zeta(3)x^2 + \\frac{\\pi^4}{90}x^3'
+    );
+    expect(p.sub(ref).simplify().isSame(0)).toBe(true);
+    expectNumericNearPole(
+      p,
+      (x) => ce.function('Digamma', [ce.number(x)]).N().re,
+      0,
+      [0.05, 0.1, 0.2],
+      1e-2
+    );
+  });
+
+  test('ζ(x) at 1 = 1/(x−1) + γ + O(x−1)', () => {
+    expect(series('\\zeta(x)', '1').latex).toBe(
+      '\\frac{1}{x-1}+\\gamma+O\\left(x-1\\right)'
+    );
+    expect(seriesResidue('\\zeta(x)', '1').isSame(1)).toBe(true);
+  });
+
+  test('pole at +∞: x²/(x−1) = x + 1 + 1/x + 1/x² + …', () => {
+    expect(series('\\frac{x^2}{x-1}', '+\\infty').latex).toBe(
+      'x+1+\\frac{1}{x}+\\frac{1}{x^2}+\\frac{1}{x^3}+\\frac{1}{x^4}+\\frac{1}{x^5}+O\\left(\\frac{1}{x^6}\\right)'
+    );
+    const p = normal('\\frac{x^2}{x-1}', '+\\infty');
+    expectNumericNearPole(
+      p,
+      (x) => (x * x) / (x - 1),
+      0,
+      [8, 10, 20],
+      1e-4
+    );
+  });
+});
+
+describe('Series — Residue consistency', () => {
+  // The coefficient of (x−x0)⁻¹ from Series equals Residue(f, x0), for the
+  // cases where the (independent) Residue engine already returns a value.
+  const cases: [string, string][] = [
+    ['\\frac{1}{\\sin x}', '0'],
+    ['\\Gamma(x)', '0'],
+    ['\\Gamma(x)', '-1'],
+    ['\\operatorname{Digamma}(x)', '0'],
+    ['\\zeta(x)', '1'],
+  ];
+  for (const [f, x0] of cases) {
+    test(`residue of ${f} at ${x0}`, () => {
+      const fromSeries = seriesResidue(f, x0);
+      const fromResidue = ce
+        .function('Residue', [ce.parse(f), ce.symbol('x'), ce.parse(x0)])
+        .evaluate();
+      expect(fromSeries.simplify().isSame(fromResidue.simplify())).toBe(true);
+    });
+  }
+});
+
+describe('Series — Laurent numeric equivalence and N() poisoning', () => {
+  test('Normal(Series(1/sin x)) matches 1/sin near 0', () => {
+    expectNumericNearPole(
+      normal('\\frac{1}{\\sin x}'),
+      (x) => 1 / Math.sin(x),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-6
+    );
+  });
+
+  test('Normal(Series(cot x)) matches cot near 0', () => {
+    expectNumericNearPole(
+      normal('\\cot x'),
+      (x) => 1 / Math.tan(x),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-6
+    );
+  });
+
+  test('a Laurent series with a BigO term has NaN as its .N()', () => {
+    expect(series('\\frac{1}{\\sin x}').N().isNaN).toBe(true);
+    expect(series('\\Gamma(x)').N().isNaN).toBe(true);
+  });
+
+  test('after Normal, a Laurent series has a real .N()', () => {
+    expect(normal('\\frac{1}{\\sin x}').subs({ x: ce.number(0.3) }).N().isNaN).not.toBe(
+      true
+    );
   });
 });
