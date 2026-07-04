@@ -385,11 +385,12 @@ verified P0 and P1 from both reviews landed across the Wave 1–4 commits. The
 findings docs are kept for the record — [`CORRECTNESS_FINDINGS.md`](./CORRECTNESS_FINDINGS.md),
 [`SYMBOLIC_FINDINGS.md`](./SYMBOLIC_FINDINGS.md), with the per-wave
 implementation log (decisions D1–D9, gate protocol, per-package status) in
-[`FINDINGS-TRACKER.md`](./FINDINGS-TRACKER.md). The condensed P2/P3 lists at the
+[`docs/reviews/2026-07-findings-tracker.md`](./docs/reviews/2026-07-findings-tracker.md).
+The condensed P2/P3 lists at the
 bottom of each findings doc are the remaining low-priority sweep. The
 opt-in/nightly harnesses that pin these fixes (exactness grid, type-soundness
 grid, mpmath kernel harness, JS/Python parity fuzz, round-trip battery) are being
-adopted from the archived sources in `reviews-archive/`.
+adopted from the archived sources in `docs/reviews/2026-07-archive/`.
 
 Two design-level residues are deliberately carried forward:
 

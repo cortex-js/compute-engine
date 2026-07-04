@@ -97,7 +97,7 @@ function close(a: number, b: number): boolean {
 }
 
 // KNOWN-OPEN cells. Each keyed by `Op(argClass):ISSUE` and justified by a
-// documented finding in reviews-archive/exactness-findings.md.
+// documented finding in docs/reviews/2026-07-archive/exactness-findings.md.
 const ALLOW = new Set<string>([
   // EX-07e (documented open finding): Factorial of an exact non-integer real
   // numericizes to a machine float instead of staying symbolic (√π/2 etc.).

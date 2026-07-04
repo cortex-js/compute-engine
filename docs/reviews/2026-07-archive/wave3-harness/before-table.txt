@@ -1,0 +1,81 @@
+
+===== BEFORE =====
+id                        kind      error             digits    
+polygamma_m_n3_2.5        machine   1505062787660.54ulp3.7dig      <-- FAIL
+polygamma_m_n3_10         machine   22944641688512.49ulp2.4dig      <-- FAIL
+polygamma_m_n3_0.5        machine   2939575755.53ulp  6.4dig      <-- FAIL
+polygamma_m_n4_2.5        machine   833281236326.56ulp3.8dig      <-- FAIL
+polygamma_m_n4_10         machine   76332382835614.75ulp1.9dig      <-- FAIL
+polygamma_m_n5_2.5        machine   381791407148.99ulp4.1dig      <-- FAIL
+polygamma_m_n5_10         machine   105099347224395.33ulp1.7dig      <-- FAIL
+polygamma_m_n6_2.5        machine   183540569317.42ulp4.5dig      <-- FAIL
+polygamma_m_n6_10         machine   151863945270221.53ulp1.6dig      <-- FAIL
+polygamma_m_n3_neg2.3     machine   13511599695646874.00ulp-0.3dig     <-- FAIL
+polygamma_m_n5_neg2.3     machine   11383704883224502.00ulp-0.3dig     <-- FAIL
+polygamma_ce_n3_2.5_p34   ce        6517661477668677650219008.00ulp@348.2dig      <-- FAIL
+polygamma_ce_n3_2.5_p50   ce        19458711616774156160446998721405556621312.00ulp@508.7dig      <-- FAIL
+polygamma_ce_n5_10.5_p34  ce        103424238155429926710280192.00ulp@347.0dig      <-- FAIL
+polygamma_ce_n5_10.5_p50  ce        190399086184218490930854522723766957506560.00ulp@507.7dig      <-- FAIL
+polygamma_ce_n4_2.5_p50   ce        1553224808340876219292547715801378979840.00ulp@509.8dig      <-- FAIL
+polygamma_ce_n6_0.5_p50   ce        47590881801340465604831505022976.00ulp@5017.3dig     <-- FAIL
+zeta_m_3                  machine   473648948.24ulp   7.1dig      <-- FAIL
+zeta_m_0.5                machine   32726341.70ulp    8.3dig      <-- FAIL
+zeta_m_15                 machine   1073071127.31ulp  6.6dig      <-- FAIL
+zeta_m_30                 machine   1073741802.88ulp  6.6dig      <-- FAIL
+zeta_m_neg11              machine   1442272079.70ulp  6.6dig      <-- FAIL
+zeta_m_1.5                machine   165696260.37ulp   7.6dig      <-- FAIL
+zeta_m_2.3                machine   371400209.63ulp   7.2dig      <-- FAIL
+zeta_m_10                 machine   1055089086.56ulp  6.6dig      <-- FAIL
+zeta_m_0.9                machine   64417603.28ulp    7.9dig      <-- FAIL
+zeta_m_1.1                machine   100083126.81ulp   7.8dig      <-- FAIL
+zeta_m_neg0.5             machine   210971027.12ulp   7.6dig      <-- FAIL
+zeta_m_50                 machine   1073741823.98ulp  6.6dig      <-- FAIL
+zeta_compiled_3           compiled  473648948.24ulp   7.1dig      <-- FAIL
+zeta_compiled_0.5         compiled  32726341.70ulp    8.3dig      <-- FAIL
+zeta_compiled_30          compiled  1073741802.88ulp  6.6dig      <-- FAIL
+besselK_m_0_0.5           machine   0.07ulp           17.1dig   
+besselK_m_0_2             machine   8.24ulp           15.0dig     <-- FAIL
+besselK_m_0_5             machine   11308.03ulp       11.9dig     <-- FAIL
+besselK_m_0_10            machine   1143322498.37ulp  6.7dig      <-- FAIL
+besselK_m_0_20            machine   138562603570649296.00ulp-1.4dig     <-- FAIL
+besselK_m_0_40            machine   249230249209671726169463823802564608.00ulp-19.5dig    <-- FAIL
+besselK_m_0_100           machine   1.16ulp           15.8dig   
+besselK_m_1_0.5           machine   0.87ulp           15.9dig   
+besselK_m_1_2             machine   2.06ulp           15.4dig   
+besselK_m_1_5             machine   5051.40ulp        12.0dig     <-- FAIL
+besselK_m_1_10            machine   1084555520.34ulp  6.7dig      <-- FAIL
+besselK_m_1_20            machine   135052883196738784.00ulp-1.4dig     <-- FAIL
+besselK_m_1_40            machine   246094893130833313068100169934831616.00ulp-19.4dig    <-- FAIL
+besselK_m_1_100           machine   0.78ulp           16.0dig   
+besselK_m_2_0.5           machine   0.94ulp           16.0dig   
+besselK_m_2_2             machine   1.21ulp           15.6dig   
+besselK_m_2_5             machine   3633.04ulp        12.2dig     <-- FAIL
+besselK_m_2_10            machine   926411394.59ulp   6.8dig      <-- FAIL
+besselK_m_2_20            machine   125057315250975424.00ulp-1.3dig     <-- FAIL
+besselK_m_2_40            machine   118462752276565028413355000281956352.00ulp-19.4dig    <-- FAIL
+besselK_m_2_100           machine   1.76ulp           15.6dig   
+besselK_m_3_15            machine   1586950161643.53ulp3.5dig      <-- FAIL
+besselI_m_0_5             machine   0.59ulp           16.1dig   
+besselI_m_0_40            machine   1.04ulp           15.9dig   
+besselI_m_0_50            machine   44644825585462.42ulp2.3dig      <-- FAIL
+besselI_m_0_100           machine   17326629790693.04ulp2.6dig      <-- FAIL
+besselI_m_0_700           machine   2869557883866.44ulp3.4dig      <-- FAIL
+besselI_m_1_5             machine   0.90ulp           15.9dig   
+besselI_m_1_40            machine   4.63ulp           15.2dig     <-- FAIL
+besselI_m_1_50            machine   133917715734407.36ulp1.8dig      <-- FAIL
+besselI_m_1_100           machine   51978264535681.42ulp2.1dig      <-- FAIL
+besselI_m_1_700           machine   8608668161338.35ulp3.0dig      <-- FAIL
+besselI_m_2_50            machine   669471304455912.00ulp1.1dig      <-- FAIL
+airyAi_m_neg10            machine   148805619219598.12ulp1.6dig      <-- FAIL
+airyAi_m_neg5             machine   200.32ulp         13.5dig     <-- FAIL
+airyAi_m_neg1             machine   0.64ulp           15.9dig   
+airyAi_m_1                machine   13.85ulp          14.5dig     <-- FAIL
+airyAi_m_5                machine   9874731.19ulp     8.9dig      <-- FAIL
+airyAi_m_5.1              machine   21249969237.51ulp 5.5dig      <-- FAIL
+airyAi_m_10               machine   214086001.82ulp   7.6dig      <-- FAIL
+airyBi_m_neg10            machine   2796028714677.76ulp3.3dig      <-- FAIL
+airyBi_m_neg5             machine   315.86ulp         13.2dig     <-- FAIL
+airyBi_m_neg1             machine   39.50ulp          14.3dig     <-- FAIL
+airyBi_m_1                machine   2.43ulp           15.3dig   
+airyBi_m_5                machine   0.68ulp           15.9dig   
+airyBi_m_10               machine   242068801.61ulp   7.5dig      <-- FAIL
