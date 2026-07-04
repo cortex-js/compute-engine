@@ -1,144 +1,302 @@
 ## [Unreleased]
 
-### New Features
+This release improves correctness and predictability across the public Compute
+Engine API: exact complex and integer arithmetic stays exact more often,
+partial derivatives and assumptions are more capable, LaTeX and lenient parsing
+round-trip more reliably, compiled output agrees more closely with interpreted
+evaluation, and arbitrary-precision arithmetic is substantially faster. It also
+fixes many cases where `evaluate()`, `N()`, `simplify()`, `isEqual()`,
+`assume()`, `verify()`, serialization, or compilation could return a wrong
+answer, lose exactness, hang, or silently accept invalid input.
 
-- **Exact Gaussian (complex) arithmetic.** Exact complex values now stay exact
-  through arithmetic instead of degrading to machine floats: `(1+i)^3` →
-  `-2+2i`, `(1+i)^{-2}` → `-i/2`, `1/(1+i)` → `(1-i)/2`, `\sqrt{3+4i}` → `2+i`,
-  and `\sqrt{-4}` → `2i`, all exactly. Sums fold exact Gaussian terms
-  (`2 + 3i + x` carries a single exact `2+3i`, which previously became an
-  inexact machine complex), and pure-imaginary radicals such as `√2·i` are
-  representable exactly. Values whose exact form would need a radical on both
-  components (e.g. `√2 + √3·i`) stay symbolic rather than silently
-  approximating. Exact complex numbers serialize losslessly as
-  `["Complex", re, im]` with exact components and round-trip through MathJSON.
+### Exact and Numeric Evaluation
 
-- **Sharper type inference for complex arithmetic.** Products, quotients and
-  powers of real and pure-imaginary operands now infer precise types: `√2·i`
-  types as `imaginary` (previously the complex-blind `finite_number`), `i·i`
-  as `finite_real`, `i/2` and `i^3` as `imaginary`, `e^i` and `\ln(-1)` as
-  `finite_complex`. As a consequence, declared signatures with complex-family
-  parameters (`(complex) -> complex`) are now enforced in strict mode like any
-  other signature — previously they were skipped entirely to avoid wrongly
-  rejecting complex constants that the old inference mistyped.
+- **Exact complex arithmetic preserves exact values.** Gaussian integer and
+  rational complex values now stay exact through arithmetic: $(1+i)^3$
+  evaluates to $-2+2i$, $(1+i)^{-2}$ to $-\frac{i}{2}$, $\frac{1}{1+i}$ to
+  $\frac{1-i}{2}$, $\sqrt{3+4i}$ to $2+i$, and $\sqrt{-4}$ to $2i$. Exact
+  complex numbers also round-trip through MathJSON as `["Complex", re, im]`
+  with exact components.
 
-- **Partial derivatives of unknown multivariate functions.** Differentiating an
-  application of an undefined function of several arguments no longer stays
-  inert: `D(f(x, y), x)` now evaluates to `Apply(Derivative(f, 1, 0), x, y)`,
-  the partial with respect to the first argument. The order argument of
-  `Derivative` is now a **multi-index** — one differentiation order per argument
-  of the function, following Mathematica's `Derivative[n₁, n₂, …][f]` convention
-  — so higher-order and mixed partials accumulate on it: `D(D(f(x, y), x), y)` →
-  `Apply(Derivative(f, 1, 1), x, y)`, and mixed partials commute. The
-  multivariate chain, product, power, and quotient rules compose over these,
-  e.g. `D(f(x^2, y), x)` → `2x * Apply(Derivative(f, 1, 0), x^2, y)`. When
-  applied to plain symbols they serialize in Leibniz notation
-  (`\frac{\partial}{\partial x} f(x, y)`); the bare operator serializes as
-  `f^{(1,0)}`. `Derivative` of a **known** multivariate function literal
-  computes the mixed partial directly, e.g.
-  `Derivative(Function(x^2·y, x, y), 1, 1)` → `(x, y) |-> 2x`. This also lets
-  Bessel functions differentiate with respect to their **order**:
-  `D(BesselJ(x, x), x)` now combines the known argument recurrence with a
-  symbolic order derivative `Apply(Derivative(BesselJ, 1, 0), x, x)` instead of
-  staying inert.
+- **Integer powers and large integers stay exact.** Integer powers such as
+  $2^{127}$ now evaluate to exact integers, negative integer powers produce
+  exact rationals such as $2^{-2} = \frac14$, and powers of Gaussian integers
+  such as $(1+i)^2$ evaluate exactly. Very large exact integers are no longer
+  rounded when used by `IsPrime`, `IsOdd`, `IsEven`, `FactorInteger`, `Mod`, or
+  `DigitSum`.
+
+- **Exact results are preserved more consistently.** `evaluate()` no longer
+  turns exact arguments into floats in cases such as $\sqrt{-2}$,
+  $\operatorname{Fract}(\frac12)$, $\Re(\frac12)$, $|1+i|$,
+  $\log_2(\pi)$, `Distance`, and statistics functions. For example,
+  $\operatorname{Mean}([1,2,3,4])$ now returns $\frac52$, and
+  $\operatorname{StandardDeviation}([1,2,3,4])$ returns
+  $\frac{\sqrt{15}}{3}$.
+
+- **Special functions are more accurate.** `PolyGamma`, `Zeta`, `BesselI`,
+  `BesselK`, Airy functions, logarithms, roots, trigonometric functions near
+  zeros and poles, `LambertW`, `acos`, `erfInv`, `Hypergeometric2F1`, `Gamma`,
+  `Beta`, Fresnel integrals, and complex elementary functions have improved
+  numeric accuracy, including at high precision.
+
+- **Negative logarithms and complex logarithms are consistent.** Inexact
+  negative arguments now produce the principal complex value under both
+  `evaluate()` and `N()`. Exact negative arguments stay symbolic under
+  `evaluate()` and produce the principal complex value under `N()`. Logarithms
+  with a complex argument and explicit base now agree between `evaluate()` and
+  `N()`.
+
+- **Roots and radicals are more reliable.** Exact perfect powers such as
+  $64^{1/3}$ and $(27/8)^{1/3}$ evaluate exactly, `Root(64, 3).N()` returns
+  exactly $4$, odd roots of negative numbers keep the real-root convention, and
+  `N(\sqrt{4y})` now returns $2\sqrt{y}$ instead of dropping the radical.
+
+- **Sums and infinite sums behave better.** Exact sums such as
+  $\sum_{k=1}^{5}\sqrt{k}$ now remain exact, while sums over infinite index
+  sets such as $\sum_{n \in \mathbb{Z}^+}\frac{1}{n^2}$ evaluate numerically
+  when appropriate, remain symbolic when parameters prevent evaluation, and
+  respect `timeLimit`.
+
+### Differentiation, Integration, and Simplification
+
+- **Partial derivatives of multivariate functions now work symbolically.**
+  `D(f(x, y), x)` now represents the partial derivative with respect to the
+  first argument, mixed partials accumulate correctly, and multivariate chain,
+  product, power, and quotient rules compose as expected. For example,
+  `D(f(x^2, y), x)` returns a symbolic chain-rule result proportional to
+  $2x$.
+
+- **Partial-derivative notation parses and evaluates.** Forms such as
+  $\partial_x f(x,y)$, $\frac{\partial}{\partial x} f(x,y)$,
+  $\frac{\partial^2}{\partial x \partial y} f(x,y)$, and
+  $\frac{\partial^2}{\partial x^2} f(x,y)$ now parse to `D` and evaluate
+  correctly.
+
+- **Derivative notation is more robust.** Compact derivatives such as
+  `d/dx(f(g(x)))` preserve unknown-function chain rules, higher-order
+  derivatives round-trip through LaTeX, and
+  $\frac{d}{dx}[\sin x]$ treats the square brackets as grouping rather than a
+  one-element list.
+
+- **Several derivative rules are corrected.** Variable-degree radicals such as
+  `Root(x, x)` differentiate as $x^{1/x}$, $\frac{d}{dx}\operatorname{Mod}(x,5)$
+  gives $1$ almost everywhere, and
+  $D(\operatorname{arcoth}(x), x)$ returns $\frac{1}{1-x^2}$.
+
+- **Definite integrals no longer return fabricated closed forms.** If no
+  closed-form antiderivative is found, `evaluate()` keeps the definite integral
+  symbolic instead of substituting bounds into the integrand. `N()` still
+  computes a numeric value.
+
+- **Default simplification covers more identities.** The sine addition identity
+  $\sin(x)\cos(y)+\cos(x)\sin(y)=\sin(x+y)$ now applies in the default
+  `simplify()` path. Pythagorean identities such as
+  $\sin^2 x+\cos^2 x$ also simplify inside larger sums.
+
+- **Simplification is more exact and branch-aware.** Combining powers keeps
+  exact exponents, for example $x \cdot x^{\sqrt2}$ becomes
+  $x^{1+\sqrt2}$. The simplification of $\ln(x^2)$ now produces
+  $2\ln(|x|)$ for real $x$, and identities that require real arguments no
+  longer apply to symbols declared as complex.
+
+- **Some unsafe rewrites were removed.** `simplify()` no longer rewrites
+  $|\sin x|$ as $\sin|x|$, `Arctan2` preserves the correct quadrant, rule
+  conditions such as $x \ne 0$ require proof rather than assuming unknown
+  symbols satisfy them, and alternating-binomial sum simplifications now check
+  their validity bounds.
+
+### Parsing and Serialization
+
+- **`\binom` is supported.** `\binom{n}{k}`, `\dbinom{n}{k}`, and
+  `\tbinom{n}{k}` parse to `Binomial(n, k)`, and `Binomial` serializes back to
+  `\binom`.
+
+- **LaTeX parsing accepts more common notation.** `N(...)` and `D(...)` parse as
+  numeric evaluation and differentiation outside quantifier scopes, superscripts
+  on `\log`, `\ln`, `\lg`, and `\exp` bind to the applied function, and
+  `==`, `!=`, chained `\ne`, mixed-direction inequality chains, parenthesized
+  relations, and double negation such as `x--y` now parse with the expected
+  meaning.
+
+- **Lenient parsing is more useful.** In lenient mode, digit suffixes parse as
+  subscripts (`x2` as $x_2$), bare known function names apply to the following
+  factor (`sin x`), `log2(8)` means $\log_2 8$, `[1,...,10]` parses as a range,
+  and $\mathbb{Z}^+$ parses as `PositiveIntegers`.
+
+- **The public string helpers accept their documented syntax.** `simplify()`,
+  `evaluate()`, `N()`, `expand()`, `expandAll()`, `factor()`, `solve()`, and
+  `compile()` now parse string input in non-strict mode, so expressions such as
+  `sqrt(5)`, `sin(alpha)`, and `x**2` work as documented.
 
 - **`verify()` and `assume()` accept strings.** `ce.verify('x > 0')` and
-  `ce.assume('$x > 0$')` parse the predicate (LaTeX) and proceed; unparseable
-  input throws a clear error. In addition, `verify()` of compound predicates now
-  recurses properly: after `assume(x·y > 0)` and `assume(x + y > 0)`,
-  `verify(And(x·y > 0, x + y > 0))` is `true` and `verify(Not(x·y > 0))` is
-  `false` (the Kleene logic recursion was previously unreachable).
+  `ce.assume('$x > 0$')` parse the predicate and report clear errors for
+  unparseable input.
 
-- **New default simplification: sine addition.** `sin(x)cos(y) + cos(x)sin(y)` →
-  `sin(x + y)` (and the `−`/`sin(x−y)` variant) now applies in the default
-  `simplify()` path, not just under the `fu` rule set.
+- **MathJSON `.json` serialization is lossless for more numbers.** Exact large
+  integers, 16- and 17-digit values, high-precision complex numbers, exact
+  rational/radical values such as $\frac{\sqrt3}{2}$, and repeating decimals now
+  round-trip without silently changing value.
 
-- **`\binom` is now supported.** `\binom{n}{k}` (and `\dbinom`/`\tbinom`) parses
-  to `Binomial(n, k)`, and `Binomial` serializes back to `\binom` — previously
-  `\binom` was a parse error.
+- **LaTeX round-trips are improved.** Repeating decimals serialize with an
+  overline, sequence expressions no longer serialize as ambiguous adjacent
+  numbers, set-builder notation attaches conditions to the comprehension, and
+  `toMathJson({exclude: ...})` honors exclusions for number literals.
 
-- **`==` and `!=` now evaluate.** `3 == 3` evaluates to `True` (previously an
-  inert `EqualEqual`) and `3!= 2` is a not-equal comparison (with `3! = 2`,
-  space before `=`, still parsed as a factorial equation). Additional unicode
-  operators are accepted in all modes: `≤ ≥ ≠ × · ∞ √ ½ ¼ ¾ ⅓ ⅔`.
+### Assumptions, Types, and Equality
 
-- **Misparse-driven auto-declarations are recoverable.** In strict mode, parsing
-  `gcd(12,8)` (an unknown multi-letter name applied to arguments) auto-declares
-  the applied symbol as a function; that declaration is now marked _inferred_,
-  so a later `ce.assign('d', 5)` overrides it and `d+1` evaluates to `6` instead
-  of erroring forever.
+- **The numeric type hierarchy is more natural.** `real` is now a subtype of
+  `complex`, so real-typed symbols satisfy complex-typed signatures and guards.
+  Union types flatten and canonicalize their member order, and type negation now
+  distinguishes `never` from `nothing`.
 
-- **`real` is now a subtype of `complex` in the type lattice.** The numeric
-  tower is the chain `integer ⊂ rational ⊂ real ⊂ complex ⊂ number`, so a
-  real-typed symbol now satisfies complex-typed signatures and guards through
-  the ordinary subtype relation (previously `complex` effectively meant
-  "strictly complex" and real-typed arguments needed special-case handling).
-  `meet(real, complex)` is now `real`. The `isReal` predicate is unchanged (real
-  still admits ±∞). In addition, union types now flatten nested unions and
-  canonicalize member order — `integer | string` and `string | integer` produce
-  the same `.type` string — and type negation distinguishes `never` (bottom)
-  from `nothing` (unit): `!any` is `never`, `!never` is `any`.
+- **Complex and non-finite type inference is more precise.** Expressions such as
+  $\sqrt2 i$, $i^2$, $i/2$, $i^3$, $e^i$, and $\ln(-1)$ infer more accurate
+  types. Non-finite values such as $\tan(\frac\pi2)$, $\Gamma(0)$, $\zeta(1)$,
+  $\ln(0)$, $0 \cdot \infty$, and $k/0$ no longer claim finite types when that
+  is unsound.
 
-- **Assumptions are more capable.** `assume(x ∈ PositiveIntegers)` (and the
-  other signed integer/real sets) now decomposes into a type and a sign bound,
-  so `x.isInteger` and `x.isPositive` respond; inequality bounds now reach
-  equality checks (`assume(w > 4)` makes `w.isEqual(2)` false, and
-  `verify(x ≠ 0)` holds after `assume(x > 0)`); two bounded symbols compare
-  (`assume(s > 4); assume(t < 1)` makes `s > t` evaluate to `True`); a
-  contradictory conjunction such as `assume(p > 0 ∧ p < −5)` is now atomic — it
-  is rejected without leaving the earlier conjuncts applied; and a no-arg
-  `forget()` now also clears values installed by `assume('x = 5')` while
-  preserving values set with `assign()`.
+- **Assumptions can prove more facts.** Assumptions over signed integer and real
+  sets refine both type and sign. Inequality bounds now affect equality checks,
+  comparisons between bounded symbols, and `verify()`. Chained inequalities and
+  equations with multiple roots are recorded correctly, contradictory
+  assumptions are rejected atomically, and `forget()` clears values introduced
+  by `assume('x = 5')` while preserving values set with `assign()`.
+
+- **Assumptions respect scope.** Assumptions made inside a pushed scope no
+  longer leak into parent scopes or continue to affect expression results after
+  `popScope()`.
+
+- **Equality and ordering are more coherent.** `isSame` is now an equivalence
+  relation, `isEqual` returns `undefined` for indeterminate equality with free
+  variables, equality and ordering share one tolerance, collection equality uses
+  scalar tolerance semantics, and complex numbers are no longer ordered against
+  real numbers.
+
+- **Set, collection, and statistics behavior is corrected.** `Intersection`,
+  `SymmetricDifference`, `Union`, and `SetMinus` produce correct finite-set
+  results, `Reverse([1,2,3])` returns `[3,2,1]`, `Quartiles` consistently uses
+  the Moore-McCabe convention, and single-argument
+  $\operatorname{KroneckerDelta}(0)$ returns $1$.
+
+### Compilation
+
+- **Compiled JavaScript, Python, GLSL, WGSL, and interval output now match the
+  interpreter more closely.** Equality uses the engine tolerance, `Mod` and
+  `Remainder` use consistent conventions, chained relations evaluate middle
+  operands once, dynamic $0^0$ returns `NaN`, non-boolean `Which` and `When`
+  conditions throw, and interval arithmetic matches interpreter conventions for
+  branches, rounding, modulus, and odd roots of negative numbers.
+
+- **Compilation fails closed when a target cannot represent an expression
+  correctly.** Unsupported or unsafe cases such as invalid shader constructs,
+  reserved shader variable names, non-real values in real-only target helpers,
+  multi-index sums or products that a target cannot express, and invalid
+  constant folds now fail at compile time instead of emitting wrong code.
+
+- **The Python target emits valid Python for more expressions.** Conditional
+  expressions, `NaN`, logical operators, chained relations, assigned symbols,
+  `vars`, and target options now compile consistently with the JavaScript target
+  and the interpreter.
+
+### Additional Resolved Issues
+
+- **Evaluation limits are honored more reliably.** Hard limits such as
+  nested-exponential limits, divergent infinite sums, and very large special
+  function inputs now return promptly, remain symbolic, or throw a
+  `CancellationError` when `timeLimit` or the recursion limit is exceeded.
+  Examples include $\lim_{x\to\infty} e^{e^{e^x}}/e^{e^{e^{x-1}}}$,
+  $\Gamma(10^{300})$, $\zeta(\pm 10^{300})$, $\operatorname{Fib}(10^9)$,
+  $\binom{2 \times 10^9}{10^9}$, and
+  $\operatorname{Subfactorial}(10^6)$.
+
+- **`simplify()` honors more of its public contract.** `simplify({rules: null})`
+  now applies no rewrite rules, as documented, and logarithmic simplifications
+  such as $\ln(a)/\ln(b)$ no longer reduce to an integer unless the identity can
+  be verified exactly. `simplify()` also preserves exact exponents when
+  combining powers, so $x \cdot x^{\sqrt2}$ becomes $x^{1+\sqrt2}$ rather than
+  a decimal exponent.
+
+- **Numeric comparison and formatting edge cases are fixed.** Two large
+  15-digit values that previously compared in the wrong order now compare
+  correctly, `toPrecision(15)` no longer corrupts
+  `999999999999999`, NaN has a deterministic place in canonical ordering, and
+  high-precision `toString()`, `.json`, and `toFixed()` avoid long stalls on
+  enormous exponents.
+
+- **Substitution and collection operations are more complete.** `subs()` now
+  reaches into lists and tensors, for example `Median([a,b,c]).subs({a: 1})`.
+  Finite set operations such as `Intersection({1,2}, {2})` and
+  `SymmetricDifference` now evaluate correctly, and `Reverse([1,2,3])` returns
+  `[3,2,1]` instead of throwing.
+
+- **Strict and non-strict validation are more predictable.** In strict mode,
+  user-declared function signatures are enforced for closed arguments, numeric
+  operators reject provably non-numeric operands such as `Sin("hello")`, big-op
+  bounds are type-checked, and `Map([1,2,3], "nf")` is rejected. In non-strict
+  mode, missing required arguments such as `Sqrt()` or `Power(2)` no longer
+  crash.
+
+- **Rule replacement is safer.** Rule guards such as $x \ne 0$ must now be
+  provable before they match, wildcard conditions such as `:notzero` no longer
+  assume unknowns satisfy the condition, and failed sequence-wildcard matches no
+  longer drop operands from the expression being transformed.
+
+- **Special values and combinatorics are corrected.** `Choose` and `Binomial`
+  now share standard conventions, including `Choose(2,3) = 0` and negative
+  upper indices such as `Binomial(-2,3) = -4`. `Argument(1+i)` evaluates to
+  $\pi/4$, several `Digamma` special values simplify when the Fungrim pack is
+  loaded, and integer-domain functions such as `Fibonacci(+Infinity)` and
+  `MoebiusMu(Infinity)` stay symbolic instead of throwing.
+
+- **Modular arithmetic is consistent.** `Mod` is floored everywhere, so
+  `Mod(-7, 3)` returns $2$, while `Remainder` uses round-to-nearest semantics.
+  Exact rational inputs stay exact, for example
+  `Mod(\frac12, \frac13)` returns $\frac16$.
+
+- **Complex and matrix products no longer lose meaning.** Multiplying a scalar
+  by a complex literal such as `["Complex", 1, 1]` preserves both real and
+  imaginary parts, and symbolic matrix products preserve their written order, so
+  a commutator such as $MP - PM$ no longer collapses to $0$ for declared matrix
+  symbols.
+
+- **Parsing rejects or preserves ambiguous forms more reliably.** `x^2^3` is
+  now a parse error instead of an unintended list power, `Sequence(1,2)` no
+  longer serializes as `1 2`, parenthesized relations are treated as atomic
+  operands inside larger chains, and a scalar or matrix next to a function- or
+  matrix-valued symbol is parsed as multiplication rather than a tuple.
+
+- **`0^0` and non-finite values are consistent across paths.** `evaluate()`,
+  `N()`, and compiled JavaScript now agree that $0^0$ is `NaN`. Trigonometric
+  poles such as `N(\cot \pi)` and `N(\csc \pi)` now return complex infinity
+  rather than huge finite artifacts.
 
 ### Performance
 
-- **LaTeX parsing is 15–28% faster.** Dictionary lookahead is now bounded per
-  token (most tokens start no multi-token trigger, so no lookahead strings are
-  built at all), and the speculative symbol parse performed by the dictionary's
-  symbol-trigger path is cached across the per-kind definition lookups at each
-  position. Measured: −24–28% on derivative/polynomial/matrix inputs, −15% on
-  a definite integral; parse results are byte-identical.
+- **LaTeX parsing is 15-28% faster.** Parsing is faster on derivative,
+  polynomial, matrix, and definite-integral inputs, with the same parse results
+  as before.
 
-- **Arbitrary-precision arithmetic is substantially faster.** A sequence of
-  byte-identical optimizations to the `BigDecimal` core: division no longer
-  normalizes or re-scans its pre-rounding quotient (its digit count is derived
-  from the operand digit counts) — `div` is 1.9–4× faster than the previous
-  release and now outperforms raw mpmath at every precision; digit counting
-  seeds from the hex-string length; comparison, rounding, addition and
-  multiplication are 1.3–6× faster; a fused multiply-and-round
-  (`mulToPrecision`) accelerates the integer power ladder ~12–16% and is adopted
-  across the Gamma/digamma/Bessel series ladders and complex rectangularization;
-  the exponential kernel uses √-depth argument reduction (O(√bits) series terms
-  instead of O(bits)) — `exp` is up to 2.6× faster at 500 digits, with `Gamma`
-  inheriting 1.2–2×; and **the natural log was rewritten** from Newton-on-exp
-  (three full exponential evaluations per call) to a machine-seeded direct
-  series (`ln(v) = y₀ + log1p(v·e^(−y₀) − 1)` with the 52-bit hardware seed) —
-  `ln` is 1.9× faster at 21 digits rising to **10× at 500**, and a pre-existing
-  accuracy loss near 1 was fixed along the way (`ln(1 − 10⁻²⁹)` at 60 digits
-  previously lost its last ~3 digits). The AGM crossover was re-measured for the
-  new kernel and moved from ~700 to ~12,000 digits — `ln` at precision 1000,
-  previously AGM territory, is another 5.6× faster (866 → 155 µs). Division by 2
-  in the sinh/arctanh/arccos paths became an exact multiply-by-0.5. Net effect
-  on a division-heavy series: ζ(3) at 100–500 digits is over 2× faster than the
-  previous release, with no kernel-specific changes. At 100 digits the field
-  operations (add/sub/mul/div) are now 2.7–15× faster than Mathematica 14.3
-  (measured; see `benchmarks/big-decimal/BIGNUM-COMPARISON.md`, the new durable
-  primitive-operation benchmark).
+- **Arbitrary-precision arithmetic is substantially faster.** At 100
+  significant digits, addition, subtraction, multiplication, division, and
+  comparison are now much faster than in 0.66.0, and high-precision `ln`, `exp`,
+  `Gamma`, and related operations also benefit. The improvements are visible in
+  both direct numeric work and symbolic operations that depend on
+  arbitrary-precision arithmetic.
 
   **Arbitrary-precision arithmetic at 100 significant digits** (ns per
   operation, lower is better; warm median, distinct operands per call):
 
-  | op     | **CE (this release)** | CE 0.66.0 |  math.js¹ | Mathematica² |
-  | ------ | --------------------: | --------: | --------: | -----------: |
-  | `add`  |                **75** |       152 |       278 |        1,023 |
-  | `sub`  |                **91** |       167 |       329 |        1,212 |
-  | `mul`  |               **202** |       319 |     7,984 |        1,025 |
-  | `div`  |               **501** |     1,748 |    11,890 |        1,366 |
-  | `cmp`  |                **29** |       198 |        61 |          984 |
-  | `sqrt` |                 3,163 |     4,018 |    54,696 |    **1,055** |
-  | `exp`  |                 4,795 |     8,698 |   728,876 |    **1,682** |
-  | `ln`   |                 5,887 |    32,398 |   670,206 |    **1,353** |
-  | `cos`  |                 6,914 |     7,467 | 1,666,292 |    **2,059** |
+  | op     | **CE 0.67.0** | CE 0.66.0 |  math.js¹ | Mathematica² |
+  | ------ | ------------: | --------: | --------: | -----------: |
+  | `add`  |        **75** |       152 |       278 |        1,023 |
+  | `sub`  |        **91** |       167 |       329 |        1,212 |
+  | `mul`  |       **202** |       319 |     7,984 |        1,025 |
+  | `div`  |       **501** |     1,748 |    11,890 |        1,366 |
+  | `cmp`  |        **29** |       198 |        61 |          984 |
+  | `sqrt` |         3,163 |     4,018 |    54,696 |    **1,055** |
+  | `exp`  |         4,795 |     8,698 |   728,876 |    **1,682** |
+  | `ln`   |         5,887 |    32,398 |   670,206 |    **1,353** |
+  | `cos`  |         6,914 |     7,467 | 1,666,292 |    **2,059** |
 
   <small>¹ math.js `BigNumber` (decimal.js) at precision 100. ² Mathematica 14.3
   timed inside the kernel with result caches disabled; its ~1 µs per-call
@@ -150,776 +308,29 @@
   **Symbolic operations** (ms per call, lower is better; warm median, from the
   cross-library suite in `benchmarks/REPORT.md`):
 
-  | case                    | **CE (this release)** | CE 0.66.0 | math.js |   SymPy | Mathematica |
-  | ----------------------- | --------------------: | --------: | ------: | ------: | ----------: |
-  | simplify `√(3+2√2)`     |              **0.07** |      0.09 | 🟡 0.92 | 🟡 3.56 |        3.28 |
-  | simplify `√6·x + √2·x`  |              **0.16** |      0.19 |    1.13 |    5.69 |        18.0 |
-  | simplify `(x²−1)/(x−1)` |              **0.10** |      0.15 | 🟡 0.99 |    8.53 |        0.17 |
-  | `d/dx √(1−x²)`          |                  0.22 |      0.21 |    2.13 |    5.70 |   **0.008** |
-  | `d/dx xˣ`               |                  0.04 |      0.04 |    1.83 |    1.80 |   **0.005** |
-  | `∫ x eˣ dx`             |              **0.08** |      0.09 |       — |    6.53 |        0.57 |
-  | `∫ x/(x²+1) dx`         |              **0.16** |      0.18 |       — |    7.23 |        0.60 |
-  | `lim sin(x)/x`          |              **0.03** |      0.04 |       — |    0.62 |        1.93 |
-  | `lim (1+1/x)ˣ`          |              **0.55** |      1.13 |       — |    2.76 |        5.81 |
-  | solve `x⁴+x²−1 = 0`     |                  1.88 |      4.65 |       — |    8.56 |    **0.55** |
-  | solve `x³−x−1 = 0`      |              **0.11** |      1.18 |       — |    5.73 |        0.23 |
+  | case                    | **CE 0.67.0** | CE 0.66.0 | math.js |   SymPy | Mathematica |
+  | ----------------------- | ------------: | --------: | ------: | ------: | ----------: |
+  | simplify `√(3+2√2)`     |      **0.07** |      0.09 | 🟡 0.92 | 🟡 3.56 |        3.28 |
+  | simplify `√6·x + √2·x`  |      **0.16** |      0.19 |    1.13 |    5.69 |        18.0 |
+  | simplify `(x²−1)/(x−1)` |      **0.10** |      0.15 | 🟡 0.99 |    8.53 |        0.17 |
+  | `d/dx √(1−x²)`          |          0.22 |      0.21 |    2.13 |    5.70 |   **0.008** |
+  | `d/dx xˣ`               |          0.04 |      0.04 |    1.83 |    1.80 |   **0.005** |
+  | `∫ x eˣ dx`             |      **0.08** |      0.09 |       — |    6.53 |        0.57 |
+  | `∫ x/(x²+1) dx`         |      **0.16** |      0.18 |       — |    7.23 |        0.60 |
+  | `lim sin(x)/x`          |      **0.03** |      0.04 |       — |    0.62 |        1.93 |
+  | `lim (1+1/x)ˣ`          |      **0.55** |      1.13 |       — |    2.76 |        5.81 |
+  | solve `x⁴+x²−1 = 0`     |          1.88 |      4.65 |       — |    8.56 |    **0.55** |
+  | solve `x³−x−1 = 0`      |      **0.11** |      1.18 |       — |    5.73 |        0.23 |
 
   <small>🟡 = value-correct but not fully simplified. — = not supported. SymPy
   1.14 via `sympify`/`evalf` (per-call parse included, as for every string-based
   tool). All engines measured warm, per-call from source, same protocol
   (`benchmarks/REPORT.md`, "Methodology").</small>
 
-- **The Rubi integration pack is much faster on integrals it cannot solve.** A
-  second-level dispatch index (the set of operator heads a rule's pattern
-  requires vs the heads present in the integrand) now screens the ~3,200 rules
-  before pattern-matching, cutting candidate scans ~10× on the miss path —
-  integrals that fall through to the built-in integrator spend less than half
-  the previous time in the pack, with byte-identical results verified across the
-  full 4,965-integral Rubi test corpus.
-
-- **Sign queries under assumptions are much faster and sharper.** `.sgn` /
-  `.isPositive` on a symbol constrained by assumptions now consults the indexed
-  bounds store (O(1) after indexing) instead of linearly re-matching every
-  assumption, and derives strictly more: `n ∈ Range(1, 10)` now yields
-  `isPositive === true` (previously undefined), agreeing with `verify(n > 0)`.
-
-- **Faster polynomial equation solving.** Solving a univariate polynomial of
-  degree ≥ 2 now goes straight to a coefficient-based closed form (quadratic
-  formula, then the rational-root theorem plus a numeric fallback for higher
-  degrees), bypassing the commutative pattern-matcher whose operand-permutation
-  search dominated the cost of polynomial solving. Roots are unchanged —
-  irrational roots such as `1 ± √2` stay exact.
-
-- **Faster `Factor`.** Detecting whether a term is a perfect square (for the
-  difference-of-squares and perfect-square factorings) is now computed
-  structurally instead of through a general `simplify()` call, which previously
-  accounted for roughly half of the factoring workload.
-
-- **Faster arbitrary-precision arithmetic.** The decimal digit count of a
-  `BigDecimal` value is now computed once and reused across `cmp`, `div`, `pow`,
-  `ln`, `sqrt`, and precision rounding (an O(log n) recomputation becomes an
-  O(1) reuse), `normalize` short-circuits the common case of a value with no
-  trailing decimal zero with a single test, and redundant `BigDecimal` copies
-  were removed from the binary numeric-function path. This speeds up
-  high-precision `N()`.
-
-### Resolved Issues
-
-- **Non-finite typing is now consistent (and documented).** Type handlers
-  claimed finite types for values that evaluate to complex infinity:
-  `Tan(π/2)`, `Sec(π/2)`, `Csc(0)`, `Gamma(0)`, `Gamma(-2)`, `Zeta(1)`,
-  `Factorial(-2)` and `EllipticK(1)` all typed `finite_real`; `Round(i)` and
-  `Round(~oo)` typed `integer`. The convention is now: claim
-  `non_finite_number` only when non-finiteness is provable (`\ln(0)` and
-  `1+∞` now correctly type `non_finite_number`), and claim `number` when a
-  pole or NaN is merely possible (`x·∞` for real `x`, which is NaN at
-  `x = 0`). The convention is documented in ARCHITECTURE.md ("Non-finite
-  typing convention for type handlers") and pinned by a dedicated test suite.
-
-- **Free functions accept the looser AsciiMath/Typst-like syntax they
-  document.** `simplify()`, `evaluate()`, `N()`, `expand()`, `expandAll()`,
-  `factor()`, `solve()`, and `compile()` now parse string input in non-strict
-  mode, so bare function names, multi-letter identifiers, and `**` for
-  exponentiation work — e.g.
-  `simplify("(sin(alpha)**2 + cos(alpha)**2) * (x**2 + 2*x + 1) / (x + 1)")`
-  returns `x + 1` and `N("(1+sqrt(5))/2")` returns the golden ratio. Previously
-  these were parsed as strict LaTeX and silently mangled (`sqrt(5)` became
-  `5·q·r·s·t`, the `i` in `sin` was read as the imaginary unit). Canonical LaTeX
-  input is unaffected. The standalone `parse(latex)` entry point remains strict
-  LaTeX.
-
-- **Two 15-digit values compared in the wrong order.** The digit-count fast path
-  returned 16 for the two largest 15-digit integers (`999999999999998/9` —
-  `Math.log10` lands exactly on 15.0), making the magnitude early-out in `cmp`
-  see them as an order of magnitude larger:
-  `999999999999999 < 999999999999999.1` compared as _greater_, and
-  `toPrecision(15)` of the exact value `999999999999999` corrupted it to
-  `1000000000000000`. The fast path now uses an exact comparison ladder (and is
-  faster than before). These were the only two affected inputs below 2⁵³.
-
-- **Hard limits no longer hang.** Nested-exponential (Gruntz-class) limits such
-  as `lim_{x→∞} e^{e^{e^x}}/e^{e^{e^{x-1}}}` burned ~18 minutes of CPU in the
-  limit engine before giving up; the engine now honors the evaluation deadline
-  and probes order-of-growth with machine floats instead of building
-  multi-million-digit intermediates — the same limits return (symbolically
-  inert) in milliseconds. The timeout contract is now documented on
-  `evaluate()`: exceeding `timeLimit` or the recursion limit throws a
-  `CancellationError` (with `cause` `'timeout'` or `'recursion-depth-exceeded'`)
-  — catch it to distinguish an interrupted evaluation from a symbolic result.
-
-- **`subs()` reaches into collections.** `Median([a,b,c]).subs({a: 1})` (and
-  substitution into any list/tensor element) previously returned the expression
-  unchanged — `BoxedTensor` now delegates substitution to its structural form.
-  Explicit `Hold(…)` semantics are unchanged.
-
-- **`0^0` is NaN on every path.** The `.N()` path returned `1` (via `Math.pow`)
-  while `evaluate()` returned NaN; both now agree, matching the
-  compiled-JavaScript alignment from the previous round.
-
-- **`simplify({rules: null})` honors its contract.** It now applies no rules
-  (structural/numeric folding only) as documented, instead of silently using the
-  full default rule set. Also, `ln(a)/ln(b) → k` now verifies `a = bᵏ` with
-  exact bigint arithmetic — `ln(2⁶⁰+1)/ln(2)` no longer falsely reduces to 60 —
-  and the simplification cost-gate exemptions moved from fragile label
-  string-matching to explicit `purpose: 'transform'` tags (no behavior change).
-
-- **Fungrim guards are uniformly finite.** Real/integer-typed rule guards now
-  require the argument not be known-infinite, matching the complex guard: a
-  real-guarded identity like `Im(e^{ix}) → sin(x)` no longer fires for `x = +∞`
-  (which produced NaN). Pack shell declarations also survive scope pops and
-  re-loads, and `Union` no longer collapses inert set-valued operands (e.g.
-  `Interior(…)`) into literal elements.
-
-- **Wester audit grading is honest.** A finite `.N()` value no longer counts as
-  correct for definite integrals and limits — results are graded against an
-  independent numeric reference; `±`-annotated outputs (`PlusMinus`) are
-  unwrapped instead of graded unsolved. (Harness only; no report regenerated
-  yet.)
-
-- **Numeric kernel accuracy.** Arbitrary-precision `log`/`log10`/`log2` now
-  carry guard digits (`log10(10⁻⁷)` is exactly `−7`; `2^(−1/2)` is correctly
-  rounded, was 2.35 ulp); `Zeta` at negative even integers returns exactly `0`
-  (was a ~1e-76 residue); machine `gammaln` was rewritten in Lanczos-log form
-  (~15.7 correct digits, was ~10.5, improving `Gamma`/`Beta` for large
-  arguments); the Fresnel integrals' asymptotic cutoff moved from 36,974 to
-  6×10¹⁵ with an exactly-computed phase (S(40,000) was returned as a flat 0.5,
-  an 8.6e-6 error cliff); exact root extraction recognizes perfect powers
-  (`64^(1/3)` → `4`, `(27/8)^(1/3)` → `3/2` exact), no longer drops the radical
-  in products like `(8√3)^(1/3)`, and fixes a wrong half-integer root
-  decomposition; and exact rational×radical values now round to the working
-  precision when numericized (a precision-100 `(7/3)√3` printed 199 digits of
-  which only ~103 were correct; machine-precision results are now the
-  correctly-rounded double).
-
-- **Negative fractional powers canonicalize uniformly.** `x^(−1/3)` becomes
-  `1/∛x` (matching `x^(−1/2)` → `1/√x`) instead of the anomalous `Root(x, −3)`
-  rendered as `\sqrt[-3]{x}`; also fixes a crash evaluating numeric
-  negative-index roots such as `8^(−1/3)`.
-
-- **Float coefficients no longer mint exact cancellations.** `(0.3x)/(0.1y)`
-  kept an exact coefficient `3` (binary `0.3/0.1` is not exactly 3); division
-  coefficient extraction now follows the same float-exclusion convention as
-  `Add`/`Multiply` folding.
-
-- **Comparison coherence.** The primitive overload of `isSame` agrees with the
-  boxed path (`Rational(1,2).isSame(0.5)` matches `.isSame(ce.number(0.5))`),
-  and collection `isEqual` uses the same tolerance semantics as scalars
-  (near-equal float vectors compare equal within `ce.tolerance`; NaN-element
-  behavior is now documented).
-
-- **Parse/serialize fidelity.** `x^2^3` is a "double superscript" parse error
-  (previously it silently became `Power(x, List(2,3))` and broadcast to a list);
-  `Sequence(1,2)` no longer serializes to `1 2`, which re-parsed as the number
-  `12`; set-builder notation `\{x \in \R : x > 0\}` attaches the condition to
-  the comprehension instead of nesting it inside the domain; and
-  `toMathJson({exclude: …})` now honors exclusions for number literals
-  (`Rational` → `Divide`, `Sqrt` → `Power`).
-
-- **Compiled code matches the interpreter more closely.** Negative-bound `Sum`
-  unrolls no longer emit `--3` (invalid in GLSL/WGSL); user variables named
-  after GLSL/WGSL reserved words (`sample`, `filter`, `in`, `texture`, …) fail
-  at compile time with a diagnostic instead of emitting invalid shader code;
-  chained relations evaluate their middle operands once (`a < Random() < b` drew
-  twice); dynamic `0^0` returns NaN in compiled JavaScript (matching the
-  interpreter) and non-boolean `Which`/`When` conditions throw as the
-  interpreter does; `realOnly` no longer passes booleans through; and the
-  compiled `Integrate` Monte-Carlo behavior (~1e-4 error, 10⁷ samples) is now
-  documented.
-
-- **Eight Fungrim `Digamma` special values now simplify.** `Digamma(1/2)` →
-  `−2 ln 2 − γ` and seven siblings (1/3, 1/4, 1/6, 1/8, 2/3, 3/4, 5/6) were
-  cost-gated into silent no-ops; they are now tagged as transforms and fire when
-  the Fungrim pack is loaded.
-
-- **High-precision results were silently wrong after increasing `precision`.**
-  The internal table of Bernoulli numbers used by `Gamma`, `Digamma`,
-  `PolyGamma` and `Zeta` at high precision was built once per process and never
-  extended, so raising `ce.precision` after a first computation reused a
-  too-short table: a precision-300 `Gamma(1.23456789)` computed after a
-  precision-20 call diverged from the correct value around digit 170. The table
-  is now rebuilt when more terms are needed (results verified bit-identical to a
-  fresh engine and to mpmath).
-
-- **Finite set operations compute correct results.** `Intersection({1,2}, {2})`
-  returned `EmptySet` (elements were compared against the whole second set
-  rather than tested for membership) and `SymmetricDifference` never evaluated
-  at all. Both now reduce correctly, with `Union`/`SetMinus` verified against
-  value tables.
-
-- **`Reverse` no longer crashes on short lists.** Its iterator's termination
-  test could never be true, so `Reverse([1,2,3]).evaluate()` threw a raw
-  JavaScript error instead of returning `[3,2,1]`.
-
-- **Non-strict mode no longer crashes on missing arguments.** With
-  `ce.strict = false`, expressions missing required arguments — `Negate()`,
-  `Sqrt()`, `Power(2)`, `Arctan()` — threw raw JavaScript errors, and `Sin()`
-  printed `sin([undefined])`. The non-strict fast paths now pad missing required
-  arguments the same way strict mode does, producing identical MathJSON.
-
-- **Rubi integration cleanups.** A rule-driven antiderivative could contain
-  unreduced `ln(e)` factors that `simplify()` couldn't fold inside a quotient
-  (`∫ e²ˣ/x³` now yields a clean `ExpIntegralEi(2x)` form, and `(ln(e)·y)/x`
-  simplifies to `y/x`); an internal re-entrant integration no longer resets the
-  evaluation deadline (a fallback could previously grant the outer integral a
-  fresh time budget); the rule-compilation report now carries per-rule skip
-  reasons and stays honest on cached reloads; and the driver's memo table is
-  cleared per top-level integration instead of growing without bound.
-
-- **Integer-domain functions no longer crash on infinite arguments.**
-  `Fibonacci(+∞)`, `BernoulliB(−∞)`, `MoebiusMu(∞)` and the rest of the
-  integer-domain family (a dozen combinatorial/number-theory operators) threw an
-  uncaught `RangeError` from `evaluate()` — `toBigint` converted ±∞/NaN with
-  `BigInt(Math.round(x))`. It now returns `null` for non-finite values per its
-  contract, so these expressions stay symbolic instead of throwing.
-
-- **Pythagorean identities fire inside larger sums.** `sin²x + cos²x + y`
-  simplified to nothing (every pattern in the block required exactly two terms);
-  the identities now scan n-ary sums pairwise, keyed on the trig argument:
-  `sin²x + cos²x + y` → `1 + y`, `3sin²x + 3cos²x + y` → `3 + y`, and the
-  `tan² + 1` / `cot² + 1` siblings likewise.
-
-- **Fungrim complex-domain rules usable with `real`-declared symbols.** A
-  `type: 'complex'` rule guard never discharged for a symbol declared `real` (or
-  `integer`, `rational`) because `real` — which admits ±∞ — is not a subtype of
-  `complex` in the type lattice. This silently blocked 68% of the Fungrim pack
-  under the most natural declaration. The guard now accepts finitely-valued
-  real-family symbols, consistent with the corpus's finite-domain ℝ/ℤ/ℚ
-  convention; guards that genuinely require non-real arguments (e.g. `Im τ > 0`)
-  still do not fire for plain reals.
-
-- **Strict mode validates arguments of numeric operators with custom canonical
-  handlers.** `Sin("hello")` and `Factorial("x")` were `isValid` and evaluated
-  to garbage — a custom canonical handler was the sole gate on argument
-  validity, and most only checked arity. In strict mode, operands of
-  pure-numeric operators are now re-validated after the canonical handler (with
-  the numeric fast-path's leniency: unknowns, lists, tensors are fine — only
-  provably non-numeric operands are rejected). `Factorial`'s signature was
-  aligned with what it computes (`Γ(x+1)` for non-integers).
-
-- **User-declared function signatures are enforced.** After
-  `declare('f', '(integer) -> integer')`, applying `f(0.5)` or `f("a")` was
-  silently valid. Ill-typed _closed_ operands (literals, constants) are now
-  rejected in strict mode; operands with free variables defer to runtime.
-
-- **Validation gaps that let wrong results through.** `Sum(x, (x, "lo", 10))`
-  evaluated to 55 (a string bound silently treated as 1) — big-op bounds are now
-  type-checked. `Map([1,2,3], "nf")` broadcast the string — a string is never a
-  function literal. A function literal used as a big-op body
-  (`Sum(Function(_1,_1), …)`) is rejected instead of producing a mistyped
-  lambda, and a function literal's numeric result claim derived from unknown
-  parameters widens to `number` (a lambda applied to ∞ is not `finite_number`).
-
-- **Type lattice: covering unions, expression types, bounded numerics.**
-  `finite_real | non_finite_number` now reduces to `real` (and likewise across
-  the numeric tower), so types produced by `meet` compare equal to what they
-  cover. A bare symbol is no longer a subtype of every `expression<Op>` (only of
-  `expression<Symbol>`). Numeric value literals check against bounded types
-  (`7 ⊑ integer<5..10>`), and the meet of two overlapping ranges is their
-  intersection instead of an unsound `nothing`.
-
-- **`√3/2` MathJSON round-trips to the same number literal.** The `.json` of a
-  radical number literal like `√3/2` (`["Divide",["Sqrt",3],2]`) re-boxed as a
-  Divide _function_ — `isSame` false against the value that produced it.
-  Canonicalization now folds exact ÷ exact quotients back to the exact number
-  literal (`Divide(√3, 3)`, `Divide(1/2, 3)` → literals; floats deliberately
-  keep not folding), so `ce.expr(x.json).isSame(x)` holds while the natural
-  Divide-form serialization — which rule patterns written as `\frac{\sqrt3}{3}`
-  match against — is preserved. Dictionaries also gained structural `isSame`
-  (previously always `false` for equal-but-distinct dictionaries), and a stale
-  code comment contradicting the documented lossless-`.json` contract was
-  corrected.
-
-- **Assumptions: chained inequalities, multi-root equations, and the
-  `assume ⇒ verify` identity.** `assume("0 < x < 1")` silently dropped every
-  relation but the first (`verify(x < 1)` was unknown afterward); n-ary
-  relational assumptions now decompose into pairwise conjuncts.
-  `assume("x^2 = 4")` incorrectly returned `'contradiction'` for every
-  multi-root equation (a type comparison tested the roots-_list_ type instead of
-  each root); it now succeeds, records the equation as a fact, and leaves the
-  symbol symbolic instead of binding it to a `List` of roots. Facts that the
-  evaluator cannot decide on its own (`x·y > 0`, `x + y > 0`) were write-only —
-  `ask` sometimes found them but `verify` never did; `verify()` now consults the
-  assumption database directly, making `assume(P) ⇒ verify(P)` an identity.
-  `ask()` bound queries also recognize canonically-boxed patterns
-  (`["Greater", "x", "_k"]`, which canonicalizes to `Less(_k, x)`), and the
-  documented `ask` example now actually works.
-
-- **Assumptions no longer mutate parent scopes.** `assume(x > 0)` inside a
-  pushed scope refined the type of `x` on its _parent-scope_ definition, so
-  after `popScope()` the assumption was gone but `x` stayed typed `real`. The
-  refinement now shadows into the current scope, like `declare`.
-
-- **Python compilation target emits valid Python.** `If`/`When`/`Which` compiled
-  to JavaScript ternaries with bare `NaN` (a Python `SyntaxError`), logical
-  operators compiled to `and(a, b)` function calls, and relational chains
-  hardcoded `&&`; they now emit conditional expressions (`a if cond else b`),
-  `float('nan')`, and infix `and`/`or`/`not`. The target also honors `vars` and
-  options, folds assigned symbols like the JavaScript target, and the documented
-  `python` target name is registered. A new parity suite executes the emitted
-  source with a real Python interpreter and checks the values against the
-  engine.
-
-- **GPU compilation targets: no more invalid shaders.** A loop-form `Sum` used
-  as a sub-expression spliced a `return` statement mid-expression
-  (`return _acc; + 1.0`) with `success: true`; it now fails at compile time with
-  the offending head. `Loop` counters are converted to float where consumed,
-  WGSL `Argument` uses `select(…)` instead of the unsupported `?:`, and
-  `Min`/`Max` with three or more arguments fold to nested two-argument builtins.
-  Compiling a real-only helper (`Erf`, `Gamma`, Bessel, …) with a complex-typed
-  argument — which silently returned garbage (`Erf(z)` → −1) — now also fails
-  closed at compile time.
-
-- **Compiled `Equal` matches the interpreter's tolerance.** Compiled code
-  compared floats with exact `===`, so `0.1 + 0.2 == 0.3` was `false` compiled
-  but `True` interpreted. JavaScript and Python targets now bake the engine's
-  tolerance into equality comparisons.
-
-- **`Root(x, n).N()` computes a true n-th root.** `Root(64, 3).N()` returned
-  `3.999…9` (computed as `x^(1/n)` with a rounded reciprocal); both the machine
-  and arbitrary-precision paths now use a dedicated n-th-root kernel
-  (Newton-corrected, snapping exact integer roots), so `Root(64, 3).N()` is
-  exactly `4`. Non-integer degrees (`Root(2, 0.5)` = 4) continue to work as
-  powers. `Root(-4, 4).evaluate()` asserted a **NaN literal** where a complex
-  value exists; it now stays symbolic, with `.N()` returning the principal
-  complex root (odd roots of negatives keep the real-root convention:
-  `Root(-8, 3)` = −2).
-
-- **Arbitrary-precision kernels: no more silent digit loss.** `LambertW` read
-  its tolerance from the wrong precision setting and never rounded (printing ~2×
-  the working precision with a garbage tail); `acos` near ±1 lost half its
-  digits to cancellation (now computed via the half-angle identity); `cos` and
-  `tan` near their zeros used a fixed 15-digit guard against unbounded
-  cancellation (now sized dynamically); integer `BigDecimal.pow` accumulated
-  ~n/2 ulp of rounding through its squaring ladder (now carries guard digits,
-  rounding once); machine `erfInv` near ±1 lost all but ~5 digits (Newton now
-  iterates on the complement); and `Hypergeometric2F1` refused arguments near
-  `z = 1` (and their Pfaff images) that its series can in fact deliver at
-  working precision. All repaired paths are pinned against mpmath references.
-
-- **Complex arbitrary-precision results are correct to working precision.**
-  Complex operations mixed machine-double intermediates into full-precision
-  arithmetic — squaring the imaginary part as a double (`1.1²` →
-  `1.2100000000000002`) contaminated every modulus (`ln`, `exp`, `sqrt`, `abs`,
-  powers and roots of complex values), and the phase of a negative-base power
-  used machine `cos`, so `(-4)^{0.25}.N()` at 50 digits printed garbage past
-  digit 16. These now compute in decimal at working precision: `Ln(1.1+1.1i)` at
-  21 digits agrees with mpmath to all 21, `Sqrt(2+3i)` at 50 digits to all 50.
-  Exact products are rounded back to working precision so no digits beyond it
-  are asserted. (The imaginary part of a complex result remains machine
-  precision by representation — a documented limitation.)
-
-- **Floating-point arguments numericize under `evaluate()` everywhere.** About
-  thirty special functions kept float arguments symbolic (`\Gamma(5.1)`,
-  `e^{5.1}`, `\operatorname{erf}(1.5)`, Bessel, Airy, elliptic, hypergeometric,
-  …) while `\cos(5.1)` numericized — the exactness contract now applies
-  uniformly: an inexact argument yields a numeric result under plain
-  `evaluate()`, at the engine's precision; exact arguments are unaffected
-  (`\Gamma(\frac12)`, `\ln 2` stay symbolic). Mixed sums fold too (`0.5 + \pi` →
-  `3.6415…`). Exact Gaussian-integer complex values (`i`, `2+i`) are correctly
-  treated as exact throughout.
-
-- **Lenient parsing: digit suffixes are subscripts, bare function names apply.**
-  In lenient mode `x2` parsed as `x^2` and `x1` _lost its index_ (→ `x`); per
-  the documented recommendation they now parse as subscripts (`x_2`, `x_1`,
-  `x_{12}`). `sin x` without parentheses parsed as the product
-  `i \cdot n \cdot s \cdot x` (complex-valued!); known function names now apply
-  to the following factor, and `log2(8)` means `\log_2 8 = 3`. Also:
-  `[1,...,10]` no longer leaks an internal placeholder (it is a `Range`), and an
-  unbraced superscript on a set symbol (`\Z^+`) now means the signed set
-  (`PositiveIntegers`) — it parsed as the matrix _pseudoinverse_, breaking
-  `\sum_{n \in \Z^+}` — while `M^+` on a matrix still means pseudoinverse.
-
-- **Chained `\ne` is pairwise.** `1 \ne 2 \ne 2` evaluated to True ("first
-  differs from the rest"); it now means `1 \ne 2 \wedge 2 \ne 2` → False,
-  consistent with the other chained relations.
-
-- **A scalar or matrix next to a function-valued or matrix-valued symbol
-  multiplies.** `2f`, `f\,x`, and `M\,P` (declared matrix symbols) silently
-  became `Tuple`s; they are now products.
-
-- **Equality and `isSame` are coherent relations.** `isSame` is now a true
-  equivalence relation (an exact rational no longer spuriously matched a
-  machine-precision decimal one-directionally); expression-valued bindings
-  compare symmetrically (`g := x^2+1` matches `x^2+1` from either side);
-  non-canonical but determinable forms compare correctly (`["Add", 1, 1]`
-  unevaluated `isEqual` 4/2… now `true` vs 2); ordering and equality share one
-  tolerance (a value can no longer be simultaneously "equal to" and "less than"
-  another); and equality with free variables uniformly answers `undefined`
-  unless provable — a sampled counterexample no longer produces a definitive
-  `false` (an assumption could still make the equation true), while identities
-  that hold at all sample points remain `true`.
-
-- **Sums over infinite index sets evaluate (and can be interrupted).**
-  `\sum_{n \in \mathbb{Z}^+} \frac{1}{n^2}` hung indefinitely under `evaluate()`
-  — the set-domain iteration path never yielded to the time-limit check, and
-  exact accumulation over the (truncated-infinite) domain built rationals with
-  tens of thousands of digits. Infinite domains now accumulate numerically
-  (≈1.6449 in ~40 ms), symbolic-parameter bodies (`\sum x^n`) stay symbolic,
-  divergent sums respect the time limit, and finite sums remain exact.
-
-- **Rule conditions no longer discharge vacuously.** A rule guard such as
-  `x \ne 0` was satisfied by _any_ unconstrained symbol (the pragmatic
-  unknown→True collapse of `Equal`/`NotEqual` leaked into rule matching); guards
-  now require provability (and a proven `z > 0` does prove `z \ne 0`). The
-  `:notzero`, `:notone`, `:notreal`, `:composite`, and `:irrational` wildcard
-  conditions were similarly fail-open for unknowns and are now three-valued. A
-  rule whose replacement function throws is logged and skipped instead of
-  silently aborting the whole `replace()` pass, and the `\in\Z^+`-family
-  condition shortcuts now work (they threw).
-
-- **`\operatorname{KroneckerDelta}(0)` is `1`.** The single-argument form
-  answered like a boolean test (`0 → 0`); it now implements `\delta_{n,0}` and
-  stays symbolic for undetermined arguments.
-
-- **`Quartiles` follows one convention.** Q1 and Q3 mixed exclusive/inclusive
-  conventions (`[1..9]` gave `(2.5, 5, 7)`, matching no standard); all paths now
-  use Moore–McCabe (median excluded): `(2.5, 5, 7.5)`, with `InterquartileRange`
-  consistent.
-
-- **`\frac{d}{dx}\operatorname{Mod}(x, 5)` is `1`, not `0`** (the sawtooth has
-  slope 1 almost everywhere); a modulus that itself depends on the variable
-  stays symbolic. Two alternating-binomial `\sum \to 0` simplifications also
-  fired outside their validity bounds (wrong at `b = 0` and `b = 1`); they now
-  require the bound to be provable.
-
-- **Five special-function kernels returned wrong digits at every precision — all
-  repaired and verified digit-for-digit against mpmath.**
-  `\operatorname{PolyGamma}(n, x)` for `n \ge 3` was missing a factorial factor
-  in its asymptotic tail (3.7 correct digits at `\psi^{(3)}(2.5)`) and had a
-  sign error for negative arguments; machine-precision `\zeta(s)` used broken
-  series-acceleration coefficients (~7 correct digits everywhere; `\zeta(30)`
-  was on the wrong side of 1 — the compiled target shared the same kernel);
-  `\operatorname{BesselK}` used its small-argument series far past its range
-  (`K_2(20)` was a factor 21 too large); `\operatorname{BesselI}`'s
-  large-argument expansion had flipped signs (2.6 digits at `I_0(100)`); and the
-  Airy functions used a single asymptotic term for negative arguments (1.6
-  digits at `\operatorname{Ai}(-10)`). All five now agree with mpmath to a few
-  ulp across their ranges. Also fixed along the way: `\zeta(10^9)` crashed with
-  a BigInt overflow (now `1` immediately).
-
-- **High-precision `N()` no longer prints machine-precision values with fake
-  extra digits.** Special functions that only have a machine-precision kernel
-  (e.g. `\operatorname{BesselI}`) returned results dressed as
-  arbitrary-precision numbers — `N(\operatorname{BesselI}(0, 100))` at 50-digit
-  precision printed ~43 digits of a 16-digit value. Machine-lane results are now
-  boxed as machine numbers, so downstream arithmetic and printing honestly
-  reflect their precision.
-
-- **`evaluate()` no longer returns floats for exact arguments across the
-  library.** `\sqrt{-2}` numericized to `1.414…i` (it now stays symbolic, while
-  `\sqrt{-4}` gives the exact `2i`); `\operatorname{Fract}(\frac12)` gave `0.5`
-  (now `\frac12`); `\Re(\frac12)` gave `0.5`; `|1+i|` gave `1.414…` (now the
-  exact `\sqrt2`); `\log_2(\pi)` numericized (a symbolic base is exact — it
-  stays symbolic); `\operatorname{Distance}` numericized; and every statistics
-  function numericized exact data — `\operatorname{Mean}([1,2,3,4])` is now
-  `\frac52`, `\operatorname{Variance}` `\frac53`,
-  `\operatorname{StandardDeviation}` `\frac{\sqrt{15}}{3}`, and so on. `N()`
-  behavior is unchanged.
-
-- **Trig poles under `N()` no longer return huge garbage values.** `N(\cot \pi)`
-  returned `-2.6\times10^{24}` (and `\csc \pi`, `\sec \frac\pi2` similar); they
-  now return `\tilde\infty` like `\tan\frac\pi2` already did.
-
-- **Logarithms of negative numbers are consistent between `evaluate()` and
-  `N()`.** `\ln(-0.5)` evaluated to NaN while `N()` gave the complex value;
-  `N(\log_2(-1))` gave NaN while `N(\ln(-1))` gave `i\pi`. Policy now: an
-  inexact negative argument produces the principal complex value under both; an
-  exact negative argument stays symbolic under `evaluate()` and goes complex
-  under `N()` — uniformly across `\ln`, `\lg`, `\lb`, and `\log_b`. Relatedly,
-  `N()` of `\operatorname{Haversine}`/`\operatorname{Hypot}` returned
-  unevaluated symbolic expressions; they now return numbers, and
-  `\operatorname{InverseHaversine}(\frac12)` folds to `\frac\pi2`.
-
-- **Interval arithmetic agrees with the interpreter.** The interval runtime
-  (used by the interval-JS compilation target) computed `\operatorname{arccot}`
-  on the wrong branch for negative arguments, rounded halves toward `+\infty`,
-  mishandled a point exactly on a multiple of a negative modulus, and returned
-  empty intervals for odd roots of negative numbers (`\sqrt[3]{-8}`). All four
-  now match the interpreter's conventions while remaining sound enclosures.
-
-- **`\operatorname{DigitSum}(2^{10^6})` returned after 20+ seconds; printing
-  `\Gamma(10^7)` at high precision took 9 seconds.** The digit functions used an
-  O(digits²) divide loop (now a linear conversion, with a guard that keeps &gt;
-  10⁶-digit inputs symbolic — `DigitSum(2^{10^6})` now answers `1351546` in ~30
-  ms), and `toFixed` materialized `10^{\text{exponent}}` for a ~65-million-digit
-  exponent (now O(significand); `.toString()`/`.json` in ~25 ms with identical
-  output).
-
-- **Type inference no longer over-claims — `Element`, `isInteger`, `isReal` and
-  friends answer soundly.** A family of type-system fixes: membership checks on
-  symbols with bounded types (`integer<0..10>`) no longer _throw_;
-  `Element(r^s, \mathbb{Z})` is no longer `True` for integer `r, s` (`r^s` can
-  be `1/4`); `\ln(-2)` is no longer typed as a finite real; the difference of
-  two imaginary quantities is no longer excluded from the reals (it can be `0`);
-  `0 \cdot \infty` and `k/0` forms no longer claim finiteness;
-  `assume(q \in \mathbb{Z})` no longer reports a spurious contradiction for a
-  `finite_number` symbol (it narrows the type); negated types (`!string`) answer
-  subtype questions correctly; and `isInteger`/`isRational` on symbols are now
-  three-valued — a `real` symbol answers `undefined` (unknown) rather than a
-  definitive `false`.
-
-- **`\ln(x^2)` simplifies to `2\ln(|x|)`, and real-only rewrites no longer fire
-  on complex symbols.** `\ln(x^2) \to 2\ln(x)` is wrong for every negative `x`
-  (a fail-open branch-cut guard); even powers now produce the `|x|` form, valid
-  for all real `x` (odd and irrational exponents keep the documented
-  generic-real convention for unconstrained symbols, and resolve under
-  `assume`). For symbols _declared_ `complex`, identities such as
-  `\sqrt{z^2} \to |z|`, `|z|^2 \to z^2`, and `\ln(z^2) \to 2\ln(z)` no longer
-  apply at all (each is false at `z = i`).
-
-- **A family of non-terminating evaluations now completes.** `\Gamma(10^{300})`,
-  `\operatorname{GammaLn}(10^{300})`, `\zeta(\pm 10^{300})`, `\Gamma(10^7)` at
-  500-digit precision, `\operatorname{Fib}(10^9)`,
-  `\binom{2 \times 10^9}{10^9}`, `\operatorname{BellNumber}(20000)`, and
-  `\operatorname{Subfactorial}(10^6)` each ran forever, ignoring `timeLimit`.
-  They now return in milliseconds (an exact value, `\pm\infty`, or a symbolic
-  form for astronomically large results) or honor the time limit. Ordinary
-  values are unchanged.
-
-- **Products of huge exact integers no longer collapse to NaN.**
-  `10^{200} \cdot 10^{200}` canonicalized to `NaN` (a machine-overflow check
-  fired before the exact big-integer path); finite inputs now always promote to
-  exact arithmetic.
-
-- **Symbolic matrix products preserve their order.** With `M` and `P` declared
-  `matrix`, canonical sorting commuted the product, so the commutator
-  `M P - P M` evaluated to `0`. Products with two or more matrix/vector operands
-  now keep their written order everywhere (canonicalization, evaluation,
-  negation, serialization); scalar factors still sort.
-
-- **Assumptions no longer outlive their scope.** An expression evaluated under
-  `assume(x > 0)` inside a scope kept its assumption-derived sign and type after
-  `popScope()` (a held `|x^3|` kept simplifying to `x^3`); the per-expression
-  cache is now invalidated when a scope is popped.
-
-- **Radicals with a variable degree now differentiate correctly.** The
-  derivative rule for `Root(base, n)` treated the degree `n` as constant, so
-  `D(Root(x, x), x)` (i.e. `x^{1/x}`) dropped the `(1 - \ln x)` term and
-  `D(Root(2, x), x)` (i.e. `2^{1/x}`) wrongly gave `0`. When the degree depends
-  on the differentiation variable the equivalent `Power(base, 1/n)` is now
-  differentiated, matching the numerical derivative.
-
-- **Partial-derivative notation (`∂`) now parses and evaluates.** The Euler form
-  `\partial_x f(x, y)` and the Leibniz forms `\frac{\partial}{\partial x} f`,
-  `\frac{\partial^2}{\partial x \partial y} f`, and
-  `\frac{\partial^2}{\partial x^2} f` now parse to the `D` operator and
-  differentiate correctly. Previously they produced a malformed
-  `PartialDerivative` expression — e.g. `\frac{\partial}{\partial x} f(x, y)`
-  evaluated to `f(x, y) / x`. The notation-only `PartialDerivative` operator has
-  been removed.
-
-- **Leibniz derivatives now treat single-item square brackets as grouping.**
-  `\frac{d}{\,\mathrm{d}x}[\sin x]` now parses as `["D", ["Sin", "x"], "x"]` and
-  evaluates to `cos(x)` instead of treating `[\sin x]` as a one-element list.
-
-- **Compact derivatives now preserve unknown-function chain rules.**
-  `d/dx(f(g(x)))` now parses as `["D", ["f", ["g", "x"]], "x"]` and evaluates
-  symbolically to `g'(x) * f'(g(x))` instead of collapsing to `0`. Sums with
-  partially unresolved terms now preserve the reducible derivatives, and
-  differentiating symbolic derivative applications increments the derivative
-  order, e.g. `D(D(f(x), x), x)` now returns `f''(x)`.
-
-- **`N(...)` and `D(...)` in LaTeX now parse as their library functions outside
-  quantifier scopes.** Previously `N` (numeric evaluation) and `D` (derivative)
-  were special-cased to always parse as first-order-logic predicates, so
-  `N(\sqrt{10})` parsed as `["Predicate", "N", ["Sqrt", 10]]` and never
-  evaluated. They now parse as ordinary function applications — `N(\sqrt{10})` →
-  `["N", ["Sqrt", 10]]` (evaluates to `3.162…`) and `D(f, x)` → the derivative —
-  matching every other name. Inside a quantifier scope they are still wrapped as
-  predicates (e.g. `\forall x, D(x)` →
-  `["ForAll", "x", ["Predicate", "D", "x"]]`).
-
-- **Definite integrals with no closed-form antiderivative no longer return wrong
-  values.** When the antiderivative could not be found, `evaluate()` substituted
-  the integration bounds _into the integrand_ and returned a spurious finite
-  result: `\int_{-1}^{1} \frac{\sqrt{1-x^2}}{1+x^2}\,dx` evaluated to `0` (the
-  true value is `π(√2−1) ≈ 1.3013`, and the integrand is strictly positive), and
-  adding `+ 5` to that integrand returned `10` — the hard part silently
-  vanished. Such integrals now stay symbolic under `evaluate()`; `N()` computes
-  them numerically, as before. Integrals with closed forms, symbolic bounds
-  (`\int_0^a x\,dx` → `a²/2`), and nested integrals are unaffected.
-
-- **`N()` no longer drops square roots of symbolic arguments.** `N(\sqrt{y})`
-  returned `y`, `N(\sqrt{4y})` returned `2y`, and `N(y\sqrt{y})` returned `y^2`.
-  The radical is now applied to the symbolic part too: `N(\sqrt{4y})` →
-  `2\sqrt{y}`, `N(y\sqrt{y})` → `y^{3/2}`.
-
-- **Number theory on large exact integers is now correct.** Integers longer than
-  the working precision (21 digits by default) were silently rounded when
-  operators extracted their integer value, so `IsPrime`, `IsOdd`/`IsEven`,
-  `FactorInteger`, `Mod`, and `DigitSum` could all return wrong answers on
-  values they displayed correctly — e.g. `Mod(10^{21}+3, 10)` returned `0`
-  instead of `3`, and `FactorInteger(10^{21}+3)` factored `10^{21}` instead. The
-  exact integer is now extracted losslessly.
-
-- **Integer powers of exact numbers are computed exactly.** `2^{127}` evaluated
-  to a value rounded to 21 significant digits (so `IsPrime(2^{127}-1)` was wrong
-  even after the fix above); it now evaluates to the exact 39-digit integer.
-  Negative integer exponents give exact rationals (`2^{-2}` → `\frac14`,
-  previously the float `0.25`), and integer powers of Gaussian integers are
-  computed exactly instead of through `exp`/`ln` (`(1+i)^2` → `2i`, previously
-  `-1.36×10^{-21} + 2i`). Astronomically large powers (e.g. `2^{10^{15}}`, whose
-  exact value has ~3×10^{14} digits) now stay symbolic instead of producing a
-  value that crashed serialization — `N()` still returns the overflow.
-
-- **Complex numbers are no longer ordered against reals.** `1.5 < 2+3i`,
-  `i < 2`, and similar comparisons returned `true`/`false` by comparing only the
-  real parts; they now return `undefined` (unknown), and `Max`/`Min` with a
-  complex operand stay symbolic instead of silently absorbing or dropping it
-  (`Max(2, i)` returned `2`; `Max(i, 2)` returned `i`).
-
-- **Logarithms of complex numbers with a base are now correct.** The imaginary
-  part of `\log_b z` was not divided by `\ln b`, so `evaluate()` and `N()`
-  disagreed: `\operatorname{lb}(i)` evaluated to `1.5707i` (= `\ln i`) but `N()`
-  gave the correct `2.2662i`. Both now agree.
-
-- **`Arctan2` returns the correct quadrant under `simplify()`.**
-  `\operatorname{atan2}(1, -1)` simplified to `\arctan(-1)` = `-π/4` (the true
-  value is `3π/4`): the `arctan(y/x)` reduction fired for any `x` though it is
-  only valid for `x > 0`. It is now quadrant-corrected; operands with unknown
-  sign stay symbolic (and resolve under `assume(x > 0)` etc.), and NaN operands
-  yield NaN instead of a definite angle.
-
-- **Mixed-direction inequality chains now mean what they say.** `1 \le 2 > 0`
-  evaluated to **False** (it parsed as `1 ≤ 0 < 2`), and `a > b < c` fabricated
-  the chain `b < c < a`. Chains that mix directions or operators now decompose
-  into the explicit conjunction of their links (`a \le b > c` →
-  `a ≤ b \wedge b > c`); same-direction chains such as `1 < 2 < 3` are
-  unchanged.
-
-- **`--` is no longer parsed as a C-style decrement.** `x--y` parsed as
-  `Multiply(y, Decrement(x))` and `--x` as `PreDecrement(x)`; they now parse as
-  ordinary double negation (`x--y` → `x+y`). The serializer also parenthesizes
-  negated right operands (`x-(-y)`), so raw `["Subtract", "x", ["Negate", "y"]]`
-  no longer round-trips to a different expression.
-
-- **Superscripts on `\log`, `\ln`, `\lg`, and `\exp` bind to the applied
-  function.** `\log_2^2 8` parsed as `8·(\log 2)^2` (silently — the correct
-  value is `(\log_2 8)^2 = 9`), and `\ln^2 x` produced an error expression. They
-  now parse like the trig functions: `\ln^2 x` → `(\ln x)^2`, and `^{-1}` yields
-  the inverse (`\ln^{-1} x` → `e^x`).
-
-- **Pattern matching no longer drops operands.** A failed sequence-wildcard
-  match attempt did not fully roll back its consumption of the subject's
-  operands, so rules applied through `replace()` could silently delete terms:
-  `(w+x+y+z).replace(['...a + b -> a'])` returned `w + y` — `x` vanished. The
-  matcher now restores its state exactly between attempts (the example returns
-  `w+x+y`), and a repeated sequence wildcard (`__a … __a`) whose second
-  occurrence captures a _different_ sequence now correctly fails to match
-  instead of proceeding with the inconsistent capture silently dropped.
-
-- **`Mod` and `Remainder` are consistent everywhere.** `Mod(-7, 3)` returned
-  `−1` at the default (bignum) precision but `2` at machine precision, and each
-  compiled target had its own convention (WGSL used the raw truncated `%`;
-  Python's `Remainder` used the floored `np.remainder`). `Mod` is now
-  **floored** (the sign follows the divisor) in both interpreter lanes, in
-  `sgn`, and in every compilation target; `Remainder` is round-to-nearest
-  consistently. `Mod` of exact rationals is now exact (`Mod(\frac12, \frac13)` →
-  `\frac16`, previously a float).
-
-- **MathJSON `.json` serialization is now lossless.** Four independent bugs
-  could silently change a value through a `.json` round-trip: exact big integers
-  emitted as JSON floats (`10^{23}` reconstructed off by 2²³); 16–17-digit
-  values altered by one digit; the real part of high-precision complex numbers
-  truncated to machine precision on re-boxing; and the repeating-decimal form
-  `"0.(3)"` re-boxed as a _string_. Values that cannot be represented exactly as
-  a JSON float now emit the `{num: "…"}` form, and the repeating-decimal syntax
-  is accepted by the number parser.
-
-- **Repeating decimals and higher-order derivatives round-trip through LaTeX.**
-  `N(\frac13)` serialized as `0.333\,333` (six digits, no overline — re-parsing
-  lost 3.3×10⁻⁷); it now serializes as `0.\overline{3}`. `f''(x)` serialized to
-  Leibniz notation (`\frac{\mathrm{d}^2}{\mathrm{d}x^2}f(x)`) that the parser
-  could not read back (it re-parsed as a _product of symbols_); degree-carrying
-  Leibniz numerators, including the single-fraction form `\frac{d^2f}{dx^2}`,
-  now parse to properly nested derivatives.
-
-- **NaN no longer corrupts canonical ordering.** Sorting operands with a NaN
-  used a comparator that returned NaN, so the canonical form of a sum or product
-  depended on the order its operands were written in (permutations of
-  `NaN + 0.5 + x + 3.7` produced different canonical forms). NaN now has a
-  deterministic place in the canonical order.
-
-- **`assume(a = b)` between two symbols is no longer silently dropped.** The
-  assumption reported `'ok'` but a type-inference side effect erased the
-  binding, so `a.isEqual(b)` stayed `false`. Additionally, `isEqual` on two
-  distinct _free_ symbols returned a definitive `false` — it now consults the
-  assumptions database and returns `undefined` when equality is indeterminate.
-  `.is()` is now symmetric for expression-valued bindings (with `g := x^2+1`,
-  both `g.is(x^2+1)` and `(x^2+1).is(g)` are `true`).
-
-- **Limits of cancelling `\ln`/`\sqrt{}` differences are now exact.**
-  `\lim_{x\to\infty} x(\ln(x+1) - \ln x)` returned `0` (the true value is `1`):
-  the asymptotic ranking saw only the individual — cancelling — leading terms.
-  Such pairs are now combined before ranking (`\ln u - \ln v \to \ln(u/v)`,
-  conjugate quotients for square roots), and these limits evaluate exactly: the
-  example gives `1`, `x(\ln(x+2)-\ln x)` gives `2`,
-  `\sqrt{x}(\sqrt{x+1}-\sqrt{x})` gives `\frac12`, and `\ln(2x)-\ln x` gives
-  `\ln 2`.
-
-- **Compilation fails closed instead of emitting wrong code.** Compiled output
-  disagreed with the interpreter in several ways: `Round` at half-values (three
-  conventions across JS/Python/interpreter), `\operatorname{arccot}` of negative
-  arguments (wrong branch), odd roots of negative numbers (`NaN` instead of
-  `\sqrt[5]{-2} ≈ -1.149`), multi-index `\sum`/`\prod` silently dropping all but
-  the first index (returning NaN with `success: true`), Python emitting
-  `-2 ** x` (which is `-(2^x)`), and missing parentheses when compiling
-  non-canonical `a-(b-c)` / `a/(b/c)`. All now compile to interpreter-matching
-  code — and anything a target _cannot_ express correctly (such as constant
-  folds with non-real values) now fails at compile time rather than emitting
-  `NaN` literals. The compilation fallback runner also no longer leaks its
-  argument bindings into the global scope.
-
-- **Parenthesized relations are atomic operands.** In chains mixing
-  parenthesized relations, the canonical form fabricated relations between
-  incidental terms (`(a < b) \le (c > d)` produced a spurious `b \le d`). An
-  explicitly parenthesized relation is now an atomic term of the surrounding
-  chain: `a < (b \le c) > d` means `a < X \wedge d < X` with `X = (b \le c)`.
-
-- **`Choose` and `Binomial` now agree, and handle edge cases.** `Choose(2,3)`
-  returned `NaN` (correct: `0`), `Choose(\frac12, \frac13)` threw an exception,
-  and `Binomial(-2,3)` returned `0` (the standard extension gives `-4`). Both
-  operators now share one implementation: integer cases follow the standard
-  conventions (including negative upper index), exact non-integer arguments stay
-  symbolic under `evaluate()` and numericize via the Gamma function under `N()`.
-  `\binom{n}{k}` with undeclared symbolic arguments also no longer produces an
-  error expression.
-
-- **`Argument` (complex argument) now evaluates.** Due to an internal operator
-  name mismatch, `Argument(1+i)` — and the second element of `AbsArg` — returned
-  an inert, unrecognized expression. It now evaluates exactly (`Argument(1+i)` →
-  `π/4`) and numerically (`N(...)` → `0.7853…`).
-
-- **`|f(x)| → f(|x|)` is no longer applied to periodic or range-limited
-  functions.** `simplify()` rewrote `|\sin x|` to `\sin|x|` (and similarly for
-  `\tan`, `\cot`, `\csc`, and `\operatorname{arccot}`), which is incorrect —
-  e.g. `|\sin 4| = 0.757` but `\sin|4| = −0.757`. The rewrite now applies only
-  to odd functions that keep a fixed sign on the positive axis (`\sinh`,
-  `\arctan`, …). As a consequence, `\int \cot^3 x\,dx` now yields
-  `-\frac12\cot^2 x - \ln(|\sin x|)` instead of the incorrect `\ln(\sin(|x|))`
-  form.
-
-- **Multiplying a scalar by a complex literal like `1+i` no longer drops the
-  real part.** `["Multiply", 2, ["Complex", 1, 1]]` evaluated to `2i` instead of
-  `2+2i` (any complex literal with an imaginary part of exactly 1 was mistaken
-  for the imaginary unit). Parsed LaTeX like `2(1+\imaginaryI)` was not
-  affected.
-
-- **`simplify()` keeps exact exponents when combining powers.** Combining
-  same-base products folded exact irrational exponents to floats:
-  `x \cdot x^{\sqrt{2}}` simplified to `x^{2.4142…}`. It now yields
-  `x^{1+\sqrt{2}}`, and `x^{\sqrt2} \cdot x^{\sqrt3}` yields
-  `x^{\sqrt2+\sqrt3}`, matching the already-exact division direction.
-
-- **`Sum` keeps exact values.** Summing exact but non-combinable terms folded
-  the accumulator to a float: `\sum_{k=1}^{5} \sqrt{k}` evaluated to `8.3823…`.
-  It now evaluates to the exact `3+\sqrt2+\sqrt3+\sqrt5` (`N()` still gives
-  `8.3823…`), matching `Product`'s existing behavior. Purely numeric sums such
-  as `\sum_{k=1}^{100} k` → `5050` are unaffected.
-
-- **The derivative of `arcoth` has the correct sign.**
-  `D(\operatorname{arcoth}(x), x)` returned `-\frac{1}{1-x^2}`; the correct
-  derivative is `\frac{1}{1-x^2}` (at `x=2`: `−1/3`).
+- **Integration, assumptions, polynomial solving, and factoring are faster.**
+  Rubi-backed integration spends less time on integrals it cannot solve,
+  sign-related assumption queries respond faster, polynomial equations solve
+  faster, and `Factor` handles common square-pattern cases more efficiently.
 
 ## 0.66.0 _2026-06-28_
 
