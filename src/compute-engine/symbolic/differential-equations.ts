@@ -440,9 +440,7 @@ function normalizedTrigProduct(
 ): Expression | undefined {
   const ce = lhs.engine;
   const ordered =
-    isFunction(lhs, 'Tan') && !isFunction(rhs, 'Tan')
-      ? [rhs, lhs]
-      : [lhs, rhs];
+    isFunction(lhs, 'Tan') && !isFunction(rhs, 'Tan') ? [rhs, lhs] : [lhs, rhs];
   const [a, b] = ordered;
   if (!isFunction(b, 'Tan') || b.op1.has(independentName) === false)
     return undefined;
@@ -923,17 +921,17 @@ function polynomialParticularSolution(
   if (zeroRootMultiplicity > 2) return undefined;
 
   const usedSymbols = collectSymbols(equation);
-  const coefficientNames = Array.from(
-    { length: rhsDegree + 1 },
-    (_, i) => {
-      const name = freshSymbolName(`dsolvep_${i}`, usedSymbols);
-      usedSymbols.add(name);
-      return name;
-    }
-  );
+  const coefficientNames = Array.from({ length: rhsDegree + 1 }, (_, i) => {
+    const name = freshSymbolName(`dsolvep_${i}`, usedSymbols);
+    usedSymbols.add(name);
+    return name;
+  });
   const x = ce.symbol(independentName);
   const terms = coefficientNames.map((name, i) =>
-    ce.symbol(name).mul(x.pow(i + zeroRootMultiplicity)).simplify()
+    ce
+      .symbol(name)
+      .mul(x.pow(i + zeroRootMultiplicity))
+      .simplify()
   );
   const ansatz = ce.function('Add', terms).simplify();
 
