@@ -19,6 +19,7 @@ import { dSolve } from '../symbolic/differential-equations';
 import { nDSolve, symbolArg } from '../differential-equation-utils';
 import { symbolicLimit } from '../symbolic/limit';
 import { residue } from '../symbolic/residue';
+import { computeSeries, normalStrip } from '../symbolic/series';
 import { canonicalLimits, canonicalLimitsSequence } from './utils';
 
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
@@ -707,6 +708,87 @@ volumes
           engine,
           limit(fn, target, dir ? dir.re : 1, engine._deadline)
         );
+      },
+    },
+  },
+
+  {
+    //
+    // **Series**: Taylor (or asymptotic, at ±∞) series expansion.
+    //
+    // `["Series", f, x]`            → about x0 = 0, order 5
+    // `["Series", f, x, x0]`        → order 5
+    // `["Series", f, x, x0, n]`     → n is the highest retained power
+    //
+    // The result is a plain expression: the truncated sum plus an inert
+    // `BigO` remainder head (e.g. `Sin(x)` → `x − x³/6 + x⁵/120 + O(x⁷)`).
+    // A pole, essential singularity, or non-differentiable operand leaves the
+    // `Series(...)` expression unevaluated (never a partial/wrong expansion).
+    //
+    Series: {
+      description:
+        'Taylor series expansion of an expression about a point (or an ' +
+        'asymptotic expansion at ±∞). ' +
+        'Example: Series(\\sin x, x) → x - x^3/6 + x^5/120 + O(x^7)',
+      broadcastable: false,
+      lazy: true,
+      signature:
+        '(expression, variable:symbol, point:value?, order:number?) -> number',
+      canonical: (ops, { engine: ce }) => {
+        const f = ops[0]?.canonical;
+        if (!f) return null;
+        const x = ops[1];
+        if (!x || !isSymbol(x)) return null;
+        const x0 = ops[2] ? ops[2].canonical : ce.Zero;
+        const n = ops[3] ? ops[3].canonical : ce.number(5);
+        return ce._fn('Series', [f, x, x0, n]);
+      },
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        const [f, xSym, x0, nExpr] = ops;
+        const x = sym(xSym);
+        if (!x || !x0) return undefined;
+        let n = Math.floor(nExpr?.N().re ?? 5);
+        if (!Number.isFinite(n)) n = 5;
+        const result = computeSeries(f, x, x0, n, ce);
+        // No result: leave `Series(...)` unevaluated (deferred singular case).
+        if (!result) return undefined;
+        return numericApproximation ? result.N() : result;
+      },
+    },
+
+    //
+    // **BigO**: the inert Landau remainder term.
+    //
+    // Inert under `evaluate`/`simplify`. `.N()` of any expression containing
+    // `BigO` is `NaN` (the remainder is not a concrete value), and `compile()`
+    // has no target for it (fails gracefully). Strip it with `Normal`.
+    //
+    BigO: {
+      description:
+        'Landau big-O remainder term. Inert; any numeric approximation ' +
+        '(.N()) of an expression containing it is NaN.',
+      broadcastable: false,
+      signature: '(value) -> number',
+      evaluate: (_ops, { engine: ce, numericApproximation }) =>
+        numericApproximation ? ce.NaN : undefined,
+    },
+
+    //
+    // **Normal**: strip every `BigO` remainder from a series, yielding the
+    // compilable/plottable truncated polynomial (Mathematica-compatible name).
+    // Idempotent; a passthrough on `BigO`-free input.
+    //
+    Normal: {
+      description:
+        'Strip Big-O remainder terms from a series, yielding the truncated ' +
+        'polynomial. Example: Normal(Series(\\sin x, x)) → x - x^3/6 + x^5/120',
+      broadcastable: false,
+      signature: '(value) -> number',
+      evaluate: ([x], { numericApproximation }) => {
+        if (!x) return x;
+        // Not lazy: the operand (typically a `Series`) is already evaluated.
+        const stripped = normalStrip(x);
+        return numericApproximation ? stripped.N() : stripped;
       },
     },
   },

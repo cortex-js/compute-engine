@@ -472,36 +472,18 @@ describe('OPERATOR postfix', () => {
     expect(check('-n!')).toMatchInlineSnapshot(
       `["Negate", ["Factorial", "n"]]`
     ));
+  // -n!! and -n!!! used to be @fixme: Factorial2 on an undeclared symbol
+  // produced an incompatible-type Error (while -n! parsed cleanly). Fixed by
+  // inferred-type narrowing in validateArguments (validate.ts).
   test('-n!!', () =>
-    expect(check('-n!!')).toMatchInlineSnapshot(`
-      invalid   =[
-        "Negate",
-        [
-          "Factorial2",
-          [
-            "Error",
-            ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
-          ]
-        ]
-      ]
-    `)); // @fixme
+    expect(check('-n!!')).toMatchInlineSnapshot(
+      `["Negate", ["Factorial2", "n"]]`
+    ));
   test('-n!!!', () =>
-    expect(ce.parse('-n!!!')).toMatchInlineSnapshot(`
-      [
-        "Negate",
-        [
-          "Factorial",
-          [
-            "Factorial2",
-            [
-              "Error",
-              ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
-            ]
-          ]
-        ]
-      ]
-    `));
-}); // @fixme
+    expect(ce.parse('-n!!!')).toMatchInlineSnapshot(
+      `["Negate", ["Factorial", ["Factorial2", "n"]]]`
+    ));
+});
 
 describe('OPERATOR serialize, valid', () => {
   test('1 3/4', () =>

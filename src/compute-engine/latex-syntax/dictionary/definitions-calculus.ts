@@ -497,7 +497,47 @@ export const DEFINITIONS_CALCULUS: LatexDictionary = [
     latexTrigger: ['\\oiiint'],
     parse: parseIntegral('CircularIntegrate', 3),
   },
+
+  //
+  // Series expansion, the inert `BigO` remainder, and `Normal`.
+  //
+  // An unevaluated `Series(...)` and `Normal(...)` serialize with
+  // `\operatorname{…}` (and round-trip through the default `\operatorname`
+  // parsing). `BigO(u)` serializes as `O\left(u\right)`; it is parsed from
+  // `\mathcal{O}(…)` and `\operatorname{O}(…)` (there is deliberately no bare
+  // `O(` capture).
+  //
+  {
+    kind: 'expression',
+    name: 'Series',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      '\\operatorname{Series}' + serializer.wrapArguments(expr),
+  },
+  {
+    kind: 'expression',
+    name: 'Normal',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      '\\operatorname{Normal}' + serializer.wrapArguments(expr),
+  },
+  {
+    kind: 'expression',
+    name: 'BigO',
+    latexTrigger: ['\\mathcal', '<{>', 'O', '<}>'],
+    parse: parseBigO,
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      'O\\left(' + serializer.serialize(operand(expr, 1)) + '\\right)',
+  },
+  {
+    kind: 'expression',
+    latexTrigger: ['\\operatorname', '<{>', 'O', '<}>'],
+    parse: parseBigO,
+  },
 ];
+
+function parseBigO(parser: Parser): MathJsonExpression {
+  const args = parser.parseArguments();
+  return args === null ? 'BigO' : ['BigO', ...args];
+}
 
 function matchDifferentialOperator(parser: Parser): boolean {
   const start = parser.index;

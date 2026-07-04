@@ -6,7 +6,35 @@
   `Or`.** `AB \parallel CD` is the parallelism relation, consistent with
   `\perp` → `Perpendicular`. Use `\lor` or `\vee` for disjunction (unchanged).
 
+- **`\rightarrow` now parses to the mapping arrow `To`, not `Implies`.**
+  `f: \mathbb{R} \rightarrow \mathbb{R}` now parses as a function signature,
+  matching `\to`. This reverses the mapping introduced for issue #156:
+  `\rightarrow`-as-implication was far rarer in practice than
+  `\rightarrow`-as-mapping. Use `\Rightarrow`, `\implies`, or
+  `\Longrightarrow` for implication (unchanged).
+
 ### New Operators
+
+- **`Series`, `BigO`, and `Normal` provide symbolic series expansion.**
+  `Series(f, x, x0, n)` returns the Taylor expansion of `f` in `x` about `x0`
+  (default `x0 = 0`) up to and including the power `n` (default `n = 5`), plus
+  an explicit remainder term. `x0` may be `±∞` for an asymptotic expansion in
+  powers of `1/x`.
+  - `Series(\sin x, x)` → $x - \tfrac{x^3}{6} + \tfrac{x^5}{120} + O(x^7)$;
+    `Series(\ln(\cos x), x)` → $-\tfrac{x^2}{2} - \tfrac{x^4}{12} + O(x^6)$;
+    `Series(\arctan x, x, +\infty)` →
+    $\tfrac{\pi}{2} - \tfrac{1}{x} + \tfrac{1}{3x^3} - \dots$. Coefficients are
+    exact (`Series(\sin x, x, \frac{\pi}{6})` gives $\tfrac12$, $\tfrac{\sqrt
+    3}{2}$, …), and an undeclared `f` yields the textbook form $f(0) + f'(0)x +
+    \dots$. A pole or essential singularity (e.g. `Series(\frac{1}{\sin x}, x)`,
+    `Series(e^{1/x}, x)`) is left unevaluated rather than expanded incorrectly.
+  - `BigO(u)` is the inert Landau remainder, serialized `O\left(u\right)` and
+    parsed from `\mathcal{O}(u)` and `\operatorname{O}(u)`. It is inert under
+    `evaluate`/`simplify`; a numeric approximation (`.N()`) of any expression
+    containing it is `NaN`.
+  - `Normal(expr)` strips the `BigO` terms, yielding the compilable/plottable
+    truncated polynomial: `Normal(Series(\sin x, x))` → $x - \tfrac{x^3}{6} +
+    \tfrac{x^5}{120}$.
 
 - **`TrigExpand`, `TrigToExp`, and `TrigReduce` rewrite trigonometric and
   hyperbolic expressions.** These are transformation verbs in the spirit of
@@ -95,6 +123,16 @@ that corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
   common alternative spelling of `\setminus`); a standalone quantified
   condition `\forall n \ge 1` parses instead of erroring; `\underbrace`
   mirrors `\overbrace`.
+
+- **A symbol's inferred type narrows instead of erroring.** When a free
+  symbol's type was inferred from one use and a later use requires a more
+  specific type, argument validation now narrows the inference (when sound)
+  instead of producing an `incompatible-type` error. This fixes
+  `(A \setminus B) \cup (B \setminus A)` — where `B` was inferred as a value
+  and then rejected as a set — as well as `-n!!` (double factorial of an
+  undeclared symbol) and a family of similar mixed-use expressions. Declared
+  types are unaffected: passing a declared string where a set is required is
+  still an error.
 
 ### Packaging
 

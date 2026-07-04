@@ -22,17 +22,27 @@ report's hand counts; the corpus checker is the source of truth for progress.
 > Notable breaking change: `\parallel` remapped from logical `Or` to
 > geometric `Parallel` (`\lor`/`\vee` unchanged) — flag in the CHANGELOG.
 >
+> **Follow-ups executed later the same day** (corpus now **277/345**):
+> - `\rightarrow` remapped `Implies` → `To` (user decision, reversing
+>   issue #156; `\Rightarrow`/`\implies`/`\Longrightarrow` stay `Implies`).
+> - `(A \setminus B) \cup (B \setminus A)` fixed at the root:
+>   `validateArguments` now *narrows* a symbol's **inferred** type when the
+>   required type is a subtype of it (mirroring the `checkNumericArgs`
+>   precedent) instead of erroring. This cured the whole
+>   inferred-type-contamination class (sets-congruence 5→22) and the
+>   `-n!!` `@fixme` (Factorial2 on an undeclared symbol).
+> - **Fresh-sample validation**: 800 unseen rows → **97.4% clean**
+>   (2,175/2,233), 0 throws — see
+>   [fresh-sweep-report.md](./fresh-sweep-report.md). New small gap types
+>   observed (candidate "Tier 5", not planned): polynomial-ring
+>   `\mathbb{Z}[x]` (5), time-of-day `8{:}30` (4), informal `\cap` on
+>   geometry labels (4), trailing `?` recovery (3), `f[S]` application (2).
+>
 > **Residual (decided or deferred):**
-> - `\rightarrow` parses as `Implies`, so `f: \mathbb{R} \rightarrow \mathbb{R}`
->   only works with `\to` — remapping `\rightarrow` to `To` is a debatable
->   semantic change, needs a decision.
 > - Set arithmetic (`2\mathbb{Z}+1`) — semantic (set ± scalar); not done.
 > - ASCII-pipe divisibility (`p|a+1`) — absolute-value collision; decided no.
-> - `(A \setminus B) \cup (B \setminus A)` errors: `SetMinus`'s
->   `(set, value*)` signature narrows `B` to `value`, then the second use
->   needs a `set` — pre-existing inference quirk, applies to `\backslash` too.
 > - Bare `N`/`D` bind to builtin heads in arithmetic contexts; stray tokens
->   (`€`, `?`) and `\text{...}` prose fragments correctly stay errors.
+>   (`€`) and `\text{...}` prose fragments correctly stay errors.
 
 ## Tier 1 — bug fix (unconditional)
 

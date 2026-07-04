@@ -400,6 +400,16 @@ export function validateArguments(
       continue;
     }
 
+    // The symbol's type was inferred (not declared), and the required type is
+    // a subtype of the current inferred type. Narrowing is sound, so narrow
+    // the symbol's type rather than erroring (e.g. `B` inferred as `value`
+    // from `SetMinus(A, B)`, later required as `set` in `SetMinus(B, A)`).
+    if (op.valueDefinition?.inferredType && isSubtype(param, op.type.type)) {
+      op.infer(param, 'narrow');
+      result.push(op);
+      continue;
+    }
+
     if (op.operatorDefinition?.inferredSignature && op.type.matches(param)) {
       result.push(op);
       continue;
@@ -453,6 +463,14 @@ export function validateArguments(
       i += 1;
       continue;
     }
+    // Inferred (not declared) symbol type, and the required type is a subtype
+    // of the current inferred type: narrow rather than error.
+    if (op.valueDefinition?.inferredType && isSubtype(param, op.type.type)) {
+      op.infer(param, 'narrow');
+      result.push(op);
+      i += 1;
+      continue;
+    }
     if (!op.type.matches(param)) {
       result.push(ce.typeError(param, op.type, op));
       isValid = false;
@@ -494,6 +512,13 @@ export function validateArguments(
       if (op.valueDefinition?.inferredType && op.type.matches(varParam)) {
         // There was an inferred type, and it is contravariant with `number`
         // e.g. "any". We'll narrow it down `number` to  when we infer later.
+        result.push(op);
+        continue;
+      }
+      // Inferred (not declared) symbol type, and the required variadic type is
+      // a subtype of the current inferred type: narrow rather than error.
+      if (op.valueDefinition?.inferredType && isSubtype(varParam, op.type.type)) {
+        op.infer(varParam, 'narrow');
         result.push(op);
         continue;
       }

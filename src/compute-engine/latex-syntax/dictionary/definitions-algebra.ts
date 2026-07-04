@@ -8,6 +8,15 @@ export const DEFINITIONS_ALGEBRA: LatexDictionary = [
     precedence: 270, // MathML rightwards arrow
   },
   {
+    // `\rightarrow` is the mapping arrow, same as `\to` (`f: A \rightarrow B`).
+    // It previously parsed to `Implies`; use `\Rightarrow`/`\implies` for
+    // implication. Parse-only alias: serialization of `To` stays `\to`.
+    latexTrigger: ['\\rightarrow'],
+    kind: 'infix',
+    precedence: 270,
+    parse: 'To',
+  },
+  {
     // Non-strict mode: -> for maps-to arrow
     latexTrigger: ['-', '>'],
     kind: 'infix',

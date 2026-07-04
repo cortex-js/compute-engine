@@ -80,7 +80,6 @@
 "DirichletGroup": {"signature":"(integer) -> set","description":"Dirichlet characters with given modulus","arity":1},
 "DirichletL": {"signature":"(complex, any) -> complex","description":"Dirichlet L-function","arity":2},
 "DiscreteLog": {"signature":"(integer, any, any) -> complex","description":"Discrete logarithm","arity":3},
-"Divides": {"signature":"(integer, integer) -> boolean","description":null,"arity":2},
 "EisensteinG": {"signature":"(integer, complex) -> complex","description":"Eisenstein series","arity":2},
 "EllipticRootE": {"signature":"(integer, complex) -> complex","description":null,"arity":2},
 "EulerQSeries": {"signature":"(complex) -> complex","description":"Euler's q-series","arity":1},

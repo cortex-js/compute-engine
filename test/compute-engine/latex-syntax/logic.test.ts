@@ -424,29 +424,26 @@ describe('Logic', () => {
     `);
   }); // @fixme
 
-  // https://github.com/cortex-js/compute-engine/issues/156
-  it('should parse lowercase arrow as Implies', () => {
-    // \rightarrow should parse as Implies (not To)
+  // \rightarrow used to parse as Implies (issue #156); it is now the
+  // mapping arrow To, same as \to — `f: A \rightarrow B` is far more common
+  // than \rightarrow-as-implication. \Rightarrow/\implies are implication.
+  it('should parse lowercase arrow as To (mapping arrow)', () => {
     expect(ce.parse('p \\rightarrow q').json).toMatchInlineSnapshot(`
       [
-        Implies,
+        To,
         p,
         q,
       ]
     `);
-    // With comparisons
-    expect(ce.parse('1=1 \\rightarrow 4>5').json).toMatchInlineSnapshot(`
+    expect(ce.parse('f: \\mathbb{R} \\rightarrow \\mathbb{R}').json)
+      .toMatchInlineSnapshot(`
       [
-        Implies,
+        Colon,
+        f,
         [
-          Equal,
-          1,
-          1,
-        ],
-        [
-          Less,
-          5,
-          4,
+          To,
+          RealNumbers,
+          RealNumbers,
         ],
       ]
     `);

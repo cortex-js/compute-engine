@@ -1,7 +1,8 @@
 # `Series` — symbolic Taylor/Laurent expansion (design proposal)
 
-**Status:** draft for review · **Date:** 2026-07-04 · **Roadmap:** Proposed
-product features item 1 (agreed 2026-07-04).
+**Status:** approved 2026-07-04 (§8 answers inline); Phase 1 in progress ·
+**Date:** 2026-07-04 · **Roadmap:** Proposed product features item 1 (agreed
+2026-07-04).
 
 ## 1. Goals and consumers
 
@@ -150,11 +151,29 @@ independent follow-ups.
 
 1. **Default order** — proposal: n = 5 (Mathematica-ish; big enough to be
    interesting, small enough to be fast). OK?
+
+[*] Approved
+
+
 2. **`Normal` naming** — Mathematica-compatible but opaque to students.
    Alternative: `TruncateSeries`, or make the pill call
    `["Normal", …]` internally and never expose the name. Preference?
+
+[*] Let's use `Normal`
+
+
 3. **Bare `O(` parsing** (§5) — strict-mode capture yes/no?
+
+[*] Decided (default, 2026-07-04): `\mathcal{O}(…)`/`\operatorname{O}(…)`
+parse to `BigO` via the dictionary; bare `O(` capture deferred in both modes
+(parse.ts under concurrent work) — revisit for lenient mode later.
+
 4. **`BigO`-poisons-`N()`** (§4) — alternative is `N()` silently dropping the
    O-term, which misrepresents the math. Keep `NaN`?
+
+[*] Keep `NaN`
+
 5. Include expansion at `±∞` in Phase 1 (it's cheap via `t = 1/x`) or hold to
    Phase 2 with the rest of the singular cases?
+
+[*] Include expansion at `±∞` in Phase 1

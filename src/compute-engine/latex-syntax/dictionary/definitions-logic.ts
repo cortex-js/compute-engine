@@ -292,13 +292,11 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     associativity: 'right',
     parse: 'Implies',
   },
-  {
-    latexTrigger: ['\\rightarrow'],
-    kind: 'infix',
-    precedence: 220,
-    associativity: 'right',
-    parse: 'Implies',
-  },
+  // Note: `\rightarrow` used to parse to `Implies` (issue #156) but is now
+  // the function/mapping arrow `To`, like `\to` (see definitions-algebra.ts):
+  // `f: A \rightarrow B` is overwhelmingly more common in mathematical text
+  // than `\rightarrow`-as-implication. Use `\Rightarrow`/`\implies` for
+  // implication.
   {
     latexTrigger: ['\\Longrightarrow'],
     kind: 'infix',

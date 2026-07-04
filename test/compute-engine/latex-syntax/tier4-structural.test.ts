@@ -140,6 +140,55 @@ describe('Tier 4 #3 — `\\backslash` as set difference', () => {
   });
 });
 
+describe('Tier 4 #3b — inferred-type narrowing in argument checking', () => {
+  // Regression: the written-out symmetric-difference idiom. In
+  // `(A \setminus B) ∪ (B \setminus A)`, the free symbol `B` is first inferred
+  // as `value` (the `value*` param of `SetMinus(A, B)`), then required as `set`
+  // by `SetMinus(B, A)`. Because `set <: value` and `B`'s type was inferred
+  // (not declared), the argument check narrows `B` to `set` rather than
+  // erroring. Both `\setminus` and `\backslash` spellings must be clean.
+  test('symmetric-difference idiom parses clean (`\\setminus`)', () => {
+    expect(json('(A \\setminus B) \\cup (B \\setminus A)')).toEqual([
+      'Union',
+      ['SetMinus', 'A', 'B'],
+      ['SetMinus', 'B', 'A'],
+    ]);
+    expect(isClean('(A \\setminus B) \\cup (B \\setminus A)')).toBe(true);
+  });
+
+  test('symmetric-difference idiom parses clean (`\\backslash`)', () => {
+    expect(json('(A \\backslash B) \\cup (B \\backslash A)')).toEqual([
+      'Union',
+      ['SetMinus', 'A', 'B'],
+      ['SetMinus', 'B', 'A'],
+    ]);
+    expect(isClean('(A \\backslash B) \\cup (B \\backslash A)')).toBe(true);
+  });
+
+  test('non-SetMinus narrowing: inferred `number` narrows to `integer`', () => {
+    // `Factorial2` requires `integer`; an undeclared `n` is inferred as
+    // `number`. Since `integer <: number` and `n`'s type is inferred, the
+    // argument check narrows `n` instead of erroring — matching the
+    // single-factorial `n!`, which already parsed clean.
+    expect(json('n!!')).toEqual(['Factorial2', 'n']);
+    expect(isClean('n!!')).toBe(true);
+  });
+
+  test('non-regression: narrowing does not mask genuine type errors', () => {
+    // Narrowing fires only when the required type is a SUBTYPE of the current
+    // type AND the current type was inferred. A string is not a subtype of
+    // `set`, so a string literal in set position still errors...
+    expect(isClean('\\text{hi} \\setminus A')).toBe(false);
+    // ...and a *declared* (not inferred) `string` symbol still errors too:
+    // the narrowing is gated on `inferredType`, protecting declared types.
+    const ce = new ComputeEngine();
+    ce.declare('kstr', 'string');
+    expect(
+      JSON.stringify(ce.parse('kstr \\setminus A').json)
+    ).toContain('incompatible-type');
+  });
+});
+
 describe('Tier 4 #4 — quantifiers & angle brackets', () => {
   test('standalone quantified condition `\\forall n \\ge 1`', () => {
     expect(json('\\forall n \\ge 1')).toEqual([

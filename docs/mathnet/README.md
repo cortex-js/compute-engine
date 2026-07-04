@@ -43,6 +43,12 @@ State after the 2026-07-04 hardening (Tiers 1–4): **265/345**, throws 0 —
 see the Status note in
 [parser-hardening-plan.md](./parser-hardening-plan.md).
 
+**Independent validation:** a fresh 800-row sample (offsets disjoint from
+the original) measured **97.4% clean** (2,175/2,233 fragments), 0 throws —
+up from the 85.0% pre-hardening baseline. Details and the small list of
+newly-observed gap types:
+[fresh-sweep-report.md](./fresh-sweep-report.md).
+
 ## Regenerating from scratch
 
 ```sh
