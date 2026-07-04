@@ -1,7 +1,9 @@
-import type { LatexDictionary, Parser, Serializer } from '../types';
+import type { LatexDictionary, Parser, Serializer, Terminator } from '../types';
+import { COMPARISON_PRECEDENCE, MULTIPLICATION_PRECEDENCE } from '../types';
 
 import {
   operand,
+  operands,
   operator,
   getSequence,
   dictionaryFromExpression,
@@ -72,6 +74,86 @@ function singleArgCommand(
       if (arg === null) return cmd;
       return `${cmd}{${serializer.serialize(arg)}}`;
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Geometry notation as inert heads.
+//
+// Euclidean-geometry notation (`\angle`, `\triangle`, `\square`, `\perp`,
+// `\parallel`, `\widehat`, `\overparen`) is transcribed faithfully into inert
+// "shell" heads — parsed and serialized, but never evaluated (the library
+// declarations in `library/core.ts` have no `evaluate` handler). CE takes no
+// position on geometry semantics; the structural parse is for consumers that
+// render figures. See `docs/mathnet/parser-hardening-plan.md` (Tier 3, #6).
+// ---------------------------------------------------------------------------
+
+/** Parse a geometry *mark* — a prefix command (`\angle`, `\triangle`,
+ *  `\square`) followed by a run of point labels, e.g. `\angle ABC`,
+ *  `\triangle A B C`, `\angle A_1C_1B_1`. The immediately-following
+ *  juxtaposition is captured and spread into separate operands so consumers
+ *  get `["Angle", "A", "B", "C"]` (source order preserved). Capture stops at
+ *  relational/arithmetic operators, so `\angle ABC = 90` yields
+ *  `Equal(Angle(A,B,C), 90)` and `\angle A + \angle B` splits at `+`. When no
+ *  label run follows (e.g. `\angle(\alpha,\beta)`), the single following
+ *  expression is wrapped instead: `["Angle", expr]`. With nothing following,
+ *  the `bare` fallback (or a zero-argument head) is returned. */
+function parseGeometryMark(
+  name: MathJsonSymbol,
+  bare?: MathJsonExpression
+): (parser: Parser, until?: Readonly<Terminator>) => MathJsonExpression | null {
+  return (parser, until) => {
+    // Capture the following juxtaposition (InvisibleOperator precedence 650)
+    // but stop before additive/relational operators (< 390).
+    const arg = parser.parseExpression({
+      ...(until ?? {}),
+      minPrec: MULTIPLICATION_PRECEDENCE,
+    });
+    if (arg === null || isEmptySequence(arg)) return bare ?? [name];
+    const op = operator(arg);
+    if (op === 'InvisibleOperator' || op === 'Multiply')
+      return [name, ...operands(arg)];
+    return [name, arg];
+  };
+}
+
+/** Serialize a geometry mark head back to its prefix command, e.g.
+ *  `Angle(A,B,C)` → `\angle ABC`. Point labels are concatenated (matching the
+ *  parse), so the result round-trips through `parseGeometryMark`. */
+function serializeGeometryMark(
+  cmd: string
+): (serializer: Serializer, expr: MathJsonExpression) => string {
+  return (serializer, expr) => {
+    const args = operands(expr);
+    if (args.length === 0) return cmd;
+    return cmd + ' ' + args.map((x) => serializer.serialize(x)).join('');
+  };
+}
+
+/** Parse a geometry *accent* — a command taking a single braced argument
+ *  (`\widehat{ABC}`, `\overparen{BC}`). Like the marks, a multi-letter argument
+ *  is spread into separate operands: `\widehat{ABC}` → `["Arc","A","B","C"]`,
+ *  while `\widehat{a}` → `["Arc","a"]`. */
+function parseGeometryAccent(
+  name: MathJsonSymbol
+): (parser: Parser) => MathJsonExpression {
+  return (parser) => {
+    const arg = parser.parseGroup() ?? parser.parseToken();
+    if (arg === null || isEmptySequence(arg)) return [name];
+    const op = operator(arg);
+    if (op === 'InvisibleOperator' || op === 'Multiply')
+      return [name, ...operands(arg)];
+    return [name, arg];
+  };
+}
+
+/** Serialize a geometry accent head, e.g. `Arc(A,B,C)` → `\widehat{ABC}`. */
+function serializeGeometryAccent(
+  cmd: string
+): (serializer: Serializer, expr: MathJsonExpression) => string {
+  return (serializer, expr) => {
+    const args = operands(expr);
+    return cmd + '{' + args.map((x) => serializer.serialize(x)).join('') + '}';
   };
 }
 
@@ -662,6 +744,89 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     kind: 'function',
     serialize: (serializer, expr) =>
       '\\operatorname{segment}' + serializer.wrapArguments(expr),
+  },
+
+  // --- Euclidean-geometry notation (inert; see the block comment above the
+  // parseGeometryMark helper). ---
+
+  // Angle mark: `\angle ABC`, `\varangle X Y Z`, `∠ABC` → `Angle(A,B,C)`.
+  {
+    name: 'Angle',
+    latexTrigger: ['\\angle'],
+    kind: 'prefix',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: parseGeometryMark('Angle'),
+    serialize: serializeGeometryMark('\\angle'),
+  },
+  // `\varangle` is a variant angle glyph; folded onto the same `Angle` head
+  // (serialization uses `\angle`).
+  {
+    latexTrigger: ['\\varangle'],
+    kind: 'prefix',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: parseGeometryMark('Angle'),
+  },
+  // Unicode `∠` (U+2220) — same as `\angle`.
+  {
+    latexTrigger: ['∠'],
+    kind: 'prefix',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: parseGeometryMark('Angle'),
+  },
+
+  // Triangle mark: `\triangle ABC` → `Triangle(A,B,C)`. Parse-only: the
+  // `Triangle` head already has a serializer (`\operatorname{triangle}(...)`)
+  // above, and the infix `\triangle` (SymmetricDifference) remains available
+  // for set expressions — a leading `\triangle` (no left operand) is the mark.
+  {
+    latexTrigger: ['\\triangle'],
+    kind: 'prefix',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: parseGeometryMark('Triangle'),
+  },
+
+  // Quadrilateral mark: `\square ABCD` → `Quadrilateral(A,B,C,D)`. A bare
+  // `\square` (placeholder / QED) falls back to the `square` symbol, which has
+  // its own `\square` serializer. (`Square` is taken by the `x^2` head, hence
+  // `Quadrilateral`.)
+  {
+    name: 'Quadrilateral',
+    latexTrigger: ['\\square'],
+    kind: 'prefix',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: parseGeometryMark('Quadrilateral', 'square'),
+    serialize: serializeGeometryMark('\\square'),
+  },
+
+  // Perpendicular / parallel relations: `FG \perp AO` → `Perpendicular(FG, AO)`,
+  // `AB \parallel CD` → `Parallel(AB, CD)`. Operands arrive as juxtaposition
+  // runs (e.g. `Multiply(F, G)`); that is acceptable for inert transcription.
+  {
+    name: 'Perpendicular',
+    latexTrigger: ['\\perp'],
+    kind: 'infix',
+    precedence: COMPARISON_PRECEDENCE,
+  },
+  {
+    name: 'Parallel',
+    latexTrigger: ['\\parallel'],
+    kind: 'infix',
+    precedence: COMPARISON_PRECEDENCE,
+  },
+
+  // Arc / over-paren accents: `\widehat{ABC}` → `Arc(A,B,C)`,
+  // `\overparen{BC}` → `OverParen(B,C)`.
+  {
+    name: 'Arc',
+    latexTrigger: ['\\widehat'],
+    parse: parseGeometryAccent('Arc'),
+    serialize: serializeGeometryAccent('\\widehat'),
+  },
+  {
+    name: 'OverParen',
+    latexTrigger: ['\\overparen'],
+    parse: parseGeometryAccent('OverParen'),
+    serialize: serializeGeometryAccent('\\overparen'),
   },
 ];
 

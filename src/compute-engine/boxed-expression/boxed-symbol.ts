@@ -378,10 +378,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
     const def = this._def;
     if (isValueDef(def)) {
-      if (def.value.inferredType || def.value.type.isUnknown) {
-        // Constants should never be inferred
-        console.assert(!def.value.isConstant);
+      // The type of a constant cannot be changed, so it is never inferred,
+      // even if it is unknown (e.g. `ContinuationPlaceholder`)
+      if (def.value.isConstant) return false;
 
+      if (def.value.inferredType || def.value.type.isUnknown) {
         def.value.type = this.engine.type(
           inferenceMode === 'widen'
             ? widen(def.value.type.type, t)

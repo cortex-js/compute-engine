@@ -10,6 +10,17 @@ Ranked by fragments recovered per unit of effort. Corpus category counts are
 from the corpus's heuristic classifier and differ slightly from the experiment
 report's hand counts; the corpus checker is the source of truth for progress.
 
+> **Status 2026-07-04: Tiers 1–3 executed.** Corpus 3/345 → **245/345**
+> (baseline 85.0% → ~95.6% clean on the original sweep), throws 9 → **0**.
+> Category state: crash 9/9 · geometry 148/148 · ellipsis 41/51 ·
+> trailing-punct 37/47 · sets-congruence 5/36 · divisibility 4/12 ·
+> unicode answers 8/19. Remaining failures are Tier 4 material (environments,
+> `\mathbb{Z}` arithmetic, `\mathbb{R}_{>0}`, ASCII-pipe divisibility),
+> `\text{...}` prose fragments, or intentionally-malformed input.
+> Notable: `\parallel` was remapped from logical `Or` to geometric
+> `Parallel` (breaking for anyone relying on `\parallel`-as-Or; `\lor`/`\vee`
+> unchanged) — flag in the CHANGELOG.
+
 ## Tier 1 — bug fix (unconditional)
 
 ### 1. `ContinuationPlaceholder` crash — 9 fragments, effort S
@@ -76,11 +87,12 @@ a congruence relation head may not) before adding.
 ### 6. Geometry notation as inert heads — 148 fragments, effort S–M
 
 `\angle`, `\varangle`, `\triangle`, `\widehat`, `\overparen`, `\perp`,
-`\parallel`, `\square`. Largest single bucket, least CAS value. Recommended
-treatment: inert shell heads (the Fungrim shell-head pattern) — parse and
-serialize faithfully, no evaluation semantics, no commitment to modeling
-geometry. Decide explicitly whether corpus coverage justifies it; skipping
-this tier is defensible.
+`\parallel`, `\square`. Largest single bucket. Treatment: inert shell heads
+(the Fungrim shell-head pattern) — parse and serialize faithfully, no
+evaluation semantics, no commitment to modeling geometry.
+**Decision (2026-07-04): approved.** Consumers (e.g. Tycho) can use the
+faithful structural parse for graphical representations; CE stays
+semantics-free on geometry.
 
 **Tier 1+2+3 target: ~93–95% clean (with #6), ~89–91% (without).**
 

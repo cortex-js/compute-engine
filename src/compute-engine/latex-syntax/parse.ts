@@ -3194,7 +3194,21 @@ function isDelimiterCommand(parser: Parser): boolean {
   return false;
 }
 
-export function parse(
+/** Return true if `expr` is, or contains anywhere, an `Error` node. */
+function containsError(expr: MathJsonExpression | null | undefined): boolean {
+  if (expr === null || expr === undefined) return false;
+  const op = operator(expr);
+  if (op === 'Error') return true;
+  if (op === '') return false;
+  return operands(expr).some((x) => containsError(x));
+}
+
+/**
+ * Parse `latex` into a MathJSON expression, marking any leftover tokens with
+ * an `Error` node. This is the core routine, without the trailing-punctuation
+ * recovery or `preserveLatex` post-processing applied by `parse`.
+ */
+function parseCore(
   latex: string,
   dictionary: IndexedLatexDictionary,
   options: Readonly<ParseLatexOptions>
@@ -3209,6 +3223,34 @@ export function parse(
     // Note: there may still be tokens left in the input, but we will
     // ignore them
     expr = expr !== null ? ['Sequence', expr, error] : error;
+  }
+
+  return expr;
+}
+
+export function parse(
+  latex: string,
+  dictionary: IndexedLatexDictionary,
+  options: Readonly<ParseLatexOptions>
+): MathJsonExpression | null {
+  let expr = parseCore(latex, dictionary, options);
+
+  // Trailing sentence-punctuation recovery.
+  //
+  // A full expression copied from prose often ends with a sentence-terminating
+  // `.`, `;` or `,` (e.g. `... = z^2.`), which leaves an unconsumed token and
+  // produces an `Error` node. If — and only if — the parse produced an Error
+  // and the input ends with such punctuation, strip a single trailing
+  // punctuation character and re-parse. The retry result is used only when it
+  // is itself clean, so no currently-valid input changes meaning: a valid
+  // decimal like `5.` parses without error and never reaches this path, and
+  // the extra parse runs only on the error path.
+  if (containsError(expr)) {
+    const trimmed = latex.trimEnd();
+    if (trimmed.length > 1 && /[.,;]$/.test(trimmed)) {
+      const retry = parseCore(trimmed.slice(0, -1), dictionary, options);
+      if (retry !== null && !containsError(retry)) expr = retry;
+    }
   }
 
   expr ??= 'Nothing';

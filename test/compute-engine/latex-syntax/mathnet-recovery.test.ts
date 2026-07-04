@@ -1,0 +1,111 @@
+import { engine as ce } from '../../utils';
+
+/**
+ * Parser-hardening (MathNet corpus) Tier-2 recovery:
+ *   - ellipsis tolerance (`\cdots`, `\dotsb/c/m`, Unicode `…`) parsing to an
+ *     inert `ContinuationPlaceholder` operand, and
+ *   - trailing sentence-punctuation recovery (`.`, `;`, `,`) on otherwise-Error
+ *     parses.
+ *
+ * A parse is considered "clean" when it produces a valid expression with no
+ * `Error` subexpression.
+ */
+
+function json(s: string): string {
+  return JSON.stringify(ce.parse(s).json);
+}
+
+function isClean(s: string): boolean {
+  const expr = ce.parse(s);
+  return expr.isValid && !JSON.stringify(expr.json).includes('"Error"');
+}
+
+describe('MathNet Tier-2: ellipsis tolerance', () => {
+  test('\\cdots in a product parses cleanly with an inert placeholder', () => {
+    expect(isClean('(2!+2)(3!+3) \\cdots (2019!+3)')).toBe(true);
+    expect(json('(2!+2)(3!+3) \\cdots (2019!+3)')).toContain(
+      'ContinuationPlaceholder'
+    );
+  });
+
+  test('\\cdots in a sum stays valid', () => {
+    expect(isClean('1 + 2 + \\cdots + n')).toBe(true);
+    expect(json('1 + 2 + \\cdots + n')).toContain('ContinuationPlaceholder');
+  });
+
+  test('\\ldots / \\dots in a tuple stays valid', () => {
+    expect(isClean('(a_1, \\ldots, a_n)')).toBe(true);
+    expect(isClean('(a_1, \\dots, a_n)')).toBe(true);
+  });
+
+  test('\\dotsb / \\dotsc / \\dotsm parse to ContinuationPlaceholder', () => {
+    for (const cmd of ['\\dotsb', '\\dotsc', '\\dotsm']) {
+      expect(ce.parse(cmd).json).toEqual('ContinuationPlaceholder');
+    }
+  });
+
+  test('Unicode … (U+2026) parses to ContinuationPlaceholder', () => {
+    expect(ce.parse('…').json).toEqual('ContinuationPlaceholder');
+    expect(isClean('1, 2, …, 10')).toBe(true);
+  });
+
+  test('ellipsis in an Add stays valid (no Error node)', () => {
+    expect(isClean('(1!)^2 + (2!)^2 + \\dots + (2018!)^2')).toBe(true);
+  });
+});
+
+describe('MathNet Tier-2: trailing sentence-punctuation recovery', () => {
+  test('trailing period on an equation is dropped', () => {
+    expect(isClean('(x^2-1)^2 (y^2-1)^2 + 16x^2 y^2 = z^2.')).toBe(true);
+    // Recovers to the bare equation, no trailing punctuation artifact
+    expect(json('(x^2-1)^2 (y^2-1)^2 + 16x^2 y^2 = z^2.')).not.toContain(
+      'Error'
+    );
+  });
+
+  test('trailing period with a space is dropped', () => {
+    expect(isClean('a + b = c .')).toBe(true);
+    expect(ce.parse('a + b = c .').json).toEqual(
+      ce.parse('a + b = c').json
+    );
+  });
+
+  test('trailing semicolon is tolerated', () => {
+    expect(isClean('x + y = z;')).toBe(true);
+  });
+
+  test('trailing comma on a complete expression is tolerated', () => {
+    expect(isClean('a + b = c,')).toBe(true);
+  });
+});
+
+describe('MathNet Tier-2: non-regression guards', () => {
+  test('`5.` still parses as the number 5', () => {
+    expect(ce.parse('5.').json).toEqual(5);
+  });
+
+  test('decimal literal at end of expression is unaffected', () => {
+    expect(ce.parse('x = 5.').json).toEqual(['Equal', 'x', 5]);
+  });
+
+  test('tuple (1,2) is unaffected', () => {
+    expect(ce.parse('(1,2)').json).toEqual(['Tuple', 1, 2]);
+  });
+
+  test('sequence 1,2,3 is unaffected', () => {
+    expect(ce.parse('1,2,3').json).toEqual(['Tuple', 1, 2, 3]);
+  });
+
+  test('valid expression without trailing punctuation is unchanged', () => {
+    expect(ce.parse('a + b').json).toEqual(['Add', 'a', 'b']);
+  });
+
+  test('recovery does not fire when the stripped parse is still an Error', () => {
+    // `M=N+1 .` is blocked by `N`-as-function, not by the trailing period,
+    // so recovery must NOT silently substitute a still-broken parse. The
+    // result keeps its Error (no change of meaning).
+    const withDot = JSON.stringify(ce.parse('M=N+1 .').json);
+    const withoutDot = JSON.stringify(ce.parse('M=N+1').json);
+    expect(withDot).toEqual(withoutDot);
+  });
+});

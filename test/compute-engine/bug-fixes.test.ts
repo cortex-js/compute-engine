@@ -214,4 +214,28 @@ describe('Playground regressions', () => {
       expect(Date.now() - start).toBeLessThan(10_000);
     });
   });
+
+  describe('Ellipsis in a numeric context must not throw (MathNet corpus)', () => {
+    // ContinuationPlaceholder is a constant with type 'unknown';
+    // checkNumericArgs → BoxedSymbol.infer() used to attempt to narrow its
+    // type, and the type setter throws for constants.
+    test('\\dots as an Add operand parses without throwing', () => {
+      const ce = new ComputeEngine();
+      const expr = ce.parse('(1!)^2 + (2!)^2 + \\dots + (2018!)^2');
+      expect(expr.isValid).toBe(true);
+    });
+
+    test('\\ldots in a sum of powers parses without throwing', () => {
+      const ce = new ComputeEngine();
+      const expr = ce.parse('1^{1987} + 2^{1987} + \\ldots + n^{1987}');
+      expect(expr.isValid).toBe(true);
+    });
+
+    test('infer() is a no-op on constants', () => {
+      const ce = new ComputeEngine();
+      const placeholder = ce.symbol('ContinuationPlaceholder');
+      expect(placeholder.infer('integer')).toBe(false);
+      expect(placeholder.type.toString()).toBe('unknown');
+    });
+  });
 });

@@ -584,8 +584,17 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
 
+  // ContinuationPlaceholder serializes to `\dots` (its `latexTrigger`), which
+  // is what existing round-trip snapshots expect. The additional triggers
+  // below all parse to the same symbol.
   { name: 'ContinuationPlaceholder', latexTrigger: ['\\dots'] },
   { latexTrigger: ['\\ldots'], parse: 'ContinuationPlaceholder' },
+  { latexTrigger: ['\\cdots'], parse: 'ContinuationPlaceholder' },
+  { latexTrigger: ['\\dotsb'], parse: 'ContinuationPlaceholder' },
+  { latexTrigger: ['\\dotsc'], parse: 'ContinuationPlaceholder' },
+  { latexTrigger: ['\\dotsm'], parse: 'ContinuationPlaceholder' },
+  // … U+2026 HORIZONTAL ELLIPSIS
+  { latexTrigger: ['…'], parse: 'ContinuationPlaceholder' },
   { latexTrigger: ['.', '.', '.'], parse: 'ContinuationPlaceholder' },
 
   //

@@ -117,7 +117,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   Congruent: {
     description: 'Indicate that two expressions are congruent modulo a number',
     complexity: 11000,
-    signature: '(number, number, modulo: integer) -> boolean',
+    // `modulo` is `number` (not `integer`) so a symbolic modulus expression
+    // such as `p^{k+1}` (statically typed `finite_number`, not `integer`) is
+    // accepted and the congruence stays symbolic instead of erroring. The
+    // `evaluate` handler only reduces when all three operands are concrete
+    // integers (`toBigint`), so a non-integer modulus simply stays unevaluated.
+    signature: '(number, number, modulo: number) -> boolean',
     evaluate: (ops, { engine: ce }) => {
       if (ops.length < 3) return undefined;
       const [lhs, rhs, modulo] = ops;

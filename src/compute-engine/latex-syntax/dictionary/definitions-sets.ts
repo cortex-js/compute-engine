@@ -261,6 +261,13 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     precedence: 350,
   },
   {
+    // Unicode ∩ (U+2229 INTERSECTION): literal-glyph spelling of `\cap`.
+    latexTrigger: ['∩'],
+    kind: 'infix',
+    precedence: 350,
+    parse: 'Intersection',
+  },
+  {
     name: 'Interval',
     serialize: serializeSet,
   },
@@ -382,12 +389,29 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     precedence: 350,
   },
+  {
+    // Unicode ∪ (U+222A UNION): literal-glyph spelling of `\cup`.
+    latexTrigger: ['∪'],
+    kind: 'infix',
+    precedence: 350,
+    parse: 'Union',
+  },
 
   // \mid as a separator/operator (used in set-builder notation: {x \mid x > 0})
   // Low precedence so it binds loosely — everything on each side is parsed first
   {
     name: 'Divides',
     latexTrigger: ['\\mid'],
+    kind: 'infix',
+    precedence: 160,
+  },
+
+  // Non-divisibility: `a \nmid b` → `NotDivides(a, b)` (canonicalizes to
+  // `Not(Divides(a, b))`). `\nmid` is a distinct command, so this does not
+  // affect `\mid`'s set-builder / such-that role above.
+  {
+    name: 'NotDivides',
+    latexTrigger: ['\\nmid'],
     kind: 'infix',
     precedence: 160,
   },
@@ -541,10 +565,24 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     precedence: 241,
   },
   {
+    // Unicode ∈ (U+2208 ELEMENT OF): literal-glyph spelling of `\in`.
+    latexTrigger: ['∈'],
+    kind: 'infix',
+    precedence: 241,
+    parse: 'Element',
+  },
+  {
     name: 'NotElement',
     latexTrigger: ['\\notin'],
     kind: 'infix',
     precedence: 240,
+  },
+  {
+    // Unicode ∉ (U+2209 NOT AN ELEMENT OF): literal-glyph spelling of `\notin`.
+    latexTrigger: ['∉'],
+    kind: 'infix',
+    precedence: 240,
+    parse: 'NotElement',
   },
   {
     name: 'NotSubset',

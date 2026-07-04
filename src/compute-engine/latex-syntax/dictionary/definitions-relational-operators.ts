@@ -192,6 +192,14 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     precedence: 247,
   },
   {
+    // Unicode ≈ (U+2248 ALMOST EQUAL TO): literal-glyph spelling of `\approx`.
+    latexTrigger: ['≈'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 247,
+    parse: 'Approx',
+  },
+  {
     name: 'NotApprox', // Note: Mathematica TildeTilde
     latexTrigger: ['\\not', '\\approx'],
     kind: 'infix',

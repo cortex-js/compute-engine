@@ -9,6 +9,7 @@ import {
   getSequence,
   operator,
   missingIfEmpty,
+  nops,
   operand,
   operands,
   symbol,
@@ -43,6 +44,110 @@ import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
 //
 // To negate a compound expression, use parentheses: `¬(p ∧ q)`
 //
+
+/**
+ * Return `true` if the parser is positioned at a *parenthesized* modulus
+ * annotation — `(\bmod …)`, `(\pmod …)`, `(\mod …)`, or `(mod …)` — possibly
+ * behind visual spacing (`\quad`, `\;`, …). Non-destructive: the parser index
+ * is restored before returning.
+ *
+ * Used as a terminator `condition` for the right-hand side of a congruence so
+ * juxtaposition (invisible multiplication) does not swallow the `(mod n)`
+ * annotation as a factor (e.g. `n ≡ 1 (mod 3)` must not parse `1·(m·o·d·3)`).
+ */
+function atParenthesizedModulus(p: Parser): boolean {
+  const start = p.index;
+  p.skipVisualSpace();
+  let result = false;
+  if (p.match('(')) {
+    p.skipVisualSpace();
+    result =
+      p.peek === '\\bmod' ||
+      p.peek === '\\pmod' ||
+      p.peek === '\\mod' ||
+      p.matchAll(['m', 'o', 'd']);
+  }
+  p.index = start;
+  return result;
+}
+
+/**
+ * After a congruence relation (`a \equiv b`), try to parse an optional modulus
+ * annotation and return the modulus expression, or `null` if none is present.
+ *
+ * Recognized spellings (all optionally preceded by spacing such as `\quad`):
+ *   - `\pmod{n}` / `\pmod n`  (parses to `Mod(n)`)
+ *   - `\bmod n`               (parses to `Mod(…, n)` — the last operand is used)
+ *   - `(\bmod n)` / `(\pmod n)` / `(\mod n)`
+ *   - `(mod n)`               (ASCII `mod` keyword, e.g. `n ≡ 1 (mod 3)`)
+ *
+ * On no-match the parser index is restored to where it was on entry.
+ */
+function parseModulusAnnotation(
+  parser: Parser,
+  terminator: Readonly<Terminator>
+): MathJsonExpression | null {
+  const start = parser.index;
+  parser.skipVisualSpace();
+
+  // Parenthesized form: `(\bmod n)`, `(\pmod n)`, `(\mod n)`, `(mod n)`.
+  if (parser.match('(')) {
+    parser.skipVisualSpace();
+    const hasMod =
+      parser.match('\\bmod') ||
+      parser.match('\\pmod') ||
+      parser.match('\\mod') ||
+      parser.matchAll(['m', 'o', 'd']);
+    if (hasMod) {
+      parser.skipVisualSpace();
+      const n =
+        parser.parseExpression({ ...terminator, minPrec: 0 }) ??
+        parser.parseGroup();
+      parser.skipVisualSpace();
+      if (n !== null && parser.match(')')) return n;
+    }
+    parser.index = start;
+    return null;
+  }
+
+  // Unparenthesized form: `\pmod{n}` (prefix → `Mod(n)`) or `\bmod n`
+  // (infix → `Mod(lhs, n)`); in both cases the modulus is the last operand.
+  const modExpr = parser.parseExpression({ ...terminator, minPrec: 219 });
+  if (modExpr !== null && operator(modExpr) === 'Mod') {
+    // `\pmod{n}` → `Mod(n)` (1 operand); `\bmod n` → `Mod(lhs, n)` (2 operands).
+    const n = nops(modExpr) >= 2 ? operand(modExpr, 2) : operand(modExpr, 1);
+    if (n !== null) return n;
+  }
+
+  parser.index = start;
+  return null;
+}
+
+/**
+ * Shared parse handler for the congruence/equivalence infix operators
+ * (`\equiv` and the Unicode `≡`). Produces `Congruent(a, b, n)` when a modulus
+ * annotation follows, otherwise `Equivalent(a, b)`.
+ */
+function parseEquivalent(
+  parser: Parser,
+  lhs: MathJsonExpression,
+  terminator: Readonly<Terminator>
+): MathJsonExpression {
+  // Stop the rhs before a parenthesized `(mod n)` annotation so juxtaposition
+  // does not absorb it as an invisible-multiplication factor. A congruence
+  // whose rhs already ends in a real `(...)` group (`a ≡ (b+c)`) is unaffected
+  // because the condition only fires when `mod`/`\bmod`/`\pmod` follows the `(`.
+  const rhs = parser.parseExpression({
+    ...terminator,
+    minPrec: 219,
+    condition: (p) =>
+      atParenthesizedModulus(p) || (terminator.condition?.(p) ?? false),
+  });
+  const modulus = parseModulusAnnotation(parser, terminator);
+  if (modulus !== null)
+    return ['Congruent', lhs, missingIfEmpty(rhs), modulus];
+  return ['Equivalent', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
+}
 
 export const DEFINITIONS_LOGIC: LatexDictionary = [
   // Constants
@@ -110,7 +215,9 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     precedence: 230,
   },
   { kind: 'infix', latexTrigger: ['\\vee'], parse: 'Or', precedence: 230 },
-  { kind: 'infix', latexTrigger: '\\parallel', parse: 'Or', precedence: 230 },
+  // Note: `\parallel` is NOT logical-Or here — it is the geometry `Parallel`
+  // relation (`AB \parallel CD`), declared in `definitions-other.ts`. Use
+  // `\lor` / `\vee` for disjunction.
   {
     kind: 'infix',
     latexTrigger: '\\operatorname{or}',
@@ -273,22 +380,16 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'infix',
     associativity: 'right',
     precedence: 219,
-    parse: (
-      parser: Parser,
-      lhs: MathJsonExpression,
-      terminator: Readonly<Terminator>
-    ) => {
-      const rhs = parser.parseExpression({ ...terminator, minPrec: 219 });
-
-      const index = parser.index;
-
-      const modulus = parser.parseExpression({ ...terminator, minPrec: 219 });
-      if (modulus !== null && operator(modulus) === 'Mod')
-        return ['Congruent', lhs, rhs, missingIfEmpty(operand(modulus, 1))];
-
-      parser.index = index;
-      return ['Equivalent', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
-    },
+    parse: parseEquivalent,
+  } as InfixEntry,
+  {
+    // Unicode ≡ (U+2261 IDENTICAL TO): copy/paste and keyboard input frequently
+    // carry the literal glyph rather than `\equiv`. Same behavior in every mode.
+    latexTrigger: ['≡'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 219,
+    parse: parseEquivalent,
   } as InfixEntry,
 
   {

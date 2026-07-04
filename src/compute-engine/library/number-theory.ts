@@ -164,6 +164,34 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Divides: {
+      description:
+        '`Divides(a, b)` returns `True` if `a` divides `b` (i.e. `b` is an integer multiple of `a`), corresponding to the notation `a ∣ b`. Stays symbolic for non-integer operands.',
+      complexity: 1200,
+      // Params are `number` (not `integer`) — like `IsPrime`/`IsOdd` — so a
+      // symbolic operand (statically typed `number`/`finite_number`) is accepted
+      // and the relation stays symbolic; the `evaluate` handler reduces only
+      // when both operands are concrete integers (`toBigint`).
+      signature: '(number, number) -> boolean',
+      examples: ['Divides(3, 12)  // "True"'],
+      evaluate: ([aOp, bOp], { engine: ce }) => {
+        const a = toBigint(aOp);
+        const b = toBigint(bOp);
+        if (a === null || b === null) return undefined;
+        // 0 divides only 0; every non-zero integer divides 0.
+        if (a === 0n) return b === 0n ? ce.True : ce.False;
+        return b % a === 0n ? ce.True : ce.False;
+      },
+    },
+
+    NotDivides: {
+      description:
+        '`NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`.',
+      complexity: 1200,
+      signature: '(integer, integer) -> boolean',
+      canonical: (ops, { engine }) => engine.expr(['Not', ['Divides', ...ops]]),
+    },
+
     Divisors: {
       description:
         'Return the sorted list of positive divisors of an integer `n`. The sign of `n` is ignored.',

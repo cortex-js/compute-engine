@@ -1648,6 +1648,44 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Segment primitive — opaque typed head.',
       signature: '(any+) -> expression',
     },
+
+    // Euclidean-geometry notation, transcribed as inert heads (no evaluator);
+    // consumers use the structural parse to render figures. See
+    // `latex-syntax/dictionary/definitions-other.ts`.
+    Angle: {
+      // Return type `number`: an angle is a measure, so it composes in
+      // arithmetic and comparisons (`\angle ABC + \angle APC = 180^\circ`).
+      description:
+        'Angle mark / measure (`\\angle ABC`, `\\varangle XYZ`, `∠ABC`) — opaque typed head; not evaluated.',
+      signature: '(any+) -> number',
+    },
+    Quadrilateral: {
+      description:
+        'Quadrilateral mark (`\\square ABCD`) — opaque typed head; not evaluated.',
+      signature: '(any+) -> expression',
+    },
+    Perpendicular: {
+      description:
+        'Perpendicularity relation (`AB \\perp CD`) — opaque typed head; not evaluated.',
+      signature: '(any, any) -> expression',
+    },
+    Parallel: {
+      description:
+        'Parallelism relation (`AB \\parallel CD`) — opaque typed head; not evaluated.',
+      signature: '(any, any) -> expression',
+    },
+    Arc: {
+      // Return type `number`: an arc measure composes in arithmetic
+      // (`\widehat{ABC} - \widehat{ATD} = \widehat{DAC}`).
+      description:
+        'Arc / wide-hat accent measure (`\\widehat{ABC}`) — opaque typed head; not evaluated.',
+      signature: '(any+) -> number',
+    },
+    OverParen: {
+      description:
+        'Over-paren accent (`\\overparen{BC}`) — opaque typed head; not evaluated.',
+      signature: '(any+) -> expression',
+    },
     To: {
       description: 'Action arrow / mapping (`a \\to b`) — opaque typed head.',
       signature: '(any, any) -> nothing',
