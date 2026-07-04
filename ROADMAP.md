@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-02.
+**Last updated:** 2026-07-04.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -39,6 +39,64 @@ not here.
 ---
 
 ## Remaining work
+
+### Proposed product features (2026-07-04 — to review together)
+
+CE is the foundation for Tycho / Graph Paper: an app helping scientists,
+students and educators collaborate and communicate about scientific topics.
+The 2026-07-04 capability survey against that goal found the engine strong on
+plotting/compile targets, units & quantities, logic/sets, linear algebra,
+equation systems, and number formatting — and thin in the areas below.
+Prioritized proposal (effort S/M/L); items 1–2 are explicit Tycho asks
+(`tycho/roadmap/CE_AUTO_SUGGEST.md` §11).
+
+1. **`Series` — symbolic Taylor/Laurent expansion (M).** Explicit Tycho ask
+   for the notebook action pills (`["Series", e, x, x0, n]`); an educational
+   staple (approximation, error terms, limits). Doubles as the kernel that
+   Strategic item 7(c) needs — exact asymptotics at special-function poles are
+   Laurent expansions — so one design serves both.
+2. **`TrigExpand` / `TrigToExp` / `TrigReduce` operators (S).** Second explicit
+   Tycho ask. The machinery already exists inside the Rubi driver
+   (`ExpandTrigReduce`, trig→exp fallbacks); this is exposure as public
+   operators + LaTeX round-trip, not new algorithms. Quick win.
+3. **Statistics for real data work (M).** The library stops at descriptive
+   stats (`Mean`…`Histogram`). Missing for a science app: probability
+   distributions (Normal/Binomial/Poisson PDF/CDF/quantile),
+   correlation/covariance, and least-squares fitting
+   (`LinearRegression`/`PolynomialFit`). Highest-value analytical gap for
+   scientists and stats students.
+4. **Step-by-step "explain" API (L).** The rule engine already threads a
+   `RuleSteps` trace (`{value, because, purpose}` per step) through
+   simplify/rules internals, but it is not surfaced publicly and `solve` has
+   no trace at all. An educator-facing differentiator no competing JS engine
+   has. Design item: public API shape, coverage (simplify → solve → D), and
+   human-readable step labeling.
+5. **Uncertainty type — value ± error propagation (M/L).** A measurement type
+   (`5.1 ± 0.2 cm`) propagating through arithmetic, layered on the existing
+   units/quantity arithmetic. Core lab-course and experimental-science need;
+   the interval engine covers enclosure but not statistical error bars.
+   Design item: linear (partial-derivative) vs interval propagation.
+6. **MathML output + speakable text (M).** Communication and accessibility:
+   MathML serialization for export/interchange (web, Word, EPUB) and a
+   speakable-text serializer for screen readers. AsciiMath output already
+   exists; MathML and speech are absent. Accessibility matters for the
+   education audience.
+7. **Significant-figures display control (S).** Scientific/engineering
+   notation and locale separators exist; an explicit sig-fig count (and
+   sig-fig-aware rounding on display) does not. Small, pairs with item 5.
+8. **Chemistry notation — mhchem `\ce{}` (M).** Chemical formulas, isotopes,
+   reaction arrows. Only if chemistry is in scope for Graph Paper — decide
+   before investing; `mol` exists solely as a unit dimension today.
+
+### Review findings (2026-07-04) — open
+
+A post-0.67.0 review of the higher-order ODE support, the loose-syntax free
+functions, and the P2/P3 residue found new open items — including two P0s in
+`DSolve` (repeated-complex-root general solutions are degenerate; a corrupted
+`Error`-node "solution" for `x²y''`-style inputs) and a missing strict opt-out
+on the loose-parsing free functions (silent meaning changes for valid LaTeX
+like `x^23`, plus `sin^-1` ≠ `\sin^{-1}`). Full detail and ranked list:
+[`docs/reviews/2026-07-04-review.md`](./docs/reviews/2026-07-04-review.md).
 
 ### Symbolic capability gaps
 
