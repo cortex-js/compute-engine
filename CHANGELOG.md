@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.67.0 _2026-07-03_
 
 This release improves correctness and predictability across the public Compute
 Engine API: exact complex and integer arithmetic stays exact more often,
