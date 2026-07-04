@@ -36,6 +36,10 @@ import {
 } from '../../common/type/utils';
 import { parseType } from '../../common/type/parse';
 import { canonicalMultiply } from '../boxed-expression/arithmetic-mul-div';
+import {
+  canonicalSolve,
+  evaluateSolve,
+} from '../boxed-expression/solve-domain';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
   Expression,
@@ -904,19 +908,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Hold the arguments: the equation must NOT be pre-evaluated, or an
       // `Equal` collapses to a boolean (`x^2 = 1` → `False`) before solving.
       lazy: true,
-      signature: '(any, symbol) -> list',
-      canonical: (ops, { engine: ce }) =>
-        ce._fn('Solve', checkArity(ce, ops, 2)),
-      evaluate: (ops, { engine: ce }) => {
-        const unknown = sym(ops[1]);
-        if (unknown === undefined) return undefined;
-        // Dispatch to the same machinery as `.solve()`.
-        // A single (string) unknown always yields the univariate root list
-        // (`Expression[]`), never the system-solve `Record` shapes.
-        const roots = ops[0].solve(unknown) as ReadonlyArray<Expression> | null;
-        if (roots === null) return ce.function('List', []);
-        return ce.function('List', [...roots]);
-      },
+      // Variadic: `Solve(equation, spec₁, spec₂, …)` where each spec is a
+      // symbol or `Element(symbol, collection[, condition])` (a domain). See
+      // `boxed-expression/solve-domain.ts`.
+      signature: '(any, any+) -> list',
+      canonical: (ops, { engine: ce }) => canonicalSolve(ce, ops),
+      evaluate: (ops, { engine: ce }) => evaluateSolve(ce, ops),
     },
 
     CanonicalForm: {

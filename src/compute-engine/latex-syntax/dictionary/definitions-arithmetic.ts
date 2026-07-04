@@ -141,6 +141,189 @@ function serializeRoot(
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+//  Series display order: sort `Add` operands so a `BigO` remainder term
+//  (from `Series()`, see `symbolic/series.ts`) prints in textbook order.
+//
+//  This is purely a SERIALIZATION concern: canonical `Add` order (see
+//  `boxed-expression/order.ts`, which is untouched and not reimplemented
+//  here) is highest-degree-first for a stable internal representation, but
+//  that reads as `x^5/120 - x^3/6 + x + O(x^7)` instead of the textbook
+//  `x - x^3/6 + x^5/120 + O(x^7)`, and can place the `BigO` term mid-sum.
+//  All of this is a no-op — same array, same order — for any `Add` that has
+//  no `BigO` operand.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Named mathematical constants, excluded when inferring the series variable
+ * from a `BigO` argument (e.g. `BigO((x - \pi)^7)` when expanding at
+ * `x0 = \pi`: the series variable is `x`, not `Pi`). */
+const NAMED_CONSTANTS = new Set([
+  'Pi',
+  'ExponentialE',
+  'ImaginaryUnit',
+  'GoldenRatio',
+  'EulerGamma',
+  'CatalanConstant',
+  'MachineEpsilon',
+]);
+
+/** Does `expr` (raw MathJSON) mention `variable` anywhere? */
+function jsonHasSymbol(expr: MathJsonExpression, variable: string): boolean {
+  const s = symbol(expr);
+  if (s !== null) return s === variable;
+  for (const op of operands(expr)) if (jsonHasSymbol(op, variable)) return true;
+  return false;
+}
+
+/** First non-constant symbol found in `expr` (pre-order), or `null`. */
+function findSeriesVariable(expr: MathJsonExpression): string | null {
+  const s = symbol(expr);
+  if (s !== null) return NAMED_CONSTANTS.has(s) ? null : s;
+  for (const op of operands(expr)) {
+    const found = findSeriesVariable(op);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/**
+ * The degree of `expr` as a (possibly Laurent, i.e. negative-exponent) power
+ * of `variable` — e.g. `1/x` and `x^{-1}` are both degree `-1`. Returns
+ * `undefined` when `expr` is not expressible as a single power of `variable`
+ * (e.g. it mentions the variable inside a transcendental function): callers
+ * should treat that as degree `0` (see module doc).
+ *
+ * Deliberately NOT a reuse of `boxed-expression/polynomials.ts`'s
+ * `polynomialDegree`: that helper is scoped to genuine (non-negative-integer
+ * exponent) polynomials, and operates on `BoxedExpression`, not raw
+ * MathJSON — neither fits the Laurent-degree, serialization-time need here.
+ */
+function seriesTermDegree(
+  expr: MathJsonExpression,
+  variable: string
+): number | undefined {
+  if (isNumberExpression(expr)) return 0;
+
+  const s = symbol(expr);
+  if (s !== null) return s === variable ? 1 : 0;
+
+  const op = operator(expr);
+  if (!op) return 0;
+
+  if (op === 'Negate') return seriesTermDegree(operand(expr, 1)!, variable);
+
+  if (op === 'Multiply') {
+    let total = 0;
+    for (const factor of operands(expr)) {
+      const d = seriesTermDegree(factor, variable);
+      if (d === undefined) return undefined;
+      total += d;
+    }
+    return total;
+  }
+
+  if (op === 'Divide') {
+    const num = seriesTermDegree(operand(expr, 1)!, variable);
+    const denom = seriesTermDegree(operand(expr, 2)!, variable);
+    if (num === undefined || denom === undefined) return undefined;
+    return num - denom;
+  }
+
+  if (op === 'Power') {
+    const base = operand(expr, 1)!;
+    const exp = operand(expr, 2)!;
+    const baseDeg = seriesTermDegree(base, variable);
+    if (baseDeg === undefined) return undefined;
+    if (baseDeg === 0) return jsonHasSymbol(exp, variable) ? undefined : 0;
+    const expVal = machineValue(exp);
+    if (expVal === null || !Number.isInteger(expVal)) return undefined;
+    return baseDeg * expVal;
+  }
+
+  // `Power(_, 2)` is rewritten to `Square(_)` by the JSON "pretty" pass that
+  // runs ahead of LaTeX serialization (see `boxed-expression/serialize.ts`),
+  // so `x^2` arrives here as `["Square", "x"]`, not `["Power", "x", 2]`.
+  if (op === 'Square') {
+    const baseDeg = seriesTermDegree(operand(expr, 1)!, variable);
+    return baseDeg === undefined ? undefined : baseDeg * 2;
+  }
+
+  // `(x - x0)` — the "shifted variable" building block of a Taylor series
+  // expanded at a non-zero `x0` — is degree 1, same as bare `x`: take the
+  // highest degree among the (defined-degree) terms, ignoring any constant
+  // offset such as `x0`.
+  if (op === 'Add' || op === 'Subtract') {
+    let maxDeg: number | undefined;
+    for (const term of operands(expr)) {
+      const d = seriesTermDegree(term, variable);
+      if (d !== undefined && (maxDeg === undefined || d > maxDeg)) maxDeg = d;
+    }
+    return maxDeg;
+  }
+
+  // Any other operator (Sin, Cos, Ln, Rational, Sqrt, BigO, ...): a constant
+  // if it doesn't mention `variable`, otherwise not a simple power term
+  // (falls back to degree 0 in the caller — see module doc).
+  return jsonHasSymbol(expr, variable) ? undefined : 0;
+}
+
+/** If `expr` is a `BigO` term or its negation (`Negate(BigO(...))`), return
+ * the `BigO` argument; otherwise `null`. */
+function bigOArgument(expr: MathJsonExpression): MathJsonExpression | null {
+  let e = expr;
+  if (operator(e) === 'Negate') e = operand(e, 1)!;
+  if (operator(e) === 'BigO') return operand(e, 1);
+  return null;
+}
+
+/**
+ * Reorder the operands of a top-level `Add` into textbook series order when
+ * (and only when) they include a `BigO` remainder term:
+ *
+ *   - ascending degree in the series variable when the `BigO` argument's
+ *     degree is non-negative (Taylor expansion at a finite point), or
+ *   - descending degree when it is negative (asymptotic/Laurent expansion,
+ *     e.g. `\pi/2 - 1/x + 1/(3x^3) + O(x^{-7})`),
+ *
+ * with the `BigO` term(s) always last.
+ *
+ * Returns the SAME array reference, untouched, when there is no `BigO`
+ * operand or no series variable can be inferred — ordinary sums are
+ * byte-identical to before this function existed.
+ */
+function reorderSeriesTerms(
+  ops: ReadonlyArray<MathJsonExpression>
+): ReadonlyArray<MathJsonExpression> {
+  const bigOArgs = ops.map(bigOArgument);
+  if (!bigOArgs.some((a) => a !== null)) return ops;
+
+  let variable: string | null = null;
+  for (const arg of bigOArgs) {
+    if (arg === null) continue;
+    variable = findSeriesVariable(arg);
+    if (variable !== null) break;
+  }
+  if (variable === null) return ops;
+
+  const firstBigOArg = bigOArgs.find((a) => a !== null)!;
+  const ascending = (seriesTermDegree(firstBigOArg, variable) ?? 0) >= 0;
+
+  const terms: MathJsonExpression[] = [];
+  const bigOTerms: MathJsonExpression[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    if (bigOArgs[i] !== null) bigOTerms.push(ops[i]);
+    else terms.push(ops[i]);
+  }
+
+  const degreeOf = (t: MathJsonExpression) =>
+    seriesTermDegree(t, variable!) ?? 0;
+  terms.sort((a, b) =>
+    ascending ? degreeOf(a) - degreeOf(b) : degreeOf(b) - degreeOf(a)
+  );
+
+  return [...terms, ...bigOTerms];
+}
+
 function serializeAdd(
   serializer: Serializer,
   expr: MathJsonExpression
@@ -168,14 +351,22 @@ function serializeAdd(
       else result = result + '-' + term;
     }
   } else if (name === 'Add') {
+    // Textbook series order: if this sum has a `BigO` remainder term (from
+    // `Series()`), display it by ascending/descending degree in the series
+    // variable with `BigO` last, instead of the canonical (highest-degree
+    // first) operand order. A no-op — `ops` is the same array, in the same
+    // order — for any `Add` without a `BigO` operand. See
+    // `reorderSeriesTerms` above.
+    const ops = reorderSeriesTerms(operands(expr));
+
     // If it is the sum of an integer and a rational, use a special form
     // (e.g. 1 + 1/2 -> 1 1/2)
     if (
       serializer.options.prettify &&
-      nops(expr) === 2 &&
+      ops.length === 2 &&
       serializer.options.invisiblePlus !== '+'
     ) {
-      const [op1, op2] = [operand(expr, 1), operand(expr, 2)];
+      const [op1, op2] = ops;
 
       let [lhs, rhs] = [op1, op2];
       let lhsValue = machineValue(lhs);
@@ -214,9 +405,9 @@ function serializeAdd(
     }
 
     // If we have (-a)+b, we want to render it as b-a
-    if (serializer.options.prettify && nops(expr) === 2) {
-      const [first, firstSign] = unsign(arg!);
-      const [second, secondSign] = unsign(operand(expr, 2)!);
+    if (serializer.options.prettify && ops.length === 2) {
+      const [first, firstSign] = unsign(ops[0]);
+      const [second, secondSign] = unsign(ops[1]);
       if (firstSign < 0 && secondSign > 0) {
         result =
           serializer.wrap(second, ADDITION_PRECEDENCE) +
@@ -227,11 +418,9 @@ function serializeAdd(
       }
     }
 
-    result = serializer.serialize(arg);
-    const last = nops(expr) + 1;
-    const ops = operands(expr);
-    for (let i = 2; i < last; i++) {
-      arg = ops[i - 1];
+    result = serializer.serialize(ops[0]);
+    for (let i = 1; i < ops.length; i++) {
+      arg = ops[i];
       if (serializer.options.prettify) {
         const [newArg, sign] = unsign(arg);
         const term = serializer.wrap(newArg, ADDITION_PRECEDENCE);

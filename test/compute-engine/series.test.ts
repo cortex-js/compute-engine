@@ -360,3 +360,38 @@ describe('Series — order cap', () => {
     expect(p.isSame(ce.One)).toBe(true);
   });
 });
+
+//
+// Display order (serialization-only; canonical `Add` order is unchanged —
+// see `latex-syntax/dictionary/definitions-arithmetic.ts`)
+//
+
+describe('series display order', () => {
+  test('sin x: ascending degree, O(x^7) last', () => {
+    expect(series('\\sin x').latex).toBe(
+      'x-\\frac{x^3}{6}+\\frac{x^5}{120}+O\\left(x^7\\right)'
+    );
+  });
+
+  test('sqrt(1+x) to order 3: ascending degree starting with the constant term, O(x^4) last', () => {
+    const latex = series('\\sqrt{1+x}', '0', 3).latex;
+    expect(latex.startsWith('1+\\frac{x}{2}')).toBe(true);
+    expect(latex).toBe(
+      '1+\\frac{x}{2}-\\frac{x^2}{8}+\\frac{x^3}{16}+O\\left(x^4\\right)'
+    );
+  });
+
+  test('arctan x at +infinity: descending degree, O(x^{-7}) last', () => {
+    const latex = series('\\arctan x', '+\\infty').latex;
+    expect(latex.startsWith('\\frac{\\pi}{2}-\\frac{1}{x}')).toBe(true);
+    expect(latex).toBe(
+      '\\frac{\\pi}{2}-\\frac{1}{x}+\\frac{1}{3x^3}-\\frac{1}{5x^5}+O\\left(\\frac{1}{x^7}\\right)'
+    );
+  });
+
+  test('a BigO-free sum is unaffected (canonical order preserved)', () => {
+    // Regression guard: the display-order rule only applies to sums that
+    // actually contain a `BigO` term.
+    expect(ce.parse('x^5 - x^3 + x').latex).toBe('x^5-x^3+x');
+  });
+});

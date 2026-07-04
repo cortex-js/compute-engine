@@ -74,6 +74,23 @@
   it, and `\simeq` now maps to the existing `TildeEqual` head (it previously
   had no LaTeX trigger).
 
+### Solving
+
+- **`Solve` accepts a domain for the unknown.**
+  `Solve(x^2-5x+6=0,\; x \in 1..1000)` restricts solutions to a collection:
+  the equation is solved symbolically and the roots are filtered to the
+  domain (an integer domain also discards non-integer roots up front). When
+  the symbolic solver finds nothing and the domain is finite and reasonably
+  sized, `Solve` falls back to enumeration with a compiled predicate,
+  confirming every candidate exactly so float rounding never produces a
+  wrong answer (budgeted, interruptible; an unaffordable search returns the
+  expression unevaluated rather than a partial answer). The predicate is not
+  limited to equations — any boolean condition works:
+  `Solve(2^n \equiv 1 \pmod{7},\; n \in 1..20)` → `[3, 6, 9, 12, 15, 18]`,
+  and an extra condition can ride on the domain
+  (`n \in 1..100, n > 5`-style, as in `Sum` indexing sets). The two-argument
+  form is unchanged.
+
 ### Parsing Resilience
 
 The parser was hardened against a corpus of ~2,300 math fragments extracted
