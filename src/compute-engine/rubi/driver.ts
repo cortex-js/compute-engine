@@ -555,20 +555,6 @@ export class RubiDriver {
       }
     }
 
-    // ---- bare trig-power reduction (self-contained fallback) -----------
-    // `unifyInertTrig` rewrites a standalone cosine to a sine cofunction so it
-    // routes to the corpus sine rules (4.1.1.1) — the faithful Rubi mechanism.
-    // But the SHIPPED bundle carries only Chapter 1 + 4.1.6, not the 4.1 sine
-    // rules, so in that context the rewritten ∫sin[arg+π/2]^n has no rule to
-    // close it. This last-resort reducer (the standard ∫t^n recurrence) keeps
-    // bare ∫(g·sin|cos)^n integrable without those rules. In the full-corpus
-    // benchmark the sine rules fire first, so this is reached only in the
-    // reduced bundle; it never overrides a corpus rule.
-    {
-      const red = this.trigPowerReduction(integrand, variable, depth);
-      if (red !== null) return red;
-    }
-
     // ---- hyperbolic → exponential fallback (self-contained) ------------
     // Chapter 6's bare `(a+b·Sinh[linear])^n` / `(c+d·x)^m·Sinh^n` reductions
     // are not standalone corpus rules (Rubi reduces them through shared
@@ -678,64 +664,6 @@ export class RubiDriver {
     return foldLnExponentialE(ce, simplified);
   }
 
-  /** ∫(g·sin|cos[e+f·x])^n dx by the power-reduction recurrence (cofunction of
-   * sine rule 4.1.1.1#3); null when the integrand is not a bare integer power
-   * of an inert sin/cos of a linear argument. See the call site. */
-  private trigPowerReduction(
-    integrand: Expression,
-    variable: string,
-    depth: number
-  ): Expression | null {
-    const ce = this.ce;
-    let base = integrand; // integrand is (base)^n, or a bare trig (n = 1)
-    let n = 1;
-    if (integrand.operator === 'Power' && integrand.ops) {
-      base = integrand.ops[0];
-      const e = integrand.ops[1].re;
-      if (typeof e !== 'number' || !Number.isInteger(e) || e < 1) return null;
-      n = e;
-    }
-    let g: Expression = ce.One; // base = (x-free g)·(inert sin|cos of linear arg)
-    let trig = base;
-    if (base.operator === 'Multiply' && base.ops) {
-      const free = base.ops.filter((o) => !o.has(variable));
-      const nonfree = base.ops.filter((o) => o.has(variable));
-      if (nonfree.length !== 1) return null;
-      trig = nonfree[0];
-      g = free.length === 0 ? ce.One : ce._fn('Multiply', free);
-    }
-    if ((trig.operator !== 'sin' && trig.operator !== 'cos') || !trig.ops)
-      return null;
-    const arg = trig.ops[0];
-    const ac = polyCoeffsX(recanonicalize(ce, arg), variable);
-    if (ac === null || ac.length !== 2 || zeroQ(ac[1])) return null; // linear
-    const f = ac[1];
-    const isCos = trig.operator === 'cos';
-    const co = ce._fn(isCos ? 'sin' : 'cos', [arg]); // cofunction
-    const gco = recanonicalize(ce, g.mul(co));
-    const gt = recanonicalize(ce, base);
-    this.stats.preludeFirings++;
-    if (n === 1) {
-      const t = gco.div(f); // ∫(g·cos)=g·sin/f ; ∫(g·sin)=−g·cos/f
-      return isCos ? t : t.neg();
-    }
-    const lead = gt
-      .pow(n - 1)
-      .mul(gco)
-      .div(f.mul(n));
-    const boundary = isCos ? lead : lead.neg();
-    const rec = this.intRec(
-      recanonicalize(ce, gt.pow(n - 2)),
-      variable,
-      depth + 1
-    );
-    if (rec === null) return null;
-    const coef = g
-      .pow(2)
-      .mul(ce.number(n - 1))
-      .div(n); // g² from factoring g^n
-    return boundary.add(rec.mul(coef));
-  }
 }
 
 /** Rewrite uncollected polynomial Add factors of a (normal-form) integrand
