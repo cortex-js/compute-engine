@@ -16,12 +16,28 @@ export function bigint(
     return BigInt(a);
   }
 
-  if (a instanceof BigDecimal) {
-    if (!a.isInteger()) return null;
+  // Recognize a BigDecimal — including one constructed in a *different* bundle,
+  // whose class object differs from ours so `instanceof` returns false. The
+  // opt-in `integration-rules` plugin re-bundles `big-decimal`, so a BigDecimal
+  // carried by a host-engine expression is a genuine BigDecimal that would fail
+  // the `instanceof` check and then crash on `.toLowerCase` below. Duck-type it.
+  if (
+    a instanceof BigDecimal ||
+    (typeof a === 'object' &&
+      a !== null &&
+      typeof (a as any).isInteger === 'function' &&
+      typeof (a as any).toFixed === 'function')
+  ) {
+    const bd = a as BigDecimal;
+    if (!bd.isInteger()) return null;
     // Use toFixed(0) to get the full integer representation without
     // scientific notation (which would have a decimal point like "3.14e+10")
-    return BigInt(a.toFixed(0));
+    return BigInt(bd.toFixed(0));
   }
+
+  // Anything that is not a string here (e.g. a foreign object we don't
+  // recognize) has no exact-integer reading — don't crash on `.toLowerCase`.
+  if (typeof a !== 'string') return null;
 
   let s = a.toLowerCase();
 

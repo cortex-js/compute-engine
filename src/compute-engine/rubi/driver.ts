@@ -224,8 +224,12 @@ export class RubiDriver {
       // An engine deadline firing inside evaluate()/simplify(), or the
       // matcher's own deadline (see match.ts), surfaces as a
       // CancellationError — deadline exhaustion, not a crash: report "no
-      // rule chain applied" like any other timeout.
-      if (e instanceof Error && e.constructor.name === 'CancellationError')
+      // rule chain applied" like any other timeout. Detect it via the
+      // `name` instance property (set as a string literal in the
+      // constructor): `instanceof CancellationError` fails across the
+      // host/plugin bundle split, and `constructor.name` is mangled by
+      // minification.
+      if (e instanceof Error && e.name === 'CancellationError')
         return null;
       throw e;
     } finally {
@@ -278,8 +282,7 @@ export class RubiDriver {
       if (!F.has(variable)) return null;
       return F;
     } catch (e) {
-      if (e instanceof Error && e.constructor.name === 'CancellationError')
-        return null;
+      if (e instanceof Error && e.name === 'CancellationError') return null;
       throw e;
     } finally {
       ce.timeLimit = savedLimit;
@@ -654,7 +657,7 @@ export class RubiDriver {
       try {
         simplified = F.simplify();
       } catch (e) {
-        if (!(e instanceof Error && e.constructor.name === 'CancellationError'))
+        if (!(e instanceof Error && e.name === 'CancellationError'))
           throw e;
         // deadline hit — keep the unsimplified form
       } finally {
