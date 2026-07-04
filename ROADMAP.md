@@ -152,13 +152,13 @@ gate each other.
 #### R. Rubi — integration coverage by chapter
 
 **State:** **Chapters 1 (Algebraic), 2 (Exponentials), and 6 (Hyperbolics)** are
-translated and bundled (84 rule-docs → ~3.2k rules in
-`src/compute-engine/rubi/rubi-rules-data.json`, exposed via
-`@cortex-js/compute-engine/integration-rules`), **plus the Chapter-4 trig
-`(a+b cos+c sin)` Weierstrass family** (`4.1.6`, 57 rules) from the trig pilot.
-The pilot closed the **three `1/(3cos x + 4sin x + k)` Wester integrals** (∅→✅
-under `CE+R/F`) via a minimal active↔inert trig head-swap bridge — Wester
-indefinite-∫ is now `CE+R/F` 6/8 (overall 32/48). Chapter 2 ≈72% effective,
+translated and bundled, **plus all of Chapter-4 §4.1 Sine** (104 rule-docs →
+~4.1k rules in `src/compute-engine/rubi/rubi-rules-data.json`, exposed via
+`@cortex-js/compute-engine/integration-rules`).
+The trig pilot closed the **three `1/(3cos x + 4sin x + k)` Wester integrals**
+(∅→✅ under `CE+R/F`) via a minimal active↔inert trig head-swap bridge — Wester
+indefinite-∫ is now `CE+R/F` 6/8 (overall 32/48 per the committed report; a
+fresh source run measures 34/48 from unrelated CE drift). Chapter 2 ≈72% effective,
 Chapter 6 ≈45% effective (sample, seed 42) — both reuse the Chapter-2
 exponential machinery (incl. the incomplete-Γ kernel); the Ch6 reciprocal/
 algebraic tail (below) is the residual. Per-chapter blow-by-blow in
@@ -183,8 +183,26 @@ the *algebraic* sub-integrals the trig reductions emit — e.g. `∫cos·g(sin)`
 (`cos[θ] → sin[θ+π/2]`), which is how Rubi routes cosine to the sine rules — it
 has **no Cosine chapter** (confirmed by tracing Rubi under `wolframscript`).
 CE's `simplify` gained the matching `sin(θ+π/2) → cos(θ)` identity so results
-read cleanly. **4.1 Sine is now 47/120 (seed 5), 0 wrong / 0 not-evaluable**, up
-from the head-swap pilot's 26.
+read cleanly. **4.1 Sine: 26 → 46/120 (seed 5)** from the head-swap pilot.
+
+**Landed (2026-07-04) — R1 + R4.** The **cofunction product clauses** in
+`unifyInertTrig` (cos·csc, cos·sec, and sin/csc/cot/tan × `(a+b cos)` binomial
+products, ported from `IntegrationUtilityFunctions.m` §1.0/1.1.2/1.1.3); the
+sine corpus is written with *sin* binomials, so these mostly pay off on
+recursive subproblems and the cos-heavy chapters (4.3 Tangent / 4.5 Secant).
+And the **ship step**: all 21 files of 4.1 Sine bundled (918 rules; bundle
+3,219 → 4,080, +~15% one-time rule-compile cost), the driver's self-contained
+bare-trig-power fallback removed (the bundled sine rules cover it — verified
+on/off identical), ch1/ch2/ch6 and Wester unchanged. Also landed: the
+**cross-bundle class-identity fix** — the ESM builds of `compute-engine` +
+`integration-rules` now share chunks (`splitting: true` in `scripts/build.mjs`,
+one `BigDecimal` realm; was the cause of two Wester integrals failing in dist
+only), plus defensive duck-typing in `numerics/bigint.ts` and `e.name`-based
+`CancellationError` checks in the driver. **Benchmark truth: 4.1 Sine is
+47/120 (seed 5), 1 wrong / 0 not-evaluable** — the wrong is the *pre-existing*
+`4.1.2.2 #1395` (a 3-factor sin-binomial integrand; the earlier "0 wrong"
+claim was a mismeasure — the clean tree was already 46/1/0). Sample 400:
+140/1/0.
 
 **Method note (hard-won).** The "unimplemented-predicate" trace census is
 *misleading* for picking levers: the late catch-all rules
@@ -200,39 +218,29 @@ Trace[Rubi`Int[Cos[x]^4, x], HoldPattern[Rubi`Int[_, _]]]
 Rubi`Private`DeactivateTrig[Cos[x]^4, x]   (* -> sin[Pi/2 + x]^4 *)
 ```
 
-**Next rungs (priority order — start at R1).** Each is a self-contained work
+**Next rungs (priority order — start at R2).** Each is a self-contained work
 item: do the change, then verify with the benchmark command above (watch
-`solved-correct` climb while `wrong`/`not-evaluable` stay 0). Diagnose any stall
-per the Method note — trace the residual integrand, don't trust the predicate
-census.
+`solved-correct` climb while `wrong`/`not-evaluable` stay at the 1/0 baseline).
+Diagnose any stall per the Method note — trace the residual integrand, don't
+trust the predicate census.
 
-- **R1 — remaining `UnifyInertTrigFunction` cofunction clauses.** Extend
-  `unifyInertTrig` in `src/compute-engine/rubi/rubi-utils.ts` (the standalone
-  `(a+b cos)^n` clause is the template) with the product siblings from
-  `IntegrationUtilityFunctions.m` ~6551–6606: `(g sin)^p(a+b cos)^m`,
-  `(a cos)^m(b csc)^n`, `(a cos)^m(b sec)^n`, `(g csc)^p(a+b cos)^m`, and the
-  tangent/secant analogs further down. **Gotcha:** apply *after* `toTimesPower`
-  (the `sin^0→1` fold), exactly like the standalone clause — otherwise a spurious
-  `sin^0·cos^n` reads as a "mixed" product and the shift is skipped. Also feeds
-  4.3 Tangent / 4.5 Secant. _Done when:_ mixed cos/cofunction products in 4.1
-  Sine route to the sine rules and close.
 - **R2 — `(a+b sin)^m (c+d sin)^n` binomial-product chains** (4.1.2 / 4.1.3 /
   4.1.4): the trig analog of Chapter 1's binomial products and the bulk of the
-  ~73 remaining 4.1 Sine unsolved. The rules are already translated; they stall
-  on a residual that doesn't close or a missing utility — trace the *residual
-  integrand* of a few unsolved 4.1.2 cases to find which, then fill that gap.
-- **R3 — `√(a+b sin)` half-integer powers** (4.1.7).
-- **R4 — bundle + validate (the "ship it" step; can run independently of R1–R3).**
-  Add the 4.1 sine families to the bundler allowlist
-  (`scripts/rubi/bundle-corpus.ts`, currently ch1 + `4.1.6` only) and regenerate
-  `src/compute-engine/rubi/rubi-rules-data.json` (CI has a bundle-freshness
-  gate — commit the regenerated file). The driver's self-contained bare-trig-
-  power fallback then becomes removable (it exists only because the bundle lacks
-  the sine rules). Validate against the ~22k-problem trig suite and re-run
-  `benchmarks/audit/wester.ts` (the three `1/(3cos+4sin+k)` cases must stay ✅).
+  ~73 remaining 4.1 Sine unsolved. The rules are already translated and now
+  bundled; they stall on a residual that doesn't close or a missing utility —
+  trace the *residual integrand* of a few unsolved 4.1.2 cases to find which,
+  then fill that gap. Known adjacent classes from the R1 probe (may or may not
+  be the same gap): 3-factor mixed products (`cos²·csc²·(a+a sin)` — no Rubi
+  two-factor unify clause exists; Rubi's 3-factor clauses need cos *binomials*)
+  and csc/sec-only pairings (`(a csc)^m(b sec)^n`, 4.1.0.3).
+- **R3 — `√(a+b sin)` half-integer powers** (4.1.7). The R1 probe showed
+  converted 4.1.0 cases reaching the sine rules but stalling on exactly these
+  shapes (`(d sin)^(±k/2)·sec^n` etc.) — the sine chapter lacks the
+  half-integer/negative exponent combos, so R3 likely unlocks part of R1's
+  conversion work too.
 - **R5 — `TrigSimplify`/`TrigSimplifyQ`** (Pythagorean reductions). _Low value /
   optional:_ the predicate census over-weights it (it's a late catch-all, not a
-  blocker). Only pursue if R1–R3 leave a concrete residual class that needs it.
+  blocker). Only pursue if R2–R3 leave a concrete residual class that needs it.
 
 **Exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules) are
 DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty). The
