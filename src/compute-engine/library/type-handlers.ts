@@ -197,6 +197,23 @@ export function elementaryFunctionType(
     case 'Arccot':
       return arctanType(ops);
 
+    // Inverse hyperbolic functions with real poles / restricted real domains.
+    // `artanh(±1) = ±∞`, `arcoth(±1) = ±∞`, `arsech(0) = +∞`, `arcsch(0) = ~oo`
+    // are non-finite, so a literal at a pole (or outside the real domain, where
+    // the value is complex) must not claim `finite_real`.
+    case 'Artanh':
+      // Real on |x| < 1; ±∞ at ±1; complex for |x| > 1.
+      return boundedInverseTrigType(ops, (r) => Math.abs(r) < 1);
+    case 'Arcoth':
+      // Real on |x| > 1; ±∞ at ±1; complex for |x| < 1.
+      return boundedInverseTrigType(ops, (r) => Math.abs(r) > 1);
+    case 'Arsech':
+      // Real on (0, 1]; +∞ at 0; complex elsewhere.
+      return boundedInverseTrigType(ops, (r) => r > 0 && r <= 1);
+    case 'Arcsch':
+      // Real for every non-zero real; ~oo at 0.
+      return boundedInverseTrigType(ops, (r) => r !== 0);
+
     default:
       return numericTypeHandler(ops);
   }

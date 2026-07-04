@@ -244,6 +244,36 @@ describe('Arctan at ±∞', () => {
     ));
 });
 
+// Regression: literal poles of the inverse hyperbolic functions used to stay
+// symbolic with a bogus `finite_real` type. They are non-finite: artanh(±1) =
+// ±∞, arcoth(±1) = ±∞, arsech(0) = +∞, arcsch(0) = ~oo. `evaluate()` must fold
+// them (not just `.N()`) and the declared type must admit the non-finite value.
+describe('Inverse hyperbolic literal poles', () => {
+  const cases: [string, number, string][] = [
+    ['Artanh', 1, '+oo'],
+    ['Artanh', -1, '-oo'],
+    ['Arcoth', 1, '+oo'],
+    ['Arcoth', -1, '-oo'],
+    ['Arsech', 0, '+oo'],
+    ['Arcsch', 0, '~oo'],
+  ];
+  for (const [op, arg, expected] of cases) {
+    test(`${op}(${arg}) = ${expected} (exact, non-finite)`, () => {
+      const e = engine.expr([op, arg]);
+      expect(e.evaluate().toString()).toBe(expected);
+      // Type must not claim finite_real for a pole.
+      expect(e.type.matches('finite_real')).toBe(false);
+    });
+  }
+
+  test('non-pole arguments keep finite_real', () => {
+    expect(engine.expr(['Artanh', 0.5]).type.matches('finite_real')).toBe(true);
+    expect(engine.expr(['Arcoth', 2]).type.matches('finite_real')).toBe(true);
+    expect(engine.expr(['Arsech', 0.5]).type.matches('finite_real')).toBe(true);
+    expect(engine.expr(['Arcsch', 3]).type.matches('finite_real')).toBe(true);
+  });
+});
+
 // REVIEW.md B20: the Degrees canonical handler reduced literals mod 360 while
 // the evaluate handler did not, so the same operator denoted different values.
 // Degrees is now a faithful linear conversion (no reduction) in both paths;

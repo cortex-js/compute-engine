@@ -12,7 +12,11 @@ import {
 import { apply, apply2, shouldNumericize } from '../boxed-expression/apply';
 
 import { reducedRational } from '../numerics/rationals';
-import type { OperatorDefinition, SymbolDefinitions } from '../global-types';
+import type {
+  OperatorDefinition,
+  SymbolDefinitions,
+  IComputeEngine,
+} from '../global-types';
 import type { Expression } from '../types-expression';
 import {
   isFunction,
@@ -524,6 +528,37 @@ function angularQuantityToRadians(expr: Expression): Expression | null {
   return expr.engine.number(magnitude * scale);
 }
 
+/**
+ * Literal pole values of the inverse hyperbolic functions:
+ *   `artanh(±1) = ±∞`, `arcoth(±1) = ±∞` (one-sided real poles),
+ *   `arsech(0) = +∞` (approached from the domain `(0, 1]`),
+ *   `arcsch(0) = ~oo` (odd function, two-sided pole).
+ * Returns `undefined` for any other operator or argument. Only applies to a
+ * real number literal (`im === 0`).
+ */
+function inverseHyperbolicPole(
+  operator: string,
+  x: Expression | undefined,
+  ce: IComputeEngine
+): Expression | undefined {
+  if (!isNumber(x) || x.im !== 0) return undefined;
+  switch (operator) {
+    case 'Artanh':
+    case 'Arcoth':
+      if (x.isSame(1)) return ce.PositiveInfinity;
+      if (x.isSame(-1)) return ce.NegativeInfinity;
+      return undefined;
+    case 'Arsech':
+      if (x.isSame(0)) return ce.PositiveInfinity;
+      return undefined;
+    case 'Arcsch':
+      if (x.isSame(0)) return ce.ComplexInfinity;
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
 function trigFunction(
   operator: string,
   complexity: number,
@@ -547,6 +582,10 @@ function trigFunction(
     },
     evaluate: ([x], { numericApproximation, engine }) => {
       if (numericApproximation) return evalTrig(operator, x);
+      // Literal poles of the inverse hyperbolic functions are exact non-finite
+      // values, so fold them in `evaluate()` too (not just `.N()`).
+      const pole = inverseHyperbolicPole(operator, x, engine);
+      if (pole) return pole;
       const a = constructibleValues(operator, x);
       if (a) return a;
       // No constructible value: numericize ONLY an inexact (float) numeric

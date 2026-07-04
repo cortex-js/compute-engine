@@ -18,6 +18,63 @@
   $2\pi x$, `xpi` → $x\pi$) instead of injecting a spurious imaginary unit, and
   an implicit subscript is accepted on a constant base (`alpha2` → $\alpha_2$).
 
+### Differential Equations
+
+- **Repeated roots produce correct general solutions.** `DSolve` now clusters
+  numeric characteristic roots by multiplicity: $y'''' + 2y'' + y = 0$ gives
+  $(c_1 + c_2 x)\cos x + (c_3 + c_4 x)\sin x$ instead of a degenerate basis
+  with spurious $e^{\varepsilon x}$ factors, and repeated real roots keep their
+  $x e^{x}$ modes. A structural self-check returns the equation unevaluated
+  rather than emit a basis with fewer independent solutions than the order.
+
+- **No more corrupted solutions.** Equations with variable coefficients on
+  higher-order derivatives (e.g. $x^2 y'' + x y' = x$) previously returned a
+  "solution" containing an internal `Error` node; they now stay unevaluated
+  when the class is unsupported. Equations whose right-hand side references
+  the dependent function with a transformed argument (e.g. $y'(x) = y(2x)$)
+  stay unevaluated instead of returning an unevaluated integral as "solved".
+
+### Evaluation
+
+- **`Beta` is exact and pole-aware.** $\mathrm{B}(a, m)$ with a positive
+  integer argument reduces exactly ($\mathrm{B}(2,3) = \frac{1}{12}$,
+  $\mathrm{B}(-2,2) = \frac12$), and arguments at gamma-function poles return
+  $\tilde\infty$ instead of a silently wrong finite value
+  ($\mathrm{B}(-1,2)$ previously returned $-2.97\times10^{49}$).
+
+- **Multiplication by infinity respects sign information.** $x \cdot \infty$
+  stays symbolic when the sign of $x$ is unknown, evaluates to $-\infty$ when
+  $x$ is known negative, and to `NaN` when $x$ is zero — it no longer
+  collapses to $+\infty$ unconditionally.
+
+- **Inverse hyperbolic functions have values at their poles.**
+  $\operatorname{artanh}(\pm 1)$ and $\operatorname{arcoth}(\pm 1)$ evaluate
+  to $\pm\infty$, $\operatorname{arsech}(0)$ to $+\infty$, and
+  $\operatorname{arcsch}(0)$ to $\tilde\infty$, with result types that no
+  longer claim a finite value at a pole.
+
+- **`Sum` reports incompatible elements.** Summing a collection containing a
+  string returns a typed error instead of a silent `NaN`.
+
+### Rules and Pattern Matching
+
+- **Rule conditions must return a boolean.** A `condition` function returning
+  a non-boolean (e.g. the boxed symbol `False`, which is a truthy JavaScript
+  object) no longer fires the rule; a one-time console warning identifies the
+  malformed condition. Returning the boxed symbol `True` is accepted.
+
+- **`e` and `i` work in string rules.** Rules such as `'e^2 -> 7'` now match:
+  the constants are resolved to `ExponentialE` and the imaginary unit when the
+  rule is parsed, instead of remaining inert symbols that could never match.
+
+- **Explicit wildcards work in LaTeX match patterns.** An object-form rule
+  such as `{match: '_a + 1', replace: '_a'}` now parses `_a`/`__a` as
+  wildcards instead of an implicit product.
+
+- **A throwing condition no longer discards subexpression rewrites.** If a
+  rule condition throws, the rule is skipped at that node but successful
+  rewrites of the operands are kept.
+
 ## 0.67.0 _2026-07-03_
 
 This release improves correctness and predictability across the public Compute

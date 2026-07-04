@@ -116,7 +116,7 @@ import type {
   SymbolDefinitions,
   Sign,
 } from '../global-types';
-import { isNumber, isFunction } from '../boxed-expression/type-guards';
+import { isNumber, isFunction, isString } from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
 import { signFromAssumedPart } from './complex';
 
@@ -846,11 +846,42 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       broadcastable: true,
       signature: '(number, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
-      evaluate: ([a, b], { numericApproximation, engine }) =>
-        shouldNumericize(numericApproximation, a, b)
+      // B(a, b) has Γ-poles (value `~oo`) where a or b is a non-positive
+      // integer (unless cancelled). Such an argument may be a pole → claim the
+      // top type `number` per the non-finite typing convention, rather than
+      // `finite_real`. (`B(−2, 2) = 1/2` is finite but `number` still admits it.)
+      type: (ops) => {
+        const nonposInt = (x: Expression | undefined) =>
+          x?.isInteger === true && x.isNonPositive === true;
+        if (nonposInt(ops[0]) || nonposInt(ops[1])) return 'number';
+        return numericTypeHandler(ops);
+      },
+      evaluate: ([a, b], { numericApproximation, engine }) => {
+        // Exact reductions and Γ-pole handling for real (im === 0) arguments.
+        // The naive B(a,b) = Γ(a)Γ(b)/Γ(a+b) formula turns the Γ-pole at a
+        // non-positive integer into silent overflow garbage (e.g. B(−1, 2)
+        // → −2.97e49); the exact rational form below is correct on both the
+        // finite (`B(−2, 2) = 1/2`) and the pole (`B(−1, 2) = ~oo`) branches.
+        if (isNumber(a) && isNumber(b) && a.im === 0 && b.im === 0) {
+          const ai = a.isInteger ? asSmallInteger(a) : null;
+          const bi = b.isInteger ? asSmallInteger(b) : null;
+          // B(a, m) = (m−1)! / (a(a+1)…(a+m−1)) — an exact rational function of
+          // a valid at every a (with a pole where the denominator vanishes).
+          let reduced: Expression | undefined;
+          if (bi !== null && bi > 0) reduced = betaPositiveIntegerArg(engine, a, bi);
+          else if (ai !== null && ai > 0)
+            reduced = betaPositiveIntegerArg(engine, b, ai);
+          if (reduced !== undefined)
+            return numericApproximation ? reduced.N() : reduced;
+          // Remaining pole cases: a or b a non-positive integer with no
+          // positive-integer partner to cancel it → Γ-pole (B is infinite).
+          if ((ai !== null && ai <= 0) || (bi !== null && bi <= 0))
+            return engine.ComplexInfinity;
+        }
+        return shouldNumericize(numericApproximation, a, b)
           ? apply2(a, b, beta, (a, b) => bigBeta(engine, a, b))
-          : undefined,
+          : undefined;
+      },
     },
 
     // Lambert W function: W(x)·e^(W(x)) = x
@@ -2359,8 +2390,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           reduceBigOp(
             ops[0],
             ops.slice(1),
-            (acc: Expression, x) =>
-              acc.mul(x.evaluate({ numericApproximation: numeric })),
+            (acc: Expression, x) => {
+              const xe = x.evaluate({ numericApproximation: numeric });
+              return reducerElementError(acc, xe) ?? acc.mul(xe);
+            },
             ce.One
           ),
           ce._timeRemaining
@@ -2385,8 +2418,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           reduceBigOp(
             ops[0],
             ops.slice(1),
-            (acc: Expression, x) =>
-              acc.mul(x.evaluate({ numericApproximation: numeric })),
+            (acc: Expression, x) => {
+              const xe = x.evaluate({ numericApproximation: numeric });
+              return reducerElementError(acc, xe) ?? acc.mul(xe);
+            },
             ce.One
           ),
           ce._timeRemaining,
@@ -2524,6 +2559,48 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   },
 ];
 
+/**
+ * Exact Beta reduction when one argument is a positive integer `m`:
+ *   B(a, m) = (m−1)! / (a (a+1) … (a+m−1))
+ * This is an exact rational function of `a`, valid at every `a`. It returns
+ * `ComplexInfinity` at a Γ-pole (a factor of the denominator is exactly 0,
+ * i.e. `a ∈ {0, −1, …, −(m−1)}`), the exact rational otherwise, or `undefined`
+ * when `m` is too large to expand exactly (the numeric kernel handles those).
+ */
+function betaPositiveIntegerArg(
+  ce: ComputeEngine,
+  a: Expression,
+  m: number
+): Expression | undefined {
+  if (m > 100) return undefined;
+  let denom = ce.One;
+  for (let k = 0; k < m; k++) {
+    const factor = a.add(k);
+    if (factor.isSame(0)) return ce.ComplexInfinity;
+    denom = denom.mul(factor);
+  }
+  let numer = 1n;
+  for (let k = 2; k < m; k++) numer *= BigInt(k);
+  return ce.number(numer).div(denom);
+}
+
+/**
+ * Guard for `Sum`/`Product` accumulation over a collection: an already-failed
+ * accumulator propagates, and a non-numeric (string) element is rejected with
+ * an `incompatible-type` error rather than silently poisoning the result
+ * (`Sum([a, b])` used to fold to `NaN`). Returns the error to short-circuit
+ * with, or `undefined` to accumulate normally. Keeps `Sum` and `Product`
+ * consistent (both surface the same typed error on a string element).
+ */
+function reducerElementError(
+  acc: Expression,
+  term: Expression
+): Expression | undefined {
+  if (acc.operator === 'Error') return acc;
+  if (isString(term)) return acc.engine.typeError('number', term.type);
+  return undefined;
+}
+
 /** Accumulate one term of a `Sum` without the `.add()` float-folding pitfall.
  *
  * The `.add()` **method** folds two exact-but-non-combinable number literals
@@ -2542,6 +2619,8 @@ function sumAccumulate(
   term: Expression,
   numericApproximation: boolean | undefined
 ): Expression {
+  const err = reducerElementError(acc, term);
+  if (err) return err;
   const sum = acc.add(term);
   if (numericApproximation) return sum;
   // Only two exact number literals can be silently floated by `.add()`. Once

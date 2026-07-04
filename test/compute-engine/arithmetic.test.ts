@@ -425,6 +425,56 @@ describe('MULTIPLY', () => {
         '1.1\\times 2\\times 5\\times\\frac{5}{7}\\times\\frac{7}{9}\\times\\sqrt{2}\\times\\pi'
       )
     ).toMatchSnapshot()); // @fixme eval-big should be same or better than evaluate
+
+  // Regression: `x · ∞` used to collapse to `∞` regardless of the sign of `x`.
+  // The sign of `∞ · (symbolic factor)` follows the factor's sign; an
+  // unknown-sign factor must stay symbolic, and `0 · ∞` is NaN.
+  //
+  // These tests create fresh engines (for isolated assumptions), which mutate
+  // the GLOBAL `BigDecimal.precision`; save/restore it so downstream
+  // precision-sensitive snapshots in this file are unaffected.
+  describe('Symbol × Infinity', () => {
+    let savedPrecision: number;
+    beforeAll(() => {
+      savedPrecision = BigDecimal.precision;
+    });
+    afterAll(() => {
+      BigDecimal.precision = savedPrecision;
+    });
+
+    test('x · +∞ stays symbolic (sign of x unknown)', () => {
+      const c = new ComputeEngine();
+      expect(
+        c.box(['Multiply', 'x', { num: '+Infinity' }]).evaluate().toString()
+      ).toBe('+oo * x');
+    });
+    test('x · −∞ stays symbolic', () => {
+      const c = new ComputeEngine();
+      expect(
+        c.box(['Multiply', 'x', { num: '-Infinity' }]).evaluate().toString()
+      ).toBe('-oo * x');
+    });
+    test('(x, x<0) · +∞ = −∞', () => {
+      const c = new ComputeEngine();
+      c.assume(['Less', 'x', 0]);
+      expect(
+        c.box(['Multiply', 'x', { num: '+Infinity' }]).evaluate().toString()
+      ).toBe('-oo');
+    });
+    test('(y, y>0) · +∞ = +∞', () => {
+      const c = new ComputeEngine();
+      c.assume(['Greater', 'y', 0]);
+      expect(
+        c.box(['Multiply', 'y', { num: '+Infinity' }]).evaluate().toString()
+      ).toBe('+oo');
+    });
+    test('0 · +∞ = NaN', () => {
+      const c = new ComputeEngine();
+      expect(
+        c.box(['Multiply', 0, { num: '+Infinity' }]).evaluate().toString()
+      ).toBe('NaN');
+    });
+  });
 });
 
 describe('DIVIDE', () => {
@@ -930,6 +980,23 @@ describe('SUM', () => {
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`55`));
+
+  // Regression: summing a collection of strings used to fold to a silent NaN.
+  // It must surface an incompatible-type error (consistent with Product, which
+  // also yields an error-typed result rather than a numeric answer).
+  it('a string element yields a typed error, not NaN', () => {
+    const result = ce
+      .expr(['Sum', ['List', { str: 'a' }, { str: 'b' }]])
+      .evaluate();
+    expect(result.type.toString()).toBe('error');
+    expect(result.toString()).not.toContain('NaN');
+    // A numeric element mixed with a string still errors (does not silently
+    // drop the string).
+    const mixed = ce
+      .expr(['Sum', ['List', 1, { str: 'a' }, 3]])
+      .evaluate();
+    expect(mixed.type.toString()).toBe('error');
+  });
 
   it('should compute the sum of a function over two indices (with optional Hold)', () =>
     expect(

@@ -197,6 +197,31 @@ describe('BETA FUNCTION', () => {
   test('B(3, 4) = 1/60', () => {
     expectApprox(ce.expr(['Beta', 3, 4]), 1 / 60);
   });
+
+  // Regression: a Γ-pole argument used to return silent overflow garbage
+  // (B(-1, 2) → −2.97e49). B(a, b) has a pole where Γ(a) or Γ(b) has a pole
+  // and it is not cancelled; match the Gamma(-1) → ~oo convention.
+  test('B(-1, 2) is a pole (~oo), not garbage', () => {
+    expect(ce.expr(['Beta', -1, 2]).evaluate().toString()).toContain('oo');
+    expect(ce.expr(['Beta', -1, 2]).N().toString()).toContain('oo');
+  });
+
+  test('B(0, 2) and B(2, -1) are poles (~oo)', () => {
+    expect(ce.expr(['Beta', 0, 2]).evaluate().toString()).toContain('oo');
+    expect(ce.expr(['Beta', 2, -1]).evaluate().toString()).toContain('oo');
+    expect(ce.expr(['Beta', -1, -1]).evaluate().toString()).toContain('oo');
+  });
+
+  // Exactness contract: a non-positive-integer argument that is NOT a pole
+  // reduces to an exact rational (not a float) under evaluate().
+  test('B(-2, 2) = 1/2 (exact)', () => {
+    expect(ce.expr(['Beta', -2, 2]).evaluate().toString()).toBe('1/2');
+  });
+
+  test('B(-3, 2) = 1/6 and B(2, 3) = 1/12 (exact under evaluate)', () => {
+    expect(ce.expr(['Beta', -3, 2]).evaluate().toString()).toBe('1/6');
+    expect(ce.expr(['Beta', 2, 3]).evaluate().toString()).toBe('1/12');
+  });
 });
 
 describe('ZETA FUNCTION', () => {

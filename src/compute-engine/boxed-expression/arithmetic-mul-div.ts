@@ -470,9 +470,33 @@ export class Product {
 
     const coef = this.coefficient;
     if (coef.isNaN) return ce.NaN;
-    if (coef.isPositiveInfinity) return ce.PositiveInfinity;
-    if (coef.isNegativeInfinity) return ce.NegativeInfinity;
     if (coef.isZero) return ce.Zero;
+
+    if (coef.isPositiveInfinity || coef.isNegativeInfinity) {
+      const infinity = coef.isPositiveInfinity
+        ? ce.PositiveInfinity
+        : ce.NegativeInfinity;
+      // A bare infinite literal (no symbolic factors) → the signed infinity.
+      if (this.terms.length === 0) return infinity;
+      // `∞ · (remaining factors)`: the result's sign follows the sign of the
+      // remaining factors' product. A provably-zero factor makes it the
+      // indeterminate form `0 · ∞ = NaN`; an unknown sign must stay symbolic
+      // (do NOT collapse `x · ∞` to `∞`, which is wrong for `x < 0` or `x = 0`).
+      this.coefficient = ce._numericValue(1);
+      const grouped = this.groupedByDegrees({
+        mode: options.numericApproximation ? 'numeric' : 'expression',
+      });
+      this.coefficient = coef;
+      if (grouped === null) return ce.NaN;
+      const rest = termsAsExpression(ce, grouped);
+      if (rest.isSame(0)) return ce.NaN;
+      if (rest.isPositive === true) return infinity;
+      if (rest.isNegative === true)
+        return coef.isPositiveInfinity
+          ? ce.NegativeInfinity
+          : ce.PositiveInfinity;
+      return ce._fn('Multiply', [infinity, rest]);
+    }
 
     // If the coef is -1, temporarily set it to 1
     const isNegativeOne = coef.isNegativeOne;
@@ -499,13 +523,26 @@ export class Product {
     const coef = this.coefficient;
     if (coef.isZero) return [ce.Zero, ce.One];
     if (coef.isPositiveInfinity || coef.isNegativeInfinity) {
-      if (this.terms.length === 0) {
+      const infinity = coef.isPositiveInfinity
+        ? ce.PositiveInfinity
+        : ce.NegativeInfinity;
+      if (this.terms.length === 0) return [infinity, ce.One];
+      // `∞ · (remaining factors)`: the sign of the result follows the sign of
+      // the remaining factors' product; a provably-zero factor is the
+      // indeterminate `0 · ∞ = NaN`; an unknown sign stays symbolic (`∞ · x`).
+      this.coefficient = ce._numericValue(1);
+      const grouped = this.groupedByDegrees({ mode: 'expression' });
+      this.coefficient = coef;
+      if (grouped === null) return [ce.NaN, ce.NaN];
+      const rest = termsAsExpression(ce, grouped);
+      if (rest.isSame(0)) return [ce.NaN, ce.NaN];
+      if (rest.isPositive === true) return [infinity, ce.One];
+      if (rest.isNegative === true)
         return [
-          coef.isPositiveInfinity ? ce.PositiveInfinity : ce.NegativeInfinity,
+          coef.isPositiveInfinity ? ce.NegativeInfinity : ce.PositiveInfinity,
           ce.One,
         ];
-      }
-      return [ce.NaN, ce.NaN];
+      return [ce._fn('Multiply', [infinity, rest]), ce.One];
     }
 
     // If the coef is -1, temporarily set it to 1
