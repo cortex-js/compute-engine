@@ -1,10 +1,10 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
   "sliceEntries": 1650,
-  "emitted": 1383,
+  "emitted": 1400,
   "ledger": {
-    "box-error": 16,
-    "compat-signature": 41,
+    "box-error": 1,
+    "compat-signature": 39,
     "curated-exclude": 4,
     "duplicate-undirected": 14,
     "guard-uncompilable": 64,
@@ -13,27 +13,28 @@
     "not-equation": 8
   },
   "byPurpose": {
-    "expand": 111,
-    "simplify": 1272
+    "expand": 112,
+    "simplify": 1280,
+    "transform": 8
   },
   "byClass": {
-    "identity": 1058,
-    "specific-value": 325
+    "identity": 1072,
+    "specific-value": 328
   },
   "byTarget": {
-    "simplify": 1383
+    "simplify": 1400
   },
   "sampleKinds": {
-    "numeric": 42,
-    "symbolic": 1341
+    "numeric": 47,
+    "symbolic": 1353
   },
   "headBuckets": {
-    "Multiply": 271,
-    "Add": 217,
-    "Divide": 93,
+    "Multiply": 279,
+    "Add": 218,
+    "Divide": 92,
     "JacobiTheta": 62,
     "Apply": 60,
-    "Which": 44,
+    "Which": 46,
     "CarlsonRJ": 36,
     "Negate": 36,
     "CarlsonRF": 25,
@@ -54,8 +55,8 @@
     "EllipticK": 13,
     "DedekindEta": 12,
     "ModularLambda": 12,
+    "Sqrt": 12,
     "CarlsonRC": 11,
-    "Sqrt": 11,
     "Conjugate": 9,
     "Imaginary": 9,
     "Abs": 8,
@@ -76,13 +77,13 @@
     "Set": 6,
     "Tuple": 6,
     "BarnesG": 5,
+    "Binomial": 5,
     "DirichletL": 5,
     "Ln": 5,
     "MultiZetaValue": 5,
     "FallingFactorial": 4,
     "Min": 4,
     "Real": 4,
-    "Binomial": 3,
     "CarlsonHypergeometricR": 3,
     "Fibonacci": 3,
     "RisingFactorial": 3,
@@ -97,7 +98,10 @@
     "Factorial": 2,
     "IncompleteBeta": 2,
     "KeiperLiLambda": 2,
+    "Matrix": 2,
     "Max": 2,
+    "SequenceLimitInferior": 2,
+    "SequenceLimitSuperior": 2,
     "Sign": 2,
     "XGCD": 2,
     "AGMSequence": 1,
@@ -116,16 +120,14 @@
     "Hypergeometric0F1": 1,
     "Hypergeometric2F0": 1,
     "IncompleteEllipticPi": 1,
-    "Matrix": 1,
     "PolyLog": 1,
-    "SequenceLimitSuperior": 1,
     "Spectrum": 1,
     "Tan": 1,
     "UniqueZero": 1,
     "WeierstrassSigma": 1,
     "WeierstrassZeta": 1
   },
-  "declaredShells": 102,
+  "declaredShells": 98,
   "injected": [
     "zeta-trivial-zeros"
   ],
@@ -204,11 +206,6 @@
       "detail": "symbol"
     },
     {
-      "id": "081188",
-      "reason": "box-error",
-      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k + 1)"
-    },
-    {
       "id": "0851cf",
       "reason": "guard-uncompilable",
       "detail": "unsupported domain \"DirichletGroup\""
@@ -237,11 +234,6 @@
       "id": "0cf60d",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
-    },
-    {
-      "id": "0e2425",
-      "reason": "compat-signature",
-      "detail": "no-fire: fired but produced Matrix([[Fibonacci(_n + 1)],[Fibonacci(_n)]]) ≠ Matrix([[Fibonacci(n + 1)],[Fibonacci(n)]])"
     },
     {
       "id": "0ed026",
@@ -279,11 +271,6 @@
       "detail": "unsupported conjunct \"Or\""
     },
     {
-      "id": "1d5e92",
-      "reason": "box-error",
-      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k)"
-    },
-    {
       "id": "1d65c2",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -294,19 +281,9 @@
       "detail": "unsupported conjunct \"Not\""
     },
     {
-      "id": "1df686",
-      "reason": "box-error",
-      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), 2)"
-    },
-    {
       "id": "1fc63b",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
-    },
-    {
-      "id": "209fc8",
-      "reason": "box-error",
-      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k + 1)"
     },
     {
       "id": "21f4f9",
@@ -317,11 +294,6 @@
       "id": "2251c6",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
-    },
-    {
-      "id": "22ee07",
-      "reason": "box-error",
-      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k)"
     },
     {
       "id": "2371b9",
@@ -409,11 +381,6 @@
       "detail": "symbol"
     },
     {
-      "id": "33139b",
-      "reason": "box-error",
-      "detail": "invalid lhs: SequenceLimitInferior((n) |-> Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))) / Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))), +oo)"
-    },
-    {
       "id": "34fafa",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
@@ -422,11 +389,6 @@
       "id": "361f61",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
-    },
-    {
-      "id": "3a9c67",
-      "reason": "compat-signature",
-      "detail": "no-fire: fired but produced Matrix([[Fibonacci(_n)],[Fibonacci(_n - 1)]]) * Matrix([[1,1],[1,0]])^m ≠ Matrix([[Fibonacci(n)],[Fibonacci(n - 1)]]) * Matrix([[1,1],[1,0]])"
     },
     {
       "id": "3d276b",
@@ -529,11 +491,6 @@
       "detail": "unsupported domain \"SL2Z\""
     },
     {
-      "id": "56d4ff",
-      "reason": "box-error",
-      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k)"
-    },
-    {
       "id": "5706ab",
       "reason": "lhs-not-value-form",
       "detail": "Apply"
@@ -562,11 +519,6 @@
       "id": "5aad5c",
       "reason": "duplicate-undirected",
       "detail": "same equality as 499cfc"
-    },
-    {
-      "id": "5b85bf",
-      "reason": "box-error",
-      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), 1)"
     },
     {
       "id": "5ce30b",
@@ -654,11 +606,6 @@
       "detail": "2-arg LambertW/Digamma"
     },
     {
-      "id": "6e1f13",
-      "reason": "box-error",
-      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k + 1)"
-    },
-    {
       "id": "6ed553",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -682,11 +629,6 @@
       "id": "72cef9",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "72db94",
-      "reason": "box-error",
-      "detail": "invalid rhs: Which(Element(-b, Range(0, n - 1)), ~oo, \"True\", 1 / (n * Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\")), n)))"
     },
     {
       "id": "73b76c",
@@ -914,11 +856,6 @@
       "detail": "no seed satisfying the guards"
     },
     {
-      "id": "988310",
-      "reason": "box-error",
-      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), 0)"
-    },
-    {
       "id": "98a765",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -999,11 +936,6 @@
       "detail": "symbol"
     },
     {
-      "id": "a7dbf6",
-      "reason": "box-error",
-      "detail": "invalid rhs: Which(Element(b, Range(1, n)), (-1)^b / (b * Binomial(n, Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")))), \"True\", ~oo)"
-    },
-    {
       "id": "a8657e",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -1017,11 +949,6 @@
       "id": "acf63c",
       "reason": "no-fire",
       "detail": "no seed satisfying the guards"
-    },
-    {
-      "id": "acfc1f",
-      "reason": "box-error",
-      "detail": " Invalid rule fungrim:acfc1f | the match expression is not valid: SequenceLimitInferior((n) |-> (ln(ln(n)) * Totient(Error(ErrorCode(\"incompatible-type\", \"integ"
     },
     {
       "id": "ad8df6",
@@ -1329,11 +1256,6 @@
       "detail": "symbol"
     },
     {
-      "id": "e87c43",
-      "reason": "box-error",
-      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k)"
-    },
-    {
       "id": "e93f43",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
@@ -1457,11 +1379,6 @@
       "id": "fc0d55",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "feb1a0",
-      "reason": "box-error",
-      "detail": "invalid lhs: SequenceLimitSuperior((n) |-> Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))) / Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))), +oo)"
     },
     {
       "id": "febdd2",

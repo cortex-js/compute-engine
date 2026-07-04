@@ -80,7 +80,7 @@ describe('loadIdentities (full artifact)', () => {
       (r) => r.target === 'simplify'
     ).length;
     expect(report.loaded).toBe(simplifyCount);
-    expect(report.loaded).toBe(1383);
+    expect(report.loaded).toBe(1400);
     // The only default-load skips are the solve templates (solve-disabled).
     expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
       true
@@ -98,16 +98,16 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1383,
+      simplify: 1400,
       solve: 0,
       harmonization: 0,
     });
     expect(report.byPurpose).toEqual({
       // 8 Digamma specific-value rules are tagged 'transform' (cost-gate
       // exempt) so they fire in simplify() — SYM P2-25.
-      simplify: 1264,
+      simplify: 1280,
       transform: 8,
-      expand: 111,
+      expand: 112,
     });
     expect(
       report.byPurpose.simplify +
