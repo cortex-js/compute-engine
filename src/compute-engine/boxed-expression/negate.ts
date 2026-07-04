@@ -3,7 +3,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { isNumber, isFunction } from './type-guards';
-import { addOrder, order, sortProductOperands } from './order';
+import { addOrder, sortProductOperands } from './order';
 
 export function canonicalNegate(expr: Expression): Expression {
   // Negate(Negate(x)) -> x

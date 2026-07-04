@@ -1,5 +1,4 @@
 import { isSubtype } from '../../common/type/subtype';
-import { BoxedType } from '../../common/type/boxed-type';
 
 import type {
   Expression,
@@ -26,7 +25,7 @@ import {
 import { SMALL_INTEGER } from '../numerics/numeric';
 import { bigint } from '../numerics/bigint';
 
-import { order, sortProductOperands } from './order';
+import { sortProductOperands } from './order';
 import { asRadical } from './arithmetic-power';
 import { flatten } from './flatten';
 import { asRational, asSmallInteger } from './numerics';

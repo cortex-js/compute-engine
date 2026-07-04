@@ -6,7 +6,6 @@ import {
   getSequence,
   dictionaryFromExpression,
   machineValue,
-  operands,
   isEmptySequence,
   stringValue,
 } from '../../../math-json/utils';
