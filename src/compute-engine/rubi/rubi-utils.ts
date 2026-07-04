@@ -2340,6 +2340,91 @@ export function activateTrig(ce: ComputeEngine, e: Expression): Expression {
   return mapTrigHeads(ce, e, TO_ACTIVE);
 }
 
+// Reciprocal inert heads → negative power of their base cofunction: `csc→1/sin`,
+// `sec→1/cos`. Unlike Mathematica Rubi — which keeps `csc`/`sec` as distinct
+// inert heads and carries a full parallel family of `(b·csc)^n`/`(b·sec)^n`
+// rules — this port routes reciprocal-head integrands through the sine/cosine
+// POWER rules, which already handle negative exponents (`∫sin·cos^-5` closes
+// but `∫sin·sec^5` did not, because `sec` is an opaque head no `(d·cos)^n`
+// pattern matches). Rewriting the reciprocal to a negative power collapses
+// products like `sin·csc^5 → sin^-4` and exposes `cos·csc^5 → cos·sin^-5` to
+// the odd-power substitution, so the whole `(g cos)^p (a+b sin)^m (c+d sin)^n`
+// (§4.1.2.2) and bare `∫csc^n`/`∫sec^n` families close. Value-preserving.
+const RECIP_BASE: Record<string, string> = { csc: 'sin', sec: 'cos' };
+
+/** Rewrite one node. `frozen` is set inside the base of a NON-integer power:
+ * there the reciprocal must NOT be converted, because `(b·sec[θ])^(1/2)` and
+ * `(b·cos[θ]^-1)^(1/2)` disagree on the principal branch (the √ of a reciprocal
+ * ≠ the reciprocal of the √ where the base is negative) — converting there
+ * flips the sign on part of the real axis (observed as wrong magnitudes on the
+ * half-integer `√(b·sec)` cases). Only integer powers of a reciprocal head are
+ * branch-safe, and those still fold. */
+function reciprocalToPowerRec(
+  ce: ComputeEngine,
+  e: Expression,
+  frozen: boolean
+): Expression {
+  if (e.operator === 'Power' && e.ops?.length === 2) {
+    const [base, exp] = e.ops;
+    const expInt = isLiteralInteger(exp);
+    const recip = RECIP_BASE[base.operator];
+    if (!frozen && expInt && recip !== undefined && base.ops?.length === 1)
+      return ce.function('Power', [
+        ce.function(recip, [reciprocalToPowerRec(ce, base.ops[0], false)]),
+        exp.neg(),
+      ]);
+    const newBase = reciprocalToPowerRec(ce, base, frozen || !expInt);
+    const newExp = reciprocalToPowerRec(ce, exp, frozen);
+    if (newBase === base && newExp === exp) return e;
+    return ce.function('Power', [newBase, newExp]);
+  }
+  const recip = RECIP_BASE[e.operator];
+  if (!frozen && recip !== undefined && e.ops?.length === 1)
+    return ce.function('Power', [
+      ce.function(recip, [reciprocalToPowerRec(ce, e.ops[0], false)]),
+      ce.NegativeOne,
+    ]);
+  const ops = e.ops;
+  if (!ops || ops.length === 0) return e;
+  const newOps = ops.map((o) => reciprocalToPowerRec(ce, o, frozen));
+  if (newOps.every((o, i) => o === ops[i])) return e;
+  return ce.function(e.operator, newOps);
+}
+
+/** True if a `csc`/`sec` reciprocal head appears anywhere in the tree. */
+function hasReciprocalTrig(e: Expression): boolean {
+  if (RECIP_BASE[e.operator] !== undefined) return true;
+  return e.ops?.some(hasReciprocalTrig) ?? false;
+}
+
+/** True if a `csc`/`sec` head appears raised to a NON-integer power (including
+ * under `Sqrt`, or as `(coef·sec)^(1/2)`). Converting such a reciprocal to a
+ * cosine/sine power is branch-unsafe — `√(b·sec) ≠ √(b/cos)` off the principal
+ * branch — and even a branch-safe INTEGER `csc`/`sec` factor sharing the
+ * integrand with such a half-integer reciprocal exposes it to elliptic rules
+ * that return branch-wrong forms. So skip the whole rewrite for those
+ * (R3 half-integer-power territory). A fractional power of a *plain* sin/cos
+ * (with only integer csc/sec present) is unaffected — that conversion is safe
+ * and closes real cases (e.g. `csc/(d·cos)^(7/2)`). */
+function hasFractionalReciprocalTrig(e: Expression): boolean {
+  if (e.operator === 'Sqrt')
+    return e.ops?.[0] ? hasReciprocalTrig(e.ops[0]) : false;
+  if (e.operator === 'Power' && e.ops?.length === 2) {
+    const [base, exp] = e.ops;
+    if (!isLiteralInteger(exp) && hasReciprocalTrig(base)) return true;
+  }
+  return e.ops?.some(hasFractionalReciprocalTrig) ?? false;
+}
+
+/** Rewrite inert reciprocal trig heads to negative powers: `csc[θ]→sin[θ]^-1`,
+ * `sec[θ]→cos[θ]^-1` (identity when neither appears). See the block comment.
+ * Only branch-safe (integer-exponent) occurrences are converted, and the whole
+ * rewrite is skipped for integrands carrying a half-integer csc/sec power. */
+export function reciprocalToPower(ce: ComputeEngine, e: Expression): Expression {
+  if (hasFractionalReciprocalTrig(e)) return e;
+  return reciprocalToPowerRec(ce, e, false);
+}
+
 // ---------------------------------------------------------------------------
 // UnifyInertTrigFunction (cofunction-shift subset) — the last step of Rubi's
 // DeactivateTrig pipeline (IntegrationUtilityFunctions.m). Rubi has NO Cosine

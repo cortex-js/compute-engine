@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### Packaging
+
+- **The `integration-rules` plugin shares code with the main library.** The
+  ESM builds of `compute-engine` and the opt-in
+  `@cortex-js/compute-engine/integration-rules` entry point are now emitted
+  with code splitting: the engine core lives in a shared chunk imported by
+  both, instead of being bundled twice. This shrinks the combined download
+  and fixes cross-bundle `instanceof` failures when a host mixed objects from
+  the two bundles. The UMD builds remain self-contained single files.
+
 ### Lenient parsing and string helpers
 
 - **The string helpers take a `strict` option.** `simplify()`, `evaluate()`,

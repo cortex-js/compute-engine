@@ -33,7 +33,7 @@ import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards'
 
 import { loadTests, Problem } from './load-tests';
 import type { Json } from './wl-parser';
-import { compileSection } from './compile';
+import { readCorpusDocs, compileRuleDocs } from './compile';
 import { RubiDriver } from '../../src/compute-engine/rubi/driver';
 
 // pass tolerance for central-difference verification (h=1e-4: truncation
@@ -548,9 +548,41 @@ function main(): void {
   if (rubiRules !== null) {
     const ce = new ComputeEngine();
     const t0 = Date.now();
-    const { rules, skipped } = compileSection(ce, rubiRules);
+    // The trig/exponential/hyperbolic chapters are NOT self-contained: their
+    // reduction chains bottom out in algebraic base-case integrals that live
+    // in Chapter 1 — e.g. ∫1/(a+b·sin) does a tangent-half-angle substitution
+    // to ∫1/(a+2b·x+a·x²), an algebraic quadratic-rational integral closed by
+    // Chapter-1 rules 1082/1083/217. Loading a higher chapter WITHOUT its
+    // Chapter-1 foundation strands every such residual as an inert Integrate.
+    // The shipped `loadIntegrationRules` bundles exactly this foundation
+    // (Chapters 1, 2, 6 + the target section); mirror it here so the benchmark
+    // measures the integrator as it actually ships. Foundation dirs are
+    // prepended (higher rule priority, matching Rubi's global rule order where
+    // the algebraic rules precede the trig rules) and de-duplicated against the
+    // target so pointing `--rubi` at a foundation chapter is a no-op.
+    const corpusRoot = path.dirname(rubiRules);
+    const foundationDirs = (
+      process.env.RUBI_NO_FOUNDATION !== undefined
+        ? []
+        : ['1 Algebraic functions', '2 Exponentials', '6 Hyperbolic functions']
+    )
+      .map((d) => path.join(corpusRoot, d))
+      .filter(
+        (d) =>
+          fs.existsSync(d) &&
+          path.resolve(d) !== path.resolve(rubiRules) &&
+          !path.resolve(rubiRules).startsWith(path.resolve(d) + path.sep)
+      );
+    const docs = [
+      ...foundationDirs.flatMap((d) => readCorpusDocs(d)),
+      ...readCorpusDocs(rubiRules),
+    ];
+    const { rules, skipped } = compileRuleDocs(ce, docs);
     console.log(
-      `rubi: compiled ${rules.length} rules (${skipped.length} skips) in ${Date.now() - t0}ms`
+      `rubi: compiled ${rules.length} rules (${skipped.length} skips) in ${Date.now() - t0}ms` +
+        (foundationDirs.length
+          ? ` [+foundation: ${foundationDirs.map((d) => path.basename(d)).join(', ')}]`
+          : '')
     );
     if (skipped.length > 0)
       console.log(

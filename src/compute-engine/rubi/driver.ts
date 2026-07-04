@@ -27,6 +27,7 @@ import {
   deactivateTrig,
   unifyInertTrig,
   activateTrig,
+  reciprocalToPower,
   containsHyperbolic,
   expandHyperbolicToExp,
   foldLnExponentialE,
@@ -59,6 +60,9 @@ const NO_NATIVE_RATIONAL = process.env.RUBI_NO_NATIVE_RATIONAL !== undefined;
 // (the screen only drops rules that provably cannot match); this switch
 // exists to A/B that equivalence and to measure the screen's speedup.
 const NO_SKELETON = process.env.RUBI_NO_SKELETON !== undefined;
+// RUBI_NO_RECIP: disable the csc/sec → sin^-1/cos^-1 reciprocal normalization
+// (for A/B measuring its effect on the benchmark).
+const NO_RECIP = process.env.RUBI_NO_RECIP !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -67,6 +71,13 @@ function hasInexactFloat(e: Expression): boolean {
 function containsIntegrate(e: Expression): boolean {
   if (e.operator === 'Integrate') return true;
   return e.ops?.some(containsIntegrate) ?? false;
+}
+
+/** True if the expression tree contains an `Error` node — a rule RHS that
+ * failed to build a well-formed call (see the reject site in intUncached). */
+function containsError(e: Expression): boolean {
+  if (e.operator === 'Error') return true;
+  return e.ops?.some(containsError) ?? false;
 }
 
 /** All operator heads appearing in the (function nodes of the) expression
@@ -309,6 +320,14 @@ export class RubiDriver {
     // no-op for algebraic integrands.
     if (this.trigActive) integrand = deactivateTrig(ce, integrand);
 
+    // Route reciprocal-head integrands (csc/sec) through the sine/cosine POWER
+    // rules by rewriting `csc→sin^-1`, `sec→cos^-1` (see reciprocalToPower).
+    // Before normalization/unification so reciprocal powers fold into the
+    // adjacent sine/cosine powers (`sin·csc^5 → sin^-4`) and the cofunction
+    // shift sees a plain sin/cos product rather than an opaque reciprocal head.
+    if (this.trigActive && !NO_RECIP)
+      integrand = reciprocalToPower(ce, integrand);
+
     // Rubi rules match against the Times/Power normal form
     integrand = toTimesPower(ce, integrand);
 
@@ -486,6 +505,16 @@ export class RubiDriver {
             // fallback below get their chance.
             if (result.operator === 'Integrate') {
               trace(rule.id, 'rule-fail: no progress (inert result)');
+              continue;
+            }
+            // A result carrying an `Error` node is not a valid antiderivative:
+            // it means the RHS built a malformed call (e.g. a Chapter-1 `Apart`
+            // whose variable argument was lost on a trig subexpression). Reject
+            // the rule so lower-priority rules get their chance and the
+            // integrand stays cleanly inert rather than surfacing a broken,
+            // non-evaluable result to the caller.
+            if (containsError(result)) {
+              trace(rule.id, 'rule-fail: result contains Error');
               continue;
             }
             this.stats.ruleFirings[rule.id] =

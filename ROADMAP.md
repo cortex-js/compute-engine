@@ -204,6 +204,29 @@ only), plus defensive duck-typing in `numerics/bigint.ts` and `e.name`-based
 claim was a mismeasure — the clean tree was already 46/1/0). Sample 400:
 140/1/0.
 
+**Landed (2026-07-04) — R2.** The binomial-product chains close. The blocker
+was **not** a missing Chapter-4 utility: (a) the benchmark's `--rubi` mode
+loaded Chapter 4 *without* the Chapter-1 algebraic foundation the shipped
+loader bundles, stranding every reduction's base case (the tangent-half-angle
+substitution in `4.1.1.1#27` emits `∫1/(a+2bx+ax²)dx`, a Ch1 rule) — the
+harness now preloads ch1/2/6 in `--rubi` mode so it measures the integrator
+as it ships (`RUBI_NO_FOUNDATION` to disable; **pre-2026-07-04 4.1 baselines
+are not comparable**); (b) inert `csc`/`sec` heads blocked the power rules —
+new `reciprocalToPower` normalization in `rubi-utils.ts` (`csc→sin⁻¹`,
+`sec→cos⁻¹`, branch-guarded: frozen under fractional powers where
+`√(b·sec) ≠ √(b/cos)` off the principal branch), applied in the driver after
+`deactivateTrig` (`RUBI_NO_RECIP` to A/B). Also: a `containsError` guard
+rejects rule results carrying `Error` nodes as no-progress. **4.1 Sine:
+47 → 96/120 (seed 5), 0 genuine wrong / 0 not-evaluable** (#1395 wrong →
+unsolved); sample 400: 140 → 288, where the 3 remaining "wrongs" are
+**verification false-wrongs** — symbolically correct hypergeometric
+antiderivatives (verified: derivative ratio 1.0 at every sample point) that
+the harness's numeric 2F1/AppellF1 evaluation mis-grades when substituting
+*non-integer* values for symbolic exponents. Expect the harness to keep
+flagging that class on future 4.1 rungs. Ch1 regression: 180/200 (+1), same
+6 pre-existing wrongs. The core integer-power `(a+b sin)^m(c+d sin)^n` class
+is closed (4.1.2.1: 12→2 unsolved; 4.1.2.2: 17→1).
+
 **Method note (hard-won).** The "unimplemented-predicate" trace census is
 *misleading* for picking levers: the late catch-all rules
 (`FunctionOfTrigOfLinearQ`, `TrigSimplifyQ`) are checked on nearly every unsolved
@@ -218,29 +241,28 @@ Trace[Rubi`Int[Cos[x]^4, x], HoldPattern[Rubi`Int[_, _]]]
 Rubi`Private`DeactivateTrig[Cos[x]^4, x]   (* -> sin[Pi/2 + x]^4 *)
 ```
 
-**Next rungs (priority order — start at R2).** Each is a self-contained work
+**Next rungs (priority order — start at R3).** Each is a self-contained work
 item: do the change, then verify with the benchmark command above (watch
-`solved-correct` climb while `wrong`/`not-evaluable` stay at the 1/0 baseline).
-Diagnose any stall per the Method note — trace the residual integrand, don't
-trust the predicate census.
+`solved-correct` climb while genuine `wrong`/`not-evaluable` stay 0 — but see
+the R2 note on hypergeometric verification false-wrongs). Diagnose any stall
+per the Method note — trace the residual integrand, don't trust the predicate
+census.
 
-- **R2 — `(a+b sin)^m (c+d sin)^n` binomial-product chains** (4.1.2 / 4.1.3 /
-  4.1.4): the trig analog of Chapter 1's binomial products and the bulk of the
-  ~73 remaining 4.1 Sine unsolved. The rules are already translated and now
-  bundled; they stall on a residual that doesn't close or a missing utility —
-  trace the *residual integrand* of a few unsolved 4.1.2 cases to find which,
-  then fill that gap. Known adjacent classes from the R1 probe (may or may not
-  be the same gap): 3-factor mixed products (`cos²·csc²·(a+a sin)` — no Rubi
-  two-factor unify clause exists; Rubi's 3-factor clauses need cos *binomials*)
-  and csc/sec-only pairings (`(a csc)^m(b sec)^n`, 4.1.0.3).
-- **R3 — `√(a+b sin)` half-integer powers** (4.1.7). The R1 probe showed
-  converted 4.1.0 cases reaching the sine rules but stalling on exactly these
-  shapes (`(d sin)^(±k/2)·sec^n` etc.) — the sine chapter lacks the
-  half-integer/negative exponent combos, so R3 likely unlocks part of R1's
-  conversion work too.
+- **R3 — half-integer / elliptic powers** (4.1.7 and friends): `√(b·sec)`,
+  `(e·cos)^(7/2)`, `(c+d·sin)^(5/2)`, `(a+a·sin)^(3/2)`, `√(a+b·sin⁴)` — the
+  bulk of what R2 left unsolved, and several are exactly the false-wrong
+  hypergeometric class. The R1 probe showed converted 4.1.0 cases reaching the
+  sine rules but stalling on these shapes (`(d sin)^(±k/2)·sec^n` etc.); note
+  `reciprocalToPower` deliberately freezes csc/sec under *fractional* powers
+  (branch safety), so this rung needs the genuine half-integer rules, not a
+  normalization tweak.
+- **R9 — polynomial×trig & nonlinear arguments** (4.1.10 / 4.1.11 / 4.1.12):
+  `(c+d·x)^m·(a+b·sin)^n`, `sin(a+b/x)`, `sin(a+b·xⁿ)^(1/3)` — a distinct
+  family from R3; several members are genuinely `Unintegrable` and correctly
+  stay inert, so grade against Rubi's own test-suite expectations.
 - **R5 — `TrigSimplify`/`TrigSimplifyQ`** (Pythagorean reductions). _Low value /
   optional:_ the predicate census over-weights it (it's a late catch-all, not a
-  blocker). Only pursue if R2–R3 leave a concrete residual class that needs it.
+  blocker). Only pursue if R3/R9 leave a concrete residual class that needs it.
 
 **Exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules) are
 DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty). The
