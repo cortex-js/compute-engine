@@ -140,6 +140,25 @@
   order, with the same budget, exact-confirmation, and interruption
   guarantees as the univariate case.
 
+- **Integer equations are solved symbolically (diophantine solving).** When
+  every unknown ranges over integers, `Solve` recognizes **linear** equations
+  in any number of unknowns and **Pell-family** equations $x^2 - Dy^2 = N$
+  (including the elliptic case $x^2 + |D|y^2 = N$) and solves them in closed
+  form — ported from SymPy's diophantine module and validated against its
+  test suite. Over a bounded domain this reaches answers enumeration cannot:
+  `Solve(x^2-29y^2=1,\; x \in 1..10^5,\; y \in 1..10^5)` →
+  `[(9801, 1820)]` via continued fractions, where the $10^{10}$-candidate
+  sweep would be refused; an unsolvable equation is decided instantly
+  (`Solve(6x+9y=4,\; x \in \pm10^6,\; y \in \pm10^6)` → `[]`). With
+  integer-typed unknowns and no domain — previously inert — `Solve` returns
+  the **parametric family**: `Solve(3n+4m=7, n, m)` →
+  `[(4t-7,\; -3t+7)]` with the fresh parameter `t` ranging over ℤ, and Pell
+  equations yield their exact closed forms
+  $\bigl(\tfrac{(3+2\sqrt2)^t + (3-2\sqrt2)^t}{2}, \dots\bigr)$. Every
+  concrete solution is exact-confirmed by substitution; half-bounded domains
+  (e.g. $n \ge 1$ alone) are left unevaluated rather than risk dropping a
+  constraint.
+
 - **Periodic equations expand their root families over a bounded domain.**
   `Solve(\sin x = \tfrac12,\; x \in [0, 4\pi])` returns all four exact
   solutions $\tfrac{\pi}{6}, \tfrac{5\pi}{6}, \tfrac{13\pi}{6},
