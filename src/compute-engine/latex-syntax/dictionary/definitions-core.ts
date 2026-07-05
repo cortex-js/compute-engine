@@ -563,6 +563,17 @@ function serializeKeyword(
   return `\\text{${lead}${word}${trail}}`;
 }
 
+// Pipeline operator (`\rhd`, `\triangleright`, `|>`): the argument on the
+// left is applied to the function on the right, e.g. `x |> f` -> `f(x)`
+function parsePipeline(
+  parser: Parser,
+  lhs: MathJsonExpression,
+  _until: Readonly<Terminator>
+): MathJsonExpression {
+  const rhs = parser.parseExpression({ minPrec: 21 }) ?? 'Nothing';
+  return ['Apply', rhs, lhs] as MathJsonExpression;
+}
+
 export const DEFINITIONS_CORE: LatexDictionary = [
   //
   // Constants
@@ -733,14 +744,31 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     precedence: 20,
     parse: 'Apply',
   },
+  // Pipeline operator: `x \rhd f` (also `x \triangleright f`, `x |> f`)
+  // applies the function on the right to the argument on the left
   {
     latexTrigger: '\\rhd',
     kind: 'infix',
     precedence: 20,
-    parse: (parser: Parser, lhs: MathJsonExpression, _until) => {
-      const rhs = parser.parseExpression({ minPrec: 21 }) ?? 'Nothing';
-      return ['Apply', rhs, lhs] as MathJsonExpression;
-    },
+    parse: parsePipeline,
+  },
+  {
+    latexTrigger: '\\triangleright',
+    kind: 'infix',
+    precedence: 20,
+    parse: parsePipeline,
+  },
+  {
+    latexTrigger: '|>',
+    kind: 'infix',
+    precedence: 20,
+    parse: parsePipeline,
+  },
+  {
+    latexTrigger: ['⊳'], // U+22B3 CONTAINS AS NORMAL SUBGROUP
+    kind: 'infix',
+    precedence: 20,
+    parse: parsePipeline,
   },
 
   {

@@ -610,6 +610,47 @@ describe('APPLY', () => {
       `f^{-1}()`
     );
   });
+
+  // The pipeline operator applies the lhs argument to the rhs function:
+  // `\rhd`, `\triangleright`, `|>` and `⊳` are synonyms
+  test('pipeline x \\rhd f', () =>
+    expect(ce.parse('x \\rhd f', { canonical: false }).json).toEqual([
+      'Apply',
+      'f',
+      'x',
+    ]));
+  test('pipeline x \\triangleright f', () =>
+    expect(ce.parse('x \\triangleright f', { canonical: false }).json).toEqual([
+      'Apply',
+      'f',
+      'x',
+    ]));
+  test('pipeline x |> f', () =>
+    expect(ce.parse('x |> f', { canonical: false }).json).toEqual([
+      'Apply',
+      'f',
+      'x',
+    ]));
+  test('pipeline x ⊳ f', () =>
+    expect(ce.parse('x ⊳ f', { canonical: false }).json).toEqual([
+      'Apply',
+      'f',
+      'x',
+    ]));
+  test('pipeline chains left-associatively', () =>
+    expect(ce.parse('x |> f |> g', { canonical: false }).json).toEqual([
+      'Apply',
+      'g',
+      ['Apply', 'f', 'x'],
+    ]));
+  test('pipeline evaluates', () =>
+    expect(ce.parse('\\pi |> \\cos').evaluate().json).toEqual(-1));
+  test('|> does not break absolute value: |x|>2', () =>
+    expect(ce.parse('|x|>2', { canonical: false }).json).toEqual([
+      'Greater',
+      ['Abs', 'x'],
+      2,
+    ]));
 });
 
 // `--`/`++` are read as repeated unary minus/plus (double negation), not as
