@@ -106,6 +106,14 @@ export function primeFactors(n: number): { [factor: number]: number } {
   let done = false;
   while (!done) {
     if (n === 1) return result;
+    // A large remaining cofactor may itself be prime: trial division would
+    // then run all the way to √n. Miller–Rabin settles it immediately.
+    // (Below 2^32 `isPrimeBigint` falls back to trial division, so only
+    // consult it where it uses Miller–Rabin.)
+    if (n >= 2 ** 32 && isPrimeBigint(BigInt(n))) {
+      result[n] = (result[n] ?? 0) + 1;
+      return result;
+    }
     const sr = Math.sqrt(n);
     done = true;
     for (let i = 6; i <= sr + 6; i += 6) {
@@ -275,11 +283,22 @@ export function bigPrimeFactors(d: bigint): Map<bigint, number> {
   k = BigInt(7);
   let kIndex = '';
   let i = 0;
-  while (k * k < n) {
+  // A large remaining cofactor may itself be prime: the wheel would then
+  // trial-divide all the way to √n (minutes for a 20-digit prime).
+  // Miller–Rabin settles primality in polynomial time, so consult it each
+  // time the cofactor changes (above the threshold where `isPrimeBigint`
+  // uses Miller–Rabin rather than trial division).
+  let checkPrime = true;
+  while (k * k <= n) {
+    if (checkPrime) {
+      if (n >= MILLER_RABIN_THRESHOLD && isPrimeBigint(n)) break;
+      checkPrime = false;
+    }
     if (n % k === BigInt(0)) {
       if (!kIndex) kIndex = k.toString();
       result.set(kIndex, (result.get(kIndex) ?? 0) + 1);
       n = n / k;
+      checkPrime = true;
     } else {
       k = k + PRIME_WHEEL_INC[i];
       kIndex = '';
