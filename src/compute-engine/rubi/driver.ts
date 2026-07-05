@@ -327,7 +327,7 @@ export class RubiDriver {
     // trig in their recursive Int subproblems, so this must run per-intRec,
     // not just at the top-level entry. Gated by trigActive so it is a strict
     // no-op for algebraic integrands.
-    if (this.trigActive) integrand = deactivateTrig(ce, integrand);
+    if (this.trigActive) integrand = deactivateTrig(ce, integrand, variable);
 
     // Rubi-faithful cofunction routing: reflect the UNAUTHORED head of each
     // reciprocal-trig pair onto the AUTHORED one — `sec→csc[+π/2]`,
@@ -654,11 +654,17 @@ export class RubiDriver {
     // (linear-argument sin/cos never reaches this — the rules close it first;
     // non-monomial/quadratic arguments are declined). The expanded form has no
     // trig heads, so it cannot re-enter here.
+    // Nonlinear-argument trig is now left ACTIVE by the linear-only
+    // deactivation (so the substitution rules can match it); fully deactivate
+    // here so the inert-keyed gate/rewrite below sees `sin`/`cos`. This runs
+    // only after all rules (incl. the active-Sin substitution rules) declined,
+    // so it is the exp-route safety net for the monomial family the rules leave.
+    const inertIntegrand = deactivateTrig(ce, integrand);
     if (
-      containsInertSinCos(integrand) &&
-      sinCosArgNonlinearExpandableQ(integrand, variable)
+      containsInertSinCos(inertIntegrand) &&
+      sinCosArgNonlinearExpandableQ(inertIntegrand, variable)
     ) {
-      const expanded = expandTrigToExp(ce, integrand);
+      const expanded = expandTrigToExp(ce, inertIntegrand);
       if (!containsInertSinCos(expanded)) {
         const F = this.intRec(
           recanonicalize(ce, expanded),

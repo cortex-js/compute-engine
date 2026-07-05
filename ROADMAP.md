@@ -328,19 +328,42 @@ negative-order incomplete Γ don't evaluate numerically — they block the exp
 route for `∫x·sin(a+b/x)`-class integrands whose antiderivatives are otherwise
 correct (the fallback declines them, so they stay cleanly unsolved).
 
+**Landed (2026-07-04) — R14, argument-aware trig deactivation.** The "matcher
+declines Subst" framing was a red herring — the real bug was
+**deactivation timing**: CE inerted ALL trig up front, but the
+4.1.12/4.1.13 substitution/completing-the-square rules are authored on
+ACTIVE `Sin` of composite arguments (Rubi's `DeactivateTrigAux` only inerts
+when the argument is linear). `deactivateTrig` is now argument-aware: x-free /
+linear / bare-monomial (incl. `a+b/x`) arguments deactivate as before
+(byte-identical, so nothing can regress); deg-2 quadratics and
+positive-fractional powers of a linear inner (`√(c+d·x)`, via
+`fractionalLinearInnerQ` — note the canonical `Sqrt` head) stay ACTIVE;
+deg-≥3 integer composites deactivate (leaving them active routed them to
+Rubi's raw exp-rewrite whose `(±i·xⁿ)^(…)` form mis-verifies at negative x —
+R9's `expandTrigToExp` path produces the branch-consistent form). **4.1 Sine:
+106 → 107/120, 314 → 317/400 (seed 5), 0 genuine wrongs**; #156
+(`∫sin(b·(c+d·x)²)` → FresnelS) and #187 (`√(c+d·x)` inner) now solve; #172
+deliberately gated to unsolved (cube-root-branch false-wrong class — correct
+at positive x, matches Rubi's own Γ form). 4.5/ch1/ch2/ch6 unchanged. All
+R9 wins preserved. RUBI.md §5 Phase R14 has the detail.
+
 **Next rungs (priority order).** Each is a self-contained work item: do the
 change, then verify with the benchmark command above (watch `solved-correct`
 climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
 hypergeometric verification false-wrongs). Diagnose any stall per the Method
 note — trace the residual integrand, don't trust the predicate census.
 
-- **R14 — Si/Ci Subst-routing.** The `SinIntegral`/`CosIntegral` kernels work
-  (verified end-to-end on #156), but the rules that produce them
-  (4.1.10/4.1.11 #23/#25–28, covering all 6 genuine 4.1.11 gaps
-  `∫sin(c+d·x)/(a+b·xⁿ)` and several 4.1.10 chains) use `Subst` forms the
-  structural matcher declines to bind. Fix the matcher/utility gap, not the
-  rules. Also unblocked by this shape: the 4.1.12 linear-inner Fresnel
-  routings (`(e+f·x)ⁿ`, `√(c+d·x)` inner arguments — #156/#172/#187).
+- **R15 — rational×sin(linear) → Si/Ci driver fallback.** The second half of
+  what R14's diagnosis split off: `∫sin(c+d·x)/(a+b·xⁿ)` (the 4.1.11 six) and
+  the 4.1.10 Si/Ci chains (#30/#112/#197/#294) are handled in Rubi by
+  `ExpandIntegrand`/`E^(i·x)` rules on ACTIVE linear-arg `Sin` — but CE must
+  inert linear-arg sin (the inert Si rule 4.1.10 #4 and most of chapter 4
+  depend on it), so the deactivation predicate can't unblock these without
+  regression. Needs an R9-style scoped driver fallback: partial-fraction the
+  rational, route each piece to Si/Ci, with the numeric self-check declining
+  the complex-Si members (#61/#71/#72 have imaginary roots → complex Si/Ci,
+  likely not-evaluable per the R9 kernel note; #18/#23/#89 have real Si/Ci
+  and are winnable).
 - **R12 — bundle 4.3 Tangent.** Three parts, per the R11 landing (RUBI.md §5
   Phase R11): (a) add the 4.3 corpus to the bundler allowlist; (b) turn on the
   `cot → −tan[θ+π/2]` leaf shift (implemented in R11 but default-OFF behind

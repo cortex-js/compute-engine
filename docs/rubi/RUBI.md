@@ -781,6 +781,70 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     budget (inconclusive, not correct) and preempts trig-form rules chapter-
     wide — deferred to a proper trig `TrigReduce` (multiple-angle, elementary
     form) or a larger verification budget.
+- **Phase R14 — nonlinear-composite argument routing (Fresnel / Si-Ci) LANDED
+  (2026-07-04).** The diagnosed "the matcher declines the `Subst` forms" gap
+  turned out to be a **deactivation-timing** bug, not a matcher bug:
+  `deactivateTrig` inerted the WHOLE integrand's trig up-front, but a set of
+  4.1.11/4.1.12/4.1.13 rules are authored on the **active** `Sin`/`Cos` head —
+  Mathematica leaves trig un-inerted until its argument is LINEAR, and Rubi's
+  `DeactivateTrigAux` reflects that (`LinearQ[u[[1]],x]` guard). So the
+  substitution rules (4.1.12 #11-14/#81-86: `Subst` a linear inner
+  `(e+f·x)ⁿ`; #29-40: the bare-monomial exp rewrite) and the completing-the-
+  square rules (4.1.13, quadratic `Sin[a+b·x+c·x²]`) never saw an integrand
+  whose composite-argument trig CE had already flattened to inert `sin`. Fix
+  (`rubi-utils.ts` `deactivateTrig` + one driver call site, `driver.ts`), no
+  corpus/bundle change:
+  - **`deactivateTrig(ce, e, x)` is now argument-aware** — it deactivates a trig
+    head only when its argument is x-free, LINEAR, or a **bare monomial**
+    `c+d·xᵏ` (incl. the reciprocal `a+b/x`, k<0), and leaves a **composite**
+    argument ACTIVE: a deg-2 quadratic (`b·(c+d·x)²` → 4.1.13 → real
+    FresnelS/FresnelC) or a positive-fractional power of a linear inner
+    (`√(c+d·x)` → elementary sin/cos·poly). deg-≥3 integer composites
+    (`(c+d·x)³`) are DEACTIVATED on purpose (see below). Passing no `x` keeps the
+    legacy full deactivation, which the trig→exp fallback uses to normalize a
+    still-active residual before rewriting.
+  - **Why the monomial/deg-≥3 carve-out (soundness).** Left fully to the
+    active-Sin rules, the bare-monomial `∫(e·x)ᵐ·sin(c+d·xⁿ)` fires Rubi's raw
+    exp-rewrite (#37-40), which emits an `(±i·d·xⁿ)^((m+1)/n)` incomplete-Γ form
+    whose fractional-power branch reads WRONG at negative x (float coefficients
+    too) — it regressed #62 (correct→wrong) and pushed #172/#150 unsolved→wrong.
+    The driver's own R9 trig→exp fallback (`expandTrigToExp` + a cleanup
+    `simplify`) produces the SAME antiderivative in a **branch-consistent** form
+    that verifies, so bare monomials are routed there (deactivated → rules
+    decline → fallback), and the deg-≥3 integer composite — whose substitution
+    reduces to the same fragile complex Γ (#172) — is left cleanly **unsolved**
+    ("unsolved beats a branch-fragile wrong"). The fallback's inert-`sin` gate
+    is fed a full deactivation of the (now possibly still-active) integrand.
+  - **Numbers (seed 5, `--rubi`).** 4.1 Sine 120: **106 → 107** correct (+1), 0
+    genuine wrong / 0 not-evaluable; 400: **314 → 317** correct (+3), **3 wrong
+    (the documented #690/#205/#116 false-wrongs — unchanged), 0 new wrongs**, 0
+    not-evaluable. No regressions: 4.5 Secant 120 = 56 (3 documented R11
+    false-wrongs), ch1 200 = 180/6, ch2 60 = 33/1/3, ch6 60 = 17/0/1 — the shift
+    is a strict no-op off its nonlinear-composite-trig shape (algebraic/hyperbolic
+    integrands never enter, and linear/monomial-arg trig deactivates exactly as
+    before). Rubi unit suites green (+9 focused tests in `rubi-utils.test.ts`:
+    the linear-only deactivation predicate + two end-to-end Si/Ci integrals).
+  - **Closed:** 4.1.12 **#156** (`∫sin(b·(c+d·x)²)` → FresnelS) and **#187**
+    (`∫(e+f·x)²·sin(a+b·√(c+d·x))` → elementary); the 4.1.13 quadratic-argument
+    completing-the-square family becomes reachable; #328/#329 stay correct
+    (R9-fallback form). **Gated to unsolved:** #172 (`(c+d·x)³` cubic composite →
+    branch-fragile complex Γ; correct at positive x, mis-verifies at negative x —
+    a verification-false-wrong of the documented cube-root class, held out of the
+    wrong column).
+  - **NOT addressed — the linear-arg-Sin × rational family (R15 candidate).** The
+    "6 genuine 4.1.11 gaps" (`∫sin(c+d·x)/(a+b·xⁿ)`, e.g. #23/#18/#89 with real
+    Si/Ci, #61/#71/#72 with complex Si/Ci) and the 4.1.10 Si/Ci chains
+    (#30/#112/#197/#294, `(c+d·x)ᵐ·trig/(a+b·sin)`) turned out to be a DIFFERENT
+    mechanism: those rules (4.1.11 #5/#11-22 `ExpandIntegrand`; 4.1.10 #25-28
+    E^(i·x) rewrite) are authored on active `Sin` of a **LINEAR** argument
+    multiplied by a rational — but CE MUST inert linear-arg sin (the working
+    inert 4.1.10 #4 `sin/(c+d·x)`→Si rule and the bulk of chapter 4 depend on
+    it), so keeping them active would regress. Closing them needs a scoped,
+    R9-style `rational(x)·sin[linear]` → partial-fraction → Si/Ci driver fallback
+    (with a numeric self-check to decline the complex-Si cases as R9 does for
+    complex-Ei) — deferred to keep R14's zero-regression / zero-new-wrong
+    guarantee. Deactivation-timing (active vs inert Sin) is the through-line for
+    both R14 and this residual.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

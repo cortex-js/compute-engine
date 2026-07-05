@@ -2329,9 +2329,95 @@ function mapTrigHeads(
   return ce.function(newHead, newOps);
 }
 
-/** Active → inert: `Cos[x]` → `cos[x]`. Applied to integrands on driver entry. */
-export function deactivateTrig(ce: ComputeEngine, e: Expression): Expression {
-  return mapTrigHeads(ce, e, TO_INERT);
+/** True if `u` contains a `Power(base, p)` whose base is LINEAR in `x` and
+ * whose exponent `p` is a POSITIVE non-integer literal (`√(c+d·x)`,
+ * `(c+d·x)^(3/2)`) — the linear-inner shape whose substitution reduction
+ * (4.1.12 #81-86) lands an elementary sin/cos·poly antiderivative. Distinguishes
+ * `√(c+d·x)` (kept active) from a reciprocal `b/x` / `(c+d·x)^(-1)` (negative
+ * exponent ⇒ NOT matched ⇒ deactivated, so the reciprocal declines cleanly). */
+function fractionalLinearInnerQ(u: Expression, x: string): boolean {
+  // `√(c+d·x)` canonicalizes to a `Sqrt` head, not `Power`.
+  if (u.operator === 'Sqrt' && u.ops && polyDegreeX(u.ops[0], x) === 1)
+    return true;
+  if (u.operator === 'Power' && u.ops) {
+    const [base, exp] = u.ops;
+    if (polyDegreeX(base, x) === 1 && exp.isNumberLiteral) {
+      const e = exp.re;
+      if (typeof e === 'number' && e > 0 && !Number.isInteger(e)) return true;
+    }
+  }
+  return (u.ops ?? []).some((o) => fractionalLinearInnerQ(o, x));
+}
+
+/** Active → inert: `Cos[x]` → `cos[x]`. Applied to integrands on driver entry.
+ *
+ * Rubi-faithful `DeactivateTrigAux` (with one deliberate CE refinement): a trig
+ * head is deactivated when its argument is LINEAR in `x`, x-free, or a BARE
+ * MONOMIAL `c+d·xᵏ`. A trig of a COMPOSITE nonlinear argument — a linear base
+ * raised to a power (`Sin[a+b·(c+d·x)ⁿ]`, `Sin[a+b·√(c+d·x)]`) or a genuine
+ * quadratic/polynomial (`Sin[a+b·x+c·x²]`) — is left ACTIVE, because the
+ * substitution / completing-the-square rules that reduce such arguments to
+ * linear form (4.1.11/4.1.12 #11-14/#81-86, 4.1.13) are authored on the ACTIVE
+ * `Sin`/`Cos` head (Mathematica keeps them un-inerted until the argument is
+ * linear). Deactivating them unconditionally (the previous behavior) made those
+ * rules structurally unmatchable, stranding the Fresnel / Si-Ci
+ * `∫(e+f·x)ᵐ·sin(c+d·(e+f·x)ⁿ)` families (docs/rubi/RUBI.md §5, Phase R14).
+ *
+ * The CE refinement vs. Rubi: a bare-monomial argument (`Sin[c+d·xⁿ]`) is also
+ * deactivated, even though Rubi keeps it active. Rubi's own bare-monomial
+ * exp-rewrite rules (#37-40) then emit a raw `(±i·d·xⁿ)^((m+1)/n)`
+ * incomplete-Γ form whose fractional-power branch reads WRONG at negative x
+ * (and carries float coefficients); the driver's own trig→exp fallback
+ * (`expandTrigToExp` + `cleanExpansionResult`) produces the SAME antiderivative
+ * in a simplified, branch-consistent form that verifies cleanly. So bare
+ * monomials are routed to that fallback (deactivated here → rules decline →
+ * fallback), while composite arguments — which the fallback's monomial gate
+ * declines — go to the substitution rules. Both land at the same place; this
+ * split just picks the correct-verifying representative per shape.
+ *
+ * Passing no `x` (undefined) performs the legacy FULL deactivation (every trig
+ * head), which the driver's trig→exp fallback uses to normalize a residual
+ * (possibly still-active) nonlinear-argument integrand before rewriting it. */
+export function deactivateTrig(
+  ce: ComputeEngine,
+  e: Expression,
+  x?: string
+): Expression {
+  if (x === undefined) return mapTrigHeads(ce, e, TO_INERT);
+  const walk = (u: Expression): Expression => {
+    const ops = u.ops;
+    if (!ops || ops.length === 0) return u;
+    const newOps = ops.map(walk);
+    let head = u.operator;
+    if (TO_INERT[head] !== undefined && ops.length === 1) {
+      const arg = ops[0];
+      const deg = polyDegreeX(arg, x);
+      // Leave ACTIVE only a composite argument whose substitution / completing-
+      // the-square reduction lands a VERIFYING closed form:
+      //   • deg 2 (quadratic, incl. `b·(c+d·x)²`) → 4.1.13 completes the square
+      //     to a real FresnelS/FresnelC — clean (e.g. #156).
+      //   • a positive-fractional power of a LINEAR inner (`√(c+d·x)`) → an
+      //     elementary sin/cos·poly reduction (e.g. #187).
+      // Everything else is deactivated so the inert rules + the driver's own
+      // trig→exp fallback handle it:
+      //   • deg 0/1 — x-free / linear (the ordinary inert path);
+      //   • bare monomial `c+d·xᵏ` (incl. the reciprocal `a+b/x`, k<0) — the
+      //     fallback's simplified, branch-consistent form / clean decline
+      //     (keeps #62 verifying, `∫x·sin(a+b/x)` unsolved);
+      //   • deg ≥ 3 integer composite (`(c+d·x)³`) — its substitution reduces to
+      //     a COMPLEX-argument incomplete-Γ whose fractional-power branch reads
+      //     wrong at negative x (#172); deactivating leaves it cleanly unsolved
+      //     (the fallback's monomial gate declines a non-monomial argument) —
+      //     "unsolved beats a branch-fragile wrong".
+      const monomial = trigArgMonomialExponent(arg, x) !== null;
+      const composite =
+        !monomial && (deg === 2 || fractionalLinearInnerQ(arg, x));
+      if (!composite) head = TO_INERT[head];
+    }
+    if (head === u.operator && newOps.every((o, i) => o === ops[i])) return u;
+    return ce.function(head, newOps);
+  };
+  return walk(e);
 }
 
 /** Inert → active: `cos[x]` → `Cos[x]`. Applied to results (RHSs already emit

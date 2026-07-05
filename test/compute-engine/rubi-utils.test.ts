@@ -547,6 +547,88 @@ describe('trig → exponential fallback (nonlinear arguments, R9)', () => {
   });
 });
 
+// R14: linear-only trig deactivation. `deactivateTrig(ce, e, 'x')` mirrors
+// Rubi's DeactivateTrigAux — it deactivates x-free / linear / bare-monomial
+// arguments but leaves a COMPOSITE nonlinear argument (deg-2 quadratic, or a
+// non-polynomial linear-inner like √(c+d·x)) ACTIVE so the substitution /
+// 4.1.13 rules (authored on active `Sin`) can match it. deg ≥ 3 integer
+// composites are deactivated (they reduce to a branch-fragile complex Γ).
+describe('linear-only trig deactivation (DeactivateTrigAux, R14)', () => {
+  const lin = ['Add', 'a', ['Multiply', 'b', 'x']] as Json; // a + b·x
+  const quadComposite = ['Multiply', 'b', ['Power', lin, 2]] as Json; // b·(a+b x)²
+  const sqrtComposite = ['Add', 'a', ['Multiply', 'b', ['Power', lin, ['Rational', 1, 2]]]] as Json; // a+b√(a+bx)
+  const cubeComposite = ['Add', 'a', ['Multiply', 'b', ['Power', lin, 3]]] as Json; // a+b·(a+bx)³
+  const bareMonomial = ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 3]]] as Json; // a+b·x³
+
+  const headOfArg = (arg: Json): string =>
+    deactivateTrig(ce, ce.box(['Sin', arg] as any), 'x').operator;
+
+  test('deactivates a LINEAR-argument sin (→ inert)', () => {
+    expect(headOfArg(lin)).toBe('sin');
+  });
+  test('deactivates an x-free-argument sin (→ inert)', () => {
+    expect(headOfArg(['Add', 'a', 'b'])).toBe('sin');
+  });
+  test('deactivates a BARE MONOMIAL sin(a+b·x³) (→ inert, R9 fallback owns it)', () => {
+    expect(headOfArg(bareMonomial)).toBe('sin');
+  });
+  test('leaves a deg-2 COMPOSITE sin(b·(a+b·x)²) ACTIVE (→ 4.1.13 Fresnel)', () => {
+    expect(headOfArg(quadComposite)).toBe('Sin');
+  });
+  test('leaves a √-inner COMPOSITE sin(a+b·√(a+b·x)) ACTIVE (→ substitution)', () => {
+    expect(headOfArg(sqrtComposite)).toBe('Sin');
+  });
+  test('deactivates a deg-3 integer COMPOSITE (branch-fragile Γ ⇒ unsolved)', () => {
+    expect(headOfArg(cubeComposite)).toBe('sin');
+  });
+  test('recurses into a nonlinear-argument tree: a linear-arg cos inside stays deactivated', () => {
+    // Sin[cube-composite]·Cos[a+b·x]: outer sin stays active, inner cos → inert
+    const mixed = ce.box([
+      'Multiply',
+      ['Sin', cubeComposite],
+      ['Cos', lin],
+    ] as any);
+    const d = deactivateTrig(ce, mixed, 'x');
+    expect(d.toString().includes('cos(')).toBe(true); // linear cos deactivated
+  });
+  test('no-variable call performs FULL (legacy) deactivation of every head', () => {
+    expect(deactivateTrig(ce, ce.box(['Sin', cubeComposite] as any)).operator).toBe('sin');
+    expect(deactivateTrig(ce, ce.box(['Sin', quadComposite] as any)).operator).toBe('sin');
+  });
+});
+
+// R14 end-to-end: the shipped bundle now closes the linear-inner Fresnel /
+// Si-Ci families whose active-`Sin` substitution rules were previously
+// unmatchable, while keeping the branch-fragile cubic composite unsolved.
+describe('R14 end-to-end Si/Ci-routing (shipped bundle)', () => {
+  let eng: ComputeEngine;
+  beforeAll(() => {
+    eng = new ComputeEngine();
+    loadIntegrationRules(eng);
+  });
+  const closesLatex = (latex: string, subs: Record<string, number>): boolean => {
+    const integ = eng.parse(latex);
+    const F = eng.box(['Integrate', integ, 'x']).evaluate();
+    if (F.operator === 'Integrate') return false;
+    for (const xv of [0.4, 0.9, 1.3]) {
+      const h = 1e-6;
+      const fp = (v: number) => F.subs({ ...subs, x: v }).N().re as number;
+      const d = (fp(xv + h) - fp(xv - h)) / (2 * h);
+      const f = integ.subs({ ...subs, x: xv }).N().re as number;
+      if (typeof d !== 'number' || typeof f !== 'number') return false;
+      if (Math.abs(d - f) > 1e-4 * Math.max(1, Math.abs(f))) return false;
+    }
+    return true;
+  };
+
+  test('closes ∫sin(x)/x → SinIntegral(x)', () => {
+    const F = eng.box(['Integrate', eng.parse('\\frac{\\sin x}{x}'), 'x']).evaluate();
+    expect(F.toString().includes('SinIntegral')).toBe(true);
+  });
+  test('closes ∫sin(b·(c+d·x)²) → FresnelS (deg-2 composite)', () =>
+    expect(closesLatex('\\sin(b (c + d x)^2)', { b: 0.7, c: 0.4, d: 0.6 })).toBe(true));
+});
+
 // R9 end-to-end: the shipped bundle closes the poly·cos and nonlinear-argument
 // families, and declines the complex-Ei case (leaves it unsolved, not wrong).
 describe('R9 end-to-end (shipped bundle)', () => {
