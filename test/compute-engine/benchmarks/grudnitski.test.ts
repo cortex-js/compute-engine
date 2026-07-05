@@ -16,7 +16,7 @@ function isEqual(a: string, b: string): boolean {
   return ce.parse(a).isEqual(ce.parse(b));
 }
 
-describe.skip(`numbers (integers, floats, operators +-*/,)`, () => {
+describe(`numbers (integers, floats, operators +-*/,)`, () => {
   //     #numbers (integers, floats, operators +-*/,)
   test(`isEquivalent('2', '1+1')`, () =>
     expect(isEquivalent('1+1', '2')).toBeTruthy());
@@ -34,7 +34,7 @@ describe.skip(`numbers (integers, floats, operators +-*/,)`, () => {
     expect(isEquivalent('x = 2', 'x = 2.0')).toBeTruthy());
   test(`isEquivalent('Eq(x,2)', 'Eq(x,1+1)')`, () =>
     expect(isEquivalent('x = 2', 'x = 1 + 1')).toBeTruthy());
-  test(`isEquivalent('Eq(2*x+4,2)', 'Eq(x+2,1)')`, () =>
+  test.skip(`isEquivalent('Eq(2*x+4,2)', 'Eq(x+2,1)')`, () =>
     expect(isEquivalent('2x+4 = 2', 'x + 2 = 1')).toBeTruthy());
 });
 

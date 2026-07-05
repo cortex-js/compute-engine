@@ -34,7 +34,7 @@ const exprs: [Expression, Expression, number | undefined][] = [
 //   }
 // });
 
-describe.skip('EQUAL', () => {
+describe('EQUAL', () => {
   for (const expr of exprs) {
     test(`equal(${latex(expr[0])}, ${latex(expr[1])})`, () => {
       expect(engine.expr(expr[0]).isEqual(engine.expr(expr[1]))).toEqual(
@@ -44,7 +44,7 @@ describe.skip('EQUAL', () => {
   }
 });
 
-describe.skip('LESS THAN', () => {
+describe('LESS THAN', () => {
   for (const expr of exprs) {
     test(`less(${latex(expr[0])}, ${latex(expr[1])})`, () => {
       expect(engine.expr(expr[0]).isLess(engine.expr(expr[1]))).toEqual(
@@ -54,7 +54,7 @@ describe.skip('LESS THAN', () => {
   }
 });
 
-describe.skip('LESS EQUAL', () => {
+describe('LESS EQUAL', () => {
   for (const expr of exprs) {
     test(`lessEqual(${latex(expr[0])}, ${latex(expr[1])})`, () => {
       expect(engine.expr(expr[0]).isLessEqual(engine.expr(expr[1]))).toEqual(
@@ -64,7 +64,7 @@ describe.skip('LESS EQUAL', () => {
   }
 });
 
-describe.skip('GREATER', () => {
+describe('GREATER', () => {
   for (const expr of exprs) {
     test(`greater(${latex(expr[0])}, ${latex(expr[1])})`, () => {
       expect(engine.expr(expr[0]).isGreater(engine.expr(expr[1]))).toEqual(
@@ -74,7 +74,7 @@ describe.skip('GREATER', () => {
   }
 });
 
-describe.skip('GREATER EQUAL', () => {
+describe('GREATER EQUAL', () => {
   for (const expr of exprs) {
     test(`greaterEqual(${latex(expr[0])}, ${latex(expr[1])})`, () => {
       expect(engine.expr(expr[0]).isGreaterEqual(engine.expr(expr[1]))).toEqual(
@@ -180,9 +180,7 @@ describe('Comparison correctness (REVIEW.md A1, A3)', () => {
 
         test('evaluated relational operators on equal infinities', () => {
           const ev = (op: string) =>
-            ce
-              .expr([op, 'NegativeInfinity', 'NegativeInfinity'])
-              .evaluate()
+            ce.expr([op, 'NegativeInfinity', 'NegativeInfinity']).evaluate()
               .symbol;
           expect(ev('Greater')).toBe('False');
           expect(ev('Less')).toBe('False');

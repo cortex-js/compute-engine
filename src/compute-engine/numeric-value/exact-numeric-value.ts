@@ -249,8 +249,17 @@ export class ExactNumericValue extends NumericValue {
   // immutability becomes a compiler-checked invariant instead of a
   // convention.
   get bignumRe(): BigDecimal {
-    const r = this.rational;
-    if (this.radical === 1) {
+    return this._bignumComponent(this.rational, this.radical);
+  }
+
+  /** bignum version of `.im` — exact even when the imaginary component
+   * overflows the machine-float projection (e.g. `(2+3i)^1000`). */
+  get bignumIm(): BigDecimal {
+    return this._bignumComponent(this.imRational, this.imRadical);
+  }
+
+  private _bignumComponent(r: Rational, radical: number): BigDecimal {
+    if (radical === 1) {
       if (isMachineRational(r)) return new BigDecimal(r[0]).div(r[1]);
       return new BigDecimal(r[0]).div(new BigDecimal(r[1]));
     }
@@ -279,10 +288,7 @@ export class ExactNumericValue extends NumericValue {
       // and toPrecision() rounding again. Single rounding is at least as
       // accurate as the previous double rounding (battery-verified vs
       // mpmath), and skips a full-width normalize + digit re-scan.
-      return quotient.mulToPrecision(
-        new BigDecimal(this.radical).sqrt(),
-        outPrec
-      );
+      return quotient.mulToPrecision(new BigDecimal(radical).sqrt(), outPrec);
     } finally {
       BigDecimal.precision = saved;
     }

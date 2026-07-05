@@ -16,20 +16,25 @@
 //   {
 //     "real": false,                 // assume the variable is real (Wester) ?
 //     "tasks": [
-//       { "id", "op", "expr", "expr2"?, "var", "points"?, "point"?, "a"?, "b"? }
+//       { "id", "op", "expr", "expr2"?, "var", "vars"?, "points"?, "point"?, "a"?, "b"? }
 //     ]
 //   }
 //
-// Supported ops: factor · expand · simplify · gcd · resultant · integrate
-// (indefinite) · defint · diff · limit · solve. `point` (for limit) and `a`/`b`
-// (for defint) are passed straight into Wolfram, so the harness must already have
-// mapped ±∞ to `Infinity` / `-Infinity`.
+// Supported ops: factor · expand · expandconst · simplify · gcd · resultant ·
+// integrate (indefinite) · defint · diff · limit · solve. `point` (for limit)
+// and `a`/`b` (for defint) are passed straight into Wolfram, so the harness must
+// already have mapped ±∞ to `Infinity` / `-Infinity`. A task with `vars` (a list
+// of variable names) is multivariate: its `points` are tuples and every variable
+// is substituted at once; without `vars`, scalar `points` substitute `var`.
 //
 // Per-task results: { id, tool:"wolfram", status, text, values, roots?, timeMs }
 //   - integrate : values = d/dx(result) sampled at `points`   (vs the integrand)
 //   - diff      : values = result sampled at `points`         (vs central diff)
 //   - defint/limit/resultant : values = [the single value]
 //   - factor/expand/simplify/gcd : values = result sampled at `points` (vs input)
+//   - expandconst : values = [mant_re, exp_re, mant_im, exp_im] of the constant
+//     result (v = mant·10^exp, |mant| ∈ [1,10)) — huge exact components would
+//     overflow a float64 sample
 //   - solve     : roots = real numeric roots; values = |residual| at each root
 //
 // If `wolframscript` is missing or the kernel dies, every task degrades to a
@@ -62,6 +67,7 @@ function buildCore(t) {
   switch (t.op) {
     case 'factor': return `Factor[${e}]`;
     case 'expand': return `Expand[${e}]`;
+    case 'expandconst': return `Expand[${e}]`; // constant expansion, graded by mantissa/exponent
     case 'simplify': return `FullSimplify[${e}${asmSimplify}]`;
     case 'gcd': return `PolynomialGCD[${e}, ${e2}]`;
     case 'resultant': return `Resultant[${e}, ${e2}, ${v}]`;
@@ -84,7 +90,12 @@ const rejected = [];
 for (const t of tasks) {
   const core = buildCore(t);
   if (core == null) { rejected.push({ id: t.id, tool: 'wolfram', status: 'error', error: 'unknown op ' + t.op }); continue; }
-  wlTasks.push({ id: t.id, op: t.op, var: t.var || 'x', points: t.points || [], core, expr: t.expr });
+  // Normalize sampling to the multivariate shape: `vars` is a list of variable
+  // names and each point is a tuple of values for them. Univariate tasks
+  // (no `vars`) become single-variable tuples, so the WL side has one path.
+  const vars = t.vars || [t.var || 'x'];
+  const points = t.vars ? (t.points || []) : (t.points || []).map((p) => [p]);
+  wlTasks.push({ id: t.id, op: t.op, var: t.var || 'x', vars, points, core, expr: t.expr });
 }
 
 if (!wlTasks.length) { for (const r of rejected) emit(r); process.exit(0); }
@@ -105,18 +116,27 @@ Quiet[SetSystemOptions["CacheOptions" -> {"Numeric" -> {"Cache" -> False},
   "Simplify" -> {"Cache" -> False}}]];
 
 fmtNum[x_] := StringReplace[First[StringSplit[ToString[x, InputForm], "\`"]], "*^" -> "e"];
-sampleAt[res_, var_, pts_] := Quiet[Map[
-  Function[p, Module[{v = Re[N[res /. var -> p]]}, If[NumericQ[v], fmtNum[v], Null]]], pts]];
+(* vars is a list of symbols; each point is a tuple of values for them *)
+sampleAt[res_, vars_, pts_] := Quiet[Map[
+  Function[p, Module[{v = Re[N[res /. Thread[vars -> p]]]}, If[NumericQ[v], fmtNum[v], Null]]], pts]];
+(* {mant, exp} with v = mant*10^exp, |mant| in [1,10) — for exact constants
+   whose components exceed float64 range (the mantexp verify kind) *)
+mantExp[v_] := If[v == 0, {0., 0}, Module[{me = MantissaExponent[N[v, 30]]}, {N[First[me]*10], Last[me] - 1}]];
 clip[s_] := StringTake[s, UpTo[200]];
 emit[a_] := (WriteString[$Output, ExportString[a, "JSON", "Compact" -> True]]; WriteString[$Output, "\\n"]);
 
-extract[op_, res_, var_, pts_, expr_] := Switch[op,
+extract[op_, res_, var_, vars_, pts_, expr_] := Switch[op,
   "factor" | "expand" | "simplify" | "diff" | "gcd",
-    <|"status" -> "ok", "text" -> clip[ToString[res, InputForm]], "values" -> sampleAt[res, var, pts]|>,
+    <|"status" -> "ok", "text" -> clip[ToString[res, InputForm]], "values" -> sampleAt[res, vars, pts]|>,
+  "expandconst",
+    Module[{re, im},
+      {re, im} = {Re[res], Im[res]};
+      <|"status" -> "ok", "text" -> clip[ToString[res, InputForm]],
+        "values" -> Map[fmtNum, Join[mantExp[re], mantExp[im]]]|>],
   "integrate",
     If[! FreeQ[res, Integrate],
       <|"status" -> "unsolved", "text" -> clip[ToString[res, InputForm]], "values" -> {}|>,
-      <|"status" -> "ok", "text" -> clip[ToString[res, InputForm]], "values" -> sampleAt[D[res, var], var, pts]|>],
+      <|"status" -> "ok", "text" -> clip[ToString[res, InputForm]], "values" -> sampleAt[D[res, var], vars, pts]|>],
   "defint",
     If[! FreeQ[res, Integrate] || ! NumericQ[N[res]],
       <|"status" -> "unsolved", "text" -> clip[ToString[res, InputForm]], "values" -> {}|>,
@@ -145,8 +165,9 @@ extract[op_, res_, var_, pts_, expr_] := Switch[op,
         <|"status" -> "unsolved", "text" -> clip[ToString[res, InputForm]], "values" -> {}, "roots" -> {}|>]],
   _, <|"status" -> "error", "error" -> "unknown op"|>];
 
-processTask[t_] := Module[{op, var, pts, expr, run, res, t0, first, batch, timeMs, payload},
-  op = t["op"]; var = Symbol[t["var"]]; pts = t["points"]; expr = ToExpression[t["expr"]];
+processTask[t_] := Module[{op, var, vars, pts, expr, run, res, t0, first, batch, timeMs, payload},
+  op = t["op"]; var = Symbol[t["var"]]; vars = Map[Symbol, t["vars"]];
+  pts = t["points"]; expr = ToExpression[t["expr"]];
   run[] := ToExpression[t["core"]];
   payload = TimeConstrained[
     (run[];  (* warm once: pays this op's one-time machinery load (the first
@@ -163,7 +184,7 @@ processTask[t_] := Module[{op, var, pts, expr, run, res, t0, first, batch, timeM
       If[batch > 1,
         Do[run[], {Min[3, batch]}];
         timeMs = N[Median[Table[First[AbsoluteTiming[Do[run[], {batch}]]]*1000./batch, {7}]]]];
-      Append[extract[op, res, var, pts, expr], "timeMs" -> timeMs]),
+      Append[extract[op, res, var, vars, pts, expr], "timeMs" -> timeMs]),
     ${TASK_TIMEOUT_S}, <|"status" -> "timeout"|>];
   If[! AssociationQ[payload], payload = <|"status" -> "error", "error" -> "no payload"|>];
   Join[<|"id" -> t["id"], "tool" -> "wolfram"|>, payload]];

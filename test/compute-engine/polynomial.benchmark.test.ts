@@ -1,9 +1,11 @@
 import { engine } from '../utils';
 
-describe.skip(`POLYNOMIALS`, () => {
+describe(`POLYNOMIALS`, () => {
   //     #numbers (integers, floats, operators +-*/,)
   test(`3x^2 -2x + 1`, () =>
-    expect(engine.parse('3x^2 -2x + 1').canonical).toMatchInlineSnapshot());
+    expect(engine.parse('3x^2 -2x + 1').canonical).toMatchInlineSnapshot(
+      `["Add", ["Multiply", 3, ["Square", "x"]], ["Multiply", -2, "x"], 1]`
+    ));
 });
 
 // # alea6

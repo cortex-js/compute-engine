@@ -84,6 +84,80 @@ for cid, title, latex, ce, sy, f in [
         ce={"op": "expand", "mathjson": ce}, sympy={"op": "expand", "expr": sy},
         verify={"kind": "equiv", "form": "expanded", "points": [s(p) for p in P], "values": samples(f)})
 
+# Multivariate expansion, from SymPy's bench_expand.py plus binomial-power
+# scaling cases. (These replaced the wall-clock threshold tests that lived in
+# test/compute-engine/benchmarks/expand.test.ts, removed 2026-07-05 — warm
+# medians vs SymPy/Mathematica here are the reliable tracker.) `vars` + tuple
+# sample points extend the univariate protocol; every runner substitutes all
+# variables of a tuple at once.
+PXYZ = [[mpf("1.5"), mpf("0.7"), mpf("2.3")],
+        [mpf("2.3"), mpf("1.1"), mpf("0.6")],
+        [mpf("0.4"), mpf("1.9"), mpf("3.1")]]
+PAB = [t[:2] for t in PXYZ]
+for cid, title, latex, ce, sy, vars_, pts, f in [
+    ("E4", "3x²yz⁷ + 7xyz² + 4x + xy⁴", "3x^2yz^7 + 7xyz^2 + 4x + xy^4",
+     ["Add", ["Multiply", 3, ["Power", "x", 2], "y", ["Power", "z", 7]],
+      ["Multiply", 7, "x", "y", ["Power", "z", 2]], ["Multiply", 4, "x"],
+      ["Multiply", "x", ["Power", "y", 4]]],
+     "3*x**2*y*z**7 + 7*x*y*z**2 + 4*x + x*y**4", ["x", "y", "z"], PXYZ,
+     lambda x, y, z: 3 * x**2 * y * z**7 + 7 * x * y * z**2 + 4 * x + x * y**4),
+    ("E5", "(x+y+z+1)³²", "(x+y+z+1)^{32}",
+     ["Power", ["Add", "x", "y", "z", 1], 32], "(x + y + z + 1)**32",
+     ["x", "y", "z"], PXYZ, lambda x, y, z: (x + y + z + 1) ** 32),
+    ("E6", "(a+b)²⁰", "(a+b)^{20}",
+     ["Power", ["Add", "a", "b"], 20], "(a + b)**20",
+     ["a", "b"], PAB, lambda a, b: (a + b) ** 20),
+    ("E7", "(a+b)⁸⁰", "(a+b)^{80}",
+     ["Power", ["Add", "a", "b"], 80], "(a + b)**80",
+     ["a", "b"], PAB, lambda a, b: (a + b) ** 80),
+]:
+    add(id=cid, cat="expand", title=title, latex=latex,
+        ce={"op": "expand", "mathjson": ce}, sympy={"op": "expand", "expr": sy},
+        verify={"kind": "equiv", "form": "expanded", "vars": vars_,
+                "points": [[s(v) for v in t] for t in pts],
+                "values": [s(f(*t)) for t in pts]})
+
+
+# Constant complex powers (also from bench_expand.py): expanding computes the
+# exact Gaussian value. The components exceed float64 range (~10^557), so the
+# verify kind is `mantexp`: values = [mant_re, exp_re, mant_im, exp_im] with
+# v = mant·10^exp, |mant| ∈ [1, 10). The reference is an exact Gaussian
+# integer/rational power (binary powering over Fraction).
+def gauss_pow(re, im, n):
+    from fractions import Fraction
+    r, i = Fraction(1), Fraction(0)
+    br, bi = Fraction(re), Fraction(im)
+    while n:
+        if n & 1:
+            r, i = r * br - i * bi, r * bi + i * br
+        n >>= 1
+        if n:
+            br, bi = br * br - bi * bi, 2 * br * bi
+    return r, i
+
+
+def mantexp(fr):
+    if fr == 0:
+        return ["0", "0"]
+    v = mp.mpf(fr.numerator) / mp.mpf(fr.denominator)
+    e = int(mp.floor(mp.log10(abs(v))))
+    return [s(v / mp.power(10, e)), str(e)]
+
+
+from fractions import Fraction
+
+for cid, title, latex, ce, sy, base_re, base_im, n in [
+    ("E8", "(2+3i)¹⁰⁰⁰", "(2+3i)^{1000}",
+     ["Power", ["Complex", 2, 3], 1000], "(2 + 3*I)**1000", 2, 3, 1000),
+    ("E9", "(2+¾i)¹⁰⁰⁰", r"\left(2+\tfrac34 i\right)^{1000}",
+     ["Power", ["Complex", 2, ["Rational", 3, 4]], 1000],
+     "(2 + Rational(3, 4)*I)**1000", 2, Fraction(3, 4), 1000),
+]:
+    gr, gi = gauss_pow(base_re, base_im, n)
+    add(id=cid, cat="expand", title=title, latex=latex,
+        ce={"op": "expand", "mathjson": ce}, sympy={"op": "expand", "expr": sy},
+        verify={"kind": "mantexp", "values": mantexp(gr) + mantexp(gi)})
+
 # ---- Simplification ----
 for cid, title, latex, ce, sy, f in [
     ("S1", "(x²−1)/(x−1)", r"\frac{x^2-1}{x-1}", ["Divide", ["Subtract", ["Power", "x", 2], 1], ["Subtract", "x", 1]],

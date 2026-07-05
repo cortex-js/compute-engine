@@ -462,7 +462,7 @@ describe('Rules: Powers: Division (misc)', () => {
 });
 
 describe('Rules: Powers and Roots', () => {
-  test.skip('root4(16b^4) = 2|b|', () =>
+  test('root4(16b^4) = 2|b|', () =>
     checkSimplify('\\sqrt[4]{16b^{4}}', '2|b|'));
   test('sqrt(x^4) = x^2', () => checkSimplify('\\sqrt{x^4}', 'x^2'));
   test('root4(x^6) = |x|^{3/2}', () =>

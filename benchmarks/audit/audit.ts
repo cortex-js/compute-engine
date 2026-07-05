@@ -46,31 +46,67 @@ function timeit(fn: () => void) {
   return { timeMs: median(times), minMs: Math.min(...times) };
 }
 const num = (b: any) => { const v = b.N(); return typeof v.re === 'number' ? v.re : Number(v.toString()); };
-const sampleResult = (boxed: any, pts: number[]) =>
-  pts.map((p) => { try { return num(boxed.subs({ x: ce.number(p) })); } catch { return null; } });
+// Sample points are scalars (univariate, substituted for x) or tuples matching
+// the case's `verify.vars` (multivariate — all variables substituted at once).
+const casePoints = (c: any): number[][] =>
+  (c.verify.points || []).map((p: any) => (Array.isArray(p) ? p.map(parseFloat) : [parseFloat(p)]));
+const sampleResult = (boxed: any, c: any) => {
+  const vars: string[] = c.verify.vars ?? ['x'];
+  return casePoints(c).map((tuple) => {
+    try {
+      const subs: Record<string, any> = {};
+      vars.forEach((v, i) => (subs[v] = ce.number(tuple[i])));
+      return num(boxed.subs(subs));
+    } catch { return null; }
+  });
+};
+
+// [mant, exp] with v = mant·10^exp, |mant| ∈ [1, 10) — from a decimal string
+// (possibly in scientific notation), for exact constants whose magnitude
+// exceeds float64 range (the `mantexp` verify kind).
+function mantExp10(s: string | undefined): [number | null, number | null] {
+  if (!s) return [null, null];
+  const m = s.trim().match(/^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/);
+  if (!m) return [null, null];
+  const [, sign, intPart, fracPart = '', expPart = '0'] = m;
+  const digits = (intPart + fracPart).replace(/^0+/, '');
+  if (!digits) return [0, 0];
+  // exponent of the leading digit
+  const lead = (intPart + fracPart).indexOf(digits[0]);
+  const exp = intPart.length - 1 - lead + parseInt(expPart, 10);
+  const mant = parseFloat(`${sign}${digits[0]}.${digits.slice(1, 20)}`);
+  return [mant, exp];
+}
 
 // --- run CE in-process -----------------------------------------------------
 function runCE(c: any) {
   const inp = c.ce, op = inp.op;
-  const pts = (c.verify.points || []).map(parseFloat);
   try {
     if (op === 'factor' || op === 'expand') {
       const head = op === 'factor' ? 'Factor' : 'Expand';
       const timing = timeit(() => ce.expr([head, inp.mathjson]).evaluate());
       const r = ce.expr([head, inp.mathjson]).evaluate();
-      return { status: 'ok', text: r.toString(), values: sampleResult(r, pts), ...timing };
+      if (c.verify.kind === 'mantexp') {
+        // constant expansion: grade the exact components (huge magnitudes —
+        // .N()/.re would overflow float64)
+        if (!r.isNumberLiteral)
+          return { status: 'unsolved', text: r.toString().slice(0, 200), values: [], ...timing };
+        const values = [...mantExp10(r.bignumRe?.toString()), ...mantExp10(r.bignumIm?.toString())];
+        return { status: 'ok', text: r.toString().slice(0, 200), values, ...timing };
+      }
+      return { status: 'ok', text: r.toString().slice(0, 200), values: sampleResult(r, c), ...timing };
     }
     if (op === 'gcd') {
       const timing = timeit(() => ce.expr(inp.mathjson).evaluate());
       const r = ce.expr(inp.mathjson).evaluate();
       // unevaluated GCD comes back as a gcd(...) function node
       const unsolved = r.operator === 'GCD' || /\bgcd\(/i.test(r.toString());
-      return { status: unsolved ? 'unsolved' : 'ok', text: r.toString(), values: sampleResult(r, pts), ...timing };
+      return { status: unsolved ? 'unsolved' : 'ok', text: r.toString(), values: sampleResult(r, c), ...timing };
     }
     if (op === 'simplify') {
       const timing = timeit(() => ce.expr(inp.mathjson).simplify());
       const r = ce.expr(inp.mathjson).simplify();
-      return { status: 'ok', text: r.toString(), values: sampleResult(r, pts), ...timing };
+      return { status: 'ok', text: r.toString(), values: sampleResult(r, c), ...timing };
     }
     if (op === 'integrate') {
       const build = () => ce.expr(['Integrate', inp.mathjson, ['Tuple', inp.var]]).evaluate();
@@ -79,7 +115,7 @@ function runCE(c: any) {
       if (F.operator === 'Integrate' || /\bint\(/.test(F.toString()))
         return { status: 'unsolved', text: F.toString(), values: [], ...timing };
       const dF = ce.expr(['D', F, inp.var]).evaluate();
-      return { status: 'ok', text: F.toString(), values: sampleResult(dF, pts), ...timing };
+      return { status: 'ok', text: F.toString(), values: sampleResult(dF, c), ...timing };
     }
     if (op === 'limit') {
       // CE evaluates limits to an exact symbolic closed form (e.g. 1/2, e); we
@@ -129,6 +165,12 @@ function runWolframAll(): Record<string, any> {
         tasks.push({ id: c.id, op: 'integrate', expr: mathJsonToWL(inp.mathjson), var: inp.var || 'x', points });
       } else if (inp.op === 'limit') {
         tasks.push({ id: c.id, op: 'limit', expr: mathJsonToWL(inp.mathjson), var: inp.var || 'x', point: wlPoint(inp.point), points: [] });
+      } else if (c.verify.kind === 'mantexp') {
+        // constant expansion graded by mantissa/exponent of the components
+        tasks.push({ id: c.id, op: 'expandconst', expr: mathJsonToWL(inp.mathjson), var: 'x', points: [] });
+      } else if (c.verify.vars) {
+        // multivariate: tuple sample points, all variables substituted at once
+        tasks.push({ id: c.id, op: inp.op, expr: mathJsonToWL(inp.mathjson), var: 'x', vars: c.verify.vars, points: (c.verify.points || []).map((t: string[]) => t.map(parseFloat)) });
       } else {
         tasks.push({ id: c.id, op: inp.op, expr: mathJsonToWL(inp.mathjson), var: 'x', points });
       }
@@ -157,7 +199,9 @@ function allClose(got: any[], exp: string[], rel = 1e-6) {
 }
 function formOk(form: string, text: string) {
   if (form === 'polynomial') return !/sqrt|√|abs|\|/i.test(text) && !/\^\s*\(?-?\d*\s*\/\s*\d/.test(text) && !/\^-?0?\.\d/.test(text);
-  if (form === 'expanded') return !text.includes('(');
+  // "expanded" = no remaining grouped factor. CE's plain-text form
+  // parenthesizes multi-digit exponents (x^(31)) — those are not groups.
+  if (form === 'expanded') return !text.replace(/\^\(-?\d+\)/g, '^#').includes('(');
   return true;
 }
 function classify(c: any, res: any) {
@@ -171,6 +215,8 @@ function classify(c: any, res: any) {
       return { v: 'partial', note: vr.form === 'polynomial' ? 'non-polynomial form' : 'not ' + vr.form };
     return { v: 'correct' };
   }
+  if (vr.kind === 'mantexp')
+    return allClose(res.values, vr.values) ? { v: 'correct' } : { v: 'wrong' };
   if (vr.kind === 'value') return allClose(res.values, [vr.value]) ? { v: 'correct' } : { v: 'wrong' };
   return { v: 'error', note: 'unknown verify' };
 }
@@ -268,12 +314,16 @@ w('## Summary');
 w();
 w(`- **CE ${ceCorrect}/${N}** fully correct vs **SymPy ${syCorrect}/${N}** and the **Mathematica ${woCorrect}/${N}** baseline. ` +
   `Against Mathematica, CE trails on **${trails.length}** cases (below).`);
-w('- **CE issues found:** none on this suite. Previously-flagged gaps are now fixed: **limits** return exact symbolic ' +
+w('- **CE issues found:** none on correctness. Previously-flagged gaps are now fixed: **limits** return exact symbolic ' +
   'closed forms (e.g. $\\tfrac12$, $e$), not just numeric values (ROADMAP B8); polynomial **GCD** (B5); `Factor` of ' +
   '$x^n-1$ returns polynomial factors (B4); and indefinite integration of fractional-power / erf / Fresnel / Si–Ci / ' +
   'radical integrands (B2).');
+w('- **Performance gap:** dense **multivariate expansion** — $(x+y+z+1)^{32}$ (6,545 terms, case E5) is correct but ' +
+  '~2–4× slower than SymPy and two orders of magnitude slower than Mathematica. Binomial powers ($(a+b)^{80}$, E7, ' +
+  '~4× faster than SymPy) and the Gaussian-integer power (E8) are ahead; the Gaussian-*rational* power (E9, exact ' +
+  'components over $4^{1000}$) runs ~2× behind SymPy.');
 w('- **Where CE leads:** it solves GCD, expansion, simplification and limits, and is **markedly faster** ' +
-  'than SymPy there — e.g. simplification ~0.2 ms vs ~4 ms.');
+  'than SymPy on most of them — e.g. simplification ~0.2 ms vs ~4 ms, $(a+b)^{80}$ ~4 ms vs ~22 ms.');
 w('- **Scope:** hand-authored cases across operations. The **Wester** suite is wired in separately ' +
   '(`wester.ts` → `REPORT-wester.md`, via the Mathematica files + `wl-parser`); the **Bondarenko** integration ' +
   'set (35, local) is the next integration-depth source.');

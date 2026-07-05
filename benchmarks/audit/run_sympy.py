@@ -19,15 +19,17 @@ with open(os.path.join(HERE, "audit_cases.json")) as fh:
     SUITE = json.load(fh)
 
 import sympy
+import mpmath
 from sympy import (
     symbols, sympify, factor, gcd, expand, simplify, integrate, diff, limit,
-    Integral, N, sqrt, sin, cos, exp, Rational, Symbol, oo,
+    Integral, N, sqrt, sin, cos, exp, Rational, Symbol, oo, I,
 )
 from sympy.core.cache import clear_cache
 
-x = symbols("x")
-NS = {"x": x, "sqrt": sqrt, "sin": sin, "cos": cos, "exp": exp, "gcd": gcd,
-      "Rational": Rational, "oo": oo}
+x, y, z, a, b = symbols("x y z a b")
+SYMS = {"x": x, "y": y, "z": z, "a": a, "b": b}
+NS = {**SYMS, "sqrt": sqrt, "sin": sin, "cos": cos, "exp": exp, "gcd": gcd,
+      "Rational": Rational, "oo": oo, "I": I}
 
 
 def emit(**kw):
@@ -55,13 +57,33 @@ def timeit(fn):
     return {"timeMs": median(times), "minMs": min(times)}
 
 
-def sample(expr_, pts):
+def sample(expr_, pts, vars_=("x",)):
+    # `pts` entries are scalars (univariate, substituted for x) or tuples
+    # matching `vars_` (multivariate — all variables substituted at once).
     out = []
     for p in pts:
+        tup = p if isinstance(p, list) else [p]
         try:
-            out.append(float(N(expr_.subs(x, sympify(p)), 30)))
+            sub = {SYMS[v]: sympify(str(t)) for v, t in zip(vars_, tup)}
+            out.append(float(N(expr_.subs(sub), 30)))
         except Exception:
             out.append(None)
+    return out
+
+
+def mantexp_values(res):
+    # [mant_re, exp_re, mant_im, exp_im] with v = mant·10^exp, |mant| ∈ [1,10)
+    # — grades exact constants whose components exceed float64 range.
+    out = []
+    re_, im_ = res.as_real_imag()
+    for v in (re_, im_):
+        r = Rational(v)
+        f = mpmath.mpf(r.p) / mpmath.mpf(r.q)
+        if f == 0:
+            out += [0.0, 0.0]
+        else:
+            e = int(mpmath.floor(mpmath.log10(abs(f))))
+            out += [float(f / mpmath.power(10, e)), float(e)]
     return out
 
 
@@ -84,8 +106,11 @@ for c in SUITE["cases"]:
                 res = expand(res)
             elif op == "simplify":
                 res = simplify(res)
-            vals = sample(res, vr["points"])
-            emit(id=cid, status="ok", text=str(res), values=vals, **timing)
+            if vr["kind"] == "mantexp":
+                vals = mantexp_values(res)
+            else:
+                vals = sample(res, vr["points"], vr.get("vars", ["x"]))
+            emit(id=cid, status="ok", text=str(res)[:200], values=vals, **timing)
 
         elif op == "integrate":
             timing = timeit(lambda: integrate(sympify(inp["expr"], locals=NS), x))

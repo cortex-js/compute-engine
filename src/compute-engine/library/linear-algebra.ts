@@ -1969,25 +1969,35 @@ function computeEigenvalues3x3(
     a12 * (a21 * a33 - a23 * a31) +
     a13 * (a21 * a32 - a22 * a31);
 
-  // Convert to depressed cubic t³ + pt + q = 0 where λ = t + trace/3
+  // Characteristic polynomial λ³ − tr·λ² + m·λ − det = 0 as a depressed
+  // cubic t³ + pt + q = 0 via λ = t + tr/3:
+  //   p = m − tr²/3,  q = −2tr³/27 + tr·m/3 − det
+  // (A sign-flipped q mirrors every root about tr/3 — invisible for spectra
+  // symmetric about their mean, e.g. {1,2,3}, but wrong in general.)
   const p = minorSum - (trace * trace) / 3;
-  const q = (2 * trace * trace * trace) / 27 - (trace * minorSum) / 3 + det;
+  const q = -(2 * trace * trace * trace) / 27 + (trace * minorSum) / 3 - det;
 
   // Solve using Cardano's formula or trigonometric method
   const eigenvalues = solveCubic(p, q, trace / 3);
 
   return ce.expr([
     'List',
-    ce.number(eigenvalues[0]),
-    ce.number(eigenvalues[1]),
-    ce.number(eigenvalues[2]),
+    ...eigenvalues.map((r) =>
+      typeof r === 'number' ? ce.number(r) : ce.number(ce.complex(r[0], r[1]))
+    ),
   ]);
 }
 
 /**
- * Solve depressed cubic t³ + pt + q = 0, return roots shifted by shift
+ * Solve depressed cubic t³ + pt + q = 0, return roots shifted by shift.
+ * A complex root is returned as a `[re, im]` pair (a real 3×3 matrix can
+ * have one real eigenvalue and a complex-conjugate pair).
  */
-function solveCubic(p: number, q: number, shift: number): number[] {
+function solveCubic(
+  p: number,
+  q: number,
+  shift: number
+): (number | [number, number])[] {
   const eps = 1e-10;
 
   // Check for special cases
@@ -1998,14 +2008,14 @@ function solveCubic(p: number, q: number, shift: number): number[] {
   const discriminant = (q * q) / 4 + (p * p * p) / 27;
 
   if (discriminant > eps) {
-    // One real root, two complex conjugates
+    // One real root and a complex-conjugate pair
     const sqrtD = Math.sqrt(discriminant);
     const u = Math.cbrt(-q / 2 + sqrtD);
     const v = Math.cbrt(-q / 2 - sqrtD);
     const realRoot = u + v + shift;
-    // Return only real part for complex roots (they come in conjugate pairs)
-    const realPart = -(u + v) / 2 + shift;
-    return [realRoot, realPart, realPart];
+    const re = -(u + v) / 2 + shift;
+    const im = (Math.sqrt(3) / 2) * (u - v);
+    return [realRoot, [re, im], [re, -im]];
   } else if (discriminant < -eps) {
     // Three distinct real roots - use trigonometric method
     const r = Math.sqrt((-p * p * p) / 27);

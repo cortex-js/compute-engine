@@ -403,34 +403,54 @@ describe('OPERATOR divide', () => {
     `));
 });
 
-describe.skip('OPERATOR partial derivative', () => {
+describe('OPERATOR partial derivative', () => {
   test('\\partial f', () =>
-    expect(check('\\partial f')).toMatchInlineSnapshot());
+    expect(check('\\partial f')).toMatchInlineSnapshot(`
+      box       = ["PartialDerivative", "f", "Nothing"]
+      canonical = ["PartialDerivative", "f"]
+    `));
 
   test('\\partial_x f', () =>
-    expect(check('\\partial_x f')).toMatchInlineSnapshot());
+    expect(check('\\partial_x f')).toMatchInlineSnapshot(`
+      box       = ["D", "f", "x"]
+      canonical = ["D", ["Function", "f", "x"], "x"]
+      eval-auto = 0
+    `));
 
   test('\\partial_x f(x)', () =>
-    expect(check('\\partial_x f(x)')).toMatchInlineSnapshot());
+    expect(check('\\partial_x f(x)')).toMatchInlineSnapshot(`
+      box       = ["D", ["f", "x"], "x"]
+      eval-auto = Apply(Derivative(f, 1), x)
+    `));
 
   test('\\frac{\\partial f}{\\partial x}', () =>
-    expect(check('\\frac{\\partial f}{\\partial x}')).toMatchInlineSnapshot());
+    expect(check('\\frac{\\partial f}{\\partial x}')).toMatchInlineSnapshot(`
+      box       = ["D", "f", "x"]
+      canonical = ["D", ["Function", "f", "x"], "x"]
+      eval-auto = 0
+    `));
 
   test('\\partial_{x,y} f(x,y)', () =>
-    expect(check('\\partial_{x,y} f(x,y)')).toMatchInlineSnapshot());
+    expect(check('\\partial_{x,y} f(x,y)')).toMatchInlineSnapshot(`
+      box       = ["D", ["f", "x", "y"], "x", "y"]
+      eval-auto = Apply(Derivative(f, 1, 1), x, y)
+    `));
 
   test('\\partial^2_{x,y} f(x,y)', () =>
-    expect(check('\\partial^2_{x,y} f(x,y)')).toMatchInlineSnapshot());
+    expect(check('\\partial^2_{x,y} f(x,y)')).toMatchInlineSnapshot(`
+      box       = ["D", ["f", "x", "y"], "x", "y"]
+      eval-auto = Apply(Derivative(f, 1, 1), x, y)
+    `));
 
-  test('\\frac{\\partial^2}{\\partial_{x,y}} f(x,y)', () =>
+  test.skip('\\frac{\\partial^2}{\\partial_{x,y}} f(x,y)', () =>
     expect(
-      check('\\frac{\\partial^2}{\\partial_{x,y}} f(x,y)')
-    ).toMatchInlineSnapshot());
+      ce.parse('\\frac{\\partial^2}{\\partial_{x,y}} f(x,y)').json
+    ).toEqual(['D', ['f', 'x', 'y'], 'x', 'y']));
 
-  test('\\frac{\\partial^2 f(x, y, z)}{\\partial_{x,y}}', () =>
+  test.skip('\\frac{\\partial^2 f(x, y, z)}{\\partial_{x,y}}', () =>
     expect(
-      check('\\frac{\\partial^2 f(x, y, z)}{\\partial_{x,y}}')
-    ).toMatchInlineSnapshot());
+      ce.parse('\\frac{\\partial^2 f(x, y, z)}{\\partial_{x,y}}').json
+    ).toEqual(['D', ['f', 'x', 'y', 'z'], 'x', 'y']));
 });
 
 describe('OPERATOR precedence', () => {

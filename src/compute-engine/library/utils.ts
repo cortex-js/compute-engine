@@ -91,6 +91,15 @@ export function classifyBigopDomain(
       )
         infinite = true;
     } else if (idx.operator === 'Limits') {
+      // A bound that is neither numeric nor ±∞/`Nothing` — e.g. an unbound
+      // symbol `n`, or `n − 1` — cannot be enumerated: the domain is
+      // symbolic. Without this check `normalizeIndexingSet` silently
+      // substitutes its default iteration window for the unusable bound, so
+      // `Sum(k, [k, 1, n])` evaluated as if `n` were 10001 (→ 50015001).
+      const symbolicBound = (b: Expression) =>
+        !(isSymbol(b) && b.symbol === 'Nothing') && Number.isNaN(b.re);
+      if (symbolicBound(idx.op2) || symbolicBound(idx.op3))
+        return 'symbolic';
       if (!normalizeIndexingSet(idx).isFinite) infinite = true;
     }
   }

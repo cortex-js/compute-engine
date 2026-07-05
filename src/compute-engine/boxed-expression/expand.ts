@@ -4,7 +4,7 @@ import type {
 } from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';
-import { isFunction } from './type-guards';
+import { isFunction, isNumber } from './type-guards';
 
 import { asSmallInteger } from './numerics';
 import { mul, expandProducts } from './arithmetic-mul-div';
@@ -174,6 +174,14 @@ export function expandFunction(
   if (h === 'Power') {
     const exp = asSmallInteger(ops[1]);
     result = exp !== null ? expandPower(ops[0], exp) : null;
+    // A number-literal base has no structural expansion, but "expanding" a
+    // constant power still computes it — Expand((2+3i)^1000) yields the exact
+    // Gaussian integer, matching SymPy's expand(). The evaluation is the
+    // exact power fold, already guarded against huge results
+    // (MAX_EXACT_POW_DIGITS); if it stays symbolic, the power is returned
+    // unchanged.
+    if (result === null && exp !== null && isNumber(ops[0]))
+      result = ce._fn('Power', [ops[0], ops[1]]).evaluate();
   }
 
   return result;

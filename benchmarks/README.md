@@ -23,7 +23,9 @@ open-source comparators — against what a mature commercial CAS does.
 | **Kernel microbench** | `big-decimal/*` | CE · CE published · SymPy · mpmath | `big-decimal/BIGNUM-COMPARISON.md` |
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 
-The first six are the **release baseline** (see below). The capability harness
+The first six are the **release baseline** (see below). Benchmark sources
+worth adopting but not yet wired in (WolframMark, SageMath's tour of
+benchmarks, …) are tracked in [`CANDIDATES.md`](./CANDIDATES.md). The capability harness
 spawns each non-CE `(tool, case)` in its own timed subprocess, and measures all
 three Compute Engine columns together in **one warm batch process** (see
 *Measurement discipline* below); the audit harnesses run CE in-process and spawn
@@ -275,7 +277,12 @@ npx tsx benchmarks/audit/wester.ts                                     # Wester 
 **Grading** is by operation invariant, so no reference answers are needed:
 factor/expand/simplify must be value-equal to the input; indefinite ∫ must
 satisfy `d/dx(result) ≈ integrand`; derivatives ≈ central difference; GCD must
-equal the true gcd. Limits and definite integrals have no cheap reliable numeric
+equal the true gcd. Expand cases may be **multivariate** (`verify.vars` +
+tuple sample points, substituted across all three runners at once — cases
+E4–E7, from SymPy's `bench_expand.py` and the `(a+b)^n` scaling series) or
+**constant complex powers** graded by mantissa/exponent of the exact
+components (`verify.kind: "mantexp"`, cases E8–E9 — the values exceed float64
+range, so they can't be sampled as floats). Limits and definite integrals have no cheap reliable numeric
 oracle, so for those *correct = the tool returned a finite value*, with CE-vs-SymPy
 disagreements flagged separately (`≠` in `REPORT-wester.md`). A `Factor` form
 check additionally flags value-correct-but-malformed results (e.g. `√x`/`|x|`).

@@ -66,6 +66,7 @@ export function mathJsonToWL(node) {
     case 'Negate': return '(-(' + a[0] + '))';
     case 'Power': return '((' + a[0] + ')^(' + a[1] + '))';
     case 'Rational': return '((' + a[0] + ')/(' + a[1] + '))';
+    case 'Complex': return '((' + a[0] + ') + (' + a[1] + ')*I)';
     case 'Root': return '((' + a[0] + ')^(1/(' + a[1] + ')))';
     case 'Ln': return 'Log[' + a[0] + ']';
     case 'Log': return a.length === 2 ? 'Log[' + a[1] + ', ' + a[0] + ']' : 'Log[' + a[0] + ']';

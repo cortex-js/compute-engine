@@ -220,7 +220,9 @@ export class BoxedNumber
 
   get bignumIm(): BigDecimal | undefined {
     if (typeof this._value === 'number') return BigDecimal.ZERO;
-    return this.engine.bignum(this._value.im);
+    // Prefer the numeric value's own bignum imaginary part (exact lane):
+    // the machine-float projection `.im` overflows for huge components.
+    return this._value.bignumIm ?? this.engine.bignum(this._value.im);
   }
 
   neg(): Expression {
@@ -636,8 +638,11 @@ export class BoxedNumber
     if (typeof this._value === 'number')
       return !Number.isFinite(this._value) && !Number.isNaN(this._value);
 
-    // Complex infinity?
-    if (!Number.isFinite(this._value.im)) return true;
+    // Complex infinity? Ask the numeric value, not the machine-float
+    // projection `.im`: an exact value with a huge imaginary component
+    // (e.g. (2+3i)^1000) overflows the projection to ±Infinity while
+    // remaining finite.
+    if (this._value.isComplexInfinity) return true;
 
     // Real infinity?
     return this._value.isPositiveInfinity || this._value.isNegativeInfinity;
