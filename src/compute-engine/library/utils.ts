@@ -98,8 +98,7 @@ export function classifyBigopDomain(
       // `Sum(k, [k, 1, n])` evaluated as if `n` were 10001 (→ 50015001).
       const symbolicBound = (b: Expression) =>
         !(isSymbol(b) && b.symbol === 'Nothing') && Number.isNaN(b.re);
-      if (symbolicBound(idx.op2) || symbolicBound(idx.op3))
-        return 'symbolic';
+      if (symbolicBound(idx.op2) || symbolicBound(idx.op3)) return 'symbolic';
       if (!normalizeIndexingSet(idx).isFinite) infinite = true;
     }
   }
