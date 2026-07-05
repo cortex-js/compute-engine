@@ -3871,7 +3871,7 @@ export function numericallyEvaluable(F: Expression, x: string): boolean {
   sub[x] = 1.31;
   try {
     const v = F.subs(sub).N();
-    if (!v.isNumberLiteral) return false;
+    if (!(isNumber(v) && v.isNumberLiteral)) return false;
     const re = v.re;
     const im = v.im ?? 0;
     return (
