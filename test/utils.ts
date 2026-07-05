@@ -13,6 +13,16 @@ let errors: string[] = [];
 export const engine = new ComputeEngine();
 engine.precision = 100; // Some arithmetic test cases assume a precision of at least 100
 
+// The engine's default `timeLimit` (2s) is calibrated for interactive use.
+// Under jest, legitimate evaluations run ~10× slower (vm instrumentation),
+// and a full-suite run adds 6-way worker contention (P+E cores) on top —
+// a sub-200ms evaluation can then blow the 2s internal deadline and throw
+// `CancellationError`, making every compute-heavy test flaky. Genuine hangs
+// are still caught, just at a contention-proof threshold. Tests that
+// exercise timeout behavior itself set their own limit (see timeout.test.ts,
+// bug-fixes.test.ts) or use a dedicated engine.
+engine.timeLimit = 20_000;
+
 // Make sure that the symbol "f" is interpreted as a function in all test
 // cases that use it.
 engine.declare('f', 'function');
