@@ -292,6 +292,142 @@ export function bigQuartiles(
   return [q1, q2, q3];
 }
 
+//
+// Covariance / correlation. `xs` and `ys` are paired, equal-length samples.
+// `covariance` uses the sample (n − 1) denominator; `populationCovariance` the
+// n denominator — mirroring the `variance`/`populationVariance` pair.
+// Pearson's `correlation` is denominator-independent (the factor cancels), so
+// there is no population variant. A length mismatch or n < 2 yields `NaN`
+// (the library validates and turns these into error nodes before calling).
+//
+
+function covImpl(
+  xsI: Iterable<number>,
+  ysI: Iterable<number>,
+  population: boolean
+): number {
+  const xs = [...xsI];
+  const ys = [...ysI];
+  const n = xs.length;
+  if (n !== ys.length || n < 2) return NaN;
+  let sx = 0;
+  let sy = 0;
+  let sxy = 0;
+  for (let i = 0; i < n; i++) {
+    sx += xs[i];
+    sy += ys[i];
+    sxy += xs[i] * ys[i];
+  }
+  return (sxy - (sx * sy) / n) / (population ? n : n - 1);
+}
+
+function bigCovImpl(
+  xsI: Iterable<BigDecimal>,
+  ysI: Iterable<BigDecimal>,
+  population: boolean
+): BigDecimal {
+  const xs = [...xsI];
+  const ys = [...ysI];
+  const n = xs.length;
+  if (n !== ys.length || n < 2) return BigDecimal.NAN;
+  let sx = BigDecimal.ZERO;
+  let sy = BigDecimal.ZERO;
+  let sxy = BigDecimal.ZERO;
+  for (let i = 0; i < n; i++) {
+    sx = sx.add(xs[i]);
+    sy = sy.add(ys[i]);
+    sxy = sxy.add(xs[i].mul(ys[i]));
+  }
+  return sxy
+    .sub(sx.mul(sy).div(new BigDecimal(n)))
+    .div(new BigDecimal(population ? n : n - 1));
+}
+
+export function covariance(
+  xs: Iterable<number>,
+  ys: Iterable<number>
+): number {
+  return covImpl(xs, ys, false);
+}
+
+export function bigCovariance(
+  xs: Iterable<BigDecimal>,
+  ys: Iterable<BigDecimal>
+): BigDecimal {
+  return bigCovImpl(xs, ys, false);
+}
+
+export function populationCovariance(
+  xs: Iterable<number>,
+  ys: Iterable<number>
+): number {
+  return covImpl(xs, ys, true);
+}
+
+export function bigPopulationCovariance(
+  xs: Iterable<BigDecimal>,
+  ys: Iterable<BigDecimal>
+): BigDecimal {
+  return bigCovImpl(xs, ys, true);
+}
+
+export function correlation(
+  xsI: Iterable<number>,
+  ysI: Iterable<number>
+): number {
+  const xs = [...xsI];
+  const ys = [...ysI];
+  const n = xs.length;
+  if (n !== ys.length || n < 2) return NaN;
+  let sx = 0;
+  let sy = 0;
+  let sxy = 0;
+  let sx2 = 0;
+  let sy2 = 0;
+  for (let i = 0; i < n; i++) {
+    sx += xs[i];
+    sy += ys[i];
+    sxy += xs[i] * ys[i];
+    sx2 += xs[i] * xs[i];
+    sy2 += ys[i] * ys[i];
+  }
+  const cov = sxy - (sx * sy) / n;
+  const vx = sx2 - (sx * sx) / n;
+  const vy = sy2 - (sy * sy) / n;
+  const d = Math.sqrt(vx * vy);
+  if (d === 0) return NaN; // zero variance → correlation undefined
+  return cov / d;
+}
+
+export function bigCorrelation(
+  xsI: Iterable<BigDecimal>,
+  ysI: Iterable<BigDecimal>
+): BigDecimal {
+  const xs = [...xsI];
+  const ys = [...ysI];
+  const n = xs.length;
+  if (n !== ys.length || n < 2) return BigDecimal.NAN;
+  let sx = BigDecimal.ZERO;
+  let sy = BigDecimal.ZERO;
+  let sxy = BigDecimal.ZERO;
+  let sx2 = BigDecimal.ZERO;
+  let sy2 = BigDecimal.ZERO;
+  for (let i = 0; i < n; i++) {
+    sx = sx.add(xs[i]);
+    sy = sy.add(ys[i]);
+    sxy = sxy.add(xs[i].mul(ys[i]));
+    sx2 = sx2.add(xs[i].mul(xs[i]));
+    sy2 = sy2.add(ys[i].mul(ys[i]));
+  }
+  const bn = new BigDecimal(n);
+  const cov = sxy.sub(sx.mul(sy).div(bn));
+  const vx = sx2.sub(sx.mul(sx).div(bn));
+  const vy = sy2.sub(sy.mul(sy).div(bn));
+  const d = vx.mul(vy).sqrt();
+  if (d.isZero()) return BigDecimal.NAN;
+  return cov.div(d);
+}
+
 export function interquartileRange(values: Iterable<number>): number {
   // IQR = Q3 − Q1, using the same quartile convention as `quartiles()`. (It
   // used to slice the upper half at `mid + 1` while `quartiles` slices at

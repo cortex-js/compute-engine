@@ -230,14 +230,24 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
 
     Quantile: {
       description:
-        'Quantile (inverse CDF): the least x with CDF(x) ≥ p, for p in [0, 1].',
+        'Quantile (inverse CDF): the least x with CDF(x) ≥ p, for p in [0, 1]. ' +
+        'The first argument may also be a data collection, in which case the ' +
+        'empirical quantile is returned.',
       complexity: 7500,
-      signature: '(distribution, number) -> number',
+      signature: '(distribution | collection, number) -> number',
       evaluate: ([dist, p], { numericApproximation, engine: ce }) => {
-        if (!dist || !p || !isDistributionExpression(dist)) return undefined;
+        if (!dist || !p) return undefined;
         const pv = litVal(p);
         if (pv !== undefined && (pv < 0 || pv > 1))
           return rangeError(ce, '0 ≤ p ≤ 1', p);
+        // Empirical quantile of a data collection (distinguished from a
+        // distribution by the first argument's shape).
+        if (!isDistributionExpression(dist)) {
+          if (!dist.isFiniteCollection) return undefined;
+          const r = empiricalQuantile(ce, dist, p, pv);
+          if (!r) return undefined;
+          return numericApproximation ? r.N() : r.evaluate();
+        }
         const r = distributionQuantile(ce, dist, p, pv, !!numericApproximation);
         if (!r) return undefined;
         return numericApproximation ? r.N() : r.evaluate();
@@ -451,6 +461,84 @@ function distributionQuantile(
     }
   }
   return undefined;
+}
+
+//
+// Empirical quantile of a data collection, self-consistent with the
+// `Quartiles` operator (Moore–McCabe convention) but interpolating in RANK
+// space so all order statistics are used:
+//
+// 1. The Moore–McCabe anchors have (possibly half-integer) 1-based ranks in
+//    the sorted data: min → 1; Q1 → (⌊n/2⌋+1)/2 (the median rank of the
+//    lower half); median → (n+1)/2; Q3 → the mirrored upper-half rank;
+//    max → n.
+// 2. p maps piecewise-linearly through the anchor ranks: p ∈ [0, ¼] spans
+//    [rank(min), rank(Q1)], p ∈ [¼, ½] spans [rank(Q1), rank(median)], etc.
+// 3. The fractional rank r interpolates linearly between adjacent order
+//    statistics: x_⌊r⌋ + (r − ⌊r⌋)·(x_⌊r⌋₊₁ − x_⌊r⌋).
+//
+// At p = ¼/½/¾ the mapped rank IS the anchor rank, so the result agrees
+// exactly with `Quartiles`/`Median`; p = 0/1 give min/max; the map is
+// monotone and continuous in p. Unlike interpolating the five anchor VALUES
+// directly, large-n percentiles land on the right order statistics (n = 100,
+// p = 0.9 lands near rank 90, not on a Q3–max chord that a big outlier would
+// distort). No single plotting-position formula matches Moore–McCabe
+// quartiles for both parities of n, which is why the map goes through the
+// anchor ranks.
+//
+// The interpolation weight is built symbolically from `p` with integer
+// coefficients (anchor ranks are integers or half-integers), so exact data +
+// exact p yield an exact result; the caller evaluates/numericizes the
+// returned tree. A symbolic `p` (no literal value) stays symbolic.
+//
+function empiricalQuantile(
+  ce: ComputeEngine,
+  coll: Expression,
+  p: Expression,
+  pv: number | undefined
+): Expression | undefined {
+  if (pv === undefined) return undefined; // symbolic p: no closed form
+  const data = [...coll.each()];
+  const n = data.length;
+  if (n === 0) return undefined;
+
+  const sorted = [...data].sort((a, b) => a.re - b.re);
+  if (pv <= 0) return sorted[0];
+  if (pv >= 1) return sorted[n - 1];
+  if (n === 1) return sorted[0];
+
+  // Anchor ranks ×2 (kept as integers to avoid floats): min, Q1, median, Q3,
+  // max at p = 0, ¼, ½, ¾, 1. rank(Q1)·2 = mid + 1; rank(median)·2 = n + 1;
+  // rank(Q3)·2 = 2·upperStart + mid + 1 (mirror of Q1 in the upper half).
+  const mid = Math.floor(n / 2);
+  const upperStart = mid + (n % 2);
+  const ranks2 = [2, mid + 1, n + 1, 2 * upperStart + mid + 1, 2 * n];
+  const fracs = [0, 0.25, 0.5, 0.75, 1];
+
+  // Locate the p-segment [i, i+1] and the fractional rank within it.
+  let i = 0;
+  while (i < 3 && pv > fracs[i + 1]) i++;
+  const ra2 = ranks2[i];
+  const rb2 = ranks2[i + 1];
+  const rNum = (ra2 + ((pv - fracs[i]) / 0.25) * (rb2 - ra2)) / 2;
+
+  // Bracketing order statistics x_lo, x_lo+1 (1-based). A float-rounding
+  // error in `lo` self-corrects: the symbolic weight t = r − lo is exact, so
+  // t = 1 reproduces x_lo+1 exactly.
+  const lo = Math.min(Math.max(Math.floor(rNum + 1e-12), 1), n - 1);
+  const xa = sorted[lo - 1];
+  const xb = sorted[lo];
+
+  // Weight t = r − lo, built exactly from p:
+  //   r = ra + (p − pa)/(¼)·(rb − ra)   with ra = ra2/2, pa = i/4
+  //   t = 2·(rb2 − ra2)·(p − pa) + (ra2 − 2·lo)/2
+  const sub = (a: Expression, b: Expression) => ce.function('Subtract', [a, b]);
+  const pa = ce.function('Divide', [ce.number(i), ce.number(4)]);
+  const t = ce.function('Add', [
+    ce.function('Multiply', [ce.number(2 * (rb2 - ra2)), sub(p, pa)]),
+    ce.function('Divide', [ce.number(ra2 - 2 * lo), ce.number(2)]),
+  ]);
+  return ce.function('Add', [xa, ce.function('Multiply', [t, sub(xb, xa)])]);
 }
 
 //

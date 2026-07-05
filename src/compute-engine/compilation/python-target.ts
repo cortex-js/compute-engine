@@ -339,6 +339,24 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Median: 'np.median',
   Variance: 'np.var',
   StandardDeviation: 'np.std',
+  // Covariance/Correlation: two-collection form only. numpy `np.cov` defaults
+  // to ddof=1 (sample) and returns the 2×2 covariance matrix — the off-diagonal
+  // entry [0][1] is Cov(x, y). `np.corrcoef` returns the correlation matrix.
+  Covariance: ([x, y], compile) => {
+    if (x === null || y === null)
+      throw new Error('Covariance: expected two collection arguments');
+    return `np.cov(${compile(x)}, ${compile(y)})[0][1]`;
+  },
+  PopulationCovariance: ([x, y], compile) => {
+    if (x === null || y === null)
+      throw new Error('PopulationCovariance: expected two collection arguments');
+    return `np.cov(${compile(x)}, ${compile(y)}, ddof=0)[0][1]`;
+  },
+  Correlation: ([x, y], compile) => {
+    if (x === null || y === null)
+      throw new Error('Correlation: expected two collection arguments');
+    return `np.corrcoef(${compile(x)}, ${compile(y)})[0][1]`;
+  },
 
   // Linear algebra
   Dot: 'np.dot',

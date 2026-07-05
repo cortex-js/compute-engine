@@ -54,22 +54,27 @@ students and educators collaborate and communicate about scientific topics.
 The 2026-07-04 capability survey against that goal found the engine strong on
 plotting/compile targets, units & quantities, logic/sets, linear algebra,
 equation systems, and number formatting — and thin in the areas below.
-Items 1–4 were agreed and prioritized 2026-07-04; `Series` (Phases 1–2) and
-`TrigExpand`/`TrigToExp`/`TrigReduce` have landed and left this list. What
-remains (effort S/M/L):
+Items 1–4 were agreed and prioritized 2026-07-04; `Series` (Phases 1–2),
+`TrigExpand`/`TrigToExp`/`TrigReduce`, and **statistics** (Phases 1–2 of
+`docs/plans/2026-07-04-statistics-design.md`: the five probability
+distributions with `PDF`/`CDF`/`Quantile`,
+`GammaRegularized`/`BetaRegularized`, covariance/correlation, and
+`LinearRegression`/`PolynomialFit` with exact fits) have landed and left
+this list. What remains (effort S/M/L):
 
-1. **Statistics for real data work (M) — next up.** The library stops at descriptive
-   stats (`Mean`…`Histogram`). Missing for a science app: probability
-   distributions (Normal/Binomial/Poisson PDF/CDF/quantile),
-   correlation/covariance, and least-squares fitting
-   (`LinearRegression`/`PolynomialFit`). Highest-value analytical gap for
-   scientists and stats students.
-2. **Step-by-step "explain" API (L).** The rule engine already threads a
+1. **Step-by-step "explain" API (L).** The rule engine already threads a
    `RuleSteps` trace (`{value, because, purpose}` per step) through
    simplify/rules internals, but it is not surfaced publicly and `solve` has
    no trace at all. An educator-facing differentiator no competing JS engine
    has. Design item: public API shape, coverage (simplify → solve → D), and
    human-readable step labeling.
+
+**Statistics residue (demand-gated Phase 3, design doc §10):** inverse
+regularized incomplete gamma/beta kernels and the distributions that need
+them (Student-t, χ², F, Geometric…), `RandomVariate` sampling (reuse the
+`Sample` RNG/seed policy), and fit diagnostics (R²). Also: the Python
+execution-parity suite for the new scipy mappings is guarded/skipped until
+scipy is installed in `./venv`.
 
 **Series residue (small follow-ups from the landed feature):**
 

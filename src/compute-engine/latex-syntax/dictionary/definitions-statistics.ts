@@ -23,6 +23,11 @@ const OPERATORNAME_HEADS = [
   'Quantile',
   'GammaRegularized',
   'BetaRegularized',
+  'Covariance',
+  'PopulationCovariance',
+  'Correlation',
+  'LinearRegression',
+  'PolynomialFit',
 ];
 
 export const DEFINITIONS_STATISTICS: LatexDictionary = [
@@ -59,6 +64,9 @@ export const DEFINITIONS_STATISTICS: LatexDictionary = [
       return ['Mean', expr] as MathJsonExpression;
     },
   },
-  // Function-style alias: `\operatorname{var}(...)`
+  // Function-style aliases: `\operatorname{var}(...)`, `\operatorname{cov}(...)`,
+  // `\operatorname{corr}(...)`
   { latexTrigger: '\\operatorname{var}', parse: 'Variance' },
+  { latexTrigger: '\\operatorname{cov}', parse: 'Covariance' },
+  { latexTrigger: '\\operatorname{corr}', parse: 'Correlation' },
 ];

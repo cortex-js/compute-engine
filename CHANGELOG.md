@@ -95,6 +95,35 @@
   `CDF(PoissonDistribution(\lambda), k)` →
   $\operatorname{GammaRegularized}(k+1, \lambda)$.
 
+- **`Covariance`, `PopulationCovariance` and `Correlation` measure the
+  relationship between two data sets.** Each accepts either two equal-length
+  collections or a single collection of $(x, y)$ pairs (a scatter of points).
+  Exact data gives exact results — `Covariance([1,2,3,4,5], [2,4,5,4,5])` →
+  $\tfrac32$ and the Pearson correlation of the same data is
+  $\tfrac{\sqrt{15}}{5}$, exactly. `Covariance` uses the sample ($n-1$)
+  convention, `PopulationCovariance` the population ($n$) convention, matching
+  `Variance`/`PopulationVariance`. Parse aliases: `\operatorname{cov}` and
+  `\operatorname{corr}`. Both compile to JavaScript and Python
+  (`np.cov`/`np.corrcoef`).
+
+- **`LinearRegression` and `PolynomialFit` compute least-squares fits.**
+  `LinearRegression(xs, ys)` (or a collection of points) evaluates to
+  `(intercept, slope)`, and `PolynomialFit(data, degree)` to the list of
+  coefficients, constant term first. **Exact data yields exact
+  coefficients**: points lying on $1 + x^2$ fit at degree 2 to exactly
+  `[1, 0, 1]`, and rational data produces exact rational coefficients rather
+  than floats. With a trailing variable argument the fitted **expression** is
+  returned directly, ready to plot:
+  `PolynomialFit([(0,1), (1,2), (2,5), (3,10)], 2, x)` → $x^2 + 1$.
+
+- **`Quantile` computes empirical quantiles of data.**
+  `Quantile(collection, p)` interpolates the sorted data so that
+  `Quantile(xs, 1/4)`, `Quantile(xs, 1/2)` and `Quantile(xs, 3/4)` agree
+  exactly with `Quartiles` and `Median` (Moore–McCabe convention), with
+  general `p` interpolated through the order statistics in rank space.
+  (Combined with the distribution form above, `Quantile` covers both the
+  theoretical and the empirical case.)
+
 - **`Divides` and `NotDivides` express divisibility.** `a \mid b` parses to
   `Divides(a, b)` and `p \nmid ab` to `NotDivides(...)`; both evaluate for
   concrete integers (`Divides(3, 12)` → `True`) and stay symbolic otherwise.

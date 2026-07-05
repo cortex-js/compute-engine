@@ -75,11 +75,14 @@ import {
 } from '../numerics/special-functions';
 import { choose } from '../boxed-expression/expand';
 import {
+  correlation,
+  covariance,
   interquartileRange,
   kurtosis,
   mean,
   median,
   mode,
+  populationCovariance,
   populationStandardDeviation,
   populationVariance,
   quartiles,
@@ -405,6 +408,25 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_SYS.interquartileRange([${args
       .map((x) => compile(x))
       .join(', ')}])`;
+  },
+  // Covariance/Correlation compile only for the two-collection form; the
+  // one-collection-of-pairs form fails closed (per compile policy).
+  Covariance: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error('Covariance: expected two collection arguments to compile');
+    return `_SYS.covariance(${compile(args[0])}, ${compile(args[1])})`;
+  },
+  PopulationCovariance: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        'PopulationCovariance: expected two collection arguments to compile'
+      );
+    return `_SYS.populationCovariance(${compile(args[0])}, ${compile(args[1])})`;
+  },
+  Correlation: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error('Correlation: expected two collection arguments to compile');
+    return `_SYS.correlation(${compile(args[0])}, ${compile(args[1])})`;
   },
   Min: 'Math.min',
   Power: (args, compile) => {
@@ -1472,6 +1494,9 @@ const SYS_HELPERS = {
   mode,
   quartiles,
   interquartileRange,
+  covariance,
+  populationCovariance,
+  correlation,
   erf,
   erfc,
   erfInv,

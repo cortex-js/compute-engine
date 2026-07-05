@@ -9,22 +9,28 @@ import {
   erfInv,
 } from '../numerics/special-functions';
 import { apply, shouldNumericize } from '../boxed-expression/apply';
-import { isNumber } from '../boxed-expression/type-guards';
+import { isNumber, isSymbol } from '../boxed-expression/type-guards';
 import {
+  bigCorrelation,
+  bigCovariance,
   bigInterquartileRange,
   bigKurtosis,
   bigMean,
   bigMedian,
   bigMode,
+  bigPopulationCovariance,
   bigPopulationVariance,
   bigQuartiles,
   bigSkewness,
   bigVariance,
+  correlation,
+  covariance,
   interquartileRange,
   kurtosis,
   mean,
   median,
   mode,
+  populationCovariance,
   populationVariance,
   quartiles,
   skewness,
@@ -524,6 +530,81 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
   },
   {
+    //
+    // Bivariate data relationships (Phase 2). Both input conventions are
+    // accepted and detected structurally by `extractPairs`: two equal-length
+    // collections, or one collection of 2-element (x, y) pairs. Dual
+    // exact/numeric path mirroring `Variance`: all-exact data → exact
+    // rational/radical result; otherwise machine or BigDecimal kernels.
+    //
+    Covariance: {
+      description:
+        'Sample covariance (n − 1 denominator) of paired data, given as two ' +
+        'equal-length collections or one collection of (x, y) pairs.',
+      complexity: 1200,
+      broadcastable: false,
+      signature: '(collection, collection?) -> number',
+      type: () => 'finite_real',
+      evaluate: (ops, { engine: ce, numericApproximation }) =>
+        evaluateCovariance(ce, ops, !!numericApproximation, false),
+    },
+
+    PopulationCovariance: {
+      description:
+        'Population covariance (n denominator) of paired data, given as two ' +
+        'equal-length collections or one collection of (x, y) pairs.',
+      complexity: 1200,
+      broadcastable: false,
+      signature: '(collection, collection?) -> number',
+      type: () => 'finite_real',
+      evaluate: (ops, { engine: ce, numericApproximation }) =>
+        evaluateCovariance(ce, ops, !!numericApproximation, true),
+    },
+
+    Correlation: {
+      description:
+        "Pearson's correlation coefficient of paired data, given as two " +
+        'equal-length collections or one collection of (x, y) pairs.',
+      complexity: 1200,
+      broadcastable: false,
+      signature: '(collection, collection?) -> number',
+      type: () => 'finite_real',
+      evaluate: (ops, { engine: ce, numericApproximation }) =>
+        evaluateCorrelation(ce, ops, !!numericApproximation),
+    },
+
+    //
+    // Least-squares fitting (Phase 2). `LinearRegression` returns
+    // `Tuple(b0, b1)` for the fit `b0 + b1·x`; `PolynomialFit` returns the
+    // ascending coefficient `List(c0, …, c_deg)`. An optional trailing
+    // variable symbol returns the fitted *expression* in that variable
+    // instead. Exact data → exact rational coefficients (normal equations
+    // solved by exact Gaussian elimination); inexact data / `.N()` → floats.
+    //
+    LinearRegression: {
+      description:
+        'Least-squares linear fit b0 + b1·x. Returns Tuple(b0, b1), or the ' +
+        'fitted expression if a trailing variable symbol is given.',
+      complexity: 1200,
+      broadcastable: false,
+      signature: '(any+) -> tuple<number, number>',
+      evaluate: (ops, { engine: ce, numericApproximation }) =>
+        evaluateLinearRegression(ce, ops, !!numericApproximation),
+    },
+
+    PolynomialFit: {
+      description:
+        'Least-squares polynomial fit of the given degree. Returns the ' +
+        'ascending coefficient List(c0, …, c_deg), or the fitted expression ' +
+        'if a trailing variable symbol is given.',
+      complexity: 1200,
+      broadcastable: false,
+      signature: '(any+) -> list<number>',
+      evaluate: (ops, { engine: ce, numericApproximation }) =>
+        evaluatePolynomialFit(ce, ops, !!numericApproximation),
+    },
+  },
+  {
     Sample: {
       description:
         'Return a random sample of k elements from the collection, ' +
@@ -721,4 +802,369 @@ function exactMode(ce: ComputeEngine, vals: Expression[]): Expression {
   for (const e of counts.values())
     if (best === undefined || e.count > best.count) best = e;
   return best ? best.val : ce.NaN;
+}
+
+//
+// Bivariate data relationships and least-squares fitting (Phase 2).
+//
+
+/** True if every value is an exact, finite, real number literal. */
+function allExact(vals: ReadonlyArray<Expression>): boolean {
+  for (const v of vals)
+    if (!isNumber(v) || v.isExact !== true || v.im !== 0 || v.isFinite !== true)
+      return false;
+  return true;
+}
+
+/**
+ * Extract paired samples from the two accepted conventions: two equal-length
+ * collections (`[xs, ys]`), or one collection of 2-element (x, y) pairs. Returns
+ * `null` if the shape is not one of these (the caller turns that into an error).
+ */
+function extractPairs(
+  ops: ReadonlyArray<Expression>
+): { xs: Expression[]; ys: Expression[] } | null {
+  if (ops.length === 1) {
+    const arg = ops[0];
+    if (!arg.isFiniteCollection) return null;
+    const xs: Expression[] = [];
+    const ys: Expression[] = [];
+    for (const el of arg.each()) {
+      if (!el.isFiniteCollection) return null;
+      const pair = [...el.each()];
+      if (pair.length !== 2) return null;
+      xs.push(pair[0]);
+      ys.push(pair[1]);
+    }
+    return { xs, ys };
+  }
+  if (ops.length === 2) {
+    const [a, b] = ops;
+    if (!a.isFiniteCollection || !b.isFiniteCollection) return null;
+    return { xs: [...a.each()], ys: [...b.each()] };
+  }
+  return null;
+}
+
+const machineVals = (vals: ReadonlyArray<Expression>): number[] =>
+  vals.map((v) => v.N().re);
+const bigVals = (vals: ReadonlyArray<Expression>) =>
+  vals.map((v) => {
+    const n = v.N();
+    return n.bignumRe ?? v.engine.bignum(n.re);
+  });
+
+function shapeError(ce: ComputeEngine, name: string): Expression {
+  return ce.error(
+    'unexpected-argument',
+    `${name} expects two equal-length collections or one collection of (x, y) pairs`
+  );
+}
+
+function evaluateCovariance(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean,
+  population: boolean
+): Expression {
+  const name = population ? 'PopulationCovariance' : 'Covariance';
+  const pairs = extractPairs(ops);
+  if (!pairs) return shapeError(ce, name);
+  const { xs, ys } = pairs;
+  if (xs.length !== ys.length)
+    return ce.error('unexpected-argument', `${name}: collections differ in length`);
+  if (xs.length < 2)
+    return ce.error('unexpected-argument', `${name}: at least 2 data points required`);
+
+  if (!numericApproximation && allExact(xs) && allExact(ys))
+    return exactCovariance(ce, xs, ys, population);
+
+  if (bignumPreferred(ce))
+    return ce.number(
+      population
+        ? bigPopulationCovariance(bigVals(xs), bigVals(ys))
+        : bigCovariance(bigVals(xs), bigVals(ys))
+    );
+  return ce.number(
+    population
+      ? populationCovariance(machineVals(xs), machineVals(ys))
+      : covariance(machineVals(xs), machineVals(ys))
+  );
+}
+
+function evaluateCorrelation(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): Expression {
+  const pairs = extractPairs(ops);
+  if (!pairs) return shapeError(ce, 'Correlation');
+  const { xs, ys } = pairs;
+  if (xs.length !== ys.length)
+    return ce.error('unexpected-argument', 'Correlation: collections differ in length');
+  if (xs.length < 2)
+    return ce.error('unexpected-argument', 'Correlation: at least 2 data points required');
+
+  if (!numericApproximation && allExact(xs) && allExact(ys)) {
+    const r = exactCorrelation(ce, xs, ys);
+    return r ?? ce.error('unexpected-argument', 'Correlation: zero variance');
+  }
+
+  const r = bignumPreferred(ce)
+    ? bigCorrelation(bigVals(xs), bigVals(ys))
+    : correlation(machineVals(xs), machineVals(ys));
+  const num = ce.number(r);
+  return num.isNaN
+    ? ce.error('unexpected-argument', 'Correlation: zero variance')
+    : num;
+}
+
+/** Exact sample/population covariance: (Σxy − ΣxΣy/n)/(n−1 or n). */
+function exactCovariance(
+  ce: ComputeEngine,
+  xs: Expression[],
+  ys: Expression[],
+  population: boolean
+): Expression {
+  const n = xs.length;
+  const sx = add(ce, xs);
+  const sy = add(ce, ys);
+  const sxy = add(
+    ce,
+    xs.map((x, i) => multiply(ce, [x, ys[i]]))
+  );
+  const num = subtract(ce, sxy, divide(ce, multiply(ce, [sx, sy]), ce.number(n)));
+  return divide(ce, num, ce.number(population ? n : n - 1));
+}
+
+/** Exact Pearson r; `null` if a variance is zero (division by zero). */
+function exactCorrelation(
+  ce: ComputeEngine,
+  xs: Expression[],
+  ys: Expression[]
+): Expression | null {
+  const n = xs.length;
+  const sx = add(ce, xs);
+  const sy = add(ce, ys);
+  const sxy = add(
+    ce,
+    xs.map((x, i) => multiply(ce, [x, ys[i]]))
+  );
+  const sx2 = add(
+    ce,
+    xs.map((x) => powi(ce, x, 2))
+  );
+  const sy2 = add(
+    ce,
+    ys.map((y) => powi(ce, y, 2))
+  );
+  const cov = subtract(ce, sxy, divide(ce, multiply(ce, [sx, sy]), ce.number(n)));
+  const vx = subtract(ce, sx2, divide(ce, powi(ce, sx, 2), ce.number(n)));
+  const vy = subtract(ce, sy2, divide(ce, powi(ce, sy, 2), ce.number(n)));
+  if (vx.isSame(0) || vy.isSame(0)) return null;
+  const denom = ce.function('Sqrt', [multiply(ce, [vx, vy])]).evaluate();
+  return divide(ce, cov, denom);
+}
+
+//
+// Least-squares fitting.
+//
+
+const MAX_FIT_DEGREE = 12;
+
+/**
+ * Parse the regression argument list: an optional trailing variable symbol,
+ * an optional trailing integer degree (for `PolynomialFit`), and the data as
+ * either two collections or one collection of pairs.
+ */
+function parseFitArgs(
+  ops: ReadonlyArray<Expression>,
+  wantDegree: boolean
+): {
+  xs: Expression[];
+  ys: Expression[];
+  degree: number;
+  variable?: string;
+} | null {
+  let rest = [...ops];
+
+  // Optional trailing variable symbol.
+  let variable: string | undefined;
+  const last = rest[rest.length - 1];
+  if (rest.length > 0 && isSymbol(last)) {
+    variable = last.symbol;
+    rest = rest.slice(0, -1);
+  }
+
+  // Optional/required trailing integer degree.
+  let degree = 1;
+  if (wantDegree) {
+    if (rest.length === 0) return null;
+    const d = toInteger(rest[rest.length - 1]);
+    if (d === null) return null;
+    degree = d;
+    rest = rest.slice(0, -1);
+  }
+
+  const pairs = extractPairs(rest);
+  if (!pairs) return null;
+  return { xs: pairs.xs, ys: pairs.ys, degree, variable };
+}
+
+function evaluateLinearRegression(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): Expression {
+  const parsed = parseFitArgs(ops, false);
+  if (!parsed)
+    return ce.error('unexpected-argument', 'LinearRegression: invalid arguments');
+  const coeffs = fitCoefficients(ce, parsed.xs, parsed.ys, 1, numericApproximation);
+  if (!coeffs)
+    return ce.error('unexpected-argument', 'LinearRegression: degenerate data');
+  const [b0, b1] = coeffs;
+  if (parsed.variable !== undefined)
+    return buildPolynomial(ce, coeffs, parsed.variable);
+  return ce.tuple(b0, b1);
+}
+
+function evaluatePolynomialFit(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): Expression {
+  const parsed = parseFitArgs(ops, true);
+  if (!parsed)
+    return ce.error('unexpected-argument', 'PolynomialFit: invalid arguments');
+  const { xs, degree, variable } = parsed;
+  if (!Number.isInteger(degree) || degree < 0 || degree > MAX_FIT_DEGREE)
+    return ce.error(
+      'unexpected-argument',
+      `PolynomialFit: degree must be an integer in [0, ${MAX_FIT_DEGREE}]`
+    );
+  if (degree > xs.length - 1)
+    return ce.error(
+      'unexpected-argument',
+      'PolynomialFit: not enough data points for the requested degree'
+    );
+  const coeffs = fitCoefficients(ce, parsed.xs, parsed.ys, degree, numericApproximation);
+  if (!coeffs)
+    return ce.error('unexpected-argument', 'PolynomialFit: degenerate data');
+  if (variable !== undefined) return buildPolynomial(ce, coeffs, variable);
+  return ce.function('List', coeffs);
+}
+
+/**
+ * Ascending least-squares coefficients `[c0, …, c_deg]` for `y ≈ Σ c_j x^j`,
+ * via the Vandermonde normal equations `(XᵀX)β = Xᵀy`. Exact data flows through
+ * exact rational elimination; inexact data / `numericApproximation` yield
+ * floats. Returns `null` for degenerate (singular) inputs.
+ */
+function fitCoefficients(
+  ce: ComputeEngine,
+  xs: Expression[],
+  ys: Expression[],
+  degree: number,
+  numericApproximation: boolean
+): Expression[] | null {
+  const n = xs.length;
+  if (n !== ys.length || n < degree + 1) return null;
+
+  const exact = !numericApproximation && allExact(xs) && allExact(ys);
+  // Under `.N()` or with inexact data, work with floats so the result is a
+  // float; otherwise keep the boxed (exact) values.
+  const X = exact ? xs : xs.map((x) => ce.number(x.N().re));
+  const Y = exact ? ys : ys.map((y) => ce.number(y.N().re));
+
+  // Powers x_i^j for j = 0 … 2·degree.
+  const maxPow = 2 * degree;
+  const powers: Expression[][] = X.map((x) => {
+    const row: Expression[] = [ce.One];
+    for (let j = 1; j <= maxPow; j++)
+      row.push(ce.function('Power', [x, ce.number(j)]).evaluate());
+    return row;
+  });
+
+  // Normal matrix A[j][k] = Σ x_i^{j+k}; RHS c[j] = Σ x_i^j · y_i.
+  const m = degree + 1;
+  const A: Expression[][] = [];
+  const b: Expression[] = [];
+  for (let j = 0; j < m; j++) {
+    const rowA: Expression[] = [];
+    for (let k = 0; k < m; k++)
+      rowA.push(add(ce, powers.map((p) => p[j + k])));
+    A.push(rowA);
+    b.push(add(ce, powers.map((p, i) => multiply(ce, [p[j], Y[i]]))));
+  }
+
+  return gaussSolve(ce, A, b);
+}
+
+/**
+ * Solve `A x = b` (A square) by Gaussian elimination with partial pivoting,
+ * using boxed arithmetic so exact rational entries yield exact solutions.
+ * Returns `null` on a singular system. This is *not* reachable from
+ * simplification, so it never calls `.simplify()`.
+ */
+function gaussSolve(
+  ce: ComputeEngine,
+  A: Expression[][],
+  b: Expression[]
+): Expression[] | null {
+  const n = A.length;
+  const aug: Expression[][] = A.map((row, i) => [...row, b[i]]);
+
+  for (let col = 0; col < n; col++) {
+    // Partial pivot on the largest magnitude (numeric proxy for exact too).
+    let piv = col;
+    let pivMag = Math.abs(aug[col][col].N().re);
+    for (let r = col + 1; r < n; r++) {
+      const mag = Math.abs(aug[r][col].N().re);
+      if (mag > pivMag) {
+        pivMag = mag;
+        piv = r;
+      }
+    }
+    if (!(pivMag > 0)) return null; // singular
+    if (piv !== col) [aug[col], aug[piv]] = [aug[piv], aug[col]];
+
+    const pivot = aug[col][col];
+    for (let r = col + 1; r < n; r++) {
+      const factor = aug[r][col].div(pivot);
+      for (let j = col; j <= n; j++)
+        aug[r][j] = aug[r][j].sub(factor.mul(aug[col][j]));
+    }
+  }
+
+  const x: Expression[] = new Array(n);
+  for (let i = n - 1; i >= 0; i--) {
+    let s = aug[i][n];
+    for (let j = i + 1; j < n; j++) s = s.sub(aug[i][j].mul(x[j]));
+    x[i] = s.div(aug[i][i]);
+  }
+  return x;
+}
+
+/** Build `c0 + c1·v + c2·v² + …` with canonical construction (no simplify).
+ * Terms with an exactly-zero coefficient are skipped so the fitted expression
+ * reads `x² + 1`, not `x² + 0x + 1`. */
+function buildPolynomial(
+  ce: ComputeEngine,
+  coeffs: Expression[],
+  variable: string
+): Expression {
+  const v = ce.symbol(variable);
+  const terms: Expression[] = [];
+  for (let j = 0; j < coeffs.length; j++) {
+    const c = coeffs[j];
+    if (c.isSame(0) || (isNumber(c) && c.re === 0)) continue;
+    if (j === 0) terms.push(c);
+    else if (j === 1) terms.push(ce.function('Multiply', [c, v]));
+    else
+      terms.push(
+        ce.function('Multiply', [c, ce.function('Power', [v, ce.number(j)])])
+      );
+  }
+  if (terms.length === 0) return ce.Zero;
+  return ce.function('Add', terms);
 }
