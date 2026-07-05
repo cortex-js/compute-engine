@@ -154,10 +154,16 @@
   the **parametric family**: `Solve(3n+4m=7, n, m)` →
   `[(4t-7,\; -3t+7)]` with the fresh parameter `t` ranging over ℤ, and Pell
   equations yield their exact closed forms
-  $\bigl(\tfrac{(3+2\sqrt2)^t + (3-2\sqrt2)^t}{2}, \dots\bigr)$. Every
-  concrete solution is exact-confirmed by substitution; half-bounded domains
-  (e.g. $n \ge 1$ alone) are left unevaluated rather than risk dropping a
-  constraint.
+  $\bigl(\tfrac{(3+2\sqrt2)^t + (3-2\sqrt2)^t}{2}, \dots\bigr)$, and
+  **Pythagorean triples** return the complete classical parametrization:
+  `Solve(x^2+y^2=z^2, x, y, z)` →
+  $\bigl(t(t_1^2-t_2^2),\; 2t\,t_1 t_2,\; t(t_1^2+t_2^2)\bigr)$ and its
+  leg-swap — every integer triple, including all signs, lies in one of the
+  two families. Every concrete solution is exact-confirmed by substitution;
+  half-bounded domains (e.g. $n \ge 1$ alone) are left unevaluated, and forms
+  whose textbook parametrizations are provably incomplete (weighted
+  coefficients, four or more squares) are declined rather than answered
+  partially.
 
 - **Periodic equations expand their root families over a bounded domain.**
   `Solve(\sin x = \tfrac12,\; x \in [0, 4\pi])` returns all four exact
