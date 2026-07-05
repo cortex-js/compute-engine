@@ -1,4 +1,7 @@
-import type { IComputeEngine as ComputeEngine, Expression } from '../global-types';
+import type {
+  IComputeEngine as ComputeEngine,
+  Expression,
+} from '../global-types';
 import { collectionElementType } from '../../common/type/utils';
 
 import { isFunction, sym } from './type-guards';
@@ -73,7 +76,7 @@ function bgcd(a: bigint, b: bigint): bigint {
 
 function blcm(a: bigint, b: bigint): bigint {
   if (a === 0n || b === 0n) return 0n;
-  return babs(a / bgcd(a, b) * b);
+  return babs((a / bgcd(a, b)) * b);
 }
 
 /** `⌈a/b⌉` for `b ≠ 0`. */
@@ -145,7 +148,10 @@ function extractCoefficients(
   ce: ComputeEngine,
   residual: Expression,
   unknowns: string[]
-): Map<string, { exps: number[]; coef: bigint /* numerator */; den: bigint }> | null {
+): Map<
+  string,
+  { exps: number[]; coef: bigint /* numerator */; den: bigint }
+> | null {
   const expanded = expand(residual) ?? residual;
   const terms = isFunction(expanded, 'Add') ? [...expanded.ops] : [expanded];
 
@@ -183,10 +189,7 @@ function extractCoefficients(
     byKey.set(key, prev ? ce.function('Add', [prev, m.coef]) : m.coef);
   }
 
-  const out = new Map<
-    string,
-    { exps: number[]; coef: bigint; den: bigint }
-  >();
+  const out = new Map<string, { exps: number[]; coef: bigint; den: bigint }>();
   for (const [key, coefExpr] of byKey) {
     const value = coefExpr.evaluate();
     const rational = asRational(value);
@@ -342,7 +345,8 @@ function confirm(
   values: bigint[]
 ): boolean {
   const subs: Record<string, Expression> = {};
-  for (let i = 0; i < unknowns.length; i++) subs[unknowns[i]] = ce.number(values[i]);
+  for (let i = 0; i < unknowns.length; i++)
+    subs[unknowns[i]] = ce.number(values[i]);
   return residual.subs(subs).evaluate().isEqual(0) === true;
 }
 
@@ -488,7 +492,13 @@ function solveLinearCase(
   if (solution === null) return []; // gcd(A) ∤ (−C) → decided: no solutions
 
   if (allBounded) {
-    const res = instantiateLinearBounded(ce, residual, unknowns, solution, kinds);
+    const res = instantiateLinearBounded(
+      ce,
+      residual,
+      unknowns,
+      solution,
+      kinds
+    );
     // Bounded linear: surface ONLY a decided-empty result — a proven-unsolvable
     // equation or an empty box intersection. A *non-empty* bounded linear family
     // is deferred to the caller's enumeration, which produces identical concrete
@@ -550,8 +560,8 @@ function instantiateLinearBounded(
       continue;
     }
     // lo ≤ base + hom·t ≤ hi.
-    let a = k.lo - base[i];
-    let b = k.hi - base[i];
+    const a = k.lo - base[i];
+    const b = k.hi - base[i];
     let cLo: bigint;
     let cHi: bigint;
     if (hom[i] > 0n) {
@@ -572,7 +582,8 @@ function instantiateLinearBounded(
   const rows: bigint[][] = [];
   for (let t = tMin; t <= tMax; t++) {
     const values = unknowns.map((_, i) => base[i] + hom[i] * t);
-    if (!values.every((v, i) => inBoundedDomain(ce, kinds[i] as any, v))) continue;
+    if (!values.every((v, i) => inBoundedDomain(ce, kinds[i] as any, v)))
+      continue;
     if (!confirm(ce, residual, unknowns, values)) continue;
     rows.push(values);
     if (rows.length > MAX_DIOPHANTINE_EXPANSION) return undefined;
@@ -702,7 +713,10 @@ function parametricPell(
       ce.number(r),
       ce.function('Multiply', [ce.number(s), sqrtD]),
     ]);
-    const memb = ce.function('Multiply', [alpha, ce.function('Power', [unit, t])]);
+    const memb = ce.function('Multiply', [
+      alpha,
+      ce.function('Power', [unit, t]),
+    ]);
     const conj = ce.function('Multiply', [
       alphaBar,
       ce.function('Power', [unitBar, t]),

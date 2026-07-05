@@ -413,7 +413,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // one-collection-of-pairs form fails closed (per compile policy).
   Covariance: (args, compile) => {
     if (args.length !== 2)
-      throw new Error('Covariance: expected two collection arguments to compile');
+      throw new Error(
+        'Covariance: expected two collection arguments to compile'
+      );
     return `_SYS.covariance(${compile(args[0])}, ${compile(args[1])})`;
   },
   PopulationCovariance: (args, compile) => {
@@ -425,7 +427,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Correlation: (args, compile) => {
     if (args.length !== 2)
-      throw new Error('Correlation: expected two collection arguments to compile');
+      throw new Error(
+        'Correlation: expected two collection arguments to compile'
+      );
     return `_SYS.correlation(${compile(args[0])}, ${compile(args[1])})`;
   },
   Min: 'Math.min',

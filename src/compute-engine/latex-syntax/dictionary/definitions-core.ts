@@ -2838,9 +2838,7 @@ const ALIGNED_RELATION_TOKENS: Record<string, string> = {
 };
 
 function atAlignedRowEnd(parser: Parser): boolean {
-  return (
-    parser.atBoundary || parser.peek === '\\\\' || parser.peek === '\\cr'
-  );
+  return parser.atBoundary || parser.peek === '\\\\' || parser.peek === '\\cr';
 }
 
 /**
@@ -2882,7 +2880,10 @@ function parseAlignedRow(parser: Parser): MathJsonExpression | null {
     const rel = ALIGNED_RELATION_TOKENS[parser.peek];
     if (rel !== undefined && acc !== null) {
       parser.nextToken();
-      const rhs = parser.parseExpression({ minPrec: 0, condition: rowCondition });
+      const rhs = parser.parseExpression({
+        minPrec: 0,
+        condition: rowCondition,
+      });
       acc = [rel, acc, missingIfEmpty(rhs)] as MathJsonExpression;
       continue;
     }

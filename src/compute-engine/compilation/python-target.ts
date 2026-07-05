@@ -349,7 +349,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   PopulationCovariance: ([x, y], compile) => {
     if (x === null || y === null)
-      throw new Error('PopulationCovariance: expected two collection arguments');
+      throw new Error(
+        'PopulationCovariance: expected two collection arguments'
+      );
     return `np.cov(${compile(x)}, ${compile(y)}, ddof=0)[0][1]`;
   },
   Correlation: ([x, y], compile) => {

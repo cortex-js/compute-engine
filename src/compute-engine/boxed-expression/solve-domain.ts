@@ -2,7 +2,10 @@ import type { Type } from '../../common/type/types';
 import { collectionElementType } from '../../common/type/utils';
 import { checkDeadline } from '../../common/interruptible';
 
-import type { IComputeEngine as ComputeEngine, Expression } from '../global-types';
+import type {
+  IComputeEngine as ComputeEngine,
+  Expression,
+} from '../global-types';
 import { isFunction, sym } from './type-guards';
 import { findUnivariateRoots } from './solve';
 import { getPolynomialCoefficients } from './polynomials';
@@ -168,7 +171,9 @@ export function evaluateSolve(
 
 function isExpression(x: unknown): x is Expression {
   return (
-    typeof x === 'object' && x !== null && typeof (x as any).operator === 'string'
+    typeof x === 'object' &&
+    x !== null &&
+    typeof (x as any).operator === 'string'
   );
 }
 
@@ -306,7 +311,8 @@ export function solveOverDomain(
 
     // Optional condition (3rd `Element` operand): drop only on a definite
     // `False`, mirroring the symbolic membership filter.
-    if (condition && conditionValue(condition, unknown, item) === false) continue;
+    if (condition && conditionValue(condition, unknown, item) === false)
+      continue;
 
     results.push(item);
   }
@@ -674,7 +680,8 @@ function domainBoundingRange(
 
   const int = interval(domain);
   if (int === undefined) return undefined;
-  if (!Number.isFinite(int.start) || !Number.isFinite(int.end)) return undefined;
+  if (!Number.isFinite(int.start) || !Number.isFinite(int.end))
+    return undefined;
   return { lo: Math.min(int.start, int.end), hi: Math.max(int.start, int.end) };
 }
 
@@ -782,14 +789,16 @@ function expandPeriodicRoots(
         k === 0
           ? x0
           : ce
-              .function('Add', [
-                x0,
-                ce.function('Multiply', [ce.number(k), T]),
-              ])
+              .function('Add', [x0, ce.function('Multiply', [ce.number(k), T])])
               .evaluate();
       // Confirm by exact substitution — guards an imperfect period and never
       // admits a wrong answer.
-      if (predBody.subs({ [unknown]: member }).evaluate().isEqual(0) !== true)
+      if (
+        predBody
+          .subs({ [unknown]: member })
+          .evaluate()
+          .isEqual(0) !== true
+      )
         continue;
       out.push(member);
     }
@@ -801,10 +810,7 @@ function expandPeriodicRoots(
   const deduped: Expression[] = [];
   for (const e of out) {
     const last = deduped[deduped.length - 1];
-    if (
-      last &&
-      (last.isSame(e) || Math.abs(last.N().re - e.N().re) <= tol)
-    )
+    if (last && (last.isSame(e) || Math.abs(last.N().re - e.N().re) <= tol))
       continue;
     deduped.push(e);
   }

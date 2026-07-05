@@ -116,7 +116,11 @@ import type {
   SymbolDefinitions,
   Sign,
 } from '../global-types';
-import { isNumber, isFunction, isString } from '../boxed-expression/type-guards';
+import {
+  isNumber,
+  isFunction,
+  isString,
+} from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
 import { signFromAssumedPart } from './complex';
 
@@ -868,7 +872,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // B(a, m) = (m−1)! / (a(a+1)…(a+m−1)) — an exact rational function of
           // a valid at every a (with a pole where the denominator vanishes).
           let reduced: Expression | undefined;
-          if (bi !== null && bi > 0) reduced = betaPositiveIntegerArg(engine, a, bi);
+          if (bi !== null && bi > 0)
+            reduced = betaPositiveIntegerArg(engine, a, bi);
           else if (ai !== null && ai > 0)
             reduced = betaPositiveIntegerArg(engine, b, ai);
           if (reduced !== undefined)

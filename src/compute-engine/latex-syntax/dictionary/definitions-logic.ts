@@ -144,8 +144,7 @@ function parseEquivalent(
       atParenthesizedModulus(p) || (terminator.condition?.(p) ?? false),
   });
   const modulus = parseModulusAnnotation(parser, terminator);
-  if (modulus !== null)
-    return ['Congruent', lhs, missingIfEmpty(rhs), modulus];
+  if (modulus !== null) return ['Congruent', lhs, missingIfEmpty(rhs), modulus];
   return ['Equivalent', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
 }
 

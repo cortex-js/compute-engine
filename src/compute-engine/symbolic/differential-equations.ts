@@ -454,9 +454,7 @@ function foldExponentialExponents(expr: Expression): Expression {
           ? exponents[0]
           : ce.function('Add', exponents).simplify();
       if (!exponent.isSame(0))
-        rest.push(
-          ce.function('Power', [ce.symbol('ExponentialE'), exponent])
-        );
+        rest.push(ce.function('Power', [ce.symbol('ExponentialE'), exponent]));
     }
     if (rest.length === 0) return ce.One;
     if (rest.length === 1) return rest[0];
@@ -476,7 +474,9 @@ function foldExponentialExponents(expr: Expression): Expression {
  * Returns `undefined` when the term is not of the form `A·sin²(u)` or
  * `A·cos²(u)` (with exactly one squared-trig factor).
  */
-function splitTrigSquareTerm(term: Expression):
+function splitTrigSquareTerm(
+  term: Expression
+):
   | { kind: 'Sin' | 'Cos'; arg: Expression; coefficient: Expression }
   | undefined {
   const ce = term.engine;
@@ -789,8 +789,7 @@ function clusterNumericRoots(
         break;
       }
     }
-    if (!placed)
-      clusters.push({ sumRe: root.re, sumIm: root.im, count: 1 });
+    if (!placed) clusters.push({ sumRe: root.re, sumIm: root.im, count: 1 });
   }
 
   return clusters.map((cluster) => ({

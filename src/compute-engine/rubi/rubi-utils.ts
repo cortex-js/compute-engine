@@ -2481,9 +2481,7 @@ const COFUNCTION_SHIFT_ALL: Record<string, { fn: string; sign: number }> = {
   cot: { fn: 'tan', sign: -1 },
 };
 const COFN_COT = process.env.RUBI_COFN_COT !== undefined;
-const COFUNCTION_SHIFT = COFN_COT
-  ? COFUNCTION_SHIFT_ALL
-  : COFUNCTION_SHIFT_SEC;
+const COFUNCTION_SHIFT = COFN_COT ? COFUNCTION_SHIFT_ALL : COFUNCTION_SHIFT_SEC;
 
 /** True if a shiftable (`sec`, and — when enabled — `cot`) inert head appears
  * anywhere (gates the shift to a strict no-op for integrands that carry none). */
@@ -2651,7 +2649,10 @@ function hasFractionalReciprocalTrig(e: Expression): boolean {
  * `sec[θ]→cos[θ]^-1` (identity when neither appears). See the block comment.
  * Only branch-safe (integer-exponent) occurrences are converted, and the whole
  * rewrite is skipped for integrands carrying a half-integer csc/sec power. */
-export function reciprocalToPower(ce: ComputeEngine, e: Expression): Expression {
+export function reciprocalToPower(
+  ce: ComputeEngine,
+  e: Expression
+): Expression {
   if (hasFractionalReciprocalTrig(e)) return e;
   return reciprocalToPowerRec(ce, e, false);
 }
@@ -2739,7 +2740,12 @@ const INERT_TRIG = new Set(['sin', 'cos', 'tan', 'cot', 'sec', 'csc']);
 // `a + b·trig[arg]` (`{ head, a, b, arg }`), as recognized inside a product
 // factor's base. `coef`/`a`/`b` are x-free; `arg` is linear in x.
 type TrigMono = { head: string; coef: Expression; arg: Expression };
-type TrigBinom = { head: string; a: Expression; b: Expression; arg: Expression };
+type TrigBinom = {
+  head: string;
+  a: Expression;
+  b: Expression;
+  arg: Expression;
+};
 
 /** `coef·trig[linear arg]` (or bare `trig[linear arg]`) → `{head, coef, arg}`,
  * else null. `coef` must be x-free. */
@@ -2792,7 +2798,13 @@ function trigBinomParts(
 // A product factor `(base)^exp` classified as monomial or binomial. `exp` is
 // x-free (default 1).
 type Factor =
-  | { kind: 'mono'; head: string; coef: Expression; arg: Expression; exp: Expression }
+  | {
+      kind: 'mono';
+      head: string;
+      coef: Expression;
+      arg: Expression;
+      exp: Expression;
+    }
   | {
       kind: 'binom';
       head: string;
@@ -2819,7 +2831,8 @@ function classifyFactor(
   const m = trigMonoParts(base, x);
   if (m) return { kind: 'mono', head: m.head, coef: m.coef, arg: m.arg, exp };
   const bi = trigBinomParts(ce, base, x);
-  if (bi) return { kind: 'binom', head: bi.head, a: bi.a, b: bi.b, arg: bi.arg, exp };
+  if (bi)
+    return { kind: 'binom', head: bi.head, a: bi.a, b: bi.b, arg: bi.arg, exp };
   return null;
 }
 
@@ -2940,7 +2953,11 @@ function hasNonCosInertTrig(e: Expression): boolean {
   return e.ops?.some(hasNonCosInertTrig) ?? false;
 }
 function hasLinearArgCos(e: Expression, x: string): boolean {
-  if (e.operator === 'cos' && e.ops?.length === 1 && polyDegreeX(e.ops[0], x) === 1)
+  if (
+    e.operator === 'cos' &&
+    e.ops?.length === 1 &&
+    polyDegreeX(e.ops[0], x) === 1
+  )
     return true;
   return e.ops?.some((o) => hasLinearArgCos(o, x)) ?? false;
 }
@@ -3758,7 +3775,12 @@ function trigToExp(ce: ComputeEngine, u: Expression): Expression {
  *  `d·x`/`d·x^k`→1/k. Null if `t` is not one x-free-scaled power of x. */
 function xPowerExponent(t: Expression, x: string): Expression | null {
   if (t.symbol === x) return t.engine.One;
-  if (t.operator === 'Power' && t.ops && t.ops[0].symbol === x && !t.ops[1].has(x))
+  if (
+    t.operator === 'Power' &&
+    t.ops &&
+    t.ops[0].symbol === x &&
+    !t.ops[1].has(x)
+  )
     return t.ops[1];
   if (t.operator === 'Multiply' && t.ops) {
     const dep = t.ops.filter((o) => o.has(x));
@@ -3875,10 +3897,7 @@ export function containsInertSinCos(u: Expression): boolean {
  *  (incl. the incomplete-Γ kernel) close each `coef·xᵏ·E^(k·xⁿ)` term. The
  *  antiderivative is exponential/incomplete-Γ form — mathematically identical
  *  to Rubi's (verified numerically). */
-export function expandTrigToExp(
-  ce: ComputeEngine,
-  u: Expression
-): Expression {
+export function expandTrigToExp(ce: ComputeEngine, u: Expression): Expression {
   return deepExpand(ce, trigToExp(ce, u));
 }
 

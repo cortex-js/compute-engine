@@ -4,7 +4,11 @@ import type {
 } from '../global-types';
 
 import { checkDeadline } from '../../common/interruptible';
-import { isFunction, isNumber, isSymbol } from '../boxed-expression/type-guards';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards';
 import { asSmallInteger } from '../boxed-expression/numerics';
 import { differentiate } from './derivative';
 import { symbolicLimit } from './limit';
@@ -85,11 +89,7 @@ function zeroCoeffs(ce: ComputeEngine, W: number): Coeffs {
   return Array.from({ length: W + 1 }, () => ce.Zero);
 }
 
-function constCoeffs(
-  ce: ComputeEngine,
-  value: Expression,
-  W: number
-): Coeffs {
+function constCoeffs(ce: ComputeEngine, value: Expression, W: number): Coeffs {
   const c = zeroCoeffs(ce, W);
   c[0] = value;
   return c;
@@ -435,13 +435,8 @@ function expandByDerivative(
   for (let k = 0; k <= W; k++) {
     checkDeadline(ce._deadline);
     let val: Expression | undefined = g.subs({ [varName]: at }).evaluate();
-    if (
-      !val ||
-      !val.isValid ||
-      val.isNaN === true ||
-      val.isInfinity === true
-    ) {
-      val = resolve ? resolve(g, k) ?? undefined : undefined;
+    if (!val || !val.isValid || val.isNaN === true || val.isInfinity === true) {
+      val = resolve ? (resolve(g, k) ?? undefined) : undefined;
       if (!val) return null;
     }
     coeffs.push(ce.function('Divide', [val, ce.number(factorialBig(k))]));
@@ -549,8 +544,7 @@ function coeffAt(ce: ComputeEngine, L: Laurent, p: number): Expression {
 /** The valuation (lowest power with a nonzero coefficient), or `null` if every
  * stored coefficient is zero. */
 function trueVal(L: Laurent): number | null {
-  for (let i = 0; i < L.c.length; i++)
-    if (!L.c[i].isSame(0)) return L.v + i;
+  for (let i = 0; i < L.c.length; i++) if (!L.c[i].isSame(0)) return L.v + i;
   return null;
 }
 
@@ -582,11 +576,7 @@ function addLaurent(
     const ai = coeffAt(ce, a, p);
     const bi = coeffAt(ce, b, p);
     c.push(
-      ai.isSame(0)
-        ? bi
-        : bi.isSame(0)
-          ? ai
-          : ce.function('Add', [ai, bi])
+      ai.isSame(0) ? bi : bi.isSame(0) ? ai : ce.function('Add', [ai, bi])
     );
   }
   return { v, c, hi: Math.min(a.hi, b.hi) };
@@ -595,7 +585,9 @@ function addLaurent(
 function scaleLaurent(ce: ComputeEngine, k: Expression, a: Laurent): Laurent {
   return {
     v: a.v,
-    c: a.c.map((ai) => (ai.isSame(0) ? ce.Zero : ce.function('Multiply', [k, ai]))),
+    c: a.c.map((ai) =>
+      ai.isSame(0) ? ce.Zero : ce.function('Multiply', [k, ai])
+    ),
     hi: a.hi,
   };
 }
@@ -625,10 +617,7 @@ function mulLaurent(
   // known (p ≤ a.hi + val(b)) and every needed b_j is known (p ≤ b.hi + val(a)).
   const la = trueVal(a);
   const lb = trueVal(b);
-  const hi =
-    la === null || lb === null
-      ? W
-      : Math.min(a.hi + lb, b.hi + la, W);
+  const hi = la === null || lb === null ? W : Math.min(a.hi + lb, b.hi + la, W);
   return { v, c, hi };
 }
 
@@ -684,9 +673,7 @@ function isRecordedPole(
   const poles = getFunctionProperties(ce, op)?.poles;
   if (!poles) return false;
   try {
-    return (
-      ce.function('Element', [point, poles]).evaluate().valueOf() === true
-    );
+    return ce.function('Element', [point, poles]).evaluate().valueOf() === true;
   } catch {
     return false;
   }
@@ -700,7 +687,10 @@ function lnGammaShiftExpr(
   deg: number
 ): Expression {
   const terms: Expression[] = [
-    ce.function('Multiply', [ce.function('Negate', [ce.symbol('EulerGamma')]), u]),
+    ce.function('Multiply', [
+      ce.function('Negate', [ce.symbol('EulerGamma')]),
+      u,
+    ]),
   ];
   for (let k = 2; k <= deg; k++) {
     const coeff = ce.function('Multiply', [
@@ -730,7 +720,8 @@ function gammaRegularPartExpr(
   const factors: Expression[] = [];
   for (let j = 1; j <= n; j++)
     factors.push(ce.function('Subtract', [u, ce.number(j)]));
-  const denom = factors.length === 1 ? factors[0] : ce.function('Multiply', factors);
+  const denom =
+    factors.length === 1 ? factors[0] : ce.function('Multiply', factors);
   return ce.function('Divide', [gammaShift, denom]);
 }
 
@@ -1099,9 +1090,7 @@ function taylorCoeffs(
   ce: ComputeEngine,
   W: number
 ): Coeffs | null {
-  return (
-    expandViaSeeds(f, x, x0, ce, W) ?? expandByDerivative(f, x, x0, ce, W)
-  );
+  return expandViaSeeds(f, x, x0, ce, W) ?? expandByDerivative(f, x, x0, ce, W);
 }
 
 /** A fresh symbol name not equal to `avoid` and not occurring free in `f`. */
@@ -1140,9 +1129,7 @@ export function computeSeries(
   if (x0.isNaN) return undefined;
 
   const xExpr = ce.symbol(x);
-  const t = x0.isSame(0)
-    ? xExpr
-    : ce.function('Subtract', [xExpr, x0]);
+  const t = x0.isSame(0) ? xExpr : ce.function('Subtract', [xExpr, x0]);
   const power = (k: number): Expression =>
     k === 1 ? t : ce.function('Power', [t, ce.number(k)]);
 

@@ -24,11 +24,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards';
 import { numericTypeHandler, elementaryFunctionType } from './type-handlers';
-import {
-  trigExpand,
-  trigToExp,
-  trigReduce,
-} from '../symbolic/trig-rewrite';
+import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite';
 import { getUnitScale } from './unit-data';
 import {
   bigFresnelC,

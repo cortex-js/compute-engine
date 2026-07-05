@@ -249,8 +249,7 @@ export class RubiDriver {
       // constructor): `instanceof CancellationError` fails across the
       // host/plugin bundle split, and `constructor.name` is mangled by
       // minification.
-      if (e instanceof Error && e.name === 'CancellationError')
-        return null;
+      if (e instanceof Error && e.name === 'CancellationError') return null;
       throw e;
     } finally {
       // Restore the outer call's state clobbered by this re-entry (see the
@@ -760,8 +759,7 @@ export class RubiDriver {
       try {
         simplified = F.simplify();
       } catch (e) {
-        if (!(e instanceof Error && e.name === 'CancellationError'))
-          throw e;
+        if (!(e instanceof Error && e.name === 'CancellationError')) throw e;
         // deadline hit — keep the unsimplified form
       } finally {
         ce.timeLimit = savedLimit;
@@ -769,7 +767,6 @@ export class RubiDriver {
     }
     return foldLnExponentialE(ce, simplified);
   }
-
 }
 
 /** Rewrite uncollected polynomial Add factors of a (normal-form) integrand

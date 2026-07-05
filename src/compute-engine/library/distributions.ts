@@ -6,10 +6,7 @@ import {
 } from '../numerics/special-functions';
 import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply';
 import { isFunction, isNumber } from '../boxed-expression/type-guards';
-import {
-  binomialQuantile,
-  poissonQuantile,
-} from '../numerics/distributions';
+import { binomialQuantile, poissonQuantile } from '../numerics/distributions';
 import type {
   Expression,
   SymbolDefinitions,
@@ -281,7 +278,12 @@ function distributionPDF(
       const [mu, sigma] = distOps(dist);
       const z = sub(x, mu);
       const num = fn('Exp', [
-        neg(div(pow(z, ce.number(2)), mul([ce.number(2), pow(sigma, ce.number(2))]))),
+        neg(
+          div(
+            pow(z, ce.number(2)),
+            mul([ce.number(2), pow(sigma, ce.number(2))])
+          )
+        ),
       ]);
       const den = mul([sigma, fn('Sqrt', [mul([ce.number(2), ce.Pi])])]);
       return div(num, den);
@@ -314,7 +316,12 @@ function distributionPDF(
       const av = litVal(a);
       const bv = litVal(b);
       // Numeric point outside the support has zero density.
-      if (xv !== undefined && av !== undefined && bv !== undefined && (xv < av || xv > bv))
+      if (
+        xv !== undefined &&
+        av !== undefined &&
+        bv !== undefined &&
+        (xv < av || xv > bv)
+      )
         return ce.Zero;
       return div(ce.One, sub(b, a));
     }
@@ -390,7 +397,10 @@ function distributionCDF(
     case 'ExponentialDistribution': {
       const [lambda] = distOps(dist);
       if (xv !== undefined && xv < 0) return ce.Zero;
-      return sub(ce.One, fn('Exp', [ce.function('Negate', [mul([lambda, x])])]));
+      return sub(
+        ce.One,
+        fn('Exp', [ce.function('Negate', [mul([lambda, x])])])
+      );
     }
   }
   return undefined;
@@ -440,7 +450,8 @@ function distributionQuantile(
       const [n, p0] = distOps(dist);
       const nv = litVal(n);
       if (pv === 0) return ce.Zero;
-      if (pv === 1) return nv !== undefined ? ce.number(nv) : ce.PositiveInfinity;
+      if (pv === 1)
+        return nv !== undefined ? ce.number(nv) : ce.PositiveInfinity;
       // No closed form: stay symbolic under `evaluate`; search under `.N()`.
       if (!numericApproximation) return undefined;
       const nn = litVal(n);
@@ -561,7 +572,10 @@ export function distributionMean(
     case 'PoissonDistribution':
       return distOps(dist)[0].evaluate();
     case 'UniformDistribution':
-      return div(add([distOps(dist)[0], distOps(dist)[1]]), ce.number(2)).evaluate();
+      return div(
+        add([distOps(dist)[0], distOps(dist)[1]]),
+        ce.number(2)
+      ).evaluate();
     case 'ExponentialDistribution':
       return div(ce.One, distOps(dist)[0]).evaluate();
   }

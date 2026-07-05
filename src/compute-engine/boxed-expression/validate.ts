@@ -517,7 +517,10 @@ export function validateArguments(
       }
       // Inferred (not declared) symbol type, and the required variadic type is
       // a subtype of the current inferred type: narrow rather than error.
-      if (op.valueDefinition?.inferredType && isSubtype(varParam, op.type.type)) {
+      if (
+        op.valueDefinition?.inferredType &&
+        isSubtype(varParam, op.type.type)
+      ) {
         op.infer(varParam, 'narrow');
         result.push(op);
         continue;

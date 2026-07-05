@@ -872,9 +872,15 @@ function evaluateCovariance(
   if (!pairs) return shapeError(ce, name);
   const { xs, ys } = pairs;
   if (xs.length !== ys.length)
-    return ce.error('unexpected-argument', `${name}: collections differ in length`);
+    return ce.error(
+      'unexpected-argument',
+      `${name}: collections differ in length`
+    );
   if (xs.length < 2)
-    return ce.error('unexpected-argument', `${name}: at least 2 data points required`);
+    return ce.error(
+      'unexpected-argument',
+      `${name}: at least 2 data points required`
+    );
 
   if (!numericApproximation && allExact(xs) && allExact(ys))
     return exactCovariance(ce, xs, ys, population);
@@ -901,9 +907,15 @@ function evaluateCorrelation(
   if (!pairs) return shapeError(ce, 'Correlation');
   const { xs, ys } = pairs;
   if (xs.length !== ys.length)
-    return ce.error('unexpected-argument', 'Correlation: collections differ in length');
+    return ce.error(
+      'unexpected-argument',
+      'Correlation: collections differ in length'
+    );
   if (xs.length < 2)
-    return ce.error('unexpected-argument', 'Correlation: at least 2 data points required');
+    return ce.error(
+      'unexpected-argument',
+      'Correlation: at least 2 data points required'
+    );
 
   if (!numericApproximation && allExact(xs) && allExact(ys)) {
     const r = exactCorrelation(ce, xs, ys);
@@ -933,7 +945,11 @@ function exactCovariance(
     ce,
     xs.map((x, i) => multiply(ce, [x, ys[i]]))
   );
-  const num = subtract(ce, sxy, divide(ce, multiply(ce, [sx, sy]), ce.number(n)));
+  const num = subtract(
+    ce,
+    sxy,
+    divide(ce, multiply(ce, [sx, sy]), ce.number(n))
+  );
   return divide(ce, num, ce.number(population ? n : n - 1));
 }
 
@@ -958,7 +974,11 @@ function exactCorrelation(
     ce,
     ys.map((y) => powi(ce, y, 2))
   );
-  const cov = subtract(ce, sxy, divide(ce, multiply(ce, [sx, sy]), ce.number(n)));
+  const cov = subtract(
+    ce,
+    sxy,
+    divide(ce, multiply(ce, [sx, sy]), ce.number(n))
+  );
   const vx = subtract(ce, sx2, divide(ce, powi(ce, sx, 2), ce.number(n)));
   const vy = subtract(ce, sy2, divide(ce, powi(ce, sy, 2), ce.number(n)));
   if (vx.isSame(0) || vy.isSame(0)) return null;
@@ -1018,8 +1038,17 @@ function evaluateLinearRegression(
 ): Expression {
   const parsed = parseFitArgs(ops, false);
   if (!parsed)
-    return ce.error('unexpected-argument', 'LinearRegression: invalid arguments');
-  const coeffs = fitCoefficients(ce, parsed.xs, parsed.ys, 1, numericApproximation);
+    return ce.error(
+      'unexpected-argument',
+      'LinearRegression: invalid arguments'
+    );
+  const coeffs = fitCoefficients(
+    ce,
+    parsed.xs,
+    parsed.ys,
+    1,
+    numericApproximation
+  );
   if (!coeffs)
     return ce.error('unexpected-argument', 'LinearRegression: degenerate data');
   const [b0, b1] = coeffs;
@@ -1047,7 +1076,13 @@ function evaluatePolynomialFit(
       'unexpected-argument',
       'PolynomialFit: not enough data points for the requested degree'
     );
-  const coeffs = fitCoefficients(ce, parsed.xs, parsed.ys, degree, numericApproximation);
+  const coeffs = fitCoefficients(
+    ce,
+    parsed.xs,
+    parsed.ys,
+    degree,
+    numericApproximation
+  );
   if (!coeffs)
     return ce.error('unexpected-argument', 'PolynomialFit: degenerate data');
   if (variable !== undefined) return buildPolynomial(ce, coeffs, variable);
@@ -1092,9 +1127,19 @@ function fitCoefficients(
   for (let j = 0; j < m; j++) {
     const rowA: Expression[] = [];
     for (let k = 0; k < m; k++)
-      rowA.push(add(ce, powers.map((p) => p[j + k])));
+      rowA.push(
+        add(
+          ce,
+          powers.map((p) => p[j + k])
+        )
+      );
     A.push(rowA);
-    b.push(add(ce, powers.map((p, i) => multiply(ce, [p[j], Y[i]]))));
+    b.push(
+      add(
+        ce,
+        powers.map((p, i) => multiply(ce, [p[j], Y[i]]))
+      )
+    );
   }
 
   return gaussSolve(ce, A, b);

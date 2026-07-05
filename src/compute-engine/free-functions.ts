@@ -61,7 +61,10 @@ function toExpression(
 ): Expression {
   if (typeof input === 'string') {
     const ce = getDefaultEngine();
-    return ce.parse(input, { strict: options?.strict ?? false }) ?? ce.expr('Nothing');
+    return (
+      ce.parse(input, { strict: options?.strict ?? false }) ??
+      ce.expr('Nothing')
+    );
   }
   if (isExpression(input)) return input;
   return getDefaultEngine().expr(input);

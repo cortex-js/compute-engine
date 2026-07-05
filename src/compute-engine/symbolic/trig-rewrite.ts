@@ -1,6 +1,10 @@
 import type { Expression } from '../global-types';
 
-import { isFunction, isNumber, isSymbol } from '../boxed-expression/type-guards';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards';
 import { asSmallInteger } from '../boxed-expression/numerics';
 import { expand, expandAll } from '../boxed-expression/expand';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
@@ -393,7 +397,12 @@ function trigExpandRec(expr: Expression): Expression {
   if (op === 'Power') {
     const base = ops[0];
     const e = asSmallInteger(ops[1]);
-    if (!expr.ops[0].isSame(base) && isFunction(base, 'Add') && e !== null && e >= 2)
+    if (
+      !expr.ops[0].isSame(base) &&
+      isFunction(base, 'Add') &&
+      e !== null &&
+      e >= 2
+    )
       return expand(ce.function('Power', [base, ops[1]]));
     return ce.function('Power', ops);
   }

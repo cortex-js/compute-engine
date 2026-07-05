@@ -343,10 +343,7 @@ function bigCovImpl(
     .div(new BigDecimal(population ? n : n - 1));
 }
 
-export function covariance(
-  xs: Iterable<number>,
-  ys: Iterable<number>
-): number {
+export function covariance(xs: Iterable<number>, ys: Iterable<number>): number {
   return covImpl(xs, ys, false);
 }
 

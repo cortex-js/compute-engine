@@ -148,7 +148,10 @@ function squareFactor(n: bigint): bigint {
  * `g = gcd(|a|, |b|) ≥ 0` and `a·x + b·y = g`. Handles zero and negative
  * inputs; `extendedGcd(0, 0) = { g: 0, x: 0, y: 0 }`.
  */
-export function extendedGcd(a: bigint, b: bigint): {
+export function extendedGcd(
+  a: bigint,
+  b: bigint
+): {
   g: bigint;
   x: bigint;
   y: bigint;
@@ -248,8 +251,7 @@ function baseSolutionLinear(
   const { g: d, x: u, y: v } = extendedGcd(abs(ap), abs(bp));
   const x0 = u * sign(ap);
   const y0 = v * sign(bp);
-  if (kp % d !== 0n)
-    return { xConst: 0n, yConst: 0n, xHom, yHom, ok: false };
+  if (kp % d !== 0n) return { xConst: 0n, yConst: 0n, xHom, yHom, ok: false };
 
   return {
     xConst: kp * x0,
@@ -527,13 +529,13 @@ function sqrtUnitOddPrimePower(u: bigint, p: bigint, k: number): bigint[] {
   for (let i = 1; i < k; i++) {
     const nextMod = mod * p;
     // Newton step: r ← r − (r² − u)·(2r)⁻¹ (mod nextMod).
-    const f = ((r * r - u) % nextMod + nextMod) % nextMod;
+    const f = (((r * r - u) % nextMod) + nextMod) % nextMod;
     const inv = modInverse((2n * r) % nextMod, nextMod);
     if (inv === null) {
       // 2r not invertible: only when p = 2 (excluded here) — bail defensively.
       return [];
     }
-    r = ((r - f * inv) % nextMod + nextMod) % nextMod;
+    r = (((r - f * inv) % nextMod) + nextMod) % nextMod;
     mod = nextMod;
   }
   const other = (mod - r) % mod;
@@ -623,10 +625,7 @@ export function sqrtMod(a: bigint, m: bigint): bigint[] {
   for (const [p, e] of factors) {
     let pe = 1n;
     for (let i = 0; i < e; i++) pe *= p;
-    const roots =
-      p === 2n
-        ? sqrtModPow2(a, e)
-        : sqrtModOddPrimePower(a, p, e);
+    const roots = p === 2n ? sqrtModPow2(a, e) : sqrtModOddPrimePower(a, p, e);
     if (roots.length === 0) return [];
     perPower.push({ roots, mod: pe });
   }
@@ -666,7 +665,7 @@ function crtPair(
   // x = v1 + m1·((v2 − v1)·m1⁻¹ mod m2).
   let t = (((v2 - v1) % m2) + m2) % m2;
   t = (t * inv) % m2;
-  const value = ((v1 + m1 * t) % mod + mod) % mod;
+  const value = (((v1 + m1 * t) % mod) + mod) % mod;
   return { value, mod };
 }
 
@@ -743,8 +742,7 @@ function pqaLength(P0: bigint, Q0: bigint, D: bigint): number {
     const prev = seen.get(key);
     if (prev !== undefined) return i;
     seen.set(key, i);
-    if (Q === 0n)
-      throw new DiophantineBudgetError('pqaLength: Q reached 0');
+    if (Q === 0n) throw new DiophantineBudgetError('pqaLength: Q reached 0');
     const a = floorDiv(P + sqD, Q);
     P = a * Q - P;
     Q = floorDiv(D - P * P, Q);
@@ -849,7 +847,7 @@ function cornacchia(a: bigint, b: bigint, m: bigint): [bigint, bigint][] {
   // Original Cornacchia. (diophantine.py:2197)
   const inv = modInverse(a, m);
   if (inv === null) return out;
-  const rhs = ((-b * inv) % m + m) % m;
+  const rhs = (((-b * inv) % m) + m) % m;
   const half = floorDiv(m, 2n);
   let guard = 0;
   for (const t0 of sqrtMod(rhs, m)) {
@@ -1024,7 +1022,15 @@ function dedupePairs(pairs: [bigint, bigint][]): [bigint, bigint][] {
     }
   }
   out.sort((a, b) =>
-    a[0] !== b[0] ? (a[0] < b[0] ? -1 : 1) : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0
+    a[0] !== b[0]
+      ? a[0] < b[0]
+        ? -1
+        : 1
+      : a[1] < b[1]
+        ? -1
+        : a[1] > b[1]
+          ? 1
+          : 0
   );
   return out;
 }

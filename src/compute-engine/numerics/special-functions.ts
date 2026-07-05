@@ -1230,15 +1230,11 @@ export function bigBetaRegularized(
       .add(a.mul(x.ln()))
       .add(b.mul(BigDecimal.ONE.sub(x).ln()))
       .exp();
-    const boundary = a
-      .add(BigDecimal.ONE)
-      .div(a.add(b).add(BigDecimal.TWO));
+    const boundary = a.add(BigDecimal.ONE).div(a.add(b).add(BigDecimal.TWO));
     if (x.lt(boundary))
       return bt.mul(bigBetaContinuedFraction(ce, a, b, x)).div(a);
     return BigDecimal.ONE.sub(
-      bt
-        .mul(bigBetaContinuedFraction(ce, b, a, BigDecimal.ONE.sub(x)))
-        .div(b)
+      bt.mul(bigBetaContinuedFraction(ce, b, a, BigDecimal.ONE.sub(x))).div(b)
     );
   });
 }
