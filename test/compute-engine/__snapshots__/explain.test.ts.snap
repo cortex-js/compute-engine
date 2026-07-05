@@ -1,5 +1,75 @@
 // Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
+exports[`explain: golden D explanations (x^2+1)/(x-1): quotient rule chain 1`] = `
+{
+  "initial": "D((x^2 + 1) / (x - 1), x)",
+  "result": "(x^2 - 2x - 1) / (x - 1)^2",
+  "steps": [
+    "derivative.quotient-rule: (-(x^2 + 1) * D(x - 1, x) + (x - 1) * D(x^2 + 1, x)) / (x - 1)^2",
+    "derivative.sum-rule: (-(x^2 + 1) * D(x - 1, x) + (x - 1) * D(x^2, x)) / (x - 1)^2",
+    "derivative.power-rule: (-(x^2 + 1) * D(x - 1, x) + 2x * (x - 1)) / (x - 1)^2",
+    "derivative.sum-rule: (-x^2 + 1 + 2x * (x - 1)) / (x - 1)^2",
+    "derivative.simplify: (x^2 - 2x - 1) / (x - 1)^2",
+  ],
+}
+`;
+
+exports[`explain: golden D explanations e^{cos x}: exponential rule + chain 1`] = `
+{
+  "initial": "D(e^(cos(x)), x)",
+  "result": "-(sin(x) * e^(cos(x)))",
+  "steps": [
+    "derivative.exponential-rule: D(cos(x), x) * e^(cos(x))",
+    "derivative.known-derivative: -(sin(x) * e^(cos(x)))",
+  ],
+}
+`;
+
+exports[`explain: golden D explanations sin(x^2): chain rule + power rule 1`] = `
+{
+  "initial": "D(sin(x^2), x)",
+  "result": "2x * cos(x^2)",
+  "steps": [
+    "derivative.chain-rule: cos(x^2) * D(x^2, x)",
+    "derivative.power-rule: 2x * cos(x^2)",
+  ],
+}
+`;
+
+exports[`explain: golden D explanations x sin(x): product rule + known derivative 1`] = `
+{
+  "initial": "D(x * sin(x), x)",
+  "result": "x * cos(x) + sin(x)",
+  "steps": [
+    "derivative.product-rule: x * D(sin(x), x) + sin(x)",
+    "derivative.known-derivative: x * cos(x) + sin(x)",
+  ],
+}
+`;
+
+exports[`explain: golden D explanations x^3+2x+1: sum / power / product chain 1`] = `
+{
+  "initial": "D(x^3 + 2x + 1, x)",
+  "result": "3x^2 + 2",
+  "steps": [
+    "derivative.sum-rule: D(x^3, x) + D(2x, x)",
+    "derivative.power-rule: 3x^2 + D(2x, x)",
+    "derivative.product-rule: 3x^2 + 2",
+  ],
+}
+`;
+
+exports[`explain: golden D explanations x^x: general power rule 1`] = `
+{
+  "initial": "D(x^x, x)",
+  "result": "x^x + ln(x) * x^x",
+  "steps": [
+    "derivative.general-power-rule: (ln(x) + 1) * x^x",
+    "derivative.simplify: x^x + ln(x) * x^x",
+  ],
+}
+`;
+
 exports[`explain: golden explanations (x+1)^2 - x^2 - 2x - 1 -> 0 1`] = `
 {
   "initial": "-x^2 + (x + 1)^2 - 2x - 1",

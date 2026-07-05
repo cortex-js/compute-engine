@@ -280,9 +280,6 @@ describe('explain: serialization', () => {
 // ============================================================
 
 describe('explain: unsupported operations throw', () => {
-  test("explain('D') throws", () => {
-    expect(() => ce.parse('x').explain('D')).toThrow();
-  });
   test("explain('solve') on a system throws", () => {
     expect(() =>
       ce.box(['List', ce.parse('x + y = 2'), ce.parse('x - y = 0')]).explain('solve')
@@ -580,5 +577,202 @@ describe('explain: solve does not perturb solve()', () => {
     expect(after!.length).toBe(before!.length);
     for (let i = 0; i < before!.length; i++)
       expect(after![i].isSame(before![i])).toBe(true);
+  });
+});
+
+// ============================================================
+// 14. D contract battery
+// ============================================================
+
+//
+// A corpus of differentiable expressions spanning the branches of the
+// `differentiate()` switch: polynomial sum/power, product rule (incl. a
+// triple product), chain rule, quotient rule, exponential rule (base e and
+// base 2), the log chain, the general power rule (x^x), radical chains, and
+// trig products. Each entry differentiates in `x` (inferred: single unknown).
+//
+const D_CORPUS: string[] = [
+  'x^3+2x+1', // sum + power + product
+  'x \\sin x', // product + known-derivative
+  '\\sin(x^2)', // chain + power
+  '\\frac{x^2+1}{x-1}', // quotient rule
+  'e^{\\cos x}', // exponential rule + chain
+  '\\ln(\\sin x)', // log chain
+  'x^x', // general power rule
+  '\\sqrt{x^2+1}', // chain + power (radical)
+  '\\cos(x) \\sin(x)', // product of two trig
+  '\\tan(3x)', // chain + product
+  '2^x', // exponential rule (base != e)
+  'x e^x \\sin x', // triple product
+];
+
+describe('explain: D contract battery', () => {
+  for (const latex of D_CORPUS) {
+    test(`D contract: ${latex}`, () => {
+      // Build the receiver once and call both the operator and explain on it.
+      const expr = ce.parse(latex);
+      const ex = expr.explain('D');
+      const dEval = ce
+        .function('D', [expr, ce.symbol('x')])
+        .evaluate();
+
+      // operation + framing
+      expect(ex.operation).toBe('D');
+      expect(ex.initial.operator).toBe('D');
+
+      // Result parity: the driver evaluates the actual D operator.
+      expect(ex.result.isSame(dEval)).toBe(true);
+
+      const { steps, result } = ex;
+
+      // Every case in this corpus takes at least one step.
+      expect(steps.length).toBeGreaterThanOrEqual(1);
+
+      // Consecutive step values differ pairwise.
+      for (let i = 1; i < steps.length; i++)
+        expect(steps[i].value.isSame(steps[i - 1].value)).toBe(false);
+
+      // The last step value is the result.
+      expect(steps.at(-1)!.value.isSame(result)).toBe(true);
+
+      // Every step id is a registered `derivative.*` label with a
+      // non-empty description.
+      for (const s of steps) {
+        expect(s.id.startsWith('derivative.')).toBe(true);
+        expect(labelFor(s.id).registered).toBe(true);
+        expect(typeof s.description).toBe('string');
+        expect(s.description.length).toBeGreaterThan(0);
+      }
+
+      // Intermediate steps may carry inert `D(...)` sub-expressions (the
+      // point of the traversal-order presentation), but the final step must
+      // be fully resolved: no `D` operator remains.
+      expect(steps.at(-1)!.value.has('D')).toBe(false);
+    });
+  }
+});
+
+// ============================================================
+// 15. Golden D explanations
+// ============================================================
+
+function serializeD(
+  latex: string,
+  options?: { variable?: string }
+): { initial: string; result: string; steps: string[] } {
+  const ex = ce.parse(latex).explain('D', options);
+  return {
+    initial: ex.initial.toString(),
+    result: ex.result.toString(),
+    steps: ex.steps.map((s) => `${s.id}: ${s.value.toString()}`),
+  };
+}
+
+describe('explain: golden D explanations', () => {
+  test('x sin(x): product rule + known derivative', () => {
+    const ex = ce.parse('x \\sin x').explain('D');
+    expect(ex.steps.some((s) => s.id === 'derivative.product-rule')).toBe(true);
+    expect(ex.steps.some((s) => s.id === 'derivative.known-derivative')).toBe(
+      true
+    );
+    expect(serializeD('x \\sin x')).toMatchSnapshot();
+  });
+
+  test('sin(x^2): chain rule + power rule', () => {
+    const ex = ce.parse('\\sin(x^2)').explain('D');
+    expect(ex.steps.some((s) => s.id === 'derivative.chain-rule')).toBe(true);
+    expect(ex.steps.some((s) => s.id === 'derivative.power-rule')).toBe(true);
+    expect(serializeD('\\sin(x^2)')).toMatchSnapshot();
+  });
+
+  test('(x^2+1)/(x-1): quotient rule chain', () => {
+    const ex = ce.parse('\\frac{x^2+1}{x-1}').explain('D');
+    expect(ex.steps.some((s) => s.id === 'derivative.quotient-rule')).toBe(true);
+    expect(serializeD('\\frac{x^2+1}{x-1}')).toMatchSnapshot();
+  });
+
+  test('e^{cos x}: exponential rule + chain', () => {
+    const ex = ce.parse('e^{\\cos x}').explain('D');
+    expect(ex.steps.some((s) => s.id === 'derivative.exponential-rule')).toBe(
+      true
+    );
+    expect(serializeD('e^{\\cos x}')).toMatchSnapshot();
+  });
+
+  test('x^x: general power rule', () => {
+    const ex = ce.parse('x^x').explain('D');
+    expect(
+      ex.steps.some((s) => s.id === 'derivative.general-power-rule')
+    ).toBe(true);
+    expect(serializeD('x^x')).toMatchSnapshot();
+  });
+
+  test('x^3+2x+1: sum / power / product chain', () => {
+    const ex = ce.parse('x^3+2x+1').explain('D');
+    expect(ex.steps.some((s) => s.id === 'derivative.sum-rule')).toBe(true);
+    expect(ex.steps.some((s) => s.id === 'derivative.power-rule')).toBe(true);
+    expect(serializeD('x^3+2x+1')).toMatchSnapshot();
+  });
+});
+
+// ============================================================
+// 16. D variable handling
+// ============================================================
+
+describe('explain: D variable option', () => {
+  test('options.variable selects the variable of differentiation', () => {
+    const inX = ce.parse('a x^2').explain('D', { variable: 'x' });
+    const inA = ce.parse('a x^2').explain('D', { variable: 'a' });
+    // d/dx (a x^2) = 2 a x ; d/da (a x^2) = x^2 — different results.
+    expect(inX.result.isSame(inA.result)).toBe(false);
+    expect(
+      inX.result.isSame(
+        ce.function('D', [ce.parse('a x^2'), ce.symbol('x')]).evaluate()
+      )
+    ).toBe(true);
+    expect(
+      inA.result.isSame(
+        ce.function('D', [ce.parse('a x^2'), ce.symbol('a')]).evaluate()
+      )
+    ).toBe(true);
+  });
+
+  test('two unknowns without options.variable throws', () => {
+    expect(() => ce.parse('a x^2').explain('D')).toThrow();
+  });
+
+  test('a single unknown is inferred', () => {
+    const ex = ce.parse('x^2').explain('D');
+    expect(
+      ex.result.isSame(
+        ce.function('D', [ce.parse('x^2'), ce.symbol('x')]).evaluate()
+      )
+    ).toBe(true);
+  });
+});
+
+// ============================================================
+// 17. D verbosity ('all' is a superset of 'default')
+// ============================================================
+
+describe('explain: D verbosity', () => {
+  test("'all' keeps at least as many steps as 'default'", () => {
+    const all = ce.parse('x e^x \\sin x').explain('D', { verbosity: 'all' });
+    const def = ce.parse('x e^x \\sin x').explain('D');
+    expect(all.steps.length).toBeGreaterThanOrEqual(def.steps.length);
+  });
+});
+
+// ============================================================
+// 18. D zero-overhead sanity (no state leakage)
+// ============================================================
+
+describe('explain: D does not perturb the D operator', () => {
+  test('D(...) evaluates the same before and after explain()', () => {
+    const expr = ce.parse('x \\sin x');
+    const before = ce.function('D', [expr, ce.symbol('x')]).evaluate();
+    expr.explain('D');
+    const after = ce.function('D', [expr, ce.symbol('x')]).evaluate();
+    expect(after.isSame(before)).toBe(true);
   });
 });

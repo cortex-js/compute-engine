@@ -27,6 +27,59 @@ const MAX_DIFFERENTIATION_DEPTH = 100;
 // limit. Check the engine deadline periodically across recursive calls.
 let differentiateCallCount = 0;
 
+//
+// ── Derivative trace ────────────────────────────────────────────────
+//
+// `expr.explain('D')` threads an optional trace through `differentiate()`.
+// Each branch records — BEFORE recursing into sub-derivatives — the node it
+// is differentiating, the id of the textbook rule applied, and the rule's
+// output `template`: the formula with each unresolved sub-derivative as an
+// inert `D(child, v)` placeholder. The explain layer
+// (symbolic/explain-derivative.ts) replays these records in traversal
+// order, replacing each placeholder in a whole-expression state — the
+// standard textbook presentation.
+//
+// The trace is a pure observation channel: recording is guarded on the
+// accumulator being present and never affects control flow or results.
+//
+
+/** One derivative rule application: differentiating `node` by rule `id`
+ * produced `template` (with `D(child, v)` placeholders for the
+ * sub-derivatives that the recursion resolves next). */
+export type DerivativeTraceStep = {
+  node: Expression;
+  id: string;
+  template: Expression;
+};
+
+export type DerivativeTrace = DerivativeTraceStep[];
+
+/** The placeholder for the derivative of `child` in a rule template:
+ * trivial derivatives are resolved inline (matching what the recursion
+ * returns without recording a step), everything else is an inert
+ * `D(child, v)` that a later trace record replaces. */
+function dPlaceholder(child: Expression, v: string): Expression {
+  const ce = child.engine;
+  if (isSymbol(child) && child.symbol === v) return ce.One;
+  if (!child.has(v)) return ce.Zero;
+  return ce._fn('D', [child, ce.symbol(v)]);
+}
+
+/** Record one rule application. The template is a thunk so nothing is
+ * allocated when no trace is attached. Nodes that do not depend on `v`
+ * are skipped: their derivative is zero and the recursion records no
+ * steps for them either. */
+function recordD(
+  trace: DerivativeTrace | undefined,
+  node: Expression,
+  v: string,
+  id: string,
+  template: () => Expression
+): void {
+  if (!trace || !node.has(v)) return;
+  trace.push({ node, id, template: template() });
+}
+
 /**
  * Return a derivative result without simplification.
  *
@@ -270,14 +323,43 @@ function differentiateApplied(
   orders: number[],
   args: Expression[],
   v: string,
-  depth: number
+  depth: number,
+  trace?: DerivativeTrace,
+  node?: Expression
 ): Expression | undefined {
   const ce = fn.engine;
+
+  // Record the (multivariate) chain-rule step against the original
+  // expression, with each argument's derivative as a placeholder.
+  if (trace && node) {
+    recordD(trace, node, v, 'derivative.chain-rule', () => {
+      const templateTerms: Expression[] = [];
+      for (let i = 0; i < args.length; i++) {
+        if (!args[i].has(v)) continue;
+        const nextOrders = orders.slice();
+        nextOrders[i] = (nextOrders[i] ?? 0) + 1;
+        const nextDeriv = ce._fn('Derivative', [
+          fn,
+          ...nextOrders.map((n) => ce.number(n)),
+        ]);
+        templateTerms.push(
+          ce.function('Multiply', [
+            ce._fn('Apply', [nextDeriv, ...args]),
+            dPlaceholder(args[i], v),
+          ])
+        );
+      }
+      if (templateTerms.length === 0) return ce.Zero;
+      return ce.function('Add', templateTerms);
+    });
+  }
+
   const terms: Expression[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     const argPrime =
-      differentiate(arg, v, depth + 1) ?? ce._fn('D', [arg, ce.symbol(v)]);
+      differentiate(arg, v, depth + 1, trace) ??
+      ce._fn('D', [arg, ce.symbol(v)]);
     if (!argPrime.isValid) return undefined;
     if (argPrime.isSame(0)) continue;
     const nextOrders = orders.slice();
@@ -318,7 +400,8 @@ function differentiateApplied(
 export function differentiate(
   expr: Expression,
   v: string,
-  depth: number = 0
+  depth: number = 0,
+  trace?: DerivativeTrace
 ): Expression | undefined {
   // Guard against runaway recursion
   if (depth > MAX_DIFFERENTIATION_DEPTH) {
@@ -349,7 +432,14 @@ export function differentiate(
       // If the body resolved (is not just the same function call), differentiate it
       if (body.operator !== expr.symbol) {
         const bodyWithV = body.subs({ _: ce.symbol(v) });
-        return differentiate(bodyWithV, v, depth + 1);
+        // The node (a bare function symbol) does not contain `v`, so record
+        // this bridging step directly rather than through `recordD`.
+        trace?.push({
+          node: expr,
+          id: 'derivative.expand-definition',
+          template: dPlaceholder(bodyWithV, v),
+        });
+        return differentiate(bodyWithV, v, depth + 1, trace);
       }
     }
 
@@ -359,14 +449,20 @@ export function differentiate(
 
   // From here on, expr is narrowed to Expression & FunctionInterface
   if (expr.operator === 'Negate') {
-    const gPrime = differentiate(expr.op1, v, depth + 1);
+    recordD(trace, expr, v, 'derivative.constant-multiple', () =>
+      dPlaceholder(expr.op1, v).neg()
+    );
+    const gPrime = differentiate(expr.op1, v, depth + 1, trace);
     if (gPrime) return gPrime.neg();
     return ce._fn('D', [expr.op1, ce.symbol(v)]).neg();
   }
 
   // Block - just differentiate the content
   if (expr.operator === 'Block') {
-    return differentiate(expr.op1, v, depth + 1);
+    recordD(trace, expr, v, 'derivative.rewrite', () =>
+      dPlaceholder(expr.op1, v)
+    );
+    return differentiate(expr.op1, v, depth + 1, trace);
   }
 
   // D - evaluate the derivative first, then differentiate the result
@@ -374,7 +470,10 @@ export function differentiate(
     const evaluated = expr.evaluate();
     // Avoid infinite recursion if D doesn't simplify
     if (evaluated.operator === 'D') return undefined;
-    return differentiate(evaluated, v, depth + 1);
+    recordD(trace, expr, v, 'derivative.rewrite', () =>
+      dPlaceholder(evaluated, v)
+    );
+    return differentiate(evaluated, v, depth + 1, trace);
   }
 
   // Differentiate an already-symbolic partial derivative, applying the chain
@@ -394,13 +493,19 @@ export function differentiate(
     const orders = derivativeOrders(derivativeFn, args.length);
     if (!orders) return undefined;
 
-    return differentiateApplied(fn, orders, args, v, depth);
+    return differentiateApplied(fn, orders, args, v, depth, trace, expr);
   }
 
   // Sum rule
   if (expr.operator === 'Add') {
+    recordD(trace, expr, v, 'derivative.sum-rule', () =>
+      ce.function(
+        'Add',
+        expr.ops.map((op) => dPlaceholder(op, v))
+      )
+    );
     const terms = expr.ops.map((op) => {
-      const term = differentiate(op, v, depth + 1);
+      const term = differentiate(op, v, depth + 1, trace);
       if (term) return term;
       if (!op.has(v)) return ce.Zero;
       return ce._fn('D', [op, ce.symbol(v)]);
@@ -411,12 +516,28 @@ export function differentiate(
 
   // Product rule
   if (expr.operator === 'Multiply') {
+    recordD(trace, expr, v, 'derivative.product-rule', () => {
+      const terms: Expression[] = [];
+      expr.ops.forEach((op, i) => {
+        const ph = dPlaceholder(op, v);
+        if (ph.isSame(0)) return; // constant factor: term drops
+        const others = expr.ops.slice();
+        others.splice(i, 1);
+        terms.push(
+          ph.isSame(1)
+            ? ce.function('Multiply', others)
+            : ce.function('Multiply', [ph, ...others])
+        );
+      });
+      return terms.length === 0 ? ce.Zero : ce.function('Add', terms);
+    });
     const terms = expr.ops.map((op, i) => {
       const otherTerms = expr.ops.slice();
       otherTerms.splice(i, 1);
       const otherProduct = mul(...otherTerms);
       const gPrime =
-        differentiate(op, v, depth + 1) ?? ce._fn('D', [op, ce.symbol(v)]);
+        differentiate(op, v, depth + 1, trace) ??
+        ce._fn('D', [op, ce.symbol(v)]);
       return gPrime.mul(otherProduct);
     });
     if (terms.some((term) => term === undefined)) return undefined;
@@ -436,21 +557,29 @@ export function differentiate(
       const power = ce.function('Power', [base, ce.One.div(n)], {
         form: 'structural',
       });
-      return differentiate(power, v, depth + 1);
+      recordD(trace, expr, v, 'derivative.rewrite', () =>
+        dPlaceholder(power, v)
+      );
+      return differentiate(power, v, depth + 1, trace);
     }
 
     if (!base.has(v)) return ce.Zero;
 
     // Constant degree: d/dx base^(1/n) = (1/n) * base^((1/n) - 1) * base'
     const exponent = ce.One.div(n); // 1/n
-    const basePrime =
-      differentiate(base, v, depth + 1) ?? ce._fn('D', [base, ce.symbol(v)]);
     const newExponent = exponent.sub(ce.One); // (1/n) - 1 = (1-n)/n
 
     // Create Power expression as structural (bound but not canonicalized) to avoid Root conversion
     const power = ce.function('Power', [base, newExponent], {
       form: 'structural',
     });
+
+    recordD(trace, expr, v, 'derivative.power-rule', () =>
+      ce.function('Multiply', [exponent, power, dPlaceholder(base, v)])
+    );
+    const basePrime =
+      differentiate(base, v, depth + 1, trace) ??
+      ce._fn('D', [base, ce.symbol(v)]);
 
     return simplifyDerivative(exponent.mul(power).mul(basePrime));
   }
@@ -468,8 +597,16 @@ export function differentiate(
 
     if (baseHasV && !expHasV) {
       // Only base depends on v: d/dx f(x)^n = n * f(x)^(n-1) * f'(x)
+      recordD(trace, expr, v, 'derivative.power-rule', () =>
+        ce.function('Multiply', [
+          exponent,
+          base.pow(exponent.add(ce.NegativeOne)),
+          dPlaceholder(base, v),
+        ])
+      );
       const fPrime =
-        differentiate(base, v, depth + 1) ?? ce._fn('D', [base, ce.symbol(v)]);
+        differentiate(base, v, depth + 1, trace) ??
+        ce._fn('D', [base, ce.symbol(v)]);
       return simplifyDerivative(
         exponent.mul(base.pow(exponent.add(ce.NegativeOne))).mul(fPrime)
       );
@@ -479,8 +616,18 @@ export function differentiate(
       // Only exponent depends on v: d/dx a^g(x) = a^g(x) * ln(a) * g'(x)
       // Use ce._fn('Ln', ...) instead of base.ln() to keep ln symbolic
       // (base.ln() evaluates to a numeric value).
+      recordD(trace, expr, v, 'derivative.exponential-rule', () =>
+        // For base e, ln(e) = 1 — show the textbook (eᵘ)′ = eᵘ·u′
+        isSymbol(base) && base.symbol === 'ExponentialE'
+          ? ce.function('Multiply', [expr, dPlaceholder(exponent, v)])
+          : ce.function('Multiply', [
+              expr,
+              ce._fn('Ln', [base]),
+              dPlaceholder(exponent, v),
+            ])
+      );
       const gPrime =
-        differentiate(exponent, v, depth + 1) ??
+        differentiate(exponent, v, depth + 1, trace) ??
         ce._fn('D', [exponent, ce.symbol(v)]);
       const lnBase = ce._fn('Ln', [base]);
       return simplifyDerivative(expr.mul(lnBase).mul(gPrime));
@@ -489,10 +636,22 @@ export function differentiate(
     // Both depend on v: d/dx f(x)^g(x) = f(x)^g(x) * (g'(x) * ln(f(x)) + g(x) * f'(x) / f(x))
     const f = base;
     const g = exponent;
+    recordD(trace, expr, v, 'derivative.general-power-rule', () =>
+      ce.function('Multiply', [
+        expr,
+        ce.function('Add', [
+          ce.function('Multiply', [dPlaceholder(g, v), ce._fn('Ln', [f])]),
+          ce.function('Divide', [
+            ce.function('Multiply', [g, dPlaceholder(f, v)]),
+            f,
+          ]),
+        ]),
+      ])
+    );
     const fPrime =
-      differentiate(f, v, depth + 1) ?? ce._fn('D', [f, ce.symbol(v)]);
+      differentiate(f, v, depth + 1, trace) ?? ce._fn('D', [f, ce.symbol(v)]);
     const gPrime =
-      differentiate(g, v, depth + 1) ?? ce._fn('D', [g, ce.symbol(v)]);
+      differentiate(g, v, depth + 1, trace) ?? ce._fn('D', [g, ce.symbol(v)]);
     // Use ce._fn('Ln', ...) instead of f.ln() to keep ln symbolic
     // (f.ln() evaluates to a numeric value when f is a constant).
     const lnF = ce._fn('Ln', [f]);
@@ -504,11 +663,22 @@ export function differentiate(
   // Quotient rule
   if (expr.operator === 'Divide') {
     const [numerator, denominator] = expr.ops;
+    recordD(trace, expr, v, 'derivative.quotient-rule', () =>
+      ce.function('Divide', [
+        ce.function('Add', [
+          ce.function('Multiply', [dPlaceholder(numerator, v), denominator]),
+          ce
+            .function('Multiply', [dPlaceholder(denominator, v), numerator])
+            .neg(),
+        ]),
+        denominator.pow(2),
+      ])
+    );
     const gPrime =
-      differentiate(numerator, v, depth + 1) ??
+      differentiate(numerator, v, depth + 1, trace) ??
       ce._fn('D', [numerator, ce.symbol(v)]);
     const hPrime =
-      differentiate(denominator, v, depth + 1) ??
+      differentiate(denominator, v, depth + 1, trace) ??
       ce._fn('D', [denominator, ce.symbol(v)]);
     return simplifyDerivative(
       gPrime.mul(denominator).sub(hPrime.mul(numerator)).div(denominator.pow(2))
@@ -530,8 +700,14 @@ export function differentiate(
 
     if (xHasV && !baseHasV) {
       // Only x depends on v: d/dx log_b(x) = 1/(x·ln(b)) * x'
+      recordD(trace, expr, v, 'derivative.known-derivative', () =>
+        ce.function('Divide', [
+          dPlaceholder(x, v),
+          ce.function('Multiply', [x, ce._fn('Ln', [base])]),
+        ])
+      );
       const xPrime =
-        differentiate(x, v, depth + 1) ?? ce._fn('D', [x, ce.symbol(v)]);
+        differentiate(x, v, depth + 1, trace) ?? ce._fn('D', [x, ce.symbol(v)]);
       const lnBase = ce._fn('Ln', [base]);
       return simplifyDerivative(xPrime.div(x.mul(lnBase)));
     }
@@ -540,7 +716,11 @@ export function differentiate(
     // d/dx (ln(x)/ln(base)) uses quotient rule
     const lnX = ce._fn('Ln', [x]);
     const lnBase = ce._fn('Ln', [base]);
-    return differentiate(lnX.div(lnBase), v, depth + 1);
+    const rewritten = lnX.div(lnBase);
+    recordD(trace, expr, v, 'derivative.rewrite', () =>
+      dPlaceholder(rewritten, v)
+    );
+    return differentiate(rewritten, v, depth + 1, trace);
   }
 
   // Mod(u, c): CE's Mod is the real sawtooth ((u mod c) + c) mod c, which is
@@ -553,8 +733,11 @@ export function differentiate(
     const [u, c] = expr.ops;
     if (c.has(v)) return undefined;
     if (!u.has(v)) return ce.Zero;
+    recordD(trace, expr, v, 'derivative.known-derivative', () =>
+      dPlaceholder(u, v)
+    );
     const uPrime =
-      differentiate(u, v, depth + 1) ?? ce._fn('D', [u, ce.symbol(v)]);
+      differentiate(u, v, depth + 1, trace) ?? ce._fn('D', [u, ce.symbol(v)]);
     return simplifyDerivative(uPrime);
   }
 
@@ -562,6 +745,7 @@ export function differentiate(
   // These are step functions with derivative 0 almost everywhere
   // (undefined at discontinuities, but we return 0 as a useful approximation)
   if (['GCD', 'LCM'].includes(expr.operator)) {
+    recordD(trace, expr, v, 'derivative.zero', () => ce.Zero);
     return ce.Zero;
   }
 
@@ -587,10 +771,25 @@ export function differentiate(
     const op = expr.operator;
     const terms: Expression[] = [];
 
+    // Record the recurrence-formula step (only in the pure ∂/∂x case; an
+    // order that depends on v has no elementary form and stays symbolic).
+    if (xHasV && !orderHasV) {
+      recordD(trace, expr, v, 'derivative.known-derivative', () => {
+        const fNMinus1 = ce._fn(op, [order.sub(ce.One), x]);
+        const fNPlus1 = ce._fn(op, [order.add(ce.One), x]);
+        let argDeriv: Expression;
+        if (op === 'BesselJ' || op === 'BesselY')
+          argDeriv = fNMinus1.sub(fNPlus1).div(2);
+        else if (op === 'BesselI') argDeriv = fNMinus1.add(fNPlus1).div(2);
+        else argDeriv = fNMinus1.add(fNPlus1).div(2).neg();
+        return ce.function('Multiply', [argDeriv, dPlaceholder(x, v)]);
+      });
+    }
+
     // ∂/∂x contribution: the standard recurrence formula, times x'.
     if (xHasV) {
       const xPrime =
-        differentiate(x, v, depth + 1) ?? ce._fn('D', [x, ce.symbol(v)]);
+        differentiate(x, v, depth + 1, trace) ?? ce._fn('D', [x, ce.symbol(v)]);
       const nMinus1 = order.sub(ce.One);
       const nPlus1 = order.add(ce.One);
       const fNMinus1 = ce._fn(op, [nMinus1, x]);
@@ -614,7 +813,7 @@ export function differentiate(
     // Apply(Derivative(op, 1, 0), order, x), times order'.
     if (orderHasV) {
       const orderPrime =
-        differentiate(order, v, depth + 1) ??
+        differentiate(order, v, depth + 1, trace) ??
         ce._fn('D', [order, ce.symbol(v)]);
       const dOrder = ce._fn('Derivative', [ce.symbol(op), ce.One, ce.Zero]);
       terms.push(ce._fn('Apply', [dOrder, order, x]).mul(orderPrime));
@@ -644,7 +843,10 @@ export function differentiate(
           subsMap[sym(w)!] = args[i];
         });
         const bodyWithArgs = body.subs(subsMap);
-        return differentiate(bodyWithArgs, v, depth + 1);
+        recordD(trace, expr, v, 'derivative.expand-definition', () =>
+          dPlaceholder(bodyWithArgs, v)
+        );
+        return differentiate(bodyWithArgs, v, depth + 1, trace);
       }
     }
 
@@ -655,18 +857,39 @@ export function differentiate(
     // For a univariate f this is the usual Apply(Derivative(f, 1), g) · g'.
     const fSym = ce.symbol(expr.operator);
     const baseOrders = expr.ops.map(() => 0);
-    return differentiateApplied(fSym, baseOrders, expr.ops.slice(), v, depth);
+    return differentiateApplied(
+      fSym,
+      baseOrders,
+      expr.ops.slice(),
+      v,
+      depth,
+      trace,
+      expr
+    );
   }
 
   // Apply the chain rule:
   // d/dx f(g(x)) = f'(g(x)) * g'(x)
   if (expr.nops > 1) return ce._fn('D', [expr, ce.symbol(v)]);
   const g = expr.ops[0];
-  const gPrime =
-    differentiate(g, v, depth + 1) ?? ce._fn('D', [g, ce.symbol(v)]);
   // Substitute the argument into the derivative formula
   // We use subs() instead of apply() to avoid evaluating the expression,
   // which would convert symbolic transcendentals like ln(10) to numeric values.
   const derivFormula = ce.expr(h).subs({ _: g });
+  // A bare `f(x)` is a table lookup; a composite `f(g(x))` is the chain rule.
+  recordD(
+    trace,
+    expr,
+    v,
+    isSymbol(g) && g.symbol === v
+      ? 'derivative.known-derivative'
+      : 'derivative.chain-rule',
+    () =>
+      isSymbol(g) && g.symbol === v
+        ? derivFormula
+        : ce.function('Multiply', [derivFormula, dPlaceholder(g, v)])
+  );
+  const gPrime =
+    differentiate(g, v, depth + 1, trace) ?? ce._fn('D', [g, ce.symbol(v)]);
   return simplifyDerivative(derivFormula.mul(gPrime));
 }

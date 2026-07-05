@@ -64,18 +64,16 @@ distributions with `PDF`/`CDF`/`Quantile`,
 with `registerStepLabels`/`labelFor`, frozen `solve.*` ids on the
 `UNIVARIATE_ROOTS` templates, and the step-keeping `matchAnyRulesWithSteps`
 — see `docs/plans/2026-07-04-explain-design.md`) have landed and left this
-list, as has **explain Phase 2** (`explain('solve')`: equation-valued phase
-steps through `findUnivariateRoots` — inverse peeling, clearing
-denominators, squaring, substitutions with back-substitution, zero-product
-splits, extraneous-root rejection). What remains (effort S/M/L):
+list, as has the **explain API, all three phases** (simplify + solve + D:
+`docs/plans/2026-07-04-explain-design.md`). What remains (effort S/M/L):
 
-1. **Explain API — derivative coverage (M).** Phase 3 (design doc §5):
-   instrument the `differentiate()` switch (`derivative.sum-rule`,
-   `derivative.product-rule`, `derivative.chain-rule`,
-   `derivative.known-derivative`, …) emitting whole-expression states in
-   traversal order — the standard textbook presentation. Also deferred from
-   Phase 2: tracing systems of equations (`explain('solve')` throws for
-   List/And/Or receivers today).
+1. **Explain API — residue (S/M).** Deferred from the landed phases:
+   tracing systems of equations (`explain('solve')` throws for List/And/Or
+   receivers today); explaining higher-order derivatives (`explain('D')`
+   traces the first derivative); semantic step coalescing for simplify
+   (merging operand-descent chains — design doc §4 flags it as a quality
+   follow-up once real traces are visible in the product); `Integrate`
+   traces via Rubi's rule chain (its own design, per the doc's non-goals).
 
 **Statistics residue (demand-gated Phase 3, design doc §10):** inverse
 regularized incomplete gamma/beta kernels and the distributions that need

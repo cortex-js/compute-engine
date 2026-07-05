@@ -1697,6 +1697,13 @@ export interface Expression {
    * rejected extraneous candidates — and `result` is a `List` of the same
    * roots `solve()` returns. Systems of equations are not supported yet.
    *
+   * For `'D'`, steps are whole-expression states in traversal order: each
+   * textbook rule (sum, product, quotient, power, chain, …) first appears
+   * with its unresolved sub-derivatives as inert `D(…)` terms, which
+   * resolve step by step. The variable is inferred when unambiguous, or
+   * passed via `options.variable`; `result` matches evaluating
+   * `D(expr, variable)`.
+   *
    * Each step carries the expression state after the step, a stable machine
    * `id` (the key for localization and custom copy) and a default English
    * `description`. The `initial` property is the canonical form of this
@@ -1706,8 +1713,6 @@ export interface Expression {
    * By default the step chain is curated: internal bookkeeping steps are
    * filtered out. Pass `verbosity: 'all'` to get the raw chain (for
    * debugging and rule authoring).
-   *
-   * The `'D'` operation is not implemented yet.
    */
   explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation;
 

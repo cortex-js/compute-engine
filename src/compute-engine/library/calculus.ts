@@ -14,6 +14,8 @@ import { monteCarloEstimate } from '../numerics/monte-carlo';
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature';
 import { centeredDiff8thOrder, limit } from '../numerics/numeric';
 import { derivative, differentiate } from '../symbolic/derivative';
+// Self-registers the `expr.explain('D')` driver (see explain.ts)
+import '../symbolic/explain-derivative';
 import { antiderivative } from '../symbolic/antiderivative';
 import { dSolve } from '../symbolic/differential-equations';
 import { nDSolve, symbolArg } from '../differential-equation-utils';

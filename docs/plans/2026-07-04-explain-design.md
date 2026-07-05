@@ -10,8 +10,15 @@ coverage measured at 100% over the simplify corpus, vs. the ≥90% target);
 threaded through `findUnivariateRoots` and its strategy helpers — pure
 observation, provisional sub-traces for strategies that can fail so only the
 winning strategy's steps join the narrative; equation-valued steps; branch =
-one list-valued step as specced; systems/Or throw "not supported yet") ·
-**Date:** 2026-07-04 ·
+one list-valued step as specced; systems/Or throw "not supported yet");
+**Phase 3 (D) implemented 2026-07-04** (`differentiate()` records
+`{node, id, template}` before each recursion, templates carry inert
+`D(child, v)` placeholders; `symbolic/explain-derivative.ts` replays them
+into whole-expression states via first-occurrence placeholder replacement,
+closing with a `derivative.simplify` step; the driver registers itself with
+explain.ts through `_setExplainDDriver` because the boxed-expression layer
+cannot import symbolic/; result parity by evaluating the actual `D`
+operator) · **Date:** 2026-07-04 ·
 **Roadmap:** Product feature track item (agreed 2026-07-04): surface the
 internal `RuleSteps` trace publicly; coverage simplify → solve → D;
 human-readable step labeling.

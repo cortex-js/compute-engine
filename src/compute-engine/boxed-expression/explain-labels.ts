@@ -316,6 +316,29 @@ registerStepLabels({
 });
 
 //
+// ── Derivatives: textbook rule steps (`expr.explain('D')`) ──
+//
+registerStepLabels({
+  'derivative.sum-rule': 'Apply the sum rule: (u + v)′ = u′ + v′',
+  'derivative.product-rule': 'Apply the product rule: (u·v)′ = u′·v + u·v′',
+  'derivative.quotient-rule':
+    'Apply the quotient rule: (u⁄v)′ = (u′·v − u·v′)⁄v²',
+  'derivative.power-rule': 'Apply the power rule: (uⁿ)′ = n·uⁿ⁻¹·u′',
+  'derivative.exponential-rule':
+    'Differentiate the exponential: (aᵘ)′ = aᵘ·ln(a)·u′',
+  'derivative.general-power-rule':
+    'Differentiate by logarithmic differentiation: (f^g)′ = f^g·(g′·ln f + g·f′⁄f)',
+  'derivative.chain-rule': 'Apply the chain rule: f(u)′ = f′(u)·u′',
+  'derivative.known-derivative': 'Differentiate using a known derivative',
+  'derivative.constant-multiple':
+    'Apply the constant-multiple rule: (c·u)′ = c·u′',
+  'derivative.rewrite': 'Rewrite in an equivalent differentiable form',
+  'derivative.expand-definition': 'Expand the definition of the function',
+  'derivative.zero': 'The expression is locally constant: its derivative is 0',
+  'derivative.simplify': 'Simplify the result',
+});
+
+//
 // Systematic families, registered per function with uniform curated copy.
 //
 

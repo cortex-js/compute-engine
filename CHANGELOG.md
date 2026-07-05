@@ -175,7 +175,16 @@
     `explain('solve').result` is a `List` of the same roots `solve()`
     returns; the unknown is inferred or passed via `options.variable`.
     Systems of equations are not traced yet.
-  - Explanations for derivatives (`explain('D')`) are planned.
+  - **`expr.explain('D')` traces differentiation.** Steps are
+    whole-expression states in traversal order — each textbook rule (sum,
+    product, quotient, power, chain, exponential, logarithmic
+    differentiation, table lookups) first appears with its unresolved
+    sub-derivatives as inert `D(…)` terms, which resolve step by step:
+    `D(x·sin x, x)` → *Apply the product rule* `x·D(sin x, x) + sin x` →
+    *Differentiate using a known derivative* `x·cos x + sin x`. The
+    variable is inferred when unambiguous (or passed via
+    `options.variable`), and the result always matches evaluating
+    `D(expr, variable)`.
 
 ### Solving
 

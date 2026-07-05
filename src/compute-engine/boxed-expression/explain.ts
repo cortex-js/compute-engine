@@ -31,6 +31,20 @@ const BOOKKEEPING_IDS = new Set(['initial', 'simplified operands']);
  * `'simplify'`, the internal `simplify()` already threads a complete
  * `RuleSteps` chain; this function curates and labels it.
  */
+// The `explain('D')` driver lives in symbolic/explain-derivative.ts (it
+// needs symbolic/derivative.ts, which this boxed-expression layer must not
+// import). It registers itself through this setter when the calculus
+// library loads.
+type ExplainDDriver = (
+  expr: Expression,
+  options?: ExplainOptions
+) => Explanation;
+let _explainDDriver: ExplainDDriver | undefined;
+/** @internal */
+export function _setExplainDDriver(fn: ExplainDDriver): void {
+  _explainDDriver = fn;
+}
+
 export function explainExpression(
   expr: Expression,
   operation: ExplainOperation = 'simplify',
@@ -38,9 +52,16 @@ export function explainExpression(
 ): Explanation {
   if (operation === 'solve') return explainSolve(expr, options);
 
+  if (operation === 'D') {
+    if (_explainDDriver) return _explainDDriver(expr, options);
+    throw new Error(
+      'explain("D") requires the calculus library, which is not loaded'
+    );
+  }
+
   if (operation !== 'simplify') {
     throw new Error(
-      `explain("${operation}") is not supported yet: only "simplify" and "solve" explanations are available`
+      `explain("${operation}") is not supported: use "simplify", "solve" or "D"`
     );
   }
 
@@ -109,20 +130,36 @@ function explainSolve(expr: Expression, options?: ExplainOptions): Explanation {
 
   const result = ce.function('List', [...filtered]);
 
-  const verbosity = options?.verbosity ?? 'default';
-  let steps: ExplainStep[];
-  if (verbosity === 'all') steps = trace.map(toExplainStep);
-  else {
-    steps = [];
-    let prev: Expression = initial;
-    for (const s of trace) {
-      if (s.value.isSame(prev)) continue;
-      steps.push(toExplainStep(s));
-      prev = s.value;
-    }
-  }
+  return {
+    operation: 'solve',
+    initial,
+    result,
+    steps: curateChain(initial, trace, options?.verbosity ?? 'default'),
+  };
+}
 
-  return { operation: 'solve', initial, result, steps };
+/**
+ * Curate a state-progression chain (each step's `value` is the whole
+ * state after the step): at `'default'` verbosity, steps whose value is
+ * unchanged from the previous state are dropped.
+ *
+ * @internal used by the solve and D explanation builders
+ */
+export function curateChain(
+  initial: Expression,
+  trace: RuleSteps,
+  verbosity: 'default' | 'all'
+): ExplainStep[] {
+  if (verbosity === 'all') return trace.map(toExplainStep);
+
+  const steps: ExplainStep[] = [];
+  let prev: Expression = initial;
+  for (const s of trace) {
+    if (s.value.isSame(prev)) continue;
+    steps.push(toExplainStep(s));
+    prev = s.value;
+  }
+  return steps;
 }
 
 /**
