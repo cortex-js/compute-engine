@@ -86,6 +86,44 @@ describe('FactorInteger', () => {
     );
   });
 
+  test('a large prime cofactor is recognized by Miller–Rabin, not trial division', () => {
+    // 10^21+3 = 67 · p₂₀ — proving the 20-digit cofactor prime by trial
+    // division took ~40s; the Miller–Rabin bail settles it instantly.
+    expect(factorInteger(10n ** 21n + 3n)).toEqual(
+      '[(67, 1),(14925373134328358209, 1)]'
+    );
+  });
+
+  test('large semiprimes split via Pollard rho (intractable by trial division)', () => {
+    // Two 10-digit primes: smallest factor ~3·10⁹, beyond any trial-division
+    // budget.
+    expect(factorInteger(3037000507n * 4093082899n)).toEqual(
+      '[(3037000507, 1),(4093082899, 1)]'
+    );
+    // Two 12-digit primes.
+    expect(factorInteger(999999999961n * 999999999989n)).toEqual(
+      '[(999999999961, 1),(999999999989, 1)]'
+    );
+  });
+
+  test('the square of a large prime factors as [p, 2] (boundary regression)', () => {
+    // The wheel loop's `k*k < n` off-by-one misreported p² as [(p², 1)].
+    expect(factorInteger(3037000507n * 3037000507n)).toEqual(
+      '[(3037000507, 2)]'
+    );
+  });
+
+  test('mixed small and repeated large factors merge correctly across lanes', () => {
+    expect(factorInteger(24n * 3037000507n ** 3n)).toEqual(
+      '[(2, 3),(3, 1),(3037000507, 3)]'
+    );
+    // Number lane (< 2^53) with a composite cofactor past 2^32: delegated to
+    // Miller–Rabin + rho instead of trial-dividing ~10⁷ candidates.
+    expect(factorInteger((2 ** 26 - 5) * (2 ** 25 - 39))).toEqual(
+      '[(33554393, 1),(67108859, 1)]'
+    );
+  });
+
   test('the factorization multiplies back to the original integer', () => {
     for (const n of [2, 84, 360, 1000000, 999983]) {
       const factors = ce.expr(['FactorInteger', n]).evaluate();

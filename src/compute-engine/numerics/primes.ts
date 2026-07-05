@@ -106,12 +106,15 @@ export function primeFactors(n: number): { [factor: number]: number } {
   let done = false;
   while (!done) {
     if (n === 1) return result;
-    // A large remaining cofactor may itself be prime: trial division would
-    // then run all the way to √n. Miller–Rabin settles it immediately.
-    // (Below 2^32 `isPrimeBigint` falls back to trial division, so only
-    // consult it where it uses Miller–Rabin.)
-    if (n >= 2 ** 32 && isPrimeBigint(BigInt(n))) {
-      result[n] = (result[n] ?? 0) + 1;
+    // Beyond 2^32, trial division to √n is too slow (up to ~9·10⁷ candidates
+    // for a 2^53 input): switch to Miller–Rabin + Pollard rho.
+    if (n >= 2 ** 32) {
+      const sub = new Map<bigint, number>();
+      factorWithRho(BigInt(n), sub);
+      for (const [p, e] of sub) {
+        const pn = Number(p);
+        result[pn] = (result[pn] ?? 0) + e;
+      }
       return result;
     }
     const sr = Math.sqrt(n);
@@ -218,6 +221,81 @@ function millerRabin(n: bigint): boolean {
   return true;
 }
 
+function bigGcd(a: bigint, b: bigint): bigint {
+  while (b !== 0n) {
+    const t = a % b;
+    a = b;
+    b = t;
+  }
+  return a;
+}
+
+/**
+ * Brent's variant of Pollard's rho: a non-trivial (not necessarily prime)
+ * factor of `n`. Requires `n` odd, composite and > 1. Deterministic: iterates
+ * x ← x² + c (mod n) for c = 1, 2, 3, … with GCDs batched 128 at a time,
+ * backtracking one step at a time when a batch overshoots.
+ *
+ * Expected cost is O(√p) modular multiplications where p is the smallest
+ * prime factor — a 20-digit semiprime splits in milliseconds where trial
+ * division needs ~10⁹ candidates.
+ */
+function pollardRho(n: bigint): bigint {
+  const m = 128n;
+  for (let c = 1n; ; c++) {
+    let x = 2n;
+    let y = 2n;
+    let ys = 2n;
+    let q = 1n;
+    let g = 1n;
+    let r = 1n;
+    while (g === 1n) {
+      x = y;
+      for (let i = 0n; i < r; i++) y = (y * y + c) % n;
+      for (let k = 0n; k < r && g === 1n; k += m) {
+        ys = y;
+        const lim = r - k < m ? r - k : m;
+        for (let i = 0n; i < lim; i++) {
+          y = (y * y + c) % n;
+          q = (q * (x > y ? x - y : y - x)) % n;
+        }
+        g = bigGcd(q, n);
+      }
+      r <<= 1n;
+    }
+    if (g === n) {
+      // The batched GCD absorbed every factor at once: replay the last batch
+      // one step at a time to isolate the first hit.
+      g = 1n;
+      while (g === 1n) {
+        ys = (ys * ys + c) % n;
+        g = bigGcd(x > ys ? x - ys : ys - x, n);
+      }
+    }
+    if (g !== n) return g;
+    // The cycle for this polynomial degenerated: retry with the next c.
+  }
+}
+
+/**
+ * Complete the factorization of an odd `n ≥ 1` into `result`, using
+ * Miller–Rabin to recognize prime cofactors and Pollard rho to split
+ * composite ones. Callers strip the small factors first (rho is only
+ * economical past the trial-division range).
+ */
+function factorWithRho(n: bigint, result: Map<bigint, number>): void {
+  while (n !== 1n) {
+    if (isPrimeBigint(n)) {
+      result.set(n, (result.get(n) ?? 0) + 1);
+      return;
+    }
+    const d = pollardRho(n);
+    // The factor rho returns may itself be composite.
+    factorWithRho(d, result);
+    n /= d;
+  }
+}
+
 // Difference between primes from 7 to 31
 const PRIME_WHEEL_INC = [
   BigInt(4),
@@ -283,22 +361,16 @@ export function bigPrimeFactors(d: bigint): Map<bigint, number> {
   k = BigInt(7);
   let kIndex = '';
   let i = 0;
-  // A large remaining cofactor may itself be prime: the wheel would then
-  // trial-divide all the way to √n (minutes for a 20-digit prime).
-  // Miller–Rabin settles primality in polynomial time, so consult it each
-  // time the cofactor changes (above the threshold where `isPrimeBigint`
-  // uses Miller–Rabin rather than trial division).
-  let checkPrime = true;
-  while (k * k <= n) {
-    if (checkPrime) {
-      if (n >= MILLER_RABIN_THRESHOLD && isPrimeBigint(n)) break;
-      checkPrime = false;
-    }
+  // Trial-divide only through the wheel's economical range; past it,
+  // Miller–Rabin + Pollard rho take over (`factorWithRho` below). Without
+  // the cap, a large prime or semiprime cofactor would be trial-divided all
+  // the way to √n — minutes for a 20-digit cofactor.
+  const TRIAL_DIVISION_BOUND = BigInt(65536);
+  while (k * k <= n && k <= TRIAL_DIVISION_BOUND) {
     if (n % k === BigInt(0)) {
       if (!kIndex) kIndex = k.toString();
       result.set(kIndex, (result.get(kIndex) ?? 0) + 1);
       n = n / k;
-      checkPrime = true;
     } else {
       k = k + PRIME_WHEEL_INC[i];
       kIndex = '';
@@ -306,10 +378,11 @@ export function bigPrimeFactors(d: bigint): Map<bigint, number> {
     }
   }
 
-  if (n !== BigInt(1))
-    result.set(n.toString(), (result.get(n.toString()) ?? 0) + 1);
-
   const r = new Map<bigint, number>();
   for (const [k, v] of result) r.set(bigint(k)!, v);
+
+  // The remaining cofactor is 1, prime, or a product of primes > 2^16.
+  if (n !== BigInt(1)) factorWithRho(n, r);
+
   return r;
 }
