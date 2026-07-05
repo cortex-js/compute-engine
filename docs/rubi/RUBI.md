@@ -1,18 +1,20 @@
 # Rubi → Compute Engine: Feasibility Analysis
 
-**Date:** 2026-06-10 (feasibility); last status update 2026-06-15.
-**Status:** **R1 + R2 cleared** (full Chapter-1 exhaustive = 90.0% over all
-25,854 problems). **Chapter-4 trig pilot landed** (the `(a+b cos+c sin)`
-Weierstrass family + the active↔inert head-swap bridge). **Chapter 2
-(Exponentials) ported** — full 965-problem run **62.6% solved (≈72.4%
-effective), 0 errors** — on the back of a new 2-argument incomplete-gamma
-engine kernel `Γ(s,z)` and the `FunctionOfExponential` substitution family
-(see Phase R3+ in §5). **Next: Chapter 6 (Hyperbolic)** — reuses the
-`FunctionOfExponential` hyperbolic branch + the incomplete-Γ kernel; then
-bundle Ch2/Ch6 into the shipped artifact. The §1–§4 analysis below is the
-original feasibility study (still accurate); §5 carries the current phasing
-status, and the project memory (`project_rubi.md`) has the session-by-session
-log.
+**Date:** 2026-06-10 (feasibility); last status update 2026-07-04.
+**Status:** shipped bundle = **Chapters 1, 2, 6 + 4.1 Sine + 4.5 Secant**
+(4,531 rules). Chapter-1 exhaustive ≈90–91%; ch2 ≈72% / ch6 ≈45% effective;
+**4.1 Sine 107/120 and 317/400 (seed 5); 4.5 Secant 56/120; genuine wrongs 0
+across all suites** (all flagged "wrongs" are documented verification
+false-wrong classes — see the ROADMAP §R state note). The 2026-07-04 rung
+series (R1/R2/R4, R10, R11, R9, R14 — §5 below) added the cofunction product
+clauses, the ch1-foundation benchmark fix, `reciprocalToPower`, the
+`cofunctionShift` and `standaloneCosineShift` runtime routing, the trig→exp
+fallback, and argument-aware `deactivateTrig`. **Next rungs live in
+ROADMAP §R** (R15 Si/Ci fallback, R12 bundle 4.3 Tangent, R13 sec binomials,
+R3′ deep chains, R5; then the Ch6 tail R6–R8). The §1–§4 analysis below is
+the original feasibility study (still accurate); §5 carries the current
+phasing status, and the project memory (`project_rubi.md`) has the
+session-by-session log.
 
 Rubi (Rule-Based Integration, [rulebasedintegration.org](https://rulebasedintegration.org/))
 is Albert Rich's corpus of **7,439 symbolic integration rules** organized as a
@@ -588,6 +590,33 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     capability gap); high-degree rationals (`1/(1−Sinh⁸)`); poly×reciprocal →
     by-parts; CoshIntegral/SinhIntegral for nonlinear-argument reciprocals.
     Each is a distinct, deeper effort — below the ≈72% Chapter-2 target.
+- **Phase R1/R2/R4 (4.1-Sine rungs) — cofunction product clauses + binomial
+  chains + §4.1 Sine BUNDLED (2026-07-04).** Three rungs landed the same day
+  (full prose in the ROADMAP history at `9c39a6f7^…fbda0900`; summary here):
+  **R1** ported the `UnifyInertTrigFunction` cofunction *product* clauses into
+  `unifyInertTrig` (cos·csc, cos·sec, and sin/csc/cot/tan × `(a+b cos)`
+  binomials, from `IntegrationUtilityFunctions.m` §1.0/1.1.2/1.1.3; the sine
+  corpus is sin-binomial, so these pay off on recursive subproblems and the
+  cos-heavy chapters). **R4** bundled all 21 files of 4.1 Sine (bundle
+  3,219 → 4,080 rules) and removed the driver's bare-trig-power fallback
+  (bundled sine rules cover it, verified on/off identical); same day, the
+  cross-bundle class-identity bug was fixed (ESM code splitting in
+  `scripts/build.mjs` — one `BigDecimal` realm — plus duck-typing in
+  `numerics/bigint.ts` and `e.name`-based `CancellationError` checks).
+  **R2** closed the `(a+b sin)^m(c+d sin)^n` binomial-product chains — the
+  blocker was NOT a ch4 utility: (a) the benchmark loaded ch4 *without* the
+  ch1 algebraic foundation the shipped loader bundles (base case
+  `∫1/(a+2bx+ax²)` from the tangent-half-angle rule had no rule) — the
+  harness now preloads ch1/2/6 in `--rubi` mode (`RUBI_NO_FOUNDATION`;
+  pre-2026-07-04 4.1 baselines not comparable); (b) inert `csc`/`sec` blocked
+  the power rules → `reciprocalToPower` (`csc→sin⁻¹`/`sec→cos⁻¹`, frozen
+  under fractional powers for branch safety; `RUBI_NO_RECIP`). Also: the
+  `containsError` no-progress guard. Trajectory: 4.1 Sine 46 → 47 (R1) →
+  96/120 (R2), sample 400 → 288; the pre-existing wrong `4.1.2.2 #1395` went
+  wrong → unsolved (genuine wrongs 0), and the 3 sample-400 flags were
+  identified as the **hypergeometric verification-false-wrong class**
+  (numeric ₂F₁/AppellF1 mis-grading at non-integer symbolic-exponent
+  substitution) that every later rung re-confirms.
 - **Phase R10 — cofunction-generation audit + §4.5 Secant BUNDLED
   (2026-07-04).** _The cofunction mechanism, audited and empirically confirmed
   under `wolframscript`:_ Rubi has **no Cosine, Cotangent, or Cosecant chapter**

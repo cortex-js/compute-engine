@@ -225,81 +225,44 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State:** **Chapters 1 (Algebraic), 2 (Exponentials), and 6 (Hyperbolics)** are
-translated and bundled, **plus all of Chapter-4 §4.1 Sine** (104 rule-docs →
-~4.1k rules in `src/compute-engine/rubi/rubi-rules-data.json`, exposed via
-`@cortex-js/compute-engine/integration-rules`).
-The trig pilot closed the **three `1/(3cos x + 4sin x + k)` Wester integrals**
-(∅→✅ under `CE+R/F`) via a minimal active↔inert trig head-swap bridge — Wester
-indefinite-∫ is now `CE+R/F` 6/8 (overall 32/48 per the committed report; a
-fresh source run measures 34/48 from unrelated CE drift). Chapter 2 ≈72% effective,
-Chapter 6 ≈45% effective (sample, seed 42) — both reuse the Chapter-2
-exponential machinery (incl. the incomplete-Γ kernel); the Ch6 reciprocal/
-algebraic tail (below) is the residual. Per-chapter blow-by-blow in
-`docs/rubi/RUBI.md` §5.
+**State (2026-07-04, R1–R14 landed):** the shipped bundle
+(`src/compute-engine/rubi/rubi-rules-data.json`, via
+`@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
+(Algebraic), 2 (Exponentials), 6 (Hyperbolics), 4.1 Sine, and 4.5 Secant** —
+4,531 rules, 4.94 MB (CI has a bundle-freshness gate). Scores (seed 5):
+**4.1 Sine 107/120 and 317/400**, **4.5 Secant 56/120**, ch1 exhaustive
+≈90–91%, ch2 ≈72% / ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
+**Genuine wrongs are 0 across all suites** — every flagged "wrong" is a
+documented **verification false-wrong** (numeric ₂F₁/AppellF1 mis-grading at
+non-integer symbolic-exponent substitution; `√(sin²)=|sin|`; cube-root branch
+at negative x): before believing a wrong flag, differentiate the
+antiderivative back and compare at integer substitutions. The trig routing
+lives in the runtime layer (`rubi-utils.ts`/`driver.ts`): argument-aware
+`deactivateTrig` (only x-free/linear/bare-monomial args inert — composite
+quadratic/√-inner args stay ACTIVE for the substitution rules),
+`cofunctionShift` (`sec → csc[θ+π/2]`; the `cot → −tan[θ+π/2]` variant is
+implemented but default-OFF behind `RUBI_COFN_COT` pending R12),
+`unifyInertTrig` + its cofunction product clauses, `standaloneCosineShift`,
+`reciprocalToPower` (frozen under fractional powers — branch safety), and two
+driver fallbacks (trig→exp with a numeric-evaluability self-check;
+native-rational). A/B env switches: `RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`,
+`RUBI_NO_COFN`, `RUBI_COFN_COT`, `RUBI_NO_SKELETON`. Per-rung blow-by-blow
+(R1–R14, incl. the cofunction-audit table and each rung's dead ends):
+`docs/rubi/RUBI.md` §5; the rest is git history.
 
-**In progress — full Chapter 4 (trig).** The whole cost is the **inert-trig
-utility layer** (77% of the chapter's 2,117 rules match inert `cos`/`sin`;
-extraction + compilation are free — `docs/rubi/RUBI.md` §1/§5). The ch4 corpus
-is translated; the runtime utility port is incremental, validated per-section
-against the **Rubi test suite** (the real metric):
-`scripts/rubi/benchmark.ts --rubi "data/rubi/corpus/4 Trig functions" --chapter
-"4 Trig functions/4.1 Sine" --sample 120 --seed 5 --report /tmp/x.json` (always
-pass `--report`; the default clobbers the committed baseline).
+**Benchmark protocol.** `npx tsx scripts/rubi/benchmark.ts --rubi
+"data/rubi/corpus/4 Trig functions" --chapter "4 Trig functions/4.1 Sine"
+--sample 120 --seed 5 --report /tmp/x.json`. Always pass `--report` (the
+default path clobbers the committed baseline); `--rubi` mode preloads the
+ch1/2/6 foundation (so it measures the integrator as it ships —
+`RUBI_NO_FOUNDATION` to disable; **pre-2026-07-04 4.1 baselines are not
+comparable**); run suites **sequentially** — concurrent benchmark runs
+contaminate each other's driver/verifier timing.
 
-**Landed (2026-06-15).** `ExpandTrig` + the predicates
-`InertTrigFreeQ`/`FalseQ`/`InverseFunctionFreeQ`; the reverse-chain rule
-(`DerivativeDivides` + `EasyDQ`, perf-gated); `FunctionOfTrig`; the pure
-substitution engine (`FunctionOfQ` + `SubstFor`/`SubstForTrig` for
-sin/cos/tan/cot); a **recursive native-rational fallback** in the driver (closes
-the *algebraic* sub-integrals the trig reductions emit — e.g. `∫cos·g(sin)` →
-`∫g(t)`); and the **`UnifyInertTrigFunction` cofunction shift**
-(`cos[θ] → sin[θ+π/2]`), which is how Rubi routes cosine to the sine rules — it
-has **no Cosine chapter** (confirmed by tracing Rubi under `wolframscript`).
-CE's `simplify` gained the matching `sin(θ+π/2) → cos(θ)` identity so results
-read cleanly. **4.1 Sine: 26 → 46/120 (seed 5)** from the head-swap pilot.
-
-**Landed (2026-07-04) — R1 + R4.** The **cofunction product clauses** in
-`unifyInertTrig` (cos·csc, cos·sec, and sin/csc/cot/tan × `(a+b cos)` binomial
-products, ported from `IntegrationUtilityFunctions.m` §1.0/1.1.2/1.1.3); the
-sine corpus is written with *sin* binomials, so these mostly pay off on
-recursive subproblems and the cos-heavy chapters (4.3 Tangent / 4.5 Secant).
-And the **ship step**: all 21 files of 4.1 Sine bundled (918 rules; bundle
-3,219 → 4,080, +~15% one-time rule-compile cost), the driver's self-contained
-bare-trig-power fallback removed (the bundled sine rules cover it — verified
-on/off identical), ch1/ch2/ch6 and Wester unchanged. Also landed: the
-**cross-bundle class-identity fix** — the ESM builds of `compute-engine` +
-`integration-rules` now share chunks (`splitting: true` in `scripts/build.mjs`,
-one `BigDecimal` realm; was the cause of two Wester integrals failing in dist
-only), plus defensive duck-typing in `numerics/bigint.ts` and `e.name`-based
-`CancellationError` checks in the driver. **Benchmark truth: 4.1 Sine is
-47/120 (seed 5), 1 wrong / 0 not-evaluable** — the wrong is the *pre-existing*
-`4.1.2.2 #1395` (a 3-factor sin-binomial integrand; the earlier "0 wrong"
-claim was a mismeasure — the clean tree was already 46/1/0). Sample 400:
-140/1/0.
-
-**Landed (2026-07-04) — R2.** The binomial-product chains close. The blocker
-was **not** a missing Chapter-4 utility: (a) the benchmark's `--rubi` mode
-loaded Chapter 4 *without* the Chapter-1 algebraic foundation the shipped
-loader bundles, stranding every reduction's base case (the tangent-half-angle
-substitution in `4.1.1.1#27` emits `∫1/(a+2bx+ax²)dx`, a Ch1 rule) — the
-harness now preloads ch1/2/6 in `--rubi` mode so it measures the integrator
-as it ships (`RUBI_NO_FOUNDATION` to disable; **pre-2026-07-04 4.1 baselines
-are not comparable**); (b) inert `csc`/`sec` heads blocked the power rules —
-new `reciprocalToPower` normalization in `rubi-utils.ts` (`csc→sin⁻¹`,
-`sec→cos⁻¹`, branch-guarded: frozen under fractional powers where
-`√(b·sec) ≠ √(b/cos)` off the principal branch), applied in the driver after
-`deactivateTrig` (`RUBI_NO_RECIP` to A/B). Also: a `containsError` guard
-rejects rule results carrying `Error` nodes as no-progress. **4.1 Sine:
-47 → 96/120 (seed 5), 0 genuine wrong / 0 not-evaluable** (#1395 wrong →
-unsolved); sample 400: 140 → 288, where the 3 remaining "wrongs" are
-**verification false-wrongs** — symbolically correct hypergeometric
-antiderivatives (verified: derivative ratio 1.0 at every sample point) that
-the harness's numeric 2F1/AppellF1 evaluation mis-grades when substituting
-*non-integer* values for symbolic exponents. Expect the harness to keep
-flagging that class on future 4.1 rungs. Ch1 regression: 180/200 (+1), same
-6 pre-existing wrongs. The core integer-power `(a+b sin)^m(c+d sin)^n` class
-is closed (4.1.2.1: 12→2 unsolved; 4.1.2.2: 17→1).
+**Known kernel gaps** (block specific classes; the fallbacks decline them
+cleanly, so they surface as unsolved, not wrong): complex-argument
+`ExpIntegralEi` and negative-order incomplete Γ don't evaluate numerically —
+needed by the `∫x·sin(a+b/x)` exp-route class and R15's complex-Si members.
 
 **Method note (hard-won).** The "unimplemented-predicate" trace census is
 *misleading* for picking levers: the late catch-all rules
@@ -314,81 +277,6 @@ Get["~/dev/rubi/Rubi-4.17.3.0/Rubi/Rubi.m"];
 Trace[Rubi`Int[Cos[x]^4, x], HoldPattern[Rubi`Int[_, _]]]
 Rubi`Private`DeactivateTrig[Cos[x]^4, x]   (* -> sin[Pi/2 + x]^4 *)
 ```
-
-**Landed (2026-07-04) — R3 base cofunction gap + R10 audit & ship.** The
-`√(b·sec)` half-integer family closed, and the mechanism is now understood
-correctly (the R10 audit corrected R3's first reading): **Rubi has no
-sec/cot/csc-of-cosecant chapters and no load-time rule generation** — its
-reciprocal-trig chapters are authored in ONE cofunction (`4.5 Secant` in inert
-`csc`, `4.3 Tangent` in `tan`), and `DeactivateTrig` maps the *other* head to
-the authored one at **integration time** via a π/2 reflection
-(`Sec[x] → csc[π/2+x]`, confirmed under `wolframscript`). CE's runtime
-deactivates `Sec→` inert `sec` instead, so the sec side had no reduction rules.
-Fix shipped: three branch-safe `sec` rules
-(`∫(b·sec)^n = (b·Sec)^n·Cos^n·∫1/Cos^n` form, wolframscript term-checked) in
-`4.5.1.1`, and **all of 4.5 Secant bundled** (13 files, 0 skips; bundle
-4,080 → 4,531 rules, 4.41 → 4.94 MB, rule-compile +~10%). Validation: 4.5
-Secant 20 → 31/120 (seed 5), 4.1 Sine 98/120 and ch1 180/200 unchanged,
-genuine wrongs 0 everywhere, shipped-path probe closes `√(sec x)` &co. via the
-real bundle. Audit table (per-section missing-cofunction counts for 4.5/4.3)
-is in `docs/rubi/RUBI.md` §5 Phase R10. 4.1 Sine benchmark: 96 → 98/120,
-288 → 293/400 (seed 5); the 3 sample-400 flags remain the documented
-hypergeometric false-wrongs.
-
-**Landed (2026-07-04) — R11, runtime cofunction shift.** `cofunctionShift` in
-`rubi-utils.ts` (driver: after `deactivateTrig`, before `reciprocalToPower`)
-now mirrors Rubi's `DeactivateTrig` routing: `sec[e+f·x] → csc[e+π/2+f·x]`
-(no sign; `cot → −tan[θ+π/2]` implemented but default-OFF pending R12). NOT a
-blind swap — it fires only for pure-source forms: declines when a cross-pair
-head is co-present (that's `unifyInertTrig`'s job) and reverts if the result
-carries the target head at ≥2 distinct arguments (the within-pair `csc·sec`
-desync, which breaks in recursion). **4.5 Secant: 31 → 56/120 (seed 5), 0
-genuine wrong** (3 flags = the same verification-false-wrong class, incl. a
-`√(sin²)=|sin|` branch present in Rubi's own reference); 4.1 Sine (98/120,
-293/400), ch1, ch2/ch6 all byte-identical; strict no-op for non-trig
-integrands (`RUBI_NO_COFN` A/B). The three stopgap sec rules are shadowed for
-pure-sec inputs but kept as fallback for reverted within-pair cases. Shifted
-results read back cleanly (`simplifyTrig` folds `csc(θ+π/2)→sec θ`). Bundle
-untouched (runtime-only change).
-
-**Landed (2026-07-04) — R9, poly×trig & nonlinear arguments.** Two runtime
-levers (no corpus/bundle change; details in RUBI.md §5 Phase R9):
-(a) `standaloneCosineShift` — a full-tree `cos[e+f·x] → sin[e+π/2+f·x]` leaf
-rewrite (gated to cos-as-sole-trig-head), closing the `poly·cos` sub-integrals
-that 4.1.10's by-parts reductions emit (their closing rules live in the
-non-existent Cosine chapter) — and, as a bonus, three of R3′'s deep cases
-(#604/#609/#1395, `(e·cos)^(7/2)/(a+b·sin)ⁿ` etc.), which route cos→sin;
-(b) a **trig→exp driver fallback** (analog of ch6's hyperbolic→exp) for
-nonlinear arguments `∫xᵐ·sin(a+b·xⁿ)` → `∫xᵐ·e^(k·xⁿ)` → Chapter-2
-incomplete-Γ, guarded by a nonlinear-monomial gate plus a **numeric
-evaluability self-check** (the correct/not-evaluable split is not structural —
-verified empirically), which kept not-evaluable at 0. **4.1 Sine:
-98 → 106/120, 293 → 314/400 (seed 5), genuine wrongs 0**; 4.5 Secant, ch1,
-ch2, ch6 all unchanged. Unintegrable census: of the remaining unsolved R9
-members, 7 at sample 400 are Rubi-`Unintegrable` (correctly inert). **Kernel
-gaps found (reported, not patched):** complex-argument `ExpIntegralEi` and
-negative-order incomplete Γ don't evaluate numerically — they block the exp
-route for `∫x·sin(a+b/x)`-class integrands whose antiderivatives are otherwise
-correct (the fallback declines them, so they stay cleanly unsolved).
-
-**Landed (2026-07-04) — R14, argument-aware trig deactivation.** The "matcher
-declines Subst" framing was a red herring — the real bug was
-**deactivation timing**: CE inerted ALL trig up front, but the
-4.1.12/4.1.13 substitution/completing-the-square rules are authored on
-ACTIVE `Sin` of composite arguments (Rubi's `DeactivateTrigAux` only inerts
-when the argument is linear). `deactivateTrig` is now argument-aware: x-free /
-linear / bare-monomial (incl. `a+b/x`) arguments deactivate as before
-(byte-identical, so nothing can regress); deg-2 quadratics and
-positive-fractional powers of a linear inner (`√(c+d·x)`, via
-`fractionalLinearInnerQ` — note the canonical `Sqrt` head) stay ACTIVE;
-deg-≥3 integer composites deactivate (leaving them active routed them to
-Rubi's raw exp-rewrite whose `(±i·xⁿ)^(…)` form mis-verifies at negative x —
-R9's `expandTrigToExp` path produces the branch-consistent form). **4.1 Sine:
-106 → 107/120, 314 → 317/400 (seed 5), 0 genuine wrongs**; #156
-(`∫sin(b·(c+d·x)²)` → FresnelS) and #187 (`√(c+d·x)` inner) now solve; #172
-deliberately gated to unsolved (cube-root-branch false-wrong class — correct
-at positive x, matches Rubi's own Γ form). 4.5/ch1/ch2/ch6 unchanged. All
-R9 wins preserved. RUBI.md §5 Phase R14 has the detail.
 
 **Next rungs (priority order).** Each is a self-contained work item: do the
 change, then verify with the benchmark command above (watch `solved-correct`
