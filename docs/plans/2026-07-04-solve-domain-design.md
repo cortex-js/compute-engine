@@ -1,6 +1,19 @@
 # Solve over a Domain — Design
 
-**Date:** 2026-07-04 · **Status:** proposed
+**Date:** 2026-07-04 · **Status:** Phases 1 & 2 IMPLEMENTED (same day) —
+`boxed-expression/solve-domain.ts` + `solve-domain.test.ts` (46 tests).
+Phase 2 notes vs. this design: Interval domains (§2.3) required no new code
+(Phase 1's contains-filter already had endpoint semantics); root-family
+expansion (§2.2) additionally recovers scaled-argument principal roots via a
+linearizing substitution (`sin 2x`: the trig rules don't fire on scaled
+arguments), capped at 1,000 members with degradation to principal roots;
+the assumptions bridge (§2.4) filters at the outer `.solve()` boundary in
+`boxed-function.ts` plus both solve-domain paths, testing assumption
+expressions by substitution (not `verify()`). **Phase 3 (symbolic diophantine)
+IMPLEMENTED (2026-07-04)** — `numerics/diophantine.ts` (pure bigint kernels) +
+`boxed-expression/diophantine.ts` (recognition/boxing/dispatch) +
+`solve-diophantine.test.ts` (19 tests); see the Phase 3 section at the end of
+this document.
 **Motivation:** the MathNet assessment (`docs/mathnet/`) identified
 enumeration/finite-domain solving as the one genuine *capability* gap the
 corpus exposed ("find all n ≤ 1000 such that …", Pell-style search). Agreed
@@ -198,3 +211,114 @@ dataset research did not cover it).
   known-answer tests.
 - The audit harness (`benchmarks/audit/solve.ts`) is unaffected (2-arg
   calls) but can grow a `domain` case class later.
+
+---
+
+## Phase 3 — Symbolic diophantine solving (2026-07-04)
+
+Integer-typed / integer-domained unknowns now reach a closed-form integer
+solver **before** the enumeration fallback, and fully unbounded integer solves
+stop being inert. Scope of the first slice (per the porting assessment,
+`docs/plans/2026-07-04-diophantine-assessment.md`):
+
+- **Linear, any number of unknowns** — `a₁x₁ + … + aₙxₙ + c = 0` with exact
+  integer/rational coefficients (rationals are cleared through the lcm of
+  denominators).
+- **Pell / diagonal binary quadratic, general N** — exactly two unknowns,
+  `A·u² + B·v² + C = 0` with no cross or linear term, reducible to
+  `X² − D·Y² = N` because `|A| = 1` or `|B| = 1` (after clearing denominators).
+  This subsumes the elliptic (`D < 0`, finite), degenerate (`D = 0`,
+  square-`D`) and hyperbolic (`D > 0` non-square, infinite family) regimes — the
+  kernel handles them all.
+
+### Result contract (decided)
+
+1. **All unknowns bounded to a finite integer domain** → a concrete `List` of
+   `Tuple`s, exactly the Phase 2 shape, sorted lexicographically ascending by
+   tuple coordinates. Every emitted member passes `domain.contains` for its
+   coordinate (so `Range` steps are honored) **and** is exact-confirmed by
+   substitution into the equation (mirroring `expandPeriodicRoots`). Cap:
+   `MAX_DIOPHANTINE_EXPANSION = 1000` members; an instantiation that would
+   exceed it returns `undefined`, leaving the existing enumeration/budget path
+   to run unchanged.
+2. **All unknowns fully unbounded over ℤ** (a declared integer-typed unknown
+   with no domain, the `Integers` collection, or a doubly-infinite `Range`) →
+   a **parametric** `List` of `Tuple`s whose entries are canonical expressions
+   in fresh integer parameters. Free parameters in a `Solve` result range over
+   ℤ (documented convention — nothing is declared in the user's scope).
+   - Linear `ax + by = c`: one tuple `(x₀ + (b/g)·t, y₀ − (a/g)·t)`; `n ≥ 3`
+     variables: one tuple in `n − 1` parameters.
+   - Pell `family`: for each class rep `(r, s)` **two** tuples — the family and
+     its global negation — each entry the exact closed form
+     `x_t = ((r+s√D)(T+U√D)^t + (r−s√D)(T−U√D)^t)/2`,
+     `y_t = ((r+s√D)(T+U√D)^t − (r−s√D)(T−U√D)^t)/(2√D)`, `t ∈ ℤ` (the unit has
+     norm 1, so `(…)^t` handles `t < 0` as the conjugate automatically). Pell
+     `finite` results are already complete → concrete tuples; the degenerate
+     `linear-family` variant emits `(a + b·y, y)` with a fresh `y` parameter.
+3. **Half-bounded** (`Range(1, +∞)`) or otherwise not-finitely-instantiable
+   integer domains → **not dispatched**; existing behavior is left untouched
+   (documented limitation — a domain constraint is never silently dropped).
+
+An empty `List` is a decision (a proven-unsolvable equation such as
+`6x + 9y = 4`); `undefined` means "not a diophantine form I handle" and falls
+through to the existing path.
+
+**Deviation from the literal dispatch spec (deliberate, to preserve the Phase-2
+contract):** for a **bounded, non-empty _linear_** system the diophantine path
+returns `undefined` (defers to enumeration) rather than surfacing the concrete
+tuples. Enumeration yields the identical tuples within budget, and — crucially —
+an over-budget bounded box for a linear equation stays *inert*, exactly as
+Phase 2 promised (`solve-domain.test.ts`'s "product over budget stays
+unevaluated"). What the bounded linear path *does* surface is the fast
+**emptiness proof** (`6x + 9y = 4` over a 10⁶ box → `[]` without sweeping). The
+genuinely new bounded capability — reaching a family enumeration cannot, over a
+box far beyond the enumeration budget — is delivered by the **Pell** path
+(MathNet `0jxv`: `x² − 29y² = 1` over `[1, 10⁵]²` → `[(9801, 1820)]`).
+
+### Dispatch points (`boxed-expression/solve-domain.ts`)
+
+- `solveOverMultipleDomains`: before the enumeration budget check, when the
+  equation is an integer equation and every domain is integer-valued
+  (`isIntegerDomain` — a bounded `Range` or the `Integers` set; not a
+  half-bounded `Range` nor a real `Interval`, whose element type degrades to
+  `number`) and carries no extra `Element` condition, attempt
+  `tryDiophantineSolve`. A result (including an empty `List`) is used; the engine
+  deadline is honored here too, since this path bypasses the deadline-checked
+  enumeration loop.
+- `evaluateSolve`, no-domain multi-unknown branch: when the equation is a single
+  `Equal` and **every** unknown is *declared* integer-typed (a plain untyped
+  symbol must NOT dispatch — that is a real-domain solve), attempt
+  `tryDiophantineSolve` with unbounded domains → parametric/finite `List`.
+- No existing behavior for non-integer cases changes.
+
+### Parameter freshness
+
+Parameters are named `t, t_1, t_2, …`, skipping any name that appears among the
+equation's symbols or is bound to a value in the current context (a bound `t`
+with a value would evaluate inside the result). Nothing is declared in the
+user's scope; the parameters surface as free symbols.
+
+### Kernel
+
+Pure-bigint kernels live in `numerics/diophantine.ts` (engine-free, a hand port
+of the relevant pieces of SymPy 1.14.0's BSD-licensed `diophantine.py`, plus a
+direct Tonelli–Shanks / Hensel `sqrtMod`): `extendedGcd`,
+`solveLinearDiophantine`, `solvePell` / `pellFundamental` / `bruteForcePell`,
+and the `DiophantineBudgetError` anti-hang backstop. The **family-generation
+rule** the boxing layer enumerates is pinned in the `PellResult` doc comment:
+over all class reps `(r, s)`, every `(r + s√D)·(T + U√D)^t` for `t ∈ ℤ`
+(inverse unit for `t < 0`) **together with** the global negation `(−x, −y)`;
+the `linear-family` variant's `xOfY: [a, b]` means `x = a + b·y` with `y` free.
+Recognition/boxing/dispatch live in `boxed-expression/diophantine.ts`
+(`tryDiophantineSolve`, `isIntegerDomain`, `MAX_DIOPHANTINE_EXPANSION`), a peer
+of `solve.ts`/`polynomials.ts` — no new import cycles (madge-verified).
+
+### Deliberately deferred
+
+- `transformation_to_DN` for **general** binary quadratics (cross terms `Bxy`,
+  linear terms `Dx`/`Ey`) — only diagonal unit-coefficient forms are recognized.
+- The **sum-of-squares / Pythagorean** tier (`x₁² + … + xₙ² = k`, `n ≥ 3`) — a
+  better fit for a dedicated representation function than for Solve output.
+- `diophantine()` **auto-factoring** of reducible equations (`factor_list`).
+- **Instantiation over half-bounded** domains (`Range(1, +∞)`) — needs a
+  one-sided family walk with a soundness argument; left inert for now.

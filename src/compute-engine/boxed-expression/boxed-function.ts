@@ -41,6 +41,7 @@ import {
 import { NumericValue } from '../numeric-value/types';
 
 import { findUnivariateRoots } from './solve';
+import { filterRootsByAssumptions } from './solve-domain';
 import {
   solveLinearSystem,
   solvePolynomialSystem,
@@ -1133,7 +1134,14 @@ export class BoxedFunction
 
     // Existing univariate solving
     if (varNames.length !== 1) return null;
-    return findUnivariateRoots(this, varNames[0]);
+    const roots = findUnivariateRoots(this, varNames[0]);
+    if (roots === null) return null;
+    // Route in-scope bound assumptions on the unknown through the same root
+    // filter the domain pipeline uses: `assume(n > 0)` should drop the negative
+    // root of `n^2 = 16`. Applied at this OUTER boundary (not inside the
+    // recursive `findUnivariateRoots`, which re-enters with substituted
+    // variables) so both `expr.solve('n')` and the `Solve` operator benefit.
+    return filterRootsByAssumptions(this.engine, roots, varNames[0]);
   }
 
   get isCollection(): boolean {

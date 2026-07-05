@@ -2834,6 +2834,65 @@ function unifyProductClauses(
   return null;
 }
 
+// Standalone-cosine leaf shift (the poly·cos generalization of cosBaseToSin).
+// Rubi's DeactivateTrig reflects a lone linear-argument cosine onto the sine
+// chapter (`cos[e+f·x] → sin[e+π/2+f·x]`, source line 6576) as a LEAF identity —
+// it applies regardless of what x-dependent factors (a polynomial (c+d·x)^m, a
+// reciprocal (c+d·x)^-k, …) multiply the cosine. `cosBaseToSin`/`unifyInertTrig`
+// only cover the base of a `(a+b·cos)^n` power (x-free coefficient), so a
+// poly·cos product (`∫(c+d·x)^m·cos`, `∫cos/(c+d·x)^k`) was NOT reflected and
+// stranded — the sine-chapter reduction `∫(c+d·x)^m·sin → …+∫(c+d·x)^(m-1)·cos`
+// (4.1.10 #1) bottoms out in exactly such a `poly·cos` sub-integral whose
+// closing rule lives in the unbundled Cosine chapter. This full-tree leaf
+// rewrite closes it. Gated to fire ONLY when cosine is the SOLE trig head: any
+// other inert trig (sin/tan/cot/sec/csc) means a mixed cross-pair form where a
+// blind reflection desyncs arguments or steals a mixed-rule match — left to the
+// two-factor clauses in `unifyInertTrig` and the bundled mixed rules.
+const NON_COS_INERT_TRIG = new Set(['sin', 'tan', 'cot', 'sec', 'csc']);
+function hasNonCosInertTrig(e: Expression): boolean {
+  if (NON_COS_INERT_TRIG.has(e.operator)) return true;
+  return e.ops?.some(hasNonCosInertTrig) ?? false;
+}
+function hasLinearArgCos(e: Expression, x: string): boolean {
+  if (e.operator === 'cos' && e.ops?.length === 1 && polyDegreeX(e.ops[0], x) === 1)
+    return true;
+  return e.ops?.some((o) => hasLinearArgCos(o, x)) ?? false;
+}
+function cosLeafShiftRec(
+  ce: ComputeEngine,
+  e: Expression,
+  x: string
+): Expression {
+  if (
+    e.operator === 'cos' &&
+    e.ops?.length === 1 &&
+    polyDegreeX(e.ops[0], x) === 1
+  )
+    return ce.function('sin', [e.ops[0].add(ce.Pi.div(2))]);
+  const ops = e.ops;
+  if (!ops || ops.length === 0) return e;
+  const newOps = ops.map((o) => cosLeafShiftRec(ce, o, x));
+  if (newOps.every((o, i) => o === ops[i])) return e;
+  return ce.function(e.operator, newOps);
+}
+
+/** Rubi DeactivateTrig standalone-cosine reflection as a full-tree LEAF rewrite:
+ * when cosine (with a linear argument) is the SOLE x-dependent trig head, map
+ * every `cos[e+f·x] → sin[e+π/2+f·x]` so the integrand routes to the sine
+ * chapter (Rubi has no Cosine chapter). Generalizes `unifyInertTrig`'s
+ * base-only cos→sin to poly·cos products (`∫(c+d·x)^m·cos`, `∫cos/(c+d·x)^k`).
+ * A strict no-op when any other inert trig head is present (mixed cross-pair,
+ * handled by the two-factor clauses) or no linear-argument cosine appears. */
+export function standaloneCosineShift(
+  ce: ComputeEngine,
+  e: Expression,
+  x: string
+): Expression {
+  if (hasNonCosInertTrig(e)) return e;
+  if (!hasLinearArgCos(e, x)) return e;
+  return cosLeafShiftRec(ce, e, x);
+}
+
 /** UnifyInertTrigFunction[u, x] (cofunction-shift subset): rewrites a
  * standalone inert cosine power/binomial `(a+b·cos)^n` to the sine cofunction
  * `(a+b·sin[arg+π/2])^n`, and the two-factor cos/cofunction product clauses
@@ -3562,6 +3621,179 @@ export function expandHyperbolicToExp(
   u: Expression
 ): Expression {
   return deepExpand(ce, hyperbolicToExp(ce, u));
+}
+
+// ---------------------------------------------------------------------------
+// Trig → exponential fallback for NONLINEAR-argument sin/cos (4.1.11 / 4.1.12).
+//
+// The direct analog of the Chapter-6 hyperbolic→exp fallback. Rubi's
+// nonlinear-argument sine rules (4.1.12 #5/#15 `∫Sin[c+d·xⁿ] → I/2·∫E^… − …`,
+// #29 the t=xⁿ substitution) route `∫xᵐ·sin(a+b·xⁿ)` to `∫xᵐ·E^(k·xⁿ)`, closed
+// by the bundled Chapter-2 incomplete-Γ kernel — exactly like the hyperbolic
+// `Sinh[a+b·xⁿ]` cases. CE's structural matcher does not bind those Subst /
+// linear-inner-match rules (the `(e+f·x)ⁿ` base defaulting to `xⁿ` and the
+// `Simplify[(m+1)/n]` exponent are Mathematica-simplifier dependent), so this
+// self-contained reducer supplies the same capability: rewrite sin/cos → E^(±i·w)
+// and expand, so every term is `coef·xᵏ·E^(k·xⁿ)`.
+//
+// Gated (`sinCosArgNonlinearExpandableQ`) to fire ONLY when a sin/cos of a
+// NONLINEAR monomial argument (`c + d·xᵏ`, k≠1 — incl. k<0 for sin(a+b/x)) is
+// present and EVERY x-dependent sin/cos argument is such a monomial. Linear-
+// argument sin/cos is left to the sine chapter (it never reaches this fallback —
+// the rules close it first); a multi-term / non-monomial argument (quadratic
+// `a+b·x+c·x²`, `(e+f·x)ⁿ`) is declined, so those stay with their own rules.
+// ---------------------------------------------------------------------------
+
+/** TrigToExp for inert sin/cos: `sin[w] → (i/2)E^(−i·w) − (i/2)E^(i·w)`,
+ *  `cos[w] → (1/2)E^(i·w) + (1/2)E^(−i·w)`, with the scalar DISTRIBUTED into
+ *  the two terms so a power base stays a pure Add (mirrors hyperbolicToExp).
+ *  Only sin/cos convert; every other head recurses unchanged. */
+function trigToExp(ce: ComputeEngine, u: Expression): Expression {
+  const ops = u.ops;
+  if (ops?.length === 1 && (u.operator === 'sin' || u.operator === 'cos')) {
+    const w = trigToExp(ce, ops[0]);
+    const i = ce.I;
+    const ewPos = ce.E.pow(i.mul(w)); // E^(i·w)
+    const ewNeg = ce.E.pow(i.neg().mul(w)); // E^(−i·w)
+    const half = ce.number([1, 2]);
+    if (u.operator === 'cos') return half.mul(ewPos).add(half.mul(ewNeg));
+    // sin[w] = (E^(i·w) − E^(−i·w))/(2i) = −(i/2)E^(i·w) + (i/2)E^(−i·w)
+    const hi = half.mul(i);
+    return hi.neg().mul(ewPos).add(hi.mul(ewNeg));
+  }
+  if (!ops || ops.length === 0) return u;
+  return ce.function(
+    u.operator,
+    ops.map((op) => trigToExp(ce, op))
+  );
+}
+
+/** The exponent k of a single `d·xᵏ` term (d x-free): bare `x`→1, `x^k`→k,
+ *  `d·x`/`d·x^k`→1/k. Null if `t` is not one x-free-scaled power of x. */
+function xPowerExponent(t: Expression, x: string): Expression | null {
+  if (t.symbol === x) return t.engine.One;
+  if (t.operator === 'Power' && t.ops && t.ops[0].symbol === x && !t.ops[1].has(x))
+    return t.ops[1];
+  if (t.operator === 'Multiply' && t.ops) {
+    const dep = t.ops.filter((o) => o.has(x));
+    if (dep.length !== 1) return null;
+    return xPowerExponent(dep[0], x);
+  }
+  return null;
+}
+
+/** For a trig argument `arg`: the exponent k if `arg = c + d·xᵏ` (x-free c, one
+ *  x-monomial term), else null. */
+function trigArgMonomialExponent(
+  arg: Expression,
+  x: string
+): Expression | null {
+  const terms = arg.operator === 'Add' && arg.ops ? arg.ops : [arg];
+  let k: Expression | null = null;
+  for (const t of terms) {
+    if (!t.has(x)) continue;
+    const e = xPowerExponent(t, x);
+    if (e === null) return null;
+    if (k !== null) return null; // two x-dependent terms ⇒ not a monomial
+    k = e;
+  }
+  return k;
+}
+
+/** Gate for `expandTrigToExp`: every x-dependent sin/cos argument in the
+ *  integrand is a NONLINEAR monomial `c + d·xᵏ` (k≠1), none a concrete negative
+ *  exponent, and at least one such nonlinear trig appears — the 4.1.11/4.1.12
+ *  `∫xᵐ·sin(a+b·xⁿ)` family (incl. the `(c·sin³)^(1/3)` cube-root form of
+ *  #328/#329). A linear (k=1) argument is ignored — the sine rules close it
+ *  first, so it never reaches this fallback. The fallback's own numeric-
+ *  evaluability check (`driver`) then drops any result whose special-function
+ *  form CE cannot evaluate, so an over-inclusive gate here only costs a wasted
+ *  expansion, never a not-evaluable. */
+export function sinCosArgNonlinearExpandableQ(
+  u: Expression,
+  x: string
+): boolean {
+  let sawNonlinear = false;
+  const walk = (e: Expression): boolean => {
+    if ((e.operator === 'sin' || e.operator === 'cos') && e.ops?.[0]?.has(x)) {
+      const k = trigArgMonomialExponent(e.ops[0], x);
+      if (k === null) return false; // non-monomial x-argument ⇒ decline
+      // Concrete negative exponent (`sin(a+b/x)`) ⇒ complex-Ei form; not a
+      // monomial-power target the exp route handles cleanly.
+      if (k.isNumberLiteral && typeof k.re === 'number' && k.re < 0)
+        return false;
+      if (!k.isSame(1)) sawNonlinear = true;
+    }
+    return (e.ops ?? []).every(walk);
+  };
+  return walk(u) && sawNonlinear;
+}
+
+/** True iff `F` evaluates to a finite complex number under a random assignment
+ *  of all its free symbols (excluding the known constants) and `x`. The
+ *  trig→exp fallback uses it to REJECT a result whose special-function form CE
+ *  cannot evaluate numerically (a complex-argument `ExpIntegralEi`, a negative-
+ *  order incomplete Γ): such a result is symbolically an antiderivative but
+ *  unverifiable, so the fallback declines it (leaving the problem unsolved)
+ *  rather than emitting an inert-verifying not-evaluable. Cheap: one sample. */
+export function numericallyEvaluable(F: Expression, x: string): boolean {
+  const ce = F.engine;
+  const known = new Set([
+    'Pi',
+    'ExponentialE',
+    'ImaginaryUnit',
+    'GoldenRatio',
+    'EulerGamma',
+    'CatalanConstant',
+    'True',
+    'False',
+    'Nothing',
+  ]);
+  const sub: Record<string, number> = {};
+  let seed = 0.37;
+  const collect = (e: Expression): void => {
+    if (e.symbol && !known.has(e.symbol)) {
+      if (!(e.symbol in sub)) {
+        sub[e.symbol] = seed;
+        seed += 0.53;
+      }
+    }
+    (e.ops ?? []).forEach(collect);
+  };
+  collect(F);
+  sub[x] = 1.31;
+  try {
+    const v = F.subs(sub).N();
+    if (!v.isNumberLiteral) return false;
+    const re = v.re;
+    const im = v.im ?? 0;
+    return (
+      typeof re === 'number' &&
+      Number.isFinite(re) &&
+      typeof im === 'number' &&
+      Number.isFinite(im)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** True if any inert sin/cos head appears (guards the fallback re-entry). */
+export function containsInertSinCos(u: Expression): boolean {
+  if (u.operator === 'sin' || u.operator === 'cos') return true;
+  return (u.ops ?? []).some(containsInertSinCos);
+}
+
+/** Driver fallback: rewrite a nonlinear-argument trig integrand to exponential
+ *  form and expand it into a sum, so the bundled Chapter-2 exponential rules
+ *  (incl. the incomplete-Γ kernel) close each `coef·xᵏ·E^(k·xⁿ)` term. The
+ *  antiderivative is exponential/incomplete-Γ form — mathematically identical
+ *  to Rubi's (verified numerically). */
+export function expandTrigToExp(
+  ce: ComputeEngine,
+  u: Expression
+): Expression {
+  return deepExpand(ce, trigToExp(ce, u));
 }
 
 /** Tidy the residual exponential artifacts CE's in-context simplify leaves in

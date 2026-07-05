@@ -297,12 +297,39 @@ pure-sec inputs but kept as fallback for reverted within-pair cases. Shifted
 results read back cleanly (`simplifyTrig` folds `csc(θ+π/2)→sec θ`). Bundle
 untouched (runtime-only change).
 
+**Landed (2026-07-04) — R9, poly×trig & nonlinear arguments.** Two runtime
+levers (no corpus/bundle change; details in RUBI.md §5 Phase R9):
+(a) `standaloneCosineShift` — a full-tree `cos[e+f·x] → sin[e+π/2+f·x]` leaf
+rewrite (gated to cos-as-sole-trig-head), closing the `poly·cos` sub-integrals
+that 4.1.10's by-parts reductions emit (their closing rules live in the
+non-existent Cosine chapter) — and, as a bonus, three of R3′'s deep cases
+(#604/#609/#1395, `(e·cos)^(7/2)/(a+b·sin)ⁿ` etc.), which route cos→sin;
+(b) a **trig→exp driver fallback** (analog of ch6's hyperbolic→exp) for
+nonlinear arguments `∫xᵐ·sin(a+b·xⁿ)` → `∫xᵐ·e^(k·xⁿ)` → Chapter-2
+incomplete-Γ, guarded by a nonlinear-monomial gate plus a **numeric
+evaluability self-check** (the correct/not-evaluable split is not structural —
+verified empirically), which kept not-evaluable at 0. **4.1 Sine:
+98 → 106/120, 293 → 314/400 (seed 5), genuine wrongs 0**; 4.5 Secant, ch1,
+ch2, ch6 all unchanged. Unintegrable census: of the remaining unsolved R9
+members, 7 at sample 400 are Rubi-`Unintegrable` (correctly inert). **Kernel
+gaps found (reported, not patched):** complex-argument `ExpIntegralEi` and
+negative-order incomplete Γ don't evaluate numerically — they block the exp
+route for `∫x·sin(a+b/x)`-class integrands whose antiderivatives are otherwise
+correct (the fallback declines them, so they stay cleanly unsolved).
+
 **Next rungs (priority order).** Each is a self-contained work item: do the
 change, then verify with the benchmark command above (watch `solved-correct`
 climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
 hypergeometric verification false-wrongs). Diagnose any stall per the Method
 note — trace the residual integrand, don't trust the predicate census.
 
+- **R14 — Si/Ci Subst-routing.** The `SinIntegral`/`CosIntegral` kernels work
+  (verified end-to-end on #156), but the rules that produce them
+  (4.1.10/4.1.11 #23/#25–28, covering all 6 genuine 4.1.11 gaps
+  `∫sin(c+d·x)/(a+b·xⁿ)` and several 4.1.10 chains) use `Subst` forms the
+  structural matcher declines to bind. Fix the matcher/utility gap, not the
+  rules. Also unblocked by this shape: the 4.1.12 linear-inner Fresnel
+  routings (`(e+f·x)ⁿ`, `√(c+d·x)` inner arguments — #156/#172/#187).
 - **R12 — bundle 4.3 Tangent.** Three parts, per the R11 landing (RUBI.md §5
   Phase R11): (a) add the 4.3 corpus to the bundler allowlist; (b) turn on the
   `cot → −tan[θ+π/2]` leaf shift (implemented in R11 but default-OFF behind
@@ -319,20 +346,19 @@ note — trace the residual integrand, don't trust the predicate census.
   (exempt Add-summands from `reciprocalToPower`) regresses 4.1 Sine by −20
   (the csc-binomial sine families rely on that rewrite), so this needs a
   sec-aware carve-out rather than a global ordering change.
-- **R3′ — residual half-integer/elliptic chains.** What remains of R3 after the
-  base gap: `(e·cos)^(7/2)/(a+b·sin)^n` and `√(g·cos)·sin³/(a+b·sin)`
-  (#604/#609/#1395) need the `Rt[-a²+b²]` symbolic-radical `ArcTan`/`ArcTanh`
-  chains (15–18 Rubi steps — genuinely deep); plus the composite
+- **R3′ — residual half-integer/elliptic chains.** #604/#609/#1395 were closed
+  by R9's cosine shift; what remains is the genuinely deep tail: #53 (23-step
+  half-integer Fresnel chain), #248 (48 steps), #294, plus the composite
   `cot^m/(a+b·sin)^n` / `(a+b·sin²)^(p/2)` tan/cot-power recursions (4.1.1.3 /
   4.1.7), which may fold into R5.
-- **R9 — polynomial×trig & nonlinear arguments** (4.1.10 / 4.1.11 / 4.1.12):
-  `(c+d·x)^m·(a+b·sin)^n`, `sin(a+b/x)`, `sin(a+b·xⁿ)^(1/3)` — the largest
-  residual block (~76 of the 100 unsolved at sample 400); several members are
-  genuinely `Unintegrable` and correctly stay inert, so grade against Rubi's
-  own test-suite expectations.
 - **R5 — `TrigSimplify`/`TrigSimplifyQ`** (Pythagorean reductions). _Low value /
   optional:_ the predicate census over-weights it (it's a late catch-all, not a
-  blocker). Only pursue if R3′/R9 leave a concrete residual class that needs it.
+  blocker). Only pursue if R14/R3′ leave a concrete residual class that needs
+  it — one confirmed member so far: #93 (`csc^(−1/2)·sin` cancellation). A
+  related deferred item from R9: a proper circular `TrigReduce`
+  (multiple-angle elementary form) for `sin^n` products — the exp-form
+  reduction works but verifies past the harness budget and preempts trig-form
+  rules chapter-wide, so it was deliberately gated off.
 
 **Exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules) are
 DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty). The

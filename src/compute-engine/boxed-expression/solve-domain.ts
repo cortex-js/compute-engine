@@ -5,6 +5,9 @@ import { checkDeadline } from '../../common/interruptible';
 import type { IComputeEngine as ComputeEngine, Expression } from '../global-types';
 import { isFunction, sym } from './type-guards';
 import { findUnivariateRoots } from './solve';
+import { getPolynomialCoefficients } from './polynomials';
+import { interval } from '../numerics/interval';
+import { tryDiophantineSolve, isIntegerDomain } from './diophantine';
 
 /**
  * Solving over a domain (Phase 1, univariate).
@@ -25,6 +28,13 @@ import { findUnivariateRoots } from './solve';
 // same limit as the numeric solver's iteration ceiling (`MAX_ITERATION`).
 const MAX_SOLVE_ENUMERATION_COMPILED = 1_000_000;
 const MAX_SOLVE_ENUMERATION_INTERPRETED = 10_000;
+
+// Root-family expansion budget (Phase 2.2). When the domain span divided by the
+// equation's period exceeds this, the family is too large to materialize (e.g.
+// `sin(x) = 0` over `[0, 10^9]`): staying inert would LOSE the principal roots
+// we already have, so the honest degradation is to return the (unexpanded)
+// principal roots and let the normal membership filter apply.
+const MAX_PERIODIC_EXPANSION = 1000;
 
 /** A validated `Solve` unknown specification. */
 export interface SolveSpec {
@@ -82,8 +92,10 @@ function canonicalSolveSpec(ce: ComputeEngine, spec: Expression): Expression {
  *
  * Routing:
  * - no domain specs → existing symbolic path (`.solve()`), unchanged;
+ * - some (but not all) specs carry a domain → inert (a free unknown has no
+ *   univariate/enumeration path);
  * - exactly one domain spec → the univariate domain pipeline below;
- * - multiple domain specs → return `undefined` (stays inert; Phase 2).
+ * - several domain specs → the multi-variable enumeration pipeline (Phase 2).
  */
 export function evaluateSolve(
   ce: ComputeEngine,
@@ -113,6 +125,21 @@ export function evaluateSolve(
       if (roots === null) return ce.function('List', []);
       return ce.function('List', [...roots]);
     }
+    // Phase 3: a single integer equation in several unknowns that are ALL
+    // declared integer-typed has a symbolic diophantine solution — parametric
+    // (fresh ℤ parameters) since the domains are unbounded. A plain untyped
+    // unknown must NOT dispatch here (that is a real-domain solve): the type
+    // check gates it. `undefined` (not a recognized form) keeps the existing
+    // inert behavior below.
+    if (
+      names.length >= 2 &&
+      isFunction(ceq, 'Equal') &&
+      names.every((nm) => ce.symbol(nm).type.matches('integer'))
+    ) {
+      const dio = tryDiophantineSolve(ce, ceq, names, undefined);
+      if (dio !== undefined) return ce.function('List', dio);
+    }
+
     // Multi-symbol (no domains): only wrap plain value lists; leave the
     // system-solve `Record` shapes unevaluated (not value-shaped in Phase 1).
     const sol = ceq.solve(names);
@@ -121,16 +148,22 @@ export function evaluateSolve(
     return undefined;
   }
 
-  // Multiple domain specs → Phase 2.
-  if (domainSpecs.length > 1) return undefined;
+  // With domains present, EVERY spec must carry one. A bare-symbol spec mixed
+  // in (e.g. `Solve(eq, x, Element(y, D))`) leaves `x` unconstrained — there is
+  // no univariate or enumeration path for a free unknown — so stay inert.
+  if (domainSpecs.length !== specs.length) return undefined;
 
-  // Exactly one domain spec. Phase 1 is univariate: any extra symbol-only spec
-  // would make the problem multivariate, which is not yet supported.
-  if (specs.length !== 1) return undefined;
+  // Exactly one domain spec → Phase 1 univariate pipeline.
+  if (specs.length === 1) {
+    const result = solveOverDomain(ce, ceq, specs[0]);
+    if (result === undefined) return undefined; // undecidable → stay inert
+    return ce.function('List', result);
+  }
 
-  const result = solveOverDomain(ce, ceq, domainSpecs[0]);
-  if (result === undefined) return undefined; // undecidable → stay inert
-  return ce.function('List', result);
+  // Several domain specs → Phase 2 multi-variable enumeration.
+  const tuples = solveOverMultipleDomains(ce, ceq, specs);
+  if (tuples === undefined) return undefined; // undecidable → stay inert
+  return ce.function('List', tuples);
 }
 
 function isExpression(x: unknown): x is Expression {
@@ -187,11 +220,7 @@ export function solveOverDomain(
   // bare numeric expression, read as `= 0`) is an equation and gets a
   // symbolic-first attempt; a boolean-valued expression (`Congruent`,
   // `Divides`, `Less`, `And`, …) goes straight to enumeration.
-  let numericBody: Expression | null = null;
-  let boolPred: Expression | null = null;
-  if (isFunction(ceq, 'Equal')) numericBody = ceq.op1.sub(ceq.op2);
-  else if (ceq.type.matches('boolean')) boolPred = ceq;
-  else numericBody = ceq;
+  const { predBody, isEquation } = classifyPredicate(ceq);
 
   // The element type of the domain refines the scratch unknown's type (an
   // integer `Range` → `integer`), so `filterRootsByType` discards non-integer
@@ -200,23 +229,41 @@ export function solveOverDomain(
   const refinedType: Type = elemType ?? 'number';
 
   // 1. Symbolic solve (equations only), then membership filter.
-  if (numericBody !== null) {
+  if (isEquation) {
     const roots = symbolicRoots(ce, ceq, unknown, refinedType);
-    if (roots.length > 0) {
-      // At least one symbolic root: return the domain-filtered list and do NOT
+
+    // Phase 2.2: the symbolic trig rules return principal values only. Over a
+    // bounded domain, expand each principal root `x₀` into its full `x₀ + k·T`
+    // family (and recover the scaled-argument roots the rules miss entirely).
+    // `expandPeriodicRoots` returns `undefined` when the equation is not a
+    // periodic one amenable to expansion — then the principal roots are used
+    // as-is (today's behavior).
+    const expanded = expandPeriodicRoots(
+      ce,
+      ceq,
+      predBody,
+      unknown,
+      domain,
+      roots
+    );
+    const finalRoots = expanded ?? roots;
+
+    if (finalRoots.length > 0) {
+      // At least one root: return the domain-filtered list and do NOT
       // enumerate. Undecidable membership (`undefined`) keeps the root.
-      return roots.filter((r) =>
+      const inDomain = finalRoots.filter((r) =>
         keepInDomain(ce, domain, unknown, r, condition)
       );
+      // Assumptions and the explicit domain restrict conjunctively: also drop
+      // roots ruled out by an in-scope bound assumption on the unknown (e.g.
+      // `assume(n > 3)` alongside `n ∈ -10..10`).
+      return [...filterRootsByAssumptions(ce, inDomain, unknown)];
     }
   }
 
   // 2. Enumeration fallback.
   const count = domain.count;
   if (count === undefined || !Number.isFinite(count)) return undefined;
-
-  const predBody = numericBody ?? boolPred;
-  if (predBody === null) return undefined;
 
   // Compile the predicate as a lambda `unknown ↦ predBody`. Only a genuine
   // compilation (`success`) enables the larger budget and the float sieve; the
@@ -236,7 +283,6 @@ export function solveOverDomain(
     : MAX_SOLVE_ENUMERATION_INTERPRETED;
   if (count > budget) return undefined; // over budget → stay inert
 
-  const isEquation = numericBody !== null;
   const tol = ce.tolerance;
 
   const results: Expression[] = [];
@@ -256,7 +302,7 @@ export function solveOverDomain(
     // Exact confirmation: every sieve-passing candidate (and every candidate at
     // all, on the interpreted path) is re-checked by exact engine evaluation —
     // floats lie for large integers (`2^53`).
-    if (!confirmExact(predBody, isEquation, unknown, item)) continue;
+    if (!confirmExact(predBody, isEquation, { [unknown]: item })) continue;
 
     // Optional condition (3rd `Element` operand): drop only on a definite
     // `False`, mirroring the symbolic membership filter.
@@ -264,7 +310,505 @@ export function solveOverDomain(
 
     results.push(item);
   }
+  // Apply any in-scope bound assumptions on the unknown conjunctively. This is a
+  // post-pass over the (small) result set, NOT a per-candidate cost in the hot
+  // enumeration loop: `filterRootsByAssumptions` no-ops when nothing constrains
+  // the unknown, so the sweep above is unaffected. (Enumeration candidates are
+  // concrete domain members, so an assumption like `n > 3` is usually already
+  // implied by the domain — but not always, e.g. `n > 3` with `n ∈ 1..10`.)
+  return [...filterRootsByAssumptions(ce, results, unknown)];
+}
+
+/**
+ * Classify a canonical equation/predicate for enumeration:
+ * - an `Equal` (or a bare numeric expression read as `= 0`) is an *equation*
+ *   whose residual body (`lhs - rhs`) is tested against zero;
+ * - a boolean-valued expression (`Congruent`, `Divides`, `Less`, `And`, …) is a
+ *   *predicate* tested against `True`.
+ */
+function classifyPredicate(ceq: Expression): {
+  predBody: Expression;
+  isEquation: boolean;
+} {
+  if (isFunction(ceq, 'Equal'))
+    return { predBody: ceq.op1.sub(ceq.op2), isEquation: true };
+  if (ceq.type.matches('boolean')) return { predBody: ceq, isEquation: false };
+  return { predBody: ceq, isEquation: true };
+}
+
+/**
+ * Solve `ceq` for several unknowns, each constrained to a finite enumerable
+ * domain, by sweeping the cartesian product of the domains.
+ *
+ * There is no symbolic path for a single equation in several unknowns (the
+ * system solver needs several equations), so this is enumeration-only, per
+ * design. Returns an array of `Tuple` VALUES in spec order, iterated in
+ * lexicographic domain order (first spec outermost); or `undefined` when the
+ * problem cannot be decided (a non-finite domain, or a product over budget).
+ * An empty array is a *decision*: no solutions.
+ */
+export function solveOverMultipleDomains(
+  ce: ComputeEngine,
+  ceq: Expression,
+  specs: SolveSpec[]
+): Expression[] | undefined {
+  const { predBody, isEquation } = classifyPredicate(ceq);
+  const unknowns = specs.map((s) => s.unknown);
+
+  // Phase 3: symbolic diophantine dispatch. Before the enumeration budget check,
+  // when the equation is an integer equation and every domain is integer-valued
+  // (a bounded `Range` or the `Integers` set — not a half-bounded `Range` or a
+  // real `Interval`) and carries no extra condition, try a closed-form integer
+  // solve. It decides cases enumeration cannot reach (unbounded or over-budget
+  // integer systems), returning concrete tuples over a bounded box, a parametric
+  // family over ℤ, or an empty `List` for a proven-unsolvable equation. A return
+  // of `undefined` (not a recognized diophantine form, or an instantiation over
+  // the materialization cap) falls through to enumeration unchanged.
+  if (
+    isEquation &&
+    specs.every(
+      (s) =>
+        s.domain !== undefined &&
+        s.condition === undefined &&
+        isIntegerDomain(ce, s.domain)
+    )
+  ) {
+    // The symbolic path bypasses the deadline-checked enumeration loop, so honor
+    // the engine deadline here too — an already-elapsed deadline must abort.
+    checkDeadline(ce._deadline);
+    const dio = tryDiophantineSolve(
+      ce,
+      ceq,
+      unknowns,
+      specs.map((s) => s.domain)
+    );
+    if (dio !== undefined) return dio;
+  }
+
+  // Every domain must be finite; the PRODUCT of the counts bounds the sweep.
+  // Accumulate and bail early once the product exceeds the largest budget, so an
+  // over-budget request never materializes or sweeps anything.
+  let product = 1;
+  for (const s of specs) {
+    if (s.domain === undefined) return undefined;
+    const c = s.domain.count;
+    if (c === undefined || !Number.isFinite(c)) return undefined;
+    product *= c;
+    if (product > MAX_SOLVE_ENUMERATION_COMPILED) return undefined;
+  }
+  // A zero-count factor (e.g. an empty `Range`) makes the product empty: a
+  // decided "no solutions", not an error.
+  if (product === 0) return [];
+
+  // Compile the predicate as a multi-parameter lambda `(u₁, u₂, …) ↦ predBody`.
+  // The compiled `run` is positional (`calling === 'lambda'`), its arguments in
+  // spec order. Only a genuine compilation enables the larger budget and the
+  // float sieve; the interpreter fallback uses the exact path directly.
+  const fnLit = ce.function('Function', [
+    predBody,
+    ...unknowns.map((u) => ce.symbol(u)),
+  ]);
+  const compiled = ce._compile(fnLit);
+  const useCompiled =
+    compiled.success === true &&
+    (compiled as any).calling === 'lambda' &&
+    typeof (compiled as any).run === 'function';
+  const run = useCompiled
+    ? ((compiled as any).run as (...xs: number[]) => unknown)
+    : undefined;
+
+  const budget = useCompiled
+    ? MAX_SOLVE_ENUMERATION_COMPILED
+    : MAX_SOLVE_ENUMERATION_INTERPRETED;
+  if (product > budget) return undefined; // over the interpreted budget
+
+  // Materialize each domain's elements up front, then index the cartesian
+  // product with a plain odometer. This is bounded and safe: each domain's
+  // count individually divides the product (≤ budget), so the total stored is
+  // ≤ n · budget. Materializing also sidesteps the cost/subtlety of restarting
+  // a lazy `Range` iterator once per outer step.
+  const elems: Expression[][] = specs.map((s) => [...s.domain!.each()]);
+  const lens = elems.map((e) => e.length);
+  const n = specs.length;
+
+  const tol = ce.tolerance;
+  const results: Expression[] = [];
+  const idx = new Array<number>(n).fill(0);
+  let steps = 0;
+
+  // Odometer over the cartesian product. The LAST index advances fastest, so
+  // the FIRST spec is the outermost (slowest) loop → lexicographic domain order
+  // with the first spec varying slowest.
+  for (;;) {
+    if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+
+    const tuple = idx.map((k, d) => elems[d][k]);
+
+    // Compiled (float) sieve: a fast, inexact pre-filter over the whole tuple.
+    let sievePass = true;
+    if (run) {
+      const r = run(...tuple.map((v) => v.re));
+      sievePass = isEquation
+        ? typeof r === 'number' && Math.abs(r) <= tol
+        : r === true;
+    }
+
+    if (sievePass) {
+      const subs: Record<string, Expression> = {};
+      for (let d = 0; d < n; d++) subs[unknowns[d]] = tuple[d];
+
+      // Exact confirmation of the whole tuple — floats lie for large integers.
+      if (confirmExact(predBody, isEquation, subs)) {
+        // Per-spec conditions (3rd `Element` operand) apply to their OWN
+        // variable; drop only on a definite `False`.
+        let keep = true;
+        for (let d = 0; d < n; d++) {
+          const cond = specs[d].condition;
+          if (cond && conditionValue(cond, unknowns[d], tuple[d]) === false) {
+            keep = false;
+            break;
+          }
+        }
+        if (keep) results.push(ce.tuple(...tuple));
+      }
+    }
+
+    // Advance the odometer (last position fastest); stop when it rolls over.
+    let d = n - 1;
+    for (; d >= 0; d--) {
+      if (++idx[d] < lens[d]) break;
+      idx[d] = 0;
+    }
+    if (d < 0) break;
+  }
+
   return results;
+}
+
+//
+// Phase 2.2 — root-family expansion for periodic equations over a bounded
+// domain.
+//
+// The symbolic solver's trig rules (`UNIVARIATE_ROOTS`) return *principal*
+// values only — `sin(x) = 1/2` yields `[π/6, 5π/6]`, one period's worth — and
+// they do not fire at all on a scaled argument like `sin(2x)`. When the domain
+// is bounded, we can turn a principal root `x₀` into the full family
+// `x₀ + k·T` (T = the equation's period) that lands in the domain, and recover
+// the scaled-argument roots via a linearizing substitution.
+//
+// Conservative by construction: we expand ONLY when the unknown appears solely
+// inside trig functions of a *linear* argument (`a·x + b`, `a` a nonzero real),
+// and every family member is confirmed by exact substitution before it is kept,
+// so an imperfect period can never introduce a wrong answer.
+//
+
+// Trig heads and their base period (as a rational multiple of π): sin/cos and
+// their reciprocals repeat every 2π; tan/cot every π.
+const TRIG_2PI = new Set(['Sin', 'Cos', 'Sec', 'Csc']);
+const TRIG_PI = new Set(['Tan', 'Cot']);
+
+/** A trig occurrence of the unknown with a linear argument `a·x + b`. */
+interface TrigTerm {
+  /** Base period as a multiple of π: 2 for sin/cos/sec/csc, 1 for tan/cot. */
+  baseMult: number;
+  /** The linear coefficient `a` (exact). */
+  aExpr: Expression;
+  /** The numeric value of `a` (nonzero, finite). */
+  aNum: number;
+  /** The constant term `b` (exact, free of the unknown). */
+  bExpr: Expression;
+  /** The (shared) argument expression `a·x + b`. */
+  arg: Expression;
+}
+
+function gcdInt(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) [a, b] = [b, a % b];
+  return a || 1;
+}
+
+function lcmInt(a: number, b: number): number {
+  return Math.abs(a * b) / gcdInt(a, b);
+}
+
+/**
+ * Walk `node` and collect the trig occurrences of `unknown`.
+ *
+ * Returns:
+ * - `[]` when `node` is free of the unknown (contributes no period);
+ * - a list of `TrigTerm`s when every occurrence of the unknown sits inside a
+ *   trig function of a *linear* argument;
+ * - `undefined` when the unknown appears outside such a trig function (a bare
+ *   `x`, a polynomial term, or a trig function of a non-linear argument) — the
+ *   equation is then NOT a candidate for periodic expansion.
+ */
+function analyzePeriodic(
+  node: Expression,
+  unknown: string
+): TrigTerm[] | undefined {
+  if (!node.has(unknown)) return [];
+
+  if (isFunction(node)) {
+    const op = node.operator;
+    const baseMult = TRIG_2PI.has(op) ? 2 : TRIG_PI.has(op) ? 1 : 0;
+    if (baseMult !== 0 && node.nops === 1) {
+      const arg = node.op1;
+      // The argument must be linear in the unknown: `a·x + b`, degree exactly 1.
+      const coeffs = getPolynomialCoefficients(arg, unknown);
+      if (!coeffs || coeffs.length !== 2) return undefined;
+      const aExpr = coeffs[1];
+      const aNum = aExpr.N().re;
+      if (!Number.isFinite(aNum) || Math.abs(aNum) < 1e-12) return undefined;
+      return [{ baseMult, aExpr, aNum, bExpr: coeffs[0], arg }];
+    }
+
+    // A function containing the unknown but not itself a linear-argument trig:
+    // its operands must each be well-behaved (free of `x`, or nested trig).
+    const out: TrigTerm[] = [];
+    for (const child of node.ops) {
+      const r = analyzePeriodic(child, unknown);
+      if (r === undefined) return undefined;
+      out.push(...r);
+    }
+    return out;
+  }
+
+  // A non-function node containing the unknown is the bare symbol itself: the
+  // unknown appears outside any trig function → not expandable.
+  return undefined;
+}
+
+/**
+ * The combined period of the collected trig terms, as an exact expression plus
+ * its numeric value. A single distinct per-term period is used directly (valid
+ * for any real `a`); several distinct periods are combined by the least common
+ * multiple of their π-rational multiples, which requires integer `a` — if any
+ * coefficient is irrational the periods may be incommensurable and we decline.
+ */
+function combinedPeriod(
+  ce: ComputeEngine,
+  terms: TrigTerm[]
+): { expr: Expression; value: number } | undefined {
+  const Pi = ce.symbol('Pi');
+  const tol = 1e-9;
+
+  const periods = terms.map((t) => ({
+    value: (t.baseMult * Math.PI) / Math.abs(t.aNum),
+    baseMult: t.baseMult,
+    aNum: t.aNum,
+    aExpr: t.aExpr,
+  }));
+
+  // Distinct per-term periods (by numeric value).
+  const distinct: typeof periods = [];
+  for (const p of periods)
+    if (
+      !distinct.some(
+        (d) => Math.abs(d.value - p.value) <= tol * Math.max(1, p.value)
+      )
+    )
+      distinct.push(p);
+
+  if (distinct.length === 1) {
+    const p = distinct[0];
+    // T = baseMult·π / |a|  (exact; e.g. 2π/2 → π). Evaluate to fold the `|a|`
+    // and Divide away while staying symbolic in π.
+    const expr = ce
+      .function('Divide', [
+        ce.function('Multiply', [ce.number(p.baseMult), Pi]),
+        ce.function('Abs', [p.aExpr]),
+      ])
+      .evaluate();
+    return { expr, value: p.value };
+  }
+
+  // Several distinct periods: T = lcm of the π-rational multiples. Each term's
+  // period is (baseMult/|a|)·π; the lcm of rationals is lcm(numerators) /
+  // gcd(denominators). Requires integer `a`.
+  const fracs: Array<[num: number, den: number]> = [];
+  for (const p of distinct) {
+    const aInt = Math.round(p.aNum);
+    if (Math.abs(p.aNum - aInt) > tol || aInt === 0) return undefined;
+    let n = p.baseMult;
+    let d = Math.abs(aInt);
+    const g = gcdInt(n, d);
+    n /= g;
+    d /= g;
+    fracs.push([n, d]);
+  }
+  const lcmNum = fracs.reduce((acc, [n]) => lcmInt(acc, n), 1);
+  const gcdDen = fracs.reduce((acc, [, d]) => gcdInt(acc, d), fracs[0][1]);
+  const value = (lcmNum / gcdDen) * Math.PI;
+  const expr = ce
+    .function('Divide', [
+      ce.function('Multiply', [ce.number(lcmNum), Pi]),
+      ce.number(gcdDen),
+    ])
+    .evaluate();
+  return { expr, value };
+}
+
+/**
+ * Finite `[lo, hi]` bounding range of a domain, or `undefined` for an unbounded
+ * or non-numeric one. Both `Range` (integer/real) and `Interval` (real) are
+ * supported; known interval-like sets (`RealNumbers`, …) fall through
+ * `interval()` and are rejected for having an infinite endpoint.
+ */
+function domainBoundingRange(
+  domain: Expression
+): { lo: number; hi: number } | undefined {
+  if (isFunction(domain, 'Range')) {
+    let lo: number;
+    let hi: number;
+    if (domain.nops >= 2) {
+      lo = domain.op1.N().re;
+      hi = domain.op2.N().re;
+    } else {
+      lo = 1;
+      hi = domain.op1.N().re;
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return undefined;
+    return { lo: Math.min(lo, hi), hi: Math.max(lo, hi) };
+  }
+
+  const int = interval(domain);
+  if (int === undefined) return undefined;
+  if (!Number.isFinite(int.start) || !Number.isFinite(int.end)) return undefined;
+  return { lo: Math.min(int.start, int.end), hi: Math.max(int.start, int.end) };
+}
+
+/**
+ * Recover principal roots for a scaled-argument equation the symbolic trig
+ * rules miss (they only match `Sin(x)`, never `Sin(2x)`). When every trig term
+ * shares ONE linear argument `L = a·x + b`, the substitution `x = (u − b)/a`
+ * turns each `trig(L)` into `trig(u)`, which the solver DOES handle; its
+ * `u`-roots map back to `x = (u₀ − b)/a`. Returns `undefined` when the terms do
+ * not share a single argument (no clean linearizing substitution).
+ */
+function substitutionRoots(
+  ce: ComputeEngine,
+  ceq: Expression,
+  unknown: string,
+  terms: TrigTerm[]
+): Expression[] | undefined {
+  const arg0 = terms[0].arg;
+  if (!terms.every((t) => t.arg.isSame(arg0))) return undefined;
+
+  const a = terms[0].aExpr;
+  const b = terms[0].bExpr;
+
+  ce.pushScope();
+  try {
+    const uName = '_periodic_u';
+    ce.declare(uName, 'real');
+    const u = ce.symbol(uName);
+    // x = (u − b)/a  →  every `trig(a·x + b)` collapses to `trig(u)`.
+    const xExpr = ce.function('Divide', [ce.function('Subtract', [u, b]), a]);
+    const subEq = ceq.subs({ [unknown]: xExpr });
+    // The substitution must have eliminated the original unknown entirely.
+    if (subEq.has(unknown)) return undefined;
+    const uRoots = findUnivariateRoots(subEq, uName);
+    if (!uRoots || uRoots.length === 0) return undefined;
+    // Map each `u`-root back: x = (u₀ − b)/a (exact).
+    return uRoots.map((u0) =>
+      ce.function('Divide', [ce.function('Subtract', [u0, b]), a]).evaluate()
+    );
+  } finally {
+    ce.popScope();
+  }
+}
+
+/**
+ * Expand the principal roots of a periodic equation into the full root family
+ * that lands in a bounded domain.
+ *
+ * Returns `undefined` when the equation is not a candidate for expansion (the
+ * unknown appears outside a linear-argument trig function, the domain is
+ * unbounded, or the period is indeterminable) — the caller then uses the
+ * principal roots as-is. Otherwise returns the exact family members, sorted
+ * ascending and de-duplicated (membership + condition filtering is applied by
+ * the caller). If the family would be larger than `MAX_PERIODIC_EXPANSION`, the
+ * (unexpanded) principal roots are returned instead — the honest degradation,
+ * since staying inert would lose the roots we already have.
+ */
+function expandPeriodicRoots(
+  ce: ComputeEngine,
+  ceq: Expression,
+  predBody: Expression,
+  unknown: string,
+  domain: Expression,
+  symbolicRootList: ReadonlyArray<Expression>
+): Expression[] | undefined {
+  // Detect the periodic structure on the residual `f(x) = lhs − rhs`.
+  const terms = analyzePeriodic(predBody, unknown);
+  if (terms === undefined || terms.length === 0) return undefined;
+
+  const bounds = domainBoundingRange(domain);
+  if (bounds === undefined) return undefined; // unbounded → cannot expand
+
+  const period = combinedPeriod(ce, terms);
+  if (period === undefined) return undefined;
+  const { expr: T, value: Tnum } = period;
+  if (!Number.isFinite(Tnum) || Tnum <= 0) return undefined;
+
+  // Principal roots: the symbolic solver's (a = 1, direct-argument) roots when
+  // it found any, else the scaled-argument substitution.
+  let principal: Expression[] = [...symbolicRootList];
+  if (principal.length === 0) {
+    principal = substitutionRoots(ce, ceq, unknown, terms) ?? [];
+    if (principal.length === 0) return undefined;
+  }
+
+  // Safety cap: never materialize an unbounded family (a `[0, 10^9]` domain
+  // must not generate ~10^8 roots). Degrade to the principal roots.
+  const span = bounds.hi - bounds.lo;
+  if (span / Tnum > MAX_PERIODIC_EXPANSION) return principal;
+
+  const tol = ce.tolerance;
+  const out: Expression[] = [];
+  for (const x0 of principal) {
+    const x0num = x0.N().re;
+    if (!Number.isFinite(x0num)) {
+      // A symbolic/non-finite principal root cannot be positioned in the
+      // domain; keep it as-is and let membership filtering decide.
+      out.push(x0);
+      continue;
+    }
+    const kmin = Math.ceil((bounds.lo - x0num) / Tnum - tol);
+    const kmax = Math.floor((bounds.hi - x0num) / Tnum + tol);
+    for (let k = kmin; k <= kmax; k++) {
+      const member =
+        k === 0
+          ? x0
+          : ce
+              .function('Add', [
+                x0,
+                ce.function('Multiply', [ce.number(k), T]),
+              ])
+              .evaluate();
+      // Confirm by exact substitution — guards an imperfect period and never
+      // admits a wrong answer.
+      if (predBody.subs({ [unknown]: member }).evaluate().isEqual(0) !== true)
+        continue;
+      out.push(member);
+    }
+  }
+
+  // Sort ascending by numeric value, then drop duplicates (e.g. two principal
+  // roots that coincide modulo the period).
+  out.sort((p, q) => p.N().re - q.N().re);
+  const deduped: Expression[] = [];
+  for (const e of out) {
+    const last = deduped[deduped.length - 1];
+    if (
+      last &&
+      (last.isSame(e) || Math.abs(last.N().re - e.N().re) <= tol)
+    )
+      continue;
+    deduped.push(e);
+  }
+  return deduped;
 }
 
 /**
@@ -288,6 +832,70 @@ function symbolicRoots(
   }
 }
 
+// Assumption operators that carry a filterable constraint on a single symbol.
+// Bound assumptions are stored *normalized* to `Less`/`LessEqual` (with the
+// subject on the lhs and `0` on the rhs — `assume.ts`), disequalities as
+// `NotEqual`, and inert set memberships as `Element`/`NotElement`; equalities
+// (`Equal`) are intentionally excluded (they assign a value, not a filter, and
+// `verify()` has known quirks with assumed equalities — repo memory).
+const FILTERABLE_ASSUMPTION_OPS = new Set([
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'NotEqual',
+  'Element',
+  'NotElement',
+]);
+
+/**
+ * Drop roots that a stored assumption definitely rules out.
+ *
+ * For each assumption in the current context whose ONLY free symbol is
+ * `unknown` and whose operator is a filterable constraint (inequality,
+ * disequality, or set membership), substitute each root and evaluate; a root is
+ * dropped ONLY on a definite `False`. `True` and undecidable (anything that does
+ * not reduce to `False`) keep the root — the same conservative Kleene posture as
+ * `keepInDomain`/`validateRoots`, so an undecidable bound (e.g. a symbolic root
+ * whose sign the engine cannot settle) never silently loses a valid solution.
+ *
+ * Assumptions mentioning any other free symbol are skipped: substituting the
+ * root would leave them symbolic (undecidable), so they can never decide a drop.
+ *
+ * This reads whatever assumptions are in effect at call time; because
+ * assumptions are lexically scoped (`pushScope`/`popScope`), a popped assumption
+ * is simply not seen here — no explicit teardown is needed.
+ */
+export function filterRootsByAssumptions(
+  ce: ComputeEngine,
+  roots: ReadonlyArray<Expression>,
+  unknown: string
+): ReadonlyArray<Expression> {
+  const assumptions = ce.context?.assumptions;
+  if (!assumptions) return roots;
+
+  // Collect (once) the assumptions that constrain ONLY the unknown.
+  const relevant: Expression[] = [];
+  for (const [a, truth] of assumptions.entries()) {
+    if (truth !== true) continue;
+    const op = a.operator;
+    if (!op || !FILTERABLE_ASSUMPTION_OPS.has(op)) continue;
+    const free = a.unknowns;
+    if (free.length !== 1 || free[0] !== unknown) continue;
+    relevant.push(a);
+  }
+  if (relevant.length === 0) return roots;
+
+  return roots.filter((root) => {
+    const value = root.evaluate();
+    for (const a of relevant) {
+      const v = a.subs({ [unknown]: value }).evaluate();
+      if (sym(v) === 'False') return false; // definite contradiction → drop
+    }
+    return true;
+  });
+}
+
 /**
  * Keep a symbolic root if the domain membership is `True` or undecidable
  * (`undefined`); drop it only on a definite `False`. Same conservative posture
@@ -301,24 +909,36 @@ function keepInDomain(
   condition: Expression | undefined
 ): boolean {
   const value = root.evaluate();
-  if (domain.contains(value) === false) return false;
+  let contained = domain.contains(value);
+  // A concrete-valued root that the (exact) membership test cannot decide —
+  // e.g. an expanded periodic root `2π` against an integer `Range`'s step grid,
+  // which `contains` leaves `undefined` for a symbolic target — is decided
+  // numerically. The numeric fallback only flips an `undefined` when the value
+  // is a finite real number; a truly symbolic value (with free variables) still
+  // yields `NaN` and stays kept, per the conservative posture.
+  if (contained === undefined) {
+    const n = value.N();
+    if (Number.isFinite(n.re) && n.im === 0) contained = domain.contains(n);
+  }
+  if (contained === false) return false;
   if (condition && conditionValue(condition, unknown, value) === false)
     return false;
   return true;
 }
 
 /**
- * Exact confirmation of a candidate value: substitute and evaluate with the
- * engine (not the compiled float). For an equation, the residual must be
- * exactly zero; for a boolean predicate, it must evaluate to `True`.
+ * Exact confirmation of a candidate: substitute the unknown(s) and evaluate
+ * with the engine (not the compiled float). For an equation, the residual must
+ * be exactly zero; for a boolean predicate, it must evaluate to `True`. The
+ * substitution is a record so the same check serves the univariate path (one
+ * unknown) and the multi-variable path (a whole candidate tuple at once).
  */
 function confirmExact(
   predBody: Expression,
   isEquation: boolean,
-  unknown: string,
-  value: Expression
+  subs: Record<string, Expression>
 ): boolean {
-  const v = predBody.subs({ [unknown]: value }).evaluate();
+  const v = predBody.subs(subs).evaluate();
   if (isEquation) return v.isEqual(0) === true;
   return sym(v) === 'True';
 }

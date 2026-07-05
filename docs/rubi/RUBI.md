@@ -713,6 +713,74 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     regresses 4.1 Sine (−20, csc-binomial sine families) — so binomial routing
     awaits a sec-specific (not global) fix. `cot` wins appear only in `--rubi`
     corpus runs with `RUBI_COFN_COT` once 4.3 Tangent is bundled.
+- **Phase R9 — poly×trig + nonlinear-argument families LANDED (2026-07-04).**
+  Two self-contained driver capabilities closed the bulk of the 4.1.10 / 4.1.11
+  / 4.1.12 residual (`src/compute-engine/rubi/{rubi-utils,driver}.ts` only; no
+  corpus/bundle change). **Numbers (seed 5, `--rubi`).** 4.1 Sine 120:
+  **98 → 106** correct (+8), **0 genuine wrong / 0 not-evaluable / 0
+  inconclusive**; 400: **293 → 314** (+21), 3 wrong (the documented
+  Hypergeometric2F1/AppellF1/`√(Sin²)=|Sin|` verification-false-wrongs
+  #690/#205/#116 — unchanged), 0 not-evaluable, 0 inconclusive. No regressions:
+  4.5 Secant 120 = 56, ch1 200 = 180/6, ch2 60 = 33/1/3, ch6 60 = 17/0/1 (both
+  new levers are strict no-ops off their trig shape). Rubi unit suites green
+  (+13 focused tests in `rubi-utils.test.ts`).
+  - **Gap 1 — poly×cos stranded (the big win).** The sine-chapter by-parts
+    reduction `∫(c+d·x)^m·sin → −(c+d·x)^m·cos/f + (d·m/f)∫(c+d·x)^(m-1)·cos`
+    (4.1.10 #1) bottoms out in a `poly·cos` sub-integral whose closing rule
+    lives in the UNBUNDLED Cosine chapter. `cosBaseToSin`/`unifyInertTrig` only
+    reflected the base of a `(a+b·cos)^n` power (x-free coefficient), so
+    `∫(c+d·x)^m·cos`, `∫cos/(c+d·x)^k` were never reflected and stranded — hence
+    `∫x·cos(a+b·x)` returned null while `∫x·sin` reduced then stalled. New
+    `standaloneCosineShift` (rubi-utils) is Rubi's `DeactivateTrig` standalone-
+    cosine identity `cos[e+f·x] → sin[e+π/2+f·x]` as a full-tree LEAF rewrite,
+    gated to fire only when cosine is the SOLE trig head (any partner sin/tan/
+    cot/sec/csc ⇒ mixed cross-pair, left to the two-factor clauses). Runs in
+    `intRec` after `unifyInertTrig`. Closes the whole poly×cos class incl. the
+    `∫cos/(c+d·x)^k` Si/Ci case (#156), and — bonus — three R3′ `(e·cos)^(7/2)/
+    (a+b·sin)ⁿ` / `√(g·cos)·sin³/(a+b·sin)` cases (#604/#609/#1395) that route
+    cos→sin. 4.1.10 (120) 1→3 correct, 4.1.11 0→1.
+  - **Gap 2 — nonlinear-argument sin/cos.** `∫xᵐ·sin(a+b·xⁿ)` (4.1.11/4.1.12):
+    Rubi routes via TrigToExp (4.1.12 #5/#15/#29) to `∫xᵐ·E^(k·xⁿ)`, closed by
+    the Chapter-2 incomplete-Γ kernel — exactly like ch6's `Sinh[a+b·xⁿ]`. CE's
+    structural matcher does not bind those Subst / `(e+f·x)ⁿ`-linear-inner /
+    `Simplify[(m+1)/n]` rules, so a driver fallback (`expandTrigToExp` +
+    `sinCosArgNonlinearExpandableQ`) mirrors the existing hyperbolic→exp
+    fallback: rewrite inert sin/cos → E^(±i·w), expand, re-integrate. Gated to a
+    nonlinear MONOMIAL argument (`c+d·xᵏ`, k≠1). Closes the `x^m·(c·sin³)^(1/3)`
+    cube-root form (#328/#329) and the `xᵐ·(a+b·sin(c+d·xⁿ))ᵖ` family. 4.1.12
+    (120) 1→3 correct.
+  - **not-evaluable held at 0 by a fallback self-check.** The exp route also
+    produces a symbolically-correct antiderivative for `∫x·sin(a+b/x)` (complex-
+    argument `ExpIntegralEi`) and `∫sin(a+b·xⁿ)/x^(2n+1)` (negative-order
+    incomplete Γ) that CE **cannot evaluate numerically** → the verifier grades
+    it not-evaluable. Rather than gate structurally (the discriminator is not
+    structural — `(a+b·sin(x³))²/x⁵` #76 has a negative x-power yet verifies,
+    `x⁴·cos·sin²` #32 has a concrete positive exponent yet does not), the
+    fallback runs `numericallyEvaluable(F, x)` (one random sample) and DECLINES
+    the result if it is not finite — leaving the problem cleanly unsolved. This
+    recovered 5 verifiable concrete/negative-power cases (#54/#62/#70/#76/#99 at
+    400) while keeping #32/#104/#150 out of not-evaluable.
+  - **Unintegrable census (correctly inert, not gaps).** 120: 4.1.10 #167/#290,
+    4.1.12 #285/#307 (Rubi returns `Unintegrable`). 400: 4.1.10 = 3, 4.1.12 = 4
+    Rubi-Unintegrable of the section unsolved.
+  - **What remains (maps to existing / new rungs).** 4.1.11 residual (all 6
+    genuine gaps: `∫sin(c+d·x)/(a+b·xⁿ)` rational-denominator × sin) and much of
+    4.1.10 (#30/#112/#197/#248/#294, `(c+d·x)^m·mixed-trig/(a+b·sin)` Si/Ci
+    chains, up to 48 Rubi steps) need SinIntegral/CosIntegral ROUTING (the Si/Ci
+    KERNELS work — #156 verified — but the `∫sin/(a+b·x)` rules #23/#25–28 use
+    Subst the matcher declines): a new **Si/Ci-routing** rung. 4.1.12 #156/#172/
+    #187 need the `(e+f·x)ⁿ`/`√(c+d·x)` linear-inner Fresnel routing. #53 (23
+    steps, deep half-integer Fresnel) / #248 / #294 are R3′-class. #93 is a
+    csc^(−1/2)=sin^(1/2) cancellation (R5/`TrigSimplify`). **Kernel gaps found
+    (reported, NOT hacked): complex-argument `ExpIntegralEi` and negative-order
+    incomplete Γ do not evaluate numerically** — the blocker for the exp-route
+    #104/#150 (and why they stay unsolved not not-evaluable). **Not pursued
+    (broad blast radius, gated OFF):** teaching the shared `ExpandTrigReduce`
+    helper to reduce circular `Sin^n` (not just hyperbolic) closes `∫(c+d·x)^m·
+    sin^n` #17/#53/#87 but in a heavy exp/Erf form that verifies past the 8 s
+    budget (inconclusive, not correct) and preempts trig-form rules chapter-
+    wide — deferred to a proper trig `TrigReduce` (multiple-angle, elementary
+    form) or a larger verification budget.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

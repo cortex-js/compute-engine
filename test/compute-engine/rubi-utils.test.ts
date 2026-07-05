@@ -14,6 +14,10 @@ import {
   deactivateTrig,
   activateTrig,
   cofunctionShift,
+  standaloneCosineShift,
+  expandTrigToExp,
+  sinCosArgNonlinearExpandableQ,
+  numericallyEvaluable,
 } from '../../src/compute-engine/rubi/rubi-utils';
 import { loadIntegrationRules } from '../../src/integration-rules';
 import type { Ctx } from '../../src/compute-engine/rubi/rubi-utils';
@@ -455,4 +459,128 @@ describe('cofunction shift — end-to-end secant integrals (shipped bundle)', ()
   test('closes 1/sec^(3/2)', () =>
     expect(closes('\\frac{1}{\\sec(x)^{3/2}}')).toBe(true));
   test('closes sec^3', () => expect(closes('\\sec(x)^3')).toBe(true));
+});
+
+// R9: standalone-cosine leaf shift for poly·cos products. cosBaseToSin/
+// unifyInertTrig only reflected the base of a (a+b·cos)^n power (x-free coef);
+// this generalizes cos→sin[+π/2] to a full-tree leaf rewrite so ∫(c+d·x)^m·cos
+// and ∫cos/(c+d·x)^k route to the sine chapter (Rubi has no Cosine chapter).
+describe('standalone-cosine leaf shift (poly·cos, R9)', () => {
+  const arg = ['Add', 'a', ['Multiply', 'b', 'x']] as Json; // a + b·x
+  const sameNumerically = (a: Expression, b: Expression): boolean => {
+    for (const xv of [0.3, 0.7, 1.2]) {
+      const subs = { a: 0.4, b: 1.1, c: 0.9, d: 1.3, x: xv };
+      const av = activateTrig(ce, a).subs(subs).N().re;
+      const bv = activateTrig(ce, b).subs(subs).N().re;
+      if (typeof av !== 'number' || typeof bv !== 'number') return false;
+      if (Math.abs(av - bv) > 1e-8 * Math.max(1, Math.abs(bv))) return false;
+    }
+    return true;
+  };
+
+  test('reflects x-dependent-coefficient cos (poly·cos), value-preserving', () => {
+    const polyCos = ce.box(['Multiply', ['Power', 'x', 2], ['cos', arg]] as any);
+    const shifted = standaloneCosineShift(ce, polyCos, 'x');
+    expect(shifted.toString().includes('cos')).toBe(false);
+    expect(shifted.toString().includes('sin')).toBe(true);
+    expect(sameNumerically(shifted, polyCos)).toBe(true);
+  });
+
+  test('reflects cos/(c+d·x)^k, value-preserving', () => {
+    const q = ce.box([
+      'Divide',
+      ['cos', arg],
+      ['Power', ['Add', 'c', ['Multiply', 'd', 'x']], 2],
+    ] as any);
+    const shifted = standaloneCosineShift(ce, q, 'x');
+    expect(shifted.toString().includes('cos')).toBe(false);
+    expect(sameNumerically(shifted, q)).toBe(true);
+  });
+
+  test('no-op when a partner trig head is present (mixed sin·cos)', () => {
+    const mixed = ce.box(['Multiply', ['sin', arg], ['cos', arg]] as any);
+    expect(standaloneCosineShift(ce, mixed, 'x')).toBe(mixed);
+  });
+
+  test('no-op for a non-linear-argument cosine (cos(x²))', () => {
+    const nonlinear = ce.box(['Multiply', 'x', ['cos', ['Power', 'x', 2]]] as any);
+    expect(standaloneCosineShift(ce, nonlinear, 'x')).toBe(nonlinear);
+  });
+
+  test('no-op when no cosine present', () => {
+    const s = ce.box(['Power', ['sin', arg], 2] as any);
+    expect(standaloneCosineShift(ce, s, 'x')).toBe(s);
+  });
+});
+
+// R9: trig → exponential fallback for nonlinear-argument sin/cos (4.1.11/4.1.12).
+describe('trig → exponential fallback (nonlinear arguments, R9)', () => {
+  const xn = ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 'n']]] as Json; // a+b·xⁿ
+
+  test('gate accepts xᵐ·sin(a+b·xⁿ), declines linear-argument sin', () => {
+    const nonlin = ce.box(['Multiply', ['Power', 'x', 2], ['sin', xn]] as any);
+    expect(sinCosArgNonlinearExpandableQ(nonlin, 'x')).toBe(true);
+    const lin = ce.box([
+      'Multiply',
+      ['Power', 'x', 2],
+      ['sin', ['Add', 'a', ['Multiply', 'b', 'x']]],
+    ] as any);
+    expect(sinCosArgNonlinearExpandableQ(lin, 'x')).toBe(false);
+  });
+
+  test('gate declines a concrete-negative argument exponent (sin(a+b/x))', () => {
+    const inv = ce.box(['Multiply', 'x', ['sin', ['Add', 'a', ['Divide', 'b', 'x']]]] as any);
+    expect(sinCosArgNonlinearExpandableQ(inv, 'x')).toBe(false);
+  });
+
+  test('expandTrigToExp rewrites sin(a+b·xⁿ) to an exp sum (no trig head left)', () => {
+    const orig = ce.box(['sin', xn] as any);
+    const r = expandTrigToExp(ce, orig);
+    expect(r.toString().toLowerCase().includes('sin(')).toBe(false);
+  });
+
+  test('numericallyEvaluable is true for a finite exp-form result, false for a complex Ei', () => {
+    const finite = ce.parse('x^2 e^{-x}'); // evaluates fine
+    expect(numericallyEvaluable(finite, 'x')).toBe(true);
+    const ei = ce.parse('\\operatorname{ExpIntegralEi}(i b / x)'); // CE leaves symbolic
+    expect(numericallyEvaluable(ei, 'x')).toBe(false);
+  });
+});
+
+// R9 end-to-end: the shipped bundle closes the poly·cos and nonlinear-argument
+// families, and declines the complex-Ei case (leaves it unsolved, not wrong).
+describe('R9 end-to-end (shipped bundle)', () => {
+  let engine: ComputeEngine;
+  beforeAll(() => {
+    engine = new ComputeEngine();
+    loadIntegrationRules(engine);
+  });
+  const closes = (latex: string): boolean => {
+    const integ = engine.parse(latex);
+    const F = engine.box(['Integrate', integ, 'x']).evaluate();
+    if (F.operator === 'Integrate') return false;
+    for (const xv of [0.4, 0.9, 1.3]) {
+      const h = 1e-6;
+      const fp = (v: number) => F.subs({ a: 0.5, b: 1.2, x: v }).N().re as number;
+      const d = (fp(xv + h) - fp(xv - h)) / (2 * h);
+      const f = integ.subs({ a: 0.5, b: 1.2, x: xv }).N().re as number;
+      if (typeof d !== 'number' || typeof f !== 'number') return false;
+      if (Math.abs(d - f) > 1e-4 * Math.max(1, Math.abs(f))) return false;
+    }
+    return true;
+  };
+  const stayInert = (latex: string): boolean => {
+    const integ = engine.parse(latex);
+    const F = engine.box(['Integrate', integ, 'x']).evaluate();
+    return F.operator === 'Integrate';
+  };
+
+  test('closes ∫x·cos(a+b·x)', () =>
+    expect(closes('x \\cos(a+b x)')).toBe(true));
+  test('closes ∫x²·cos(a+b·x)', () =>
+    expect(closes('x^2 \\cos(a+b x)')).toBe(true));
+  test('closes ∫x²·sin(a+b·x) (recurses through the cos sub-integral)', () =>
+    expect(closes('x^2 \\sin(a+b x)')).toBe(true));
+  test('declines ∫x·sin(a+b/x) (complex-Ei, unverifiable) rather than mis-solving', () =>
+    expect(stayInert('x \\sin(a+b/x)')).toBe(true));
 });

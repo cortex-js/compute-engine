@@ -26,11 +26,16 @@ import {
   hasActiveTrig,
   deactivateTrig,
   unifyInertTrig,
+  standaloneCosineShift,
   activateTrig,
   cofunctionShift,
   reciprocalToPower,
   containsHyperbolic,
   expandHyperbolicToExp,
+  containsInertSinCos,
+  expandTrigToExp,
+  sinCosArgNonlinearExpandableQ,
+  numericallyEvaluable,
   foldLnExponentialE,
   functionOfExponentialSubstitution,
   sinhCoshArgsPolynomialQ,
@@ -357,6 +362,18 @@ export class RubiDriver {
       if (unified !== integrand) integrand = toTimesPower(ce, unified);
     }
 
+    // Standalone-cosine leaf reflection for poly·cos products (∫(c+d·x)^m·cos,
+    // ∫cos/(c+d·x)^k): the sine-chapter by-parts reduction bottoms out in such a
+    // cos sub-integral whose closing rule lives in the unbundled Cosine chapter.
+    // `standaloneCosineShift` maps cos→sin[+π/2] as a full-tree leaf identity
+    // when cosine is the sole trig head — generalizing unifyInertTrig's
+    // base-only cos→sin — so the sub-integral re-enters the sine rules. No-op
+    // for mixed cross-pair forms (other trig heads present).
+    if (this.trigActive) {
+      const cosShifted = standaloneCosineShift(ce, integrand, variable);
+      if (cosShifted !== integrand) integrand = toTimesPower(ce, cosShifted);
+    }
+
     // Collect uncollected polynomial factors (Σ Coeff·x^k with x-free
     // coefficients). Rule RHSs emit these as huge distributed sums — CE's
     // canonical mul re-distributes (Σ)·x during RHS construction, undoing
@@ -623,6 +640,42 @@ export class RubiDriver {
           depth + 1
         );
         if (F !== null && !F.has('Integrate'))
+          return this.cleanExpansionResult(F);
+      }
+    }
+
+    // ---- trig → exponential fallback (nonlinear arguments) -------------
+    // The direct analog of the hyperbolic→exp fallback for the 4.1.11/4.1.12
+    // nonlinear-argument sine families: `∫xᵐ·sin(a+b·xⁿ)`, `∫x·sin(a+b/x)`.
+    // Rubi routes these through TrigToExp (rules 4.1.12 #5/#15/#29) to
+    // `∫xᵐ·E^(k·xⁿ)`, closed by the Chapter-2 incomplete-Γ kernel; CE's matcher
+    // does not bind those Subst/linear-inner rules, so rewrite sin/cos → E^(±i·w)
+    // here and re-integrate. Gated to a sin/cos of a NONLINEAR monomial argument
+    // (linear-argument sin/cos never reaches this — the rules close it first;
+    // non-monomial/quadratic arguments are declined). The expanded form has no
+    // trig heads, so it cannot re-enter here.
+    if (
+      containsInertSinCos(integrand) &&
+      sinCosArgNonlinearExpandableQ(integrand, variable)
+    ) {
+      const expanded = expandTrigToExp(ce, integrand);
+      if (!containsInertSinCos(expanded)) {
+        const F = this.intRec(
+          recanonicalize(ce, expanded),
+          variable,
+          depth + 1
+        );
+        // Take the exp-route antiderivative only if it is numerically
+        // EVALUABLE: `∫x·sin(a+b/x)` → complex `ExpIntegralEi`, `∫sin(a+b·xⁿ)/
+        // x^(2n+1)` → negative-order incomplete Γ, etc. produce a result that is
+        // symbolically an antiderivative but which CE cannot numerically
+        // evaluate, so it would verify as an unhelpful not-evaluable. Declining
+        // it leaves the problem cleanly unsolved (a future Si/Ci/Ei-kernel rung).
+        if (
+          F !== null &&
+          !F.has('Integrate') &&
+          numericallyEvaluable(F, variable)
+        )
           return this.cleanExpansionResult(F);
       }
     }
