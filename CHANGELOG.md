@@ -164,8 +164,18 @@
     "Combine powers with the same base: xⁿ·xᵐ = xⁿ⁺ᵐ", …); other rules get
     a readable fallback derived from the rule id. `registerStepLabels()`
     lets a host application override or extend the descriptions.
-  - Explanations for `solve()` and derivatives are planned; the `solve()`
-    rule templates already carry stable `solve.*` ids in preparation.
+  - **`expr.explain('solve')` traces equation solving.** Step values are
+    *equations* — the state after each phase — so the chain reads like
+    textbook working: `2x+1=5` → *Move all terms to one side* `2x-4=0` →
+    *Isolate the unknown* `x=2`. The trace covers the solver's algorithmic
+    phases (clearing denominators, squaring both sides, substitutions like
+    `u = eˣ` with back-substitution, zero-product factoring, the quadratic
+    formula, checking candidates and rejecting extraneous roots) and the
+    root-template rules, which now carry stable `solve.*` ids.
+    `explain('solve').result` is a `List` of the same roots `solve()`
+    returns; the unknown is inferred or passed via `options.variable`.
+    Systems of equations are not traced yet.
+  - Explanations for derivatives (`explain('D')`) are planned.
 
 ### Solving
 

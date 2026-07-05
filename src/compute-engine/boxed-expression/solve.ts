@@ -1,10 +1,11 @@
-import { matchAnyRules } from './rules';
+import { matchAnyRules, matchAnyRulesWithSteps } from './rules';
 import { expand } from './expand';
 import type {
   Expression,
   BoxedSubstitution,
   IComputeEngine as ComputeEngine,
   Rule,
+  RuleSteps,
 } from '../global-types';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
 import {
@@ -59,6 +60,53 @@ function filter(sub: BoxedSubstitution): boolean {
     if (k !== 'x' && k !== '_x' && v.has('_x')) return false;
   }
   return true;
+}
+
+//
+// ── Solve trace ─────────────────────────────────────────────────────
+//
+// `expr.explain('solve')` threads an optional `RuleSteps` accumulator
+// through `findUnivariateRoots` and its helpers. The trace is a pure
+// observation channel: every recording is guarded on the accumulator being
+// present, and recording never affects control flow or results — the plain
+// `solve()` path passes no accumulator and allocates nothing.
+//
+// Step values are *equations*: the state of the equation after the step
+// (`Equal(f, 0)` while solving, `Equal(x, root)` for candidate roots), so a
+// student reads `2x+1=5` → `2x-4=0` → `x=2`.
+//
+
+/** Record one narrative step. `value` is the equation state after the step. */
+function traceStep(
+  trace: RuleSteps | undefined,
+  because: string,
+  value: Expression
+): void {
+  trace?.push({ value, because });
+}
+
+/** The equation `f = 0`, with any internal `_x` unknown displayed as `x`. */
+function asEquation(f: Expression, x: string): Expression {
+  const ce = f.engine;
+  if (f.has('_x')) f = f.subs({ _x: ce.symbol(x) });
+  return ce.function('Equal', [f, ce.Zero]);
+}
+
+/** The candidate roots as equations: `x = r` for a single root, a `List` of
+ * `x = rᵢ` equations otherwise.
+ * @internal exported for `expr.explain('solve')` (explain.ts) */
+export function rootsAsEquations(
+  ce: ComputeEngine,
+  x: string,
+  roots: ReadonlyArray<Expression>
+): Expression {
+  const eqs = roots.map((r) =>
+    ce.function('Equal', [
+      ce.symbol(x),
+      r.has('_x') ? r.subs({ _x: ce.symbol(x) }) : r,
+    ])
+  );
+  return eqs.length === 1 ? eqs[0] : ce.function('List', eqs);
 }
 
 export const UNIVARIATE_ROOTS: Rule[] = [
@@ -850,7 +898,8 @@ function transformSqrtLinearEquation(
  */
 function solveSingleSqrtEquation(
   expr: Expression,
-  variable: string
+  variable: string,
+  trace?: RuleSteps
 ): ReadonlyArray<Expression> | null {
   const ce = expr.engine;
 
@@ -921,7 +970,9 @@ function solveSingleSqrtEquation(
   if (squared.has(variable) === false) return null;
   // Solve the sqrt-free polynomial; extraneous roots from squaring are removed
   // by the caller's validation against the original equation.
-  return findUnivariateRoots(squared.simplify(), variable);
+  const sqrtFree = squared.simplify();
+  traceStep(trace, 'solve.square-both-sides', asEquation(sqrtFree, variable));
+  return findUnivariateRoots(sqrtFree, variable);
 }
 
 /**
@@ -940,7 +991,8 @@ function solveSingleSqrtEquation(
  */
 function solveTwoSqrtEquation(
   expr: Expression,
-  variable: string
+  variable: string,
+  trace?: RuleSteps
 ): Expression[] | null {
   if (!isFunction(expr, 'Add')) return null;
 
@@ -1055,14 +1107,30 @@ function solveTwoSqrtEquation(
     if (gSign === 1) {
       // Use g on the left: √g = e - fSign·√f
       // For now, just swap the variables
-      return solveTwoSqrtEquationCore(ce, gExpr, fExpr, eExpr, fSign, variable);
+      return solveTwoSqrtEquationCore(
+        ce,
+        gExpr,
+        fExpr,
+        eExpr,
+        fSign,
+        variable,
+        trace
+      );
     }
     // Both negative: -√f - √g = e, i.e., √f + √g = -e
     // This only has solutions if -e ≥ 0 and both sqrts can equal parts of it
     return null;
   }
 
-  return solveTwoSqrtEquationCore(ce, fExpr, gExpr, eExpr, gSign, variable);
+  return solveTwoSqrtEquationCore(
+    ce,
+    fExpr,
+    gExpr,
+    eExpr,
+    gSign,
+    variable,
+    trace
+  );
 }
 
 /**
@@ -1074,7 +1142,8 @@ function solveTwoSqrtEquationCore(
   gExpr: Expression,
   eExpr: Expression,
   gSign: number,
-  variable: string
+  variable: string,
+  trace?: RuleSteps
 ): Expression[] | null {
   // We have: √f = e - gSign·√g
   // Square both sides: f = e² - 2·e·gSign·√g + g
@@ -1095,11 +1164,21 @@ function solveTwoSqrtEquationCore(
 
   // Final equation: (f - e² - g)² - 4·e²·g = 0
   const finalEquation = leftSquared.sub(rightSide).simplify();
+  traceStep(
+    trace,
+    'solve.square-both-sides',
+    asEquation(finalEquation, variable)
+  );
 
   // Solve the polynomial equation
   const solutions = findUnivariateRoots(finalEquation, variable);
 
   if (solutions.length === 0) return null;
+  traceStep(
+    trace,
+    'solve.candidates',
+    rootsAsEquations(ce, variable, solutions)
+  );
 
   // Validate solutions against original constraints:
   // 1. f(x) ≥ 0 (for √f to be real)
@@ -1133,6 +1212,17 @@ function solveTwoSqrtEquationCore(
     }
   }
 
+  if (trace && validSolutions.length < solutions.length) {
+    const rejected = solutions.filter(
+      (s) => !validSolutions.some((v) => v.isSame(s))
+    );
+    traceStep(
+      trace,
+      'solve.validate-roots',
+      rootsAsEquations(ce, variable, rejected)
+    );
+  }
+
   return validSolutions.length > 0 ? validSolutions : null;
 }
 
@@ -1148,7 +1238,8 @@ function solveTwoSqrtEquationCore(
  */
 function solveNestedSqrtEquation(
   expr: Expression,
-  variable: string
+  variable: string,
+  trace?: RuleSteps
 ): Expression[] | null {
   if (!isFunction(expr, 'Add')) return null;
 
@@ -1256,6 +1347,27 @@ function solveNestedSqrtEquation(
   const aSquared = aExpr.mul(aExpr);
   const uEquation = substitutedArg.sub(aSquared).simplify();
 
+  if (trace) {
+    // Display the internal substitution symbol under a readable name
+    const uDisplay = ['u', 't', 'w', 's', 'v'].find((n) => n !== variable)!;
+    traceStep(
+      trace,
+      'solve.substitute',
+      ce.function('Equal', [
+        ce.symbol(uDisplay),
+        ce.function('Sqrt', [ce.symbol(variable)]),
+      ])
+    );
+    traceStep(
+      trace,
+      'solve.substituted-equation',
+      asEquation(
+        uEquation.subs({ [uSymbolName]: ce.symbol(uDisplay) }),
+        uDisplay
+      )
+    );
+  }
+
   // Solve for u
   ce.pushScope();
   ce.declare(uSymbolName, { type: 'real' });
@@ -1291,6 +1403,13 @@ function solveNestedSqrtEquation(
     const xVal = uVal.mul(uVal).simplify();
     xSolutions.push(xVal);
   }
+
+  if (xSolutions.length > 0)
+    traceStep(
+      trace,
+      'solve.back-substitute',
+      rootsAsEquations(ce, variable, xSolutions)
+    );
 
   return xSolutions.length > 0 ? xSolutions : null;
 }
@@ -1355,7 +1474,8 @@ function rationalExponent(e: Expression): [number, number] | null {
  */
 function solveByRationalPowerSubstitution(
   expr: Expression,
-  x: string
+  x: string,
+  trace?: RuleSteps
 ): ReadonlyArray<Expression> | null {
   const ce = expr.engine;
 
@@ -1425,12 +1545,26 @@ function solveByRationalPowerSubstitution(
     return node;
   };
 
-  const uRoots = findUnivariateRoots(rewrite(expr), uName);
+  const uExpr = rewrite(expr);
+  if (trace) {
+    traceStep(
+      trace,
+      'solve.substitute',
+      ce.function('Equal', [
+        u,
+        ce.symbol(x).pow(ce.number(1).div(ce.number(d))),
+      ])
+    );
+    traceStep(trace, 'solve.substituted-equation', asEquation(uExpr, uName));
+  }
+  const uRoots = findUnivariateRoots(uExpr, uName);
   if (uRoots.length === 0) return null;
 
   // Back-substitute x = uᵈ; extraneous roots are dropped by the caller's
   // validation against the original equation.
-  return uRoots.map((ur) => ur.pow(d));
+  const xRoots = uRoots.map((ur) => ur.pow(d));
+  traceStep(trace, 'solve.back-substitute', rootsAsEquations(ce, x, xRoots));
+  return xRoots;
 }
 
 /**
@@ -1670,7 +1804,8 @@ function collectGenerators(expr: Expression, x: string): Expression[] {
 function solveByGeneratorSubstitution(
   expr: Expression,
   x: string,
-  depth: number
+  depth: number,
+  trace?: RuleSteps
 ): ReadonlyArray<Expression> | null {
   if (depth >= 3) return null; // recursion backstop
   const ce = expr.engine;
@@ -1704,7 +1839,22 @@ function solveByGeneratorSubstitution(
       for (const r of findUnivariateRoots(g.sub(ur), x, depth + 1))
         xRoots.push(r);
 
-    if (xRoots.length > 0) return xRoots;
+    if (xRoots.length > 0) {
+      if (trace) {
+        traceStep(trace, 'solve.substitute', ce.function('Equal', [u, g]));
+        traceStep(
+          trace,
+          'solve.substituted-equation',
+          asEquation(exprU, uName)
+        );
+        traceStep(
+          trace,
+          'solve.back-substitute',
+          rootsAsEquations(ce, x, xRoots)
+        );
+      }
+      return xRoots;
+    }
   }
   return null;
 }
@@ -1725,22 +1875,41 @@ function solveByGeneratorSubstitution(
 function solveByZeroProduct(
   expr: Expression,
   x: string,
-  depth: number
+  depth: number,
+  trace?: RuleSteps
 ): ReadonlyArray<Expression> | null {
   if (depth >= 3) return null; // recursion backstop
   if (!isFunction(expr, 'Multiply')) return null;
   const factors = expr.ops!.filter((f) => f.has(x));
   if (factors.length < 2) return null;
 
-  const roots: Expression[] = [];
+  // The factor bases whose roots are collected (a factor `fⁿ`, n > 0,
+  // contributes the roots of `f`; n ≤ 0 contributes none).
+  const bases: Expression[] = [];
   for (const f of factors) {
     let base = f;
     if (isFunction(f, 'Power') && f.op1.has(x) && !f.op2.has(x)) {
       if (f.op2.isPositive !== true) continue; // fⁿ with n ≤ 0: no extra roots
       base = f.op1;
     }
-    for (const r of findUnivariateRoots(base, x, depth + 1)) roots.push(r);
+    bases.push(base);
   }
+
+  if (trace && bases.length > 0) {
+    const ce = expr.engine;
+    traceStep(
+      trace,
+      'solve.factor-zero-product',
+      ce.function(
+        'List',
+        bases.map((b) => asEquation(b, x))
+      )
+    );
+  }
+
+  const roots: Expression[] = [];
+  for (const base of bases)
+    for (const r of findUnivariateRoots(base, x, depth + 1)) roots.push(r);
   return roots.length > 0 ? roots : null;
 }
 
@@ -1779,7 +1948,8 @@ function solveInverseTrigEquation(
   lhs: Expression,
   rhs: Expression,
   x: string,
-  depth: number
+  depth: number,
+  trace?: RuleSteps
 ): Expression[] | null {
   if (depth >= 3) return null; // recursion backstop
   if (!isFunction(lhs) || !isFunction(rhs)) return null;
@@ -1794,6 +1964,7 @@ function solveInverseTrigEquation(
   if (tanL === null || tanR === null) return null;
 
   const ce = lhs.engine;
+  traceStep(trace, 'solve.apply-tangent', ce.function('Equal', [tanL, tanR]));
   const roots = findUnivariateRoots(
     ce.function('Equal', [tanL, tanR]),
     x,
@@ -1811,7 +1982,8 @@ function solveInverseTrigEquation(
 export function findUnivariateRoots(
   expr: Expression,
   x: string,
-  depth = 0
+  depth = 0,
+  trace?: RuleSteps
 ): ReadonlyArray<Expression> {
   const ce = expr.engine;
 
@@ -1843,6 +2015,7 @@ export function findUnivariateRoots(
     ) {
       lhs = lhs.op1;
       rhs = rhs.op1;
+      traceStep(trace, 'solve.apply-inverse', ce.function('Equal', [lhs, rhs]));
     }
 
     // Same-base power equality: cᵃ = cᵇ ⟺ a = b when x ↦ cˣ is injective,
@@ -1859,15 +2032,42 @@ export function findUnivariateRoots(
     ) {
       lhs = lhs.op2;
       rhs = rhs.op2;
+      traceStep(
+        trace,
+        'solve.equate-exponents',
+        ce.function('Equal', [lhs, rhs])
+      );
     }
 
     // Two *different* inverse-trig functions of the unknown (e.g.
     // `arcsin x = arctan x`): clear them by applying `tan` to both sides, solve
     // the algebraic result, and validate against the original (B9).
-    const invTrigRoots = solveInverseTrigEquation(lhs, rhs, x, depth);
+    // Record this strategy's steps provisionally: they only join the trace
+    // if the strategy actually produces the answer.
+    const invTrigTrace: RuleSteps | undefined = trace ? [] : undefined;
+    const invTrigRoots = solveInverseTrigEquation(
+      lhs,
+      rhs,
+      x,
+      depth,
+      invTrigTrace
+    );
     if (invTrigRoots !== null) {
-      const validated = validateRoots(lhs0.sub(rhs0), x, invTrigRoots);
-      if (validated.length > 0) return validated;
+      traceStep(
+        invTrigTrace,
+        'solve.candidates',
+        rootsAsEquations(ce, x, invTrigRoots)
+      );
+      const validated = validateRoots(
+        lhs0.sub(rhs0),
+        x,
+        invTrigRoots,
+        invTrigTrace
+      );
+      if (validated.length > 0) {
+        trace?.push(...invTrigTrace!);
+        return validated;
+      }
     }
 
     expr = expand(lhs).sub(expand(rhs)).simplify();
@@ -1877,39 +2077,64 @@ export function findUnivariateRoots(
     // `ln(a) + ln(b) → ln(ab)`), which would make extraneous roots
     // introduced by the transformations below appear valid.
     originalExpr = lhs0.sub(rhs0);
+    traceStep(trace, 'solve.move-terms', asEquation(expr, x));
   } else {
     originalExpr = expr;
     expr = expand(expr).simplify();
+    if (trace && !expr.isSame(originalExpr))
+      traceStep(trace, 'solve.simplify', asEquation(expr, x));
   }
 
   // Same-base power difference cᵃ − cᵇ = 0 ⟹ a − b = 0 (handles the f = 0 input
   // form, complementing the Equal-form peeling above).
-  expr = reduceSameBasePower(expr, x) ?? expr;
+  {
+    const reduced = reduceSameBasePower(expr, x);
+    if (reduced !== null && reduced !== undefined) {
+      expr = reduced;
+      traceStep(trace, 'solve.equate-exponents', asEquation(expr, x));
+    }
+  }
 
   // Clear denominators to enable matching of expressions like F - 3x/h = 0
-  expr = clearDenominators(expr);
+  {
+    const cleared = clearDenominators(expr);
+    if (trace && !cleared.isSame(expr))
+      traceStep(trace, 'solve.clear-denominators', asEquation(cleared, x));
+    expr = cleared;
+  }
 
   // Try to solve equations with two sqrt terms: √(f(x)) + √(g(x)) = e
   // Pattern 3: Uses double squaring to eliminate both sqrts
-  const twoSqrtSolutions = solveTwoSqrtEquation(expr, x);
+  // (Strategy steps are recorded provisionally and only join the trace when
+  // the strategy produces the answer.)
+  const twoSqrtTrace: RuleSteps | undefined = trace ? [] : undefined;
+  const twoSqrtSolutions = solveTwoSqrtEquation(expr, x, twoSqrtTrace);
   if (twoSqrtSolutions !== null) {
     // Solutions are already validated inside the function
+    trace?.push(...twoSqrtTrace!);
     return twoSqrtSolutions;
   }
 
   // Try to solve nested sqrt equations: √(f(x, √x)) = a
   // This uses substitution u = √x, solves for u, then converts back to x = u²
-  const nestedSqrtSolutions = solveNestedSqrtEquation(expr, x);
+  const nestedTrace: RuleSteps | undefined = trace ? [] : undefined;
+  const nestedSqrtSolutions = solveNestedSqrtEquation(expr, x, nestedTrace);
   if (nestedSqrtSolutions !== null) {
     // Validate and return the solutions
-    return validateRoots(originalExpr, x, nestedSqrtSolutions);
+    trace?.push(...nestedTrace!);
+    return validateRoots(originalExpr, x, nestedSqrtSolutions, trace);
   }
 
   // Transform sqrt-linear equations: √(f(x)) = g(x) → f(x) - g(x)² = 0
   // This handles Pattern 2: √(ax+b) = cx+d by squaring both sides.
   // Must be done before pattern matching so quadratic formula can match.
   // Note: This can introduce extraneous roots, which are filtered by validateRoots().
-  expr = transformSqrtLinearEquation(expr, x);
+  {
+    const transformed = transformSqrtLinearEquation(expr, x);
+    if (trace && !transformed.isSame(expr))
+      traceStep(trace, 'solve.square-both-sides', asEquation(transformed, x));
+    expr = transformed;
+  }
 
   const rules = ce.getRuleSet('solve-univariate')!;
 
@@ -1931,13 +2156,31 @@ export function findUnivariateRoots(
     // `harmonize()` also contain the literal `_x` symbol, so binding `_x` to
     // the original unknown post-harmonization would make every pattern rule
     // fail to match.
-    const matchRoots = (expr: Expression): Expression[] =>
-      matchAnyRules(
+    const matchRootsSteps = (expr: Expression): RuleSteps =>
+      matchAnyRulesWithSteps(
         expr,
         rules,
         { _x: ce.symbol('_x') },
         { useVariations: true, form: 'canonical' }
       );
+
+    // Record the candidates produced by matched root templates, each under
+    // its template's id (`solve.linear`, `solve.quadratic-formula-positive`,
+    // …). `via`, when present, is a step recording the equivalent form
+    // (harmonized/expanded) the templates matched against.
+    const traceMatches = (
+      matches: RuleSteps,
+      via?: { because: string; form: Expression }
+    ): void => {
+      if (!trace || matches.length === 0) return;
+      if (via) traceStep(trace, via.because, asEquation(via.form, x));
+      for (const m of matches)
+        traceStep(
+          trace,
+          m.because !== '' ? m.because : 'solve.template',
+          rootsAsEquations(ce, x, [m.value])
+        );
+    };
 
     // FAST PATH: a univariate polynomial of degree ≥ 2 is solved directly from
     // its coefficients (quadratic formula / rational-root + numeric), skipping
@@ -1955,9 +2198,15 @@ export function findUnivariateRoots(
           ? expr
           : null;
     if (polyExpr !== null && polynomialDegree(polyExpr, x) >= 2)
-      result = solvePolynomialByCoefficients(polyExpr, x);
+      result = solvePolynomialByCoefficients(polyExpr, x, trace);
 
-    if (result.length === 0) result = exprs.flatMap(matchRoots);
+    if (result.length === 0) {
+      for (const e of exprs) {
+        const matches = matchRootsSteps(e);
+        traceMatches(matches);
+        result.push(...matches.map((s) => s.value));
+      }
+    }
 
     // If we didn't find a solution yet, try modifying the expression
     //expr.
@@ -1974,7 +2223,11 @@ export function findUnivariateRoots(
     let harmonized: Expression[] = [];
     if (result.length === 0) {
       harmonized = exprs.flatMap((expr) => harmonize(expr));
-      result = harmonized.flatMap(matchRoots);
+      for (const h of harmonized) {
+        const matches = matchRootsSteps(h);
+        traceMatches(matches, { because: 'solve.harmonize', form: h });
+        result.push(...matches.map((s) => s.value));
+      }
     }
 
     if (result.length === 0) {
@@ -1984,10 +2237,18 @@ export function findUnivariateRoots(
       const expanded = [...exprs, ...harmonized]
         .map((expr) => expand(expr.canonical))
         .filter((expr) => expr !== null);
-      result = [
+      const forms = [
         ...expanded,
         ...expanded.flatMap((expr) => harmonize(expr)),
-      ].flatMap(matchRoots);
+      ];
+      forms.forEach((form, i) => {
+        const matches = matchRootsSteps(form);
+        traceMatches(matches, {
+          because: i < expanded.length ? 'solve.expand' : 'solve.harmonize',
+          form,
+        });
+        result.push(...matches.map((s) => s.value));
+      });
     }
 
     // (The polynomial coefficient solve that used to live here as a
@@ -1998,30 +2259,55 @@ export function findUnivariateRoots(
     // with a non-constant coefficient, e.g. x·√(x²+1) = 1), which the
     // sqrt-linear transform above intentionally skips.
     if (result.length === 0) {
-      const sqrtRoots = solveSingleSqrtEquation(expr, x);
-      if (sqrtRoots) result = [...sqrtRoots];
+      const subTrace: RuleSteps | undefined = trace ? [] : undefined;
+      const sqrtRoots = solveSingleSqrtEquation(expr, x, subTrace);
+      if (sqrtRoots) {
+        trace?.push(...subTrace!);
+        result = [...sqrtRoots];
+      }
     }
 
     // Homogenization: equations that are polynomials in a rational power of the
     // unknown (e.g. 2√x + 3·⁴√x = 2) — substitute u = x^{1/d}, solve, invert.
     if (result.length === 0) {
-      const substRoots = solveByRationalPowerSubstitution(originalExpr, x);
-      if (substRoots) result = [...substRoots];
+      const subTrace: RuleSteps | undefined = trace ? [] : undefined;
+      const substRoots = solveByRationalPowerSubstitution(
+        originalExpr,
+        x,
+        subTrace
+      );
+      if (substRoots) {
+        trace?.push(...subTrace!);
+        result = [...substRoots];
+      }
     }
 
     // Zero-product: a product of x-containing factors is zero iff one factor is
     // (e.g. `ln(x)·(x − 1) = 0`, or an already-factored `(x+1)·cos³(3x) = 0`).
     if (result.length === 0) {
-      const productRoots = solveByZeroProduct(originalExpr, x, depth);
-      if (productRoots) result = [...productRoots];
+      const subTrace: RuleSteps | undefined = trace ? [] : undefined;
+      const productRoots = solveByZeroProduct(originalExpr, x, depth, subTrace);
+      if (productRoots) {
+        trace?.push(...subTrace!);
+        result = [...productRoots];
+      }
     }
 
     // Generator substitution: an equation that is a polynomial in a single
     // nonlinear generator g(x) — `(ln x)² − 4`, `√(ln x) = ln√x`,
     // `e^{2x} − 3e^x + 2` — via u = g(x), solve, invert.
     if (result.length === 0) {
-      const genRoots = solveByGeneratorSubstitution(originalExpr, x, depth);
-      if (genRoots) result = [...genRoots];
+      const subTrace: RuleSteps | undefined = trace ? [] : undefined;
+      const genRoots = solveByGeneratorSubstitution(
+        originalExpr,
+        x,
+        depth,
+        subTrace
+      );
+      if (genRoots) {
+        trace?.push(...subTrace!);
+        result = [...genRoots];
+      }
     }
 
     // A root may reference the `_x` wildcard symbol (e.g. when produced by a
@@ -2041,11 +2327,12 @@ export function findUnivariateRoots(
   const validatedRoots = validateRoots(
     originalExpr,
     x,
-    result.map((x) => x.evaluate().simplify())
+    result.map((x) => x.evaluate().simplify()),
+    trace
   );
 
   // Filter solutions by the declared type of the variable
-  return filterRootsByType(ce, x, validatedRoots);
+  return filterRootsByType(ce, x, validatedRoots, trace);
 }
 
 /**
@@ -2060,7 +2347,8 @@ export function findUnivariateRoots(
  */
 function solvePolynomialByCoefficients(
   polyExpr: Expression,
-  x: string
+  x: string,
+  trace?: RuleSteps
 ): Expression[] {
   const ce = polyExpr.engine;
   const deg = polynomialDegree(polyExpr, x);
@@ -2070,7 +2358,14 @@ function solvePolynomialByCoefficients(
     // `Negate(Multiply(b, x))` (or `Negate(x)`), which that pattern misses — so
     // e.g. `x^2 - a x + 1 = 0` found no roots. Coefficient extraction handles
     // every sign form uniformly (#300).
-    return [...solveQuadraticByCoefficients(polyExpr, x)];
+    const roots = [...solveQuadraticByCoefficients(polyExpr, x)];
+    if (trace && roots.length > 0)
+      traceStep(
+        trace,
+        'solve.quadratic-formula',
+        rootsAsEquations(ce, x, roots)
+      );
+    return roots;
   }
   if (deg >= 3) {
     // Pure powers `x^n + c` (only the constant and leading coefficients are
@@ -2091,6 +2386,12 @@ function solvePolynomialByCoefficients(
 
     // Exact rational roots first (rational-root theorem)…
     const rationalRoots = findRationalRoots(polyExpr, x, ce);
+    if (trace && rationalRoots.length > 0)
+      traceStep(
+        trace,
+        'solve.rational-roots',
+        rootsAsEquations(ce, x, rationalRoots)
+      );
     const result: Expression[] = [...rationalRoots];
     // For the remaining (irrational) roots, prefer an exact reduction of a
     // sparse polynomial (gcd of exponents > 1, e.g. a biquadratic via u = x²)
@@ -2101,15 +2402,24 @@ function solvePolynomialByCoefficients(
       const extra =
         solveByPowerGcdSubstitution(polyExpr, x) ??
         numericRealRoots(polyExpr, x, ce);
+      const added: Expression[] = [];
       for (const nr of extra) {
         const v = nr.N().re;
         if (
           !result.some(
             (r) => Math.abs(r.N().re - v) <= 1e-7 * (1 + Math.abs(v))
           )
-        )
+        ) {
           result.push(nr);
+          added.push(nr);
+        }
       }
+      if (trace && added.length > 0)
+        traceStep(
+          trace,
+          'solve.polynomial-roots',
+          rootsAsEquations(ce, x, added)
+        );
     }
     return result;
   }
@@ -2261,7 +2571,8 @@ function harmonize(expr: Expression): Expression[] {
 function validateRoots(
   expr: Expression,
   x: string,
-  roots: ReadonlyArray<Expression>
+  roots: ReadonlyArray<Expression>,
+  trace?: RuleSteps
 ): Expression[] {
   const validRoots = roots.filter((root) => {
     // Evaluate the expression at the root
@@ -2291,6 +2602,17 @@ function validateRoots(
     return value.simplify().isEqual(0);
   });
 
+  // Record the extraneous candidates rejected by substitution into the
+  // original equation (dropped duplicates below are not "rejected").
+  if (trace && validRoots.length < roots.length) {
+    const rejected = roots.filter((r) => !validRoots.some((v) => v.isSame(r)));
+    traceStep(
+      trace,
+      'solve.validate-roots',
+      rootsAsEquations(expr.engine, x, rejected)
+    );
+  }
+
   // Deduplicate roots (e.g., arccos(1) and -arccos(1) both equal 0)
   const uniqueRoots: Expression[] = [];
   for (const root of validRoots) {
@@ -2309,7 +2631,8 @@ function validateRoots(
 function filterRootsByType(
   ce: ComputeEngine,
   x: string,
-  roots: ReadonlyArray<Expression>
+  roots: ReadonlyArray<Expression>,
+  trace?: RuleSteps
 ): ReadonlyArray<Expression> {
   const varTypeObj = ce.symbol(x).type;
   const vt = varTypeObj.type;
@@ -2317,7 +2640,7 @@ function filterRootsByType(
   if (typeof vt !== 'string' || vt === 'number' || vt === 'unknown')
     return roots;
 
-  return roots.filter((root) => {
+  const filtered = roots.filter((root) => {
     const val = root.evaluate();
     if (varTypeObj.matches('integer') || varTypeObj.matches('finite_integer'))
       return val.isInteger === true;
@@ -2327,6 +2650,13 @@ function filterRootsByType(
       return val.isReal === true;
     return true;
   });
+
+  if (trace && filtered.length < roots.length) {
+    const dropped = roots.filter((r) => !filtered.includes(r));
+    traceStep(trace, 'solve.filter-domain', rootsAsEquations(ce, x, dropped));
+  }
+
+  return filtered;
 }
 
 /**

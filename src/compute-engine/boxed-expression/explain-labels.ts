@@ -219,6 +219,103 @@ registerStepLabels({
 });
 
 //
+// ── Solve: algorithmic phase steps (`expr.explain('solve')`) ──
+//
+registerStepLabels({
+  'solve.move-terms': 'Move all terms to one side',
+  'solve.simplify': 'Simplify the equation',
+  'solve.apply-inverse': 'Apply the inverse function to both sides',
+  'solve.equate-exponents': 'The bases are equal, so equate the exponents',
+  'solve.apply-tangent':
+    'Take the tangent of both sides to clear the inverse trigonometric functions',
+  'solve.clear-denominators': 'Multiply through to clear the denominators',
+  'solve.square-both-sides': 'Square both sides to eliminate the radical',
+  'solve.substitute': 'Substitute a new variable',
+  'solve.substituted-equation':
+    'Rewrite the equation in the substituted variable',
+  'solve.back-substitute': 'Substitute back to the original variable',
+  'solve.factor-zero-product':
+    'A product is zero exactly when one of its factors is zero',
+  'solve.harmonize': 'Rewrite the equation in an equivalent form',
+  'solve.expand': 'Expand the equation',
+  'solve.quadratic-formula': 'Apply the quadratic formula',
+  'solve.rational-roots': 'Find the rational roots (rational-root theorem)',
+  'solve.polynomial-roots': 'Find the remaining roots of the polynomial',
+  'solve.candidates': 'Candidate solutions',
+  'solve.validate-roots':
+    'Check each candidate in the original equation; reject the extraneous ones',
+  'solve.filter-domain': 'Discard solutions outside the domain of the variable',
+  'solve.roots': 'The solutions',
+  'solve.template': 'Solve the matched equation pattern',
+});
+
+//
+// ── Solve: root-template ids (`UNIVARIATE_ROOTS` in solve.ts) ──
+//
+registerStepLabels({
+  'solve.linear-monomial':
+    'A multiple of the unknown is zero when the unknown is zero',
+  'solve.reciprocal': 'Solve the reciprocal equation',
+  'solve.linear':
+    'Isolate the unknown: subtract the constant, then divide by the coefficient',
+  'solve.linear-negated':
+    'Isolate the unknown: subtract the constant, then divide by the coefficient',
+  'solve.power': 'Take the n-th root of both sides',
+  'solve.power-negative-root':
+    'Take the n-th root of both sides (negative root)',
+  'solve.quadratic-no-constant-zero':
+    'Factor out the unknown: one solution is 0',
+  'solve.quadratic-no-constant':
+    'Factor out the unknown and solve the remaining linear factor',
+  'solve.quadratic-formula-positive':
+    'Apply the quadratic formula (positive branch)',
+  'solve.quadratic-formula-negative':
+    'Apply the quadratic formula (negative branch)',
+  'solve.exponential': 'Take the logarithm of both sides',
+  'solve.exponential-natural': 'Take the natural logarithm of both sides',
+  'solve.exponential-natural-unit-exponent':
+    'Take the natural logarithm of both sides',
+  'solve.exponential-natural-simple':
+    'Take the natural logarithm of both sides',
+  'solve.exponential-natural-unit-coefficient':
+    'Take the natural logarithm of both sides',
+  'solve.logarithm-base': 'Exponentiate both sides to clear the logarithm',
+  'solve.logarithm-base-no-constant':
+    'Exponentiate both sides to clear the logarithm',
+  'solve.absolute-value-positive': 'Resolve the absolute value (positive case)',
+  'solve.absolute-value-negative': 'Resolve the absolute value (negative case)',
+  'solve.quadratic-in-sqrt-positive':
+    'Solve as a quadratic in the square root of the unknown',
+  'solve.quadratic-in-sqrt-negative':
+    'Solve as a quadratic in the square root of the unknown',
+  'solve.quadratic-in-sqrt-negated-positive':
+    'Solve as a quadratic in the square root of the unknown',
+  'solve.quadratic-in-sqrt-negated-negative':
+    'Solve as a quadratic in the square root of the unknown',
+  'solve.radical': 'Isolate the radical, then square both sides',
+  'solve.logarithm-natural-scaled':
+    'Exponentiate both sides to clear the logarithm',
+  'solve.logarithm-natural': 'Exponentiate both sides to clear the logarithm',
+  'solve.sine': 'Apply the inverse sine',
+  'solve.sine-second-branch':
+    'Apply the inverse sine (second branch: π − arcsin)',
+  'solve.sine-unit': 'Apply the inverse sine',
+  'solve.sine-unit-second-branch':
+    'Apply the inverse sine (second branch: π − arcsin)',
+  'solve.cosine': 'Apply the inverse cosine',
+  'solve.cosine-negative-branch': 'Apply the inverse cosine (negative branch)',
+  'solve.cosine-unit': 'Apply the inverse cosine',
+  'solve.cosine-unit-negative-branch':
+    'Apply the inverse cosine (negative branch)',
+  'solve.tangent': 'Apply the inverse tangent',
+  'solve.tangent-unit': 'Apply the inverse tangent',
+  'solve.cotangent': 'Apply the inverse cotangent',
+  'solve.cotangent-unit': 'Apply the inverse cotangent',
+  'solve.sine-cosine-linear-combination':
+    'Rewrite a·sin x + b·cos x as a single sinusoid',
+});
+
+//
 // Systematic families, registered per function with uniform curated copy.
 //
 

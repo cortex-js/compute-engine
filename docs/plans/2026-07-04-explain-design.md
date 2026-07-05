@@ -5,7 +5,12 @@
 + `matchAnyRulesWithSteps`; one deviation: the labels module lives at
 `boxed-expression/explain-labels.ts`, not `symbolic/` — the architecture
 layering rule forbids `boxed-expression/` importing from `symbolic/`; label
-coverage measured at 100% over the simplify corpus, vs. the ≥90% target) ·
+coverage measured at 100% over the simplify corpus, vs. the ≥90% target);
+**Phase 2 (solve) implemented 2026-07-04** (optional `trace` accumulator
+threaded through `findUnivariateRoots` and its strategy helpers — pure
+observation, provisional sub-traces for strategies that can fail so only the
+winning strategy's steps join the narrative; equation-valued steps; branch =
+one list-valued step as specced; systems/Or throw "not supported yet") ·
 **Date:** 2026-07-04 ·
 **Roadmap:** Product feature track item (agreed 2026-07-04): surface the
 internal `RuleSteps` trace publicly; coverage simplify → solve → D;

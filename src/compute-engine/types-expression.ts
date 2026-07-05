@@ -1690,6 +1690,13 @@ export interface Expression {
    * engine code as the plain method: `explain('simplify').result` is the
    * same value `simplify()` returns.
    *
+   * For `'solve'`, the receiver is a univariate equation (or an expression
+   * `f`, read as `f = 0`); the unknown is inferred or passed via
+   * `options.variable`. Step values are *equations* — the state after each
+   * phase (`2x+1=5` → `2x-4=0` → `x=2`), including candidate roots and
+   * rejected extraneous candidates — and `result` is a `List` of the same
+   * roots `solve()` returns. Systems of equations are not supported yet.
+   *
    * Each step carries the expression state after the step, a stable machine
    * `id` (the key for localization and custom copy) and a default English
    * `description`. The `initial` property is the canonical form of this
@@ -1700,7 +1707,7 @@ export interface Expression {
    * filtered out. Pass `verbosity: 'all'` to get the raw chain (for
    * debugging and rule authoring).
    *
-   * The `'solve'` and `'D'` operations are not implemented yet.
+   * The `'D'` operation is not implemented yet.
    */
   explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation;
 
