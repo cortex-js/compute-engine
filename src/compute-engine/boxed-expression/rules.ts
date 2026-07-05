@@ -426,7 +426,10 @@ function resolveWildcardShorthand(x: Expression): Expression {
     const rest = x.ops.slice(1);
     if (rest.length > 0 && rest.every((op) => isSymbol(op)))
       return x.engine.symbol(
-        '_' + rest.map((op) => (op as Expression & { symbol: string }).symbol).join('')
+        '_' +
+          rest
+            .map((op) => (op as Expression & { symbol: string }).symbol)
+            .join('')
       );
   }
   // `__a` → Subscript('_', 'a'): a sequence wildcard
@@ -672,9 +675,7 @@ function parseRule(
     let match = normalizeRuleConstants(match_);
     let replace = normalizeRuleConstants(replace_);
     const condition =
-      condition_ !== undefined
-        ? normalizeRuleConstants(condition_)
-        : undefined;
+      condition_ !== undefined ? normalizeRuleConstants(condition_) : undefined;
     if (canonical) {
       match = match.canonical;
       replace = replace.canonical;
@@ -1415,24 +1416,26 @@ export function replace(
 }
 
 /**
- * For each rules in the rule set that match, return the `replace` of the rule
+ * For each rule in the rule set that matches, return the full `RuleStep`
+ * (replacement value with its provenance: the rule id in `because`, plus
+ * `purpose`). Used by callers that keep a step trace (`explain`).
  *
  * @param rules
  */
-export function matchAnyRules(
+export function matchAnyRulesWithSteps(
   expr: Expression,
   rules: BoxedRuleSet,
   sub: BoxedSubstitution,
   options?: Partial<ReplaceOptions>
-): Expression[] {
-  const results: Expression[] = [];
+): RuleStep[] {
+  const results: RuleStep[] = [];
 
   const collect = (rule: BoxedRule): void => {
     const r = applyRule(rule, expr, sub, options);
 
     // Verify that the results are unique
-    if (r !== null && !results.some((x) => x.isSame(r.value)))
-      results.push(r.value);
+    if (r !== null && !results.some((x) => x.value.isSame(r.value)))
+      results.push(r);
   };
 
   // Operator-indexed dispatch (see rule-index.ts). `expr` never changes
@@ -1447,6 +1450,20 @@ export function matchAnyRules(
   else for (const { rule } of candidateRules(index, expr, -1)) collect(rule);
 
   return results;
+}
+
+/**
+ * For each rules in the rule set that match, return the `replace` of the rule
+ *
+ * @param rules
+ */
+export function matchAnyRules(
+  expr: Expression,
+  rules: BoxedRuleSet,
+  sub: BoxedSubstitution,
+  options?: Partial<ReplaceOptions>
+): Expression[] {
+  return matchAnyRulesWithSteps(expr, rules, sub, options).map((s) => s.value);
 }
 
 /**

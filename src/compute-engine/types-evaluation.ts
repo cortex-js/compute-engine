@@ -3,7 +3,6 @@ import type { IComputeEngine as ComputeEngine } from './types-engine';
 import type { Expression, ExpressionInput } from './types-expression';
 import type {
   Assumption as KernelAssumption,
-  AssumeResult,
   AssignValue as KernelAssignValue,
   BoxedRule as KernelBoxedRule,
   BoxedRuleSet as KernelBoxedRuleSet,
@@ -16,10 +15,16 @@ import type {
   RuleReplaceFunction as KernelRuleReplaceFunction,
   RuleStep as KernelRuleStep,
   RuleSteps as KernelRuleSteps,
+  ExplainStep as KernelExplainStep,
+  Explanation as KernelExplanation,
   Scope as KernelScope,
 } from './types-kernel-evaluation';
 
-export type { AssumeResult };
+export type {
+  AssumeResult,
+  ExplainOperation,
+  ExplainVerbosity,
+} from './types-kernel-evaluation';
 
 /**
  * Options for evaluating boxed expressions.
@@ -45,6 +50,12 @@ export type RuleStep = KernelRuleStep<Expression>;
 
 /** A list of rule application steps. */
 export type RuleSteps = KernelRuleSteps<Expression>;
+
+/** One step of an `Explanation`. See `expr.explain()`. */
+export type ExplainStep = KernelExplainStep<Expression>;
+
+/** A structured step-by-step explanation. See `expr.explain()`. */
+export type Explanation = KernelExplanation<Expression>;
 
 /**
  * Assumption predicates bound to this compute engine.

@@ -18,6 +18,7 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
 import { replace } from './rules';
 import { simplify } from './simplify';
+import { explainExpression } from './explain';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
@@ -47,6 +48,9 @@ import type {
   PatternMatchOptions,
   ReplaceOptions,
   SimplifyOptions,
+  ExplainOperation,
+  ExplainOptions,
+  Explanation,
   ExpressionInput,
   NumberLiteralInterface,
 } from '../global-types';
@@ -784,6 +788,11 @@ export class BoxedNumber
     const results = simplify(this.structural, options);
 
     return results.at(-1)!.value ?? this;
+  }
+
+  explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation {
+    // Mirror `simplify()`: it runs on the structural form
+    return explainExpression(this.structural, operation, options);
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {

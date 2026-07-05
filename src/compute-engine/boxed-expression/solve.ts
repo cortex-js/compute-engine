@@ -66,7 +66,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Multiply', '_x', '__a'],
     replace: 0,
-    id: 'ax',
+    id: 'solve.linear-monomial',
     condition: filter,
   },
 
@@ -74,6 +74,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Divide', '_a', '_x'], '__b'],
     replace: Infinity,
+    id: 'solve.reciprocal',
     useVariations: true, // Handle a/x = 0
     condition: filter,
   },
@@ -82,6 +83,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '_x', '__a'], '__b'],
     replace: ['Divide', ['Negate', '__b'], '__a'],
+    id: 'solve.linear',
     useVariations: true, // Handle ax = 0
     condition: filter,
   },
@@ -91,6 +93,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Negate', ['Multiply', '_x', '__a']], '__b'],
     replace: ['Divide', '__b', '__a'],
+    id: 'solve.linear-negated',
     useVariations: true,
     condition: filter,
   },
@@ -103,7 +106,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ['Divide', ['Negate', '__b'], '_a'],
       ['Divide', 1, '_n'],
     ],
-
+    id: 'solve.power',
     useVariations: true,
     condition: (sub) => filter(sub) && !sub._n.isSame(0),
   },
@@ -114,7 +117,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       'Negate',
       ['Power', ['Divide', ['Negate', '__b'], '_a'], ['Divide', 1, '_n']],
     ],
-
+    id: 'solve.power-negative-root',
     useVariations: true,
     condition: (sub: BoxedSubstitution) =>
       filter(sub) && !sub._n.isSame(0) && (sub._n.isEven ?? false),
@@ -131,6 +134,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ['Multiply', '__b', '_x'],
     ],
     replace: 0,
+    id: 'solve.quadratic-no-constant-zero',
     useVariations: true,
     condition: filter,
   },
@@ -141,6 +145,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ['Multiply', '__b', '_x'],
     ],
     replace: ['Divide', ['Negate', '__b'], '__a'],
+    id: 'solve.quadratic-no-constant',
     useVariations: true,
     condition: filter,
   },
@@ -169,6 +174,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ],
       ['Multiply', 2, '__a'],
     ],
+    id: 'solve.quadratic-formula-positive',
     useVariations: true,
     condition: filter,
   },
@@ -192,15 +198,16 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ],
       ['Multiply', 2, '__a'],
     ],
+    id: 'solve.quadratic-formula-negative',
     useVariations: true,
     condition: filter,
   },
 
   // a^x + b = 0
   {
-    id: 'a^x + b = 0',
     match: ['Add', ['Power', '_a', '_x'], '__b'],
     replace: ['Ln', ['Negate', '__b'], '_a'],
+    id: 'solve.exponential',
     useVariations: true,
     onBeforeMatch: () => {
       // debugger;
@@ -219,6 +226,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       '__c',
     ],
     replace: ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
+    id: 'solve.exponential-natural',
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
@@ -229,6 +237,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Exp', '_x']], '__c'],
     replace: ['Ln', ['Negate', ['Divide', '__c', '__a']]],
+    id: 'solve.exponential-natural-unit-exponent',
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
@@ -241,6 +250,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Exp', '_x'], '__c'],
     replace: ['Ln', ['Negate', '__c']],
+    id: 'solve.exponential-natural-simple',
     useVariations: true,
     condition: (sub) => filter(sub) && (sub.__c.isNegative ?? false),
   },
@@ -249,6 +259,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Exp', ['Multiply', '__b', '_x']], '__c'],
     replace: ['Divide', ['Ln', ['Negate', '__c']], '__b'],
+    id: 'solve.exponential-natural-unit-coefficient',
     useVariations: true,
     condition: (sub) => filter(sub) && (sub.__c.isNegative ?? false),
   },
@@ -257,6 +268,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Log', '_x', '__b']], '__c'],
     replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
+    id: 'solve.logarithm-base',
     useVariations: true,
     condition: (sub) =>
       (filter(sub) && !sub.__a.isSame(0) && sub.__b.isPositive) ?? false,
@@ -266,6 +278,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Multiply', '__a', ['Log', '_x', '__b']],
     replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
+    id: 'solve.logarithm-base-no-constant',
     useVariations: true,
     condition: (sub) =>
       (filter(sub) && !sub.__a.isSame(0) && sub.__b.isPositive) ?? false,
@@ -277,11 +290,13 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
     replace: ['Divide', ['Subtract', '__c', '__b'], '__a'],
+    id: 'solve.absolute-value-positive',
     condition: filter,
   },
   {
     match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
     replace: ['Divide', ['Negate', ['Add', '__b', '__c']], '__a'],
+    id: 'solve.absolute-value-negative',
     condition: filter,
   },
 
@@ -316,6 +331,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ],
       2,
     ],
+    id: 'solve.quadratic-in-sqrt-positive',
     useVariations: true,
     condition: filter,
   },
@@ -344,6 +360,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ],
       2,
     ],
+    id: 'solve.quadratic-in-sqrt-negative',
     useVariations: true,
     condition: filter,
   },
@@ -370,6 +387,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ],
       2,
     ],
+    id: 'solve.quadratic-in-sqrt-negated-positive',
     useVariations: true,
     condition: filter,
   },
@@ -395,6 +413,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ],
       2,
     ],
+    id: 'solve.quadratic-in-sqrt-negated-negative',
     useVariations: true,
     condition: filter,
   },
@@ -407,6 +426,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Sqrt', '_x']], '__b'],
     replace: ['Square', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.radical',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -423,6 +443,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Ln', '_x']], '__b'],
     replace: ['Exp', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.logarithm-natural-scaled',
     useVariations: true,
     condition: filter,
   },
@@ -431,6 +452,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Ln', '_x'], '__b'],
     replace: ['Exp', ['Negate', '__b']],
+    id: 'solve.logarithm-natural',
     useVariations: true,
     condition: filter,
   },
@@ -447,6 +469,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Sin', '_x']], '__b'],
     replace: ['Arcsin', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.sine',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -470,6 +493,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       'Pi',
       ['Arcsin', ['Divide', ['Negate', '__b'], '__a']],
     ],
+    id: 'solve.sine-second-branch',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -488,6 +512,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Sin', '_x'], '__b'],
     replace: ['Arcsin', ['Negate', '__b']],
+    id: 'solve.sine-unit',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -503,6 +528,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Sin', '_x'], '__b'],
     replace: ['Subtract', 'Pi', ['Arcsin', ['Negate', '__b']]],
+    id: 'solve.sine-unit-second-branch',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -519,6 +545,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Cos', '_x']], '__b'],
     replace: ['Arccos', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.cosine',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -537,6 +564,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Cos', '_x']], '__b'],
     replace: ['Negate', ['Arccos', ['Divide', ['Negate', '__b'], '__a']]],
+    id: 'solve.cosine-negative-branch',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -555,6 +583,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Cos', '_x'], '__b'],
     replace: ['Arccos', ['Negate', '__b']],
+    id: 'solve.cosine-unit',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -570,6 +599,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Cos', '_x'], '__b'],
     replace: ['Negate', ['Arccos', ['Negate', '__b']]],
+    id: 'solve.cosine-unit-negative-branch',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -586,6 +616,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Tan', '_x']], '__b'],
     replace: ['Arctan', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.tangent',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -597,6 +628,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Tan', '_x'], '__b'],
     replace: ['Arctan', ['Negate', '__b']],
+    id: 'solve.tangent-unit',
     useVariations: true,
     condition: filter,
   },
@@ -605,6 +637,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Cot', '_x']], '__b'],
     replace: ['Arccot', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.cotangent',
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -616,6 +649,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Cot', '_x'], '__b'],
     replace: ['Arccot', ['Negate', '__b']],
+    id: 'solve.cotangent-unit',
     useVariations: true,
     condition: filter,
   },
@@ -632,6 +666,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ['Multiply', '__b', ['Cos', '_x']],
     ],
     replace: ['Arctan', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.sine-cosine-linear-combination',
     useVariations: true,
     condition: (sub) => filter(sub) && !sub.__a.isSame(0),
   },

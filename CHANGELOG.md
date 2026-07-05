@@ -146,6 +146,27 @@
   it, and `\simeq` now maps to the existing `TildeEqual` head (it previously
   had no LaTeX trigger).
 
+### Step-by-Step Explanations
+
+- **`expr.explain()` returns a structured, step-by-step explanation of a
+  simplification** — the textbook chain *expression → step (with a reason) →
+  … → result*. Each step carries the expression state after the step, a
+  stable machine `id` (the localization key for consumers), and a default
+  English description; `explain().result` is always the same value
+  `simplify()` returns. `ce.parse('\\frac{x^2-1}{x-1}').explain()` yields
+  one step, *"Cancel the common factors"*, ending at `x + 1`.
+  - The step chain is curated by default (driver bookkeeping is filtered
+    out); pass `{verbosity: 'all'}` for the raw trace (rule authoring,
+    debugging). `simplify()` options (`rules`, `costFunction`, `strategy`)
+    are honored.
+  - The most frequently fired simplification rules ship with curated
+    descriptions ("Apply the Pythagorean identity: sin²x + cos²x = 1",
+    "Combine powers with the same base: xⁿ·xᵐ = xⁿ⁺ᵐ", …); other rules get
+    a readable fallback derived from the rule id. `registerStepLabels()`
+    lets a host application override or extend the descriptions.
+  - Explanations for `solve()` and derivatives are planned; the `solve()`
+    rule templates already carry stable `solve.*` ids in preparation.
+
 ### Solving
 
 - **`Solve` accepts a domain for the unknown.**

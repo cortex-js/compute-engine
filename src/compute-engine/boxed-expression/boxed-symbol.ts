@@ -14,6 +14,9 @@ import { NumericValue } from '../numeric-value/types';
 import type {
   Expression,
   SimplifyOptions,
+  ExplainOperation,
+  ExplainOptions,
+  Explanation,
   PatternMatchOptions,
   ReplaceOptions,
   BoxedValueDefinition,
@@ -39,6 +42,7 @@ import { mul, div } from './arithmetic-mul-div';
 
 import { replace } from './rules';
 import { simplify } from './simplify';
+import { explainExpression } from './explain';
 import { negate } from './negate';
 
 import { match } from './match';
@@ -736,6 +740,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
     return simplify(this, options).at(-1)?.value ?? this;
+  }
+
+  explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation {
+    return explainExpression(this, operation, options);
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {

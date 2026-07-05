@@ -1,6 +1,12 @@
 # `explain` — step-by-step explanations (design proposal)
 
-**Status:** approved 2026-07-04 (§8 answers inline) · **Date:** 2026-07-04 ·
+**Status:** approved 2026-07-04 (§8 answers inline); **Phase 1 implemented
+2026-07-04** (simplify explanations + labeling layer + `UNIVARIATE_ROOTS` ids
++ `matchAnyRulesWithSteps`; one deviation: the labels module lives at
+`boxed-expression/explain-labels.ts`, not `symbolic/` — the architecture
+layering rule forbids `boxed-expression/` importing from `symbolic/`; label
+coverage measured at 100% over the simplify corpus, vs. the ≥90% target) ·
+**Date:** 2026-07-04 ·
 **Roadmap:** Product feature track item (agreed 2026-07-04): surface the
 internal `RuleSteps` trace publicly; coverage simplify → solve → D;
 human-readable step labeling.

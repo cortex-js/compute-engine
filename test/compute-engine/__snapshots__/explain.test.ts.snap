@@ -1,0 +1,109 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`explain: golden explanations (x+1)^2 - x^2 - 2x - 1 -> 0 1`] = `
+{
+  "initial": "-x^2 + (x + 1)^2 - 2x - 1",
+  "result": "0",
+  "steps": [
+    "expand: 0",
+  ],
+}
+`;
+
+exports[`explain: golden explanations (x^2-1)/(x-1): cancel common polynomial factors 1`] = `
+{
+  "initial": "(x^2 - 1) / (x - 1)",
+  "result": "x + 1",
+  "steps": [
+    "cancel common polynomial factors: x + 1",
+  ],
+}
+`;
+
+exports[`explain: golden explanations |-x| -> |x|: abs-negate 1`] = `
+{
+  "initial": "|-x|",
+  "result": "|x|",
+  "steps": [
+    "|-x| -> |x|: |x|",
+  ],
+}
+`;
+
+exports[`explain: golden explanations a^5/a^2: exponent subtraction 1`] = `
+{
+  "initial": "a^5 / a^2",
+  "result": "a^3",
+  "steps": [
+    "cancel common polynomial factors: a^3",
+  ],
+}
+`;
+
+exports[`explain: golden explanations e^{ln x}: reduces via simplify (one step), not canonicalization 1`] = `
+{
+  "initial": "e^(ln(x))",
+  "result": "x",
+  "steps": [
+    "e^ln(x) -> x: x",
+  ],
+}
+`;
+
+exports[`explain: golden explanations ln(x^3): log rule brings the exponent out (transform) 1`] = `
+{
+  "initial": "ln(x^3)",
+  "result": "3ln(x)",
+  "steps": [
+    "ln: 3ln(x)",
+  ],
+}
+`;
+
+exports[`explain: golden explanations sin(pi + x): angle shift 1`] = `
+{
+  "initial": "sin(x + pi)",
+  "result": "-sin(x)",
+  "steps": [
+    "Sin(π + x) -> -Sin(x): -sin(x)",
+  ],
+}
+`;
+
+exports[`explain: golden explanations sin^2(x) + cos^2(x): Pythagorean identity 1`] = `
+{
+  "initial": "sin(x)^2 + cos(x)^2",
+  "result": "1",
+  "steps": [
+    "sin²(x) + cos²(x) -> 1: 1",
+  ],
+}
+`;
+
+exports[`explain: golden explanations sqrt(x^2) -> |x| 1`] = `
+{
+  "initial": "sqrt(x^2)",
+  "result": "|x|",
+  "steps": [
+    "sqrt(x^2) -> |x|: |x|",
+  ],
+}
+`;
+
+exports[`explain: golden explanations sqrt[4]{16 b^4}: multi-step radical chain 1`] = `
+{
+  "initial": "root(4)(16b^4)",
+  "result": "2 * |b|",
+  "steps": [
+    "root(product, n) -> factored: 2 * |b|",
+  ],
+}
+`;
+
+exports[`explain: golden explanations x - 1: canonicalization out of frame (zero steps) 1`] = `
+{
+  "initial": "x - 1",
+  "result": "x - 1",
+  "steps": [],
+}
+`;

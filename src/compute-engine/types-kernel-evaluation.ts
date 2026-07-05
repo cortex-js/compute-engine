@@ -136,6 +136,62 @@ export type RuleStep<Expr = unknown> = {
 export type RuleSteps<Expr = unknown> = RuleStep<Expr>[];
 
 /**
+ * The operation that an `Explanation` traces. See `expr.explain()`.
+ *
+ * @category Rules
+ */
+export type ExplainOperation = 'simplify' | 'solve' | 'D';
+
+/**
+ * How much of the raw rule trace `expr.explain()` returns:
+ *
+ * - `'default'`: curated — bookkeeping steps (driver-internal markers) and
+ *   no-op steps are filtered out.
+ * - `'all'`: the raw, uncurated chain (for rule authors and debugging).
+ *
+ * @category Rules
+ */
+export type ExplainVerbosity = 'default' | 'all';
+
+/**
+ * One step of an `Explanation`: the expression state after the step was
+ * applied, with a stable machine id and a default English description.
+ *
+ * The `id` is the public, frozen identifier of the rule or algorithmic
+ * phase that produced the step; consumers key localization and custom copy
+ * off it. See `expr.explain()`.
+ *
+ * @category Rules
+ */
+export type ExplainStep<Expr = unknown> = {
+  /** The expression (or equation, for `solve`) after the step. */
+  value: Expr;
+  /** Stable machine id, e.g. `'power-of-product'`, `'fungrim:0010f3'`. */
+  id: string;
+  /** Default English description, e.g. `'Apply (ab)ⁿ = aⁿ·bⁿ'`. */
+  description: string;
+  /** The purpose of the rule that produced this step, if any. */
+  purpose?: RulePurpose;
+};
+
+/**
+ * A structured, JSON-able step-by-step explanation returned by
+ * `expr.explain()`.
+ *
+ * @category Rules
+ */
+export type Explanation<Expr = unknown> = {
+  operation: ExplainOperation;
+  /** The canonical form of the expression `explain()` was called on: the
+   * chain's step 0. */
+  initial: Expr;
+  /** The same value the plain method (`simplify()`, `solve()`, `D`)
+   * returns. */
+  result: Expr;
+  steps: ExplainStep<Expr>[];
+};
+
+/**
  * A rule describes how to transform an expression matching `match`
  * into a new expression produced by `replace`.
  *

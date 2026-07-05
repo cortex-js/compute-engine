@@ -102,6 +102,13 @@ export {
 } from './compute-engine/free-functions';
 export type { FreeFunctionOptions } from './compute-engine/free-functions';
 
+// ── Explanations (see `expr.explain()`) ─────────────────────────────
+export {
+  registerStepLabels,
+  labelFor,
+} from './compute-engine/boxed-expression/explain-labels';
+export type { StepLabel } from './compute-engine/boxed-expression/explain-labels';
+
 // ── Type guards ─────────────────────────────────────────────────────
 export {
   isExpression,

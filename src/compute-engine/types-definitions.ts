@@ -9,6 +9,7 @@ import type {
 } from './types-expression';
 import type {
   EvaluateOptions as KernelEvaluateOptions,
+  ExplainVerbosity,
   Rule as KernelRule,
   BoxedRule as KernelBoxedRule,
   BoxedRuleSet as KernelBoxedRuleSet,
@@ -555,6 +556,23 @@ export type SimplifyOptions = {
    *   keeps `e^{iθ}` in exponential form for a symbolic angle `θ`.
    */
   strategy?: 'default' | 'fu' | 'trig';
+};
+
+/** Options for `Expression.explain()`
+ *
+ * In addition to the `SimplifyOptions` (honored when explaining a
+ * `'simplify'` operation, so that `explain('simplify', options).result`
+ * matches `simplify(options)`):
+ *
+ * - `verbosity`: `'default'` returns the curated step chain (bookkeeping
+ *   steps filtered out); `'all'` returns the raw, uncurated chain.
+ * - `variable`: the unknown, for the `'solve'` and `'D'` operations.
+ *
+ * @category Boxed Expression
+ */
+export type ExplainOptions = SimplifyOptions & {
+  verbosity?: ExplainVerbosity;
+  variable?: string;
 };
 
 /**

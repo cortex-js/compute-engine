@@ -55,19 +55,26 @@ The 2026-07-04 capability survey against that goal found the engine strong on
 plotting/compile targets, units & quantities, logic/sets, linear algebra,
 equation systems, and number formatting — and thin in the areas below.
 Items 1–4 were agreed and prioritized 2026-07-04; `Series` (Phases 1–2),
-`TrigExpand`/`TrigToExp`/`TrigReduce`, and **statistics** (Phases 1–2 of
+`TrigExpand`/`TrigToExp`/`TrigReduce`, **statistics** (Phases 1–2 of
 `docs/plans/2026-07-04-statistics-design.md`: the five probability
 distributions with `PDF`/`CDF`/`Quantile`,
 `GammaRegularized`/`BetaRegularized`, covariance/correlation, and
-`LinearRegression`/`PolynomialFit` with exact fits) have landed and left
-this list. What remains (effort S/M/L):
+`LinearRegression`/`PolynomialFit` with exact fits), and **explain Phase 1**
+(`expr.explain()` for simplify: curated step chains, the step-label registry
+with `registerStepLabels`/`labelFor`, frozen `solve.*` ids on the
+`UNIVARIATE_ROOTS` templates, and the step-keeping `matchAnyRulesWithSteps`
+— see `docs/plans/2026-07-04-explain-design.md`) have landed and left this
+list. What remains (effort S/M/L):
 
-1. **Step-by-step "explain" API (L).** The rule engine already threads a
-   `RuleSteps` trace (`{value, because, purpose}` per step) through
-   simplify/rules internals, but it is not surfaced publicly and `solve` has
-   no trace at all. An educator-facing differentiator no competing JS engine
-   has. Design item: public API shape, coverage (simplify → solve → D), and
-   human-readable step labeling.
+1. **Explain API — solve and derivative coverage (M/L).** Phase 2
+   (design doc §5): instrument `findUnivariateRoots` with hand-authored
+   phase steps (`solve.apply-inverse`, `solve.clear-denominators`,
+   `solve.validate-roots`, …) where each step's value is the transformed
+   *equation*; branches (zero-product, ±√) render as one list-valued step;
+   the rule templates already carry ids and `matchAnyRulesWithSteps`
+   preserves them. Phase 3 (M, independent): instrument the
+   `differentiate()` switch (`derivative.sum-rule`, `derivative.chain-rule`,
+   …) emitting whole-expression states in traversal order.
 
 **Statistics residue (demand-gated Phase 3, design doc §10):** inverse
 regularized incomplete gamma/beta kernels and the distributions that need

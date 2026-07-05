@@ -28,6 +28,9 @@ import type {
   Rule as KernelRule,
   BoxedRuleSet as KernelBoxedRuleSet,
   Scope as KernelScope,
+  ExplainOperation,
+  ExplainVerbosity,
+  Explanation as KernelExplanation,
 } from './types-kernel-evaluation';
 
 /**
@@ -176,6 +179,13 @@ type SimplifyOptions = {
   costFunction?: (expr: Expression) => number;
   strategy?: 'default' | 'fu' | 'trig';
 };
+
+type ExplainOptions = SimplifyOptions & {
+  verbosity?: ExplainVerbosity;
+  variable?: string;
+};
+
+type Explanation = KernelExplanation<Expression>;
 
 //
 // ── Tensor & Compilation Types ──────────────────────────────────────────
@@ -1670,6 +1680,29 @@ export interface Expression {
    *
    */
   simplify(options?: Partial<SimplifyOptions>): Expression;
+
+  /**
+   * Return a structured, step-by-step explanation of an operation applied
+   * to this expression: the textbook chain *expression → step (with a
+   * reason) → … → result*.
+   *
+   * The `operation` defaults to `'simplify'`. The explanation runs the same
+   * engine code as the plain method: `explain('simplify').result` is the
+   * same value `simplify()` returns.
+   *
+   * Each step carries the expression state after the step, a stable machine
+   * `id` (the key for localization and custom copy) and a default English
+   * `description`. The `initial` property is the canonical form of this
+   * expression — canonicalization happens before the first step is recorded
+   * and is not traced.
+   *
+   * By default the step chain is curated: internal bookkeeping steps are
+   * filtered out. Pass `verbosity: 'all'` to get the raw chain (for
+   * debugging and rule authoring).
+   *
+   * The `'solve'` and `'D'` operations are not implemented yet.
+   */
+  explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation;
 
   /**
    * For a relation expression (`Equal`, `Less`, `Greater`, `LessEqual`,

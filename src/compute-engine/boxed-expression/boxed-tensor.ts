@@ -14,6 +14,9 @@ import type {
   DataTypeMap,
   Expression,
   SimplifyOptions,
+  ExplainOperation,
+  ExplainOptions,
+  Explanation,
   PatternMatchOptions,
   Tensor,
   TensorInterface,
@@ -445,6 +448,12 @@ export class BoxedTensor<T extends TensorDataType>
   simplify(options?: Partial<SimplifyOptions>): Expression {
     if (this._tensor && this._tensor.dtype !== 'expression') return this;
     return this.structural.simplify(options);
+  }
+
+  explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation {
+    if (this._tensor && this._tensor.dtype !== 'expression')
+      return super.explain(operation, options);
+    return this.structural.explain(operation, options);
   }
 
   N(): Expression {

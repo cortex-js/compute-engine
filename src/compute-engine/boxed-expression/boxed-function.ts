@@ -1,6 +1,9 @@
 import type { MathJsonExpression } from '../../math-json/types';
 import type {
   SimplifyOptions,
+  ExplainOperation,
+  ExplainOptions,
+  Explanation,
   ReplaceOptions,
   PatternMatchOptions,
   Expression,
@@ -50,6 +53,7 @@ import {
 import { replace } from './rules';
 import { negate } from './negate';
 import { simplify } from './simplify';
+import { explainExpression } from './explain';
 import { canonicalMultiply, mul, div, Product } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
 import { pow } from './arithmetic-power';
@@ -1098,6 +1102,10 @@ export class BoxedFunction
       this.engine,
       () => simplify(this, options).at(-1)?.value ?? this
     )();
+  }
+
+  explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation {
+    return explainExpression(this, operation, options);
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {

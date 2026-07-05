@@ -19,6 +19,7 @@ export type {
   OperatorDefinition,
   BaseDefinition,
   SimplifyOptions,
+  ExplainOptions,
   SymbolDefinition,
   SymbolDefinitions,
   LibraryDefinition,

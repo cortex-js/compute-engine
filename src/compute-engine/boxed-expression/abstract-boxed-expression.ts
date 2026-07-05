@@ -25,6 +25,10 @@ import type {
   JsonSerializationOptions,
   PatternMatchOptions,
   SimplifyOptions,
+  ExplainOperation,
+  ExplainOptions,
+  Explanation,
+  ExplainStep,
   IComputeEngine as ComputeEngine,
   Scope,
   Tensor,
@@ -40,6 +44,7 @@ import { cmp, eq, same } from './compare';
 import { CancellationError } from '../../common/interruptible';
 import { isSymbol, isString, isNumber, isFunction } from './type-guards';
 import { extractIntervalBounds } from './inequality-bounds';
+import { labelFor } from './explain-labels';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
@@ -941,6 +946,28 @@ export abstract class _BoxedExpression implements Expression {
 
   simplify(_options?: Partial<SimplifyOptions>): Expression {
     return this;
+  }
+
+  // Trivial default for expressions with no simplification machinery
+  // (strings, dictionaries). Subclasses with a real trace (functions,
+  // symbols, numbers, tensors) override this with `explainExpression()`,
+  // which this base class cannot import (it would recreate the
+  // abstract-boxed-expression → rules → box circular dependency).
+  explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation {
+    operation ??= 'simplify';
+    if (operation !== 'simplify') {
+      throw new Error(
+        `explain("${operation}") is not supported yet: only "simplify" explanations are available`
+      );
+    }
+    const initial = this.canonical;
+    const result = this.simplify(options);
+    const steps: ExplainStep[] = [];
+    if (!result.isSame(initial)) {
+      const { id, description } = labelFor('simplify-terms');
+      steps.push({ value: result, id, description });
+    }
+    return { operation, initial, result, steps };
   }
 
   evaluate(_options?: Partial<EvaluateOptions>): Expression {
