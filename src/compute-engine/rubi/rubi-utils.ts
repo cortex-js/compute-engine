@@ -3845,7 +3845,6 @@ export function sinCosArgNonlinearExpandableQ(
  *  unverifiable, so the fallback declines it (leaving the problem unsolved)
  *  rather than emitting an inert-verifying not-evaluable. Cheap: one sample. */
 export function numericallyEvaluable(F: Expression, x: string): boolean {
-  const ce = F.engine;
   const known = new Set([
     'Pi',
     'ExponentialE',
