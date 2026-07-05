@@ -76,6 +76,8 @@ src/
 ├── interval.ts              Interval-arithmetic entry
 ├── numerics.ts              Numeric primitives entry
 ├── compile.ts               Compilation-targets entry
+├── identities.ts            Fungrim identities plugin entry (loadIdentities)
+├── integration-rules.ts     Rubi integration-rules plugin entry
 ├── cortex.ts                Experimental Cortex language (not a published entry)
 │
 ├── math-json/               MathJSON format: types + accessors/guards
@@ -101,12 +103,39 @@ src/
     ├── latex-syntax/         LaTeX ↔ MathJSON tokenizer, parser, serializer, dictionary
     ├── library/              Standard library of operators & constants, by domain
     ├── symbolic/             Simplification rules, calculus, the Fu trig algorithm
+    ├── rubi/                 Rubi rule-based integrator (loader, matcher, driver)
     ├── numerics/             Numeric algorithms (primes, rationals, special functions)
     ├── numeric-value/        NumericValue abstraction (exact / machine / bignum)
     ├── compilation/          Expression → JS/GLSL/WGSL/Python code generation
     ├── interval/             Interval arithmetic
     └── tensor/               Vectors, matrices, multi-dimensional arrays
 ```
+
+Outside `src/`: **`data/`** holds the Rubi and Fungrim rule corpora consumed
+by the plugin entries (see "Integration rules" below); **`benchmarks/`** is
+the cross-library benchmark and audit harness (see
+[`benchmarks/README.md`](./benchmarks/README.md)); **`docs/reviews/`** holds
+findings trackers from codebase reviews.
+
+## Where does X live?
+
+A task-oriented index — where to start for the most common kinds of work
+(paths relative to `src/compute-engine/` unless noted):
+
+| Task | Start here |
+|---|---|
+| Parse bug (LaTeX → wrong MathJSON) | `latex-syntax/dictionary/definitions-*.ts` |
+| Serialization bug (expression → wrong LaTeX) | `latex-syntax/serializer.ts` + the operator's dictionary entry |
+| Wrong canonical form | `boxed-expression/arithmetic-*.ts`, `boxed-expression/canonical.ts` |
+| Wrong `evaluate()`/`N()` result | the operator's `evaluate` handler in `library/<domain>.ts`, then `numerics/` for the kernel |
+| Simplification missing or wrong | `symbolic/simplify-rules.ts` + [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md) |
+| Trig simplification | `symbolic/fu*.ts`, `boxed-expression/trigonometry.ts` (`constructibleValues`) |
+| Integration (symbolic) | `symbolic/antiderivative.ts` for built-ins; `rubi/` for the rule-based integrator; `latex-syntax/dictionary/README.md` for the ∫ parse→eval→serialize pipeline |
+| Solve | `boxed-expression/solve.ts`, `boxed-expression/solve-linear-system.ts` |
+| Type-inference bug | `library/type-handlers.ts`, `src/common/type/` |
+| Compilation target bug | `compilation/<target>.ts`; the tree walk is in `compilation/base-compiler.ts` |
+| Assumptions / `verify()` / `ask()` | `engine-assumptions.ts`, `assume.ts` |
+| Step-by-step explanations | `boxed-expression/explain.ts`, `explain-labels.ts` |
 
 ## Layered module architecture
 
@@ -306,6 +335,14 @@ holds focused modules for `expand.ts`, `factor.ts`, `solve.ts` /
 (`match.ts`, `pattern-utils.ts`), comparison (`compare.ts`), and the type guards
 exported to consumers (`type-guards.ts`).
 
+**Step-by-step explanations.** `explain.ts` / `explain-labels.ts` implement
+`expr.explain('simplify' | 'solve' | 'D')`, which returns a structured trace
+of the operation with human-readable labels (a ~250-entry registry in
+`explain-labels.ts`; the registry lives in `boxed-expression/` rather than
+`symbolic/` for layering reasons). The derivative driver
+(`symbolic/explain-derivative.ts`) self-registers via `_setExplainDDriver`,
+keeping `boxed-expression/` free of an upward import into `symbolic/`.
+
 ## Type system
 
 `src/common/type/` is a self-contained type system used to describe and check
@@ -480,6 +517,29 @@ Rules are pattern/predicate based and must avoid re-entrant `.simplify()` calls;
 the recursion constraints are documented in
 [CLAUDE.md](./CLAUDE.md#simplification-and-recursion-prevention).
 
+## Integration rules: Rubi and Fungrim
+
+Symbolic capabilities beyond the built-in tables come from two optional,
+separately-bundled plugins whose rule corpora live in `data/`:
+
+- **Rubi** (`src/compute-engine/rubi/`, corpus in `data/rubi/`, published as
+  `…/integration-rules`) is a port of the Rubi rule-based integrator: a
+  loader that compiles rule chapters into matchers, a normal-form module, and
+  a driver that applies rules during `Integrate` evaluation. Rules ship in
+  chapter bundles; **chapter bundles assume the chapter-1 foundation rules
+  are loaded first** — loading, say, the trig chapters without ch1 silently
+  degrades coverage rather than erroring.
+- **Fungrim** (`src/identities.ts`, corpus in `data/fungrim/`, published as
+  `…/identities`) provides curated identities and special values, loadable as
+  simplify/solve rules via `loadIdentities(ce, { topics: […] })`. The loader
+  uses only the public engine API, so this bundle shares no engine code with
+  the main entry.
+
+Because these plugins re-bundle engine code, `instanceof` and
+`constructor.name` checks fail across the host/plugin boundary — use string
+checks like `e.name === '…'` (see
+[CLAUDE.md](./CLAUDE.md#common-api-traps)).
+
 ## Numerics
 
 Numeric values are abstracted so the engine can stay exact when possible and
@@ -513,6 +573,10 @@ and delegates formatting to a `LanguageTarget` / `CompileTarget`
 - `glsl-target.ts`, `wgsl-target.ts`, `gpu-target.ts` — GPU shaders.
 - `python-target.ts` — Python 3.
 - `interval-javascript-target.ts` — JavaScript with interval arithmetic.
+- `interval-glsl-target.ts` — GLSL with interval arithmetic (`vec2` intervals,
+  outward rounding for float32 soundness); powers `compileExclusionShader()`
+  for implicit-curve plotting. Design notes in
+  [`docs/INTERVAL_GLSL_PLAN.md`](./docs/INTERVAL_GLSL_PLAN.md).
 
 Targets are registered in the engine's compilation-target registry and validated
 by the extension contracts. Consumers can register custom targets via
@@ -533,6 +597,8 @@ minified, with `.d.ts` types in `dist/types/`:
 | `…/numerics` | `src/numerics.ts` | Numeric primitives (BigDecimal, rationals, special functions) |
 | `…/interval` | `src/interval.ts` | Interval arithmetic |
 | `…/compile` | `src/compile.ts` | Compilation targets |
+| `…/identities` | `src/identities.ts` | Fungrim identities loader (rules-as-data plugin) |
+| `…/integration-rules` | `src/integration-rules.ts` | Rubi rule-based integration plugin |
 
 The **full** entry (`compute-engine.ts`) registers
 `ComputeEngine._latexSyntaxFactory` and a default-engine factory that injects
@@ -562,7 +628,7 @@ These properties are intentional and enforced; preserve them when contributing:
 
 1. **Zero circular dependencies** in `src/compute-engine` (runtime *and*
    type-only), checked with `madge`. See
-   [CLAUDE.md](./CLAUDE.md#circular-dependency-resolution) and
+   [CLAUDE.md](./CLAUDE.md#circular-dependencies) and
    `docs/architecture/ZERO-CYCLES-PLAN.md`.
 2. **Layered imports**: kernel types → wrappers → services → composition root;
    no upward imports. Enforced by ESLint `import/no-restricted-paths`.
