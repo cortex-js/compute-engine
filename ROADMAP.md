@@ -24,6 +24,13 @@ The 2026-06 release shipped:
 - a substantial bignum/numeric performance pass (item 17): base-2 internal
   kernels, AGM `ln`, faster `sqrt`/`Gamma`, on-demand π and γ.
 
+**MathNet parser hardening (2026-07-04):** all four tiers of
+`docs/mathnet/parser-hardening-plan.md` landed and are test-locked
+(`ContinuationPlaceholder` crash, ellipsis/trailing-punctuation recovery,
+Unicode relation tokens, congruence/divisibility, geometry heads; corpus
+clean-parse 3/345 → 277/345, throws 9 → 0). Residual parser items in
+"Remaining work" below are unrelated to that pass.
+
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
 status:** R1 and R2 gates cleared (full-Chapter-1 exhaustive run ≈90%, ≈91.3%
 with the committed `Numer/Denom` + upstream-1.1.3.6 fixes). Remaining Rubi
@@ -113,8 +120,7 @@ Still open from its ranked list:
 - **Loose-parsing low items:** `sqrt2x` → `√(2x)` divergence from AsciiMath
   convention; `min x` → `Min(x)`; explicit `_a` wildcards in arrow-string
   rules are a silent no-op (redundant there — auto-wildcarding covers it).
-- **Doc/cosmetic tail:** `5.` invalid while `.5` parses; `0.999\ldots` drops
-  the ellipsis; locale separators.
+- **Doc/cosmetic tail:** `0.999\ldots` drops the ellipsis; locale separators.
 - ODE P2s (all correctly inert, no wrong answers): sin/exp forcing via
   undetermined coefficients, order ≥ 3 nonhomogeneous, tolerance hardening.
 
