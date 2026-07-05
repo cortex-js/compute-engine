@@ -5,7 +5,8 @@ import type { MathJsonExpression, MathJsonNumberObject } from '../../math-json';
 
 import { mul, div } from './arithmetic-mul-div';
 
-import { canonicalInteger, SMALL_INTEGER } from '../numerics/numeric';
+import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric';
+import { primeFactors } from '../numerics/primes';
 import type { Rational, SmallInteger } from '../numerics/types';
 import { bigint } from '../numerics/bigint';
 
@@ -433,6 +434,32 @@ export class BoxedNumber
     )
       return ce.One;
 
+    // log_b(a) exact rational reduction: when the argument `a` and the base
+    // `b` are both integer powers of a common integer base c (e.g. 2 = 2^1 and
+    // 8 = 2^3), then log_b(a) = p/q is exact. Handles both orders —
+    // log_2(8) = 3, log_8(2) = 1/3, log_4(8) = 3/2 — and stays symbolic when
+    // the bases have different prime support (log_8(10)).
+    if (base !== undefined && isNumber(base) && base.isInteger) {
+      const a = this.re;
+      const b = base.re;
+      if (
+        Number.isInteger(a) &&
+        a > 1 &&
+        a < Number.MAX_SAFE_INTEGER &&
+        Number.isInteger(b) &&
+        b > 1 &&
+        b < Number.MAX_SAFE_INTEGER
+      ) {
+        const r = integerLogRational(a, b);
+        if (r !== null) {
+          const [p, q] = r;
+          return q === 1
+            ? ce.number(p)
+            : ce.number(ce._numericValue({ rational: [p, q] }));
+        }
+      }
+    }
+
     const f = this.re;
     if (Number.isInteger(f) && f > 0) {
       let [factor, root] = canonicalInteger(f, 3);
@@ -815,6 +842,42 @@ export class BoxedNumber
     if (v === n) return this;
     return this.engine.number(n);
   }
+}
+
+/**
+ * If integers `a > 1` and `b > 1` are both integer powers of a common integer
+ * base `c` (i.e. a = c^p, b = c^q), return the reduced rational `[p, q]` so
+ * that `log_b(a) = p/q`. Otherwise return `null`.
+ *
+ * Two integers are powers of a common base iff they share the same set of
+ * prime factors and their prime-exponent vectors are proportional; the ratio
+ * of exponents is then p/q.
+ */
+function integerLogRational(a: number, b: number): [number, number] | null {
+  const fa = primeFactors(a);
+  const fb = primeFactors(b);
+  const primesA = Object.keys(fa);
+  const primesB = Object.keys(fb);
+  // Both must share exactly the same set of prime factors.
+  if (primesA.length !== primesB.length) return null;
+  let num = 0;
+  let den = 0;
+  for (const p of primesA) {
+    const pn = Number(p);
+    const eb = fb[pn];
+    if (eb === undefined) return null; // prime not a factor of `b`
+    const ea = fa[pn];
+    if (num === 0 && den === 0) {
+      num = ea;
+      den = eb;
+    } else if (ea * den !== num * eb) {
+      // Exponent ratios differ → not powers of a common base.
+      return null;
+    }
+  }
+  if (den === 0) return null;
+  const g = gcd(num, den);
+  return [num / g, den / g];
 }
 
 export function canonicalNumber(

@@ -437,7 +437,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Exp: {
-      description: 'Natural exponential function: e^x.',
+      description:
+        'Natural exponential function: e^x. Applied to a matrix (or any ' +
+        'collection), it broadcasts ELEMENTWISE — it is NOT the matrix ' +
+        'exponential e^M (which is not currently implemented).',
       wikidata: 'Q168698',
       broadcastable: true,
       complexity: 3500,
@@ -2382,15 +2385,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       evaluate: (ops, options) => {
         const ce = options.engine;
-        // EL-4: see the matching comment in `Sum.evaluate` — an infinite
-        // (capped) domain is accumulated numerically; a symbolic body over one
-        // stays symbolic.
-        let numeric = options.numericApproximation;
-        if (!numeric) {
-          const mode = classifyBigopDomain(ops[0], ops.slice(1), ce);
-          if (mode === 'symbolic') return undefined;
-          if (mode === 'numeric') numeric = true;
-        }
+        // EL-4 (revised): see the matching comment in `Sum.evaluate` — an
+        // infinite domain stays symbolic under exact evaluate (`.N()` owns
+        // the truncated numeric path); free bounds/body are never enumerable.
+        const numeric = options.numericApproximation;
+        const mode = classifyBigopDomain(ops[0], ops.slice(1), ce);
+        if (mode === 'symbolic') return undefined;
+        if (mode === 'numeric' && !numeric) return undefined;
         const result = run(
           reduceBigOp(
             ops[0],
@@ -2413,11 +2414,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       evaluateAsync: async (ops, options) => {
         const ce = options.engine;
-        let numeric = options.numericApproximation;
-        if (!numeric) {
+        const numeric = options.numericApproximation;
+        {
           const mode = classifyBigopDomain(ops[0], ops.slice(1), ce);
           if (mode === 'symbolic') return undefined;
-          if (mode === 'numeric') numeric = true;
+          if (mode === 'numeric' && !numeric) return undefined;
         }
         const result = await runAsync(
           reduceBigOp(
@@ -2482,15 +2483,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
 
         // Big-op form: Sum(body, [i, a, b], …).
-        // EL-4: an infinite (capped) domain is a truncated approximation, so
-        // accumulate it numerically rather than building an intractable exact
-        // rational; a symbolic body over such a domain stays symbolic.
-        let numeric = numericApproximation;
-        if (!numeric) {
-          const mode = classifyBigopDomain(first, rest, engine);
-          if (mode === 'symbolic') return undefined;
-          if (mode === 'numeric') numeric = true;
-        }
+        // EL-4 (revised): an infinite (capped) domain is only a truncated
+        // approximation — it has no exact value, so exact `evaluate()` stays
+        // symbolic and `.N()` owns the numeric path. Free (symbolic) bounds
+        // or a body with free variables beyond the index are never
+        // enumerable, under either mode.
+        const numeric = numericApproximation;
+        const mode = classifyBigopDomain(first, rest, engine);
+        if (mode === 'symbolic') return undefined;
+        if (mode === 'numeric' && !numeric) return undefined;
         const result = run(
           reduceBigOp(
             first,
@@ -2534,11 +2535,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return result?.evaluate({ numericApproximation }) ?? engine.NaN;
         }
 
-        let numeric = numericApproximation;
-        if (!numeric) {
+        const numeric = numericApproximation;
+        {
           const mode = classifyBigopDomain(first, rest, engine);
           if (mode === 'symbolic') return undefined;
-          if (mode === 'numeric') numeric = true;
+          if (mode === 'numeric' && !numeric) return undefined;
         }
         const result = await runAsync(
           reduceBigOp(

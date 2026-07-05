@@ -393,6 +393,60 @@ that corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **`Sum` reports incompatible elements.** Summing a collection containing a
   string returns a typed error instead of a silent `NaN`.
 
+- **Sums and products over an infinite domain stay symbolic under
+  `evaluate()`.** An infinite domain has no exact value by truncation, so
+  $\sum_{n=1}^{\infty} \frac{1}{n^2}$ now evaluates to itself; `.N()` returns
+  the truncated numeric approximation, as before. Previously `evaluate()`
+  returned a silently truncated partial sum (off by $\sim 10^{-4}$ for this
+  example) — a float where the exactness contract promises an exact value.
+
+- **Sums and products with symbolic bounds no longer evaluate to a number.**
+  `\sum_{k=1}^{n} k` with an unbound $n$ evaluated to $50\,015\,001$ — the
+  sum truncated at an internal iteration cap of $10\,001$ — under both
+  `evaluate()` and `.N()`. It now stays symbolic (`simplify()` still
+  produces the closed form $\tfrac{n^2+n}{2}$).
+
+- **`Expand` computes constant powers.** `Expand((2+3i)^{1000})` returns the
+  exact 557-digit Gaussian integer (matching SymPy's `expand()`), and
+  `Expand(2^{1000})` the exact integer; both previously returned unevaluated.
+  Structural expansion of symbolic powers is unchanged, and powers too large
+  for exact computation still stay symbolic.
+
+- **Huge exact complex numbers are finite and print in full.** An exact
+  Gaussian integer with components beyond float64 range (e.g.
+  $(2+3i)^{1000}$) reported `isInfinity` `true`, serialized as $\tilde\infty$
+  in plain text, and had a `NaN` `bignumIm` — all artifacts of routing
+  through the machine-float projection. It now types as `finite_complex`,
+  prints its full digits, and `bignumIm` is exact.
+
+- **Perfect-power radicands reduce.** $(997^3)^{1/6} = \sqrt{997}$,
+  $8^{1/6} = \sqrt2$, $8^{1/4} = 2^{3/4}$: when canonicalization folds a
+  power into an opaque integer, the root now recovers the structure by
+  perfect-power decomposition. In particular the zero-equivalence test
+  $\sqrt{997} - (997^3)^{1/6}$ evaluates to exact $0$ (it previously leaked
+  a float residue).
+
+- **Logarithms reduce when the argument and base are powers of a common
+  base.** $\log_8 32768 = 5$, $\log_8 2 = \tfrac13$, $\log_4 8 = \tfrac32$
+  — exactly, honoring the exactness contract ($\ln 2$ and $\log_8 10$ stay
+  symbolic).
+
+- **`Xor` cancels repeated operands.** $a \oplus a = \mathrm{False}$, so
+  `Xor(x, y, y)` evaluates to $x$; cancellation composes with the existing
+  `True`/`False` folding.
+
+### Linear Algebra
+
+- **3×3 `Eigenvalues` returned wrong values — fixed.** The analytic solver
+  used a sign-flipped term in its depressed cubic, mirroring every
+  eigenvalue about $\operatorname{tr}/3$: e.g.
+  $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned $\{\tfrac{10}{3}, -\tfrac53,
+  \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra symmetric about their
+  mean — like $\{1,2,3\}$ — were unaffected, which is how it escaped
+  notice.) Additionally, a complex-conjugate eigenvalue pair was returned as
+  its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$); complex
+  eigenvalues are now returned as complex numbers.
+
 ### Rules and Pattern Matching
 
 - **Rule conditions must return a boolean.** A `condition` function returning

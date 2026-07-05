@@ -285,23 +285,31 @@ export function evaluateXor(
     }
   }
 
-  // If all arguments are known, return the result
-  if (unknowns.length === 0) {
-    return trueCount % 2 === 1 ? ce.True : ce.False;
+  // Cancel identical operands pairwise: a ⊕ a = False, so an operand with even
+  // multiplicity drops out and one with odd multiplicity survives once. Xor is
+  // associative and commutative, so this parity-of-multiplicity grouping is
+  // sound. Uses structural identity (`isSame`).
+  const reduced: Expression[] = [];
+  for (const u of unknowns) {
+    const idx = reduced.findIndex((r) => r.isSame(u));
+    if (idx >= 0) reduced.splice(idx, 1);
+    else reduced.push(u);
   }
 
-  // Partial evaluation: XOR with known True values flips the result
-  // XOR(True, x) = NOT(x), XOR(False, x) = x
-  if (unknowns.length === 1 && trueCount % 2 === 1) {
-    // Odd number of Trues with one unknown = NOT(unknown)
-    return ce._fn('Not', [unknowns[0]]);
-  }
-  if (unknowns.length === 1 && trueCount % 2 === 0) {
-    // Even number of Trues with one unknown = unknown
-    return unknowns[0];
-  }
+  const oddTrue = trueCount % 2 === 1;
 
-  return undefined;
+  // All unknowns cancelled: the result is determined by the True parity alone.
+  if (reduced.length === 0) return oddTrue ? ce.True : ce.False;
+
+  // A single surviving unknown: XOR(True, x) = NOT(x), XOR(False, x) = x.
+  if (reduced.length === 1)
+    return oddTrue ? ce._fn('Not', [reduced[0]]) : reduced[0];
+
+  // Multiple surviving unknowns. If nothing cancelled, preserve the prior
+  // behaviour (leave the expression untouched); otherwise rebuild the reduced
+  // Xor, folding the True parity back in as an explicit operand.
+  if (reduced.length === unknowns.length) return undefined;
+  return ce._fn('Xor', oddTrue ? [ce.True, ...reduced] : reduced);
 }
 
 export function evaluateNand(

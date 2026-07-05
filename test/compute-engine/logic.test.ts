@@ -119,6 +119,26 @@ describe('Logic', () => {
     // XOR(False, x) = x
     expect(box(['Xor', 'False', 'A'])).toMatchInlineSnapshot(`A`);
   });
+
+  it('should cancel repeated Xor operands (a ⊕ a = False)', () => {
+    // Uppercase boolean symbols avoid retyping x/y/z used by later
+    // arithmetic-sensitive tests in this shared engine.
+    // Xor(Xor(A, B), B) → A
+    expect(box(['Xor', ['Xor', 'A', 'B'], 'B'])).toMatchInlineSnapshot(`A`);
+    // Even multiplicity cancels to False
+    expect(box(['Xor', 'A', 'A'])).toMatchInlineSnapshot(`"False"`);
+    // Odd multiplicity leaves one survivor
+    expect(box(['Xor', 'A', 'A', 'A'])).toMatchInlineSnapshot(`A`);
+    // Distinct operands are preserved
+    expect(box(['Xor', 'A', 'B'])).toMatchInlineSnapshot(`Xor(A, B)`);
+    // Multiple pairs cancel, distinct survivors remain
+    expect(box(['Xor', 'A', 'B', 'B', 'C'])).toMatchInlineSnapshot(
+      `Xor(A, C)`
+    );
+    expect(box(['Xor', 'A', 'A', 'B', 'B'])).toMatchInlineSnapshot(`"False"`);
+    // Cancellation composes with a True operand: Xor(True, A, A) = True
+    expect(box(['Xor', 'True', 'A', 'A'])).toMatchInlineSnapshot(`"True"`);
+  });
 });
 
 describe('Kronecker Delta', () => {

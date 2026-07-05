@@ -919,6 +919,23 @@ describe('LOG(a,b)', () => {
     expect(checkJson(['Log', ['Complex', 1.1, 1.1], 5])).toMatchSnapshot());
 });
 
+describe('LOG common-base rational reduction', () => {
+  const logEval = (a: number, b: number) =>
+    ce.expr(['Log', a, b]).evaluate().toString();
+  test('log_8(2) = 1/3', () => expect(logEval(2, 8)).toEqual('1/3'));
+  test('log_8(32768) = 5', () => expect(logEval(32768, 8)).toEqual('5'));
+  test('log_2(8) = 3', () => expect(logEval(8, 2)).toEqual('3'));
+  test('log_4(8) = 3/2', () => expect(logEval(8, 4)).toEqual('3/2'));
+  test('log_9(27) = 3/2', () => expect(logEval(27, 9)).toEqual('3/2'));
+  test('log_27(9) = 2/3', () => expect(logEval(9, 27)).toEqual('2/3'));
+  test('log_8(10) stays symbolic', () =>
+    expect(logEval(10, 8)).toEqual('log(10, 8)'));
+  test('log_b(1) = 0', () => expect(logEval(1, 8)).toEqual('0'));
+  // Exactness contract: ln of an exact argument stays symbolic under evaluate.
+  test('ln(2) stays symbolic', () =>
+    expect(ce.parse('\\ln 2').evaluate().toString()).toEqual('ln(2)'));
+});
+
 describe('INVALID LOG', () => {
   test(`Ln`, () => expect(checkJson(['Ln'])).toMatchSnapshot());
   test(`Ln with string argument`, () =>

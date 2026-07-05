@@ -434,6 +434,8 @@ describe('CORTEX PARSING SYMBOLS', () => {
   });
 });
 
+// Unsupported: these Unicode operator aliases currently parse as unexpected
+// symbols rather than their ASCII/operator equivalents.
 describe.skip('CORTEX PARSING FANCY SYMBOLS', () => {
   test('Fancy symbols', () => {
     expect(validCortex('a ∧ ¬b ⋁ !c')).toMatchInlineSnapshot();
@@ -805,6 +807,8 @@ describe('CORTEX PARSING EXTENDED STRINGS', () => {
   });
 });
 
+// Unsupported: dictionary syntax currently stops at the opening `{` or function
+// call delimiter, so even the "valid" examples parse as errors.
 describe.skip('CORTEX PARSING DICTIONARY', () => {
   test('Empty dictionary', () => {
     expect(validCortex('{->}')).toMatchInlineSnapshot();
@@ -833,6 +837,8 @@ describe.skip('CORTEX PARSING DICTIONARY', () => {
   });
 });
 
+// Unsupported: collection shorthand/function syntax is not currently parsed by
+// the Cortex parser.
 describe.skip('CORTEX PARSING COLLECTIONS', () => {
   test('Sets', () => {
     expect(validCortex('{}')).toMatchInlineSnapshot();
@@ -872,6 +878,8 @@ describe.skip('CORTEX PARSING COLLECTIONS', () => {
   // Dictionaries: see above.
 });
 
+// Unsupported/incomplete: arithmetic, invisible, and power operators still have
+// known parser gaps; unary minus currently errors at `-`.
 describe.skip('CORTEX PARSING OPERATORS', () => {
   test('Unary Operators', () => {
     expect(validCortex('-x')).toStrictEqual(['Negate', 'x']);
@@ -935,6 +943,7 @@ describe.skip('CORTEX PARSING OPERATORS', () => {
   });
 });
 
+// Unsupported: function-call syntax is not currently accepted in this parser.
 describe.skip('CORTEX PARSING FUNCTIONS', () => {
   test('Functions', () => {
     expect(validCortex('f()')).toMatchInlineSnapshot();

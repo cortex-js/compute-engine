@@ -992,6 +992,33 @@ export function root(
         if (v?.isExact && !v.isNaN) return a.engine.number(v);
       }
     }
+
+    // The radicand may be a perfect power whose structure was folded away at
+    // canonicalization (997³ → 991026973): decompose n = m^k with the largest
+    // k and reduce the exponent, root_e(m^k) = m^(k/e) — e.g.
+    // root6(997³) = √997, root6(8) = √2, root6(4096) = 4. (Wester 26; the
+    // structurally preserved (999983³)^(1/6) already reduces via the (x^a)^b
+    // exponent rule, which this makes consistent.)
+    if (
+      e !== undefined &&
+      Number.isInteger(e) &&
+      e > 1 &&
+      a.isPositive === true
+    ) {
+      const n = a.re;
+      if (Number.isSafeInteger(n) && n > 1) {
+        for (let k = Math.floor(Math.log2(n)); k >= 2; k--) {
+          const m = Math.round(Math.pow(n, 1 / k));
+          if (m > 1 && BigInt(m) ** BigInt(k) === BigInt(n)) {
+            // m is not itself a perfect power (k is maximal), so the
+            // rational-exponent path in pow() terminates.
+            return pow(a.engine.number(m), a.engine.number([k, e]), {
+              numericApproximation: false,
+            });
+          }
+        }
+      }
+    }
   }
 
   return a.engine._fn('Root', [a, b]);

@@ -43,26 +43,24 @@ export function convertInfiniteSetToLimits(
 }
 
 /**
- * EL-4: Classify a big-op (`Sum`/`Product`) domain to decide how it should be
- * accumulated under an *exact* `evaluate()` (i.e. not `numericApproximation`).
+ * EL-4 (revised): Classify a big-op (`Sum`/`Product`) domain.
  *
  * An infinite integer domain — `n ∈ ℤ⁺`, `n ∈ ℕ₀`, or a `Limits` range with an
  * infinite bound — is iterated up to `MAX_ITERATION` terms, so its value is only
- * a *truncated numeric approximation*, never a closed form. Accumulating it
- * exactly builds an intractable object that both hangs the thread and is
- * meaningless:
- *   - `Σ 1/n²` over ℤ⁺ becomes a rational whose denominator is the LCM of 10⁴
- *     squares (a bigint with tens of thousands of digits);
- *   - `Σ xⁿ` becomes a 10⁴-term symbolic polynomial.
+ * a *truncated numeric approximation*, never a closed form. Per the exactness
+ * contract, exact `evaluate()` therefore stays symbolic on ANY non-finite
+ * domain; only `.N()` (`numericApproximation`) may truncate-iterate, and only
+ * when the body is numeric.
  *
  * Returns:
- *   - `'finite'`   — the domain is finite (or non-iterable / symbolic); evaluate
- *                    normally, preserving exactness.
- *   - `'numeric'`  — infinite domain with a numeric body; accumulate as floats
- *                    (fast, and honest about the truncation).
- *   - `'symbolic'` — infinite domain with a body that has free variables beyond
- *                    the index (e.g. `Σ xⁿ`); a truncated partial value is
- *                    meaningless, so keep the expression symbolic.
+ *   - `'finite'`   — enumerable exactly; evaluate normally under either mode.
+ *   - `'numeric'`  — infinite domain with a numeric body: exact evaluate stays
+ *                    symbolic; `.N()` accumulates floats (honest about the
+ *                    truncation).
+ *   - `'symbolic'` — never enumerable, under either mode: a free (symbolic)
+ *                    bound (e.g. `Σ_{k=1}^{n}`), or a body with free variables
+ *                    beyond the index (e.g. `Σ xⁿ` over ℤ⁺), where a truncated
+ *                    partial value would be meaningless.
  */
 export function classifyBigopDomain(
   body: Expression | undefined,

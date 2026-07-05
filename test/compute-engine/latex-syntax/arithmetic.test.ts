@@ -555,72 +555,77 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
   });
 });
 
-describe('EL-4: Infinite series with Element notation', () => {
-  // EL-4: NonNegativeIntegers and PositiveIntegers are converted to Limits form
-  // and iterated (capped at MAX_ITERATION), behaving like traditional bounds notation
+describe('EL-4 (revised): Infinite series with Element notation', () => {
+  // EL-4 (revised 2026-07-05): an infinite domain has no exact value by
+  // truncation, so exact `evaluate()` stays SYMBOLIC and `.N()` owns the
+  // (capped, truncated) numeric path. NonNegativeIntegers/PositiveIntegers
+  // are converted to Limits form and iterated under `.N()` only.
 
-  test('sum over NonNegativeIntegers evaluates (converges to partial sum)', () => {
-    // Sum n from 0 to MAX_ITERATION - should give a numeric result (triangular number approximation)
-    // Note: This test verifies the behavior change, not the exact value
+  test('sum over NonNegativeIntegers stays symbolic under evaluate()', () => {
     const expr = ce.expr(['Sum', 'n', ['Element', 'n', 'NonNegativeIntegers']]);
     const result = expr.evaluate();
-    // Should be a Number, not remain as Sum
+    expect(result.operator).toBe('Sum');
+    expect(result.isNaN).not.toBe(true);
+  }, 15000);
+
+  test('sum over NonNegativeIntegers numericizes under N()', () => {
+    // Truncated partial sum (triangular number at the iteration cap) — this
+    // verifies the numeric path terminates, not the exact value.
+    const expr = ce.expr(['Sum', 'n', ['Element', 'n', 'NonNegativeIntegers']]);
+    const result = expr.N();
     expect(result.isNumber).toBe(true);
     expect(result.operator).not.toBe('Sum');
     expect(result.isNaN).not.toBe(true);
-  }, 15000); // Allow 15 seconds for iteration
+  }, 15000);
 
-  test('product over PositiveIntegers evaluates (converges to partial product)', () => {
-    // Product k from 1 to MAX_ITERATION - should give a numeric result
+  test('product over PositiveIntegers stays symbolic under evaluate(), numericizes under N()', () => {
     const expr = ce.expr([
       'Product',
       'k',
       ['Element', 'k', 'PositiveIntegers'],
     ]);
-    const result = expr.evaluate();
-    // Should be a Number, not remain as Product
+    expect(expr.evaluate().operator).toBe('Product');
+    const result = expr.N();
     expect(result.isNumber).toBe(true);
     expect(result.operator).not.toBe('Product');
     expect(result.isNaN).not.toBe(true);
-  }, 15000); // Allow 15 seconds for iteration
+  }, 15000);
 
-  test('convergent series over NonNegativeIntegers gives reasonable approximation', () => {
+  test('convergent series over PositiveIntegers gives reasonable approximation under N()', () => {
     // Sum 1/n^2 from 1 to infinity approaches π²/6 ≈ 1.6449
-    // Using PositiveIntegers to avoid division by zero
     const expr = ce.expr([
       'Sum',
       ['Power', 'n', -2],
       ['Element', 'n', 'PositiveIntegers'],
     ]);
-    const result = expr.evaluate();
+    const result = expr.N();
     expect(result.isNumber).toBe(true);
-    // Should be close to π²/6 ≈ 1.6449
-    // .re gives us the numeric value as a number
     const value = result.re;
     expect(typeof value).toBe('number');
     expect(value).toBeGreaterThan(1.6);
     expect(value).toBeLessThan(1.7);
-  }, 30000); // Allow 30 seconds for this computation
+  }, 30000);
 
-  // Regression: an infinite (capped) domain must be accumulated *numerically*.
-  // Accumulating Σ 1/n² exactly builds a rational whose denominator is the LCM
-  // of 10⁴ squares — an intractable bigint that hung the thread (the Element
-  // iteration also bypassed the engine deadline, so `run()` never cancelled).
-  test('divergent series over PositiveIntegers terminates (does not hang)', () => {
+  // Regression: an infinite (capped) domain must be accumulated *numerically*
+  // under `.N()`. Accumulating Σ 1/n² exactly builds a rational whose
+  // denominator is the LCM of 10⁴ squares — an intractable bigint that hung
+  // the thread (the Element iteration also bypassed the engine deadline, so
+  // `run()` never cancelled).
+  test('divergent series over PositiveIntegers terminates under N() (does not hang)', () => {
     const start = Date.now();
     const expr = ce.expr([
       'Sum',
       ['Power', 'n', -1], // harmonic series — diverges
       ['Element', 'n', 'PositiveIntegers'],
     ]);
-    const result = expr.evaluate();
+    const result = expr.N();
     // Returns the truncated numeric partial sum, quickly, without hanging.
     expect(result.isNumber).toBe(true);
     expect(Number.isFinite(result.re)).toBe(true);
     expect(Date.now() - start).toBeLessThan(5000);
   }, 10000);
 
-  test('infinite series with a symbolic body stays symbolic', () => {
+  test('infinite series with a symbolic body stays symbolic under both modes', () => {
     // Σ xⁿ has a free variable beyond the index, so a truncated partial value
     // is meaningless: keep it symbolic instead of building a 10⁴-term polynomial.
     const expr = ce.expr([
@@ -628,17 +633,17 @@ describe('EL-4: Infinite series with Element notation', () => {
       ['Power', 'x', 'n'],
       ['Element', 'n', 'NonNegativeIntegers'],
     ]);
-    const result = expr.evaluate();
-    expect(result.operator).toBe('Sum');
-    expect(result.isNaN).not.toBe(true);
+    expect(expr.evaluate().operator).toBe('Sum');
+    expect(expr.N().operator).toBe('Sum');
   }, 10000);
 
-  test('convergent series with traditional infinite bounds evaluates numerically', () => {
-    // Σ_{n=1}^{∞} 1/n² via `.evaluate()` (not just `.N()`) — the exact
-    // accumulation used to exceed the deadline and throw.
-    const result = ce
-      .parse('\\sum_{n=1}^{\\infty} \\frac{1}{n^2}')
-      .evaluate();
+  test('convergent series with traditional infinite bounds: symbolic evaluate, numeric N()', () => {
+    // Σ_{n=1}^{∞} 1/n² — `.evaluate()` stays symbolic (no closed form yet);
+    // `.N()` gives the truncated approximation (the exact accumulation used
+    // to exceed the deadline and throw).
+    const expr = ce.parse('\\sum_{n=1}^{\\infty} \\frac{1}{n^2}');
+    expect(expr.evaluate().operator).toBe('Sum');
+    const result = expr.N();
     expect(result.isNumber).toBe(true);
     expect(result.re).toBeGreaterThan(1.6);
     expect(result.re).toBeLessThan(1.7);

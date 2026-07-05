@@ -232,38 +232,32 @@ separate tracking is needed. Grouped by theme:
   √2+√3+√5`), recursive (Wester 9, the Putnam radical), and cube-root
   (`(90+34√7)^{1/3} → 3+√7`). Rationalizing denominators
   (`(√3+√2)/(√3−√2) → 5+2√6`). Extracting perfect-power factors from a
-  rational radicand (`(1029/1000)^{1/3} → 7·3^{1/3}/10`) and from an integer
-  radicand (`root6(997³) → √997` — Wester 26 fails while the structurally
-  identical Wester 27 reduces exactly, and the failing path leaks a **float
-  residue** out of `evaluate()`, an exactness-contract violation). Exact
-  arithmetic over `ℚ(2^{1/3})` (Wester 28, also a float leak).
-- **Logarithm reduction.** `log_b(a)` when `a` and `b` are powers of a common
-  base: `log_8(32768) → 5` stops at `15·log_8(2)` because `log_8(2) → 1/3` is
-  not reduced.
+  **rational** radicand (`(1029/1000)^{1/3} → 7·3^{1/3}/10`; the
+  integer-radicand case `root6(997³) → √997` is done). Exact arithmetic over
+  `ℚ(2^{1/3})` (Wester 28, which also leaks a float residue out of
+  `evaluate()`).
 - **Symbolic combinatorics.** Expansion of `Binomial(n, k)` and
   `Pochhammer(a, k)` for small integer `k` (→ polynomial / product forms).
-  Missing operators noted in comments: `PartitionsP`, `StirlingS1`.
 - **Sum/Product closed forms.** Telescoping detection for sums
   (`Σ g(k+1)−g(k) → g(n+1)−g(0)`) and products (`Π (1+1/k) → n`); symbolic
   products (`Π k → n!`); closed forms for classic infinite series and
-  products (`Σ 1/k²+1/k³ → π²/6+ζ(3)`, Wallis `→ 2/π`). Separately, the
-  truncated-numeric fallback for infinite sums is **inaccurate** (plain
-  10⁴-term truncation, off by ~1e-4 for `Σ 1/k²`) — wants tail acceleration
+  products (`Σ 1/k²+1/k³ → π²/6+ζ(3)`, Wallis `→ 2/π`). Under the revised
+  EL-4 contract exact `evaluate()` stays symbolic on infinite domains and
+  `.N()` owns the numeric path — but `.N()` is a plain 10⁴-term truncation
+  (off by ~1e-4 for `Σ 1/k²`) and wants tail acceleration
   (Richardson/Euler–Maclaurin) or a wider cap.
 - **Trigonometric simplification.** `cos³x + cos x·sin²x − cos x → 0` (factor
   out `cos x`, then Pythagorean identity). The same missing rewrite blocks the
   rank-1 detection of the trig matrix in the linear-algebra group.
-- **Boolean algebra.** `Xor` operand-pair cancellation (`Xor(x, y, y) → x`;
-  n-ary flattening already happens).
 - **Complex/abs simplification.** Kahan's `|3−√7+i·√(6√7−15)| → 1` exactly
   (the modulus-squared is rational after expansion).
 - **Assumptions.** Transitivity closure over a cycle of `≥` (Wester 21:
   `x≥y, y≥z, z≥x ⊢ x=z`) and monotonicity of `x²` on ordered positive reals
   (Wester 22: `x>y>0 ⊢ 2x²>2y²`).
-- **Rational-function normalization policy.** Wester 14:
-  `(x²−4)/(x²+4x+4)` does not cancel to `(x−2)/(x+2)` under `evaluate()` —
-  decide whether common-factor cancellation belongs in evaluate or stays a
-  simplify-only transform, then lock the choice.
+- **Rational-function cancellation in `simplify()`.** Policy decided
+  (2026-07-05): common-factor cancellation belongs in `simplify()`, not
+  `evaluate()`. Remaining work: `simplify()` does not yet cancel Wester 14,
+  `(x²−4)/(x²+4x+4) → (x−2)/(x+2)`.
 - **Linear algebra.** Exact rational RREF (`RowReduce` currently leaves float
   artifacts like `2.999…` on an integer matrix); `M·M⁻¹` not simplifying its
   diagonal to `1` for a symbolic 2×2; elementwise `D` over matrix literals
@@ -287,12 +281,14 @@ vector/tensor analysis, numerical analysis.
 
 Distinct from B13: these Wester problems have **no CE API to express them**,
 so they cannot exist as `test.skip`s — each needs a naming/design decision
-first, then its acceptance test goes into `wester.test.ts`. (Each candidate
-below was probed against the current engine — many presumed-missing heads
-turned out to exist under CE names and are now locked as passing tests
-instead: `NthPrime`, `NPartition`, `PowerMod` incl. negative exponents,
-`PrimitiveRoot`, `ContinuedFraction` of quadratic surds, matrix ∞-`Norm`,
-`BaseForm`, finite-domain `ForAll`/`Exists`. Probe before adding here.)
+first, then its acceptance test goes into `wester.test.ts`. Mathematica
+spellings are deliberately NOT aliased (decision 2026-07-05); the
+Mathematica→CE correspondence table lives in
+[`docs/MATHEMATICA-NAMES.md`](./docs/MATHEMATICA-NAMES.md) — **probe CE's
+own names before adding an entry here** (many presumed-missing heads exist
+under CE names: `NthPrime`, `NPartition`, `PowerMod`, `PrimitiveRoot`,
+`ContinuedFraction`, matrix ∞-`Norm`, `BaseForm`, finite-domain
+`ForAll`/`Exists`).
 
 - **Number theory / combinatorics operators:** Stirling numbers of the
   **first** kind (`StirlingS1(5, 2) → −50`; the second kind exists as

@@ -442,11 +442,15 @@ describe('OPERATOR partial derivative', () => {
       eval-auto = Apply(Derivative(f, 1, 1), x, y)
     `));
 
+  // Parser gap: this currently becomes a Divide/InvisibleOperator expression
+  // involving `Nothing`, not a derivative application.
   test.skip('\\frac{\\partial^2}{\\partial_{x,y}} f(x,y)', () =>
     expect(
       ce.parse('\\frac{\\partial^2}{\\partial_{x,y}} f(x,y)').json
     ).toEqual(['D', ['f', 'x', 'y'], 'x', 'y']));
 
+  // Parser gap: same fraction form as above, with the numerator function
+  // mis-associated before derivative construction.
   test.skip('\\frac{\\partial^2 f(x, y, z)}{\\partial_{x,y}}', () =>
     expect(
       ce.parse('\\frac{\\partial^2 f(x, y, z)}{\\partial_{x,y}}').json

@@ -358,6 +358,7 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
       serializeCortex(['Negate', ['Multiply', 2, 3]])
     ).toMatchInlineSnapshot(`"-(2 * 3)"`);
   });
+  // Unsupported: the serializer currently emits explicit multiplication.
   test.skip('Invisible Multiply', () => {
     expect(serializeCortex(['Multiply', 2, 'x'])).toMatch('2x');
     expect(serializeCortex(['Multiply', 'x', 2])).toMatch('x * 2');
@@ -369,6 +370,7 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
       serializeCortex(['Multiply', ['Multiply', 'x', 'y'], ['Add', 3, 4]])
     ).toMatch('(x * y)(3 + 4)');
   });
+  // Unsupported: mixed-number / invisible-plus serialization is not implemented.
   test.skip('Invisible Plus', () => {
     expect(serializeCortex(['Add', 2, ['Rational', 1, 2]])).toMatch('2 1 / 2');
     expect(serializeCortex(['Add', 'x', ['Rational', 1, 2]])).toMatch(

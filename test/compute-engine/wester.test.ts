@@ -90,17 +90,11 @@ describe('Numbers', () => {
     });
   });
 
-  test(`log base 8 of 32768 (numeric check)`, () => {
-    // Wester expects the exact integer 5. CE currently returns the partially
-    // reduced symbolic form 15·log_8(2) — value-correct (see skip below), so
-    // lock at least the numeric value here.
-    expect(ce.expr(['Log', 32768, 8]).N().json).toBe(5);
-  });
-
-  test.skip(`log base 8 of 32768 => exact 5`, () => {
-    // CURRENT: evaluates to ["Multiply", 15, ["Log", 2, 8]] — log_8(2) = 1/3
-    // is not reduced (log_b(a) for a, b powers of a common base).
+  test(`log base 8 of 32768 => exact 5`, () => {
+    // Regression: this evaluated to 15·log_8(2), leaving log_8(2) = 1/3
+    // unreduced (log_b(a) for a, b powers of a common base); fixed 2026-07-05.
     expect(ce.expr(['Log', 32768, 8]).evaluate().json).toBe(5);
+    expect(ce.expr(['Log', 2, 8]).evaluate().json).toEqual(['Rational', 1, 3]);
   });
 
   test(`gcd(1776, 1554, 5698) = 74`, () => {
@@ -237,36 +231,42 @@ describe('Boolean logic', () => {
     expect(ce.expr(['And', 'True', 'False']).evaluate().json).toBe('False');
   });
 
-  test(`Wester 122: x or not x = True`, () => {
-    expect(ce.expr(['Or', 'x', ['Not', 'x']]).evaluate().json).toBe('True');
+  // Convention: UPPERCASE symbols (A, B) in boolean contexts. Evaluating a
+  // bare symbol as a boolean operand types it `boolean` in the engine; with
+  // a shared engine that silently breaks later numeric uses of x/y/z (see
+  // logic.test.ts). This file uses a fresh engine per test, but keep the
+  // convention so these can't become traps.
+  test(`Wester 122: A or not A = True`, () => {
+    expect(ce.expr(['Or', 'A', ['Not', 'A']]).evaluate().json).toBe('True');
   });
 
-  test(`Wester 123: x or y or (x and y) = x or y`, () => {
+  test(`Wester 123: A or B or (A and B) = A or B`, () => {
     expect(
-      ce.expr(['Or', 'x', 'y', ['And', 'x', 'y']]).evaluate().json
-    ).toEqual(['Or', 'x', 'y']);
+      ce.expr(['Or', 'A', 'B', ['And', 'A', 'B']]).evaluate().json
+    ).toEqual(['Or', 'A', 'B']);
   });
 
-  test(`x and (1 > 2) = False`, () => {
-    expect(ce.expr(['And', 'x', ['Greater', 1, 2]]).evaluate().json).toBe(
+  test(`A and (1 > 2) = False`, () => {
+    expect(ce.expr(['And', 'A', ['Greater', 1, 2]]).evaluate().json).toBe(
       'False'
     );
   });
 
-  test.skip(`Xor(Xor(x, y), y) => x`, () => {
-    // CURRENT: flattens to Xor(x, y, y) but does not cancel the repeated
-    // operand (a ⊕ a = False, so Xor(x, y, y) = x).
-    expect(ce.expr(['Xor', ['Xor', 'x', 'y'], 'y']).evaluate().json).toBe('x');
+  test(`Xor(Xor(A, B), B) => A`, () => {
+    // Regression: this flattened to Xor(A, B, B) without cancelling the
+    // repeated operand (a ⊕ a = False); fixed 2026-07-05.
+    expect(ce.expr(['Xor', ['Xor', 'A', 'B'], 'B']).evaluate().json).toBe('A');
   });
 });
 
 describe('Zero equivalence', () => {
-  test.skip(`Wester 26: sqrt(997) - (997^3)^(1/6) = 0`, () => {
-    // CURRENT: evaluate leaves a float artifact
-    // (sqrt(997) − 31.575…·root6(1)) and simplify returns the float residue
-    // -2.33e-21 instead of exact 0: root6(997³) is not recognized as
-    // 997^(1/2) (perfect-power radicand), unlike Wester 27 below which does
-    // reduce exactly.
+  test(`Wester 26: sqrt(997) - (997^3)^(1/6) = 0`, () => {
+    // Regression: root6(997³) was not recognized as √997 — canonicalization
+    // folds 997³ → 991026973, losing the structure the (x^a)^b exponent rule
+    // needs (Wester 27's bigint radicand stayed structural, so it worked) —
+    // and evaluate leaked a float residue. Fixed 2026-07-05 via
+    // perfect-power decomposition of the radicand in root().
+    expect(ce.parse('\\sqrt{997} - (997^3)^{\\frac16}').evaluate().json).toBe(0);
     expect(ce.parse('\\sqrt{997} - (997^3)^{\\frac16}').simplify().json).toBe(0);
   });
 
@@ -333,9 +333,10 @@ describe('Sums and products', () => {
   });
 
   test.skip(`Sum(1/k^2 + 1/k^3, k=1..oo) => pi^2/6 + zeta(3)`, () => {
-    // CURRENT: evaluate() returns a plain truncated numeric approximation
-    // (2.84689…, off by ~1e-4 — the tail of Σ1/k² past the iteration cap)
-    // instead of the exact closed form ≈ 2.84699.
+    // CURRENT: evaluate() correctly stays symbolic (an infinite domain has no
+    // exact truncated value; .N() owns the numeric path — policy decision
+    // 2026-07-05). The remaining gap is the exact closed form ≈ 2.84699.
+    // (.N() is a plain 10⁴-term truncation, off by ~1e-4 — see ROADMAP B13.)
     expect(
       ce
         .expr([
@@ -364,8 +365,9 @@ describe('Sums and products', () => {
   });
 
   test.skip(`Wallis: Product(1 - 1/(2k)^2, k=1..oo) => 2/pi`, () => {
-    // CURRENT: returns a truncated numeric approximation (0.636636…, exact is
-    // 2/π = 0.636620…) instead of the closed form.
+    // CURRENT: evaluate() correctly stays symbolic (infinite domains
+    // numericize only under .N() — policy decision 2026-07-05); the
+    // remaining gap is the exact closed form 2/π.
     expect(
       ce
         .expr([
@@ -1014,8 +1016,11 @@ describe('Series', () => {
 
 describe('Algebra', () => {
   test.skip(`Wester 14: (x^2 - 4)/(x^2 + 4x + 4) => (x - 2)/(x + 2)`, () => {
+    // Policy decision 2026-07-05: common-factor cancellation belongs in
+    // simplify(), not evaluate(). CURRENT: simplify() does not cancel the
+    // common (x + 2) factor either — that is the remaining gap.
     expect(
-      ce.parse('\\frac{x ^{2} - 4}{x ^{2} + 4 x + 4}').evaluate().json
+      ce.parse('\\frac{x ^{2} - 4}{x ^{2} + 4 x + 4}').simplify().json
     ).toEqual(['Divide', ['Subtract', 'x', 2], ['Add', 'x', 2]]);
   });
 });
