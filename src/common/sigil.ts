@@ -25,8 +25,8 @@ export const SIGILS = {
   '÷': '\\div', // \u00F7
 
   '⁎': '\\ast', // \u204E (asterisk operator)
-  '⁑': '\\**', // \u204F (two asterisks operator)
-  '⁂': '\\***', // \u2052 (three asterisks operator)
+  '⁑': '\\**', // \u2051 (two asterisks aligned vertically)
+  '⁂': '\\***', // \u2042 (asterism)
   // '⋅': '\\cdot', // \u22C5 (dot operator)
   // '∗': '\\ast', // \u2217 (asterisk operator)
   '∘': '\\()', // \u2218 (ring operator)
@@ -231,7 +231,7 @@ export const SIGILS = {
   '₭': '\\kip', // \u20AD (Lao Kip sign)
   '₮': '\\tugrik', // \u20AE (Mongolian Tugrik sign)
   '₨': '\\rupees', // \u20A8 (Rupee sign, used in several South Asian countries)
-  '₯': '\\drachma', // \u20B2 (Greek Drachma sign)
+  '₯': '\\drachma', // \u20AF (Greek Drachma sign)
   '₰': '\\pfennig', // \u20B0 (German Pfennig sign)
   '₲': '\\guarani', // \u20B2 (Paraguayan Guarani sign)
 
@@ -274,22 +274,22 @@ export const SIGILS = {
   '⊭': '\\nvDash', // \u22AD
   '⊮': '\\nVdash', // \u22AE
   '⊯': '\\nVDash', // \u22AF
-  '⊰': '\\dashv', // \u22A8
-  '⊱': '\\vDash', // \u22A9
-  '⊲': '\\triangleleft', // \u22B2
-  '⊳': '\\triangleright', // \u22B3
-  '⊴': '\\lhd', // \u22B4
-  '⊵': '\\rhd', // \u22B5
-  '⊶': '\\unlhd', // \u22B6
-  '⊷': '\\unrhd', // \u22B7
-  '⊸': '\\trianglelefteq', // \u22B4
-  '⊹': '\\trianglerighteq', // \u22B5
-  '⊺': '\\lhd', // \u22B6
-  '⊻': '\\rhd', // \u22B7
-  '⊼': '\\unlhd', // \u22B8
-  '⊽': '\\unrhd', // \u22B9
-  '⊾': '\\trianglelefteq', // \u22BA
-  '⊿': '\\trianglerighteq', // \u22BB
-  '⊀': '\\ntriangleleft', // \u22EA
-  '⊁': '\\ntriangleright', // \u22EB
+  '⊰': '\\prurel', // \u22B0 (precedes under relation)
+  '⊱': '\\scurel', // \u22B1 (succeeds under relation)
+  '⊲': '\\lhd', // \u22B2
+  '⊳': '\\rhd', // \u22B3
+  '⊴': '\\unlhd', // \u22B4
+  '⊵': '\\unrhd', // \u22B5
+  '⊶': '\\origof', // \u22B6
+  '⊷': '\\imageof', // \u22B7
+  '⊸': '\\multimap', // \u22B8
+  '⊹': '\\hermitmatrix', // \u22B9
+  '⊺': '\\intercal', // \u22BA
+  '⊻': '\\veebar', // \u22BB (xor)
+  '⊼': '\\barwedge', // \u22BC (nand)
+  '⊽': '\\barvee', // \u22BD (nor)
+  '⊾': '\\measuredrightangle', // \u22BE
+  '⊿': '\\varlrtriangle', // \u22BF
+  '⊀': '\\nprec', // \u2280
+  '⊁': '\\nsucc', // \u2281
 };

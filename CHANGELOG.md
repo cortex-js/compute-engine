@@ -1,17 +1,19 @@
+## [Unreleased]
+
 ## 0.68.0 _2026-07-05_
 
 ### Breaking Changes
 
 - **`\parallel` now parses to the geometric relation `Parallel`, not logical
-  `Or`.** `AB \parallel CD` is the parallelism relation, consistent with
-  `\perp` → `Perpendicular`. Use `\lor` or `\vee` for disjunction (unchanged).
+  `Or`.** `AB \parallel CD` is the parallelism relation, consistent with `\perp`
+  → `Perpendicular`. Use `\lor` or `\vee` for disjunction (unchanged).
 
 - **`\rightarrow` now parses to the mapping arrow `To`, not `Implies`.**
   `f: \mathbb{R} \rightarrow \mathbb{R}` now parses as a function signature,
   matching `\to`. This reverses the mapping introduced for issue #156:
   `\rightarrow`-as-implication was far rarer in practice than
-  `\rightarrow`-as-mapping. Use `\Rightarrow`, `\implies`, or
-  `\Longrightarrow` for implication (unchanged).
+  `\rightarrow`-as-mapping. Use `\Rightarrow`, `\implies`, or `\Longrightarrow`
+  for implication (unchanged).
 
 ### New Operators
 
@@ -24,27 +26,34 @@
     `Series(\ln(\cos x), x)` → $-\tfrac{x^2}{2} - \tfrac{x^4}{12} + O(x^6)$;
     `Series(\arctan x, x, +\infty)` →
     $\tfrac{\pi}{2} - \tfrac{1}{x} + \tfrac{1}{3x^3} - \dots$. Coefficients are
-    exact (`Series(\sin x, x, \frac{\pi}{6})` gives $\tfrac12$, $\tfrac{\sqrt
-    3}{2}$, …), and an undeclared `f` yields the textbook form $f(0) + f'(0)x +
+    exact (`Series(\sin x, x, \frac{\pi}{6})` gives $\tfrac12$,
+    $\tfrac{\sqrt
+    3}{2}$, …), and an undeclared `f` yields the textbook form
+    $f(0) + f'(0)x +
     \dots$.
   - At a **pole** the result is a Laurent expansion with a finite principal
-    part: `Series(\frac{1}{\sin x}, x)` → $\tfrac{1}{x} + \tfrac{x}{6} +
-    \tfrac{7x^3}{360} + O(x^7)$, `Series(\cot x, x)` →
+    part: `Series(\frac{1}{\sin x}, x)` →
+    $\tfrac{1}{x} + \tfrac{x}{6} +
+    \tfrac{7x^3}{360} + O(x^7)$,
+    `Series(\cot x, x)` →
     $\tfrac{1}{x} - \tfrac{x}{3} - \tfrac{x^3}{45} + \dots$, and the special
     functions expand at their poles with exact coefficients —
-    `Series(\Gamma(x), x)` → $\tfrac{1}{x} - \gamma + (\tfrac{\gamma^2}{2} +
-    \tfrac{\pi^2}{12})x + \dots$, `Series(\zeta(x), x, 1)` →
-    $\tfrac{1}{x-1} + \gamma + O(x-1)$. Poles at `±∞` are handled too
-    (`Series(\frac{x^2}{x-1}, x, +\infty)` → $x + 1 + \tfrac1x + \tfrac1{x^2} +
-    \dots$). An essential singularity or branch point (e.g. `Series(e^{1/x},
-    x)`, `Series(\ln x, x)`) is still left unevaluated rather than expanded
-    incorrectly.
+    `Series(\Gamma(x), x)` →
+    $\tfrac{1}{x} - \gamma + (\tfrac{\gamma^2}{2} +
+    \tfrac{\pi^2}{12})x + \dots$,
+    `Series(\zeta(x), x, 1)` → $\tfrac{1}{x-1} + \gamma + O(x-1)$. Poles at `±∞`
+    are handled too (`Series(\frac{x^2}{x-1}, x, +\infty)` →
+    $x + 1 + \tfrac1x + \tfrac1{x^2} +
+    \dots$). An essential singularity or
+    branch point (e.g. `Series(e^{1/x}, x)`, `Series(\ln x, x)`) is still left
+    unevaluated rather than expanded incorrectly.
   - `BigO(u)` is the inert Landau remainder, serialized `O\left(u\right)` and
     parsed from `\mathcal{O}(u)` and `\operatorname{O}(u)`. It is inert under
     `evaluate`/`simplify`; a numeric approximation (`.N()`) of any expression
     containing it is `NaN`.
   - `Normal(expr)` strips the `BigO` terms, yielding the compilable/plottable
-    truncated polynomial: `Normal(Series(\sin x, x))` → $x - \tfrac{x^3}{6} +
+    truncated polynomial: `Normal(Series(\sin x, x))` →
+    $x - \tfrac{x^3}{6} +
     \tfrac{x^5}{120}$.
 
 - **`TrigExpand`, `TrigToExp`, and `TrigReduce` rewrite trigonometric and
@@ -56,36 +65,36 @@
     `\sec`/`\csc`/`\cot` as reciprocals of the expanded `\cos`/`\sin`, are also
     handled).
   - `TrigToExp` rewrites trigonometric and hyperbolic functions in terms of the
-    complex exponential, exactly:
-    `TrigToExp(\sin x)` → $-\tfrac{i}{2}e^{ix} + \tfrac{i}{2}e^{-ix}$.
+    complex exponential, exactly: `TrigToExp(\sin x)` →
+    $-\tfrac{i}{2}e^{ix} + \tfrac{i}{2}e^{-ix}$.
   - `TrigReduce` is the inverse of `TrigExpand`, rewriting products and integer
-    powers as functions of multiple angles:
-    `TrigReduce(\sin^2 x)` → $\tfrac{1 - \cos 2x}{2}$ and
-    `TrigReduce(\sin x\cos x)` → $\tfrac{\sin 2x}{2}$.
+    powers as functions of multiple angles: `TrigReduce(\sin^2 x)` →
+    $\tfrac{1 - \cos 2x}{2}$ and `TrigReduce(\sin x\cos x)` →
+    $\tfrac{\sin 2x}{2}$.
 
 - **Probability distributions: `NormalDistribution`, `BinomialDistribution`,
   `PoissonDistribution`, `UniformDistribution`, `ExponentialDistribution`,
   consumed by the generic `PDF`, `CDF`, and `Quantile` operators.** A
   distribution is a first-class value — assign it, pass it around, query it:
-  - `PDF(dist, x)`, `CDF(dist, x)` and `Quantile(dist, p)` evaluate to
-    **exact closed forms**: `CDF(NormalDistribution(0, 1), x)` →
-    $\tfrac12\left(1 + \operatorname{erf}\tfrac{x}{\sqrt2}\right)$, an
-    ordinary expression that can be simplified, differentiated, compiled and
-    plotted. Exact arguments give exact results —
+  - `PDF(dist, x)`, `CDF(dist, x)` and `Quantile(dist, p)` evaluate to **exact
+    closed forms**: `CDF(NormalDistribution(0, 1), x)` →
+    $\tfrac12\left(1 + \operatorname{erf}\tfrac{x}{\sqrt2}\right)$, an ordinary
+    expression that can be simplified, differentiated, compiled and plotted.
+    Exact arguments give exact results —
     `PDF(BinomialDistribution(4, \tfrac12), 2)` → $\tfrac38$ — and `.N()`
     numericizes at machine or arbitrary precision.
   - For discrete distributions `PDF` is the probability mass function, and
-    `Quantile` (the least $k$ with $\operatorname{CDF}(k) \ge p$) is computed
-    by exact search: `Quantile(PoissonDistribution(9), 0.95)` → `14`.
-  - `Mean`, `Variance`, and `StandardDeviation` now also accept a
-    distribution: `Mean(NormalDistribution(\mu, \sigma))` → $\mu$,
+    `Quantile` (the least $k$ with $\operatorname{CDF}(k) \ge p$) is computed by
+    exact search: `Quantile(PoissonDistribution(9), 0.95)` → `14`.
+  - `Mean`, `Variance`, and `StandardDeviation` now also accept a distribution:
+    `Mean(NormalDistribution(\mu, \sigma))` → $\mu$,
     `Variance(BinomialDistribution(n, p))` → $np(1-p)$.
   - `NormalDistribution(\mu, \sigma)` takes the standard deviation (not the
-    variance), and `ExponentialDistribution(\lambda)` the rate — the
-    Mathematica and scipy conventions.
+    variance), and `ExponentialDistribution(\lambda)` the rate — the Mathematica
+    and scipy conventions.
 
-- **`GammaRegularized` and `BetaRegularized` — the regularized incomplete
-  gamma and beta functions.** `GammaRegularized(a, z)` is
+- **`GammaRegularized` and `BetaRegularized` — the regularized incomplete gamma
+  and beta functions.** `GammaRegularized(a, z)` is
   $Q(a, z) = \Gamma(a, z)/\Gamma(a)$ and `BetaRegularized(x, a, b)` is
   $I_x(a, b)$. They follow the exactness contract (special values fold —
   `GammaRegularized(1, z)` → $e^{-z}$ — and exact arguments stay symbolic),
@@ -109,20 +118,18 @@
 - **`LinearRegression` and `PolynomialFit` compute least-squares fits.**
   `LinearRegression(xs, ys)` (or a collection of points) evaluates to
   `(intercept, slope)`, and `PolynomialFit(data, degree)` to the list of
-  coefficients, constant term first. **Exact data yields exact
-  coefficients**: points lying on $1 + x^2$ fit at degree 2 to exactly
-  `[1, 0, 1]`, and rational data produces exact rational coefficients rather
-  than floats. With a trailing variable argument the fitted **expression** is
-  returned directly, ready to plot:
-  `PolynomialFit([(0,1), (1,2), (2,5), (3,10)], 2, x)` → $x^2 + 1$.
+  coefficients, constant term first. **Exact data yields exact coefficients**:
+  points lying on $1 + x^2$ fit at degree 2 to exactly `[1, 0, 1]`, and rational
+  data produces exact rational coefficients rather than floats. With a trailing
+  variable argument the fitted **expression** is returned directly, ready to
+  plot: `PolynomialFit([(0,1), (1,2), (2,5), (3,10)], 2, x)` → $x^2 + 1$.
 
-- **`Quantile` computes empirical quantiles of data.**
-  `Quantile(collection, p)` interpolates the sorted data so that
-  `Quantile(xs, 1/4)`, `Quantile(xs, 1/2)` and `Quantile(xs, 3/4)` agree
-  exactly with `Quartiles` and `Median` (Moore–McCabe convention), with
-  general `p` interpolated through the order statistics in rank space.
-  (Combined with the distribution form above, `Quantile` covers both the
-  theoretical and the empirical case.)
+- **`Quantile` computes empirical quantiles of data.** `Quantile(collection, p)`
+  interpolates the sorted data so that `Quantile(xs, 1/4)`, `Quantile(xs, 1/2)`
+  and `Quantile(xs, 3/4)` agree exactly with `Quartiles` and `Median`
+  (Moore–McCabe convention), with general `p` interpolated through the order
+  statistics in rank space. (Combined with the distribution form above,
+  `Quantile` covers both the theoretical and the empirical case.)
 
 - **`Divides` and `NotDivides` express divisibility.** `a \mid b` parses to
   `Divides(a, b)` and `p \nmid ab` to `NotDivides(...)`; both evaluate for
@@ -130,206 +137,199 @@
 
 - **Geometry notation is transcribed as inert heads.** `\angle ABC` →
   `Angle(A, B, C)` (also `\varangle`, `∠`), `\triangle ABC` →
-  `Triangle(A, B, C)`, `\square ABCD` → `Quadrilateral(A, B, C, D)`,
-  `A \perp B` → `Perpendicular`, `AB \parallel CD` → `Parallel`,
-  `\widehat{ABC}` → `Arc`, `\overparen{BC}` → `OverParen`, and
-  `\langle a, b \rangle` → `AngleBracket`. These heads have no evaluation
-  semantics — the Compute Engine does not model geometry — but they parse and
-  serialize faithfully so downstream consumers (e.g. graphical clients) get
-  the structure instead of an error. Angle and arc measures are typed as
-  numbers, so `\angle A + \angle B + \angle C = 180^\circ` composes in
-  arithmetic.
+  `Triangle(A, B, C)`, `\square ABCD` → `Quadrilateral(A, B, C, D)`, `A \perp B`
+  → `Perpendicular`, `AB \parallel CD` → `Parallel`, `\widehat{ABC}` → `Arc`,
+  `\overparen{BC}` → `OverParen`, and `\langle a, b \rangle` → `AngleBracket`.
+  These heads have no evaluation semantics — the Compute Engine does not model
+  geometry — but they parse and serialize faithfully so downstream consumers
+  (e.g. graphical clients) get the structure instead of an error. Angle and arc
+  measures are typed as numbers, so `\angle A + \angle B + \angle C = 180^\circ`
+  composes in arithmetic.
 
 - **`\sim` parses to the generic similarity relation `Tilde`.** It covers
   triangle similarity (`\triangle ABC \sim \triangle DEF`), asymptotic
-  equivalence, and "is distributed as" (`X \sim N(0, 1)`); `\nsim` negates
-  it, and `\simeq` now maps to the existing `TildeEqual` head (it previously
-  had no LaTeX trigger).
+  equivalence, and "is distributed as" (`X \sim N(0, 1)`); `\nsim` negates it,
+  and `\simeq` now maps to the existing `TildeEqual` head (it previously had no
+  LaTeX trigger).
 
 ### Step-by-Step Explanations
 
 - **`expr.explain()` returns a structured, step-by-step explanation of a
-  simplification** — the textbook chain *expression → step (with a reason) →
-  … → result*. Each step carries the expression state after the step, a
-  stable machine `id` (the localization key for consumers), and a default
-  English description; `explain().result` is always the same value
-  `simplify()` returns. `ce.parse('\\frac{x^2-1}{x-1}').explain()` yields
-  one step, *"Cancel the common factors"*, ending at `x + 1`.
-  - The step chain is curated by default (driver bookkeeping is filtered
-    out); pass `{verbosity: 'all'}` for the raw trace (rule authoring,
-    debugging). `simplify()` options (`rules`, `costFunction`, `strategy`)
-    are honored.
+  simplification** — the textbook chain _expression → step (with a reason) → … →
+  result_. Each step carries the expression state after the step, a stable
+  machine `id` (the localization key for consumers), and a default English
+  description; `explain().result` is always the same value `simplify()` returns.
+  `ce.parse('\\frac{x^2-1}{x-1}').explain()` yields one step, _"Cancel the
+  common factors"_, ending at `x + 1`.
+  - The step chain is curated by default (driver bookkeeping is filtered out);
+    pass `{verbosity: 'all'}` for the raw trace (rule authoring, debugging).
+    `simplify()` options (`rules`, `costFunction`, `strategy`) are honored.
   - The most frequently fired simplification rules ship with curated
-    descriptions ("Apply the Pythagorean identity: sin²x + cos²x = 1",
-    "Combine powers with the same base: xⁿ·xᵐ = xⁿ⁺ᵐ", …); other rules get
-    a readable fallback derived from the rule id. `registerStepLabels()`
-    lets a host application override or extend the descriptions.
+    descriptions ("Apply the Pythagorean identity: sin²x + cos²x = 1", "Combine
+    powers with the same base: xⁿ·xᵐ = xⁿ⁺ᵐ", …); other rules get a readable
+    fallback derived from the rule id. `registerStepLabels()` lets a host
+    application override or extend the descriptions.
   - **`expr.explain('solve')` traces equation solving.** Step values are
-    *equations* — the state after each phase — so the chain reads like
-    textbook working: `2x+1=5` → *Move all terms to one side* `2x-4=0` →
-    *Isolate the unknown* `x=2`. The trace covers the solver's algorithmic
-    phases (clearing denominators, squaring both sides, substitutions like
-    `u = eˣ` with back-substitution, zero-product factoring, the quadratic
-    formula, checking candidates and rejecting extraneous roots) and the
-    root-template rules, which now carry stable `solve.*` ids.
-    `explain('solve').result` is a `List` of the same roots `solve()`
-    returns; the unknown is inferred or passed via `options.variable`.
-    Systems of equations are not traced yet.
-  - **`expr.explain('D')` traces differentiation.** Steps are
-    whole-expression states in traversal order — each textbook rule (sum,
-    product, quotient, power, chain, exponential, logarithmic
-    differentiation, table lookups) first appears with its unresolved
-    sub-derivatives as inert `D(…)` terms, which resolve step by step:
-    `D(x·sin x, x)` → *Apply the product rule* `x·D(sin x, x) + sin x` →
-    *Differentiate using a known derivative* `x·cos x + sin x`. The
-    variable is inferred when unambiguous (or passed via
+    _equations_ — the state after each phase — so the chain reads like textbook
+    working: `2x+1=5` → _Move all terms to one side_ `2x-4=0` → _Isolate the
+    unknown_ `x=2`. The trace covers the solver's algorithmic phases (clearing
+    denominators, squaring both sides, substitutions like `u = eˣ` with
+    back-substitution, zero-product factoring, the quadratic formula, checking
+    candidates and rejecting extraneous roots) and the root-template rules,
+    which now carry stable `solve.*` ids. `explain('solve').result` is a `List`
+    of the same roots `solve()` returns; the unknown is inferred or passed via
+    `options.variable`. Systems of equations are not traced yet.
+  - **`expr.explain('D')` traces differentiation.** Steps are whole-expression
+    states in traversal order — each textbook rule (sum, product, quotient,
+    power, chain, exponential, logarithmic differentiation, table lookups) first
+    appears with its unresolved sub-derivatives as inert `D(…)` terms, which
+    resolve step by step: `D(x·sin x, x)` → _Apply the product rule_
+    `x·D(sin x, x) + sin x` → _Differentiate using a known derivative_
+    `x·cos x + sin x`. The variable is inferred when unambiguous (or passed via
     `options.variable`), and the result always matches evaluating
     `D(expr, variable)`.
 
 ### Solving
 
 - **`Solve` accepts a domain for the unknown.**
-  `Solve(x^2-5x+6=0,\; x \in 1..1000)` restricts solutions to a collection:
-  the equation is solved symbolically and the roots are filtered to the
-  domain (an integer domain also discards non-integer roots up front). When
-  the symbolic solver finds nothing and the domain is finite and reasonably
-  sized, `Solve` falls back to enumeration with a compiled predicate,
-  confirming every candidate exactly so float rounding never produces a
-  wrong answer (budgeted, interruptible; an unaffordable search returns the
-  expression unevaluated rather than a partial answer). The predicate is not
-  limited to equations — any boolean condition works:
-  `Solve(2^n \equiv 1 \pmod{7},\; n \in 1..20)` → `[3, 6, 9, 12, 15, 18]`,
-  and an extra condition can ride on the domain
+  `Solve(x^2-5x+6=0,\; x \in 1..1000)` restricts solutions to a collection: the
+  equation is solved symbolically and the roots are filtered to the domain (an
+  integer domain also discards non-integer roots up front). When the symbolic
+  solver finds nothing and the domain is finite and reasonably sized, `Solve`
+  falls back to enumeration with a compiled predicate, confirming every
+  candidate exactly so float rounding never produces a wrong answer (budgeted,
+  interruptible; an unaffordable search returns the expression unevaluated
+  rather than a partial answer). The predicate is not limited to equations — any
+  boolean condition works: `Solve(2^n \equiv 1 \pmod{7},\; n \in 1..20)` →
+  `[3, 6, 9, 12, 15, 18]`, and an extra condition can ride on the domain
   (`n \in 1..100, n > 5`-style, as in `Sum` indexing sets). The two-argument
   form is unchanged.
 
 - **Multiple unknowns enumerate over the product of their domains.**
   `Solve(x^3+y^3=1729,\; x \in 1..12,\; y \in 1..12)` →
-  `[(1,12), (9,10), (10,9), (12,1)]` — a `List` of `Tuple`s in unknown
-  order, with the same budget, exact-confirmation, and interruption
-  guarantees as the univariate case.
+  `[(1,12), (9,10), (10,9), (12,1)]` — a `List` of `Tuple`s in unknown order,
+  with the same budget, exact-confirmation, and interruption guarantees as the
+  univariate case.
 
 - **Integer equations are solved symbolically (diophantine solving).** When
-  every unknown ranges over integers, `Solve` recognizes **linear** equations
-  in any number of unknowns and **Pell-family** equations $x^2 - Dy^2 = N$
+  every unknown ranges over integers, `Solve` recognizes **linear** equations in
+  any number of unknowns and **Pell-family** equations $x^2 - Dy^2 = N$
   (including the elliptic case $x^2 + |D|y^2 = N$) and solves them in closed
-  form — ported from SymPy's diophantine module and validated against its
-  test suite. Over a bounded domain this reaches answers enumeration cannot:
-  `Solve(x^2-29y^2=1,\; x \in 1..10^5,\; y \in 1..10^5)` →
-  `[(9801, 1820)]` via continued fractions, where the $10^{10}$-candidate
-  sweep would be refused; an unsolvable equation is decided instantly
+  form — ported from SymPy's diophantine module and validated against its test
+  suite. Over a bounded domain this reaches answers enumeration cannot:
+  `Solve(x^2-29y^2=1,\; x \in 1..10^5,\; y \in 1..10^5)` → `[(9801, 1820)]` via
+  continued fractions, where the $10^{10}$-candidate sweep would be refused; an
+  unsolvable equation is decided instantly
   (`Solve(6x+9y=4,\; x \in \pm10^6,\; y \in \pm10^6)` → `[]`). With
-  integer-typed unknowns and no domain — previously inert — `Solve` returns
-  the **parametric family**: `Solve(3n+4m=7, n, m)` →
-  `[(4t-7,\; -3t+7)]` with the fresh parameter `t` ranging over ℤ, and Pell
-  equations yield their exact closed forms
-  $\bigl(\tfrac{(3+2\sqrt2)^t + (3-2\sqrt2)^t}{2}, \dots\bigr)$, and
-  **Pythagorean triples** return the complete classical parametrization:
+  integer-typed unknowns and no domain — previously inert — `Solve` returns the
+  **parametric family**: `Solve(3n+4m=7, n, m)` → `[(4t-7,\; -3t+7)]` with the
+  fresh parameter `t` ranging over ℤ, and Pell equations yield their exact
+  closed forms $\bigl(\tfrac{(3+2\sqrt2)^t + (3-2\sqrt2)^t}{2}, \dots\bigr)$,
+  and **Pythagorean triples** return the complete classical parametrization:
   `Solve(x^2+y^2=z^2, x, y, z)` →
-  $\bigl(t(t_1^2-t_2^2),\; 2t\,t_1 t_2,\; t(t_1^2+t_2^2)\bigr)$ and its
-  leg-swap — every integer triple, including all signs, lies in one of the
-  two families. Every concrete solution is exact-confirmed by substitution;
-  half-bounded domains (e.g. $n \ge 1$ alone) are left unevaluated, and forms
-  whose textbook parametrizations are provably incomplete (weighted
-  coefficients, four or more squares) are declined rather than answered
-  partially.
+  $\bigl(t(t_1^2-t_2^2),\; 2t\,t_1 t_2,\; t(t_1^2+t_2^2)\bigr)$ and its leg-swap
+  — every integer triple, including all signs, lies in one of the two families.
+  Every concrete solution is exact-confirmed by substitution; half-bounded
+  domains (e.g. $n \ge 1$ alone) are left unevaluated, and forms whose textbook
+  parametrizations are provably incomplete (weighted coefficients, four or more
+  squares) are declined rather than answered partially.
 
 - **Periodic equations expand their root families over a bounded domain.**
-  `Solve(\sin x = \tfrac12,\; x \in [0, 4\pi])` returns all four exact
-  solutions $\tfrac{\pi}{6}, \tfrac{5\pi}{6}, \tfrac{13\pi}{6},
-  \tfrac{17\pi}{6}$ — not just the principal values. Scaled arguments work
-  too (`\sin 2x = 1` over $[0, 2\pi]$ → $\tfrac{\pi}{4}, \tfrac{5\pi}{4}$).
-  Expansion applies when the unknown appears only inside trigonometric
-  functions of linear arguments; each family member is verified by exact
-  substitution, and unreasonably large expansions degrade gracefully to the
-  principal roots.
+  `Solve(\sin x = \tfrac12,\; x \in [0, 4\pi])` returns all four exact solutions
+  $\tfrac{\pi}{6}, \tfrac{5\pi}{6}, \tfrac{13\pi}{6},
+  \tfrac{17\pi}{6}$ — not
+  just the principal values. Scaled arguments work too (`\sin 2x = 1` over
+  $[0, 2\pi]$ → $\tfrac{\pi}{4}, \tfrac{5\pi}{4}$). Expansion applies when the
+  unknown appears only inside trigonometric functions of linear arguments; each
+  family member is verified by exact substitution, and unreasonably large
+  expansions degrade gracefully to the principal roots.
 
 - **`assume()` bounds now filter solutions.** After `assume(n > 0)`,
   `Solve(n^2 = 16, n)` (and `expr.solve("n")`) returns `[4]` instead of
   `[4, -4]`; `assume(n \in 1..10)`, inequality, and `\ne` assumptions are
   honored the same way, conjunctively with any explicit domain. Roots are
-  dropped only when an assumption definitely excludes them — symbolic roots
-  that cannot be decided are kept.
+  dropped only when an assumption definitely excludes them — symbolic roots that
+  cannot be decided are kept.
 
 ### Parsing Resilience
 
-The parser was hardened against a corpus of ~2,300 math fragments extracted
-from real olympiad problems (the MathNet dataset); the clean-parse rate on
-that corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
+The parser was hardened against a corpus of ~2,300 math fragments extracted from
+real olympiad problems (the MathNet dataset); the clean-parse rate on that
+corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 `docs/mathnet/` for the corpus, the regression checker, and the work plan.
 
-- **Ellipsis in a numeric context no longer throws.** `(1!)^2 + (2!)^2 +
-  \dots + (2018!)^2` crashed with `The type of the constant
-  "ContinuationPlaceholder" cannot be changed` (type inference attempted to
-  narrow a constant). Inference is now a no-op on constants.
+- **Ellipsis in a numeric context no longer throws.**
+  `(1!)^2 + (2!)^2 + \dots + (2018!)^2` crashed with
+  `The type of the constant "ContinuationPlaceholder" cannot be changed` (type
+  inference attempted to narrow a constant). Inference is now a no-op on
+  constants.
 
-- **`\cdots`, `\dotsb`, `\dotsc`, `\dotsm`, and Unicode `…` parse as
-  ellipsis.** Previously only `\dots`/`\ldots`/`...` did; `(2!+2)(3!+3)
-  \cdots (2019!+3)` now parses with the placeholder as an inert operand
-  instead of erroring.
+- **`\cdots`, `\dotsb`, `\dotsc`, `\dotsm`, and Unicode `…` parse as ellipsis.**
+  Previously only `\dots`/`\ldots`/`...` did; `(2!+2)(3!+3) \cdots (2019!+3)`
+  now parses with the placeholder as an inert operand instead of erroring.
 
-- **A trailing sentence period no longer breaks an equation.** Input copied
-  from prose often ends in `.`, `;` or `,` (e.g. `... = z^2.`). When — and
-  only when — the parse would otherwise contain an error, the trailing
-  punctuation is dropped and the input re-parsed. Valid input is unaffected:
-  `5.` still parses as the decimal $5$.
+- **A trailing sentence period no longer breaks an equation.** Input copied from
+  prose often ends in `.`, `;` or `,` (e.g. `... = z^2.`). When — and only when
+  — the parse would otherwise contain an error, the trailing punctuation is
+  dropped and the input re-parsed. Valid input is unaffected: `5.` still parses
+  as the decimal $5$.
 
-- **Congruences parse and evaluate.** `a \equiv b \pmod{n}` (also `\bmod`,
-  the parenthesized `(\bmod n)`, and the ASCII form `n ≡ 1 (mod 3)`) parse to
+- **Congruences parse and evaluate.** `a \equiv b \pmod{n}` (also `\bmod`, the
+  parenthesized `(\bmod n)`, and the ASCII form `n ≡ 1 (mod 3)`) parse to
   `Congruent(a, b, n)`, which evaluates for concrete integers
   (`7 \equiv 1 \pmod{3}` → `True`) and now accepts symbolic moduli
   (`2^n \equiv 1 \pmod{p^{k+1}}` stays symbolic instead of erroring).
 
-- **Common Unicode math symbols are accepted:** `≡` (congruence), `∈`, `∉`,
-  `∪`, `∩`, `≈`, `∠`, and `…` — useful when input comes from plain-text
-  sources rather than LaTeX.
+- **Common Unicode math symbols are accepted:** `≡` (congruence), `∈`, `∉`, `∪`,
+  `∩`, `≈`, `∠`, and `…` — useful when input comes from plain-text sources
+  rather than LaTeX.
 
-- **Alignment environments parse as systems.** `\begin{aligned} a^2+ab+c=0
-  \\ b^2+bc+a=0 \end{aligned}` (also `align`, `gather`, `split`, `multline`,
-  `eqnarray` and their starred variants) parses to a `List` of the row
-  expressions — the same convention as `\begin{cases}`, accepted by `solve()`.
-  Alignment markers are transparent: `x &= y` is `x = y`.
+- **Alignment environments parse as systems.**
+  `\begin{aligned} a^2+ab+c=0 \\ b^2+bc+a=0 \end{aligned}` (also `align`,
+  `gather`, `split`, `multline`, `eqnarray` and their starred variants) parses
+  to a `List` of the row expressions — the same convention as `\begin{cases}`,
+  accepted by `solve()`. Alignment markers are transparent: `x &= y` is `x = y`.
 
 - **Qualified number sets parse.** `\mathbb{R}_{>0}` → `PositiveNumbers`,
   `\mathbb{Z}_{\ge0}` → `NonNegativeIntegers`, `\mathbb{N}^*` →
   `PositiveIntegers`, etc., and they round-trip to canonical LaTeX. A
-  qualification with no named set (`\mathbb{N}_{>1}`) falls back to a
-  faithful set-builder.
+  qualification with no named set (`\mathbb{N}_{>1}`) falls back to a faithful
+  set-builder.
 
 - **Structural odds and ends:** `A \backslash B` parses as `SetMinus` (the
-  common alternative spelling of `\setminus`); a standalone quantified
-  condition `\forall n \ge 1` parses instead of erroring; `\underbrace`
-  mirrors `\overbrace`.
+  common alternative spelling of `\setminus`); a standalone quantified condition
+  `\forall n \ge 1` parses instead of erroring; `\underbrace` mirrors
+  `\overbrace`.
 
-- **A symbol's inferred type narrows instead of erroring.** When a free
-  symbol's type was inferred from one use and a later use requires a more
-  specific type, argument validation now narrows the inference (when sound)
-  instead of producing an `incompatible-type` error. This fixes
-  `(A \setminus B) \cup (B \setminus A)` — where `B` was inferred as a value
-  and then rejected as a set — as well as `-n!!` (double factorial of an
-  undeclared symbol) and a family of similar mixed-use expressions. Declared
-  types are unaffected: passing a declared string where a set is required is
-  still an error.
+- **A symbol's inferred type narrows instead of erroring.** When a free symbol's
+  type was inferred from one use and a later use requires a more specific type,
+  argument validation now narrows the inference (when sound) instead of
+  producing an `incompatible-type` error. This fixes
+  `(A \setminus B) \cup (B \setminus A)` — where `B` was inferred as a value and
+  then rejected as a set — as well as `-n!!` (double factorial of an undeclared
+  symbol) and a family of similar mixed-use expressions. Declared types are
+  unaffected: passing a declared string where a set is required is still an
+  error.
 
 ### Packaging
 
-- **The `integration-rules` plugin shares code with the main library.** The
-  ESM builds of `compute-engine` and the opt-in
-  `@cortex-js/compute-engine/integration-rules` entry point are now emitted
-  with code splitting: the engine core lives in a shared chunk imported by
-  both, instead of being bundled twice. This shrinks the combined download
-  and fixes cross-bundle `instanceof` failures when a host mixed objects from
-  the two bundles. The UMD builds remain self-contained single files.
+- **The `integration-rules` plugin shares code with the main library.** The ESM
+  builds of `compute-engine` and the opt-in
+  `@cortex-js/compute-engine/integration-rules` entry point are now emitted with
+  code splitting: the engine core lives in a shared chunk imported by both,
+  instead of being bundled twice. This shrinks the combined download and fixes
+  cross-bundle `instanceof` failures when a host mixed objects from the two
+  bundles. The UMD builds remain self-contained single files.
 
 ### Lenient parsing and string helpers
 
 - **The string helpers take a `strict` option.** `simplify()`, `evaluate()`,
-  `N()`, `expand()`, `expandAll()`, `factor()`, `solve()`, and `compile()`
-  parse string input in lenient (non-strict) mode by default. Note that lenient
-  mode is not a pure superset of strict LaTeX: unbraced multi-digit scripts
-  change meaning — `x^23` is $x^{23}$ (not $3x^2$), and `x_23`/`a_12` are single
-  multi-digit subscripts. Pass `{ strict: true }` (e.g. `N('x^23', { strict:
-  true })`) to restore the strict LaTeX grammar.
+  `N()`, `expand()`, `expandAll()`, `factor()`, `solve()`, and `compile()` parse
+  string input in lenient (non-strict) mode by default. Note that lenient mode
+  is not a pure superset of strict LaTeX: unbraced multi-digit scripts change
+  meaning — `x^23` is $x^{23}$ (not $3x^2$), and `x_23`/`a_12` are single
+  multi-digit subscripts. Pass `{ strict: true }` (e.g.
+  `N('x^23', { strict: true })`) to restore the strict LaTeX grammar.
 
 - **Lenient inverse functions, `atan2`, and letter runs parse correctly.**
   `sin^-1 x` now means $\arcsin x$ (the inverse function), not $1/\sin x$
@@ -343,52 +343,51 @@ that corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 
 - **Repeated roots produce correct general solutions.** `DSolve` now clusters
   numeric characteristic roots by multiplicity: $y'''' + 2y'' + y = 0$ gives
-  $(c_1 + c_2 x)\cos x + (c_3 + c_4 x)\sin x$ instead of a degenerate basis
-  with spurious $e^{\varepsilon x}$ factors, and repeated real roots keep their
+  $(c_1 + c_2 x)\cos x + (c_3 + c_4 x)\sin x$ instead of a degenerate basis with
+  spurious $e^{\varepsilon x}$ factors, and repeated real roots keep their
   $x e^{x}$ modes. A structural self-check returns the equation unevaluated
   rather than emit a basis with fewer independent solutions than the order.
 
 - **No more corrupted solutions.** Equations with variable coefficients on
   higher-order derivatives (e.g. $x^2 y'' + x y' = x$) previously returned a
-  "solution" containing an internal `Error` node; they now stay unevaluated
-  when the class is unsupported. Equations whose right-hand side references
-  the dependent function with a transformed argument (e.g. $y'(x) = y(2x)$)
-  stay unevaluated instead of returning an unevaluated integral as "solved".
+  "solution" containing an internal `Error` node; they now stay unevaluated when
+  the class is unsupported. Equations whose right-hand side references the
+  dependent function with a transformed argument (e.g. $y'(x) = y(2x)$) stay
+  unevaluated instead of returning an unevaluated integral as "solved".
 
 - **Exponential forcing terms solve.** Variation of parameters was silently
   disabled for exponential bases (an internal Wronskian stayed unsimplified):
   $y'' - y = e^x$ now returns
-  $c_1 e^x + c_2 e^{-x} + \frac12 x e^x - \frac14 e^x$, and
-  $y'' + y = e^x$ returns $c_1 \cos x + c_2 \sin x + \frac12 e^x$, instead of
-  the equation unevaluated. Solutions are returned in collected form (no
-  $e^a \cdot e^b$ products or $A\sin^2 u + A\cos^2 u$ pairs).
+  $c_1 e^x + c_2 e^{-x} + \frac12 x e^x - \frac14 e^x$, and $y'' + y = e^x$
+  returns $c_1 \cos x + c_2 \sin x + \frac12 e^x$, instead of the equation
+  unevaluated. Solutions are returned in collected form (no $e^a \cdot e^b$
+  products or $A\sin^2 u + A\cos^2 u$ pairs).
 
-- **Parsed LaTeX input works end-to-end.** `ce.parse("y''(x)+y(x)=0")` no
-  longer canonicalizes the derivative of an undeclared function into an
-  `Error` node: a derivative now reports a numeric result type, so
-  prime/dot-notation equations flow from `parse()` through `DSolve`
-  ($\dot x + \ddot x$ expressions are likewise no longer corrupted). The
-  implicit first-order form `Apply(Derivative(y), x)` is also recognized
-  (order defaults to 1).
+- **Parsed LaTeX input works end-to-end.** `ce.parse("y''(x)+y(x)=0")` no longer
+  canonicalizes the derivative of an undeclared function into an `Error` node: a
+  derivative now reports a numeric result type, so prime/dot-notation equations
+  flow from `parse()` through `DSolve` ($\dot x + \ddot x$ expressions are
+  likewise no longer corrupted). The implicit first-order form
+  `Apply(Derivative(y), x)` is also recognized (order defaults to 1).
 
 ### Evaluation
 
-- **`Beta` is exact and pole-aware.** $\mathrm{B}(a, m)$ with a positive
-  integer argument reduces exactly ($\mathrm{B}(2,3) = \frac{1}{12}$,
+- **`Beta` is exact and pole-aware.** $\mathrm{B}(a, m)$ with a positive integer
+  argument reduces exactly ($\mathrm{B}(2,3) = \frac{1}{12}$,
   $\mathrm{B}(-2,2) = \frac12$), and arguments at gamma-function poles return
-  $\tilde\infty$ instead of a silently wrong finite value
-  ($\mathrm{B}(-1,2)$ previously returned $-2.97\times10^{49}$).
+  $\tilde\infty$ instead of a silently wrong finite value ($\mathrm{B}(-1,2)$
+  previously returned $-2.97\times10^{49}$).
 
 - **Multiplication by infinity respects sign information.** $x \cdot \infty$
   stays symbolic when the sign of $x$ is unknown, evaluates to $-\infty$ when
-  $x$ is known negative, and to `NaN` when $x$ is zero — it no longer
-  collapses to $+\infty$ unconditionally.
+  $x$ is known negative, and to `NaN` when $x$ is zero — it no longer collapses
+  to $+\infty$ unconditionally.
 
 - **Inverse hyperbolic functions have values at their poles.**
-  $\operatorname{artanh}(\pm 1)$ and $\operatorname{arcoth}(\pm 1)$ evaluate
-  to $\pm\infty$, $\operatorname{arsech}(0)$ to $+\infty$, and
-  $\operatorname{arcsch}(0)$ to $\tilde\infty$, with result types that no
-  longer claim a finite value at a pole.
+  $\operatorname{artanh}(\pm 1)$ and $\operatorname{arcoth}(\pm 1)$ evaluate to
+  $\pm\infty$, $\operatorname{arsech}(0)$ to $+\infty$, and
+  $\operatorname{arcsch}(0)$ to $\tilde\infty$, with result types that no longer
+  claim a finite value at a pole.
 
 - **`Sum` reports incompatible elements.** Summing a collection containing a
   string returns a typed error instead of a silent `NaN`.
@@ -401,35 +400,34 @@ that corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
   example) — a float where the exactness contract promises an exact value.
 
 - **Sums and products with symbolic bounds no longer evaluate to a number.**
-  `\sum_{k=1}^{n} k` with an unbound $n$ evaluated to $50\,015\,001$ — the
-  sum truncated at an internal iteration cap of $10\,001$ — under both
-  `evaluate()` and `.N()`. It now stays symbolic (`simplify()` still
-  produces the closed form $\tfrac{n^2+n}{2}$).
+  `\sum_{k=1}^{n} k` with an unbound $n$ evaluated to $50\,015\,001$ — the sum
+  truncated at an internal iteration cap of $10\,001$ — under both `evaluate()`
+  and `.N()`. It now stays symbolic (`simplify()` still produces the closed form
+  $\tfrac{n^2+n}{2}$).
 
 - **`Expand` computes constant powers.** `Expand((2+3i)^{1000})` returns the
   exact 557-digit Gaussian integer (matching SymPy's `expand()`), and
   `Expand(2^{1000})` the exact integer; both previously returned unevaluated.
-  Structural expansion of symbolic powers is unchanged, and powers too large
-  for exact computation still stay symbolic.
+  Structural expansion of symbolic powers is unchanged, and powers too large for
+  exact computation still stay symbolic.
 
-- **Huge exact complex numbers are finite and print in full.** An exact
-  Gaussian integer with components beyond float64 range (e.g.
-  $(2+3i)^{1000}$) reported `isInfinity` `true`, serialized as $\tilde\infty$
-  in plain text, and had a `NaN` `bignumIm` — all artifacts of routing
-  through the machine-float projection. It now types as `finite_complex`,
-  prints its full digits, and `bignumIm` is exact.
+- **Huge exact complex numbers are finite and print in full.** An exact Gaussian
+  integer with components beyond float64 range (e.g. $(2+3i)^{1000}$) reported
+  `isInfinity` `true`, serialized as $\tilde\infty$ in plain text, and had a
+  `NaN` `bignumIm` — all artifacts of routing through the machine-float
+  projection. It now types as `finite_complex`, prints its full digits, and
+  `bignumIm` is exact.
 
 - **Perfect-power radicands reduce.** $(997^3)^{1/6} = \sqrt{997}$,
-  $8^{1/6} = \sqrt2$, $8^{1/4} = 2^{3/4}$: when canonicalization folds a
-  power into an opaque integer, the root now recovers the structure by
-  perfect-power decomposition. In particular the zero-equivalence test
-  $\sqrt{997} - (997^3)^{1/6}$ evaluates to exact $0$ (it previously leaked
-  a float residue).
+  $8^{1/6} = \sqrt2$, $8^{1/4} = 2^{3/4}$: when canonicalization folds a power
+  into an opaque integer, the root now recovers the structure by perfect-power
+  decomposition. In particular the zero-equivalence test
+  $\sqrt{997} - (997^3)^{1/6}$ evaluates to exact $0$ (it previously leaked a
+  float residue).
 
-- **Logarithms reduce when the argument and base are powers of a common
-  base.** $\log_8 32768 = 5$, $\log_8 2 = \tfrac13$, $\log_4 8 = \tfrac32$
-  — exactly, honoring the exactness contract ($\ln 2$ and $\log_8 10$ stay
-  symbolic).
+- **Logarithms reduce when the argument and base are powers of a common base.**
+  $\log_8 32768 = 5$, $\log_8 2 = \tfrac13$, $\log_4 8 = \tfrac32$ — exactly,
+  honoring the exactness contract ($\ln 2$ and $\log_8 10$ stay symbolic).
 
 - **`Xor` cancels repeated operands.** $a \oplus a = \mathrm{False}$, so
   `Xor(x, y, y)` evaluates to $x$; cancellation composes with the existing
@@ -437,20 +435,20 @@ that corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 
 ### Linear Algebra
 
-- **3×3 `Eigenvalues` returned wrong values — fixed.** The analytic solver
-  used a sign-flipped term in its depressed cubic, mirroring every
-  eigenvalue about $\operatorname{tr}/3$: e.g.
-  $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned $\{\tfrac{10}{3}, -\tfrac53,
-  \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra symmetric about their
-  mean — like $\{1,2,3\}$ — were unaffected, which is how it escaped
-  notice.) Additionally, a complex-conjugate eigenvalue pair was returned as
-  its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$); complex
-  eigenvalues are now returned as complex numbers.
+- **3×3 `Eigenvalues` returned wrong values — fixed.** The analytic solver used
+  a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+  $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+  $\{\tfrac{10}{3}, -\tfrac53,
+  \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+  symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+  it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+  returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+  complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 
-- **Rule conditions must return a boolean.** A `condition` function returning
-  a non-boolean (e.g. the boxed symbol `False`, which is a truthy JavaScript
+- **Rule conditions must return a boolean.** A `condition` function returning a
+  non-boolean (e.g. the boxed symbol `False`, which is a truthy JavaScript
   object) no longer fires the rule; a one-time console warning identifies the
   malformed condition. Returning the boxed symbol `True` is accepted.
 
@@ -458,19 +456,19 @@ that corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
   the constants are resolved to `ExponentialE` and the imaginary unit when the
   rule is parsed, instead of remaining inert symbols that could never match.
 
-- **Explicit wildcards work in LaTeX match patterns.** An object-form rule
-  such as `{match: '_a + 1', replace: '_a'}` now parses `_a`/`__a` as
-  wildcards instead of an implicit product.
+- **Explicit wildcards work in LaTeX match patterns.** An object-form rule such
+  as `{match: '_a + 1', replace: '_a'}` now parses `_a`/`__a` as wildcards
+  instead of an implicit product.
 
-- **A throwing condition no longer discards subexpression rewrites.** If a
-  rule condition throws, the rule is skipped at that node but successful
-  rewrites of the operands are kept.
+- **A throwing condition no longer discards subexpression rewrites.** If a rule
+  condition throws, the rule is skipped at that node but successful rewrites of
+  the operands are kept.
 
 ## 0.67.0 _2026-07-03_
 
 This release improves correctness and predictability across the public Compute
-Engine API: exact complex and integer arithmetic stays exact more often,
-partial derivatives and assumptions are more capable, LaTeX and lenient parsing
+Engine API: exact complex and integer arithmetic stays exact more often, partial
+derivatives and assumptions are more capable, LaTeX and lenient parsing
 round-trip more reliably, compiled output agrees more closely with interpreted
 evaluation, and arbitrary-precision arithmetic is substantially faster. It also
 fixes many cases where `evaluate()`, `N()`, `simplify()`, `isEqual()`,
@@ -480,11 +478,11 @@ answer, lose exactness, hang, or silently accept invalid input.
 ### Exact and Numeric Evaluation
 
 - **Exact complex arithmetic preserves exact values.** Gaussian integer and
-  rational complex values now stay exact through arithmetic: $(1+i)^3$
-  evaluates to $-2+2i$, $(1+i)^{-2}$ to $-\frac{i}{2}$, $\frac{1}{1+i}$ to
+  rational complex values now stay exact through arithmetic: $(1+i)^3$ evaluates
+  to $-2+2i$, $(1+i)^{-2}$ to $-\frac{i}{2}$, $\frac{1}{1+i}$ to
   $\frac{1-i}{2}$, $\sqrt{3+4i}$ to $2+i$, and $\sqrt{-4}$ to $2i$. Exact
-  complex numbers also round-trip through MathJSON as `["Complex", re, im]`
-  with exact components.
+  complex numbers also round-trip through MathJSON as `["Complex", re, im]` with
+  exact components.
 
 - **Integer powers and large integers stay exact.** Integer powers such as
   $2^{127}$ now evaluate to exact integers, negative integer powers produce
@@ -495,11 +493,10 @@ answer, lose exactness, hang, or silently accept invalid input.
 
 - **Exact results are preserved more consistently.** `evaluate()` no longer
   turns exact arguments into floats in cases such as $\sqrt{-2}$,
-  $\operatorname{Fract}(\frac12)$, $\Re(\frac12)$, $|1+i|$,
-  $\log_2(\pi)$, `Distance`, and statistics functions. For example,
+  $\operatorname{Fract}(\frac12)$, $\Re(\frac12)$, $|1+i|$, $\log_2(\pi)$,
+  `Distance`, and statistics functions. For example,
   $\operatorname{Mean}([1,2,3,4])$ now returns $\frac52$, and
-  $\operatorname{StandardDeviation}([1,2,3,4])$ returns
-  $\frac{\sqrt{15}}{3}$.
+  $\operatorname{StandardDeviation}([1,2,3,4])$ returns $\frac{\sqrt{15}}{3}$.
 
 - **Special functions are more accurate.** `PolyGamma`, `Zeta`, `BesselI`,
   `BesselK`, Airy functions, logarithms, roots, trigonometric functions near
@@ -520,10 +517,10 @@ answer, lose exactness, hang, or silently accept invalid input.
   `N(\sqrt{4y})` now returns $2\sqrt{y}$ instead of dropping the radical.
 
 - **Sums and infinite sums behave better.** Exact sums such as
-  $\sum_{k=1}^{5}\sqrt{k}$ now remain exact, while sums over infinite index
-  sets such as $\sum_{n \in \mathbb{Z}^+}\frac{1}{n^2}$ evaluate numerically
-  when appropriate, remain symbolic when parameters prevent evaluation, and
-  respect `timeLimit`.
+  $\sum_{k=1}^{5}\sqrt{k}$ now remain exact, while sums over infinite index sets
+  such as $\sum_{n \in \mathbb{Z}^+}\frac{1}{n^2}$ evaluate numerically when
+  appropriate, remain symbolic when parameters prevent evaluation, and respect
+  `timeLimit`.
 
 ### Differentiation, Integration, and Simplification
 
@@ -531,8 +528,7 @@ answer, lose exactness, hang, or silently accept invalid input.
   `D(f(x, y), x)` now represents the partial derivative with respect to the
   first argument, mixed partials accumulate correctly, and multivariate chain,
   product, power, and quotient rules compose as expected. For example,
-  `D(f(x^2, y), x)` returns a symbolic chain-rule result proportional to
-  $2x$.
+  `D(f(x^2, y), x)` returns a symbolic chain-rule result proportional to $2x$.
 
 - **Partial-derivative notation parses and evaluates.** Forms such as
   $\partial_x f(x,y)$, $\frac{\partial}{\partial x} f(x,y)$,
@@ -542,14 +538,13 @@ answer, lose exactness, hang, or silently accept invalid input.
 
 - **Derivative notation is more robust.** Compact derivatives such as
   `d/dx(f(g(x)))` preserve unknown-function chain rules, higher-order
-  derivatives round-trip through LaTeX, and
-  $\frac{d}{dx}[\sin x]$ treats the square brackets as grouping rather than a
-  one-element list.
+  derivatives round-trip through LaTeX, and $\frac{d}{dx}[\sin x]$ treats the
+  square brackets as grouping rather than a one-element list.
 
 - **Several derivative rules are corrected.** Variable-degree radicals such as
   `Root(x, x)` differentiate as $x^{1/x}$, $\frac{d}{dx}\operatorname{Mod}(x,5)$
-  gives $1$ almost everywhere, and
-  $D(\operatorname{arcoth}(x), x)$ returns $\frac{1}{1-x^2}$.
+  gives $1$ almost everywhere, and $D(\operatorname{arcoth}(x), x)$ returns
+  $\frac{1}{1-x^2}$.
 
 - **Definite integrals no longer return fabricated closed forms.** If no
   closed-form antiderivative is found, `evaluate()` keeps the definite integral
@@ -558,14 +553,14 @@ answer, lose exactness, hang, or silently accept invalid input.
 
 - **Default simplification covers more identities.** The sine addition identity
   $\sin(x)\cos(y)+\cos(x)\sin(y)=\sin(x+y)$ now applies in the default
-  `simplify()` path. Pythagorean identities such as
-  $\sin^2 x+\cos^2 x$ also simplify inside larger sums.
+  `simplify()` path. Pythagorean identities such as $\sin^2 x+\cos^2 x$ also
+  simplify inside larger sums.
 
 - **Simplification is more exact and branch-aware.** Combining powers keeps
-  exact exponents, for example $x \cdot x^{\sqrt2}$ becomes
-  $x^{1+\sqrt2}$. The simplification of $\ln(x^2)$ now produces
-  $2\ln(|x|)$ for real $x$, and identities that require real arguments no
-  longer apply to symbols declared as complex.
+  exact exponents, for example $x \cdot x^{\sqrt2}$ becomes $x^{1+\sqrt2}$. The
+  simplification of $\ln(x^2)$ now produces $2\ln(|x|)$ for real $x$, and
+  identities that require real arguments no longer apply to symbols declared as
+  complex.
 
 - **Some unsafe rewrites were removed.** `simplify()` no longer rewrites
   $|\sin x|$ as $\sin|x|$, `Arctan2` preserves the correct quadrant, rule
@@ -584,10 +579,10 @@ answer, lose exactness, hang, or silently accept invalid input.
   equations (undetermined coefficients for polynomial forcing, variation of
   parameters otherwise) and **second-order Cauchy–Euler** equations. Integration
   constants are now named `c_1`, `c_2`, … (fresh names are chosen if those are
-  already in use). Correspondingly, `NDSolve` now solves explicit **higher-order**
-  initial value problems `y⁽ⁿ⁾(x) = f(x, y, y', …, y⁽ⁿ⁻¹⁾)` by reducing them to a
-  first-order RK4 system, with the initial condition given as a list
-  `[y(x0), y'(x0), …]`. Equations outside these classes remain inert.
+  already in use). Correspondingly, `NDSolve` now solves explicit
+  **higher-order** initial value problems `y⁽ⁿ⁾(x) = f(x, y, y', …, y⁽ⁿ⁻¹⁾)` by
+  reducing them to a first-order RK4 system, with the initial condition given as
+  a list `[y(x0), y'(x0), …]`. Equations outside these classes remain inert.
 
 ### Parsing and Serialization
 
@@ -597,8 +592,8 @@ answer, lose exactness, hang, or silently accept invalid input.
 
 - **LaTeX parsing accepts more common notation.** `N(...)` and `D(...)` parse as
   numeric evaluation and differentiation outside quantifier scopes, superscripts
-  on `\log`, `\ln`, `\lg`, and `\exp` bind to the applied function, and
-  `==`, `!=`, chained `\ne`, mixed-direction inequality chains, parenthesized
+  on `\log`, `\ln`, `\lg`, and `\exp` bind to the applied function, and `==`,
+  `!=`, chained `\ne`, mixed-direction inequality chains, parenthesized
   relations, and double negation such as `x--y` now parse with the expected
   meaning.
 
@@ -690,22 +685,20 @@ answer, lose exactness, hang, or silently accept invalid input.
   `CancellationError` when `timeLimit` or the recursion limit is exceeded.
   Examples include $\lim_{x\to\infty} e^{e^{e^x}}/e^{e^{e^{x-1}}}$,
   $\Gamma(10^{300})$, $\zeta(\pm 10^{300})$, $\operatorname{Fib}(10^9)$,
-  $\binom{2 \times 10^9}{10^9}$, and
-  $\operatorname{Subfactorial}(10^6)$.
+  $\binom{2 \times 10^9}{10^9}$, and $\operatorname{Subfactorial}(10^6)$.
 
 - **`simplify()` honors more of its public contract.** `simplify({rules: null})`
   now applies no rewrite rules, as documented, and logarithmic simplifications
   such as $\ln(a)/\ln(b)$ no longer reduce to an integer unless the identity can
   be verified exactly. `simplify()` also preserves exact exponents when
-  combining powers, so $x \cdot x^{\sqrt2}$ becomes $x^{1+\sqrt2}$ rather than
-  a decimal exponent.
+  combining powers, so $x \cdot x^{\sqrt2}$ becomes $x^{1+\sqrt2}$ rather than a
+  decimal exponent.
 
-- **Numeric comparison and formatting edge cases are fixed.** Two large
-  15-digit values that previously compared in the wrong order now compare
-  correctly, `toPrecision(15)` no longer corrupts
-  `999999999999999`, NaN has a deterministic place in canonical ordering, and
-  high-precision `toString()`, `.json`, and `toFixed()` avoid long stalls on
-  enormous exponents.
+- **Numeric comparison and formatting edge cases are fixed.** Two large 15-digit
+  values that previously compared in the wrong order now compare correctly,
+  `toPrecision(15)` no longer corrupts `999999999999999`, NaN has a
+  deterministic place in canonical ordering, and high-precision `toString()`,
+  `.json`, and `toFixed()` avoid long stalls on enormous exponents.
 
 - **Substitution and collection operations are more complete.** `subs()` now
   reaches into lists and tensors, for example `Median([a,b,c]).subs({a: 1})`.
@@ -726,16 +719,16 @@ answer, lose exactness, hang, or silently accept invalid input.
   longer drop operands from the expression being transformed.
 
 - **Special values and combinatorics are corrected.** `Choose` and `Binomial`
-  now share standard conventions, including `Choose(2,3) = 0` and negative
-  upper indices such as `Binomial(-2,3) = -4`. `Argument(1+i)` evaluates to
-  $\pi/4$, several `Digamma` special values simplify when the Fungrim pack is
-  loaded, and integer-domain functions such as `Fibonacci(+Infinity)` and
+  now share standard conventions, including `Choose(2,3) = 0` and negative upper
+  indices such as `Binomial(-2,3) = -4`. `Argument(1+i)` evaluates to $\pi/4$,
+  several `Digamma` special values simplify when the Fungrim pack is loaded, and
+  integer-domain functions such as `Fibonacci(+Infinity)` and
   `MoebiusMu(Infinity)` stay symbolic instead of throwing.
 
 - **Modular arithmetic is consistent.** `Mod` is floored everywhere, so
   `Mod(-7, 3)` returns $2$, while `Remainder` uses round-to-nearest semantics.
-  Exact rational inputs stay exact, for example
-  `Mod(\frac12, \frac13)` returns $\frac16$.
+  Exact rational inputs stay exact, for example `Mod(\frac12, \frac13)` returns
+  $\frac16$.
 
 - **Complex and matrix products no longer lose meaning.** Multiplying a scalar
   by a complex literal such as `["Complex", 1, 1]` preserves both real and
@@ -743,10 +736,10 @@ answer, lose exactness, hang, or silently accept invalid input.
   a commutator such as $MP - PM$ no longer collapses to $0$ for declared matrix
   symbols.
 
-- **Parsing rejects or preserves ambiguous forms more reliably.** `x^2^3` is
-  now a parse error instead of an unintended list power, `Sequence(1,2)` no
-  longer serializes as `1 2`, parenthesized relations are treated as atomic
-  operands inside larger chains, and a scalar or matrix next to a function- or
+- **Parsing rejects or preserves ambiguous forms more reliably.** `x^2^3` is now
+  a parse error instead of an unintended list power, `Sequence(1,2)` no longer
+  serializes as `1 2`, parenthesized relations are treated as atomic operands
+  inside larger chains, and a scalar or matrix next to a function- or
   matrix-valued symbol is parsed as multiplication rather than a tuple.
 
 - **`0^0` and non-finite values are consistent across paths.** `evaluate()`,
@@ -760,12 +753,12 @@ answer, lose exactness, hang, or silently accept invalid input.
   polynomial, matrix, and definite-integral inputs, with the same parse results
   as before.
 
-- **Arbitrary-precision arithmetic is substantially faster.** At 100
-  significant digits, addition, subtraction, multiplication, division, and
-  comparison are now much faster than in 0.66.0, and high-precision `ln`, `exp`,
-  `Gamma`, and related operations also benefit. The improvements are visible in
-  both direct numeric work and symbolic operations that depend on
-  arbitrary-precision arithmetic.
+- **Arbitrary-precision arithmetic is substantially faster.** At 100 significant
+  digits, addition, subtraction, multiplication, division, and comparison are
+  now much faster than in 0.66.0, and high-precision `ln`, `exp`, `Gamma`, and
+  related operations also benefit. The improvements are visible in both direct
+  numeric work and symbolic operations that depend on arbitrary-precision
+  arithmetic.
 
   **Arbitrary-precision arithmetic at 100 significant digits** (ns per
   operation, lower is better; warm median, distinct operands per call):
