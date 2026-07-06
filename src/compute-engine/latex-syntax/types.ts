@@ -527,8 +527,18 @@ export type FunctionEntry = BaseEntry &
  * A dictionary entry is a record that maps a LaTeX token or string of tokens
  * ( a trigger) to a MathJSON expression or to a parsing handler.
  *
- * Set the `ComputeEngine.latexDictionary` property to an array of
- * dictionary entries to define custom LaTeX parsing and serialization.
+ * To define custom LaTeX parsing and serialization, pass a `LatexSyntax`
+ * instance to the `ComputeEngine` constructor via the `latexSyntax` option.
+ * The `LatexSyntax` `dictionary` option **replaces** the default dictionary, so
+ * start from `LATEX_DICTIONARY` and append your entries:
+ *
+ * ```ts
+ * import { ComputeEngine, LatexSyntax, LATEX_DICTIONARY } from '@cortex-js/compute-engine';
+ *
+ * const ce = new ComputeEngine({
+ *   latexSyntax: new LatexSyntax({ dictionary: [...LATEX_DICTIONARY, myEntry] }),
+ * });
+ * ```
  *
  * @category Latex Parsing and Serialization
  *
