@@ -675,6 +675,45 @@ describe('APPLY', () => {
       ['Abs', 'x'],
       2,
     ]));
+
+  // A `\square` topic marker in the rhs names where the lhs is substituted,
+  // allowing a multi-argument call on the right.
+  test('pipeline topic marker: single argument', () =>
+    expect(ce.parse('x |> f(\\square)', { canonical: false }).json).toEqual([
+      'f',
+      'x',
+    ]));
+  test('pipeline topic marker: multi-argument call', () =>
+    expect(
+      ce.parse('y |> \\operatorname{Solve}(\\square, x)', { canonical: false })
+        .json
+    ).toEqual(['Solve', 'y', 'x']));
+  test('pipeline topic marker: repeated', () =>
+    expect(
+      ce.parse('x |> f(\\square, \\square)', { canonical: false }).json
+    ).toEqual(['f', 'x', 'x']));
+  test('pipeline topic marker: chains', () =>
+    expect(
+      ce.parse('a |> f(\\square) |> g(\\square)', { canonical: false }).json
+    ).toEqual(['g', ['f', 'a']]));
+
+  // Prefix pipeline: the lhs is implied, so the stage is an anonymous unary
+  // function over the topic. The caller applies it to the piped value.
+  test('prefix pipeline: bare function', () =>
+    expect(ce.parse('|> f', { canonical: false }).json).toEqual([
+      'Function',
+      ['Apply', 'f', '_'],
+      '_',
+    ]));
+  test('prefix pipeline: topic marker', () =>
+    expect(
+      ce.parse('|> \\operatorname{Solve}(\\square, x)', { canonical: false })
+        .json
+    ).toEqual(['Function', ['Solve', '_', 'x'], '_']));
+  test('prefix pipeline evaluates when applied', () =>
+    expect(ce.box(['Apply', ce.parse('|> \\cos'), 'Pi']).evaluate().json).toEqual(
+      -1
+    ));
 });
 
 // `--`/`++` are read as repeated unary minus/plus (double negation), not as

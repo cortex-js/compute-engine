@@ -564,14 +564,71 @@ function serializeKeyword(
 }
 
 // Pipeline operator (`\rhd`, `\triangleright`, `|>`): the argument on the
-// left is applied to the function on the right, e.g. `x |> f` -> `f(x)`
+// left is applied to the function on the right, e.g. `x |> f` -> `f(x)`.
+//
+// A topic marker `\square` in the right-hand side names the position the
+// left-hand side fills, so the right-hand side may be a multi-argument call,
+// e.g. `x |> \operatorname{Solve}(\square, y)` -> `Solve(x, y)`. Without a
+// marker the left-hand side is passed as the sole argument (`Apply`).
+
+// The internal symbol a bare `\square` parses to (see the `Quadrilateral`
+// definition in definitions-other.ts). Within a pipeline it acts as the
+// topic marker / hole for the piped value.
+const PIPE_TOPIC_MARKER = 'square';
+
+// Substitute `replacement` for every topic marker in `expr`. Returns the
+// (possibly) rewritten expression and whether any marker was found.
+function substituteTopic(
+  expr: MathJsonExpression,
+  replacement: MathJsonExpression
+): [MathJsonExpression, boolean] {
+  if (symbol(expr) === PIPE_TOPIC_MARKER) return [replacement, true];
+
+  const op = operator(expr);
+  if (!op) return [expr, false];
+
+  let found = false;
+  const args = operands(expr).map((arg) => {
+    const [sub, f] = substituteTopic(arg, replacement);
+    if (f) found = true;
+    return sub;
+  });
+  if (!found) return [expr, false];
+  return [[op, ...args] as MathJsonExpression, true];
+}
+
+// Build the body of a pipeline stage: substitute `arg` for the topic marker
+// in `rhs` if present, otherwise apply `rhs` to `arg` as the sole argument.
+function buildPipe(
+  rhs: MathJsonExpression,
+  arg: MathJsonExpression
+): MathJsonExpression {
+  const [body, found] = substituteTopic(rhs, arg);
+  if (found) return body;
+  return ['Apply', rhs, arg] as MathJsonExpression;
+}
+
 function parsePipeline(
   parser: Parser,
   lhs: MathJsonExpression,
   _until: Readonly<Terminator>
 ): MathJsonExpression {
   const rhs = parser.parseExpression({ minPrec: 21 }) ?? 'Nothing';
-  return ['Apply', rhs, lhs] as MathJsonExpression;
+  return buildPipe(rhs, lhs);
+}
+
+// Prefix pipeline (`|> f`, `|> \operatorname{Solve}(\square, x)`): the
+// left-hand side is implied, so the stage becomes an anonymous unary function
+// over the topic. The caller applies it to the value it wants to pipe in.
+// e.g. `|> f` -> `Function(Apply(f, _), _)`; `|> Solve(\square, x)` ->
+// `Function(Solve(_, x), _)`.
+function parsePipelinePrefix(
+  parser: Parser,
+  _until?: Readonly<Terminator>
+): MathJsonExpression {
+  const rhs = parser.parseExpression({ minPrec: 21 }) ?? 'Nothing';
+  const param = '_';
+  return ['Function', buildPipe(rhs, param), param] as MathJsonExpression;
 }
 
 export const DEFINITIONS_CORE: LatexDictionary = [
@@ -769,6 +826,32 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'infix',
     precedence: 20,
     parse: parsePipeline,
+  },
+  // Prefix forms of the pipeline operator: the left-hand side is implied and
+  // the stage becomes an anonymous unary function (see `parsePipelinePrefix`).
+  {
+    latexTrigger: '|>',
+    kind: 'prefix',
+    precedence: 20,
+    parse: parsePipelinePrefix,
+  },
+  {
+    latexTrigger: '\\rhd',
+    kind: 'prefix',
+    precedence: 20,
+    parse: parsePipelinePrefix,
+  },
+  {
+    latexTrigger: '\\triangleright',
+    kind: 'prefix',
+    precedence: 20,
+    parse: parsePipelinePrefix,
+  },
+  {
+    latexTrigger: ['⊳'], // U+22B3 CONTAINS AS NORMAL SUBGROUP
+    kind: 'prefix',
+    precedence: 20,
+    parse: parsePipelinePrefix,
   },
 
   {

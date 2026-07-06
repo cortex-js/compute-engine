@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Parsing and Serialization
+
+- **The pipeline operator `|>` supports a topic marker and a prefix form.** A
+  `\square` in the right-hand side marks where the piped value is substituted,
+  so the right-hand side may be a multi-argument call:
+  `x^2 + 2x + 1 |> \operatorname{Solve}(\square, x)` parses to
+  `Solve(x^2+2x+1, x)`. Without a marker the value is passed as the sole
+  argument, as before (`x |> f` → `f(x)`). A prefix `|> f` (or
+  `|> \operatorname{Solve}(\square, x)`) leaves the left-hand side implied and
+  yields an anonymous unary function over the topic
+  (`Function(Apply(f, _), _)`), which the caller applies to whatever value it
+  wants to pipe in. `\rhd`, `\triangleright`, and `⊳` behave identically.
+
 ## 0.68.0 _2026-07-05_
 
 ### Breaking Changes
