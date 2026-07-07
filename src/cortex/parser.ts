@@ -8,14 +8,27 @@ import {
 } from '../math-json/utils';
 import { escapeJsonString } from '../common/json';
 
-import { DIGITS, HEX_DIGITS } from './characters';
+import { DIGITS, FANCY_UNICODE, HEX_DIGITS } from './characters';
 import {
   DiagnosticMessage,
   FatalParsingError,
   ParsingDiagnostic,
 } from './diagnostics';
 import { tokenize } from './lexer';
+import {
+  OperatorDef,
+  infixOperatorForSymbol,
+  prefixOperatorForSymbol,
+} from './operators';
+import { RESERVED_WORDS } from './reserved-words';
 import { SourceSpan, Token, TokenType } from './tokens';
+
+/** Precedence of the prefix operators (`-`, `!`, and fancy aliases). Read from
+ * the shared table so it can never drift. */
+const PREFIX_PRECEDENCE = prefixOperatorForSymbol('!')!.precedence;
+
+/** The characters that can head a prefix operator run (`-x`, `!a`, `+3`). */
+const PREFIX_SIGILS = new Set(['!', '-', '+']);
 
 //
 // The Cortex parser turns a `Token[]` (from the Cortex `Lexer`) into a MathJSON
@@ -33,16 +46,41 @@ import { SourceSpan, Token, TokenType } from './tokens';
 //     the next statement boundary (a token preceded by a line break, or a
 //     `;`). Each recovery emits exactly one diagnostic for the skipped region.
 //
-// For this phase the grammar is intentionally minimal (Phase 2 adds the
-// operator/expression layer):
+// Grammar (Phase 2, Stage A — binary/unary operators):
 //
 //   primary    = number | symbol | verbatim-symbol | string | pragma
 //              | parenthesized
-//   program    = shebang? primary* EOF
+//   unary      = prefix-op unary | primary
+//   expression = unary (infix-op expression)*      // precedence climbing
+//   program    = shebang? (statement separator?)* EOF
 //
-// The top-level shape reproduces today's behavior exactly: 0 expressions →
-// `Nothing`, 1 expression → that expression (not wrapped), N expressions →
-// `["Do", …]`.
+// Precedence, associativity, and spelling come from the shared operator table
+// (`operators.ts`), consumed by both parser and serializer.
+//
+// ─── The whitespace rule ────────────────────────────────────────────────────
+//
+// An infix operator continues the current expression only if it has whitespace
+// on **both** sides or **neither** (the Phase 1 `precededByWhitespace` flag):
+//
+//   • `a + b`, `a+b`  → infix.
+//   • `a +b`          → NOT infix: `a` ends; `+b` begins a new (prefix)
+//                        statement. This makes separator-free programs parse
+//                        deterministically.
+//   • `a+ b`          → `asymmetric-operator-whitespace` diagnostic; recovers
+//                        by treating the operator as infix so parsing continues.
+//
+// A prefix operator must have **no** whitespace before its operand (`-x`, not
+// `- x`).
+//
+// ─── Statement sequencing ───────────────────────────────────────────────────
+//
+// Top-level statements are separated by a linebreak (`precededByLinebreak`) or
+// `;`. Two full expressions on one line with no separator are a diagnostic
+// (no silent `Do`-juxtaposition) — unless the second unambiguously begins a new
+// prefix statement (`a +b`), which the whitespace rule already carved off.
+//
+// The top-level shape: 0 statements → `Nothing`, 1 statement → that expression
+// (not wrapped), N statements → `["Do", …]`.
 //
 
 export class Parser {
@@ -186,11 +224,14 @@ export class Parser {
     while (this.current.type !== 'EOF') {
       const startPos = this.pos;
       const token = this.current;
-      const expr = this.parsePrimary();
+      const diagBefore = this.diagnostics.length;
+      const expr = this.parseExpression(0);
       if (expr !== null) {
         exprs.push(expr);
+        this.expectStatementSeparator();
       } else {
-        this.reportUnexpected(token);
+        // If the failed parse already emitted a diagnostic, don't double-report.
+        if (this.diagnostics.length === diagBefore) this.reportUnexpected(token);
         this.recoverAtTopLevel();
       }
       // Guard against a non-advancing iteration.
@@ -235,6 +276,240 @@ export class Parser {
     if (this.current.type === 'SEMICOLON') this.advance();
   }
 
+  /**
+   * Consume an explicit statement separator (`;`) after a statement.
+   *
+   * Statements are otherwise separated by a linebreak or simply juxtaposed —
+   * the whitespace rule already carves `a +b` into two statements (`a` then the
+   * prefix expression `+b`), which the top-level loop then wraps in `Do`. The
+   * "two bare expressions on one line" diagnostic from language-review §2.5
+   * lands in Stage B, once function-call syntax removes today's `f(x)` →
+   * `Do(f, x)` juxtaposition (see the phase plan §2.5 note).
+   */
+  private expectStatementSeparator(): void {
+    if (this.check('SEMICOLON')) this.advance();
+  }
+
+  //
+  // ─── Expression (precedence climbing) ─────────────────────────────────────
+  //
+
+  /**
+   * Parse an expression whose operators all bind at least as tightly as
+   * `minPrecedence`. Returns `null` if no primary can be parsed.
+   */
+  private parseExpression(minPrecedence: number): MathJsonExpression | null {
+    let left = this.parseUnary();
+    if (left === null) return null;
+
+    for (;;) {
+      const op = this.peekInfix();
+      if (op === null) break;
+      if (op.def.precedence < minPrecedence) break;
+
+      if (op.asymmetric)
+        this.emitAsymmetric(this.current, op.def.symbol);
+
+      // Consume the operator token(s).
+      for (let i = 0; i < op.tokenCount; i++) this.advance();
+
+      const rightMin =
+        op.def.assoc === 'right' ? op.def.precedence : op.def.precedence + 1;
+      const right = this.parseExpression(rightMin);
+      if (right === null) {
+        this.error(
+          ['expression-expected'],
+          this.current.start,
+          this.current.end
+        );
+        break;
+      }
+      left = this.combineInfix(op.def, left, right);
+    }
+
+    return left;
+  }
+
+  /** A prefix-operator run followed by its operand, or a primary. */
+  private parseUnary(): MathJsonExpression | null {
+    const token = this.current;
+    const sigils = this.prefixSigils(token);
+    if (sigils === null) return this.parsePrimary();
+
+    // A prefix operator must abut its operand: `-x`, never `- x`.
+    const operandToken = this.peek();
+    if (operandToken.precededByWhitespace) {
+      this.error(['unexpected-symbol', token.text], token.start, token.end);
+      this.advance(); // the offending prefix operator
+      return null;
+    }
+
+    const start = token.start;
+    this.advance(); // the prefix-operator token
+    const operand = this.parseExpression(PREFIX_PRECEDENCE);
+    if (operand === null) {
+      this.error(['expression-expected'], token.start, token.end);
+      return null;
+    }
+    return this.applyPrefix(sigils, operand, start);
+  }
+
+  /**
+   * The prefix-operator sigils a token would contribute in prefix position, or
+   * `null` if it is not a prefix operator. An `OPERATOR` token is a run of
+   * `!`/`-`/`+` (e.g. `!!`); a single fancy-Unicode `ERROR` token is translated
+   * first (`¬` → `!`, `−` → `-`).
+   */
+  private prefixSigils(token: Token): string[] | null {
+    let text: string;
+    if (token.type === 'OPERATOR') text = token.text;
+    else if (token.type === 'ERROR') {
+      const mapped = this.fancyOperator(token);
+      if (mapped === null) return null;
+      text = mapped;
+    } else return null;
+
+    const sigils = [...text];
+    if (sigils.length === 0) return null;
+    for (const s of sigils) if (!PREFIX_SIGILS.has(s)) return null;
+    return sigils;
+  }
+
+  /** Apply a run of prefix sigils to an operand, innermost (rightmost) first. */
+  private applyPrefix(
+    sigils: string[],
+    operand: MathJsonExpression,
+    start: number
+  ): MathJsonExpression {
+    const end = this.localEnd(operand) ?? this.previousEnd();
+    let result = operand;
+    for (let i = sigils.length - 1; i >= 0; i--) {
+      const s = sigils[i];
+      if (s === '!') {
+        result = this.wrap(['Not', result], start, end);
+      } else {
+        // `-` and `+`: fold the sign into a bare number literal, otherwise
+        // wrap in `Negate` (`+` on a non-literal is the identity).
+        const negative = s === '-';
+        const folded = foldSignedNumber(result, negative);
+        if (folded !== null) result = this.wrap(folded, start, end);
+        else if (negative) result = this.wrap(['Negate', result], start, end);
+        // `+` on a non-literal: identity, `result` unchanged.
+      }
+    }
+    return result;
+  }
+
+  /**
+   * If an infix operator continues the current expression, describe it.
+   * Applies the whitespace rule; returns `null` when the expression should end
+   * (no operator, or a whitespace-vetoed `a +b`).
+   */
+  private peekInfix(): {
+    def: OperatorDef;
+    tokenCount: number;
+    asymmetric: boolean;
+  } | null {
+    const token = this.current;
+
+    let def: OperatorDef | undefined;
+    let tokenCount = 1;
+
+    // `!in` (NotElement) is two tokens: `!` immediately followed by `in`.
+    if (
+      token.type === 'OPERATOR' &&
+      token.text === '!' &&
+      this.peek().type === 'SYMBOL' &&
+      this.peek().text === 'in' &&
+      !this.peek().precededByWhitespace
+    ) {
+      def = infixOperatorForSymbol('!in');
+      tokenCount = 2;
+    } else {
+      const text = this.operatorText(token);
+      if (text !== null) def = infixOperatorForSymbol(text);
+    }
+
+    if (!def) return null;
+
+    // Whitespace rule. `leftWS` is the whitespace before the operator; `rightWS`
+    // the whitespace before its operand (the token after the operator run).
+    const leftWS = token.precededByWhitespace;
+    const rightWS = this.peek(tokenCount).precededByWhitespace;
+    if (leftWS === rightWS) return { def, tokenCount, asymmetric: false };
+    if (leftWS && !rightWS) return null; // `a +b`: expression ends here
+    return { def, tokenCount, asymmetric: true }; // `a+ b`
+  }
+
+  /** The operator spelling a token would contribute in infix position (fancy
+   * Unicode translated), or `null` if the token cannot be an operator. */
+  private operatorText(token: Token): string | null {
+    if (token.type === 'OPERATOR') return token.text;
+    if (token.type === 'SYMBOL') return this.fancyOperator(token) ?? token.text;
+    if (token.type === 'ERROR') return this.fancyOperator(token);
+    return null;
+  }
+
+  /** Translate a single fancy-Unicode-codepoint token to its ASCII operator
+   * spelling (`×` → `*`, `∈` → `in`), or `null`. */
+  private fancyOperator(token: Token): string | null {
+    const text = token.text;
+    if ([...text].length !== 1) return null;
+    return FANCY_UNICODE.get(text.codePointAt(0)!) ?? null;
+  }
+
+  private emitAsymmetric(token: Token, symbol: string): void {
+    this.diagnostics.push({
+      severity: 'warning',
+      message: ['asymmetric-operator-whitespace', symbol],
+      range: [this.baseOffset + token.start, this.baseOffset + token.end],
+      fixits: [[this.baseOffset + token.start, this.baseOffset + token.end, ` ${symbol} `]],
+    });
+  }
+
+  /** Combine an infix operator with its operands, flattening a run of the same
+   * relational operator into an n-ary node (`a < b < c` → `Less(a,b,c)`). */
+  private combineInfix(
+    def: OperatorDef,
+    left: MathJsonExpression,
+    right: MathJsonExpression
+  ): MathJsonExpression {
+    const start = this.localStart(left) ?? 0;
+    const end = this.localEnd(right) ?? this.previousEnd();
+
+    if (
+      def.relational &&
+      typeof left === 'object' &&
+      left !== null &&
+      'fn' in left &&
+      Array.isArray((left as { fn: MathJsonExpression[] }).fn) &&
+      (left as { fn: MathJsonExpression[] }).fn[0] === def.name
+    ) {
+      const fn = (left as unknown as { fn: MathJsonExpression[] }).fn;
+      return this.wrap([...fn, right] as MathJsonExpression[], start, end);
+    }
+
+    return this.wrap([def.name, left, right] as MathJsonExpression[], start, end);
+  }
+
+  /** End offset (local) of the most recently consumed token. */
+  private previousEnd(): number {
+    const t = this.tokens[Math.max(0, this.pos - 1)];
+    return t ? t.end : 0;
+  }
+
+  /** Local start offset of a node (undoing `baseOffset`), if it has one. */
+  private localStart(expr: MathJsonExpression): number | undefined {
+    const o = nodeOffsets(expr);
+    return o ? o[0] - this.baseOffset : undefined;
+  }
+
+  /** Local end offset of a node (undoing `baseOffset`), if it has one. */
+  private localEnd(expr: MathJsonExpression): number | undefined {
+    const o = nodeOffsets(expr);
+    return o ? o[1] - this.baseOffset : undefined;
+  }
+
   //
   // ─── Primary ──────────────────────────────────────────────────────────────
   //
@@ -255,12 +530,10 @@ export class Parser {
         return this.parseVerbatimSymbol();
       case 'OPEN_PAREN':
         return this.parseParenthesized();
-      case 'OPERATOR':
-        // A `+`/`-` immediately in front of a number (or `Infinity`) forms a
-        // signed-number primary. This is the only operator handled in Phase 1;
-        // the general operator layer is Phase 2.
-        return this.parseSignedNumber();
       default:
+        // Prefix operators are handled by `parseUnary`; anything else in
+        // primary position (an infix operator, a stray bracket, …) is not a
+        // primary.
         return null;
     }
   }
@@ -279,44 +552,6 @@ export class Parser {
     );
   }
 
-  /** A `+`/`-` sign followed (no intervening whitespace) by a number literal or
-   * the `Infinity` constant. */
-  private parseSignedNumber(): MathJsonExpression | null {
-    const sign = this.current;
-    if (sign.text !== '+' && sign.text !== '-') return null;
-
-    const next = this.peek();
-    const negative = sign.text === '-';
-
-    if (next.type === 'NUMBER' && !next.precededByWhitespace) {
-      this.advance(); // sign
-      const token = this.advance(); // number
-      this.harvest(token);
-      return this.wrap(
-        { num: numberPayload(token.text, negative) },
-        sign.start,
-        token.end
-      );
-    }
-
-    if (
-      next.type === 'SYMBOL' &&
-      next.text === 'Infinity' &&
-      !next.precededByWhitespace
-    ) {
-      this.advance(); // sign
-      const token = this.advance(); // Infinity
-      return this.wrap(
-        { num: (negative ? '-' : '+') + 'Infinity' },
-        sign.start,
-        token.end
-      );
-    }
-
-    // A bare `+`/`-` (or other operator) cannot start a primary in Phase 1.
-    return null;
-  }
-
   //
   // ─── Symbols ──────────────────────────────────────────────────────────────
   //
@@ -325,12 +560,18 @@ export class Parser {
     const token = this.advance();
     this.harvest(token);
 
-    // `NaN` and `Infinity` are numeric constants, not plain symbols (matching
-    // the old `signed-number` rule, which claimed them before `symbol`).
+    // `NaN` and `Infinity` are numeric constants, not plain symbols.
     if (token.text === 'NaN')
       return this.wrap({ num: 'NaN' }, token.start, token.end);
     if (token.text === 'Infinity')
       return this.wrap({ num: '+Infinity' }, token.start, token.end);
+
+    // A reserved word is rejected in expression position (the verbatim
+    // `` `word` `` form, handled by `parseVerbatimSymbol`, still works). Word
+    // operators such as `in` never reach here — they are consumed by the Pratt
+    // loop before a primary is attempted.
+    if (RESERVED_WORDS.has(token.text))
+      this.error(['reserved-word', token.text], token.start, token.end);
 
     return this.wrap({ sym: token.text }, token.start, token.end);
   }
@@ -422,7 +663,7 @@ export class Parser {
     const open = this.advance(); // `(`
     this.brackets.push(open);
 
-    const inner = this.parsePrimary();
+    const inner = this.parseExpression(0);
     if (inner === null && this.current.type !== 'CLOSE_PAREN') {
       this.reportUnexpected(this.current);
       this.recoverInBracket();
@@ -589,7 +830,7 @@ export class Parser {
 
     if (!this.check('CLOSE_PAREN')) {
       for (;;) {
-        const expr = this.parsePrimary();
+        const expr = this.parseExpression(0);
         if (expr === null) {
           this.reportUnexpected(this.current);
           this.recoverInBracket();
@@ -629,6 +870,37 @@ export class Parser {
 // The conversion arithmetic is ported verbatim from the old combinator
 // library's numeric parsers, so the produced values are identical.
 //
+
+/** The absolute `sourceOffsets` of a node, if it carries them. */
+function nodeOffsets(
+  expr: MathJsonExpression
+): [number, number] | undefined {
+  if (typeof expr === 'object' && expr !== null && 'sourceOffsets' in expr)
+    return (expr as { sourceOffsets?: [number, number] }).sourceOffsets;
+  return undefined;
+}
+
+/** If `expr` is a bare number literal (`{num}`), return it with `negative`/
+ * positive sign folded in; otherwise `null` (the caller wraps in `Negate`). */
+function foldSignedNumber(
+  expr: MathJsonExpression,
+  negative: boolean
+): { num: string } | null {
+  if (typeof expr !== 'object' || expr === null || Array.isArray(expr))
+    return null;
+  if (!('num' in expr)) return null;
+  return { num: applySign((expr as { num: string }).num, negative) };
+}
+
+/** Apply a leading sign to a MathJSON `num` payload string. Preserves full
+ * precision (no `parseFloat`) and collapses `-0` to `0`. */
+function applySign(s: string, negative: boolean): string {
+  if (!negative) return s.startsWith('+') ? s.slice(1) : s;
+  if (s.startsWith('-')) return s.slice(1);
+  const body = s.startsWith('+') ? s.slice(1) : s;
+  if (/^0+(\.0*)?$/.test(body)) return body; // -0 → 0
+  return '-' + body;
+}
 
 function numberPayload(text: string, negative: boolean): string {
   const t = text.replace(/_/g, '');

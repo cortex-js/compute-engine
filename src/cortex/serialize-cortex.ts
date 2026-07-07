@@ -12,10 +12,7 @@ import {
   matchesString,
 } from '../math-json/utils';
 import { splitGraphemes } from '../common/grapheme-splitter';
-import {
-  COMPARISON_PRECEDENCE,
-  NumberSerializationFormat,
-} from '../compute-engine/latex-syntax/types';
+import { NumberSerializationFormat } from '../compute-engine/latex-syntax/types';
 import { MathJsonExpression } from '../math-json/types';
 import {
   serializeHexFloat,
@@ -34,6 +31,7 @@ import {
   isInvisible,
 } from './characters';
 import { RESERVED_WORDS } from './reserved-words';
+import { OPERATORS as SHARED_OPERATORS } from './operators';
 
 export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
   positiveInfinity: '+Infinity',
@@ -178,71 +176,21 @@ export function serializeCortex(
     relational?: boolean;
   };
 
-  const OPERATORS: { [name: string]: OperatorInfo } = {
-    NotElement: {
-      symbol: '!in',
-      fancySymbol: '\u2209',
-      relational: true,
-      precedence: 160,
-    },
-    Element: {
-      symbol: 'in',
-      fancySymbol: '\u2208',
-      relational: true,
-      precedence: 240,
-    },
-    LessEqual: {
-      symbol: '<=',
-      relational: true,
-      fancySymbol: '\u2A7d',
-      precedence: 241,
-    },
-    GreaterEqual: {
-      symbol: '>=',
-      fancySymbol: '\u2A7e',
-      relational: true,
-      precedence: 242,
-    },
-    Less: { symbol: '<', relational: true, precedence: 245 },
-    Greater: { symbol: '>', relational: true, precedence: 245 },
-    NotEqual: {
-      symbol: '!=',
-      fancySymbol: '\u2260',
-      relational: true,
-      precedence: 255,
-    },
-    Assign: { symbol: '=', relational: true, precedence: 258 },
-    Equal: {
-      symbol: '==',
-      relational: true,
-      precedence: COMPARISON_PRECEDENCE,
-    },
-    Same: {
-      symbol: '===',
-      fancySymbol: '\u2263',
-      relational: true,
-      precedence: COMPARISON_PRECEDENCE,
-    },
-    KeyValuePair: {
-      symbol: '->',
-      fancySymbol: '\u2192',
-      precedence: 265,
-    },
-    Add: { symbol: '+', precedence: 275 },
-    Subtract: { symbol: '-', fancySymbol: '\u2212', precedence: 275 },
-    Multiply: { symbol: '*', fancySymbol: '\u00d7', precedence: 390 },
-    Divide: { symbol: '/', fancySymbol: '\u00f7', precedence: 660 },
-    Negate: {
-      symbol: '-',
-      unary: true,
-      fancySymbol: '\u2212',
-      precedence: 665,
-    },
-    Power: { symbol: '^', precedence: 720 },
-    Or: { symbol: '||', fancySymbol: '\u22c1', precedence: 800 },
-    And: { symbol: '&&', fancySymbol: '\u22c0', precedence: 810 }, // @todo revisit precedence
-    Not: { symbol: '!', unary: true, fancySymbol: '\u00ac', precedence: 820 },
-  };
+  // A serializer-shaped view over the single shared operator table
+  // (`operators.ts`). `kind === 'prefix'` maps to the existing `unary`
+  // codepath; `precedence` drives parenthesization; `relational` drives
+  // spacing. Keyed by MathJSON operator name.
+  const OPERATORS: { [name: string]: OperatorInfo } = {};
+  for (const def of SHARED_OPERATORS) {
+    if (def.name in OPERATORS) continue; // canonical (first) row wins
+    OPERATORS[def.name] = {
+      symbol: def.symbol,
+      fancySymbol: def.fancySymbol,
+      precedence: def.precedence,
+      unary: def.kind === 'prefix',
+      relational: def.relational,
+    };
+  }
 
   //
   // Functions with a custom serializer: BaseForm, String, List, Set

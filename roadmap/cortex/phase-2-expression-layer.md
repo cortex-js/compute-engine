@@ -29,21 +29,26 @@ constants). Proposed ordering, loosest → tightest (exact numbers free, gaps
 of 10):
 
 ```
-Assign(right)  <  KeyValuePair(->)  <  Or(||)  <  And(&&)
-  <  relational (== === != < <= > >= in !in, non-assoc chainable? — no: non-assoc for v0)
+Assign(right)  <  Pipe(|> ~>, left)  <  KeyValuePair(->)  <  Or(||)  <  And(&&)
+  <  relational (== === != < <= > >= in !in, n-ary chainable — see below)
   <  Add/Subtract(left)  <  Multiply/Divide(left, SAME precedence)
-  <  unary prefix (- ! Not)  <  Power(^, right)  <  Pipe(|> ~>, left)
+  <  unary prefix (- ! Not)  <  Power(^, right)
   <  postfix call/index
 ```
 
 Deviations from the old table are deliberate: And/Or below relational
 (standard); Multiply == Divide (left-assoc, so `a/b*c = (a/b)*c`); Power
 right-assoc and above unary minus (`-x^2` = `-(x^2)`, matching math
-convention and the engine); Pipe binds tight enough that `a + b |> f`
-parses as `a + (b |> f)`... **[decide: or loosest, elixir-style — this is
-the one genuinely open precedence question; the docs must state it with
-examples]**. Fancy Unicode aliases come from the ported `FANCY_UNICODE`
+convention and the engine). **Pipe precedence — DECIDED 2026-07-07: loose
+(Elixir-style).** `|>`/`~>` sit at the loose end — looser than arithmetic,
+relational, and boolean — but tighter than `Assign`, so `a + b |> f`
+parses as `(a + b) |> f`, `a || b |> f` as `(a || b) |> f`, and
+`x = a |> f` as `x = (a |> f)`. The docs must state this with those
+examples. Fancy Unicode aliases come from the ported `FANCY_UNICODE`
 tables and are pure alternate spellings (same table row).
+
+**`**` as a `^` alias — DECIDED 2026-07-07: yes** (a single extra table
+row; aligns with loose `ce.parse`).
 
 Serializer switches `OPERATORS` to this module; `docs/operators.md` is
 rewritten from it (table with precedence, associativity, fancy forms).
@@ -86,9 +91,9 @@ program still wraps multiple statements in `["Do", …]`.
   `["Apply", callee, x]`. The `(` must NOT be preceded by whitespace
   (otherwise it starts a parenthesized/tuple expression — same
   whitespace-sensitivity as operators, and matches the serializer).
-- Indexing `xs[i]` → `["At", xs, i]` — **1-based like the engine**
-  (requires the `cortex.md` 0-based claim to be fixed; see language-review
-  §2.7). Same no-whitespace rule.
+- Indexing `xs[i]` → `["At", xs, i]` — **1-based like the engine** (DECIDED
+  2026-07-07; requires the `cortex.md` 0-based claim to be fixed; see
+  language-review §2.7). Same no-whitespace rule.
 - Empty call `f()` → `["f"]`.
 
 ## 4. Collections and dictionaries
@@ -163,11 +168,15 @@ into the expression grammar.
 - `docs/operators.md` and `docs/syntax.md` updated to the implemented
   grammar (they are the normative spec from here on).
 
-## Open questions
+## Decisions (settled 2026-07-07)
 
-- Pipe precedence (tight vs loose — see §1).
-- Chained relationals (`a < b < c`): reject (v0) or parse as
-  `["Less", a, b, c]` like the engine. Leaning: parse n-ary like the
-  engine; it's what math users expect and MathJSON supports it.
-- `**` as a `^` alias (loose-`ce.parse` compat): cheap table row —
-  leaning yes.
+- **Pipe precedence: loose** (Elixir-style) — `a + b |> f` = `(a + b) |> f`;
+  looser than arithmetic/relational/boolean, tighter than `Assign`. See §1.
+- **Chained relationals: n-ary** — `a < b < c` → `["Less", a, b, c]`, like
+  the engine (what math users expect; MathJSON supports it).
+- **`**` as a `^` alias: yes** — a single table row.
+- **Indexing: 1-based** — `xs[i]` → `["At", xs, i]`, matching the engine;
+  fix the `cortex.md` 0-based claim (§3).
+- **Invisible multiplication: in for v0** — number immediately followed by a
+  symbol (no whitespace) only (`2x`, `3x^3`, `2i`); the whitespace rule
+  disambiguates (language-review §2.11). `i` is the engine's `ImaginaryUnit`.

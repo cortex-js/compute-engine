@@ -6,6 +6,8 @@
  */
 
 export type DiagnosticCode =
+  | 'asymmetric-operator-whitespace' // %0 = operator
+  | 'reserved-word' // %0 = word
   | 'binary-number-expected'
   | 'closing-bracket-expected' // %0 = bracket
   | 'decimal-number-expected'

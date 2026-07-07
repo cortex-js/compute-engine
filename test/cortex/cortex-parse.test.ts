@@ -1,4 +1,5 @@
 import { stringValue } from '../../src/math-json/utils';
+import { serializeCortex } from '../../src/cortex/serialize-cortex';
 import { validCortex, invalidCortex } from '../utils';
 
 describe('CORTEX PARSING SHEBANG', () => {
@@ -54,19 +55,8 @@ describe('CORTEX PARSING SPACES', () => {
     expect(validCortex(' \u2000 ')).toBe('Nothing');
     expect(validCortex(' \u2009 ')).toBe('Nothing');
     expect(validCortex('1\t2')).toStrictEqual(['Do', 1, 2]);
-    // @fixme: should parse tab correctly
-    expect(validCortex('1\t+\t2')).toMatchInlineSnapshot(`
-      [
-        Error,
-        [
-          String,
-          [
-            unexpected-symbol,
-            +,
-          ],
-        ],
-      ]
-    `);
+    // A tab is whitespace on both sides of `+`, so it parses as an infix Add.
+    expect(validCortex('1\t+\t2')).toStrictEqual(['Add', 1, 2]);
     expect(validCortex(' 2 \t 1')).toStrictEqual(['Do', 2, 1]);
   });
 });
@@ -94,41 +84,20 @@ describe('CORTEX PARSING COMMENTS', () => {
  */`)
     ).toBe(3.14);
 
-    // @fixme: should parse multi-line comment correctly
+    // A `+` with whitespace on both sides (a space, then a linebreak) is an
+    // infix operator that continues onto the next line.
     expect(
       validCortex(`3.14 +
 3.14 /*
  * Multi-line comment
  */`)
-    ).toMatchInlineSnapshot(`
-      [
-        Error,
-        [
-          String,
-          [
-            unexpected-symbol,
-            +,
-          ],
-        ],
-      ]
-    `);
+    ).toStrictEqual(['Add', 3.14, 3.14]);
     expect(
       validCortex(`3.14 +
 5.67 /*
  * Nested /* Comment */
  */`)
-    ).toMatchInlineSnapshot(`
-      [
-        Error,
-        [
-          String,
-          [
-            unexpected-symbol,
-            +,
-          ],
-        ],
-      ]
-    `);
+    ).toStrictEqual(['Add', 3.14, 5.67]);
   });
   test('Invalid multiline comment', () => {
     expect(invalidCortex(`   /* over nested /* comment */ */ */`))
@@ -229,28 +198,16 @@ describe('CORTEX PARSING NUMBERS', () => {
         ],
       ]
     `);
-    expect(invalidCortex('62_73_7547.k-13')).toMatchInlineSnapshot(`
-      [
-        UnexpectedSuccess,
-        [
-          Do,
-          62737547,
-          k,
-          -13,
-        ],
-      ]
-    `);
-    expect(invalidCortex('62_73_7547k-13')).toMatchInlineSnapshot(`
-      [
-        UnexpectedSuccess,
-        [
-          Do,
-          62737547,
-          k,
-          -13,
-        ],
-      ]
-    `);
+    // `k-13`: the `-` has no whitespace on either side, so it is an infix
+    // Subtract; `62737547.` and `k` juxtapose into a `Do`.
+    expect(invalidCortex('62_73_7547.k-13')).toStrictEqual([
+      'UnexpectedSuccess',
+      ['Do', 62737547, ['Subtract', 'k', 13]],
+    ]);
+    expect(invalidCortex('62_73_7547k-13')).toStrictEqual([
+      'UnexpectedSuccess',
+      ['Do', 62737547, ['Subtract', 'k', 13]],
+    ]);
     expect(invalidCortex('.1e-13')).toMatchInlineSnapshot(`
       [
         Error,
@@ -427,13 +384,23 @@ describe('CORTEX PARSING SYMBOLS', () => {
 
 // Unsupported: these Unicode operator aliases currently parse as unexpected
 // symbols rather than their ASCII/operator equivalents.
-describe.skip('CORTEX PARSING FANCY SYMBOLS', () => {
+describe('CORTEX PARSING FANCY SYMBOLS', () => {
   test('Fancy symbols', () => {
-    expect(validCortex('a ∧ ¬b ⋁ !c')).toMatchInlineSnapshot();
+    // ∧ → &&, ¬ → !, ⋁ → ||
+    expect(validCortex('a ∧ ¬b ⋁ !c')).toStrictEqual([
+      'Or',
+      ['And', 'a', ['Not', 'b']],
+      ['Not', 'c'],
+    ]);
     // \u2212 2 \u00d7 x
-    expect(validCortex('−2 × x >= 5')).toMatchInlineSnapshot();
-    expect(validCortex('3πⅈ')).toMatchInlineSnapshot();
-    expect(validCortex('3.1 ∈ ℝ')).toMatchInlineSnapshot();
+    expect(validCortex('−2 × x >= 5')).toStrictEqual([
+      'GreaterEqual',
+      ['Multiply', -2, 'x'],
+      5,
+    ]);
+    // `3πⅈ` is invisible multiplication — Stage B.
+    // ∈ → in (Element). Fancy constant symbols (ℝ) stay literal in Stage A.
+    expect(validCortex('3.1 ∈ ℝ')).toStrictEqual(['Element', 3.1, 'ℝ']);
   });
 });
 
@@ -512,11 +479,16 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
       ]
     `);
 
+    // `end` is a reserved word, rejected in expression position.
     expect(invalidCortex('end"')).toMatchInlineSnapshot(`
       [
         Error,
         [
           String,
+          [
+            reserved-word,
+            end,
+          ],
           [
             string-literal-opening-delimiter-expected,
             ",
@@ -529,6 +501,10 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
         Error,
         [
           String,
+          [
+            reserved-word,
+            end,
+          ],
           [
             string-literal-opening-delimiter-expected,
             ",
@@ -544,6 +520,10 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
           [
             string-literal-closing-delimiter-expected,
             ",
+          ],
+          [
+            reserved-word,
+            end,
           ],
           [
             string-literal-opening-delimiter-expected,
@@ -660,6 +640,8 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
         ],
       ]
     `);
+    // `+` in the interpolation is now a prefix operator; its operand is the
+    // (unterminated) closing `"`, which yields the string-delimiter diagnostics.
     expect(invalidCortex('"start \\(+"')).toMatchInlineSnapshot(`
       [
         Error,
@@ -674,12 +656,13 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
             ",
           ],
           [
-            unexpected-symbol,
-            +,
+            string-literal-opening-delimiter-expected,
+            ",
           ],
         ],
       ]
     `);
+    // `end` is a reserved word inside the interpolation.
     expect(invalidCortex('"start \\(end"')).toMatchInlineSnapshot(`
       [
         Error,
@@ -692,6 +675,10 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
           [
             string-literal-closing-delimiter-expected,
             ",
+          ],
+          [
+            reserved-word,
+            end,
           ],
           [
             string-literal-opening-delimiter-expected,
@@ -712,6 +699,10 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
           [
             string-literal-closing-delimiter-expected,
             ",
+          ],
+          [
+            reserved-word,
+            end,
           ],
           [
             string-literal-opening-delimiter-expected,
@@ -893,56 +884,134 @@ describe.skip('CORTEX PARSING COLLECTIONS', () => {
   // Dictionaries: see above.
 });
 
-// Unsupported/incomplete: arithmetic, invisible, and power operators still have
-// known parser gaps; unary minus currently errors at `-`.
-describe.skip('CORTEX PARSING OPERATORS', () => {
+describe('CORTEX PARSING OPERATORS', () => {
   test('Unary Operators', () => {
     expect(validCortex('-x')).toStrictEqual(['Negate', 'x']);
-    // expect(validCortex('-(2+1)')).toMatchInlineSnapshot();
-    // expect(validCortex('+(2+1)')).toMatchInlineSnapshot();
+    expect(validCortex('-(2+1)')).toStrictEqual(['Negate', ['Add', 2, 1]]);
+    // Unary `+` on a non-literal is the identity.
+    expect(validCortex('+(2+1)')).toStrictEqual(['Add', 2, 1]);
     expect(validCortex('!a')).toStrictEqual(['Not', 'a']);
-    expect(validCortex('!!a')).toMatchInlineSnapshot(`['Not', ['Not', 'a']]`);
+    // `!!` maximal-munches into one operator token that peels into two `Not`s.
+    expect(validCortex('!!a')).toStrictEqual(['Not', ['Not', 'a']]);
   });
   test('Invalid unary Operators', () => {
-    // Must not have whitespace before term
-    expect(invalidCortex('- x')).toMatchInlineSnapshot(
-      `['Error', ['unexpected-symbol', '-']]`
-    );
+    // A prefix operator must abut its operand: `- x` (with a space) is invalid.
+    expect(invalidCortex('- x')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '-']],
+    ]);
   });
-  test.skip('Arithmetic Operators', () => {
-    expect(validCortex('2 * x')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('2*x')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('-1 + -2')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('-1 * -2')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('-x * -y')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('(x + 1) * (x - 1)')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('1 + (2 + 3)')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('2 * (2 + 3)')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('2 (2 + 3)')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('x * -1 + x * 2')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('-x - -1')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('x * y + a * b')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('(x + y) * (a + b)')).toMatchInlineSnapshot(`'Nothing'`);
-    expect(validCortex('x * y * a * b')).toMatchInlineSnapshot(`'Nothing'`);
+  test('Arithmetic Operators', () => {
+    expect(validCortex('2 * x')).toStrictEqual(['Multiply', 2, 'x']);
+    expect(validCortex('2*x')).toStrictEqual(['Multiply', 2, 'x']);
+    expect(validCortex('-1 + -2')).toStrictEqual(['Add', -1, -2]);
+    expect(validCortex('-1 * -2')).toStrictEqual(['Multiply', -1, -2]);
+    expect(validCortex('-x * -y')).toStrictEqual([
+      'Multiply',
+      ['Negate', 'x'],
+      ['Negate', 'y'],
+    ]);
+    expect(validCortex('(x + 1) * (x - 1)')).toStrictEqual([
+      'Multiply',
+      ['Add', 'x', 1],
+      ['Subtract', 'x', 1],
+    ]);
+    expect(validCortex('1 + (2 + 3)')).toStrictEqual(['Add', 1, ['Add', 2, 3]]);
+    expect(validCortex('2 * (2 + 3)')).toStrictEqual([
+      'Multiply',
+      2,
+      ['Add', 2, 3],
+    ]);
+    // `2 (2 + 3)` is invisible multiplication — Stage B.
+    expect(validCortex('x * -1 + x * 2')).toStrictEqual([
+      'Add',
+      ['Multiply', 'x', -1],
+      ['Multiply', 'x', 2],
+    ]);
+    expect(validCortex('-x - -1')).toStrictEqual([
+      'Subtract',
+      ['Negate', 'x'],
+      -1,
+    ]);
+    expect(validCortex('x * y + a * b')).toStrictEqual([
+      'Add',
+      ['Multiply', 'x', 'y'],
+      ['Multiply', 'a', 'b'],
+    ]);
+    expect(validCortex('(x + y) * (a + b)')).toStrictEqual([
+      'Multiply',
+      ['Add', 'x', 'y'],
+      ['Add', 'a', 'b'],
+    ]);
+    // Arithmetic is left-associative binary (n-ary folding happens later).
+    expect(validCortex('x * y * a * b')).toStrictEqual([
+      'Multiply',
+      ['Multiply', ['Multiply', 'x', 'y'], 'a'],
+      'b',
+    ]);
   });
-  test.skip('Invalid Arithmetic Operators', () => {
-    // Must have whitespace on both sides, or no whitespace
-    expect(invalidCortex('2 *x')).toMatchInlineSnapshot();
-    expect(invalidCortex('2* x')).toMatchInlineSnapshot();
-    expect(invalidCortex('-1+-2')).toMatchInlineSnapshot();
-    expect(invalidCortex('-1+-2')).toMatchInlineSnapshot();
+  test('Invalid Arithmetic Operators', () => {
+    // Whitespace only on one side is invalid.
+    // `2 *x`: `*` has a space before but not after → `2` ends, `*x` is not a
+    // valid new statement.
+    expect(invalidCortex('2 *x')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '*']],
+    ]);
+    // `2* x`: `*` has a space after but not before → asymmetric; recovers as
+    // infix Multiply, but the diagnostic remains.
+    expect(invalidCortex('2* x')).toStrictEqual([
+      'Error',
+      ['String', ['asymmetric-operator-whitespace', '*']],
+    ]);
+    // `-1+-2`: the lexer maximal-munches `+-` into one (non-operator) token, so
+    // `+-2` is a prefix run and the two terms juxtapose into a `Do`.
+    expect(invalidCortex('-1+-2')).toStrictEqual([
+      'UnexpectedSuccess',
+      ['Do', -1, -2],
+    ]);
+    expect(invalidCortex('-1+-2')).toStrictEqual([
+      'UnexpectedSuccess',
+      ['Do', -1, -2],
+    ]);
   });
-  test.skip('Logic Operators', () => {
-    expect(validCortex('x && y && (a || b)')).toMatchInlineSnapshot();
-    expect(validCortex('x && !y || !(a&&b)')).toMatchInlineSnapshot();
-    expect(validCortex('x && !y || !a&&b')).toMatchInlineSnapshot();
+  test('Logic Operators', () => {
+    expect(validCortex('x && y && (a || b)')).toStrictEqual([
+      'And',
+      ['And', 'x', 'y'],
+      ['Or', 'a', 'b'],
+    ]);
+    expect(validCortex('x && !y || !(a&&b)')).toStrictEqual([
+      'Or',
+      ['And', 'x', ['Not', 'y']],
+      ['Not', ['And', 'a', 'b']],
+    ]);
+    // `&&` binds tighter than `||`.
+    expect(validCortex('x && !y || !a&&b')).toStrictEqual([
+      'Or',
+      ['And', 'x', ['Not', 'y']],
+      ['And', ['Not', 'a'], 'b'],
+    ]);
   });
-  test.skip('Relational Operators', () => {
-    expect(validCortex('x * y == a + b')).toMatchInlineSnapshot();
-    expect(validCortex('0 > -1')).toMatchInlineSnapshot();
-    expect(validCortex('0 >= -1')).toMatchInlineSnapshot();
+  test('Relational Operators', () => {
+    expect(validCortex('x * y == a + b')).toStrictEqual([
+      'Equal',
+      ['Multiply', 'x', 'y'],
+      ['Add', 'a', 'b'],
+    ]);
+    expect(validCortex('0 > -1')).toStrictEqual(['Greater', 0, -1]);
+    expect(validCortex('0 >= -1')).toStrictEqual(['GreaterEqual', 0, -1]);
+    // A run of the same relational operator flattens to an n-ary node.
+    expect(validCortex('a < b < c')).toStrictEqual(['Less', 'a', 'b', 'c']);
+    // A mix of relational operators nests left-associatively.
+    expect(validCortex('a < b <= c')).toStrictEqual([
+      'LessEqual',
+      ['Less', 'a', 'b'],
+      'c',
+    ]);
   });
   test.skip('Invisible Operators', () => {
+    // Stage B
     expect(validCortex('2x')).toMatchInlineSnapshot();
     expect(validCortex('x(2+1)')).toMatchInlineSnapshot();
     expect(validCortex('2(2+1)')).toMatchInlineSnapshot();
@@ -950,11 +1019,58 @@ describe.skip('CORTEX PARSING OPERATORS', () => {
     expect(validCortex('2 1/2')).toMatchInlineSnapshot();
     expect(validCortex('x 1/2')).toMatchInlineSnapshot();
   });
-  test.skip('Power', () => {
-    expect(validCortex('x^2')).toMatchInlineSnapshot();
-    expect(validCortex('x^1/2')).toMatchInlineSnapshot();
-    expect(validCortex('x ^ 1 / 2')).toMatchInlineSnapshot();
-    expect(validCortex('(x + 1) ^ (n - 1)')).toMatchInlineSnapshot();
+  test('Power', () => {
+    expect(validCortex('x^2')).toStrictEqual(['Power', 'x', 2]);
+    // `^` binds tighter than `/`, so `x^1/2` is `(x^1)/2`.
+    expect(validCortex('x^1/2')).toStrictEqual([
+      'Divide',
+      ['Power', 'x', 1],
+      2,
+    ]);
+    expect(validCortex('x ^ 1 / 2')).toStrictEqual([
+      'Divide',
+      ['Power', 'x', 1],
+      2,
+    ]);
+    expect(validCortex('(x + 1) ^ (n - 1)')).toStrictEqual([
+      'Power',
+      ['Add', 'x', 1],
+      ['Subtract', 'n', 1],
+    ]);
+    // `**` is an alias for `^`.
+    expect(validCortex('x**2')).toStrictEqual(['Power', 'x', 2]);
+    // `^` is right-associative.
+    expect(validCortex('2^3^2')).toStrictEqual([
+      'Power',
+      2,
+      ['Power', 3, 2],
+    ]);
+  });
+});
+
+// The parser and serializer both read the shared `operators.ts` table, so a
+// serialized operator row must parse back to itself.
+describe('CORTEX OPERATOR ROUND-TRIP', () => {
+  test('parse(serialize(row)) is identity', () => {
+    const rows = [
+      ['Add', 'a', 'b'],
+      ['Subtract', 'a', 'b'],
+      ['Multiply', 'a', 'b'],
+      ['Divide', 'a', 'b'],
+      ['Power', 'a', 'b'],
+      ['Equal', 'a', 'b'],
+      ['Same', 'a', 'b'],
+      ['And', 'a', 'b'],
+      ['Or', 'a', 'b'],
+      ['Less', 'a', 'b'],
+      ['LessEqual', 'a', 'b'],
+      ['Element', 'a', 'b'],
+      ['NotElement', 'a', 'b'],
+      ['KeyValuePair', 'a', 'b'],
+    ];
+    for (const row of rows) {
+      expect(validCortex(serializeCortex(row as any))).toStrictEqual(row);
+    }
   });
 });
 
