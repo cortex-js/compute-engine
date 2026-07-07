@@ -57,8 +57,19 @@ export class Lexer {
   private column: number = 1;
   private tokens: Token[] = [];
 
-  constructor(input: string) {
+  /**
+   * In tolerant mode the lexer does not throw on an unexpected character:
+   * instead it emits a synthetic `EOF` token at that position. This is used by
+   * the prefix-parse mode (`parseTypePrefix`), where a type is parsed from the
+   * *start* of a string that may be followed by arbitrary trailing source (e.g.
+   * ` = 5`, `, y`, `)`); the first character that cannot begin a type token
+   * marks the natural end of the type.
+   */
+  private tolerant: boolean;
+
+  constructor(input: string, options?: { tolerant?: boolean }) {
     this.input = input;
+    this.tolerant = options?.tolerant ?? false;
   }
 
   // Save current lexer state for backtracking
@@ -391,6 +402,11 @@ export class Lexer {
       this.advance();
       return this.createToken('INFINITY', '∞');
     }
+
+    // In tolerant (prefix) mode, an unexpected character is not an error: it
+    // marks the end of the parseable type. Report it as EOF so the parser
+    // stops without consuming it.
+    if (this.tolerant) return this.createToken('EOF', '');
 
     this.error(`Unexpected character: ${char}`);
   }

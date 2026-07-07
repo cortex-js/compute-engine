@@ -78,3 +78,35 @@ export function parseType(
     );
   }
 }
+
+/**
+ * Parse a type from the *start* of `source`, returning the parsed {@link Type}
+ * and the offset in `source` just past the consumed type (the delimiter or
+ * whitespace that ended the type is *not* consumed).
+ *
+ * Unlike {@link parseType}, this does **not** require the whole string to be a
+ * type: `source` may be followed by arbitrary trailing content (e.g.
+ * `"real = 5"`, `"list<integer>, y"`). This is the entry point used by the
+ * Cortex parser for type annotations (`x: real = 5`), where the type occupies
+ * a prefix of the remaining source.
+ *
+ * The parser's `input`-scanning "did you mean `list<…>`" heuristics are scoped
+ * to the consumed range, so trailing (non-type) source never leaks into a type
+ * error or suggestion.
+ *
+ * On an invalid type this throws (as {@link parseType} does). The thrown
+ * `Error` additionally carries a `position` property (the offset within
+ * `source` of the offending token) and a `rawMessage` property (the bare error
+ * message), so callers can offset-shift the diagnostic.
+ *
+ * This path deliberately does **not** touch the `parseType` `TYPE_CACHE`.
+ */
+export function parseTypePrefix(
+  source: string,
+  typeResolver?: TypeResolver
+): { type: Type; end: number } {
+  const parser = new Parser(source, { typeResolver, allowTrailing: true });
+  const ast = parser.parseTypePrefix();
+  const type = buildTypeFromAST(ast, typeResolver);
+  return { type, end: parser.endOffset };
+}

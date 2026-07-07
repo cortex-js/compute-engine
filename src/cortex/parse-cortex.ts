@@ -24,9 +24,10 @@ export function analyzeErrors(
  */
 export function parseCortex(
   source: string,
-  url?: string
+  url?: string,
+  options?: { parseLatex?: (latex: string) => MathJsonExpression }
 ): [MathJsonExpression, ParsingDiagnostic[]] {
-  const parser = new Parser(source, { url });
+  const parser = new Parser(source, { url, parseLatex: options?.parseLatex });
 
   let value: MathJsonExpression | null;
   try {

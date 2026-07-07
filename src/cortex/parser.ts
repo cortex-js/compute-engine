@@ -1,5 +1,6 @@
 import { MathJsonExpression, MathJsonSymbol } from '../math-json/types';
 import { Origin } from '../common/debug';
+import { parseTypePrefix } from '../common/type/parse';
 import {
   isStringObject,
   mapArgs,
@@ -111,6 +112,12 @@ export class Parser {
 
   readonly diagnostics: ParsingDiagnostic[] = [];
 
+  /** Injected LaTeX parser for `$…$` islands (Part 3). Absent → an island is a
+   * `latex-parsing-unavailable` diagnostic. Structurally mirrors the engine's
+   * `ILatexSyntax` injection so `src/cortex` never statically imports
+   * `latex-syntax`. */
+  private readonly parseLatex?: (latex: string) => MathJsonExpression;
+
   private tokens: Token[];
   private pos = 0;
 
@@ -119,11 +126,16 @@ export class Parser {
 
   constructor(
     source: string,
-    options?: { url?: string; offset?: number }
+    options?: {
+      url?: string;
+      offset?: number;
+      parseLatex?: (latex: string) => MathJsonExpression;
+    }
   ) {
     this.source = source;
     this.url = options?.url;
     this.baseOffset = options?.offset ?? 0;
+    this.parseLatex = options?.parseLatex;
     this.tokens = tokenize(source);
   }
 
@@ -241,7 +253,7 @@ export class Parser {
       const startPos = this.pos;
       const token = this.current;
       const diagBefore = this.diagnostics.length;
-      const expr = this.parseExpression(0);
+      const expr = this.parseStatement();
       if (expr !== null) {
         exprs.push(expr);
         this.expectStatementSeparator();
@@ -268,6 +280,110 @@ export class Parser {
         last.sourceOffsets?.[1] ?? this.baseOffset,
       ],
     };
+  }
+
+  //
+  // ─── Statements ───────────────────────────────────────────────────────────
+  //
+
+  /**
+   * A statement is either a type annotation (`target: Type` /
+   * `target: Type = expr`) or an ordinary expression. Annotations are only
+   * recognized here (statement position), never inside the expression grammar,
+   * so type-syntax tokens (`<`, `>`, `->`, `|`, `&`) never enter it.
+   */
+  private parseStatement(): MathJsonExpression | null {
+    const annotation = this.tryParseAnnotation();
+    if (annotation !== undefined) return annotation;
+    return this.parseExpression(0);
+  }
+
+  /**
+   * Type annotation in a declaration/assignment target position: a target
+   * symbol immediately followed by an `OPERATOR` token whose text is `:`. The
+   * type is parsed by the engine's `common/type` prefix subparser, then parsing
+   * resumes in Cortex just past the type. Returns `undefined` when the current
+   * position is *not* an annotation (the caller falls back to an expression).
+   *
+   * The annotation is **parse-and-held** (Phase 4 finalizes the shape):
+   *   - `x: T`        →  `["Declare", "x", {str: "T"}]`
+   *   - `x: T = expr` →  `["Declare", "x", {str: "T"}, expr]`
+   *
+   * where `"T"` is the (trimmed) source text of the annotation type.
+   */
+  private tryParseAnnotation(): MathJsonExpression | null | undefined {
+    const target = this.current;
+    if (target.type !== 'SYMBOL' && target.type !== 'VERBATIM_SYMBOL')
+      return undefined;
+    const colon = this.peek(1);
+    if (colon.type !== 'OPERATOR' || colon.text !== ':') return undefined;
+
+    // Commit to an annotation.
+    this.advance(); // the target symbol
+    this.harvest(target);
+    const name =
+      target.type === 'VERBATIM_SYMBOL' ? target.value ?? '' : target.text;
+    const colonTok = this.advance(); // ':'
+
+    // Parse the type from the remaining source (local offsets).
+    const typeSourceStart = colonTok.end;
+    let typeEnd: number;
+    let typeString: string;
+    try {
+      const { end } = parseTypePrefix(this.source.slice(typeSourceStart));
+      typeEnd = typeSourceStart + end;
+      typeString = this.source.slice(typeSourceStart, typeEnd).trim();
+      this.advanceToOffset(typeEnd);
+    } catch (e) {
+      const err = e as { position?: number; rawMessage?: string };
+      const rel = typeof err.position === 'number' ? err.position : 0;
+      const message =
+        err.rawMessage ?? (e instanceof Error ? e.message : String(e));
+      const errStart = typeSourceStart + rel;
+      // Offset-shift the type error to the absolute Cortex position. Use the
+      // token at that offset (if any) for the diagnostic's end.
+      let errEnd = errStart + 1;
+      for (const tok of this.tokens) {
+        if (tok.start >= errStart) {
+          errEnd = Math.max(tok.end, errStart + 1);
+          break;
+        }
+      }
+      this.error(['type-annotation-error', message], errStart, errEnd);
+      this.recoverAtTopLevel();
+      return null;
+    }
+
+    const nameNode = this.wrap({ sym: name }, target.start, target.end);
+    const typeNode = this.wrap({ str: typeString }, typeSourceStart, typeEnd);
+
+    // Optional initializer: `= expr`.
+    let init: MathJsonExpression | null = null;
+    if (this.check('OPERATOR') && this.current.text === '=') {
+      this.advance(); // '='
+      init = this.parseExpression(0);
+      if (init === null)
+        this.error(
+          ['expression-expected'],
+          this.current.start,
+          this.current.end
+        );
+    }
+
+    const parts: MathJsonExpression[] = ['Declare', nameNode, typeNode];
+    if (init !== null) parts.push(init);
+
+    const end =
+      init !== null ? this.localEnd(init) ?? this.previousEnd() : typeEnd;
+    return this.wrap(parts, target.start, end);
+  }
+
+  /** Advance the token cursor until the current token starts at or past the
+   * (local) `offset`. Used to resume Cortex parsing after a type subparse
+   * consumed a prefix of the raw source. */
+  private advanceToOffset(offset: number): void {
+    while (this.current.type !== 'EOF' && this.current.start < offset)
+      this.advance();
   }
 
   /** Emit exactly one diagnostic for an unexpected token. */
@@ -664,6 +780,8 @@ export class Parser {
         return this.parseList();
       case 'OPEN_BRACE':
         return this.parseBrace();
+      case 'LATEX_ISLAND':
+        return this.parseLatexIsland();
       default:
         // Prefix operators are handled by `parseUnary`; anything else in
         // primary position (an infix operator, a stray bracket, …) is not a
@@ -714,6 +832,42 @@ export class Parser {
     const token = this.advance();
     this.harvest(token);
     return this.wrap({ sym: token.value ?? '' }, token.start, token.end);
+  }
+
+  //
+  // ─── LaTeX islands ────────────────────────────────────────────────────────
+  //
+  // A `$…$` island is a primary. Its inner LaTeX is parsed by an **injected**
+  // parser (`parseLatex`, a structural mirror of the engine's `ILatexSyntax`
+  // injection — `src/cortex` never statically imports `latex-syntax`). The
+  // returned MathJSON is spliced in raw (Cortex owns canonicalization) with its
+  // `sourceOffsets` set to the island's Cortex-source range. Without an injected
+  // parser, an island is a `latex-parsing-unavailable` diagnostic. An
+  // unterminated island already carries a lexer diagnostic, surfaced here.
+  //
+
+  private parseLatexIsland(): MathJsonExpression {
+    const token = this.advance();
+    this.harvest(token); // surface an unterminated-island lexer diagnostic
+    const span = token.island!;
+    const latex = this.source.slice(span.start, span.end);
+
+    if (!this.parseLatex) {
+      this.error(['latex-parsing-unavailable'], token.start, token.end);
+      // "Errors are values": splice an Error node so parsing continues cleanly.
+      return this.wrap(
+        ['Error', { str: 'latex-parsing-unavailable' }] as MathJsonExpression[],
+        token.start,
+        token.end
+      );
+    }
+
+    // Splice the imported MathJSON as a primary, tagging it with the island's
+    // Cortex-source range. Diagnostics *inside* the LaTeX (engine `["Error", …]`
+    // nodes) stay embedded in the returned expression (v0 does not translate
+    // them into `ParsingDiagnostic`s).
+    const value = this.parseLatex(latex);
+    return this.wrap(value, token.start, token.end);
   }
 
   //
@@ -783,6 +937,7 @@ export class Parser {
     const sub = new Parser(this.source.slice(span.start, span.end), {
       url: this.url,
       offset: this.baseOffset + span.start,
+      parseLatex: this.parseLatex,
     });
     const value = sub.parseProgram();
     for (const d of sub.diagnostics) this.diagnostics.push(d);

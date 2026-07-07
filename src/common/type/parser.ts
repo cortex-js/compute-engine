@@ -157,8 +157,26 @@ export class Parser {
   private typeResolver: TypeResolver;
   private current: Token;
 
-  constructor(input: string, options?: { typeResolver?: TypeResolver }) {
-    this.lexer = new Lexer(input);
+  /**
+   * Prefix mode: parse a type from the *start* of the input and stop at the
+   * first token that cannot continue the type, without requiring EOF. Used by
+   * `parseTypePrefix()` (the Cortex type-annotation boundary). In this mode the
+   * lexer is tolerant (unexpected trailing characters become EOF) and the
+   * `this.lexer.input`-scanning error heuristics are scoped to the consumed
+   * range so trailing (non-type) source never leaks into a type suggestion.
+   */
+  private allowTrailing: boolean;
+
+  /** End offset (in `input`) just past the last token consumed as part of the
+   * type. Exposed via `endOffset` for prefix mode. */
+  private _end = 0;
+
+  constructor(
+    input: string,
+    options?: { typeResolver?: TypeResolver; allowTrailing?: boolean }
+  ) {
+    this.allowTrailing = options?.allowTrailing ?? false;
+    this.lexer = new Lexer(input, { tolerant: this.allowTrailing });
     this.typeResolver = options?.typeResolver ?? {
       forward: () => undefined,
       resolve: () => undefined,
@@ -169,12 +187,23 @@ export class Parser {
     this.current = this.lexer.consumeToken();
   }
 
+  /** Offset just past the last token consumed as part of the parsed type
+   * prefix (the delimiter/whitespace that ended the type is *not* included). */
+  get endOffset(): number {
+    return this._end;
+  }
+
   error(message: string, suggestion?: string): never {
     this.errorAtToken(this.current, message, suggestion);
   }
 
   errorAtToken(token: Token, message: string, suggestion?: string): never {
-    const input = this.lexer.input;
+    let input = this.lexer.input;
+    // In prefix mode, scope the displayed source (and the `set(`/`list(` … "did
+    // you mean" heuristics that scan `input`) to the range consumed so far, so
+    // trailing Cortex source after the type does not leak into the message.
+    if (this.allowTrailing)
+      input = input.slice(0, token.position + token.value.length);
     const lines = input.split('\n');
     const currentLine = lines[token.line - 1] || input;
     const column = token.column;
@@ -197,11 +226,22 @@ export class Parser {
 
     formattedMessage.push('');
 
-    throw new Error(formattedMessage.join('\n'));
+    // Attach structured location so the prefix-parse boundary (Cortex) can
+    // offset-shift the error to an absolute source position. These extra
+    // properties are additive and ignored by the existing `parseType()`
+    // callers, which only read `.message`.
+    const err = new Error(formattedMessage.join('\n')) as Error & {
+      position?: number;
+      rawMessage?: string;
+    };
+    err.position = token.position;
+    err.rawMessage = message;
+    throw err;
   }
 
   private advance(): Token {
     const prev = this.current;
+    this._end = prev.position + prev.value.length;
     this.current = this.lexer.consumeToken();
     return prev;
   }
@@ -290,6 +330,24 @@ export class Parser {
       }
     }
 
+    return type;
+  }
+
+  /**
+   * Parse a type from the *start* of the input, stopping at the first token
+   * that cannot continue the type (no EOF is required). Requires the parser to
+   * have been constructed with `{ allowTrailing: true }`. After a successful
+   * parse, `endOffset` is the offset just past the type.
+   */
+  parseTypePrefix(): TypeNode {
+    // Check for naked function signature pattern at the start (a genuine error
+    // even in prefix mode, e.g. `real -> real` without parentheses).
+    this.checkForNakedFunctionSignature();
+
+    const type = this.parseUnionType();
+    if (!type) this.error('Expected a type');
+
+    // No EOF check: trailing tokens belong to the surrounding (Cortex) grammar.
     return type;
   }
 

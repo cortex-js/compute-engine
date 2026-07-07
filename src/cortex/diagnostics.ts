@@ -20,6 +20,8 @@ export type DiagnosticCode =
   | 'expression-expected'
   | 'hexadecimal-number-expected'
   | 'invalid-symbol-name' // %0 = symbol name
+  | 'type-annotation-error' // %0 = message from the type subparser
+  | 'latex-parsing-unavailable' // no LaTeX parser was injected for a `$…$` island
   | 'invalid-escape-sequence' // %0 = escape sequence char
   | 'invalid-unicode-codepoint-string' // %0 = codepoint string
   | 'invalid-unicode-codepoint-value' // %0 = codepoint

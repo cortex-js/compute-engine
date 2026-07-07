@@ -253,6 +253,31 @@ concurrency (`async`/`await`/`parallel`), attributes/annotations, macros.
 All have reserved words held; a short "Future directions" section in
 `cortex.md` should say they're reserved, not designed.
 
+### 2.13 Verbatim symbols vs LaTeX-command identifiers (Phase 3/4; found during Phase 2 Stage B)
+
+A Tycho notebook user will want to write a symbol named `\sin`. Two problems
+surfaced (both empirically confirmed 2026-07-07):
+
+- **Plain `` `\sin` `` eats the `\s`.** The verbatim-symbol scanner applies
+  the documented string escapes, so `\s` cooks to a space and `` `\sin` ``
+  becomes the symbol `" in"`. The escape-processing that makes sense for
+  strings is questionable for verbatim *symbols* — a "verbatim" form is
+  usually literal.
+- **`` `\\sin` `` produces the right value but is flagged.** With an escaped
+  backslash the cooked value is correct (`\sin`, and `` `\\sin`(x) `` →
+  `["\\sin","x"]`), but the lexer (`lexer.ts:453`) still enforces
+  `isIdentifierStartProhibited`/`isIdentifierContinueProhibited` inside
+  backticks, so a leading `\` trips `invalid-symbol-name`. That defeats the
+  purpose of the verbatim form (`` `a+b` `` is accepted because `+` is not a
+  prohibited char, but `` `\sin` `` is not).
+
+Decide: (a) verbatim symbols become truly literal (no escape processing, no
+identifier-char enforcement) — cleanest for notebook use; or (b) keep escapes
+but drop the identifier-char check for the verbatim form; or (c) add a
+separate raw-symbol syntax. Until then the FUNCTIONS suite uses `` `a+b`(x) ``
+as the verbatim-callee example (the roadmap's `` `\sin`(x) `` rested on a
+false premise).
+
 ## Suggested docs work order
 
 1. Now (with Phase 0): fix Part 1 defects that are pure errors (broken

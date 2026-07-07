@@ -62,7 +62,7 @@ Dependency order: **0 ∥ 1 → 2 → (3 ∥ 4) → 5**. Full plans in
 | --- | --- | --- | --- |
 | 0 — Hygiene | Mechanical fixes to current code + docs (`#date` bug, List/Set swap, `Element` naming, console output, docs errors) | [plan](./roadmap/cortex/phase-0-hygiene.md) | ✅ done (2026-07-07) |
 | 1 — Parser foundation | New lexer/parser, diagnostics + recovery, port lexical layer (49 green tests = DoD), delete `point-free-parser` | [plan](./roadmap/cortex/phase-1-parser-foundation.md) | ✅ done (2026-07-07) |
-| 2 — Expression layer | Shared operator table, Pratt + whitespace rule, calls, collections, dictionaries, type annotations, `$…$` islands; un-skip all suites | [plan](./roadmap/cortex/phase-2-expression-layer.md) | 🚧 Stage A+B done (2026-07-07); Stage C (type annotations, `$…$` islands, docs rewrite) remains |
+| 2 — Expression layer | Shared operator table, Pratt + whitespace rule, calls, collections, dictionaries, type annotations, `$…$` islands; un-skip all suites | [plan](./roadmap/cortex/phase-2-expression-layer.md) | 🚧 Stages A+B+C-code done (2026-07-07); only the normative docs rewrite (`operators.md`/`syntax.md`/`types.md`) remains |
 | 3 — Round-trip | Serializer completion, parse∘serialize property test, loose-syntax compat check | [plan](./roadmap/cortex/phase-3-round-trip.md) | not started |
 | 4 — Semantics & execution | `executeCortex`, declarations/scoping, function definitions, control flow, pragma security, Tycho integration | [plan](./roadmap/cortex/phase-4-semantics.md) | not started |
 | 5 — Ship | Build target, `./cortex` export, docs sync, highlight mode, CHANGELOG (experimental) | [plan](./roadmap/cortex/phase-5-ship.md) | not started |
