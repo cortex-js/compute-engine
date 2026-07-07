@@ -29,7 +29,6 @@ import {
   parseSingleLineString,
 } from '../point-free-parser/string-parsers';
 import { Grammar } from '../point-free-parser/grammar';
-// import { parseShebang } from '../fixed-point-parser/whitespace-parsers';
 import {
   operand,
   machineValue,
@@ -110,7 +109,7 @@ grammar.rule(
           '-' +
           ('00' + (1 + today.getMonth())).slice(-2) +
           '-' +
-          ('00' + (1 + today.getDay())).slice(-2)
+          ('00' + today.getDate()).slice(-2)
         );
       }
       if (fn.value === '#time') {
@@ -164,13 +163,16 @@ grammar.rule(
         const message = mapArgs<string>(args.value!, (x) =>
           expressionToString(x)
         ).join(' ');
-        console.log(message);
+        // @todo: append a warning-severity ParsingDiagnostic here. The
+        // point-free `combine()` snapshots diagnostics before invoking this
+        // action callback (and the callback returns a value, not a Result),
+        // so a warning cannot be threaded out cleanly at this layer. Deferred
+        // to the Phase 1 parser rewrite (which deletes this file).
         return { str: message };
       } else if (fn.value === '#error') {
         const message = mapArgs<string>(args.value!, (x) =>
           expressionToString(x)
         ).join(' ');
-        console.error(message);
         throw new FatalParsingError(message);
       } else if (fn.value === '#env') {
         if ('process' in globalThis && process.env) {

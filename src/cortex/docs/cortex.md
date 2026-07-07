@@ -28,8 +28,8 @@ Simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
 // ➔ 4x^3 + 2x^2 + 3
 
 x = 2^11 - 1
-"\(x) is a \(Domain(x))"
-// ➔ "2047 is a PrimeNumber"
+"\(x) has type \(Type(x))"
+// ➔ "2047 has type integer"
 ```
 
 {% readmore "/cortex/syntax/" %} Read more about the <strong>formal syntax of
@@ -39,21 +39,21 @@ Cortex</strong> {% endreadmore %}
 <strong>implementation of Cortex</strong> {% endreadmore %}
 
 
-{% readmore "/mathlive/cortex/comments/" %}
+{% readmore "/cortex/pragmas/" %}
 **Pragmas**: compiler directives embedded in the code 
 {% endreadmore %}
 
 
-{% readmore "/mathlive/cortex/comments/" %}
+{% readmore "/cortex/comments/" %}
 **Comments**: line and block comments
 {% endreadmore %}
 
-{% readmore "/mathlive/cortex/comments/" %}
+{% readmore "/cortex/literals/" %}
 **Literals**: strings, numbers, symbols
 {% endreadmore %}
 
 
-{% readmore "/mathlive/cortex/comments/" %}
+{% readmore "/cortex/operators/" %}
 **Operators**: arithmetic, logic, relational
 {% endreadmore %}
 

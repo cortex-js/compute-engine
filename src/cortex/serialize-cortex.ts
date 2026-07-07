@@ -179,13 +179,13 @@ export function serializeCortex(
   };
 
   const OPERATORS: { [name: string]: OperatorInfo } = {
-    NotElementOf: {
+    NotElement: {
       symbol: '!in',
       fancySymbol: '\u2209',
       relational: true,
       precedence: 160,
     },
-    ElementOf: {
+    Element: {
       symbol: 'in',
       fancySymbol: '\u2208',
       relational: true,
@@ -308,25 +308,23 @@ export function serializeCortex(
     //
     // List
     //
-    // Interpolated string, e.g. `["String", "'hello '", "name"]`
     List: (expr: MathJsonExpression): FormattingBlock =>
       fmt.fencedList(
-        '{',
+        '[',
         fmt.separator(','),
-        '}',
+        ']',
         mapArgs<FormattingBlock>(expr, serializeExpression)
       ),
 
     //
     // Set
     //
-    // Interpolated string, e.g. `["String", "'hello '", "name"]`
     Set: (expr: MathJsonExpression): FormattingBlock => {
-      if (nops(expr) === 0) return fmt.text('EmptySet');
+      if (nops(expr) === 0) return fmt.text('{}');
       return fmt.fencedList(
-        '[',
+        '{',
         fmt.separator(','),
-        ']',
+        '}',
         mapArgs<FormattingBlock>(expr, serializeExpression)
       );
     },

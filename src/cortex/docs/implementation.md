@@ -46,7 +46,7 @@ Print("x =", x)
 ["Add", ["Multiply", 2, "x"], 1]
 ```
 
-- Collections (List, Set, Tuple, Sequence, Dicitionary) get converted into a
+- Collections (List, Set, Tuple, Sequence, Dictionary) get converted into a
   corresponding MathJSON expression:
 
 ```cortex
@@ -61,15 +61,15 @@ sequence = 2, 5, 7
 ```
 
 ```json example
-["Assign", "list", ["List", 2, 7, 2, 4, 2])]
+["Assign", "list", ["List", 2, 7, 2, 4, 2]]
 ```
 
 ```json example
-["Assign", "tuple", ["Tuple", 1.5, 0.5])]
+["Assign", "tuple", ["Tuple", 1.5, 0.5]]
 ```
 
 ```json example
-["Assign", "sequence", ["Sequence", 2, 5, 7])]
+["Assign", "sequence", ["Sequence", 2, 5, 7]]
 ```
 
 - Control structures get converted to an appropriate expression:
@@ -77,9 +77,9 @@ sequence = 2, 5, 7
 ```cortex
 if (x in PrimeNumber) {
   Print(x);
-   x += 1;
+  x = x + 1;
 } else {
-  x += 2;
+  x = x + 2;
 }
 ```
 
@@ -87,7 +87,7 @@ if (x in PrimeNumber) {
 [
   "If",
   ["Element", "x", "PrimeNumber"],
-  ["Do", ["Print", "x"], ["Equal", "x", ["Add", "x", 1]]],
-  ["Add", "x", 2]
+  ["Do", ["Print", "x"], ["Assign", "x", ["Add", "x", 1]]],
+  ["Do", ["Assign", "x", ["Add", "x", 2]]]
 ]
 ```

@@ -60,7 +60,7 @@ Dependency order: **0 ∥ 1 → 2 → (3 ∥ 4) → 5**. Full plans in
 
 | Phase | Scope | Plan | Status |
 | --- | --- | --- | --- |
-| 0 — Hygiene | Mechanical fixes to current code + docs (`#date` bug, List/Set swap, `Element` naming, console output, docs errors) | [plan](./roadmap/cortex/phase-0-hygiene.md) | not started |
+| 0 — Hygiene | Mechanical fixes to current code + docs (`#date` bug, List/Set swap, `Element` naming, console output, docs errors) | [plan](./roadmap/cortex/phase-0-hygiene.md) | ✅ done (2026-07-07) |
 | 1 — Parser foundation | New lexer/parser, diagnostics + recovery, port lexical layer (49 green tests = DoD), delete `point-free-parser` | [plan](./roadmap/cortex/phase-1-parser-foundation.md) | not started |
 | 2 — Expression layer | Shared operator table, Pratt + whitespace rule, calls, collections, dictionaries, type annotations, `$…$` islands; un-skip all suites | [plan](./roadmap/cortex/phase-2-expression-layer.md) | not started |
 | 3 — Round-trip | Serializer completion, parse∘serialize property test, loose-syntax compat check | [plan](./roadmap/cortex/phase-3-round-trip.md) | not started |
@@ -139,6 +139,18 @@ and the docs.
 
 ## Completed log
 
+- 2026-07-07 — **Phase 0 (Hygiene)**: all 11 items landed. Code — `#date`
+  `getDay()`→`getDate()`; serializer List `[…]` / Set `{…}` (empty `{}`);
+  `ElementOf`/`NotElementOf` keys → `Element`/`NotElement`; dropped
+  `console.log`/`console.error` from `#warning`/`#error` (warning-diagnostic
+  threading deferred to Phase 1 — the point-free `combine()` snapshots
+  diagnostics before the action callback, so there's no clean hook in the
+  dying combinator layer). Docs — readmore links, false `Domain(x)`/PrimeNumber
+  example, malformed JSON + `+=`/`Equal`→`Assign` in implementation.md, glyphs +
+  reserved-word sync in literals.md (new `test/cortex/reserved-words.test.ts`
+  asserts docs↔`reserved-words.ts` set-equality, 82 words), pragmas/operators/
+  principles cleanup. Cortex suites green (51 passed, snapshot diff limited to
+  List/Set/Element), typecheck clean. Not committed.
 - 2026-07-05 — Audit; direction decided (revive for Tycho notebooks);
   architecture decisions §2 ratified; per-phase plans + language review
   written in `roadmap/cortex/`.

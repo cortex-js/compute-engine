@@ -38,10 +38,15 @@ The operator at the root of the parse tree has the lowest precedence.
 
 ## Logic Operations
 
-- `and`, `or`, `not`, `=>`, `<=>`
+- `&&` (and), `||` (or), `!` (not)
+
+The word forms `and`, `or`, `not`, and the implication/equivalence operators
+`=>` and `<=>` are reserved but not yet implemented.
 
 
 ## Relational Operators
 
-- `<`, `<=`, `=`, `>=`, '`>`, '!='
-- `==`, '!=='
+- `<`, `<=`, `>`, `>=`, `==`, `!=`, `===`
+
+Note that `=` is **assignment**, not equality: use `==` to compare values and
+`===` for structural identity.

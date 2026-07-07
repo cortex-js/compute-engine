@@ -19,4 +19,3 @@ sidebar:
 - There's one idiomatic way to do it
 - Regularity and Orthogonality. Define a small number of concepts and allow
   them to be combined without restrictions.
-- 

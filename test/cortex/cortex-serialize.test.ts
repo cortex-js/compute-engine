@@ -239,30 +239,30 @@ describe('CORTEX SERIALIZING FUNCTIONS', () => {
 describe('CORTEX SERIALIZING COLLECTIONS', () => {
   test('Sets', () => {
     // Empty set
-    expect(serializeCortex(['Set'])).toMatchInlineSnapshot(`"EmptySet"`);
+    expect(serializeCortex(['Set'])).toMatchInlineSnapshot(`"{}"`);
     //Regular set
     expect(
       serializeCortex(['Set', 5, 7, 'x', ['Add', 5, 'x', 2]])
-    ).toMatchInlineSnapshot(`"[5, 7, x, 5 + x + 2]"`);
+    ).toMatchInlineSnapshot(`"{5, 7, x, 5 + x + 2}"`);
     // Nested sets
     expect(
       serializeCortex(['Set', 5, 7, ['Set', 7, 8, 9], ['Add', 5, 'x', 2]])
-    ).toMatchInlineSnapshot(`"[5, 7, [7, 8, 9], 5 + x + 2]"`);
+    ).toMatchInlineSnapshot(`"{5, 7, {7, 8, 9}, 5 + x + 2}"`);
 
     // @todo:set membership
   });
 
   test('Lists', () => {
     // Empty list
-    expect(serializeCortex(['List'])).toMatchInlineSnapshot(`"{}"`);
+    expect(serializeCortex(['List'])).toMatchInlineSnapshot(`"[]"`);
     //Regular list
     expect(
       serializeCortex(['List', 5, 7, 'x', ['Add', 5, 'x', 2]])
-    ).toMatchInlineSnapshot(`"{5, 7, x, 5 + x + 2}"`);
+    ).toMatchInlineSnapshot(`"[5, 7, x, 5 + x + 2]"`);
     // Nested lists
     expect(
       serializeCortex(['Set', 5, 7, ['List', 7, 8, 9], ['Add', 5, 'x', 2]])
-    ).toMatchInlineSnapshot(`"[5, 7, {7, 8, 9}, 5 + x + 2]"`);
+    ).toMatchInlineSnapshot(`"{5, 7, [7, 8, 9], 5 + x + 2}"`);
   });
 
   test('Sequence', () => {
@@ -341,6 +341,14 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
     );
     expect(serializeCortex(['Multiply', 2, 'x', 'y'])).toMatchInlineSnapshot(
       `"2 * x * y"`
+    );
+  });
+  test('Element', () => {
+    expect(serializeCortex(['Element', 'x', 'S'])).toMatchInlineSnapshot(
+      `"x in S"`
+    );
+    expect(serializeCortex(['NotElement', 'x', 'S'])).toMatchInlineSnapshot(
+      `"x !in S"`
     );
   });
   test('Unary operators', () => {

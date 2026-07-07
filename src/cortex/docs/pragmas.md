@@ -72,13 +72,14 @@ use the `#warning()` pragma function.
 ## Line Control Statements
 
 The name and URL of the source file being parsed/compiled can be accessed using
-the `#sourceFile` and `#sourceUrl` pragmas. The current line is indicated by
-`#line` and column by `#column`.
+the `#filename` and `#url` pragmas. The current line is indicated by `#line` and
+the column by `#column`.
 
-When generating and pre-processing code, it might be useful to indicate the
-original source code and location, rather than the current one. To change the
-source URL and line of the current file, use the `#sourceLocation()` pragma
-function.
+The `#sourceLocation()` pragma function is **not yet implemented** and is
+reserved for a future release. When implemented, it will override the source URL
+and line reported for the current file. This is useful when generating or
+pre-processing code, to indicate the original source code and location rather
+than the current one.
 
 ```cortex
 #sourceLocation(145, "file://localhost/~user/dev/source.ctx")
