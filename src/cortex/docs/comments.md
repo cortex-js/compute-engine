@@ -35,3 +35,17 @@ markdown**, use `///` for single line comments and `/** */` for block comments.
 /** This is a documentation block comment */
 
 ```
+
+## Comments are lossy (v0)
+
+In v0, the parser **discards** comments: they are not attached to the
+MathJSON of the following expression, and a round-trip
+(`parseCortex` → `serializeCortex`) does not reproduce them. Comments carry no
+semantic weight and are dropped during tokenization.
+
+This is a deliberate scope decision. Notebooks keep prose in dedicated
+markdown cells rather than in code comments, so comment preservation is not
+required for the notebook workflow. (The serializer can still *emit* a
+`/* … */` comment when a MathJSON expression carries a `comment` metadata
+field — that path is used when serializing engine-produced expressions — but
+nothing on the parse side ever populates that field.)

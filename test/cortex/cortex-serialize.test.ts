@@ -332,9 +332,8 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
     expect(
       serializeCortex(['And', ['And', ['Not', 'x'], 'y'], ['Or', 'a', 'b']])
     ).toMatchInlineSnapshot(`"!x && y && (a || b)"`);
-    expect(serializeCortex(['Multiply', 2, 'x'])).toMatchInlineSnapshot(
-      `"2 * x"`
-    );
+    // Invisible multiplication: binary number×symbol.
+    expect(serializeCortex(['Multiply', 2, 'x'])).toMatchInlineSnapshot(`"2x"`);
     expect(
       serializeCortex(['Multiply', 2, ['Negate', 'x']])
     ).toMatchInlineSnapshot(`"2 * -x"`);
@@ -359,7 +358,9 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
       `"Negate(2, 3)"`
     );
     expect(serializeCortex(['Negate', 1])).toMatchInlineSnapshot(`"-1"`);
-    expect(serializeCortex(['Negate', -1])).toMatchInlineSnapshot(`"--1"`);
+    // Negate of a negative literal folds the sign in (not `--1`, which is a
+    // diagnostic).
+    expect(serializeCortex(['Negate', -1])).toMatchInlineSnapshot(`"1"`);
     expect(serializeCortex(['Negate', ['Add', 2, 3]])).toMatchInlineSnapshot(
       `"-(2 + 3)"`
     );
@@ -368,12 +369,13 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
       serializeCortex(['Negate', ['Multiply', 2, 3]])
     ).toMatchInlineSnapshot(`"-(2 * 3)"`);
   });
-  // The serializer emits explicit multiplication (invisible-multiply *output*
-  // — `2x`, `2(3+4)` — remains a `@todo`; note `(x+y)(3+4)` would parse back as
-  // `Apply`, not `Multiply`, so it could not round-trip). These assert the
-  // current, round-tripping explicit form.
+  // Invisible multiplication is emitted only for a binary number×symbol
+  // (`2x`). Everything else — n-ary products, number×group (`2(3+4)`),
+  // group×group — stays explicit `*`: `2(3+4)` would round-trip fine, but
+  // `(x+y)(3+4)` parses back as `Apply`, not `Multiply`, so the serializer
+  // keeps a uniform explicit rule for all non-`{num}{sym}` products.
   test('Multiply', () => {
-    expect(serializeCortex(['Multiply', 2, 'x'])).toMatch('2 * x');
+    expect(serializeCortex(['Multiply', 2, 'x'])).toMatch('2x');
     expect(serializeCortex(['Multiply', 'x', 2])).toMatch('x * 2');
     expect(serializeCortex(['Multiply', 2, ['Add', 3, 4]])).toMatch(
       '2 * (3 + 4)'
@@ -385,14 +387,15 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
       serializeCortex(['Multiply', ['Multiply', 'x', 'y'], ['Add', 3, 4]])
     ).toMatch('x * y * (3 + 4)');
   });
-  // Mixed-number / invisible-plus serialization is not implemented; the
-  // serializer emits an explicit `+`.
+  // `Rational` serializes as `a / b` (and re-parses as `Divide`, a documented
+  // normalization). Mixed-number / invisible-plus rendering (`2½`) is out of
+  // scope for v0 — the serializer never merges an `Add` into a mixed number.
   test('Plus', () => {
     expect(serializeCortex(['Add', 2, ['Rational', 1, 2]])).toMatch(
-      '2 + Rational(1, 2)'
+      '2 + 1 / 2'
     );
     expect(serializeCortex(['Add', 'x', ['Rational', 1, 2]])).toMatch(
-      'x + Rational(1, 2)'
+      'x + 1 / 2'
     );
   });
 
@@ -411,9 +414,9 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
     ).toMatchInlineSnapshot(`"(x + 1) ^ (1 / 2)"`);
     expect(
       serializeCortex(['Power', ['Multiply', 2, 'x'], ['Divide', 1, 2]])
-    ).toMatchInlineSnapshot(`"(2 * x) ^ (1 / 2)"`);
+    ).toMatchInlineSnapshot(`"(2x) ^ (1 / 2)"`);
     expect(
       serializeCortex(['Power', ['Multiply', 2, 'x'], ['Subtract', 1, 'n']])
-    ).toMatchInlineSnapshot(`"(2 * x) ^ (1 - n)"`);
+    ).toMatchInlineSnapshot(`"(2x) ^ (1 - n)"`);
   });
 });

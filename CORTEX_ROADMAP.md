@@ -63,7 +63,7 @@ Dependency order: **0 ∥ 1 → 2 → (3 ∥ 4) → 5**. Full plans in
 | 0 — Hygiene | Mechanical fixes to current code + docs (`#date` bug, List/Set swap, `Element` naming, console output, docs errors) | [plan](./roadmap/cortex/phase-0-hygiene.md) | ✅ done (2026-07-07) |
 | 1 — Parser foundation | New lexer/parser, diagnostics + recovery, port lexical layer (49 green tests = DoD), delete `point-free-parser` | [plan](./roadmap/cortex/phase-1-parser-foundation.md) | ✅ done (2026-07-07) |
 | 2 — Expression layer | Shared operator table, Pratt + whitespace rule, calls, collections, dictionaries, type annotations, `$…$` islands; un-skip all suites | [plan](./roadmap/cortex/phase-2-expression-layer.md) | ✅ done (2026-07-07) |
-| 3 — Round-trip | Serializer completion, parse∘serialize property test, loose-syntax compat check | [plan](./roadmap/cortex/phase-3-round-trip.md) | not started |
+| 3 — Round-trip | Serializer completion, parse∘serialize property test, loose-syntax compat check | [plan](./roadmap/cortex/phase-3-round-trip.md) | ✅ done (2026-07-07) |
 | 4 — Semantics & execution | `executeCortex`, declarations/scoping, function definitions, control flow, pragma security, Tycho integration | [plan](./roadmap/cortex/phase-4-semantics.md) | not started |
 | 5 — Ship | Build target, `./cortex` export, docs sync, highlight mode, CHANGELOG (experimental) | [plan](./roadmap/cortex/phase-5-ship.md) | not started |
 
@@ -139,6 +139,26 @@ and the docs.
 
 ## Completed log
 
+- 2026-07-07 — **Phase 3 (Round-trip coherence)**: `parse∘serialize` locked
+  by a 66-expression property harness (`test/cortex/round-trip.test.ts`) that
+  asserts structural equality under documented normalizations AND zero
+  re-parse diagnostics, covering every operator row + collection/call/index
+  form. Serializer gaps filled: `Rational`→`1 / 2` (normalizes to `Divide`),
+  negative-literal folding + spacing (`Add(a,-3)`→`a + -3`, `Negate(-1)`→`1`),
+  narrow invisible-multiply `Multiply({num},{sym})`→`2x` behind a
+  `canJuxtapose` guard (blocks `e`/`E` exponent, `0x`/`0b`, escape-needing
+  syms — `Multiply(2,"e5")` stays `2 * e5`), `Do`→statement-per-line.
+  Decisions: **comments lossy in v0** (documented in `comments.md`);
+  **invisible-mul serialization number×symbol only**. `If` left as the generic
+  `If(…)` form (Phase 2 has no `if`-expression; Phase 4 owns the statement
+  form — documented). Formatter reviewed + first unit tests
+  (`formatter.test.ts`); fixed a `StackBlock` continuation-indent bug (aligned
+  to column, not indent-level); one cosmetic trailing-space-before-newline
+  artifact left (fixing it risks corrupting `"""` literal trailing spaces).
+  Loose-parser compat table added to `syntax.md` (`[1,2,3]`/`x^2` agree;
+  `**`/`|>`/`f(x,y)`/bare-name/`2x` diverge — documented). `test/cortex`:
+  227 passed, 0 skips. Not committed here. Next: Phase 4 (semantics &
+  execution) — Phase 5 (ship) follows.
 - 2026-07-07 — **Phase 2 (Expression layer)**: every skipped parse suite is
   now enabled and green (0 `describe.skip`/`test.skip` in `test/cortex`).
   Landed in four stages. **A** — shared `src/cortex/operators.ts` consumed by

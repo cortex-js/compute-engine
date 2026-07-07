@@ -188,7 +188,12 @@ export class StackBlock extends FormattingBlock {
     let indent = '';
     for (const block of this.blocks) {
       result += indent + block.serialize(offset);
-      if (!indent) indent = this.fmt.linebreak() + this.fmt.indentChars(offset);
+      // Continuation lines align to the block's starting column (`offset`),
+      // per the pretty-printer contract. Use `offset` spaces — NOT
+      // `indentChars(offset)`, which multiplies by `indentWidth` and treats a
+      // column count as an indent-level count (the historical misalignment
+      // bug: first item at 2 spaces, the rest at 4).
+      if (!indent) indent = this.fmt.linebreak() + ' '.repeat(offset);
     }
 
     return result;

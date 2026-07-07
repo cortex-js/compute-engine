@@ -197,6 +197,22 @@ export function serializeCortex(
     };
   }
 
+  // `Rational` has no infix spelling of its own; serialize it exactly like a
+  // `Divide` (`["Rational", 1, 2]` → `1 / 2`), which also gives it the right
+  // precedence for parenthesization when it appears as an operand. The parser
+  // has no rational literal, so it re-parses as `Divide` — a documented
+  // normalization (see docs/syntax.md).
+  if (OPERATORS['Divide'] && !OPERATORS['Rational'])
+    OPERATORS['Rational'] = { ...OPERATORS['Divide'] };
+
+  // Is `expr` a number literal (a plain number, a `{num}` object, or a numeric
+  // string)? Used by the `Negate`/`Multiply` serializers below.
+  const isNumberLiteral = (x: MathJsonExpression | null): boolean =>
+    x !== null &&
+    (typeof x === 'number' ||
+      isNumberObject(x) ||
+      (typeof x === 'string' && matchesNumber(x)));
+
   //
   // Functions with a custom serializer: BaseForm, String, List, Set
   //
@@ -342,7 +358,62 @@ export function serializeCortex(
       );
     },
 
-    // @todo: Do, If
+    //
+    // Negate
+    //
+    // A `Negate` of a numeric literal folds the sign into the literal
+    // (`["Negate", 3]` → `-3`, `["Negate", -1]` → `1`) so the output is a
+    // clean signed `num` rather than a doubled sign (`--1`). Non-literal
+    // operands go through the prefix-operator path (`-x`, `-(2 + 3)`).
+    //
+    Negate: (expr: MathJsonExpression): FormattingBlock => {
+      if (nops(expr) !== 1) return serializeGenericFunction(expr);
+      const arg = operand(expr, 1);
+      if (isNumberLiteral(arg))
+        return fmt.text(
+          negateNumberString(serializeNumber(arg, NUMBER_FORMATTING_OPTIONS))
+        );
+      return serializeOperator(expr) ?? serializeGenericFunction(expr);
+    },
+
+    //
+    // Multiply
+    //
+    // Invisible multiplication is emitted ONLY for a binary
+    // `["Multiply", {num}, {sym}]` where the juxtaposition `2x` re-lexes as a
+    // number followed by a symbol (see `canJuxtapose`). Everything else
+    // (n-ary products, number×group, group×group) stays explicit `*` via the
+    // operator path.
+    //
+    Multiply: (expr: MathJsonExpression): FormattingBlock => {
+      const args = operands(expr);
+      if (args.length === 2 && isNumberLiteral(args[0])) {
+        const symName = symbol(args[1]);
+        if (symName !== null) {
+          const numStr = serializeNumber(args[0], NUMBER_FORMATTING_OPTIONS);
+          if (canJuxtapose(numStr, symName))
+            return fmt.text(numStr + symName);
+        }
+      }
+      return serializeOperator(expr) ?? serializeGenericFunction(expr);
+    },
+
+    //
+    // Do
+    //
+    // A multi-statement block serializes one statement per line; the parser
+    // re-wraps a newline-separated statement list in `Do`. A 0- or 1-element
+    // `Do` has no statement-list spelling (the parser never produces one), so
+    // it falls back to the generic `Do(…)` function form.
+    //
+    Do: (expr: MathJsonExpression): FormattingBlock => {
+      if (nops(expr) < 2) return serializeGenericFunction(expr);
+      return fmt.stack(...mapArgs<FormattingBlock>(expr, serializeExpression));
+    },
+
+    // `If` has no `if`-expression spelling in the Phase 2 grammar, so it is
+    // left to the generic `If(cond, then, else)` function form (which
+    // round-trips). Phase 4 owns the statement form.
   };
 
   function serializeFunction(expr: MathJsonExpression): FormattingBlock | null {
@@ -379,7 +450,8 @@ export function serializeCortex(
     );
   }
 
-  // @todo: 2x, 2(x+1)
+  // Invisible-multiply (`2x`) is handled by the `Multiply` entry in
+  // `FUNCTIONS`; this serializes the explicit infix/prefix operator forms.
   function serializeOperator(expr: MathJsonExpression): FormattingBlock | null {
     const opName = operator(expr);
     if (!opName) return null;
@@ -423,6 +495,28 @@ export function serializeCortex(
   // Main body of `serializeCortex()`
   return serializeExpression(expr).serialize(0);
 }
+// Flip the sign of an already-serialized number so a `Negate` of a literal
+// folds into the literal (`3` → `-3`, `-3` → `3`, `+Infinity` → `-Infinity`).
+function negateNumberString(n: string): string {
+  if (n.startsWith('-')) return n.slice(1);
+  if (n.startsWith('+')) return '-' + n.slice(1);
+  return '-' + n;
+}
+
+// Can `numStr` and `symName` be juxtaposed (`2` + `x` → `2x`) and re-lex as a
+// number followed by a symbol? Conservative: the number must be a plain
+// non-negative decimal (no sign, exponent, `NaN`/`Infinity`), and the symbol a
+// bare inline identifier that starts neither an exponent (`2e5`) nor a base
+// prefix (`0b…`/`0x…`).
+function canJuxtapose(numStr: string, symName: string): boolean {
+  if (!/^\d[\d_]*(\.\d[\d_]*)?$/.test(numStr)) return false;
+  if (escapeSymbol(symName) !== symName) return false;
+  if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(symName)) return false;
+  if (/^[eE]/.test(symName)) return false;
+  if (numStr === '0' && /^[bBxX]/.test(symName)) return false;
+  return true;
+}
+
 function escapeInvisibleCharacter(code: number): string {
   if (ESCAPED_CHARS.has(code)) return ESCAPED_CHARS.get(code)!;
   if (isInvisible(code)) {

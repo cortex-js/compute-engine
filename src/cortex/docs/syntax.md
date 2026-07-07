@@ -256,3 +256,58 @@ A bare, top-level comma-separated sequence with no enclosing delimiter (for
 example `1, 2, 3` on its own) is **not** a `Sequence` literal in v0 — it is a
 diagnostic. `Sequence` is available only as an explicit call: `Sequence(1, 2,
 3)` → `["Sequence", 1, 2, 3]`.
+
+## Round-trip and serialization normalizations
+
+`serializeCortex` and `parseCortex` are inverses over the MathJSON the grammar
+can produce, up to a small set of documented normalizations. `parse(serialize(e))`
+is **structurally** equal to `e` after applying:
+
+- **Number formatting** — `2`, `{num: "2"}` and `"2"` are the same number;
+  the serializer emits a single canonical spelling (with `_` digit grouping),
+  which re-parses to a `{num}` object.
+- **`Negate` of a literal** — `["Negate", 3]` serializes to `-3` and
+  `["Negate", -1]` to `1`; both re-parse as a signed `num` literal rather than
+  a `Negate` node (the sign is folded into the number).
+- **`Rational` → `Divide`** — `["Rational", 1, 2]` serializes to `1 / 2`.
+  There is no rational literal in the grammar, so it re-parses as
+  `["Divide", 1, 2]`.
+- **Invisible multiply** — a binary `["Multiply", {num}, {sym}]` serializes to
+  the juxtaposed form `2x` (only when the two abut and re-lex unambiguously as
+  a number followed by a symbol). All other products — n-ary, number×group
+  (`2(x+1)`), group×group — stay explicit `*`, because `(x+y)(3+4)` would
+  otherwise re-parse as `Apply`, not `Multiply`.
+- **Associativity** — the left-associative operators
+  (`Add`/`Subtract`/`Multiply`/`Divide`/`And`/`Or`) re-parse into
+  left-nested binary trees; a flat n-ary form and its left-nested spelling are
+  the same expression.
+
+Comments are **not** preserved by a round-trip — see
+[Comments](/cortex/comments/).
+
+`If` has no `if`-expression spelling in this grammar; it serializes to the
+generic `If(cond, then, else)` call form (which round-trips). A dedicated
+statement form is deferred to a later phase.
+
+## Relationship to the loose math parser
+
+Cortex is a **programming-language** syntax. The Compute Engine also ships a
+*loose math parser* (`ce.parse(src, { canonical: false })`) that reads
+LaTeX/ASCII-math notation. The two share a few surface forms but are **not** the
+same language, and they overlap only partially:
+
+| Source     | Cortex `parseCortex`                | Loose `ce.parse` (non-canonical)              | Agree? |
+| ---------- | ----------------------------------- | --------------------------------------------- | ------ |
+| `[1, 2, 3]` | `["List", 1, 2, 3]`                | `["List", 1, 2, 3]`                           | ✅ same |
+| `x^2`      | `["Power", "x", 2]`                  | `["Power", "x", 2]`                            | ✅ same |
+| `2**3`     | `["Power", 2, 3]`                   | math-parser artifact (`**` is not an operator) | ❌ diverge |
+| `a \|> b`   | `["Pipe", "a", "b"]`               | `["Apply", "b", "a"]`                          | ❌ diverge |
+| `f(x, y)`  | `["f", "x", "y"]` (call)            | `["InvisibleOperator", "f", ["Delimiter", …]]` | ❌ diverge |
+| `sin`      | `"sin"` (a symbol)                  | `["InvisibleOperator", "s", "i", "n"]`         | ❌ diverge |
+| `2x`       | `["Multiply", 2, "x"]`             | `["InvisibleOperator", 2, "x"]`               | ❌ diverge |
+
+The divergences are intentional: in Cortex a juxtaposed name is a single
+identifier (`sin` is one symbol, not `s·i·n`), `f(x, y)` is a function call,
+`|>` is the pipeline operator, and `**` is exponentiation — none of which the
+math-notation parser assigns the same meaning. Do not rely on the two parsers
+agreeing except on the two rows marked *same*.
