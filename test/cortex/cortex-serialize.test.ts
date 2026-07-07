@@ -278,9 +278,11 @@ describe('CORTEX SERIALIZING COLLECTIONS', () => {
 
   test('Tuple', () => {
     expect(serializeCortex(['Tuple'])).toMatchInlineSnapshot(`"Tuple()"`);
+    // A 2+ element tuple serializes to the parenthesized `(…)` form (Stage B),
+    // which round-trips back to a `Tuple`.
     expect(
       serializeCortex(['Tuple', 5, 'x', 7, ['Add', 'x', 3, 'y']])
-    ).toMatchInlineSnapshot(`"Tuple(5, x, 7, x + 3 + y)"`);
+    ).toMatchInlineSnapshot(`"(5, x, 7, x + 3 + y)"`);
     expect(
       serializeCortex([
         'Tuple',
@@ -289,7 +291,7 @@ describe('CORTEX SERIALIZING COLLECTIONS', () => {
         ['Tuple', 11, 13],
         ['Add', 'x', 3, 'y'],
       ])
-    ).toMatchInlineSnapshot(`"Tuple(5, x, Tuple(11, 13), x + 3 + y)"`);
+    ).toMatchInlineSnapshot(`"(5, x, (11, 13), x + 3 + y)"`);
   });
 });
 describe('CORTEX SERIALIZING OPERATORS', () => {
@@ -366,23 +368,31 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
       serializeCortex(['Negate', ['Multiply', 2, 3]])
     ).toMatchInlineSnapshot(`"-(2 * 3)"`);
   });
-  // Unsupported: the serializer currently emits explicit multiplication.
-  test.skip('Invisible Multiply', () => {
-    expect(serializeCortex(['Multiply', 2, 'x'])).toMatch('2x');
+  // The serializer emits explicit multiplication (invisible-multiply *output*
+  // — `2x`, `2(3+4)` — remains a `@todo`; note `(x+y)(3+4)` would parse back as
+  // `Apply`, not `Multiply`, so it could not round-trip). These assert the
+  // current, round-tripping explicit form.
+  test('Multiply', () => {
+    expect(serializeCortex(['Multiply', 2, 'x'])).toMatch('2 * x');
     expect(serializeCortex(['Multiply', 'x', 2])).toMatch('x * 2');
-    expect(serializeCortex(['Multiply', 2, ['Add', 3, 4]])).toMatch('2(3 + 4)');
+    expect(serializeCortex(['Multiply', 2, ['Add', 3, 4]])).toMatch(
+      '2 * (3 + 4)'
+    );
     expect(
       serializeCortex(['Multiply', ['Add', 'x', 'y'], ['Add', 3, 4]])
-    ).toMatch('(x + y)(3 + 4)');
+    ).toMatch('(x + y) * (3 + 4)');
     expect(
       serializeCortex(['Multiply', ['Multiply', 'x', 'y'], ['Add', 3, 4]])
-    ).toMatch('(x * y)(3 + 4)');
+    ).toMatch('x * y * (3 + 4)');
   });
-  // Unsupported: mixed-number / invisible-plus serialization is not implemented.
-  test.skip('Invisible Plus', () => {
-    expect(serializeCortex(['Add', 2, ['Rational', 1, 2]])).toMatch('2 1 / 2');
+  // Mixed-number / invisible-plus serialization is not implemented; the
+  // serializer emits an explicit `+`.
+  test('Plus', () => {
+    expect(serializeCortex(['Add', 2, ['Rational', 1, 2]])).toMatch(
+      '2 + Rational(1, 2)'
+    );
     expect(serializeCortex(['Add', 'x', ['Rational', 1, 2]])).toMatch(
-      'x + 1 / 2'
+      'x + Rational(1, 2)'
     );
   });
 

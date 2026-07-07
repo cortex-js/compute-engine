@@ -91,7 +91,9 @@ A list is a collection of expressions separated with a comma `,` and surrounded
 by square brackets: `[` and `]`
 
 Elements in a list are ordered and don't have to be unique. They are iterable
-and indexable with a numeric value (their order in the list, start with 0).
+and indexable with a numeric value (their position in the list, starting at 1).
+Indexing uses the `xs[i]` syntax and is 1-based, matching the Compute Engine
+convention (`xs[1]` is the first element).
 
 ```cortex
 [3, 5, 7, 11]

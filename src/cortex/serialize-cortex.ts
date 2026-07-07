@@ -1,5 +1,6 @@
 import {
   operand,
+  operands,
   nops,
   dictionaryFromExpression,
   operator,
@@ -92,6 +93,10 @@ export function serializeCortex(
     if (typeof expr === 'string' && matchesString(expr)) {
       const s = stringValue(expr);
       if (s !== null) return serializeString(s);
+    }
+    // A string object (`{str: …}`), e.g. a dictionary key.
+    if (typeof expr === 'object' && expr !== null && 'str' in expr) {
+      return serializeString((expr as { str: string }).str);
     }
     const comment = serializeComment(expr);
     let body: FormattingBlock | undefined;
@@ -277,7 +282,67 @@ export function serializeCortex(
       );
     },
 
-    // @todo: Dictionary, Do, If
+    //
+    // Tuple
+    //
+    // `(a, b)` for 2+ elements; the empty and 1-element cases have no
+    // parenthesized spelling (`()` is a diagnostic, `(a)` is grouping), so
+    // fall back to the generic `Tuple(…)` function form.
+    //
+    Tuple: (expr: MathJsonExpression): FormattingBlock => {
+      if (nops(expr) < 2) return serializeGenericFunction(expr);
+      return fmt.fencedList(
+        '(',
+        fmt.separator(','),
+        ')',
+        mapArgs<FormattingBlock>(expr, serializeExpression)
+      );
+    },
+
+    //
+    // At (indexing), 1-based: `["At", xs, i]` → `xs[i]`
+    //
+    At: (expr: MathJsonExpression): FormattingBlock => {
+      const base = operand(expr, 1);
+      const indices = operands(expr).slice(1);
+      if (base === null || indices.length === 0)
+        return serializeGenericFunction(expr);
+      // Parenthesize a base that is itself an operator expression, so the
+      // postfix `[…]` binds to the whole thing.
+      const baseBlock =
+        OPERATORS[operator(base)] !== undefined
+          ? fmt.line('(', serializeExpression(base), ')')
+          : serializeExpression(base);
+      return fmt.line(
+        baseBlock,
+        fmt.fencedList(
+          '[',
+          fmt.separator(','),
+          ']',
+          indices.map((x) => serializeExpression(x))
+        )
+      );
+    },
+
+    //
+    // Dictionary
+    //
+    // `["Dictionary", ["KeyValuePair", key, value], …]` → `{key -> value, …}`;
+    // the empty dictionary is `{->}`. Each `KeyValuePair` entry is serialized
+    // through the operator table (`->`), so a string key prints quoted.
+    //
+    Dictionary: (expr: MathJsonExpression): FormattingBlock => {
+      if (nops(expr) === 0)
+        return fmt.line(fmt.fence('{'), fmt.relationalOperator('->'), fmt.fence('}'));
+      return fmt.fencedList(
+        '{',
+        fmt.separator(','),
+        '}',
+        mapArgs<FormattingBlock>(expr, serializeExpression)
+      );
+    },
+
+    // @todo: Do, If
   };
 
   function serializeFunction(expr: MathJsonExpression): FormattingBlock | null {

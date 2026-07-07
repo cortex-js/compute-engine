@@ -4,6 +4,7 @@ import {
   isStringObject,
   mapArgs,
   operand,
+  operator,
   stringValue,
 } from '../math-json/utils';
 import { escapeJsonString } from '../common/json';
@@ -27,6 +28,10 @@ import { SourceSpan, Token, TokenType } from './tokens';
  * the shared table so it can never drift. */
 const PREFIX_PRECEDENCE = prefixOperatorForSymbol('!')!.precedence;
 
+/** Precedence of `Multiply`, used for invisible multiplication (`2x`). Read
+ * from the shared table so it stays in sync. */
+const MULTIPLY_PRECEDENCE = infixOperatorForSymbol('*')!.precedence;
+
 /** The characters that can head a prefix operator run (`-x`, `!a`, `+3`). */
 const PREFIX_SIGILS = new Set(['!', '-', '+']);
 
@@ -46,13 +51,24 @@ const PREFIX_SIGILS = new Set(['!', '-', '+']);
 //     the next statement boundary (a token preceded by a line break, or a
 //     `;`). Each recovery emits exactly one diagnostic for the skipped region.
 //
-// Grammar (Phase 2, Stage A — binary/unary operators):
+// Grammar (Phase 2, Stage B — operators, calls, indexing, collections):
 //
 //   primary    = number | symbol | verbatim-symbol | string | pragma
-//              | parenthesized
-//   unary      = prefix-op unary | primary
-//   expression = unary (infix-op expression)*      // precedence climbing
+//              | parenthesized | tuple | list | set | dictionary
+//   postfix    = primary ( call-clause | index-clause )*   // tightest
+//   unary      = prefix-op unary | postfix
+//   expression = unary (infix-op expression | invisible-multiply)*
 //   program    = shebang? (statement separator?)* EOF
+//
+// A `call-clause` is `( args )` and an `index-clause` is `[ args ]`, neither
+// preceded by whitespace. A symbol callee `f(x)` becomes `["f", x]`; a
+// compound callee `(g)(x)` becomes `["Apply", g, x]`; a number callee is never
+// a call (`2(x)` is invisible multiplication). Indexing is 1-based:
+// `xs[i]` → `["At", xs, i]`.
+//
+// `Invisible-multiply` inserts a `Multiply` (at `Multiply` precedence) when a
+// number literal is immediately followed — no whitespace — by a token that
+// begins a primary (`2x`, `2i`, `2(x+1)`).
 //
 // Precedence, associativity, and spelling come from the shared operator table
 // (`operators.ts`), consumed by both parser and serializer.
@@ -74,10 +90,10 @@ const PREFIX_SIGILS = new Set(['!', '-', '+']);
 //
 // ─── Statement sequencing ───────────────────────────────────────────────────
 //
-// Top-level statements are separated by a linebreak (`precededByLinebreak`) or
-// `;`. Two full expressions on one line with no separator are a diagnostic
-// (no silent `Do`-juxtaposition) — unless the second unambiguously begins a new
-// prefix statement (`a +b`), which the whitespace rule already carved off.
+// Top-level (and block-level) statements are separated by a linebreak
+// (`precededByLinebreak`) or `;`. Two full expressions on one line with no
+// separator are a diagnostic (no silent `Do`-juxtaposition — now that calls
+// land, `f(x)` is a call, not `Do(f, x)`).
 //
 // The top-level shape: 0 statements → `Nothing`, 1 statement → that expression
 // (not wrapped), N statements → `["Do", …]`.
@@ -277,17 +293,28 @@ export class Parser {
   }
 
   /**
-   * Consume an explicit statement separator (`;`) after a statement.
+   * Consume a statement separator after a statement, or diagnose its absence.
    *
-   * Statements are otherwise separated by a linebreak or simply juxtaposed —
-   * the whitespace rule already carves `a +b` into two statements (`a` then the
-   * prefix expression `+b`), which the top-level loop then wraps in `Do`. The
-   * "two bare expressions on one line" diagnostic from language-review §2.5
-   * lands in Stage B, once function-call syntax removes today's `f(x)` →
-   * `Do(f, x)` juxtaposition (see the phase plan §2.5 note).
+   * Statements are separated by an explicit `;` or by a linebreak
+   * (`precededByLinebreak`). Two full expressions on one line with no separator
+   * are a diagnostic (language-review §2.5) — there is no silent
+   * `Do`-juxtaposition. The offending region is skipped by the top-level
+   * recovery so exactly one diagnostic is reported.
    */
   private expectStatementSeparator(): void {
-    if (this.check('SEMICOLON')) this.advance();
+    if (this.check('SEMICOLON')) {
+      this.advance();
+      return;
+    }
+    if (this.current.type === 'EOF' || this.current.precededByLinebreak) return;
+
+    // A second expression on the same line with no separator.
+    this.error(
+      ['unexpected-symbol', this.current.text],
+      this.current.start,
+      this.current.end
+    );
+    this.recoverAtTopLevel();
   }
 
   //
@@ -304,7 +331,28 @@ export class Parser {
 
     for (;;) {
       const op = this.peekInfix();
-      if (op === null) break;
+      if (op === null) {
+        // Invisible multiplication: a number literal immediately followed (no
+        // whitespace) by a token that begins a primary (`2x`, `2(x+1)`). Binds
+        // at `Multiply` precedence, so `^` stays tighter (`3x^3` is
+        // `3·(x^3)`).
+        if (
+          this.startsInvisibleMultiply(left) &&
+          MULTIPLY_PRECEDENCE >= minPrecedence
+        ) {
+          const right = this.parseExpression(MULTIPLY_PRECEDENCE + 1);
+          if (right === null) break;
+          const start = this.localStart(left) ?? 0;
+          const end = this.localEnd(right) ?? this.previousEnd();
+          left = this.wrap(
+            ['Multiply', left, right] as MathJsonExpression[],
+            start,
+            end
+          );
+          continue;
+        }
+        break;
+      }
       if (op.def.precedence < minPrecedence) break;
 
       if (op.asymmetric)
@@ -334,7 +382,7 @@ export class Parser {
   private parseUnary(): MathJsonExpression | null {
     const token = this.current;
     const sigils = this.prefixSigils(token);
-    if (sigils === null) return this.parsePrimary();
+    if (sigils === null) return this.parsePostfix();
 
     // A prefix operator must abut its operand: `-x`, never `- x`.
     const operandToken = this.peek();
@@ -511,6 +559,88 @@ export class Parser {
   }
 
   //
+  // ─── Postfix: calls and indexing ──────────────────────────────────────────
+  //
+
+  /**
+   * A primary followed by zero or more call/index clauses (the tightest-binding
+   * layer). A clause abuts its operand: `f(x)`, `xs[i]`, never `f (x)`.
+   */
+  private parsePostfix(): MathJsonExpression | null {
+    let expr = this.parsePrimary();
+    if (expr === null) return null;
+
+    for (;;) {
+      const t = this.current;
+      if (t.precededByWhitespace) break;
+      if (t.type === 'OPEN_PAREN') {
+        // A number callee is never a call: `2(x+1)` is invisible multiplication.
+        if (isNumberNode(expr)) break;
+        expr = this.parseCall(expr);
+      } else if (t.type === 'OPEN_BRACKET') {
+        expr = this.parseIndex(expr);
+      } else break;
+    }
+    return expr;
+  }
+
+  /** A call clause `( args )` applied to `callee`. A bare-symbol callee becomes
+   * the operator head (`f(x)` → `["f", x]`); any other callee is wrapped in
+   * `Apply` (`(g)(x)` → `["Apply", g, x]`). */
+  private parseCall(callee: MathJsonExpression): MathJsonExpression {
+    const start = this.localStart(callee) ?? this.current.start;
+    const { values, end } = this.parseBracketedList('CLOSE_PAREN', ')');
+    const head = symbolNameOf(callee);
+    if (head !== null)
+      return this.wrap([head, ...values] as MathJsonExpression[], start, end);
+    return this.wrap(
+      ['Apply', callee, ...values] as MathJsonExpression[],
+      start,
+      end
+    );
+  }
+
+  /** An index clause `[ i ]` applied to `base` → `["At", base, i]` (1-based). */
+  private parseIndex(base: MathJsonExpression): MathJsonExpression {
+    const start = this.localStart(base) ?? this.current.start;
+    const { values, end } = this.parseBracketedList('CLOSE_BRACKET', ']');
+    return this.wrap(
+      ['At', base, ...values] as MathJsonExpression[],
+      start,
+      end
+    );
+  }
+
+  /** Whether `left` can be the left operand of an invisible multiplication: a
+   * bare number literal immediately followed (no whitespace) by a token that
+   * begins a primary. */
+  private startsInvisibleMultiply(left: MathJsonExpression): boolean {
+    if (!isNumberNode(left)) return false;
+    const t = this.current;
+    if (t.precededByWhitespace) return false;
+    return this.startsPrimary(t);
+  }
+
+  /** Whether a token can begin a primary expression (number, symbol, string,
+   * `(`, `{`, `[`, pragma). Operator/word-operator tokens are handled by
+   * `peekInfix` before this is consulted. */
+  private startsPrimary(token: Token): boolean {
+    switch (token.type) {
+      case 'NUMBER':
+      case 'SYMBOL':
+      case 'VERBATIM_SYMBOL':
+      case 'STRING':
+      case 'PRAGMA':
+      case 'OPEN_PAREN':
+      case 'OPEN_BRACKET':
+      case 'OPEN_BRACE':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  //
   // ─── Primary ──────────────────────────────────────────────────────────────
   //
 
@@ -530,6 +660,10 @@ export class Parser {
         return this.parseVerbatimSymbol();
       case 'OPEN_PAREN':
         return this.parseParenthesized();
+      case 'OPEN_BRACKET':
+        return this.parseList();
+      case 'OPEN_BRACE':
+        return this.parseBrace();
       default:
         // Prefix operators are handled by `parseUnary`; anything else in
         // primary position (an infix operator, a stray bracket, …) is not a
@@ -659,22 +793,163 @@ export class Parser {
   // ─── Parenthesized expression ─────────────────────────────────────────────
   //
 
+  /**
+   * A parenthesized construct: `(a)` → the inner expression `a`; `(a, b)` →
+   * `["Tuple", a, b]`; `()` → diagnostic (no empty tuple in v0).
+   */
   private parseParenthesized(): MathJsonExpression | null {
-    const open = this.advance(); // `(`
+    const diagBefore = this.diagnostics.length;
+    const { values, open, end } = this.parseBracketedList('CLOSE_PAREN', ')');
+
+    if (values.length === 0) {
+      if (this.diagnostics.length === diagBefore)
+        this.error(['expression-expected'], open.start, end);
+      return null;
+    }
+    // A single value is a parenthesized expression, not a 1-tuple.
+    if (values.length === 1) return values[0];
+    return this.wrap(['Tuple', ...values] as MathJsonExpression[], open.start, end);
+  }
+
+  //
+  // ─── Collections and dictionaries ─────────────────────────────────────────
+  //
+
+  /** `[a, b]` → `["List", a, b]`; `[]` → `["List"]`. */
+  private parseList(): MathJsonExpression {
+    const { values, open, end } = this.parseBracketedList('CLOSE_BRACKET', ']');
+    return this.wrap(['List', ...values] as MathJsonExpression[], open.start, end);
+  }
+
+  /**
+   * A brace construct: `{}` → `["Set"]`; `{->}` → empty `Dictionary`; a first
+   * element with a top-level `->` → `Dictionary` (all elements must then be
+   * `key -> value`); otherwise a `Set`.
+   */
+  private parseBrace(): MathJsonExpression {
+    // `{}` → empty Set.
+    if (this.peek().type === 'CLOSE_BRACE') {
+      const open = this.advance(); // `{`
+      const close = this.advance(); // `}`
+      return this.wrap(['Set'], open.start, close.end);
+    }
+    // `{->}` → empty Dictionary.
+    if (
+      this.peek().type === 'OPERATOR' &&
+      this.peek().text === '->' &&
+      this.peek(2).type === 'CLOSE_BRACE'
+    ) {
+      const open = this.advance(); // `{`
+      this.advance(); // `->`
+      const close = this.advance(); // `}`
+      return this.wrap(['Dictionary'], open.start, close.end);
+    }
+
+    const { values, open, end } = this.parseBracketedList('CLOSE_BRACE', '}');
+
+    // Disambiguate Set vs Dictionary on the first element: a top-level `->`
+    // (a `KeyValuePair`) marks a dictionary.
+    if (values.length > 0 && operator(values[0]) === 'KeyValuePair')
+      return this.buildDictionary(values, open.start, end);
+
+    return this.wrap(['Set', ...values] as MathJsonExpression[], open.start, end);
+  }
+
+  /** Assemble a `Dictionary` from parsed brace elements. Every element must be
+   * a `key -> value` pair; unquoted symbol keys become strings; duplicate keys
+   * are diagnosed. */
+  private buildDictionary(
+    elements: MathJsonExpression[],
+    start: number,
+    end: number
+  ): MathJsonExpression {
+    const entries: MathJsonExpression[] = [];
+    const seenKeys = new Set<string>();
+
+    for (const el of elements) {
+      if (operator(el) !== 'KeyValuePair') {
+        const o = nodeOffsets(el);
+        this.error(
+          ['dictionary-key-value-expected'],
+          o ? o[0] - this.baseOffset : start,
+          o ? o[1] - this.baseOffset : end
+        );
+        continue;
+      }
+      const key = keyToString(operand(el, 1));
+      const value = operand(el, 2) ?? 'Nothing';
+      const keyName = stringValue(key);
+      if (keyName !== null) {
+        if (seenKeys.has(keyName)) {
+          const o = nodeOffsets(el);
+          this.error(
+            ['duplicate-dictionary-key', keyName],
+            o ? o[0] - this.baseOffset : start,
+            o ? o[1] - this.baseOffset : end
+          );
+          continue;
+        }
+        seenKeys.add(keyName);
+      }
+      const o = nodeOffsets(el);
+      entries.push(
+        this.wrap(
+          ['KeyValuePair', key, value] as MathJsonExpression[],
+          o ? o[0] - this.baseOffset : start,
+          o ? o[1] - this.baseOffset : end
+        )
+      );
+    }
+
+    return this.wrap(
+      ['Dictionary', ...entries] as MathJsonExpression[],
+      start,
+      end
+    );
+  }
+
+  /**
+   * Parse a comma-separated list of expressions delimited by the current
+   * opening bracket and `closeType`. Trailing commas are allowed. On a missing
+   * or mismatched closer, a `closing-bracket-expected` diagnostic is emitted
+   * and (for a mismatched closer) the stray bracket is consumed for recovery.
+   */
+  private parseBracketedList(
+    closeType: TokenType,
+    closeText: string
+  ): { values: MathJsonExpression[]; open: Token; end: number } {
+    const open = this.advance(); // the opening bracket
     this.brackets.push(open);
 
-    const inner = this.parseExpression(0);
-    if (inner === null && this.current.type !== 'CLOSE_PAREN') {
-      this.reportUnexpected(this.current);
-      this.recoverInBracket();
+    const values: MathJsonExpression[] = [];
+    if (!this.check(closeType)) {
+      for (;;) {
+        const expr = this.parseExpression(0);
+        if (expr === null) {
+          this.reportUnexpected(this.current);
+          this.recoverInBracket();
+          break;
+        }
+        values.push(expr);
+        if (!this.match('COMMA')) break;
+        if (this.check(closeType)) break; // trailing comma
+      }
     }
 
     this.brackets.pop();
 
-    if (this.current.type === 'CLOSE_PAREN') this.advance();
-    else this.error(['closing-bracket-expected', ')'], open.start, open.end);
+    let end: number;
+    if (this.check(closeType)) {
+      end = this.current.end;
+      this.advance();
+    } else {
+      this.error(['closing-bracket-expected', closeText], open.start, open.end);
+      end = this.current.start;
+      // A mismatched closer (`{ … )`) is consumed so it does not cascade.
+      if (isCloseToken(this.current.type)) this.advance();
+    }
 
-    return inner;
+    return { values, open, end };
   }
 
   /** Within a bracketed construct, skip to (but do not consume) the matching
@@ -870,6 +1145,50 @@ export class Parser {
 // The conversion arithmetic is ported verbatim from the old combinator
 // library's numeric parsers, so the produced values are identical.
 //
+
+/** Whether `expr` is a bare number literal node (`{num}`). */
+function isNumberNode(expr: MathJsonExpression): boolean {
+  return (
+    typeof expr === 'object' &&
+    expr !== null &&
+    !Array.isArray(expr) &&
+    'num' in expr
+  );
+}
+
+/** The name of a bare-symbol node (`{sym}`), or `null` for any other node. Used
+ * to decide a call head vs. an `Apply`. */
+function symbolNameOf(expr: MathJsonExpression): string | null {
+  if (
+    typeof expr === 'object' &&
+    expr !== null &&
+    !Array.isArray(expr) &&
+    'sym' in expr
+  )
+    return (expr as { sym: string }).sym;
+  return null;
+}
+
+/** A dictionary key: an unquoted symbol key (`one`) becomes a string
+ * (`{str:'one'}`); a string key is kept; anything else is passed through. */
+function keyToString(key: MathJsonExpression | null): MathJsonExpression {
+  if (key === null) return { str: '' };
+  const sym = symbolNameOf(key);
+  if (sym !== null) {
+    const offsets = nodeOffsets(key);
+    return offsets ? { str: sym, sourceOffsets: offsets } : { str: sym };
+  }
+  return key;
+}
+
+/** Whether a token type closes a bracketed construct. */
+function isCloseToken(type: TokenType): boolean {
+  return (
+    type === 'CLOSE_PAREN' ||
+    type === 'CLOSE_BRACKET' ||
+    type === 'CLOSE_BRACE'
+  );
+}
 
 /** The absolute `sourceOffsets` of a node, if it carries them. */
 function nodeOffsets(

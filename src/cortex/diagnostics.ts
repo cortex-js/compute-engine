@@ -11,6 +11,8 @@ export type DiagnosticCode =
   | 'binary-number-expected'
   | 'closing-bracket-expected' // %0 = bracket
   | 'decimal-number-expected'
+  | 'dictionary-key-value-expected'
+  | 'duplicate-dictionary-key' // %0 = key
   | 'eof-expected' // %0 = unexpected symbol
   | 'empty-verbatim-symbol'
   | 'end-of-comment-expected'

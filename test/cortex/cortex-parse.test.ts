@@ -54,10 +54,18 @@ describe('CORTEX PARSING SPACES', () => {
     expect(validCortex(' \t\n ')).toBe('Nothing');
     expect(validCortex(' \u2000 ')).toBe('Nothing');
     expect(validCortex(' \u2009 ')).toBe('Nothing');
-    expect(validCortex('1\t2')).toStrictEqual(['Do', 1, 2]);
+    // Two expressions on one line with no separator (a tab is not a linebreak)
+    // is a diagnostic — no silent `Do`-juxtaposition (language-review §2.5).
+    expect(validCortex('1\t2')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '2']],
+    ]);
     // A tab is whitespace on both sides of `+`, so it parses as an infix Add.
     expect(validCortex('1\t+\t2')).toStrictEqual(['Add', 1, 2]);
-    expect(validCortex(' 2 \t 1')).toStrictEqual(['Do', 2, 1]);
+    expect(validCortex(' 2 \t 1')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '1']],
+    ]);
   });
 });
 
@@ -187,26 +195,21 @@ describe('CORTEX PARSING NUMBERS', () => {
         ],
       ]
     `);
-    // @todo: revisit
-    expect(invalidCortex('2et')).toMatchInlineSnapshot(`
-      [
-        UnexpectedSuccess,
-        [
-          Do,
-          2,
-          et,
-        ],
-      ]
-    `);
-    // `k-13`: the `-` has no whitespace on either side, so it is an infix
-    // Subtract; `62737547.` and `k` juxtapose into a `Do`.
+    // `2et`: the number `2` immediately abuts the symbol `et`, so it is
+    // invisible multiplication (Stage B).
+    expect(invalidCortex('2et')).toStrictEqual([
+      'UnexpectedSuccess',
+      ['Multiply', 2, 'et'],
+    ]);
+    // `k-13`: the number abuts `k` (invisible multiplication); the `-` has no
+    // whitespace on either side, so it is an infix Subtract.
     expect(invalidCortex('62_73_7547.k-13')).toStrictEqual([
       'UnexpectedSuccess',
-      ['Do', 62737547, ['Subtract', 'k', 13]],
+      ['Subtract', ['Multiply', 62737547, 'k'], 13],
     ]);
     expect(invalidCortex('62_73_7547k-13')).toStrictEqual([
       'UnexpectedSuccess',
-      ['Do', 62737547, ['Subtract', 'k', 13]],
+      ['Subtract', ['Multiply', 62737547, 'k'], 13],
     ]);
     expect(invalidCortex('.1e-13')).toMatchInlineSnapshot(`
       [
@@ -296,8 +299,8 @@ describe('CORTEX PARSING SYMBOLS', () => {
       ,
           ],
           [
-            unbalanced-verbatim-symbol,
-            ,
+            unexpected-symbol,
+            d,
           ],
         ],
       ]
@@ -490,7 +493,7 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
             end,
           ],
           [
-            string-literal-opening-delimiter-expected,
+            unexpected-symbol,
             ",
           ],
         ],
@@ -506,7 +509,7 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
             end,
           ],
           [
-            string-literal-opening-delimiter-expected,
+            unexpected-symbol,
             ",
           ],
         ],
@@ -526,7 +529,7 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
             end,
           ],
           [
-            string-literal-opening-delimiter-expected,
+            unexpected-symbol,
             ",
           ],
         ],
@@ -681,7 +684,7 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
             end,
           ],
           [
-            string-literal-opening-delimiter-expected,
+            unexpected-symbol,
             ",
           ],
         ],
@@ -705,7 +708,7 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
             end,
           ],
           [
-            string-literal-opening-delimiter-expected,
+            unexpected-symbol,
             ",
           ],
         ],
@@ -747,6 +750,10 @@ describe('CORTEX PARSING MULTILINE STRINGS', () => {
         [
           String,
           multiline-string-expected,
+          [
+            unexpected-symbol,
+            abc,
+          ],
           [
             string-literal-closing-delimiter-expected,
             """,
@@ -813,73 +820,475 @@ describe('CORTEX PARSING EXTENDED STRINGS', () => {
   });
 });
 
-// Unsupported: dictionary syntax currently stops at the opening `{` or function
-// call delimiter, so even the "valid" examples parse as errors.
-describe.skip('CORTEX PARSING DICTIONARY', () => {
+describe('CORTEX PARSING DICTIONARY', () => {
   test('Empty dictionary', () => {
-    expect(validCortex('{->}')).toMatchInlineSnapshot();
+    expect(validCortex('{->}')).toMatchInlineSnapshot(`
+      [
+        Dictionary,
+      ]
+    `);
   });
   test('Empty dictionary', () => {
-    expect(validCortex('Dictionary()')).toMatchInlineSnapshot();
+    expect(validCortex('Dictionary()')).toMatchInlineSnapshot(`
+      [
+        Dictionary,
+      ]
+    `);
   });
 
   test('Valid dictionary', () => {
-    expect(validCortex('{ one -> 1)')).toMatchInlineSnapshot();
-    expect(validCortex('{ one -> 1, two -> 2)')).toMatchInlineSnapshot();
-    expect(validCortex('{ one -> 1, three -> 2 + 1)')).toMatchInlineSnapshot();
-    expect(validCortex('{x -> 1, y -> 2, z -> 2 + x}')).toMatchInlineSnapshot();
+    expect(validCortex('{ one -> 1}')).toMatchInlineSnapshot(`
+      [
+        Dictionary,
+        [
+          KeyValuePair,
+          {
+            str: one,
+          },
+          1,
+        ],
+      ]
+    `);
+    expect(validCortex('{ one -> 1, two -> 2}')).toMatchInlineSnapshot(`
+      [
+        Dictionary,
+        [
+          KeyValuePair,
+          {
+            str: one,
+          },
+          1,
+        ],
+        [
+          KeyValuePair,
+          {
+            str: two,
+          },
+          2,
+        ],
+      ]
+    `);
+    expect(validCortex('{ one -> 1, three -> 2 + 1}')).toMatchInlineSnapshot(`
+      [
+        Dictionary,
+        [
+          KeyValuePair,
+          {
+            str: one,
+          },
+          1,
+        ],
+        [
+          KeyValuePair,
+          {
+            str: three,
+          },
+          [
+            Add,
+            2,
+            1,
+          ],
+        ],
+      ]
+    `);
+    expect(validCortex('{x -> 1, y -> 2, z -> 2 + x}')).toMatchInlineSnapshot(`
+      [
+        Dictionary,
+        [
+          KeyValuePair,
+          {
+            str: x,
+          },
+          1,
+        ],
+        [
+          KeyValuePair,
+          {
+            str: y,
+          },
+          2,
+        ],
+        [
+          KeyValuePair,
+          {
+            str: z,
+          },
+          [
+            Add,
+            2,
+            x,
+          ],
+        ],
+      ]
+    `);
   });
 
   test('Nested dictionary', () => {
-    expect(
-      validCortex('{x -> {a -> 7, b -> 5}, y -> 2, z -> 2 + x}')
-    ).toMatchInlineSnapshot();
+    expect(validCortex('{x -> {a -> 7, b -> 5}, y -> 2, z -> 2 + x}'))
+      .toMatchInlineSnapshot(`
+      [
+        Dictionary,
+        [
+          KeyValuePair,
+          {
+            str: x,
+          },
+          [
+            Dictionary,
+            [
+              KeyValuePair,
+              {
+                str: a,
+              },
+              7,
+            ],
+            [
+              KeyValuePair,
+              {
+                str: b,
+              },
+              5,
+            ],
+          ],
+        ],
+        [
+          KeyValuePair,
+          {
+            str: y,
+          },
+          2,
+        ],
+        [
+          KeyValuePair,
+          {
+            str: z,
+          },
+          [
+            Add,
+            2,
+            x,
+          ],
+        ],
+      ]
+    `);
   });
 
   test('Invalid dictionary', () => {
-    expect(invalidCortex('{ one -> 1, one -> 2}')).toMatchInlineSnapshot();
-    expect(invalidCortex('{ one -> 1, two -> 2, }')).toMatchInlineSnapshot();
-    expect(invalidCortex('{ one -> 1, , two -> 2}')).toMatchInlineSnapshot();
+    expect(invalidCortex('{ one -> 1, one -> 2}')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            duplicate-dictionary-key,
+            one,
+          ],
+        ],
+      ]
+    `);
+    expect(invalidCortex('{ one -> 1, two -> 2, }')).toMatchInlineSnapshot(`
+      [
+        UnexpectedSuccess,
+        [
+          Dictionary,
+          [
+            KeyValuePair,
+            {
+              str: one,
+            },
+            1,
+          ],
+          [
+            KeyValuePair,
+            {
+              str: two,
+            },
+            2,
+          ],
+        ],
+      ]
+    `);
+    expect(invalidCortex('{ one -> 1, , two -> 2}')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            ,,
+          ],
+        ],
+      ]
+    `);
   });
 });
 
-// Unsupported: collection shorthand/function syntax is not currently parsed by
-// the Cortex parser.
-describe.skip('CORTEX PARSING COLLECTIONS', () => {
+describe('CORTEX PARSING COLLECTIONS', () => {
   test('Sets', () => {
-    expect(validCortex('{}')).toMatchInlineSnapshot();
-    expect(validCortex('{1}')).toMatchInlineSnapshot();
-    expect(validCortex('{1, 2}')).toMatchInlineSnapshot();
-    expect(validCortex('{1, {2, 3}, 4}')).toMatchInlineSnapshot();
-    expect(validCortex('Set()')).toMatchInlineSnapshot();
-    expect(validCortex('Set(1, 2, 3)')).toMatchInlineSnapshot();
-    expect(validCortex('Set(1, {2, 3}, 3)')).toMatchInlineSnapshot();
+    expect(validCortex('{}')).toMatchInlineSnapshot(`
+      [
+        Set,
+      ]
+    `);
+    expect(validCortex('{1}')).toMatchInlineSnapshot(`
+      [
+        Set,
+        1,
+      ]
+    `);
+    expect(validCortex('{1, 2}')).toMatchInlineSnapshot(`
+      [
+        Set,
+        1,
+        2,
+      ]
+    `);
+    expect(validCortex('{1, {2, 3}, 4}')).toMatchInlineSnapshot(`
+      [
+        Set,
+        1,
+        [
+          Set,
+          2,
+          3,
+        ],
+        4,
+      ]
+    `);
+    expect(validCortex('Set()')).toMatchInlineSnapshot(`
+      [
+        Set,
+      ]
+    `);
+    expect(validCortex('Set(1, 2, 3)')).toMatchInlineSnapshot(`
+      [
+        Set,
+        1,
+        2,
+        3,
+      ]
+    `);
+    expect(validCortex('Set(1, {2, 3}, 3)')).toMatchInlineSnapshot(`
+      [
+        Set,
+        1,
+        [
+          Set,
+          2,
+          3,
+        ],
+        3,
+      ]
+    `);
   });
   test('Lists', () => {
-    expect(validCortex('[]')).toMatchInlineSnapshot();
-    expect(validCortex('[1]')).toMatchInlineSnapshot();
-    expect(validCortex('[1, 2]')).toMatchInlineSnapshot();
-    expect(validCortex('[1, [2, 3], 4]')).toMatchInlineSnapshot();
-    expect(validCortex('List()')).toMatchInlineSnapshot();
-    expect(validCortex('List(2, 2x, 4)')).toMatchInlineSnapshot();
-    expect(validCortex('List(2, [2x, 5], 4)')).toMatchInlineSnapshot();
+    expect(validCortex('[]')).toMatchInlineSnapshot(`
+      [
+        List,
+      ]
+    `);
+    expect(validCortex('[1]')).toMatchInlineSnapshot(`
+      [
+        List,
+        1,
+      ]
+    `);
+    expect(validCortex('[1, 2]')).toMatchInlineSnapshot(`
+      [
+        List,
+        1,
+        2,
+      ]
+    `);
+    expect(validCortex('[1, [2, 3], 4]')).toMatchInlineSnapshot(`
+      [
+        List,
+        1,
+        [
+          List,
+          2,
+          3,
+        ],
+        4,
+      ]
+    `);
+    expect(validCortex('List()')).toMatchInlineSnapshot(`
+      [
+        List,
+      ]
+    `);
+    expect(validCortex('List(2, 2x, 4)')).toMatchInlineSnapshot(`
+      [
+        List,
+        2,
+        [
+          Multiply,
+          2,
+          x,
+        ],
+        4,
+      ]
+    `);
+    expect(validCortex('List(2, [2x, 5], 4)')).toMatchInlineSnapshot(`
+      [
+        List,
+        2,
+        [
+          List,
+          [
+            Multiply,
+            2,
+            x,
+          ],
+          5,
+        ],
+        4,
+      ]
+    `);
   });
   test('Sequence', () => {
-    expect(validCortex('1, 2, 3')).toMatchInlineSnapshot();
-    expect(validCortex('1,, 3')).toMatchInlineSnapshot();
-    expect(validCortex('1, 2,')).toMatchInlineSnapshot();
-    expect(validCortex(', 2,')).toMatchInlineSnapshot();
-    expect(validCortex('Sequence()')).toMatchInlineSnapshot();
-    expect(validCortex('Sequence(1, 2, 3)')).toMatchInlineSnapshot();
-    expect(validCortex('Sequence(1, 2x + 4, 3)')).toMatchInlineSnapshot();
+    expect(validCortex('1, 2, 3')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            ,,
+          ],
+        ],
+      ]
+    `);
+    expect(validCortex('1,, 3')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            ,,
+          ],
+        ],
+      ]
+    `);
+    expect(validCortex('1, 2,')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            ,,
+          ],
+        ],
+      ]
+    `);
+    expect(validCortex(', 2,')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            ,,
+          ],
+        ],
+      ]
+    `);
+    expect(validCortex('Sequence()')).toMatchInlineSnapshot(`
+      [
+        Sequence,
+      ]
+    `);
+    expect(validCortex('Sequence(1, 2, 3)')).toMatchInlineSnapshot(`
+      [
+        Sequence,
+        1,
+        2,
+        3,
+      ]
+    `);
+    expect(validCortex('Sequence(1, 2x + 4, 3)')).toMatchInlineSnapshot(`
+      [
+        Sequence,
+        1,
+        [
+          Add,
+          [
+            Multiply,
+            2,
+            x,
+          ],
+          4,
+        ],
+        3,
+      ]
+    `);
   });
   test('Tuple', () => {
-    expect(validCortex('()')).toMatchInlineSnapshot();
-    expect(validCortex('(a,b)')).toMatchInlineSnapshot();
-    expect(validCortex('(a,,b)')).toMatchInlineSnapshot();
-    expect(validCortex('(a , , b)')).toMatchInlineSnapshot();
-    expect(validCortex('Tuple()')).toMatchInlineSnapshot();
-    expect(validCortex('Tuple(a, 2b, c^3)')).toMatchInlineSnapshot();
+    expect(validCortex('()')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            expression-expected,
+          ],
+        ],
+      ]
+    `);
+    expect(validCortex('(a,b)')).toMatchInlineSnapshot(`
+      [
+        Tuple,
+        a,
+        b,
+      ]
+    `);
+    expect(validCortex('(a,,b)')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            ,,
+          ],
+        ],
+      ]
+    `);
+    expect(validCortex('(a , , b)')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            ,,
+          ],
+        ],
+      ]
+    `);
+    expect(validCortex('Tuple()')).toMatchInlineSnapshot(`
+      [
+        Tuple,
+      ]
+    `);
+    expect(validCortex('Tuple(a, 2b, c^3)')).toMatchInlineSnapshot(`
+      [
+        Tuple,
+        a,
+        [
+          Multiply,
+          2,
+          b,
+        ],
+        [
+          Power,
+          c,
+          3,
+        ],
+      ]
+    `);
   });
   // Dictionaries: see above.
 });
@@ -965,14 +1374,11 @@ describe('CORTEX PARSING OPERATORS', () => {
       ['String', ['asymmetric-operator-whitespace', '*']],
     ]);
     // `-1+-2`: the lexer maximal-munches `+-` into one (non-operator) token, so
-    // `+-2` is a prefix run and the two terms juxtapose into a `Do`.
+    // `-1` ends the first expression; `+-2` on the same line with no separator
+    // is a diagnostic (language-review §2.5), no longer a silent `Do`.
     expect(invalidCortex('-1+-2')).toStrictEqual([
-      'UnexpectedSuccess',
-      ['Do', -1, -2],
-    ]);
-    expect(invalidCortex('-1+-2')).toStrictEqual([
-      'UnexpectedSuccess',
-      ['Do', -1, -2],
+      'Error',
+      ['String', ['unexpected-symbol', '+-']],
     ]);
   });
   test('Logic Operators', () => {
@@ -1010,14 +1416,74 @@ describe('CORTEX PARSING OPERATORS', () => {
       'c',
     ]);
   });
-  test.skip('Invisible Operators', () => {
-    // Stage B
-    expect(validCortex('2x')).toMatchInlineSnapshot();
-    expect(validCortex('x(2+1)')).toMatchInlineSnapshot();
-    expect(validCortex('2(2+1)')).toMatchInlineSnapshot();
-    expect(validCortex('(a+b)(2+1)')).toMatchInlineSnapshot();
-    expect(validCortex('2 1/2')).toMatchInlineSnapshot();
-    expect(validCortex('x 1/2')).toMatchInlineSnapshot();
+  test('Invisible Operators', () => {
+    expect(validCortex('2x')).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        x,
+      ]
+    `);
+    expect(validCortex('x(2+1)')).toMatchInlineSnapshot(`
+      [
+        x,
+        [
+          Add,
+          2,
+          1,
+        ],
+      ]
+    `);
+    expect(validCortex('2(2+1)')).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        [
+          Add,
+          2,
+          1,
+        ],
+      ]
+    `);
+    expect(validCortex('(a+b)(2+1)')).toMatchInlineSnapshot(`
+      [
+        Apply,
+        [
+          Add,
+          a,
+          b,
+        ],
+        [
+          Add,
+          2,
+          1,
+        ],
+      ]
+    `);
+    expect(validCortex('2 1/2')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            1,
+          ],
+        ],
+      ]
+    `);
+    expect(validCortex('x 1/2')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            1,
+          ],
+        ],
+      ]
+    `);
   });
   test('Power', () => {
     expect(validCortex('x^2')).toStrictEqual(['Power', 'x', 2]);
@@ -1040,11 +1506,7 @@ describe('CORTEX PARSING OPERATORS', () => {
     // `**` is an alias for `^`.
     expect(validCortex('x**2')).toStrictEqual(['Power', 'x', 2]);
     // `^` is right-associative.
-    expect(validCortex('2^3^2')).toStrictEqual([
-      'Power',
-      2,
-      ['Power', 3, 2],
-    ]);
+    expect(validCortex('2^3^2')).toStrictEqual(['Power', 2, ['Power', 3, 2]]);
   });
 });
 
@@ -1072,17 +1534,89 @@ describe('CORTEX OPERATOR ROUND-TRIP', () => {
       expect(validCortex(serializeCortex(row as any))).toStrictEqual(row);
     }
   });
+
+  test('parse(serialize(x)) for collections, calls and indexing', () => {
+    const rows: any[] = [
+      ['List', 'a', 'b'],
+      ['List'],
+      ['Set', 'a', 'b'],
+      ['Set'],
+      ['Tuple', 'a', 'b'],
+      ['At', 'xs', 'i'],
+      ['At', ['Add', 'a', 'b'], 1],
+      ['Apply', ['g', 'f'], 'x'],
+      ['f', 'x', 'y'],
+      ['f'],
+      ['Dictionary'],
+      ['Dictionary', ['KeyValuePair', { str: 'a' }, 'b']],
+      [
+        'Dictionary',
+        ['KeyValuePair', { str: 'a' }, 'b'],
+        ['KeyValuePair', { str: 'c' }, ['Add', 2, 1]],
+      ],
+    ];
+    for (const row of rows) {
+      expect(validCortex(serializeCortex(row as any))).toStrictEqual(row);
+    }
+  });
 });
 
-// Unsupported: function-call syntax is not currently accepted in this parser.
-describe.skip('CORTEX PARSING FUNCTIONS', () => {
+describe('CORTEX PARSING FUNCTIONS', () => {
   test('Functions', () => {
-    expect(validCortex('f()')).toMatchInlineSnapshot();
-    expect(validCortex('f(x)')).toMatchInlineSnapshot();
-    expect(validCortex('f(x, y)')).toMatchInlineSnapshot();
-    expect(validCortex('Add()')).toMatchInlineSnapshot();
-    expect(validCortex('Add(2, 3)')).toMatchInlineSnapshot();
-    expect(validCortex('`\\sin`(x)')).toMatchInlineSnapshot();
-    expect(validCortex('Apply(g(f), [x, 1, 0])')).toMatchInlineSnapshot();
+    expect(validCortex('f()')).toMatchInlineSnapshot(`
+      [
+        f,
+      ]
+    `);
+    expect(validCortex('f(x)')).toMatchInlineSnapshot(`
+      [
+        f,
+        x,
+      ]
+    `);
+    expect(validCortex('f(x, y)')).toMatchInlineSnapshot(`
+      [
+        f,
+        x,
+        y,
+      ]
+    `);
+    expect(validCortex('Add()')).toMatchInlineSnapshot(`
+      [
+        Add,
+      ]
+    `);
+    expect(validCortex('Add(2, 3)')).toMatchInlineSnapshot(`
+      [
+        Add,
+        2,
+        3,
+      ]
+    `);
+    // A verbatim symbol (needs backticks because of the `+`) as a call head.
+    // NOTE: the roadmap's `` `\sin` `` example is not expressible as a Cortex
+    // symbol — `\` is a prohibited identifier-start character and `\s` is the
+    // Cortex space escape, so `` `\sin` `` is a genuine invalid-symbol-name.
+    expect(validCortex('`a+b`(x)')).toMatchInlineSnapshot(`
+      [
+        a+b,
+        x,
+      ]
+    `);
+    expect(validCortex('Apply(g(f), [x, 1, 0])')).toMatchInlineSnapshot(`
+      [
+        Apply,
+        [
+          g,
+          f,
+        ],
+        [
+          List,
+          x,
+          1,
+          0,
+        ],
+      ]
+    `);
   });
 });
