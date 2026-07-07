@@ -96,15 +96,27 @@ scipy is installed in `./venv`.
 
 **Not yet agreed (proposed 2026-07-04, awaiting a call):**
 
-5. **Uncertainty type — value ± error propagation (M/L).** A measurement type
+5. **Uncertainty type — value ± error propagation (M).** A measurement type
    (`5.1 ± 0.2 cm`) propagating through arithmetic, layered on the existing
-   units/quantity arithmetic. Core lab-course and experimental-science need;
-   the interval engine covers enclosure but not statistical error bars.
-   Design item: linear (partial-derivative) vs interval propagation. Its
-   *display* half is nearly free once item 7 lands — rendering `x ± e` rounds
-   the value to the error's least-significant place (a *derived* digit count),
-   so it reuses item 7's rounding primitive verbatim; the M/L work is the
-   value-carrying arithmetic, which stands on its own and needs this go-ahead.
+   units/quantity arithmetic. Core lab-course and experimental-science need.
+   **Design agreed 2026-07-07** — full write-up in
+   [`docs/plans/2026-07-07-uncertainty-design.md`](./docs/plans/2026-07-07-uncertainty-design.md).
+   Decisions: a `['Measurement', value, error]` head mirroring the `Quantity`
+   precedent (library-level dispatch, **not** a `NumericValue` subclass);
+   **independent linear (quadrature) propagation** for the MVP (correct for
+   distinct-measurement combination and any reuse that canonicalizes — `x−x`,
+   `x+x`, `x·x` — since CE resolves same-variable reuse symbolically before
+   numeric propagation; dual-number correlation tracking is the documented later
+   upgrade for nonlinear multi-occurrence like `x/(x+1)`); per-op closed-form
+   partials so there is **no calculus-engine dependency/cycle**; and a
+   **breaking redefinition of `\pm`** from `PlusMinus` (branch tuple) to
+   `Measurement`, migrating the solution-branch use (`calculus.ts`, `solve.ts`)
+   to an explicit List/Or form. Its *display* half is nearly free — rendering
+   `x ± e` rounds the value to the error's least-significant place, reusing item
+   7's `roundToDecimalPlace` primitive verbatim. Phased plan (head+arithmetic →
+   elementary fns → `\pm`/PlusMinus migration → display → units) in the design
+   doc. Deferred (demand-gated L): dual-number correlation, relative-error
+   notation (`±5%`), distribution/`RandomVariate` links.
 6. **MathML output + speakable text (M).** Communication and accessibility:
    MathML serialization for export/interchange (web, Word, EPUB) and a
    speakable-text serializer for screen readers. AsciiMath output already
