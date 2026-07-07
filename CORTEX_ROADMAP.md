@@ -62,7 +62,7 @@ Dependency order: **0 ∥ 1 → 2 → (3 ∥ 4) → 5**. Full plans in
 | --- | --- | --- | --- |
 | 0 — Hygiene | Mechanical fixes to current code + docs (`#date` bug, List/Set swap, `Element` naming, console output, docs errors) | [plan](./roadmap/cortex/phase-0-hygiene.md) | ✅ done (2026-07-07) |
 | 1 — Parser foundation | New lexer/parser, diagnostics + recovery, port lexical layer (49 green tests = DoD), delete `point-free-parser` | [plan](./roadmap/cortex/phase-1-parser-foundation.md) | ✅ done (2026-07-07) |
-| 2 — Expression layer | Shared operator table, Pratt + whitespace rule, calls, collections, dictionaries, type annotations, `$…$` islands; un-skip all suites | [plan](./roadmap/cortex/phase-2-expression-layer.md) | 🚧 Stages A+B+C-code done (2026-07-07); only the normative docs rewrite (`operators.md`/`syntax.md`/`types.md`) remains |
+| 2 — Expression layer | Shared operator table, Pratt + whitespace rule, calls, collections, dictionaries, type annotations, `$…$` islands; un-skip all suites | [plan](./roadmap/cortex/phase-2-expression-layer.md) | ✅ done (2026-07-07) |
 | 3 — Round-trip | Serializer completion, parse∘serialize property test, loose-syntax compat check | [plan](./roadmap/cortex/phase-3-round-trip.md) | not started |
 | 4 — Semantics & execution | `executeCortex`, declarations/scoping, function definitions, control flow, pragma security, Tycho integration | [plan](./roadmap/cortex/phase-4-semantics.md) | not started |
 | 5 — Ship | Build target, `./cortex` export, docs sync, highlight mode, CHANGELOG (experimental) | [plan](./roadmap/cortex/phase-5-ship.md) | not started |
@@ -139,6 +139,31 @@ and the docs.
 
 ## Completed log
 
+- 2026-07-07 — **Phase 2 (Expression layer)**: every skipped parse suite is
+  now enabled and green (0 `describe.skip`/`test.skip` in `test/cortex`).
+  Landed in four stages. **A** — shared `src/cortex/operators.ts` consumed by
+  both parser and serializer (the two-table `Element`/`ElementOf` divergence is
+  structurally gone); Pratt precedence-climbing with the both-sides-or-neither
+  whitespace rule; prefix unary + negative-literal folding; reserved-word
+  rejection; n-ary chained relationals; `**`/`~>` aliases. **B** — postfix
+  calls (`f(x)`→`["f","x"]`, compound callee→`Apply`) and 1-based indexing
+  (`xs[i]`→`["At",xs,i]`); invisible multiplication (number→symbol/`(`,
+  `2x`/`3x^3`/`2(2+1)`); `Tuple`/`List`/`Set`/`Dictionary` with the `{}`
+  disambiguation (dict = `KeyValuePair` entries, string keys); the full §2.5
+  sequencing rule (linebreak/`;` separators, no silent juxtaposition);
+  serializer `Tuple`/`At`/`Dictionary` cases for round-trip. **C-code** —
+  additive `parseTypePrefix()` in `common/type` (tolerant/allowTrailing,
+  end-offset, heuristics scoped; 8 existing `parseType` callers untouched);
+  Cortex type annotations parse-and-held as `["Declare","x",{str:T},expr?]`
+  (final shape deferred to Phase 4); `$…$` LaTeX islands via an injected
+  `parseLatex` (no static `latex-syntax` import; `2*$\frac12$`→`Multiply(2,
+  Divide(1,2))`). **C-docs** — `operators.md`/`syntax.md` rewritten from the
+  implemented grammar, new `types.md`, LaTeX-island section in `literals.md`
+  (examples verified against the test suite). Ratified decisions recorded in
+  the phase plan (pipe loose, chained relationals n-ary, `**` alias, 1-based
+  index, invisible-multiply in). Open item logged: language-review §2.13
+  (verbatim symbols vs `\sin`-style names). Not committed here (staged in
+  parts). Next: Phase 3 (round-trip) ∥ Phase 4 (semantics & execution).
 - 2026-07-07 — **Phase 1 (Parser foundation)**: hand-written `Lexer` +
   `Parser` in the `common/type` house style replaces `point-free-parser/`
   (all 9 files deleted). New files under `src/cortex/`: `tokens.ts`,

@@ -100,10 +100,159 @@ _extended-string_ →
 
 _string_ → _single-line-string_ | _multiline-string_ | _extended-string_
 
-_primary_ → _signed-number_ | _symbol_ | _string_
+_primary_ → _signed-number_ | _symbol_ | _string_ | _pragma_ | _latex-island_ |
+_parenthesized_ | _list_ | _set_ | _dictionary_ | _call_ | _index_
 
-_expression_ → _primary_
+_parenthesized_ → **`(`** _expression_ **`)`**
+
+_latex-island_ → **`$`** (_unicode-char_ | **`\$`**)\* **`$`**
+
+_expression_ → _primary_ | _prefix-expression_ | _infix-expression_
+
+_prefix-expression_ → (**`-`** | **`!`**) _expression_
+
+_infix-expression_ → _expression_ _operator_ _expression_
+
+_statement_ → _expression_ | _declaration_
+
+_statement-separator_ → **`;`** | _linebreak_
 
 _shebang_ → **`#!`** (unicode-char)\* (_linebreak | \_eof_)
 
-_cortex_ → (\[_shebang_\] (_expression_)\* _eof_)!
+_cortex_ → (\[_shebang_\] (_statement_)#_statement-separator_ \[_eof_\])
+
+The Pratt (precedence-climbing) grammar for `_infix-expression_` and
+`_prefix-expression_` — the operator set, its precedence, and its
+associativity — is documented as a table in
+[Operators](/cortex/operators/) rather than spelled out production by
+production; the whitespace rule described there (an infix operator has
+whitespace on both sides or neither; a prefix operator has none) is part of
+this grammar, not a separate lexical concern.
+
+## Statements and sequencing
+
+A program is a sequence of statements separated by a linebreak or a `;`. Two
+expressions on the same line with no separator between them is **not** a
+silent sequence — it is a diagnostic:
+
+```cortex
+1 2
+```
+
+```
+Error: unexpected-symbol "2"
+```
+
+A well-formed multi-statement program wraps its statements in `["Do", …]`; a
+program consisting of a single statement is returned unwrapped (no `Do`
+wrapper):
+
+```cortex
+a
+2
+```
+
+```json
+["Do", "a", 2]
+```
+
+`;` is interchangeable with a linebreak as a separator:
+
+```cortex
+a; 2
+```
+
+```json
+["Do", "a", 2]
+```
+
+## Primary expressions
+
+A primary is the leaf of the expression grammar — the thing an operator or a
+call/index applies to. The primary forms are:
+
+- a number: `2`, `3.14`, `0x1F`, `0b101`
+- a symbol: `x`, `Add`
+- a verbatim symbol: `` `a+b` ``
+- a string: `"hello"`
+- a pragma: `#env("HOME")`
+- a parenthesized expression: `(2 + 3)`
+- a list: `[1, 2, 3]`
+- a set: `{1, 2, 3}`
+- a dictionary: `{one -> 1, two -> 2}`
+- a `$…$` LaTeX island: `$\frac{1}{2}$` — see
+  [LaTeX Islands](/cortex/literals/#latex-islands)
+- a function call: `f(x, y)`
+- an index expression: `xs[i]`
+
+## Calls and indexing
+
+A call is a symbol (or another primary) immediately followed — with **no**
+whitespace — by a parenthesized, comma-separated argument list:
+
+```cortex
+f(x, y)     // ["f", "x", "y"]
+f()         // ["f"]
+```
+
+If the callee is not a bare symbol (for example, a parenthesized expression
+or the result of another call), the call compiles to `Apply`:
+
+```cortex
+(getF())(x)   // ["Apply", ["getF"], "x"]
+(a + b)(2+1)  // ["Apply", ["Add", "a", "b"], ["Add", 2, 1]]
+```
+
+Indexing is a primary immediately followed — with no whitespace — by a
+bracketed index expression, and compiles to `At`. Indexing is **1-based**,
+matching the engine convention (`xs[1]` is the first element):
+
+```cortex
+xs[i]       // ["At", "xs", "i"]
+f(x)[0]     // ["At", ["f", "x"], 0]
+```
+
+In both cases the `(` or `[` must directly abut the callee/indexed
+expression: whitespace before it means the parenthesized/bracketed form is a
+separate primary (a parenthesized expression or a list literal), not a
+call/index — the same whitespace-sensitivity that governs operators.
+
+## Collections, tuples, and dictionaries
+
+- **List**: `[a, b]` → `["List", "a", "b"]`; `[]` → `["List"]`.
+- **Set**: `{a, b}` → `["Set", "a", "b"]`; `{}` → `["Set"]`.
+- **Tuple**: `(a, b)` → `["Tuple", "a", "b"]`; a single parenthesized element,
+  `(a)`, is just the parenthesized expression `a`, not a one-element tuple;
+  `()` is a diagnostic (`expression-expected`) — there is no empty tuple.
+- **Dictionary**: `{k -> v}` → `["Dictionary", ["KeyValuePair", {str: "k"}, "v"]]`;
+  an unquoted key becomes a string key. The empty dictionary is spelled
+  `{->}` (not `{}`, which is the empty set) and compiles to
+  `["Dictionary"]`.
+
+`{ … }` is disambiguated by looking at the first element once it has been
+parsed: if it is followed by a top-level `->`, the whole `{ … }` is a
+dictionary and every subsequent element must also be a `key -> value` pair;
+otherwise `{ … }` is a set.
+
+```cortex
+{ one -> 1, two -> 2 }
+```
+
+```json
+["Dictionary",
+  ["KeyValuePair", {"str": "one"}, 1],
+  ["KeyValuePair", {"str": "two"}, 2]]
+```
+
+Trailing commas are allowed in every collection form (lists, sets, tuples,
+dictionaries, and call/index argument lists) — friendly to notebook editing
+and diffs:
+
+```cortex
+[1, 2, 3,]    // same as [1, 2, 3]
+```
+
+A bare, top-level comma-separated sequence with no enclosing delimiter (for
+example `1, 2, 3` on its own) is **not** a `Sequence` literal in v0 — it is a
+diagnostic. `Sequence` is available only as an explicit call: `Sequence(1, 2,
+3)` → `["Sequence", 1, 2, 3]`.

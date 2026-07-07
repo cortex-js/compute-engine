@@ -285,3 +285,44 @@ A string literal which contains no escape sequences is delimited by one or more
 These string as useful for string containing characters such as quotation mark
 or backslash that would otherwise need to be escaped, leading to the
 [Leaning Tootpick Syndrome](https://en.wikipedia.org/wiki/Leaning_toothpick_syndrome).
+
+## LaTeX Islands
+
+A `$…$` island is a primary expression whose contents are LaTeX rather than
+Cortex. The text between the delimiters is handed to an **injected** LaTeX
+parser, and the MathJSON it returns is spliced into the Cortex AST at that
+point, composing with the surrounding expression like any other primary:
+
+```cortex
+2 * $\frac{1}{2}$
+```
+
+```json
+["Multiply", 2, ["Divide", 1, 2]]
+```
+
+### Delimiters
+
+- Islands do not nest: the first unescaped `$` after the opening `$` closes
+  the island.
+- `\$` inside an island is an escaped literal `$` character, not a
+  delimiter.
+- An unterminated island (no closing `$` before the end of input) is a
+  parse error.
+
+### Dialect
+
+The LaTeX dialect accepted inside an island is whatever the injected parser
+accepts — Cortex does not define or restrict it. In practice this is the
+Compute Engine's LaTeX parser (`ce.parse()`), but Cortex's own parser has no
+static dependency on it: the parser is passed in by the caller, the same way
+the engine itself injects `LatexSyntax` rather than importing it directly.
+Without an injected parser, a `$…$` island produces a
+`latex-parsing-unavailable` diagnostic instead of a spliced expression.
+
+### Why `$` is prohibited as a symbol's first character
+
+`$` cannot start a Cortex symbol name (see
+[Prohibited Symbol Characters](#prohibited-symbol-characters) above). This is
+what keeps the lexer unambiguous: seeing a `$` at the start of a primary
+always means "LaTeX island begins here," never "symbol reference."
