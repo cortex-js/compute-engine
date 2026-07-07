@@ -5,8 +5,13 @@ import type {
 } from '../global-types';
 import type { BigDecimal } from '../../big-decimal';
 
+import { machineValue } from '../../math-json/utils';
 import { isRational } from '../numerics/rationals';
-import { roundToSignificant, roundToDecimalPlace } from '../numerics/strings';
+import {
+  roundToSignificant,
+  roundToDecimalPlace,
+  roundMeasurementForDisplay,
+} from '../numerics/strings';
 import { isFunction, isSymbol, isString, isNumber } from './type-guards';
 
 /** Helper type for expressions known to be function expressions (in operator/function callbacks) */
@@ -321,17 +326,19 @@ const FUNCTIONS: Record<
   Max: 'max',
   Min: 'min',
 
-  PlusMinus: (expr_, serialize) => {
+  Measurement: (expr_, serialize) => {
     const [lhs, rhs] = (expr_ as FnExpr).ops;
     if (!rhs) return serialize(lhs);
-    if (lhs && rhs) {
-      const lhs_ = serialize(lhs);
-      const rhs_ = serialize(rhs);
-      return `${lhs_} ± ${rhs_}`;
+    // Physics significant-figures display when both operands are plain numbers;
+    // exact/symbolic operands fall through to lossless serialization (mirrors
+    // the LaTeX `Measurement` serializer).
+    const v = machineValue(lhs.json);
+    const e = machineValue(rhs.json);
+    if (v !== null && e !== null && Number.isFinite(v) && Number.isFinite(e) && e > 0) {
+      const { value, error } = roundMeasurementForDisplay(v, e);
+      return `${value} ± ${error}`;
     }
-    if (lhs) return `± ${serialize(lhs)}`;
-    if (rhs) return `± ${serialize(rhs)}`;
-    return '0';
+    return `${serialize(lhs)} ± ${serialize(rhs)}`;
   },
 
   Sum: (expr: Expression, serialize) => bigOp(expr, 'sum', serialize),

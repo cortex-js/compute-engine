@@ -204,7 +204,7 @@ export class Serializer {
       h !== 'Add' &&
       h !== 'Negate' &&
       h !== 'Subtract' &&
-      h !== 'PlusMinus' &&
+      h !== 'Measurement' &&
       h !== 'Multiply'
     )
       return exprStr;

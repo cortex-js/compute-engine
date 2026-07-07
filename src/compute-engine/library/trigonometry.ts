@@ -24,6 +24,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards';
 import { numericTypeHandler, elementaryFunctionType } from './type-handlers';
+import { isMeasurement, measurementTrig } from './measurement-arithmetic';
 import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite';
 import { getUnitScale } from './unit-data';
 import {
@@ -633,6 +634,13 @@ function trigFunction(
       return ce._fn(operator, ops);
     },
     evaluate: ([x], { numericApproximation, engine }) => {
+      // Measurement error propagation (Sin/Cos/Tan only; other operators fall
+      // through). Guard on the evaluated argument being a Measurement.
+      const evalX = x.evaluate();
+      if (isMeasurement(evalX)) {
+        const r = measurementTrig(engine, operator, evalX);
+        if (r !== undefined) return numericApproximation ? r.N() : r;
+      }
       if (numericApproximation) return evalTrig(operator, x);
       // Literal poles of the inverse hyperbolic functions are exact non-finite
       // values, so fold them in `evaluate()` too (not just `.N()`).

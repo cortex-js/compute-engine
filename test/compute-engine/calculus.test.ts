@@ -5,7 +5,7 @@ function evaluate(expr: string): string {
 }
 function N(expr: string): number {
   const result = engine.parse(expr).N();
-  if (result.operator === 'PlusMinus') return result.op1.re;
+  if (result.operator === 'Measurement') return result.op1.re;
   return result.re;
 }
 

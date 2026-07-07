@@ -2518,10 +2518,14 @@ export const HARMONIZATION_RULES: Rule[] = [
     replace: 1,
     condition: ({ _a }) => _a.has('_x'),
   },
-  // sin^2(a) - cos^2(a) -> sin(x) +/- √(2)/2
+  // sin^2(a) - cos^2(a) -> sin(x) +/- √(2)/2 (the two branch values)
   {
     match: ['Subtract', ['Square', ['Sin', '_a']], ['Square', ['Cos', '_a']]],
-    replace: ['PlusMinus', ['Sin', '_a'], ['Divide', ['Sqrt', 2], 2]],
+    replace: [
+      'List',
+      ['Subtract', ['Sin', '_a'], ['Divide', ['Sqrt', 2], 2]],
+      ['Add', ['Sin', '_a'], ['Divide', ['Sqrt', 2], 2]],
+    ],
     condition: ({ _a }) => _a.has('_x'),
   },
 ];

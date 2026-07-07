@@ -374,7 +374,7 @@ volumes
                 );
             if (osc)
               return ce.expr([
-                'PlusMinus',
+                'Measurement',
                 ce.number(osc.estimate),
                 ce.number(osc.error),
               ]);
@@ -399,7 +399,7 @@ volumes
           // uncertainty on singular integrands should be treated as a lower
           // bound, not a guarantee.
           return ce.expr([
-            'PlusMinus',
+            'Measurement',
             ce.number(mce.estimate),
             ce.number(mce.error),
           ]);

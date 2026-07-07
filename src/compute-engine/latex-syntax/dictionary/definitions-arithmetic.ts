@@ -30,6 +30,7 @@ import {
 import { latexTemplate } from '../serializer-style';
 import { joinLatex, supsub } from '../tokenizer';
 import { normalizeAngle, formatDMS } from '../serialize-dms';
+import { roundMeasurementForDisplay } from '../../numerics/strings';
 
 /**
  * If expression is a product, collect all the terms with a
@@ -105,6 +106,37 @@ function negateNumberLiteral(
   if (num.startsWith('-')) return { num: num.slice(1) };
   if (num.startsWith('+')) return { num: '-' + num.slice(1) };
   return { num: '-' + num };
+}
+
+/**
+ * Serialize `Measurement(value, error)` → `value \pm error`.
+ *
+ * When both operands are plain (machine) numbers, the physics significant-
+ * figures convention is applied: round the error to 1 significant figure, then
+ * round the nominal to the error's decimal place. Exact/symbolic operands (e.g.
+ * a radical error from `evaluate()`) are serialized losslessly.
+ */
+function serializeMeasurement(
+  serializer: Serializer,
+  expr: MathJsonExpression | null
+): string {
+  if (!expr) return '\\pm';
+  const op1 = operand(expr, 1);
+  const op2 = operand(expr, 2);
+  if (op1 === null) return '\\pm';
+  if (op2 === null) return serializer.serialize(op1);
+
+  const v = machineValue(op1);
+  const e = machineValue(op2);
+  if (v !== null && e !== null && Number.isFinite(v) && Number.isFinite(e) && e > 0) {
+    const { value, error } = roundMeasurementForDisplay(v, e);
+    return joinLatex([value, '\\pm', error]);
+  }
+  return joinLatex([
+    serializer.serialize(op1),
+    '\\pm',
+    serializer.serialize(op2),
+  ]);
 }
 
 function serializeRoot(
@@ -1932,23 +1964,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     },
   },
   {
-    name: 'PlusMinus',
+    // `a \pm b` is a measurement: a nominal value carrying a 1σ absolute error.
+    // (The former branch-tuple `PlusMinus` role migrated to an explicit `List`
+    // of the two branch values on the engine-output side.)
+    name: 'Measurement',
     latexTrigger: ['\\pm'],
     kind: 'infix',
     associativity: 'any',
     precedence: ARROW_PRECEDENCE,
-    serialize: (serializer, expr) => {
-      const op1 = operand(expr, 1);
-      if (op1 === null) return '\\pm';
-      if (nops(expr) === 1)
-        return joinLatex(['\\pm', serializer.serialize(op1)]);
-      const op2 = operand(expr, 2);
-      return joinLatex([
-        serializer.serialize(op1),
-        '\\pm',
-        serializer.serialize(op2),
-      ]);
-    },
+    serialize: serializeMeasurement,
   },
   {
     latexTrigger: ['\\pm'],
@@ -1956,7 +1980,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
-      return ['PlusMinus', 0, missingIfEmpty(rhs)] as MathJsonExpression;
+      return ['Measurement', 0, missingIfEmpty(rhs)] as MathJsonExpression;
     },
   },
   {
@@ -1966,7 +1990,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: ARROW_PRECEDENCE,
     parse: (parser, lhs, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
-      return ['PlusMinus', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
+      return ['Measurement', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
     },
   },
   {
@@ -1975,7 +1999,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
-      return ['PlusMinus', missingIfEmpty(rhs)] as MathJsonExpression;
+      return ['Measurement', 0, missingIfEmpty(rhs)] as MathJsonExpression;
     },
   },
   {

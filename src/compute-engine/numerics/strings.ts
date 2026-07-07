@@ -40,6 +40,45 @@ export function roundToDecimalPlace(
   return value.toFixed(k);
 }
 
+/**
+ * Error-aware display rounding for a Measurement `value ± error`, following the
+ * physics significant-figures convention: round the 1σ error to a single
+ * significant figure, then round the nominal value to that error's least-
+ * significant decimal place. Returns the two formatted decimal strings.
+ *
+ * Only ever called with `error > 0` (a zero error canonicalizes the Measurement
+ * back to the bare value, so `Measurement(v, e)` always has `e > 0`).
+ *
+ * Examples: `(5.134, 0.021)` → `{ value: '5.13', error: '0.02' }`;
+ * `(1234.5, 12)` → `{ value: '1230', error: '10' }`.
+ */
+export function roundMeasurementForDisplay(
+  value: number,
+  error: number
+): { value: string; error: string } {
+  // Round the error to 1 significant figure.
+  const er = roundToSignificant(error, 1);
+  // Decimal exponent of the rounded (single-significant-figure) error. Read it
+  // from the exponential form to avoid log10 rounding artifacts at powers of
+  // ten (e.g. `Math.log10(0.1)` is not exactly −1).
+  const exp = parseInt(er.toExponential().split('e')[1], 10);
+  // Number of digits after the decimal point implied by the error.
+  const k = -exp;
+  if (k > 0) {
+    return {
+      value: roundToDecimalPlace(value, k),
+      error: roundToDecimalPlace(er, k),
+    };
+  }
+  // k <= 0: the error is ≥ 1; round the nominal to the 10^(-k) place (tens,
+  // hundreds, …) rather than using `toFixed` with a negative argument.
+  const place = Math.pow(10, -k);
+  return {
+    value: String(Math.round(value / place) * place),
+    error: String(er),
+  };
+}
+
 function fromRoman(roman: string): [result: number, rest: string] {
   if (roman === 'N') return [0, ''];
 

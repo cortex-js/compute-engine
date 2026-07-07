@@ -116,6 +116,10 @@ import {
   measurementDivide,
   measurementNegate,
   measurementPower,
+  measurementSqrt,
+  measurementRoot,
+  measurementLn,
+  measurementLog,
 } from './measurement-arithmetic';
 import { range, rangeLast } from './collections';
 import { run, runAsync, CancellationError } from '../../common/interruptible';
@@ -1028,6 +1032,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // @fastpath: this doesn't get called. See makeNumericFunction()
       evaluate: ([z], { numericApproximation, engine }) => {
         // Ln(a, b) = Log(a, b), so no need to check second argument
+        const evalZ = z.evaluate();
+        if (isMeasurement(evalZ)) {
+          const r = measurementLn(engine, evalZ);
+          return numericApproximation ? r?.N() : r;
+        }
         if (!numericApproximation) return z.ln();
 
         return apply(
@@ -1071,6 +1080,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //   return x.ln(base ?? 10);
       // },
       evaluate: (ops, { numericApproximation, engine }) => {
+        const evalArg = ops[0]?.evaluate();
+        if (evalArg && isMeasurement(evalArg)) {
+          const base = ops[1]?.evaluate() ?? engine.number(10);
+          const r = measurementLog(engine, evalArg, base);
+          return numericApproximation ? r?.N() : r;
+        }
         if (!numericApproximation) return ops[0]?.ln(ops[1] ?? 10) ?? undefined;
         const ce = engine;
         if (ops[1] === undefined)
@@ -1729,6 +1744,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (nVal !== undefined && nVal !== 0)
             return quantityPower(engine, evalX, engine.number(1 / nVal));
         }
+        if (isMeasurement(evalX)) {
+          const r = measurementRoot(engine, evalX, n.evaluate());
+          return numericApproximation ? r?.N() : r;
+        }
         // D2: an inexact (float) radicand or index numericizes even under
         // plain evaluate() — `Root(5.1, 3)` → 1.721…; `isExactNumber`
         // protects an exact Gaussian-integer radicand (see `Power`).
@@ -1884,6 +1903,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const evalX = x.evaluate();
         if (evalX.operator === 'Quantity')
           return quantityPower(engine, evalX, engine.number(0.5));
+
+        if (isMeasurement(evalX)) {
+          const r = measurementSqrt(engine, evalX);
+          return numericApproximation ? r?.N() : r;
+        }
 
         if (!numericApproximation) return x.sqrt();
 

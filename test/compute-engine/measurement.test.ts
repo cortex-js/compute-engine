@@ -133,8 +133,150 @@ describe('Measurement — independent semantics', () => {
   });
 });
 
+describe('Measurement — elementary function propagation (.N())', () => {
+  test('Sqrt: √M(4,0.2) -> 2 ± 0.05', () => {
+    const r = ce.function('Sqrt', [M(4, 0.2)]).N();
+    expect(nominal(r)).toBeCloseTo(2, 12);
+    expect(error(r)).toBeCloseTo(0.05, 10);
+  });
+
+  test('Root: M(8,0.1)^{1/3} -> 2 ± 0.008333', () => {
+    const r = ce.function('Root', [M(8, 0.1), 3]).N();
+    expect(nominal(r)).toBeCloseTo(2, 12);
+    expect(error(r)).toBeCloseTo(0.0083333333, 8);
+  });
+
+  test('Exp: e^M(1,0.1) -> 2.71828 ± 0.27183 (routes through Power)', () => {
+    const r = ce.function('Exp', [M(1, 0.1)]).N();
+    expect(nominal(r)).toBeCloseTo(2.7182818285, 8);
+    expect(error(r)).toBeCloseTo(0.2718281828, 8);
+  });
+
+  test('Ln: ln M(2,0.1) -> 0.69315 ± 0.05', () => {
+    const r = ce.function('Ln', [M(2, 0.1)]).N();
+    expect(nominal(r)).toBeCloseTo(0.6931471806, 8);
+    expect(error(r)).toBeCloseTo(0.05, 10);
+  });
+
+  test('Log base 10: log M(100,0.1) -> 2 ± 0.000434', () => {
+    const r = ce.function('Log', [M(100, 0.1), 10]).N();
+    expect(nominal(r)).toBeCloseTo(2, 12);
+    expect(error(r)).toBeCloseTo(0.1 / (100 * Math.log(10)), 10);
+  });
+
+  test('Sin: sin M(1,0.1) -> 0.84147 ± 0.05403', () => {
+    const r = ce.function('Sin', [M(1, 0.1)]).N();
+    expect(nominal(r)).toBeCloseTo(0.8414709848, 8);
+    expect(error(r)).toBeCloseTo(0.0540302306, 8);
+  });
+
+  test('Cos: cos M(1,0.1) -> 0.54030 ± 0.08415', () => {
+    const r = ce.function('Cos', [M(1, 0.1)]).N();
+    expect(nominal(r)).toBeCloseTo(0.5403023059, 8);
+    expect(error(r)).toBeCloseTo(0.0841470985, 8);
+  });
+
+  test('Tan: tan M(0,0.1) -> 0 ± 0.1', () => {
+    const r = ce.function('Tan', [M(0, 0.1)]).N();
+    expect(nominal(r)).toBeCloseTo(0, 12);
+    expect(error(r)).toBeCloseTo(0.1, 10);
+  });
+
+  // First-order (linear) propagation gives ZERO error at a stationary point:
+  // cos'(0) = -sin(0) = 0, so the error collapses to 0 and the Measurement
+  // canonicalizes back to the bare value 1.
+  test('Cos at extremum: cos M(0,0.1) -> 1 (bare, zero slope)', () => {
+    const r = ce.function('Cos', [M(0, 0.1)]).N();
+    expect(r.operator).not.toBe('Measurement');
+    expect(r.re).toBeCloseTo(1, 12);
+  });
+});
+
+describe('Measurement — elementary functions honor evaluate-vs-N contract', () => {
+  test('Sqrt of exact input keeps an EXACT error under evaluate(), float under N()', () => {
+    // 1/5 is an exact rational; the propagated error √-free here is 1/20,
+    // which stays exact under evaluate() and only floats under .N().
+    const m = ce
+      .function('Sqrt', [ce.function('Measurement', [4, ce.number([1, 5])])])
+      .evaluate();
+    expect(m.operator).toBe('Measurement');
+    expect(m.op1.isSame(2)).toBe(true);
+    expect(m.op2.isSame(ce.number([1, 20]))).toBe(true);
+    expect(m.op2.isExact).toBe(true);
+    expect(m.op2.N().re).toBeCloseTo(0.05, 12);
+  });
+});
+
+describe('Measurement — angular-unit-aware trig propagation', () => {
+  // The trig derivative is taken in the engine's angular convention: in degree
+  // mode it carries the π/180 chain factor.
+  test('degree mode: sin(30° ± 1°) error uses (π/180)·cos(30°)', () => {
+    const scoped = new ComputeEngine();
+    scoped.angularUnit = 'deg';
+    const r = scoped
+      .function('Sin', [scoped.function('Measurement', [30, 1])])
+      .N();
+    expect(r.op1.re).toBeCloseTo(0.5, 10);
+    expect(r.op2.re).toBeCloseTo((Math.PI / 180) * Math.cos(Math.PI / 6), 10);
+  });
+});
+
 describe('Measurement — type', () => {
   test('Measurement of real inputs is real', () => {
     expect(M(5, 0.2).type.matches('real')).toBe(true);
+  });
+});
+
+describe('Measurement — \\pm parses to Measurement', () => {
+  test('infix a \\pm b -> Measurement(a, b)', () => {
+    expect(ce.parse('5.1 \\pm 0.2').json).toEqual(['Measurement', 5.1, 0.2]);
+  });
+
+  test('prefix \\pm b -> Measurement(0, b)', () => {
+    expect(ce.parse('\\pm 0.2').json).toEqual(['Measurement', 0, 0.2]);
+  });
+
+  test('\\plusmn is an alias for \\pm', () => {
+    expect(ce.parse('5.1 \\plusmn 0.2').json).toEqual([
+      'Measurement',
+      5.1,
+      0.2,
+    ]);
+  });
+
+  test('round-trip: parse then serialize back to LaTeX', () => {
+    expect(ce.parse('5.1 \\pm 0.2').toLatex()).toBe('5.1\\pm0.2');
+  });
+});
+
+describe('Measurement — error-aware display rounding', () => {
+  test('LaTeX display convention', () => {
+    expect(M(5.134, 0.021).toLatex()).toBe('5.13\\pm0.02');
+    expect(M(5.1, 0.234).toLatex()).toBe('5.1\\pm0.2');
+    expect(M(1234.5, 12).toLatex()).toBe('1230\\pm10');
+  });
+
+  test('AsciiMath display convention', () => {
+    expect(M(5.134, 0.021).toString()).toBe('5.13 ± 0.02');
+    expect(M(5.1, 0.234).toString()).toBe('5.1 ± 0.2');
+    expect(M(1234.5, 12).toString()).toBe('1230 ± 10');
+  });
+
+  test('.json / toMathJson stays lossless (full precision)', () => {
+    expect(M(5.134, 0.021).toMathJson()).toEqual(['Measurement', 5.134, 0.021]);
+  });
+});
+
+describe('Measurement — PlusMinus branch migration', () => {
+  test('quadratic solve returns an explicit List of the two roots', () => {
+    const sol = ce
+      .box(['Solve', ['Equal', ['Add', ['Square', 'x'], -1], 0], 'x'])
+      .evaluate();
+    // Two explicit branch values (a List), not a \pm form.
+    expect(sol.operator).toBe('List');
+    expect(sol.ops!.length).toBe(2);
+    const roots = sol.ops!.map((r) => r.re).sort((a, b) => a! - b!);
+    expect(roots[0]).toBeCloseTo(-1, 12);
+    expect(roots[1]).toBeCloseTo(1, 12);
   });
 });
