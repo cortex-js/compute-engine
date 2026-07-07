@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { toAsciiMath } from '../../src/compute-engine/boxed-expression/ascii-math';
 
 // A fresh engine so the `ce.assign('x', …)` cases don't leak into the shared
 // test engine.
@@ -245,21 +246,59 @@ describe('Measurement — \\pm parses to Measurement', () => {
   });
 
   test('round-trip: parse then serialize back to LaTeX', () => {
-    expect(ce.parse('5.1 \\pm 0.2').toLatex()).toBe('5.1\\pm0.2');
+    // Default display rounds the error to 2 significant figures and aligns the
+    // nominal to the same decimal place, so `5.1 ± 0.2` serializes as
+    // `5.10 ± 0.20` (both round-trip back to their values on re-parse).
+    expect(ce.parse('5.1 \\pm 0.2').toLatex()).toBe('5.10\\pm0.20');
   });
 });
 
 describe('Measurement — error-aware display rounding', () => {
-  test('LaTeX display convention', () => {
-    expect(M(5.134, 0.021).toLatex()).toBe('5.13\\pm0.02');
-    expect(M(5.1, 0.234).toLatex()).toBe('5.1\\pm0.2');
-    expect(M(1234.5, 12).toLatex()).toBe('1230\\pm10');
+  // Default (`digits: 'auto'`): round the error to 2 significant figures, then
+  // round the nominal to the error's least-significant displayed decimal place
+  // (value and uncertainty share a decimal place; trailing zeros are kept).
+  test('LaTeX display convention (auto = 2 sig figs on error)', () => {
+    expect(M(8, 0.2236).toLatex()).toBe('8.00\\pm0.22');
+    expect(M(5.134, 0.021).toLatex()).toBe('5.134\\pm0.021');
+    expect(M(5.1, 0.234).toLatex()).toBe('5.10\\pm0.23');
+    expect(M(1234.5, 12).toLatex()).toBe('1235\\pm12');
+    expect(M(9.81, 0.037).toLatex()).toBe('9.810\\pm0.037');
   });
 
-  test('AsciiMath display convention', () => {
-    expect(M(5.134, 0.021).toString()).toBe('5.13 ± 0.02');
-    expect(M(5.1, 0.234).toString()).toBe('5.1 ± 0.2');
-    expect(M(1234.5, 12).toString()).toBe('1230 ± 10');
+  test('AsciiMath display convention (auto = 2 sig figs on error)', () => {
+    expect(M(8, 0.2236).toString()).toBe('8.00 ± 0.22');
+    expect(M(5.134, 0.021).toString()).toBe('5.134 ± 0.021');
+    expect(M(5.1, 0.234).toString()).toBe('5.10 ± 0.23');
+    expect(M(1234.5, 12).toString()).toBe('1235 ± 12');
+  });
+
+  test('digits: { significant: 1 } rounds the error to 1 sig fig', () => {
+    // Error 0.021 → 0.02 (1 sig fig, hundredths) → nominal aligned to hundredths.
+    expect(M(5.134, 0.021).toLatex({ digits: { significant: 1 } })).toBe(
+      '5.13\\pm0.02'
+    );
+  });
+
+  test('digits: { significant: 3 } rounds the error to 3 sig figs', () => {
+    expect(
+      M(5.13456, 0.021789).toLatex({ digits: { significant: 3 } })
+    ).toBe('5.1346\\pm0.0218');
+  });
+
+  test('digits: { fractional: 2 } rounds both to 2 decimal places', () => {
+    expect(M(5.134, 0.021).toLatex({ digits: { fractional: 2 } })).toBe(
+      '5.13\\pm0.02'
+    );
+  });
+
+  test("digits: 'max' shows full precision", () => {
+    expect(M(5.134, 0.021).toLatex({ digits: 'max' })).toBe('5.134\\pm0.021');
+  });
+
+  test('AsciiMath honors digits: { significant: 1 }', () => {
+    expect(toAsciiMath(M(5.134, 0.021) as any, { digits: { significant: 1 } })).toBe(
+      '5.13 ± 0.02'
+    );
   });
 
   test('.json / toMathJson stays lossless (full precision)', () => {
@@ -278,5 +317,128 @@ describe('Measurement — PlusMinus branch migration', () => {
     const roots = sol.ops!.map((r) => r.re).sort((a, b) => a! - b!);
     expect(roots[0]).toBeCloseTo(-1, 12);
     expect(roots[1]).toBeCloseTo(1, 12);
+  });
+});
+
+describe('Measurement — units interaction (Phase 5)', () => {
+  // A quantity Quantity(Measurement(v, e), unit).
+  const QM = (v: number, e: number, unit: string) =>
+    ce.box(['Quantity', ['Measurement', v, e], unit]);
+
+  /** The (nominal, error, unit) of an evaluated measurement-quantity. */
+  function qm(expr: ReturnType<typeof QM>) {
+    expect(expr.operator).toBe('Quantity');
+    const mag = expr.op1!;
+    const unit = expr.op2!.symbol ?? expr.op2!.toString();
+    return { nominal: nominal(mag), error: error(mag), unit };
+  }
+
+  test('add: (5±0.2)cm + (3±0.1)cm -> (8 ± 0.2236) cm', () => {
+    const r = ce.function('Add', [QM(5, 0.2, 'cm'), QM(3, 0.1, 'cm')]).N();
+    const { nominal: n, error: e, unit } = qm(r);
+    expect(n).toBeCloseTo(8, 12);
+    expect(e).toBeCloseTo(Math.hypot(0.2, 0.1), 8); // 0.2236…
+    expect(unit).toBe('cm');
+  });
+
+  test('multiply: (5±0.2)cm · (3±0.1)cm -> (15 ± 0.7810) cm²', () => {
+    const r = ce.function('Multiply', [QM(5, 0.2, 'cm'), QM(3, 0.1, 'cm')]).N();
+    expect(r.operator).toBe('Quantity');
+    expect(nominal(r.op1!)).toBeCloseTo(15, 12);
+    // σ = √((3·0.2)² + (5·0.1)²) = √(0.36 + 0.25) = √0.61
+    expect(error(r.op1!)).toBeCloseTo(Math.sqrt(0.61), 8); // 0.7810…
+    // Unit is cm·cm (length²)
+    expect(ce.box(['UnitDimension', r.op2!]).evaluate().toString()).toBe(
+      ce.box(['UnitDimension', ['Multiply', 'cm', 'cm']]).evaluate().toString()
+    );
+  });
+
+  test('UnitConvert: (5.1±0.2)cm -> m gives (0.051 ± 0.002) m', () => {
+    const r = ce.box(['UnitConvert', ['Quantity', ['Measurement', 5.1, 0.2], 'cm'], 'm']).N();
+    const { nominal: n, error: e, unit } = qm(r);
+    expect(n).toBeCloseTo(0.051, 12);
+    expect(e).toBeCloseTo(0.002, 12);
+    expect(unit).toBe('m');
+  });
+
+  test('mixed units add: (5±0.2)cm + (3±0.1)m converts the error', () => {
+    // Result in metres: 0.05 m + 3 m = 3.05 m; the cm error 0.2 → 0.002 m,
+    // then quadrature with 0.1 m: √(0.1² + 0.002²) ≈ 0.100020.
+    const r = ce.function('Add', [QM(5, 0.2, 'cm'), QM(3, 0.1, 'm')]).N();
+    const { nominal: n, error: e, unit } = qm(r);
+    expect(n).toBeCloseTo(3.05, 12);
+    expect(e).toBeCloseTo(Math.hypot(0.1, 0.002), 8);
+    expect(unit).toBe('m');
+  });
+
+  test('subtract: (5±0.2)cm - (3±0.1)cm -> (2 ± 0.2236) cm', () => {
+    const r = ce.function('Subtract', [QM(5, 0.2, 'cm'), QM(3, 0.1, 'cm')]).N();
+    const { nominal: n, error: e, unit } = qm(r);
+    expect(n).toBeCloseTo(2, 12);
+    expect(e).toBeCloseTo(Math.hypot(0.2, 0.1), 8);
+    expect(unit).toBe('cm');
+  });
+
+  test('evaluate() keeps a symbolic (exact) error, .N() floats it', () => {
+    const sum = ce.function('Add', [QM(5, 0.2, 'cm'), QM(3, 0.1, 'cm')]);
+    const ev = sum.evaluate();
+    expect(ev.operator).toBe('Quantity');
+    expect(ev.op1!.operator).toBe('Measurement');
+    // The error is a symbolic Sqrt under evaluate(), a float under N().
+    expect(ev.op1!.op2!.operator).toBe('Sqrt');
+    expect(error(sum.N().op1!)).toBeCloseTo(Math.hypot(0.2, 0.1), 8);
+  });
+
+  test('parse: (5.1 ± 0.2) cm -> Quantity(Measurement(5.1, 0.2), cm)', () => {
+    const p = ce.parse('(5.1 \\pm 0.2)\\,\\mathrm{cm}');
+    expect(p.json).toEqual(['Quantity', ['Measurement', 5.1, 0.2], 'cm']);
+  });
+
+  test('display: Quantity(Measurement(5.1, 0.2), cm) round-trips', () => {
+    const q = ce.box(['Quantity', ['Measurement', 5.1, 0.2], 'cm']);
+    // Default display rounds the error to 2 significant figures and aligns the
+    // nominal to the same decimal place (`5.1 ± 0.2` → `5.10 ± 0.20`).
+    expect(q.toLatex()).toBe('\\left(5.10\\pm0.20\\right)\\,\\mathrm{cm}');
+    expect(q.toString()).toBe('(5.10 ± 0.20) cm');
+    // Round-trip through the serialized LaTeX.
+    expect(ce.parse(q.toLatex()).json).toEqual([
+      'Quantity',
+      ['Measurement', 5.1, 0.2],
+      'cm',
+    ]);
+  });
+
+  test('units display honors digits: { significant: 2 } on the error', () => {
+    // (5±0.2)cm + (3±0.1)cm -> (8 ± √0.05) cm; √0.05 ≈ 0.2236, which shows as
+    // 0.22 at 2 significant figures.
+    const r = ce.function('Add', [QM(5, 0.2, 'cm'), QM(3, 0.1, 'cm')]).N();
+    expect(r.toLatex({ digits: { significant: 2 } })).toBe(
+      '\\left(8.00\\pm0.22\\right)\\,\\mathrm{cm}'
+    );
+  });
+
+  test('bare (unparenthesised) notation mis-nests — documented limitation', () => {
+    // `5.1 ± 0.2 cm` without parentheses: `\pm` is low precedence and the unit
+    // juxtaposition binds tighter, so the unit attaches to the error operand,
+    // not the whole measurement. Deferred (needs parser-precedence surgery);
+    // use `(5.1 ± 0.2) cm`. This test documents the current behavior.
+    const p = ce.parse('5.1 \\pm 0.2\\,\\mathrm{cm}');
+    expect(p.operator).toBe('Measurement');
+    expect(p.op1!.re).toBeCloseTo(5.1, 12);
+    // The unit ended up inside the error operand rather than on the whole.
+    expect(p.toString()).not.toBe('(5.1 ± 0.2) cm');
+  });
+
+  test('regression: plain (non-measurement) Quantity arithmetic unchanged', () => {
+    const add = ce.function('Add', [
+      ce.box(['Quantity', 5, 'cm']),
+      ce.box(['Quantity', 3, 'cm']),
+    ]);
+    expect(add.evaluate().json).toEqual(['Quantity', 8, 'cm']);
+
+    const conv = ce.box(['UnitConvert', ['Quantity', 250, 'cm'], 'm']).evaluate();
+    expect(conv.operator).toBe('Quantity');
+    expect(conv.op1!.re).toBeCloseTo(2.5, 12);
+    expect(conv.op2!.symbol).toBe('m');
   });
 });

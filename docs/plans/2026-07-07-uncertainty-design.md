@@ -1,7 +1,15 @@
 # Uncertainty / Measurement Type — Design
 
-**Status:** design agreed 2026-07-07 (ROADMAP item 5). MVP scope; upgrade path
-documented. Not yet implemented.
+**Status:** **MVP landed 2026-07-07** (ROADMAP item 5). All five phases shipped
+— `Measurement` head + independent propagation (algebraic + elementary ops),
+`\pm`→`Measurement` parsing with the `PlusMinus`→`List` branch migration,
+`digits`-controlled error-aware display (error to 2 sig figs by default, value
+aligned to the same decimal place), and units nesting
+(`Quantity(Measurement(…), unit)`) with error-carrying conversion. Deferred
+items (dual-number correlation, bare `5.1 ± 0.2 cm` parsing, relative-error
+notation, distribution links) are recorded under "Non-goals" and in ROADMAP.
+The correctness boundary of independent propagation is documented in the
+Units guide.
 
 ## Goal
 

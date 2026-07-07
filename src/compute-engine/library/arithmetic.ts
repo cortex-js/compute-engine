@@ -279,7 +279,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Check if any operand is a Quantity expression
         const evaluated = ops.map((x) => x.evaluate());
         if (evaluated.some((x) => x.operator === 'Quantity')) {
-          return quantityAdd(engine!, evaluated);
+          const r = quantityAdd(engine!, evaluated);
+          if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+            return r.N();
+          return r;
         }
         if (evaluated.some((x) => x.operator === 'Measurement')) {
           const r = measurementAdd(engine!, evaluated);
@@ -445,7 +448,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           evalNum.operator === 'Quantity' ||
           evalDen.operator === 'Quantity'
         ) {
-          return quantityDivide(engine!, evalNum, evalDen);
+          const r = quantityDivide(engine!, evalNum, evalDen);
+          if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+            return r.N();
+          return r;
         }
         if (
           evalNum.operator === 'Measurement' ||
@@ -1389,7 +1395,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Check if any operand is a Quantity expression
         const evaluated = ops.map((x) => x.evaluate());
         if (evaluated.some((x) => x.operator === 'Quantity')) {
-          return quantityMultiply(engine!, evaluated);
+          const r = quantityMultiply(engine!, evaluated);
+          if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+            return r.N();
+          return r;
         }
         if (evaluated.some((x) => x.operator === 'Measurement')) {
           const r = measurementMultiply(engine!, evaluated);
@@ -1429,6 +1438,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation, engine }) => {
         const evalX = x.evaluate();
         if (isQuantity(evalX)) {
+          if (isMeasurement(evalX.op1)) {
+            const negM = measurementNegate(engine, evalX.op1);
+            if (negM !== undefined) {
+              const r = engine._fn('Quantity', [negM, evalX.op2]);
+              return numericApproximation ? r.N() : r;
+            }
+          }
           const mag = evalX.op1.re;
           if (mag !== undefined)
             return engine._fn('Quantity', [engine.number(-mag), evalX.op2]);
@@ -1606,7 +1622,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x, n], { numericApproximation, engine }) => {
         const evalBase = x.evaluate();
         if (evalBase.operator === 'Quantity') {
-          return quantityPower(engine!, evalBase, n.evaluate());
+          const r = quantityPower(engine!, evalBase, n.evaluate());
+          if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+            return r.N();
+          return r;
         }
         const evalExp = n.evaluate();
         if (
@@ -1741,8 +1760,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const evalX = x.evaluate();
         if (evalX.operator === 'Quantity') {
           const nVal = n.re;
-          if (nVal !== undefined && nVal !== 0)
-            return quantityPower(engine, evalX, engine.number(1 / nVal));
+          if (nVal !== undefined && nVal !== 0) {
+            const r = quantityPower(engine, evalX, engine.number(1 / nVal));
+            if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+              return r.N();
+            return r;
+          }
         }
         if (isMeasurement(evalX)) {
           const r = measurementRoot(engine, evalX, n.evaluate());
@@ -1901,8 +1924,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine }) => {
         const evalX = x.evaluate();
-        if (evalX.operator === 'Quantity')
-          return quantityPower(engine, evalX, engine.number(0.5));
+        if (evalX.operator === 'Quantity') {
+          const r = quantityPower(engine, evalX, engine.number(0.5));
+          if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+            return r.N();
+          return r;
+        }
 
         if (isMeasurement(evalX)) {
           const r = measurementSqrt(engine, evalX);

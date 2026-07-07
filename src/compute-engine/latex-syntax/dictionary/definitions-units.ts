@@ -411,8 +411,12 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
         return `${degrees}°`;
       }
 
-      // Fall through to default Quantity serialization
-      const magLatex = serializer.serialize(magnitude);
+      // Fall through to default Quantity serialization.  A Measurement
+      // magnitude (`5.1 ± 0.2`) is wrapped in parentheses so the unit applies
+      // to the whole measurement: `(5.1 \pm 0.2)\,\mathrm{cm}`.
+      let magLatex = serializer.serialize(magnitude);
+      if (operator(magnitude) === 'Measurement')
+        magLatex = `\\left(${magLatex}\\right)`;
       const unitStr = unitToMathrm(unit);
 
       return joinLatex([magLatex, '\\,', `\\mathrm{${unitStr}}`]);

@@ -22,6 +22,14 @@ import {
   getExpressionDimension,
   findNamedUnit,
 } from './unit-data';
+import {
+  isMeasurement,
+  measurementAdd,
+  measurementMultiply,
+  measurementDivide,
+  measurementPower,
+  measurementAffine,
+} from './measurement-arithmetic';
 
 // ---------------------------------------------------------------------------
 // Type guard
@@ -46,6 +54,35 @@ export function isQuantity(expr: Expression): expr is QuantityExpr {
 function unitSymbol(q: QuantityExpr): string | null {
   const u = q.op2;
   return isSymbol(u) ? u.symbol : null;
+}
+
+/**
+ * Convert a (possibly `Measurement`) magnitude expression from its own unit to
+ * the target unit, preserving/scaling a `Measurement` error.  Unit conversion
+ * is affine (`x → f·x + c`); the linear factor `f = convert(1) − convert(0)`
+ * removes any additive offset (so the error scales by `|f|` while the offset
+ * shifts the nominal only).  Returns `undefined` if the units are incompatible.
+ */
+function convertMagnitude(
+  ce: ComputeEngine,
+  mag: Expression,
+  opSymbol: string | null,
+  opUE: ReturnType<typeof boxedToUnitExpression>,
+  targetSymbol: string | null,
+  targetUE: ReturnType<typeof boxedToUnitExpression>
+): Expression | undefined {
+  if (targetSymbol && opSymbol) {
+    if (opSymbol === targetSymbol) return mag;
+    const c0 = convertUnit(0, opSymbol, targetSymbol);
+    const c1 = convertUnit(1, opSymbol, targetSymbol);
+    if (c0 === null || c1 === null) return undefined;
+    return measurementAffine(ce, mag, c1 - c0, c0);
+  }
+  if (!opUE || !targetUE) return undefined;
+  const c0 = convertCompoundUnit(0, opUE, targetUE);
+  const c1 = convertCompoundUnit(1, opUE, targetUE);
+  if (c0 === null || c1 === null) return undefined;
+  return measurementAffine(ce, mag, c1 - c0, c0);
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +127,29 @@ export function quantityAdd(
   const bestQ = quantities[bestIdx];
   const targetSymbol = unitSymbol(bestQ);
   const targetUE = unitExprs[bestIdx];
+
+  // Measurement-carrying magnitudes: convert each to the target unit (scaling
+  // its error by the conversion factor) then combine with error-propagating
+  // addition instead of raw numeric summation.
+  if (quantities.some((q) => isMeasurement(q.op1))) {
+    const mags: Expression[] = [];
+    for (let i = 0; i < quantities.length; i++) {
+      const q = quantities[i];
+      const converted = convertMagnitude(
+        ce,
+        q.op1,
+        unitSymbol(q),
+        unitExprs[i],
+        targetSymbol,
+        targetUE
+      );
+      if (converted === undefined) return undefined;
+      mags.push(converted);
+    }
+    const combined = measurementAdd(ce, mags);
+    if (combined === undefined) return undefined;
+    return ce._fn('Quantity', [combined, bestQ.op2]);
+  }
 
   let total = 0;
   for (let i = 0; i < quantities.length; i++) {
@@ -141,6 +201,27 @@ export function quantityMultiply(
 
   if (quantities.length === 0) return undefined;
 
+  // Measurement-carrying magnitudes (or scalars): multiply magnitudes with
+  // error-propagating multiplication instead of raw numeric products.
+  if (
+    ops.some((x) => isMeasurement(x)) ||
+    quantities.some((q) => isMeasurement(q.op1))
+  ) {
+    const factors: Expression[] = [
+      ...scalars,
+      ...quantities.map((q) => q.op1),
+    ];
+    const combinedMag = measurementMultiply(ce, factors);
+    if (combinedMag === undefined) return undefined;
+
+    if (quantities.length === 1)
+      return ce._fn('Quantity', [combinedMag, quantities[0].op2]);
+
+    const unitParts = quantities.map((q) => q.op2);
+    const combinedUnit = ce._fn('Multiply', unitParts);
+    return simplifyQuantityUnitMeasurement(ce, combinedMag, combinedUnit);
+  }
+
   // Compute scalar product
   let scalarValue = 1;
   for (const s of scalars) {
@@ -183,6 +264,14 @@ export function quantityDivide(
 ): Expression | undefined {
   const numQ = isQuantity(num) ? num : null;
   const denQ = isQuantity(den) ? den : null;
+
+  // Measurement-carrying magnitudes: propagate the error through the division.
+  const numMagIsM = isMeasurement(num) || (numQ ? isMeasurement(numQ.op1) : false);
+  const denMagIsM = isMeasurement(den) || (denQ ? isMeasurement(denQ.op1) : false);
+  if (numMagIsM || denMagIsM) {
+    const result = quantityDivideMeasurement(ce, num, den, numQ, denQ);
+    if (result !== undefined) return result;
+  }
 
   if (numQ && denQ) {
     // Quantity / Quantity
@@ -235,6 +324,64 @@ export function quantityDivide(
 }
 
 /**
+ * Measurement-magnitude counterpart of `quantityDivide`.  Mirrors the four
+ * cases (Quantity/Quantity, Quantity/scalar, scalar/Quantity) but combines the
+ * magnitudes with error-propagating division.  `num`/`den` may themselves be
+ * bare `Measurement` scalars (dimensionless measured quantities).
+ */
+function quantityDivideMeasurement(
+  ce: ComputeEngine,
+  num: Expression,
+  den: Expression,
+  numQ: QuantityExpr | null,
+  denQ: QuantityExpr | null
+): Expression | undefined {
+  if (numQ && denQ) {
+    const numMag = numQ.op1;
+    const denMag = denQ.op1;
+
+    // Check if units cancel (same dimension → dimensionless measurement)
+    const numUE = boxedToUnitExpression(numQ.op2);
+    const denUE = boxedToUnitExpression(denQ.op2);
+    if (numUE && denUE) {
+      const numDim = getExpressionDimension(numUE);
+      const denDim = getExpressionDimension(denUE);
+      if (numDim && denDim && dimensionsEqual(numDim, denDim)) {
+        const numScale = getExpressionScale(numUE);
+        const denScale = getExpressionScale(denUE);
+        if (numScale !== null && denScale !== null && denScale !== 0) {
+          const ratio = measurementDivide(ce, numMag, denMag);
+          if (ratio === undefined) return undefined;
+          return scaleMagnitude(ce, ratio, numScale / denScale);
+        }
+      }
+    }
+
+    const resultMag = measurementDivide(ce, numMag, denMag);
+    if (resultMag === undefined) return undefined;
+    const resultUnit = ce._fn('Divide', [numQ.op2, denQ.op2]);
+    return simplifyQuantityUnitMeasurement(ce, resultMag, resultUnit);
+  }
+
+  if (numQ && !denQ) {
+    // Quantity / scalar
+    const resultMag = measurementDivide(ce, numQ.op1, den);
+    if (resultMag === undefined) return undefined;
+    return ce._fn('Quantity', [resultMag, numQ.op2]);
+  }
+
+  if (!numQ && denQ) {
+    // scalar / Quantity => Quantity with inverted unit
+    const resultMag = measurementDivide(ce, num, denQ.op1);
+    if (resultMag === undefined) return undefined;
+    const invertedUnit = ce._fn('Power', [denQ.op2, ce.number(-1)]);
+    return ce._fn('Quantity', [resultMag, invertedUnit]);
+  }
+
+  return undefined;
+}
+
+/**
  * Try to simplify a compound unit to a named derived unit.
  * E.g. Multiply(N, m) → J, Divide(kg, Multiply(m, Power(s, 2))) → Pa.
  * If no simplification is found, returns the Quantity as-is.
@@ -267,6 +414,49 @@ function simplifyQuantityUnit(
 }
 
 /**
+ * Measurement-magnitude counterpart of `simplifyQuantityUnit`: the magnitude is
+ * a boxed expression (typically a `Measurement`) rather than a raw number, so a
+ * unit scale factor is applied with error-propagating multiplication.
+ */
+function simplifyQuantityUnitMeasurement(
+  ce: ComputeEngine,
+  mag: Expression,
+  unit: Expression
+): Expression {
+  const ue = boxedToUnitExpression(unit);
+  if (ue) {
+    const dim = getExpressionDimension(ue);
+    if (dim) {
+      // Dimensionless result (all exponents zero) → plain (unitless) magnitude
+      if (isDimensionless(dim)) {
+        const scale = getExpressionScale(ue);
+        if (scale !== null) return scaleMagnitude(ce, mag, scale);
+      }
+      const match = findNamedUnit(dim);
+      if (match) {
+        const scale = getExpressionScale(ue);
+        if (scale !== null)
+          return ce._fn('Quantity', [
+            scaleMagnitude(ce, mag, scale),
+            ce.symbol(match),
+          ]);
+      }
+    }
+  }
+  return ce._fn('Quantity', [mag, unit]);
+}
+
+/** Scale a (possibly `Measurement`) magnitude by a plain factor. */
+function scaleMagnitude(
+  ce: ComputeEngine,
+  mag: Expression,
+  scale: number
+): Expression {
+  if (scale === 1) return mag;
+  return measurementAffine(ce, mag, scale, 0);
+}
+
+/**
  * Raise a Quantity to a power.
  */
 export function quantityPower(
@@ -275,9 +465,11 @@ export function quantityPower(
   exp: Expression
 ): Expression | undefined {
   if (!isQuantity(base)) return undefined;
+  const magIsMeasurement = isMeasurement(base.op1);
   const mag = base.op1.re;
   const n = exp.re;
-  if (mag === undefined || n === undefined) return undefined;
+  if (n === undefined) return undefined;
+  if (!magIsMeasurement && mag === undefined) return undefined;
 
   // Simplify unit exponents: Power(Power(u, a), b) → Power(u, a*b)
   const unit = base.op2;
@@ -297,5 +489,11 @@ export function quantityPower(
     resultUnit = n === 1 ? unit : ce._fn('Power', [unit, exp]);
   }
 
-  return ce._fn('Quantity', [ce.number(Math.pow(mag, n)), resultUnit]);
+  if (magIsMeasurement) {
+    const poweredMag = measurementPower(ce, base.op1, exp);
+    if (poweredMag === undefined) return undefined;
+    return ce._fn('Quantity', [poweredMag, resultUnit]);
+  }
+
+  return ce._fn('Quantity', [ce.number(Math.pow(mag!, n)), resultUnit]);
 }

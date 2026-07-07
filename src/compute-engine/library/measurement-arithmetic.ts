@@ -214,6 +214,31 @@ export function measurementPower(
   return makeMeasurement(ce, value, error);
 }
 
+/**
+ * Apply an affine map `x → f·x + c` to a magnitude expression, scaling a
+ * `Measurement` error by `|f|` (the shift `c` moves the nominal only).  Used
+ * by the units layer for unit conversion of a measured magnitude — converting
+ * by a linear factor scales both nominal and error.  A non-`Measurement`
+ * operand collapses to a plain scalar (error 0).
+ */
+export function measurementAffine(
+  ce: ComputeEngine,
+  mag: Expression,
+  f: number,
+  c: number
+): Expression {
+  let r = mag;
+  if (f !== 1) {
+    const m = measurementMultiply(ce, [r, ce.number(f)]);
+    if (m !== undefined) r = m;
+  }
+  if (c !== 0) {
+    const m = measurementAdd(ce, [r, ce.number(c)]);
+    if (m !== undefined) r = m;
+  }
+  return r;
+}
+
 // ---------------------------------------------------------------------------
 // Elementary functions (unary, first-order propagation)
 // ---------------------------------------------------------------------------

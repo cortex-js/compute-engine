@@ -14,6 +14,7 @@ import {
   findNamedUnit,
   type UnitExpression,
 } from './unit-data';
+import { isMeasurement, measurementAffine } from './measurement-arithmetic';
 
 /**
  * Convert a boxed expression representing a unit into a plain
@@ -134,7 +135,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       // Canonicalize the quantity (first arg) but leave the target unit as-is
       return ce._fn('UnitConvert', [args[0].canonical, args[1].canonical]);
     },
-    evaluate: (ops, { engine: ce }) => {
+    evaluate: (ops, { numericApproximation, engine: ce }) => {
       if (!ce) return undefined;
       const quantity = ops[0]?.evaluate();
       const targetUnitExpr = ops[1];
@@ -145,8 +146,13 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       )
         return undefined;
 
-      const mag = quantity.op1.re;
-      if (mag === undefined) return undefined;
+      // A Measurement magnitude scales (nominal and error) by the conversion
+      // factor; unit conversion is affine, so the linear factor is
+      // `convert(1) − convert(0)` and the offset shifts the nominal only.
+      const magExpr = quantity.op1;
+      const magIsMeasurement = isMeasurement(magExpr);
+      const mag = magExpr.re;
+      if (!magIsMeasurement && mag === undefined) return undefined;
 
       // Try simple symbol-based conversion first
       const fromUnit = quantity.op2;
@@ -154,7 +160,15 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const toSymbol = isSymbol(targetUnitExpr) ? targetUnitExpr.symbol : null;
 
       if (fromSymbol && toSymbol) {
-        const converted = convertUnit(mag, fromSymbol, toSymbol);
+        if (magIsMeasurement) {
+          const c0 = convertUnit(0, fromSymbol, toSymbol);
+          const c1 = convertUnit(1, fromSymbol, toSymbol);
+          if (c0 === null || c1 === null) return ce.error('incompatible-type');
+          const convertedMag = measurementAffine(ce, magExpr, c1 - c0, c0);
+          const r = ce._fn('Quantity', [convertedMag, ce.symbol(toSymbol)]);
+          return numericApproximation ? r.N() : r;
+        }
+        const converted = convertUnit(mag!, fromSymbol, toSymbol);
         if (converted !== null)
           return ce._fn('Quantity', [
             ce.number(converted),
@@ -169,7 +183,16 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const toUE = boxedToUnitExpression(targetUnitExpr);
       if (!fromUE || !toUE) return undefined;
 
-      const converted = convertCompoundUnit(mag, fromUE, toUE);
+      if (magIsMeasurement) {
+        const c0 = convertCompoundUnit(0, fromUE, toUE);
+        const c1 = convertCompoundUnit(1, fromUE, toUE);
+        if (c0 === null || c1 === null) return ce.error('incompatible-type');
+        const convertedMag = measurementAffine(ce, magExpr, c1 - c0, c0);
+        const r = ce._fn('Quantity', [convertedMag, targetUnitExpr]);
+        return numericApproximation ? r.N() : r;
+      }
+
+      const converted = convertCompoundUnit(mag!, fromUE, toUE);
       if (converted === null) return ce.error('incompatible-type');
 
       return ce._fn('Quantity', [ce.number(converted), targetUnitExpr]);

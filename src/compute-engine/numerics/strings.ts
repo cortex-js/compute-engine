@@ -1,4 +1,5 @@
 import type { BigDecimal } from '../../big-decimal';
+import type { DisplayDigits } from '../types-kernel-serialization';
 
 /**
  * Round a value to `n` significant figures, returning a value of the same kind
@@ -41,41 +42,72 @@ export function roundToDecimalPlace(
 }
 
 /**
- * Error-aware display rounding for a Measurement `value ± error`, following the
- * physics significant-figures convention: round the 1σ error to a single
- * significant figure, then round the nominal value to that error's least-
- * significant decimal place. Returns the two formatted decimal strings.
+ * Error-aware display rounding for a Measurement `value ± error`, honoring the
+ * `digits` serialization control ({@link DisplayDigits}). Returns the two
+ * formatted decimal strings.
+ *
+ * - `'auto'` (the default): round the error to **2** significant figures, then
+ *   round the nominal to the error's least-significant displayed decimal place
+ *   (value and uncertainty share a decimal place, per physics convention).
+ * - `{ significant: n }`: round the error to `n` significant figures, nominal
+ *   to that error's least-significant displayed place. (`'auto'` is `n = 2`.)
+ * - `{ fractional: k }`: round **both** the nominal and the error to `k`
+ *   decimal places (`toFixed(k)`).
+ * - `'max'`: no rounding — nominal and error at full precision.
+ *
+ * Trailing zeros produced by the shared-place alignment are significant and
+ * kept (e.g. `5.10`, `8.00`).
  *
  * Only ever called with `error > 0` (a zero error canonicalizes the Measurement
  * back to the bare value, so `Measurement(v, e)` always has `e > 0`).
  *
- * Examples: `(5.134, 0.021)` → `{ value: '5.13', error: '0.02' }`;
- * `(1234.5, 12)` → `{ value: '1230', error: '10' }`.
+ * Examples (`'auto'`): `(8, 0.2236)` → `{ value: '8.00', error: '0.22' }`;
+ * `(1234.5, 12)` → `{ value: '1235', error: '12' }`. `{ significant: 1 }`:
+ * `(5.134, 0.021)` → `{ value: '5.13', error: '0.02' }`.
  */
 export function roundMeasurementForDisplay(
   value: number,
-  error: number
+  error: number,
+  digits: DisplayDigits = 'auto'
 ): { value: string; error: string } {
-  // Round the error to 1 significant figure.
-  const er = roundToSignificant(error, 1);
-  // Decimal exponent of the rounded (single-significant-figure) error. Read it
-  // from the exponential form to avoid log10 rounding artifacts at powers of
-  // ten (e.g. `Math.log10(0.1)` is not exactly −1).
-  const exp = parseInt(er.toExponential().split('e')[1], 10);
-  // Number of digits after the decimal point implied by the error.
-  const k = -exp;
-  if (k > 0) {
+  // No rounding.
+  if (digits === 'max') return { value: String(value), error: String(error) };
+
+  // Fixed number of decimal places for both nominal and error.
+  if (typeof digits === 'object' && 'fractional' in digits) {
+    const k = digits.fractional;
     return {
       value: roundToDecimalPlace(value, k),
-      error: roundToDecimalPlace(er, k),
+      error: roundToDecimalPlace(error, k),
     };
   }
-  // k <= 0: the error is ≥ 1; round the nominal to the 10^(-k) place (tens,
-  // hundreds, …) rather than using `toFixed` with a negative argument.
-  const place = Math.pow(10, -k);
+
+  // `'auto'` (2 significant figures) or `{ significant: n }`.
+  const n =
+    digits === 'auto' ? 2 : (digits as { significant: number }).significant;
+  // Round the error to `n` significant figures.
+  const er = roundToSignificant(error, n);
+  // Decimal exponent of the rounded error's *leading* significant digit. Read
+  // it from the exponential form to avoid log10 rounding artifacts at powers of
+  // ten (e.g. `Math.log10(0.1)` is not exactly −1).
+  const exp = parseInt(er.toExponential().split('e')[1], 10);
+  // Least-significant displayed decimal place of the `n`-significant-figure
+  // error: `p = n - 1 - floor(log10(er))`. Both the nominal and the error are
+  // rounded to this shared place so they carry the same precision.
+  const p = n - 1 - exp;
+  if (p > 0) {
+    return {
+      value: roundToDecimalPlace(value, p),
+      error: roundToDecimalPlace(er, p),
+    };
+  }
+  // p <= 0: the error's last significant digit is at the 10^(-p) place (units,
+  // tens, …); round both to that place rather than using `toFixed` with a
+  // negative argument.
+  const place = Math.pow(10, -p);
   return {
     value: String(Math.round(value / place) * place),
-    error: String(er),
+    error: String(Math.round(er / place) * place),
   };
 }
 

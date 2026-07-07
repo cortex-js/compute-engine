@@ -1,5 +1,43 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`\pm` now parses to a `Measurement`, not `PlusMinus`.** `a \pm b` parses to
+  `["Measurement", a, b]` — a value with an uncertainty (see below) — replacing
+  the previous `PlusMinus` head that evaluated to the two-branch tuple
+  `(a−b, a+b)`. Consequences: solution sets that previously used `\pm` (e.g.
+  quadratic roots) are now returned as an explicit `List` of the branches, and a
+  numeric integral that reports an error estimate now returns
+  `["Measurement", estimate, error]` instead of a `PlusMinus` tuple. Prefix
+  `\pm b` parses to `["Measurement", 0, b]`.
+
+### Measurements and Uncertainty
+
+- **New `Measurement` type — values with a propagated uncertainty.**
+  `Measurement(value, error)` (written `value \pm error`) represents a
+  measured quantity carrying a 1σ absolute uncertainty, and the uncertainty
+  **propagates through arithmetic** using standard independent, first-order
+  (quadrature) error propagation:
+  - Algebraic and elementary operations propagate the error:
+    `(5 \pm 0.2)(3 \pm 0.1)` → `15.00 \pm 0.78`, `\sqrt{4 \pm 0.2}` →
+    `2.000 \pm 0.050`, `\sin(1 \pm 0.1)` → `0.841 \pm 0.054` (trig respects the
+    engine's angular unit).
+  - Measurements combine with **units**: `(5.1 \pm 0.2)\,\mathrm{cm}` is a
+    measured quantity, and the error carries through quantity arithmetic and
+    unit conversion (`UnitConvert` of `(5.1 \pm 0.2)\,\mathrm{cm}` to `m` →
+    `(0.0510 \pm 0.0020)\,\mathrm{m}`).
+  - **Display** follows the physics convention — the uncertainty is shown to
+    two significant figures by default and the value is rounded to the same
+    decimal place (`5.134 \pm 0.021`, `8.00 \pm 0.22`). Controlled by the
+    `digits` serialization option (`{ significant: n }`, `{ fractional: n }`,
+    `"max"`); `.toMathJson()` stays lossless.
+  - **Correctness note:** propagation is *independent* — exact when each
+    measured quantity appears once (`A = L·W`) or in a single operation
+    (`x^2`), but it over/under-estimates when one measured variable is reused
+    across an expression (`x·x`, `x/(x+1)`), which are treated as independent.
+    See the [Units guide](/compute-engine/guides/units/) for details and the
+    `simplify` workaround.
+
 ### Parsing and Serialization
 
 - **New `digits` serialization option for significant-figures and

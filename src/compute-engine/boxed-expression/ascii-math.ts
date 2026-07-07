@@ -45,7 +45,12 @@ export type AsciiMathOptions = {
   operators: Record<string, [string | ((expr: Expression) => string), number]>;
   functions: Record<
     string,
-    string | ((expr: Expression, serialize: AsciiMathSerializer) => string)
+    | string
+    | ((
+        expr: Expression,
+        serialize: AsciiMathSerializer,
+        options?: Partial<AsciiMathOptions>
+      ) => string)
   >;
   /** Controls how many digits numbers are displayed with. See `DisplayDigits`. */
   digits?: DisplayDigits;
@@ -255,7 +260,12 @@ const OPERATORS: Record<
 
 const FUNCTIONS: Record<
   string,
-  string | ((expr: Expression, serialize: AsciiMathSerializer) => string)
+  | string
+  | ((
+      expr: Expression,
+      serialize: AsciiMathSerializer,
+      options?: Partial<AsciiMathOptions>
+    ) => string)
 > = {
   Abs: (expr: Expression, serialize) => `|${serialize((expr as FnExpr).op1)}|`,
   Norm: (expr: Expression, serialize) =>
@@ -316,7 +326,12 @@ const FUNCTIONS: Record<
 
   Quantity: (expr_, serialize) => {
     const expr = expr_ as FnExpr;
-    return `${serialize(expr.op1)} ${unitToString(expr.op2)}`;
+    // A Measurement magnitude is parenthesised so the unit applies to the whole
+    // measurement: `(5.1 ± 0.2) cm`.
+    const mag = isFunction(expr.op1, 'Measurement')
+      ? `(${serialize(expr.op1)})`
+      : serialize(expr.op1);
+    return `${mag} ${unitToString(expr.op2)}`;
   },
 
   GCD: 'gcd',
@@ -326,7 +341,7 @@ const FUNCTIONS: Record<
   Max: 'max',
   Min: 'min',
 
-  Measurement: (expr_, serialize) => {
+  Measurement: (expr_, serialize, options) => {
     const [lhs, rhs] = (expr_ as FnExpr).ops;
     if (!rhs) return serialize(lhs);
     // Physics significant-figures display when both operands are plain numbers;
@@ -335,7 +350,7 @@ const FUNCTIONS: Record<
     const v = machineValue(lhs.json);
     const e = machineValue(rhs.json);
     if (v !== null && e !== null && Number.isFinite(v) && Number.isFinite(e) && e > 0) {
-      const { value, error } = roundMeasurementForDisplay(v, e);
+      const { value, error } = roundMeasurementForDisplay(v, e, options?.digits);
       return `${value} ± ${error}`;
     }
     return `${serialize(lhs)} ± ${serialize(rhs)}`;
@@ -674,7 +689,7 @@ export function toAsciiMath(
     ? { ...FUNCTIONS, ...options.functions }
     : FUNCTIONS;
   const func = functions[expr.operator];
-  if (typeof func === 'function') return func(expr, serialize);
+  if (typeof func === 'function') return func(expr, serialize, options);
   // For non-function expression types with operators (e.g., tensors like List),
   // fall through to JSON serialization if no matching function/operator handler
   if (fnExpr) {

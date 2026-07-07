@@ -94,33 +94,27 @@ scipy is installed in `./venv`.
 - Bare `O(…)` parsing deferred (design doc §8 Q3); revisit for lenient mode
   once the parser work settles.
 
+**Uncertainty/Measurement residue (item 5 MVP landed 2026-07-07).** The
+`Measurement` type shipped — `value \pm error` with independent first-order
+error propagation through algebraic + elementary ops and units, `\pm`
+redefined from `PlusMinus` to `Measurement` (branch use → `List`), and
+`digits`-controlled display. Full design + the phased record:
+[`docs/plans/2026-07-07-uncertainty-design.md`](./docs/plans/2026-07-07-uncertainty-design.md).
+Deferred:
+
+- **Dual-number correlation tracking** (correct-by-default) — the documented
+  upgrade past independent propagation, which over/under-estimates when one
+  measured variable is reused across operands (`x·x`, `x/(x+1)`). A
+  `BoxedMeasurement` carrier with per-source identity; the hard part is
+  source-id stability across re-boxing (design doc "Non-goals").
+- **Bare `5.1 ± 0.2 cm` parsing** (no parens) — mis-nests because `\pm` binds
+  looser than unit juxtaposition; needs a precedence change. Parenthesized
+  `(5.1 ± 0.2) cm` works today.
+- **Relative-error notation** (`±5%`) and **distribution/`RandomVariate`
+  links** (reuse the statistics RNG/seed policy).
+
 **Not yet agreed (proposed 2026-07-04, awaiting a call):**
 
-5. **Uncertainty type — value ± error propagation (M).** A measurement type
-   (`5.1 ± 0.2 cm`) propagating through arithmetic, layered on the existing
-   units/quantity arithmetic. Core lab-course and experimental-science need.
-   **Design agreed 2026-07-07** — full write-up in
-   [`docs/plans/2026-07-07-uncertainty-design.md`](./docs/plans/2026-07-07-uncertainty-design.md).
-   Decisions: a `['Measurement', value, error]` head mirroring the `Quantity`
-   precedent (library-level dispatch, **not** a `NumericValue` subclass);
-   **independent linear (quadrature) propagation** for the MVP, shipped as
-   *documented independent-error propagation* (correct for distinct measurements
-   each appearing once — `A=L·W` — and single-op reuse like `x²`; over/under-
-   estimates when one measured variable is reused across operands, since a bound
-   measurement substitutes eagerly and repeated occurrences are treated as
-   independent — the `x−x→0` fold only fires for *free* symbols. `simplify` is
-   an optional user aid for the collapsing cases but is NOT auto-invoked (it can
-   regress by expanding, e.g. `x(1−x)`). Dual-number correlation tracking is the
-   documented later upgrade for correct-by-default); per-op closed-form
-   partials so there is **no calculus-engine dependency/cycle**; and a
-   **breaking redefinition of `\pm`** from `PlusMinus` (branch tuple) to
-   `Measurement`, migrating the solution-branch use (`calculus.ts`, `solve.ts`)
-   to an explicit List/Or form. Its *display* half is nearly free — rendering
-   `x ± e` rounds the value to the error's least-significant place, reusing item
-   7's `roundToDecimalPlace` primitive verbatim. Phased plan (head+arithmetic →
-   elementary fns → `\pm`/PlusMinus migration → display → units) in the design
-   doc. Deferred (demand-gated L): dual-number correlation, relative-error
-   notation (`±5%`), distribution/`RandomVariate` links.
 6. **MathML output + speakable text (M).** Communication and accessibility:
    MathML serialization for export/interchange (web, Word, EPUB) and a
    speakable-text serializer for screen readers. AsciiMath output already

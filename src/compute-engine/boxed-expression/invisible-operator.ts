@@ -200,11 +200,20 @@ export function canonicalInvisibleOperator(
     const significant = ops.filter((x) => x.operator !== 'HorizontalSpacing');
     if (significant.length === 2) {
       const [a, b] = significant;
-      if (isNumber(a) && isFunction(b, '__unit__')) {
-        return ce._fn('Quantity', [a.canonical, b.op1.canonical]);
+      // A magnitude is a bare number or a measurement `a ± b`.  A parenthesised
+      // measurement — `(5.1\pm0.2)\,\mathrm{cm}` — arrives wrapped in a
+      // single-argument `Delimiter`, so look through it.
+      const unwrap = (x: typeof a) =>
+        isFunction(x, 'Delimiter') && x.nops === 1 ? x.op1 : x;
+      const isMagnitude = (x: typeof a) => {
+        const u = unwrap(x);
+        return isNumber(u) || isFunction(u, 'Measurement');
+      };
+      if (isMagnitude(a) && isFunction(b, '__unit__')) {
+        return ce._fn('Quantity', [unwrap(a).canonical, b.op1.canonical]);
       }
-      if (isNumber(b) && isFunction(a, '__unit__')) {
-        return ce._fn('Quantity', [b.canonical, a.op1.canonical]);
+      if (isMagnitude(b) && isFunction(a, '__unit__')) {
+        return ce._fn('Quantity', [unwrap(b).canonical, a.op1.canonical]);
       }
     }
   }

@@ -458,9 +458,20 @@ function serializeJsonFunction(
 
   const jsonHead = _escapeJsonString(name);
 
+  // The display rounding of a `Measurement(value, error)` is performed by the
+  // LaTeX/AsciiMath serializers, which apply an error-aware significant-figures
+  // convention (round the error to `n` sig figs, then the nominal to the
+  // error's place). Keep the operands lossless here so that stage is the sole
+  // authority — otherwise a `{ significant: n }` control would crop the nominal
+  // before the measurement rounding runs.
+  const argOptions: Readonly<JsonSerializationOptions> =
+    name === 'Measurement'
+      ? { ...options, digits: 'max', fractionalDigits: 'max' }
+      : options;
+
   const fn: MathJsonExpression = [
     jsonHead,
-    ...args.map((x) => (x ? serializeJson(ce, x, options) : 'Undefined')),
+    ...args.map((x) => (x ? serializeJson(ce, x, argOptions) : 'Undefined')),
   ];
 
   const md: Metadata = { ...(metadata ?? {}) };
