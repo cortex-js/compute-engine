@@ -77,6 +77,18 @@
   value operand was silently dropped. The one- and two-operand forms are
   unchanged.
 
+- **`Declare` can attach definition attributes via a trailing dictionary,
+  including declaring constants.** An optional final `Dictionary` operand
+  carries any of `type`, `value`, `constant`, and `holdUntil`, mirroring the
+  JavaScript `ce.declare(name, def)` API. For example,
+  `["Declare", "c", "real", 299792458, ["Dictionary", ["KeyValuePair", "constant", "True"]]]`
+  declares an immutable constant (a later `Assign` to it is rejected), and
+  `holdUntil` controls when the symbol's value is substituted (as for built-in
+  constants such as `Pi`). A positional `type`/`value` takes precedence over
+  the same key in the dictionary. This gives MathJSON a representation for
+  constant declarations (e.g. the target for a `const` keyword in a surface
+  language).
+
 ## 0.68.0 _2026-07-05_
 
 ### Breaking Changes

@@ -43,9 +43,12 @@ import {
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
   Expression,
+  SymbolDefinition,
   SymbolDefinitions,
+  DictionaryInterface,
   CanonicalForm,
 } from '../global-types';
+import type { Type } from '../../common/type/types';
 import { BoxedString } from '../boxed-expression/boxed-string';
 import { canonical } from '../boxed-expression/canonical-utils';
 import { isDictionary, isValueDef } from '../boxed-expression/utils';
@@ -688,14 +691,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Declare: {
       description:
         'Declare a symbol in the current scope, optionally assigning a type ' +
-        'and an initial value. With a value, evaluates to that value; ' +
-        'otherwise evaluates to `Nothing`.',
+        'and an initial value. An optional trailing attributes dictionary ' +
+        '(with keys `type`, `value`, `constant` and `holdUntil`) can further ' +
+        'describe the definition, e.g. to declare a constant. With a value, ' +
+        'evaluates to that value; otherwise evaluates to `Nothing`.',
       lazy: true,
       pure: false,
-      signature: '(symbol, type: (string | symbol)?, value: any?) -> any',
-      // With a value operand, `Declare` evaluates to the value; otherwise
-      // to `Nothing`.
-      type: (ops) => (ops[2] ? ops[2].type : 'nothing'),
+      signature:
+        '(symbol, type: (string | symbol)?, value: any?, attributes: dictionary?) -> any',
+      // With a positional value operand, `Declare` evaluates to the value;
+      // otherwise to `Nothing`. (A trailing dictionary operand is the
+      // attributes bag, not a value.)
+      type: (ops) =>
+        ops[2] && !isDictionary(ops[2]) ? ops[2].type : 'nothing',
       canonical: (args, { engine: ce }) => {
         // Note: we can't use checkType() because it canonicalized/bind the argument.
         let symbolExpr = args[0];
@@ -706,17 +714,74 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         if (args.length === 1) return ce._fn('Declare', [symbolExpr]);
 
-        if (args.length === 2)
-          return ce._fn('Declare', [symbolExpr, args[1]]);
+        if (args.length === 2) {
+          // The second operand is either a type (kept raw, so that a
+          // type-name symbol such as `real` is not auto-declared as a
+          // variable) or a trailing attributes dictionary (canonicalized so
+          // that its `.get(...)` accessor works during evaluation).
+          const op =
+            args[1].operator === 'Dictionary' ? args[1].canonical : args[1];
+          return ce._fn('Declare', [symbolExpr, op]);
+        }
 
         if (args.length === 3)
           return ce._fn('Declare', [symbolExpr, args[1], args[2].canonical]);
+
+        if (args.length === 4)
+          return ce._fn('Declare', [
+            symbolExpr,
+            args[1],
+            args[2].canonical,
+            args[3].canonical,
+          ]);
 
         return null;
       },
       evaluate: (ops, { engine: ce }) => {
         const symbolName = sym(ops[0].evaluate());
         if (!symbolName) return undefined;
+
+        // Separate an optional trailing attributes dictionary. When the last
+        // operand (with arity ≥ 2) is a `Dictionary`, it carries definition
+        // attributes (`type`, `value`, `constant`, `holdUntil`); the
+        // remaining operands after the symbol are the positional
+        // `[type?, value?]`.
+        const rest = ops.slice(1);
+        let attrs: DictionaryInterface | undefined;
+        const last = rest[rest.length - 1];
+        if (last !== undefined && isDictionary(last)) {
+          attrs = last;
+          rest.pop();
+        }
+        const typeOp = rest[0];
+        const valueOp = rest[1];
+
+        // Resolve the effective type spec: a positional type wins over the
+        // attributes `type`.
+        const typeSource = typeOp ?? attrs?.get('type');
+        const hasType = typeSource !== undefined;
+        let type: Type | undefined;
+        if (hasType) {
+          const t = typeSource!.canonical.evaluate();
+          const parsed = parseType(
+            (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined
+          );
+          if (!isValidType(parsed)) return undefined;
+          type = parsed;
+        }
+
+        // Resolve the effective value: a positional value wins over the
+        // attributes `value`.
+        const valueSource = valueOp ?? attrs?.get('value');
+        const hasValue = valueSource !== undefined;
+        const value = hasValue ? valueSource!.evaluate() : undefined;
+
+        // Resolve the remaining attributes.
+        const isConstant = sym(attrs?.get('constant')) === 'True';
+        const holdOp = attrs?.get('holdUntil')?.evaluate();
+        const holdUntil = (
+          holdOp && isString(holdOp) ? holdOp.string : undefined
+        ) as 'never' | 'evaluate' | 'N' | undefined;
 
         // A symbol may already exist in the current scope as an *inferred*
         // binding with no value — typically because an earlier statement in
@@ -738,39 +803,43 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           existingValueDef.value.inferredType &&
           existingValueDef.value.value === undefined;
 
-        // An optional initial value (third operand). When present, `Declare`
-        // sets the symbol's value and evaluates to it.
-        const hasValue = ops[2] !== undefined;
-        const value = hasValue ? ops[2].evaluate() : undefined;
-
-        // Establish the type binding (first, so the value assignment below
-        // is checked against the declared type).
-        if (!ops[1]) {
-          if (!isAutoDeclareHere)
-            ce.declare(symbolName, { inferred: true, type: 'unknown' });
-          // else: keep the existing auto-declared binding
-        } else {
-          const t = ops[1].canonical.evaluate();
-
-          const type = parseType(
-            (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined
-          );
-          if (!isValidType(type)) return undefined;
-
-          if (isAutoDeclareHere && existingValueDef) {
-            existingValueDef.value.type = ce.type(type);
+        if (isAutoDeclareHere && existingValueDef) {
+          // Upgrade the existing auto-declared binding in place.
+          if (hasType) {
+            existingValueDef.value.type = ce.type(type!);
             existingValueDef.value.inferredType = false;
-          } else {
-            ce.declare(symbolName, type);
           }
+          if (holdUntil) existingValueDef.value.holdUntil = holdUntil;
+          if (hasValue) ce.assign(symbolName, value!); // assign while mutable
+          if (isConstant)
+            // Freeze AFTER assigning the value. There is no public setter to
+            // turn an existing definition into a constant, so set the backing
+            // flag directly. This is safe here: the value was just assigned
+            // (so the binding holds a concrete `_value`), and the config-change
+            // listener / `_defValue` recomputation that the constructor sets up
+            // is only needed for precision-dependent constants (`Pi`), which
+            // cannot be expressed through `Declare`.
+            (existingValueDef.value as unknown as {
+              _isConstant: boolean;
+            })._isConstant = true;
+        } else {
+          // Fresh declaration.
+          const def: Partial<SymbolDefinition> = {};
+          if (hasType) def.type = type;
+          else if (!hasValue) {
+            // Preserve the bare-declare default (inferred `unknown`). When a
+            // value is present without a type, leave the type unset so
+            // `ce.declare` infers it from the value.
+            def.inferred = true;
+            def.type = 'unknown';
+          }
+          if (hasValue) def.value = value;
+          if (holdUntil) def.holdUntil = holdUntil;
+          if (isConstant) (def as { isConstant?: boolean }).isConstant = true;
+          ce.declare(symbolName, def);
         }
 
-        if (hasValue) {
-          ce.assign(symbolName, value!);
-          return value;
-        }
-
-        return ce.Nothing;
+        return hasValue ? value : ce.Nothing;
       },
     },
 

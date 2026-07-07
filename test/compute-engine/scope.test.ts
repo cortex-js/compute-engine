@@ -125,6 +125,113 @@ describe('DECLARING', () => {
   //   ce.declare('d', { value: 42 });
   //   expect(ce.expr('d').value).toEqual(42);
   // });
+
+  test('["Declare"] attributes dict: const via type, value, attrs', () => {
+    // ["Declare", sym, type, value, { constant: True }] declares a constant.
+    const result = ce
+      .box([
+        'Declare',
+        'c1',
+        'real',
+        5,
+        ['Dictionary', ['KeyValuePair', 'constant', 'True']],
+      ])
+      .evaluate();
+    expect(result.valueOf()).toEqual(5);
+    expect(ce.expr('c1').type.toString()).toEqual('real');
+    expect(ce.expr('c1').valueOf()).toEqual(5);
+    // Assigning to a constant throws.
+    expect(() => ce.box(['Assign', 'c1', 6]).evaluate()).toThrow(/constant/);
+  });
+
+  test('["Declare"] attributes dict: const with no value (dict in slot 2)', () => {
+    const result = ce
+      .box([
+        'Declare',
+        'c2',
+        ['Dictionary', ['KeyValuePair', 'constant', 'True']],
+      ])
+      .evaluate();
+    expect(result.symbol).toEqual('Nothing');
+    expect((ce.lookupDefinition('c2') as any).value.isConstant).toBe(true);
+  });
+
+  test('["Declare"] attributes dict: pure dict carrying type + value + constant', () => {
+    const result = ce
+      .box([
+        'Declare',
+        'c3',
+        [
+          'Dictionary',
+          ['KeyValuePair', 'type', 'real'],
+          ['KeyValuePair', 'value', 5],
+          ['KeyValuePair', 'constant', 'True'],
+        ],
+      ])
+      .evaluate();
+    expect(result.valueOf()).toEqual(5);
+    expect(ce.expr('c3').type.toString()).toEqual('real');
+    expect((ce.lookupDefinition('c3') as any).value.isConstant).toBe(true);
+  });
+
+  test('["Declare"] attributes dict: holdUntil + constant', () => {
+    const result = ce
+      .box([
+        'Declare',
+        'g1',
+        'real',
+        9.81,
+        [
+          'Dictionary',
+          ['KeyValuePair', 'holdUntil', ['String', 'N']],
+          ['KeyValuePair', 'constant', 'True'],
+        ],
+      ])
+      .evaluate();
+    expect(result.valueOf()).toEqual(9.81);
+    expect((ce.lookupDefinition('g1') as any).value.holdUntil).toEqual('N');
+    expect((ce.lookupDefinition('g1') as any).value.isConstant).toBe(true);
+  });
+
+  test('["Declare"] attributes dict: non-const dict stays mutable', () => {
+    // A dict without `constant` declares an ordinary (mutable) binding.
+    const result = ce
+      .box([
+        'Declare',
+        'm1',
+        'real',
+        1,
+        ['Dictionary', ['KeyValuePair', 'holdUntil', ['String', 'N']]],
+      ])
+      .evaluate();
+    expect(result.valueOf()).toEqual(1);
+    expect((ce.lookupDefinition('m1') as any).value.isConstant).toBe(false);
+    // Assigning succeeds and changes the value.
+    expect(() => ce.box(['Assign', 'm1', 2]).evaluate()).not.toThrow();
+    expect(ce.expr('m1').N().valueOf()).toEqual(2);
+  });
+
+  test('["Declare"] attributes dict: const over an auto-declared binding', () => {
+    // Exercises the auto-declare upgrade path: `u1` is first auto-declared as
+    // an inferred, value-less binding, then `Declare` upgrades it in place to
+    // a constant with a type and value. Reassignment must then be rejected.
+    const ce2 = new ComputeEngine();
+    ce2.box('u1').add(1); // auto-declares u1 (inferred number, no value)
+    const result = ce2
+      .box([
+        'Declare',
+        'u1',
+        'real',
+        5,
+        ['Dictionary', ['KeyValuePair', 'constant', 'True']],
+      ])
+      .evaluate();
+    expect(result.valueOf()).toEqual(5);
+    expect(ce2.expr('u1').type.toString()).toEqual('real');
+    expect(ce2.expr('u1').valueOf()).toEqual(5);
+    expect((ce2.lookupDefinition('u1') as any).value.isConstant).toBe(true);
+    expect(() => ce2.box(['Assign', 'u1', 6]).evaluate()).toThrow(/constant/);
+  });
 });
 
 describe('CONSTANTS', () => {
