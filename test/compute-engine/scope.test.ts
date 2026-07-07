@@ -28,6 +28,21 @@ describe('DECLARING', () => {
     expect(ce.expr('c').valueOf()).toEqual(5);
   });
 
+  test('["Declare"] operator with type and value evaluates to the value', () => {
+    // The 3-operand form of the `Declare` operator declares the symbol with
+    // the given type, sets its initial value, and evaluates to that value.
+    const result = ce.box(['Declare', 'dv1', 'integer', 42]).evaluate();
+    expect(result.valueOf()).toEqual(42);
+    expect(ce.expr('dv1').type.toString()).toEqual('integer');
+    expect(ce.expr('dv1').valueOf()).toEqual(42);
+  });
+
+  test('["Declare"] operator without a value evaluates to Nothing', () => {
+    const result = ce.box(['Declare', 'dv2', 'integer']).evaluate();
+    expect(result.symbol).toEqual('Nothing');
+    expect(ce.expr('dv2').type.toString()).toEqual('integer');
+  });
+
   test("Can't declare twice in same scope", () => {
     ce.declare('d', { type: 'number' });
 

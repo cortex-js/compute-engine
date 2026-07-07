@@ -68,6 +68,15 @@
   (`Function(Apply(f, _), _)`), which the caller applies to whatever value it
   wants to pipe in. `\rhd`, `\triangleright`, and `⊳` behave identically.
 
+### Runtime and Scoping
+
+- **`Declare` now accepts an optional initial value.** The three-operand form
+  `["Declare", symbol, type, value]` declares the symbol with the given type,
+  sets its initial value, and evaluates to that value (the previous form
+  evaluated to `Nothing`). This matches the documented signature; earlier the
+  value operand was silently dropped. The one- and two-operand forms are
+  unchanged.
+
 ## 0.68.0 _2026-07-05_
 
 ### Breaking Changes

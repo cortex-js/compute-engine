@@ -686,10 +686,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Declare: {
-      description: 'Declare a symbol and optionally assign a type.',
+      description:
+        'Declare a symbol in the current scope, optionally assigning a type ' +
+        'and an initial value. With a value, evaluates to that value; ' +
+        'otherwise evaluates to `Nothing`.',
       lazy: true,
       pure: false,
-      signature: '(symbol, type: string | symbol) -> nothing',
+      signature: '(symbol, type: (string | symbol)?, value: any?) -> any',
+      // With a value operand, `Declare` evaluates to the value; otherwise
+      // to `Nothing`.
+      type: (ops) => (ops[2] ? ops[2].type : 'nothing'),
       canonical: (args, { engine: ce }) => {
         // Note: we can't use checkType() because it canonicalized/bind the argument.
         let symbolExpr = args[0];
@@ -700,9 +706,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         if (args.length === 1) return ce._fn('Declare', [symbolExpr]);
 
-        if (args.length !== 2) return null;
+        if (args.length === 2)
+          return ce._fn('Declare', [symbolExpr, args[1]]);
 
-        return ce._fn('Declare', [symbolExpr, args[1]]);
+        if (args.length === 3)
+          return ce._fn('Declare', [symbolExpr, args[1], args[2].canonical]);
+
+        return null;
       },
       evaluate: (ops, { engine: ce }) => {
         const symbolName = sym(ops[0].evaluate());
@@ -728,26 +738,38 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           existingValueDef.value.inferredType &&
           existingValueDef.value.value === undefined;
 
+        // An optional initial value (third operand). When present, `Declare`
+        // sets the symbol's value and evaluates to it.
+        const hasValue = ops[2] !== undefined;
+        const value = hasValue ? ops[2].evaluate() : undefined;
+
+        // Establish the type binding (first, so the value assignment below
+        // is checked against the declared type).
         if (!ops[1]) {
-          if (isAutoDeclareHere) return ce.Nothing;
-          ce.declare(symbolName, { inferred: true, type: 'unknown' });
-          return ce.Nothing;
+          if (!isAutoDeclareHere)
+            ce.declare(symbolName, { inferred: true, type: 'unknown' });
+          // else: keep the existing auto-declared binding
+        } else {
+          const t = ops[1].canonical.evaluate();
+
+          const type = parseType(
+            (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined
+          );
+          if (!isValidType(type)) return undefined;
+
+          if (isAutoDeclareHere && existingValueDef) {
+            existingValueDef.value.type = ce.type(type);
+            existingValueDef.value.inferredType = false;
+          } else {
+            ce.declare(symbolName, type);
+          }
         }
 
-        const t = ops[1].canonical.evaluate();
-
-        const type = parseType(
-          (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined
-        );
-        if (!isValidType(type)) return undefined;
-
-        if (isAutoDeclareHere && existingValueDef) {
-          existingValueDef.value.type = ce.type(type);
-          existingValueDef.value.inferredType = false;
-          return ce.Nothing;
+        if (hasValue) {
+          ce.assign(symbolName, value!);
+          return value;
         }
 
-        ce.declare(symbolName, type);
         return ce.Nothing;
       },
     },
