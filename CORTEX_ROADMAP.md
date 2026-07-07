@@ -61,7 +61,7 @@ Dependency order: **0 ∥ 1 → 2 → (3 ∥ 4) → 5**. Full plans in
 | Phase | Scope | Plan | Status |
 | --- | --- | --- | --- |
 | 0 — Hygiene | Mechanical fixes to current code + docs (`#date` bug, List/Set swap, `Element` naming, console output, docs errors) | [plan](./roadmap/cortex/phase-0-hygiene.md) | ✅ done (2026-07-07) |
-| 1 — Parser foundation | New lexer/parser, diagnostics + recovery, port lexical layer (49 green tests = DoD), delete `point-free-parser` | [plan](./roadmap/cortex/phase-1-parser-foundation.md) | not started |
+| 1 — Parser foundation | New lexer/parser, diagnostics + recovery, port lexical layer (49 green tests = DoD), delete `point-free-parser` | [plan](./roadmap/cortex/phase-1-parser-foundation.md) | ✅ done (2026-07-07) |
 | 2 — Expression layer | Shared operator table, Pratt + whitespace rule, calls, collections, dictionaries, type annotations, `$…$` islands; un-skip all suites | [plan](./roadmap/cortex/phase-2-expression-layer.md) | not started |
 | 3 — Round-trip | Serializer completion, parse∘serialize property test, loose-syntax compat check | [plan](./roadmap/cortex/phase-3-round-trip.md) | not started |
 | 4 — Semantics & execution | `executeCortex`, declarations/scoping, function definitions, control flow, pragma security, Tycho integration | [plan](./roadmap/cortex/phase-4-semantics.md) | not started |
@@ -139,6 +139,24 @@ and the docs.
 
 ## Completed log
 
+- 2026-07-07 — **Phase 1 (Parser foundation)**: hand-written `Lexer` +
+  `Parser` in the `common/type` house style replaces `point-free-parser/`
+  (all 9 files deleted). New files under `src/cortex/`: `tokens.ts`,
+  `lexer.ts`, `parser.ts`, `diagnostics.ts` (ported types), `characters.ts`
+  (moved from point-free); `test/cortex/lexer.test.ts` (53 new unit tests, the
+  old library had none). `parseCortex` rewired behind its unchanged public
+  signature; never-throws + two-level panic-mode recovery; numbers lex as raw
+  text and convert to `{num}` with full precision (40-digit check passes).
+  All previously-passing cortex tests green (104 passed / 21 still skipped for
+  Phase 2), typecheck + `tsc -p` + madge (0 cycles, `src/cortex` stays out of
+  the `compute-engine` graph) clean, zero `point-free-parser` references remain.
+  Two intentional value-snapshot changes (spec-correct, not regressions): the
+  stricter exponent lexer splits `2et` → `2`,`et` (old half-consumed the `e`),
+  and multiline `\`-continuation now joins lines per `docs/literals.md`
+  (`"""…hello\⏎world…"""` → `helloworld`, fixing the old `.slice(-1)` bug).
+  Diagnostic-message snapshots also shifted (reviewed; values unchanged). Not
+  committed. Fullwidth-digit support kept (open question resolved). Next: Phase 2
+  (expression layer) — un-skip the 21 suites.
 - 2026-07-07 — **Phase 0 (Hygiene)**: all 11 items landed. Code — `#date`
   `getDay()`→`getDate()`; serializer List `[…]` / Set `{…}` (empty `{}`);
   `ElementOf`/`NotElementOf` keys → `Element`/`NotElement`; dropped

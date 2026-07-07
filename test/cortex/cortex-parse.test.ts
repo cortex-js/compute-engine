@@ -139,7 +139,7 @@ describe('CORTEX PARSING COMMENTS', () => {
           String,
           [
             unexpected-symbol,
-            *,
+            */,
           ],
         ],
       ]
@@ -222,7 +222,11 @@ describe('CORTEX PARSING NUMBERS', () => {
     expect(invalidCortex('2et')).toMatchInlineSnapshot(`
       [
         UnexpectedSuccess,
-        2et,
+        [
+          Do,
+          2,
+          et,
+        ],
       ]
     `);
     expect(invalidCortex('62_73_7547.k-13')).toMatchInlineSnapshot(`
@@ -335,8 +339,8 @@ describe('CORTEX PARSING SYMBOLS', () => {
       ,
           ],
           [
-            unexpected-symbol,
-            d,
+            unbalanced-verbatim-symbol,
+            ,
           ],
         ],
       ]
@@ -542,8 +546,8 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
             ",
           ],
           [
-            unexpected-symbol,
-            e,
+            string-literal-opening-delimiter-expected,
+            ",
           ],
         ],
       ]
@@ -642,15 +646,15 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
         [
           String,
           [
-            string-literal-opening-delimiter-expected,
-            ",
-          ],
-          [
             closing-bracket-expected,
             ),
           ],
           [
             string-literal-closing-delimiter-expected,
+            ",
+          ],
+          [
+            string-literal-opening-delimiter-expected,
             ",
           ],
         ],
@@ -665,6 +669,14 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
             closing-bracket-expected,
             ),
           ],
+          [
+            string-literal-closing-delimiter-expected,
+            ",
+          ],
+          [
+            unexpected-symbol,
+            +,
+          ],
         ],
       ]
     `);
@@ -677,6 +689,14 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
             closing-bracket-expected,
             ),
           ],
+          [
+            string-literal-closing-delimiter-expected,
+            ",
+          ],
+          [
+            string-literal-opening-delimiter-expected,
+            ",
+          ],
         ],
       ]
     `);
@@ -688,6 +708,14 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
           [
             closing-bracket-expected,
             ),
+          ],
+          [
+            string-literal-closing-delimiter-expected,
+            ",
+          ],
+          [
+            string-literal-opening-delimiter-expected,
+            ",
           ],
         ],
       ]
@@ -718,7 +746,7 @@ describe('CORTEX PARSING MULTILINE STRINGS', () => {
     });
 
     expect(validCortex('"""\n\t  hello\\\n\t  world\n\t  """')).toStrictEqual({
-      str: 'hello\\\\\\n\\t  world',
+      str: 'helloworld',
     });
   });
   test('Invalid string', () => {
@@ -729,8 +757,8 @@ describe('CORTEX PARSING MULTILINE STRINGS', () => {
           String,
           multiline-string-expected,
           [
-            unexpected-symbol,
-            a,
+            string-literal-closing-delimiter-expected,
+            """,
           ],
         ],
       ]

@@ -1,5 +1,5 @@
 import { MathJsonExpression as Expression } from '../src/math-json/types';
-import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
+import { ParsingDiagnostic } from '../src/cortex/diagnostics';
 import { ComputeEngine } from '../src/compute-engine';
 
 import { parseCortex } from '../src/cortex';

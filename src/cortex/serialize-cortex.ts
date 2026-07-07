@@ -32,7 +32,7 @@ import {
   ESCAPED_CHARS,
   isBreak,
   isInvisible,
-} from '../point-free-parser/characters';
+} from './characters';
 import { RESERVED_WORDS } from './reserved-words';
 
 export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
