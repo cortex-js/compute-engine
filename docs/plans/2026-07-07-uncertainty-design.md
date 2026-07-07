@@ -19,7 +19,10 @@ this feature's *display* half nearly for free.
    dominant real-world meaning of `5.1 ± 0.2` is a measurement, not "the two
    values 4.9 and 5.3".
 2. **Independent linear (quadrature) propagation for the MVP** — not dual-number
-   correlation tracking. Rationale below (§"Why independent is enough").
+   correlation tracking. Shipped as *documented independent-error propagation*:
+   correct for distinct measurements each appearing once, over/under-estimating
+   when one measured variable is reused across operands. `simplify` is NOT
+   auto-invoked. See §"Correctness boundary of independent propagation".
 
 ## Representation
 
@@ -72,22 +75,55 @@ General unary rule: `σ_f = |f'(a)|·σ_a`. The propagated error is generally
 inexact (quadrature introduces `√`); that is acceptable — errors are
 approximate by nature. Nominals keep their own exactness.
 
-### Why independent is enough (the symbolic-canonicalization insight)
+### Correctness boundary of independent propagation
 
-Naive independent propagation is famously wrong on correlated reuse of one
-source (`x − x` → `√2·σ` instead of 0). **CE avoids this for free** because
-same-variable reuse is resolved by *symbolic canonicalization before any numeric
-propagation*:
+**Decided 2026-07-07: ship the independent MVP, documented — do NOT auto-invoke
+`simplify` inside `evaluate`/`N`.** An earlier draft of this doc claimed CE's
+symbolic canonicalization resolves same-variable reuse "for free" so that
+independent propagation is effectively correct. **That was verified false** and
+is corrected here.
 
-- `x − x` folds to `0` (generic-symbol fold) → error 0. ✓
-- `x + x` → `2x` → one scalar·measurement op → fully correlated `2a ± 2σ`. ✓
-- `x · x` → `x²` → one `pow` op → correct. ✓
+The `x − x → 0` generic-symbol fold only fires for a **free** symbol. Once `x`
+is *bound* to a measurement value (the only way to compute with one),
+canonicalization keeps `Add(x, Negate(x))` and `evaluate` substitutes the
+measurement into both slots, propagating them as **independent**. Empirically,
+with `x = Measurement(5, 0.2)`:
 
-The **only** residual wrong class is *nonlinear multi-occurrence of one source
-that does not collapse* — `x/(x+1)`, `sin(x)+x`. Real, but uncommon in the
-target audience, and exactly what the dual-number upgrade (below) fixes. So the
-MVP is genuinely correct for (a) combining distinct measurements and (b) any
-reuse that canonicalizes — not a compromise.
+- `x − x` → `Measurement(0, 0.283)` (should be `0`)
+- `x + x` → `Measurement(10, 0.283)` (should be `10 ± 0.4`)
+- `x · x` → `Measurement(25, 1.414)` (should be `25 ± 2.0`)
+- `x^2` → `Measurement(25, 2.0)` ✓ (a single `Power` op)
+
+**What the MVP gets right:**
+
+- **Distinct measured quantities, each appearing once** — `A = L·W`,
+  `F = m·a`, `ρ = m/V`. The dominant textbook pattern; exactly correct (they
+  genuinely are independent).
+- **Single-op reuse** — `x^2` (one `Power` op).
+
+**What it gets wrong:** one measured variable appearing in **≥2 operands** —
+`x·x` (if written that way rather than `x²`), `x − x`, `x/(x+1)` — is treated
+as independent and mis-estimates the error.
+
+**`simplify()` as an optional user aid (not a fix, not auto-invoked).**
+Simplifying *before* evaluating recovers the *collapsing* cases because it
+reduces them to single-occurrence forms symbolically: `(x−x).simplify() → 0`,
+`(x+x).simplify() → 2x → 10 ± 0.4`, `(x·x).simplify() → x² → 25 ± 2.0`. But it
+is **not** a general mechanism and is deliberately **not** wired into `N()`:
+
+- It is **incomplete** — `x/(x+1)` has no single-occurrence form, so `simplify`
+  leaves it and the error stays wrong.
+- It can **regress** — `simplify` expands `x·(1−x) → −x²+x`, splitting one
+  source across two independently-treated terms and giving `2.01` instead of the
+  true `1.8`. `simplify` optimizes nominal form, not source structure, and can
+  *increase* occurrence multiplicity. Auto-invoking it would make error bars
+  depend on unrelated simplify rules — worse than consistent, documented
+  independent semantics.
+
+The complete fix is the dual-number upgrade (see Non-goals) — correct
+regardless of algebraic form because correlation rides on source identity, not
+expression shape. Until then the feature is **independent-error propagation**,
+documented as such.
 
 ## Layering — no calculus dependency
 

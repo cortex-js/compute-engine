@@ -103,11 +103,15 @@ scipy is installed in `./venv`.
    [`docs/plans/2026-07-07-uncertainty-design.md`](./docs/plans/2026-07-07-uncertainty-design.md).
    Decisions: a `['Measurement', value, error]` head mirroring the `Quantity`
    precedent (library-level dispatch, **not** a `NumericValue` subclass);
-   **independent linear (quadrature) propagation** for the MVP (correct for
-   distinct-measurement combination and any reuse that canonicalizes — `x−x`,
-   `x+x`, `x·x` — since CE resolves same-variable reuse symbolically before
-   numeric propagation; dual-number correlation tracking is the documented later
-   upgrade for nonlinear multi-occurrence like `x/(x+1)`); per-op closed-form
+   **independent linear (quadrature) propagation** for the MVP, shipped as
+   *documented independent-error propagation* (correct for distinct measurements
+   each appearing once — `A=L·W` — and single-op reuse like `x²`; over/under-
+   estimates when one measured variable is reused across operands, since a bound
+   measurement substitutes eagerly and repeated occurrences are treated as
+   independent — the `x−x→0` fold only fires for *free* symbols. `simplify` is
+   an optional user aid for the collapsing cases but is NOT auto-invoked (it can
+   regress by expanding, e.g. `x(1−x)`). Dual-number correlation tracking is the
+   documented later upgrade for correct-by-default); per-op closed-form
    partials so there is **no calculus-engine dependency/cycle**; and a
    **breaking redefinition of `\pm`** from `PlusMinus` (branch tuple) to
    `Measurement`, migrating the solution-branch use (`calculus.ts`, `solve.ts`)

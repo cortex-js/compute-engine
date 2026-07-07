@@ -100,6 +100,7 @@ import {
   elementaryFunctionType,
   gammaPoleType,
   roundingFunctionType,
+  measurementType,
 } from './type-handlers';
 import {
   isQuantity,
@@ -108,6 +109,14 @@ import {
   quantityDivide,
   quantityPower,
 } from './quantity-arithmetic';
+import {
+  isMeasurement,
+  measurementAdd,
+  measurementMultiply,
+  measurementDivide,
+  measurementNegate,
+  measurementPower,
+} from './measurement-arithmetic';
 import { range, rangeLast } from './collections';
 import { run, runAsync, CancellationError } from '../../common/interruptible';
 import type {
@@ -267,6 +276,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const evaluated = ops.map((x) => x.evaluate());
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           return quantityAdd(engine!, evaluated);
+        }
+        if (evaluated.some((x) => x.operator === 'Measurement')) {
+          const r = measurementAdd(engine!, evaluated);
+          return numericApproximation ? r?.N() : r;
         }
         // Do not evaluate in the case of numericApproximation
         // to avoid premature rounding errors.
@@ -429,6 +442,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           evalDen.operator === 'Quantity'
         ) {
           return quantityDivide(engine!, evalNum, evalDen);
+        }
+        if (
+          evalNum.operator === 'Measurement' ||
+          evalDen.operator === 'Measurement'
+        ) {
+          const r = measurementDivide(engine!, evalNum, evalDen);
+          return numericApproximation ? r?.N() : r;
         }
         const res = num.div(den);
         if (numericApproximation && res.operator !== 'Divide') return res.N();
@@ -1356,6 +1376,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           return quantityMultiply(engine!, evaluated);
         }
+        if (evaluated.some((x) => x.operator === 'Measurement')) {
+          const r = measurementMultiply(engine!, evaluated);
+          return numericApproximation ? r?.N() : r;
+        }
         // Use evaluate in both cases: do not introduce premature rounding errors
         if (numericApproximation) return mulN(...ops);
         const result = mul(...evaluated);
@@ -1387,12 +1411,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
         return args[0].neg();
       },
-      evaluate: ([x], { engine }) => {
+      evaluate: ([x], { numericApproximation, engine }) => {
         const evalX = x.evaluate();
         if (isQuantity(evalX)) {
           const mag = evalX.op1.re;
           if (mag !== undefined)
             return engine._fn('Quantity', [engine.number(-mag), evalX.op2]);
+        }
+        if (isMeasurement(evalX)) {
+          const r = measurementNegate(engine, evalX);
+          return numericApproximation ? r?.N() : r;
         }
         const neg = evalX.neg();
         // If the operand only became a collection (vector/matrix) *after*
@@ -1404,6 +1432,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // distributes it element-wise. (Guarded so symbolic scalars like
         // `Negate(a)` don't recurse.)
         return evalX.isIndexedCollection ? neg.evaluate() : neg;
+      },
+    },
+
+    Measurement: {
+      description: 'A nominal value carrying a 1σ absolute uncertainty.',
+      complexity: 1200,
+      lazy: true,
+      signature: '(value, value) -> value',
+      type: measurementType,
+      canonical: (args, { engine: ce }) => {
+        if (args.length !== 2) return ce.error('incompatible-type');
+        const value = args[0].canonical;
+        const error = args[1].canonical;
+        // A zero (or absent) error collapses to the exact value (decided
+        // 2026-07-07: zero error is an exact value).
+        if (error.isSame(0)) return value;
+        // The error is a 1σ absolute magnitude: canonicalize to |error|.
+        return ce._fn('Measurement', [value, error.abs()]);
+      },
+      evaluate: (ops, { numericApproximation, engine: ce }) => {
+        const value = numericApproximation ? ops[0].N() : ops[0].evaluate();
+        const error = numericApproximation ? ops[1].N() : ops[1].evaluate();
+        if (error.isSame(0)) return value;
+        return ce._fn('Measurement', [value, error.abs()]);
       },
     },
 
@@ -1540,6 +1592,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const evalBase = x.evaluate();
         if (evalBase.operator === 'Quantity') {
           return quantityPower(engine!, evalBase, n.evaluate());
+        }
+        const evalExp = n.evaluate();
+        if (
+          evalBase.operator === 'Measurement' ||
+          evalExp.operator === 'Measurement'
+        ) {
+          const r = measurementPower(engine!, evalBase, evalExp);
+          return numericApproximation ? r?.N() : r;
         }
         // D2: an inexact (float) base or exponent numericizes even under
         // plain evaluate() — `Power(2, 5.1)` → 34.29…, matching `Cos(5.1)`.

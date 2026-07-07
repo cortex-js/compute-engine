@@ -1,5 +1,6 @@
 import type { Expression } from '../global-types';
 import type { Type } from '../../common/type/types';
+import type { BoxedType } from '../../common/type/boxed-type';
 
 /**
  * Type handlers for the standard library follow the **non-finite typing
@@ -157,6 +158,17 @@ export function roundingFunctionType(x: Expression | undefined): Type {
   if (x.isReal === false)
     return x.isFinite === true ? 'finite_complex' : 'number';
   return 'finite_integer';
+}
+
+/**
+ * `Measurement(value, error)` — a nominal value carrying a 1σ absolute error.
+ * The type is the nominal's scalar type (typically `real`); the error bar does
+ * not widen it.
+ */
+export function measurementType(
+  ops: ReadonlyArray<Expression>
+): Type | BoxedType {
+  return ops[0]?.type ?? 'real';
 }
 
 /**
