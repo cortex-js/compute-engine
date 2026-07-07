@@ -2,6 +2,35 @@
 export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
 /**
+ * Controls how many digits a number is **displayed** with when serialized.
+ *
+ * This is a display/formatting concern only: it does not change the stored
+ * value, nor the precision used for computation.
+ *
+ * - `"auto"`: round to the engine's working precision (`ce.precision`). This is
+ *   the default used by the `.latex` getter.
+ * - `"max"`: display all stored digits, with no rounding. This is the default
+ *   used by `.json` / `toMathJson()`.
+ * - `{ significant: n }`: round **inexact** values to `n` significant figures.
+ *   Exact values (integers, rationals, radicals) are displayed in full — this
+ *   is a no-op on them. Truncation only: trailing zeros are not padded
+ *   (`2.0` stays `2`).
+ * - `{ fractional: n }`: display `n` digits after the decimal point, using
+ *   `toFixed` semantics (may pad with trailing zeros, e.g. `2` → `2.00`).
+ *
+ * Rounding is orthogonal to notation: it never switches a number to
+ * scientific/exponential notation as a side effect. Fixed-vs-scientific is
+ * controlled by the `notation` / `avoidExponentsInRange` options.
+ *
+ * @category Serialization
+ */
+export type DisplayDigits =
+  | 'auto'
+  | 'max'
+  | { significant: number }
+  | { fractional: number };
+
+/**
  * Options to control serialization to MathJSON when using
  * `Expression.toMathJson()`.
  *
@@ -48,6 +77,17 @@ export type JsonSerializationOptions = {
   repeatingDecimal: boolean;
 
   /**
+   * Controls how many digits a number is displayed with. See
+   * {@link DisplayDigits}.
+   *
+   * When both `digits` and the deprecated `fractionalDigits` are provided,
+   * `digits` takes precedence.
+   *
+   * **Default**: `"max"` for `toMathJson()`, `"auto"` for the `.latex` getter.
+   */
+  digits?: DisplayDigits;
+
+  /**
    * Controls how many digits are emitted for arbitrary-precision numbers.
    *
    * - `"max"`: all available digits from the raw `BigDecimal` value,
@@ -62,6 +102,10 @@ export type JsonSerializationOptions = {
    * from precision-bounded operations are not displayed.
    *
    * **Default**: `"max"` (when called via `toMathJson()` directly)
+   *
+   * @deprecated Use {@link digits} instead. `fractionalDigits: n` (n ≥ 0) maps
+   * to `{ fractional: n }`, `"auto"`/`"max"` map to the same `digits` values,
+   * and the internal negative-`n` overload maps to `{ significant: -n }`.
    */
   fractionalDigits: 'auto' | 'max' | number;
 };

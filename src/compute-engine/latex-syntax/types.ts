@@ -1,6 +1,7 @@
 import type { OneOf } from '../../common/one-of';
 import type { MathJsonExpression, MathJsonSymbol } from '../../math-json/types';
 import type { TypeString } from '../../common/type/types';
+import type { DisplayDigits } from '../types-kernel-serialization';
 import { BoxedType } from '../../common/type/boxed-type';
 
 export type SymbolTable = {
@@ -693,11 +694,23 @@ export type NumberFormat = {
 /** @category Serialization */
 export type NumberSerializationFormat = NumberFormat & {
   /**
+   * Controls how many digits a number is displayed with. See
+   * {@link DisplayDigits}.
+   *
+   * When serializing via `.toLatex({ digits })`, rounding is applied at the
+   * MathJSON (kernel) layer; the LaTeX layer only lays out the already-rounded
+   * digits.
+   */
+  digits?: DisplayDigits;
+
+  /**
    * The maximum number of significant digits in serialized numbers.
    * - `"max"`: all availabe digits are serialized.
    * - `"auto"`: use the same precision as the compute engine.
    *
    * Default: `"auto"`
+   *
+   * @deprecated Use {@link digits} instead.
    */
   fractionalDigits: 'auto' | 'max' | number;
   notation: 'auto' | 'engineering' | 'scientific' | 'adaptiveScientific'; // @todo: add | 'percent'

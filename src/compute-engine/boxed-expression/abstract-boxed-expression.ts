@@ -271,10 +271,15 @@ export abstract class _BoxedExpression implements Expression {
       if (!materialized.isLazyCollection) return materialized.toLatex(options);
     }
 
-    const json = this.toMathJson({
-      prettify: options?.prettify ?? true,
-      fractionalDigits: 'auto',
-    });
+    // Round numbers at the MathJSON (kernel) layer so the LaTeX layer only
+    // lays out the already-rounded digits (it must not re-crop). When the
+    // caller supplies `digits`, thread it through; otherwise default to
+    // `'auto'` (round to engine precision), matching prior behavior.
+    const json = this.toMathJson(
+      options?.digits !== undefined
+        ? { prettify: options?.prettify ?? true, digits: options.digits }
+        : { prettify: options?.prettify ?? true, fractionalDigits: 'auto' }
+    );
 
     const syntax = this.engine._requireLatexSyntax();
     const latexOpts = this.engine.latexOptions;
@@ -352,10 +357,30 @@ export abstract class _BoxedExpression implements Expression {
         defaultOptions.fractionalDigits = -this.engine.precision; // When negative, indicate that the number of digits should be less than the number of whole digits + this value
       if (typeof options.fractionalDigits === 'number')
         defaultOptions.fractionalDigits = options.fractionalDigits;
+
+      // Resolve the number-display control. The current `digits` option takes
+      // precedence over the deprecated `fractionalDigits`.
+      if (options.digits !== undefined) {
+        if (options.fractionalDigits !== undefined)
+          console.warn(
+            '`digits` and `fractionalDigits` were both specified; `digits` takes precedence. `fractionalDigits` is deprecated — use `digits` instead.'
+          );
+        defaultOptions.digits = options.digits;
+      } else if (options.fractionalDigits === 'auto') {
+        defaultOptions.digits = 'auto';
+      } else if (options.fractionalDigits === 'max') {
+        defaultOptions.digits = 'max';
+      } else if (typeof options.fractionalDigits === 'number') {
+        defaultOptions.digits =
+          options.fractionalDigits < 0
+            ? { significant: -options.fractionalDigits }
+            : { fractional: options.fractionalDigits };
+      }
     }
     const opts: JsonSerializationOptions = {
       ...defaultOptions,
       ...options,
+      digits: defaultOptions.digits,
       fractionalDigits: defaultOptions.fractionalDigits,
       shorthands: defaultOptions.shorthands,
       metadata: defaultOptions.metadata,

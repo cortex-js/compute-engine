@@ -1,4 +1,6 @@
 import { engine as ce } from '../utils';
+import { BigDecimal } from '../../src/big-decimal';
+import { toAsciiMath } from '../../src/compute-engine/boxed-expression/ascii-math';
 
 // There are several paths that need to be tested:
 // - expr.json: only use shorthands, no sugaring/prettification, numbers are
@@ -348,5 +350,132 @@ describe('String round-trip (REVIEW.md G6)', () => {
 
   test('symbol-like string json is quoted, not bare', () => {
     expect(ce.string('world').json).toBe("'world'");
+  });
+});
+
+// Display-digits control (`digits` option): significant figures and decimal
+// places, applied at serialization time (a display concern, not the value).
+describe('DISPLAY DIGITS', () => {
+  const sig3 = { digits: { significant: 3 } } as const;
+  const frac2 = { digits: { fractional: 2 } } as const;
+
+  describe('toMathJson', () => {
+    test('π (N) → 3 sig figs / 2 fractional', () => {
+      const e = ce.parse('\\pi').N();
+      expect(e.toMathJson(sig3)).toEqual('3.14');
+      expect(e.toMathJson(frac2)).toEqual('3.14');
+    });
+
+    test('N(1/3) → 3 sig figs / 2 fractional', () => {
+      const e = ce.parse('\\frac{1}{3}').N();
+      expect(e.toMathJson(sig3)).toEqual('0.333');
+      expect(e.toMathJson(frac2)).toEqual('0.33');
+    });
+
+    test('1500. (float) stays fixed notation (not 1.5e3)', () => {
+      const e = ce.parse('1500.');
+      // exact integer: significant is a no-op
+      expect(e.toMathJson(sig3)).toEqual(1500);
+      expect(e.toMathJson(frac2)).toEqual({ num: '1500.00' });
+    });
+
+    test('integer-valued floats (1500.0, 7.0) pad like bare integers', () => {
+      // These parse to a pure-integer ExactNumericValue; `{ fractional }` must
+      // still pad them, and `{ significant }` stays a no-op.
+      const a = ce.parse('1500.0');
+      expect(a.toMathJson(frac2)).toEqual({ num: '1500.00' });
+      expect(a.toMathJson(sig3)).toEqual(1500);
+
+      const b = ce.parse('7.0');
+      expect(b.toMathJson(frac2)).toEqual({ num: '7.00' });
+      expect(b.toMathJson(sig3)).toEqual(7);
+
+      const c = ce.parse('123456.0');
+      expect(c.toMathJson(frac2)).toEqual({ num: '123456.00' });
+      expect(c.toMathJson(sig3)).toEqual(123456);
+    });
+
+    test('0.00123456 (float) → 3 sig figs / 2 fractional', () => {
+      const e = ce.parse('0.00123456');
+      expect(e.toMathJson(sig3)).toEqual('0.00123');
+      expect(e.toMathJson(frac2)).toEqual('0.00');
+    });
+
+    test('123456 (exact int): significant is a no-op, fractional pads', () => {
+      const e = ce.parse('123456');
+      expect(e.toMathJson(sig3)).toEqual(123456);
+      expect(e.toMathJson(frac2)).toEqual({ num: '123456.00' });
+    });
+
+    test('exact rational 1/3 stays a symbolic fraction', () => {
+      const e = ce.parse('\\frac{1}{3}');
+      expect(e.toMathJson(sig3)).toEqual(['Rational', 1, 3]);
+      expect(e.toMathJson(frac2)).toEqual(['Rational', 1, 3]);
+    });
+
+    test('high precision (BigDecimal path): π to 5 sig figs', () => {
+      const savedCE = ce.precision;
+      const savedBD = BigDecimal.precision;
+      try {
+        ce.precision = 30;
+        expect(ce.parse('\\pi').N().toMathJson({ digits: { significant: 5 } })).toEqual(
+          '3.1416'
+        );
+      } finally {
+        ce.precision = savedCE;
+        BigDecimal.precision = savedBD;
+      }
+    });
+  });
+
+  describe('toLatex', () => {
+    test('π (N) → 3 sig figs / 2 fractional', () => {
+      const e = ce.parse('\\pi').N();
+      expect(e.toLatex(sig3)).toEqual('3.14');
+      expect(e.toLatex(frac2)).toEqual('3.14');
+    });
+
+    test('exact rational 1/3 stays \\frac{1}{3}', () => {
+      const e = ce.parse('\\frac{1}{3}');
+      expect(e.toLatex(sig3)).toEqual('\\frac{1}{3}');
+      expect(e.toLatex(frac2)).toEqual('\\frac{1}{3}');
+    });
+  });
+
+  describe('AsciiMath', () => {
+    test('π (N) → 3 sig figs / 2 fractional', () => {
+      const e = ce.parse('\\pi').N();
+      expect(toAsciiMath(e as any, sig3)).toEqual('3.14');
+      expect(toAsciiMath(e as any, frac2)).toEqual('3.14');
+    });
+
+    test('exact integer: significant no-op, fractional pads', () => {
+      const e = ce.parse('123456');
+      expect(toAsciiMath(e as any, sig3)).toEqual('123456');
+      expect(toAsciiMath(e as any, frac2)).toEqual('123456.00');
+    });
+  });
+
+  describe('back-compat with fractionalDigits', () => {
+    test('legacy fractionalDigits: n behaves as { fractional: n }', () => {
+      const e = ce.parse('\\pi').N();
+      expect(e.toMathJson({ fractionalDigits: 2 })).toEqual(
+        e.toMathJson({ digits: { fractional: 2 } })
+      );
+    });
+
+    test("digits: 'max' matches legacy fractionalDigits: 'max'", () => {
+      const e = ce.parse('\\pi').N();
+      expect(e.toMathJson({ digits: 'max' })).toEqual(
+        e.toMathJson({ fractionalDigits: 'max' })
+      );
+    });
+
+    test('digits takes precedence over fractionalDigits', () => {
+      const e = ce.parse('\\pi').N();
+      expect(
+        e.toMathJson({ digits: { significant: 3 }, fractionalDigits: 6 })
+      ).toEqual('3.14');
+    });
   });
 });

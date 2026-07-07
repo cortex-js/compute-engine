@@ -30,7 +30,9 @@ import type {
   Expression,
   FunctionInterface,
   JsonSerializationOptions,
+  DisplayDigits,
 } from '../global-types';
+import { roundToSignificant, roundToDecimalPlace } from '../numerics/strings';
 import { isOperatorDef } from './utils';
 import { isNumber, isSymbol, isString, isFunction } from './type-guards';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils';
@@ -628,6 +630,24 @@ function serializeRepeatingDecimals(
   return `${wholepart}.${fractionalPart}`;
 }
 
+/**
+ * Resolve the effective number-display control from the serialization options.
+ *
+ * `options.digits` (the current control) takes precedence; when it is absent
+ * (e.g. options constructed directly rather than via `toMathJson()`), fall back
+ * to interpreting the deprecated `options.fractionalDigits` field.
+ */
+function effectiveDigits(
+  options: Readonly<JsonSerializationOptions>
+): DisplayDigits {
+  if (options.digits !== undefined) return options.digits;
+  const fd = options.fractionalDigits;
+  if (fd === 'auto' || fd === 'max') return fd;
+  if (typeof fd === 'number')
+    return fd < 0 ? { significant: -fd } : { fractional: fd };
+  return 'max';
+}
+
 function serializeJsonNumber(
   ce: ComputeEngine,
   value: number | bigint | NumericValue | BigDecimal | Complex | Rational,
@@ -668,18 +688,37 @@ function serializeJsonNumber(
     if (value instanceof ExactNumericValue) {
       // Note: implement same logic as in ExactNumericValue.toJSON()
 
+      // A pure real integer (no denominator, no radical, no imaginary part) is
+      // a whole number *value*, not a structural composite — so the
+      // number-display control applies to it directly (e.g. `1500.0` with
+      // `{ fractional: 2 }` must pad to `1500.00`, matching a bare `1500`).
+      // `{ significant: n }` remains a no-op on it, and `'auto'`/`'max'` still
+      // emit the bare integer.
+      if (value.im === 0 && value.radical === 1 && isInteger(value.rational))
+        return serializeJsonNumber(ce, value.rational[0], options);
+
       // Honor the `exclude` option for the heads emitted here. The default
       // `.json` path (`ExactNumericValue.toJSON()`) always uses `Rational`/
       // `Sqrt`; only `toMathJson({ exclude: […] })` diverges, so the default
       // output is unchanged (exclusions default to `[]`).
       const excludeRational = exclusions.includes('Rational');
       const excludeSqrt = exclusions.includes('Sqrt');
+      // The components of an exact value (numerator/denominator of a rational,
+      // radicand of a radical) are structural integers and always render in
+      // full — the number-display control (`digits`) applies to the value as a
+      // whole, not to these parts (e.g. `{ fractional: 2 }` must not turn
+      // `1/3` into `1.00/3.00`).
+      const partOptions: Readonly<JsonSerializationOptions> = {
+        ...options,
+        digits: 'max',
+        fractionalDigits: 'max',
+      };
       const rationalExpr = (r: Rational) => {
-        if (isInteger(r)) return serializeJsonNumber(ce, r[0], options);
+        if (isInteger(r)) return serializeJsonNumber(ce, r[0], partOptions);
         return [
           excludeRational ? 'Divide' : 'Rational',
-          serializeJsonNumber(ce, r[0], options),
-          serializeJsonNumber(ce, r[1], options),
+          serializeJsonNumber(ce, r[0], partOptions),
+          serializeJsonNumber(ce, r[1], partOptions),
         ] as MathJsonExpression;
       };
       // `√r` as either `Sqrt(r)` or, when `Sqrt` is excluded, `Power(r, 1/2)`
@@ -704,7 +743,7 @@ function serializeJsonNumber(
           return [
             'Divide',
             sqrtExpr(radical),
-            serializeJsonNumber(ce, rational[1], options),
+            serializeJsonNumber(ce, rational[1], partOptions),
           ];
         if (rational[0] == -1)
           return [
@@ -712,7 +751,7 @@ function serializeJsonNumber(
             [
               'Divide',
               sqrtExpr(radical),
-              serializeJsonNumber(ce, rational[1], options),
+              serializeJsonNumber(ce, rational[1], partOptions),
             ],
           ];
 
@@ -765,26 +804,39 @@ function serializeJsonNumber(
     else if (!value.isFinite())
       result = value.isPositive() ? 'PositiveInfinity' : 'NegativeInfinity';
     else {
-      // Use the number shorthand if the number can be represented as a machine number
-      if (shorthandAllowed && isInMachineRange(value)) return value.toNumber();
+      const digits = effectiveDigits(options);
+      const wantFractional = typeof digits === 'object' && 'fractional' in digits;
+      const needsRounding = typeof digits === 'object';
 
-      // Use toFixed for small integers, toString (scientific notation) for large
+      // Use the number shorthand if the number can be represented as a machine
+      // number and no explicit display rounding was requested.
+      if (shorthandAllowed && !needsRounding && isInMachineRange(value))
+        return value.toNumber();
+
       if (value.isInteger()) {
-        // For very large/small integers, use toString which gives scientific notation
-        const absStr = (
-          value.significand < 0n ? -value.significand : value.significand
-        ).toString();
-        const adjustedExp = absStr.length + value.exponent - 1;
-        num = adjustedExp > 20 ? value.toString() : value.toFixed(0);
+        if (wantFractional) {
+          // `toFixed` semantics: pad with trailing zeros (e.g. `5` → `5.00`).
+          num = roundToDecimalPlace(value, digits.fractional);
+        } else {
+          // Use toFixed for small integers, toString (scientific notation) for large
+          // For very large/small integers, use toString which gives scientific notation
+          const absStr = (
+            value.significand < 0n ? -value.significand : value.significand
+          ).toString();
+          const adjustedExp = absStr.length + value.exponent - 1;
+          num = adjustedExp > 20 ? value.toString() : value.toFixed(0);
+        }
+      } else if (wantFractional) {
+        // `toFixed` semantics: emit the fixed-point string directly (with
+        // any trailing-zero padding) — do not run repeating-decimal
+        // detection, which would strip the padding.
+        num = roundToDecimalPlace(value, digits.fractional);
       } else {
-        const precision = options.fractionalDigits;
         let s: string;
-        if (precision === 'max') s = value.toString();
-        else if (precision === 'auto')
-          s = value.toPrecision(ce.precision).toString();
-        else if (typeof precision === 'number' && precision < 0)
-          s = value.toPrecision(-precision).toString();
-        else s = value.toFixed(precision);
+        if (digits === 'max') s = value.toString();
+        else if (digits === 'auto')
+          s = roundToSignificant(value, ce.precision).toString();
+        else s = roundToSignificant(value, digits.significant).toString();
 
         num = serializeRepeatingDecimals(s, options);
 
@@ -895,7 +947,26 @@ function serializeJsonNumber(
   if (Number.isNaN(value)) result = 'NaN';
   else if (!Number.isFinite(value))
     result = value > 0 ? 'PositiveInfinity' : 'NegativeInfinity';
-  else num = serializeRepeatingDecimals(value.toString(), options);
+  else {
+    const digits = effectiveDigits(options);
+    if (typeof digits === 'object' && 'fractional' in digits) {
+      // `toFixed` semantics, preserving trailing-zero padding (bypass the
+      // repeating-decimal detection which would strip it).
+      num = roundToDecimalPlace(value, digits.fractional);
+    } else {
+      let v = value;
+      // `{ significant: n }` is a no-op on exact values. A bare non-integer
+      // machine number is an inexact float (exact non-integers are stored as
+      // rationals/radicals), so `Number.isInteger` is the exact/inexact split.
+      if (
+        typeof digits === 'object' &&
+        'significant' in digits &&
+        !Number.isInteger(value)
+      )
+        v = roundToSignificant(value, digits.significant);
+      num = serializeRepeatingDecimals(v.toString(), options);
+    }
+  }
 
   if (options.metadata.includes('latex') && ce.latexSyntax)
     metadata.latex =

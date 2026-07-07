@@ -100,7 +100,11 @@ scipy is installed in `./venv`.
    (`5.1 ± 0.2 cm`) propagating through arithmetic, layered on the existing
    units/quantity arithmetic. Core lab-course and experimental-science need;
    the interval engine covers enclosure but not statistical error bars.
-   Design item: linear (partial-derivative) vs interval propagation.
+   Design item: linear (partial-derivative) vs interval propagation. Its
+   *display* half is nearly free once item 7 lands — rendering `x ± e` rounds
+   the value to the error's least-significant place (a *derived* digit count),
+   so it reuses item 7's rounding primitive verbatim; the M/L work is the
+   value-carrying arithmetic, which stands on its own and needs this go-ahead.
 6. **MathML output + speakable text (M).** Communication and accessibility:
    MathML serialization for export/interchange (web, Word, EPUB) and a
    speakable-text serializer for screen readers. AsciiMath output already
@@ -108,7 +112,47 @@ scipy is installed in `./venv`.
    education audience.
 7. **Significant-figures display control (S).** Scientific/engineering
    notation and locale separators exist; an explicit sig-fig count (and
-   sig-fig-aware rounding on display) does not. Small, pairs with item 5.
+   sig-fig-aware rounding on display) does not. **Design agreed 2026-07-07.**
+   Single serializer field `digits: 'auto' | 'max' | { significant: n } |
+   { fractional: n }` (a tagged union — one rounding mode expressible at a
+   time, no mutually-exclusive sibling fields); soft-deprecates the existing
+   `fractionalDigits`, which normalizes into the union (`n≥0 → {fractional:n}`,
+   the internal negative-`n` sig-fig overload → `{significant:-n}`), with
+   `digits` winning if both are passed. Semantics: `{significant:n}` is a
+   **no-op on exact values** (`isExact` — exact ints/rationals/radicals render
+   in full; only inexact/float values round); rounding is orthogonal to
+   notation (fixed vs scientific stays owned by `notation`/
+   `avoidExponentsInRange`, so `1500` at 2 sig figs stays ambiguous in fixed
+   notation by design). **Truncation only** — `{significant:n}` drops excess
+   digits (round to n sig figs); trailing-zero *padding* (`2.0` at
+   `{significant:2}` → `2.0`) is **deferred to item 5** (spike note below).
+   Applies across all three surfaces — `.latex`/`toLatex`,
+   `.json`/`toMathJson`, and `toString()`/AsciiMath (the last is currently
+   uncontrolled). Display-only for now; a `NumberForm`-style operator is a
+   possible later add. **Extract the rounding as a pure primitive**
+   (`roundToSignificant(value,n)` / `roundToDecimalPlace(value,k)`) rather than
+   inlining `toPrecision`/`toFixed` in `serializeJsonNumber` — item 5's
+   uncertainty display reuses it. Plumbing: `latex-syntax/types.ts` (type +
+   field), options normalization (legacy alias), `serialize.ts` (~780–787,
+   the `digits` switch + `isExact` guard), `abstract-boxed-expression.ts`
+   (stop hardcoding `fractionalDigits:'auto'`; thread `digits`, default
+   `'auto'`), `ascii-math.ts` (583–596). **Spike done 2026-07-07** — three
+   findings reshape the plumbing: (1) `BigDecimal.toPrecision(n)` returns a
+   *value*, so it cannot pad trailing zeros (`2.00` and `2` are one value) —
+   padding is a string-formatter concern, hence deferred to item 5, where its
+   only real beneficiary (measurements) lives; in plain CE padding has almost
+   no target anyway (exact-short values are B(ii)-exempt, `2.0` boxes to exact
+   `2` before any serializer runs, and inexact values almost always have *more*
+   digits → truncation, not padding). (2) BigDecimal truncation already works
+   (`π`@30 with `{significant:5}` → `3.1416`) but **machine floats bypass the
+   rounding branch entirely** in `serialize.ts` (separate machine-number path)
+   — must be wired in. (3) The LaTeX-layer `fractionalDigits`
+   (`formatFractionalPart`) **double-applies** when the same value flows to
+   both layers and corrupts output (`3.\ldots`) — `digits` must round at the
+   kernel layer only, with the LaTeX layer not re-cropping. So the remaining
+   build is: the `digits` union + normalization, a value-level round applied
+   uniformly to the BigDecimal **and** machine-float paths, the LaTeX
+   double-apply fix, AsciiMath wiring, and the extracted primitive.
 8. **Chemistry notation — mhchem `\ce{}` (M).** Chemical formulas, isotopes,
    reaction arrows. Only if chemistry is in scope for Graph Paper — decide
    before investing; `mol` exists solely as a unit dimension today.

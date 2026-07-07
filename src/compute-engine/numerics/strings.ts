@@ -1,3 +1,45 @@
+import type { BigDecimal } from '../../big-decimal';
+
+/**
+ * Round a value to `n` significant figures, returning a value of the same kind
+ * (used by the number-display `{ significant: n }` control).
+ *
+ * Truncation only — no trailing-zero padding. For machine numbers, the value
+ * is round-tripped through `parseFloat(x.toPrecision(n))` so that the caller
+ * can serialize it through the normal string path; this avoids the exponential
+ * notation that `Number.prototype.toPrecision` injects for large/small
+ * magnitudes (e.g. `(1500).toPrecision(2)` → `"1.5e+3"` would otherwise leak
+ * into fixed-notation output).
+ */
+export function roundToSignificant(value: number, n: number): number;
+export function roundToSignificant(value: BigDecimal, n: number): BigDecimal;
+export function roundToSignificant(
+  value: number | BigDecimal,
+  n: number
+): number | BigDecimal;
+export function roundToSignificant(
+  value: number | BigDecimal,
+  n: number
+): number | BigDecimal {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return value;
+    return parseFloat(value.toPrecision(n));
+  }
+  return value.toPrecision(n);
+}
+
+/**
+ * Round a value to `k` digits after the decimal point (`toFixed` semantics),
+ * returning the fixed-point string (used by the number-display
+ * `{ fractional: k }` control). May include trailing zeros (e.g. `2` → `2.00`).
+ */
+export function roundToDecimalPlace(
+  value: number | BigDecimal,
+  k: number
+): string {
+  return value.toFixed(k);
+}
+
 function fromRoman(roman: string): [result: number, rest: string] {
   if (roman === 'N') return [0, ''];
 

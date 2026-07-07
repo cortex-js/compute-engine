@@ -1,6 +1,12 @@
-import type { Expression, FunctionInterface } from '../global-types';
+import type {
+  Expression,
+  FunctionInterface,
+  DisplayDigits,
+} from '../global-types';
+import type { BigDecimal } from '../../big-decimal';
 
 import { isRational } from '../numerics/rationals';
+import { roundToSignificant, roundToDecimalPlace } from '../numerics/strings';
 import { isFunction, isSymbol, isString, isNumber } from './type-guards';
 
 /** Helper type for expressions known to be function expressions (in operator/function callbacks) */
@@ -36,7 +42,29 @@ export type AsciiMathOptions = {
     string,
     string | ((expr: Expression, serialize: AsciiMathSerializer) => string)
   >;
+  /** Controls how many digits numbers are displayed with. See `DisplayDigits`. */
+  digits?: DisplayDigits;
 };
+
+/**
+ * Apply the `digits` display control to a real number value for AsciiMath
+ * output. Returns the numeric string, or `undefined` to fall through to the
+ * default serialization.
+ */
+function serializeAsciiNumber(
+  value: number | BigDecimal,
+  isExact: boolean,
+  digits: DisplayDigits | undefined
+): string {
+  if (digits === undefined || digits === 'auto' || digits === 'max')
+    return value.toString();
+  if ('significant' in digits) {
+    // No-op on exact values (integers, rationals, radicals).
+    if (isExact) return value.toString();
+    return roundToSignificant(value, digits.significant).toString();
+  }
+  return roundToDecimalPlace(value, digits.fractional);
+}
 
 const SYMBOLS: Record<string, string> = {
   PositiveInfinity: '+oo',
@@ -593,6 +621,17 @@ export function toAsciiMath(
     }
 
     // It's either a plain number or a NumericValue...
+    if (options.digits !== undefined) {
+      if (typeof num === 'number')
+        return serializeAsciiNumber(num, expr.isExact, options.digits);
+      // Round real values only; leave complex values to their default form.
+      if (num.im === 0)
+        return serializeAsciiNumber(
+          num.bignumRe ?? num.re,
+          expr.isExact,
+          options.digits
+        );
+    }
     return num.toString();
   }
 

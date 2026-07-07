@@ -4,6 +4,7 @@ import type {
   BoxedSubstitution as KernelBoxedSubstitution,
   CanonicalForm,
   CanonicalOptions,
+  DisplayDigits,
   FormOption,
   Hold,
   JsonSerializationOptions,
@@ -16,6 +17,7 @@ import type {
 export type {
   Hold,
   JsonSerializationOptions,
+  DisplayDigits,
   ReplaceOptions,
   CanonicalForm,
   CanonicalOptions,

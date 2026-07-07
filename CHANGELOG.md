@@ -2,6 +2,23 @@
 
 ### Parsing and Serialization
 
+- **New `digits` serialization option for significant-figures and
+  decimal-place display control.** Available on `expr.toLatex()`,
+  `expr.toMathJson()`, and honored by `expr.toString()`, `digits` controls how
+  many digits of a number are _displayed_ (a formatting choice — it does not
+  change the stored value or computation precision):
+  - `digits: { significant: n }` rounds to `n` significant figures
+    (`ce.parse("\\pi").N().toLatex({ digits: { significant: 3 } })` → `3.14`).
+    Rounding is independent of notation (`1500` at two significant figures
+    stays `1500` in fixed notation; use `notation: "scientific"` for
+    `1.5 \cdot 10^{3}`), and exact integers, rationals, and radicals are shown
+    in full — only inexact values are rounded.
+  - `digits: { fractional: n }` shows `n` digits after the decimal point
+    (`toFixed` semantics), and `digits: "auto"` / `"max"` behave as before.
+  - The `fractionalDigits` option is **deprecated** in favor of `digits`. It
+    continues to work (a numeric `n` is equivalent to
+    `digits: { fractional: n }`); if both are provided, `digits` wins.
+
 - **The pipeline operator `|>` supports a topic marker and a prefix form.** A
   `\square` in the right-hand side marks where the piped value is substituted,
   so the right-hand side may be a multi-argument call:
