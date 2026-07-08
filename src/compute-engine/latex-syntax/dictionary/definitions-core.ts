@@ -3424,6 +3424,33 @@ function isParenGroupDelimiter(lhs: MathJsonExpression): boolean {
   return typeof fence === 'string' && fence.length >= 2 && fence[0] === '(';
 }
 
+/** Compound heads that can reach `parseAt` as an LHS but are NOT function
+ * applications, so they must not be indexed here. `Delimiter` and `List` are
+ * accepted through their own gates; the rest are structural: a bare
+ * `Sequence`, an `InvisibleOperator` juxtaposition product, an `Error`, or an
+ * already-built `At` (chained indexing is unsupported, matching the symbol
+ * path `x[1][2]`). */
+const NON_APPLICATION_HEADS = new Set([
+  'Delimiter',
+  'List',
+  'Sequence',
+  'InvisibleOperator',
+  'Error',
+  'At',
+]);
+
+/** The LHS is a function application (`f(x)`, `\operatorname{sphere}(u,v)`)
+ * when it is a compound expression with a symbol head that is not one of the
+ * structural non-application heads. Such a call is a valid indexing target
+ * (`f(x)[1]` → `At(f(x), 1)`). An undeclared juxtaposition (`g(x)`) never
+ * reaches here as an application: it parses to `InvisibleOperator` and the
+ * bracket binds to the inner parenthesized group instead. */
+function isFunctionApplication(lhs: MathJsonExpression): boolean {
+  const head = operator(lhs);
+  if (typeof head !== 'string' || head === '') return false;
+  return !NON_APPLICATION_HEADS.has(head);
+}
+
 function parseAt(
   ...close: string[]
 ): (parser: Parser, lhs: MathJsonExpression) => MathJsonExpression | null {
@@ -3433,18 +3460,21 @@ function parseAt(
     parser: Parser,
     lhs: MathJsonExpression
   ): MathJsonExpression | null => {
-    // The LHS must be indexable: a symbol, a List literal, or a
-    // parenthesized group. A parenthesized group reaches us as a `Delimiter`
-    // with `(` fences (e.g. `(3,4)` → `Delimiter(Sequence(3,4), '(,)')`,
-    // `(x+1)` → `Delimiter(Add(x,1))`). Only parentheses can present a
-    // compound LHS here: a bare compound such as `x+1[2]` binds the bracket
-    // to its last operand via precedence, so `Add(x,1)` never reaches us.
-    // The Delimiter is left intact and unwrapped to a `Tuple`/inner
-    // expression by canonicalization.
+    // The LHS must be indexable: a symbol, a List literal, a parenthesized
+    // group, or a function application. A parenthesized group reaches us as a
+    // `Delimiter` with `(` fences (e.g. `(3,4)` → `Delimiter(Sequence(3,4),
+    // '(,)')`, `(x+1)` → `Delimiter(Add(x,1))`). A function application
+    // reaches us as `[head, ...args]` (e.g. `f(x)` → `["f","x"]`,
+    // `\operatorname{sphere}(u,v)` → `["Sphere","u","v"]`). Only parentheses
+    // and calls can present a compound LHS here: a bare compound such as
+    // `x+1[2]` binds the bracket to its last operand via precedence, so
+    // `Add(x,1)` never reaches us. The Delimiter is left intact and unwrapped
+    // to a `Tuple`/inner expression by canonicalization.
     if (
       !symbol(lhs) &&
       operator(lhs) !== 'List' &&
-      !isParenGroupDelimiter(lhs)
+      !isParenGroupDelimiter(lhs) &&
+      !isFunctionApplication(lhs)
     )
       return null;
 

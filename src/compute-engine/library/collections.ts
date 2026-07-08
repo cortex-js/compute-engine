@@ -3,11 +3,13 @@ import {
   checkType,
   checkTypes,
   spellCheckMessage,
+  validateArguments,
 } from '../boxed-expression/validate';
 import { toInteger } from '../boxed-expression/numerics';
 
 import {
   basicIndexedCollectionHandlers,
+  isDeclaredScalarNumber,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils';
 import { extractFiniteDomainWithReason } from './logic-analysis';
@@ -48,6 +50,13 @@ import { typeMembership } from './sets';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
+
+// Parsed form of the `At` signature (kept in sync with the `signature:` string
+// on the `At` definition), used by its custom canonical handler to delegate
+// operand validation to `validateArguments`.
+const AT_SIGNATURE = parseType(
+  '(value: indexed_collection | dictionary, index: (number|string|indexed_collection)+) -> unknown'
+);
 
 // Shared instance of the basic handlers, used by the `Set` handlers to
 // delegate the literal (non-comprehension) cases.
@@ -1199,6 +1208,40 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       xs.operatorDefinition?.collection?.elttype?.(xs) ??
       collectionElementType(xs.type.type) ??
       'any',
+
+    // Custom canonical handler so the value-operand check can tolerate
+    // dishonest collection-broadcast result types. A list-broadcast such as
+    // `Multiply([...], x)` reports a scalar-`number` result type though its
+    // value is actually a List; the generic signature validation would reject
+    // it as a non-collection. Index validation (and all its leniency for
+    // unknown/inferred operands) is delegated to the standard
+    // `validateArguments`; we then relax only the value operand, restoring it
+    // when the sole reason it failed is that its number type is not a
+    // *provable* scalar (see `isDeclaredScalarNumber`) — mirroring the
+    // `scalar + tuple` guard in `canonicalAdd`.
+    // STOPGAP: this special-case exists only because those result types lie —
+    // remove once they are honest (docs/plans/2026-07-07-honest-list-broadcast-typing.md).
+    canonical: (ops, { engine: ce }) => {
+      // `ops` are already canonical (At is not lazy).
+      const adjusted = validateArguments(ce, ops, AT_SIGNATURE, false, false);
+
+      // `null` → every operand matched; nothing to relax.
+      if (!adjusted) return ce._fn('At', ops);
+
+      const patched = [...adjusted];
+      const value = ops[0];
+      // Restore the value operand when it failed only because its number type
+      // is a dishonest collection-broadcast (not a provable scalar).
+      if (
+        value?.isValid &&
+        patched[0]?.operator === 'Error' &&
+        value.type.matches('number') &&
+        !isDeclaredScalarNumber(value)
+      )
+        patched[0] = value;
+
+      return ce._fn('At', patched);
+    },
 
     evaluate: (ops, { engine: ce }) => {
       // @todo: the implementation does not match the description. Need to think this through...

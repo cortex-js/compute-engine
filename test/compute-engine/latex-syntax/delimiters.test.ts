@@ -229,15 +229,62 @@ describe('DELIMITERS', () => {
     );
     // Symbol LHS multi-index path is preserved.
     expect(raw('x[1,2]')).toEqual('["At","x",1,2]');
+  });
 
-    // A declared function application is not broken by a trailing bracket:
-    // `f(x)` consumes `(x)` as its argument, leaving `[1]` unexpected.
+  // A postfix bracket after a function-call LHS indexes the call result,
+  // extending the symbol/paren-group indexing to `f(x)[i]`. All four fence
+  // combinations, multi-index, and range forms mirror the symbol path.
+  // Corpus motivation: Desmos emits `C_{ube}\left(u,v\right)\left[y\right]`
+  // and `\operatorname{sphere}\left(...\right)\left[range\right]`.
+  test('Indexed access with a function-application LHS', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('f', '(number) -> number');
-    const raw2 = (s: string) =>
+    ce2.declare('F', '(number) -> number');
+    const raw = (s: string) =>
       JSON.stringify(ce2.parse(s, { canonical: false }).json);
-    expect(raw2('f(x)[1]')).toEqual(
-      '["Sequence",["f","x"],["Error","\'unexpected-operator\'",["LatexString","\'[\'"]]]'
+
+    // A declared function call, all four fence combinations.
+    expect(raw('f(x)[1]')).toEqual('["At",["f","x"],1]');
+    expect(raw('f\\left(x\\right)\\left[1\\right]')).toEqual(
+      '["At",["f","x"],1]'
+    );
+    expect(raw('f(x)\\left[1\\right]')).toEqual('["At",["f","x"],1]');
+    expect(raw('f\\left(x\\right)[1]')).toEqual('["At",["f","x"],1]');
+
+    // Multi-index and range index, plain and \left..\right forms.
+    expect(raw('F(x)[1,2]')).toEqual('["At",["F","x"],1,2]');
+    expect(raw('F(x)\\left[1,2\\right]')).toEqual('["At",["F","x"],1,2]');
+    expect(raw('F(x)[1...5]')).toEqual('["At",["F","x"],["Range",1,5]]');
+    expect(raw('F(x)\\left[1...5\\right]')).toEqual(
+      '["At",["F","x"],["Range",1,5]]'
+    );
+
+    // A built-in `\operatorname{...}` call (parses to a function head) indexes
+    // identically, plain and fenced.
+    expect(raw('\\operatorname{sphere}\\left(a,b\\right)\\left[1\\right]')).toEqual(
+      '["At",["Sphere","a","b"],1]'
+    );
+    expect(raw('\\operatorname{sphere}(a,b)[1]')).toEqual(
+      '["At",["Sphere","a","b"],1]'
+    );
+
+    // A trig-function application is likewise indexable (was an error before).
+    expect(raw('\\sin(x)[1]')).toEqual('["At",["Sin","x"],1]');
+
+    // Chained indexing stays unsupported, matching the symbol path `x[1][2]`:
+    // the second bracket falls on an `At` LHS and is left unexpected.
+    expect(raw('f(x)[1][2]')).toEqual(
+      '["Sequence",["At",["f","x"],1],["Error","\'unexpected-operator\'",["LatexString","\'[\'"]]]'
+    );
+
+    // Guard-rail: an UNDECLARED juxtaposition (`g(x)`) is NOT a function
+    // application — it parses to `InvisibleOperator` and the bracket binds to
+    // the inner parenthesized group, unchanged by this relaxation.
+    expect(raw('g(x)[1]')).toEqual(
+      '["InvisibleOperator","g",["At",["Delimiter","x"],1]]'
+    );
+    expect(raw('g\\left(x\\right)\\left[1\\right]')).toEqual(
+      '["InvisibleOperator","g",["At",["Delimiter","x"],1]]'
     );
   });
 });

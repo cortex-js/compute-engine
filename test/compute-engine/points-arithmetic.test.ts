@@ -275,6 +275,69 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
   });
 });
 
+// A list-broadcast such as `Multiply([...], x)` reports a dishonest
+// scalar-`number` result type though its value is actually a List. The
+// `scalar + tuple` guard (canonicalAdd) and the `At` value-operand check must
+// NOT treat such an expression as a provable scalar and reject a valid Desmos
+// shape. STOPGAP regression — see
+// docs/plans/2026-07-07-honest-list-broadcast-typing.md.
+describe('POINT/TUPLE ARITHMETIC — dishonest collection-broadcast types', () => {
+  test('Tuple + list-broadcast Multiply stays a valid symbolic Add', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box([
+      'Add',
+      ['Tuple', 1, 2],
+      ['Multiply', ['List', 1, 2], 'x'],
+    ]);
+    expect(r.isValid).toBe(true);
+    expect(r.operator).toBe('Add');
+    expect(errorCode(r)).toBeUndefined();
+  });
+
+  test('At on a list-broadcast Multiply value stays valid (symbolic)', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['At', ['Multiply', ['List', 1, 2], 'x'], 1]);
+    expect(r.isValid).toBe(true);
+    expect(r.operator).toBe('At');
+  });
+
+  test('At on a tuple with list-broadcast components stays valid', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box([
+      'At',
+      ['Tuple', ['Multiply', ['List', 1, 2], 'x'], 2],
+      1,
+    ]);
+    expect(r.isValid).toBe(true);
+    expect(r.operator).toBe('At');
+  });
+
+  // The dishonest-broadcast tolerance must not open a hole in the genuine
+  // rejections: a provable scalar / string value is still not an indexed
+  // collection.
+  test('At still rejects a provable scalar-number value', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['At', 5, 1]);
+    expect(r.isValid).toBe(false);
+    expect(errorCode(r.op1)).toBe('incompatible-type');
+  });
+
+  test('At still rejects a string value', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['At', ce.string('hello'), 1]);
+    expect(r.isValid).toBe(false);
+    expect(errorCode(r.op1)).toBe('incompatible-type');
+  });
+
+  // Genuine collection access is unaffected by the custom canonical handler.
+  test('At on a genuine List still evaluates', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['At', ['List', 10, 20, 30], 2]).evaluate().toString()).toBe(
+      '20'
+    );
+  });
+});
+
 describe('POINT/TUPLE ARITHMETIC — T3 end-to-end (needs T4)', () => {
   // `t^2·(z.x, z.y)` requires T4 (First/Second typing on tuple-typed symbols)
   // to type `z.x` as `number` so `(z.x, z.y)` is a numeric tuple.

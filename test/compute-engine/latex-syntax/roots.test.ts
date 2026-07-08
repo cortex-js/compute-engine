@@ -31,11 +31,23 @@ describe('ROOT FUNCTION (INVALID FORMS)', () => {
     expect(parse('\\sqrt{}')).toMatchInlineSnapshot(
       `["Sqrt", ["Error", "'missing'"]]`
     );
+    // `\sqrt{5}` is a function application, so a trailing `[3]` now indexes it
+    // (postfix bracket on a function-call LHS → `At`). `Sqrt(5)` is a scalar,
+    // so the type layer rejects the target with an `incompatible-type` error —
+    // same canonical shape as `f[3]`, not an `unexpected-operator` bailout.
     expect(parse('\\sqrt{5}[3]')).toMatchInlineSnapshot(`
       [
-        "Sequence",
-        ["Sqrt", 5],
-        ["Error", "unexpected-operator", ["LatexString", "["]]
+        "At",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "dictionary | indexed_collection",
+            "'finite_real'"
+          ]
+        ],
+        3
       ]
     `);
   });

@@ -1,7 +1,7 @@
 import { widen } from '../common/type/utils';
 import { isSubtype } from '../common/type/subtype';
 import { Expression, CollectionHandlers } from './global-types';
-import { isFunction } from './boxed-expression/type-guards';
+import { isFunction, isNumber, isSymbol } from './boxed-expression/type-guards';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
  *
@@ -39,23 +39,52 @@ export function isNumericTuple(expr: Expression): boolean {
 
 /**
  * True when `expr` is provably a **scalar** number — a subtype of `number`
- * that is not a numeric tuple — whose number-type comes from a LITERAL or an
- * explicitly DECLARED (non-inferred) definition.
+ * that is not a numeric tuple — established by one of three shapes:
  *
- * Inferred evidence is retractable, not proof: a symbol or user function whose
- * numeric type was merely *inferred* from earlier use might still turn out to
- * be a tuple (Desmos forward references make this common). Such operands stay
- * symbolic instead of triggering a `scalar + tuple` rejection, so the
- * canonical/evaluation guards only fire on genuine scalar literals or
- * declarations (e.g. `1 + (2,3)`).
+ * - a number **literal**; or
+ * - a **symbol** with an explicitly DECLARED (non-inferred) number type; or
+ * - a **function call** whose operator has a declared (non-inferred) numeric
+ *   result AND none of whose operands is collection-typed / a collection
+ *   literal.
+ *
+ * Everything else stays symbolic (the guards defer to evaluation). Two kinds of
+ * evidence are deliberately treated as *not* proof:
+ *
+ * 1. Inferred types are retractable: a symbol or user function whose numeric
+ *    type was merely *inferred* from earlier use might still turn out to be a
+ *    tuple (Desmos forward references make this common).
+ * 2. A broadcastable arithmetic operator over a list (e.g.
+ *    `Multiply([0,0,1], x)`) reports a dishonest scalar-`number` result type
+ *    while its value is actually a List. Requiring no collection operand keeps
+ *    such calls out of the `scalar + tuple` rejection.
+ *
+ * STOPGAP: clause (2) works around dishonest collection-broadcast result types
+ * and can be removed once those are honest — see
+ * `docs/plans/2026-07-07-honest-list-broadcast-typing.md`.
  */
 export function isDeclaredScalarNumber(expr: Expression): boolean {
   if (isNumericTuple(expr)) return false;
   if (!isSubtype(expr.type.type, 'number')) return false;
-  // A merely-inferred numeric type is not proof — stay symbolic.
-  if (expr.valueDefinition?.inferredType) return false;
-  if (expr.operatorDefinition?.inferredSignature) return false;
-  return true;
+
+  // A number literal is unconditionally a provable scalar.
+  if (isNumber(expr)) return true;
+
+  // A symbol counts only when its number type was explicitly declared, not
+  // merely inferred from earlier use.
+  if (isSymbol(expr)) return !expr.valueDefinition?.inferredType;
+
+  // A function call counts only when its operator has a declared (non-inferred)
+  // numeric result AND no operand is a collection (type or literal). See
+  // clause (2) above: a list-broadcast such as `Multiply([...], x)` reports a
+  // dishonest scalar type and must NOT count as a provable scalar.
+  if (isFunction(expr)) {
+    if (!expr.operatorDefinition) return false;
+    if (expr.operatorDefinition.inferredSignature) return false;
+    if (expr.ops?.some((op) => op.isCollection)) return false;
+    return true;
+  }
+
+  return false;
 }
 
 /** The element count of a tuple-typed expression when statically known. */
