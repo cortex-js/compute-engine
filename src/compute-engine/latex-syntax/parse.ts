@@ -2612,8 +2612,23 @@ export class _Parser implements Parser {
     if (lhs === null || this.atEnd) return null;
 
     const start = this.index;
+    // Skip visual space (e.g. `\ `, `\,`) before peeking postfix triggers, so
+    // a `\{…\}` When-restriction can attach even when separated from its base
+    // by space. Restricted to brace triggers: for other postfix operators —
+    // notably `\left[…\right]` indexing — a preceding space means implicit
+    // multiplication by a list literal (Desmos semantics), not a postfix.
+    // The `this.index = start` no-match restore rolls back the skipped space.
+    this.skipVisualSpace();
+    if (this.index !== start) {
+      const tok = this._tokens[this.index];
+      const isBraceTrigger =
+        tok === '\\{' ||
+        (tok === '\\left' && this._tokens[this.index + 1] === '\\{');
+      if (!isBraceTrigger) this.index = start;
+    }
+    const afterSpace = this.index;
     for (const [def, n] of this.peekDefinitions('postfix')) {
-      this.index = start + n;
+      this.index = afterSpace + n;
       const result = def.parse(this, lhs, until);
       if (result !== null) return result;
     }

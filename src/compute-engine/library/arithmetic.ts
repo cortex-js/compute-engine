@@ -136,6 +136,7 @@ import {
 } from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
 import { isNumericTuple } from '../collection-utils';
+import { isTensor } from '../boxed-expression/boxed-tensor';
 import { signFromAssumedPart } from './complex';
 
 // When processing an arithmetic expression, the following are the core
@@ -1291,6 +1292,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `isFinite` is `false`, which would otherwise collapse to `number`).
         const tupleOps = ops.filter((x) => isNumericTuple(x));
         if (tupleOps.length === 1) return tupleOps[0].type;
+        // Element-wise product of a single tensor (vector/matrix) with scalars
+        // keeps the tensor's shape/type. The list-broadcast wrapper is
+        // skip-listed for tensor Multiply (mulTensors handles the value), so
+        // the honest list type must come from here.
+        const tensorOps = ops.filter((x) => isTensor(x));
+        if (tensorOps.length === 1) return tensorOps[0].type;
         if (ops.some((x) => x.isNaN)) return 'number';
         if (ops.some((x) => x.isFinite === false)) {
           // 0 · ±∞ = NaN (indeterminate).

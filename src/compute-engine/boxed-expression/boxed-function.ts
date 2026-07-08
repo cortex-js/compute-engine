@@ -40,6 +40,8 @@ import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
 import { NUMERIC_TYPES } from '../../common/type/primitive';
 import {
+  broadcastResultType,
+  collectionElementType,
   functionResult,
   isSignatureType,
   narrow,
@@ -1582,6 +1584,16 @@ function skipBroadcastForVectorOps(
     ops.some((x) => isNumericTuple(x))
   )
     return true;
+  // `Equal`/`NotEqual` broadcast only in the list-vs-scalar case (Desmos
+  // `L[d=4]`). When two or more operands are collections, keep the whole-list
+  // (structural/mathematical) equality semantics — `Equal(L, M)` stays a scalar
+  // boolean rather than a list of element-wise comparisons. See
+  // docs/plans/2026-07-07-desmos-list-filtering.md (highest-risk item).
+  if (
+    (operator === 'Equal' || operator === 'NotEqual') &&
+    ops.filter((x) => isFiniteIndexedCollection(x)).length >= 2
+  )
+    return true;
   return false;
 }
 
@@ -1831,6 +1843,27 @@ function type(expr: BoxedFunction): Type {
         const widened = widen(...argTypes);
         if (typeof widened === 'string' && isSubtype(widened, sigResult))
           sigResult = widened;
+      }
+    }
+
+    // Honest typing for list broadcast: when this operator will broadcast
+    // element-wise over a finite indexed collection operand, its value is a
+    // List, so its declared type must be the broadcast list type — not the
+    // scalar per-element type the handler computed. Use the SAME predicate as
+    // the value path (step 2, `:1286-1290`) so type and value never disagree:
+    // this leaves numeric tuples/points and tensor Add/Multiply (which have
+    // dedicated component-wise typing) untouched via `skipBroadcastForVectorOps`.
+    if (def.broadcastable) {
+      const hasTensors = expr.ops.some((x) => isTensor(x));
+      if (
+        expr.ops.some((x) => isFiniteIndexedCollection(x)) &&
+        !skipBroadcastForVectorOps(expr.operator, hasTensors, expr.ops)
+      ) {
+        // The handler computed the scalar per-element result. A few handlers
+        // leak the collection type (e.g. `Negate` returns `x.type`); unwrap to
+        // the element type so the wrapper does not nest lists.
+        const element = collectionElementType(sigResult) ?? sigResult;
+        return broadcastResultType(element);
       }
     }
 

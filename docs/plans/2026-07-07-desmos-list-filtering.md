@@ -1,5 +1,82 @@
 # Desmos List Filtering — `L[condition]`
 
+**Status: LANDED (2026-07-08) — T1–T3 complete (Design A).**
+
+What shipped:
+
+- **T1 — relational broadcast.** `broadcastable: true` added to `Greater`,
+  `Less`, `GreaterEqual`, `LessEqual`, `Equal`, `NotEqual`
+  (`library/relational-operator.ts`). A list operand now zips into a
+  `list<boolean>` via the generic broadcast + the honest-typing wrapper
+  (sibling plan, landed same day). Scalar (`1>2`) and symbolic (`x>0`)
+  comparisons are unchanged — only a *finite indexed collection* operand
+  triggers the zip.
+  - **Equal/NotEqual decision (highest-risk item): restricted to list-vs-scalar.**
+    `skipBroadcastForVectorOps` (`boxed-function.ts`) skips broadcasting for
+    `Equal`/`NotEqual` when **two or more** operands are collections, so
+    whole-list equality `Equal(L, M)` stays a **scalar boolean** (structural /
+    mathematical list comparison, used elsewhere) while Desmos `L[d=4]`
+    (list-vs-scalar) broadcasts to a mask. Point/tuple equality is likewise
+    preserved (two-collection case). `Greater`/`Less`/`GreaterEqual`/`LessEqual`
+    have no whole-list overload and broadcast in every collection case.
+  - **Lazy-operator post-eval broadcast.** `Less`/`LessEqual` are `lazy`, so the
+    generic broadcast (`boxed-function` steps 2/4b) misses an operand that only
+    *becomes* a collection at evaluate (e.g. `|[1...5]-2|`, whose operand
+    `Abs(Range−2)` is not a materialized collection pre-eval). A
+    `broadcastComparison` helper in the `Less`/`LessEqual` handlers rebuilds the
+    comparison from the already-evaluated operands so the generic broadcast then
+    zips it — no double evaluation on the scalar path.
+- **T2 — `L[condition]` end-to-end.** `L[L>0]`, `L[d=4]` (d a list), and the
+  positional Range mask `L[|[1...length(L)]-i|>0]` (concrete length) validate
+  and evaluate via `At`'s existing boolean-mask branch (Case B). `At`'s index
+  signature was **widened to accept `boolean`** so a broadcast-expression
+  condition that only types `list<boolean>` at evaluate (its operand isn't a
+  materialized collection at canonicalization) still passes the index check; it
+  broadcasts to the list at evaluate and the mask fires. The **At-canonical
+  broadcast stopgap** (the `value.type.matches('number')` value-operand
+  relaxation) is now dead under honest typing and was **removed**; the handler
+  is a plain validate-and-box passthrough. `isDeclaredScalarNumber` import
+  dropped from `collections.ts`.
+- **T3 — LaTeX round-trip.** `L[L>0]`, `L[d=4]` (`=` stays `Equal`, not
+  `Assign`), and literal-list filters round-trip through the `At` subscript
+  serializer (`L_{0\lt L}`, `L_{d=4}`). Integer indices unchanged.
+
+New test: `test/compute-engine/list-filtering.test.ts` (23 tests, T1–T3 +
+corpus rows + exactness).
+
+Verification: `npm run typecheck` + `npx tsc -p tsconfig.json --noEmit` clean;
+madge 0 cycles; targeted suites (list-filtering, list-broadcast-typing,
+a3-lists, collections, logic, points-arithmetic, parser-desmos-composition) all
+green; **full suite 3987 snapshots passed, 0 changed** (relational broadcast
+changes list *values*, but no snapshot had locked a `list <relop> scalar` as
+symbolic).
+
+Known limitations / deviations (see the implementation report):
+
+- **Bare declared list symbol** (`ce.declare('L','list<number>')` with no value)
+  is not a collection (`isCollection` false), so `L>0` does not broadcast for a
+  value-less symbol. This is a pre-existing broadcast limitation (`2L`, `sin(L)`
+  don't broadcast for such symbols either), not introduced here. Filtering works
+  once `L` has a value — the realistic Desmos case.
+- **Abstract `remove(L,i)`** (fully symbolic `Length(L)`): `Range(1, Length(L))`
+  is not a finite collection until `Length` resolves, and `Add`/`Multiply` are
+  excluded from the post-eval broadcast (step 4b), so the mask does not
+  materialize with a symbolic length. With a **concrete** length (the mask
+  mechanism this plan delivers) it works: `[10,20,30][|[1...3]-2|>0]` → `[10,30]`.
+- **Mask alignment: CE truncates** to the shorter of list/mask (mask entries
+  past the source end contribute nothing; an uncovered tail is dropped). Verify
+  vs Desmos length-mismatch behavior at the importer boundary.
+- **List `.N()` does not numericize elements** (uniform CE behavior): a filtered
+  list keeps exact rationals under both `evaluate` and `.N()`; individual
+  elements numericize when taken singly. Exactness is preserved under evaluate.
+- **`At` mask-mode result type is the element type, not `list<…>`** (pre-existing
+  `At.type` handler behavior), so chaining `At` over a filtered list can misfire
+  at the type check. Out of scope; noted for a follow-on.
+
+---
+
+_Original plan follows._
+
 **Status: PLANNED — not started**
 
 ## Motivation

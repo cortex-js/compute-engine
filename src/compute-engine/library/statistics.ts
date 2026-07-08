@@ -463,8 +463,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Compute a histogram of the values in a collection. Returns a list of (bin start, count) tuples.',
       complexity: 8200,
+      // The bin spec accepts any number so Desmos-style `histogram(L, .05)`
+      // (bin *width*) parses; a non-integer count is inert at evaluate
+      // (`computeBinning` returns undefined) — width semantics are the
+      // importer's to translate (e.g. to explicit bin edges).
       signature:
-        '(collection, integer | list<number>) -> list<tuple<number, integer>>',
+        '(collection, number | list<number>) -> list<tuple<number, integer>>',
       examples: [
         'Histogram([1, 2, 2, 3], 3)  // Returns [(1,1), (1.6667,2), (2.3333,1)]',
       ],
@@ -485,7 +489,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     BinCounts: {
       description: 'Count the number of elements falling into each bin.',
       complexity: 8200,
-      signature: '(collection, integer | list<number>) -> list<number>',
+      // Same widened bin spec as Histogram (non-integer counts stay inert).
+      signature: '(collection, number | list<number>) -> list<number>',
       examples: ['BinCounts([1, 2, 2, 3], 3)  // Returns [1, 2, 1]'],
       evaluate: ([xs, binsArg], { engine: ce }) => {
         const binning = computeBinning(xs, binsArg);

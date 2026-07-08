@@ -1,6 +1,56 @@
 # Honest Result Typing for List-Broadcast Numeric Operators
 
-**Status: PLANNED — not started**
+**Status: LANDED (2026-07-08) — T1–T4 complete.**
+
+What shipped:
+
+- **T1 — centralized wrapper.** `broadcastResultType(elementType)` in
+  `common/type/utils.ts` (produces an unbounded `list<R>`), and a wrapper in
+  `boxed-function.ts` `type()` that lifts the handler's scalar result to
+  `list<R>` using the **same predicate as the value path** (broadcastable +
+  `isFiniteIndexedCollection` + `!skipBroadcastForVectorOps`). The wrapper
+  unwraps a leaked collection type (`collectionElementType`) so handlers that
+  return `x.type` (e.g. `Negate`) don't nest lists.
+- **T2 — `Add`/`Multiply` tensor cases.** The list-broadcast wrapper is
+  **skip-listed for tensor `Add`/`Multiply`** (they use addTensors/mulTensors),
+  so the honest list type must come from the handlers themselves. A single-tensor
+  branch in `addType` / `Multiply.type` returns the tensor operand's type
+  (`vector<n>`), removing the `number | vector<n>` union artifact and the
+  `finite_number`-for-a-vector result. Two-tensor cases (matrix multiply / dot
+  product) are left as-is (out of scope).
+- **T3 — shared handlers.** No per-handler edits: the wrapper covers trig, log,
+  special functions, `Negate`, complex (`Real`/`Conjugate`), rounding, and logic
+  (`And`/`Or`/`Not` → `list<boolean>`). Representative test per family added.
+  Relational operators (`Less`/`Greater`) are **not broadcastable yet**, so the
+  `list<boolean>` relational assertion is deferred to the follow-on
+  desmos-list-filtering plan; the logic-operator `list<boolean>` case is
+  asserted here as the hand-off.
+- **T4 — stopgap re-scoped (option (a)).** `isDeclaredScalarNumber`
+  (`collection-utils.ts`) keeps the inference-retractability exclusions but
+  **drops the collection-operand clause**: honest typing means a list-broadcast
+  result is now `list<…>`/`vector<n>`, excluded by the `isSubtype(…, 'number')`
+  gate, so the clause is no longer load-bearing — and removing it lets a genuine
+  scalar with a collection operand (e.g. `Length([1,2])`) count as a scalar.
+
+Deviations from the design as written (see the implementation report):
+
+- **No length propagation in the wrapper.** The value path materializes a plain
+  `List` whose type handler is unbounded `list<…>` (it drops the operand's fixed
+  length), so an unbounded `list<R>` is the consistent, sound upper bound; a
+  fixed `vector<n>` from the wrapper would be *incomparable* to the evaluated
+  `list<R>`. The exact `vector<n>` cases in the motivation table are all
+  **tensor** `Add`/`Multiply` (T2), which type exactly. The `list<boolean>`
+  consumer needs only the element type, not a fixed length.
+- **`.type` is a sound upper bound, not string-identical to `.evaluate().type`**
+  for the wrapper families. Exact string equality is unachievable across
+  families because the value path's list/tensor type is value-dependent and
+  lossy (a `BoxedTensor` always reports `list<number^n>`; a `List` drops length).
+  The tests assert the tensor `Add`/`Multiply` and logic cases with exact
+  equality, and the wrapper families with the soundness invariant
+  `evaluate().type ⊆ .type` plus list-ness.
+- **Snapshot blast radius: zero.** The full suite (3987 snapshots) passes
+  unchanged — the change affects only the *declared* pre-evaluation `.type`,
+  which snapshots (value/serialization oriented) do not capture.
 
 ## Motivation
 

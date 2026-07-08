@@ -23,6 +23,19 @@
   applied as a lambda to each element) has been removed: use `Map`, or an
   `Element` clause; a non-`Element` iterator argument is now an error.
 
+- **`scalar + point` is now an error.** Adding a scalar to a numeric tuple
+  (`1 + (2, 3)`) previously broadcast the scalar over the components; points
+  are now proper vectors in ℝⁿ (see below) and a scalar term does not
+  broadcast into them. Add a tuple explicitly (`(1,1) + (2,3)`) instead.
+  Multiplying or dividing a point by a scalar still scales it.
+
+- **Comparing a list to a scalar is now elementwise.** `[1, 4, 4] = 4`
+  previously evaluated to `False` (whole-list comparison against a scalar);
+  it now broadcasts and evaluates to `["List", "False", "True", "True"]`, as
+  do `<`, `<=`, `>`, `>=`, and `!=`. Comparing two collections is unchanged:
+  `Equal(L, M)` remains a whole-value comparison (`[1,2,3] = [1,2,3]` →
+  `True`).
+
 ### Measurements and Uncertainty
 
 - **New `Measurement` type — values with a propagated uncertainty.**
@@ -50,7 +63,82 @@
     See the [Units guide](/compute-engine/guides/units/) for details and the
     `simplify` workaround.
 
+### Points and Tuples
+
+- **Numeric tuples are now points/vectors in ℝⁿ, distinct from lists.**
+  Arithmetic on tuples is componentwise vector arithmetic and stays a
+  `Tuple`: `(1,2) + (3,4)` → `(4,6)`, `3(1,2)` → `(3,6)`, `(4,2)/2` →
+  `(2,1)`, `-(1,2)` → `(-1,-2)`. This fixes `(1,2)-(3,4)`, which previously
+  produced a malformed nested list. `tuple · tuple` is an error (no implicit
+  dot product — use `Dot`), and `scalar + tuple` is rejected (see Breaking
+  Changes). Lists keep their existing broadcast semantics.
+
+- **Tuple arithmetic and component access work symbolically for typed
+  symbols.** A symbol declared `tuple<number, number>` participates in vector
+  arithmetic without a value, and its components are accessible with the
+  `.x`/`.y`/`.z` member syntax, which parses to `First`/`Second`/etc.
+  (`P.x` → `["First", "P"]`). Component access on a point literal
+  (`(1,2).x` → `1`) also works.
+
+- **Color functions broadcast over lists**, so `rgb` and `hsv` applied to
+  list arguments produce a list of colors, matching the other broadcastable
+  numeric operators.
+
+### Lists and Collections
+
+- **Filtering a list with a condition in index position.**
+  `L[L > 0]` evaluates to the elements of `L` where the condition holds —
+  the Desmos list-filtering notation. The condition may reference the list
+  itself (`L[L>0]`), another list (`L[d=4]` where `d` is a list), or compute a
+  positional mask from a `Range`
+  (`L[|[1...\operatorname{length}(L)]-i|>0]` removes the `i`-th element).
+  A condition may be combined with integer indexes. The mask applies
+  positionally and truncates to the shorter of list and mask.
+
+- **Relational operators broadcast over lists.** `[-1, 2, -3] > 0` evaluates
+  to `["List", "False", "True", "False"]`, typed `list<boolean>`. Scalar and
+  symbolic comparisons are unchanged (`x > 0` stays symbolic). For `=` and
+  `!=` the elementwise form applies only when exactly one operand is a
+  collection — comparing two collections remains a whole-value equality (see
+  Breaking Changes).
+
+- **Broadcast results now report an honest `list<…>` type.** A broadcastable
+  numeric operator applied to a list operand produces a list value, and its
+  declared type now says so: `Sin([t, 1])` is typed `list<finite_number>`
+  (previously the scalar `finite_number`, contradicting the value), and
+  `[1,2] \cdot 2` / `[1,2] + x` report `vector<2>` rather than a scalar or a
+  `number | vector<2>` union. Code that inspects `.type` before evaluating
+  no longer needs to special-case list-broadcast expressions.
+
 ### Parsing and Serialization
+
+- **Fixed: bracket indexing after a symbol with `\left[` delimiters.**
+  `A\left[1\right]` silently dropped the bracket group and parsed as bare
+  `A`; it now parses to `["At", "A", 1]` like `A[1]` always did. Indexing
+  also works on parenthesized groups and function applications:
+  `(3,4)[1]` and `f(x)[i]` parse to `At` expressions.
+
+- **Numbers with a leading or trailing decimal dot parse correctly.**
+  `.85x` parses as `0.85 x`, and a trailing-dot literal inside delimiters
+  (`(1., 2)`) is accepted.
+
+- **Restriction braces attach across visual space.** A `\{...\}`
+  domain-restriction suffix now attaches to its base expression even when
+  separated by spacing commands: `s(t) = (1-t)^2(1+2t)\ \{t\ge0\}\{t\le1\}`
+  parses to a `When` with both conditions. The space-tolerance is specific to
+  restriction braces: a space before an indexing bracket (`x\ \left[1,2\right]`)
+  is still not an index access.
+
+- **New inert `Polygon` operator.** `\operatorname{polygon}((0,0),(1,0),(0,1))`
+  parses to `["Polygon", ...]`, an opaque geometric primitive like `Triangle`
+  and `Segment`, for consumers that render it.
+
+- **`histogram`, `pdf`, `cdf`, and `length` parse to `Histogram`, `PDF`,
+  `CDF`, and `Length`.** The lowercase `\operatorname{...}` forms used by
+  Desmos are now aliases of the existing operators. `Histogram` and `BinCounts` accept any
+  number as their bin specification (a non-integer bin count is left
+  unevaluated; translate a Desmos bin *width* to explicit bin edges at the
+  import boundary).
 
 - **New `digits` serialization option for significant-figures and
   decimal-place display control.** Available on `expr.toLatex()`,

@@ -199,6 +199,13 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // honest heterogeneous type (e.g. `any`) rather than claiming `number`.
   if (args.some((x) => isNumericTuple(x)))
     return widen(...args.map((x) => x.type.type));
+  // Element-wise sum of a single tensor (vector/matrix) with scalars keeps the
+  // tensor's shape/type. The list-broadcast wrapper is skip-listed for tensor
+  // Add (addTensors handles the value), so the honest list type must come from
+  // here — this also removes the `number | vector<n>` union artifact that the
+  // final `widen` used to produce.
+  const tensors = args.filter((x) => isTensor(x));
+  if (tensors.length === 1) return tensors[0].type.type;
   if (args.some((x) => x.isNaN)) return 'number';
   // (+∞) + (−∞) = NaN: two or more non-finite operands can cancel to NaN.
   const nonFinite = args.filter((x) => x.isFinite === false);

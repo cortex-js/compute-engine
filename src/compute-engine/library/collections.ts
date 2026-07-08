@@ -55,7 +55,7 @@ export const DEFAULT_LINSPACE_COUNT = 50;
 // on the `At` definition), used by its custom canonical handler to delegate
 // operand validation to `validateArguments`.
 const AT_SIGNATURE = parseType(
-  '(value: indexed_collection | dictionary, index: (number|string|indexed_collection)+) -> unknown'
+  '(value: indexed_collection | dictionary, index: (number|string|boolean|indexed_collection)+) -> unknown'
 );
 
 // Shared instance of the basic handlers, used by the `Set` handlers to
@@ -1203,24 +1203,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature:
-      '(value: indexed_collection | dictionary, index: (number|string|indexed_collection)+) -> unknown',
+      '(value: indexed_collection | dictionary, index: (number|string|boolean|indexed_collection)+) -> unknown',
     type: ([xs]) =>
       xs.operatorDefinition?.collection?.elttype?.(xs) ??
       collectionElementType(xs.type.type) ??
       'any',
 
-    // Custom canonical handler so the value-operand check can tolerate
-    // dishonest collection-broadcast result types. A list-broadcast such as
-    // `Multiply([...], x)` reports a scalar-`number` result type though its
-    // value is actually a List; the generic signature validation would reject
-    // it as a non-collection. Index validation (and all its leniency for
-    // unknown/inferred operands) is delegated to the standard
-    // `validateArguments`; we then relax only the value operand, restoring it
-    // when the sole reason it failed is that its number type is not a
-    // *provable* scalar (see `isDeclaredScalarNumber`) — mirroring the
-    // `scalar + tuple` guard in `canonicalAdd`.
-    // STOPGAP: this special-case exists only because those result types lie —
-    // remove once they are honest (docs/plans/2026-07-07-honest-list-broadcast-typing.md).
+    // Custom canonical handler delegating operand validation to
+    // `validateArguments` (matching the standard signature-validation flags).
+    // The index type accepts `boolean` so a Desmos filter condition that only
+    // *becomes* a `list<boolean>` at evaluate — e.g. `L[|[1...n]-i|>0]`, whose
+    // condition `|…|>0` is a broadcast expression typed scalar `boolean` before
+    // evaluation (its operand is not yet a materialized collection) — passes
+    // canonicalization. At evaluate the condition broadcasts to a boolean list
+    // and the mask branch (Case B) fires. A genuinely scalar boolean index that
+    // stays scalar leaves `At` unevaluated (see Case C).
+    // The value operand additionally tolerates an operand whose number type
+    // was merely *inferred* (not declared): inference is retractable, and an
+    // untyped function parameter used as `a[1]` may only resolve to a
+    // collection when the function is applied. Rejecting it here would
+    // permanently invalidate the definition (see `isDeclaredScalarNumber`).
     canonical: (ops, { engine: ce }) => {
       // `ops` are already canonical (At is not lazy).
       const adjusted = validateArguments(ce, ops, AT_SIGNATURE, false, false);
@@ -1231,7 +1233,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const patched = [...adjusted];
       const value = ops[0];
       // Restore the value operand when it failed only because its number type
-      // is a dishonest collection-broadcast (not a provable scalar).
+      // is inferred and thus retractable (may still resolve to a collection).
       if (
         value?.isValid &&
         patched[0]?.operator === 'Error' &&

@@ -6,6 +6,7 @@ import type {
 } from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';
+import { isFiniteIndexedCollection } from '../collection-utils';
 import { flatten } from '../boxed-expression/flatten';
 import { eq } from '../boxed-expression/compare';
 import { isNumber, isFunction } from '../boxed-expression/type-guards';
@@ -160,6 +161,13 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     lazy: true,
 
+    // Broadcast element-wise over a list operand (Desmos `L[d=4]` filtering).
+    // Restricted to the list-vs-scalar case: `skipBroadcastForVectorOps` skips
+    // broadcasting when two-or-more operands are collections, so whole-list
+    // equality `Equal(L, M)` stays a scalar boolean. See
+    // docs/plans/2026-07-07-desmos-list-filtering.md.
+    broadcastable: true,
+
     canonical: (args, { engine: ce }) => canonicalRelational(ce, 'Equal', args),
 
     // Comparing two equalities...
@@ -290,6 +298,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     signature: '(any, any) -> boolean',
 
+    // Broadcast element-wise over a list operand (list-vs-scalar only; see
+    // `Equal` above and `skipBroadcastForVectorOps`).
+    broadcastable: true,
+
     // `lazy` so the `canonical` handler receives raw, direction-intact operands
     // for chain decomposition (see `canonicalComparisonChain`); a chained
     // `a ≠ b ≠ c` becomes `And(a ≠ b, b ≠ c)`.
@@ -356,6 +368,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any+) -> boolean',
 
     lazy: true,
+    // Broadcast element-wise over a list operand so `L > 0` (canonicalizes to
+    // `Less(0, L)`) yields a `list<boolean>` mask for Desmos `L[L>0]` filtering.
+    broadcastable: true,
     canonical: (ops, { engine: ce }) => canonicalRelational(ce, 'Less', ops),
 
     eq: (a, b) => inequalityEq(a, b, 'Greater'),
@@ -366,6 +381,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // evaluating the arguments before this handler runs, so evaluate them
       // here — otherwise a compound operand like `Im(𝑖)` never folds to `1`.
       const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
+      // Element-wise broadcast when an operand evaluated to a collection (e.g.
+      // `|[1...5]-2| > 0`, canonical `Less(0, Abs(…))`). See `broadcastComparison`.
+      const bc = broadcastComparison(ce, 'Less', ops, numericApproximation);
+      if (bc) return bc;
       if (ops.length === 2) {
         const [lhs, rhs] = ops;
         // Try quantity comparison first
@@ -408,6 +427,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
     signature: '(any, any+) -> boolean',
     lazy: true,
+    // Broadcast element-wise over a list operand (canonicalizes to `Less`; the
+    // flag is kept here for a non-canonicalized `Greater`).
+    broadcastable: true,
     // Pass the operator through unchanged (rather than reversing to `Less`
     // here). `canonicalRelational` needs the original direction to correctly
     // decompose mixed-direction chains (e.g. `a ≤ b > c`); the Greater→Less
@@ -427,6 +449,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any+) -> boolean',
 
     lazy: true,
+    // Broadcast element-wise over a list operand (see `Less`).
+    broadcastable: true,
     canonical: (ops, { engine: ce }) =>
       canonicalRelational(ce, 'LessEqual', ops),
 
@@ -435,6 +459,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     evaluate: (rawOps, { engine: ce, numericApproximation }) => {
       // `lazy` skips argument evaluation (see `Less` above): evaluate here.
       const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
+      // Element-wise broadcast when an operand evaluated to a collection.
+      const bc = broadcastComparison(ce, 'LessEqual', ops, numericApproximation);
+      if (bc) return bc;
       if (ops.length === 2) {
         const [lhs, rhs] = ops;
         const qcmp = quantityCompare(lhs, rhs);
@@ -478,6 +505,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any+) -> boolean',
 
     lazy: true,
+    // Broadcast element-wise over a list operand (canonicalizes to `LessEqual`).
+    broadcastable: true,
     // Pass the operator through unchanged (see `Greater` above): the
     // GreaterEqual→LessEqual normalization is done per chain segment inside
     // `canonicalRelational`.
@@ -638,6 +667,28 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       engine._fn('Not', [canonicalRelational(engine, 'Succeeds', args)]),
   },
 };
+
+/**
+ * Post-evaluation element-wise broadcast for the `lazy` comparison operators.
+ *
+ * `Less`/`LessEqual` are `lazy`, so the generic broadcast in `boxed-function`
+ * (steps 2 and 4b) does not fire when an operand only *becomes* a collection
+ * after evaluation — e.g. `|[1...5]-2| > 0`, whose operand `Abs(Add(…, Range))`
+ * is not a materialized collection until evaluated. The handlers evaluate their
+ * operands internally; once evaluated, if any operand is a finite indexed
+ * collection, rebuild the comparison so the generic broadcast (step 2) zips it
+ * into a `list<boolean>`. Reusing the already-evaluated operands means no
+ * double evaluation on the scalar path.
+ */
+function broadcastComparison(
+  ce: ComputeEngine,
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!ops.some((op) => isFiniteIndexedCollection(op))) return undefined;
+  return ce._fn(operator, ops).evaluate({ numericApproximation });
+}
 
 /**
  * Check if two expressions are approximately equal, i.e. their numeric

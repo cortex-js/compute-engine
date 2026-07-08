@@ -698,11 +698,15 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   // aliases so the lowercase names don't land in `unsupported-operator`.
   // ---------------------------------------------------------------------------
   { latexTrigger: '\\operatorname{count}', parse: 'Length' },
+  { latexTrigger: '\\operatorname{length}', parse: 'Length' },
   { latexTrigger: '\\operatorname{random}', parse: 'Random' },
   { latexTrigger: '\\operatorname{shuffle}', parse: 'Shuffle' },
   { latexTrigger: '\\operatorname{repeat}', parse: 'Repeat' },
   { latexTrigger: '\\operatorname{join}', parse: 'Join' },
   { latexTrigger: '\\operatorname{range}', parse: 'Range' },
+  { latexTrigger: '\\operatorname{histogram}', parse: 'Histogram' },
+  { latexTrigger: '\\operatorname{pdf}', parse: 'PDF' },
+  { latexTrigger: '\\operatorname{cdf}', parse: 'CDF' },
 
   // Note: `\operatorname{with}` (Desmos's local-binding clause) is intentionally
   // NOT registered here. Use the math-notation equivalent `\operatorname{where}`
@@ -745,6 +749,13 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     kind: 'function',
     serialize: (serializer, expr) =>
       '\\operatorname{segment}' + serializer.wrapArguments(expr),
+  },
+  {
+    name: 'Polygon',
+    latexTrigger: ['\\operatorname{polygon}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{polygon}' + serializer.wrapArguments(expr),
   },
 
   // --- Euclidean-geometry notation (inert; see the block comment above the
