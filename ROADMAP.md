@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-04.
+**Last updated:** 2026-07-08.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -31,6 +31,16 @@ Unicode relation tokens, congruence/divisibility, geometry heads; corpus
 clean-parse 3/345 → 277/345, throws 9 → 0). Residual parser items in
 "Remaining work" below are unrelated to that pass.
 
+**Pending 0.69.0 (feature-complete on `main`, 2026-07-08):** the
+`Measurement`/uncertainty MVP (`\pm`), the control-flow/scoping overhaul
+(`Loop`/`Comprehension` split, `Block` lexical-scope fixes, `Declare`
+attributes), `digits` display control, numeric tuples as points/vectors, and
+the Desmos-compatibility lists wave (relational broadcast + honest
+`list<…>` typing, `L[condition]` filtering, `When` over list conditions,
+parsing batch). Neyret-corpus parse coverage 78.6% → 92.9%; the remaining
+Desmos gaps are importer-side (tracked in tycho's `COMPUTE_ENGINE.md`), not
+engine items.
+
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
 status:** R1 and R2 gates cleared (full-Chapter-1 exhaustive run ≈90%, ≈91.3%
 with the committed `Numer/Denom` + upstream-1.1.3.6 fixes). Remaining Rubi
@@ -53,19 +63,16 @@ CE is the foundation for Tycho / Graph Paper: an app helping scientists,
 students and educators collaborate and communicate about scientific topics.
 The 2026-07-04 capability survey against that goal found the engine strong on
 plotting/compile targets, units & quantities, logic/sets, linear algebra,
-equation systems, and number formatting — and thin in the areas below.
-Items 1–4 were agreed and prioritized 2026-07-04; `Series` (Phases 1–2),
-`TrigExpand`/`TrigToExp`/`TrigReduce`, **statistics** (Phases 1–2 of
-`docs/plans/2026-07-04-statistics-design.md`: the five probability
-distributions with `PDF`/`CDF`/`Quantile`,
-`GammaRegularized`/`BetaRegularized`, covariance/correlation, and
-`LinearRegression`/`PolynomialFit` with exact fits), and **explain Phase 1**
-(`expr.explain()` for simplify: curated step chains, the step-label registry
-with `registerStepLabels`/`labelFor`, frozen `solve.*` ids on the
-`UNIVARIATE_ROOTS` templates, and the step-keeping `matchAnyRulesWithSteps`
-— see `docs/plans/2026-07-04-explain-design.md`) have landed and left this
-list, as has the **explain API, all three phases** (simplify + solve + D:
-`docs/plans/2026-07-04-explain-design.md`). What remains (effort S/M/L):
+equation systems, and number formatting — and thin in the areas below. Of the
+items agreed 2026-07-04, `Series` (Phases 1–2), the trig rewrites
+(`TrigExpand`/`TrigToExp`/`TrigReduce`), **statistics** Phases 1–2, the
+**explain API** (all three phases: simplify + solve + D),
+**significant-figures display** (the `digits` serializer option, former item
+7), and the **`Measurement` MVP** (item 5) have all landed and left this
+list — the record lives in `CHANGELOG.md` and the design docs under
+`docs/plans/` (`2026-07-04-statistics-design.md`,
+`2026-07-04-explain-design.md`, `2026-07-07-uncertainty-design.md`). What
+remains (effort S/M/L):
 
 1. **Explain API — residue (S/M).** Deferred from the landed phases:
    tracing systems of equations (`explain('solve')` throws for List/And/Or
@@ -94,12 +101,9 @@ scipy is installed in `./venv`.
 - Bare `O(…)` parsing deferred (design doc §8 Q3); revisit for lenient mode
   once the parser work settles.
 
-**Uncertainty/Measurement residue (item 5 MVP landed 2026-07-07).** The
-`Measurement` type shipped — `value \pm error` with independent first-order
-error propagation through algebraic + elementary ops and units, `\pm`
-redefined from `PlusMinus` to `Measurement` (branch use → `List`), and
-`digits`-controlled display. Full design + the phased record:
-[`docs/plans/2026-07-07-uncertainty-design.md`](./docs/plans/2026-07-07-uncertainty-design.md).
+**Uncertainty/Measurement residue** (MVP landed 2026-07-07; design + phased
+record:
+[`docs/plans/2026-07-07-uncertainty-design.md`](./docs/plans/2026-07-07-uncertainty-design.md)).
 Deferred:
 
 - **Dual-number correlation tracking** (correct-by-default) — the documented
@@ -117,15 +121,6 @@ Deferred:
    speakable-text serializer for screen readers. AsciiMath output already
    exists; MathML and speech are absent. Accessibility matters for the
    education audience.
-7. **Significant-figures display control (S) — LANDED 2026-07-07.** The
-   `digits` serializer option (`'auto' | 'max' | { significant: n } |
-   { fractional: n }`, soft-deprecating `fractionalDigits`) shipped across
-   `.latex`/`.json`/`toString()`: truncation-only sig-fig / decimal-place
-   display, orthogonal to notation, a no-op on exact values. The rounding was
-   extracted as the reusable `roundToSignificant`/`roundToDecimalPlace`
-   primitives (now also driving item 5's measurement display). Trailing-zero
-   *padding* was deferred as a string-formatter concern and is realized in
-   item 5's measurement display via `toFixed`.
 8. **Chemistry notation — mhchem `\ce{}` (M).** Chemical formulas, isotopes,
    reaction arrows. Only if chemistry is in scope for Graph Paper — decide
    before investing; `mol` exists solely as a unit dimension today.

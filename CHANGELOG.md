@@ -24,25 +24,24 @@
   `Element` clause; a non-`Element` iterator argument is now an error.
 
 - **`scalar + point` is now an error.** Adding a scalar to a numeric tuple
-  (`1 + (2, 3)`) previously broadcast the scalar over the components; points
-  are now proper vectors in ℝⁿ (see below) and a scalar term does not
-  broadcast into them. Add a tuple explicitly (`(1,1) + (2,3)`) instead.
-  Multiplying or dividing a point by a scalar still scales it.
+  (`1 + (2, 3)`) previously broadcast the scalar over the components; points are
+  now proper vectors in ℝⁿ (see below) and a scalar term does not broadcast into
+  them. Add a tuple explicitly (`(1,1) + (2,3)`) instead. Multiplying or
+  dividing a point by a scalar still scales it.
 
 - **Comparing a list to a scalar is now elementwise.** `[1, 4, 4] = 4`
-  previously evaluated to `False` (whole-list comparison against a scalar);
-  it now broadcasts and evaluates to `["List", "False", "True", "True"]`, as
-  do `<`, `<=`, `>`, `>=`, and `!=`. Comparing two collections is unchanged:
-  `Equal(L, M)` remains a whole-value comparison (`[1,2,3] = [1,2,3]` →
-  `True`).
+  previously evaluated to `False` (whole-list comparison against a scalar); it
+  now broadcasts and evaluates to `["List", "False", "True", "True"]`, as do
+  `<`, `<=`, `>`, `>=`, and `!=`. Comparing two collections is unchanged:
+  `Equal(L, M)` remains a whole-value comparison (`[1,2,3] = [1,2,3]` → `True`).
 
 ### Measurements and Uncertainty
 
 - **New `Measurement` type — values with a propagated uncertainty.**
-  `Measurement(value, error)` (written `value \pm error`) represents a
-  measured quantity carrying a 1σ absolute uncertainty, and the uncertainty
-  **propagates through arithmetic** using standard independent, first-order
-  (quadrature) error propagation:
+  `Measurement(value, error)` (written `value \pm error`) represents a measured
+  quantity carrying a 1σ absolute uncertainty, and the uncertainty **propagates
+  through arithmetic** using standard independent, first-order (quadrature)
+  error propagation:
   - Algebraic and elementary operations propagate the error:
     `(5 \pm 0.2)(3 \pm 0.1)` → `15.00 \pm 0.78`, `\sqrt{4 \pm 0.2}` →
     `2.000 \pm 0.050`, `\sin(1 \pm 0.1)` → `0.841 \pm 0.054` (trig respects the
@@ -53,70 +52,69 @@
     `(0.0510 \pm 0.0020)\,\mathrm{m}`). The bare form `5.1 \pm 0.2\,\mathrm{cm}`
     (no parentheses) parses to the same thing: a unit on only one operand of
     `\pm` scopes over the whole measurement (a dimensionless value with a
-    dimensioned error is never meaningful). An error in a *different* unit
-    than the value (`5.1\,\mathrm{cm} \pm 2\,\mathrm{mm}`) stays as written.
-  - **Display** follows the physics convention — the uncertainty is shown to
-    two significant figures by default and the value is rounded to the same
-    decimal place (`5.134 \pm 0.021`, `8.00 \pm 0.22`). Controlled by the
-    `digits` serialization option (`{ significant: n }`, `{ fractional: n }`,
-    `"max"`); `.toMathJson()` stays lossless.
-  - **Correctness note:** propagation is *independent* — exact when each
-    measured quantity appears once (`A = L·W`) or in a single operation
-    (`x^2`), but it over/under-estimates when one measured variable is reused
-    across an expression (`x·x`, `x/(x+1)`), which are treated as independent.
-    See the [Units guide](/compute-engine/guides/units/) for details and the
-    `simplify` workaround.
+    dimensioned error is never meaningful). An error in a _different_ unit than
+    the value (`5.1\,\mathrm{cm} \pm 2\,\mathrm{mm}`) stays as written.
+  - **Display** follows the physics convention — the uncertainty is shown to two
+    significant figures by default and the value is rounded to the same decimal
+    place (`5.134 \pm 0.021`, `8.00 \pm 0.22`). Controlled by the `digits`
+    serialization option (`{ significant: n }`, `{ fractional: n }`, `"max"`);
+    `.toMathJson()` stays lossless.
+  - **Correctness note:** propagation is _independent_ — exact when each
+    measured quantity appears once (`A = L·W`) or in a single operation (`x^2`),
+    but it over/under-estimates when one measured variable is reused across an
+    expression (`x·x`, `x/(x+1)`), which are treated as independent. See the
+    [Units guide](/compute-engine/guides/units/) for details and the `simplify`
+    workaround.
 
 ### Points and Tuples
 
 - **Numeric tuples are now points/vectors in ℝⁿ, distinct from lists.**
-  Arithmetic on tuples is componentwise vector arithmetic and stays a
-  `Tuple`: `(1,2) + (3,4)` → `(4,6)`, `3(1,2)` → `(3,6)`, `(4,2)/2` →
-  `(2,1)`, `-(1,2)` → `(-1,-2)`. This fixes `(1,2)-(3,4)`, which previously
-  produced a malformed nested list. `tuple · tuple` is an error (no implicit
-  dot product — use `Dot`), and `scalar + tuple` is rejected (see Breaking
-  Changes). Lists keep their existing broadcast semantics.
+  Arithmetic on tuples is componentwise vector arithmetic and stays a `Tuple`:
+  `(1,2) + (3,4)` → `(4,6)`, `3(1,2)` → `(3,6)`, `(4,2)/2` → `(2,1)`, `-(1,2)` →
+  `(-1,-2)`. This fixes `(1,2)-(3,4)`, which previously produced a malformed
+  nested list. `tuple · tuple` is an error (no implicit dot product — use
+  `Dot`), and `scalar + tuple` is rejected (see Breaking Changes). Lists keep
+  their existing broadcast semantics.
 
-- **Tuple arithmetic and component access work symbolically for typed
-  symbols.** A symbol declared `tuple<number, number>` participates in vector
-  arithmetic without a value, and its components are accessible with the
-  `.x`/`.y`/`.z` member syntax, which parses to `First`/`Second`/etc.
-  (`P.x` → `["First", "P"]`). Component access on a point literal
-  (`(1,2).x` → `1`) also works.
+- **Tuple arithmetic and component access work symbolically for typed symbols.**
+  A symbol declared `tuple<number, number>` participates in vector arithmetic
+  without a value, and its components are accessible with the `.x`/`.y`/`.z`
+  member syntax, which parses to `First`/`Second`/etc. (`P.x` →
+  `["First", "P"]`). Component access on a point literal (`(1,2).x` → `1`) also
+  works.
 
-- **Color functions broadcast over lists**, so `rgb` and `hsv` applied to
-  list arguments produce a list of colors, matching the other broadcastable
-  numeric operators.
+- **Color functions broadcast over lists**, so `rgb` and `hsv` applied to list
+  arguments produce a list of colors, matching the other broadcastable numeric
+  operators.
 
 ### Lists and Collections
 
-- **Filtering a list with a condition in index position.**
-  `L[L > 0]` evaluates to the elements of `L` where the condition holds —
-  the Desmos list-filtering notation. The condition may reference the list
-  itself (`L[L>0]`), another list (`L[d=4]` where `d` is a list), or compute a
-  positional mask from a `Range`
-  (`L[|[1...\operatorname{length}(L)]-i|>0]` removes the `i`-th element).
-  A condition may be combined with integer indexes. The mask applies
-  positionally and truncates to the shorter of list and mask.
+- **Filtering a list with a condition in index position.** `L[L > 0]` evaluates
+  to the elements of `L` where the condition holds — the Desmos list-filtering
+  notation. The condition may reference the list itself (`L[L>0]`), another list
+  (`L[d=4]` where `d` is a list), or compute a positional mask from a `Range`
+  (`L[|[1...\operatorname{length}(L)]-i|>0]` removes the `i`-th element). A
+  condition may be combined with integer indexes. The mask applies positionally
+  and truncates to the shorter of list and mask.
 
-- **Relational operators broadcast over lists.** `[-1, 2, -3] > 0` evaluates
-  to `["List", "False", "True", "False"]`, typed `list<boolean>`. Scalar and
-  symbolic comparisons are unchanged (`x > 0` stays symbolic). For `=` and
-  `!=` the elementwise form applies only when exactly one operand is a
-  collection — comparing two collections remains a whole-value equality (see
-  Breaking Changes).
+- **Relational operators broadcast over lists.** `[-1, 2, -3] > 0` evaluates to
+  `["List", "False", "True", "False"]`, typed `list<boolean>`. Scalar and
+  symbolic comparisons are unchanged (`x > 0` stays symbolic). For `=` and `!=`
+  the elementwise form applies only when exactly one operand is a collection —
+  comparing two collections remains a whole-value equality (see Breaking
+  Changes).
 
 - **Broadcast results now report an honest `list<…>` type.** A broadcastable
   numeric operator applied to a list operand produces a list value, and its
   declared type now says so: `Sin([t, 1])` is typed `list<finite_number>`
   (previously the scalar `finite_number`, contradicting the value), and
   `[1,2] \cdot 2` / `[1,2] + x` report `vector<2>` rather than a scalar or a
-  `number | vector<2>` union. Code that inspects `.type` before evaluating
-  no longer needs to special-case list-broadcast expressions.
+  `number | vector<2>` union. Code that inspects `.type` before evaluating no
+  longer needs to special-case list-broadcast expressions.
 
-- **`When` broadcasts over a list-valued condition.** A domain restriction
-  whose condition is a finite list of booleans now masks element by element —
-  the Desmos restriction semantics. `x^2\{[1,2,3] > 0\}` evaluates to
+- **`When` broadcasts over a list-valued condition.** A domain restriction whose
+  condition is a finite list of booleans now masks element by element — the
+  Desmos restriction semantics. `x^2\{[1,2,3] > 0\}` evaluates to
   `[x^2, x^2, x^2]`, and with `x = 2`, `x\{x \le [1,2,3]\}` evaluates to
   `[Undefined, 2, 2]` (one masked branch per element: the value where the
   element condition is `True`, `Undefined` where `False`, a held `When` where
@@ -128,23 +126,23 @@
 ### Parsing and Serialization
 
 - **Fixed: bracket indexing after a symbol with `\left[` delimiters.**
-  `A\left[1\right]` silently dropped the bracket group and parsed as bare
-  `A`; it now parses to `["At", "A", 1]` like `A[1]` always did. Indexing
-  also works on parenthesized groups and function applications:
-  `(3,4)[1]` and `f(x)[i]` parse to `At` expressions.
+  `A\left[1\right]` silently dropped the bracket group and parsed as bare `A`;
+  it now parses to `["At", "A", 1]` like `A[1]` always did. Indexing also works
+  on parenthesized groups and function applications: `(3,4)[1]` and `f(x)[i]`
+  parse to `At` expressions.
 
-- **Numbers with a leading or trailing decimal dot parse correctly.**
-  `.85x` parses as `0.85 x`, and a trailing-dot literal inside delimiters
-  (`(1., 2)`) is accepted.
+- **Numbers with a leading or trailing decimal dot parse correctly.** `.85x`
+  parses as `0.85 x`, and a trailing-dot literal inside delimiters (`(1., 2)`)
+  is accepted.
 
-- **Scaling a list/vector by juxtaposition is a `Multiply`, not a `Tuple`.**
-  A scalar written next to a list- or vector-typed operand — including a
-  scaled fraction whose numerator is a list or range, as in Desmos'
+- **Scaling a list/vector by juxtaposition is a `Multiply`, not a `Tuple`.** A
+  scalar written next to a list- or vector-typed operand — including a scaled
+  fraction whose numerator is a list or range, as in Desmos'
   `2\frac{[0,...,8]}{8}` — now canonicalizes to `Multiply` (element-wise
   scaling). Previously such juxtapositions produced a spurious `Tuple`, which
   raised an `incompatible-type` error when the result was used in further
-  arithmetic. Genuine tuples (`2(3, 4)`) and plain list literals (`[1,2,3]`)
-  are unaffected.
+  arithmetic. Genuine tuples (`2(3, 4)`) and plain list literals (`[1,2,3]`) are
+  unaffected.
 
 - **Restriction braces attach across visual space.** A `\{...\}`
   domain-restriction suffix now attaches to its base expression even when
@@ -157,24 +155,24 @@
   parses to `["Polygon", ...]`, an opaque geometric primitive like `Triangle`
   and `Segment`, for consumers that render it.
 
-- **`histogram`, `pdf`, `cdf`, `length`, and `nCr` parse to `Histogram`,
-  `PDF`, `CDF`, `Length`, and `Choose`.** The lowercase `\operatorname{...}`
-  forms used by Desmos are now aliases of the existing operators. The member
-  form `.length` (`S.\operatorname{length}`) also maps to `Length`, joining
-  `.count`, `.max`, `.min`, `.total`, and the `.x`/`.y`/`.z` component
-  accessors. `Histogram` and `BinCounts` accept any number as their bin
-  specification (a non-integer bin count is left unevaluated; translate a
-  Desmos bin *width* to explicit bin edges at the import boundary).
+- **`histogram`, `pdf`, `cdf`, `length`, and `nCr` parse to `Histogram`, `PDF`,
+  `CDF`, `Length`, and `Choose`.** The lowercase `\operatorname{...}` forms used
+  by Desmos are now aliases of the existing operators. The member form `.length`
+  (`S.\operatorname{length}`) also maps to `Length`, joining `.count`, `.max`,
+  `.min`, `.total`, and the `.x`/`.y`/`.z` component accessors. `Histogram` and
+  `BinCounts` accept any number as their bin specification (a non-integer bin
+  count is left unevaluated; translate a Desmos bin _width_ to explicit bin
+  edges at the import boundary).
 
-- **New `digits` serialization option for significant-figures and
-  decimal-place display control.** Available on `expr.toLatex()`,
-  `expr.toMathJson()`, and honored by `expr.toString()`, `digits` controls how
-  many digits of a number are _displayed_ (a formatting choice — it does not
-  change the stored value or computation precision):
+- **New `digits` serialization option for significant-figures and decimal-place
+  display control.** Available on `expr.toLatex()`, `expr.toMathJson()`, and
+  honored by `expr.toString()`, `digits` controls how many digits of a number
+  are _displayed_ (a formatting choice — it does not change the stored value or
+  computation precision):
   - `digits: { significant: n }` rounds to `n` significant figures
     (`ce.parse("\\pi").N().toLatex({ digits: { significant: 3 } })` → `3.14`).
-    Rounding is independent of notation (`1500` at two significant figures
-    stays `1500` in fixed notation; use `notation: "scientific"` for
+    Rounding is independent of notation (`1500` at two significant figures stays
+    `1500` in fixed notation; use `notation: "scientific"` for
     `1.5 \cdot 10^{3}`), and exact integers, rationals, and radicals are shown
     in full — only inexact values are rounded.
   - `digits: { fractional: n }` shows `n` digits after the decimal point
@@ -201,9 +199,8 @@
   sets its initial value, and evaluates to that value (the previous form
   evaluated to `Nothing`). This matches the documented signature; earlier the
   value operand was silently dropped. The one- and two-operand forms are
-  unchanged. A value-carrying `Declare` also compiles correctly (the
-  initializer is emitted for the JavaScript and GLSL targets), not just when
-  evaluated.
+  unchanged. A value-carrying `Declare` also compiles correctly (the initializer
+  is emitted for the JavaScript and GLSL targets), not just when evaluated.
 
 - **`Declare` can attach definition attributes via a trailing dictionary,
   including declaring constants.** An optional final `Dictionary` operand
@@ -212,48 +209,47 @@
   `["Declare", "c", "real", 299792458, ["Dictionary", ["KeyValuePair", "constant", "True"]]]`
   declares an immutable constant (a later `Assign` to it is rejected), and
   `holdUntil` controls when the symbol's value is substituted (as for built-in
-  constants such as `Pi`). A positional `type`/`value` takes precedence over
-  the same key in the dictionary. This gives MathJSON a representation for
-  constant declarations (e.g. the target for a `const` keyword in a surface
-  language).
+  constants such as `Pi`). A positional `type`/`value` takes precedence over the
+  same key in the dictionary. This gives MathJSON a representation for constant
+  declarations (e.g. the target for a `const` keyword in a surface language).
 
 ### Control Flow
 
 - **`Loop` is now imperative control flow only** (see Breaking Changes above),
-  and `["Loop", body]` is a real infinite loop: the body is evaluated
-  repeatedly until it yields a `["Break", value?]` (the loop's value) or a
-  `["Return", …]` (propagated), guarded by `ce.iterationLimit` and the
-  evaluation deadline. Previously this form — documented as `while(true)` —
-  evaluated the body only once. It compiles to `while (true) { … }` in
-  JavaScript, and `Loop` with `Element` clauses compiles to plain `for` /
-  `for…of` statement loops with no result array.
+  and `["Loop", body]` is a real infinite loop: the body is evaluated repeatedly
+  until it yields a `["Break", value?]` (the loop's value) or a `["Return", …]`
+  (propagated), guarded by `ce.iterationLimit` and the evaluation deadline.
+  Previously this form — documented as `while(true)` — evaluated the body only
+  once. It compiles to `while (true) { … }` in JavaScript, and `Loop` with
+  `Element` clauses compiles to plain `for` / `for…of` statement loops with no
+  result array.
 
 - **New `Comprehension` operator: value-producing list comprehensions.**
   `["Comprehension", body, ["Element", x, xs], …]` evaluates `body` for each
   combination of one or more `Element` clauses and collects the results into a
-  `List`. Independent clauses produce a flat Cartesian product; a later
-  clause's collection may reference an earlier binding
+  `List`. Independent clauses produce a flat Cartesian product; a later clause's
+  collection may reference an earlier binding
   (`[…, ["Element", "x", ["Range", 1, 3]], ["Element", "y", ["Range", 1, "x"]]]`
   iterates the triangle). Bound names do not leak. With a single clause it is
   equivalent to `Map(xs, x ↦ body)`; unlike `Map` (lazy) it materializes its
-  result. Compiles to JavaScript as nested array-collecting loops (not
-  available on the GLSL/WGSL targets, which have no dynamic arrays).
+  result. Compiles to JavaScript as nested array-collecting loops (not available
+  on the GLSL/WGSL targets, which have no dynamic arrays).
 
-- **`Break` and `Continue` are now registered operators.** `Break(value?)`
-  exits the enclosing loop immediately and its optional value becomes the
-  loop's value; `Continue()` skips to the next iteration. Outside a loop both
-  are inert.
+- **`Break` and `Continue` are now registered operators.** `Break(value?)` exits
+  the enclosing loop immediately and its optional value becomes the loop's
+  value; `Continue()` skips to the next iteration. Outside a loop both are
+  inert.
 
-- **Control flow now propagates out of `Block` statement results.** A
-  `Break`, `Continue`, or `Return` produced by a statement's *result* — e.g.
+- **Control flow now propagates out of `Block` statement results.** A `Break`,
+  `Continue`, or `Return` produced by a statement's _result_ — e.g.
   `["If", cond, ["Break"]]` — now short-circuits the enclosing `Block` and
   propagates to the enclosing loop or function, as the documentation always
-  specified. Previously only a statement that was *literally* one of those
-  heads short-circuited, so a conditional `Break` inside a block was silently
+  specified. Previously only a statement that was _literally_ one of those heads
+  short-circuited, so a conditional `Break` inside a block was silently
   discarded and the loop ran to the iteration limit. Consequences: the
   `while`-loop lowering `["Loop", ["Block", ["If", cond, ["Break"]], …body]]`
-  now terminates correctly, and a `Block` whose value is a `Return` evaluates
-  to the `["Return", value]` expression itself (unwrapped at the function
+  now terminates correctly, and a `Block` whose value is a `Return` evaluates to
+  the `["Return", value]` expression itself (unwrapped at the function
   application boundary), where it previously unwrapped eagerly.
 
 - **`If` without an else branch is fixed.** `["If", cond, then]` — the
@@ -261,28 +257,98 @@
   `Cannot read properties of undefined`) and was left inert. It now
   canonicalizes and evaluates to `Nothing` when the condition is false.
 
-- **Nested scopes now see the enclosing block's variables (lexical
-  scoping fix).** A `Block`, `If` branch, or `Loop` body nested inside a
-  `Block` resolved symbols against a stale canonicalization-time scope, so it
-  could not read the values of the enclosing block's locals:
+- **Nested scopes now see the enclosing block's variables (lexical scoping
+  fix).** A `Block`, `If` branch, or `Loop` body nested inside a `Block`
+  resolved symbols against a stale canonicalization-time scope, so it could not
+  read the values of the enclosing block's locals:
   `["Block", ["Declare", "k", "integer"], ["Assign", "k", 7], ["Block", "k"]]`
   evaluated to symbolic `k` instead of `7`, a `while`-style
   `["Loop", ["Block", ["If", cond, …], …]]` threw
-  `Condition must evaluate to "True" or "False"`, and an `Element`-clause
-  loop whose body is a `Block` left the loop variable symbolic
+  `Condition must evaluate to "True" or "False"`, and an `Element`-clause loop
+  whose body is a `Block` left the loop variable symbolic
   (`Loop(Block(Assign(s, s + n)), Element(n, Range(1, 5)))` produced `5n`
-  instead of accumulating `15`). Nested scopes now resolve enclosing
-  block locals, loop variables, and — inside a function body — the function's
-  parameters and locals correctly, so `while`/`for` lowerings with block
-  bodies evaluate as expected.
+  instead of accumulating `15`). Nested scopes now resolve enclosing block
+  locals, loop variables, and — inside a function body — the function's
+  parameters and locals correctly, so `while`/`for` lowerings with block bodies
+  evaluate as expected.
 
 - **Re-evaluating a program with `Declare` statements no longer throws.**
-  Evaluating the same `Block` expression more than once — or a `Declare`
-  inside a loop body, which re-executes every iteration — threw
+  Evaluating the same `Block` expression more than once — or a `Declare` inside
+  a loop body, which re-executes every iteration — threw
   `The symbol "…" is already declared in this scope` on the second entry. A
-  `Declare` statement now resets the binding it created on a previous run of
-  the same scope. Genuine conflicts (redeclaring a function parameter, or
+  `Declare` statement now resets the binding it created on a previous run of the
+  same scope. Genuine conflicts (redeclaring a function parameter, or
   `ce.declare()` on an explicitly declared symbol) still throw.
+
+### Benchmarks
+
+The numeric and symbolic state of this release is summarized below against the
+last packed comparator release (`0.66.0`), SymPy, math.js, and **Mathematica** —
+the reference baseline, since it is the broadest engine in the field. The tables
+are generated by the harness in [`benchmarks/`](./benchmarks/)
+(`node benchmarks/report_changelog.mjs`); every result is verified numerically
+against an independent `mpmath` reference, never another tool. "CE 0.69.0" is
+this release.
+
+#### Numeric performance (200-digit precision)
+
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
+
+| Expression         | CE 0.69.0 | CE 0.66.0 | SymPy | math.js | Mathematica |
+| ------------------ | --------: | --------: | ----: | ------: | ----------: |
+| $\pi^2$            |       5.9 |       7.9 |   176 |     104 |         3.9 |
+| $\sin 1$           |        20 |        20 |   222 |     442 |         5.2 |
+| $\cos 1$           |        20 |        20 |   224 |     455 |         7.1 |
+| $\ln 2$            |        13 |        81 |   339 |   4,315 |         3.8 |
+| $e^{\pi}$          |        12 |        23 |   213 |   4,787 |         4.0 |
+| $\zeta(3)$         |     1,542 |     3,395 |   268 |       — |          49 |
+| $\Gamma(\tfrac13)$ |       830 |         — |   354 |       — |         214 |
+| $\psi(\tfrac13)$   |       725 |         — | 2,810 |       — |         172 |
+
+Biggest gains over `0.66.0`: $\ln 2$ **6.1× faster**, $\zeta(3)$ **2.2×
+faster**.
+
+#### Symbolic capability & performance
+
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE 0.69.0** and **CE 0.66.0** columns to see
+what is _new this release_ (a `—` under `0.66.0` next to a number under the
+current build). The **CE + R/F** column is the current build with the opt-in
+Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
+
+| Operation                              | CE 0.69.0 | CE + R/F | CE 0.66.0 | SymPy  | math.js | Mathematica |
+| -------------------------------------- | :-------: | :------: | :-------: | :----: | :-----: | :---------: |
+| **Antiderivatives**                    |           |          |           |        |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |   6.8×    |   3.1×   |   7.5×    |  0.5×  |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |    11×    |   1.7×   |   10.0×   | 0.08×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |   6.3×    |   0.9×   |   6.7×    |  0.3×  |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |     —     |   2.1×   |     —     |  0.1×  |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |     —     |   1.4×   |     —     | 0.01×  |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |     —     |   1.3×   |     —     | 0.007× |    —    |     1×      |
+| **Derivatives**                        |           |          |           |        |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |   0.03×   |  0.03×   |   0.03×   | 0.001× | 0.004×  |     1×      |
+| **Simplification**                     |           |          |           |        |         |             |
+| $\sqrt{3+2\sqrt2}$                     |    46×    |   30×    |    41×    |   —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |    98×    |   58×    |    97×    |  3.1×  |   19×   |     1×      |
+| **Evaluation**                         |           |          |           |        |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |    55×    |   25×    |    56×    |  3.1×  |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |   9.7×    |   6.0×   |   5.1×    |  2.1×  |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |   7429×   |  7782×   |   7935×   |  90×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |   459×    |   153×   |   586×    |  2.5×  |    —    |     1×      |
+| **Solving**                            |           |          |           |        |         |             |
+| $x^4+x^2-1=0$                          |   0.3×    |   0.2×   |   0.1×    | 0.06×  |    —    |     1×      |
+| $x^3-x-1=0$                            |   1.9×    |   2.0×   |   0.2×    | 0.04×  |    —    |     1×      |
+
+Across the cases both solve, Compute Engine is a **median 6.8× faster than
+Mathematica** (up to 7429×).
+
+<sub>
+Measured 2026-07-08 · Compute Engine `0.68.0` @ `5a2abce1` (current build) · published `0.66.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+</sub>
 
 ## 0.68.0 _2026-07-05_
 
