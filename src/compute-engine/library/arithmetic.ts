@@ -1507,6 +1507,37 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A zero (or absent) error collapses to the exact value (decided
         // 2026-07-07: zero error is an exact value).
         if (error.isSame(0)) return value;
+        // Dimensional-consistency repair. `5.1 \pm 0.2\,\mathrm{cm}` parses
+        // with the unit attached to the error term only: unit juxtaposition
+        // binds during primary parsing, tighter than any infix, so no `\pm`
+        // precedence can prevent it. A dimensionless value with a dimensioned
+        // error (or vice versa) is not a meaningful measurement — the unit
+        // scopes over the whole measurement:
+        //   Measurement(v, Quantity(e, u)) → Quantity(Measurement(v, e), u)
+        //   Measurement(Quantity(v, u), e) → Quantity(Measurement(v, e), u)
+        // (Both operands Quantity — an error in a different unit than the
+        // value — is left as written; propagation handles conversion.)
+        if (
+          isQuantity(error) &&
+          !isQuantity(value) &&
+          value.type.matches('number') &&
+          error.op1.type.matches('number')
+        ) {
+          return ce._fn('Quantity', [
+            ce._fn('Measurement', [value, error.op1.abs()]),
+            error.op2,
+          ]);
+        }
+        if (
+          isQuantity(value) &&
+          error.type.matches('number') &&
+          value.op1.type.matches('number')
+        ) {
+          return ce._fn('Quantity', [
+            ce._fn('Measurement', [value.op1, error.abs()]),
+            value.op2,
+          ]);
+        }
         // The error is a 1σ absolute magnitude: canonicalize to |error|.
         return ce._fn('Measurement', [value, error.abs()]);
       },

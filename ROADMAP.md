@@ -107,9 +107,6 @@ Deferred:
   measured variable is reused across operands (`x·x`, `x/(x+1)`). A
   `BoxedMeasurement` carrier with per-source identity; the hard part is
   source-id stability across re-boxing (design doc "Non-goals").
-- **Bare `5.1 ± 0.2 cm` parsing** (no parens) — mis-nests because `\pm` binds
-  looser than unit juxtaposition; needs a precedence change. Parenthesized
-  `(5.1 ± 0.2) cm` works today.
 - **Relative-error notation** (`±5%`) and **distribution/`RandomVariate`
   links** (reuse the statistics RNG/seed policy).
 

@@ -50,7 +50,11 @@
   - Measurements combine with **units**: `(5.1 \pm 0.2)\,\mathrm{cm}` is a
     measured quantity, and the error carries through quantity arithmetic and
     unit conversion (`UnitConvert` of `(5.1 \pm 0.2)\,\mathrm{cm}` to `m` →
-    `(0.0510 \pm 0.0020)\,\mathrm{m}`).
+    `(0.0510 \pm 0.0020)\,\mathrm{m}`). The bare form `5.1 \pm 0.2\,\mathrm{cm}`
+    (no parentheses) parses to the same thing: a unit on only one operand of
+    `\pm` scopes over the whole measurement (a dimensionless value with a
+    dimensioned error is never meaningful). An error in a *different* unit
+    than the value (`5.1\,\mathrm{cm} \pm 2\,\mathrm{mm}`) stays as written.
   - **Display** follows the physics convention — the uncertainty is shown to
     two significant figures by default and the value is rounded to the same
     decimal place (`5.134 \pm 0.021`, `8.00 \pm 0.22`). Controlled by the

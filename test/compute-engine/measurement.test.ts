@@ -417,16 +417,30 @@ describe('Measurement — units interaction (Phase 5)', () => {
     );
   });
 
-  test('bare (unparenthesised) notation mis-nests — documented limitation', () => {
-    // `5.1 ± 0.2 cm` without parentheses: `\pm` is low precedence and the unit
-    // juxtaposition binds tighter, so the unit attaches to the error operand,
-    // not the whole measurement. Deferred (needs parser-precedence surgery);
-    // use `(5.1 ± 0.2) cm`. This test documents the current behavior.
+  test('bare (unparenthesised) notation re-nests the unit over the whole measurement', () => {
+    // `5.1 ± 0.2 cm` without parentheses: unit juxtaposition binds during
+    // primary parsing (tighter than any infix), so the raw parse attaches the
+    // unit to the error operand. Measurement canonicalization repairs the
+    // dimensional inconsistency by scoping the unit over the whole
+    // measurement — the bare form now equals the parenthesized form.
     const p = ce.parse('5.1 \\pm 0.2\\,\\mathrm{cm}');
+    expect(p.json).toEqual(['Quantity', ['Measurement', 5.1, 0.2], 'cm']);
+    expect(p.json).toEqual(
+      ce.parse('\\left(5.1 \\pm 0.2\\right)\\,\\mathrm{cm}').json
+    );
+  });
+
+  test('unit on the value operand re-nests the same way', () => {
+    // `5.1 cm ± 0.2`: error implicitly in the value's unit.
+    const p = ce.parse('5.1\\,\\mathrm{cm} \\pm 0.2');
+    expect(p.json).toEqual(['Quantity', ['Measurement', 5.1, 0.2], 'cm']);
+  });
+
+  test('value and error in different units stay as written', () => {
+    // Both operands dimensioned — propagation handles conversion; no re-nest.
+    const p = ce.parse('5.1\\,\\mathrm{cm} \\pm 2\\,\\mathrm{mm}');
     expect(p.operator).toBe('Measurement');
-    expect(p.op1!.re).toBeCloseTo(5.1, 12);
-    // The unit ended up inside the error operand rather than on the whole.
-    expect(p.toString()).not.toBe('(5.1 ± 0.2) cm');
+    expect(p.op1!.operator).toBe('Quantity');
   });
 
   test('regression: plain (non-measurement) Quantity arithmetic unchanged', () => {
