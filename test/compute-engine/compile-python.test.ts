@@ -172,6 +172,58 @@ describe('PYTHON TARGET', () => {
     });
   });
 
+  describe('Block / Declare (bare statement block, not JS IIFE)', () => {
+    it('compiles a value-carrying Declare block to a valid def', () => {
+      // Declare(t, 'real', x*x) — the empty `declare` hook is filtered; the
+      // value rides on a separate `t = x * x` assignment. The block hook puts
+      // `return` on the last statement.
+      const expr = ce.box([
+        'Block',
+        ['Declare', 't', { str: 'real' }, ['Multiply', 'x', 'x']],
+        ['Add', 't', 1],
+      ]);
+      const code = python.compileFunction(expr, 'f', ['x']);
+      expect(code).toBe('def f(x):\n    t = x * x\n    return t + 1\n');
+    });
+
+    it('compiles an Assign block to a valid def', () => {
+      const expr = ce.box([
+        'Block',
+        ['Assign', 't', ['Multiply', 'x', 'x']],
+        ['Add', 't', 1],
+      ]);
+      const code = python.compileFunction(expr, 'g', ['x']);
+      expect(code).toBe('def g(x):\n    t = x * x\n    return t + 1\n');
+    });
+
+    it('fails closed (D6) when a Block is used as a sub-expression', () => {
+      const block = ce.box([
+        'Block',
+        ['Assign', 't', ['Multiply', 'x', 'x']],
+        ['Add', 't', 1],
+      ]);
+      expect(() => python.compile(ce.box(['Add', 1, block]))).toThrow(/Block/);
+    });
+
+    it('fails closed when a Block is a function argument', () => {
+      const block = ce.box([
+        'Block',
+        ['Assign', 't', ['Multiply', 'x', 'x']],
+        ['Add', 't', 1],
+      ]);
+      expect(() => python.compile(ce.box(['Sin', block]))).toThrow(/Block/);
+    });
+
+    it('rejects a Block body for compileLambda', () => {
+      const block = ce.box([
+        'Block',
+        ['Assign', 't', ['Multiply', 'x', 'x']],
+        ['Add', 't', 1],
+      ]);
+      expect(() => python.compileLambda(block, ['x'])).toThrow(/lambda/);
+    });
+  });
+
   describe('Real-World Formulas', () => {
     it('should compile distance formula', () => {
       const expr = ce.parse('\\sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}');

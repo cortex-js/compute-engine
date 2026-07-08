@@ -529,6 +529,20 @@ export class PythonTarget implements LanguageTarget<Expression> {
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',
+      // A Python Block is a bare statement sequence (like GLSL/WGSL), never a
+      // JS IIFE. Fail closed (D6) if such a block is spliced as a sub-operand.
+      bareStatementBlocks: true,
+      // Python has no declaration keyword; a `Declare`'s value rides on the
+      // separate `name = value` assignment compileBlock emits. Ignore the GPU
+      // type-hint argument (`vec2` etc. is meaningless here).
+      declare: (_name) => '',
+      // Return-prefix the last statement and newline-join. No semicolons.
+      block: (stmts) => {
+        if (stmts.length === 0) return '';
+        const last = stmts.length - 1;
+        stmts[last] = `return ${stmts[last]}`;
+        return stmts.join('\n');
+      },
       ...options,
     };
   }
@@ -642,7 +656,17 @@ export class PythonTarget implements LanguageTarget<Expression> {
       code += `    r"""${docstring}"""\n`;
     }
 
-    code += `    return ${body}\n`;
+    if (body.includes('\n')) {
+      // Block body — the block hook already put `return` on the last line.
+      // Indent each statement under the `def`; do not wrap in `return`.
+      const indented = body
+        .split('\n')
+        .map((l) => `    ${l}`)
+        .join('\n');
+      code += `${indented}\n`;
+    } else {
+      code += `    return ${body}\n`;
+    }
 
     return code;
   }
@@ -689,6 +713,15 @@ export class PythonTarget implements LanguageTarget<Expression> {
       var: this.makeVarResolver(undefined, parameters),
     });
     const body = BaseCompiler.compile(expr, target);
+    // A multi-statement construct (loop-form Sum/Product, Loop, Block) can
+    // never be a Python lambda body. This path bypasses the D6 value-operand
+    // guard, so check explicitly.
+    if (body.includes('\n'))
+      throw new Error(
+        'compileLambda: a multi-statement construct (loop-form Sum/Product, ' +
+          'Loop, or Block) cannot be a Python lambda body — use ' +
+          'compileFunction instead.'
+      );
 
     const params = parameters.join(', ');
     return `lambda ${params}: ${body}`;
