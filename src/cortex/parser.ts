@@ -1348,6 +1348,11 @@ export class Parser {
       case 'STRING':
         return this.parseString();
       case 'SYMBOL':
+        // `if … { … } else { … }` is an expression (it yields a value), so it
+        // is a primary — usable as an assignment RHS, argument, or operand,
+        // not only as a top-level statement. (`while`/`for` stay statement-only:
+        // they evaluate for effect to `Nothing`.)
+        if (token.text === 'if') return this.parseIf();
         return this.parseSymbol();
       case 'VERBATIM_SYMBOL':
         return this.parseVerbatimSymbol();

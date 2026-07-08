@@ -64,7 +64,7 @@ Dependency order: **0 ∥ 1 → 2 → (3 ∥ 4) → 5**. Full plans in
 | 1 — Parser foundation | New lexer/parser, diagnostics + recovery, port lexical layer (49 green tests = DoD), delete `point-free-parser` | [plan](./roadmap/cortex/phase-1-parser-foundation.md) | ✅ done (2026-07-07) |
 | 2 — Expression layer | Shared operator table, Pratt + whitespace rule, calls, collections, dictionaries, type annotations, `$…$` islands; un-skip all suites | [plan](./roadmap/cortex/phase-2-expression-layer.md) | ✅ done (2026-07-07) |
 | 3 — Round-trip | Serializer completion, parse∘serialize property test, loose-syntax compat check | [plan](./roadmap/cortex/phase-3-round-trip.md) | ✅ done (2026-07-07) |
-| 4 — Semantics & execution | `executeCortex`, declarations/scoping, function definitions, control flow, pragma security, Tycho integration | [plan](./roadmap/cortex/phase-4-semantics.md) | not started |
+| 4 — Semantics & execution | `executeCortex`, declarations/scoping, function definitions, control flow, pragma security, Tycho integration | [plan](./roadmap/cortex/phase-4-semantics.md) | ✅ done (2026-07-07); v0 caveats: typed params parsed-but-unenforced; Tycho cell UX is consumer-side |
 | 5 — Ship | Build target, `./cortex` export, docs sync, highlight mode, CHANGELOG (experimental) | [plan](./roadmap/cortex/phase-5-ship.md) | not started |
 
 Open design questions are flagged inside the phase plans (Phase 2: pipe
@@ -139,6 +139,26 @@ and the docs.
 
 ## Completed log
 
+- 2026-07-07 — **Phase 4 (Semantics & execution)**: Cortex runs in a notebook
+  cell via `executeCortex(ce, source, options?) → { value, diagnostics }`
+  (sequential top-level statements in a shared scope; symbolic-by-default with
+  explicit `N()`; errors-are-values; pragma security — `#env`/`#navigator`
+  gated off by default, `#error` → diagnostic). **Declarations** use the
+  enhanced engine `Declare` (`let`/`const`, const = `constant: True` binding
+  attribute enforced by the engine, type inferred; a type annotation implies a
+  declaration; bare `x = 5` = `Assign`). **Functions**: `f(x)=expr`,
+  `function f(x){…}`, mapsto lambda `x |-> expr` → `Function`. **Control flow**:
+  `if` is a true **expression** (`If`, usable as RHS/operand); `while` →
+  `Loop(Block(If(Not(cond),Break), body))`; `for x in xs` → `Loop(…, Element)` —
+  all real engine primitives (compile via `base-compiler`). Surfaced + fixed an
+  engine `for`-binding bug (loop var assigned in a shadowing `freshScope` vs the
+  Block's lexical scope — fix in `control-structures.ts runNestedElements`,
+  landed with the user's Loop/Map de-conflation). Docs: `declarations.md`,
+  `control-flow.md`, `evaluation.md`, `naming.md`. Notebook integration test +
+  pragma-gating tests. **285 `test/cortex` green**, typecheck + madge clean.
+  v0 caveats: typed function params parsed-but-unenforced; `While` custom head
+  dropped in favor of the `Loop` lowering; `List` literals keep elements lazy
+  (engine convention). Next: Phase 5 (ship).
 - 2026-07-07 — **Phase 3 (Round-trip coherence)**: `parse∘serialize` locked
   by a 66-expression property harness (`test/cortex/round-trip.test.ts`) that
   asserts structural equality under documented normalizations AND zero

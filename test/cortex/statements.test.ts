@@ -239,6 +239,25 @@ describe('CORTEX CONTROL FLOW', () => {
       ['Element', 'x', ['Element', 'a', 'b']],
     ]);
   });
+
+  test('`if` is an expression (usable as an assignment RHS)', () => {
+    expect(validCortex('let a = if c { 1 } else { 2 }')).toStrictEqual([
+      'Declare',
+      'a',
+      [
+        'Dictionary',
+        ['KeyValuePair', 'value', ['If', 'c', ['Block', 1], ['Block', 2]]],
+      ],
+    ]);
+  });
+
+  test('`if` is an expression (usable as an operand)', () => {
+    expect(validCortex('x + if c { 1 } else { 2 }')).toStrictEqual([
+      'Add',
+      'x',
+      ['If', 'c', ['Block', 1], ['Block', 2]],
+    ]);
+  });
 });
 
 describe('CORTEX BLOCKS', () => {
@@ -283,17 +302,19 @@ describe('CORTEX BLOCKS', () => {
   });
 });
 
-describe('CORTEX KEYWORDS STAY RESERVED IN EXPRESSION POSITION', () => {
-  test('a bare `if` used as a value is a diagnostic', () => {
-    const [, diags] = parseCortex('x = if');
-    expect(diags.length).toBeGreaterThan(0);
-    expect(diags[0].message).toStrictEqual(['reserved-word', 'if']);
-  });
-
+describe('CORTEX STATEMENT KEYWORDS STAY RESERVED IN EXPRESSION POSITION', () => {
+  // `if` is an expression (see above), but the for-effect loop keywords are
+  // statement-only and remain reserved in expression position.
   test('a bare `while` used as a value is a diagnostic', () => {
     const [, diags] = parseCortex('y = while');
     expect(diags.length).toBeGreaterThan(0);
     expect(diags[0].message).toStrictEqual(['reserved-word', 'while']);
+  });
+
+  test('a bare `for` used as a value is a diagnostic', () => {
+    const [, diags] = parseCortex('y = for');
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].message).toStrictEqual(['reserved-word', 'for']);
   });
 });
 
