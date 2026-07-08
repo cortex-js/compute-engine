@@ -147,6 +147,29 @@
   `Cannot read properties of undefined`) and was left inert. It now
   canonicalizes and evaluates to `Nothing` when the condition is false.
 
+- **Nested scopes now see the enclosing block's variables (lexical
+  scoping fix).** A `Block`, `If` branch, or `Loop` body nested inside a
+  `Block` resolved symbols against a stale canonicalization-time scope, so it
+  could not read the values of the enclosing block's locals:
+  `["Block", ["Declare", "k", "integer"], ["Assign", "k", 7], ["Block", "k"]]`
+  evaluated to symbolic `k` instead of `7`, a `while`-style
+  `["Loop", ["Block", ["If", cond, …], …]]` threw
+  `Condition must evaluate to "True" or "False"`, and an `Element`-clause
+  loop whose body is a `Block` left the loop variable symbolic
+  (`Loop(Block(Assign(s, s + n)), Element(n, Range(1, 5)))` produced `5n`
+  instead of accumulating `15`). Nested scopes now resolve enclosing
+  block locals, loop variables, and — inside a function body — the function's
+  parameters and locals correctly, so `while`/`for` lowerings with block
+  bodies evaluate as expected.
+
+- **Re-evaluating a program with `Declare` statements no longer throws.**
+  Evaluating the same `Block` expression more than once — or a `Declare`
+  inside a loop body, which re-executes every iteration — threw
+  `The symbol "…" is already declared in this scope` on the second entry. A
+  `Declare` statement now resets the binding it created on a previous run of
+  the same scope. Genuine conflicts (redeclaring a function parameter, or
+  `ce.declare()` on an explicitly declared symbol) still throw.
+
 ## 0.68.0 _2026-07-05_
 
 ### Breaking Changes
