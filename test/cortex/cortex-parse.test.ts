@@ -63,7 +63,7 @@ describe('CORTEX PARSING SPACES', () => {
     expect(validCortex(' \u2000 ')).toBe('Nothing');
     expect(validCortex(' \u2009 ')).toBe('Nothing');
     // Two expressions on one line with no separator (a tab is not a linebreak)
-    // is a diagnostic — no silent `Do`-juxtaposition (language-review §2.5).
+    // is a diagnostic — no silent `Block`-juxtaposition (language-review §2.5).
     expect(validCortex('1\t2')).toStrictEqual([
       'Error',
       ['String', ['unexpected-symbol', '2']],
@@ -87,7 +87,7 @@ describe('CORTEX PARSING COMMENTS', () => {
     expect(validCortex('  12 // inline 👩🏻‍🎤 // comment')).toBe(12);
     expect(validCortex('  12 /// inline 👩🏻‍🎤 // documentation')).toBe(12);
     expect(validCortex('  12 /// inline\n 👩🏻‍🎤 // documentation')).toStrictEqual([
-      'Do',
+      'Block',
       12,
       '👩🏻‍🎤',
     ]);
@@ -1383,7 +1383,7 @@ describe('CORTEX PARSING OPERATORS', () => {
     ]);
     // `-1+-2`: the lexer maximal-munches `+-` into one (non-operator) token, so
     // `-1` ends the first expression; `+-2` on the same line with no separator
-    // is a diagnostic (language-review §2.5), no longer a silent `Do`.
+    // is a diagnostic (language-review §2.5), no longer a silent `Block`.
     expect(invalidCortex('-1+-2')).toStrictEqual([
       'Error',
       ['String', ['unexpected-symbol', '+-']],

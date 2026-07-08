@@ -75,11 +75,14 @@ export function executeCortex(
     throw e;
   }
 
-  // Unwrap a top-level `Do` into its statement list. The parser wraps a
-  // multi-statement program in `Do`; a single statement is not wrapped, and an
-  // empty program is `Nothing`.
+  // Unwrap a top-level `Block` into its statement list. The parser wraps a
+  // multi-statement program in `Block`; a single statement is not wrapped, and
+  // an empty program is `Nothing`. A top-level `Block` node is unambiguously the
+  // program wrapper: top-level `{…}` source is the collection grammar
+  // (Set/Dictionary), statement blocks parse only in keyword position, and a
+  // single-statement program is returned unwrapped.
   const statements =
-    operator(ast) === 'Do' ? [...operands(ast)] : [ast];
+    operator(ast) === 'Block' ? [...operands(ast)] : [ast];
 
   let value: BoxedExpression = ce.Nothing;
 

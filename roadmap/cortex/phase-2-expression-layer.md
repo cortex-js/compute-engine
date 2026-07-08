@@ -83,7 +83,8 @@ matched from the shared table, not hardcoded).
 block-level expressions are separated by linebreaks or `;`. Two expressions
 on one line without a separator = diagnostic (no silent `Do`-juxtaposition
 — today's `f(x)` → `Do(f, x)` behavior disappears when calls land). The
-program still wraps multiple statements in `["Do", …]`.
+program still wraps multiple statements in `["Do", …]` (renamed to
+`["Block", …]` in Phase 4).
 
 ## 3. Postfix: calls and indexing
 

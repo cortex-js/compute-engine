@@ -126,8 +126,8 @@ if x > 0 { 1 } else if x < 0 { 2 } else { 3 }
 ]
 ```
 
-A `{ }` block's value is its last expression — the same `Do`-like semantics
-as any other block (see [Blocks](#blocks) below).
+A `{ }` block's value is its last expression — the same `Block` semantics
+as a multi-statement program (see [Blocks](#blocks) below).
 
 ## Loops
 

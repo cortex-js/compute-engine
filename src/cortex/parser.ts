@@ -93,11 +93,11 @@ const PREFIX_SIGILS = new Set(['!', '-', '+']);
 //
 // Top-level (and block-level) statements are separated by a linebreak
 // (`precededByLinebreak`) or `;`. Two full expressions on one line with no
-// separator are a diagnostic (no silent `Do`-juxtaposition — now that calls
-// land, `f(x)` is a call, not `Do(f, x)`).
+// separator are a diagnostic (no silent `Block`-juxtaposition — now that calls
+// land, `f(x)` is a call, not `Block(f, x)`).
 //
 // The top-level shape: 0 statements → `Nothing`, 1 statement → that expression
-// (not wrapped), N statements → `["Do", …]`.
+// (not wrapped), N statements → `["Block", …]`.
 //
 
 export class Parser {
@@ -283,7 +283,7 @@ export class Parser {
       sourceOffsets?: [number, number];
     };
     return {
-      fn: ['Do', ...exprs] as [MathJsonSymbol, ...MathJsonExpression[]],
+      fn: ['Block', ...exprs] as [MathJsonSymbol, ...MathJsonExpression[]],
       sourceOffsets: [
         first.sourceOffsets?.[0] ?? this.baseOffset,
         last.sourceOffsets?.[1] ?? this.baseOffset,
@@ -344,7 +344,7 @@ export class Parser {
   // linebreak or `;`), parsed only in keyword position (after
   // `function`/`if`/`else`/`while`/`for`). It is distinct from the Phase 2
   // `{…}` collection grammar (`Set`/`Dictionary`), which is a *primary*. The
-  // block's value is its last expression (`Do`/`Block` semantics). An empty
+  // block's value is its last expression (`Block` semantics). An empty
   // block is `["Block"]`.
   //
 
@@ -951,7 +951,7 @@ export class Parser {
    * Statements are separated by an explicit `;` or by a linebreak
    * (`precededByLinebreak`). Two full expressions on one line with no separator
    * are a diagnostic (language-review §2.5) — there is no silent
-   * `Do`-juxtaposition. The offending region is skipped by the top-level
+   * `Block`-juxtaposition. The offending region is skipped by the top-level
    * recovery so exactly one diagnostic is reported.
    */
   private expectStatementSeparator(): void {

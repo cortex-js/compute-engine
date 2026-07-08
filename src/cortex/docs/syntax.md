@@ -143,8 +143,8 @@ silent sequence — it is a diagnostic:
 Error: unexpected-symbol "2"
 ```
 
-A well-formed multi-statement program wraps its statements in `["Do", …]`; a
-program consisting of a single statement is returned unwrapped (no `Do`
+A well-formed multi-statement program wraps its statements in `["Block", …]`; a
+program consisting of a single statement is returned unwrapped (no `Block`
 wrapper):
 
 ```cortex
@@ -153,7 +153,7 @@ a
 ```
 
 ```json
-["Do", "a", 2]
+["Block", "a", 2]
 ```
 
 `;` is interchangeable with a linebreak as a separator:
@@ -163,7 +163,7 @@ a; 2
 ```
 
 ```json
-["Do", "a", 2]
+["Block", "a", 2]
 ```
 
 ## Primary expressions

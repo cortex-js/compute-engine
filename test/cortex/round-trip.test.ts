@@ -178,9 +178,9 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   ['At multi-index', ['At', 'm', 'i', 'j']],
   ['At of a call', ['At', ['f', 'x'], 1]],
 
-  // Do / If
-  ['Do', ['Do', 'a', 2]],
-  ['Do (3 statements)', ['Do', 'a', 'b', 'c']],
+  // Block / If
+  ['Block', ['Block', 'a', 2]],
+  ['Block (3 statements)', ['Block', 'a', 'b', 'c']],
   ['If (generic function form)', ['If', 'c', 't', 'e']],
 
   // Interpolated string

@@ -16,7 +16,8 @@ serializer work. Depends on Phase 2._
 2. **Serializer gaps** (currently fall through to generic `Fn(args)` form):
    - `Dictionary` (the `dictionaryFromExpression` path exists; align it
      with the Phase 2 `{k -> v}` grammar and unquoted-key rules).
-   - `Do` (statement-per-line), `If` (Phase 4 decides the full statement
+   - `Do` (statement-per-line; the program wrapper — renamed `Block` in
+     Phase 4), `If` (Phase 4 decides the full statement
      form; until then serialize as conditional expression).
    - `Rational` (`["Rational", 1, 2]` → `1/2`), negative-literal forms.
    - Invisible multiply: serialize `["Multiply", 2, "x"]` as `2x` per the

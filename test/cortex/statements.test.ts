@@ -319,11 +319,11 @@ describe('CORTEX STATEMENT KEYWORDS STAY RESERVED IN EXPRESSION POSITION', () =>
 });
 
 describe('CORTEX MULTI-STATEMENT PROGRAM', () => {
-  test('declarations and control flow sequence into a Do', () => {
+  test('declarations and control flow sequence into a Block', () => {
     expect(
       validCortex('let x = 5\nif x > 0 { 1 } else { 2 }')
     ).toStrictEqual([
-      'Do',
+      'Block',
       ['Declare', 'x', ['Dictionary', ['KeyValuePair', 'value', 5]]],
       ['If', ['Greater', 'x', 0], ['Block', 1], ['Block', 2]],
     ]);

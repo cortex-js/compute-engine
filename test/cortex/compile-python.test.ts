@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { parseCortex } from '../../src/cortex/parse-cortex';
-import { operator, operands } from '../../src/math-json/utils';
+import { operator } from '../../src/math-json/utils';
 
 //
 // End-to-end pipeline lock: Cortex source → MathJSON → engine canonicalization
@@ -10,11 +10,10 @@ import { operator, operands } from '../../src/math-json/utils';
 // through `PythonTarget.compileFunction`, so drift on either side of the
 // pipeline (parser lowering shapes, Block/Declare/Loop codegen) fails here.
 //
-// The parser wraps a multi-statement program in `Do`, which `executeCortex`
-// unwraps to run statements in the engine's current scope (a notebook
-// cell-chain). A *compiled function body* wants `Block` scoping instead, so —
-// mirroring that boundary translation — the helper rewraps the statements in a
-// `Block`. `Do` itself has no engine definition and does not compile.
+// The parser wraps a multi-statement program in `Block`, so a program AST is a
+// first-class engine expression: directly evaluable and compilable. A
+// single-statement program is returned unwrapped, so the helper only needs to
+// wrap that case in a `Block` to give the compiled function a body.
 //
 // The expected defs were verified to run under python3 (`f(3) === 10`,
 // `g() === 10`); the assertions here are string-only so the suite does not
@@ -30,8 +29,9 @@ function compileToPythonDef(
 ): string {
   const [ast, diagnostics] = parseCortex(source);
   expect(diagnostics).toHaveLength(0);
-  const statements = operator(ast) === 'Do' ? [...operands(ast)] : [ast];
-  const body = ce.box(['Block', ...statements]);
+  // A multi-statement program already IS a `Block`; wrap only the unwrapped
+  // single-statement case.
+  const body = operator(ast) === 'Block' ? ce.box(ast) : ce.box(['Block', ast]);
   return new PythonTarget().compileFunction(body, name, params);
 }
 

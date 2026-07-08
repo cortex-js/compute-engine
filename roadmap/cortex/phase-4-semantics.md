@@ -36,7 +36,7 @@ parallel._
   - Reassignment (no keyword, no annotation): `x = 5` → `["Assign","x",5]`.
 - **Function definitions: BOTH forms.** Math-style `f(x) = expr` and block
   `function f(x) { … }`; both → `["Assign", name, ["Function", body, …params]]`
-  (block body is a `Do`/block whose value is its last expression). Typed
+  (block body is a `Block` whose value is its last expression). Typed
   params `f(x: real) = expr` via the type subparser; a return-type annotation
   uses `->` only in the unambiguous post-parameter-list signature position
   (matches the type language's own `(real) -> real`).
@@ -48,7 +48,7 @@ parallel._
   in expression position). `return`/`break`/`continue` stay reserved (out).
 - **Blocks** (`{ … }` after a keyword: `function`/`if`/`else`/`while`/`for`)
   are statement blocks, distinct from the Phase 2 `{ … }` collection grammar;
-  block value = last expression (`Do` semantics), and each pushes a scope.
+  block value = last expression (`Block` semantics), and each pushes a scope.
 - **Execution [confirmed per §1]:** `executeCortex` evaluates each top-level
   statement, symbolic-by-default (exactness contract), numeric only via
   explicit `N(expr)`; runtime problems are `["Error", …]` values, parse
@@ -101,7 +101,7 @@ library definitions, don't invent.
 - `if cond { … } else { … }` as an expression → `["If", cond, then, else]`.
   Braces here are *blocks* (keyword-introduced only — the Phase 2 `{…}`
   collection grammar is unaffected). Block value = last expression
-  (`["Do", …]` → engine `Do` semantics).
+  (`["Block", …]` → engine `Block` semantics).
 - One loop for v0: leaning `while cond { … }` → `["Loop", body, cond]`-
   shaped mapping (exact MathJSON per engine's `Loop`/control operators),
   plus collection iteration via library functions (`Map`, `Filter`,

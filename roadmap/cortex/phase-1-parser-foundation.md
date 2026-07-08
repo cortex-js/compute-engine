@@ -115,7 +115,8 @@ from `point-free-parser/parsers.ts`. `test/utils.ts` imports the
    invalid escapes).
 2. `diagnostics.ts` (ported types) + `parser.ts` skeleton: primary =
    number | symbol | string | pragma | parenthesized; top-level =
-   shebang? expression* EOF with `Do`-wrapping, exactly today's semantics.
+   shebang? expression* EOF with `Do`-wrapping, exactly today's semantics
+   (the program wrapper was renamed to `Block` in Phase 4).
 3. Rewire `parse-cortex.ts` to the new parser behind the unchanged public
    signature. Run the cortex test suites; iterate until the **49 passing
    tests are green with unchanged snapshots** (diagnostic *messages* may

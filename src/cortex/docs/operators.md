@@ -89,7 +89,7 @@ The expression `a` ends there; `+b` is left over on the same line with no
 separator before it, which is a diagnostic (`unexpected-symbol`) rather than a
 silently-inferred sequence — see [Statements and Sequencing](/cortex/syntax/).
 On its own line (after a linebreak or `;`), `+b` is a valid new statement:
-unary `+` is the identity, so `a\n+b` parses as `["Do", "a", "b"]`.
+unary `+` is the identity, so `a\n+b` parses as `["Block", "a", "b"]`.
 
 ```cortex
 a+ b

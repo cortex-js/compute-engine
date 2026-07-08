@@ -83,7 +83,7 @@ ratified in the Phase 2 plan):
   (`if … { }`, `else { }`, function bodies) — never as a bare expression.
   This keeps expression grammar unambiguous at the cost of "no bare block
   expressions", which is consistent with "everything is an expression"
-  since `Do(…)` covers sequencing.
+  since `Block(…)` covers sequencing.
 
 ### 1.6 Smaller defects
 

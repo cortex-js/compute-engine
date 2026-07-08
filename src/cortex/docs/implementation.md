@@ -87,7 +87,7 @@ if (x in PrimeNumber) {
 [
   "If",
   ["Element", "x", "PrimeNumber"],
-  ["Do", ["Print", "x"], ["Assign", "x", ["Add", "x", 1]]],
-  ["Do", ["Assign", "x", ["Add", "x", 2]]]
+  ["Block", ["Print", "x"], ["Assign", "x", ["Add", "x", 1]]],
+  ["Block", ["Assign", "x", ["Add", "x", 2]]]
 ]
 ```

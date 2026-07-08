@@ -398,19 +398,6 @@ export function serializeCortex(
       return serializeOperator(expr) ?? serializeGenericFunction(expr);
     },
 
-    //
-    // Do
-    //
-    // A multi-statement block serializes one statement per line; the parser
-    // re-wraps a newline-separated statement list in `Do`. A 0- or 1-element
-    // `Do` has no statement-list spelling (the parser never produces one), so
-    // it falls back to the generic `Do(…)` function form.
-    //
-    Do: (expr: MathJsonExpression): FormattingBlock => {
-      if (nops(expr) < 2) return serializeGenericFunction(expr);
-      return fmt.stack(...mapArgs<FormattingBlock>(expr, serializeExpression));
-    },
-
     // `If` has no `if`-expression spelling in the Phase 2 grammar, so it is
     // left to the generic `If(cond, then, else)` function form (which
     // round-trips). Phase 4 owns the statement form.
@@ -493,6 +480,18 @@ export function serializeCortex(
   }
 
   // Main body of `serializeCortex()`
+  //
+  // A multi-statement program is the parser's top-level `Block` wrapper: it
+  // serializes one statement per line. This is handled here — at the root
+  // only — rather than as a `FUNCTIONS` handler, because those handlers apply
+  // at every recursion depth, and a `Block` nested inside another expression
+  // must keep the generic `Block(a, b)` function spelling (Phase 4 owns the
+  // nested statement form). A 0- or 1-element `Block` has no statement-list
+  // spelling, so it too falls through to normal serialization.
+  if (operator(expr) === 'Block' && nops(expr) >= 2)
+    return fmt
+      .stack(...mapArgs<FormattingBlock>(expr, serializeExpression))
+      .serialize(0);
   return serializeExpression(expr).serialize(0);
 }
 // Flip the sign of an already-serialized number so a `Negate` of a literal
