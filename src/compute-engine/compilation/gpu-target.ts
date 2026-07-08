@@ -3373,6 +3373,18 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       block: (stmts) => {
         if (stmts.length === 0) return '';
         const last = stmts.length - 1;
+        // A statement-form construct as the block's LAST element — a `Loop`
+        // emits a `for (…) { … }` statement — has no value to return.
+        // Return-prefixing it would produce `return for (…) { … }` (invalid
+        // GLSL/WGSL), and a shader block must evaluate to a typed value, so
+        // there is no `return None` analog either. Fail closed (D6). A Loop in
+        // a non-final position is fine (it stays a bare statement).
+        if (/^\s*(for|while)\b/.test(stmts[last]))
+          throw new Error(
+            `${this.languageId.toUpperCase()}: a Loop (or other statement-form ` +
+              `construct) cannot be the final statement of a block — a shader ` +
+              `block must evaluate to a typed value.`
+          );
         stmts[last] = `return ${stmts[last]}`;
         return stmts.join(';\n') + ';';
       },

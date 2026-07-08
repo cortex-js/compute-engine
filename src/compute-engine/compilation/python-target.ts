@@ -156,6 +156,80 @@ function compilePythonSumProduct(
 }
 
 /**
+ * Indent every line of a (possibly multi-line) statement block by one Python
+ * level (4 spaces). An empty block becomes `pass` (a valid non-empty suite).
+ */
+function indentPythonStatements(code: string): string {
+  const body = code.trim() === '' ? 'pass' : code;
+  return body
+    .split('\n')
+    .map((l) => `    ${l}`)
+    .join('\n');
+}
+
+/**
+ * Compile an expression as Python *statements* — evaluated for effect, no value
+ * collected. Mirrors `BaseCompiler.compileLoopBody` (the statement dispatch the
+ * JS target uses inside loop bodies) but emits Python:
+ *
+ * - `Nothing` → '' (a no-op; filtered out by the `Block` join).
+ * - `Break` → `break`, `Continue` → `continue`, `Return(v)` → `return <v>`.
+ * - `If(cond, then[, else])` → a Python `if`/`else` *statement* (not the
+ *   expression-If's `(then) if (cond) else (else)`), recursing into each branch
+ *   so nested control flow composes. An empty branch becomes `pass`.
+ * - `Block` → its statements newline-joined (no trailing `return` — a loop /
+ *   branch body is for effect).
+ * - `Loop` → a nested statement loop (via `compilePythonLoop`).
+ * - anything else → `BaseCompiler.compile` (an expression evaluated for effect,
+ *   or an `Assign`).
+ *
+ * NOTE: statement-form `If` is reached ONLY here — inside a loop body — exactly
+ * as the JS target statement-forms `If` only inside `compileLoopBody`. An `If`
+ * anywhere else (e.g. a plain function-body `Block`) stays the expression
+ * conditional emitted by the `If` function handler.
+ */
+function compilePythonStatements(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): string {
+  if (isSymbol(expr, 'Nothing')) return '';
+  if (!isFunction(expr)) return BaseCompiler.compile(expr, target);
+
+  const h = expr.operator;
+
+  if (h === 'Break') return 'break';
+  if (h === 'Continue') return 'continue';
+  if (h === 'Return')
+    return `return ${BaseCompiler.compile(expr.ops[0], target)}`;
+
+  if (h === 'If') {
+    // The Python target's comparisons already emit real Python booleans, so —
+    // unlike the JS `compileLoopBody`, whose interval-JS targets need a
+    // `scalarConditionTarget` to avoid comparison *objects* — the condition is
+    // compiled directly.
+    const cond = BaseCompiler.compile(expr.ops[0], target);
+    let code = `if ${cond}:\n${indentPythonStatements(
+      compilePythonStatements(expr.ops[1], target)
+    )}`;
+    if (expr.ops.length > 2)
+      code += `\nelse:\n${indentPythonStatements(
+        compilePythonStatements(expr.ops[2], target)
+      )}`;
+    return code;
+  }
+
+  if (h === 'Block')
+    return expr.ops
+      .map((s) => compilePythonStatements(s, target))
+      .filter((s) => s !== '')
+      .join('\n');
+
+  if (h === 'Loop') return compilePythonLoop(expr.ops, target);
+
+  return BaseCompiler.compile(expr, target);
+}
+
+/**
  * Compile a `Loop` — imperative control flow, for effect (evaluates to
  * `Nothing`). Emits a Python statement loop (not a JS IIFE):
  *
@@ -209,18 +283,12 @@ function compilePythonLoop(
     };
   }
 
-  // Compile the body as statements. Override the block hook so a `Block` body
-  // is newline-joined WITHOUT a trailing `return` (a loop body is for effect).
-  const stmtTarget: CompileTarget<Expression> = {
-    ...bodyTarget,
-    block: (stmts) => stmts.join('\n'),
-  };
-  let bodyCode = BaseCompiler.compile(body, stmtTarget);
-  if (bodyCode.trim() === '') bodyCode = 'pass';
-  const indented = bodyCode
-    .split('\n')
-    .map((l) => `    ${l}`)
-    .join('\n');
+  // Compile the body as statements — statement-form control flow
+  // (`If`/`Break`/`Continue`/`Return`), a flattened `Block`, and nested `Loop`s
+  // all compose, for effect (no trailing `return`).
+  const indented = indentPythonStatements(
+    compilePythonStatements(body, bodyTarget)
+  );
   return `${header}\n${indented}`;
 }
 

@@ -802,4 +802,107 @@ describe('PYTHON TARGET', () => {
       expect(() => python.compileLambda(loop, [])).toThrow(/lambda/);
     });
   });
+
+  // Statement-position control flow inside a loop body: `If` containing
+  // `Break`/`Continue`/`Return` must compile to a Python `if` STATEMENT (not
+  // the expression-If's `(then) if (cond) else (else)`, a SyntaxError). This is
+  // how Cortex lowers `while`: `Loop(Block(If(cond, Break), …))`.
+  describe('Loop body → statement-position control flow', () => {
+    it('while-pattern: If(cond, Break) compiles to an `if …:` statement', () => {
+      const expr = ce.box([
+        'Block',
+        ['Assign', 's', 0],
+        ['Assign', 'k', 1],
+        [
+          'Loop',
+          [
+            'Block',
+            ['If', ['GreaterEqual', 'k', 5], ['Break']],
+            ['Assign', 's', ['Add', 's', 'k']],
+            ['Assign', 'k', ['Add', 'k', 1]],
+          ],
+        ],
+        's',
+      ]);
+      const code = python.compileFunction(expr, 'f', []);
+      expect(code).toBe(
+        'def f():\n' +
+          '    s = 0\n' +
+          '    k = 1\n' +
+          '    while True:\n' +
+          '        if 5 <= k:\n' +
+          '            break\n' +
+          '        s = k + s\n' +
+          '        k = k + 1\n' +
+          '    return s\n'
+      );
+      // The If compiled to a statement, not `(break) if (…) else …` (a
+      // SyntaxError); the loop is a `while`, not a JS IIFE.
+      expect(code).not.toContain('=>');
+      expect(code).not.toMatch(/return for|return while/);
+    });
+
+    it('If/else with Continue in one branch', () => {
+      const expr = ce.box([
+        'Loop',
+        [
+          'Block',
+          [
+            'If',
+            ['Greater', 'k', 2],
+            ['Continue'],
+            ['Assign', 's', ['Add', 's', 'k']],
+          ],
+        ],
+        ['Element', 'k', ['Range', 1, 5]],
+      ]);
+      const code = python.compileFunction(expr, 'g', ['s']);
+      expect(code).toBe(
+        'def g(s):\n' +
+          '    for k in range(1, 6):\n' +
+          '        if 2 < k:\n' +
+          '            continue\n' +
+          '        else:\n' +
+          '            s = k + s\n'
+      );
+    });
+
+    it('nested Loop inside a Loop body', () => {
+      const expr = ce.box([
+        'Loop',
+        [
+          'Loop',
+          ['Assign', 's', ['Add', 's', ['Multiply', 'a', 'b']]],
+          ['Element', 'b', ['Range', 1, 3]],
+        ],
+        ['Element', 'a', ['Range', 1, 3]],
+      ]);
+      const code = python.compileFunction(expr, 'h', ['s']);
+      expect(code).toBe(
+        'def h(s):\n' +
+          '    for a in range(1, 4):\n' +
+          '        for b in range(1, 4):\n' +
+          '            s = a * b + s\n'
+      );
+    });
+
+    it('Return inside a Loop within a compileFunction def', () => {
+      const expr = ce.box([
+        'Loop',
+        [
+          'Block',
+          ['If', ['GreaterEqual', 'k', 3], ['Return', 'k']],
+          ['Assign', 'k', ['Add', 'k', 1]],
+        ],
+      ]);
+      const code = python.compileFunction(expr, 'r', ['k']);
+      expect(code).toBe(
+        'def r(k):\n' +
+          '    while True:\n' +
+          '        if 3 <= k:\n' +
+          '            return k\n' +
+          '        k = k + 1\n'
+      );
+    });
+  });
 });

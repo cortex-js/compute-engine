@@ -833,4 +833,38 @@ describe('GLSL COMPILATION', () => {
       expect(glsl.compile(ce.box(['Add', 'inp', 1])).code).toContain('inp');
     });
   });
+
+  describe('Loop as the final block statement fails closed', () => {
+    it('rejects a trailing Loop (no value to return, no `return None` analog)', () => {
+      const expr = ce.box([
+        'Block',
+        ['Assign', 's', 0],
+        [
+          'Loop',
+          ['Assign', 's', ['Add', 's', 'a']],
+          ['Element', 'a', ['Range', 1, 5]],
+        ],
+      ]);
+      expect(() => glsl.compile(expr).code).toThrow(
+        /final statement of a block/
+      );
+    });
+
+    it('accepts a Loop followed by a value-producing statement', () => {
+      const expr = ce.box([
+        'Block',
+        ['Assign', 's', 0],
+        [
+          'Loop',
+          ['Assign', 's', ['Add', 's', 'a']],
+          ['Element', 'a', ['Range', 1, 5]],
+        ],
+        's',
+      ]);
+      const code = glsl.compile(expr).code;
+      expect(code).toContain('for (int a = 1; a <= 5; a++)');
+      expect(code).toContain('return s;');
+      expect(code).not.toMatch(/return for/);
+    });
+  });
 });
