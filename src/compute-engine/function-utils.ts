@@ -344,19 +344,34 @@ function unwrapReturn(ce: ComputeEngine, expr: Expression): Expression {
 }
 
 /**
- * Temporarily remove param bindings from bodyScope so they don't shadow
- * the freshScope values during scope chain lookup. Returns the removed
- * entries for restoration.
+ * Temporarily remove stale canonicalization bindings from bodyScope so they
+ * don't shadow the freshScope values during scope chain lookup. Returns the
+ * removed entries for restoration.
+ *
+ * Two kinds of bindings are hidden:
+ * - the function's parameters (their call values live in freshScope);
+ * - inferred, valueless bindings — auto-declared free variables and hoisted
+ *   `Declare`/`Assign` block-locals (see `canonicalBlock`). These exist only
+ *   as canonicalization bookkeeping: at evaluation time the `Declare`
+ *   statement re-creates its local in the current (fresh) scope, and a
+ *   nested scoped expression (an inner `Block`, a `Sum`) resolving through
+ *   bodyScope must see that runtime binding, not the valueless stale one.
+ *
+ * Bindings that carry a value or an explicit type are left in place.
  */
 function hideBodyScopeParams(
   bodyScope: Scope,
   paramNames: string[]
 ): Array<[string, BoxedDefinition]> {
   const hidden: Array<[string, BoxedDefinition]> = [];
-  for (const name of paramNames) {
-    if (!name) continue;
-    const binding = bodyScope.bindings.get(name);
-    if (binding) {
+  const params = new Set(paramNames.filter((n) => n));
+  for (const [name, binding] of [...bodyScope.bindings]) {
+    const stale =
+      params.has(name) ||
+      ('value' in binding &&
+        binding.value.inferredType &&
+        binding.value.value === undefined);
+    if (stale) {
       hidden.push([name, binding]);
       bodyScope.bindings.delete(name);
     }

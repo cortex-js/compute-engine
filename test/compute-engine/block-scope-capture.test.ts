@@ -155,6 +155,73 @@ describe('re-entered scopes (warm engine / repeated evaluation)', () => {
   });
 });
 
+describe('nested Blocks inside function bodies', () => {
+  let ce: ComputeEngine;
+  beforeEach(() => {
+    ce = new ComputeEngine();
+  });
+
+  test('a nested Block reads a body-local of an n-ary function', () => {
+    ce.declare('gg', '(integer) -> integer');
+    ce.assign(
+      'gg',
+      ce.expr([
+        'Function',
+        [
+          'Block',
+          ['Declare', 'q', { str: 'integer' }],
+          ['Assign', 'q', ['Add', 'x', 5]],
+          ['Block', 'q'],
+        ],
+        'x',
+      ])
+    );
+    expect(ce.expr(['gg', 2]).evaluate().toString()).toEqual('7');
+  });
+
+  test('a while-style Loop body inside a function reads the parameter', () => {
+    // The Cortex `fn f(n) { while … }` lowering shape: the parameter is
+    // referenced from a Block nested two levels below the function body.
+    ce.declare('sumto', '(integer) -> integer');
+    ce.assign(
+      'sumto',
+      ce.expr([
+        'Function',
+        [
+          'Block',
+          ['Declare', 'acc', { str: 'integer' }],
+          ['Assign', 'acc', 0],
+          ['Declare', 'i2', { str: 'integer' }],
+          ['Assign', 'i2', 1],
+          [
+            'Loop',
+            [
+              'Block',
+              ['If', ['Greater', 'i2', 'nn'], ['Break']],
+              ['Assign', 'acc', ['Add', 'acc', 'i2']],
+              ['Assign', 'i2', ['Add', 'i2', 1]],
+            ],
+          ],
+          'acc',
+        ],
+        'nn',
+      ])
+    );
+    expect(ce.expr(['sumto', 4]).evaluate().toString()).toEqual('10');
+    // Repeated calls must not see state from the previous call.
+    expect(ce.expr(['sumto', 5]).evaluate().toString()).toEqual('15');
+  });
+
+  test('closure capture still works (curried adder)', () => {
+    ce.declare('adder', '(integer) -> ((integer) -> integer)');
+    ce.assign(
+      'adder',
+      ce.expr(['Function', ['Function', ['Add', 'a', 'b'], 'b'], 'a'])
+    );
+    expect(ce.expr([['adder', 3], 4]).evaluate().toString()).toEqual('7');
+  });
+});
+
 describe('block-local semantics preserved', () => {
   let ce: ComputeEngine;
   beforeEach(() => {

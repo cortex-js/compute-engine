@@ -251,6 +251,29 @@ function evaluateBlock(
   { engine: ce }: Partial<EvaluateOptions> & { engine: ComputeEngine }
 ): Expression {
   if (ops.length === 0) return ce.Nothing;
+
+  // The Block's canonicalization scope was pushed as the runtime scope
+  // (scoped operator). Sweep stale canonicalization bookkeeping from it:
+  // *inferred, valueless* bindings are auto-declared references and hoisted
+  // `Declare`/`Assign` targets from the canonical pass. If left in place
+  // they shadow the runtime chain — e.g. a function *parameter* referenced
+  // from a Block nested inside the function body auto-declared a valueless
+  // shadow here at canonicalization, hiding the call value in the lambda's
+  // fresh scope. Runtime `Declare`/`Assign` statements re-create genuine
+  // block-locals below; reads of everything else resolve by name up the
+  // chain. Bindings carrying a value or an explicit type are kept (e.g.
+  // locals from a previous evaluation of this block — reset by `Declare`'s
+  // statement-redeclare path, not here).
+  const scope = ce.context.lexicalScope;
+  for (const [name, def] of [...scope.bindings]) {
+    if (
+      'value' in def &&
+      def.value.inferredType &&
+      def.value.value === undefined
+    )
+      scope.bindings.delete(name);
+  }
+
   return evaluateStatements(ce, ops);
 }
 

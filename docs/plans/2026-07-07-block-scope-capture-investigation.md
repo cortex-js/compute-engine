@@ -182,17 +182,42 @@ canonicalization scope *is* the runtime frame in this engine's design;
 mixing models breaks whenever they nest. The hoisting fix works with the
 existing model instead.
 
+### Stretch goal: function-body blocks (CLOSED, follow-up same day)
+
+The function-body variants of the defect were fixed in a follow-up on the
+same day (originally documented here as residuals):
+
+- `hideBodyScopeParams` (`function-utils.ts`) now hides, in addition to the
+  parameters, **all inferred valueless bindings** of the body scope during a
+  call — auto-declared free variables and hoisted block-locals are
+  canonicalization bookkeeping that must not shadow the lambda's fresh
+  scope. (Their runtime counterparts are re-created by the `Declare`
+  statements; `captureClosures` already documented them as safe to drop.)
+- `evaluateBlock` sweeps inferred valueless bindings from the Block's pushed
+  scope on entry. This fixes the deepest shape: a function **parameter**
+  referenced from a Block nested inside the body (e.g. a `while` lowering,
+  `fn sumto(n) { … while … }`) auto-declared a stale shadow in the *nested*
+  block's scope at canonicalization — unreachable from `makeLambda`. With
+  the sweep, the read resolves by name up the runtime chain to the call's
+  fresh scope. Bindings with a value or explicit type are kept (previous-run
+  locals are reset by `Declare`'s statement-redeclare path instead).
+
+Tests: "nested Blocks inside function bodies" describe-block in
+`block-scope-capture.test.ts` (n-ary body-local, while-loop-reads-parameter,
+curried-adder closure canary).
+
 ### Residual (documented, unchanged behavior)
 
-- A nested statement-`Block` inside a *function body* reading a body-local
-  still hits the shadow problem in some shapes (the body scope's stale
-  bindings are only hidden for parameters at apply time). Pre-existing, not
-  a regression; the lambda-side unification remains the stretch goal.
 - Block/loop canonicalization scopes still accumulate runtime values across
   evaluations (same as `Sum`); `Declare` resets its locals on re-entry, but a
   read-before-assign of a non-declared local could observe a previous run's
   value. Same-expression *recursive* re-entry (a loop inside a recursive
   function) shares the scope — pre-existing `Sum` behavior.
+- An `Assign` that first introduces a variable only *inside* an `If` branch
+  (no top-level `Declare`/`Assign` for it in the block) is not hoisted, so a
+  nested-Block read of it stays symbolic. Cortex lowerings always emit
+  explicit declarations, so this is theoretical; extend the hoist scan into
+  control-flow operands if it ever matters.
 
 ### Validation
 
