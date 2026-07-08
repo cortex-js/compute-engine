@@ -260,18 +260,19 @@ describe('A1 — Random GPU compile (deterministic seed)', () => {
 });
 
 describe('A1 — Loop / Integrate JS compile', () => {
-  test('Loop compiles in JS to the List of body values', () => {
-    // Loop(i^2, Element(i, Range(1,5))) evaluates to ["List",1,4,9,16,25];
-    // the compiled JS now collects each iteration's value and returns it.
+  test('Comprehension compiles in JS to the List of body values', () => {
+    // Comprehension(i^2, Element(i, Range(1,5))) evaluates to
+    // ["List",1,4,9,16,25]; the compiled JS collects each iteration's value
+    // into an array and returns it.
     const ce = new ComputeEngine();
     const expr = ce.parse(
-      '\\operatorname{Loop}(i^2, \\operatorname{Element}(i, \\operatorname{Range}(1, 5)))'
+      '\\operatorname{Comprehension}(i^2, \\operatorname{Element}(i, \\operatorname{Range}(1, 5)))'
     );
     const result = compile(expr);
     expect(result?.success).toBe(true);
-    // Still uses the efficient counter-loop form …
-    expect(result?.code).toMatch(/for\s*\(let i/);
-    // … but now returns the collected values rather than undefined.
+    // Collects into a result array (comprehension codegen).
+    expect(result?.code).toContain('result.push(');
+    // Returns the collected values.
     expect(result?.run?.({})).toEqual([1, 4, 9, 16, 25]);
   });
 

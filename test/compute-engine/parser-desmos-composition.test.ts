@@ -30,7 +30,7 @@ describe('Desmos composition: multi-feature corpus rows', () => {
 
   test('list-range inside a for-comprehension', () => {
     const ast = parse('x \\operatorname{for} x = \\left[1...5\\right]');
-    expect((ast as any[])[0]).toBe('Loop');
+    expect((ast as any[])[0]).toBe('Comprehension');
   });
 
   test('restriction on a list-range', () => {
@@ -48,7 +48,7 @@ describe('Desmos composition: multi-feature corpus rows', () => {
     const ast = parse(
       '(p.x, p.y) \\operatorname{for} p = P_{list}'
     );
-    expect((ast as any[])[0]).toBe('Loop');
+    expect((ast as any[])[0]).toBe('Comprehension');
   });
 
   test('range with restriction and member access composition', () => {

@@ -11,6 +11,18 @@
   `["Measurement", estimate, error]` instead of a `PlusMinus` tuple. Prefix
   `\pm b` parses to `["Measurement", 0, b]`.
 
+- **`Loop` no longer produces a list — comprehensions moved to the new
+  `Comprehension` operator.** `["Loop", body, ["Element", x, coll], …]` is now
+  an imperative for-each evaluated **for effect**: its value is `Nothing` (or
+  the value carried by a `Break`/`Return`), and it no longer collects the body
+  values into a `List`. The trailing-`for` comprehension syntax
+  (`x^2 \operatorname{for} x = [1...10]`) now parses to
+  `["Comprehension", body, ["Element", …], …]`, which returns exactly what the
+  collecting `Loop` used to — for consumers of the parse tree this is a head
+  rename. The undocumented arity-2 form `["Loop", body, collection]` (body
+  applied as a lambda to each element) has been removed: use `Map`, or an
+  `Element` clause; a non-`Element` iterator argument is now an error.
+
 ### Measurements and Uncertainty
 
 - **New `Measurement` type — values with a propagated uncertainty.**
@@ -90,6 +102,33 @@
   the same key in the dictionary. This gives MathJSON a representation for
   constant declarations (e.g. the target for a `const` keyword in a surface
   language).
+
+### Control Flow
+
+- **`Loop` is now imperative control flow only** (see Breaking Changes above),
+  and `["Loop", body]` is a real infinite loop: the body is evaluated
+  repeatedly until it yields a `["Break", value?]` (the loop's value) or a
+  `["Return", …]` (propagated), guarded by `ce.iterationLimit` and the
+  evaluation deadline. Previously this form — documented as `while(true)` —
+  evaluated the body only once. It compiles to `while (true) { … }` in
+  JavaScript, and `Loop` with `Element` clauses compiles to plain `for` /
+  `for…of` statement loops with no result array.
+
+- **New `Comprehension` operator: value-producing list comprehensions.**
+  `["Comprehension", body, ["Element", x, xs], …]` evaluates `body` for each
+  combination of one or more `Element` clauses and collects the results into a
+  `List`. Independent clauses produce a flat Cartesian product; a later
+  clause's collection may reference an earlier binding
+  (`[…, ["Element", "x", ["Range", 1, 3]], ["Element", "y", ["Range", 1, "x"]]]`
+  iterates the triangle). Bound names do not leak. With a single clause it is
+  equivalent to `Map(xs, x ↦ body)`; unlike `Map` (lazy) it materializes its
+  result. Compiles to JavaScript as nested array-collecting loops (not
+  available on the GLSL/WGSL targets, which have no dynamic arrays).
+
+- **`Break` and `Continue` are now registered operators.** `Break(value?)`
+  exits the enclosing loop immediately and its optional value becomes the
+  loop's value; `Continue()` skips to the next iteration. Outside a loop both
+  are inert.
 
 ## 0.68.0 _2026-07-05_
 

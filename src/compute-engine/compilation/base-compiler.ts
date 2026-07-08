@@ -366,6 +366,17 @@ export class BaseCompiler {
       return BaseCompiler.compileForLoop(args, target);
     }
 
+    if (h === 'Comprehension') {
+      const compFn = target.functions?.(h);
+      if (typeof compFn === 'function')
+        return compFn(
+          args,
+          (expr) => BaseCompiler.compileValueOperand(expr, target),
+          target
+        );
+      return BaseCompiler.compileComprehension(args, target);
+    }
+
     if (h === 'If') {
       if (args.length !== 3) throw new Error('If: wrong number of arguments');
       const fn = target.functions?.(h);
@@ -637,241 +648,225 @@ export class BaseCompiler {
   }
 
   /**
-   * Compile a Loop expression.
+   * Compile a `Loop` expression — imperative control flow, **for effect** (no
+   * value is collected). Three shapes:
    *
-   * Two forms are supported:
+   * 1. **Bare infinite loop:** `Loop(body)` → `(() => { while (true) { … } })()`.
+   *    The body compiles as statements (`compileLoopBody`), so `break` /
+   *    `continue` / `return` terminate it. Unbounded loops are rejected on GPU
+   *    targets (GLSL/WGSL).
    *
-   * 1. **Imperative / single-Element form** (existing behaviour):
-   *    `Loop(body, Element(i, Range(lo, hi)))`
-   *    Generates a raw `for (let i = lo; i <= hi; i++) { body }` loop wrapped
-   *    in an IIFE.  The loop counter is always a plain number.  For targets
-   *    that wrap numeric values (e.g. interval-js uses `_IA.point()`),
-   *    references to the loop index inside the body are re-wrapped via
-   *    `target.number`.  `break` / `continue` / `return` are preserved.
+   * 2. **Counted loop:** `Loop(body, Element(i, Range(lo, hi)))` where the
+   *    Range is integer-ascending with step 1 → the legacy
+   *    `for (let i = lo; i <= hi; i++) { … }` shape, emitted as bare statements
+   *    (no result array). The counter is a plain number; wrapping targets
+   *    (interval-js) re-wrap references to `i` in the body.
    *
-   * 2. **Comprehension / variadic-Element form** (new):
-   *    `Loop(body, Element(x, coll1), Element(y, coll2), …)`
-   *    When two or more `Element` clauses are present — or when the single
-   *    Element's collection is not a `Range` — the loop is compiled as a
-   *    comprehension that collects results into an array.  Each clause
-   *    produces a `for (const name of collection)` loop, nested
-   *    outermost-to-innermost, and the innermost body pushes into `result`.
+   * 3. **General for-each:** any other Element form (multiple clauses, a
+   *    non-`Range` collection, or a stepped/descending/fractional `Range`) →
+   *    nested `for (const x of …) { … }` loops whose innermost statement is the
+   *    compiled body. No result array.
    *
-   *    Example output (JS):
-   *    ```js
-   *    (() => { const result = [];
-   *      for (const x of [1,2]) { for (const y of [3,4]) { result.push(body); } }
-   *      return result; })()
-   *    ```
-   *
-   *    GLSL: multi-Element comprehension is not trivially representable in
-   *    GLSL (no dynamic arrays, no push).  A compile-time error is thrown.
-   *    TODO(E3-GLSL): support GLSL multi-Element via a pre-declared fixed-size
-   *    array or by unrolling when bounds are known at compile time.
-   *
-   * Form (1) collects each iteration's body value into an array and returns
-   * it (matching the interpreter's `List` result) when the body is a plain
-   * value expression; bodies that use control flow or mutate outer state keep
-   * the bare statement form. See `isCollectibleLoopValue`.
+   * Value-producing comprehensions are compiled by `compileComprehension`
+   * (head `Comprehension`), not here.
    */
   private static compileForLoop(
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): TargetSource {
     if (!args[0]) throw new Error('Loop: no body');
-    if (!args[1]) throw new Error('Loop: no indexing set');
+
+    const body = args[0];
+    const elements = args.slice(1);
+    const lang = target.language ?? '';
+
+    // ── Bare infinite loop ────────────────────────────────────────────────
+    if (elements.length === 0) {
+      if (lang === 'glsl' || lang === 'wgsl')
+        throw new Error(
+          `${lang.toUpperCase()}: an unbounded Loop(body) is not supported.`
+        );
+      const bodyStmts = BaseCompiler.compileLoopBody(body, target);
+      return `(() => {${target.ws('\n')}while (true) {${target.ws(
+        '\n'
+      )}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
+    }
+
+    // ── Counted loop: single integer-ascending step-1 Range ───────────────
+    if (
+      elements.length === 1 &&
+      isFunction(elements[0], 'Element') &&
+      BaseCompiler.isLegacyCompatibleRange(elements[0].ops[1])
+    ) {
+      const indexing = elements[0];
+      const indexExpr = indexing.ops[0];
+      const rangeExpr = indexing.ops[1];
+
+      if (!isSymbol(indexExpr)) throw new Error('Loop: index must be a symbol');
+      if (!isFunction(rangeExpr, 'Range'))
+        throw new Error('Loop: expected Range(lo, hi)');
+
+      const index = indexExpr.symbol;
+
+      // Use raw numeric values for the for-loop counter (not target-wrapped).
+      // This ensures `for (let i = 1; i <= 5; i++)` uses plain numbers even
+      // when the target wraps values (e.g. interval-js would produce
+      // `_IA.point(1)` which breaks `i++`).
+      const lower = Math.floor(rangeExpr.ops[0].re);
+      const upper = Math.floor(rangeExpr.ops[1].re);
+
+      if (!Number.isFinite(lower) || !Number.isFinite(upper))
+        throw new Error('Loop: bounds must be finite numbers');
+
+      // Check if the target wraps numeric values (e.g. interval-js).
+      // If so, references to the loop index in the body must be wrapped.
+      const needsWrap = target.number(0) !== '0';
+
+      const bodyTarget: CompileTarget<Expression> = {
+        ...target,
+        var: (id: string) =>
+          id === index
+            ? needsWrap
+              ? target.number(0).replace('0', index)
+              : index
+            : target.var(id),
+      };
+
+      const bodyStmts = BaseCompiler.compileLoopBody(body, bodyTarget);
+
+      return `(() => {${target.ws(
+        '\n'
+      )}for (let ${index} = ${lower}; ${index} <= ${upper}; ${index}++) {${target.ws(
+        '\n'
+      )}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
+    }
+
+    // ── General for-each (for effect) ─────────────────────────────────────
+    if (lang === 'glsl' || lang === 'wgsl')
+      throw new Error(
+        `${lang.toUpperCase()}: a multi-Element or non-Range Loop is not supported.`
+      );
+
+    const inner = BaseCompiler.compileElementLoops(
+      elements,
+      target,
+      (bodyTarget) => BaseCompiler.compileLoopBody(body, bodyTarget)
+    );
+    return `(() => {${target.ws('\n')}${inner}${target.ws('\n')}})()`;
+  }
+
+  /**
+   * Compile a `Comprehension` expression — a value-producing comprehension.
+   * `Comprehension(body, Element(x, coll1), Element(y, coll2), …)` compiles to
+   * nested `for (const x of …)` loops that `result.push(body)`, returning the
+   * collected array:
+   *
+   * ```js
+   * (() => { const result = [];
+   *   for (const x of [1,2]) { for (const y of [3,4]) { result.push(body); } }
+   *   return result; })()
+   * ```
+   *
+   * GLSL/WGSL have no dynamic arrays, so a comprehension is rejected there.
+   */
+  private static compileComprehension(
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    if (!args[0]) throw new Error('Comprehension: no body');
+    if (!args[1]) throw new Error('Comprehension: no indexing set');
 
     const body = args[0];
     const elements = args.slice(1);
 
-    // ── Comprehension path ────────────────────────────────────────────────
-    // Use this path when:
-    //   (a) there are 2+ Element clauses, or
-    //   (b) the single Element's collection is not a Range, or
-    //   (c) the single Element's Range is fractional, descending, or has a
-    //       non-unit step. The legacy `for (let i = lo; i <= hi; i++)` shape
-    //       only matches Range semantics for integer ascending bounds with
-    //       step 1; everything else must go through the iterable path.
-    const useComprehension =
-      elements.length > 1 ||
-      (elements.length === 1 &&
-        isFunction(elements[0], 'Element') &&
-        !BaseCompiler.isLegacyCompatibleRange(elements[0].ops[1]));
-
-    if (useComprehension) {
-      // GLSL does not support dynamic arrays; multi-Element comprehension is
-      // deferred to a future task (see TODO above).
-      const lang = target.language ?? '';
-      if (lang === 'glsl' || lang === 'wgsl') {
-        throw new Error(
-          `${lang.toUpperCase()}: multi-Element Loop comprehension is not yet supported. ` +
-            'TODO(E3-GLSL): unroll or use a fixed-size array.'
-        );
-      }
-
-      // Validate all Element clauses and narrow their types.
-      type NarrowedElement = Expression & {
-        ops: ReadonlyArray<Expression>;
-        op1: Expression;
-        op2: Expression;
-      };
-      const narrowedElements: NarrowedElement[] = [];
-      for (let i = 0; i < elements.length; i++) {
-        const elem = elements[i];
-        if (!isFunction(elem, 'Element'))
-          throw new Error(
-            `Loop: argument ${i + 1} must be an Element clause, got ${(elem as Expression & { operator?: string }).operator ?? '?'}`
-          );
-        if (!isSymbol(elem.ops[0]))
-          throw new Error(
-            `Loop: Element index (argument ${i + 1}) must be a symbol`
-          );
-        narrowedElements.push(elem as unknown as NarrowedElement);
-      }
-
-      // For wrapping targets (e.g. interval-js where `target.number(0)` is
-      // `_IA.point(0)`), each loop variable must be wrapped wherever it
-      // appears in the body or in an inner collection expression. Without
-      // this, code like `_IA.add(x, y)` is invoked with raw numbers and
-      // produces incorrect intervals. Mirrors the legacy single-Element
-      // wrapping at the bottom of this function.
-      const loopVarSet = new Set(
-        narrowedElements.map(
-          (e) => (e.ops[0] as Expression & { symbol: string }).symbol
-        )
+    const lang = target.language ?? '';
+    if (lang === 'glsl' || lang === 'wgsl')
+      throw new Error(
+        `${lang.toUpperCase()}: Comprehension is not supported (no dynamic arrays). ` +
+          'TODO(E3-GLSL): unroll or use a fixed-size array.'
       );
-      const needsWrap = target.number(0) !== '0';
-      // Always shadow the loop variables in the body's target: a loop variable
-      // is bound to the bare emitted identifier (wrapped only for wrapping
-      // targets like interval-js). Without this, a loop variable that collides
-      // with a symbol the engine knows (e.g. an index named `i`, which the
-      // engine resolves to the imaginary unit) would be folded to that value
-      // by `target.var` instead of referencing the loop binding.
-      const bodyTarget: CompileTarget<Expression> = {
-        ...target,
-        var: (id: string) =>
-          loopVarSet.has(id)
-            ? needsWrap
-              ? target.number(0).replace('0', id)
-              : id
-            : target.var(id),
-      };
 
-      // Compile the body expression (the value pushed into the result array).
-      const bodyCode = BaseCompiler.compile(body, bodyTarget);
-
-      // Build nested for-of loops from innermost to outermost. Inner
-      // collections are compiled with `bodyTarget` so that references to
-      // outer loop variables are wrapped consistently.
-      let inner = `result.push(${bodyCode});`;
-      for (let i = narrowedElements.length - 1; i >= 0; i--) {
-        const elem = narrowedElements[i];
-        const name = (elem.ops[0] as Expression & { symbol: string }).symbol;
-        const collExpr = elem.ops[1];
-        let collection: string;
-        if (isFunction(collExpr, 'Range')) {
-          collection = BaseCompiler.compileRangeIterable(collExpr, bodyTarget);
-        } else {
-          collection = BaseCompiler.compile(collExpr, bodyTarget);
-        }
-        inner = `for (const ${name} of ${collection}) { ${inner} }`;
-      }
-
-      return `(() => { const result = []; ${inner} return result; })()`;
-    }
-
-    // ── Legacy / imperative path ─────────────────────────────────────────
-    // Single Element clause where the collection is a Range(lo, hi).
-    const indexing = elements[0];
-    if (!isFunction(indexing, 'Element'))
-      throw new Error('Loop: expected Element(index, Range(lo, hi))');
-
-    const indexExpr = indexing.ops[0];
-    const rangeExpr = indexing.ops[1];
-
-    if (!isSymbol(indexExpr)) throw new Error('Loop: index must be a symbol');
-    if (!isFunction(rangeExpr, 'Range'))
-      throw new Error('Loop: expected Range(lo, hi)');
-
-    const index = indexExpr.symbol;
-
-    // Use raw numeric values for the for-loop counter (not target-wrapped).
-    // This ensures `for (let i = 1; i <= 5; i++)` uses plain numbers even
-    // when the target wraps values (e.g. interval-js would produce
-    // `_IA.point(1)` which breaks `i++`).
-    const lower = Math.floor(rangeExpr.ops[0].re);
-    const upper = Math.floor(rangeExpr.ops[1].re);
-
-    if (!Number.isFinite(lower) || !Number.isFinite(upper))
-      throw new Error('Loop: bounds must be finite numbers');
-
-    // Check if the target wraps numeric values (e.g. interval-js).
-    // If so, references to the loop index in the body must be wrapped.
-    const needsWrap = target.number(0) !== '0';
-
-    const bodyTarget: CompileTarget<Expression> = {
-      ...target,
-      var: (id: string) =>
-        id === index
-          ? needsWrap
-            ? target.number(0).replace('0', index)
-            : index
-          : target.var(id),
-    };
-
-    // A `Loop` evaluates to an indexed collection of its body values (see the
-    // operator's type, `indexed_collection<body.type>`). When the body is a
-    // plain value expression — no control-flow heads (`Break`/`Continue`/
-    // `Return`) and no statement/binding forms — collect each iteration's
-    // value and return the array, matching the interpreter (which yields
-    // `["List", …]`). Previously this IIFE had no `return`, so a value loop
-    // such as `Loop(i², Element(i, Range(1,5)))` compiled to `undefined`.
-    // Imperative bodies (those that mutate an outer accumulator or use control
-    // flow) keep the bare statement form: their result is consumed for its
-    // side effects via the enclosing `Block`.
-    if (BaseCompiler.isCollectibleLoopValue(body)) {
-      const bodyCode = BaseCompiler.compile(body, bodyTarget);
-      const acc = BaseCompiler.tempVar();
-      return `(() => {${target.ws('\n')}const ${acc} = [];${target.ws(
-        '\n'
-      )}for (let ${index} = ${lower}; ${index} <= ${upper}; ${index}++) {${target.ws(
-        '\n'
-      )}${acc}.push(${bodyCode});${target.ws('\n')}}${target.ws(
-        '\n'
-      )}return ${acc};${target.ws('\n')}})()`;
-    }
-
-    const bodyStmts = BaseCompiler.compileLoopBody(body, bodyTarget);
-
-    return `(() => {${target.ws(
-      '\n'
-    )}for (let ${index} = ${lower}; ${index} <= ${upper}; ${index}++) {${target.ws(
-      '\n'
-    )}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
+    const inner = BaseCompiler.compileElementLoops(
+      elements,
+      target,
+      (bodyTarget) => `result.push(${BaseCompiler.compile(body, bodyTarget)});`
+    );
+    return `(() => { const result = []; ${inner} return result; })()`;
   }
 
   /**
-   * True when a `Loop` body is a plain value expression that can be collected
-   * into the loop's result array — i.e. it contains no control-flow heads
-   * (`Break`, `Continue`, `Return`) and no statement/binding forms (`Block`,
-   * `Assign`, `Declare`) anywhere in its tree. Such bodies are consumed for
-   * their value; bodies with those constructs are imperative and are consumed
-   * for their side effects (e.g. mutating an accumulator in the enclosing
-   * scope), so they keep the bare for-loop form.
+   * Build nested `for (const name of collection) { … }` loops from a list of
+   * `Element` clauses. `makeInner` produces the innermost statement given the
+   * loop-variable-aware `bodyTarget`. Shared by `compileForLoop` (general
+   * for-each) and `compileComprehension`.
    */
-  private static isCollectibleLoopValue(expr: Expression): boolean {
-    if (!isFunction(expr)) return true;
-    const h = expr.operator;
-    if (
-      h === 'Break' ||
-      h === 'Continue' ||
-      h === 'Return' ||
-      h === 'Block' ||
-      h === 'Assign' ||
-      h === 'Declare'
-    )
-      return false;
-    return expr.ops.every((op) => BaseCompiler.isCollectibleLoopValue(op));
+  private static compileElementLoops(
+    elements: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    makeInner: (bodyTarget: CompileTarget<Expression>) => string
+  ): string {
+    // Validate all Element clauses and narrow their types.
+    type NarrowedElement = Expression & {
+      ops: ReadonlyArray<Expression>;
+      op1: Expression;
+      op2: Expression;
+    };
+    const narrowedElements: NarrowedElement[] = [];
+    for (let i = 0; i < elements.length; i++) {
+      const elem = elements[i];
+      if (!isFunction(elem, 'Element'))
+        throw new Error(
+          `Loop: argument ${i + 1} must be an Element clause, got ${(elem as Expression & { operator?: string }).operator ?? '?'}`
+        );
+      if (!isSymbol(elem.ops[0]))
+        throw new Error(
+          `Loop: Element index (argument ${i + 1}) must be a symbol`
+        );
+      narrowedElements.push(elem as unknown as NarrowedElement);
+    }
+
+    // For wrapping targets (e.g. interval-js where `target.number(0)` is
+    // `_IA.point(0)`), each loop variable must be wrapped wherever it appears
+    // in the body or in an inner collection expression. Without this, code
+    // like `_IA.add(x, y)` is invoked with raw numbers and produces incorrect
+    // intervals.
+    const loopVarSet = new Set(
+      narrowedElements.map(
+        (e) => (e.ops[0] as Expression & { symbol: string }).symbol
+      )
+    );
+    const needsWrap = target.number(0) !== '0';
+    // Always shadow the loop variables in the body's target: a loop variable
+    // is bound to the bare emitted identifier (wrapped only for wrapping
+    // targets like interval-js). Without this, a loop variable that collides
+    // with a symbol the engine knows (e.g. an index named `i`, which the
+    // engine resolves to the imaginary unit) would be folded to that value by
+    // `target.var` instead of referencing the loop binding.
+    const bodyTarget: CompileTarget<Expression> = {
+      ...target,
+      var: (id: string) =>
+        loopVarSet.has(id)
+          ? needsWrap
+            ? target.number(0).replace('0', id)
+            : id
+          : target.var(id),
+    };
+
+    // Build nested for-of loops from innermost to outermost. Inner collections
+    // are compiled with `bodyTarget` so that references to outer loop variables
+    // are wrapped consistently.
+    let inner = makeInner(bodyTarget);
+    for (let i = narrowedElements.length - 1; i >= 0; i--) {
+      const elem = narrowedElements[i];
+      const name = (elem.ops[0] as Expression & { symbol: string }).symbol;
+      const collExpr = elem.ops[1];
+      const collection = isFunction(collExpr, 'Range')
+        ? BaseCompiler.compileRangeIterable(collExpr, bodyTarget)
+        : BaseCompiler.compile(collExpr, bodyTarget);
+      inner = `for (const ${name} of ${collection}) { ${inner} }`;
+    }
+
+    return inner;
   }
 
   /**
@@ -1278,6 +1273,7 @@ export class BaseCompiler {
     'Break',
     'Continue',
     'Loop',
+    'Comprehension',
     'If',
     'Which',
     'When',
@@ -1379,7 +1375,13 @@ export class BaseCompiler {
         visit(ops[0], params.length ? union(bound, params) : bound);
         return;
       }
-      if (h === 'Sum' || h === 'Product' || h === 'Integrate' || h === 'Loop') {
+      if (
+        h === 'Sum' ||
+        h === 'Product' ||
+        h === 'Integrate' ||
+        h === 'Loop' ||
+        h === 'Comprehension'
+      ) {
         const indices: string[] = [];
         const limitExprs: Expression[] = [];
         for (const clause of ops.slice(1)) {

@@ -3,7 +3,7 @@ import { engine as ce } from '../utils';
 describe('A5 — where+for composition (Order 1: where before for)', () => {
   test('Parse: bindings before iter produces Block-outermost shape', () => {
     // Surface: `i \operatorname{where} n \coloneq 3 \operatorname{for} i = \operatorname{Range}(n)`
-    // Target canonical shape (Block outermost, Loop inside).
+    // Target canonical shape (Block outermost, Comprehension inside).
     // Note: `Range(n)` canonicalizes to `Range(1, n)` (1-arg Range
     // means upper bound with default start of 1).
     expect(
@@ -15,7 +15,7 @@ describe('A5 — where+for composition (Order 1: where before for)', () => {
         "Block",
         ["Declare", "n"],
         ["Assign", "n", 3],
-        ["Loop", "i", ["Element", "i", ["Range", 1, "n"]]]
+        ["Comprehension", "i", ["Element", "i", ["Range", 1, "n"]]]
       ]
     `);
   });
@@ -34,7 +34,7 @@ describe('A5 — where+for composition (Order 2: for before where)', () => {
         "Block",
         ["Declare", "n"],
         ["Assign", "n", 3],
-        ["Loop", "i", ["Element", "i", ["Range", 1, "n"]]]
+        ["Comprehension", "i", ["Element", "i", ["Range", 1, "n"]]]
       ]
     `);
   });

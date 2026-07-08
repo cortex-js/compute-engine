@@ -1,4 +1,4 @@
-import { applicable, evaluateStatements } from '../function-utils';
+import { evaluateStatements } from '../function-utils';
 import { checkConditions } from '../boxed-expression/rules';
 import { widen } from '../../common/type/utils';
 import { parseType } from '../../common/type/parse';
@@ -82,11 +82,37 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 
     Loop: {
       description:
-        'Evaluate a body expression in nested iteration over Element clauses. ' +
-        'Later clauses see earlier bindings; independent clauses produce a ' +
-        'Cartesian product.',
+        'Imperative loop, evaluated **for effect**. `Loop(body)` repeatedly ' +
+        'evaluates `body` until it yields a `Break` or `Return`. ' +
+        '`Loop(body, Element(x, coll), …)` iterates `body` in nested ' +
+        'iteration over the Element clauses (later clauses see earlier ' +
+        'bindings; independent clauses produce a Cartesian product). The loop ' +
+        'value is `Nothing`, or the value carried by a `Break`/`Return`. For a ' +
+        'value-producing comprehension use `Comprehension` or `Map`.',
       lazy: true,
       signature: '(body:expression, iterators:expression*) -> any',
+      type: ([body]) => {
+        if (!body) return 'nothing';
+        // A `Loop` is evaluated for effect: its value is `Nothing` unless the
+        // body can short-circuit with a value (`Break v` / `Return`).
+        return loopBodyYieldsValue(body) ? 'unknown' : 'nothing';
+      },
+      canonical: (ops, options) => canonicalLoopLike('Loop', ops, options),
+      evaluate: (ops, { engine: ce }) =>
+        run(runLoop(ops[0], ops.slice(1), ce), ce._timeRemaining),
+      evaluateAsync: async (ops, { engine: ce, signal }) =>
+        runAsync(runLoop(ops[0], ops.slice(1), ce), ce._timeRemaining, signal),
+    },
+
+    Comprehension: {
+      description:
+        'Value-producing comprehension: evaluate `body` in nested iteration ' +
+        'over one or more `Element` clauses and collect the results into an ' +
+        'indexed collection (a `List`). Later clauses see earlier bindings; ' +
+        'independent clauses produce a Cartesian product.',
+      lazy: true,
+      signature:
+        '(body:expression, iterators:expression+) -> indexed_collection',
       type: ([body]) => {
         if (!body) return 'nothing';
         // Result is an indexed collection of body.type values. The body's
@@ -94,11 +120,32 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // indexed_collection<...>.
         return parseType(`indexed_collection<${String(body.type)}>`);
       },
-      canonical: canonicalLoop,
+      canonical: (ops, options) => canonicalLoopLike('Comprehension', ops, options),
       evaluate: (ops, { engine: ce }) =>
-        run(runLoop(ops[0], ops.slice(1), ce), ce._timeRemaining),
+        run(runComprehension(ops[0], ops.slice(1), ce), ce._timeRemaining),
       evaluateAsync: async (ops, { engine: ce, signal }) =>
-        runAsync(runLoop(ops[0], ops.slice(1), ce), ce._timeRemaining, signal),
+        runAsync(
+          runComprehension(ops[0], ops.slice(1), ce),
+          ce._timeRemaining,
+          signal
+        ),
+    },
+
+    // `Break`/`Continue` are inert: they have no `evaluate` handler, so they
+    // evaluate to themselves (with their operands evaluated) and are
+    // intercepted structurally by `Loop`/`Block`. They are NOT `lazy`: the
+    // optional `Break` value must be evaluated in the loop context so a value
+    // referencing the loop variable is concrete (mirrors `Return`).
+    Break: {
+      description:
+        'Exit the enclosing loop immediately, optionally with a value ' +
+        '(`Break(v)`) that becomes the loop value.',
+      signature: '(value:any?) -> nothing',
+    },
+
+    Continue: {
+      description: 'Skip to the next iteration of the enclosing loop.',
+      signature: '() -> nothing',
     },
 
     When: {
@@ -225,44 +272,51 @@ function canonicalBlock(
 }
 
 /**
- * Canonicalize a Loop expression.
+ * True when a `Loop` body can short-circuit with a value — it structurally
+ * contains a `Return`, or a `Break` carrying an operand. Used by the `Loop`
+ * type handler: a for-effect loop is otherwise `nothing`.
+ */
+function loopBodyYieldsValue(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (expr.operator === 'Return') return true;
+  if (expr.operator === 'Break' && expr.ops.length > 0) return true;
+  return expr.ops.some((op) => loopBodyYieldsValue(op));
+}
+
+/**
+ * Canonicalize a `Loop` or `Comprehension` expression. Both share the same
+ * variadic `Element`-clause scope hygiene:
  *
- * Two forms are supported:
- *
- * - Variadic Element form (new): `Loop(body, Element(x, L1), Element(y, L2), ...)`.
- *   Push a fresh scope with `noAutoDeclare = true`, declare each Element's
+ * - Push a fresh scope with `noAutoDeclare = true`, declare each Element's
  *   index variable in that scope, and canonicalize each clause + body inside
  *   the scope. Mirrors `canonicalBigop` so that free variables in the body
  *   and collection expressions are auto-declared in the enclosing scope, not
  *   leaking the iteration variable names.
  *
- * - Legacy single-collection form: `Loop(body, collection)` where the second
- *   argument is *not* an `Element` clause. Pass through unchanged (with each
- *   operand canonicalized) — preserves backwards compatibility with the
- *   former arity-2 signature, including the existing compile path.
+ * - A `Loop(body)` with no clauses is a valid bare (infinite) imperative loop;
+ *   a `Comprehension(body)` with no clauses is invalid (`null`).
+ *
+ * - An iterator operand that is not an `Element` clause is not silently passed
+ *   through (it would otherwise be ignored at runtime, producing a spurious
+ *   infinite loop): it is replaced with an error expression so the whole
+ *   expression is visibly invalid.
  */
-function canonicalLoop(
+function canonicalLoopLike(
+  head: 'Loop' | 'Comprehension',
   ops: ReadonlyArray<Expression>,
   options: { engine: ComputeEngine; scope: Scope | undefined }
 ): Expression | null {
   const { engine: ce, scope } = options;
   if (ops.length === 0) return null;
-  if (ops.length === 1) {
-    // Body-only Loop: canonicalize and pass through.
-    return ce._fn('Loop', [ops[0].canonical]);
-  }
 
   const body = ops[0];
   const iterators = ops.slice(1);
 
-  const allElement = iterators.every((it) => it.operator === 'Element');
-
-  if (!allElement) {
-    // Legacy form — pass through, canonicalizing operands.
-    return ce._fn(
-      'Loop',
-      ops.map((op) => op.canonical)
-    );
+  if (iterators.length === 0) {
+    // Bare form. `Loop(body)` is a valid infinite imperative loop;
+    // `Comprehension(body)` needs at least one Element clause.
+    if (head === 'Comprehension') return null;
+    return ce._fn('Loop', [body.canonical]);
   }
 
   // Variadic Element form: bound names must not leak. Mirror canonicalBigop.
@@ -283,10 +337,9 @@ function canonicalLoop(
     // than triggering auto-declaration in the enclosing scope.
     canonicalIterators = iterators.map((it) => {
       if (!isFunction(it, 'Element')) {
-        return ce._fn('Element', [
-          ce.error('missing').canonical,
-          ce.error('missing').canonical,
-        ]);
+        // Not an Element clause — flag as invalid rather than passing it
+        // through (which would be ignored at runtime → infinite loop).
+        return ce.error('unexpected-argument', it.toString());
       }
       const indexExpr = it.ops[0];
       const collExpr = it.ops[1];
@@ -308,43 +361,106 @@ function canonicalLoop(
     loopScope.noAutoDeclare = false;
   }
 
-  return ce._fn('Loop', [canonicalBody, ...canonicalIterators], {
+  return ce._fn(head, [canonicalBody, ...canonicalIterators], {
     scope: loopScope,
   });
 }
 
+/** Mutable state shared across the nested-iteration walker. */
+interface LoopState {
+  stopped: boolean;
+  value?: Expression;
+  count: number;
+}
+
+/**
+ * Imperative `Loop`, evaluated **for effect**.
+ *
+ * - `Loop(body)` — infinite loop: repeatedly evaluate `body` until it yields a
+ *   `Break` (loop value = its operand, else `Nothing`) or a `Return`
+ *   (propagated unchanged). Any other result (including `Continue`) just
+ *   continues.
+ * - `Loop(body, Element(x, coll), …)` — nested for-each for effect. No results
+ *   are accumulated; normal completion returns `Nothing`.
+ */
 function* runLoop(
   body: Expression,
   elements: ReadonlyArray<Expression>,
   ce: ComputeEngine
 ): Generator<Expression> {
   body ??= ce.Nothing;
-  if (sym(body) === 'Nothing') return body;
+  if (sym(body) === 'Nothing') return ce.Nothing;
 
   if (elements.length === 0) {
-    // Body-only Loop: yield body's eval once.
-    const result = body.evaluate();
-    yield result;
-    return result;
+    // Bare infinite imperative loop.
+    let i = 0;
+    while (true) {
+      const result = body.evaluate();
+      if (isFunction(result, 'Break'))
+        return result.ops.length > 0 ? result.op1 : ce.Nothing;
+      if (result.operator === 'Return') return result;
+      i += 1;
+      yield result;
+      if (i > ce.iterationLimit)
+        throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+    }
   }
 
-  // Backwards-compat: a single non-Element argument is treated as a plain
-  // collection (the old arity-2 form). This preserves the prior semantics of
-  // `Loop(body, collection)` where body is `applicable(...)` to each element.
-  if (elements.length === 1 && elements[0].operator !== 'Element') {
-    return yield* runLoopLegacy(body, elements[0], ce);
-  }
+  const state: LoopState = { stopped: false, count: 0 };
+  yield* runNestedElements(body, elements, ce, state, (result) => {
+    if (isFunction(result, 'Break')) {
+      state.stopped = true;
+      // The break value is already evaluated in-context (Break is eager), so a
+      // value referencing the loop variable is concrete.
+      if (result.ops.length > 0) state.value = result.op1;
+      return;
+    }
+    if (result.operator === 'Return') {
+      // Return propagation: forward the Return expression unchanged.
+      state.stopped = true;
+      state.value = result;
+      return;
+    }
+    // Any other result (including Continue) simply continues.
+  });
 
-  // Variadic Element form: nested iteration producing a flat indexed
-  // collection of body evaluations.
+  if (state.stopped && state.value !== undefined) return state.value;
+  return ce.Nothing;
+}
+
+/**
+ * Value-producing `Comprehension`: collect each body evaluation into a flat
+ * `List`. Control-flow inside a comprehension is a category error and is not
+ * intercepted — body values are collected as-is.
+ */
+function* runComprehension(
+  body: Expression,
+  elements: ReadonlyArray<Expression>,
+  ce: ComputeEngine
+): Generator<Expression> {
+  body ??= ce.Nothing;
+
   const results: Expression[] = [];
-  const state: {
-    stopped: boolean;
-    broke: boolean;
-    value?: Expression;
-    count: number;
-  } = { stopped: false, broke: false, count: 0 };
+  const state: LoopState = { stopped: false, count: 0 };
+  yield* runNestedElements(body, elements, ce, state, (result) => {
+    results.push(result);
+  });
 
+  return ce.function('List', results);
+}
+
+/**
+ * Set up the fresh loop scope (index vars pre-declared) and drive the nested
+ * iteration. Shared by `runLoop` and `runComprehension`; the per-result
+ * behaviour is supplied via `onLeaf`.
+ */
+function* runNestedElements(
+  body: Expression,
+  elements: ReadonlyArray<Expression>,
+  ce: ComputeEngine,
+  state: LoopState,
+  onLeaf: (result: Expression) => void
+): Generator<Expression> {
   // Build a fresh loop scope per evaluation so repeated evaluations don't
   // accumulate state. The parent is the current scope at evaluation time.
   // Element index variables are pre-declared into this scope so subsequent
@@ -365,38 +481,24 @@ function* runLoop(
           ce.declare(idx.symbol, 'unknown');
       }
     }
-    yield* runLoopNested(body, elements, 0, ce, results, state);
+    yield* runNested(body, elements, 0, ce, state, onLeaf);
   } finally {
     ce._popEvalContext();
   }
-
-  if (state.stopped && state.value !== undefined) {
-    // Return propagation: forward the Return expression unchanged.
-    if (!state.broke) return state.value;
-    // Break: return the broken-out value as the Loop's result directly.
-    return state.value;
-  }
-
-  // Build the resulting indexed collection of body evaluations.
-  return ce.function('List', results);
 }
 
 /**
- * Recursive nested iteration over Element clauses, producing a flat list of
- * body evaluations. Stops early on Break/Return by mutating `state.stopped`.
+ * Recursive nested iteration over Element clauses. At each leaf, the body is
+ * evaluated and handed to `onLeaf`, which may stop the walk by setting
+ * `state.stopped`. `yield`s once per body evaluation for interruptibility.
  */
-function* runLoopNested(
+function* runNested(
   body: Expression,
   elements: ReadonlyArray<Expression>,
   index: number,
   ce: ComputeEngine,
-  results: Expression[],
-  state: {
-    stopped: boolean;
-    broke: boolean;
-    value?: Expression;
-    count: number;
-  }
+  state: LoopState,
+  onLeaf: (result: Expression) => void
 ): Generator<Expression> {
   if (state.stopped) return;
 
@@ -405,18 +507,7 @@ function* runLoopNested(
     state.count += 1;
     if (state.count > ce.iterationLimit)
       throw new CancellationError({ cause: 'iteration-limit-exceeded' });
-    if (isFunction(result, 'Break')) {
-      state.stopped = true;
-      state.broke = true;
-      state.value = result.op1;
-      return;
-    }
-    if (result.operator === 'Return') {
-      state.stopped = true;
-      state.value = result;
-      return;
-    }
-    results.push(result);
+    onLeaf(result);
     yield result;
     return;
   }
@@ -442,54 +533,14 @@ function* runLoopNested(
     return;
   }
 
-  // Skip assigning to the wildcard `Nothing`. canonicalLoop already filters
-  // these out of the pre-declaration pass, so without this guard a stray
-  // non-canonical `Loop(body, Element('Nothing', coll))` would walk to the
-  // parent scope looking for a binding to assign into.
+  // Skip assigning to the wildcard `Nothing`. canonicalLoopLike already
+  // filters these out of the pre-declaration pass, so without this guard a
+  // stray non-canonical `Loop(body, Element('Nothing', coll))` would walk to
+  // the parent scope looking for a binding to assign into.
   const skipAssign = name === 'Nothing';
   for (const value of collection.each()) {
     if (!skipAssign) ce.assign(name, value);
-    yield* runLoopNested(body, elements, index + 1, ce, results, state);
+    yield* runNested(body, elements, index + 1, ce, state, onLeaf);
     if (state.stopped) return;
-  }
-}
-
-function* runLoopLegacy(
-  body: Expression,
-  collection: Expression,
-  ce: ComputeEngine
-): Generator<Expression> {
-  if (collection?.isCollection) {
-    //
-    // Iterate over the elements of a collection
-    //
-    let result: Expression | undefined = undefined;
-    const fn = applicable(body);
-    let i = 0;
-
-    for (const x of collection.each()) {
-      result = fn([x]) ?? ce.Nothing;
-      if (isFunction(result, 'Break')) return result.op1;
-      if (result.operator === 'Return') return result;
-      i += 1;
-      yield result;
-      if (i > ce.iterationLimit)
-        throw new CancellationError({ cause: 'iteration-limit-exceeded' });
-    }
-    return result;
-  }
-
-  //
-  // No collection: infinite loop
-  //
-  let i = 0;
-  while (true) {
-    const result = body.evaluate();
-    if (isFunction(result, 'Break')) return result.op1;
-    if (result.operator === 'Return') return result;
-    i += 1;
-    yield result;
-    if (i > ce.iterationLimit)
-      throw new CancellationError({ cause: 'iteration-limit-exceeded' });
   }
 }

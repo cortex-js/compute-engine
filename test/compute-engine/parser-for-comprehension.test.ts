@@ -10,10 +10,10 @@ function parse(latex: string): Expression {
 
 describe('Parser: for-comprehensions', () => {
   describe('basic comprehension', () => {
-    test('`x for x = [1...3]` → Loop with single Element', () => {
+    test('`x for x = [1...3]` → Comprehension with single Element', () => {
       const ast = parse('x \\operatorname{for} x = \\left[1...3\\right]');
       expect(ast).toEqual([
-        'Loop', 'x', ['Element', 'x', ['Range', 1, 3]],
+        'Comprehension', 'x', ['Element', 'x', ['Range', 1, 3]],
       ]);
     });
 
@@ -22,7 +22,7 @@ describe('Parser: for-comprehensions', () => {
         '(x, y) \\operatorname{for} x = \\left[1...2\\right], y = \\left[3...4\\right]'
       );
       expect(ast).toEqual([
-        'Loop',
+        'Comprehension',
         ['Tuple', 'x', 'y'],
         ['Element', 'x', ['Range', 1, 2]],
         ['Element', 'y', ['Range', 3, 4]],
@@ -72,7 +72,7 @@ describe('Parser: for-comprehensions', () => {
         '(x + y) \\operatorname{for} x = L_1, y = L_2'
       );
       expect(ast).toEqual([
-        'Loop',
+        'Comprehension',
         ['Add', 'x', 'y'],
         ['Element', 'x', 'L_1'],
         ['Element', 'y', 'L_2'],
@@ -83,7 +83,7 @@ describe('Parser: for-comprehensions', () => {
   describe('round-trip', () => {
     test('multi-Element for-comprehension round-trips', () => {
       const ast: any = [
-        'Loop',
+        'Comprehension',
         ['Tuple', 'x', 'y'],
         ['Element', 'x', ['Range', 1, 2]],
         ['Element', 'y', ['Range', 3, 4]],
@@ -99,7 +99,7 @@ describe('Parser: for-comprehensions', () => {
       // L_1 may already be declared by the precedence test — only declare if needed
       if (!ce.context.lexicalScope.bindings.has('L_1'))
         ce.declare('L_1', 'list<number>');
-      const ast: any = ['Loop', ['Power', 'x', 2], ['Element', 'x', 'L_1']];
+      const ast: any = ['Comprehension', ['Power', 'x', 2], ['Element', 'x', 'L_1']];
       const expr = ce.expr(ast);
       const latex = expr.toLatex();
       expect(latex).toContain('\\operatorname{for}');

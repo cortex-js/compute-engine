@@ -78,16 +78,17 @@ describe('TIMEOUT', () => {
   });
 
   describe('Loop', () => {
-    it('finite loop completes within timeout', () => {
+    it('finite for-effect loop completes within timeout, evaluates to Nothing', () => {
       const list = ce.function(
         'List',
         Array.from({ length: 5 }, (_, i) => ce.number(i + 1))
       );
-      // Loop applies body (a lambda) to each element, returns the last result
+      // A `Loop` is imperative / for effect: it iterates the body over the
+      // collection and evaluates to `Nothing`.
       const result = ce
-        .expr(['Loop', ['Function', ['Multiply', 'x', 2], 'x'], list])
+        .expr(['Loop', ['Multiply', 'x', 2], ['Element', 'x', list]])
         .evaluate();
-      expect(result.re).toBe(10); // last element 5 * 2 = 10
+      expect(result.symbol).toBe('Nothing');
     });
 
     it('loop over large collection throws CancellationError', () => {
@@ -98,7 +99,7 @@ describe('TIMEOUT', () => {
       // Body does expensive work per element
       expect(() =>
         ce
-          .expr(['Loop', ['Function', ['Power', 'x', 'x'], 'x'], list])
+          .expr(['Loop', ['Power', 'x', 'x'], ['Element', 'x', list]])
           .evaluate()
       ).toThrow(CancellationError);
     });

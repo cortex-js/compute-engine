@@ -1518,31 +1518,17 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       ]);
     },
   },
-  // Serializer for Loop expressions
+  // Serializer for Loop expressions (imperative control flow)
   {
     name: 'Loop',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
-      if (!args || args.length < 2) return '';
+      if (!args || args.length === 0) return '';
       const body = args[0];
       const elements = args.slice(1);
 
-      // Check if all iterators are Element clauses
-      const allElements = elements.every((e) => operator(e) === 'Element');
-
-      if (!allElements) {
-        // Legacy fallback: emit \operatorname{Loop}(body, ...)
-        return joinLatex([
-          '\\operatorname{Loop}(',
-          serializer.serialize(body),
-          ', ',
-          serializer.serialize(elements[0]),
-          ')',
-        ]);
-      }
-
-      // Single-Element with Range → emit \text{for ... from ... to ... do ...} (legacy form)
-      if (elements.length === 1) {
+      // Single-Element with Range → emit \text{for ... from ... to ... do ...}
+      if (elements.length === 1 && operator(elements[0]) === 'Element') {
         const elem = elements[0];
         const index = operand(elem, 1);
         const coll = operand(elem, 2);
@@ -1560,17 +1546,27 @@ export const DEFINITIONS_CORE: LatexDictionary = [
             serializer.serialize(body),
           ]);
         }
-        // Single-Element non-Range → emit comprehension form
-        return joinLatex([
-          serializer.serialize(body),
-          ' \\operatorname{for} ',
-          serializer.serialize(index),
-          ' = ',
-          serializer.serialize(coll),
-        ]);
       }
 
-      // Multi-Element → emit comprehension form: body \operatorname{for} x=L1, y=L2, ...
+      // All other Loop shapes → functional fallback \operatorname{Loop}(...).
+      // (Comprehension syntax is reserved for the `Comprehension` operator.)
+      return joinLatex([
+        '\\operatorname{Loop}(',
+        args.map((a) => serializer.serialize(a)).join(', '),
+        ')',
+      ]);
+    },
+  },
+  // Serializer for Comprehension expressions (value-producing)
+  {
+    name: 'Comprehension',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const args = operands(expr);
+      if (!args || args.length < 2) return '';
+      const body = args[0];
+      const elements = args.slice(1);
+
+      // Emit comprehension form: body \operatorname{for} x = L1, y = L2, ...
       const bindings = elements
         .map((elem) => {
           const name = operand(elem, 1);
@@ -3227,13 +3223,13 @@ function parseForExpression(
  *
  *   body \operatorname{for} x = L_1, y = L_2, ...
  *
- * Produces `["Loop", body, ["Element", x, L_1], ["Element", y, L_2], ...]`.
+ * Produces `["Comprehension", body, ["Element", x, L_1], ["Element", y, L_2], ...]`.
  *
  * The bindings are comma-separated `name = expr` pairs. We stop at the
  * outer terminator (e.g. closing `]` of a surrounding list literal).
  *
- * Note: scope hygiene is handled by canonicalLoop — this function only
- * produces the raw AST.
+ * Note: scope hygiene is handled by the `Comprehension` canonical form — this
+ * function only produces the raw AST.
  */
 function parseForComprehension(
   parser: Parser,
@@ -3292,7 +3288,7 @@ function parseForComprehension(
   } while (parser.match(','));
 
   if (elements.length === 0) return null;
-  return ['Loop', lhs, ...elements] as MathJsonExpression;
+  return ['Comprehension', lhs, ...elements] as MathJsonExpression;
 }
 
 /**

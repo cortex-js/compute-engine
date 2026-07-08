@@ -193,10 +193,10 @@ describe('COMPILE Loop (interval-js)', () => {
 });
 
 describe('COMPILE Variadic Loop (comprehension)', () => {
-  test('JS: Loop with 2 Element clauses produces Cartesian product', () => {
+  test('JS: Comprehension with 2 Element clauses produces Cartesian product', () => {
     // (x, y) for x = [1..2], y = [3..4]  →  4 pairs
     const expr = ce.expr([
-      'Loop',
+      'Comprehension',
       ['Tuple', 'x', 'y'],
       ['Element', 'x', ['Range', 1, 2]],
       ['Element', 'y', ['Range', 3, 4]],
@@ -225,12 +225,9 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
     expect(result.run!()).toBe(6); // 1 + 2 + 3
   });
 
-  test('JS: Loop with single Element (body is plain expression) collects results', () => {
-    // Single Element where body is a pure value expression — comprehension mode
-    // because a Loop body without side effects in a standalone context is collected.
-    // Note: since Range is the collection, this still uses the imperative path;
-    // but the body is just a computation (i*2) which is a statement with no effect.
-    // The test exercises the legacy for-loop with an expression body.
+  test('JS: Loop with single Element (body is plain expression) runs for effect', () => {
+    // A `Loop` is imperative / for effect: the body value is discarded. Single
+    // integer-ascending step-1 Range → counted for-loop, no result array.
     const expr = ce.expr([
       'Loop',
       ['Multiply', 'i', 2],
@@ -239,7 +236,8 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
     const result = compile(expr);
     expect(result.success).toBe(true);
     // The imperative loop runs but doesn't collect; run() returns undefined.
-    // This is the expected behaviour for the legacy path.
+    expect(result.run!()).toBeUndefined();
+    expect(result.code).not.toContain('result.push');
     expect(result.code).toContain('for (let i = 1; i <= 3; i++)');
   });
 
@@ -249,7 +247,7 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
     // Since we use `for (const x of ...) { for (const y of ...) { ... } }`,
     // x is naturally in scope for the inner loop's collection.
     const expr = ce.expr([
-      'Loop',
+      'Comprehension',
       ['Add', 'x', 'y'],
       ['Element', 'x', ['Range', 1, 2]],
       ['Element', 'y', ['Range', 1, 'x']],
@@ -265,7 +263,7 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
 
   test('JS: compiled code contains for-of for multi-Element comprehension', () => {
     const expr = ce.expr([
-      'Loop',
+      'Comprehension',
       'x',
       ['Element', 'x', ['Range', 1, 3]],
       ['Element', 'y', ['Range', 4, 5]],
@@ -281,7 +279,7 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
     // Range(1, 9, 2) → [1, 3, 5, 7, 9]. A second Element clause forces
     // comprehension mode so the new compileRangeIterable path is exercised.
     const expr = ce.expr([
-      'Loop',
+      'Comprehension',
       'i',
       ['Element', 'i', ['Range', 1, 9, 2]],
       ['Element', '_', ['List', 0]],
@@ -295,7 +293,7 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
     // Range(0, 1, 0.25) → [0, 0.25, 0.5, 0.75, 1]. Pre-fix this collapsed
     // to integer bounds via Math.floor and ignored the step.
     const expr = ce.expr([
-      'Loop',
+      'Comprehension',
       'x',
       ['Element', 'x', ['Range', 0, 1, 0.25]],
       ['Element', '_', ['List', 0]],
@@ -309,7 +307,7 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
 
   test('JS: comprehension over Range with negative step', () => {
     const expr = ce.expr([
-      'Loop',
+      'Comprehension',
       'i',
       ['Element', 'i', ['Range', 10, 0, -2]],
       ['Element', '_', ['List', 0]],
@@ -321,7 +319,7 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
 
   test('JS: comprehension over Range(5, 1) auto-directs (no explicit step)', () => {
     const expr = ce.expr([
-      'Loop',
+      'Comprehension',
       'i',
       ['Element', 'i', ['Range', 5, 1]],
       ['Element', '_', ['List', 0]],
@@ -333,7 +331,7 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
 
   test('JS: comprehension over sign-mismatched Range yields empty', () => {
     const expr = ce.expr([
-      'Loop',
+      'Comprehension',
       'i',
       ['Element', 'i', ['Range', 0, 1, -1]],
       ['Element', '_', ['List', 0]],
@@ -417,7 +415,7 @@ describe('COMPILE Loop comprehension under interval-js', () => {
     // operators must wrap each loop variable as `_IA.point(...)`. Otherwise
     // `_IA.add(x, y)` is invoked with raw numbers and yields a wrong result.
     const expr = ce.expr([
-      'Loop',
+      'Comprehension',
       ['Add', 'x', 'y'],
       ['Element', 'x', ['Range', 1, 2]],
       ['Element', 'y', ['Range', 3, 4]],
