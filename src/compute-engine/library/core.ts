@@ -784,7 +784,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         ) as 'never' | 'evaluate' | 'N' | undefined;
 
         // A symbol may already exist in the current scope as an *inferred*
-        // binding with no value — typically because an earlier statement in
+        // binding with no value — typically because the block's canonical
+        // pass hoisted it (see `canonicalBlock`), or an earlier statement in
         // this Block (e.g. `Assign(x, ...)`) auto-declared it during the
         // canonical pass. In that case, `ce.declare(...)` would throw
         // "already declared in this scope." Treat that case as an upgrade
@@ -794,8 +795,23 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Bindings that carry a value — e.g. function-argument bindings,
         // or an outer explicit declaration — are NOT upgraded; the
         // original "already declared" error is preserved for them.
+        //
+        // Exception: a binding this handler itself created or upgraded on a
+        // *previous* evaluation (marked `_declaredByStatement`). A scope is
+        // re-entered whenever the same Block expression is re-evaluated — a
+        // Loop body on its second iteration, or a warmed engine re-running a
+        // program — and re-executing the Declare must reset the local, not
+        // conflict with its own earlier run.
         const currentScope = ce.context.lexicalScope;
-        const existing = currentScope.bindings.get(symbolName);
+        let existing = currentScope.bindings.get(symbolName);
+        if (
+          existing &&
+          (existing as { _declaredByStatement?: boolean })
+            ._declaredByStatement === true
+        ) {
+          currentScope.bindings.delete(symbolName);
+          existing = undefined;
+        }
         const existingValueDef =
           existing && isValueDef(existing) ? existing : undefined;
         const isAutoDeclareHere =
@@ -805,6 +821,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         if (isAutoDeclareHere && existingValueDef) {
           // Upgrade the existing auto-declared binding in place.
+          (existingValueDef as { _declaredByStatement?: boolean }
+          )._declaredByStatement = true;
           if (hasType) {
             existingValueDef.value.type = ce.type(type!);
             existingValueDef.value.inferredType = false;
@@ -837,6 +855,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (holdUntil) def.holdUntil = holdUntil;
           if (isConstant) (def as { isConstant?: boolean }).isConstant = true;
           ce.declare(symbolName, def);
+          const created = ce.context.lexicalScope.bindings.get(symbolName);
+          if (created)
+            (created as { _declaredByStatement?: boolean }
+            )._declaredByStatement = true;
         }
 
         return hasValue ? value : ce.Nothing;

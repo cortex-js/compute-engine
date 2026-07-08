@@ -69,7 +69,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       canonical: (ops, { engine }) =>
         engine._fn(
           'If',
-          ops.map((op) => op.canonical)
+          // The condition (op 0) is an ordinary expression; the then/else
+          // branches (ops 1+) are statement positions, so reject a bare
+          // `Break`/`Continue` symbol there.
+          ops.map((op, i) =>
+            i === 0 ? op.canonical : canonicalStatement(engine, op)
+          )
         ),
       evaluate: ([cond, ifTrue, ifFalse], { engine }) => {
         const evaluatedCond = sym(cond.evaluate());
@@ -267,13 +272,87 @@ function canonicalBlock(
   // Empty block?
   if (ops.length === 0) return null;
 
-  // We canonicalize the statements in the local scope
-  const result = ce._fn(
-    'Block',
-    ce._inScope(scope, () => ops.map((op) => op.canonical)),
-    { scope }
-  );
-  return result;
+  // A `Declare(name, …)` introduces a block-local `name` that shadows any
+  // same-named constant (`i`, `e`, `Pi`, …) for the rest of the block. Push
+  // those names onto the engine's shadowed-parameter stack — the same
+  // mechanism used for function-literal parameters — so that e.g.
+  // `Add(i, 1)` after `Declare(i, …)` keeps `i` as an ordinary variable
+  // instead of folding to the imaginary unit `1 + i`. The shadow is scoped to
+  // this block: it is popped once the statements are canonicalized, so an `i`
+  // outside the block is the imaginary unit again.
+  const declaredNames: string[] = [];
+  for (const op of ops) {
+    if (isFunction(op, 'Declare')) {
+      const nameExpr = op.ops[0];
+      if (nameExpr && isSymbol(nameExpr)) declaredNames.push(nameExpr.symbol);
+    }
+  }
+
+  // Hoist the block's own locals into the block scope BEFORE canonicalizing
+  // the statements. `Declare`/`Assign` only register their symbol at
+  // *evaluation* time, so without this a reference to a block-local from a
+  // nested scope (an inner `Block`, an `If` branch inside a `Loop` body, …)
+  // finds no binding during canonicalization and auto-declares a valueless
+  // shadow in the *inner* scope — which then permanently hides the enclosing
+  // block's runtime binding (the canonicalization-scope-vs-runtime-scope
+  // defect: `Block(Declare(k), Assign(k, 7), Block(k))` evaluated to `k`).
+  //
+  // - A top-level `Declare(name, …)` always introduces a block-local.
+  // - A top-level `Assign(name, …)` introduces a block-local only when the
+  //   name is not visible in the scope chain (assignment to a visible
+  //   binding — including a constant, which errors at runtime — must keep
+  //   binding upward).
+  //
+  // The hoisted binding is identical to an auto-declared one (inferred type,
+  // no value), so the `Declare` evaluate handler upgrades it in place at
+  // runtime exactly as it upgrades an auto-declared binding.
+  if (scope) {
+    for (const name of declaredNames) {
+      if (name !== 'Nothing' && !scope.bindings.has(name))
+        ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
+    }
+    for (const op of ops) {
+      if (!isFunction(op, 'Assign')) continue;
+      const name = sym(op.ops[0]);
+      if (!name || name === 'Nothing') continue;
+      if (scope.bindings.has(name) || ce.lookupDefinition(name)) continue;
+      ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
+    }
+  }
+
+  ce._pushShadowedParameters(declaredNames);
+  let statements: Expression[];
+  try {
+    // We canonicalize the statements in the local scope
+    statements = ce._inScope(scope, () =>
+      ops.map((op) => canonicalStatement(ce, op))
+    );
+  } finally {
+    ce._popShadowedParameters();
+  }
+
+  return ce._fn('Block', statements, { scope });
+}
+
+/**
+ * Canonicalize an expression in **statement position** (a `Block` operand, an
+ * `If` branch, or a `Loop` body). A bare *symbol* `Break`/`Continue` (as
+ * opposed to the function forms `Break()`/`Continue()`) is almost certainly a
+ * mistake: the control-flow dispatch in `evaluateStatements`/`runLoop` only
+ * recognizes the function form, so a bare symbol would silently canonicalize
+ * to an ordinary variable reference. Flag it as an error instead. Bare
+ * `Return` is intentionally left alone.
+ */
+function canonicalStatement(
+  ce: ComputeEngine,
+  op: Expression
+): Expression {
+  if (isSymbol(op) && (op.symbol === 'Break' || op.symbol === 'Continue'))
+    return ce.error(
+      `\`${op.symbol}\` must be written as a function: \`${op.symbol}()\``,
+      op.symbol
+    );
+  return op.canonical;
 }
 
 /**
@@ -321,7 +400,7 @@ function canonicalLoopLike(
     // Bare form. `Loop(body)` is a valid infinite imperative loop;
     // `Comprehension(body)` needs at least one Element clause.
     if (head === 'Comprehension') return null;
-    return ce._fn('Loop', [body.canonical]);
+    return ce._fn('Loop', [canonicalStatement(ce, body)]);
   }
 
   // Variadic Element form: bound names must not leak. Mirror canonicalBigop.
@@ -360,7 +439,7 @@ function canonicalLoopLike(
       }
       return ce._fn('Element', [indexExpr.canonical, collExpr.canonical]);
     });
-    canonicalBody = body.canonical;
+    canonicalBody = canonicalStatement(ce, body);
   } finally {
     ce.popScope();
     loopScope.noAutoDeclare = false;
@@ -466,30 +545,25 @@ function* runNestedElements(
   state: LoopState,
   onLeaf: (result: Expression) => void
 ): Generator<Expression> {
-  // Build a fresh loop scope per evaluation so repeated evaluations don't
-  // accumulate state. The parent is the current scope at evaluation time.
-  // Element index variables are pre-declared into this scope so subsequent
-  // `ce.assign(name, value)` updates the binding inside the loop scope
-  // rather than leaking to the enclosing one.
-  const freshScope: Scope = {
-    parent: ce.context.lexicalScope,
-    bindings: new Map(),
-  };
-
-  ce._pushEvalContext(freshScope);
-  try {
-    for (const elem of elements) {
-      if (!isFunction(elem, 'Element')) continue;
-      const idx = elem.ops[0];
-      if (idx && isSymbol(idx) && idx.symbol !== 'Nothing') {
-        if (!freshScope.bindings.has(idx.symbol))
-          ce.declare(idx.symbol, 'unknown');
-      }
+  // Iterate in the loop's OWN lexical scope — the current eval context. The
+  // scoped `Loop`/`Comprehension` pushed this scope before its evaluate handler
+  // ran, and `canonicalLoopLike` already declared the Element index names in
+  // it. We must NOT push a shadowing child scope here: a `Block` body resolves
+  // its free variables against its *lexical* parent (this loop scope), not the
+  // dynamic runtime context. A child scope would capture `ce.assign(name,
+  // value)` below while the body kept reading the (unset) lexical binding,
+  // leaving the loop variable symbolic in a `Loop(Block(…), Element…)`. The
+  // index names are popped with the loop scope, so they don't leak.
+  // Declare-if-absent keeps a non-canonical direct call working.
+  for (const elem of elements) {
+    if (!isFunction(elem, 'Element')) continue;
+    const idx = elem.ops[0];
+    if (idx && isSymbol(idx) && idx.symbol !== 'Nothing') {
+      if (!ce.context.lexicalScope.bindings.has(idx.symbol))
+        ce.declare(idx.symbol, 'unknown');
     }
-    yield* runNested(body, elements, 0, ce, state, onLeaf);
-  } finally {
-    ce._popEvalContext();
   }
+  yield* runNested(body, elements, 0, ce, state, onLeaf);
 }
 
 /**

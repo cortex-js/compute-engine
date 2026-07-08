@@ -4503,8 +4503,18 @@ type LatexDictionaryEntry = OneOf<[
 A dictionary entry is a record that maps a LaTeX token or string of tokens
 ( a trigger) to a MathJSON expression or to a parsing handler.
 
-Set the `ComputeEngine.latexDictionary` property to an array of
-dictionary entries to define custom LaTeX parsing and serialization.
+To define custom LaTeX parsing and serialization, pass a `LatexSyntax`
+instance to the `ComputeEngine` constructor via the `latexSyntax` option.
+The `LatexSyntax` `dictionary` option **replaces** the default dictionary, so
+start from `LATEX_DICTIONARY` and append your entries:
+
+```ts
+import { ComputeEngine, LatexSyntax, LATEX_DICTIONARY } from '@cortex-js/compute-engine';
+
+const ce = new ComputeEngine({
+  latexSyntax: new LatexSyntax({ dictionary: [...LATEX_DICTIONARY, myEntry] }),
+});
+```
 
 </MemberCard>
 
@@ -10992,13 +11002,27 @@ These options control how numbers are parsed and serialized.
 
 ```ts
 type NumberSerializationFormat = NumberFormat & {
+  digits: DisplayDigits;
   fractionalDigits: "auto" | "max" | number;
   notation: "auto" | "engineering" | "scientific" | "adaptiveScientific";
   avoidExponentsInRange: undefined | null | [number, number];
 };
 ```
 
-#### NumberSerializationFormat.fractionalDigits
+#### NumberSerializationFormat.digits?
+
+```ts
+optional digits?: DisplayDigits;
+```
+
+Controls how many digits a number is displayed with. See
+[DisplayDigits](#displaydigits).
+
+When serializing via `.toLatex({ digits })`, rounding is applied at the
+MathJSON (kernel) layer; the LaTeX layer only lays out the already-rounded
+digits.
+
+#### NumberSerializationFormat.~~fractionalDigits~~
 
 ```ts
 fractionalDigits: "auto" | "max" | number;
@@ -11009,6 +11033,48 @@ The maximum number of significant digits in serialized numbers.
 - `"auto"`: use the same precision as the compute engine.
 
 Default: `"auto"`
+
+##### Deprecated
+
+Use [digits](#numberserializationformat) instead.
+
+</MemberCard>
+
+<MemberCard>
+
+### DisplayDigits
+
+```ts
+type DisplayDigits = 
+  | "auto"
+  | "max"
+  | {
+  significant: number;
+ }
+  | {
+  fractional: number;
+};
+```
+
+Controls how many digits a number is **displayed** with when serialized.
+
+This is a display/formatting concern only: it does not change the stored
+value, nor the precision used for computation.
+
+- `"auto"`: round to the engine's working precision (`ce.precision`). This is
+  the default used by the `.latex` getter.
+- `"max"`: display all stored digits, with no rounding. This is the default
+  used by `.json` / `toMathJson()`.
+- `{ significant: n }`: round **inexact** values to `n` significant figures.
+  Exact values (integers, rationals, radicals) are displayed in full — this
+  is a no-op on them. Truncation only: trailing zeros are not padded
+  (`2.0` stays `2`).
+- `{ fractional: n }`: display `n` digits after the decimal point, using
+  `toFixed` semantics (may pad with trailing zeros, e.g. `2` → `2.00`).
+
+Rounding is orthogonal to notation: it never switches a number to
+scientific/exponential notation as a side effect. Fixed-vs-scientific is
+controlled by the `notation` / `avoidExponentsInRange` options.
 
 </MemberCard>
 
@@ -11023,6 +11089,7 @@ type JsonSerializationOptions = {
   shorthands: ("all" | "number" | "symbol" | "function" | "string" | "dictionary")[];
   metadata: ("all" | "wikidata" | "latex" | "sourceOffsets")[];
   repeatingDecimal: boolean;
+  digits: DisplayDigits;
   fractionalDigits: "auto" | "max" | number;
 };
 ```
