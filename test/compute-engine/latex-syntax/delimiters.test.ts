@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../../src/compute-engine';
 import { engine as ce } from '../../utils';
 
 describe('DELIMITERS', () => {
@@ -122,6 +123,122 @@ describe('DELIMITERS', () => {
         4,
       ]
     `);
+  });
+
+  // A symbol followed by a `\left[...\right]` (or `\left\lbrack...\rbrack`)
+  // fenced group must index identically to the plain-bracket `symbol[...]`
+  // form. Previously the fenced group was silently dropped (e.g.
+  // `A\left[1\right]` parsed to just `["A"]`), losing the index — which broke
+  // every Desmos list-indexing row, since Desmos always emits `\left[...\right]`.
+  test('Indexed access with \\left[...\\right] fences (parity with plain brackets)', () => {
+    const raw = (s: string) => JSON.stringify(ce.parse(s, { canonical: false }).json);
+
+    // Single index
+    expect(raw('A\\left[1\\right]')).toEqual(raw('A[1]'));
+    expect(raw('A\\left[1\\right]')).toEqual('["At","A",1]');
+    expect(raw('A\\left\\lbrack1\\right\\rbrack')).toEqual(raw('A[1]'));
+
+    // List-typed symbol, symbolic index (Desmos `L\left[k\right]`)
+    expect(raw('L\\left[k\\right]')).toEqual(raw('L[k]'));
+    expect(raw('L\\left[k\\right]')).toEqual('["At","L","k"]');
+
+    // Multi-index
+    expect(raw('L\\left[1,2\\right]')).toEqual(raw('L[1,2]'));
+    expect(raw('L\\left[1,2\\right]')).toEqual('["At","L",1,2]');
+
+    // Range index
+    expect(raw('L\\left[1...5\\right]')).toEqual(raw('L[1...5]'));
+    expect(raw('L\\left[1...5\\right]')).toEqual('["At","L",["Range",1,5]]');
+
+    // `D` must index (not crash on the derivative operator path)
+    expect(raw('D\\left[1\\right]')).toEqual('["At","D",1]');
+
+    // A standalone `\left[...\right]` NOT preceded by a symbol stays a List
+    expect(raw('\\left[1,2\\right]')).toEqual('["List",1,2]');
+  });
+
+  // A parenthesized group followed by a bracket indexes the group, matching
+  // symbol/list-literal LHS behavior. The group reaches the postfix `[`
+  // parser as a `Delimiter` (with `(` fences); only parentheses can present
+  // a compound LHS to the bracket, so a bare `x+1[2]` is unaffected.
+  // Corpus motivation: Desmos emits `\left(...tuple...\right)\left[range\right]`.
+  test('Indexed access with a parenthesized-group LHS', () => {
+    const raw = (s: string) =>
+      JSON.stringify(ce.parse(s, { canonical: false }).json);
+
+    // Tuple LHS, single/multi/symbolic/range index — plain and \left..\right,
+    // plus the mixed fence forms Desmos and hand-authored LaTeX produce.
+    expect(raw('(3,4)[1]')).toEqual(
+      '["At",["Delimiter",["Sequence",3,4],"\'(,)\'"],1]'
+    );
+    expect(raw('\\left(1,2,3\\right)\\left[2\\right]')).toEqual(
+      '["At",["Delimiter",["Sequence",1,2,3],"\'(,)\'"],2]'
+    );
+    expect(raw('\\left(a,b\\right)\\left[k\\right]')).toEqual(
+      '["At",["Delimiter",["Sequence","a","b"],"\'(,)\'"],"k"]'
+    );
+    expect(raw('(a,b,c)[2]')).toEqual(
+      '["At",["Delimiter",["Sequence","a","b","c"],"\'(,)\'"],2]'
+    );
+    // Mixed fences: plain `(...)` + `\left[...\right]`, and `\left(...\right)` + `[...]`
+    expect(raw('(1,2,3)\\left[2\\right]')).toEqual(
+      '["At",["Delimiter",["Sequence",1,2,3],"\'(,)\'"],2]'
+    );
+    expect(raw('\\left(1,2\\right)[2]')).toEqual(
+      '["At",["Delimiter",["Sequence",1,2],"\'(,)\'"],2]'
+    );
+    // Corpus range index `\left(...\right)\left[r_{ange}\right]`
+    expect(raw('\\left(1,2,3\\right)\\left[r_{ange}\\right]')).toEqual(
+      '["At",["Delimiter",["Sequence",1,2,3],"\'(,)\'"],"r_ange"]'
+    );
+
+    // A non-tuple (scalar-valued) parenthesized group still parses to an
+    // indexing `At`; the type layer decides whether the target is indexable.
+    expect(raw('(x+1)[2]')).toEqual(
+      '["At",["Delimiter",["Add","x",1]],2]'
+    );
+    expect(raw('(x+1)[1,2]')).toEqual(
+      '["At",["Delimiter",["Add","x",1]],1,2]'
+    );
+    expect(raw('(x+1)[1...5]')).toEqual(
+      '["At",["Delimiter",["Add","x",1]],["Range",1,5]]'
+    );
+
+    // A tuple LHS canonicalizes to `At(Tuple(...), index)`.
+    expect(JSON.stringify(ce.parse('(3,4)[1]').json)).toEqual(
+      '["At",["Tuple",3,4],1]'
+    );
+  });
+
+  // Guard-rails: the parenthesized-group relaxation must NOT change how a
+  // bracket binds to a non-`)`-closed LHS. A scalar or bare compound followed
+  // by `[` remains an unexpected-operator error (never flips to indexing or
+  // multiplication), and a declared function application is untouched.
+  test('Bracket after non-group LHS is unchanged (no scalar[list] flip)', () => {
+    const raw = (s: string) =>
+      JSON.stringify(ce.parse(s, { canonical: false }).json);
+
+    // Scalar LHS: still an unexpected `[`, not At and not Multiply.
+    expect(raw('2[1,2]')).toEqual(
+      '["Sequence",2,["Error","\'unexpected-operator\'",["LatexString","\'[\'"]]]'
+    );
+    // Bare (unparenthesized) compound: `[` binds to the last operand `1`,
+    // which is a number → rejected → leftover unexpected `[`.
+    expect(raw('x+1[2]')).toEqual(
+      '["Sequence",["Add","x",1],["Error","\'unexpected-operator\'",["LatexString","\'[\'"]]]'
+    );
+    // Symbol LHS multi-index path is preserved.
+    expect(raw('x[1,2]')).toEqual('["At","x",1,2]');
+
+    // A declared function application is not broken by a trailing bracket:
+    // `f(x)` consumes `(x)` as its argument, leaving `[1]` unexpected.
+    const ce2 = new ComputeEngine();
+    ce2.declare('f', '(number) -> number');
+    const raw2 = (s: string) =>
+      JSON.stringify(ce2.parse(s, { canonical: false }).json);
+    expect(raw2('f(x)[1]')).toEqual(
+      '["Sequence",["f","x"],["Error","\'unexpected-operator\'",["LatexString","\'[\'"]]]'
+    );
   });
 });
 

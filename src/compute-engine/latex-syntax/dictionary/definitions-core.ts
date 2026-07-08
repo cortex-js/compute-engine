@@ -1251,6 +1251,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\left', '\\lbrack'],
     parse: parseAt('\\right', '\\rbrack'),
   },
+  {
+    kind: 'postfix',
+    precedence: 810,
+    latexTrigger: ['\\left', '['],
+    parse: parseAt('\\right', ']'),
+  },
   // When-restriction: `expr\left\{cond\right\}` → `When(expr, cond)` (D3)
   {
     name: 'When',
@@ -3404,6 +3410,20 @@ function normalizeLocalAssign(expr: MathJsonExpression): MathJsonExpression {
   return ['Assign', `${base}_${subStr}`, operand(expr, 2) ?? 'Nothing'];
 }
 
+/** A parenthesized group parses to a `Delimiter` with `(` fences. Such a
+ * group is a valid indexing target (`(3,4)[1]` → `At(Tuple(3,4), 1)`).
+ * A bare comma-delimiter (`a, b`) is a `Delimiter` whose fence string is a
+ * lone separator (e.g. `,`) with no opening paren, and is not a group. */
+function isParenGroupDelimiter(lhs: MathJsonExpression): boolean {
+  if (operator(lhs) !== 'Delimiter') return false;
+  // No explicit fence string: the default fences are parentheses `()`.
+  if (nops(lhs) < 2) return true;
+  const fence = stringValue(operand(lhs, 2));
+  // The fence string is `open[+sep]+close`; a length-1 string is a bare
+  // separator, not a parenthesized group.
+  return typeof fence === 'string' && fence.length >= 2 && fence[0] === '(';
+}
+
 function parseAt(
   ...close: string[]
 ): (parser: Parser, lhs: MathJsonExpression) => MathJsonExpression | null {
@@ -3413,15 +3433,44 @@ function parseAt(
     parser: Parser,
     lhs: MathJsonExpression
   ): MathJsonExpression | null => {
-    // If the lhs is a symbol or a List literal...
-    if (!symbol(lhs) && operator(lhs) !== 'List') return null;
+    // The LHS must be indexable: a symbol, a List literal, or a
+    // parenthesized group. A parenthesized group reaches us as a `Delimiter`
+    // with `(` fences (e.g. `(3,4)` → `Delimiter(Sequence(3,4), '(,)')`,
+    // `(x+1)` → `Delimiter(Add(x,1))`). Only parentheses can present a
+    // compound LHS here: a bare compound such as `x+1[2]` binds the bracket
+    // to its last operand via precedence, so `Add(x,1)` never reaches us.
+    // The Delimiter is left intact and unwrapped to a `Tuple`/inner
+    // expression by canonicalization.
+    if (
+      !symbol(lhs) &&
+      operator(lhs) !== 'List' &&
+      !isParenGroupDelimiter(lhs)
+    )
+      return null;
 
     let rhs: MathJsonExpression | null = null;
-    if (close.length === 0) rhs = parser.parseGroup();
-    rhs ??= parser.parseExpression({ minPrec: 0 });
-    if (rhs === null) return null;
-
-    if (close.length > 0 && !parser.matchAll(close)) return null;
+    if (close.length === 0) {
+      rhs = parser.parseGroup() ?? parser.parseExpression({ minPrec: 0 });
+      if (rhs === null) return null;
+    } else if (close.length > 1) {
+      // `\left...\right` fenced form (e.g. `A\left[1\right]`, which Desmos
+      // always emits). Bound the index expression by the closing fence.
+      // Without this, `parseExpression()` over-consumes: unlike a bare `]`
+      // (which terminates the expression), a `\right` token parses as an
+      // error and the invisible-operator path keeps swallowing the closing
+      // tokens, so the delimiter match then fails and the whole index group
+      // is silently dropped.
+      parser.addBoundary(close);
+      rhs = parser.parseExpression({ minPrec: 0 });
+      if (rhs === null || !parser.matchBoundary()) {
+        parser.removeBoundary();
+        return null;
+      }
+    } else {
+      rhs = parser.parseExpression({ minPrec: 0 });
+      if (rhs === null) return null;
+      if (!parser.matchAll(close)) return null;
+    }
 
     // A string index is a dictionary key (`data["x"]` → `At(data, "x")`), valid
     // only for the bracketed forms. In the close-less (subscript) mode a string

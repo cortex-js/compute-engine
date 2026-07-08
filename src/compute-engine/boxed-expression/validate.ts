@@ -58,6 +58,32 @@ function typeCouldBeNumericCollection(type: Type): boolean {
 }
 
 /**
+ * Return true if a type *could* be a numeric tuple (point/vector in ℝⁿ) at
+ * runtime — a `tuple` whose every element type could be numeric. Such tuples
+ * participate in vector arithmetic (`z + (1,2)`, `2·z`), so `checkNumericArgs`
+ * admits them as a pass-through (without inferring their elements to `real`).
+ *
+ * This mirrors the COULD-semantics of `typeCouldBeNumericCollection`: an
+ * `any`/`unknown` element (e.g. `(w.x, w.y)` on an undeclared `w`, typed
+ * `tuple<any, any>`) qualifies, so the expression stays symbolic instead of
+ * erroring during validation. (The provable numeric-tuple guards at
+ * canonicalization use the stricter `isNumericTuple`.)
+ */
+function typeCouldBeNumericTuple(type: Type): boolean {
+  const elementCouldBeNumeric = (el: Type): boolean =>
+    el === 'any' ||
+    el === 'unknown' ||
+    isSubtype(el, 'number') ||
+    isSubtype('number', el);
+  if (typeof type === 'string') return type === 'tuple';
+  if (type.kind === 'tuple')
+    return type.elements.every((el) => elementCouldBeNumeric(el.type));
+  if (type.kind === 'union')
+    return type.types.some((t) => typeCouldBeNumericTuple(t));
+  return false;
+}
+
+/**
  * Check that the number of arguments is as expected.
  *
  * Converts the arguments to canonical, and flattens the sequence.
@@ -187,6 +213,11 @@ export function checkNumericArgs(
       // The argument's type could be a numeric collection at runtime
       // (e.g. `list`, `number | list`). Since numeric functions are
       // threadable, accept it.
+      xs.push(op);
+    } else if (typeCouldBeNumericTuple(op.type.type)) {
+      // The argument is a numeric tuple (point/vector in ℝⁿ). Accept it for
+      // vector arithmetic (Add/Multiply/Negate/Subtract/Divide). Pass through
+      // without inferring its elements to `real` (like the tensor branch).
       xs.push(op);
     } else if (isTensor(op)) {
       // The argument is a tensor (matrix or vector). Accept it for tensor

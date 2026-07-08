@@ -626,28 +626,33 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   Rgb: {
     description: 'sRGB color (channels 0-1, optional alpha 0-1)',
     complexity: 8000,
+    broadcastable: true,
     signature: '(number, number, number, number?) -> color',
   },
   Hsv: {
     description:
       'HSV color (hue degrees, saturation/value 0-1, optional alpha)',
     complexity: 8000,
+    broadcastable: true,
     signature: '(number, number, number, number?) -> color',
   },
   Hsl: {
     description:
       'HSL color (hue degrees, saturation/lightness 0-1, optional alpha)',
     complexity: 8000,
+    broadcastable: true,
     signature: '(number, number, number, number?) -> color',
   },
   Oklab: {
     description: 'OKLab color (L 0-1, a/b ~ -0.4..0.4, optional alpha)',
     complexity: 8000,
+    broadcastable: true,
     signature: '(number, number, number, number?) -> color',
   },
   Oklch: {
     description: 'OKLCh color (L 0-1, C 0-~0.4, hue degrees, optional alpha)',
     complexity: 8000,
+    broadcastable: true,
     signature: '(number, number, number, number?) -> color',
   },
 

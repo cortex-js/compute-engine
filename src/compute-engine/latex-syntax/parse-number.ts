@@ -335,9 +335,27 @@ export function parseNumber(
 
   if (hasFractionalPart && !fractionalPart) {
     // There was a '.', but an empty fractional part and no repeating part.
-    // The '.' may be part of something else, i.e. '1..2'
-    // so backtrack
-    parser.index = fractionalIndex;
+    // The '.' may either be a Desmos-style trailing-dot number (`1.` → 1) or
+    // belong to something else: the member-access operator (`1.x`, `1.\max`,
+    // `1.\operatorname{count}`) or a stray dot (`1..2`).
+    //
+    // Disambiguation: a dot followed by a letter (or a member-access command)
+    // is member access, so we backtrack and leave the '.' for the caller. A
+    // dot followed by anything else (a delimiter, an operator, end of input)
+    // is a trailing-dot number, so we consume the '.' and keep the whole part.
+    const peek = parser.peek;
+    const isMemberAccess =
+      typeof peek === 'string' &&
+      (/^[a-zA-Z]$/.test(peek) ||
+        peek === '\\operatorname' ||
+        peek === '\\max' ||
+        peek === '\\min' ||
+        peek === '.');
+    if (startsWithdecimalSeparator || isMemberAccess) {
+      // Backtrack: leave the '.' unconsumed for the caller.
+      parser.index = fractionalIndex;
+    }
+    // Otherwise the '.' stays consumed as a trailing-dot number.
     if (wholePart.length < 10)
       return numberExpression(sign * parseInt(wholePart, 10));
     return { num: sign < 0 ? '-' + wholePart : wholePart };

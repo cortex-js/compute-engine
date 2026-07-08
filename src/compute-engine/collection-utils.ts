@@ -1,4 +1,5 @@
 import { widen } from '../common/type/utils';
+import { isSubtype } from '../common/type/subtype';
 import { Expression, CollectionHandlers } from './global-types';
 import { isFunction } from './boxed-expression/type-guards';
 
@@ -15,6 +16,66 @@ export const MAX_SIZE_EAGER_COLLECTION = 100;
 
 export function isFiniteIndexedCollection(col: Expression): boolean {
   return (col.isFiniteCollection ?? false) && col.isIndexedCollection;
+}
+
+/** Operators that construct a tuple. All canonicalize to `Tuple`. */
+const TUPLE_OPERATORS = new Set(['Tuple', 'Pair', 'Triple', 'Single']);
+
+/**
+ * A **numeric tuple** is a `Tuple`/`Pair`/`Triple` — type `tuple<number,…>` —
+ * whose every element type is a subtype of `number`. These are treated as
+ * points/vectors in ℝⁿ, semantically distinct from Lists (see
+ * `docs/plans/2026-07-07-tuple-point-semantics.md`).
+ *
+ * Type-based, so it covers literal tuples AND symbols declared with a numeric
+ * tuple type (e.g. `z: tuple<number, number>`).
+ */
+export function isNumericTuple(expr: Expression): boolean {
+  const t = expr.type.type;
+  if (typeof t === 'string') return false;
+  if (t.kind !== 'tuple') return false;
+  return t.elements.every((el) => isSubtype(el.type, 'number'));
+}
+
+/**
+ * True when `expr` is provably a **scalar** number — a subtype of `number`
+ * that is not a numeric tuple — whose number-type comes from a LITERAL or an
+ * explicitly DECLARED (non-inferred) definition.
+ *
+ * Inferred evidence is retractable, not proof: a symbol or user function whose
+ * numeric type was merely *inferred* from earlier use might still turn out to
+ * be a tuple (Desmos forward references make this common). Such operands stay
+ * symbolic instead of triggering a `scalar + tuple` rejection, so the
+ * canonical/evaluation guards only fire on genuine scalar literals or
+ * declarations (e.g. `1 + (2,3)`).
+ */
+export function isDeclaredScalarNumber(expr: Expression): boolean {
+  if (isNumericTuple(expr)) return false;
+  if (!isSubtype(expr.type.type, 'number')) return false;
+  // A merely-inferred numeric type is not proof — stay symbolic.
+  if (expr.valueDefinition?.inferredType) return false;
+  if (expr.operatorDefinition?.inferredSignature) return false;
+  return true;
+}
+
+/** The element count of a tuple-typed expression when statically known. */
+export function numericTupleArity(expr: Expression): number | undefined {
+  const t = expr.type.type;
+  if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
+  return t.elements.length;
+}
+
+/**
+ * True when `expr` is a literal tuple expression whose components are directly
+ * accessible as operands, so component-wise arithmetic can be computed now. A
+ * tuple-typed *symbol* has no accessible components and must stay symbolic.
+ */
+export function hasAccessibleComponents(expr: Expression): boolean {
+  return (
+    isFunction(expr) &&
+    TUPLE_OPERATORS.has(expr.operator) &&
+    (expr.ops?.length ?? 0) > 0
+  );
 }
 
 export function repeat(

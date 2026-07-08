@@ -13,6 +13,12 @@ import type {
 } from '../global-types';
 import { isTensor } from './boxed-tensor';
 import { isNumber, isFunction, isSymbol } from './type-guards';
+import {
+  isNumericTuple,
+  numericTupleArity,
+  hasAccessibleComponents,
+  isDeclaredScalarNumber,
+} from '../collection-utils';
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
 import type { NumericValue, NumericValueFactory } from '../numeric-value/types';
@@ -35,6 +41,17 @@ export function canonicalAdd(
 ): Expression {
   // Make canonical, flatten, and lift nested expressions (associative)
   ops = flatten(ops, 'Add');
+
+  // A numeric tuple (point/vector in ℝⁿ) cannot be added to a scalar. Reject
+  // `scalar + tuple` at canonicalization when provable: some operand is a
+  // numeric tuple and another is a *declared/literal* scalar number (not a
+  // tuple). Unknown/`any`-typed operands — and operands whose numeric type was
+  // merely INFERRED — stay symbolic (inference is retractable evidence).
+  if (
+    ops.some((x) => isNumericTuple(x)) &&
+    ops.some((x) => isDeclaredScalarNumber(x))
+  )
+    return ce.error(['incompatible-type', 'tuple', 'number']);
 
   // Remove literal 0
   ops = ops.filter((x) => !isNumber(x) || !x.isSame(0));
@@ -174,6 +191,14 @@ export function canonicalAdd(
 export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   if (args.length === 0) return 'finite_integer'; // = 0
   if (args.length === 1) return args[0].type;
+  // Numeric tuples (points/vectors) add component-wise, preserving the tuple
+  // type. Handle ANY tuple presence before the NaN/finiteness early-returns: a
+  // tuple's `isFinite` is `false`, which would otherwise collapse the result to
+  // `number`. When every operand is a tuple the widened tuple type is exact;
+  // when a tuple is mixed with an unknown/scalar operand, `widen` reports the
+  // honest heterogeneous type (e.g. `any`) rather than claiming `number`.
+  if (args.some((x) => isNumericTuple(x)))
+    return widen(...args.map((x) => x.type.type));
   if (args.some((x) => x.isNaN)) return 'number';
   // (+∞) + (−∞) = NaN: two or more non-finite operands can cancel to NaN.
   const nonFinite = args.filter((x) => x.isFinite === false);
@@ -206,6 +231,10 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   const hasTensors = xs.some((x) => isTensor(x));
   if (hasTensors) return addTensors(xs[0].engine, xs);
 
+  // Numeric tuples (points/vectors) add component-wise (never broadcast).
+  if (xs.some((x) => isNumericTuple(x)))
+    return addTuples(xs[0].engine, xs, false);
+
   return new Terms(xs[0].engine, xs).asExpression();
 }
 
@@ -221,9 +250,56 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
     return addTensors(xs[0].engine, xs);
   }
 
+  // Numeric tuples (points/vectors) add component-wise (never broadcast).
+  if (xs.some((x) => isNumericTuple(x)))
+    return addTuples(xs[0].engine, xs, true);
+
   // Don't N() the number literals (fractions) to avoid losing precision
   xs = xs.map((x) => (isNumber(x) ? x.evaluate() : x.N()));
   return new Terms(xs[0].engine, xs).N();
+}
+
+/**
+ * Add numeric tuples (points/vectors in ℝⁿ) component-wise.
+ * - All operands literal tuples of equal arity → a component-wise `Tuple`.
+ * - A scalar operand mixed in → `incompatible-type` (defensive; T2 rejects
+ *   most `scalar + tuple` at canonicalization).
+ * - Statically-known unequal arity → `incompatible-type` at evaluation.
+ * - A symbolic tuple operand (no accessible components) → symbolic `Add`.
+ */
+function addTuples(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): Expression {
+  // A declared/literal scalar cannot be added to a point. A merely-inferred
+  // scalar stays symbolic (inference is retractable — see
+  // `isDeclaredScalarNumber`), falling through to the symbolic `Add` below.
+  if (ops.some((x) => isDeclaredScalarNumber(x)))
+    return ce.error(['incompatible-type', 'tuple', 'number']);
+
+  // Enforce equal arity when statically known.
+  const arities = ops.map((x) => numericTupleArity(x));
+  const arity = arities[0];
+  if (
+    arity !== undefined &&
+    arities.every((a) => a !== undefined) &&
+    !arities.every((a) => a === arity)
+  )
+    return ce.error(['incompatible-type', 'tuple', 'tuple']);
+
+  // Compute now only when every tuple exposes its components; otherwise stay
+  // symbolic (e.g. `z + (1,2)` with `z` a tuple-typed symbol).
+  if (!ops.every((x) => hasAccessibleComponents(x) && isFunction(x)))
+    return ce._fn('Add', ops);
+
+  const n = isFunction(ops[0]) ? ops[0].nops : 0;
+  const components: Expression[] = [];
+  for (let i = 0; i < n; i++) {
+    const parts = ops.map((x) => (isFunction(x) ? x.ops[i] : x));
+    components.push(numericApproximation ? addN(...parts) : add(...parts));
+  }
+  return ce.tuple(...components);
 }
 
 /**

@@ -185,6 +185,50 @@ describe('PARSING OF NUMBER', () => {
     expect(parseVal(' -  +   -   -1')).toEqual(-1);
   });
 
+  // Desmos-style dot numbers: a trailing dot (`1.`) is the integer 1, and a
+  // leading dot (`.85`) is 0.85. The dot must still work as the member-access
+  // operator when followed by a letter (`1.x`), and `1.4` stays one number.
+  describe('Desmos dot-number lexing', () => {
+    test('Trailing-dot numbers', () => {
+      expect(parse('1.')).toMatchInlineSnapshot(`1`);
+      expect(parse('x>1.')).toMatchInlineSnapshot(`["Less", 1, "x"]`);
+      // z^{1.} → z^1 → z, proving the exponent lexed as the integer 1.
+      expect(parse('z^{1.}')).toMatchInlineSnapshot(`z`);
+      expect(parse('\\{1.65>x>1.\\}')).toMatchInlineSnapshot(
+        `["Set", ["Less", 1, "x", 1.65]]`
+      );
+    });
+
+    test('Trailing-dot number round-trips as a normal number', () => {
+      expect(ce.parse('x>1.').latex).toMatchInlineSnapshot(`1\\lt x`);
+      expect(ce.parse('1.').latex).toMatchInlineSnapshot(`1`);
+    });
+
+    test('Leading-dot numbers', () => {
+      expect(parseVal('.85')).toEqual('0.85');
+      expect(parse('.5+.5')).toMatchInlineSnapshot(`["Add", 0.5, 0.5]`);
+      expect(parse('[.1,.2]')).toMatchInlineSnapshot(`["List", 0.1, 0.2]`);
+    });
+
+    test('1.4 stays a single number', () => {
+      expect(parseVal('1.4')).toEqual('1.4');
+    });
+
+    test('Dot before a letter stays member access', () => {
+      // `1.x` is member access (parses to First(1)), NOT `1` then `.x`.
+      expect(parse('1.x')).toMatchInlineSnapshot(`["First", 1]`);
+      // `1.\operatorname{count}` is member access, not a trailing-dot number.
+      expect(parse('1.\\operatorname{count}')).toMatchInlineSnapshot(
+        `["Length", 1]`
+      );
+    });
+
+    test('Degenerate dot sequences produce errors, not misparses', () => {
+      expect(parse('1.2.3').isValid).toBe(false);
+      expect(parse('..5').isValid).toBe(false);
+    });
+  });
+
   test('Parsing digits', () => {
     // Numbers with decimal points are treated as approximate (BigNumericValue)
     // Number with exactly three digits after the decimal point

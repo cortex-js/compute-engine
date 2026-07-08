@@ -203,6 +203,15 @@ volumes
         return body.engine.type('number');
       },
       canonical: (ops, { engine: ce, scope }) => {
+        // Guard against a malformed `D` with no operand. This can arise when
+        // upstream parsing drops the argument (e.g. `D\left[1\right]` from a
+        // Desmos list-index expression collapses to `["D"]`). Without an
+        // expression to differentiate there is nothing to canonicalize;
+        // return null so the caller produces a non-canonical fallback rather
+        // than throwing a `Cannot read properties of undefined` error on
+        // `ops[0].canonical` below.
+        if (!ops[0]) return null;
+
         // If the first argument is a function symbol (e.g., f where f(x):=2x),
         // apply it to the differentiation variables to produce a function call.
         // e.g., ['D', 'f', 'x'] → ['D', ['f', 'x'], 'x']
@@ -226,6 +235,10 @@ volumes
         return ce._fn('D', [f, ...ops!.slice(1)], { scope });
       },
       evaluate: (ops, { engine: _engine }) => {
+        // Guard against a malformed `D` with no operand (see the canonical
+        // handler above): there is nothing to differentiate, so leave it
+        // unevaluated rather than crashing on `ops[0].canonical`.
+        if (!ops[0]) return undefined;
         let f: Expression | undefined = ops[0].canonical;
 
         // Unwrap Function literals to get the body for differentiation.

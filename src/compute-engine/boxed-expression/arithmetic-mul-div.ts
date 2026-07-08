@@ -7,6 +7,7 @@ import type {
 } from '../global-types';
 import { isTensor } from './boxed-tensor';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
+import { isNumericTuple, hasAccessibleComponents } from '../collection-utils';
 import { NumericValue } from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import type { Rational } from '../numerics/types';
@@ -653,6 +654,26 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
   if (op1.isNaN || op2.isNaN) return ce.NaN;
 
+  // Numeric tuples (points/vectors in ℝⁿ): `tuple / scalar` scales
+  // component-wise; `scalar / tuple` and `tuple / tuple` are undefined.
+  {
+    const op1Tuple = isNumericTuple(op1);
+    const op2Tuple = isNumericTuple(op2);
+    if (op1Tuple || op2Tuple) {
+      // A tuple divisor has no defined reciprocal (no implicit dot/cross).
+      if (op2Tuple) return ce.error(['incompatible-type', 'number', 'tuple']);
+      // `tuple / scalar`: scale each component when the divisor is provably a
+      // scalar number and the components are accessible; else stay symbolic.
+      if (
+        hasAccessibleComponents(op1) &&
+        isFunction(op1) &&
+        isSubtype(op2.type.type, 'number')
+      )
+        return ce.tuple(...op1.ops.map((c) => canonicalDivide(c, op2)));
+      return ce._fn('Divide', [op1, op2]);
+    }
+  }
+
   // A fully-determined expression (no free variables) that is not already a
   // literal. Such expressions may evaluate to 0 or ∞ (e.g. 1-1, tan(π/2))
   // and we want to avoid collapsing divisions like 0/(1-1) or
@@ -1010,6 +1031,12 @@ export function canonicalMultiply(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression {
+  // Two or more numeric tuples (points/vectors) have no implicit product
+  // (dot/cross); reject `tuple · tuple` at canonicalization when provable.
+  // `scalar · tuple` is allowed and scales component-wise at evaluation.
+  if (ops.filter((x) => isNumericTuple(x)).length >= 2)
+    return ce.error(['incompatible-type', 'number', 'tuple']);
+
   //
   // Remove negations and negative numbers
   //
@@ -1317,6 +1344,9 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
   // semantics rather than the scalar Product machinery.
   if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs);
 
+  // Numeric tuples (points/vectors): scalar · tuple scales component-wise.
+  if (xs.some((x) => isNumericTuple(x))) return mulTuples(ce, xs, false);
+
   const exp = expandProducts(ce, xs);
   if (exp) {
     if (exp.operator !== 'Multiply') return exp;
@@ -1330,6 +1360,7 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   const ce = xs[0].engine;
   if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs, true);
+  if (xs.some((x) => isNumericTuple(x))) return mulTuples(ce, xs, true);
   xs = xs.map((x) => x.N());
   const exp = expandProducts(ce, xs);
   if (exp) {
@@ -1338,6 +1369,42 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   }
 
   return new Product(ce, xs).asExpression({ numericApproximation: true });
+}
+
+/**
+ * Multiply operands when at least one is a numeric tuple (point/vector in ℝⁿ).
+ *
+ * - **scalar · tuple**: scale every component by the product of the scalar
+ *   factors (`2 · (1,2)` → `(2,4)`), staying exact through the scalar `mul`.
+ * - **two or more tuples**: no implicit product (dot/cross) — return an
+ *   `incompatible-type` error (T2 also rejects this at canonicalization).
+ * - A symbolic tuple (no accessible components) stays a symbolic `Multiply`.
+ */
+function mulTuples(
+  ce: ComputeEngine,
+  xs: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): Expression {
+  const tuples = xs.filter((x) => isNumericTuple(x));
+  const scalars = xs.filter((x) => !isNumericTuple(x));
+
+  if (tuples.length >= 2)
+    return ce.error(['incompatible-type', 'number', 'tuple']);
+
+  const tuple = tuples[0];
+
+  // No accessible components (symbolic tuple, e.g. `2·z`): stay symbolic.
+  if (!hasAccessibleComponents(tuple) || !isFunction(tuple))
+    return ce._fn('Multiply', sortProductOperands([...xs]));
+
+  // Combine the scalar factors (commutative). `scalars` is non-empty because
+  // `mul`/`mulN` short-circuit single-operand calls before reaching here.
+  const scalar = numericApproximation ? mulN(...scalars) : mul(...scalars);
+
+  const components = tuple.ops.map((c) =>
+    numericApproximation ? mulN(scalar, c) : mul(scalar, c)
+  );
+  return ce.tuple(...components);
 }
 
 /**

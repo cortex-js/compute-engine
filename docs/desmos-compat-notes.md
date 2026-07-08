@@ -52,3 +52,57 @@ tests live in `test/compute-engine/a6-polish.test.ts` under
   `\operatorname{hsv}(1,1,1)x`) still produces `["Tuple", ["Hsv", …], "x"]`
   because `color` is not a recognized multiplicand type. Whether color × scalar
   should be multiplication is a separate semantic question, not addressed here.
+
+---
+
+# Desmos Compatibility Notes — Dot-Number Lexing
+
+Investigated: 2026-07-07. Reporter: GP team, Desmos-corpus parse audit
+(311 failing probes in a 585-graph corpus: 183 leading-dot, 128 trailing-dot).
+
+## Behavior
+
+Desmos accepts numbers written with a bare leading or trailing decimal dot.
+CE now lexes both:
+
+- **Trailing-dot numbers** — `1.` is the number `1`. Works wherever a number
+  literal appears, including before a delimiter or operator:
+  `x>1.`, `z^{1.}`, `\{1.65>x>1.\}`, `\frac{[1,-1,-1,1]1.}{t+1}`.
+- **Leading-dot numbers** — `.85` is `0.85`, at any position a number literal
+  can start: `.85`, `.5+.5`, `[.1,.2]`. (Leading-dot already worked before this
+  change; it is documented here for completeness.)
+
+Serialization is unchanged: a trailing/leading-dot number round-trips as a
+normal number (`ce.parse('x>1.').latex` → `1\lt x`, never `1.`).
+
+## Disambiguation rule (the `.` is also member access)
+
+The dot is overloaded: it is both the decimal marker and the member-access
+operator (`z.x` → `First(z)`, `1.\operatorname{count}` → `Length(1)`). The
+lexer resolves the ambiguity by the token that *follows* the dot, in
+`parseNumber` (`src/compute-engine/latex-syntax/parse-number.ts`): when a whole
+part is followed by `.` with an empty fractional part,
+
+- **dot followed by a letter, `\operatorname`, or a member command
+  (`\max`/`\min`)** → member access: backtrack, leave the `.` for the postfix
+  operator (`1.x` → `First(1)`, unchanged).
+- **dot followed by another `.`** → leave it (`1..2` errors, unchanged).
+- **dot followed by anything else** (a delimiter, an operator, end of input) →
+  trailing-dot number: consume the `.`, keep the whole part.
+
+`1.4` is unaffected (non-empty fractional part → one number). `1.2.3` and
+`..5` still produce errors, not misparses. Regression tests:
+`test/compute-engine/latex-syntax/numbers.test.ts` →
+`describe('Desmos dot-number lexing')`, plus the member-access side in
+`test/compute-engine/parser-component-access.test.ts`.
+
+## Out of scope: leading-dot as implicit multiplication after an expression
+
+`t^{i}.4` (Desmos: `t^i · 0.4`) does **not** yet parse as implicit
+multiplication. After a complete expression, the `.` is peeked by the
+member-access postfix operator, which pre-empts the InvisibleOperator
+(implicit-multiplication) path in `parseExpression` before a leading-dot number
+can be tried. Making it work requires special-casing that gate (allow
+InvisibleOperator when the only operator ahead is a `.` immediately followed by
+a digit), which was judged too risky for this change. It remains handled at the
+importer boundary (see `tycho/requirements/todo/DESMOS_IMPORTER.md`).

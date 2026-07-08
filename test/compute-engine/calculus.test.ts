@@ -1606,3 +1606,28 @@ describe('DOUBLY-INFINITE SUMS', () => {
     expect(r.re).toBeCloseTo(1, 10);
   });
 });
+
+// Regression: a `D` node with no operand (produced e.g. when upstream LaTeX
+// parsing drops an argument, as in Desmos `D\left[1\right]` list indexing)
+// must not throw `Cannot read properties of undefined (reading 'canonical')`
+// out of the canonical/evaluate handlers (which box.ts catches and logs to
+// stderr, masking the failure).
+describe('D with no operand does not crash', () => {
+  let errorSpy: jest.SpyInstance;
+  beforeAll(() => {
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterAll(() => errorSpy.mockRestore());
+
+  test('canonicalizing D() does not log an internal error', () => {
+    const canon = engine.box(['D']);
+    expect(canon.json).toEqual(['D']);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  test('evaluating D() does not log an internal error', () => {
+    const result = engine.box(['D'], { canonical: false }).evaluate();
+    expect(result.json).toEqual(['D']);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+});

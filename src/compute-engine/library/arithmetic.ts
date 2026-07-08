@@ -135,6 +135,7 @@ import {
   isString,
 } from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
+import { isNumericTuple } from '../collection-utils';
 import { signFromAssumedPart } from './complex';
 
 // When processing an arithmetic expression, the following are the core
@@ -1285,6 +1286,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops) => {
         if (ops.length === 0) return 'finite_integer'; // = 1
         if (ops.length === 1) return ops[0].type;
+        // A numeric tuple (point/vector) scaled by scalars keeps the tuple
+        // type. Hoisted above the NaN/finiteness early-returns (a tuple's
+        // `isFinite` is `false`, which would otherwise collapse to `number`).
+        const tupleOps = ops.filter((x) => isNumericTuple(x));
+        if (tupleOps.length === 1) return tupleOps[0].type;
         if (ops.some((x) => x.isNaN)) return 'number';
         if (ops.some((x) => x.isFinite === false)) {
           // 0 · ±∞ = NaN (indeterminate).

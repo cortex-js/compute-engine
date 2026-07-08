@@ -1004,6 +1004,30 @@ describe('Color constructor heads', () => {
     expect(expr.ops![1].re).toBe(-0.5);
     expect(expr.ops![2].re).toBe(5);
   });
+
+  test('Hsv broadcasts over a List argument', () => {
+    const expr = ce.parse('\\operatorname{hsv}(0,1,[0,1])').evaluate();
+    expect(expr.operator).toBe('List');
+    expect(expr.ops!.length).toBe(2);
+    expect(expr.ops![0].operator).toBe('Hsv');
+    expect(expr.ops![0].toString()).toBe('Hsv(0, 1, 0)');
+    expect(expr.ops![1].operator).toBe('Hsv');
+    expect(expr.ops![1].toString()).toBe('Hsv(0, 1, 1)');
+  });
+
+  test('Rgb broadcasts over a List argument', () => {
+    const expr = ce.expr(['Rgb', ['List', 0, 1], 0, 0]).evaluate();
+    expect(expr.operator).toBe('List');
+    expect(expr.ops!.length).toBe(2);
+    expect(expr.ops![0].operator).toBe('Rgb');
+    expect(expr.ops![1].operator).toBe('Rgb');
+  });
+
+  test('Hsv with scalar arguments is unchanged', () => {
+    const expr = ce.parse('\\operatorname{hsv}(0,1,1)').evaluate();
+    expect(expr.operator).toBe('Hsv');
+    expect(expr.toString()).toBe('Hsv(0, 1, 1)');
+  });
 });
 
 describe('Color conversions (As*)', () => {

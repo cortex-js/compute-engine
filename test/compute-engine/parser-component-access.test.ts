@@ -117,6 +117,50 @@ describe('Parser: component access', () => {
     });
   });
 
+  describe('member access on a tuple-typed symbol (no value)', () => {
+    // Use a fresh engine so the tuple declaration does not leak into the
+    // shared one (where `z` is already declared `complex`).
+    const tupleEngine = () => {
+      const e = new ComputeEngine();
+      e.declare('z', 'tuple<number, number>');
+      return e;
+    };
+
+    test('z.x stays symbolic First(z), valid, typed number', () => {
+      const e = tupleEngine();
+      const result = e.parse('z.x').evaluate();
+      expect(result.operator).toBe('First');
+      expect(result.op1.symbol).toBe('z');
+      expect(result.isValid).toBe(true);
+      expect(result.type.toString()).toBe('number');
+    });
+
+    test('z.y stays symbolic Second(z), valid, typed number', () => {
+      const e = tupleEngine();
+      const result = e.parse('z.y').evaluate();
+      expect(result.operator).toBe('Second');
+      expect(result.op1.symbol).toBe('z');
+      expect(result.isValid).toBe(true);
+      expect(result.type.toString()).toBe('number');
+    });
+
+    test('literal (10,20).x still evaluates to 10', () => {
+      const e = tupleEngine();
+      expect(e.parse('(10,20).x').evaluate().valueOf()).toBe(10);
+    });
+
+    test('1.x still evaluates to an Error (provably not a collection)', () => {
+      const e = tupleEngine();
+      expect(e.parse('1.x').evaluate().operator).toBe('Error');
+    });
+
+    test('(z.x, z.y) builds a tuple<number, number>', () => {
+      const e = tupleEngine();
+      const pair = e.function('Tuple', [e.parse('z.x'), e.parse('z.y')]);
+      expect(pair.type.toString()).toBe('tuple<number, number>');
+    });
+  });
+
   describe('dictionary key access via dot-notation', () => {
     // A symbol declared as a `dictionary` gets `.member` key access; the key
     // is an alphabetic, space-free run. Use a fresh engine so the dictionary

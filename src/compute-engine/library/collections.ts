@@ -53,6 +53,38 @@ export const DEFAULT_LINSPACE_COUNT = 50;
 // delegate the literal (non-comprehension) cases.
 const SET_BASE_HANDLERS = basicIndexedCollectionHandlers();
 
+// Element type of `xs` at 1-based `position` (`-1` = last), used by the
+// `First`/`Second`/`Third`/`Last` type handlers. Prefers the operand's
+// collection element-type handler (covers literal collections); for a
+// symbolic operand with a statically-known tuple type, derives the type of
+// the element at `position`; otherwise falls back to the (widened) collection
+// element type.
+function componentType(xs: Expression, position: number): Type {
+  const elt = xs.operatorDefinition?.collection?.elttype?.(xs);
+  if (elt) return elt;
+  const t = xs.type.type;
+  if (typeof t !== 'string' && t.kind === 'tuple' && position >= 1) {
+    const e = t.elements[position - 1]?.type;
+    if (e) return e;
+  }
+  return collectionElementType(t) ?? 'any';
+}
+
+// Access the element of `xs` at 1-based `position` (`-1` = last), used by the
+// `First`/`Second`/`Third`/`Last` evaluate handlers. A literal indexed
+// collection returns the element; a symbolic operand whose type is (or could
+// be) an indexed collection stays symbolic (return `undefined`); an operand
+// provably not an indexed collection is a type error.
+function componentAt(
+  xs: Expression,
+  position: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (xs.isCollection) return xs.at(position) ?? ce.Nothing;
+  if (xs.type.matches('indexed_collection')) return undefined;
+  return ce.error(['incompatible-type', `'collection'`, xs.type.toString()]);
+}
+
 // @todo: future thoughts. Consider
 // - operations from the Scala library, which is particularly well designed:
 //    - https://scala-lang.org/api/3.3.1/scala/language$.html#
@@ -1374,53 +1406,29 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   First: {
     complexity: 8200,
     signature: '(any) -> any',
-    type: ([xs]) => xs.operatorDefinition?.collection?.elttype?.(xs) ?? 'any',
-    evaluate: ([xs], { engine: ce }) => {
-      if (!xs.isCollection)
-        return ce.error([
-          'incompatible-type',
-          `'collection'`,
-          xs.type.toString(),
-        ]);
-      return xs.at(1) ?? ce.Nothing;
-    },
+    type: ([xs]) => componentType(xs, 1),
+    evaluate: ([xs], { engine: ce }) => componentAt(xs, 1, ce),
   },
 
   Second: {
     complexity: 8200,
     signature: '(any) -> any',
-    type: ([xs]) => xs.operatorDefinition?.collection?.elttype?.(xs) ?? 'any',
-    evaluate: ([xs], { engine: ce }) => {
-      if (!xs.isCollection)
-        return ce.error([
-          'incompatible-type',
-          `'collection'`,
-          xs.type.toString(),
-        ]);
-      return xs.at(2) ?? ce.Nothing;
-    },
+    type: ([xs]) => componentType(xs, 2),
+    evaluate: ([xs], { engine: ce }) => componentAt(xs, 2, ce),
   },
 
   Third: {
     complexity: 8200,
     signature: '(any) -> any',
-    type: ([xs]) => xs.operatorDefinition?.collection?.elttype?.(xs) ?? 'any',
-    evaluate: ([xs], { engine: ce }) => {
-      if (!xs.isCollection)
-        return ce.error([
-          'incompatible-type',
-          `'collection'`,
-          xs.type.toString(),
-        ]);
-      return xs.at(3) ?? ce.Nothing;
-    },
+    type: ([xs]) => componentType(xs, 3),
+    evaluate: ([xs], { engine: ce }) => componentAt(xs, 3, ce),
   },
 
   Last: {
     complexity: 8200,
     signature: '(collection) -> any',
-    type: ([xs]) => xs.operatorDefinition?.collection?.elttype?.(xs) ?? 'any',
-    evaluate: ([xs], { engine: ce }) => xs.at(-1) ?? ce.Nothing,
+    type: ([xs]) => componentType(xs, -1),
+    evaluate: ([xs], { engine: ce }) => componentAt(xs, -1, ce),
   },
 
   Rest: {

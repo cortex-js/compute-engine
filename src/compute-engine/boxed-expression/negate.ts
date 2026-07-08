@@ -4,6 +4,7 @@ import type {
 } from '../global-types';
 import { isNumber, isFunction } from './type-guards';
 import { addOrder, sortProductOperands } from './order';
+import { isNumericTuple, hasAccessibleComponents } from '../collection-utils';
 
 export function canonicalNegate(expr: Expression): Expression {
   // Negate(Negate(x)) -> x
@@ -15,6 +16,10 @@ export function canonicalNegate(expr: Expression): Expression {
   if (sign === 1) return expr;
 
   if (isNumber(expr)) return expr.neg();
+
+  // A numeric tuple (point/vector) negates component-wise.
+  if (isNumericTuple(expr) && hasAccessibleComponents(expr) && isFunction(expr))
+    return expr.engine.tuple(...expr.ops.map((op) => op.neg()));
 
   return expr.engine._fn('Negate', [expr]);
 }
@@ -38,6 +43,10 @@ export function negate(expr: Expression): Expression {
   if (isNumber(expr)) return expr.neg();
 
   const ce = expr.engine;
+
+  // A numeric tuple (point/vector) negates component-wise.
+  if (isNumericTuple(expr) && hasAccessibleComponents(expr) && isFunction(expr))
+    return ce.tuple(...expr.ops.map((op) => op.neg()));
 
   if (isFunction(expr)) {
     // Negate(Subtract(a, b)) -> Subtract(b, a)

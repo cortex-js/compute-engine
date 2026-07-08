@@ -25,7 +25,11 @@ import type {
   FunctionInterface,
 } from '../global-types';
 
-import { isFiniteIndexedCollection, zip } from '../collection-utils';
+import {
+  isFiniteIndexedCollection,
+  isNumericTuple,
+  zip,
+} from '../collection-utils';
 import { isTensor } from './boxed-tensor';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition';
 import { isNumber, isFunction, isString, isSymbol } from './type-guards';
@@ -1279,12 +1283,10 @@ export class BoxedFunction
       // element-wise handling in addTensors/mulTensors
       //
       const hasTensors = this.ops!.some((x) => isTensor(x));
-      const skipBroadcastForTensors =
-        hasTensors && (this.operator === 'Add' || this.operator === 'Multiply');
       if (
         def.broadcastable &&
         this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
-        !skipBroadcastForTensors
+        !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
       ) {
         const items = zip(this._ops);
         if (!items) return this.engine.Nothing;
@@ -1353,6 +1355,7 @@ export class BoxedFunction
         def.broadcastable &&
         this.operator !== 'Add' &&
         this.operator !== 'Multiply' &&
+        !skipBroadcastForVectorOps(this.operator, false, tail) &&
         tail.some((x) => isFiniteIndexedCollection(x))
       ) {
         const items = zip(tail);
@@ -1427,12 +1430,10 @@ export class BoxedFunction
       // element-wise handling
       //
       const hasTensors = this.ops!.some((x) => isTensor(x));
-      const skipBroadcastForTensors =
-        hasTensors && (this.operator === 'Add' || this.operator === 'Multiply');
       if (
         def?.broadcastable &&
         this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
-        !skipBroadcastForTensors
+        !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
       ) {
         const items = zip(this._ops);
         if (!items) return this.engine.Nothing;
@@ -1499,6 +1500,7 @@ export class BoxedFunction
         def.broadcastable &&
         this.operator !== 'Add' &&
         this.operator !== 'Multiply' &&
+        !skipBroadcastForVectorOps(this.operator, false, tail) &&
         tail.some((x) => isFiniteIndexedCollection(x))
       ) {
         const items = zip(tail);
@@ -1555,6 +1557,32 @@ export class BoxedFunction
       });
     };
   }
+}
+
+/**
+ * Vector-space operators over numeric tuples (points/vectors in ℝⁿ) must not
+ * be broadcast into a List: they have dedicated component-wise handling in
+ * `add`/`mul`/`negate`/`canonicalDivide`. This mirrors the tensor carve-out
+ * (which stays limited to Add/Multiply). See
+ * `docs/plans/2026-07-07-tuple-point-semantics.md`.
+ */
+function skipBroadcastForVectorOps(
+  operator: string,
+  hasTensors: boolean,
+  ops: ReadonlyArray<Expression>
+): boolean {
+  if (hasTensors && (operator === 'Add' || operator === 'Multiply'))
+    return true;
+  if (
+    (operator === 'Add' ||
+      operator === 'Multiply' ||
+      operator === 'Negate' ||
+      operator === 'Subtract' ||
+      operator === 'Divide') &&
+    ops.some((x) => isNumericTuple(x))
+  )
+    return true;
+  return false;
 }
 
 /** Solve a system of equations or inequalities given as an array of
