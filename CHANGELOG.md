@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **#318** Type declarations now resolve correctly in projects using
+  `"module": "nodenext"`/`"node16"`. The published `.d.ts` files used
+  extensionless relative imports, which produced `TS2834` errors (or collapsed
+  every imported type to `any` with `skipLibCheck`). The build now rewrites the
+  emitted declarations with explicit `.js` extensions and validates them
+  against a `nodenext` consumer as part of every release build.
+
 ## 0.69.0 _2026-07-08_
 
 ### Breaking Changes
@@ -8889,9 +8900,7 @@ Read more at
 - Only require Node LTS (16.14.2)
 - Improved documentation, including Dark Mode support
 
-## 0.4.4
-
-**Release Date**: 2022-03-27
+## 0.4.4 _2022-03-27_
 
 ### Improvements
 
@@ -8903,9 +8912,7 @@ Read more at
   environments. The ESM build (`compute-engine.min.esm.js`) targets evergreen
   JavaScript (currently ECMAScript 2020).
 
-## 0.4.3
-
-**Release Date**: 2022-03-21
+## 0.4.3 _2022-03-21_
 
 ### Transition Guide from 0.4.2
 
@@ -9043,9 +9050,7 @@ console.log(expr.isEqual(ce.box(2)));
 | `ce.domain(expr)`                         | `expr.domain`                            |
 | `ce.format(expr...)`                      | `expr.canonical` <br/> `expr.simplify()` |
 
-## 0.3.0
-
-**Release Date**: 2021-06-18
+## 0.3.0 _2021-06-18_
 
 ### Improvements
 

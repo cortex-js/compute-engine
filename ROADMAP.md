@@ -647,6 +647,37 @@ evaluated tensors, `MatrixPower` negative branch, matrix juxtaposition). Detaile
 findings — the three failed approaches and why — are in
 `docs/plans/2026-06-28-tensor-value-representation-design.md`.
 
+#### 10. TypeScript 7 migration + nodenext-native source imports
+
+**What:** move the toolchain from TS 6.0.3 to TS 7 (the native Go port —
+8–12× faster builds/checks; keeps `bundler` and `nodenext` resolution, drops
+`node10`/`baseUrl`/legacy `module` modes), and in the same effort codemod the
+~1,557 extensionless relative imports across `src/` to explicit `.js`
+specifiers (`/index.js` for the 5 directory-index targets), so `tsc` emits
+nodenext-compatible declarations natively.
+
+**Why together:** the codemod has two hard prerequisites discovered
+empirically (issue #318 investigation, 2026-07-08): jest resolution breaks
+without a `moduleNameMapper` (`^(\\.{1,2}/.*)\\.js$` → `$1`) in
+`config/jest.config.cjs`, and ESLint's `import/no-unresolved` errors on every
+import while `import/no-cycle` **silently stops following edges** — defeating
+the zero-cycle budget — unless `eslint-import-resolver-typescript` is
+installed and configured. Bundling both config changes with the migration
+keeps them out of an urgent bugfix and lands the 264-file diff in one
+deliberate PR. The codemod must be resolution-driven (TS API/ts-morph, not
+sed) and also cover the ~9 inline `import('…')` type refs and relative
+`declare module` sites, which are not `ImportDeclaration` nodes. madge, tsx,
+esbuild, and typedoc are verified safe with `.js`-style specifiers.
+
+**Interim state:** the published declarations are already nodenext-correct —
+`scripts/fix-dts-extensions.mjs` rewrites `dist/types` after emit, gated by
+the `test/consumer/nodenext-smoke.mjs` consumer test in the production build
+(issue #318). Once the codemod lands, the post-processor becomes a no-op and
+can be retired; the smoke test stays.
+
+**Effort:** the TS 7 bump itself is small (TS 6 already adopted the new
+defaults); the codemod is mechanical but wide. One focused session.
+
 ### Correctness & symbolic findings (2026-07) — residue
 
 The July 2026 correctness and symbolic reviews are fully dispositioned: every

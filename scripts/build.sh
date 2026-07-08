@@ -131,6 +131,12 @@ if [[ "$TARGETS" == *integration-rules* ]]; then
 fi
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building TypeScript declaration files$RESET"
 
+# Rewrite extensionless relative specifiers in the emitted declarations so
+# consumers using `moduleResolution: nodenext` resolve them (issue #318).
+# Runs for every build since dist/types is emitted unconditionally, and fails
+# loud if a specifier cannot be resolved.
+node ./scripts/fix-dts-extensions.mjs
+
 #
 # Do build (development or production)
 #
@@ -156,6 +162,13 @@ if [ "$BUILD" = "production" ]; then
 
     # Build the docs (non-fatal - continue even if it fails)
     bash ./scripts/doc.sh || true
+
+    # Verify the published declarations resolve under `moduleResolution:
+    # nodenext` (issue #318). Runs last, after version stamping edits the
+    # .d.ts files, so publishing broken types is impossible.
+    printf "$BASENAME$DOT Verifying nodenext consumer resolution"
+    node ./test/consumer/nodenext-smoke.mjs
+    echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying nodenext consumer resolution$RESET"
 
 
     # Run test suite
