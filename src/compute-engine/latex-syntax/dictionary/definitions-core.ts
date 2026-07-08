@@ -43,6 +43,7 @@ const COMPONENT_ACCESS_HEADS: Record<string, string> = {
   imag: 'Imaginary',
   im: 'Imaginary',
   count: 'Length',
+  length: 'Length',
   total: 'Sum',
   max: 'Max',
   min: 'Min',

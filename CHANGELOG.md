@@ -110,6 +110,17 @@
   `number | vector<2>` union. Code that inspects `.type` before evaluating
   no longer needs to special-case list-broadcast expressions.
 
+- **`When` broadcasts over a list-valued condition.** A domain restriction
+  whose condition is a finite list of booleans now masks element by element —
+  the Desmos restriction semantics. `x^2\{[1,2,3] > 0\}` evaluates to
+  `[x^2, x^2, x^2]`, and with `x = 2`, `x\{x \le [1,2,3]\}` evaluates to
+  `[Undefined, 2, 2]` (one masked branch per element: the value where the
+  element condition is `True`, `Undefined` where `False`, a held `When` where
+  the element is still symbolic). When the restricted expression is itself a
+  list, the two are zipped elementwise, truncating to the shorter. Scalar
+  restrictions (`x^2\{x > 0\}`) are unchanged, and the result type is lifted to
+  `list<…>` only when the condition's type is a list of booleans.
+
 ### Parsing and Serialization
 
 - **Fixed: bracket indexing after a symbol with `\left[` delimiters.**
@@ -122,6 +133,15 @@
   `.85x` parses as `0.85 x`, and a trailing-dot literal inside delimiters
   (`(1., 2)`) is accepted.
 
+- **Scaling a list/vector by juxtaposition is a `Multiply`, not a `Tuple`.**
+  A scalar written next to a list- or vector-typed operand — including a
+  scaled fraction whose numerator is a list or range, as in Desmos'
+  `2\frac{[0,...,8]}{8}` — now canonicalizes to `Multiply` (element-wise
+  scaling). Previously such juxtapositions produced a spurious `Tuple`, which
+  raised an `incompatible-type` error when the result was used in further
+  arithmetic. Genuine tuples (`2(3, 4)`) and plain list literals (`[1,2,3]`)
+  are unaffected.
+
 - **Restriction braces attach across visual space.** A `\{...\}`
   domain-restriction suffix now attaches to its base expression even when
   separated by spacing commands: `s(t) = (1-t)^2(1+2t)\ \{t\ge0\}\{t\le1\}`
@@ -133,12 +153,14 @@
   parses to `["Polygon", ...]`, an opaque geometric primitive like `Triangle`
   and `Segment`, for consumers that render it.
 
-- **`histogram`, `pdf`, `cdf`, and `length` parse to `Histogram`, `PDF`,
-  `CDF`, and `Length`.** The lowercase `\operatorname{...}` forms used by
-  Desmos are now aliases of the existing operators. `Histogram` and `BinCounts` accept any
-  number as their bin specification (a non-integer bin count is left
-  unevaluated; translate a Desmos bin *width* to explicit bin edges at the
-  import boundary).
+- **`histogram`, `pdf`, `cdf`, `length`, and `nCr` parse to `Histogram`,
+  `PDF`, `CDF`, `Length`, and `Choose`.** The lowercase `\operatorname{...}`
+  forms used by Desmos are now aliases of the existing operators. The member
+  form `.length` (`S.\operatorname{length}`) also maps to `Length`, joining
+  `.count`, `.max`, `.min`, `.total`, and the `.x`/`.y`/`.z` component
+  accessors. `Histogram` and `BinCounts` accept any number as their bin
+  specification (a non-integer bin count is left unevaluated; translate a
+  Desmos bin *width* to explicit bin edges at the import boundary).
 
 - **New `digits` serialization option for significant-figures and
   decimal-place display control.** Available on `expr.toLatex()`,

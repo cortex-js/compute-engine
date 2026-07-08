@@ -699,6 +699,10 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   // ---------------------------------------------------------------------------
   { latexTrigger: '\\operatorname{count}', parse: 'Length' },
   { latexTrigger: '\\operatorname{length}', parse: 'Length' },
+  // `nCr(n, r)` = binomial coefficient. (No `nPr` alias: CE's `Permutations`
+  // enumerates arrangements of a collection; there is no n!/(n−r)! counting
+  // operator to map it to.)
+  { latexTrigger: '\\operatorname{nCr}', parse: 'Choose' },
   { latexTrigger: '\\operatorname{random}', parse: 'Random' },
   { latexTrigger: '\\operatorname{shuffle}', parse: 'Shuffle' },
   { latexTrigger: '\\operatorname{repeat}', parse: 'Repeat' },

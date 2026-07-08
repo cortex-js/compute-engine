@@ -9,6 +9,7 @@ import { BoxedType } from '../../common/type/boxed-type';
 
 const MATRIX_TYPE = new BoxedType('matrix');
 const FUNCTION_TYPE = new BoxedType('function');
+const LIST_TYPE = new BoxedType('list');
 
 export function canonicalInvisibleOperator(
   ops: ReadonlyArray<Expression>,
@@ -263,6 +264,14 @@ export function canonicalInvisibleOperator(
           // juxtaposition is multiplication, not a silent `Tuple`.
           x.type.matches(MATRIX_TYPE) ||
           x.type.matches(FUNCTION_TYPE) ||
+          // List/vector-typed operands (e.g. `2v` with `v: vector<3>`, or a
+          // still-unevaluated `2\frac{[1,2,3]}{8}` whose scaled numerator has
+          // type `vector<3>`/`list<number>`) are value-like: juxtaposition is
+          // scaling, not a silent `Tuple`. The runtime `isIndexedCollection`
+          // test below only catches operands that are already concrete
+          // collections (raw `List`), so match the value type here as well.
+          // `list` deliberately excludes heterogeneous `tuple` and `set`.
+          x.type.matches(LIST_TYPE) ||
           isFunction(x, 'Matrix') ||
           (x.isIndexedCollection && !isString(x)))
     )

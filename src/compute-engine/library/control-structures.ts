@@ -2,6 +2,7 @@ import { evaluateStatements } from '../function-utils';
 import { checkConditions } from '../boxed-expression/rules';
 import { widen } from '../../common/type/utils';
 import { parseType } from '../../common/type/parse';
+import { typeToString } from '../../common/type/serialize';
 import { CancellationError, run, runAsync } from '../../common/interruptible';
 import type {
   Expression,
@@ -168,7 +169,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.',
       lazy: true,
       signature: '(expression, boolean) -> any',
-      type: ([expr]) => expr.type,
+      type: ([expr, cond]) => {
+        // A list/vector-of-booleans condition broadcasts: the result is a
+        // list whose element type is `expr`'s type (see the broadcast branch
+        // in `evaluate`). Lazy operators bypass the generic list-broadcast
+        // typing wrapper, so lift the type here explicitly — but only when the
+        // condition's *declared* type is a list/vector of booleans. A scalar
+        // or unknown boolean condition keeps `expr`'s type.
+        if (cond?.type.matches(parseType('list<boolean>')))
+          return `list<${typeToString(expr.type.type)}>`;
+        return expr.type;
+      },
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return null;
         const [expr, cond] = args;
@@ -186,6 +197,40 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([expr, cond], { engine: ce }) => {
         const c = cond.evaluate();
+
+        // Desmos-style broadcast: a finite indexed collection of booleans
+        // masks element-by-element (one masked branch per element). This
+        // mirrors the boolean-mask branch of `At` in `collections.ts`. Lazy
+        // operators bypass the generic broadcast machinery, so handle it here.
+        if (c.isCollection && c.isFiniteCollection) {
+          const conds = Array.from(c.each()) as Expression[];
+          if (
+            conds.length > 0 &&
+            conds.every((ci) => ci.type.matches('boolean'))
+          ) {
+            // If `expr` itself evaluates to a finite indexed collection, zip
+            // elementwise (expr_i masked by c_i); otherwise mask the scalar
+            // `expr` by each c_i. Different lengths truncate to the shorter,
+            // matching `At`'s mask alignment.
+            const ev = expr.evaluate();
+            const zip = ev.isCollection && ev.isFiniteCollection;
+            const elems = zip ? (Array.from(ev.each()) as Expression[]) : [];
+            const n = zip ? Math.min(conds.length, elems.length) : conds.length;
+            const result: Expression[] = [];
+            for (let i = 0; i < n; i++) {
+              const ci = conds[i];
+              const cis = sym(ci);
+              // The per-element expression: the zipped element, or the scalar.
+              const elem = zip ? elems[i] : ev;
+              if (cis === 'True') result.push(elem);
+              else if (cis === 'False') result.push(ce.symbol('Undefined'));
+              // Indeterminate (symbolic boolean): hold `When` on the element.
+              else result.push(ce._fn('When', [zip ? elems[i] : expr, ci]));
+            }
+            return ce._fn('List', result);
+          }
+        }
+
         const cs = sym(c);
         if (cs === 'True') return expr.evaluate();
         if (cs === 'False') return ce.symbol('Undefined');

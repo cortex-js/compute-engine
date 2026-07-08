@@ -110,4 +110,50 @@ describe('Parser: list range ellipsis', () => {
       expect(raw).toEqual('ContinuationPlaceholder');
     });
   });
+
+  // A scalar juxtaposed with a list/vector-*typed* operand is scaling
+  // (`Multiply`), not a silent `Tuple`. This matters for a scaled `\frac`
+  // whose numerator is a list/range: `2\frac{[…]}{8}` — the scaled numerator
+  // has type `vector<N>`/`list<number>` but is not yet a concrete collection.
+  describe('scalar · list scaling (not Tuple)', () => {
+    test('`2\\frac{[0,...,8]}{8}` scales the range', () => {
+      expect(parse('2\\frac{\\left[0,...,8\\right]}{8}')).toEqual([
+        'Multiply',
+        2,
+        ['Rational', 1, 8],
+        ['Range', 0, 8],
+      ]);
+    });
+
+    test('`2\\frac{[1,2,3]}{8}` scales the list literal', () => {
+      expect(parse('2\\frac{\\left[1,2,3\\right]}{8}')).toEqual([
+        'Multiply',
+        2,
+        ['Rational', 1, 8],
+        ['List', 1, 2, 3],
+      ]);
+    });
+
+    test('scalar times a vector-typed symbol is a Multiply', () => {
+      const ce2 = new ComputeEngine();
+      ce2.declare('v', 'vector<3>');
+      expect(ce2.parse('2v').json).toEqual(['Multiply', 2, 'v']);
+    });
+
+    test('a genuine tuple is NOT turned into a Multiply', () => {
+      // `(3,4)` is a heterogeneous tuple; scaling keeps the tuple intact.
+      expect(parse('2\\left(3,4\\right)')).toEqual([
+        'Multiply',
+        2,
+        ['Tuple', 3, 4],
+      ]);
+    });
+
+    test('Desmos corpus row parses valid (P undeclared)', () => {
+      const expr = ce.parse(
+        '1>0\\ \\left\\{\\ P\\left(x,y\\right)\\le\\ 0.6\\cdot\\left(2\\frac{\\left[0,...,8\\right]}{8}-1\\right)\\right\\}'
+      );
+      expect(expr.isValid).toBe(true);
+    });
+  });
 });
