@@ -1,7 +1,7 @@
 import { MathJsonExpression } from '../math-json/types';
 import { Origin } from '../common/debug';
 
-import { FatalParsingError, ParsingDiagnostic } from './diagnostics';
+import { ParsingDiagnostic } from './diagnostics';
 import { Parser } from './parser';
 
 /** Analyze the reported errors and combine them when possible */
@@ -19,23 +19,29 @@ export function analyzeErrors(
  * diagnostics.
  *
  * The parser never throws (it accumulates diagnostics and recovers) with a
- * single exception: a `#error` pragma throws a `FatalParsingError`, caught
- * here.
+ * single exception: a `#error` pragma throws a `FatalParsingError`. It is
+ * propagated to the caller (`executeCortex` catches it and turns it into a
+ * diagnostic, so a notebook cell never throws to the host — plan §5).
+ *
+ * `options.allowHostPragmas` (default `false`) gates the host-state pragmas
+ * `#env`/`#navigator`: when off they emit a `host-pragma-disabled` diagnostic
+ * instead of reading the host environment.
  */
 export function parseCortex(
   source: string,
   url?: string,
-  options?: { parseLatex?: (latex: string) => MathJsonExpression }
-): [MathJsonExpression, ParsingDiagnostic[]] {
-  const parser = new Parser(source, { url, parseLatex: options?.parseLatex });
-
-  let value: MathJsonExpression | null;
-  try {
-    value = parser.parseProgram();
-  } catch (e) {
-    if (e instanceof FatalParsingError) return ['Nothing', []];
-    throw e;
+  options?: {
+    parseLatex?: (latex: string) => MathJsonExpression;
+    allowHostPragmas?: boolean;
   }
+): [MathJsonExpression, ParsingDiagnostic[]] {
+  const parser = new Parser(source, {
+    url,
+    parseLatex: options?.parseLatex,
+    allowHostPragmas: options?.allowHostPragmas,
+  });
+
+  const value: MathJsonExpression | null = parser.parseProgram();
 
   const diagnostics = analyzeErrors(parser.diagnostics);
   if (diagnostics.length === 0) return [value ?? 'Nothing', []];

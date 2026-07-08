@@ -118,6 +118,13 @@ export class Parser {
    * `latex-syntax`. */
   private readonly parseLatex?: (latex: string) => MathJsonExpression;
 
+  /** When false (the default), the host-state pragmas `#env`/`#navigator` do
+   * NOT read the host environment — they emit a `host-pragma-disabled`
+   * diagnostic instead (an embedded notebook must not leak host state into a
+   * document at parse time). The benign pragmas (`#line`/`#column`/`#url`/
+   * `#filename`/`#date`/`#time`) are always available. */
+  private readonly allowHostPragmas: boolean;
+
   private tokens: Token[];
   private pos = 0;
 
@@ -130,12 +137,14 @@ export class Parser {
       url?: string;
       offset?: number;
       parseLatex?: (latex: string) => MathJsonExpression;
+      allowHostPragmas?: boolean;
     }
   ) {
     this.source = source;
     this.url = options?.url;
     this.baseOffset = options?.offset ?? 0;
     this.parseLatex = options?.parseLatex;
+    this.allowHostPragmas = options?.allowHostPragmas ?? false;
     this.tokens = tokenize(source);
   }
 
@@ -287,29 +296,560 @@ export class Parser {
   //
 
   /**
-   * A statement is either a type annotation (`target: Type` /
-   * `target: Type = expr`) or an ordinary expression. Annotations are only
-   * recognized here (statement position), never inside the expression grammar,
-   * so type-syntax tokens (`<`, `>`, `->`, `|`, `&`) never enter it.
+   * A statement is (in priority order):
+   *   1. A keyword-led construct: `let`/`const` declaration, `function`
+   *      definition, `if`, `while`, or `for`. These keywords stay reserved in
+   *      *expression* position (a bare `if`/`while`/… value is a diagnostic);
+   *      they are only heads here, in statement position.
+   *   2. A math-style function definition `f(x) = expr` (typed params
+   *      supported).
+   *   3. A type annotation `target: Type` / `target: Type = expr`
+   *      (a declaration — see `tryParseAnnotation`).
+   *   4. An ordinary expression.
+   *
+   * Annotations and the keyword heads are only recognized here (statement
+   * position), never inside the expression grammar, so their tokens (`<`, `>`,
+   * `->`, `|`, `&`, and the keyword words) never enter it.
    */
   private parseStatement(): MathJsonExpression | null {
+    const t = this.current;
+    if (t.type === 'SYMBOL') {
+      switch (t.text) {
+        case 'let':
+          return this.parseDeclaration(false);
+        case 'const':
+          return this.parseDeclaration(true);
+        case 'function':
+          return this.parseFunctionDefinition();
+        case 'if':
+          return this.parseIf();
+        case 'while':
+          return this.parseWhile();
+        case 'for':
+          return this.parseFor();
+      }
+    }
+
+    if (this.isMathFunctionDef()) return this.parseMathFunctionDef();
+
     const annotation = this.tryParseAnnotation();
     if (annotation !== undefined) return annotation;
     return this.parseExpression(0);
   }
 
+  //
+  // ─── Statement blocks (keyword-introduced `{ … }`) ────────────────────────
+  //
+  // A block is a brace-delimited sequence of statements (separated by a
+  // linebreak or `;`), parsed only in keyword position (after
+  // `function`/`if`/`else`/`while`/`for`). It is distinct from the Phase 2
+  // `{…}` collection grammar (`Set`/`Dictionary`), which is a *primary*. The
+  // block's value is its last expression (`Do`/`Block` semantics). An empty
+  // block is `["Block"]`.
+  //
+
+  private parseBlock(): MathJsonExpression {
+    const open = this.advance(); // '{'
+    this.brackets.push(open);
+
+    const stmts: MathJsonExpression[] = [];
+    for (;;) {
+      if (this.check('CLOSE_BRACE') || this.check('EOF')) break;
+      const startPos = this.pos;
+      const diagBefore = this.diagnostics.length;
+      const stmt = this.parseStatement();
+      if (stmt === null) {
+        if (this.diagnostics.length === diagBefore)
+          this.reportUnexpected(this.current);
+        this.recoverInBracket();
+        break;
+      }
+      stmts.push(stmt);
+      // Separator: `;`, a linebreak, or the closing brace/EOF.
+      if (this.check('SEMICOLON')) {
+        this.advance();
+      } else if (
+        this.check('CLOSE_BRACE') ||
+        this.check('EOF') ||
+        this.current.precededByLinebreak
+      ) {
+        // A valid statement boundary.
+      } else {
+        this.error(
+          ['unexpected-symbol', this.current.text],
+          this.current.start,
+          this.current.end
+        );
+        this.recoverInBracket();
+        break;
+      }
+      if (this.pos === startPos) this.advance();
+    }
+
+    this.brackets.pop();
+
+    let end: number;
+    if (this.check('CLOSE_BRACE')) {
+      end = this.current.end;
+      this.advance();
+    } else {
+      this.error(['closing-bracket-expected', '}'], open.start, open.end);
+      end = this.current.start;
+      if (isCloseToken(this.current.type)) this.advance();
+    }
+
+    return this.wrap(['Block', ...stmts] as MathJsonExpression[], open.start, end);
+  }
+
+  //
+  // ─── Declarations (`let` / `const`) ───────────────────────────────────────
+  //
+  // `let name`, `let name: Type`, `let name = value`, `let name: Type = value`
+  // (and the same with `const`) lower to the enhanced engine `Declare`
+  // primitive (Phase 4). The uniform lowering is: *type positional when
+  // present; `value` (and `constant` for `const`) in a trailing attributes
+  // `Dictionary`.* A missing type/value is simply omitted:
+  //
+  //   let x            → ["Declare", "x"]
+  //   let x: real      → ["Declare", "x", {str:"real"}]
+  //   let x = 5        → ["Declare", "x", ["Dictionary", ["KeyValuePair", value, 5]]]
+  //   let x: real = 5  → ["Declare", "x", {str:"real"}, ["Dictionary", ["KeyValuePair", value, 5]]]
+  //   const c = 6.28   → ["Declare", "c", ["Dictionary",
+  //                         ["KeyValuePair", value, 6.28],
+  //                         ["KeyValuePair", constant, True]]]
+  //
+  // `constant` is a *binding attribute* (`constant: True` → `isConstant`), not
+  // a type; the engine enforces immutability (reassigning a `const` yields an
+  // error value). A bare annotation `name: Type = value` (no keyword) also
+  // declares — see `tryParseAnnotation` — emitting the same `Declare` shape
+  // (never `constant`).
+  //
+
+  private parseDeclaration(isConst: boolean): MathJsonExpression | null {
+    const kw = this.advance(); // 'let' | 'const'
+    const nameTok = this.current;
+    if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
+      this.error(['symbol-expected'], nameTok.start, nameTok.end);
+      return null;
+    }
+    this.advance();
+    this.harvest(nameTok);
+    const name =
+      nameTok.type === 'VERBATIM_SYMBOL' ? nameTok.value ?? '' : nameTok.text;
+    const nameNode = this.wrap({ sym: name }, nameTok.start, nameTok.end);
+    return this.finishDeclaration(isConst, kw.start, nameNode);
+  }
+
+  /** Parse the optional `: Type` and `= value` tail of a declaration and build
+   * the engine `Declare` node (type positional; `value`/`constant` in a
+   * trailing attributes `Dictionary`). On a malformed type, returns `null` (the
+   * type subparse has already recovered). The current token is the one right
+   * after the declared name (`:`, `=`, or a separator). */
+  private finishDeclaration(
+    isConst: boolean,
+    start: number,
+    nameNode: MathJsonExpression
+  ): MathJsonExpression | null {
+    let typeNode: MathJsonExpression | undefined;
+    let end = this.localEnd(nameNode) ?? this.previousEnd();
+
+    if (this.check('OPERATOR') && this.current.text === ':') {
+      const t = this.parseTypeAnnotation();
+      if (t === null) return null;
+      typeNode = t.node;
+      end = t.end;
+    }
+
+    let valueNode: MathJsonExpression | undefined;
+    if (this.check('OPERATOR') && this.current.text === '=') {
+      this.advance(); // '='
+      const init = this.parseExpression(0);
+      if (init === null) {
+        this.error(
+          ['expression-expected'],
+          this.current.start,
+          this.current.end
+        );
+      } else {
+        valueNode = init;
+        end = this.localEnd(init) ?? this.previousEnd();
+      }
+    }
+
+    // Assemble `["Declare", name, type?, attributes?]`. The type is positional
+    // when present; `value`/`constant` go in a trailing attributes Dictionary
+    // that is omitted entirely when it would be empty.
+    const parts: MathJsonExpression[] = ['Declare', nameNode];
+    if (typeNode !== undefined) parts.push(typeNode);
+
+    const entries: MathJsonExpression[] = [];
+    if (valueNode !== undefined)
+      entries.push(this.kvPair('value', valueNode, start, end));
+    if (isConst)
+      entries.push(
+        this.kvPair('constant', this.wrap({ sym: 'True' }, start, end), start, end)
+      );
+    if (entries.length > 0)
+      parts.push(
+        this.wrap(['Dictionary', ...entries] as MathJsonExpression[], start, end)
+      );
+
+    return this.wrap(parts, start, end);
+  }
+
+  /** Build a `["KeyValuePair", key, value]` attributes entry with a bare-symbol
+   * key (matching the engine's attributes-Dictionary accessor). */
+  private kvPair(
+    key: string,
+    value: MathJsonExpression,
+    start: number,
+    end: number
+  ): MathJsonExpression {
+    return this.wrap(
+      [
+        'KeyValuePair',
+        this.wrap({ sym: key }, start, end),
+        value,
+      ] as MathJsonExpression[],
+      start,
+      end
+    );
+  }
+
+  //
+  // ─── Control flow: if / while / for ───────────────────────────────────────
+  //
+
+  /** `if cond { … }` with optional `else { … }` / `else if …` chain →
+   * `["If", cond, thenBlock, elseBlock?]`. Branches are `["Block", …]`; an
+   * `else if` chains into a nested `If`. */
+  private parseIf(): MathJsonExpression | null {
+    const kw = this.advance(); // 'if'
+    const cond = this.parseExpression(0);
+    if (cond === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+    if (!this.check('OPEN_BRACE')) {
+      this.error(
+        ['opening-bracket-expected', '{'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    const thenBlock = this.parseBlock();
+    let end = this.localEnd(thenBlock) ?? this.previousEnd();
+    const parts: MathJsonExpression[] = ['If', cond, thenBlock];
+
+    // A dangling `else` binds to this `if`, even across a linebreak.
+    if (this.check('SYMBOL') && this.current.text === 'else') {
+      this.advance(); // 'else'
+      const next = this.current;
+      if (next.type === 'SYMBOL' && next.text === 'if') {
+        const nested = this.parseIf();
+        if (nested !== null) {
+          parts.push(nested);
+          end = this.localEnd(nested) ?? end;
+        }
+      } else if (this.check('OPEN_BRACE')) {
+        const elseBlock = this.parseBlock();
+        parts.push(elseBlock);
+        end = this.localEnd(elseBlock) ?? end;
+      } else {
+        this.error(
+          ['opening-bracket-expected', '{'],
+          this.current.start,
+          this.current.end
+        );
+      }
+    }
+
+    return this.wrap(parts, kw.start, end);
+  }
+
+  /** `while cond { … }` lowers to the engine's imperative `Loop`:
+   * `Loop(Block(If(Not(cond), Break), body))` — an infinite loop that breaks
+   * when the condition fails, then runs the body. No custom head, so it
+   * canonicalizes/evaluates/compiles as engine primitives. `body` is
+   * `["Block", …]`. */
+  private parseWhile(): MathJsonExpression | null {
+    const kw = this.advance(); // 'while'
+    const cond = this.parseExpression(0);
+    if (cond === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+    if (!this.check('OPEN_BRACE')) {
+      this.error(
+        ['opening-bracket-expected', '{'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    const body = this.parseBlock();
+    const end = this.localEnd(body) ?? this.previousEnd();
+    const loopBody = [
+      'Block',
+      ['If', ['Not', cond], ['Break']],
+      body,
+    ] as MathJsonExpression[];
+    return this.wrap(
+      ['Loop', loopBody] as MathJsonExpression[],
+      kw.start,
+      end
+    );
+  }
+
+  /** `for x in xs { … }` → `["Loop", body, ["Element", "x", "xs"]]` (engine
+   * `Loop`; the iterator clause is `Element`). The loop variable and the `in`
+   * keyword are consumed contextually here, so the `Element` *infix* operator
+   * (also spelled `in`) never enters the collection's expression grammar. */
+  private parseFor(): MathJsonExpression | null {
+    const kw = this.advance(); // 'for'
+    const varTok = this.current;
+    if (varTok.type !== 'SYMBOL' && varTok.type !== 'VERBATIM_SYMBOL') {
+      this.error(['symbol-expected'], varTok.start, varTok.end);
+      return null;
+    }
+    this.advance();
+    this.harvest(varTok);
+    const varName =
+      varTok.type === 'VERBATIM_SYMBOL' ? varTok.value ?? '' : varTok.text;
+    const varNode = this.wrap({ sym: varName }, varTok.start, varTok.end);
+
+    // The contextual `in` keyword (a SYMBOL token, consumed directly — not as
+    // the `Element` infix operator).
+    if (!(this.check('SYMBOL') && this.current.text === 'in')) {
+      this.error(
+        ['unexpected-symbol', this.current.text],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    this.advance(); // 'in'
+
+    const coll = this.parseExpression(0);
+    if (coll === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+    if (!this.check('OPEN_BRACE')) {
+      this.error(
+        ['opening-bracket-expected', '{'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    const body = this.parseBlock();
+    const end = this.localEnd(body) ?? this.previousEnd();
+
+    const elementNode = this.wrap(
+      ['Element', varNode, coll] as MathJsonExpression[],
+      varTok.start,
+      this.localEnd(coll) ?? this.previousEnd()
+    );
+    return this.wrap(
+      ['Loop', body, elementNode] as MathJsonExpression[],
+      kw.start,
+      end
+    );
+  }
+
+  //
+  // ─── Function definitions ─────────────────────────────────────────────────
+  //
+
+  /** Block form `function f(x) { … }` →
+   * `["Assign", "f", ["Function", ["Block", …], …params]]`. Typed params
+   * (`function f(x: real) { … }`) and a return type (`… -> real { … }`) are
+   * accepted syntactically; both are held-and-dropped for v0 (the engine
+   * `Function` takes bare symbol params). */
+  private parseFunctionDefinition(): MathJsonExpression | null {
+    const kw = this.advance(); // 'function'
+    const nameTok = this.current;
+    if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
+      this.error(['symbol-expected'], nameTok.start, nameTok.end);
+      return null;
+    }
+    this.advance();
+    this.harvest(nameTok);
+    const name =
+      nameTok.type === 'VERBATIM_SYMBOL' ? nameTok.value ?? '' : nameTok.text;
+    const nameNode = this.wrap({ sym: name }, nameTok.start, nameTok.end);
+
+    if (!this.check('OPEN_PAREN')) {
+      this.error(
+        ['opening-bracket-expected', '('],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    const params = this.parseParameterList();
+
+    // Optional return type `-> Type` (parsed and dropped for v0).
+    if (this.check('OPERATOR') && this.current.text === '->') {
+      this.advance(); // '->'
+      this.parseHeldType();
+    }
+
+    if (!this.check('OPEN_BRACE')) {
+      this.error(
+        ['opening-bracket-expected', '{'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    const body = this.parseBlock();
+    const end = this.localEnd(body) ?? this.previousEnd();
+
+    const fnNode = this.wrap(
+      ['Function', body, ...params] as MathJsonExpression[],
+      nameTok.start,
+      end
+    );
+    return this.wrap(
+      ['Assign', nameNode, fnNode] as MathJsonExpression[],
+      kw.start,
+      end
+    );
+  }
+
+  /** Whether the statement at the cursor is a math-style function definition
+   * `f( … ) = …`: a bare symbol, an abutting `(`, its matching `)`, then `=`.
+   * A lookahead only — it consumes nothing. */
+  private isMathFunctionDef(): boolean {
+    if (this.current.type !== 'SYMBOL') return false;
+    const paren = this.peek(1);
+    if (paren.type !== 'OPEN_PAREN' || paren.precededByWhitespace) return false;
+
+    // Scan to the matching close paren (from the token after the symbol).
+    let depth = 0;
+    let i = this.pos + 1;
+    for (; i < this.tokens.length; i++) {
+      const t = this.tokens[i].type;
+      if (t === 'OPEN_PAREN') depth += 1;
+      else if (t === 'CLOSE_PAREN') {
+        depth -= 1;
+        if (depth === 0) break;
+      } else if (t === 'EOF') return false;
+    }
+    const after = this.tokens[i + 1];
+    return (
+      after !== undefined && after.type === 'OPERATOR' && after.text === '='
+    );
+  }
+
+  /** Math-style `f(x) = expr` (typed params supported) →
+   * `["Assign", "f", ["Function", expr, …params]]`. */
+  private parseMathFunctionDef(): MathJsonExpression | null {
+    const nameTok = this.advance(); // SYMBOL
+    this.harvest(nameTok);
+    const nameNode = this.wrap(
+      { sym: nameTok.text },
+      nameTok.start,
+      nameTok.end
+    );
+    const params = this.parseParameterList();
+
+    if (!(this.check('OPERATOR') && this.current.text === '=')) {
+      this.error(
+        ['unexpected-symbol', this.current.text],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    this.advance(); // '='
+    const rhs = this.parseExpression(0);
+    if (rhs === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+    const end = this.localEnd(rhs) ?? this.previousEnd();
+
+    const fnNode = this.wrap(
+      ['Function', rhs, ...params] as MathJsonExpression[],
+      nameTok.start,
+      end
+    );
+    return this.wrap(
+      ['Assign', nameNode, fnNode] as MathJsonExpression[],
+      nameTok.start,
+      end
+    );
+  }
+
+  /** Parse a `( param, … )` parameter list. Each param is a symbol with an
+   * optional `: Type` annotation (parsed and dropped for v0). Returns the bare
+   * param symbol nodes. */
+  private parseParameterList(): MathJsonExpression[] {
+    const open = this.advance(); // '('
+    this.brackets.push(open);
+
+    const params: MathJsonExpression[] = [];
+    if (!this.check('CLOSE_PAREN')) {
+      for (;;) {
+        const tok = this.current;
+        if (tok.type !== 'SYMBOL' && tok.type !== 'VERBATIM_SYMBOL') {
+          this.error(['symbol-expected'], tok.start, tok.end);
+          this.recoverInBracket();
+          break;
+        }
+        this.advance();
+        this.harvest(tok);
+        const pname =
+          tok.type === 'VERBATIM_SYMBOL' ? tok.value ?? '' : tok.text;
+        params.push(this.wrap({ sym: pname }, tok.start, tok.end));
+
+        // Optional `: Type` — consumed and dropped for v0.
+        if (this.check('OPERATOR') && this.current.text === ':')
+          this.parseTypeAnnotation();
+
+        if (!this.match('COMMA')) break;
+        if (this.check('CLOSE_PAREN')) break; // trailing comma
+      }
+    }
+
+    this.brackets.pop();
+
+    if (this.check('CLOSE_PAREN')) this.advance();
+    else this.error(['closing-bracket-expected', ')'], open.start, open.end);
+
+    return params;
+  }
+
+  /** Consume a `Type` starting at the current token (a return type after
+   * `->`). Parsed and dropped for v0. */
+  private parseHeldType(): void {
+    const start = this.current.start;
+    try {
+      const { end } = parseTypePrefix(this.source.slice(start));
+      this.advanceToOffset(start + end);
+    } catch {
+      // A malformed return type: leave the cursor; the following
+      // `{`-expectation reports the problem.
+    }
+  }
+
   /**
-   * Type annotation in a declaration/assignment target position: a target
-   * symbol immediately followed by an `OPERATOR` token whose text is `:`. The
-   * type is parsed by the engine's `common/type` prefix subparser, then parsing
-   * resumes in Cortex just past the type. Returns `undefined` when the current
-   * position is *not* an annotation (the caller falls back to an expression).
-   *
-   * The annotation is **parse-and-held** (Phase 4 finalizes the shape):
+   * A bare type annotation in target position (no `let`/`const` keyword): a
+   * target symbol immediately followed by an `OPERATOR` token whose text is
+   * `:`. A type annotation *implies a declaration* (Phase 4 reconciliation), so
+   * this emits the same (non-const) `Declare` shape as a keyword declaration:
    *   - `x: T`        →  `["Declare", "x", {str: "T"}]`
-   *   - `x: T = expr` →  `["Declare", "x", {str: "T"}, expr]`
+   *   - `x: T = expr` →  `["Declare", "x", {str: "T"}, ["Dictionary",
+   *                         ["KeyValuePair", value, expr]]]`
    *
-   * where `"T"` is the (trimmed) source text of the annotation type.
+   * where `"T"` is the (trimmed) source text of the annotation type. Returns
+   * `undefined` when the current position is *not* an annotation (the caller
+   * falls back to an expression), or `null` on a malformed type (already
+   * recovered).
    */
   private tryParseAnnotation(): MathJsonExpression | null | undefined {
     const target = this.current;
@@ -318,11 +858,28 @@ export class Parser {
     const colon = this.peek(1);
     if (colon.type !== 'OPERATOR' || colon.text !== ':') return undefined;
 
-    // Commit to an annotation.
+    // Commit to an annotation (a declaration).
     this.advance(); // the target symbol
     this.harvest(target);
     const name =
       target.type === 'VERBATIM_SYMBOL' ? target.value ?? '' : target.text;
+    const nameNode = this.wrap({ sym: name }, target.start, target.end);
+
+    // The cursor is now on the `:`; `finishDeclaration` parses the type and an
+    // optional initializer, building the (non-const) `Declare` node.
+    return this.finishDeclaration(false, target.start, nameNode);
+  }
+
+  /**
+   * Parse a `: Type` annotation starting at the current `:` OPERATOR token. The
+   * type is parsed by the engine's `common/type` prefix subparser, then parsing
+   * resumes in Cortex just past the type. Returns the held `{str}` type node and
+   * its end offset, or `null` on a malformed type (after emitting a
+   * `type-annotation-error` diagnostic and recovering at top level).
+   */
+  private parseTypeAnnotation():
+    | { node: MathJsonExpression; end: number }
+    | null {
     const colonTok = this.advance(); // ':'
 
     // Parse the type from the remaining source (local offsets).
@@ -354,28 +911,8 @@ export class Parser {
       return null;
     }
 
-    const nameNode = this.wrap({ sym: name }, target.start, target.end);
-    const typeNode = this.wrap({ str: typeString }, typeSourceStart, typeEnd);
-
-    // Optional initializer: `= expr`.
-    let init: MathJsonExpression | null = null;
-    if (this.check('OPERATOR') && this.current.text === '=') {
-      this.advance(); // '='
-      init = this.parseExpression(0);
-      if (init === null)
-        this.error(
-          ['expression-expected'],
-          this.current.start,
-          this.current.end
-        );
-    }
-
-    const parts: MathJsonExpression[] = ['Declare', nameNode, typeNode];
-    if (init !== null) parts.push(init);
-
-    const end =
-      init !== null ? this.localEnd(init) ?? this.previousEnd() : typeEnd;
-    return this.wrap(parts, target.start, end);
+    const node = this.wrap({ str: typeString }, typeSourceStart, typeEnd);
+    return { node, end: typeEnd };
   }
 
   /** Advance the token cursor until the current token starts at or past the
@@ -641,6 +1178,16 @@ export class Parser {
     const start = this.localStart(left) ?? 0;
     const end = this.localEnd(right) ?? this.previousEnd();
 
+    // The mapsto arrow `params |-> body`: `left` is a parameter list (a bare
+    // symbol, or a parenthesized/tuple list of symbols), `right` is the body.
+    // Rewrite into the engine `Function` shape `["Function", body, …params]`.
+    if (def.symbol === '|->')
+      return this.wrap(
+        ['Function', right, ...this.mapstoParams(left)] as MathJsonExpression[],
+        start,
+        end
+      );
+
     if (
       def.relational &&
       typeof left === 'object' &&
@@ -654,6 +1201,36 @@ export class Parser {
     }
 
     return this.wrap([def.name, left, right] as MathJsonExpression[], start, end);
+  }
+
+  /** Extract the parameter symbols from a mapsto LHS: a bare symbol (one
+   * parameter), or a `Tuple` of symbols (`(x, y) |-> …`). A parenthesized
+   * single symbol arrives here already unwrapped. A non-symbol parameter is a
+   * diagnostic and is dropped. */
+  private mapstoParams(left: MathJsonExpression): MathJsonExpression[] {
+    const emit = (bad: MathJsonExpression) => {
+      const o = nodeOffsets(bad);
+      this.error(
+        ['symbol-expected'],
+        o ? o[0] - this.baseOffset : 0,
+        o ? o[1] - this.baseOffset : 0
+      );
+    };
+
+    const ops = fnOps(left);
+    if (ops !== null && ops[0] === 'Tuple') {
+      const params: MathJsonExpression[] = [];
+      for (const p of ops.slice(1)) {
+        if (symbolNameOf(p) === null) emit(p);
+        else params.push(p);
+      }
+      return params;
+    }
+
+    if (symbolNameOf(left) !== null) return [left];
+
+    emit(left);
+    return [];
   }
 
   /** End offset (local) of the most recently consumed token. */
@@ -938,6 +1515,7 @@ export class Parser {
       url: this.url,
       offset: this.baseOffset + span.start,
       parseLatex: this.parseLatex,
+      allowHostPragmas: this.allowHostPragmas,
     });
     const value = sub.parseProgram();
     for (const d of sub.diagnostics) this.diagnostics.push(d);
@@ -1159,7 +1737,7 @@ export class Parser {
     // Function pragmas: an argument clause `( … )`.
     const { list, end } = this.parseArgumentClause();
     return this.wrap(
-      this.evalFunctionPragma(name, list),
+      this.evalFunctionPragma(name, list, token),
       token.start,
       end
     );
@@ -1206,7 +1784,8 @@ export class Parser {
 
   private evalFunctionPragma(
     name: string,
-    args: MathJsonExpression
+    args: MathJsonExpression,
+    token: Token
   ): MathJsonExpression | string {
     if (name === '#warning') {
       const message = mapArgs<string>(args, (x) => expressionToString(x)).join(
@@ -1225,6 +1804,12 @@ export class Parser {
     }
 
     if (name === '#env') {
+      // Host-state pragma: gated off by default so an embedded notebook cannot
+      // leak the host environment into a document at parse time.
+      if (!this.allowHostPragmas) {
+        this.error(['host-pragma-disabled', name], token.start, token.end);
+        return 'Nothing';
+      }
       if ('process' in globalThis && process.env) {
         return {
           str: process.env[expressionToString(operand(args, 1))] ?? '',
@@ -1233,6 +1818,11 @@ export class Parser {
     }
 
     if (name === '#navigator') {
+      // Host-state pragma: gated off by default (see `#env`).
+      if (!this.allowHostPragmas) {
+        this.error(['host-pragma-disabled', name], token.start, token.end);
+        return 'Nothing';
+      }
       // eslint-disable-next-line no-restricted-globals
       if ('navigator' in globalThis) {
         return {
@@ -1309,6 +1899,19 @@ function isNumberNode(expr: MathJsonExpression): boolean {
     !Array.isArray(expr) &&
     'num' in expr
   );
+}
+
+/** The operands array of a function node (`{fn: […]}`), or `null` for any other
+ * node. The first element is the operator head. */
+function fnOps(expr: MathJsonExpression): MathJsonExpression[] | null {
+  if (
+    typeof expr === 'object' &&
+    expr !== null &&
+    !Array.isArray(expr) &&
+    'fn' in expr
+  )
+    return (expr as { fn: MathJsonExpression[] }).fn;
+  return null;
 }
 
 /** The name of a bare-symbol node (`{sym}`), or `null` for any other node. Used

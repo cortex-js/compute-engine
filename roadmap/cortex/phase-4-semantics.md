@@ -6,6 +6,61 @@ decision should be ratified before its implementation starts (update this
 doc as decisions land). Depends on Phase 2; Phase 3 can proceed in
 parallel._
 
+## Decisions (settled 2026-07-07)
+
+- **Declarations require a keyword: `let` (mutable) + `const` (immutable).**
+  `let x = 5` declares; bare `x = 5` is reassignment (`Assign`); reassigning a
+  `const` is an error value. **A type annotation also implies a declaration** —
+  `x: real = 5` declares even without `let`; the keyword is only mandatory for
+  untyped declarations.
+  - **Encoding — the enhanced engine `Declare` (NOT a custom `Let`/`Const`
+    head).** As of 2026-07-07 `Declare` takes an optional value + a trailing
+    attributes `Dictionary` (`type`/`value`/`constant`/`holdUntil`); const is a
+    **binding attribute** (`constant: True` → `isConstant`), not a type, and the
+    engine enforces it (reassigning a const throws). See
+    [[declare-attributes-and-constness]]. This supersedes the provisional
+    `Let`/`Const` heads from the Stage-1 draft — declarations are engine
+    primitives (they compile), so `executeCortex` needs no special declaration
+    logic; it just evaluates the `Declare`.
+  - **Uniform lowering** (verified empirically): *type positional when present;
+    `value` + `constant` in a trailing `Dictionary`.*
+    - `let x = 5` → `["Declare","x",["Dictionary",["KeyValuePair","value",5]]]`
+      (type inferred → `integer`)
+    - `let x: real = 5` / `x: real = 5` →
+      `["Declare","x","real",["Dictionary",["KeyValuePair","value",5]]]`
+    - `let x: real` → `["Declare","x","real"]`; `let x` → `["Declare","x"]`
+    - `const c = 6.28` →
+      `["Declare","c",["Dictionary",["KeyValuePair","value",6.28],["KeyValuePair","constant","True"]]]`
+    - `const c: real = 6.28` →
+      `["Declare","c","real",["Dictionary",["KeyValuePair","value",6.28],["KeyValuePair","constant","True"]]]`
+  - Reassignment (no keyword, no annotation): `x = 5` → `["Assign","x",5]`.
+- **Function definitions: BOTH forms.** Math-style `f(x) = expr` and block
+  `function f(x) { … }`; both → `["Assign", name, ["Function", body, …params]]`
+  (block body is a `Do`/block whose value is its last expression). Typed
+  params `f(x: real) = expr` via the type subparser; a return-type annotation
+  uses `->` only in the unambiguous post-parameter-list signature position
+  (matches the type language's own `(real) -> real`).
+- **Anonymous functions: mapsto `x |-> expr`** → `["Function", expr, "x"]`
+  (ASCII for the engine's `↦`; collision-free — a plain `->` is `KeyValuePair`).
+- **Control flow: `if cond { } else { }` (expression) + `while cond { }` +
+  `for x in xs { }`**, plus library `map`/`filter`/`reduce`. In `for x in xs`,
+  `in` is the iterator keyword (contextual — it is also the `Element` operator
+  in expression position). `return`/`break`/`continue` stay reserved (out).
+- **Blocks** (`{ … }` after a keyword: `function`/`if`/`else`/`while`/`for`)
+  are statement blocks, distinct from the Phase 2 `{ … }` collection grammar;
+  block value = last expression (`Do` semantics), and each pushes a scope.
+- **Execution [confirmed per §1]:** `executeCortex` evaluates each top-level
+  statement, symbolic-by-default (exactness contract), numeric only via
+  explicit `N(expr)`; runtime problems are `["Error", …]` values, parse
+  problems are diagnostics; respects the engine deadline.
+- **Pragma security [confirmed per §5]:** `#env`/`#navigator` gated behind an
+  opt-in option, default OFF in `executeCortex`; `#error` emits a diagnostic
+  instead of throwing `FatalParsingError`.
+
+Implementation MathJSON shapes (`Declare`/`Assign`/`Function`/`If`/`Loop`/
+block) must match the engine's existing operator conventions — align with the
+library definitions, don't invent.
+
 ## 1. Execution model
 
 - `executeCortex(ce, source, options?) → { value, diagnostics }` (working

@@ -7,9 +7,13 @@ import { validCortex } from '../utils';
 // whose text is `:` — the Cortex parser calls the engine-side type prefix
 // subparser and resumes just past the type.
 //
-// The annotation is parse-and-held (Phase 4 finalizes the shape):
+// Phase 4 reconciliation: a type annotation *implies a declaration*, so a bare
+// annotation (no `let`/`const` keyword) now lowers to the enhanced engine
+// `Declare` primitive — the type is positional; an initializer goes into a
+// trailing attributes `Dictionary` (omitted when absent):
 //   x: T        →  ["Declare", "x", {str: "T"}]
-//   x: T = expr →  ["Declare", "x", {str: "T"}, expr]
+//   x: T = expr →  ["Declare", "x", {str: "T"}, ["Dictionary",
+//                     ["KeyValuePair", value, expr]]]
 //
 
 describe('CORTEX TYPE ANNOTATIONS', () => {
@@ -26,7 +30,7 @@ describe('CORTEX TYPE ANNOTATIONS', () => {
       'Declare',
       'x',
       { str: 'real' },
-      5,
+      ['Dictionary', ['KeyValuePair', 'value', 5]],
     ]);
   });
 
@@ -35,7 +39,7 @@ describe('CORTEX TYPE ANNOTATIONS', () => {
       'Declare',
       'x',
       { str: 'real' },
-      ['Add', 2, 3],
+      ['Dictionary', ['KeyValuePair', 'value', ['Add', 2, 3]]],
     ]);
   });
 

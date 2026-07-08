@@ -15,5 +15,10 @@ export { ComputeEngine } from './compute-engine';
 //
 export { parseCortex } from './cortex/parse-cortex';
 export { serializeCortex } from './cortex/serialize-cortex';
+export { executeCortex } from './cortex/execute-cortex';
+export type {
+  ExecuteCortexOptions,
+  ExecuteCortexResult,
+} from './cortex/execute-cortex';
 
 export const version = '{{SDK_VERSION}}';

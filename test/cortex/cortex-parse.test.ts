@@ -1,4 +1,5 @@
 import { stringValue } from '../../src/math-json/utils';
+import { parseCortex } from '../../src/cortex/parse-cortex';
 import { serializeCortex } from '../../src/cortex/serialize-cortex';
 import { validCortex, invalidCortex } from '../utils';
 
@@ -24,17 +25,24 @@ describe('CORTEX PARSING SHEBANG', () => {
 });
 
 describe('CORTEX PARSING DIRECTIVES', () => {
-  test('Navigator directive', () => {
+  test('Navigator directive (host pragmas enabled)', () => {
+    // `#navigator` reads host state, so it is gated behind `allowHostPragmas`
+    // (default off — see the gating tests in `execute.test.ts`).
     // `navigator` is not available when running in a node environment
     // node v22 added support for the navigator object
-    const ua = validCortex('#navigator("userAgent")');
+    const [ua, diags] = parseCortex('#navigator("userAgent")', undefined, {
+      allowHostPragmas: true,
+    });
+    expect(diags).toHaveLength(0);
     const validUa = ua === 'Undefined' || stringValue(ua)?.startsWith('Node');
     expect(validUa).toBe(true);
   });
-  test('Environment variable directive', () => {
-    expect(validCortex('#env("HOME")')).toStrictEqual({
-      str: process.env['HOME'],
+  test('Environment variable directive (host pragmas enabled)', () => {
+    const [value, diags] = parseCortex('#env("HOME")', undefined, {
+      allowHostPragmas: true,
     });
+    expect(diags).toHaveLength(0);
+    expect(stringValue(value)).toBe(process.env['HOME']);
   });
   test('Warning directive', () => {
     // `#warning` no longer writes to the console; it evaluates to its

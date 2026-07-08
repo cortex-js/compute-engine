@@ -71,6 +71,21 @@ export const OPERATORS: OperatorDef[] = [
     assoc: 'right',
     relational: true,
   },
+  // Anonymous-function (mapsto) arrow `x |-> expr`. Maximal-munches as one
+  // OPERATOR token, distinct from `|>` (Pipe) and `->` (KeyValuePair). It binds
+  // very loosely (just above `Assign`, so `f = x |-> x + 1` captures the whole
+  // mapsto as the RHS) and right-associates for currying (`x |-> y |-> …`). Its
+  // MathJSON `name` is a parser-internal marker: the parser rewrites the node in
+  // `combineInfix` into the engine `Function` shape (`["Function", body,
+  // …params]`), so a raw `MapsTo` head never reaches the serializer.
+  {
+    name: 'MapsTo',
+    symbol: '|->',
+    fancySymbol: '↦',
+    precedence: 15,
+    kind: 'infix',
+    assoc: 'right',
+  },
   { name: 'Pipe', symbol: '|>', precedence: 20, kind: 'infix', assoc: 'left' },
   { name: 'Pipe', symbol: '~>', precedence: 20, kind: 'infix', assoc: 'left' },
   {
