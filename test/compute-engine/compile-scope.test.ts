@@ -149,6 +149,50 @@ describe('COMPILE: Scoping and Closure', () => {
     });
   });
 
+  // ── 4b. Block body with a value-carrying Declare ───────────────────
+  describe('Function with Block body and a value-carrying Declare', () => {
+    // f(x) = { let t = x²; return t + 1 } — the initializer is on the
+    // `Declare` itself (`Declare(t, number, Square(x))`), not a separate
+    // `Assign`. The compiler must emit the initializer, not drop it.
+    const f = ce.expr([
+      'Function',
+      ['Block', ['Declare', 't', 'number', ['Square', 'x']], ['Add', 't', 1]],
+      'x',
+    ]);
+
+    it('emits the initializer (not a bare declaration)', () => {
+      expect(compile(f)?.code).toContain('let t = ');
+    });
+
+    it('run(3) === 10 and run(4) === 17', () => {
+      expect(compile(f)?.run!(3)).toBe(10);
+      expect(compile(f)?.run!(4)).toBe(17);
+    });
+
+    // The attributes-dictionary form (used to declare constants) also carries
+    // a value; the compiler emits it as an ordinary local initializer.
+    const g = ce.expr([
+      'Function',
+      [
+        'Block',
+        [
+          'Declare',
+          'c',
+          'number',
+          10,
+          ['Dictionary', ['KeyValuePair', 'constant', 'True']],
+        ],
+        ['Add', ['Multiply', 'x', 'c'], 1],
+      ],
+      'x',
+    ]);
+
+    it('value from an attributes-dictionary Declare is emitted', () => {
+      expect(compile(g)?.code).toContain('let c = 10');
+      expect(compile(g)?.run!(2)).toBe(21);
+    });
+  });
+
   // ── 5. Conditional body (absolute value) ───────────────────────────
   describe('Conditional body (absolute value)', () => {
     // f(x) = if x > 0 then x else -x

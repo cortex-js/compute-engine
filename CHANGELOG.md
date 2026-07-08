@@ -75,7 +75,9 @@
   sets its initial value, and evaluates to that value (the previous form
   evaluated to `Nothing`). This matches the documented signature; earlier the
   value operand was silently dropped. The one- and two-operand forms are
-  unchanged.
+  unchanged. A value-carrying `Declare` also compiles correctly (the
+  initializer is emitted for the JavaScript and GLSL targets), not just when
+  evaluated.
 
 - **`Declare` can attach definition attributes via a trailing dictionary,
   including declaring constants.** An optional final `Dictionary` operand

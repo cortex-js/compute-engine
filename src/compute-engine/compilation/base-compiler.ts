@@ -11,6 +11,7 @@ import {
   isNumber,
   isString,
   isFunction,
+  isDictionary,
 } from '../boxed-expression/type-guards';
 
 import type { CompileTarget, TargetSource } from './types';
@@ -335,7 +336,15 @@ export class BaseCompiler {
 
     if (h === 'Declare') {
       const name = isSymbol(args[0]) ? args[0].symbol : '_';
-      return target.declare ? target.declare(name) : `let ${name}`;
+      // Targets with a `declare` hook handle any initial value at the block
+      // level (as a separate assignment statement — see `compileBlock`). For
+      // the default path (no hook), emit a combined initializer so a
+      // value-carrying `Declare(sym, type, value)` isn't dropped.
+      if (target.declare) return target.declare(name);
+      const value = BaseCompiler.declareValueOperand(args);
+      return value === undefined
+        ? `let ${name}`
+        : `let ${name} = ${BaseCompiler.compile(value, target)}`;
     }
     if (h === 'Assign')
       return `${
@@ -505,6 +514,28 @@ export class BaseCompiler {
     new Set(['Real', 'Imaginary', 'Argument', 'Conjugate']);
 
   /**
+   * Extract the initial-value operand of a `Declare` expression, if any.
+   *
+   * Handles the positional forms `Declare(sym, type, value)` and a `value`
+   * key in an optional trailing attributes `Dictionary`. A positional value
+   * takes precedence over the dictionary's `value`. Returns `undefined` when
+   * the declaration has no value (`Declare(sym)` / `Declare(sym, type)`).
+   */
+  private static declareValueOperand(
+    ops: ReadonlyArray<Expression>
+  ): Expression | undefined {
+    let rest = ops.slice(1);
+    let attrsValue: Expression | undefined;
+    const last = rest[rest.length - 1];
+    if (last !== undefined && isDictionary(last)) {
+      attrsValue = last.get('value');
+      rest = rest.slice(0, -1);
+    }
+    // rest is now the positional operands after the symbol: [type?, value?]
+    return rest[1] ?? attrsValue;
+  }
+
+  /**
    * Compile a block expression
    */
   private static compileBlock(
@@ -570,19 +601,27 @@ export class BaseCompiler {
 
     const result = args
       .filter((a) => !isSymbol(a, 'Nothing'))
-      .map((arg) => {
+      .flatMap((arg) => {
         // For Declare, pass inferred type hint to the target hook
         if (
           isFunction(arg, 'Declare') &&
           isSymbol(arg.ops[0]) &&
           target.declare
         ) {
-          return target.declare(
-            arg.ops[0].symbol,
-            typeHints[arg.ops[0].symbol]
-          );
+          const name = arg.ops[0].symbol;
+          const decl = target.declare(name, typeHints[name]);
+          // A `Declare` may carry an initial value (`Declare(sym, type, value)`
+          // or a `value` key in a trailing attributes dictionary). Emit it as a
+          // separate assignment statement, mirroring how a hoisted
+          // `Declare`+`Assign` pair compiles. (Two statements — not a combined
+          // initializer — so the declaration stays a plain `let`/`float`, which
+          // is what the subsequent assignment requires.)
+          const value = BaseCompiler.declareValueOperand(arg.ops);
+          if (value !== undefined)
+            return [decl, `${name} = ${BaseCompiler.compile(value, localTarget)}`];
+          return [decl];
         }
-        return BaseCompiler.compile(arg, localTarget);
+        return [BaseCompiler.compile(arg, localTarget)];
       })
       .filter((s) => s !== '');
 
