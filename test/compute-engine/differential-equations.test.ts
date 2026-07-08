@@ -278,11 +278,45 @@ describe('DSolve', () => {
     expect(result.operator).toBe('DSolve');
   });
 
+  test('solves separable nonlinear first-order equations implicitly', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Divide', 'x', ['y', 'x']],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[1/2 * "y_value"^2 === 1/2 * x^2 + "c_1"]`
+    );
+  });
+
+  test('applies initial conditions to separable implicit solutions', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Divide', 'x', ['y', 'x']],
+    ];
+    const solution = dsolve(['List', equation, ['Equal', ['y', 0], 1]]);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[1/2 * "y_value"^2 === 1/2 * x^2 + 1/2]`
+    );
+  });
+
+  test('applies initial conditions to first-order equations', () => {
+    const equation = ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']];
+    const solution = dsolve(['List', equation, ['Equal', ['y', 0], 2]]);
+
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === 2e^x]`);
+    expect(verifyEquationSolution(equation, solution, { x: 0.75 })).toBe(true);
+  });
+
   test('stays inert for unsupported nonlinear first-order equations', () => {
     const result = dsolve([
       'Equal',
       ['D', ['y', 'x'], 'x'],
-      ['Power', ['y', 'x'], 2],
+      ['Add', 'x', ['Power', ['y', 'x'], 2]],
     ]);
 
     expect(result.operator).toBe('DSolve');
@@ -354,6 +388,23 @@ describe('DSolve', () => {
     expect(
       verifyEquationSolution(equation, solution, { c_1: 2, c_2: 3, x: 0.75 })
     ).toBe(true);
+  });
+
+  test('applies initial conditions to second-order equations', () => {
+    const equation = [
+      'Equal',
+      ['D', ['D', ['y', 'x'], 'x'], 'x'],
+      ['Negate', ['y', 'x']],
+    ];
+    const solution = dsolve([
+      'List',
+      equation,
+      ['Equal', ['y', 0], 0],
+      ['Equal', ['Apply', ['Derivative', 'y', 1], 0], 1],
+    ]);
+
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === sin(x)]`);
+    expect(verifyEquationSolution(equation, solution, { x: 0.75 })).toBe(true);
   });
 
   test('solves second-order homogeneous equation with a repeated root', () => {
@@ -644,7 +695,10 @@ describe('DSolve', () => {
       [
         'Add',
         ['D', ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'], 'x'],
-        ['Negate', ['Multiply', 2, ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x']]],
+        [
+          'Negate',
+          ['Multiply', 2, ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x']],
+        ],
         ['Multiply', 2, ['D', ['D', ['y', 'x'], 'x'], 'x']],
         ['Negate', ['Multiply', 2, ['D', ['y', 'x'], 'x']]],
         ['y', 'x'],
@@ -739,8 +793,7 @@ describe('DSolve', () => {
   function hasUnfoldedExpProduct(expr: ReturnType<typeof dsolve>): boolean {
     if (expr.operator === 'Multiply') {
       const expFactors = expr.ops.filter(
-        (op) =>
-          op.operator === 'Power' && op.op1?.symbol === 'ExponentialE'
+        (op) => op.operator === 'Power' && op.op1?.symbol === 'ExponentialE'
       ).length;
       if (expFactors >= 2) return true;
     }
@@ -886,7 +939,7 @@ describe('DSolve', () => {
   // `D` term as `expression` and replaced it with an `Error` node before
   // `DSolve` ran).
   //
-  test('parses y\'\'(x) + y(x) = 0 without an Error node and solves it', () => {
+  test("parses y''(x) + y(x) = 0 without an Error node and solves it", () => {
     const equation = engine.parse("y''(x)+y(x)=0");
     expect(equation.isValid).toBe(true);
     expect(hasNoErrorNode(equation)).toBe(true);
@@ -898,7 +951,7 @@ describe('DSolve', () => {
     );
   });
 
-  test('parses and solves y\'\'(x) - y(x) = e^x end-to-end', () => {
+  test("parses and solves y''(x) - y(x) = e^x end-to-end", () => {
     const equation = engine.parse("y''(x) - y(x) = e^x");
     expect(equation.isValid).toBe(true);
     expect(hasNoErrorNode(equation)).toBe(true);
@@ -936,9 +989,7 @@ describe('DSolve', () => {
 
     expect(implicit.operator).toBe('List');
     expect(implicit.toString()).toEqual(explicit.toString());
-    expect(implicit.toString()).toMatchInlineSnapshot(
-      `[y(x) === "c_1" * e^x]`
-    );
+    expect(implicit.toString()).toMatchInlineSnapshot(`[y(x) === "c_1" * e^x]`);
   });
 });
 
