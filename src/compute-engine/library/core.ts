@@ -821,7 +821,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         if (isAutoDeclareHere && existingValueDef) {
           // Upgrade the existing auto-declared binding in place.
-          (existingValueDef as { _declaredByStatement?: boolean }
+          (
+            existingValueDef as { _declaredByStatement?: boolean }
           )._declaredByStatement = true;
           if (hasType) {
             existingValueDef.value.type = ce.type(type!);
@@ -837,9 +838,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             // listener / `_defValue` recomputation that the constructor sets up
             // is only needed for precision-dependent constants (`Pi`), which
             // cannot be expressed through `Declare`.
-            (existingValueDef.value as unknown as {
-              _isConstant: boolean;
-            })._isConstant = true;
+            (
+              existingValueDef.value as unknown as {
+                _isConstant: boolean;
+              }
+            )._isConstant = true;
         } else {
           // Fresh declaration.
           const def: Partial<SymbolDefinition> = {};
@@ -857,7 +860,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           ce.declare(symbolName, def);
           const created = ce.context.lexicalScope.bindings.get(symbolName);
           if (created)
-            (created as { _declaredByStatement?: boolean }
+            (
+              created as { _declaredByStatement?: boolean }
             )._declaredByStatement = true;
         }
 

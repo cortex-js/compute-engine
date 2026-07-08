@@ -25,12 +25,7 @@ import {
   Formatter,
   FormattingBlock,
 } from './formatter';
-import {
-  DIGITS,
-  ESCAPED_CHARS,
-  isBreak,
-  isInvisible,
-} from './characters';
+import { DIGITS, ESCAPED_CHARS, isBreak, isInvisible } from './characters';
 import { RESERVED_WORDS } from './reserved-words';
 import { OPERATORS as SHARED_OPERATORS } from './operators';
 
@@ -349,7 +344,11 @@ export function serializeCortex(
     //
     Dictionary: (expr: MathJsonExpression): FormattingBlock => {
       if (nops(expr) === 0)
-        return fmt.line(fmt.fence('{'), fmt.relationalOperator('->'), fmt.fence('}'));
+        return fmt.line(
+          fmt.fence('{'),
+          fmt.relationalOperator('->'),
+          fmt.fence('}')
+        );
       return fmt.fencedList(
         '{',
         fmt.separator(','),
@@ -391,8 +390,7 @@ export function serializeCortex(
         const symName = symbol(args[1]);
         if (symName !== null) {
           const numStr = serializeNumber(args[0], NUMBER_FORMATTING_OPTIONS);
-          if (canJuxtapose(numStr, symName))
-            return fmt.text(numStr + symName);
+          if (canJuxtapose(numStr, symName)) return fmt.text(numStr + symName);
         }
       }
       return serializeOperator(expr) ?? serializeGenericFunction(expr);

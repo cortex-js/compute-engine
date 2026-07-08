@@ -128,7 +128,13 @@ function serializeMeasurement(
 
   const v = machineValue(op1);
   const e = machineValue(op2);
-  if (v !== null && e !== null && Number.isFinite(v) && Number.isFinite(e) && e > 0) {
+  if (
+    v !== null &&
+    e !== null &&
+    Number.isFinite(v) &&
+    Number.isFinite(e) &&
+    e > 0
+  ) {
     const { value, error } = roundMeasurementForDisplay(
       v,
       e,

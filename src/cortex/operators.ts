@@ -230,7 +230,13 @@ export const OPERATORS: OperatorDef[] = [
     kind: 'prefix',
   },
 
-  { name: 'Power', symbol: '^', precedence: 100, kind: 'infix', assoc: 'right' },
+  {
+    name: 'Power',
+    symbol: '^',
+    precedence: 100,
+    kind: 'infix',
+    assoc: 'right',
+  },
   {
     name: 'Power',
     symbol: '**',
@@ -254,7 +260,9 @@ for (const def of OPERATORS) {
 }
 
 /** The infix operator for a (canonical, ASCII) spelling, if any. */
-export function infixOperatorForSymbol(symbol: string): OperatorDef | undefined {
+export function infixOperatorForSymbol(
+  symbol: string
+): OperatorDef | undefined {
   return INFIX_BY_SYMBOL.get(symbol);
 }
 

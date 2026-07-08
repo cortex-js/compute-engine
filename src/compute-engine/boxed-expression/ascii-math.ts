@@ -349,8 +349,18 @@ const FUNCTIONS: Record<
     // the LaTeX `Measurement` serializer).
     const v = machineValue(lhs.json);
     const e = machineValue(rhs.json);
-    if (v !== null && e !== null && Number.isFinite(v) && Number.isFinite(e) && e > 0) {
-      const { value, error } = roundMeasurementForDisplay(v, e, options?.digits);
+    if (
+      v !== null &&
+      e !== null &&
+      Number.isFinite(v) &&
+      Number.isFinite(e) &&
+      e > 0
+    ) {
+      const { value, error } = roundMeasurementForDisplay(
+        v,
+        e,
+        options?.digits
+      );
       return `${value} ± ${error}`;
     }
     return `${serialize(lhs)} ± ${serialize(rhs)}`;

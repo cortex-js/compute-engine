@@ -202,8 +202,7 @@ export class Parser {
   /** Collect any lexical diagnostics carried by a token. */
   private harvest(token: Token): void {
     if (token.diagnostics)
-      for (const m of token.diagnostics)
-        this.error(m, token.start, token.end);
+      for (const m of token.diagnostics) this.error(m, token.start, token.end);
   }
 
   //
@@ -268,7 +267,8 @@ export class Parser {
         this.expectStatementSeparator();
       } else {
         // If the failed parse already emitted a diagnostic, don't double-report.
-        if (this.diagnostics.length === diagBefore) this.reportUnexpected(token);
+        if (this.diagnostics.length === diagBefore)
+          this.reportUnexpected(token);
         this.recoverAtTopLevel();
       }
       // Guard against a non-advancing iteration.
@@ -398,7 +398,11 @@ export class Parser {
       if (isCloseToken(this.current.type)) this.advance();
     }
 
-    return this.wrap(['Block', ...stmts] as MathJsonExpression[], open.start, end);
+    return this.wrap(
+      ['Block', ...stmts] as MathJsonExpression[],
+      open.start,
+      end
+    );
   }
 
   //
@@ -435,7 +439,7 @@ export class Parser {
     this.advance();
     this.harvest(nameTok);
     const name =
-      nameTok.type === 'VERBATIM_SYMBOL' ? nameTok.value ?? '' : nameTok.text;
+      nameTok.type === 'VERBATIM_SYMBOL' ? (nameTok.value ?? '') : nameTok.text;
     const nameNode = this.wrap({ sym: name }, nameTok.start, nameTok.end);
     return this.finishDeclaration(isConst, kw.start, nameNode);
   }
@@ -487,11 +491,20 @@ export class Parser {
       entries.push(this.kvPair('value', valueNode, start, end));
     if (isConst)
       entries.push(
-        this.kvPair('constant', this.wrap({ sym: 'True' }, start, end), start, end)
+        this.kvPair(
+          'constant',
+          this.wrap({ sym: 'True' }, start, end),
+          start,
+          end
+        )
       );
     if (entries.length > 0)
       parts.push(
-        this.wrap(['Dictionary', ...entries] as MathJsonExpression[], start, end)
+        this.wrap(
+          ['Dictionary', ...entries] as MathJsonExpression[],
+          start,
+          end
+        )
       );
 
     return this.wrap(parts, start, end);
@@ -595,11 +608,7 @@ export class Parser {
       ['If', ['Not', cond], ['Break']],
       body,
     ] as MathJsonExpression[];
-    return this.wrap(
-      ['Loop', loopBody] as MathJsonExpression[],
-      kw.start,
-      end
-    );
+    return this.wrap(['Loop', loopBody] as MathJsonExpression[], kw.start, end);
   }
 
   /** `for x in xs { … }` → `["Loop", body, ["Element", "x", "xs"]]` (engine
@@ -616,7 +625,7 @@ export class Parser {
     this.advance();
     this.harvest(varTok);
     const varName =
-      varTok.type === 'VERBATIM_SYMBOL' ? varTok.value ?? '' : varTok.text;
+      varTok.type === 'VERBATIM_SYMBOL' ? (varTok.value ?? '') : varTok.text;
     const varNode = this.wrap({ sym: varName }, varTok.start, varTok.end);
 
     // The contextual `in` keyword (a SYMBOL token, consumed directly — not as
@@ -678,7 +687,7 @@ export class Parser {
     this.advance();
     this.harvest(nameTok);
     const name =
-      nameTok.type === 'VERBATIM_SYMBOL' ? nameTok.value ?? '' : nameTok.text;
+      nameTok.type === 'VERBATIM_SYMBOL' ? (nameTok.value ?? '') : nameTok.text;
     const nameNode = this.wrap({ sym: name }, nameTok.start, nameTok.end);
 
     if (!this.check('OPEN_PAREN')) {
@@ -804,7 +813,7 @@ export class Parser {
         this.advance();
         this.harvest(tok);
         const pname =
-          tok.type === 'VERBATIM_SYMBOL' ? tok.value ?? '' : tok.text;
+          tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
         params.push(this.wrap({ sym: pname }, tok.start, tok.end));
 
         // Optional `: Type` — consumed and dropped for v0.
@@ -862,7 +871,7 @@ export class Parser {
     this.advance(); // the target symbol
     this.harvest(target);
     const name =
-      target.type === 'VERBATIM_SYMBOL' ? target.value ?? '' : target.text;
+      target.type === 'VERBATIM_SYMBOL' ? (target.value ?? '') : target.text;
     const nameNode = this.wrap({ sym: name }, target.start, target.end);
 
     // The cursor is now on the `:`; `finishDeclaration` parses the type and an
@@ -877,9 +886,10 @@ export class Parser {
    * its end offset, or `null` on a malformed type (after emitting a
    * `type-annotation-error` diagnostic and recovering at top level).
    */
-  private parseTypeAnnotation():
-    | { node: MathJsonExpression; end: number }
-    | null {
+  private parseTypeAnnotation(): {
+    node: MathJsonExpression;
+    end: number;
+  } | null {
     const colonTok = this.advance(); // ':'
 
     // Parse the type from the remaining source (local offsets).
@@ -1008,8 +1018,7 @@ export class Parser {
       }
       if (op.def.precedence < minPrecedence) break;
 
-      if (op.asymmetric)
-        this.emitAsymmetric(this.current, op.def.symbol);
+      if (op.asymmetric) this.emitAsymmetric(this.current, op.def.symbol);
 
       // Consume the operator token(s).
       for (let i = 0; i < op.tokenCount; i++) this.advance();
@@ -1164,7 +1173,13 @@ export class Parser {
       severity: 'warning',
       message: ['asymmetric-operator-whitespace', symbol],
       range: [this.baseOffset + token.start, this.baseOffset + token.end],
-      fixits: [[this.baseOffset + token.start, this.baseOffset + token.end, ` ${symbol} `]],
+      fixits: [
+        [
+          this.baseOffset + token.start,
+          this.baseOffset + token.end,
+          ` ${symbol} `,
+        ],
+      ],
     });
   }
 
@@ -1200,7 +1215,11 @@ export class Parser {
       return this.wrap([...fn, right] as MathJsonExpression[], start, end);
     }
 
-    return this.wrap([def.name, left, right] as MathJsonExpression[], start, end);
+    return this.wrap(
+      [def.name, left, right] as MathJsonExpression[],
+      start,
+      end
+    );
   }
 
   /** Extract the parameter symbols from a mapsto LHS: a bare symbol (one
@@ -1546,7 +1565,11 @@ export class Parser {
     }
     // A single value is a parenthesized expression, not a 1-tuple.
     if (values.length === 1) return values[0];
-    return this.wrap(['Tuple', ...values] as MathJsonExpression[], open.start, end);
+    return this.wrap(
+      ['Tuple', ...values] as MathJsonExpression[],
+      open.start,
+      end
+    );
   }
 
   //
@@ -1556,7 +1579,11 @@ export class Parser {
   /** `[a, b]` → `["List", a, b]`; `[]` → `["List"]`. */
   private parseList(): MathJsonExpression {
     const { values, open, end } = this.parseBracketedList('CLOSE_BRACKET', ']');
-    return this.wrap(['List', ...values] as MathJsonExpression[], open.start, end);
+    return this.wrap(
+      ['List', ...values] as MathJsonExpression[],
+      open.start,
+      end
+    );
   }
 
   /**
@@ -1590,7 +1617,11 @@ export class Parser {
     if (values.length > 0 && operator(values[0]) === 'KeyValuePair')
       return this.buildDictionary(values, open.start, end);
 
-    return this.wrap(['Set', ...values] as MathJsonExpression[], open.start, end);
+    return this.wrap(
+      ['Set', ...values] as MathJsonExpression[],
+      open.start,
+      end
+    );
   }
 
   /** Assemble a `Dictionary` from parsed brace elements. Every element must be
@@ -1947,16 +1978,12 @@ function keyToString(key: MathJsonExpression | null): MathJsonExpression {
 /** Whether a token type closes a bracketed construct. */
 function isCloseToken(type: TokenType): boolean {
   return (
-    type === 'CLOSE_PAREN' ||
-    type === 'CLOSE_BRACKET' ||
-    type === 'CLOSE_BRACE'
+    type === 'CLOSE_PAREN' || type === 'CLOSE_BRACKET' || type === 'CLOSE_BRACE'
   );
 }
 
 /** The absolute `sourceOffsets` of a node, if it carries them. */
-function nodeOffsets(
-  expr: MathJsonExpression
-): [number, number] | undefined {
+function nodeOffsets(expr: MathJsonExpression): [number, number] | undefined {
   if (typeof expr === 'object' && expr !== null && 'sourceOffsets' in expr)
     return (expr as { sourceOffsets?: [number, number] }).sourceOffsets;
   return undefined;

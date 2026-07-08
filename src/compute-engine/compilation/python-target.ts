@@ -574,8 +574,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Indexed Sum/Product compile to Python generator expressions (single
   // expressions, so they compose everywhere). The `Limits` clause carried by an
   // indexed Sum/Product would throw under a plain `np.sum(...)` string mapping.
-  Sum: (args, _compile, target) =>
-    compilePythonSumProduct('Sum', args, target),
+  Sum: (args, _compile, target) => compilePythonSumProduct('Sum', args, target),
   Product: (args, _compile, target) =>
     compilePythonSumProduct('Product', args, target),
   Mean: 'np.mean',

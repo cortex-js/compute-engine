@@ -629,7 +629,10 @@ export class BaseCompiler {
           // is what the subsequent assignment requires.)
           const value = BaseCompiler.declareValueOperand(arg.ops);
           if (value !== undefined)
-            return [decl, `${name} = ${BaseCompiler.compile(value, localTarget)}`];
+            return [
+              decl,
+              `${name} = ${BaseCompiler.compile(value, localTarget)}`,
+            ];
           return [decl];
         }
         return [BaseCompiler.compile(arg, localTarget)];

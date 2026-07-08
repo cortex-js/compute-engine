@@ -207,10 +207,7 @@ export function quantityMultiply(
     ops.some((x) => isMeasurement(x)) ||
     quantities.some((q) => isMeasurement(q.op1))
   ) {
-    const factors: Expression[] = [
-      ...scalars,
-      ...quantities.map((q) => q.op1),
-    ];
+    const factors: Expression[] = [...scalars, ...quantities.map((q) => q.op1)];
     const combinedMag = measurementMultiply(ce, factors);
     if (combinedMag === undefined) return undefined;
 
@@ -266,8 +263,10 @@ export function quantityDivide(
   const denQ = isQuantity(den) ? den : null;
 
   // Measurement-carrying magnitudes: propagate the error through the division.
-  const numMagIsM = isMeasurement(num) || (numQ ? isMeasurement(numQ.op1) : false);
-  const denMagIsM = isMeasurement(den) || (denQ ? isMeasurement(denQ.op1) : false);
+  const numMagIsM =
+    isMeasurement(num) || (numQ ? isMeasurement(numQ.op1) : false);
+  const denMagIsM =
+    isMeasurement(den) || (denQ ? isMeasurement(denQ.op1) : false);
   if (numMagIsM || denMagIsM) {
     const result = quantityDivideMeasurement(ce, num, den, numQ, denQ);
     if (result !== undefined) return result;

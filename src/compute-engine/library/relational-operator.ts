@@ -460,7 +460,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // `lazy` skips argument evaluation (see `Less` above): evaluate here.
       const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
       // Element-wise broadcast when an operand evaluated to a collection.
-      const bc = broadcastComparison(ce, 'LessEqual', ops, numericApproximation);
+      const bc = broadcastComparison(
+        ce,
+        'LessEqual',
+        ops,
+        numericApproximation
+      );
       if (bc) return bc;
       if (ops.length === 2) {
         const [lhs, rhs] = ops;

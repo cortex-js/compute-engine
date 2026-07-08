@@ -282,7 +282,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const evaluated = ops.map((x) => x.evaluate());
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityAdd(engine!, evaluated);
-          if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+          if (
+            numericApproximation &&
+            r &&
+            isQuantity(r) &&
+            isMeasurement(r.op1)
+          )
             return r.N();
           return r;
         }
@@ -451,7 +456,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           evalDen.operator === 'Quantity'
         ) {
           const r = quantityDivide(engine!, evalNum, evalDen);
-          if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+          if (
+            numericApproximation &&
+            r &&
+            isQuantity(r) &&
+            isMeasurement(r.op1)
+          )
             return r.N();
           return r;
         }
@@ -1409,7 +1419,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const evaluated = ops.map((x) => x.evaluate());
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityMultiply(engine!, evaluated);
-          if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+          if (
+            numericApproximation &&
+            r &&
+            isQuantity(r) &&
+            isMeasurement(r.op1)
+          )
             return r.N();
           return r;
         }
@@ -1636,7 +1651,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const evalBase = x.evaluate();
         if (evalBase.operator === 'Quantity') {
           const r = quantityPower(engine!, evalBase, n.evaluate());
-          if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+          if (
+            numericApproximation &&
+            r &&
+            isQuantity(r) &&
+            isMeasurement(r.op1)
+          )
             return r.N();
           return r;
         }
@@ -1775,7 +1795,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const nVal = n.re;
           if (nVal !== undefined && nVal !== 0) {
             const r = quantityPower(engine, evalX, engine.number(1 / nVal));
-            if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+            if (
+              numericApproximation &&
+              r &&
+              isQuantity(r) &&
+              isMeasurement(r.op1)
+            )
               return r.N();
             return r;
           }
@@ -1939,7 +1964,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const evalX = x.evaluate();
         if (evalX.operator === 'Quantity') {
           const r = quantityPower(engine, evalX, engine.number(0.5));
-          if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+          if (
+            numericApproximation &&
+            r &&
+            isQuantity(r) &&
+            isMeasurement(r.op1)
+          )
             return r.N();
           return r;
         }

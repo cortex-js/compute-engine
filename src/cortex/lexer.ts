@@ -837,8 +837,7 @@ export class Lexer {
 
     // Validate the closing indentation and strip it from each nonblank line.
     let validPrefix = true;
-    for (const ch of prefix)
-      if (ch !== ' ' && ch !== '\t') validPrefix = false;
+    for (const ch of prefix) if (ch !== ' ' && ch !== '\t') validPrefix = false;
 
     if (!validPrefix) diagnostics.push('multiline-whitespace-expected');
     else if (prefix.length > 0) {

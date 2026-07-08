@@ -131,7 +131,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // indexed_collection<...>.
         return parseType(`indexed_collection<${String(body.type)}>`);
       },
-      canonical: (ops, options) => canonicalLoopLike('Comprehension', ops, options),
+      canonical: (ops, options) =>
+        canonicalLoopLike('Comprehension', ops, options),
       evaluate: (ops, { engine: ce }) =>
         run(runComprehension(ops[0], ops.slice(1), ce), ce._timeRemaining),
       evaluateAsync: async (ops, { engine: ce, signal }) =>
@@ -377,7 +378,11 @@ function canonicalBlock(
   if (scope) {
     for (const name of declaredNames) {
       if (name !== 'Nothing' && !scope.bindings.has(name))
-        ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
+        ce._declareSymbolValue(
+          name,
+          { type: 'unknown', inferred: true },
+          scope
+        );
     }
     for (const op of ops) {
       if (!isFunction(op, 'Assign')) continue;
@@ -411,10 +416,7 @@ function canonicalBlock(
  * to an ordinary variable reference. Flag it as an error instead. Bare
  * `Return` is intentionally left alone.
  */
-function canonicalStatement(
-  ce: ComputeEngine,
-  op: Expression
-): Expression {
+function canonicalStatement(ce: ComputeEngine, op: Expression): Expression {
   if (isSymbol(op) && (op.symbol === 'Break' || op.symbol === 'Continue'))
     return ce.error(
       `\`${op.symbol}\` must be written as a function: \`${op.symbol}()\``,

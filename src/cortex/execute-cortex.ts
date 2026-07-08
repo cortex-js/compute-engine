@@ -81,8 +81,7 @@ export function executeCortex(
   // program wrapper: top-level `{…}` source is the collection grammar
   // (Set/Dictionary), statement blocks parse only in keyword position, and a
   // single-statement program is returned unwrapped.
-  const statements =
-    operator(ast) === 'Block' ? [...operands(ast)] : [ast];
+  const statements = operator(ast) === 'Block' ? [...operands(ast)] : [ast];
 
   let value: BoxedExpression = ce.Nothing;
 

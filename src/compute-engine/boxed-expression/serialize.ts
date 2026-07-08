@@ -16,7 +16,11 @@ import {
   isZero,
   neg,
 } from '../numerics/rationals';
-import { numberToString } from '../numerics/strings';
+import {
+  numberToString,
+  roundToSignificant,
+  roundToDecimalPlace,
+} from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
 
 import { NumericValue } from '../numeric-value/types';
@@ -32,7 +36,6 @@ import type {
   JsonSerializationOptions,
   DisplayDigits,
 } from '../global-types';
-import { roundToSignificant, roundToDecimalPlace } from '../numerics/strings';
 import { isOperatorDef } from './utils';
 import { isNumber, isSymbol, isString, isFunction } from './type-guards';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils';
@@ -816,7 +819,8 @@ function serializeJsonNumber(
       result = value.isPositive() ? 'PositiveInfinity' : 'NegativeInfinity';
     else {
       const digits = effectiveDigits(options);
-      const wantFractional = typeof digits === 'object' && 'fractional' in digits;
+      const wantFractional =
+        typeof digits === 'object' && 'fractional' in digits;
       const needsRounding = typeof digits === 'object';
 
       // Use the number shorthand if the number can be represented as a machine
