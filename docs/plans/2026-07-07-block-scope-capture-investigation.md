@@ -108,3 +108,97 @@ has no visible value), not control-flow propagation failures.
   become unnecessary or are unified with the general fix — but treat that as
   stretch, not required (high regression risk; see
   function-literal-canonicalization.md dead ends).
+
+---
+
+## RESOLUTION (2026-07-07, investigation session)
+
+**Status: FIXED** — R1–R5 pass on fresh and warm engines, including
+re-evaluating the *same expression object* and `Declare` inside a Loop body
+Block (re-executed per iteration). Regression tests:
+`test/compute-engine/block-scope-capture.test.ts` (11 tests).
+
+### Root cause (three distinct mechanisms)
+
+1. **Stale shadow bindings (R1/R2/R3).** `Declare`/`Assign` register their
+   symbol only at *evaluation* time. So when a nested `Block` (or an `If`
+   branch inside a `Loop` body) referencing an enclosing block-local is
+   canonicalized, the symbol is not yet declared anywhere; auto-declaration
+   puts a valueless inferred binding in the *innermost* scope. At evaluation,
+   the nested Block pushes its canonicalization scope, and that stale binding
+   shadows the enclosing block's runtime binding forever. (Verified by scope
+   instrumentation: `S3{k: unknown, no value} → S1{k: integer, 7}`.)
+
+2. **Runtime freshScope bypass (R5 / Element-loops).** `runNestedElements`
+   pushed a *fresh* eval scope and assigned the index variables there — but a
+   `Block` body pushes its own canonicalization scope, whose parent chain goes
+   through the loop's *canonicalization* scope, bypassing the fresh scope.
+   Bare (non-Block) bodies resolved by name against the current context and
+   worked; Block bodies saw the valueless canonicalization binding.
+
+3. **Re-entered scope conflicts (warm-state R4).** A Block pushes its
+   *persistent* canonicalization scope as its runtime scope, so a first
+   evaluation's runtime `Declare` binding (typed, with value) survives; the
+   second evaluation of the same object threw
+   `The symbol "…" is already declared in this scope`. Deterministic repro:
+   evaluate the same Block object twice. This also broke `Declare` inside any
+   Loop body Block (second iteration).
+
+### The fix (three parts, matching the mechanisms)
+
+1. **Hoisting in `canonicalBlock`** (`library/control-structures.ts`): before
+   canonicalizing statements, declare each top-level `Declare` target — and
+   each top-level `Assign` target *not visible in the scope chain* — into the
+   block scope as an inferred, valueless binding (identical to an
+   auto-declared one, so the `Declare` evaluate handler's existing upgrade
+   path applies unchanged). References from nested scopes now bind to the
+   right scope at canonicalization. Assign-without-declare stays block-local;
+   assignment to a visible binding (incl. constants → runtime error) still
+   binds upward.
+
+2. **`runNestedElements` iterates in the loop's own lexical scope** (the
+   pushed canonicalization scope) instead of a fresh child scope, so a Block
+   body's lexical parent chain sees the index values. (Landed concurrently in
+   the Loop/Comprehension session; same design.)
+
+3. **Statement re-declaration resets** (`library/core.ts`, `Declare`
+   evaluate): bindings created/upgraded by a `Declare` statement are marked
+   (`_declaredByStatement`); on re-entry of the same scope the mark lets the
+   statement replace its own earlier binding instead of conflicting. Genuine
+   conflicts (function parameters, `ce.declare()` API double-declares) still
+   throw — those bindings are unmarked.
+
+### Why not the "fresh runtime scope" redesign
+
+A prototype that evaluated every scoped expression in a fresh scope parented
+to the current runtime context (never pushing the canonicalization scope)
+fixed all repros *and* the warm-state hazard structurally — but broke two
+contracts the suite locks in: nullary-function lexical capture
+(`makeLambda`'s 0-arg shortcut calls `body.evaluate()` and relies on the
+canonicalization-scope push for defining-scope resolution) and closures
+defined inside a `Sum` body capturing the index variable from the Sum's
+canonicalization scope (`scope.test.ts` "FUNCTION INSIDE BIGOP"). The
+canonicalization scope *is* the runtime frame in this engine's design;
+mixing models breaks whenever they nest. The hoisting fix works with the
+existing model instead.
+
+### Residual (documented, unchanged behavior)
+
+- A nested statement-`Block` inside a *function body* reading a body-local
+  still hits the shadow problem in some shapes (the body scope's stale
+  bindings are only hidden for parameters at apply time). Pre-existing, not
+  a regression; the lambda-side unification remains the stretch goal.
+- Block/loop canonicalization scopes still accumulate runtime values across
+  evaluations (same as `Sum`); `Declare` resets its locals on re-entry, but a
+  read-before-assign of a non-declared local could observe a previous run's
+  value. Same-expression *recursive* re-entry (a loop inside a recursive
+  function) shares the scope — pre-existing `Sum` behavior.
+
+### Validation
+
+- `block-scope-capture` (11 new), `block-scope-shadowing`, `loop-imperative`,
+  `control-structures`, `scope`, `scope-advanced`, `lambda-capture`,
+  `function-parameter-shadowing`, `functions`, `compile-scope`,
+  `compile-loop`: all pass.
+- `npm run typecheck`: clean. Full `test/compute-engine` suite: see session
+  report (run for snapshot blast radius).
