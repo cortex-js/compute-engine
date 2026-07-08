@@ -124,6 +124,84 @@ describe('Loop — imperative (interpreter)', () => {
     expect(result.re).toBe(16);
   });
 
+  test('Break produced by a statement result terminates the loop', () => {
+    // Regression: a Break that is the *result* of a statement (here the If)
+    // must propagate out of the Block to the Loop — previously only a literal
+    // Break statement short-circuited the Block, and this shape looped to the
+    // iteration limit.
+    const result = ce
+      .expr(['Loop', ['Block', ['If', 'True', ['Break']]]])
+      .evaluate();
+    expect(result.symbol).toBe('Nothing');
+  });
+
+  test('Break inside If inside Block terminates the loop (while-lowering shape)', () => {
+    // `while cond { body }` lowers to Loop(Block(If(Not(cond), Break), body)).
+    // The counter is an engine-level binding: a Block-local read from within
+    // a nested Block does not resolve reliably (pre-existing scope-capture
+    // bug), and this test targets Break propagation, not scope resolution.
+    ce.declare('k', 'integer');
+    ce.assign('k', 0);
+    const result = ce
+      .expr([
+        'Loop',
+        [
+          'Block',
+          ['If', ['Not', ['Less', 'k', 5]], ['Break']],
+          ['Assign', 'k', ['Add', 'k', 1]],
+        ],
+      ])
+      .evaluate();
+    expect(result.symbol).toBe('Nothing');
+    expect(ce.expr('k').evaluate().re).toBe(5);
+  });
+
+  test('Break with value inside If inside Block becomes the loop value', () => {
+    ce.declare('k', 'integer');
+    ce.assign('k', 0);
+    const result = ce
+      .expr([
+        'Loop',
+        [
+          'Block',
+          ['Assign', 'k', ['Add', 'k', 1]],
+          ['If', ['GreaterEqual', 'k', 4], ['Break', ['Multiply', 'k', 10]]],
+        ],
+      ])
+      .evaluate();
+    expect(result.re).toBe(40);
+  });
+
+  test('two-argument If (no else branch) canonicalizes and evaluates', () => {
+    // Regression: If's canonical handler destructured a missing else branch
+    // and threw "Cannot read properties of undefined (reading 'canonical')",
+    // leaving the expression non-canonical (and a Loop over it unable to
+    // terminate).
+    const t = ce.expr(['If', 'True', 7]);
+    expect(t.isCanonical).toBe(true);
+    expect(t.evaluate().re).toBe(7);
+    expect(ce.expr(['If', 'False', 7]).evaluate().symbol).toBe('Nothing');
+  });
+
+  test('Return propagates through Block and Loop to the function boundary', () => {
+    // The Return is produced by an If *result* inside the loop-body Block; it
+    // must escape the Block, then the Loop, then the function-body Block, and
+    // be unwrapped at the application boundary. (The condition is a constant:
+    // reading a parameter from a nested Block is a separate, pre-existing
+    // scope-capture bug.)
+    const fn = ce.expr([
+      'Function',
+      [
+        'Block',
+        ['Loop', ['Block', ['If', 'True', ['Return', 42]], ['Break']]],
+        -1,
+      ],
+      'x',
+    ]);
+    const result = ce.function('Apply', [fn, ce.number(1)]).evaluate();
+    expect(result.re).toBe(42);
+  });
+
   test('Loop type is `nothing` for a for-effect body', () => {
     const expr = ce.box([
       'Loop',

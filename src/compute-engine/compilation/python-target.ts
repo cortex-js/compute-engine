@@ -10,7 +10,11 @@ import type {
 } from './types';
 import { BaseCompiler } from './base-compiler';
 import { tryGetConstant } from './constant-folding';
-import { isSymbol } from '../boxed-expression/type-guards';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards';
 
 /**
  * Python mathematical constants, keyed by MathJSON symbol.
@@ -52,6 +56,172 @@ function compilePythonEquality(
   for (let i = 0; i < args.length - 1; i++)
     parts.push(pair(args[i], args[i + 1]));
   return `(${parts.join(' and ')})`;
+}
+
+/**
+ * Compile a Sum/Product bound. An integer constant is emitted as the literal;
+ * anything else is compiled as an expression (symbolic bounds resolve at
+ * runtime — a Python `range` needs the value to be an `int`).
+ */
+function compilePythonBound(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): string {
+  if (isNumber(expr) && expr.im === 0 && Number.isFinite(expr.re))
+    return String(Math.floor(expr.re));
+  return BaseCompiler.compile(expr, target);
+}
+
+/**
+ * Compile a Sum/Product upper bound *plus one* — the engine's upper bound is
+ * inclusive, Python `range(a, b)` is exclusive. A literal integer folds the
+ * `+ 1` into the number (`range(1, 11)`); a symbolic bound stays `<b> + 1`.
+ */
+function compilePythonUpperBound(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): string {
+  if (isNumber(expr) && expr.im === 0 && Number.isFinite(expr.re))
+    return String(Math.floor(expr.re) + 1);
+  return `${BaseCompiler.compile(expr, target)} + 1`;
+}
+
+/**
+ * Compile a `Sum`/`Product` to a single Python generator expression:
+ *   `sum(<body> for i in range(<lo>, <hi> + 1))`
+ *   `math.prod(<body> for i in range(<lo>, <hi> + 1))`
+ *
+ * Being a single expression (not a statement block), it composes everywhere —
+ * lambda body, operand position, or a `compileFunction` single-line return.
+ * The engine's inclusive upper bound maps to Python's exclusive `range` upper
+ * (`<hi> + 1`); an empty/reversed range yields an empty `range`, so builtin
+ * `sum` returns 0 and `math.prod` returns 1 — matching the interpreter.
+ *
+ * Multi-index forms (`Sum(body, Limits(i,…), Limits(j,…), …)`) are emitted as
+ * nested generator clauses (`… for i in … for j in …`) — the natural, trivial
+ * Python idiom — so every indexing set is honored (cf. the JS target, which
+ * nests single-index loops; GPU targets fail closed instead).
+ */
+function compilePythonSumProduct(
+  kind: 'Sum' | 'Product',
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): string {
+  if (!args[0]) throw new Error(`${kind}: no body`);
+  if (!args[1]) throw new Error(`${kind}: no indexing set`);
+
+  const body = args[0];
+  const clauses = args.slice(1);
+  const forClauses: string[] = [];
+
+  // `idxTarget` binds every index seen so far, so an inner clause's bounds and
+  // the body resolve the outer indices as bare identifiers.
+  let idxTarget = target;
+  for (const clause of clauses) {
+    if (!isFunction(clause, 'Limits'))
+      throw new Error(`${kind}: expected a Limits indexing set`);
+    const ops = clause.ops;
+    const indexExpr = ops[0];
+    if (!isSymbol(indexExpr))
+      throw new Error(`${kind}: index must be a symbol`);
+    const index = indexExpr.symbol;
+
+    const lowerExpr = ops[1];
+    const upperExpr = ops[2];
+    // A Python `range` needs finite bounds — reject an unbounded Sum/Product
+    // (fail closed) rather than emit `range(1, inf + 1)`.
+    if (
+      lowerExpr === undefined ||
+      upperExpr === undefined ||
+      isSymbol(upperExpr, 'Nothing') ||
+      upperExpr.isInfinity ||
+      lowerExpr.isInfinity
+    )
+      throw new Error(`${kind}: an unbounded range is not supported`);
+
+    const lowerCode = compilePythonBound(lowerExpr, idxTarget);
+    const upperCode = compilePythonUpperBound(upperExpr, idxTarget);
+    forClauses.push(`for ${index} in range(${lowerCode}, ${upperCode})`);
+
+    const prev = idxTarget;
+    idxTarget = {
+      ...prev,
+      var: (id) => (id === index ? index : prev.var(id)),
+    };
+  }
+
+  const bodyCode = BaseCompiler.compile(body, idxTarget);
+  const gen = `${bodyCode} ${forClauses.join(' ')}`;
+  return kind === 'Sum' ? `sum(${gen})` : `math.prod(${gen})`;
+}
+
+/**
+ * Compile a `Loop` — imperative control flow, for effect (evaluates to
+ * `Nothing`). Emits a Python statement loop (not a JS IIFE):
+ *
+ * - `Loop(body)` → `while True:` with the body indented beneath it.
+ * - `Loop(body, Element(i, Range(lo, hi)))` (single ascending step-1 Range) →
+ *   `for i in range(<lo>, <hi> + 1):` with the body indented beneath it.
+ *
+ * Other shapes the generic loop compiler accepts (multiple Element clauses, a
+ * non-`Range` collection, a stepped/descending Range) fail closed here.
+ *
+ * The body is compiled as *statements* — a `Block` body is joined by newlines
+ * WITHOUT the block hook's trailing `return` (a loop body has no return value),
+ * then indented one level under the loop header.
+ */
+function compilePythonLoop(
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): string {
+  if (!args[0]) throw new Error('Loop: no body');
+  const body = args[0];
+  const elements = args.slice(1);
+
+  let header: string;
+  let bodyTarget = target;
+
+  if (elements.length === 0) {
+    header = 'while True:';
+  } else {
+    if (elements.length > 1)
+      throw new Error(
+        'Loop: multiple Element clauses are not supported by the Python target'
+      );
+    const indexing = elements[0];
+    if (!isFunction(indexing, 'Element'))
+      throw new Error('Loop: expected Element(index, Range(lo, hi))');
+    const indexExpr = indexing.ops[0];
+    const rangeExpr = indexing.ops[1];
+    if (!isSymbol(indexExpr)) throw new Error('Loop: index must be a symbol');
+    if (!isFunction(rangeExpr, 'Range') || rangeExpr.ops.length > 2)
+      throw new Error(
+        'Loop: only a single ascending step-1 Range(lo, hi) is supported by the Python target'
+      );
+    const index = indexExpr.symbol;
+    const lowerCode = compilePythonBound(rangeExpr.ops[0], target);
+    const upperCode = compilePythonUpperBound(rangeExpr.ops[1], target);
+    header = `for ${index} in range(${lowerCode}, ${upperCode}):`;
+    const prev = target;
+    bodyTarget = {
+      ...prev,
+      var: (id) => (id === index ? index : prev.var(id)),
+    };
+  }
+
+  // Compile the body as statements. Override the block hook so a `Block` body
+  // is newline-joined WITHOUT a trailing `return` (a loop body is for effect).
+  const stmtTarget: CompileTarget<Expression> = {
+    ...bodyTarget,
+    block: (stmts) => stmts.join('\n'),
+  };
+  let bodyCode = BaseCompiler.compile(body, stmtTarget);
+  if (bodyCode.trim() === '') bodyCode = 'pass';
+  const indented = bodyCode
+    .split('\n')
+    .map((l) => `    ${l}`)
+    .join('\n');
+  return `${header}\n${indented}`;
 }
 
 /**
@@ -333,8 +503,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Conjugate: 'np.conj',
 
   // Array/Vector operations
-  Sum: 'np.sum',
-  Product: 'np.prod',
+  // Indexed Sum/Product compile to Python generator expressions (single
+  // expressions, so they compose everywhere). The `Limits` clause carried by an
+  // indexed Sum/Product would throw under a plain `np.sum(...)` string mapping.
+  Sum: (args, _compile, target) =>
+    compilePythonSumProduct('Sum', args, target),
+  Product: (args, _compile, target) =>
+    compilePythonSumProduct('Product', args, target),
   Mean: 'np.mean',
   Median: 'np.median',
   Variance: 'np.var',
@@ -422,6 +597,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     };
     return build(0);
   },
+
+  // Loop — a Python statement loop (`while True:` / `for … in range(…):`), not
+  // the base compiler's JS `for`-IIFE (a Python SyntaxError). See
+  // compilePythonLoop for the supported shapes.
+  Loop: (args, _compile, target) => compilePythonLoop(args, target),
 
   // Special functions
   Erf: 'scipy.special.erf',
@@ -540,7 +720,12 @@ export class PythonTarget implements LanguageTarget<Expression> {
       block: (stmts) => {
         if (stmts.length === 0) return '';
         const last = stmts.length - 1;
-        stmts[last] = `return ${stmts[last]}`;
+        // A `Loop` (or any for-effect statement) as the block's last element
+        // compiles to a `for`/`while` statement — return-prefixing it would
+        // produce `return for …:` (a SyntaxError). Emit it as-is and make the
+        // block evaluate to `None` (the Loop's `Nothing` value).
+        if (/^(for|while)\b/.test(stmts[last])) stmts.push('return None');
+        else stmts[last] = `return ${stmts[last]}`;
         return stmts.join('\n');
       },
       ...options,
@@ -598,6 +783,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     let imports = 'import numpy as np\n';
     imports += 'import cmath\n';
     if (this.useScipy) imports += 'import scipy.special\n';
+    // `math.prod` (from a compiled Product) needs `import math`. The `\b`
+    // anchor avoids a false match on `cmath.` (no word boundary before `math`).
+    if (/\bmath\./.test(code)) imports += 'import math\n';
     return `${imports}\n${code}`;
   }
 
@@ -647,6 +835,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
       if (this.useScipy) {
         code += 'import scipy.special\n';
       }
+      // `math.prod` (from a compiled Product) needs `import math`.
+      if (/\bmath\./.test(body)) code += 'import math\n';
       code += '\n';
     }
 

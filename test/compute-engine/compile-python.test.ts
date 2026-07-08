@@ -623,4 +623,183 @@ describe('PYTHON TARGET', () => {
       expect(code).toBe('scipy.special.betainc(2, 3, x)');
     });
   });
+
+  // Indexed Sum/Product compile to single Python generator expressions
+  // (builtin `sum` / `math.prod`), so they compose everywhere. The engine's
+  // inclusive upper bound maps to Python's exclusive `range` upper (`b + 1`).
+  describe('Sum / Product → generator expressions', () => {
+    it('numeric-bound Sum via compileFunction', () => {
+      const expr = ce.parse('\\sum_{k=0}^{3} k^2');
+      const code = python.compileFunction(expr, 'f', []);
+      expect(code).toBe('def f():\n    return sum(k ** 2 for k in range(0, 4))\n');
+    });
+
+    it('symbolic-bound Sum keeps the bound symbolic (b + 1)', () => {
+      const expr = ce.parse('\\sum_{i=1}^{n} i^2');
+      expect(python.compile(expr).code).toBe(
+        'sum(i ** 2 for i in range(1, n + 1))'
+      );
+    });
+
+    it('Sum nested inside a larger expression', () => {
+      const expr = ce.parse('1 + \\sum_{i=1}^{n} i');
+      expect(python.compile(expr).code).toBe(
+        'sum(i for i in range(1, n + 1)) + 1'
+      );
+    });
+
+    it('Product compiles to math.prod', () => {
+      const expr = ce.parse('\\prod_{k=1}^{4} k');
+      expect(python.compile(expr).code).toBe(
+        'math.prod(k for k in range(1, 5))'
+      );
+    });
+
+    it('Product emits `import math` in the compile() output with imports', () => {
+      const expr = ce.parse('\\prod_{k=1}^{n} k');
+      const code = pythonWithImports.compile(expr).code;
+      expect(code).toContain('import math');
+      expect(code).toContain('math.prod(k for k in range(1, n + 1))');
+    });
+
+    it('empty/reversed range relies on Python range semantics', () => {
+      // range(5, 4) is empty → sum() == 0, math.prod() == 1 (matches the
+      // interpreter's empty-range identities).
+      expect(python.compile(ce.parse('\\sum_{k=5}^{3} k')).code).toBe(
+        'sum(k for k in range(5, 4))'
+      );
+      expect(python.compile(ce.parse('\\prod_{k=5}^{3} k')).code).toBe(
+        'math.prod(k for k in range(5, 4))'
+      );
+    });
+
+    it('multi-index Sum emits nested generator clauses', () => {
+      const expr = ce.box([
+        'Sum',
+        ['Multiply', 'i', 'j'],
+        ['Limits', 'i', 1, 3],
+        ['Limits', 'j', 1, 3],
+      ]);
+      expect(python.compile(expr).code).toBe(
+        'sum(i * j for i in range(1, 4) for j in range(1, 4))'
+      );
+    });
+
+    it('composes as a lambda body', () => {
+      const expr = ce.parse('\\sum_{i=1}^{n} i^2');
+      expect(python.compileLambda(expr, ['n'])).toBe(
+        'lambda n: sum(i ** 2 for i in range(1, n + 1))'
+      );
+    });
+  });
+
+  // Loop compiles to a Python statement loop (`while True:` / `for … in
+  // range(…):`), not the base compiler's JS `for`-IIFE.
+  describe('Loop → statement loops', () => {
+    it('accumulator pattern compiles to a valid def', () => {
+      const expr = ce.box([
+        'Block',
+        ['Assign', 'acc', 0],
+        [
+          'Loop',
+          ['Assign', 'acc', ['Add', 'acc', 'i']],
+          ['Element', 'i', ['Range', 1, 5]],
+        ],
+        'acc',
+      ]);
+      const code = python.compileFunction(expr, 'f', []);
+      expect(code).toBe(
+        'def f():\n' +
+          '    acc = 0\n' +
+          '    for i in range(1, 6):\n' +
+          '        acc = acc + i\n' +
+          '    return acc\n'
+      );
+      expect(code).not.toContain('=>');
+      expect(code).not.toContain('})()');
+    });
+
+    it('Loop body may be a multi-line Block (indented, no return)', () => {
+      const expr = ce.box([
+        'Block',
+        ['Assign', 's', 0],
+        [
+          'Loop',
+          [
+            'Block',
+            ['Assign', 's', ['Add', 's', 'i']],
+            ['Assign', 's', ['Multiply', 's', 2]],
+          ],
+          ['Element', 'i', ['Range', 1, 3]],
+        ],
+        's',
+      ]);
+      const code = python.compileFunction(expr, 'm', []);
+      expect(code).toBe(
+        'def m():\n' +
+          '    s = 0\n' +
+          '    for i in range(1, 4):\n' +
+          '        s = i + s\n' +
+          '        s = 2 * s\n' +
+          '    return s\n'
+      );
+      expect(code).not.toContain('return s = ');
+    });
+
+    it('bare Loop compiles to `while True:`', () => {
+      // A bare Loop as the whole function body goes through compileFunction's
+      // multi-line branch directly (no Block, so no block hook / return None):
+      // the def implicitly returns None.
+      const expr = ce.box(['Loop', ['Assign', 'acc', ['Add', 'acc', 1]]]);
+      const code = python.compileFunction(expr, 'b', ['acc']);
+      expect(code).toBe(
+        'def b(acc):\n    while True:\n        acc = acc + 1\n'
+      );
+    });
+
+    it('Loop as the final statement of a Block appends `return None`', () => {
+      // The block hook must NOT return-prefix a `for`/`while` statement (that
+      // would be `return for …:` — a SyntaxError). Instead the Block evaluates
+      // to None (the Loop's Nothing value).
+      const expr = ce.box([
+        'Block',
+        ['Assign', 'acc', 0],
+        [
+          'Loop',
+          ['Assign', 'acc', ['Add', 'acc', 'i']],
+          ['Element', 'i', ['Range', 1, 5]],
+        ],
+      ]);
+      const code = python.compileFunction(expr, 'g', []);
+      expect(code).toBe(
+        'def g():\n' +
+          '    acc = 0\n' +
+          '    for i in range(1, 6):\n' +
+          '        acc = acc + i\n' +
+          '    return None\n'
+      );
+      expect(code).not.toMatch(/return for/);
+    });
+
+    it('expression-position Loop fails closed (D6)', () => {
+      const loop = ce.box([
+        'List',
+        [
+          'Loop',
+          ['Assign', 'acc', 'i'],
+          ['Element', 'i', ['Range', 1, 5]],
+        ],
+      ]);
+      expect(() => python.compile(loop)).toThrow(/Loop/);
+    });
+
+    it('a Loop body cannot be a compileLambda body', () => {
+      const loop = ce.box([
+        'Loop',
+        ['Assign', 'acc', 'i'],
+        ['Element', 'i', ['Range', 1, 5]],
+      ]);
+      expect(() => python.compileLambda(loop, [])).toThrow(/lambda/);
+    });
+  });
 });

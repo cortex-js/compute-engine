@@ -27,7 +27,32 @@ describe('CONTROL STRUCTURES', () => {
         ['Add', 2, 2],
       ]);
       const result = expr.evaluate();
-      expect(result.json).toMatchInlineSnapshot(`3`);
+      // The Return short-circuits the block, and the Block's value is the
+      // Return expression itself: it propagates through nested blocks and
+      // loops until a function application unwraps it.
+      expect(result.json).toMatchInlineSnapshot(`
+        [
+          Return,
+          3,
+        ]
+      `);
+    });
+
+    it('should short-circuit when a statement evaluates to a control-flow expression', () => {
+      // The If statement is not literally a Return, but evaluates to one:
+      // the block must stop, not run the following statements.
+      const expr = ce.expr([
+        'Block',
+        ['If', 'True', ['Return', 3], 'Nothing'],
+        ['Add', 2, 2],
+      ]);
+      const result = expr.evaluate();
+      expect(result.json).toMatchInlineSnapshot(`
+        [
+          Return,
+          3,
+        ]
+      `);
     });
   });
 

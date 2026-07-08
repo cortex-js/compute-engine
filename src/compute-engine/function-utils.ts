@@ -315,18 +315,32 @@ export function evaluateStatements(
 ): Expression {
   let result: Expression = ce.Nothing;
   for (const op of ops) {
-    const h = op.operator;
-    if (h === 'Return' && isFunction(op)) {
-      result = op.op1.evaluate();
-      break;
-    }
-    if ((h === 'Break' || h === 'Continue') && isFunction(op)) {
-      result = ce.expr([h, op.op1.evaluate()]);
-      break;
-    }
+    // Evaluate the statement. `Break`/`Continue` are inert registered
+    // operators and `Return` is unregistered, so a literal control-flow
+    // statement evaluates to itself with its operand evaluated.
     result = op.evaluate();
+    // Short-circuit on a control-flow result — whether the statement was a
+    // literal `Break`/`Continue`/`Return` or *evaluated to* one (e.g.
+    // `If(cond, Break)`). The control-flow expression itself is the block's
+    // value, so it propagates through nested blocks up to the enclosing
+    // `Loop` (which consumes `Break`/`Continue`) or function application
+    // (which unwraps `Return` — see `unwrapReturn`).
+    const h = result.operator;
+    if (h === 'Return' || h === 'Break' || h === 'Continue') break;
   }
   return result;
+}
+
+/**
+ * Unwrap a `["Return", value]` expression to its value at a function
+ * application boundary. `evaluateStatements` propagates `Return` wrapped so
+ * that it can escape nested blocks and loops; the function boundary is where
+ * it is consumed.
+ */
+function unwrapReturn(ce: ComputeEngine, expr: Expression): Expression {
+  if (expr.operator === 'Return' && isFunction(expr))
+    return expr.ops.length > 0 ? expr.op1 : ce.Nothing;
+  return expr;
 }
 
 /**
@@ -561,7 +575,7 @@ function makeLambda(
       ce.pushScope(freshScope);
       let newBody: Expression;
       try {
-        newBody = evaluateStatements(ce, bodyFn.ops);
+        newBody = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));
       } finally {
         ce.popScope();
         bodyScope.parent = savedParent;
@@ -616,7 +630,7 @@ function makeLambda(
     ce.pushScope(freshScope);
     let result: Expression;
     try {
-      result = evaluateStatements(ce, bodyFn.ops);
+      result = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));
 
       // Closure capture: walk the result tree and rebind any Function literals
       // so their body scopes close over the current freshScope.

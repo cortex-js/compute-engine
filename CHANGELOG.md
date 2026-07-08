@@ -130,6 +130,23 @@
   loop's value; `Continue()` skips to the next iteration. Outside a loop both
   are inert.
 
+- **Control flow now propagates out of `Block` statement results.** A
+  `Break`, `Continue`, or `Return` produced by a statement's *result* — e.g.
+  `["If", cond, ["Break"]]` — now short-circuits the enclosing `Block` and
+  propagates to the enclosing loop or function, as the documentation always
+  specified. Previously only a statement that was *literally* one of those
+  heads short-circuited, so a conditional `Break` inside a block was silently
+  discarded and the loop ran to the iteration limit. Consequences: the
+  `while`-loop lowering `["Loop", ["Block", ["If", cond, ["Break"]], …body]]`
+  now terminates correctly, and a `Block` whose value is a `Return` evaluates
+  to the `["Return", value]` expression itself (unwrapped at the function
+  application boundary), where it previously unwrapped eagerly.
+
+- **`If` without an else branch is fixed.** `["If", cond, then]` — the
+  documented two-operand form — failed to canonicalize (throwing
+  `Cannot read properties of undefined`) and was left inert. It now
+  canonicalizes and evaluates to `Nothing` when the condition is false.
+
 ## 0.68.0 _2026-07-05_
 
 ### Breaking Changes

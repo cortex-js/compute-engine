@@ -61,11 +61,16 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     If: {
       description: 'Conditional branch: evaluate one of two expressions.',
       lazy: true,
-      signature: '(expression, expression, expression) -> any',
+      signature: '(expression, expression, expression?) -> any',
+      // The else branch is optional: `If(cond, expr)` evaluates to `Nothing`
+      // when the condition is false.
       type: ([_cond, ifTrue, ifFalse]) =>
-        widen(ifTrue.type.type, ifFalse.type.type),
-      canonical: ([cond, ifTrue, ifFalse], { engine }) =>
-        engine._fn('If', [cond.canonical, ifTrue.canonical, ifFalse.canonical]),
+        widen(ifTrue.type.type, ifFalse?.type.type ?? 'nothing'),
+      canonical: (ops, { engine }) =>
+        engine._fn(
+          'If',
+          ops.map((op) => op.canonical)
+        ),
       evaluate: ([cond, ifTrue, ifFalse], { engine }) => {
         const evaluatedCond = sym(cond.evaluate());
         if (evaluatedCond === 'True')
