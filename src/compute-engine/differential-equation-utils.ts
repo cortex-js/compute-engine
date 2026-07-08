@@ -11,6 +11,19 @@ export function symbolArg(
   return arg;
 }
 
+export function symbolOrListArg(
+  engine: IComputeEngine,
+  arg: Expression | undefined
+): Expression {
+  if (arg === undefined) return engine.error('missing');
+  if (isSymbol(arg)) return arg;
+  if (isFunction(arg, 'List')) {
+    const symbols = arg.ops.map((op) => symbolArg(engine, op));
+    return engine._fn('List', symbols);
+  }
+  return engine.typeError('symbol', arg.type, arg);
+}
+
 export function isDependentFunction(
   expr: Expression,
   dependentName: string,
@@ -78,7 +91,7 @@ export function derivativeOrderOfDependent(
   return undefined;
 }
 
-function explicitDerivativeRhs(
+export function explicitDerivativeRhs(
   equation: Expression,
   dependentName: string,
   independentName: string
@@ -99,6 +112,15 @@ function explicitDerivativeRhs(
   return undefined;
 }
 
+function dependentNames(dependent: Expression): string[] | undefined {
+  if (isSymbol(dependent)) return [dependent.symbol];
+  if (!isFunction(dependent, 'List')) return undefined;
+  const names = dependent.ops.map((op) => sym(op));
+  if (names.some((name) => name === undefined)) return undefined;
+  const result = names as string[];
+  return new Set(result).size === result.length ? result : undefined;
+}
+
 function substituteDependentCall(
   expr: Expression,
   dependentName: string,
@@ -112,6 +134,31 @@ function substituteDependentCall(
     expr.operator,
     expr.ops.map((op) =>
       substituteDependentCall(op, dependentName, independentName, stateName)
+    )
+  );
+}
+
+function substituteSystemDependentCalls(
+  expr: Expression,
+  dependentNames: readonly string[],
+  independentName: string,
+  stateNames: readonly string[]
+): Expression {
+  for (let i = 0; i < dependentNames.length; i++) {
+    if (isDependentFunction(expr, dependentNames[i], independentName))
+      return expr.engine.symbol(stateNames[i]);
+  }
+
+  if (!isFunction(expr)) return expr;
+  return expr.engine._fn(
+    expr.operator,
+    expr.ops.map((op) =>
+      substituteSystemDependentCalls(
+        op,
+        dependentNames,
+        independentName,
+        stateNames
+      )
     )
   );
 }
@@ -150,8 +197,8 @@ export function nDSolve(
   stepsExpr?: Expression
 ): Expression | undefined {
   const ce = equation.engine;
-  const dependentName = sym(dependent);
-  if (!dependentName) return undefined;
+  const names = dependentNames(dependent);
+  if (!names) return undefined;
 
   if (!isFunction(limits, 'Limits')) return undefined;
   const independentName = sym(limits.op1);
@@ -169,6 +216,72 @@ export function nDSolve(
   )
     return undefined;
 
+  if (names.length > 1 || isFunction(equation, 'List')) {
+    if (
+      names.length === 1 ||
+      !isFunction(equation, 'List') ||
+      !isFunction(initialValue, 'List') ||
+      equation.ops.length !== names.length ||
+      initialValue.ops.length !== names.length
+    )
+      return undefined;
+
+    const initialValues = initialValue.ops.map((op) => op.N().re);
+    if (!initialValues.every(Number.isFinite)) return undefined;
+
+    const stateNames = names.map((name, i) => `ndsolve${name}state${i}`);
+    const runs: ((vars: Record<string, number>) => number)[] = [];
+
+    for (let i = 0; i < equation.ops.length; i++) {
+      const rhsInfo = explicitDerivativeRhs(
+        equation.ops[i].structural,
+        names[i],
+        independentName
+      );
+      if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+
+      const compiledRhs = substituteSystemDependentCalls(
+        rhsInfo.rhs,
+        names,
+        independentName,
+        stateNames
+      );
+      const compiled = ce._compile(compiledRhs, { realOnly: true });
+      if (!compiled.success) return undefined;
+      runs.push(compiled.run as (vars: Record<string, number>) => number);
+    }
+
+    const samples = rk4System(
+      (x, y) => {
+        const vars: Record<string, number> = { [independentName]: x };
+        stateNames.forEach((name, i) => {
+          vars[name] = y[i];
+        });
+        const values = runs.map((run) => run(vars));
+        return values.every(Number.isFinite) ? values : undefined;
+      },
+      x0,
+      initialValues,
+      x1,
+      { steps, deadline: ce._deadline }
+    );
+    if (!samples) return undefined;
+
+    return ce._fn(
+      'List',
+      samples.map(([x, y]) =>
+        ce._fn('List', [
+          ce.number(x),
+          ce._fn(
+            'List',
+            y.map((yi) => ce.number(yi))
+          ),
+        ])
+      )
+    );
+  }
+
+  const dependentName = names[0];
   const rhsInfo = explicitDerivativeRhs(
     equation.structural,
     dependentName,

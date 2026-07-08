@@ -8,6 +8,7 @@ import {
 } from '../boxed-expression/polynomials';
 import {
   derivativeOrderOfDependent,
+  explicitDerivativeRhs,
   isDependentFunction,
   isDerivativeOfDependent,
 } from '../differential-equation-utils';
@@ -21,6 +22,11 @@ interface LinearTermCoefficients {
 
 interface DerivativeTermCoefficients {
   coefficients: Map<number, Expression>;
+  rest: Expression;
+}
+
+interface SystemLinearTerms {
+  coefficients: Expression[];
   rest: Expression;
 }
 
@@ -221,6 +227,33 @@ function expressionForDependent(
     dependentName,
     independentName,
     dependentCall: ce.function(dependentName, [ce.symbol(independentName)]),
+  };
+}
+
+function expressionsForDependentSystem(
+  dependent: Expression,
+  independent: Expression
+): {
+  dependentNames: string[];
+  independentName: string;
+  dependentCalls: Expression[];
+} | null {
+  if (!isFunction(dependent, 'List')) return null;
+  const independentName = sym(independent);
+  if (!independentName) return null;
+
+  const dependentNames = dependent.ops.map((op) => sym(op));
+  if (dependentNames.some((name) => name === undefined)) return null;
+  const names = dependentNames as string[];
+  if (new Set(names).size !== names.length) return null;
+
+  const ce = dependent.engine;
+  return {
+    dependentNames: names,
+    independentName,
+    dependentCalls: names.map((name) =>
+      ce.function(name, [ce.symbol(independentName)])
+    ),
   };
 }
 
@@ -589,6 +622,194 @@ function dSolveAntiderivative(expr: Expression, variable: string): Expression {
     }
   }
   return antiderivative(expr, variable);
+}
+
+function splitSystemTerm(
+  term: Expression,
+  dependentNames: readonly string[],
+  independentName: string
+): { index: number | null; coefficient: Expression } {
+  const ce = term.engine;
+
+  for (let i = 0; i < dependentNames.length; i++) {
+    if (isDependentFunction(term, dependentNames[i], independentName))
+      return { index: i, coefficient: ce.One };
+  }
+
+  if (isFunction(term, 'Negate')) {
+    const result = splitSystemTerm(term.op1, dependentNames, independentName);
+    return { ...result, coefficient: result.coefficient.neg() };
+  }
+
+  if (isFunction(term, 'Multiply')) {
+    let dependentIndex = -1;
+    let dependentFactorIndex = -1;
+
+    for (let i = 0; i < term.ops.length; i++) {
+      for (let j = 0; j < dependentNames.length; j++) {
+        if (
+          isDependentFunction(term.ops[i], dependentNames[j], independentName)
+        ) {
+          if (dependentIndex >= 0) return { index: null, coefficient: term };
+          dependentIndex = j;
+          dependentFactorIndex = i;
+        }
+      }
+    }
+
+    if (dependentIndex >= 0) {
+      const coefficientFactors = term.ops.filter(
+        (_, i) => i !== dependentFactorIndex
+      );
+      return {
+        index: dependentIndex,
+        coefficient:
+          coefficientFactors.length === 0
+            ? ce.One
+            : ce.function('Multiply', coefficientFactors),
+      };
+    }
+  }
+
+  return { index: null, coefficient: term };
+}
+
+function collectSystemLinearTerms(
+  rhs: Expression,
+  dependentNames: readonly string[],
+  independentName: string
+): SystemLinearTerms {
+  const ce = rhs.engine;
+  const terms = isFunction(rhs, 'Add')
+    ? rhs.ops
+    : isFunction(rhs, 'Subtract')
+      ? [rhs.op1, rhs.op2.neg()]
+      : [rhs];
+  const coefficients = dependentNames.map(() => ce.Zero);
+  let rest = ce.Zero;
+
+  for (const term of terms) {
+    const split = splitSystemTerm(term, dependentNames, independentName);
+    if (split.index === null) rest = rest.add(split.coefficient);
+    else
+      coefficients[split.index] = coefficients[split.index].add(
+        split.coefficient
+      );
+  }
+
+  return { coefficients, rest };
+}
+
+function hasAnyDependentOrDerivative(
+  expr: Expression,
+  dependentNames: readonly string[],
+  independentName: string
+): boolean {
+  return dependentNames.some((name) =>
+    hasDependentOrDerivative(expr, name, independentName)
+  );
+}
+
+function listOps(expr: Expression): readonly Expression[] | undefined {
+  return isFunction(expr, 'List') ? expr.ops : undefined;
+}
+
+function solveLinearHomogeneousSystem(
+  equation: Expression,
+  dependent: Expression,
+  independent: Expression
+): Expression | undefined {
+  const system = expressionsForDependentSystem(dependent, independent);
+  if (!system || !isFunction(equation, 'List')) return undefined;
+
+  const { dependentNames, independentName, dependentCalls } = system;
+  const ce = equation.engine;
+  if (
+    dependentNames.length === 0 ||
+    equation.ops.length !== dependentNames.length
+  )
+    return undefined;
+
+  const rows: Expression[][] = [];
+  for (let i = 0; i < equation.ops.length; i++) {
+    const rhsInfo = explicitDerivativeRhs(
+      equation.ops[i].structural,
+      dependentNames[i],
+      independentName
+    );
+    if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+
+    const row = collectSystemLinearTerms(
+      rhsInfo.rhs.structural,
+      dependentNames,
+      independentName
+    );
+    if (!row.rest.simplify().isSame(0)) return undefined;
+    if (
+      row.coefficients.some(
+        (coefficient) =>
+          coefficient.has(independentName) ||
+          hasAnyDependentOrDerivative(
+            coefficient,
+            dependentNames,
+            independentName
+          )
+      )
+    )
+      return undefined;
+
+    rows.push(row.coefficients.map((coefficient) => coefficient.simplify()));
+  }
+
+  const matrix = ce
+    ._fn(
+      'List',
+      rows.map((row) => ce._fn('List', row))
+    )
+    .evaluate();
+  const eigen = ce.expr(['Eigen', matrix]).evaluate();
+  if (!isFunction(eigen, 'Tuple') || eigen.nops !== 2) return undefined;
+
+  const eigenvalues = listOps(eigen.op1);
+  const eigenvectors = listOps(eigen.op2);
+  if (
+    !eigenvalues ||
+    !eigenvectors ||
+    eigenvalues.length !== dependentNames.length ||
+    eigenvectors.length !== dependentNames.length
+  )
+    return undefined;
+
+  const seenEigenvalues = new Set<string>();
+  for (const eigenvalue of eigenvalues) {
+    const key = eigenvalue.toString();
+    if (seenEigenvalues.has(key)) return undefined;
+    seenEigenvalues.add(key);
+  }
+
+  const constants = integrationConstants(equation, dependentNames.length);
+  const x = ce.symbol(independentName);
+  const solutions = dependentNames.map((_, componentIndex) => {
+    const terms: Expression[] = [];
+    for (let i = 0; i < eigenvalues.length; i++) {
+      const vector = listOps(eigenvectors[i]);
+      if (!vector || vector.length !== dependentNames.length) return undefined;
+      terms.push(
+        constants[i]
+          .mul(vector[componentIndex])
+          .mul(ce.function('Exp', [eigenvalues[i].mul(x).simplify()]))
+      );
+    }
+    return ce.function('Add', terms).simplify();
+  });
+  if (solutions.some((solution) => solution === undefined)) return undefined;
+
+  return ce.function(
+    'List',
+    dependentCalls.map((call, i) =>
+      ce.function('Equal', [call, solutions[i] as Expression])
+    )
+  );
 }
 
 function productExpression(ce: Expression['engine'], factors: Expression[]) {
@@ -1356,6 +1577,9 @@ export function dSolve(
   dependent: Expression,
   independent: Expression
 ): Expression | undefined {
+  const system = solveLinearHomogeneousSystem(equation, dependent, independent);
+  if (system) return system;
+
   const names = expressionForDependent(dependent, independent);
   if (!names) return undefined;
 
