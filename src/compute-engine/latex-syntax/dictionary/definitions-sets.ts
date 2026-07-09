@@ -126,8 +126,10 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   // Real numbers <= 0
   { name: 'NonPositiveNumbers', latexTrigger: '\\R_{\\le0}' },
   { latexTrigger: '\\R^{\\leq0}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\R^{\\leqslant0}', parse: 'NonPositiveNumbers' },
   { latexTrigger: '\\R^{-0}', parse: 'NonPositiveNumbers' },
   { latexTrigger: '\\R^{\\leq}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\R^{\\leqslant}', parse: 'NonPositiveNumbers' },
   { latexTrigger: '\\R^{0-}', parse: 'NonPositiveNumbers' },
 
   // Real numbers > 0
@@ -143,8 +145,10 @@ export const DEFINITIONS_SETS: LatexDictionary = [
 
   // Real numbers >= 0
   { name: 'NonNegativeNumbers', latexTrigger: '\\R_{\\geq0}' },
+  { latexTrigger: '\\R_{\\geqslant0}', parse: 'NonNegativeNumbers' },
   { latexTrigger: '\\R^{0+}', parse: 'NonNegativeNumbers' },
   { latexTrigger: '\\R^{\\geq}', parse: 'NonNegativeNumbers' },
+  { latexTrigger: '\\R^{\\geqslant}', parse: 'NonNegativeNumbers' },
 
   // Extended Real numbers = \R \cup \{-\infty, +\infty\}
   { name: 'ExtendedRealNumbers', latexTrigger: '\\overline\\R' },
@@ -162,6 +166,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   // Integers <= 0
   { name: 'NonPositiveIntegers', latexTrigger: '\\Z_{\\le0}' },
   { latexTrigger: '\\Z_{\\leq0}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\Z_{\\leqslant0}', parse: 'NonPositiveIntegers' },
   { latexTrigger: '\\Z_{<0}', parse: 'NonPositiveIntegers' },
 
   // Integers >  0
@@ -188,7 +193,9 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { name: 'NonNegativeIntegers', latexTrigger: ['\\N'] },
   { latexTrigger: '\\Z^{+0}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{\\geq}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\Z^{\\geqslant}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{\\geq0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\Z^{\\geqslant0}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{0+}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\mathbb{N}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\N_0', parse: 'NonNegativeIntegers' },
@@ -224,12 +231,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\mathbb{R}_{+}', parse: 'PositiveNumbers' },
   { latexTrigger: '\\mathbb{R}_{\\geq0}', parse: 'NonNegativeNumbers' },
   { latexTrigger: '\\mathbb{R}_{\\ge0}', parse: 'NonNegativeNumbers' },
+  { latexTrigger: '\\mathbb{R}_{\\geqslant0}', parse: 'NonNegativeNumbers' },
   { latexTrigger: '\\mathbb{R}_{<0}', parse: 'NegativeNumbers' },
   { latexTrigger: '\\mathbb{R}_{\\lt0}', parse: 'NegativeNumbers' },
   { latexTrigger: '\\mathbb{R}_-', parse: 'NegativeNumbers' },
   { latexTrigger: '\\mathbb{R}_{-}', parse: 'NegativeNumbers' },
   { latexTrigger: '\\mathbb{R}_{\\leq0}', parse: 'NonPositiveNumbers' },
   { latexTrigger: '\\mathbb{R}_{\\le0}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\mathbb{R}_{\\leqslant0}', parse: 'NonPositiveNumbers' },
 
   // Integers > 0 / >= 0 / < 0 / <= 0
   { latexTrigger: '\\mathbb{Z}_{>0}', parse: 'PositiveIntegers' },
@@ -240,12 +249,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\mathbb{Z}^{+}', parse: 'PositiveIntegers' },
   { latexTrigger: '\\mathbb{Z}_{\\geq0}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\mathbb{Z}_{\\ge0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{\\geqslant0}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\mathbb{Z}_{<0}', parse: 'NegativeIntegers' },
   { latexTrigger: '\\mathbb{Z}_{\\lt0}', parse: 'NegativeIntegers' },
   { latexTrigger: '\\mathbb{Z}_-', parse: 'NegativeIntegers' },
   { latexTrigger: '\\mathbb{Z}_{-}', parse: 'NegativeIntegers' },
   { latexTrigger: '\\mathbb{Z}_{\\leq0}', parse: 'NonPositiveIntegers' },
   { latexTrigger: '\\mathbb{Z}_{\\le0}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\mathbb{Z}_{\\leqslant0}', parse: 'NonPositiveIntegers' },
 
   // Naturals: > 0 is the positive integers; N_0 already includes 0.
   { latexTrigger: '\\mathbb{N}_{>0}', parse: 'PositiveIntegers' },
@@ -256,8 +267,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\mathbb{N}^{*}', parse: 'PositiveIntegers' },
   { latexTrigger: '\\mathbb{N}_0', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\mathbb{N}_{0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\mathbb{N}_{\\geq0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\mathbb{N}_{\\ge0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\mathbb{N}_{\\geqslant0}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\mathbb{N}_1', parse: 'PositiveIntegers' },
   { latexTrigger: '\\mathbb{N}_{1}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{N}_{\\geq1}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{N}_{\\ge1}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\mathbb{N}_{\\geqslant1}', parse: 'PositiveIntegers' },
 
   // `\mathbb{N}_{>1}` (integers strictly greater than 1) has no named set:
   // transcribe it faithfully as an inert set-builder `{ n ∈ ℕ | n > 1 }`.

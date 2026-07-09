@@ -396,7 +396,26 @@ const KEYWORDS: KeywordDef[] = [
     precedence: 19, // Just below comma (20), so the body is captured whole
     associativity: 'none',
     operatorname: true,
-    build: (parser, lhs, until) => parseForComprehension(parser, lhs, until),
+    build: (parser, lhs, until) => {
+      // First try to parse the clause as a comprehension binding list
+      // (`for x = L_1, ...`). If that doesn't apply, rewind and try to parse
+      // it as a trailing qualifier condition (`... for n \ge 2`), producing a
+      // `ForAll`.
+      const start = parser.index;
+      const comprehension = parseForComprehension(parser, lhs, until);
+      if (comprehension !== null) return comprehension;
+      parser.index = start;
+      const condition = parseTrailingCondition(parser, until);
+      if (condition === null) {
+        parser.index = start;
+        return null;
+      }
+      return [
+        'ForAll',
+        condition,
+        normalizeQualifierBody(lhs),
+      ] as MathJsonExpression;
+    },
   },
   {
     surface: 'break',
@@ -432,6 +451,29 @@ const KEYWORDS: KeywordDef[] = [
     build: (parser, until) => parseQuantifier('ForAll')(parser, until!),
   },
   {
+    // Trailing qualifier form: `<body> \text{for all } n \ge 1`. The prefix
+    // entry above handles `for all` in leading position; here we handle it as
+    // a low-precedence infix so the body is captured whole and the clause
+    // parses as a `ForAll` condition, mirroring the infix `for` fallback.
+    surface: 'for all',
+    kind: 'infix',
+    precedence: 19, // Same as the infix `for` fallback
+    associativity: 'none',
+    build: (parser, lhs, until) => {
+      const start = parser.index;
+      const condition = parseTrailingCondition(parser, until);
+      if (condition === null) {
+        parser.index = start;
+        return null;
+      }
+      return [
+        'ForAll',
+        condition,
+        normalizeQualifierBody(lhs),
+      ] as MathJsonExpression;
+    },
+  },
+  {
     surface: 'there exists',
     kind: 'prefix',
     precedence: 200, // Same as \exists
@@ -461,6 +503,20 @@ const KEYWORDS: KeywordDef[] = [
   },
 
   // Logical connectives
+  {
+    // English enumeration connective in leading position: `A, B, \text{and } C`.
+    // When `and` appears where an operand is expected (e.g. after a comma in a
+    // list), it is a purely connective word — absorb it and return the
+    // following expression, so `A, B, and C` parses as the list `A, B, C`
+    // rather than treating `and` as a stray text token.
+    surface: 'and',
+    kind: 'prefix',
+    precedence: 235, // Same as \land
+    build: (parser, until) => {
+      parser.skipVisualSpace();
+      return parser.parseExpression(until) ?? 'Nothing';
+    },
+  },
   {
     surface: 'and',
     kind: 'infix',
@@ -3375,6 +3431,67 @@ function parseForComprehension(
 
   if (elements.length === 0) return null;
   return ['Comprehension', lhs, ...elements] as MathJsonExpression;
+}
+
+/** Relational / membership predicates recognized as a trailing qualifier
+ * condition (`... for n \ge 2`, `... for all n \ge 1`). */
+const CONDITION_PREDICATE_OPERATORS = new Set([
+  'Less',
+  'Greater',
+  'LessEqual',
+  'GreaterEqual',
+  'Equal',
+  'NotEqual',
+  'Element',
+]);
+
+/** Return true if `expr` is a relational/membership predicate, or an
+ * `And`/`Or` composed of such predicates. */
+function isConditionPredicate(expr: MathJsonExpression | null): boolean {
+  if (expr === null) return false;
+  const op = operator(expr);
+  if (!op) return false;
+  if (CONDITION_PREDICATE_OPERATORS.has(op)) return true;
+  if (op === 'And' || op === 'Or') {
+    const args = operands(expr);
+    if (args.length === 0) return false;
+    return args.every((arg) => isConditionPredicate(arg));
+  }
+  return false;
+}
+
+/**
+ * Parse a trailing qualifier condition clause (the part after
+ * `\text{for } ` / `\text{for all } ` in a recurrence definition such as
+ * `u_n = ... \text{for } n \ge 2`). Returns the parsed predicate if it is a
+ * recognizable relational/membership condition, otherwise `null` (leaving it
+ * to the caller to rewind and report the clause as unparsed).
+ */
+function parseTrailingCondition(
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
+  parser.skipVisualSpace();
+  const condition = parser.parseExpression(until);
+  if (!isConditionPredicate(condition)) return null;
+  return condition;
+}
+
+/**
+ * Normalize the body captured to the left of a trailing `for`/`for all`
+ * qualifier. A comma-separated list of equations parses as a raw
+ * `Delimiter(Sequence(...), ',')`, which holds its content un-canonicalized.
+ * Unwrap it to a `Tuple` so the equations are canonicalized (the target shape
+ * for a recurrence system such as `u_0 = 0, u_1 = 1, u_n = ... for n \ge 2`).
+ */
+function normalizeQualifierBody(body: MathJsonExpression): MathJsonExpression {
+  if (operator(body) !== 'Delimiter') return body;
+  const inner = operand(body, 1);
+  if (operator(inner) !== 'Sequence') return body;
+  // Only unwrap a bare comma-separated list (no bracket fence): the delimiter
+  // has exactly two operands and its separator is a comma.
+  if (nops(body) !== 2 || stringValue(operand(body, 2)) !== ',') return body;
+  return ['Tuple', ...operands(inner)] as MathJsonExpression;
 }
 
 /**

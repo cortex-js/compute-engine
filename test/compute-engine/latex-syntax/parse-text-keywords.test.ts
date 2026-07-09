@@ -166,3 +166,99 @@ describe('KEYWORD COMMAND (\\keyword{…})', () => {
     expect(ce.parse('\\keyword{andy}').json).toMatchInlineSnapshot(`'andy'`);
   });
 });
+
+describe('TRAILING QUALIFIER CLAUSES', () => {
+  test('trailing \\text{for} condition parses as ForAll', () => {
+    // A non-binding clause (a condition, not `name = collection`) after `for`
+    // is a trailing qualifier: `body for n >= 2` → ForAll(n >= 2, body).
+    const engine = new ComputeEngine();
+    expect(engine.parse('u_n = 3u_{n-1} \\text{ for } n \\ge 2').json).toEqual([
+      'ForAll',
+      ['GreaterEqual', 'n', 2],
+      ['Equal', 'u_n', ['InvisibleOperator', 3, ['Subscript', 'u', ['Subtract', 'n', 1]]]],
+    ]);
+  });
+
+  test('trailing \\text{for all} condition parses as ForAll', () => {
+    const engine = new ComputeEngine();
+    expect(
+      engine.parse('u_n = 3u_{n-1} \\text{ for all } n \\ge 2').json
+    ).toEqual([
+      'ForAll',
+      ['GreaterEqual', 'n', 2],
+      ['Equal', 'u_n', ['InvisibleOperator', 3, ['Subscript', 'u', ['Subtract', 'n', 1]]]],
+    ]);
+  });
+
+  test('trailing \\text{for} with a comprehension binding still parses as Comprehension', () => {
+    // Regression guard: a `name = collection` clause is a comprehension, not a
+    // trailing condition.
+    const engine = new ComputeEngine();
+    expect(engine.parse('x^2 \\text{ for } x = 1..10').json).toEqual([
+      'Comprehension',
+      ['Power', 'x', 2],
+      ['Element', 'x', ['Range', 1, 10]],
+    ]);
+  });
+
+  test('a non-condition clause after \\text{for} is not swallowed', () => {
+    // `for y` (neither a binding nor a predicate) leaves `for` unconsumed
+    // rather than misparsing as a ForAll.
+    const engine = new ComputeEngine();
+    const e = engine.parse('x^2 \\text{ for } y');
+    expect(e.isValid).toBe(false);
+  });
+
+  test('English enumeration `and` after a comma is absorbed', () => {
+    // `a, b, and c` is a list `a, b, c`, not a stray `and` text token.
+    const engine = new ComputeEngine();
+    expect(engine.parse('a, b, \\text{and } c').json).toEqual([
+      'Tuple',
+      'a',
+      'b',
+      'c',
+    ]);
+  });
+
+  test('recurrence system: u_0, u_1, u_n = ... for n >= 2', () => {
+    const engine = new ComputeEngine();
+    const e = engine.parse(
+      'u_0 = 0,\\ u_1 = 1,\\ u_n = 2011u_{n-1} - u_{n-2} \\quad \\text{for } n \\ge 2.'
+    );
+    expect(e.isValid).toBe(true);
+    expect(JSON.stringify(e.json)).not.toContain('Error');
+    expect(e.operator).toBe('ForAll');
+    expect(e.op1.json).toEqual(['GreaterEqual', 'n', 2]);
+    // The body is a Tuple of the three equations.
+    expect(e.op2.operator).toBe('Tuple');
+    expect(e.op2.nops).toBe(3);
+  });
+
+  test('recurrence system with fraction: x_1, x_2, x_n = ... for n >= 3', () => {
+    const engine = new ComputeEngine();
+    const e = engine.parse(
+      'x_1 = a, \\quad x_2 = b, \\quad x_n = \\frac{x_{n-1}^2 + x_{n-2}^2}{x_{n-1} + x_{n-2}} \\quad \\text{for } n \\ge 3.'
+    );
+    expect(e.isValid).toBe(true);
+    expect(JSON.stringify(e.json)).not.toContain('Error');
+    expect(e.operator).toBe('ForAll');
+    expect(e.op1.json).toEqual(['GreaterEqual', 'n', 3]);
+    expect(e.op2.operator).toBe('Tuple');
+    expect(e.op2.nops).toBe(3);
+  });
+
+  test('recurrence system with enumeration `and` and trailing `for all`', () => {
+    const engine = new ComputeEngine();
+    const e = engine.parse(
+      'a_0 = 1, \\quad a_1 = 3, \\quad \\text{and} \\quad a_{n+1} = a_n + a_{n-1} \\quad \\text{for all } n \\ge 1.'
+    );
+    expect(e.isValid).toBe(true);
+    expect(JSON.stringify(e.json)).not.toContain('Error');
+    // The `and` connective is absorbed, so there is no stray text token.
+    expect(JSON.stringify(e.json)).not.toContain("'and'");
+    expect(e.operator).toBe('ForAll');
+    expect(e.op1.json).toEqual(['GreaterEqual', 'n', 1]);
+    expect(e.op2.operator).toBe('Tuple');
+    expect(e.op2.nops).toBe(3);
+  });
+});

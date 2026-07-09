@@ -107,6 +107,36 @@ devolution (`N`, `D`), `\measuredangle`/`\Varangle`, decorated operators
 (`\oplus` → `CirclePlus`, …), structure tuples `(A,+,\cdot)`, and the
 geometry `\cap` label tolerance all landed):**
 
+*Next up (agreed 2026-07-09):*
+
+- **Trailing equation labels (S):** strip a trailing `\quad (2)`,
+  `\quad (\text{Attribution})`, or `\textcircled{1}` tag on the error path,
+  like the trailing-punctuation recovery.
+- **Trailing qualifier clauses (S/M):** recurrence definitions ending in
+  `\quad \text{for } n \ge 2.` — parse the `\text{for}` clause as a
+  condition (the English `\text{and}` connective already parses; `for` and
+  `where` do not).
+- **Subscripted-relation sets (S):** `\mathbb{N}_{\geqslant 0}` and friends.
+- **Greek capital labels (S):** `\Pi` has no symbol entry (name collides
+  with the `Pi` constant), so plane labels like `\Sigma T \parallel \Pi P`
+  fail; needs a distinct symbol name for the glyph.
+- **Sequence-braces notation (M):** `\{a_n\}_{n=1}^{\infty}` — subscripted /
+  superscripted braces denoting a sequence; currently the sub/superscript on
+  the `Set` flags `incompatible-type` (3 corpus cases, 2026-07-09 sample).
+  Needs a design call on the target MathJSON shape before implementing.
+- **Genre-coverage sweep (S, one-off):** MathNet sampling has converged
+  (four disjoint slices, ~97.4–97.6% clean; a new slice yields only a
+  handful of new small categories) — do NOT fetch more MathNet. Instead run
+  `parse-sweep.ts` once over a different-genre corpus (e.g. Hendrycks MATH
+  solutions, arXiv equation extracts, or a physics/units problem set) to
+  test whether the clean rate generalizes beyond olympiad notation
+  (MathNet is ~2% calculus/analysis, no stats/units).
+- **Corpus regression gate (S):** `check-corpus.ts` exits non-zero on
+  regressions against the recorded `observed` outcomes — add it to the
+  pre-release checklist (or CI) so 350/428 is a protected floor.
+
+*Rest of the tail:*
+
 - **Polynomial-ring notation (M):** parse blackboard-bold rings followed by a
   bracketed variable list, e.g. `\mathbb{Z}[x]`, `\mathbb{R}[X,Y]`, as an
   inert/structural algebraic object instead of treating `[...]` as indexing.
@@ -114,22 +144,33 @@ geometry `\cap` label tolerance all landed):**
   `At(f, S)`; decide whether set contexts need a distinct structural
   function-image head for expressions such as
   `f[\operatorname{divs}(m)] = \operatorname{divs}(n)`.
-- **Sequence-braces notation (M):** `\{a_n\}_{n=1}^{\infty}` — subscripted /
-  superscripted braces denoting a sequence; currently the sub/superscript on
-  the `Set` flags `incompatible-type` (3 corpus cases, 2026-07-09 sample).
-- **Trailing qualifier clauses (S/M):** recurrence definitions ending in
-  `\quad \text{for } n \ge 2.` — parse the `\text{for}` clause as a
-  condition (the English `\text{and}` connective already parses; `for` and
-  `where` do not).
-- **Trailing equation labels (S):** strip a trailing `\quad (2)`,
-  `\quad (\text{Attribution})`, or `\textcircled{1}` tag on the error path,
-  like the trailing-punctuation recovery.
-- **Subscripted-relation sets (S):** `\mathbb{N}_{\geqslant 0}` and friends.
-- **Greek capital labels (S):** `\Pi` has no symbol entry (name collides
-  with the `Pi` constant), so plane labels like `\Sigma T \parallel \Pi P`
-  fail; needs a distinct symbol name for the glyph.
 - **Matrix-operator typing (M):** `\det(A+2B)` — `Add` infers its symbols
-  `real` before `Det` sees them; inference-ordering problem.
+  `real` before `Det` sees them; inference-ordering problem. Note this is a
+  general class (any matrix/collection-expecting function whose arguments
+  contain sibling arithmetic), so it warrants its own design pass, not a
+  spot fix.
+
+**Ellipsis-expression interpretation (M, design-gated — proposed
+2026-07-09):** give `ContinuationPlaceholder` expressions a path to formal
+meaning, e.g. `1 + 2 + \dots + n` → `Sum(k, (k, 1, n))` (and
+`Product` for `\cdot`/`\times` chains). Two parts:
+
+- **Fold barrier (S, correctness-flavored):** today `Add`/`Multiply` fold
+  literal operands *across* a continuation, which misrepresents the omitted
+  terms. Observed (2026-07-09): `1 + 2 + \dots + n` evaluates to
+  `n + 3 + ...` (pattern destroyed) and `2 \cdot 4 \cdot \dots \cdot 2n`
+  evaluates to `16 * ... * n` — it folds `2·4` and *tears the coefficient
+  out of the `2n` anchor*. An `Add`/`Multiply` containing a
+  `ContinuationPlaceholder` should stay inert under `evaluate`/`N`.
+- **Pattern inference → `Sum`/`Prod` (M):** anti-unify the sample terms and
+  the anchor to a general term, mirroring the existing
+  `tryInferRangeFromElements` precedent (`[1, 2, \ldots, 10]` → `Range`).
+  NOT canonicalization (interpretation is a guess; canonical transforms are
+  irreversible and `Add` sorting has already disturbed source order) and not
+  a default simplify rule at first — start as an explicit, strictly gated
+  reduction (unambiguous consecutive/arithmetic patterns only; anything else
+  stays inert) and decide after real usage whether `evaluate` or `simplify`
+  should pick it up by default.
 
 Still deferred: ASCII-pipe divisibility (`p|a+1`) because it conflicts with
 absolute-value syntax (though the parenthesized form `(a+f(b)) | (a^2+bf(a))`

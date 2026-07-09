@@ -763,3 +763,29 @@ describe('ACCENT COMMANDS', () => {
     expect(JSON.stringify(ce.parse(e.latex).json)).toBe(JSON.stringify(e.json));
   });
 });
+
+describe('CAPITAL PI (\\Pi)', () => {
+  // `\Pi` (Greek capital letter Π) previously failed to parse
+  // ('unexpected-command') because the name `Pi` is already used by the
+  // constant π (parsed from `\pi`). It is now bound to the distinct symbol
+  // name `CapitalPi`, so it can be used as an ordinary symbol, e.g. for
+  // geometry labels like `\Sigma T \parallel \Pi P`.
+  test('\\Pi parses as the CapitalPi symbol', () => {
+    expect(parse('\\Pi')).toMatchInlineSnapshot(`CapitalPi`);
+  });
+
+  test('\\Pi in a geometry expression parses as valid', () => {
+    const e = parse('\\Sigma T \\parallel \\Pi P');
+    expect(e.isValid).toBe(true);
+    expect(JSON.stringify(e.json)).toContain('CapitalPi');
+  });
+
+  test('\\Pi round-trips through serialization', () => {
+    expect(ce.parse('\\Pi').latex).toBe('\\Pi');
+    expect(ce.box('CapitalPi').latex).toBe('\\Pi');
+  });
+
+  test('\\pi still parses as the Pi constant', () => {
+    expect(JSON.stringify(ce.parse('\\pi').json)).toBe('"Pi"');
+  });
+});

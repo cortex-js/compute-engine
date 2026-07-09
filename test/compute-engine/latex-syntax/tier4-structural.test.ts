@@ -119,6 +119,28 @@ describe('Tier 4 #2 — subscript/superscript-qualified blackboard sets', () => 
       ['To', 'PositiveNumbers', 'PositiveNumbers'],
     ]);
   });
+
+  test('`\\geqslant`/`\\leqslant` (amssymb slanted forms) match the `\\geq`/`\\leq` triggers', () => {
+    expect(json('\\mathbb{N}_{\\geqslant 0}')).toEqual('NonNegativeIntegers');
+    expect(json('\\mathbb{N}_{\\geq 0}')).toEqual('NonNegativeIntegers');
+    expect(json('\\mathbb{Z}_{\\geqslant 0}')).toEqual('NonNegativeIntegers');
+    expect(json('\\mathbb{R}_{\\leqslant 0}')).toEqual('NonPositiveNumbers');
+  });
+
+  test('`\\mathbb{N}_{\\geq...}`/`\\geqslant...` — previously-missing naturals rows', () => {
+    expect(json('\\mathbb{N}_{\\geq0}')).toEqual('NonNegativeIntegers');
+    expect(json('\\mathbb{N}_{\\ge0}')).toEqual('NonNegativeIntegers');
+    expect(json('\\mathbb{N}_{\\geqslant0}')).toEqual('NonNegativeIntegers');
+    expect(json('\\mathbb{N}_{\\geq1}')).toEqual('PositiveIntegers');
+    expect(json('\\mathbb{N}_{\\ge1}')).toEqual('PositiveIntegers');
+    expect(json('\\mathbb{N}_{\\geqslant1}')).toEqual('PositiveIntegers');
+  });
+
+  test('qualified sets with `\\geqslant` in a `\\mapsto` function signature', () => {
+    expect(isClean('f: \\mathbb{N}_{\\geqslant 1} \\mapsto \\mathbb{N}_{\\geqslant 0}')).toBe(
+      true
+    );
+  });
 });
 
 describe('Tier 4 #3 — `\\backslash` as set difference', () => {

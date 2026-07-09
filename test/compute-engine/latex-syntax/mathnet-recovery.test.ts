@@ -134,6 +134,45 @@ describe('MathNet Tier-2: trailing sentence-punctuation recovery', () => {
   });
 });
 
+describe('MathNet Tier-2: trailing equation-label recovery', () => {
+  test('parenthesized numeric label after \\quad (and a period) is dropped', () => {
+    const s =
+      'f(x + y) = f(x) + f(y), \\forall x, y \\in \\mathbb{R}. \\quad (2)';
+    expect(isClean(s)).toBe(true);
+    expect(json(s)).not.toContain('Error');
+    // Recovers to the same expression as without the label suffix
+    expect(ce.parse(s).json).toEqual(
+      ce.parse('f(x + y) = f(x) + f(y), \\forall x, y \\in \\mathbb{R}').json
+    );
+  });
+
+  test('\\text{...} attribution label after \\quad (and a period) is dropped', () => {
+    const s =
+      '\\frac{2 \\sin^2 x + 2}{\\sin x + 1} = 3 + \\cos (x + y). \\quad (\\text{Petar Bakić})';
+    expect(isClean(s)).toBe(true);
+    expect(json(s)).not.toContain('Error');
+    expect(ce.parse(s).json).toEqual(
+      ce.parse('\\frac{2 \\sin^2 x + 2}{\\sin x + 1} = 3 + \\cos (x + y)').json
+    );
+  });
+
+  test('\\textcircled label after \\qquad (following a comma) is dropped', () => {
+    const s = 'f(x) + f(y) + 2xyf(xy) = \\frac{f(xy)}{f(x+y)}, \\qquad \\textcircled{1}';
+    expect(isClean(s)).toBe(true);
+    expect(json(s)).not.toContain('Error');
+  });
+
+  test('negative control: a clean input ending in \\quad (2) is unchanged', () => {
+    // `x \quad (2)` already parses without error, so recovery must not run.
+    expect(ce.parse('x \\quad (2)').json).toEqual(['Multiply', 2, 'x']);
+  });
+
+  test('negative control: an Error not matching the label pattern is untouched', () => {
+    // No trailing label/punctuation to strip, so the Error stands.
+    expect(JSON.stringify(ce.parse('26 =').json)).toContain('Error');
+  });
+});
+
 describe('Algebraic-structure tuples (bare operators as elements)', () => {
   test('(A, +) and (K, +, \\cdot) parse with inert operation names', () => {
     expect(ce.parse('(A,+)').json).toEqual(['Tuple', 'A', 'Add']);

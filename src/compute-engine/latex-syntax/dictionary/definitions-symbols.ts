@@ -67,7 +67,9 @@ export const SYMBOLS: [string, string, number][] = [
   ['Nu', '\\Nu', 0x039d],
   ['Xi', '\\Xi', 0x039e],
   ['Omicron', '\\Omicron', 0x039f],
-  // ['Pi', '\\Pi', 0x03a0],
+  // The name `Pi` is taken by the constant π (from `\pi`), so the capital-Π
+  // glyph gets a distinct symbol name.
+  ['CapitalPi', '\\Pi', 0x03a0],
   ['Rho', '\\Rho', 0x03a1],
   ['Sigma', '\\Sigma', 0x03a3],
   ['Tau', '\\Tau', 0x03a4],

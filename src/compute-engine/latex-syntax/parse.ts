@@ -3250,22 +3250,65 @@ export function parse(
 ): MathJsonExpression | null {
   let expr = parseCore(latex, dictionary, options);
 
-  // Trailing sentence-punctuation recovery.
+  // Trailing-noise recovery (sentence punctuation and equation labels).
   //
   // A full expression copied from prose often ends with a sentence-terminating
   // `.`, `;`, `,` or `?` (e.g. `... = z^2.`, or an MCQ/rhetorical fragment
-  // such as `\sum_{n=1}^{100} a_n^2?`), which leaves an unconsumed token and
-  // produces an `Error` node. If — and only if — the parse produced an Error
-  // and the input ends with such punctuation, strip a single trailing
-  // punctuation character and re-parse. The retry result is used only when it
-  // is itself clean, so no currently-valid input changes meaning: a valid
-  // decimal like `5.` parses without error and never reaches this path, and
-  // the extra parse runs only on the error path.
+  // such as `\sum_{n=1}^{100} a_n^2?`), and MathNet-style corpus fragments
+  // frequently append an equation label / attribution tag, e.g.
+  // `... = f(x)+f(y). \quad (2)`, `... = 3+\cos(x+y). \quad (\text{Petar})`, or
+  // `..., \qquad \textcircled{1}`. Both leave unconsumed tokens and produce an
+  // `Error` node.
+  //
+  // If — and only if — the parse produced an Error, try a few reduced inputs
+  // and adopt the first retry that is itself completely clean. Because the
+  // retry is used only when it produces no Error, no currently-valid input can
+  // change meaning: a valid decimal like `5.` parses without error and never
+  // reaches this path, `x \quad (2)` already parses (it stays untouched), and
+  // the extra parses run only on the error path.
   if (containsError(expr)) {
     const trimmed = latex.trimEnd();
-    if (trimmed.length > 1 && /[.,;?]$/.test(trimmed)) {
-      const retry = parseCore(trimmed.slice(0, -1), dictionary, options);
-      if (retry !== null && !containsError(retry)) expr = retry;
+
+    // Strip a single trailing sentence-punctuation character, if present.
+    const stripPunctuation = (s: string): string | null => {
+      const t = s.trimEnd();
+      return t.length > 1 && /[.,;?]$/.test(t) ? t.slice(0, -1) : null;
+    };
+
+    // Strip a trailing equation label: a `\quad`/`\qquad`/`\hspace{…}` spacer
+    // followed by either a parenthesized tag `(…)` (no nested parens; the
+    // content may hold `\text{…}` etc.) or `\textcircled{…}`. A genuine math
+    // tail such as `\quad (x+1)` would also match, but that is harmless here:
+    // recovery runs only on the error path and only adopts a *clean* retry, so
+    // a meaningful parenthesized trailer would either already parse (never
+    // reaching this path) or leave the retry with an Error (rejected).
+    const stripLabel = (s: string): string | null => {
+      const t = s.trimEnd();
+      const m = t.match(
+        /(?:\\q?quad|\\hspace\{[^{}]*\})\s*(?:\([^()]*\)|\\textcircled\{[^{}]*\})$/
+      );
+      return m ? t.slice(0, m.index) : null;
+    };
+
+    // Candidates, in order: punctuation-strip, label-strip, then
+    // label-strip-then-punctuation-strip (a label often follows a trailing
+    // `.` or `,`, so the two strips must compose).
+    const candidates: string[] = [];
+    const p = stripPunctuation(trimmed);
+    if (p !== null) candidates.push(p);
+    const l = stripLabel(trimmed);
+    if (l !== null) {
+      candidates.push(l);
+      const lp = stripPunctuation(l);
+      if (lp !== null) candidates.push(lp);
+    }
+
+    for (const candidate of candidates) {
+      const retry = parseCore(candidate, dictionary, options);
+      if (retry !== null && !containsError(retry)) {
+        expr = retry;
+        break;
+      }
     }
   }
 

@@ -1681,7 +1681,7 @@
   {
    "latex": "a^2 + ac + c^2 + 1 = b^2 + bd + d^2, \\quad \\text{and} \\quad 2ab + ad + 2cd + bc = 0.",
    "category": "trailing-punctuation",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "a^2 + b^2 + c^2 + d^2 = 4.",
@@ -1691,7 +1691,7 @@
   {
    "latex": "a_0 = 9 \\quad \\text{and} \\quad a_{k+1} = 3a_k^4 + 4a_k^3 \\quad \\text{for all } k \\ge 0.",
    "category": "trailing-punctuation",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "ab + bc + ca = 16, \\quad a \\ge 3.",
@@ -1879,7 +1879,7 @@
   {
    "latex": "\\Pi",
    "category": "new-command-notation",
-   "observed": "'unexpected-command'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -1945,7 +1945,7 @@
   {
    "latex": "\\mathbb{N}_{\\geqslant 0}",
    "category": "sets-and-congruence",
-   "observed": "'unexpected-command'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -2197,55 +2197,55 @@
   {
    "latex": "u_0 = 0,\\ u_1 = 1,\\ u_n = 2011u_{n-1} - u_{n-2} \\quad \\text{for } n \\ge 2.",
    "category": "trailing-qualifier",
-   "observed": "'unexpected-operator'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
    "latex": "x_1 = a, \\quad x_2 = b, \\quad x_n = \\frac{x_{n-1}^2 + x_{n-2}^2}{x_{n-1} + x_{n-2}} \\quad \\text{for } n \\ge 3.",
    "category": "trailing-qualifier",
-   "observed": "'unexpected-operator'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
    "latex": "a_0 = 1, \\quad a_1 = 3, \\quad \\text{and} \\quad a_{n+1} = a_n + a_{n-1} \\quad \\text{for all } n \\ge 1.",
    "category": "trailing-qualifier",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
    "latex": "f(x + y) = f(x) + f(y), \\forall x, y \\in \\mathbb{R}. \\quad (2)",
    "category": "trailing-label",
-   "observed": "'unexpected-operator'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
    "latex": "\\frac{2 \\sin^2 x + 2}{\\sin x + 1} = 3 + \\cos (x + y). \\quad (\\text{Petar Bakić})",
    "category": "trailing-label",
-   "observed": "'unexpected-operator'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
    "latex": "f(x) + f(y) + 2xyf(xy) = \\frac{f(xy)}{f(x+y)}, \\qquad \\textcircled{1}",
    "category": "trailing-label",
-   "observed": "'unexpected-command'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
    "latex": "\\mathbb{N}_{\\geqslant 0}",
    "category": "set-relation-subscript",
-   "observed": "'unexpected-command'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
    "latex": "f: \\mathbb{N}_{\\geqslant 1} \\mapsto \\mathbb{N}_{\\geqslant 0}",
    "category": "set-relation-subscript",
-   "observed": "'unexpected-command'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
    "latex": "\\Sigma T \\parallel \\Pi P",
    "category": "greek-capital",
-   "observed": "'unexpected-command'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
