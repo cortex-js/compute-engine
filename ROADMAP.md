@@ -110,7 +110,7 @@ scipy is installed in `./venv`.
 - Bare `O(…)` parsing deferred (design doc §8 Q3); revisit for lenient mode
   once the parser work settles.
 
-**MathNet parser tail (S/M; corpus at 369/428 after the 2026-07-09 rounds —
+**MathNet parser tail (S/M; corpus at 371/428 after the 2026-07-09 rounds —
 trailing-`?`/`\ldots` recovery, Unicode `±`/`∓`/`ℓ`, un-applied-operator
 devolution (`N`, `D`), `\measuredangle`/`\Varangle`, decorated operators
 (`\oplus` → `CirclePlus`, …), structure tuples `(A,+,\cdot)`, geometry
@@ -138,15 +138,23 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   then landed too (`10111_2` → the numeric `BaseForm(value, base)` head,
   12 of 16 tagged fixed; the rest are symbolic-base `161_b`, inert by
   design), as did sequence braces (`\{a_n\}_{n=1}^{\infty}` → inert
-  `IndexedSequence`, 3/3). Remaining ranked tail:
+  `IndexedSequence`, 3/3). The prime/pmod/empty-subscript round then
+  closed prime-after-arg 13/13 (`Prime` now mirrors its base's type),
+  symbolic-modulus congruences + `N`/`D` devolution in `validateArguments`,
+  congruence chains (→ conjunction) and leading-`\equiv` recovery, and
+  `\alpha_{}` — genre corpus at **97.63%** (365 of 735 fixed).
+  Remaining ranked tail:
   (1) units-in-text arithmetic
   `(18 \text{ inches})/(12 \text{ inches/foot})` (42, overlaps the units
-  subsystem); (2) prime-after-arg `\sin a'` (13); (3) residual pmod chains
-  (9) + styling remnants (11); (4) small leftovers: empty scripts on
-  multi-letter symbol bases (`\alpha_{}`, needs the `_` parselet in
-  `definitions-core.ts` to drop empty braced subscripts at the source),
-  `\cancel` inside `array`-env `@{}`/`\cline` layouts, and possible future
-  upgrades to `IndexedSequence` (lazy-collection semantics, the
+  subsystem — NOTE the unit lexicon already accepts English words:
+  `Quantity(1, "inches")`/`"gallons"` are valid, and `18\ \text{in}`
+  already parses to `Quantity`; the gap is whitespace/word matching in the
+  number×text path and compounds like `\text{ gallons/ft}^3` where the
+  exponent sits outside the `\text`); (2) styling remnants (11, mostly
+  array-env/prose — low value); (3) small leftovers: `\cancel` inside
+  `array`-env `@{}`/`\cline` layouts, set-congruence
+  `\{0,1\}+\{1,4\}\equiv…` (set arithmetic, out of scope), and possible
+  future upgrades to `IndexedSequence` (lazy-collection semantics, the
   parenthesized `(a_n)_{n\in\mathbb{N}}` form).
   Ascii-pipe divisibility evidence doubled (36 more hits, tracked below).
   Skip: `array`-env long-division layouts, `\nabla` puzzle ops, repeating

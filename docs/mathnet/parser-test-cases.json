@@ -141,7 +141,7 @@
   {
    "latex": "|N| = n > 2",
    "category": "divisibility-bar",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "|S| \\ge N",
@@ -2041,7 +2041,7 @@
   {
    "latex": "AC' \\le \\sqrt{3} \\cdot AA'",
    "category": "geometry-label-arithmetic",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {

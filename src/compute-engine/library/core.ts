@@ -1831,7 +1831,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Prime: {
       description:
         "Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs.",
-      signature: '(any, integer?) -> expression',
+      signature: '(any, integer?) -> unknown',
+      // A primed entity denotes something of the same kind as its base:
+      // `a'` on a number-valued symbol is another value (so `\sin a'`
+      // type-checks), `f'` on a function is a function. Mirror the type.
+      type: ([x]) => x?.type ?? 'unknown',
     },
   },
 ];

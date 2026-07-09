@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+### Number Theory
+
+- **Modular arithmetic reaches common notation.** `Mod` and `Congruent` now
+  reduce integer-valued expressions in ℤ/mℤ without materializing the
+  (potentially astronomically large) intermediate value. Modular
+  exponentiation, sums, products, negations and factorial reduction are all
+  handled, so `2^{3^{20}} \pmod{100}` evaluates to `52` and
+  `2^{3^{20}} \equiv 52 \pmod{100}` evaluates to `True`, where both used to
+  stay inert. The floored-sign convention of `Mod` (the result follows the
+  divisor) is preserved on the new path.
+- **New `ModularInverse(a, m)`** returns the modular multiplicative inverse
+  of `a` modulo `m` — the integer `x` in `[0, m)` with `a·x ≡ 1 (mod m)` —
+  and stays symbolic when `a` and `m` are not coprime.
+- **Linear congruences and CRT systems solve.** `solve` on a linear
+  congruence returns the parametric residue family with a fresh integer
+  parameter `t ∈ ℤ` (`6n \equiv 4 \pmod 7` → `7t + 3`), an empty result when
+  there is no solution (`2x \equiv 1 \pmod 4`), and reduces gcd-divisible
+  congruences (`4x \equiv 2 \pmod 6` → `3t + 2`). A system of simultaneous
+  congruences in one unknown is combined via the Chinese Remainder Theorem —
+  including non-coprime moduli — into a single family (`x \equiv 2 \pmod 3`,
+  `x \equiv 3 \pmod 5`, `x \equiv 2 \pmod 7` → `105t + 23`); an inconsistent
+  system reports no solution.
+
 ### New Notations
 
 - **Base-subscript numerals compute.** A numeral with an integer-literal
@@ -64,6 +87,22 @@ that corpus from 97.09% to 97.38% clean parse:
   (its signature was integer-only and rejected `2n` with an
   `incompatible-type` error); numeric double factorials are unchanged
   (`8!! = 384`).
+- **Primed variables type-check as arguments:** `\sin a'` now parses to
+  `Sin(Prime(a))` instead of a type error — `Prime` mirrors the type of
+  its base (a primed value is a value; a primed function is a function).
+  Derivative notation (`f'(x)` → `D(f(x), x)`) is unchanged.
+- **Bare `N`/`D` devolve to variables in all argument positions:**
+  `N \equiv 1 \pmod k` now parses as a congruence over the variable `N`
+  (previously the standard-library `N` operator's function type failed the
+  relation's numeric parameter check; the existing devolution fallback ran
+  only for arithmetic operators). Applied uses (`N(2/3)`) still call the
+  operator.
+- **Congruence chains and fragments:**
+  `3^{27}\equiv 3^7\pmod{100}\equiv 87\pmod{100}` folds into a conjunction
+  of the adjacent congruence steps; a leading `\equiv b \pmod n` with an
+  elided left-hand side recovers with a missing-operand placeholder.
+- **Empty subscripts on multi-letter symbols are dropped:** `\alpha_{}`
+  parses as `alpha` (completing the earlier `x_{}`/`13^{}` fix).
 
 ## 0.72.0 _2026-07-09_
 

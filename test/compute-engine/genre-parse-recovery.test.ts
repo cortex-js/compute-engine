@@ -134,3 +134,62 @@ describe('Genre recovery: `{,}` thousands separator', () => {
     expect(isClean(ce, '3{,}')).toBe(false);
   });
 });
+
+describe('Genre recovery: prime after a juxtaposed function argument', () => {
+  // `a'` denotes a primed variable; the implicit trig argument must accept
+  // it. Previously `\sin a'` produced Sin(Error) because Prime's result
+  // type (`expression`) failed Sin's `number` parameter check — Prime now
+  // mirrors the type of its base.
+  test("\\sin a' parses to Sin(Prime(a))", () => {
+    const ce = freshEngine();
+    expect(ce.parse("\\sin a'").json).toEqual(['Sin', ['Prime', 'a']]);
+    expect(ce.parse("2 \\sin a'").json).toEqual([
+      'Multiply',
+      2,
+      ['Sin', ['Prime', 'a']],
+    ]);
+  });
+
+  test("prime does not swallow a following function: \\sin a' \\cos a'", () => {
+    const ce = freshEngine();
+    expect(ce.parse("2 \\sin a' \\cos a'").json).toEqual([
+      'Multiply',
+      2,
+      ['Sin', ['Prime', 'a']],
+      ['Cos', ['Prime', 'a']],
+    ]);
+  });
+
+  test('corpus equation shape with trailing period', () => {
+    const ce = freshEngine();
+    expect(ce.parse("\\cos a = \\cos a'.").json).toEqual([
+      'Equal',
+      ['Cos', 'a'],
+      ['Cos', ['Prime', 'a']],
+    ]);
+  });
+
+  test("NEGATIVE: derivative notation f'(x) is unchanged", () => {
+    const ce = freshEngine();
+    expect(ce.parse("f'(x)").json).toEqual(['D', ['f', 'x'], 'x']);
+    expect(ce.parse("a''").json).toEqual(['Prime', 'a', 2]);
+  });
+});
+
+describe('Genre recovery: empty subscript on multi-letter symbols', () => {
+  test('\\alpha_{} drops the empty subscript', () => {
+    const ce = freshEngine();
+    expect(ce.parse('\\alpha_{}').json).toEqual('alpha');
+  });
+
+  test('NEGATIVE: real subscripts on multi-letter symbols unchanged', () => {
+    const ce = freshEngine();
+    expect(ce.parse('\\alpha_{3}').json).toEqual('alpha_3');
+    // strict-mode missing-subscript shape is preserved
+    expect(ce.parse('a_(k+m)').json).toEqual([
+      'Tuple',
+      ['Subscript', 'a', ['Error', "'missing'"]],
+      ['Add', 'k', 'm'],
+    ]);
+  });
+});

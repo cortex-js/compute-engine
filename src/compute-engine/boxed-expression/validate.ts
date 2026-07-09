@@ -503,6 +503,15 @@ export function validateArguments(
     }
 
     if (!op.type.matches(param)) {
+      // A bare uppercase symbol bound to a standard-library operator (`N`,
+      // `D`) used where a value is required almost always means a variable
+      // (`N \equiv 1 \pmod k`): devolve it to an unknown symbol, mirroring
+      // the checkNumericArgs fallback.
+      const devolved = devolveUnappliedOperator(ce, op);
+      if (devolved !== null) {
+        result.push(devolved);
+        continue;
+      }
       result.push(ce.typeError(param, op.type, op));
       isValid = false;
       continue;

@@ -278,3 +278,55 @@ describe('MathNet Tier-3: non-regression guards', () => {
     expect(ce.parse('p \\iff q').json).toEqual(['Equivalent', 'p', 'q']);
   });
 });
+
+describe('Congruence chains and recoveries (2026-07-09 pmod-chain round)', () => {
+  test('symbolic modulus: bare `N` devolves to a variable', () => {
+    const ce = freshEngine();
+    expect(ce.parse('N \\equiv 1 \\pmod k').json).toEqual([
+      'Congruent',
+      'N',
+      1,
+      'k',
+    ]);
+    expect(ce.parse('N\\equiv n\\pmod{100}').json).toEqual([
+      'Congruent',
+      'N',
+      'n',
+      100,
+    ]);
+  });
+
+  test('chained congruence folds to a conjunction over adjacent steps', () => {
+    const ce = freshEngine();
+    expect(ce.parse('a\\equiv b\\pmod{100}\\equiv c\\pmod{100}').json).toEqual([
+      'And',
+      ['Congruent', 'a', 'b', 100],
+      ['Congruent', 'b', 'c', 100],
+    ]);
+  });
+
+  test('leading \\equiv recovers with a missing-lhs placeholder', () => {
+    const ce = freshEngine();
+    expect(ce.parse('\\equiv 7 \\pmod{12}').json).toEqual([
+      'Congruent',
+      ['Error', "'missing'"],
+      7,
+      12,
+    ]);
+  });
+
+  test('NEGATIVE: plain congruences and \\not\\equiv unchanged', () => {
+    const ce = freshEngine();
+    expect(ce.parse('a \\equiv b \\pmod{7}').json).toEqual([
+      'Congruent',
+      'a',
+      'b',
+      7,
+    ]);
+    expect(ce.parse('p \\equiv q').json).toEqual(['Equivalent', 'p', 'q']);
+    expect(ce.parse('2019^8 \\not\\equiv -1 \\pmod{17}').json).toEqual([
+      'Not',
+      ['Congruent', ['Power', 2019, 8], -1, 17],
+    ]);
+  });
+});

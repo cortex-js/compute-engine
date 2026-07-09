@@ -1559,6 +1559,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         if (baseForm !== null) return baseForm;
       }
 
+      // An empty braced subscript (`\alpha_{}`) is dropped: return the base.
+      // (Single-letter and numeric bases are handled upstream; this covers
+      // multi-letter symbol bases that reach the generic parselet.)
+      if (rhs !== null && symbol(rhs) === 'Nothing') return lhs;
+
       return ['Subscript', lhs, rhs];
     },
   } as PostfixEntry,

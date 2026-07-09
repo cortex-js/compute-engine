@@ -163,7 +163,22 @@ function parseEquivalent(
       atParenthesizedModulus(p) || (terminator.condition?.(p) ?? false),
   });
   const modulus = parseModulusAnnotation(parser, terminator);
-  if (modulus !== null) return ['Congruent', lhs, missingIfEmpty(rhs), modulus];
+  if (modulus !== null) {
+    // Chained congruence — `a ≡ b (mod m) ≡ c (mod m)` asserts each adjacent
+    // step: fold to a conjunction, comparing against the previous rhs.
+    if (operator(lhs) === 'Congruent')
+      return [
+        'And',
+        lhs,
+        [
+          'Congruent',
+          missingIfEmpty(operand(lhs, 2)),
+          missingIfEmpty(rhs),
+          modulus,
+        ],
+      ];
+    return ['Congruent', lhs, missingIfEmpty(rhs), modulus];
+  }
   return ['Equivalent', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
 }
 
@@ -414,6 +429,20 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     precedence: COMPARISON_PRECEDENCE,
     parse: parseEquivalent,
   } as InfixEntry,
+  {
+    // A leading `\equiv b \pmod n` (elided lhs, common in worked-solution
+    // fragments) recovers with a missing-lhs placeholder, mirroring the
+    // standalone-`\pmod` convention (`Mod(missing, 7)`).
+    latexTrigger: ['\\equiv'],
+    kind: 'prefix',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: (parser: Parser, terminator?: Readonly<Terminator>) =>
+      parseEquivalent(
+        parser,
+        parser.error('missing', parser.index),
+        terminator ?? { minPrec: 0 }
+      ),
+  },
   {
     // `\not\equiv` (and `\not≡`) negates the congruence/equivalence: it reuses
     // `parseEquivalent` (so a trailing `\pmod n` still folds into a
