@@ -27,8 +27,8 @@ import { tmpdir } from 'node:os';
 // (~2× overhead on the symbolic engine) is stripped and CE timings reflect
 // shipped code. Requires `npm run build production` first. See
 // PERFORMANCE_FINDINGS.md P0-2.
-import { ComputeEngine } from '../../dist/compute-engine.min.esm.js';
-import { loadIdentities } from '../../dist/identities.min.esm.js';
+import { ComputeEngine } from '../../dist/esm-min/compute-engine.js';
+import { loadIdentities } from '../../dist/esm-min/identities.js';
 import { mathJsonToWL } from '../runners/mathjson-to-wl.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -200,7 +200,7 @@ const tally = (sel: (r: (typeof rows)[number]) => Verdict, pred: (c: Case) => bo
 const md: string[] = [];
 md.push('# Univariate Equation-Solving Benchmark', '');
 md.push(
-  '_Runner: **minified production bundles** (`dist/*.min.esm.js`, `console.assert` stripped) — CE times reflect ' +
+  '_Runner: **minified production bundles** (`dist/esm-min/*.js`, `console.assert` stripped) — CE times reflect ' +
     'shipped code. Rebuild with `npm run build production` before running._',
   '',
 );

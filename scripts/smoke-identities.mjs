@@ -11,9 +11,9 @@ import { dirname, join } from 'node:path';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '../dist');
 
-const { ComputeEngine } = await import(join(DIST, 'compute-engine.esm.js'));
+const { ComputeEngine } = await import(join(DIST, 'esm', 'compute-engine.js'));
 const { loadIdentities, FUNGRIM_CORE, version } = await import(
-  join(DIST, 'identities.esm.js')
+  join(DIST, 'esm', 'identities.js')
 );
 
 function check(label, condition) {

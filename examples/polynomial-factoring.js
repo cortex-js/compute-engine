@@ -48,7 +48,7 @@ import {
   factorDifferenceOfSquares,
   factorQuadratic,
   factorPolynomial,
-} from '../dist/compute-engine.esm.js';
+} from '../dist/esm/compute-engine.js';
 
 const expr1 = ce.parse('x^2 + 2x + 1');
 console.log('x² + 2x + 1 factored:', factorPerfectSquare(expr1)?.latex || 'null');

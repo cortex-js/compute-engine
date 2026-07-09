@@ -6,7 +6,7 @@
  * process-global and the constant caches (ln10/π/ln2) are single-entry, so a
  * fresh process per precision keeps each block honest (no cross-precision cache
  * thrash). Columns:
- *   - CE HEAD    : dist/compute-engine.min.esm.js (current working-tree build)
+ *   - CE HEAD    : dist/esm-min/compute-engine.js (current working-tree build)
  *   - CE 0.69.0  : benchmarks/.competitors/ce-0.69.0/dist/... (last published)
  *   - mpmath     : ./venv/bin/python3 ops-bench.py (raw bignum reference)
  *
@@ -25,7 +25,7 @@ const ROOT = resolve(HERE, '../..');
 const PRECS = (process.env.PRECS ?? '21,50,100,200,500').split(',').map(Number);
 const BUDGET = Number(process.env.BUDGET ?? 250);
 
-const CUR = resolve(ROOT, 'dist/compute-engine.min.esm.js');
+const CUR = resolve(ROOT, 'dist/esm-min/compute-engine.js');
 const OLD = resolve(ROOT, 'benchmarks/.competitors/ce-0.69.0/dist/compute-engine.min.esm.js');
 const PY = resolve(ROOT, 'venv/bin/python3');
 const MJS = resolve(HERE, 'ops-bench.mjs');

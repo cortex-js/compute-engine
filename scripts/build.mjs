@@ -137,368 +137,123 @@ const BUILD_OPTIONS = {
   resolveExtensions: ['.ts', '.js'],
 };
 
+// Minification settings shared by every `*-min` variant. Kept identical in
+// effect to the previous per-call inline options.
+const MIN_OPTIONS = {
+  drop: ['debugger'],
+  pure: ['console.assert', 'console.log'],
+  minify: true,
+};
+
+// Entry table: source entry name → its UMD wrapper options + IIFE globalName.
+// `esmViaSplit` entries (compute-engine + integration-rules) do NOT get a
+// standalone single-entry ESM build — their ESM output comes from the shared
+// code-splitting invocation below. Every entry still gets both UMD variants.
+const ENTRIES = [
+  {
+    name: 'compute-engine',
+    umd: COMPUTE_ENGINE_UMD_OPTIONS,
+    globalName: 'ComputeEngine',
+    esmViaSplit: true,
+  },
+  { name: 'math-json', umd: MATH_JSON_UMD_OPTIONS, globalName: 'MathJson' },
+  {
+    name: 'latex-syntax',
+    umd: LATEX_SYNTAX_UMD_OPTIONS,
+    globalName: 'LatexSyntax',
+  },
+  { name: 'interval', umd: INTERVAL_UMD_OPTIONS, globalName: 'Interval' },
+  { name: 'numerics', umd: NUMERICS_UMD_OPTIONS, globalName: 'Numerics' },
+  { name: 'core', umd: CORE_UMD_OPTIONS, globalName: 'ComputeEngineCore' },
+  { name: 'compile', umd: COMPILE_UMD_OPTIONS, globalName: 'Compile' },
+  { name: 'identities', umd: IDENTITIES_UMD_OPTIONS, globalName: 'Identities' },
+  {
+    name: 'integration-rules',
+    umd: INTEGRATION_RULES_UMD_OPTIONS,
+    globalName: 'IntegrationRules',
+    esmViaSplit: true,
+  },
+];
+
+// The published layout puts the variant marker in the DIRECTORY, not the
+// filename: `esm/<name>.js`, `esm-min/<name>.js`, `umd/<name>.cjs`,
+// `umd-min/<name>.cjs`. Each ESM directory is self-contained (its own
+// `chunks/`).
+const builds = [];
+
+// Build the library + the integration-rules plugin as ONE esbuild invocation
+// per ESM variant with code splitting, so the shared engine core (BigDecimal,
+// boxed expressions, numeric-value, latex-syntax, …) is emitted ONCE into a
+// common chunk that both `esm/compute-engine.js` and
+// `esm/integration-rules.js` import (and likewise under `esm-min/`). Without
+// this, the integration-rules bundle re-bundles the entire engine and its
+// duplicate class definitions break cross-bundle `instanceof` checks (e.g. a
+// host-created BigDecimal fails `instanceof BigDecimal` inside the plugin's
+// statically-imported engine code). Splitting is ESM-only; the UMD variants
+// stay self-contained single files. The variant marker is the outdir
+// (`dist/esm` vs `dist/esm-min`), so the entry/chunk names carry no suffix.
+for (const [outdir, extra] of [
+  ['./dist/esm', {}],
+  ['./dist/esm-min', MIN_OPTIONS],
+]) {
+  builds.push(
+    esbuild.build({
+      ...BUILD_OPTIONS,
+      ...extra,
+      entryPoints: ['./src/compute-engine.ts', './src/integration-rules.ts'],
+      outdir,
+      format: 'esm',
+      splitting: true,
+      entryNames: '[name]',
+      chunkNames: 'chunks/[name]-[hash]',
+    })
+  );
+}
+
+// Single-entry ESM builds for every entry NOT covered by the split builds.
+for (const e of ENTRIES) {
+  if (e.esmViaSplit) continue;
+  builds.push(
+    esbuild.build({
+      ...BUILD_OPTIONS,
+      entryPoints: [`./src/${e.name}.ts`],
+      outfile: `./dist/esm/${e.name}.js`,
+      format: 'esm',
+    }),
+    esbuild.build({
+      ...BUILD_OPTIONS,
+      ...MIN_OPTIONS,
+      entryPoints: [`./src/${e.name}.ts`],
+      outfile: `./dist/esm-min/${e.name}.js`,
+      format: 'esm',
+    })
+  );
+}
+
+// Self-contained UMD (IIFE) builds for every entry, minified and not.
+for (const e of ENTRIES) {
+  builds.push(
+    esbuild.build({
+      ...BUILD_OPTIONS,
+      entryPoints: [`./src/${e.name}.ts`],
+      outfile: `./dist/umd/${e.name}.cjs`,
+      format: 'iife',
+      ...e.umd,
+      globalName: e.globalName,
+    }),
+    esbuild.build({
+      ...BUILD_OPTIONS,
+      ...MIN_OPTIONS,
+      entryPoints: [`./src/${e.name}.ts`],
+      outfile: `./dist/umd-min/${e.name}.cjs`,
+      format: 'iife',
+      ...e.umd,
+      globalName: e.globalName,
+    })
+  );
+}
+
 //
 // Build all variants in parallel for maximum performance
 //
-await Promise.all([
-  // Build the library + the integration-rules plugin as ONE esbuild
-  // invocation with code splitting, so the shared engine core (BigDecimal,
-  // boxed expressions, numeric-value, latex-syntax, …) is emitted ONCE into a
-  // common chunk that both `compute-engine.esm.js` and
-  // `integration-rules.esm.js` import. Without this, the integration-rules
-  // bundle re-bundles the entire engine and its duplicate class definitions
-  // break cross-bundle `instanceof` checks (e.g. a host-created BigDecimal
-  // fails `instanceof BigDecimal` inside the plugin's statically-imported
-  // engine code). Splitting is ESM-only; the UMD variants below stay
-  // self-contained single files.
-  // (non-minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/compute-engine.ts', './src/integration-rules.ts'],
-    outdir: './dist',
-    format: 'esm',
-    splitting: true,
-    entryNames: '[name].esm',
-    chunkNames: 'chunks/[name]-[hash]',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/compute-engine.ts'],
-    outfile: './dist/compute-engine.umd.cjs',
-    format: 'iife',
-    ...COMPUTE_ENGINE_UMD_OPTIONS,
-    globalName: 'ComputeEngine',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/math-json.ts'],
-    outfile: './dist/math-json.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/math-json.ts'],
-    outfile: './dist/math-json.umd.cjs',
-    format: 'iife',
-    ...MATH_JSON_UMD_OPTIONS,
-    globalName: 'MathJson',
-  }),
-
-  // Build the minified library + integration-rules plugin with code splitting
-  // (see the non-minified split build above for the rationale). Emits
-  // `compute-engine.min.esm.js`, `integration-rules.min.esm.js`, and one or
-  // more shared `chunks/chunk-*.js` files.
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/compute-engine.ts', './src/integration-rules.ts'],
-    outdir: './dist',
-    format: 'esm',
-    splitting: true,
-    entryNames: '[name].min.esm',
-    chunkNames: 'chunks/[name]-[hash]',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/compute-engine.ts'],
-    outfile: './dist/compute-engine.min.umd.cjs',
-    format: 'iife',
-    ...COMPUTE_ENGINE_UMD_OPTIONS,
-    globalName: 'ComputeEngine',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/math-json.ts'],
-    outfile: './dist/math-json.min.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/math-json.ts'],
-    outfile: './dist/math-json.min.umd.cjs',
-    format: 'iife',
-    ...MATH_JSON_UMD_OPTIONS,
-    globalName: 'MathJson',
-  }),
-
-  // latex-syntax (non-minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/latex-syntax.ts'],
-    outfile: './dist/latex-syntax.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/latex-syntax.ts'],
-    outfile: './dist/latex-syntax.umd.cjs',
-    format: 'iife',
-    ...LATEX_SYNTAX_UMD_OPTIONS,
-    globalName: 'LatexSyntax',
-  }),
-
-  // latex-syntax (minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/latex-syntax.ts'],
-    outfile: './dist/latex-syntax.min.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/latex-syntax.ts'],
-    outfile: './dist/latex-syntax.min.umd.cjs',
-    format: 'iife',
-    ...LATEX_SYNTAX_UMD_OPTIONS,
-    globalName: 'LatexSyntax',
-  }),
-
-  // interval (non-minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/interval.ts'],
-    outfile: './dist/interval.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/interval.ts'],
-    outfile: './dist/interval.umd.cjs',
-    format: 'iife',
-    ...INTERVAL_UMD_OPTIONS,
-    globalName: 'Interval',
-  }),
-
-  // interval (minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/interval.ts'],
-    outfile: './dist/interval.min.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/interval.ts'],
-    outfile: './dist/interval.min.umd.cjs',
-    format: 'iife',
-    ...INTERVAL_UMD_OPTIONS,
-    globalName: 'Interval',
-  }),
-
-  // numerics (non-minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/numerics.ts'],
-    outfile: './dist/numerics.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/numerics.ts'],
-    outfile: './dist/numerics.umd.cjs',
-    format: 'iife',
-    ...NUMERICS_UMD_OPTIONS,
-    globalName: 'Numerics',
-  }),
-
-  // numerics (minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/numerics.ts'],
-    outfile: './dist/numerics.min.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/numerics.ts'],
-    outfile: './dist/numerics.min.umd.cjs',
-    format: 'iife',
-    ...NUMERICS_UMD_OPTIONS,
-    globalName: 'Numerics',
-  }),
-
-  // core (non-minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/core.ts'],
-    outfile: './dist/core.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/core.ts'],
-    outfile: './dist/core.umd.cjs',
-    format: 'iife',
-    ...CORE_UMD_OPTIONS,
-    globalName: 'ComputeEngineCore',
-  }),
-
-  // core (minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/core.ts'],
-    outfile: './dist/core.min.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/core.ts'],
-    outfile: './dist/core.min.umd.cjs',
-    format: 'iife',
-    ...CORE_UMD_OPTIONS,
-    globalName: 'ComputeEngineCore',
-  }),
-
-  // compile (non-minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/compile.ts'],
-    outfile: './dist/compile.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/compile.ts'],
-    outfile: './dist/compile.umd.cjs',
-    format: 'iife',
-    ...COMPILE_UMD_OPTIONS,
-    globalName: 'Compile',
-  }),
-
-  // compile (minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/compile.ts'],
-    outfile: './dist/compile.min.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/compile.ts'],
-    outfile: './dist/compile.min.umd.cjs',
-    format: 'iife',
-    ...COMPILE_UMD_OPTIONS,
-    globalName: 'Compile',
-  }),
-
-  // identities (non-minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/identities.ts'],
-    outfile: './dist/identities.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/identities.ts'],
-    outfile: './dist/identities.umd.cjs',
-    format: 'iife',
-    ...IDENTITIES_UMD_OPTIONS,
-    globalName: 'Identities',
-  }),
-
-  // identities (minified)
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/identities.ts'],
-    outfile: './dist/identities.min.esm.js',
-    format: 'esm',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/identities.ts'],
-    outfile: './dist/identities.min.umd.cjs',
-    format: 'iife',
-    ...IDENTITIES_UMD_OPTIONS,
-    globalName: 'Identities',
-  }),
-
-  // integration-rules ESM (both minified + non-minified) are built together
-  // with the main library via the code-splitting builds above so they share a
-  // single engine chunk. Only the self-contained UMD variants are built here.
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    entryPoints: ['./src/integration-rules.ts'],
-    outfile: './dist/integration-rules.umd.cjs',
-    format: 'iife',
-    ...INTEGRATION_RULES_UMD_OPTIONS,
-    globalName: 'IntegrationRules',
-  }),
-
-  esbuild.build({
-    ...BUILD_OPTIONS,
-    drop: ['debugger'],
-    pure: ['console.assert', 'console.log'],
-    minify: true,
-    entryPoints: ['./src/integration-rules.ts'],
-    outfile: './dist/integration-rules.min.umd.cjs',
-    format: 'iife',
-    ...INTEGRATION_RULES_UMD_OPTIONS,
-    globalName: 'IntegrationRules',
-  }),
-]);
+await Promise.all(builds);

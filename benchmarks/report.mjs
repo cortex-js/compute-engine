@@ -36,7 +36,7 @@ const PUBLISHED_VERSION = process.env.CE_PUBLISHED_VERSION || '0.69.0';
 const PYTHON = join(ROOT, 'venv', 'bin', 'python3');
 const NODE = process.execPath;
 const RUBI_BATCH_TIMEOUT_MS = 180000;
-const CE_CURRENT_BUNDLE = process.env.CE_CURRENT_BUNDLE || join(ROOT, 'dist', 'compute-engine.min.esm.js');
+const CE_CURRENT_BUNDLE = process.env.CE_CURRENT_BUNDLE || join(ROOT, 'dist', 'esm-min', 'compute-engine.js');
 const CE_PUBLISHED_BUNDLE = process.env.CE_PUBLISHED_BUNDLE ||
   join(ROOT, 'benchmarks', '.competitors', `ce-${PUBLISHED_VERSION}`, 'dist', 'compute-engine.min.esm.js');
 

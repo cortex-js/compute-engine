@@ -36,7 +36,7 @@
 // Precision is reset to the engine default at the start of every case so an
 // arbitrary-precision `N` case cannot leak its precision into later cases.
 //
-// Bundle paths default to ../../dist/* and can be overridden:
+// Bundle paths default to ../../dist/esm-min/* and can be overridden:
 //   CE_CURRENT_BUNDLE · CE_PUBLISHED_BUNDLE
 //   CE_INTEGRATION_RULES_BUNDLE · CE_IDENTITIES_BUNDLE
 //   CE_LOAD_PACKS=0 disables both packs (drops the ce-rubi column)
@@ -47,10 +47,10 @@ import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DIST = join(__dirname, '..', '..', 'dist');
-const CE_BUNDLE = process.env.CE_CURRENT_BUNDLE || join(DIST, 'compute-engine.min.esm.js');
+const CE_BUNDLE = process.env.CE_CURRENT_BUNDLE || join(DIST, 'esm-min', 'compute-engine.js');
 const PUB_BUNDLE = process.env.CE_PUBLISHED_BUNDLE || '';
-const IR_BUNDLE = process.env.CE_INTEGRATION_RULES_BUNDLE || join(DIST, 'integration-rules.min.esm.js');
-const ID_BUNDLE = process.env.CE_IDENTITIES_BUNDLE || join(DIST, 'identities.min.esm.js');
+const IR_BUNDLE = process.env.CE_INTEGRATION_RULES_BUNDLE || join(DIST, 'esm-min', 'integration-rules.js');
+const ID_BUNDLE = process.env.CE_IDENTITIES_BUNDLE || join(DIST, 'esm-min', 'identities.js');
 
 const suite = JSON.parse(readFileSync(join(__dirname, '..', 'cases.json'), 'utf8'));
 

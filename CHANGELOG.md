@@ -1,3 +1,33 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **The published `dist/` directory is reorganized into per-variant
+  subdirectories.** The flat layout — where the variant was encoded in each
+  filename (`compute-engine.min.esm.js`, `compute-engine.umd.cjs`, …) — is
+  replaced by `esm/`, `esm-min/`, `umd/`, `umd-min/`, and the unchanged
+  `types/`. The variant marker moves from the filename into the directory, so a
+  bundle is now `<dir>/<name>.<ext>`. The general mapping is
+  `<name>.esm.js` → `esm/<name>.js`, `<name>.min.esm.js` → `esm-min/<name>.js`,
+  `<name>.umd.cjs` → `umd/<name>.cjs`, and `<name>.min.umd.cjs` →
+  `umd-min/<name>.cjs`; for example `dist/compute-engine.min.esm.js` is now
+  `dist/esm-min/compute-engine.js`. Consumers importing via the bare package
+  specifier (`@cortex-js/compute-engine` and its sub-paths such as
+  `@cortex-js/compute-engine/identities`) are **unaffected** — the package
+  `exports` map absorbs the move. Only deep imports that reach into
+  `…/dist/…` directly, and pinned CDN URLs, need to be updated. Each `esm*/`
+  directory is now fully self-contained, with its own `chunks/` subdirectory
+  holding only that variant's shared chunks, so vendoring a build is now "copy
+  the directory for the variant you use."
+
+- **The non-minified builds are no longer published to npm.** The package now
+  ships `dist/esm-min/`, `dist/umd-min/`, and `dist/types/` only. The
+  non-minified `esm/` and `umd/` directories — about 60% of the unpacked
+  package, and never referenced by the `exports` map — are now build-only
+  artifacts: `npm run build` still produces them locally for development and
+  debugging, but if you need a readable (non-minified) bundle, build from
+  source.
+
 ## 0.69.1 _2026-07-08_
 
 ### Issues Resolved
@@ -365,7 +395,33 @@ Measured 2026-07-08 · Compute Engine `0.68.0` @ `5a2abce1` (current build) · p
 
 ### Breaking Changes
 
-- **`\parallel` now parses to the geometric relation `Parallel`, not logical
+- **The ESM builds are no longer single-file: they load a shared chunk from
+  `dist/chunks/`.** `compute-engine.esm.js`, `compute-engine.min.esm.js` and
+  the corresponding `integration-rules` bundles are now built with code
+  splitting, so the engine core is emitted once into a `chunks/chunk-*.js`
+  file that both entry points import (this fixes `instanceof` failures when
+  the integration-rules plugin is loaded alongside the main library, which
+  previously carried its own duplicate copy of the engine). If you copy
+  `compute-engine.min.esm.js` out of the package as a standalone file — for
+  example to vendor it or serve it from your own static assets — you must now
+  copy the `chunks/` directory alongside it, preserving the relative layout.
+  Installing the package from npm, importing it from a bundler, or loading it
+  from a CDN that serves the whole package (jsDelivr, unpkg, esm.sh) is
+  unaffected. The `.umd.cjs` builds remain self-contained single files if you
+  need a copyable artifact.
+
+  Note that the chunk is required even if you don't use the integration-rules
+  plugin: it contains the shared engine core, not the rule data. To vendor the
+  Compute Engine _without_ the optional rule corpora, copy
+  `compute-engine.min.esm.js` plus the `chunks/` directory and omit
+  `integration-rules.*` (the Rubi corpus) and `identities.*` (the Fungrim
+  corpus) — neither is loaded unless you import it explicitly. Each entry
+  point imports exactly one chunk, so if you only ship the minified build you
+  only need one of the two chunk files — the smaller one (the minified chunk),
+  or definitively the one named in the entry file's first `import` statement.
+  Just remember the names contain a content hash that changes between
+  releases. All other sub-path bundles (`core`, `latex-syntax`, `numerics`,
+  `compile`, `interval`, `identities`) remain self-contained.
   `Or`.** `AB \parallel CD` is the parallelism relation, consistent with `\perp`
   → `Perpendicular`. Use `\lor` or `\vee` for disjunction (unchanged).
 

@@ -17,11 +17,13 @@ esbuild
   })
   .then((ctx) => ctx.watch());
 
-// Build and serve the library
+// Build and serve the library (plus the Cortex entry used by
+// test/cortex.html)
 esbuild
   .context({
-    entryPoints: ['./src/compute-engine.ts'],
-    outfile: './dist/compute-engine.esm.js',
+    entryPoints: ['./src/compute-engine.ts', './src/cortex.ts'],
+    outdir: './dist',
+    entryNames: '[name].esm',
     format: 'esm',
     bundle: true,
     loader: {

@@ -41,69 +41,71 @@
   ],
   "license": "MIT",
   "files": [
-    "/dist"
+    "/dist/esm-min",
+    "/dist/umd-min",
+    "/dist/types"
   ],
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/types/compute-engine.d.ts",
-      "import": "./dist/compute-engine.min.esm.js",
-      "require": "./dist/compute-engine.min.umd.cjs",
-      "default": "./dist/compute-engine.min.esm.js"
+      "import": "./dist/esm-min/compute-engine.js",
+      "require": "./dist/umd-min/compute-engine.cjs",
+      "default": "./dist/esm-min/compute-engine.js"
     },
     "./math-json": {
       "types": "./dist/types/math-json.d.ts",
-      "import": "./dist/math-json.min.esm.js",
-      "require": "./dist/math-json.min.umd.cjs",
-      "default": "./dist/math-json.min.esm.js"
+      "import": "./dist/esm-min/math-json.js",
+      "require": "./dist/umd-min/math-json.cjs",
+      "default": "./dist/esm-min/math-json.js"
     },
     "./latex-syntax": {
       "types": "./dist/types/latex-syntax.d.ts",
-      "import": "./dist/latex-syntax.min.esm.js",
-      "require": "./dist/latex-syntax.min.umd.cjs",
-      "default": "./dist/latex-syntax.min.esm.js"
+      "import": "./dist/esm-min/latex-syntax.js",
+      "require": "./dist/umd-min/latex-syntax.cjs",
+      "default": "./dist/esm-min/latex-syntax.js"
     },
     "./interval": {
       "types": "./dist/types/interval.d.ts",
-      "import": "./dist/interval.min.esm.js",
-      "require": "./dist/interval.min.umd.cjs",
-      "default": "./dist/interval.min.esm.js"
+      "import": "./dist/esm-min/interval.js",
+      "require": "./dist/umd-min/interval.cjs",
+      "default": "./dist/esm-min/interval.js"
     },
     "./numerics": {
       "types": "./dist/types/numerics.d.ts",
-      "import": "./dist/numerics.min.esm.js",
-      "require": "./dist/numerics.min.umd.cjs",
-      "default": "./dist/numerics.min.esm.js"
+      "import": "./dist/esm-min/numerics.js",
+      "require": "./dist/umd-min/numerics.cjs",
+      "default": "./dist/esm-min/numerics.js"
     },
     "./core": {
       "types": "./dist/types/core.d.ts",
-      "import": "./dist/core.min.esm.js",
-      "require": "./dist/core.min.umd.cjs",
-      "default": "./dist/core.min.esm.js"
+      "import": "./dist/esm-min/core.js",
+      "require": "./dist/umd-min/core.cjs",
+      "default": "./dist/esm-min/core.js"
     },
     "./compile": {
       "types": "./dist/types/compile.d.ts",
-      "import": "./dist/compile.min.esm.js",
-      "require": "./dist/compile.min.umd.cjs",
-      "default": "./dist/compile.min.esm.js"
+      "import": "./dist/esm-min/compile.js",
+      "require": "./dist/umd-min/compile.cjs",
+      "default": "./dist/esm-min/compile.js"
     },
     "./identities": {
       "types": "./dist/types/identities.d.ts",
-      "import": "./dist/identities.min.esm.js",
-      "require": "./dist/identities.min.umd.cjs",
-      "default": "./dist/identities.min.esm.js"
+      "import": "./dist/esm-min/identities.js",
+      "require": "./dist/umd-min/identities.cjs",
+      "default": "./dist/esm-min/identities.js"
     },
     "./integration-rules": {
       "types": "./dist/types/integration-rules.d.ts",
-      "import": "./dist/integration-rules.min.esm.js",
-      "require": "./dist/integration-rules.min.umd.cjs",
-      "default": "./dist/integration-rules.min.esm.js"
+      "import": "./dist/esm-min/integration-rules.js",
+      "require": "./dist/umd-min/integration-rules.cjs",
+      "default": "./dist/esm-min/integration-rules.js"
     }
   },
-  "main": "./dist/compute-engine.min.esm.js",
-  "module": "./dist/compute-engine.min.esm.js",
-  "browser": "./dist/compute-engine.min.umd.cjs",
-  "unpkg": "./dist/compute-engine.min.umd.cjs",
+  "main": "./dist/esm-min/compute-engine.js",
+  "module": "./dist/esm-min/compute-engine.js",
+  "browser": "./dist/umd-min/compute-engine.cjs",
+  "unpkg": "./dist/umd-min/compute-engine.cjs",
   "types": "./dist/types/compute-engine.d.ts",
   "engines": {
     "npm": ">=10.5.0",

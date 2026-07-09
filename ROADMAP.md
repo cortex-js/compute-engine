@@ -678,6 +678,33 @@ can be retired; the smoke test stays.
 **Effort:** the TS 7 bump itself is small (TS 6 already adopted the new
 defaults); the codemod is mechanical but wide. One focused session.
 
+#### 11. Publish Cortex as a package entry point
+
+**What:** expose `src/cortex.ts` (`parseCortex`, `serializeCortex`,
+`executeCortex`) as a `@cortex-js/compute-engine/cortex` sub-path. The entry
+exists and bundles cleanly (the dev server already builds it for
+`test/cortex.html`) but is not published: no `exports` entry, no `.d.ts`
+emission (`cortex` is excluded from `TARGETS` in `scripts/build.sh`), no
+bundle in `dist/`.
+
+**Design decision (2026-07-08):** the Cortex bundle must join the
+code-splitting ESM invocation alongside `compute-engine` and
+`integration-rules` — not be built standalone like `identities` — because
+`executeCortex(ce, …)` receives a host-created `ComputeEngine`, and a
+standalone bundle's duplicate engine classes break cross-bundle
+`instanceof`/identity checks (the same hazard that motivated the splitting).
+Mechanically: one row in the `ENTRIES` table of `scripts/build.mjs` with
+`esmViaSplit: true`, an `exports` map entry for `./cortex`, `cortex` restored
+to `TARGETS` in `scripts/build.sh`, and the sub-path added to
+`test/consumer/nodenext-smoke.mjs`.
+
+**Gate:** the Phase 4 interpreter semantics (`Return`/`Break`/`Continue`
+propagation, block scope capture) must be settled and test-locked first —
+publishing an interpreter whose semantics move release-to-release is worse
+than not publishing it. The parser/serializer surface is already stable.
+
+**Effort:** half a day once the gate clears.
+
 ### Correctness & symbolic findings (2026-07) — residue
 
 The July 2026 correctness and symbolic reviews are fully dispositioned: every
