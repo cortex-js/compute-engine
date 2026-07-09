@@ -18,6 +18,7 @@ import { derivative, differentiate } from '../symbolic/derivative';
 import '../symbolic/explain-derivative';
 import { antiderivative } from '../symbolic/antiderivative';
 import { dSolve } from '../symbolic/differential-equations';
+import { rSolve } from '../symbolic/recurrences';
 import {
   nDSolve,
   symbolArg,
@@ -589,6 +590,41 @@ volumes
       },
       evaluate: ([equation, dependent, independent]) =>
         dSolve(equation, dependent, independent),
+    },
+
+    RSolve: {
+      description: 'Symbolic recurrence equation solver.',
+      broadcastable: false,
+      lazy: true,
+      signature: '(expression, symbol, symbol) -> expression',
+      canonical: (ops, { engine }) => {
+        if (ops.length === 0)
+          return engine._fn('RSolve', [
+            engine.error('missing'),
+            engine.error('missing'),
+            engine.error('missing'),
+          ]);
+        if (ops.length === 1)
+          return engine._fn('RSolve', [
+            ops[0],
+            engine.error('missing'),
+            engine.error('missing'),
+          ]);
+        if (ops.length === 2)
+          return engine._fn('RSolve', [
+            ops[0],
+            symbolArg(engine, ops[1]),
+            engine.error('missing'),
+          ]);
+
+        return engine._fn('RSolve', [
+          ops[0],
+          symbolArg(engine, ops[1]),
+          symbolArg(engine, ops[2]),
+        ]);
+      },
+      evaluate: ([equation, dependent, index]) =>
+        rSolve(equation, dependent, index),
     },
 
     NDSolve: {
