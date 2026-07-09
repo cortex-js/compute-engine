@@ -17,6 +17,8 @@ const DIRECT_TRIG_OPERATORS = new Set([
   'Cot',
   'Sec',
   'Csc',
+  // Evaluates as ½(1−cos z): its argument is an angle.
+  'Haversine',
 ]);
 
 /**
@@ -35,6 +37,9 @@ const INVERSE_TRIG_OPERATORS = new Set([
   'Arccot',
   'Arcsec',
   'Arccsc',
+  // Evaluates as 2·arcsin(√z): its result is an angle. Result scaling is
+  // linear, so the factor of 2 composes with the unit conversion.
+  'InverseHaversine',
 ]);
 
 /**

@@ -169,6 +169,21 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
     );
   });
 
+  test('deg: Haversine/InverseHaversine agree with evaluate()', () => {
+    // Haversine evaluates as ½(1−cos z) (angle argument); InverseHaversine as
+    // 2·arcsin(√z) (angle result). Compiled code must scale the same way.
+    const ce = degEngine();
+    const js = ce.getCompilationTarget('javascript')!;
+    expect(
+      js.compile(ce.box(['Haversine', ce.symbol('x')])).run!({ x: 30 })
+    ).toBeCloseTo(ce.box(['Haversine', 30]).N().re, 10);
+    expect(
+      js.compile(ce.box(['InverseHaversine', ce.symbol('x')])).run!({
+        x: 0.5,
+      })
+    ).toBeCloseTo(90, 10);
+  });
+
   test('rad: no rewrite (codegen unchanged)', () => {
     const ce = new ComputeEngine();
     const js = ce.getCompilationTarget('javascript')!;
