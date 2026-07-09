@@ -445,14 +445,14 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-09, R1–R15 landed):** the shipped bundle
+**State (2026-07-09, R1–R15 landed, incl. R12):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
-(Algebraic), 2 (Exponentials), 6 (Hyperbolics), 4.1 Sine, and 4.5 Secant** —
-4,531 rules, 4.94 MB (CI has a bundle-freshness gate). Scores (seed 5):
-**4.1 Sine 106/120 and 320/400 (4.1.11 file 71/113)**, **4.5 Secant 56/120**,
-ch1 exhaustive ≈90–91%, ch2 ≈72% / ch6 ≈45% effective (seed 42), Wester
-indefinite-∫ 6/8.
+(Algebraic), 2 (Exponentials), 6 (Hyperbolics), 4.1 Sine, 4.3 Tangent, and
+4.5 Secant** — 4,831 rules, 5.29 MB (CI has a bundle-freshness gate). Scores
+(seed 5): **4.1 Sine 106/120 and 321/400 (4.1.11 file 71/113)**, **4.3
+Tangent 70/120**, **4.5 Secant 56/120**, ch1 exhaustive ≈90–91%, ch2 ≈72% /
+ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
 **Genuine wrongs are 0 across all suites** — every flagged "wrong" is a
 documented **verification false-wrong** (numeric ₂F₁/AppellF1 mis-grading at
 non-integer symbolic-exponent substitution; `√(sin²)=|sin|`; cube-root branch
@@ -461,14 +461,15 @@ antiderivative back and compare at integer substitutions. The trig routing
 lives in the runtime layer (`rubi-utils.ts`/`driver.ts`): argument-aware
 `deactivateTrig` (only x-free/linear/bare-monomial args inert — composite
 quadratic/√-inner args stay ACTIVE for the substitution rules),
-`cofunctionShift` (`sec → csc[θ+π/2]`; the `cot → −tan[θ+π/2]` variant is
-implemented but default-OFF behind `RUBI_COFN_COT` pending R12),
+`cofunctionShift` (`sec → csc[θ+π/2]` and, since R12, `cot → −tan[θ+π/2]`,
+both default-ON; the mixed-cross-pair decline gate keeps `(g·cot)^p(a+b·sin)^m`
+on `unifyInertTrig`'s matched-±π/2 clauses),
 `unifyInertTrig` + its cofunction product clauses, `standaloneCosineShift`,
 `reciprocalToPower` (frozen under fractional powers — branch safety), and
 three driver fallbacks (trig→exp with a numeric-evaluability self-check;
 R15's rational×sin/cos(linear) → Si/Ci partial-fraction split with a
 central-difference D-self-check; native-rational). A/B env switches:
-`RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`, `RUBI_NO_COFN`, `RUBI_COFN_COT`,
+`RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`, `RUBI_NO_COFN`, `RUBI_NO_COFN_COT`,
 `RUBI_NO_SKELETON`, `RUBI_NO_SICI`. Per-rung blow-by-blow
 (R1–R15, incl. the cofunction-audit table and each rung's dead ends):
 `docs/rubi/RUBI.md` §5; the rest is git history.
@@ -508,15 +509,6 @@ climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
 hypergeometric verification false-wrongs). Diagnose any stall per the Method
 note — trace the residual integrand, don't trust the predicate census.
 
-- **R12 — bundle 4.3 Tangent.** Three parts, per the R11 landing (RUBI.md §5
-  Phase R11): (a) add the 4.3 corpus to the bundler allowlist; (b) turn on the
-  `cot → −tan[θ+π/2]` leaf shift (implemented in R11 but default-OFF behind
-  `RUBI_COFN_COT` — correct but premature while 4.3 is unbundled, and it
-  regresses 4.1's mixed `(g·cot)^p(a+b·sin)^m` families); (c) supply the
-  mixed-argument "cot→tan" `unifyInertTrigFunction`-style matched-±π/2
-  product clauses — the uniform leaf reflection desyncs mixed `sin·cot`
-  products, so (b) alone is not enough. Validate 4.3 + 4.1 with the
-  genuine-wrong gate at 0.
 - **R13 — sec-specific binomial routing.** Integer-power symbolic binomials
   (`1/(a+b·sec)`, `(a+b·sec)²`) still stay inert in the shipped bundle: after
   the R11 reflection, `reciprocalToPower` rewrites the reflected `csc` inside

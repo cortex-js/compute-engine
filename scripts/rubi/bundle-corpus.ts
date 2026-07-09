@@ -19,8 +19,11 @@
 // NO load-time sec-rule generation — it deactivates active `Sec[θ]` to inert
 // `csc[π/2+θ]` at integration time and reuses the csc rules; CE keeps inert
 // `sec`, so the cofunction rules are supplied per-section (see RUBI.md §5).
-// Append further Chapter-4 sections (4.3 Tangent, 4.7, …) here as they are
-// verified.
+// `4.3 Tangent` is walked whole (RUBI.md §5, Phase R12): its tan-authored
+// reduction rules are the target of the runtime `cot → −tan[θ+π/2]` cofunction
+// shift (default-on since R12; see cofunctionShift in rubi/rubi-utils.ts), the
+// tan/cot mirror of the 4.5 sec→csc routing. Append further Chapter-4 sections
+// (4.7, …) here as they are verified.
 //
 // Chapter 6 also relies on driver-level fallbacks (rubi/driver.ts: the
 // hyperbolic→exponential expansion and the FunctionOfExponential substitution)
@@ -33,6 +36,7 @@ const ch1Dir = 'data/rubi/corpus/1 Algebraic functions';
 const ch2Dir = 'data/rubi/corpus/2 Exponentials';
 const ch6Dir = 'data/rubi/corpus/6 Hyperbolic functions';
 const trigSineDir = 'data/rubi/corpus/4 Trig functions/4.1 Sine';
+const trigTangentDir = 'data/rubi/corpus/4 Trig functions/4.3 Tangent';
 const trigSecantDir = 'data/rubi/corpus/4 Trig functions/4.5 Secant';
 const out = 'src/compute-engine/rubi/rubi-rules-data.json';
 
@@ -43,6 +47,7 @@ const docs = [
   ...readCorpusDocs(ch2Dir),
   ...readCorpusDocs(ch6Dir),
   ...readCorpusDocs(trigSineDir),
+  ...readCorpusDocs(trigTangentDir),
   ...readCorpusDocs(trigSecantDir),
 ].map((d) => ({
   file: d.file,

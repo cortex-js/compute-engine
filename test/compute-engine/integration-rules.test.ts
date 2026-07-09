@@ -220,6 +220,37 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     test('∫cos⁶x dx', () => verify('\\cos^6 x'));
   });
 
+  // Chapter-4 §4.3 Tangent (RUBI.md §5, Phase R12). The tan-authored reduction
+  // rules are bundled, and the runtime `cot → −tan[θ+π/2]` cofunction shift
+  // (default-on since R12) routes pure-cot integrands onto them — the tan/cot
+  // mirror of the 4.5 sec→csc routing. All D-verified against the integrand.
+  describe('integrates the tangent family (Chapter-4 §4.3)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const dF = ce.expr(['D', F, 'x']).evaluate();
+      // stay clear of the tan/cot poles at 0 and π/2
+      for (const x of [0.31, 0.73, 1.18]) {
+        const a = dF.subs({ x }).N().re;
+        const b = integrand.subs({ x }).N().re;
+        if (a === undefined || b === undefined) continue;
+        expect(a).toBeCloseTo(b, 6);
+      }
+    };
+    test('∫tan²x dx', () => verify('\\tan^2 x'));
+    test('∫tan⁴x dx (power reduction)', () => verify('\\tan^4 x'));
+    test('∫(1+tan x)² dx (binomial)', () => verify('(1+\\tan x)^2'));
+    test('∫tan²x·sec²x dx (product)', () => verify('\\tan^2 x \\sec^2 x'));
+    test('∫cot²x dx (cot power reduction)', () => verify('\\cot^2 x'));
+    // this pure-cot binomial is INERT without the shift; it closes only by
+    // reflecting cot→tan onto the bundled 4.3 (a+b·tan)^n rules (R12 default-on)
+    test('∫(2+3cot x)² dx (cot→tan shift → 4.3 binomial rule)', () =>
+      verify('(2+3\\cot x)^2'));
+  });
+
   describe('integrates exponential integrands (Chapter 2)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce);

@@ -2463,16 +2463,22 @@ export function activateTrig(ce: ComputeEngine, e: Expression): Expression {
 // re-activated and run through `simplifyTrig`, whose PI_HALF_PLUS table already
 // folds `Csc(θ+π/2)→Sec(θ)` and `Tan(θ+π/2)→−Cot(θ)` (see driver `cleanTrig`).
 //
-// SCOPE (R11): only `sec→csc` is enabled by default. The `cot→tan` reflection
-// is CORRECT but PREMATURE — it regresses the bundled 4.1 Sine `cot`-with-`sin`
-// families (`(g·cot)^p (a+b·sin)^m`, 4.1.1.3), because those are MIXED cross-pair
-// integrands: Rubi's UnifyInertTrigFunction reflects BOTH factors with a matched
-// ±π/2 so they keep a common argument, whereas the uniform leaf reflection here
-// turns `cot[θ]→-tan[θ+π/2]` while the `sin[θ]` stays at `θ`, so the product no
-// longer matches the sine-chapter `(g cot)^p (a+b cos)^m` clause (`unifyInertTrig`)
-// nor a `tan` rule. Enabling `cot→tan` waits on bundling 4.3 Tangent together
-// with a mixed-argument reflection (the "Cotangent to tangent" product clauses).
-// Behind the `RUBI_COFN_COT` toggle for that future rung / --rubi measurement.
+// SCOPE (R12): BOTH `sec→csc` and `cot→tan` are enabled by default (R12 bundled
+// the 4.3 Tangent chapter that is the `cot→tan` reflection's target). The
+// `cot→tan` reflection is the exact tan/cot mirror of `sec→csc`, and the SAME
+// firing-scope guard makes it safe: the MIXED cross-pair 4.1 Sine
+// `(g·cot)^p (a+b·sin)^m` families (4.1.1.3) carry a co-present `sin`/`cos`
+// (a MIXED head — see MIXED_TRIG_HEADS below, which is auto-derived from
+// COFUNCTION_SHIFT and now excludes both cofunction pairs), so `cofunctionShift`
+// DECLINES on them and leaves them to `unifyInertTrig`'s matched-±π/2
+// `(g cot)^p (a+b cos)^m` product clause — no leaf desync, no regression.
+// A pure-cot integrand (no sin/cos partner) reflects cleanly onto the bundled
+// 4.3 `tan` rule family, exactly as pure-sec reflects onto 4.5's `csc` rules.
+//
+// Toggles (mirroring `RUBI_NO_COFN`, which disables the whole shift in
+// driver.ts): set `RUBI_NO_COFN_COT` to disable ONLY the `cot→tan` half and
+// reproduce the pre-R12 sec-only behavior (used for A/B measurement); the
+// `sec→csc` half stays on.
 const COFUNCTION_SHIFT_SEC: Record<string, { fn: string; sign: number }> = {
   sec: { fn: 'csc', sign: 1 },
 };
@@ -2480,7 +2486,7 @@ const COFUNCTION_SHIFT_ALL: Record<string, { fn: string; sign: number }> = {
   sec: { fn: 'csc', sign: 1 },
   cot: { fn: 'tan', sign: -1 },
 };
-const COFN_COT = process.env.RUBI_COFN_COT !== undefined;
+const COFN_COT = process.env.RUBI_NO_COFN_COT === undefined;
 const COFUNCTION_SHIFT = COFN_COT ? COFUNCTION_SHIFT_ALL : COFUNCTION_SHIFT_SEC;
 
 /** True if a shiftable (`sec`, and — when enabled — `cot`) inert head appears
@@ -2549,8 +2555,8 @@ function cofunctionShiftRec(
   return ce.function(e.operator, newOps);
 }
 
-/** Reflect an inert `sec` (and, under `RUBI_COFN_COT`, `cot`) onto the authored
- * `csc`/`tan` cofunction via the quarter-period shift (identity when none
+/** Reflect an inert `sec` (and, unless `RUBI_NO_COFN_COT`, `cot`) onto the
+ * authored `csc`/`tan` cofunction via the quarter-period shift (identity when none
  * appears). See the block comment. Runs at deactivation time, before
  * `reciprocalToPower`, so a fractional-power `sec` reflects to a `csc` that
  * survives to the 4.5 csc rule family. If the reflection would desynchronize a

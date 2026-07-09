@@ -1,18 +1,21 @@
 # Rubi → Compute Engine: Feasibility Analysis
 
 **Date:** 2026-06-10 (feasibility); last status update 2026-07-09.
-**Status:** shipped bundle = **Chapters 1, 2, 6 + 4.1 Sine + 4.5 Secant**
-(4,531 rules). Chapter-1 exhaustive ≈90–91%; ch2 ≈72% / ch6 ≈45% effective;
-**4.1 Sine 106/120 and 320/400 (seed 5; 4.1.11 file 71/113); 4.5 Secant
-56/120; genuine wrongs 0 across all suites** (all flagged "wrongs" are
-documented verification false-wrong classes — see the ROADMAP §R state note).
+**Status:** shipped bundle = **Chapters 1, 2, 6 + 4.1 Sine + 4.3 Tangent +
+4.5 Secant** (4,831 rules, 5.29 MB). Chapter-1 exhaustive ≈90–91%; ch2 ≈72% /
+ch6 ≈45% effective; **4.1 Sine 106/120 and 321/400 (seed 5; 4.1.11 file
+71/113); 4.3 Tangent 70/120; 4.5 Secant 56/120; genuine wrongs 0 across all
+suites** (all flagged "wrongs" are documented verification false-wrong
+classes — see the ROADMAP §R state note).
 The 2026-07-04 rung series (R1/R2/R4, R10, R11, R9, R14 — §5 below) added the
 cofunction product clauses, the ch1-foundation benchmark fix,
 `reciprocalToPower`, the `cofunctionShift` and `standaloneCosineShift` runtime
-routing, the trig→exp fallback, and argument-aware `deactivateTrig`; R15
-(2026-07-09) added the rational×sin(linear) → Si/Ci partial-fraction fallback.
-**Next rungs live in ROADMAP §R** (R12 bundle 4.3 Tangent, R13 sec binomials,
-R16 the 4.1.10 `(a+b·sin)`-denominator Si/Ci chains, R3′ deep chains, R5;
+routing, the trig→exp fallback, and argument-aware `deactivateTrig`; the
+2026-07-09 rungs added R15 (rational×sin(linear) → Si/Ci partial-fraction
+fallback) and R12 (4.3 Tangent bundled, cot→tan shift default-ON behind
+`RUBI_NO_COFN_COT`).
+**Next rungs live in ROADMAP §R** (R13 sec binomials, R16 the 4.1.10
+`(a+b·sin)`-denominator Si/Ci chains, R3′ deep chains, R5;
 then the Ch6 tail R6–R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
 phasing status, and the project memory (`project_rubi.md`) has the
@@ -721,7 +724,8 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     correct but PREMATURE: 4.3 Tangent is not bundled, and it regresses the
     bundled 4.1 `(g·cot)^p (a+b·sin)^m` families (mixed cross-pair). Enabling it
     is part of the 4.3-Tangent bundling rung, together with the mixed-argument
-    "Cotangent to tangent" product clauses.
+    "Cotangent to tangent" product clauses. *(→ Superseded by Phase R12,
+    2026-07-09: default-ON, toggle now `RUBI_NO_COFN_COT`.)*
   - **Numbers (seed 5, `--rubi`).** 4.5 Secant 120: **31 → 56** correct (+25),
     **0 genuine wrong** — the 3 flagged wrong (`4.5.3.1` #27/#30, `4.5.1.2` #333)
     are verification-false-wrongs of the symbolic-exponent Hypergeometric2F1 /
@@ -743,7 +747,8 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     binomial rule can match, and the Add-summand exemption that would fix it
     regresses 4.1 Sine (−20, csc-binomial sine families) — so binomial routing
     awaits a sec-specific (not global) fix. `cot` wins appear only in `--rubi`
-    corpus runs with `RUBI_COFN_COT` once 4.3 Tangent is bundled.
+    corpus runs with `RUBI_COFN_COT` once 4.3 Tangent is bundled. *(→ Both
+    landed in Phase R12.)*
 - **Phase R9 — poly×trig + nonlinear-argument families LANDED (2026-07-04).**
   Two self-contained driver capabilities closed the bulk of the 4.1.10 / 4.1.11
   / 4.1.12 residual (`src/compute-engine/rubi/{rubi-utils,driver}.ts` only; no
@@ -920,6 +925,43 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     end-to-end through the shipped `loadIntegrationRules` path (D-checked with
     concrete integer parameters, plus a #61-shape decline test). The two close
     tests fail under `RUBI_NO_SICI=1` — they exercise the rung, not a rule.
+- **Phase R12 — 4.3 Tangent bundled + cot→tan default-ON LANDED
+  (2026-07-09).** The rung the R11 landing scoped out: (a) `4.3 Tangent`
+  walked whole in `bundle-corpus.ts` (13 files, 0 skips — matching the
+  4.1/4.5 precedent): bundle **4,531 → 4,831 rules, 4.94 → 5.29 MB**, compile
+  ~967 ms. (b) The R11 `cot → −tan[θ+π/2]` leaf reflection flipped to
+  **default-ON**; the A/B toggle is now `RUBI_NO_COFN_COT` (disables only the
+  cot half; `RUBI_NO_COFN` still disables the whole shift), mirroring the
+  `RUBI_NO_*` convention.
+  - **(c) resolved as a decline-gate, NO new product clauses.** The predicted
+    mixed-pair regression did not require `unifyInertTrigFunction`-style
+    matched-±π/2 clauses: R11's firing-scope guard is auto-derived from
+    `COFUNCTION_SHIFT`, so adding `cot` recomputes `MIXED_TRIG_HEADS` to
+    `{sin, cos}` and `cofunctionShift` **declines** any integrand with a
+    co-present sin/cos — the 4.1.1.3 `(g·cot)^p(a+b·sin)^m` families fall
+    through to `unifyInertTrig`'s existing matched-±π/2 `(g cot)^p (a+b cos)^m`
+    clause, unshifted. Within-pair `csc·cot`/`cot·tan` desyncs are caught by
+    the existing ≥2-distinct-args revert. Measured: 4.1 Sine does not regress
+    with cot ON, so matched-shift clauses would have been dead complexity.
+  - **Numbers (seed 5, `--rubi`).** 4.3 Tangent 120: **65 → 70 correct (+5)**,
+    2 wrong both **pre-existing false-wrongs** (`4.3.0 #14` `1/(b·tan)^(3/2)`,
+    `4.3.2.1 #346` `(a+a·tan)²/√(d·tan)` — the half-integer `√tan` /
+    `(−b²)^(1/4)` branch class, pure-tan, present at the cot-off baseline;
+    both D-verify: `F(x₂)−F(x₁)` matches quadrature to 6 digits). A/B
+    `RUBI_NO_COFN_COT=1` reproduces the 65-correct baseline exactly. No
+    regressions: 4.1 Sine 120 = 106, 400 = **321** (+1)/3 documented
+    false-wrongs; 4.5 Secant = 56; ch1 200 = 183, ch2 60 = 33, ch6 60 = 19
+    (strict no-ops).
+  - **Tests.** +6 D-verified tangent loader tests in
+    `integration-rules.test.ts` against the real shipped bundle — including
+    `∫(2+3·cot x)²`, which is inert under `RUBI_NO_COFN_COT` and closes only
+    via the cot→tan routing onto the 4.3 binomial rules (a genuine
+    shipped-path regression test; bare `∫cot²`/`∫cot³` solve regardless and
+    don't discriminate).
+  - **Residual (untriaged 4.3 tail, 46 unsolved at 120):** includes the
+    half-integer `√(cot)` family, which goes inert→"wrong" (same branch-cut
+    false-wrong class) rather than correct when shifted — excluded from the
+    loader tests deliberately. Triage before picking a 4.3-tail rung.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the
