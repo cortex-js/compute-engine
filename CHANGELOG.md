@@ -1,4 +1,4 @@
-## Unreleased
+## [Unreleased]
 
 ### Step-by-Step Explanations
 
@@ -8,22 +8,21 @@
   receiver that is itself a `D` expression — including mixed partials such as
   `D(f, x, y)` — is traced through its whole differentiation sequence. The
   explanation differentiates one order at a time: each stage replays the
-  textbook rule applications inside the remaining derivative operators, folds
-  to the simplified derivative, then differentiates again.
+  textbook rule applications inside the remaining derivative operators, folds to
+  the simplified derivative, then differentiates again.
 
-- **`explain('solve')` traces systems of equations and alternatives.** A
-  `List` or `And` of equations is traced through the same solvers `solve()`
-  runs: Gaussian elimination shows one step per eliminated variable and per
+- **`explain('solve')` traces systems of equations and alternatives.** A `List`
+  or `And` of equations is traced through the same solvers `solve()` runs:
+  Gaussian elimination shows one step per eliminated variable and per
   back-substituted variable (`solve.system.eliminate`,
-  `solve.system.back-substitute`, `solve.system.parametric`), and nonlinear
-  2×2 systems show the product–sum or solve-and-substitute strategy
+  `solve.system.back-substitute`, `solve.system.parametric`), and nonlinear 2×2
+  systems show the product–sum or solve-and-substitute strategy
   (`solve.system.product-sum`, `solve.system.solve-for`,
-  `solve.system.substitute`). An `Or` of univariate equations is solved case
-  by case (`solve.case`) with the roots merged. The solutions are identical
-  to `solve()` — the trace is a pure observation channel. Systems of
-  inequalities and mixed systems are not traced and throw a precise error.
-  To support systems, the `variable` explain option now also accepts an
-  array of unknowns.
+  `solve.system.substitute`). An `Or` of univariate equations is solved case by
+  case (`solve.case`) with the roots merged. The solutions are identical to
+  `solve()` — the trace is a pure observation channel. Systems of inequalities
+  and mixed systems are not traced and throw a precise error. To support
+  systems, the `variable` explain option now also accepts an array of unknowns.
 
 ## 0.71.0 _2026-07-08_
 
@@ -32,15 +31,14 @@
 - **First-order nonlinear equations solve.** (contributed by
   [KingArth0r](https://github.com/KingArth0r)) `DSolve` now handles four
   classical first-order classes:
-  - **Separable** equations return an implicit solution when no explicit form
-    is available: $y' = x/y$ gives $\frac12 y(x)^2 = \frac12 x^2 + c_1$.
+  - **Separable** equations return an implicit solution when no explicit form is
+    available: $y' = x/y$ gives $\frac12 y(x)^2 = \frac12 x^2 + c_1$.
   - **Bernoulli** equations $y' = p(x)\,y + q(x)\,y^n$ reduce via the
     $v = y^{1-n}$ substitution and return explicit solutions.
   - **Homogeneous** equations of the form $y' = F(y/x)$ solve by the $v = y/x$
     substitution: $y' = 1 + y/x$ gives $y(x)/x = \ln x + c_1$.
-  - **Exact** equations $M(x,y) + N(x,y)\,y' = 0$ return the implicit
-    potential: $2xy + y^2 + (x^2 + 2xy)\,y' = 0$ gives
-    $x^2\,y(x) + x\,y(x)^2 = c_1$.
+  - **Exact** equations $M(x,y) + N(x,y)\,y' = 0$ return the implicit potential:
+    $2xy + y^2 + (x^2 + 2xy)\,y' = 0$ gives $x^2\,y(x) + x\,y(x)^2 = c_1$.
 
   Implicit solutions are expressed in terms of $y(x)$ itself. Equations outside
   the supported classes (e.g. the Riccati equation $y' = x + y^2$) stay inert.
@@ -48,27 +46,26 @@
 - **Initial and boundary conditions are applied.** Scalar conditions can be
   passed in a list alongside the equation:
   `DSolve([y'' = -y, y(0) = 0, y'(0) = 1], y, x)` returns $y(x) = \sin x$.
-  Derivative conditions are recognized in both the
-  `Apply(Derivative(y, 1), x0)` and flat `D(y(x0), x)` forms. Conditions also
-  apply to supported implicit solutions ($y' = x/y$ with $y(0) = 1$ gives
+  Derivative conditions are recognized in both the `Apply(Derivative(y, 1), x0)`
+  and flat `D(y(x0), x)` forms. Conditions also apply to supported implicit
+  solutions ($y' = x/y$ with $y(0) = 1$ gives
   $\frac12 y(x)^2 = \frac12 x^2 + \frac12$), and free parameters survive:
   $y' = kx/y$ with $y(0) = 2$ gives $\frac12 y(x)^2 = \frac12 k x^2 + 2$ with
-  $k$ untouched. If the conditions cannot be applied to the solution class,
-  the equation stays inert rather than silently dropping them.
+  $k$ untouched. If the conditions cannot be applied to the solution class, the
+  equation stays inert rather than silently dropping them.
 
 - **Nonhomogeneous constant-coefficient equations of any order.** The
   undetermined-coefficients method now covers **polynomial, exponential, and
   sinusoidal** forcing at any order (previously polynomial forcing was
-  second-order only), including **resonant** cases, which retry the ansatz
-  with powers of $x$: $y'' - y = e^x$ gives
-  $c_1 e^x + c_2 e^{-x} + \frac12 x e^x$, and $y''' - y = \sin x$ and
-  resonant $y'' + y = \sin x$ both solve.
+  second-order only), including **resonant** cases, which retry the ansatz with
+  powers of $x$: $y'' - y = e^x$ gives $c_1 e^x + c_2 e^{-x} + \frac12 x e^x$,
+  and $y''' - y = \sin x$ and resonant $y'' + y = \sin x$ both solve.
 
 - **First-order linear homogeneous systems solve.** Pass the equations and
   dependent functions as lists: `DSolve([y' = z, z' = y], [y, z], x)` returns
   the general solution built from the eigen-decomposition of the coefficient
-  matrix. Systems with repeated — or numerically indistinguishable —
-  eigenvalues stay inert rather than returning a degenerate basis.
+  matrix. Systems with repeated — or numerically indistinguishable — eigenvalues
+  stay inert rather than returning a degenerate basis.
 
 - **`NDSolve` integrates first-order systems.** Fixed-step RK4 now handles
   systems, including nonlinear ones, with the dependent functions and initial
@@ -81,14 +78,14 @@
 
 - **New `RSolve` operator.** (contributed by
   [KingArth0r](https://github.com/KingArth0r)) `RSolve(equation, a, n)` solves
-  **linear homogeneous constant-coefficient** recurrences via the
-  characteristic polynomial: geometric ($a_{n+1} = 2a_n$ gives
-  $a(n) = c_1\,2^n$), Fibonacci-style, repeated roots with $n^k r^n$ modes
+  **linear homogeneous constant-coefficient** recurrences via the characteristic
+  polynomial: geometric ($a_{n+1} = 2a_n$ gives $a(n) = c_1\,2^n$),
+  Fibonacci-style, repeated roots with $n^k r^n$ modes
   ($a_{n+2} + a_n = 2a_{n+1}$ gives $a(n) = c_1 + c_2\,n$), and complex roots
   ($a_{n+2} = -a_n$ gives $a(n) = c_1\,i^n + c_2\,(-i)^n$). Initial conditions
   can be given in list form: `RSolve([a(n+1) = 2a(n), a(0) = 3], a, n)` gives
-  $a(n) = 3 \cdot 2^n$. Nonhomogeneous and variable-coefficient recurrences
-  stay inert.
+  $a(n) = 3 \cdot 2^n$. Nonhomogeneous and variable-coefficient recurrences stay
+  inert.
 
 ## 0.70.0 _2026-07-08_
 
@@ -99,18 +96,18 @@
   filename (`compute-engine.min.esm.js`, `compute-engine.umd.cjs`, …) — is
   replaced by `esm/`, `esm-min/`, `umd/`, `umd-min/`, and the unchanged
   `types/`. The variant marker moves from the filename into the directory, so a
-  bundle is now `<dir>/<name>.<ext>`. The general mapping is
-  `<name>.esm.js` → `esm/<name>.js`, `<name>.min.esm.js` → `esm-min/<name>.js`,
-  `<name>.umd.cjs` → `umd/<name>.cjs`, and `<name>.min.umd.cjs` →
-  `umd-min/<name>.cjs`; for example `dist/compute-engine.min.esm.js` is now
-  `dist/esm-min/compute-engine.js`. Consumers importing via the bare package
-  specifier (`@cortex-js/compute-engine` and its sub-paths such as
+  bundle is now `<dir>/<name>.<ext>`. The general mapping is `<name>.esm.js` →
+  `esm/<name>.js`, `<name>.min.esm.js` → `esm-min/<name>.js`, `<name>.umd.cjs` →
+  `umd/<name>.cjs`, and `<name>.min.umd.cjs` → `umd-min/<name>.cjs`; for example
+  `dist/compute-engine.min.esm.js` is now `dist/esm-min/compute-engine.js`.
+  Consumers importing via the bare package specifier
+  (`@cortex-js/compute-engine` and its sub-paths such as
   `@cortex-js/compute-engine/identities`) are **unaffected** — the package
-  `exports` map absorbs the move. Only deep imports that reach into
-  `…/dist/…` directly, and pinned CDN URLs, need to be updated. Each `esm*/`
-  directory is now fully self-contained, with its own `chunks/` subdirectory
-  holding only that variant's shared chunks, so vendoring a build is now "copy
-  the directory for the variant you use."
+  `exports` map absorbs the move. Only deep imports that reach into `…/dist/…`
+  directly, and pinned CDN URLs, need to be updated. Each `esm*/` directory is
+  now fully self-contained, with its own `chunks/` subdirectory holding only
+  that variant's shared chunks, so vendoring a build is now "copy the directory
+  for the variant you use."
 
 - **The non-minified builds are no longer published to npm.** The package now
   ships `dist/esm-min/`, `dist/umd-min/`, and `dist/types/` only. The
@@ -124,14 +121,14 @@
 
 - **The declaration build and typecheck now run on TypeScript 7** (the native
   compiler), cutting `.d.ts` emission from ~31s to ~5s and the full production
-  build from ~45s to ~29s. TS 7.0 ships no programmatic API, so it is
-  installed side-by-side: the module name `typescript` stays aliased to the
-  TS 6 API (`@typescript/typescript6`) for ts-jest, typedoc, typescript-eslint
-  and madge, while the native compiler (`@typescript/native`) drives the CLI.
-  No consumer-facing change — the published declarations are type-identical;
-  only cosmetic emission differences appear (single-quoted string literals,
-  sorted numeric-literal unions, literal non-ASCII property keys instead of
-  `\uXXXX` escapes).
+  build from ~45s to ~29s. TS 7.0 ships no programmatic API, so it is installed
+  side-by-side: the module name `typescript` stays aliased to the TS 6 API
+  (`@typescript/typescript6`) for ts-jest, typedoc, typescript-eslint and madge,
+  while the native compiler (`@typescript/native`) drives the CLI. No
+  consumer-facing change — the published declarations are type-identical; only
+  cosmetic emission differences appear (single-quoted string literals, sorted
+  numeric-literal unions, literal non-ASCII property keys instead of `\uXXXX`
+  escapes).
 
 ## 0.69.1 _2026-07-08_
 
@@ -141,8 +138,8 @@
   `"module": "nodenext"`/`"node16"`. The published `.d.ts` files used
   extensionless relative imports, which produced `TS2834` errors (or collapsed
   every imported type to `any` with `skipLibCheck`). The build now rewrites the
-  emitted declarations with explicit `.js` extensions and validates them
-  against a `nodenext` consumer as part of every release build.
+  emitted declarations with explicit `.js` extensions and validates them against
+  a `nodenext` consumer as part of every release build.
 
 ## 0.69.0 _2026-07-08_
 
@@ -501,11 +498,11 @@ Measured 2026-07-08 · Compute Engine `0.68.0` @ `5a2abce1` (current build) · p
 ### Breaking Changes
 
 - **The ESM builds are no longer single-file: they load a shared chunk from
-  `dist/chunks/`.** `compute-engine.esm.js`, `compute-engine.min.esm.js` and
-  the corresponding `integration-rules` bundles are now built with code
-  splitting, so the engine core is emitted once into a `chunks/chunk-*.js`
-  file that both entry points import (this fixes `instanceof` failures when
-  the integration-rules plugin is loaded alongside the main library, which
+  `dist/chunks/`.** `compute-engine.esm.js`, `compute-engine.min.esm.js` and the
+  corresponding `integration-rules` bundles are now built with code splitting,
+  so the engine core is emitted once into a `chunks/chunk-*.js` file that both
+  entry points import (this fixes `instanceof` failures when the
+  integration-rules plugin is loaded alongside the main library, which
   previously carried its own duplicate copy of the engine). If you copy
   `compute-engine.min.esm.js` out of the package as a standalone file — for
   example to vendor it or serve it from your own static assets — you must now
@@ -520,15 +517,15 @@ Measured 2026-07-08 · Compute Engine `0.68.0` @ `5a2abce1` (current build) · p
   Compute Engine _without_ the optional rule corpora, copy
   `compute-engine.min.esm.js` plus the `chunks/` directory and omit
   `integration-rules.*` (the Rubi corpus) and `identities.*` (the Fungrim
-  corpus) — neither is loaded unless you import it explicitly. Each entry
-  point imports exactly one chunk, so if you only ship the minified build you
-  only need one of the two chunk files — the smaller one (the minified chunk),
-  or definitively the one named in the entry file's first `import` statement.
-  Just remember the names contain a content hash that changes between
-  releases. All other sub-path bundles (`core`, `latex-syntax`, `numerics`,
-  `compile`, `interval`, `identities`) remain self-contained.
-  `Or`.** `AB \parallel CD` is the parallelism relation, consistent with `\perp`
-  → `Perpendicular`. Use `\lor` or `\vee` for disjunction (unchanged).
+  corpus) — neither is loaded unless you import it explicitly. Each entry point
+  imports exactly one chunk, so if you only ship the minified build you only
+  need one of the two chunk files — the smaller one (the minified chunk), or
+  definitively the one named in the entry file's first `import` statement. Just
+  remember the names contain a content hash that changes between releases. All
+  other sub-path bundles (`core`, `latex-syntax`, `numerics`, `compile`,
+  `interval`, `identities`) remain self-contained. `Or`.\*\* `AB \parallel CD`
+  is the parallelism relation, consistent with `\perp` → `Perpendicular`. Use
+  `\lor` or `\vee` for disjunction (unchanged).
 
 - **`\rightarrow` now parses to the mapping arrow `To`, not `Implies`.**
   `f: \mathbb{R} \rightarrow \mathbb{R}` now parses as a function signature,
