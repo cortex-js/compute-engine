@@ -24,6 +24,13 @@ function finalSample(result: ReturnType<typeof ndsolve>): [number, number] {
   return [sample.op1.N().re, sample.op2.N().re];
 }
 
+function finalSystemSample(
+  result: ReturnType<typeof ndsolve>
+): [number, number[]] {
+  const sample = result.ops[result.ops.length - 1];
+  return [sample.op1.N().re, sample.op2.ops.map((op) => op.N().re)];
+}
+
 function verifyFirstOrderSolution(
   solution: ReturnType<typeof dsolve>,
   rhs: unknown
@@ -93,6 +100,41 @@ function verifyEquationSolution(
   return Math.abs(value) < 1e-10;
 }
 
+function verifySystemSolution(
+  equations: unknown[],
+  solution: ReturnType<typeof dsolve>,
+  sample: Record<string, number>
+): boolean {
+  for (const equation of equations) {
+    let substituted = engine.expr(equation, { form: 'raw' });
+    for (const solutionEquation of solution.ops) {
+      const dependentName = solutionEquation.op1.operator;
+      const value = solutionEquation.op2;
+      const derivative = engine.expr(['D', value, 'x']).evaluate();
+      const dependentCall = [dependentName, 'x'];
+      substituted =
+        substituted.replace(
+          { match: ['D', dependentCall, 'x'], replace: derivative },
+          { recursive: true }
+        ) ?? substituted;
+      substituted =
+        substituted.replace(
+          { match: dependentCall, replace: value },
+          { recursive: true }
+        ) ?? substituted;
+    }
+    if (substituted.operator !== 'Equal') return false;
+
+    const residual = substituted.op1
+      .evaluate()
+      .sub(substituted.op2.evaluate())
+      .subs(sample)
+      .simplify();
+    if (Math.abs(residual.N().re) >= 1e-10) return false;
+  }
+  return true;
+}
+
 function maxDerivativeOrder(expr: ReturnType<typeof engine.expr>): number {
   if (expr.operator === 'D') {
     let order = expr.ops.length - 1;
@@ -114,9 +156,7 @@ describe('DSolve', () => {
   test('solves y prime equals y', () => {
     const solution = dsolve(['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']]);
 
-    expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) === "c_1" * e^x]`
-    );
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === "c_1" * e^x]`);
     expect(verifyFirstOrderSolution(solution, ['y', 'x'])).toBe(true);
   });
 
@@ -196,11 +236,158 @@ describe('DSolve', () => {
     }
   });
 
+  test('solves diagonal first-order linear systems', () => {
+    const equations = [
+      ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+      ['Equal', ['D', ['z', 'x'], 'x'], ['Multiply', 2, ['z', 'x']]],
+    ];
+    const solution = dsolve(['List', ...equations], ['List', 'y', 'z']);
+
+    expect(solution.operator).toBe('List');
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * e^x,z(x) === "c_2" * e^(2x)]`
+    );
+    expect(
+      verifySystemSolution(equations, solution, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves coupled first-order linear systems', () => {
+    const equations = [
+      ['Equal', ['D', ['y', 'x'], 'x'], ['z', 'x']],
+      ['Equal', ['D', ['z', 'x'], 'x'], ['y', 'x']],
+    ];
+    const solution = dsolve(['List', ...equations], ['List', 'y', 'z']);
+
+    expect(solution.operator).toBe('List');
+    expect(
+      verifySystemSolution(equations, solution, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('stays inert for first-order linear systems with repeated eigenvalues', () => {
+    const result = dsolve(
+      [
+        'List',
+        ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+        ['Equal', ['D', ['z', 'x'], 'x'], ['z', 'x']],
+      ],
+      ['List', 'y', 'z']
+    );
+
+    expect(result.operator).toBe('DSolve');
+  });
+
+  test('solves separable nonlinear first-order equations implicitly', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Divide', 'x', ['y', 'x']],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[1/2 * "y_value"^2 === 1/2 * x^2 + "c_1"]`
+    );
+  });
+
+  test('applies initial conditions to separable implicit solutions', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Divide', 'x', ['y', 'x']],
+    ];
+    const solution = dsolve(['List', equation, ['Equal', ['y', 0], 1]]);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[1/2 * "y_value"^2 === 1/2 * x^2 + 1/2]`
+    );
+  });
+
+  test('solves first-order homogeneous equations by substitution', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Add', 1, ['Divide', ['y', 'x'], 'x']],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `["y_value" / x === "c_1" + ln(x)]`
+    );
+  });
+
+  test('solves Bernoulli first-order equations', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Add', ['y', 'x'], ['Multiply', 'x', ['Power', ['y', 'x'], 2]]],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 2, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves exact first-order equations implicitly', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['Multiply', 2, 'x', ['y', 'x']],
+        ['Power', ['y', 'x'], 2],
+        [
+          'Multiply',
+          ['Add', ['Power', 'x', 2], ['Multiply', 2, 'x', ['y', 'x']]],
+          ['D', ['y', 'x'], 'x'],
+        ],
+      ],
+      0,
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `["y_value" * x^2 + x * "y_value"^2 === "c_1"]`
+    );
+  });
+
+  test('applies initial conditions to exact first-order equations', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['Multiply', 2, 'x', ['y', 'x']],
+        ['Power', ['y', 'x'], 2],
+        [
+          'Multiply',
+          ['Add', ['Power', 'x', 2], ['Multiply', 2, 'x', ['y', 'x']]],
+          ['D', ['y', 'x'], 'x'],
+        ],
+      ],
+      0,
+    ];
+    const solution = dsolve(['List', equation, ['Equal', ['y', 1], 1]]);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `["y_value" * x^2 + x * "y_value"^2 === 2]`
+    );
+  });
+
+  test('applies initial conditions to first-order equations', () => {
+    const equation = ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']];
+    const solution = dsolve(['List', equation, ['Equal', ['y', 0], 2]]);
+
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === 2e^x]`);
+    expect(verifyEquationSolution(equation, solution, { x: 0.75 })).toBe(true);
+  });
+
   test('stays inert for unsupported nonlinear first-order equations', () => {
     const result = dsolve([
       'Equal',
       ['D', ['y', 'x'], 'x'],
-      ['Power', ['y', 'x'], 2],
+      ['Add', 'x', ['Power', ['y', 'x'], 2]],
     ]);
 
     expect(result.operator).toBe('DSolve');
@@ -272,6 +459,40 @@ describe('DSolve', () => {
     expect(
       verifyEquationSolution(equation, solution, { c_1: 2, c_2: 3, x: 0.75 })
     ).toBe(true);
+  });
+
+  test('applies initial conditions to second-order equations', () => {
+    const equation = [
+      'Equal',
+      ['D', ['D', ['y', 'x'], 'x'], 'x'],
+      ['Negate', ['y', 'x']],
+    ];
+    const solution = dsolve([
+      'List',
+      equation,
+      ['Equal', ['y', 0], 0],
+      ['Equal', ['Apply', ['Derivative', 'y', 1], 0], 1],
+    ]);
+
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === sin(x)]`);
+    expect(verifyEquationSolution(equation, solution, { x: 0.75 })).toBe(true);
+  });
+
+  test('applies flat derivative-form initial conditions', () => {
+    const equation = [
+      'Equal',
+      ['D', ['D', ['y', 'x'], 'x'], 'x'],
+      ['Negate', ['y', 'x']],
+    ];
+    const solution = dsolve([
+      'List',
+      equation,
+      ['Equal', ['y', 0], 0],
+      ['Equal', ['D', ['y', 0], 'x'], 1],
+    ]);
+
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === sin(x)]`);
+    expect(verifyEquationSolution(equation, solution, { x: 0.75 })).toBe(true);
   });
 
   test('solves second-order homogeneous equation with a repeated root', () => {
@@ -387,11 +608,7 @@ describe('DSolve', () => {
   });
 
   test('solves nonhomogeneous second-order constant coefficient equation', () => {
-    const equation = [
-      'Equal',
-      ['D', ['D', ['y', 'x'], 'x'], 'x'],
-      1,
-    ];
+    const equation = ['Equal', ['D', ['D', ['y', 'x'], 'x'], 'x'], 1];
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
@@ -405,11 +622,7 @@ describe('DSolve', () => {
   test('solves polynomial-forced second-order constant coefficient equation', () => {
     const equation = [
       'Equal',
-      [
-        'Add',
-        ['D', ['D', ['y', 'x'], 'x'], 'x'],
-        ['Negate', ['y', 'x']],
-      ],
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['Negate', ['y', 'x']]],
       'x',
     ];
     const result = dsolve(equation);
@@ -419,6 +632,80 @@ describe('DSolve', () => {
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves resonant exponential-forced second-order equation', () => {
+    const equation = [
+      'Equal',
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['Negate', ['y', 'x']]],
+      ['Exp', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves resonant sinusoidal-forced second-order equation', () => {
+    const equation = [
+      'Equal',
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['y', 'x']],
+      ['Sin', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves exponential-forced higher-order constant coefficient equation', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'],
+        ['Negate', ['y', 'x']],
+      ],
+      ['Exp', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, result, {
+        c_1: 2,
+        c_2: 3,
+        c_3: 5,
+        x: 0.25,
+      })
+    ).toBe(true);
+  });
+
+  test('solves sinusoidal-forced higher-order constant coefficient equation', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'],
+        ['Negate', ['y', 'x']],
+      ],
+      ['Sin', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, result, {
+        c_1: 2,
+        c_2: 3,
+        c_3: 5,
+        x: 0.25,
+      })
     ).toBe(true);
   });
 
@@ -570,7 +857,10 @@ describe('DSolve', () => {
       [
         'Add',
         ['D', ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'], 'x'],
-        ['Negate', ['Multiply', 2, ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x']]],
+        [
+          'Negate',
+          ['Multiply', 2, ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x']],
+        ],
         ['Multiply', 2, ['D', ['D', ['y', 'x'], 'x'], 'x']],
         ['Negate', ['Multiply', 2, ['D', ['y', 'x'], 'x']]],
         ['y', 'x'],
@@ -665,8 +955,7 @@ describe('DSolve', () => {
   function hasUnfoldedExpProduct(expr: ReturnType<typeof dsolve>): boolean {
     if (expr.operator === 'Multiply') {
       const expFactors = expr.ops.filter(
-        (op) =>
-          op.operator === 'Power' && op.op1?.symbol === 'ExponentialE'
+        (op) => op.operator === 'Power' && op.op1?.symbol === 'ExponentialE'
       ).length;
       if (expFactors >= 2) return true;
     }
@@ -743,7 +1032,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) === "c_1" * e^x + "c_2" * e^(-x) + 1/2 * x * e^x - 1/4 * e^x]`
+      `[y(x) === "c_1" * e^x + "c_2" * e^(-x) + 1/2 * x * e^x]`
     );
     expect(hasUnfoldedExpProduct(result)).toBe(false);
     expect(hasPythagoreanPair(result)).toBe(false);
@@ -812,7 +1101,7 @@ describe('DSolve', () => {
   // `D` term as `expression` and replaced it with an `Error` node before
   // `DSolve` ran).
   //
-  test('parses y\'\'(x) + y(x) = 0 without an Error node and solves it', () => {
+  test("parses y''(x) + y(x) = 0 without an Error node and solves it", () => {
     const equation = engine.parse("y''(x)+y(x)=0");
     expect(equation.isValid).toBe(true);
     expect(hasNoErrorNode(equation)).toBe(true);
@@ -824,7 +1113,7 @@ describe('DSolve', () => {
     );
   });
 
-  test('parses and solves y\'\'(x) - y(x) = e^x end-to-end', () => {
+  test("parses and solves y''(x) - y(x) = e^x end-to-end", () => {
     const equation = engine.parse("y''(x) - y(x) = e^x");
     expect(equation.isValid).toBe(true);
     expect(hasNoErrorNode(equation)).toBe(true);
@@ -862,9 +1151,7 @@ describe('DSolve', () => {
 
     expect(implicit.operator).toBe('List');
     expect(implicit.toString()).toEqual(explicit.toString());
-    expect(implicit.toString()).toMatchInlineSnapshot(
-      `[y(x) === "c_1" * e^x]`
-    );
+    expect(implicit.toString()).toMatchInlineSnapshot(`[y(x) === "c_1" * e^x]`);
   });
 });
 
@@ -960,6 +1247,43 @@ describe('NDSolve', () => {
 
     expect(result.operator).toBe('List');
     expect(y).toBeCloseTo(Math.E, 10);
+  });
+
+  test('solves first-order systems with RK4 samples', () => {
+    const result = ndsolve(
+      [
+        'List',
+        ['Equal', ['D', ['y', 'x'], 'x'], ['z', 'x']],
+        ['Equal', ['D', ['z', 'x'], 'x'], ['Negate', ['y', 'x']]],
+      ],
+      ['List', 0, 1],
+      200,
+      ['List', 'y', 'z']
+    );
+    const [x, [y, z]] = finalSystemSample(result);
+
+    expect(result.operator).toBe('List');
+    expect(x).toBeCloseTo(1, 12);
+    expect(y).toBeCloseTo(Math.sin(1), 10);
+    expect(z).toBeCloseTo(Math.cos(1), 10);
+  });
+
+  test('solves nonlinear first-order systems with RK4 samples', () => {
+    const result = ndsolve(
+      [
+        'List',
+        ['Equal', ['D', ['y', 'x'], 'x'], ['Multiply', ['y', 'x'], ['z', 'x']]],
+        ['Equal', ['D', ['z', 'x'], 'x'], ['Negate', ['z', 'x']]],
+      ],
+      ['List', 1, 1],
+      400,
+      ['List', 'y', 'z']
+    );
+    const [, [y, z]] = finalSystemSample(result);
+
+    expect(result.operator).toBe('List');
+    expect(y).toBeCloseTo(Math.exp(1 - Math.exp(-1)), 10);
+    expect(z).toBeCloseTo(Math.exp(-1), 10);
   });
 
   test('stays inert when higher-order IVP initial values have wrong length', () => {

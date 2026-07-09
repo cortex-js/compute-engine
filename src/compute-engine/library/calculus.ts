@@ -18,7 +18,12 @@ import { derivative, differentiate } from '../symbolic/derivative.js';
 import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
 import { dSolve } from '../symbolic/differential-equations.js';
-import { nDSolve, symbolArg } from '../differential-equation-utils.js';
+import { rSolve } from '../symbolic/recurrences.js';
+import {
+  nDSolve,
+  symbolArg,
+  symbolOrListArg,
+} from '../differential-equation-utils.js';
 import { symbolicLimit } from '../symbolic/limit.js';
 import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
@@ -573,18 +578,53 @@ volumes
         if (ops.length === 2)
           return engine._fn('DSolve', [
             ops[0],
-            symbolArg(engine, ops[1]),
+            symbolOrListArg(engine, ops[1]),
             engine.error('missing'),
           ]);
 
         return engine._fn('DSolve', [
           ops[0],
-          symbolArg(engine, ops[1]),
+          symbolOrListArg(engine, ops[1]),
           symbolArg(engine, ops[2]),
         ]);
       },
       evaluate: ([equation, dependent, independent]) =>
         dSolve(equation, dependent, independent),
+    },
+
+    RSolve: {
+      description: 'Symbolic recurrence equation solver.',
+      broadcastable: false,
+      lazy: true,
+      signature: '(expression, symbol, symbol) -> expression',
+      canonical: (ops, { engine }) => {
+        if (ops.length === 0)
+          return engine._fn('RSolve', [
+            engine.error('missing'),
+            engine.error('missing'),
+            engine.error('missing'),
+          ]);
+        if (ops.length === 1)
+          return engine._fn('RSolve', [
+            ops[0],
+            engine.error('missing'),
+            engine.error('missing'),
+          ]);
+        if (ops.length === 2)
+          return engine._fn('RSolve', [
+            ops[0],
+            symbolArg(engine, ops[1]),
+            engine.error('missing'),
+          ]);
+
+        return engine._fn('RSolve', [
+          ops[0],
+          symbolArg(engine, ops[1]),
+          symbolArg(engine, ops[2]),
+        ]);
+      },
+      evaluate: ([equation, dependent, index]) =>
+        rSolve(equation, dependent, index),
     },
 
     NDSolve: {
@@ -602,7 +642,7 @@ volumes
 
         return engine._fn('NDSolve', [
           ops[0] ?? missing,
-          symbolArg(engine, ops[1]),
+          symbolOrListArg(engine, ops[1]),
           limits ?? missing,
           ops[3]?.canonical ?? missing,
           ...(ops[4] ? [ops[4].canonical] : []),

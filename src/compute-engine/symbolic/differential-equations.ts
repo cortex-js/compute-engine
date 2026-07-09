@@ -1,6 +1,5 @@
 import { antiderivative } from './antiderivative.js';
 import type { Expression } from '../global-types.js';
-import { isValueDef } from '../boxed-expression/utils.js';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 import {
   getPolynomialCoefficients,
@@ -8,10 +7,20 @@ import {
 } from '../boxed-expression/polynomials.js';
 import {
   derivativeOrderOfDependent,
+  explicitDerivativeRhs,
   isDependentFunction,
   isDerivativeOfDependent,
 } from '../differential-equation-utils.js';
 import { durandKernerRoots } from '../numerics/polynomial-roots.js';
+import {
+  appendDistinctRoot,
+  characteristicPolynomial,
+  collectSymbols,
+  freshSymbolName,
+  integrationConstants,
+  rootMultiplicity,
+  solutionRecord,
+} from './solver-utils.js';
 
 interface LinearTermCoefficients {
   derivative: Expression;
@@ -24,9 +33,30 @@ interface DerivativeTermCoefficients {
   rest: Expression;
 }
 
+interface SystemLinearTerms {
+  coefficients: Expression[];
+  rest: Expression;
+}
+
+interface ScalarProblem {
+  equation: Expression;
+  conditions: readonly Expression[];
+}
+
 function functionName(expr: Expression): string | undefined {
   if (!isFunction(expr)) return undefined;
   return expr.operator;
+}
+
+function scalarProblem(
+  equation: Expression,
+  dependent: Expression
+): ScalarProblem {
+  if (isFunction(dependent, 'List') || !isFunction(equation, 'List'))
+    return { equation, conditions: [] };
+
+  const [ode, ...conditions] = equation.ops;
+  return ode ? { equation: ode, conditions } : { equation, conditions: [] };
 }
 
 function splitTerm(
@@ -224,42 +254,31 @@ function expressionForDependent(
   };
 }
 
-function collectSymbols(
-  expr: Expression,
-  symbols = new Set<string>()
-): Set<string> {
-  if (isSymbol(expr)) symbols.add(expr.symbol);
-  if (isFunction(expr)) {
-    for (const op of expr.ops) collectSymbols(op, symbols);
-  }
-  return symbols;
-}
+function expressionsForDependentSystem(
+  dependent: Expression,
+  independent: Expression
+): {
+  dependentNames: string[];
+  independentName: string;
+  dependentCalls: Expression[];
+} | null {
+  if (!isFunction(dependent, 'List')) return null;
+  const independentName = sym(independent);
+  if (!independentName) return null;
 
-function freshSymbolName(prefix: string, usedSymbols: Set<string>): string {
-  for (let i = 0; ; i++) {
-    const name = i === 0 ? prefix : `${prefix}_${i}`;
-    if (!usedSymbols.has(name)) return name;
-  }
-}
+  const dependentNames = dependent.ops.map((op) => sym(op));
+  if (dependentNames.some((name) => name === undefined)) return null;
+  const names = dependentNames as string[];
+  if (new Set(names).size !== names.length) return null;
 
-function integrationConstants(
-  equation: Expression,
-  count: number
-): Expression[] {
-  const ce = equation.engine;
-  const usedSymbols = collectSymbols(equation);
-  const result: Expression[] = [];
-
-  for (let i = 1; result.length < count; i++) {
-    const name = `c_${i}`;
-    if (usedSymbols.has(name)) continue;
-    const def = ce.lookupDefinition(name);
-    if (def && !(isValueDef(def) && def.value.inferredType)) continue;
-    usedSymbols.add(name);
-    result.push(ce.symbol(name));
-  }
-
-  return result;
+  const ce = dependent.engine;
+  return {
+    dependentNames: names,
+    independentName,
+    dependentCalls: names.map((name) =>
+      ce.function(name, [ce.symbol(independentName)])
+    ),
+  };
 }
 
 function splitDerivativeTerm(
@@ -591,6 +610,194 @@ function dSolveAntiderivative(expr: Expression, variable: string): Expression {
   return antiderivative(expr, variable);
 }
 
+function splitSystemTerm(
+  term: Expression,
+  dependentNames: readonly string[],
+  independentName: string
+): { index: number | null; coefficient: Expression } {
+  const ce = term.engine;
+
+  for (let i = 0; i < dependentNames.length; i++) {
+    if (isDependentFunction(term, dependentNames[i], independentName))
+      return { index: i, coefficient: ce.One };
+  }
+
+  if (isFunction(term, 'Negate')) {
+    const result = splitSystemTerm(term.op1, dependentNames, independentName);
+    return { ...result, coefficient: result.coefficient.neg() };
+  }
+
+  if (isFunction(term, 'Multiply')) {
+    let dependentIndex = -1;
+    let dependentFactorIndex = -1;
+
+    for (let i = 0; i < term.ops.length; i++) {
+      for (let j = 0; j < dependentNames.length; j++) {
+        if (
+          isDependentFunction(term.ops[i], dependentNames[j], independentName)
+        ) {
+          if (dependentIndex >= 0) return { index: null, coefficient: term };
+          dependentIndex = j;
+          dependentFactorIndex = i;
+        }
+      }
+    }
+
+    if (dependentIndex >= 0) {
+      const coefficientFactors = term.ops.filter(
+        (_, i) => i !== dependentFactorIndex
+      );
+      return {
+        index: dependentIndex,
+        coefficient:
+          coefficientFactors.length === 0
+            ? ce.One
+            : ce.function('Multiply', coefficientFactors),
+      };
+    }
+  }
+
+  return { index: null, coefficient: term };
+}
+
+function collectSystemLinearTerms(
+  rhs: Expression,
+  dependentNames: readonly string[],
+  independentName: string
+): SystemLinearTerms {
+  const ce = rhs.engine;
+  const terms = isFunction(rhs, 'Add')
+    ? rhs.ops
+    : isFunction(rhs, 'Subtract')
+      ? [rhs.op1, rhs.op2.neg()]
+      : [rhs];
+  const coefficients = dependentNames.map(() => ce.Zero);
+  let rest = ce.Zero;
+
+  for (const term of terms) {
+    const split = splitSystemTerm(term, dependentNames, independentName);
+    if (split.index === null) rest = rest.add(split.coefficient);
+    else
+      coefficients[split.index] = coefficients[split.index].add(
+        split.coefficient
+      );
+  }
+
+  return { coefficients, rest };
+}
+
+function hasAnyDependentOrDerivative(
+  expr: Expression,
+  dependentNames: readonly string[],
+  independentName: string
+): boolean {
+  return dependentNames.some((name) =>
+    hasDependentOrDerivative(expr, name, independentName)
+  );
+}
+
+function listOps(expr: Expression): readonly Expression[] | undefined {
+  return isFunction(expr, 'List') ? expr.ops : undefined;
+}
+
+function solveLinearHomogeneousSystem(
+  equation: Expression,
+  dependent: Expression,
+  independent: Expression
+): Expression | undefined {
+  const system = expressionsForDependentSystem(dependent, independent);
+  if (!system || !isFunction(equation, 'List')) return undefined;
+
+  const { dependentNames, independentName, dependentCalls } = system;
+  const ce = equation.engine;
+  if (
+    dependentNames.length === 0 ||
+    equation.ops.length !== dependentNames.length
+  )
+    return undefined;
+
+  const rows: Expression[][] = [];
+  for (let i = 0; i < equation.ops.length; i++) {
+    const rhsInfo = explicitDerivativeRhs(
+      equation.ops[i].structural,
+      dependentNames[i],
+      independentName
+    );
+    if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+
+    const row = collectSystemLinearTerms(
+      rhsInfo.rhs.structural,
+      dependentNames,
+      independentName
+    );
+    if (!row.rest.simplify().isSame(0)) return undefined;
+    if (
+      row.coefficients.some(
+        (coefficient) =>
+          coefficient.has(independentName) ||
+          hasAnyDependentOrDerivative(
+            coefficient,
+            dependentNames,
+            independentName
+          )
+      )
+    )
+      return undefined;
+
+    rows.push(row.coefficients.map((coefficient) => coefficient.simplify()));
+  }
+
+  const matrix = ce
+    ._fn(
+      'List',
+      rows.map((row) => ce._fn('List', row))
+    )
+    .evaluate();
+  const eigen = ce.expr(['Eigen', matrix]).evaluate();
+  if (!isFunction(eigen, 'Tuple') || eigen.nops !== 2) return undefined;
+
+  const eigenvalues = listOps(eigen.op1);
+  const eigenvectors = listOps(eigen.op2);
+  if (
+    !eigenvalues ||
+    !eigenvectors ||
+    eigenvalues.length !== dependentNames.length ||
+    eigenvectors.length !== dependentNames.length
+  )
+    return undefined;
+
+  const seenEigenvalues = new Set<string>();
+  for (const eigenvalue of eigenvalues) {
+    const key = eigenvalue.toString();
+    if (seenEigenvalues.has(key)) return undefined;
+    seenEigenvalues.add(key);
+  }
+
+  const constants = integrationConstants(equation, dependentNames.length);
+  const x = ce.symbol(independentName);
+  const solutions = dependentNames.map((_, componentIndex) => {
+    const terms: Expression[] = [];
+    for (let i = 0; i < eigenvalues.length; i++) {
+      const vector = listOps(eigenvectors[i]);
+      if (!vector || vector.length !== dependentNames.length) return undefined;
+      terms.push(
+        constants[i]
+          .mul(vector[componentIndex])
+          .mul(ce.function('Exp', [eigenvalues[i].mul(x).simplify()]))
+      );
+    }
+    return ce.function('Add', terms).simplify();
+  });
+  if (solutions.some((solution) => solution === undefined)) return undefined;
+
+  return ce.function(
+    'List',
+    dependentCalls.map((call, i) =>
+      ce.function('Equal', [call, solutions[i] as Expression])
+    )
+  );
+}
+
 function productExpression(ce: Expression['engine'], factors: Expression[]) {
   if (factors.length === 0) return ce.One;
   if (factors.length === 1) return factors[0];
@@ -656,82 +863,6 @@ function normalizedTrigProduct(
   }
 
   return undefined;
-}
-
-function characteristicPolynomial(
-  coefficients: Map<number, Expression>,
-  order: number,
-  variable: string,
-  ce: Expression['engine']
-): Expression {
-  const root = ce.symbol(variable);
-  const terms: Expression[] = [];
-
-  for (let i = 0; i <= order; i++) {
-    const coefficient = (coefficients.get(i) ?? ce.Zero).simplify();
-    if (coefficient.isSame(0)) continue;
-    if (i === 0) terms.push(coefficient);
-    else if (i === 1) terms.push(coefficient.mul(root).simplify());
-    else terms.push(coefficient.mul(root.pow(i)).simplify());
-  }
-
-  return terms.length === 0 ? ce.Zero : ce.function('Add', terms).simplify();
-}
-
-function isZeroAtRoot(
-  expr: Expression,
-  variable: string,
-  root: Expression
-): boolean {
-  const value = expr.subs({ [variable]: root }).simplify();
-  if (value.isSame(0)) return true;
-  const numeric = value.N();
-  return Math.hypot(numeric.re, numeric.im) < 1e-8;
-}
-
-function rootMultiplicity(
-  polynomial: Expression,
-  variable: string,
-  root: Expression,
-  maxMultiplicity: number
-): number {
-  const ce = polynomial.engine;
-  let multiplicity = 0;
-  let derivative = polynomial;
-
-  while (
-    multiplicity < maxMultiplicity &&
-    isZeroAtRoot(derivative, variable, root)
-  ) {
-    multiplicity += 1;
-    derivative = ce
-      .function('D', [derivative, ce.symbol(variable)])
-      .evaluate()
-      .simplify();
-  }
-
-  return multiplicity;
-}
-
-function appendDistinctRoot(
-  roots: Expression[],
-  root: Expression,
-  tolerance = 1e-8
-): void {
-  const rootValue = root.N();
-  if (
-    roots.some((other) => {
-      if (root.isSame(other)) return true;
-      const otherValue = other.N();
-      return (
-        Math.hypot(rootValue.re - otherValue.re, rootValue.im - otherValue.im) <
-        tolerance
-      );
-    })
-  )
-    return;
-
-  roots.push(root);
 }
 
 function numericCharacteristicCoefficients(
@@ -928,7 +1059,6 @@ function solveHigherOrderHomogeneousConstantCoefficient(
   const rootVariable = freshSymbolName('dsolveroot', collectSymbols(equation));
   const polynomial = characteristicPolynomial(
     collected.coefficients,
-    order,
     rootVariable,
     ce
   );
@@ -991,6 +1121,79 @@ function solveHigherOrderHomogeneousConstantCoefficient(
   return ce.function('List', [ce.function('Equal', [dependentCall, solution])]);
 }
 
+function homogeneousEquationFromCoefficients(
+  equation: Expression,
+  coefficients: Map<number, Expression>,
+  dependentName: string,
+  independentName: string
+): Expression {
+  const ce = equation.engine;
+  const x = ce.symbol(independentName);
+  const dependentCall = ce.function(dependentName, [x]);
+  const terms: Expression[] = [];
+
+  for (const [order, coefficient] of coefficients) {
+    let term = dependentCall;
+    for (let i = 0; i < order; i++)
+      term = ce.function('D', [term, x], { form: 'structural' });
+    terms.push(coefficient.mul(term).simplify());
+  }
+
+  const lhs = terms.length === 1 ? terms[0] : ce.function('Add', terms);
+  return ce.function('Equal', [lhs, ce.Zero]);
+}
+
+function solveHigherOrderNonhomogeneousConstantCoefficient(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const ce = equation.engine;
+  const collected = equationDerivativeCoefficients(
+    equation,
+    dependentName,
+    independentName
+  );
+  const order = Math.max(...collected.coefficients.keys());
+  if (order < 3 || collected.rest.isSame(0)) return undefined;
+  const leading = (collected.coefficients.get(order) ?? ce.Zero).simplify();
+  if (leading.isSame(0)) return undefined;
+  if (
+    hasDependentOrDerivative(collected.rest, dependentName, independentName) ||
+    ![...collected.coefficients.values()].every((coefficient) =>
+      isConstantCoefficient(coefficient, dependentName, independentName)
+    )
+  )
+    return undefined;
+
+  const particular = undeterminedCoefficientParticularSolution(
+    equation,
+    collected,
+    independentName
+  );
+  if (!particular) return undefined;
+
+  const homogeneousEquation = homogeneousEquationFromCoefficients(
+    equation,
+    collected.coefficients,
+    dependentName,
+    independentName
+  );
+  const homogeneous = solveHigherOrderHomogeneousConstantCoefficient(
+    homogeneousEquation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (!homogeneous || !isFunction(homogeneous, 'List')) return undefined;
+
+  const solutionEquation = homogeneous.op1;
+  if (!isFunction(solutionEquation, 'Equal')) return undefined;
+  const solution = solutionEquation.op2.add(particular).simplify();
+  return ceListSolution(dependentCall, solution);
+}
+
 function solveSecondOrderHomogeneousConstantCoefficient(
   equation: Expression,
   dependentCall: Expression,
@@ -1019,6 +1222,540 @@ function ceListSolution(
   return dependentCall.engine.function('List', [
     dependentCall.engine.function('Equal', [dependentCall, solution]),
   ]);
+}
+
+function dependentAtPoint(
+  expr: Expression,
+  dependentName: string
+): { point: Expression } | undefined {
+  return isFunction(expr) && expr.operator === dependentName && expr.nops === 1
+    ? { point: expr.op1 }
+    : undefined;
+}
+
+function derivativeAtPoint(
+  expr: Expression,
+  dependentName: string,
+  independentName: string
+): { order: number; point: Expression } | undefined {
+  if (isFunction(expr, 'Apply') && isFunction(expr.op1, 'Derivative')) {
+    if (!isSymbol(expr.op1.op1, dependentName) || expr.nops !== 2)
+      return undefined;
+
+    const order = expr.op1.op2 === undefined ? 1 : expr.op1.op2.N().re;
+    if (!Number.isInteger(order) || order <= 0) return undefined;
+    return { order, point: expr.op2 };
+  }
+
+  if (isFunction(expr, 'D') && expr.nops >= 2) {
+    const direct = dependentAtPoint(expr.op1, dependentName);
+    if (!direct) return undefined;
+    if (!expr.ops.slice(1).every((op) => isSymbol(op, independentName)))
+      return undefined;
+    return { order: expr.nops - 1, point: direct.point };
+  }
+
+  return undefined;
+}
+
+function implicitDependentSymbol(
+  solutionEquation: Expression,
+  dependentName: string,
+  independentName: string
+): string | undefined {
+  const symbols = collectSymbols(solutionEquation);
+  for (const symbol of symbols) {
+    if (
+      symbol !== dependentName &&
+      symbol !== independentName &&
+      !/^c_\d+$/.test(symbol)
+    )
+      return symbol;
+  }
+  return undefined;
+}
+
+function replaceDependentCall(
+  expr: Expression,
+  dependentCall: Expression,
+  replacement: Expression
+): Expression {
+  if (expr.isSame(dependentCall)) return replacement;
+  if (
+    isFunction(expr) &&
+    isFunction(dependentCall) &&
+    expr.operator === dependentCall.operator &&
+    expr.nops === dependentCall.nops &&
+    expr.ops.every((op, i) => op.isSame(dependentCall.ops[i]))
+  )
+    return replacement;
+  if (!isFunction(expr)) return expr;
+  return expr.engine._fn(
+    expr.operator,
+    expr.ops.map((op) => replaceDependentCall(op, dependentCall, replacement))
+  );
+}
+
+function replaceSymbol(
+  expr: Expression,
+  name: string,
+  replacement: Expression
+): Expression {
+  if (isSymbol(expr, name)) return replacement;
+  if (!isFunction(expr)) return expr;
+  return expr.engine._fn(
+    expr.operator,
+    expr.ops.map((op) => replaceSymbol(op, name, replacement))
+  );
+}
+
+function conditionEquationForSolution(
+  condition: Expression,
+  solutionEquation: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  if (!isFunction(condition, 'Equal') || !isFunction(solutionEquation, 'Equal'))
+    return undefined;
+
+  const ce = condition.engine;
+  const x = ce.symbol(independentName);
+  const dependentCall = ce.function(dependentName, [x]);
+
+  const direct =
+    dependentAtPoint(condition.op1, dependentName) ??
+    dependentAtPoint(condition.op2, dependentName);
+  if (direct) {
+    const value = dependentAtPoint(condition.op1, dependentName)
+      ? condition.op2
+      : condition.op1;
+    const implicitName = implicitDependentSymbol(
+      solutionEquation,
+      dependentName,
+      independentName
+    );
+    let lhs = replaceDependentCall(solutionEquation.op1, dependentCall, value);
+    let rhs = replaceDependentCall(solutionEquation.op2, dependentCall, value);
+    if (implicitName) {
+      lhs = replaceSymbol(lhs, implicitName, value);
+      rhs = replaceSymbol(rhs, implicitName, value);
+    }
+    lhs = replaceSymbol(lhs, dependentName, value)
+      .subs({ [independentName]: direct.point })
+      .simplify();
+    rhs = replaceSymbol(rhs, dependentName, value)
+      .subs({ [independentName]: direct.point })
+      .simplify();
+    return ce.function('Equal', [lhs, rhs]);
+  }
+
+  const derivative =
+    derivativeAtPoint(condition.op1, dependentName, independentName) ??
+    derivativeAtPoint(condition.op2, dependentName, independentName);
+  if (!derivative) return undefined;
+  if (!solutionEquation.op1.isSame(dependentCall)) return undefined;
+
+  const value = derivativeAtPoint(condition.op1, dependentName, independentName)
+    ? condition.op2
+    : condition.op1;
+  let differentiated = solutionEquation.op2;
+  for (let i = 0; i < derivative.order; i++)
+    differentiated = ce.function('D', [differentiated, x]).evaluate();
+
+  return ce.function('Equal', [
+    differentiated.subs({ [independentName]: derivative.point }).simplify(),
+    value,
+  ]);
+}
+
+function applyScalarConditions(
+  solution: Expression,
+  conditions: readonly Expression[],
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  if (conditions.length === 0) return solution;
+  if (!isFunction(solution, 'List') || solution.nops !== 1) return undefined;
+
+  const solutionEquation = solution.op1;
+  if (!isFunction(solutionEquation, 'Equal')) return undefined;
+  const equations: Expression[] = [];
+  for (const condition of conditions) {
+    const equation = conditionEquationForSolution(
+      condition,
+      solutionEquation,
+      dependentName,
+      independentName
+    );
+    if (!equation) return undefined;
+    equations.push(equation.canonical);
+  }
+
+  const constantNames = [...collectSymbols(solution)].filter((name) =>
+    /^c_\d+$/.test(name)
+  );
+  if (constantNames.length === 0) return undefined;
+
+  const result = solution.engine
+    .function('List', equations)
+    .solve(constantNames);
+  const solved = solutionRecord(result);
+  if (!solved) return undefined;
+
+  const conditioned = solutionEquation.op2.subs(solved).simplify();
+  if (constantNames.some((name) => conditioned.has(name))) return undefined;
+  return ceListSolution(solutionEquation.op1, conditioned);
+}
+
+function splitSeparableRhs(
+  rhs: Expression,
+  dependentName: string,
+  independentName: string
+): { xPart: Expression; yPart: Expression } | undefined {
+  const ce = rhs.engine;
+  const factors = isFunction(rhs, 'Multiply')
+    ? rhs.ops
+    : isFunction(rhs, 'Divide')
+      ? [rhs.op1, ce._fn('Power', [rhs.op2, ce.number(-1)])]
+      : [rhs];
+  const xFactors: Expression[] = [];
+  const yFactors: Expression[] = [];
+
+  for (const factor of factors) {
+    const hasX = hasIndependentOutsideDependent(
+      factor,
+      dependentName,
+      independentName
+    );
+    const hasY = hasDependentOrDerivative(
+      factor,
+      dependentName,
+      independentName
+    );
+    if (hasX && hasY) return undefined;
+    if (hasY) yFactors.push(factor);
+    else xFactors.push(factor);
+  }
+
+  if (yFactors.length === 0) return undefined;
+  return {
+    xPart: productExpression(ce, xFactors),
+    yPart: productExpression(ce, yFactors),
+  };
+}
+
+function hasIndependentOutsideDependent(
+  expr: Expression,
+  dependentName: string,
+  independentName: string
+): boolean {
+  if (isDependentFunction(expr, dependentName, independentName)) return false;
+  if (derivativeOrderOfDependent(expr, dependentName, independentName))
+    return false;
+  if (isSymbol(expr, independentName)) return true;
+  if (!isFunction(expr)) return false;
+  return expr.ops.some((op) =>
+    hasIndependentOutsideDependent(op, dependentName, independentName)
+  );
+}
+
+function reciprocal(expr: Expression): Expression {
+  if (isFunction(expr, 'Power') && expr.op2.N().re === -1) return expr.op1;
+  return expr.pow(-1).simplify();
+}
+
+function solveSeparableFirstOrder(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const rhsInfo = explicitDerivativeRhs(
+    equation.structural,
+    dependentName,
+    independentName
+  );
+  if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+
+  const separated = splitSeparableRhs(
+    rhsInfo.rhs.structural,
+    dependentName,
+    independentName
+  );
+  if (!separated) return undefined;
+
+  const ce = equation.engine;
+  const ySymbolName = freshSymbolName(
+    `${dependentName}_value`,
+    collectSymbols(equation)
+  );
+  const y = ce.symbol(ySymbolName);
+  const yPart = replaceDependentCall(
+    separated.yPart,
+    dependentCall,
+    y
+  ).simplify();
+  if (separated.yPart.isSame(dependentCall)) return undefined;
+  if (yPart.has(independentName) || yPart.isSame(0)) return undefined;
+
+  const left = dSolveAntiderivative(reciprocal(yPart), ySymbolName);
+  const right = dSolveAntiderivative(separated.xPart, independentName);
+  if (hasOperator(left, 'Integrate') || hasOperator(right, 'Integrate'))
+    return undefined;
+
+  const [c] = integrationConstants(equation, 1);
+  const implicitLeft = left.simplify();
+  const implicitRight = right.add(c).simplify();
+  return ce.function('List', [
+    ce.function('Equal', [implicitLeft, implicitRight]),
+  ]);
+}
+
+function solveHomogeneousFirstOrder(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const rhsInfo = explicitDerivativeRhs(
+    equation.structural,
+    dependentName,
+    independentName
+  );
+  if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+
+  const ce = equation.engine;
+  const usedSymbols = collectSymbols(equation);
+  const ratioName = freshSymbolName('dsolvev', usedSymbols);
+  const ySymbolName = freshSymbolName(`${dependentName}_value`, usedSymbols);
+  const x = ce.symbol(independentName);
+  const v = ce.symbol(ratioName);
+  const y = ce.symbol(ySymbolName);
+  const substituted = replaceDependentCall(
+    rhsInfo.rhs.structural,
+    dependentCall,
+    ce.function('Multiply', [v, x], { form: 'structural' })
+  );
+  const reduced = cancelHomogeneousRatio(
+    substituted,
+    ratioName,
+    independentName
+  ).simplify();
+  if (reduced.has(independentName)) return undefined;
+
+  const denominator = reduced.sub(v).simplify();
+  if (denominator.isSame(0)) return undefined;
+  const left = dSolveAntiderivative(denominator.pow(-1).simplify(), ratioName);
+  if (hasOperator(left, 'Integrate')) return undefined;
+
+  const [c] = integrationConstants(equation, 1);
+  const ratio = y.div(x).simplify();
+  const implicitLeft = replaceSymbol(left, ratioName, ratio).simplify();
+  const implicitRight = ce.function('Ln', [x]).add(c).simplify();
+  return ce.function('List', [
+    ce.function('Equal', [implicitLeft, implicitRight]),
+  ]);
+}
+
+function cancelHomogeneousRatio(
+  expr: Expression,
+  ratioName: string,
+  independentName: string
+): Expression {
+  const ce = expr.engine;
+  const v = ce.symbol(ratioName);
+  const x = ce.symbol(independentName);
+
+  if (
+    isFunction(expr, 'Divide') &&
+    expr.op2.isSame(x) &&
+    isFunction(expr.op1, 'Multiply') &&
+    expr.op1.ops.some((op) => op.isSame(v)) &&
+    expr.op1.ops.some((op) => op.isSame(x))
+  ) {
+    const remaining = expr.op1.ops.filter((op) => !op.isSame(x));
+    return productExpression(ce, remaining);
+  }
+
+  if (!isFunction(expr)) return expr;
+  return ce.function(
+    expr.operator,
+    expr.ops.map((op) => cancelHomogeneousRatio(op, ratioName, independentName))
+  );
+}
+
+function termDependentPower(
+  term: Expression,
+  dependentCall: Expression
+): { power: Expression; coefficient: Expression } | undefined {
+  const ce = term.engine;
+
+  if (term.isSame(dependentCall)) return { power: ce.One, coefficient: ce.One };
+  if (
+    isFunction(term, 'Power') &&
+    (term.op1.isSame(dependentCall) ||
+      (isFunction(term.op1) &&
+        isFunction(dependentCall) &&
+        term.op1.operator === dependentCall.operator &&
+        term.op1.nops === dependentCall.nops &&
+        term.op1.ops.every((op, i) => op.isSame(dependentCall.ops[i]))))
+  )
+    return { power: term.op2, coefficient: ce.One };
+
+  if (isFunction(term, 'Negate')) {
+    const result = termDependentPower(term.op1, dependentCall);
+    return result
+      ? { ...result, coefficient: result.coefficient.neg() }
+      : undefined;
+  }
+
+  if (!isFunction(term, 'Multiply')) return undefined;
+
+  let power: Expression | undefined;
+  const coefficientFactors: Expression[] = [];
+  for (const factor of term.ops) {
+    const factorPower = termDependentPower(factor, dependentCall);
+    if (factorPower && factorPower.coefficient.isSame(1)) {
+      if (power) return undefined;
+      power = factorPower.power;
+    } else coefficientFactors.push(factor);
+  }
+  if (!power) return undefined;
+
+  return {
+    power,
+    coefficient: productExpression(ce, coefficientFactors).simplify(),
+  };
+}
+
+function solveBernoulliFirstOrder(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const rhsInfo = explicitDerivativeRhs(
+    equation.structural,
+    dependentName,
+    independentName
+  );
+  if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+
+  const ce = equation.engine;
+  const terms = isFunction(rhsInfo.rhs, 'Add')
+    ? rhsInfo.rhs.ops
+    : [rhsInfo.rhs];
+  let linearCoefficient = ce.Zero;
+  let nonlinearCoefficient: Expression | undefined;
+  let nonlinearPower: Expression | undefined;
+
+  for (const term of terms) {
+    const split = termDependentPower(term, dependentCall);
+    if (!split) return undefined;
+    // Coefficients may be constants or functions of x, but not y-dependent.
+    if (
+      hasDependentOrDerivative(
+        split.coefficient,
+        dependentName,
+        independentName
+      )
+    )
+      return undefined;
+
+    if (split.power.isSame(1))
+      linearCoefficient = linearCoefficient.add(split.coefficient).simplify();
+    else {
+      if (nonlinearPower && !nonlinearPower.isSame(split.power.simplify()))
+        return undefined;
+      nonlinearPower = split.power.simplify();
+      nonlinearCoefficient = (nonlinearCoefficient ?? ce.Zero)
+        .add(split.coefficient)
+        .simplify();
+    }
+  }
+
+  if (!nonlinearPower || !nonlinearCoefficient) return undefined;
+  if (
+    nonlinearPower.has(independentName) ||
+    hasDependentOrDerivative(nonlinearPower, dependentName, independentName) ||
+    nonlinearPower.isSame(0) ||
+    nonlinearPower.isSame(1)
+  )
+    return undefined;
+
+  const oneMinusN = ce.One.sub(nonlinearPower).simplify();
+  const p = oneMinusN.neg().mul(linearCoefficient).simplify();
+  const r = oneMinusN.mul(nonlinearCoefficient).simplify();
+  const integralP = dSolveAntiderivative(p, independentName);
+  if (hasOperator(integralP, 'Integrate')) return undefined;
+  const integratingFactor = ce.function('Exp', [integralP]).simplify();
+  const integralR = dSolveAntiderivative(
+    integratingFactor.mul(r).simplify(),
+    independentName
+  );
+  if (hasOperator(integralR, 'Integrate')) return undefined;
+
+  const [c] = integrationConstants(equation, 1);
+  const transformed = c.add(integralR).div(integratingFactor).simplify();
+  const exponent = ce.One.div(oneMinusN).simplify();
+  const solution = transformed.pow(exponent).simplify();
+  return ceListSolution(dependentCall, solution);
+}
+
+function solveExactFirstOrder(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const ce = equation.engine;
+  const collected = equationDerivativeCoefficients(
+    equation,
+    dependentName,
+    independentName
+  );
+  if (
+    [...collected.coefficients.keys()].some((order) => order > 1) ||
+    !collected.coefficients.has(1)
+  )
+    return undefined;
+
+  const usedSymbols = collectSymbols(equation);
+  const ySymbolName = freshSymbolName(`${dependentName}_value`, usedSymbols);
+  const x = ce.symbol(independentName);
+  const y = ce.symbol(ySymbolName);
+  const mTerm = collected.rest
+    .add((collected.coefficients.get(0) ?? ce.Zero).mul(dependentCall))
+    .simplify();
+  const m = replaceDependentCall(mTerm, dependentCall, y).simplify();
+  const n = replaceDependentCall(
+    collected.coefficients.get(1) ?? ce.Zero,
+    dependentCall,
+    y
+  ).simplify();
+  if (m.isSame(0) || n.isSame(0)) return undefined;
+  if (!m.has(ySymbolName) && !n.has(ySymbolName)) return undefined;
+  if (
+    hasDependentOrDerivative(m, dependentName, independentName) ||
+    hasDependentOrDerivative(n, dependentName, independentName)
+  )
+    return undefined;
+
+  const mY = ce.function('D', [m, y]).evaluate().simplify();
+  const nX = ce.function('D', [n, x]).evaluate().simplify();
+  if (!mY.sub(nX).simplify().isSame(0)) return undefined;
+
+  const mIntegral = dSolveAntiderivative(m, independentName);
+  if (hasOperator(mIntegral, 'Integrate')) return undefined;
+  const correction = n
+    .sub(ce.function('D', [mIntegral, y]).evaluate())
+    .simplify();
+  const correctionIntegral = dSolveAntiderivative(correction, ySymbolName);
+  if (hasOperator(correctionIntegral, 'Integrate')) return undefined;
+
+  const [c] = integrationConstants(equation, 1);
+  const potential = mIntegral.add(correctionIntegral).simplify();
+  return ce.function('List', [ce.function('Equal', [potential, c])]);
 }
 
 function secondOrderConstantCoefficientBasis(
@@ -1135,16 +1872,16 @@ function solveSecondOrderNonhomogeneousConstantCoefficient(
 
   const [y1, y2] = basis;
   const [c1, c2] = integrationConstants(equation, 2);
-  const polynomialParticular = polynomialParticularSolution(
+  const undeterminedParticular = undeterminedCoefficientParticularSolution(
     equation,
     collected,
     independentName
   );
-  if (polynomialParticular) {
+  if (undeterminedParticular) {
     const solution = c1
       .mul(y1)
       .add(c2.mul(y2))
-      .add(polynomialParticular)
+      .add(undeterminedParticular)
       .simplify();
     return ceListSolution(dependentCall, solution);
   }
@@ -1189,15 +1926,16 @@ function polynomialParticularSolution(
   const rhsDegree = polynomialDegree(rhs, independentName);
   if (rhsDegree < 0) return undefined;
 
+  const order = Math.max(...collected.coefficients.keys());
   let zeroRootMultiplicity = 0;
   while (
-    zeroRootMultiplicity <= 2 &&
+    zeroRootMultiplicity <= order &&
     (collected.coefficients.get(zeroRootMultiplicity) ?? ce.Zero)
       .simplify()
       .isSame(0)
   )
     zeroRootMultiplicity += 1;
-  if (zeroRootMultiplicity > 2) return undefined;
+  if (zeroRootMultiplicity > order) return undefined;
 
   const usedSymbols = collectSymbols(equation);
   const coefficientNames = Array.from({ length: rhsDegree + 1 }, (_, i) => {
@@ -1213,7 +1951,26 @@ function polynomialParticularSolution(
       .simplify()
   );
   const ansatz = ce.function('Add', terms).simplify();
+  return solveParticularAnsatz(
+    equation,
+    collected,
+    independentName,
+    ansatz,
+    coefficientNames,
+    (residual) => polynomialResidualExpressions(residual, independentName)
+  );
+}
 
+function solveParticularAnsatz(
+  equation: Expression,
+  collected: DerivativeTermCoefficients,
+  independentName: string,
+  ansatz: Expression,
+  coefficientNames: string[],
+  residualExpressions: (residual: Expression) => Expression[] | undefined
+): Expression | undefined {
+  const ce = equation.engine;
+  const x = ce.symbol(independentName);
   const residual = [...collected.coefficients.entries()]
     .reduce((sum, [order, coefficient]) => {
       let derivative = ansatz;
@@ -1222,13 +1979,10 @@ function polynomialParticularSolution(
       return sum.add(coefficient.mul(derivative)).simplify();
     }, collected.rest)
     .simplify();
-  const residualCoefficients = getPolynomialCoefficients(
-    residual,
-    independentName
-  );
-  if (!residualCoefficients) return undefined;
+  const expressions = residualExpressions(simplifyFoldingExp(residual));
+  if (!expressions) return undefined;
 
-  const equations = residualCoefficients.map((coefficient) =>
+  const equations = expressions.map((coefficient) =>
     ce.function('Equal', [coefficient.simplify(), ce.Zero])
   );
   const result = ce.function('List', equations).solve(coefficientNames);
@@ -1240,18 +1994,247 @@ function polynomialParticularSolution(
   return particular;
 }
 
-function solutionRecord(
-  result:
-    | null
-    | ReadonlyArray<Expression>
-    | Record<string, Expression>
-    | Array<Record<string, Expression>>
-): Record<string, Expression> | undefined {
-  if (!result) return undefined;
-  if (!Array.isArray(result)) return result as Record<string, Expression>;
-  const [first] = result;
-  if (!first || 'operator' in first) return undefined;
-  return first as Record<string, Expression>;
+function polynomialResidualExpressions(
+  residual: Expression,
+  independentName: string
+): Expression[] | undefined {
+  const residualCoefficients = getPolynomialCoefficients(
+    residual,
+    independentName
+  );
+  return residualCoefficients ?? undefined;
+}
+
+function exponentialArgument(expr: Expression): Expression | undefined {
+  if (isFunction(expr, 'Exp')) return expr.op1;
+  if (isFunction(expr, 'Power') && isSymbol(expr.op1, 'ExponentialE'))
+    return expr.op2;
+  return undefined;
+}
+
+function splitScaledExponential(
+  expr: Expression,
+  independentName: string
+): { coefficient: Expression; lambda: Expression } | undefined {
+  const ce = expr.engine;
+  const direct = exponentialArgument(expr);
+  if (direct) {
+    const lambda = direct.div(ce.symbol(independentName)).simplify();
+    if (lambda.has(independentName)) return undefined;
+    return { coefficient: ce.One, lambda };
+  }
+
+  if (isFunction(expr, 'Negate')) {
+    const inner = splitScaledExponential(expr.op1, independentName);
+    return inner
+      ? { ...inner, coefficient: inner.coefficient.neg() }
+      : undefined;
+  }
+
+  if (!isFunction(expr, 'Multiply')) return undefined;
+
+  let exponential: Expression | undefined;
+  const rest: Expression[] = [];
+  for (const op of expr.ops) {
+    if (exponentialArgument(op)) {
+      if (exponential) return undefined;
+      exponential = op;
+    } else rest.push(op);
+  }
+  if (!exponential) return undefined;
+
+  const argument = exponentialArgument(exponential);
+  if (!argument) return undefined;
+  const lambda = argument.div(ce.symbol(independentName)).simplify();
+  if (lambda.has(independentName)) return undefined;
+  const coefficient = productExpression(ce, rest).simplify();
+  if (coefficient.has(independentName)) return undefined;
+  return { coefficient, lambda };
+}
+
+function exponentialParticularSolution(
+  equation: Expression,
+  collected: DerivativeTermCoefficients,
+  independentName: string
+): Expression | undefined {
+  const ce = equation.engine;
+  const rhs = simplifyFoldingExp(collected.rest.neg());
+  const split = splitScaledExponential(rhs, independentName);
+  if (!split) return undefined;
+
+  const order = Math.max(...collected.coefficients.keys());
+  const usedSymbols = collectSymbols(equation);
+  const coefficientName = freshSymbolName('dsolvea', usedSymbols);
+  const x = ce.symbol(independentName);
+  const base = split.coefficient
+    .mul(ce.symbol(coefficientName))
+    .mul(ce.function('Exp', [split.lambda.mul(x).simplify()]))
+    .simplify();
+
+  for (let resonance = 0; resonance <= order; resonance++) {
+    const ansatz =
+      resonance === 0 ? base : base.mul(x.pow(resonance)).simplify();
+    const particular = solveParticularAnsatz(
+      equation,
+      collected,
+      independentName,
+      ansatz,
+      [coefficientName],
+      (residual) => {
+        const scaled = simplifyFoldingExp(
+          residual.div(ce.function('Exp', [split.lambda.mul(x).simplify()]))
+        );
+        return polynomialResidualExpressions(scaled, independentName);
+      }
+    );
+    if (particular) return particular;
+  }
+
+  return undefined;
+}
+
+function splitScaledTrig(
+  expr: Expression
+):
+  | { kind: 'Sin' | 'Cos'; arg: Expression; coefficient: Expression }
+  | undefined {
+  const ce = expr.engine;
+  if (isFunction(expr, 'Sin') || isFunction(expr, 'Cos'))
+    return {
+      kind: expr.operator as 'Sin' | 'Cos',
+      arg: expr.op1,
+      coefficient: ce.One,
+    };
+
+  if (isFunction(expr, 'Negate')) {
+    const inner = splitScaledTrig(expr.op1);
+    return inner
+      ? { ...inner, coefficient: inner.coefficient.neg() }
+      : undefined;
+  }
+
+  if (!isFunction(expr, 'Multiply')) return undefined;
+
+  let trig: Expression | undefined;
+  const rest: Expression[] = [];
+  for (const op of expr.ops) {
+    if (isFunction(op, 'Sin') || isFunction(op, 'Cos')) {
+      if (trig) return undefined;
+      trig = op;
+    } else rest.push(op);
+  }
+  if (!trig || (!isFunction(trig, 'Sin') && !isFunction(trig, 'Cos')))
+    return undefined;
+
+  return {
+    kind: trig.operator as 'Sin' | 'Cos',
+    arg: trig.op1,
+    coefficient: productExpression(ce, rest).simplify(),
+  };
+}
+
+function splitSinusoidalRhs(
+  rhs: Expression,
+  independentName: string
+): { arg: Expression; sin: Expression; cos: Expression } | undefined {
+  const ce = rhs.engine;
+  const terms = isFunction(rhs, 'Add') ? rhs.ops : [rhs];
+  let arg: Expression | undefined;
+  let sin = ce.Zero;
+  let cos = ce.Zero;
+
+  for (const term of terms) {
+    const split = splitScaledTrig(term);
+    if (!split) return undefined;
+    if (!split.arg.has(independentName)) return undefined;
+    if (split.coefficient.has(independentName)) return undefined;
+    if (arg && !sameArgument(arg, split.arg)) return undefined;
+    arg = split.arg;
+    if (split.kind === 'Sin') sin = sin.add(split.coefficient).simplify();
+    else cos = cos.add(split.coefficient).simplify();
+  }
+
+  return arg ? { arg, sin, cos } : undefined;
+}
+
+function trigResidualExpressions(
+  residual: Expression,
+  arg: Expression,
+  independentName: string
+): Expression[] | undefined {
+  const ce = residual.engine;
+  const terms = isFunction(residual, 'Add') ? residual.ops : [residual];
+  let sin = ce.Zero;
+  let cos = ce.Zero;
+  let rest = ce.Zero;
+
+  for (const term of terms) {
+    const split = splitScaledTrig(term);
+    if (split && sameArgument(split.arg, arg)) {
+      if (split.kind === 'Sin') sin = sin.add(split.coefficient).simplify();
+      else cos = cos.add(split.coefficient).simplify();
+    } else rest = rest.add(term).simplify();
+  }
+
+  const expressions: Expression[] = [];
+  for (const expr of [sin, cos, rest]) {
+    const coefficients = polynomialResidualExpressions(expr, independentName);
+    if (!coefficients) return undefined;
+    expressions.push(...coefficients);
+  }
+  return expressions;
+}
+
+function sinusoidalParticularSolution(
+  equation: Expression,
+  collected: DerivativeTermCoefficients,
+  independentName: string
+): Expression | undefined {
+  const ce = equation.engine;
+  const rhs = simplifyFoldingExp(collected.rest.neg());
+  const split = splitSinusoidalRhs(rhs, independentName);
+  if (!split) return undefined;
+
+  const order = Math.max(...collected.coefficients.keys());
+  const usedSymbols = collectSymbols(equation);
+  const sinName = freshSymbolName('dsolvesin', usedSymbols);
+  usedSymbols.add(sinName);
+  const cosName = freshSymbolName('dsolvecos', usedSymbols);
+  const x = ce.symbol(independentName);
+  const base = ce
+    .symbol(sinName)
+    .mul(ce.function('Sin', [split.arg]))
+    .add(ce.symbol(cosName).mul(ce.function('Cos', [split.arg])))
+    .simplify();
+
+  for (let resonance = 0; resonance <= order; resonance++) {
+    const ansatz =
+      resonance === 0 ? base : base.mul(x.pow(resonance)).simplify();
+    const particular = solveParticularAnsatz(
+      equation,
+      collected,
+      independentName,
+      ansatz,
+      [sinName, cosName],
+      (residual) =>
+        trigResidualExpressions(residual, split.arg, independentName)
+    );
+    if (particular) return particular;
+  }
+
+  return undefined;
+}
+
+function undeterminedCoefficientParticularSolution(
+  equation: Expression,
+  collected: DerivativeTermCoefficients,
+  independentName: string
+): Expression | undefined {
+  return (
+    polynomialParticularSolution(equation, collected, independentName) ??
+    exponentialParticularSolution(equation, collected, independentName) ??
+    sinusoidalParticularSolution(equation, collected, independentName)
+  );
 }
 
 function coefficientWithoutPowerOfX(
@@ -1356,49 +2339,105 @@ export function dSolve(
   dependent: Expression,
   independent: Expression
 ): Expression | undefined {
+  const system = solveLinearHomogeneousSystem(equation, dependent, independent);
+  if (system) return system;
+
+  const problem = scalarProblem(equation, dependent);
   const names = expressionForDependent(dependent, independent);
   if (!names) return undefined;
 
   const { dependentName, independentName, dependentCall } = names;
   const ce = equation.engine;
+  const finalize = (
+    solution: Expression | undefined
+  ): Expression | undefined =>
+    solution
+      ? applyScalarConditions(
+          solution,
+          problem.conditions,
+          dependentName,
+          independentName
+        )
+      : undefined;
 
   const higherOrder = solveHigherOrderHomogeneousConstantCoefficient(
-    equation,
+    problem.equation,
     dependentCall,
     dependentName,
     independentName
   );
-  if (higherOrder) return higherOrder;
+  if (higherOrder) return finalize(higherOrder);
 
   const cauchyEuler = solveSecondOrderCauchyEulerHomogeneous(
-    equation,
+    problem.equation,
     dependentCall,
     dependentName,
     independentName
   );
-  if (cauchyEuler) return cauchyEuler;
+  if (cauchyEuler) return finalize(cauchyEuler);
 
-  const secondOrderNonhomogeneous =
-    solveSecondOrderNonhomogeneousConstantCoefficient(
-      equation,
+  const higherOrderNonhomogeneous =
+    solveHigherOrderNonhomogeneousConstantCoefficient(
+      problem.equation,
       dependentCall,
       dependentName,
       independentName
     );
-  if (secondOrderNonhomogeneous) return secondOrderNonhomogeneous;
+  if (higherOrderNonhomogeneous) return finalize(higherOrderNonhomogeneous);
+
+  const secondOrderNonhomogeneous =
+    solveSecondOrderNonhomogeneousConstantCoefficient(
+      problem.equation,
+      dependentCall,
+      dependentName,
+      independentName
+    );
+  if (secondOrderNonhomogeneous) return finalize(secondOrderNonhomogeneous);
 
   // Keep order 2 separate from the general constant-coefficient solver so
   // quadratic radical and complex roots stay exact when possible.
   const secondOrder = solveSecondOrderHomogeneousConstantCoefficient(
-    equation,
+    problem.equation,
     dependentCall,
     dependentName,
     independentName
   );
-  if (secondOrder) return secondOrder;
+  if (secondOrder) return finalize(secondOrder);
+
+  const separable = solveSeparableFirstOrder(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (separable) return finalize(separable);
+
+  const bernoulli = solveBernoulliFirstOrder(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (bernoulli) return finalize(bernoulli);
+
+  const homogeneousFirstOrder = solveHomogeneousFirstOrder(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (homogeneousFirstOrder) return finalize(homogeneousFirstOrder);
+
+  const exact = solveExactFirstOrder(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (exact) return finalize(exact);
 
   const coefficients = equationCoefficients(
-    equation,
+    problem.equation,
     dependentName,
     independentName
   );
@@ -1430,7 +2469,6 @@ export function dSolve(
 
   const p = coefficients.dependent.div(coefficients.derivative).simplify();
   const q = coefficients.rest.neg().div(coefficients.derivative).simplify();
-
   // Forcing (or a variable coefficient) that references the dependent function
   // with a non-standard argument, e.g. `y'(x) = y(2x)`, is not a supported
   // linear ODE. `hasDependentOrDerivative` only matches the literal `y(x)`, so
@@ -1441,7 +2479,7 @@ export function dSolve(
   )
     return undefined;
 
-  const [c] = integrationConstants(equation, 1);
+  const [c] = integrationConstants(problem.equation, 1);
 
   let solution: Expression;
   if (p.isSame(0)) {
@@ -1464,5 +2502,7 @@ export function dSolve(
   )
     return undefined;
 
-  return ce.function('List', [ce.function('Equal', [dependentCall, solution])]);
+  return finalize(
+    ce.function('List', [ce.function('Equal', [dependentCall, solution])])
+  );
 }
