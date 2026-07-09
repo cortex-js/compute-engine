@@ -1617,6 +1617,197 @@ function solveSeparableFirstOrder(
   ]);
 }
 
+function solveHomogeneousFirstOrder(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const rhsInfo = explicitDerivativeRhs(
+    equation.structural,
+    dependentName,
+    independentName
+  );
+  if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+
+  const ce = equation.engine;
+  const usedSymbols = collectSymbols(equation);
+  const ratioName = freshSymbolName('dsolvev', usedSymbols);
+  const ySymbolName = freshSymbolName(`${dependentName}_value`, usedSymbols);
+  const x = ce.symbol(independentName);
+  const v = ce.symbol(ratioName);
+  const y = ce.symbol(ySymbolName);
+  const substituted = replaceDependentCall(
+    rhsInfo.rhs.structural,
+    dependentCall,
+    ce.function('Multiply', [v, x], { form: 'structural' })
+  );
+  const reduced = cancelHomogeneousRatio(
+    substituted,
+    ratioName,
+    independentName
+  ).simplify();
+  if (reduced.has(independentName)) return undefined;
+
+  const denominator = reduced.sub(v).simplify();
+  if (denominator.isSame(0)) return undefined;
+  const left = dSolveAntiderivative(denominator.pow(-1).simplify(), ratioName);
+  if (hasOperator(left, 'Integrate')) return undefined;
+
+  const [c] = integrationConstants(equation, 1);
+  const ratio = y.div(x).simplify();
+  const implicitLeft = replaceSymbol(left, ratioName, ratio).simplify();
+  const implicitRight = ce.function('Ln', [x]).add(c).simplify();
+  return ce.function('List', [
+    ce.function('Equal', [implicitLeft, implicitRight]),
+  ]);
+}
+
+function cancelHomogeneousRatio(
+  expr: Expression,
+  ratioName: string,
+  independentName: string
+): Expression {
+  const ce = expr.engine;
+  const v = ce.symbol(ratioName);
+  const x = ce.symbol(independentName);
+
+  if (
+    isFunction(expr, 'Divide') &&
+    expr.op2.isSame(x) &&
+    isFunction(expr.op1, 'Multiply') &&
+    expr.op1.ops.some((op) => op.isSame(v)) &&
+    expr.op1.ops.some((op) => op.isSame(x))
+  ) {
+    const remaining = expr.op1.ops.filter((op) => !op.isSame(x));
+    return productExpression(ce, remaining);
+  }
+
+  if (!isFunction(expr)) return expr;
+  return ce.function(
+    expr.operator,
+    expr.ops.map((op) => cancelHomogeneousRatio(op, ratioName, independentName))
+  );
+}
+
+function termDependentPower(
+  term: Expression,
+  dependentCall: Expression
+): { power: Expression; coefficient: Expression } | undefined {
+  const ce = term.engine;
+
+  if (term.isSame(dependentCall)) return { power: ce.One, coefficient: ce.One };
+  if (
+    isFunction(term, 'Power') &&
+    (term.op1.isSame(dependentCall) ||
+      (isFunction(term.op1) &&
+        isFunction(dependentCall) &&
+        term.op1.operator === dependentCall.operator &&
+        term.op1.nops === dependentCall.nops &&
+        term.op1.ops.every((op, i) => op.isSame(dependentCall.ops[i]))))
+  )
+    return { power: term.op2, coefficient: ce.One };
+
+  if (isFunction(term, 'Negate')) {
+    const result = termDependentPower(term.op1, dependentCall);
+    return result
+      ? { ...result, coefficient: result.coefficient.neg() }
+      : undefined;
+  }
+
+  if (!isFunction(term, 'Multiply')) return undefined;
+
+  let power: Expression | undefined;
+  const coefficientFactors: Expression[] = [];
+  for (const factor of term.ops) {
+    const factorPower = termDependentPower(factor, dependentCall);
+    if (factorPower && factorPower.coefficient.isSame(1)) {
+      if (power) return undefined;
+      power = factorPower.power;
+    } else coefficientFactors.push(factor);
+  }
+  if (!power) return undefined;
+
+  return {
+    power,
+    coefficient: productExpression(ce, coefficientFactors).simplify(),
+  };
+}
+
+function solveBernoulliFirstOrder(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const rhsInfo = explicitDerivativeRhs(
+    equation.structural,
+    dependentName,
+    independentName
+  );
+  if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+
+  const ce = equation.engine;
+  const terms = isFunction(rhsInfo.rhs, 'Add')
+    ? rhsInfo.rhs.ops
+    : [rhsInfo.rhs];
+  let linearCoefficient = ce.Zero;
+  let nonlinearCoefficient: Expression | undefined;
+  let nonlinearPower: Expression | undefined;
+
+  for (const term of terms) {
+    const split = termDependentPower(term, dependentCall);
+    if (!split) return undefined;
+    // Coefficients may be constants or functions of x, but not y-dependent.
+    if (
+      hasDependentOrDerivative(
+        split.coefficient,
+        dependentName,
+        independentName
+      )
+    )
+      return undefined;
+
+    if (split.power.isSame(1))
+      linearCoefficient = linearCoefficient.add(split.coefficient).simplify();
+    else {
+      if (nonlinearPower && !nonlinearPower.isSame(split.power.simplify()))
+        return undefined;
+      nonlinearPower = split.power.simplify();
+      nonlinearCoefficient = (nonlinearCoefficient ?? ce.Zero)
+        .add(split.coefficient)
+        .simplify();
+    }
+  }
+
+  if (!nonlinearPower || !nonlinearCoefficient) return undefined;
+  if (
+    nonlinearPower.has(independentName) ||
+    hasDependentOrDerivative(nonlinearPower, dependentName, independentName) ||
+    nonlinearPower.isSame(0) ||
+    nonlinearPower.isSame(1)
+  )
+    return undefined;
+
+  const oneMinusN = ce.One.sub(nonlinearPower).simplify();
+  const p = oneMinusN.neg().mul(linearCoefficient).simplify();
+  const r = oneMinusN.mul(nonlinearCoefficient).simplify();
+  const integralP = dSolveAntiderivative(p, independentName);
+  if (hasOperator(integralP, 'Integrate')) return undefined;
+  const integratingFactor = ce.function('Exp', [integralP]).simplify();
+  const integralR = dSolveAntiderivative(
+    integratingFactor.mul(r).simplify(),
+    independentName
+  );
+  if (hasOperator(integralR, 'Integrate')) return undefined;
+
+  const [c] = integrationConstants(equation, 1);
+  const transformed = c.add(integralR).div(integratingFactor).simplify();
+  const exponent = ce.One.div(oneMinusN).simplify();
+  const solution = transformed.pow(exponent).simplify();
+  return ceListSolution(dependentCall, solution);
+}
+
 function secondOrderConstantCoefficientBasis(
   equation: Expression,
   dependentName: string,
@@ -2284,6 +2475,22 @@ export function dSolve(
     independentName
   );
   if (separable) return finalize(separable);
+
+  const bernoulli = solveBernoulliFirstOrder(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (bernoulli) return finalize(bernoulli);
+
+  const homogeneousFirstOrder = solveHomogeneousFirstOrder(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (homogeneousFirstOrder) return finalize(homogeneousFirstOrder);
 
   const coefficients = equationCoefficients(
     problem.equation,

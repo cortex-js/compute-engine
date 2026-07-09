@@ -304,6 +304,33 @@ describe('DSolve', () => {
     );
   });
 
+  test('solves first-order homogeneous equations by substitution', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Add', 1, ['Divide', ['y', 'x'], 'x']],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `["y_value" / x === "c_1" + ln(x)]`
+    );
+  });
+
+  test('solves Bernoulli first-order equations', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Add', ['y', 'x'], ['Multiply', 'x', ['Power', ['y', 'x'], 2]]],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 2, x: 0.75 })
+    ).toBe(true);
+  });
+
   test('applies initial conditions to first-order equations', () => {
     const equation = ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']];
     const solution = dsolve(['List', equation, ['Equal', ['y', 0], 2]]);
