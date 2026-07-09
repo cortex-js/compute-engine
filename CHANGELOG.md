@@ -1,38 +1,37 @@
+## [Unreleased]
+
 ## 0.72.0 _2026-07-09_
 
 ### Angular Units
 
 - **Compilation targets honor `ce.angularUnit`.** Compiled code from every
-  built-in target (`javascript`, `interval-js`, `glsl`, `wgsl`,
-  `interval-glsl`, `python`) now reproduces the engine's angular-unit
-  semantics instead of always computing in radians: direct trigonometric
-  arguments (`Sin`…`Csc`, `Haversine`) are scaled by the unit→radian factor
-  and inverse-trigonometric results (`Arcsin`…`Arccsc`, `Arctan2`,
-  `InverseHaversine`) by its reciprocal, for all units (`deg`, `grad`,
-  `turn`). With
-  `ce.angularUnit = 'deg'`, `compile('\\sin(x)')` emits
-  `Math.sin(0.017453… * x)` so `run({x: 90})` returns 1, matching
-  `evaluate()` — previously a degree-mode expression *evaluated* in degrees
-  but *compiled* (and therefore plotted) as if radians. Radian mode emits
-  the same code as before.
+  built-in target (`javascript`, `interval-js`, `glsl`, `wgsl`, `interval-glsl`,
+  `python`) now reproduces the engine's angular-unit semantics instead of always
+  computing in radians: direct trigonometric arguments (`Sin`…`Csc`,
+  `Haversine`) are scaled by the unit→radian factor and inverse-trigonometric
+  results (`Arcsin`…`Arccsc`, `Arctan2`, `InverseHaversine`) by its reciprocal,
+  for all units (`deg`, `grad`, `turn`). With `ce.angularUnit = 'deg'`,
+  `compile('\\sin(x)')` emits `Math.sin(0.017453… * x)` so `run({x: 90})`
+  returns 1, matching `evaluate()` — previously a degree-mode expression
+  _evaluated_ in degrees but _compiled_ (and therefore plotted) as if radians.
+  Radian mode emits the same code as before.
 
 - **Hyperbolic functions are now unit-independent.** Their argument (and an
-  inverse hyperbolic's result) is a dimensionless real, not an angle, so
-  `sinh`, `cosh`, `tanh`, `coth`, `sech`, `csch` and `arsinh`…`artanh` no
-  longer convert under a non-radian `angularUnit`. Previously in degree mode
-  `\sinh(1)` evaluated to $\sinh(\pi/180) \approx 0.0175$ instead of
-  $1.1752$.
+  inverse hyperbolic's result) is a dimensionless real, not an angle, so `sinh`,
+  `cosh`, `tanh`, `coth`, `sech`, `csch` and `arsinh`…`artanh` no longer convert
+  under a non-radian `angularUnit`. Previously in degree mode `\sinh(1)`
+  evaluated to $\sinh(\pi/180) \approx 0.0175$ instead of $1.1752$.
 
 - **Exact inverse-trigonometric values are returned in the current angular
-  unit.** In degree mode `\arcsin(1)` now evaluates to the exact integer
-  `90` (previously the exact *radian* value $\pi/2$, disagreeing with
-  `.N()`, which returned 90). Similarly `100` in `grad` mode and the exact
-  rational `1/4` in `turn` mode; radian mode still returns $\pi/2$.
+  unit.** In degree mode `\arcsin(1)` now evaluates to the exact integer `90`
+  (previously the exact _radian_ value $\pi/2$, disagreeing with `.N()`, which
+  returned 90). Similarly `100` in `grad` mode and the exact rational `1/4` in
+  `turn` mode; radian mode still returns $\pi/2$.
 
-- **`Arctan2` honors `angularUnit`,** consistently with `Arctan` (it
-  previously always returned radians): in degree mode `Arctan2(1, 1)`
-  evaluates to the exact `45`, with the quadrant corrections applied in the
-  current unit (`Arctan2(1, -1)` → `135`).
+- **`Arctan2` honors `angularUnit`,** consistently with `Arctan` (it previously
+  always returned radians): in degree mode `Arctan2(1, 1)` evaluates to the
+  exact `45`, with the quadrant corrections applied in the current unit
+  (`Arctan2(1, -1)` → `135`).
 
   Symbolic calculus (`D`, `Integrate`) remains radian-based regardless of
   `angularUnit` (no $\pi/180$ chain-rule factor); this is a known limitation.
@@ -88,64 +87,62 @@
 - **A pipeline operator applies the expression on its left to the function on
   its right.** `x \rhd f` (also `x \triangleright f`, `x \vartriangleright f`,
   `x ⊳ f`, or the plain-text shortcut `x |> f`) parses to `f(x)`. A `\square`
-  topic marker in the right-hand side names the position the piped value
-  fills, so a stage can be a multi-argument call:
-  `x^2 = 4 \rhd \operatorname{Solve}(\square, x)` is `Solve(x^2 = 4, x)`.
-  Stages chain left to right (`4 \rhd \sqrt \rhd \ln` is `ln(√4)`), a bare
-  function command such as `\ln`, `\lb` or `\sqrt` acts as a function
-  reference (`12 \rhd \ln` is `ln(12)`), and the prefix form (`\rhd f`, with
-  no left-hand side) denotes the anonymous unary function `_ ↦ f(_)`.
+  topic marker in the right-hand side names the position the piped value fills,
+  so a stage can be a multi-argument call:
+  `x^2 = 4 \rhd \operatorname{Solve}(\square, x)` is `Solve(x^2 = 4, x)`. Stages
+  chain left to right (`4 \rhd \sqrt \rhd \ln` is `ln(√4)`), a bare function
+  command such as `\ln`, `\lb` or `\sqrt` acts as a function reference
+  (`12 \rhd \ln` is `ln(12)`), and the prefix form (`\rhd f`, with no left-hand
+  side) denotes the anonymous unary function `_ ↦ f(_)`.
 
-- **The unknown/variable argument of `Solve`, `D`, `Series` and the
-  polynomial operators may now be omitted.** It defaults to the input's single
-  free variable, or to `x` when there are several free variables and one of
-  them is `x`; with no inferable default the expression stays unevaluated.
-  This enables point-free pipelines such as
-  `x^2 = 4 \rhd \operatorname{Solve}` or `x^2 \rhd \operatorname{D}`. Applies
-  to `Solve`, `D`, `Series`, `PolynomialDegree`, `CoefficientList`,
-  `PolynomialRoots`, `Discriminant`, `PolynomialQuotient`,
-  `PolynomialRemainder`, `PolynomialGCD`, `Resultant`, `Cancel`,
-  `PartialFraction` and `Apart` (`Factor` already inferred its variable). For
-  the two-input polynomial operators the default is inferred from both
-  operands together.
+- **The unknown/variable argument of `Solve`, `D`, `Series` and the polynomial
+  operators may now be omitted.** It defaults to the input's single free
+  variable, or to `x` when there are several free variables and one of them is
+  `x`; with no inferable default the expression stays unevaluated. This enables
+  point-free pipelines such as `x^2 = 4 \rhd \operatorname{Solve}` or
+  `x^2 \rhd \operatorname{D}`. Applies to `Solve`, `D`, `Series`,
+  `PolynomialDegree`, `CoefficientList`, `PolynomialRoots`, `Discriminant`,
+  `PolynomialQuotient`, `PolynomialRemainder`, `PolynomialGCD`, `Resultant`,
+  `Cancel`, `PartialFraction` and `Apart` (`Factor` already inferred its
+  variable). For the two-input polynomial operators the default is inferred from
+  both operands together.
 
 ### LaTeX Parsing
 
-Notation coverage driven by a cross-genre corpus sweep (Hendrycks MATH,
-15,546 fragments across all seven subjects including worked solutions; see
+Notation coverage driven by a cross-genre corpus sweep (Hendrycks MATH, 15,546
+fragments across all seven subjects including worked solutions; see
 `docs/mathnet/math-genre-sweep.md`), which took the measured clean-parse rate
 from 95.3% to 97.1%:
 
 - **Text-styling commands.** `\textbf`, `\textit`, `\emph`, `\texttt`,
   `\textsf`, and `\textup` parse their argument as a text run and produce an
-  `Annotated` expression with the matching style
-  (`\textbf{Sizes}` → `["Annotated", "'Sizes'", {dict: {fontWeight: "bold"}}]`)
-  that round-trips back to the same LaTeX. `\textrm` and `\mbox` parse like
-  `\text`. `\bold`, `\boldsymbol`, and `\bm` are synonyms of `\mathbf`
-  (`\bold{v}` → the symbol `v_bold`).
+  `Annotated` expression with the matching style (`\textbf{Sizes}` →
+  `["Annotated", "'Sizes'", {dict: {fontWeight: "bold"}}]`) that round-trips
+  back to the same LaTeX. `\textrm` and `\mbox` parse like `\text`. `\bold`,
+  `\boldsymbol`, and `\bm` are synonyms of `\mathbf` (`\bold{v}` → the symbol
+  `v_bold`).
 
-- **Vector-norm bars.** The `\|` command is now recognized as a norm
-  delimiter everywhere `\Vert` is: `\|\mathbf{a}\|`,
-  `\left\| b \right\|`, and `\|a\|^2` all parse to `Norm`.
+- **Vector-norm bars.** The `\|` command is now recognized as a norm delimiter
+  everywhere `\Vert` is: `\|\mathbf{a}\|`, `\left\| b \right\|`, and `\|a\|^2`
+  all parse to `Norm`.
 
 - **TeX-primitive binomial.** The infix `{n \choose k}` form parses to
   `Binomial(n, k)`, joining the already supported `\binom`, `\dbinom` and
   `\tbinom`.
 
 - **Bare mod annotations.** `x \pmod n` with no preceding `\equiv` parses as
-  `Mod(x, n)` (`-811 \pmod{24}` → `["Mod", -811, 24]`), matching the
-  existing `\bmod` behavior. Congruence chains followed by an implication now
-  parse correctly:
-  `a+1 \equiv 4 \pmod 7 \implies a \equiv 3 \pmod 7` is
-  `Implies(Congruent(…), Congruent(…))` (the congruence previously
-  disintegrated when `\implies` followed the modulus). `\equiv` now binds at
-  comparison precedence, tighter than `\implies` (zero snapshot impact).
+  `Mod(x, n)` (`-811 \pmod{24}` → `["Mod", -811, 24]`), matching the existing
+  `\bmod` behavior. Congruence chains followed by an implication now parse
+  correctly: `a+1 \equiv 4 \pmod 7 \implies a \equiv 3 \pmod 7` is
+  `Implies(Congruent(…), Congruent(…))` (the congruence previously disintegrated
+  when `\implies` followed the modulus). `\equiv` now binds at comparison
+  precedence, tighter than `\implies` (zero snapshot impact).
 
 - **Mixed braced/unbraced fraction and binomial arguments.** `\frac1{-1}`,
-  `\frac{900}7`, `\binom{n}k`, `\binom n{k+1}` parse correctly. Each argument
-  is now independently a group or a single token, per TeX semantics;
-  previously both arguments were forced into the style of the first, and the
-  mixed forms produced a `missing` error.
+  `\frac{900}7`, `\binom{n}k`, `\binom n{k+1}` parse correctly. Each argument is
+  now independently a group or a single token, per TeX semantics; previously
+  both arguments were forced into the style of the first, and the mixed forms
+  produced a `missing` error.
 
 ### Issues Resolved
 
@@ -154,16 +151,16 @@ from 95.3% to 97.1%:
   `ce.box(['Multiply', 2, ['Tuple', 1, 2]]).latex` — no longer throws
   `RangeError: Maximum call stack size exceeded`. The pretty-JSON `Multiply`
   serializer round-trips through `Product.asRationalExpression()`, and the
-  tuple-aware branch of `canonicalDivide` returned an inert
-  `Divide(expr, 1)` instead of stripping the trivial divisor, sending the
-  serializer into infinite recursion. Trivial `/1` and `/-1` divisors of
-  tuple-typed expressions are now reduced.
+  tuple-aware branch of `canonicalDivide` returned an inert `Divide(expr, 1)`
+  instead of stripping the trivial divisor, sending the serializer into infinite
+  recursion. Trivial `/1` and `/-1` divisors of tuple-typed expressions are now
+  reduced.
 
 - Juxtaposing a scalar with a tuple-**typed** symbol now means scaling, not
-  tuple construction: with `z` declared `tuple<number, number>`, `3z` parses
-  to `["Multiply", 3, "z"]` (previously a spurious `["Tuple", 3, "z"]`).
-  Literal tuples (`3(1,2)`) were already handled; heterogeneous tuples such
-  as `tuple<string, number>` still group as a `Tuple`.
+  tuple construction: with `z` declared `tuple<number, number>`, `3z` parses to
+  `["Multiply", 3, "z"]` (previously a spurious `["Tuple", 3, "z"]`). Literal
+  tuples (`3(1,2)`) were already handled; heterogeneous tuples such as
+  `tuple<string, number>` still group as a `Tuple`.
 
 - Compiled broadcasts over a list operand now compute their values. The
   generated `.map()` callback read its element variable from the vars object
@@ -171,47 +168,46 @@ from 95.3% to 97.1%:
   `[null, null]` for every input. Compiled broadcast results now agree with
   `evaluate()`.
 
-- `\operatorname{csch}(x)` now parses to the `Csch` function (previously a
-  free symbol named `csch`, silently turning the expression into an implicit
+- `\operatorname{csch}(x)` now parses to the `Csch` function (previously a free
+  symbol named `csch`, silently turning the expression into an implicit
   multiplication), joining the existing `\csch` command and matching
   `\operatorname{sech}`.
 
 - Constructing many `ComputeEngine` instances in a synchronous loop no longer
-  balloons memory (~430 KB pinned per engine until the task yielded to the
-  event loop, enough to exhaust the default V8 heap after a few thousand
-  engines). Every constant definition subscribed to configuration changes
-  through a `new WeakRef(...)`, and the ECMAScript kept-objects rule pins each
-  `WeakRef` target until the next microtask checkpoint. The tracker now holds
-  its listeners directly; since it is owned by the engine, the engine and its
+  balloons memory (~430 KB pinned per engine until the task yielded to the event
+  loop, enough to exhaust the default V8 heap after a few thousand engines).
+  Every constant definition subscribed to configuration changes through a
+  `new WeakRef(...)`, and the ECMAScript kept-objects rule pins each `WeakRef`
+  target until the next microtask checkpoint. The tracker now holds its
+  listeners directly; since it is owned by the engine, the engine and its
   listeners form a self-contained cycle that is garbage-collected as a unit.
 
 - A bare `\ln` or `\log` — with no argument, as in the pipeline
-  `12 \triangleright \ln` — now parses to the function symbol (`"Ln"`,
-  `"Log"`), consistent with `\cos`, `\lg` and `\lb`. It previously parsed to
-  an empty function application, so piping a value into it produced a
-  `missing` error instead of applying the function:
-  `ce.parse('12 \\triangleright \\ln').evaluate()` now returns
-  $2\ln 2 + \ln 3$. The bare symbols also serialize back to `\ln`, `\log` and
-  `\lg` (previously `\ln()`).
+  `12 \triangleright \ln` — now parses to the function symbol (`"Ln"`, `"Log"`),
+  consistent with `\cos`, `\lg` and `\lb`. It previously parsed to an empty
+  function application, so piping a value into it produced a `missing` error
+  instead of applying the function:
+  `ce.parse('12 \\triangleright \\ln').evaluate()` now returns $2\ln 2 + \ln 3$.
+  The bare symbols also serialize back to `\ln`, `\log` and `\lg` (previously
+  `\ln()`).
 
 - A bare `\lb` (binary log) now parses to the `Lb` function symbol, so
-  `12 \triangleright \lb` computes $\log_2 12$. It previously parsed to
-  `Log`, silently computing the base-10 logarithm instead.
+  `12 \triangleright \lb` computes $\log_2 12$. It previously parsed to `Log`,
+  silently computing the base-10 logarithm instead.
 
 - A log with a base but no argument (`\log_2`) now parses with the pipeline
-  topic marker `\square` standing in for the argument: `8 \triangleright
-  \log_2` fills the hole and computes $\log_2 8 = 3$ (composing with inverse
+  topic marker `\square` standing in for the argument: `8 \triangleright \log_2`
+  fills the hole and computes $\log_2 8 = 3$ (composing with inverse
   superscripts too: `9 \triangleright \log_3^{-1}` gives $3^9$), and a
   standalone `\log_2` displays as $\log_2(\square)$. It previously parsed as
-  $\log_{10} 2$ — the base was read as the *argument* — so piping into it
+  $\log_{10} 2$ — the base was read as the _argument_ — so piping into it
   silently discarded the piped value.
 
-- Likewise, a function with a superscript but no argument (`\cos^2`,
-  `\ln^{-1}`, `\lg^{-1}`) holds a topic-marker hole: `x \triangleright
-  \cos^2` computes $\cos^2 x$, `12 \triangleright \ln^{-1}` computes
-  $e^{12}$, and a standalone `\cos^2` displays as $\cos(\square)^2$. These
-  previously produced a `Power` of the bare function symbol, which failed to
-  type when piped into.
+- Likewise, a function with a superscript but no argument (`\cos^2`, `\ln^{-1}`,
+  `\lg^{-1}`) holds a topic-marker hole: `x \triangleright \cos^2` computes
+  $\cos^2 x$, `12 \triangleright \ln^{-1}` computes $e^{12}$, and a standalone
+  `\cos^2` displays as $\cos(\square)^2$. These previously produced a `Power` of
+  the bare function symbol, which failed to type when piped into.
 
 ## 0.71.0 _2026-07-08_
 
