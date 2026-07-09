@@ -52,6 +52,7 @@ import { NumericValue } from '../numeric-value/types.js';
 import { findUnivariateRoots } from './solve.js';
 import { filterRootsByAssumptions } from './solve-domain.js';
 import { solveSystem, solveOr } from './solve-system.js';
+import { solveCongruence } from './solve-congruence.js';
 import { replace } from './rules.js';
 import { negate } from './negate.js';
 import { simplify } from './simplify.js';
@@ -1151,6 +1152,20 @@ export class BoxedFunction
 
     // Existing univariate solving
     if (varNames.length !== 1) return null;
+
+    // Linear congruence `Congruent(lhs, rhs, m)` in one unknown: emit the
+    // parametric residue family. Decline (undefined) falls through to the
+    // ordinary root finder.
+    if (this.operator === 'Congruent') {
+      const congruenceRoots = solveCongruence(this.engine, this, varNames[0]);
+      if (congruenceRoots !== undefined)
+        return filterRootsByAssumptions(
+          this.engine,
+          congruenceRoots,
+          varNames[0]
+        );
+    }
+
     const roots = findUnivariateRoots(this, varNames[0]);
     if (roots === null) return null;
     // Route in-scope bound assumptions on the unknown through the same root

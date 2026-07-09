@@ -13,9 +13,11 @@ import {
   asRational,
   asBignum,
   asBigint,
+  toBigint,
   toInteger,
 } from '../boxed-expression/numerics.js';
 import { addOrder } from '../boxed-expression/order.js';
+import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
 
 import {
   apply,
@@ -1286,6 +1288,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 k -= BigInt(1); // truncated → floored correction
               // Mod(p, q) = p - k·q = (an·bd − k·bn·ad) / (ad·bd)
               return ce.number([an * bd - k * bn * ad, ad * bd]);
+            }
+          }
+        }
+
+        // Modular reduction of an integer dividend whose value would be
+        // impractical (or impossible) to materialize — e.g.
+        // `Mod(2^(3^20), 100)`. Reduce in ℤ/mℤ by walking the (canonical)
+        // dividend tree (modular exponentiation, factorial reduction, …)
+        // without ever forming the huge integer. Only concrete integer
+        // moduli qualify; `a.isInteger` gates the dividend and `b.isInteger`
+        // the modulus (`toBigint` ROUNDS a non-integer: without the gate
+        // `Mod(5, 2.5)` reduced mod 3). On decline (the walker returns
+        // null), fall through to the float lanes below.
+        if (a.isInteger === true && b.isInteger === true) {
+          const bm = toBigint(b);
+          if (bm !== null && bm !== 0n) {
+            const mAbs = bm < 0n ? -bm : bm;
+            const r = reduceModulo(a, mAbs);
+            if (r !== null) {
+              // Floored convention: the result's sign follows the divisor.
+              if (bm > 0n) return ce.number(r);
+              return ce.number(r === 0n ? 0n : r + bm);
             }
           }
         }

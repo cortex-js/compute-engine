@@ -41,6 +41,7 @@ import { simplifyHyperbolic } from './simplify-hyperbolic.js';
 import { simplifyDivide } from './simplify-divide.js';
 import {
   simplifyBinomial,
+  simplifyFactorial2,
   simplifyFactorialAdd,
 } from './simplify-factorial.js';
 
@@ -843,6 +844,9 @@ export const SIMPLIFY_RULES: Rule[] = [
 
   // Binomial/Choose identity simplifications
   simplifyBinomial,
+
+  // Double-factorial → factorial reductions for integer 2n / 2n+1 arguments
+  simplifyFactorial2,
 
   //
   // Power combination for 2+ operands in Multiply

@@ -61,6 +61,10 @@ import { normalizeAngle, formatDMS } from '../serialize-dms.js';
  * Returns `null` if no opening brace is found.
  */
 function readBracedText(parser: Parser): string | null {
+  // Skip spaces between the trigger and the opening brace, e.g. the space
+  // in `\text { gallons/ft}`.
+  while (parser.peek === '<space>') parser.nextToken();
+
   if (!parser.match('<{>')) return null;
 
   let text = '';
@@ -135,6 +139,91 @@ function readBracedText(parser: Parser): string | null {
 const UNIT_BLOCKLIST = new Set(['d']);
 
 /**
+ * English unit words → canonical unit symbols, applied at the parse
+ * boundary (NOT added to the core lexicon in `unit-data.ts`).  The unit
+ * system stays canonical; the parser normalizes words before lookup.
+ *
+ * Every target below is asserted to exist in `unit-data.ts` (via
+ * `getUnitDimension`) — aliases whose target is missing (`yard`, `quart`,
+ * `pint`, `cup`, `week`, …) are intentionally omitted.  Singular and
+ * plural forms are listed explicitly (words are case-sensitive lowercase,
+ * matching corpus usage).
+ *
+ * Values may themselves be compound DSL strings (e.g. `mph` → `mi/h`);
+ * `normalizeUnitText` re-parses the result through the DSL path.
+ */
+const UNIT_ALIASES: Record<string, string> = {
+  // Length
+  inch: 'in',
+  inches: 'in',
+  'in.': 'in',
+  foot: 'ft',
+  feet: 'ft',
+  'ft.': 'ft',
+  mile: 'mi',
+  miles: 'mi',
+  meter: 'm',
+  meters: 'm',
+  metre: 'm',
+  metres: 'm',
+  centimeter: 'cm',
+  centimeters: 'cm',
+  centimetre: 'cm',
+  centimetres: 'cm',
+  kilometer: 'km',
+  kilometers: 'km',
+  kilometre: 'km',
+  kilometres: 'km',
+  // Volume
+  gallon: 'gal',
+  gallons: 'gal',
+  liter: 'L',
+  liters: 'L',
+  litre: 'L',
+  litres: 'L',
+  // Mass / weight
+  ounce: 'oz',
+  ounces: 'oz',
+  pound: 'lb',
+  pounds: 'lb',
+  gram: 'g',
+  grams: 'g',
+  kilogram: 'kg',
+  kilograms: 'kg',
+  // NO `ton(s)` alias: in US usage a "ton" is the short ton (~907 kg), but
+  // the only available symbol `t` is the metric tonne (1000 kg) — mapping it
+  // would be a silent 10% error. Inert is better than wrong.
+  // Time
+  second: 's',
+  seconds: 's',
+  minute: 'min',
+  minutes: 'min',
+  hour: 'h',
+  hours: 'h',
+  day: 'd',
+  days: 'd',
+  // Angle
+  degree: 'deg',
+  degrees: 'deg',
+  // Compound
+  mph: 'mi/h',
+};
+
+/**
+ * Normalize a raw unit text by mapping English unit words to canonical
+ * symbols.  Applies to whole simple words (`inches` → `in`) AND to each
+ * leaf word inside a compound DSL string (`inches/foot` → `in/ft`).
+ *
+ * Non-unit words (`to`, `cis`, …) are left unchanged, so the caller's
+ * subsequent `getUnitDimension` / DSL check still rejects them.
+ */
+function normalizeUnitText(text: string): string {
+  // Replace each maximal run of letters/period with its alias, leaving
+  // DSL operators (`/ * ^`) and digits untouched.
+  return text.replace(/[A-Za-z.]+/g, (w) => UNIT_ALIASES[w] ?? w);
+}
+
+/**
  * Check whether a raw text string from `\mathrm{...}` or `\text{...}`
  * represents a known unit (simple or compound).
  *
@@ -143,16 +232,21 @@ const UNIT_BLOCKLIST = new Set(['d']);
 function resolveUnitText(text: string): MathJsonExpression | null {
   if (!text || text.length === 0) return null;
 
-  // Block symbols that have primary mathematical meanings
+  // Block symbols that have primary mathematical meanings.  Checked on the
+  // RAW text so that bare `\mathrm{d}` (differential) stays blocked while
+  // the word `days` still normalizes to the `d` unit below.
   if (UNIT_BLOCKLIST.has(text)) return null;
 
+  // Normalize English unit words (singular/plural) to canonical symbols.
+  const normalized = normalizeUnitText(text);
+
   // Simple unit check: is the whole string a known unit?
-  if (getUnitDimension(text) !== null) return text;
+  if (getUnitDimension(normalized) !== null) return normalized;
 
   // Compound unit check: does the string contain `/`, `*`, or `^`?
-  if (/[/*^]/.test(text)) {
+  if (/[/*^]/.test(normalized)) {
     try {
-      const parsed = parseUnitDSL(text);
+      const parsed = parseUnitDSL(normalized);
       // Verify the parsed expression represents valid units
       if (parsed !== null && isValidUnitExpression(parsed))
         return parsed as MathJsonExpression;
@@ -202,6 +296,39 @@ function isValidUnitExpression(expr: UnitExpression): boolean {
  * returns `null` so that longer triggers (like `\mathrm{e}` → ExponentialE)
  * or normal symbol parsing can take over.
  */
+/**
+ * Read an exponent suffix (`^{n}` or `^n`) as a raw string (e.g. `"3"`,
+ * `"-1"`), or `null` if the next token is not `^`.  Restores the parser
+ * index if a `^` is present but no exponent can be read.
+ */
+function readExponentSuffix(parser: Parser): string | null {
+  const saved = parser.index;
+  if (!parser.match('^')) return null;
+
+  // Braced exponent: `^{...}`
+  if (parser.match('<{>')) {
+    let exp = '';
+    while (!parser.atEnd && parser.peek !== '<}>') {
+      exp += parser.peek;
+      parser.nextToken();
+    }
+    if (!parser.match('<}>')) {
+      parser.index = saved;
+      return null;
+    }
+    return exp;
+  }
+
+  // Single-token exponent: `^3`
+  if (parser.atEnd) {
+    parser.index = saved;
+    return null;
+  }
+  const token = parser.peek;
+  parser.nextToken();
+  return token;
+}
+
 const parseUnitExpression: ExpressionParseHandler = (
   parser: Parser
 ): MathJsonExpression | null => {
@@ -211,6 +338,26 @@ const parseUnitExpression: ExpressionParseHandler = (
   if (text === null) {
     parser.index = saved;
     return null;
+  }
+
+  // An exponent may sit OUTSIDE the braced text, e.g. `\text{ gallons/ft}^3`.
+  // Fold it into the LAST factor of the unit expression before resolving:
+  // `gallons/ft^3` (gallons per cubic foot), NOT `(gallons/ft)^3`.  The
+  // unit DSL binds `^` to the trailing factor, so appending `^n` to the
+  // raw text yields the intended structure.  Consume the `^` only if the
+  // combined text resolves; otherwise restore to just after the brace.
+  // The fold must respect the blocklist on the BASE text: `\mathrm{d}` is
+  // blocked (differential), and `\mathrm{d}^{2}` must stay the Leibniz
+  // numerator `d²` — without this gate the folded text `d^2` resolves as
+  // "square days" and breaks Leibniz-notation round-trips.
+  const afterBrace = parser.index;
+  if (!UNIT_BLOCKLIST.has(text.trim())) {
+    const exp = readExponentSuffix(parser);
+    if (exp !== null) {
+      const withExp = resolveUnitText(`${text}^${exp}`);
+      if (withExp !== null) return ['__unit__', withExp];
+      parser.index = afterBrace;
+    }
   }
 
   const unit = resolveUnitText(text);

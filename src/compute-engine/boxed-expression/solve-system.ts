@@ -9,6 +9,9 @@ import {
   solvePolynomialSystem,
   solveLinearInequalitySystem,
 } from './solve-linear-system.js';
+import { congruenceResidue } from './solve-congruence.js';
+import { freshParameters } from './diophantine.js';
+import { chineseRemainder, lcm } from '../numerics/numeric-bigint.js';
 
 /** Solve a system of equations or inequalities given as an array of
  * expressions (from List or And). Returns null if no solution found.
@@ -49,6 +52,48 @@ export function solveSystem(
         if (trace && polyTrace) trace.push(...polyTrace);
         return filtered;
       }
+    }
+  }
+
+  // System of simultaneous linear congruences in a single unknown, combined
+  // via the Chinese Remainder Theorem (moduli need not be coprime). Each
+  // congruence must reduce to a single residue class `x ≡ rᵢ (mod mᵢ)`; the
+  // merged solution is `x ≡ x₀ (mod lcm(mᵢ))`, emitted as a parametric family
+  // `x₀ + M·t`. Any congruence that declines falls through to the paths below.
+  if (
+    equations &&
+    varNames.length === 1 &&
+    equations.length > 0 &&
+    equations.every((eq) => eq.operator === 'Congruent')
+  ) {
+    const residues: bigint[] = [];
+    const moduli: bigint[] = [];
+    let declined = false;
+    for (const eq of equations) {
+      const res = congruenceResidue(eq, varNames[0]);
+      if (res === undefined) {
+        declined = true;
+        break;
+      }
+      if (res === 'none') return null; // a congruence with no solution
+      residues.push(res.r);
+      moduli.push(res.m);
+    }
+    if (!declined) {
+      const combined = chineseRemainder(residues, moduli);
+      if (combined === null) return null; // inconsistent system
+      let M = 1n;
+      for (const mm of moduli) M = lcm(M, mm);
+      const container = ce.function('List', [...equations]);
+      const t = freshParameters(ce, container, 1)[0];
+      const root =
+        M === 1n
+          ? t
+          : ce.function('Add', [
+              ce.number(combined),
+              ce.function('Multiply', [ce.number(M), t]),
+            ]);
+      return { [varNames[0]]: root };
     }
   }
 

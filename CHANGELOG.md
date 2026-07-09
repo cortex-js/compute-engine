@@ -103,6 +103,17 @@ that corpus from 97.09% to 97.38% clean parse:
   elided left-hand side recovers with a missing-operand placeholder.
 - **Empty subscripts on multi-letter symbols are dropped:** `\alpha_{}`
   parses as `alpha` (completing the earlier `x_{}`/`13^{}` fix).
+- **English unit words in `\text{…}` parse as quantities.**
+  `18 \text{ inches}` → `["Quantity", 18, "in"]`: common measurement words
+  (singular and plural — inches, feet, miles, gallons, pounds, minutes,
+  hours, meters, liters, degrees, …) are normalized to their canonical
+  unit symbols at the parse boundary, including inside compound units
+  (`\text{ inches/foot}` → `in/ft`). An exponent *outside* the text binds
+  to the trailing unit factor: `7.5 \text{ gallons/ft}^3` →
+  `Quantity(7.5, gal/ft³)` (gallons per cubic foot, not `(gal/ft)³`).
+  Strictly gated: the whole text must resolve as a unit, so prose like
+  `9\text{ to }80` is untouched. No `ton(s)` alias (a US short ton is not
+  the metric tonne `t` — mapping it would be a silent 10% error).
 
 ## 0.72.0 _2026-07-09_
 

@@ -142,20 +142,25 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   closed prime-after-arg 13/13 (`Prime` now mirrors its base's type),
   symbolic-modulus congruences + `N`/`D` devolution in `validateArguments`,
   congruence chains (→ conjunction) and leading-`\equiv` recovery, and
-  `\alpha_{}` — genre corpus at **97.63%** (365 of 735 fixed).
+  `\alpha_{}` — genre corpus at **97.63%** (365 of 735 fixed). Units-in-text
+  then landed (English word→canonical-symbol aliases at the parse boundary
+  in `definitions-units.ts`, compound leaves normalized, outside-exponent
+  folded into the trailing factor; `ton(s)` deliberately NOT aliased —
+  short ton ≠ tonne; of the 46 tagged rows only 13 were unit-bearing, 6
+  fully fixed + 1 partial) — genre corpus at **97.66%** (371 of 735).
   Remaining ranked tail:
-  (1) units-in-text arithmetic
-  `(18 \text{ inches})/(12 \text{ inches/foot})` (42, overlaps the units
-  subsystem — NOTE the unit lexicon already accepts English words:
-  `Quantity(1, "inches")`/`"gallons"` are valid, and `18\ \text{in}`
-  already parses to `Quantity`; the gap is whitespace/word matching in the
-  number×text path and compounds like `\text{ gallons/ft}^3` where the
-  exponent sits outside the `\text`); (2) styling remnants (11, mostly
-  array-env/prose — low value); (3) small leftovers: `\cancel` inside
-  `array`-env `@{}`/`\cline` layouts, set-congruence
-  `\{0,1\}+\{1,4\}\equiv…` (set arithmetic, out of scope), and possible
-  future upgrades to `IndexedSequence` (lazy-collection semantics, the
-  parenthesized `(a_n)_{n\in\mathbb{N}}` form).
+  (1) styling remnants (11, mostly array-env/prose — low value);
+  (2) units residue: `yd`/`qt`/`pt` and currency (`USD`, `cents`, `euro`)
+  have no `unit-data.ts` symbols (adding them is a units-subsystem call,
+  not parser work); spaced `\text{miles per hour}` (interior spaces are
+  stripped before resolution); Quantity arithmetic does not cancel
+  compound units (`18 in / (12 in/ft)` → `1.5 in/in/ft`, not `1.5 ft` —
+  a Quantity-simplification item);
+  (3) small leftovers: `\cancel` inside `array`-env `@{}`/`\cline`
+  layouts, set-congruence `\{0,1\}+\{1,4\}\equiv…` (set arithmetic, out
+  of scope), and possible future upgrades to `IndexedSequence`
+  (lazy-collection semantics, the parenthesized `(a_n)_{n\in\mathbb{N}}`
+  form).
   Ascii-pipe divisibility evidence doubled (36 more hits, tracked below).
   Skip: `array`-env long-division layouts, `\nabla` puzzle ops, repeating
   decimals `0.abab\overline{ab}`.

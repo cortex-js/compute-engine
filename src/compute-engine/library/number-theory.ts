@@ -1,6 +1,12 @@
 import type { Expression, SymbolDefinitions } from '../global-types.js';
 import { toBigint } from '../boxed-expression/numerics.js';
-import { gcd, lcm } from '../numerics/numeric-bigint.js';
+import {
+  gcd,
+  lcm,
+  extGcd,
+  chineseRemainder,
+  modularInverse,
+} from '../numerics/numeric-bigint.js';
 import { bigPrimeFactors, isPrimeBigint, modPow } from '../numerics/primes.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
@@ -395,6 +401,24 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (g !== 1n) return undefined; // inverse does not exist
         const inv = ((s % m) + m) % m;
         return ce.number(modPow(inv, -b, m));
+      },
+    },
+
+    ModularInverse: {
+      description:
+        'Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` in [0, m) with `a·x ≡ 1 (mod m)`. Undefined when `a` and `m` are not coprime.',
+      signature: '(integer, integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['ModularInverse(3, 7)  // 5'],
+      evaluate: ([aOp, mOp], { engine: ce }) => {
+        const a = toBigint(aOp);
+        const m = toBigint(mOp);
+        if (a === null || m === null) return undefined;
+        if (m < 1n) return undefined; // modulus must be positive
+        if (m === 1n) return ce.number(0); // everything ≡ 0 (mod 1)
+        const inv = modularInverse(a, m);
+        if (inv === null) return undefined; // inverse does not exist
+        return ce.number(inv);
       },
     },
 
@@ -1145,24 +1169,6 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
   },
 ];
 
-/**
- * Extended Euclidean algorithm: returns `[g, x, y]` with `a·x + b·y = g`,
- * where `g = gcd(a, b)` (its sign follows `a`/`b`; callers that need a
- * non-negative `g` normalize the triple).
- */
-function extGcd(a: bigint, b: bigint): [bigint, bigint, bigint] {
-  let [oldR, r] = [a, b];
-  let [oldS, s] = [1n, 0n];
-  let [oldT, t] = [0n, 1n];
-  while (r !== 0n) {
-    const q = oldR / r;
-    [oldR, r] = [r, oldR - q * r];
-    [oldS, s] = [s, oldS - q * s];
-    [oldT, t] = [t, oldT - q * t];
-  }
-  return [oldR, oldS, oldT];
-}
-
 /** Integer (floor) square root of `n ≥ 0` via Newton's method on bigints. */
 function bigintSqrt(n: bigint): bigint {
   if (n < 2n) return n;
@@ -1174,30 +1180,6 @@ function bigintSqrt(n: bigint): bigint {
     x = y;
   }
   while (x * x > n) x -= 1n;
-  return x;
-}
-
-/**
- * General Chinese Remainder: merge the congruences `x ≡ residues[i]
- * (mod moduli[i])` pairwise. Moduli need not be coprime. Returns the least
- * non-negative solution modulo lcm(moduli), or `null` if inconsistent or a
- * modulus is not positive.
- */
-function chineseRemainder(residues: bigint[], moduli: bigint[]): bigint | null {
-  let x = 0n;
-  let m = 1n; // current solution: x (mod m)
-  for (let i = 0; i < residues.length; i++) {
-    const ni = moduli[i];
-    if (ni <= 0n) return null;
-    const ri = ((residues[i] % ni) + ni) % ni;
-    const [g, p] = extGcd(m, ni);
-    if ((ri - x) % g !== 0n) return null; // inconsistent
-    const lcmMN = (m / g) * ni;
-    const mod2 = ni / g;
-    const lambda = (((((ri - x) / g) * p) % mod2) + mod2) % mod2;
-    x = (((x + m * lambda) % lcmMN) + lcmMN) % lcmMN;
-    m = lcmMN;
-  }
   return x;
 }
 

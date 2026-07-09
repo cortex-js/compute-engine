@@ -1310,6 +1310,37 @@ describe('Norm', () => {
     const result = ce.expr(['Norm', ['List', -5]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`5`);
   });
+
+  // A point-like Tuple is treated as a rank-1 vector (only inside Norm).
+  it('should compute the L2 norm of a Tuple (3-4-5 triangle)', () => {
+    // √((-3)² + 4²) = √25 = 5
+    const result = ce.parse('\\|(-3,4)\\|').evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`5`);
+  });
+
+  it('should compute the L1 norm of a Tuple', () => {
+    // |-3| + |4| = 7
+    const result = ce.expr(['Norm', ['Tuple', -3, 4], 1]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`7`);
+  });
+
+  it('should compute the L-infinity norm of a Tuple', () => {
+    // max(|-3|, |4|) = 4
+    const result = ce.expr(['Norm', ['Tuple', -3, 4], 'Infinity']).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`4`);
+  });
+
+  it('should compute the L2 norm of a 3-element Tuple', () => {
+    // √(1² + 2² + 2²) = √9 = 3
+    const result = ce.expr(['Norm', ['Tuple', 1, 2, 2]]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`3`);
+  });
+
+  // Regression: List-valued vectors still evaluate.
+  it('should still compute the L2 norm of a List (regression)', () => {
+    const result = ce.expr(['Norm', ['List', 3, 4]]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`5`);
+  });
 });
 
 describe('Higher-Rank Tensor Operations (LA-4)', () => {

@@ -11,6 +11,7 @@ import { flatten } from '../boxed-expression/flatten.js';
 import { eq } from '../boxed-expression/compare.js';
 import { isNumber, isFunction } from '../boxed-expression/type-guards.js';
 import { toBigint } from '../boxed-expression/numerics.js';
+import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
 import {
   subjectOf,
   finiteNumericValue,
@@ -131,12 +132,23 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // bignum-preferred default precision (where `.value` is not a JS
       // number), and reduce with a floored modulo so negatives are handled
       // correctly (JS `%` is a remainder: `-1 % 7 === -1`, not `6`).
-      const a = toBigint(lhs);
-      const b = toBigint(rhs);
+      // A symbolic (non-integer) modulus stays unevaluated.
       const m = toBigint(modulo);
-      if (a === null || b === null || m === null || m === 0n) return undefined;
-      const reduce = (x: bigint) => ((x % m) + m) % m;
-      return reduce(a) === reduce(b) ? ce.True : ce.False;
+      if (m === null || m === 0n) return undefined;
+      const mAbs = m < 0n ? -m : m;
+      // Reduce each side to its canonical residue in [0, mAbs). `toBigint`
+      // handles concrete integer literals directly; when it declines (e.g.
+      // `2^(3^20)`, whose value can't be materialized), fall back to the
+      // modular walker, which reduces in ℤ/mℤ without forming the integer.
+      const reduce = (x: Expression): bigint | null => {
+        const v = toBigint(x);
+        if (v !== null) return ((v % mAbs) + mAbs) % mAbs;
+        return reduceModulo(x, mAbs);
+      };
+      const a = reduce(lhs);
+      const b = reduce(rhs);
+      if (a === null || b === null) return undefined;
+      return a === b ? ce.True : ce.False;
     },
   },
 

@@ -278,7 +278,7 @@ export function isIntegerDomain(
  * context (a bound `t` with a value would evaluate inside the result). Nothing
  * is declared in the user's scope — the parameters surface as free symbols.
  */
-function freshParameters(
+export function freshParameters(
   ce: ComputeEngine,
   eq: Expression,
   count: number

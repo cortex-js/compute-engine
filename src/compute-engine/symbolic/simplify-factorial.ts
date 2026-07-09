@@ -63,6 +63,63 @@ export function simplifyBinomial(x: Expression): RuleStep | undefined {
 }
 
 /**
+ * Double-factorial reductions to ordinary factorials, for integer-typed
+ * arguments of the canonical forms `2n` and `2n+1`:
+ *
+ * - `Factorial2(2n)   → 2^n · n!`             (n a nonnegative integer)
+ * - `Factorial2(2n+1) → (2n+1)! / (2^n · n!)` (n a nonnegative integer)
+ *
+ * Both are exact closed forms (verified numerically for n = 1..5). The
+ * rewrites make the expression structurally larger, so they are tagged
+ * `purpose: 'transform'` to bypass the simplification cost gate.
+ */
+export function simplifyFactorial2(x: Expression): RuleStep | undefined {
+  if (!isFunction(x, 'Factorial2')) return undefined;
+
+  const arg = x.op1;
+  if (!arg) return undefined;
+
+  // Leave numeric literals to the `Factorial2` evaluate handler.
+  if (isNumber(arg)) return undefined;
+
+  const ce = x.engine;
+
+  // Odd case: (2n+1)!! → (2n+1)! / (2^n · n!)
+  // The argument is `Add(2n, 1)`; recover `n` as (arg - 1) / 2.
+  const bo = baseOffset(arg);
+  if (bo && bo.offset === 1) {
+    const n = bo.base.div(2);
+    if (n.isInteger === true && n.isNonNegative !== false) {
+      const denom = ce._fn('Multiply', [
+        ce._fn('Power', [ce.number(2), n]),
+        ce._fn('Factorial', [n]),
+      ]);
+      return {
+        value: ce._fn('Divide', [ce._fn('Factorial', [arg]), denom]),
+        because: '(2n+1)!! -> (2n+1)! / (2^n n!)',
+        purpose: 'transform',
+      };
+    }
+  }
+
+  // Even case: (2n)!! → 2^n · n!
+  // The argument is `2n`; recover `n` as arg / 2.
+  const n = arg.div(2);
+  if (n.isInteger === true && n.isNonNegative !== false) {
+    return {
+      value: ce._fn('Multiply', [
+        ce._fn('Power', [ce.number(2), n]),
+        ce._fn('Factorial', [n]),
+      ]),
+      because: '(2n)!! -> 2^n n!',
+      purpose: 'transform',
+    };
+  }
+
+  return undefined;
+}
+
+/**
  * Extracts factorial information from a term in an Add expression.
  * Handles: Factorial(n), Negate(Factorial(n)), Multiply(c, Factorial(n))
  */

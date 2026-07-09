@@ -10,6 +10,65 @@ export function lcm(a: bigint, b: bigint): bigint {
   return (a * b) / gcd(a, b);
 }
 
+/**
+ * Extended Euclidean algorithm: returns `[g, x, y]` with `a·x + b·y = g`,
+ * where `g = gcd(a, b)` (its sign follows `a`/`b`; callers that need a
+ * non-negative `g` normalize the triple).
+ */
+export function extGcd(a: bigint, b: bigint): [bigint, bigint, bigint] {
+  let [oldR, r] = [a, b];
+  let [oldS, s] = [1n, 0n];
+  let [oldT, t] = [0n, 1n];
+  while (r !== 0n) {
+    const q = oldR / r;
+    [oldR, r] = [r, oldR - q * r];
+    [oldS, s] = [s, oldS - q * s];
+    [oldT, t] = [t, oldT - q * t];
+  }
+  return [oldR, oldS, oldT];
+}
+
+/**
+ * The modular multiplicative inverse of `a` modulo `m` (`m > 0`): the integer
+ * `x` in `[0, m)` with `a·x ≡ 1 (mod m)`, or `null` when `a` and `m` are not
+ * coprime (i.e. `gcd(a mod m, m) ≠ 1`).
+ */
+export function modularInverse(a: bigint, m: bigint): bigint | null {
+  if (m <= 0n) return null;
+  if (m === 1n) return 0n;
+  const base = ((a % m) + m) % m;
+  const [g, s] = extGcd(base, m);
+  if (g !== 1n && g !== -1n) return null;
+  return ((s % m) + m) % m;
+}
+
+/**
+ * General Chinese Remainder: merge the congruences `x ≡ residues[i]
+ * (mod moduli[i])` pairwise. Moduli need not be coprime. Returns the least
+ * non-negative solution modulo lcm(moduli), or `null` if inconsistent or a
+ * modulus is not positive.
+ */
+export function chineseRemainder(
+  residues: bigint[],
+  moduli: bigint[]
+): bigint | null {
+  let x = 0n;
+  let m = 1n; // current solution: x (mod m)
+  for (let i = 0; i < residues.length; i++) {
+    const ni = moduli[i];
+    if (ni <= 0n) return null;
+    const ri = ((residues[i] % ni) + ni) % ni;
+    const [g, p] = extGcd(m, ni);
+    if ((ri - x) % g !== 0n) return null; // inconsistent
+    const lcmMN = (m / g) * ni;
+    const mod2 = ni / g;
+    const lambda = (((((ri - x) / g) * p) % mod2) + mod2) % mod2;
+    x = (((x + m * lambda) % lcmMN) + lcmMN) % lcmMN;
+    m = lcmMN;
+  }
+  return x;
+}
+
 /** Return `[factor, root]` such that
  * pow(n, 1/exponent) = factor * pow(root, 1/exponent)
  *

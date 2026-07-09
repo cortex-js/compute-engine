@@ -1024,10 +1024,6 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return ce.expr(['Abs', x]).evaluate();
         }
 
-        if (!isTensor(x)) return undefined;
-
-        const shape = x.shape;
-
         // Determine norm type
         let normType: number | string = 2; // Default to L2/Frobenius
         if (normTypeExpr) {
@@ -1050,15 +1046,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           }
         }
 
-        // Vector norm (rank 1)
-        if (shape.length === 1) {
-          const elements: Expression[] = [];
-          const n = shape[0];
-          for (let i = 0; i < n; i++) {
-            const val = x.tensor.at(i + 1);
-            elements.push(val !== undefined ? ce.expr(val) : ce.Zero);
-          }
-
+        // Compute a rank-1 (vector) norm from a list of element expressions.
+        // Shared by the tensor rank-1 branch and the Tuple branch.
+        const vectorNorm = (
+          elements: readonly Expression[]
+        ): Expression | undefined => {
           if (normType === 1) {
             // L1 norm: sum of absolute values
             let sum: Expression = ce.Zero;
@@ -1110,6 +1102,25 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           }
 
           return undefined;
+        };
+
+        // A point-like Tuple is treated as a rank-1 vector — but only inside
+        // Norm (no general Tuple→vector coercion is introduced elsewhere).
+        if (isFunction(x, 'Tuple')) return vectorNorm(x.ops);
+
+        if (!isTensor(x)) return undefined;
+
+        const shape = x.shape;
+
+        // Vector norm (rank 1)
+        if (shape.length === 1) {
+          const elements: Expression[] = [];
+          const n = shape[0];
+          for (let i = 0; i < n; i++) {
+            const val = x.tensor.at(i + 1);
+            elements.push(val !== undefined ? ce.expr(val) : ce.Zero);
+          }
+          return vectorNorm(elements);
         }
 
         // Matrix norm (rank 2)

@@ -36,6 +36,41 @@ import { asRational, asSmallInteger } from './numerics.js';
 import { negateProduct } from './negate.js';
 import { add } from './arithmetic-add.js';
 
+// Maximum number of decimal digits allowed in a *materialized* exact power
+// folded into a product's coefficient. Beyond this the factor is kept symbolic
+// (an inert `Power` term) instead of being computed — mirrors the identical
+// guard in `arithmetic-power.ts`. Building a multi-million-digit integer is
+// pathological (and can overflow `bigint`); `.N()` still yields the float /
+// overflow-to-infinity.
+const MAX_EXACT_POW_DIGITS = 1_000_000;
+
+/** (Rough upper bound on) the decimal digit count of an integer value. */
+function integerDigitCount(v: bigint | number): number {
+  if (typeof v === 'bigint') return (v < 0n ? -v : v).toString().length;
+  if (!Number.isFinite(v)) return Infinity;
+  const a = Math.abs(v);
+  return a < 1 ? 1 : Math.floor(Math.log10(a)) + 1;
+}
+
+/**
+ * Would materializing `base^exp` (an exact base with a rational exponent)
+ * exceed the digit budget? If so, the caller keeps the factor symbolic rather
+ * than folding it into the product's coefficient.
+ */
+function exactPowExceedsBudget(base: NumericValue, exp: Rational): boolean {
+  const e = reducedRational(exp);
+  const exponent = Math.abs(Number(e[0]) / Number(e[1]));
+  if (Number.isNaN(exponent)) return false;
+  const exact = base.asExact;
+  if (!(exact instanceof ExactNumericValue)) return false;
+  const baseDigits = Math.max(
+    integerDigitCount(exact.rational[0]),
+    integerDigitCount(exact.rational[1]),
+    integerDigitCount(exact.radical)
+  );
+  return baseDigits * exponent > MAX_EXACT_POW_DIGITS;
+}
+
 //
 // ── Product class ──────────────────────────────────────────────────────
 //
@@ -205,6 +240,14 @@ export class Product {
 
         if (isOne(exp)) {
           this.coefficient = this.coefficient.mul(num);
+        } else if (
+          exactPowExceedsBudget(this.engine._numericValue(num), exp)
+        ) {
+          // Materializing this exact power would exceed the digit budget:
+          // keep it symbolic (an inert Power term) rather than folding it
+          // into the coefficient — mirrors the guard in arithmetic-power.ts,
+          // and avoids a `Maximum BigInt size exceeded` throw.
+          this.terms.push({ term, exponent: exp });
         } else
           this.coefficient = this.coefficient.mul(
             this.engine._numericValue(num).pow(this.engine._numericValue(exp))
