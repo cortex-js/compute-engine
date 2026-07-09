@@ -154,6 +154,69 @@ describe('MathNet Tier-3 Task 5: congruence', () => {
   });
 });
 
+describe('MathNet Tier-3 Task 5: bare \\pmod residue annotation', () => {
+  test('bare \\pmod after an expression (no \\equiv) is Mod(x, n)', () => {
+    const ce = freshEngine();
+    expect(ce.parse('1 \\pmod 7').json).toEqual(['Mod', 1, 7]);
+  });
+
+  test('bare \\pmod with braces attaches to the preceding operand', () => {
+    const ce = freshEngine();
+    expect(ce.parse('-811\\pmod{24}').json).toEqual(['Mod', -811, 24]);
+  });
+
+  test('bare \\pmod binds tighter than a comma sequence', () => {
+    const ce = freshEngine();
+    // `0, 1 \pmod 4` → the residue attaches to `1` only, not the whole tuple.
+    expect(ce.parse('0, 1 \\pmod 4.').json).toEqual([
+      'Tuple',
+      0,
+      ['Mod', 1, 4],
+    ]);
+  });
+
+  test('standalone \\pmod (no preceding expression) stays structural', () => {
+    const ce = freshEngine();
+    // No dividend to attach to: the Mod carries a missing operand rather than
+    // deriving a spurious value.
+    expect(isClean(ce, '\\pmod{7}')).toBe(false);
+    expect(JSON.stringify(ce.parse('\\pmod{7}').json)).toContain('Mod');
+  });
+});
+
+describe('MathNet Tier-3 Task 5: congruence in an implication chain', () => {
+  test('\\implies between two congruences groups as Implies(Congruent, Congruent)', () => {
+    const ce = freshEngine();
+    // No space between `7` and `\implies` in the source (the reported case).
+    expect(
+      ce.parse('1+6n\\equiv 4\\pmod 7\\implies n\\equiv 4\\pmod 7').json
+    ).toEqual([
+      'Implies',
+      ['Congruent', ['Add', ['Multiply', 6, 'n'], 1], 4, 7],
+      ['Congruent', 'n', 4, 7],
+    ]);
+  });
+
+  test('\\Rightarrow between two congruences groups as Implies(Congruent, Congruent)', () => {
+    const ce = freshEngine();
+    expect(
+      ce.parse('1+6n\\equiv 4\\pmod 7\\Rightarrow n\\equiv 4\\pmod 7').json
+    ).toEqual([
+      'Implies',
+      ['Congruent', ['Add', ['Multiply', 6, 'n'], 1], 4, 7],
+      ['Congruent', 'n', 4, 7],
+    ]);
+  });
+
+  test('a relation chain ending in a congruence parses without an error', () => {
+    const ce = freshEngine();
+    expect(isClean(ce, '1492 = 1500-8 \\equiv -8\\pmod{500}')).toBe(true);
+    expect(
+      isClean(ce, '10\\cdot 901 = 9010 = 9(1001)+1 \\equiv 1\\pmod{1001}')
+    ).toBe(true);
+  });
+});
+
 describe('MathNet Tier-3 Task 5: divisibility', () => {
   test('a \\bmod n parses to Mod(a, n)', () => {
     const ce = freshEngine();

@@ -197,7 +197,7 @@ const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
   '}': ['\\}', '\\rbrace'],
   ':': [':', '\\colon'],
   '|': ['|', '\\|', '\\lvert', '\\rvert'], //special: '\lvert` when open, `\rvert` when close
-  '||': ['||', '\\Vert', '\\lVert', '\\rVert'], // special: `\lVert` when open, `\rVert` when close
+  '||': ['||', '\\Vert', '\\lVert', '\\rVert', '\\|'], // special: `\lVert` when open, `\rVert` when close; `\|` is a self-closing synonym for `\Vert`
   // '\\lfloor': ['\\lfloor'],
   // '\\rfloor': ['\\rfloor'],
   // '\\lceil': ['\\lceil'],
@@ -277,6 +277,7 @@ const CLOSE_DELIMITER: Record<string, string> = {
   '\\lvert': '\\rvert',
   '\\Vert': '\\Vert',
   '\\lVert': '\\rVert',
+  '\\|': '\\|',
   '\\lbrack': '\\rbrack',
   '\\ulcorner': '\\urcorner',
   '\\llcorner': '\\lrcorner',

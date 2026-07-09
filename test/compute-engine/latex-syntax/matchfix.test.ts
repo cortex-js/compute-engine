@@ -213,6 +213,26 @@ describe('MATCHFIX abs and norm', () => {
       box       = ["Add", ["Norm", "a"], ["Abs", "b"]]
       eval-auto = |a| + |b|
     `));
+
+  // `\|` is a LaTeX synonym for `\Vert` (renders ‖); should parse like
+  // `||a||`, `\Vert a \Vert`, `\lVert a \rVert`.
+  test('\\|a\\|', () =>
+    expect(check('\\|a\\|')).toMatchInlineSnapshot(`
+      box       = ["Norm", "a"]
+      eval-auto = |a|
+    `));
+
+  test('\\left\\|a\\right\\|', () =>
+    expect(check('\\left\\|a\\right\\|')).toMatchInlineSnapshot(`
+      box       = ["Norm", "a"]
+      eval-auto = |a|
+    `));
+
+  test('\\|a\\|+|b|', () =>
+    expect(check('\\|a\\|+|b|')).toMatchInlineSnapshot(`
+      box       = ["Add", ["Norm", "a"], ["Abs", "b"]]
+      eval-auto = |a| + |b|
+    `));
 });
 
 describe('MATCHFIX no redundant wrapping', () => {

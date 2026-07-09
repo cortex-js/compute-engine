@@ -45,6 +45,27 @@ describe('PIPELINE OPERATOR — bare function references', () => {
     expect(ce.parse('9|>\\log_3^{-1}').evaluate().json).toEqual(19683);
     expect(json('|>\\log_2')).toBe(`["Function",["Lb","_"],"_"]`);
   });
+
+  // A function with a superscript but no argument (`\cos^2`, `\ln^{-1}`)
+  // also holds a topic-marker hole (a bare `Power(Cos, 2)` would treat the
+  // function symbol as a number and fail to type).
+  test('a superscripted function with no argument holds a topic-marker hole', () => {
+    expect(json('\\cos^2')).toBe(`["Power",["Cos","topic_marker"],2]`);
+    expect(ce.parse('4|>\\cos^2', { canonical: false }).json).toEqual([
+      'Power',
+      ['Cos', 4],
+      2,
+    ]);
+    expect(json('12|>\\ln^2')).toBe(`["Power",["Ln",12],2]`);
+    expect(ce.parse('12|>\\ln^{-1}').evaluate().latex).toBe(
+      '\\exponentialE^{12}'
+    );
+    expect(ce.parse('100|>\\lg^{-1}').evaluate().json).toEqual({
+      num: '1e+100',
+    });
+    // The InverseFunction route is unaffected
+    expect(ce.parse('1|>\\sin^{-1}').evaluate().latex).toBe('\\frac{\\pi}{2}');
+  });
 });
 
 describe('PIPELINE OPERATOR — infix `x |> f`', () => {

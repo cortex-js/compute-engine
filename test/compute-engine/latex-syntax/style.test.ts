@@ -150,6 +150,93 @@ describe('STYLE - TEXT MODE', () => {
   });
 });
 
+describe('TEXT FONT STYLING', () => {
+  // Text-family styling commands at the top level (math mode) parse their
+  // argument as a text run and wrap it in an `Annotated` carrying the style.
+  test('\\textbf parses to Annotated with bold weight', () => {
+    expect(engine.parse('\\textbf{Sizes}', { form: 'raw' }).json).toEqual([
+      'Annotated',
+      "'Sizes'",
+      { dict: { fontWeight: 'bold' } },
+    ]);
+  });
+
+  test('\\textit and \\emph parse to italic', () => {
+    expect(engine.parse('\\textit{Math}', { form: 'raw' }).json).toEqual([
+      'Annotated',
+      "'Math'",
+      { dict: { fontStyle: 'italic' } },
+    ]);
+    expect(engine.parse('\\emph{very}', { form: 'raw' }).json).toEqual([
+      'Annotated',
+      "'very'",
+      { dict: { fontStyle: 'italic' } },
+    ]);
+  });
+
+  test('\\textup parses to normal font style', () => {
+    expect(engine.parse('\\textup{z}', { form: 'raw' }).json).toEqual([
+      'Annotated',
+      "'z'",
+      { dict: { fontStyle: 'normal' } },
+    ]);
+  });
+
+  test('\\texttt and \\textsf parse to font family', () => {
+    expect(engine.parse('\\texttt{x}', { form: 'raw' }).json).toEqual([
+      'Annotated',
+      "'x'",
+      { dict: { fontFamily: 'monospace' } },
+    ]);
+    expect(engine.parse('\\textsf{y}', { form: 'raw' }).json).toEqual([
+      'Annotated',
+      "'y'",
+      { dict: { fontFamily: 'sans-serif' } },
+    ]);
+  });
+
+  test('\\textrm and \\mbox parse to a plain text run', () => {
+    expect(engine.parse('\\textrm{abc}', { form: 'raw' }).json).toEqual("'abc'");
+    expect(engine.parse('\\mbox{th}', { form: 'raw' }).json).toEqual("'th'");
+  });
+
+  test('text-family styling round-trips', () => {
+    for (const input of [
+      '\\textbf{abc}',
+      '\\textit{Math}',
+      '\\textup{z}',
+      '\\texttt{x}',
+      '\\textsf{y}',
+    ])
+      expect(engine.parse(input).latex).toBe(input);
+    // \emph normalizes to \textit (both italic)
+    expect(engine.parse('\\emph{very}').latex).toBe('\\textit{very}');
+    // \textrm / \mbox normalize to \text (plain text run)
+    expect(engine.parse('\\textrm{abc}').latex).toBe('\\text{abc}');
+  });
+});
+
+describe('MATH-MODE BOLD', () => {
+  // `\bold`, `\boldsymbol`, `\bm` are aliases of `\mathbf` (math-mode bold),
+  // producing a `_bold`-suffixed symbol rather than a text run.
+  test('bold aliases parse to a bold symbol', () => {
+    expect(engine.parse('\\bold{v}', { form: 'raw' }).json).toEqual('v_bold');
+    expect(engine.parse('\\boldsymbol{w}', { form: 'raw' }).json).toEqual(
+      'w_bold'
+    );
+    expect(engine.parse('\\bm{u}', { form: 'raw' }).json).toEqual('u_bold');
+  });
+
+  test('\\bold in an equation with a matrix', () => {
+    expect(
+      check('\\bold{v} = \\begin{pmatrix} 5 \\\\ -3 \\end{pmatrix}')
+    ).toMatchInlineSnapshot(`
+      box       = ["Equal", "v_bold", ["Matrix", ["List", ["List", 5], ["List", -3]]]]
+      eval-auto = "False"
+    `);
+  });
+});
+
 describe('TEXT PROMOTION', () => {
   test('math + text + math promotes to Text', () => {
     expect(check('a\\text{ hello }b')).toMatchInlineSnapshot(`

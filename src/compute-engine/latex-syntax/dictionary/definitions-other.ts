@@ -21,8 +21,7 @@ import {
   MathJsonSymbol,
 } from '../../../math-json/types.js';
 import { joinLatex } from '../tokenizer.js';
-import { PIPE_TOPIC_MARKER } from './definitions-core.js';
-import { parseTextRun } from './definitions-core.js';
+import { PIPE_TOPIC_MARKER, parseTextRun } from './definitions-core.js';
 
 // TeX dimension units (each letter is a separate token from the tokenizer)
 const TEX_UNITS = [
@@ -491,6 +490,22 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
 
       const dict = dictionaryFromExpression(operand(expr, 2));
       if (dict === null || dict === undefined) return result;
+
+      // Text-family styling commands (`\textbf`, `\textit`, `\texttt`, …) are
+      // themselves text-mode wrappers, so a plain-string body should be
+      // emitted as raw text, not re-wrapped in `\text{…}` — otherwise
+      // `\textbf{abc}` would serialize to `\textbf{\text{abc}}` (which does not
+      // round-trip through `parseTextRun`).
+      const rawText = stringValue(operand(expr, 1));
+      if (
+        rawText !== null &&
+        (dict.dict.fontFamily === 'monospace' ||
+          dict.dict.fontFamily === 'sans-serif' ||
+          dict.dict.fontWeight === 'bold' ||
+          dict.dict.fontStyle === 'italic' ||
+          dict.dict.fontStyle === 'normal')
+      )
+        result = rawText;
 
       //
       // Display: "math style"

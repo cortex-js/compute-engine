@@ -6,6 +6,7 @@ import {
   Parser,
   Terminator,
 } from '../types.js';
+import { PIPE_TOPIC_MARKER } from './definitions-core.js';
 
 /**
  * Trigonometric functions have some special conventions that require a
@@ -96,12 +97,17 @@ function parseTrig(op: string): ExpressionParseHandler {
     // Look for an implicit argument (a product of terms) but stop if another
     // trig function is encountered, i.e. ensure that
     // "\cos a \sin b" is parsed as "(\cos a)(\sin b)" and not "\cos (a \sin b)"
-    const args = parser.parseArguments('implicit', {
+    let args = parser.parseArguments('implicit', {
       minPrec: MULTIPLICATION_PRECEDENCE,
       condition: (parser) =>
         trigCommands[parser.peek] !== undefined ||
         (until?.condition?.(parser) ?? false),
     });
+
+    // A superscript but no argument (`\cos^2`): the topic marker `\square`
+    // stands in for the argument, so a pipeline can fill it
+    // (`x |> \cos^2` → cos²x); standalone it displays as `\cos(\square)^2`.
+    if (args === null && sup !== null) args = [PIPE_TOPIC_MARKER];
 
     // Desmos compatibility: `\arctan(y, x)` and `\tan^{-1}(y, x)` are
     // both 2-arg atan2. We must lower to Arctan2 here, before the operator

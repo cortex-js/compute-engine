@@ -1663,11 +1663,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         : '\\log_{10}' + serializer.wrapArguments(expr),
     parse: (parser: Parser) => {
       const sup = parseFunctionSup(parser);
-      const args = parser.parseArguments('implicit');
-      if (args === null)
-        return sup === null
-          ? ('Lg' as MathJsonExpression)
-          : (['Power', 'Lg', sup] as MathJsonExpression);
+      let args = parser.parseArguments('implicit');
+      if (args === null && sup === null) return 'Lg' as MathJsonExpression;
+      // A superscript but no argument (`\lg^{-1}`): the topic marker stands
+      // in for the argument so a pipeline can fill it.
+      if (args === null) args = [PIPE_TOPIC_MARKER];
       // `\lg^{-1} x` → `10^x` (inverse of base-10 log).
       return applyFunctionSup(
         ['Log', ...args, 10] as MathJsonExpression,
@@ -2716,16 +2716,15 @@ function parseLog(command: string, parser: Parser): MathJsonExpression | null {
 
   let args = parser.parseArguments('implicit');
 
-  // No argument and no base: a bare function symbol (`12 |> \ln` → `Ln`),
-  // matching the behavior of `\cos`, `\lg` and `\lb`.
-  if (args === null && sub === null)
-    return sup === null
-      ? (command as MathJsonExpression)
-      : (['Power', command, sup] as MathJsonExpression);
+  // No argument, base or superscript: a bare function symbol
+  // (`12 |> \ln` → `Ln`), matching the behavior of `\cos`, `\lg` and `\lb`.
+  if (args === null && sub === null && sup === null)
+    return command as MathJsonExpression;
 
-  // A base but no argument (`\log_2`): the topic marker `\square` stands in
-  // for the argument, so a pipeline can fill it (`12 |> \log_2` → log₂ 12);
-  // standalone it displays as `\log_2(\square)`.
+  // A base or superscript but no argument (`\log_2`, `\ln^{-1}`): the topic
+  // marker `\square` stands in for the argument, so a pipeline can fill it
+  // (`12 |> \log_2` → log₂ 12, `12 |> \ln^{-1}` → e¹²); standalone it
+  // displays with a hole (`\log_2(\square)`).
   if (args === null) args = [PIPE_TOPIC_MARKER];
 
   // The natural log and the base-`b` log have well-defined inverses:

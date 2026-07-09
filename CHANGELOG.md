@@ -6,8 +6,10 @@
   built-in target (`javascript`, `interval-js`, `glsl`, `wgsl`,
   `interval-glsl`, `python`) now reproduces the engine's angular-unit
   semantics instead of always computing in radians: direct trigonometric
-  arguments are scaled by the unit→radian factor and inverse-trigonometric
-  results by its reciprocal, for all units (`deg`, `grad`, `turn`). With
+  arguments (`Sin`…`Csc`, `Haversine`) are scaled by the unit→radian factor
+  and inverse-trigonometric results (`Arcsin`…`Arccsc`, `Arctan2`,
+  `InverseHaversine`) by its reciprocal, for all units (`deg`, `grad`,
+  `turn`). With
   `ce.angularUnit = 'deg'`, `compile('\\sin(x)')` emits
   `Math.sin(0.017453… * x)` so `run({x: 90})` returns 1, matching
   `evaluate()` — previously a degree-mode expression *evaluated* in degrees
@@ -81,6 +83,32 @@
   **This is experimental**: the syntax and semantics may change between
   releases.
 
+### Pipeline Operator
+
+- **A pipeline operator applies the expression on its left to the function on
+  its right.** `x \rhd f` (also `x \triangleright f`, `x \vartriangleright f`,
+  `x ⊳ f`, or the plain-text shortcut `x |> f`) parses to `f(x)`. A `\square`
+  topic marker in the right-hand side names the position the piped value
+  fills, so a stage can be a multi-argument call:
+  `x^2 = 4 \rhd \operatorname{Solve}(\square, x)` is `Solve(x^2 = 4, x)`.
+  Stages chain left to right (`4 \rhd \sqrt \rhd \ln` is `ln(√4)`), a bare
+  function command such as `\ln`, `\lb` or `\sqrt` acts as a function
+  reference (`12 \rhd \ln` is `ln(12)`), and the prefix form (`\rhd f`, with
+  no left-hand side) denotes the anonymous unary function `_ ↦ f(_)`.
+
+- **The unknown/variable argument of `Solve`, `D`, `Series` and the
+  polynomial operators may now be omitted.** It defaults to the input's single
+  free variable, or to `x` when there are several free variables and one of
+  them is `x`; with no inferable default the expression stays unevaluated.
+  This enables point-free pipelines such as
+  `x^2 = 4 \rhd \operatorname{Solve}` or `x^2 \rhd \operatorname{D}`. Applies
+  to `Solve`, `D`, `Series`, `PolynomialDegree`, `CoefficientList`,
+  `PolynomialRoots`, `Discriminant`, `PolynomialQuotient`,
+  `PolynomialRemainder`, `PolynomialGCD`, `Resultant`, `Cancel`,
+  `PartialFraction` and `Apart` (`Factor` already inferred its variable). For
+  the two-input polynomial operators the default is inferred from both
+  operands together.
+
 ### Issues Resolved
 
 - Reading `.latex` (or `.toString()`) on the canonical, unevaluated form of a
@@ -139,6 +167,13 @@
   standalone `\log_2` displays as $\log_2(\square)$. It previously parsed as
   $\log_{10} 2$ — the base was read as the *argument* — so piping into it
   silently discarded the piped value.
+
+- Likewise, a function with a superscript but no argument (`\cos^2`,
+  `\ln^{-1}`, `\lg^{-1}`) holds a topic-marker hole: `x \triangleright
+  \cos^2` computes $\cos^2 x$, `12 \triangleright \ln^{-1}` computes
+  $e^{12}$, and a standalone `\cos^2` displays as $\cos(\square)^2$. These
+  previously produced a `Power` of the bare function symbol, which failed to
+  type when piped into.
 
 ## 0.71.0 _2026-07-08_
 
@@ -234,20 +269,6 @@
   source.
 
 ### Improvements
-
-- **The unknown/variable argument of `Solve`, `D`, `Series` and the
-  polynomial operators may now be omitted.** It defaults to the input's single
-  free variable, or to `x` when there are several free variables and one of
-  them is `x`; with no inferable default the expression stays unevaluated.
-  This enables point-free pipelines such as
-  `x^2 = 4 \rhd \operatorname{Solve}` (i.e. `% |> Solve`) or
-  `x^2 \rhd \operatorname{D}`. Applies to `Solve`, `D`, `Series`,
-  `PolynomialDegree`, `CoefficientList`, `PolynomialRoots`, `Discriminant`,
-  `PolynomialQuotient`, `PolynomialRemainder`, `PolynomialGCD`, `Resultant`,
-  `Cancel`, `PartialFraction` and `Apart` (`Factor` already inferred its
-  variable). For
-  the two-input polynomial operators the default is inferred from both
-  operands together.
 
 - **The declaration build and typecheck now run on TypeScript 7** (the native
   compiler), cutting `.d.ts` emission from ~31s to ~5s and the full production

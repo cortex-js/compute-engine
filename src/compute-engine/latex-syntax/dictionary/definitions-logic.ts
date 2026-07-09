@@ -5,6 +5,7 @@ import type {
   Serializer,
   Terminator,
 } from '../types.js';
+import { COMPARISON_PRECEDENCE, POSTFIX_PRECEDENCE } from '../types.js';
 import {
   getSequence,
   operator,
@@ -112,7 +113,19 @@ function parseModulusAnnotation(
 
   // Unparenthesized form: `\pmod{n}` (prefix → `Mod(n)`) or `\bmod n`
   // (infix → `Mod(lhs, n)`); in both cases the modulus is the last operand.
-  const modExpr = parser.parseExpression({ ...terminator, minPrec: 219 });
+  //
+  // Parse the modulus at a very high `minPrec` so a trailing operator does not
+  // get folded into it. The modulus is a self-contained atom (the `\pmod`
+  // prefix reads a group/token), so nothing after it belongs to the modulus.
+  // Notably, when a chained relation follows without spacing — e.g.
+  // `a \equiv b \pmod 7\implies …` — a low `minPrec` would let `\implies`
+  // (prec 220) attach to `Mod(7)`, yielding an `Implies(...)` whose operator is
+  // no longer `Mod`; the check below then fails and the whole annotation (plus
+  // the rest of the chain) is rolled back, derailing the congruence parse.
+  const modExpr = parser.parseExpression({
+    ...terminator,
+    minPrec: POSTFIX_PRECEDENCE,
+  });
   if (modExpr !== null && operator(modExpr) === 'Mod') {
     // `\pmod{n}` → `Mod(n)` (1 operand); `\bmod n` → `Mod(lhs, n)` (2 operands).
     const n = nops(modExpr) >= 2 ? operand(modExpr, 2) : operand(modExpr, 1);
@@ -139,7 +152,13 @@ function parseEquivalent(
   // because the condition only fires when `mod`/`\bmod`/`\pmod` follows the `(`.
   const rhs = parser.parseExpression({
     ...terminator,
-    minPrec: 219,
+    // Congruence is a comparison-level relation (see the precedence note on the
+    // `\equiv` entry). Parse the rhs at `COMPARISON_PRECEDENCE` (matching the
+    // operator's own right-associative precedence) so a following implication
+    // (`\implies`, prec 220) or another comparison is NOT folded into the rhs —
+    // it stays for the outer parser, letting `a ≡ b ⟹ c ≡ d` group as
+    // `Implies(Congruent(…), Congruent(…))`.
+    minPrec: COMPARISON_PRECEDENCE,
     condition: (p) =>
       atParenthesizedModulus(p) || (terminator.condition?.(p) ?? false),
   });
@@ -373,10 +392,17 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     },
   },
   {
+    // `\equiv` is overwhelmingly used as congruence / "identical to" (`a ≡ b
+    // (mod n)`), a comparison-level relation, not as the logical biconditional
+    // (that is `\iff` / `\Leftrightarrow`, which stay at 219). It therefore
+    // binds at `COMPARISON_PRECEDENCE` (245), tighter than implication
+    // (`\implies`, 220), so `a ≡ b ⟹ c ≡ d` groups as
+    // `Implies(Congruent(…), Congruent(…))` rather than mis-associating the
+    // implication into one of the congruences.
     latexTrigger: ['\\equiv'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 219,
+    precedence: COMPARISON_PRECEDENCE,
     parse: parseEquivalent,
   } as InfixEntry,
   {
@@ -385,8 +411,31 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     latexTrigger: ['≡'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 219,
+    precedence: COMPARISON_PRECEDENCE,
     parse: parseEquivalent,
+  } as InfixEntry,
+
+  // Bare `\pmod` following an expression (no `\equiv`) is a residue
+  // annotation: `x \pmod n` → `Mod(x, n)` (e.g. solution prose like
+  // `-811 \pmod{24}` meaning "the residue of −811 mod 24"). Unlike `\bmod`
+  // (which binds tightly, at `DIVISION_PRECEDENCE`), `\pmod` attaches to the
+  // whole preceding expression at a low precedence, so `1 + 6n \pmod 7` is
+  // `Mod(1 + 6n, 7)` and `0, 1 \pmod 4` is `Tuple(0, Mod(1, 4))`.
+  //
+  // The precedence is kept below the `\equiv` right-hand-side parse precedence
+  // (`COMPARISON_PRECEDENCE`, see `parseEquivalent`) so this infix does NOT
+  // fire inside the right-hand side of a congruence — there, `\pmod` is
+  // consumed as a modulus annotation by `parseEquivalent`/
+  // `parseModulusAnnotation` (via the `\pmod` *prefix* form), producing
+  // `Congruent(a, b, n)`.
+  {
+    latexTrigger: ['\\pmod'],
+    kind: 'infix',
+    precedence: COMPARISON_PRECEDENCE - 1,
+    parse: (parser, lhs) => {
+      const rhs = parser.parseGroup() ?? parser.parseToken();
+      return ['Mod', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
+    },
   } as InfixEntry,
 
   {

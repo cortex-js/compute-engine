@@ -96,7 +96,7 @@ const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
   '}': ['\\}', '\\rbrace'],
   ':': [':', '\\colon'],
   '|': ['|', '\\|', '\\lvert', '\\rvert'],
-  '||': ['||', '\\Vert', '\\lVert', '\\rVert'],
+  '||': ['||', '\\Vert', '\\lVert', '\\rVert', '\\|'],
 };
 
 /** @internal */
@@ -471,9 +471,9 @@ export function indexLatexDictionary(
     '|': ['|', '\\|', '\\rvert', '\\lvert'],
     '\\|': ['|', '\\|', '\\rvert', '\\lvert'],
     '\\lvert': ['|', '\\|', '\\rvert', '\\lvert'],
-    '||': ['||', '\\Vert', '\\lVert', '\\rVert'],
-    '\\Vert': ['||', '\\Vert', '\\lVert', '\\rVert'],
-    '\\lVert': ['||', '\\Vert', '\\lVert', '\\rVert'],
+    '||': ['||', '\\Vert', '\\lVert', '\\rVert', '\\|'],
+    '\\Vert': ['||', '\\Vert', '\\lVert', '\\rVert', '\\|'],
+    '\\lVert': ['||', '\\Vert', '\\lVert', '\\rVert', '\\|'],
   };
 
   for (const [token, defs] of result.matchfixByOpen.entries()) {
