@@ -1800,6 +1800,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     associativity: 'any',
     precedence: ARROW_PRECEDENCE,
   },
+  // Unicode minus-plus spelling (paste/keyboard input), parsed the same as
+  // `\mp`.
+  {
+    latexTrigger: ['∓'], // ∓ U+2213 MINUS-OR-PLUS SIGN
+    kind: 'infix',
+    associativity: 'any',
+    precedence: ARROW_PRECEDENCE,
+    parse: 'MinusPlus',
+  },
   {
     name: 'Multiply',
     latexTrigger: ['\\times'],
@@ -2005,6 +2014,27 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     latexTrigger: ['\\plusmn'],
+    kind: 'prefix',
+    precedence: ARROW_PRECEDENCE,
+    parse: (parser, terminator) => {
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
+      return ['Measurement', 0, missingIfEmpty(rhs)] as MathJsonExpression;
+    },
+  },
+  // Unicode plus-minus spelling (paste/keyboard input), parsed the same as
+  // `\pm`/`\plusmn`.
+  {
+    latexTrigger: ['±'], // ± U+00B1 PLUS-MINUS SIGN
+    kind: 'infix',
+    associativity: 'any',
+    precedence: ARROW_PRECEDENCE,
+    parse: (parser, lhs, terminator) => {
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
+      return ['Measurement', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
+    },
+  },
+  {
+    latexTrigger: ['±'],
     kind: 'prefix',
     precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {

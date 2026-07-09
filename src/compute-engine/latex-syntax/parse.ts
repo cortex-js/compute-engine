@@ -3253,7 +3253,8 @@ export function parse(
   // Trailing sentence-punctuation recovery.
   //
   // A full expression copied from prose often ends with a sentence-terminating
-  // `.`, `;` or `,` (e.g. `... = z^2.`), which leaves an unconsumed token and
+  // `.`, `;`, `,` or `?` (e.g. `... = z^2.`, or an MCQ/rhetorical fragment
+  // such as `\sum_{n=1}^{100} a_n^2?`), which leaves an unconsumed token and
   // produces an `Error` node. If — and only if — the parse produced an Error
   // and the input ends with such punctuation, strip a single trailing
   // punctuation character and re-parse. The retry result is used only when it
@@ -3262,7 +3263,7 @@ export function parse(
   // the extra parse runs only on the error path.
   if (containsError(expr)) {
     const trimmed = latex.trimEnd();
-    if (trimmed.length > 1 && /[.,;]$/.test(trimmed)) {
+    if (trimmed.length > 1 && /[.,;?]$/.test(trimmed)) {
       const retry = parseCore(trimmed.slice(0, -1), dictionary, options);
       if (retry !== null && !containsError(retry)) expr = retry;
     }

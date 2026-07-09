@@ -86,7 +86,7 @@ export const SYMBOLS: [string, string, number][] = [
   ['dalet', '\\daleth', 0x2138],
 
   // Letter-like
-  ['ell', '\\ell', 0x2133], // Unicode SCRIPT SMALL L
+  ['ell', '\\ell', 0x2113], // Unicode SCRIPT SMALL L
   ['turnedCapitalF', '\\Finv', 0x2132], // Unicode TURNED CAPITAL F'
   ['turnedCapitalG', '\\Game', 0x2141], // TURNED SANS-SERIF CAPITAL G
   ['weierstrass', '\\wp', 0x2118], // Unicode SCRIPT CAPITAL P

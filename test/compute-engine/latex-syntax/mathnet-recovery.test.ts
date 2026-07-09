@@ -77,6 +77,13 @@ describe('MathNet Tier-2: trailing sentence-punctuation recovery', () => {
   test('trailing comma on a complete expression is tolerated', () => {
     expect(isClean('a + b = c,')).toBe(true);
   });
+
+  test('trailing question mark is dropped (MCQ/rhetorical fragments)', () => {
+    expect(isClean('\\cos^2 x + 2\\sin^2 x = 1?')).toBe(true);
+    expect(isClean('\\sum_{n=1}^{100} a_n^2?')).toBe(true);
+    expect(isClean('a^3+b^3+c^3+5a^2+5b^2+5c^2?')).toBe(true);
+    expect(ce.parse('x + y = z?').json).toEqual(ce.parse('x + y = z').json);
+  });
 });
 
 describe('MathNet Tier-2: non-regression guards', () => {

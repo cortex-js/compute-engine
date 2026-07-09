@@ -223,4 +223,20 @@ describe('P2 parse/serialize: ==, !=, unicode operators (#10)', () => {
     expect(ce.parse('⅓').json).toEqual(['Rational', 1, 3]);
     expect(ce.parse('⅔').json).toEqual(['Rational', 2, 3]);
   });
+
+  test('unicode plus-minus and minus-plus parse like \\pm and \\mp', () => {
+    expect(ce.parse('3 ± 2').json).toEqual(['Measurement', 3, 2]);
+    expect(ce.parse('±5').json).toEqual(['Measurement', 0, 5]);
+    expect(ce.parse('x ∓ 1').json).toEqual(['MinusPlus', 'x', 1]);
+    expect(ce.parse('3 ± 2').json).toEqual(ce.parse('3 \\pm 2').json);
+    expect(ce.parse('x ∓ 1').json).toEqual(ce.parse('x \\mp 1').json);
+  });
+
+  test('unicode script small l (ℓ) parses like \\ell', () => {
+    expect(ce.parse('ℓ').json).toBe('ell');
+    expect(ce.parse('2ℓ').json).toEqual(['Multiply', 2, 'ell']);
+    // ℳ (U+2133 SCRIPT CAPITAL M) must NOT parse as `ell` — it was
+    // mistakenly used as the codepoint for \ell.
+    expect(ce.parse('ℳ').json).not.toBe('ell');
+  });
 });
