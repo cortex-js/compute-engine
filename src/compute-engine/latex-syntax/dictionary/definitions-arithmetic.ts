@@ -1686,7 +1686,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: '\\lb',
     parse: (parser: Parser) => {
       const args = parser.parseArguments('implicit');
-      if (args === null) return 'Log' as MathJsonExpression;
+      // Bare `\lb` is the binary-log function symbol (`12 |> \lb` → log₂ 12),
+      // not `Log` (base 10).
+      if (args === null) return 'Lb' as MathJsonExpression;
       return ['Log', args[0], 2] as MathJsonExpression;
     },
   },

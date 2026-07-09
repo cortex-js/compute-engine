@@ -46,6 +46,21 @@
   **This is experimental**: the syntax and semantics may change between
   releases.
 
+### Issues Resolved
+
+- A bare `\ln` or `\log` — with no argument, as in the pipeline
+  `12 \triangleright \ln` — now parses to the function symbol (`"Ln"`,
+  `"Log"`), consistent with `\cos`, `\lg` and `\lb`. It previously parsed to
+  an empty function application, so piping a value into it produced a
+  `missing` error instead of applying the function:
+  `ce.parse('12 \\triangleright \\ln').evaluate()` now returns
+  $2\ln 2 + \ln 3$. The bare symbols also serialize back to `\ln`, `\log` and
+  `\lg` (previously `\ln()`).
+
+- A bare `\lb` (binary log) now parses to the `Lb` function symbol, so
+  `12 \triangleright \lb` computes $\log_2 12$. It previously parsed to
+  `Log`, silently computing the base-10 logarithm instead.
+
 ## 0.71.0 _2026-07-08_
 
 ### Differential Equations
@@ -141,10 +156,19 @@
 
 ### Improvements
 
-- **The unknown of `Solve` may now be omitted.** `["Solve", eq]` defaults to
-  the equation's single free variable, or to `x` when the equation has several
-  free variables and one of them is `x`. This enables point-free pipelines
-  such as `x^2 = 4 \rhd \operatorname{Solve}` (i.e. `% |> Solve`).
+- **The unknown/variable argument of `Solve`, `D`, `Series` and the
+  polynomial operators may now be omitted.** It defaults to the input's single
+  free variable, or to `x` when there are several free variables and one of
+  them is `x`; with no inferable default the expression stays unevaluated.
+  This enables point-free pipelines such as
+  `x^2 = 4 \rhd \operatorname{Solve}` (i.e. `% |> Solve`) or
+  `x^2 \rhd \operatorname{D}`. Applies to `Solve`, `D`, `Series`,
+  `PolynomialDegree`, `CoefficientList`, `PolynomialRoots`, `Discriminant`,
+  `PolynomialQuotient`, `PolynomialRemainder`, `PolynomialGCD`, `Resultant`,
+  `Cancel`, `PartialFraction` and `Apart` (`Factor` already inferred its
+  variable). For
+  the two-input polynomial operators the default is inferred from both
+  operands together.
 
 - **The declaration build and typecheck now run on TypeScript 7** (the native
   compiler), cutting `.d.ts` emission from ~31s to ~5s and the full production
