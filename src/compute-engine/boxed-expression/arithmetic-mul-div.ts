@@ -1040,6 +1040,17 @@ export function canonicalMultiply(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression {
+  // Ellipsis fold barrier: a `Multiply` with a direct `ContinuationPlaceholder`
+  // operand (from `\dots`/`\cdots` in a product) is a *notational* object, not
+  // an arithmetic one. Do not unnegate, filter ones, fold numerics, or sort —
+  // preserve the source operand order and structure so the elided pattern reads
+  // correctly, e.g. `2 · 4 · … · 2n` keeps the `2n` anchor as `Multiply(2, n)`.
+  if (ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+    return ce._fn(
+      'Multiply',
+      ops.map((x) => x.canonical)
+    );
+
   // Two or more numeric tuples (points/vectors) have no implicit product
   // (dot/cross); reject `tuple · tuple` at canonicalization when provable.
   // `scalar · tuple` is allowed and scales component-wise at evaluation.
@@ -1349,6 +1360,14 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
 
   const ce = xs[0].engine;
 
+  // Ellipsis fold barrier: a direct `ContinuationPlaceholder` operand makes
+  // this a notational product; stay inert (do not fold via `Product`).
+  if (xs.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+    return ce._fn(
+      'Multiply',
+      xs.map((x) => x.canonical)
+    );
+
   // Tensor (matrix/vector) operands follow matrix-product / scalar-scaling
   // semantics rather than the scalar Product machinery.
   if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs);
@@ -1368,6 +1387,12 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
 export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   const ce = xs[0].engine;
+  // Ellipsis fold barrier: stay inert for a notational product.
+  if (xs.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+    return ce._fn(
+      'Multiply',
+      xs.map((x) => x.canonical)
+    );
   if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs, true);
   if (xs.some((x) => isNumericTuple(x))) return mulTuples(ce, xs, true);
   xs = xs.map((x) => x.N());

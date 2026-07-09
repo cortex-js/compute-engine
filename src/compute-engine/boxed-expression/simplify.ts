@@ -401,6 +401,17 @@ function simplifyExpression(
   }
 
   //
+  // Ellipsis fold barrier: an `Add`/`Multiply` (or any operator) with a direct
+  // `ContinuationPlaceholder` operand is a notational object. Leave it and its
+  // operand structure unchanged rather than folding across the elided terms.
+  //
+  if (
+    isFunction(expr) &&
+    expr.ops.some((x) => isSymbol(x, 'ContinuationPlaceholder'))
+  )
+    return steps;
+
+  //
   // 3/ Simplify a function expression
   //
 

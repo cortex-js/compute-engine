@@ -1,7 +1,7 @@
 import type { Expression } from '../global-types.js';
 
 import { flatten } from './flatten.js';
-import { isFunction } from './type-guards.js';
+import { isFunction, isSymbol } from './type-guards.js';
 
 /** Apply the function `f` to each operand of the expression `expr`,
  * account for the 'lazy' property of the operator definition:
@@ -23,7 +23,14 @@ export function holdMap(
   if (!def || xs.length === 0) return xs;
 
   // f(a, f(b, c), d) -> f(a, b, c, d)
-  if (def?.associative) xs = flatten(xs, expr.operator, false);
+  // Ellipsis fold barrier: a `ContinuationPlaceholder` operand marks a
+  // notational sum/product; do not lift nested associative operands (it would
+  // tear a coefficient out of an anchor like the `2n` in `Multiply(2, n)`).
+  const hasContinuation = xs.some(
+    (x) => isSymbol(x, 'ContinuationPlaceholder')
+  );
+  if (def?.associative && !hasContinuation)
+    xs = flatten(xs, expr.operator, false);
 
   //
   // Apply the hold as necessary
@@ -42,7 +49,9 @@ export function holdMap(
       }
     }
   }
-  return def?.associative ? flatten(result, expr.operator, false) : result;
+  return def?.associative && !hasContinuation
+    ? flatten(result, expr.operator, false)
+    : result;
 }
 
 export async function holdMapAsync(
@@ -58,7 +67,13 @@ export async function holdMapAsync(
   if (!def || xs.length === 0) return xs;
 
   // f(a, f(b, c), d) -> f(a, b, c, d)
-  if (def?.associative) xs = flatten(xs, expr.operator, false);
+  // Ellipsis fold barrier (see `holdMap`): a `ContinuationPlaceholder` operand
+  // marks a notational sum/product; keep nested associative anchors intact.
+  const hasContinuation = xs.some(
+    (x) => isSymbol(x, 'ContinuationPlaceholder')
+  );
+  if (def?.associative && !hasContinuation)
+    xs = flatten(xs, expr.operator, false);
 
   //
   // Apply the hold as necessary
@@ -77,5 +92,7 @@ export async function holdMapAsync(
       }
     }
   }
-  return def?.associative ? flatten(result, expr.operator, false) : result;
+  return def?.associative && !hasContinuation
+    ? flatten(result, expr.operator, false)
+    : result;
 }

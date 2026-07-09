@@ -42,8 +42,27 @@ export function canonicalAdd(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression {
+  // Ellipsis fold barrier: an `Add` with a direct `ContinuationPlaceholder`
+  // operand (from `\dots`/`\cdots` in a sum) is a *notational* object, not an
+  // arithmetic one. Do not flatten, remove zeros, fold numerics, or sort —
+  // preserve the source operand order and structure so the elided pattern
+  // reads correctly, e.g. `1 + 2 + … + n` stays `Add(1, 2, …, n)`. Checked
+  // before `flatten` so nested anchors (`2n`) are not lifted.
+  if (ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+    return ce._fn(
+      'Add',
+      ops.map((x) => x.canonical)
+    );
+
   // Make canonical, flatten, and lift nested expressions (associative)
   ops = flatten(ops, 'Add');
+
+  // A continuation-bearing inner `Add` may have been lifted by `flatten`
+  // (e.g. `x + (1 + 2 + … + n)`); if a placeholder surfaced, stay inert and
+  // skip the fold/sort below. (Operand order for the nested case is not
+  // guaranteed to match the source.)
+  if (ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+    return ce._fn('Add', ops);
 
   // A numeric tuple (point/vector in ℝⁿ) cannot be added to a scalar. Reject
   // `scalar + tuple` at canonicalization when provable: some operand is a
@@ -237,6 +256,14 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
 
+  // Ellipsis fold barrier: a direct `ContinuationPlaceholder` operand makes
+  // this a notational sum; stay inert (do not fold via `Terms`).
+  if (xs.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+    return xs[0].engine._fn(
+      'Add',
+      xs.map((x) => x.canonical)
+    );
+
   // Check if any operands are tensors
   const hasTensors = xs.some((x) => isTensor(x));
   if (hasTensors) return addTensors(xs[0].engine, xs);
@@ -251,6 +278,13 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
 export function addN(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
+
+  // Ellipsis fold barrier: stay inert for a notational sum.
+  if (xs.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+    return xs[0].engine._fn(
+      'Add',
+      xs.map((x) => x.canonical)
+    );
 
   // Check if any operands are tensors
   const hasTensors = xs.some((x) => isTensor(x));

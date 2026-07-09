@@ -156,9 +156,6 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   `unsubscribe` closure returned by `listen()` (currently discarded at
   `boxed-value-definition.ts:181`) when a definition/scope is disposed —
   needs a disposal hook, hence design-gated.
-- **Corpus regression gate (S):** `check-corpus.ts` exits non-zero on
-  regressions against the recorded `observed` outcomes — add it to the
-  pre-release checklist (or CI) so 363/428 is a protected floor.
 
 *Rest of the tail:*
 
@@ -178,24 +175,21 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
 **Ellipsis-expression interpretation (M, design-gated — proposed
 2026-07-09):** give `ContinuationPlaceholder` expressions a path to formal
 meaning, e.g. `1 + 2 + \dots + n` → `Sum(k, (k, 1, n))` (and
-`Product` for `\cdot`/`\times` chains). Two parts:
+`Product` for `\cdot`/`\times` chains). The prerequisite **fold barrier
+landed 2026-07-09**: an `Add`/`Multiply` with a `ContinuationPlaceholder`
+operand no longer folds literals across the continuation and is inert under
+`evaluate`/`N`/`simplify`, with source operand order and nested anchors
+(`2n`) preserved — so the sample terms and anchor are intact for inference.
+What remains:
 
-- **Fold barrier (S, correctness-flavored):** today `Add`/`Multiply` fold
-  literal operands *across* a continuation, which misrepresents the omitted
-  terms. Observed (2026-07-09): `1 + 2 + \dots + n` evaluates to
-  `n + 3 + ...` (pattern destroyed) and `2 \cdot 4 \cdot \dots \cdot 2n`
-  evaluates to `16 * ... * n` — it folds `2·4` and *tears the coefficient
-  out of the `2n` anchor*. An `Add`/`Multiply` containing a
-  `ContinuationPlaceholder` should stay inert under `evaluate`/`N`.
 - **Pattern inference → `Sum`/`Prod` (M):** anti-unify the sample terms and
   the anchor to a general term, mirroring the existing
   `tryInferRangeFromElements` precedent (`[1, 2, \ldots, 10]` → `Range`).
-  NOT canonicalization (interpretation is a guess; canonical transforms are
-  irreversible and `Add` sorting has already disturbed source order) and not
-  a default simplify rule at first — start as an explicit, strictly gated
-  reduction (unambiguous consecutive/arithmetic patterns only; anything else
-  stays inert) and decide after real usage whether `evaluate` or `simplify`
-  should pick it up by default.
+  NOT canonicalization (interpretation is a guess and canonical transforms
+  are irreversible) and not a default simplify rule at first — start as an
+  explicit, strictly gated reduction (unambiguous consecutive/arithmetic
+  patterns only; anything else stays inert) and decide after real usage
+  whether `evaluate` or `simplify` should pick it up by default.
 
 Still deferred: ASCII-pipe divisibility (`p|a+1`) because it conflicts with
 absolute-value syntax (though the parenthesized form `(a+f(b)) | (a^2+bf(a))`

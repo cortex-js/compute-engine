@@ -137,6 +137,7 @@ import {
   isNumber,
   isFunction,
   isString,
+  isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { isNumericTuple } from '../collection-utils.js';
@@ -282,6 +283,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // @fastpath: canonicalization is done in the function
       // makeNumericFunction().
       evaluate: (ops, { numericApproximation, engine }) => {
+        // Ellipsis fold barrier: an `Add` with a direct `ContinuationPlaceholder`
+        // operand is a notational object; leave it unchanged rather than summing
+        // across the elided terms.
+        if (ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+          return undefined;
         // Check if any operand is a Quantity expression
         const evaluated = ops.map((x) => x.evaluate());
         if (evaluated.some((x) => x.operator === 'Quantity')) {
@@ -1419,6 +1425,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: (ops, { numericApproximation, engine }) => {
+        // Ellipsis fold barrier: a `Multiply` with a direct
+        // `ContinuationPlaceholder` operand is a notational object; leave it
+        // unchanged rather than multiplying across the elided terms.
+        if (ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+          return undefined;
         // Check if any operand is a Quantity expression
         const evaluated = ops.map((x) => x.evaluate());
         if (evaluated.some((x) => x.operator === 'Quantity')) {

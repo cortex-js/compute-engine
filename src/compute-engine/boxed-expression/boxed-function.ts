@@ -32,7 +32,7 @@ import {
 } from '../collection-utils.js';
 import { isTensor } from './boxed-tensor.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
-import { isNumber, isFunction, isString } from './type-guards.js';
+import { isNumber, isFunction, isString, isSymbol } from './type-guards.js';
 import type { NumericPrimitiveType } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -314,7 +314,14 @@ export class BoxedFunction
   get structural(): Expression {
     if (this.isStructural) return this;
     const def = this.operatorDefinition;
-    if (def?.associative || def?.commutative) {
+    // Ellipsis fold barrier: an `Add`/`Multiply` with a direct
+    // `ContinuationPlaceholder` operand is a notational object. Do not flatten
+    // nested associative operands or sort — preserve source order and the
+    // nested anchor structure (`2n`) in the serialized form.
+    if (
+      (def?.associative || def?.commutative) &&
+      !this.ops.some((x) => isSymbol(x, 'ContinuationPlaceholder'))
+    ) {
       // Flatten the arguments if they are the same as the operator
       const xs: Expression[] = this.ops.map((x) => x.structural);
       let ys: Expression[] = [];

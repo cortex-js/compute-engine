@@ -82,6 +82,13 @@ jobs:
           npx --yes tsx scripts/rubi/bundle-corpus.ts
           git diff --exit-code -- src/compute-engine/rubi/rubi-rules-data.json
 
+      # MathNet parser-regression gate: every corpus case whose recorded
+      # `observed` outcome is "clean" must still parse clean, and nothing may
+      # throw (docs/mathnet/parser-test-cases.json is the recorded contract;
+      # refresh it with check-corpus.ts --update after reviewing changes).
+      - name: MathNet parser corpus regression gate
+        run: npx --yes tsx docs/mathnet/scripts/check-corpus.ts
+
   lint:
     runs-on: ubuntu-latest
 

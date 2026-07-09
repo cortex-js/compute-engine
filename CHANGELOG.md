@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### Ellipsis Expressions
+
+- **Sums and products no longer fold numeric terms across an ellipsis.** An
+  `Add` or `Multiply` containing an ellipsis (`\dots`, the
+  `ContinuationPlaceholder` symbol) is a notational pattern, not an
+  arithmetic one: it now keeps its operands in source order with their
+  structure intact, and is returned unchanged by `evaluate()`, `N()` and
+  `simplify()`. Previously `1 + 2 + \dots + n` canonicalized to
+  `n + 3 + \ldots` — folding the sample terms and destroying the pattern —
+  and `2 \cdot 4 \cdot \dots \cdot 2n` folded to `16 \cdot \ldots \cdot n`,
+  tearing the coefficient out of the `2n` anchor. Such products also
+  round-trip through LaTeX now (an explicit `\times` is emitted around the
+  ellipsis instead of juxtaposition).
+
 ## 0.72.0 _2026-07-09_
 
 ### Angular Units

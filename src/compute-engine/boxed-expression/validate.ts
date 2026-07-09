@@ -192,7 +192,13 @@ export function checkNumericArgs(
   const flattenHead =
     typeof options === 'number' ? undefined : options?.flatten;
 
-  ops = flatten(ops, flattenHead);
+  // Ellipsis fold barrier: when a direct `ContinuationPlaceholder` operand is
+  // present (a notational sum/product like `2 · 4 · … · 2n`), do not lift
+  // nested associative operands — that would tear a coefficient out of its
+  // anchor (the `2n` in `Multiply(2, n)`). Still lift `Sequence`/`Nothing`.
+  if (flattenHead && ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+    ops = flatten(ops);
+  else ops = flatten(ops, flattenHead);
 
   // @fastpath
   if (!ce.strict) {

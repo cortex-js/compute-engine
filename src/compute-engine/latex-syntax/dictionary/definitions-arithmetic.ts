@@ -547,6 +547,9 @@ function serializeMultiply(
     }
   }
   let prevWasNumber = false;
+  // Track a `ContinuationPlaceholder` (`…`) operand so the next factor gets an
+  // explicit multiplication separator (see the join logic below).
+  let prevWasContinuation = false;
   for (let i = 1; i < count; i++) {
     arg = xs[i - 1];
     if (arg === null) continue;
@@ -568,6 +571,7 @@ function serializeMultiply(
         else result = latexTemplate(serializer.options.multiply, result, term);
       }
       prevWasNumber = true;
+      prevWasContinuation = false;
       continue;
     }
 
@@ -585,6 +589,7 @@ function serializeMultiply(
             d
           );
           prevWasNumber = false;
+          prevWasContinuation = false;
           continue;
         }
       }
@@ -601,6 +606,7 @@ function serializeMultiply(
       else result = latexTemplate(serializer.options.multiply, result, term);
 
       prevWasNumber = true;
+      prevWasContinuation = false;
       continue;
     }
 
@@ -613,6 +619,7 @@ function serializeMultiply(
     term = serializer.wrap(arg, MULTIPLICATION_PRECEDENCE);
 
     // 2.2. The terms can be separated by an invisible multiply.
+    const isContinuation = symbol(arg) === 'ContinuationPlaceholder';
     if (!result) {
       // First term
       result = term;
@@ -634,6 +641,13 @@ function serializeMultiply(
       else if (/^\d/.test(term)) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
+      // A `ContinuationPlaceholder` (`…`) is notational: force an explicit
+      // multiplication separator on BOTH sides so the ellipsis does not merge
+      // with an adjacent factor via juxtaposition (which would reparse as a
+      // `Range` rather than the original product).
+      else if (isContinuation || prevWasContinuation) {
+        result = latexTemplate(serializer.options.multiply, result, term);
+      }
       // Not first term, use invisible multiply
       else if (!serializer.options.invisibleMultiply) {
         // Replace, joining the terms correctly
@@ -648,6 +662,7 @@ function serializeMultiply(
       }
     }
     prevWasNumber = false;
+    prevWasContinuation = isContinuation;
   }
 
   // Restore the level
