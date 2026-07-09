@@ -362,6 +362,11 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Csch'),
   },
   {
+    // Variant: `\operatorname{csch}` (mirrors the `sech` symbol trigger)
+    symbolTrigger: 'csch',
+    parse: parseTrig('Csch'),
+  },
+  {
     name: 'Coth',
     latexTrigger: ['\\coth'],
     parse: parseTrig('Coth'),

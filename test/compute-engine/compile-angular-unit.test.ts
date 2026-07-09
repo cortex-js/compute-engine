@@ -71,8 +71,10 @@ describe('ANGULAR UNIT — evaluate() contract', () => {
       1 / Math.cosh(1),
       10
     );
-    // (`\operatorname{csch}` has no LaTeX dictionary entry — box directly.)
-    expect(ce.box(['Csch', 1]).N().re).toBeCloseTo(1 / Math.sinh(1), 10);
+    expect(ce.parse('\\operatorname{csch}(1)').N().re).toBeCloseTo(
+      1 / Math.sinh(1),
+      10
+    );
   });
 
   test('deg: inverse hyperbolics are unit-independent', () => {
