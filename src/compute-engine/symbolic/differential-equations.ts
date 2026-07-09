@@ -766,12 +766,10 @@ function solveLinearHomogeneousSystem(
   )
     return undefined;
 
-  const seenEigenvalues = new Set<string>();
-  for (const eigenvalue of eigenvalues) {
-    const key = eigenvalue.toString();
-    if (seenEigenvalues.has(key)) return undefined;
-    seenEigenvalues.add(key);
-  }
+  const distinctEigenvalues: Expression[] = [];
+  for (const eigenvalue of eigenvalues)
+    appendDistinctRoot(distinctEigenvalues, eigenvalue);
+  if (distinctEigenvalues.length !== eigenvalues.length) return undefined;
 
   const constants = integrationConstants(equation, dependentNames.length);
   const x = ce.symbol(independentName);
@@ -1258,23 +1256,6 @@ function derivativeAtPoint(
   return undefined;
 }
 
-function implicitDependentSymbol(
-  solutionEquation: Expression,
-  dependentName: string,
-  independentName: string
-): string | undefined {
-  const symbols = collectSymbols(solutionEquation);
-  for (const symbol of symbols) {
-    if (
-      symbol !== dependentName &&
-      symbol !== independentName &&
-      !/^c_\d+$/.test(symbol)
-    )
-      return symbol;
-  }
-  return undefined;
-}
-
 function replaceDependentCall(
   expr: Expression,
   dependentCall: Expression,
@@ -1329,17 +1310,8 @@ function conditionEquationForSolution(
     const value = dependentAtPoint(condition.op1, dependentName)
       ? condition.op2
       : condition.op1;
-    const implicitName = implicitDependentSymbol(
-      solutionEquation,
-      dependentName,
-      independentName
-    );
     let lhs = replaceDependentCall(solutionEquation.op1, dependentCall, value);
     let rhs = replaceDependentCall(solutionEquation.op2, dependentCall, value);
-    if (implicitName) {
-      lhs = replaceSymbol(lhs, implicitName, value);
-      rhs = replaceSymbol(rhs, implicitName, value);
-    }
     lhs = replaceSymbol(lhs, dependentName, value)
       .subs({ [independentName]: direct.point })
       .simplify();
@@ -1504,7 +1476,11 @@ function solveSeparableFirstOrder(
     return undefined;
 
   const [c] = integrationConstants(equation, 1);
-  const implicitLeft = left.simplify();
+  const implicitLeft = replaceSymbol(
+    left,
+    ySymbolName,
+    dependentCall
+  ).simplify();
   const implicitRight = right.add(c).simplify();
   return ce.function('List', [
     ce.function('Equal', [implicitLeft, implicitRight]),
@@ -1527,10 +1503,8 @@ function solveHomogeneousFirstOrder(
   const ce = equation.engine;
   const usedSymbols = collectSymbols(equation);
   const ratioName = freshSymbolName('dsolvev', usedSymbols);
-  const ySymbolName = freshSymbolName(`${dependentName}_value`, usedSymbols);
   const x = ce.symbol(independentName);
   const v = ce.symbol(ratioName);
-  const y = ce.symbol(ySymbolName);
   const substituted = replaceDependentCall(
     rhsInfo.rhs.structural,
     dependentCall,
@@ -1549,7 +1523,7 @@ function solveHomogeneousFirstOrder(
   if (hasOperator(left, 'Integrate')) return undefined;
 
   const [c] = integrationConstants(equation, 1);
-  const ratio = y.div(x).simplify();
+  const ratio = dependentCall.div(x).simplify();
   const implicitLeft = replaceSymbol(left, ratioName, ratio).simplify();
   const implicitRight = ce.function('Ln', [x]).add(c).simplify();
   return ce.function('List', [
@@ -1754,7 +1728,11 @@ function solveExactFirstOrder(
   if (hasOperator(correctionIntegral, 'Integrate')) return undefined;
 
   const [c] = integrationConstants(equation, 1);
-  const potential = mIntegral.add(correctionIntegral).simplify();
+  const potential = replaceSymbol(
+    mIntegral.add(correctionIntegral).simplify(),
+    ySymbolName,
+    dependentCall
+  ).simplify();
   return ce.function('List', [ce.function('Equal', [potential, c])]);
 }
 

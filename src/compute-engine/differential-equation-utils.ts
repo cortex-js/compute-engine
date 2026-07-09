@@ -230,6 +230,8 @@ export function nDSolve(
     if (!initialValues.every(Number.isFinite)) return undefined;
 
     const stateNames = names.map((name, i) => `ndsolve${name}state${i}`);
+    if (stateNames.some((stateName) => equation.has(stateName)))
+      return undefined;
     const runs: ((vars: Record<string, number>) => number)[] = [];
 
     for (let i = 0; i < equation.ops.length; i++) {

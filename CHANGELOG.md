@@ -1,3 +1,68 @@
+## Unreleased
+
+### Differential Equations
+
+- **First-order nonlinear equations solve.** (contributed by
+  [KingArth0r](https://github.com/KingArth0r)) `DSolve` now handles four
+  classical first-order classes:
+  - **Separable** equations return an implicit solution when no explicit form
+    is available: $y' = x/y$ gives $\frac12 y(x)^2 = \frac12 x^2 + c_1$.
+  - **Bernoulli** equations $y' = p(x)\,y + q(x)\,y^n$ reduce via the
+    $v = y^{1-n}$ substitution and return explicit solutions.
+  - **Homogeneous** equations of the form $y' = F(y/x)$ solve by the $v = y/x$
+    substitution: $y' = 1 + y/x$ gives $y(x)/x = \ln x + c_1$.
+  - **Exact** equations $M(x,y) + N(x,y)\,y' = 0$ return the implicit
+    potential: $2xy + y^2 + (x^2 + 2xy)\,y' = 0$ gives
+    $x^2\,y(x) + x\,y(x)^2 = c_1$.
+
+  Implicit solutions are expressed in terms of $y(x)$ itself. Equations outside
+  the supported classes (e.g. the Riccati equation $y' = x + y^2$) stay inert.
+
+- **Initial and boundary conditions are applied.** Scalar conditions can be
+  passed in a list alongside the equation:
+  `DSolve([y'' = -y, y(0) = 0, y'(0) = 1], y, x)` returns $y(x) = \sin x$.
+  Derivative conditions are recognized in both the
+  `Apply(Derivative(y, 1), x0)` and flat `D(y(x0), x)` forms. Conditions also
+  apply to supported implicit solutions ($y' = x/y$ with $y(0) = 1$ gives
+  $\frac12 y(x)^2 = \frac12 x^2 + \frac12$), and free parameters survive:
+  $y' = kx/y$ with $y(0) = 2$ gives $\frac12 y(x)^2 = \frac12 k x^2 + 2$ with
+  $k$ untouched. If the conditions cannot be applied to the solution class,
+  the equation stays inert rather than silently dropping them.
+
+- **Nonhomogeneous constant-coefficient equations of any order.** The
+  undetermined-coefficients method now covers **polynomial, exponential, and
+  sinusoidal** forcing at any order (previously polynomial forcing was
+  second-order only), including **resonant** cases, which retry the ansatz
+  with powers of $x$: $y'' - y = e^x$ gives
+  $c_1 e^x + c_2 e^{-x} + \frac12 x e^x$, and $y''' - y = \sin x$ and
+  resonant $y'' + y = \sin x$ both solve.
+
+- **First-order linear homogeneous systems solve.** Pass the equations and
+  dependent functions as lists: `DSolve([y' = z, z' = y], [y, z], x)` returns
+  the general solution built from the eigen-decomposition of the coefficient
+  matrix. Systems with repeated — or numerically indistinguishable —
+  eigenvalues stay inert rather than returning a degenerate basis.
+
+- **`NDSolve` integrates first-order systems.** Fixed-step RK4 now handles
+  systems, including nonlinear ones, with the dependent functions and initial
+  values given as lists:
+  `NDSolve([y' = z, z' = -y], [y, z], Limits(x, 0, 1), [0, 1], 200)` produces
+  samples as `[x, [y, z]]` pairs. Malformed or unsupported systems stay inert
+  rather than returning partial results.
+
+### Recurrence Equations
+
+- **New `RSolve` operator.** (contributed by
+  [KingArth0r](https://github.com/KingArth0r)) `RSolve(equation, a, n)` solves
+  **linear homogeneous constant-coefficient** recurrences via the
+  characteristic polynomial: geometric ($a_{n+1} = 2a_n$ gives
+  $a(n) = c_1\,2^n$), Fibonacci-style, repeated roots with $n^k r^n$ modes
+  ($a_{n+2} + a_n = 2a_{n+1}$ gives $a(n) = c_1 + c_2\,n$), and complex roots
+  ($a_{n+2} = -a_n$ gives $a(n) = c_1\,i^n + c_2\,(-i)^n$). Initial conditions
+  can be given in list form: `RSolve([a(n+1) = 2a(n), a(0) = 3], a, n)` gives
+  $a(n) = 3 \cdot 2^n$. Nonhomogeneous and variable-coefficient recurrences
+  stay inert.
+
 ## 0.70.0 _2026-07-08_
 
 ### Breaking Changes

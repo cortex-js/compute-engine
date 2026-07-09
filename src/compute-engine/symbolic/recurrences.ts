@@ -45,9 +45,9 @@ function dependentAtShift(
   if (isSymbol(index, indexName)) return 0;
   if (isFunction(index, 'Add')) {
     let shift = 0;
-    let sawIndex = false;
+    let indexCount = 0;
     for (const op of index.ops) {
-      if (isSymbol(op, indexName)) sawIndex = true;
+      if (isSymbol(op, indexName)) indexCount += 1;
       else {
         const value = op.N();
         if (!Number.isInteger(value.re) || Math.abs(value.im) > 1e-12)
@@ -55,7 +55,7 @@ function dependentAtShift(
         shift += value.re;
       }
     }
-    return sawIndex ? shift : undefined;
+    return indexCount === 1 ? shift : undefined;
   }
   if (isFunction(index, 'Subtract') && isSymbol(index.op1, indexName)) {
     const value = index.op2.N();

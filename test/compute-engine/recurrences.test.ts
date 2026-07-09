@@ -95,4 +95,23 @@ describe('RSolve', () => {
 
     expect(result.operator).toBe('RSolve');
   });
+
+  test('stays inert for malformed index shifts', () => {
+    const result = rsolve(['Equal', ['a', ['Add', 'n', 'n', 1]], ['a', 'n']]);
+
+    expect(result.operator).toBe('RSolve');
+  });
+
+  test('solves recurrences with complex characteristic roots', () => {
+    const result = rsolve([
+      'Equal',
+      ['a', ['Add', 'n', 2]],
+      ['Negate', ['a', 'n']],
+    ]);
+
+    expect(result.operator).toBe('List');
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[a(n) === "c_1" * i^n + "c_2" * (-i)^n]`
+    );
+  });
 });

@@ -278,6 +278,27 @@ describe('DSolve', () => {
     expect(result.operator).toBe('DSolve');
   });
 
+  test('stays inert for first-order linear systems with near-repeated eigenvalues', () => {
+    const result = dsolve(
+      [
+        'List',
+        [
+          'Equal',
+          ['D', ['y', 'x'], 'x'],
+          ['Add', ['Multiply', 2, ['y', 'x']], ['z', 'x']],
+        ],
+        [
+          'Equal',
+          ['D', ['z', 'x'], 'x'],
+          ['Multiply', 2.0000000001, ['z', 'x']],
+        ],
+      ],
+      ['List', 'y', 'z']
+    );
+
+    expect(result.operator).toBe('DSolve');
+  });
+
   test('solves separable nonlinear first-order equations implicitly', () => {
     const equation = [
       'Equal',
@@ -287,7 +308,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[1/2 * "y_value"^2 === 1/2 * x^2 + "c_1"]`
+      `[1/2 * y(x)^2 === 1/2 * x^2 + "c_1"]`
     );
   });
 
@@ -300,8 +321,23 @@ describe('DSolve', () => {
     const solution = dsolve(['List', equation, ['Equal', ['y', 0], 1]]);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[1/2 * "y_value"^2 === 1/2 * x^2 + 1/2]`
+      `[1/2 * y(x)^2 === 1/2 * x^2 + 1/2]`
     );
+  });
+
+  test('preserves parameters when applying separable initial conditions', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Divide', ['Multiply', 'k', 'x'], ['y', 'x']],
+    ];
+    const solution = dsolve(['List', equation, ['Equal', ['y', 0], 2]]);
+
+    expect(solution.operator).toBe('List');
+    const text = solution.toString();
+    expect(text).toContain('k');
+    expect(text).not.toContain('c_1');
+    expect(text).not.toContain('y_value');
   });
 
   test('solves first-order homogeneous equations by substitution', () => {
@@ -313,7 +349,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `["y_value" / x === "c_1" + ln(x)]`
+      `[y(x) / x === "c_1" + ln(x)]`
     );
   });
 
@@ -349,7 +385,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `["y_value" * x^2 + x * "y_value"^2 === "c_1"]`
+      `[y(x) * x^2 + x * y(x)^2 === "c_1"]`
     );
   });
 
@@ -371,7 +407,7 @@ describe('DSolve', () => {
     const solution = dsolve(['List', equation, ['Equal', ['y', 1], 1]]);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `["y_value" * x^2 + x * "y_value"^2 === 2]`
+      `[y(x) * x^2 + x * y(x)^2 === 2]`
     );
   });
 
