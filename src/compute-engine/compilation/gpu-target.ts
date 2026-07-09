@@ -1,10 +1,10 @@
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 import {
   isFunction,
   isNumber,
   isString,
   isSymbol,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 import { parseColor, rgbToOklch } from '@arnog/colors';
 import {
   tryGetConstant,
@@ -12,7 +12,7 @@ import {
   tryGetComplexParts,
   formatFloat,
   parenthesizeFactor,
-} from './constant-folding';
+} from './constant-folding.js';
 
 import type {
   CompileTarget,
@@ -21,8 +21,8 @@ import type {
   LanguageTarget,
   CompilationOptions,
   CompilationResult,
-} from './types';
-import { BaseCompiler } from './base-compiler';
+} from './types.js';
+import { BaseCompiler } from './base-compiler.js';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.

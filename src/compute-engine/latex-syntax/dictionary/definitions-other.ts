@@ -1,5 +1,10 @@
-import type { LatexDictionary, Parser, Serializer, Terminator } from '../types';
-import { COMPARISON_PRECEDENCE, MULTIPLICATION_PRECEDENCE } from '../types';
+import type {
+  LatexDictionary,
+  Parser,
+  Serializer,
+  Terminator,
+} from '../types.js';
+import { COMPARISON_PRECEDENCE, MULTIPLICATION_PRECEDENCE } from '../types.js';
 
 import {
   operand,
@@ -10,9 +15,12 @@ import {
   machineValue,
   isEmptySequence,
   stringValue,
-} from '../../../math-json/utils';
-import { MathJsonExpression, MathJsonSymbol } from '../../../math-json/types';
-import { joinLatex } from '../tokenizer';
+} from '../../../math-json/utils.js';
+import {
+  MathJsonExpression,
+  MathJsonSymbol,
+} from '../../../math-json/types.js';
+import { joinLatex } from '../tokenizer.js';
 
 // TeX dimension units (each letter is a separate token from the tokenizer)
 const TEX_UNITS = [

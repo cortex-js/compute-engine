@@ -1,4 +1,4 @@
-import type { MathJsonExpression } from '../../../math-json/types';
+import type { MathJsonExpression } from '../../../math-json/types.js';
 import {
   operator,
   isEmptySequence,
@@ -6,8 +6,8 @@ import {
   operand,
   operands,
   symbol,
-} from '../../../math-json/utils';
-import { LatexDictionary, Parser, Serializer } from '../types';
+} from '../../../math-json/utils.js';
+import { LatexDictionary, Parser, Serializer } from '../types.js';
 
 // See https://de.wikipedia.org/wiki/Formelsatz
 // for a discussion of typographical notation in Germany, Russia and France

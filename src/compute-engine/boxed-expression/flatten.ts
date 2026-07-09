@@ -1,5 +1,5 @@
-import type { Expression } from '../global-types';
-import { isFunction, isSymbol } from './type-guards';
+import type { Expression } from '../global-types.js';
+import { isFunction, isSymbol } from './type-guards.js';
 
 /**
  *

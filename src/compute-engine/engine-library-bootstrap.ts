@@ -1,15 +1,15 @@
 import type {
   IComputeEngine as ComputeEngine,
   LibraryDefinition,
-} from './global-types';
-import { assertLibraryDefinitionContract } from './engine-extension-contracts';
+} from './global-types.js';
+import { assertLibraryDefinitionContract } from './engine-extension-contracts.js';
 
 import {
   STANDARD_LIBRARIES,
   getStandardLibrary,
   setSymbolDefinitions,
   sortLibraries,
-} from './library/library';
+} from './library/library.js';
 
 function resolveLibraryEntry(
   library: string | LibraryDefinition

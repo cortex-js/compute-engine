@@ -9,11 +9,11 @@
 // sums. Recursion is bounded by depth and by the engine deadline; failed
 // subproblems stay as inert `Integrate` expressions.
 
-import type { IComputeEngine as ComputeEngine } from '../global-types';
-import type { Expr as Expression } from './types';
+import type { IComputeEngine as ComputeEngine } from '../global-types.js';
+import type { Expr as Expression } from './types.js';
 
-import { matchAll } from './match';
-import type { CompiledRule } from './compile';
+import { matchAll } from './match.js';
+import type { CompiledRule } from './compile.js';
 import {
   build,
   evalCondition,
@@ -42,10 +42,10 @@ import {
   RuleFail,
   Ctx,
   Hooks,
-} from './rubi-utils';
-import { isNumber } from '../boxed-expression/type-guards';
-import { simplifyTrig } from '../symbolic/simplify-trig';
-import { toTimesPower, recanonicalize } from './normal-form';
+} from './rubi-utils.js';
+import { isNumber } from '../boxed-expression/type-guards.js';
+import { simplifyTrig } from '../symbolic/simplify-trig.js';
+import { toTimesPower, recanonicalize } from './normal-form.js';
 
 const MAX_DEPTH = 40;
 

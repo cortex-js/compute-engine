@@ -4,8 +4,8 @@
  * @module interval/arithmetic
  */
 
-import type { Interval, IntervalResult } from './types';
-import { ok, unwrapOrPropagate } from './util';
+import type { Interval, IntervalResult } from './types.js';
+import { ok, unwrapOrPropagate } from './util.js';
 
 /**
  * Add two intervals (or IntervalResults).

@@ -15,11 +15,16 @@
 // default value (0 in Add, 1 in Multiply / as Power exponent) is derived
 // from the placeholder's parent in the *canonical* skeleton.
 
-import type { IComputeEngine as ComputeEngine } from '../global-types';
-import type { Expr as Expression, Json, RubiRule, RubiRuleDoc } from './types';
+import type { IComputeEngine as ComputeEngine } from '../global-types.js';
+import type {
+  Expr as Expression,
+  Json,
+  RubiRule,
+  RubiRuleDoc,
+} from './types.js';
 
-import { Pat, slotNames } from './match';
-import { toTimesPower } from './normal-form';
+import { Pat, slotNames } from './match.js';
+import { toTimesPower } from './normal-form.js';
 
 export type CompiledRule = {
   id: string;

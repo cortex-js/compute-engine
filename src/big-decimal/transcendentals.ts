@@ -5,7 +5,7 @@
  * via declaration merging. It is imported for side effects in index.ts.
  */
 
-import { BigDecimal, fromRaw } from './big-decimal';
+import { BigDecimal, fromRaw } from './big-decimal.js';
 import {
   bigintAbs,
   bitLength,
@@ -18,11 +18,11 @@ import {
   fpatan,
   bigintDigits,
   pow10,
-} from './utils';
+} from './utils.js';
 
 // ---------- Declaration merging ----------
 
-declare module './big-decimal' {
+declare module './big-decimal.js' {
   interface BigDecimal {
     /** Square root. Returns NaN for negative values. */
     sqrt(): BigDecimal;

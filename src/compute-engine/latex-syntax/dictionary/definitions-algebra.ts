@@ -1,4 +1,4 @@
-import type { LatexDictionary } from '../types';
+import type { LatexDictionary } from '../types.js';
 
 export const DEFINITIONS_ALGEBRA: LatexDictionary = [
   {

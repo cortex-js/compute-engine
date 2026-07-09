@@ -18,7 +18,7 @@ import {
   PI_DIGITS,
   piChudnovskyDecimal,
   bigintSqrt,
-} from './utils';
+} from './utils.js';
 
 /** Directed rounding direction: toward −∞ (`floor`) or +∞ (`ceiling`). */
 export type RoundDir = 'floor' | 'ceiling';

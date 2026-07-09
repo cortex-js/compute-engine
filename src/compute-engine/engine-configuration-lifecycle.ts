@@ -1,7 +1,7 @@
 import {
   ConfigurationChangeTracker,
   type ConfigurationChangeListener,
-} from '../common/configuration-change';
+} from '../common/configuration-change.js';
 
 type ResetHooks = {
   refreshNumericConstants: () => void;

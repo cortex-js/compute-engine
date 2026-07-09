@@ -1,4 +1,4 @@
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 
 import type {
   CompileTarget,
@@ -7,14 +7,14 @@ import type {
   LanguageTarget,
   CompilationOptions,
   CompilationResult,
-} from './types';
-import { BaseCompiler } from './base-compiler';
-import { tryGetConstant } from './constant-folding';
+} from './types.js';
+import { BaseCompiler } from './base-compiler.js';
+import { tryGetConstant } from './constant-folding.js';
 import {
   isFunction,
   isNumber,
   isSymbol,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 
 /**
  * Python mathematical constants, keyed by MathJSON symbol.

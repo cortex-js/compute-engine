@@ -5,12 +5,12 @@
  * with secondary consideration for overall expression complexity.
  */
 
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 import {
   isFunction,
   isNumber,
   isSymbol,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 
 const TRIG_FUNCS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
 

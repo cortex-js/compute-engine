@@ -1,6 +1,6 @@
-import type { BoxedDefinition } from './types-definitions';
-import type { IComputeEngine as ComputeEngine } from './types-engine';
-import type { Expression, ExpressionInput } from './types-expression';
+import type { BoxedDefinition } from './types-definitions.js';
+import type { IComputeEngine as ComputeEngine } from './types-engine.js';
+import type { Expression, ExpressionInput } from './types-expression.js';
 import type {
   Assumption as KernelAssumption,
   AssignValue as KernelAssignValue,
@@ -18,13 +18,13 @@ import type {
   ExplainStep as KernelExplainStep,
   Explanation as KernelExplanation,
   Scope as KernelScope,
-} from './types-kernel-evaluation';
+} from './types-kernel-evaluation.js';
 
 export type {
   AssumeResult,
   ExplainOperation,
   ExplainVerbosity,
-} from './types-kernel-evaluation';
+} from './types-kernel-evaluation.js';
 
 /**
  * Options for evaluating boxed expressions.

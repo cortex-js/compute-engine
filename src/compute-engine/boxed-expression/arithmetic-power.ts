@@ -1,16 +1,20 @@
-import type { NumericPrimitiveType, Type } from '../../common/type/types';
-import { BoxedType } from '../../common/type/boxed-type';
-import { BigDecimal } from '../../big-decimal';
-import type { Expression } from '../global-types';
-import { SMALL_INTEGER, machineNthRoot } from '../numerics/numeric';
-import { rationalize } from '../numerics/rationals';
-import type { Rational } from '../numerics/types';
+import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
+import { BigDecimal } from '../../big-decimal/index.js';
+import type { Expression } from '../global-types.js';
+import { SMALL_INTEGER, machineNthRoot } from '../numerics/numeric.js';
+import { rationalize } from '../numerics/rationals.js';
+import type { Rational } from '../numerics/types.js';
 
-import { asRational } from './numerics';
-import { bignumPreferred, canonicalAngle, getImaginaryFactor } from './utils';
-import { apply, apply2 } from './apply';
-import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { asRational } from './numerics.js';
+import {
+  bignumPreferred,
+  canonicalAngle,
+  getImaginaryFactor,
+} from './utils.js';
+import { apply, apply2 } from './apply.js';
+import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 
 function isSqrt(expr: Expression): boolean {
   if (!isFunction(expr)) return false;

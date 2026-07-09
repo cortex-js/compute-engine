@@ -18,8 +18,8 @@
 
 import dataJson from './function-properties-data.json';
 
-import type { IComputeEngine } from '../types-engine';
-import type { Expression, ExpressionInput } from '../types-expression';
+import type { IComputeEngine } from '../types-engine.js';
+import type { Expression, ExpressionInput } from '../types-expression.js';
 
 /** A single analytic-property record for an operator. The MathJSON fields are
  * raw (as translated from Fungrim); box them with `ce.expr` to query. */

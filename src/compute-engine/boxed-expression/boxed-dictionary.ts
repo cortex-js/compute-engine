@@ -6,15 +6,15 @@ import type {
   Metadata,
   DictionaryInterface,
   JsonSerializationOptions,
-} from '../global-types';
+} from '../global-types.js';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode } from './utils';
-import { isWildcard, wildcardName } from './pattern-utils';
-import { BoxedType } from '../../common/type/boxed-type';
-import { DictionaryValue, MathJsonExpression } from '../../math-json/types';
-import { widen } from '../../common/type/utils';
-import { isFunction, isString, isSymbol, isNumber } from './type-guards';
+import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { hashCode } from './utils.js';
+import { isWildcard, wildcardName } from './pattern-utils.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
+import { DictionaryValue, MathJsonExpression } from '../../math-json/types.js';
+import { widen } from '../../common/type/utils.js';
+import { isFunction, isString, isSymbol, isNumber } from './type-guards.js';
 
 /**
  * BoxedDictionary

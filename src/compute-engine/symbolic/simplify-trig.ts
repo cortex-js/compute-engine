@@ -2,9 +2,9 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
   RuleStep,
-} from '../global-types';
-import { add } from '../boxed-expression/arithmetic-add';
-import { isFunction, isNumber, sym } from '../boxed-expression/type-guards';
+} from '../global-types.js';
+import { add } from '../boxed-expression/arithmetic-add.js';
+import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
 
 /**
  * Trigonometric simplification rules consolidated from simplify-rules.ts.

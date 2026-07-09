@@ -35,6 +35,18 @@ module.exports = {
     es6: true,
     node: true,
   },
+  settings: {
+    // Source imports carry explicit `.js` extensions (nodenext-style) that
+    // resolve to `.ts` files. The TypeScript resolver understands this mapping;
+    // without it `import/no-unresolved` errors on every `.js` specifier and
+    // `import/no-cycle` silently stops following edges (defeating the
+    // zero-cycle budget).
+    'import/resolver': {
+      typescript: {
+        project: './tsconfig.eslint.json',
+      },
+    },
+  },
   rules: {
     'import/no-unresolved': 'error',
     'import/named': 'error',

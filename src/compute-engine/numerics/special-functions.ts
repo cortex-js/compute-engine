@@ -1,7 +1,7 @@
-import type { IComputeEngine as ComputeEngine } from '../global-types';
-import type { BigNum } from './types';
-import { BigDecimal } from '../../big-decimal';
-import { checkDeadline } from '../../common/interruptible';
+import type { IComputeEngine as ComputeEngine } from '../global-types.js';
+import type { BigNum } from './types.js';
+import { BigDecimal } from '../../big-decimal/index.js';
+import { checkDeadline } from '../../common/interruptible.js';
 
 const gammaG = 7;
 const lanczos_7_c = [

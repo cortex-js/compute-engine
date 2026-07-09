@@ -1,29 +1,29 @@
-import { MathJsonExpression, MathJsonSymbol } from '../math-json/types';
-import { Origin } from '../common/debug';
-import { parseTypePrefix } from '../common/type/parse';
+import { MathJsonExpression, MathJsonSymbol } from '../math-json/types.js';
+import { Origin } from '../common/debug.js';
+import { parseTypePrefix } from '../common/type/parse.js';
 import {
   isStringObject,
   mapArgs,
   operand,
   operator,
   stringValue,
-} from '../math-json/utils';
-import { escapeJsonString } from '../common/json';
+} from '../math-json/utils.js';
+import { escapeJsonString } from '../common/json.js';
 
-import { DIGITS, FANCY_UNICODE, HEX_DIGITS } from './characters';
+import { DIGITS, FANCY_UNICODE, HEX_DIGITS } from './characters.js';
 import {
   DiagnosticMessage,
   FatalParsingError,
   ParsingDiagnostic,
-} from './diagnostics';
-import { tokenize } from './lexer';
+} from './diagnostics.js';
+import { tokenize } from './lexer.js';
 import {
   OperatorDef,
   infixOperatorForSymbol,
   prefixOperatorForSymbol,
-} from './operators';
-import { RESERVED_WORDS } from './reserved-words';
-import { SourceSpan, Token, TokenType } from './tokens';
+} from './operators.js';
+import { RESERVED_WORDS } from './reserved-words.js';
+import { SourceSpan, Token, TokenType } from './tokens.js';
 
 /** Precedence of the prefix operators (`-`, `!`, and fancy aliases). Read from
  * the shared table so it can never drift. */

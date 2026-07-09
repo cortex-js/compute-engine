@@ -1,20 +1,20 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { isOperatorDef } from '../boxed-expression/utils';
-import { isFiniteIndexedCollection } from '../collection-utils';
-import { isRelationalOperator } from '../latex-syntax/utils';
-import { normalizeIndexingSet } from '../library/utils';
+} from '../global-types.js';
+import { isOperatorDef } from '../boxed-expression/utils.js';
+import { isFiniteIndexedCollection } from '../collection-utils.js';
+import { isRelationalOperator } from '../latex-syntax/utils.js';
+import { normalizeIndexingSet } from '../library/utils.js';
 import {
   isSymbol,
   isNumber,
   isString,
   isFunction,
   isDictionary,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 
-import type { CompileTarget, TargetSource } from './types';
+import type { CompileTarget, TargetSource } from './types.js';
 
 /**
  * Base compiler class containing language-agnostic compilation logic

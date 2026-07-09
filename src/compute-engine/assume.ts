@@ -1,8 +1,8 @@
-import { isSubtype } from '../common/type/subtype';
-import { reduceType } from '../common/type/reduce';
-import { functionResult } from '../common/type/utils';
-import { BoxedType } from '../common/type/boxed-type';
-import type { Type } from '../common/type/types';
+import { isSubtype } from '../common/type/subtype.js';
+import { reduceType } from '../common/type/reduce.js';
+import { functionResult } from '../common/type/utils.js';
+import { BoxedType } from '../common/type/boxed-type.js';
+import type { Type } from '../common/type/types.js';
 
 import {
   AssumeResult,
@@ -10,21 +10,21 @@ import {
   IComputeEngine as ComputeEngine,
   IntervalBounds,
   Sign,
-} from './global-types';
+} from './global-types.js';
 
-import { findUnivariateRoots } from './boxed-expression/solve';
+import { findUnivariateRoots } from './boxed-expression/solve.js';
 import {
   domainToType,
   isValueDef,
   isOperatorDef,
-} from './boxed-expression/utils';
-import { isInequalityOperator } from './latex-syntax/utils';
+} from './boxed-expression/utils.js';
+import { isInequalityOperator } from './latex-syntax/utils.js';
 import {
   isFunction,
   isSymbol,
   isNumber,
   isString,
-} from './boxed-expression/type-guards';
+} from './boxed-expression/type-guards.js';
 import {
   type Subject,
   subjectOf,
@@ -35,7 +35,7 @@ import {
   signFromBounds,
   getFactIndex,
   hasAssumptions,
-} from './boxed-expression/constraint-subject';
+} from './boxed-expression/constraint-subject.js';
 
 /**
  * Infer a promoted type from a value expression.
@@ -1347,5 +1347,5 @@ function getSignFromAssumptionsLegacy(
 }
 
 // Re-export from its new home for backward compatibility
-import { getInequalityBoundsFromAssumptions } from './boxed-expression/inequality-bounds';
+import { getInequalityBoundsFromAssumptions } from './boxed-expression/inequality-bounds.js';
 export { getInequalityBoundsFromAssumptions };

@@ -7,8 +7,8 @@
 //   types-evaluation.ts  — rules, assumptions, scopes, evaluation
 //   types-engine.ts      — ComputeEngine interface
 
-export type * from './types-expression';
-export type * from './types-serialization';
+export type * from './types-expression.js';
+export type * from './types-serialization.js';
 export type {
   ValueDefinition,
   SequenceDefinition,
@@ -35,6 +35,6 @@ export type {
   BoxedValueDefinition,
   OperatorDefinitionFlags,
   BoxedOperatorDefinition,
-} from './types-definitions';
-export type * from './types-evaluation';
-export type * from './types-engine';
+} from './types-definitions.js';
+export type * from './types-evaluation.js';
+export type * from './types-engine.js';

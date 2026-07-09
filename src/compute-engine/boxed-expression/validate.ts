@@ -1,17 +1,17 @@
-import { isFiniteIndexedCollection } from '../collection-utils';
+import { isFiniteIndexedCollection } from '../collection-utils.js';
 
-import { flatten } from './flatten';
-import { isSubtype } from '../../common/type/subtype';
-import { Type } from '../../common/type/types';
+import { flatten } from './flatten.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import { Type } from '../../common/type/types.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
   Scope,
-} from '../global-types';
-import { fuzzyStringMatch } from '../../common/fuzzy-string-match';
-import { isOperatorDef, isValueDef } from './utils';
-import { isTensor } from './boxed-tensor';
-import { isSymbol, isFunction } from './type-guards';
+} from '../global-types.js';
+import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
+import { isOperatorDef, isValueDef } from './utils.js';
+import { isTensor } from './boxed-tensor.js';
+import { isSymbol, isFunction } from './type-guards.js';
 
 /**
  * Return true if a type could be a collection type at runtime.

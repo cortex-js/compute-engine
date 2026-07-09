@@ -1,30 +1,33 @@
-import { getImaginaryFactor } from './utils';
+import { getImaginaryFactor } from './utils.js';
 
-import { flatten } from './flatten';
-import { addOrder, order } from './order';
-import { Type } from '../../common/type/types';
-import { widen } from '../../common/type/utils';
-import { isSubtype } from '../../common/type/subtype';
-import { BoxedType } from '../../common/type/boxed-type';
+import { flatten } from './flatten.js';
+import { addOrder, order } from './order.js';
+import { Type } from '../../common/type/types.js';
+import { widen } from '../../common/type/utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
   TensorInterface,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { isTensor } from './boxed-tensor';
-import { isNumber, isFunction, isSymbol } from './type-guards';
+} from '../global-types.js';
+import { isTensor } from './boxed-tensor.js';
+import { isNumber, isFunction, isSymbol } from './type-guards.js';
 import {
   isNumericTuple,
   numericTupleArity,
   hasAccessibleComponents,
   isDeclaredScalarNumber,
-} from '../collection-utils';
+} from '../collection-utils.js';
 
-import { MACHINE_PRECISION } from '../numerics/numeric';
-import type { NumericValue, NumericValueFactory } from '../numeric-value/types';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { BigNumericValue } from '../numeric-value/big-numeric-value';
-import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
+import { MACHINE_PRECISION } from '../numerics/numeric.js';
+import type {
+  NumericValue,
+  NumericValueFactory,
+} from '../numeric-value/types.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import { BigNumericValue } from '../numeric-value/big-numeric-value.js';
+import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
 
 /**
  *

@@ -1,7 +1,7 @@
-import type { Expression, RuleStep } from '../global-types';
-import { isFunction, isNumber } from '../boxed-expression/type-guards';
-import { asRational } from '../boxed-expression/numerics';
-import { baseOffset } from './simplify-factorial';
+import type { Expression, RuleStep } from '../global-types.js';
+import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { asRational } from '../boxed-expression/numerics.js';
+import { baseOffset } from './simplify-factorial.js';
 
 /**
  * Division simplification rules consolidated from simplify-rules.ts.

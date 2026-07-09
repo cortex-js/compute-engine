@@ -4,28 +4,28 @@ import {
   checkTypes,
   spellCheckMessage,
   validateArguments,
-} from '../boxed-expression/validate';
-import { toInteger } from '../boxed-expression/numerics';
+} from '../boxed-expression/validate.js';
+import { toInteger } from '../boxed-expression/numerics.js';
 
 import {
   basicIndexedCollectionHandlers,
   isDeclaredScalarNumber,
   MAX_SIZE_EAGER_COLLECTION,
-} from '../collection-utils';
-import { extractFiniteDomainWithReason } from './logic-analysis';
-import { applicable, canonicalFunctionLiteral } from '../function-utils';
+} from '../collection-utils.js';
+import { extractFiniteDomainWithReason } from './logic-analysis.js';
+import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
 // (collections → compile-expression → base-compiler → library/utils → collections)
-import { parseType } from '../../common/type/parse';
-import { Type } from '../../common/type/types';
+import { parseType } from '../../common/type/parse.js';
+import { Type } from '../../common/type/types.js';
 import {
   collectionElementType,
   functionResult,
   widen,
-} from '../../common/type/utils';
-import { interval, intervalContains } from '../numerics/interval';
-import { deterministicRandom, nextSeed } from '../numerics/random';
-import { CancellationError, run } from '../../common/interruptible';
+} from '../../common/type/utils.js';
+import { interval, intervalContains } from '../numerics/interval.js';
+import { deterministicRandom, nextSeed } from '../numerics/random.js';
+import { CancellationError, run } from '../../common/interruptible.js';
 import type {
   Expression,
   OperatorDefinition,
@@ -33,11 +33,11 @@ import type {
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
   Scope,
-} from '../global-types';
-import { BoxedType } from '../types';
-import { typeToString } from '../../common/type/serialize';
+} from '../global-types.js';
+import { BoxedType } from '../types.js';
+import { typeToString } from '../../common/type/serialize.js';
 // BoxedDictionary dynamically imported to avoid circular dependency
-import { canonical } from '../boxed-expression/canonical-utils';
+import { canonical } from '../boxed-expression/canonical-utils.js';
 import {
   isDictionary,
   isFunction,
@@ -45,8 +45,8 @@ import {
   isString,
   isSymbol,
   sym,
-} from '../boxed-expression/type-guards';
-import { typeMembership } from './sets';
+} from '../boxed-expression/type-guards.js';
+import { typeMembership } from './sets.js';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;

@@ -2,14 +2,14 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
   IntervalBounds,
-} from '../global-types';
-import { isFunction, isSymbol } from './type-guards';
+} from '../global-types.js';
+import { isFunction, isSymbol } from './type-guards.js';
 import {
   type Subject,
   toSubject,
   subjectKey,
   getFactIndex,
-} from './constraint-subject';
+} from './constraint-subject.js';
 
 /**
  * Extract interval bounds for `symbol` from a condition expression.

@@ -1,12 +1,12 @@
-import type { OneOf } from '../common/one-of';
-import type { Type, TypeString } from '../common/type/types';
-import type { BoxedType } from '../common/type/boxed-type';
-import type { LatexString } from './latex-syntax/types';
+import type { OneOf } from '../common/one-of.js';
+import type { Type, TypeString } from '../common/type/types.js';
+import type { BoxedType } from '../common/type/boxed-type.js';
+import type { LatexString } from './latex-syntax/types.js';
 import type {
   Expression,
   ExpressionInput,
   CompiledExpression,
-} from './types-expression';
+} from './types-expression.js';
 import type {
   EvaluateOptions as KernelEvaluateOptions,
   ExplainVerbosity,
@@ -14,7 +14,7 @@ import type {
   BoxedRule as KernelBoxedRule,
   BoxedRuleSet as KernelBoxedRuleSet,
   Scope as KernelScope,
-} from './types-kernel-evaluation';
+} from './types-kernel-evaluation.js';
 
 /**
  * Compute engine surface used by definition callbacks.

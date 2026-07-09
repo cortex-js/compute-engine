@@ -1,5 +1,5 @@
-import { ansiFgColor, ansiBgColor } from './ansi-codes';
-import { StyledBlock, StyledSpan } from './styled-text';
+import { ansiFgColor, ansiBgColor } from './ansi-codes.js';
+import { StyledBlock, StyledSpan } from './styled-text.js';
 
 type TerminalCapabilities = 'none' | 'basic' | '256' | 'full' | 'css';
 

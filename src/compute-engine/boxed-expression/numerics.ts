@@ -1,19 +1,19 @@
 import { Complex } from 'complex-esm';
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
-import type { Rational } from '../numerics/types';
+import type { Rational } from '../numerics/types.js';
 
-import type { Expression, ExpressionInput } from '../global-types';
-import { isExpression } from './utils';
+import type { Expression, ExpressionInput } from '../global-types.js';
+import { isExpression } from './utils.js';
 
-import { SMALL_INTEGER } from '../numerics/numeric';
-import { bigint } from '../numerics/bigint';
+import { SMALL_INTEGER } from '../numerics/numeric.js';
+import { bigint } from '../numerics/bigint.js';
 
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { NumericValue } from '../numeric-value/types';
-import { bigintValue } from '../numerics/expression';
-import { MathJsonExpression } from '../types';
-import { isNumber } from './type-guards';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import { NumericValue } from '../numeric-value/types.js';
+import { bigintValue } from '../numerics/expression.js';
+import { MathJsonExpression } from '../types.js';
+import { isNumber } from './type-guards.js';
 
 export function asRational(expr: Expression): Rational | undefined {
   if (!isNumber(expr)) return undefined;

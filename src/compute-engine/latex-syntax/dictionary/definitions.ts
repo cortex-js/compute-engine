@@ -1,5 +1,5 @@
-import type { MathJsonExpression } from '../../../math-json/types';
-import { isValidSymbol } from '../../../math-json/symbols';
+import type { MathJsonExpression } from '../../../math-json/types.js';
+import { isValidSymbol } from '../../../math-json/symbols.js';
 import {
   foldAssociativeOperator,
   operator,
@@ -8,11 +8,16 @@ import {
   nops,
   operand,
   operands,
-} from '../../../math-json/utils';
+} from '../../../math-json/utils.js';
 
-import { ErrorSignal, WarningSignal } from '../../../common/signals';
+import { ErrorSignal, WarningSignal } from '../../../common/signals.js';
 
-import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
+import {
+  countTokens,
+  joinLatex,
+  tokenize,
+  tokensToString,
+} from '../tokenizer.js';
 
 import {
   Delimiter,
@@ -31,7 +36,7 @@ import {
   isPostfixEntry,
   isPrefixEntry,
   isSymbolEntry,
-} from '../types';
+} from '../types.js';
 
 export type {
   CommonEntry,
@@ -45,7 +50,7 @@ export type {
   IndexedEnvironmentEntry,
   IndexedLatexDictionaryEntry,
   IndexedLatexDictionary,
-} from './indexed-types';
+} from './indexed-types.js';
 
 import type {
   IndexedSymbolEntry,
@@ -58,7 +63,7 @@ import type {
   IndexedEnvironmentEntry,
   IndexedLatexDictionaryEntry,
   IndexedLatexDictionary,
-} from './indexed-types';
+} from './indexed-types.js';
 
 /**
  * The optional fields that may appear on some (but not all) members of the

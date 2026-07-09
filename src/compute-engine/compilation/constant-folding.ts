@@ -6,13 +6,13 @@
  * expressions into real/imaginary parts for direct vec2 construction.
  */
 
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 import {
   isNumber,
   isFunction,
   isSymbol,
-} from '../boxed-expression/type-guards';
-import { BaseCompiler } from './base-compiler';
+} from '../boxed-expression/type-guards.js';
+import { BaseCompiler } from './base-compiler.js';
 
 /**
  * Format a number as a GPU float literal, ensuring a decimal point.

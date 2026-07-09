@@ -1,6 +1,11 @@
-import type { MathJsonExpression } from '../../../math-json/types';
-import { symbol } from '../../../math-json/utils';
-import type { LatexDictionary, Parser, Serializer, Terminator } from '../types';
+import type { MathJsonExpression } from '../../../math-json/types.js';
+import { symbol } from '../../../math-json/utils.js';
+import type {
+  LatexDictionary,
+  Parser,
+  Serializer,
+  Terminator,
+} from '../types.js';
 
 // The distribution heads and `PDF`/`CDF`/`Quantile`/`GammaRegularized`/
 // `BetaRegularized` round-trip via the default `\operatorname{…}(…)` path

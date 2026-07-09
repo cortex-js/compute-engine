@@ -1,7 +1,11 @@
-import { widen } from '../common/type/utils';
-import { isSubtype } from '../common/type/subtype';
-import { Expression, CollectionHandlers } from './global-types';
-import { isFunction, isNumber, isSymbol } from './boxed-expression/type-guards';
+import { widen } from '../common/type/utils.js';
+import { isSubtype } from '../common/type/subtype.js';
+import { Expression, CollectionHandlers } from './global-types.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from './boxed-expression/type-guards.js';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
  *

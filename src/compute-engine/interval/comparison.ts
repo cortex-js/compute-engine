@@ -4,8 +4,8 @@
  * @module interval/comparison
  */
 
-import type { Interval, IntervalResult, BoolInterval } from './types';
-import { unionResults, unwrapOrPropagate } from './util';
+import type { Interval, IntervalResult, BoolInterval } from './types.js';
+import { unionResults, unwrapOrPropagate } from './util.js';
 
 /** Normalize a value that may be a plain Interval or an IntervalResult. */
 function toResult(x: Interval | IntervalResult): IntervalResult {

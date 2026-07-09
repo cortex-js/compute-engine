@@ -1,8 +1,11 @@
-import type { OneOf } from '../../common/one-of';
-import type { MathJsonExpression, MathJsonSymbol } from '../../math-json/types';
-import type { TypeString } from '../../common/type/types';
-import type { DisplayDigits } from '../types-kernel-serialization';
-import { BoxedType } from '../../common/type/boxed-type';
+import type { OneOf } from '../../common/one-of.js';
+import type {
+  MathJsonExpression,
+  MathJsonSymbol,
+} from '../../math-json/types.js';
+import type { TypeString } from '../../common/type/types.js';
+import type { DisplayDigits } from '../types-kernel-serialization.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 
 export type SymbolTable = {
   parent: SymbolTable | null;

@@ -1,7 +1,7 @@
-import { NumericValue } from '../numeric-value/types';
-import type { Expression } from '../global-types';
-import { getInequalityBoundsFromAssumptions } from './inequality-bounds';
-import { compareBounds } from './constraint-subject';
+import { NumericValue } from '../numeric-value/types.js';
+import type { Expression } from '../global-types.js';
+import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
+import { compareBounds } from './constraint-subject.js';
 import {
   isNumber,
   isFunction,
@@ -9,8 +9,8 @@ import {
   isString,
   isTensor,
   isDictionary,
-} from './type-guards';
-import { stochasticEqual } from './stochastic-equal';
+} from './type-guards.js';
+import { stochasticEqual } from './stochastic-equal.js';
 
 // Lazy reference to break circular dependency:
 // expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare

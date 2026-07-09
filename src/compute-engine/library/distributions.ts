@@ -3,15 +3,18 @@ import {
   bigGammaQ,
   betaRegularized,
   gammaQ,
-} from '../numerics/special-functions';
-import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply';
-import { isFunction, isNumber } from '../boxed-expression/type-guards';
-import { binomialQuantile, poissonQuantile } from '../numerics/distributions';
+} from '../numerics/special-functions.js';
+import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
+import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import {
+  binomialQuantile,
+  poissonQuantile,
+} from '../numerics/distributions.js';
 import type {
   Expression,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
+} from '../global-types.js';
 
 //
 // Probability distributions (Phase 1).

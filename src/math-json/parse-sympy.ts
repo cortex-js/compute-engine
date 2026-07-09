@@ -2,8 +2,8 @@
 
 // https://github.com/python/cpython/blob/390459de6db1e68b79c0897cc88c0d562693ec5c/Grammar/python.gram
 
-import { symbol } from '../math-json';
-import type { MathJsonExpression as Expression } from './types';
+import { symbol } from '../math-json.js';
+import type { MathJsonExpression as Expression } from './types.js';
 
 const DIGITS: Record<string, number> = {
   '0': 0,

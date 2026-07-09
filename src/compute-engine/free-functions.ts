@@ -7,16 +7,16 @@ import type {
   FormOption,
   Scope,
   SimplifyOptions,
-} from './global-types';
-import type { Type, TypeString } from '../common/type/types';
-import type { LatexString, ParseLatexOptions } from './latex-syntax/types';
-import { isExpression } from './boxed-expression/type-guards';
+} from './global-types.js';
+import type { Type, TypeString } from '../common/type/types.js';
+import type { LatexString, ParseLatexOptions } from './latex-syntax/types.js';
+import { isExpression } from './boxed-expression/type-guards.js';
 import {
   expand as expandExpr,
   expandAll as expandAllExpr,
-} from './boxed-expression/expand';
-import { factorPolynomial as factorExpr } from './boxed-expression/factor';
-import { compile as compileExpr } from './compilation/compile-expression';
+} from './boxed-expression/expand.js';
+import { factorPolynomial as factorExpr } from './boxed-expression/factor.js';
+import { compile as compileExpr } from './compilation/compile-expression.js';
 
 let _defaultEngine: IComputeEngine | null = null;
 let _defaultEngineFactory: (() => IComputeEngine) | null = null;

@@ -3,28 +3,28 @@ import type {
   OperatorDefinition,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
+} from '../global-types.js';
 
-import { isRelationalOperator } from '../latex-syntax/utils';
-import { isFiniteIndexedCollection } from '../collection-utils';
-import { flatten } from '../boxed-expression/flatten';
-import { eq } from '../boxed-expression/compare';
-import { isNumber, isFunction } from '../boxed-expression/type-guards';
-import { toBigint } from '../boxed-expression/numerics';
+import { isRelationalOperator } from '../latex-syntax/utils.js';
+import { isFiniteIndexedCollection } from '../collection-utils.js';
+import { flatten } from '../boxed-expression/flatten.js';
+import { eq } from '../boxed-expression/compare.js';
+import { isNumber, isFunction } from '../boxed-expression/type-guards.js';
+import { toBigint } from '../boxed-expression/numerics.js';
 import {
   subjectOf,
   finiteNumericValue,
   hasAssumptions,
   decideComparisonFromBounds,
-} from '../boxed-expression/constraint-subject';
-import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds';
-import { isQuantity } from './quantity-arithmetic';
-import { boxedToUnitExpression } from './units';
+} from '../boxed-expression/constraint-subject.js';
+import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
+import { isQuantity } from './quantity-arithmetic.js';
+import { boxedToUnitExpression } from './units.js';
 import {
   dimensionsEqual,
   getExpressionDimension,
   getExpressionScale,
-} from './unit-data';
+} from './unit-data.js';
 
 /**
  * Compare two Quantity expressions.

@@ -1,21 +1,21 @@
-import { parseType } from '../../common/type/parse';
-import { isSubtype } from '../../common/type/subtype';
-import { ListType } from '../../common/type/types';
-import { isTensor } from '../boxed-expression/boxed-tensor';
-import { totalDegree } from '../boxed-expression/polynomial-degree';
-import { checkArity } from '../boxed-expression/validate';
-import { isFiniteIndexedCollection } from '../collection-utils';
+import { parseType } from '../../common/type/parse.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import { ListType } from '../../common/type/types.js';
+import { isTensor } from '../boxed-expression/boxed-tensor.js';
+import { totalDegree } from '../boxed-expression/polynomial-degree.js';
+import { checkArity } from '../boxed-expression/validate.js';
+import { isFiniteIndexedCollection } from '../collection-utils.js';
 import {
   Expression,
   IComputeEngine as ComputeEngine,
   SymbolDefinitions,
   Sign,
-} from '../global-types';
+} from '../global-types.js';
 import {
   isFunction,
   isString,
   isSymbol,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {

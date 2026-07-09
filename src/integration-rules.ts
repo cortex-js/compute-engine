@@ -17,9 +17,9 @@
 
 export const version = '{{SDK_VERSION}}';
 
-export { loadIntegrationRules } from './compute-engine/rubi/loader';
+export { loadIntegrationRules } from './compute-engine/rubi/loader.js';
 
 export type {
   IntegrationRulesLoadOptions,
   IntegrationRulesLoadReport,
-} from './compute-engine/rubi/loader';
+} from './compute-engine/rubi/loader.js';

@@ -26,8 +26,8 @@
  * circular dependencies.
  */
 
-import type { BoxedRule, Expression, RuleStep } from '../global-types';
-import { isFunction, isNumber } from './type-guards';
+import type { BoxedRule, Expression, RuleStep } from '../global-types.js';
+import { isFunction, isNumber } from './type-guards.js';
 
 /** A rule paired with its position in the original rule array. */
 export type OrdinalRule = { rule: BoxedRule; ordinal: number };

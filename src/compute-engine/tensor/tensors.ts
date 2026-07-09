@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { getSupertype, makeTensorField } from './tensor-fields';
+import { getSupertype, makeTensorField } from './tensor-fields.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -9,7 +9,7 @@ import type {
   NestedArray,
   Tensor,
   TensorField,
-} from '../global-types';
+} from '../global-types.js';
 
 // @todo: See also:
 // - https://github.com/scalanlp/breeze/wiki/Linear-Algebra-Cheat-Sheet

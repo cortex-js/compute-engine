@@ -1,10 +1,13 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { isNumber, isFunction } from './type-guards';
-import { addOrder, sortProductOperands } from './order';
-import { isNumericTuple, hasAccessibleComponents } from '../collection-utils';
+} from '../global-types.js';
+import { isNumber, isFunction } from './type-guards.js';
+import { addOrder, sortProductOperands } from './order.js';
+import {
+  isNumericTuple,
+  hasAccessibleComponents,
+} from '../collection-utils.js';
 
 export function canonicalNegate(expr: Expression): Expression {
   // Negate(Negate(x)) -> x

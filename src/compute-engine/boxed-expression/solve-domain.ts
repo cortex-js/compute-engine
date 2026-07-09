@@ -1,16 +1,16 @@
-import type { Type } from '../../common/type/types';
-import { collectionElementType } from '../../common/type/utils';
-import { checkDeadline } from '../../common/interruptible';
+import type { Type } from '../../common/type/types.js';
+import { collectionElementType } from '../../common/type/utils.js';
+import { checkDeadline } from '../../common/interruptible.js';
 
 import type {
   IComputeEngine as ComputeEngine,
   Expression,
-} from '../global-types';
-import { isFunction, sym } from './type-guards';
-import { findUnivariateRoots } from './solve';
-import { getPolynomialCoefficients } from './polynomials';
-import { interval } from '../numerics/interval';
-import { tryDiophantineSolve, isIntegerDomain } from './diophantine';
+} from '../global-types.js';
+import { isFunction, sym } from './type-guards.js';
+import { findUnivariateRoots } from './solve.js';
+import { getPolynomialCoefficients } from './polynomials.js';
+import { interval } from '../numerics/interval.js';
+import { tryDiophantineSolve, isIntegerDomain } from './diophantine.js';
 
 /**
  * Solving over a domain (Phase 1, univariate).

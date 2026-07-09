@@ -2,44 +2,47 @@ import {
   constructibleValues,
   isConstructible,
   processInverseFunction,
-} from '../boxed-expression/trigonometry';
-import { mul } from '../boxed-expression/arithmetic-mul-div';
-import { simplifyLogicFunction } from './simplify-logic';
-import type { Expression, Rule, RuleStep } from '../global-types';
+} from '../boxed-expression/trigonometry.js';
+import { mul } from '../boxed-expression/arithmetic-mul-div.js';
+import { simplifyLogicFunction } from './simplify-logic.js';
+import type { Expression, Rule, RuleStep } from '../global-types.js';
 import {
   isFunction,
   isNumber,
   isSymbol,
   numericValue,
   sym,
-} from '../boxed-expression/type-guards';
-import { expand } from '../boxed-expression/expand';
-import { factor, partialFraction } from '../boxed-expression/factor';
-import { add } from '../boxed-expression/arithmetic-add';
-import { SMALL_INTEGER, gcd } from '../numerics/numeric';
-import { primeFactors } from '../numerics/primes';
-import { NumericValue } from '../numeric-value/types';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+} from '../boxed-expression/type-guards.js';
+import { expand } from '../boxed-expression/expand.js';
+import { factor, partialFraction } from '../boxed-expression/factor.js';
+import { add } from '../boxed-expression/arithmetic-add.js';
+import { SMALL_INTEGER, gcd } from '../numerics/numeric.js';
+import { primeFactors } from '../numerics/primes.js';
+import { NumericValue } from '../numeric-value/types.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import {
   isEquationOperator,
   isInequalityOperator,
   isRelationalOperator,
-} from '../latex-syntax/utils';
-import { cancelCommonFactors } from '../boxed-expression/polynomials';
-import { simplifySum } from './simplify-sum';
-import { simplifyProduct } from './simplify-product';
+} from '../latex-syntax/utils.js';
+import { cancelCommonFactors } from '../boxed-expression/polynomials.js';
+import { simplifySum } from './simplify-sum.js';
+import { simplifyProduct } from './simplify-product.js';
 import {
   simplifyAbs,
   simplifyAbsPower,
   simplifyEvenFunctionAbs,
-} from './simplify-abs';
-import { simplifyInfinity } from './simplify-infinity';
-import { simplifyLog } from './simplify-log';
-import { simplifyPower } from './simplify-power';
-import { simplifyTrig } from './simplify-trig';
-import { simplifyHyperbolic } from './simplify-hyperbolic';
-import { simplifyDivide } from './simplify-divide';
-import { simplifyBinomial, simplifyFactorialAdd } from './simplify-factorial';
+} from './simplify-abs.js';
+import { simplifyInfinity } from './simplify-infinity.js';
+import { simplifyLog } from './simplify-log.js';
+import { simplifyPower } from './simplify-power.js';
+import { simplifyTrig } from './simplify-trig.js';
+import { simplifyHyperbolic } from './simplify-hyperbolic.js';
+import { simplifyDivide } from './simplify-divide.js';
+import {
+  simplifyBinomial,
+  simplifyFactorialAdd,
+} from './simplify-factorial.js';
 
 /**
  * # Performance Optimization Notes for Simplification Rules

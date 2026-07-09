@@ -7,10 +7,10 @@
  * @module compilation/interval-javascript-target
  */
 
-import type { Expression } from '../global-types';
-import { isSymbol, isNumber } from '../boxed-expression/type-guards';
+import type { Expression } from '../global-types.js';
+import { isSymbol, isNumber } from '../boxed-expression/type-guards.js';
 
-import { BaseCompiler } from './base-compiler';
+import { BaseCompiler } from './base-compiler.js';
 import type {
   CompileTarget,
   CompiledOperators,
@@ -19,9 +19,9 @@ import type {
   CompilationOptions,
   CompilationResult,
   CompiledRunner,
-} from './types';
-import { IntervalArithmetic } from '../interval';
-import type { Interval, IntervalResult } from '../interval/types';
+} from './types.js';
+import { IntervalArithmetic } from '../interval/index.js';
+import type { Interval, IntervalResult } from '../interval/types.js';
 
 /**
  * Interval arithmetic operators mapped to _IA library calls.

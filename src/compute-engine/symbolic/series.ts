@@ -1,19 +1,19 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
+} from '../global-types.js';
 
-import { checkDeadline } from '../../common/interruptible';
+import { checkDeadline } from '../../common/interruptible.js';
 import {
   isFunction,
   isNumber,
   isSymbol,
-} from '../boxed-expression/type-guards';
-import { asSmallInteger } from '../boxed-expression/numerics';
-import { differentiate } from './derivative';
-import { symbolicLimit } from './limit';
-import { trigToExp } from './trig-rewrite';
-import { getFunctionProperties } from '../function-properties';
+} from '../boxed-expression/type-guards.js';
+import { asSmallInteger } from '../boxed-expression/numerics.js';
+import { differentiate } from './derivative.js';
+import { symbolicLimit } from './limit.js';
+import { trigToExp } from './trig-rewrite.js';
+import { getFunctionProperties } from '../function-properties/index.js';
 
 //
 // This module implements `Series` — symbolic Taylor expansion at a regular

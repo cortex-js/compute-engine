@@ -9,7 +9,7 @@ import type {
   MathJsonSymbol,
   MathJsonDictionaryObject,
   DictionaryValue,
-} from './types';
+} from './types.js';
 
 export const MISSING: MathJsonExpression = ['Error', "'missing'"];
 

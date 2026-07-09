@@ -1,6 +1,6 @@
-import type { Expression } from '../global-types';
-import { asSmallInteger } from './numerics';
-import { isSymbol, isFunction, isNumber } from './type-guards';
+import type { Expression } from '../global-types.js';
+import { asSmallInteger } from './numerics.js';
+import { isSymbol, isFunction, isNumber } from './type-guards.js';
 
 /**
  * The total degree of an expression is the sum of the

@@ -6,9 +6,9 @@ import type {
   SequenceInfo,
   OEISSequenceInfo,
   OEISOptions,
-} from './global-types';
+} from './global-types.js';
 
-import { isValueDef } from './boxed-expression/utils';
+import { isValueDef } from './boxed-expression/utils.js';
 
 import {
   createSequenceHandler,
@@ -20,12 +20,12 @@ import {
   clearSequenceCache as clearSequenceCacheImpl,
   getSequenceCache as getSequenceCacheImpl,
   generateSequenceTerms as generateSequenceTermsImpl,
-} from './sequence';
+} from './sequence.js';
 
 import {
   lookupSequence as lookupSequenceImpl,
   checkSequence as checkSequenceImpl,
-} from './oeis';
+} from './oeis.js';
 
 export function declareSequence(
   ce: IComputeEngine,

@@ -1,15 +1,18 @@
-import type { MathJsonExpression, MathJsonSymbol } from '../../math-json/types';
-import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
+import type {
+  MathJsonExpression,
+  MathJsonSymbol,
+} from '../../math-json/types.js';
+import { isValidSymbol, validateSymbol } from '../../math-json/symbols.js';
 
-import type { Type, TypeString } from '../../common/type/types';
-import { isSignatureType, widen, narrow } from '../../common/type/utils';
-import { reduceType } from '../../common/type/reduce';
-import type { OneOf } from '../../common/one-of';
-import { BoxedType } from '../../common/type/boxed-type';
-import { parseType } from '../../common/type/parse';
+import type { Type, TypeString } from '../../common/type/types.js';
+import { isSignatureType, widen, narrow } from '../../common/type/utils.js';
+import { reduceType } from '../../common/type/reduce.js';
+import type { OneOf } from '../../common/one-of.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
+import { parseType } from '../../common/type/parse.js';
 
-import type { BigNum } from '../numerics/types';
-import { NumericValue } from '../numeric-value/types';
+import type { BigNum } from '../numerics/types.js';
+import { NumericValue } from '../numeric-value/types.js';
 
 import type {
   Expression,
@@ -36,37 +39,37 @@ import type {
   CollectionHandlers,
   ExpressionInput,
   SymbolInterface,
-} from '../global-types';
+} from '../global-types.js';
 
-import { mul, div } from './arithmetic-mul-div';
+import { mul, div } from './arithmetic-mul-div.js';
 
-import { replace } from './rules';
-import { simplify } from './simplify';
-import { explainExpression } from './explain';
-import { negate } from './negate';
+import { replace } from './rules.js';
+import { simplify } from './simplify.js';
+import { explainExpression } from './explain.js';
+import { negate } from './negate.js';
 
-import { match } from './match';
-import { _BoxedExpression } from './abstract-boxed-expression';
+import { match } from './match.js';
+import { _BoxedExpression } from './abstract-boxed-expression.js';
 import {
   hashCode,
   isOperatorDef,
   isValueDef,
   normalizedUnknownsForSolve,
   updateDef,
-} from './utils';
-import { pow } from './arithmetic-power';
-import { add } from './arithmetic-add';
+} from './utils.js';
+import { pow } from './arithmetic-power.js';
+import { add } from './arithmetic-add.js';
 import {
   positiveSign,
   nonPositiveSign,
   negativeSign,
   nonNegativeSign,
-} from './sgn';
-import { matchesSymbol } from '../../math-json/utils';
-import { getSignFromAssumptions } from '../assume';
-import { getFactIndex, hasAssumptions } from './constraint-subject';
-import { isSymbol } from './type-guards';
-import { checkDeadline } from '../../common/interruptible';
+} from './sgn.js';
+import { matchesSymbol } from '../../math-json/utils.js';
+import { getSignFromAssumptions } from '../assume.js';
+import { getFactIndex, hasAssumptions } from './constraint-subject.js';
+import { isSymbol } from './type-guards.js';
+import { checkDeadline } from '../../common/interruptible.js';
 
 /**
  * ### BoxedSymbol

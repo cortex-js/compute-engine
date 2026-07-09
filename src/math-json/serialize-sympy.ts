@@ -1,5 +1,5 @@
-import type { MathJsonExpression as Expression } from './types';
-import { operand, machineValue, symbol, operator, operands } from './utils';
+import type { MathJsonExpression as Expression } from './types.js';
+import { operand, machineValue, symbol, operator, operands } from './utils.js';
 
 function serializeBaseForm(expr: Expression): string | null {
   if (operator(expr) !== 'BaseForm') return null;

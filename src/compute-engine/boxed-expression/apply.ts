@@ -1,12 +1,12 @@
 import { Complex } from 'complex-esm';
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
-import type { Expression, IComputeEngine } from '../global-types';
+import type { Expression, IComputeEngine } from '../global-types.js';
 
-import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
-import { SMALL_INTEGER } from '../numerics/numeric';
-import { bignumPreferred } from './utils';
-import { isNumber } from './type-guards';
+import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
+import { SMALL_INTEGER } from '../numerics/numeric.js';
+import { bignumPreferred } from './utils.js';
+import { isNumber } from './type-guards.js';
 
 /**
  * Box a kernel result that is a plain JS double.

@@ -1,4 +1,4 @@
-import { LatexDictionaryEntry, COMPARISON_PRECEDENCE } from '../types';
+import { LatexDictionaryEntry, COMPARISON_PRECEDENCE } from '../types.js';
 
 export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
   {

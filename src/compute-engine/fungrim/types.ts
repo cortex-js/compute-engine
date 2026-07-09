@@ -9,8 +9,8 @@
 // engine. The public-facing aliases are the `Identities*` names; the
 // internal names stay fungrim-prefixed.
 
-import type { RulePurpose } from '../types-kernel-evaluation';
-import type { BoxedSubstitution } from '../types-serialization';
+import type { RulePurpose } from '../types-kernel-evaluation.js';
+import type { BoxedSubstitution } from '../types-serialization.js';
 
 /** Raw MathJSON — the artifact is plain JSON. */
 export type FungrimMathJson = unknown;

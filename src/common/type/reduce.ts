@@ -1,5 +1,9 @@
-import { typeToString } from './serialize';
-import { COVERING_UNION_MAP, isSubtype, meetPrimitiveTypes } from './subtype';
+import { typeToString } from './serialize.js';
+import {
+  COVERING_UNION_MAP,
+  isSubtype,
+  meetPrimitiveTypes,
+} from './subtype.js';
 import type {
   Type,
   PrimitiveType,
@@ -14,8 +18,8 @@ import type {
   NegationType,
   DictionaryType,
   RecordType,
-} from './types';
-import { isValidPrimitiveType, NUMERIC_TYPES_SET } from './primitive';
+} from './types.js';
+import { isValidPrimitiveType, NUMERIC_TYPES_SET } from './primitive.js';
 
 /**
  * Reduce the input type

@@ -5,9 +5,9 @@
  * that holds the pre-tokenized formatting strings from ParseLatexOptions.
  */
 
-import type { MathJsonExpression } from '../../math-json/types';
-import type { LatexToken, Parser } from './types';
-import { SMALL_INTEGER } from '../numerics/numeric';
+import type { MathJsonExpression } from '../../math-json/types.js';
+import type { LatexToken, Parser } from './types.js';
+import { SMALL_INTEGER } from '../numerics/numeric.js';
 
 /**
  * Pre-tokenized formatting strings used during number parsing.

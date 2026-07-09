@@ -1,9 +1,9 @@
-import { toBigint, toInteger } from '../boxed-expression/numerics';
-import type { Expression, SymbolDefinitions } from '../global-types';
-import { isFunction, isNumber } from '../boxed-expression/type-guards';
-import { apply2 } from '../boxed-expression/apply';
-import { gamma, bigGamma, gammaln } from '../numerics/special-functions';
-import { checkDeadline } from '../../common/interruptible';
+import { toBigint, toInteger } from '../boxed-expression/numerics.js';
+import type { Expression, SymbolDefinitions } from '../global-types.js';
+import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { apply2 } from '../boxed-expression/apply.js';
+import { gamma, bigGamma, gammaln } from '../numerics/special-functions.js';
+import { checkDeadline } from '../../common/interruptible.js';
 
 /**
  * Above this many decimal digits, an exact combinatorial result (Fibonacci,

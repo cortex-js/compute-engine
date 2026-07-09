@@ -1,14 +1,14 @@
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 
 import {
   isFunction,
   isNumber,
   isSymbol,
-} from '../boxed-expression/type-guards';
-import { asSmallInteger } from '../boxed-expression/numerics';
-import { expand, expandAll } from '../boxed-expression/expand';
-import { mul } from '../boxed-expression/arithmetic-mul-div';
-import { add } from '../boxed-expression/arithmetic-add';
+} from '../boxed-expression/type-guards.js';
+import { asSmallInteger } from '../boxed-expression/numerics.js';
+import { expand, expandAll } from '../boxed-expression/expand.js';
+import { mul } from '../boxed-expression/arithmetic-mul-div.js';
+import { add } from '../boxed-expression/arithmetic-add.js';
 
 //
 // This module implements three symbolic trigonometric rewrite verbs, modeled

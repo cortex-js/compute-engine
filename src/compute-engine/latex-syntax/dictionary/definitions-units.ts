@@ -20,26 +20,26 @@
  * our 1-token `\mathrm` entry.
  */
 
-import type { MathJsonExpression } from '../../../math-json/types';
+import type { MathJsonExpression } from '../../../math-json/types.js';
 import {
   operand,
   operator,
   symbol,
   machineValue,
-} from '../../../math-json/utils';
+} from '../../../math-json/utils.js';
 import type {
   LatexDictionary,
   Parser,
   Serializer,
   ExpressionParseHandler,
-} from '../types';
-import { joinLatex } from '../tokenizer';
+} from '../types.js';
+import { joinLatex } from '../tokenizer.js';
 import {
   getUnitDimension,
   parseUnitDSL,
   type UnitExpression,
-} from '../../numerics/unit-data';
-import { normalizeAngle, formatDMS } from '../serialize-dms';
+} from '../../numerics/unit-data.js';
+import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,4 +1,4 @@
-import type { MathJsonExpression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types.js';
 import type {
   SimplifyOptions,
   ExplainOperation,
@@ -23,22 +23,22 @@ import type {
   BoxedValueDefinition,
   ExpressionInput,
   FunctionInterface,
-} from '../global-types';
+} from '../global-types.js';
 
 import {
   isFiniteIndexedCollection,
   isNumericTuple,
   zip,
-} from '../collection-utils';
-import { isTensor } from './boxed-tensor';
-import { _BoxedOperatorDefinition } from './boxed-operator-definition';
-import { isNumber, isFunction, isString, isSymbol } from './type-guards';
-import type { NumericPrimitiveType } from '../../common/type/types';
-import { Type } from '../../common/type/types';
-import { BoxedType } from '../../common/type/boxed-type';
-import { parseType } from '../../common/type/parse';
-import { isSubtype } from '../../common/type/subtype';
-import { NUMERIC_TYPES } from '../../common/type/primitive';
+} from '../collection-utils.js';
+import { isTensor } from './boxed-tensor.js';
+import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
+import { isNumber, isFunction, isString, isSymbol } from './type-guards.js';
+import type { NumericPrimitiveType } from '../../common/type/types.js';
+import { Type } from '../../common/type/types.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
+import { parseType } from '../../common/type/parse.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import { NUMERIC_TYPES } from '../../common/type/primitive.js';
 import {
   broadcastResultType,
   collectionElementType,
@@ -46,51 +46,51 @@ import {
   isSignatureType,
   narrow,
   widen,
-} from '../../common/type/utils';
-import { NumericValue } from '../numeric-value/types';
+} from '../../common/type/utils.js';
+import { NumericValue } from '../numeric-value/types.js';
 
-import { findUnivariateRoots } from './solve';
-import { filterRootsByAssumptions } from './solve-domain';
+import { findUnivariateRoots } from './solve.js';
+import { filterRootsByAssumptions } from './solve-domain.js';
 import {
   solveLinearSystem,
   solvePolynomialSystem,
   solveLinearInequalitySystem,
-} from './solve-linear-system';
-import { replace } from './rules';
-import { negate } from './negate';
-import { simplify } from './simplify';
-import { explainExpression } from './explain';
-import { canonicalMultiply, mul, div, Product } from './arithmetic-mul-div';
-import { add } from './arithmetic-add';
-import { pow } from './arithmetic-power';
-import { asSmallInteger } from './numerics';
-import { gcd } from '../numerics/numeric';
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { DEFAULT_COMPLEXITY, sortOperands } from './order';
+} from './solve-linear-system.js';
+import { replace } from './rules.js';
+import { negate } from './negate.js';
+import { simplify } from './simplify.js';
+import { explainExpression } from './explain.js';
+import { canonicalMultiply, mul, div, Product } from './arithmetic-mul-div.js';
+import { add } from './arithmetic-add.js';
+import { pow } from './arithmetic-power.js';
+import { asSmallInteger } from './numerics.js';
+import { gcd } from '../numerics/numeric.js';
+import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { DEFAULT_COMPLEXITY, sortOperands } from './order.js';
 import {
   hashCode,
   isOperatorDef,
   isValueDef,
   normalizedUnknownsForSolve,
-} from './utils';
-import { match } from './match';
-import { factor } from './factor';
-import { holdMap, holdMapAsync } from './hold';
+} from './utils.js';
+import { match } from './match.js';
+import { factor } from './factor.js';
+import { holdMap, holdMapAsync } from './hold.js';
 import {
   positiveSign,
   nonNegativeSign,
   negativeSign,
   nonPositiveSign,
   sgn,
-} from './sgn';
-import { cachedValue, CachedValue } from './cache';
-import { apply, lookup } from '../function-utils';
-import { checkDeadline } from '../../common/interruptible';
+} from './sgn.js';
+import { cachedValue, CachedValue } from './cache.js';
+import { apply, lookup } from '../function-utils.js';
+import { checkDeadline } from '../../common/interruptible.js';
 import {
   applyPoleOverride,
   isEligibleRealRewrite,
   onBranchCut,
-} from '../function-properties';
+} from '../function-properties/index.js';
 
 /** When `materialization` is true, display 10 items if the collection is
  * infinite, otherwise 5 from the head and 5 from the tail

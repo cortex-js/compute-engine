@@ -1,15 +1,18 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
+} from '../global-types.js';
 
-import { differentiate } from './derivative';
+import { differentiate } from './derivative.js';
 import {
   polynomialDegree,
   getPolynomialCoefficients,
-} from '../boxed-expression/polynomials';
-import { limit as numericLimit } from '../numerics/numeric';
-import { checkDeadline, CancellationError } from '../../common/interruptible';
+} from '../boxed-expression/polynomials.js';
+import { limit as numericLimit } from '../numerics/numeric.js';
+import {
+  checkDeadline,
+  CancellationError,
+} from '../../common/interruptible.js';
 
 // The base `Expression` type exposes operands only after a type-guard narrows it
 // to a function (`isFunction`). Internally we always hold real boxed expressions

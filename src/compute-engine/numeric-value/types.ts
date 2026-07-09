@@ -24,9 +24,9 @@
  *
  */
 
-import { BigDecimal } from '../../big-decimal';
-import type { Rational, SmallInteger } from '../numerics/types';
-import { NumericPrimitiveType } from '../../common/type/types';
+import { BigDecimal } from '../../big-decimal/index.js';
+import type { Rational, SmallInteger } from '../numerics/types.js';
+import { NumericPrimitiveType } from '../../common/type/types.js';
 
 /** The value is equal to `rational * sqrt(radical) + imRational * sqrt(imRadical) * i`
  *

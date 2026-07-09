@@ -1,11 +1,11 @@
-import { MathJsonExpression } from '../../../math-json/types';
+import { MathJsonExpression } from '../../../math-json/types.js';
 import {
   ExpressionParseHandler,
   LatexDictionary,
   MULTIPLICATION_PRECEDENCE,
   Parser,
   Terminator,
-} from '../types';
+} from '../types.js';
 
 /**
  * Trigonometric functions have some special conventions that require a

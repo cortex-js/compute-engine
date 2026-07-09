@@ -1,5 +1,5 @@
-import type { Expression } from '../global-types';
-import { isFunction } from '../boxed-expression/type-guards';
+import type { Expression } from '../global-types.js';
+import { isFunction } from '../boxed-expression/type-guards.js';
 import {
   evaluateAnd,
   evaluateOr,
@@ -9,7 +9,7 @@ import {
   evaluateXor,
   evaluateNand,
   evaluateNor,
-} from './logic-utils';
+} from './logic-utils.js';
 
 export function simplifyLogicFunction(
   x: Expression

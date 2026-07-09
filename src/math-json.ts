@@ -15,7 +15,7 @@ export type {
   MathJsonFunctionObject,
   MathJsonDictionaryObject,
   MathJsonSymbol,
-} from './math-json/types';
+} from './math-json/types.js';
 
 export {
   isSymbolObject,
@@ -27,6 +27,6 @@ export {
   symbol,
   mapArgs,
   dictionaryFromExpression,
-} from './math-json/utils';
+} from './math-json/utils.js';
 
 export const version = '{{SDK_VERSION}}';

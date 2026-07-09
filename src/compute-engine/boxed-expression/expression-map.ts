@@ -1,4 +1,4 @@
-import type { Expression, ExpressionMapInterface } from '../global-types';
+import type { Expression, ExpressionMapInterface } from '../global-types.js';
 
 export class ExpressionMap<U> implements ExpressionMapInterface<U> {
   readonly _items: Map<Expression, U>;

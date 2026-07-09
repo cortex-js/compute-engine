@@ -7,23 +7,23 @@
  * system.
  */
 
-import type { LatexDictionary } from '../types';
+import type { LatexDictionary } from '../types.js';
 
-import { DEFINITIONS_CORE } from './definitions-core';
-import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
-import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
-import { DEFINITIONS_LOGIC } from './definitions-logic';
-import { DEFINITIONS_SETS } from './definitions-sets';
-import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
-import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic';
-import { DEFINITIONS_COMPLEX } from './definitions-complex';
-import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry';
-import { DEFINITIONS_CALCULUS } from './definitions-calculus';
-import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra';
-import { DEFINITIONS_STATISTICS } from './definitions-statistics';
-import { DEFINITIONS_UNITS } from './definitions-units';
-import { DEFINITIONS_OTHERS } from './definitions-other';
-import { DEFINITIONS_COLORS } from './definitions-colors';
+import { DEFINITIONS_CORE } from './definitions-core.js';
+import { DEFINITIONS_SYMBOLS } from './definitions-symbols.js';
+import { DEFINITIONS_ALGEBRA } from './definitions-algebra.js';
+import { DEFINITIONS_LOGIC } from './definitions-logic.js';
+import { DEFINITIONS_SETS } from './definitions-sets.js';
+import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators.js';
+import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic.js';
+import { DEFINITIONS_COMPLEX } from './definitions-complex.js';
+import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry.js';
+import { DEFINITIONS_CALCULUS } from './definitions-calculus.js';
+import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra.js';
+import { DEFINITIONS_STATISTICS } from './definitions-statistics.js';
+import { DEFINITIONS_UNITS } from './definitions-units.js';
+import { DEFINITIONS_OTHERS } from './definitions-other.js';
+import { DEFINITIONS_COLORS } from './definitions-colors.js';
 
 // Re-export all individual dictionaries with their original names
 export {

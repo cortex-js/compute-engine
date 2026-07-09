@@ -5,12 +5,12 @@ import type {
   IComputeEngine as ComputeEngine,
   Metadata,
   StringInterface,
-} from '../global-types';
+} from '../global-types.js';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode, isExpression } from './utils';
-import { isWildcard, wildcardName } from './pattern-utils';
-import { BoxedType } from '../../common/type/boxed-type';
+import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { hashCode, isExpression } from './utils.js';
+import { isWildcard, wildcardName } from './pattern-utils.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 
 /**
  * BoxedString

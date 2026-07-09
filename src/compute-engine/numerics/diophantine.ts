@@ -16,7 +16,7 @@
  * @module
  */
 
-import { bigPrimeFactors, modPow } from './primes';
+import { bigPrimeFactors, modPow } from './primes.js';
 
 /**
  * Anti-hang backstop. Every unbounded search loop (PQa period detection, the

@@ -2,7 +2,7 @@ import type {
   MathJsonExpression,
   ExpressionObject,
   MathJsonSymbol,
-} from '../../math-json/types';
+} from '../../math-json/types.js';
 import {
   getSequence,
   missingIfEmpty,
@@ -14,7 +14,7 @@ import {
   stringValue,
   matchesString,
   matchesNumber,
-} from '../../math-json/utils';
+} from '../../math-json/utils.js';
 
 import {
   ParseLatexOptions,
@@ -25,9 +25,9 @@ import {
   INVISIBLE_OP_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
   SymbolTable,
-} from './types';
-import { tokenize, tokensToString } from './tokenizer';
-import { parseSymbol, parseInvalidSymbol } from './parse-symbol';
+} from './types.js';
+import { tokenize, tokensToString } from './tokenizer.js';
+import { parseSymbol, parseInvalidSymbol } from './parse-symbol.js';
 import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
@@ -39,15 +39,15 @@ import type {
   IndexedFunctionEntry,
   IndexedEnvironmentEntry,
   IndexedMatchfixEntry,
-} from './dictionary/definitions';
+} from './dictionary/definitions.js';
 import {
   parseNumber as _parseNumber,
   parseRepeatingDecimal as _parseRepeatingDecimal,
   type NumberFormatTokens,
-} from './parse-number';
-import { BoxedType } from '../../common/type/boxed-type';
-import { TypeString } from '../types';
-import { SYMBOLS } from './dictionary/definitions-symbols';
+} from './parse-number.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
+import { TypeString } from '../types.js';
+import { SYMBOLS } from './dictionary/definitions-symbols.js';
 
 /** Tokens that cannot begin the braces-less argument of a LaTeX command
  * (e.g. `\frac12`). See `parseToken()`. */

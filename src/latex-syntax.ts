@@ -12,9 +12,9 @@ export {
   LatexSyntax,
   parse,
   serialize,
-} from './compute-engine/latex-syntax/latex-syntax';
+} from './compute-engine/latex-syntax/latex-syntax.js';
 
-export type { LatexSyntaxOptions } from './compute-engine/latex-syntax/latex-syntax';
+export type { LatexSyntaxOptions } from './compute-engine/latex-syntax/latex-syntax.js';
 
 // --- Dictionaries ---
 export {
@@ -34,7 +34,7 @@ export {
   UNITS_DICTIONARY,
   OTHERS_DICTIONARY,
   PHYSICS_DICTIONARY,
-} from './compute-engine/latex-syntax/dictionary/default-dictionary';
+} from './compute-engine/latex-syntax/dictionary/default-dictionary.js';
 
 // --- Types ---
 export type {
@@ -43,8 +43,8 @@ export type {
   SerializeLatexOptions,
   ParseLatexOptions,
   LatexString,
-} from './compute-engine/latex-syntax/types';
+} from './compute-engine/latex-syntax/types.js';
 
-export type { MathJsonExpression } from './math-json/types';
+export type { MathJsonExpression } from './math-json/types.js';
 
 export const version = '{{SDK_VERSION}}';

@@ -3,7 +3,7 @@ import type {
   FunctionInterface,
   NumberLiteralInterface,
   SymbolInterface,
-} from '../global-types';
+} from '../global-types.js';
 
 /** An interval is a continuous set of real numbers */
 export type Interval = {

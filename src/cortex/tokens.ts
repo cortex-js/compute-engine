@@ -1,4 +1,4 @@
-import { DiagnosticMessage } from './diagnostics';
+import { DiagnosticMessage } from './diagnostics.js';
 
 /**
  * The set of token types produced by the Cortex {@link Lexer}.

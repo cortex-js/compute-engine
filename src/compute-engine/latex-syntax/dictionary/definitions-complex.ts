@@ -1,4 +1,4 @@
-import { LatexDictionary } from '../types';
+import { LatexDictionary } from '../types.js';
 
 export const DEFINITIONS_COMPLEX: LatexDictionary = [
   {

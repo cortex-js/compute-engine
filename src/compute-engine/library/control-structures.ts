@@ -1,18 +1,22 @@
-import { evaluateStatements } from '../function-utils';
-import { checkConditions } from '../boxed-expression/rules';
-import { widen } from '../../common/type/utils';
-import { parseType } from '../../common/type/parse';
-import { typeToString } from '../../common/type/serialize';
-import { CancellationError, run, runAsync } from '../../common/interruptible';
+import { evaluateStatements } from '../function-utils.js';
+import { checkConditions } from '../boxed-expression/rules.js';
+import { widen } from '../../common/type/utils.js';
+import { parseType } from '../../common/type/parse.js';
+import { typeToString } from '../../common/type/serialize.js';
+import {
+  CancellationError,
+  run,
+  runAsync,
+} from '../../common/interruptible.js';
 import type {
   Expression,
   SymbolDefinitions,
   EvaluateOptions,
   IComputeEngine as ComputeEngine,
   Scope,
-} from '../global-types';
-import { spellCheckMessage } from '../boxed-expression/validate';
-import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
+} from '../global-types.js';
+import { spellCheckMessage } from '../boxed-expression/validate.js';
+import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {

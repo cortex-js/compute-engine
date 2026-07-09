@@ -1,13 +1,17 @@
-import { MathJsonSymbol } from '../math-json';
-import { cmp } from './boxed-expression/compare';
+import { MathJsonSymbol } from '../math-json.js';
+import { cmp } from './boxed-expression/compare.js';
 import type {
   BoxedDefinition,
   Expression,
   FunctionInterface,
   IComputeEngine as ComputeEngine,
   Scope,
-} from './global-types';
-import { isSymbol, isFunction, isString } from './boxed-expression/type-guards';
+} from './global-types.js';
+import {
+  isSymbol,
+  isFunction,
+  isString,
+} from './boxed-expression/type-guards.js';
 
 /***
  * ### THEORY OF OPERATIONS

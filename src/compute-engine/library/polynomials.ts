@@ -2,9 +2,9 @@ import {
   factorPolynomial,
   together,
   partialFraction,
-} from '../boxed-expression/factor';
-import { distribute } from '../symbolic/distribute';
-import { expand, expandAll } from '../boxed-expression/expand';
+} from '../boxed-expression/factor.js';
+import { distribute } from '../symbolic/distribute.js';
+import { expand, expandAll } from '../boxed-expression/expand.js';
 import {
   polynomialDegree,
   getPolynomialCoefficients,
@@ -13,9 +13,9 @@ import {
   polynomialResultant,
   cancelCommonFactors,
   fromCoefficients,
-} from '../boxed-expression/polynomials';
-import type { SymbolDefinitions } from '../global-types';
-import { isFunction, sym } from '../boxed-expression/type-guards';
+} from '../boxed-expression/polynomials.js';
+import type { SymbolDefinitions } from '../global-types.js';
+import { isFunction, sym } from '../boxed-expression/type-guards.js';
 
 export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
   {

@@ -1,12 +1,12 @@
-import { joinLatex } from '../latex-syntax/tokenizer';
+import { joinLatex } from '../latex-syntax/tokenizer.js';
 import {
   parse as parseLatex,
   serialize as serializeLatex,
-} from '../latex-syntax/latex-syntax';
+} from '../latex-syntax/latex-syntax.js';
 
-import { checkType, checkArity } from '../boxed-expression/validate';
-import { canonicalForm } from '../boxed-expression/canonical';
-import { asSmallInteger, toInteger } from '../boxed-expression/numerics';
+import { checkType, checkArity } from '../boxed-expression/validate.js';
+import { canonicalForm } from '../boxed-expression/canonical.js';
+import { asSmallInteger, toInteger } from '../boxed-expression/numerics.js';
 import {
   addSequenceBaseCase,
   addSequenceRecurrence,
@@ -14,32 +14,32 @@ import {
   addMultiIndexRecurrence,
   containsSelfReference,
   extractIndexVariable,
-} from '../sequence';
+} from '../sequence.js';
 
 import {
   apply,
   canonicalFunctionLiteral,
   canonicalFunctionLiteralArguments,
-} from '../function-utils';
+} from '../function-utils.js';
 
-import { flatten, flattenSequence } from '../boxed-expression/flatten';
+import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
 
-import { fromDigits } from '../numerics/strings';
-import { deterministicRandom } from '../numerics/random';
+import { fromDigits } from '../numerics/strings.js';
+import { deterministicRandom } from '../numerics/random.js';
 
-import { randomExpression } from './random-expression';
-import { canonicalInvisibleOperator } from '../boxed-expression/invisible-operator';
+import { randomExpression } from './random-expression.js';
+import { canonicalInvisibleOperator } from '../boxed-expression/invisible-operator.js';
 import {
   collectionElementType,
   functionResult,
   isValidType,
-} from '../../common/type/utils';
-import { parseType } from '../../common/type/parse';
-import { canonicalMultiply } from '../boxed-expression/arithmetic-mul-div';
+} from '../../common/type/utils.js';
+import { parseType } from '../../common/type/parse.js';
+import { canonicalMultiply } from '../boxed-expression/arithmetic-mul-div.js';
 import {
   canonicalSolve,
   evaluateSolve,
-} from '../boxed-expression/solve-domain';
+} from '../boxed-expression/solve-domain.js';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
   Expression,
@@ -47,18 +47,18 @@ import type {
   SymbolDefinitions,
   DictionaryInterface,
   CanonicalForm,
-} from '../global-types';
-import type { Type } from '../../common/type/types';
-import { BoxedString } from '../boxed-expression/boxed-string';
-import { canonical } from '../boxed-expression/canonical-utils';
-import { isDictionary, isValueDef } from '../boxed-expression/utils';
+} from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
+import { BoxedString } from '../boxed-expression/boxed-string.js';
+import { canonical } from '../boxed-expression/canonical-utils.js';
+import { isDictionary, isValueDef } from '../boxed-expression/utils.js';
 import {
   isNumber,
   isSymbol,
   isFunction,
   isString,
   sym,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))

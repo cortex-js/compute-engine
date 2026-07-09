@@ -1,4 +1,4 @@
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
 export function mean(values: Iterable<number>): number {
   let sum = 0;

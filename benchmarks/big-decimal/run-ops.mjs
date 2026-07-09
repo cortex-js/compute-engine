@@ -7,7 +7,7 @@
  * fresh process per precision keeps each block honest (no cross-precision cache
  * thrash). Columns:
  *   - CE HEAD    : dist/esm-min/compute-engine.js (current working-tree build)
- *   - CE 0.69.0  : benchmarks/.competitors/ce-0.69.0/dist/... (last published)
+ *   - CE 0.70.0  : benchmarks/.competitors/ce-0.70.0/dist/... (last published)
  *   - mpmath     : ./venv/bin/python3 ops-bench.py (raw bignum reference)
  *
  * Writes ops-results.json (machine-readable sidecar for diffing across runs)
@@ -26,14 +26,14 @@ const PRECS = (process.env.PRECS ?? '21,50,100,200,500').split(',').map(Number);
 const BUDGET = Number(process.env.BUDGET ?? 250);
 
 const CUR = resolve(ROOT, 'dist/esm-min/compute-engine.js');
-const OLD = resolve(ROOT, 'benchmarks/.competitors/ce-0.69.0/dist/compute-engine.min.esm.js');
+const OLD = resolve(ROOT, 'benchmarks/.competitors/ce-0.70.0/dist/esm-min/compute-engine.js');
 const PY = resolve(ROOT, 'venv/bin/python3');
 const MJS = resolve(HERE, 'ops-bench.mjs');
 const PYB = resolve(HERE, 'ops-bench.py');
 
 const COLUMNS = [
   ['CE HEAD', 'node', [MJS, CUR, null, String(BUDGET), 'CE HEAD']],
-  ['CE 0.69.0', 'node', [MJS, OLD, null, String(BUDGET), 'CE 0.69.0']],
+  ['CE 0.70.0', 'node', [MJS, OLD, null, String(BUDGET), 'CE 0.70.0']],
   ['mpmath', PY, [PYB, null, String(BUDGET)]],
 ];
 
@@ -81,7 +81,7 @@ const sidecar = {
   precisions: PRECS,
   columns: COLUMNS.map((c) => c[0]),
   unit: 'ns/op',
-  note: 'CE HEAD = dist working-tree build; CE 0.69.0 = last published npm tarball.',
+  note: 'CE HEAD = dist working-tree build; CE 0.70.0 = last published npm tarball.',
   results,
 };
 const sidecarPath = resolve(HERE, 'ops-results.json');

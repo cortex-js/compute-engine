@@ -1,4 +1,4 @@
-import { Lexer, Token, TokenType } from './lexer';
+import { Lexer, Token, TokenType } from './lexer.js';
 import {
   ASTNode,
   TypeNode,
@@ -26,9 +26,9 @@ import {
   NamedElementNode,
   ArgumentNode,
   DimensionNode,
-} from './ast-nodes';
-import { TypeResolver } from './types';
-import { PRIMITIVE_TYPES_SET } from './primitive';
+} from './ast-nodes.js';
+import { TypeResolver } from './types.js';
+import { PRIMITIVE_TYPES_SET } from './primitive.js';
 
 /**
  * BNF grammar for the type parser:

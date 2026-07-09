@@ -1,9 +1,9 @@
-import { BLUE, BOLD, CYAN, GREY, RESET } from '../common/ansi-codes';
+import { BLUE, BOLD, CYAN, GREY, RESET } from '../common/ansi-codes.js';
 
-import type { BoxedDefinition, IComputeEngine, Scope } from './global-types';
+import type { BoxedDefinition, IComputeEngine, Scope } from './global-types.js';
 
-import { ExpressionMap } from './boxed-expression/expression-map';
-import { isValueDef, isOperatorDef } from './boxed-expression/utils';
+import { ExpressionMap } from './boxed-expression/expression-map.js';
+import { isValueDef, isOperatorDef } from './boxed-expression/utils.js';
 
 export function pushScope(
   ce: IComputeEngine,

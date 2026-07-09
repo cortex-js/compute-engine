@@ -1,6 +1,6 @@
 import { Complex } from 'complex-esm';
 
-import { checkDeadline } from '../../common/interruptible';
+import { checkDeadline } from '../../common/interruptible.js';
 
 /**
  * All complex roots of a polynomial via the Durand–Kerner (Weierstrass)

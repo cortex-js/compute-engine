@@ -1,15 +1,15 @@
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 import type {
   CompiledFunctions,
   CompiledOperators,
   CompileTarget,
   CompilationOptions,
   CompilationResult,
-} from './types';
-import { BaseCompiler } from './base-compiler';
-import { GLSLTarget } from './glsl-target';
-import { formatGPUNumber } from './gpu-target';
-import { isNumber, isSymbol } from '../boxed-expression/type-guards';
+} from './types.js';
+import { BaseCompiler } from './base-compiler.js';
+import { GLSLTarget } from './glsl-target.js';
+import { formatGPUNumber } from './gpu-target.js';
+import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
 
 /**
  * `interval-glsl` — a GPU compilation target that evaluates an expression with

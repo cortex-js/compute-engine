@@ -5,7 +5,7 @@
  *
  */
 
-import { splitGraphemes } from '../../common/grapheme-splitter';
+import { splitGraphemes } from '../../common/grapheme-splitter.js';
 
 const UNICODE_SUPERSCRIPT_MAP: Record<string, string> = {
   '\u2070': '0', // ⁰

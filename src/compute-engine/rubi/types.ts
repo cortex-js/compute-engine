@@ -9,7 +9,7 @@ import type {
   FunctionInterface,
   SymbolInterface,
   NumberLiteralInterface,
-} from '../types-expression';
+} from '../types-expression.js';
 
 /** A boxed expression with the function/symbol/number member interfaces folded
  * in as optional. The base `Expression` exposes `.operator` but keeps `.ops`,

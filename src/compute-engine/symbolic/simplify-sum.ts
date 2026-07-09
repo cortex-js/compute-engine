@@ -1,5 +1,5 @@
-import type { Expression, RuleStep } from '../global-types';
-import { isFunction, isNumber, sym } from '../boxed-expression/type-guards';
+import type { Expression, RuleStep } from '../global-types.js';
+import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
 
 /**
  * Sum simplification rules extracted from simplify-rules.ts.

@@ -1,4 +1,4 @@
-import type { MathJsonSymbol } from '../../math-json/types';
+import type { MathJsonSymbol } from '../../math-json/types.js';
 
 /**
  * Source code in the target language

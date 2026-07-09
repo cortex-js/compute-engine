@@ -1,12 +1,15 @@
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
-import type { MathJsonExpression, MathJsonSymbol } from '../../math-json/types';
+import type {
+  MathJsonExpression,
+  MathJsonSymbol,
+} from '../../math-json/types.js';
 
 // To avoid circular dependency issues we have to import the following
 // function *after* the class definition
 
-import type { Type, TypeString } from '../../common/type/types';
-import { BoxedType } from '../../common/type/boxed-type';
+import type { Type, TypeString } from '../../common/type/types.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 
 import type {
   BoxedSubstitution,
@@ -33,18 +36,18 @@ import type {
   Scope,
   Tensor,
   TensorDataType,
-} from '../global-types';
+} from '../global-types.js';
 
-import type { NumericValue } from '../numeric-value/types';
-import type { SmallInteger } from '../numerics/types';
+import type { NumericValue } from '../numeric-value/types.js';
+import type { SmallInteger } from '../numerics/types.js';
 
-import { toAsciiMath } from './ascii-math';
+import { toAsciiMath } from './ascii-math.js';
 // Dynamic import for serializeJson to avoid circular dependency
-import { cmp, eq, same } from './compare';
-import { CancellationError } from '../../common/interruptible';
-import { isSymbol, isString, isNumber, isFunction } from './type-guards';
-import { extractIntervalBounds } from './inequality-bounds';
-import { labelFor } from './explain-labels';
+import { cmp, eq, same } from './compare.js';
+import { CancellationError } from '../../common/interruptible.js';
+import { isSymbol, isString, isNumber, isFunction } from './type-guards.js';
+import { extractIntervalBounds } from './inequality-bounds.js';
+import { labelFor } from './explain-labels.js';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression

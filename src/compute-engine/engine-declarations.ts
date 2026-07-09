@@ -1,10 +1,10 @@
-import type { Type, TypeString } from '../common/type/types';
-import { isValidType, isValidTypeName, widen } from '../common/type/utils';
-import { parseType } from '../common/type/parse';
-import { BoxedType } from '../common/type/boxed-type';
+import type { Type, TypeString } from '../common/type/types.js';
+import { isValidType, isValidTypeName, widen } from '../common/type/utils.js';
+import { parseType } from '../common/type/parse.js';
+import { BoxedType } from '../common/type/boxed-type.js';
 
-import { isValidSymbol, validateSymbol } from '../math-json/symbols';
-import type { MathJsonSymbol } from '../math-json/types';
+import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
+import type { MathJsonSymbol } from '../math-json/types.js';
 
 import type {
   ValueDefinition,
@@ -15,17 +15,17 @@ import type {
   SymbolDefinition,
   IComputeEngine,
   Scope,
-} from './global-types';
+} from './global-types.js';
 
-import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition';
+import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition.js';
 import {
   isValidOperatorDef,
   isValidValueDef,
   isValueDef,
   isOperatorDef,
   updateDef,
-} from './boxed-expression/utils';
-import { canonicalFunctionLiteral, lookup } from './function-utils';
+} from './boxed-expression/utils.js';
+import { canonicalFunctionLiteral, lookup } from './function-utils.js';
 
 export function lookupDefinition(
   ce: IComputeEngine,

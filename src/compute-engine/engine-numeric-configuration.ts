@@ -1,12 +1,12 @@
-import { BigDecimal } from '../big-decimal';
+import { BigDecimal } from '../big-decimal/index.js';
 
 import {
   DEFAULT_PRECISION,
   DEFAULT_TOLERANCE,
   MACHINE_PRECISION,
-} from './numerics/numeric';
+} from './numerics/numeric.js';
 
-import type { AngularUnit } from './types-definitions';
+import type { AngularUnit } from './types-definitions.js';
 
 export class EngineNumericConfiguration {
   private _precision: number;

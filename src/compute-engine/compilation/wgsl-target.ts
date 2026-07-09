@@ -1,7 +1,7 @@
-import type { Expression } from '../global-types';
-import type { CompiledFunctions } from './types';
-import { GPUShaderTarget, compileGPUMatrix } from './gpu-target';
-import { BaseCompiler } from './base-compiler';
+import type { Expression } from '../global-types.js';
+import type { CompiledFunctions } from './types.js';
+import { GPUShaderTarget, compileGPUMatrix } from './gpu-target.js';
+import { BaseCompiler } from './base-compiler.js';
 
 /**
  * WGSL-specific function overrides.

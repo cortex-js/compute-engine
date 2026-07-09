@@ -1,4 +1,4 @@
-import { checkDeadline } from '../../common/interruptible';
+import { checkDeadline } from '../../common/interruptible.js';
 
 export type RK4Options = {
   steps: number;

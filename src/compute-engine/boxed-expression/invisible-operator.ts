@@ -1,11 +1,11 @@
-import { flatten } from './flatten';
-import { isImaginaryUnit, isOperatorDef } from './utils';
+import { flatten } from './flatten.js';
+import { isImaginaryUnit, isOperatorDef } from './utils.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { isFunction, isSymbol, isString, isNumber } from './type-guards';
-import { BoxedType } from '../../common/type/boxed-type';
+} from '../global-types.js';
+import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 
 const MATRIX_TYPE = new BoxedType('matrix');
 const FUNCTION_TYPE = new BoxedType('function');

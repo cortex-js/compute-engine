@@ -1,19 +1,19 @@
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 
-import { isRelationalOperator } from '../latex-syntax/utils';
-import { isNumber, isFunction } from './type-guards';
-import { NumericValue } from '../numeric-value/types';
+import { isRelationalOperator } from '../latex-syntax/utils.js';
+import { isNumber, isFunction } from './type-guards.js';
+import { NumericValue } from '../numeric-value/types.js';
 
-import { Product, commonTerms, mul } from './arithmetic-mul-div';
-import { add } from './arithmetic-add';
+import { Product, commonTerms, mul } from './arithmetic-mul-div.js';
+import { add } from './arithmetic-add.js';
 import {
   polynomialDegree,
   getPolynomialCoefficients,
   polynomialDivide,
   fromCoefficients,
-} from './polynomials';
-import { asSmallInteger } from './numerics';
-import { expand } from './expand';
+} from './polynomials.js';
+import { asSmallInteger } from './numerics.js';
+import { expand } from './expand.js';
 
 function hasNonTrivialRadical(value: unknown): boolean {
   return (

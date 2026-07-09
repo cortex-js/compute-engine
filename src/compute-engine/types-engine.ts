@@ -1,27 +1,27 @@
 import type { Complex } from 'complex-esm';
-import type { OneOf } from '../common/one-of';
-import type { MathJsonSymbol, MathJsonNumberObject } from '../math-json';
-import type { Type, TypeString, TypeResolver } from '../common/type/types';
-import type { BoxedType } from '../common/type/boxed-type';
-import type { ConfigurationChangeListener } from '../common/configuration-change';
+import type { OneOf } from '../common/one-of.js';
+import type { MathJsonSymbol, MathJsonNumberObject } from '../math-json.js';
+import type { Type, TypeString, TypeResolver } from '../common/type/types.js';
+import type { BoxedType } from '../common/type/boxed-type.js';
+import type { ConfigurationChangeListener } from '../common/configuration-change.js';
 import type {
   ParseLatexOptions,
   SerializeLatexOptions,
-} from './latex-syntax/types';
+} from './latex-syntax/types.js';
 import type {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
-} from './numeric-value/types';
-import type { BigNum, Rational } from './numerics/types';
+} from './numeric-value/types.js';
+import type { BigNum, Rational } from './numerics/types.js';
 
-import type { Expression, ExpressionInput } from './types-expression';
+import type { Expression, ExpressionInput } from './types-expression.js';
 import type {
   Metadata,
   CanonicalOptions,
   FormOption,
   BoxedSubstitution,
-} from './types-serialization';
+} from './types-serialization.js';
 import type {
   AngularUnit,
   SymbolDefinition,
@@ -33,7 +33,7 @@ import type {
   SequenceInfo,
   OEISSequenceInfo,
   OEISOptions,
-} from './types-definitions';
+} from './types-definitions.js';
 import type {
   AssumeResult,
   Rule as KernelRule,
@@ -44,10 +44,10 @@ import type {
   AssignValue as KernelAssignValue,
   Scope as KernelScope,
   EvalContext as KernelEvalContext,
-} from './types-kernel-evaluation';
-import type { LanguageTarget, CompilationResult } from './compilation/types';
+} from './types-kernel-evaluation.js';
+import type { LanguageTarget, CompilationResult } from './compilation/types.js';
 
-export type { RulePurpose } from './types-kernel-evaluation';
+export type { RulePurpose } from './types-kernel-evaluation.js';
 
 type Rule = KernelRule<Expression, ExpressionInput, IComputeEngine>;
 type BoxedRule = KernelBoxedRule<Expression, IComputeEngine>;
@@ -67,9 +67,9 @@ export interface ILatexSyntax {
   parse(
     latex: string,
     options?: Partial<ParseLatexOptions>
-  ): import('../math-json/types').MathJsonExpression | null;
+  ): import('../math-json/types.js').MathJsonExpression | null;
   serialize(
-    expr: import('../math-json/types').MathJsonExpression,
+    expr: import('../math-json/types.js').MathJsonExpression,
     options?: Record<string, unknown>
   ): string;
 }
@@ -688,12 +688,12 @@ export interface IComputeEngine {
   symbolInfo(name: string): SymbolInfo | undefined;
 }
 
-declare module './types-expression' {
+declare module './types-expression.js' {
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   interface ExpressionComputeEngine extends IComputeEngine {}
 }
 
-declare module './types-definitions' {
+declare module './types-definitions.js' {
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   interface ComputeEngine extends IComputeEngine {}
 }

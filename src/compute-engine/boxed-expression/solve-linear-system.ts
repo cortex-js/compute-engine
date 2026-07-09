@@ -1,11 +1,11 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { polynomialDegree } from './polynomials';
-import { findUnivariateRoots } from './solve';
-import { expand } from './expand';
-import { isFunction, isSymbol, numericValue } from './type-guards';
+} from '../global-types.js';
+import { polynomialDegree } from './polynomials.js';
+import { findUnivariateRoots } from './solve.js';
+import { expand } from './expand.js';
+import { isFunction, isSymbol, numericValue } from './type-guards.js';
 
 function numericRealPart(value: unknown): number | undefined {
   if (typeof value === 'number') return value;

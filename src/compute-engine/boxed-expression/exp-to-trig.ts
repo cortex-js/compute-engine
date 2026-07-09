@@ -1,6 +1,6 @@
-import type { Expression } from '../global-types';
-import { isFunction, isNumber, isSymbol } from './type-guards';
-import { canonicalAngle } from './utils';
+import type { Expression } from '../global-types.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import { canonicalAngle } from './utils.js';
 
 /** True if the expression carries the imaginary unit anywhere. */
 function containsImaginary(e: Expression): boolean {

@@ -1,4 +1,4 @@
-import { bigint } from './bigint';
+import { bigint } from './bigint.js';
 
 // prettier-ignore
 const SMALL_PRIMES = new Set<number>([

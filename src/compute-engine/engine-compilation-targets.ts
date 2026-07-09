@@ -1,16 +1,16 @@
-import type { Expression } from './types-expression';
-import type { LanguageTarget } from './compilation/types';
+import type { Expression } from './types-expression.js';
+import type { LanguageTarget } from './compilation/types.js';
 import {
   assertCompilationTargetContract,
   assertCompilationTargetName,
-} from './engine-extension-contracts';
+} from './engine-extension-contracts.js';
 
-import { JavaScriptTarget } from './compilation/javascript-target';
-import { GLSLTarget } from './compilation/glsl-target';
-import { WGSLTarget } from './compilation/wgsl-target';
-import { PythonTarget } from './compilation/python-target';
-import { IntervalJavaScriptTarget } from './compilation/interval-javascript-target';
-import { IntervalGLSLTarget } from './compilation/interval-glsl-target';
+import { JavaScriptTarget } from './compilation/javascript-target.js';
+import { GLSLTarget } from './compilation/glsl-target.js';
+import { WGSLTarget } from './compilation/wgsl-target.js';
+import { PythonTarget } from './compilation/python-target.js';
+import { IntervalJavaScriptTarget } from './compilation/interval-javascript-target.js';
+import { IntervalGLSLTarget } from './compilation/interval-glsl-target.js';
 
 /**
  * Internal registry for compilation targets.

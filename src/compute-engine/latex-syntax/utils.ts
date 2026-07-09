@@ -1,5 +1,5 @@
-import { joinLatex } from './tokenizer';
-import { DEFINITIONS_INEQUALITIES } from './dictionary/definitions-relational-operators';
+import { joinLatex } from './tokenizer.js';
+import { DEFINITIONS_INEQUALITIES } from './dictionary/definitions-relational-operators.js';
 
 export function isLatexString(s: unknown): s is string {
   if (typeof s === 'string') return s.startsWith('$') && s.endsWith('$');

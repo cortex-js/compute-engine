@@ -1,5 +1,5 @@
-import { MathJsonExpression } from '../../math-json/types';
-import { NumberFormat, NumberSerializationFormat } from './types';
+import { MathJsonExpression } from '../../math-json/types.js';
+import { NumberFormat, NumberSerializationFormat } from './types.js';
 
 // Some vocabulary:
 // 123.456e78

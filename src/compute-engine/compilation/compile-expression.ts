@@ -1,9 +1,13 @@
-import type { MathJsonSymbol } from '../../math-json/types';
-import type { Expression, JSSource } from '../global-types';
-import type { CompileTarget, CompilationResult, CompiledRunner } from './types';
-import { BaseCompiler } from './base-compiler';
-import { isFunction } from '../boxed-expression/type-guards';
-import { assertCompilationOptionsContract } from '../engine-extension-contracts';
+import type { MathJsonSymbol } from '../../math-json/types.js';
+import type { Expression, JSSource } from '../global-types.js';
+import type {
+  CompileTarget,
+  CompilationResult,
+  CompiledRunner,
+} from './types.js';
+import { BaseCompiler } from './base-compiler.js';
+import { isFunction } from '../boxed-expression/type-guards.js';
+import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 
 type CompileExpressionOptions<T extends string = string> = {
   to?: T;

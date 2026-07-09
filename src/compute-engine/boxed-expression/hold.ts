@@ -1,7 +1,7 @@
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 
-import { flatten } from './flatten';
-import { isFunction } from './type-guards';
+import { flatten } from './flatten.js';
+import { isFunction } from './type-guards.js';
 
 /** Apply the function `f` to each operand of the expression `expr`,
  * account for the 'lazy' property of the operator definition:

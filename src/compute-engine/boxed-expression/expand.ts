@@ -1,14 +1,14 @@
 import type {
   IComputeEngine as ComputeEngine,
   Expression,
-} from '../global-types';
+} from '../global-types.js';
 
-import { isRelationalOperator } from '../latex-syntax/utils';
-import { isFunction, isNumber } from './type-guards';
+import { isRelationalOperator } from '../latex-syntax/utils.js';
+import { isFunction, isNumber } from './type-guards.js';
 
-import { asSmallInteger } from './numerics';
-import { mul, expandProducts } from './arithmetic-mul-div';
-import { add } from './arithmetic-add';
+import { asSmallInteger } from './numerics.js';
+import { mul, expandProducts } from './arithmetic-mul-div.js';
+import { add } from './arithmetic-add.js';
 
 const binomials = [
   [1],

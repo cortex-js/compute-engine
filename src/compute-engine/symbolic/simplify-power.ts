@@ -1,12 +1,12 @@
-import type { Expression, RuleStep } from '../global-types';
-import { asRational } from '../boxed-expression/numerics';
+import type { Expression, RuleStep } from '../global-types.js';
+import { asRational } from '../boxed-expression/numerics.js';
 import {
   factorPerfectSquare,
   factorDifferenceOfSquares,
-} from '../boxed-expression/factor';
-import { isFunction, isNumber } from '../boxed-expression/type-guards';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { isEligibleRealRewrite } from '../function-properties';
+} from '../boxed-expression/factor.js';
+import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import { isEligibleRealRewrite } from '../function-properties/index.js';
 
 /**
  * Denest a nested square root √(a + b√c) → √x + sign(b)·√y.

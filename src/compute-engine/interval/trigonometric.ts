@@ -4,13 +4,18 @@
  * @module interval/trigonometric
  */
 
-import type { Interval, IntervalResult } from './types';
-import { ok, containsExtremum, containsZero, unwrapOrPropagate } from './util';
-import { div } from './arithmetic';
+import type { Interval, IntervalResult } from './types.js';
+import {
+  ok,
+  containsExtremum,
+  containsZero,
+  unwrapOrPropagate,
+} from './util.js';
+import { div } from './arithmetic.js';
 import {
   fresnelS as scalarFresnelS,
   fresnelC as scalarFresnelC,
-} from '../numerics/special-functions';
+} from '../numerics/special-functions.js';
 
 const TWO_PI = 2 * Math.PI;
 const PI = Math.PI;

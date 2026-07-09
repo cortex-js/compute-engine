@@ -1,7 +1,7 @@
-import type { MathJsonExpression } from '../../math-json';
-import { isNumberExpression, isNumberObject } from '../../math-json/utils';
-import { bigint } from './bigint';
-import { numberToString } from './strings';
+import type { MathJsonExpression } from '../../math-json.js';
+import { isNumberExpression, isNumberObject } from '../../math-json/utils.js';
+import { bigint } from './bigint.js';
+import { numberToString } from './strings.js';
 
 export function bigintValue(
   expr: MathJsonExpression | null | undefined

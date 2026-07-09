@@ -1,13 +1,13 @@
-import { MathJsonExpression } from '../../math-json/types';
+import { MathJsonExpression } from '../../math-json/types.js';
 import {
   countLeaves,
   machineValue,
   operand,
   operator,
   operands,
-} from '../../math-json/utils';
-import { DelimiterScale } from './types';
-import { joinLatex } from './tokenizer';
+} from '../../math-json/utils.js';
+import { DelimiterScale } from './types.js';
+import { joinLatex } from './tokenizer.js';
 
 export function getApplyFunctionStyle(
   _expr: MathJsonExpression,

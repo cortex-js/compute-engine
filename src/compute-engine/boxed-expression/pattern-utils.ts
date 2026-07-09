@@ -6,8 +6,8 @@
  * has dependencies that create cycles through boxed-symbol.ts.
  */
 
-import type { Expression } from '../global-types';
-import { isFunction, isSymbol } from './type-guards';
+import type { Expression } from '../global-types.js';
+import { isFunction, isSymbol } from './type-guards.js';
 
 /**
  * Check if an expression is a wildcard (universal, sequence, or optional sequence).

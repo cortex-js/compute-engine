@@ -1,10 +1,10 @@
-import { BoxedSymbol } from './boxed-expression/boxed-symbol';
+import { BoxedSymbol } from './boxed-expression/boxed-symbol.js';
 
 import type {
   BoxedDefinition,
   Expression,
   IComputeEngine as ComputeEngine,
-} from './global-types';
+} from './global-types.js';
 
 export type CommonSymbolTable = {
   [symbol: string]: null | Expression;

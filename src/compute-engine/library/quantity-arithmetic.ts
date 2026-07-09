@@ -10,9 +10,9 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { isFunction, isSymbol } from '../boxed-expression/type-guards';
-import { boxedToUnitExpression } from './units';
+} from '../global-types.js';
+import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
+import { boxedToUnitExpression } from './units.js';
 import {
   convertUnit,
   convertCompoundUnit,
@@ -21,7 +21,7 @@ import {
   getExpressionScale,
   getExpressionDimension,
   findNamedUnit,
-} from './unit-data';
+} from './unit-data.js';
 import {
   isMeasurement,
   measurementAdd,
@@ -29,7 +29,7 @@ import {
   measurementDivide,
   measurementPower,
   measurementAffine,
-} from './measurement-arithmetic';
+} from './measurement-arithmetic.js';
 
 // ---------------------------------------------------------------------------
 // Type guard

@@ -1,5 +1,5 @@
-import type { TaggedSpan } from './markdown-types';
-import { StyledSpan } from './styled-text';
+import type { TaggedSpan } from './markdown-types.js';
+import { StyledSpan } from './styled-text.js';
 
 /** Parse a markdown string into tagged text fragments */
 export function parseSpan(t: string): TaggedSpan[] {

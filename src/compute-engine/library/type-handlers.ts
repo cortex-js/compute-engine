@@ -1,6 +1,6 @@
-import type { Expression } from '../global-types';
-import type { Type } from '../../common/type/types';
-import type { BoxedType } from '../../common/type/boxed-type';
+import type { Expression } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
+import type { BoxedType } from '../../common/type/boxed-type.js';
 
 /**
  * Type handlers for the standard library follow the **non-finite typing

@@ -54,10 +54,10 @@
  * @module boxed-patterns
  */
 
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 
-import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
-import { isFunction } from './type-guards';
+import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
+import { isFunction } from './type-guards.js';
 
 // Re-export wildcard utilities from leaf module (no circular deps)
 export { isWildcard, wildcardName, wildcardType };

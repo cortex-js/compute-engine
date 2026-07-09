@@ -1,27 +1,27 @@
 import { Complex } from 'complex-esm';
 
-import type { Expression, BoxedSubstitution, Rule } from '../global-types';
+import type { Expression, BoxedSubstitution, Rule } from '../global-types.js';
 
-import { durandKernerRoots } from '../numerics/polynomial-roots';
-import { mul } from '../boxed-expression/arithmetic-mul-div';
-import { add } from '../boxed-expression/arithmetic-add';
-import { matchAnyRules } from '../boxed-expression/rules';
-import { expandAll } from '../boxed-expression/expand';
-import { differentiate } from './derivative';
-import { findUnivariateRoots } from '../boxed-expression/solve';
+import { durandKernerRoots } from '../numerics/polynomial-roots.js';
+import { mul } from '../boxed-expression/arithmetic-mul-div.js';
+import { add } from '../boxed-expression/arithmetic-add.js';
+import { matchAnyRules } from '../boxed-expression/rules.js';
+import { expandAll } from '../boxed-expression/expand.js';
+import { differentiate } from './derivative.js';
+import { findUnivariateRoots } from '../boxed-expression/solve.js';
 import {
   cancelCommonFactors,
   getPolynomialCoefficients,
   polynomialDegree,
   polynomialDivide,
-} from '../boxed-expression/polynomials';
-import { partialFraction } from '../boxed-expression/factor';
+} from '../boxed-expression/polynomials.js';
+import { partialFraction } from '../boxed-expression/factor.js';
 import {
   isFunction,
   isNumber,
   isSymbol,
   sym,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 
 //  @todo: implement using Risch Algorithm
 

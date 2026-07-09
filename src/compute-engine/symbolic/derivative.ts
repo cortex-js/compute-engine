@@ -1,15 +1,15 @@
-import { apply } from '../function-utils';
-import { checkDeadline } from '../../common/interruptible';
-import { mul } from '../boxed-expression/arithmetic-mul-div';
-import type { Expression, ExpressionInput } from '../global-types';
-import { add } from '../boxed-expression/arithmetic-add';
+import { apply } from '../function-utils.js';
+import { checkDeadline } from '../../common/interruptible.js';
+import { mul } from '../boxed-expression/arithmetic-mul-div.js';
+import type { Expression, ExpressionInput } from '../global-types.js';
+import { add } from '../boxed-expression/arithmetic-add.js';
 import {
   isNumber,
   isSymbol,
   isFunction,
   isString,
   sym,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 
 /**
  * Maximum recursion depth for differentiation.

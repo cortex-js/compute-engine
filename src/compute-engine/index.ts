@@ -1,21 +1,21 @@
 import { Complex } from 'complex-esm';
-import { BigDecimal } from '../big-decimal';
+import { BigDecimal } from '../big-decimal/index.js';
 
-import { Type, TypeResolver, TypeString } from '../common/type/types';
-import { BoxedType } from '../common/type/boxed-type';
+import { Type, TypeResolver, TypeString } from '../common/type/types.js';
+import { BoxedType } from '../common/type/boxed-type.js';
 
-import type { OneOf } from '../common/one-of';
-import { hidePrivateProperties } from '../common/utils';
+import type { OneOf } from '../common/one-of.js';
+import { hidePrivateProperties } from '../common/utils.js';
 
-import type { ConfigurationChangeListener } from '../common/configuration-change';
+import type { ConfigurationChangeListener } from '../common/configuration-change.js';
 
 import type {
   MathJsonExpression,
   MathJsonSymbol,
   MathJsonNumberObject,
-} from '../math-json/types';
+} from '../math-json/types.js';
 
-import { MACHINE_PRECISION, SMALL_INTEGER } from './numerics/numeric';
+import { MACHINE_PRECISION, SMALL_INTEGER } from './numerics/numeric.js';
 
 import type {
   ValueDefinition,
@@ -47,62 +47,62 @@ import type {
   LibraryDefinition,
   OperatorInfo,
   SymbolInfo,
-} from './global-types';
+} from './global-types.js';
 
 import type {
   LibraryCategory,
   ParseLatexOptions,
   SerializeLatexOptions,
-} from './latex-syntax/types';
-import { isOperatorDef, isValueDef } from './boxed-expression/utils';
-import { isSymbol } from './boxed-expression/type-guards';
+} from './latex-syntax/types.js';
+import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
+import { isSymbol } from './boxed-expression/type-guards.js';
 
-import { getStandardLibrary } from './library/library';
+import { getStandardLibrary } from './library/library.js';
 
-import { DEFAULT_COST_FUNCTION } from './cost-function';
+import { DEFAULT_COST_FUNCTION } from './cost-function.js';
 
-import type { BigNum, Rational } from './numerics/types';
-import { isMachineRational, isRational } from './numerics/rationals';
+import type { BigNum, Rational } from './numerics/types.js';
+import { isMachineRational, isRational } from './numerics/rationals.js';
 import {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
-} from './numeric-value/types';
-import { ExactNumericValue } from './numeric-value/exact-numeric-value';
-import { BigNumericValue } from './numeric-value/big-numeric-value';
-import { MachineNumericValue } from './numeric-value/machine-numeric-value';
+} from './numeric-value/types.js';
+import { ExactNumericValue } from './numeric-value/exact-numeric-value.js';
+import { BigNumericValue } from './numeric-value/big-numeric-value.js';
+import { MachineNumericValue } from './numeric-value/machine-numeric-value.js';
 
-import { box, boxFunction, optionsToInternal } from './boxed-expression/box';
-import type { FormOption } from './types-serialization';
-import { boxRules } from './boxed-expression/rules';
-import { aggregateHotHeadDispatch } from './boxed-expression/rule-index';
-import { validatePattern } from './boxed-expression/boxed-patterns';
-import { BoxedString } from './boxed-expression/boxed-string';
-import { BoxedFunction } from './boxed-expression/boxed-function';
-import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
-import './boxed-expression/init-lazy-refs';
-import { _BoxedOperatorDefinition } from './boxed-expression/boxed-operator-definition';
+import { box, boxFunction, optionsToInternal } from './boxed-expression/box.js';
+import type { FormOption } from './types-serialization.js';
+import { boxRules } from './boxed-expression/rules.js';
+import { aggregateHotHeadDispatch } from './boxed-expression/rule-index.js';
+import { validatePattern } from './boxed-expression/boxed-patterns.js';
+import { BoxedString } from './boxed-expression/boxed-string.js';
+import { BoxedFunction } from './boxed-expression/boxed-function.js';
+import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression.js';
+import './boxed-expression/init-lazy-refs.js';
+import { _BoxedOperatorDefinition } from './boxed-expression/boxed-operator-definition.js';
 import {
   HARMONIZATION_RULES,
   UNIVARIATE_ROOTS,
-} from './boxed-expression/solve';
+} from './boxed-expression/solve.js';
 import {
   factorPerfectSquare,
   factorDifferenceOfSquares,
   factorQuadratic,
   factorPolynomial,
-} from './boxed-expression/factor';
+} from './boxed-expression/factor.js';
 
 // To avoid circular dependencies, serializeToJson is forward declared. Type
 // to import it.
-import './boxed-expression/serialize';
-import { SIMPLIFY_RULES } from './symbolic/simplify-rules';
+import './boxed-expression/serialize.js';
+import { SIMPLIFY_RULES } from './symbolic/simplify-rules.js';
 
-import { bigint } from './numerics/bigint';
-import { isValidSymbol } from '../math-json/symbols';
+import { bigint } from './numerics/bigint.js';
+import { isValidSymbol } from '../math-json/symbols.js';
 
-import { getFunctionProperties } from './function-properties';
-import type { FunctionProperties } from './function-properties';
+import { getFunctionProperties } from './function-properties/index.js';
+import type { FunctionProperties } from './function-properties/index.js';
 
 import {
   lookupDefinition as lookupDefinitionImpl,
@@ -113,7 +113,7 @@ import {
   declareType as declareTypeImpl,
   declareFn as declareFnImpl,
   assignFn as assignFnImpl,
-} from './engine-declarations';
+} from './engine-declarations.js';
 
 import {
   pushScope as pushScopeImpl,
@@ -122,14 +122,14 @@ import {
   popEvalContext as popEvalContextImpl,
   inScope as inScopeImpl,
   printStack as printStackImpl,
-} from './engine-scope';
+} from './engine-scope.js';
 
 import {
   ask as askImpl,
   verify as verifyImpl,
   assumeFn as assumeFnImpl,
   forget as forgetImpl,
-} from './engine-assumptions';
+} from './engine-assumptions.js';
 
 import {
   declareSequence as declareSequenceImpl,
@@ -142,30 +142,30 @@ import {
   getSequenceTerms as getSequenceTermsImpl,
   lookupOEIS as lookupOEISImpl,
   checkSequenceOEIS as checkSequenceOEISImpl,
-} from './engine-sequences';
-import { EngineCacheStore } from './engine-cache';
+} from './engine-sequences.js';
+import { EngineCacheStore } from './engine-cache.js';
 import {
   type CommonSymbolTable,
   resetCommonSymbols,
-} from './engine-common-symbols';
-import { CompilationTargetRegistry } from './engine-compilation-targets';
-import { EngineConfigurationLifecycle } from './engine-configuration-lifecycle';
+} from './engine-common-symbols.js';
+import { CompilationTargetRegistry } from './engine-compilation-targets.js';
+import { EngineConfigurationLifecycle } from './engine-configuration-lifecycle.js';
 import {
   type CommonNumberTable,
   createNumberExpression,
   createSymbolExpression,
-} from './engine-expression-entrypoints';
-import { SimplificationRuleStore } from './engine-simplification-rules';
-import { EngineNumericConfiguration } from './engine-numeric-configuration';
-import { EngineRuntimeState } from './engine-runtime-state';
-import { EngineStartupCoordinator } from './engine-startup-coordinator';
-import { createTypeResolver } from './engine-type-resolver';
+} from './engine-expression-entrypoints.js';
+import { SimplificationRuleStore } from './engine-simplification-rules.js';
+import { EngineNumericConfiguration } from './engine-numeric-configuration.js';
+import { EngineRuntimeState } from './engine-runtime-state.js';
+import { EngineStartupCoordinator } from './engine-startup-coordinator.js';
+import { createTypeResolver } from './engine-type-resolver.js';
 import {
   createErrorExpression,
   createTypeErrorExpression,
-} from './engine-validation-entrypoints';
+} from './engine-validation-entrypoints.js';
 
-export type * from './global-types';
+export type * from './global-types.js';
 
 // Free functions backed by a lazily-instantiated global engine
 export {
@@ -182,9 +182,9 @@ export {
   solve,
   compile,
   getDefaultEngine,
-} from './free-functions';
-export type { FreeFunctionOptions } from './free-functions';
-import { _setDefaultEngineFactory } from './free-functions';
+} from './free-functions.js';
+export type { FreeFunctionOptions } from './free-functions.js';
+import { _setDefaultEngineFactory } from './free-functions.js';
 
 export { validatePattern };
 
@@ -206,21 +206,21 @@ export type {
   LanguageTarget,
   TargetSource,
   CompiledFunction,
-} from './compilation/types';
+} from './compilation/types.js';
 
 // Export BigDecimal for arbitrary-precision arithmetic
-export { BigDecimal } from '../big-decimal';
+export { BigDecimal } from '../big-decimal/index.js';
 
-export { JavaScriptTarget } from './compilation/javascript-target';
-export { GLSLTarget } from './compilation/glsl-target';
-export { PythonTarget } from './compilation/python-target';
-export { IntervalJavaScriptTarget } from './compilation/interval-javascript-target';
-export { BaseCompiler } from './compilation/base-compiler';
+export { JavaScriptTarget } from './compilation/javascript-target.js';
+export { GLSLTarget } from './compilation/glsl-target.js';
+export { PythonTarget } from './compilation/python-target.js';
+export { IntervalJavaScriptTarget } from './compilation/interval-javascript-target.js';
+export { BaseCompiler } from './compilation/base-compiler.js';
 
 // Import for internal use
-import type { LanguageTarget } from './compilation/types';
-import { compile as _compile } from './compilation/compile-expression';
-import { fu as _fu } from './symbolic/fu';
+import type { LanguageTarget } from './compilation/types.js';
+import { compile as _compile } from './compilation/compile-expression.js';
+import { fu as _fu } from './symbolic/fu.js';
 
 /**
  *

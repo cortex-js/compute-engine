@@ -1,12 +1,12 @@
 import type {
   IComputeEngine as ComputeEngine,
   Expression,
-} from '../global-types';
-import { collectionElementType } from '../../common/type/utils';
+} from '../global-types.js';
+import { collectionElementType } from '../../common/type/utils.js';
 
-import { isFunction, sym } from './type-guards';
-import { asRational, asBigint, asSmallInteger } from './numerics';
-import { expand } from './expand';
+import { isFunction, sym } from './type-guards.js';
+import { asRational, asBigint, asSmallInteger } from './numerics.js';
+import { expand } from './expand.js';
 
 import {
   solveLinearDiophantine,
@@ -14,7 +14,7 @@ import {
   DiophantineBudgetError,
   type LinearSolution,
   type PellResult,
-} from '../numerics/diophantine';
+} from '../numerics/diophantine.js';
 
 /**
  * Symbolic diophantine solving for the `Solve` pipeline (Phase 3).

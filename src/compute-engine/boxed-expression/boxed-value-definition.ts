@@ -5,20 +5,20 @@ import type {
   BoxedValueDefinition,
   CollectionHandlers,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
+} from '../global-types.js';
 
-import type { Type, TypeString } from '../../common/type/types';
-import { parseType } from '../../common/type/parse';
-import { isValidType } from '../../common/type/utils';
-import { BoxedType } from '../../common/type/boxed-type';
+import type { Type, TypeString } from '../../common/type/types.js';
+import { parseType } from '../../common/type/parse.js';
+import { isValidType } from '../../common/type/utils.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 
-import { defaultCollectionHandlers } from '../collection-utils';
-import type { LatexString } from '../latex-syntax/types';
+import { defaultCollectionHandlers } from '../collection-utils.js';
+import type { LatexString } from '../latex-syntax/types.js';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { isLatexString } from '../latex-syntax/utils';
-import { parse as parseLatex } from '../latex-syntax/latex-syntax';
-import { ConfigurationChangeListener } from '../../common/configuration-change';
+import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { isLatexString } from '../latex-syntax/utils.js';
+import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
+import { ConfigurationChangeListener } from '../../common/configuration-change.js';
 
 /**
  * ### THEORY OF OPERATIONS

@@ -1,6 +1,6 @@
-import type { Expression, RuleStep } from '../global-types';
-import { isFunction } from '../boxed-expression/type-guards';
-import { isEligibleRealRewrite } from '../function-properties';
+import type { Expression, RuleStep } from '../global-types.js';
+import { isFunction } from '../boxed-expression/type-guards.js';
+import { isEligibleRealRewrite } from '../function-properties/index.js';
 
 /**
  * Abs simplification rules consolidated from simplify-rules.ts.

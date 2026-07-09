@@ -1,5 +1,5 @@
-import type { SymbolDefinitions, Expression } from '../global-types';
-import { isNumber } from '../boxed-expression/type-guards';
+import type { SymbolDefinitions, Expression } from '../global-types.js';
+import { isNumber } from '../boxed-expression/type-guards.js';
 
 /** Smooth escape-time value for any z0 → z^2 + c iteration in [0, 1]. */
 function juliaEscape(

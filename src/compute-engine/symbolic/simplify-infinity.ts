@@ -1,5 +1,5 @@
-import type { Expression, RuleStep } from '../global-types';
-import { isFunction, isSymbol } from '../boxed-expression/type-guards';
+import type { Expression, RuleStep } from '../global-types.js';
+import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 
 /**
  * Infinity simplification rules consolidated from simplify-rules.ts.

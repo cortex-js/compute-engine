@@ -1,15 +1,15 @@
-import type { Expression, CanonicalOptions, Scope } from '../global-types';
+import type { Expression, CanonicalOptions, Scope } from '../global-types.js';
 
-import { canonicalInvisibleOperator } from './invisible-operator';
+import { canonicalInvisibleOperator } from './invisible-operator.js';
 
-import { flatten } from './flatten';
-import { canonicalAdd } from './arithmetic-add';
-import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div';
-import { canonicalPower } from './arithmetic-power';
-import { canonicalOrder } from './order';
-import { asBigint } from './numerics';
-import { isOperatorDef, isImaginaryUnit } from './utils';
-import { isFunction, isNumber, isSymbol } from './type-guards';
+import { flatten } from './flatten.js';
+import { canonicalAdd } from './arithmetic-add.js';
+import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div.js';
+import { canonicalPower } from './arithmetic-power.js';
+import { canonicalOrder } from './order.js';
+import { asBigint } from './numerics.js';
+import { isOperatorDef, isImaginaryUnit } from './utils.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
 
 export function canonicalForm(
   expr: Expression,

@@ -1,9 +1,9 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
+} from '../global-types.js';
 
-import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
+import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 
 /**
  * Basic evaluation functions for logical operators.

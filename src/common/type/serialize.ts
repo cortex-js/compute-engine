@@ -1,5 +1,5 @@
-import { NUMERIC_TYPES_SET } from './primitive';
-import type { NamedElement, NumericPrimitiveType, Type } from './types';
+import { NUMERIC_TYPES_SET } from './primitive.js';
+import type { NamedElement, NumericPrimitiveType, Type } from './types.js';
 
 const NEGATION_PRECEDENCE = 3;
 const UNION_PRECEDENCE = 1;

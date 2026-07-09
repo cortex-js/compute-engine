@@ -1,4 +1,4 @@
-import type { SymbolDefinitions } from '../global-types';
+import type { SymbolDefinitions } from '../global-types.js';
 import {
   parseColor,
   apca,
@@ -25,7 +25,7 @@ import {
   isFunction,
   isNumber,
   isString,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 
 /**
  * Canonicalize an alpha value. Returns `undefined` for undefined, non-finite,

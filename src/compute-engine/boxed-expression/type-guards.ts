@@ -8,8 +8,8 @@ import type {
   TensorInterface,
   CollectionInterface,
   IndexedCollectionInterface,
-} from '../global-types';
-import type { NumericValue } from '../numeric-value/types';
+} from '../global-types.js';
+import type { NumericValue } from '../numeric-value/types.js';
 
 function isExpressionImpl(x: unknown): x is Expression {
   const boxed = x as { _kind?: unknown } | null | undefined;

@@ -1,12 +1,12 @@
-import { BigDecimal } from '../../big-decimal';
-import type { SmallInteger } from '../numerics/types';
-import { NumericValue, NumericValueData } from './types';
-import type { MathJsonExpression } from '../../math-json/types';
-import { numberToString } from '../numerics/strings';
-import { numberToExpression } from '../numerics/expression';
-import { NumericPrimitiveType } from '../../common/type/types';
-import { ExactNumericValue } from './exact-numeric-value';
-import { machineNthRoot } from '../numerics/numeric';
+import { BigDecimal } from '../../big-decimal/index.js';
+import type { SmallInteger } from '../numerics/types.js';
+import { NumericValue, NumericValueData } from './types.js';
+import type { MathJsonExpression } from '../../math-json/types.js';
+import { numberToString } from '../numerics/strings.js';
+import { numberToExpression } from '../numerics/expression.js';
+import { NumericPrimitiveType } from '../../common/type/types.js';
+import { ExactNumericValue } from './exact-numeric-value.js';
+import { machineNthRoot } from '../numerics/numeric.js';
 
 export class MachineNumericValue extends NumericValue {
   declare __brand: 'MachineNumericValue';

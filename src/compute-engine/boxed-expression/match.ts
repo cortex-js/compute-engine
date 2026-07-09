@@ -3,14 +3,14 @@ import type {
   ExpressionInput,
   PatternMatchOptions,
   Expression,
-} from '../global-types';
+} from '../global-types.js';
 
-import { permutations } from '../../common/utils';
+import { permutations } from '../../common/utils.js';
 
-import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
-import { isOperatorDef } from './utils';
-import { isNumber, isFunction, isSymbol, isString } from './type-guards';
-import { parse as parseLatex } from '../latex-syntax/latex-syntax';
+import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
+import { isOperatorDef } from './utils.js';
+import { isNumber, isFunction, isSymbol, isString } from './type-guards.js';
+import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 
 /** Internal options extending the public PatternMatchOptions */
 type MatchOptions = PatternMatchOptions & {

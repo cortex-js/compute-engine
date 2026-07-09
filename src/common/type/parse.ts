@@ -1,8 +1,8 @@
-import type { Type, TypeResolver, TypeString } from './types';
+import type { Type, TypeResolver, TypeString } from './types.js';
 
-import { isValidType } from './primitive';
-import { Parser } from './parser';
-import { buildTypeFromAST } from './type-builder';
+import { isValidType } from './primitive.js';
+import { Parser } from './parser.js';
+import { buildTypeFromAST } from './type-builder.js';
 
 // Note: the authoritative BNF grammar for the type syntax lives with the
 // parser implementation in `./parser.ts`.

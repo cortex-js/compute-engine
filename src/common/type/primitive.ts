@@ -1,4 +1,4 @@
-import type { NumericPrimitiveType, PrimitiveType, Type } from './types';
+import type { NumericPrimitiveType, PrimitiveType, Type } from './types.js';
 
 /** All the types representing numeric values */
 export const NUMERIC_TYPES: NumericPrimitiveType[] = [

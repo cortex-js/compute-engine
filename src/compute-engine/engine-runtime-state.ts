@@ -1,4 +1,4 @@
-import { CancellationError } from '../common/interruptible';
+import { CancellationError } from '../common/interruptible.js';
 
 export class EngineRuntimeState {
   private _timeLimit = 2000;

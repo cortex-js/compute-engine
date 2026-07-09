@@ -1,37 +1,40 @@
-import { ARITHMETIC_LIBRARY } from './arithmetic';
-import { CALCULUS_LIBRARY } from './calculus';
-import { COLLECTIONS_LIBRARY } from './collections';
-import { COLORS_LIBRARY } from './colors';
-import { CONTROL_STRUCTURES_LIBRARY } from './control-structures';
-import { COMBINATORICS_LIBRARY } from './combinatorics';
-import { COMPLEX_LIBRARY } from './complex';
-import { CORE_LIBRARY } from './core';
-import { LINEAR_ALGEBRA_LIBRARY } from './linear-algebra';
-import { LOGIC_LIBRARY, LOGIC_FUNCTION_LIBRARY } from './logic';
-import { NUMBER_THEORY_LIBRARY } from './number-theory';
-import { POLYNOMIALS_LIBRARY } from './polynomials';
-import { RELOP_LIBRARY } from './relational-operator';
-import { SETS_LIBRARY } from './sets';
-import { SPECIAL_FUNCTIONS_LIBRARY } from './special-functions';
-import { STATISTICS_LIBRARY } from './statistics';
-import { DISTRIBUTIONS_LIBRARY } from './distributions';
-import { TRIGONOMETRY_LIBRARY } from './trigonometry';
-import { UNITS_LIBRARY } from './units';
-import { FRACTALS_LIBRARY } from './fractals';
+import { ARITHMETIC_LIBRARY } from './arithmetic.js';
+import { CALCULUS_LIBRARY } from './calculus.js';
+import { COLLECTIONS_LIBRARY } from './collections.js';
+import { COLORS_LIBRARY } from './colors.js';
+import { CONTROL_STRUCTURES_LIBRARY } from './control-structures.js';
+import { COMBINATORICS_LIBRARY } from './combinatorics.js';
+import { COMPLEX_LIBRARY } from './complex.js';
+import { CORE_LIBRARY } from './core.js';
+import { LINEAR_ALGEBRA_LIBRARY } from './linear-algebra.js';
+import { LOGIC_LIBRARY, LOGIC_FUNCTION_LIBRARY } from './logic.js';
+import { NUMBER_THEORY_LIBRARY } from './number-theory.js';
+import { POLYNOMIALS_LIBRARY } from './polynomials.js';
+import { RELOP_LIBRARY } from './relational-operator.js';
+import { SETS_LIBRARY } from './sets.js';
+import { SPECIAL_FUNCTIONS_LIBRARY } from './special-functions.js';
+import { STATISTICS_LIBRARY } from './statistics.js';
+import { DISTRIBUTIONS_LIBRARY } from './distributions.js';
+import { TRIGONOMETRY_LIBRARY } from './trigonometry.js';
+import { UNITS_LIBRARY } from './units.js';
+import { FRACTALS_LIBRARY } from './fractals.js';
 
-import type { LibraryCategory } from '../latex-syntax/types';
+import type { LibraryCategory } from '../latex-syntax/types.js';
 
-import { _BoxedValueDefinition } from '../boxed-expression/boxed-value-definition';
-import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression';
-import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
-import { isValidOperatorDef, isValidValueDef } from '../boxed-expression/utils';
+import { _BoxedValueDefinition } from '../boxed-expression/boxed-value-definition.js';
+import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression.js';
+import { isValidSymbol, validateSymbol } from '../../math-json/symbols.js';
+import {
+  isValidOperatorDef,
+  isValidValueDef,
+} from '../boxed-expression/utils.js';
 import type {
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
   LibraryDefinition,
   ExpressionInput,
-} from '../global-types';
-import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-definition';
+} from '../global-types.js';
+import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-definition.js';
 
 /**
  * The standard libraries bundled with the Compute Engine.

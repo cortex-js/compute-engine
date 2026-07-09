@@ -27,14 +27,14 @@ import {
   getValue as _getValue,
   unwrap as _unwrap,
   unwrapOrPropagate as _unwrapOrPropagate,
-} from './util';
+} from './util.js';
 import {
   add as _add,
   sub as _sub,
   mul as _mul,
   div as _div,
   negate as _negate,
-} from './arithmetic';
+} from './arithmetic.js';
 import {
   sqrt as _sqrt,
   square as _square,
@@ -70,7 +70,7 @@ import {
   erfc as _erfc,
   exp2 as _exp2,
   hypot as _hypot,
-} from './elementary';
+} from './elementary.js';
 import {
   sin as _sin,
   cos as _cos,
@@ -100,7 +100,7 @@ import {
   sinc as _sinc,
   fresnelS as _fresnelS,
   fresnelC as _fresnelC,
-} from './trigonometric';
+} from './trigonometric.js';
 import {
   less as _less,
   lessEqual as _lessEqual,
@@ -113,10 +113,10 @@ import {
   not as _not,
   piecewise as _piecewise,
   clamp as _clamp,
-} from './comparison';
+} from './comparison.js';
 
 // Types
-export type { Interval, IntervalResult, BoolInterval } from './types';
+export type { Interval, IntervalResult, BoolInterval } from './types.js';
 
 // Utilities
 export {
@@ -136,10 +136,10 @@ export {
   getValue,
   unwrap,
   unwrapOrPropagate,
-} from './util';
+} from './util.js';
 
 // Arithmetic operations
-export { add, sub, mul, div, negate, _mul } from './arithmetic';
+export { add, sub, mul, div, negate, _mul } from './arithmetic.js';
 
 // Elementary functions
 export {
@@ -172,7 +172,7 @@ export {
   binomial,
   gcd,
   lcm,
-} from './elementary';
+} from './elementary.js';
 
 // Trigonometric functions
 export {
@@ -204,7 +204,7 @@ export {
   sinc,
   fresnelS,
   fresnelC,
-} from './trigonometric';
+} from './trigonometric.js';
 
 // Comparison operations
 export {
@@ -219,7 +219,7 @@ export {
   not,
   piecewise,
   clamp,
-} from './comparison';
+} from './comparison.js';
 
 /**
  * The complete interval arithmetic library object.

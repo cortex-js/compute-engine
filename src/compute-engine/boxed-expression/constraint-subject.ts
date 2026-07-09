@@ -3,8 +3,8 @@ import type {
   IComputeEngine as ComputeEngine,
   IntervalBounds,
   Sign,
-} from '../global-types';
-import { isFunction, isSymbol, isNumber } from './type-guards';
+} from '../global-types.js';
+import { isFunction, isSymbol, isNumber } from './type-guards.js';
 
 /**
  * Constraint subjects (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §2).

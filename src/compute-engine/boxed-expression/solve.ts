@@ -1,20 +1,20 @@
-import { matchAnyRules, matchAnyRulesWithSteps } from './rules';
-import { expand } from './expand';
+import { matchAnyRules, matchAnyRulesWithSteps } from './rules.js';
+import { expand } from './expand.js';
 import type {
   Expression,
   BoxedSubstitution,
   IComputeEngine as ComputeEngine,
   Rule,
   RuleSteps,
-} from '../global-types';
-import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
+} from '../global-types.js';
+import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import {
   polynomialDegree,
   getPolynomialCoefficients,
   fromCoefficients,
-} from './polynomials';
-import { asSmallInteger } from './numerics';
-import { realPolynomialRoots } from '../numerics/polynomial-roots';
+} from './polynomials.js';
+import { asSmallInteger } from './numerics.js';
+import { realPolynomialRoots } from '../numerics/polynomial-roots.js';
 
 function numericApproximation(value: unknown): number | undefined {
   if (typeof value === 'number') return value;

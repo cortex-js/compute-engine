@@ -6,15 +6,15 @@ import type {
   Sign,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { isNumber, isSymbol } from '../boxed-expression/type-guards';
-import { shouldNumericize } from '../boxed-expression/apply';
+} from '../global-types.js';
+import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
+import { shouldNumericize } from '../boxed-expression/apply.js';
 import {
   type SubjectPart,
   hasAssumptions,
   signFromBounds,
-} from '../boxed-expression/constraint-subject';
-import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds';
+} from '../boxed-expression/constraint-subject.js';
+import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
 
 /**
  * Assumption-based sign fallback for the part extractors

@@ -2,7 +2,7 @@ import type {
   Expression,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
+} from '../global-types.js';
 import {
   evaluateAnd,
   evaluateOr,
@@ -14,8 +14,8 @@ import {
   evaluateNor,
   toCNF,
   toDNF,
-} from '../symbolic/logic-utils';
-import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards';
+} from '../symbolic/logic-utils.js';
+import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards.js';
 import {
   extractFiniteDomainWithReason,
   bodyContainsVariable,
@@ -30,7 +30,7 @@ import {
   findPrimeImplicates,
   minimalDNF,
   minimalCNF,
-} from './logic-analysis';
+} from './logic-analysis.js';
 
 export const LOGIC_LIBRARY: SymbolDefinitions = {
   True: {

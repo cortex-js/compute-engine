@@ -1,4 +1,4 @@
-import type { TypeReference, TypeResolver } from '../common/type/types';
+import type { TypeReference, TypeResolver } from '../common/type/types.js';
 
 type ResolverScope = {
   parent: ResolverScope | null;

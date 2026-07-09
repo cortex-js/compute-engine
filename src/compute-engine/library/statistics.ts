@@ -7,9 +7,9 @@ import {
   erfc,
   erfi,
   erfInv,
-} from '../numerics/special-functions';
-import { apply, shouldNumericize } from '../boxed-expression/apply';
-import { isNumber, isSymbol } from '../boxed-expression/type-guards';
+} from '../numerics/special-functions.js';
+import { apply, shouldNumericize } from '../boxed-expression/apply.js';
+import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
 import {
   bigCorrelation,
   bigCovariance,
@@ -35,21 +35,21 @@ import {
   quartiles,
   skewness,
   variance,
-} from '../numerics/statistics';
+} from '../numerics/statistics.js';
 import type {
   Expression,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { bignumPreferred } from '../boxed-expression/utils';
-import { toInteger } from '../boxed-expression/numerics';
-import { deterministicRandom, nextSeed } from '../numerics/random';
+} from '../global-types.js';
+import { bignumPreferred } from '../boxed-expression/utils.js';
+import { toInteger } from '../boxed-expression/numerics.js';
+import { deterministicRandom, nextSeed } from '../numerics/random.js';
 import {
   distributionMean,
   distributionStandardDeviation,
   distributionVariance,
   isDistributionExpression,
-} from './distributions';
+} from './distributions.js';
 
 // Geometric mean:
 // Harmonic mean:

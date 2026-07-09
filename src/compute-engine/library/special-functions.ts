@@ -1,8 +1,8 @@
-import type { SymbolDefinitions } from '../global-types';
-import { applyN, shouldNumericize } from '../boxed-expression/apply';
-import { asSmallInteger } from '../boxed-expression/numerics';
-import { isNumber } from '../boxed-expression/type-guards';
-import { numericTypeHandler } from './type-handlers';
+import type { SymbolDefinitions } from '../global-types.js';
+import { applyN, shouldNumericize } from '../boxed-expression/apply.js';
+import { asSmallInteger } from '../boxed-expression/numerics.js';
+import { isNumber } from '../boxed-expression/type-guards.js';
+import { numericTypeHandler } from './type-handlers.js';
 import {
   ellipticK,
   ellipticE,
@@ -21,7 +21,7 @@ import {
   bigAgm,
   expIntegralEi,
   logIntegral,
-} from '../numerics/special-functions';
+} from '../numerics/special-functions.js';
 import {
   ellipticKComplex,
   ellipticEComplex,
@@ -36,7 +36,7 @@ import {
   dedekindEta,
   eisensteinE,
   agmComplex,
-} from '../numerics/numeric-complex';
+} from '../numerics/numeric-complex.js';
 
 /**
  * Tier-2 numeric kernels for special functions (ROADMAP item 4).

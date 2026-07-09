@@ -20,6 +20,10 @@ module.exports = {
   setupFilesAfterEnv: ['../test/jest-config.ts'],
   reporters: ['jest-silent-reporter'],
   transformIgnorePatterns: ['node_modules/(?!(complex-esm)/)'],
+  // Source imports carry explicit `.js` extensions (nodenext-style) that
+  // resolve to `.ts` files under bundler resolution. Strip the extension so
+  // jest's resolver finds the TypeScript sources.
+  moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
   transform: {
     '^.+\\.(ts|js)$': [
       'ts-jest',

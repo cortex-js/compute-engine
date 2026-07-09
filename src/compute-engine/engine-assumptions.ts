@@ -3,22 +3,22 @@ import type {
   BoxedSubstitution,
   IComputeEngine,
   AssumeResult,
-} from './global-types';
+} from './global-types.js';
 
-import type { MathJsonSymbol } from '../math-json/types';
+import type { MathJsonSymbol } from '../math-json/types.js';
 
-import { isWildcard, wildcardName } from './boxed-expression/pattern-utils';
-import { isSymbol, isFunction } from './boxed-expression/type-guards';
-import { subjectOf } from './boxed-expression/constraint-subject';
-import { isValueDef } from './boxed-expression/utils';
+import { isWildcard, wildcardName } from './boxed-expression/pattern-utils.js';
+import { isSymbol, isFunction } from './boxed-expression/type-guards.js';
+import { subjectOf } from './boxed-expression/constraint-subject.js';
+import { isValueDef } from './boxed-expression/utils.js';
 
 import {
   assume as assumeImpl,
   getInequalityBoundsFromAssumptions,
-} from './assume';
+} from './assume.js';
 
-import { asLatexString } from './latex-syntax/utils';
-import { parse as parseLatex } from './latex-syntax/latex-syntax';
+import { asLatexString } from './latex-syntax/utils.js';
+import { parse as parseLatex } from './latex-syntax/latex-syntax.js';
 
 /**
  * Normalize a predicate argument that may be a string.

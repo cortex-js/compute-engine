@@ -11,7 +11,7 @@
 //
 // Tools compared:
 //   ce-current   Compute Engine, freshly-built local bundle  (the "current build")
-//   ce-pub       Compute Engine, last published npm release   (0.69.0 by default)
+//   ce-pub       Compute Engine, last published npm release   (0.70.0 by default)
 //   sympy        SymPy + mpmath        (Python, symbolic + arbitrary precision)
 //   mathjs       math.js               (JavaScript, numeric + light symbolic)
 //   numpy        NumPy                 (Python, numeric only, double precision)
@@ -20,7 +20,7 @@
 // Override versions / paths via env:
 //   CE_CURRENT_BUNDLE   path to the current-build ESM bundle
 //   CE_PUBLISHED_BUNDLE  path to the published-version ESM bundle
-//   CE_PUBLISHED_VERSION label for the published column (default 0.69.0)
+//   CE_PUBLISHED_VERSION label for the published column (default 0.70.0)
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -31,14 +31,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 
 const PER_CASE_TIMEOUT_MS = 20000;
-const PUBLISHED_VERSION = process.env.CE_PUBLISHED_VERSION || '0.69.0';
+const PUBLISHED_VERSION = process.env.CE_PUBLISHED_VERSION || '0.70.0';
 
 const PYTHON = join(ROOT, 'venv', 'bin', 'python3');
 const NODE = process.execPath;
 const RUBI_BATCH_TIMEOUT_MS = 180000;
 const CE_CURRENT_BUNDLE = process.env.CE_CURRENT_BUNDLE || join(ROOT, 'dist', 'esm-min', 'compute-engine.js');
 const CE_PUBLISHED_BUNDLE = process.env.CE_PUBLISHED_BUNDLE ||
-  join(ROOT, 'benchmarks', '.competitors', `ce-${PUBLISHED_VERSION}`, 'dist', 'compute-engine.min.esm.js');
+  join(ROOT, 'benchmarks', '.competitors', `ce-${PUBLISHED_VERSION}`, 'dist', 'esm-min', 'compute-engine.js');
 
 const suite = JSON.parse(readFileSync(join(__dirname, 'cases.json'), 'utf8'));
 

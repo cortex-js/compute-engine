@@ -1,7 +1,7 @@
-import type { MathJsonExpression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types.js';
 
-import { CancellationError } from '../../common/interruptible';
-import { _BoxedExpression } from './abstract-boxed-expression';
+import { CancellationError } from '../../common/interruptible.js';
+import { _BoxedExpression } from './abstract-boxed-expression.js';
 import type {
   BoxedRule,
   BoxedRuleSet,
@@ -18,19 +18,19 @@ import type {
   ReplaceOptions,
   ExpressionInput,
   FormOption,
-} from '../global-types';
+} from '../global-types.js';
 
 import {
   isInequalityOperator,
   isRelationalOperator,
-} from '../latex-syntax/utils';
+} from '../latex-syntax/utils.js';
 
-import type { Parser, Terminator } from '../latex-syntax/types';
-import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary';
+import type { Parser, Terminator } from '../latex-syntax/types.js';
+import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary.js';
 
-import { isPrime } from './predicates';
-import { isString, isNumber, isSymbol, isFunction } from './type-guards';
-import { getRuleIndex, candidateRules } from './rule-index';
+import { isPrime } from './predicates.js';
+import { isString, isNumber, isSymbol, isFunction } from './type-guards.js';
+import { getRuleIndex, candidateRules } from './rule-index.js';
 
 /** Condition functions that already triggered the one-time "non-boolean
  * condition result" warning (see `applyRule`). */
@@ -630,10 +630,12 @@ function parseRule(
   // Construct via the injected LatexSyntax class (avoids static import).
   const LatexSyntaxClass = ce._requireLatexSyntax().constructor as new (
     options?: Record<string, unknown>
-  ) => InstanceType<typeof import('../latex-syntax/latex-syntax').LatexSyntax>;
+  ) => InstanceType<
+    typeof import('../latex-syntax/latex-syntax.js').LatexSyntax
+  >;
   const ruleSyntax = new LatexSyntaxClass({
     dictionary: ruleDict as ReadonlyArray<
-      Partial<import('../latex-syntax/types').LatexDictionaryEntry>
+      Partial<import('../latex-syntax/types.js').LatexDictionaryEntry>
     >,
   });
 

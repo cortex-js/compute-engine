@@ -1,28 +1,28 @@
-import type { Expression, SymbolDefinitions } from '../global-types';
+import type { Expression, SymbolDefinitions } from '../global-types.js';
 
-import { checkType } from '../boxed-expression/validate';
-import { hasSymbolicTranscendental } from '../boxed-expression/utils';
-import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
-import { BoxedNumber } from '../boxed-expression/boxed-number';
+import { checkType } from '../boxed-expression/validate.js';
+import { hasSymbolicTranscendental } from '../boxed-expression/utils.js';
+import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import { BoxedNumber } from '../boxed-expression/boxed-number.js';
 
 import {
   applicableN1,
   canonicalFunctionLiteral,
   canonicalFunctionLiteralArguments,
-} from '../function-utils';
-import { monteCarloEstimate } from '../numerics/monte-carlo';
-import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature';
-import { centeredDiff8thOrder, limit } from '../numerics/numeric';
-import { derivative, differentiate } from '../symbolic/derivative';
+} from '../function-utils.js';
+import { monteCarloEstimate } from '../numerics/monte-carlo.js';
+import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
+import { centeredDiff8thOrder, limit } from '../numerics/numeric.js';
+import { derivative, differentiate } from '../symbolic/derivative.js';
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
-import '../symbolic/explain-derivative';
-import { antiderivative } from '../symbolic/antiderivative';
-import { dSolve } from '../symbolic/differential-equations';
-import { nDSolve, symbolArg } from '../differential-equation-utils';
-import { symbolicLimit } from '../symbolic/limit';
-import { residue } from '../symbolic/residue';
-import { computeSeries, normalStrip } from '../symbolic/series';
-import { canonicalLimits, canonicalLimitsSequence } from './utils';
+import '../symbolic/explain-derivative.js';
+import { antiderivative } from '../symbolic/antiderivative.js';
+import { dSolve } from '../symbolic/differential-equations.js';
+import { nDSolve, symbolArg } from '../differential-equation-utils.js';
+import { symbolicLimit } from '../symbolic/limit.js';
+import { residue } from '../symbolic/residue.js';
+import { computeSeries, normalStrip } from '../symbolic/series.js';
+import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
 
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
   {
@@ -434,7 +434,7 @@ volumes
         for (let i = limitsSequence.length - 1; i >= 0; i--) {
           if (!isFunction(limitsSequence[i])) continue;
           const limitFn = limitsSequence[i] as Expression &
-            import('../global-types').FunctionInterface;
+            import('../global-types.js').FunctionInterface;
           const [varExpr, lower, upper] = limitFn.ops;
           let variable = sym(varExpr);
 

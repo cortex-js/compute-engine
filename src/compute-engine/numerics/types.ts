@@ -1,4 +1,4 @@
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
 /** @internal */
 type IsInteger<N extends number> = `${N}` extends `${string}.${string}`

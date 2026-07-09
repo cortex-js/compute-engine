@@ -1,17 +1,17 @@
-import { antiderivative } from './antiderivative';
-import type { Expression } from '../global-types';
-import { isValueDef } from '../boxed-expression/utils';
-import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
+import { antiderivative } from './antiderivative.js';
+import type { Expression } from '../global-types.js';
+import { isValueDef } from '../boxed-expression/utils.js';
+import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 import {
   getPolynomialCoefficients,
   polynomialDegree,
-} from '../boxed-expression/polynomials';
+} from '../boxed-expression/polynomials.js';
 import {
   derivativeOrderOfDependent,
   isDependentFunction,
   isDerivativeOfDependent,
-} from '../differential-equation-utils';
-import { durandKernerRoots } from '../numerics/polynomial-roots';
+} from '../differential-equation-utils.js';
+import { durandKernerRoots } from '../numerics/polynomial-roots.js';
 
 interface LinearTermCoefficients {
   derivative: Expression;

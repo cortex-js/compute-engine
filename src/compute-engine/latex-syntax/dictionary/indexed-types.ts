@@ -17,7 +17,7 @@ import type {
   PostfixParseHandler,
   Precedence,
   SerializeHandler,
-} from '../types';
+} from '../types.js';
 
 export type CommonEntry = {
   /** Note: a name is required if a serialize handler is provided */

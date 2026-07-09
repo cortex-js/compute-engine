@@ -1,9 +1,9 @@
-import type { Type } from '../common/type/types';
-import { typeToString } from '../common/type/serialize';
-import { BoxedType } from '../common/type/boxed-type';
+import type { Type } from '../common/type/types.js';
+import { typeToString } from '../common/type/serialize.js';
+import { BoxedType } from '../common/type/boxed-type.js';
 
-import { asLatexString, isLatexString } from './latex-syntax/utils';
-import type { Expression, Metadata, ExpressionInput } from './global-types';
+import { asLatexString, isLatexString } from './latex-syntax/utils.js';
+import type { Expression, Metadata, ExpressionInput } from './global-types.js';
 
 type ValidationHost = {
   string(s: string, metadata?: Metadata): Expression;

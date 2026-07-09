@@ -8,18 +8,18 @@
  * @module latex-syntax
  */
 
-import type { MathJsonExpression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types.js';
 import type {
   LatexDictionaryEntry,
   LatexString,
   ParseLatexOptions,
   SerializeLatexOptions,
-} from './types';
-import { LATEX_DICTIONARY } from './dictionary/default-dictionary';
-import { indexLatexDictionary } from './dictionary/definitions';
-import type { IndexedLatexDictionary } from './dictionary/indexed-types';
-import { parse as parseImpl } from './parse';
-import { serializeLatex as serializeImpl } from './serializer';
+} from './types.js';
+import { LATEX_DICTIONARY } from './dictionary/default-dictionary.js';
+import { indexLatexDictionary } from './dictionary/definitions.js';
+import type { IndexedLatexDictionary } from './dictionary/indexed-types.js';
+import { parse as parseImpl } from './parse.js';
+import { serializeLatex as serializeImpl } from './serializer.js';
 import {
   getApplyFunctionStyle,
   getFractionStyle,
@@ -29,8 +29,8 @@ import {
   getNumericSetStyle,
   getPowerStyle,
   getRootStyle,
-} from './serializer-style';
-import { BoxedType } from '../../common/type/boxed-type';
+} from './serializer-style.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 
 // ---------------------------------------------------------------------------
 //  Public option types

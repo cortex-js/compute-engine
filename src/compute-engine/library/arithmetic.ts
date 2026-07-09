@@ -1,21 +1,21 @@
 import { Complex } from 'complex-esm';
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
 import {
   checkType,
   checkTypes,
   checkNumericArgs,
-} from '../boxed-expression/validate';
-import { bignumPreferred } from '../boxed-expression/utils';
-import { polynomialGCDMulti } from '../boxed-expression/polynomials';
+} from '../boxed-expression/validate.js';
+import { bignumPreferred } from '../boxed-expression/utils.js';
+import { polynomialGCDMulti } from '../boxed-expression/polynomials.js';
 import {
   asSmallInteger,
   asRational,
   asBignum,
   asBigint,
   toInteger,
-} from '../boxed-expression/numerics';
-import { addOrder } from '../boxed-expression/order';
+} from '../boxed-expression/numerics.js';
+import { addOrder } from '../boxed-expression/order.js';
 
 import {
   apply,
@@ -23,24 +23,24 @@ import {
   applyN,
   shouldNumericize,
   isExactNumber,
-} from '../boxed-expression/apply';
-import { flatten } from '../boxed-expression/flatten';
+} from '../boxed-expression/apply.js';
+import { flatten } from '../boxed-expression/flatten.js';
 
 import {
   gamma as gammaComplex,
   gammaln as lngammaComplex,
   incompleteGammaUpperComplex,
-} from '../numerics/numeric-complex';
+} from '../numerics/numeric-complex.js';
 import {
   factorial2 as bigFactorial2,
   gcd as bigGcd,
   lcm as bigLcm,
-} from '../numerics/numeric-bignum';
-import { factorial as bigFactorial } from '../numerics/numeric-bigint';
+} from '../numerics/numeric-bignum.js';
+import { factorial as bigFactorial } from '../numerics/numeric-bigint.js';
 import {
   zetaEvenCoefficient,
   zetaNegativeInteger,
-} from '../numerics/bernoulli';
+} from '../numerics/bernoulli.js';
 import {
   gamma,
   gammaln,
@@ -65,50 +65,50 @@ import {
   besselK,
   airyAi,
   airyBi,
-} from '../numerics/special-functions';
-import { factorial2, gcd, lcm } from '../numerics/numeric';
-import { rationalize } from '../numerics/rationals';
-import { isPrime } from '../boxed-expression/predicates';
+} from '../numerics/special-functions.js';
+import { factorial2, gcd, lcm } from '../numerics/numeric.js';
+import { rationalize } from '../numerics/rationals.js';
+import { isPrime } from '../boxed-expression/predicates.js';
 
 import {
   canonicalAdd,
   add,
   addType,
   addN,
-} from '../boxed-expression/arithmetic-add';
+} from '../boxed-expression/arithmetic-add.js';
 import {
   mul,
   mulN,
   canonicalDivide,
-} from '../boxed-expression/arithmetic-mul-div';
+} from '../boxed-expression/arithmetic-mul-div.js';
 import {
   canonicalBigop,
   reduceBigOp,
   NON_ENUMERABLE_DOMAIN,
   classifyBigopDomain,
-} from './utils';
+} from './utils.js';
 import {
   canonicalPower,
   canonicalRoot,
   pow,
   root,
-} from '../boxed-expression/arithmetic-power';
-import { parseType } from '../../common/type/parse';
-import { widen } from '../../common/type/utils';
+} from '../boxed-expression/arithmetic-power.js';
+import { parseType } from '../../common/type/parse.js';
+import { widen } from '../../common/type/utils.js';
 import {
   numericTypeHandler,
   elementaryFunctionType,
   gammaPoleType,
   roundingFunctionType,
   measurementType,
-} from './type-handlers';
+} from './type-handlers.js';
 import {
   isQuantity,
   quantityAdd,
   quantityMultiply,
   quantityDivide,
   quantityPower,
-} from './quantity-arithmetic';
+} from './quantity-arithmetic.js';
 import {
   isMeasurement,
   measurementAdd,
@@ -120,24 +120,28 @@ import {
   measurementRoot,
   measurementLn,
   measurementLog,
-} from './measurement-arithmetic';
-import { range, rangeLast } from './collections';
-import { run, runAsync, CancellationError } from '../../common/interruptible';
+} from './measurement-arithmetic.js';
+import { range, rangeLast } from './collections.js';
+import {
+  run,
+  runAsync,
+  CancellationError,
+} from '../../common/interruptible.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
   SymbolDefinitions,
   Sign,
-} from '../global-types';
+} from '../global-types.js';
 import {
   isNumber,
   isFunction,
   isString,
-} from '../boxed-expression/type-guards';
-import { canonical } from '../boxed-expression/canonical-utils';
-import { isNumericTuple } from '../collection-utils';
-import { isTensor } from '../boxed-expression/boxed-tensor';
-import { signFromAssumedPart } from './complex';
+} from '../boxed-expression/type-guards.js';
+import { canonical } from '../boxed-expression/canonical-utils.js';
+import { isNumericTuple } from '../collection-utils.js';
+import { isTensor } from '../boxed-expression/boxed-tensor.js';
+import { signFromAssumedPart } from './complex.js';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:

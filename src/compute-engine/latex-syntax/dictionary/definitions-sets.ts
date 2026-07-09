@@ -5,16 +5,16 @@ import {
   operand,
   operands,
   stringValue,
-} from '../../../math-json/utils';
-import { joinLatex } from '../tokenizer';
-import { MathJsonExpression } from '../../../math-json/types';
+} from '../../../math-json/utils.js';
+import { joinLatex } from '../tokenizer.js';
+import { MathJsonExpression } from '../../../math-json/types.js';
 import {
   LatexDictionary,
   Serializer,
   LatexString,
   Parser,
   COMPARISON_PRECEDENCE,
-} from '../types';
+} from '../types.js';
 
 /**
  * Parse the body of an interval expression and create an Interval MathJSON expression.

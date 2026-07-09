@@ -1,4 +1,4 @@
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 
 // Lazy reference to break circular dependency:
 // compare → stochastic-equal → compile-expression → base-compiler → utils → ...

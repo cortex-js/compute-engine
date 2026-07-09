@@ -1,5 +1,5 @@
-import type { Expression, RuleStep } from '../global-types';
-import { isFunction } from '../boxed-expression/type-guards';
+import type { Expression, RuleStep } from '../global-types.js';
+import { isFunction } from '../boxed-expression/type-guards.js';
 
 /**
  * Hyperbolic trig simplification rules consolidated from simplify-rules.ts.

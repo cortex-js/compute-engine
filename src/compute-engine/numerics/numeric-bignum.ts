@@ -1,5 +1,5 @@
-import type { BigNum } from './types';
-import { BigDecimal } from '../../big-decimal';
+import type { BigNum } from './types.js';
+import { BigDecimal } from '../../big-decimal/index.js';
 
 export function gcd(a: BigNum, b: BigNum): BigNum {
   //@todo: https://github.com/Yaffle/bigint-gcd/blob/main/gcd.js

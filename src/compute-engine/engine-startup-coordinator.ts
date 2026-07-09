@@ -1,17 +1,17 @@
-import { BoxedNumber } from './boxed-expression/boxed-number';
+import { BoxedNumber } from './boxed-expression/boxed-number.js';
 import {
   type CommonSymbolTable,
   initializeCommonSymbols,
-} from './engine-common-symbols';
+} from './engine-common-symbols.js';
 import {
   loadLibraryDefinitions,
   resolveBootstrapLibraries,
-} from './engine-library-bootstrap';
+} from './engine-library-bootstrap.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
   LibraryDefinition,
-} from './global-types';
+} from './global-types.js';
 
 export type CommonNumberBindings = {
   Zero: Expression;

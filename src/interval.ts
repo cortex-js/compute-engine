@@ -11,7 +11,7 @@ export type {
   Interval,
   IntervalResult,
   BoolInterval,
-} from './compute-engine/interval/types';
+} from './compute-engine/interval/types.js';
 
 // Utilities
 export {
@@ -31,7 +31,7 @@ export {
   getValue,
   unwrap,
   unwrapOrPropagate,
-} from './compute-engine/interval/util';
+} from './compute-engine/interval/util.js';
 
 // Arithmetic operations
 export {
@@ -41,7 +41,7 @@ export {
   div,
   negate,
   _mul,
-} from './compute-engine/interval/arithmetic';
+} from './compute-engine/interval/arithmetic.js';
 
 // Elementary functions
 export {
@@ -77,7 +77,7 @@ export {
   erfc,
   exp2,
   hypot,
-} from './compute-engine/interval/elementary';
+} from './compute-engine/interval/elementary.js';
 
 // Trigonometric functions
 export {
@@ -109,7 +109,7 @@ export {
   sinc,
   fresnelS,
   fresnelC,
-} from './compute-engine/interval/trigonometric';
+} from './compute-engine/interval/trigonometric.js';
 
 // Comparison operations
 export {
@@ -124,7 +124,7 @@ export {
   not,
   piecewise,
   clamp,
-} from './compute-engine/interval/comparison';
+} from './compute-engine/interval/comparison.js';
 
 // Runtime library object for compiled interval arithmetic functions
-export { IntervalArithmetic } from './compute-engine/interval/index';
+export { IntervalArithmetic } from './compute-engine/interval/index.js';

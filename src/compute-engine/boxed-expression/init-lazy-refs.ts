@@ -2,26 +2,26 @@
 // Import it once from the main entry point (index.ts) so the registrations
 // run before any user code.
 
-import { expand } from './expand';
-import { _setExpand } from './compare';
+import { expand } from './expand.js';
+import { _setExpand } from './compare.js';
 
-import { serializeJson, _setProduct } from './serialize';
+import { serializeJson, _setProduct } from './serialize.js';
 import {
   _setSerializeJson,
   _setExpandForIs,
   _setGetPolynomialCoefficients,
   _setGetPolynomialDegree,
   _setFindUnivariateRoots,
-} from './abstract-boxed-expression';
+} from './abstract-boxed-expression.js';
 
-import { Product } from './arithmetic-mul-div';
-import { getPolynomialCoefficients, polynomialDegree } from './polynomials';
+import { Product } from './arithmetic-mul-div.js';
+import { getPolynomialCoefficients, polynomialDegree } from './polynomials.js';
 
-import { findUnivariateRoots } from './solve';
+import { findUnivariateRoots } from './solve.js';
 
 // eslint-disable-next-line import/no-restricted-paths
-import { compile } from '../compilation/compile-expression';
-import { _setCompile } from './stochastic-equal';
+import { compile } from '../compilation/compile-expression.js';
+import { _setCompile } from './stochastic-equal.js';
 
 _setExpand(expand);
 _setExpandForIs(expand);

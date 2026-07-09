@@ -2,17 +2,17 @@ import type {
   Expression,
   FunctionInterface,
   DisplayDigits,
-} from '../global-types';
-import type { BigDecimal } from '../../big-decimal';
+} from '../global-types.js';
+import type { BigDecimal } from '../../big-decimal/index.js';
 
-import { machineValue } from '../../math-json/utils';
-import { isRational } from '../numerics/rationals';
+import { machineValue } from '../../math-json/utils.js';
+import { isRational } from '../numerics/rationals.js';
 import {
   roundToSignificant,
   roundToDecimalPlace,
   roundMeasurementForDisplay,
-} from '../numerics/strings';
-import { isFunction, isSymbol, isString, isNumber } from './type-guards';
+} from '../numerics/strings.js';
+import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
 
 /** Helper type for expressions known to be function expressions (in operator/function callbacks) */
 type FnExpr = Expression & FunctionInterface;

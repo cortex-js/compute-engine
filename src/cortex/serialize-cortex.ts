@@ -11,23 +11,23 @@ import {
   mapArgs,
   matchesNumber,
   matchesString,
-} from '../math-json/utils';
-import { splitGraphemes } from '../common/grapheme-splitter';
-import { NumberSerializationFormat } from '../compute-engine/latex-syntax/types';
-import { MathJsonExpression } from '../math-json/types';
+} from '../math-json/utils.js';
+import { splitGraphemes } from '../common/grapheme-splitter.js';
+import { NumberSerializationFormat } from '../compute-engine/latex-syntax/types.js';
+import { MathJsonExpression } from '../math-json/types.js';
 import {
   serializeHexFloat,
   serializeNumber,
-} from '../compute-engine/latex-syntax/serialize-number';
+} from '../compute-engine/latex-syntax/serialize-number.js';
 import {
   EmptyBlock,
   FormattingOptions,
   Formatter,
   FormattingBlock,
-} from './formatter';
-import { DIGITS, ESCAPED_CHARS, isBreak, isInvisible } from './characters';
-import { RESERVED_WORDS } from './reserved-words';
-import { OPERATORS as SHARED_OPERATORS } from './operators';
+} from './formatter.js';
+import { DIGITS, ESCAPED_CHARS, isBreak, isInvisible } from './characters.js';
+import { RESERVED_WORDS } from './reserved-words.js';
+import { OPERATORS as SHARED_OPERATORS } from './operators.js';
 
 export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
   positiveInfinity: '+Infinity',

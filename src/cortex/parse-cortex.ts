@@ -1,8 +1,8 @@
-import { MathJsonExpression } from '../math-json/types';
-import { Origin } from '../common/debug';
+import { MathJsonExpression } from '../math-json/types.js';
+import { Origin } from '../common/debug.js';
 
-import { ParsingDiagnostic } from './diagnostics';
-import { Parser } from './parser';
+import { ParsingDiagnostic } from './diagnostics.js';
+import { Parser } from './parser.js';
 
 /** Analyze the reported errors and combine them when possible */
 export function analyzeErrors(

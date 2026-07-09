@@ -10,14 +10,14 @@
 //                               RuleFail when a utility can't apply, which
 //                               makes the driver try the next rule.
 
-import type { Expr as Expression, Json } from './types';
-import type { IComputeEngine as ComputeEngine } from '../types-engine';
-import { isNumber } from '../boxed-expression/type-guards';
+import type { Expr as Expression, Json } from './types.js';
+import type { IComputeEngine as ComputeEngine } from '../types-engine.js';
+import { isNumber } from '../boxed-expression/type-guards.js';
 
-import { expand } from '../boxed-expression/expand';
+import { expand } from '../boxed-expression/expand.js';
 
-import type { Env } from './match';
-import { toTimesPower } from './normal-form';
+import type { Env } from './match.js';
+import { toTimesPower } from './normal-form.js';
 
 export class RuleFail extends Error {
   constructor(reason: string) {

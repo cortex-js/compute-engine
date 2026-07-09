@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 import type {
   ExpressionInput,
   Expression,
@@ -7,14 +7,14 @@ import type {
   IComputeEngine as ComputeEngine,
   Metadata,
   Scope,
-} from '../global-types';
-import type { FormOption } from '../types-serialization';
+} from '../global-types.js';
+import type { FormOption } from '../types-serialization.js';
 
 import type {
   MathJsonExpression,
   ExpressionObject,
   MathJsonSymbol,
-} from '../../math-json/types';
+} from '../../math-json/types.js';
 import {
   hasMetaData,
   machineValue,
@@ -24,37 +24,37 @@ import {
   missingIfEmpty,
   stringValue,
   symbol,
-} from '../../math-json/utils';
-import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
+} from '../../math-json/utils.js';
+import { isValidSymbol, validateSymbol } from '../../math-json/symbols.js';
 
-import { isOne, isZero } from '../numerics/rationals';
-import { SMALL_INTEGER } from '../numerics/numeric';
-import type { Rational } from '../numerics/types';
-import { asBigint } from './numerics';
-import { isInMachineRange } from '../numerics/numeric-bignum';
+import { isOne, isZero } from '../numerics/rationals.js';
+import { SMALL_INTEGER } from '../numerics/numeric.js';
+import type { Rational } from '../numerics/types.js';
+import { asBigint } from './numerics.js';
+import { isInMachineRange } from '../numerics/numeric-bignum.js';
 
-import { canonicalAdd } from './arithmetic-add';
-import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div';
+import { canonicalAdd } from './arithmetic-add.js';
+import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div.js';
 
-import { NumericValue } from '../numeric-value/types';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { canonicalPower, canonicalRoot } from './arithmetic-power';
+import { NumericValue } from '../numeric-value/types.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { BoxedFunction } from './boxed-function';
-import { BoxedString } from './boxed-string';
-import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
-import { BoxedDictionary } from './boxed-dictionary';
-import { canonicalForm } from './canonical';
-import { sortOperands } from './order';
-import { validateArguments, checkNumericArgs } from './validate';
-import { isSubtype } from '../../common/type/subtype';
-import type { Type } from '../../common/type/types';
-import { flatten } from './flatten';
-import { isValueDef } from './utils';
-import { canonicalNegate } from './negate';
-import { canonical } from './canonical-utils';
-import { isNumber, isFunction } from './type-guards';
+import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { BoxedFunction } from './boxed-function.js';
+import { BoxedString } from './boxed-string.js';
+import { BoxedTensor, expressionTensorInfo } from './boxed-tensor.js';
+import { BoxedDictionary } from './boxed-dictionary.js';
+import { canonicalForm } from './canonical.js';
+import { sortOperands } from './order.js';
+import { validateArguments, checkNumericArgs } from './validate.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import type { Type } from '../../common/type/types.js';
+import { flatten } from './flatten.js';
+import { isValueDef } from './utils.js';
+import { canonicalNegate } from './negate.js';
+import { canonical } from './canonical-utils.js';
+import { isNumber, isFunction } from './type-guards.js';
 // Dynamic import to avoid circular dependency
 
 /**

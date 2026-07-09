@@ -21,7 +21,7 @@ import {
   checkDeadline,
   getAmbientDeadline,
   withAmbientDeadline,
-} from '../../common/interruptible';
+} from '../../common/interruptible.js';
 
 export interface ExtrapolateOptions {
   contract?: number; // contract the step size by this factor on each step

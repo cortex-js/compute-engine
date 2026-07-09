@@ -18,7 +18,10 @@
 
 export const version = '{{SDK_VERSION}}';
 
-export { loadIdentities, FUNGRIM_CORE } from './compute-engine/fungrim/loader';
+export {
+  loadIdentities,
+  FUNGRIM_CORE,
+} from './compute-engine/fungrim/loader.js';
 
 export type {
   // Public-facing aliases
@@ -38,4 +41,4 @@ export type {
   FungrimMathJson,
   CompiledFungrimRule,
   GuardSpec,
-} from './compute-engine/fungrim/types';
+} from './compute-engine/fungrim/types.js';

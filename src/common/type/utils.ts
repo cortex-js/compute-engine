@@ -1,16 +1,16 @@
-import { parseType } from './parse';
-import { isValidType } from './primitive';
-import { typeToString } from './serialize';
-import { widen } from './subtype';
+import { parseType } from './parse.js';
+import { isValidType } from './primitive.js';
+import { typeToString } from './serialize.js';
+import { widen } from './subtype.js';
 
 // Re-export isValidType from primitive for backward compatibility
 export { isValidType };
 
 // Re-export widen/narrow from subtype (moved there to break the
 // subtype ↔ utils cycle; they depend on isSubtype)
-export { widen, narrow } from './subtype';
+export { widen, narrow } from './subtype.js';
 
-import type { Type, ListType, FunctionSignature, TypeString } from './types';
+import type { Type, ListType, FunctionSignature, TypeString } from './types.js';
 
 export function isSignatureType(
   type: Readonly<Type> | TypeString

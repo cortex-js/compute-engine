@@ -12,9 +12,9 @@
 // matching; anything that flows into rule RHSs is rebuilt canonically by
 // the builder.
 
-import type { IComputeEngine as ComputeEngine } from '../global-types';
-import type { Expr as Expression } from './types';
-import { isNumber } from '../boxed-expression/type-guards';
+import type { IComputeEngine as ComputeEngine } from '../global-types.js';
+import type { Expr as Expression } from './types.js';
+import { isNumber } from '../boxed-expression/type-guards.js';
 
 export function toTimesPower(ce: ComputeEngine, e: Expression): Expression {
   if (e.symbol || !e.ops) return e;

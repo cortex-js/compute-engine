@@ -1,21 +1,21 @@
 import { Complex } from 'complex-esm';
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
-import type { MathJsonExpression } from '../../math-json/types';
-import type { LatexString } from '../latex-syntax/types';
+import type { MathJsonExpression } from '../../math-json/types.js';
+import type { LatexString } from '../latex-syntax/types.js';
 
-import { apply } from './apply';
+import { apply } from './apply.js';
 
-import { canonicalAngle } from './utils';
+import { canonicalAngle } from './utils.js';
 
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
   Sign,
-} from '../global-types';
-import { asLatexString } from '../latex-syntax/utils';
-import { parse as parseLatex } from '../latex-syntax/latex-syntax';
-import { isNumber, isSymbol, isFunction } from './type-guards';
+} from '../global-types.js';
+import { asLatexString } from '../latex-syntax/utils.js';
+import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
+import { isNumber, isSymbol, isFunction } from './type-guards.js';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],

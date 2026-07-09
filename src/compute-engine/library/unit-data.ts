@@ -19,4 +19,4 @@ export {
   parseUnitDSL,
   convertCompoundUnit,
   findNamedUnit,
-} from '../numerics/unit-data';
+} from '../numerics/unit-data.js';

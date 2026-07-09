@@ -16,10 +16,10 @@
 
 import RUBI_RULES_DATA from './rubi-rules-data.json';
 
-import type { IComputeEngine as ComputeEngine } from '../global-types';
-import type { Expr as Expression, RubiRuleDoc } from './types';
-import { compileRuleDocs, type CompileResult } from './compile';
-import { RubiDriver } from './driver';
+import type { IComputeEngine as ComputeEngine } from '../global-types.js';
+import type { Expr as Expression, RubiRuleDoc } from './types.js';
+import { compileRuleDocs, type CompileResult } from './compile.js';
+import { RubiDriver } from './driver.js';
 
 export interface IntegrationRulesLoadOptions {
   /** Per-integral wall-clock budget for the rule driver, in milliseconds.

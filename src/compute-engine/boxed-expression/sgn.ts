@@ -1,5 +1,5 @@
-import type { Expression, Sign } from '../global-types';
-import { isFunction, isSymbol, isNumber } from './type-guards';
+import type { Expression, Sign } from '../global-types.js';
+import { isFunction, isSymbol, isNumber } from './type-guards.js';
 
 export function sgn(expr: Expression): Sign | undefined {
   const ce = expr.engine;

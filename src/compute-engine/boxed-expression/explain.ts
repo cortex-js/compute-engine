@@ -8,13 +8,13 @@ import type {
   RuleSteps,
   SimplifyOptions,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { simplify } from './simplify';
-import { findUnivariateRoots, rootsAsEquations } from './solve';
-import { filterRootsByAssumptions } from './solve-domain';
-import { normalizedUnknownsForSolve } from './utils';
-import { isFunction } from './type-guards';
-import { labelFor } from './explain-labels';
+} from '../global-types.js';
+import { simplify } from './simplify.js';
+import { findUnivariateRoots, rootsAsEquations } from './solve.js';
+import { filterRootsByAssumptions } from './solve-domain.js';
+import { normalizedUnknownsForSolve } from './utils.js';
+import { isFunction } from './type-guards.js';
+import { labelFor } from './explain-labels.js';
 
 /**
  * Driver-internal markers in the raw simplify trace that are not

@@ -4,23 +4,23 @@
  * @module interval/elementary
  */
 
-import type { Interval, IntervalResult } from './types';
-import { ok, containsZero, isNegative, unwrapOrPropagate } from './util';
-import { sub, mul, div } from './arithmetic';
+import type { Interval, IntervalResult } from './types.js';
+import { ok, containsZero, isNegative, unwrapOrPropagate } from './util.js';
+import { sub, mul, div } from './arithmetic.js';
 import {
   gamma as scalarGamma,
   gammaln as scalarGammaln,
   erf as scalarErf,
   erfc as scalarErfc,
-} from '../numerics/special-functions';
+} from '../numerics/special-functions.js';
 import {
   factorial as scalarFactorial,
   factorial2 as scalarFactorial2,
   gcd as scalarGcd,
   lcm as scalarLcm,
   chop as scalarChop,
-} from '../numerics/numeric';
-import { choose as scalarBinomial } from '../boxed-expression/expand';
+} from '../numerics/numeric.js';
+import { choose as scalarBinomial } from '../boxed-expression/expand.js';
 
 /**
  * Square root of an interval (or IntervalResult).

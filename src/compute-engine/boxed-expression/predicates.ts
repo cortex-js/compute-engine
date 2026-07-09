@@ -1,7 +1,7 @@
-import type { Expression } from '../global-types';
-import { asBigint } from './numerics';
-import { isPrimeBigint } from '../numerics/primes';
-import { isNumber } from './type-guards';
+import type { Expression } from '../global-types.js';
+import { asBigint } from './numerics.js';
+import { isPrimeBigint } from '../numerics/primes.js';
+import { isNumber } from './type-guards.js';
 
 export function isPrime(expr: Expression): boolean | undefined {
   if (!expr.isInteger) return undefined;

@@ -2,32 +2,32 @@
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
 import { Complex } from 'complex-esm';
-import { BoxedType } from '../../common/type/boxed-type';
-import { parseType } from '../../common/type/parse';
-import { reduceType } from '../../common/type/reduce';
-import type { Type } from '../../common/type/types';
-import { flatten } from '../boxed-expression/flatten';
-import { isFunction, isNumber, sym } from '../boxed-expression/type-guards';
-import { validateArguments } from '../boxed-expression/validate';
+import { BoxedType } from '../../common/type/boxed-type.js';
+import { parseType } from '../../common/type/parse.js';
+import { reduceType } from '../../common/type/reduce.js';
+import type { Type } from '../../common/type/types.js';
+import { flatten } from '../boxed-expression/flatten.js';
+import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
+import { validateArguments } from '../boxed-expression/validate.js';
 import {
   getFactIndex,
   hasAssumptions,
   subjectKey,
   subjectOf,
-} from '../boxed-expression/constraint-subject';
-import { domainToType } from '../boxed-expression/utils';
-import { MAX_SIZE_EAGER_COLLECTION } from '../collection-utils';
+} from '../boxed-expression/constraint-subject.js';
+import { domainToType } from '../boxed-expression/utils.js';
+import { MAX_SIZE_EAGER_COLLECTION } from '../collection-utils.js';
 import type {
   Expression,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
+} from '../global-types.js';
 import {
   cantorEnumerateComplexNumbers,
   cantorEnumerateIntegers,
   cantorEnumeratePositiveRationals,
   cantorEnumerateRationals,
-} from '../numerics/numeric';
+} from '../numerics/numeric.js';
 
 function typeIntersection(a: Type, b: Type): Type {
   return reduceType({ kind: 'intersection', types: [a, b] });

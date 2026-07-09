@@ -1,4 +1,4 @@
-import { MathJsonExpression } from '../../../math-json/types';
+import { MathJsonExpression } from '../../../math-json/types.js';
 import {
   machineValue,
   foldAssociativeOperator,
@@ -13,7 +13,7 @@ import {
   isNumberExpression,
   MISSING,
   getSequence,
-} from '../../../math-json/utils';
+} from '../../../math-json/utils.js';
 import {
   Serializer,
   Parser,
@@ -26,11 +26,11 @@ import {
   POSTFIX_PRECEDENCE,
   COMPARISON_PRECEDENCE,
   EXPONENTIATION_PRECEDENCE,
-} from '../types';
-import { latexTemplate } from '../serializer-style';
-import { joinLatex, supsub } from '../tokenizer';
-import { normalizeAngle, formatDMS } from '../serialize-dms';
-import { roundMeasurementForDisplay } from '../../numerics/strings';
+} from '../types.js';
+import { latexTemplate } from '../serializer-style.js';
+import { joinLatex, supsub } from '../tokenizer.js';
+import { normalizeAngle, formatDMS } from '../serialize-dms.js';
+import { roundMeasurementForDisplay } from '../../numerics/strings.js';
 
 /**
  * If expression is a product, collect all the terms with a

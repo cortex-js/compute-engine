@@ -11,4 +11,4 @@ export type {
   TensorData,
   TensorField,
   Tensor,
-} from './types-expression';
+} from './types-expression.js';

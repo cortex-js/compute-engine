@@ -1,5 +1,5 @@
-import type { Type, TypeString } from '../../common/type/types';
-import { BoxedType } from '../../common/type/boxed-type';
+import type { Type, TypeString } from '../../common/type/types.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 
 import type {
   OperatorDefinition,
@@ -11,15 +11,15 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
   Sign,
-} from '../global-types';
+} from '../global-types.js';
 
-import { applicable } from '../function-utils';
+import { applicable } from '../function-utils.js';
 
-import { DEFAULT_COMPLEXITY } from './constants';
-import { isFunction } from './type-guards';
-import { functionResult } from '../../common/type/utils';
-import { isSubtype } from '../../common/type/subtype';
-import { defaultCollectionHandlers } from '../collection-utils';
+import { DEFAULT_COMPLEXITY } from './constants.js';
+import { isFunction } from './type-guards.js';
+import { functionResult } from '../../common/type/utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import { defaultCollectionHandlers } from '../collection-utils.js';
 
 const OPERATOR_DEF_KEYS = new Set([
   // Base

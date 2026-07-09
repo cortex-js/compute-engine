@@ -1,8 +1,8 @@
-import type { Type, TypeResolver, TypeString } from './types';
-import { isSubtype } from './subtype';
-import { typeToString } from './serialize';
-import { parseType } from './parse';
-import { narrow, widen } from './utils';
+import type { Type, TypeResolver, TypeString } from './types.js';
+import { isSubtype } from './subtype.js';
+import { typeToString } from './serialize.js';
+import { parseType } from './parse.js';
+import { narrow, widen } from './utils.js';
 
 /** @category Type */
 export class BoxedType {

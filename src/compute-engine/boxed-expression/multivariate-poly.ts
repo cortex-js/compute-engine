@@ -1,8 +1,8 @@
 import type {
   IComputeEngine as ComputeEngine,
   Expression,
-} from '../global-types';
-import { isFunction, isNumber, isSymbol } from './type-guards';
+} from '../global-types.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
 
 /**
  * `MPoly` — a distributed, sparse **multivariate polynomial over ℤ**.

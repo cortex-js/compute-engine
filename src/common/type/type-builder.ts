@@ -24,8 +24,8 @@ import {
   visitNode,
   NamedElementNode,
   DimensionNode,
-} from './ast-nodes';
-import { Type, NamedElement, TypeResolver } from './types';
+} from './ast-nodes.js';
+import { Type, NamedElement, TypeResolver } from './types.js';
 
 export class TypeBuilder implements ASTVisitor<Type> {
   private typeResolver: TypeResolver;

@@ -1,5 +1,5 @@
-import { checkDeadline } from '../../common/interruptible';
-import { betaRegularized, erfInv, gammaQ } from './special-functions';
+import { checkDeadline } from '../../common/interruptible.js';
+import { betaRegularized, erfInv, gammaQ } from './special-functions.js';
 
 //
 // Distribution-specific numeric glue. The continuous distributions have

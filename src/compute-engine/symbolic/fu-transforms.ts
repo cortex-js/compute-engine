@@ -15,12 +15,12 @@
  * to avoid infinite recursion when called from the simplification pipeline.
  */
 
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 import {
   isFunction,
   isNumber,
   isSymbol,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 
 // ============================================================================
 // Helper Functions

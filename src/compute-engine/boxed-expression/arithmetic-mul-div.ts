@@ -1,16 +1,19 @@
-import { isSubtype } from '../../common/type/subtype';
+import { isSubtype } from '../../common/type/subtype.js';
 
 import type {
   Expression,
   TensorInterface,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { isTensor } from './boxed-tensor';
-import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
-import { isNumericTuple, hasAccessibleComponents } from '../collection-utils';
-import { NumericValue } from '../numeric-value/types';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import type { Rational } from '../numerics/types';
+} from '../global-types.js';
+import { isTensor } from './boxed-tensor.js';
+import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import {
+  isNumericTuple,
+  hasAccessibleComponents,
+} from '../collection-utils.js';
+import { NumericValue } from '../numeric-value/types.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import type { Rational } from '../numerics/types.js';
 import {
   add as rationalAdd,
   mul as rationalMul,
@@ -22,16 +25,16 @@ import {
   rationalGcd,
   reducedRational,
   isZero,
-} from '../numerics/rationals';
-import { SMALL_INTEGER } from '../numerics/numeric';
-import { bigint } from '../numerics/bigint';
+} from '../numerics/rationals.js';
+import { SMALL_INTEGER } from '../numerics/numeric.js';
+import { bigint } from '../numerics/bigint.js';
 
-import { sortProductOperands } from './order';
-import { asRadical } from './arithmetic-power';
-import { flatten } from './flatten';
-import { asRational, asSmallInteger } from './numerics';
-import { negateProduct } from './negate';
-import { add } from './arithmetic-add';
+import { sortProductOperands } from './order.js';
+import { asRadical } from './arithmetic-power.js';
+import { flatten } from './flatten.js';
+import { asRational, asSmallInteger } from './numerics.js';
+import { negateProduct } from './negate.js';
+import { add } from './arithmetic-add.js';
 
 //
 // ── Product class ──────────────────────────────────────────────────────

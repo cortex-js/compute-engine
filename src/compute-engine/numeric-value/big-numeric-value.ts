@@ -1,13 +1,13 @@
-import { BigDecimal } from '../../big-decimal';
-import type { SmallInteger } from '../numerics/types';
-import { NumericValue, NumericValueData } from './types';
-import { ExactNumericValue } from './exact-numeric-value';
-import { isInMachineRange } from '../numerics/numeric-bignum';
-import { MathJsonExpression } from '../../math-json/types';
-import { numberToExpression } from '../numerics/expression';
-import { numberToString } from '../numerics/strings';
-import { bigint } from '../numerics/bigint';
-import { NumericPrimitiveType } from '../../common/type/types';
+import { BigDecimal } from '../../big-decimal/index.js';
+import type { SmallInteger } from '../numerics/types.js';
+import { NumericValue, NumericValueData } from './types.js';
+import { ExactNumericValue } from './exact-numeric-value.js';
+import { isInMachineRange } from '../numerics/numeric-bignum.js';
+import { MathJsonExpression } from '../../math-json/types.js';
+import { numberToExpression } from '../numerics/expression.js';
+import { numberToString } from '../numerics/strings.js';
+import { bigint } from '../numerics/bigint.js';
+import { NumericPrimitiveType } from '../../common/type/types.js';
 
 export class BigNumericValue extends NumericValue {
   declare __brand: 'BigNumericValue';

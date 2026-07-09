@@ -1,5 +1,5 @@
-import type { Expression } from '../global-types';
-import { isFunction } from '../boxed-expression/type-guards';
+import type { Expression } from '../global-types.js';
+import { isFunction } from '../boxed-expression/type-guards.js';
 
 function distribute2(
   lhs: Expression,

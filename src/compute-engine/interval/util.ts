@@ -4,7 +4,7 @@
  * @module interval/util
  */
 
-import type { Interval, IntervalResult } from './types';
+import type { Interval, IntervalResult } from './types.js';
 
 /**
  * Wrap a plain interval in an IntervalResult.

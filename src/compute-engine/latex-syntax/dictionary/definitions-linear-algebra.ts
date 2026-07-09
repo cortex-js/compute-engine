@@ -1,18 +1,18 @@
-import type { MathJsonExpression } from '../../../math-json';
+import type { MathJsonExpression } from '../../../math-json.js';
 import {
   stringValue,
   operands,
   operand,
   operator,
-} from '../../../math-json/utils';
+} from '../../../math-json/utils.js';
 import {
   LatexDictionary,
   MULTIPLICATION_PRECEDENCE,
   Parser,
   Serializer,
-} from '../types';
-import { joinLatex } from '../tokenizer';
-import { DELIMITERS_SHORTHAND } from './definitions-core';
+} from '../types.js';
+import { joinLatex } from '../tokenizer.js';
+import { DELIMITERS_SHORTHAND } from './definitions-core.js';
 
 /** Base number-set symbols. A `+`/`-`/`*` superscript on one of these is a
  * signed-set modifier, not a matrix operation (see the `PseudoInverse`

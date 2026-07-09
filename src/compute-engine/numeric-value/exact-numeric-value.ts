@@ -1,7 +1,7 @@
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
-import { Rational, SmallInteger } from '../numerics/types';
-import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric';
+import { Rational, SmallInteger } from '../numerics/types.js';
+import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric.js';
 import {
   isOne,
   isZero,
@@ -16,17 +16,17 @@ import {
   isMachineRational,
   rationalGcd,
   inverse,
-} from '../numerics/rationals';
+} from '../numerics/rationals.js';
 import {
   ExactNumericValueData,
   NumericValue,
   NumericValueFactory,
-} from './types';
-import { MathJsonExpression } from '../../math-json/types';
-import { numberToExpression } from '../numerics/expression';
-import { numberToString } from '../numerics/strings';
-import { NumericPrimitiveType } from '../../common/type/types';
-import { isSubtype } from '../../common/type/subtype';
+} from './types.js';
+import { MathJsonExpression } from '../../math-json/types.js';
+import { numberToExpression } from '../numerics/expression.js';
+import { numberToString } from '../numerics/strings.js';
+import { NumericPrimitiveType } from '../../common/type/types.js';
+import { isSubtype } from '../../common/type/subtype.js';
 
 // Shared frozen zero imaginary component: real values (the overwhelmingly
 // common case) all point to this singleton, so no per-instance allocation is

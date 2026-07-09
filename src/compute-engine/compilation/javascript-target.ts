@@ -1,12 +1,12 @@
-import type { Expression } from '../global-types';
-import type { MathJsonSymbol } from '../../math-json/types';
+import type { Expression } from '../global-types.js';
+import type { MathJsonSymbol } from '../../math-json/types.js';
 import {
   isSymbol,
   isNumber,
   isFunction,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 import { Complex } from 'complex-esm';
-import { tryGetConstant } from './constant-folding';
+import { tryGetConstant } from './constant-folding.js';
 
 import {
   chop,
@@ -15,7 +15,7 @@ import {
   gcd,
   lcm,
   limit,
-} from '../numerics/numeric';
+} from '../numerics/numeric.js';
 import {
   parseColor,
   rgbToOklch,
@@ -72,8 +72,8 @@ import {
   hypergeometric1F1,
   gammaQ,
   betaRegularized,
-} from '../numerics/special-functions';
-import { choose } from '../boxed-expression/expand';
+} from '../numerics/special-functions.js';
+import { choose } from '../boxed-expression/expand.js';
 import {
   correlation,
   covariance,
@@ -89,10 +89,10 @@ import {
   skewness,
   standardDeviation,
   variance,
-} from '../numerics/statistics';
-import { monteCarloEstimate } from '../numerics/monte-carlo';
+} from '../numerics/statistics.js';
+import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 
-import { BaseCompiler } from './base-compiler';
+import { BaseCompiler } from './base-compiler.js';
 import type {
   CompileTarget,
   CompiledOperators,
@@ -103,7 +103,7 @@ import type {
   CompiledRunner,
   ComplexResult,
   TargetSource,
-} from './types';
+} from './types.js';
 
 /**
  * JavaScript operator mappings

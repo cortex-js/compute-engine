@@ -1,14 +1,14 @@
-import type { MathJsonExpression } from '../math-json/types';
-import { operator, operands } from '../math-json/utils';
+import type { MathJsonExpression } from '../math-json/types.js';
+import { operator, operands } from '../math-json/utils.js';
 
 // Type-only imports: `src/cortex` never statically imports the engine, so this
 // adds no runtime dependency (and no `compute-engine` cycle — the engine never
 // imports `cortex`). The engine is injected at call time, mirroring the
 // `parseLatex`/`ILatexSyntax` injection pattern used elsewhere in `src/cortex`.
-import type { BoxedExpression, ComputeEngine } from '../compute-engine';
+import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
 
-import { FatalParsingError, ParsingDiagnostic } from './diagnostics';
-import { parseCortex } from './parse-cortex';
+import { FatalParsingError, ParsingDiagnostic } from './diagnostics.js';
+import { parseCortex } from './parse-cortex.js';
 
 export interface ExecuteCortexOptions {
   /** Source URL (for `#url`/`#filename` pragmas and diagnostic origins). */

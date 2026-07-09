@@ -1,8 +1,8 @@
-import type { Expression, SymbolDefinitions } from '../global-types';
-import { toBigint } from '../boxed-expression/numerics';
-import { gcd, lcm } from '../numerics/numeric-bigint';
-import { bigPrimeFactors, isPrimeBigint, modPow } from '../numerics/primes';
-import { checkDeadline } from '../../common/interruptible';
+import type { Expression, SymbolDefinitions } from '../global-types.js';
+import { toBigint } from '../boxed-expression/numerics.js';
+import { gcd, lcm } from '../numerics/numeric-bigint.js';
+import { bigPrimeFactors, isPrimeBigint, modPow } from '../numerics/primes.js';
+import { checkDeadline } from '../../common/interruptible.js';
 
 /**
  * Above this many digits (in the target base), materializing or iterating an

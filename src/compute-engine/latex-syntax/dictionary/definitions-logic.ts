@@ -4,7 +4,7 @@ import type {
   Parser,
   Serializer,
   Terminator,
-} from '../types';
+} from '../types.js';
 import {
   getSequence,
   operator,
@@ -13,9 +13,9 @@ import {
   operand,
   operands,
   symbol,
-} from '../../../math-json/utils';
-import type { MathJsonExpression } from '../../../math-json';
-import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
+} from '../../../math-json/utils.js';
+import type { MathJsonExpression } from '../../../math-json.js';
+import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators.js';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
 //

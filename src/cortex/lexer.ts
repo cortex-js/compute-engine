@@ -8,9 +8,15 @@ import {
   isIdentifierStartProhibited,
   isIdentifierContinueProhibited,
   codePointLength,
-} from './characters';
-import { DiagnosticMessage } from './diagnostics';
-import { DocComment, SourceSpan, StringPart, Token, TokenType } from './tokens';
+} from './characters.js';
+import { DiagnosticMessage } from './diagnostics.js';
+import {
+  DocComment,
+  SourceSpan,
+  StringPart,
+  Token,
+  TokenType,
+} from './tokens.js';
 
 //
 // The Cortex lexer turns a source string into a flat `Token[]`.

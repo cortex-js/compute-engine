@@ -1,5 +1,5 @@
-import type { BigDecimal } from '../../big-decimal';
-import type { DisplayDigits } from '../types-kernel-serialization';
+import type { BigDecimal } from '../../big-decimal/index.js';
+import type { DisplayDigits } from '../types-kernel-serialization.js';
 
 /**
  * Round a value to `n` significant figures, returning a value of the same kind

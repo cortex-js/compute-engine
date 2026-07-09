@@ -1,4 +1,4 @@
-import type { MathJsonExpression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types.js';
 
 import type {
   IComputeEngine as ComputeEngine,
@@ -20,23 +20,23 @@ import type {
   PatternMatchOptions,
   Tensor,
   TensorInterface,
-} from '../global-types';
+} from '../global-types.js';
 
-import { BoxedType } from '../../common/type/boxed-type';
+import { BoxedType } from '../../common/type/boxed-type.js';
 
 import {
   getExpressionDatatype,
   getSupertype,
   makeTensorField,
-} from '../tensor/tensor-fields';
-import { AbstractTensor, makeTensor } from '../tensor/tensors';
+} from '../tensor/tensor-fields.js';
+import { AbstractTensor, makeTensor } from '../tensor/tensors.js';
 
-import { NumericValue } from '../numeric-value/types';
+import { NumericValue } from '../numeric-value/types.js';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { isWildcard, wildcardName } from './pattern-utils';
-import { hashCode, isExpression } from './utils';
-import { isFunction } from './type-guards';
+import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { isWildcard, wildcardName } from './pattern-utils.js';
+import { hashCode, isExpression } from './utils.js';
+import { isFunction } from './type-guards.js';
 
 /**
  * A boxed tensor represents an expression that can be represented by a tensor.

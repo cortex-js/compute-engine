@@ -2,7 +2,7 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
   Scope,
-} from '../global-types';
+} from '../global-types.js';
 
 /**
  * Ensure all expressions in the array are in canonical form

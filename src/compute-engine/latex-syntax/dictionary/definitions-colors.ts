@@ -1,4 +1,4 @@
-import type { LatexDictionary } from '../types';
+import type { LatexDictionary } from '../types.js';
 
 /**
  * LaTeX dictionary for color constructors and conversions.

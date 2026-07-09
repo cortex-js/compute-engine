@@ -11,10 +11,14 @@ import type {
   SequenceDefinition,
   SequenceStatus,
   SequenceInfo,
-} from './global-types';
-import { isValueDef, updateDef } from './boxed-expression/utils';
-import { isSymbol, isNumber, isFunction } from './boxed-expression/type-guards';
-import { serialize as serializeLatex } from './latex-syntax/latex-syntax';
+} from './global-types.js';
+import { isValueDef, updateDef } from './boxed-expression/utils.js';
+import {
+  isSymbol,
+  isNumber,
+  isFunction,
+} from './boxed-expression/type-guards.js';
+import { serialize as serializeLatex } from './latex-syntax/latex-syntax.js';
 
 // ============================================================================
 // Sequence Registry (SUB-7: Introspection support)

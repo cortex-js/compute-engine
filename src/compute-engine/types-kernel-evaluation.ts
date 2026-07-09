@@ -1,8 +1,8 @@
-import type { MathJsonSymbol } from '../math-json';
-import type { TypeReference } from '../common/type/types';
-import type { BoxedType } from '../common/type/boxed-type';
-import type { LatexString } from './latex-syntax/types';
-import type { BoxedSubstitution } from './types-kernel-serialization';
+import type { MathJsonSymbol } from '../math-json.js';
+import type { TypeReference } from '../common/type/types.js';
+import type { BoxedType } from '../common/type/boxed-type.js';
+import type { LatexString } from './latex-syntax/types.js';
+import type { BoxedSubstitution } from './types-kernel-serialization.js';
 
 /** @category Assumptions */
 export interface Assumption<Expr = unknown, CE = unknown> {

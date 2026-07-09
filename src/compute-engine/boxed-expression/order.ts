@@ -1,22 +1,22 @@
-import type { Expression } from '../global-types';
+import type { Expression } from '../global-types.js';
 
-import { maxDegree, revlex, totalDegree } from './polynomial-degree';
-import { asRadical } from './arithmetic-power';
-import { isOperatorDef } from './utils';
+import { maxDegree, revlex, totalDegree } from './polynomial-degree.js';
+import { asRadical } from './arithmetic-power.js';
+import { isOperatorDef } from './utils.js';
 import {
   isNumber,
   isFunction,
   isSymbol,
   isString,
   numericValue,
-} from './type-guards';
+} from './type-guards.js';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
-import { DEFAULT_COMPLEXITY } from './constants';
+import { DEFAULT_COMPLEXITY } from './constants.js';
 export { DEFAULT_COMPLEXITY };
 
-import { BoxedType } from '../../common/type/boxed-type';
+import { BoxedType } from '../../common/type/boxed-type.js';
 
 const MATRIX_TYPE = new BoxedType('matrix');
 const VECTOR_TYPE = new BoxedType('vector');

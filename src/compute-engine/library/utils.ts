@@ -2,17 +2,17 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
   Scope,
-} from '../global-types';
+} from '../global-types.js';
 
 import {
   isNumber,
   isSymbol,
   isFunction,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 
-import { MAX_ITERATION } from '../numerics/numeric';
-import { fromRange, reduceCollection } from './collections';
-import { extractFiniteDomainWithReason } from './logic-analysis';
+import { MAX_ITERATION } from '../numerics/numeric.js';
+import { fromRange, reduceCollection } from './collections.js';
+import { extractFiniteDomainWithReason } from './logic-analysis.js';
 
 /**
  * EL-4: Convert known infinite integer sets to their equivalent Limits bounds.
@@ -147,7 +147,7 @@ export function normalizeIndexingSet(indexingSet: Expression): IndexingSet {
 
   // We've asserted it's a function above; narrow the type
   const fn = indexingSet as Expression &
-    import('../global-types').FunctionInterface;
+    import('../global-types.js').FunctionInterface;
   const op1 = fn.op1;
   index = isSymbol(op1) ? op1.symbol : undefined;
   console.assert(index !== undefined, 'Indexing set must have an index');
@@ -261,7 +261,7 @@ export function canonicalLimitsSequence(
     if (op.operator === 'Range') {
       // ["Range", 1, 10]
       const rangeFn = op as Expression &
-        import('../global-types').FunctionInterface;
+        import('../global-types.js').FunctionInterface;
       result.push(
         canonicalLimits([ce.Nothing, rangeFn.op1, rangeFn.op2], options) ??
           ce.error('missing')
@@ -276,7 +276,7 @@ export function canonicalLimitsSequence(
       // ["Limits", "n", 1, 10]
       // ["Hold", "x"]
       const fnOp = op as Expression &
-        import('../global-types').FunctionInterface;
+        import('../global-types.js').FunctionInterface;
       result.push(canonicalLimits(fnOp.ops, options) ?? ce.error('missing'));
     } else if (isSymbol(op)) {
       // "x" or "1, 10"

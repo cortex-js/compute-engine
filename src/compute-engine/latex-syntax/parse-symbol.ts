@@ -1,7 +1,11 @@
-import type { MathJsonExpression, MathJsonSymbol } from '../../math-json';
-import { EMOJIS, isValidSymbol, validateSymbol } from '../../math-json/symbols';
-import { SYMBOLS } from './dictionary/definitions-symbols';
-import { Parser } from './types';
+import type { MathJsonExpression, MathJsonSymbol } from '../../math-json.js';
+import {
+  EMOJIS,
+  isValidSymbol,
+  validateSymbol,
+} from '../../math-json/symbols.js';
+import { SYMBOLS } from './dictionary/definitions-symbols.js';
+import { Parser } from './types.js';
 
 /** Lazy map from LaTeX command (e.g. '\\alpha') to symbol name (e.g.
  * 'alpha'). Built once from the SYMBOLS table on first access; first entry

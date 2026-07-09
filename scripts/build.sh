@@ -138,12 +138,6 @@ if [[ "$TARGETS" == *integration-rules* ]]; then
 fi
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building TypeScript declaration files$RESET"
 
-# Rewrite extensionless relative specifiers in the emitted declarations so
-# consumers using `moduleResolution: nodenext` resolve them (issue #318).
-# Runs for every build since dist/types is emitted unconditionally, and fails
-# loud if a specifier cannot be resolved.
-node ./scripts/fix-dts-extensions.mjs
-
 #
 # Do build (development or production)
 #

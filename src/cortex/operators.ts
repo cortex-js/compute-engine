@@ -1,4 +1,4 @@
-import { MathJsonSymbol } from '../math-json/types';
+import { MathJsonSymbol } from '../math-json/types.js';
 
 //
 // The single, shared Cortex operator table.

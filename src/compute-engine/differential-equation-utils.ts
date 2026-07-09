@@ -1,6 +1,6 @@
-import type { Expression, IComputeEngine } from './global-types';
-import { isFunction, isSymbol, sym } from './boxed-expression/type-guards';
-import { rk4, rk4System } from './numerics/differential-equations';
+import type { Expression, IComputeEngine } from './global-types.js';
+import { isFunction, isSymbol, sym } from './boxed-expression/type-guards.js';
+import { rk4, rk4System } from './numerics/differential-equations.js';
 
 export function symbolArg(
   engine: IComputeEngine,

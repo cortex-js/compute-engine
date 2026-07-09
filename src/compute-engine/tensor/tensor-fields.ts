@@ -1,13 +1,13 @@
 import { Complex } from 'complex-esm';
-import '../numerics/complex-esm-augment'; // adds the 1-arg `Complex.equals` overload
+import '../numerics/complex-esm-augment.js'; // adds the 1-arg `Complex.equals` overload
 import {
   Expression,
   IComputeEngine as ComputeEngine,
   DataTypeMap,
   TensorDataType,
   TensorField,
-} from '../global-types';
-import { isSymbol, isNumber } from '../boxed-expression/type-guards';
+} from '../global-types.js';
+import { isSymbol, isNumber } from '../boxed-expression/type-guards.js';
 
 /** @category Tensors */
 export function makeTensorField<DT extends keyof DataTypeMap>(

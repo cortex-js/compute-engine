@@ -207,14 +207,14 @@ mkdir -p benchmarks/.competitors/mathjs-host
 ( cd benchmarks/.competitors/mathjs-host && npm init -y >/dev/null && npm install mathjs )
 
 # the published Compute Engine release to compare against
-( cd benchmarks/.competitors && npm pack @cortex-js/compute-engine@0.69.0 \
-  && mkdir -p ce-0.69.0 && tar xzf cortex-js-compute-engine-0.69.0.tgz -C ce-0.69.0 --strip-components=1 )
+( cd benchmarks/.competitors && npm pack @cortex-js/compute-engine@0.70.0 \
+  && mkdir -p ce-0.70.0 && tar xzf cortex-js-compute-engine-0.70.0.tgz -C ce-0.70.0 --strip-components=1 )
 
 # Mathematica: a licensed `wolframscript` on PATH (nothing is vendored)
 wolframscript -version   # confirm it is available
 ```
 
-The **current build** is read from `dist/compute-engine.min.esm.js`, so build it
+The **current build** is read from `dist/esm-min/compute-engine.js`, so build it
 first (`npm run build production`). Then:
 
 ```bash
@@ -226,7 +226,7 @@ node benchmarks/report_changelog.mjs  # write CHANGELOG-TABLES.md (from results.
 
 The `CE+R/F` column loads the published Rubi (`integration-rules`) and Fungrim
 (`identities`) bundles, so `npm run build production` must have produced
-`dist/integration-rules.min.esm.js` and `dist/identities.min.esm.js`. If the
+`dist/esm-min/integration-rules.js` and `dist/esm-min/identities.js`. If the
 load fails the orchestrator logs a warning and that column is dropped; the rest
 of the report still builds.
 
@@ -234,9 +234,9 @@ of the report still builds.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CE_CURRENT_BUNDLE` | `dist/compute-engine.min.esm.js` | Path to the "current build" ESM bundle. |
-| `CE_PUBLISHED_VERSION` | `0.69.0` | Label for the published column. |
-| `CE_PUBLISHED_BUNDLE` | `.competitors/ce-<version>/dist/compute-engine.min.esm.js` | Path to the published bundle. |
+| `CE_CURRENT_BUNDLE` | `dist/esm-min/compute-engine.js` | Path to the "current build" ESM bundle. |
+| `CE_PUBLISHED_VERSION` | `0.70.0` | Label for the published column. |
+| `CE_PUBLISHED_BUNDLE` | `.competitors/ce-<version>/dist/esm-min/compute-engine.js` | Path to the published bundle. |
 | `CE_CURRENT_LABEL` | `CE (current)` | Override the current column label in the CHANGELOG tables. |
 
 ---
@@ -330,7 +330,7 @@ capability:
   — the **primitive-operation** microbench: per-op cost (ns/op) of `add`/`sub`/
   `mul`/`div`/`sqrt`/`round`/`normalize`/`cmp` plus composite consumers
   (`ln`/`exp`/`cos`/Apéry ζ(3)) at 21/50/100/200/500 digits, comparing CE HEAD
-  vs published 0.69.0 vs mpmath. Where the transcendental tables measure whole
+  vs published 0.70.0 vs mpmath. Where the transcendental tables measure whole
   kernels, this isolates the primitives whose wins propagate to every kernel
   (e.g. the `div` normalize-skip). One command: `node
   big-decimal/run-ops.mjs` (writes `ops-results.json` + the Markdown tables that

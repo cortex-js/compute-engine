@@ -23,8 +23,8 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { isFunction } from '../boxed-expression/type-guards';
+} from '../global-types.js';
+import { isFunction } from '../boxed-expression/type-guards.js';
 
 // ---------------------------------------------------------------------------
 // Type guard

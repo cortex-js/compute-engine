@@ -1,4 +1,4 @@
-import { MathJsonExpression } from '../../../math-json/types';
+import { MathJsonExpression } from '../../../math-json/types.js';
 import {
   machineValue,
   mapArgs,
@@ -13,7 +13,7 @@ import {
   unhold,
   symbol,
   dictionaryFromEntries,
-} from '../../../math-json/utils';
+} from '../../../math-json/utils.js';
 import {
   ADDITION_PRECEDENCE,
   ARROW_PRECEDENCE,
@@ -24,11 +24,11 @@ import {
   PostfixEntry,
   Serializer,
   Terminator,
-} from '../types';
-import { joinLatex, supsub } from '../tokenizer';
-import { isEquationOperator, isInequalityOperator } from '../utils';
-import { BoxedType } from '../../../common/type/boxed-type';
-import { parseQuantifier } from './definitions-logic';
+} from '../types.js';
+import { joinLatex, supsub } from '../tokenizer.js';
+import { isEquationOperator, isInequalityOperator } from '../utils.js';
+import { BoxedType } from '../../../common/type/boxed-type.js';
+import { parseQuantifier } from './definitions-logic.js';
 
 // ---------------------------------------------------------------------------
 // Component-access member-name table (C2)

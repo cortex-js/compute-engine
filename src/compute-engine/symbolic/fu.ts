@@ -10,7 +10,7 @@
  * trigonometric expressions.
  */
 
-import type { Expression, RuleStep } from '../global-types';
+import type { Expression, RuleStep } from '../global-types.js';
 
 import {
   hasTrigFunction,
@@ -36,9 +36,9 @@ import {
   applyTR22i,
   applyTRmorrie,
   applyTRpythagorean,
-} from './fu-transforms';
+} from './fu-transforms.js';
 
-import { TrigCostFunction, DEFAULT_TRIG_COST } from './fu-cost';
+import { TrigCostFunction, DEFAULT_TRIG_COST } from './fu-cost.js';
 
 export interface FuOptions {
   /**
@@ -380,6 +380,6 @@ export function fuSimplify(expr: Expression, options?: FuOptions): Expression {
 }
 
 // Re-export types and utilities
-export { hasTrigFunction, hasOperator } from './fu-transforms';
-export { trigCost, countTrigFunctions, countLeaves } from './fu-cost';
-export type { TrigCostFunction } from './fu-cost';
+export { hasTrigFunction, hasOperator } from './fu-transforms.js';
+export { trigCost, countTrigFunctions, countLeaves } from './fu-cost.js';
+export type { TrigCostFunction } from './fu-cost.js';

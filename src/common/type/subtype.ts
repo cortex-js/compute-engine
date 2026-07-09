@@ -10,15 +10,15 @@ import {
   SCALAR_TYPES,
   SCALAR_TYPES_SET,
   VALUE_TYPES,
-} from './primitive';
+} from './primitive.js';
 import type {
   NumericPrimitiveType,
   PrimitiveType,
   Type,
   TypeCompatibility,
   TypeString,
-} from './types';
-import { parseType } from './parse';
+} from './types.js';
+import { parseType } from './parse.js';
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {

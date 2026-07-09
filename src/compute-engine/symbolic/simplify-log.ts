@@ -1,7 +1,10 @@
-import type { Expression, RuleStep } from '../global-types';
-import { isFunction, sym } from '../boxed-expression/type-guards';
-import { isEligibleRealRewrite, onBranchCut } from '../function-properties';
-import { toBigint } from '../boxed-expression/numerics';
+import type { Expression, RuleStep } from '../global-types.js';
+import { isFunction, sym } from '../boxed-expression/type-guards.js';
+import {
+  isEligibleRealRewrite,
+  onBranchCut,
+} from '../function-properties/index.js';
+import { toBigint } from '../boxed-expression/numerics.js';
 
 /**
  * Logarithm simplification rules consolidated from simplify-rules.ts.

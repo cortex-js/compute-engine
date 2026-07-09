@@ -12,7 +12,7 @@ export type {
   SmallInteger,
   Rational,
   BigNum,
-} from './compute-engine/numerics/types';
+} from './compute-engine/numerics/types.js';
 
 //
 // Types (numeric-value)
@@ -21,31 +21,31 @@ export type {
   ExactNumericValueData,
   NumericValueData,
   NumericValueFactory,
-} from './compute-engine/numeric-value/types';
+} from './compute-engine/numeric-value/types.js';
 
-export { NumericValue } from './compute-engine/numeric-value/types';
+export { NumericValue } from './compute-engine/numeric-value/types.js';
 
 //
 // Numeric value classes
 //
-export { BigNumericValue } from './compute-engine/numeric-value/big-numeric-value';
-export { ExactNumericValue } from './compute-engine/numeric-value/exact-numeric-value';
-export { MachineNumericValue } from './compute-engine/numeric-value/machine-numeric-value';
+export { BigNumericValue } from './compute-engine/numeric-value/big-numeric-value.js';
+export { ExactNumericValue } from './compute-engine/numeric-value/exact-numeric-value.js';
+export { MachineNumericValue } from './compute-engine/numeric-value/machine-numeric-value.js';
 
 //
 // Non-colliding modules — export * is safe
 //
-export * from './compute-engine/numerics/bigint';
-export * from './compute-engine/numerics/expression';
-export * from './compute-engine/numerics/interval';
-export * from './compute-engine/numerics/linear-algebra';
-export * from './compute-engine/numerics/monte-carlo';
-export * from './compute-engine/numerics/primes';
-export * from './compute-engine/numerics/rationals';
-export * from './compute-engine/numerics/richardson';
-export * from './compute-engine/numerics/statistics';
-export * from './compute-engine/numerics/strings';
-export * from './compute-engine/numerics/unit-data';
+export * from './compute-engine/numerics/bigint.js';
+export * from './compute-engine/numerics/expression.js';
+export * from './compute-engine/numerics/interval.js';
+export * from './compute-engine/numerics/linear-algebra.js';
+export * from './compute-engine/numerics/monte-carlo.js';
+export * from './compute-engine/numerics/primes.js';
+export * from './compute-engine/numerics/rationals.js';
+export * from './compute-engine/numerics/richardson.js';
+export * from './compute-engine/numerics/statistics.js';
+export * from './compute-engine/numerics/strings.js';
+export * from './compute-engine/numerics/unit-data.js';
 
 //
 // numeric.ts — machine-precision utilities and constants.
@@ -76,7 +76,7 @@ export {
   cantorEnumerateComplexNumbers,
   cantorEnumerateIntegers,
   cantorEnumerateNaturalNumbers,
-} from './compute-engine/numerics/numeric';
+} from './compute-engine/numerics/numeric.js';
 
 //
 // numeric-bigint.ts — bigint-precision variants.
@@ -88,7 +88,7 @@ export {
   canonicalInteger as bigintCanonicalInteger,
   reducedInteger,
   factorial as bigintFactorial,
-} from './compute-engine/numerics/numeric-bigint';
+} from './compute-engine/numerics/numeric-bigint.js';
 
 //
 // numeric-bignum.ts — arbitrary-precision (Decimal) variants.
@@ -99,7 +99,7 @@ export {
   lcm as bignumLcm,
   factorial2 as bignumFactorial2,
   isInMachineRange,
-} from './compute-engine/numerics/numeric-bignum';
+} from './compute-engine/numerics/numeric-bignum.js';
 
 //
 // special-functions.ts — machine-precision special functions.
@@ -134,7 +134,7 @@ export {
   fresnelS,
   fresnelC,
   sinc,
-} from './compute-engine/numerics/special-functions';
+} from './compute-engine/numerics/special-functions.js';
 
 //
 // numeric-complex.ts — complex-number variants.
@@ -143,4 +143,4 @@ export {
 export {
   gamma as complexGamma,
   gammaln as complexGammaln,
-} from './compute-engine/numerics/numeric-complex';
+} from './compute-engine/numerics/numeric-complex.js';

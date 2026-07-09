@@ -1,15 +1,21 @@
 import { Complex } from 'complex-esm';
-import { BigDecimal } from '../big-decimal';
+import { BigDecimal } from '../big-decimal/index.js';
 
-import { isValidSymbol, validateSymbol } from '../math-json/symbols';
-import type { MathJsonNumberObject, MathJsonSymbol } from '../math-json/types';
+import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
+import type {
+  MathJsonNumberObject,
+  MathJsonSymbol,
+} from '../math-json/types.js';
 
-import { BoxedSymbol } from './boxed-expression/boxed-symbol';
-import { BoxedNumber, canonicalNumber } from './boxed-expression/boxed-number';
-import { isValueDef } from './boxed-expression/utils';
-import { NumericValue } from './numeric-value/types';
-import { isRational } from './numerics/rationals';
-import type { Rational } from './numerics/types';
+import { BoxedSymbol } from './boxed-expression/boxed-symbol.js';
+import {
+  BoxedNumber,
+  canonicalNumber,
+} from './boxed-expression/boxed-number.js';
+import { isValueDef } from './boxed-expression/utils.js';
+import { NumericValue } from './numeric-value/types.js';
+import { isRational } from './numerics/rationals.js';
+import type { Rational } from './numerics/types.js';
 import type {
   BoxedDefinition,
   Expression,
@@ -17,7 +23,7 @@ import type {
   Metadata,
   ValueDefinition,
   IComputeEngine as ComputeEngine,
-} from './global-types';
+} from './global-types.js';
 
 export type CommonNumberTable = {
   [num: number]: null | Expression;
@@ -30,7 +36,7 @@ type SymbolHost = ComputeEngine & {
   _declareSymbolValue(
     name: MathJsonSymbol,
     def: Partial<ValueDefinition>,
-    scope?: import('./global-types').Scope
+    scope?: import('./global-types.js').Scope
   ): BoxedDefinition;
   error(message: string | string[], where?: string): Expression;
 };

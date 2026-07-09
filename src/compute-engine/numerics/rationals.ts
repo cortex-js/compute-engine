@@ -1,10 +1,10 @@
-import { canonicalInteger, gcd, lcm } from './numeric';
+import { canonicalInteger, gcd, lcm } from './numeric.js';
 import {
   gcd as bigGcd,
   lcm as bigLcm,
   canonicalInteger as bigCanonicalInteger,
-} from './numeric-bigint';
-import { Rational, SmallInteger } from './types';
+} from './numeric-bigint.js';
+import { Rational, SmallInteger } from './types.js';
 
 export function isRational(x: unknown | null): x is Rational {
   return x !== null && Array.isArray(x);

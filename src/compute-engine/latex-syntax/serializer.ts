@@ -1,4 +1,4 @@
-import type { MathJsonExpression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types.js';
 import {
   nops,
   stringValue,
@@ -9,25 +9,25 @@ import {
   operands,
   isNumberExpression,
   machineValue,
-} from '../../math-json/utils';
+} from '../../math-json/utils.js';
 
 import {
   LatexString,
   SerializeLatexOptions,
   DelimiterScale,
   ADDITION_PRECEDENCE,
-} from './types';
+} from './types.js';
 
 import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
-} from './dictionary/definitions';
+} from './dictionary/definitions.js';
 
-import { countTokens, supsub } from './tokenizer';
-import { serializeNumber } from './serialize-number';
-import { SYMBOLS } from './dictionary/definitions-symbols';
-import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core';
-import { EMOJIS } from '../../math-json/symbols';
+import { countTokens, supsub } from './tokenizer.js';
+import { serializeNumber } from './serialize-number.js';
+import { SYMBOLS } from './dictionary/definitions-symbols.js';
+import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core.js';
+import { EMOJIS } from '../../math-json/symbols.js';
 
 // ---------------------------------------------------------------------------
 // Dot-notation serialization (dotNotation option)

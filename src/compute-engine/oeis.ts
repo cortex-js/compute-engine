@@ -10,7 +10,7 @@
 import type {
   IComputeEngine as ComputeEngine,
   Expression,
-} from './global-types';
+} from './global-types.js';
 
 // ============================================================================
 // Types

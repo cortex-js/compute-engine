@@ -1,14 +1,14 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
-import { asSmallInteger } from '../boxed-expression/numerics';
+} from '../global-types.js';
+import { asSmallInteger } from '../boxed-expression/numerics.js';
 import {
   extractVariables,
   evaluateWithAssignment,
   generateAssignments,
-} from '../symbolic/logic-utils';
-import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards';
+} from '../symbolic/logic-utils.js';
+import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards.js';
 
 /**
  * Quantifier domain helpers and boolean analysis functions.

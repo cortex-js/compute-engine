@@ -21,10 +21,13 @@ import type {
   ExplainOptions,
   Explanation,
   RuleSteps,
-} from '../global-types';
-import { differentiate, DerivativeTrace } from './derivative';
-import { _setExplainDDriver, curateChain } from '../boxed-expression/explain';
-import { isFunction, sym } from '../boxed-expression/type-guards';
+} from '../global-types.js';
+import { differentiate, DerivativeTrace } from './derivative.js';
+import {
+  _setExplainDDriver,
+  curateChain,
+} from '../boxed-expression/explain.js';
+import { isFunction, sym } from '../boxed-expression/type-guards.js';
 
 function explainD(expr: Expression, options?: ExplainOptions): Explanation {
   const ce = expr.engine;

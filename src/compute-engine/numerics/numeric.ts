@@ -1,5 +1,5 @@
-import { extrapolate } from './richardson';
-import { primeFactors } from './primes';
+import { extrapolate } from './richardson.js';
+import { primeFactors } from './primes.js';
 
 // Number of significant digits for Decimal
 // The Decimal implementation groups digits by 7

@@ -1,4 +1,4 @@
-import type { Expression, ExpressionInput } from './types-expression';
+import type { Expression, ExpressionInput } from './types-expression.js';
 
 import type {
   BoxedSubstitution as KernelBoxedSubstitution,
@@ -12,7 +12,7 @@ import type {
   PatternMatchOptions as KernelPatternMatchOptions,
   ReplaceOptions,
   Substitution as KernelSubstitution,
-} from './types-kernel-serialization';
+} from './types-kernel-serialization.js';
 
 export type {
   Hold,

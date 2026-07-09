@@ -1,4 +1,4 @@
-export type { OneOf } from '../common/one-of';
+export type { OneOf } from '../common/one-of.js';
 // export * from '../common/one-of';
 
 export type {
@@ -12,20 +12,20 @@ export type {
   MathJsonDictionaryObject,
   ExpressionObject,
   MathJsonSymbol,
-} from '../math-json/types';
+} from '../math-json/types.js';
 
-export * from '../common/type/boxed-type';
-export * from '../common/type/types';
+export * from '../common/type/boxed-type.js';
+export * from '../common/type/types.js';
 
-export type * from './latex-syntax/types';
+export type * from './latex-syntax/types.js';
 
 // export * from './latex-syntax/dictionary/definitions';
 
-export * from './numerics/types';
+export * from './numerics/types.js';
 
-export * from './numeric-value/types';
+export * from './numeric-value/types.js';
 
 // export * from './tensor/tensors';
 // export * from './tensor/tensor-fields';
 
-export * from './global-types';
+export * from './global-types.js';

@@ -9,15 +9,15 @@ import type {
   BoxedOperatorDefinition,
   BoxedValueDefinition,
   DictionaryInterface,
-} from '../global-types';
+} from '../global-types.js';
 
-import { MACHINE_PRECISION } from '../numerics/numeric';
-import { Type } from '../../common/type/types';
-import { NumericValue } from '../numeric-value/types';
-import { _BoxedOperatorDefinition } from './boxed-operator-definition';
-import { _BoxedValueDefinition } from './boxed-value-definition';
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
+import { MACHINE_PRECISION } from '../numerics/numeric.js';
+import { Type } from '../../common/type/types.js';
+import { NumericValue } from '../numeric-value/types.js';
+import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
+import { _BoxedValueDefinition } from './boxed-value-definition.js';
+import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 
 /**
  * Check if an expression contains symbolic transcendental functions of constants

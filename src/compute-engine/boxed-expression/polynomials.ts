@@ -1,13 +1,13 @@
-import { checkDeadline } from '../../common/interruptible';
-import type { Expression } from '../global-types';
-import { asSmallInteger } from './numerics';
-import { add } from './arithmetic-add';
-import { expand } from './expand';
-import { multivariateGCD } from './multivariate-gcd';
-import { isNumber, isFunction, isSymbol } from './type-guards';
+import { checkDeadline } from '../../common/interruptible.js';
+import type { Expression } from '../global-types.js';
+import { asSmallInteger } from './numerics.js';
+import { add } from './arithmetic-add.js';
+import { expand } from './expand.js';
+import { multivariateGCD } from './multivariate-gcd.js';
+import { isNumber, isFunction, isSymbol } from './type-guards.js';
 
 // Re-export degree functions from leaf module (no circular deps)
-export { totalDegree, maxDegree, lex, revlex } from './polynomial-degree';
+export { totalDegree, maxDegree, lex, revlex } from './polynomial-degree.js';
 
 /**
  * Coefficient of a univariate (single variable) polynomial.

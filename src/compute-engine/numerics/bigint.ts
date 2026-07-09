@@ -1,4 +1,4 @@
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
 export function bigint(
   a: BigDecimal | number | bigint | string

@@ -1,5 +1,5 @@
 import type { Complex } from 'complex-esm';
-import type { OneOf } from '../common/one-of';
+import type { OneOf } from '../common/one-of.js';
 import type {
   MathJsonExpression,
   MathJsonNumberObject,
@@ -8,11 +8,11 @@ import type {
   MathJsonFunctionObject,
   MathJsonSymbol,
   MathJsonDictionaryObject,
-} from '../math-json';
-import type { Type, TypeString } from '../common/type/types';
-import type { BoxedType } from '../common/type/boxed-type';
-import type { NumericValue } from './numeric-value/types';
-import type { BigNum } from './numerics/types';
+} from '../math-json.js';
+import type { Type, TypeString } from '../common/type/types.js';
+import type { BoxedType } from '../common/type/boxed-type.js';
+import type { NumericValue } from './numeric-value/types.js';
+import type { BigNum } from './numerics/types.js';
 
 import type {
   JsonSerializationOptions,
@@ -21,7 +21,7 @@ import type {
   Substitution,
   BoxedSubstitution,
   CanonicalOptions,
-} from './types-kernel-serialization';
+} from './types-kernel-serialization.js';
 import type {
   EvaluateOptions as KernelEvaluateOptions,
   BoxedRule as KernelBoxedRule,
@@ -31,7 +31,7 @@ import type {
   ExplainOperation,
   ExplainVerbosity,
   Explanation as KernelExplanation,
-} from './types-kernel-evaluation';
+} from './types-kernel-evaluation.js';
 
 /**
  * Compute engine surface used by expression types.

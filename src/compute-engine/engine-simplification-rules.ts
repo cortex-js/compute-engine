@@ -1,4 +1,4 @@
-import type { Rule } from './types-evaluation';
+import type { Rule } from './types-evaluation.js';
 
 /**
  * Internal holder for a rule array and its cache-staleness marker.

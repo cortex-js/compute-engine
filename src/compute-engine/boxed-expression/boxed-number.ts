@@ -1,40 +1,43 @@
 import { Complex } from 'complex-esm';
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
-import type { MathJsonExpression, MathJsonNumberObject } from '../../math-json';
+import type {
+  MathJsonExpression,
+  MathJsonNumberObject,
+} from '../../math-json.js';
 
-import { mul, div } from './arithmetic-mul-div';
+import { mul, div } from './arithmetic-mul-div.js';
 
-import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric';
-import { primeFactors } from '../numerics/primes';
-import type { Rational, SmallInteger } from '../numerics/types';
-import { bigint } from '../numerics/bigint';
+import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric.js';
+import { primeFactors } from '../numerics/primes.js';
+import type { Rational, SmallInteger } from '../numerics/types.js';
+import { bigint } from '../numerics/bigint.js';
 
 import {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
-} from '../numeric-value/types';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+} from '../numeric-value/types.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 
-import { replace } from './rules';
-import { simplify } from './simplify';
-import { explainExpression } from './explain';
+import { replace } from './rules.js';
+import { simplify } from './simplify.js';
+import { explainExpression } from './explain.js';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode } from './utils';
-import { match } from './match';
-import { same } from './compare';
-import { add } from './arithmetic-add';
-import { pow } from './arithmetic-power';
-import { isSubtype } from '../../common/type/subtype';
+import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { hashCode } from './utils.js';
+import { match } from './match.js';
+import { same } from './compare.js';
+import { add } from './arithmetic-add.js';
+import { pow } from './arithmetic-power.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import {
   positiveSign,
   nonNegativeSign,
   negativeSign,
   nonPositiveSign,
-} from './sgn';
-import { BoxedType } from '../../common/type/boxed-type';
+} from './sgn.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   BoxedRuleSet,
   BoxedSubstitution,
@@ -54,8 +57,8 @@ import type {
   Explanation,
   ExpressionInput,
   NumberLiteralInterface,
-} from '../global-types';
-import { isNumber, isSymbol } from './type-guards';
+} from '../global-types.js';
+import { isNumber, isSymbol } from './type-guards.js';
 
 /**
  * BoxedNumber

@@ -47,11 +47,11 @@
 
 import coreDataJson from './fungrim-core-data.json';
 
-import type { IComputeEngine } from '../types-engine';
-import type { Expression, ExpressionInput } from '../types-expression';
-import type { BoxedSubstitution } from '../types-serialization';
-import type { Rule, RuleStep } from '../types-evaluation';
-import type { RulePurpose } from '../types-kernel-evaluation';
+import type { IComputeEngine } from '../types-engine.js';
+import type { Expression, ExpressionInput } from '../types-expression.js';
+import type { BoxedSubstitution } from '../types-serialization.js';
+import type { Rule, RuleStep } from '../types-evaluation.js';
+import type { RulePurpose } from '../types-kernel-evaluation.js';
 
 import type {
   CompiledFungrimRule,
@@ -61,7 +61,7 @@ import type {
   FungrimMathJson,
   FungrimRuleData,
   GuardSpec,
-} from './types';
+} from './types.js';
 
 /** The compiled artifact (the whole slice, bundled as JSON). */
 export const FUNGRIM_CORE: FungrimRuleData =

@@ -1,4 +1,7 @@
-import { checkDeadline, getAmbientDeadline } from '../../common/interruptible';
+import {
+  checkDeadline,
+  getAmbientDeadline,
+} from '../../common/interruptible.js';
 
 /**
  * Quadrature for **conditionally-convergent oscillatory** semi-infinite

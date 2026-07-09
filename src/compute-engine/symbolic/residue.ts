@@ -21,12 +21,12 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-} from '../global-types';
+} from '../global-types.js';
 
-import { symbolicLimit } from './limit';
-import { differentiate } from './derivative';
-import { sym } from '../boxed-expression/type-guards';
-import { getFunctionProperties } from '../function-properties';
+import { symbolicLimit } from './limit.js';
+import { differentiate } from './derivative.js';
+import { sym } from '../boxed-expression/type-guards.js';
+import { getFunctionProperties } from '../function-properties/index.js';
 
 // The base `Expression` type only exposes operands after a type guard; the
 // boxed objects always have an `ops` getter (see limit.ts for the same idiom).

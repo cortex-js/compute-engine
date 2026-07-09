@@ -1,8 +1,13 @@
 import type {
   IComputeEngine as ComputeEngine,
   Expression,
-} from '../global-types';
-import { MPoly, igcd, mpolyFromBoxed, mpolyToBoxed } from './multivariate-poly';
+} from '../global-types.js';
+import {
+  MPoly,
+  igcd,
+  mpolyFromBoxed,
+  mpolyToBoxed,
+} from './multivariate-poly.js';
 
 /**
  * Multivariate polynomial GCD over ℤ via **Brown's dense modular algorithm**

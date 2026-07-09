@@ -1,9 +1,9 @@
-import type { SymbolDefinitions, Expression } from '../global-types';
+import type { SymbolDefinitions, Expression } from '../global-types.js';
 import {
   isSymbol,
   isString,
   isFunction,
-} from '../boxed-expression/type-guards';
+} from '../boxed-expression/type-guards.js';
 import {
   convertUnit,
   convertCompoundUnit,
@@ -13,8 +13,8 @@ import {
   getExpressionScale,
   findNamedUnit,
   type UnitExpression,
-} from './unit-data';
-import { isMeasurement, measurementAffine } from './measurement-arithmetic';
+} from './unit-data.js';
+import { isMeasurement, measurementAffine } from './measurement-arithmetic.js';
 
 /**
  * Convert a boxed expression representing a unit into a plain

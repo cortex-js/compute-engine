@@ -1,9 +1,9 @@
-import type { Expression, LibraryDefinition } from './global-types';
+import type { Expression, LibraryDefinition } from './global-types.js';
 import type {
   LanguageTarget,
   CompileTarget,
   CompilationOptions,
-} from './compilation/types';
+} from './compilation/types.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;

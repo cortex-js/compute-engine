@@ -1,32 +1,32 @@
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
-import { bignumPreferred } from '../boxed-expression/utils';
-import { checkArity } from '../boxed-expression/validate';
+import { bignumPreferred } from '../boxed-expression/utils.js';
+import { checkArity } from '../boxed-expression/validate.js';
 import {
   constructibleValues,
   evalTrig,
   processInverseFunction,
   trigSign,
-} from '../boxed-expression/trigonometry';
+} from '../boxed-expression/trigonometry.js';
 
-import { apply, apply2, shouldNumericize } from '../boxed-expression/apply';
+import { apply, apply2, shouldNumericize } from '../boxed-expression/apply.js';
 
-import { reducedRational } from '../numerics/rationals';
+import { reducedRational } from '../numerics/rationals.js';
 import type {
   OperatorDefinition,
   SymbolDefinitions,
   IComputeEngine,
-} from '../global-types';
-import type { Expression } from '../types-expression';
+} from '../global-types.js';
+import type { Expression } from '../types-expression.js';
 import {
   isFunction,
   isNumber,
   isSymbol,
-} from '../boxed-expression/type-guards';
-import { numericTypeHandler, elementaryFunctionType } from './type-handlers';
-import { isMeasurement, measurementTrig } from './measurement-arithmetic';
-import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite';
-import { getUnitScale } from './unit-data';
+} from '../boxed-expression/type-guards.js';
+import { numericTypeHandler, elementaryFunctionType } from './type-handlers.js';
+import { isMeasurement, measurementTrig } from './measurement-arithmetic.js';
+import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite.js';
+import { getUnitScale } from './unit-data.js';
 import {
   bigFresnelC,
   bigFresnelS,
@@ -36,7 +36,7 @@ import {
   fresnelS,
   sinc,
   sinIntegral,
-} from '../numerics/special-functions';
+} from '../numerics/special-functions.js';
 
 //
 // Note: The name of trigonometric functions follow NIST DLMF

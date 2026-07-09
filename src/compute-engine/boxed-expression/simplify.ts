@@ -1,14 +1,14 @@
-import { checkDeadline } from '../../common/interruptible';
-import { replace } from './rules';
-import { holdMap } from './hold';
-import { expToTrig } from './exp-to-trig';
+import { checkDeadline } from '../../common/interruptible.js';
+import { replace } from './rules.js';
+import { holdMap } from './hold.js';
+import { expToTrig } from './exp-to-trig.js';
 import type {
   Expression,
   SimplifyOptions,
   BoxedRuleSet,
   RuleSteps,
-} from '../global-types';
-import { isNumber, isSymbol, isFunction, isString } from './type-guards';
+} from '../global-types.js';
+import { isNumber, isSymbol, isFunction, isString } from './type-guards.js';
 
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;

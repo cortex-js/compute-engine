@@ -21,7 +21,7 @@ import {
   checkDeadline,
   getAmbientDeadline,
   withAmbientDeadline,
-} from '../../common/interruptible';
+} from '../../common/interruptible.js';
 
 /**
  * Rounds the error to 2 significant digits, and rounds the estimate

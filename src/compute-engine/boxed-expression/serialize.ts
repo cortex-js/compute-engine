@@ -1,10 +1,10 @@
 import { Complex } from 'complex-esm';
-import { BigDecimal } from '../../big-decimal';
+import { BigDecimal } from '../../big-decimal/index.js';
 
-import type { MathJsonExpression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types.js';
 
-import { Rational } from '../numerics/types';
-import { isInMachineRange } from '../numerics/numeric-bignum';
+import { Rational } from '../numerics/types.js';
+import { isInMachineRange } from '../numerics/numeric-bignum.js';
 import {
   isInteger,
   isMachineRational,
@@ -15,19 +15,19 @@ import {
   machineNumerator,
   isZero,
   neg,
-} from '../numerics/rationals';
+} from '../numerics/rationals.js';
 import {
   numberToString,
   roundToSignificant,
   roundToDecimalPlace,
-} from '../numerics/strings';
-import { numberToExpression } from '../numerics/expression';
+} from '../numerics/strings.js';
+import { numberToExpression } from '../numerics/expression.js';
 
-import { NumericValue } from '../numeric-value/types';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { NumericValue } from '../numeric-value/types.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 
-import { order } from './order';
-import { asSmallInteger } from './numerics';
+import { order } from './order.js';
+import { asSmallInteger } from './numerics.js';
 import type {
   IComputeEngine as ComputeEngine,
   Metadata,
@@ -35,10 +35,10 @@ import type {
   FunctionInterface,
   JsonSerializationOptions,
   DisplayDigits,
-} from '../global-types';
-import { isOperatorDef } from './utils';
-import { isNumber, isSymbol, isString, isFunction } from './type-guards';
-import { matchesNumber, matchesSymbol } from '../../math-json/utils';
+} from '../global-types.js';
+import { isOperatorDef } from './utils.js';
+import { isNumber, isSymbol, isString, isFunction } from './type-guards.js';
+import { matchesNumber, matchesSymbol } from '../../math-json/utils.js';
 
 // Lazy reference to break circular dependency:
 // arithmetic-mul-div → ... → abstract-boxed-expression → serialize

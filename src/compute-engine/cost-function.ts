@@ -1,11 +1,11 @@
-import type { Expression } from './global-types';
+import type { Expression } from './global-types.js';
 import type { NumericValue } from './numeric-value/types.js';
 import {
   isSymbol,
   isNumber,
   isFunction,
   numericValue,
-} from './boxed-expression/type-guards';
+} from './boxed-expression/type-guards.js';
 
 /**
  * The Cost Function is used to select the simplest between two expressions:
