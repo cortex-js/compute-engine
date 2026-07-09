@@ -1780,6 +1780,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Angle mark / measure (`\\angle ABC`, `\\varangle XYZ`, `∠ABC`) — opaque typed head; not evaluated.',
       signature: '(any+) -> number',
     },
+    IndexedSequence: {
+      // Scripted-brace sequence notation `\{a_n\}_{n=1}^{\infty}`:
+      // `IndexedSequence(term, index, lower, upper?)`. Inert for now: it is
+      // held (not evaluated) and stays symbolic — the `term` operand carries
+      // the index in call form (`["a_", "n"]`) so the binding survives symbol
+      // fusion. Typed `-> expression` rather than `collection`: it has no
+      // collection handlers yet, so claiming `collection` would be dishonest.
+      // `lazy` keeps the held term from being evaluated/canonicalized.
+      description:
+        'Indexed sequence `\\{a_n\\}_{n=1}^{\\infty}` — inert head `IndexedSequence(term, index, lower, upper?)`; not evaluated.',
+      lazy: true,
+      signature: '(any, symbol, any, any?) -> expression',
+    },
     Quadrilateral: {
       description:
         'Quadrilateral mark (`\\square ABCD`) — opaque typed head; not evaluated.',

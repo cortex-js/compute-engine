@@ -49,6 +49,118 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { TypeString } from '../types.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
 
+/** Does the index symbol `index` occur anywhere in `expr`? A fused compound
+ * symbol (`a_n`) counts as mentioning its subscript token. */
+function mentionsIndex(
+  expr: MathJsonExpression | null,
+  index: MathJsonSymbol
+): boolean {
+  if (expr === null) return false;
+  if (typeof expr === 'string')
+    return expr === index || expr.split('_').includes(index);
+  if (Array.isArray(expr)) return expr.some((e) => mentionsIndex(e, index));
+  return false;
+}
+
+/** Rewrite subscripted symbols that reference the sequence index into the
+ * operator-call form (`a_n` → `["a_", "n"]`, `["Subscript","b",i+s]` →
+ * `["b_", i+s]`) so the index binding survives symbol fusion. Subexpressions
+ * that don't mention the index are left untouched. */
+function liftIndexBinding(
+  expr: MathJsonExpression,
+  index: MathJsonSymbol
+): MathJsonExpression {
+  // Fused compound symbol `X_Y` whose subscript is exactly the index.
+  if (typeof expr === 'string') {
+    const i = expr.indexOf('_');
+    if (i > 0 && expr.substring(i + 1) === index)
+      return [expr.substring(0, i) + '_', index];
+    return expr;
+  }
+  if (!Array.isArray(expr)) return expr;
+
+  // Explicit `Subscript(base, sub)` on a plain symbol whose subscript
+  // references the index (e.g. `b_{i+s}`).
+  if (
+    operator(expr) === 'Subscript' &&
+    typeof operand(expr, 1) === 'string' &&
+    mentionsIndex(operand(expr, 2), index)
+  ) {
+    const base = operand(expr, 1) as string;
+    return [base + '_', liftIndexBinding(operand(expr, 2)!, index)];
+  }
+
+  // Otherwise recurse into operands, leaving the operator head untouched.
+  return [
+    expr[0],
+    ...expr.slice(1).map((o) => liftIndexBinding(o as MathJsonExpression, index)),
+  ] as MathJsonExpression;
+}
+
+/** Least element of a set symbol, for mapping `n \in \mathbb{N}` subscripts to
+ * a lower bound. Returns `undefined` when the set has no clear least element
+ * (we don't guess in that case). */
+function setLeastElement(set: MathJsonExpression | null): number | undefined {
+  if (set === 'NonNegativeIntegers') return 0;
+  if (set === 'PositiveIntegers') return 1;
+  return undefined;
+}
+
+/** Rewrite a scripted `\{…\}` (Set) into the inert `IndexedSequence` head when
+ * it carries an index-binding subscript. Both shapes produced by the parser
+ * are recognized (regardless of `_`/`^` order):
+ *   - `["Subscript", ["Set", term], sub]`               (subscript only)
+ *   - `["Power", ["Subscript", ["Set", term], sub], up]` (with upper bound)
+ * where `sub` is `Equal(index, lower)` or `Element(index, set)`. Returns the
+ * expression unchanged if it is not a sequence-braces pattern. */
+function parseIndexedSequence(
+  expr: MathJsonExpression
+): MathJsonExpression {
+  let upper: MathJsonExpression | undefined;
+  let inner: MathJsonExpression | null = expr;
+  if (operator(expr) === 'Power') {
+    upper = operand(expr, 2) ?? undefined;
+    inner = operand(expr, 1);
+  }
+  if (inner === null || operator(inner) !== 'Subscript') return expr;
+
+  const setNode = operand(inner, 1);
+  if (
+    setNode === null ||
+    operator(setNode) !== 'Set' ||
+    (operands(setNode)?.length ?? 0) !== 1
+  )
+    return expr;
+
+  const sub = operand(inner, 2);
+  if (sub === null) return expr;
+
+  let index: MathJsonSymbol | undefined;
+  let lower: MathJsonExpression | undefined;
+  if (operator(sub) === 'Equal') {
+    const i = operand(sub, 1);
+    if (typeof i !== 'string') return expr;
+    index = i;
+    lower = operand(sub, 2) ?? undefined;
+  } else if (operator(sub) === 'Element') {
+    const i = operand(sub, 1);
+    if (typeof i !== 'string') return expr;
+    const least = setLeastElement(operand(sub, 2));
+    if (least === undefined) return expr; // no clear least element — don't guess
+    index = i;
+    lower = least;
+  } else {
+    return expr;
+  }
+
+  if (index === undefined || lower === undefined) return expr;
+
+  const term = liftIndexBinding(operand(setNode, 1)!, index);
+  return upper === undefined
+    ? ['IndexedSequence', term, index, lower]
+    : ['IndexedSequence', term, index, lower, upper];
+}
+
 /** Tokens that cannot begin the braces-less argument of a LaTeX command
  * (e.g. `\frac12`). See `parseToken()`. */
 const PARSE_TOKEN_EXCLUDED = new Set<string>([
@@ -2926,6 +3038,14 @@ export class _Parser implements Parser {
     // 7. Are there superscript or subfix operators?
     //
     if (result !== null) result = this.parseSupsub(result);
+
+    //
+    // 7b. Scripted-brace sequence notation: `\{a_n\}_{n=1}^{\infty}`.
+    //     A `\{…\}` (Set) carrying an index-binding subscript (and optional
+    //     upper superscript) denotes an indexed sequence, not a set indexed
+    //     by an equation. Rewrite to the inert `IndexedSequence` head.
+    //
+    if (result !== null) result = parseIndexedSequence(result);
 
     //
     // 8. Are there postfix operators after subsup?

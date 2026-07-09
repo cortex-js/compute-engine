@@ -110,7 +110,7 @@ scipy is installed in `./venv`.
 - Bare `O(…)` parsing deferred (design doc §8 Q3); revisit for lenient mode
   once the parser work settles.
 
-**MathNet parser tail (S/M; corpus at 363/428 after the 2026-07-09 rounds —
+**MathNet parser tail (S/M; corpus at 369/428 after the 2026-07-09 rounds —
 trailing-`?`/`\ldots` recovery, Unicode `±`/`∓`/`ℓ`, un-applied-operator
 devolution (`N`, `D`), `\measuredangle`/`\Varangle`, decorated operators
 (`\oplus` → `CirclePlus`, …), structure tuples `(A,+,\cdot)`, geometry
@@ -122,10 +122,6 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
 
 *Next up (agreed 2026-07-09):*
 
-- **Sequence-braces notation (M):** `\{a_n\}_{n=1}^{\infty}` — subscripted /
-  superscripted braces denoting a sequence; currently the sub/superscript on
-  the `Set` flags `incompatible-type` (3 corpus cases, 2026-07-09 sample).
-  Needs a design call on the target MathJSON shape before implementing.
 - **MATH genre-gap fixes (S/M; top tier + cheap recoveries EXECUTED
   2026-07-09):** the genre-coverage sweep ran over Hendrycks MATH (15,546
   fragments incl. worked solutions across all 7 subjects; report:
@@ -138,18 +134,20 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   thousands separator with the `decimalSeparator: '{,}'` precedence guard,
   `\cancel`/`\cancelto`, `\not`-prefixed relations, `Factorial2` symbolic
   signature, standalone-`\pmod` operand order — see CHANGELOG), taking the
-  corpus to **97.38%** (327 of 735 failures fixed). Remaining ranked tail:
-  (1) base-subscript numerals `10111_2`, `161_b` (16, all failing in
-  *arithmetic* contexts — bare `10111_2` is already an inert `Subscript`) —
-  needs a design call (fold to integer literal vs. parse to the existing
-  numeric-valued `BaseForm(value, base)` head, whose LaTeX serializer also
-  needs an unbalanced-paren fix); (2) units-in-text arithmetic
+  corpus to **97.38%** (327 of 735 failures fixed). Base-subscript numerals
+  then landed too (`10111_2` → the numeric `BaseForm(value, base)` head,
+  12 of 16 tagged fixed; the rest are symbolic-base `161_b`, inert by
+  design), as did sequence braces (`\{a_n\}_{n=1}^{\infty}` → inert
+  `IndexedSequence`, 3/3). Remaining ranked tail:
+  (1) units-in-text arithmetic
   `(18 \text{ inches})/(12 \text{ inches/foot})` (42, overlaps the units
-  subsystem); (3) prime-after-arg `\sin a'` (13); (4) residual pmod chains
-  (9) + styling remnants (11); (5) small leftovers: empty scripts on
+  subsystem); (2) prime-after-arg `\sin a'` (13); (3) residual pmod chains
+  (9) + styling remnants (11); (4) small leftovers: empty scripts on
   multi-letter symbol bases (`\alpha_{}`, needs the `_` parselet in
-  `definitions-core.ts` to drop empty braced subscripts at the source) and
-  `\cancel` inside `array`-env `@{}`/`\cline` layouts.
+  `definitions-core.ts` to drop empty braced subscripts at the source),
+  `\cancel` inside `array`-env `@{}`/`\cline` layouts, and possible future
+  upgrades to `IndexedSequence` (lazy-collection semantics, the
+  parenthesized `(a_n)_{n\in\mathbb{N}}` form).
   Ascii-pipe divisibility evidence doubled (36 more hits, tracked below).
   Skip: `array`-env long-division layouts, `\nabla` puzzle ops, repeating
   decimals `0.abab\overline{ab}`.

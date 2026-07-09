@@ -341,6 +341,25 @@ const FUNCTIONS: Record<
   Max: 'max',
   Min: 'min',
 
+  // Indexed sequence `\{a_n\}_{n=1}^{\infty}` → `{a_n : n = 1..oo}`. The term
+  // is held in call form (`["a_", "n"]`); render that back as `a_n` for
+  // readability, and drop the upper bound when absent.
+  IndexedSequence: (expr_, serialize) => {
+    const expr = expr_ as FnExpr;
+    const t = expr.op1;
+    const term =
+      isFunction(t) &&
+      t.operator.length > 1 &&
+      t.operator.endsWith('_') &&
+      t.nops === 1
+        ? `${t.operator.slice(0, -1)}_${serialize(t.op1)}`
+        : serialize(t);
+    const index = serialize(expr.op2);
+    const lower = serialize(expr.op3);
+    const upper = expr.ops[3] ? serialize(expr.ops[3]) : '';
+    return `{${term} : ${index} = ${lower}..${upper}}`;
+  },
+
   Measurement: (expr_, serialize, options) => {
     const [lhs, rhs] = (expr_ as FnExpr).ops;
     if (!rhs) return serialize(lhs);

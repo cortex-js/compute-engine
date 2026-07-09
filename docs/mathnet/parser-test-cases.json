@@ -2179,19 +2179,19 @@
   {
    "latex": "\\{a_n\\}_{n=1}^{\\infty}",
    "category": "sequence-braces",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
    "latex": "\\{x_{n}\\}_{n=1}^{\\infty}",
    "category": "sequence-braces",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {
    "latex": "\\{c_i = a_i + b_{i+s}\\}_{i=1}^m",
    "category": "sequence-braces",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "sample-2600 sweep (2026-07-09)"
   },
   {

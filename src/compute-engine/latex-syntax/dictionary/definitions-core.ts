@@ -56,6 +56,105 @@ function memberHead(name: string): string | null {
   return COMPONENT_ACCESS_HEADS[name] ?? null;
 }
 
+/**
+ * Base-subscript numeral reading.
+ *
+ * A decimal numeral literal (`lhs`) subscripted by a single integer base ≥ 2
+ * (`rhs`) denotes that numeral read in the given base, e.g. `10111_2` (binary
+ * 23), `2748_{16}` (hex 10056), `235935623_{74}`. Returns the corresponding
+ * `BaseForm(value, base)` expression — an existing numeric head that
+ * participates in arithmetic — or `null` when the reading does not apply, in
+ * which case the caller keeps the generic `Subscript` reading:
+ *  - the base is not an integer literal ≥ 2 (e.g. symbolic `161_b`);
+ *  - `lhs` is not a non-negative decimal integer numeral;
+ *  - any digit of the numeral is not a valid digit for the base (`19_2`).
+ *
+ * The value is accumulated with `BigInt` so large numerals stay exact, and it
+ * is boxed via the machine-number shorthand only when it fits exactly.
+ */
+function parseBaseFormNumeral(
+  lhs: MathJsonExpression,
+  rhs: MathJsonExpression
+): MathJsonExpression | null {
+  // Base must be an integer literal ≥ 2.
+  if (typeof rhs !== 'number' || !Number.isInteger(rhs) || rhs < 2) return null;
+  const base = rhs;
+
+  // The numeral must be a non-negative decimal integer literal. Extract its
+  // decimal digit string (from a machine number or a big-integer `{num}`).
+  let digits: string | null = null;
+  if (typeof lhs === 'number') {
+    if (Number.isSafeInteger(lhs) && lhs >= 0) digits = lhs.toString();
+  } else if (
+    typeof lhs === 'object' &&
+    lhs !== null &&
+    !Array.isArray(lhs) &&
+    typeof (lhs as { num?: unknown }).num === 'string'
+  ) {
+    const num = (lhs as { num: string }).num;
+    if (/^[0-9]+$/.test(num)) digits = num;
+  }
+  if (digits === null || !/^[0-9]+$/.test(digits)) return null;
+
+  // Every digit must be a valid digit for the base.
+  const bigBase = BigInt(base);
+  let value = 0n;
+  for (let i = 0; i < digits.length; i++) {
+    const d = digits.charCodeAt(i) - 48;
+    if (d >= base) return null;
+    value = value * bigBase + BigInt(d);
+  }
+
+  const valueExpr: MathJsonExpression =
+    value <= BigInt(Number.MAX_SAFE_INTEGER)
+      ? Number(value)
+      : { num: value.toString() };
+
+  return ['BaseForm', valueExpr, base];
+}
+
+/**
+ * Extract the exact non-negative integer value of a MathJSON numeral as a
+ * `bigint`, or `null` if it is not an integer literal. Used by the `BaseForm`
+ * serializer, which must not truncate values outside the machine range.
+ */
+function baseFormBigintValue(
+  expr: MathJsonExpression | null | undefined
+): bigint | null {
+  if (typeof expr === 'number')
+    return Number.isSafeInteger(expr) ? BigInt(expr) : null;
+  if (
+    typeof expr === 'object' &&
+    expr !== null &&
+    !Array.isArray(expr) &&
+    typeof (expr as { num?: unknown }).num === 'string'
+  ) {
+    const s = (expr as { num: string }).num;
+    if (/^[+-]?[0-9]+$/.test(s)) return BigInt(s);
+  }
+  return null;
+}
+
+/**
+ * Render a non-negative `bigint` as a numeral in `base` (2–36 use 0–9a–z).
+ * Returns `null` if any digit cannot be represented (base > 36 with a digit
+ * ≥ 36), in which case the caller falls back to the functional form.
+ */
+function bigintToBaseDigits(value: bigint, base: number): string | null {
+  if (value === 0n) return '0';
+  const bigBase = BigInt(base);
+  const out: string[] = [];
+  let v = value;
+  while (v > 0n) {
+    const d = Number(v % bigBase);
+    if (d < 10) out.push(String.fromCharCode(48 + d));
+    else if (d < 36) out.push(String.fromCharCode(97 + d - 10));
+    else return null;
+    v = v / bigBase;
+  }
+  return out.reverse().join('');
+}
+
 // ---------------------------------------------------------------------------
 // Component-access postfix parse function (C3)
 // ---------------------------------------------------------------------------
@@ -1115,32 +1214,22 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'BaseForm',
     serialize: (serializer, expr) => {
       const radix = machineValue(operand(expr, 2)) ?? NaN;
-      if (isFinite(radix) && radix >= 2 && radix <= 36) {
-        // CAUTION: machineValue() may return a truncated value
-        // if the number is outside of the machine range.
-        const num = machineValue(operand(expr, 1)) ?? NaN;
-        if (isFinite(num) && Number.isInteger(num)) {
-          let digits = Number(num).toString(radix);
-          let groupLength = 0;
-          if (radix === 2) {
-            groupLength = 4;
-          } else if (radix === 10) {
-            groupLength = 4;
-          } else if (radix === 16) {
-            groupLength = 2;
-          } else if (radix > 16) {
-            groupLength = 4;
+      if (isFinite(radix) && radix >= 2 && Number.isInteger(radix)) {
+        // Render the (exact) value as the numeral read in `radix`. Extract the
+        // value with `BigInt` so numbers outside the machine range stay exact —
+        // `machineValue()` would truncate them.
+        const value = baseFormBigintValue(operand(expr, 1));
+        if (value !== null && value >= 0n) {
+          const digits = bigintToBaseDigits(value, radix);
+          // A numeral whose digits are all decimal (0–9) round-trips through
+          // the base-subscript numeral parser (`digits_{radix}` →
+          // `BaseForm(value, radix)`), so emit it as plain digits + subscript.
+          // Otherwise (letter digits, e.g. hex `abc`) the numeral would not
+          // re-parse; keep the readable subscripted form but with `\mathrm`.
+          if (digits !== null) {
+            if (/^[0-9]+$/.test(digits)) return `${digits}_{${radix}}`;
+            return `\\mathrm{${digits}}_{${radix}}`;
           }
-          if (groupLength > 0) {
-            const oldDigits = digits;
-            digits = '';
-            for (let i = 0; i < oldDigits.length; i++) {
-              if (i > 0 && i % groupLength === 0) digits = '\\, ' + digits;
-
-              digits = oldDigits[oldDigits.length - i - 1] + digits;
-            }
-          }
-          return `(\\text{${digits}}_{${radix}}`;
         }
       }
       return (
@@ -1462,6 +1551,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         // Multi-index: unpack Sequence into separate At arguments
         if (operator(rhs) === 'Sequence') return ['At', lhs, ...operands(rhs)];
         return ['At', lhs, rhs];
+      }
+
+      // Base-subscript numeral: `10111_2`, `2748_{16}` → BaseForm(value, base).
+      if (rhs !== null) {
+        const baseForm = parseBaseFormNumeral(lhs, rhs);
+        if (baseForm !== null) return baseForm;
       }
 
       return ['Subscript', lhs, rhs];
@@ -1845,6 +1940,23 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         );
       }
       return '_{' + serializer.serialize(operand(expr, 1)) + '}';
+    },
+  },
+  {
+    // Indexed sequence `\{a_n\}_{n=1}^{\infty}`. Parse-only via the generic
+    // `parseIndexedSequence` post-processing in `parse.ts`; here we only
+    // serialize `IndexedSequence(term, index, lower, upper?)` back to LaTeX.
+    name: 'IndexedSequence',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const term = lowerIndexedTerm(operand(expr, 1));
+      const index = operand(expr, 2);
+      const lower = operand(expr, 3);
+      const upper = nops(expr) >= 4 ? (operands(expr)?.[3] ?? null) : null;
+      const base = `\\left\\{${serializer.serialize(term)}\\right\\}_{${serializer.serialize(
+        index
+      )}=${serializer.serialize(lower)}}`;
+      if (upper === null) return base;
+      return `${base}^{${serializer.serialize(upper)}}`;
     },
   },
   { name: 'Superplus', latexTrigger: ['^', '+'], kind: 'postfix' },
@@ -2905,6 +3017,21 @@ export function latexToDelimiterShorthand(s: string): string | undefined {
       return key;
 
   return undefined;
+}
+
+/** Invert the index-binding call form for serialization: `["a_", sub]` →
+ * `["Subscript", "a", sub]`, recursively, so an `IndexedSequence` term
+ * serializes back to `a_n` notation. */
+function lowerIndexedTerm(
+  expr: MathJsonExpression | null
+): MathJsonExpression {
+  if (expr === null) return 'Nothing';
+  const op = operator(expr);
+  if (!op) return expr; // atom (number or symbol)
+  const args = operands(expr) ?? [];
+  if (op.length > 1 && op.endsWith('_') && args.length === 1)
+    return ['Subscript', op.slice(0, -1), lowerIndexedTerm(args[0])];
+  return [op, ...args.map((a) => lowerIndexedTerm(a))];
 }
 
 function parseAssign(

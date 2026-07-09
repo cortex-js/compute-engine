@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+### New Notations
+
+- **Base-subscript numerals compute.** A numeral with an integer-literal
+  subscript base, e.g. `10111_2` or `2748_{16}`, now parses to the numeric
+  `BaseForm(value, base)` head (`10111_2` → `["BaseForm", 23, 2]`), so
+  arithmetic on based numerals works: `1011_2 \cdot 101_2` evaluates to
+  `55`, and `11_8 - 3_8 = 6_8` evaluates to `True`. The guard is strict —
+  every digit must be valid for the base (`19_2` stays an inert
+  `Subscript`), symbolic bases (`161_b`) and subscripted symbols (`x_2`)
+  are unchanged, and values larger than 2⁵³ stay exact. The `BaseForm`
+  LaTeX serializer was also fixed (it emitted an unbalanced parenthesis)
+  and now round-trips: `BaseForm(23, 2)` serializes as `10111_{2}`.
+- **Sequence-braces notation.** `\{a_n\}_{n=1}^{\infty}` now parses to the
+  new inert `IndexedSequence(term, index, lower, upper)` head instead of
+  an `incompatible-type` error. The term uses the operator-call form
+  (`["a_", "n"]`) so the index binding survives; `_{n\in\mathbb{N}}`
+  subscripts map to the set's least element as the lower bound;
+  the expression is inert under `evaluate()` and `simplify()` and
+  round-trips through LaTeX. Bare `\{a_n\}` remains a `Set`, and the
+  parenthesized form `(a_n)_{n\in\mathbb{N}}` is unchanged.
+
 ### Ellipsis Expressions
 
 - **Sums and products no longer fold numeric terms across an ellipsis.** An
