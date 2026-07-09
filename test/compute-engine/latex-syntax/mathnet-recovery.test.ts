@@ -52,6 +52,54 @@ describe('MathNet Tier-2: ellipsis tolerance', () => {
   test('ellipsis in an Add stays valid (no Error node)', () => {
     expect(isClean('(1!)^2 + (2!)^2 + \\dots + (2018!)^2')).toBe(true);
   });
+
+  test('trailing \\ldots without a comma parses like the comma form', () => {
+    expect(ce.parse('a_{1}, a_{2}, a_{3} \\ldots').json).toEqual(
+      ce.parse('a_{1}, a_{2}, a_{3}, \\ldots').json
+    );
+    expect(ce.parse('F_{1}, F_{2}, F_{3} \\ldots').json).toEqual([
+      'Tuple',
+      'F_1',
+      'F_2',
+      'F_3',
+      'ContinuationPlaceholder',
+    ]);
+    // Mid-sequence: the spliced continuation keeps the following elements flat
+    expect(ce.parse('a_3 \\ldots, b').json).toEqual([
+      'Tuple',
+      'a_3',
+      'ContinuationPlaceholder',
+      'b',
+    ]);
+  });
+
+  test('number followed by trailing \\ldots is clean', () => {
+    expect(isClean('122333444455555 \\ldots')).toBe(true);
+    expect(json('122333444455555 \\ldots')).toContain(
+      'ContinuationPlaceholder'
+    );
+  });
+
+  test('\\vdots / \\ddots parse to ContinuationPlaceholder', () => {
+    expect(ce.parse('\\vdots').json).toEqual('ContinuationPlaceholder');
+    expect(ce.parse('\\ddots').json).toEqual('ContinuationPlaceholder');
+    // Inside a matrix, omitted rows become placeholder cells (no Error)
+    expect(
+      isClean('\\begin{pmatrix} 1 & 2 \\\\ \\vdots & \\ddots \\end{pmatrix}')
+    ).toBe(true);
+  });
+
+  test('range parsing is unaffected by the trailing-dots recovery', () => {
+    expect(ce.parse('[1 \\ldots 9]').json).toEqual(['Range', 1, 9]);
+    expect(ce.parse('[1 \\dots 9]').json).toEqual(['Range', 1, 9]);
+    expect(ce.parse('1..5').json).toEqual(['Range', 1, 5]);
+    // The programmatic `..` operator does NOT get the recovery: `1..` never
+    // becomes a continuation (the trailing-punctuation recovery strips the
+    // stray dot instead: `1..` → `1.` → 1).
+    expect(json('1..')).not.toContain('ContinuationPlaceholder');
+    expect(ce.parse('1..').json).toEqual(1);
+    expect(ce.parse('1..2..10').json).toEqual(['Range', 1, 10, 1]);
+  });
 });
 
 describe('MathNet Tier-2: trailing sentence-punctuation recovery', () => {
@@ -108,11 +156,12 @@ describe('MathNet Tier-2: non-regression guards', () => {
   });
 
   test('recovery does not fire when the stripped parse is still an Error', () => {
-    // `M=N+1 .` is blocked by `N`-as-function, not by the trailing period,
-    // so recovery must NOT silently substitute a still-broken parse. The
-    // result keeps its Error (no change of meaning).
-    const withDot = JSON.stringify(ce.parse('M=N+1 .').json);
-    const withoutDot = JSON.stringify(ce.parse('M=N+1').json);
-    expect(withDot).toEqual(withoutDot);
+    // `(A,+) .` is blocked by the operator-in-tuple, not by the trailing
+    // period, so recovery must NOT silently substitute a still-broken parse.
+    // The result keeps its Error (no change of meaning).
+    // (The former fixture `M=N+1 .` no longer applies: bare `N` devolves to
+    // a plain symbol — see unapplied-operator-fallback.test.ts.)
+    expect(JSON.stringify(ce.parse('(A,+) .').json)).toContain('Error');
+    expect(JSON.stringify(ce.parse('(A,+)').json)).toContain('Error');
   });
 });

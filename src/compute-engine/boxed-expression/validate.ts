@@ -126,6 +126,48 @@ export function checkArity(
 }
 
 /**
+ * Prose-style fallback for un-applied builtin operators: a single
+ * uppercase-letter symbol bound to a **standard-library** operator (`N`, `D`)
+ * that appears as a bare operand of a numeric function (`N + 1`, `M = N + 1`,
+ * `S/D`) almost always means a variable, not the builtin. Devolve it to an
+ * unknown symbol by shadowing the builtin in the current scope; its type is
+ * then inferred like any other free variable.
+ *
+ * Only *root-scope* (standard library) bindings devolve — a user-declared
+ * function used as an operand is a genuine error and is preserved. Note the
+ * shadow persists in the scope: a later `N(...)` in the same scope refers to
+ * the variable, not the builtin (same convention as type inference, which is
+ * also use-order dependent).
+ *
+ * Returns the re-boxed symbol, or `null` if the fallback does not apply.
+ */
+function devolveUnappliedOperator(
+  ce: ComputeEngine,
+  op: Expression
+): Expression | null {
+  if (!isSymbol(op)) return null;
+  const name = op.symbol;
+  if (!/^[A-Z]$/.test(name)) return null;
+
+  // Find the scope where the name is currently bound
+  let scope: Scope | null = ce.context.lexicalScope;
+  while (scope && !scope.bindings.has(name)) scope = scope.parent;
+  if (!scope) return null;
+
+  const def = scope.bindings.get(name)!;
+  if (!scope.parent) {
+    // Bound to the standard library: shadow it in the current scope
+    if (!isOperatorDef(def)) return null;
+    ce.declare(name, 'unknown');
+    return ce.box(name);
+  }
+  // The name was already shadowed with a value (e.g. by a previous operand
+  // of the same expression): rebind this occurrence to the shadow.
+  if (isValueDef(def)) return ce.box(name);
+  return null;
+}
+
+/**
  * Validation of arguments is normally done by checking the signature of the
  * function vs the arguments of the expression. However, we have a fastpath
  * for some common operations (add, multiply, power, neg, etc...) that bypasses
@@ -256,8 +298,16 @@ export function checkNumericArgs(
       // We keep 'Hold' expressions as is
       xs.push(op);
     } else {
-      isValid = false;
-      xs.push(ce.typeError('number', op.type, op));
+      // Last chance: an un-applied single-letter builtin operator (`N + 1`)
+      // devolves to an unknown symbol (see devolveUnappliedOperator)
+      const devolved = op.operatorDefinition
+        ? devolveUnappliedOperator(ce, op)
+        : null;
+      if (devolved) xs.push(devolved);
+      else {
+        isValid = false;
+        xs.push(ce.typeError('number', op.type, op));
+      }
     }
   }
 

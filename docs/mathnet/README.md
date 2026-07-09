@@ -30,6 +30,7 @@ scripts.
 ```sh
 npx tsx docs/mathnet/scripts/check-corpus.ts             # per-category fixed/total
 npx tsx docs/mathnet/scripts/check-corpus.ts --failures  # list survivors
+npx tsx docs/mathnet/scripts/check-corpus.ts --update    # record current outcomes
 ```
 
 Every original corpus case failed when captured; the appended fresh-sample
@@ -37,13 +38,18 @@ follow-up cases record newly observed gaps from later validation. A case is
 *fixed* when `ce.parse()` returns a valid expression with no `Error`
 subexpression and no throw. Baseline at original capture: 3/345 fragments
 pass, 9 throws. The expanded local corpus currently contains 413 fragments.
-`throws` must reach and stay 0. The checker parses each input in a **fresh
-engine**: a shared engine lets free-symbol type inference from one fragment
-contaminate another's parse, under-counting fixes.
+Each entry's `observed` field records the parser outcome as of `lastChecked`
+and is an enforced contract: the checker lists improvements (recorded failing,
+now clean), error-code changes, and **regressions** (recorded clean, now
+failing) — regressions or any throw make it exit non-zero. Run `--update`
+after reviewing the changes to refresh `observed` and `lastChecked`.
+The checker parses each input in a **fresh engine**: a shared engine lets
+free-symbol type inference from one fragment contaminate another's parse,
+under-counting fixes.
 
 State after the 2026-07-04 hardening (Tiers 1–4): **265/345**, throws 0.
 Current local state after later follow-ups and the appended fresh-sample tail:
-**298/413** fragments and **12/19** answer strings, throws 0. See the Status note in
+**320/413** fragments and **14/19** answer strings, throws 0. See the Status note in
 [parser-hardening-plan.md](./parser-hardening-plan.md) for the original pass.
 
 **Independent validation:** a fresh 800-row sample (offsets disjoint from

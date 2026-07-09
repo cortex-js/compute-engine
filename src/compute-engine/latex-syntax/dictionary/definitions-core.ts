@@ -182,7 +182,18 @@ function parseSequence(
 ): MathJsonExpression[] | null {
   if (terminator && terminator.minPrec >= prec) return null;
 
-  const result: MathJsonExpression[] = lhs ? [lhs] : ['Nothing'];
+  // A bare `Sequence` element splices into the enclosing sequence (per the
+  // MathJSON `Sequence` contract), so `a_1, a_2, a_3 \ldots` — where the
+  // trailing-ellipsis recovery yields `Sequence(a_3, ContinuationPlaceholder)`
+  // — collects the same flat elements as `a_1, a_2, a_3, \ldots`.
+  const push = (x: MathJsonExpression) => {
+    if (operator(x) === 'Sequence') result.push(...operands(x));
+    else result.push(x);
+  };
+
+  const result: MathJsonExpression[] = [];
+  if (lhs) push(lhs);
+  else result.push('Nothing');
   let done = false;
   while (!done) {
     done = true;
@@ -198,7 +209,8 @@ function parseSequence(
       result.push('Nothing');
     } else {
       const rhs = parser.parseExpression({ ...terminator, minPrec: prec });
-      result.push(rhs ?? 'Nothing');
+      if (rhs !== null) push(rhs);
+      else result.push('Nothing');
       done = rhs === null;
     }
     if (!done) {
@@ -665,6 +677,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // … U+2026 HORIZONTAL ELLIPSIS
   { latexTrigger: ['…'], parse: 'ContinuationPlaceholder' },
   { latexTrigger: ['.', '.', '.'], parse: 'ContinuationPlaceholder' },
+  // Vertical/diagonal ellipses (matrix rows, column continuations) mean the
+  // same "omitted elements"; they don't round-trip (serialize as `\dots`).
+  { latexTrigger: ['\\vdots'], parse: 'ContinuationPlaceholder' },
+  { latexTrigger: ['\\ddots'], parse: 'ContinuationPlaceholder' },
 
   //
   // Functions
@@ -1406,7 +1422,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'infix',
     // associativity: 'left',
     precedence: 800,
-    parse: parseRange,
+    // Not `parse: parseRange` directly: infix callbacks are invoked with
+    // (parser, lhs, terminator), and the terminator must not land in
+    // parseRange's `trailingDots` parameter.
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parseRange(parser, lhs),
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (args.length === 0) return '';
@@ -1458,19 +1478,22 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['.', '.', '.'],
     kind: 'infix',
     precedence: 800,
-    parse: parseRange,
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parseRange(parser, lhs, true),
   },
   {
     latexTrigger: ['\\ldots'],
     kind: 'infix',
     precedence: 800,
-    parse: parseRange,
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parseRange(parser, lhs, true),
   },
   {
     latexTrigger: ['\\dots'],
     kind: 'infix',
     precedence: 800,
-    parse: parseRange,
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parseRange(parser, lhs, true),
   },
   {
     latexTrigger: [';'],
@@ -2692,13 +2715,25 @@ function serializeList(
  */
 function parseRange(
   parser: Parser,
-  lhs: MathJsonExpression | null
+  lhs: MathJsonExpression | null,
+  trailingDots = false
 ): MathJsonExpression | null {
   if (lhs === null) return null;
 
   const second = parser.parseExpression({ minPrec: 270 });
-  // This was `1..`. Don't know what to do with it. Bail.
-  if (second === null) return null;
+  if (second === null) {
+    // A prose-ellipsis spelling (`\ldots`, `\dots`, `...`) with no right-hand
+    // side is a trailing continuation ("the sequence goes on"), not a
+    // malformed range: `a_3 \ldots` parses like `a_3, \ldots`. `Sequence`
+    // splices into an enclosing comma sequence, so `a_1, a_2, a_3 \ldots`
+    // yields the same Tuple as `a_1, a_2, a_3, \ldots`. This path only fires
+    // where the parse previously produced an Error, so no valid input
+    // changes meaning. The programmatic `..` operator keeps bailing.
+    if (trailingDots)
+      return ['Sequence', lhs, 'ContinuationPlaceholder'] as MathJsonExpression;
+    // This was `1..`. Don't know what to do with it. Bail.
+    return null;
+  }
 
   // If we have 1..2..3, we have a range with a step, and second returned
   // ["Range", 2, 3]
