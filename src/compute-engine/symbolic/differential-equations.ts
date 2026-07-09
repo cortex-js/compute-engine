@@ -1378,6 +1378,7 @@ function applyScalarConditions(
   if (!isFunction(solution, 'List') || solution.nops !== 1) return undefined;
 
   const solutionEquation = solution.op1;
+  if (!isFunction(solutionEquation, 'Equal')) return undefined;
   const equations: Expression[] = [];
   for (const condition of conditions) {
     const equation = conditionEquationForSolution(
