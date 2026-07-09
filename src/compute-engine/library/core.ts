@@ -1021,7 +1021,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Solve(equation, unknown): the list of solutions of an equation for the',
         'unknown. The equation may be an `Equal` expression or a bare expression',
         '(read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`.',
-        'The unknown may be omitted: it defaults to the equation\'s single free',
+        "The unknown may be omitted: it defaults to the equation's single free",
         'variable, or to `x` when there are several and one of them is `x`.',
       ],
       // Hold the arguments: the equation must NOT be pre-evaluated, or an

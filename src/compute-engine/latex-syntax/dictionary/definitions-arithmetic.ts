@@ -664,9 +664,7 @@ function serializeMultiply(
 function parseFractionArgument(parser: Parser): MathJsonExpression {
   const group = parser.parseGroup();
   if (group === null) return missingIfEmpty(parser.parseToken());
-  return isEmptySequence(group)
-    ? parser.error('missing', parser.index)
-    : group;
+  return isEmptySequence(group) ? parser.error('missing', parser.index) : group;
 }
 
 function parseFraction(parser: Parser): MathJsonExpression | null {

@@ -79,7 +79,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> integer',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
-        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(poly);
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(poly);
         if (!variable) return undefined;
         const deg = polynomialDegree(poly.canonical, variable);
         return deg >= 0 ? poly.engine.number(deg) : undefined;
@@ -94,7 +96,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> list<value>',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
-        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(poly);
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(poly);
         if (!variable) return undefined;
         const coeffs = getPolynomialCoefficients(poly.canonical, variable);
         if (!coeffs) return undefined;
@@ -154,7 +158,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(a: value, b: value, variable: symbol?) -> value',
       evaluate: ([a, b, varExpr]) => {
         if (!a || !b) return undefined;
-        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(a, b);
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(a, b);
         if (!variable) return undefined;
         return polynomialGCD(a.canonical, b.canonical, variable);
       },
@@ -169,7 +175,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(a: value, b: value, variable: symbol?) -> value',
       evaluate: ([a, b, varExpr]) => {
         if (!a || !b) return undefined;
-        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(a, b);
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(a, b);
         if (!variable) return undefined;
         return polynomialResultant(a.canonical, b.canonical, variable);
       },
@@ -183,7 +191,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
         if (!expr) return undefined;
-        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(expr);
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(expr);
         if (!variable) return undefined;
         return cancelCommonFactors(expr.canonical, variable);
       },
@@ -197,7 +207,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
         if (!expr) return undefined;
-        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(expr);
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(expr);
         if (!variable) return undefined;
         return partialFraction(expr.canonical, variable);
       },
@@ -210,7 +222,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
         if (!expr) return undefined;
-        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(expr);
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(expr);
         if (!variable) return undefined;
         return partialFraction(expr.canonical, variable);
       },
@@ -224,7 +238,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> set<value>',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
-        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(poly);
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(poly);
         if (!variable) return undefined;
         const roots = poly.canonical.polynomialRoots(variable);
         if (!roots || roots.length === 0) return undefined;
@@ -240,7 +256,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> value',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
-        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(poly);
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(poly);
         if (!variable) return undefined;
 
         const coeffsAsc = getPolynomialCoefficients(poly.canonical, variable);
