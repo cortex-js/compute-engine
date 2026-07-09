@@ -61,6 +61,15 @@ export function canonicalSolve(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression {
+  if (ops.length === 1) {
+    // The unknown may be omitted (`Solve(eq)`, e.g. from `expr |> Solve`).
+    // Default to the equation's single free variable, or to `x` when there
+    // are several free variables and one of them is `x`.
+    const unknown = defaultUnknown(ops[0]);
+    if (unknown !== undefined)
+      return ce._fn('Solve', [ops[0], ce.symbol(unknown)]);
+  }
+
   if (ops.length < 2) {
     // Reuse the standard arity padding (produces `missing` error operands).
     const padded = [...ops];
@@ -71,6 +80,21 @@ export function canonicalSolve(
   const eq = ops[0]; // keep lazy — do not canonicalize
   const specs = ops.slice(1).map((spec) => canonicalSolveSpec(ce, spec));
   return ce._fn('Solve', [eq, ...specs]);
+}
+
+/**
+ * The unknown to solve for when none is given: the equation's single free
+ * variable, or `x` when there are several and one of them is `x`. `undefined`
+ * when no default can be inferred (no free variable, or several without `x`).
+ *
+ * The equation is the lazily-held (non-canonical) operand; `unknowns` resolves
+ * symbol definitions by name, so it works on a non-canonical expression.
+ */
+function defaultUnknown(eq: Expression): string | undefined {
+  const names = eq.unknowns;
+  if (names.length === 1) return names[0];
+  if (names.length > 1 && names.includes('x')) return 'x';
+  return undefined;
 }
 
 /** Validate/canonicalize a single `Solve` spec operand. */

@@ -141,6 +141,11 @@
 
 ### Improvements
 
+- **The unknown of `Solve` may now be omitted.** `["Solve", eq]` defaults to
+  the equation's single free variable, or to `x` when the equation has several
+  free variables and one of them is `x`. This enables point-free pipelines
+  such as `x^2 = 4 \rhd \operatorname{Solve}` (i.e. `% |> Solve`).
+
 - **The declaration build and typecheck now run on TypeScript 7** (the native
   compiler), cutting `.d.ts` emission from ~31s to ~5s and the full production
   build from ~45s to ~29s. TS 7.0 ships no programmatic API, so it is installed

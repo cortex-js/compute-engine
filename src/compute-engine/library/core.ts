@@ -1021,14 +1021,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Solve(equation, unknown): the list of solutions of an equation for the',
         'unknown. The equation may be an `Equal` expression or a bare expression',
         '(read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`.',
+        'The unknown may be omitted: it defaults to the equation\'s single free',
+        'variable, or to `x` when there are several and one of them is `x`.',
       ],
       // Hold the arguments: the equation must NOT be pre-evaluated, or an
       // `Equal` collapses to a boolean (`x^2 = 1` → `False`) before solving.
       lazy: true,
       // Variadic: `Solve(equation, spec₁, spec₂, …)` where each spec is a
-      // symbol or `Element(symbol, collection[, condition])` (a domain). See
-      // `boxed-expression/solve-domain.ts`.
-      signature: '(any, any+) -> list',
+      // symbol or `Element(symbol, collection[, condition])` (a domain). The
+      // specs may be omitted entirely (the unknown is then inferred from the
+      // equation). See `boxed-expression/solve-domain.ts`.
+      signature: '(any, any*) -> list',
       canonical: (ops, { engine: ce }) => canonicalSolve(ce, ops),
       evaluate: (ops, { engine: ce }) => evaluateSolve(ce, ops),
     },

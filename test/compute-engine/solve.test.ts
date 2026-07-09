@@ -1773,4 +1773,41 @@ describe('SOLVE OPERATOR (B9)', () => {
       -1,
     ]);
   });
+
+  // The unknown may be omitted: it defaults to the equation's single free
+  // variable, or to `x` when there are several and one of them is `x`.
+  describe('default unknown', () => {
+    test('single free variable is inferred', () => {
+      const r = ce.expr(['Solve', ['Equal', ['Power', 'y', 2], 1]]);
+      // The inferred unknown appears in the canonical form…
+      expect(r.json).toEqual(['Solve', ['Equal', ['Power', 'y', 2], 1], 'y']);
+      // …and the solve dispatches on it.
+      expect(r.evaluate().json).toEqual(['List', 1, -1]);
+    });
+
+    test('several free variables: defaults to x when present', () => {
+      const r = ce
+        .expr(['Solve', ['Equal', ['Add', ['Power', 'x', 2], 'a'], 1]])
+        .evaluate();
+      expect(r.operator).toBe('List');
+      // Solved for x (not a): roots are ±√(1 − a).
+      expect(r.nops).toBe(2);
+      expect(r.op1.has('a')).toBe(true);
+    });
+
+    test('several free variables, none named x: no default (missing error)', () => {
+      const r = ce.expr(['Solve', ['Equal', ['Add', ['Power', 'y', 2], 'a'], 1]]);
+      expect(r.json).toEqual([
+        'Solve',
+        ['Equal', ['Add', ['Power', 'y', 2], 'a'], 1],
+        ['Error', "'missing'"],
+      ]);
+    });
+
+    test('pipeline: eq |> Solve', () => {
+      expect(ce.parse('x^2 = 4 \\rhd \\mathrm{Solve}').evaluate().json).toEqual(
+        ['List', 2, -2]
+      );
+    });
+  });
 });
