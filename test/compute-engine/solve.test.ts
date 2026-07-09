@@ -1811,3 +1811,65 @@ describe('SOLVE OPERATOR (B9)', () => {
     });
   });
 });
+
+describe('inverse trigonometric equations', () => {
+  test('arcsin(x) = 1/3 → x = sin(1/3)', () => {
+    // Scaled shape (clearDenominators rewrites `arcsin x − 1/3` → `3·arcsin x − 1`)
+    const result = expr('\\arcsin x = 1/3').solve('x')?.map((x) => x.json);
+    expect(result).toEqual([['Sin', ['Rational', 1, 3]]]);
+  });
+
+  test('arccos(x) = 1/2 → x = cos(1/2)', () => {
+    const result = expr('\\arccos x = 1/2').solve('x')?.map((x) => x.json);
+    expect(result).toEqual([['Cos', ['Rational', 1, 2]]]);
+  });
+
+  test('arctan(x) = 1/2 → x = tan(1/2)', () => {
+    const result = expr('\\arctan x = 1/2').solve('x')?.map((x) => x.json);
+    expect(result).toEqual([['Tan', ['Rational', 1, 2]]]);
+  });
+});
+
+describe('hyperbolic equations', () => {
+  test('sinh(x) = 1 → x = arsinh(1)', () => {
+    const result = expr('\\sinh x = 1').solve('x')?.map((x) => x.json);
+    expect(result).toEqual([['Arsinh', 1]]);
+  });
+
+  test('cosh(x) = 2 → x = ±arcosh(2) (both branches)', () => {
+    const result = expr('\\cosh x = 2').solve('x')?.map((x) => x.json);
+    expect(result).toEqual([['Arcosh', 2], ['Negate', ['Arcosh', 2]]]);
+  });
+
+  test('tanh(x) = 1/2 → x = artanh(1/2)', () => {
+    const result = expr('\\tanh x = 1/2').solve('x')?.map((x) => x.json);
+    expect(result).toEqual([['Artanh', ['Rational', 1, 2]]]);
+  });
+
+  // eˣ + e⁻ˣ = 4 harmonizes to 2·cosh(x) = 4, then the cosh template returns
+  // both roots ±arcosh(2) = ln(2 ± √3).
+  test('eˣ + e⁻ˣ = 4 → x = ±arcosh(2)', () => {
+    const result = expr('e^x + e^{-x} = 4').solve('x')?.map((x) => x.json);
+    expect(result).toEqual([['Arcosh', 2], ['Negate', ['Arcosh', 2]]]);
+  });
+});
+
+describe('rational and absolute-value equations', () => {
+  // Regression: clearDenominators multiplies each term individually so
+  // `2x/(x+2) · (x+2)` cancels to `2x` (rather than expanding into a
+  // non-cancelling `2x²+4x`), leaving `x − 2 = 0`.
+  test('2x/(x+2) = 1 → x = 2', () => {
+    const result = expr('\\frac{2x}{x+2} = 1').solve('x')?.map((x) => x.json);
+    expect(result).toEqual([2]);
+  });
+
+  test('|x+3| − 2|x−3| = 0 → x = 9, 1', () => {
+    const result = expr('|x+3| - 2|x-3| = 0').solve('x')?.map((x) => x.json);
+    expect(result).toEqual([9, 1]);
+  });
+
+  test('2|x| − |x−1| = 0 → x = 1/3, −1', () => {
+    const result = expr('2|x| - |x-1| = 0').solve('x')?.map((x) => x.json);
+    expect(result).toEqual([['Rational', 1, 3], -1]);
+  });
+});

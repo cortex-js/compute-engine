@@ -737,8 +737,10 @@ describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
   });
 
   it('these equations are NOT solvable without { solve: true }', () => {
+    // LambertW is the genuinely fungrim-only solve capability. (arctan/tan/
+    // exp/ln solve templates are now built into base CE, so their fungrim
+    // `:solve` rules are redundant — `\arctan(x) = 0.5` solves either way.)
     expect(solved('x e^x = 3', { solve: false })).toEqual([]);
-    expect(solved('\\arctan(x) = 0.5', { solve: false })).toEqual([]);
   });
 
   it('a returned root is never wrong (validateRoots is the safety net)', () => {

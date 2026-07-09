@@ -702,6 +702,150 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: filter,
   },
 
+  //
+  // Inverse trigonometric equations
+  //
+  // arcsin, arccos and arctan are injective on their domains, so there is a
+  // single solution branch (no π-companion). Any candidate outside the target
+  // function's range is dropped by `validateRoots` against the original
+  // equation. The scaled shapes are needed because `clearDenominators` rewrites
+  // e.g. `arcsin x − 1/3 = 0` into `3·arcsin x − 1 = 0` before matching.
+  //
+
+  // a·arcsin(x) + b = 0  =>  x = sin(-b/a)
+  {
+    match: ['Add', ['Multiply', '__a', ['Arcsin', '_x']], '__b'],
+    replace: ['Sin', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.arcsine',
+    useVariations: true,
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+  },
+
+  // arcsin(x) + b = 0  =>  x = sin(-b)
+  {
+    match: ['Add', ['Arcsin', '_x'], '__b'],
+    replace: ['Sin', ['Negate', '__b']],
+    id: 'solve.arcsine-unit',
+    useVariations: true,
+    condition: filter,
+  },
+
+  // a·arccos(x) + b = 0  =>  x = cos(-b/a)
+  {
+    match: ['Add', ['Multiply', '__a', ['Arccos', '_x']], '__b'],
+    replace: ['Cos', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.arccosine',
+    useVariations: true,
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+  },
+
+  // arccos(x) + b = 0  =>  x = cos(-b)
+  {
+    match: ['Add', ['Arccos', '_x'], '__b'],
+    replace: ['Cos', ['Negate', '__b']],
+    id: 'solve.arccosine-unit',
+    useVariations: true,
+    condition: filter,
+  },
+
+  // a·arctan(x) + b = 0  =>  x = tan(-b/a)
+  {
+    match: ['Add', ['Multiply', '__a', ['Arctan', '_x']], '__b'],
+    replace: ['Tan', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.arctangent',
+    useVariations: true,
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+  },
+
+  // arctan(x) + b = 0  =>  x = tan(-b)
+  {
+    match: ['Add', ['Arctan', '_x'], '__b'],
+    replace: ['Tan', ['Negate', '__b']],
+    id: 'solve.arctangent-unit',
+    useVariations: true,
+    condition: filter,
+  },
+
+  //
+  // Hyperbolic equations
+  //
+  // sinh and tanh are bijective (tanh onto (−1, 1); out-of-range candidates
+  // are dropped by `validateRoots`), so a single branch each. cosh is even, so
+  // it needs both ±arcosh branches for a complete finite solution set.
+  //
+
+  // a·sinh(x) + b = 0  =>  x = arsinh(-b/a)
+  {
+    match: ['Add', ['Multiply', '__a', ['Sinh', '_x']], '__b'],
+    replace: ['Arsinh', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.hyperbolic-sine',
+    useVariations: true,
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+  },
+
+  // sinh(x) + b = 0  =>  x = arsinh(-b)
+  {
+    match: ['Add', ['Sinh', '_x'], '__b'],
+    replace: ['Arsinh', ['Negate', '__b']],
+    id: 'solve.hyperbolic-sine-unit',
+    useVariations: true,
+    condition: filter,
+  },
+
+  // a·cosh(x) + b = 0  =>  x = arcosh(-b/a)  (positive branch)
+  {
+    match: ['Add', ['Multiply', '__a', ['Cosh', '_x']], '__b'],
+    replace: ['Arcosh', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.hyperbolic-cosine',
+    useVariations: true,
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+  },
+
+  // Second solution for cosh: x = -arcosh(-b/a)  (since cosh(-x) = cosh(x))
+  {
+    match: ['Add', ['Multiply', '__a', ['Cosh', '_x']], '__b'],
+    replace: ['Negate', ['Arcosh', ['Divide', ['Negate', '__b'], '__a']]],
+    id: 'solve.hyperbolic-cosine-negative-branch',
+    useVariations: true,
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+  },
+
+  // cosh(x) + b = 0  =>  x = arcosh(-b)  (positive branch)
+  {
+    match: ['Add', ['Cosh', '_x'], '__b'],
+    replace: ['Arcosh', ['Negate', '__b']],
+    id: 'solve.hyperbolic-cosine-unit',
+    useVariations: true,
+    condition: filter,
+  },
+
+  // Second solution for cosh(x) + b = 0: x = -arcosh(-b)
+  {
+    match: ['Add', ['Cosh', '_x'], '__b'],
+    replace: ['Negate', ['Arcosh', ['Negate', '__b']]],
+    id: 'solve.hyperbolic-cosine-unit-negative-branch',
+    useVariations: true,
+    condition: filter,
+  },
+
+  // a·tanh(x) + b = 0  =>  x = artanh(-b/a)
+  {
+    match: ['Add', ['Multiply', '__a', ['Tanh', '_x']], '__b'],
+    replace: ['Artanh', ['Divide', ['Negate', '__b'], '__a']],
+    id: 'solve.hyperbolic-tangent',
+    useVariations: true,
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+  },
+
+  // tanh(x) + b = 0  =>  x = artanh(-b)
+  {
+    match: ['Add', ['Tanh', '_x'], '__b'],
+    replace: ['Artanh', ['Negate', '__b']],
+    id: 'solve.hyperbolic-tangent-unit',
+    useVariations: true,
+    condition: filter,
+  },
+
   // a·sin(x) + b·cos(x) = 0  =>  tan(x) = -b/a  =>  x = arctan(-b/a)
   // Handles e.g. sin(x) = cos(x) (a = 1, b = -1 → arctan(1) = π/4). The two
   // standalone sin/cos rules above don't fire here because their constant term
@@ -785,8 +929,13 @@ function clearDenominators(expr: Expression, _variable?: string): Expression {
     lcm = lcm.mul(lcmFactors[i]);
   }
 
-  // Multiply the entire expression by the LCM and simplify
-  return expr.mul(lcm).simplify();
+  // Multiply each term by the LCM individually and simplify. Multiplying the
+  // whole Add at once distributes the LCM into each term and expands the
+  // numerator (e.g. `2x·(x+2)` → `2x²+4x`), which then fails to cancel against
+  // the denominator during simplify. Per-term multiplication lets each
+  // `p(x)/q(x) · lcm` cancel cleanly (e.g. `2x/(x+2) − 1` → `x − 2`).
+  const clearedOps = ops.map((op) => op.mul(lcm).simplify());
+  return expr.engine.function('Add', clearedOps).simplify();
 }
 
 /**
@@ -2450,6 +2599,30 @@ export const HARMONIZATION_RULES: Rule[] = [
     replace: ['Subtract', ['Square', '_f'], ['Square', '_g']],
     condition: ({ _f, _g }) => (_f?.has('_x') && _g?.has('_x')) ?? false,
   },
+  // a·|f(x)| + b·|g(x)| = 0  ->  a²f² - b²g² = 0.  Squaring a|f| = -b|g| gives
+  // a²f² = b²g² — a *necessary* condition (candidate-generating, not an
+  // equivalence: same-sign coefficients have no root unless f = g = 0), so
+  // `validateRoots` against the original equation filters the extraneous
+  // candidates. `useVariations` lets a bare `|g|` match as `1·|g|` and a
+  // `Negate(|g|)` as `-1·|g|`, so `|x+3| − 2|x−3|` and `2|x| − |x−1|` both fire.
+  {
+    match: [
+      'Add',
+      ['Multiply', '__a', ['Abs', '_f']],
+      ['Multiply', '__b', ['Abs', '_g']],
+    ],
+    replace: [
+      'Subtract',
+      ['Multiply', ['Square', '__a'], ['Square', '_f']],
+      ['Multiply', ['Square', '__b'], ['Square', '_g']],
+    ],
+    useVariations: true,
+    condition: ({ __a, __b, _f, _g }) =>
+      !__a.has('_x') &&
+      !__b.has('_x') &&
+      (_f?.has('_x') ?? false) &&
+      (_g?.has('_x') ?? false),
+  },
   // a(b^n) -> a
   {
     match: ['Multiply', '__a', ['Power', '_b', '_n']],
@@ -2486,6 +2659,30 @@ export const HARMONIZATION_RULES: Rule[] = [
   {
     match: ['Multiply', ['Exp', '_a'], ['Exp', '_b'], '___c'],
     replace: ['Multiply', ['Exp', ['Add', '_a', '_b']], '___c'],
+  },
+  // e^f + e^-f (+ c) -> 2·cosh(f) (+ c). `e^{-f}` canonicalizes to
+  // `Power(ExponentialE, Negate(f))`, so match that shape directly. The Cosh
+  // solve template then produces both ±arcosh roots (e.g. `e^x + e^-x = 4`).
+  {
+    match: [
+      'Add',
+      ['Power', 'ExponentialE', '_f'],
+      ['Power', 'ExponentialE', ['Negate', '_f']],
+      '___c',
+    ],
+    replace: ['Add', ['Multiply', 2, ['Cosh', '_f']], '___c'],
+    condition: ({ _f }) => _f.has('_x'),
+  },
+  // e^f - e^-f (+ c) -> 2·sinh(f) (+ c).
+  {
+    match: [
+      'Add',
+      ['Power', 'ExponentialE', '_f'],
+      ['Negate', ['Power', 'ExponentialE', ['Negate', '_f']]],
+      '___c',
+    ],
+    replace: ['Add', ['Multiply', 2, ['Sinh', '_f']], '___c'],
+    condition: ({ _f }) => _f.has('_x'),
   },
   // ln(f(x)) -> f(x) - 1
   {
