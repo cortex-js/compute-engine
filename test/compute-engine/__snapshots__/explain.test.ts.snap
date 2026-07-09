@@ -1,5 +1,18 @@
 // Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
+exports[`explain: D receiver forms mixed partial golden 1`] = `
+{
+  "initial": "D(y^3 * x^2, x, y)",
+  "result": "6x * y^2",
+  "steps": [
+    "derivative.product-rule: D(D(x^2, x) * y^3, y)",
+    "derivative.power-rule: D(2x * y^3, y)",
+    "derivative.product-rule: 2x * D(y^3, y)",
+    "derivative.power-rule: 6x * y^2",
+  ],
+}
+`;
+
 exports[`explain: golden D explanations (x^2+1)/(x-1): quotient rule chain 1`] = `
 {
   "initial": "D((x^2 + 1) / (x - 1), x)",
@@ -276,6 +289,75 @@ exports[`explain: golden solve explanations x^2=4: quadratic (two roots) 1`] = `
   "steps": [
     "solve.move-terms: x^2 - 4 === 0",
     "solve.quadratic-formula: [x === 2,x === -2]",
+  ],
+}
+`;
+
+exports[`explain: higher-order derivatives (options.order) order 3 of x^4: three power-rule descents, parity 1`] = `
+{
+  "initial": "D(x^4, x, x, x)",
+  "result": "24x",
+  "steps": [
+    "derivative.power-rule: D(4x^3, x, x)",
+    "derivative.product-rule: D(4D(x^3, x), x)",
+    "derivative.power-rule: D(12x^2, x)",
+    "derivative.product-rule: 12D(x^2, x)",
+    "derivative.power-rule: 24x",
+  ],
+}
+`;
+
+exports[`explain: higher-order derivatives (options.order) second-derivative golden 1`] = `
+{
+  "initial": "D(x * sin(x), x, x)",
+  "result": "-x * sin(x) + 2cos(x)",
+  "steps": [
+    "derivative.product-rule: D(x * D(sin(x), x) + sin(x), x)",
+    "derivative.known-derivative: D(x * cos(x) + sin(x), x)",
+    "derivative.sum-rule: D(sin(x), x) + D(x * cos(x), x)",
+    "derivative.product-rule: x * D(cos(x), x) + cos(x) + D(sin(x), x)",
+    "derivative.known-derivative: -x * sin(x) + cos(x) + D(sin(x), x)",
+    "derivative.known-derivative: -x * sin(x) + cos(x) + cos(x)",
+    "derivative.simplify: -x * sin(x) + 2cos(x)",
+  ],
+}
+`;
+
+exports[`explain: solve Or (alternatives) Or(x^2=1, x=3): per-case steps + merged roots, parity 1`] = `
+{
+  "initial": "x === 3 || x^2 === 1",
+  "result": "[3,1,-1]",
+  "steps": [
+    "solve.case: x === 3",
+    "solve.move-terms: x - 3 === 0",
+    "solve.linear: x === 3",
+    "solve.case: x^2 === 1",
+    "solve.move-terms: x^2 - 1 === 0",
+    "solve.quadratic-formula: [x === 1,x === -1]",
+    "solve.roots: [x === 3,x === 1,x === -1]",
+  ],
+}
+`;
+
+exports[`explain: solve linear systems 2x2 golden: eliminate + back-substitute, parity, empirical 1`] = `
+{
+  "initial": "[2x + y === 5,x - y === 1]",
+  "result": "[x === 2,y === 1]",
+  "steps": [
+    "solve.system.eliminate: [2x + y === 5,-3/2 * y === -3/2]",
+    "solve.system.back-substitute: [y === 1]",
+    "solve.system.back-substitute: [x === 2,y === 1]",
+  ],
+}
+`;
+
+exports[`explain: solve polynomial systems product-sum (x+y=5, xy=6): product-sum milestone + parity 1`] = `
+{
+  "initial": "[x + y === 5,x * y === 6]",
+  "result": "[[x === 3,y === 2],[x === 2,y === 3]]",
+  "steps": [
+    "solve.system.product-sum: t^2 - 5t + 6 === 0",
+    "solve.roots: [[x === 3,y === 2],[x === 2,y === 3]]",
   ],
 }
 `;

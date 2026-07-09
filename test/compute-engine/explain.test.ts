@@ -280,9 +280,11 @@ describe('explain: serialization', () => {
 // ============================================================
 
 describe('explain: unsupported operations throw', () => {
-  test("explain('solve') on a system throws", () => {
+  test("explain('solve') on a system of inequalities throws", () => {
+    // Systems of *equations* are supported (see the system sections below);
+    // inequality systems remain out of scope.
     expect(() =>
-      ce.box(['List', ce.parse('x + y = 2'), ce.parse('x - y = 0')]).explain('solve')
+      ce.box(['List', ce.parse('x + y < 2'), ce.parse('x - y > 0')]).explain('solve')
     ).toThrow();
   });
   test("explain('solve') with several unknowns throws", () => {
@@ -658,7 +660,7 @@ describe('explain: D contract battery', () => {
 
 function serializeD(
   latex: string,
-  options?: { variable?: string }
+  options?: { variable?: string; order?: number }
 ): { initial: string; result: string; steps: string[] } {
   const ex = ce.parse(latex).explain('D', options);
   return {
@@ -774,5 +776,408 @@ describe('explain: D does not perturb the D operator', () => {
     expr.explain('D');
     const after = ce.function('D', [expr, ce.symbol('x')]).evaluate();
     expect(after.isSame(before)).toBe(true);
+  });
+});
+
+// ============================================================
+// 19. Higher-order and mixed partial derivatives
+// ============================================================
+
+/** Parity: the explanation's result equals the plain `D` operator applied to
+ * the full variable sequence. */
+function dEval(latex: string, vars: string[]) {
+  return ce
+    .function('D', [ce.parse(latex), ...vars.map((v) => ce.symbol(v))])
+    .evaluate();
+}
+
+describe('explain: higher-order derivatives (options.order)', () => {
+  test("order 2 of x sin(x): flat initial, product rule fires in both stages, parity", () => {
+    const ex = ce.parse('x \\sin x').explain('D', { variable: 'x', order: 2 });
+
+    // The initial is the flat second-derivative form.
+    expect(ex.initial.operator).toBe('D');
+    expect(ex.initial.ops!.length).toBe(3); // D(f, x, x)
+    expect(ex.initial.ops!.slice(1).every((o) => o.symbol === 'x')).toBe(true);
+
+    // The product rule appears in each of the two orders.
+    const productSteps = ex.steps.filter(
+      (s) => s.id === 'derivative.product-rule'
+    );
+    expect(productSteps.length).toBeGreaterThanOrEqual(2);
+
+    // Result parity with the plain operator on the full sequence, and fully
+    // resolved (no residual `D`).
+    expect(ex.result.isSame(dEval('x \\sin x', ['x', 'x']))).toBe(true);
+    expect(ex.result.has('D')).toBe(false);
+
+    // Empirical check: d²/dx²(x sin x) = 2cos(x) − x sin(x).
+    expect(ex.result.isSame(ce.parse('2\\cos(x) - x \\sin(x)'))).toBe(true);
+  });
+
+  test('order 3 of x^4: three power-rule descents, parity', () => {
+    const ex = ce.parse('x^4').explain('D', { order: 3 });
+    expect(ex.initial.ops!.length).toBe(4); // D(f, x, x, x)
+    expect(ex.result.isSame(dEval('x^4', ['x', 'x', 'x']))).toBe(true);
+    expect(ex.result.isSame(ce.parse('24x'))).toBe(true);
+    expect(ex.result.has('D')).toBe(false);
+    expect(serializeD('x^4', { order: 3 })).toMatchSnapshot();
+  });
+
+  test('order defaults to 1 (byte-identical to no option)', () => {
+    const a = ce.parse('x^3+2x+1').explain('D');
+    const b = ce.parse('x^3+2x+1').explain('D', { order: 1 });
+    expect(a.initial.isSame(b.initial)).toBe(true);
+    expect(a.result.isSame(b.result)).toBe(true);
+    expect(a.steps.length).toBe(b.steps.length);
+    for (let i = 0; i < a.steps.length; i++) {
+      expect(a.steps[i].value.isSame(b.steps[i].value)).toBe(true);
+      expect(a.steps[i].id).toBe(b.steps[i].id);
+    }
+  });
+
+  test('order must be a positive integer', () => {
+    expect(() => ce.parse('x^2').explain('D', { order: 0 })).toThrow();
+    expect(() => ce.parse('x^2').explain('D', { order: -1 })).toThrow();
+    expect(() => ce.parse('x^2').explain('D', { order: 2.5 })).toThrow();
+  });
+
+  test('second-derivative golden', () => {
+    expect(serializeD('x \\sin x', { variable: 'x', order: 2 })).toMatchSnapshot();
+  });
+});
+
+describe('explain: D receiver forms', () => {
+  test('first-order D(f, x) receiver (differentiate f, not D(f,x))', () => {
+    // Latent-bug lock: a `D(f, x)` receiver must differentiate `f` once — not
+    // re-differentiate the whole `D(f, x)` node.
+    const ex = ce.box(['D', ce.parse('x^2'), 'x']).explain('D');
+    expect(ex.initial.operator).toBe('D');
+    expect(ex.initial.op1.isSame(ce.parse('x^2'))).toBe(true);
+    expect(ex.result.isSame(ce.parse('2x'))).toBe(true);
+    expect(ex.result.has('D')).toBe(false);
+  });
+
+  test('flat D(f, x, x) receiver equals order:2 on f', () => {
+    const viaReceiver = ce.box(['D', ce.parse('x \\sin x'), 'x', 'x']).explain('D');
+    const viaOption = ce.parse('x \\sin x').explain('D', {
+      variable: 'x',
+      order: 2,
+    });
+    expect(viaReceiver.initial.isSame(viaOption.initial)).toBe(true);
+    expect(viaReceiver.result.isSame(viaOption.result)).toBe(true);
+    expect(viaReceiver.steps.length).toBe(viaOption.steps.length);
+    for (let i = 0; i < viaReceiver.steps.length; i++)
+      expect(viaReceiver.steps[i].value.isSame(viaOption.steps[i].value)).toBe(
+        true
+      );
+    // A `D(...)` receiver ignores options.order.
+    const ignored = ce
+      .box(['D', ce.parse('x \\sin x'), 'x', 'x'])
+      .explain('D', { order: 5 });
+    expect(ignored.result.isSame(viaReceiver.result)).toBe(true);
+  });
+
+  test('mixed partial D(x^2 y^3, x, y): stage-1 states wrapped in D(·, y)', () => {
+    const ex = ce.box(['D', ce.parse('x^2 y^3'), 'x', 'y']).explain('D');
+
+    // Flat initial with the two distinct variables, in order.
+    expect(ex.initial.ops!.length).toBe(3);
+    expect(ex.initial.ops![1].symbol).toBe('x');
+    expect(ex.initial.ops![2].symbol).toBe('y');
+
+    // The first stage differentiates w.r.t. x while still owing a d/dy: its
+    // displayed states are wrapped in an outer `D(·, y)`.
+    const firstStage = ex.steps[0];
+    expect(firstStage.value.operator).toBe('D');
+    expect(firstStage.value.ops!.length).toBe(2);
+    expect(firstStage.value.ops![1].symbol).toBe('y');
+
+    // Parity + fully resolved. d²/dx dy (x² y³) = 6 x y².
+    expect(ex.result.isSame(dEval('x^2 y^3', ['x', 'y']))).toBe(true);
+    expect(ex.result.isSame(ce.parse('6 x y^2'))).toBe(true);
+    expect(ex.result.has('D')).toBe(false);
+  });
+
+  test('mixed partial golden', () => {
+    const ex = ce.box(['D', ce.parse('x^2 y^3'), 'x', 'y']).explain('D');
+    expect({
+      initial: ex.initial.toString(),
+      result: ex.result.toString(),
+      steps: ex.steps.map((s) => `${s.id}: ${s.value.toString()}`),
+    }).toMatchSnapshot();
+  });
+
+  test('contract: higher-order/mixed steps progress and fully resolve', () => {
+    const cases: { expr: string; vars: string[] }[] = [
+      { expr: 'x \\sin x', vars: ['x', 'x'] },
+      { expr: 'x^2 y^3', vars: ['x', 'y'] },
+      { expr: 'x^4', vars: ['x', 'x', 'x'] },
+      { expr: 'e^{x^2}', vars: ['x', 'x'] },
+    ];
+    for (const { expr, vars } of cases) {
+      const ex = ce
+        .box(['D', ce.parse(expr), ...vars])
+        .explain('D');
+
+      // Consecutive step values differ pairwise (curateChain guarantee).
+      for (let i = 1; i < ex.steps.length; i++)
+        expect(ex.steps[i].value.isSame(ex.steps[i - 1].value)).toBe(false);
+
+      // Every step id is a registered `derivative.*` label.
+      for (const s of ex.steps) {
+        expect(s.id.startsWith('derivative.')).toBe(true);
+        expect(labelFor(s.id).registered).toBe(true);
+      }
+
+      // Last step is the result; result is fully resolved.
+      if (ex.steps.length > 0)
+        expect(ex.steps.at(-1)!.value.isSame(ex.result)).toBe(true);
+      expect(ex.result.isSame(dEval(expr, vars))).toBe(true);
+      expect(ex.result.has('D')).toBe(false);
+    }
+  });
+});
+
+// ============================================================
+// 20. Systems of equations: linear
+// ============================================================
+
+/** Substitute a single solution record `List(Equal(v, val), …)` into each
+ * equation of `system` and assert every equation holds (evaluates True). */
+function checkSystemSolution(system: string[][], record: any): void {
+  const subs: Record<string, any> = {};
+  for (const eq of record.ops!) subs[eq.op1.symbol] = eq.op2;
+  for (const [lhs, rhs] of system) {
+    const holds = ce
+      .box(['Equal', ce.parse(lhs), ce.parse(rhs)])
+      .subs(subs)
+      .evaluate();
+    expect(holds.symbol).toBe('True');
+  }
+}
+
+/** Contract shared by every system explanation: registered `solve.*` labels,
+ * pairwise-distinct step states, and a last step matching the result. */
+function assertSystemContract(ex: any): void {
+  for (const s of ex.steps) {
+    expect(s.id.startsWith('solve.')).toBe(true);
+    expect(labelFor(s.id).registered).toBe(true);
+    expect(typeof s.description).toBe('string');
+    expect(s.description.length).toBeGreaterThan(0);
+  }
+  for (let i = 1; i < ex.steps.length; i++)
+    expect(ex.steps[i].value.isSame(ex.steps[i - 1].value)).toBe(false);
+  if (ex.steps.length > 0)
+    expect(ex.steps.at(-1)!.value.isSame(ex.result)).toBe(true);
+}
+
+describe('explain: solve linear systems', () => {
+  test('2x2 golden: eliminate + back-substitute, parity, empirical', () => {
+    const sys = ce.box(['List', ce.parse('2x + y = 5'), ce.parse('x - y = 1')]);
+    const ex = sys.explain('solve');
+
+    expect(ex.operation).toBe('solve');
+    // result is List(Equal(x,2), Equal(y,1)).
+    expect(
+      ex.result.isSame(
+        ce.box(['List', ['Equal', 'x', 2], ['Equal', 'y', 1]])
+      )
+    ).toBe(true);
+
+    // The two core phases appear.
+    const ids = ex.steps.map((s: any) => s.id);
+    expect(ids).toContain('solve.system.eliminate');
+    expect(ids).toContain('solve.system.back-substitute');
+
+    assertSystemContract(ex);
+
+    // Parity with the plain solver.
+    const solved = sys.solve(['x', 'y']) as Record<string, any>;
+    expect(solved.x.isSame(2)).toBe(true);
+    expect(solved.y.isSame(1)).toBe(true);
+
+    // Empirical: the solution satisfies both equations.
+    checkSystemSolution([['2x + y', '5'], ['x - y', '1']], ex.result);
+
+    expect({
+      initial: ex.initial.toString(),
+      result: ex.result.toString(),
+      steps: ex.steps.map((s: any) => `${s.id}: ${s.value.toString()}`),
+    }).toMatchSnapshot();
+  });
+
+  test('3x3 integer solution: contract + parity', () => {
+    const sys = ce.box([
+      'List',
+      ce.parse('x + y + z = 6'),
+      ce.parse('x - y = 0'),
+      ce.parse('y - z = 0'),
+    ]);
+    const ex = sys.explain('solve', { variable: ['x', 'y', 'z'] });
+    assertSystemContract(ex);
+    expect(
+      ex.result.isSame(
+        ce.box(['List', ['Equal', 'x', 2], ['Equal', 'y', 2], ['Equal', 'z', 2]])
+      )
+    ).toBe(true);
+    checkSystemSolution(
+      [['x + y + z', '6'], ['x - y', '0'], ['y - z', '0']],
+      ex.result
+    );
+  });
+
+  test('And receiver is equivalent to the List receiver', () => {
+    const asAnd = ce.box(['And', ce.parse('2x + y = 5'), ce.parse('x - y = 1')]);
+    const ex = asAnd.explain('solve');
+    assertSystemContract(ex);
+    expect(
+      ex.result.isSame(
+        ce.box(['List', ['Equal', 'x', 2], ['Equal', 'y', 1]])
+      )
+    ).toBe(true);
+  });
+});
+
+// ============================================================
+// 21. Systems of equations: polynomial (product-sum + substitution)
+// ============================================================
+
+describe('explain: solve polynomial systems', () => {
+  test('product-sum (x+y=5, xy=6): product-sum milestone + parity', () => {
+    const sys = ce.box(['List', ce.parse('x + y = 5'), ce.parse('x y = 6')]);
+    const ex = sys.explain('solve');
+    const ids = ex.steps.map((s: any) => s.id);
+    expect(ids).toContain('solve.system.product-sum');
+    assertSystemContract(ex);
+
+    // Parity: two solutions {x:3,y:2} and {x:2,y:3}.
+    const solved = sys.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(Array.isArray(solved)).toBe(true);
+    expect(solved.length).toBe(2);
+    expect(ex.result.operator).toBe('List');
+    expect(ex.result.ops!.length).toBe(2);
+
+    // Empirical: every returned pair satisfies both equations.
+    for (const branch of ex.result.ops!)
+      checkSystemSolution([['x + y', '5'], ['x y', '6']], branch);
+
+    expect({
+      initial: ex.initial.toString(),
+      result: ex.result.toString(),
+      steps: ex.steps.map((s: any) => `${s.id}: ${s.value.toString()}`),
+    }).toMatchSnapshot();
+  });
+
+  test('substitution (y=x+1, x^2+y=7): solve-for/substitute/candidates', () => {
+    const sys = ce.box([
+      'List',
+      ce.parse('y = x + 1'),
+      ce.parse('x^2 + y = 7'),
+    ]);
+    const ex = sys.explain('solve');
+    const ids = ex.steps.map((s: any) => s.id);
+    expect(ids).toContain('solve.system.solve-for');
+    expect(ids).toContain('solve.system.substitute');
+    expect(ids).toContain('solve.candidates');
+    assertSystemContract(ex);
+
+    // Parity + empirical.
+    const solved = sys.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(solved.length).toBe(ex.result.ops!.length);
+    for (const branch of ex.result.ops!)
+      checkSystemSolution([['y', 'x + 1'], ['x^2 + y', '7']], branch);
+  });
+});
+
+// ============================================================
+// 22. Alternatives (Or), univariate
+// ============================================================
+
+describe('explain: solve Or (alternatives)', () => {
+  test('Or(x^2=1, x=3): per-case steps + merged roots, parity', () => {
+    const orx = ce.box(['Or', ce.parse('x^2 = 1'), ce.parse('x = 3')]);
+    const ex = orx.explain('solve');
+
+    // Every operand contributes a `solve.case` frame; there are two operands.
+    const caseSteps = ex.steps.filter((s: any) => s.id === 'solve.case');
+    expect(caseSteps.length).toBe(2);
+
+    // Every step id is a registered `solve.*` label.
+    for (const s of ex.steps) {
+      expect(s.id.startsWith('solve.')).toBe(true);
+      expect(labelFor(s.id).registered).toBe(true);
+    }
+
+    // Result is the merged root set; parity with plain solve() (order + values).
+    const roots = orx.solve('x') as ReadonlyArray<any>;
+    expect(ex.result.operator).toBe('List');
+    expect(ex.result.ops!.length).toBe(roots.length);
+    for (let i = 0; i < roots.length; i++)
+      expect(ex.result.ops![i].isSame(roots[i])).toBe(true);
+
+    expect({
+      initial: ex.initial.toString(),
+      result: ex.result.toString(),
+      steps: ex.steps.map((s: any) => `${s.id}: ${s.value.toString()}`),
+    }).toMatchSnapshot();
+  });
+
+  test('overlapping cases dedup: Or(x^2=1, x=1) lists 1 once', () => {
+    const orx = ce.box(['Or', ce.parse('x^2 = 1'), ce.parse('x = 1')]);
+    const ex = orx.explain('solve');
+    // Roots {1, -1}: the shared root 1 appears exactly once.
+    const rootStrings = ex.result.ops!.map((r: any) => r.toString());
+    expect(rootStrings.filter((s: string) => s === '1').length).toBe(1);
+    // Dedup matches plain solveOr exactly.
+    const roots = orx.solve('x') as ReadonlyArray<any>;
+    expect(ex.result.ops!.length).toBe(roots.length);
+    for (let i = 0; i < roots.length; i++)
+      expect(ex.result.ops![i].isSame(roots[i])).toBe(true);
+  });
+});
+
+// ============================================================
+// 23. System / Or unsupported cases throw
+// ============================================================
+
+describe('explain: solve systems — unsupported cases throw', () => {
+  test('system of inequalities throws', () => {
+    expect(() =>
+      ce
+        .box(['List', ce.parse('x + y < 5'), ce.parse('x - y > 1')])
+        .explain('solve')
+    ).toThrow(/inequalit/i);
+  });
+
+  test('mixed equality + inequality system throws', () => {
+    expect(() =>
+      ce
+        .box(['List', ce.parse('x + y = 5'), ce.parse('x - y > 1')])
+        .explain('solve')
+    ).toThrow(/mixed/i);
+  });
+
+  test('multivariate Or throws', () => {
+    expect(() =>
+      ce
+        .box(['Or', ce.parse('x + y = 2'), ce.parse('x - y = 0')])
+        .explain('solve', { variable: ['x', 'y'] })
+    ).toThrow(/Or/i);
+  });
+});
+
+// ============================================================
+// 24. System solve does not perturb plain solve()
+// ============================================================
+
+describe('explain: solve system does not perturb solve()', () => {
+  test('solve() returns the same value before and after explain()', () => {
+    const sys = ce.box(['List', ce.parse('2x + y = 5'), ce.parse('x - y = 1')]);
+    const before = sys.solve(['x', 'y']) as Record<string, any>;
+    sys.explain('solve');
+    const after = sys.solve(['x', 'y']) as Record<string, any>;
+    expect(after.x.isSame(before.x)).toBe(true);
+    expect(after.y.isSame(before.y)).toBe(true);
   });
 });

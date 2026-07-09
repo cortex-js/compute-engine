@@ -1,3 +1,30 @@
+## Unreleased
+
+### Step-by-Step Explanations
+
+- **`explain('D')` handles higher-order and mixed partial derivatives.** A new
+  `order` option requests the $n$-th derivative
+  (`ce.parse('x \\sin x').explain('D', { variable: 'x', order: 2 })`), and a
+  receiver that is itself a `D` expression — including mixed partials such as
+  `D(f, x, y)` — is traced through its whole differentiation sequence. The
+  explanation differentiates one order at a time: each stage replays the
+  textbook rule applications inside the remaining derivative operators, folds
+  to the simplified derivative, then differentiates again.
+
+- **`explain('solve')` traces systems of equations and alternatives.** A
+  `List` or `And` of equations is traced through the same solvers `solve()`
+  runs: Gaussian elimination shows one step per eliminated variable and per
+  back-substituted variable (`solve.system.eliminate`,
+  `solve.system.back-substitute`, `solve.system.parametric`), and nonlinear
+  2×2 systems show the product–sum or solve-and-substitute strategy
+  (`solve.system.product-sum`, `solve.system.solve-for`,
+  `solve.system.substitute`). An `Or` of univariate equations is solved case
+  by case (`solve.case`) with the roots merged. The solutions are identical
+  to `solve()` — the trace is a pure observation channel. Systems of
+  inequalities and mixed systems are not traced and throw a precise error.
+  To support systems, the `variable` explain option now also accepts an
+  array of unknowns.
+
 ## 0.71.0 _2026-07-08_
 
 ### Differential Equations

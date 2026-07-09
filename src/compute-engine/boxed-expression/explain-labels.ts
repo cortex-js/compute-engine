@@ -247,6 +247,17 @@ registerStepLabels({
   'solve.filter-domain': 'Discard solutions outside the domain of the variable',
   'solve.roots': 'The solutions',
   'solve.template': 'Solve the matched equation pattern',
+  // System-of-equations phases
+  'solve.system.eliminate': 'Eliminate a variable from the remaining equations',
+  'solve.system.back-substitute':
+    'Substitute the known value back to solve for the next variable',
+  'solve.system.parametric':
+    'Express the solutions in terms of a free parameter',
+  'solve.system.solve-for': 'Solve one equation for one variable',
+  'solve.system.substitute': 'Substitute into the remaining equations',
+  'solve.system.product-sum':
+    'Rewrite the sum and product conditions as a quadratic',
+  'solve.case': 'Consider the next case',
 });
 
 //

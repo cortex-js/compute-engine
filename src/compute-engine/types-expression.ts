@@ -182,7 +182,8 @@ type SimplifyOptions = {
 
 type ExplainOptions = SimplifyOptions & {
   verbosity?: ExplainVerbosity;
-  variable?: string;
+  variable?: string | string[];
+  order?: number;
 };
 
 type Explanation = KernelExplanation<Expression>;

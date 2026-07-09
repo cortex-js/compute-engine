@@ -1,11 +1,62 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
+  RuleSteps,
 } from '../global-types.js';
 import { polynomialDegree } from './polynomials.js';
-import { findUnivariateRoots } from './solve.js';
+import { findUnivariateRoots, rootsAsEquations } from './solve.js';
 import { expand } from './expand.js';
 import { isFunction, isSymbol, numericValue } from './type-guards.js';
+
+//
+// ── Solve-system trace ──────────────────────────────────────────────
+//
+// `expr.explain('solve')` threads an optional `RuleSteps` accumulator
+// through the system solvers. The trace is a pure observation channel:
+// every recording is guarded on the accumulator being present, and never
+// affects control flow or results — the plain `solve()` path passes no
+// accumulator and allocates nothing.
+//
+
+/** Reconstruct the equation `a1·x1 + … + an·xn = rhs` from a row of the
+ * augmented matrix, dropping zero-coefficient terms. Built with
+ * `ce.function(...)` (not `.add()`/`.mul()`, which fold exact literals). */
+function rowToEquation(
+  ce: ComputeEngine,
+  coeffs: Expression[],
+  rhs: Expression,
+  variables: string[]
+): Expression {
+  const terms: Expression[] = [];
+  for (let j = 0; j < variables.length; j++) {
+    const c = coeffs[j];
+    if (c === undefined || c.isSame(0)) continue;
+    const sym = ce.symbol(variables[j]);
+    terms.push(c.isSame(1) ? sym : ce.function('Multiply', [c, sym]));
+  }
+  const lhs =
+    terms.length === 0
+      ? ce.Zero
+      : terms.length === 1
+        ? terms[0]
+        : ce.function('Add', terms);
+  return ce.function('Equal', [lhs, rhs]);
+}
+
+/** The whole system as a `List` of equations, reconstructed from the current
+ * augmented-matrix rows (columns `0..n-1` are coefficients, column `n` the
+ * RHS). */
+function augToSystem(
+  ce: ComputeEngine,
+  aug: Expression[][],
+  n: number,
+  variables: string[]
+): Expression {
+  const eqs = aug.map((row) =>
+    rowToEquation(ce, row.slice(0, n), row[n], variables)
+  );
+  return ce.function('List', eqs);
+}
 
 function numericRealPart(value: unknown): number | undefined {
   if (typeof value === 'number') return value;
@@ -120,7 +171,8 @@ function isLinearInVariables(expr: Expression, variables: string[]): boolean {
  */
 export function solveLinearSystem(
   equations: Expression[],
-  variables: string[]
+  variables: string[],
+  trace?: RuleSteps
 ): Record<string, Expression> | null {
   if (equations.length === 0 || variables.length === 0) return null;
 
@@ -136,11 +188,11 @@ export function solveLinearSystem(
 
   // For under-determined systems, use parametric solver
   if (m < n) {
-    return solveParametric(A, b, variables, ce);
+    return solveParametric(A, b, variables, ce, trace);
   }
 
   // Solve using Gaussian elimination with partial pivoting
-  const solutions = gaussianElimination(A, b, n, ce);
+  const solutions = gaussianElimination(A, b, n, ce, variables, trace);
   if (!solutions) return null;
 
   // Build result object
@@ -348,7 +400,9 @@ function gaussianElimination(
   A: Expression[][],
   b: Expression[],
   n: number,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  variables: string[],
+  trace?: RuleSteps
 ): Expression[] | null {
   const m = A.length;
 
@@ -394,6 +448,14 @@ function gaussianElimination(
         aug[row][j] = aug[row][j].sub(factor.mul(aug[col][j]));
       }
     }
+
+    // One step per pivot column: the system after eliminating this variable
+    // from the rows below it.
+    if (trace)
+      trace.push({
+        value: augToSystem(ce, aug, n, variables),
+        because: 'solve.system.eliminate',
+      });
   }
 
   // Check for inconsistency (non-zero in last column of zero rows)
@@ -424,6 +486,20 @@ function gaussianElimination(
       sum = sum.sub(aug[i][j].mul(solution[j]));
     }
     solution[i] = sum.div(aug[i][i]);
+
+    // One step per back-substituted variable: the variables resolved so far,
+    // in index order (this iteration resolves `variables[i]`).
+    if (trace) {
+      const resolved: Expression[] = [];
+      for (let j = i; j < n; j++)
+        resolved.push(
+          ce.function('Equal', [ce.symbol(variables[j]), solution[j]])
+        );
+      trace.push({
+        value: ce.function('List', resolved),
+        because: 'solve.system.back-substitute',
+      });
+    }
   }
 
   return solution;
@@ -449,7 +525,8 @@ function solveParametric(
   A: Expression[][],
   b: Expression[],
   variables: string[],
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  trace?: RuleSteps
 ): Record<string, Expression> | null {
   const m = A.length; // number of equations
   const n = variables.length; // number of variables
@@ -568,6 +645,17 @@ function solveParametric(
     result[variables[i]] = sol;
   }
 
+  // A single step expressing the pivot variables in terms of the free ones.
+  if (trace) {
+    const eqs = Object.entries(result).map(([v, expr]) =>
+      ce.function('Equal', [ce.symbol(v), expr])
+    );
+    trace.push({
+      value: ce.function('List', eqs),
+      because: 'solve.system.parametric',
+    });
+  }
+
   return result;
 }
 
@@ -669,7 +757,8 @@ function isEffectivelyZero(expr: Expression | undefined): boolean {
  */
 export function solvePolynomialSystem(
   equations: Expression[],
-  variables: string[]
+  variables: string[],
+  trace?: RuleSteps
 ): Array<Record<string, Expression>> | null {
   if (equations.length !== 2 || variables.length !== 2) return null;
 
@@ -685,13 +774,28 @@ export function solvePolynomialSystem(
     return expand(eq).simplify();
   });
 
-  // Try product + sum pattern first
-  const productSumResult = tryProductSumPattern(normalized, x, y, ce);
-  if (productSumResult) return productSumResult;
+  // Try product + sum pattern first. Each strategy records into a provisional
+  // local trace that only joins `trace` when the strategy produces the answer.
+  const psTrace: RuleSteps | undefined = trace ? [] : undefined;
+  const productSumResult = tryProductSumPattern(normalized, x, y, ce, psTrace);
+  if (productSumResult) {
+    if (trace && psTrace) trace.push(...psTrace);
+    return productSumResult;
+  }
 
   // Try substitution method
-  const substitutionResult = trySubstitutionMethod(normalized, x, y, ce);
-  if (substitutionResult) return substitutionResult;
+  const subTrace: RuleSteps | undefined = trace ? [] : undefined;
+  const substitutionResult = trySubstitutionMethod(
+    normalized,
+    x,
+    y,
+    ce,
+    subTrace
+  );
+  if (substitutionResult) {
+    if (trace && subTrace) trace.push(...subTrace);
+    return substitutionResult;
+  }
 
   return null;
 }
@@ -705,7 +809,8 @@ function tryProductSumPattern(
   equations: Expression[],
   x: string,
   y: string,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  trace?: RuleSteps
 ): Array<Record<string, Expression>> | null {
   let productEq: Expression | null = null;
   let sumEq: Expression | null = null;
@@ -738,6 +843,17 @@ function tryProductSumPattern(
   const quadratic = ce
     .expr(['Add', ['Square', t], ['Negate', ['Multiply', sum, t]], product])
     .simplify();
+
+  // Both unknowns are the two roots of this quadratic in a fresh variable `t`
+  // (displayed under the readable name `t`).
+  if (trace)
+    trace.push({
+      value: ce.function('Equal', [
+        quadratic.subs({ _t: ce.symbol('t') }),
+        ce.Zero,
+      ]),
+      because: 'solve.system.product-sum',
+    });
 
   const roots = findUnivariateRoots(quadratic, t);
   if (roots.length === 0) return null;
@@ -969,7 +1085,8 @@ function trySubstitutionMethod(
   equations: Expression[],
   x: string,
   y: string,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  trace?: RuleSteps
 ): Array<Record<string, Expression>> | null {
   // Try each equation and each variable
   for (let i = 0; i < equations.length; i++) {
@@ -998,7 +1115,23 @@ function trySubstitutionMethod(
             solutions.push({ [x]: xVal, [y]: ySimplified });
           }
         }
-        if (solutions.length > 0) return solutions;
+        if (solutions.length > 0) {
+          if (trace) {
+            trace.push({
+              value: ce.function('Equal', [ce.symbol(x), solveForXResult]),
+              because: 'solve.system.solve-for',
+            });
+            trace.push({
+              value: ce.function('Equal', [substituted, ce.Zero]),
+              because: 'solve.system.substitute',
+            });
+            trace.push({
+              value: rootsAsEquations(ce, y, yRoots),
+              because: 'solve.candidates',
+            });
+          }
+          return solutions;
+        }
       }
     }
 
@@ -1024,7 +1157,23 @@ function trySubstitutionMethod(
             solutions.push({ [x]: xSimplified, [y]: yVal });
           }
         }
-        if (solutions.length > 0) return solutions;
+        if (solutions.length > 0) {
+          if (trace) {
+            trace.push({
+              value: ce.function('Equal', [ce.symbol(y), solveForYResult]),
+              because: 'solve.system.solve-for',
+            });
+            trace.push({
+              value: ce.function('Equal', [substituted, ce.Zero]),
+              because: 'solve.system.substitute',
+            });
+            trace.push({
+              value: rootsAsEquations(ce, x, xRoots),
+              because: 'solve.candidates',
+            });
+          }
+          return solutions;
+        }
       }
     }
   }
