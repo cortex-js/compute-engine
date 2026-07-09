@@ -1,5 +1,40 @@
 ## [Unreleased]
 
+### Angular Units
+
+- **Compilation targets honor `ce.angularUnit`.** Compiled code from every
+  built-in target (`javascript`, `interval-js`, `glsl`, `wgsl`,
+  `interval-glsl`, `python`) now reproduces the engine's angular-unit
+  semantics instead of always computing in radians: direct trigonometric
+  arguments are scaled by the unit→radian factor and inverse-trigonometric
+  results by its reciprocal, for all units (`deg`, `grad`, `turn`). With
+  `ce.angularUnit = 'deg'`, `compile('\\sin(x)')` emits
+  `Math.sin(0.017453… * x)` so `run({x: 90})` returns 1, matching
+  `evaluate()` — previously a degree-mode expression *evaluated* in degrees
+  but *compiled* (and therefore plotted) as if radians. Radian mode emits
+  the same code as before.
+
+- **Hyperbolic functions are now unit-independent.** Their argument (and an
+  inverse hyperbolic's result) is a dimensionless real, not an angle, so
+  `sinh`, `cosh`, `tanh`, `coth`, `sech`, `csch` and `arsinh`…`artanh` no
+  longer convert under a non-radian `angularUnit`. Previously in degree mode
+  `\sinh(1)` evaluated to $\sinh(\pi/180) \approx 0.0175$ instead of
+  $1.1752$.
+
+- **Exact inverse-trigonometric values are returned in the current angular
+  unit.** In degree mode `\arcsin(1)` now evaluates to the exact integer
+  `90` (previously the exact *radian* value $\pi/2$, disagreeing with
+  `.N()`, which returned 90). Similarly `100` in `grad` mode and the exact
+  rational `1/4` in `turn` mode; radian mode still returns $\pi/2$.
+
+- **`Arctan2` honors `angularUnit`,** consistently with `Arctan` (it
+  previously always returned radians): in degree mode `Arctan2(1, 1)`
+  evaluates to the exact `45`, with the quadrant corrections applied in the
+  current unit (`Arctan2(1, -1)` → `135`).
+
+  Symbolic calculus (`D`, `Integrate`) remains radian-based regardless of
+  `angularUnit` (no $\pi/180$ chain-rule factor); this is a known limitation.
+
 ### Step-by-Step Explanations
 
 - **`explain('D')` handles higher-order and mixed partial derivatives.** A new
@@ -47,6 +82,33 @@
   releases.
 
 ### Issues Resolved
+
+- Reading `.latex` (or `.toString()`) on the canonical, unevaluated form of a
+  scalar×tuple product — `ce.parse('3(1,2)').latex`,
+  `ce.box(['Multiply', 2, ['Tuple', 1, 2]]).latex` — no longer throws
+  `RangeError: Maximum call stack size exceeded`. The pretty-JSON `Multiply`
+  serializer round-trips through `Product.asRationalExpression()`, and the
+  tuple-aware branch of `canonicalDivide` returned an inert
+  `Divide(expr, 1)` instead of stripping the trivial divisor, sending the
+  serializer into infinite recursion. Trivial `/1` and `/-1` divisors of
+  tuple-typed expressions are now reduced.
+
+- Juxtaposing a scalar with a tuple-**typed** symbol now means scaling, not
+  tuple construction: with `z` declared `tuple<number, number>`, `3z` parses
+  to `["Multiply", 3, "z"]` (previously a spurious `["Tuple", 3, "z"]`).
+  Literal tuples (`3(1,2)`) were already handled; heterogeneous tuples such
+  as `tuple<string, number>` still group as a `Tuple`.
+
+- Compiled broadcasts over a list operand now compute their values. The
+  generated `.map()` callback read its element variable from the vars object
+  instead of the callback parameter, so a compiled `\sin([x, 2x])` returned
+  `[null, null]` for every input. Compiled broadcast results now agree with
+  `evaluate()`.
+
+- `\operatorname{csch}(x)` now parses to the `Csch` function (previously a
+  free symbol named `csch`, silently turning the expression into an implicit
+  multiplication), joining the existing `\csch` command and matching
+  `\operatorname{sech}`.
 
 - Constructing many `ComputeEngine` instances in a synchronous loop no longer
   balloons memory (~430 KB pinned per engine until the task yielded to the

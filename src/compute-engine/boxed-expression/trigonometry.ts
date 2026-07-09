@@ -241,6 +241,21 @@ function applyAngle(
   );
 }
 
+/**
+ * The exact half-turn angle (π rad) expressed in the engine's current angular
+ * unit: `π` (rad), `180` (deg), `200` (grad), or `1/2` (turn). Building exact
+ * angle results from this constant keeps `evaluate()` consistent with the
+ * unit-converted numeric path (`radiansToAngle`) — e.g. in degree mode
+ * `arcsin(1)` evaluates to the exact integer `90`, matching `.N()`.
+ */
+export function halfTurnAngle(ce: ComputeEngine): Expression {
+  const unit = ce.angularUnit;
+  if (unit === 'deg') return ce.number(180);
+  if (unit === 'grad') return ce.number(200);
+  if (unit === 'turn') return ce.number([1, 2]);
+  return ce.Pi;
+}
+
 /** Assuming x in an expression in radians, convert to current angular unit. */
 export function radiansToAngle(
   x: Expression | undefined
@@ -293,45 +308,42 @@ export function evalTrig(
           (x) => x.inverse().asin()
         )
       );
+    // Inverse HYPERBOLIC functions return an area (a dimensionless real),
+    // NOT an angle: they are unit-independent and must not be scaled by
+    // `angularUnit` (no `radiansToAngle` wrapper).
     case 'Arcosh':
-      return radiansToAngle(
-        apply(
-          op,
-          Math.acosh,
-          // acosh(x) = ln(x + sqrt(x^2 - 1))
-          (x) => x.add(x.mul(x).sub(BigDecimal.ONE).sqrt()).ln(),
-          (x) => x.acosh()
-        )
+      return apply(
+        op,
+        Math.acosh,
+        // acosh(x) = ln(x + sqrt(x^2 - 1))
+        (x) => x.add(x.mul(x).sub(BigDecimal.ONE).sqrt()).ln(),
+        (x) => x.acosh()
       );
     case 'Arcoth':
       // ln[(1 + x) /(x − 1)] /2
-      return radiansToAngle(
-        apply(
-          op,
-          (x) => Math.log((1 + x) / (x - 1)) / 2,
-          (x) =>
-            BigDecimal.ONE.add(x)
-              .div(x.sub(BigDecimal.ONE))
-              .ln()
-              .div(BigDecimal.TWO),
-          (x) => ce.complex(1).add(x).div(x.sub(1)).log().div(2)
-        )
+      return apply(
+        op,
+        (x) => Math.log((1 + x) / (x - 1)) / 2,
+        (x) =>
+          BigDecimal.ONE.add(x)
+            .div(x.sub(BigDecimal.ONE))
+            .ln()
+            .div(BigDecimal.TWO),
+        (x) => ce.complex(1).add(x).div(x.sub(1)).log().div(2)
       );
 
     case 'Arcsch':
       // ln[1/x + √(1/x2 + 1)],
-      return radiansToAngle(
-        apply(
-          op,
-          (x) => Math.log(1 / x + Math.sqrt(1 / (x * x) + 1)),
-          (x) =>
-            BigDecimal.ONE.div(x.mul(x))
-              .add(BigDecimal.ONE)
-              .sqrt()
-              .add(BigDecimal.ONE.div(x))
-              .ln(),
-          (x) => x.mul(x).inverse().add(1).sqrt().add(x.inverse()).log()
-        )
+      return apply(
+        op,
+        (x) => Math.log(1 / x + Math.sqrt(1 / (x * x) + 1)),
+        (x) =>
+          BigDecimal.ONE.div(x.mul(x))
+            .add(BigDecimal.ONE)
+            .sqrt()
+            .add(BigDecimal.ONE.div(x))
+            .ln(),
+        (x) => x.mul(x).inverse().add(1).sqrt().add(x.inverse()).log()
       );
 
     case 'Arcsec':
@@ -355,26 +367,22 @@ export function evalTrig(
       );
 
     case 'Arsech':
-      return radiansToAngle(
-        apply(
-          op,
-          (x) => Math.log((1 + Math.sqrt(1 - x * x)) / x),
-          // arsech(x) = ln((1 + sqrt(1 - x^2)) / x)
-          (x) =>
-            BigDecimal.ONE.sub(x.mul(x)).sqrt().add(BigDecimal.ONE).div(x).ln(),
-          (x) => ce.complex(1).sub(x.mul(x)).add(1).div(x).log()
-        )
+      return apply(
+        op,
+        (x) => Math.log((1 + Math.sqrt(1 - x * x)) / x),
+        // arsech(x) = ln((1 + sqrt(1 - x^2)) / x)
+        (x) =>
+          BigDecimal.ONE.sub(x.mul(x)).sqrt().add(BigDecimal.ONE).div(x).ln(),
+        (x) => ce.complex(1).sub(x.mul(x)).add(1).div(x).log()
       );
 
     case 'Arsinh':
-      return radiansToAngle(
-        apply(
-          op,
-          Math.asinh,
-          // asinh(x) = ln(x + sqrt(x^2 + 1))
-          (x) => x.add(x.mul(x).add(BigDecimal.ONE).sqrt()).ln(),
-          (x) => x.asinh()
-        )
+      return apply(
+        op,
+        Math.asinh,
+        // asinh(x) = ln(x + sqrt(x^2 + 1))
+        (x) => x.add(x.mul(x).add(BigDecimal.ONE).sqrt()).ln(),
+        (x) => x.asinh()
       );
 
     case 'Arctan':
@@ -388,18 +396,16 @@ export function evalTrig(
       );
 
     case 'Artanh':
-      return radiansToAngle(
-        apply(
-          op,
-          Math.atanh,
-          // atanh(x) = 0.5 * ln((1+x)/(1-x))
-          (x) =>
-            BigDecimal.ONE.add(x)
-              .div(BigDecimal.ONE.sub(x))
-              .ln()
-              .div(BigDecimal.TWO),
-          (x) => x.atanh()
-        )
+      return apply(
+        op,
+        Math.atanh,
+        // atanh(x) = 0.5 * ln((1+x)/(1-x))
+        (x) =>
+          BigDecimal.ONE.add(x)
+            .div(BigDecimal.ONE.sub(x))
+            .ln()
+            .div(BigDecimal.TWO),
+        (x) => x.atanh()
       );
 
     case 'Cos':
@@ -410,8 +416,11 @@ export function evalTrig(
         (x) => x.cos()
       );
 
+    // Hyperbolic functions take a dimensionless argument, NOT an angle: they
+    // are unit-independent and must not be converted by `angularUnit` (use
+    // plain `apply`, not `applyAngle`).
     case 'Cosh':
-      return applyAngle(
+      return apply(
         op,
         Math.cosh,
         (x) => x.cosh(),
@@ -437,7 +446,7 @@ export function evalTrig(
         (x) => x.tan().inverse()
       );
     case 'Coth':
-      return applyAngle(
+      return apply(
         op,
         (x) => 1 / Math.tanh(x),
         (x) => BigDecimal.ONE.div(x.tanh()),
@@ -461,7 +470,7 @@ export function evalTrig(
         (x) => x.sin().inverse()
       );
     case 'Csch':
-      return applyAngle(
+      return apply(
         op,
         (x) => 1 / Math.sinh(x),
         (x) => BigDecimal.ONE.div(x.sinh()),
@@ -485,7 +494,7 @@ export function evalTrig(
         (x) => x.cos().inverse()
       );
     case 'Sech':
-      return applyAngle(
+      return apply(
         op,
         (x) => 1 / Math.cosh(x),
         (x) => BigDecimal.ONE.div(x.cosh()),
@@ -499,7 +508,7 @@ export function evalTrig(
         (x) => x.sin()
       );
     case 'Sinh':
-      return applyAngle(
+      return apply(
         op,
         Math.sinh,
         (x) => x.sinh(),
@@ -525,7 +534,7 @@ export function evalTrig(
       return result;
     }
     case 'Tanh':
-      return applyAngle(
+      return apply(
         op,
         Math.tanh,
         (x) => x.tanh(),
@@ -643,10 +652,13 @@ function constructibleValuesInverse(
 
   for (const [[_match_arg, match_arg_N], [n, d]] of specialInverseValues) {
     if (ce.chop(x_N - match_arg_N) === 0) {
-      // there is an implicit Pi in the numerator
-      let theta = ce.Pi.mul(n).div(d);
+      // The angle is (n/d)·halfTurn, expressed exactly in the engine's
+      // angular unit (π rad, 180 deg, …) so evaluate() agrees with the
+      // unit-converted numeric path (e.g. deg mode: arcsin(1) → exact 90).
+      const halfTurn = halfTurnAngle(ce);
+      let theta = halfTurn.mul(n).div(d);
       if (quadrant == -1) theta = theta.neg();
-      else if (quadrant == 1) theta = ce.Pi.sub(theta);
+      else if (quadrant == 1) theta = halfTurn.sub(theta);
 
       return theta.evaluate();
     }

@@ -23,6 +23,7 @@ import type {
   CompilationResult,
 } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
+import { rewriteAngularUnit } from './angular-unit.js';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.
@@ -3396,6 +3397,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult {
+    // Reproduce the engine's `angularUnit` semantics in radian-based code.
+    expr = rewriteAngularUnit(expr);
     const { functions: userFunctions, vars } = options;
     const allFunctions = this.getFunctions();
     const constants = this.getConstants();

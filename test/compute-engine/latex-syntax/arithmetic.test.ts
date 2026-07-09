@@ -736,3 +736,67 @@ describe('POWER', () => {
     );
   });
 });
+
+describe('FRACTION mixed braced/unbraced arguments', () => {
+  test('unbraced numerator, braced denominator', () => {
+    expect(ce.parse('\\frac1{-1}')).toMatchInlineSnapshot(`-1`);
+  });
+
+  test('braced numerator, unbraced denominator', () => {
+    expect(ce.parse('\\frac{900}7')).toMatchInlineSnapshot(
+      `["Rational", 900, 7]`
+    );
+  });
+
+  test('both unbraced', () => {
+    expect(ce.parse('\\frac12')).toMatchInlineSnapshot(`["Rational", 1, 2]`);
+  });
+
+  test('both braced', () => {
+    expect(ce.parse('\\frac{1}{2}')).toMatchInlineSnapshot(
+      `["Rational", 1, 2]`
+    );
+  });
+
+  test('space after command, both unbraced', () => {
+    expect(ce.parse('\\frac 12')).toMatchInlineSnapshot(`["Rational", 1, 2]`);
+  });
+
+  test('empty groups report missing at each group', () => {
+    expect(ce.parse('\\frac{}{}')).toMatchInlineSnapshot(
+      `["Divide", ["Error", "'missing'"], ["Error", "'missing'"]]`
+    );
+  });
+
+  test('Leibniz derivative notation is untouched', () => {
+    expect(ce.parse('\\frac{d}{dx}f')).toMatchInlineSnapshot(
+      `["D", ["Function", "f", "x"], "x"]`
+    );
+    expect(ce.parse('\\frac{\\partial f}{\\partial x}')).toMatchInlineSnapshot(
+      `["D", ["Function", "f", "x"], "x"]`
+    );
+    expect(ce.parse('\\frac{d^2}{dx^2}f')).toMatchInlineSnapshot(
+      `["D", ["D", ["Function", "f", "x"], "x"], "x"]`
+    );
+  });
+});
+
+describe('BINOMIAL parsing', () => {
+  test('braced top, unbraced bottom', () => {
+    expect(ce.parse('\\binom{n}k')).toMatchInlineSnapshot(
+      `["Binomial", "n", "k"]`
+    );
+  });
+
+  test('unbraced top, braced bottom', () => {
+    expect(ce.parse('\\binom n{k+1}')).toMatchInlineSnapshot(
+      `["Binomial", "n", ["Add", "k", 1]]`
+    );
+  });
+
+  test('infix \\choose primitive', () => {
+    expect(ce.parse('{4028 \\choose 2014}')).toMatchInlineSnapshot(
+      `["Binomial", 4028, 2014]`
+    );
+  });
+});

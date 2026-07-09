@@ -54,9 +54,10 @@ describe('basic', () => {
     expect(parse('\\sqrt{}{}')).toMatchInlineSnapshot(
       `["Sqrt", ["Error", "'missing'"]]`
     );
-    expect(parse('\\sqrt')).toMatchInlineSnapshot(
-      `["Sqrt", ["Error", "'missing'"]]`
-    );
+    // A bare `\sqrt` (nothing following) is a function reference, like `\ln`
+    // — so it can be piped (`x |> \sqrt`). Only an explicit empty radical
+    // (`\sqrt{}`) is a missing-argument error.
+    expect(parse('\\sqrt')).toMatchInlineSnapshot(`Sqrt`);
   });
 
   test('Semantic Errors', () => {

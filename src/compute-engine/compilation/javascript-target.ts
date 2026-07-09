@@ -93,6 +93,7 @@ import {
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 
 import { BaseCompiler } from './base-compiler.js';
+import { rewriteAngularUnit } from './angular-unit.js';
 import type {
   CompileTarget,
   CompiledOperators,
@@ -1718,6 +1719,10 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
+    // Compiled code is radian-based: reproduce the engine's `angularUnit`
+    // semantics (scaled trig args, scaled inverse-trig results) so compiled
+    // output agrees with evaluate().
+    expr = rewriteAngularUnit(expr);
     const {
       operators,
       functions,

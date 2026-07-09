@@ -5,7 +5,9 @@ import { checkArity } from '../boxed-expression/validate.js';
 import {
   constructibleValues,
   evalTrig,
+  halfTurnAngle,
   processInverseFunction,
+  radiansToAngle,
   trigSign,
 } from '../boxed-expression/trigonometry.js';
 
@@ -212,8 +214,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if ((isNumber(y) && y.im !== 0) || (isNumber(x) && x.im !== 0))
           return undefined;
 
+        // Like the other inverse trig functions, the result is an angle in
+        // the engine's current `angularUnit`: the numeric path converts via
+        // `radiansToAngle`, the exact paths below build on `halfTurnAngle`
+        // (π rad / 180 deg / 200 grad / 1/2 turn).
         if (numericApproximation)
-          return apply2(y, x, Math.atan2, (a, b) => BigDecimal.atan2(a, b));
+          return radiansToAngle(
+            apply2(y, x, Math.atan2, (a, b) => BigDecimal.atan2(a, b))
+          );
+
+        const halfTurn = halfTurnAngle(ce);
 
         // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
         // Three-valued discipline throughout: only act on an === true / ===
@@ -222,27 +232,28 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (y.isSame(0) && x.isSame(0)) return ce.Zero;
         if (x.isFinite === false) {
           if (x.isPositive === true) return ce.Zero;
-          if (x.isNegative === true) return ce.Pi;
+          if (x.isNegative === true) return halfTurn;
           return undefined;
         }
         if (y.isFinite === false) {
-          if (y.isPositive === true) return ce.Pi.div(2);
-          if (y.isNegative === true) return ce.Pi.div(-2);
+          if (y.isPositive === true) return halfTurn.div(2);
+          if (y.isNegative === true) return halfTurn.div(-2);
           return undefined;
         }
         if (y.isSame(0)) {
           if (x.isPositive === true) return ce.Zero;
-          if (x.isNegative === true) return ce.Pi;
+          if (x.isNegative === true) return halfTurn;
           return undefined;
         }
         // x = 0 (and y ≠ 0): the angle is ±π/2
         if (x.isSame(0)) {
-          if (y.isPositive === true) return ce.Pi.div(2);
-          if (y.isNegative === true) return ce.Pi.div(-2);
+          if (y.isPositive === true) return halfTurn.div(2);
+          if (y.isNegative === true) return halfTurn.div(-2);
           return undefined;
         }
 
-        // General case: apply the quadrant correction to the principal value.
+        // General case: apply the quadrant correction to the principal value
+        // (the `Arctan` result is already in the current angular unit).
         //   atan2(y, x) = atan(y/x)        if x > 0
         //               = atan(y/x) + π    if x < 0 and y ≥ 0
         //               = atan(y/x) − π    if x < 0 and y < 0
@@ -250,8 +261,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return ce.function('Arctan', [y.div(x)]).evaluate();
         if (x.isNegative === true) {
           const principal = ce.function('Arctan', [y.div(x)]).evaluate();
-          if (y.isNonNegative === true) return principal.add(ce.Pi);
-          if (y.isNegative === true) return principal.sub(ce.Pi);
+          if (y.isNonNegative === true) return principal.add(halfTurn);
+          if (y.isNegative === true) return principal.sub(halfTurn);
         }
         // Sign of x (or of y, when x < 0) is indeterminate: leave unevaluated.
         return undefined;

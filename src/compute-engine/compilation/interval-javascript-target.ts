@@ -11,6 +11,7 @@ import type { Expression } from '../global-types.js';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards.js';
 
 import { BaseCompiler } from './base-compiler.js';
+import { rewriteAngularUnit } from './angular-unit.js';
 import type {
   CompileTarget,
   CompiledOperators,
@@ -553,6 +554,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'interval-js', IntervalResult | Interval> {
+    // Reproduce the engine's `angularUnit` semantics in radian-based code.
+    expr = rewriteAngularUnit(expr);
     const { functions, vars, preamble } = options;
     const unknowns = expr.unknowns;
 

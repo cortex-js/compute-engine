@@ -34,8 +34,8 @@ describe('PIPELINE OPERATOR — bare function references', () => {
   // marker `\square` stands in for the argument, so a pipeline can fill the
   // hole and a standalone `\log_2` displays as `\log_2(\square)`.
   test('a based log with no argument holds a topic-marker hole', () => {
-    expect(json('\\log_2')).toBe(`["Lb","square"]`);
-    expect(json('\\log_5')).toBe(`["Log","square",5]`);
+    expect(json('\\log_2')).toBe(`["Lb","topic_marker"]`);
+    expect(json('\\log_5')).toBe(`["Log","topic_marker",5]`);
     expect(ce.parse('\\log_2').latex).toBe('\\log_{2}(\\square)');
   });
 

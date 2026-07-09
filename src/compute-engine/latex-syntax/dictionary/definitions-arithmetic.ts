@@ -656,27 +656,22 @@ function serializeMultiply(
   return isNegative ? '-' + result : result;
 }
 
+/** Parse a single `\frac`/`\binom` argument. In TeX, each argument is
+ *  independently a group (`{…}`) or a single token, so mixed forms like
+ *  `\frac1{-1}` or `\frac{900}7` are valid. An empty group (`{}`) is reported
+ *  as a missing-operand error positioned right after the group is consumed, so
+ *  the editor can flag it; a missing token becomes `missingIfEmpty`. */
+function parseFractionArgument(parser: Parser): MathJsonExpression {
+  const group = parser.parseGroup();
+  if (group === null) return missingIfEmpty(parser.parseToken());
+  return isEmptySequence(group)
+    ? parser.error('missing', parser.index)
+    : group;
+}
+
 function parseFraction(parser: Parser): MathJsonExpression | null {
-  let numer: MathJsonExpression | null = parser.parseGroup();
-  let denom: MathJsonExpression | null = null;
-  if (numer === null) {
-    numer = parser.parseToken();
-    denom = parser.parseToken();
-    numer = missingIfEmpty(numer);
-    denom = missingIfEmpty(denom);
-  } else {
-    // Report an empty numerator/denominator (e.g. `\frac{}{}`) as a
-    // missing-operand error positioned at the empty group, so the editor can
-    // flag it. `error('missing', …)` is emitted right after each group is
-    // consumed, while the parser is positioned at that group.
-    numer = isEmptySequence(numer)
-      ? parser.error('missing', parser.index)
-      : numer;
-    denom = parser.parseGroup();
-    denom = isEmptySequence(denom)
-      ? parser.error('missing', parser.index)
-      : denom;
-  }
+  const numer = parseFractionArgument(parser);
+  const denom = parseFractionArgument(parser);
   // Leibniz partial-derivative notation, assembled from the ∂ markers emitted
   // by the `\partial` parser: `∂f/∂x`, `∂/∂x f(x)`, `∂²f/∂x∂y`, `∂²f/∂x²`.
   // Each `PartialDerivative(fnOrVar, degree)` marker carries the numerator
@@ -953,18 +948,8 @@ function serializeFraction(
 /** Parse `\binom{n}{k}` (and the `\dbinom`/`\tbinom` display/text variants)
  *  as `Binomial(n, k)`. Mirrors `parseFraction`'s two-group reading. */
 function parseBinomial(parser: Parser): MathJsonExpression | null {
-  let top: MathJsonExpression | null = parser.parseGroup();
-  let bottom: MathJsonExpression | null = null;
-  if (top === null) {
-    top = missingIfEmpty(parser.parseToken());
-    bottom = missingIfEmpty(parser.parseToken());
-  } else {
-    top = isEmptySequence(top) ? parser.error('missing', parser.index) : top;
-    bottom = parser.parseGroup();
-    bottom = isEmptySequence(bottom)
-      ? parser.error('missing', parser.index)
-      : bottom;
-  }
+  const top = parseFractionArgument(parser);
+  const bottom = parseFractionArgument(parser);
   return ['Binomial', top, missingIfEmpty(bottom)];
 }
 
@@ -1446,6 +1431,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     associativity: 'none', // In LaTeX, the \over command is not associative
     precedence: DIVISION_PRECEDENCE,
     parse: 'Divide',
+  },
+  {
+    // TeX primitive `{n \choose k}`, same grammar as `\over`. Serializes as
+    // `\binom` (handled by the `Binomial` serializer above).
+    kind: 'infix',
+    latexTrigger: '\\choose',
+    associativity: 'none',
+    precedence: DIVISION_PRECEDENCE,
+    parse: 'Binomial',
   },
   {
     // The \/ command is recognized by MathLive, but not by KaTeX, so we

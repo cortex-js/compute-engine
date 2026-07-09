@@ -7,6 +7,7 @@ import type {
   CompilationResult,
 } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
+import { rewriteAngularUnit } from './angular-unit.js';
 import { GLSLTarget } from './glsl-target.js';
 import { formatGPUNumber } from './gpu-target.js';
 import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
@@ -648,6 +649,10 @@ export class IntervalGLSLTarget extends GLSLTarget {
     expr: Expression,
     options: CompilationOptions<Expression> & IntervalGLSLPreambleOptions = {}
   ): CompilationResult {
+    // Reproduce the engine's `angularUnit` semantics in radian-based code.
+    // (This override does not chain to `super.compile`, so it applies the
+    // rewrite itself — exactly once per compilation.)
+    expr = rewriteAngularUnit(expr);
     const { vars, trigAbsPad } = options;
 
     const target = this.createTarget({

@@ -687,8 +687,10 @@ function serializeKeyword(
 
 // The internal symbol a bare `\square` parses to (see the `Quadrilateral`
 // definition in definitions-other.ts). Within a pipeline it acts as the
-// topic marker / hole for the piped value.
-export const PIPE_TOPIC_MARKER = 'square';
+// topic marker / hole for the piped value. Deliberately not named `square`:
+// a user symbol with that name (e.g. a function called `square`) must not be
+// captured by topic substitution.
+export const PIPE_TOPIC_MARKER = 'topic_marker';
 
 // Substitute `replacement` for every topic marker in `expr`. Returns the
 // (possibly) rewritten expression and whether any marker was found.
@@ -919,6 +921,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'infix',
     precedence: 20,
     parse: 'Apply',
+  },
+  // The topic marker serializes back to `\square`. (Parsing `\square` is
+  // handled by the `Quadrilateral` geometry mark in definitions-other.ts,
+  // whose bare form falls back to this symbol.)
+  {
+    name: PIPE_TOPIC_MARKER,
+    serialize: '\\square',
   },
   // Pipeline operator: `x \rhd f` (also `x \triangleright f`,
   // `x \vartriangleright f`, `x |> f`) applies the function on the right to
@@ -2315,7 +2324,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 /**
  * Start scanning a text run. The scanner is pointing at a `<{>
  */
-function parseTextRun(
+export function parseTextRun(
   parser: Parser,
   style?: { [key: string]: string }
 ): MathJsonExpression {

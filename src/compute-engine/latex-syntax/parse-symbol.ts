@@ -48,6 +48,10 @@ const SYMBOL_PREFIX: Record<string, string> = {
   '\\mathrm': '_upright',
   '\\mathit': '_italic',
   '\\mathbf': '_bold',
+  // Aliases for math-mode bold (LaTeX / amsmath / bm package)
+  '\\bold': '_bold',
+  '\\boldsymbol': '_bold',
+  '\\bm': '_bold',
   '\\mathscr': '_script',
   '\\mathcal': '_calligraphic',
   '\\mathfrak': '_fraktur',

@@ -21,6 +21,8 @@ import {
   MathJsonSymbol,
 } from '../../../math-json/types.js';
 import { joinLatex } from '../tokenizer.js';
+import { PIPE_TOPIC_MARKER } from './definitions-core.js';
+import { parseTextRun } from './definitions-core.js';
 
 // TeX dimension units (each letter is a separate token from the tokenizer)
 const TEX_UNITS = [
@@ -369,6 +371,48 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       if (body !== null) return ['Annotated', body, { dict: { border: true } }];
       return 'Nothing';
     },
+  },
+  //
+  // Text-styling commands: parse the argument as a text run (like `\text`)
+  // and wrap it in an `Annotated` expression carrying the style dictionary.
+  // The `Annotated` serializer (below) re-emits these from the dict keys.
+  // Note: the same commands are also handled *inside* a text run by
+  // `parseTextRun`; these entries handle them at the top level (math mode).
+  //
+  {
+    latexTrigger: ['\\textbf'],
+    parse: (parser: Parser) => parseTextRun(parser, { fontWeight: 'bold' }),
+  },
+  {
+    latexTrigger: ['\\textit'],
+    parse: (parser: Parser) => parseTextRun(parser, { fontStyle: 'italic' }),
+  },
+  {
+    latexTrigger: ['\\emph'],
+    parse: (parser: Parser) => parseTextRun(parser, { fontStyle: 'italic' }),
+  },
+  {
+    latexTrigger: ['\\textup'],
+    parse: (parser: Parser) => parseTextRun(parser, { fontStyle: 'normal' }),
+  },
+  {
+    latexTrigger: ['\\texttt'],
+    parse: (parser: Parser) =>
+      parseTextRun(parser, { fontFamily: 'monospace' }),
+  },
+  {
+    latexTrigger: ['\\textsf'],
+    parse: (parser: Parser) =>
+      parseTextRun(parser, { fontFamily: 'sans-serif' }),
+  },
+  {
+    // Plain text run, no styling annotation (same result as `\text{…}`)
+    latexTrigger: ['\\textrm'],
+    parse: (parser: Parser) => parseTextRun(parser),
+  },
+  {
+    latexTrigger: ['\\mbox'],
+    parse: (parser: Parser) => parseTextRun(parser),
   },
   {
     latexTrigger: ['\\displaystyle'],
@@ -830,15 +874,16 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
 
   // Quadrilateral mark: `\square ABCD` → `Quadrilateral(A,B,C,D)`. A bare
-  // `\square` (placeholder / QED) falls back to the `square` symbol, which has
-  // its own `\square` serializer. (`Square` is taken by the `x^2` head, hence
+  // `\square` (placeholder / QED / pipeline topic marker) falls back to the
+  // topic-marker symbol, which has its own `\square` serializer in
+  // definitions-core.ts. (`Square` is taken by the `x^2` head, hence
   // `Quadrilateral`.)
   {
     name: 'Quadrilateral',
     latexTrigger: ['\\square'],
     kind: 'prefix',
     precedence: COMPARISON_PRECEDENCE,
-    parse: parseGeometryMark('Quadrilateral', 'square'),
+    parse: parseGeometryMark('Quadrilateral', PIPE_TOPIC_MARKER),
     serialize: serializeGeometryMark('\\square'),
   },
 

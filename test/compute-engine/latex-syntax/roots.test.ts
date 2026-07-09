@@ -25,9 +25,10 @@ describe('ROOT FUNCTION', () => {
 
 describe('ROOT FUNCTION (INVALID FORMS)', () => {
   test('Invalid forms', () => {
-    expect(parse('\\sqrt')).toMatchInlineSnapshot(
-      `["Sqrt", ["Error", "'missing'"]]`
-    );
+    // A bare `\sqrt` with nothing following is a function reference (like `\ln`,
+    // `\cos`), so it can be piped: `12 |> \sqrt` → `Sqrt(12)`. An *explicit*
+    // empty radical `\sqrt{}` remains a missing-argument error.
+    expect(parse('\\sqrt')).toMatchInlineSnapshot(`Sqrt`);
     expect(parse('\\sqrt{}')).toMatchInlineSnapshot(
       `["Sqrt", ["Error", "'missing'"]]`
     );

@@ -138,8 +138,11 @@ describe('Quadrilateral / \\square', () => {
     ]);
   });
 
-  test('bare \\square (placeholder / QED) → square symbol', () => {
-    expect(json('\\square')).toEqual('square');
+  // Named `topic_marker` rather than `square` so a user symbol called
+  // `square` is never captured by pipeline topic substitution.
+  test('bare \\square (placeholder / QED / topic marker) → topic_marker symbol', () => {
+    expect(json('\\square')).toEqual('topic_marker');
+    expect(ce.box('topic_marker').latex).toEqual('\\square');
   });
 });
 

@@ -6,6 +6,7 @@ import type {
   CompiledRunner,
 } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
+import { rewriteAngularUnit } from './angular-unit.js';
 import { isFunction } from '../boxed-expression/type-guards.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 
@@ -69,8 +70,13 @@ export function compile<T extends string = 'javascript'>(
   try {
     // Determine the target to use
     if (options?.target) {
-      // Direct target override - use BaseCompiler
-      const code = BaseCompiler.compile(expr, options.target);
+      // Direct target override - use BaseCompiler. Registered language
+      // targets apply the angular-unit rewrite in their own compile();
+      // this raw-target path must do it itself.
+      const code = BaseCompiler.compile(
+        rewriteAngularUnit(expr),
+        options.target
+      );
       return BaseCompiler.withReferences(
         {
           target: (options.target.language ?? 'custom') as T,

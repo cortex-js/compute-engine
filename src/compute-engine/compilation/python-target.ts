@@ -9,6 +9,7 @@ import type {
   CompilationResult,
 } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
+import { rewriteAngularUnit } from './angular-unit.js';
 import { tryGetConstant } from './constant-folding.js';
 import {
   isFunction,
@@ -825,6 +826,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'python'> {
+    // Reproduce the engine's `angularUnit` semantics in radian-based code.
+    expr = rewriteAngularUnit(expr);
     const vars = options.vars as Record<string, string> | undefined;
     const target = this.createTarget({
       var: this.makeVarResolver(vars),

@@ -87,12 +87,14 @@ describe('Parser Error source offsets', () => {
   });
 
   test('missing parser operands use a zero-width source range at the parser position', () => {
+    // `\sqrt{}` (explicit empty radical) is the missing-operand case; a bare
+    // `\sqrt` is now a function reference, not a missing-argument error.
     const expr = engine
-      .parse('1+\\sqrt')!
+      .parse('1+\\sqrt{}')!
       .toMathJson({ metadata: ['sourceOffsets'] });
     const error = findError(expr, 'missing');
 
-    expect(error.sourceOffsets).toEqual([7, 7]);
+    expect(error.sourceOffsets).toEqual([9, 9]);
   });
 
   test('missing closing delimiters identify the unterminated group range', () => {
@@ -257,7 +259,7 @@ check('Environment without name', () =>
 );
 
 check('Missing argument with \\sqrt custom parser', () =>
-  expect(engine.parse('1+\\sqrt')).toMatchInlineSnapshot(
+  expect(engine.parse('1+\\sqrt{}')).toMatchInlineSnapshot(
     `["Add", 1, ["Sqrt", ["Error", "'missing'"]]]`
   )
 );
