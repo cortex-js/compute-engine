@@ -717,6 +717,21 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     complexity: 11200,
     signature: '(value, collection) -> boolean',
     description: 'Test whether a value is not an element of a collection.',
+    canonical: (args, { engine: ce }) => {
+      // Same collection leniency as `Element` (which accepts `K_a \in BC`):
+      // without this handler, generic signature validation rejects a label
+      // collection (`K_a \notin BC`, where `BC` is a geometry line label).
+      if (args.length < 2)
+        return ce._fn('NotElement', [
+          args[0]?.canonical ?? ce.error('missing'),
+          ce.error('missing'),
+        ]);
+      const [value, collection] = args;
+      return ce._fn('NotElement', [
+        value.canonical,
+        listToIntervalInSetContext(ce, collection),
+      ]);
+    },
     evaluate: ([value, collection], { engine: ce }) => {
       if (!collection) return undefined;
       const result = membershipKleene(ce, value, collection);
@@ -861,6 +876,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // Functions
   //
 
+  // Note: `Intersection`, `Union`, `SetMinus` and `NotElement` tolerate
+  // *label operands* (see `isLabelOperand`) where a set is expected:
+  // olympiad geometry uses `P = AC \cap BD` (lines through points) and group
+  // theory uses `x \in G \setminus H`, `|H \cap xH|`. Such expressions stay
+  // inert instead of flagging `incompatible-type`.
+
   Complement: {
     // Return the elements of the first argument that are not in any of
     // the subsequent sets
@@ -903,12 +924,11 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       const transformedArgs = args.map((arg) =>
         listToIntervalInSetContext(ce, arg)
       );
-      const validatedArgs =
-        validateArguments(
-          ce,
-          flatten(transformedArgs, 'Intersection'),
-          parseType('(set+) -> set')
-        ) ?? transformedArgs;
+      const validatedArgs = validateSetArguments(
+        ce,
+        flatten(transformedArgs, 'Intersection'),
+        '(set+) -> set'
+      );
       return ce._fn('Intersection', validatedArgs);
     },
     evaluate: intersection,
@@ -935,12 +955,11 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       const transformedArgs = args.map((arg) =>
         listToIntervalInSetContext(ce, arg)
       );
-      const validatedArgs =
-        validateArguments(
-          ce,
-          flatten(transformedArgs, 'Union'),
-          parseType('(collection+) -> set')
-        ) ?? transformedArgs;
+      const validatedArgs = validateSetArguments(
+        ce,
+        flatten(transformedArgs, 'Union'),
+        '(collection+) -> set'
+      );
       // Even if there is only one argument, we still need to call Union
       // to canonicalize the argument, since it may not be a set (it could
       // be a collection)
@@ -982,6 +1001,15 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     signature: '(set, value*) -> set',
     description:
       'Return the set difference between the first set and subsequent values.',
+    canonical: (args, { engine: ce }) => {
+      // Label tolerance (`G \setminus H`, `G \setminus \{e\}`): without
+      // this handler, generic signature validation rejects a label first
+      // operand (e.g. `G`, the gravitational constant, types finite_real).
+      return ce._fn(
+        'SetMinus',
+        validateSetArguments(ce, args, '(set, value*) -> set')
+      );
+    },
     evaluate: setMinus,
     collection: {
       // Three-valued: `x ∈ col ∧ ¬excluded(v1, x) ∧ …` with Kleene
@@ -1094,10 +1122,16 @@ function union(
 function intersection(
   ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): Expression {
-  // @fixme: need to account for eager/lazy collections. See Union
-  const firstOps = isFunction(ops[0]) ? ops[0].ops : [];
-  let elements: Expression[] = [...firstOps];
+): Expression | undefined {
+  // Stay symbolic unless every operand is a collection and the first is
+  // finite and enumerable (mirrors `union`/`setMinus`). Folding unknown
+  // symbols or tolerated label operands (`H \cap K`, `AC \cap BD`) to
+  // literal elements produced a spurious `EmptySet`, as did an infinite
+  // first operand (`Intersection(Integers, Set(1,2))`).
+  if (!ops.every((op) => op.isCollection)) return undefined;
+  const first = ops[0];
+  if (first.isFiniteCollection !== true) return undefined;
+  if ((first.count ?? Infinity) > MAX_SIZE_EAGER_COLLECTION) return undefined;
 
   // Remove elements that are not in all the other sets. Use `.contains()`
   // (not `isFiniteIndexedCollection` + `.each()`) since a `Set` is a finite
@@ -1107,17 +1141,74 @@ function intersection(
   // (never matching), so e.g. `Intersection(Set(1,2), Set(2))` always
   // produced `EmptySet`. `.contains()` also works for non-indexed and
   // infinite collections (e.g. `Integers`) without enumerating them.
-  for (const op of ops.slice(1)) {
-    if (op.isCollection) {
-      elements = elements.filter((element) => op.contains(element) === true);
-    } else {
-      // Not a collection, assume it's a collection made of this single element
-      elements = elements.filter((element) => element.isSame(op));
-    }
-  }
+  let elements = [...first.each()];
+  for (const op of ops.slice(1))
+    elements = elements.filter((element) => op.contains(element) === true);
 
   if (elements.length === 0) return ce.symbol('EmptySet');
   return ce._fn('Set', elements);
+}
+
+/**
+ * A *label operand*: a symbol conventionally naming a geometric object or a
+ * group — a single letter, optionally subscripted or primed (`G`, `K_a`,
+ * `C_1`, `B'`) — or an implicit product of such symbols (`AC`, `xH`,
+ * `CC_1`). Set operations tolerate these where a set is expected so that
+ * olympiad geometry (`P = AC \cap BD`) and group theory
+ * (`x \in G \setminus H`) stay inert instead of flagging
+ * `incompatible-type`. A *bare* operand must start with an uppercase letter
+ * (`G`, `K_a`); inside a product any single-letter symbols qualify (`xH`).
+ */
+// Some single-letter glyphs bind to well-known constants at parse time
+// (`G` → CatalanConstant, `e` → ExponentialE, `i` → ImaginaryUnit). In a
+// label context those glyphs still name points or groups, so map the
+// constant back to its glyph for the label test.
+const CONSTANT_GLYPHS: Record<string, string> = {
+  CatalanConstant: 'G',
+  ExponentialE: 'e',
+  ImaginaryUnit: 'i',
+};
+
+function labelSymbolName(x: Expression): string | null {
+  if (isFunction(x) && x.operator === 'Prime') return labelSymbolName(x.ops[0]);
+  const s = sym(x);
+  if (!s) return null;
+  const glyph = CONSTANT_GLYPHS[s];
+  if (glyph !== undefined) return glyph;
+  return /^[a-zA-Z](_.*)?$/.test(s) ? s : null;
+}
+
+function isLabelOperand(expr: Expression): boolean {
+  if (
+    isFunction(expr) &&
+    (expr.operator === 'Multiply' || expr.operator === 'InvisibleOperator')
+  ) {
+    // A product label needs at least one uppercase letter (`AC`, `xH`,
+    // `CC_1`): an all-lowercase run such as `kstr` is a genuine type error
+    // (see tier4-structural.test.ts), not a geometry/group label.
+    const names = expr.ops.map(labelSymbolName);
+    return (
+      expr.ops.length >= 2 &&
+      names.every((n) => n !== null) &&
+      names.some((n) => /^[A-Z]/.test(n!))
+    );
+  }
+  const name = labelSymbolName(expr);
+  return name !== null && /^[A-Z]/.test(name);
+}
+
+/** Validate `args` against `signature`, but keep label operands (see
+ * `isLabelOperand`) as-is where validation flagged them. */
+function validateSetArguments(
+  ce: ComputeEngine,
+  args: ReadonlyArray<Expression>,
+  signature: string
+): ReadonlyArray<Expression> {
+  const validated = validateArguments(ce, args, parseType(signature));
+  if (!validated) return args;
+  return validated.map((v, i) =>
+    !v.isValid && isLabelOperand(args[i]) ? args[i] : v
+  );
 }
 
 /** A trailing SetMinus operand excludes its *members* when it is itself a

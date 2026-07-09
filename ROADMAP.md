@@ -102,32 +102,40 @@ scipy is installed in `./venv`.
 - Bare `O(…)` parsing deferred (design doc §8 Q3); revisit for lenient mode
   once the parser work settles.
 
-**MathNet parser tail (S/M, from the 2026-07-04 fresh-sample sweep and later
-1,600-row shifted sample):**
+**MathNet parser tail (S/M; corpus at 350/428 after the 2026-07-09 round —
+trailing-`?`/`\ldots` recovery, Unicode `±`/`∓`/`ℓ`, un-applied-operator
+devolution (`N`, `D`), `\measuredangle`/`\Varangle`, decorated operators
+(`\oplus` → `CirclePlus`, …), structure tuples `(A,+,\cdot)`, and the
+geometry `\cap` label tolerance all landed):**
 
-- **Trailing question mark recovery (S):** extend the existing trailing
-  punctuation fallback from `.`, `,`, `;` to complete expressions ending in
-  `?` (for example MCQ/rhetorical fragments such as
-  `\sum_{n=1}^{100} a_n^2?`). This is the cheapest and lowest-risk follow-up.
 - **Polynomial-ring notation (M):** parse blackboard-bold rings followed by a
   bracketed variable list, e.g. `\mathbb{Z}[x]`, `\mathbb{R}[X,Y]`, as an
   inert/structural algebraic object instead of treating `[...]` as indexing.
-- **Geometry intersection idiom (M):** tolerate olympiad geometry expressions
-  such as `P = AC \cap BD` and `\{F\} = DI \cap AM`, where `\cap` denotes the
-  intersection of named lines/segments rather than set intersection over
-  numeric implicit-products.
 - **Set-image bracket notation audit (S/M):** `f[S]` is parser-clean today as
   `At(f, S)`; decide whether set contexts need a distinct structural
   function-image head for expressions such as
   `f[\operatorname{divs}(m)] = \operatorname{divs}(n)`.
-- **Additional notation tail (S/M):** the larger shifted sample added
-  representative regressions for `\Varangle`/`\measuredangle`, `\circledast`
-  and `\star`, `\geqslant`, uppercase geometry-label arithmetic (`AB \times
-  CD`, `MA + MB + MC + MD`), built-in symbol collisions (`N`, `D`, `\omega`),
-  matrix-operator typing (`\det(A+2B)`), and richer `array`/`cases` variants.
+- **Sequence-braces notation (M):** `\{a_n\}_{n=1}^{\infty}` — subscripted /
+  superscripted braces denoting a sequence; currently the sub/superscript on
+  the `Set` flags `incompatible-type` (3 corpus cases, 2026-07-09 sample).
+- **Trailing qualifier clauses (S/M):** recurrence definitions ending in
+  `\quad \text{for } n \ge 2.` — parse the `\text{for}` clause as a
+  condition (the English `\text{and}` connective already parses; `for` and
+  `where` do not).
+- **Trailing equation labels (S):** strip a trailing `\quad (2)`,
+  `\quad (\text{Attribution})`, or `\textcircled{1}` tag on the error path,
+  like the trailing-punctuation recovery.
+- **Subscripted-relation sets (S):** `\mathbb{N}_{\geqslant 0}` and friends.
+- **Greek capital labels (S):** `\Pi` has no symbol entry (name collides
+  with the `Pi` constant), so plane labels like `\Sigma T \parallel \Pi P`
+  fail; needs a distinct symbol name for the glyph.
+- **Matrix-operator typing (M):** `\det(A+2B)` — `Add` infers its symbols
+  `real` before `Det` sees them; inference-ordering problem.
 
 Still deferred: ASCII-pipe divisibility (`p|a+1`) because it conflicts with
-absolute-value syntax; set arithmetic such as `2\mathbb{Z}+1`; prose-heavy or
+absolute-value syntax (though the parenthesized form `(a+f(b)) | (a^2+bf(a))`
+is unambiguous and could be revisited); set arithmetic such as
+`2\mathbb{Z}+1`; richer `array`/`cases` environment variants; prose-heavy or
 fragment-boundary inputs that need surrounding natural-language context.
 
 **Uncertainty/Measurement residue** (MVP landed 2026-07-07; design + phased

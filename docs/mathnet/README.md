@@ -18,7 +18,7 @@ modeling).
 | [mathnet-characterization.md](./mathnet-characterization.md) | Dataset statistics (3,100-row sample): topics, answer formats, best/worst-case examples |
 | [ce-mathnet-experiment.md](./ce-mathnet-experiment.md) | The three CE experiments: fragment parse sweep, `final_answer` sweep, 10 end-to-end case studies |
 | [parser-hardening-plan.md](./parser-hardening-plan.md) | Ranked work plan derived from the findings |
-| [parser-test-cases.json](./parser-test-cases.json) | **Curated regression corpus**: 345 originally failing LaTeX fragments + 68 follow-up fragments + 19 failing answer strings, categorized (captured on v0.67.0 plus follow-ups) |
+| [parser-test-cases.json](./parser-test-cases.json) | **Curated regression corpus**: 345 originally failing LaTeX fragments + 83 follow-up fragments + 19 failing answer strings, categorized (captured on v0.67.0 plus follow-ups) |
 | [scripts/](./scripts/) | Regeneration + progress-check scripts (below) |
 
 The bulky intermediate data (row samples, full sweep results, ~9 MB of JSONL)
@@ -37,7 +37,7 @@ Every original corpus case failed when captured; the appended fresh-sample
 follow-up cases record newly observed gaps from later validation. A case is
 *fixed* when `ce.parse()` returns a valid expression with no `Error`
 subexpression and no throw. Baseline at original capture: 3/345 fragments
-pass, 9 throws. The expanded local corpus currently contains 413 fragments.
+pass, 9 throws. The expanded local corpus currently contains 428 fragments.
 Each entry's `observed` field records the parser outcome as of `lastChecked`
 and is an enforced contract: the checker lists improvements (recorded failing,
 now clean), error-code changes, and **regressions** (recorded clean, now
@@ -48,8 +48,8 @@ free-symbol type inference from one fragment contaminate another's parse,
 under-counting fixes.
 
 State after the 2026-07-04 hardening (Tiers 1–4): **265/345**, throws 0.
-Current local state after later follow-ups and the appended fresh-sample tail:
-**320/413** fragments and **14/19** answer strings, throws 0. See the Status note in
+Current local state after later follow-ups and the appended fresh-sample tails:
+**350/428** fragments and **14/19** answer strings, throws 0. See the Status note in
 [parser-hardening-plan.md](./parser-hardening-plan.md) for the original pass.
 
 **Independent validation:** a fresh 800-row sample (offsets disjoint from
@@ -63,6 +63,14 @@ newly-observed gap types:
 found 165 parse errors and 0 throws; 57 representative new failures were
 appended to the local corpus. The raw sample and sweep outputs are not checked
 in.
+
+**2026-07-09 sample:** another 1,600-row disjoint sample
+(`--pages 16 --offset-shift 2600`, 4,195 unique fragments) measured **97.64%
+clean** (4,096/4,195), 0 throws, after the un-applied-operator devolution,
+trailing-ellipsis recovery, and set label tolerance landed. 15 representative
+new failures were appended (categories: `sequence-braces`,
+`trailing-qualifier`, `trailing-label`, `set-relation-subscript`,
+`greek-capital`, plus divisibility/arc variants).
 
 ## Regenerating from scratch
 

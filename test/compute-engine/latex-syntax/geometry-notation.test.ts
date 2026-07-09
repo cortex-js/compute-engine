@@ -55,8 +55,22 @@ describe('Angle mark (\\angle / \\varangle / ∠)', () => {
     expect(json('\\varangle X Y Z')).toEqual(['Angle', 'X', 'Y', 'Z']);
   });
 
+  test('\\measuredangle and \\Varangle fold onto the Angle head', () => {
+    expect(json('\\measuredangle O_1 O O_2')).toEqual([
+      'Angle',
+      'O_1',
+      'O',
+      'O_2',
+    ]);
+    expect(json('\\Varangle ACM')).toEqual(['Angle', 'A', 'C', 'M']);
+  });
+
   test('Unicode ∠ (U+2220) is the same as \\angle', () => {
     expect(json('∠ABC')).toEqual(['Angle', 'A', 'B', 'C']);
+  });
+
+  test('Unicode ∡ (U+2221) is the same as \\measuredangle', () => {
+    expect(json('∡ABC')).toEqual(['Angle', 'A', 'B', 'C']);
   });
 
   test('capture stops at relational operators', () => {

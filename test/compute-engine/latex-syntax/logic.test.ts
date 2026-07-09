@@ -537,18 +537,21 @@ describe('Logic', () => {
   });
 
   it('should parse XOR', () => {
+    // `\veebar` is the XOR trigger. `\oplus` deliberately parses to the
+    // inert `CirclePlus` head instead: in algebraic sources it denotes a
+    // custom binary operation, and parsing it as `Xor` would infer boolean
+    // types for its operands. Logic consumers can map CirclePlus → Xor.
+    expect(ce.parse('p \\veebar q').json).toMatchInlineSnapshot(`
+      [
+        Xor,
+        p,
+        q,
+      ]
+    `);
     expect(ce.parse('p \\oplus q').json).toMatchInlineSnapshot(`
       [
-        Tuple,
+        CirclePlus,
         p,
-        [
-          Error,
-          'unexpected-command',
-          [
-            LatexString,
-            '\\oplus',
-          ],
-        ],
         q,
       ]
     `);

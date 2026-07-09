@@ -134,6 +134,52 @@ describe('MathNet Tier-2: trailing sentence-punctuation recovery', () => {
   });
 });
 
+describe('Algebraic-structure tuples (bare operators as elements)', () => {
+  test('(A, +) and (K, +, \\cdot) parse with inert operation names', () => {
+    expect(ce.parse('(A,+)').json).toEqual(['Tuple', 'A', 'Add']);
+    expect(ce.parse('(K, +, \\cdot)').json).toEqual([
+      'Tuple',
+      'K',
+      'Add',
+      'Multiply',
+    ]);
+  });
+
+  test('recovery requires the operator to be bare', () => {
+    // `+b` is a normal prefixed element, not a bare operator
+    expect(ce.parse('(a, +b)').json).toEqual(['Tuple', 'a', 'b']);
+    expect(ce.parse('f(x, -y)').json).toEqual(['f', 'x', ['Negate', 'y']]);
+  });
+});
+
+describe('Decorated binary operators parse to inert heads', () => {
+  test('\\oplus / \\otimes / \\star / \\circledast', () => {
+    expect(ce.parse('a \\oplus b').json).toEqual(['CirclePlus', 'a', 'b']);
+    expect(ce.parse('a \\otimes b \\otimes c').json).toEqual([
+      'CircleTimes',
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(ce.parse('x \\star y').json).toEqual(['Star', 'x', 'y']);
+    expect(ce.parse('(2+3) \\circledast (0+3)').json).toEqual([
+      'CircledAst',
+      5,
+      3,
+    ]);
+  });
+
+  test('round-trip serialization', () => {
+    expect(ce.parse('a \\oplus b').latex).toBe('a\\oplus b');
+    expect(ce.parse('x \\star y').latex).toBe('x\\star y');
+  });
+
+  test('existing \\star spellings are unaffected', () => {
+    expect(ce.parse('A^\\star').json).toEqual(['ConjugateTranspose', 'A']);
+    expect(ce.parse('x \\star\\star y').json).toEqual(['Starstar', 'x', 'y']);
+  });
+});
+
 describe('MathNet Tier-2: non-regression guards', () => {
   test('`5.` still parses as the number 5', () => {
     expect(ce.parse('5.').json).toEqual(5);
@@ -156,12 +202,13 @@ describe('MathNet Tier-2: non-regression guards', () => {
   });
 
   test('recovery does not fire when the stripped parse is still an Error', () => {
-    // `(A,+) .` is blocked by the operator-in-tuple, not by the trailing
-    // period, so recovery must NOT silently substitute a still-broken parse.
-    // The result keeps its Error (no change of meaning).
-    // (The former fixture `M=N+1 .` no longer applies: bare `N` devolves to
-    // a plain symbol — see unapplied-operator-fallback.test.ts.)
-    expect(JSON.stringify(ce.parse('(A,+) .').json)).toContain('Error');
-    expect(JSON.stringify(ce.parse('(A,+)').json)).toContain('Error');
+    // `26 = .` is blocked by the missing right-hand side, not by the
+    // trailing period, so recovery must NOT silently substitute a
+    // still-broken parse. The result keeps its Error (no change of meaning).
+    // (Former fixtures `M=N+1 .` and `(A,+) .` no longer apply: bare `N`
+    // devolves to a plain symbol, and bare operators are now valid tuple
+    // elements.)
+    expect(JSON.stringify(ce.parse('26 = .').json)).toContain('Error');
+    expect(JSON.stringify(ce.parse('26 =').json)).toContain('Error');
   });
 });

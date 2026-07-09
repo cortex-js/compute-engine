@@ -1850,6 +1850,95 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: MULTIPLICATION_PRECEDENCE,
     parse: 'Multiply',
   },
+  // --- Decorated binary operators (inert heads) ---
+  // `\oplus`, `\otimes`, `\star`, `\circledast`, ... conventionally denote a
+  // *custom* binary operation (group/ring constructions, convolutions,
+  // competition-defined operators). They parse to inert structural heads
+  // (CirclePlus, CircleTimes, Star, ... — MathML/Mathematica naming) that are
+  // not evaluated; consumers or `ce.assign` give them meaning.
+  {
+    name: 'CirclePlus',
+    latexTrigger: ['\\oplus'],
+    kind: 'infix',
+    associativity: 'any',
+    precedence: ADDITION_PRECEDENCE,
+  },
+  {
+    latexTrigger: ['⊕'], // U+2295 CIRCLED PLUS
+    kind: 'infix',
+    associativity: 'any',
+    precedence: ADDITION_PRECEDENCE,
+    parse: 'CirclePlus',
+  },
+  {
+    name: 'CircleMinus',
+    latexTrigger: ['\\ominus'],
+    kind: 'infix',
+    precedence: ADDITION_PRECEDENCE,
+  },
+  {
+    latexTrigger: ['⊖'], // U+2296 CIRCLED MINUS
+    kind: 'infix',
+    precedence: ADDITION_PRECEDENCE,
+    parse: 'CircleMinus',
+  },
+  {
+    name: 'CircleTimes',
+    latexTrigger: ['\\otimes'],
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+  },
+  {
+    latexTrigger: ['⊗'], // U+2297 CIRCLED TIMES
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+    parse: 'CircleTimes',
+  },
+  {
+    name: 'CircleDot',
+    latexTrigger: ['\\odot'],
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+  },
+  {
+    latexTrigger: ['⊙'], // U+2299 CIRCLED DOT OPERATOR
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+    parse: 'CircleDot',
+  },
+  {
+    name: 'CircledAst',
+    latexTrigger: ['\\circledast'],
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+  },
+  {
+    latexTrigger: ['⊛'], // U+229B CIRCLED ASTERISK OPERATOR
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+    parse: 'CircledAst',
+  },
+  {
+    name: 'Star',
+    latexTrigger: ['\\star'],
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+  },
+  {
+    latexTrigger: ['⋆'], // U+22C6 STAR OPERATOR
+    kind: 'infix',
+    associativity: 'any',
+    precedence: MULTIPLICATION_PRECEDENCE,
+    parse: 'Star',
+  },
+
   {
     latexTrigger: ['⋅'], // ⋅ U+22C5 DOT OPERATOR
     kind: 'infix',

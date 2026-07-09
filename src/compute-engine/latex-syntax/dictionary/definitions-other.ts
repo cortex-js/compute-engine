@@ -790,9 +790,29 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     precedence: COMPARISON_PRECEDENCE,
     parse: parseGeometryMark('Angle'),
   },
-  // Unicode `∠` (U+2220) — same as `\angle`.
+  // `\measuredangle` (AMS) and `\Varangle` (marvosym/European sources) are
+  // further variant angle glyphs; also folded onto `Angle`.
+  {
+    latexTrigger: ['\\measuredangle'],
+    kind: 'prefix',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: parseGeometryMark('Angle'),
+  },
+  {
+    latexTrigger: ['\\Varangle'],
+    kind: 'prefix',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: parseGeometryMark('Angle'),
+  },
+  // Unicode `∠` (U+2220) and `∡` (U+2221 MEASURED ANGLE) — same as `\angle`.
   {
     latexTrigger: ['∠'],
+    kind: 'prefix',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: parseGeometryMark('Angle'),
+  },
+  {
+    latexTrigger: ['∡'],
     kind: 'prefix',
     precedence: COMPARISON_PRECEDENCE,
     parse: parseGeometryMark('Angle'),

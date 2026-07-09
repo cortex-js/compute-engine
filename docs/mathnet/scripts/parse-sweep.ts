@@ -17,13 +17,17 @@ const start = parseInt(process.argv[3] ?? '0');
 const end = parseInt(process.argv[4] ?? String(inputs.length));
 const outPath = process.argv[5] ?? 'parse-results.jsonl';
 
-const ce = new ComputeEngine();
 const out = fs.openSync(outPath, start === 0 ? 'w' : 'a');
 
 for (let i = start; i < end; i++) {
   const latex = inputs[i];
   const rec: Record<string, unknown> = { i, latex };
   try {
+    // Fresh engine per input (same rationale as check-corpus.ts): symbol
+    // type inference and the un-applied-operator devolution are
+    // scope-persistent, so a shared engine lets one fragment contaminate
+    // another's parse.
+    const ce = new ComputeEngine();
     const expr = ce.parse(latex);
     const json = JSON.stringify(expr.json);
     const hasError = json.includes('"Error"');

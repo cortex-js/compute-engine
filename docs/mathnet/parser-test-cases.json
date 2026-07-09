@@ -1186,17 +1186,17 @@
   {
    "latex": "(A,+)",
    "category": "other",
-   "observed": "'unexpected-delimiter'"
+   "observed": "clean"
   },
   {
    "latex": "(A,+, \\cdot)",
    "category": "other",
-   "observed": "'unexpected-delimiter'"
+   "observed": "clean"
   },
   {
    "latex": "(K, +, \\cdot)",
    "category": "other",
-   "observed": "'unexpected-delimiter'"
+   "observed": "clean"
   },
   {
    "latex": ". Let",
@@ -1361,7 +1361,7 @@
   {
    "latex": "(\\mathbb{Z}_n, +, \\cdot)",
    "category": "sets-and-congruence",
-   "observed": "'unexpected-delimiter'"
+   "observed": "clean"
   },
   {
    "latex": "2 \\mathbb{Z} + 1",
@@ -1386,32 +1386,32 @@
   {
    "latex": "AH \\cap CE = \\{K\\}",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "EG \\cap HF = \\{O\\}",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "GH \\cap EF = \\{M\\}",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "K_{a} \\notin BC",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "K_{b} \\notin AC",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "K_{c} \\notin AB",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "M=\\{f: \\mathbb{R} \\rightarrow \\mathbb{R} \\mid f(2 f(x)+x)+f(x)=4 x-4\\}",
@@ -1421,17 +1421,17 @@
   {
    "latex": "P = AC \\cap BD",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "X = AM \\cap BP",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "Y = BN \\cap AQ",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "\\left(\\square_{1}, \\square_{2}\\right) \\in \\{\\cup, \\cap\\}^{2}",
@@ -1807,19 +1807,19 @@
   {
    "latex": "P = AC \\cap BD",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "fresh-sweep-report.md"
   },
   {
    "latex": "A_1 = AO \\cap SBC",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "fresh-sweep-report.md"
   },
   {
    "latex": "\\{F\\} = DI \\cap AM",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "fresh-sweep-report.md"
   },
   {
@@ -1867,13 +1867,13 @@
   {
    "latex": "(2+3) \\circledast (0+3)",
    "category": "new-command-notation",
-   "observed": "'unexpected-command'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
    "latex": "C \\star C' = \\{x \\mid x \\in (C - C') \\cup (C' - C)\\}.",
    "category": "new-command-notation",
-   "observed": "'unexpected-command'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -1885,7 +1885,7 @@
   {
    "latex": "\\Varangle ACM = \\Varangle BCD",
    "category": "new-command-notation",
-   "observed": "'unexpected-command'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -1897,7 +1897,7 @@
   {
    "latex": "\\measuredangle O_{1} O O_{2}=45^{\\circ}",
    "category": "new-command-notation",
-   "observed": "'unexpected-command'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -1909,7 +1909,7 @@
   {
    "latex": "A \\cap f(A) \\neq \\emptyset",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -1921,7 +1921,7 @@
   {
    "latex": "B \\cup f(B) = X",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -1951,49 +1951,49 @@
   {
    "latex": "BD \\cap AC = \\{E\\}",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
    "latex": "BE \\cap CF = \\{I\\}",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
    "latex": "CD \\cap AB = \\{F\\}",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
    "latex": "K = AC \\cap EG",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
    "latex": "KB \\cap CC_1 = \\{L\\}",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
    "latex": "L = AB \\cap IH",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
    "latex": "M = IB \\cap GC",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
    "latex": "N = IL \\cap GK",
    "category": "geometry-intersection",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -2175,6 +2175,96 @@
    "category": "other-fresh-sample",
    "observed": "'unexpected-command'",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\{a_n\\}_{n=1}^{\\infty}",
+   "category": "sequence-braces",
+   "observed": "'incompatible-type'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "\\{x_{n}\\}_{n=1}^{\\infty}",
+   "category": "sequence-braces",
+   "observed": "'incompatible-type'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "\\{c_i = a_i + b_{i+s}\\}_{i=1}^m",
+   "category": "sequence-braces",
+   "observed": "'incompatible-type'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "u_0 = 0,\\ u_1 = 1,\\ u_n = 2011u_{n-1} - u_{n-2} \\quad \\text{for } n \\ge 2.",
+   "category": "trailing-qualifier",
+   "observed": "'unexpected-operator'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "x_1 = a, \\quad x_2 = b, \\quad x_n = \\frac{x_{n-1}^2 + x_{n-2}^2}{x_{n-1} + x_{n-2}} \\quad \\text{for } n \\ge 3.",
+   "category": "trailing-qualifier",
+   "observed": "'unexpected-operator'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "a_0 = 1, \\quad a_1 = 3, \\quad \\text{and} \\quad a_{n+1} = a_n + a_{n-1} \\quad \\text{for all } n \\ge 1.",
+   "category": "trailing-qualifier",
+   "observed": "'incompatible-type'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "f(x + y) = f(x) + f(y), \\forall x, y \\in \\mathbb{R}. \\quad (2)",
+   "category": "trailing-label",
+   "observed": "'unexpected-operator'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "\\frac{2 \\sin^2 x + 2}{\\sin x + 1} = 3 + \\cos (x + y). \\quad (\\text{Petar Bakić})",
+   "category": "trailing-label",
+   "observed": "'unexpected-operator'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "f(x) + f(y) + 2xyf(xy) = \\frac{f(xy)}{f(x+y)}, \\qquad \\textcircled{1}",
+   "category": "trailing-label",
+   "observed": "'unexpected-command'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "\\mathbb{N}_{\\geqslant 0}",
+   "category": "set-relation-subscript",
+   "observed": "'unexpected-command'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "f: \\mathbb{N}_{\\geqslant 1} \\mapsto \\mathbb{N}_{\\geqslant 0}",
+   "category": "set-relation-subscript",
+   "observed": "'unexpected-command'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "\\Sigma T \\parallel \\Pi P",
+   "category": "greek-capital",
+   "observed": "'unexpected-command'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "(a + f(b)) | (a^2 + b f(a))",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-delimiter'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "2^k|n - s",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-delimiter'",
+   "source": "sample-2600 sweep (2026-07-09)"
+  },
+  {
+   "latex": "\\widearc{BC}",
+   "category": "geometry-notation",
+   "observed": "'unexpected-command'",
+   "source": "sample-2600 sweep (2026-07-09)"
   }
  ],
  "unicodeAnswers": [

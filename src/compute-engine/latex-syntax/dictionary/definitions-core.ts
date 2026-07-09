@@ -1,4 +1,7 @@
-import { MathJsonExpression } from '../../../math-json/types.js';
+import {
+  MathJsonExpression,
+  MathJsonSymbol,
+} from '../../../math-json/types.js';
 import {
   machineValue,
   mapArgs,
@@ -170,6 +173,42 @@ function parseWhenRestriction(
 //   );
 // }
 
+// Algebraic-structure notation (`(A, +)`, `(K, +, \cdot)`,
+// `(\mathbb{Z}_n, +, \cdot)`) lists *operators* as sequence elements. A bare
+// operator token in element position is not parseable as an expression, so
+// tolerate it as an inert symbol naming the operation — but only when it is
+// immediately followed by the separator or the end of the sequence, which is
+// always an error today (no valid input changes meaning).
+const BARE_OPERATOR_ELEMENTS: Record<string, MathJsonSymbol> = {
+  '+': 'Add',
+  '-': 'Subtract',
+  '*': 'Multiply',
+  '\\cdot': 'Multiply',
+  '\\times': 'Multiply',
+  '\\circ': 'Ring',
+  '\\cup': 'Union',
+  '\\cap': 'Intersection',
+  '\\oplus': 'CirclePlus',
+  '\\otimes': 'CircleTimes',
+  '\\star': 'Star',
+};
+
+function parseBareOperatorElement(
+  parser: Parser,
+  terminator: Readonly<Terminator> | undefined,
+  sep: string
+): MathJsonSymbol | null {
+  const name = BARE_OPERATOR_ELEMENTS[parser.peek];
+  if (name === undefined) return null;
+  const start = parser.index;
+  parser.nextToken();
+  parser.skipSpace();
+  if (parser.peek === sep || parser.atTerminator(terminator)) return name;
+  // Not a bare operator (e.g. `(A, +B)`): backtrack and parse normally
+  parser.index = start;
+  return null;
+}
+
 /**
  * Parse a sequence of expressions separated with `sep`
  */
@@ -208,10 +247,16 @@ function parseSequence(
     if (parser.atTerminator(terminator)) {
       result.push('Nothing');
     } else {
-      const rhs = parser.parseExpression({ ...terminator, minPrec: prec });
-      if (rhs !== null) push(rhs);
-      else result.push('Nothing');
-      done = rhs === null;
+      const bareOp = parseBareOperatorElement(parser, terminator, sep);
+      if (bareOp !== null) {
+        result.push(bareOp);
+        done = false;
+      } else {
+        const rhs = parser.parseExpression({ ...terminator, minPrec: prec });
+        if (rhs !== null) push(rhs);
+        else result.push('Nothing');
+        done = rhs === null;
+      }
     }
     if (!done) {
       parser.skipSpace();
