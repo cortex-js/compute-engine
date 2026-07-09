@@ -18,6 +18,11 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
+console.log(ce.parse('\\operatorname{Solve}(x^2+2x+1, x)').evaluate().json);
+
+console.log(ce.assign('n', 12));
+console.log(ce.parse('12 \\triangleright \\ln').evaluate().json);
+
 console.log(ce.parse('\\int_a^b f(x)\\mathrm{d}x').evaluate().json);
 
 // =============================================================================

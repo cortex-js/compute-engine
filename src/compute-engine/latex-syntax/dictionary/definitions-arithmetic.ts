@@ -83,9 +83,12 @@ function parseRoot(parser: Parser): MathJsonExpression | null {
   const degree = parser.parseOptionalGroup();
   const base = parser.parseGroup() ?? parser.parseToken();
   if (isEmptySequence(base)) {
+    // No radicand and no degree: a bare function symbol (`12 |> \sqrt` → `Sqrt`),
+    // matching the behavior of `\ln`, `\lg` and `\cos`. A degree with no
+    // radicand (e.g. `\sqrt[3]`) is still genuinely malformed.
+    if (degree === null) return 'Sqrt' as MathJsonExpression;
     const missing = parser.error('missing', parser.index);
-    if (degree !== null) return ['Root', missing, missingIfEmpty(degree)];
-    return ['Sqrt', missing];
+    return ['Root', missing, missingIfEmpty(degree)];
   }
   if (degree !== null) return ['Root', base, degree];
   return ['Sqrt', base];
@@ -1657,7 +1660,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Lg',
     latexTrigger: ['\\lg'],
     serialize: (serializer, expr) =>
-      '\\log_{10}' + serializer.wrapArguments(expr),
+      symbol(expr) !== null
+        ? '\\lg'
+        : '\\log_{10}' + serializer.wrapArguments(expr),
     parse: (parser: Parser) => {
       const sup = parseFunctionSup(parser);
       const args = parser.parseArguments('implicit');
@@ -1686,13 +1691,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Ln',
     latexTrigger: ['\\ln'],
     parse: (parser: Parser) => parseLog('Ln', parser),
-    serialize: (serializer, expr) => '\\ln' + serializer.wrapArguments(expr),
+    serialize: (serializer, expr) =>
+      symbol(expr) !== null ? '\\ln' : '\\ln' + serializer.wrapArguments(expr),
   },
   {
     name: 'Log',
     latexTrigger: ['\\log'],
     parse: (parser: Parser) => parseLog('Log', parser),
     serialize: (serializer, expr) => {
+      if (symbol(expr) !== null) return '\\log';
       const [body, base] = operands(expr)!;
       if (!base) return '\\log' + serializer.wrapArguments(expr);
 
@@ -2709,9 +2716,11 @@ function parseLog(command: string, parser: Parser): MathJsonExpression | null {
 
   const args = parser.parseArguments('implicit');
 
+  // No argument and no base: a bare function symbol (`12 |> \ln` → `Ln`),
+  // matching the behavior of `\cos`, `\lg` and `\lb`.
   if (args === null && sub === null)
     return sup === null
-      ? ([command] as MathJsonExpression)
+      ? (command as MathJsonExpression)
       : (['Power', command, sup] as MathJsonExpression);
   if (args === null)
     return sup === null

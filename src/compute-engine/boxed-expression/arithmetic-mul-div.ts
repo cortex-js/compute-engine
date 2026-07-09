@@ -665,6 +665,12 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     if (op1Tuple || op2Tuple) {
       // A tuple divisor has no defined reciprocal (no implicit dot/cross).
       if (op2Tuple) return ce.error(['incompatible-type', 'number', 'tuple']);
+      // Strip trivial divisors: the generic a/1 rule below is unreachable
+      // from this branch, and an inert Divide(tuple-typed, 1) sends the
+      // pretty-JSON serializer into infinite recursion (Multiply →
+      // asRationalExpression → Divide(same Multiply, 1) → …).
+      if (op2.isSame(1)) return op1;
+      if (op2.isSame(-1)) return op1.neg();
       // `tuple / scalar`: scale each component when the divisor is provably a
       // scalar number and the components are accessible; else stay symbolic.
       if (

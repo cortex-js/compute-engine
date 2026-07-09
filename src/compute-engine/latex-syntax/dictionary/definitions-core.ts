@@ -919,8 +919,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     precedence: 20,
     parse: 'Apply',
   },
-  // Pipeline operator: `x \rhd f` (also `x \triangleright f`, `x |> f`)
-  // applies the function on the right to the argument on the left
+  // Pipeline operator: `x \rhd f` (also `x \triangleright f`,
+  // `x \vartriangleright f`, `x |> f`) applies the function on the right to
+  // the argument on the left
   {
     latexTrigger: '\\rhd',
     kind: 'infix',
@@ -929,6 +930,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     latexTrigger: '\\triangleright',
+    kind: 'infix',
+    precedence: 20,
+    parse: parsePipeline,
+  },
+  {
+    latexTrigger: '\\vartriangleright',
     kind: 'infix',
     precedence: 20,
     parse: parsePipeline,
@@ -961,6 +968,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     latexTrigger: '\\triangleright',
+    kind: 'prefix',
+    precedence: 20,
+    parse: parsePipelinePrefix,
+  },
+  {
+    latexTrigger: '\\vartriangleright',
     kind: 'prefix',
     precedence: 20,
     parse: parsePipelinePrefix,
