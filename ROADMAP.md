@@ -126,20 +126,27 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   superscripted braces denoting a sequence; currently the sub/superscript on
   the `Set` flags `incompatible-type` (3 corpus cases, 2026-07-09 sample).
   Needs a design call on the target MathJSON shape before implementing.
-- **MATH genre-gap fixes (S/M):** the genre-coverage sweep ran 2026-07-09
-  over Hendrycks MATH (15,546 fragments incl. worked solutions across all 7
-  subjects): **95.27% clean, 0 throws** — the MathNet clean rate generalizes
-  (report: `docs/mathnet/math-genre-sweep.md`; tagged failures:
-  `math-genre-failures.json`). Ranked residual gaps, none MathNet
-  regressions: (1) `\frac` mixed-brace **bug** — `\frac1{-1}`, `\frac{900}7`
-  → `Error 'missing'` (31); (2) styling no-ops `\textbf`/`\emph`/`\mbox`/
-  `\bold` (80); (3) `\|…\|` norm (67); (4) infix `{n \choose k}` (49);
-  (5) bare `x \pmod n` without `\equiv` + `\pmod n \implies` derail (67);
-  (6) base-subscript numerals `10111_2`, `161_b` (16); (7) cheap
-  recoveries: ordinal `^{\text{th}}`, empty `^{}`, `{,}` thousands,
-  `\cancel`, `\not`, symbolic `Factorial2`. Ascii-pipe divisibility
-  evidence doubled (36 more hits). Skip: `array`-env long-division layouts,
-  `\nabla` puzzle ops.
+- **MATH genre-gap fixes (S/M; top tier EXECUTED 2026-07-09):** the
+  genre-coverage sweep ran over Hendrycks MATH (15,546 fragments incl.
+  worked solutions across all 7 subjects; report:
+  `docs/mathnet/math-genre-sweep.md`, tagged failures:
+  `math-genre-failures.json`): 95.27% clean, 0 throws — the MathNet clean
+  rate generalizes. The top five gaps then landed same day (see CHANGELOG
+  "LaTeX Parsing": `\frac`/`\binom` mixed-brace bug, styling commands,
+  `\|` norm, infix `\choose`, bare `\pmod` + `\equiv…\implies` chain),
+  taking the corpus to **97.09%** (282 of 735 failures fixed). Remaining
+  ranked tail: (1) base-subscript numerals `10111_2`, `161_b` (16) — needs
+  a design call (integer literal when base is literal vs. inert `BaseForm`
+  head); (2) cheap recoveries: ordinal `13^{\text{th}}` (13, devolve to the
+  base number), empty scripts `^{}`/`_{}` (10, drop), `{,}` thousands
+  separator (9), `\cancel`/`\cancelto` (10, unwrap), `\not` prefix (4,
+  compose negated relation), `Factorial2` symbolic signature `(2n)!!` (7);
+  (3) units-in-text arithmetic `(18 \text{ inches})/(12 \text{
+  inches/foot})` (42, overlaps the units subsystem); (4) prime-after-arg
+  `\sin a'` (13); (5) residual pmod chains (9) + styling remnants (11).
+  Ascii-pipe divisibility evidence doubled (36 more hits, tracked below).
+  Skip: `array`-env long-division layouts, `\nabla` puzzle ops, repeating
+  decimals `0.abab\overline{ab}`.
 - **Constant-definition listener disposal (S/M, residual of the engine
   memory fix):** the 2026-07-09 fix for synchronous-burst engine retention
   (see CHANGELOG) holds configuration-change listeners strongly, so a

@@ -109,6 +109,44 @@
   the two-input polynomial operators the default is inferred from both
   operands together.
 
+### LaTeX Parsing
+
+Notation coverage driven by a cross-genre corpus sweep (Hendrycks MATH,
+15,546 fragments across all seven subjects including worked solutions; see
+`docs/mathnet/math-genre-sweep.md`), which took the measured clean-parse rate
+from 95.3% to 97.1%:
+
+- **Text-styling commands.** `\textbf`, `\textit`, `\emph`, `\texttt`,
+  `\textsf`, and `\textup` parse their argument as a text run and produce an
+  `Annotated` expression with the matching style
+  (`\textbf{Sizes}` → `["Annotated", "'Sizes'", {dict: {fontWeight: "bold"}}]`)
+  that round-trips back to the same LaTeX. `\textrm` and `\mbox` parse like
+  `\text`. `\bold`, `\boldsymbol`, and `\bm` are synonyms of `\mathbf`
+  (`\bold{v}` → the symbol `v_bold`).
+
+- **Vector-norm bars.** The `\|` command is now recognized as a norm
+  delimiter everywhere `\Vert` is: `\|\mathbf{a}\|`,
+  `\left\| b \right\|`, and `\|a\|^2` all parse to `Norm`.
+
+- **TeX-primitive binomial.** The infix `{n \choose k}` form parses to
+  `Binomial(n, k)`, joining the already supported `\binom`, `\dbinom` and
+  `\tbinom`.
+
+- **Bare mod annotations.** `x \pmod n` with no preceding `\equiv` parses as
+  `Mod(x, n)` (`-811 \pmod{24}` → `["Mod", -811, 24]`), matching the
+  existing `\bmod` behavior. Congruence chains followed by an implication now
+  parse correctly:
+  `a+1 \equiv 4 \pmod 7 \implies a \equiv 3 \pmod 7` is
+  `Implies(Congruent(…), Congruent(…))` (the congruence previously
+  disintegrated when `\implies` followed the modulus). `\equiv` now binds at
+  comparison precedence, tighter than `\implies` (zero snapshot impact).
+
+- **Mixed braced/unbraced fraction and binomial arguments.** `\frac1{-1}`,
+  `\frac{900}7`, `\binom{n}k`, `\binom n{k+1}` parse correctly. Each argument
+  is now independently a group or a single token, per TeX semantics;
+  previously both arguments were forced into the style of the first, and the
+  mixed forms produced a `missing` error.
+
 ### Issues Resolved
 
 - Reading `.latex` (or `.toString()`) on the canonical, unevaluated form of a

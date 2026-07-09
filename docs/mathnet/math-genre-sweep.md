@@ -1,5 +1,15 @@
 # Genre-Coverage Sweep: Hendrycks MATH (2026-07-09)
 
+> **Status (2026-07-09, same day):** the top five ranked opportunities below
+> were implemented (`\frac`/`\binom` mixed-brace bug, styling commands, `\|`
+> norm, infix `\choose`, bare `\pmod` + congruence-chain derail — see
+> CHANGELOG "LaTeX Parsing"). Re-sweeping the 735 failing fragments: **282
+> now parse clean**, taking the corpus from 95.27% to **97.09%**
+> (15,093/15,546). Per-motif: frac-mixed-brace 31/31, norm 67/67, choose
+> 48/49, styling 69/80, bare-pmod 38/46, pmod-chain 12/21, plus 15
+> matrix-env and 14 "other" fixed incidentally. The remaining tail is
+> tracked in ROADMAP "MATH genre-gap fixes".
+
 One-off sweep answering the ROADMAP question: *does the ~97.5% clean-parse
 rate measured on MathNet generalize beyond olympiad notation?* MathNet is
 ~2% calculus/analysis with no stats or units content, so the hardening could
