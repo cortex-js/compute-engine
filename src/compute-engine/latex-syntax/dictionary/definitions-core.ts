@@ -688,7 +688,7 @@ function serializeKeyword(
 // The internal symbol a bare `\square` parses to (see the `Quadrilateral`
 // definition in definitions-other.ts). Within a pipeline it acts as the
 // topic marker / hole for the piped value.
-const PIPE_TOPIC_MARKER = 'square';
+export const PIPE_TOPIC_MARKER = 'square';
 
 // Substitute `replacement` for every topic marker in `expr`. Returns the
 // (possibly) rewritten expression and whether any marker was found.
@@ -883,8 +883,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // If no argument, or the body is a single symbol, display as a regular function
       const rhs = operand(expr, 2); // The first argument
       if (typeof lhs === 'string' || !rhs) {
-        // e.g. "Apply(f, x)" -> "f(x)"
-        const fn = operands(expr).slice(1) as unknown as MathJsonExpression;
+        // e.g. "Apply(f, x)" -> "f(x)": the operands of `Apply` — head
+        // followed by its arguments — are exactly the application expression
+        const fn = operands(expr) as unknown as MathJsonExpression;
         return serializer.serialize(fn);
       }
 

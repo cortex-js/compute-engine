@@ -70,6 +70,14 @@
   `12 \triangleright \lb` computes $\log_2 12$. It previously parsed to
   `Log`, silently computing the base-10 logarithm instead.
 
+- A log with a base but no argument (`\log_2`) now parses with the pipeline
+  topic marker `\square` standing in for the argument: `8 \triangleright
+  \log_2` fills the hole and computes $\log_2 8 = 3$ (composing with inverse
+  superscripts too: `9 \triangleright \log_3^{-1}` gives $3^9$), and a
+  standalone `\log_2` displays as $\log_2(\square)$. It previously parsed as
+  $\log_{10} 2$ — the base was read as the *argument* — so piping into it
+  silently discarded the piped value.
+
 ## 0.71.0 _2026-07-08_
 
 ### Differential Equations

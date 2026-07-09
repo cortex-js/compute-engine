@@ -28,6 +28,7 @@ import {
   EXPONENTIATION_PRECEDENCE,
 } from '../types.js';
 import { latexTemplate } from '../serializer-style.js';
+import { PIPE_TOPIC_MARKER } from './definitions-core.js';
 import { joinLatex, supsub } from '../tokenizer.js';
 import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 import { roundMeasurementForDisplay } from '../../numerics/strings.js';
@@ -2719,7 +2720,7 @@ function parseLog(command: string, parser: Parser): MathJsonExpression | null {
   // `\ln^2 x` → `(\ln x)^2`, `\ln^{-1} x` → the inverse (`exp`).
   const sup = parseFunctionSup(parser);
 
-  const args = parser.parseArguments('implicit');
+  let args = parser.parseArguments('implicit');
 
   // No argument and no base: a bare function symbol (`12 |> \ln` → `Ln`),
   // matching the behavior of `\cos`, `\lg` and `\lb`.
@@ -2727,10 +2728,11 @@ function parseLog(command: string, parser: Parser): MathJsonExpression | null {
     return sup === null
       ? (command as MathJsonExpression)
       : (['Power', command, sup] as MathJsonExpression);
-  if (args === null)
-    return sup === null
-      ? ([command, sub] as MathJsonExpression)
-      : (['Power', [command, sub], sup] as MathJsonExpression);
+
+  // A base but no argument (`\log_2`): the topic marker `\square` stands in
+  // for the argument, so a pipeline can fill it (`12 |> \log_2` → log₂ 12);
+  // standalone it displays as `\log_2(\square)`.
+  if (args === null) args = [PIPE_TOPIC_MARKER];
 
   // The natural log and the base-`b` log have well-defined inverses:
   // `\ln^{-1} x` → `exp(x)`, `\log_b^{-1} x` → `b^x` (with `b` defaulting to

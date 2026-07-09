@@ -29,6 +29,22 @@ describe('PIPELINE OPERATOR — bare function references', () => {
     expect(json('\\sqrt{}')).toBe(`["Sqrt",["Error","'missing'"]]`);
     expect(json('\\sqrt[3]')).toBe(`["Root",["Error","'missing'"],3]`);
   });
+
+  // A log with a base but no argument is not a plain symbol: the topic
+  // marker `\square` stands in for the argument, so a pipeline can fill the
+  // hole and a standalone `\log_2` displays as `\log_2(\square)`.
+  test('a based log with no argument holds a topic-marker hole', () => {
+    expect(json('\\log_2')).toBe(`["Lb","square"]`);
+    expect(json('\\log_5')).toBe(`["Log","square",5]`);
+    expect(ce.parse('\\log_2').latex).toBe('\\log_{2}(\\square)');
+  });
+
+  test('piping into a based log fills the topic-marker hole', () => {
+    expect(json('8|>\\log_2')).toBe(`["Lb",8]`);
+    expect(ce.parse('8|>\\log_2').evaluate().json).toEqual(3);
+    expect(ce.parse('9|>\\log_3^{-1}').evaluate().json).toEqual(19683);
+    expect(json('|>\\log_2')).toBe(`["Function",["Lb","_"],"_"]`);
+  });
 });
 
 describe('PIPELINE OPERATOR — infix `x |> f`', () => {
