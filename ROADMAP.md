@@ -126,13 +126,29 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   superscripted braces denoting a sequence; currently the sub/superscript on
   the `Set` flags `incompatible-type` (3 corpus cases, 2026-07-09 sample).
   Needs a design call on the target MathJSON shape before implementing.
-- **Genre-coverage sweep (S, one-off):** MathNet sampling has converged
-  (four disjoint slices, ~97.4–97.6% clean; a new slice yields only a
-  handful of new small categories) — do NOT fetch more MathNet. Instead run
-  `parse-sweep.ts` once over a different-genre corpus (e.g. Hendrycks MATH
-  solutions, arXiv equation extracts, or a physics/units problem set) to
-  test whether the clean rate generalizes beyond olympiad notation
-  (MathNet is ~2% calculus/analysis, no stats/units).
+- **MATH genre-gap fixes (S/M):** the genre-coverage sweep ran 2026-07-09
+  over Hendrycks MATH (15,546 fragments incl. worked solutions across all 7
+  subjects): **95.27% clean, 0 throws** — the MathNet clean rate generalizes
+  (report: `docs/mathnet/math-genre-sweep.md`; tagged failures:
+  `math-genre-failures.json`). Ranked residual gaps, none MathNet
+  regressions: (1) `\frac` mixed-brace **bug** — `\frac1{-1}`, `\frac{900}7`
+  → `Error 'missing'` (31); (2) styling no-ops `\textbf`/`\emph`/`\mbox`/
+  `\bold` (80); (3) `\|…\|` norm (67); (4) infix `{n \choose k}` (49);
+  (5) bare `x \pmod n` without `\equiv` + `\pmod n \implies` derail (67);
+  (6) base-subscript numerals `10111_2`, `161_b` (16); (7) cheap
+  recoveries: ordinal `^{\text{th}}`, empty `^{}`, `{,}` thousands,
+  `\cancel`, `\not`, symbolic `Factorial2`. Ascii-pipe divisibility
+  evidence doubled (36 more hits). Skip: `array`-env long-division layouts,
+  `\nabla` puzzle ops.
+- **Constant-definition listener disposal (S/M, residual of the engine
+  memory fix):** the 2026-07-09 fix for synchronous-burst engine retention
+  (see CHANGELOG) holds configuration-change listeners strongly, so a
+  `constant` definition declared in a scope that is later popped now stays
+  reachable for the engine's lifetime (variables/operators don't subscribe;
+  system constants live engine-long anyway). Proper fix: call the
+  `unsubscribe` closure returned by `listen()` (currently discarded at
+  `boxed-value-definition.ts:181`) when a definition/scope is disposed —
+  needs a disposal hook, hence design-gated.
 - **Corpus regression gate (S):** `check-corpus.ts` exits non-zero on
   regressions against the recorded `observed` outcomes — add it to the
   pre-release checklist (or CI) so 363/428 is a protected floor.

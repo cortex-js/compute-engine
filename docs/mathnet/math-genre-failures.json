@@ -1,0 +1,5957 @@
+[
+ {
+  "latex": "(",
+  "config": "algebra",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "(*)",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "(*),",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "(1152 \\text{ ft}^3)\\cdot(7.5 \\text { gallons/ft}^3)=8640 \\text{ gallons}.",
+  "config": "prealgebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "(18 \\text{ inches})/(12 \\text{ inches/foot})=1.5\\text{ feet}.",
+  "config": "prealgebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "(2i)! = (2i)!! \\cdot (2i-1)!! = 2^i \\cdot i! \\cdot (2i-1)!!",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "double-factorial"
+  ]
+ },
+ {
+  "latex": "(2i)!!",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "double-factorial"
+  ]
+ },
+ {
+  "latex": "(2i-1)!!",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "double-factorial"
+  ]
+ },
+ {
+  "latex": "(2n)!! = 2^n \\cdot n!",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "double-factorial"
+  ]
+ },
+ {
+  "latex": "(2n)!! \\cdot (2n-1)!! = (2n)!",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "double-factorial"
+  ]
+ },
+ {
+  "latex": "(8640 \\text{ gallons})/(24 \\text{ gallons/minute})=\\boxed{360}",
+  "config": "prealgebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "(9\\text{ to }80)^2 > 80",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "(\\mathbf{a} \\cdot \\mathbf{c}) \\mathbf{b} - (\\mathbf{b} \\cdot \\mathbf{c}) \\mathbf{a} = \\frac{1}{3} \\|\\mathbf{b}\\| \\|\\mathbf{c}\\| \\mathbf{a}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "(\\mathbf{a} \\cdot \\mathbf{c}) \\mathbf{b} = \\left( \\mathbf{b} \\cdot \\mathbf{c} + \\frac{1}{3} \\|\\mathbf{b}\\| \\|\\mathbf{c}\\| \\right) \\mathbf{a}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "(\\mathbf{a} \\cdot \\mathbf{c})^2 \\|\\mathbf{a}\\|^2 - 2 (\\mathbf{a} \\cdot \\mathbf{c})^2 + \\|\\mathbf{c}\\|^2 = 1.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "(\\mathbf{a} \\times \\mathbf{b}) \\times \\mathbf{c} = \\frac{1}{3} \\|\\mathbf{b}\\| \\|\\mathbf{c}\\| \\mathbf{a}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "(\\mathbf{b} \\times \\mathbf{a}) \\cdot (\\mathbf{b} \\times \\mathbf{a}) = \\|\\mathbf{b} \\times \\mathbf{a}\\|^2.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "(\\text{cos}(a\\pi)+i\\text{sin}(b\\pi))^4",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "(\\triangle+q)+q=106",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "(b,c): n \\equiv b \\pmod{12}, 0 \\le b \\le 11",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "(x + \\sqrt{2})[(x + \\sqrt{2})^2 + 1] = 0,",
+  "config": "intermediate_algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "bracket-grouping"
+  ]
+ },
+ {
+  "latex": "(x^2-6x+9)-9+(y^2+4y+4)-4+18 \\Rightarrow (x-3)^2+(y+2)^2+5",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "*",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "+",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "-",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "-1 = \\frac1{-1}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "-125=(-5)^3=\\left(x+\\frac1x\\right)^3=x^3+3x+\\frac3x+\\frac1{x^3}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "-6 = \\nabla+2",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "nabla-custom-op"
+  ]
+ },
+ {
+  "latex": "-811\\pmod{24}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "0, 1 \\pmod 4.",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "0.abab\\overline{ab}",
+  "config": "number_theory",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "0.abab\\overline{ab}+0.abcabc\\overline{abc}=\\frac{33}{37},",
+  "config": "number_theory",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "0.ababab\\dots",
+  "config": "number_theory",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "0.abcabc\\overline{abc}",
+  "config": "number_theory",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "0.abcd,",
+  "config": "number_theory",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "0^{}_{}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "empty-scripts"
+  ]
+ },
+ {
+  "latex": "1 \\pmod 7",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "1 \\pmod{16}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "1 \\pmod{p},",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "1+6n\\equiv 4\\pmod 7\\implies n\\equiv 4\\pmod 7",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "1,3,5,7,9,11,13\\pmod{14}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "1001 = 10^3 + 1 | 10^{j-i} - 1",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "1004^2=\\boxed{1{,}008{,}016}.",
+  "config": "intermediate_algebra",
+  "errCode": "'expected-closing-delimiter'",
+  "motifs": [
+   "thousands-sep"
+  ]
+ },
+ {
+  "latex": "100^\\text{th}",
+  "config": "prealgebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "10111_2-x",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "1011_2 \\cdot 101_2",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "101_2 + 11_2 + 1100_2 + 11101_2.",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "10\\cdot 901 = 9010 = 9(1001)+1 \\equiv 1\\pmod{1001}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "10\\pmod{1001}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "10^6 - 10^0, 10^7 - 10^1, \\dots\\implies 94",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "10^{-1}\\pmod{1001}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "10^{6} - 1 | 10^{6k} - 1",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "11 \\implies n = 121",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "11+9^{-1}\\pmod{25}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "11_8-3_8=6_8",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "1200\\cdot .35 = s \\cdot 2400 \\Rightarrow s = \\frac{.35}2 = \\boxed{.175}",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "120:",
+  "config": "prealgebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "1313^{\\text{th}}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "1314^{\\text{th}}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "13^{\\text{th}}",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "14 \\pmod {16}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "1492 = 1500-8 \\equiv -8\\pmod{500}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "15 \\pmod{22}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "15 \\pmod{22}?",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "15_8-7_8=6_8",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "16,3,25|k(k+1)(2k+1)",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "161_{b}+134_{b}=315_{b}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "16:",
+  "config": "prealgebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "180(7-2)/7=\\frac{900}7",
+  "config": "prealgebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "18{,}360.",
+  "config": "algebra",
+  "errCode": "'expected-closing-delimiter'",
+  "motifs": [
+   "thousands-sep"
+  ]
+ },
+ {
+  "latex": "1999 = 2000-1\\equiv -1\\pmod{500}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "1:",
+  "config": "prealgebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "1\\pmod 8",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "1^2+2^2+3^2+\\ldots+k^{2}=\\frac{k(k+1)(2k+1)}6",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "1^{}_{}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "empty-scripts"
+  ]
+ },
+ {
+  "latex": "2 \\cdot 5^{-1} + 8 \\cdot 11^{-1} \\pmod{56}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "2 \\nabla 5 = \\dfrac{2 + 5}{1 + 2 \\times 5} = \\boxed{\\frac{7}{11}}.",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "nabla-custom-op"
+  ]
+ },
+ {
+  "latex": "2 \\nabla 5.",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "nabla-custom-op"
+  ]
+ },
+ {
+  "latex": "2 \\pmod 4",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "2 \\pmod {8}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "2 \\pmod{8}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "2 \\sin a = 2 \\sin a',",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "2 \\sin a \\cos a = 2 \\sin a' \\cos a'",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "2 \\sin a \\cos a = 2 \\sin a' \\cos a'.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "2019^8 \\not\\equiv -1 \\pmod{17}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "pmod-chain",
+   "not-prefix"
+  ]
+ },
+ {
+  "latex": "214 \\pmod {256}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "21^{\\text{st}}",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "22 \\pmod {128}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "22 \\pmod {32}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "22 \\pmod {64}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "235935623_{74}-a",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "24^\\text{th}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "25 - x^2 = 0),",
+  "config": "algebra",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "27 \\text{ ft}^3 = 1 \\text{ yd}^3",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "29 + 1.1 = 29 + 1 + 0.1 = 30 + 0.1 =",
+  "config": "prealgebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "2^{-1} + 2^{-2} + 2^{-3} + 2^{-4} + 2^{-5} + 2^{-6} \\pmod{13}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "2^{2007} - 2 \\pmod{1000}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "2^{2007} \\pmod{125}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "2x + 5 - 5 = - \\frac 12 (x - 5) \\Rightarrow \\frac {5}2 x = \\frac 52 \\Rightarrow x = 1",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "2{n \\choose 2} + 90 = n^2 - n + 90",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "3 \\nabla 6 = \\frac{3 + 6}{1 + 3 \\times 6} = \\frac{9}{19}.",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "nabla-custom-op"
+  ]
+ },
+ {
+  "latex": "3!=\\emph{6}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "3(-2) = \\nabla +2",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "nabla-custom-op"
+  ]
+ },
+ {
+  "latex": "3(-2)=\\nabla+2",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "nabla-custom-op"
+  ]
+ },
+ {
+  "latex": "3(\\$10)+8(\\$.25)+n(\\$.10) \\ge \\$32.75.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "3+4k=n \\equiv 2 \\pmod 5.",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "300^{}_{}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "empty-scripts"
+  ]
+ },
+ {
+  "latex": "30^{\\mbox{th}}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command",
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "3124_{5}+3122_{5}+124_{5}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "325_{8}-237_{8}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "342 \\pmod {512}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "36^{}_{}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "empty-scripts"
+  ]
+ },
+ {
+  "latex": "3S \\equiv 128-2 \\pmod{1000} \\Rightarrow S\\equiv \\boxed{42}\\pmod{1000}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "3^{100}=1\\pmod{1000}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "3|2k+1",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "3|k",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "3|k+1",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "4 \\cdot 9 = 36 \\equiv 1 \\pmod{35}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "4 \\times 10111_2 = 100_2 \\times 10111_2 = \\boxed{1011100}_2",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "4''\\times10''\\times19'',",
+  "config": "counting_and_probability",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "43210_{6}-3210_{7}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "4:",
+  "config": "prealgebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "4\\bowtie y = 10",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "4\\bowtie y = 4+\\sqrt{y+\\sqrt{y+\\sqrt{y+...}}}=10.",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "4^{-1} \\pmod{35}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "50 \\pmod{70}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "50^{\\text{th}}",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "50|ab",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "54 \\pmod {64}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "596^{}_{}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "empty-scripts"
+  ]
+ },
+ {
+  "latex": "5\\text{ USD} \\times \\frac{1\\text{ euro}}{1.25\\text{ USD}}=4\\text{ euros}",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "5^{\\text{th}}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "5|a,b",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "6 \\pmod {16}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "6 \\pmod {32}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "6 \\pmod{8}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "6 \\pmod{9}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "6''\\times3''\\times9''",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "6''\\times5''\\times10''",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "64^{-1} \\pmod{97}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "67^{\\text{th}}",
+  "config": "counting_and_probability",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "67| a(n,k) = 2^{n-1} (n+2k-2)",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "67| n - 2k + 2",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "67|n+2k-2",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "6_{b}+3_{b}=11_{b}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "780=\\frac 3{10}\\cdot 2600",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "799^{\\text{th}}",
+  "config": "counting_and_probability",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "8 < (3\\text{ to }8)^2 < 81",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "86 \\pmod {128}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "86 \\pmod {256}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "86 \\pmod {512}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "94 + 88 + 82 + \\dots + 4\\implies 16\\left(\\dfrac{98}{2}\\right) = \\boxed{784}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "9:",
+  "config": "prealgebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "9^{k} = 81^{k/2}=\\overbrace{(81)(81)\\cdots (81)}^{k/2\\text{ times}},",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ellipsis",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "9k = 963, 981, 990, 999 \\Longrightarrow n = 37, 19, 10, 1",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "= 1 \\cdot 2 + 7 \\cdot 3 + 21 \\cdot 4 + 35 \\cdot 5 + 35 \\cdot 6 + 21 \\cdot 7 + 7 \\cdot 8 + 1 \\cdot 9",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "= 1000(n + 3) + 100(n + 2) + 10(n + 1) + n = 3210 + 1111n",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "= 2x(x-3) + 9(x-3) + 20",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "= 2x(x-3) + 9x - 7 - 20 + 20",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "= 2x^2 + 3x - 7 - 9x + 9x",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "= 4\\pi \\cdot h^3",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "= \\boxed{704}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "= \\pi \\times r^2",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "=2\\cdot(2^2)^3+1\\cdot(2^2)^3+1\\cdot(2^2)^2+2\\cdot(2^2)^1",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "=3\\cdot4^3+1\\cdot4^2+2\\cdot4^1+0\\cdot4^0=\\boxed{3120_4}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "? \\times \\dfrac{1}{10} = 5",
+  "config": "prealgebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "A.\\ \\ \\frac{2006}{2005}+\\frac{2006}{2007} \\qquad B.\\ \\ \\frac{2006}{2007}+\\frac{2008}{2007} \\qquad C.\\ \\ \\frac{2007}{2006}+\\frac{2007}{2008}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "AB||CD",
+  "config": "geometry",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "AX=",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "AX=\\frac{AC\\cdot BX}{BC}=\\frac{21\\cdot28}{30}=\\frac{7^2\\cdot3\\cdot4}{30}=\\frac{7^2\\cdot2}{5}=\\boxed{\\frac{98}5}.",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "A^{}_{}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "empty-scripts"
+  ]
+ },
+ {
+  "latex": "A_6+4_6=13_6",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "A_d - B_d = \\frac{d + 5}2 - \\frac{d-1}{2} = \\boxed{3}_d",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "A_d = \\frac{d + 5}2",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "A_d = \\frac{d + 6}2",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "B ^\\prime G ^\\prime",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "BF=",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "B^\\prime G ^\\prime",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "B_6+1_6=A_6",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "B_d + A_d = d + 2 \\Longrightarrow B_d = d+2 - \\frac{d + 5}2 = \\frac d2 - \\frac 12.",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "CD=",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "D(4,1)",
+  "config": "geometry",
+  "errCode": "'expected-a-symbol'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "DE||BC",
+  "config": "geometry",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "E = \\dfrac{1}{3}\\times \\$0 + \\dfrac{1}{6}\\times(\\$2+\\$3+\\$5) + \\dfrac{1}{6} \\times -\\$3 \\approx \\boxed{\\$1.17}.",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "F = \\left[\\frac{9}{5}\\left[\\frac{5}{9}(9x + k)\\right] + 32\\right] \\Longrightarrow F = \\left[\\frac{9}{5}(5x + \\left[\\frac{5}{9}k\\right]) + 32\\right] \\Longrightarrow F = \\left[\\frac{9}{5} \\left[\\frac{5}{9}k \\right] \\right] + 9x + 32",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "F = \\left[\\frac{9}{5}\\left[\\frac{5}{9}(F-32)\\right] + 32\\right] \\Longrightarrow F = \\left[\\frac{9}{5}(5x + 1) + 32\\right] \\Longrightarrow",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "F = \\left[\\frac{9}{5}\\left[\\frac{5}{9}(F-32)\\right] + 32\\right] \\Longrightarrow F = \\left[\\frac{9}{5}(5x) + 32\\right] \\Longrightarrow F = 9x + 32",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "HF = \\frac{AF}{\\tan B} = \\frac{2R \\cos A \\sin B}{\\sin B/\\cos B} = 2R \\cos A \\cos B = 6.",
+  "config": "precalculus",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "N = 6a+1,\\\\N = 7b+1, \\\\N = 8c +1.",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "N = 9 + 99 + 999 + 9999 + \\cdots + \\underbrace{99\\ldots 99}_\\text{321 digits}.",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "N \\equiv 1 \\pmod k",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "N=3^{27}\\equiv 3^7\\pmod{100}\\equiv 87\\pmod{100}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "N\\equiv n\\pmod{100}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "N\\equiv1\\pmod{n}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "P(4) = \\frac7{27}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "S = (1 + \\omega)^{2007} + (1 + \\zeta)^{2007} + (1 + 1)^{2007} = (-1)^{669} + (-1)^{669} + 2^{2007} = 2^{2007} - 2",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "S = (1 + \\omega)^{2007} + (1 + \\zeta)^{2007} + (1 + 1)^{2007} = \\sum_{i = 0}^{2007} {2007 \\choose i}(\\omega^i + \\zeta^i + 1)",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "S = \\sum_{i = 0}^{669} 3 {2007 \\choose 3i}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "S = \\{5^k | k \\in \\mathbb{Z}, 0 \\le k \\le 2004 \\}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "S=\\sum_{i=1}^{2009} \\dfrac{{2i\\choose i}}{2^{2i}}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "S_n = \\frac{n [2a + (n - 1) 3]}{2}",
+  "config": "intermediate_algebra",
+  "errCode": "'expected-closing-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "S_{3n} = \\frac{3n [2a + (3n - 1) 3]}{2},",
+  "config": "intermediate_algebra",
+  "errCode": "'expected-closing-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "T \\begin{pmatrix} x \\\\ y \\\\ z \\end{pmatrix} = \\renewcommand{\\arraystretch}{1.5} \\begin{pmatrix} -\\frac{7}{27} & \\frac{26}{27} & -\\frac{2}{27} \\\\ -\\frac{14}{27} & -\\frac{2}{27} & \\frac{23}{27} \\\\ \\frac{22}{27} & \\frac{7}{27} & \\frac{14}{27} \\end{pmatrix} \\renewcommand{\\arraystretch}{1} \\begin{pmatrix} x \\\\ y \\\\ z \\end{pmatrix}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env"
+  ]
+ },
+ {
+  "latex": "[ADC] = \\frac 34 [ABD] = \\frac 34 \\cdot 24 = \\boxed{18}",
+  "config": "geometry",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "[CDE] = (4/25)[ABE] = (4/25)(50) = 8",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "bracket-grouping"
+  ]
+ },
+ {
+  "latex": "[EAF] = \\frac12 (AE)(EF)\\sin \\angle AEF  = \\frac12\\cdot11\\cdot13\\cdot\\sin{120^\\circ} = \\frac {143\\sqrt3}4.",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "[GBC] = \\frac {BC^2}{AF^2}\\cdot[EAF] = \\frac {12}{11^2 + 13^2 - 2\\cdot11\\cdot13\\cdot\\cos120^\\circ}\\cdot\\frac {143\\sqrt3}4 = \\frac {429\\sqrt3}{433}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "[G_A G_B G_C G_C] = \\frac{1}{9} [ABCD],",
+  "config": "precalculus",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "[G_A G_B G_C] = \\frac{1}{9} [ABC].",
+  "config": "precalculus",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "[G_C G_D G_A] = \\frac{1}{9} [CDA].",
+  "config": "precalculus",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "[N_1DC] = \\frac{1}{7} [ADC] = \\frac{1}{21}K.",
+  "config": "geometry",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "[N_1N_2N_3] = K - 3\\left(\\frac{1}{21}K\\right) - 3\\left(\\frac{5}{21}\\right)K = K - \\frac{6}{7}K = \\boxed{\\frac{1}{7}\\triangle ABC}.",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "\\#(\\#(\\#58))=\\#(\\#(.5(58)+1))=\\#(\\#(30))=",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\%",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\Rightarrow{\\boxed{30}}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\allowbreak LMNOPQ",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\allowbreak \\{2,3,4,\\ldots,\\}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\angle DAE = \\angle CAB - \\angle CAD - \\angle BAE = 60^\\circ - 15^\\circ - 15^\\circ = \\boxed{30^\\circ.}",
+  "config": "geometry",
+  "errCode": "'expected-closing-delimiter'",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "\\begin{aligned} 2 < 1 &- \\frac{2}{t+1} < 5 \\\\ 1 <&-\\frac{2}{t+1} < 4 \\\\ -\\frac{1}{2} > &\\frac{1}{t+1} > -2. \\end{aligned}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "align-env"
+  ]
+ },
+ {
+  "latex": "\\begin{aligned} A(2, 1)&\\stackrel{(3)}{=}  A(1, A(2, 0)) \\\\ &\\stackrel{(2)}{=} A(1, A(1, 1)) \\\\ &\\stackrel{(3)}{=}  A(1, A(0, A(1, 0))) \\\\ &\\stackrel{(2)}{=}  A(1, A(0, A(0, 1))) \\\\ &\\stackrel{(1)}{=} A(1, A(0, 2)) \\\\  &\\stackrel{(1)}{=} A(1, 3) \\\\ &\\stackrel{(3)}{=}  A(0, A(1, 2)) \\\\ &\\stackrel{(3)}{=} A(0, A(0, A(1, 1))). \\end{aligned}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "align-env",
+   "stackrel-overset"
+  ]
+ },
+ {
+  "latex": "\\begin{aligned} \\frac{\\binom{1/2}{2014}\\cdot 4^{2014}}{{4028 \\choose 2014}} &= -\\frac{4026!\\cdot 4^{2014}} {(2014!)2^{2014+2013}(2013!){4028 \\choose 2014}}  \\\\\n&= -\\frac{4026!\\cdot 2^{4028}(2014!)(2014!)} {(2014!)2^{4027}(2013!)(4028!)}  \\\\\n&= \\boxed{-\\frac{1} { 4027}}.  \\\\\n\\end{aligned}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix",
+   "align-env"
+  ]
+ },
+ {
+  "latex": "\\begin{aligned} \\sum_{k=2}^{63} \\log_2\\left(1 + \\frac{1}{k}\\right) \\log_k 2 \\log_{k+1} 2 &= \\left(\\frac{1}{\\log_2 2} - \\frac{1}{\\log_2 3}\\right) + \\left(\\frac{1}{\\log_2 3} - \\frac1{\\log_2 4}\\right) + \\dots + \\left(\\frac{1}{\\log_2 63} - \\frac{1}{\\log_2 64}\\right) \\\\ &= \\frac{1}{\\log_2 2} - \\frac{1}{\\log_2 64} \\\\ &= 1 - \\frac16 \\\\ &= \\boxed{\\frac56}. \\end{aligned}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace",
+   "align-env",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\begin{aligned} a+b\\; &\\text{ with } \\;c+d, \\\\  a+c\\; &\\text{ with }\\; b+d, \\\\  a+d \\;&\\text{ with } \\;b+c. \\end{aligned}",
+  "config": "intermediate_algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "align-env",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\begin{aligned}a+a+b&=-\\tfrac82=-4, \\\\ ab+ab+a^2 &= \\tfrac{120}2 = -60. \\end{aligned}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace",
+   "align-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{@{}c@{\\;}c@{}c@{}c@{}c@{}c@{}c}\n& & & 1 & 0 & 1 & 1_2 \\\\\n& & & \\times & 1 & 0 & 1_2 \\\\\n\\cline{4-7} & & & 1 & 0 & 1 & 1_2 \\\\\n& & 0 & 0 & 0 & 0 & 0_2 \\\\\n+ & 1 & 0 & 1 & 1 & 0 & 0_2 \\\\ \\cline{1-7}\n& 1 & 1 & 0 & 1 & 1 & 1_2 \\\\\n\\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c || c | c | c | c | c}\nx & 1 & 2 & 3 & 4 & 5 \\\\\n\\hline\nf(x) & 2 & 3 & 5 & 7 & 8\n\\end{array}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{\\;}c@{}c@{}c@{}c@{}c@{}c} & & & \\stackrel{2}{1} & \\stackrel{2}{1} & \\stackrel{1}{1} & \\stackrel{1}{0} & \\stackrel{}{1}_2 \\\\ && & & 1 & 1 & 0 & 0_2 \\\\ && & & & 1 & 0 & 1_2 \\\\ &+ & & & & & 1 & 1_2 \\\\ \\cline{2-8} && 1 & 1 & 0 & 0 & 0 & 1_2 \\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "array-env",
+   "stackrel-overset"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{\\;}c@{}c@{}c@{}c} & & & \\cancelto{2}{3}& \\cancelto{1}{2} & 5_8\\\\ & & - & 2 & 3 & 7_8\\\\ \\cline{2-6} & & & & 6& 6_8\\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "array-env",
+   "cancel"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{\\;}c@{}c@{}c@{}c} & & 3 & 2 & 1 & 5_6\\\\ & & & 5 & 4 & 0_6\\\\ &+ & & & 5 & 2_6\\\\ \\cline{2-6} & & 4 & 2 & 5 & 1_6.\\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{\\;}c@{}c@{}c@{}c} & & 3 & 2 & 1 & \\triangle_6\\\\ & & & \\triangle & 4 & 0_6\\\\ &+ & & & \\triangle & 2_6\\\\ \\cline{2-6} & & 4 & 2 & \\triangle & 1_6\\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env",
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{\\;}c@{}c@{}c@{}c}& & & 4 & A & B_{6}\\\\ &+& & & 4 & 1_{6}\\\\ \\cline{2-6}& & & 5 & 3 & A_{6}\\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{}c@{}c@{}c@{}c@{}c@{}c@{}c} &&&&1&0&1&0&1_2\\\\ &&&&&\\times&1&0&1_2\\\\ \\cline{2-9} &&&_1&1^{\\text{ }}&0^1&1^{\\text{ }}&0^{\\text{ }}&1^{\\text{ }}_2\\\\ &+&1^{\\text{ }}&0^{\\text{ }}&1&0_{\\text{ }}&1&0&0_2\\\\ \\cline{2-9} &&1&1&0&1&0&0&1_2\\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{}c@{}c@{}c@{}c} &&6&4&5&3_h\\\\ &+&7&5&1&2_h\\\\ \\cline{2-6} &1&6&1&6&5_h.\\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{}c@{}c@{}c} & &_{1} & _{1}& \\\\ & & 3& 2 & 7_8 \\\\ &+ & & 7 & 3_8 \\\\ \\cline{2-5} && 4& 2 & 2_8 \\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{}c@{}c@{}c} &&&&\\\\ &\\cancelto{0}{1}&\\cancelto{6}{0}&\\cancelto{6}{0}&{\\cancelto{7}{0}}_{7}\\\\ &-&6&6&6_7\\\\ \\cline{2-5} &&&&1_7.\\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "array-env",
+   "cancel"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{}c@{}c} &4&1&2_5\\\\ &+&1&2_5\\\\ \\cline{2-4} &4&2&4_5\\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c@{}c@{}c@{}c} &S&H&E_5\\\\ &+&H&E_5\\\\ \\cline{2-4} &S&E&S_5\\\\ \\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{ccccccccccccc}\\vspace{0.1in}\n\\textrm{Row 0}: & \\qquad & & & & & 1 & & & & & & \\\\ \\vspace{0.1in}\n\\textrm{Row 1}: & \\qquad & & & & 1 & & 1 & & & & &\\\\ \\vspace{0.1in}\n\\textrm{Row 2}: & \\qquad & & & 1 & & 2 & & 1 & & & &\\\\ \\vspace{0.1in}\n\\textrm{Row 3}: & \\qquad & & 1 && 3 && 3 && 1&& \\\\ \\vspace{0.1in}\n\\textrm{Row 4}: & \\qquad & 1&& 4 && 6 && 4 && 1\n\\end{array}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{ccc}\nf(x) & = & 5x^2 - \\frac{1}{x}+ 3\\\\\ng(x) & = & x^2-k\n\\end{array}",
+  "config": "algebra",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{ccc}a&b&a+b\\\\\\hline\n-1 & 10 & 9\\\\\n-2 & 5 & 3\\\\\n-5 & 2 & -3\\\\\n-10 & 1 & -9\n\\end{array}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c|cc ccc}\n\\multicolumn{2}{r}{2x^2} & -3x & -11 \\\\\n\\cline{2-6}\nx^2+7x-5 & 2x^4 & +11x^3 & -42x^2 & -60x & +47  \\\\\n\\multicolumn{2}{r}{-2x^4} & -14x^3 & +10x^2 \\\\\n\\cline{2-4}\n\\multicolumn{2}{r}{0} & -3x^3 & -32x^2 & -60x \\\\\n\\multicolumn{2}{r}{} & +3x^3 & +21x^2 & -15x \\\\\n\\cline{3-5}\n\\multicolumn{2}{r}{} & 0 & -11x^2 & -75x & +47 \\\\\n\\multicolumn{2}{r}{} &  & +11x^2 & +77x & -55 \\\\\n\\cline{4-6}\n\\multicolumn{2}{r}{} &  & 0 & 2x & -8 \\\\\n\\end{array}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c|cc cc}\n\\multicolumn{2}{r}{4x^2} & -2x & +3/2  \\\\\n\\cline{2-5}\n2x+5 & 8x^3 & +16x^2&-7x&+4  \\\\\n\\multicolumn{2}{r}{-8x^3} & -20x^2& \\\\ \n\\cline{2-3}\n\\multicolumn{2}{r}{0} & -4x^2& -7x\\\\ \n\\multicolumn{2}{r}{} & +4x^2& +10x\\\\ \n\\cline{3-4}\n\\multicolumn{2}{r}{} & 0& +3x & +4\\\\ \n\\multicolumn{2}{r}{} & & -3x & -15/2\\\\ \n\\cline{4-5}\n\\multicolumn{2}{r}{} & & & -7/2\\\\ \n\\end{array}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c|ccccc}\n& x < -\\frac{9}{2} & -\\frac{9}{2} < x < -2 & -2 < x < \\frac{1 - \\sqrt{5}}{2} & \\frac{1 - \\sqrt{5}}{2} < x < \\frac{1 + \\sqrt{5}}{2} & \\frac{1 + \\sqrt{5}}{2} < x \\\\ \\hline\n2x + 9 & - & + & + & + & + \\\\\nx + 2 & - & - & + & + & + \\\\\nx - \\frac{1 - \\sqrt{5}}{2} & - & - & - & + & + \\\\\nx - \\frac{1 + \\sqrt{5}}{2} & - & - & - & - & + \\\\\n\\frac{x^2 - x - 1}{(x + 2)(2x + 9)} & + & - & + & - & +\n\\end{array}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c|ccccc}\n\\multicolumn{2}{r}{z^3} & -2z^2&+3z&-\\frac{17}{3} \\\\\n\\cline{2-6}\n3z+2 & 3z^4 &- 4z^3 &+ 5z^2&-11z&+2   \\\\\n\\multicolumn{2}{r}{3z^4} & +2z^3  \\\\ \n\\cline{2-3}\n\\multicolumn{2}{r}{0} & -6z^3 & +5z^2   \\\\\n\\multicolumn{2}{r}{} &- 6z^3  &-4z^2  \\\\ \n\\cline{3-4}\n\\multicolumn{2}{r}{} & 0& 9z^2 & -11z   \\\\\n\\multicolumn{2}{r}{} & & 9z^2 & +6z   \\\\\n\\cline{4-5}\n\\multicolumn{2}{r}{} & & 0 & -17z  & +2 \\\\\n\\multicolumn{2}{r}{} & &  & -17z  & -\\frac{34}{3} \\\\\n\\cline{5-6}\n\\multicolumn{2}{r}{} & &  & 0 & +\\frac{40}{3} \\\\\n\\end{array}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c|ccc}\n\\multicolumn{2}{r}{x} & +2 \\\\\n\\cline{2-4}\n2x+3 & 2x^2&+7x&+10 \\\\\n\\multicolumn{2}{r}{2x^2} & +3x &   \\\\\n\\cline{2-3}\n\\multicolumn{2}{r}{0} & 4x &  +10 \\\\\n\\multicolumn{2}{r}{} & 4x &  +6 \\\\\n\\cline{3-4}\n\\multicolumn{2}{r}{} & 0 &  4 \\\\\n\\end{array}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c|c}\nn & 2^n \\pmod{45} \\\\ \\hline\n0 & 1 \\\\\n1 & 2 \\\\\n2 & 4 \\\\\n3 & 8 \\\\\n4 & 16 \\\\\n5 & 32 \\\\\n6 & 19 \\\\\n7 & 38 \\\\\n8 & 31 \\\\\n9 & 17 \\\\\n10 & 34 \\\\\n11 & 23 \\\\\n12 & 1\n\\end{array}",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "bare-pmod",
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{c||c|c|c|c}\nk \\backslash n & 0 & 1 & 2 & 3 \\\\ \\hline \\hline\n0 & 0 & 0 & 0 & 0 \\\\ \\hline\n1 & 2 & 0 & 2 & 0 \\\\ \\hline\n2 & 2 & 2 & 2 & 2 \\\\ \\hline\n3 & 0 & 2 & 0 & 2\n\\end{array}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{r r c r@{}l}\n&10000x &=& 1213&.12131213\\ldots \\\\\n- &x &=& 0&.12131213\\ldots \\\\\n\\hline\n&9999x &=& 1213 &\n\\end{array}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{r r c r@{}l}\n&100x &=& 32&.5252525\\ldots \\\\\n- &x &=& 0&.3252525\\ldots \\\\\n\\hline\n&99x &=& 32&.2\n\\end{array}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{r r c r@{}l}\n&100x &=& 81&.818181\\ldots \\\\\n- &x &=& 0&.818181\\ldots \\\\\n\\hline\n&99x &=& 81 &\n\\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{r r c r@{}l}\n&10x &=& 37&.77777\\ldots \\\\\n- &x &=& 3&.77777\\ldots \\\\\n\\hline\n&9x &=& 34&\n\\end{array}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{r r c r@{}l}\n&10x &=& n&.nnnnn\\ldots \\\\\n- &x &=& 0&.nnnnn\\ldots \\\\\n\\hline\n&9x &=& n &\n\\end{array}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{r r c r@{}l}\n&300/11 &=& ab&.ababab\\ldots \\\\\n- &3/11 &=& 0&.ababab\\ldots \\\\\n\\hline\n&297/11 &=& ab &\n\\end{array}",
+  "config": "number_theory",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{|c|c|c|c|c|c|c|}\n\\hline\n\\text{order of terms} & 1 & 2 & 3 & 4 & \\dots & 100 \\\\\n\\hline\n\\text{terms of sequence} & 1 & 4 & 7 & 10 & \\dots & ? \\\\\n\\hline\n\\text{multiples of 3} & 3 & 6 & 9 & 12 & \\dots & (300)\\\\\n\\hline\n\\end{array}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env",
+   "ellipsis",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{|c|c|}\n\\hline\n& \\textbf{Number of} \\\\\n\\textbf{Sizes} & \\textbf{Squares} \\\\\n\\hline\n1 \\times 1 & 21 \\\\\n2 \\times 2 & 12 \\\\\n3 \\times 3 & 5 \\\\\n\\hline\n\\multicolumn{2}{|c|}{\\text{Total \\boxed{38}}} \\\\\n\\hline\n\\end{array}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command",
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\begin{array}{|c|c|}\\hline\n\\text{Tens digit} & \\text{Units digit} \\\\ \\hline\n0 & 0,1,2,3,4,5,6,7,8,9 \\\\ \\hline\n1 & 2,3,4,5,6,7,8,9 \\\\ \\hline\n2 & 4,5,6,7,8,9 \\\\ \\hline\n3 & 6,7,8,9 \\\\ \\hline\n4 & 8,9 \\\\ \\hline\n\\end{array}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\begin{pmatrix} \\mathbf{r}_1 \\\\ \\mathbf{r}_2 \\\\ \\mathbf{r}_3 \\end{pmatrix} \\begin{pmatrix} | & | & | \\\\ a \\mathbf{v} & b \\mathbf{v} & c \\mathbf{v} \\\\ | & | & | \\end{pmatrix},",
+  "config": "precalculus",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "matrix-env"
+  ]
+ },
+ {
+  "latex": "\\binom{2008}{2}-2\\binom{1004}{2} = 1004\\cdot 2007 - 1004\\cdot 1003 =\n1004^2 = \\boxed{1{,}008{,}016}.",
+  "config": "intermediate_algebra",
+  "errCode": "'expected-closing-delimiter'",
+  "motifs": [
+   "thousands-sep"
+  ]
+ },
+ {
+  "latex": "\\bmod\\ 5",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "\\bmod\\ 9",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "\\bold{0}",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\bold{v}",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\bold{v} + \\bold{w}",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\bold{v} = \\begin{pmatrix} 5 \\\\ -3 \\end{pmatrix}",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command",
+   "matrix-env"
+  ]
+ },
+ {
+  "latex": "\\bold{w}",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\bold{w} = \\begin{pmatrix} 11 \\\\ -2 \\end{pmatrix}",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command",
+   "matrix-env"
+  ]
+ },
+ {
+  "latex": "\\boxed{2}\\%",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\bullet",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\cos \\theta = \\frac{\\begin{pmatrix} 1 \\\\ 2 \\\\ 2 \\end{pmatrix} \\cdot \\begin{pmatrix} 1 \\\\ 0 \\\\ 0 \\end{pmatrix}}{\\left\\| \\begin{pmatrix} 1 \\\\ 2 \\\\ 2 \\end{pmatrix} \\right\\| \\left\\|\\begin{pmatrix} 1 \\\\ 0 \\\\ 0 \\end{pmatrix} \\right\\|} = \\frac{1}{3}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\cos \\theta = \\frac{\\begin{pmatrix} 2 \\\\ -1 \\\\ 1 \\end{pmatrix} \\cdot \\begin{pmatrix} -1 \\\\ 1 \\\\ 0 \\end{pmatrix}}{\\left\\| \\begin{pmatrix} 2 \\\\ -1 \\\\ 1 \\end{pmatrix} \\right\\| \\left\\| \\begin{pmatrix} -1 \\\\ 1 \\\\ 0 \\end{pmatrix} \\right\\|} = \\frac{(2)(-1) + (-1)(1) + (1)(0)}{\\sqrt{6} \\cdot \\sqrt{2}} = \\frac{-3}{2 \\sqrt{3}} = -\\frac{\\sqrt{3}}{2}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\cos \\theta = \\frac{\\mathbf{a} \\cdot \\mathbf{b}}{\\|\\mathbf{a}\\| \\|\\mathbf{b}\\|} = \\frac{-\\frac{d^2}{2}}{d^2} = -\\frac{1}{2},",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\cos \\theta = \\frac{\\mathbf{a} \\cdot \\mathbf{b}}{\\|\\mathbf{a}\\| \\|\\mathbf{b}\\|} = \\frac{1/2}{1 \\cdot 1} = \\frac{1}{2}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\cos \\theta = \\frac{\\mathbf{a} \\cdot \\mathbf{c}}{\\|\\mathbf{a}\\| \\|\\mathbf{c}\\|} = \\frac{z}{2} = \\pm \\frac{\\sqrt{3}}{2}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\cos \\theta = \\frac{\\mathbf{a} \\cdot \\mathbf{c}}{\\|\\mathbf{a}\\| \\|\\mathbf{c}\\|} = \\pm \\frac{\\sqrt{3}}{2},",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\cos \\theta = \\frac{\\mathbf{a} \\cdot \\mathbf{c}}{\\|\\mathbf{a}\\| \\|\\mathbf{c}\\|} = \\pm \\frac{\\sqrt{3}}{2}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\cos a = \\cos a',",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "\\cos a = \\cos a'.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "\\cos\\left({{n\\pi}\\over2}-nt\\right) =\n\\cos\\left({{\\pi}\\over2}-nt\\right) \\quad {\\rm and} \\quad\n\\sin\\left({{n\\pi}\\over2}-nt\\right) =\n\\sin\\left({{\\pi}\\over2}-nt\\right).",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\det (\\mathbf{A} \\mathbf{B}) = (\\det \\mathbf{A})(\\det \\mathbf{B}) = (2)(12) = \\boxed{24}.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\det (\\mathbf{A} \\mathbf{B}).",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\dfrac 1 4 \\left( \\dfrac{1}{0^2 + 1} + \\dfrac 1 {1^2 + 1} \\right) = \\boxed{\\dfrac 3 8}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\dfrac{(2i)!}{(2i)!!^2} = \\dfrac{(2i)!}{2^{2i}(i!)^2}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "double-factorial"
+  ]
+ },
+ {
+  "latex": "\\dfrac{(2i-1)!!}{(2i)!!}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "double-factorial"
+  ]
+ },
+ {
+  "latex": "\\dfrac{{2i\\choose i}}{2^{2i}}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "\\emph{1}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{3}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Approach 1:}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Approach 1}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Approach 2:}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Approach 2}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Approach 3:}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Case 1:}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Case 2:}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Case 3:}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Introduction to Geometry}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Introduction to} \\allowbreak\\ \\emph{Counting and} \\allowbreak\\ \\emph{Probability}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Solution 1: Find the equation of the line.}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{Solution 2: Use the slope without finding the equation.}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{all}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{convex}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{diagonal}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{doesn't}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command",
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "\\emph{icosahedron}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{interior}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\emph{not}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\equiv (-1)^k\\dbinom{k+2}{2} \\mod 2017",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\equiv (-1)^k\\dbinom{k+2}{k} \\mod 2017",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\equiv 4\\bmod\\ 5",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "\\frac 32 \\left( \\frac 1{2^a} \\cdot \\frac 12 \\cdot \\frac 1{2^b} \\cdot \\frac 12 \\cdot \\frac 1{2^c} \\cdots \\right) \\cdot \\left(\\frac 12\\right)^5",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\frac 32\\left( \\left(\\frac {15}{16}\\right)^n \\cdot \\left(\\frac 12\\right)^n \\right) \\cdot \\left(\\frac 1{32}\\right)=\\frac 3{64}\\left(\\frac{15}{32}\\right)^n",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac 3{13}.",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac {15,000n\\frac{\\text{meters}}{\\text{hour}}}{4(n + 1)\\frac{\\text{meters}}{\\text{unit}}} = \\frac {15,000n}{4(n + 1)}\\frac{\\text{units}}{\\text{hour}}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\frac13 + \\frac{n}7 < 1",
+  "config": "prealgebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "\\frac13,\\frac19,\\frac1{27},\\dots",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\frac1{x^3}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "\\frac{(AB+CD)BC}2=(AB+CD)BF",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "\\frac{(\\text{first term}+\\text{last term})(\\text{number of terms})}{2},",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\frac{(a+c)(-2ac \\cdot \\frac{7}{16}+2ac)}{ac} = \\frac{21\\sqrt{23}}{2} \\implies",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac{10^n}{5^{{}^n}} = 2^n",
+  "config": "number_theory",
+  "errCode": "'expected-closing-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac{1357_{9}}{100_{4}}-2460_{8}+5678_{9}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "\\frac{18}{17}\\cdot\\frac{13}{24}\\cdot\\frac{68}{39}=\\frac{\\cancel{6}\\cdot3}{\\cancel{17}\\cdot1}\\cdot\\frac{\\cancel{13}\\cdot1}{\\cancel{6}\\cdot4}\\cdot\\frac{\\cancel{17}\\cdot4}{\\cancel{13}\\cdot3}.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "cancel"
+  ]
+ },
+ {
+  "latex": "\\frac{1}{2}(2\\cdot CD)(CD)=25\\text{ in.}^2",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\frac{1}{5^{{}^n}}",
+  "config": "number_theory",
+  "errCode": "'expected-closing-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac{1}{\\frac{\\frac{1}{x}+\\frac{1}{y}}2} = \\frac{2xy}{x+y}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac{1}{x} = f\\left(\\frac{1}{x}\\right) +\nf\\displaystyle\\left(\\frac{1}{1/x}\\displaystyle\\right) = f\\displaystyle\\left(\\frac{1}{x}\\displaystyle\\right) + f(x).",
+  "config": "intermediate_algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac{20\\text{ in.}}{10\\text{ in.}}=2",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\frac{2a+2b+2c}2=a+b+c",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "\\frac{2x_1+2x_2+\\cdots +2x_{33}}2=x_1+x_2+\\cdots+x_{33}",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\frac{2}{5}=\\frac{\\text{area of the win sector}}{100\\pi}",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\frac{3,\\!744}{2,\\!598,\\!960} = \\boxed{\\frac{6}{4165}}.",
+  "config": "counting_and_probability",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac{300}{11}=ab.ababab\\ldots",
+  "config": "number_theory",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\frac{36 \\cdot 23 + b^2+c^2-a^2}{bc} + \\frac{36 \\cdot 23+a^2+b^2-c^2}{ab} = \\frac{7}{4} \\implies",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac{36 \\cdot 23 + c^2-a^2}{c} + \\frac{36 \\cdot 23 + a^2-c^2}{a} = \\frac{21\\sqrt{23}}{2} \\implies",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac{3}{11}=0.ababab\\ldots",
+  "config": "number_theory",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\frac{3}{42} = \\frac{60}{x} \\Longrightarrow \\boxed{840}",
+  "config": "counting_and_probability",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac{3}{4}\\times80\\text{ miles per hour}=3\\times20=60\\text{ miles per hour}.",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\frac{40^{}_{}}{\\overline{z}}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "empty-scripts"
+  ]
+ },
+ {
+  "latex": "\\frac{4\\cdot \\cancel{3}}{\\cancel{3}\\cdot 2}=\\frac{4}{2}=\\boxed{2}.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "cancel"
+  ]
+ },
+ {
+  "latex": "\\frac{52}{30} = \\frac{26 \\cdot \\cancel{2}}{15 \\cdot \\cancel{2}} = \\boxed{\\frac{26}{15}}.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "cancel"
+  ]
+ },
+ {
+  "latex": "\\frac{60 \\text{ miles}}{60\\text{ minutes}}\\times20\\text{ minutes}=1\\times20=\\boxed{20\\text{ miles}}.",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\frac{R-r}2 = \\frac {R}{3} = r",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "\\frac{S_{3n}}{S_n} = \\frac{\\frac{3n [2a + (3n - 1) 3]}{2}}{\\frac{n [2a + (n - 1) 3]}{2}} = \\frac{3(2a + 9n - 3)}{2a + 3n - 3} = \\frac{6a + 27n - 9}{2a + 3n - 3}.",
+  "config": "intermediate_algebra",
+  "errCode": "'expected-closing-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\frac{\\cancelto{4}{8}\\cancel{x}y^{\\cancel{2}}}{\\cancelto{3}{6}x^{\\cancel{2}}\\cancel{y}}=\\frac{4y}{3x}.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "cancel"
+  ]
+ },
+ {
+  "latex": "\\frac{\\cancel{2} \\cdot \\cancel{3} \\cdot \\cancel{5} \\cdot 7}{\\cancel{2} \\cdot \\cancel{3} \\cdot \\cancel{5} \\cdot 11} = \\boxed{\\frac{7}{11}}.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "cancel"
+  ]
+ },
+ {
+  "latex": "\\frac{\\cancel{3}}{\\cancel{1}}\\cdot\\frac{\\cancel{1}}{\\cancel{4}}\\cdot\\frac{\\cancel{4}}{\\cancel{3}}=\\boxed{1}.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "cancel"
+  ]
+ },
+ {
+  "latex": "\\frac{\\frac{AD-PQ}{2}}{PQ+5} =\\frac{3}{5}\\quad\n\\mbox {and}\\quad \\frac{3-PQ}{\\frac{AD+PQ}{2}}=\\frac{3}{5}.",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\frac{\\text{Volume of Cylinder A}}{\\text{Volume of Cylinder B}} = \\frac{r^2 \\cdot h}{h^2 \\cdot r} = \\frac{r}{h} = 2",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\frac{\\text{successful outcomes}}{\\text{total outcomes}}=\\frac{96}{216}=\\boxed{\\frac{4}{9}}.",
+  "config": "counting_and_probability",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\frac{a+b}2,\\frac{a+c}2,\\frac{b+c}2",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "\\frac{m}{n} = 0.X251 \\ldots",
+  "config": "number_theory",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\frac{x-1}2=\\frac 2x+1=\\frac{2+x}x.",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "\\frac{x_1+x_2}2,\\frac{x_2+x_3}2,\\ldots,\\frac{x_{33}+x_1}2",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\frac{z^{}_{}}{40}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "empty-scripts"
+  ]
+ },
+ {
+  "latex": "\\frac{|\\triangle AEF|}{|\\triangle DEF|}=\\frac{AF}{FD}=\\frac{3}{1}.",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "\\frac{|\\triangle BDA|}{|\\triangle DCA|}=\\frac{BD}{DC}=\\frac{1}{1}.",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "\\frac{|\\triangle ECD|}{|\\triangle AED|}=\\frac{EC}{AE}=\\frac{2}{1}.",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "\\gcd(x,y) \\cdot \\text{lcm}(x,y)=x\\cdot y",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\gcd(|A|,|B|,|C|,|D|) = 1.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\gcd(|A|,|B|,|C|,|D|,|E|,|F|) = 1.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\implies \\text{gcd}(957,580)=\\text{gcd}(957,58).",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\in \\{4,5,6\\}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\left(2^n\\right)^3 - 2 \\pmod{31}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "\\left(\\frac16\\right)^3 = \\boxed{\\frac1{216}}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "\\left(\\frac{2}{\\cancel{3}}\\right)\\left(\\frac{\\cancel{3}}{\\cancel{4}}\\right)\\left(\\frac{\\cancel{4}}{\\cancel{5}}\\right)\\left(\\frac{\\cancel{5}}{6}\\right)=\\frac{2}{6}=\\boxed{\\frac{1}{3}}.",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "cancel"
+  ]
+ },
+ {
+  "latex": "\\left(\\frac{5-3}2,\\frac{3-1}2\\right)=(1,1)",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "\\left(a^{3^{-1}}\\right)^3 \\not\\equiv a \\pmod{p}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "pmod-chain",
+   "not-prefix"
+  ]
+ },
+ {
+  "latex": "\\left[ \\frac{9}{5} \\left[ \\frac{5}{9} k \\right] \\right] = k",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\left\\| \\begin{pmatrix} 2 \\\\ 3 \\\\ 6 \\end{pmatrix} \\right\\| = \\boxed{7}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\left\\| \\begin{pmatrix} 3 \\\\ 1 \\\\ -2 \\end{pmatrix} \\times \\begin{pmatrix} 1 \\\\ -3 \\\\ 4 \\end{pmatrix} \\right\\| = \\left\\| \\begin{pmatrix} -2 \\\\ -14 \\\\ -10 \\end{pmatrix} \\right\\| = \\boxed{10 \\sqrt{3}}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\left\\| \\begin{pmatrix} x \\\\ y \\end{pmatrix} \\right\\| = 4.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\left\\| k \\begin{pmatrix} 2 \\\\ -3 \\end{pmatrix} - \\begin{pmatrix} 4 \\\\ 7 \\end{pmatrix} \\right\\| = 2 \\sqrt{13}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\left| |x|- |y| \\right| = 1:",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "\\log (xy)+2(\\log(\\gcd(x,y))+\\log(\\text{lcm}(x,y)))=630",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\log x+\\log y+2(\\log(\\gcd(x,y))+\\log(\\text{lcm}(x,y)))=630",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\log_8 a_1+\\log_8 a_2+\\ldots+\\log_8 a_{12}= \\log_8 a+\\log_8 (ar)+\\ldots+\\log_8 (ar^{11}) \\\\ = \\log_8(a\\cdot ar\\cdot ar^2\\cdot \\cdots \\cdot ar^{11}) = \\log_8  (a^{12}r^{66})",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\mathbf M = \\sqrt 2\\begin{pmatrix}\n\\cos 45^\\circ & -\\sin 45^\\circ \\\\\n\\sin 45^\\circ & \\phantom -\\cos 45^\\circ\n\\end{pmatrix} = \\boxed{\\begin{pmatrix} 1 & -1 \\\\ 1 & \\phantom -1 \\end{pmatrix}}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env"
+  ]
+ },
+ {
+  "latex": "\\mathbf M \\begin{pmatrix} 0 \\\\ 1 \\end{pmatrix} = \\begin{pmatrix} -1 \\\\ 1 \\end{pmatrix}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env"
+  ]
+ },
+ {
+  "latex": "\\mathbf M \\begin{pmatrix} 1 \\\\ 0 \\end{pmatrix} = \\begin{pmatrix} 1 \\\\ 1 \\end{pmatrix}",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env"
+  ]
+ },
+ {
+  "latex": "\\mathbf M,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mathbf{a} \\cdot \\mathbf{a} = \\|\\mathbf{a}\\|^2 = 1,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\mathbf{b} \\cdot (\\mathbf{c} \\times \\mathbf{a})) = \\mathbf{a} \\cdot (\\mathbf{b} \\times \\mathbf{c}) = 1,",
+  "config": "precalculus",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mathbf{b} \\cdot \\mathbf{b} = \\|\\mathbf{b}\\|^2 = 1,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\mathbf{b} \\cdot \\mathbf{c} + \\frac{1}{3} \\|\\mathbf{b}\\| \\|\\mathbf{c}\\| = 0.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\mathbf{b} \\cdot \\mathbf{c} = \\|\\mathbf{b}\\| \\|\\mathbf{c}\\| \\cos \\theta,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\mathbf{u} \\cdot \\begin{pmatrix} 3 \\\\ -7 \\\\ -1 \\end{pmatrix} = \\|\\mathbf{u}\\| \\left\\| \\begin{pmatrix} 3 \\\\ -7 \\\\ -1 \\end{pmatrix} \\right\\| \\cos \\theta = \\sqrt{59} \\cos \\theta,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\mathbf{v} \\cdot \\mathbf{v} = \\|\\mathbf{v}\\|^2 = \\boxed{16}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\mathcal L",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mathrm{(A) \\ 6 } \\qquad \\mathrm{(B) \\frac{18}{\\pi^2} } \\qquad \\mathrm{(C) \\frac{9}{\\pi^2}(\\sqrt{3}-1) } \\qquad \\mathrm{(D) \\frac{9}{\\pi^2}(\\sqrt{3}-1) } \\qquad \\mathrm{(E) \\frac{9}{\\pi^2}(\\sqrt{3}+3) }",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mathrm{(A) \\ }0 \\qquad \\mathrm{(B) \\ }0.1 \\qquad \\mathrm{(C) \\ }0.2 \\qquad \\mathrm{(D) \\ }0.3 \\qquad \\mathrm{(E) \\ }0.4",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mathrm{(A) \\frac{\\sqrt{3}}{12} } \\qquad \\mathrm{(B) \\frac{\\sqrt{6}}{16} } \\qquad \\mathrm{(C) \\frac{1}{6} } \\qquad \\mathrm{(D) \\frac{\\sqrt{2}}{8} } \\qquad \\mathrm{(E) \\frac{1}{4} }",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mathrm{(A)}\\ \\frac{\\sqrt{3}}{6}\\qquad\\mathrm{(B)}\\ \\frac{\\sqrt{3}}{3}\\qquad\\mathrm{(C)}\\ \\frac{\\sqrt{3}}{2\\sqrt{2}}\\qquad\\mathrm{(D)}\\ \\frac{\\sqrt{3}}{4\\sqrt{2}-3}\\qquad\\mathrm{(E)}\\ 1",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mbox{area}=\\frac{1}{2}\\mbox{base}\\cdot\\mbox{height}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\mbox{elements in only }A+\\mbox{elements in only }B+\\mbox{elements in both}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\mod 11",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mod 13",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mod 4",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mod 7",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\mod p",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\nabla",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "nabla-custom-op"
+  ]
+ },
+ {
+  "latex": "\\nabla = -6-2=\\boxed{-8}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "nabla-custom-op"
+  ]
+ },
+ {
+  "latex": "\\omega^i + \\zeta^i + 1 = 1 + 1 + 1 = 3",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\omega^i + \\zeta^i + 1 = \\omega + \\zeta + 1 = 0",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\omega^i + \\zeta^i + 1 = \\omega^2 + \\zeta^2 + 1= \\zeta + \\omega + 1 = 0",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\operatorname{proj}_{\\begin{pmatrix} 1 \\\\ -3 \\end{pmatrix}} \\begin{pmatrix} -4 \\\\ -7 \\end{pmatrix} = \\frac{\\begin{pmatrix} -4 \\\\ -7 \\end{pmatrix} \\cdot \\begin{pmatrix} 1 \\\\ -3 \\end{pmatrix}}{\\left\\| \\begin{pmatrix} 1 \\\\ -3 \\end{pmatrix} \\right\\|^2} \\begin{pmatrix} 1 \\\\ -3 \\end{pmatrix} = \\frac{17}{10} \\begin{pmatrix} 1 \\\\ -3 \\end{pmatrix} = \\begin{pmatrix} \\frac{17}{10} \\\\ -\\frac{51}{10} \\end{pmatrix}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\operatorname{proj}_{\\begin{pmatrix} 2 \\\\ 0 \\end{pmatrix}} \\begin{pmatrix} 4 \\\\ 5 \\end{pmatrix} = \\frac{\\begin{pmatrix} 4 \\\\ 5 \\end{pmatrix} \\cdot \\begin{pmatrix} 2 \\\\ 0 \\end{pmatrix}}{\\left\\| \\begin{pmatrix} 2 \\\\ 0 \\end{pmatrix} \\right\\|^2} \\begin{pmatrix} 2 \\\\ 0 \\end{pmatrix} = \\frac{8}{4} \\begin{pmatrix} 2 \\\\ 0 \\end{pmatrix} = \\boxed{\\begin{pmatrix} 4 \\\\ 0 \\end{pmatrix}}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\overbrace{(10-1)(10-1)(10-1)\\cdots(10-1)}^{2004\\text{ factors}}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ellipsis",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\overline{AB}_d + \\overline{AA}_d = 162_d",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "base-subscript-numeral"
+  ]
+ },
+ {
+  "latex": "\\overrightarrow{AB} \\cdot \\overrightarrow{AB} = \\|\\overrightarrow{AB}\\|^2 = 1.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\overrightarrow{BD} = \\frac{\\overrightarrow{AB} \\cdot \\overrightarrow{BC}}{\\overrightarrow{BC} \\cdot \\overrightarrow{BC}} \\overrightarrow{BC} = \\frac{\\begin{pmatrix} -4 \\\\ -1 \\\\ 2 \\end{pmatrix} \\cdot \\begin{pmatrix} -2 \\\\ 1 \\\\ 4 \\end{pmatrix}}{\\left\\| \\begin{pmatrix} -4 \\\\ -1 \\\\ 2 \\end{pmatrix} \\right\\| \\left\\| \\begin{pmatrix} -2 \\\\ 1 \\\\ 4 \\end{pmatrix} \\right\\|} \\begin{pmatrix} -2 \\\\ 1 \\\\ 4 \\end{pmatrix} = \\frac{15}{21} \\begin{pmatrix} -2 \\\\ 1 \\\\ 4 \\end{pmatrix} = \\begin{pmatrix} -10/7 \\\\ 5/7 \\\\ 20/7 \\end{pmatrix}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\pm \\frac{1}{2} \\pm \\frac{\\sqrt{3}}{2} i.",
+  "config": "precalculus",
+  "errCode": "'incompatible-type'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\pmod{14}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "\\pmod{3}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "\\pmod{52}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "\\pmod{89}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "\\quad\\bullet\\ \\gcd(m+n,210)=1,",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\quad\\bullet\\ m",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\quad\\bullet\\ m^m",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\renewcommand{\\arraystretch}{1.5}\n\\begin{array}{c|c|c}\nm & S_m & \\frac{1}{2} - S_m \\\\ \\hline\n1 & \\frac{1}{6} & \\frac{1}{3} \\\\\n2 & \\frac{3}{8} & \\frac{1}{8} \\\\\n3 & \\frac{7}{15} & \\frac{1}{30} \\\\\n4 & \\frac{71}{144} & \\frac{1}{144} \\\\\n5 & \\frac{419}{840} & \\frac{1}{840} \n\\end{array}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\renewcommand{\\arraystretch}{1.5}\n\\begin{array}{c|c}\nm & S_m \\\\ \\hline\n1 & \\frac{1}{6} \\\\\n2 & \\frac{3}{8} \\\\\n3 & \\frac{7}{15} \\\\\n4 & \\frac{71}{144} \\\\\n5 & \\frac{419}{840}\n\\end{array}",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "array-env"
+  ]
+ },
+ {
+  "latex": "\\rightarrow",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\sin (\\arccos (\\tan (\\arcsin x) ) ) ) = \\sin \\left( \\arccos \\frac{x}{\\sqrt{1 - x^2}} \\right).",
+  "config": "precalculus",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\sin (\\arccos( \\tan (\\arcsin x) ) ) ) = x.",
+  "config": "precalculus",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\sin 2a' = 2 \\sin a' \\cos a',",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "\\sin a = \\sin a'",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "\\sin a = \\sin a' \\neq 0.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "\\sin a = \\sin a'.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "\\sin a \\cos b = \\sin a' \\cos b = \\sin 29,",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "\\sqrt{71})",
+  "config": "prealgebra",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\stackrel \\frown {AB} = 120^\\circ",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "stackrel-overset"
+  ]
+ },
+ {
+  "latex": "\\stackrel \\frown {AC} = 168^\\circ",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "stackrel-overset"
+  ]
+ },
+ {
+  "latex": "\\stackrel \\frown {BC} = 72^\\circ",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "stackrel-overset"
+  ]
+ },
+ {
+  "latex": "\\stackrel{\\frown}{BF} = \\stackrel{\\frown}{EC},\\ \\stackrel{\\frown}{AF} = \\stackrel{\\frown}{CD},\\ \\stackrel{\\frown}{AE} = \\stackrel{\\frown}{BD}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "stackrel-overset"
+  ]
+ },
+ {
+  "latex": "\\star",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\sum \\limits_{k=1}^{n}(-1)^k\\dbinom{k+2}{2}\\equiv -\\left(\\frac{n+1}{2} \\right) \\left(\\frac{n+1}{2}+1 \\right) \\mod 2017 \\textnormal{  if n is odd}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\sum \\limits_{k=1}^{n}(-1)^k\\dbinom{k+2}{2}\\equiv \\left(\\frac{n}{2}+1 \\right)^2 \\mod 2017 \\textnormal{  if n is even}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\sum_{k=0}^{7} {7 \\choose k}(k+2)",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A) } 2 \\qquad\\textbf{(B) } 4 \\qquad\\textbf{(C) } 6 \\qquad\\textbf{(D) } 30 \\qquad\\textbf{(E) } 32",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A) } 324 \\qquad \\textbf{(B) } 330 \\qquad \\textbf{(C) } 340 \\qquad \\textbf{(D) } 361 \\qquad \\textbf{(E) } 646",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A) } 512 \\qquad  \\textbf{(B) } 729 \\qquad  \\textbf{(C) } 1094 \\qquad  \\textbf{(D) } 3281 \\qquad  \\textbf{(E) } 59,048",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A) } 7 \\qquad \\textbf{(B) } 11 \\qquad \\textbf{(C) } 13 \\qquad \\textbf{(D) } 17 \\qquad \\textbf{(E) } 19",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A) }110\\qquad\\textbf{(B) }191\\qquad\\textbf{(C) }261\\qquad\\textbf{(D) }325\\qquad\\textbf{(E) }425",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A) }32\\qquad \\textbf{(B) }684\\qquad \\textbf{(C) }1024\\qquad \\textbf{(D) }1576\\qquad \\textbf{(E) }2016\\qquad",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A) }80\\qquad \\textbf{(B) }81 \\qquad \\textbf{(C) }96 \\qquad \\textbf{(D) }97 \\qquad \\textbf{(E) }625\\qquad",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A) }\\frac{\\pi r}{h+2r}\\qquad \\textbf{(B) }\\frac{\\pi r}{h+r}\\qquad \\textbf{(C) }\\frac{\\pi}{2h+r}\\qquad \\textbf{(D) }\\frac{\\pi r^2}{r^2+h^2}\\qquad \\textbf{(E) }\\text{none of these}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)} 92 \\qquad\\textbf{(B)} 94 \\qquad\textbf{(C)} 96 \\qquad\\textbf{(D)} 98 \\qquad\\textbf{(E)} 100",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)} \\ 0 \\qquad\\textbf{(B)} \\ 1 \\qquad \\textbf{(C)} \\ 2 \\qquad\\textbf{(D)} \\ 3\\qquad \\textbf{(E)} \\ \\text{More than three, but finite}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)} \\text{ 12} \\qquad \\textbf{(B)} \\text{ 14} \\qquad \\textbf{(C)} \\text{ 16} \\qquad \\textbf{(D)} \\text{ 18} \\qquad \\textbf{(E)} \\text{ 20}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)} \\text{ 5} \\qquad \\textbf{(B)} \\text{ 7} \\qquad \\textbf{(C)} \\text{ 11} \\qquad \\textbf{(D)} \\text{ 13} \\qquad \\textbf{(E)} \\text{ 17}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 0\\qquad \\textbf{(B)}\\ 16\\qquad \\textbf{(C)}\\ 17\\qquad \\textbf{(D)}\\ 57\\qquad \\textbf{(E)}\\ 58",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 0\\qquad \\textbf{(B)}\\ 1\\qquad \\textbf{(C)}\\ 2\\qquad \\textbf{(D)}\\ 3\\qquad \\textbf{(E)}\\ \\text{more than 3}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 1 \\qquad\\textbf{(B)}\\ 3\\qquad\\textbf{(C)}\\ 12\\qquad\\textbf{(D)}\\ 1239\\qquad\\textbf{(E)}\\ 1265",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 1:2\\qquad \\textbf{(B)}\\ 1:3\\qquad \\textbf{(C)}\\ \\sqrt{3}:7\\qquad \\textbf{(D)}\\ 1:4\\qquad \\textbf{(E)}\\ \\sqrt{2}:6",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 1:3 \\qquad \\textbf{(B)}\\ 3:4 \\qquad \\textbf{(C)}\\ 4:3 \\qquad \\textbf{(D)}\\ 3:1 \\qquad \\textbf{(E)}\\ 7:1",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 1\\qquad \\textbf{(B)}\\ \\frac{3}{2}\\qquad \\textbf{(C)}\\ 2\\qquad \\textbf{(D)}\\ \\frac{9}{4}\\qquad \\textbf{(E)}\\ 3",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 1\\qquad\\textbf{(B)}\\ 4\\qquad\\textbf{(C)}\\ 9\\qquad\\textbf{(D)}\\ 18\\qquad\\textbf{(E)}\\ 44",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 2\\qquad \\textbf{(B)}\\ 4\\qquad \\textbf{(C)}\\ 6\\qquad \\textbf{(D)}\\ 8\\qquad \\textbf{(E)}\\ 16",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 3 \\qquad \\textbf{(B)}\\ \\dfrac{3}{2}\\qquad \\textbf{(C)}\\ 4 \\qquad \\textbf{(D)}\\ 5 \\qquad \\textbf{(E)}\\ \\dfrac{5}{2}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 378 \\qquad \\textbf{(B)}\\ 392 \\qquad \\textbf{(C)}\\ 400 \\qquad \\textbf{(D)}\\ 441 \\qquad \\textbf{(E)}\\ 484",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 3\\cos\\theta \\qquad \\textbf{(B)}\\ 3\\sec\\theta \\qquad \\textbf{(C)}\\ 3 \\cos \\frac12 \\theta \\qquad \\textbf{(D)}\\ 3 \\sec \\frac12 \\theta \\qquad \\textbf{(E)}\\ 3",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 4 \\qquad \\textbf{(B)}\\ 8\\qquad \\textbf{(C)}\\ 10 \\qquad \\textbf{(D)}\\ 12 \\qquad \\textbf{(E)}\\ 16",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 4\\qquad \\textbf{(B)}\\ 5\\qquad \\textbf{(C)}\\ 6\\qquad \\textbf{(D)}\\ 7\\qquad \\textbf{(E)}\\ \\text{none of these}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 4\\qquad \\textbf{(B)}\\ \\sqrt{17} \\qquad \\textbf{(C)}\\ 4.25\\qquad \\textbf{(D)}\\ 2\\sqrt{5} \\qquad \\textbf{(E)}\\ 4.5",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 6\\qquad \\textbf{(B)}\\ 7\\qquad \\textbf{(C)}\\ 8\\qquad \\textbf{(D)}\\ 9\\qquad \\textbf{(E)}\\ 10",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 72\\qquad \\textbf{(B)}\\ 75\\qquad \\textbf{(C)}\\ 80\\qquad \\textbf{(D)}\\ 90\\qquad \\textbf{(E)}\\ \\text{not uniquely determined}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 7\\qquad \\textbf{(B)}\\ 13\\qquad \\textbf{(C)}\\ 18\\qquad \\textbf{(D)}\\ 27\\qquad \\textbf{(E)}\\ 36",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 7\\qquad \\textbf{(B)}\\ 8\\qquad \\textbf{(C)}\\ 9\\qquad \\textbf{(D)}\\ 10\\qquad \\textbf{(E)}\\ 11",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 7\\qquad\\textbf{(B)}\\ 8\\qquad\\textbf{(C)}\\ 16\\qquad\\textbf{(D)}\\ 17\\qquad\\textbf{(E)}\\ 18",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ 8 \\qquad \\textbf{(B)}\\ 12 \\qquad \\textbf{(C)}\\ 13 \\qquad \\textbf{(D)}\\ 8\\sqrt{3} \\qquad \\textbf{(E)}\\ 6\\sqrt{6}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ AB=3, CD=1\\qquad \\textbf{(B)}\\ AB=5, CD=2\\qquad \\textbf{(C)}\\ AB=7, CD=3\\qquad\\\\ \\textbf{(D)}\\ AB=9, CD=4\\qquad \\textbf{(E)}\\ AB=11, CD=5",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ \\cos\\ \\alpha\\qquad \\textbf{(B)}\\ \\sin\\ \\alpha\\qquad \\textbf{(C)}\\ \\cos^2\\alpha\\qquad \\textbf{(D)}\\ \\sin^2\\alpha\\qquad \\textbf{(E)}\\ 1-\\sin\\ \\alpha",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ \\frac{1}{2} \\qquad \\textbf{(B)}\\ 1 \\qquad \\textbf{(C)}\\ \\frac{3}{2} \\qquad \\textbf{(D)}\\ \\frac{13}{2}\\qquad \\textbf{(E)}\\ \\text{there is no minimum}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ \\frac{5}{18}\\qquad \\textbf{(B)}\\ \\frac{2}{9}\\qquad \\textbf{(C)}\\ \\frac{1}{4}\\qquad \\textbf{(D)}\\ \\frac{1}{3}\\qquad \\textbf{(E)}\\ \\frac{4}{9}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ \\frac{bx}{h}(h-x)\\qquad \\textbf{(B)}\\ \\frac{hx}{b}(b-x)\\qquad \\textbf{(C)}\\ \\frac{bx}{h}(h-2x)\\qquad \\textbf{(D)}\\ x(b-x)\\qquad \\textbf{(E)}\\ x(h-x)",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ \\sqrt{13}\\qquad \\textbf{(B)}\\ \\sqrt{14}\\qquad \\textbf{(C)}\\ \\sqrt{15}\\qquad \\textbf{(D)}\\ \\sqrt{16}\\qquad \\textbf{(E)}\\ \\sqrt{17}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ \\sqrt{3}/3\\qquad \\textbf{(B)}\\ \\sqrt{2}/2\\qquad \\textbf{(C)}\\ 2\\sqrt{2}/3\\qquad \\textbf{(D)}\\ 1 \\qquad \\textbf{(E)}\\ \\sqrt{2}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ \\tan \\theta = \\theta\\qquad \\textbf{(B)}\\ \\tan \\theta = 2\\theta\\qquad \\textbf{(C)}\\ \\tan\\theta = 4\\theta\\qquad \\textbf{(D)}\\ \\tan 2\\theta =\\theta\\qquad\\\\  \\textbf{(E)}\\ \\tan\\frac{\\theta}{2}=\\theta",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{(A)}\\ s^2\\le8r^2\\qquad \\textbf{(B)}\\ s^2=8r^2 \\qquad \\textbf{(C)}\\ s^2 \\ge 8r^2 \\qquad\\\\ \\textbf{(D)}\\ s^2\\le4r^2 \\qquad \\textbf{(E)}\\ s^2=4r^2",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textbf{Juan's Old Stamping Grounds}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command",
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "\\textbf{medians}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textit{abundant number}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textit{external diagonal}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textit{palindrome}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\textit{proper factors}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "style-command"
+  ]
+ },
+ {
+  "latex": "\\text{(A) } 0\\quad\\qquad \\text{(B) } 1\\quad\\\\ \\text{(C) } \\frac{n}{2} \\text{ for n even, } \\frac{n+1}{2} \\text{ for n odd}\\quad\\\\ \\text{(D) } n-1\\quad \\text{(E) } n",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\text{(A) } \\cos(6^\\circ)\\cos(12^\\circ)\\sec(18^\\circ)\\quad\\\\ \\text{(B) } \\cos(6^\\circ)\\sin(12^\\circ)\\csc(18^\\circ)\\quad\\\\ \\text{(C) } \\cos(6^\\circ)\\sin(12^\\circ)\\sec(18^\\circ)\\quad\\\\ \\text{(D) } \\sin(6^\\circ)\\sin(12^\\circ)\\csc(18^\\circ)\\quad\\\\ \\text{(E) } \\sin(6^\\circ)\\sin(12^\\circ)\\sec(18^\\circ)",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\text{(A) } \\frac {1}{10} \\triangle ABC \\qquad \\text{(B) } \\frac {1}{9} \\triangle ABC \\qquad \\text{(C) } \\frac{1}{7}\\triangle ABC\\qquad \\text{(D) } \\frac{1}{6}\\triangle ABC\\qquad \\text{(E) } \\text{none of these}",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text",
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "\\text{(A) } \\tfrac{1}{2}a+2b\\quad \\text{(B) } \\tfrac{3}{2}b+\\tfrac{3}{4}a\\quad \\text{(C) } 2a-b\\quad \\text{(D) } 4b-\\tfrac{1}{2}a\\quad \\text{(E) } a+b",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\text{(ratio of } \\theta \\text{ to total angle of circle)} \\times \\text{(total area)} = \\frac{\\theta}{2\\pi} \\cdot (\\pi r^2) = \\frac{\\theta}{2} \\cdot (AC)^2",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\text{Square }FECG-\\text{Square }FHIJ=4\\times 4-3\\times 3 =16-9=\\boxed{7}.",
+  "config": "prealgebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\text{Utility} = \\text{hours of math done} \\times \\text{hours of frisbee played}.",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\text{cis } (-36^\\circ) + \\text{cis } (-28^\\circ) + \\text{cis } (-20^\\circ) + \\dots + \\text{cis } (36^\\circ)",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ellipsis",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\text{cis } 75^\\circ + \\text{cis } 83^\\circ + \\text{cis } 91^\\circ + \\dots + \\text{cis } 147^\\circ",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ellipsis",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\text{cis } 75^\\circ + \\text{cis } 83^\\circ + \\text{cis } 91^\\circ + \\dots + \\text{cis } 147^\\circ = r \\, \\text{cis } 111^\\circ,",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ellipsis",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\text{cis } n^\\circ + \\text{cis } (-n)^\\circ",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\text{lcm}[6,7,8] = \\text{lcm}[3,7,8]= 3\\cdot 7\\cdot 8 = 168,",
+  "config": "number_theory",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "\\tfrac1n = 0.d_1d_2d_3d_4\\ldots",
+  "config": "number_theory",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "\\times",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\triangle",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "\\triangle = \\boxed{12}",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "\\triangle=7-2=\\boxed{5}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "\\widetilde{AB}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\widetilde{AD}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\widetilde{AE}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\widetilde{BC}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\widetilde{BD}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\widetilde{CD}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\widetilde{DE}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\{",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\{+,-,\\times,\\div\\}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\{1 + \\omega, 1 + \\zeta\\} = \\{\\frac{1}{2} + \\frac{\\sqrt 3}{2}i, \\frac{1}{2} - \\frac{\\sqrt 3}{2}i\\}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\{2, 4, 5, 8, \\allowbreak 10, 16, 20, 25, \\allowbreak 32, 40, 50, 64, \\allowbreak 80, 100\\}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\|(2 \\mathbf{a} + 3 \\mathbf{b}) \\times (\\mathbf{a} - 5 \\mathbf{b})\\| = 13 \\|\\mathbf{a} \\times \\mathbf{b}\\| = \\boxed{104}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|(2 \\mathbf{a} + 3 \\mathbf{b}) \\times (\\mathbf{a} - 5 \\mathbf{b})\\|.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|(\\mathbf{a} \\cdot \\mathbf{c}) \\mathbf{a} - \\mathbf{c}\\| = \\|-\\mathbf{b}\\| = 1.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|(\\mathbf{a} \\cdot \\mathbf{c}) \\mathbf{a} - \\mathbf{c}\\|^2 = 1,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|(\\mathbf{b} - \\mathbf{a}) \\times (\\mathbf{c} - \\mathbf{a})\\| = \\left\\| \\begin{pmatrix} 2 \\\\ -4 \\\\ 3 \\end{pmatrix} \\times \\begin{pmatrix} 1 \\\\ 1 \\\\ -2 \\end{pmatrix} \\right\\| = \\left\\| \\begin{pmatrix} 5 \\\\ 7 \\\\ 6 \\end{pmatrix} \\right\\| = \\boxed{\\sqrt{110}}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|-3 \\mathbf{v} \\| = \\left\\| -3 \\begin{pmatrix} x \\\\ y \\end{pmatrix} \\right\\| = \\left\\| \\begin{pmatrix} -3x \\\\ -3y \\end{pmatrix} \\right\\| = \\sqrt{(-3x)^2 + (-3y)^2} = 3 \\sqrt{x^2 + y^2} = \\boxed{12}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|-3 \\mathbf{v}\\|.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a} + \\mathbf{b} + \\mathbf{c}\\|^2 \\ge 0.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a} + \\mathbf{b}\\| = \\sqrt{3},",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a} + \\mathbf{b}\\|^2 = \\left\\| \\begin{pmatrix} 6 \\\\ 14 \\end{pmatrix} \\right\\|^2 = 6^2  + 14^2 = 232.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "matrix-env",
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a} - \\mathbf{b}\\| = \\|\\mathbf{a} - \\mathbf{c}\\| = \\|\\mathbf{b} - \\mathbf{c}\\| = \\sqrt{3}",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a} - \\mathbf{b}\\|^2 + \\|\\mathbf{a} - \\mathbf{c}\\|^2 + \\|\\mathbf{b} - \\mathbf{c}\\|^2 = 6 - 2 (\\mathbf{a} \\cdot \\mathbf{b} + \\mathbf{a} \\cdot \\mathbf{c} + \\mathbf{b} \\cdot \\mathbf{c}) \\le 9.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a} - \\mathbf{b}\\|^2 + \\|\\mathbf{a} - \\mathbf{c}\\|^2 + \\|\\mathbf{b} - \\mathbf{c}\\|^2 = 6 - 2 (\\mathbf{a} \\cdot \\mathbf{b} + \\mathbf{a} \\cdot \\mathbf{c} + \\mathbf{b} \\cdot \\mathbf{c}).",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a} - \\mathbf{b}\\|^2 + \\|\\mathbf{a} - \\mathbf{c}\\|^2 + \\|\\mathbf{b} - \\mathbf{c}\\|^2.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a} - \\mathbf{c}\\|^2 = 2 - 2 \\mathbf{a} \\cdot \\mathbf{c}",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a} \\times \\mathbf{b}\\| = 8.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a} \\times \\mathbf{b}\\| = \\|\\mathbf{a}\\| \\|\\mathbf{b}\\| \\sin \\theta,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a}\\| = 1,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a}\\| = 2,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a}\\| = 3",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a}\\| = \\|\\mathbf{b}\\| = 1,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a}\\| = \\|\\mathbf{b}\\| = \\|\\mathbf{a} + \\mathbf{b}\\|.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a}\\|^2 + \\|\\mathbf{b}\\|^2 + \\|\\mathbf{c}\\|^2 + 2 \\mathbf{a} \\cdot \\mathbf{b} + 2 \\mathbf{a} \\cdot \\mathbf{c} + 2 \\mathbf{b} \\cdot \\mathbf{c} \\ge 0.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a}\\|^2 + \\|\\mathbf{b}\\|^2 = \\|\\mathbf{a} + \\mathbf{b}\\|^2 - 2 \\mathbf{a} \\cdot \\mathbf{b} = 232 - 2 \\cdot 6 = \\boxed{220}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{a}\\|^2 + \\|\\mathbf{b}\\|^2.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{b} - \\mathbf{c}\\|^2 = 2 - 2 \\mathbf{b} \\cdot \\mathbf{c},",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{b} \\times \\mathbf{a}\\| = \\|\\mathbf{a}\\| \\|\\mathbf{b}\\| \\sin \\frac{\\pi}{3} = \\frac{\\sqrt{3}}{2},",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{b}\\| = 1",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{b}\\| = 5,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{b}\\| = 6,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{b}\\| \\|\\mathbf{c}\\| \\cos \\theta + \\frac{1}{3} \\|\\mathbf{b}\\| \\|\\mathbf{c}\\| = 0.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{c}\\| = 2,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{c}\\|^2 = \\|k \\mathbf{a} + \\mathbf{b}\\|^2.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{u}\\| = 1,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{v}\\| = 1",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{v}\\| = 4,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{v}\\| \\|\\mathbf{w}\\| \\sin \\theta,",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|\\mathbf{v}_1 - \\mathbf{v}_2\\|.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\|k \\mathbf{v}\\| = |k| \\|\\mathbf{v}\\|.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "\\}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "^2",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "a \\bowtie b = a+\\sqrt{b+\\sqrt{b+\\sqrt{b+...}}}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "a \\clubsuit b = \\frac{2 \\cancel{ab}}{\\cancel{ab}}=2.",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "cancel"
+  ]
+ },
+ {
+  "latex": "a \\nabla b = \\dfrac{a + b}{1 + ab}.",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "nabla-custom-op"
+  ]
+ },
+ {
+  "latex": "a | 5",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "a(y^2 + \\frac{45}4) + by = c",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "a+b | 7",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "a-b | a^n - b^n",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "a=\\pm 18 \\pm 1556 + 300",
+  "config": "geometry",
+  "errCode": "'incompatible-type'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "a^{4} + 2^{2a} \\equiv \\{0,1\\} + \\{1,4\\} \\equiv \\{0,1,2,4\\} \\pmod{5}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "a|2",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "b = k - k' + \\frac{1}{2}.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "b = k' - k - \\frac{1}{2}.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "b^2 - 4\\cdot a \\cdot (\\frac{45}4a - c) = 0",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "c + ki(b - a) - a - ki(c - b) = \\left( \\frac{1}{2} + \\frac{\\sqrt{3}}{2} i \\right) [b + ki(a - c) - a - ki(c - b)].",
+  "config": "precalculus",
+  "errCode": "'unexpected-operator'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "c = \\sum_{i=1}^{2009} {2i\\choose i} \\cdot 2^{2\\cdot 2009 - 2i}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "c' - a' = e^{\\pi i/3} (b' - a').",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "prime-after-arg"
+  ]
+ },
+ {
+  "latex": "d = \\|\\mathbf{a}\\| = \\|\\mathbf{b}\\| = \\|\\mathbf{a} + \\mathbf{b}\\|.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "d\\not=0",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "not-prefix"
+  ]
+ },
+ {
+  "latex": "f(f(f(-x))) = f(f(-f(x)) = f(-f(f(x))) = -f(f(f(x))),",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "f(n) = \\left\\{\n\\begin{array}{cl}\n1 & \\text{if $n$ is even}, \\\\\n0 & \\text{if $n$ is odd}.\n\\end{array}\n\\right.",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "f(n) = \\left\\{\n\\begin{array}{cl}\nn + 3 & \\text{if $n$ is odd}, \\\\\nn/2 & \\text{if $n$ is even}.\n\\end{array}\n\\right.",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "f(x) =\n\\begin{cases}\nx/2 &\\quad \\text{if } x \\text{ is even}, \\\\\n3x+1 &\\quad \\text{if } x \\text{ is odd}.\n\\end{cases}",
+  "config": "algebra",
+  "errCode": null,
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "f(x) = \\left\\{\n\\begin{array}{cl}\nx^2 & \\text{if $x > 0$}, \\\\\n0 & \\text{if $x = 0$}, \\\\\n-x^2 & \\text{if $x < 0$}.\n\\end{array}\n\\right.",
+  "config": "intermediate_algebra",
+  "errCode": "'unexpected-token'",
+  "motifs": [
+   "array-env"
+  ]
+ },
+ {
+  "latex": "f(x) = \\left\\{\n\\begin{array}{cl} ax+3, &\\text{ if }x>2, \\\\\nx-5 &\\text{ if } -2 \\le x \\le 2, \\\\\n2x-b &\\text{ if } x <-2.\n\\end{array}\n\\right.",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "array-env",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "f(x)=\\frac{ax+b}{cx+d}, abcd\\not=0",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "not-prefix"
+  ]
+ },
+ {
+  "latex": "f\\left(\\frac{x-a}5\\right) = f\\left(\\frac x5\\right)",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "f^{-1}(x)=\\frac{x-1}2.",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "g : x \\mapsto \\max_{j : 2^j | x} 2^j",
+  "config": "number_theory",
+  "errCode": "'expected-closing-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "k \\equiv 0, 112, 224, 175, 287, 399 \\pmod{400}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "k \\equiv 0, 15 \\pmod{16}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "k \\equiv 0, 24, 12 \\pmod{25}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "k^2 = x^2 + 2 + \\frac 1{x^2}",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "k^\\text{th}",
+  "config": "counting_and_probability",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "k^{}_{}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "empty-scripts"
+  ]
+ },
+ {
+  "latex": "m+n=",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "n - 9 \\pmod{37}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "bare-pmod"
+  ]
+ },
+ {
+  "latex": "n = 50\\text{ or }-51.",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "n = {200\\choose 100}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "n \\choose 2",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "n).",
+  "config": "algebra",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "n^{\\text{th}}",
+  "config": "algebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ordinal-th"
+  ]
+ },
+ {
+  "latex": "n|18",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides",
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "n|2001=3\\cdot23\\cdot29",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "n|N-x",
+  "config": "number_theory",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "ascii-pipe-divides"
+  ]
+ },
+ {
+  "latex": "p = \\frac n{729}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "p(c) = p\\left( {2\\cdot 2009\\choose 2009} \\right) = 2009 - p(2009!)",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "p\\left( {2i\\choose i} \\cdot 2^{2\\cdot 2009 - 2i} \\right) = 2\\cdot 2009 - i - p(i!)",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "p\\left( {2i\\choose i} \\right) = p((2i)!) - 2p(i!) = i - p(i!)",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "r = \\frac {h_{ABCD}}4",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "r = \\text{cis } (-36^\\circ) + \\text{cis } (-28^\\circ) + \\text{cis } (-20^\\circ) + \\dots + \\text{cis } (36^\\circ).",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ellipsis",
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "r(r(r(\\theta ))) = r\\left(1 - \\frac 1{\\theta}\\right) = \\frac{1}{1 - \\left(1 - \\frac 1{\\theta}\\right)} = \\frac{1}{\\frac {1}{\\theta}} = \\theta.",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "r^2=",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "x -2 = 1),",
+  "config": "algebra",
+  "errCode": "'unexpected-delimiter'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "x =",
+  "config": "geometry",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "x = -4y = \\mp 2 \\sqrt{2}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "x \\equiv 0 \\mod 7 \\Rightarrow 7 \\mid x",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "x \\equiv y \\pmod{1000} \\Leftrightarrow x \\equiv y \\pmod{125}",
+  "config": "number_theory",
+  "errCode": "'missing'",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "x-",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "x-\\lfloor x\\rfloor=\\frac1{\\lfloor x\\rfloor}.",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "x\\equiv N\\pmod{n}",
+  "config": "number_theory",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "pmod-chain"
+  ]
+ },
+ {
+  "latex": "x^2 + 3x + \\frac{3}x + \\frac{1}{x^2} = 26",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "x^2 + \\frac 1{x^2} = k^2-2",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "x^3+\\frac1{x^3}",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "x^3+\\frac1{x^3}=(-125)-(-15)=\\boxed{-110}.",
+  "config": "counting_and_probability",
+  "errCode": "'missing'",
+  "motifs": [
+   "frac-mixed-brace"
+  ]
+ },
+ {
+  "latex": "xy-",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "y < 6:",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "y \\ge 6:",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "y-",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "y:",
+  "config": "algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "z^{2000}+\\frac 1{z^{2000}}",
+  "config": "precalculus",
+  "errCode": "'missing'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "z^{}_{}",
+  "config": "intermediate_algebra",
+  "errCode": "'missing'",
+  "motifs": [
+   "empty-scripts"
+  ]
+ },
+ {
+  "latex": "{10 \\choose 0} = 1",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{10 \\choose 1} = 10",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{10 \\choose 2} = 45",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{10 \\choose 3} = 120",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{10 \\choose 4} = \\frac{10 \\cdot 9 \\cdot 8 \\cdot 7}{4 \\cdot 3 \\cdot 2} = 10 \\cdot 3 \\cdot 7 = \\boxed{210}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{12 \\choose 5} = 792",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{200 \\choose 100}=\\frac{200!}{100!100!}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{2007 \\choose 0} + {2007 \\choose 3} + \\cdots + {2007 \\choose 2007}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix",
+   "ellipsis"
+  ]
+ },
+ {
+  "latex": "{2i \\choose i}",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{3 \\choose 2} = 3",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{3\\choose 1}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{3\\choose 1} \\cdot 3 \\cdot 3! = 54",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{3\\choose 2}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{3\\choose 2} = 3",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{3\\choose 2} \\cdot 3 \\cdot 3 = 27",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{4 \\choose 2} = 6",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{40 \\choose 2} = 780",
+  "config": "number_theory",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{4\\choose 1} = 4",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{4\\choose 2}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{4\\choose 2} = 6",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{4\\choose2} = 6",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{5 \\choose 2} = 10",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{5\\choose1}(h)^1(1-h)^4 = {5\\choose2}(h)^2(1-h)^3",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{5\\choose3}(h)^3(1-h)^2 = 10\\left(\\frac{1}{3}\\right)^3\\left(\\frac{2}{3}\\right)^2 = \\frac{40}{243}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{6 \\choose 2} = \\boxed{15}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{6\\choose3} = 20",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{6\\choose3}=20",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{7 \\choose 2} = 21",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{7 \\choose 3} = \\frac{7 \\cdot 6 \\cdot 5}{3 \\cdot 2 \\cdot 1} = \\boxed{35}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{8\\choose5} = 56",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{9 \\choose 2} = 36",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{9\\choose 2}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{9\\choose 2} = 36",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{\\it can}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "{\\it could}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "{n + 10 \\choose 2} = \\frac{(n + 10)(n + 9)}{2}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{{2+3}\\choose3} = 10",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "{{5+3}\\choose3} = 56",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "choose-infix"
+  ]
+ },
+ {
+  "latex": "|A| + |B| + |C| + |D| + |E| + |F| = 81 + 36 + 16 + 108 + 240 + 900 = \\boxed{1381}.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "|A| + |B| + |C| + |D| + |E| + |F|.",
+  "config": "precalculus",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "|\\mathbf{a} \\cdot \\mathbf{b}| = \\|\\mathbf{a}\\| \\|\\mathbf{b}\\| |\\cos \\theta| = 2 \\cdot 5 \\cdot \\frac{3}{5} = \\boxed{6}.",
+  "config": "precalculus",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "norm-double-bar"
+  ]
+ },
+ {
+  "latex": "|\\triangle ABC|=|\\triangle BDA|+|\\triangle DCA|=204+204=\\boxed{408}.",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "|\\triangle AED|=|\\triangle AEF|+|\\triangle DEF|=51+17=68.",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "|\\triangle AEF|=3\\times |\\triangle DEF|=3(17)=51.",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ascii-pipe-divides",
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "|\\triangle BDA|=|\\triangle DCA|=204",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "|\\triangle DCA|=|\\triangle ECD|+|\\triangle AED|=136+68=204.",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "|\\triangle ECD|=2\\times |\\triangle AED|=2(68)=136.",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "ascii-pipe-divides",
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "|\\triangle XYZ|",
+  "config": "geometry",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "angle-triangle"
+  ]
+ },
+ {
+  "latex": "10 \\times \\$0.04 = \\$0.40.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "11 \\times \\$ 0.06 = \\$ 0.66",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "11(3)(5\\text{ cents})=\\boxed{\\$1.65}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "12/14 \\times 4.05 \\approx \\boxed{\\$3.47}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "1250\\times0.10+100=\\$225",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "1250\\times0.15=\\$187.50",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "15\\;\\text{USD}\\left(\\dfrac{6\\;\\text{CNY}}{1\\;\\text{USD}}\\right) = \\boxed{90}\\;\\text{yuan}",
+  "config": "prealgebra",
+  "errCode": "ErrorCode",
+  "motifs": [
+   "units-in-text"
+  ]
+ },
+ {
+  "latex": "3000\\times0.10+100=\\$400",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "3000\\times0.15=\\$450",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "3250\\times0.10+100=\\$425",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "3250\\times0.15=\\$487.50",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "E = \\frac{1}{3}(\\$3) + \\frac{2}{3}(-\\$2) = \\boxed{-\\frac{1}{3}}",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$ 0.66 + \\$ 0.40 = \\boxed{\\$ 1.06}.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$ 1000",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$ 1700",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$ 300",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$ 400",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$0",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$0.10",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$0.15",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$0.60\\times6=\\boxed{\\$3.60}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$1",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$10",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$100",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$12",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$130{,}000",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "thousands-sep"
+  ]
+ },
+ {
+  "latex": "\\$15",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$150",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$165,\\!000",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$1700",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$19.90",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$2",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$2.53",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$20",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$200",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$22,\\!000",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$22,\\!000/4=\\boxed{5500}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$23{,}000",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "thousands-sep"
+  ]
+ },
+ {
+  "latex": "\\$3",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$30",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$30+\\$15=\\$45",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$30+\\$20=\\$50",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$30-\\$10=\\$20",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$30\\div 2=\\$15",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$32.75",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$4.05",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$425+\\$187.50+\\$400=\\boxed{\\$1012.50}",
+  "config": "geometry",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$45",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$5",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$50",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$50{,}000",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "thousands-sep"
+  ]
+ },
+ {
+  "latex": "\\$6",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$6.95",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$60,\\!000",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\$7",
+  "config": "counting_and_probability",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "extraction-noise"
+  ]
+ },
+ {
+  "latex": "\\$75{,}000",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "thousands-sep"
+  ]
+ },
+ {
+  "latex": "\\$90{,}000",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "thousands-sep"
+  ]
+ },
+ {
+  "latex": "\\boxed{\\$1.05}.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\boxed{\\$23{,}000}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "thousands-sep"
+  ]
+ },
+ {
+  "latex": "\\boxed{\\$42409}",
+  "config": "algebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\boxed{\\$50}.",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\text{N}\\$",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "other"
+  ]
+ },
+ {
+  "latex": "\\text{N}\\$105\\left(\\dfrac{1\\;\\text{USD}}{\\text{N}\\$7}\\right) = 15\\;\\text{USD}",
+  "config": "prealgebra",
+  "errCode": "'unexpected-command'",
+  "motifs": [
+   "units-in-text"
+  ]
+ }
+]

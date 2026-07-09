@@ -48,6 +48,15 @@
 
 ### Issues Resolved
 
+- Constructing many `ComputeEngine` instances in a synchronous loop no longer
+  balloons memory (~430 KB pinned per engine until the task yielded to the
+  event loop, enough to exhaust the default V8 heap after a few thousand
+  engines). Every constant definition subscribed to configuration changes
+  through a `new WeakRef(...)`, and the ECMAScript kept-objects rule pins each
+  `WeakRef` target until the next microtask checkpoint. The tracker now holds
+  its listeners directly; since it is owned by the engine, the engine and its
+  listeners form a self-contained cycle that is garbage-collected as a unit.
+
 - A bare `\ln` or `\log` — with no argument, as in the pipeline
   `12 \triangleright \ln` — now parses to the function symbol (`"Ln"`,
   `"Log"`), consistent with `\cos`, `\lg` and `\lb`. It previously parsed to

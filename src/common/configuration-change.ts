@@ -1,17 +1,23 @@
 // Tracks and notifies listeners when a configuration change occurs.
-// Uses WeakRef to avoid preventing garbage collection of listeners.
 export class ConfigurationChangeTracker {
-  // Weak references to registered listeners. WeakRef lets a listener be
-  // garbage-collected (and pruned on the next notification) even if it is
-  // never explicitly unsubscribed. The list must stay enumerable so that
-  // `notifyNow()` can walk it — a `WeakSet` alone would not work, as it is
-  // not iterable.
-  private _listeners: WeakRef<ConfigurationChangeListener>[] = [];
+  // Strong references to registered listeners, kept enumerable so that
+  // `notifyNow()` can walk them.
+  //
+  // NOTE: This deliberately does NOT use `WeakRef`. `new WeakRef(target)`
+  // adds `target` to V8's per-job "kept alive" set (ECMAScript
+  // AddToKeptObjects), which is only cleared at a microtask checkpoint.
+  // Because `listen()` runs on the object-construction path (every constant
+  // definition subscribes, and each definition references its engine),
+  // wrapping listeners in `WeakRef` pinned every engine built within a single
+  // synchronous burst until the job ended — constructing many engines in a
+  // tight loop grew the heap by ~430 KB/engine. Holding listeners strongly
+  // here is safe because the tracker is owned by the engine and forms a
+  // self-contained cycle with it: when the engine becomes unreachable, the
+  // tracker and its listeners are collected together.
+  private _listeners: ConfigurationChangeListener[] = [];
   // Membership set for O(1) dedup. `listen()` runs on the object-construction
   // path (every new definition subscribes), so a linear "already registered?"
-  // scan would make a burst of registrations O(n²). The WeakSet holds
-  // listeners weakly — it never keeps one alive, and a garbage-collected
-  // listener drops out of both structures.
+  // scan would make a burst of registrations O(n²).
   private _registered = new WeakSet<ConfigurationChangeListener>();
   private _pending = false;
   private _version = 0;
@@ -26,7 +32,7 @@ export class ConfigurationChangeTracker {
     // O(1) dedup: only add a listener that is not already registered.
     if (!this._registered.has(listener)) {
       this._registered.add(listener);
-      this._listeners.push(new WeakRef(listener));
+      this._listeners.push(listener);
     }
 
     return () => this._unsubscribe(listener);
@@ -35,10 +41,7 @@ export class ConfigurationChangeTracker {
   private _unsubscribe(listener: ConfigurationChangeListener): void {
     if (!this._registered.has(listener)) return;
     this._registered.delete(listener);
-    this._listeners = this._listeners.filter((r) => {
-      const l = r.deref();
-      return l !== undefined && l !== listener;
-    });
+    this._listeners = this._listeners.filter((l) => l !== listener);
   }
 
   /**
@@ -67,16 +70,14 @@ export class ConfigurationChangeTracker {
    */
   notifyNow(): void {
     this._version++;
-    this._listeners = this._listeners.filter((ref) => {
-      const listener = ref.deref();
+    for (const listener of this._listeners) {
       try {
         listener?.onConfigurationChange?.();
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('Listener error:', err);
       }
-      return listener !== undefined;
-    });
+    }
     this._pending = false;
   }
 }

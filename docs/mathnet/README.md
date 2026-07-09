@@ -19,6 +19,8 @@ modeling).
 | [ce-mathnet-experiment.md](./ce-mathnet-experiment.md) | The three CE experiments: fragment parse sweep, `final_answer` sweep, 10 end-to-end case studies |
 | [parser-hardening-plan.md](./parser-hardening-plan.md) | Ranked work plan derived from the findings |
 | [parser-test-cases.json](./parser-test-cases.json) | **Curated regression corpus**: 345 originally failing LaTeX fragments + 83 follow-up fragments + 19 failing answer strings, categorized (captured on v0.67.0 plus follow-ups) |
+| [math-genre-sweep.md](./math-genre-sweep.md) | **Genre-coverage sweep** (2026-07-09) over Hendrycks MATH (15,546 fragments, all 7 subjects incl. worked solutions): 95.27% clean, ranked new-notation gap list |
+| [math-genre-failures.json](./math-genre-failures.json) | The 735 failing MATH fragments, tagged by motif (`latex`/`config`/`errCode`/`motifs`) |
 | [scripts/](./scripts/) | Regeneration + progress-check scripts (below) |
 
 The bulky intermediate data (row samples, full sweep results, ~9 MB of JSONL)
@@ -84,3 +86,9 @@ npx tsx parse-sweep.ts fragments.json                  # -> parse-results.jsonl
 
 Run the sweep on a *fresh* sample occasionally: the frozen corpus can only
 measure the gaps known at capture time.
+
+For the cross-genre variant (Hendrycks MATH instead of MathNet), use
+`fetch-math.py` + `extract-math-fragments.py` and see
+[math-genre-sweep.md](./math-genre-sweep.md) — including the sweep-chunking
+note (the fresh-engine-per-fragment pattern OOMs past ~4,900 engines in one
+process).
