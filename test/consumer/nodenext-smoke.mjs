@@ -25,6 +25,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
@@ -39,7 +40,14 @@ if (!existsSync(entryDts)) {
   process.exit(1);
 }
 
-const tsc = join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
+// Resolve the CLI entry (lib/tsc.js) of the module aliased as `typescript`.
+// This is the TS 6 API package (@typescript/typescript6), which the tooling
+// keeps for programmatic use; its bin is named `tsc6` (the native TS 7 package
+// owns the `tsc` bin), so we resolve lib/tsc.js directly rather than by bin
+// name. This must be TS 6: the smoke test type-checks with skipLibCheck:false
+// under nodenext, which needs the full programmatic compiler.
+const require = createRequire(import.meta.url);
+const tsc = join(dirname(require.resolve('typescript')), 'tsc.js');
 if (!existsSync(tsc)) {
   console.error(`nodenext-smoke: TypeScript not found at ${tsc}.`);
   process.exit(1);

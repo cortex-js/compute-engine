@@ -1,10 +1,14 @@
+// Imports resolve into the built declarations. This mirrors what a consumer
+// sees via the package's `types` export (dist/types/compute-engine.d.ts). The
+// path is relative because TS 7 removed --baseUrl, which previously mapped the
+// bare `compute-engine` specifier onto dist/types.
 import {
   ComputeEngine,
   LatexSyntax,
   LATEX_DICTIONARY,
   version,
-} from 'compute-engine';
-import type { Parser } from 'compute-engine';
+} from '../../dist/types/compute-engine';
+import type { Parser } from '../../dist/types/compute-engine';
 
 console.log(version);
 const ce = new ComputeEngine();

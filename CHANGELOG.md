@@ -28,6 +28,19 @@
   debugging, but if you need a readable (non-minified) bundle, build from
   source.
 
+### Improvements
+
+- **The declaration build and typecheck now run on TypeScript 7** (the native
+  compiler), cutting `.d.ts` emission from ~31s to ~5s and the full production
+  build from ~45s to ~29s. TS 7.0 ships no programmatic API, so it is
+  installed side-by-side: the module name `typescript` stays aliased to the
+  TS 6 API (`@typescript/typescript6`) for ts-jest, typedoc, typescript-eslint
+  and madge, while the native compiler (`@typescript/native`) drives the CLI.
+  No consumer-facing change — the published declarations are type-identical;
+  only cosmetic emission differences appear (single-quoted string literals,
+  sorted numeric-literal unions, literal non-ASCII property keys instead of
+  `\uXXXX` escapes).
+
 ## 0.69.1 _2026-07-08_
 
 ### Issues Resolved

@@ -2,12 +2,15 @@
 set -e
 
 # TypeScript type checking
-# TS 6: a file argument makes tsc ignore tsconfig.json (error TS5112), so the
-# full option set is passed on the CLI with --ignoreConfig. "bundler" replaces
-# the removed node10 resolution; --types node restores @types/node (no longer
+# Runs on the native (Go) compiler (@typescript/native, npm:typescript@7),
+# referenced by its explicit path because it and the TS 6 API package
+# (@typescript/typescript6, aliased as `typescript`) both ship a `tsc` bin.
+# A file argument makes tsc ignore tsconfig.json (error TS5112), so the full
+# option set is passed on the CLI with --ignoreConfig. "bundler" replaces the
+# removed node10 resolution; --types node restores @types/node (no longer
 # auto-discovered); strict is on by default.
 echo "Running TypeScript type check..."
-npx tsc --target es2022 --module es2022 --moduleResolution bundler --types node \
+./node_modules/@typescript/native/bin/tsc --target es2022 --module es2022 --moduleResolution bundler --types node \
   --skipLibCheck -d --allowImportingTsExtensions true --emitDeclarationOnly \
   --ignoreConfig --outDir /tmp/typecheck ./src/compute-engine.ts
 

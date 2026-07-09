@@ -76,56 +76,63 @@ printf "$BASENAME$DOT Building TypeScript declaration files (.d.ts)"
 # Even though we only generate declaration file, the target must be set high-enough
 # to prevent tsc from complaining (!)
 #
-# TS 6 notes: passing a file argument makes tsc ignore tsconfig.json (error
-# TS5112), so the full option set is supplied here with --ignoreConfig.
-# "bundler" replaces the removed node10 resolution and --types node restores
-# @types/node (no longer auto-discovered). Keep these flags in sync with
-# scripts/typecheck.sh.
+# TS 7 notes: the .d.ts emission runs on the native (Go) compiler for speed. It
+# is installed side-by-side as `@typescript/native` (npm:typescript@7); the
+# module name `typescript` stays aliased to the TS 6 API (@typescript/typescript6)
+# so ts-jest/typedoc/eslint/madge keep working. Both packages ship a `tsc` bin,
+# so the native one is referenced by its explicit path here (never via npx,
+# whose resolution order is ambiguous).
+#
+# Passing a file argument makes tsc ignore tsconfig.json (error TS5112), so the
+# full option set is supplied here with --ignoreConfig. "bundler" replaces the
+# removed node10 resolution and --types node restores @types/node (no longer
+# auto-discovered). Keep these flags in sync with scripts/typecheck.sh.
+TS7="./node_modules/@typescript/native/bin/tsc"
 DTS_FLAGS="--target es2022 --module es2022 --moduleResolution bundler --types node --skipLibCheck -d --allowImportingTsExtensions true --ignoreConfig"
 if [[ "$TARGETS" == *math-json* ]]; then
-  npx tsc $DTS_FLAGS \
+  "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts
 fi
 if [[ "$TARGETS" == *compute-engine* ]]; then
-  npx tsc $DTS_FLAGS \
+  "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/compute-engine.ts 
 fi
 if [[ "$TARGETS" == *cortex* ]]; then
-  npx tsc $DTS_FLAGS \
+  "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts
 fi
 if [[ "$TARGETS" == *latex-syntax* ]]; then
-  npx tsc $DTS_FLAGS \
+  "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/latex-syntax.ts
 fi
 if [[ "$TARGETS" == *interval* ]]; then
-  npx tsc $DTS_FLAGS \
+  "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/interval.ts
 fi
 if [[ "$TARGETS" == *numerics* ]]; then
-  npx tsc $DTS_FLAGS \
+  "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/numerics.ts
 fi
 if [[ "$TARGETS" == *core* ]]; then
-  npx tsc $DTS_FLAGS \
+  "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/core.ts
 fi
 if [[ "$TARGETS" == *compile* ]]; then
-  npx tsc $DTS_FLAGS \
+  "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/compile.ts
 fi
 if [[ "$TARGETS" == *identities* ]]; then
   # --resolveJsonModule/--esModuleInterop: the identities entry imports the
   # compiled rule artifact (fungrim-core-data.json); these flags are not in
   # the root tsconfig and CLI invocations ignore tsconfig.
-  npx tsc $DTS_FLAGS \
+  "$TS7" $DTS_FLAGS \
     --resolveJsonModule --esModuleInterop \
     --emitDeclarationOnly --outDir ./dist/types ./src/identities.ts
 fi
 if [[ "$TARGETS" == *integration-rules* ]]; then
   # --resolveJsonModule/--esModuleInterop: the integration-rules entry imports
   # the bundled Rubi corpus (rubi-rules-data.json).
-  npx tsc $DTS_FLAGS \
+  "$TS7" $DTS_FLAGS \
     --resolveJsonModule --esModuleInterop \
     --emitDeclarationOnly --outDir ./dist/types ./src/integration-rules.ts
 fi
