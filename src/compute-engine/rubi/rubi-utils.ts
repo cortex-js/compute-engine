@@ -4440,6 +4440,66 @@ function expandPartialFractions(u: Expression, ctx: Ctx): Expression {
   return ce.function('Add', terms);
 }
 
+/** True iff every x-DEPENDENT denominator factor of the rational function `r`
+ *  is LINEAR in x (degree exactly 1), and at least one such factor exists.
+ *  Fail-closed gate for `expandRationalOverLinears`: a denominator factor of
+ *  degree ≥ 2 (an irreducible quadratic like `a+b·x²`, or a higher power) would
+ *  need complex/irrational roots to split, which the linear-only
+ *  partial-fraction machinery can't do soundly — decline. x-free (constant
+ *  coefficient) denominator factors are ignored. */
+function allXDenominatorsLinearQ(
+  ce: ComputeEngine,
+  r: Expression,
+  x: string
+): boolean {
+  const u = toTimesPower(ce, r);
+  const factors = u.operator === 'Multiply' && u.ops ? [...u.ops] : [u];
+  let hasXDenom = false;
+  for (const f of factors) {
+    if (f.operator !== 'Power' || !f.ops) continue;
+    const [base, e] = f.ops;
+    if (!(isNumber(e) && typeof e.re === 'number' && e.re < 0)) continue;
+    if (!base.has(x)) continue; // constant/coefficient denominator — ignore
+    hasXDenom = true;
+    if (polyDegreeX(base, x) !== 1) return false;
+  }
+  return hasXDenom;
+}
+
+/** R15 support: expand a rational function `r` of `x` into a sum of pieces —
+ *  each a single polynomial monomial or a `c·L^{−j}` term over a LINEAR factor
+ *  L — via the ExpandIntegrand poly-over-linear / partial-fraction machinery.
+ *  Returns the list of pieces, or `null` when:
+ *    • `r` is not a rational function of x;
+ *    • some x-dependent denominator factor is NON-LINEAR (irreducible
+ *      quadratic or higher — the complex-root case the caller must decline);
+ *    • there is no x-dependent denominator (degree-0 denominator); or
+ *    • the expansion does not actually SPLIT (< 2 pieces — a single-piece
+ *      rational the caller must not re-enter).
+ *  Fail-closed: any `RuleFail` from the expansion machinery returns null. */
+export function expandRationalOverLinears(
+  ce: ComputeEngine,
+  r: Expression,
+  x: string
+): Expression[] | null {
+  if (!rationalFnQ(r, x)) return null;
+  if (!allXDenominatorsLinearQ(ce, r, x)) return null;
+  let expanded: Expression;
+  try {
+    const ctx: Ctx = { ce, env: new Map(), x, hooks: { int: () => null } };
+    expanded = expandPolyOverLinear(r, ctx);
+  } catch (e) {
+    if (e instanceof RuleFail) return null;
+    throw e;
+  }
+  const pieces =
+    expanded.operator === 'Add' && expanded.ops
+      ? [...expanded.ops]
+      : [expanded];
+  if (pieces.length < 2) return null;
+  return pieces;
+}
+
 function coeff(args: Json[], ctx: Ctx): Expression {
   const u = build(args[0], ctx);
   const n = args.length >= 3 ? (realNum(build(args[2], ctx)) ?? NaN) : 1;

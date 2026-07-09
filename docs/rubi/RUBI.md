@@ -1,17 +1,19 @@
 # Rubi → Compute Engine: Feasibility Analysis
 
-**Date:** 2026-06-10 (feasibility); last status update 2026-07-04.
+**Date:** 2026-06-10 (feasibility); last status update 2026-07-09.
 **Status:** shipped bundle = **Chapters 1, 2, 6 + 4.1 Sine + 4.5 Secant**
 (4,531 rules). Chapter-1 exhaustive ≈90–91%; ch2 ≈72% / ch6 ≈45% effective;
-**4.1 Sine 107/120 and 317/400 (seed 5); 4.5 Secant 56/120; genuine wrongs 0
-across all suites** (all flagged "wrongs" are documented verification
-false-wrong classes — see the ROADMAP §R state note). The 2026-07-04 rung
-series (R1/R2/R4, R10, R11, R9, R14 — §5 below) added the cofunction product
-clauses, the ch1-foundation benchmark fix, `reciprocalToPower`, the
-`cofunctionShift` and `standaloneCosineShift` runtime routing, the trig→exp
-fallback, and argument-aware `deactivateTrig`. **Next rungs live in
-ROADMAP §R** (R15 Si/Ci fallback, R12 bundle 4.3 Tangent, R13 sec binomials,
-R3′ deep chains, R5; then the Ch6 tail R6–R8). The §1–§4 analysis below is
+**4.1 Sine 106/120 and 320/400 (seed 5; 4.1.11 file 71/113); 4.5 Secant
+56/120; genuine wrongs 0 across all suites** (all flagged "wrongs" are
+documented verification false-wrong classes — see the ROADMAP §R state note).
+The 2026-07-04 rung series (R1/R2/R4, R10, R11, R9, R14 — §5 below) added the
+cofunction product clauses, the ch1-foundation benchmark fix,
+`reciprocalToPower`, the `cofunctionShift` and `standaloneCosineShift` runtime
+routing, the trig→exp fallback, and argument-aware `deactivateTrig`; R15
+(2026-07-09) added the rational×sin(linear) → Si/Ci partial-fraction fallback.
+**Next rungs live in ROADMAP §R** (R12 bundle 4.3 Tangent, R13 sec binomials,
+R16 the 4.1.10 `(a+b·sin)`-denominator Si/Ci chains, R3′ deep chains, R5;
+then the Ch6 tail R6–R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
 phasing status, and the project memory (`project_rubi.md`) has the
 session-by-session log.
@@ -873,7 +875,51 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     (with a numeric self-check to decline the complex-Si cases as R9 does for
     complex-Ei) — deferred to keep R14's zero-regression / zero-new-wrong
     guarantee. Deactivation-timing (active vs inert Sin) is the through-line for
-    both R14 and this residual.
+    both R14 and this residual. *(→ Closed by Phase R15 below.)*
+- **Phase R15 — rational×sin/cos(linear) → Si/Ci partial-fraction fallback
+  LANDED (2026-07-09, runtime only, bundle untouched).** Exactly the scoped
+  driver fallback the R14 diagnosis called for. Premise verified first: the
+  driver ALREADY closes the single-piece forms (`∫sin(c+d·x)/(a+b·x)` → shifted
+  `SinIntegral`/`CosIntegral` via the inert Si/Ci rules; `∫xᵏ·sin(c+d·x)` via
+  by-parts) — only COMPOSITE rationals returned null. So the fallback splits
+  and recurses rather than emitting Si/Ci itself.
+  - **Mechanism.** `rationalTrigSiCiFallback` (driver.ts; placed after the
+    trig→exp fallback — which gates on NONLINEAR args, so no overlap — and
+    before the function-of-exponential fallback; `RUBI_NO_SICI` A/B switch;
+    whole body try/catch → null) + `expandRationalOverLinears` /
+    `allXDenominatorsLinearQ` (rubi-utils.ts, reusing the `ExpandIntegrand`
+    poly-over-linear / partial-fraction machinery). Each expanded
+    `piece·sin` is routed back through `intRec`.
+  - **Double gate, fail-closed.** (1) *Structural*: exactly one inert
+    `sin`/`cos` factor at power 1 of a LINEAR argument; every other factor
+    trig-free and rational in x; every x-dependent denominator factor LINEAR
+    (declines irreducible quadratics — the complex-Si family); the expansion
+    must actually SPLIT (≥2 pieces — every emitted piece is single-piece by
+    construction, so the fallback cannot re-enter); every piece must close.
+    (2) *Numeric*: `antiderivativeVerifies` central-difference D-check of the
+    ACTIVATED antiderivative against the integrand at 5 sample points with
+    deterministic parameter substitution — "unsolved beats a branch-fragile
+    wrong".
+  - **Numbers (seed 5, `--rubi`).** 4.1.11 file (all 113 problems): **46 → 71
+    correct (+25)**, 0 new wrong, 0 not-evaluable. 4.1 Sine 400: **317 → 320**
+    (the 3 wrongs are the documented #690/#205/#116 false-wrongs, unchanged);
+    120: 106 both ways (the sample contains no target problem; the R14-era
+    "107" predates commit `d6305386` — pre-existing drift, not an R15 shift).
+    Strict no-op off-family (A/B via `RUBI_NO_SICI` byte-identical): 4.5
+    Secant 120 = 56, ch1 200 = 183, ch2 60 = 33 (the R14 notes' "33/1/3" had
+    already drifted to 33/3/6 before R15), ch6 60 = 19.
+  - **Targets.** 4.1.11 #18 (`x⁴·sin/(a+b·x)`), #23 (`sin/(x(a+b·x))`), #89
+    (`(a+b·x³)²·sin/x`) all solve in the corpus-matching shifted Si/Ci forms.
+    #61/#71/#72 (irreducible-quadratic denominators → complex Si/Ci) are
+    declined by the linear-only gate in ~50 ms — cleanly unsolved, not wrong,
+    not not-evaluable. The 4.1.10 four (#30/#112/#197/#294) are unchanged and
+    are confirmed to be a genuinely DIFFERENT mechanism — `(a+b·sin)`
+    **denominators**, not rational-in-x, so the trig-free-rational gate
+    declines them; they need their own rung.
+  - **Tests.** +10 in `rubi-utils.test.ts`: 7 expansion-gate unit tests and 3
+    end-to-end through the shipped `loadIntegrationRules` path (D-checked with
+    concrete integer parameters, plus a #61-shape decline test). The two close
+    tests fail under `RUBI_NO_SICI=1` — they exercise the rung, not a rule.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

@@ -34,6 +34,8 @@ import {
   expandHyperbolicToExp,
   containsInertSinCos,
   expandTrigToExp,
+  expandRationalOverLinears,
+  polyDegreeX,
   sinCosArgNonlinearExpandableQ,
   numericallyEvaluable,
   foldLnExponentialE,
@@ -72,6 +74,9 @@ const NO_RECIP = process.env.RUBI_NO_RECIP !== undefined;
 // RUBI_NO_COFN: disable the sec→csc[+π/2] / cot→-tan[+π/2] cofunction
 // deactivation shift (A/B measuring its effect on the 4.5/4.3 benchmarks).
 const NO_COFN = process.env.RUBI_NO_COFN !== undefined;
+// RUBI_NO_SICI: disable the R15 rational×sin/cos(linear) → Si/Ci
+// partial-fraction fallback (A/B measuring its effect on the 4.1 benchmark).
+const NO_SICI = process.env.RUBI_NO_SICI !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -685,6 +690,25 @@ export class RubiDriver {
       }
     }
 
+    // ---- rational × sin/cos(linear) → Si/Ci fallback (R15) ------------
+    // `∫ R(x)·sin(c+d·x) dx` (and cos) where R is a rational function of x
+    // whose x-dependent denominator factors are all LINEAR. Rubi closes these
+    // with ExpandIntegrand + E^(i·x) rules on ACTIVE linear-arg Sin, but CE
+    // MUST inert linear-arg sin (the working inert Si rule and the bulk of
+    // chapter 4 depend on it), so those rules can't fire without regression.
+    // Instead: expand R into partial-fraction / poly-over-linear pieces and
+    // route each `piece·sin` back through the driver — the single-piece forms
+    // close via the Si/Ci rules (∫sin/(a+bx), ∫sin/x) and by-parts
+    // (∫xᵏ·sin). Every emitted piece is single-piece by construction, so the
+    // ≥2-piece gate in expandRationalOverLinears prevents re-entry. Reached
+    // only after every rule and the trig→exp fallback declined; gated
+    // fail-closed with a numeric self-check so the complex-root families
+    // (irreducible-quadratic denominators → complex Si/Ci) stay unsolved.
+    if (this.trigActive && !NO_SICI) {
+      const F = this.rationalTrigSiCiFallback(integrand, variable, depth);
+      if (F !== null) return F;
+    }
+
     // ---- function-of-a-single-exponential fallback --------------------
     // A pure hyperbolic of a LINEAR argument is a rational function of
     // e^(linear) — including the reciprocals Tanh/Coth/Sech/Csch that the
@@ -739,6 +763,73 @@ export class RubiDriver {
     }
   }
 
+  /** R15: `∫ R(x)·sin(c+d·x) dx` (and cos) where R is a rational function of x
+   * with all-LINEAR x-dependent denominator factors — closed by expanding R
+   * into partial-fraction / poly-over-linear pieces (ExpandIntegrand) and
+   * routing each `piece·sin` back through the driver, which closes the
+   * single-piece forms via the Si/Ci rules and by-parts. Reached only after
+   * every rule and the trig→exp fallback declined. Fail-closed with a numeric
+   * self-check: returns null unless every piece closes AND D(ΣF) matches the
+   * integrand numerically — so the complex-root families (irreducible-quadratic
+   * denominators → complex Si/Ci) stay cleanly unsolved. The whole body is
+   * wrapped in try/catch (the native expansion machinery can throw on odd
+   * inputs); any throw → null. */
+  private rationalTrigSiCiFallback(
+    integrand: Expression,
+    variable: string,
+    depth: number
+  ): Expression | null {
+    const ce = this.ce;
+    try {
+      // Fully deactivate so linear-arg trig is the inert `sin`/`cos` head, then
+      // put in Times/Power normal form to inspect the product factors.
+      const inert = toTimesPower(ce, deactivateTrig(ce, integrand));
+      if (inert.operator !== 'Multiply' || !inert.ops) return null;
+      // Exactly one bare inert sin/cos factor (power 1) of a LINEAR argument.
+      const trigFactors = inert.ops.filter(
+        (f) =>
+          (f.operator === 'sin' || f.operator === 'cos') &&
+          f.ops?.length === 1 &&
+          polyDegreeX(f.ops[0], variable) === 1
+      );
+      if (trigFactors.length !== 1) return null;
+      const trig = trigFactors[0];
+      const rest = inert.ops.filter((f) => f !== trig);
+      // Every other factor must be free of trig heads (the rational part).
+      if (rest.some((f) => containsInertSinCos(f))) return null;
+      const rational = recanonicalize(
+        ce,
+        rest.length === 1 ? rest[0] : ce._fn('Multiply', rest)
+      );
+      // Expand R into single-piece terms over LINEAR denominators (declines a
+      // non-rational R, a non-linear/irreducible-quadratic denominator, or a
+      // non-splitting single-piece rational — the last prevents re-entry).
+      const pieces = expandRationalOverLinears(ce, rational, variable);
+      if (pieces === null) return null;
+      // Integrate each `piece·sin`; every piece must close.
+      const parts: Expression[] = [];
+      for (const p of pieces) {
+        const term = recanonicalize(ce, ce._fn('Multiply', [p, trig]));
+        const F = this.intRec(term, variable, depth + 1);
+        if (F === null || F.has('Integrate')) return null;
+        parts.push(F);
+      }
+      const F = this.cleanExpansionResult(
+        parts.length === 1 ? parts[0] : ce.function('Add', parts)
+      );
+      if (F.has('Integrate')) return null;
+      // Numeric self-check: D(F) must match the integrand at sample points
+      // (via central differences on the ACTIVATED antiderivative — SinIntegral/
+      // CosIntegral evaluate; a complex-Si result evaluates non-finite and is
+      // declined). Decline unless it verifies.
+      if (!antiderivativeVerifies(ce, activateTrig(ce, F), integrand, variable))
+        return null;
+      return F;
+    } catch {
+      return null;
+    }
+  }
+
   /** Clean the exponential-fallback antiderivative: collect like terms via a
    * bounded simplify (the raw expansion repeats `c·x` once per exponential
    * term, which otherwise bloats high-degree results past the verifier's leaf
@@ -767,6 +858,75 @@ export class RubiDriver {
     }
     return foldLnExponentialE(ce, simplified);
   }
+}
+
+/** Numeric self-check for the R15 fallback: verify D(F) ≈ integrand by CENTRAL
+ * DIFFERENCES at several sample points, with every free parameter fixed to a
+ * distinct sample value. Central differences avoid needing a symbolic
+ * derivative of SinIntegral/CosIntegral, and cancel the integration constant.
+ * Returns false on any non-finite evaluation (a complex-Si antiderivative
+ * evaluates non-finite over the real samples → declined) or any mismatch, and
+ * requires at least MIN_OK clean agreements. `F` is passed activated by the
+ * caller; the integrand is activated here so its trig heads evaluate. */
+function antiderivativeVerifies(
+  ce: ComputeEngine,
+  F: Expression,
+  integrand: Expression,
+  variable: string
+): boolean {
+  const target = activateTrig(ce, integrand);
+  const known = new Set([
+    'Pi',
+    'ExponentialE',
+    'ImaginaryUnit',
+    'GoldenRatio',
+    'EulerGamma',
+    'CatalanConstant',
+    'True',
+    'False',
+    'Nothing',
+  ]);
+  const sub: Record<string, number> = {};
+  let seed = 0.41;
+  const collect = (e: Expression): void => {
+    if (
+      e.symbol &&
+      e.symbol !== variable &&
+      !known.has(e.symbol) &&
+      !(e.symbol in sub)
+    ) {
+      sub[e.symbol] = seed;
+      seed += 0.53;
+    }
+    (e.ops ?? []).forEach(collect);
+  };
+  collect(F);
+  collect(target);
+  const h = 1e-4;
+  const xs = [0.37, 0.83, 1.29, 1.71, 2.13];
+  const MIN_OK = 3;
+  const finite = (v: unknown): v is number =>
+    typeof v === 'number' && Number.isFinite(v);
+  let ok = 0;
+  for (const xv of xs) {
+    try {
+      const fp = F.subs({ ...sub, [variable]: xv + h }).N();
+      const fm = F.subs({ ...sub, [variable]: xv - h }).N();
+      const tv = target.subs({ ...sub, [variable]: xv }).N();
+      if (!(isNumber(fp) && isNumber(fm) && isNumber(tv))) return false;
+      const dr = ((fp.re as number) - (fm.re as number)) / (2 * h);
+      const di = ((fp.im ?? 0) - (fm.im ?? 0)) / (2 * h);
+      const tr = tv.re;
+      const ti = tv.im ?? 0;
+      if (![dr, di, tr, ti].every(finite)) return false;
+      if (Math.abs(dr - tr) > 1e-4 * (1 + Math.abs(tr))) return false;
+      if (Math.abs(di - ti) > 1e-4 * (1 + Math.abs(ti))) return false;
+      ok++;
+    } catch {
+      return false;
+    }
+  }
+  return ok >= MIN_OK;
 }
 
 /** Rewrite uncollected polynomial Add factors of a (normal-form) integrand

@@ -126,24 +126,30 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   superscripted braces denoting a sequence; currently the sub/superscript on
   the `Set` flags `incompatible-type` (3 corpus cases, 2026-07-09 sample).
   Needs a design call on the target MathJSON shape before implementing.
-- **MATH genre-gap fixes (S/M; top tier EXECUTED 2026-07-09):** the
-  genre-coverage sweep ran over Hendrycks MATH (15,546 fragments incl.
-  worked solutions across all 7 subjects; report:
+- **MATH genre-gap fixes (S/M; top tier + cheap recoveries EXECUTED
+  2026-07-09):** the genre-coverage sweep ran over Hendrycks MATH (15,546
+  fragments incl. worked solutions across all 7 subjects; report:
   `docs/mathnet/math-genre-sweep.md`, tagged failures:
   `math-genre-failures.json`): 95.27% clean, 0 throws — the MathNet clean
-  rate generalizes. The top five gaps then landed same day (see CHANGELOG
-  "LaTeX Parsing": `\frac`/`\binom` mixed-brace bug, styling commands,
-  `\|` norm, infix `\choose`, bare `\pmod` + `\equiv…\implies` chain),
-  taking the corpus to **97.09%** (282 of 735 failures fixed). Remaining
-  ranked tail: (1) base-subscript numerals `10111_2`, `161_b` (16) — needs
-  a design call (integer literal when base is literal vs. inert `BaseForm`
-  head); (2) cheap recoveries: ordinal `13^{\text{th}}` (13, devolve to the
-  base number), empty scripts `^{}`/`_{}` (10, drop), `{,}` thousands
-  separator (9), `\cancel`/`\cancelto` (10, unwrap), `\not` prefix (4,
-  compose negated relation), `Factorial2` symbolic signature `(2n)!!` (7);
-  (3) units-in-text arithmetic `(18 \text{ inches})/(12 \text{
-  inches/foot})` (42, overlaps the units subsystem); (4) prime-after-arg
-  `\sin a'` (13); (5) residual pmod chains (9) + styling remnants (11).
+  rate generalizes. The top five gaps landed same day (`\frac`/`\binom`
+  mixed-brace bug, styling commands, `\|` norm, infix `\choose`, bare
+  `\pmod` + `\equiv…\implies` chain → 97.09%), followed by the cheap
+  recoveries (ordinal `13^{\text{th}}`, empty scripts `^{}`/`_{}`, `{,}`
+  thousands separator with the `decimalSeparator: '{,}'` precedence guard,
+  `\cancel`/`\cancelto`, `\not`-prefixed relations, `Factorial2` symbolic
+  signature, standalone-`\pmod` operand order — see CHANGELOG), taking the
+  corpus to **97.38%** (327 of 735 failures fixed). Remaining ranked tail:
+  (1) base-subscript numerals `10111_2`, `161_b` (16, all failing in
+  *arithmetic* contexts — bare `10111_2` is already an inert `Subscript`) —
+  needs a design call (fold to integer literal vs. parse to the existing
+  numeric-valued `BaseForm(value, base)` head, whose LaTeX serializer also
+  needs an unbalanced-paren fix); (2) units-in-text arithmetic
+  `(18 \text{ inches})/(12 \text{ inches/foot})` (42, overlaps the units
+  subsystem); (3) prime-after-arg `\sin a'` (13); (4) residual pmod chains
+  (9) + styling remnants (11); (5) small leftovers: empty scripts on
+  multi-letter symbol bases (`\alpha_{}`, needs the `_` parselet in
+  `definitions-core.ts` to drop empty braced subscripts at the source) and
+  `\cancel` inside `array`-env `@{}`/`\cline` layouts.
   Ascii-pipe divisibility evidence doubled (36 more hits, tracked below).
   Skip: `array`-env long-division layouts, `\nabla` puzzle ops, repeating
   decimals `0.abab\overline{ab}`.
@@ -441,13 +447,14 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-04, R1–R14 landed):** the shipped bundle
+**State (2026-07-09, R1–R15 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 6 (Hyperbolics), 4.1 Sine, and 4.5 Secant** —
 4,531 rules, 4.94 MB (CI has a bundle-freshness gate). Scores (seed 5):
-**4.1 Sine 107/120 and 317/400**, **4.5 Secant 56/120**, ch1 exhaustive
-≈90–91%, ch2 ≈72% / ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
+**4.1 Sine 106/120 and 320/400 (4.1.11 file 71/113)**, **4.5 Secant 56/120**,
+ch1 exhaustive ≈90–91%, ch2 ≈72% / ch6 ≈45% effective (seed 42), Wester
+indefinite-∫ 6/8.
 **Genuine wrongs are 0 across all suites** — every flagged "wrong" is a
 documented **verification false-wrong** (numeric ₂F₁/AppellF1 mis-grading at
 non-integer symbolic-exponent substitution; `√(sin²)=|sin|`; cube-root branch
@@ -459,11 +466,13 @@ quadratic/√-inner args stay ACTIVE for the substitution rules),
 `cofunctionShift` (`sec → csc[θ+π/2]`; the `cot → −tan[θ+π/2]` variant is
 implemented but default-OFF behind `RUBI_COFN_COT` pending R12),
 `unifyInertTrig` + its cofunction product clauses, `standaloneCosineShift`,
-`reciprocalToPower` (frozen under fractional powers — branch safety), and two
-driver fallbacks (trig→exp with a numeric-evaluability self-check;
-native-rational). A/B env switches: `RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`,
-`RUBI_NO_COFN`, `RUBI_COFN_COT`, `RUBI_NO_SKELETON`. Per-rung blow-by-blow
-(R1–R14, incl. the cofunction-audit table and each rung's dead ends):
+`reciprocalToPower` (frozen under fractional powers — branch safety), and
+three driver fallbacks (trig→exp with a numeric-evaluability self-check;
+R15's rational×sin/cos(linear) → Si/Ci partial-fraction split with a
+central-difference D-self-check; native-rational). A/B env switches:
+`RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`, `RUBI_NO_COFN`, `RUBI_COFN_COT`,
+`RUBI_NO_SKELETON`, `RUBI_NO_SICI`. Per-rung blow-by-blow
+(R1–R15, incl. the cofunction-audit table and each rung's dead ends):
 `docs/rubi/RUBI.md` §5; the rest is git history.
 
 **Benchmark protocol.** `npx tsx scripts/rubi/benchmark.ts --rubi
@@ -478,7 +487,8 @@ contaminate each other's driver/verifier timing.
 **Known kernel gaps** (block specific classes; the fallbacks decline them
 cleanly, so they surface as unsolved, not wrong): complex-argument
 `ExpIntegralEi` and negative-order incomplete Γ don't evaluate numerically —
-needed by the `∫x·sin(a+b/x)` exp-route class and R15's complex-Si members.
+needed by the `∫x·sin(a+b/x)` exp-route class and the complex-Si family R15
+declines (4.1.11 #61/#71/#72 — irreducible-quadratic denominators).
 
 **Method note (hard-won).** The "unimplemented-predicate" trace census is
 *misleading* for picking levers: the late catch-all rules
@@ -500,17 +510,6 @@ climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
 hypergeometric verification false-wrongs). Diagnose any stall per the Method
 note — trace the residual integrand, don't trust the predicate census.
 
-- **R15 — rational×sin(linear) → Si/Ci driver fallback.** The second half of
-  what R14's diagnosis split off: `∫sin(c+d·x)/(a+b·xⁿ)` (the 4.1.11 six) and
-  the 4.1.10 Si/Ci chains (#30/#112/#197/#294) are handled in Rubi by
-  `ExpandIntegrand`/`E^(i·x)` rules on ACTIVE linear-arg `Sin` — but CE must
-  inert linear-arg sin (the inert Si rule 4.1.10 #4 and most of chapter 4
-  depend on it), so the deactivation predicate can't unblock these without
-  regression. Needs an R9-style scoped driver fallback: partial-fraction the
-  rational, route each piece to Si/Ci, with the numeric self-check declining
-  the complex-Si members (#61/#71/#72 have imaginary roots → complex Si/Ci,
-  likely not-evaluable per the R9 kernel note; #18/#23/#89 have real Si/Ci
-  and are winnable).
 - **R12 — bundle 4.3 Tangent.** Three parts, per the R11 landing (RUBI.md §5
   Phase R11): (a) add the 4.3 corpus to the bundler allowlist; (b) turn on the
   `cot → −tan[θ+π/2]` leaf shift (implemented in R11 but default-OFF behind
@@ -527,6 +526,13 @@ note — trace the residual integrand, don't trust the predicate census.
   (exempt Add-summands from `reciprocalToPower`) regresses 4.1 Sine by −20
   (the csc-binomial sine families rely on that rewrite), so this needs a
   sec-aware carve-out rather than a global ordering change.
+- **R16 — the 4.1.10 `(c+d·x)^m·trig/(a+b·sin)` Si/Ci chains**
+  (#30/#112/#197/#294). Confirmed by R15 to be a genuinely different
+  mechanism from the rational-in-x family R15 closed: the denominator is
+  `(a+b·sin(e+f·x))`, not a rational in x, so R15's trig-free-rational gate
+  declines them (correctly — cleanly unsolved). Rubi routes them through
+  `ExpandIntegrand`/`E^(i·x)` rewrites on active linear-arg Sin, up to 48-step
+  chains; needs its own scoped routing.
 - **R3′ — residual half-integer/elliptic chains.** #604/#609/#1395 were closed
   by R9's cosine shift; what remains is the genuinely deep tail: #53 (23-step
   half-integer Fresnel chain), #248 (48 steps), #294, plus the composite

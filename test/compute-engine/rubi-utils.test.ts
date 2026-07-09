@@ -18,6 +18,7 @@ import {
   expandTrigToExp,
   sinCosArgNonlinearExpandableQ,
   numericallyEvaluable,
+  expandRationalOverLinears,
 } from '../../src/compute-engine/rubi/rubi-utils';
 import { loadIntegrationRules } from '../../src/integration-rules';
 import type { Ctx } from '../../src/compute-engine/rubi/rubi-utils';
@@ -665,4 +666,75 @@ describe('R9 end-to-end (shipped bundle)', () => {
     expect(closes('x^2 \\sin(a+b x)')).toBe(true));
   test('declines ∫x·sin(a+b/x) (complex-Ei, unverifiable) rather than mis-solving', () =>
     expect(stayInert('x \\sin(a+b/x)')).toBe(true));
+});
+
+// R15: rational(x)·sin(linear) → partial-fraction → Si/Ci driver fallback.
+// The expansion helper splits a rational with all-LINEAR denominators into
+// single-piece terms and declines the irreducible-quadratic (complex-root)
+// families.
+describe('expandRationalOverLinears (R15 expansion gate)', () => {
+  const pieces = (latex: string): Expression[] | null =>
+    expandRationalOverLinears(ce, ce.parse(latex), 'x');
+
+  test('splits x⁴/(a+bx) (poly-over-linear, ≥2 pieces)', () => {
+    const p = pieces('\\frac{x^4}{a+b x}');
+    expect(p).not.toBeNull();
+    expect(p!.length).toBeGreaterThanOrEqual(2);
+  });
+  test('splits 1/(x(a+bx)) into 2 partial-fraction pieces', () => {
+    const p = pieces('\\frac{1}{x(a+b x)}');
+    expect(p).not.toBeNull();
+    expect(p!.length).toBe(2);
+  });
+  test('splits (a+bx³)²/x (numerator over linear)', () => {
+    const p = pieces('\\frac{(a+b x^3)^2}{x}');
+    expect(p).not.toBeNull();
+    expect(p!.length).toBeGreaterThanOrEqual(2);
+  });
+  test('declines 1/(a+bx²) — irreducible-quadratic denominator', () =>
+    expect(pieces('\\frac{1}{a+b x^2}')).toBeNull());
+  test('declines x³/(a+bx²)³ — quadratic denominator', () =>
+    expect(pieces('\\frac{x^3}{(a+b x^2)^3}')).toBeNull());
+  test('declines a bare polynomial (no denominator)', () =>
+    expect(pieces('x^2 + x')).toBeNull());
+  test('declines a single-piece 1/(a+bx) (no split → no re-entry)', () =>
+    expect(pieces('\\frac{1}{a+b x}')).toBeNull());
+});
+
+// R15 end-to-end: the shipped bundle closes rational·sin(linear) families whose
+// denominators split over real linear factors, and declines the irreducible-
+// quadratic (complex-Si) family. Concrete small-integer parameters (avoiding
+// the reserved symbols `e`/`i`).
+describe('R15 end-to-end Si/Ci partial-fraction routing (shipped bundle)', () => {
+  let eng: ComputeEngine;
+  beforeAll(() => {
+    eng = new ComputeEngine();
+    loadIntegrationRules(eng);
+  });
+  const closesLatex = (latex: string): boolean => {
+    const integ = eng.parse(latex);
+    const F = eng.box(['Integrate', integ, 'x']).evaluate();
+    if (F.operator === 'Integrate') return false;
+    let ok = 0;
+    for (const xv of [0.4, 0.9, 1.3, 1.7]) {
+      const h = 1e-4;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      const d = (fp(xv + h) - fp(xv - h)) / (2 * h);
+      const f = integ.subs({ x: xv }).N().re as number;
+      if (typeof d !== 'number' || typeof f !== 'number') return false;
+      if (Math.abs(d - f) > 1e-4 * Math.max(1, Math.abs(f))) return false;
+      ok++;
+    }
+    return ok >= 3;
+  };
+  const stayInert = (latex: string): boolean =>
+    eng.box(['Integrate', eng.parse(latex), 'x']).evaluate().operator ===
+    'Integrate';
+
+  test('closes ∫x²·sin(1+2x)/(3+2x) (#18-shape, poly-over-linear)', () =>
+    expect(closesLatex('\\frac{x^2 \\sin(1+2 x)}{3+2 x}')).toBe(true));
+  test('closes ∫sin(1+2x)/(x(3+2x)) (#23-shape, partial fractions)', () =>
+    expect(closesLatex('\\frac{\\sin(1+2 x)}{x(3+2 x)}')).toBe(true));
+  test('declines ∫sin(1+2x)/(2+3x²) (#61-shape, complex-Si) — stays inert', () =>
+    expect(stayInert('\\frac{\\sin(1+2 x)}{2+3 x^2}')).toBe(true));
 });
