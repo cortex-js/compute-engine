@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.72.0 _2026-07-09_
 
 ### Angular Units
 
