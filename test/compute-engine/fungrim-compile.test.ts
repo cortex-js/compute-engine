@@ -785,10 +785,12 @@ describe('fungrim-core-data.json artifact', () => {
     expect([...ids].sort()).toEqual(ids);
     for (const r of artifact.rules) {
       // Corpus entries carry 6-hex Fungrim ids; curated injections
-      // (curation-overrides.json `inject`) carry kebab-case ids; derived
-      // solve templates (apply-solve-templates.ts) carry a `:solve` suffix.
+      // (curation-overrides.json `inject`) carry kebab-case ids; solve
+      // templates (apply-solve-templates.ts) carry a `:solve` suffix — derived
+      // from a 6-hex seed, or a curated kebab-case template
+      // (curation-overrides.json `solveTemplates`).
       expect(r.id).toMatch(
-        /^fungrim:([0-9a-f]{6}(:solve)?|[a-z][a-z0-9]*(-[a-z0-9]+)+)$/
+        /^fungrim:([0-9a-f]{6}|[a-z][a-z0-9]*(-[a-z0-9]+)+)(:solve)?$/
       );
       expect(Array.isArray(r.guards)).toBe(true);
       expect(['simplify', 'transform', 'expand']).toContain(r.purpose);

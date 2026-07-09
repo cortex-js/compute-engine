@@ -97,6 +97,29 @@
    "note": "Arctan(Tan(theta)) = theta inverse composition (principal branch). complex-domain guard accepted for solve templates because validateRoots filters every candidate against the original equation."
   }
  },
+ "solveTemplates": [
+  {
+   "id": "lambertw-linear-exp",
+   "match": ["Add", ["Multiply", "__c", ["Power", "_p", ["Multiply", "__m", "_x"]]], ["Multiply", "__a", "_x"], "__b"],
+   "replace": ["Subtract",["Negate",["Divide","__b","__a"]],["Divide",["LambertW",["Multiply",["Divide",["Multiply","__m",["Ln","_p"],"__c"],"__a"],["Power","_p",["Negate",["Multiply","__m",["Divide","__b","__a"]]]]]],["Multiply","__m",["Ln","_p"]]]],
+   "heads": ["LambertW"],
+   "topics": ["lambertw"],
+   "note": "Hand-curated (not corpus-derivable): c*p^(m*x) + a*x + b = 0 solves to x = -b/a - W((m*ln(p)*c/a)*p^(-m*b/a))/(m*ln(p)), the general LambertW root of a linear-plus-single-exponential. Handles shapes with an explicit linear coefficient and/or constant (e.g. e^x - x - 2 = 0). validateRoots checks every candidate against the original equation, so an over-broad match degrades to a no-op, never a wrong root. The all-coefficients-absent shape (p^x + x = 0) is handled by the companion lambertw-exp-bare template because useVariations does not synthesize every missing __c/__m/__a/__b slot simultaneously.",
+   "tests": [{"equation": ["Add", ["Power", "ExponentialE", "x"], ["Negate", "x"], -2], "root": -1.8414056604369606}]
+  },
+  {
+   "id": "lambertw-exp-bare",
+   "match": ["Add", ["Power", "_p", "_x"], "_x"],
+   "replace": ["Negate", ["Divide", ["LambertW", ["Ln", "_p"]], ["Ln", "_p"]]],
+   "heads": ["LambertW"],
+   "topics": ["lambertw"],
+   "note": "Hand-curated companion to lambertw-linear-exp for the bare shape p^x + x = 0 (no exponential coefficient, no exponent scale, unit linear term, no constant), which solves to x = -W(ln(p))/ln(p). Split out because useVariations cannot synthesize the missing __c=1, __m=1, __a=1, __b=0 slots of the master template simultaneously. Covers e^x + x = 0 and x + 2^x = 0. Soundness guaranteed downstream by validateRoots.",
+   "tests": [
+    {"equation": ["Add", ["Power", "ExponentialE", "x"], "x"], "root": -0.5671432904097838},
+    {"equation": ["Add", "x", ["Power", 2, "x"]], "root": -0.641185744504986}
+   ]
+  }
+ ],
  "recompileDivergence": {
   "$comment": "Allowlist for scripts/fungrim/recompile-drift.ts -- the 'no silent drops' gate. The gate full-recompiles the slice and FAILS if any committed simplify rule would be dropped (or any new rule added) without an entry here, so a future silent drop/add is impossible. The artifact is currently FULLY REPRODUCIBLE from compile-rules.ts (the self-test's sign-neutral fallback recovers the rules that only fire within the full rule set), so both lists are EMPTY -- any nonzero divergence is a real signal to investigate (a self-test false-negative to keep, a dead rule to drop, or a missing rule to add). Keyed by bare entry id.",
   "dropped": {},

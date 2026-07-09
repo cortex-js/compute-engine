@@ -566,12 +566,31 @@ coverage work, and most of it is shared capability rather than Ch6-specific:
 
 **Decoupled from Wester.** The two remaining Wester `Solve` gaps are harness
 artifacts (B9), so additional Fungrim solve rules will **not** move that number
-— the Wester `Solve` rows are saturated at our principled ceiling (14/21). This
-track is worth pursuing on its own merits — LambertW / Ln–Exp inverse forms
-beyond the current 5 solve seeds, via `loadIdentities(ce, { solve: true })` —
-but it needs **its own solving benchmark** distinct from Wester: pick or build
-one before investing, so progress is measurable. (Fungrim's _simplify_-side work
-is separate again — see Strategic item 7, Fungrim Phase 4.)
+— the Wester `Solve` rows are saturated at our principled ceiling (14/21). The
+track's own benchmark exists (`benchmarks/audit/solve.ts` /
+`REPORT-solve.md`, 40 SymPy-derived univariate cases): CE+Fungrim scores
+**29/40** (base CE 24) after the 2026-07-09 round — derived templates
+generalized to the `clearDenominators`-scaled shape
+`Add(Multiply(__a, A(_x)), __b)` (fixes rational-RHS cases like
+`arctan x = 1/2`), plus hand-curated LambertW templates
+(`curation-overrides.json` `solveTemplates`: `c·pᵐˣ + ax + b = 0` and the bare
+`pˣ + x = 0`), all via `loadIdentities(ce, { solve: true })`. What remains, by
+benchmark case:
+
+- **T2, H1–H3** (`arcsin x = c`, `sinh/cosh/tanh x = c`): no
+  inverse-composition identity exists in the Fungrim slice (mining audit is
+  exhaustive) — these belong in the native `UNIVARIATE_ROOTS` templates
+  (engine-side, see B9), not in the Fungrim artifact.
+- **A2/A3** (nested/two-`Abs` splits), **E3** (`eˣ + e⁻ˣ = 4`,
+  exp-quadratic homogenization), **R2** (rational with unknown in the
+  denominator on both sides): native solve/harmonization gaps, also B9.
+- **FR2 second branch:** the curated LambertW templates return only the
+  principal-branch root (CE's `LambertW` is 1-arg); the `W₋₁` companion root
+  needs branch support (same gate as the `ed7dac` seed, still reported
+  "unavailable" by `apply-solve-templates.ts`).
+
+(Fungrim's _simplify_-side work is separate again — see Strategic item 7,
+Fungrim Phase 4.)
 
 ### Bignum / numeric track
 

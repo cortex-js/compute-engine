@@ -674,11 +674,16 @@ describe('solve routing', () => {
     // apply-solve-templates.ts. They carry no domain guards (validateRoots is
     // the safety net) and are skipped on a default load.
     const solveRules = FUNGRIM_CORE.rules.filter((r) => r.target === 'solve');
-    expect(solveRules.length).toBeGreaterThanOrEqual(5);
+    expect(solveRules.length).toBeGreaterThanOrEqual(7);
     for (const r of solveRules) {
-      expect(r.id).toMatch(/^fungrim:[0-9a-f]{6}:solve$/);
+      // Derived seed templates carry a 6-hex id; curated LambertW templates
+      // (curation-overrides.json `solveTemplates`) carry a kebab-case id.
+      expect(r.id).toMatch(
+        /^fungrim:([0-9a-f]{6}|[a-z][a-z0-9]*(-[a-z0-9]+)+):solve$/
+      );
       expect(r.guards).toEqual([]);
-      // Root-template shape: match is `Add(A(_x), __b)`, replace introduces __b.
+      // Root-template shape: match is `Add(…, __b)`, an Add of the inner
+      // function term(s) and the constant offset.
       expect(Array.isArray(r.match) && (r.match as unknown[])[0]).toBe('Add');
     }
     // Default load skips them; {solve:true} routes them to ce.solveRules.
@@ -740,6 +745,51 @@ describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
     // x·eˣ = 3 has a single real root; the template must not invent extras.
     const r = solved('x e^x = 3');
     for (const v of r) expect(v * Math.exp(v)).toBeCloseTo(3, 9);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Scaled-coefficient generalization (benchmark T1). findUnivariateRoots runs
+  // clearDenominators before rule matching, so a rational RHS `arctan(x) = 1/2`
+  // is presented as `2·arctan(x) − 1 = 0`. The derived template matches the
+  // scaled shape `Add(Multiply(__a, A(_x)), __b)` and inverts `A(x) = −__b/__a`.
+  // ---------------------------------------------------------------------------
+
+  it('scaled arctan (rational RHS, clearDenominators): arctan(x) = 1/2 → tan(1/2)  [T1]', () => {
+    const r = solved('\\arctan x = \\frac12');
+    expect(r.length).toBe(1);
+    expect(r[0]).toBeCloseTo(Math.tan(0.5), 10);
+  });
+
+  it('scaled Ln (rational RHS): ln(x) = 1/2 → √e', () => {
+    const r = solved('\\ln x = \\frac12');
+    expect(r.some((v) => Math.abs(v - Math.sqrt(Math.E)) < 1e-9)).toBe(true);
+  });
+
+  it('unscaled integer RHS still fires (__a = 1): tan(x) = 2 → arctan(2)', () => {
+    const r = solved('\\tan x = 2');
+    expect(r.some((v) => Math.abs(v - Math.atan(2)) < 1e-9)).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Hand-curated LambertW solve templates (curation-overrides.json
+  // `solveTemplates`; benchmark W2/W3/FR2). Not corpus-derivable — no
+  // inverse-composition identity for `c·pᵐˣ + a·x + b` exists in the slice.
+  // ---------------------------------------------------------------------------
+
+  it('LambertW linear-exp: eˣ − x − 2 = 0 → −2 − W(−e⁻²)  [FR2, lambertw-linear-exp]', () => {
+    const r = solved('e^x - x - 2 = 0');
+    expect(r.some((v) => Math.abs(v - -1.8414056604369606) < 1e-9)).toBe(true);
+    for (const v of r) expect(Math.exp(v) - v - 2).toBeCloseTo(0, 8);
+  });
+
+  it('LambertW exp-bare: eˣ + x = 0 → −W(1)  [W2, lambertw-exp-bare]', () => {
+    const r = solved('e^x + x = 0');
+    expect(r.some((v) => Math.abs(v - -0.5671432904097838) < 1e-9)).toBe(true);
+  });
+
+  it('LambertW exp-bare: x + 2ˣ = 0 → −W(ln2)/ln2  [W3, lambertw-exp-bare]', () => {
+    const r = solved('x + 2^x = 0');
+    expect(r.some((v) => Math.abs(v - -0.641185744504986) < 1e-9)).toBe(true);
   });
 });
 
