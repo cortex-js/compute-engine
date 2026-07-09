@@ -7,6 +7,7 @@ import type {
   Expression,
 } from '../global-types.js';
 import { isFunction, sym } from './type-guards.js';
+import { defaultUnknown } from './utils.js';
 import { findUnivariateRoots } from './solve.js';
 import { getPolynomialCoefficients } from './polynomials.js';
 import { interval } from '../numerics/interval.js';
@@ -80,21 +81,6 @@ export function canonicalSolve(
   const eq = ops[0]; // keep lazy — do not canonicalize
   const specs = ops.slice(1).map((spec) => canonicalSolveSpec(ce, spec));
   return ce._fn('Solve', [eq, ...specs]);
-}
-
-/**
- * The unknown to solve for when none is given: the equation's single free
- * variable, or `x` when there are several and one of them is `x`. `undefined`
- * when no default can be inferred (no free variable, or several without `x`).
- *
- * The equation is the lazily-held (non-canonical) operand; `unknowns` resolves
- * symbol definitions by name, so it works on a non-canonical expression.
- */
-function defaultUnknown(eq: Expression): string | undefined {
-  const names = eq.unknowns;
-  if (names.length === 1) return names[0];
-  if (names.length > 1 && names.includes('x')) return 'x';
-  return undefined;
 }
 
 /** Validate/canonicalize a single `Solve` spec operand. */

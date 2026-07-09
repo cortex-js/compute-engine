@@ -115,6 +115,26 @@ export function hashCode(s: string): number {
   return Math.abs(hash);
 }
 
+/**
+ * The default unknown/variable for an operator whose variable argument was
+ * omitted (`Solve(eq)`, `D(expr)`, `PolynomialDegree(poly)`, …): the single
+ * free variable of the expression(s), or `x` when there are several free
+ * variables and one of them is `x`. `undefined` when no default can be
+ * inferred (no free variable, or several free variables without `x`).
+ *
+ * Works on lazily-held (non-canonical) operands: `unknowns` resolves symbol
+ * definitions by name, not through binding.
+ */
+export function defaultUnknown(
+  ...exprs: ReadonlyArray<Expression>
+): string | undefined {
+  const names = new Set<string>();
+  for (const e of exprs) for (const n of e.unknowns) names.add(n);
+  if (names.size === 1) return names.values().next().value;
+  if (names.size > 1 && names.has('x')) return 'x';
+  return undefined;
+}
+
 export function normalizedUnknownsForSolve(
   syms:
     | string

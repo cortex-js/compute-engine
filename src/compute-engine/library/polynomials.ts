@@ -16,6 +16,7 @@ import {
 } from '../boxed-expression/polynomials.js';
 import type { SymbolDefinitions } from '../global-types.js';
 import { isFunction, sym } from '../boxed-expression/type-guards.js';
+import { defaultUnknown } from '../boxed-expression/utils.js';
 
 export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
   {
@@ -75,10 +76,10 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Return the degree of a polynomial with respect to a variable. ' +
         'Example: PolynomialDegree(x³ + 2x + 1, x) → 3',
       lazy: true,
-      signature: '(value, symbol) -> integer',
+      signature: '(value, symbol?) -> integer',
       evaluate: ([poly, varExpr]) => {
-        if (!poly || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!poly) return undefined;
+        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(poly);
         if (!variable) return undefined;
         const deg = polynomialDegree(poly.canonical, variable);
         return deg >= 0 ? poly.engine.number(deg) : undefined;
@@ -90,10 +91,10 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Return the list of coefficients of a polynomial, from highest to lowest degree. ' +
         'Example: CoefficientList(x³ + 2x + 1, x) → [1, 0, 2, 1]',
       lazy: true,
-      signature: '(value, symbol) -> list<value>',
+      signature: '(value, symbol?) -> list<value>',
       evaluate: ([poly, varExpr]) => {
-        if (!poly || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!poly) return undefined;
+        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(poly);
         if (!variable) return undefined;
         const coeffs = getPolynomialCoefficients(poly.canonical, variable);
         if (!coeffs) return undefined;
@@ -106,10 +107,13 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Return the quotient of polynomial division of dividend by divisor. ' +
         'Example: PolynomialQuotient(x³ - 1, x - 1, x) → x² + x + 1',
       lazy: true,
-      signature: '(dividend: value, divisor: value, variable: symbol) -> value',
+      signature:
+        '(dividend: value, divisor: value, variable: symbol?) -> value',
       evaluate: ([dividend, divisor, varExpr]) => {
-        if (!dividend || !divisor || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!dividend || !divisor) return undefined;
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(dividend, divisor);
         if (!variable) return undefined;
         const result = polynomialDivide(
           dividend.canonical,
@@ -125,10 +129,13 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Return the remainder of polynomial division of dividend by divisor. ' +
         'Example: PolynomialRemainder(x³ + 2x + 1, x + 1, x) → -2',
       lazy: true,
-      signature: '(dividend: value, divisor: value, variable: symbol) -> value',
+      signature:
+        '(dividend: value, divisor: value, variable: symbol?) -> value',
       evaluate: ([dividend, divisor, varExpr]) => {
-        if (!dividend || !divisor || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!dividend || !divisor) return undefined;
+        const variable = varExpr
+          ? sym(varExpr.canonical)
+          : defaultUnknown(dividend, divisor);
         if (!variable) return undefined;
         const result = polynomialDivide(
           dividend.canonical,
@@ -144,10 +151,10 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Return the greatest common divisor of two polynomials. ' +
         'Example: PolynomialGCD(x² - 1, x - 1, x) → x - 1',
       lazy: true,
-      signature: '(a: value, b: value, variable: symbol) -> value',
+      signature: '(a: value, b: value, variable: symbol?) -> value',
       evaluate: ([a, b, varExpr]) => {
-        if (!a || !b || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!a || !b) return undefined;
+        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(a, b);
         if (!variable) return undefined;
         return polynomialGCD(a.canonical, b.canonical, variable);
       },
@@ -159,10 +166,10 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'It is zero iff the polynomials share a common factor. ' +
         'Example: Resultant(x² - 1, x - 1, x) → 0',
       lazy: true,
-      signature: '(a: value, b: value, variable: symbol) -> value',
+      signature: '(a: value, b: value, variable: symbol?) -> value',
       evaluate: ([a, b, varExpr]) => {
-        if (!a || !b || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!a || !b) return undefined;
+        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(a, b);
         if (!variable) return undefined;
         return polynomialResultant(a.canonical, b.canonical, variable);
       },
@@ -173,10 +180,10 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Cancel common polynomial factors in the numerator and denominator of a rational expression. ' +
         'Example: Cancel((x² - 1)/(x - 1), x) → x + 1',
       lazy: true,
-      signature: '(value, symbol) -> value',
+      signature: '(value, symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
-        if (!expr || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!expr) return undefined;
+        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(expr);
         if (!variable) return undefined;
         return cancelCommonFactors(expr.canonical, variable);
       },
@@ -187,10 +194,10 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Decompose a rational expression into partial fractions. ' +
         'Example: PartialFraction(1/((x+1)(x+2)), x) → 1/(x+1) - 1/(x+2)',
       lazy: true,
-      signature: '(value, symbol) -> value',
+      signature: '(value, symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
-        if (!expr || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!expr) return undefined;
+        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(expr);
         if (!variable) return undefined;
         return partialFraction(expr.canonical, variable);
       },
@@ -200,10 +207,10 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Alias for PartialFraction. Decompose a rational expression into partial fractions.',
       lazy: true,
-      signature: '(value, symbol) -> value',
+      signature: '(value, symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
-        if (!expr || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!expr) return undefined;
+        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(expr);
         if (!variable) return undefined;
         return partialFraction(expr.canonical, variable);
       },
@@ -214,10 +221,10 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Return the roots of a polynomial expression. ' +
         'Example: PolynomialRoots(x² - 5x + 6, x) → {2, 3}',
       lazy: true,
-      signature: '(value, symbol) -> set<value>',
+      signature: '(value, symbol?) -> set<value>',
       evaluate: ([poly, varExpr]) => {
-        if (!poly || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!poly) return undefined;
+        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(poly);
         if (!variable) return undefined;
         const roots = poly.canonical.polynomialRoots(variable);
         if (!roots || roots.length === 0) return undefined;
@@ -230,10 +237,10 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Return the discriminant of a polynomial. ' +
         'Example: Discriminant(x² - 5x + 6, x) → 1',
       lazy: true,
-      signature: '(value, symbol) -> value',
+      signature: '(value, symbol?) -> value',
       evaluate: ([poly, varExpr]) => {
-        if (!poly || !varExpr) return undefined;
-        const variable = sym(varExpr.canonical);
+        if (!poly) return undefined;
+        const variable = varExpr ? sym(varExpr.canonical) : defaultUnknown(poly);
         if (!variable) return undefined;
 
         const coeffsAsc = getPolynomialCoefficients(poly.canonical, variable);

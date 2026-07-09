@@ -1,7 +1,10 @@
 import type { Expression, SymbolDefinitions } from '../global-types.js';
 
 import { checkType } from '../boxed-expression/validate.js';
-import { hasSymbolicTranscendental } from '../boxed-expression/utils.js';
+import {
+  defaultUnknown,
+  hasSymbolicTranscendental,
+} from '../boxed-expression/utils.js';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 import { BoxedNumber } from '../boxed-expression/boxed-number.js';
 
@@ -187,8 +190,7 @@ volumes
 
       scoped: true,
       lazy: true,
-      signature:
-        '(expression, variable:symbol, variables:symbol+) -> expression',
+      signature: '(expression, variables:symbol*) -> expression',
       type: ([body]) => {
         if (!body) return undefined;
         const t = body.type;
@@ -216,6 +218,20 @@ volumes
         // than throwing a `Cannot read properties of undefined` error on
         // `ops[0].canonical` below.
         if (!ops[0]) return null;
+
+        // The differentiation variable may be omitted (`D(expr)`, e.g. from
+        // `expr |> D`): default to the expression's single free variable, or
+        // to `x` when there are several and one of them is `x`. A function
+        // symbol (`D(f)`) is excluded — it is handled by the function-symbol
+        // branch below, and must not have the inferred variable fed into its
+        // argument list.
+        if (
+          ops.length === 1 &&
+          !(isSymbol(ops[0]) && ops[0].canonical.operatorDefinition)
+        ) {
+          const v = defaultUnknown(ops[0]);
+          if (v !== undefined) ops = [ops[0], ce.symbol(v)];
+        }
 
         // If the first argument is a function symbol (e.g., f where f(x):=2x),
         // apply it to the differentiation variables to produce a function call.
@@ -788,11 +804,18 @@ volumes
       broadcastable: false,
       lazy: true,
       signature:
-        '(expression, variable:symbol, point:value?, order:number?) -> number',
+        '(expression, variable:symbol?, point:value?, order:number?) -> number',
       canonical: (ops, { engine: ce }) => {
         const f = ops[0]?.canonical;
         if (!f) return null;
-        const x = ops[1];
+        let x = ops[1];
+        // The expansion variable may be omitted (`Series(expr)`, e.g. from
+        // `expr |> Series`): default to the expression's single free
+        // variable, or to `x` when there are several and one of them is `x`.
+        if (x === undefined) {
+          const v = defaultUnknown(f);
+          if (v !== undefined) x = ce.symbol(v);
+        }
         if (!x || !isSymbol(x)) return null;
         const x0 = ops[2] ? ops[2].canonical : ce.Zero;
         const n = ops[3] ? ops[3].canonical : ce.number(5);
