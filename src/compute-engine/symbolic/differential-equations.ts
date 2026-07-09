@@ -1808,6 +1808,62 @@ function solveBernoulliFirstOrder(
   return ceListSolution(dependentCall, solution);
 }
 
+function solveExactFirstOrder(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const ce = equation.engine;
+  const collected = equationDerivativeCoefficients(
+    equation,
+    dependentName,
+    independentName
+  );
+  if (
+    [...collected.coefficients.keys()].some((order) => order > 1) ||
+    !collected.coefficients.has(1)
+  )
+    return undefined;
+
+  const usedSymbols = collectSymbols(equation);
+  const ySymbolName = freshSymbolName(`${dependentName}_value`, usedSymbols);
+  const x = ce.symbol(independentName);
+  const y = ce.symbol(ySymbolName);
+  const mTerm = collected.rest
+    .add((collected.coefficients.get(0) ?? ce.Zero).mul(dependentCall))
+    .simplify();
+  const m = replaceDependentCall(mTerm, dependentCall, y).simplify();
+  const n = replaceDependentCall(
+    collected.coefficients.get(1) ?? ce.Zero,
+    dependentCall,
+    y
+  ).simplify();
+  if (m.isSame(0) || n.isSame(0)) return undefined;
+  if (!m.has(ySymbolName) && !n.has(ySymbolName)) return undefined;
+  if (
+    hasDependentOrDerivative(m, dependentName, independentName) ||
+    hasDependentOrDerivative(n, dependentName, independentName)
+  )
+    return undefined;
+
+  const mY = ce.function('D', [m, y]).evaluate().simplify();
+  const nX = ce.function('D', [n, x]).evaluate().simplify();
+  if (!mY.sub(nX).simplify().isSame(0)) return undefined;
+
+  const mIntegral = dSolveAntiderivative(m, independentName);
+  if (hasOperator(mIntegral, 'Integrate')) return undefined;
+  const correction = n
+    .sub(ce.function('D', [mIntegral, y]).evaluate())
+    .simplify();
+  const correctionIntegral = dSolveAntiderivative(correction, ySymbolName);
+  if (hasOperator(correctionIntegral, 'Integrate')) return undefined;
+
+  const [c] = integrationConstants(equation, 1);
+  const potential = mIntegral.add(correctionIntegral).simplify();
+  return ce.function('List', [ce.function('Equal', [potential, c])]);
+}
+
 function secondOrderConstantCoefficientBasis(
   equation: Expression,
   dependentName: string,
@@ -2491,6 +2547,14 @@ export function dSolve(
     independentName
   );
   if (homogeneousFirstOrder) return finalize(homogeneousFirstOrder);
+
+  const exact = solveExactFirstOrder(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (exact) return finalize(exact);
 
   const coefficients = equationCoefficients(
     problem.equation,

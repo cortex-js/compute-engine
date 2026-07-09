@@ -331,6 +331,50 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
+  test('solves exact first-order equations implicitly', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['Multiply', 2, 'x', ['y', 'x']],
+        ['Power', ['y', 'x'], 2],
+        [
+          'Multiply',
+          ['Add', ['Power', 'x', 2], ['Multiply', 2, 'x', ['y', 'x']]],
+          ['D', ['y', 'x'], 'x'],
+        ],
+      ],
+      0,
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `["y_value" * x^2 + x * "y_value"^2 === "c_1"]`
+    );
+  });
+
+  test('applies initial conditions to exact first-order equations', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['Multiply', 2, 'x', ['y', 'x']],
+        ['Power', ['y', 'x'], 2],
+        [
+          'Multiply',
+          ['Add', ['Power', 'x', 2], ['Multiply', 2, 'x', ['y', 'x']]],
+          ['D', ['y', 'x'], 'x'],
+        ],
+      ],
+      0,
+    ];
+    const solution = dsolve(['List', equation, ['Equal', ['y', 1], 1]]);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `["y_value" * x^2 + x * "y_value"^2 === 2]`
+    );
+  });
+
   test('applies initial conditions to first-order equations', () => {
     const equation = ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']];
     const solution = dsolve(['List', equation, ['Equal', ['y', 0], 2]]);
