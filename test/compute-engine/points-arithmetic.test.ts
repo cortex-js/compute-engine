@@ -273,6 +273,52 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
     expect(ce.parse('1+(2,3)').operator).toBe('Error');
     expect(ce.parse('(2,3)+1').operator).toBe('Error');
   });
+
+  // Defect 3 (reported by Tycho against 0.69.1): serializing the CANONICAL,
+  // unevaluated form of `scalar × tuple` overflowed the stack. The pretty-JSON
+  // Multiply serializer round-trips through Product.asRationalExpression →
+  // canonicalDivide, whose tuple branch returned an inert Divide(expr, 1)
+  // instead of stripping the trivial divisor, so the numerator (the same
+  // Multiply) re-entered the serializer forever.
+  test('canonical scalar × tuple serializes without stack overflow', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('3(1,2)').latex).toBe('3(1,2)');
+    expect(ce.box(['Multiply', 2, ['Tuple', 1, 2]]).latex).toBe('2(1,2)');
+    expect(ce.box(['Multiply', 2, ['Tuple', 1, 2]]).toString()).toBe(
+      '2(1, 2)'
+    );
+  });
+
+  test('tuple-typed expression / ±1 strips the trivial divisor', () => {
+    const ce = new ComputeEngine();
+    const m: any = ['Multiply', 2, ['Tuple', 1, 2]];
+    expect(ce.box(['Divide', m, 1]).json).toEqual(m);
+    expect(ce.box(['Divide', m, -1]).json).toEqual([
+      'Multiply',
+      -2,
+      ['Tuple', 1, 2],
+    ]);
+  });
+
+  // Defect 4: juxtaposition with a tuple-TYPED symbol (`3z` with
+  // `z: tuple<number, number>`) collapsed to a spurious `Tuple(3, z)` instead
+  // of `Multiply` (scaling). Literal tuples were already handled; the
+  // value-like test in canonicalInvisibleOperator missed numeric-tuple types.
+  test('scalar · tuple-typed symbol juxtaposition is scaling, not Tuple', () => {
+    const ce = new ComputeEngine();
+    ce.declare('z', ce.type('tuple<number, number>'));
+    const r = ce.parse('3z');
+    expect(r.json).toEqual(['Multiply', 3, 'z']);
+    expect(r.latex).toBe('3z');
+    ce.assign('z', ce.box(['Tuple', 1, 2]));
+    expect(ce.parse('3z').evaluate().json).toEqual(['Tuple', 3, 6]);
+  });
+
+  test('scalar · heterogeneous-tuple-typed symbol still groups as Tuple', () => {
+    const ce = new ComputeEngine();
+    ce.declare('w', ce.type('tuple<string, number>'));
+    expect(ce.parse('3w').json).toEqual(['Tuple', 3, 'w']);
+  });
 });
 
 // A list-broadcast such as `Multiply([...], x)` reports a dishonest

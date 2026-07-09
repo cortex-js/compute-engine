@@ -6,6 +6,7 @@ import type {
 } from '../global-types.js';
 import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
+import { isNumericTuple } from '../collection-utils.js';
 
 const MATRIX_TYPE = new BoxedType('matrix');
 const FUNCTION_TYPE = new BoxedType('function');
@@ -272,6 +273,13 @@ export function canonicalInvisibleOperator(
           // collections (raw `List`), so match the value type here as well.
           // `list` deliberately excludes heterogeneous `tuple` and `set`.
           x.type.matches(LIST_TYPE) ||
+          // Numeric-tuple-typed operands (points/vectors in ℝⁿ, e.g. `3z`
+          // with `z: tuple<number, number>`) are value-like: juxtaposition
+          // is scaling. Literal tuples are already caught by the
+          // `isIndexedCollection` test below; this covers tuple-typed
+          // symbols and unevaluated tuple-typed expressions. Heterogeneous
+          // tuples (e.g. `tuple<string, number>`) still group as `Tuple`.
+          isNumericTuple(x) ||
           isFunction(x, 'Matrix') ||
           (x.isIndexedCollection && !isString(x)))
     )

@@ -480,10 +480,18 @@ export class BaseCompiler {
         isFiniteIndexedCollection(args[0])
       ) {
         const v = BaseCompiler.tempVar();
+        // Inside the map callback the element variable is the callback
+        // parameter — shadow `target.var` so it compiles bare, not as a
+        // `_.<name>` vars-object lookup (same pattern as the Sum/Product
+        // loop index).
+        const innerTarget = {
+          ...target,
+          var: (id: string) => (id === v ? v : target.var(id)),
+        };
         return `(${BaseCompiler.compile(args[0], target)}).map((${v}) => ${fn(
           [args[0].engine.expr(v)],
-          (expr) => BaseCompiler.compileValueOperand(expr, target),
-          target
+          (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
+          innerTarget
         )})`;
       }
       return fn(

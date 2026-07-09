@@ -265,4 +265,20 @@ describe('E2E: Real-world Expressions', () => {
       expect(Array.isArray(out)).toBe(true);
     });
   });
+
+  // ── Broadcast over a list operand ──────────────────────────────────
+
+  describe('Broadcastable operator over a list (sin([x, 2x]))', () => {
+    // Regression: the generated `.map()` callback read its element variable
+    // off the vars object (`_.<temp>` → undefined → [null, null]) instead of
+    // the callback parameter.
+    it('compiled broadcast agrees with evaluate()', () => {
+      const expr = ce.parse('\\sin([x, 2x])');
+      const result = compile(expr);
+      expect(result?.success).toBe(true);
+      const out = result?.run?.({ x: 0.5 }) as unknown as number[];
+      expect(out[0]).toBeCloseTo(Math.sin(0.5), 12);
+      expect(out[1]).toBeCloseTo(Math.sin(1), 12);
+    });
+  });
 });
