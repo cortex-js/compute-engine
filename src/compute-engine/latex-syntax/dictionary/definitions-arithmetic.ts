@@ -81,14 +81,17 @@ function numeratorDenominator(
 
 function parseRoot(parser: Parser): MathJsonExpression | null {
   const degree = parser.parseOptionalGroup();
-  const base = parser.parseGroup() ?? parser.parseToken();
+  const group = parser.parseGroup();
+  const base = group ?? parser.parseToken();
   if (isEmptySequence(base)) {
-    // No radicand and no degree: a bare function symbol (`12 |> \sqrt` → `Sqrt`),
-    // matching the behavior of `\ln`, `\lg` and `\cos`. A degree with no
-    // radicand (e.g. `\sqrt[3]`) is still genuinely malformed.
-    if (degree === null) return 'Sqrt' as MathJsonExpression;
+    // A bare `\sqrt` with nothing following is a function symbol
+    // (`12 |> \sqrt` → `Sqrt`), matching `\ln`, `\lg` and `\cos`. But an
+    // explicit empty radical (`\sqrt{}`) or a degree with no radicand
+    // (`\sqrt[3]`) is a genuine missing-argument error.
+    if (degree === null && group === null) return 'Sqrt' as MathJsonExpression;
     const missing = parser.error('missing', parser.index);
-    return ['Root', missing, missingIfEmpty(degree)];
+    if (degree !== null) return ['Root', missing, missingIfEmpty(degree)];
+    return ['Sqrt', missing];
   }
   if (degree !== null) return ['Root', base, degree];
   return ['Sqrt', base];
