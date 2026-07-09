@@ -372,6 +372,34 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     },
   },
   //
+  // `\cancel{x}` / `\bcancel{x}` / `\xcancel{x}` (cancel.sty): strike-through
+  // decorations used to show a term being cancelled. There is no semantic
+  // content to preserve, so unwrap to the body: `\cancel{72}` → `72`,
+  // `\frac{4 \cdot \cancel{3}}{\cancel{3} \cdot 2}` reads as `\frac{4·3}{3·2}`.
+  //
+  ...['\\cancel', '\\bcancel', '\\xcancel'].map((trigger) => ({
+    latexTrigger: [trigger],
+    parse: (parser: Parser): MathJsonExpression => {
+      const body = parser.parseGroup();
+      return body ?? 'Nothing';
+    },
+  })),
+  //
+  // `\cancelto{target}{expr}` (cancel.sty): shows `expr` being replaced by
+  // `target` (e.g. borrow/carry arithmetic `\cancelto{4}{8}` means the 8
+  // became a 4). Parse to the *target* value — the corpus uses the target as
+  // the resulting term: `\frac{\cancelto{4}{8}x}{\cancelto{3}{6}}` → `4x/3`.
+  //
+  {
+    latexTrigger: ['\\cancelto'],
+    parse: (parser: Parser): MathJsonExpression => {
+      const target = parser.parseGroup();
+      // Consume (and discard) the cancelled expression, the second argument.
+      parser.parseGroup();
+      return target ?? 'Nothing';
+    },
+  },
+  //
   // Text-styling commands: parse the argument as a text run (like `\text`)
   // and wrap it in an `Annotated` expression carrying the style dictionary.
   // The `Annotated` serializer (below) re-emits these from the dict keys.

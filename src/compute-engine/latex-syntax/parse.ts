@@ -2545,7 +2545,12 @@ export class _Parser implements Parser {
     //
     // 2/ Apply subscripts (first)
     //
-    if (subscripts.length > 0) {
+    // An empty subscript (e.g. `x_{}`) is dropped, mirroring the empty
+    // superscript handling below — the base is returned unchanged.
+    const nonEmptySubscripts = subscripts.filter(
+      (x) => !isEmptySequence(x)
+    ) as MathJsonExpression[];
+    if (nonEmptySubscripts.length > 0) {
       // The `infixByTrigger` index buckets are in priority order
       // (later definitions first), same as filtering `getDefs('infix')`
       const defs = this._dictionary.infixByTrigger.get('_') ?? [];
@@ -2553,7 +2558,9 @@ export class _Parser implements Parser {
         const arg: MathJsonExpression = [
           'Subscript',
           result,
-          subscripts.length === 1 ? subscripts[0] : ['List', ...subscripts],
+          nonEmptySubscripts.length === 1
+            ? nonEmptySubscripts[0]
+            : ['List', ...nonEmptySubscripts],
         ];
         for (const def of defs) {
           if (typeof def.parse === 'function')
@@ -2571,9 +2578,18 @@ export class _Parser implements Parser {
       const defs = this._dictionary.infixByTrigger.get('^') ?? [];
 
       if (defs) {
-        const nonEmptySuperscripts = superscripts.filter(
-          (x) => !isEmptySequence(x)
-        ) as MathJsonExpression[];
+        // Drop empty superscripts (`x^{}`) and ordinal-suffix text runs
+        // (`13^{\text{th}}`, `21^{\text{st}}`): the latter is typographic
+        // decoration (an ordinal number written in LaTeX), not a power, so it
+        // devolves to the base. Only an exact ordinal suffix string
+        // (st/nd/rd/th, case-insensitive) is dropped; other text like
+        // `x^{\text{m}}` is left untouched.
+        const nonEmptySuperscripts = superscripts.filter((x) => {
+          if (isEmptySequence(x)) return false;
+          const s = stringValue(x);
+          if (s !== null && /^(?:st|nd|rd|th)$/i.test(s)) return false;
+          return true;
+        }) as MathJsonExpression[];
         // In LaTeX, a second superscript on the same base (e.g. `x^2^3`) is a
         // "Double superscript" error. Previously these were gathered into a
         // `List`, which then *broadcasts* under evaluation (`2^3^4` → [8, 16]),

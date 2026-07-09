@@ -14,6 +14,36 @@
   round-trip through LaTeX now (an explicit `\times` is emitted around the
   ellipsis instead of juxtaposition).
 
+### LaTeX Parsing
+
+Recovery fixes from the Hendrycks-MATH genre sweep (`docs/mathnet/`), taking
+that corpus from 97.09% to 97.38% clean parse:
+
+- **Ordinal superscripts** devolve to the base number: `13^{\text{th}}` now
+  parses as `13` (also `1^{\text{st}}`, `k^\text{th}`, `\mbox` variants).
+  Only an exact ordinal suffix (`st`/`nd`/`rd`/`th`, case-insensitive) is
+  dropped; other superscripts are unchanged.
+- **Empty scripts are dropped:** `x^{}` and `x_{}` now parse as `x` instead
+  of producing an error.
+- **`{,}` thousands separator:** the LaTeX thin-separator idiom `1{,}000`
+  now parses as the number `1000`. Only between digits, and a configured
+  `decimalSeparator: '{,}'` (European convention) takes precedence —
+  `3{,}14` still parses as `3.14` in that mode.
+- **`\cancel`, `\bcancel`, `\xcancel`** unwrap to their body, and
+  **`\cancelto{4}{72}`** parses to the replacement value `4` — matching the
+  worked-solution usage the notation comes from.
+- **`\not`-prefixed relations** compose into the negated relation:
+  `\not=` → `NotEqual`, `\not\in` → `NotElement`, `\not\equiv` (incl. a
+  trailing `\pmod n`) → the negated congruence, `\not\subset` →
+  `NotSubset`, and relations without a dedicated negated head wrap in
+  `Not(…)`.
+- **Standalone `\pmod{7}`** now places the modulus as the second argument
+  of `Mod` (previously the operands were flipped).
+- **`(2n)!!` stays symbolic:** `Factorial2` accepts symbolic arguments
+  (its signature was integer-only and rejected `2n` with an
+  `incompatible-type` error); numeric double factorials are unchanged
+  (`8!! = 384`).
+
 ## 0.72.0 _2026-07-09_
 
 ### Angular Units

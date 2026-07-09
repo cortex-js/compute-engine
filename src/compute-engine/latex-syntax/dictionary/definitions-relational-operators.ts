@@ -1,4 +1,23 @@
+import type { Parser, Terminator } from '../types.js';
 import { LatexDictionaryEntry, COMPARISON_PRECEDENCE } from '../types.js';
+import type { MathJsonExpression } from '../../../math-json.js';
+
+/**
+ * Parse handler for a `\not`-prefixed relation that has no dedicated negated
+ * head: parse the right-hand side at `precedence` and wrap the positive
+ * relation in `Not` (e.g. `a \not\le b` → `Not(LessEqual(a, b))`).
+ */
+function negatedRelation(head: string, precedence: number) {
+  return (
+    parser: Parser,
+    lhs: MathJsonExpression,
+    terminator: Readonly<Terminator>
+  ): MathJsonExpression | null => {
+    const rhs = parser.parseExpression({ ...terminator, minPrec: precedence });
+    if (rhs === null) return null;
+    return ['Not', [head, lhs, rhs]] as MathJsonExpression;
+  };
+}
 
 export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
   {
@@ -258,6 +277,44 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     associativity: 'right',
     precedence: 255,
     parse: 'NotEqual',
+  },
+  {
+    // `\not=` is the composed spelling of `\ne` (≠); e.g. `d \not= 0`.
+    latexTrigger: ['\\not', '='],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 255,
+    parse: 'NotEqual',
+  },
+  {
+    // `\not\le` / `\not\leq`: no dedicated negated head, so wrap `LessEqual`.
+    latexTrigger: ['\\not', '\\le'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 241,
+    parse: negatedRelation('LessEqual', 241),
+  },
+  {
+    latexTrigger: ['\\not', '\\leq'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 241,
+    parse: negatedRelation('LessEqual', 241),
+  },
+  {
+    // `\not\ge` / `\not\geq`: wrap `GreaterEqual`.
+    latexTrigger: ['\\not', '\\ge'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 242,
+    parse: negatedRelation('GreaterEqual', 242),
+  },
+  {
+    latexTrigger: ['\\not', '\\geq'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 242,
+    parse: negatedRelation('GreaterEqual', 242),
   },
   {
     // `!=` (ASCII not-equal, per docs/LENIENT_PARSER.md `!=` → `\neq`) parses

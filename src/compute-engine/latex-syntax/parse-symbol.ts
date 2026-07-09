@@ -407,6 +407,13 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
         }
 
         const sub = parseSymbolBody(parser);
+        // An empty braced subscript (`x_{}`) is meaningless decoration:
+        // consume and drop it rather than folding it into the symbol name
+        // (which would produce a spurious `x_` symbol).
+        if (sub === '' && parser.peek === '<}>') {
+          parser.match('<}>');
+          continue;
+        }
         // Check for indicators that this is an expression, not a simple symbol:
         // - null result
         // - contains comma (multi-index)

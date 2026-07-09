@@ -414,6 +414,29 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     precedence: COMPARISON_PRECEDENCE,
     parse: parseEquivalent,
   } as InfixEntry,
+  {
+    // `\not\equiv` (and `\not≡`) negates the congruence/equivalence: it reuses
+    // `parseEquivalent` (so a trailing `\pmod n` still folds into a
+    // `Congruent(a, b, n)`) and wraps the result in `Not`. There is no
+    // `NotCongruent` head, so the `Not`-wrap is the canonical form:
+    // `2019^8 \not\equiv -1 \pmod{17}` → `Not(Congruent(2019^8, -1, 17))`.
+    latexTrigger: ['\\not', '\\equiv'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: (parser, lhs, terminator) =>
+      ['Not', parseEquivalent(parser, lhs, terminator)] as MathJsonExpression,
+  } as InfixEntry,
+  {
+    // Unicode ≢ (U+2262 NOT IDENTICAL TO): literal-glyph spelling of
+    // `\not\equiv`.
+    latexTrigger: ['≢'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: (parser, lhs, terminator) =>
+      ['Not', parseEquivalent(parser, lhs, terminator)] as MathJsonExpression,
+  } as InfixEntry,
 
   // Bare `\pmod` following an expression (no `\equiv`) is a residue
   // annotation: `x \pmod n` → `Mod(x, n)` (e.g. solution prose like

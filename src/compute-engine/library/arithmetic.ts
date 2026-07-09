@@ -645,8 +645,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 9000,
       broadcastable: true,
 
-      signature: '(integer) -> integer',
-      type: () => 'finite_integer',
+      // `n!!` is only computed for integer n (see `evaluate` below), but a
+      // symbolic or real-typed argument must still be accepted and stay
+      // symbolic rather than erroring — mirror `Factorial`'s signature
+      // pattern rather than `(integer) -> integer`.
+      signature: '(number) -> number',
+      type: ([x]) => {
+        if (x?.isInteger === true && x.isNonNegative === true)
+          return 'finite_integer';
+        if (x?.isInteger === true && x.isNegative === true) return 'number';
+        return numericTypeHandler([x]);
+      },
       sgn: (
         [x] //Assumes that the inside of the factorial is an integer
       ) =>

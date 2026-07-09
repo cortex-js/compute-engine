@@ -54,14 +54,29 @@ function parseDecimalDigits(
       part === 'whole'
         ? fmt.wholeDigitGroupSeparatorTokens
         : fmt.fractionalDigitGroupSeparatorTokens;
-    if (part !== 'none' && group.length > 0) {
+    if (part !== 'none') {
       const savedIndex = parser.index;
       parser.skipVisualSpace();
-      if (parser.matchAll(group)) {
+      // Accept the configured digit-group separator, or the LaTeX `{,}` idiom
+      // (a thin thousands separator, e.g. `1{,}000`) — unless `{,}` is the
+      // configured *decimal* separator (European convention), which takes
+      // precedence. Either is only valid between digits, so we backtrack if
+      // not followed by another digit.
+      const decimalIsBracedComma =
+        fmt.decimalSeparatorTokens.length === 3 &&
+        fmt.decimalSeparatorTokens[0] === '<{>' &&
+        fmt.decimalSeparatorTokens[1] === ',' &&
+        fmt.decimalSeparatorTokens[2] === '<}>';
+      if (
+        (group.length > 0 && parser.matchAll(group)) ||
+        (!decimalIsBracedComma && parser.matchAll(['<{>', ',', '<}>']))
+      ) {
         parser.skipVisualSpace();
         // Are there more digits after a group separator
         if (/^[0-9]$/.test(parser.peek)) done = false;
         else parser.index = savedIndex;
+      } else {
+        parser.index = savedIndex;
       }
     }
   }

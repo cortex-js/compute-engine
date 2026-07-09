@@ -715,6 +715,41 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     precedence: 240,
   },
   {
+    // `\not\in` is the composed spelling of `\notin` (∉).
+    latexTrigger: ['\\not', '\\in'],
+    kind: 'infix',
+    precedence: 240,
+    parse: 'NotElement',
+  },
+  {
+    // `\not\subset` is the composed spelling of `\nsubset` (⊄).
+    latexTrigger: ['\\not', '\\subset'],
+    kind: 'infix',
+    associativity: 'none',
+    precedence: 240,
+    parse: 'NotSubset',
+  },
+  {
+    // `\not\supset` is the composed spelling of `\nsupset` (⊅).
+    latexTrigger: ['\\not', '\\supset'],
+    kind: 'infix',
+    associativity: 'none',
+    precedence: 240,
+    parse: 'NotSuperset',
+  },
+  {
+    // `\not\subseteq`: no dedicated negated head, so wrap `SubsetEqual`.
+    latexTrigger: ['\\not', '\\subseteq'],
+    kind: 'infix',
+    associativity: 'none',
+    precedence: 240,
+    parse: (parser, lhs, terminator): MathJsonExpression | null => {
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 240 });
+      if (rhs === null) return null;
+      return ['Not', ['SubsetEqual', lhs, rhs]];
+    },
+  },
+  {
     name: 'SquareSubset', // MathML: square image of
     latexTrigger: ['\\sqsubset'],
     kind: 'infix',
