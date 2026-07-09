@@ -1425,8 +1425,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // Not `parse: parseRange` directly: infix callbacks are invoked with
     // (parser, lhs, terminator), and the terminator must not land in
     // parseRange's `trailingDots` parameter.
-    parse: (parser: Parser, lhs: MathJsonExpression) =>
-      parseRange(parser, lhs),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parseRange(parser, lhs),
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (args.length === 0) return '';
