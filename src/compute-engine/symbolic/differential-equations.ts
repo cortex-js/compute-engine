@@ -1,6 +1,5 @@
 import { antiderivative } from './antiderivative';
 import type { Expression } from '../global-types';
-import { isValueDef } from '../boxed-expression/utils';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
 import {
   getPolynomialCoefficients,
@@ -13,6 +12,15 @@ import {
   isDerivativeOfDependent,
 } from '../differential-equation-utils';
 import { durandKernerRoots } from '../numerics/polynomial-roots';
+import {
+  appendDistinctRoot,
+  characteristicPolynomial,
+  collectSymbols,
+  freshSymbolName,
+  integrationConstants,
+  rootMultiplicity,
+  solutionRecord,
+} from './solver-utils';
 
 interface LinearTermCoefficients {
   derivative: Expression;
@@ -271,44 +279,6 @@ function expressionsForDependentSystem(
       ce.function(name, [ce.symbol(independentName)])
     ),
   };
-}
-
-function collectSymbols(
-  expr: Expression,
-  symbols = new Set<string>()
-): Set<string> {
-  if (isSymbol(expr)) symbols.add(expr.symbol);
-  if (isFunction(expr)) {
-    for (const op of expr.ops) collectSymbols(op, symbols);
-  }
-  return symbols;
-}
-
-function freshSymbolName(prefix: string, usedSymbols: Set<string>): string {
-  for (let i = 0; ; i++) {
-    const name = i === 0 ? prefix : `${prefix}_${i}`;
-    if (!usedSymbols.has(name)) return name;
-  }
-}
-
-function integrationConstants(
-  equation: Expression,
-  count: number
-): Expression[] {
-  const ce = equation.engine;
-  const usedSymbols = collectSymbols(equation);
-  const result: Expression[] = [];
-
-  for (let i = 1; result.length < count; i++) {
-    const name = `c_${i}`;
-    if (usedSymbols.has(name)) continue;
-    const def = ce.lookupDefinition(name);
-    if (def && !(isValueDef(def) && def.value.inferredType)) continue;
-    usedSymbols.add(name);
-    result.push(ce.symbol(name));
-  }
-
-  return result;
 }
 
 function splitDerivativeTerm(
@@ -895,82 +865,6 @@ function normalizedTrigProduct(
   return undefined;
 }
 
-function characteristicPolynomial(
-  coefficients: Map<number, Expression>,
-  order: number,
-  variable: string,
-  ce: Expression['engine']
-): Expression {
-  const root = ce.symbol(variable);
-  const terms: Expression[] = [];
-
-  for (let i = 0; i <= order; i++) {
-    const coefficient = (coefficients.get(i) ?? ce.Zero).simplify();
-    if (coefficient.isSame(0)) continue;
-    if (i === 0) terms.push(coefficient);
-    else if (i === 1) terms.push(coefficient.mul(root).simplify());
-    else terms.push(coefficient.mul(root.pow(i)).simplify());
-  }
-
-  return terms.length === 0 ? ce.Zero : ce.function('Add', terms).simplify();
-}
-
-function isZeroAtRoot(
-  expr: Expression,
-  variable: string,
-  root: Expression
-): boolean {
-  const value = expr.subs({ [variable]: root }).simplify();
-  if (value.isSame(0)) return true;
-  const numeric = value.N();
-  return Math.hypot(numeric.re, numeric.im) < 1e-8;
-}
-
-function rootMultiplicity(
-  polynomial: Expression,
-  variable: string,
-  root: Expression,
-  maxMultiplicity: number
-): number {
-  const ce = polynomial.engine;
-  let multiplicity = 0;
-  let derivative = polynomial;
-
-  while (
-    multiplicity < maxMultiplicity &&
-    isZeroAtRoot(derivative, variable, root)
-  ) {
-    multiplicity += 1;
-    derivative = ce
-      .function('D', [derivative, ce.symbol(variable)])
-      .evaluate()
-      .simplify();
-  }
-
-  return multiplicity;
-}
-
-function appendDistinctRoot(
-  roots: Expression[],
-  root: Expression,
-  tolerance = 1e-8
-): void {
-  const rootValue = root.N();
-  if (
-    roots.some((other) => {
-      if (root.isSame(other)) return true;
-      const otherValue = other.N();
-      return (
-        Math.hypot(rootValue.re - otherValue.re, rootValue.im - otherValue.im) <
-        tolerance
-      );
-    })
-  )
-    return;
-
-  roots.push(root);
-}
-
 function numericCharacteristicCoefficients(
   coefficients: Map<number, Expression>,
   order: number,
@@ -1165,7 +1059,6 @@ function solveHigherOrderHomogeneousConstantCoefficient(
   const rootVariable = freshSymbolName('dsolveroot', collectSymbols(equation));
   const polynomial = characteristicPolynomial(
     collected.coefficients,
-    order,
     rootVariable,
     ce
   );
@@ -2341,20 +2234,6 @@ function undeterminedCoefficientParticularSolution(
     exponentialParticularSolution(equation, collected, independentName) ??
     sinusoidalParticularSolution(equation, collected, independentName)
   );
-}
-
-function solutionRecord(
-  result:
-    | null
-    | ReadonlyArray<Expression>
-    | Record<string, Expression>
-    | Array<Record<string, Expression>>
-): Record<string, Expression> | undefined {
-  if (!result) return undefined;
-  if (!Array.isArray(result)) return result as Record<string, Expression>;
-  const [first] = result;
-  if (!first || 'operator' in first) return undefined;
-  return first as Record<string, Expression>;
 }
 
 function coefficientWithoutPowerOfX(
