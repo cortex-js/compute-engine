@@ -2,7 +2,7 @@
 
 _Reviewed 2026-07-05 against `src/cortex/docs/` (11 files, ~890 lines), the
 implementation in `src/cortex/`, and the confirmed architecture decisions in
-[`CORTEX_ROADMAP.md`](../../CORTEX_ROADMAP.md). Two parts: **consistency
+[`README.md`](./README.md). Two parts: **consistency
 defects** in what the docs already say, and **gaps** — things a v0 language
 needs that the docs don't define yet. Each gap notes which phase owns it._
 

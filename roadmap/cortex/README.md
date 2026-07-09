@@ -1,22 +1,107 @@
-# Cortex Language — Implementation Plans
+# Cortex Language
 
-Detailed plans for the Cortex language revival. The top-level tracker —
-status, audit findings, architecture decisions, phase checklists — is
-[`CORTEX_ROADMAP.md`](../../CORTEX_ROADMAP.md) at the repo root; these
-documents carry the per-phase design detail. Update the relevant plan when
-a design decision is ratified or a phase's scope changes.
+Cortex is a text-syntax programming language for scientific computing whose
+intermediate representation is MathJSON, evaluated by the Compute Engine
+(language design in `src/cortex/docs/*.md`; see the
+[language review](./language-review.md) for its consistency state and gaps).
 
-| Document | Scope | Depth |
-| --- | --- | --- |
-| [`language-review.md`](./language-review.md) | Consistency review of `src/cortex/docs/` + language design gaps (type system, scoping, control flow, …), each gap assigned to a phase | Complete review |
-| [`phase-0-hygiene.md`](./phase-0-hygiene.md) | Mechanical fixes to current code + docs; runs in parallel with Phase 1 | Detailed |
-| [`phase-1-parser-foundation.md`](./phase-1-parser-foundation.md) | New lexer/parser (house style of `common/type`), diagnostics + recovery model, port strategy, `point-free-parser` retirement | Detailed |
-| [`phase-2-expression-layer.md`](./phase-2-expression-layer.md) | Shared operator table, Pratt + whitespace rule, calls/collections/dictionaries, type-annotation subparser, `$…$` LaTeX islands | Detailed |
-| [`phase-3-round-trip.md`](./phase-3-round-trip.md) | Serializer completion + parse∘serialize property test, loose-syntax compat check | Scoped |
-| [`phase-4-semantics.md`](./phase-4-semantics.md) | Execution model, declarations/scoping, function definitions, control flow, pragma security, Tycho integration | Scoped, open decisions flagged |
-| [`phase-5-ship.md`](./phase-5-ship.md) | Build targets, package export, docs sync, announcement | Checklist |
+Cortex shipped as an **experimental** entry point
+`@cortex-js/compute-engine/cortex` on 2026-07-09 — all phases (0–5) of the
+2026-07-05 revival are complete. What genuinely remains is the
+[Roadmap](#roadmap) below. History — the audit that started the revival, the
+inventory snapshot, the per-phase completion log, and the per-phase design
+documents — lives in [`STATUS_REPORT.md`](./STATUS_REPORT.md).
 
-**Dependency order**: 0 ∥ 1 → 2 → (3 ∥ 4) → 5. Phase 2's open questions
-(pipe precedence, chained relationals) and Phase 4's design decisions
-(anonymous functions, loop form) are flagged inline and should be settled
-before their implementation starts.
+Public API:
+
+- `parseCortex(source, url?) → [MathJsonExpression, ParsingDiagnostic[]]`
+- `serializeCortex(expr, options?) → string`
+- `executeCortex(ce, source, options?) → { value, diagnostics }`
+
+## Architecture decisions (2026-07-05)
+
+1. **Type annotations reuse the engine's type language.**
+   `src/common/type/` (hand-written `Lexer` + recursive-descent `Parser`)
+   is used as a subparser in annotation positions (`x: real`, function
+   signatures). It needs a prefix-parse API (parse from an offset, report
+   the end, no EOF requirement) and thrown-error → diagnostic bridging.
+   Type-syntax tokens (`<`, `>`, `->`, `|`, `&`) never enter the expression
+   grammar.
+2. **The loose `ce.parse()` is NOT the expression parser — align with it
+   instead.** The non-strict AsciiMath/Typst grammar is a math-notation
+   parser over a LaTeX token model (unknown multi-letter identifiers split
+   into letter products: `foo` → `f·o·o`; `&&`, `in`, `0x1F`, strings,
+   comments are foreign to it). Instead: (i) keep Cortex syntax
+   *compatible* where the grammars overlap (`**`, `|>`, `[1,2,3]`,
+   `f(x,y)`, bare function names); (ii) reuse dictionary *data* and
+   `serialize-number`; (iii) **`$...$` LaTeX islands**: a `$...$` span is a
+   primary expression — its contents are parsed as LaTeX by an *injected*
+   parser (mirroring the engine's `ILatexSyntax` injection pattern) and the
+   resulting MathJSON is spliced into the Cortex AST like any other operand
+   (`2 * $\frac{1}{2}$` → `["Multiply", 2, ["Divide", 1, 2]]`). Islands
+   parse raw/structural by default (Cortex owns canonicalization); island
+   diagnostics must be offset-mapped into the Cortex source.
+3. **`point-free-parser` is retired.** The Cortex parser is a hand-written
+   `Lexer` + Pratt/recursive-descent parser in the house style of
+   `src/common/type/lexer.ts`/`parser.ts`, with diagnostic accumulation +
+   panic-mode recovery (always a partial AST + diagnostics — never
+   throw-on-first-error) and source ranges on every node. The working
+   lexical layer, the `characters.ts` Unicode tables, and the
+   `ParsingDiagnostic`/fix-it types were ported; the combinator machinery
+   was deleted.
+
+## Roadmap
+
+The revival (phases 0–5) is complete and shipped; this is the backlog of what
+genuinely remains. It is the single list of open Cortex work — items leave it
+once they land, and the record moves to the completed log in
+[`STATUS_REPORT.md`](./STATUS_REPORT.md). None of these block use of the
+experimental entry point; they are gated on demand from the first consumer
+(Cortex fragments in Tycho notebooks). Effort tags: S small / M medium / L
+large.
+
+### Release-protocol (do at/around each release)
+
+- **Docs sync (S).** Route `src/cortex/docs/` through the normal `doc/`
+  workflow to cortexjs.io at release time (never edit cortexjs.io directly).
+  Before syncing: fill `naming.md` (language-review §2.10), add the "Future
+  directions" non-goals section to `cortex.md` (§2.12 — `match`, modules,
+  `try`/`catch`, `async`, macros are reserved words, *not designed*), and do a
+  final grammar pass on `syntax.md`.
+- **Highlight mode (S).** Validate `src/cortex/highlight-js-mode.js` against
+  the shipped grammar (operators, `$…$` islands, verbatim symbols, extended
+  strings); derive a CodeMirror grammar for Tycho if needed (Tycho-side).
+- **Runtime dist smoke in CI (S).** The nodenext consumer smoke test covers
+  `/cortex` type resolution; add a runtime smoke that imports
+  `@cortex-js/compute-engine/cortex` from the *packed* build and executes a
+  tiny program (mirrors what the benchmark harness does for CE releases).
+
+### Language design decisions still open
+
+- **Verbatim symbols vs LaTeX-command identifiers (M; language-review §2.13).**
+  A notebook user will want a symbol named `\sin`, but today `` `\sin` `` cooks
+  `\s`→space (string escapes applied to verbatim symbols) and `` `\\sin` ``
+  trips `invalid-symbol-name` (identifier-char check enforced inside backticks,
+  `lexer.ts:453`). Decide: (a) verbatim symbols become truly literal — no
+  escape processing, no identifier-char enforcement (cleanest for notebooks);
+  (b) keep escapes but drop the identifier-char check for the verbatim form; or
+  (c) add a separate raw-symbol syntax.
+
+### Semantics gaps shipped as v0 caveats (complete on demand)
+
+- **Enforce typed function params (M).** `f(x: integer) = …` parses and holds
+  the annotation but `executeCortex` does not enforce it at call time — wire
+  the annotation into parameter binding.
+- **Comment fidelity through serialize (M).** Comments are dropped on
+  serialize (documented lossy in `comments.md`); preserve them if round-trip
+  fidelity is required for the notebook use case.
+
+### Serializer / compile-target polish
+
+- **Formatter trailing-space artifact (S).** One cosmetic
+  trailing-space-before-newline case remains; a naive fix risks corrupting
+  trailing spaces inside `"""` string literals, so it needs a scoped fix.
+- **Python compile-target tails (M).** The Cortex→engine lowering currently
+  fails closed in the Python target on `Comprehension`, stepped/descending
+  `Range`, and multi-`Element` `Loop`; implement these when a Cortex program
+  needs them.

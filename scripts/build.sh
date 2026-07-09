@@ -47,7 +47,7 @@ fi
 export BUILD="${1-production}"
 
 # export TARGETS="math-json cortex compute-engine"
-export TARGETS="math-json latex-syntax interval numerics core compile identities integration-rules compute-engine"
+export TARGETS="math-json latex-syntax interval numerics core compile identities integration-rules cortex compute-engine"
 
 # export GIT_VERSION=`git describe --long --dirty`
 

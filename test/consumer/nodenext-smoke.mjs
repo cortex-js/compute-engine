@@ -88,6 +88,7 @@ import * as core from '${PKG_NAME}/core';
 import * as compile from '${PKG_NAME}/compile';
 import * as identities from '${PKG_NAME}/identities';
 import * as integrationRules from '${PKG_NAME}/integration-rules';
+import * as cortex from '${PKG_NAME}/cortex';
 
 // Touch a real symbol from each entry so tsc actually resolves the types
 // instead of silently treating the module as \`any\`.
@@ -104,6 +105,10 @@ const touched: unknown[] = [
   compile.compile,
   identities.loadIdentities,
   integrationRules.loadIntegrationRules,
+  cortex.parseCortex,
+  cortex.serializeCortex,
+  cortex.executeCortex,
+  cortex.version,
 ];
 void touched;
 

@@ -202,7 +202,10 @@ function explainSolveSystem(
   }
 
   // Only pure systems of equations are traced; anything else declines.
-  if (equations.length === 0 || !equations.every((eq) => eq.operator === 'Equal'))
+  if (
+    equations.length === 0 ||
+    !equations.every((eq) => eq.operator === 'Equal')
+  )
     return null;
 
   const trace: RuleSteps = [];
@@ -232,8 +235,7 @@ function recordToEquationList(
 ): Expression {
   const eqs: Expression[] = [];
   for (const v of varNames)
-    if (v in record)
-      eqs.push(ce.function('Equal', [ce.symbol(v), record[v]]));
+    if (v in record) eqs.push(ce.function('Equal', [ce.symbol(v), record[v]]));
   return ce.function('List', eqs);
 }
 

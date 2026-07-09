@@ -35,7 +35,7 @@ listed here so nothing is forgotten. Ship as **experimental**._
    releases).
 5. **Announce**: CHANGELOG entry (first ever Cortex mention — say
    experimental, link docs); README section; note in ROADMAP.md pointing
-   at `CORTEX_ROADMAP.md`.
+   at [`STATUS_REPORT.md`](./STATUS_REPORT.md).
 
 ## Definition of done
 

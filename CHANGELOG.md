@@ -24,6 +24,28 @@
   and mixed systems are not traced and throw a precise error. To support
   systems, the `variable` explain option now also accepts an array of unknowns.
 
+### Cortex Language (Experimental)
+
+- **Cortex ships as a new entry point `@cortex-js/compute-engine/cortex`.**
+  Cortex is a text-syntax programming language for scientific computing whose
+  intermediate representation is MathJSON, evaluated by the Compute Engine. The
+  entry point exports `parseCortex()` (Cortex text → MathJSON),
+  `serializeCortex()` (MathJSON → Cortex text), and `executeCortex()` (parse and
+  evaluate a program against a host-created engine):
+
+  ```js
+  import { ComputeEngine, executeCortex } from '@cortex-js/compute-engine/cortex';
+  const ce = new ComputeEngine();
+  const { value } = executeCortex(ce, `
+    let x = 1/2
+    if (x < 1) { x + 1 } else { 0 }
+  `);
+  // value.toString() === '3/2'
+  ```
+
+  **This is experimental**: the syntax and semantics may change between
+  releases.
+
 ## 0.71.0 _2026-07-08_
 
 ### Differential Equations

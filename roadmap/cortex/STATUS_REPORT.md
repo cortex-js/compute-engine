@@ -1,80 +1,48 @@
-# Cortex Language — Roadmap
+# Cortex Language — Status Report
 
-_Status tracker for the Cortex language revival (`src/cortex/`,
-`src/point-free-parser/`, `src/cortex.ts`, `test/cortex/`). Audited
-2026-07-05; direction decided the same day. Detailed per-phase
-implementation plans live in [`roadmap/cortex/`](./roadmap/cortex/README.md)
-— this file tracks status and records decisions. Move completed work to the
-log at the bottom._
+Status, audit history, inventory snapshot, and the per-phase completion log
+for the Cortex language revival (`src/cortex/`, `src/cortex.ts`,
+`test/cortex/`). Forward-looking reference (what Cortex is, architecture
+decisions, plan index) lives in [`README.md`](./README.md) beside the
+per-phase plans.
 
-## 1. What Cortex is
+## Status
 
-Cortex is a text-syntax programming language for scientific computing whose
-IR is MathJSON, evaluated by the Compute Engine (language design in
-`src/cortex/docs/*.md`; see the
-[language review](./roadmap/cortex/language-review.md) for its current
-consistency state and gaps). Two public functions today:
-
-- `parseCortex(source, url?) → [MathJsonExpression, ParsingDiagnostic[]]`
-- `serializeCortex(expr, options?) → string`
-
-**Goal**: a shippable experimental v0 whose first consumer is **Cortex
-fragments in Tycho notebooks**.
-
-## 2. Decisions (2026-07-05)
-
-1. **Type annotations reuse the engine's type language.**
-   `src/common/type/` (hand-written `Lexer` + recursive-descent `Parser`)
-   is used as a subparser in annotation positions (`x: real`, function
-   signatures). It needs a prefix-parse API (parse from an offset, report
-   the end, no EOF requirement) and thrown-error → diagnostic bridging.
-   Type-syntax tokens (`<`, `>`, `->`, `|`, `&`) never enter the expression
-   grammar.
-2. **The loose `ce.parse()` is NOT the expression parser — align with it
-   instead.** The non-strict AsciiMath/Typst grammar is a math-notation
-   parser over a LaTeX token model (unknown multi-letter identifiers split
-   into letter products: `foo` → `f·o·o`; `&&`, `in`, `0x1F`, strings,
-   comments are foreign to it). Instead: (i) keep Cortex syntax
-   *compatible* where the grammars overlap (`**`, `|>`, `[1,2,3]`,
-   `f(x,y)`, bare function names); (ii) reuse dictionary *data* and
-   `serialize-number`; (iii) **`$...$` LaTeX islands**: a `$...$` span is a
-   primary expression — its contents are parsed as LaTeX by an *injected*
-   parser (mirroring the engine's `ILatexSyntax` injection pattern) and the
-   resulting MathJSON is spliced into the Cortex AST like any other operand
-   (`2 * $\frac{1}{2}$` → `["Multiply", 2, ["Divide", 1, 2]]`). Islands
-   parse raw/structural by default (Cortex owns canonicalization); island
-   diagnostics must be offset-mapped into the Cortex source.
-3. **`point-free-parser` is retired.** The Cortex parser is rewritten as a
-   hand-written `Lexer` + Pratt/recursive-descent parser in the house style
-   of `src/common/type/lexer.ts`/`parser.ts`, with diagnostic accumulation
-   + panic-mode recovery (always a partial AST + diagnostics — never
-   throw-on-first-error) and source ranges on every node. The working
-   lexical layer, the `characters.ts` Unicode tables, and the
-   `ParsingDiagnostic`/fix-it types are ported; the combinator machinery is
-   deleted.
-
-## 3. Phases
-
-Dependency order: **0 ∥ 1 → 2 → (3 ∥ 4) → 5**. Full plans in
-[`roadmap/cortex/`](./roadmap/cortex/README.md).
+Shipped 2026-07-09 as the **experimental** entry point
+`@cortex-js/compute-engine/cortex` (`parseCortex`, `serializeCortex`,
+`executeCortex`). All phases of the 2026-07-05 revival are complete. Residual
+release-protocol items — docs sync to cortexjs.io, highlight-mode validation
+— stay user-driven at release time.
 
 | Phase | Scope | Plan | Status |
 | --- | --- | --- | --- |
-| 0 — Hygiene | Mechanical fixes to current code + docs (`#date` bug, List/Set swap, `Element` naming, console output, docs errors) | [plan](./roadmap/cortex/phase-0-hygiene.md) | ✅ done (2026-07-07) |
-| 1 — Parser foundation | New lexer/parser, diagnostics + recovery, port lexical layer (49 green tests = DoD), delete `point-free-parser` | [plan](./roadmap/cortex/phase-1-parser-foundation.md) | ✅ done (2026-07-07) |
-| 2 — Expression layer | Shared operator table, Pratt + whitespace rule, calls, collections, dictionaries, type annotations, `$…$` islands; un-skip all suites | [plan](./roadmap/cortex/phase-2-expression-layer.md) | ✅ done (2026-07-07) |
-| 3 — Round-trip | Serializer completion, parse∘serialize property test, loose-syntax compat check | [plan](./roadmap/cortex/phase-3-round-trip.md) | ✅ done (2026-07-07) |
-| 4 — Semantics & execution | `executeCortex`, declarations/scoping, function definitions, control flow, pragma security, Tycho integration | [plan](./roadmap/cortex/phase-4-semantics.md) | ✅ done (2026-07-07); v0 caveats: typed params parsed-but-unenforced; Tycho cell UX is consumer-side |
-| 5 — Ship | Build target, `./cortex` export, docs sync, highlight mode, CHANGELOG (experimental) | [plan](./roadmap/cortex/phase-5-ship.md) | not started |
+| 0 — Hygiene | Mechanical fixes to current code + docs (`#date` bug, List/Set swap, `Element` naming, console output, docs errors) | [plan](./phase-0-hygiene.md) | ✅ done (2026-07-07) |
+| 1 — Parser foundation | New lexer/parser, diagnostics + recovery, port lexical layer (49 green tests = DoD), delete `point-free-parser` | [plan](./phase-1-parser-foundation.md) | ✅ done (2026-07-07) |
+| 2 — Expression layer | Shared operator table, Pratt + whitespace rule, calls, collections, dictionaries, type annotations, `$…$` islands; un-skip all suites | [plan](./phase-2-expression-layer.md) | ✅ done (2026-07-07) |
+| 3 — Round-trip | Serializer completion, parse∘serialize property test, loose-syntax compat check | [plan](./phase-3-round-trip.md) | ✅ done (2026-07-07) |
+| 4 — Semantics & execution | `executeCortex`, declarations/scoping, function definitions, control flow, pragma security, Tycho integration | [plan](./phase-4-semantics.md) | ✅ done (2026-07-07); v0 caveats: typed params parsed-but-unenforced; Tycho cell UX is consumer-side |
+| 5 — Ship | Build target, `./cortex` export, docs sync, highlight mode, CHANGELOG (experimental) | [plan](./phase-5-ship.md) | ✅ done (2026-07-09); packaging landed — docs sync + highlight-mode validation remain user-driven at release time |
 
-Open design questions are flagged inside the phase plans (Phase 2: pipe
-precedence, chained relationals; Phase 4: anonymous-function syntax, loop
-form) and in the [language review](./roadmap/cortex/language-review.md)
-(gaps §2.1–§2.12, each assigned to a phase).
+## Design documents (per phase)
 
-## 4. Audit record (2026-07-05)
+The per-phase plans that drove the revival. All phases landed; these are kept
+as the design record (each plan's own "open questions" were settled during its
+implementation — the surviving open items are consolidated in the
+[Roadmap](./README.md#roadmap)). **Dependency order**: 0 ∥ 1 → 2 → (3 ∥ 4) → 5.
 
-Kept for reference; the defects below are owned by Phase 0 (mechanical
+| Document | Scope | Depth |
+| --- | --- | --- |
+| [`language-review.md`](./language-review.md) | Consistency review of `src/cortex/docs/` + language design gaps (type system, scoping, control flow, …), each gap assigned to a phase | Complete review |
+| [`phase-0-hygiene.md`](./phase-0-hygiene.md) | Mechanical fixes to current code + docs; ran in parallel with Phase 1 | Detailed |
+| [`phase-1-parser-foundation.md`](./phase-1-parser-foundation.md) | New lexer/parser (house style of `common/type`), diagnostics + recovery model, port strategy, `point-free-parser` retirement | Detailed |
+| [`phase-2-expression-layer.md`](./phase-2-expression-layer.md) | Shared operator table, Pratt + whitespace rule, calls/collections/dictionaries, type-annotation subparser, `$…$` LaTeX islands | Detailed |
+| [`phase-3-round-trip.md`](./phase-3-round-trip.md) | Serializer completion + parse∘serialize property test, loose-syntax compat check | Scoped |
+| [`phase-4-semantics.md`](./phase-4-semantics.md) | Execution model, declarations/scoping, function definitions, control flow, pragma security, Tycho integration | Scoped, open decisions flagged |
+| [`phase-5-ship.md`](./phase-5-ship.md) | Build targets, package export, docs sync, announcement | Checklist |
+
+## Audit record (2026-07-05)
+
+Kept for reference; the defects below were owned by Phase 0 (mechanical
 ones) and Phases 1–3 (structural ones).
 
 ### Status found: dormant, unshipped, half-built
@@ -120,9 +88,13 @@ and the docs.
 9. Docs drift — broken readmore links, malformed JSON examples, glyph
    typos, reserved-word list drift, two overlapping pragma families,
    lexical-only grammar in `syntax.md`. → Phase 0 (mechanical) +
-   [language review](./roadmap/cortex/language-review.md) Part 1 (rest)
+   [language review](./language-review.md) Part 1 (rest)
 
-## 5. Inventory (as of the audit)
+## Inventory (as of the 2026-07-05 audit)
+
+Snapshot from the audit — line counts and roles predate the Phase 1–5 work
+(`point-free-parser/` was deleted in Phase 1; the `src/cortex/` file set grew
+`tokens.ts`/`lexer.ts`/`parser.ts`/`operators.ts`/`execute-cortex.ts`).
 
 | Path | Lines | Role |
 | --- | --- | --- |
@@ -133,12 +105,33 @@ and the docs.
 | `src/cortex/utils.ts` | 21 | Misc helpers |
 | `src/cortex/highlight-js-mode.js` | 196 | highlight.js syntax mode |
 | `src/cortex/docs/*.md` | 888 | Language design docs (cortexjs.io frontmatter) |
-| `src/point-free-parser/*.ts` | ~2,950 | Combinator library — to be deleted in Phase 1 |
+| `src/point-free-parser/*.ts` | ~2,950 | Combinator library — deleted in Phase 1 |
 | `src/cortex.ts` | 19 | Entry point (not in build TARGETS yet) |
 | `test/cortex/*.test.ts` | 1,358 | 49 passing (lexical), 21 skipped (expression layer) |
 
 ## Completed log
 
+- 2026-07-09 — **Phase 5 (Ship) — packaging**: Cortex is published as the
+  experimental entry point `@cortex-js/compute-engine/cortex`. Restored `cortex`
+  to `TARGETS` in `scripts/build.sh` (the `.d.ts` branch already existed);
+  added `CORTEX_UMD_OPTIONS` + a `{ esmViaSplit: true }` row to the `ENTRIES`
+  table in `scripts/build.mjs` and joined `./src/cortex.ts` to the
+  **code-splitting** ESM invocation alongside `compute-engine` and
+  `integration-rules` — so `executeCortex(ce, …)` shares the engine core chunk
+  and cross-bundle identity holds (verified: engine created from the main entry,
+  `executeCortex` called from `/cortex`, `3/2` with no diagnostics). Added the
+  `./cortex` `exports` entry to `package.json`, extended the nodenext consumer
+  smoke test (`test/consumer/nodenext-smoke.mjs`) to import `/cortex` and touch
+  `parseCortex`/`serializeCortex`/`executeCortex`/`version`, and documented the
+  entry in CHANGELOG (Unreleased) and README (both marked experimental). Bundle
+  sizes confirm chunk-sharing: `dist/esm-min/cortex.js` ≈ 57 KB (re-exports over
+  shared chunks) vs self-contained `dist/umd-min/cortex.cjs` ≈ 1.6 MB. Full
+  production build (incl. version stamping + nodenext smoke), the 285 cortex
+  tests, and typecheck all pass. No source under `src/cortex/` or
+  `src/compute-engine/` needed changes; the CHANGELOG usage snippet was verified
+  to run against the built dist before landing. Remaining Phase 5 items (docs
+  sync to cortexjs.io, highlight-mode validation) stay user-driven at release
+  time.
 - 2026-07-07 — **Phase 4 (Semantics & execution)**: Cortex runs in a notebook
   cell via `executeCortex(ce, source, options?) → { value, diagnostics }`
   (sequential top-level statements in a shared scope; symbolic-by-default with
@@ -235,5 +228,5 @@ and the docs.
   principles cleanup. Cortex suites green (51 passed, snapshot diff limited to
   List/Set/Element), typecheck clean. Not committed.
 - 2026-07-05 — Audit; direction decided (revive for Tycho notebooks);
-  architecture decisions §2 ratified; per-phase plans + language review
-  written in `roadmap/cortex/`.
+  architecture decisions ratified (see [`README.md`](./README.md)); per-phase
+  plans + language review written in `roadmap/cortex/`.

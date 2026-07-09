@@ -32,7 +32,7 @@ import {
 } from '../collection-utils.js';
 import { isTensor } from './boxed-tensor.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
-import { isNumber, isFunction, isString, isSymbol } from './type-guards.js';
+import { isNumber, isFunction, isString } from './type-guards.js';
 import type { NumericPrimitiveType } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';

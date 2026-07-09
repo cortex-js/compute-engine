@@ -117,6 +117,18 @@ const INTEGRATION_RULES_UMD_OPTIONS = {
   },
 };
 
+const CORTEX_UMD_OPTIONS = {
+  banner: {
+    js: `/** Cortex ${SDK_VERSION} ${
+      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
+    }*/
+    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Cortex = {}));})(this, (function (exports) { 'use strict';`,
+  },
+  footer: {
+    js: `Object.assign(exports, Cortex); Object.defineProperty(exports, '__esModule', { value: true });}));`,
+  },
+};
+
 const BUILD_OPTIONS = {
   banner: {
     js: `/** Compute Engine ${SDK_VERSION} ${
@@ -146,9 +158,10 @@ const MIN_OPTIONS = {
 };
 
 // Entry table: source entry name → its UMD wrapper options + IIFE globalName.
-// `esmViaSplit` entries (compute-engine + integration-rules) do NOT get a
-// standalone single-entry ESM build — their ESM output comes from the shared
-// code-splitting invocation below. Every entry still gets both UMD variants.
+// `esmViaSplit` entries (compute-engine + integration-rules + cortex) do NOT
+// get a standalone single-entry ESM build — their ESM output comes from the
+// shared code-splitting invocation below. Every entry still gets both UMD
+// variants.
 const ENTRIES = [
   {
     name: 'compute-engine',
@@ -173,6 +186,12 @@ const ENTRIES = [
     globalName: 'IntegrationRules',
     esmViaSplit: true,
   },
+  {
+    name: 'cortex',
+    umd: CORTEX_UMD_OPTIONS,
+    globalName: 'Cortex',
+    esmViaSplit: true,
+  },
 ];
 
 // The published layout puts the variant marker in the DIRECTORY, not the
@@ -181,16 +200,17 @@ const ENTRIES = [
 // `chunks/`).
 const builds = [];
 
-// Build the library + the integration-rules plugin as ONE esbuild invocation
-// per ESM variant with code splitting, so the shared engine core (BigDecimal,
-// boxed expressions, numeric-value, latex-syntax, …) is emitted ONCE into a
-// common chunk that both `esm/compute-engine.js` and
-// `esm/integration-rules.js` import (and likewise under `esm-min/`). Without
-// this, the integration-rules bundle re-bundles the entire engine and its
+// Build the library + the integration-rules plugin + the cortex language as
+// ONE esbuild invocation per ESM variant with code splitting, so the shared
+// engine core (BigDecimal, boxed expressions, numeric-value, latex-syntax, …)
+// is emitted ONCE into a common chunk that `esm/compute-engine.js`,
+// `esm/integration-rules.js` and `esm/cortex.js` import (and likewise under
+// `esm-min/`). Without this, each bundle re-bundles the entire engine and its
 // duplicate class definitions break cross-bundle `instanceof` checks (e.g. a
 // host-created BigDecimal fails `instanceof BigDecimal` inside the plugin's
-// statically-imported engine code). Splitting is ESM-only; the UMD variants
-// stay self-contained single files. The variant marker is the outdir
+// statically-imported engine code, and `executeCortex(ce, …)` receives a
+// host-created engine). Splitting is ESM-only; the UMD variants stay
+// self-contained single files. The variant marker is the outdir
 // (`dist/esm` vs `dist/esm-min`), so the entry/chunk names carry no suffix.
 for (const [outdir, extra] of [
   ['./dist/esm', {}],
@@ -200,7 +220,11 @@ for (const [outdir, extra] of [
     esbuild.build({
       ...BUILD_OPTIONS,
       ...extra,
-      entryPoints: ['./src/compute-engine.ts', './src/integration-rules.ts'],
+      entryPoints: [
+        './src/compute-engine.ts',
+        './src/integration-rules.ts',
+        './src/cortex.ts',
+      ],
       outdir,
       format: 'esm',
       splitting: true,

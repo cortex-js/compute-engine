@@ -138,6 +138,26 @@ console.log(solution.x.json);  // 3
 console.log(solution.y.json);  // 2
 ```
 
+### Cortex Language (Experimental)
+
+Cortex is a text-syntax programming language for scientific computing whose
+intermediate representation is MathJSON, evaluated by the Compute Engine. It
+ships as a separate, **experimental** entry point (syntax and semantics may
+change between releases):
+
+```js
+import { ComputeEngine, executeCortex } from "@cortex-js/compute-engine/cortex";
+
+const ce = new ComputeEngine();
+const { value } = executeCortex(ce, `
+  let x = 1/2
+  if (x < 1) { x + 1 } else { 0 }
+`);
+// value.toString() ➔ "3/2"
+```
+
+See the [Cortex language documentation](https://cortexjs.io/cortex/).
+
 **💡 Best Practices:**
 
 - Always use type guards (`isNumber`, `isSymbol`, `isFunction`) before accessing
