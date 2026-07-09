@@ -1,5 +1,5 @@
 {
- "$comment": "Parser regression corpus distilled from the 2026-07-04 MathNet sweep (see ce-mathnet-experiment.md). fragments = LaTeX from problem statements that did NOT parse clean; unicodeAnswers = non-prose final_answer strings (mixed Unicode/ASCII math) that failed. A case is FIXED when ce.parse() yields a valid expression with no Error subexpression (and no throw). Regenerate from scratch with scripts/ (see README.md).",
+ "$comment": "Parser regression corpus distilled from the 2026-07-04 MathNet sweep (see ce-mathnet-experiment.md), with follow-up cases appended from fresh-sweep-report.md and a later shifted sample. fragments = LaTeX from problem statements that did NOT parse clean; unicodeAnswers = non-prose final_answer strings (mixed Unicode/ASCII math) that failed. A case is FIXED when ce.parse() yields a valid expression with no Error subexpression (and no throw). Regenerate from scratch with scripts/ (see README.md).",
  "date": "2026-07-04",
  "engineVersion": "0.67.0",
  "source": "huggingface.co/datasets/ShadenA/MathNet (800-row sample, offsets 0..24500 step 3500)",
@@ -20,6 +20,27 @@
   "environment": 6,
   "set-minus": 2,
   "logic-misc": 2
+ },
+ "freshSampleFollowupCounts": {
+  "trailing-question": 3,
+  "polynomial-ring": 3,
+  "geometry-intersection": 3,
+  "set-image-brackets": 2
+ },
+ "expandedSampleCounts": {
+  "trailing-question": 5,
+  "new-command-notation": 6,
+  "sets-and-congruence": 8,
+  "geometry-intersection": 8,
+  "builtin-symbol-collision": 6,
+  "geometry-label-arithmetic": 6,
+  "divisibility-bar": 2,
+  "ellipsis": 4,
+  "environment": 4,
+  "stray-token": 2,
+  "matrix-operator-typing": 2,
+  "fragment-boundary": 2,
+  "other-fresh-sample": 2
  },
  "fragments": [
   {
@@ -1755,6 +1776,414 @@
    "latex": "|z| + |z - x| + |z - y| \\geq \\left| \\frac{\\sqrt{3}}{2}x + \\left(y - \\frac{1}{2}\\right)i \\right|.",
    "category": "trailing-punctuation",
    "observed": "'unexpected-operator'"
+  },
+  {
+   "latex": "\\cos^2 x + 2\\sin^2 x = 1?",
+   "category": "trailing-question",
+   "observed": "'unexpected-token'",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "\\sum_{n=1}^{100} a_n^2?",
+   "category": "trailing-question",
+   "observed": "'unexpected-token'",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "a^3+b^3+c^3+5a^2+5b^2+5c^2?",
+   "category": "trailing-question",
+   "observed": "'unexpected-token'",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "\\mathbb{Z}[x]",
+   "category": "polynomial-ring",
+   "observed": "incompatible-type",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "\\mathbb{R}[X, Y]",
+   "category": "polynomial-ring",
+   "observed": "incompatible-type",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "\\theta : \\mathbb{Z}[x] \\to \\mathbb{Z}",
+   "category": "polynomial-ring",
+   "observed": "incompatible-type",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "P = AC \\cap BD",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "A_1 = AO \\cap SBC",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "\\{F\\} = DI \\cap AM",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "f[S]",
+   "category": "set-image-brackets",
+   "observed": "incompatible-type",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "f[\\operatorname{divs}(m)]=\\operatorname{divs}(n)",
+   "category": "set-image-brackets",
+   "observed": "incompatible-type",
+   "source": "fresh-sweep-report.md"
+  },
+  {
+   "latex": "1/\\ N_0 = 120 ?",
+   "category": "trailing-question",
+   "observed": "'unexpected-token'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "1004 \\times 1005 \\times 1006 \\times \\dots \\times 2008?",
+   "category": "trailing-question",
+   "observed": "'unexpected-token'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\frac{1}{\\sqrt{2024}} < \\frac{1}{\\sqrt{a+1}} + \\frac{1}{\\sqrt{a+2}} + \\dots + \\frac{1}{\\sqrt{a+2023}} < \\frac{1}{\\sqrt{2023}}?",
+   "category": "trailing-question",
+   "observed": "'unexpected-token'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\frac{x^{4}+x^{2}+5}{\\left(x^{2}+1\\right)^{2}} ?",
+   "category": "trailing-question",
+   "observed": "'unexpected-token'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\sqrt{a+b}\\left(\\frac{1}{\\sqrt{a}}+\\frac{1}{\\sqrt{b}}\\right) ?",
+   "category": "trailing-question",
+   "observed": "'unexpected-token'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "(2+3) \\circledast (0+3)",
+   "category": "new-command-notation",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "C \\star C' = \\{x \\mid x \\in (C - C') \\cup (C' - C)\\}.",
+   "category": "new-command-notation",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\Pi",
+   "category": "new-command-notation",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\Varangle ACM = \\Varangle BCD",
+   "category": "new-command-notation",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\angle^*BDC = \\angle^*CEA = \\angle^*AFB",
+   "category": "new-command-notation",
+   "observed": "'missing'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\measuredangle O_{1} O O_{2}=45^{\\circ}",
+   "category": "new-command-notation",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "A \\cap B = \\emptyset",
+   "category": "sets-and-congruence",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "A \\cap f(A) \\neq \\emptyset",
+   "category": "sets-and-congruence",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "B = \\{x \\mid -x \\in A, 2 - x^2 \\notin A\\}",
+   "category": "sets-and-congruence",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "B \\cup f(B) = X",
+   "category": "sets-and-congruence",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "Q^+ = \\{q \\mid q \\text{ is a positive rational number}\\}",
+   "category": "sets-and-congruence",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "S=\\{(x, y) \\mid 0 \\leq x \\leq 1, 0 \\leq y \\leq 1\\}",
+   "category": "sets-and-congruence",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "X \\Delta Y = \\{a \\mid a \\in X, a \\notin Y\\} \\cup \\{a \\mid a \\in Y, a \\notin X\\}",
+   "category": "sets-and-congruence",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\mathbb{N}_{\\geqslant 0}",
+   "category": "sets-and-congruence",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "BD \\cap AC = \\{E\\}",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "BE \\cap CF = \\{I\\}",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "CD \\cap AB = \\{F\\}",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "K = AC \\cap EG",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "KB \\cap CC_1 = \\{L\\}",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "L = AB \\cap IH",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "M = IB \\cap GC",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "N = IL \\cap GK",
+   "category": "geometry-intersection",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "2^{N} - 2N",
+   "category": "builtin-symbol-collision",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "N+y",
+   "category": "builtin-symbol-collision",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "N, N+1, N+2, N+3",
+   "category": "builtin-symbol-collision",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "N-2",
+   "category": "builtin-symbol-collision",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\frac{S}{D}",
+   "category": "builtin-symbol-collision",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\omega^{k}=1",
+   "category": "builtin-symbol-collision",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "AB \\times CD",
+   "category": "geometry-label-arithmetic",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "AC' \\le \\sqrt{3} \\cdot AA'",
+   "category": "geometry-label-arithmetic",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "AP \\cdot CP + BP \\cdot DP = 1",
+   "category": "geometry-label-arithmetic",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "BM + CN = BC",
+   "category": "geometry-label-arithmetic",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "MA + MB + MC + MD",
+   "category": "geometry-label-arithmetic",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\frac{MN}{NP}",
+   "category": "geometry-label-arithmetic",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "(a + f(b)) | (a^2 + b f(a))",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-delimiter'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "3|S(A)",
+   "category": "divisibility-bar",
+   "observed": "'unexpected-delimiter'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "122333444455555 \\ldots",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "F_{1}, F_{2}, F_{3} \\ldots",
+   "category": "ellipsis",
+   "observed": "'unexpected-operator'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\gcd(d_1, d_2) + \\gcd(d_2, d_3) + \\dots + \\gcd(d_{s-1}, d_s) = N - 2. \\quad (\\text{A. Kuznetsov})",
+   "category": "ellipsis",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\vdots",
+   "category": "ellipsis",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\begin{array}{r@{\\ }c@{\\ }l@{\\quad}l@{\\quad}l@{\\quad}l}\n0 & 1 & -1 & \\dots & \\dots & \\dots & \\dots \\\\\n\\cline{2-7}\n0 & 1 & -1 & \\dots & \\dots & \\dots & \\dots \\\\\n+ & 0 & 1 & -1 & \\dots & \\dots & \\dots \\\\\n\\cline{2-7}\n0 & 3 & 6 & 9 & 12 & \\dots & \\dots\n\\end{array}",
+   "category": "environment",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\begin{cases} \n3x+z = 2y+(a+b), \\\\\n3x^2 + 3xz = y^2 + 2(a+b)y + ab, \\\\\nx^3 + 3x^2z = y^2(a+b) + 2yab.\n\\end{cases}",
+   "category": "environment",
+   "observed": "'unexpected-token'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\begin{gathered}\n\\max _{x_{1}>0, \\cdots, x_{n}>0} \\min \\left(x_{1}, \\frac{1}{x_{1}}+x_{2}, \\cdots, \\frac{1}{x_{n-1}}+x_{n}, \\frac{1}{x_{n}}\\right)= \\\\\n\\min _{x_{1}>0, \\cdots, x_{n}>0} \\max \\left(x_{1}, \\frac{1}{x_{1}}+x_{2}, \\cdots, \\frac{1}{x_{n-1}}+x_{n}, \\frac{1}{x_{n}}\\right)=2 \\cos \\left(\\frac{\\pi}{n+2}\\right) .\n\\end{gathered}",
+   "category": "environment",
+   "observed": "'missing'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\left.\\begin{array}{l}\n3 \\cdot 2^{y}-1=2^{x}+2^{-x} \\\\\n3 \\cdot 2^{z}-1=2^{y}+2^{-y} \\\\\n3 \\cdot 2^{x}-1=2^{z}+2^{-z}\n\\end{array}\\right\\}",
+   "category": "environment",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "3,60~€",
+   "category": "stray-token",
+   "observed": "'unexpected-token'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\%",
+   "category": "stray-token",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\det(A + 2B) - \\det(B + 2A)",
+   "category": "matrix-operator-typing",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "\\det(B) = 2",
+   "category": "matrix-operator-typing",
+   "observed": "incompatible-type",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "26 =",
+   "category": "fragment-boundary",
+   "observed": "'missing'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "> 20",
+   "category": "fragment-boundary",
+   "observed": "'missing'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "0{,}45~l",
+   "category": "other-fresh-sample",
+   "observed": "'expected-closing-delimiter'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
+  },
+  {
+   "latex": "A \\leftarrow B",
+   "category": "other-fresh-sample",
+   "observed": "'unexpected-command'",
+   "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   }
  ],
  "unicodeAnswers": [

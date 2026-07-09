@@ -2,11 +2,12 @@
 as JSONL, with the image payloads stripped.
 
 Usage:
-    python3 fetch-sample.py [--pages N] [--out FILE]
+    python3 fetch-sample.py [--pages N] [--offset-shift N] [--out FILE]
 
 Defaults reproduce the 800-row sample used by the 2026-07-04 experiment
 (8 pages of 100 rows at evenly spaced offsets). The characterization report
-used --pages 31 (~3,100 rows). The API serves at most 100 rows per request.
+used --pages 31 (~3,100 rows). Use --offset-shift to take a disjoint pass
+between those default offsets. The API serves at most 100 rows per request.
 """
 
 import argparse
@@ -39,10 +40,21 @@ def fetch(offset: int, attempt: int = 1):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument('--pages', type=int, default=8)
+    ap.add_argument(
+        '--offset-shift',
+        type=int,
+        default=0,
+        help='add this many rows to each evenly spaced offset',
+    )
     ap.add_argument('--out', default='mathnet-sample.jsonl')
     args = ap.parse_args()
 
-    offsets = [i * (TOTAL // args.pages) for i in range(args.pages)]
+    stride = TOTAL // args.pages
+    max_offset = TOTAL - PAGE
+    offsets = [
+        min(args.offset_shift + i * stride, max_offset)
+        for i in range(args.pages)
+    ]
     count = 0
     with open(args.out, 'w') as f:
         for offset in offsets:

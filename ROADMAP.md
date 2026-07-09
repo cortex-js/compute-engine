@@ -28,8 +28,9 @@ The 2026-06 release shipped:
 `docs/mathnet/parser-hardening-plan.md` landed and are test-locked
 (`ContinuationPlaceholder` crash, ellipsis/trailing-punctuation recovery,
 Unicode relation tokens, congruence/divisibility, geometry heads; corpus
-clean-parse 3/345 → 277/345, throws 9 → 0). Residual parser items in
-"Remaining work" below are unrelated to that pass.
+clean-parse 3/345 → 278/345, throws 9 → 0). Fresh unseen-sample validation
+measured 97.4% clean parse with 0 throws/0 hangs; the remaining MathNet work
+is a small notation tail tracked below.
 
 **Pending 0.69.0 (feature-complete on `main`, 2026-07-08):** the
 `Measurement`/uncertainty MVP (`\pm`), the control-flow/scoping overhaul
@@ -100,6 +101,34 @@ scipy is installed in `./venv`.
   `ascii-math.ts`.
 - Bare `O(…)` parsing deferred (design doc §8 Q3); revisit for lenient mode
   once the parser work settles.
+
+**MathNet parser tail (S/M, from the 2026-07-04 fresh-sample sweep and later
+1,600-row shifted sample):**
+
+- **Trailing question mark recovery (S):** extend the existing trailing
+  punctuation fallback from `.`, `,`, `;` to complete expressions ending in
+  `?` (for example MCQ/rhetorical fragments such as
+  `\sum_{n=1}^{100} a_n^2?`). This is the cheapest and lowest-risk follow-up.
+- **Polynomial-ring notation (M):** parse blackboard-bold rings followed by a
+  bracketed variable list, e.g. `\mathbb{Z}[x]`, `\mathbb{R}[X,Y]`, as an
+  inert/structural algebraic object instead of treating `[...]` as indexing.
+- **Geometry intersection idiom (M):** tolerate olympiad geometry expressions
+  such as `P = AC \cap BD` and `\{F\} = DI \cap AM`, where `\cap` denotes the
+  intersection of named lines/segments rather than set intersection over
+  numeric implicit-products.
+- **Set-image bracket notation audit (S/M):** `f[S]` is parser-clean today as
+  `At(f, S)`; decide whether set contexts need a distinct structural
+  function-image head for expressions such as
+  `f[\operatorname{divs}(m)] = \operatorname{divs}(n)`.
+- **Additional notation tail (S/M):** the larger shifted sample added
+  representative regressions for `\Varangle`/`\measuredangle`, `\circledast`
+  and `\star`, `\geqslant`, uppercase geometry-label arithmetic (`AB \times
+  CD`, `MA + MB + MC + MD`), built-in symbol collisions (`N`, `D`, `\omega`),
+  matrix-operator typing (`\det(A+2B)`), and richer `array`/`cases` variants.
+
+Still deferred: ASCII-pipe divisibility (`p|a+1`) because it conflicts with
+absolute-value syntax; set arithmetic such as `2\mathbb{Z}+1`; prose-heavy or
+fragment-boundary inputs that need surrounding natural-language context.
 
 **Uncertainty/Measurement residue** (MVP landed 2026-07-07; design + phased
 record:
@@ -647,7 +676,7 @@ evaluated tensors, `MatrixPower` negative branch, matrix juxtaposition). Detaile
 findings — the three failed approaches and why — are in
 `docs/plans/2026-06-28-tensor-value-representation-design.md`.
 
-#### 10. TypeScript 7 — retire the TS 6 compat alias + nodenext-native source imports
+#### 10. TypeScript 7 — retire the TS 6 compat alias
 
 **Landed (2026-07-08):** the CLI compiler is TS 7 (native), installed
 side-by-side per Microsoft's recommendation: `@typescript/native`
@@ -660,34 +689,20 @@ declaration output verified type-identical (cosmetic emission diffs only).
 Note: both packages ship a `tsc` bin, so scripts reference the native binary
 by explicit path — bare `npx tsc` is ambiguous (it currently resolves to TS
 6.0.3 via the compat package's internal `@typescript/old` dependency).
+The nodenext source-import codemod (former item (b)) landed the same day
+(`cced4d27`): all relative imports in `src/` carry explicit `.js`/`/index.js`
+specifiers, jest strips them via `moduleNameMapper`, ESLint resolves them via
+`eslint-import-resolver-typescript` (required for `import/no-cycle` to keep
+following edges), and the `fix-dts-extensions.mjs` post-processor is retired —
+declarations are nodenext-correct natively, gated by the consumer smoke test.
+**New-file convention: relative imports in `src/` use `.js` specifiers.**
 
-**Remaining, in two independent pieces:**
+**Remaining:** drop the TS 6 compat alias once TS 7.1 ships its (new,
+different) programmatic API **and** ts-jest/typedoc/typescript-eslint/madge
+support it. Until then the side-by-side install is the intended end state,
+not a hack.
 
-- **(a) Drop the TS 6 compat alias** once TS 7.1 ships its (new, different)
-  programmatic API **and** ts-jest/typedoc/typescript-eslint/madge support
-  it. Until then the side-by-side install is the intended end state, not a
-  hack.
-- **(b) Codemod the ~1,557 extensionless relative imports across `src/` to
-  explicit `.js` specifiers** (`/index.js` for the 5 directory-index
-  targets), so `tsc` emits nodenext-compatible declarations natively. Two
-  hard prerequisites discovered empirically (issue #318 investigation,
-  2026-07-08): jest resolution breaks without a `moduleNameMapper`
-  (`^(\\.{1,2}/.*)\\.js$` → `$1`) in `config/jest.config.cjs`, and ESLint's
-  `import/no-unresolved` errors on every import while `import/no-cycle`
-  **silently stops following edges** — defeating the zero-cycle budget —
-  unless `eslint-import-resolver-typescript` is installed and configured.
-  Land both config changes with the codemod in one deliberate PR. The codemod
-  must be resolution-driven (TS API/ts-morph, not sed) and also cover the ~9
-  inline `import('…')` type refs and relative `declare module` sites, which
-  are not `ImportDeclaration` nodes. madge, tsx, esbuild, and typedoc are
-  verified safe with `.js`-style specifiers. Interim state: the published
-  declarations are already nodenext-correct — `scripts/fix-dts-extensions.mjs`
-  rewrites `dist/types` after emit, gated by the nodenext consumer smoke test.
-  Once the codemod lands, the post-processor becomes a no-op and can be
-  retired; the smoke test stays.
-
-**Effort:** (a) is small once the ecosystem is ready; (b) is mechanical but
-wide — one focused session.
+**Effort:** small once the ecosystem is ready.
 
 #### 11. Publish Cortex as a package entry point
 
