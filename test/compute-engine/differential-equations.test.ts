@@ -407,6 +407,23 @@ describe('DSolve', () => {
     expect(verifyEquationSolution(equation, solution, { x: 0.75 })).toBe(true);
   });
 
+  test('applies flat derivative-form initial conditions', () => {
+    const equation = [
+      'Equal',
+      ['D', ['D', ['y', 'x'], 'x'], 'x'],
+      ['Negate', ['y', 'x']],
+    ];
+    const solution = dsolve([
+      'List',
+      equation,
+      ['Equal', ['y', 0], 0],
+      ['Equal', ['D', ['y', 0], 'x'], 1],
+    ]);
+
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === sin(x)]`);
+    expect(verifyEquationSolution(equation, solution, { x: 0.75 })).toBe(true);
+  });
+
   test('solves second-order homogeneous equation with a repeated root', () => {
     const equation = [
       'Equal',
@@ -544,6 +561,80 @@ describe('DSolve', () => {
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves resonant exponential-forced second-order equation', () => {
+    const equation = [
+      'Equal',
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['Negate', ['y', 'x']]],
+      ['Exp', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves resonant sinusoidal-forced second-order equation', () => {
+    const equation = [
+      'Equal',
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['y', 'x']],
+      ['Sin', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves exponential-forced higher-order constant coefficient equation', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'],
+        ['Negate', ['y', 'x']],
+      ],
+      ['Exp', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, result, {
+        c_1: 2,
+        c_2: 3,
+        c_3: 5,
+        x: 0.25,
+      })
+    ).toBe(true);
+  });
+
+  test('solves sinusoidal-forced higher-order constant coefficient equation', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['D', ['y', 'x'], 'x'], 'x'], 'x'],
+        ['Negate', ['y', 'x']],
+      ],
+      ['Sin', 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, result, {
+        c_1: 2,
+        c_2: 3,
+        c_3: 5,
+        x: 0.25,
+      })
     ).toBe(true);
   });
 
@@ -870,7 +961,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) === "c_1" * e^x + "c_2" * e^(-x) + 1/2 * x * e^x - 1/4 * e^x]`
+      `[y(x) === "c_1" * e^x + "c_2" * e^(-x) + 1/2 * x * e^x]`
     );
     expect(hasUnfoldedExpProduct(result)).toBe(false);
     expect(hasPythagoreanPair(result)).toBe(false);
