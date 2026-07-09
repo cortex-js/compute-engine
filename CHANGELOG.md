@@ -1,4 +1,4 @@
-## Unreleased
+## 0.71.0 _2026-07-08_
 
 ### Differential Equations
 
