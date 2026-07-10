@@ -365,6 +365,43 @@ describe('Special function derivatives', () => {
       `LambertW(x) / (x + x * LambertW(x))`
     );
   });
+
+  it('d/dx LambertW(x, -1) preserves the branch (same closed form per branch)', () => {
+    const expr = engine.expr(['D', ['LambertW', 'x', -1], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `LambertW(x, -1) / (x + x * LambertW(x, -1))`
+    );
+  });
+
+  it('d/dx LambertW(g(x), -1) applies the chain rule', () => {
+    const expr = engine.expr(['D', ['LambertW', ['Square', 'x'], -1], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `(2x * LambertW(x^2, -1)) / (x^2 + LambertW(x^2, -1) * x^2)`
+    );
+  });
+
+  it('d/dx LambertW(x, -1) agrees with a central difference at x = -0.2', () => {
+    const d = engine
+      .expr(['D', ['LambertW', 'x', -1], 'x'])
+      .evaluate()
+      .subs({ x: engine.number(-0.2) })
+      .N().re;
+    const at = (x: number) =>
+      engine.expr(['LambertW', { num: x.toString() }, -1]).N().re;
+    const h = 1e-6;
+    const fd = (at(-0.2 + h) - at(-0.2 - h)) / (2 * h);
+    expect(Math.abs(d - fd)).toBeLessThan(1e-8);
+  });
+
+  it('∂/∂k LambertW(x, k) stays inert (discrete branch index)', () => {
+    const expr = engine.expr(['D', ['LambertW', 'x', 'k'], 'k']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `D(LambertW(x, k), k)`
+    );
+  });
 });
 
 describe('Symbolic derivatives for unknown functions', () => {

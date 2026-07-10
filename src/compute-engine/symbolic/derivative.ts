@@ -749,6 +749,31 @@ export function differentiate(
     return ce.Zero;
   }
 
+  // Lambert W, 2-argument form W(z, k) — the branch index k is the SECOND
+  // argument. Every fixed branch satisfies the same functional equation, so
+  // d/dz W(z, k) = W(z, k)/(z·(1+W(z, k))) on any branch, away from the
+  // branch points (z = −1/e, and z = 0 for k ≠ 0). The branch index is a
+  // discrete parameter: if k depends on v there is no derivative — stay
+  // symbolic (inert rather than wrong).
+  if (expr.operator === 'LambertW' && expr.nops === 2) {
+    const [z, k] = expr.ops;
+    if (k.has(v)) return ce._fn('D', [expr, ce.symbol(v)]);
+    if (!z.has(v)) return ce.Zero;
+    const w = expr; // W(z, k), branch preserved
+    recordD(trace, expr, v, 'derivative.known-derivative', () =>
+      ce.function('Multiply', [
+        ce.function('Divide', [
+          w,
+          ce.function('Multiply', [z, ce.function('Add', [ce.One, w])]),
+        ]),
+        dPlaceholder(z, v),
+      ])
+    );
+    const zPrime =
+      differentiate(z, v, depth + 1, trace) ?? ce._fn('D', [z, ce.symbol(v)]);
+    return simplifyDerivative(w.div(z.mul(w.add(ce.One))).mul(zPrime));
+  }
+
   // Bessel function derivatives
   // BesselJ, BesselY, BesselI, BesselK have signature (order, x)
   // d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2
