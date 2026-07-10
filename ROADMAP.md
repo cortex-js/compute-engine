@@ -488,7 +488,7 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-10, R1–R23 landed):** the shipped bundle
+**State (2026-07-10, R1–R24 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 3 (Logarithms), 5 (Inverse trig), 6 (Hyperbolics),
@@ -496,9 +496,11 @@ gate each other.
 — 6,574 rules, 6.98 MB (CI has a bundle-freshness gate). Scores (seed 5): **4.1
 Sine 107/120 and 331/400 (4.1.11 file 93/113, post-R18)**, **4.3 Tangent 72/120**,
 **4.5 Secant 69/120**, **ch3 Logarithms 71/120 (R20, +2 from ch5 family-C
-producers)**, **Chapter 5 Inverse trig (R23): 5.1 sine 55/120, 5.2 cosine 55,
-5.3 tangent 58, 5.4 cotangent 60, 5.5 secant 56, 5.6 cosecant 52 (336/720 =
-46.7%, R23 +5 over R22's 331 via the InvTrig^n multiple-angle → CosIntegral
+producers)**, **Chapter 5 Inverse trig (R24): 5.1 sine 57/120, 5.2 cosine 67,
+5.3 tangent 59, 5.4 cotangent 60, 5.5 secant 56, 5.6 cosecant 52 (≥351/720 =
+≥48.8%; R24 +15 on 5.1/5.2/5.3 via a complex-argument Erf/Erfi kernel flipping
+fractional-`n` Erfi antiderivatives not-evaluable→correct — 5.4/5.5/5.6 not
+re-run; R23 +5 over R22's 331 via the InvTrig^n multiple-angle → CosIntegral
 reduction)**, **Chapter 7
 Inverse hyperbolic (R22): 7.1 sine 79/120, 7.2 cosine 51,
 7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44, 7.6 cosecant 54 (408/720 =

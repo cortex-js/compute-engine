@@ -5,10 +5,11 @@
 4.5 Secant + §8.8 Polylogarithm** (6,574 rules, 6.98 MB). Chapter-1 exhaustive
 ≈90–91%; ch2 ≈72% / ch6 ≈45% effective; **4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
-71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R23, s120 seed5):
-5.1 sine 55/120, 5.2 cosine 55, 5.3 tangent 58, 5.4 cotangent 60, 5.5 secant 56,
-5.6 cosecant 52 (336/720 = 46.7%, R23 +5 vs R22's 331 — the InvTrig^n
-multiple-angle → CosIntegral reduction); Chapter 7 Inverse hyperbolic (R22, s120 seed5):
+71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R24, s120 seed5):
+5.1 sine 57/120, 5.2 cosine 67, 5.3 tangent 59 (R24 +15 vs R23's 55/55/58 — a
+complex-argument Erfi kernel flips fractional-`n` Erfi antiderivatives
+not-evaluable→correct), 5.4 cotangent 60, 5.5 secant 56, 5.6 cosecant 52 (R23,
+not re-run at R24) (≥351/720 = ≥48.8%); Chapter 7 Inverse hyperbolic (R22, s120 seed5):
 7.1 sine 79/120, 7.2 cosine 51, 7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44,
 7.6 cosecant 54 (408/720 = 56.7%, R22 +2 — ch7's arsinh sub-integrals already
 routed via the ungated hyperbolic fallback; unchanged at R23, which touches only the
@@ -1565,6 +1566,71 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     `reduce(u) ≡ u` identity over pure powers, mixed products, a scalar-Add shape,
     and a symbolic linear argument, plus a single-angle-only output assertion and
     the load-bearing `Sin²→½−½cos(2x)` step.
+- **Phase R24 — complex-argument Erf/Erfi kernel LANDED; the
+  `FunctionOfTrigOfLinearQ` mixed-product lever mapped and DEFERRED
+  (2026-07-10).** R23's census named two paired follow-ups. **Part B shipped;
+  Part A was implemented, measured net-zero, and backed out** (a bounded port
+  with a good map beats a forced no-op).
+  - **Part B — complex Erf/Erfi kernel (`numerics/numeric-complex.ts`
+    `erfComplex`/`erfiComplex`, ~40 lines; wired in `library/statistics.ts`).**
+    R23 left ~7–15 ch5.2 fractional-`n` problems `not-evaluable`/`inconclusive`:
+    their CORRECT (Rubi-optimal) antiderivatives carry `Erfi`/`Erf` of a COMPLEX
+    argument the harness could not `.N()`, so `F`'s finite-difference verification
+    stranded. **Kernel:** `erf(z) = 1 − Γ(1/2, z²)/√π` on the existing complex
+    incomplete-Γ kernel (`incompleteGammaUpperComplex`), reflected into the right
+    half-plane (`erf` odd, entire), with `erfi(z) = −i·erf(i·z)` — the R21
+    rotate-a-validated-kernel precedent. Signed-zero trap handled: on the
+    imaginary axis `z²` lands on the Γ(1/2,·) negative-real branch cut with a
+    spurious `−0` imaginary part; forcing `Im(z²) = +0` selects the correct
+    (odd-function) branch. mpmath-validated (all quadrants + both axes + large
+    |z|) to ≲1e-12 small/moderate, ~1e-7 in the large-|z| asymptotic band.
+    Exactness contract honoured — a Gaussian-integer arg stays symbolic under
+    `evaluate()`, numericizes under `.N()`.
+    - **Per-suite before→after (s120 seed5, clean back-to-back A/B toggling only
+      the kernel; genuine wrongs 0).** 5.1 sine **55 → 57** (+2, not-eval 3→1),
+      5.2 cosine **55 → 67** (+12, not-eval 15→4, inconc 1→0), 5.3 tangent
+      **58 → 59** (+1, not-eval 2→0) — **+15 correct across the three, ALL from
+      not-evaluable/inconclusive → correct** (the Part-B signature). `unsolved`
+      unchanged (the kernel does not change whether `F` contains `Integrate`; it
+      unblocks both the grading oracle AND the driver's internal
+      `antiderivativeVerifies`). Each before-run reproduces the R23 baseline
+      exactly (55/55/58).
+    - **Guards.** 4.1 Sine (chapter-dir, s120 seed5) **108/0w** (pure trig, no
+      Erfi → Part-B-inert). ch2 exponentials s120 seed5 **83/2w → 82/3w**: the
+      +1 flag is a **documented-class false-wrong**, `2.3#191`
+      `∫f^(a+b·xⁿ)·x^(n/2−1)` = `f^a·√π·Erfi[√b·x^(n/2)·√Log f]/(√b·n·√Log f)`
+      (Rubi's OPTIMAL answer, `D(F) ≡ integrand` exactly — verified symbolically
+      and numerically at real args). It was accidentally graded correct BEFORE
+      only because `Erfi` stayed symbolic so the harness saw real-arg points
+      alone; with the kernel it finite-differences `F` at a `f<1` / non-integer-`n`
+      / `x<0` point (arg complex) and the central difference crosses the
+      `x^(n/2)`/`√Log f` branch cut (`dF=0.397` vs `f=0.398−0.004i`, ~1% — a phase
+      artifact, not a magnitude error). **Genuine wrongs remain 0** — same
+      non-integer-`n` complex-log/fractional-power class as the R20 false-wrongs.
+    - **Tests.** `special-functions.test.ts` — a `COMPLEX-ARGUMENT Erf, Erfi`
+      block (four quadrants, both imaginary half-axes, large-|z|, the exactness
+      contract, real-path regression), mirroring the Ei/Si/Ci and Shi/Chi blocks;
+      `special-functions-bignum.test.ts` B23 updated (Erf(1+i) now numericizes;
+      Sinc/FresnelS still symbolic). FresnelS/FresnelC complex support was NOT
+      needed (the affected antiderivatives carry Erfi, not Fresnel) — out of scope.
+  - **Part A — `FunctionOfTrigOfLinearQ` (implemented, measured, backed out).**
+    Ported faithfully (`AlgebraicTrigFunctionQ` ∧ non-Null/False `FunctionOfTrig`,
+    on the activated form) and **fail-CLOSED** (over-firing probe: `∫x⁴` 49 ms,
+    `∫x²eˣ`, a rational — 0 touches of the gated rule; before the port an
+    unimplemented predicate head already `throw`s in `evalCondition`, so the rule
+    declined). **But it is net-zero and was removed.** Its SOLE bundled consumer is
+    the universal rule `4.1.0.1#1` `Int[u_] → Int[DeactivateTrig[u,x], x]`. In Rubi
+    this deactivates ACTIVE trig so the inert-form rules can match; in CE the driver
+    **already pre-deactivates** trig up front (`driver.ts`), so `DeactivateTrig[u] ≈ u`
+    and the rule is a memo/cycle-guard-neutralised no-op. Measured: 5.1 s120 seed5
+    is **57 with the predicate ON and 57 with it OFF** (identical), at ~3% extra
+    wall-clock (the rule is retried on every trig integrand). Trace confirms the
+    rule now fires on `∫θⁿ·sin^m·cos^k` yet the inner STILL returns `null`. **The
+    real blocker is downstream:** after deactivation CE lacks the poly×trig
+    reduction (an `ExpandTrigReduce` over a polynomial coefficient / the specific
+    `4.1.0.x` `(c+d·x)^m·trig^n` expansion rules) that closes `5.1.2#408/#410/#336`.
+    That capability — NOT the predicate — is the next rung, and it is a
+    disproportionate port for R24, so Part A is deferred with this map.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the
