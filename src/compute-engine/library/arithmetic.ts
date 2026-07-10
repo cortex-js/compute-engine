@@ -89,6 +89,7 @@ import {
   NON_ENUMERABLE_DOMAIN,
   classifyBigopDomain,
 } from './utils.js';
+import { inferContinuationPattern } from '../symbolic/interpret.js';
 import {
   canonicalPower,
   canonicalRoot,
@@ -2793,6 +2794,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return (
           result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN
         );
+      },
+    },
+
+    Interpret: {
+      description:
+        'Interpret a notational expression as its mathematical meaning. In v1: a continuation-bearing `Add`/`Multiply` (e.g. `1 + 2 + \\dots + n`) becomes a `Sum`/`Product`. Returns the argument unchanged when the (strict) inference gate does not pass',
+      complexity: 9000,
+      broadcastable: false,
+
+      // The argument is an inert notational object; keep it unevaluated so the
+      // recognizer sees the original operand order and structure.
+      lazy: true,
+      signature: '(any) -> any',
+
+      evaluate: ([arg]) => {
+        if (!arg) return undefined;
+        return inferContinuationPattern(arg) ?? arg;
       },
     },
   },

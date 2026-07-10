@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+### New Operator: `Interpret`
+
+- **`Interpret(expr)` gives formal meaning to elliptical notation.**
+  Evaluating `["Interpret", expr]` turns a continuation-bearing sum or
+  product (the inert notational objects produced by the ellipsis fold
+  barrier, see below) into a formal `Sum`/`Product`:
+  `Interpret(1 + 2 + \dots + n)` → `\sum_{k=1}^{n} k`,
+  `Interpret(2 \cdot 4 \cdot \dots \cdot 2n)` → `\prod_{k=1}^{n} 2k`, and
+  `Interpret(1 + 2 + \dots + 100)` → a `Sum` that evaluates to `5050`.
+  Interpretation is an explicit opt-in — a plain `evaluate()` never guesses —
+  and the gate is strict by design: at least two exact numeric sample terms
+  in arithmetic progression and a single anchor whose implied upper bound is
+  integral (so `1 + 3 + \dots + 2n`, whose even anchor does not belong to
+  the odd progression, stays untouched). Anything the gate cannot prove is
+  returned unchanged. The design (including the recognition ladder toward
+  polynomial/geometric patterns, recurrence closed forms via `RSolve`, and
+  OEIS-backed proposals through the existing async `ce.lookupOEIS`) is in
+  `docs/plans/2026-07-09-ellipsis-interpretation-design.md`.
+
 ### Number Theory
 
 - **Modular arithmetic reaches common notation.** `Mod` and `Congruent` now

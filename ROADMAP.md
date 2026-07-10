@@ -189,24 +189,24 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   contain sibling arithmetic), so it warrants its own design pass, not a
   spot fix.
 
-**Ellipsis-expression interpretation (M, design-gated — proposed
-2026-07-09):** give `ContinuationPlaceholder` expressions a path to formal
-meaning, e.g. `1 + 2 + \dots + n` → `Sum(k, (k, 1, n))` (and
-`Product` for `\cdot`/`\times` chains). The prerequisite **fold barrier
-landed 2026-07-09**: an `Add`/`Multiply` with a `ContinuationPlaceholder`
-operand no longer folds literals across the continuation and is inert under
-`evaluate`/`N`/`simplify`, with source operand order and nested anchors
-(`2n`) preserved — so the sample terms and anchor are intact for inference.
-What remains:
+**`Interpret` — generalization ladder (design:
+`docs/plans/2026-07-09-ellipsis-interpretation-design.md`):** v1 landed
+2026-07-09 — the explicit `Interpret(expr)` head turns continuation-bearing
+sums/products into formal `Sum`/`Product` under a strict arithmetic-
+progression gate (`1+2+\dots+n` → `Sum(k,(k,1,n))`; parity mismatches and
+anything unproven stay inert). Remaining rungs, demand-paced:
 
-- **Pattern inference → `Sum`/`Prod` (M):** anti-unify the sample terms and
-  the anchor to a general term, mirroring the existing
-  `tryInferRangeFromElements` precedent (`[1, 2, \ldots, 10]` → `Range`).
-  NOT canonicalization (interpretation is a guess and canonical transforms
-  are irreversible) and not a default simplify rule at first — start as an
-  explicit, strictly gated reduction (unambiguous consecutive/arithmetic
-  patterns only; anything else stays inert) and decide after real usage
-  whether `evaluate` or `simplify` should pick it up by default.
+- **v2 (M):** finite differences → polynomial general terms; constant
+  ratio → geometric.
+- **v3 (M):** Berlekamp–Massey → linear recurrence → closed form via the
+  existing `RSolve`; optional hand-curated famous-sequence table.
+- **v4 (M):** OEIS-backed *proposals* through the existing async
+  `ce.lookupOEIS` (parse the free-text `formula` field, verify against the
+  samples with the recognizer core, return attributed candidates). Sync
+  `evaluate()` never performs lookups; bundling OEIS data stays out
+  (CC BY-NC).
+- **Promotion decision** (after product usage): whether bare
+  `evaluate()`/`simplify()` should invoke the recognizer by default.
 
 Still deferred: ASCII-pipe divisibility (`p|a+1`) because it conflicts with
 absolute-value syntax (though the parenthesized form `(a+f(b)) | (a^2+bf(a))`
@@ -458,13 +458,13 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-09, R1–R15 landed, incl. R12):** the shipped bundle
+**State (2026-07-09, R1–R15 landed, incl. R12+R13):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 6 (Hyperbolics), 4.1 Sine, 4.3 Tangent, and
 4.5 Secant** — 4,831 rules, 5.29 MB (CI has a bundle-freshness gate). Scores
 (seed 5): **4.1 Sine 106/120 and 321/400 (4.1.11 file 71/113)**, **4.3
-Tangent 70/120**, **4.5 Secant 56/120**, ch1 exhaustive ≈90–91%, ch2 ≈72% /
+Tangent 70/120**, **4.5 Secant 69/120**, ch1 exhaustive ≈90–91%, ch2 ≈72% /
 ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
 **Genuine wrongs are 0 across all suites** — every flagged "wrong" is a
 documented **verification false-wrong** (numeric ₂F₁/AppellF1 mis-grading at
@@ -478,12 +478,16 @@ quadratic/√-inner args stay ACTIVE for the substitution rules),
 both default-ON; the mixed-cross-pair decline gate keeps `(g·cot)^p(a+b·sin)^m`
 on `unifyInertTrig`'s matched-±π/2 clauses),
 `unifyInertTrig` + its cofunction product clauses, `standaloneCosineShift`,
-`reciprocalToPower` (frozen under fractional powers — branch safety), and
+`reciprocalToPower` (frozen under fractional powers — branch safety; since
+R13 it also keeps REFLECTION-produced `csc[·+π/2]` heads raw — the +π/2
+shift signature — so pure-sec binomials `(a+b·sec)^n` reach the 4.5.1
+csc-binomial rules, with a `(a+b·sec²)^p`-Power exception routing 4.5.7 to
+the sin/cos rules), and
 three driver fallbacks (trig→exp with a numeric-evaluability self-check;
 R15's rational×sin/cos(linear) → Si/Ci partial-fraction split with a
 central-difference D-self-check; native-rational). A/B env switches:
 `RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`, `RUBI_NO_COFN`, `RUBI_NO_COFN_COT`,
-`RUBI_NO_SKELETON`, `RUBI_NO_SICI`. Per-rung blow-by-blow
+`RUBI_NO_SKELETON`, `RUBI_NO_SICI`, `RUBI_NO_SECBIN`. Per-rung blow-by-blow
 (R1–R15, incl. the cofunction-audit table and each rung's dead ends):
 `docs/rubi/RUBI.md` §5; the rest is git history.
 
@@ -522,13 +526,6 @@ climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
 hypergeometric verification false-wrongs). Diagnose any stall per the Method
 note — trace the residual integrand, don't trust the predicate census.
 
-- **R13 — sec-specific binomial routing.** Integer-power symbolic binomials
-  (`1/(a+b·sec)`, `(a+b·sec)²`) still stay inert in the shipped bundle: after
-  the R11 reflection, `reciprocalToPower` rewrites the reflected `csc` inside
-  a summand to `1/sin` before a csc *binomial* rule can match. The naive fix
-  (exempt Add-summands from `reciprocalToPower`) regresses 4.1 Sine by −20
-  (the csc-binomial sine families rely on that rewrite), so this needs a
-  sec-aware carve-out rather than a global ordering change.
 - **R16 — the 4.1.10 `(c+d·x)^m·trig/(a+b·sin)` Si/Ci chains**
   (#30/#112/#197/#294). Confirmed by R15 to be a genuinely different
   mechanism from the rational-in-x family R15 closed: the denominator is
