@@ -2,232 +2,277 @@
 
 ### New Operator: `Interpret`
 
-- **`Interpret(expr)` gives formal meaning to elliptical notation.**
-  Evaluating `["Interpret", expr]` turns a continuation-bearing sum or
-  product (the inert notational objects produced by the ellipsis fold
-  barrier, see below) into a formal `Sum`/`Product`:
-  `Interpret(1 + 2 + \dots + n)` → `\sum_{k=1}^{n} k`,
+- **`Interpret(expr)` gives formal meaning to elliptical notation.** Evaluating
+  `["Interpret", expr]` turns a continuation-bearing sum or product (the inert
+  notational objects produced by the ellipsis fold barrier, see below) into a
+  formal `Sum`/`Product`: `Interpret(1 + 2 + \dots + n)` → `\sum_{k=1}^{n} k`,
   `Interpret(2 \cdot 4 \cdot \dots \cdot 2n)` → `\prod_{k=1}^{n} 2k`, and
   `Interpret(1 + 2 + \dots + 100)` → a `Sum` that evaluates to `5050`.
   Interpretation is an explicit opt-in — a plain `evaluate()` never guesses —
-  and the gate is strict by design: at least two exact numeric sample terms
-  in arithmetic progression and a single anchor whose implied upper bound is
-  integral (so `1 + 3 + \dots + 2n`, whose even anchor does not belong to
-  the odd progression, stays untouched). Anything the gate cannot prove is
-  returned unchanged.
+  and the gate is strict by design: at least two exact numeric sample terms in
+  arithmetic progression and a single anchor whose implied upper bound is
+  integral (so `1 + 3 + \dots + 2n`, whose even anchor does not belong to the
+  odd progression, stays untouched). Anything the gate cannot prove is returned
+  unchanged.
 - **Polynomial and geometric patterns are recognized too (v2).** Successive
   finite differences identify polynomial general terms —
   `Interpret(1 + 4 + 9 + 16 + \dots + n^2)` → `\sum_{k=1}^{n} k^2`, cubes and
-  triangular numbers likewise — and a constant exact ratio identifies
-  geometric ones: `1 + 2 + 4 + \dots + 2^n` → `\sum_{k=1}^{n+1} 2^{k-1}`,
+  triangular numbers likewise — and a constant exact ratio identifies geometric
+  ones: `1 + 2 + 4 + \dots + 2^n` → `\sum_{k=1}^{n+1} 2^{k-1}`,
   `2 \cdot 4 \cdot 8 \cdot \dots \cdot 2^n` → `\prod_{k=1}^{n} 2^k`. Numeric
-  anchors resolve to concrete bounds (`1 + 4 + 9 + \dots + 100` → a sum to
-  10 that evaluates to `385`). An evidence discipline guards against
-  overfitting: a degree-g polynomial needs its constant difference row
-  witnessed twice, or one fewer sample when the anchor structurally confirms
-  the general term — three samples fit *any* quadratic, so
-  `1 + 2 + 4 + \dots + m` stays untouched.
-- **Linear recurrences are recognized (v3).** An exact-rational
-  Berlekamp–Massey pass finds the minimal constant-coefficient recurrence
-  (order ≥ 2) behind the samples, obtains a verified closed form through
-  `RSolve`, and resolves numeric anchors by iterating the recurrence
-  exactly: `Interpret(1 + 1 + 2 + 3 + 5 + 8 + \dots + 55)` →
-  `\sum_{k=1}^{10} \operatorname{Fibonacci}(k)`, which evaluates exactly
-  to `143`; Pell-number sums likewise (with a Binet-style body). The same
-  evidence discipline applies — a recurrence of order L needs `2L+1`
-  samples (or `2L` with a confirming anchor), so primes and factorials
-  stay untouched. Closed forms are verified against every sample before
-  being trusted.
-- **Subtraction-spelled ellipses are protected too.** `1 - 2 + 4 - \dots
-  + x` used to fold its samples across the continuation (the
-  `Negate`-wrapped placeholder evaded the fold barrier); the barrier now
-  treats a negated ellipsis like a bare one, so subtraction chains stay
-  unfolded, in source order, and inert.
-  The design (including the ladder toward
-  OEIS-backed proposals through the existing async `ce.lookupOEIS`) is in
-  `docs/plans/2026-07-09-ellipsis-interpretation-design.md`.
+  anchors resolve to concrete bounds (`1 + 4 + 9 + \dots + 100` → a sum to 10
+  that evaluates to `385`). An evidence discipline guards against overfitting: a
+  degree-g polynomial needs its constant difference row witnessed twice, or one
+  fewer sample when the anchor structurally confirms the general term — three
+  samples fit _any_ quadratic, so `1 + 2 + 4 + \dots + m` stays untouched.
+- **Linear recurrences are recognized (v3).** An exact-rational Berlekamp–Massey
+  pass finds the minimal constant-coefficient recurrence (order ≥ 2) behind the
+  samples, obtains a verified closed form through `RSolve`, and resolves numeric
+  anchors by iterating the recurrence exactly:
+  `Interpret(1 + 1 + 2 + 3 + 5 + 8 + \dots + 55)` →
+  `\sum_{k=1}^{10} \operatorname{Fibonacci}(k)`, which evaluates exactly to
+  `143`; Pell-number sums likewise (with a Binet-style body). The same evidence
+  discipline applies — a recurrence of order L needs `2L+1` samples (or `2L`
+  with a confirming anchor), so primes and factorials stay untouched. Closed
+  forms are verified against every sample before being trusted.
+- **Subtraction-spelled ellipses are protected too.**
 
 ### Number Theory
 
 - **Modular arithmetic reaches common notation.** `Mod` and `Congruent` now
   reduce integer-valued expressions in ℤ/mℤ without materializing the
-  (potentially astronomically large) intermediate value. Modular
-  exponentiation, sums, products, negations and factorial reduction are all
-  handled, so `2^{3^{20}} \pmod{100}` evaluates to `52` and
-  `2^{3^{20}} \equiv 52 \pmod{100}` evaluates to `True`, where both used to
-  stay inert. The floored-sign convention of `Mod` (the result follows the
-  divisor) is preserved on the new path.
-- **New `ModularInverse(a, m)`** returns the modular multiplicative inverse
-  of `a` modulo `m` — the integer `x` in `[0, m)` with `a·x ≡ 1 (mod m)` —
-  and stays symbolic when `a` and `m` are not coprime.
-- **Linear congruences and CRT systems solve.** `solve` on a linear
-  congruence returns the parametric residue family with a fresh integer
-  parameter `t ∈ ℤ` (`6n \equiv 4 \pmod 7` → `7t + 3`), an empty result when
-  there is no solution (`2x \equiv 1 \pmod 4`), and reduces gcd-divisible
-  congruences (`4x \equiv 2 \pmod 6` → `3t + 2`). A system of simultaneous
-  congruences in one unknown is combined via the Chinese Remainder Theorem —
-  including non-coprime moduli — into a single family (`x \equiv 2 \pmod 3`,
+  (potentially astronomically large) intermediate value. Modular exponentiation,
+  sums, products, negations and factorial reduction are all handled, so
+  `2^{3^{20}} \pmod{100}` evaluates to `52` and
+  `2^{3^{20}} \equiv 52 \pmod{100}` evaluates to `True`, where both used to stay
+  inert. The floored-sign convention of `Mod` (the result follows the divisor)
+  is preserved on the new path.
+- **New `ModularInverse(a, m)`** returns the modular multiplicative inverse of
+  `a` modulo `m` — the integer `x` in `[0, m)` with `a·x ≡ 1 (mod m)` — and
+  stays symbolic when `a` and `m` are not coprime.
+- **Linear congruences and CRT systems solve.** `solve` on a linear congruence
+  returns the parametric residue family with a fresh integer parameter `t ∈ ℤ`
+  (`6n \equiv 4 \pmod 7` → `7t + 3`), an empty result when there is no solution
+  (`2x \equiv 1 \pmod 4`), and reduces gcd-divisible congruences
+  (`4x \equiv 2 \pmod 6` → `3t + 2`). A system of simultaneous congruences in
+  one unknown is combined via the Chinese Remainder Theorem — including
+  non-coprime moduli — into a single family (`x \equiv 2 \pmod 3`,
   `x \equiv 3 \pmod 5`, `x \equiv 2 \pmod 7` → `105t + 23`); an inconsistent
   system reports no solution.
-- **Huge exact products stay symbolic instead of overflowing.** `Multiply`
-  now applies the same digit-count budget as `Power` when an exact power
-  term (`base^exp`) would be folded into a product's numeric coefficient:
-  if materializing that power would exceed the budget, the factor is kept
-  as a symbolic `Power` term rather than computed eagerly (`2 \cdot 3^{5000000}`
+- **Huge exact products stay symbolic instead of overflowing.** `Multiply` now
+  applies the same digit-count budget as `Power` when an exact power term
+  (`base^exp`) would be folded into a product's numeric coefficient: if
+  materializing that power would exceed the budget, the factor is kept as a
+  symbolic `Power` term rather than computed eagerly (`2 \cdot 3^{5000000}`
   stays `2 \cdot 3^{5000000}` instead of building a multi-million-digit
   `bigint`). This also lets `Mod`/`Congruent` reduce such products —
-  `2 \cdot 3^{5000000} \pmod 7` evaluates to `4` — without ever
-  materializing the giant intermediate value.
+  `2 \cdot 3^{5000000} \pmod 7` evaluates to `4` — without ever materializing
+  the giant intermediate value.
 
 ### Arithmetic
 
-- **New operator: `PolyLog` — the polylogarithm Liₛ(z).** Numeric
-  evaluation for integer order s ≥ 2 over the whole complex plane
-  (validated against mpmath to ≈5·10⁻¹⁵; branch cut z ∈ (1, ∞) with the
-  below-the-cut convention), and exact reductions for the elementary
-  orders and special points: `Li₁(z) → −ln(1−z)`, `Li₀(z) → z/(1−z)`,
-  `Li₋₁(z) → z/(1−z)²`, `Liₙ(1) → ζ(n)`, `Liₙ(−1) → (2^{1−n}−1)·ζ(n)`,
-  `Liₛ(0) → 0`. Parses and serializes as `\operatorname{Li}_s(z)` (the
-  unsubscripted `\operatorname{Li}`, conventionally the *offset*
-  logarithmic integral, is deliberately not claimed).
-- **`LogIntegral` now has its standard notation.** `\operatorname{li}(x)`
-  parses to `LogIntegral` and serializes back (previously the fallback
+- **New operator: `PolyLog` — the polylogarithm Liₛ(z).** Numeric evaluation for
+  integer order s ≥ 2 over the whole complex plane (validated against mpmath to
+  ≈5·10⁻¹⁵; branch cut z ∈ (1, ∞) with the below-the-cut convention), and exact
+  reductions for the elementary orders and special points: `Li₁(z) → −ln(1−z)`,
+  `Li₀(z) → z/(1−z)`, `Li₋₁(z) → z/(1−z)²`, `Liₙ(1) → ζ(n)`,
+  `Liₙ(−1) → (2^{1−n}−1)·ζ(n)`, `Liₛ(0) → 0`. Parses and serializes as
+  `\operatorname{Li}_s(z)` (the unsubscripted `\operatorname{Li}`,
+  conventionally the _offset_ logarithmic integral, is deliberately not
+  claimed).
+- **`LogIntegral` now has its standard notation.** `\operatorname{li}(x)` parses
+  to `LogIntegral` and serializes back (previously the fallback
   `\mathrm{LogIntegral}(x)`).
 - **Repeating decimals box as exact rationals.** A LaTeX repeating-decimal
   literal — vinculum (`0.\overline{3}`), dots
-  (`0.\overset{.}{1}4285\overset{.}{7}`), parenthetical (`1.54(2345)`), or
-  arc (`0.\wideparen{142857}`) notation — and the MathJSON `{num: "0.(3)"}`
+  (`0.\overset{.}{1}4285\overset{.}{7}`), parenthetical (`1.54(2345)`), or arc
+  (`0.\wideparen{142857}`) notation — and the MathJSON `{num: "0.(3)"}`
   shorthand now box directly to the exact `Rational` they represent
   (`0.\overline{3}` → `["Rational", 1, 3]`, `1.(2345)` →
-  `["Rational", 12344, 9999]`) instead of a truncated decimal float carrying
-  a repeating-decimal marker.
-- **`Norm` accepts point-like `Tuple`s.** `\|(-3, 4)\|` now evaluates to
-  `5` instead of leaving the expression inert.
-- **Double-factorial symbolic reductions.** Under `simplify()`, `(2n)!!`
-  reduces to `2^n \cdot n!` and `(2n+1)!!` reduces to
-  `\frac{(2n+1)!}{2^n \cdot n!}` when `n` is integer-typed.
+  `["Rational", 12344, 9999]`) instead of a truncated decimal float carrying a
+  repeating-decimal marker.
+- **`Norm` accepts point-like `Tuple`s.** `\|(-3, 4)\|` now evaluates to `5`
+  instead of leaving the expression inert.
+- **Double-factorial symbolic reductions.** Under `simplify()`, `(2n)!!` reduces
+  to `2^n \cdot n!` and `(2n+1)!!` reduces to `\frac{(2n+1)!}{2^n \cdot n!}`
+  when `n` is integer-typed.
+
+### Equation Solving
+
+On a 40-case univariate solving benchmark derived from SymPy's own test suite
+(graded by substituting the returned roots back into the equation), this release
+reaches **38/40 — parity with both SymPy and Mathematica** — up from 26/40 for
+the previous release (base engine, without the opt-in solve templates: 33/40, up
+from 24). The two remaining cases (Dottie-style transcendental fixed points) are
+unsolved by SymPy and Mathematica as well. What changed:
+
+- **Inverse trigonometric and hyperbolic equations solve exactly.**
+  `\arcsin x = c`, `\arccos x = c` and `\arctan x = c` return the exact root
+  (`\arcsin x = \frac12` → `\sin\frac12`), with out-of-range constants correctly
+  rejected (`\arctan x = 2` has no solution — `2` is outside arctan's range).
+  `\sinh x = c` and `\tanh x = c` return their single root, and `\cosh x = c`
+  returns **both** roots `\pm\operatorname{arcosh}(c)`.
+- **Exponential-symmetric equations are recognized.** `e^x \pm e^{-x}`
+  harmonizes to `2\cosh x` / `2\sinh x` before solving, so `e^x + e^{-x} = 4`
+  returns both roots `\pm\operatorname{arcosh}(2)`.
+- **Two-absolute-value equations solve.**
+  `a\,\lvert f(x)\rvert = b\,\lvert g(x)\rvert` is squared into
+  `a^2 f^2 - b^2 g^2` (candidates are validated against the original equation,
+  so no extraneous roots): `\lvert x-1\rvert = \lvert x+3\rvert` → `-1`.
+- **Rational equations cancel correctly before solving.** Clearing denominators
+  no longer expands numerators past their common factor (`\frac{2x}{x+2} = 1` →
+  `2`), and pure-number denominators are no longer multiplied through at all —
+  rational constants stay where the solve patterns expect them.
+- **`LambertW` gains the real lower branch W₋₁.** The 2-argument form
+  `["LambertW", z, k]` selects the branch (`k` is `0` or `-1`; other branches
+  stay symbolic): exact evaluation, machine- and arbitrary-precision numerics on
+  the branch domain `[-1/e, 0)`, compilation, and `\operatorname{W}_{-1}(x)`
+  LaTeX serialization. `W(-\frac1{10}, -1)` evaluates symbolically and `.N()`s
+  to `-3.5771520639…`.
+- **The opt-in solve templates now cover Lambert-type equations on both real
+  branches.** With `loadIdentities(ce, { solve: true })` (from the `identities`
+  bundle), equations reducible to `W` solve exactly and return **every real
+  root**: `x e^x = -\frac1{10}` →
+  `\{\operatorname{W}(-\frac1{10}), \operatorname{W}_{-1}(-\frac1{10})\}`,
+  `e^x - x - 2 = 0` →
+  `\{-2 - \operatorname{W}(-e^{-2}), -2 - \operatorname{W}_{-1}(-e^{-2})\}`, and
+  mixed linear-exponential forms like `x + 2^x = 0` →
+  `-\operatorname{W}(\ln 2)/\ln 2`. Exact rational, float, and integer
+  right-hand sides are all handled. The identities library also simplifies
+  `W(x e^x, -1) \to x` under `assume(x \le -1)`.
+
+### Integration (opt-in Rubi rules)
+
+New rule coverage in the `integration-rules` bundle (`loadIntegrationRules`):
+
+- **Polynomial × csc²/sec² integrates by parts.** `\int x\csc^2 x\,dx` →
+  `-x\cot x + \ln \sin x`, and likewise for `P(x)\sec^2(ax+b)` with any
+  polynomial `P` (the recursion reduces the polynomial degree).
+- **Rational × sin/cos of a linear argument reduces to Si/Ci.**
+  `\int \frac{\sin x}{x+1}\,dx` returns the exact
+  `\sin(-1)\operatorname{Ci}(x+1) + \cos(-1)\operatorname{Si}(x+1)` form via
+  partial fractions over linear factors.
+- **Secant-family binomials route through the dedicated secant rules.**
+  Integrands like `\frac{1}{1+\sec x}` now resolve
+  (`x - \frac{\tan x}{\sec x + 1}`) instead of returning unevaluated.
+- **Cotangent integrands reflect onto the tangent rules**, closing forms like
+  `\int \cot^3 x\,dx` → `-\frac{\cot^2 x}{2} - \ln \sin x`.
 
 ### Simplification and Exact Arithmetic (Wester round 1)
 
-- **Rational radicands extract perfect-power factors.**
-  `(1029/1000)^{1/3}` now canonicalizes to `\frac{7}{10}\sqrt[3]{3}`
-  (numerator and denominator factored independently), extending the existing
-  integer-radicand extraction. Also fixed an exactness leak where a
-  higher root of an exact literal could evaluate to a float times
-  `Root(1, n)` (e.g. Wester 28's `2^{1/3}` expressions now stay all-exact
-  under `evaluate()`).
+- **Rational radicands extract perfect-power factors.** `(1029/1000)^{1/3}` now
+  canonicalizes to `\frac{7}{10}\sqrt[3]{3}` (numerator and denominator factored
+  independently), extending the existing integer-radicand extraction. Also fixed
+  an exactness leak where a higher root of an exact literal could evaluate to a
+  float times `Root(1, n)` (e.g. Wester 28's `2^{1/3}` expressions now stay
+  all-exact under `evaluate()`).
 - **Pythagorean factoring in `simplify()`.**
   `\cos^3 x + \cos x\sin^2 x - \cos x` now simplifies to `0`: a sum with a
   shared factor times `\cos^2 u` and `\sin^2 u` combines
   (`g\cos^2 u + g\sin^2 u \to g`), generalizing the bare
   `\sin^2 x + \cos^2 x \to 1` case.
 - **Rational-function cancellation fires in `simplify()`** (Wester 14):
-  `\frac{x^2-4}{x^2+4x+4}` simplifies to `\frac{x-2}{x+2}`. The
-  cancellation machinery existed but its result was destroyed by a
-  subsequent expand-over-sum-denominator rewrite in the same pass; that
-  split is now suppressed (it never reduces complexity).
-- **`Binomial(n, k)` and `Pochhammer(a, k)` expand for small literal `k`**
-  with a symbolic first argument: `Binomial(n, 3)` evaluates to
+  `\frac{x^2-4}{x^2+4x+4}` simplifies to `\frac{x-2}{x+2}`. The cancellation
+  machinery existed but its result was destroyed by a subsequent
+  expand-over-sum-denominator rewrite in the same pass; that split is now
+  suppressed (it never reduces complexity).
+- **`Binomial(n, k)` and `Pochhammer(a, k)` expand for small literal `k`** with
+  a symbolic first argument: `Binomial(n, 3)` evaluates to
   `\frac{n(n-1)(n-2)}{6}`, `Pochhammer(a, 3)` to `a(a+1)(a+2)` (k ≤ 20).
-  `Pochhammer` is a newly registered operator (it previously had no
-  definition and was fully inert).
-- Six Wester CAS-review tests unskipped in `wester.test.ts` (the skip
-  ledger drops from 27 to 21).
+  `Pochhammer` is a newly registered operator (it previously had no definition
+  and was fully inert).
+- Six Wester CAS-review tests unskipped in `wester.test.ts` (the skip ledger
+  drops from 27 to 21).
 
 ### Linear Algebra
 
-- **`RowReduce` is exact on exact input.** Reduction of an integer or
-  rational matrix now uses exact bigint-fraction elimination — the RREF of
-  an integer matrix has exact `-1`/`3` pivots instead of
-  `-0.999…`/`2.999…` float artifacts. Float matrices use the numeric path
-  unchanged. (`NullSpace`/`MatrixRank`'s float elimination is tracked in
-  the ROADMAP for the same treatment.)
+- **`RowReduce` is exact on exact input.** Reduction of an integer or rational
+  matrix now uses exact bigint-fraction elimination — the RREF of an integer
+  matrix has exact `-1`/`3` pivots instead of `-0.999…`/`2.999…` float
+  artifacts. Float matrices use the numeric path unchanged.
+  (`NullSpace`/`MatrixRank`'s float elimination is tracked in the ROADMAP for
+  the same treatment.)
 - **Products of declared matrices type correctly.** A product with a
-  matrix/vector/list-typed operand now carries the collection type instead
-  of collapsing to a numeric type: with `X` and `Y` declared `matrix`, `2Y`,
-  `XY`, `X - Y` and `3X + 2Y` all type as `matrix` (previously
-  `finite_number`, which made `\det(XY)` fail validation as an
-  `incompatible-type` error). `Trace` of a matrix now types as `number`.
-  All-scalar products are unchanged. Note: *undeclared* symbols in a
-  matrix-expecting argument (`\det(A+2B)` with fresh `A`, `B`) still infer
-  as numbers — declare matrix/vector symbols for symbolic matrix algebra
-  (see the ROADMAP "Matrix-operator typing" item for the planned
+  matrix/vector/list-typed operand now carries the collection type instead of
+  collapsing to a numeric type: with `X` and `Y` declared `matrix`, `2Y`, `XY`,
+  `X - Y` and `3X + 2Y` all type as `matrix` (previously `finite_number`, which
+  made `\det(XY)` fail validation as an `incompatible-type` error). `Trace` of a
+  matrix now types as `number`. All-scalar products are unchanged. Note:
+  _undeclared_ symbols in a matrix-expecting argument (`\det(A+2B)` with fresh
+  `A`, `B`) still infer as numbers — declare matrix/vector symbols for symbolic
+  matrix algebra (see the ROADMAP "Matrix-operator typing" item for the planned
   inference-ordering fix).
 
 ### Units
 
 - **Compound units cancel in quantity arithmetic.** Multiplying or dividing
   quantities now cancels units structurally instead of accumulating them:
-  `18 \text{ in} / (12 \text{ in/ft})` evaluates to `1.5 \text{ ft}`
-  (previously the inscrutable `1.5 \text{ in/in/ft}`). A repeated unit
-  symbol cancels exactly — no conversion factors are introduced — while
-  different units of the same dimension on opposite sides of a fraction
-  bar are converted and folded into the magnitude:
-  `\frac{10 \text{ m} \cdot 1 \text{ s}}{5 \text{ in}}` →
+  `18 \text{ in} / (12 \text{ in/ft})` evaluates to `1.5 \text{ ft}` (previously
+  the inscrutable `1.5 \text{ in/in/ft}`). A repeated unit symbol cancels
+  exactly — no conversion factors are introduced — while different units of the
+  same dimension on opposite sides of a fraction bar are converted and folded
+  into the magnitude: `\frac{10 \text{ m} \cdot 1 \text{ s}}{5 \text{ in}}` →
   `78.74 \text{ s}`. Products of same-dimension units are left as written
-  (`2 \text{ in} \cdot 3 \text{ ft}` stays `6 \text{ in} \cdot \text{ft}`),
-  and simplification to named derived SI units still applies afterwards
-  (`2 \text{ N} \cdot 3 \text{ m}` → `6 \text{ J}`). Works with
-  measurement (uncertainty-carrying) magnitudes as well.
-- **New units: `yd`, `qt`, `pt`, `cup`, `wk`.** Yards, quarts, pints, cups
-  (US liquid convention, consistent with the existing US `gal`) and weeks
-  join the unit registry, with their English word aliases
-  (`5 \text{ yards}` → `5 \text{ yd}`), and convert exactly:
-  `1 \text{ gal} / 1 \text{ qt}` evaluates to `4`.
-- **Currency: dollars and cents.** A new currency dimension backs the
-  `USD` and `cent` units (`18 \text{ dollars}` → `18 \text{ USD}`,
+  (`2 \text{ in} \cdot 3 \text{ ft}` stays `6 \text{ in} \cdot \text{ft}`), and
+  simplification to named derived SI units still applies afterwards
+  (`2 \text{ N} \cdot 3 \text{ m}` → `6 \text{ J}`). Works with measurement
+  (uncertainty-carrying) magnitudes as well.
+- **New units: `yd`, `qt`, `pt`, `cup`, `wk`.** Yards, quarts, pints, cups (US
+  liquid convention, consistent with the existing US `gal`) and weeks join the
+  unit registry, with their English word aliases (`5 \text{ yards}` →
+  `5 \text{ yd}`), and convert exactly: `1 \text{ gal} / 1 \text{ qt}` evaluates
+  to `4`.
+- **Currency: dollars and cents.** A new currency dimension backs the `USD` and
+  `cent` units (`18 \text{ dollars}` → `18 \text{ USD}`,
   `1 \text{ dollar} + 50 \text{ cents}` → `1.5 \text{ USD}`), and currency
-  participates in unit cancellation
-  (`\$6 / (\$2/\text{lb})` → `3 \text{ lb}`). Other currencies are
-  deliberately not modeled: exchange rates are not fixed constants, so
-  cross-currency expressions stay inert rather than silently wrong.
+  participates in unit cancellation (`\$6 / (\$2/\text{lb})` → `3 \text{ lb}`).
+  Other currencies are deliberately not modeled: exchange rates are not fixed
+  constants, so cross-currency expressions stay inert rather than silently
+  wrong.
 - **Spaced unit phrases parse.** Multi-word unit text such as
-  `60 \text{ miles per hour}` now parses to `60 \text{ mi/h}` — spaces
-  inside `\text{...}` unit annotations are preserved and `per` reads as
-  division — where previously the words ran together and the unit was not
-  recognized.
+  `60 \text{ miles per hour}` now parses to `60 \text{ mi/h}` — spaces inside
+  `\text{...}` unit annotations are preserved and `per` reads as division —
+  where previously the words ran together and the unit was not recognized.
 
 ### New Notations
 
 - **Base-subscript numerals compute.** A numeral with an integer-literal
   subscript base, e.g. `10111_2` or `2748_{16}`, now parses to the numeric
   `BaseForm(value, base)` head (`10111_2` → `["BaseForm", 23, 2]`), so
-  arithmetic on based numerals works: `1011_2 \cdot 101_2` evaluates to
-  `55`, and `11_8 - 3_8 = 6_8` evaluates to `True`. The guard is strict —
-  every digit must be valid for the base (`19_2` stays an inert
-  `Subscript`), subscripted symbols (`x_2`) are unchanged, and values
-  larger than 2⁵³ stay exact. The `BaseForm`
-  LaTeX serializer was also fixed (it emitted an unbalanced parenthesis)
-  and now round-trips: `BaseForm(23, 2)` serializes as `10111_{2}`.
-  A numeral with a **symbol** subscript base, e.g. `161_b` or `161_{b}`,
-  now parses to `BaseForm` of the digit polynomial in that base
-  (`161_b` → `["BaseForm", ["Add", ["Power", "b", 2], ["Multiply", 6, "b"], 1], "b"]`,
-  i.e. `b² + 6b + 1`), so arithmetic works symbolically
-  (`161_b + 134_b` evaluates to `2b² + 9b + 5`) and the numeral
-  round-trips back to `161_{b}`. Base equations solve: `161_b + 134_b = 315_b`
-  reduces to `b² − 8b = 0` and solves to `b = 8` (and `b = 0`).
-- **Sequence-braces notation.** `\{a_n\}_{n=1}^{\infty}` now parses to the
-  new inert `IndexedSequence(term, index, lower, upper)` head instead of
-  an `incompatible-type` error. The term uses the operator-call form
-  (`["a_", "n"]`) so the index binding survives; `_{n\in\mathbb{N}}`
-  subscripts map to the set's least element as the lower bound;
-  the expression is inert under `evaluate()` and `simplify()` and
-  round-trips through LaTeX. Bare `\{a_n\}` remains a `Set`, and the
-  parenthesized form `(a_n)_{n\in\mathbb{N}}` is unchanged.
+  arithmetic on based numerals works: `1011_2 \cdot 101_2` evaluates to `55`,
+  and `11_8 - 3_8 = 6_8` evaluates to `True`. The guard is strict — every digit
+  must be valid for the base (`19_2` stays an inert `Subscript`), subscripted
+  symbols (`x_2`) are unchanged, and values larger than 2⁵³ stay exact. The
+  `BaseForm` LaTeX serializer was also fixed (it emitted an unbalanced
+  parenthesis) and now round-trips: `BaseForm(23, 2)` serializes as `10111_{2}`.
+  A numeral with a **symbol** subscript base, e.g. `161_b` or `161_{b}`, now
+  parses to `BaseForm` of the digit polynomial in that base (`161_b` →
+  `["BaseForm", ["Add", ["Power", "b", 2], ["Multiply", 6, "b"], 1], "b"]`, i.e.
+  `b² + 6b + 1`), so arithmetic works symbolically (`161_b + 134_b` evaluates to
+  `2b² + 9b + 5`) and the numeral round-trips back to `161_{b}`. Base equations
+  solve: `161_b + 134_b = 315_b` reduces to `b² − 8b = 0` and solves to `b = 8`
+  (and `b = 0`).
+- **Sequence-braces notation.** `\{a_n\}_{n=1}^{\infty}` now parses to the new
+  inert `IndexedSequence(term, index, lower, upper)` head instead of an
+  `incompatible-type` error. The term uses the operator-call form
+  (`["a_", "n"]`) so the index binding survives; `_{n\in\mathbb{N}}` subscripts
+  map to the set's least element as the lower bound; the expression is inert
+  under `evaluate()` and `simplify()` and round-trips through LaTeX. Bare
+  `\{a_n\}` remains a `Set`, and the parenthesized form `(a_n)_{n\in\mathbb{N}}`
+  is unchanged.
 
 ### Ellipsis Expressions
 
 - **Sums and products no longer fold numeric terms across an ellipsis.** An
   `Add` or `Multiply` containing an ellipsis (`\dots`, the
-  `ContinuationPlaceholder` symbol) is a notational pattern, not an
-  arithmetic one: it now keeps its operands in source order with their
-  structure intact, and is returned unchanged by `evaluate()`, `N()` and
-  `simplify()`. Previously `1 + 2 + \dots + n` canonicalized to
-  `n + 3 + \ldots` — folding the sample terms and destroying the pattern —
-  and `2 \cdot 4 \cdot \dots \cdot 2n` folded to `16 \cdot \ldots \cdot n`,
-  tearing the coefficient out of the `2n` anchor. Such products also
-  round-trip through LaTeX now (an explicit `\times` is emitted around the
-  ellipsis instead of juxtaposition).
+  `ContinuationPlaceholder` symbol) is a notational pattern, not an arithmetic
+  one: it now keeps its operands in source order with their structure intact,
+  and is returned unchanged by `evaluate()`, `N()` and `simplify()`. Previously
+  `1 + 2 + \dots + n` canonicalized to `n + 3 + \ldots` — folding the sample
+  terms and destroying the pattern — and `2 \cdot 4 \cdot \dots \cdot 2n` folded
+  to `16 \cdot \ldots \cdot n`, tearing the coefficient out of the `2n` anchor.
+  Such products also round-trip through LaTeX now (an explicit `\times` is
+  emitted around the ellipsis instead of juxtaposition).
 
 ### LaTeX Parsing
 
@@ -235,137 +280,127 @@ Recovery fixes from the Hendrycks-MATH genre sweep (`docs/mathnet/`), taking
 that corpus from 97.09% to 97.38% clean parse:
 
 - **Ordinal superscripts** devolve to the base number: `13^{\text{th}}` now
-  parses as `13` (also `1^{\text{st}}`, `k^\text{th}`, `\mbox` variants).
-  Only an exact ordinal suffix (`st`/`nd`/`rd`/`th`, case-insensitive) is
-  dropped; other superscripts are unchanged.
-- **Empty scripts are dropped:** `x^{}` and `x_{}` now parse as `x` instead
-  of producing an error.
-- **`{,}` thousands separator:** the LaTeX thin-separator idiom `1{,}000`
-  now parses as the number `1000`. Only between digits, and a configured
-  `decimalSeparator: '{,}'` (European convention) takes precedence —
-  `3{,}14` still parses as `3.14` in that mode.
+  parses as `13` (also `1^{\text{st}}`, `k^\text{th}`, `\mbox` variants). Only
+  an exact ordinal suffix (`st`/`nd`/`rd`/`th`, case-insensitive) is dropped;
+  other superscripts are unchanged.
+- **Empty scripts are dropped:** `x^{}` and `x_{}` now parse as `x` instead of
+  producing an error.
+- **`{,}` thousands separator:** the LaTeX thin-separator idiom `1{,}000` now
+  parses as the number `1000`. Only between digits, and a configured
+  `decimalSeparator: '{,}'` (European convention) takes precedence — `3{,}14`
+  still parses as `3.14` in that mode.
 - **`\cancel`, `\bcancel`, `\xcancel`** unwrap to their body, and
   **`\cancelto{4}{72}`** parses to the replacement value `4` — matching the
   worked-solution usage the notation comes from.
-- **`\not`-prefixed relations** compose into the negated relation:
-  `\not=` → `NotEqual`, `\not\in` → `NotElement`, `\not\equiv` (incl. a
-  trailing `\pmod n`) → the negated congruence, `\not\subset` →
-  `NotSubset`, and relations without a dedicated negated head wrap in
-  `Not(…)`.
-- **Standalone `\pmod{7}`** now places the modulus as the second argument
-  of `Mod` (previously the operands were flipped).
-- **`(2n)!!` stays symbolic:** `Factorial2` accepts symbolic arguments
-  (its signature was integer-only and rejected `2n` with an
-  `incompatible-type` error); numeric double factorials are unchanged
-  (`8!! = 384`).
+- **`\not`-prefixed relations** compose into the negated relation: `\not=` →
+  `NotEqual`, `\not\in` → `NotElement`, `\not\equiv` (incl. a trailing
+  `\pmod n`) → the negated congruence, `\not\subset` → `NotSubset`, and
+  relations without a dedicated negated head wrap in `Not(…)`.
+- **Standalone `\pmod{7}`** now places the modulus as the second argument of
+  `Mod` (previously the operands were flipped).
+- **`(2n)!!` stays symbolic:** `Factorial2` accepts symbolic arguments (its
+  signature was integer-only and rejected `2n` with an `incompatible-type`
+  error); numeric double factorials are unchanged (`8!! = 384`).
 - **Primed variables type-check as arguments:** `\sin a'` now parses to
-  `Sin(Prime(a))` instead of a type error — `Prime` mirrors the type of
-  its base (a primed value is a value; a primed function is a function).
-  Derivative notation (`f'(x)` → `D(f(x), x)`) is unchanged.
+  `Sin(Prime(a))` instead of a type error — `Prime` mirrors the type of its base
+  (a primed value is a value; a primed function is a function). Derivative
+  notation (`f'(x)` → `D(f(x), x)`) is unchanged.
 - **Bare `N`/`D` devolve to variables in all argument positions:**
   `N \equiv 1 \pmod k` now parses as a congruence over the variable `N`
   (previously the standard-library `N` operator's function type failed the
-  relation's numeric parameter check; the existing devolution fallback ran
-  only for arithmetic operators). Applied uses (`N(2/3)`) still call the
-  operator.
+  relation's numeric parameter check; the existing devolution fallback ran only
+  for arithmetic operators). Applied uses (`N(2/3)`) still call the operator.
 - **Congruence chains and fragments:**
-  `3^{27}\equiv 3^7\pmod{100}\equiv 87\pmod{100}` folds into a conjunction
-  of the adjacent congruence steps; a leading `\equiv b \pmod n` with an
-  elided left-hand side recovers with a missing-operand placeholder.
-- **Empty subscripts on multi-letter symbols are dropped:** `\alpha_{}`
-  parses as `alpha` (completing the earlier `x_{}`/`13^{}` fix).
-- **English unit words in `\text{…}` parse as quantities.**
-  `18 \text{ inches}` → `["Quantity", 18, "in"]`: common measurement words
-  (singular and plural — inches, feet, miles, gallons, pounds, minutes,
-  hours, meters, liters, degrees, …) are normalized to their canonical
-  unit symbols at the parse boundary, including inside compound units
-  (`\text{ inches/foot}` → `in/ft`). An exponent *outside* the text binds
-  to the trailing unit factor: `7.5 \text{ gallons/ft}^3` →
-  `Quantity(7.5, gal/ft³)` (gallons per cubic foot, not `(gal/ft)³`).
-  Strictly gated: the whole text must resolve as a unit, so prose like
-  `9\text{ to }80` is untouched. No `ton(s)` alias (a US short ton is not
-  the metric tonne `t` — mapping it would be a silent 10% error).
+  `3^{27}\equiv 3^7\pmod{100}\equiv 87\pmod{100}` folds into a conjunction of
+  the adjacent congruence steps; a leading `\equiv b \pmod n` with an elided
+  left-hand side recovers with a missing-operand placeholder.
+- **Empty subscripts on multi-letter symbols are dropped:** `\alpha_{}` parses
+  as `alpha` (completing the earlier `x_{}`/`13^{}` fix).
+- **English unit words in `\text{…}` parse as quantities.** `18 \text{ inches}`
+  → `["Quantity", 18, "in"]`: common measurement words (singular and plural —
+  inches, feet, miles, gallons, pounds, minutes, hours, meters, liters, degrees,
+  …) are normalized to their canonical unit symbols at the parse boundary,
+  including inside compound units (`\text{ inches/foot}` → `in/ft`). An exponent
+  _outside_ the text binds to the trailing unit factor:
+  `7.5 \text{ gallons/ft}^3` → `Quantity(7.5, gal/ft³)` (gallons per cubic foot,
+  not `(gal/ft)³`). Strictly gated: the whole text must resolve as a unit, so
+  prose like `9\text{ to }80` is untouched. No `ton(s)` alias (a US short ton is
+  not the metric tonne `t` — mapping it would be a silent 10% error).
 
 ### Restriction Braces
 
 - **Comma-separated brace conditions combine as a union (`Or`).**
-  `x^2\{x\ge0, x\le3\}` now parses to
-  `["When", x², ["Or", 0≤x, x≤3]]` — each comma element is
-  piecewise shorthand for `cond: 1` evaluated first-match, so the
-  expression is defined where **any** condition holds. (Previously the
-  condition was a `Tuple`, which is not boolean and could not compile.)
-  Stacked braces (`\{c_1\}\{c_2\}`) still AND-combine, unchanged.
-- **Colon groups parse as piecewise value selectors.**
-  `x\{x>0:1, x<0:-1\}` now parses to
-  `["Multiply", "x", ["Which", 0<x, 1, x<0, −1]]`: a brace group is
-  a first-class piecewise *value* (`{cond}` ≡ `{cond: 1}`) attached by
+  `x^2\{x\ge0, x\le3\}` now parses to `["When", x², ["Or", 0≤x, x≤3]]` — each
+  comma element is piecewise shorthand for `cond: 1` evaluated first-match, so
+  the expression is defined where **any** condition holds. (Previously the
+  condition was a `Tuple`, which is not boolean and could not compile.) Stacked
+  braces (`\{c_1\}\{c_2\}`) still AND-combine, unchanged.
+- **Colon groups parse as piecewise value selectors.** `x\{x>0:1, x<0:-1\}` now
+  parses to `["Multiply", "x", ["Which", 0<x, 1, x<0, −1]]`: a brace group is a
+  first-class piecewise _value_ (`{cond}` ≡ `{cond: 1}`) attached by
   juxtaposition — i.e. multiplication, the same convention that makes the
-  bare-condition form a restriction. A trailing bare value is the else
-  branch (`\{x>0:1, -1\}` → `…, "True", −1`), and a bare condition inside a
-  colon group means `cond: 1`. (Previously the `cond:val` pairs were
-  parsed as a `When` *gate* for the body — inverted semantics.)
+  bare-condition form a restriction. A trailing bare value is the else branch
+  (`\{x>0:1, -1\}` → `…, "True", −1`), and a bare condition inside a colon group
+  means `cond: 1`. (Previously the `cond:val` pairs were parsed as a `When`
+  _gate_ for the body — inverted semantics.)
 - **`When` now masks correctly on the `interval-js` compile target.** The
-  interval comparisons return the tri-state string
-  `'true' | 'false' | 'maybe'` — all truthy — so the previously-emitted JS
-  ternary could never take its masking branch: an input interval entirely
-  outside the restriction returned a normal interval result. `When` now
-  compiles to a tri-state-aware runtime helper (`_IA.restrict`): `'false'`
-  masks (`{kind: 'empty'}`), `'true'` passes the value through, and
-  `'maybe'` — an input straddling the restriction boundary — reports the
-  value range as domain-clipped
-  (`{kind: 'partial', domainClipped: 'both'}`) so adaptive samplers see a
-  domain edge rather than a clean interval. Scalar `javascript` and `glsl`
-  `When` emission is unchanged.
+  interval comparisons return the tri-state string `'true' | 'false' | 'maybe'`
+  — all truthy — so the previously-emitted JS ternary could never take its
+  masking branch: an input interval entirely outside the restriction returned a
+  normal interval result. `When` now compiles to a tri-state-aware runtime
+  helper (`_IA.restrict`): `'false'` masks (`{kind: 'empty'}`), `'true'` passes
+  the value through, and `'maybe'` — an input straddling the restriction
+  boundary — reports the value range as domain-clipped
+  (`{kind: 'partial', domainClipped: 'both'}`) so adaptive samplers see a domain
+  edge rather than a clean interval. Scalar `javascript` and `glsl` `When`
+  emission is unchanged.
 
 ### Pipelines and Held Operands
 
-- **Hold operators reduce transformer heads.** `Solve`, `Integrate`, and
-  `Limit` hold their expression operand (so an equation is not collapsed to
-  a boolean before solving) — but a held operand whose head is an
-  expression *transformer* (`Simplify`, `Expand`, `ExpandAll`, `Factor`,
-  `Together`, `Distribute`, `TrigExpand`) is a computation step and is now
-  reduced before the algorithm runs.
-  `x^2+2x+1 \rhd \operatorname{Simplify} \rhd \operatorname{Solve}` now
-  returns `[-1]` (previously `[]`: the solver found no roots in an
-  expression whose operator was `Simplify`), and
-  `\int \operatorname{Simplify}(x^2)\,dx` /
-  `\lim` of a transformer-wrapped body compute instead of staying inert.
-  Only the curated transformer set is reduced — full evaluation would
-  collapse relations and substitute assigned values into the unknown.
-- **Unknown-inference defers on the pipe topic placeholder.** Operators
-  that infer their variable when omitted (`Solve`, `D`, `Series`, the
-  polynomial operators) no longer run that inference on the pipeline topic
-  placeholder `_`: `ce.box(["Solve", "_"])` stays `["Solve", "_"]` instead
-  of canonicalizing to `["Solve", "_", "_"]`, which baked the placeholder
-  into the unknown slot so a *prefix* pipeline stage
-  (`\rhd \operatorname{Solve}`) computed `Solve(expr, expr)` → `[0]` where
-  the infix spelling returned `[-1]`. `Solve` re-infers the unknown when
-  the applied stage evaluates; the two spellings now agree. Piping an
-  *equation* through the prefix form works too, now that an undecidable
-  `Equal` survives the lambda's argument pre-evaluation (see "Undecidable
-  Relations Stay Symbolic" below): `Apply(\rhd Solve, x^2 = 4)` → `[2, -2]`.
+- **Hold operators reduce transformer heads.** `Solve`, `Integrate`, and `Limit`
+  hold their expression operand (so an equation is not collapsed to a boolean
+  before solving) — but a held operand whose head is an expression _transformer_
+  (`Simplify`, `Expand`, `ExpandAll`, `Factor`, `Together`, `Distribute`,
+  `TrigExpand`) is a computation step and is now reduced before the algorithm
+  runs. `x^2+2x+1 \rhd \operatorname{Simplify} \rhd \operatorname{Solve}` now
+  returns `[-1]` (previously `[]`: the solver found no roots in an expression
+  whose operator was `Simplify`), and `\int \operatorname{Simplify}(x^2)\,dx` /
+  `\lim` of a transformer-wrapped body compute instead of staying inert. Only
+  the curated transformer set is reduced — full evaluation would collapse
+  relations and substitute assigned values into the unknown.
+- **Unknown-inference defers on the pipe topic placeholder.** Operators that
+  infer their variable when omitted (`Solve`, `D`, `Series`, the polynomial
+  operators) no longer run that inference on the pipeline topic placeholder `_`:
+  `ce.box(["Solve", "_"])` stays `["Solve", "_"]` instead of canonicalizing to
+  `["Solve", "_", "_"]`, which baked the placeholder into the unknown slot so a
+  _prefix_ pipeline stage (`\rhd \operatorname{Solve}`) computed
+  `Solve(expr, expr)` → `[0]` where the infix spelling returned `[-1]`. `Solve`
+  re-infers the unknown when the applied stage evaluates; the two spellings now
+  agree. Piping an _equation_ through the prefix form works too, now that an
+  undecidable `Equal` survives the lambda's argument pre-evaluation (see
+  "Undecidable Relations Stay Symbolic" below): `Apply(\rhd Solve, x^2 = 4)` →
+  `[2, -2]`.
 
 ### Undecidable Relations Stay Symbolic
 
-- **An equation with free variables is a condition, not a falsity.**
-  `Equal` and `NotEqual` with an undecidable comparison now stay **inert**
-  under `evaluate()`: `x^2 = 4` evaluates to itself instead of `False`
-  (and `x \ne 4` to itself instead of `True`). This matches the inequality
-  operators — `x^2 < 4` already stayed symbolic — and Mathematica's `==`.
-  Decidable comparisons are unchanged (`2+2=4` → `True`, `2=3` → `False`,
-  `x=x` → `True`), list/scalar elementwise comparisons are unchanged, and
-  assumption discharge still applies (`assume(z > 0)` ⇒ `z \ne 0` → `True`).
-  The previous collapse silently ruined stored equations: a notebook cell
-  holding `x^2 = 4` evaluated to `False` at storage time, breaking every
-  answer-referencing `Solve` pipe downstream.
-- **`If` and `Which` stay unevaluated on an undecided condition.**
-  A condition that is boolean-typed but not yet decidable (e.g. `x = 4`
-  with a free `x`) leaves the conditional inert — it may become decidable
-  once the variables are bound — instead of throwing
-  `Condition must evaluate to "True" or "False"` (or, previously for
-  `Equal` conditions, silently taking the else branch). Genuinely
-  non-boolean conditions (a number, a misspelled symbol) still throw with
-  the spell-check hint.
+- **An equation with free variables is a condition, not a falsity.** `Equal` and
+  `NotEqual` with an undecidable comparison now stay **inert** under
+  `evaluate()`: `x^2 = 4` evaluates to itself instead of `False` (and `x \ne 4`
+  to itself instead of `True`). This matches the inequality operators —
+  `x^2 < 4` already stayed symbolic — and Mathematica's `==`. Decidable
+  comparisons are unchanged (`2+2=4` → `True`, `2=3` → `False`, `x=x` → `True`),
+  list/scalar elementwise comparisons are unchanged, and assumption discharge
+  still applies (`assume(z > 0)` ⇒ `z \ne 0` → `True`). The previous collapse
+  silently ruined stored equations: a notebook cell holding `x^2 = 4` evaluated
+  to `False` at storage time, breaking every answer-referencing `Solve` pipe
+  downstream.
+- **`If` and `Which` stay unevaluated on an undecided condition.** A condition
+  that is boolean-typed but not yet decidable (e.g. `x = 4` with a free `x`)
+  leaves the conditional inert — it may become decidable once the variables are
+  bound — instead of throwing `Condition must evaluate to "True" or "False"`
+  (or, previously for `Equal` conditions, silently taking the else branch).
+  Genuinely non-boolean conditions (a number, a misspelled symbol) still throw
+  with the spell-check hint.
 
 ### Issues Resolved
 
@@ -375,23 +410,82 @@ that corpus from 97.09% to 97.38% clean parse:
   `DisplayDigits` forms, but the exact shape of a mechanical
   `fractionalDigits: n` → `digits: n` migration — is accepted with the
   deprecated numeric convention (`n ≥ 0` = fractional digits, `n < 0` =
-  significant digits), and a genuinely invalid shape reports a clear
-  validation error instead of crashing.
+  significant digits), and a genuinely invalid shape reports a clear validation
+  error instead of crashing.
 - The engine no longer trips its own
-  `` `digits` and `fractionalDigits` were both specified `` deprecation
-  warning. The serializer re-entered the public `toMathJson()` boundary —
-  which always carries both (resolved) options — for any
-  dictionary-*typed* expression; for a symbol bound to a dictionary value
-  this also recursed without bound (a warning flood followed by a stack
-  overflow). Dictionary values now serialize inside the serializer proper;
-  the warning fires only for genuine caller mistakes, once.
+  `` `digits` and `fractionalDigits` were both specified `` deprecation warning.
+  The serializer re-entered the public `toMathJson()` boundary — which always
+  carries both (resolved) options — for any dictionary-_typed_ expression; for a
+  symbol bound to a dictionary value this also recursed without bound (a warning
+  flood followed by a stack overflow). Dictionary values now serialize inside
+  the serializer proper; the warning fires only for genuine caller mistakes,
+  once.
 - `BoxedDictionary.toMathJson()` called without options no longer throws
-  (`Cannot read properties of undefined`); it resolves the same defaults
-  as every other expression kind.
-- `.latex` on a dictionary-typed symbol with no value no longer overflows
-  the stack; it serializes as the symbol. (`.latex` on a dictionary
-  *value* — which crashed in released builds — now returns an empty
-  string: dictionaries have no LaTeX display form yet.)
+  (`Cannot read properties of undefined`); it resolves the same defaults as
+  every other expression kind.
+- `.latex` on a dictionary-typed symbol with no value no longer overflows the
+  stack; it serializes as the symbol. (`.latex` on a dictionary _value_ — which
+  crashed in released builds — now returns an empty string: dictionaries have no
+  LaTeX display form yet.)
+
+### Benchmarks
+
+#### Numeric performance (200-digit precision)
+
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
+
+| Expression         | CE (current) | CE 0.70.0 | SymPy | math.js | Mathematica |
+| ------------------ | -----------: | --------: | ----: | ------: | ----------: |
+| $\pi^2$            |           18 |        12 |   281 |     275 |         6.2 |
+| $\sin 1$           |           34 |        36 |   353 |     945 |         7.1 |
+| $\cos 1$           |           40 |        41 |   351 |   1,315 |          11 |
+| $\ln 2$            |           27 |        24 |   598 |   8,195 |         5.8 |
+| $e^{\pi}$          |           20 |        22 |   376 |   8,984 |         7.5 |
+| $\zeta(3)$         |        2,715 |     2,787 |   494 |       — |         151 |
+| $\Gamma(\tfrac13)$ |        1,452 |     1,424 | 4,843 |       — |         267 |
+| $\psi(\tfrac13)$   |        1,269 |     1,241 | 3,782 |       — |         235 |
+
+#### Symbolic capability & performance
+
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE (current)** and **CE 0.70.0** columns to see
+what is _new this release_ (a `—` under `0.70.0` next to a number under the
+current build). The **CE + R/F** column is the current build with the opt-in
+Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
+
+| Operation                              | CE (current) | CE + R/F | CE 0.70.0 |  SymPy  | math.js | Mathematica |
+| -------------------------------------- | :----------: | :------: | :-------: | :-----: | :-----: | :---------: |
+| **Antiderivatives**                    |              |          |           |         |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |     7.4×     |   3.0×   |   5.0×    |  0.6×   |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |     8.3×     |   1.2×   |   7.7×    |  0.08×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |     4.3×     |   0.7×   |   3.4×    |  0.3×   |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |      —       |   2.0×   |     —     |  0.1×   |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |      —       |   0.9×   |     —     | 0.008×  |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |      —       |   1.2×   |     —     | 0.006×  |    —    |     1×      |
+| **Derivatives**                        |              |          |           |         |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |    0.01×     |  0.02×   |   0.02×   | 0.0009× | 0.002×  |     1×      |
+| **Simplification**                     |              |          |           |         |         |             |
+| $\sqrt{3+2\sqrt2}$                     |     29×      |   23×    |    27×    |    —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |     71×      |   36×    |    54×    |  2.8×   |  9.1×   |     1×      |
+| **Evaluation**                         |              |          |           |         |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |     43×      |   20×    |    38×    |  2.5×   |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |     6.3×     |   4.2×   |   6.0×    |  2.1×   |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |    5213×     |  6049×   |   5202×   |   82×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |     332×     |   106×   |   279×    |  2.3×   |    —    |     1×      |
+| **Solving**                            |              |          |           |         |         |             |
+| $x^4+x^2-1=0$                          |     0.2×     |   0.2×   |   0.2×    |  0.06×  |    —    |     1×      |
+| $x^3-x-1=0$                            |     1.2×     |   1.4×   |   1.4×    |  0.04×  |    —    |     1×      |
+
+Across the cases both solve, Compute Engine is a **median 6.3× faster than
+Mathematica** (up to 5213×).
+
+<sub>
+Measured 2026-07-10 · Compute Engine `0.72.0` @ `2cf87db4` (current build) · published `0.70.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+</sub>
 
 ## 0.72.0 _2026-07-09_
 

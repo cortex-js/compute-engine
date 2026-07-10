@@ -11,7 +11,8 @@ files, and `docs/rubi/RUBI.md` / `docs/fungrim/`.
 The 2026-06 release shipped:
 
 - the Fungrim-derived identities library
-  (`@cortex-js/compute-engine/identities`, 1,385 rules incl. 5 solve seeds), the
+  (`@cortex-js/compute-engine/identities`, 1,413 rules incl. 10 solve
+  templates), the
   complex-domain assumptions extension, the operator-indexed rule dispatcher
   with purpose tags, `ce.solveRules`/`ce.harmonizationRules`, and exact `Zeta`;
 - the Rubi rule driver as an opt-in entry point
@@ -490,7 +491,7 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-09, R1–R15 landed, incl. R12+R13):** the shipped bundle
+**State (2026-07-09, R1–R16 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 6 (Hyperbolics), 4.1 Sine, 4.3 Tangent, and
@@ -606,29 +607,13 @@ coverage work, and most of it is shared capability rather than Ch6-specific:
 
 **Decoupled from Wester.** The two remaining Wester `Solve` gaps are harness
 artifacts (B9), so additional Fungrim solve rules will **not** move that number
-— the Wester `Solve` rows are saturated at our principled ceiling (14/21). The
-track's own benchmark exists (`benchmarks/audit/solve.ts` /
-`REPORT-solve.md`, 40 SymPy-derived univariate cases): after the two
-2026-07-09 rounds, CE+Fungrim scores **37/40** (base CE 33; SymPy and
-Mathematica 38) — category parity with both references everywhere except
-`frontier`. Round 1 (Fungrim-side): derived templates generalized to the
-`clearDenominators`-scaled shape `Add(Multiply(__a, A(_x)), __b)` (fixes
-rational-RHS cases like `arctan x = 1/2`), plus hand-curated LambertW
-templates (`curation-overrides.json` `solveTemplates`: `c·pᵐˣ + ax + b = 0`
-and the bare `pˣ + x = 0`), via `loadIdentities(ce, { solve: true })`.
-Round 2 (engine-side, `solve.ts`): native `UNIVARIATE_ROOTS` templates for
-inverse-trig-of-x (`arcsin/arccos/arctan x = c`) and the hyperbolic family
-(`sinh/tanh` one-branch, `cosh` ±both-roots); harmonization rewrites
-`eᶠ ± e⁻ᶠ → 2cosh/2sinh` and the coefficient-general two-`Abs` squaring
-`a·|f| + b·|g| → a²f² − b²g²`; and a `clearDenominators` fix (per-term LCM
-multiplication so `p(x)/q(x)·lcm` cancels — whole-`Add` `.mul()` expanded
-numerators past cancellation). Round 3: real **W₋₁-branch support for
-`LambertW`** — 2-arg form `["LambertW", z, k]` (branch last, SymPy/Fungrim
-convention; k ∈ {0, −1} evaluated, others inert), machine + bignum kernels,
-`\operatorname{W}_{-1}(x)` serialization, branch-aware compile target — plus
-W₋₁ companion solve templates, so `eˣ − x − 2 = 0` returns both real roots
-(FR2 ✅). **The benchmark is at parity — 38/40 = SymPy = Mathematica — and
-this track is done as a coverage effort.** Residual, none benchmark-reachable:
+— the Wester `Solve` rows are saturated at our principled ceiling (14/21). On
+the track's own benchmark (`benchmarks/audit/solve.ts` / `REPORT-solve.md`,
+40 SymPy-derived univariate cases) **CE+Fungrim is at parity — 38/40 = SymPy
+= Mathematica (base CE 33) — and this track is done as a coverage effort**
+(shipping in the next release: native inverse-trig/hyperbolic/two-`Abs`
+solving, LambertW W₋₁ 2-arg branch, Lambert solve templates on both real
+branches). Residual, none benchmark-reachable:
 
 - **FR1/FR3** (Dottie-style transcendental fixed points): unsolved by SymPy
   and Mathematica too — outside the closed-form ceiling, not a gap to chase.
