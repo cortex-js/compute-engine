@@ -1,6 +1,11 @@
 import { antiderivative } from './antiderivative.js';
 import type { Expression } from '../global-types.js';
-import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+  sym,
+} from '../boxed-expression/type-guards.js';
 import {
   getPolynomialCoefficients,
   polynomialDegree,
@@ -75,6 +80,20 @@ function splitTerm(
   if (isFunction(term, 'Negate')) {
     const result = splitTerm(term.op1, dependentName, independentName);
     return { ...result, coefficient: result.coefficient.neg() };
+  }
+
+  // A quotient like `y(x)/x` or `y'(x)/x²` is linear with coefficient
+  // 1/denominator — but only when the denominator is free of the dependent
+  // function (`y'/y` is nonlinear and must stay `rest`).
+  if (isFunction(term, 'Divide')) {
+    if (referencesDependent(term.op2, dependentName))
+      return { kind: 'rest', coefficient: term };
+    const result = splitTerm(term.op1, dependentName, independentName);
+    if (result.kind === 'rest') return { kind: 'rest', coefficient: term };
+    return {
+      ...result,
+      coefficient: ce.function('Divide', [result.coefficient, term.op2]),
+    };
   }
 
   if (isFunction(term, 'Multiply')) {
@@ -193,17 +212,30 @@ function structuralNeg(expr: Expression): Expression {
   return ce.function('Negate', [expr], { form: 'structural' });
 }
 
+/** Flatten nested `Add`/`Subtract`/`Negate` into a list of addends, so a
+ *  spelling like `Subtract(Subtract(y'', y'), y)` splits into individual
+ *  terms instead of leaving a compound operand that lands in `rest`. */
+function flattenAddends(residual: Expression): Expression[] {
+  const terms: Expression[] = [];
+  const flatten = (expr: Expression, negate: boolean): void => {
+    if (isFunction(expr, 'Add')) for (const op of expr.ops) flatten(op, negate);
+    else if (isFunction(expr, 'Subtract')) {
+      flatten(expr.op1, negate);
+      flatten(expr.op2, !negate);
+    } else if (isFunction(expr, 'Negate')) flatten(expr.op1, !negate);
+    else terms.push(negate ? expr.neg() : expr);
+  };
+  flatten(residual, false);
+  return terms;
+}
+
 function collectLinearTerms(
   residual: Expression,
   dependentName: string,
   independentName: string
 ): LinearTermCoefficients {
   const ce = residual.engine;
-  const terms = isFunction(residual, 'Add')
-    ? residual.ops
-    : isFunction(residual, 'Subtract')
-      ? [residual.op1, residual.op2.neg()]
-      : [residual];
+  const terms = flattenAddends(residual);
   let derivative = ce.Zero;
   let dependent = ce.Zero;
   const restTerms: Expression[] = [];
@@ -370,11 +402,7 @@ function collectDerivativeTerms(
   independentName: string
 ): DerivativeTermCoefficients {
   const ce = residual.engine;
-  const terms = isFunction(residual, 'Add')
-    ? residual.ops
-    : isFunction(residual, 'Subtract')
-      ? [residual.op1, residual.op2.neg()]
-      : [residual];
+  const terms = flattenAddends(residual);
   const coefficients = new Map<number, Expression>();
   let rest = ce.Zero;
 
@@ -629,6 +657,57 @@ function dSolveAntiderivative(expr: Expression, variable: string): Expression {
     }
   }
   return antiderivative(expr, variable);
+}
+
+/** Split a term of a log-bearing antiderivative into `k·ln(u)` parts:
+ *  returns `{ exponent, base }` for `ln u`, `−ln u`, and `k·ln u` (numeric
+ *  literal k), with `Abs` inside the logarithm dropped; null otherwise. */
+function logTermSplit(
+  term: Expression
+): { exponent: Expression; base: Expression } | null {
+  const ce = term.engine;
+  const stripAbs = (u: Expression): Expression =>
+    isFunction(u, 'Abs') ? u.op1 : u;
+  if (isFunction(term, 'Ln') && term.ops.length === 1)
+    return { exponent: ce.One, base: stripAbs(term.op1) };
+  if (isFunction(term, 'Negate')) {
+    const inner = logTermSplit(term.op1);
+    return inner ? { ...inner, exponent: inner.exponent.neg() } : null;
+  }
+  if (isFunction(term, 'Multiply') && term.ops.length === 2) {
+    const [a, b] = term.ops;
+    const [k, log] = isNumber(a) ? [a, b] : isNumber(b) ? [b, a] : [null, null];
+    if (k === null || !isFunction(log, 'Ln') || log.ops.length !== 1)
+      return null;
+    return { exponent: k, base: stripAbs(log.op1) };
+  }
+  return null;
+}
+
+/** Build the integrating factor `e^{∫p}` from the antiderivative `integralP`,
+ *  folding `Exp(Σ kᵢ·ln uᵢ + rest)` → `Π uᵢ^{kᵢ} · e^{rest}` so that
+ *  log-valued integrals produce closed-form factors (`e^{−ln|x|}` → `1/x`).
+ *  Dropping `Abs` is sound here: an integrating factor is determined only up
+ *  to a nonzero constant multiple, and on each connected component of the
+ *  domain `|u|^k = ±u^k` (the ± absorbs into the integration constant; the
+ *  simplifier already folds the even-power case `|x|² → x²`). */
+function integratingFactorExp(integralP: Expression): Expression {
+  const ce = integralP.engine;
+  const termList = isFunction(integralP, 'Add') ? integralP.ops : [integralP];
+  const powers: Expression[] = [];
+  const rest: Expression[] = [];
+  for (const term of termList) {
+    const split = logTermSplit(term);
+    if (split) powers.push(ce.function('Power', [split.base, split.exponent]));
+    else rest.push(term);
+  }
+  if (powers.length === 0)
+    return ce.function('Exp', [integralP]).simplify();
+  if (rest.length > 0)
+    powers.push(ce.function('Exp', [ce.function('Add', rest)]));
+  return (
+    powers.length === 1 ? powers[0] : ce.function('Multiply', powers)
+  ).simplify();
 }
 
 function splitSystemTerm(
@@ -1746,7 +1825,7 @@ function solveBernoulliFirstOrder(
   const r = oneMinusN.mul(nonlinearCoefficient).simplify();
   const integralP = dSolveAntiderivative(p, independentName);
   if (hasOperator(integralP, 'Integrate')) return undefined;
-  const integratingFactor = ce.function('Exp', [integralP]).simplify();
+  const integratingFactor = integratingFactorExp(integralP);
   const integralR = dSolveAntiderivative(
     integratingFactor.mul(r).simplify(),
     independentName
@@ -2549,7 +2628,7 @@ export function dSolve(
     solution = c.add(integral).simplify();
   } else {
     const integralP = dSolveAntiderivative(p, independentName);
-    const integratingFactor = ce.function('Exp', [integralP]).simplify();
+    const integratingFactor = integratingFactorExp(integralP);
     const weightedRhs = integratingFactor.mul(q).simplify();
     const integral = dSolveAntiderivative(weightedRhs, independentName);
     solution = c.add(integral).div(integratingFactor).simplify();

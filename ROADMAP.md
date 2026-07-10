@@ -343,14 +343,17 @@ first-order homogeneous `y′ = F(y/x)`, and exact `M dx + N dy = 0`), and
 initial/boundary conditions (solving the linear system for the integration
 constants). `NDSolve` provides fixed-step RK4 (scalar + higher-order reduction
 to systems). Unsupported forms stay **inert rather than wrong** — preserve that
-contract as coverage grows. Ranked next steps (good contributor territory):
+contract as coverage grows.
 
-- **Verification oracle + graded corpus.** Grade every solver path by
-  substituting the solution back into the equation and checking the residual
-  vanishes (symbolically or numerically) — the ODE analog of the
-  root-substitution oracle in `benchmarks/audit/solve.ts`. Add a CE-vs-SymPy
-  `dsolve` harness under `benchmarks/audit/` (update its README index),
-  seeded from SymPy's `test_ode.py` (BSD) or the Kamke collection.
+The CE-vs-SymPy audit harness (`benchmarks/audit/dsolve.ts` +
+`gen_dsolve.py`, substitute-back residual oracle, 51-case corpus seeded from
+SymPy's `test_ode.py`; landed 2026-07-10) grades **CE 46/51 correct, 0
+wrong** vs SymPy 50/51 — CE solves every case in its claimed classes. The
+five `unsupported` rows are the coverage frontier (SymPy solves four):
+**Riccati, Airy `y″ = x·y` (special-function solutions), variable-coefficient
+second order, nonhomogeneous Cauchy–Euler, repeated-eigenvalue linear
+systems.** Ranked next steps (good contributor territory):
+
 - **`NDSolve` numerics.** Adaptive stepping (RK45 / Dormand–Prince) with an
   error tolerance — fixed-step RK4 silently loses accuracy near rapid
   transients; expose first-order vector IVPs in the API (`rk4System` already
@@ -366,6 +369,11 @@ contract as coverage grows. Ranked next steps (good contributor territory):
   the characteristic-polynomial / root-multiplicity machinery for linear
   constant-coefficient recurrences, with an `rⁿ·n^k` basis instead of
   `e^{rx}·x^k`.)
+- **Small artifact from the audit:** the second derivative of `|u|`
+  produces a `Derivative(Sign, 1)` (Dirac) term that `.N()` leaves
+  unevaluated → `NaN` in numeric residual checks (it is 0 a.e.; the audit
+  oracle zeroes it at generic sample points). Either evaluate it to 0 away
+  from the singular set or introduce a proper `DiracDelta`.
 
 #### B13. Wester capability gaps — the skip ledger in `wester.test.ts`
 

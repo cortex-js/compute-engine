@@ -260,7 +260,6 @@ exports[`explain: golden solve explanations sin(x)=1/2: inverse trig with second
   "result": "[1/6 * pi,5/6 * pi]",
   "steps": [
     "solve.move-terms: sin(x) - 1/2 === 0",
-    "solve.clear-denominators: 2sin(x) - 1 === 0",
     "solve.sine: x === arcsin(1/2)",
     "solve.sine-second-branch: x === pi - arcsin(1/2)",
     "solve.roots: [x === 1/6 * pi,x === 5/6 * pi]",

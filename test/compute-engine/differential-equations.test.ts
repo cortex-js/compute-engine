@@ -1221,6 +1221,54 @@ describe('DSolve', () => {
     expect(implicit.toString()).toEqual(explicit.toString());
     expect(implicit.toString()).toMatchInlineSnapshot(`[y(x) === "c_1" * e^x]`);
   });
+
+  //
+  // A linear term spelled as a quotient, `y(x)/x`, must be recognized by the
+  // first-order linear path (audit case FL5); the integrating factor
+  // `e^{−ln|x|}` folds to `1/x` so the solution is closed-form.
+  //
+  test('recognizes a Divide-spelled linear coefficient: y′ − y/x = x', () => {
+    const solution = dsolve([
+      'Equal',
+      ['Subtract', ['D', ['y', 'x'], 'x'], ['Divide', ['y', 'x'], 'x']],
+      'x',
+    ]);
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === x^2 + "c_1" * x]`
+    );
+  });
+
+  //
+  // Nested-Subtract spelling: `Subtract(Subtract(y'', y'), y) = 0` must split
+  // into individual terms (flattenAddends), not stay inert.
+  //
+  test('recognizes nested-Subtract spelling: y″ − y′ − y = 0', () => {
+    const solution = dsolve([
+      'Equal',
+      [
+        'Subtract',
+        ['Subtract', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['D', ['y', 'x'], 'x']],
+        ['y', 'x'],
+      ],
+      0,
+    ]);
+    expect(solution.operator).toBe('List');
+    // Characteristic roots (1 ± √5)/2
+    expect(solution.toString()).toContain('sqrt(5)');
+  });
+
+  //
+  // The nonlinearity guard: a dependent-bearing denominator must NOT be
+  // treated as a linear coefficient.
+  //
+  test('y′/y = x stays inert (nonlinear quotient)', () => {
+    const inert = dsolve([
+      'Equal',
+      ['Divide', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+      'x',
+    ]);
+    expect(inert.operator).toBe('DSolve');
+  });
 });
 
 // On a *fresh* engine, the dependent function `y` is not yet known to be a

@@ -20,6 +20,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Operation audit** | `audit/audit.ts` | CE · SymPy · **Mathematica** | `audit/REPORT-audit.md` |
 | **Wester suite** | `audit/wester.ts` | CE · CE+R/F · SymPy · **Mathematica** | `audit/REPORT-wester.md` |
 | **Solving** | `audit/solve.ts` | CE · CE+Fungrim · SymPy · **Mathematica** | `audit/REPORT-solve.md` |
+| **ODE solving** | `audit/dsolve.ts` | CE · SymPy | `audit/REPORT-dsolve.md` |
 | **Kernel microbench** | `big-decimal/*` | CE · CE published · SymPy · mpmath | `big-decimal/BIGNUM-COMPARISON.md` |
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 
@@ -259,6 +260,8 @@ feed it, each writing its own report:
 | `audit/run_sympy_wester.py` | SymPy side of the Wester run. |
 | `audit/gen_solve.py` | Adapts SymPy's `test_solveset.py` (univariate) → `audit/solve_cases.json`, with SymPy's `solve()` outcome and vetted reference roots per case. |
 | `audit/solve.ts` | The **univariate solving** benchmark: runs **base CE / CE+Fungrim solve templates / SymPy / Mathematica**, graded by a root-substitution oracle → **`audit/REPORT-solve.md`**. |
+| `audit/gen_dsolve.py` | Defines the **ODE** corpus once as MathJSON (SymPy's `test_ode.py` classes + textbook ODEs), translates each to a SymPy ODE, runs `dsolve` (per-case timeout — some hang) and grades it by a numeric residual oracle → `audit/dsolve_cases.json`. |
+| `audit/dsolve.ts` | The **ODE-solving** benchmark: runs CE `DSolve` from source and grades it by a **substitute-back residual oracle** (explicit `y=f(x)`; implicit `F(x,y)=C` via the first-integral identity `y′=−F_x/F_y`; initial/boundary conditions) → **`audit/REPORT-dsolve.md`**. CE’s inert-rather-than-wrong contract is scored honestly: `unsupported` (expected inert) is separated from `gap` (should have solved). SymPy is the comparator (graded by the mirror oracle in `gen_dsolve.py`); Mathematica is not yet wired in. |
 
 The Mathematica side of all three is driven through the shared
 [`runners/run_wolfram_batch.mjs`](./runners/run_wolfram_batch.mjs) (one kernel
@@ -272,6 +275,7 @@ so a concrete sample root can be graded — the soundness check (`|residual| <
 python benchmarks/audit/gen.py && npx tsx benchmarks/audit/audit.ts   # hand-authored audit
 npx tsx benchmarks/audit/wester.ts                                     # Wester audit
 ./venv/bin/python3 benchmarks/audit/gen_solve.py && npx tsx benchmarks/audit/solve.ts  # univariate solving
+./venv/bin/python3 benchmarks/audit/gen_dsolve.py && npx tsx benchmarks/audit/dsolve.ts  # ODE solving
 ```
 
 **Grading** is by operation invariant, so no reference answers are needed:

@@ -1,0 +1,2444 @@
+{
+ "config": {
+  "constants": {
+   "c_1": 1.0,
+   "c_2": 2.0,
+   "c_3": 3.0,
+   "c_4": 5.0
+  },
+  "explicitPoints": [
+   0.35,
+   0.7,
+   1.1,
+   1.6,
+   2.0
+  ],
+  "implicitPoints": [
+   [
+    0.5,
+    1.3
+   ],
+   [
+    1.0,
+    0.7
+   ],
+   [
+    1.4,
+    1.9
+   ],
+   [
+    1.9,
+    1.1
+   ],
+   [
+    0.8,
+    2.2
+   ]
+  ],
+  "tol": 1e-07,
+  "minPoints": 4
+ },
+ "cases": [
+  {
+   "id": "FL1",
+   "class": "1st-linear",
+   "title": "y' = 3y",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Multiply",
+      3,
+      [
+       "y",
+       "x"
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*exp(3*x))"
+   }
+  },
+  {
+   "id": "FL2",
+   "class": "1st-linear",
+   "title": "y' + y = x",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     "x"
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*exp(-x) + x - 1)"
+   }
+  },
+  {
+   "id": "FL3",
+   "class": "1st-linear",
+   "title": "y' + 2xy = x (var-coeff)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Multiply",
+       2,
+       "x",
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ],
+     "x"
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*exp(-x**2) + 1/2)"
+   }
+  },
+  {
+   "id": "FL4",
+   "class": "1st-linear",
+   "title": "y' + (2/x)y = x (var-coeff)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Multiply",
+       [
+        "Divide",
+        2,
+        "x"
+       ],
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ],
+     "x"
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), (C1 + x**4/4)/x**2)"
+   }
+  },
+  {
+   "id": "FL5",
+   "class": "1st-linear",
+   "title": "y' \u2212 y/x = x (var-coeff, Divide)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Subtract",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Divide",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ]
+     ],
+     "x"
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), x*(C1 + x))"
+   }
+  },
+  {
+   "id": "FL6",
+   "class": "1st-linear",
+   "title": "y' + y = sin x",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "Sin",
+      "x"
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*exp(-x) + sin(x)/2 - cos(x)/2)"
+   }
+  },
+  {
+   "id": "FL7",
+   "class": "1st-linear",
+   "title": "y' = e^(\u2212x) \u2212 y",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Subtract",
+      [
+       "Exp",
+       [
+        "Negate",
+        "x"
+       ]
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), (C1 + x)*exp(-x))"
+   }
+  },
+  {
+   "id": "SP1",
+   "class": "separable",
+   "title": "y' = y",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "y",
+      "x"
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*exp(x))"
+   }
+  },
+  {
+   "id": "SP2",
+   "class": "separable",
+   "title": "y' = xy",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Multiply",
+      "x",
+      [
+       "y",
+       "x"
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*exp(x**2/2))"
+   }
+  },
+  {
+   "id": "SP3",
+   "class": "separable",
+   "title": "y' = x/y",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Divide",
+      "x",
+      [
+       "y",
+       "x"
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "[Eq(y(x), -sqrt(C1 + x**2)), Eq(y(x), sqrt(C1 + x**2))]"
+   }
+  },
+  {
+   "id": "SP4",
+   "class": "separable",
+   "title": "y' = y\u00b2",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Power",
+      [
+       "y",
+       "x"
+      ],
+      2
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), -1/(C1 + x))"
+   }
+  },
+  {
+   "id": "SP5",
+   "class": "separable",
+   "title": "y' = 1 + y\u00b2",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Add",
+      1,
+      [
+       "Power",
+       [
+        "y",
+        "x"
+       ],
+       2
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), -tan(C1 - x))"
+   }
+  },
+  {
+   "id": "HM1",
+   "class": "homogeneous",
+   "title": "y' = 1 + y/x",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Add",
+      1,
+      [
+       "Divide",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), x*(C1 + log(x)))"
+   }
+  },
+  {
+   "id": "HM2",
+   "class": "homogeneous",
+   "title": "y' = (x\u00b2+y\u00b2)/(xy)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Power",
+        "x",
+        2
+       ],
+       [
+        "Power",
+        [
+         "y",
+         "x"
+        ],
+        2
+       ]
+      ],
+      [
+       "Multiply",
+       "x",
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "[Eq(y(x), -x*sqrt(C1 + 2*log(x))), Eq(y(x), x*sqrt(C1 + 2*log(x)))]"
+   }
+  },
+  {
+   "id": "BN1",
+   "class": "bernoulli",
+   "title": "y' = y + xy\u00b2",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Add",
+      [
+       "y",
+       "x"
+      ],
+      [
+       "Multiply",
+       "x",
+       [
+        "Power",
+        [
+         "y",
+         "x"
+        ],
+        2
+       ]
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), exp(x)/(C1 - x*exp(x) + exp(x)))"
+   }
+  },
+  {
+   "id": "BN2",
+   "class": "bernoulli",
+   "title": "y' + y = xy\u00b3",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "Multiply",
+      "x",
+      [
+       "Power",
+       [
+        "y",
+        "x"
+       ],
+       3
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "[Eq(y(x), -sqrt(2)*sqrt(1/(C1*exp(2*x) + 2*x + 1))), Eq(y(x), sqrt(2)*sqrt(1/(C1*exp(2*x) + 2*x + 1)))]"
+   }
+  },
+  {
+   "id": "BN3",
+   "class": "bernoulli",
+   "title": "y' \u2212 y/x = y\u00b2",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Subtract",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Divide",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ]
+     ],
+     [
+      "Power",
+      [
+       "y",
+       "x"
+      ],
+      2
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), 2*x/(C1 - x**2))"
+   }
+  },
+  {
+   "id": "EX1",
+   "class": "exact",
+   "title": "2xy + y\u00b2 + (x\u00b2+2xy)y' = 0",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "x",
+       [
+        "y",
+        "x"
+       ]
+      ],
+      [
+       "Power",
+       [
+        "y",
+        "x"
+       ],
+       2
+      ],
+      [
+       "Multiply",
+       [
+        "Add",
+        [
+         "Power",
+         "x",
+         2
+        ],
+        [
+         "Multiply",
+         2,
+         "x",
+         [
+          "y",
+          "x"
+         ]
+        ]
+       ],
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "[Eq(y(x), x*(sqrt(C1/x**3 + 1) - 1)/2), Eq(y(x), x*(-sqrt(C1/x**3 + 1) - 1)/2)]"
+   }
+  },
+  {
+   "id": "EX2",
+   "class": "exact",
+   "title": "xy' + y = x\u00b2",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "Multiply",
+       "x",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "Power",
+      "x",
+      2
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), (C1 + x**3/3)/x)"
+   }
+  },
+  {
+   "id": "L2a",
+   "class": "linhom-2",
+   "title": "y'' \u2212 y = 0 (real distinct)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Subtract",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*exp(-x) + C2*exp(x))"
+   }
+  },
+  {
+   "id": "L2b",
+   "class": "linhom-2",
+   "title": "y'' + y = 0 (complex)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*sin(x) + C2*cos(x))"
+   }
+  },
+  {
+   "id": "L2c",
+   "class": "linhom-2",
+   "title": "y'' \u2212 2y' + y = 0 (repeated)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Multiply",
+       -2,
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), (C1 + C2*x)*exp(x))"
+   }
+  },
+  {
+   "id": "L2d",
+   "class": "linhom-2",
+   "title": "y'' \u2212 y' \u2212 y = 0 (irrational)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Negate",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Negate",
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*exp(x*(1 - sqrt(5))/2) + C2*exp(x*(1 + sqrt(5))/2))"
+   }
+  },
+  {
+   "id": "L2e",
+   "class": "linhom-2",
+   "title": "y'' \u2212 3y' + 2y = 0 (real distinct)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Multiply",
+       -3,
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), (C1 + C2*exp(x))*exp(x))"
+   }
+  },
+  {
+   "id": "L3a",
+   "class": "linhom-3",
+   "title": "y''' \u2212 6y'' + 11y' \u2212 6y = 0 (real)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Multiply",
+       -6,
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       11,
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       -6,
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), (C1 + C2*exp(x) + C3*exp(2*x))*exp(x))"
+   }
+  },
+  {
+   "id": "L3b",
+   "class": "linhom-3",
+   "title": "y''' \u2212 3y'' + 3y' \u2212 y = 0 (repeated)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Multiply",
+       -3,
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       3,
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Negate",
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), (C1 + x*(C2 + C3*x))*exp(x))"
+   }
+  },
+  {
+   "id": "L3c",
+   "class": "linhom-3",
+   "title": "y''' \u2212 y = 0 (complex pair)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Subtract",
+      [
+       "D",
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C3*exp(x) + (C1*sin(sqrt(3)*x/2) + C2*cos(sqrt(3)*x/2))*exp(-x/2))"
+   }
+  },
+  {
+   "id": "L4a",
+   "class": "linhom-4",
+   "title": "y'''' + 2y'' + y = 0 (repeated \u00b1i)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "D",
+         [
+          "D",
+          [
+           "y",
+           "x"
+          ],
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), (C1 + C2*x)*sin(x) + (C3 + C4*x)*cos(x))"
+   }
+  },
+  {
+   "id": "L4b",
+   "class": "linhom-4",
+   "title": "y'''' \u2212 2y''' + 2y'' \u2212 2y' + y = 0",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "D",
+         [
+          "D",
+          [
+           "y",
+           "x"
+          ],
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Multiply",
+       -2,
+       [
+        "D",
+        [
+         "D",
+         [
+          "D",
+          [
+           "y",
+           "x"
+          ],
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       -2,
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C3*sin(x) + C4*cos(x) + (C1 + C2*x)*exp(x))"
+   }
+  },
+  {
+   "id": "NH1",
+   "class": "nonhom",
+   "title": "y'' = 1 (poly)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      "x"
+     ],
+     1
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1 + C2*x + x**2/2)"
+   }
+  },
+  {
+   "id": "NH2",
+   "class": "nonhom",
+   "title": "y'' \u2212 y = x (poly forcing)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Subtract",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     "x"
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*exp(-x) + C2*exp(x) - x)"
+   }
+  },
+  {
+   "id": "NH3",
+   "class": "nonhom",
+   "title": "y'' \u2212 y = e\u02e3 (resonant exp)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Subtract",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "Exp",
+      "x"
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C2*exp(-x) + (C1 + x/2)*exp(x))"
+   }
+  },
+  {
+   "id": "NH4",
+   "class": "nonhom",
+   "title": "y'' + y = e\u02e3 (non-resonant exp)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "Exp",
+      "x"
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*sin(x) + C2*cos(x) + exp(x)/2)"
+   }
+  },
+  {
+   "id": "NH5",
+   "class": "nonhom",
+   "title": "y'' \u2212 y = e^(2x)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Subtract",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Multiply",
+       2,
+       "x"
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*exp(-x) + C2*exp(x) + exp(2*x)/3)"
+   }
+  },
+  {
+   "id": "NH6",
+   "class": "nonhom",
+   "title": "y'' + y = sin x (resonant)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "Sin",
+      "x"
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C2*sin(x) + (C1 - x/2)*cos(x))"
+   }
+  },
+  {
+   "id": "NH7",
+   "class": "nonhom",
+   "title": "y'' + 4y = sin x (non-resonant)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Multiply",
+       4,
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ],
+     [
+      "Sin",
+      "x"
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*sin(2*x) + C2*cos(2*x) + sin(x)/3)"
+   }
+  },
+  {
+   "id": "NH8",
+   "class": "nonhom",
+   "title": "y'' + y = tan x (variation of params)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "Tan",
+      "x"
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C2*sin(x) + (C1 + log(sin(x) - 1)/2 - log(sin(x) + 1)/2)*cos(x))"
+   }
+  },
+  {
+   "id": "CE1",
+   "class": "cauchy-euler",
+   "title": "x\u00b2y'' \u2212 2y = 0 (distinct)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Power",
+        "x",
+        2
+       ],
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1/x + C2*x**2)"
+   }
+  },
+  {
+   "id": "CE2",
+   "class": "cauchy-euler",
+   "title": "x\u00b2y'' + xy' = 0 (repeated)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Power",
+        "x",
+        2
+       ],
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       "x",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1 + C2*log(x))"
+   }
+  },
+  {
+   "id": "CE3",
+   "class": "cauchy-euler",
+   "title": "x\u00b2y'' + xy' + y = 0 (complex)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Power",
+        "x",
+        2
+       ],
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       "x",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     0
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*sin(log(x)) + C2*cos(log(x)))"
+   }
+  },
+  {
+   "id": "IV1",
+   "class": "ivp",
+   "title": "y' = y, y(0)=2",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "List",
+     [
+      "Equal",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "Equal",
+      [
+       "y",
+       0
+      ],
+      2
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), 2.0*exp(x))"
+   }
+  },
+  {
+   "id": "IV2",
+   "class": "ivp",
+   "title": "y'' = \u2212y, y(0)=0, y'(0)=1",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "List",
+     [
+      "Equal",
+      [
+       "D",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Negate",
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ],
+     [
+      "Equal",
+      [
+       "y",
+       0
+      ],
+      0
+     ],
+     [
+      "Equal",
+      [
+       "Apply",
+       [
+        "Derivative",
+        "y",
+        1
+       ],
+       0
+      ],
+      1
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), 1.0*sin(x))"
+   }
+  },
+  {
+   "id": "IV3",
+   "class": "ivp",
+   "title": "y' = x/y, y(0)=1 (separable IVP)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "List",
+     [
+      "Equal",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "Divide",
+       "x",
+       [
+        "y",
+        "x"
+       ]
+      ]
+     ],
+     [
+      "Equal",
+      [
+       "y",
+       0
+      ],
+      1
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), sqrt(x**2 + 1.0))"
+   }
+  },
+  {
+   "id": "IV4",
+   "class": "ivp",
+   "title": "exact IVP, y(1)=1",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "List",
+     [
+      "Equal",
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "x",
+        [
+         "y",
+         "x"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "y",
+         "x"
+        ],
+        2
+       ],
+       [
+        "Multiply",
+        [
+         "Add",
+         [
+          "Power",
+          "x",
+          2
+         ],
+         [
+          "Multiply",
+          2,
+          "x",
+          [
+           "y",
+           "x"
+          ]
+         ]
+        ],
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ]
+       ]
+      ],
+      0
+     ],
+     [
+      "Equal",
+      [
+       "y",
+       1
+      ],
+      1
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), x*(sqrt(1 + 8.0/x**3) - 1)/2)"
+   }
+  },
+  {
+   "id": "BV1",
+   "class": "bvp",
+   "title": "y'' + y = 0, y(0)=0, y(\u03c0/2)=1",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "List",
+     [
+      "Equal",
+      [
+       "Add",
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ],
+       [
+        "y",
+        "x"
+       ]
+      ],
+      0
+     ],
+     [
+      "Equal",
+      [
+       "y",
+       0
+      ],
+      0
+     ],
+     [
+      "Equal",
+      [
+       "y",
+       [
+        "Divide",
+        "Pi",
+        2
+       ]
+      ],
+      1
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), 1.0*sin(x))"
+   }
+  },
+  {
+   "id": "SY1",
+   "class": "system",
+   "title": "y'=z, z'=y (coupled linear)",
+   "expectInert": false,
+   "ce": {
+    "equation": [
+     "List",
+     [
+      "Equal",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "z",
+       "x"
+      ]
+     ],
+     [
+      "Equal",
+      [
+       "D",
+       [
+        "z",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ]
+    ],
+    "dependent": [
+     "y",
+     "z"
+    ],
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "[Eq(y(x), -C1*exp(-x) + C2*exp(x)), Eq(z(x), C1*exp(-x) + C2*exp(x))]"
+   }
+  },
+  {
+   "id": "BY1",
+   "class": "beyond",
+   "title": "y' = x + y\u00b2 (Riccati)",
+   "expectInert": true,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "y",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Add",
+      "x",
+      [
+       "Power",
+       [
+        "y",
+        "x"
+       ],
+       2
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "error",
+    "note": "TypeError: bad operand type for unary -: 'list'",
+    "verdict": "unsolved"
+   }
+  },
+  {
+   "id": "BY2",
+   "class": "beyond",
+   "title": "sin(x)y'' + y' = cos x (var-coeff 2nd order)",
+   "expectInert": true,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Sin",
+        "x"
+       ],
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ]
+     ],
+     [
+      "Cos",
+      "x"
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1 + Integral((C2 + Integral(sqrt(cos(x) - 1)/(sqrt(cos(x) + 1)*tan(x)), x))*sqrt(cos(x) + 1)/sqrt(cos(x) - 1), x))"
+   }
+  },
+  {
+   "id": "BY3",
+   "class": "beyond",
+   "title": "x\u00b2y'' + xy' = x (nonhomog Cauchy\u2013Euler)",
+   "expectInert": true,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Power",
+        "x",
+        2
+       ],
+       [
+        "D",
+        [
+         "D",
+         [
+          "y",
+          "x"
+         ],
+         "x"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       "x",
+       [
+        "D",
+        [
+         "y",
+         "x"
+        ],
+        "x"
+       ]
+      ]
+     ],
+     "x"
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1 + C2*log(x) + x)"
+   }
+  },
+  {
+   "id": "BY4",
+   "class": "beyond",
+   "title": "y''=xy (Airy, variable coeff)",
+   "expectInert": true,
+   "ce": {
+    "equation": [
+     "Equal",
+     [
+      "D",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Multiply",
+      "x",
+      [
+       "y",
+       "x"
+      ]
+     ]
+    ],
+    "dependent": "y",
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "Eq(y(x), C1*airyai(x) + C2*airybi(x))"
+   }
+  },
+  {
+   "id": "BY5",
+   "class": "beyond",
+   "title": "y'=y, z'=z (repeated eigenvalue system)",
+   "expectInert": true,
+   "ce": {
+    "equation": [
+     "List",
+     [
+      "Equal",
+      [
+       "D",
+       [
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "Equal",
+      [
+       "D",
+       [
+        "z",
+        "x"
+       ],
+       "x"
+      ],
+      [
+       "z",
+       "x"
+      ]
+     ]
+    ],
+    "dependent": [
+     "y",
+     "z"
+    ],
+    "independent": "x"
+   },
+   "sympy": {
+    "status": "ok",
+    "verdict": "correct",
+    "sol": "[Eq(y(x), C1*exp(x)), Eq(z(x), C2*exp(x))]"
+   }
+  }
+ ]
+}
