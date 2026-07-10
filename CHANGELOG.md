@@ -81,6 +81,18 @@
 
 ### Arithmetic
 
+- **New operator: `PolyLog` — the polylogarithm Liₛ(z).** Numeric
+  evaluation for integer order s ≥ 2 over the whole complex plane
+  (validated against mpmath to ≈5·10⁻¹⁵; branch cut z ∈ (1, ∞) with the
+  below-the-cut convention), and exact reductions for the elementary
+  orders and special points: `Li₁(z) → −ln(1−z)`, `Li₀(z) → z/(1−z)`,
+  `Li₋₁(z) → z/(1−z)²`, `Liₙ(1) → ζ(n)`, `Liₙ(−1) → (2^{1−n}−1)·ζ(n)`,
+  `Liₛ(0) → 0`. Parses and serializes as `\operatorname{Li}_s(z)` (the
+  unsubscripted `\operatorname{Li}`, conventionally the *offset*
+  logarithmic integral, is deliberately not claimed).
+- **`LogIntegral` now has its standard notation.** `\operatorname{li}(x)`
+  parses to `LogIntegral` and serializes back (previously the fallback
+  `\mathrm{LogIntegral}(x)`).
 - **Repeating decimals box as exact rationals.** A LaTeX repeating-decimal
   literal — vinculum (`0.\overline{3}`), dots
   (`0.\overset{.}{1}4285\overset{.}{7}`), parenthetical (`1.54(2345)`), or

@@ -1633,6 +1633,45 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       return '\\operatorname{K}' + serializer.wrapArguments(expr);
     },
   },
+  // Polylogarithm — the subscript is the order: `\operatorname{Li}_2(x)` is
+  // the dilogarithm PolyLog(2, x). A bare `\operatorname{Li}` (no subscript)
+  // is NOT claimed: by convention it denotes the *offset* logarithmic
+  // integral Li(x) = li(x) − li(2), which CE does not define (CE's
+  // `LogIntegral` is the principal-value li, `\operatorname{li}` below).
+  {
+    name: 'PolyLog',
+    latexTrigger: ['\\operatorname{Li}'],
+    kind: 'function',
+    parse: (parser: Parser) => {
+      if (!parser.match('_')) return null;
+      const order = parser.parseGroup() ?? parser.parseToken();
+      if (order === null) return null;
+      const args = parser.parseArguments('implicit');
+      if (args === null) return ['PolyLog', order];
+      return ['PolyLog', order, ...args];
+    },
+    serialize: (serializer, expr) => {
+      const order = operand(expr, 1);
+      const x = operand(expr, 2);
+      if (order !== null && x !== null) {
+        return (
+          '\\operatorname{Li}_{' +
+          serializer.serialize(order) +
+          '}' +
+          serializer.wrapArguments(['PolyLog', x])
+        );
+      }
+      return '\\operatorname{Li}' + serializer.wrapArguments(expr);
+    },
+  },
+  // Logarithmic integral li(x) (principal value; Ei(ln x))
+  {
+    name: 'LogIntegral',
+    latexTrigger: ['\\operatorname{li}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{li}' + serializer.wrapArguments(expr),
+  },
   // Airy functions
   {
     name: 'AiryAi',

@@ -1641,3 +1641,80 @@ describe('WAVE-4 NU-P1 numeric precision', () => {
     );
   });
 });
+
+describe('POLYLOGARITHM Liₙ(z)', () => {
+  // Reference values: mpmath polylog at 25 digits (the kernel-validation
+  // sweep lives with the implementation notes; worst error ≈ 5e-15).
+
+  test('machine kernel: real fast paths', () => {
+    // |z| ≤ 1/2 → direct series
+    expect(ce.box(['PolyLog', 2, 0.5]).N().re).toBeCloseTo(0.5822405264650125, 14);
+    expect(ce.box(['PolyLog', 3, 0.5]).N().re).toBeCloseTo(0.5372131936080402, 14);
+    // 1/2 < z < 1 → Crandall ln-expansion
+    expect(ce.box(['PolyLog', 2, 0.75]).N().re).toBeCloseTo(0.978469392930305, 13);
+  });
+
+  test('complex kernel: branch cut z ∈ (1, ∞), below-the-cut convention', () => {
+    // Li₂(2) = π²/4 − iπ ln 2 (mpmath convention: Im < 0 on the cut)
+    const v = ce.box(['PolyLog', 2, 2]).N();
+    expect(v.re).toBeCloseTo(Math.PI ** 2 / 4, 13);
+    expect(v.im).toBeCloseTo(-Math.PI * Math.LN2, 13);
+    // Inversion band, higher order
+    const w = ce.box(['PolyLog', 4, 2]).N();
+    expect(w.re).toBeCloseTo(2.4278628067547032, 13);
+    expect(w.im).toBeCloseTo(-0.17437130002545306, 13);
+  });
+
+  test('complex kernel: complex argument', () => {
+    // Li₂(i) = −π²/48 + i·Catalan
+    const v = ce.box(['PolyLog', 2, ['Complex', 0, 1]]).N();
+    expect(v.re).toBeCloseTo(-(Math.PI ** 2) / 48, 14);
+    expect(v.im).toBeCloseTo(0.915965594177219015, 14);
+  });
+
+  test('exact reductions', () => {
+    // Liₛ(0) = 0, any order (incl. symbolic)
+    expect(ce.box(['PolyLog', 's', 0]).evaluate().toString()).toBe('0');
+    // Li₁(z) = −ln(1 − z), Li₀(z) = z/(1−z), Li₋₁(z) = z/(1−z)²
+    expect(ce.box(['PolyLog', 1, 'z']).evaluate().latex).toBe('-\\ln(1-z)');
+    expect(ce.box(['PolyLog', 0, 'z']).evaluate().latex).toBe('\\frac{z}{1-z}');
+    expect(ce.box(['PolyLog', -1, 'z']).evaluate().latex).toBe(
+      '\\frac{z}{(1-z)^2}'
+    );
+    // Liₙ(±1)
+    expect(ce.box(['PolyLog', 3, 1]).evaluate().toString()).toBe('Zeta(3)');
+    expect(ce.box(['PolyLog', 2, -1]).evaluate().latex).toBe(
+      '\\frac{-\\pi^2}{12}'
+    );
+    // Exactness contract: inexact argument numericizes through the reduction
+    expect(ce.box(['PolyLog', 1, 0.5]).evaluate().re).toBeCloseTo(Math.LN2, 14);
+  });
+
+  test('stays symbolic outside the kernel domain', () => {
+    // Non-integer and symbolic orders have no kernel (n ≥ 2 only)
+    expect(ce.box(['PolyLog', 2.5, 0.5]).N().operator).toBe('PolyLog');
+    expect(ce.box(['PolyLog', 's', 0.5]).N().operator).toBe('PolyLog');
+  });
+
+  test('LaTeX: subscripted Li parses and serializes; bare Li untouched', () => {
+    expect(ce.parse('\\operatorname{Li}_2(x)').json).toEqual(['PolyLog', 2, 'x']);
+    expect(ce.parse('\\operatorname{Li}_{s}(x^2)').json).toEqual([
+      'PolyLog',
+      's',
+      ['Power', 'x', 2],
+    ]);
+    expect(ce.box(['PolyLog', 2, 'x']).latex).toBe('\\operatorname{Li}_{2}(x)');
+    // Bare `\operatorname{Li}` (offset log-integral, undefined in CE) is not
+    // claimed by the PolyLog entry.
+    expect(ce.parse('\\operatorname{Li}(x)').json).not.toContain('PolyLog');
+  });
+
+  test('LaTeX: LogIntegral ↔ \\operatorname{li}', () => {
+    expect(ce.parse('\\operatorname{li}(x)').json).toEqual(['LogIntegral', 'x']);
+    expect(ce.box(['LogIntegral', 'x']).latex).toBe('\\operatorname{li}(x)');
+    expect(ce.parse('\\operatorname{li}(2)').N().re).toBeCloseTo(
+      1.0451637801174927,
+      14
+    );
+  });
+});

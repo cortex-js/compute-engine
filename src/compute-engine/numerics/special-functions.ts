@@ -1678,6 +1678,61 @@ function zetaBorweinWeights(): [number[], number] {
   return ZETA_BORWEIN_CACHE;
 }
 
+/** Direct series Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ for real z, |z| ≲ 1/2. */
+function polylogSeriesReal(n: number, z: number): number {
+  let sum = 0;
+  let zk = 1;
+  for (let k = 1; k < 500; k++) {
+    zk *= z;
+    const term = zk / Math.pow(k, n);
+    sum += term;
+    if (Math.abs(term) < 1e-17 * (1 + Math.abs(sum))) break;
+  }
+  return sum;
+}
+
+/** Crandall's ln-expansion about z = 1 for real z ∈ (1/2, 1) (all real):
+ *  Liₙ(z) = L^{n−1}/(n−1)!·(H_{n−1} − ln(−L)) + Σ_{k≥0,k≠n−1} ζ(n−k) Lᵏ/k!,
+ *  L = ln z < 0. Converges for |L| < 2π. */
+function polylogLnExpReal(n: number, z: number): number {
+  const L = Math.log(z);
+  let H = 0;
+  for (let j = 1; j < n; j++) H += 1 / j;
+  const lnNegL = Math.log(-L); // −L > 0 for z < 1
+  let sum = 0;
+  let coef = 1; // Lᵏ/k!
+  for (let k = 0; k < 200; k++) {
+    const term = k === n - 1 ? coef * (H - lnNegL) : coef * zeta(n - k);
+    sum += term;
+    // ζ vanishes at the negative even integers (every other term is 0); break
+    // only on a small *non-zero* term.
+    const a = Math.abs(term);
+    if (k > n && a !== 0 && a < 1e-16 * (1 + Math.abs(sum))) break;
+    coef = (coef * L) / (k + 1);
+  }
+  return sum;
+}
+
+/**
+ * Polylogarithm Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ for integer order n ≥ 2 and real z.
+ *
+ * Returns a real value on the real-valued domain z ≤ 1 (fast paths for
+ * z ∈ [−1/2, 1]); returns NaN for z > 1 (genuinely complex — on the branch
+ * cut), for real z outside the fast-path range (z < −1/2, where ln z is
+ * complex), and for non-integer/order < 2. In every NaN case the caller
+ * (`applyN`) cascades to `polylogComplex`, which yields the correct value
+ * (real, with a negligible imaginary part, for real z < 1).
+ */
+export function polylog(n: number, z: number): number {
+  if (!Number.isInteger(n) || n < 2) return NaN;
+  if (Number.isNaN(z)) return NaN;
+  if (z === 0) return 0;
+  if (z === 1) return zeta(n);
+  if (z >= -0.5 && z <= 0.5) return polylogSeriesReal(n, z);
+  if (z > 0.5 && z < 1) return polylogLnExpReal(n, z);
+  return NaN; // |z| > 1 or z < −1/2 → complex kernel
+}
+
 /**
  * Lambert W function W₀(x): the principal branch satisfying W(x)·e^{W(x)} = x.
  * Uses Halley's method with appropriate initial guesses.

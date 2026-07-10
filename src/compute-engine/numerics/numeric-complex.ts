@@ -1,6 +1,7 @@
 import { Complex } from 'complex-esm';
 import './complex-esm-augment.js'; // adds the 1-arg `Complex.equals` overload
 import { bernoulliRational } from './bernoulli.js';
+import { zeta } from './special-functions.js';
 
 // Lanczos approximation coefficients (g = 7, n = 9), accurate to ~15 digits
 // for the principal branch. See Numerical Recipes / mathjs gamma().
@@ -223,6 +224,137 @@ export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
 
   // Small/moderate |z|: Γ(s) − γ(s,z) (lower Tricomi series, entire in z).
   return gamma(s).sub(lowerGammaSeriesComplex(s, z));
+}
+
+//
+// ---------------- Polylogarithm Liₙ(z), integer order n ≥ 2 (complex) ----
+//
+// Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ, analytically continued over the whole plane with
+// the standard branch cut along z ∈ (1, ∞) (mpmath's convention: the value
+// on the cut matches the limit from below, Im < 0). Three bands, mirroring
+// mpmath's `polylog`:
+//   - |z| ≤ 1/2                 → direct power series
+//   - 1/2 < |z| ≤ 1             → ln-expansion about z = 1 (Crandall), valid
+//                                 while |ln z| < 2π (always true on |z| ≤ 1)
+//   - |z| > 1                   → inversion to Liₙ(1/z) with a Bernoulli-
+//                                 polynomial term (below)
+// Non-integer order and order < 2 are out of scope (return NaN → the caller
+// keeps the expression symbolic).
+//
+
+/** kᵗʰ Bernoulli number Bₖ as a machine float (k small). */
+function bernoulliFloat(k: number): number {
+  const [num, den] = bernoulliRational(k);
+  return Number(num) / Number(den);
+}
+
+/** Binomial coefficient C(n, k) for small non-negative integers. */
+function binomialInt(n: number, k: number): number {
+  let r = 1;
+  for (let i = 0; i < k; i++) r = (r * (n - i)) / (i + 1);
+  return Math.round(r);
+}
+
+/** Bernoulli polynomial Bₙ(x) = Σ_{k=0}^n C(n,k) Bₖ x^{n−k}, complex x. */
+function bernoulliPolyComplex(n: number, x: Complex): Complex {
+  let result = C_ZERO;
+  for (let k = 0; k <= n; k++)
+    result = result.add(x.pow(n - k).mul(binomialInt(n, k) * bernoulliFloat(k)));
+  return result;
+}
+
+/** Direct series Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ (|z| ≲ 1/2). */
+function polylogSeriesComplex(n: number, z: Complex): Complex {
+  let sum = C_ZERO;
+  let zk: Complex = C_ONE;
+  for (let k = 1; k < 500; k++) {
+    zk = zk.mul(z);
+    const term = zk.div(Math.pow(k, n));
+    sum = sum.add(term);
+    if (term.abs() < 1e-17 * (1 + sum.abs())) break;
+  }
+  return sum;
+}
+
+/**
+ * Crandall's ln-expansion about z = 1 (DLMF 25.12.11, general s specialised
+ * to integer n): with L = ln z,
+ *   Liₙ(z) = L^{n−1}/(n−1)! · (H_{n−1} − ln(−L))
+ *            + Σ_{k≥0, k≠n−1} ζ(n−k) Lᵏ/k!
+ * Converges for |L| < 2π, i.e. everywhere on 1/2 < |z| ≤ 1.
+ */
+function polylogLnExpComplex(n: number, z: Complex): Complex {
+  const L = z.log();
+  // z = 1: L = 0. The singular term vanishes (L^{n−1} = 0 for n ≥ 2) and
+  // only the k = 0 term survives → Liₙ(1) = ζ(n). Guard the ln(−L) = −∞.
+  if (L.re === 0 && L.im === 0) return new Complex(zeta(n), 0);
+
+  // Harmonic number H_{n−1} = Σ_{j=1}^{n−1} 1/j.
+  let H = 0;
+  for (let j = 1; j < n; j++) H += 1 / j;
+  const lnNegL = L.neg().log(); // ln(−ln z)
+
+  let sum = C_ZERO;
+  let coef: Complex = C_ONE; // Lᵏ/k!, starting at k = 0
+  for (let k = 0; k < 200; k++) {
+    let term: Complex;
+    if (k === n - 1) term = coef.mul(new Complex(H, 0).sub(lnNegL));
+    else term = coef.mul(zeta(n - k));
+    sum = sum.add(term);
+    // ζ vanishes at the negative even integers, so every other term is exactly
+    // 0; break only on a small *non-zero* term (the non-zero terms decay
+    // geometrically, so the first tiny one is a safe stopping point).
+    const a = term.abs();
+    if (k > n && a !== 0 && a < 1e-16 * (1 + sum.abs())) break;
+    coef = coef.mul(L).div(k + 1); // advance to k+1
+  }
+  return sum;
+}
+
+/** Interior evaluation for |z| ≤ 1 (dispatches series vs ln-expansion). */
+function polylogInteriorComplex(n: number, z: Complex): Complex {
+  if (z.abs() <= 0.5) return polylogSeriesComplex(n, z);
+  return polylogLnExpComplex(n, z);
+}
+
+/**
+ * Inversion formula for |z| > 1 (DLMF 25.12.4, integer n):
+ *   Liₙ(z) = (−1)^{n−1} Liₙ(1/z) − (2πi)ⁿ/n! · Bₙ(1/2 + ln(−z)/(2πi))
+ * with the principal branch of ln(−z) (reproduces mpmath's below-the-cut
+ * value on z ∈ (1, ∞)).
+ */
+function polylogInversionComplex(n: number, z: Complex): Complex {
+  const twoPiI = new Complex(0, 2 * Math.PI);
+  // Principal ln(−z). Force +0 (not −0) imaginary for real z so that a
+  // point on the cut z ∈ (1, ∞) takes arg(−z) = +π, matching mpmath's
+  // below-the-cut (Im < 0) convention. (`z.neg()` yields −0 imaginary,
+  // which would pick −π and hand back the conjugate.)
+  const negZ = new Complex(-z.re, z.im === 0 ? 0 : -z.im);
+  const arg = new Complex(0.5, 0).add(negZ.log().div(twoPiI));
+  const bern = bernoulliPolyComplex(n, arg);
+  const inner = polylogInteriorComplex(n, z.inverse());
+  const sign = n % 2 === 0 ? -1 : 1; // (−1)^{n−1}
+  let nFact = 1;
+  for (let i = 2; i <= n; i++) nFact *= i;
+  return inner.mul(sign).sub(twoPiI.pow(n).div(nFact).mul(bern));
+}
+
+/**
+ * Polylogarithm Liₙ(z) for integer order n ≥ 2 and complex z (whole plane).
+ * Returns NaN for non-integer order, order < 2, or NaN input — the caller
+ * then keeps the expression symbolic. Accurate to ≈1e-12 or better across
+ * the plane (see the validation notes at the call site); the branch cut is
+ * z ∈ (1, ∞) with the below-the-cut (Im < 0) convention.
+ */
+export function polylogComplex(s: Complex, z: Complex): Complex {
+  if (s.isNaN() || z.isNaN()) return C_NAN;
+  if (s.im !== 0) return C_NAN;
+  const n = Math.round(s.re);
+  if (!Number.isInteger(s.re) || Math.abs(s.re - n) > 1e-12 || n < 2)
+    return C_NAN;
+  if (z.isZero()) return C_ZERO;
+  if (z.abs() > 1) return polylogInversionComplex(n, z);
+  return polylogInteriorComplex(n, z);
 }
 
 //

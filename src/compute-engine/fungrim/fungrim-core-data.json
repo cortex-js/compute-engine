@@ -123,7 +123,6 @@
 "ModularLambdaFundamentalDomain": {"signature":"set<complex>","description":"Fundamental domain of the modular lambda function"},
 "MultiZetaValue": {"signature":"(integer, integer) -> complex","description":"Multiple zeta value (MZV)","arity":[2,3]},
 "OpenDisk": {"signature":"(complex, real) -> set<complex>","description":null,"arity":2},
-"PolyLog": {"signature":"(complex, complex) -> complex","description":null,"arity":2},
 "Primes": {"signature":"set<integer>","description":"Prime numbers"},
 "PrimitiveDirichletCharacters": {"signature":"(integer) -> set","description":"Primitive Dirichlet characters with given modulus","arity":1},
 "RiemannXi": {"signature":"(complex) -> complex","description":null,"arity":1},

@@ -21,6 +21,7 @@ import {
   bigAgm,
   expIntegralEi,
   logIntegral,
+  polylog,
 } from '../numerics/special-functions.js';
 import {
   ellipticKComplex,
@@ -36,7 +37,9 @@ import {
   dedekindEta,
   eisensteinE,
   agmComplex,
+  polylogComplex,
 } from '../numerics/numeric-complex.js';
+import type { Expression, IComputeEngine } from '../global-types.js';
 
 /**
  * Tier-2 numeric kernels for special functions (ROADMAP item 4).
@@ -238,6 +241,41 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    PolyLog: {
+      description: 'Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ.',
+      wikidata: 'Q320067',
+      complexity: 8700,
+      signature: '(number, number) -> number',
+      // Liₛ(1) = ζ(s) is finite for s > 1 but a pole (value `~oo`, only
+      // representable by `number`) for s ≤ 1; likewise Li₀/Li₋₁ at z = 1.
+      type: ([s, z]) => {
+        if (
+          z?.isSame(1) === true &&
+          s !== undefined &&
+          isNumber(s) &&
+          s.im === 0 &&
+          s.re <= 1
+        )
+          return 'number';
+        return numericTypeHandler([s, z]);
+      },
+      evaluate: (ops, { numericApproximation, engine }) => {
+        const [s, z] = ops;
+        // Exact reductions (see `polylogReduce`). Evaluate the reduced form so
+        // an inexact argument still numericizes (exactness contract).
+        const reduced = polylogReduce(engine, s, z);
+        if (reduced !== undefined) return reduced.evaluate({ numericApproximation });
+
+        // Numeric kernel: integer order s ≥ 2 only (dilog/trilog/Li₄ …).
+        // Other orders have no kernel here → stay symbolic.
+        const sInt = asSmallInteger(s);
+        if (sInt === null || sInt < 2) return undefined;
+        return shouldNumericize(numericApproximation, s, z)
+          ? applyN([s, z], polylog, undefined, polylogComplex)
+          : undefined;
+      },
+    },
+
     Hypergeometric1F1: {
       description:
         'Kummer confluent hypergeometric function ₁F₁(a; b; z) = M(a, b, z).',
@@ -367,3 +405,53 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+/**
+ * Exact closed-form reductions for `PolyLog(s, z)`, or `undefined` when none
+ * applies (the numeric kernel then takes over). All identities are verified
+ * against mpmath. The returned expression is *unevaluated* — the caller
+ * evaluates it (so an inexact argument numericizes per the exactness
+ * contract).
+ *
+ *   Liₛ(0) = 0                 (any s)
+ *   Li₁(z)  = −ln(1 − z)
+ *   Li₀(z)  = z/(1 − z)
+ *   Li₋₁(z) = z/(1 − z)²
+ *   Liₙ(1)  = ζ(n)             (integer n ≥ 2)
+ *   Liₙ(−1) = (2^{1−n} − 1) ζ(n)   (integer n ≥ 2)
+ */
+function polylogReduce(
+  engine: IComputeEngine,
+  s: Expression,
+  z: Expression
+): Expression | undefined {
+  // Liₛ(0) = 0 (for any order).
+  if (isNumber(z) && z.im === 0 && z.isSame(0)) return engine.Zero;
+
+  const sInt = asSmallInteger(s);
+
+  // Order-specific elementary forms, valid for all z (symbolic or numeric).
+  const oneMinusZ = (): Expression =>
+    engine.function('Subtract', [engine.One, z]);
+  if (sInt === 1) return engine.function('Ln', [oneMinusZ()]).neg();
+  if (sInt === 0) return engine.function('Divide', [z, oneMinusZ()]);
+  if (sInt === -1)
+    return engine.function('Divide', [
+      z,
+      engine.function('Power', [oneMinusZ(), engine.number(2)]),
+    ]);
+
+  // z = ±1 with integer order n ≥ 2.
+  if (sInt !== null && sInt >= 2 && isNumber(z) && z.im === 0) {
+    if (z.isSame(1)) return engine.function('Zeta', [s]);
+    if (z.isSame(-1))
+      return engine.function('Multiply', [
+        engine.function('Subtract', [
+          engine.function('Power', [engine.number(2), engine.number(1 - sInt)]),
+          engine.One,
+        ]),
+        engine.function('Zeta', [s]),
+      ]);
+  }
+  return undefined;
+}
