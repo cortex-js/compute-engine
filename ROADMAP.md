@@ -894,26 +894,29 @@ adopted from the archived sources in `docs/reviews/2026-07-archive/`.
 **Stage-2 corpus audit findings (2026-07-10)** — the per-topic numeric sweep
 (all 57 topics, 120 s kill guard per topic; the two upstream formula bugs it
 caught — a172c7, b16177 — are fixed in the fork and PR'd) surfaced three
-engine/tooling items:
+engine/tooling items. The P1 deadline escape in the numeric limit prober and
+the `Count(Range(1, n))` collapse are **fixed** (compiled `Sum`/`Product`
+loops on the probe paths carry an `iterationBudget` and over-budget rungs
+read as NaN; the Richardson ladder checks the deadline between rungs and the
+`extrapolate` default `power` was corrected from 2 to 1, so
+`const_gamma/4644c0` and `pi/dea83d` now *converge* — γ to 1e-12, π to 1e-8 —
+in milliseconds; symbolic-bound `Range` handlers with an indeterminate
+channel now use it). What remains:
 
-- **Deadline escape in the numeric limit prober (P1).** `N()` of
-  `Limit@+∞` whose body contains a `Sum` with a variable-dependent bound
-  (`γ = lim (Hₙ − ln n)`, corpus `const_gamma/4644c0`; `π` via
-  `(4/n²)·Σ√(n²−k²)`, `pi/dea83d`) runs unbounded — >30 s with
-  `ce.timeLimit = 2000` (reproduced in isolation) — because the prober
-  substitutes astronomically large `n` and the summation loop runs in a
-  region that does not honor the engine deadline. This is a hole in the
-  interruptible-evaluation contract (ROADMAP item 2); until it is fixed,
-  full-corpus Stage-2 runs hang on these two entries (per-topic runs with
-  an external kill guard are the workaround).
-- **`Count(Range(1, n))` → `1` for symbolic `n`.** Should stay inert (or
-  return `n`); the wrong scalar is the `undefined → value` collapse class.
 - **Set-builder translation fidelity (corpus-side).** Fungrim
   comprehensions translate to a 3-operand literal `["Set", var,
   membership, condition]`, which CE counts as a 3-element literal set
   (corpus `gcd/4099d2` graded False from `Count` = 3). The translator
   should skip (or find a real encoding for) set-builder forms; CE-side
   semantics are arguably correct.
+- **Symbolic-bound `Range` iteration channel.** The `iterator` collection
+  handler (and thus materialization / `each()`) has no indeterminate
+  channel, so a symbolic `Range(1, n)` still iterates as the collapsed
+  `[1]` there (`range()` coerces a NaN bound to 1). The scalar-producing
+  handlers (`count`, `at`, `eq`, `subsetOf`, `eltsgn`) are guarded; fixing
+  iteration means deciding what `Reduce`/materialization over a
+  symbolic-bound collection should return (inert, most likely) before
+  un-coercing `range()` itself.
 
 Two design-level residues are deliberately carried forward:
 
