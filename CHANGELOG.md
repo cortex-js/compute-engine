@@ -23,6 +23,26 @@
   \psi^{(m+1)}(u)`. The `Gamma`/`Digamma` pole expansions themselves were
   rebuilt on closed-form coefficients (exp-of-log recurrence, harmonic-number
   sums) — `Series` at a `Digamma` pole is ~20× faster.
+- **Residues at infinity evaluate.** `Residue(f, x, \infty)` — any infinite
+  point names the Riemann-sphere point at infinity — computes
+  `-\operatorname{Res}_{s=0} f(1/s)/s^2` through the exact Laurent kernel:
+  `\operatorname{Res}_\infty 1/x = -1`,
+  `\operatorname{Res}_\infty \frac{3x^2+2}{x^3+x} = -3` (the negated sum of
+  the finite residues).
+- **Limits at poles resolve to signed infinities.** A *directional* limit at
+  a pole now evaluates to `\pm\infty` from the exact Laurent data:
+  `\lim_{x\to0^+} 1/x = +\infty`, `\lim_{x\to0^-}\Gamma(x) = -\infty`,
+  `\lim_{s\to1^\pm}\zeta(s) = \pm\infty`, `\lim_{x\to0^+}\ln x = -\infty`. A
+  *two-sided* limit resolves only when both sides agree (even pole order):
+  `\lim_{x\to0} 1/x^2 = +\infty`, `\Gamma(x)^2 \to +\infty`,
+  `\ln(x^2) \to -\infty`. Disagreeing two-sided limits (`\lim_{x\to0} 1/x`,
+  `\Gamma`, `\ln x` at their poles) deliberately stay inert — the engine
+  does not produce `ComplexInfinity` limits.
+- **`Beta` joins the meromorphic pole family.** The Laurent kernel expands
+  `\operatorname{B}(a,b)` through the `\Gamma`-quotient identity, so
+  residues, limits and `Series` at Beta poles evaluate:
+  `\operatorname{Res}_{x=0} \operatorname{B}(x,3) = 1`,
+  `\lim_{x\to0} x\cdot\operatorname{B}(x,3) = 1`.
 - **Numeric limits of sums converge instead of hanging.** `N()` of a `Limit`
   at `\infty` whose body contains a `Sum` with a variable-dependent bound ran
   an unbounded, uninterruptible loop — past any `ce.timeLimit` (the numeric
