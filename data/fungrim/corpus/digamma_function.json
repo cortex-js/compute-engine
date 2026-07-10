@@ -5398,7 +5398,8 @@
       ]
      ],
      [
-      "Digamma",
+      "PolyGamma",
+      "m",
       "x"
      ]
     ],
@@ -5418,7 +5419,8 @@
       ]
      ],
      [
-      "Digamma",
+      "PolyGamma",
+      "m",
       "x"
      ]
     ]
@@ -5469,7 +5471,6 @@
    "class": "logical",
    "subclass": null,
    "heads": [
-    "Digamma",
     "IsEven",
     "IsOdd",
     "PolyGamma"
