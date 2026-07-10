@@ -463,6 +463,21 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         const rowCount = shape.length === 1 ? 1 : shape[0];
         const columnCount = shape.length === 1 ? shape[0] : shape[1];
+
+        // Exact path: when every entry is an exact integer/rational, compute
+        // the null-space basis with exact rational arithmetic so the result is
+        // free of float artifacts. Floats-in → numeric path unchanged.
+        const rationalMatrix = tensorToRationalMatrix(op, rowCount, columnCount);
+        if (rationalMatrix) {
+          const basis = exactRationalNullSpaceBasis(rationalMatrix);
+          return ce.expr([
+            'List',
+            ...basis.map((vector) =>
+              ce.expr(['List', ...vector.map(([n, d]) => ce.number([n, d]))])
+            ),
+          ]);
+        }
+
         const matrix = tensorToNumericMatrix(op, rowCount, columnCount);
         if (!matrix) return undefined;
 
@@ -707,6 +722,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Interpret a vector as a 1×n matrix (linear form), as `Kernel` does.
         const rowCount = shape.length === 1 ? 1 : shape[0];
         const columnCount = shape.length === 1 ? shape[0] : shape[1];
+
+        // Exact path: for an exact integer/rational matrix, the rank is the
+        // number of pivots in the exact RREF (no tolerance ambiguity).
+        const rationalMatrix = tensorToRationalMatrix(op, rowCount, columnCount);
+        if (rationalMatrix) {
+          const { pivotCols } = exactRationalRref(rationalMatrix);
+          return ce.number(pivotCols.length);
+        }
+
         const matrix = tensorToNumericMatrix(op, rowCount, columnCount);
         if (!matrix) return undefined;
 
@@ -2207,6 +2231,48 @@ function dot(a: number[], b: number[]): number {
 }
 
 /**
+ * Compute an eigenvector for `lambda` using exact rational arithmetic, or
+ * `undefined` when the matrix or eigenvalue is not an exact rational (in which
+ * case the caller falls back to the numeric path).
+ *
+ * A − λI is exact when both M and λ are exact rationals; its null space is
+ * found from the exact RREF, and the first basis vector (free variable = 1,
+ * pivots back-substituted — the same convention as `Kernel`) is returned.
+ */
+function exactEigenvector(
+  M: Expression,
+  lambda: Expression,
+  n: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!isTensor(M)) return undefined;
+
+  // λ must be an exact rational (integers included).
+  if (!isNumber(lambda) || !lambda.isExact) return undefined;
+  const lam = asRational(lambda);
+  if (lam === undefined) return undefined;
+  const lambdaRat: BigRat = [
+    typeof lam[0] === 'bigint' ? lam[0] : BigInt(lam[0]),
+    typeof lam[1] === 'bigint' ? lam[1] : BigInt(lam[1]),
+  ];
+
+  // M must be an exact rational matrix.
+  const A = tensorToRationalMatrix(M, n, n);
+  if (!A) return undefined;
+
+  // Build A − λI exactly.
+  const AminusLambdaI: BigRat[][] = A.map((row, i) =>
+    row.map((v, j) => (i === j ? ratSub(v, lambdaRat) : v))
+  );
+
+  const basis = exactRationalNullSpaceBasis(AminusLambdaI);
+  if (basis.length === 0) return undefined;
+
+  const v = basis[0];
+  return ce.expr(['List', ...v.map(([num, den]) => ce.number([num, den]))]);
+}
+
+/**
  * Compute eigenvector for a given eigenvalue
  */
 function computeEigenvector(
@@ -2216,6 +2282,12 @@ function computeEigenvector(
   ce: ComputeEngine
 ): Expression | undefined {
   if (!isTensor(M)) return undefined;
+
+  // Exact path: when M and λ are both exact rationals, A − λI is exact, so the
+  // eigenvector (a null-space vector of A − λI) can be computed with exact
+  // fraction arithmetic. Irrational/complex λ falls through to the float path.
+  const exact = exactEigenvector(M, lambda, n, ce);
+  if (exact) return exact;
 
   const lambdaNum = lambda.re;
   if (lambdaNum === undefined || isNaN(lambdaNum)) {
@@ -2585,6 +2657,43 @@ function computeNullSpaceBasis(A: number[][]): number[][] {
     for (let row = 0; row < pivotCols.length; row++) {
       const pivotCol = pivotCols[row];
       vector[pivotCol] = -matrix[row][freeCol];
+    }
+    basis.push(vector);
+  }
+  return basis;
+}
+
+/**
+ * Return a basis of the null space of an exact rational matrix A as row
+ * vectors, computed with exact rational (fraction) arithmetic.
+ *
+ * Each basis vector corresponds to a free column of the exact RREF: that free
+ * variable is set to 1 and the pivot variables are back-substituted. This is
+ * the same "free variable = 1" convention as the numeric
+ * `computeNullSpaceBasis`, so the exact and float paths agree on the basis
+ * (the exact path just returns exact rationals instead of floats).
+ */
+function exactRationalNullSpaceBasis(matrix: BigRat[][]): BigRat[][] {
+  const colCount = matrix[0]?.length ?? 0;
+  if (colCount === 0) return [];
+
+  const { matrix: reduced, pivotCols } = exactRationalRref(matrix);
+  const pivotSet = new Set(pivotCols);
+  const freeCols: number[] = [];
+  for (let col = 0; col < colCount; col++)
+    if (!pivotSet.has(col)) freeCols.push(col);
+  if (freeCols.length === 0) return [];
+
+  const basis: BigRat[][] = [];
+  for (const freeCol of freeCols) {
+    const vector: BigRat[] = Array.from(
+      { length: colCount },
+      () => [0n, 1n] as BigRat
+    );
+    vector[freeCol] = [1n, 1n];
+    for (let row = 0; row < pivotCols.length; row++) {
+      const [n, d] = reduced[row][freeCol];
+      vector[pivotCols[row]] = [-n, d]; // v[pivotCol] = -reduced[row][freeCol]
     }
     basis.push(vector);
   }

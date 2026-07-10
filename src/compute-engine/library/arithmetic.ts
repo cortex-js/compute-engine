@@ -88,6 +88,8 @@ import {
   reduceBigOp,
   NON_ENUMERABLE_DOMAIN,
   classifyBigopDomain,
+  symbolicSumClosedForm,
+  symbolicProductClosedForm,
 } from './utils.js';
 import { inferContinuationPattern } from '../symbolic/interpret.js';
 import {
@@ -2661,13 +2663,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // infinite domain stays symbolic under exact evaluate (`.N()` owns
         // the truncated numeric path); free bounds/body are never enumerable.
         const numeric = options.numericApproximation;
-        const mode = classifyBigopDomain(ops[0], ops.slice(1), ce);
-        if (mode === 'symbolic') return undefined;
+        const bounds = ops.slice(1);
+        const mode = classifyBigopDomain(ops[0], bounds, ce);
+        if (mode === 'symbolic') {
+          if (bounds.length === 1)
+            return symbolicProductClosedForm(ops[0], bounds[0], ce);
+          return undefined;
+        }
         if (mode === 'numeric' && !numeric) return undefined;
         const result = run(
           reduceBigOp(
             ops[0],
-            ops.slice(1),
+            bounds,
             (acc: Expression, x) => {
               const xe = x.evaluate({ numericApproximation: numeric });
               return reducerElementError(acc, xe) ?? acc.mul(xe);
@@ -2687,15 +2694,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluateAsync: async (ops, options) => {
         const ce = options.engine;
         const numeric = options.numericApproximation;
+        const bounds = ops.slice(1);
         {
-          const mode = classifyBigopDomain(ops[0], ops.slice(1), ce);
-          if (mode === 'symbolic') return undefined;
+          const mode = classifyBigopDomain(ops[0], bounds, ce);
+          if (mode === 'symbolic') {
+            if (bounds.length === 1)
+              return symbolicProductClosedForm(ops[0], bounds[0], ce);
+            return undefined;
+          }
           if (mode === 'numeric' && !numeric) return undefined;
         }
         const result = await runAsync(
           reduceBigOp(
             ops[0],
-            ops.slice(1),
+            bounds,
             (acc: Expression, x) => {
               const xe = x.evaluate({ numericApproximation: numeric });
               return reducerElementError(acc, xe) ?? acc.mul(xe);
@@ -2765,7 +2777,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // enumerable, under either mode.
         const numeric = numericApproximation;
         const mode = classifyBigopDomain(first, rest, engine);
-        if (mode === 'symbolic') return undefined;
+        if (mode === 'symbolic') {
+          if (rest.length === 1)
+            return symbolicSumClosedForm(first, rest[0], engine);
+          return undefined;
+        }
         if (mode === 'numeric' && !numeric) return undefined;
         const result = run(
           reduceBigOp(
@@ -2814,7 +2830,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const numeric = numericApproximation;
         {
           const mode = classifyBigopDomain(first, rest, engine);
-          if (mode === 'symbolic') return undefined;
+          if (mode === 'symbolic') {
+            if (rest.length === 1)
+              return symbolicSumClosedForm(first, rest[0], engine);
+            return undefined;
+          }
           if (mode === 'numeric' && !numeric) return undefined;
         }
         const result = await runAsync(

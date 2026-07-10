@@ -320,7 +320,7 @@ describe('Sums and products', () => {
     );
   });
 
-  test.skip(`telescoping Sum(g(k+1) - g(k), k=0..n) => g(n+1) - g(0)`, () => {
+  test(`telescoping Sum(g(k+1) - g(k), k=0..n) => g(n+1) - g(0)`, () => {
     // CURRENT: stays symbolic (no telescoping detection).
     expect(
       ce
@@ -345,14 +345,14 @@ describe('Sums and products', () => {
     ).toEqual(['Add', ['Divide', ['Power', 'Pi', 2], 6], ['Zeta', 3]]);
   });
 
-  test.skip(`Product(k, k=1..n) => n!`, () => {
+  test(`Product(k, k=1..n) => n!`, () => {
     // CURRENT: stays symbolic (no closed form for products).
     expect(ce.expr(['Product', 'k', ['Tuple', 'k', 1, 'n']]).evaluate().json).toEqual(
       ['Factorial', 'n']
     );
   });
 
-  test.skip(`Product(1 + 1/k, k=1..n-1) => n`, () => {
+  test(`Product(1 + 1/k, k=1..n-1) => n`, () => {
     // CURRENT: stays symbolic (no telescoping product detection).
     expect(
       ce

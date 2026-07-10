@@ -394,10 +394,9 @@ separate tracking is needed. Grouped by theme:
   explicit `Expand` leaves `2^{1/3}·4^{2/3}` uncombined). Adjacent defect
   spotted 2026-07-09: `Expand` of that cube gives an expression whose
   `.N()` is `NaN` even though each term evaluates finitely.
-- **Sum/Product closed forms.** Telescoping detection for sums
-  (`Σ g(k+1)−g(k) → g(n+1)−g(0)`) and products (`Π (1+1/k) → n`); symbolic
-  products (`Π k → n!`); closed forms for classic infinite series and
-  products (`Σ 1/k²+1/k³ → π²/6+ζ(3)`, Wallis `→ 2/π`). Under the revised
+- **Sum/Product closed forms (telescoping sums/products and `Π k → n!`
+  LANDED 2026-07-10).** Remaining: closed forms for classic infinite series
+  and products (`Σ 1/k²+1/k³ → π²/6+ζ(3)`, Wallis `→ 2/π`). Under the revised
   EL-4 contract exact `evaluate()` stays symbolic on infinite domains and
   `.N()` owns the numeric path — but `.N()` is a plain 10⁴-term truncation
   (off by ~1e-4 for `Σ 1/k²`) and wants tail acceleration
@@ -412,10 +411,9 @@ separate tracking is needed. Grouped by theme:
 - **Assumptions.** Transitivity closure over a cycle of `≥` (Wester 21:
   `x≥y, y≥z, z≥x ⊢ x=z`) and monotonicity of `x²` on ordered positive reals
   (Wester 22: `x>y>0 ⊢ 2x²>2y²`).
-- **Linear algebra.** `NullSpace`/`Kernel`, `MatrixRank`'s rank-via-nullity
-  path, and the eigenvector null-space solver still run float Gaussian
-  elimination on exact input (`RowReduce` itself got the exact rational
-  path 2026-07-09 — extend the same treatment); `M·M⁻¹` not simplifying its
+- **Linear algebra (exact rational elimination extended to
+  `Kernel`/`MatrixRank`/eigenvectors 2026-07-10, joining `RowReduce`).**
+  Remaining: `M·M⁻¹` not simplifying its
   diagonal to `1` for a symbolic 2×2; elementwise `D` over matrix literals
   (the rotation-matrix second derivative currently yields a scalar `Add`);
   a matrix-valued `Add` fed unevaluated into `MatrixMultiply` is

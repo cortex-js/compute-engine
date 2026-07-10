@@ -114,6 +114,191 @@ export function classifyBigopDomain(
   return numericBody ? 'numeric' : 'symbolic';
 }
 
+/**
+ * Shift a body's index `k → k + 1`, returning the substituted expression.
+ */
+function shiftIndex(
+  expr: Expression,
+  index: string,
+  ce: ComputeEngine
+): Expression {
+  return expr.subs({ [index]: ce.box(['Add', index, 1]) });
+}
+
+/**
+ * Decompose a telescoping body `Add(a, b)` (exactly two terms, exactly one a
+ * `Negate`) into its positive and negative parts and the orientation:
+ *   - forward: body = t(k+1) − t(k)  (with `t = neg`), sums to t(b+1) − t(a)
+ *   - mirror:  body = t(k) − t(k+1)  (with `t = pos`), sums to t(a) − t(b+1)
+ * Both parts must depend on the index. Returns undefined if the body is not a
+ * `k → k+1` shift pair.
+ */
+function telescopingParts(
+  body: Expression,
+  index: string,
+  ce: ComputeEngine
+): { pos: Expression; neg: Expression; forward: boolean } | undefined {
+  if (!isFunction(body, 'Add') || body.ops.length !== 2) return undefined;
+
+  let pos: Expression | undefined;
+  let neg: Expression | undefined;
+  for (const t of body.ops) {
+    if (isFunction(t, 'Negate')) {
+      if (neg) return undefined; // two negated terms → not a telescoping pair
+      neg = t.op1;
+    } else {
+      if (pos) return undefined;
+      pos = t;
+    }
+  }
+  if (!pos || !neg) return undefined;
+
+  // Both parts must reference the index (guards against degenerate matches).
+  if (!new Set(pos.unknowns).has(index)) return undefined;
+  if (!new Set(neg.unknowns).has(index)) return undefined;
+
+  // forward: neg shifted by k→k+1 equals pos  ⇒ body = neg(k+1) − neg(k)
+  if (shiftIndex(neg, index, ce).isSame(pos)) return { pos, neg, forward: true };
+  // mirror: pos shifted by k→k+1 equals neg  ⇒ body = pos(k) − pos(k+1)
+  if (shiftIndex(pos, index, ce).isSame(neg))
+    return { pos, neg, forward: false };
+
+  return undefined;
+}
+
+/**
+ * Attempt a symbolic closed form for `Sum(body, [index, lower, upper])` when the
+ * domain is symbolic (free bounds). Currently handles telescoping sums:
+ *   Σ_{k=a}^{b} (g(k+1) − g(k)) = g(b+1) − g(a)   (and the mirror orientation).
+ * Returns undefined when no closed form applies (caller keeps it symbolic).
+ */
+export function symbolicSumClosedForm(
+  body: Expression | undefined,
+  limits: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!body || !isFunction(limits, 'Limits')) return undefined;
+  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+  const lower = limits.op2;
+  const upper = limits.op3;
+  if (!index || !lower || !upper) return undefined;
+
+  const tele = telescopingParts(body, index, ce);
+  if (tele) {
+    const { pos, neg, forward } = tele;
+    // Build a structural `Subtract` so the closed form stays readable
+    // (`g(b+1) − g(a)`) instead of folding to `Add(g(b+1), Negate(g(a)))`.
+    if (forward) {
+      // Σ (t(k+1) − t(k)) = t(b+1) − t(a), where t = neg (so pos = t(k+1)).
+      return ce.function(
+        'Subtract',
+        [pos.subs({ [index]: upper }), neg.subs({ [index]: lower })],
+        { structural: true }
+      );
+    }
+    // Σ (t(k) − t(k+1)) = t(a) − t(b+1), where t = pos (so neg = t(k+1)).
+    return ce.function(
+      'Subtract',
+      [pos.subs({ [index]: lower }), neg.subs({ [index]: upper })],
+      { structural: true }
+    );
+  }
+
+  return undefined;
+}
+
+/**
+ * Combine an expression into a single fraction `{ num, den }` without simplifying
+ * (safe to call from evaluate). Handles `Divide`, `Negate`, `Add`, `Multiply`;
+ * any other expression is returned as `expr / 1`.
+ */
+function asSingleFraction(
+  expr: Expression,
+  ce: ComputeEngine
+): { num: Expression; den: Expression } {
+  if (isFunction(expr, 'Divide')) return { num: expr.op1, den: expr.op2 };
+
+  if (isFunction(expr, 'Negate')) {
+    const f = asSingleFraction(expr.op1, ce);
+    return { num: ce.function('Negate', [f.num]), den: f.den };
+  }
+
+  if (isFunction(expr, 'Add')) {
+    let acc: { num: Expression; den: Expression } | undefined;
+    for (const t of expr.ops) {
+      const f = asSingleFraction(t, ce);
+      if (!acc) acc = f;
+      else {
+        // n1/d1 + n2/d2 = (n1·d2 + n2·d1)/(d1·d2)
+        acc = {
+          num: ce.function('Add', [
+            ce.function('Multiply', [acc.num, f.den]),
+            ce.function('Multiply', [f.num, acc.den]),
+          ]),
+          den: ce.function('Multiply', [acc.den, f.den]),
+        };
+      }
+    }
+    if (acc) return acc;
+  }
+
+  if (isFunction(expr, 'Multiply')) {
+    let num: Expression = ce.One;
+    let den: Expression = ce.One;
+    for (const t of expr.ops) {
+      const f = asSingleFraction(t, ce);
+      num = ce.function('Multiply', [num, f.num]);
+      den = ce.function('Multiply', [den, f.den]);
+    }
+    return { num, den };
+  }
+
+  return { num: expr, den: ce.One };
+}
+
+/**
+ * Attempt a symbolic closed form for `Product(body, [index, lower, upper])` when
+ * the domain is symbolic (free bounds). Handles:
+ *   - Π_{k=1}^{n} k = n!
+ *   - telescoping products: Π_{k=a}^{b} h(k+1)/h(k) = h(b+1)/h(a)
+ *     (and the mirror orientation Π h(k)/h(k+1) = h(a)/h(b+1)).
+ * Returns undefined when no closed form applies (caller keeps it symbolic).
+ */
+export function symbolicProductClosedForm(
+  body: Expression | undefined,
+  limits: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!body || !isFunction(limits, 'Limits')) return undefined;
+  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+  const lower = limits.op2;
+  const upper = limits.op3;
+  if (!index || !lower || !upper) return undefined;
+
+  // Π_{k=1}^{n} k = n!  (bare index, lower bound 1).
+  if (isSymbol(body) && body.symbol === index && lower.isSame(1))
+    return ce.function('Factorial', [upper]);
+
+  // Telescoping product: body = h(k+1)/h(k).
+  const { num, den } = asSingleFraction(body, ce);
+  if (new Set(num.unknowns).has(index) && new Set(den.unknowns).has(index)) {
+    // forward: den shifted by k→k+1 equals num ⇒ body = h(k+1)/h(k), h = den.
+    if (shiftIndex(den, index, ce).isSame(num))
+      return ce.function('Divide', [
+        num.subs({ [index]: upper }),
+        den.subs({ [index]: lower }),
+      ]);
+    // mirror: num shifted by k→k+1 equals den ⇒ body = h(k)/h(k+1), h = num.
+    if (shiftIndex(num, index, ce).isSame(den))
+      return ce.function('Divide', [
+        num.subs({ [index]: lower }),
+        den.subs({ [index]: upper }),
+      ]);
+  }
+
+  return undefined;
+}
+
 export type IndexingSet = {
   index: string | undefined;
   lower: number;

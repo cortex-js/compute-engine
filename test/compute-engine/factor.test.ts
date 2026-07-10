@@ -10,6 +10,7 @@ import {
   factorQuadratic,
   factorPolynomial,
   factorByRationalRoots,
+  together,
 } from '../../src/compute-engine/boxed-expression/factor';
 
 const ce = new ComputeEngine();
@@ -704,5 +705,38 @@ describe('Factor(xⁿ − 1) returns polynomial factors (ROADMAP B4)', () => {
     const f = factored('x^6 + 2x^3 + 1');
     expect(f.has('Abs')).toBe(false);
     expect(f.toString()).toBe('(x^3 + 1)^2');
+  });
+});
+
+// together()'s Add branch used to sum all numerators and all denominators
+// independently (a/b + c/d → (a+c)/(b+d), 1 + 1/k → 2/k). It must fold the
+// terms over a common denominator instead.
+describe('together() common-denominator fold', () => {
+  test('a/b + c/d → (ad + bc)/(bd)', () => {
+    const t = together(parse('\\frac{a}{b} + \\frac{c}{d}'));
+    expect(
+      t.isSame(
+        ce.expr([
+          'Divide',
+          ['Add', ['Multiply', 'a', 'd'], ['Multiply', 'b', 'c']],
+          ['Multiply', 'b', 'd'],
+        ])
+      )
+    ).toBe(true);
+  });
+
+  test('1 + 1/k → (k + 1)/k', () => {
+    const t = together(parse('1 + \\frac{1}{k}'));
+    expect(t.isSame(ce.expr(['Divide', ['Add', 'k', 1], 'k']))).toBe(true);
+  });
+
+  test('same denominator is reused: x/y + z/y → (x + z)/y', () => {
+    const t = together(parse('\\frac{x}{y} + \\frac{z}{y}'));
+    expect(t.isSame(ce.expr(['Divide', ['Add', 'x', 'z'], 'y']))).toBe(true);
+  });
+
+  test('a sum with no denominators is returned unchanged', () => {
+    const e = parse('x + y');
+    expect(together(e).isSame(e)).toBe(true);
   });
 });

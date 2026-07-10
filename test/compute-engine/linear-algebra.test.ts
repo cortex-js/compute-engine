@@ -2463,3 +2463,138 @@ describe('RowReduce', () => {
     ).toBe('[[1,0],[0,1]]');
   });
 });
+
+describe('Exact linear algebra (rational null space / rank / eigenvectors)', () => {
+  it('computes an exact rational kernel basis (no floats)', () => {
+    // [[1/2, 1, 3/2], [1, 2, 3]] has rank 1 (row 2 = 2·row 1), so a
+    // 2-dimensional null space. Free-variable = 1 convention.
+    expect(
+      ce
+        .expr([
+          'Kernel',
+          [
+            'List',
+            ['List', ['Rational', 1, 2], 1, ['Rational', 3, 2]],
+            ['List', 1, 2, 3],
+          ],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['List', -2, 1, 0], ['List', -3, 0, 1]]);
+  });
+
+  it('kernel basis vectors satisfy A·v = 0 exactly', () => {
+    const A: Expression = [
+      'List',
+      ['List', ['Rational', 1, 2], 1, ['Rational', 3, 2]],
+      ['List', 1, 2, 3],
+    ];
+    const basis = ce.expr(['Kernel', A]).evaluate();
+    for (const v of basis.ops!) {
+      const product = ce.expr(['MatrixMultiply', A, v]).evaluate();
+      expect(product.json).toEqual(['List', 0, 0]);
+    }
+  });
+
+  it('keeps integer kernel bases exact', () => {
+    // Rank 2, nullity 1.
+    expect(
+      ce
+        .expr([
+          'Kernel',
+          ['List', ['List', 1, 2, 3], ['List', 2, 4, 6], ['List', 1, 1, 1]],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['List', 1, -2, 1]]);
+  });
+
+  it('returns the full standard basis for the zero matrix kernel', () => {
+    expect(
+      ce
+        .expr(['Kernel', ['List', ['List', 0, 0], ['List', 0, 0]]])
+        .evaluate().json
+    ).toEqual(['List', ['List', 1, 0], ['List', 0, 1]]);
+  });
+
+  it('returns an empty kernel for an injective n×1 map', () => {
+    expect(
+      ce.expr(['Kernel', ['List', ['List', 2], ['List', 4]]]).evaluate().json
+    ).toEqual(['List']);
+  });
+
+  it('leaves the float kernel path unchanged for inexact input', () => {
+    // Genuinely inexact entries (1.5, 2.5) route through the numeric
+    // Gaussian-elimination path; row 2 = (5/3)·row 1, so nullity 1.
+    const result = ce
+      .expr(['Kernel', ['List', ['List', 1.5, 3.0], ['List', 2.5, 5.0]]])
+      .evaluate();
+    expect(result.toString()).toBe('[[-2,1]]');
+  });
+
+  it('computes exact rank via the exact RREF pivot count', () => {
+    expect(
+      ce
+        .expr([
+          'MatrixRank',
+          ['List', ['List', 1, 2, 3], ['List', 2, 4, 6], ['List', 1, 1, 1]],
+        ])
+        .evaluate().json
+    ).toBe(2);
+    // rank + nullity = number of columns (3 = 2 + 1)
+    const nullity = ce
+      .expr([
+        'Kernel',
+        ['List', ['List', 1, 2, 3], ['List', 2, 4, 6], ['List', 1, 1, 1]],
+      ])
+      .evaluate().ops!.length;
+    expect(2 + nullity).toBe(3);
+  });
+
+  it('computes rank of a rational matrix exactly', () => {
+    expect(
+      ce
+        .expr([
+          'MatrixRank',
+          [
+            'List',
+            ['List', ['Rational', 1, 2], ['Rational', 1, 3]],
+            ['List', 1, ['Rational', 2, 3]],
+          ],
+        ])
+        .evaluate().json
+    ).toBe(1);
+  });
+
+  it('computes exact eigenvectors of a diagonal integer matrix', () => {
+    expect(
+      ce
+        .expr(['Eigenvectors', ['List', ['List', 2, 0], ['List', 0, 3]]])
+        .evaluate().json
+    ).toEqual(['List', ['List', 1, 0], ['List', 0, 1]]);
+  });
+
+  it('computes exact eigenvectors of an integer matrix with integer eigenvalues', () => {
+    // [[4, 1], [2, 3]] has eigenvalues 5 and 2; eigenvectors come out exact.
+    expect(
+      ce
+        .expr(['Eigenvectors', ['List', ['List', 4, 1], ['List', 2, 3]]])
+        .evaluate().json
+    ).toEqual([
+      'List',
+      ['List', 1, 1],
+      ['List', ['Rational', -1, 2], 1],
+    ]);
+  });
+
+  it('exact eigenvectors satisfy A·v = λ·v', () => {
+    const A: Expression = ['List', ['List', 4, 1], ['List', 2, 3]];
+    const eigenvalues = ce.expr(['Eigenvalues', A]).evaluate().ops!;
+    const eigenvectors = ce.expr(['Eigenvectors', A]).evaluate().ops!;
+    for (let i = 0; i < eigenvectors.length; i++) {
+      const v = eigenvectors[i];
+      const lambda = eigenvalues[i];
+      const Av = ce.expr(['MatrixMultiply', A, v]).evaluate();
+      const lambdaV = ce.expr(['Multiply', lambda, v]).evaluate();
+      expect(Av.json).toEqual(lambdaV.json);
+    }
+  });
+});

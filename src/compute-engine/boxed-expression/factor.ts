@@ -39,17 +39,43 @@ export function together(op: Expression): Expression {
     if (h === 'Negate') return together(op.ops[0]).neg();
 
     if (h === 'Add') {
-      const [numer, denom] = op.ops.reduce(
-        (acc, x) => {
-          if (isFunction(x, 'Divide')) {
-            acc[0].push(x.ops[0]);
-            acc[1].push(x.ops[1]);
-          } else acc[0].push(x);
-          return acc;
-        },
-        [[], []] as Expression[][]
-      );
-      return add(...numer).div(add(...denom));
+      // Fold the terms over a common denominator:
+      // n₁/d₁ + n₂/d₂ = (n₁·d₂ + n₂·d₁)/(d₁·d₂), reusing d when d₁ = d₂.
+      let num: Expression | undefined = undefined;
+      let den: Expression | undefined = undefined;
+      let sawDenominator = false;
+      for (const term of op.ops) {
+        const t = together(term);
+        let tn = t;
+        let td: Expression | undefined = undefined;
+        if (isFunction(t, 'Divide')) {
+          [tn, td] = t.ops;
+          sawDenominator = true;
+        }
+        if (num === undefined) {
+          [num, den] = [tn, td];
+        } else if (td === undefined || den === undefined || td.isSame(den)) {
+          const common = den ?? td;
+          const scaledNum =
+            den === undefined && td !== undefined
+              ? ce.function('Multiply', [num, td])
+              : num;
+          const scaledTerm =
+            td === undefined && den !== undefined
+              ? ce.function('Multiply', [tn, den])
+              : tn;
+          num = ce.function('Add', [scaledNum, scaledTerm]);
+          den = common;
+        } else {
+          num = ce.function('Add', [
+            ce.function('Multiply', [num, td]),
+            ce.function('Multiply', [tn, den]),
+          ]);
+          den = ce.function('Multiply', [den, td]);
+        }
+      }
+      if (!sawDenominator || num === undefined || den === undefined) return op;
+      return ce.function('Divide', [num, den]);
     }
   }
 
