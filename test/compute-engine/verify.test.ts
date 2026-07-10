@@ -83,9 +83,10 @@ describe('VERIFY', () => {
     expect(ce.verify(ce.expr(['Equal', 'x', 0]))).toBe(undefined);
     expect(ce.verify(ce.expr(['NotEqual', 'x', 0]))).toBe(undefined);
 
-    // But when evaluated directly (not in verify), they return False/True
-    expect(ce.expr(['Equal', 'x', 0]).evaluate().symbol).toBe('False');
-    expect(ce.expr(['NotEqual', 'x', 0]).evaluate().symbol).toBe('True');
+    // When evaluated directly, undecidable comparisons stay inert
+    // (a condition, not a truth) — same 3-valued semantics as verify()
+    expect(ce.expr(['Equal', 'x', 0]).evaluate().operator).toBe('Equal');
+    expect(ce.expr(['NotEqual', 'x', 0]).evaluate().operator).toBe('NotEqual');
   });
 
   test('Less/Greater/LessEqual/GreaterEqual do not cause stack overflow', () => {
