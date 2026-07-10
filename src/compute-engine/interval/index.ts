@@ -112,6 +112,7 @@ import {
   or as _or,
   not as _not,
   piecewise as _piecewise,
+  restrict as _restrict,
   clamp as _clamp,
 } from './comparison.js';
 
@@ -218,6 +219,7 @@ export {
   or,
   not,
   piecewise,
+  restrict,
   clamp,
 } from './comparison.js';
 
@@ -330,5 +332,6 @@ export const IntervalArithmetic = {
   or: _or,
   not: _not,
   piecewise: _piecewise,
+  restrict: _restrict,
   clamp: _clamp,
 };

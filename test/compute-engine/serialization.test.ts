@@ -60,12 +60,14 @@ describe('JSON PROPERTY', () => {
     const expr = ce.parse('1.23456789e-400');
     expect(expr.json).toMatchObject({ num: '1.23456789e-400' });
   });
-  test(`Approximate numbers (repeating decimal)`, () => {
+  test(`Exact rationals (repeating decimal)`, () => {
     const expr = ce.parse('1.(2345)');
     expect(expr.json).toMatchInlineSnapshot(`
-      {
-        num: 1.2345234523452345234523452345234523452345234523452345234523452345234523452345234523452345234523452345,
-      }
+      [
+        Rational,
+        12344,
+        9999,
+      ]
     `);
   });
 });
@@ -73,7 +75,9 @@ describe('JSON PROPERTY', () => {
 describe('DEFAULT JSON SERIALIZATION', () => {
   // Nan, +Infinity, -Infinity are represented as symbols
   test(`Numeric symbols: Nan`, () =>
-    expect(ce.expr({ num: 'NaN' }).toMathJson({})).toMatchInlineSnapshot(`NaN`));
+    expect(ce.expr({ num: 'NaN' }).toMathJson({})).toMatchInlineSnapshot(
+      `NaN`
+    ));
   test(`Numeric symbols: +Infinity`, () =>
     expect(ce.expr({ num: '+infinity' }).toMathJson({})).toMatchInlineSnapshot(
       `PositiveInfinity`
@@ -122,16 +126,24 @@ describe('DEFAULT JSON SERIALIZATION', () => {
     const expr = ce.parse('1.23456789e-400');
     expect(expr.toMathJson({})).toMatchInlineSnapshot(`1.23456789e-400`);
   });
-  test(`Approximate numbers (repeating decimal)`, () => {
+  test(`Exact rationals (repeating decimal)`, () => {
     const expr = ce.parse('1.(2345)');
-    expect(expr.toMathJson({})).toMatchInlineSnapshot(`1.(2345)`);
+    expect(expr.toMathJson({})).toMatchInlineSnapshot(`
+      [
+        Rational,
+        12344,
+        9999,
+      ]
+    `);
   });
 });
 
 describe('CUSTOM JSON SERIALIZATION', () => {
   // Nan, +Infinity, -Infinity are represented as symbols
   test(`Numeric symbols: Nan`, () =>
-    expect(ce.expr({ num: 'NaN' }).toMathJson({})).toMatchInlineSnapshot(`NaN`));
+    expect(ce.expr({ num: 'NaN' }).toMathJson({})).toMatchInlineSnapshot(
+      `NaN`
+    ));
   test(`Numeric symbols: +Infinity`, () =>
     expect(ce.expr({ num: '+infinity' }).toMathJson({})).toMatchInlineSnapshot(
       `PositiveInfinity`
@@ -182,9 +194,15 @@ describe('CUSTOM JSON SERIALIZATION', () => {
     expect(expr.toMathJson({})).toMatchInlineSnapshot(`1.23456789e-400`);
   });
 
-  test(`Approximate numbers (repeating decimal)`, () => {
+  test(`Exact rationals (repeating decimal)`, () => {
     const expr = ce.parse('1.(2345)');
-    expect(expr.toMathJson({})).toMatchInlineSnapshot(`1.(2345)`);
+    expect(expr.toMathJson({})).toMatchInlineSnapshot(`
+      [
+        Rational,
+        12344,
+        9999,
+      ]
+    `);
   });
 
   // test(`Custom invisible multiply`, () => {
@@ -290,8 +308,9 @@ describe('toMathJson metadata option', () => {
     const expr = ce.symbol('Pi');
     // With shorthand allowed and no metadata, a symbol is shorthanded to a string
     const result = expr.toMathJson({ metadata: [] });
-    expect(typeof result === 'string' || (result as any).latex === undefined)
-      .toBe(true);
+    expect(
+      typeof result === 'string' || (result as any).latex === undefined
+    ).toBe(true);
   });
 });
 
@@ -418,9 +437,12 @@ describe('DISPLAY DIGITS', () => {
       const savedBD = BigDecimal.precision;
       try {
         ce.precision = 30;
-        expect(ce.parse('\\pi').N().toMathJson({ digits: { significant: 5 } })).toEqual(
-          '3.1416'
-        );
+        expect(
+          ce
+            .parse('\\pi')
+            .N()
+            .toMathJson({ digits: { significant: 5 } })
+        ).toEqual('3.1416');
       } finally {
         ce.precision = savedCE;
         BigDecimal.precision = savedBD;
@@ -476,6 +498,38 @@ describe('DISPLAY DIGITS', () => {
       expect(
         e.toMathJson({ digits: { significant: 3 }, fractionalDigits: 6 })
       ).toEqual('3.14');
+    });
+  });
+
+  // A bare number is not part of `DisplayDigits`, but it is an easy author
+  // mistake (and the exact shape of a mechanical `fractionalDigits: n` →
+  // `digits: n` migration), so it is accepted at runtime with the deprecated
+  // numeric convention: n ≥ 0 = fractional digits, n < 0 = significant
+  // digits. It previously crashed with `RangeError: The number NaN cannot be
+  // converted to a BigInt` on a bignum-precision engine (Tycho, 0.72.0).
+  describe('bare-number digits (Tycho 0.72.0 report)', () => {
+    test('digits: n rounds to n fractional digits on a bignum engine', () => {
+      expect(ce.parse('1/3').N().toLatex({ digits: 6 })).toEqual('0.333\\,333');
+    });
+
+    test('digits: -n rounds to n significant digits', () => {
+      expect(ce.parse('\\pi').N().toLatex({ digits: -4 })).toEqual('3.142');
+    });
+
+    test('digits: n matches { fractional: n }', () => {
+      const e = ce.parse('\\pi').N();
+      expect(e.toLatex({ digits: 2 })).toEqual(
+        e.toLatex({ digits: { fractional: 2 } })
+      );
+    });
+
+    test('an invalid digits shape is a validation error, not a crash', () => {
+      expect(() =>
+        ce
+          .parse('1/3')
+          .N()
+          .toLatex({ digits: { sig: 3 } })
+      ).toThrow(/Invalid `digits` option/);
     });
   });
 });

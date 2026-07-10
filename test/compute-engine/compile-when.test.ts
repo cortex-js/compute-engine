@@ -86,4 +86,57 @@ describe('COMPILE When', () => {
       expect(Number.isNaN(result.run!({ x: -1 }))).toBe(true);
     });
   });
+
+  // The interval comparisons return the tri-state string
+  // 'true' | 'false' | 'maybe' — all truthy, so the generic JS ternary can
+  // never mask. `When` must compile to the tri-state-aware `_IA.restrict`.
+  // (Tycho 0.72.0 restriction-brace probe, issue 1: an input interval
+  // entirely outside the condition returned a normal interval result.)
+  describe('interval-js target', () => {
+    const target = ce.getCompilationTarget('interval-js')!;
+
+    it('compiles When to _IA.restrict, not a bare ternary', () => {
+      const expr = ce.parse('\\sin(x)\\{x>0\\}');
+      const result = target.compile(expr);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('_IA.restrict(');
+    });
+
+    it('masks an input interval entirely outside the condition', () => {
+      const expr = ce.parse('\\sin(x)\\{x>0\\}');
+      const run = target.compile(expr).run!;
+      expect(run({ x: { lo: -2, hi: -1 } })).toEqual({ kind: 'empty' });
+    });
+
+    it('returns a normal interval entirely inside the condition', () => {
+      const expr = ce.parse('\\sin(x)\\{x>0\\}');
+      const run = target.compile(expr).run!;
+      const r = run({ x: { lo: 1, hi: 2 } }) as any;
+      expect(r.kind).toBe('interval');
+      expect(r.value.lo).toBeCloseTo(Math.sin(1), 12);
+      expect(r.value.hi).toBe(1);
+    });
+
+    it('reports a domain-clipped partial when the input straddles the boundary', () => {
+      const expr = ce.parse('\\sin(x)\\{x>0\\}');
+      const run = target.compile(expr).run!;
+      const r = run({ x: { lo: -1, hi: 1 } }) as any;
+      expect(r.kind).toBe('partial');
+      expect(r.domainClipped).toBe('both');
+    });
+
+    it('masks a comma-Or restriction (union of segments)', () => {
+      const expr = ce.parse('x\\{x>4, x<0\\}');
+      const run = target.compile(expr).run!;
+      expect(run({ x: { lo: 1, hi: 2 } })).toEqual({ kind: 'empty' });
+      expect((run({ x: { lo: 5, hi: 6 } }) as any).kind).toBe('interval');
+    });
+
+    it('masks stacked (And-combined) restrictions', () => {
+      const expr = ce.parse('x\\{x\\ge0\\}\\{x\\le1\\}');
+      const run = target.compile(expr).run!;
+      expect((run({ x: { lo: 0.2, hi: 0.5 } }) as any).kind).toBe('interval');
+      expect(run({ x: { lo: 2, hi: 3 } })).toEqual({ kind: 'empty' });
+    });
+  });
 });

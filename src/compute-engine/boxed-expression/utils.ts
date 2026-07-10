@@ -129,10 +129,57 @@ export function defaultUnknown(
   ...exprs: ReadonlyArray<Expression>
 ): string | undefined {
   const names = new Set<string>();
-  for (const e of exprs) for (const n of e.unknowns) names.add(n);
+  // The pipe topic placeholder `_` is never a valid unknown: in a deferred
+  // pipeline stage (`\rhd Solve` → `Function(Solve(_), _)`) the operand IS
+  // the placeholder at canonicalization time. Inferring it would bake `_`
+  // into the unknown slot, so applying the stage computes
+  // `Solve(expr, expr)` instead of `Solve(expr, x)`. Skipping it defers
+  // inference until the topic value has been substituted.
+  for (const e of exprs)
+    for (const n of e.unknowns) if (n !== '_') names.add(n);
   if (names.size === 1) return names.values().next().value;
   if (names.size > 1 && names.has('x')) return 'x';
   return undefined;
+}
+
+/**
+ * Operator heads whose evaluation is a pure expression-transformation step:
+ * the result is an expression in the same free variables — no symbol-value
+ * substitution, no relational collapse.
+ *
+ * A structural algorithm that *holds* its expression operand (`Solve`,
+ * `Integrate`, `Limit`, …) should reduce such a head before running:
+ * `Solve(Simplify(eq), x)` means "simplify, then solve", not "solve an
+ * expression whose operator is `Simplify`" (which finds no roots). This is
+ * how a multi-stage pipeline (`expr |> Simplify |> Solve`) reaches the
+ * algorithm.
+ *
+ * Deliberately NOT included:
+ * - `Evaluate` / `N`: they substitute assigned symbol values, which would
+ *   replace the very unknown being solved for;
+ * - relational/boolean heads: evaluating an `Equal` collapses it to a
+ *   boolean before the solver sees it;
+ * - `CanonicalForm`: taking `.canonical` already handles it.
+ */
+const TRANSFORMER_HEADS = new Set([
+  'Simplify',
+  'Expand',
+  'ExpandAll',
+  'Factor',
+  'Together',
+  'Distribute',
+  'TrigExpand',
+]);
+
+/**
+ * Reduce a held (already canonical) operand whose head is an
+ * expression-transformer (see `TRANSFORMER_HEADS`) so that a structural
+ * algorithm sees the transformed expression rather than the transformer
+ * call. Any other expression is returned unchanged.
+ */
+export function reduceTransformerHead(expr: Expression): Expression {
+  if (!TRANSFORMER_HEADS.has(expr.operator)) return expr;
+  return expr.evaluate();
 }
 
 export function normalizedUnknownsForSolve(

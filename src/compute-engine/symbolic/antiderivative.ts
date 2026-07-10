@@ -16,6 +16,7 @@ import {
   polynomialDivide,
 } from '../boxed-expression/polynomials.js';
 import { partialFraction } from '../boxed-expression/factor.js';
+import { reduceTransformerHead } from '../boxed-expression/utils.js';
 import {
   isFunction,
   isNumber,
@@ -2880,6 +2881,13 @@ export function antiderivative(fn: Expression, index: string): Expression {
     const inner = fn.evaluate();
     if (!isFunction(inner, 'Integrate')) return antiderivative(inner, index);
   }
+
+  // Same treatment for a transformer head (`∫ Simplify(f) dx`, e.g. from the
+  // pipeline `f |> Simplify |> Integrate`): the transformation is a
+  // computation step — integrate the transformed expression, not an opaque
+  // `Simplify` node.
+  const reduced = reduceTransformerHead(fn);
+  if (reduced !== fn) return antiderivative(reduced, index);
 
   // Is it the index?
   if (sym(fn) === index) return ce.expr(['Divide', ['Power', fn, 2], 2]);

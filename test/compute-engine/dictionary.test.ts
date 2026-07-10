@@ -565,3 +565,63 @@ describe('Dictionary structural equality (RT-P1-2)', () => {
     expect(engine.expr(dict.json).isSame(dict)).toBe(true);
   });
 });
+
+// Serialization must never re-enter the public `toMathJson()` boundary from
+// inside the serializer: `serializeJson()` used to route every
+// dictionary-*typed* expression (including symbols merely typed or valued
+// `dictionary`) back through `expr.toMathJson()`, which recursed forever and
+// re-tripped the digits/fractionalDigits deprecation warning on each pass
+// (Tycho 0.72.0 report: warning flood + stack overflow).
+describe('Dictionary serialization boundary (Tycho 0.72.0 report)', () => {
+  let ce: ComputeEngine;
+  beforeAll(() => {
+    ce = new ComputeEngine();
+  });
+
+  test('toMathJson() with no options resolves defaults', () => {
+    const dict = box(['Dictionary', ['Tuple', { str: 'a' }, 1]]);
+    expect(dict.toMathJson()).toEqual({ dict: { a: 1 } });
+  });
+
+  test('entry values serialize through the internal serializer, without deprecation warnings', () => {
+    const spy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const dict = box([
+        'Dictionary',
+        ['Tuple', { str: 'a' }, 1],
+        ['Tuple', { str: 'b' }, ['Add', 'x', 1]],
+      ]);
+      expect(dict.toMathJson({ shorthands: [] })).toEqual({
+        dict: {
+          a: { num: '1' },
+          b: { fn: ['Add', { sym: 'x' }, { num: '1' }] },
+        },
+      });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('a symbol bound to a dictionary value serializes as a symbol', () => {
+    const spy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      ce.assign(
+        'dictValProbe',
+        ce.box(['Dictionary', ['Tuple', { str: 'a' }, 1]])
+      );
+      // Previously: infinite recursion + a deprecation warning per pass.
+      expect(ce.box('dictValProbe').toMathJson()).toEqual('dictValProbe');
+      expect(ce.box('dictValProbe').latex).toEqual('\\mathrm{dictValProbe}');
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('a dictionary-typed symbol with no value serializes as a symbol', () => {
+    ce.declare('dictTypeProbe', 'dictionary');
+    expect(ce.box('dictTypeProbe').toMathJson()).toEqual('dictTypeProbe');
+    expect(ce.box('dictTypeProbe').latex).toEqual('\\mathrm{dictTypeProbe}');
+  });
+});

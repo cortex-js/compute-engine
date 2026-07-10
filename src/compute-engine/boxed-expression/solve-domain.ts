@@ -7,7 +7,7 @@ import type {
   Expression,
 } from '../global-types.js';
 import { isFunction, sym } from './type-guards.js';
-import { defaultUnknown } from './utils.js';
+import { defaultUnknown, reduceTransformerHead } from './utils.js';
 import { findUnivariateRoots } from './solve.js';
 import { getPolynomialCoefficients } from './polynomials.js';
 import { interval } from '../numerics/interval.js';
@@ -69,6 +69,15 @@ export function canonicalSolve(
     const unknown = defaultUnknown(ops[0]);
     if (unknown !== undefined)
       return ce._fn('Solve', [ops[0], ce.symbol(unknown)]);
+
+    // A pipe topic placeholder means this is a deferred pipeline stage
+    // (`\rhd Solve` → `Function(Solve(_), _)`): keep the arity-1 form so
+    // inference re-runs at evaluation, once the topic value is bound.
+    // Padding with a `missing` error here would make the stage invalid
+    // before it is ever applied. Checked with `has` (not `unknowns`): when
+    // the stage is applied, `_` is *bound* in the call scope (so it is no
+    // longer an unknown) but the operand is still the `_` symbol.
+    if (ops[0].has('_')) return ce._fn('Solve', [ops[0]]);
   }
 
   if (ops.length < 2) {
@@ -121,10 +130,39 @@ export function evaluateSolve(
   // `Equal`/predicate that still contains the free unknown stays symbolic (it
   // is *evaluation*, not canonicalization, that would collapse it), and the
   // downstream solver requires a canonical input.
-  const ceq = eq.canonical;
+  //
+  // A transformer head (`Solve(Simplify(eq), x)`, e.g. from the pipeline
+  // `eq |> Simplify |> Solve`) is then reduced so the solver sees the
+  // transformed expression — the solver finds no roots in an expression
+  // whose operator is `Simplify`. Full evaluation would be unsound here
+  // (relational collapse, unknown-value substitution) — see
+  // `reduceTransformerHead`.
+  let ceq = reduceTransformerHead(eq.canonical);
 
-  const specs = parseSolveSpecs(ops.slice(1));
+  let specs = parseSolveSpecs(ops.slice(1));
   if (specs === undefined) return undefined; // invalid spec → stay inert
+
+  // An arity-1 `Solve` is a deferred pipeline stage whose unknown-inference
+  // was postponed at canonicalization (the operand contained the pipe topic
+  // placeholder `_` — see `canonicalSolve`). If the stage has been applied,
+  // `_` is bound in the evaluation scope: resolve it to the actual piped
+  // expression, then infer the unknown from that. An unbound placeholder
+  // stays inert. (Evaluating a bare bound `_` returns its stored value
+  // without collapsing it — a symbolic `Equal` value survives. Note the
+  // lambda machinery pre-evaluates arguments *before* binding, so an
+  // `Equal` piped through the prefix form collapses to a boolean upstream
+  // of this function; that pre-existing limitation makes such a stage
+  // inert here — no unknown to infer from `False` — rather than wrong.)
+  if (specs.length === 0) {
+    if (ceq.has('_')) {
+      const resolved = ceq.evaluate();
+      if (resolved.has('_')) return undefined; // still unresolved → inert
+      ceq = reduceTransformerHead(resolved.canonical);
+    }
+    const unknown = defaultUnknown(ceq);
+    if (unknown === undefined) return undefined;
+    specs = [{ unknown }];
+  }
 
   const domainSpecs = specs.filter((s) => s.domain !== undefined);
 

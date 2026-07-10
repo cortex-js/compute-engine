@@ -36,7 +36,7 @@ import type {
   JsonSerializationOptions,
   DisplayDigits,
 } from '../global-types.js';
-import { isOperatorDef } from './utils.js';
+import { isDictionary, isOperatorDef } from './utils.js';
 import { isNumber, isSymbol, isString, isFunction } from './type-guards.js';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils.js';
 
@@ -654,7 +654,36 @@ function serializeRepeatingDecimals(
 function effectiveDigits(
   options: Readonly<JsonSerializationOptions>
 ): DisplayDigits {
-  if (options.digits !== undefined) return options.digits;
+  const d = options.digits as DisplayDigits | number | undefined;
+  if (d !== undefined) {
+    if (d === 'auto' || d === 'max') return d;
+    // A bare number is accepted (though not part of `DisplayDigits`) and
+    // follows the deprecated `fractionalDigits` numeric convention:
+    // n ≥ 0 = digits after the decimal point, n < 0 = total significant
+    // digits. Normalizing here keeps a mechanical `fractionalDigits: n` →
+    // `digits: n` migration working instead of crashing downstream.
+    if (typeof d === 'number' && Number.isFinite(d))
+      return d < 0
+        ? { significant: Math.max(1, Math.round(-d)) }
+        : { fractional: Math.round(d) };
+    if (typeof d === 'object' && d !== null) {
+      if (
+        'significant' in d &&
+        Number.isFinite(d.significant) &&
+        d.significant >= 1
+      )
+        return { significant: Math.round(d.significant) };
+      if (
+        'fractional' in d &&
+        Number.isFinite(d.fractional) &&
+        d.fractional >= 0
+      )
+        return { fractional: Math.round(d.fractional) };
+    }
+    throw new Error(
+      `Invalid \`digits\` option: ${JSON.stringify(d)}. Expected 'auto', 'max', { significant: n } with n ≥ 1, or { fractional: n } with n ≥ 0.`
+    );
+  }
   const fd = options.fractionalDigits;
   if (fd === 'auto' || fd === 'max') return fd;
   if (typeof fd === 'number')
@@ -1015,8 +1044,17 @@ export function serializeJson(
   // Is it a tensor?
   if (expr.rank > 0) return expr.json;
 
-  // Is it a dictionary?
-  if (expr.type.matches('dictionary')) return expr.toMathJson(options);
+  // Is it a dictionary *value*? (`isDictionary` is type-based, so a symbol
+  // merely *typed* `dictionary` matches too — it has no entries and must
+  // serialize as a symbol below. Re-entering the public `toMathJson()` here
+  // would recurse forever and re-trip its option-validation warnings.)
+  if (isDictionary(expr) && Array.isArray(expr.entries)) {
+    if (options.shorthands.includes('dictionary')) return expr.json;
+    const dict: Record<string, MathJsonExpression> = {};
+    for (const [key, value] of expr.entries)
+      dict[key] = serializeJson(ce, value, options);
+    return { dict };
+  }
 
   // Is it a string?
   if (isString(expr)) return serializeJsonString(expr.string, options);

@@ -145,4 +145,57 @@ describe('DEFAULT UNKNOWN INFERENCE', () => {
       expect(e.operator).toBe('PolynomialDegree');
     });
   });
+
+  // The pipe topic placeholder `_` is never a valid inferred unknown. In a
+  // deferred prefix-pipeline stage (`\rhd Solve` → `Function(Solve(_), _)`)
+  // the operand IS the placeholder at canonicalization time; inferring it
+  // baked `_` into the unknown slot, so applying the stage computed
+  // `Solve(expr, expr)` → `[0]` while the infix spelling returned `[-1]`.
+  // Inference is deferred: canonicalization keeps the arity-1 form, and
+  // `Solve` re-infers at evaluation once the topic value is bound.
+  // (Tycho 0.72.0 report: "Prefix pipeline: unknown-inference binds to the
+  // topic placeholder".)
+  describe('pipe topic placeholder `_` defers inference', () => {
+    const quad = ['Add', ['Power', 'x', 2], ['Multiply', 2, 'x'], 1];
+
+    test('Solve(_) stays arity-1 (minimal repro)', () => {
+      expect(ce.box(['Solve', '_']).json).toEqual(['Solve', '_']);
+    });
+
+    test('the prefix stage keeps a deferred body', () => {
+      expect(ce.parse('\\rhd\\operatorname{Solve}').json).toEqual([
+        'Function',
+        ['Block', ['Solve', '_']],
+        '_',
+      ]);
+    });
+
+    test('applying the prefix stage agrees with the infix spelling', () => {
+      const stage = ce.parse('\\rhd\\operatorname{Solve}').json;
+      const applied = ce.box(['Apply', stage, quad]).evaluate();
+      expect(applied.json).toEqual(['List', -1]);
+      expect(
+        ce.parse('x^2+2x+1\\rhd\\operatorname{Solve}').evaluate().json
+      ).toEqual(['List', -1]);
+    });
+
+    test('a hand-built deferred lambda works too', () => {
+      const applied = ce
+        .box(['Apply', ['Function', ['Solve', '_'], '_'], quad])
+        .evaluate();
+      expect(applied.json).toEqual(['List', -1]);
+    });
+
+    test('an unapplied Solve(_) evaluates to itself (inert)', () => {
+      expect(ce.box(['Solve', '_']).evaluate().json).toEqual(['Solve', '_']);
+    });
+
+    test('D(_) no longer bakes the placeholder into the variable slot', () => {
+      const e = ce.box(['D', '_']);
+      // Previously canonicalized to D(_, _) — the derivative of the topic
+      // with respect to itself. The exact deferred shape is unimportant;
+      // what must not come back is `_` in the variable slot.
+      expect((e.json as any[])[2]).not.toEqual('_');
+    });
+  });
 });

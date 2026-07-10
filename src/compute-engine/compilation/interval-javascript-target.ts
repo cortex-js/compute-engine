@@ -251,6 +251,15 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       () => ${compile(args[2])}
     )`;
   },
+  // Domain restriction: When(body, cond) → body where cond holds, empty
+  // where it doesn't. Must NOT fall through to the generic JS ternary: the
+  // interval comparisons return the tri-state string 'true'|'false'|'maybe',
+  // which is always truthy, so a ternary guard would never mask.
+  When: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error('When: expected 2 arguments (value, condition)');
+    return `_IA.restrict(${compile(args[1])}, () => ${compile(args[0])})`;
+  },
   Which: (args, compile) => {
     if (args.length < 2 || args.length % 2 !== 0)
       throw new Error(

@@ -203,6 +203,35 @@ export function piecewise(
 }
 
 /**
+ * Domain restriction (the `When` operator): the value where the condition
+ * holds, no value (`empty`) where it does not.
+ *
+ * The condition is a tri-state `BoolInterval` — a plain JS truthiness test
+ * would be unsound, since the strings `'true'`, `'false'` and `'maybe'` are
+ * all truthy.
+ *
+ * On `'maybe'` the input interval straddles the restriction boundary: the
+ * value is only attained on part of the input, so report the value range as
+ * domain-clipped (`partial`) rather than a clean interval (which would hide
+ * the domain edge) or a hard branch pick. `domainClipped: 'both'` is a
+ * conservative "some clipping occurred" — which end(s) of the input are
+ * outside the condition is not derivable from the tri-state alone.
+ */
+export function restrict(
+  cond: BoolInterval,
+  value: () => Interval | IntervalResult
+): IntervalResult {
+  if (cond === 'false') return { kind: 'empty' };
+  const v = toResult(value());
+  if (cond === 'true') return v;
+  // 'maybe'
+  if (v.kind === 'interval')
+    return { kind: 'partial', value: v.value, domainClipped: 'both' };
+  if (v.kind === 'partial') return { ...v, domainClipped: 'both' };
+  return v; // empty / singular / entire propagate unchanged
+}
+
+/**
  * Clamp an interval to a range.
  *
  * clamp(x, lo, hi) returns x clamped to [lo, hi].

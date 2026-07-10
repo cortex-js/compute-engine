@@ -5,7 +5,6 @@ import type {
   IComputeEngine as ComputeEngine,
   Metadata,
   DictionaryInterface,
-  JsonSerializationOptions,
 } from '../global-types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
@@ -137,19 +136,8 @@ export class BoxedDictionary
     };
   }
 
-  toMathJson(options: Readonly<JsonSerializationOptions>): MathJsonExpression {
-    if (options.shorthands.includes('dictionary')) {
-      const result = this.json;
-      return result;
-    }
-    if (this.isEmptyCollection) return { dict: {} };
-
-    const result: Record<string, MathJsonExpression> = {};
-    for (const [key, value] of this.entries)
-      result[key] = value.toMathJson(options);
-
-    return { dict: result };
-  }
+  // Note: `toMathJson()` is inherited from `_BoxedExpression`, which resolves
+  // default options and serializes dictionary entries via `serializeJson()`.
 
   get hash(): number {
     return hashCode('Dictionary' + JSON.stringify(this._keyValues));

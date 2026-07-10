@@ -57,31 +57,11 @@ function memberHead(name: string): string | null {
 }
 
 /**
- * Base-subscript numeral reading.
- *
- * A decimal numeral literal (`lhs`) subscripted by a single integer base ≥ 2
- * (`rhs`) denotes that numeral read in the given base, e.g. `10111_2` (binary
- * 23), `2748_{16}` (hex 10056), `235935623_{74}`. Returns the corresponding
- * `BaseForm(value, base)` expression — an existing numeric head that
- * participates in arithmetic — or `null` when the reading does not apply, in
- * which case the caller keeps the generic `Subscript` reading:
- *  - the base is not an integer literal ≥ 2 (e.g. symbolic `161_b`);
- *  - `lhs` is not a non-negative decimal integer numeral;
- *  - any digit of the numeral is not a valid digit for the base (`19_2`).
- *
- * The value is accumulated with `BigInt` so large numerals stay exact, and it
- * is boxed via the machine-number shorthand only when it fits exactly.
+ * Extract the decimal digit string of a non-negative decimal integer numeral
+ * `lhs` (a machine number or a big-integer `{num}` object), or `null` if it is
+ * not one. Shared by the literal-base and symbolic-base numeral readers.
  */
-function parseBaseFormNumeral(
-  lhs: MathJsonExpression,
-  rhs: MathJsonExpression
-): MathJsonExpression | null {
-  // Base must be an integer literal ≥ 2.
-  if (typeof rhs !== 'number' || !Number.isInteger(rhs) || rhs < 2) return null;
-  const base = rhs;
-
-  // The numeral must be a non-negative decimal integer literal. Extract its
-  // decimal digit string (from a machine number or a big-integer `{num}`).
+function baseFormDecimalDigits(lhs: MathJsonExpression): string | null {
   let digits: string | null = null;
   if (typeof lhs === 'number') {
     if (Number.isSafeInteger(lhs) && lhs >= 0) digits = lhs.toString();
@@ -95,6 +75,75 @@ function parseBaseFormNumeral(
     if (/^[0-9]+$/.test(num)) digits = num;
   }
   if (digits === null || !/^[0-9]+$/.test(digits)) return null;
+  return digits;
+}
+
+/**
+ * Base-subscript numeral reading.
+ *
+ * A decimal numeral literal (`lhs`) subscripted by a base (`rhs`) denotes that
+ * numeral read in the given base. Two cases are handled:
+ *
+ *  - **Integer base ≥ 2** (`10111_2` → binary 23, `2748_{16}` → hex 10056,
+ *    `235935623_{74}`): returns `BaseForm(value, base)`, where `value` is the
+ *    concrete integer. The value is accumulated with `BigInt` so large
+ *    numerals stay exact, and boxed via the machine-number shorthand only when
+ *    it fits exactly.
+ *  - **Symbol base** (`161_b`, `161_{b}`): returns `BaseForm(poly, b)`, where
+ *    `poly` is the positional expansion of the digits as a polynomial in the
+ *    base symbol (`161_b` → `b² + 6·b + 1`). The polynomial fills the value
+ *    slot, so the wrapper still participates in arithmetic, while the base
+ *    symbol lets the serializer reconstruct the `digits_{b}` numeral.
+ *
+ * Returns `null` when neither reading applies, in which case the caller keeps
+ * the generic `Subscript` reading:
+ *  - the base is neither an integer literal ≥ 2 nor a symbol;
+ *  - `lhs` is not a non-negative decimal integer numeral;
+ *  - any digit of the numeral is not a valid digit for an integer base
+ *    (`19_2`).
+ */
+function parseBaseFormNumeral(
+  lhs: MathJsonExpression,
+  rhs: MathJsonExpression
+): MathJsonExpression | null {
+  // Symbol base: `161_b` / `161_{b}` → BaseForm(digit polynomial, b).
+  // (An integer literal ≥ 2 is handled by the concrete-base path below.)
+  if (!(typeof rhs === 'number' && Number.isInteger(rhs) && rhs >= 2)) {
+    const baseSym = symbol(rhs);
+    if (baseSym === null || baseSym === 'Nothing') return null;
+
+    const digits = baseFormDecimalDigits(lhs);
+    if (digits === null) return null;
+
+    // Positional expansion in descending powers, skipping zero digits.
+    // digit d at index i (0 = most significant) has power k = len-1-i.
+    const terms: MathJsonExpression[] = [];
+    const len = digits.length;
+    for (let i = 0; i < len; i++) {
+      const d = digits.charCodeAt(i) - 48;
+      if (d === 0) continue;
+      const k = len - 1 - i;
+      if (k === 0) {
+        terms.push(d);
+      } else if (k === 1) {
+        terms.push(d === 1 ? baseSym : ['Multiply', d, baseSym]);
+      } else {
+        const pow: MathJsonExpression = ['Power', baseSym, k];
+        terms.push(d === 1 ? pow : ['Multiply', d, pow]);
+      }
+    }
+
+    const poly: MathJsonExpression =
+      terms.length === 0 ? 0 : terms.length === 1 ? terms[0] : ['Add', ...terms];
+
+    return ['BaseForm', poly, baseSym];
+  }
+
+  // Integer base ≥ 2.
+  const base = rhs;
+
+  const digits = baseFormDecimalDigits(lhs);
+  if (digits === null) return null;
 
   // Every digit must be a valid digit for the base.
   const bigBase = BigInt(base);
@@ -133,6 +182,86 @@ function baseFormBigintValue(
     if (/^[+-]?[0-9]+$/.test(s)) return BigInt(s);
   }
   return null;
+}
+
+/**
+ * Symbolic-base numeral reconstruction (serialize side).
+ *
+ * Given the value slot `poly` of a `BaseForm(poly, b)` whose base is the symbol
+ * `baseSym`, recover the decimal digit string of the numeral if `poly` is the
+ * positional expansion of a numeral in `baseSym` — a polynomial in `baseSym`
+ * whose coefficients are all integers 0–9 and whose degree is ≤ 40. Returns the
+ * digit string (e.g. `b² + 6·b + 1` → `"161"`), or `null` when `poly` is not
+ * such an expansion, in which case the caller falls back to the functional
+ * form. This is the inverse of the symbol-base branch of
+ * `parseBaseFormNumeral`.
+ */
+function baseFormSymbolicDigits(
+  poly: MathJsonExpression | null | undefined,
+  baseSym: string
+): string | null {
+  if (poly === null || poly === undefined) return null;
+
+  const terms: MathJsonExpression[] =
+    operator(poly) === 'Add' ? [...operands(poly)] : [poly];
+
+  const coeffByDegree = new Map<number, number>();
+  for (const term of terms) {
+    let coeff: number;
+    let degree: number;
+
+    // Degree of a `baseSym`-power factor, or null if it is not one. Handles
+    // the bare symbol (`b`), `Square(b)` (the MathJSON serialization of
+    // `Power(b, 2)`), and `Power(b, n)`.
+    const powerDegree = (e: MathJsonExpression): number | null => {
+      if (symbol(e) === baseSym) return 1;
+      if (operator(e) === 'Square' && symbol(operand(e, 1)) === baseSym)
+        return 2;
+      if (operator(e) === 'Power' && symbol(operand(e, 1)) === baseSym) {
+        const n = machineValue(operand(e, 2));
+        return n === null ? null : n;
+      }
+      return null;
+    };
+
+    const s = symbol(term);
+    if (s !== null) {
+      // A bare symbol term: must be the base symbol (degree 1, coefficient 1).
+      if (s !== baseSym) return null;
+      coeff = 1;
+      degree = 1;
+    } else if (operator(term) === 'Power' || operator(term) === 'Square') {
+      const deg = powerDegree(term);
+      if (deg === null) return null;
+      coeff = 1;
+      degree = deg;
+    } else if (operator(term) === 'Multiply') {
+      const args = [...operands(term)];
+      if (args.length !== 2) return null;
+      const k = machineValue(args[0]);
+      if (k === null) return null;
+      coeff = k;
+      const deg = powerDegree(args[1]);
+      if (deg === null) return null;
+      degree = deg;
+    } else {
+      // A numeric literal (the constant term).
+      const v = machineValue(term);
+      if (v === null) return null;
+      coeff = v;
+      degree = 0;
+    }
+
+    if (!Number.isInteger(coeff) || coeff < 0 || coeff > 9) return null;
+    if (!Number.isInteger(degree) || degree < 0 || degree > 40) return null;
+    if (coeffByDegree.has(degree)) return null; // Not a canonical expansion.
+    coeffByDegree.set(degree, coeff);
+  }
+
+  const maxDeg = Math.max(0, ...coeffByDegree.keys());
+  let digits = '';
+  for (let k = maxDeg; k >= 0; k--) digits += String(coeffByDegree.get(k) ?? 0);
+  return digits;
 }
 
 /**
@@ -230,6 +359,52 @@ function parseComponentAccess(
 //   - trigger ['\\left', '\\{']  → close ['\\right', '\\}']
 //   - trigger ['\\{']            → close ['\\}']
 //
+
+/** The comma elements of a brace group: `a, b` parses to
+ * `["Delimiter", ["Sequence", a, b], "','"]`. A single element is returned
+ * as a one-element list. */
+function braceGroupElements(
+  expr: MathJsonExpression
+): ReadonlyArray<MathJsonExpression> {
+  let seq = expr;
+  if (operator(seq) === 'Delimiter') seq = operand(seq, 1) ?? seq;
+  if (operator(seq) === 'Sequence') return operands(seq);
+  return [expr];
+}
+
+/** Is this a condition on its own (relational/logical), i.e. the Desmos
+ * piecewise shorthand for `cond: 1`? */
+function isBraceCondition(expr: MathJsonExpression): boolean {
+  const op = operator(expr);
+  return (
+    isInequalityOperator(op) ||
+    isEquationOperator(op) ||
+    ['And', 'Or', 'Not', 'Element', 'NotElement'].includes(op)
+  );
+}
+
+/** Build the flat `Which` clause list (`c1, v1, c2, v2, …, True, else?`) for
+ * a Desmos piecewise brace group (`{c1: v1, …}` with an optional trailing
+ * bare else value). Returns `null` if the elements don't fit that shape. */
+function whichClausesFromBraceGroup(
+  elements: ReadonlyArray<MathJsonExpression>
+): MathJsonExpression[] | null {
+  const clauses: MathJsonExpression[] = [];
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (operator(el) === 'Colon' && nops(el) === 2) {
+      clauses.push(operand(el, 1)!, operand(el, 2)!);
+    } else if (isBraceCondition(el)) {
+      // A bare condition is shorthand for `cond: 1`.
+      clauses.push(el, 1);
+    } else if (i === elements.length - 1) {
+      // A trailing bare value is the else branch.
+      clauses.push('True', el);
+    } else return null;
+  }
+  return clauses;
+}
+
 function parseWhenRestriction(
   parser: Parser,
   lhs: MathJsonExpression,
@@ -254,6 +429,29 @@ function parseWhenRestriction(
   if (!parser.matchBoundary()) {
     parser.removeBoundary();
     return null;
+  }
+
+  // Desmos brace-group semantics (beyond the single-condition restriction):
+  //
+  // - `expr\{c1: v1, c2: v2\}` is a piecewise *value selector*: a brace group
+  //   is a first-class value in Desmos ({cond} ≡ {cond: 1}), attached by
+  //   juxtaposition — i.e. multiplication. Lower to
+  //   `Multiply(expr, Which(c1, v1, c2, v2, …))`; a trailing bare value is
+  //   the else branch (`True` clause), and a bare condition means `cond: 1`.
+  //
+  // - `expr\{c1, c2\}` (comma, no colons): each element is shorthand for
+  //   `cond: 1`, evaluated first-match — the expression is defined where ANY
+  //   condition holds. Comma combines as a union (`Or`), unlike *stacked*
+  //   braces which AND-combine.
+  const elements = braceGroupElements(cond);
+  if (elements.length > 1 || operator(elements[0]) === 'Colon') {
+    if (elements.some((el) => operator(el) === 'Colon')) {
+      const clauses = whichClausesFromBraceGroup(elements);
+      if (clauses !== null)
+        return ['Multiply', lhs, ['Which', ...clauses]] as MathJsonExpression;
+    } else if (elements.every(isBraceCondition)) {
+      return ['When', lhs, ['Or', ...elements]] as MathJsonExpression;
+    }
   }
 
   return ['When', lhs, cond] as MathJsonExpression;
@@ -1231,6 +1429,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
             return `\\mathrm{${digits}}_{${radix}}`;
           }
         }
+      }
+      // Symbolic base: `BaseForm(digit polynomial, b)` → `digits_{b}`, the
+      // inverse of the symbol-base numeral parse.
+      const baseSym = symbol(operand(expr, 2));
+      if (baseSym !== null) {
+        const digits = baseFormSymbolicDigits(operand(expr, 1), baseSym);
+        if (digits !== null) return `${digits}_{${baseSym}}`;
       }
       return (
         '\\operatorname{BaseForm}(' +

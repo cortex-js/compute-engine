@@ -8,6 +8,7 @@ import {
   polynomialDegree,
   getPolynomialCoefficients,
 } from '../boxed-expression/polynomials.js';
+import { reduceTransformerHead } from '../boxed-expression/utils.js';
 import { limit as numericLimit } from '../numerics/numeric.js';
 import {
   checkDeadline,
@@ -62,6 +63,12 @@ export function symbolicLimit(
     // it so the structural strategies see the actual operator (Divide, Power…).
     let b = body;
     while (b.operator === 'Block' && oo(b)?.length === 1) b = o1(b);
+
+    // A transformer head (`Limit(Simplify(f), …)`, e.g. from the pipeline
+    // `f |> Simplify |> Limit`) is a computation step: reduce it so the
+    // structural strategies see the transformed expression rather than an
+    // opaque `Simplify` node.
+    b = reduceTransformerHead(b);
 
     // Soundness guard for special-function poles. The structural strategies
     // (notably direct substitution) don't model the poles of Gamma/Digamma/…,
