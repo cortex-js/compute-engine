@@ -227,6 +227,87 @@ export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
 }
 
 //
+// ---------------- Exponential / trigonometric integrals (complex) ----------------
+//
+// Ei, Si and Ci for complex arguments, all built on E₁(z) = Γ(0, z) via
+// `incompleteGammaUpperComplex(C_ZERO, ·)` so they inherit its region split
+// (divergent asymptotic series for large |z|, E₁ series/CF otherwise). Do NOT
+// call `e1Complex` directly here: its power-series branch runs for Re(z) ≤ 0 at
+// any modulus and cancels catastrophically at machine precision for large |z|.
+//
+// Branch conventions (validated against mpmath at 25 digits, all four quadrants
+// and both imaginary half-axes), with sign(0) = 0:
+//   Ei(z) = −E₁(−z) + iπ·sign(Im z)                      (off the real axis)
+//   Si(z) = (E₁(iz) − E₁(−iz))/(2i) + π/2, using Si(−z) = −Si(z) (odd, entire)
+//           to reflect Re(z) < 0 (or Re(z) = 0, Im(z) < 0) into the right
+//           half-plane.
+//   Ci(z) = −(E₁(iz) + E₁(−iz))/2, plus a +iπ·sign(Im z) correction when
+//           Re(z) < 0, or Re(z) = 0 and Im(z) < 0.
+//
+// Accuracy tracks the incomplete-Γ kernel: ≲1e-12 for small/moderate |z|,
+// degrading toward ~1e-10 in the large-|z| asymptotic region.
+//
+
+/** E₁(z) = Γ(0, z), routed through the incomplete-gamma dispatcher so the
+ *  large-|z| asymptotic branch is used (avoids `e1Complex`'s cancellation).
+ *  On the negative real axis E₁ has a branch cut; for a real argument (which
+ *  arises when z is purely imaginary) a spurious −0 imaginary part — from
+ *  internal negations — would select the wrong side. Approach the cut from
+ *  above (+0i), the branch that reproduces the validated Si/Ci axis values. */
+function e1ViaGamma(z: Complex): Complex {
+  const arg = z.im === 0 ? new Complex(z.re, 0) : z;
+  return incompleteGammaUpperComplex(C_ZERO, arg);
+}
+
+/** sign of a real number, with sign(0) = 0. */
+function signOf(x: number): number {
+  return x > 0 ? 1 : x < 0 ? -1 : 0;
+}
+
+/**
+ * Exponential integral Ei(z) for complex z, off the real axis:
+ * Ei(z) = −E₁(−z) + iπ·sign(Im z). (Real z is handled by the machine kernel
+ * in numerics/special-functions.ts.)
+ */
+export function expIntegralEiComplex(z: Complex): Complex {
+  if (z.isNaN()) return C_NAN;
+  return e1ViaGamma(z.neg())
+    .neg()
+    .add(new Complex(0, Math.PI * signOf(z.im)));
+}
+
+/**
+ * Sine integral Si(z) for complex z. Si is odd and entire, so complex
+ * arguments give finite complex values.
+ */
+export function sinIntegralComplex(z: Complex): Complex {
+  if (z.isNaN()) return C_NAN;
+  // Reflect into the right half-plane (Si(−z) = −Si(z)).
+  if (z.re < 0 || (z.re === 0 && z.im < 0))
+    return sinIntegralComplex(z.neg()).neg();
+  const iz = new Complex(-z.im, z.re); // i·z
+  return e1ViaGamma(iz)
+    .sub(e1ViaGamma(iz.neg()))
+    .div(new Complex(0, 2)) // /(2i)
+    .add(new Complex(Math.PI / 2, 0));
+}
+
+/**
+ * Cosine integral Ci(z) for complex z: Ci(z) = −(E₁(iz) + E₁(−iz))/2, with a
+ * +iπ·sign(Im z) correction in the left half-plane (and on the lower imaginary
+ * axis). The real-argument convention (Ci(|x|) for x < 0) is handled by the
+ * machine kernel; this kernel is only reached for Im(z) ≠ 0.
+ */
+export function cosIntegralComplex(z: Complex): Complex {
+  if (z.isNaN()) return C_NAN;
+  const iz = new Complex(-z.im, z.re); // i·z
+  let val = e1ViaGamma(iz).add(e1ViaGamma(iz.neg())).mul(-0.5);
+  if (z.re < 0 || (z.re === 0 && z.im < 0))
+    val = val.add(new Complex(0, Math.PI * signOf(z.im)));
+  return val;
+}
+
+//
 // ---------------- Polylogarithm Liₙ(z), integer order n ≥ 2 (complex) ----
 //
 // Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ, analytically continued over the whole plane with

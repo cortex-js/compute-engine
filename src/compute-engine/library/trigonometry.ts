@@ -39,6 +39,10 @@ import {
   sinc,
   sinIntegral,
 } from '../numerics/special-functions.js';
+import {
+  sinIntegralComplex,
+  cosIntegralComplex,
+} from '../numerics/numeric-complex.js';
 
 //
 // Note: The name of trigonometric functions follow NIST DLMF
@@ -447,18 +451,29 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Sine integral: ∫₀ˣ sin(t)/t dt.',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> real',
-      type: () => 'finite_real',
+      signature: '(number) -> number',
+      // Si is entire and odd: a real argument → finite real; a finite complex
+      // argument → finite complex value.
+      type: (ops) => {
+        const x = ops[0];
+        if (!x || x.isNaN) return 'number';
+        if (x.isReal === false)
+          return x.isFinite === true ? 'finite_complex' : 'number';
+        return 'finite_real';
+      },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
-        // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.Zero;
-        if (x.isInfinity) {
-          const v = x.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
-          return numericApproximation ? v.N() : v;
+        if (!isNumber(x)) return undefined;
+        if (x.im === 0) {
+          // Exact special values, regardless of numericApproximation
+          if (x.isSame(0)) return ce.Zero;
+          if (x.isInfinity) {
+            const v = x.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
+            return numericApproximation ? v.N() : v;
+          }
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
-        return apply(x, (x) => sinIntegral(x));
+        // Real args use the machine kernel; complex args the E₁-based kernel.
+        return apply(x, (x) => sinIntegral(x), undefined, sinIntegralComplex);
       },
     },
 
@@ -471,16 +486,27 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt.',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> real',
-      // Not finite_real: Ci(0) = −∞
-      type: () => 'real',
+      signature: '(number) -> number',
+      // Real argument → real (not finite_real: Ci(0) = −∞); a finite complex
+      // argument → finite complex value.
+      type: (ops) => {
+        const x = ops[0];
+        if (!x || x.isNaN) return 'number';
+        if (x.isReal === false)
+          return x.isFinite === true ? 'finite_complex' : 'number';
+        return 'real';
+      },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
-        // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.NegativeInfinity;
-        if (x.isInfinity && x.isPositive) return ce.Zero;
+        if (!isNumber(x)) return undefined;
+        if (x.im === 0) {
+          // Exact special values, regardless of numericApproximation.
+          // For real x < 0 the machine kernel returns the real part Ci(|x|).
+          if (x.isSame(0)) return ce.NegativeInfinity;
+          if (x.isInfinity && x.isPositive) return ce.Zero;
+        }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
-        return apply(x, (x) => cosIntegral(x));
+        // Real args use the machine kernel; complex args the E₁-based kernel.
+        return apply(x, (x) => cosIntegral(x), undefined, cosIntegralComplex);
       },
     },
 

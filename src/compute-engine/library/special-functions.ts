@@ -42,6 +42,7 @@ import {
   eisensteinE,
   agmComplex,
   polylogComplex,
+  expIntegralEiComplex,
 } from '../numerics/numeric-complex.js';
 
 /**
@@ -376,16 +377,26 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q1361401',
       complexity: 7500,
       broadcastable: true,
-      signature: '(number) -> real',
-      // Not finite_real: Ei(0) = −∞, Ei(±∞) = ±∞/0.
-      type: () => 'real',
+      signature: '(number) -> number',
+      // Real argument → real (not finite_real: Ei(0) = −∞, Ei(±∞) = ±∞/0);
+      // a finite complex argument → finite complex value.
+      type: (ops) => {
+        const x = ops[0];
+        if (!x || x.isNaN) return 'number';
+        if (x.isReal === false)
+          return x.isFinite === true ? 'finite_complex' : 'number';
+        return 'real';
+      },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        // Real argument only (machine-precision kernel); stay symbolic otherwise.
-        if (!isNumber(x) || x.im !== 0) return undefined;
-        if (x.isSame(0)) return ce.NegativeInfinity;
-        if (x.isInfinity) return x.isPositive ? ce.PositiveInfinity : ce.Zero;
+        if (!isNumber(x)) return undefined;
+        // Exact special values (real axis).
+        if (x.im === 0) {
+          if (x.isSame(0)) return ce.NegativeInfinity;
+          if (x.isInfinity) return x.isPositive ? ce.PositiveInfinity : ce.Zero;
+        }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
-        return applyN([x], expIntegralEi);
+        // Real args use the machine kernel; complex args the E₁-based kernel.
+        return applyN([x], expIntegralEi, undefined, expIntegralEiComplex);
       },
     },
 

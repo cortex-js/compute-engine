@@ -1115,6 +1115,132 @@ describe('EXPONENTIAL & LOGARITHMIC INTEGRALS (Ei, li)', () => {
   });
 });
 
+// Complex-argument numeric evaluation of Ei, Si, Ci (closes a Rubi-
+// verification gap). Reference values from mpmath (dps=20); the underlying
+// kernels are built on E₁(z) = Γ(0, z) via incompleteGammaUpperComplex, so
+// accuracy tracks that kernel (≲1e-12 for small/moderate |z|, degrading toward
+// ~1e-10 in the large-|z| asymptotic region — see numeric-complex.ts).
+describe('COMPLEX-ARGUMENT Ei, Si, Ci', () => {
+  // Assert a complex .N() result within an absolute+relative tolerance.
+  const expectComplex = (
+    expr: any,
+    re: number,
+    im: number,
+    tol = 1e-11
+  ) => {
+    const v = expr.N();
+    const scale = Math.hypot(re, im) * tol + tol;
+    expect(Math.abs(v.re - re)).toBeLessThan(scale);
+    expect(Math.abs(v.im - im)).toBeLessThan(scale);
+  };
+  const z = (re: number, im: number): any => ['Complex', re, im];
+
+  // --- Reference values pinned from the task (mpmath, 20 digits) ---
+  test('Ei(2+3i) = −0.361551944599640 + 5.270548435813695i', () =>
+    expectComplex(ce.expr(['ExpIntegralEi', z(2, 3)]),
+      -0.36155194459964029541, 5.270548435813694627));
+
+  test('Ei(−1+i) = −0.000281624451981 + 2.962268118550434i', () =>
+    expectComplex(ce.expr(['ExpIntegralEi', z(-1, 1)]),
+      -0.00028162445198141832551, 2.9622681185504342983));
+
+  test('Si(2+3i) = 4.547513889562289 + 1.399196580646055i', () =>
+    expectComplex(ce.expr(['SinIntegral', z(2, 3)]),
+      4.5475138895622892199, 1.3991965806460547895));
+
+  test('Ci(2+3i) = 1.408292501520850 − 2.983617742029605i', () =>
+    expectComplex(ce.expr(['CosIntegral', z(2, 3)]),
+      1.4082925015208495188, -2.9836177420296050931));
+
+  // --- Four quadrants (moderate |z|) ---
+  test('Ei/Si/Ci at 5−4i (fourth quadrant)', () => {
+    expectComplex(ce.expr(['ExpIntegralEi', z(5, -4)]),
+      -25.859146300916343214, -2.0659670718537599856);
+    expectComplex(ce.expr(['SinIntegral', z(5, -4)]),
+      -1.7404102535672612819, 3.1604160641549284249);
+    expectComplex(ce.expr(['CosIntegral', z(5, -4)]),
+      -3.1627164950516224925, -3.3124076201488326073);
+  });
+
+  test('Ei/Si/Ci at −5+4i (second quadrant)', () => {
+    expectComplex(ce.expr(['ExpIntegralEi', z(-5, 4)]),
+      0.0001035016551439969064, 3.1425282146397831621);
+    expectComplex(ce.expr(['SinIntegral', z(-5, 4)]),
+      1.7404102535672612819, -3.1604160641549284249);
+    expectComplex(ce.expr(['CosIntegral', z(-5, 4)]),
+      -3.1627164950516224925, -0.17081496655903936887);
+  });
+
+  test('Ei/Si/Ci at −0.1−0.2i (third quadrant, small |z|)', () => {
+    expectComplex(ce.expr(['ExpIntegralEi', z(-0.1, -0.2)]),
+      -1.027547308779188102, -2.2243571819434269873);
+    expectComplex(ce.expr(['SinIntegral', z(-0.1, -0.2)]),
+      -0.10061179436187763154, -0.20011047698957614353);
+    expectComplex(ce.expr(['CosIntegral', z(-0.1, -0.2)]),
+      -0.91315779064180127647, -2.0444689459704626664);
+  });
+
+  // --- Both imaginary half-axes (branch-cut / signed-zero sensitive) ---
+  test('Ei/Si/Ci on the upper imaginary axis (3i)', () => {
+    expectComplex(ce.expr(['ExpIntegralEi', z(0, 3)]),
+      0.11962978600800032763, 3.4194488547943648756);
+    expectComplex(ce.expr(['SinIntegral', z(0, 3)]),
+      0.0, 4.9734404758598067977);
+    expectComplex(ce.expr(['CosIntegral', z(0, 3)]),
+      4.9603920947656097603, 1.5707963267948966192);
+  });
+
+  test('Ei/Si/Ci on the lower imaginary axis (−3i)', () => {
+    expectComplex(ce.expr(['ExpIntegralEi', z(0, -3)]),
+      0.11962978600800032763, -3.4194488547943648756);
+    expectComplex(ce.expr(['SinIntegral', z(0, -3)]),
+      0.0, -4.9734404758598067977);
+    expectComplex(ce.expr(['CosIntegral', z(0, -3)]),
+      4.9603920947656097603, -1.5707963267948966192);
+  });
+
+  // --- Large |z| asymptotic region (the incomplete-Γ kernel's harder band) ---
+  test('Ei/Si/Ci at −30+40i (large |z|, asymptotic branch)', () => {
+    expectComplex(ce.expr(['ExpIntegralEi', z(-30, 40)]),
+      1.8442670872039556112e-15, 3.1415926535897933699, 1e-9);
+    expectComplex(ce.expr(['SinIntegral', z(-30, 40)]),
+      2097913261506350.3259, -1149478706763855.1113, 1e-9);
+    expectComplex(ce.expr(['CosIntegral', z(-30, 40)]),
+      -1149478706763855.1113, -2097913261506348.7551, 1e-9);
+  });
+
+  test('Ei/Si/Ci at 50+10i (large |z|)', () => {
+    expectComplex(ce.expr(['ExpIntegralEi', z(50, 10)]),
+      -96553591638824579850.0, -37865406213393255819.0, 1e-9);
+    expectComplex(ce.expr(['SinIntegral', z(50, 10)]),
+      -214.30061584511994363, -18.939440913649358639, 1e-9);
+    expectComplex(ce.expr(['CosIntegral', z(50, 10)]),
+      -18.939441324476748194, 215.87141138636322563, 1e-9);
+  });
+
+  // --- Exactness contract: a Gaussian-integer argument stays symbolic under
+  // evaluate(), numericizes under N(). ---
+  test('Ei(2+3i) stays symbolic under evaluate(), numericizes under N()', () => {
+    expect(ce.expr(['ExpIntegralEi', z(2, 3)]).evaluate().toString()).toEqual(
+      'ExpIntegralEi((2 + 3i))'
+    );
+    expectComplex(ce.expr(['ExpIntegralEi', z(2, 3)]),
+      -0.36155194459964029541, 5.270548435813694627);
+  });
+
+  // --- Regression: the real-argument path is untouched ---
+  test('real-argument path unchanged (Ei(3), Si(2), Ci(2), Ei(−2), Ci(−2))', () => {
+    expectApprox(ce.expr(['ExpIntegralEi', 3]), 9.933832570625415, 1e-12);
+    expectApprox(ce.expr(['SinIntegral', 2]), 1.6054129768026948, 1e-12);
+    expectApprox(ce.expr(['CosIntegral', 2]), 0.4229808287748649, 1e-12);
+    expectApprox(ce.expr(['ExpIntegralEi', -2]), -0.04890051070806112, 1e-12);
+    // Ci(−2): the machine kernel returns the real part Ci(|x|) (real result).
+    const cm2 = ce.expr(['CosIntegral', -2]).N();
+    expect(Math.abs(cm2.re - 0.4229808287748649)).toBeLessThan(1e-12);
+    expect(cm2.im ?? 0).toBe(0);
+  });
+});
+
 //
 // ---------------- Tier-2 kernels (ROADMAP item 4) ----------------
 // Reference values computed independently (Simpson quadrature for K/E,
