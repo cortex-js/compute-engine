@@ -1,5 +1,9 @@
 import { extrapolate } from './richardson.js';
 import { primeFactors } from './primes.js';
+import {
+  checkDeadline,
+  getAmbientDeadline,
+} from '../../common/interruptible.js';
 
 // Number of significant digits for Decimal
 // The Decimal implementation groups digits by 7
@@ -298,7 +302,8 @@ export function centeredDiff8thOrder(
 function reliableLimitSamples(
   f: (x: number) => number,
   x0: number,
-  step: number
+  step: number,
+  deadline?: number
 ): number {
   const CONTRACT = 0.125; // must match extrapolate()'s default contract
   const MAX = 60;
@@ -322,6 +327,7 @@ function reliableLimitSamples(
     // O(1) amount, not a few ulps).
     const tol = 1e-2 * Math.max(1, Math.abs(v));
     for (let i = 1; i <= 5; i++) {
+      checkDeadline(deadline);
       const y = f(arg(hA * Math.pow(hB / hA, i / 6)));
       if (!Number.isFinite(y) || Math.abs(y - v) > tol) return false;
     }
@@ -334,6 +340,10 @@ function reliableLimitSamples(
   let prev = NaN;
   let prevH = NaN;
   for (let k = 1; k <= MAX; k++) {
+    // Each rung multiplies the argument by 1/CONTRACT = 8×, so a rung can be
+    // arbitrarily expensive (e.g. a compiled Sum with a variable bound):
+    // check the evaluation deadline between rungs, like extrapolate() does.
+    checkDeadline(deadline);
     const y = f(arg(h));
     if (!Number.isFinite(y)) return k - 1; // overflow / NaN horizon
     const a = Math.abs(y);
@@ -361,12 +371,30 @@ function reliableLimitSamples(
   return Infinity;
 }
 
+/**
+ * `iterationBudget` used when compiling an expression for the numeric limit
+ * ladder (here and in the symbolic-limit growth probes). The ladder samples
+ * at geometrically increasing arguments (8^k up to 8^60 for a limit at ∞), so
+ * a compiled `Sum`/`Product` whose bound depends on the limit variable would
+ * otherwise run an astronomically long — or, for an infinite bound, endless —
+ * uninterruptible loop inside a single sample (the Stage-2 corpus-audit
+ * deadline escape: `γ = lim (Hₙ − ln n)` with `ce.timeLimit = 2000` ran
+ * unbounded). Over-budget samples evaluate to NaN, the ladder's existing
+ * "horizon" signal: `reliableLimitSamples` caps the rungs to the clean prefix
+ * and Richardson extrapolation converges from those (γ still comes out
+ * correct to ~1e-10 from the ≤ 8⁶-term rungs).
+ */
+export const LIMIT_PROBE_ITERATION_BUDGET = 1e6;
+
 export function limit(
   f: (x: number) => number,
   x: number,
   dir = 1,
   deadline?: number
 ): number {
+  // A call reached through compiled code (`_SYS.limit`) has no deadline of
+  // its own: inherit the ambient one (see interruptible.ts).
+  deadline ??= getAmbientDeadline();
   if (dir === 0) {
     // Approach from both sides
     const left = limit(f, x, -1, deadline);
@@ -380,7 +408,7 @@ export function limit(
   // Don't let floating-point overflow/cancellation past the numeric horizon
   // feed `extrapolate` garbage that masquerades as convergence (see
   // `reliableLimitSamples`).
-  const clean = reliableLimitSamples(f, x, step);
+  const clean = reliableLimitSamples(f, x, step, deadline);
   if (clean === 0) return NaN; // no trustworthy samples -> not-evaluable
   const [val, err] = extrapolate(f, x, {
     step,

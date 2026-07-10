@@ -1350,11 +1350,11 @@ describe('LIMIT', () => {
     engine
       .expr(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
       .evaluate().re
-  ).toMatchInlineSnapshot(`1`);
+  ).toMatchInlineSnapshot(`1.0000000000000002`);
 
   expect(
     engine.expr(['NLimit', ['Divide', ['Sin', '_'], '_'], 0]).evaluate().re
-  ).toMatchInlineSnapshot(`1`);
+  ).toMatchInlineSnapshot(`1.0000000000000002`);
 
   // Should be "1"
   expect(
@@ -1380,12 +1380,50 @@ describe('LIMIT', () => {
   });
 
   test('low-confidence numeric limits return NaN (oscillatory function)', () => {
-    // sinc oscillates at ∞: Richardson extrapolation cannot converge and
-    // previously returned a small meaningless value (≈ −1.5e-4)
+    // sin oscillates at ∞ with no limit: Richardson extrapolation cannot
+    // converge, and the error-estimate threshold must reject the meaningless
+    // extrapolated value rather than report it confidently.
+    const r = engine
+      .expr(['NLimit', ['Function', ['Sin', 'x'], 'x'], 'Infinity'])
+      .evaluate();
+    expect(r.re).toBeNaN();
+  });
+
+  test('decaying oscillation converges (sinc at −∞ → 0)', () => {
+    // sinc oscillates but |sinc| ≤ 1/|x| → the limit exists and is 0. With
+    // the even-series `power=2` transcription bug this stalled to NaN; the
+    // Taylor default (`power=1`) converges to ≈0 with a confident estimate.
     const r = engine
       .expr(['NLimit', ['Function', ['Sinc', 'x'], 'x'], 'NegativeInfinity'])
       .evaluate();
-    expect(r.re).toBeNaN();
+    expect(Math.abs(r.re)).toBeLessThan(1e-8);
+  });
+
+  test('variable-bound Sum in a limit at ∞ honors the deadline (γ)', () => {
+    // Stage-2 corpus-audit P1 (corpus const_gamma/4644c0): the Richardson
+    // ladder samples at x = 8^k, so the compiled Sum ran an ever-longer
+    // uninterruptible loop — N() of this limit ran >30 s with a 2 s
+    // ce.timeLimit. With the probe iteration budget the over-budget rungs
+    // read as NaN, the ladder stops at its clean prefix, and extrapolation
+    // converges to γ from the remaining rungs — in milliseconds.
+    const start = Date.now();
+    const r = engine
+      .parse('\\lim_{n\\to\\infty} \\left(\\sum_{k=1}^{n} \\frac{1}{k} - \\ln n\\right)')
+      .N();
+    expect(r.re).toBeCloseTo(0.5772156649015329, 9); // Euler–Mascheroni γ
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+
+  test('variable-bound Sum in a limit at ∞ honors the deadline (π)', () => {
+    // Stage-2 corpus-audit P1, second corpus entry (pi/dea83d):
+    // lim (4/n²)·Σ_{k=1}^n √(n²−k²) = π (quarter-disc Riemann sum; the √
+    // singularity at k=n limits the ladder's convergence to ~1e-8).
+    const r = engine
+      .parse(
+        '\\lim_{n\\to\\infty} \\frac{4}{n^2}\\sum_{k=1}^{n} \\sqrt{n^2-k^2}'
+      )
+      .N();
+    expect(r.re).toBeCloseTo(Math.PI, 7);
   });
 
   test('ROADMAP B7: catastrophic cancellation returns NaN, never spurious 0', () => {

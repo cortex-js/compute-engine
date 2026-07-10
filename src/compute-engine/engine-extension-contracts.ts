@@ -270,4 +270,14 @@ export function assertCompilationOptionsContract(
       'Invalid compilation option "fallback": expected a boolean'
     );
   }
+
+  if (
+    options.iterationBudget !== undefined &&
+    (typeof options.iterationBudget !== 'number' ||
+      !(options.iterationBudget > 0))
+  ) {
+    throw new Error(
+      'Invalid compilation option "iterationBudget": expected a positive number'
+    );
+  }
 }

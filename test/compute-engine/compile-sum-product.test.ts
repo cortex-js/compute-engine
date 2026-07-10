@@ -211,6 +211,40 @@ describe('COMPILE Sum - symbolic bounds', () => {
   });
 });
 
+describe('COMPILE Sum - iterationBudget', () => {
+  // The budget keeps a single compiled call cheap enough for the engine
+  // deadline to be honored between calls on the numeric limit ladder (the
+  // Stage-2 corpus-audit deadline escape: N() of a Limit at +∞ whose body
+  // contains a variable-bound Sum ran unbounded past ce.timeLimit).
+  test('within budget: normal result', () => {
+    const expr = ce.parse('\\sum_{k=1}^{n} k');
+    const result = compile(expr, { iterationBudget: 1e6 });
+    expect(result.success).toBe(true);
+    expect(result.run!({ n: 4 })).toBe(10);
+  });
+
+  test('over budget: NaN instead of running the loop', () => {
+    const expr = ce.parse('\\sum_{k=1}^{n} k');
+    const result = compile(expr, { iterationBudget: 1e6 });
+    expect(result.success).toBe(true);
+    expect(result.run!({ n: 1e12 })).toBeNaN();
+  });
+
+  test('infinite bound: NaN instead of a non-terminating loop', () => {
+    const expr = ce.parse('\\sum_{k=1}^{\\infty} \\frac{1}{k^2}');
+    const result = compile(expr, { iterationBudget: 1e6 });
+    expect(result.success).toBe(true);
+    expect(result.run!({})).toBeNaN();
+  });
+
+  test('no budget: loops of any length run (unchanged public behavior)', () => {
+    const expr = ce.parse('\\sum_{k=1}^{n} k');
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.run!({ n: 2e6 })).toBe((2e6 * (2e6 + 1)) / 2);
+  });
+});
+
 describe('COMPILE Product - interval-js', () => {
   test('factorial: prod_{k=1}^{4} k = 24', () => {
     const expr = ce.parse('\\prod_{k=1}^{4} k');

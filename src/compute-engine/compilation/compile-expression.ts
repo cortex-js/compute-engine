@@ -25,6 +25,7 @@ type CompileExpressionOptions<T extends string = string> = {
   preamble?: string;
   fallback?: boolean;
   realOnly?: boolean;
+  iterationBudget?: number;
 };
 
 /**
@@ -110,6 +111,7 @@ export function compile<T extends string = 'javascript'>(
       imports: options?.imports,
       preamble: options?.preamble,
       realOnly: options?.realOnly,
+      iterationBudget: options?.iterationBudget,
     }) as CompilationResult<T>;
   } catch (e) {
     if (options?.fallback ?? true) {

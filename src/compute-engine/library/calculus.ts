@@ -15,7 +15,11 @@ import {
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
-import { centeredDiff8thOrder, limit } from '../numerics/numeric.js';
+import {
+  centeredDiff8thOrder,
+  limit,
+  LIMIT_PROBE_ITERATION_BUDGET,
+} from '../numerics/numeric.js';
 import { derivative, differentiate } from '../symbolic/derivative.js';
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
 import '../symbolic/explain-derivative.js';
@@ -801,10 +805,16 @@ volumes
         }
 
         // Numeric fallback: compiled JS functions (machine arithmetic).
+        // The iteration budget keeps a single sample on the extrapolation
+        // ladder interruptible: an unbudgeted compiled Sum/Product with a
+        // variable-dependent bound runs an arbitrarily long loop that no
+        // deadline check can reach (see LIMIT_PROBE_ITERATION_BUDGET).
         if (numericApproximation) {
           const target = x.N().re;
           if (Number.isNaN(target)) return undefined;
-          const compiled = engine._compile(f);
+          const compiled = engine._compile(f, {
+            iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
+          });
           const fn = (compiled.run as (x: number) => number) ?? applicableN1(f);
           return new BoxedNumber(
             engine,
@@ -848,10 +858,13 @@ volumes
         return engine._fn('NLimit', [fn, x.canonical, dir.canonical]);
       },
       evaluate: ([f, x, dir], { engine }) => {
-        // Uses compiled JS functions (machine arithmetic)
+        // Uses compiled JS functions (machine arithmetic). Budgeted for the
+        // same reason as Limit's numeric fallback above.
         const target = x.N().re;
         if (Number.isNaN(target)) return undefined;
-        const compiled = engine._compile(f);
+        const compiled = engine._compile(f, {
+          iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
+        });
         const fn = (compiled.run as (x: number) => number) ?? applicableN1(f);
         return new BoxedNumber(
           engine,

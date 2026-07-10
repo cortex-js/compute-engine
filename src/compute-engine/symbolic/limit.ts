@@ -10,7 +10,10 @@ import {
 } from '../boxed-expression/polynomials.js';
 import { reduceTransformerHead } from '../boxed-expression/utils.js';
 import { laurentData } from './series.js';
-import { limit as numericLimit } from '../numerics/numeric.js';
+import {
+  limit as numericLimit,
+  LIMIT_PROBE_ITERATION_BUDGET,
+} from '../numerics/numeric.js';
 import {
   checkDeadline,
   CancellationError,
@@ -735,7 +738,12 @@ function compiledProbe(
   fn = null;
   try {
     const lit = ce.function('Function', [e, ce.symbol(x)]);
-    const compiled = ce._compile(lit) as { run?: (x: number) => number };
+    // Budgeted so a probe of a Sum/Product with a variable-dependent (or
+    // infinite) bound stays cheap — over-budget calls read as NaN, which the
+    // growth oracles already treat as "unreliable, bail".
+    const compiled = ce._compile(lit, {
+      iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
+    }) as { run?: (x: number) => number };
     if (typeof compiled?.run === 'function') fn = compiled.run;
   } catch {
     fn = null;
@@ -926,7 +934,12 @@ function leadingCoefficientRatio(
   // Shift the probe ladder a little past x = 1: forms like x·ln(1−1/x) are
   // singular there (ln 0), which would poison the extrapolation. The shift
   // leaves the x → ∞ limit unchanged.
-  const v = numericLimit((xv) => numericAt(ratio, x, xv + 2, ce), Infinity);
+  const v = numericLimit(
+    (xv) => numericAt(ratio, x, xv + 2, ce),
+    Infinity,
+    1,
+    ce._deadline
+  );
   if (!Number.isFinite(v)) return undefined;
   const rounded = Math.round(v);
   if (Math.abs(v - rounded) < 1e-7) return ce.number(rounded);

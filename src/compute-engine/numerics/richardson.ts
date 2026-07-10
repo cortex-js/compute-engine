@@ -98,7 +98,13 @@ export function extrapolate(
   const {
     contract = 0.125,
     step = 1,
-    power = 2,
+    // An ordinary Taylor/asymptotic series in h (see the doc comment above —
+    // `power=2` is an opt-in acceleration for even functions). The default
+    // was transcribed as 2, contradicting the docstring and Richardson.jl:
+    // on series with odd powers (e.g. Hₙ − ln n − γ ~ 1/(2n)) the h¹ term was
+    // never eliminated, the error estimate stalled above `limit()`'s 1e-6
+    // acceptance threshold, and convergent limits were reported as NaN.
+    power = 1,
     atol = 1e-16,
     rtol = atol > 0 ? 0 : Math.sqrt(Number.EPSILON),
     maxeval = 1e6, // Number.MAX_SAFE_INTEGER

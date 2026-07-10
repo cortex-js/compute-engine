@@ -141,6 +141,17 @@ export interface CompileTarget<Expr = unknown> {
    */
   bareStatementBlocks?: boolean;
 
+  /**
+   * When set, a cap on the trip count of emitted `Sum`/`Product` loops: a
+   * loop whose iteration count would exceed the budget (including infinite
+   * or `NaN` bounds) evaluates to `NaN` instead of running. Internal numeric
+   * probes (the Richardson limit ladder) set this so a single compiled call
+   * stays cheap enough for the engine deadline to be honored between calls;
+   * it is never set on user-facing `compile()` paths, whose loops remain
+   * unguarded (zero overhead).
+   */
+  iterationBudget?: number;
+
   /** Target language identifier (for debugging/logging) */
   language?: string;
 }
@@ -269,6 +280,13 @@ export interface CompilationOptions<Expr = unknown> {
    * results (e.g., plotting).
    */
   realOnly?: boolean;
+
+  /**
+   * Cap the trip count of emitted `Sum`/`Product` loops: a loop whose
+   * iteration count would exceed the budget (including infinite bounds)
+   * evaluates to `NaN` instead of running. See `CompileTarget.iterationBudget`.
+   */
+  iterationBudget?: number;
 }
 
 /**

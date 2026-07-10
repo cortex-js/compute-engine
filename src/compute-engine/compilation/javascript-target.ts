@@ -1730,6 +1730,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       imports = [],
       preamble,
       realOnly,
+      iterationBudget,
     } = options;
     const unknowns = expr.unknowns;
 
@@ -1805,6 +1806,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         return `_.${id}`;
       },
       preamble: (preamble ?? '') + preambleImports,
+      iterationBudget,
     });
 
     const result = compileToTarget(expr, target, realOnly);
@@ -2062,15 +2064,27 @@ function emitSumProduct(
 
   const acc = BaseCompiler.tempVar();
 
+  // Iteration-budget guard (see CompileTarget.iterationBudget): a trip count
+  // over the budget — including infinite or NaN bounds, for which the negated
+  // comparison also fails — evaluates to NaN instead of running the loop.
+  // At the guard point `index` holds the lower bound, so the trip count is
+  // `_upper - index + 1`.
+  const budget = target.iterationBudget;
+  const guardNaN = (nan: string): string =>
+    budget !== undefined
+      ? `if (!(_upper - ${index} < ${budget})) return ${nan}; `
+      : '';
+
   if (bodyIsComplex) {
     const val = BaseCompiler.tempVar();
+    const guard = guardNaN('{ re: NaN, im: NaN }');
     if (isSum) {
-      return `(() => { let ${acc} = { re: 0, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } return ${acc}; })()`;
+      return `(() => { let ${acc} = { re: 0, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guard}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } return ${acc}; })()`;
     }
-    return `(() => { let ${acc} = { re: 1, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } return ${acc}; })()`;
+    return `(() => { let ${acc} = { re: 1, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guard}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } return ${acc}; })()`;
   }
 
-  return `(() => { let ${acc} = ${identity}; let ${index} = ${lowerCode}; const _upper = ${upperCode}; while (${index} <= _upper) { ${acc} ${op}= ${bodyCode}; ${index}++; } return ${acc}; })()`;
+  return `(() => { let ${acc} = ${identity}; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { ${acc} ${op}= ${bodyCode}; ${index}++; } return ${acc}; })()`;
 }
 
 /**

@@ -1103,12 +1103,23 @@ export class BaseCompiler {
 
     const acc = BaseCompiler.tempVar();
 
+    // Iteration-budget guard (see CompileTarget.iterationBudget): a trip
+    // count over the budget — including infinite or NaN bounds, for which
+    // the negated comparison also fails — evaluates to NaN instead of
+    // running the loop.
+    const budget = target.iterationBudget;
+    const guardNaN = (nan: string): string =>
+      budget !== undefined
+        ? `\n  if (!((${upper}) - ${index} < ${budget})) return ${nan};`
+        : '';
+
     if (bodyIsComplex) {
       const val = BaseCompiler.tempVar();
+      const guard = guardNaN('{ re: NaN, im: NaN }');
       if (isSum) {
         return `(() => {
   let ${acc} = { re: 0, im: 0 };
-  let ${index} = ${lower};
+  let ${index} = ${lower};${guard}
   while (${index} <= ${upper}) {
     const ${val} = ${fn};
     ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im };
@@ -1120,7 +1131,7 @@ export class BaseCompiler {
       // Product
       return `(() => {
   let ${acc} = { re: 1, im: 0 };
-  let ${index} = ${lower};
+  let ${index} = ${lower};${guard}
   while (${index} <= ${upper}) {
     const ${val} = ${fn};
     ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re };
@@ -1132,7 +1143,7 @@ export class BaseCompiler {
 
     return `(() => {
   let ${acc} = ${isSum ? '0' : '1'};
-  let ${index} = ${lower};
+  let ${index} = ${lower};${guardNaN('NaN')}
   while (${index} <= ${upper}) {
     ${acc} ${op}= ${fn};
     ${index}++;
