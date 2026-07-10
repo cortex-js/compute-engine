@@ -815,7 +815,7 @@ export class RubiDriver {
       let matched: { kind: 'sin' | 'cos'; arg: Expression } | null = null;
       const rest: Expression[] = [];
       for (const f of inert.ops) {
-        const m =
+        const m: { kind: 'sin' | 'cos'; arg: Expression } | null =
           matched === null ? inverseSquareTrigFactor(f, variable) : null;
         if (m !== null) matched = m;
         else rest.push(f);
