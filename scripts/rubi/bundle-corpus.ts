@@ -3,9 +3,12 @@
 // benchmark's `compileSection`, so the bundled rule priority can't drift
 // from the benchmark's.
 //
-// Scope: all of Chapter 1 (algebraic), Chapter 2 (exponentials), and Chapter 6
-// (hyperbolics) — all fully ported (active heads, ~Chapter-1 difficulty;
-// docs/rubi/RUBI.md §5, Phase R3+) — plus the full Chapter-4 §4.1 Sine family
+// Scope: all of Chapter 1 (algebraic), Chapter 2 (exponentials), Chapter 3
+// (logarithms), and Chapter 6 (hyperbolics) — all fully ported (active heads,
+// ~Chapter-1 difficulty; docs/rubi/RUBI.md §5, Phase R3+). Chapter 3 supplies
+// the PolyLog-producing log families (∫x^k·Log[a+b·F^{gx}] telescope) that
+// Chapter-2 §2.2 reduces into, plus the by-parts log rules (IntHide bindings).
+// Also bundled: the full Chapter-4 §4.1 Sine family
 // (RUBI.md §5, Phase R4) and §4.5 Secant (RUBI.md §5, Phase R10). The whole
 // `4.1 Sine` section is walked (all 21 files compile clean, 0 skips, 918
 // rules): the inert-trig bridge (deactivateTrig / unifyInertTrig cofunction
@@ -30,14 +33,23 @@
 // that ship with the runtime regardless of the bundle; the corpus rules here
 // add the rule-driven nonlinear-argument families (ExpandTrigReduce).
 import * as fs from 'node:fs';
+import type { RubiRuleDoc } from '../../src/compute-engine/rubi/types';
 import { readCorpusDocs } from './compile';
 
 const ch1Dir = 'data/rubi/corpus/1 Algebraic functions';
 const ch2Dir = 'data/rubi/corpus/2 Exponentials';
+const ch3Dir = 'data/rubi/corpus/3 Logarithms';
 const ch6Dir = 'data/rubi/corpus/6 Hyperbolic functions';
 const trigSineDir = 'data/rubi/corpus/4 Trig functions/4.1 Sine';
 const trigTangentDir = 'data/rubi/corpus/4 Trig functions/4.3 Tangent';
 const trigSecantDir = 'data/rubi/corpus/4 Trig functions/4.5 Secant';
+// Chapter 8 is a flat directory (each subsection is a single .m/.json file,
+// not a subdirectory), so only the PolyLog telescope file (§8.8, closes the
+// ∫x^m·PolyLog[n, d·F^{gx}] chain that Ch3 §3.5 reduces into) is bundled here
+// — not the rest of Chapter 8. `readCorpusDocs` walks a directory, so a
+// single file is read directly, mirroring its doc format.
+const ch8PolyLogFile =
+  'data/rubi/corpus/8 Special functions/8.8 Polylogarithm function.json';
 const out = 'src/compute-engine/rubi/rubi-rules-data.json';
 
 // Strip the `source` (original WL text) field — it is runtime-dead (only the
@@ -45,10 +57,12 @@ const out = 'src/compute-engine/rubi/rubi-rules-data.json';
 const docs = [
   ...readCorpusDocs(ch1Dir),
   ...readCorpusDocs(ch2Dir),
+  ...readCorpusDocs(ch3Dir),
   ...readCorpusDocs(ch6Dir),
   ...readCorpusDocs(trigSineDir),
   ...readCorpusDocs(trigTangentDir),
   ...readCorpusDocs(trigSecantDir),
+  JSON.parse(fs.readFileSync(ch8PolyLogFile, 'utf8')) as RubiRuleDoc,
 ].map((d) => ({
   file: d.file,
   rules: d.rules.map(({ source, ...rest }) => rest),

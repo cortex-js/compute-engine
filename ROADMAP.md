@@ -493,18 +493,21 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-09, R1–R16 landed):** the shipped bundle
+**State (2026-07-10, R1–R17 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
-(Algebraic), 2 (Exponentials), 6 (Hyperbolics), 4.1 Sine, 4.3 Tangent, and
-4.5 Secant** — 4,831 rules, 5.29 MB (CI has a bundle-freshness gate). Scores
-(seed 5): **4.1 Sine 106/120 and 322/400 (4.1.11 file 71/113)**, **4.3
-Tangent 70/120**, **4.5 Secant 69/120**, ch1 exhaustive ≈90–91%, ch2 ≈72% /
-ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
-**Genuine wrongs are 0 across all suites** — every flagged "wrong" is a
-documented **verification false-wrong** (numeric ₂F₁/AppellF1 mis-grading at
-non-integer symbolic-exponent substitution; `√(sin²)=|sin|`; cube-root branch
-at negative x): before believing a wrong flag, differentiate the
+(Algebraic), 2 (Exponentials), 3 (Logarithms), 6 (Hyperbolics), 4.1 Sine, 4.3
+Tangent, 4.5 Secant, and §8.8 Polylogarithm** — 5,191 rules, 5.64 MB (CI has a
+bundle-freshness gate). Scores (seed 5): **4.1 Sine 106/120 and 326/400 (4.1.11
+file 71/113)**, **4.3 Tangent 72/120**, **4.5 Secant 69/120**, **ch3 Logarithms
+67/120 (new)**, ch1 exhaustive ≈90–91%, ch2 ≈72% / ch6 ≈45% effective (seed
+42), Wester indefinite-∫ 6/8.
+**Genuine wrongs are 0 across all suites** (incl. ch3 after the R17
+back-substitution fix) — every flagged "wrong" is a documented
+**verification false-wrong** (numeric ₂F₁/AppellF1
+mis-grading at non-integer symbolic-exponent substitution; `√(sin²)=|sin|`;
+cube-root/fractional-power branch at negative x): before believing a wrong
+flag, differentiate the
 antiderivative back and compare at integer substitutions. The trig routing
 lives in the runtime layer (`rubi-utils.ts`/`driver.ts`): argument-aware
 `deactivateTrig` (only x-free/linear/bare-monomial args inert — composite
@@ -518,21 +521,33 @@ R13 it also keeps REFLECTION-produced `csc[·+π/2]` heads raw — the +π/2
 shift signature — so pure-sec binomials `(a+b·sec)^n` reach the 4.5.1
 csc-binomial rules, with a `(a+b·sec²)^p`-Power exception routing 4.5.7 to
 the sin/cos rules), and
-four driver fallbacks (trig→exp with a numeric-evaluability self-check;
+five driver fallbacks (trig→exp with a numeric-evaluability self-check;
 R15's rational×sin/cos(linear) → Si/Ci partial-fraction split with a
 central-difference D-self-check; R16's poly×csc²/sec²(linear) by-parts;
-native-rational). A/B env switches:
+R17's `singleAngleTrigExpFallback` — `∫P(x)·R(trig(w))` with `w` linear and an
+additive `(a+b·trig)` denominator, rewritten via `y=E^{iw}` +
+partial-fractions and routed through the §2.2→Ch3→§8.8 PolyLog telescope,
+fail-closed D-check; native-rational). A/B env switches:
 `RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`, `RUBI_NO_COFN`, `RUBI_NO_COFN_COT`,
-`RUBI_NO_SKELETON`, `RUBI_NO_SICI`, `RUBI_NO_SECBIN`, `RUBI_NO_TRIGSQ`.
+`RUBI_NO_SKELETON`, `RUBI_NO_SICI`, `RUBI_NO_SECBIN`, `RUBI_NO_TRIGSQ`,
+`RUBI_NO_TRIGEXP`.
+**Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
+power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
+shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`
+rules) use Rubi's general `Subst[u, expr, repl] := u /. expr -> repl`, but the
+`build()` `Subst` handler substituted the integration variable instead of the
+`expr` subexpression. Fixed by dispatching on the middle argument
+(`replaceSubexpr` in `rubi-utils.ts`). ch3 s120 seed5: 65→67 correct, genuine
+wrongs 0. See `docs/rubi/RUBI.md` §5 R17.
 Per-rung blow-by-blow
-(R1–R15, incl. the cofunction-audit table and each rung's dead ends):
+(R1–R17, incl. the cofunction-audit table and each rung's dead ends):
 `docs/rubi/RUBI.md` §5; the rest is git history.
 
 **Benchmark protocol.** `npx tsx scripts/rubi/benchmark.ts --rubi
 "data/rubi/corpus/4 Trig functions" --chapter "4 Trig functions/4.1 Sine"
 --sample 120 --seed 5 --report /tmp/x.json`. Always pass `--report` (the
 default path clobbers the committed baseline); `--rubi` mode preloads the
-ch1/2/6 foundation (so it measures the integrator as it ships —
+ch1/2/3/6/§8.8 foundation (so it measures the integrator as it ships —
 `RUBI_NO_FOUNDATION` to disable; **pre-2026-07-04 4.1 baselines are not
 comparable**); run suites **sequentially** — concurrent benchmark runs
 contaminate each other's driver/verifier timing.
@@ -563,24 +578,16 @@ climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
 hypergeometric verification false-wrongs). Diagnose any stall per the Method
 note — trace the residual integrand, don't trust the predicate census.
 
-- **R17 — bundle the PolyLog-producing rule families** (closes the R16
-  residual #112/#197/#294 — `(c+d·x)^m·trig/(a+b·sin)` chains whose results
-  carry `Log[complex]` + `PolyLog[2..4]`; the numeric PolyLog kernel landed
-  2026-07-09, so the results now VERIFY, but the symbolic rules that PRODUCE
-  PolyLog are not bundled — confirmed `∫x³·Eˣ/(a+b·Eˣ)` does not close).
-  Shopping list from the R16 Rubi traces: (a) the missing Ch2 `2.2
-  (c+d x)^m (F^(g(e+f x)))^n (a+b …)^p` reductions (`∫x^m·F^{gx}/(a+b·F^{gx})^p`;
-  only 4 of the family are currently bundled; Rubi rule 5030 is the 4.1.10
-  entry point), and (b) the Chapter-3 Logarithms PolyLog producers —
-  sections 3.1.5, 3.2.3, 3.3, 3.4, 3.5 (`∫x^k·Log[a+b·F^{gx}]` → PolyLog
-  telescope). None of Ch3 is bundled today. Then a trig→exp routing fallback
-  (single-exponential normalization + partial fractions in `y=E^{iw}`, gated
-  by the fail-closed numeric self-check) closes all three targets.
+- **Ch3 unsolved tail** (47/120 at s120 seed5). Dominant families: the deep
+  multi-step `(f x)^m (d+e x^r)^q (a+b Log[c x^n])^p` and Möbius-argument
+  `Log[e((a+b x)/(c+d x))^n]` chains (3.1.4 / 3.2.x) that exceed the by-parts
+  recursion depth, plus `Log`-of-nested-power forms (3.3–3.5). Tractable
+  incrementally.
 - **R3′ — residual half-integer/elliptic chains.** #604/#609/#1395 were closed
-  by R9's cosine shift; what remains is the genuinely deep tail: #53 (23-step
-  half-integer Fresnel chain), #248 (48 steps), #294, plus the composite
-  `cot^m/(a+b·sin)^n` / `(a+b·sin²)^(p/2)` tan/cot-power recursions (4.1.1.3 /
-  4.1.7), which may fold into R5.
+  by R9's cosine shift, #294 by R17's exp-route telescope; what remains is the
+  genuinely deep tail: #53 (23-step half-integer Fresnel chain), #248 (48
+  steps), plus the composite `cot^m/(a+b·sin)^n` / `(a+b·sin²)^(p/2)`
+  tan/cot-power recursions (4.1.1.3 / 4.1.7), which may fold into R5.
 - **R5 — `TrigSimplify`/`TrigSimplifyQ`** (Pythagorean reductions). _Low value /
   optional:_ the predicate census over-weights it (it's a late catch-all, not a
   blocker). Only pursue if R14/R3′ leave a concrete residual class that needs

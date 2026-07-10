@@ -49,6 +49,31 @@ const fail = (why: string): never => {
 // Builder: corpus MathJSON + bindings → BoxedExpression
 // ---------------------------------------------------------------------------
 
+/** Structural ReplaceAll: return `u` with every subexpression structurally
+ * equal to `target` replaced by `replacement` (Mathematica `u /. target ->
+ * replacement`). Used by the general form of Rubi's `Subst` (see the Subst
+ * case in build). If `target` does not occur, `u` is returned unchanged — a
+ * safe outcome for the back-substitution rules, whose pre-substitution form
+ * differs from the intended one only by a branch-constant offset in the log
+ * argument (equal on the positive-real verification domain). */
+function replaceSubexpr(
+  u: Expression,
+  target: Expression,
+  replacement: Expression
+): Expression {
+  if (u.isSame(target)) return replacement;
+  const ops = u.ops;
+  if (!ops) return u;
+  let changed = false;
+  const newOps = ops.map((op) => {
+    const r = replaceSubexpr(op, target, replacement);
+    if (r !== op) changed = true;
+    return r;
+  });
+  if (!changed) return u;
+  return u.engine.function(u.operator, newOps);
+}
+
 export function build(json: Json, ctx: Ctx): Expression {
   const { ce, env } = ctx;
   if (typeof json === 'number') return ce.number(json);
@@ -68,7 +93,7 @@ export function build(json: Json, ctx: Ctx): Expression {
       return ctx.hooks.int(f) ?? ce._fn('Integrate', [f, ce.symbol(ctx.x)]);
     }
     case 'Subst': {
-      // Subst[u, x, v]: integrate/transform u, then substitute x → v.
+      // Subst[u, y, v]: integrate/transform u, then substitute y → v.
       // When u is itself Int[…], a failed inner integration fails the
       // rule (substituting into an inert integral is not useful).
       if (args.length !== 3) return fail('Subst arity');
@@ -83,7 +108,19 @@ export function build(json: Json, ctx: Ctx): Expression {
         u = F;
       } else u = build(args[0], ctx);
       const v = build(args[2], ctx);
-      return u.subs({ [ctx.x]: v }).evaluate();
+      // Rubi's Subst has two forms. The common one, Subst[u, x, v], has the
+      // integration variable as its middle argument and substitutes x → v.
+      // The general form Subst[u, expr, v] := u /. expr -> v replaces the
+      // subexpression `expr` (a non-variable, e.g. the expanded log argument
+      // c·dⁿ·(e+f·x)^{m·n}) with `v` — used by the 6 "power-in-log" /
+      // radical back-substitution rules (1.1.3.1 #44/#45, 1.1.3.2 #103/#104,
+      // 3.2.2 #15, 3.3 #60). Dispatching on args[1] here is essential:
+      // substituting ctx.x for those compound middles rewrites `x` itself and
+      // corrupts the antiderivative (spurious powers in the log argument).
+      const target = build(args[1], ctx);
+      if (target.symbol === ctx.x)
+        return u.subs({ [ctx.x]: v }).evaluate();
+      return replaceSubexpr(u, target, v).evaluate();
     }
     case 'Rational':
       // NOTE: ce.number() does not accept a MathJSON array (spins) — box
@@ -997,6 +1034,24 @@ const PRED_FNS: Record<string, PredFn> = {
     const u = build(args[0], ctx);
     return u.operator !== 'Add' && u.operator !== 'Subtract';
   },
+  // ProductQ[u] := u is a Times expression (IntegrationUtilityFunctions.m).
+  ProductQ: (args, ctx) => build(args[0], ctx).operator === 'Multiply',
+  // MemberQ[{e1,…,en}, u] := u is structurally one of the list elements.
+  // Chapter-3 uses it to test whether a captured head F is an inverse
+  // trig/hyperbolic function (ArcSin/ArcCos/ArcSinh/ArcCosh).
+  MemberQ: (args, ctx) => {
+    const list = args[0];
+    if (!Array.isArray(list) || list[0] !== 'List') return false;
+    const elem = build(args[1], ctx);
+    return (list as Json[])
+      .slice(1)
+      .some((e) => build(e, ctx).isSame(elem));
+  },
+  // IntegralFreeQ[u] := u contains no inert integral node
+  // (IntegrationUtilityFunctions.m: FreeQ of Int/Integral/Unintegrable/
+  // CannotIntegrate). Gates a Chapter-3 rule on its IntHide result closing.
+  IntegralFreeQ: (args, ctx) =>
+    !build(args[0], ctx).has('Integrate'),
   AtomQ: (args, ctx) => !build(args[0], ctx).ops,
   OddQ: (args, ctx) => {
     const r = realNum(build(args[0], ctx).evaluate());
@@ -4214,6 +4269,59 @@ const VALUE_FNS: Record<string, ValueFn> = {
   // simplifier (referenced by the exponential/log rules).
   SimplifyIntegrand: (args, ctx) => safeSimplify(build(args[0], ctx)),
 
+  // IntHide[u, x] := Block[{$ShowSteps=False}, Int[u,x]] — integrate u with
+  // steps hidden. The Chapter-3 by-parts log rules bind `u = IntHide[…]` (the
+  // antiderivative of the non-log factor), then emit `u·log(…) − ∫u·D[log]`.
+  // Recurse through the driver's `int` hook; a sub-integral that does not close
+  // (null, or a residual inert Integrate) must FAIL the rule rather than leave
+  // an inert integral in the binding — otherwise the by-parts result would
+  // carry an unusable `Integrate` node (mirrors the Subst inner-Int guard).
+  IntHide: (args, ctx) => {
+    const F = ctx.hooks.int(build(args[0], ctx));
+    if (F === null || F.has('Integrate'))
+      return fail('IntHide: sub-integral did not close');
+    return F;
+  },
+
+  // Cancel[u] — Mathematica's rational-function common-factor canceller;
+  // FullSimplify[u] — its deepest simplifier. Both approximated by the
+  // rubi-safe bounded simplifier (never raw .simplify(), which can recurse).
+  Cancel: (args, ctx) => safeSimplify(build(args[0], ctx)),
+  FullSimplify: (args, ctx) => safeSimplify(build(args[0], ctx)),
+
+  // Part[list, n] — 1-indexed element extraction (WL lst[[n]]). Used to read
+  // RationalFunctionExponents[u,x][[2]] (the denominator degree).
+  Part: (args, ctx) => {
+    const list = build(args[0], ctx);
+    const n = realNum(build(args[1], ctx));
+    if (list.operator !== 'List' || !list.ops || n === null || !Number.isInteger(n))
+      return fail('Part: not a list / bad index');
+    const idx = n < 0 ? list.ops.length + n : n - 1;
+    if (idx < 0 || idx >= list.ops.length) return fail('Part: index out of range');
+    return list.ops[idx];
+  },
+
+  // RationalFunctionExponents[u, x] := {numerator-degree, denominator-degree}
+  // of u as a rational function of x (IntegrationUtilityFunctions.m). Drives
+  // the ∫Pq^m·Log[u] → PolyLog[2,1-u] rule's degree guard. Fails closed when u
+  // is not a rational function of x.
+  RationalFunctionExponents: (args, ctx) => {
+    const u = build(args[0], ctx);
+    const { num, den } = asNumDen(u);
+    const dn = polyDegreeX(num, ctx.x);
+    const dd = polyDegreeX(den, ctx.x);
+    if (dn < 0 || dd < 0)
+      return fail('RationalFunctionExponents: not a rational function');
+    return ctx.ce.function('List', [ctx.ce.number(dn), ctx.ce.number(dd)]);
+  },
+
+  // FunctionOfLog[u, x] and SubstForFractionalPowerOfLinear[u, x] — Rubi
+  // pattern-recognizers returning a substitution tuple or False. Each is used
+  // by a single Chapter-3 rule gated on `Not[FalseQ[lst]]`; a faithful
+  // implementation is disproportionate, so return False (rule fails closed).
+  FunctionOfLog: (_args, ctx) => ctx.ce.symbol('False'),
+  SubstForFractionalPowerOfLinear: (_args, ctx) => ctx.ce.symbol('False'),
+
   // SubstFor[w, v, u, x] / SubstFor[v, u, x] — substitute the trig
   // subexpression v by x in u (times w), for the trig-substitution rules
   // 4.7.5 #15–#34. Handles the pure sin/cos/tan/cot targets with inner
@@ -4651,6 +4759,388 @@ export function expandRationalOverLinears(
       : [expanded];
   if (pieces.length < 2) return null;
   return pieces;
+}
+
+// ---------------------------------------------------------------------------
+// R17: single-angle trig-rational → single-exponential normalization fallback.
+//
+// For `∫P(x)·R(trig(w)) dx` with P a polynomial in x, w = e+f·x LINEAR, and R a
+// rational function of trig heads (sin/cos/tan/cot/sec/csc) all sharing the SAME
+// linear argument w, rewrite every trig factor via the single exponential
+// y = E^{i·w} (`sin w = (y-1/y)/(2i)`, `cos w = (y+1/y)/2`, …). The trig part
+// becomes a rational function Q(y); its denominator (from `a+b·sin`, `csc`, …)
+// factors into LINEAR factors in y (roots `i·(a±√(a²−b²))/b` and ±1, ±i). A
+// linear-factor partial fraction of Q(y) (reusing `expandRationalOverLinears`)
+// then yields pieces `c·y^k/(y−r)^s`, and substituting back y = E^{i·w} turns
+// each into `∫P(x)·E^{k·i·w}/(a+b·E^{i·w})^s` — the Chapter-2 §2.2 / Chapter-3 /
+// §8.8 PolyLog telescope the bundle already closes.
+//
+// Rubi reaches these via ExpandIntegrand's E^{ix} expansion of ACTIVE linear-arg
+// Sin; CE deliberately INERTS linear-arg trig (`deactivateTrig`, load-bearing
+// for the whole chapter), so those rules can't fire — hence this driver-level
+// fallback. Declines fast (and fail-closed with the driver's numeric D-check) on
+// anything but the single-angle additive-denominator shape.
+// ---------------------------------------------------------------------------
+
+/** For an inert trig head, the pair [N(y), D(y)] with `head(w) = N(y)/D(y)` at
+ *  y = E^{i·w}: `sin=(y²−1)/(2i·y)`, `cos=(y²+1)/(2y)`, `tan=−i(y²−1)/(y²+1)`,
+ *  `cot=i(y²+1)/(y²−1)`, `sec=2y/(y²+1)`, `csc=2i·y/(y²−1)`. */
+function trigHeadYForm(
+  ce: ComputeEngine,
+  head: string,
+  y: Expression
+): [Expression, Expression] | null {
+  const y2 = y.pow(2);
+  const I = ce.I;
+  const two = ce.number(2);
+  const yPlus = (k: number): Expression =>
+    ce.function('Add', [y2, ce.number(k)]);
+  switch (head) {
+    case 'sin':
+      return [yPlus(-1), two.mul(I).mul(y)];
+    case 'cos':
+      return [yPlus(1), two.mul(y)];
+    case 'tan':
+      return [I.neg().mul(yPlus(-1)), yPlus(1)];
+    case 'cot':
+      return [I.mul(yPlus(1)), yPlus(-1)];
+    case 'sec':
+      return [two.mul(y), yPlus(1)];
+    case 'csc':
+      return [two.mul(I).mul(y), yPlus(-1)];
+  }
+  return null;
+}
+
+/** Factor a polynomial in `y` of degree ≤ 2 into its leading coefficient and
+ *  its (linear-factor) roots — `c₂(y−r₁)(y−r₂)`, `c₁(y−r₀)`, or a constant `c₀`.
+ *  Degree-2 roots come from the quadratic formula (roots may be complex or carry
+ *  a symbolic surd `√(…)`). Returns null when `poly` is not a polynomial in `y`
+ *  or has degree > 2 (the "messy roots" decline). */
+function factorLinearsY(
+  ce: ComputeEngine,
+  poly: Expression,
+  yName: string
+): { lead: Expression; roots: Expression[] } | null {
+  const coeffs = polyCoeffsX(poly, yName);
+  if (coeffs === null) return null;
+  let d = coeffs.length - 1;
+  while (d > 0 && zeroQ(coeffs[d])) d--;
+  if (d === 0) return { lead: coeffs[0], roots: [] };
+  if (d === 1)
+    return { lead: coeffs[1], roots: [coeffs[0].neg().div(coeffs[1]).evaluate()] };
+  if (d === 2) {
+    const [c0, c1, c2] = coeffs;
+    // Normalize to monic (b₁ = c₁/c₂, b₀ = c₀/c₂) BEFORE the quadratic formula:
+    // the roots are the same, but the monic discriminant `b₁²−4b₀` keeps a
+    // symbolic surd in a form the residue simplify collapses cleanly (e.g.
+    // `√(1−a²/b²)`), whereas `√(c₁²−4c₂c₀)` leaves a `√(…)/c₂` the §2.2 matcher
+    // can't see through after the partial fraction.
+    const b1 = c1.div(c2).evaluate();
+    const b0 = c0.div(c2).evaluate();
+    const disc = b1.pow(2).sub(ce.number(4).mul(b0)).evaluate();
+    const sq = ce.function('Sqrt', [disc]);
+    const two = ce.number(2);
+    return {
+      lead: c2,
+      roots: [
+        b1.neg().add(sq).div(two).evaluate(),
+        b1.neg().sub(sq).div(two).evaluate(),
+      ],
+    };
+  }
+  return null;
+}
+
+/** The single shared LINEAR trig argument `w` of every inert trig head in the
+ *  (deactivated) expression, or null if the heads disagree, some argument is
+ *  non-linear in `x`, or no trig head appears (mixed-angle / nonlinear decline). */
+function sharedLinearTrigArg(
+  u: Expression,
+  x: string
+): Expression | null {
+  let w: Expression | null = null;
+  let ok = true;
+  const walk = (e: Expression): void => {
+    if (!ok) return;
+    if (INERT_TRIG.has(e.operator) && e.ops?.length === 1) {
+      const arg = e.ops[0];
+      if (polyDegreeX(arg, x) !== 1) {
+        ok = false;
+        return;
+      }
+      if (w === null) w = arg;
+      else if (!w.isSame(arg)) {
+        ok = false;
+        return;
+      }
+    }
+    (e.ops ?? []).forEach(walk);
+  };
+  walk(u);
+  return ok ? w : null;
+}
+
+/** Split one term of an additive trig atom (`a + b·trig(w)`) into either a
+ *  trig-free constant (`head: null`) or `coef · trig(w)` (bare, power-1). Returns
+ *  null on anything else (x-dependent coefficient, a trig power, a nested trig,
+ *  a wrong argument). */
+function splitTrigTerm(
+  ce: ComputeEngine,
+  t: Expression,
+  w: Expression,
+  x: string
+): { head: string | null; coef: Expression } | null {
+  t = toTimesPower(ce, t);
+  if (!containsInertTrig(t)) {
+    if (t.has(x)) return null; // x-dependent additive term ⇒ not (a+b·trig)
+    return { head: null, coef: t };
+  }
+  if (INERT_TRIG.has(t.operator) && t.ops?.length === 1)
+    return t.ops[0].isSame(w) ? { head: t.operator, coef: ce.One } : null;
+  if (t.operator === 'Multiply' && t.ops) {
+    let head: string | null = null;
+    const rest: Expression[] = [];
+    for (const f of t.ops) {
+      if (INERT_TRIG.has(f.operator) && f.ops?.length === 1) {
+        if (head !== null) return null; // two trig factors in one term
+        if (!f.ops[0].isSame(w)) return null;
+        head = f.operator;
+      } else if (containsInertTrig(f)) return null; // trig power / nested trig
+      else if (f.has(x)) return null; // x-dependent coefficient
+      else rest.push(f);
+    }
+    if (head === null) return null;
+    return {
+      head,
+      coef: rest.length === 0 ? ce.One : ce.function('Multiply', rest),
+    };
+  }
+  return null;
+}
+
+/** Rewrite one trig atom's `base` as the y-rational `num(y)/den(y)` (both
+ *  polynomials in y). Handles a bare trig head `trig(w)` and an additive
+ *  `a + b·trig(w)` whose trig terms all share ONE head with argument w. Returns
+ *  null for mixed-head sums, wrong argument, or a non-additive/non-trig base. */
+function trigAtomNumDen(
+  ce: ComputeEngine,
+  base: Expression,
+  w: Expression,
+  y: Expression,
+  x: string
+): { num: Expression; den: Expression } | null {
+  if (INERT_TRIG.has(base.operator) && base.ops?.length === 1) {
+    if (!base.ops[0].isSame(w)) return null;
+    const nd = trigHeadYForm(ce, base.operator, y);
+    return nd === null ? null : { num: nd[0], den: nd[1] };
+  }
+  if (base.operator === 'Add' && base.ops) {
+    let head: string | null = null;
+    let coefSum: Expression = ce.Zero;
+    let constSum: Expression = ce.Zero;
+    for (const t of base.ops) {
+      const info = splitTrigTerm(ce, t, w, x);
+      if (info === null) return null;
+      if (info.head === null) constSum = constSum.add(info.coef);
+      else {
+        if (head !== null && head !== info.head) return null; // mixed heads
+        head = info.head;
+        coefSum = coefSum.add(info.coef);
+      }
+    }
+    if (head === null) return null;
+    const nd = trigHeadYForm(ce, head, y);
+    if (nd === null) return null;
+    const [N, D] = nd;
+    return { num: ce.function('Add', [constSum.mul(D), coefSum.mul(N)]), den: D };
+  }
+  return null;
+}
+
+/** Pick a symbol name for the exponential variable y that does not occur in the
+ *  integrand (nor is the integration variable). */
+function freshYSymbol(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): Expression {
+  const used = new Set<string>([x]);
+  const collect = (e: Expression): void => {
+    if (e.symbol) used.add(e.symbol);
+    (e.ops ?? []).forEach(collect);
+  };
+  collect(integrand);
+  for (const n of ['y', 't', 's', 'u', 'ξ', 'ζ', 'η', 'θ', 'ψ', 'ω'])
+    if (!used.has(n)) return ce.symbol(n);
+  return ce.symbol('yRubi');
+}
+
+/** Analyze `∫P(x)·R(trig(w))` into the polynomial part P, the exponential
+ *  variable name, and the factored y-rational tally `{C, roots}` of R (so that
+ *  R(trig(w)) = C·∏(y−root)^exp at y = E^{i·w}). Returns null unless the
+ *  integrand is a product of a nontrivial polynomial in x and single-angle trig
+ *  factors WITH an additive `(a+b·trig)`-type denominator — the shape that
+ *  distinguishes this fallback from the pure reciprocal-square (R16) and
+ *  rational×sin/cos (R15) families. */
+function analyzeSingleAngleTrigRational(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+):
+  | {
+      w: Expression;
+      P: Expression;
+      C: Expression;
+      roots: Map<string, { root: Expression; exp: number }>;
+      yName: string;
+    }
+  | null {
+  const inert = toTimesPower(ce, deactivateTrig(ce, integrand, x));
+  if (inert.operator !== 'Multiply' || !inert.ops) return null;
+  const w = sharedLinearTrigArg(inert, x);
+  if (w === null) return null;
+  const y = freshYSymbol(ce, integrand, x);
+  const yName = y.symbol!;
+  let C: Expression = ce.One;
+  const roots = new Map<string, { root: Expression; exp: number }>();
+  const addRoot = (r: Expression, e: number): void => {
+    const k = r.toString();
+    const cur = roots.get(k);
+    roots.set(k, { root: r, exp: (cur?.exp ?? 0) + e });
+  };
+  const pFactors: Expression[] = [];
+  let hasAddDenom = false;
+  for (const f of inert.ops) {
+    if (!containsInertTrig(f)) {
+      if (f.has(x)) pFactors.push(f);
+      else C = C.mul(f);
+      continue;
+    }
+    let base = f;
+    let p = 1;
+    if (f.operator === 'Power' && f.ops) {
+      const pn = f.ops[1];
+      if (!(isNumber(pn) && pn.isInteger === true)) return null;
+      const pv = realNum(pn);
+      if (pv === null) return null;
+      base = f.ops[0];
+      p = pv;
+    }
+    const nd = trigAtomNumDen(ce, base, w, y, x);
+    if (nd === null) return null;
+    if (base.operator === 'Add' && p < 0) hasAddDenom = true;
+    const fn = factorLinearsY(ce, nd.num, yName);
+    const fd = factorLinearsY(ce, nd.den, yName);
+    if (fn === null || fd === null) return null;
+    C = C.mul(fn.lead.div(fd.lead).pow(p));
+    for (const r of fn.roots) addRoot(r, p);
+    for (const r of fd.roots) addRoot(r, -p);
+  }
+  if (!hasAddDenom) return null; // require an (a+b·trig)-type denominator
+  const P =
+    pFactors.length === 0
+      ? ce.One
+      : pFactors.length === 1
+        ? pFactors[0]
+        : ce.function('Multiply', pFactors);
+  if (polyDegreeX(P, x) < 1) return null; // require a nontrivial polynomial
+  if (polyCoeffsX(P, x) === null) return null;
+  return { w, P, C, roots, yName };
+}
+
+/** Cheap O(nodes) syntactic pre-filter for the R17 single-angle trig→exp
+ *  fallback: does an additive-trig DENOMINATOR literally occur — a
+ *  `Power(Add, negative)` whose `Add` base contains a trig head (active or
+ *  inert)? This is the `(a+b·sin)^{−n}` shape that distinguishes the fallback
+ *  from the pure reciprocal-square (R16, `csc²`) and rational×sin/cos (R15)
+ *  families, so it stays a near-zero-cost no-op off its shape. */
+export function hasSingleAngleTrigRationalCandidate(e: Expression): boolean {
+  if (e.operator === 'Power' && e.ops && e.ops.length === 2) {
+    const [base, exp] = e.ops;
+    if (
+      base.operator === 'Add' &&
+      isNumber(exp) &&
+      typeof exp.re === 'number' &&
+      exp.re < 0 &&
+      (containsInertTrig(base) || hasActiveTrig(base))
+    )
+      return true;
+  }
+  // Also match the raw (un-normalized) `Divide(_, Add-with-trig)` form: the
+  // driver normalizes to `Power(Add,−1)` before calling this, but a caller may
+  // pass a parsed integrand directly.
+  if (e.operator === 'Divide' && e.ops && e.ops.length === 2) {
+    const den = e.ops[1];
+    if (
+      den.operator === 'Add' &&
+      (containsInertTrig(den) || hasActiveTrig(den))
+    )
+      return true;
+  }
+  return (e.ops ?? []).some(hasSingleAngleTrigRationalCandidate);
+}
+
+/** True iff `integrand` is `∫P(x)·R(trig(w))` in the single-angle trig-rational
+ *  shape the R17 fallback handles (nontrivial polynomial P in x, all trig heads
+ *  sharing one LINEAR argument w, and an additive `(a+b·trig)`-type denominator).
+ *  Declines pure reciprocal-square (`poly·csc²`, R16 territory), nonlinear trig
+ *  arguments, and mixed-angle trig. The gate for the fallback and its tests. */
+export function singleAngleTrigRationalQ(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): boolean {
+  return analyzeSingleAngleTrigRational(ce, integrand, x) !== null;
+}
+
+/** R17 support: expand `∫P(x)·R(trig(w))` into the list of x-integrand pieces
+ *  `P(x)·(c·y^k/(y−r)^s)[y → E^{i·w}]` — each a Chapter-2 §2.2 / §8.8 shape the
+ *  bundled rules close. Rewrites R to the y-rational tally, builds Q(y), partial-
+ *  fractions it over its linear y-factors (reusing `expandRationalOverLinears`),
+ *  and substitutes y = E^{i·w}. Returns null when the integrand is not in the
+ *  single-angle additive-denominator shape. */
+export function singleAngleExponentialPieces(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): Expression[] | null {
+  const info = analyzeSingleAngleTrigRational(ce, integrand, x);
+  if (info === null) return null;
+  const { w, P, C, roots, yName } = info;
+  const y = ce.symbol(yName);
+  // Build Q(y) WITHOUT the (y-free) constant C: a symbolic C carrying a
+  // parameter in a denominator (e.g. `−4/a`, `i/b`) is a `Power(a,−1)` factor
+  // that `expandPolyOverLinear` rejects as non-polynomial. Partial fraction is
+  // linear, so factoring C out and multiplying it back into each piece is exact.
+  const factors: Expression[] = [];
+  for (const { root, exp } of roots.values()) {
+    if (exp === 0) continue;
+    const lin = ce.function('Add', [y, root.neg()]); // (y − root)
+    factors.push(exp === 1 ? lin : lin.pow(exp));
+  }
+  const Qy =
+    factors.length === 0
+      ? ce.One
+      : factors.length === 1
+        ? factors[0]
+        : ce.function('Multiply', factors);
+  // Linear-factor partial fraction in y (reuses R15's machinery). When it does
+  // not split (single piece — a proper `c/(y−r)^s`), integrate the whole thing;
+  // that single piece is still a §2.2 shape and, being trig-free after the
+  // y = E^{i·w} substitution, cannot re-enter this fallback.
+  const pieces = expandRationalOverLinears(ce, Qy, yName) ?? [Qy];
+  const Y = ce.E.pow(ce.I.mul(w)); // E^{i·w}
+  return pieces.map((pc) => {
+    // Collapse each piece's (possibly messy surd) residue coefficient to a clean
+    // constant BEFORE the substitution: a symbolic-root residue like
+    // `1/(r₁−r₂)` otherwise leaves the denominator an un-collected sum that the
+    // §2.2 matcher can't see as `a+b·E^{i·w}`. The piece is a small rational
+    // function of y, so this simplify is cheap; a deadline throw propagates to
+    // the driver's fallback try/catch. Value-preserving.
+    const pcs = pc.simplify();
+    return ce.function('Multiply', [P, C, pcs.subs({ [yName]: Y })]);
+  });
 }
 
 function coeff(args: Json[], ctx: Ctx): Expression {

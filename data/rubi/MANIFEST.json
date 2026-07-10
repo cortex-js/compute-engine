@@ -1,6 +1,6 @@
 {
  "schemaVersion": 1,
- "generated": "2026-06-16",
+ "generated": "2026-07-10",
  "generator": "scripts/rubi/translate.ts",
  "upstream": {
   "name": "Rubi",
@@ -8,722 +8,125 @@
   "version": "4.17.3.0",
   "note": "extracted from the release tarball; rule order within each file is Rubi’s match-priority order",
   "pin": {
-   "sha256": "5aa4eaeae99957fadb68195f7c60c644bf3499bfb13cb4c4a6b8873fa9c0c84a",
+   "sha256": "36569ad9e8b850fbff557ae418f1a19ff63d991bf9bdf26893a64d3236089b9e",
    "method": "sha256 over the translated IntegrationRules/**/*.m files, sorted, concatenated",
-   "fileCount": 140
+   "fileCount": 21
   },
   "license": "MIT, Copyright (c) 2018 Rule-based Integration Organization"
  },
  "scope": [
-  "1 Algebraic functions",
-  "2 Exponentials",
-  "4 Trig functions",
-  "6 Hyperbolic functions"
+  "3 Logarithms",
+  "8 Special functions"
  ],
  "counts": {
-  "files": 140,
-  "rules": 5279,
+  "files": 21,
+  "rules": 644,
   "skipped": 0
  },
  "files": [
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.1 (a+b x)^m.m",
-   "rules": 34,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
-   "rules": 47,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.3 (a+b x)^m (c+d x)^n (e+f x)^p.m",
-   "rules": 77,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.4 (a+b x)^m (c+d x)^n (e+f x)^p (g+h x)^q.m",
-   "rules": 48,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.5 P(x) (a+b x)^m (c+d x)^n.m",
-   "rules": 7,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.6 P(x) (a+b x)^m (c+d x)^n (e+f x)^p.m",
-   "rules": 7,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.7 P(x) (a+b x)^m (c+d x)^n (e+f x)^p (g+h x)^q.m",
-   "rules": 15,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.1 (a+b x^2)^p.m",
-   "rules": 33,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.10 P(x) (a+b x^2)^p.m",
+   "file": "3 Logarithms/3.1.1 (a+b log(c x^n))^p.m",
    "rules": 6,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.11 P(x) (c x)^m (a+b x^2)^p.m",
-   "rules": 10,
+   "file": "3 Logarithms/3.1.2 (d x)^m (a+b log(c x^n))^p.m",
+   "rules": 12,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.12 P(x) (c+d x)^n (a+b x^2)^p.m",
-   "rules": 16,
+   "file": "3 Logarithms/3.1.3 (d+e x^r)^q (a+b log(c x^n))^p.m",
+   "rules": 21,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.13 P(x) (e x)^m (c+d x)^n (a+b x^2)^p.m",
-   "rules": 6,
+   "file": "3 Logarithms/3.1.4 (f x)^m (d+e x^r)^q (a+b log(c x^n))^p.m",
+   "rules": 29,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.14 P(x) (c+d x)^m (e+f x)^n (a+b x^2)^p.m",
-   "rules": 3,
+   "file": "3 Logarithms/3.1.5 u (a+b log(c x^n))^p.m",
+   "rules": 59,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.2 (c x)^m (a+b x^2)^p.m",
-   "rules": 40,
+   "file": "3 Logarithms/3.2.1 (f+g x)^m (A+B log(e ((a+b x) over (c+d x))^n))^p.m",
+   "rules": 24,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.3 (a+b x^2)^p (c+d x^2)^q.m",
-   "rules": 55,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.4 (e x)^m (a+b x^2)^p (c+d x^2)^q.m",
-   "rules": 67,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.5 (a+b x^2)^p (c+d x^2)^q (e+f x^2)^r.m",
-   "rules": 39,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.6 (g x)^m (a+b x^2)^p (c+d x^2)^q (e+f x^2)^r.m",
-   "rules": 20,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.7 (c+d x)^n (a+b x^2)^p.m",
-   "rules": 65,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.8 (e x)^m (c+d x)^n (a+b x^2)^p.m",
-   "rules": 123,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.9 (c+d x)^m (e+f x)^n (a+b x^2)^p.m",
-   "rules": 108,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.1 (a+b x^n)^p.m",
-   "rules": 47,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.2 (c x)^m (a+b x^n)^p.m",
-   "rules": 106,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.3 (a+b x^n)^p (c+d x^n)^q.m",
-   "rules": 67,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.4 (e x)^m (a+b x^n)^p (c+d x^n)^q.m",
-   "rules": 78,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.5 (a+b x^n)^p (c+d x^n)^q (e+f x^n)^r.m",
+   "file": "3 Logarithms/3.2.2 (f+g x)^m (h+i x)^q (A+B log(e ((a+b x) over (c+d x))^n))^p.m",
    "rules": 19,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.6 (g x)^m (a+b x^n)^p (c+d x^n)^q (e+f x^n)^r.m",
-   "rules": 40,
+   "file": "3 Logarithms/3.2.3 u log(e (f (a+b x)^p (c+d x)^q)^r)^s.m",
+   "rules": 20,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.7 P(x) (a+b x^n)^p.m",
-   "rules": 52,
+   "file": "3 Logarithms/3.3 u (a+b log(c (d+e x)^n))^p.m",
+   "rules": 61,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.8 P(x) (c x)^m (a+b x^n)^p.m",
-   "rules": 33,
+   "file": "3 Logarithms/3.4 u (a+b log(c (d+e x^m)^n))^p.m",
+   "rules": 39,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.4 Improper/1.1.4.1 (a x^j+b x^n)^p.m",
-   "rules": 13,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.4 Improper/1.1.4.2 (c x)^m (a x^j+b x^n)^p.m",
-   "rules": 21,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.4 Improper/1.1.4.3 (e x)^m (a x^j+b x^k)^p (c+d x^n)^q.m",
-   "rules": 9,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.1 Binomial products/1.1.4 Improper/1.1.4.4 P(x) (c x)^m (a x^j+b x^n)^p.m",
-   "rules": 11,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.1 (a+b x+c x^2)^p.m",
-   "rules": 21,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.2 (d+e x)^m (a+b x+c x^2)^p.m",
-   "rules": 83,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.3 (d+e x)^m (f+g x)^n (a+b x+c x^2)^p.m",
-   "rules": 113,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.4 (a+b x+c x^2)^p (d+e x+f x^2)^q.m",
-   "rules": 35,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.5 (g+h x)^m (a+b x+c x^2)^p (d+e x+f x^2)^q.m",
-   "rules": 50,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.6 P(x) (a+b x+c x^2)^p.m",
-   "rules": 5,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.7 P(x) (d+e x)^m (a+b x+c x^2)^p.m",
-   "rules": 33,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.8 P(x) (d+e x)^m (f+g x)^n (a+b x+c x^2)^p.m",
-   "rules": 3,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.9 P(x) (a+b x+c x^2)^p (d+e x+f x^2)^q.m",
-   "rules": 26,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.1 (a+b x^2+c x^4)^p.m",
-   "rules": 40,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.2 (d x)^m (a+b x^2+c x^4)^p.m",
+   "file": "3 Logarithms/3.5 Miscellaneous logarithms.m",
    "rules": 44,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.3 (d+e x^2)^q (a+b x^2+c x^4)^p.m",
-   "rules": 109,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.4 (f x)^m (d+e x^2)^q (a+b x^2+c x^4)^p.m",
-   "rules": 107,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.5 P(x) (a+b x^2+c x^4)^p.m",
-   "rules": 8,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.6 P(x) (d x)^m (a+b x^2+c x^4)^p.m",
-   "rules": 7,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.7 P(x) (d+e x^2)^q (a+b x^2+c x^4)^p.m",
-   "rules": 54,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.8 P(x) (d+e x)^q (a+b x^2+c x^4)^p.m",
-   "rules": 21,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.1 (a+b x^n+c x^(2 n))^p.m",
-   "rules": 11,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.2 (d x)^m (a+b x^n+c x^(2 n))^p.m",
-   "rules": 37,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.3 (d+e x^n)^q (a+b x^n+c x^(2 n))^p.m",
-   "rules": 65,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.4 (f x)^m (d+e x^n)^q (a+b x^n+c x^(2 n))^p.m",
-   "rules": 114,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.5 P(x) (a+b x^n+c x^(2 n))^p.m",
-   "rules": 23,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.6 P(x) (d x)^m (a+b x^n+c x^(2 n))^p.m",
-   "rules": 25,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.4 Improper/1.2.4.1 (a x^q+b x^n+c x^(2 n-q))^p.m",
-   "rules": 9,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.4 Improper/1.2.4.2 (d x)^m (a x^q+b x^n+c x^(2 n-q))^p.m",
-   "rules": 21,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.4 Improper/1.2.4.3 (d+e x^(n-q)) (a x^q+b x^n+c x^(2 n-q))^p.m",
-   "rules": 8,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.4 Improper/1.2.4.4 (f x)^m (d+e x^(n-q)) (a x^q+b x^n+c x^(2 n-q))^p.m",
-   "rules": 16,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.3 Polynomial products/1.3.1 u (a+b x+c x^2+d x^3)^p.m",
-   "rules": 20,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.3 Polynomial products/1.3.2 u (a+b x+c x^2+d x^3+e x^4)^p.m",
-   "rules": 18,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.3 Polynomial products/1.3.3 P(x)^p.m",
-   "rules": 20,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.3 Polynomial products/1.3.4 P(x) Q(x)^p.m",
-   "rules": 21,
-   "errors": 0
-  },
-  {
-   "file": "1 Algebraic functions/1.4 Miscellaneous/1.4.1 Algebraic function simplification.m",
+   "file": "8 Special functions/8.1 Error functions.m",
    "rules": 69,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.4 Miscellaneous/1.4.2 Algebraic function normalization.m",
-   "rules": 29,
+   "file": "8 Special functions/8.10 Bessel functions.m",
+   "rules": 3,
    "errors": 0
   },
   {
-   "file": "1 Algebraic functions/1.4 Miscellaneous/1.4.3 Miscellaneous algebraic functions.m",
-   "rules": 60,
+   "file": "8 Special functions/8.2 Fresnel integral functions.m",
+   "rules": 55,
    "errors": 0
   },
   {
-   "file": "2 Exponentials/2.1 (c+d x)^m (a+b (F^(g (e+f x)))^n)^p.m",
-   "rules": 13,
-   "errors": 0
-  },
-  {
-   "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
-   "rules": 4,
-   "errors": 0
-  },
-  {
-   "file": "2 Exponentials/2.3 Miscellaneous exponentials.m",
-   "rules": 108,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.0.1 (a sin)^m (b trg)^n.m",
-   "rules": 27,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.0.2 (a trg)^m (b tan)^n.m",
-   "rules": 30,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.0.3 (a csc)^m (b sec)^n.m",
-   "rules": 14,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.1.1 (a+b sin)^n.m",
-   "rules": 33,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.1.2 (g cos)^p (a+b sin)^m.m",
-   "rules": 39,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.1.3 (g tan)^p (a+b sin)^m.m",
-   "rules": 28,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.10 (c+d x)^m (a+b sin)^n.m",
-   "rules": 33,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.11 (e x)^m (a+b x^n)^p sin.m",
-   "rules": 22,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.12 (e x)^m (a+b sin(c+d x^n))^p.m",
-   "rules": 94,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.13 (d+e x)^m sin(a+b x+c x^2)^n.m",
-   "rules": 28,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.2.1 (a+b sin)^m (c+d sin)^n.m",
-   "rules": 99,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.2.2 (g cos)^p (a+b sin)^m (c+d sin)^n.m",
-   "rules": 95,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.2.3 (g sin)^p (a+b sin)^m (c+d sin)^n.m",
-   "rules": 38,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.3.1 (a+b sin)^m (c+d sin)^n (A+B sin).m",
-   "rules": 44,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.4.1 (a+b sin)^m (A+B sin+C sin^2).m",
-   "rules": 19,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.4.2 (a+b sin)^m (c+d sin)^n (A+B sin+C sin^2).m",
-   "rules": 42,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.5 trig^m (a cos+b sin)^n.m",
-   "rules": 43,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.6 (a+b cos+c sin)^n.m",
-   "rules": 57,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.7 (d trig)^m (a+b (c sin)^n)^p.m",
-   "rules": 73,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.8 trig^m (a+b cos^p+c sin^q)^n.m",
-   "rules": 8,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.1 Sine/4.1.9 trig^m (a+b sin^n+c sin^(2 n))^p.m",
-   "rules": 52,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.1.1 (a+b tan)^n.m",
-   "rules": 13,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.1.2 (d sec)^m (a+b tan)^n.m",
-   "rules": 32,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.1.3 (d sin)^m (a+b tan)^n.m",
-   "rules": 6,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.10 (c+d x)^m (a+b tan)^n.m",
-   "rules": 27,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.11 (e x)^m (a+b tan(c+d x^n))^p.m",
-   "rules": 20,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.12 (d+e x)^m tan(a+b x+c x^2)^n.m",
-   "rules": 8,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.2.1 (a+b tan)^m (c+d tan)^n.m",
-   "rules": 58,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.2.3 (g tan)^p (a+b tan)^m (c+d tan)^n.m",
-   "rules": 8,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.3.1 (a+b tan)^m (c+d tan)^n (A+B tan).m",
-   "rules": 29,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.4.1 (a+b tan)^m (A+B tan+C tan^2).m",
-   "rules": 15,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.4.2 (a+b tan)^m (c+d tan)^n (A+B tan+C tan^2).m",
-   "rules": 25,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.7 (d trig)^m (a+b (c tan)^n)^p.m",
-   "rules": 25,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.3 Tangent/4.3.9 trig^m (a+b tan^n+c tan^(2 n))^p.m",
-   "rules": 34,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.1.1 (a+b sec)^n.m",
-   "rules": 20,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.1.2 (d sec)^n (a+b sec)^m.m",
-   "rules": 85,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.1.3 (d sin)^n (a+b sec)^m.m",
-   "rules": 8,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.1.4 (d tan)^n (a+b sec)^m.m",
-   "rules": 24,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.10 (c+d x)^m (a+b sec)^n.m",
-   "rules": 16,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.11 (e x)^m (a+b sec(c+d x^n))^p.m",
-   "rules": 18,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.2.1 (a+b sec)^m (c+d sec)^n.m",
-   "rules": 47,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.2.2 (g sec)^p (a+b sec)^m (c+d sec)^n.m",
-   "rules": 46,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.3.1 (a+b sec)^m (d sec)^n (A+B sec).m",
-   "rules": 45,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.4.1 (a+b sec)^m (A+B sec+C sec^2).m",
-   "rules": 31,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.4.2 (a+b sec)^m (d sec)^n (A+B sec+C sec^2).m",
-   "rules": 48,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.7 (d trig)^m (a+b (c sec)^n)^p.m",
-   "rules": 32,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.5 Secant/4.5.9 trig^m (a+b sec^n+c sec^(2 n))^p.m",
-   "rules": 28,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.7 Miscellaneous/(a sin(m x) + b cos(n x))^p.m",
-   "rules": 22,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.7 Miscellaneous/4.7.1 Sine normalization rules.m",
+   "file": "8 Special functions/8.3 Exponential integral functions.m",
    "rules": 26,
    "errors": 0
   },
   {
-   "file": "4 Trig functions/4.7 Miscellaneous/4.7.2 Tangent normalization rules.m",
-   "rules": 19,
+   "file": "8 Special functions/8.4 Trig integral functions.m",
+   "rules": 29,
    "errors": 0
   },
   {
-   "file": "4 Trig functions/4.7 Miscellaneous/4.7.3 Secant normalization rules.m",
+   "file": "8 Special functions/8.5 Hyperbolic integral functions.m",
+   "rules": 29,
+   "errors": 0
+  },
+  {
+   "file": "8 Special functions/8.6 Gamma functions.m",
    "rules": 24,
    "errors": 0
   },
   {
-   "file": "4 Trig functions/4.7 Miscellaneous/4.7.4 (c trig)^m (d trig)^n.m",
-   "rules": 50,
+   "file": "8 Special functions/8.7 Zeta function.m",
+   "rules": 5,
    "errors": 0
   },
   {
-   "file": "4 Trig functions/4.7 Miscellaneous/4.7.5 Inert trig functions.m",
-   "rules": 84,
+   "file": "8 Special functions/8.8 Polylogarithm function.m",
+   "rules": 26,
    "errors": 0
   },
   {
-   "file": "4 Trig functions/4.7 Miscellaneous/4.7.6 (c+d x)^m trig(a+b x)^n trig(a+b x)^p.m",
-   "rules": 28,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.7 Miscellaneous/4.7.7 F^(c (a+b x)) trig(d+e x)^n.m",
-   "rules": 46,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.7 Miscellaneous/4.7.8 u trig(a+b log(c x^n))^p.m",
-   "rules": 48,
-   "errors": 0
-  },
-  {
-   "file": "4 Trig functions/4.7 Miscellaneous/4.7.9 Active trig functions.m",
-   "rules": 104,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.1 Hyperbolic sine/6.1.10 (c+d x)^m (a+b sinh)^n.m",
-   "rules": 2,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.1 Hyperbolic sine/6.1.11 (e x)^m (a+b x^n)^p sinh.m",
-   "rules": 22,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.1 Hyperbolic sine/6.1.12 (e x)^m (a+b sinh(c+d x^n))^p.m",
-   "rules": 76,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.1 Hyperbolic sine/6.1.13 (d+e x)^m sinh(a+b x+c x^2)^n.m",
-   "rules": 24,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.3 Hyperbolic tangent/6.3.10 (c+d x)^m (a+b tanh)^n.m",
-   "rules": 2,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.3 Hyperbolic tangent/6.3.11 (e x)^m (a+b tanh(c+d x^n))^p.m",
-   "rules": 20,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.3 Hyperbolic tangent/6.3.12 (d+e x)^m tanh(a+b x+c x^2)^n.m",
-   "rules": 6,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.5 Hyperbolic secant/6.5.10 (c+d x)^m (a+b sech)^n.m",
-   "rules": 2,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.5 Hyperbolic secant/6.5.11 (e x)^m (a+b sech(c+d x^n))^p.m",
-   "rules": 18,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.7 Miscellaneous/6.7.6 (c+d x)^m hyper(a+b x)^n hyper(a+b x)^p.m",
-   "rules": 28,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.7 Miscellaneous/6.7.7 F^(c (a+b x)) hyper(d+e x)^n.m",
+   "file": "8 Special functions/8.9 Product logarithm function.m",
    "rules": 44,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.7 Miscellaneous/6.7.8 u hyper(a+b log(c x^n))^p.m",
-   "rules": 50,
-   "errors": 0
-  },
-  {
-   "file": "6 Hyperbolic functions/6.7 Miscellaneous/6.7.9 Active hyperbolic functions.m",
-   "rules": 96,
    "errors": 0
   }
  ]

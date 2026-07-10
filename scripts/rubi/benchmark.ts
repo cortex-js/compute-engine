@@ -555,8 +555,15 @@ function main(): void {
     // Chapter-1 rules 1082/1083/217. Loading a higher chapter WITHOUT its
     // Chapter-1 foundation strands every such residual as an inert Integrate.
     // The shipped `loadIntegrationRules` bundles exactly this foundation
-    // (Chapters 1, 2, 6 + the target section); mirror it here so the benchmark
-    // measures the integrator as it actually ships. Foundation dirs are
+    // (Chapters 1, 2, 3, 6, §8.8 + the target section); mirror it here so the
+    // benchmark measures the integrator as it actually ships. Chapter 3
+    // (logarithms) is in the foundation because Chapter-2 §2.2 reduces
+    // ∫(c+dx)^m·F^{gx}/(a+b·F^{gx}) into a Chapter-3 log/PolyLog integral,
+    // and §8.8 (polylogarithm) terminates that telescope
+    // (∫x^m·PolyLog[n,·] → PolyLog[n+1]). Only the 8.8 FILE is in the shipped
+    // bundle — preloading the rest of Chapter 8 here would diverge from
+    // production (and 8.7 Zeta has known compile skips).
+    // Foundation dirs are
     // prepended (higher rule priority, matching Rubi's global rule order where
     // the algebraic rules precede the trig rules) and de-duplicated against the
     // target so pointing `--rubi` at a foundation chapter is a no-op.
@@ -564,7 +571,13 @@ function main(): void {
     const foundationDirs = (
       process.env.RUBI_NO_FOUNDATION !== undefined
         ? []
-        : ['1 Algebraic functions', '2 Exponentials', '6 Hyperbolic functions']
+        : [
+            '1 Algebraic functions',
+            '2 Exponentials',
+            '3 Logarithms',
+            '6 Hyperbolic functions',
+            '8 Special functions/8.8 Polylogarithm function.json',
+          ]
     )
       .map((d) => path.join(corpusRoot, d))
       .filter(
@@ -574,7 +587,11 @@ function main(): void {
           !path.resolve(rubiRules).startsWith(path.resolve(d) + path.sep)
       );
     const docs = [
-      ...foundationDirs.flatMap((d) => readCorpusDocs(d)),
+      ...foundationDirs.flatMap((d) =>
+        fs.statSync(d).isDirectory()
+          ? readCorpusDocs(d)
+          : [JSON.parse(fs.readFileSync(d, 'utf8'))]
+      ),
       ...readCorpusDocs(rubiRules),
     ];
     const { rules, skipped } = compileRuleDocs(ce, docs);

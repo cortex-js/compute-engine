@@ -43,6 +43,8 @@ import {
   foldLnExponentialE,
   functionOfExponentialSubstitution,
   sinhCoshArgsPolynomialQ,
+  hasSingleAngleTrigRationalCandidate,
+  singleAngleExponentialPieces,
   RuleFail,
   Ctx,
   Hooks,
@@ -82,6 +84,9 @@ const NO_SICI = process.env.RUBI_NO_SICI !== undefined;
 // RUBI_NO_TRIGSQ: disable the R16 poly×csc(u)²/sec(u)² integration-by-parts
 // fallback (A/B measuring its effect on the 4.1.10 benchmark).
 const NO_TRIGSQ = process.env.RUBI_NO_TRIGSQ !== undefined;
+// RUBI_NO_TRIGEXP: disable the R17 single-angle trig-rational → single-
+// exponential normalization fallback (A/B measuring its effect on 4.1.10).
+const NO_TRIGEXP = process.env.RUBI_NO_TRIGEXP !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -729,6 +734,30 @@ export class RubiDriver {
       if (F !== null) return F;
     }
 
+    // ---- single-angle trig-rational → single-exponential fallback (R17) --
+    // `∫P(x)·R(trig(w)) dx`, P a polynomial in x, w = e+f·x linear, R a rational
+    // function of sin/cos/csc/sec/tan/cot all of the SAME angle w, WITH an
+    // additive `(a+b·trig)`-type denominator. Rewrite every trig factor via the
+    // single exponential y = E^{i·w}, partial-fraction the resulting Q(y) over
+    // its linear y-factors, and route each `∫P(x)·E^{k·i·w}/(a+b·E^{i·w})^s`
+    // piece back through the driver — the §2.2 / Chapter-3 / §8.8 PolyLog
+    // telescope closes it. Rubi reaches these through ExpandIntegrand's E^{ix}
+    // expansion of ACTIVE linear-arg Sin, which CE must inert (load-bearing for
+    // the whole chapter), so this driver-level fallback supplies the capability.
+    //
+    // Placed AFTER R16/R15: the pure reciprocal-square (`poly·csc²`, R16) and
+    // rational×sin/cos (R15) shapes are handled — and closed — by those cheaper
+    // fallbacks first, and this fallback's gate declines them anyway (it requires
+    // an additive-trig denominator, which `csc²` / bare `sin` lack). Placed
+    // BEFORE the hyperbolic function-of-exponential fallback, which is mutually
+    // exclusive (that one gates on `containsHyperbolic`). Fail-closed with the
+    // same numeric D-check as R15/R16; the emitted pieces are trig-free after the
+    // exponential substitution, so they cannot re-enter this fallback.
+    if (this.trigActive && !NO_TRIGEXP) {
+      const F = this.singleAngleTrigExpFallback(integrand, variable, depth);
+      if (F !== null) return F;
+    }
+
     // ---- function-of-a-single-exponential fallback --------------------
     // A pure hyperbolic of a LINEAR argument is a rational function of
     // e^(linear) — including the reciprocals Tanh/Coth/Sech/Csch that the
@@ -920,6 +949,47 @@ export class RubiDriver {
       // (via central differences on the ACTIVATED antiderivative — SinIntegral/
       // CosIntegral evaluate; a complex-Si result evaluates non-finite and is
       // declined). Decline unless it verifies.
+      if (!antiderivativeVerifies(ce, activateTrig(ce, F), integrand, variable))
+        return null;
+      return F;
+    } catch {
+      return null;
+    }
+  }
+
+  /** R17: `∫P(x)·R(trig(w)) dx` for P a polynomial in x, w = e+f·x linear, and R
+   * a rational function of same-angle trig heads with an additive `(a+b·trig)`-
+   * type denominator — closed by the single-exponential normalization y = E^{i·w}
+   * (see `singleAngleExponentialPieces`) plus a linear-factor partial fraction,
+   * routing each `∫P(x)·E^{k·i·w}/(a+b·E^{i·w})^s` piece back through the driver
+   * (§2.2 / Chapter-3 / §8.8 telescope). Cheap syntactic pre-filter gates it to a
+   * near-zero-cost no-op off its shape. Fail-closed: returns null unless every
+   * piece closes AND D(ΣF) matches the integrand numerically (the central-
+   * difference check on the ACTIVATED antiderivative — PolyLog/complex-log forms
+   * evaluate but do not admit a symbolic derivative). Body wrapped try/catch. */
+  private singleAngleTrigExpFallback(
+    integrand: Expression,
+    variable: string,
+    depth: number
+  ): Expression | null {
+    // Cheap O(nodes) pre-filter: an additive-trig denominator must literally
+    // occur, else bail before any deactivation / factoring work.
+    if (!hasSingleAngleTrigRationalCandidate(integrand)) return null;
+    const ce = this.ce;
+    try {
+      const pieces = singleAngleExponentialPieces(ce, integrand, variable);
+      if (pieces === null) return null;
+      const parts: Expression[] = [];
+      for (const pc of pieces) {
+        const term = recanonicalize(ce, pc);
+        const F = this.intRec(term, variable, depth + 1);
+        if (F === null || F.has('Integrate')) return null;
+        parts.push(F);
+      }
+      let F = this.cleanExpansionResult(
+        parts.length === 1 ? parts[0] : ce.function('Add', parts)
+      );
+      if (F.has('Integrate')) return null;
       if (!antiderivativeVerifies(ce, activateTrig(ce, F), integrand, variable))
         return null;
       return F;

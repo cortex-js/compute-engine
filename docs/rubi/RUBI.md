@@ -1,12 +1,16 @@
 # Rubi → Compute Engine: Feasibility Analysis
 
-**Date:** 2026-06-10 (feasibility); last status update 2026-07-09.
-**Status:** shipped bundle = **Chapters 1, 2, 6 + 4.1 Sine + 4.3 Tangent +
-4.5 Secant** (4,831 rules, 5.29 MB). Chapter-1 exhaustive ≈90–91%; ch2 ≈72% /
-ch6 ≈45% effective; **4.1 Sine 106/120 and 322/400 (seed 5; 4.1.11 file
-71/113); 4.3 Tangent 70/120; 4.5 Secant 69/120; genuine wrongs 0 across all
-suites** (all flagged "wrongs" are documented verification false-wrong
-classes — see the ROADMAP §R state note).
+**Date:** 2026-06-10 (feasibility); last status update 2026-07-10.
+**Status:** shipped bundle = **Chapters 1, 2, 3, 6 + 4.1 Sine + 4.3 Tangent +
+4.5 Secant + §8.8 Polylogarithm** (5,191 rules, 5.64 MB). Chapter-1 exhaustive
+≈90–91%; ch2 ≈72% / ch6 ≈45% effective; **4.1 Sine 106/120 and 326/400 (seed 5;
+4.1.11 file 71/113); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
+67/120 (new); genuine wrongs 0 across ALL suites incl. ch3** (all flagged
+"wrongs" are documented verification false-wrong classes — see the
+ROADMAP §R state note). The nested `Log[c·(b·x^n)^p]` power-in-log family
+(§3.1.5 / §3.3) that R17 first shipped with ~3 genuine wrongs was **fixed**
+in the R17 back-substitution follow-up (Rubi general `Subst[u,expr,repl]`;
+see the R17 entry).
 The 2026-07-04 rung series (R1/R2/R4, R10, R11, R9, R14 — §5 below) added the
 cofunction product clauses, the ch1-foundation benchmark fix,
 `reciprocalToPower`, the `cofunctionShift` and `standaloneCosineShift` runtime
@@ -16,9 +20,11 @@ fallback), R12 (4.3 Tangent bundled, cot→tan shift default-ON behind
 `RUBI_NO_COFN_COT`), R13 (sec-binomial routing: reflected `csc[·+π/2]`
 kept raw through `reciprocalToPower`, behind `RUBI_NO_SECBIN`), and R16
 (poly×csc²/sec² by-parts fallback behind `RUBI_NO_TRIGSQ`; its triage mapped
-the PolyLog-bundling residual → R17).
-**Next rungs live in ROADMAP §R** (R17 bundle the Ch2-2.2/Ch3 PolyLog
-producers, R3′ deep chains, R5; then the Ch6 tail R6–R8). The §1–§4 analysis below is
+the PolyLog-bundling residual → R17). The 2026-07-10 rung added R17 (Ch3
+Logarithms + §8.8 Polylogarithm bundled — the PolyLog telescope — plus a
+single-angle trig→exp partial-fraction fallback behind `RUBI_NO_TRIGEXP`).
+**Next rungs live in ROADMAP §R** (R3′ deep chains, R5; then the Ch6 tail
+R6–R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
 phasing status, and the project memory (`project_rubi.md`) has the
 session-by-session log.
@@ -1046,6 +1052,95 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
   - **Tests.** +11 in `rubi-utils.test.ts` (8 structural-gate unit + 3
     end-to-end D-verified); the two csc² close tests fail under
     `RUBI_NO_TRIGSQ=1`.
+- **Phase R17 — Ch3 Logarithms + §8.8 Polylogarithm bundled (the PolyLog
+  telescope) + single-angle trig→exp fallback LANDED (2026-07-10).** Closes the
+  R16 residual #112/#197/#294 (the `(c+d·x)^m·trig/(a+b·sin)` chains whose
+  results carry `Log[complex]` + `PolyLog[2..4]`).
+  - **Mechanism (a): bundling.** `3 Logarithms` walked whole (334 rules, 0
+    skips) + the single-file `8.8 Polylogarithm function` (26 rules) added to
+    `bundle-corpus.ts`; the rest of Ch8 is translated to corpus but
+    deliberately NOT bundled. This terminates the PolyLog telescope: Ch2 §2.2
+    (`∫x^m·F^{gx}/(a+b·F^{gx})^p`) → Ch3 (`∫x^k·Log[a+b·F^{gx}]`) → §8.8
+    (`∫x^k·PolyLog[n,·]` → `PolyLog[n+1]`). Bundle **4,831 → 5,191 rules
+    (+360), 5.29 → 5.64 MB**, compile ~640 ms. Nine new utilities in
+    `rubi-utils.ts`: `IntHide` (by-parts driver-recursion binding, fails
+    closed on non-closing sub-integrals), `MemberQ`, `ProductQ`,
+    `IntegralFreeQ`, `Cancel`/`FullSimplify` (bounded `safeSimplify`), `Part`,
+    `RationalFunctionExponents`, plus fail-closed stubs `FunctionOfLog`,
+    `SubstForFractionalPowerOfLinear`. `∫x³·eˣ/(a+b·eˣ)` and `∫x·log(1+eˣ)`
+    now close and D-verify. The benchmark foundation preload now mirrors the
+    ship: ch1, ch2, **ch3**, ch6, **§8.8 file** (single-file foundation
+    entries supported).
+  - **Mechanism (b): `singleAngleTrigExpFallback`** (driver.ts, after R15's
+    `rationalTrigSiCiFallback`; env toggle **`RUBI_NO_TRIGEXP`**). For
+    `∫P(x)·R(trig(w))` with `w` linear and an additive `(a+b·trig)`
+    denominator: rewrites via `y=E^{iw}`, partial-fractions in `y` over linear
+    factors, routes the pieces through the §2.2→Ch3→§8.8 telescope, with a
+    fail-closed central-difference D-check. Helpers in `rubi-utils.ts`
+    (`hasSingleAngleTrigRationalCandidate` O(nodes) pre-filter,
+    `singleAngleTrigRationalQ`, `singleAngleExponentialPieces`).
+  - **Outcome flips.** 4.1.10 **#112** closes from bundling alone; **#197** and
+    **#294** close via the new fallback (both D-verified, symbolic params). #30
+    (R16) unchanged.
+  - **Numbers (seed 5, `--rubi`; foundation = ch1/2/3/6/§8.8).** 4.1 Sine 400:
+    **322 → 326 (+4)**; s120 106 (unchanged; sample holds no target — A/B
+    `RUBI_NO_TRIGEXP=1` byte-identical, 0 outcome diffs / 112 keys). 4.3
+    Tangent 120: **70 → 72 (+2)**, 2 wrong = the documented #14/#346 √tan
+    half-integer false-wrongs (unchanged). 4.5 Secant 120: **69** (unchanged),
+    3 documented R11 false-wrongs (#333/#27/#30). ch2 60: **33 → 36 (+3)** from
+    §8.8 (matches the s120 77→82 seed-5 measurement earlier this session); 1
+    false-wrong (#394 `∫E^(e(c+dx)³)` → `Gamma[1/3,·]` cube-root-of-negative
+    branch). **Genuine wrongs remain 0 on every pre-existing suite.**
+  - **s400 new false-wrong (#150, 4.1.12).** `∫Sin[a+b·x^n]/x^(2n+1)` newly
+    CLOSES via the exp-route telescope; the verifier flags it only at NEGATIVE
+    x (x=−0.23/−0.41) where `x^n` with fractional n≈0.674 is on a branch cut —
+    at POSITIVE x, D(F) matches the integrand to ~9 digits (probed). A new
+    member of the documented fractional-power-of-negative-x false-wrong class,
+    so s400 wrongs = 3 documented (#690/#205/#116) + #150; genuine wrongs 0.
+  - **Off-target timing dips (both zero genuine wrongs).** ch1 200:
+    **183 → 180 (−3)**, all into `unsolved`; the R17 fallback is provably inert
+    here — `RUBI_NO_TRIGEXP=1` is byte-identical (180/6/12). All 6 wrongs are
+    the documented ₂F₁/AppellF1-symbolic-exponent + fractional-power/cube-root
+    branch false-wrongs (signature-verified). The −3 is a correct↔unsolved
+    boundary shift at the 15 s solve/verify deadline (one hard timeout #371, a
+    6-step quartic `∫(7+5x²)⁵/(4+3x²+x⁴)^(3/2)` that does NOT close even at 60 s
+    in either the lean ch1-only or the full rule set — so it was almost
+    certainly unsolved at the 183 baseline too, on the smaller {2,6}
+    foundation). ch6 60: **19 → 18 (−1)**, one problem correct→inconclusive
+    (#158 `∫√Coth[a+b·Log[c·x^n]]/x`, passes=3/fails=1, worst 7.13e-3 — a
+    √Coth branch numeric-tolerance boundary, not a wrong answer).
+  - **ch3 Logarithms — NEW suite classification (s120 seed5), AFTER the
+    back-substitution fix below: 67 correct / 4 wrong / 47 unsolved /
+    1 not-evaluable / 1 inconclusive** (was 65/6 at first bundling). All 4
+    remaining wrongs are verification FALSE-wrongs (probed by D-check at
+    positive x + `F_CE − F_Rubi` structural compare):
+    - #394/#442 (3.1.4 `(f x)^m(d+e x^r)^q(a+b Log[c x^n])`, fractional
+      `x^r`/`(f x)^m` sampled at negative x) and #44 (3.2.2
+      `Log[e(a+b x)/(c+d x)]` Möbius-log at negative x): D-verify to rel ~1e-10
+      at positive x on the principal branch.
+    - #538 (3.3 `∫(i+j x)²·Log[c(d(e+f x)^p)^q]³/(g+h x)`): after the fix,
+      `F_CE − F_Rubi` is a **constant** (≈123.7) at complex points off the
+      PolyLog branch cut and `d(F_CE)=f` there to ~1e-9 — a correct
+      antiderivative. It flags only because the real-axis D-check samples land
+      on the PolyLog[3]/PolyLog[4] branch cut (arg `z>1`), where CE's
+      `Log[A/B]→Log A−Log B` split distributes the branch differently than
+      Rubi's compact `Log[ratio]` form (a core-Ln quirk, not a Rubi bug).
+  - **Fixed: the nested power-in-log genuine-wrong family (R17 follow-up,
+    2026-07-10).** #236 (3.1.5 `∫Log[c(b x^n)^p]²/x⁴`) and #449/#538 (3.3
+    `Log[c(d(e+f x)^p)^q]`) were malformed because rule **3.3 #60** (and the 5
+    other compound-`Subst` rules — 1.1.3.1 #44/#45, 1.1.3.2 #103/#104, 3.2.2
+    #15) use Rubi's *general* form `Subst[u, expr, repl] := u /. expr -> repl`
+    — a subexpression replacement of the expanded log argument
+    `c·dⁿ·(e+f x)^{mn}` — but `build()`'s `Subst` handler ignored its middle
+    argument and substituted the integration variable `x`. That rewrote `x`
+    itself (e.g. `1/x³ → (b x^n)^{-3p}/c³`, log arg gaining spurious powers).
+    Fix: dispatch on the middle argument — substitute `x` only when it *is* the
+    variable, else structurally replace `expr → repl` (`replaceSubexpr` in
+    `rubi-utils.ts`). #236/#449 now D-verify clean; #538 is a correct
+    antiderivative (see above). Regression test in `integration-rules.test.ts`.
+  - **Tests.** loader/utility tests in `rubi-utils.test.ts` and
+    `integration-rules.test.ts` (pre-existing known jest fail:
+    `numericallyEvaluable … ExpIntegralEi` — unrelated, complex-arg kernel gap).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

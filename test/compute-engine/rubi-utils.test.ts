@@ -22,6 +22,10 @@ import {
   expandRationalOverLinears,
   inverseSquareTrigFactor,
   containsInertTrig,
+  singleAngleTrigRationalQ,
+  singleAngleExponentialPieces,
+  hasSingleAngleTrigRationalCandidate,
+  RuleFail,
 } from '../../src/compute-engine/rubi/rubi-utils';
 import { loadIntegrationRules } from '../../src/integration-rules';
 import type { Ctx } from '../../src/compute-engine/rubi/rubi-utils';
@@ -162,6 +166,83 @@ describe('EqQ/NeQ arity', () => {
     expect(cond(['NeQ', ['Subtract', 4, 4]])).toBe(false);
     // does not throw on the single-argument shape
     expect(() => cond(['NeQ', ['Power', 'e_var', 2]])).not.toThrow();
+  });
+});
+
+// Chapter-3 Logarithms utility layer (RUBI.md §5, Phase R17).
+describe('Chapter-3 utilities (IntHide / MemberQ / ProductQ / Cancel / ...)', () => {
+  test('ProductQ[u] is true only for a Times expression', () => {
+    expect(cond(['ProductQ', ['Multiply', 'x', 2]])).toBe(true);
+    expect(cond(['ProductQ', ['Add', 'x', 2]])).toBe(false);
+    expect(cond(['ProductQ', 'x'])).toBe(false);
+  });
+
+  test('MemberQ[{…}, u] tests structural membership', () => {
+    const inv = ['List', 'ArcSin', 'ArcCos', 'ArcSinh', 'ArcCosh'];
+    expect(cond(['MemberQ', inv, 'ArcSin'])).toBe(true);
+    expect(cond(['MemberQ', inv, 'ArcCosh'])).toBe(true);
+    expect(cond(['MemberQ', inv, 'Sin'])).toBe(false);
+    expect(cond(['MemberQ', inv, 'Tan'])).toBe(false);
+  });
+
+  test('IntegralFreeQ[u] detects a residual inert integral', () => {
+    ctx.env.set('freeExpr', ce.parse('x^2 + 1'));
+    ctx.env.set('inertExpr', ce.box(['Integrate', ce.symbol('x'), 'x']));
+    expect(cond(['IntegralFreeQ', 'freeExpr'])).toBe(true);
+    expect(cond(['IntegralFreeQ', 'inertExpr'])).toBe(false);
+  });
+
+  test('Cancel/FullSimplify normalize without throwing', () => {
+    // Cancel[2·x/2] → x; both map to the bounded rubi-safe simplifier.
+    const r = build(['Cancel', ['Divide', ['Multiply', 2, 'x'], 2]], ctx);
+    expect(r.isSame(ce.symbol('x'))).toBe(true);
+    expect(() => build(['FullSimplify', ['Add', 'x', 'x']], ctx)).not.toThrow();
+  });
+
+  test('Part[list, n] is 1-indexed', () => {
+    const lst = ['List', 10, 20, 30];
+    expect(build(['Part', lst, 1], ctx).isSame(10)).toBe(true);
+    expect(build(['Part', lst, 2], ctx).isSame(20)).toBe(true);
+    expect(build(['Part', lst, -1], ctx).isSame(30)).toBe(true);
+  });
+
+  test('RationalFunctionExponents[u, x] = {numDeg, denDeg}', () => {
+    // (x²+1)/(x³+x) — numerator degree 2, denominator degree 3
+    const r = build(
+      ['RationalFunctionExponents', ['Divide', ['Add', ['Power', 'x', 2], 1], ['Add', ['Power', 'x', 3], 'x']], 'x'],
+      ctx
+    );
+    expect(r.operator).toBe('List');
+    expect(r.ops![0].isSame(2)).toBe(true);
+    expect(r.ops![1].isSame(3)).toBe(true);
+  });
+
+  test('IntHide integrates via the int hook, else fails the rule', () => {
+    // A hook that closes the sub-integral: IntHide returns its antiderivative.
+    const solving: Ctx = {
+      ...ctx,
+      env: new Map(),
+      hooks: { int: (f) => f.mul(ce.symbol('x')) }, // pretend ∫f = f·x
+    };
+    const F = build(['IntHide', ['Multiply', 2, 'x'], 'x'], solving);
+    expect(F.has('Integrate')).toBe(false);
+
+    // A hook that cannot close (null) must throw RuleFail — NOT emit an inert
+    // Integrate into the by-parts binding.
+    const failing: Ctx = { ...ctx, env: new Map(), hooks: { int: () => null } };
+    expect(() => build(['IntHide', ['Multiply', 2, 'x'], 'x'], failing)).toThrow(
+      RuleFail
+    );
+
+    // A hook whose result still carries an inert Integrate also fails closed.
+    const inertCtx: Ctx = {
+      ...ctx,
+      env: new Map(),
+      hooks: { int: (f) => ce.box(['Integrate', f, 'x']) },
+    };
+    expect(() =>
+      build(['IntHide', ['Multiply', 2, 'x'], 'x'], inertCtx)
+    ).toThrow(RuleFail);
   });
 });
 
@@ -637,11 +718,14 @@ describe('trig → exponential fallback (nonlinear arguments, R9)', () => {
     expect(r.toString().toLowerCase().includes('sin(')).toBe(false);
   });
 
-  test('numericallyEvaluable is true for a finite exp-form result, false for a complex Ei', () => {
+  test('numericallyEvaluable is true for a finite exp-form result and for a complex Ei', () => {
     const finite = ce.parse('x^2 e^{-x}'); // evaluates fine
     expect(numericallyEvaluable(finite, 'x')).toBe(true);
-    const ei = ce.parse('\\operatorname{ExpIntegralEi}(i b / x)'); // CE leaves symbolic
-    expect(numericallyEvaluable(ei, 'x')).toBe(false);
+    // Complex-argument Ei evaluates since the 2026-07-09 kernel (commit
+    // 2980a5a8: expIntegralEiComplex via Γ(0,z)), opening the R9 exp-route
+    // self-check gate for the ∫x·sin(a+b/x) class.
+    const ei = ce.parse('\\operatorname{ExpIntegralEi}(i b / x)');
+    expect(numericallyEvaluable(ei, 'x')).toBe(true);
   });
 });
 
@@ -917,4 +1001,63 @@ describe('R16 end-to-end poly×csc²/sec² by-parts (shipped bundle)', () => {
     expect(closesLatex('x \\csc(2+x)^2')).toBe(true));
   test('leaves ∫x³·csc(1+2x) (power-1, needs PolyLog) cleanly unsolved', () =>
     expect(stayInert('x^3 \\csc(1+2 x)')).toBe(true));
+});
+
+// R17: single-angle trig-rational → single-exponential normalization gate. The
+// gate `singleAngleTrigRationalQ` accepts `∫P(x)·R(trig(w))` with a nontrivial
+// polynomial P, all trig heads sharing ONE linear argument w, and an additive
+// `(a+b·trig)`-type denominator (the #197/#294 shapes). It declines the pure
+// reciprocal-square (`poly·csc²`, R16 territory), nonlinear trig arguments, and
+// mixed-angle trig. `singleAngleExponentialPieces` returns the linear-factor
+// pieces that reconstruct the integrand at y = E^{i·w}.
+describe('singleAngleTrigRationalQ (R17 gate)', () => {
+  const q = (latex: string): boolean =>
+    singleAngleTrigRationalQ(ce, ce.parse(latex), 'x');
+
+  test('accepts #197-shape csc(w)/(a+a·sin(w)) with poly factor', () =>
+    expect(q('x^3 \\csc(c+d x) / (a + a \\sin(c+d x))')).toBe(true));
+  test('accepts #294-shape cos(w)/(a+b·sin(w)) with poly factor', () =>
+    expect(q('(3+2 x)^3 \\cos(c+d x) / (a + b \\sin(c+d x))')).toBe(true));
+  test('accepts a bare (a+b·cos(w)) denominator with poly factor', () =>
+    expect(q('x^2 / (2 + 3\\cos(1+2 x))')).toBe(true));
+
+  test('declines #30-shape poly·csc² (no additive denominator → R16)', () =>
+    expect(q('(1+x) \\csc(c+d x)^2')).toBe(false));
+  test('declines bare poly·csc(w) (reciprocal, no additive denominator)', () =>
+    expect(q('x^3 \\csc(1+2 x)')).toBe(false));
+  test('declines a nonlinear trig argument sin(x²)', () =>
+    expect(q('x^2 \\cos(x^2) / (1 + \\sin(x^2))')).toBe(false));
+  test('declines mixed-angle trig (sin(2x) vs cos(x))', () =>
+    expect(q('x^2 \\cos(x) / (1 + \\sin(2 x))')).toBe(false));
+  test('declines a constant (no nontrivial polynomial factor)', () =>
+    expect(q('\\cos(x) / (2 + \\sin(x))')).toBe(false));
+
+  test('hasSingleAngleTrigRationalCandidate pre-filter matches the shape', () => {
+    expect(
+      hasSingleAngleTrigRationalCandidate(
+        ce.parse('x^3 \\cos(x) / (2 + \\sin(x))')
+      )
+    ).toBe(true);
+    // pure csc² (no additive-trig denominator) is not a candidate
+    expect(
+      hasSingleAngleTrigRationalCandidate(ce.parse('(1+x) \\csc(x)^2'))
+    ).toBe(false);
+  });
+
+  test('singleAngleExponentialPieces reconstructs the integrand at y=E^{i·w}', () => {
+    const integrand = ce.parse('x^3 \\cos(x) / (2 + \\sin(x))');
+    const pieces = singleAngleExponentialPieces(ce, integrand, 'x');
+    expect(pieces).not.toBeNull();
+    for (const xv of [0.5, 1.1]) {
+      let sum = ce.number(0);
+      for (const p of pieces!) sum = sum.add(p.subs({ x: xv }));
+      const s = sum.N();
+      const t = integrand.subs({ x: xv }).N();
+      expect((s.re as number)).toBeCloseTo(t.re as number, 6);
+    }
+  });
+  test('singleAngleExponentialPieces declines the #30 reciprocal-square shape', () =>
+    expect(
+      singleAngleExponentialPieces(ce, ce.parse('(1+x) \\csc(x)^2'), 'x')
+    ).toBeNull());
 });

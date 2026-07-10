@@ -329,6 +329,162 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     test('∫csch⁴x dx (reciprocal)', () => verify('\\csch^4 x'));
   });
 
+  // Chapter-3 Logarithms (RUBI.md §5, Phase R17). The log families are bundled
+  // (bundle-corpus.ts ch3Dir): by-parts log rules (∫(a+bx)^m·Log[u], 3.5 #34)
+  // and the PolyLog telescope (∫(f+gx)^m·Log[1+e·F^{gx}] → PolyLog[2,…], 3.5
+  // #14). All D-verified against the integrand. These all go inert without the
+  // Chapter-3 bundle walk (verified by reverting ch3Dir), so they exercise it.
+  describe('integrates the logarithm family (Chapter-3)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    // Verify by finite-differencing F.N() (not symbolic D[F]): the PolyLog
+    // cases have an inert symbolic derivative (Derivative[PolyLog,…] does not
+    // numericize) but F.N() itself is numerically evaluable, so the numeric
+    // derivative of F is the robust check. `\ln(x)` is always parenthesized:
+    // `\ln x` before `dx` would absorb the differential `d` (parser quirk).
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      for (const x of [0.31, 0.73, 1.42]) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ x }).N().re as number;
+        if (typeof d !== 'number' || typeof f !== 'number') continue;
+        expect(d).toBeCloseTo(f, 6);
+      }
+    };
+    // Plain logarithm base cases (by-parts, 3.5 #31/#34, 3.1.2 #4).
+    test('∫log(x) dx', () => verify('\\ln(x)'));
+    test('∫x·log(x)² dx', () => verify('x\\ln(x)^2'));
+    test('∫log(2+3x) dx', () => verify('\\ln(2+3x)'));
+    test('∫x²·log(x) dx', () => verify('x^2\\ln(x)'));
+    // PolyLog telescope on a logarithm of an exponential (3.5 #14): the
+    // ∫Log[1+e·F^{gx}] base case closes to PolyLog[2, −e·F^{gx}]. This is the
+    // Chapter-3 PolyLog producer that Chapter-2 §2.2 reduces into.
+    test('∫log(1+eˣ) dx → PolyLog(2, −eˣ)', () => {
+      const F = ce.parse('\\int \\ln(1+e^x) \\, dx').evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toContain('PolyLog');
+      verify('\\ln(1+e^x)');
+    });
+    test('∫log(2+eˣ) dx (PolyLog)', () => verify('\\ln(2+e^x)'));
+
+    // Regression (RUBI.md §5, R17): the "power-in-log" back-substitution rule
+    // 3.3 #60 rewrites Log[c·(d·(e+f·x)^m)^n] via Rubi's general
+    // Subst[u, expr, repl] := u /. expr -> repl — a subexpression replacement,
+    // NOT a substitution of the integration variable. The build() Subst
+    // handler used to ignore its middle argument and substitute `x`, which
+    // corrupted the antiderivative (the log argument gained spurious powers,
+    // e.g. ∫Log[c·(b·x^n)^p]²/x⁴ → a form with Log[c·b^p·(c·(b·x^n)^p)^(n·p)]).
+    // Symbolic b,c,n,p are required so the nested-power log stays opaque
+    // (concrete positive numerics collapse (b·x^n)^p and bypass rule 3.3 #60).
+    test('∫Log[c·(b·xⁿ)ᵖ]²/x⁴ dx (power-in-log, rule 3.3 #60 back-subst)', () => {
+      const latex = '\\frac{\\ln(c(b x^n)^p)^2}{x^4}';
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      // The log argument must survive intact — no spurious powers.
+      expect(F.toString()).toContain('ln(c * (b * x^n)^p)');
+      // D-verify with substituted params + finite-difference in x.
+      const params = { b: 1.7, c: 2.3, n: 1.4, p: 0.6 };
+      const Fp = F.subs(params);
+      const fp = integrand.subs(params);
+      const h = 1e-5;
+      const fval = (v: number) => Fp.subs({ x: v }).N().re as number;
+      for (const x of [0.31, 0.73, 1.42]) {
+        const d = (fval(x + h) - fval(x - h)) / (2 * h);
+        const f = fp.subs({ x }).N().re as number;
+        if (typeof d !== 'number' || typeof f !== 'number') continue;
+        expect(d).toBeCloseTo(f, 5);
+      }
+    });
+  });
+
+  // R16/R17 Chapter-2 §2.2 → Chapter-3 → Chapter-8 chain (RUBI.md §5, Phase
+  // R17 part b). ∫x^m·F^{gx}/(a+b·F^{gx}) reduces (2.2 #1) to
+  // ∫x^{m-1}·Log[1+e·F^{gx}], which the Chapter-3 rule 3.5 #14 telescopes to
+  // ∫x^{m-1}·PolyLog[2, −e·F^{gx}]. That LAST sub-integral now closes via the
+  // PolyLog-of-exponential rules ∫x^m·PolyLog[n, d·F^{gx}] (Rubi Chapter 8
+  // §8.8 #185/#191, bundle-corpus.ts ch8PolyLogFile), so the full
+  // antiderivative closes end to end, carrying Log and PolyLog[2..4] terms.
+  // D-verified by finite-differencing F.N() (not symbolic D[F]): the PolyLog
+  // terms have an inert symbolic derivative but F.N() is numerically
+  // evaluable, so the numeric derivative of F is the robust check.
+  describe('closes the Chapter-2 → Chapter-3 → Chapter-8 PolyLog chain', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      for (const x of [0.31, 0.73, 1.42]) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ x }).N().re as number;
+        if (typeof d !== 'number' || typeof f !== 'number') continue;
+        expect(d).toBeCloseTo(f, 6);
+      }
+    };
+    test('∫x³·eˣ/(2+eˣ) dx (Log + PolyLog[2..4])', () => {
+      const F = ce.parse('\\int \\frac{x^3 e^x}{2+e^x} \\, dx').evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toContain('PolyLog');
+      verify('\\frac{x^3 e^x}{2+e^x}');
+    });
+    test('∫x·log(1+eˣ) dx (PolyLog[2,3])', () => {
+      const F = ce.parse('\\int x\\ln(1+e^x) \\, dx').evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toContain('PolyLog');
+      verify('x\\ln(1+e^x)');
+    });
+  });
+
+  // R17 part (b): single-angle trig-rational → single-exponential normalization
+  // fallback (driver `singleAngleTrigExpFallback`). `∫P(x)·R(trig(w))` with an
+  // additive `(a+b·trig)`-type denominator is rewritten via y = E^{i·w} into a
+  // linear-factor partial fraction, each piece `∫P(x)·E^{k·i·w}/(a+b·E^{i·w})^s`
+  // closing through the §2.2 → Chapter-3 → §8.8 PolyLog telescope. These are the
+  // 4.1.10 #197 (csc/(a+a·sin)) and #294 (cos/(a+b·sin)) shapes. Rubi reaches
+  // them via ExpandIntegrand's E^{ix} expansion of ACTIVE linear-arg Sin, which
+  // CE deliberately inerts — hence the driver fallback. Every one of these goes
+  // INERT under `RUBI_NO_TRIGEXP=1` (verified manually), so they exercise the
+  // R17 rung, not a bundled rule. D-verified by finite-differencing F.N() (the
+  // antiderivative carries PolyLog/complex-Log terms whose symbolic derivative
+  // does not numericize). Concrete integer params avoid the reserved `e`/`i`.
+  describe('closes the single-angle trig-rational family (Chapter-4, R17)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      let ok = 0;
+      for (const x of [0.4, 0.9, 1.3, 1.7, 2.1]) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ x }).N().re as number;
+        if (typeof d !== 'number' || typeof f !== 'number') continue;
+        expect(d).toBeCloseTo(f, 4);
+        ok++;
+      }
+      expect(ok).toBeGreaterThanOrEqual(3);
+    };
+    // #197-shape: csc(w)/(a+a·sin(w)) — the antiderivative carries ArcTanh, Log,
+    // and PolyLog[2..4] of ±E^{i·w} / i·E^{i·w}.
+    test('∫(3+2x)³·csc(1+2x)/(1+sin(1+2x)) dx (#197-shape)', () =>
+      verify('(3+2 x)^3 \\csc(1+2 x) / (1 + \\sin(1+2 x))'));
+    // #294-shape: cos(w)/(a+b·sin(w)), general a,b — Log[1 − i·b·E^{i·w}/(a±√(a²−b²))]
+    // + PolyLog[2..4]. The denominator roots carry a real surd √(a²−b²).
+    test('∫(3+2x)³·cos(1+2x)/(3+2sin(1+2x)) dx (#294-shape, real surd)', () =>
+      verify('(3+2 x)^3 \\cos(1+2 x) / (3 + 2\\sin(1+2 x))'));
+    test('∫(3+2x)³·cos(1+2x)/(2+sin(1+2x)) dx (#294-shape, √3 surd)', () =>
+      verify('(3+2 x)^3 \\cos(1+2 x) / (2 + \\sin(1+2 x))'));
+  });
+
   test('the built-in antiderivative still handles non-Rubi integrands', () => {
     // The provider returns null for a Gaussian (outside Chapter 1), so the
     // built-in antiderivative runs and produces Erf.
