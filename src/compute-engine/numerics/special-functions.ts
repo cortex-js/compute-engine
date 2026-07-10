@@ -1344,48 +1344,10 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
   );
 }
 
-/**
- * Bignum Lambert W function W₀(x): principal branch satisfying W(x)·e^{W(x)} = x.
- * Uses Halley's method with adaptive precision tolerance.
- */
-export function bigLambertW(ce: ComputeEngine, x: BigNum): BigNum {
-  if (!x.isFinite()) return x; // ±Infinity, NaN
-  if (x.isZero()) return new BigDecimal(0);
-
-  const invE = BigDecimal.ONE.div(BigDecimal.ONE.exp()); // 1/e
-  const negInvE = invE.neg();
-
-  // Branch point: W(-1/e) = -1
-  // Use a tolerance that accounts for machine-precision inputs.
-  // The convergence tolerance is the *working* precision (BigDecimal.precision),
-  // not `ce.precision`: everything else in this iteration rounds to
-  // BigDecimal.precision, and reading a looser `ce.precision` here let Halley
-  // stop early (or, when the working precision was higher, left a garbage tail
-  // beyond the true precision). (NU-P1-10)
-  const tol = new BigDecimal(10).pow(-BigDecimal.precision);
-  const branchTol = new BigDecimal(10).pow(-15); // machine precision tolerance
-  if (x.sub(negInvE).abs().lt(branchTol)) return BigDecimal.NEGATIVE_ONE;
-
-  // W is defined for x >= -1/e
-  if (x.lt(negInvE)) return BigDecimal.NAN;
-
-  // Initial guess using machine precision
-  let w: BigNum;
-  const xNum = x.toNumber();
-  if (xNum < 0) {
-    const p = Math.sqrt(2 * (Math.E * xNum + 1));
-    w = new BigDecimal(-1 + p - (p * p) / 3 + (11 / 72) * p * p * p);
-  } else if (xNum <= 1) {
-    w = new BigDecimal(xNum * (1 - xNum * (1 - 1.5 * xNum)));
-  } else if (xNum < 100) {
-    const lnx = Math.log(xNum);
-    w = new BigDecimal(lnx - Math.log(lnx));
-  } else {
-    const l1 = x.ln();
-    const l2 = l1.ln();
-    w = l1.sub(l2).add(l2.div(l1));
-  }
-
+/** Halley refinement of a BigDecimal Lambert W estimate `w` toward the root of
+ *  w·e^w = x (branch-independent), rounded to working precision. `tol` is the
+ *  convergence tolerance. */
+function bigLambertWHalley(w: BigNum, x: BigNum, tol: BigNum): BigNum {
   // Halley's method: converges cubically
   for (let i = 0; i < 100; i++) {
     const ew = w.exp();
@@ -1402,6 +1364,82 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum): BigNum {
   // `w` carries digits beyond BigDecimal.precision that are not converged.
   // (NU-P1-10)
   return w.toPrecision(BigDecimal.precision);
+}
+
+/**
+ * Bignum Lambert W function W_k(x) satisfying W(x)·e^{W(x)} = x.
+ *
+ * `branch` selects the real branch (0 = principal W₀, defined for x ≥ −1/e;
+ * −1 = the second real branch W₋₁, defined for −1/e ≤ x < 0). Any other (or
+ * non-integer) branch index returns NaN — the complex branches are out of
+ * scope for this real kernel. Uses Halley's method with adaptive precision.
+ */
+export function bigLambertW(ce: ComputeEngine, x: BigNum, branch = 0): BigNum {
+  if (!x.isFinite()) return x; // ±Infinity, NaN
+
+  const invE = BigDecimal.ONE.div(BigDecimal.ONE.exp()); // 1/e
+  const negInvE = invE.neg();
+
+  // The convergence tolerance is the *working* precision (BigDecimal.precision),
+  // not `ce.precision`: everything else in this iteration rounds to
+  // BigDecimal.precision, and reading a looser `ce.precision` here let Halley
+  // stop early (or, when the working precision was higher, left a garbage tail
+  // beyond the true precision). (NU-P1-10)
+  const tol = new BigDecimal(10).pow(-BigDecimal.precision);
+  const branchTol = new BigDecimal(10).pow(-15); // machine precision tolerance
+
+  if (branch === 0) {
+    if (x.isZero()) return new BigDecimal(0);
+
+    // Branch point: W(-1/e) = -1. Use a tolerance that accounts for
+    // machine-precision inputs.
+    if (x.sub(negInvE).abs().lt(branchTol)) return BigDecimal.NEGATIVE_ONE;
+
+    // W₀ is defined for x >= -1/e
+    if (x.lt(negInvE)) return BigDecimal.NAN;
+
+    // Initial guess using machine precision
+    let w: BigNum;
+    const xNum = x.toNumber();
+    if (xNum < 0) {
+      const p = Math.sqrt(2 * (Math.E * xNum + 1));
+      w = new BigDecimal(-1 + p - (p * p) / 3 + (11 / 72) * p * p * p);
+    } else if (xNum <= 1) {
+      w = new BigDecimal(xNum * (1 - xNum * (1 - 1.5 * xNum)));
+    } else if (xNum < 100) {
+      const lnx = Math.log(xNum);
+      w = new BigDecimal(lnx - Math.log(lnx));
+    } else {
+      const l1 = x.ln();
+      const l2 = l1.ln();
+      w = l1.sub(l2).add(l2.div(l1));
+    }
+    return bigLambertWHalley(w, x, tol);
+  }
+
+  if (branch === -1) {
+    // Branch point: W₋₁(-1/e) = -1
+    if (x.sub(negInvE).abs().lt(branchTol)) return BigDecimal.NEGATIVE_ONE;
+
+    // W₋₁ is real only on -1/e <= x < 0
+    if (x.lt(negInvE) || x.gte(0)) return BigDecimal.NAN;
+
+    // Initial guess using machine precision (mirror of the W₀ series near the
+    // branch point; log asymptotic near 0⁻).
+    let w: BigNum;
+    const xNum = x.toNumber();
+    if (xNum < -0.27) {
+      const p = Math.sqrt(2 * (Math.E * xNum + 1));
+      w = new BigDecimal(-1 - p - (p * p) / 3 - (11 / 72) * p * p * p);
+    } else {
+      const l1 = Math.log(-xNum);
+      w = new BigDecimal(l1 - Math.log(-l1));
+    }
+    return bigLambertWHalley(w, x, tol);
+  }
+
+  // Other (complex) branches are out of scope for the real kernel.
+  return BigDecimal.NAN;
 }
 
 // Euler-Mascheroni constant
@@ -1678,39 +1716,9 @@ function zetaBorweinWeights(): [number[], number] {
   return ZETA_BORWEIN_CACHE;
 }
 
-/**
- * Lambert W function W₀(x): the principal branch satisfying W(x)·e^{W(x)} = x.
- * Uses Halley's method with appropriate initial guesses.
- */
-export function lambertW(x: number): number {
-  if (!isFinite(x)) return x; // ±Infinity, NaN
-  if (x === 0) return 0;
-
-  const e1 = 1 / Math.E; // 1/e ≈ 0.3679
-
-  // W is defined for x >= -1/e
-  if (x < -e1) return NaN;
-
-  // Branch point: W(-1/e) = -1
-  if (Math.abs(x + e1) < 1e-15) return -1;
-
-  // Initial guess
-  let w: number;
-  if (x < 0) {
-    // Near -1/e: use series expansion around branch point
-    const p = Math.sqrt(2 * (Math.E * x + 1));
-    w = -1 + p - (p * p) / 3 + (11 / 72) * p * p * p;
-  } else if (x <= 1) {
-    w = x * (1 - x * (1 - 1.5 * x)); // Padé-like initial guess for small x
-  } else if (x < 100) {
-    const lnx = Math.log(x);
-    w = lnx - Math.log(lnx);
-  } else {
-    const l1 = Math.log(x);
-    const l2 = Math.log(l1);
-    w = l1 - l2 + l2 / l1;
-  }
-
+/** Halley refinement of a Lambert W estimate `w` toward the root of
+ *  w·e^w = x (branch-independent: the same equation on every branch). */
+function lambertWHalley(w: number, x: number): number {
   // Halley's method: converges cubically
   for (let i = 0; i < 30; i++) {
     const ew = Math.exp(w);
@@ -1722,8 +1730,76 @@ export function lambertW(x: number): number {
     w -= delta;
     if (Math.abs(delta) < 1e-15 * (1 + Math.abs(w))) break;
   }
-
   return w;
+}
+
+/**
+ * Lambert W function W_k(x) satisfying W(x)·e^{W(x)} = x.
+ *
+ * `branch` selects the real branch:
+ *   - 0 (default): principal branch W₀, defined for x ≥ −1/e.
+ *   - −1: the second real branch W₋₁, defined for −1/e ≤ x < 0.
+ * Any other (or non-integer) branch index returns NaN — the complex branches
+ * are out of scope for this real kernel.
+ *
+ * Uses Halley's method with branch-appropriate initial guesses.
+ */
+export function lambertW(x: number, branch = 0): number {
+  if (!isFinite(x)) return x; // ±Infinity, NaN
+
+  const e1 = 1 / Math.E; // 1/e ≈ 0.3679
+
+  if (branch === 0) {
+    if (x === 0) return 0;
+
+    // W₀ is defined for x >= -1/e
+    if (x < -e1) return NaN;
+
+    // Branch point: W(-1/e) = -1
+    if (Math.abs(x + e1) < 1e-15) return -1;
+
+    // Initial guess
+    let w: number;
+    if (x < 0) {
+      // Near -1/e: use series expansion around branch point
+      const p = Math.sqrt(2 * (Math.E * x + 1));
+      w = -1 + p - (p * p) / 3 + (11 / 72) * p * p * p;
+    } else if (x <= 1) {
+      w = x * (1 - x * (1 - 1.5 * x)); // Padé-like initial guess for small x
+    } else if (x < 100) {
+      const lnx = Math.log(x);
+      w = lnx - Math.log(lnx);
+    } else {
+      const l1 = Math.log(x);
+      const l2 = Math.log(l1);
+      w = l1 - l2 + l2 / l1;
+    }
+    return lambertWHalley(w, x);
+  }
+
+  if (branch === -1) {
+    // W₋₁ is real only on -1/e <= x < 0
+    if (x < -e1 || x >= 0) return NaN;
+
+    // Branch point: W₋₁(-1/e) = -1
+    if (Math.abs(x + e1) < 1e-15) return -1;
+
+    // Initial guess. Near the branch point use the series around -1/e (the
+    // mirror of the W₀ series: MINUS p); near 0⁻ use the log asymptotic
+    // w ~ ln(-x) - ln(-ln(-x)).
+    let w: number;
+    if (x < -0.27) {
+      const p = Math.sqrt(2 * (Math.E * x + 1));
+      w = -1 - p - (p * p) / 3 - (11 / 72) * p * p * p;
+    } else {
+      const l1 = Math.log(-x);
+      w = l1 - Math.log(-l1);
+    }
+    return lambertWHalley(w, x);
+  }
+
+  // Other (complex) branches are out of scope for the real kernel.
+  return NaN;
 }
 
 /**

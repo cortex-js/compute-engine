@@ -17,8 +17,8 @@ Adapted from SymPy’s `test_solveset.py` (univariate cases). Each returned root
 | lambert | 4 | 0 | 4 | 4 | 4 |
 | trig | 4 | 4 | 4 | 4 | 4 |
 | hyperbolic | 3 | 3 | 3 | 3 | 3 |
-| frontier | 3 | 0 | 0 | 1 | 1 |
-| **all** | **40** | **33** | **37** | **38** | **38** |
+| frontier | 3 | 0 | 1 | 1 | 1 |
+| **all** | **40** | **33** | **38** | **38** | **38** |
 
 ## Cases
 
@@ -62,5 +62,5 @@ Adapted from SymPy’s `test_solveset.py` (univariate cases). Each returned root
 | H2 | cosh x − 2 = 0 | finite | ✅ | ✅ | ✅ | ✅ |
 | H3 | tanh x − 1/2 = 0 | finite | ✅ | ✅ | ✅ | ✅ |
 | FR1 | x − cos x = 0 (Dottie) | finite | ∅ | ∅ | ∅ | ∅ |
-| FR2 | eˣ − x − 2 = 0 | finite | ∅ | 🟡 _(1/2 roots)_ | ✅ | ✅ |
+| FR2 | eˣ − x − 2 = 0 | finite | ∅ | ✅ | ✅ | ✅ |
 | FR3 | x² − cos x = 0 | finite | ∅ | ∅ | ∅ | ∅ |

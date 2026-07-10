@@ -1541,8 +1541,23 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'LambertW',
     latexTrigger: ['\\operatorname{W}'],
     kind: 'function',
-    serialize: (serializer, expr) =>
-      '\\operatorname{W}' + serializer.wrapArguments(expr),
+    // Two-argument form W(x, k) carries the branch index k as a subscript
+    // (BesselJ-style), e.g. W₋₁(x) → `\operatorname{W}_{-1}(x)`. The branch is
+    // the SECOND argument (the value is first); one-argument W(x) prints
+    // without a subscript.
+    serialize: (serializer, expr) => {
+      const x = operand(expr, 1);
+      const k = operand(expr, 2);
+      if (x !== null && k !== null) {
+        return (
+          '\\operatorname{W}_{' +
+          serializer.serialize(k) +
+          '}' +
+          serializer.wrapArguments(['LambertW', x])
+        );
+      }
+      return '\\operatorname{W}' + serializer.wrapArguments(expr);
+    },
   },
   // Bessel functions - order is first argument, value is second
   // BesselJ(n, x) represents J_n(x)

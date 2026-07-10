@@ -118,6 +118,24 @@
     {"equation": ["Add", ["Power", "ExponentialE", "x"], "x"], "root": -0.5671432904097838},
     {"equation": ["Add", "x", ["Power", 2, "x"]], "root": -0.641185744504986}
    ]
+  },
+  {
+   "id": "lambertw-linear-exp-branch",
+   "match": ["Add", ["Multiply", "__c", ["Power", "_p", ["Multiply", "__m", "_x"]]], ["Multiply", "__a", "_x"], "__b"],
+   "replace": ["Subtract",["Negate",["Divide","__b","__a"]],["Divide",["LambertW",["Multiply",["Divide",["Multiply","__m",["Ln","_p"],"__c"],"__a"],["Power","_p",["Negate",["Multiply","__m",["Divide","__b","__a"]]]]],-1],["Multiply","__m",["Ln","_p"]]]],
+   "heads": ["LambertW"],
+   "topics": ["lambertw"],
+   "note": "Branch -1 (second real branch) companion of lambertw-linear-exp: c*p^(m*x) + a*x + b = 0 also solves to x = -b/a - W_{-1}((m*ln(p)*c/a)*p^(-m*b/a))/(m*ln(p)) wherever the W argument lands in [-1/e, 0). Emits the SECOND real root of a linear-plus-single-exponential (e.g. the x = 1.146... root of e^x - x - 2 = 0). W_{-1} returns NaN outside its domain, so validateRoots drops the candidate for shapes with a single real root (never a wrong root).",
+   "tests": [{"equation": ["Add", ["Power", "ExponentialE", "x"], ["Negate", "x"], -2], "root": 1.1461932206205825}]
+  },
+  {
+   "id": "lambertw-exp-bare-branch",
+   "match": ["Add", ["Power", "_p", "_x"], "_x"],
+   "replace": ["Negate",["Divide",["LambertW",["Ln","_p"],-1],["Ln","_p"]]],
+   "heads": ["LambertW"],
+   "topics": ["lambertw"],
+   "note": "Branch -1 companion of lambertw-exp-bare for the bare shape p^x + x = 0: x = -W_{-1}(ln(p))/ln(p). Real only when ln(p) in [-1/e, 0), i.e. p in [e^{-1/e}, 1); for p >= 1 (e.g. e^x + x = 0, x + 2^x = 0) the W argument ln(p) >= 0 falls outside W_{-1}'s domain and the NaN candidate is dropped by validateRoots (those equations have a single real root). Tested at p = 0.8.",
+   "tests": [{"equation": ["Add", ["Power", 0.8, "x"], "x"], "root": -10.565272633818234}]
   }
  ],
  "recompileDivergence": {

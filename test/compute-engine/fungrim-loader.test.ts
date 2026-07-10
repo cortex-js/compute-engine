@@ -674,7 +674,9 @@ describe('solve routing', () => {
     // apply-solve-templates.ts. They carry no domain guards (validateRoots is
     // the safety net) and are skipped on a default load.
     const solveRules = FUNGRIM_CORE.rules.filter((r) => r.target === 'solve');
-    expect(solveRules.length).toBeGreaterThanOrEqual(7);
+    // 5 derived seed templates + 4 curated LambertW templates (linear-exp and
+    // exp-bare, each with a W₋₁ branch companion).
+    expect(solveRules.length).toBeGreaterThanOrEqual(9);
     for (const r of solveRules) {
       // Derived seed templates carry a 6-hex id; curated LambertW templates
       // (curation-overrides.json `solveTemplates`) carry a kebab-case id.
@@ -778,10 +780,27 @@ describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
   // inverse-composition identity for `c·pᵐˣ + a·x + b` exists in the slice.
   // ---------------------------------------------------------------------------
 
-  it('LambertW linear-exp: eˣ − x − 2 = 0 → −2 − W(−e⁻²)  [FR2, lambertw-linear-exp]', () => {
+  it('LambertW linear-exp: eˣ − x − 2 = 0 → both real roots via W₀ and W₋₁  [FR2, lambertw-linear-exp(-branch)]', () => {
     const r = solved('e^x - x - 2 = 0');
+    // Principal branch: −2 − W₀(−e⁻²) ≈ −1.8414
     expect(r.some((v) => Math.abs(v - -1.8414056604369606) < 1e-9)).toBe(true);
+    // Second real branch: −2 − W₋₁(−e⁻²) ≈ 1.1462
+    expect(r.some((v) => Math.abs(v - 1.1461932206205825) < 1e-9)).toBe(true);
     for (const v of r) expect(Math.exp(v) - v - 2).toBeCloseTo(0, 8);
+  });
+
+  it('LambertW linear-exp-branch drops the NaN candidate for single-real-root shapes (W1: x·eˣ − 1 → one root)', () => {
+    const r = solved('x e^x - 1 = 0');
+    // Only the principal root; the W₋₁ companion argument (−1) is outside its
+    // domain → NaN → validateRoots drops it (no spurious root).
+    expect(r.length).toBe(1);
+    expect(r[0]).toBeCloseTo(0.5671432904097838, 9);
+  });
+
+  it('LambertW exp-bare-branch: 0.8ˣ + x = 0 → second real root −W₋₁(ln 0.8)/ln 0.8', () => {
+    const r = solved('0.8^x + x = 0');
+    expect(r.some((v) => Math.abs(v - -10.565272633818234) < 1e-6)).toBe(true);
+    for (const v of r) expect(Math.pow(0.8, v) + v).toBeCloseTo(0, 6);
   });
 
   it('LambertW exp-bare: eˣ + x = 0 → −W(1)  [W2, lambertw-exp-bare]', () => {

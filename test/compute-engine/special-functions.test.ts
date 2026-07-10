@@ -362,6 +362,66 @@ describe('LAMBERT W FUNCTION', () => {
     const wVal = w.re;
     expect(Math.abs(wVal * Math.exp(wVal) - 100)).toBeLessThan(1e-10);
   });
+
+  test('W(x, 0) agrees with the 1-argument principal form', () => {
+    expectApprox(ce.expr(['LambertW', 1, 0]), 0.5671432904097838);
+    expectApprox(
+      ce.expr(['LambertW', { num: '-0.13533528323661270' }, 0]),
+      -0.15859433956303937,
+      1e-10
+    );
+  });
+
+  test('W₋₁(-1/e) = -1 (branch point of the second real branch)', () => {
+    expectApprox(
+      ce.expr(['LambertW', { num: '-0.36787944117144233' }, -1]),
+      -1,
+      1e-9
+    );
+  });
+
+  test('W₋₁(-0.1) ≈ -3.577152063957297', () => {
+    expectApprox(
+      ce.expr(['LambertW', { num: '-0.1' }, -1]),
+      -3.577152063957297,
+      1e-10
+    );
+  });
+
+  test('W₋₁(-e⁻²) ≈ -3.1461932206205825 and satisfies w·eʷ = -e⁻²', () => {
+    const x = -Math.exp(-2);
+    const w = ce.expr(['LambertW', { num: x.toString() }, -1]).N();
+    const wVal = w.re;
+    expect(Math.abs(wVal - -3.1461932206205825)).toBeLessThan(1e-12);
+    expect(Math.abs(wVal * Math.exp(wVal) - x)).toBeLessThan(1e-14);
+  });
+
+  test('W₋₁ returns NaN outside its real domain (like the principal branch)', () => {
+    // x >= 0 is outside W₋₁'s real domain → NaN, matching W₀'s out-of-domain
+    // behavior (e.g. W₀(-1) with -1 < -1/e is also NaN).
+    expect(ce.expr(['LambertW', { num: '0.5' }, -1]).N().operator).toBe('NaN');
+    expect(ce.expr(['LambertW', -1]).N().operator).toBe('NaN');
+  });
+
+  test('LambertW stays inert for unsupported / symbolic branch indices', () => {
+    // Only the real branches 0 and −1 are implemented; any other integer
+    // branch keeps the expression symbolic.
+    expect(ce.expr(['LambertW', { num: '-0.1' }, 2]).N().operator).toBe(
+      'LambertW'
+    );
+    // A symbolic branch index keeps the expression inert.
+    expect(ce.expr(['LambertW', { num: '-0.1' }, 'k']).N().operator).toBe(
+      'LambertW'
+    );
+  });
+
+  test('serialization: 2-argument W(x, k) prints the branch as a subscript', () => {
+    expect(ce.box(['LambertW', 'x']).latex).toBe('\\operatorname{W}(x)');
+    expect(ce.box(['LambertW', 'x', -1]).latex).toBe(
+      '\\operatorname{W}_{-1}(x)'
+    );
+    expect(ce.box(['LambertW', 'x', 0]).latex).toBe('\\operatorname{W}_{0}(x)');
+  });
 });
 
 describe('BESSEL J FUNCTION', () => {
@@ -706,6 +766,22 @@ describe('BIGNUM SPECIAL FUNCTIONS', () => {
     const val = result.toString();
     // Should be 1 or very close to 1
     expect(val === '1' || val.startsWith('1.0000000000000000000') || val.startsWith('0.9999999999999999999')).toBe(true);
+  });
+
+  test('high-precision W₋₁(-e⁻²) to working precision (50 digits)', () => {
+    // Second real branch, computed by the BigDecimal kernel. −e⁻² is formed at
+    // working precision (not a truncated literal), so the residual w·eʷ = −e⁻²
+    // must hold to ~working precision.
+    const negInvE2 = ['Negate', ['Exp', -2]];
+    expectBignum(
+      bigCe.expr(['LambertW', negInvE2, -1]),
+      '-3.1461932206205825852370610285213682528886620461824'
+    );
+    const w = bigCe.expr(['LambertW', negInvE2, -1]).N();
+    const resid = bigCe
+      .expr(['Add', ['Multiply', w.json, ['Exp', w.json]], ['Exp', -2]])
+      .N();
+    expect(Math.abs(resid.re)).toBeLessThan(1e-45);
   });
 
   test('high-precision PolyGamma(2, 1) = -2ζ(3)', () => {

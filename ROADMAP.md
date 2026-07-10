@@ -582,15 +582,24 @@ inverse-trig-of-x (`arcsin/arccos/arctan x = c`) and the hyperbolic family
 `eᶠ ± e⁻ᶠ → 2cosh/2sinh` and the coefficient-general two-`Abs` squaring
 `a·|f| + b·|g| → a²f² − b²g²`; and a `clearDenominators` fix (per-term LCM
 multiplication so `p(x)/q(x)·lcm` cancels — whole-`Add` `.mul()` expanded
-numerators past cancellation). What remains:
+numerators past cancellation). Round 3: real **W₋₁-branch support for
+`LambertW`** — 2-arg form `["LambertW", z, k]` (branch last, SymPy/Fungrim
+convention; k ∈ {0, −1} evaluated, others inert), machine + bignum kernels,
+`\operatorname{W}_{-1}(x)` serialization, branch-aware compile target — plus
+W₋₁ companion solve templates, so `eˣ − x − 2 = 0` returns both real roots
+(FR2 ✅). **The benchmark is at parity — 38/40 = SymPy = Mathematica — and
+this track is done as a coverage effort.** Residual, none benchmark-reachable:
 
-- **FR2 second branch** (the last reachable point vs SymPy/Mathematica):
-  the LambertW templates return only the principal-branch root (CE's
-  `LambertW` is 1-arg); the `W₋₁` companion root needs branch support (same
-  gate as the `ed7dac` seed, still reported "unavailable" by
-  `apply-solve-templates.ts`).
 - **FR1/FR3** (Dottie-style transcendental fixed points): unsolved by SymPy
   and Mathematica too — outside the closed-form ceiling, not a gap to chase.
+- **`ed7dac` seed stays gated**: a full recompile still excludes its 2-arg
+  simplify rule (recompile-drift is 0/0 even with branch support landed —
+  the compat gate is upstream of the signature); the surgical
+  `solveTemplates` companions cover the solve side, so activation is now
+  cosmetic (the simplify identity `W(x·eˣ, −1) → x` for x ≤ −1).
+- **Small tails**: `\operatorname{W}_{-1}` subscript parse (BesselJ has the
+  same one-way limitation), derivative of the 2-arg form (kept inert, not
+  wrong).
 
 (Fungrim's _simplify_-side work is separate again — see Strategic item 7,
 Fungrim Phase 4.)
