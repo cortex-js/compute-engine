@@ -1,5 +1,27 @@
 ## [Unreleased]
 
+### Special Functions
+
+- **Subscripted special-function notation parses.** `\operatorname{W}_{-1}(x)`
+  now parses to the two-argument `["LambertW", x, -1]` (branch last), and
+  `\operatorname{J}_{n}(x)` / `\operatorname{Y}` / `\operatorname{I}` /
+  `\operatorname{K}` parse to `BesselJ(n, x)` et al. (order first) — these
+  forms previously serialized but did not parse back, so LaTeX round-trips of
+  non-principal Lambert branches and indexed Bessel functions now close.
+- **The two-argument `LambertW(z, k)` differentiates.** Every fixed branch
+  satisfies the same functional equation, so
+  `d/dz W(z,k) = W(z,k)/(z·(1+W(z,k)))` now carries the branch through
+  (chain rule included); the derivative with respect to the discrete branch
+  index stays inert. Verified against central differences on both real
+  branches.
+- **Fungrim identities: `W₋₁(x·ln x) → ln x` fires.** The upstream entry
+  `a172c7` published an *empty* assumption interval
+  (`OpenClosedInterval(0, −1/e)`); the corrected band `x ∈ (0, 1/e]` was
+  fixed in the corpus fork (submitted upstream), and the recompiled
+  identities artifact now carries the rule (1,414 rules): with
+  `loadIdentities(ce)` and `assume(0 < x ≤ 1/4)`,
+  `simplify(W(x·ln x, −1))` returns `ln x`.
+
 ## 0.73.0 _2026-07-09_
 
 ### New Operator: `Interpret`
