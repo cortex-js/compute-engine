@@ -65,9 +65,42 @@ barrier):
 
 ## The generalization ladder (v2+)
 
-- **v2 — richer local recognition:** finite differences → polynomial general
-  terms (squares, cubes, triangular numbers); constant ratio → geometric
-  products/sums.
+- **v2 — richer local recognition** (spec below): finite differences →
+  polynomial general terms (squares, cubes, triangular numbers); constant
+  ratio → geometric products/sums.
+
+### v2 gate (agreed 2026-07-09)
+
+Recognizers are tried in order: arithmetic progression (v1, unchanged shapes)
+→ polynomial via finite differences → geometric. Same operand handling as v1
+(contiguous exact-numeric sample run before the placeholder, single anchor
+after it, leading terms re-attached, fresh index).
+
+- **Polynomial (degree g ≥ 2):** successive finite differences of the
+  samples until a constant row; general term via Newton's forward-difference
+  formula `t(k) = Σⱼ Δʲs₁·C(k−1, j)`, built with canonical operations and
+  simplified. **Evidence discipline** (3 samples fit *any* quadratic — the
+  anchor must carry the missing evidence): accept when `m ≥ g + 2` (the
+  constant difference row is witnessed at least twice), OR `m = g + 1` AND
+  the anchor *structurally confirms* the term (below). Degree-1 stays the
+  v1 path byte-for-byte.
+- **Geometric:** constant exact ratio `r` (`r ≠ 0, |r| ≠ 1`) between
+  consecutive samples; `t(k) = s₁·r^(k−1)`. Evidence: `m ≥ 3` (ratio
+  witnessed twice) OR `m = 2` with structural anchor confirmation.
+- **Anchor validation** (replaces v1's affine-U rule for these families):
+  - *numeric anchor* `A`: find integer `U ≥ m+1` with `t(U) = A` — integer
+    root of `t(U) − A` for polynomials (via the univariate solver or bounded
+    integer search), exact repeated division by `r` for geometric; reject
+    otherwise.
+  - *symbolic anchor* `A` (exactly one free symbol `s`): candidate `U`
+    from substituting `k → s` (and, if that fails, matching `A` against
+    `t` with the index as wildcard); accept iff `t(U)` is canonically
+    identical to `A` and `U` passes the v1 shape gate (symbol, or affine
+    with integer coefficients). So `1+4+9+16+\dots+n²` → `Sum(k², (k,1,n))`
+    and `1+2+4+\dots+2^n` → `Sum(2^(k−1), (k,1,n+1))`, while
+    `1+2+4+\dots+n²` stays inert (anchor fits neither family's term).
+- Alternating signs (`r < 0` covers sign-alternating geometric; other
+  alternating patterns), mixed families, and anything unproven: inert.
 - **v3 — recurrences via `RSolve`:** Berlekamp–Massey over the samples → a
   linear constant-coefficient recurrence → feed the existing `RSolve`
   (landed 0.71.0) for the closed form (Fibonacci → Binet, no lookup tables).

@@ -196,10 +196,15 @@ sums/products into formal `Sum`/`Product` under a strict arithmetic-
 progression gate (`1+2+\dots+n` → `Sum(k,(k,1,n))`; parity mismatches and
 anything unproven stay inert). Remaining rungs, demand-paced:
 
-- **v2 (M):** finite differences → polynomial general terms; constant
-  ratio → geometric.
 - **v3 (M):** Berlekamp–Massey → linear recurrence → closed form via the
   existing `RSolve`; optional hand-curated famous-sequence table.
+  (v2 — finite differences → polynomial terms + constant-ratio geometric,
+  with the twice-witnessed/anchor-confirmation evidence discipline —
+  landed 2026-07-09.) Known edge for a future rung: `1 - 2 + 4 - \dots`
+  wraps the placeholder in `Negate`, so the fold barrier's direct-operand
+  gate doesn't protect it (samples fold to `3`) — subtraction-ellipsis
+  needs its own barrier clause before alternating patterns can be
+  recognized.
 - **v4 (M):** OEIS-backed *proposals* through the existing async
   `ce.lookupOEIS` (parse the free-text `formula` field, verify against the
   samples with the recognizer core, return attributed candidates). Sync

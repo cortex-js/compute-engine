@@ -14,8 +14,20 @@
   in arithmetic progression and a single anchor whose implied upper bound is
   integral (so `1 + 3 + \dots + 2n`, whose even anchor does not belong to
   the odd progression, stays untouched). Anything the gate cannot prove is
-  returned unchanged. The design (including the recognition ladder toward
-  polynomial/geometric patterns, recurrence closed forms via `RSolve`, and
+  returned unchanged.
+- **Polynomial and geometric patterns are recognized too (v2).** Successive
+  finite differences identify polynomial general terms —
+  `Interpret(1 + 4 + 9 + 16 + \dots + n^2)` → `\sum_{k=1}^{n} k^2`, cubes and
+  triangular numbers likewise — and a constant exact ratio identifies
+  geometric ones: `1 + 2 + 4 + \dots + 2^n` → `\sum_{k=1}^{n+1} 2^{k-1}`,
+  `2 \cdot 4 \cdot 8 \cdot \dots \cdot 2^n` → `\prod_{k=1}^{n} 2^k`. Numeric
+  anchors resolve to concrete bounds (`1 + 4 + 9 + \dots + 100` → a sum to
+  10 that evaluates to `385`). An evidence discipline guards against
+  overfitting: a degree-g polynomial needs its constant difference row
+  witnessed twice, or one fewer sample when the anchor structurally confirms
+  the general term — three samples fit *any* quadratic, so
+  `1 + 2 + 4 + \dots + m` stays untouched. The design (including the
+  ladder toward recurrence closed forms via `RSolve`, and
   OEIS-backed proposals through the existing async `ce.lookupOEIS`) is in
   `docs/plans/2026-07-09-ellipsis-interpretation-design.md`.
 

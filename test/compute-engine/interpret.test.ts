@@ -94,19 +94,133 @@ describe('Interpret — negative gates stay inert', () => {
     ]);
   });
 
-  test('geometric 1 + 2 + 4 + … + 2^n stays inert', () => {
-    expect(interpret('1 + 2 + 4 + \\dots + 2^n').json).toEqual([
+  // NOTE: `1 + 2 + 4 + … + 2^n` was a v1 negative gate (geometric unsupported);
+  // v2 now recognizes it (see the geometric describe block above).
+
+  test('no continuation: Interpret(x + 1) → x + 1', () => {
+    expect(interpret('x + 1').json).toEqual(['Add', 'x', 1]);
+  });
+});
+
+describe('Interpret — polynomial (finite differences)', () => {
+  test('1 + 4 + 9 + 16 + … + n² → Sum(k², (k, 1, n)) [m = g+2]', () => {
+    expect(interpret('1 + 4 + 9 + 16 + \\dots + n^2').json).toEqual([
+      'Sum',
+      ['Power', 'k', 2],
+      ['Limits', 'k', 1, 'n'],
+    ]);
+  });
+
+  test('1 + 4 + 9 + … + n² → Sum(k², (k, 1, n)) [m = g+1, anchor confirms]', () => {
+    expect(interpret('1 + 4 + 9 + \\dots + n^2').json).toEqual([
+      'Sum',
+      ['Power', 'k', 2],
+      ['Limits', 'k', 1, 'n'],
+    ]);
+  });
+
+  test('1 + 8 + 27 + 64 + … + n³ → Sum(k³, (k, 1, n))', () => {
+    // A cubic needs g+1 = 4 samples to be witnessed by finite differences
+    // (three samples fit a *quadratic*); see the evidence discipline in the
+    // design doc. With four samples, degree 3 is detected and the anchor n³
+    // confirms.
+    expect(interpret('1 + 8 + 27 + 64 + \\dots + n^3').json).toEqual([
+      'Sum',
+      ['Power', 'k', 3],
+      ['Limits', 'k', 1, 'n'],
+    ]);
+  });
+
+  test('triangular 1 + 3 + 6 + 10 + … + n(n+1)/2 → Sum(k(k+1)/2, (k, 1, n))', () => {
+    const sum = interpret('1 + 3 + 6 + 10 + \\dots + \\frac{n(n+1)}{2}');
+    expect(sum.json).toEqual([
+      'Sum',
+      [
+        'Add',
+        ['Multiply', ['Rational', 1, 2], ['Power', 'k', 2]],
+        ['Multiply', ['Rational', 1, 2], 'k'],
+      ],
+      ['Limits', 'k', 1, 'n'],
+    ]);
+    // Numeric check at n = 5: 1 + 3 + 6 + 10 + 15 = 35.
+    expect(sum.subs({ n: 5 }).evaluate().json).toEqual(35);
+  });
+
+  test('numeric anchor 1 + 4 + 9 + … + 100 → Sum(k², (k, 1, 10)) = 385', () => {
+    const sum = interpret('1 + 4 + 9 + \\dots + 100');
+    expect(sum.json).toEqual(['Sum', ['Power', 'k', 2], ['Limits', 'k', 1, 10]]);
+    expect(sum.evaluate().json).toEqual(385);
+  });
+});
+
+describe('Interpret — geometric', () => {
+  test('1 + 2 + 4 + … + 2^n → Sum(2^(k−1), (k, 1, n+1))', () => {
+    const sum = interpret('1 + 2 + 4 + \\dots + 2^n');
+    expect(sum.json).toEqual([
+      'Sum',
+      ['Power', 2, ['Add', 'k', -1]],
+      ['Limits', 'k', 1, ['Add', 'n', 1]],
+    ]);
+    // Numeric check at n = 3: 1 + 2 + 4 + 8 = 15.
+    expect(sum.subs({ n: 3 }).evaluate().json).toEqual(15);
+  });
+
+  test('2 · 4 · 8 · … · 2^n → Product(2^k, (k, 1, n))', () => {
+    const prod = interpret('2 \\cdot 4 \\cdot 8 \\cdot \\dots \\cdot 2^n');
+    expect(prod.json).toEqual([
+      'Product',
+      ['Power', 2, 'k'],
+      ['Limits', 'k', 1, 'n'],
+    ]);
+    // Numeric check at n = 4: 2 · 4 · 8 · 16 = 1024.
+    expect(prod.subs({ n: 4 }).evaluate().json).toEqual(1024);
+  });
+
+  test('numeric anchor 1 + 2 + 4 + … + 64 → Sum(2^(k−1), (k, 1, 7)) = 127', () => {
+    const sum = interpret('1 + 2 + 4 + \\dots + 64');
+    expect(sum.json).toEqual([
+      'Sum',
+      ['Power', 2, ['Add', 'k', -1]],
+      ['Limits', 'k', 1, 7],
+    ]);
+    expect(sum.evaluate().json).toEqual(127);
+  });
+});
+
+describe('Interpret — v2 negative gates stay inert', () => {
+  test('anchor fits neither family: 1 + 2 + 4 + … + n² stays inert', () => {
+    expect(interpret('1 + 2 + 4 + \\dots + n^2').json).toEqual([
       'Add',
       1,
       2,
       4,
       'ContinuationPlaceholder',
-      ['Power', 2, 'n'],
+      ['Power', 'n', 2],
     ]);
   });
 
-  test('no continuation: Interpret(x + 1) → x + 1', () => {
-    expect(interpret('x + 1').json).toEqual(['Add', 'x', 1]);
+  test('overfit guard: 1 + 2 + 4 + … + m (bare symbol confirms nothing) stays inert', () => {
+    // The quadratic interpolant of 1,2,4 evaluated at m is not m, and the
+    // geometric candidate t = 2^(k−1) has a non-affine bound log₂(m)+1.
+    expect(interpret('1 + 2 + 4 + \\dots + m').json).toEqual([
+      'Add',
+      1,
+      2,
+      4,
+      'ContinuationPlaceholder',
+      'm',
+    ]);
+  });
+
+  test('constant samples 2 + 2 + 2 + … + 2 (d = 0, r = 1) stays inert', () => {
+    expect(interpret('2 + 2 + 2 + \\dots + 2').json).toEqual([
+      'Add',
+      2,
+      2,
+      2,
+      'ContinuationPlaceholder',
+      2,
+    ]);
   });
 });
 
