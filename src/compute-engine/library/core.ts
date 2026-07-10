@@ -1651,7 +1651,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     BaseForm: {
       description: '`BaseForm(expr, base=10)`',
       complexity: 9000,
-      signature: '(number, (string|integer)?) -> string | nothing',
+      signature: '(number, (string|number)?) -> string | nothing',
       type: ([x]) => (x === undefined ? 'nothing' : x.type),
       evaluate: ([x]) => x,
     },

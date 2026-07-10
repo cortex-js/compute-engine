@@ -75,10 +75,17 @@
   arithmetic on based numerals works: `1011_2 \cdot 101_2` evaluates to
   `55`, and `11_8 - 3_8 = 6_8` evaluates to `True`. The guard is strict —
   every digit must be valid for the base (`19_2` stays an inert
-  `Subscript`), symbolic bases (`161_b`) and subscripted symbols (`x_2`)
-  are unchanged, and values larger than 2⁵³ stay exact. The `BaseForm`
+  `Subscript`), subscripted symbols (`x_2`) are unchanged, and values
+  larger than 2⁵³ stay exact. The `BaseForm`
   LaTeX serializer was also fixed (it emitted an unbalanced parenthesis)
   and now round-trips: `BaseForm(23, 2)` serializes as `10111_{2}`.
+  A numeral with a **symbol** subscript base, e.g. `161_b` or `161_{b}`,
+  now parses to `BaseForm` of the digit polynomial in that base
+  (`161_b` → `["BaseForm", ["Add", ["Power", "b", 2], ["Multiply", 6, "b"], 1], "b"]`,
+  i.e. `b² + 6b + 1`), so arithmetic works symbolically
+  (`161_b + 134_b` evaluates to `2b² + 9b + 5`) and the numeral
+  round-trips back to `161_{b}`. Base equations solve: `161_b + 134_b = 315_b`
+  reduces to `b² − 8b = 0` and solves to `b = 8` (and `b = 0`).
 - **Sequence-braces notation.** `\{a_n\}_{n=1}^{\infty}` now parses to the
   new inert `IndexedSequence(term, index, lower, upper)` head instead of
   an `incompatible-type` error. The term uses the operator-call form

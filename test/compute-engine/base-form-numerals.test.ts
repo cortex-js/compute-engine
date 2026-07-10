@@ -54,9 +54,17 @@ describe('Base-subscript numeral guards (unchanged behavior)', () => {
     expect(ce.parse('8_8').json).toEqual(['Subscript', 8, 8]);
   });
 
-  test('symbolic base stays an inert Subscript', () => {
-    expect(ce.parse('161_b').json).toEqual(['Subscript', 161, 'b']);
-    expect(ce.parse('161_{b}').json).toEqual(['Subscript', 161, 'b']);
+  test('symbolic base parses to the digit polynomial (BaseForm)', () => {
+    // Since the symbolic-base extension, `161_b` reads as the positional
+    // expansion 1·b² + 6·b + 1 (see base-form-symbolic.test.ts for full
+    // coverage of that path).
+    const expected = [
+      'BaseForm',
+      ['Add', ['Power', 'b', 2], ['Multiply', 6, 'b'], 1],
+      'b',
+    ];
+    expect(ce.parse('161_b').json).toEqual(expected);
+    expect(ce.parse('161_{b}').json).toEqual(expected);
   });
 
   test('base of 1 or 0 stays an inert Subscript', () => {

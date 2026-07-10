@@ -1987,6 +1987,21 @@ export function findUnivariateRoots(
 ): ReadonlyArray<Expression> {
   const ce = expr.engine;
 
+  // `BaseForm` is an inert display wrapper (`BaseForm(value, base)`); its value
+  // slot may be a polynomial in the unknown (symbolic-base numerals such as
+  // `161_b` → `BaseForm(b² + 6b + 1, b)`). Strip the wrappers so the underlying
+  // polynomial equation is visible to the solver. This is a structural rewrite
+  // — do not evaluate — so exact coefficients are preserved.
+  if (expr.has('BaseForm')) {
+    const stripBaseForm = (node: Expression): Expression => {
+      if (isFunction(node, 'BaseForm')) return stripBaseForm(node.op1);
+      if (isFunction(node) && node.ops)
+        return ce.function(node.operator, node.ops.map(stripBaseForm));
+      return node;
+    };
+    expr = stripBaseForm(expr);
+  }
+
   // Save the expression to solve BEFORE peeling, clearing denominators and
   // other transformations. This is crucial for validating roots: those
   // transformations can introduce extraneous roots that satisfy the
