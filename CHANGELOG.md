@@ -79,6 +79,22 @@
   reduces to `2^n \cdot n!` and `(2n+1)!!` reduces to
   `\frac{(2n+1)!}{2^n \cdot n!}` when `n` is integer-typed.
 
+### Units
+
+- **Compound units cancel in quantity arithmetic.** Multiplying or dividing
+  quantities now cancels units structurally instead of accumulating them:
+  `18 \text{ in} / (12 \text{ in/ft})` evaluates to `1.5 \text{ ft}`
+  (previously the inscrutable `1.5 \text{ in/in/ft}`). A repeated unit
+  symbol cancels exactly — no conversion factors are introduced — while
+  different units of the same dimension on opposite sides of a fraction
+  bar are converted and folded into the magnitude:
+  `\frac{10 \text{ m} \cdot 1 \text{ s}}{5 \text{ in}}` →
+  `78.74 \text{ s}`. Products of same-dimension units are left as written
+  (`2 \text{ in} \cdot 3 \text{ ft}` stays `6 \text{ in} \cdot \text{ft}`),
+  and simplification to named derived SI units still applies afterwards
+  (`2 \text{ N} \cdot 3 \text{ m}` → `6 \text{ J}`). Works with
+  measurement (uncertainty-carrying) magnitudes as well.
+
 ### New Notations
 
 - **Base-subscript numerals compute.** A numeral with an integer-literal
@@ -177,6 +193,93 @@ that corpus from 97.09% to 97.38% clean parse:
   Strictly gated: the whole text must resolve as a unit, so prose like
   `9\text{ to }80` is untouched. No `ton(s)` alias (a US short ton is not
   the metric tonne `t` — mapping it would be a silent 10% error).
+
+### Restriction Braces
+
+- **Comma-separated brace conditions combine as a union (`Or`).**
+  `x^2\{x\ge0, x\le3\}` now parses to
+  `["When", x², ["Or", 0≤x, x≤3]]` — each comma element is
+  piecewise shorthand for `cond: 1` evaluated first-match, so the
+  expression is defined where **any** condition holds. (Previously the
+  condition was a `Tuple`, which is not boolean and could not compile.)
+  Stacked braces (`\{c_1\}\{c_2\}`) still AND-combine, unchanged.
+- **Colon groups parse as piecewise value selectors.**
+  `x\{x>0:1, x<0:-1\}` now parses to
+  `["Multiply", "x", ["Which", 0<x, 1, x<0, −1]]`: a brace group is
+  a first-class piecewise *value* (`{cond}` ≡ `{cond: 1}`) attached by
+  juxtaposition — i.e. multiplication, the same convention that makes the
+  bare-condition form a restriction. A trailing bare value is the else
+  branch (`\{x>0:1, -1\}` → `…, "True", −1`), and a bare condition inside a
+  colon group means `cond: 1`. (Previously the `cond:val` pairs were
+  parsed as a `When` *gate* for the body — inverted semantics.)
+- **`When` now masks correctly on the `interval-js` compile target.** The
+  interval comparisons return the tri-state string
+  `'true' | 'false' | 'maybe'` — all truthy — so the previously-emitted JS
+  ternary could never take its masking branch: an input interval entirely
+  outside the restriction returned a normal interval result. `When` now
+  compiles to a tri-state-aware runtime helper (`_IA.restrict`): `'false'`
+  masks (`{kind: 'empty'}`), `'true'` passes the value through, and
+  `'maybe'` — an input straddling the restriction boundary — reports the
+  value range as domain-clipped
+  (`{kind: 'partial', domainClipped: 'both'}`) so adaptive samplers see a
+  domain edge rather than a clean interval. Scalar `javascript` and `glsl`
+  `When` emission is unchanged.
+
+### Pipelines and Held Operands
+
+- **Hold operators reduce transformer heads.** `Solve`, `Integrate`, and
+  `Limit` hold their expression operand (so an equation is not collapsed to
+  a boolean before solving) — but a held operand whose head is an
+  expression *transformer* (`Simplify`, `Expand`, `ExpandAll`, `Factor`,
+  `Together`, `Distribute`, `TrigExpand`) is a computation step and is now
+  reduced before the algorithm runs.
+  `x^2+2x+1 \rhd \operatorname{Simplify} \rhd \operatorname{Solve}` now
+  returns `[-1]` (previously `[]`: the solver found no roots in an
+  expression whose operator was `Simplify`), and
+  `\int \operatorname{Simplify}(x^2)\,dx` /
+  `\lim` of a transformer-wrapped body compute instead of staying inert.
+  Only the curated transformer set is reduced — full evaluation would
+  collapse relations and substitute assigned values into the unknown.
+- **Unknown-inference defers on the pipe topic placeholder.** Operators
+  that infer their variable when omitted (`Solve`, `D`, `Series`, the
+  polynomial operators) no longer run that inference on the pipeline topic
+  placeholder `_`: `ce.box(["Solve", "_"])` stays `["Solve", "_"]` instead
+  of canonicalizing to `["Solve", "_", "_"]`, which baked the placeholder
+  into the unknown slot so a *prefix* pipeline stage
+  (`\rhd \operatorname{Solve}`) computed `Solve(expr, expr)` → `[0]` where
+  the infix spelling returned `[-1]`. `Solve` re-infers the unknown when
+  the applied stage evaluates; the two spellings now agree. (Known
+  limitation, pre-existing: piping an *equation* through the prefix form
+  still collapses upstream — lambda arguments are pre-evaluated when
+  bound, and evaluating a free-standing `Equal` decides it — so such a
+  stage stays inert rather than returning a wrong answer; the infix
+  spelling is unaffected.)
+
+### Issues Resolved
+
+- `toLatex({ digits: <number> })` no longer throws
+  `RangeError: The number NaN cannot be converted to a BigInt` on a
+  bignum-precision engine. A bare number — not part of the documented
+  `DisplayDigits` forms, but the exact shape of a mechanical
+  `fractionalDigits: n` → `digits: n` migration — is accepted with the
+  deprecated numeric convention (`n ≥ 0` = fractional digits, `n < 0` =
+  significant digits), and a genuinely invalid shape reports a clear
+  validation error instead of crashing.
+- The engine no longer trips its own
+  `` `digits` and `fractionalDigits` were both specified `` deprecation
+  warning. The serializer re-entered the public `toMathJson()` boundary —
+  which always carries both (resolved) options — for any
+  dictionary-*typed* expression; for a symbol bound to a dictionary value
+  this also recursed without bound (a warning flood followed by a stack
+  overflow). Dictionary values now serialize inside the serializer proper;
+  the warning fires only for genuine caller mistakes, once.
+- `BoxedDictionary.toMathJson()` called without options no longer throws
+  (`Cannot read properties of undefined`); it resolves the same defaults
+  as every other expression kind.
+- `.latex` on a dictionary-typed symbol with no value no longer overflows
+  the stack; it serializes as the symbol. (`.latex` on a dictionary
+  *value* — which crashed in released builds — now returns an empty
+  string: dictionaries have no LaTeX display form yet.)
 
 ## 0.72.0 _2026-07-09_
 

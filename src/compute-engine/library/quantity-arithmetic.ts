@@ -21,6 +21,10 @@ import {
   getExpressionScale,
   getExpressionDimension,
   findNamedUnit,
+  flattenUnitFactors,
+  cancelUnitFactors,
+  unitExpressionFromFactors,
+  type UnitExpression,
 } from './unit-data.js';
 import {
   isMeasurement,
@@ -380,6 +384,41 @@ function quantityDivideMeasurement(
   return undefined;
 }
 
+/** Shallow equality of two `symbol → exponent` factor maps. */
+function factorMapsEqual(
+  a: Map<string, number>,
+  b: Map<string, number>
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) if (b.get(k) !== v) return false;
+  return true;
+}
+
+/**
+ * Structurally cancel repeated unit factors in a compound unit expression
+ * (e.g. `in/in` → dimensionless, `m·s/in` → `s` after converting `in` to `m`).
+ *
+ * Returns `null` when the unit cannot be flattened/cancelled, or when nothing
+ * changed (same factors and unit magnitude scale of 1) — in which case the
+ * caller should keep the original boxed unit to avoid churn.  Otherwise
+ * returns the magnitude scale to apply and the rebuilt `UnitExpression`
+ * (`null` rebuilt = fully cancelled → dimensionless).
+ */
+function cancelCompoundUnit(
+  ue: UnitExpression
+): { magnitudeScale: number; rebuilt: UnitExpression | null } | null {
+  const flat = flattenUnitFactors(ue);
+  if (!flat) return null;
+  const cancelled = cancelUnitFactors(flat);
+  if (!cancelled) return null;
+  if (cancelled.magnitudeScale === 1 && factorMapsEqual(cancelled.factors, flat))
+    return null;
+  return {
+    magnitudeScale: cancelled.magnitudeScale,
+    rebuilt: unitExpressionFromFactors(cancelled.factors),
+  };
+}
+
 /**
  * Try to simplify a compound unit to a named derived unit.
  * E.g. Multiply(N, m) → J, Divide(kg, Multiply(m, Power(s, 2))) → Pa.
@@ -390,7 +429,22 @@ function simplifyQuantityUnit(
   mag: number,
   unit: Expression
 ): Expression {
-  const ue = boxedToUnitExpression(unit);
+  let ue = boxedToUnitExpression(unit);
+
+  // First, structurally cancel any repeated unit factors that share a
+  // dimension (e.g. in/in, m·s/in).  This runs before the named-unit logic so
+  // that a fully-cancelled unit collapses to a scalar and a partially-cancelled
+  // unit still gets a chance at findNamedUnit below.
+  if (ue) {
+    const cancelled = cancelCompoundUnit(ue);
+    if (cancelled) {
+      mag = mag * cancelled.magnitudeScale;
+      if (cancelled.rebuilt === null) return ce.number(mag);
+      unit = ce.expr(cancelled.rebuilt as any);
+      ue = boxedToUnitExpression(unit);
+    }
+  }
+
   if (ue) {
     const dim = getExpressionDimension(ue);
     if (dim) {
@@ -422,7 +476,21 @@ function simplifyQuantityUnitMeasurement(
   mag: Expression,
   unit: Expression
 ): Expression {
-  const ue = boxedToUnitExpression(unit);
+  let ue = boxedToUnitExpression(unit);
+
+  // Structurally cancel repeated unit factors (see `simplifyQuantityUnit`).
+  // The magnitude is a boxed (possibly Measurement) value, so the scale is
+  // applied with error-propagating multiplication.
+  if (ue) {
+    const cancelled = cancelCompoundUnit(ue);
+    if (cancelled) {
+      mag = scaleMagnitude(ce, mag, cancelled.magnitudeScale);
+      if (cancelled.rebuilt === null) return mag;
+      unit = ce.expr(cancelled.rebuilt as any);
+      ue = boxedToUnitExpression(unit);
+    }
+  }
+
   if (ue) {
     const dim = getExpressionDimension(ue);
     if (dim) {

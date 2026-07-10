@@ -503,6 +503,179 @@ export function getExpressionScale(expr: UnitExpression): number | null {
 }
 
 // ---------------------------------------------------------------------------
+// Structural unit cancellation
+// ---------------------------------------------------------------------------
+
+/**
+ * Flatten a compound unit expression into a map from unit symbol to its
+ * summed exponent.
+ *
+ * - `string` → add `exp` to the symbol's running total.
+ * - `["Multiply", ...]` → recurse each child with the same exponent.
+ * - `["Divide", a, b]` → recurse `a` with `+exp`, `b` with `−exp`.
+ * - `["Power", base, n]` (n a number) → recurse `base` with `exp·n`.
+ *
+ * Returns `null` on any other shape (the caller then leaves the unit
+ * untouched).  Because same-symbol exponents are summed, `in¹·in⁻¹` cancels
+ * exactly, with no floating-point scale involved.
+ */
+export function flattenUnitFactors(
+  expr: UnitExpression
+): Map<string, number> | null {
+  const factors = new Map<string, number>();
+
+  function walk(e: UnitExpression, exp: number): boolean {
+    if (typeof e === 'string') {
+      factors.set(e, (factors.get(e) ?? 0) + exp);
+      return true;
+    }
+    if (!Array.isArray(e) || e.length < 2) return false;
+    const op = e[0];
+    if (op === 'Multiply') {
+      for (let i = 1; i < e.length; i++) if (!walk(e[i], exp)) return false;
+      return true;
+    }
+    if (op === 'Divide') {
+      if (e.length !== 3) return false;
+      return walk(e[1], exp) && walk(e[2], -exp);
+    }
+    if (op === 'Power') {
+      if (e.length !== 3) return false;
+      const n = e[2];
+      if (typeof n !== 'number') return false;
+      return walk(e[1], exp * n);
+    }
+    return false;
+  }
+
+  if (!walk(expr, 1)) return null;
+  return factors;
+}
+
+/**
+ * Cancel repeated unit factors that share a physical dimension.
+ *
+ * Zero-exponent entries are dropped.  The remaining symbols are grouped by
+ * their dimension vector.  For each group with MIXED-SIGN exponents (genuine
+ * cancellation potential, e.g. `m` and `in` with `+1`/`−1`), the member with
+ * the largest scale is chosen as the representative (same convention as
+ * `quantityAdd`); every other member `s` with exponent `e` folds into the
+ * representative (`magnitudeScale *= (scale_s / scale_rep) ** e`, and `e` is
+ * added to the representative's exponent).  The representative itself is
+ * dropped if its summed exponent reaches 0.  Groups whose exponents are all
+ * the same sign are left untouched (so `in·ft` area survives as written).
+ *
+ * Offsets (degC/degF) are intentionally ignored, consistent with
+ * `getExpressionScale`/`convertCompoundUnit` in compound contexts.
+ *
+ * Returns the reduced factor map plus the accumulated magnitude scale, or
+ * `null` when a symbol has an unknown dimension.
+ */
+export function cancelUnitFactors(
+  factors: Map<string, number>
+): { factors: Map<string, number>; magnitudeScale: number } | null {
+  // Drop zero-exponent entries.
+  const result = new Map<string, number>();
+  for (const [sym, exp] of factors) if (exp !== 0) result.set(sym, exp);
+
+  // Group remaining symbols by dimension-vector key.
+  const groups = new Map<string, string[]>();
+  for (const sym of result.keys()) {
+    const dim = getUnitDimension(sym);
+    if (!dim) return null;
+    const key = dim.join(',');
+    const arr = groups.get(key);
+    if (arr) arr.push(sym);
+    else groups.set(key, [sym]);
+  }
+
+  let magnitudeScale = 1;
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+
+    // Only cancel groups with mixed-sign exponents.
+    let hasPos = false;
+    let hasNeg = false;
+    for (const sym of members) {
+      const e = result.get(sym)!;
+      if (e > 0) hasPos = true;
+      else if (e < 0) hasNeg = true;
+    }
+    if (!hasPos || !hasNeg) continue;
+
+    // Representative = member with the largest scale.
+    let rep = members[0];
+    let repScale = getUnitScale(rep);
+    if (repScale === null) return null;
+    for (const sym of members) {
+      const s = getUnitScale(sym);
+      if (s === null) return null;
+      if (s > repScale) {
+        repScale = s;
+        rep = sym;
+      }
+    }
+
+    for (const sym of members) {
+      if (sym === rep) continue;
+      const e = result.get(sym)!;
+      const s = getUnitScale(sym)!;
+      magnitudeScale *= (s / repScale) ** e;
+      result.set(rep, result.get(rep)! + e);
+      result.delete(sym);
+    }
+    if (result.get(rep) === 0) result.delete(rep);
+  }
+
+  return { factors: result, magnitudeScale };
+}
+
+/**
+ * Rebuild a canonical `UnitExpression` from a factor map (symbol → exponent).
+ *
+ * Numerator factors (positive exponents) become a bare symbol, a `Power`, or
+ * a `Multiply`; denominator factors (negative exponents) go under a `Divide`.
+ * When there are only denominator factors, negative `Power` forms are emitted
+ * directly (matching what `quantityDivide`'s scalar/Quantity path produces),
+ * since a numeric `1` is not a valid unit symbol.
+ *
+ * Returns `null` for an empty map (fully cancelled → dimensionless).
+ */
+export function unitExpressionFromFactors(
+  factors: Map<string, number>
+): UnitExpression | null {
+  const num: UnitExpression[] = [];
+  const den: UnitExpression[] = [];
+  const negPow: UnitExpression[] = [];
+  for (const [sym, exp] of factors) {
+    if (exp === 0) continue;
+    if (exp > 0) {
+      num.push(exp === 1 ? sym : ['Power', sym, exp]);
+    } else {
+      den.push(-exp === 1 ? sym : ['Power', sym, -exp]);
+      negPow.push(['Power', sym, exp]);
+    }
+  }
+
+  if (num.length === 0 && den.length === 0) return null;
+
+  if (num.length === 0) {
+    // Only denominator factors — use negative Power form(s).
+    return negPow.length === 1 ? negPow[0] : ['Multiply', ...negPow];
+  }
+
+  const numExpr: UnitExpression =
+    num.length === 1 ? num[0] : ['Multiply', ...num];
+
+  if (den.length === 0) return numExpr;
+
+  const denExpr: UnitExpression =
+    den.length === 1 ? den[0] : ['Multiply', ...den];
+
+  return ['Divide', numExpr, denExpr];
+}
+
+// ---------------------------------------------------------------------------
 // DSL string parsing
 // ---------------------------------------------------------------------------
 

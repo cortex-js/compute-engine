@@ -190,6 +190,111 @@ describe('QUANTITY ARITHMETIC', () => {
   });
 });
 
+describe('compound unit cancellation', () => {
+  test('LaTeX repro: 18 in / (12 in/ft) → 1.5 ft (exact)', () => {
+    const expr = engine
+      .parse('18 \\text{ in} / (12 \\text{ in/ft})')
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    // in/in cancels exactly — magnitude is exactly 1.5, no 0.0254 round-trip
+    expect(expr.op1.re).toBe(1.5);
+    expect(expr.op2.symbol).toBe('ft');
+  });
+
+  test('LaTeX repro survives .N()', () => {
+    const expr = engine.parse('18 \\text{ in} / (12 \\text{ in/ft})').N();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(1.5);
+    expect(expr.op2.symbol).toBe('ft');
+  });
+
+  test('direct form: 18 in / (12 in/ft) → 1.5 ft (exact)', () => {
+    const expr = engine
+      .expr([
+        'Divide',
+        ['Quantity', 18, 'in'],
+        ['Quantity', 12, ['Divide', 'in', 'ft']],
+      ])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(1.5);
+    expect(expr.op2.symbol).toBe('ft');
+  });
+
+  test('mixed-dimension cancellation: (10 m · 1 s) / (5 in) → s', () => {
+    const expr = engine
+      .expr([
+        'Divide',
+        ['Multiply', ['Quantity', 10, 'm'], ['Quantity', 1, 's']],
+        ['Quantity', 5, 'in'],
+      ])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    // 2 m·s / in → (2 / 0.0254) s
+    expect(expr.op1.re).toBeCloseTo(2 / 0.0254);
+    expect(expr.op1.re).toBeCloseTo(78.74015748031496);
+    expect(expr.op2.symbol).toBe('s');
+  });
+
+  test('same-sign compound units are preserved (in·ft area survives)', () => {
+    const expr = engine
+      .expr(['Multiply', ['Quantity', 2, 'in'], ['Quantity', 3, 'ft']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(6);
+    // in·ft must NOT collapse — both exponents are positive
+    expect(boxedToUnitExpression(expr.op2)).toEqual(['Multiply', 'in', 'ft']);
+  });
+
+  test('named derived unit still recognised (N·m → J)', () => {
+    const expr = engine
+      .expr(['Multiply', ['Quantity', 2, 'N'], ['Quantity', 3, 'm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(6);
+    expect(expr.op2.symbol).toBe('J');
+  });
+
+  test('same-dimension division still yields a scalar (18 in / 3 ft)', () => {
+    const expr = engine
+      .expr(['Divide', ['Quantity', 18, 'in'], ['Quantity', 3, 'ft']])
+      .evaluate();
+    // 18 in = 0.4572 m, 3 ft = 0.9144 m → 0.5 (existing same-dimension path)
+    expect(expr.operator).not.toBe('Quantity');
+    expect(expr.re).toBeCloseTo(0.5);
+  });
+
+  test('scalar / Quantity keeps negative Power unit form (6 / (2 in))', () => {
+    const expr = engine
+      .expr(['Divide', 6, ['Quantity', 2, 'in']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(3);
+    expect(boxedToUnitExpression(expr.op2)).toEqual(['Power', 'in', -1]);
+  });
+
+  test('Measurement magnitude flows through cancellation', () => {
+    const expr = engine
+      .function('Divide', [
+        engine.function('Multiply', [
+          engine.function('Quantity', [
+            engine.function('Measurement', [10, 0.1]),
+            engine.symbol('m'),
+          ]),
+          engine.function('Quantity', [engine.number(1), engine.symbol('s')]),
+        ]),
+        engine.function('Quantity', [engine.number(5), engine.symbol('in')]),
+      ])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op2.symbol).toBe('s');
+    // nominal magnitude is (2 / 0.0254) s, error propagated
+    expect(expr.op1.operator).toBe('Measurement');
+    // Measurement nominal lives in op1.op1
+    expect(expr.N().op1.op1.re).toBeCloseTo(78.74015748031496);
+  });
+});
+
 describe('UNIT CONVERT', () => {
   test('UnitConvert operator is defined', () => {
     const def = engine.lookupDefinition('UnitConvert');

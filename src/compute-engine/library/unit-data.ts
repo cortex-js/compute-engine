@@ -19,4 +19,7 @@ export {
   parseUnitDSL,
   convertCompoundUnit,
   findNamedUnit,
+  flattenUnitFactors,
+  cancelUnitFactors,
+  unitExpressionFromFactors,
 } from '../numerics/unit-data.js';
