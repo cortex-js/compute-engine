@@ -3,8 +3,8 @@
 **Date:** 2026-06-10 (feasibility); last status update 2026-07-10.
 **Status:** shipped bundle = **Chapters 1, 2, 3, 6 + 4.1 Sine + 4.3 Tangent +
 4.5 Secant + §8.8 Polylogarithm** (5,191 rules, 5.64 MB). Chapter-1 exhaustive
-≈90–91%; ch2 ≈72% / ch6 ≈45% effective; **4.1 Sine 106/120 and 326/400 (seed 5;
-4.1.11 file 71/113); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
+≈90–91%; ch2 ≈72% / ch6 ≈45% effective; **4.1 Sine 107/120 and 331/400 (seed 5;
+4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
 67/120 (new); genuine wrongs 0 across ALL suites incl. ch3** (all flagged
 "wrongs" are documented verification false-wrong classes — see the
 ROADMAP §R state note). The nested `Log[c·(b·x^n)^p]` power-in-log family
@@ -22,7 +22,11 @@ kept raw through `reciprocalToPower`, behind `RUBI_NO_SECBIN`), and R16
 (poly×csc²/sec² by-parts fallback behind `RUBI_NO_TRIGSQ`; its triage mapped
 the PolyLog-bundling residual → R17). The 2026-07-10 rung added R17 (Ch3
 Logarithms + §8.8 Polylogarithm bundled — the PolyLog telescope — plus a
-single-angle trig→exp partial-fraction fallback behind `RUBI_NO_TRIGEXP`).
+single-angle trig→exp partial-fraction fallback behind `RUBI_NO_TRIGEXP`), then
+R18 (complex special-function closures on the 2026-07-09 kernels: irreducible-
+quadratic denominators split over complex-conjugate linear roots in the Si/Ci
+fallback behind `RUBI_NO_SICI_COMPLEX`, and the reciprocal-argument
+`∫xᵐ·sin(a+b/x)` exp route un-gated).
 **Next rungs live in ROADMAP §R** (R3′ deep chains, R5; then the Ch6 tail
 R6–R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
@@ -1139,8 +1143,67 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     `rubi-utils.ts`). #236/#449 now D-verify clean; #538 is a correct
     antiderivative (see above). Regression test in `integration-rules.test.ts`.
   - **Tests.** loader/utility tests in `rubi-utils.test.ts` and
-    `integration-rules.test.ts` (pre-existing known jest fail:
-    `numericallyEvaluable … ExpIntegralEi` — unrelated, complex-arg kernel gap).
+    `integration-rules.test.ts`.
+- **Phase R18 — complex special-function closures on the 2026-07-09 kernels
+  LANDED (2026-07-10).** The complex-argument `ExpIntegralEi`/`SinIntegral`/
+  `CosIntegral` (commit 2980a5a8, Γ(0,z)-based, mpmath ~1e-15 all quadrants) and
+  the (already-evaluable) negative-order incomplete Γ turned two families that
+  R15/R9 had fail-closed on numeric-evaluability into closed, D-verified results.
+  - **Mechanism (a): complex-linear extension of the Si/Ci fallback**
+    (`expandRationalOverComplexLinears` in `rubi-utils.ts`, wired into
+    `rationalTrigSiCiFallback`; env toggle **`RUBI_NO_SICI_COMPLEX`**). When the
+    plain all-linear expansion (R15) declines because an x-dependent denominator
+    factor is an irreducible/reducible QUADRATIC, factor it over its
+    complex-conjugate linear roots `(x−r)(x−r̄)` (quadratic formula via
+    `factorLinearsY`), then run the SAME ExpandIntegrand partial-fraction
+    machinery. Each piece `c·(x−rₖ)^{−j}·sin` closes to a COMPLEX
+    SinIntegral/CosIntegral; the conjugate pair recombines to a real
+    antiderivative, so the existing central-difference D-check on the real axis
+    accepts it. Gates preserved from R15 (exactly one power-1 linear-arg sin/cos,
+    ≥2-piece re-entry guard, every piece closes, whole-body try/catch→null);
+    cubic-and-higher x-denominators and repeated quadratic roots decline. A
+    one-line guard fix in `expandPartialFractions` (an x-FREE `const^{−k}` — the
+    `b^{−1}` leading-coefficient reciprocal the split emits — is a coefficient,
+    not a denominator factor; route it to polyParts, mirroring
+    `expandPolyOverLinear`) was required for the split to reach the machinery.
+  - **Mechanism (b): un-gate the reciprocal-argument exp route.**
+    `sinCosArgNonlinearExpandableQ` (the R9 `expandTrigToExp` gate) previously
+    fail-closed-declined a concrete NEGATIVE monomial exponent (`sin(a+b/x)`,
+    k<0) because the resulting complex `ExpIntegralEi` didn't evaluate. Removed
+    that decline: k<0 is now admitted, rewrites to a complex-Ei form the kernels
+    evaluate, and the driver's own `numericallyEvaluable` self-check (which now
+    passes) is the safety net. No new toggle (a pure fail-closed-safe relaxation
+    of an existing gate; the R9 route runs BEFORE R15/R16/R17 and returns null
+    when its result is not evaluable, so it can never strand a later fallback).
+  - **Outcome flips.** 4.1.11 **#61/#71/#72** (`∫sin/(a+bx²)`,
+    `∫sin/(x²(a+bx²)²)`, `∫x³sin/(a+bx²)³`) close and D-verify via (a) — Rubi's
+    own antiderivatives carry `√(−a)` complex Si/Ci, so ours legitimately do too.
+    4.1.12 **#103–#110** (`∫xᵐ·sin(a+b/x)`, `∫sin(a+b/x)/xᵏ`) close via (b), all
+    D=5/5 on the real axis; the broader `(a+b·Sin[c+d/x])` numerator family
+    (#288–#291, #294–#296) also newly closes, all D-verified. R15's real-Si
+    targets (#18/#23/#89) and R17's #112/#197/#294 unchanged; genuine wrongs 0.
+  - **Numbers (seed 5, `--rubi`; foundation = ch1/2/3/6/§8.8).** 4.1.11 file
+    all-113: **71 → 93 (+22)** (A/B `RUBI_NO_SICI_COMPLEX=1` byte-reproduces
+    **71**, the pre-rung baseline — 4.1.11 has no reciprocal-arg (b) targets).
+    4.1 Sine s120: **106 → 107 (+1)** entirely from (b) (main == `RUBI_NO_SICI_
+    COMPLEX=1`, 0 outcome diffs — the s120 sample holds no complex-quadratic (a)
+    target). 4.1 Sine s400: **326 → 331 (+5)** correct (60 unsolved, 4
+    solved-formal, 1 inconclusive); the 4 solved-wrong are the IDENTICAL
+    documented false-wrong set (#690 4.1.1.2, #205 4.1.1.3, #116 4.1.2.1, #150
+    4.1.12) — all pre-existing, in files this rung does not touch (#150 is
+    `Sin[a+b·x^n]/x^(2n+1)`, a POSITIVE-exponent x^n arg whose route the k<0
+    relaxation does not change), so **zero new wrongs**. 4.1.11 file and s120
+    carry zero solved-wrong.
+  - **Dead ends / scope.** (a) only splits degree-≤2 x-denominators (cubic+ needs
+    Cardano/general roots — declined). The `numericallyEvaluable` acceptance in
+    (b) is a finiteness check, NOT a D-check; correctness there rests on the
+    exact sin→exp rewrite plus sound sub-integration (validated by the end-to-end
+    D-verified tests). No corpus/bundle changes — pure driver+util rung.
+  - **Tests.** `expandRationalOverComplexLinears` unit tests (accepts
+    irreducible quadratic, conjugate-root reconstruction, declines cubic/no-
+    quadratic) + R18 end-to-end closures in `rubi-utils.test.ts`; complex-Si and
+    reciprocal-arg end-to-end D-verified cases in `integration-rules.test.ts`;
+    the R9-gate unit test flipped to assert `sin(a+b/x)` is now admitted.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

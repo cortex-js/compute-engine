@@ -490,13 +490,13 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-10, R1–R17 landed):** the shipped bundle
+**State (2026-07-10, R1–R18 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 3 (Logarithms), 6 (Hyperbolics), 4.1 Sine, 4.3
 Tangent, 4.5 Secant, and §8.8 Polylogarithm** — 5,191 rules, 5.64 MB (CI has a
-bundle-freshness gate). Scores (seed 5): **4.1 Sine 106/120 and 326/400 (4.1.11
-file 71/113)**, **4.3 Tangent 72/120**, **4.5 Secant 69/120**, **ch3 Logarithms
+bundle-freshness gate). Scores (seed 5): **4.1 Sine 107/120 and 331/400 (4.1.11
+file 93/113, post-R18)**, **4.3 Tangent 72/120**, **4.5 Secant 69/120**, **ch3 Logarithms
 67/120 (new)**, ch1 exhaustive ≈90–91%, ch2 ≈72% / ch6 ≈45% effective (seed
 42), Wester indefinite-∫ 6/8.
 **Genuine wrongs are 0 across all suites** (incl. ch3 after the R17
@@ -520,14 +520,17 @@ csc-binomial rules, with a `(a+b·sec²)^p`-Power exception routing 4.5.7 to
 the sin/cos rules), and
 five driver fallbacks (trig→exp with a numeric-evaluability self-check;
 R15's rational×sin/cos(linear) → Si/Ci partial-fraction split with a
-central-difference D-self-check; R16's poly×csc²/sec²(linear) by-parts;
+central-difference D-self-check (R18 extends it to irreducible-quadratic
+denominators via `expandRationalOverComplexLinears`, splitting over
+complex-conjugate linear roots → complex Si/Ci that recombine real, behind
+`RUBI_NO_SICI_COMPLEX`); R16's poly×csc²/sec²(linear) by-parts;
 R17's `singleAngleTrigExpFallback` — `∫P(x)·R(trig(w))` with `w` linear and an
 additive `(a+b·trig)` denominator, rewritten via `y=E^{iw}` +
 partial-fractions and routed through the §2.2→Ch3→§8.8 PolyLog telescope,
 fail-closed D-check; native-rational). A/B env switches:
 `RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`, `RUBI_NO_COFN`, `RUBI_NO_COFN_COT`,
-`RUBI_NO_SKELETON`, `RUBI_NO_SICI`, `RUBI_NO_SECBIN`, `RUBI_NO_TRIGSQ`,
-`RUBI_NO_TRIGEXP`.
+`RUBI_NO_SKELETON`, `RUBI_NO_SICI`, `RUBI_NO_SICI_COMPLEX`, `RUBI_NO_SECBIN`,
+`RUBI_NO_TRIGSQ`, `RUBI_NO_TRIGEXP`.
 **Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
 power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
 shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`
@@ -537,7 +540,7 @@ rules) use Rubi's general `Subst[u, expr, repl] := u /. expr -> repl`, but the
 (`replaceSubexpr` in `rubi-utils.ts`). ch3 s120 seed5: 65→67 correct, genuine
 wrongs 0. See `docs/rubi/RUBI.md` §5 R17.
 Per-rung blow-by-blow
-(R1–R17, incl. the cofunction-audit table and each rung's dead ends):
+(R1–R18, incl. the cofunction-audit table and each rung's dead ends):
 `docs/rubi/RUBI.md` §5; the rest is git history.
 
 **Benchmark protocol.** `npx tsx scripts/rubi/benchmark.ts --rubi
@@ -549,11 +552,15 @@ ch1/2/3/6/§8.8 foundation (so it measures the integrator as it ships —
 comparable**); run suites **sequentially** — concurrent benchmark runs
 contaminate each other's driver/verifier timing.
 
-**Known kernel gaps** (block specific classes; the fallbacks decline them
-cleanly, so they surface as unsolved, not wrong): complex-argument
-`ExpIntegralEi` and negative-order incomplete Γ don't evaluate numerically —
-needed by the `∫x·sin(a+b/x)` exp-route class and the complex-Si family R15
-declines (4.1.11 #61/#71/#72 — irreducible-quadratic denominators).
+**Kernel status.** The complex-argument `ExpIntegralEi`/`SinIntegral`/
+`CosIntegral` and negative-order incomplete Γ kernels landed 2026-07-09 (commit
+2980a5a8, mpmath-validated ~1e-15 all quadrants), and **R18 consumed them**: the
+`∫xᵐ·sin(a+b/x)` reciprocal-argument class (4.1.12) now closes via the R9 exp
+route, and the complex-Si family R15 declined (4.1.11 #61/#71/#72 —
+irreducible-quadratic denominators) closes via the R18 complex-linear split.
+Both are D-verified on the real axis (the complex Ei/Si and conjugate-pair terms
+recombine to a real antiderivative). Remaining hard cubic-and-higher x-denominator
+Si/Ci shapes still decline cleanly (unsolved, not wrong).
 
 **Method note (hard-won).** The "unimplemented-predicate" trace census is
 *misleading* for picking levers: the late catch-all rules

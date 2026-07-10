@@ -485,6 +485,52 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       verify('(3+2 x)^3 \\cos(1+2 x) / (2 + \\sin(1+2 x))'));
   });
 
+  // R18 (RUBI.md §5): two complex-special-function families the earlier rungs
+  // declined once the 2026-07-09 complex kernels landed (commit 2980a5a8):
+  //  (a) irreducible-quadratic denominators `∫R(x)·sin(c+d·x)/(a+b·x²)` — the
+  //      Si/Ci fallback splits the quadratic over its complex-conjugate linear
+  //      roots (driver `rationalTrigSiCiFallback` +
+  //      `expandRationalOverComplexLinears`) and closes each piece to a COMPLEX
+  //      SinIntegral/CosIntegral; the conjugate pair recombines to a real
+  //      antiderivative (4.1.11 #61/#71/#72). Gated by RUBI_NO_SICI_COMPLEX.
+  //  (b) reciprocal-argument `∫xᵐ·sin(a+b/x)` — the R9 exp route rewrites the
+  //      now-admitted negative-exponent monomial argument to a complex
+  //      ExpIntegralEi (4.1.12 #103–#110).
+  // D-verified by finite-differencing F.N() over the real axis (the complex-Ei
+  // / complex-Si terms numericize but do not admit a symbolic derivative).
+  // Concrete integer params avoid the reserved `e`/`i`.
+  describe('closes complex-Si / reciprocal-arg families (Chapter-4, R18)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    ce.timeLimit = 30_000; // complex Si/Ci/Ei kernels are slow under ts-jest
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      let ok = 0;
+      for (const x of [0.6, 1.1, 1.7, 2.3, 2.9]) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ x }).N().re as number;
+        if (typeof d !== 'number' || typeof f !== 'number') continue;
+        expect(d).toBeCloseTo(f, 3);
+        ok++;
+      }
+      expect(ok).toBeGreaterThanOrEqual(3);
+    };
+    // (a) irreducible-quadratic denominator — complex-conjugate Si/Ci.
+    test('∫sin(1+2x)/(2+3x²) dx (#61-shape, complex-Si)', () =>
+      verify('\\frac{\\sin(1+2 x)}{2+3 x^2}'));
+    test('∫x³·sin(1+2x)/(2+3x²)³ dx (#72-shape, quadratic cube)', () =>
+      verify('\\frac{x^3 \\sin(1+2 x)}{(2+3 x^2)^3}'));
+    // (b) reciprocal argument — complex ExpIntegralEi via the R9 exp route.
+    test('∫x·sin(1+2/x) dx (#104-shape, reciprocal argument)', () =>
+      verify('x \\sin(1+2/x)'));
+    test('∫sin(1+2/x)/x dx (#106-shape, reciprocal Si/Ci)', () =>
+      verify('\\frac{\\sin(1+2/x)}{x}'));
+  });
+
   test('the built-in antiderivative still handles non-Rubi integrands', () => {
     // The provider returns null for a Gaussian (outside Chapter 1), so the
     // built-in antiderivative runs and produces Erf.

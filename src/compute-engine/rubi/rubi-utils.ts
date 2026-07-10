@@ -3985,13 +3985,17 @@ function trigArgMonomialExponent(
 }
 
 /** Gate for `expandTrigToExp`: every x-dependent sin/cos argument in the
- *  integrand is a NONLINEAR monomial `c + d·xᵏ` (k≠1), none a concrete negative
- *  exponent, and at least one such nonlinear trig appears — the 4.1.11/4.1.12
- *  `∫xᵐ·sin(a+b·xⁿ)` family (incl. the `(c·sin³)^(1/3)` cube-root form of
- *  #328/#329). A linear (k=1) argument is ignored — the sine rules close it
- *  first, so it never reaches this fallback. The fallback's own numeric-
- *  evaluability check (`driver`) then drops any result whose special-function
- *  form CE cannot evaluate, so an over-inclusive gate here only costs a wasted
+ *  integrand is a NONLINEAR monomial `c + d·xᵏ` (k≠1) and at least one such
+ *  nonlinear trig appears — the 4.1.11/4.1.12 `∫xᵐ·sin(a+b·xⁿ)` family (incl.
+ *  the `(c·sin³)^(1/3)` cube-root form of #328/#329, and the RECIPROCAL-argument
+ *  `∫xᵐ·sin(a+b/x)` family of 4.1.12, k<0). A linear (k=1) argument is ignored —
+ *  the sine rules close it first, so it never reaches this fallback.
+ *
+ *  R18: negative (reciprocal) exponents are now ADMITTED. They rewrite to a
+ *  complex-argument `ExpIntegralEi` / negative-order incomplete Γ, which the
+ *  2026-07-09 complex kernels evaluate; the fallback's own numeric-evaluability
+ *  check (`driver`) still drops any result whose special-function form CE
+ *  cannot evaluate, so an over-inclusive gate here only costs a wasted
  *  expansion, never a not-evaluable. */
 export function sinCosArgNonlinearExpandableQ(
   u: Expression,
@@ -4002,10 +4006,6 @@ export function sinCosArgNonlinearExpandableQ(
     if ((e.operator === 'sin' || e.operator === 'cos') && e.ops?.[0]?.has(x)) {
       const k = trigArgMonomialExponent(e.ops[0], x);
       if (k === null) return false; // non-monomial x-argument ⇒ decline
-      // Concrete negative exponent (`sin(a+b/x)`) ⇒ complex-Ei form; not a
-      // monomial-power target the exp route handles cleanly.
-      if (k.isNumberLiteral && typeof k.re === 'number' && k.re < 0)
-        return false;
       if (!k.isSame(1)) sawNonlinear = true;
     }
     return (e.ops ?? []).every(walk);
@@ -4611,7 +4611,16 @@ function expandPartialFractions(u: Expression, ctx: Ctx): Expression {
   const polyParts: Expression[] = [];
   for (const f of factors) {
     const e = f.operator === 'Power' && f.ops ? f.ops[1] : null;
-    if (e !== null && isLiteralInteger(e) && (realNum(e) ?? 0) < 0) {
+    // A negative-integer power counts as a denominator factor only when its
+    // base is x-DEPENDENT; an x-free `const^{−k}` (e.g. the `b^{−1}` leading-
+    // coefficient reciprocal the R18 complex-linear split emits) is a constant
+    // coefficient — route it to polyParts, mirroring `expandPolyOverLinear`.
+    if (
+      e !== null &&
+      isLiteralInteger(e) &&
+      (realNum(e) ?? 0) < 0 &&
+      f.ops![0].has(x)
+    ) {
       const base = f.ops![0];
       if (polyDegreeX(base, x) !== 1)
         return fail('ExpandIntegrand: non-linear denominator factor');
@@ -4752,6 +4761,79 @@ export function expandRationalOverLinears(
   } catch (e) {
     if (e instanceof RuleFail) return null;
     throw e;
+  }
+  const pieces =
+    expanded.operator === 'Add' && expanded.ops
+      ? [...expanded.ops]
+      : [expanded];
+  if (pieces.length < 2) return null;
+  return pieces;
+}
+
+/** R18 support: rewrite the irreducible/reducible-QUADRATIC x-dependent
+ *  denominator factors of `r` over their complex-conjugate linear roots
+ *  `(x−r₁)(x−r₂)` (via the quadratic formula in `factorLinearsY`), then feed the
+ *  all-linear-denominator rational to the same ExpandIntegrand partial-fraction
+ *  machinery `expandRationalOverLinears` uses. This turns `R(x)·sin(c+d·x)` with
+ *  an `a+b·x²` denominator into pieces `c·(x−rₖ)^{−j}·sin`, each of which the
+ *  linear-arg Si/Ci rules close to (now-evaluable) COMPLEX SinIntegral/
+ *  CosIntegral — the conjugate pair recombines to a real antiderivative on the
+ *  real axis, so the driver's numeric D-check accepts it.
+ *
+ *  Returns null when: `r` is not a rational function of x; there is no
+ *  x-dependent quadratic denominator factor (nothing this path adds over the
+ *  plain linear expansion — decline so the caller doesn't double-count); a
+ *  quadratic factor has a REPEATED root (perfect square — the distinct-root
+ *  partial fraction can't split it); any x-dependent denominator factor has
+ *  degree ≥ 3, or a quadratic carries a non-integer negative exponent (the
+ *  integer-multiplicity partial fraction can't handle it); or the resulting
+ *  expansion does not split into ≥ 2 pieces. Fail-closed on any `RuleFail`. */
+export function expandRationalOverComplexLinears(
+  ce: ComputeEngine,
+  r: Expression,
+  x: string
+): Expression[] | null {
+  if (!rationalFnQ(r, x)) return null;
+  // Rewrite each quadratic x-denominator factor `(base)^e` (e a negative
+  // integer) as `lead^e · (x−r₁)^e · (x−r₂)^e`. Linear denominators, the
+  // numerator, and constant factors pass through unchanged.
+  const u = toTimesPower(ce, r);
+  const factors = u.operator === 'Multiply' && u.ops ? [...u.ops] : [u];
+  const out: Expression[] = [];
+  let hasQuadratic = false;
+  for (const f of factors) {
+    if (f.operator === 'Power' && f.ops) {
+      const [base, e] = f.ops;
+      const negInt =
+        isNumber(e) && e.isInteger === true && (realNum(e) ?? 0) < 0;
+      if (negInt && base.has(x)) {
+        const deg = polyDegreeX(base, x);
+        if (deg === 2) {
+          const fac = factorLinearsY(ce, base, x);
+          if (fac === null || fac.roots.length !== 2) return null;
+          const [r1, r2] = fac.roots;
+          if (zeroQ(r1.sub(r2).evaluate())) return null; // repeated root
+          hasQuadratic = true;
+          out.push(powOrOne(fac.lead, e)); // lead^e (x-free constant)
+          out.push(ce.function('Add', [ce.symbol(x), r1.neg()]).pow(e));
+          out.push(ce.function('Add', [ce.symbol(x), r2.neg()]).pow(e));
+          continue;
+        }
+        if (deg >= 3) return null; // cubic+ x-denominator — decline
+      }
+    }
+    out.push(f);
+  }
+  if (!hasQuadratic) return null; // no quadratic to split — leave to linear path
+  const linearized =
+    out.length === 1 ? out[0] : ce.function('Multiply', out);
+  let expanded: Expression;
+  try {
+    const ctx: Ctx = { ce, env: new Map(), x, hooks: { int: () => null } };
+    expanded = expandPolyOverLinear(linearized, ctx);
+  } catch (err) {
+    if (err instanceof RuleFail) return null;
+    throw err;
   }
   const pieces =
     expanded.operator === 'Add' && expanded.ops

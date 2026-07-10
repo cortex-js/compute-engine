@@ -20,6 +20,7 @@ import {
   sinCosArgNonlinearExpandableQ,
   numericallyEvaluable,
   expandRationalOverLinears,
+  expandRationalOverComplexLinears,
   inverseSquareTrigFactor,
   containsInertTrig,
   singleAngleTrigRationalQ,
@@ -27,6 +28,7 @@ import {
   hasSingleAngleTrigRationalCandidate,
   RuleFail,
 } from '../../src/compute-engine/rubi/rubi-utils';
+import { toTimesPower } from '../../src/compute-engine/rubi/normal-form';
 import { loadIntegrationRules } from '../../src/integration-rules';
 import type { Ctx } from '../../src/compute-engine/rubi/rubi-utils';
 import type { Json } from '../../scripts/rubi/wl-parser';
@@ -707,10 +709,19 @@ describe('trig → exponential fallback (nonlinear arguments, R9)', () => {
     expect(sinCosArgNonlinearExpandableQ(lin, 'x')).toBe(false);
   });
 
-  test('gate declines a concrete-negative argument exponent (sin(a+b/x))', () => {
-    const inv = ce.box(['Multiply', 'x', ['sin', ['Add', 'a', ['Divide', 'b', 'x']]]] as any);
-    expect(sinCosArgNonlinearExpandableQ(inv, 'x')).toBe(false);
-  });
+  // R18: the reciprocal-argument `sin(a+b/x)` (concrete-negative monomial
+  // exponent) is now ADMITTED — it rewrites to a complex-Ei form the
+  // 2026-07-09 kernels evaluate, and the driver's numeric-evaluability check is
+  // the safety net. (Previously the gate declined it fail-closed.) The gate
+  // reads the `x^(-1)` normal form the driver feeds it (via `toTimesPower`), so
+  // build the input the same way rather than the raw `b/x` Divide form.
+  const norm = (latex: string) => toTimesPower(ce, deactivateTrig(ce, ce.parse(latex)));
+  test('gate accepts a reciprocal-argument sin(a+b/x) (R18)', () =>
+    expect(sinCosArgNonlinearExpandableQ(norm('x \\sin(a+b/x)'), 'x')).toBe(true));
+  test('gate still declines a non-monomial x-argument (two x-terms)', () =>
+    expect(sinCosArgNonlinearExpandableQ(norm('x \\sin(b x + c/x)'), 'x')).toBe(
+      false
+    ));
 
   test('expandTrigToExp rewrites sin(a+b·xⁿ) to an exp sum (no trig head left)', () => {
     const orig = ce.box(['sin', xn] as any);
@@ -812,12 +823,14 @@ describe('R14 end-to-end Si/Ci-routing (shipped bundle)', () => {
 });
 
 // R9 end-to-end: the shipped bundle closes the poly·cos and nonlinear-argument
-// families, and declines the complex-Ei case (leaves it unsolved, not wrong).
+// families — including (since R18) the reciprocal-argument complex-Ei case
+// `∫x·sin(a+b/x)`, which the 2026-07-09 kernels now make numerically evaluable.
 describe('R9 end-to-end (shipped bundle)', () => {
   let engine: ComputeEngine;
   beforeAll(() => {
     engine = new ComputeEngine();
     loadIntegrationRules(engine);
+    engine.timeLimit = 30_000; // complex-Ei kernel is slow under ts-jest
   });
   const closes = (latex: string): boolean => {
     const integ = engine.parse(latex);
@@ -833,11 +846,6 @@ describe('R9 end-to-end (shipped bundle)', () => {
     }
     return true;
   };
-  const stayInert = (latex: string): boolean => {
-    const integ = engine.parse(latex);
-    const F = engine.box(['Integrate', integ, 'x']).evaluate();
-    return F.operator === 'Integrate';
-  };
 
   test('closes ∫x·cos(a+b·x)', () =>
     expect(closes('x \\cos(a+b x)')).toBe(true));
@@ -845,8 +853,8 @@ describe('R9 end-to-end (shipped bundle)', () => {
     expect(closes('x^2 \\cos(a+b x)')).toBe(true));
   test('closes ∫x²·sin(a+b·x) (recurses through the cos sub-integral)', () =>
     expect(closes('x^2 \\sin(a+b x)')).toBe(true));
-  test('declines ∫x·sin(a+b/x) (complex-Ei, unverifiable) rather than mis-solving', () =>
-    expect(stayInert('x \\sin(a+b/x)')).toBe(true));
+  test('closes ∫x·sin(a+b/x) (R18: reciprocal argument → complex-Ei)', () =>
+    expect(closes('x \\sin(a+b/x)')).toBe(true));
 });
 
 // R15: rational(x)·sin(linear) → partial-fraction → Si/Ci driver fallback.
@@ -882,10 +890,47 @@ describe('expandRationalOverLinears (R15 expansion gate)', () => {
     expect(pieces('\\frac{1}{a+b x}')).toBeNull());
 });
 
+// R18: `expandRationalOverComplexLinears` splits irreducible/reducible QUADRATIC
+// x-denominators over their complex-conjugate linear roots (x−r)(x−r̄) before
+// the linear partial-fraction machinery — the additional capability that lets
+// the Si/Ci fallback close the complex-Si families (4.1.11 #61/#71/#72).
+describe('expandRationalOverComplexLinears (R18 quadratic split)', () => {
+  const pieces = (latex: string): Expression[] | null =>
+    expandRationalOverComplexLinears(ce, ce.parse(latex), 'x');
+
+  test('accepts 1/(a+bx²) — splits into 2 complex-linear pieces', () => {
+    const p = pieces('\\frac{1}{a+b x^2}');
+    expect(p).not.toBeNull();
+    expect(p!.length).toBe(2);
+  });
+  test('accepts 1/(x²(a+bx²)²) — mixed linear + quadratic (≥2 pieces)', () => {
+    const p = pieces('\\frac{1}{x^2 (a+b x^2)^2}');
+    expect(p).not.toBeNull();
+    expect(p!.length).toBeGreaterThanOrEqual(2);
+  });
+  test('conjugate-pair pieces recombine to the original rational (numeric)', () => {
+    const p = pieces('\\frac{1}{a+b x^2}')!;
+    const sum = ce.function('Add', p);
+    const orig = ce.parse('\\frac{1}{a+b x^2}');
+    const sub = { a: 0.41, b: 0.94 };
+    for (const xv of [0.37, 1.29, 2.13]) {
+      const s = sum.subs({ ...sub, x: xv }).N();
+      const o = orig.subs({ ...sub, x: xv }).N();
+      expect(Math.abs((s.re as number) - (o.re as number))).toBeLessThan(1e-9);
+      expect(Math.abs((s.im ?? 0) - (o.im ?? 0))).toBeLessThan(1e-9);
+    }
+  });
+  test('declines when there is NO quadratic denominator (leaves to linear path)', () =>
+    expect(pieces('\\frac{1}{x(a+b x)}')).toBeNull());
+  test('declines a cubic (degree-3) x-denominator', () =>
+    expect(pieces('\\frac{1}{a+b x^3}')).toBeNull());
+  test('declines a bare polynomial (no denominator)', () =>
+    expect(pieces('x^2 + x')).toBeNull());
+});
+
 // R15 end-to-end: the shipped bundle closes rational·sin(linear) families whose
-// denominators split over real linear factors, and declines the irreducible-
-// quadratic (complex-Si) family. Concrete small-integer parameters (avoiding
-// the reserved symbols `e`/`i`).
+// denominators split over real linear factors. Concrete small-integer
+// parameters (avoiding the reserved symbols `e`/`i`).
 describe('R15 end-to-end Si/Ci partial-fraction routing (shipped bundle)', () => {
   let eng: ComputeEngine;
   beforeAll(() => {
@@ -908,16 +953,52 @@ describe('R15 end-to-end Si/Ci partial-fraction routing (shipped bundle)', () =>
     }
     return ok >= 3;
   };
-  const stayInert = (latex: string): boolean =>
-    eng.box(['Integrate', eng.parse(latex), 'x']).evaluate().operator ===
-    'Integrate';
 
   test('closes ∫x²·sin(1+2x)/(3+2x) (#18-shape, poly-over-linear)', () =>
     expect(closesLatex('\\frac{x^2 \\sin(1+2 x)}{3+2 x}')).toBe(true));
   test('closes ∫sin(1+2x)/(x(3+2x)) (#23-shape, partial fractions)', () =>
     expect(closesLatex('\\frac{\\sin(1+2 x)}{x(3+2 x)}')).toBe(true));
-  test('declines ∫sin(1+2x)/(2+3x²) (#61-shape, complex-Si) — stays inert', () =>
-    expect(stayInert('\\frac{\\sin(1+2 x)}{2+3 x^2}')).toBe(true));
+});
+
+// R18 end-to-end: the shipped bundle now closes the complex-Si families the R15
+// rung declined — irreducible-quadratic denominators (`∫sin/(a+bx²)`, 4.1.11
+// #61/#71/#72) split over complex-conjugate linear roots, and the reciprocal-
+// argument `∫xᵐ·sin(a+b/x)` family (4.1.12) via the R9 exp route. Each result is
+// D-verified over the real axis; the conjugate/complex-Ei parts recombine to a
+// real antiderivative. These FAIL the #61/#71/#72 case under
+// RUBI_NO_SICI_COMPLEX=1 (they exercise the R18 quadratic extension).
+describe('R18 end-to-end complex-Si / reciprocal-arg closure (shipped bundle)', () => {
+  let eng: ComputeEngine;
+  beforeAll(() => {
+    eng = new ComputeEngine();
+    loadIntegrationRules(eng);
+    eng.timeLimit = 30_000; // complex Si/Ci/Ei kernels are slow under ts-jest
+  });
+  const closesLatex = (latex: string): boolean => {
+    const integ = eng.parse(latex);
+    const F = eng.box(['Integrate', integ, 'x']).evaluate();
+    if (F.operator === 'Integrate' || F.has('Integrate')) return false;
+    let ok = 0;
+    for (const xv of [0.6, 1.1, 1.7, 2.3]) {
+      const h = 1e-4;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      const d = (fp(xv + h) - fp(xv - h)) / (2 * h);
+      const f = integ.subs({ x: xv }).N().re as number;
+      if (typeof d !== 'number' || typeof f !== 'number') return false;
+      if (Math.abs(d - f) > 1e-3 * Math.max(1, Math.abs(f))) return false;
+      ok++;
+    }
+    return ok >= 3;
+  };
+
+  test('closes ∫sin(1+2x)/(2+3x²) (#61-shape, complex-Si)', () =>
+    expect(closesLatex('\\frac{\\sin(1+2 x)}{2+3 x^2}')).toBe(true));
+  test('closes ∫sin(1+2x)/(x²(2+3x²)²) (#71-shape, quadratic power)', () =>
+    expect(closesLatex('\\frac{\\sin(1+2 x)}{x^2 (2+3 x^2)^2}')).toBe(true));
+  test('closes ∫x·sin(1+2/x) (reciprocal-argument, R9 exp route)', () =>
+    expect(closesLatex('x \\sin(1+2/x)')).toBe(true));
+  test('closes ∫sin(1+2/x)/x (reciprocal-argument Si/Ci)', () =>
+    expect(closesLatex('\\frac{\\sin(1+2/x)}{x}')).toBe(true));
 });
 
 // R16: poly×csc(u)²/sec(u)² → integration-by-parts fallback. The structural

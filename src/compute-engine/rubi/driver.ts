@@ -37,6 +37,7 @@ import {
   inverseSquareTrigFactor,
   expandTrigToExp,
   expandRationalOverLinears,
+  expandRationalOverComplexLinears,
   polyDegreeX,
   sinCosArgNonlinearExpandableQ,
   numericallyEvaluable,
@@ -81,6 +82,11 @@ const NO_COFN = process.env.RUBI_NO_COFN !== undefined;
 // RUBI_NO_SICI: disable the R15 rational×sin/cos(linear) → Si/Ci
 // partial-fraction fallback (A/B measuring its effect on the 4.1 benchmark).
 const NO_SICI = process.env.RUBI_NO_SICI !== undefined;
+// RUBI_NO_SICI_COMPLEX: disable only the R18 quadratic extension of the Si/Ci
+// fallback (irreducible-quadratic denominators split over complex-conjugate
+// linear roots), keeping the R15 all-linear path. A/B measures the quadratic
+// extension's effect on the 4.1.11 benchmark.
+const NO_SICI_COMPLEX = process.env.RUBI_NO_SICI_COMPLEX !== undefined;
 // RUBI_NO_TRIGSQ: disable the R16 poly×csc(u)²/sec(u)² integration-by-parts
 // fallback (A/B measuring its effect on the 4.1.10 benchmark).
 const NO_TRIGSQ = process.env.RUBI_NO_TRIGSQ !== undefined;
@@ -895,11 +901,21 @@ export class RubiDriver {
    * into partial-fraction / poly-over-linear pieces (ExpandIntegrand) and
    * routing each `piece·sin` back through the driver, which closes the
    * single-piece forms via the Si/Ci rules and by-parts. Reached only after
-   * every rule and the trig→exp fallback declined. Fail-closed with a numeric
-   * self-check: returns null unless every piece closes AND D(ΣF) matches the
-   * integrand numerically — so the complex-root families (irreducible-quadratic
-   * denominators → complex Si/Ci) stay cleanly unsolved. The whole body is
-   * wrapped in try/catch (the native expansion machinery can throw on odd
+   * every rule and the trig→exp fallback declined.
+   *
+   * R18 extension: when the plain linear expansion declines because an
+   * x-dependent denominator factor is an irreducible/reducible QUADRATIC,
+   * `expandRationalOverComplexLinears` splits it over its complex-conjugate
+   * linear roots `(x−r)(x−r̄)`; each piece then closes to a COMPLEX Si/Ci
+   * (evaluable since the 2026-07-09 complex-argument kernels) and the conjugate
+   * pair recombines to a real antiderivative on the real axis. Gated by
+   * `RUBI_NO_SICI_COMPLEX` (disables just the quadratic extension).
+   *
+   * Fail-closed with a numeric self-check: returns null unless every piece
+   * closes AND D(ΣF) matches the integrand numerically at the deterministic
+   * real-axis sample points — cubic-and-higher denominators, repeated quadratic
+   * roots, and any non-verifying assembly stay cleanly unsolved. The whole body
+   * is wrapped in try/catch (the native expansion machinery can throw on odd
    * inputs); any throw → null. */
   private rationalTrigSiCiFallback(
     integrand: Expression,
@@ -931,7 +947,14 @@ export class RubiDriver {
       // Expand R into single-piece terms over LINEAR denominators (declines a
       // non-rational R, a non-linear/irreducible-quadratic denominator, or a
       // non-splitting single-piece rational — the last prevents re-entry).
-      const pieces = expandRationalOverLinears(ce, rational, variable);
+      // R18: when the plain linear expansion declines because an x-dependent
+      // denominator factor is an irreducible/reducible QUADRATIC, split it over
+      // its complex-conjugate linear roots (x−r)(x−r̄) and expand THAT — the
+      // pieces close to complex Si/Ci that recombine to a real antiderivative on
+      // the real axis (the numeric D-check below is the acceptance bar).
+      let pieces = expandRationalOverLinears(ce, rational, variable);
+      if (pieces === null && !NO_SICI_COMPLEX)
+        pieces = expandRationalOverComplexLinears(ce, rational, variable);
       if (pieces === null) return null;
       // Integrate each `piece·sin`; every piece must close.
       const parts: Expression[] = [];
