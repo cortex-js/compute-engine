@@ -966,12 +966,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q429963',
       complexity: 8300,
       broadcastable: true,
-      signature: '(number) -> number',
+      // Optional second argument: the (integer) branch index. The branch is
+      // kept as a plain `number?` (not `integer`) in the signature — an
+      // `integer`-typed parameter has broken rule boxing in this repo — and
+      // validated in `evaluate` instead.
+      signature: '(number, number?) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([x], { numericApproximation, engine }) =>
-        shouldNumericize(numericApproximation, x)
-          ? apply(x, lambertW, (x) => bigLambertW(engine, x))
-          : undefined,
+      evaluate: (ops, { numericApproximation, engine }) => {
+        const x = ops[0];
+        // Branch index: default 0 (principal W₀). Only the real branches 0
+        // and −1 are implemented; a symbolic, non-integer, or otherwise
+        // unsupported branch keeps the expression inert.
+        let branch = 0;
+        if (ops[1] !== undefined) {
+          const k = asSmallInteger(ops[1]);
+          if (k === null || (k !== 0 && k !== -1)) return undefined;
+          branch = k;
+        }
+        return shouldNumericize(numericApproximation, x)
+          ? apply(
+              x,
+              (v) => lambertW(v, branch),
+              (v) => bigLambertW(engine, v, branch)
+            )
+          : undefined;
+      },
     },
 
     // Bessel function of the first kind J_n(x)

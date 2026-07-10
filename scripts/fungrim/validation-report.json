@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-10T00:52:59.294Z",
+  "generated": "2026-07-10T03:04:12.588Z",
   "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
   "stage1": {
     "total": 2551,
@@ -8,7 +8,7 @@
     "unknownSymbol": 0,
     "timeout": 0,
     "passRate": 0.9953,
-    "elapsedMs": 3356,
+    "elapsedMs": 1847,
     "failureBuckets": [
       {
         "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_rational'\"]]",

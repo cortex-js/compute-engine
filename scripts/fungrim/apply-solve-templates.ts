@@ -11,9 +11,11 @@
 //   A corpus identity of the shape `f(A(x)) = x` (compiled simplify rule
 //   `match = f(A(_w))`, `replace = _w`) is a LEFT inverse — `f` undoes `A`.
 //   So `A(x) = c` solves to `x = f(c)` (apply `f` to both sides). Normalized
-//   to the solve convention (`E(_x) = 0`, `__b` the constant offset):
+//   to the solve convention (`E(_x) = 0`, `__a` the scale that
+//   `clearDenominators` may introduce, `__b` the constant offset):
 //
-//       match:  ['Add', A(_x), '__b']      replace: f(Negate(__b))
+//       match:  ['Add', ['Multiply', '__a', A(_x)], '__b']
+//       replace: f(Negate(Divide(__b, __a)))
 //
 // The derivation is sound for ANY such identity (it is just function
 // application); if `A` is not injective the template merely finds fewer
@@ -61,6 +63,21 @@ type Artifact = {
 
 type SolveSeeds = Record<string, { target: 'solve'; note: string }>;
 
+/** A hand-curated solve template that is NOT corpus-derivable (no
+ *  inverse-composition identity exists in the Fungrim slice). Emitted verbatim
+ *  as a `target: 'solve'` artifact rule and self-tested against its `tests`
+ *  array (each test solves `equation = 0` for `x` and requires a returned root
+ *  ≈ `root`). */
+type SolveTemplateSpec = {
+  id: string;
+  match: MathJSON;
+  replace: MathJSON;
+  heads: string[];
+  topics: string[];
+  note: string;
+  tests: { equation: MathJSON; root: number }[];
+};
+
 // ---------------------------------------------------------------------------
 // MathJSON tree utilities
 // ---------------------------------------------------------------------------
@@ -83,9 +100,9 @@ function substituteSymbol(x: MathJSON, from: string, to: MathJSON): MathJSON {
 // ---------------------------------------------------------------------------
 
 export type SolveTemplate = {
-  /** Raw `['Add', A(_x), '__b']`. */
+  /** Raw `['Add', ['Multiply', '__a', A(_x)], '__b']`. */
   match: MathJSON;
-  /** Raw `f(Negate(__b))`. */
+  /** Raw `f(Negate(Divide(__b, __a)))`. */
   replace: MathJSON;
   /** The inner `A(_x)` (in the solve `_x` convention) — used by the self-test. */
   innerA: MathJSON;
@@ -120,11 +137,34 @@ export function deriveSolveTemplate(
     return { error: `inner argument has extra wildcards: ${others.join(', ')}` };
 
   const innerA = substituteSymbol(A, unknown, '_x');
+  // Solve `A(x) = c` after `findUnivariateRoots` runs `clearDenominators`,
+  // which can scale the equation to `__a·A(x) + __b = 0` (e.g. a rational RHS
+  // `A(x) − 1/2` becomes `2·A(x) − 1`). Match the scaled shape with a leading
+  // coefficient wildcard and invert both the scale and the offset:
+  // `A(x) = −__b/__a`, so `x = f(−__b/__a)`. `useVariations` (attached by the
+  // loader for solve rules) covers the degenerate `__a = 1` / missing-`__b`
+  // cases (unscaled `A(x) = c`).
+  //
+  // EXCEPTION: when `A` is itself a product (`Multiply(_x, …)`, e.g. the
+  // LambertW seed `x·eˣ`), canonicalizing `Multiply(__a, A(_x))` FLATTENS the
+  // two products into one commutative `Multiply(__a, _x, …)`, and the matcher
+  // cannot synthesize an EMPTY `__a` among the flattened factors (it fires only
+  // when `__a` is explicitly present, i.e. the already-scaled case). That
+  // regresses the unscaled integer-RHS case (`x·eˣ = 3`). For product inners we
+  // therefore keep the unscaled shape `Add(A(_x), __b)` (no leading scale
+  // wildcard); the rational-RHS/clearDenominators path is out of reach for
+  // those, which is the pre-existing behavior.
+  const isProduct = Array.isArray(innerA) && innerA[0] === 'Multiply';
+  const negOffset: MathJSON = isProduct
+    ? ['Negate', '__b']
+    : ['Negate', ['Divide', '__b', '__a']];
   const outer = (m as MathJSON[]).map((part, i) =>
-    i === slot ? ['Negate', '__b'] : part
+    i === slot ? negOffset : part
   );
   return {
-    match: ['Add', innerA, '__b'],
+    match: isProduct
+      ? ['Add', innerA, '__b']
+      : ['Add', ['Multiply', '__a', innerA], '__b'],
     replace: substituteSymbol(outer, unknown, '_x'),
     innerA,
   };
@@ -135,8 +175,11 @@ export function deriveSolveTemplate(
 // ---------------------------------------------------------------------------
 
 /** Probe values for the solve self-test (positive bias: many inner functions
- *  — `Ln`, `Sqrt` — are real only for positive arguments). */
-const SOLVE_SELFTEST_PROBES = [0.5, 1.5, 2.5, 0.7, 3.25];
+ *  — `Ln`, `Sqrt` — are real only for positive arguments). The negative
+ *  probes exercise templates that only validate for x0 < −1, e.g. the W₋₁
+ *  branch seed ed7dac (`A(x0) = x0·e^{x0} ∈ (−1/e, 0)` where W₋₁ inverts);
+ *  probes whose image is non-real for a given seed are skipped structurally. */
+const SOLVE_SELFTEST_PROBES = [0.5, 1.5, 2.5, 0.7, 3.25, -2, -1.5, -3.25];
 
 /** The no-capture filter (mirrors `solve.ts`'s `filter` and the loader copy):
  *  no wildcard other than `_x` may capture `_x`. */
@@ -161,6 +204,14 @@ export function selfTestSolveTemplate(
     condition: noCaptureFilter,
     useVariations: true,
   };
+  // Isolate the template: only it (plus solve's non-rule machinery) may
+  // produce a root, so a success proves THIS template fires.
+  ce.solveRules = [template as never];
+
+  // Pass 1 — float probes: solve `A(x) = A(x0)` (float RHS, no
+  // clearDenominators scaling) for a concrete probe `x0`. Exercises the
+  // `__a = 1` degenerate (unscaled) shape.
+  let floatOk = false;
   for (const x0 of SOLVE_SELFTEST_PROBES) {
     const c = ce.expr(substituteSymbol(innerA, '_x', x0) as never).N();
     const cre = (c as unknown as { re?: number }).re;
@@ -172,9 +223,6 @@ export function selfTestSolveTemplate(
       substituteSymbol(innerA, '_x', 'x'),
       c.json,
     ] as never);
-    // Isolate the template: only it (plus solve's non-rule machinery) may
-    // produce the root, so a success proves THIS template fires.
-    ce.solveRules = [template as never];
     let roots: unknown;
     try {
       roots = (eq as unknown as { solve(v: string): unknown }).solve('x');
@@ -188,11 +236,128 @@ export function selfTestSolveTemplate(
         typeof rv === 'number' &&
         Number.isFinite(rv) &&
         Math.abs(rv - x0) < 1e-6 * (1 + Math.abs(x0))
+      ) {
+        floatOk = true;
+        break;
+      }
+    }
+    if (floatOk) break;
+  }
+  if (!floatOk)
+    return { ok: false, detail: 'no float probe yielded a validating root ≈ x0' };
+
+  // The rational-RHS pass only applies to scale-generalized templates (those
+  // carrying the leading `__a` coefficient wildcard). Product-inner templates
+  // keep the unscaled `Add(A(_x), __b)` shape (no `__a`) and cannot reach the
+  // clearDenominators path — skip the pass for them.
+  if (!collectWildcards(match).has('__a')) return { ok: true };
+
+  // Pass 2 — rational RHS: solve `A(x) − 1/2 = 0` with an EXACT rational RHS,
+  // which `findUnivariateRoots` scales via `clearDenominators` to
+  // `2·A(x) − 1 = 0`. This exercises the scaled `__a`/`__b` match path (the
+  // reason the leading coefficient wildcard exists). Skip — do not fail — when
+  // `A(x) = 1/2` has no real solution (`f(1/2)` non-real/non-finite): the
+  // probe simply cannot exercise the path for that inner function.
+  const half: MathJSON = ['Rational', 1, 2];
+  // `f(1/2)` analog: the root the template should produce, via the replace
+  // template with `__b = −1/2`, `__a = 1` (so `−__b/__a = 1/2`).
+  const rootAnalog = ce
+    .expr(
+      substituteSymbol(
+        substituteSymbol(replace, '__b', ['Rational', -1, 2]),
+        '__a',
+        1
+      ) as never
+    )
+    .N();
+  const rre = (rootAnalog as unknown as { re?: number }).re;
+  const rim = (rootAnalog as unknown as { im?: number }).im ?? 0;
+  if (typeof rre !== 'number' || !Number.isFinite(rre) || Math.abs(rim) > 1e-9)
+    return { ok: true }; // `A(x) = 1/2` has no real root — skip this pass
+
+  const eqR = ce.expr([
+    'Subtract',
+    substituteSymbol(innerA, '_x', 'x'),
+    half,
+  ] as never);
+  let rootsR: unknown;
+  try {
+    rootsR = (eqR as unknown as { solve(v: string): unknown }).solve('x');
+  } catch (err) {
+    return { ok: false, detail: `rational RHS pass threw: ${String(err)}` };
+  }
+  if (Array.isArray(rootsR)) {
+    for (const r of rootsR) {
+      // Accept when the returned root numerically satisfies `A(r) = 1/2`.
+      const av = ce
+        .expr(substituteSymbol(innerA, '_x', (r as { json: MathJSON }).json) as never)
+        .N();
+      const are = (av as unknown as { re?: number }).re;
+      const aim = (av as unknown as { im?: number }).im ?? 0;
+      if (
+        typeof are === 'number' &&
+        Number.isFinite(are) &&
+        Math.abs(aim) < 1e-9 &&
+        Math.abs(are - 0.5) < 1e-6
       )
         return { ok: true };
     }
   }
-  return { ok: false, detail: 'no probe yielded a validating root ≈ x0' };
+  return {
+    ok: false,
+    detail: 'clearDenominators (rational RHS) pass yielded no validating root',
+  };
+}
+
+/** Self-test a hand-curated (non-derived) solve template: push it in isolation
+ *  to a stock engine's `solveRules` and solve each `tests[i].equation = 0` for
+ *  `x`, requiring some returned root ≈ `tests[i].root` (1e-6 relative). A
+ *  failure is a hard error (the template list is hand-vetted, same policy as
+ *  the derived seeds). */
+export function selfTestCuratedSolveTemplate(
+  match: MathJSON,
+  replace: MathJSON,
+  tests: { equation: MathJSON; root: number }[]
+): { ok: true } | { ok: false; detail: string } {
+  const ce = new ComputeEngine();
+  const template = {
+    match,
+    replace,
+    condition: noCaptureFilter,
+    useVariations: true,
+  };
+  ce.solveRules = [template as never];
+  for (const t of tests) {
+    let roots: unknown;
+    try {
+      roots = (ce.expr(t.equation as never) as unknown as {
+        solve(v: string): unknown;
+      }).solve('x');
+    } catch (err) {
+      return {
+        ok: false,
+        detail: `equation ${JSON.stringify(t.equation)} threw: ${String(err)}`,
+      };
+    }
+    if (!Array.isArray(roots) || roots.length === 0)
+      return { ok: false, detail: `no root for ${JSON.stringify(t.equation)}` };
+    const hit = roots.some((r) => {
+      const rv = (r as { N(): { re?: number } }).N().re;
+      return (
+        typeof rv === 'number' &&
+        Number.isFinite(rv) &&
+        Math.abs(rv - t.root) < 1e-6 * (1 + Math.abs(t.root))
+      );
+    });
+    if (!hit)
+      return {
+        ok: false,
+        detail:
+          `no returned root ≈ ${t.root} for ${JSON.stringify(t.equation)} ` +
+          `(got ${JSON.stringify(roots.map((r) => (r as { N(): { re?: number } }).N().re))})`,
+      };
+  }
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +382,8 @@ export type ApplyResult = {
  *  list is hand-vetted — a failure is a bug to fix, not silently skip). */
 export function buildSolveRules(
   artifact: Artifact,
-  solveSeeds: SolveSeeds
+  solveSeeds: SolveSeeds,
+  solveTemplates: SolveTemplateSpec[] = []
 ): ApplyResult {
   const ce = new ComputeEngine();
   const baseRules = artifact.rules.filter((r) => r.target !== 'solve');
@@ -258,7 +424,7 @@ export function buildSolveRules(
     let replace: MathJSON;
     ce.pushScope();
     try {
-      for (const wc of ['_x', '__b'])
+      for (const wc of ['_x', '__a', '__b'])
         try {
           ce.declare(wc, 'complex');
         } catch {
@@ -292,6 +458,57 @@ export function buildSolveRules(
       topics: base.topics,
     });
   }
+
+  // Hand-curated (non-corpus-derivable) solve templates — e.g. the LambertW
+  // inverse-composition roots that have no inverse identity in the Fungrim
+  // slice. Emitted verbatim (canonicalized to align with the loader's
+  // re-boxing) and self-tested against their `tests` array; a failing template
+  // is a hard error (same policy as the derived seeds).
+  for (const spec of solveTemplates) {
+    let match: MathJSON;
+    let replace: MathJSON;
+    ce.pushScope();
+    try {
+      const wcs = new Set<string>();
+      collectWildcards(spec.match, wcs);
+      collectWildcards(spec.replace, wcs);
+      for (const wc of wcs)
+        try {
+          ce.declare(wc, 'complex');
+        } catch {
+          /* tolerate */
+        }
+      const mc = ce.expr(spec.match as never);
+      const rc = ce.expr(spec.replace as never);
+      if (!mc.isValid || !rc.isValid)
+        throw new Error(
+          `solve template ${spec.id}: invalid canonical ${mc.isValid ? 'replace' : 'match'}`
+        );
+      match = mc.json;
+      replace = rc.json;
+    } finally {
+      ce.popScope();
+    }
+
+    const tested = selfTestCuratedSolveTemplate(match, replace, spec.tests);
+    if (!tested.ok)
+      throw new Error(
+        `solve template ${spec.id}: self-test failed — ${tested.detail}`
+      );
+
+    solveRules.push({
+      id: 'fungrim:' + spec.id + ':solve',
+      match,
+      replace,
+      guards: [],
+      purpose: 'simplify',
+      target: 'solve',
+      class: 'identity',
+      heads: spec.heads,
+      topics: spec.topics,
+    });
+  }
+
   solveRules.sort((a, b) => a.id.localeCompare(b.id));
   return { baseRules, solveRules, unavailable, candidates };
 }
@@ -334,8 +551,10 @@ function main(): void {
   const artifact: Artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
   const overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8')) as {
     solveSeeds?: SolveSeeds;
+    solveTemplates?: SolveTemplateSpec[];
   };
   const solveSeeds = overrides.solveSeeds ?? {};
+  const solveTemplates = overrides.solveTemplates ?? [];
 
   const existing = artifact.rules
     .filter((r) => r.target === 'solve')
@@ -344,7 +563,8 @@ function main(): void {
 
   const { baseRules, solveRules, unavailable, candidates } = buildSolveRules(
     artifact,
-    solveSeeds
+    solveSeeds,
+    solveTemplates
   );
 
   const rules = [...baseRules, ...solveRules].sort((a, b) =>

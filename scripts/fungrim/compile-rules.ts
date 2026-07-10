@@ -89,7 +89,7 @@ export type SkipReason =
   | 'not-equation' // formula root is not a plain binary Equal (EqualNearestDecimal, …)
   | 'lhs-not-value-form' // specific value whose LHS is a symbol/Set/Apply (Q3: all excluded)
   | 'curated-exclude' // excluded via curation-overrides.json
-  | 'compat-signature' // relies on a widened COMPAT signature (2-arg LambertW/Digamma, …)
+  | 'compat-signature' // relies on a widened COMPAT signature (2-arg Digamma → polygamma order, …)
   | 'guard-uncompilable' // assumption outside the §2.2 mapping table (fail-closed)
   | 'unorientable' // no viable direction (match not a function expr / wildcard subset fails)
   | 'duplicate-undirected' // same undirected equality already emitted (§2.5)
@@ -1344,11 +1344,13 @@ function findNumericSeed(
 
 /** Static detection of widened-compat-signature usage (§2.2: `compat-signature`). */
 export function usesWidenedCompatSignature(formula: MathJSON): boolean {
-  // CE's LambertW and Digamma are 1-arg; the corpus' 2-arg forms (branch /
-  // polygamma order) require the COMPAT widening that the loader never applies.
+  // CE's Digamma is 1-arg; the corpus' 2-arg form (polygamma order) requires the
+  // COMPAT widening that the loader never applies. LambertW is NOT gated here —
+  // CE gained a genuine 2-arg form `["LambertW", z, k]` (branch k last), so those
+  // corpus entries box and go through the standard self-test on their own merits.
   const walk = (x: MathJSON): boolean => {
     if (!Array.isArray(x)) return false;
-    if ((x[0] === 'LambertW' || x[0] === 'Digamma') && x.length > 2) return true;
+    if (x[0] === 'Digamma' && x.length > 2) return true;
     return x.some((y) => walk(y));
   };
   return walk(formula);
@@ -1435,9 +1437,9 @@ export function compileEntries(
       }
     }
 
-    // 3. Static compat-signature check (2-arg LambertW/Digamma)
+    // 3. Static compat-signature check (2-arg Digamma → polygamma order)
     if (usesWidenedCompatSignature(formula)) {
-      skip(e, 'compat-signature', '2-arg LambertW/Digamma');
+      skip(e, 'compat-signature', '2-arg Digamma');
       continue;
     }
 

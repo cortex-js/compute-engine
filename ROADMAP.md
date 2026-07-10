@@ -606,12 +606,62 @@ coverage work, and most of it is shared capability rather than Ch6-specific:
 
 **Decoupled from Wester.** The two remaining Wester `Solve` gaps are harness
 artifacts (B9), so additional Fungrim solve rules will **not** move that number
-— the Wester `Solve` rows are saturated at our principled ceiling (14/21). This
-track is worth pursuing on its own merits — LambertW / Ln–Exp inverse forms
-beyond the current 5 solve seeds, via `loadIdentities(ce, { solve: true })` —
-but it needs **its own solving benchmark** distinct from Wester: pick or build
-one before investing, so progress is measurable. (Fungrim's _simplify_-side work
-is separate again — see Strategic item 7, Fungrim Phase 4.)
+— the Wester `Solve` rows are saturated at our principled ceiling (14/21). The
+track's own benchmark exists (`benchmarks/audit/solve.ts` /
+`REPORT-solve.md`, 40 SymPy-derived univariate cases): after the two
+2026-07-09 rounds, CE+Fungrim scores **37/40** (base CE 33; SymPy and
+Mathematica 38) — category parity with both references everywhere except
+`frontier`. Round 1 (Fungrim-side): derived templates generalized to the
+`clearDenominators`-scaled shape `Add(Multiply(__a, A(_x)), __b)` (fixes
+rational-RHS cases like `arctan x = 1/2`), plus hand-curated LambertW
+templates (`curation-overrides.json` `solveTemplates`: `c·pᵐˣ + ax + b = 0`
+and the bare `pˣ + x = 0`), via `loadIdentities(ce, { solve: true })`.
+Round 2 (engine-side, `solve.ts`): native `UNIVARIATE_ROOTS` templates for
+inverse-trig-of-x (`arcsin/arccos/arctan x = c`) and the hyperbolic family
+(`sinh/tanh` one-branch, `cosh` ±both-roots); harmonization rewrites
+`eᶠ ± e⁻ᶠ → 2cosh/2sinh` and the coefficient-general two-`Abs` squaring
+`a·|f| + b·|g| → a²f² − b²g²`; and a `clearDenominators` fix (per-term LCM
+multiplication so `p(x)/q(x)·lcm` cancels — whole-`Add` `.mul()` expanded
+numerators past cancellation). Round 3: real **W₋₁-branch support for
+`LambertW`** — 2-arg form `["LambertW", z, k]` (branch last, SymPy/Fungrim
+convention; k ∈ {0, −1} evaluated, others inert), machine + bignum kernels,
+`\operatorname{W}_{-1}(x)` serialization, branch-aware compile target — plus
+W₋₁ companion solve templates, so `eˣ − x − 2 = 0` returns both real roots
+(FR2 ✅). **The benchmark is at parity — 38/40 = SymPy = Mathematica — and
+this track is done as a coverage effort.** Residual, none benchmark-reachable:
+
+- **FR1/FR3** (Dottie-style transcendental fixed points): unsolved by SymPy
+  and Mathematica too — outside the closed-form ceiling, not a gap to chase.
+- ~~`ed7dac` seed stays gated~~ **Done (round 4):** the static
+  `compat-signature` gate in `compile-rules.ts` now covers only 2-arg
+  `Digamma` (polygamma order — still unimplemented); the 2-arg LambertW
+  entries compile on their own merits (+3 rules: `ed7dac`, `d09380`,
+  `f372e9`; artifact 1413 / 10 solve templates). New capability:
+  `x·eˣ = −0.1` returns both real roots (W₀ and W₋₁), and
+  `W(x·eˣ, −1) → x` simplifies under `assume(x ≤ −1)`. Residual notes:
+  `x·eˣ = −1/10` (exact rational RHS) still finds no root —
+  `clearDenominators` rescales to `10x·eˣ + 1` and the product-inner
+  template carries no scale wildcard (known limitation from the round-1
+  product-inner exception); `a172c7` honestly no-fires (its guard band
+  `x·ln x ∈ (−1/e, 0)` defeats seeding) — its former `compat-signature`
+  mislabel is fixed: `LambertW` left the harness `COMPAT_OVERRIDES`
+  (`scripts/fungrim/load.ts`; verified zero Stage-1 impact — the real
+  2-arg signature boxes everything the widening did), and the remaining
+  30 `compat-signature` skips are all genuine 2-arg `Digamma`.
+- **Stage-1 report drift (pre-existing, surfaced while verifying the
+  above):** the committed `scripts/fungrim/validation-report.json` dated
+  from 2026-06-12; regenerating against the current engine shows 11
+  newly-failing / 4 newly-passing entries (net 2546→2539 of 2551, all
+  `incompatible-type` integer-typing errors in modular/theta/Bell-number
+  topics — unrelated to the solve/LambertW work, attributable to a month
+  of engine typing evolution). Worth a triage pass; the old "CI for the
+  Stage-1 harness" follow-up would have caught this as it happened.
+- **Small tails**: `\operatorname{W}_{-1}` subscript parse (BesselJ has the
+  same one-way limitation), derivative of the 2-arg form (kept inert, not
+  wrong).
+
+(Fungrim's _simplify_-side work is separate again — see Strategic item 7,
+Fungrim Phase 4.)
 
 ### Bignum / numeric track
 

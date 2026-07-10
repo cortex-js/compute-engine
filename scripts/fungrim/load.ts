@@ -4,9 +4,9 @@
 // Responsibilities:
 //  - read data/fungrim/corpus/*.json, declarations.json, MANIFEST.json
 //  - create a ComputeEngine with all symbol shells declared in a child scope
-//    (incl. the LambertW re-declaration: CE's LambertW is 1-arg principal
-//    branch, the corpus emits 2-arg ["LambertW", z, k] — see the `existing`
-//    note in declarations.json / SPIKE-DECISIONS.md)
+//    (incl. the COMPAT_OVERRIDES re-declarations for heads whose corpus
+//    usage is wider than CE's signature — see SPIKE-DECISIONS.md; LambertW
+//    left this list when CE gained the 2-arg branch form)
 //  - per-entry variable type inference from assumptions (SPIKE-DECISIONS.md
 //    cross-cutting finding #2: symbolic derivative orders / integer slots
 //    produce bogus incompatible-type errors unless variables are typed)
@@ -75,8 +75,6 @@ export function loadCorpus(dir: string): Corpus {
  * Stage 2 runs with `compat: false` and treats the affected entries as
  * not-evaluable instead.
  *
- *  - LambertW: corpus emits ["LambertW", z, k] for branch k
- *    (SPIKE-DECISIONS.md; CE is 1-arg principal branch).
  *  - Digamma: Fungrim DigammaFunction(z, m) is the order-m polygamma;
  *    CE Digamma is (number) -> number (1-arg). ~40 entries.
  *  - Binomial: Fungrim Binomial(z, k) is the generalized binomial over
@@ -87,7 +85,6 @@ export function loadCorpus(dir: string): Corpus {
  *    `complex`; it is a matrix (Determinant(HilbertMatrix(n)) occurs).
  */
 export const COMPAT_OVERRIDES: Record<string, string> = {
-  LambertW: '(complex, integer?) -> complex',
   Digamma: '(complex, integer?) -> complex',
   Binomial: '(complex, complex) -> complex',
   Fibonacci: '(complex) -> complex',

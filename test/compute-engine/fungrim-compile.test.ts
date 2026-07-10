@@ -691,14 +691,14 @@ describe('compileEntries: curation overrides', () => {
 // ---------------------------------------------------------------------------
 
 describe('compileEntries: compat-signature', () => {
-  it('statically rejects 2-arg LambertW/Digamma (widened COMPAT signatures)', () => {
+  it('statically rejects 2-arg Digamma (widened COMPAT polygamma-order signature)', () => {
     const result = compileEntries(
       [
         entry(
           'cmp001',
-          ['Equal', ['LambertW', ['Multiply', 'x', ['Exp', 'x']], -1], 'x'],
-          ['x'],
-          ['Element', 'x', 'RealNumbers']
+          ['Equal', ['Digamma', 'z', 2], ['Digamma', 'z', 2]],
+          ['z'],
+          ['Element', 'z', 'RealNumbers']
         ),
       ],
       EMPTY_DECLS
@@ -708,6 +708,26 @@ describe('compileEntries: compat-signature', () => {
       id: 'cmp001',
       reason: 'compat-signature',
     });
+  });
+
+  it('does NOT statically reject 2-arg LambertW (CE gained a genuine branch form)', () => {
+    // ["LambertW", z, k] is now a real 2-arg operator (branch k last), so these
+    // entries box and go through the standard self-test instead of the static
+    // compat-signature gate — cf. ed7dac in the shipped artifact.
+    const result = compileEntries(
+      [
+        entry(
+          'cmp002',
+          ['Equal', ['LambertW', ['Multiply', 'x', ['Exp', 'x']], -1], 'x'],
+          ['x'],
+          ['LessEqual', 'x', -1]
+        ),
+      ],
+      EMPTY_DECLS
+    );
+    // Whatever its disposition, it is NOT the static compat-signature skip.
+    for (const s of result.skips)
+      expect(s.reason).not.toBe('compat-signature');
   });
 });
 
@@ -785,10 +805,12 @@ describe('fungrim-core-data.json artifact', () => {
     expect([...ids].sort()).toEqual(ids);
     for (const r of artifact.rules) {
       // Corpus entries carry 6-hex Fungrim ids; curated injections
-      // (curation-overrides.json `inject`) carry kebab-case ids; derived
-      // solve templates (apply-solve-templates.ts) carry a `:solve` suffix.
+      // (curation-overrides.json `inject`) carry kebab-case ids; solve
+      // templates (apply-solve-templates.ts) carry a `:solve` suffix — derived
+      // from a 6-hex seed, or a curated kebab-case template
+      // (curation-overrides.json `solveTemplates`).
       expect(r.id).toMatch(
-        /^fungrim:([0-9a-f]{6}(:solve)?|[a-z][a-z0-9]*(-[a-z0-9]+)+)$/
+        /^fungrim:([0-9a-f]{6}|[a-z][a-z0-9]*(-[a-z0-9]+)+)(:solve)?$/
       );
       expect(Array.isArray(r.guards)).toBe(true);
       expect(['simplify', 'transform', 'expand']).toContain(r.purpose);

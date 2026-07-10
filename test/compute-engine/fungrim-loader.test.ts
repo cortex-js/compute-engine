@@ -80,7 +80,7 @@ describe('loadIdentities (full artifact)', () => {
       (r) => r.target === 'simplify'
     ).length;
     expect(report.loaded).toBe(simplifyCount);
-    expect(report.loaded).toBe(1400);
+    expect(report.loaded).toBe(1403);
     // The only default-load skips are the solve templates (solve-disabled).
     expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
       true
@@ -98,14 +98,14 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1400,
+      simplify: 1403,
       solve: 0,
       harmonization: 0,
     });
     expect(report.byPurpose).toEqual({
       // 8 Digamma specific-value rules are tagged 'transform' (cost-gate
       // exempt) so they fire in simplify() — SYM P2-25.
-      simplify: 1280,
+      simplify: 1283,
       transform: 8,
       expand: 112,
     });
@@ -312,6 +312,25 @@ describe('guard controls', () => {
         ce.expr(['RiemannZetaZero', -3])
       )
     ).toBe(true);
+  });
+
+  it('positive: W₋₁(x·eˣ) → x for a real symbol ≤ −1  [fungrim:ed7dac]', () => {
+    // The 2-arg branch form ["LambertW", x·eˣ, −1] simplifies to x only where
+    // W₋₁ inverts x·eˣ, i.e. x ≤ −1 (guards: x real, x ≤ −1).
+    ce.declare('w', 'real');
+    ce.assume(ce.expr(['LessEqual', 'w', -1]));
+    expect(
+      ce
+        .expr(['LambertW', ['Multiply', 'w', ['Exp', 'w']], -1])
+        .simplify()
+        .isSame(ce.expr('w'))
+    ).toBe(true);
+  });
+
+  it('negative: W₋₁(x·eˣ) does NOT rewrite for a real symbol without the ≤ −1 guard', () => {
+    ce.declare('u', 'real');
+    const expr = ce.expr(['LambertW', ['Multiply', 'u', ['Exp', 'u']], -1]);
+    expect(expr.simplify().operator).toBe('LambertW');
   });
 
   it('negative: Sin(πx) does NOT rewrite for a real (non-integer-typed) symbol', () => {
@@ -674,11 +693,19 @@ describe('solve routing', () => {
     // apply-solve-templates.ts. They carry no domain guards (validateRoots is
     // the safety net) and are skipped on a default load.
     const solveRules = FUNGRIM_CORE.rules.filter((r) => r.target === 'solve');
-    expect(solveRules.length).toBeGreaterThanOrEqual(5);
+    // 6 derived seed templates (incl. the ed7dac W₋₁ branch seed) + 4 curated
+    // LambertW templates (linear-exp and exp-bare, each with a W₋₁ branch
+    // companion).
+    expect(solveRules.length).toBeGreaterThanOrEqual(10);
     for (const r of solveRules) {
-      expect(r.id).toMatch(/^fungrim:[0-9a-f]{6}:solve$/);
+      // Derived seed templates carry a 6-hex id; curated LambertW templates
+      // (curation-overrides.json `solveTemplates`) carry a kebab-case id.
+      expect(r.id).toMatch(
+        /^fungrim:([0-9a-f]{6}|[a-z][a-z0-9]*(-[a-z0-9]+)+):solve$/
+      );
       expect(r.guards).toEqual([]);
-      // Root-template shape: match is `Add(A(_x), __b)`, replace introduces __b.
+      // Root-template shape: match is `Add(…, __b)`, an Add of the inner
+      // function term(s) and the constant offset.
       expect(Array.isArray(r.match) && (r.match as unknown[])[0]).toBe('Add');
     }
     // Default load skips them; {solve:true} routes them to ce.solveRules.
@@ -720,6 +747,18 @@ describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
     expect(r[0]).toBeCloseTo(1.0499088949640398, 10); // W(3)
   });
 
+  it('LambertW: x·eˣ = −0.1 → BOTH real roots via W₀ and W₋₁  [fungrim:ed7dac:solve]', () => {
+    // For −1/e < c < 0 the equation x·eˣ = c has two real roots: the principal
+    // branch W₀(c) (from fungrim:8654a3:solve) and the second branch W₋₁(c)
+    // (from the ed7dac W₋₁ seed unblocked this round). A rational RHS (−1/10)
+    // triggers clearDenominators, which rescales the eˣ term out of the
+    // unscaled ed7dac shape, so probe with the decimal value.
+    const r = solved('x e^x = -0.1');
+    expect(r.some((v) => Math.abs(v - -0.11183255915896297) < 1e-9)).toBe(true); // W₀(−0.1)
+    expect(r.some((v) => Math.abs(v - -3.577152063957297) < 1e-9)).toBe(true); // W₋₁(−0.1)
+    for (const v of r) expect(v * Math.exp(v)).toBeCloseTo(-0.1, 9);
+  });
+
   it('Arctan: arctan(x) = 0.5 → tan(0.5)  [fungrim:1f026d:solve]', () => {
     const r = solved('\\arctan(x) = 0.5');
     expect(r.length).toBe(1);
@@ -732,14 +771,78 @@ describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
   });
 
   it('these equations are NOT solvable without { solve: true }', () => {
+    // LambertW is the genuinely fungrim-only solve capability. (arctan/tan/
+    // exp/ln solve templates are now built into base CE, so their fungrim
+    // `:solve` rules are redundant — `\arctan(x) = 0.5` solves either way.)
     expect(solved('x e^x = 3', { solve: false })).toEqual([]);
-    expect(solved('\\arctan(x) = 0.5', { solve: false })).toEqual([]);
   });
 
   it('a returned root is never wrong (validateRoots is the safety net)', () => {
     // x·eˣ = 3 has a single real root; the template must not invent extras.
     const r = solved('x e^x = 3');
     for (const v of r) expect(v * Math.exp(v)).toBeCloseTo(3, 9);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Scaled-coefficient generalization (benchmark T1). findUnivariateRoots runs
+  // clearDenominators before rule matching, so a rational RHS `arctan(x) = 1/2`
+  // is presented as `2·arctan(x) − 1 = 0`. The derived template matches the
+  // scaled shape `Add(Multiply(__a, A(_x)), __b)` and inverts `A(x) = −__b/__a`.
+  // ---------------------------------------------------------------------------
+
+  it('scaled arctan (rational RHS, clearDenominators): arctan(x) = 1/2 → tan(1/2)  [T1]', () => {
+    const r = solved('\\arctan x = \\frac12');
+    expect(r.length).toBe(1);
+    expect(r[0]).toBeCloseTo(Math.tan(0.5), 10);
+  });
+
+  it('scaled Ln (rational RHS): ln(x) = 1/2 → √e', () => {
+    const r = solved('\\ln x = \\frac12');
+    expect(r.some((v) => Math.abs(v - Math.sqrt(Math.E)) < 1e-9)).toBe(true);
+  });
+
+  it('unscaled integer RHS still fires (__a = 1): tan(x) = 2 → arctan(2)', () => {
+    const r = solved('\\tan x = 2');
+    expect(r.some((v) => Math.abs(v - Math.atan(2)) < 1e-9)).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Hand-curated LambertW solve templates (curation-overrides.json
+  // `solveTemplates`; benchmark W2/W3/FR2). Not corpus-derivable — no
+  // inverse-composition identity for `c·pᵐˣ + a·x + b` exists in the slice.
+  // ---------------------------------------------------------------------------
+
+  it('LambertW linear-exp: eˣ − x − 2 = 0 → both real roots via W₀ and W₋₁  [FR2, lambertw-linear-exp(-branch)]', () => {
+    const r = solved('e^x - x - 2 = 0');
+    // Principal branch: −2 − W₀(−e⁻²) ≈ −1.8414
+    expect(r.some((v) => Math.abs(v - -1.8414056604369606) < 1e-9)).toBe(true);
+    // Second real branch: −2 − W₋₁(−e⁻²) ≈ 1.1462
+    expect(r.some((v) => Math.abs(v - 1.1461932206205825) < 1e-9)).toBe(true);
+    for (const v of r) expect(Math.exp(v) - v - 2).toBeCloseTo(0, 8);
+  });
+
+  it('LambertW linear-exp-branch drops the NaN candidate for single-real-root shapes (W1: x·eˣ − 1 → one root)', () => {
+    const r = solved('x e^x - 1 = 0');
+    // Only the principal root; the W₋₁ companion argument (−1) is outside its
+    // domain → NaN → validateRoots drops it (no spurious root).
+    expect(r.length).toBe(1);
+    expect(r[0]).toBeCloseTo(0.5671432904097838, 9);
+  });
+
+  it('LambertW exp-bare-branch: 0.8ˣ + x = 0 → second real root −W₋₁(ln 0.8)/ln 0.8', () => {
+    const r = solved('0.8^x + x = 0');
+    expect(r.some((v) => Math.abs(v - -10.565272633818234) < 1e-6)).toBe(true);
+    for (const v of r) expect(Math.pow(0.8, v) + v).toBeCloseTo(0, 6);
+  });
+
+  it('LambertW exp-bare: eˣ + x = 0 → −W(1)  [W2, lambertw-exp-bare]', () => {
+    const r = solved('e^x + x = 0');
+    expect(r.some((v) => Math.abs(v - -0.5671432904097838) < 1e-9)).toBe(true);
+  });
+
+  it('LambertW exp-bare: x + 2ˣ = 0 → −W(ln2)/ln2  [W3, lambertw-exp-bare]', () => {
+    const r = solved('x + 2^x = 0');
+    expect(r.some((v) => Math.abs(v - -0.641185744504986) < 1e-9)).toBe(true);
   });
 });
 

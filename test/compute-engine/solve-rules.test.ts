@@ -7,16 +7,18 @@ import { ComputeEngine, Rule } from '../../src/compute-engine';
 // per-engine isolation).
 //
 
-// A root template for `sinh(_x) + b = 0 → x = arsinh(-b)`.
-// `sinh(x) + b = 0` is not solvable by the built-in rules, so this rule
-// makes a previously-unsolvable equation solvable.
-const SINH_ROOT_RULE: Rule = {
-  match: ['Add', ['Sinh', '_x'], '__b'],
-  replace: ['Arsinh', ['Negate', '__b']],
+// A root template for `coth(_x) + b = 0 → x = arcoth(-b)`.
+// `coth(x) + b = 0` is not solvable by the built-in rules, so this rule
+// makes a previously-unsolvable equation solvable. (sinh/cosh/tanh are all
+// solvable natively, so `coth` is used here as the unsolvable-by-default
+// stand-in for exercising the custom-rule API.)
+const COTH_ROOT_RULE: Rule = {
+  match: ['Add', ['Coth', '_x'], '__b'],
+  replace: ['Arcoth', ['Negate', '__b']],
   condition: (sub) => !sub.__b.has('_x'),
 };
 
-const ARSINH_3 = 1.8184464592320668; // arsinh(3), root of sinh(x) - 3 = 0
+const ARCOTH_3 = 0.34657359027997264; // arcoth(3), root of coth(x) - 3 = 0
 
 function firstRootValue(result: any): number | undefined {
   if (!Array.isArray(result) || result.length === 0) return undefined;
@@ -54,18 +56,18 @@ describe('solveRules', () => {
   it('pushed root template makes a previously-unsolvable equation solvable', () => {
     const ce = new ComputeEngine();
     // Not solvable by default
-    expect(ce.parse('\\sinh(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
 
-    ce.solveRules.push(SINH_ROOT_RULE);
+    ce.solveRules.push(COTH_ROOT_RULE);
 
-    const result = ce.parse('\\sinh(x) - 3 = 0').solve('x') as any[];
+    const result = ce.parse('\\coth(x) - 3 = 0').solve('x') as any[];
     expect(result?.length).toBe(1);
-    expect(firstRootValue(result)).toBeCloseTo(ARSINH_3, 10);
+    expect(firstRootValue(result)).toBeCloseTo(ARCOTH_3, 10);
   });
 
   it('pushed rule does not break built-in root finding', () => {
     const ce = new ComputeEngine();
-    ce.solveRules.push(SINH_ROOT_RULE);
+    ce.solveRules.push(COTH_ROOT_RULE);
     const result = ce
       .expr(['Add', ['Multiply', 5, 'x'], -10])
       .solve('x') as any[];
@@ -77,12 +79,12 @@ describe('solveRules', () => {
   //
   it('full replacement via setter works', () => {
     const ce = new ComputeEngine();
-    ce.solveRules = [SINH_ROOT_RULE];
+    ce.solveRules = [COTH_ROOT_RULE];
 
     // The custom rule is used...
-    const result = ce.parse('\\sinh(x) - 3 = 0').solve('x') as any[];
+    const result = ce.parse('\\coth(x) - 3 = 0').solve('x') as any[];
     expect(result?.length).toBe(1);
-    expect(firstRootValue(result)).toBeCloseTo(ARSINH_3, 10);
+    expect(firstRootValue(result)).toBeCloseTo(ARCOTH_3, 10);
 
     // ...and the built-in rules are gone: linear equations are no
     // longer solvable
@@ -98,14 +100,14 @@ describe('solveRules', () => {
   it('cache invalidation when pushing after a prior solve()', () => {
     const ce = new ComputeEngine();
     // Trigger caching of the boxed 'solve-univariate' rule set
-    expect(ce.parse('\\sinh(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
 
     // Now push a new rule: it must be picked up despite the cached set
-    ce.solveRules.push(SINH_ROOT_RULE);
+    ce.solveRules.push(COTH_ROOT_RULE);
 
-    const result = ce.parse('\\sinh(x) - 3 = 0').solve('x') as any[];
+    const result = ce.parse('\\coth(x) - 3 = 0').solve('x') as any[];
     expect(result?.length).toBe(1);
-    expect(firstRootValue(result)).toBeCloseTo(ARSINH_3, 10);
+    expect(firstRootValue(result)).toBeCloseTo(ARCOTH_3, 10);
   });
 
   it('cache invalidation after setter replacement', () => {
@@ -113,7 +115,7 @@ describe('solveRules', () => {
     // Trigger caching
     ce.expr(['Add', ['Multiply', 5, 'x'], -10]).solve('x');
 
-    ce.solveRules = [SINH_ROOT_RULE];
+    ce.solveRules = [COTH_ROOT_RULE];
 
     // The replaced set is used: built-in linear solving is gone
     const linear = ce
@@ -129,14 +131,14 @@ describe('solveRules', () => {
     const ce1 = new ComputeEngine();
     const ce2 = new ComputeEngine();
 
-    ce1.solveRules.push(SINH_ROOT_RULE);
+    ce1.solveRules.push(COTH_ROOT_RULE);
 
     expect(ce1.solveRules.length).toBe(ce2.solveRules.length + 1);
 
     // ce1 can solve, ce2 cannot
-    const r1 = ce1.parse('\\sinh(x) - 3 = 0').solve('x') as any[];
+    const r1 = ce1.parse('\\coth(x) - 3 = 0').solve('x') as any[];
     expect(r1?.length).toBe(1);
-    expect(ce2.parse('\\sinh(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce2.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
   });
 
   //
@@ -144,15 +146,15 @@ describe('solveRules', () => {
   //
   it('bogus roots from a wrong template are filtered by validation', () => {
     const ce = new ComputeEngine();
-    // A deliberately wrong template: claims cosh(x) + b = 0 has root 42.
-    // cosh(42) - 5 ≠ 0, so the candidate root must be rejected and solve()
+    // A deliberately wrong template: claims coth(x) + b = 0 has root 42.
+    // coth(42) - 3 ≠ 0, so the candidate root must be rejected and solve()
     // degrades to a no-op instead of returning a wrong answer.
     ce.solveRules.push({
-      match: ['Add', ['Cosh', '_x'], '__b'],
+      match: ['Add', ['Coth', '_x'], '__b'],
       replace: 42,
       condition: (sub) => !sub.__b.has('_x'),
     });
-    expect(ce.parse('\\cosh(x) - 5 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
   });
 
   //
@@ -162,11 +164,11 @@ describe('solveRules', () => {
     const ce = new ComputeEngine();
     // Same template, but the condition rejects every match
     ce.solveRules.push({
-      match: ['Add', ['Sinh', '_x'], '__b'],
-      replace: ['Arsinh', ['Negate', '__b']],
+      match: ['Add', ['Coth', '_x'], '__b'],
+      replace: ['Arcoth', ['Negate', '__b']],
       condition: () => false,
     });
-    expect(ce.parse('\\sinh(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
   });
 });
 
@@ -199,10 +201,10 @@ describe('harmonizationRules', () => {
   // rules and functional root rules can match the harmonized form.
   //
   function pushHarmonizationScenario(ce: ComputeEngine): void {
-    // sinh(_x) + b = 0 → _x - arsinh(-b) = 0
+    // coth(_x) + b = 0 → _x - arcoth(-b) = 0
     ce.harmonizationRules.push({
-      match: ['Add', ['Sinh', '_x'], '__b'],
-      replace: ['Subtract', '_x', ['Arsinh', ['Negate', '__b']]],
+      match: ['Add', ['Coth', '_x'], '__b'],
+      replace: ['Subtract', '_x', ['Arcoth', ['Negate', '__b']]],
       condition: (sub) => !sub.__b.has('_x'),
     });
     // Functional root rule: _x - c = 0 → x = c
@@ -216,33 +218,33 @@ describe('harmonizationRules', () => {
   it('pushed harmonization rule feeds root finding', () => {
     const ce = new ComputeEngine();
     // Not solvable by default
-    expect(ce.parse('\\sinh(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
 
     pushHarmonizationScenario(ce);
 
-    const result = ce.parse('\\sinh(x) - 3 = 0').solve('x') as any[];
+    const result = ce.parse('\\coth(x) - 3 = 0').solve('x') as any[];
     expect(result?.length).toBe(1);
-    expect(result[0].N().re).toBeCloseTo(ARSINH_3, 10);
+    expect(result[0].N().re).toBeCloseTo(ARCOTH_3, 10);
   });
 
   //
   // Natural path: a pushed harmonization rule whose output is solved by the
   // BUILT-IN pattern root rules (no functional rule needed). The harmonized
-  // form `_x - arsinh(3) = 0` is matched by the built-in linear template.
+  // form `_x - arcoth(3) = 0` is matched by the built-in linear template.
   //
   it('pushed harmonization rule feeds built-in pattern root rules', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('\\sinh(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
 
     ce.harmonizationRules.push({
-      match: ['Add', ['Sinh', '_x'], '__b'],
-      replace: ['Subtract', '_x', ['Arsinh', ['Negate', '__b']]],
+      match: ['Add', ['Coth', '_x'], '__b'],
+      replace: ['Subtract', '_x', ['Arcoth', ['Negate', '__b']]],
       condition: (sub) => !sub.__b.has('_x'),
     });
 
-    const result = ce.parse('\\sinh(x) - 3 = 0').solve('x') as any[];
+    const result = ce.parse('\\coth(x) - 3 = 0').solve('x') as any[];
     expect(result?.length).toBe(1);
-    expect(result[0].N().re).toBeCloseTo(ARSINH_3, 10);
+    expect(result[0].N().re).toBeCloseTo(ARCOTH_3, 10);
   });
 
   //
@@ -290,13 +292,13 @@ describe('harmonizationRules', () => {
     const ce = new ComputeEngine();
     // Trigger caching of the boxed 'harmonization' rule set (the
     // harmonization pass runs when pattern root-finding fails)
-    expect(ce.parse('\\sinh(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
 
     pushHarmonizationScenario(ce);
 
-    const result = ce.parse('\\sinh(x) - 3 = 0').solve('x') as any[];
+    const result = ce.parse('\\coth(x) - 3 = 0').solve('x') as any[];
     expect(result?.length).toBe(1);
-    expect(result[0].N().re).toBeCloseTo(ARSINH_3, 10);
+    expect(result[0].N().re).toBeCloseTo(ARCOTH_3, 10);
   });
 
   //
@@ -307,14 +309,14 @@ describe('harmonizationRules', () => {
     pushHarmonizationScenario(ce);
 
     // Works, and caches the boxed harmonization rule set
-    expect((ce.parse('\\sinh(x) - 3 = 0').solve('x') as any[])?.length).toBe(
+    expect((ce.parse('\\coth(x) - 3 = 0').solve('x') as any[])?.length).toBe(
       1
     );
 
     // Remove all harmonization rules: the equation becomes unsolvable
     // again (the functional root rule alone can't match the raw equation)
     ce.harmonizationRules = [];
-    expect(ce.parse('\\sinh(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
   });
 
   //
@@ -325,8 +327,8 @@ describe('harmonizationRules', () => {
     const ce2 = new ComputeEngine();
 
     ce1.harmonizationRules.push({
-      match: ['Add', ['Sinh', '_x'], '__b'],
-      replace: ['Subtract', '_x', ['Arsinh', ['Negate', '__b']]],
+      match: ['Add', ['Coth', '_x'], '__b'],
+      replace: ['Subtract', '_x', ['Arcoth', ['Negate', '__b']]],
       condition: (sub) => !sub.__b.has('_x'),
     });
 
