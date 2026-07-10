@@ -1356,6 +1356,89 @@ export function applyTR11i(expr: Expression): Expression {
 }
 
 // ============================================================================
+// TRdiffPowers: difference of squares of the Pythagorean pair -> double angle
+//   sin(x)^2 - cos(x)^2 -> -cos(2x)     cos(x)^2 - sin(x)^2 -> cos(2x)
+//   sin(x)^4 - cos(x)^4 -> -cos(2x)     cos(x)^4 - sin(x)^4 -> cos(2x)
+// The 4th-power cases factor as (a^2 - b^2)(a^2 + b^2) with a = sin, b = cos;
+// the sum factor collapses to 1 by the Pythagorean identity, leaving the
+// 2nd-power reduction. This is the "difference of squares of sin²/cos²" step
+// that lets the Fu chain finish patterns like sin⁴x - cos⁴x that TR5/TR6/TR7
+// (which only fire on exponent 2) leave untouched.
+// ============================================================================
+
+/**
+ * Parse an `Add` operand of the form `±func(arg)^power` where `func` is Sin or
+ * Cos, `power` is 2 or 4, and there is no other numeric coefficient. Returns
+ * the components, or undefined if the operand does not match.
+ */
+function parseSignedTrigPower(
+  op: Expression
+):
+  | { func: 'Sin' | 'Cos'; arg: Expression; power: number; negated: boolean }
+  | undefined {
+  let negated = false;
+  let term = op;
+
+  // Peel a leading sign: Negate(...) or Multiply(-1, ...)
+  if (isFunction(term, 'Negate') && term.op1) {
+    negated = true;
+    term = term.op1;
+  } else if (isFunction(term, 'Multiply') && term.ops.length === 2) {
+    const negIdx = term.ops.findIndex((f) => f.isSame(-1));
+    if (negIdx >= 0) {
+      negated = true;
+      term = term.ops[1 - negIdx];
+    }
+  }
+
+  if (!isFunction(term, 'Power')) return undefined;
+  const base = term.op1;
+  const exp = term.op2;
+  if (!base || !exp) return undefined;
+  if (!(exp.isSame(2) || exp.isSame(4))) return undefined;
+  if (base.operator !== 'Sin' && base.operator !== 'Cos') return undefined;
+  if (!isFunction(base)) return undefined;
+  const arg = base.op1;
+  if (!arg) return undefined;
+
+  return {
+    func: base.operator as 'Sin' | 'Cos',
+    arg,
+    power: exp.isSame(2) ? 2 : 4,
+    negated,
+  };
+}
+
+export function TRdiffPowers(expr: Expression): Expression | undefined {
+  const ce = expr.engine;
+
+  if (!isFunction(expr, 'Add') || expr.ops.length !== 2) return undefined;
+
+  const a = parseSignedTrigPower(expr.ops[0]);
+  const b = parseSignedTrigPower(expr.ops[1]);
+  if (!a || !b) return undefined;
+
+  // Need opposite signs, complementary functions, equal power, same argument.
+  if (a.negated === b.negated) return undefined;
+  if (a.func === b.func) return undefined;
+  if (a.power !== b.power) return undefined;
+  if (!a.arg.isSame(b.arg)) return undefined;
+
+  // The positive (non-negated) term determines the sign of the result:
+  //   cos^p - sin^p -> cos(2x)      sin^p - cos^p -> -cos(2x)
+  const positive = a.negated ? b : a;
+  const doubled = ce._fn('Cos', [positive.arg.mul(2)]);
+  return positive.func === 'Cos' ? doubled : doubled.neg();
+}
+
+/**
+ * Apply TRdiffPowers to all subexpressions
+ */
+export function applyTRdiffPowers(expr: Expression): Expression {
+  return mapSubexpressions(expr, TRdiffPowers);
+}
+
+// ============================================================================
 // TR12: Tangent addition formula
 // tan(x+y) -> (tan(x) + tan(y))/(1 - tan(x)tan(y))
 // tan(x-y) -> (tan(x) - tan(y))/(1 + tan(x)tan(y))

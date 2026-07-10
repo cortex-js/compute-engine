@@ -384,6 +384,27 @@ describe('Integration - simplify({ strategy: "fu" })', () => {
     // Fu should simplify sin²+cos² to 1, then standard rules remove +0
     expect(result.is(1)).toBe(true);
   });
+
+  test('fu strategy on sin⁴x - cos⁴x -> -cos(2x)', () => {
+    // sin⁴x - cos⁴x = (sin²x - cos²x)(sin²x + cos²x) = (sin²x - cos²x)·1
+    //               = -cos(2x)
+    // Verified numerically (input vs -cos(2x) via .N()) at x = 0.7, 1.3, 2.9:
+    // diffs are 0 (well within 1e-10).
+    const expr = ce.parse('\\sin^4 x - \\cos^4 x');
+    const result = expr.simplify({ strategy: 'fu' });
+    expect(result.isSame(ce.parse('-\\cos(2x)'))).toBe(true);
+    // The default simplify path must be unaffected by the fu-only change:
+    // it leaves the expression in its canonical input form.
+    expect(expr.simplify().isSame(expr)).toBe(true);
+  });
+
+  test('fu strategy on cos⁴x - sin⁴x -> cos(2x)', () => {
+    // Mirror of the above: cos⁴x - sin⁴x = cos(2x).
+    const expr = ce.parse('\\cos^4 x - \\sin^4 x');
+    const result = expr.simplify({ strategy: 'fu' });
+    expect(result.isSame(ce.parse('\\cos(2x)'))).toBe(true);
+    expect(expr.simplify().isSame(expr)).toBe(true);
+  });
 });
 
 describe('Integration - simplify with fu strategy', () => {

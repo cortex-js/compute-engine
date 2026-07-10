@@ -36,6 +36,7 @@ import {
   applyTR22i,
   applyTRmorrie,
   applyTRpythagorean,
+  applyTRdiffPowers,
 } from './fu-transforms.js';
 
 import { TrigCostFunction, DEFAULT_TRIG_COST } from './fu-cost.js';
@@ -324,6 +325,13 @@ export function fu(
   // Phase 6: Try double angle contraction
   const tr11iResult = applyTR11i(bestResult);
   updateBest(tr11iResult);
+
+  // Phase 6a: Difference of squares of the Pythagorean pair -> double angle
+  // sin⁴x - cos⁴x -> -cos(2x), cos⁴x - sin⁴x -> cos(2x), and the 2nd-power
+  // mirror sin²x - cos²x -> -cos(2x). TR5/TR6/TR7 only fire on exponent 2, so
+  // the 4th-power difference otherwise stalls.
+  const diffPowersResult = applyTRdiffPowers(bestResult);
+  updateBest(diffPowersResult);
 
   // Phase 7: Try Morrie's law for cos product chains
   const morrieResult = applyTRmorrie(bestResult);

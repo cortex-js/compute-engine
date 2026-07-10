@@ -206,6 +206,44 @@ describe('PR #301 cherry-picked fixes', () => {
     expect(result?.toString()).toBe('x + y * z');
   });
 
+  it('applyRule swallows a throwing function-replace and preserves operand rewrites', () => {
+    // Contract (rules.ts ~1180-1190): an exception thrown by a function
+    // `replace` is caught — logged via console.error, NOT propagated — and if
+    // recursive operand rewrites already succeeded they are preserved
+    // (`return operandsMatched ? stepOf(expr) : null`). Only a CancellationError
+    // (deadline) still propagates. This is the sibling of the `return undefined`
+    // case tested above.
+    const expr = ce.expr(['Add', 'x', ['Add', 'y', 'z']], { form: 'raw' });
+
+    const rule = {
+      match: ['Add', '_a', '_b'],
+      replace: (_e, { _a, _b }) => {
+        if (_a.symbol === 'x') throw new Error('boom'); // outer Add
+        return ce.expr(['Multiply', _a, _b]); // inner Add(y, z) -> y * z
+      },
+    };
+
+    // Silence (and observe) the expected console.error from the swallowed throw.
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    let result: ReturnType<typeof expr.replace> = null;
+    // (a) the exception does not propagate out of replace()
+    expect(() => {
+      result = expr.replace(rule, {
+        recursive: true,
+        matchPermutations: false,
+      });
+    }).not.toThrow();
+
+    // The throw was swallowed but logged.
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+
+    // (b) the successful inner rewrite (y + z -> y * z) is preserved
+    expect(result).not.toBeNull();
+    expect(result!.toString()).toBe('x + y * z');
+  });
+
   it('object-rule condition string without $ delimiters is honored', () => {
     // Before the '$'-delimiter fix: the condition string was silently dropped,
     // so the rule applied unconditionally.
