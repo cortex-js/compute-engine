@@ -1863,6 +1863,31 @@ describe('rational and absolute-value equations', () => {
     expect(result).toEqual([2]);
   });
 
+  // clearDenominators (b2) semantics: SYMBOLIC denominators are still cleared,
+  // exact NUMERIC-literal denominators are not (rational coefficients are
+  // solved natively). Both directions must remain solvable.
+  describe('clearDenominators skips only numeric-literal denominators', () => {
+    // Symbolic denominator containing the unknown — must STILL clear (R2 fix).
+    test('symbolic denom with x still cleared: 3/(x-1) = 6 → x = 3/2', () => {
+      const result = expr('\\frac{3}{x-1} = 6').solve('x')?.map((x) => x.json);
+      expect(result).toEqual([['Rational', 3, 2]]);
+    });
+
+    // Symbolic denominator free of the unknown (the docstring example shape,
+    // F − 3x/h) — must STILL clear so the linear path solves for x.
+    test('symbolic denom free of x still cleared: F = 3x/h → x = Fh/3', () => {
+      const result = expr('F = 3x/h').solve('x')?.map((x) => x.toString());
+      expect(result).toEqual(['1/3 * F * h']);
+    });
+
+    // Pure numeric-literal denominator — no longer cleared, still solved by the
+    // native polynomial/rational-coefficient path.
+    test('numeric denom still solvable without clearing: x/2 + 3 = 0 → x = -6', () => {
+      const result = expr('x/2 + 3 = 0').solve('x')?.map((x) => x.json);
+      expect(result).toEqual([-6]);
+    });
+  });
+
   test('|x+3| − 2|x−3| = 0 → x = 9, 1', () => {
     const result = expr('|x+3| - 2|x-3| = 0').solve('x')?.map((x) => x.json);
     expect(result).toEqual([9, 1]);

@@ -865,8 +865,8 @@ export const UNIVARIATE_ROOTS: Rule[] = [
 ];
 
 /**
- * Clear denominators from an Add expression by multiplying through by the LCM
- * of all denominators. For example, `F - 3x/h` becomes `F*h - 3x`.
+ * Clear *symbolic* denominators from an Add expression by multiplying through
+ * by the LCM of those denominators. For example, `F - 3x/h` becomes `F*h - 3x`.
  *
  * This transformation preserves the roots of the equation (assuming denominators
  * are non-zero) and allows the solve rules to match expressions that would
@@ -874,6 +874,16 @@ export const UNIVARIATE_ROOTS: Rule[] = [
  *
  * Also handles the case where the variable is in the denominator (e.g., `a/x - b`
  * becomes `a - bx` after multiplying by x).
+ *
+ * Exact **numeric-literal** denominators (integer/rational constants, e.g. the
+ * `10` in `1/10`) are deliberately NOT cleared: rational coefficients are
+ * already handled natively by the solve templates (leading-coefficient
+ * wildcards + `useVariations`) and the polynomial machinery, so rescaling by a
+ * pure number buys nothing — and it would flatten the product-inner LambertW
+ * shape `Add(Multiply(_x, Exp(_x)), __b)` (scaling `x·eˣ + 1/10` to
+ * `10·x·eˣ + 1` collapses the two products into one commutative Multiply the
+ * matcher can't invert). Symbolic denominators (`h`, `x+2`, `x`, …) keep the
+ * original behavior exactly.
  */
 function clearDenominators(expr: Expression, _variable?: string): Expression {
   if (!isFunction(expr, 'Add')) return expr;
@@ -885,10 +895,14 @@ function clearDenominators(expr: Expression, _variable?: string): Expression {
   // is trivially 1 (e.g. `.denominator` of `e^x` is `1^x`): multiplying
   // through by it would needlessly mangle the expression (e.g. `e^x - 5`
   // would become `1^x e^x - 5·1^x`, which no root template matches).
+  // Exact numeric-literal denominators are skipped (see the doc comment).
   const denominators = ops
     .map((op) => op.denominator)
     .filter(
-      (d) => !d.isSame(1) && !(isFunction(d, 'Power') && d.op1.isSame(1))
+      (d) =>
+        !d.isSame(1) &&
+        !(isFunction(d, 'Power') && d.op1.isSame(1)) &&
+        !(isNumber(d) && d.isExact)
     );
 
   if (denominators.length === 0) return expr;

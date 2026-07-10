@@ -750,12 +750,29 @@ describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
   it('LambertW: x·eˣ = −0.1 → BOTH real roots via W₀ and W₋₁  [fungrim:ed7dac:solve]', () => {
     // For −1/e < c < 0 the equation x·eˣ = c has two real roots: the principal
     // branch W₀(c) (from fungrim:8654a3:solve) and the second branch W₋₁(c)
-    // (from the ed7dac W₋₁ seed unblocked this round). A rational RHS (−1/10)
-    // triggers clearDenominators, which rescales the eˣ term out of the
-    // unscaled ed7dac shape, so probe with the decimal value.
+    // (from the ed7dac W₋₁ seed).
     const r = solved('x e^x = -0.1');
     expect(r.some((v) => Math.abs(v - -0.11183255915896297) < 1e-9)).toBe(true); // W₀(−0.1)
     expect(r.some((v) => Math.abs(v - -3.577152063957297) < 1e-9)).toBe(true); // W₋₁(−0.1)
+    for (const v of r) expect(v * Math.exp(v)).toBeCloseTo(-0.1, 9);
+  });
+
+  it('LambertW: x·eˣ = −1/10 (EXACT rational RHS) → BOTH real roots via W₀ and W₋₁  [ROADMAP §F followup 2]', () => {
+    // Regression for the exact-rational RHS of the product-inner LambertW shape.
+    // `clearDenominators` now skips exact numeric-literal denominators, so
+    // `x·eˣ + 1/10` is NOT rescaled to `10·x·eˣ + 1` and reaches the unscaled
+    // product-inner template `Add(Multiply(_x, Exp(_x)), __b)` intact. Exact
+    // input ⇒ exact (symbolic LambertW) roots per the exactness contract; assert
+    // numerically via .N().
+    const ce = new ComputeEngine();
+    loadIdentities(ce, { solve: true });
+    const roots = (ce.parse('x e^x = -\\frac1{10}').solve('x') ??
+      []) as ReturnType<ComputeEngine['box']>[];
+    // Exact symbolic roots (not floats): the operator head is LambertW.
+    expect(roots.every((r) => r.operator === 'LambertW')).toBe(true);
+    const r = roots.map((x) => x.N().re ?? NaN);
+    expect(r.some((v) => Math.abs(v - -0.11183255915896297) < 1e-9)).toBe(true); // W₀(−1/10)
+    expect(r.some((v) => Math.abs(v - -3.577152063957297) < 1e-9)).toBe(true); // W₋₁(−1/10)
     for (const v of r) expect(v * Math.exp(v)).toBeCloseTo(-0.1, 9);
   });
 

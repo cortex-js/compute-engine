@@ -152,8 +152,13 @@ export function deriveSolveTemplate(
   // when `__a` is explicitly present, i.e. the already-scaled case). That
   // regresses the unscaled integer-RHS case (`x·eˣ = 3`). For product inners we
   // therefore keep the unscaled shape `Add(A(_x), __b)` (no leading scale
-  // wildcard); the rational-RHS/clearDenominators path is out of reach for
-  // those, which is the pre-existing behavior.
+  // wildcard).
+  //
+  // This no longer costs the rational-RHS case: `clearDenominators` (solve.ts)
+  // now skips exact numeric-literal denominators, so a rational RHS like
+  // `x·eˣ = −1/10` is NOT rescaled to `10·x·eˣ + 1` and reaches the templates
+  // as `Add(Multiply(_x, Exp(_x)), 1/10)`, matching this unscaled product-inner
+  // shape (the `__b` wildcard + `useVariations` absorbs the rational offset).
   const isProduct = Array.isArray(innerA) && innerA[0] === 'Multiply';
   const negOffset: MathJSON = isProduct
     ? ['Negate', '__b']
@@ -246,17 +251,15 @@ export function selfTestSolveTemplate(
   if (!floatOk)
     return { ok: false, detail: 'no float probe yielded a validating root ≈ x0' };
 
-  // The rational-RHS pass only applies to scale-generalized templates (those
-  // carrying the leading `__a` coefficient wildcard). Product-inner templates
-  // keep the unscaled `Add(A(_x), __b)` shape (no `__a`) and cannot reach the
-  // clearDenominators path — skip the pass for them.
-  if (!collectWildcards(match).has('__a')) return { ok: true };
-
-  // Pass 2 — rational RHS: solve `A(x) − 1/2 = 0` with an EXACT rational RHS,
-  // which `findUnivariateRoots` scales via `clearDenominators` to
-  // `2·A(x) − 1 = 0`. This exercises the scaled `__a`/`__b` match path (the
-  // reason the leading coefficient wildcard exists). Skip — do not fail — when
-  // `A(x) = 1/2` has no real solution (`f(1/2)` non-real/non-finite): the
+  // Pass 2 — rational RHS: solve `A(x) − 1/2 = 0` with an EXACT rational RHS.
+  // `findUnivariateRoots` runs `clearDenominators`, which now SKIPS exact
+  // numeric-literal denominators, so the equation is NOT rescaled and reaches
+  // the templates as `Add(A(_x), −1/2)`; the `__b` wildcard + `useVariations`
+  // (covering `__a = 1` for the scale-generalized templates) absorbs the
+  // rational offset. This pass runs for BOTH scale-generalized and product-inner
+  // templates — the product-inner shape (`x·eˣ = −1/10`) is now reachable
+  // because rational RHSs are no longer flattened away. Skip — do not fail —
+  // when `A(x) = 1/2` has no real solution (`f(1/2)` non-real/non-finite): the
   // probe simply cannot exercise the path for that inner function.
   const half: MathJSON = ['Rational', 1, 2];
   // `f(1/2)` analog: the root the template should produce, via the replace

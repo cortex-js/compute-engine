@@ -632,30 +632,10 @@ this track is done as a coverage effort.** Residual, none benchmark-reachable:
 
 - **FR1/FR3** (Dottie-style transcendental fixed points): unsolved by SymPy
   and Mathematica too — outside the closed-form ceiling, not a gap to chase.
-- ~~`ed7dac` seed stays gated~~ **Done (round 4):** the static
-  `compat-signature` gate in `compile-rules.ts` now covers only 2-arg
-  `Digamma` (polygamma order — still unimplemented); the 2-arg LambertW
-  entries compile on their own merits (+3 rules: `ed7dac`, `d09380`,
-  `f372e9`; artifact 1413 / 10 solve templates). New capability:
-  `x·eˣ = −0.1` returns both real roots (W₀ and W₋₁), and
-  `W(x·eˣ, −1) → x` simplifies under `assume(x ≤ −1)`. Residual notes:
-  `x·eˣ = −1/10` (exact rational RHS) still finds no root —
-  `clearDenominators` rescales to `10x·eˣ + 1` and the product-inner
-  template carries no scale wildcard (known limitation from the round-1
-  product-inner exception); `a172c7` honestly no-fires (its guard band
-  `x·ln x ∈ (−1/e, 0)` defeats seeding) — its former `compat-signature`
-  mislabel is fixed: `LambertW` left the harness `COMPAT_OVERRIDES`
-  (`scripts/fungrim/load.ts`; verified zero Stage-1 impact — the real
-  2-arg signature boxes everything the widening did), and the remaining
-  30 `compat-signature` skips are all genuine 2-arg `Digamma`.
-- **Stage-1 report drift (pre-existing, surfaced while verifying the
-  above):** the committed `scripts/fungrim/validation-report.json` dated
-  from 2026-06-12; regenerating against the current engine shows 11
-  newly-failing / 4 newly-passing entries (net 2546→2539 of 2551, all
-  `incompatible-type` integer-typing errors in modular/theta/Bell-number
-  topics — unrelated to the solve/LambertW work, attributable to a month
-  of engine typing evolution). Worth a triage pass; the old "CI for the
-  Stage-1 harness" follow-up would have caught this as it happened.
+- `a172c7` (`W(x·ln x, −1) → ln x`) honestly no-fires — its guard band
+  `x·ln x ∈ (−1/e, 0)` defeats seeding; the remaining 30 `compat-signature`
+  compile skips are all genuine 2-arg `Digamma` (polygamma order — still
+  unimplemented).
 - **Small tails**: `\operatorname{W}_{-1}` subscript parse (BesselJ has the
   same one-way limitation), derivative of the 2-arg form (kept inert, not
   wrong).
