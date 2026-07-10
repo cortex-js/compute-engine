@@ -101,6 +101,15 @@ export function symbolicLimit(
               const c0 = L.coeff(0).evaluate();
               if (c0.isValid && c0.isNaN !== true) return c0;
             }
+            // Negative valuation: a genuine pole — resolve to a signed
+            // infinity when the direction/parity allows (see
+            // signedPoleInfinity); otherwise defer as before. Never fall
+            // through to the structural strategies: direct substitution
+            // does not model these poles (that is this guard's purpose).
+            if (L && L.v < 0) {
+              const inf = signedPoleInfinity(L, dir ?? 0, ce);
+              if (inf) return inf;
+            }
             return undefined;
           }
         }
@@ -180,6 +189,49 @@ function limitDispatch(
 // Finite point
 // ──────────────────────────────────────────────────────────────────────────
 
+/**
+ * Sign of `c_v·(x − a)^v` (the leading Laurent term) as `x → a` from `dir`
+ * (+1 right, −1 left, 0 two-sided), or `undefined` when indeterminate:
+ * a two-sided approach with odd `|v|` (the two sides disagree), or a
+ * leading coefficient whose sign the engine cannot decide.
+ */
+function laurentSignNear(
+  L: { v: number; coeff: (p: number) => Expression },
+  dir: number
+): 1 | -1 | undefined {
+  const odd = Math.abs(L.v) % 2 === 1;
+  if (dir === 0 && odd) return undefined;
+  const c = L.coeff(L.v).evaluate();
+  if (!c.isValid || c.isNaN === true) return undefined;
+  let s: 1 | -1;
+  if (c.isPositive === true) s = 1;
+  else if (c.isNegative === true) s = -1;
+  else return undefined;
+  // From the left, x − a = −t (t > 0): odd powers flip the sign.
+  if (dir === -1 && odd) s = s === 1 ? -1 : 1;
+  return s;
+}
+
+/**
+ * Signed-infinity resolution of a pole (negative-valuation Laurent
+ * expansion) — the 2026-07-10 convention decision: a *directional* limit at
+ * a pole resolves to `±∞` from the sign of the leading coefficient and the
+ * parity of the valuation; a *two-sided* limit resolves only when both
+ * sides agree (even valuation, `lim 1/x² = +∞`). An odd-valuation two-sided
+ * limit (`lim 1/x` at 0) stays inert — the engine does not produce
+ * `ComplexInfinity` limits.
+ */
+function signedPoleInfinity(
+  L: { v: number; coeff: (p: number) => Expression },
+  dir: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (L.v >= 0) return undefined;
+  const s = laurentSignNear(L, dir);
+  if (s === undefined) return undefined;
+  return s > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+}
+
 function limitAtFinite(
   e: Expression,
   x: string,
@@ -224,6 +276,44 @@ function limitAtFinite(
     )
       return n0.div(d0).evaluate();
   }
+
+  // 3. Pole resolution (7c follow-up; the 2026-07-10 convention decision —
+  //    directional limits at poles resolve to ±∞, two-sided only when both
+  //    sides agree).
+  //
+  // 3a. Logarithmic divergence: `ln`/`log` of an argument approaching 0⁺ is
+  //     −∞, and of one blowing up to +∞ is +∞. The Laurent kernel declines
+  //     `Ln` itself (logarithmic branch point), but the *argument*'s
+  //     expansion decides the approach. An argument approaching 0⁻ or −∞
+  //     leaves the real logarithm undefined — defer. (A two-sided
+  //     `lim ln x` at 0 also stays inert: resolving it would be a
+  //     domain-restricted-limit convention, not taken here; `ln(x²)`
+  //     two-sided does resolve — the argument approaches 0⁺ from both
+  //     sides.)
+  const op = e.operator;
+  if (op === 'Ln' || op === 'Log') {
+    const eOps = oo(e);
+    // Log(z, b): a constant base > 1 preserves the divergence direction.
+    const baseOk =
+      op === 'Ln' ||
+      eOps.length < 2 ||
+      (!eOps[1].has(x) && eOps[1].isGreater(1) === true);
+    if (baseOk && eOps[0]) {
+      const Li = laurentData(eOps[0], x, a, ce, 3);
+      if (Li && laurentSignNear(Li, dir) === 1) {
+        if (Li.v > 0) return ce.NegativeInfinity; // argument → 0⁺
+        if (Li.v < 0) return ce.PositiveInfinity; // argument → +∞
+      }
+    }
+    return undefined;
+  }
+
+  // 3b. Meromorphic pole: the leading Laurent term decides the signed
+  //     infinity (elementary poles like 1/x² reach here after direct
+  //     substitution and L'Hôpital decline; special-function poles are
+  //     intercepted earlier by the soundness guard in `symbolicLimit`).
+  const L = laurentData(e, x, a, ce, 3);
+  if (L) return signedPoleInfinity(L, dir, ce);
 
   return undefined;
 }

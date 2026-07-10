@@ -162,15 +162,55 @@ describe('RESIDUE (ROADMAP item 7c)', () => {
     });
   });
 
-  describe('deferral', () => {
-    test('residue at infinity stays unevaluated', () => {
-      const r = ce.expr([
-        'Residue',
-        ['Divide', 1, 'x'],
-        'x',
-        { num: '+Infinity' },
-      ]);
-      expect(r.evaluate().operator).toBe('Residue');
+  describe('residue at infinity (7c follow-up rung)', () => {
+    // Res_∞ f = −Res_{s=0} f(1/s)/s²; any infinite point spelling names the
+    // Riemann-sphere point at infinity. For a rational function, Res_∞ is
+    // the negated sum of the finite residues (total residue over the
+    // sphere is 0) — each value below is checked against that identity.
+    test('1/x at ∞ → −1', () => {
+      expect(res(['Divide', 1, 'x'], 'x', 'ComplexInfinity').re).toBe(-1);
+      // +∞ spelling names the same sphere point
+      expect(res(['Divide', 1, 'x'], 'x', { num: '+Infinity' }).re).toBe(-1);
+    });
+    test('an entire function: x at ∞ → 0', () => {
+      expect(res('x', 'x', 'ComplexInfinity').re).toBe(0);
+    });
+    test('1/(x²+1) at ∞ → 0 (finite residues cancel)', () => {
+      expect(
+        res(['Divide', 1, ['Add', ['Power', 'x', 2], 1]], 'x', 'ComplexInfinity')
+          .re
+      ).toBe(0);
+    });
+    test('(3x²+2)/(x³+x) at ∞ → −3 (= −Σ finite residues −(2+½+½))', () => {
+      const f = [
+        'Divide',
+        ['Add', ['Multiply', 3, ['Power', 'x', 2]], 2],
+        ['Add', ['Power', 'x', 3], 'x'],
+      ];
+      expect(res(f, 'x', 'ComplexInfinity').re).toBe(-3);
+    });
+  });
+
+  describe('Beta poles via the Γ-quotient rewrite (7c follow-up rung)', () => {
+    // B(a, b) = Γ(a)Γ(b)/Γ(a+b); values verified numerically:
+    // ε·B(ε, 3) → 1 and (x+1)·B(x, ½)|_{x=−1+ε} → ½ at ε = 1e−6.
+    test('Res_{x=0} B(x, 3) = 1', () => {
+      expect(res(['Beta', 'x', 3], 'x', 0).re).toBe(1);
+    });
+    test('Res_{x=−1} B(x, ½) = ½ (exact Γ-quotient form)', () => {
+      const r = res(['Beta', 'x', ['Rational', 1, 2]], 'x', -1);
+      expect(r.N().re).toBeCloseTo(0.5, 10);
+    });
+    test('lim_{x→0} x·B(x, 3) = 1', () => {
+      expect(
+        ce
+          .expr([
+            'Limit',
+            ['Function', ['Multiply', 'x', ['Beta', 'x', 3]], 'x'],
+            0,
+          ])
+          .evaluate().re
+      ).toBe(1);
     });
   });
 });

@@ -261,3 +261,71 @@ describe('HARD GRUNTZ LIMITS RESPECT THE DEADLINE (CORRECTNESS_FINDINGS #28)', (
     });
   }
 });
+
+describe('SIGNED INFINITIES AT POLES (7c follow-up; 2026-07-10 convention)', () => {
+  // Convention: a DIRECTIONAL limit at a pole resolves to ±∞ (sign from the
+  // leading Laurent coefficient and the valuation's parity); a TWO-SIDED
+  // limit resolves only when both sides agree (even valuation). A two-sided
+  // odd-valuation limit (lim 1/x at 0) stays inert — the engine does not
+  // produce ComplexInfinity limits. Directional signs verified numerically:
+  // Γ(0.1) > 0, Γ(−0.1) < 0, ζ(1.1) > 0, ζ(0.9) < 0.
+  function limDir(body: any, a: any, dir: number) {
+    return ce
+      .expr(['Limit', ['Function', ce.expr(body), 'x'], ce.expr(a), dir])
+      .evaluate();
+  }
+  const isPosInf = (e: any) =>
+    e.isInfinity === true && e.isPositive === true;
+  const isNegInf = (e: any) =>
+    e.isInfinity === true && e.isNegative === true;
+
+  test('directional elementary poles: 1/x at 0± → ±∞', () => {
+    expect(isPosInf(limDir(['Divide', 1, 'x'], 0, 1))).toBe(true);
+    expect(isNegInf(limDir(['Divide', 1, 'x'], 0, -1))).toBe(true);
+  });
+
+  test('agreeing two-sided: 1/x² → +∞, −1/x² → −∞, 1/(x−2)² at 2 → +∞', () => {
+    expect(isPosInf(lim(['Divide', 1, ['Power', 'x', 2]], 0).evaluate())).toBe(
+      true
+    );
+    expect(isNegInf(lim(['Divide', -1, ['Power', 'x', 2]], 0).evaluate())).toBe(
+      true
+    );
+    expect(
+      isPosInf(
+        lim(['Divide', 1, ['Power', ['Subtract', 'x', 2], 2]], 2).evaluate()
+      )
+    ).toBe(true);
+  });
+
+  test('disagreeing two-sided stays inert: 1/x, Γ, ln x at their poles', () => {
+    expect(lim(['Divide', 1, 'x'], 0).evaluate().operator).toBe('Limit');
+    expect(lim(['Gamma', 'x'], 0).evaluate().operator).toBe('Limit');
+    expect(lim(['Ln', 'x'], 0).evaluate().operator).toBe('Limit');
+  });
+
+  test('directional special-function poles: Γ and ζ', () => {
+    expect(isPosInf(limDir(['Gamma', 'x'], 0, 1))).toBe(true);
+    expect(isNegInf(limDir(['Gamma', 'x'], 0, -1))).toBe(true);
+    expect(isPosInf(limDir(['Zeta', 'x'], 1, 1))).toBe(true);
+    expect(isNegInf(limDir(['Zeta', 'x'], 1, -1))).toBe(true);
+  });
+
+  test('even special poles resolve two-sided: Γ(x)² at 0 → +∞', () => {
+    expect(isPosInf(lim(['Power', ['Gamma', 'x'], 2], 0).evaluate())).toBe(
+      true
+    );
+  });
+
+  test('logarithmic divergence: ln x at 0⁺ → −∞; ln(x²), ln(1/x²) two-sided', () => {
+    expect(isNegInf(limDir(['Ln', 'x'], 0, 1))).toBe(true);
+    // argument x² → 0⁺ from both sides
+    expect(isNegInf(lim(['Ln', ['Power', 'x', 2]], 0).evaluate())).toBe(true);
+    // argument 1/x² → +∞ from both sides
+    expect(
+      isPosInf(lim(['Ln', ['Divide', 1, ['Power', 'x', 2]]], 0).evaluate())
+    ).toBe(true);
+    // ln x from the left: real logarithm undefined — stays inert
+    expect(limDir(['Ln', 'x'], 0, -1).operator).toBe('Limit');
+  });
+});

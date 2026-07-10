@@ -24,7 +24,7 @@ import type {
 } from '../global-types.js';
 
 import { symbolicLimit } from './limit.js';
-import { laurentData } from './series.js';
+import { laurentData, freshSymbol } from './series.js';
 import { differentiate } from './derivative.js';
 import { sym } from '../boxed-expression/type-guards.js';
 import { getFunctionProperties } from '../function-properties/index.js';
@@ -45,7 +45,9 @@ function factorialBig(n: number): bigint {
 /**
  * Residue of `body` (a function of `varName`) at `varName = point`, or
  * `undefined` when it cannot be determined (the operator then stays symbolic).
- * Residue at infinity is not yet supported.
+ *
+ * An infinite `point` (`∞`, `−∞`, `~∞`) is the Riemann-sphere point at
+ * infinity: `Res_∞ f = −Res_{s=0} f(1/s)/s²`.
  */
 export function residue(
   body: Expression,
@@ -53,7 +55,23 @@ export function residue(
   point: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (point.isFinite === false || point.isInfinity === true) return undefined;
+  if (point.isInfinity === true) {
+    // Res_∞ f = −Res_{s=0} [f(1/s)/s²] (7c follow-up rung). All infinite
+    // point spellings name the same Riemann-sphere point, and the
+    // substitution reuses this function at 0, where the Laurent kernel and
+    // the probing paths apply unchanged.
+    const s = freshSymbol(body, varName);
+    const sSym = ce.symbol(s);
+    const g = body.subs({
+      [varName]: ce.function('Divide', [ce.One, sSym]),
+    });
+    const integrand = ce.function('Divide', [
+      ce.function('Negate', [g]),
+      ce.function('Power', [sSym, 2]),
+    ]);
+    return residue(integrand, s, ce.Zero, ce);
+  }
+  if (point.isFinite === false) return undefined;
 
   // The Laurent kernel runs FIRST (item 7c): the residue is, by definition,
   // the coefficient of `(x − a)⁻¹` in the exact Laurent expansion, and the

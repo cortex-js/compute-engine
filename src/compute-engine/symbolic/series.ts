@@ -1079,6 +1079,28 @@ function expandLaurent(
       const w = addLaurent(ce, inner, lConst(ce, b0.neg(), W), W);
       return composeSpecial(ce, outer, w, W);
     }
+    case 'Beta': {
+      // B(a, b) = Γ(a)·Γ(b)/Γ(a+b) — a meromorphic identity valid wherever
+      // either side is defined, so the Γ pole machinery (specialLaurent and
+      // the quotient arithmetic) serves Beta's poles through the rewrite
+      // (7c follow-up rung; the binary shape cannot ride the unary default
+      // path below). `GammaLn` remains a non-goal: logarithmic branch
+      // point, not meromorphic.
+      if (ops.length !== 2) return null;
+      return expandLaurent(
+        ce.function('Divide', [
+          ce.function('Multiply', [
+            ce.function('Gamma', [ops[0]]),
+            ce.function('Gamma', [ops[1]]),
+          ]),
+          ce.function('Gamma', [ce.function('Add', [ops[0], ops[1]])]),
+        ]),
+        x,
+        x0,
+        ce,
+        W
+      );
+    }
     case 'Root': {
       const m = asSmallInteger(ops[1]);
       if (m === null || m === 0) return null;
@@ -1223,7 +1245,7 @@ function taylorCoeffs(
 }
 
 /** A fresh symbol name not equal to `avoid` and not occurring free in `f`. */
-function freshSymbol(f: Expression, avoid: string): string {
+export function freshSymbol(f: Expression, avoid: string): string {
   for (const name of ['t', 's', 'u', 'w', 'q', 'z', 'tau', 'xi']) {
     if (name !== avoid && !f.has(name)) return name;
   }
@@ -1320,6 +1342,19 @@ function specialPoleInvolved(
       if (!arg) continue;
       const at = arg.subs({ [x]: x0 }).evaluate();
       if (isRecordedPole(ce, op, at)) return true;
+    }
+  }
+  // Beta rides the Γ-quotient rewrite (see expandLaurent): a pole can only
+  // arise where Γ(a) or Γ(b) has one (Γ(a+b) sits in the denominator), so
+  // check both arguments against Γ's recorded pole set. Over-detection is
+  // safe — it only routes the expansion Laurent-first, which is exact
+  // either way; under-detection would let the Taylor engine emit a
+  // spurious regular expansion with inert `Beta(pole, ·)` coefficients.
+  for (const sub of f.getSubexpressions('Beta')) {
+    if (!isFunction(sub)) continue;
+    for (const arg of sub.ops) {
+      const at = arg.subs({ [x]: x0 }).evaluate();
+      if (isRecordedPole(ce, 'Gamma', at)) return true;
     }
   }
   return false;
