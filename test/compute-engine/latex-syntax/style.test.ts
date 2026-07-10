@@ -6,7 +6,7 @@ describe('STYLE - MATH MODE', () => {
   // `Annotated` carrying the color.
   test('\\textcolor', () => {
     expect(check('x = \\textcolor{red}{y + 1} - z')).toMatchInlineSnapshot(`
-      box       = [
+      [
         "Equal",
         "x",
         [
@@ -15,7 +15,6 @@ describe('STYLE - MATH MODE', () => {
           "z"
         ]
       ]
-      eval-auto = "False"
     `);
   });
 
@@ -24,10 +23,9 @@ describe('STYLE - MATH MODE', () => {
   // the result is the plain operator expression. (Previously this errored,
   // yielding a Tuple wrapping an 'expected-closing-delimiter' error.)
   test('\\textcolor wrapping an operator', () => {
-    expect(check('x \\textcolor{red}{=} y')).toMatchInlineSnapshot(`
-      box       = ["Equal", "x", "y"]
-      eval-auto = "False"
-    `);
+    expect(check('x \\textcolor{red}{=} y')).toMatchInlineSnapshot(
+      `["Equal", "x", "y"]`
+    );
     expect(check('x \\textcolor{red}{+} y')).toMatchInlineSnapshot(
       `["Add", "x", "y"]`
     );
@@ -196,7 +194,9 @@ describe('TEXT FONT STYLING', () => {
   });
 
   test('\\textrm and \\mbox parse to a plain text run', () => {
-    expect(engine.parse('\\textrm{abc}', { form: 'raw' }).json).toEqual("'abc'");
+    expect(engine.parse('\\textrm{abc}', { form: 'raw' }).json).toEqual(
+      "'abc'"
+    );
     expect(engine.parse('\\mbox{th}', { form: 'raw' }).json).toEqual("'th'");
   });
 
@@ -228,9 +228,8 @@ describe('MATH-MODE BOLD', () => {
   });
 
   test('\\bold in an equation with a matrix', () => {
-    expect(
-      check('\\bold{v} = \\begin{pmatrix} 5 \\\\ -3 \\end{pmatrix}')
-    ).toMatchInlineSnapshot(`
+    expect(check('\\bold{v} = \\begin{pmatrix} 5 \\\\ -3 \\end{pmatrix}'))
+      .toMatchInlineSnapshot(`
       box       = ["Equal", "v_bold", ["Matrix", ["List", ["List", 5], ["List", -3]]]]
       eval-auto = "False"
     `);
@@ -328,7 +327,6 @@ describe('MATH STYLE SWITCHES', () => {
         "a",
         ["Annotated", ["Rational", 1, 2], {dict: {mathStyle: "normal"}}]
       ]
-      eval-auto = "False"
     `);
   });
 

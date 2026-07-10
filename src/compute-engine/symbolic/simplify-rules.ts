@@ -244,6 +244,17 @@ export const SIMPLIFY_RULES: Rule[] = [
     )
       return undefined;
 
+    // Skip expand for a division by a sum, e.g. (x-2)/(x+2). Splitting the
+    // numerator over such a denominator ((a+b)/c → a/c + b/c) never reduces
+    // cost, and — because this rule runs right after the common-factor
+    // cancellation rule in the same pass — it would otherwise re-inflate a
+    // freshly-cancelled rational function (Wester 14: (x²-4)/(x²+4x+4) cancels
+    // to (x-2)/(x+2), which expand would blow back up, failing the cost gate
+    // and discarding the cancellation). Division by a monomial denominator
+    // (number, symbol, or power) is still expanded, since there each split
+    // term genuinely simplifies.
+    if (isFunction(x, 'Divide') && isFunction(x.op2, 'Add')) return undefined;
+
     // Skip expand for Multiply expressions with same-base powers
     // Let simplifyPower handle e^x * e^2 -> e^{x+2} instead of evaluating e^2
     // Also handle bare symbols (a = a^1) as having an implicit power

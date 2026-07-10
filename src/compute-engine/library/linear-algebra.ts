@@ -13,9 +13,11 @@ import {
 } from '../global-types.js';
 import {
   isFunction,
+  isNumber,
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import { asRational } from '../boxed-expression/numerics.js';
 
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
@@ -864,6 +866,21 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const shape = op.shape;
         if (shape.length !== 2)
           return ce.error('expected-matrix', op.toString());
+
+        // Exact path: when every entry is an exact integer/rational, compute
+        // the RREF with exact rational arithmetic (fraction pivoting) so the
+        // result is free of the float artifacts (…2.999…) that a numeric
+        // Gaussian elimination introduces. Floats-in → numeric path unchanged.
+        const rationalMatrix = tensorToRationalMatrix(op, shape[0], shape[1]);
+        if (rationalMatrix) {
+          const { matrix: reduced } = exactRationalRref(rationalMatrix);
+          return ce.expr([
+            'List',
+            ...reduced.map((row) =>
+              ce.expr(['List', ...row.map(([n, d]) => ce.number([n, d]))])
+            ),
+          ]);
+        }
 
         const matrix = tensorToNumericMatrix(op, shape[0], shape[1]);
         if (!matrix) return undefined;
@@ -2366,6 +2383,122 @@ function tensorToNumericMatrix(
   }
 
   return matrix;
+}
+
+/**
+ * An exact rational `[numerator, denominator]`, with `denominator > 0` and the
+ * fraction in lowest terms.
+ */
+type BigRat = [bigint, bigint];
+
+function ratGcd(a: bigint, b: bigint): bigint {
+  a = a < 0n ? -a : a;
+  b = b < 0n ? -b : b;
+  while (b) [a, b] = [b, a % b];
+  return a;
+}
+
+function ratNorm(n: bigint, d: bigint): BigRat {
+  if (d === 0n) return [0n, 1n]; // unreachable in RREF; defensive
+  if (d < 0n) {
+    n = -n;
+    d = -d;
+  }
+  if (n === 0n) return [0n, 1n];
+  const g = ratGcd(n, d);
+  return [n / g, d / g];
+}
+
+function ratSub([an, ad]: BigRat, [bn, bd]: BigRat): BigRat {
+  return ratNorm(an * bd - bn * ad, ad * bd);
+}
+function ratMul([an, ad]: BigRat, [bn, bd]: BigRat): BigRat {
+  return ratNorm(an * bn, ad * bd);
+}
+function ratDiv([an, ad]: BigRat, [bn, bd]: BigRat): BigRat {
+  return ratNorm(an * bd, ad * bn);
+}
+
+/**
+ * Extract an exact rational matrix from a rank-2 tensor, or `undefined` if any
+ * entry is not an exact integer/rational (e.g. an inexact float, a radical, a
+ * symbol). Used to gate the exact RREF path.
+ */
+function tensorToRationalMatrix(
+  tensor: Expression,
+  rows: number,
+  cols: number
+): BigRat[][] | undefined {
+  if (!isTensor(tensor)) return undefined;
+  const ce = tensor.engine;
+  const matrix: BigRat[][] = [];
+  for (let i = 0; i < rows; i++) {
+    const row: BigRat[] = [];
+    for (let j = 0; j < cols; j++) {
+      const value =
+        tensor.rank === 1
+          ? tensor.tensor.at(j + 1)
+          : tensor.tensor.at(i + 1, j + 1);
+      const boxed = ce.box(value as Expression);
+      if (!isNumber(boxed) || !boxed.isExact) return undefined;
+      const r = asRational(boxed);
+      if (r === undefined) return undefined;
+      const [n, d] = r;
+      row.push([typeof n === 'bigint' ? n : BigInt(n), typeof d === 'bigint' ? d : BigInt(d)]);
+    }
+    matrix.push(row);
+  }
+  return matrix;
+}
+
+/**
+ * Reduced row echelon form using exact rational arithmetic. Because the
+ * arithmetic is exact, pivot selection can simply take the first nonzero entry
+ * in the column (no numeric magnitude/tolerance considerations).
+ */
+function exactRationalRref(matrix: BigRat[][]): {
+  matrix: BigRat[][];
+  pivotCols: number[];
+} {
+  const rowCount = matrix.length;
+  const colCount = matrix[0]?.length ?? 0;
+  const out = matrix.map((row) => row.map((v) => [v[0], v[1]] as BigRat));
+  const pivotCols: number[] = [];
+
+  let pivotRow = 0;
+  for (let col = 0; col < colCount && pivotRow < rowCount; col++) {
+    // Find the first row at or below pivotRow with a nonzero entry in `col`.
+    let sel = -1;
+    for (let row = pivotRow; row < rowCount; row++) {
+      if (out[row][col][0] !== 0n) {
+        sel = row;
+        break;
+      }
+    }
+    if (sel === -1) continue;
+
+    if (sel !== pivotRow)
+      [out[pivotRow], out[sel]] = [out[sel], out[pivotRow]];
+
+    // Normalize the pivot row so the pivot entry is 1.
+    const pivot = out[pivotRow][col];
+    for (let j = col; j < colCount; j++)
+      out[pivotRow][j] = ratDiv(out[pivotRow][j], pivot);
+
+    // Eliminate the pivot column from every other row.
+    for (let row = 0; row < rowCount; row++) {
+      if (row === pivotRow) continue;
+      const factor = out[row][col];
+      if (factor[0] === 0n) continue;
+      for (let j = col; j < colCount; j++)
+        out[row][j] = ratSub(out[row][j], ratMul(factor, out[pivotRow][j]));
+    }
+
+    pivotCols.push(col);
+    pivotRow++;
+  }
+
+  return { matrix: out, pivotCols };
 }
 
 /**

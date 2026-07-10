@@ -95,8 +95,41 @@
   reduces to `2^n \cdot n!` and `(2n+1)!!` reduces to
   `\frac{(2n+1)!}{2^n \cdot n!}` when `n` is integer-typed.
 
+### Simplification and Exact Arithmetic (Wester round 1)
+
+- **Rational radicands extract perfect-power factors.**
+  `(1029/1000)^{1/3}` now canonicalizes to `\frac{7}{10}\sqrt[3]{3}`
+  (numerator and denominator factored independently), extending the existing
+  integer-radicand extraction. Also fixed an exactness leak where a
+  higher root of an exact literal could evaluate to a float times
+  `Root(1, n)` (e.g. Wester 28's `2^{1/3}` expressions now stay all-exact
+  under `evaluate()`).
+- **Pythagorean factoring in `simplify()`.**
+  `\cos^3 x + \cos x\sin^2 x - \cos x` now simplifies to `0`: a sum with a
+  shared factor times `\cos^2 u` and `\sin^2 u` combines
+  (`g\cos^2 u + g\sin^2 u \to g`), generalizing the bare
+  `\sin^2 x + \cos^2 x \to 1` case.
+- **Rational-function cancellation fires in `simplify()`** (Wester 14):
+  `\frac{x^2-4}{x^2+4x+4}` simplifies to `\frac{x-2}{x+2}`. The
+  cancellation machinery existed but its result was destroyed by a
+  subsequent expand-over-sum-denominator rewrite in the same pass; that
+  split is now suppressed (it never reduces complexity).
+- **`Binomial(n, k)` and `Pochhammer(a, k)` expand for small literal `k`**
+  with a symbolic first argument: `Binomial(n, 3)` evaluates to
+  `\frac{n(n-1)(n-2)}{6}`, `Pochhammer(a, 3)` to `a(a+1)(a+2)` (k ≤ 20).
+  `Pochhammer` is a newly registered operator (it previously had no
+  definition and was fully inert).
+- Six Wester CAS-review tests unskipped in `wester.test.ts` (the skip
+  ledger drops from 27 to 21).
+
 ### Linear Algebra
 
+- **`RowReduce` is exact on exact input.** Reduction of an integer or
+  rational matrix now uses exact bigint-fraction elimination — the RREF of
+  an integer matrix has exact `-1`/`3` pivots instead of
+  `-0.999…`/`2.999…` float artifacts. Float matrices use the numeric path
+  unchanged. (`NullSpace`/`MatrixRank`'s float elimination is tracked in
+  the ROADMAP for the same treatment.)
 - **Products of declared matrices type correctly.** A product with a
   matrix/vector/list-typed operand now carries the collection type instead
   of collapsing to a numeric type: with `X` and `Y` declared `matrix`, `2Y`,

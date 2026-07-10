@@ -481,13 +481,17 @@ export class BoxedFunction
       if (exp % 2 === 0 && coef.sgn() === -1)
         return [ce._numericValue(1), this];
 
-      // Extracting an inexact root would strand a symbolic remainder beside a
-      // float coefficient (e.g. Root(2x,3) → ∛2·Root(x,3)), contrary to the
-      // radical-preservation policy in Product.mulOp. Keep the whole radical
-      // symbolic in that case. A pure-number radicand (rest = 1) has nothing
-      // stranded, so its numeric root is still returned.
+      // Extracting an inexact root of an EXACT radicand leaks a float: it
+      // either strands a symbolic remainder beside a float coefficient
+      // (e.g. Root(2x,3) → ∛2·Root(x,3)) or, for a pure-number radicand,
+      // floats the whole exact constant (Root(2,3) → 1.2599·Root(1,3)),
+      // violating the exactness contract. Keep the whole radical symbolic
+      // whenever the coefficient we would extract is inexact but the radicand
+      // was exact. (A genuinely inexact radicand — a float — may still
+      // numericize, since there is no exactness to preserve.)
       const root = coef.root(exp);
-      if (!root.isExact && !rest.isSame(1)) return [ce._numericValue(1), this];
+      if (!root.isExact && (!rest.isSame(1) || coef.isExact))
+        return [ce._numericValue(1), this];
       return [root, ce.function('Root', [rest, expr.op2])];
     }
 

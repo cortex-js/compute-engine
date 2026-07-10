@@ -381,17 +381,21 @@ harness cannot ingest). Every gap below exists there as a `test.skip`
 asserting the **correct** answer — unskipping is the acceptance test, so no
 separate tracking is needed. Grouped by theme:
 
-- **Radical arithmetic & denesting** (the largest cluster). Denesting beyond
-  the single-level `√(a+b√c)` case: multi-term (`√(10+2√6+2√10+2√15) →
-  √2+√3+√5`), recursive (Wester 9, the Putnam radical), and cube-root
-  (`(90+34√7)^{1/3} → 3+√7`). Rationalizing denominators
-  (`(√3+√2)/(√3−√2) → 5+2√6`). Extracting perfect-power factors from a
-  **rational** radicand (`(1029/1000)^{1/3} → 7·3^{1/3}/10`; the
-  integer-radicand case `root6(997³) → √997` is done). Exact arithmetic over
-  `ℚ(2^{1/3})` (Wester 28, which also leaks a float residue out of
-  `evaluate()`).
-- **Symbolic combinatorics.** Expansion of `Binomial(n, k)` and
-  `Pochhammer(a, k)` for small integer `k` (→ polynomial / product forms).
+- **Radical arithmetic & denesting** (the largest cluster; rational-radicand
+  extraction `(1029/1000)^{1/3} → 7·3^{1/3}/10` and the Wester-28 float-leak
+  fix landed 2026-07-09). Denesting beyond the single-level `√(a+b√c)` case:
+  multi-term (`√(10+2√6+2√10+2√15) → √2+√3+√5`), recursive (Wester 9, the
+  Putnam radical), and cube-root (`(90+34√7)^{1/3} → 3+√7`). Rationalizing
+  denominators (`(√3+√2)/(√3−√2) → 5+2√6`) — home decided 2026-07-09: the
+  simplify subsystem, next to `denestSqrt` in `symbolic/simplify-power.ts`
+  (NOT `canonicalDivide`, which would make rationalized form canonical; and
+  not the exact numeric-value layer, which has no multi-radical sum
+  representation). Exact zero-recognition over `ℚ(2^{1/3})` (Wester 28):
+  diagnosed 2026-07-09 — `2^{1/3}·2^{2/3}` never combines because unit
+  fractions canonicalize to `Root(2,3)` while `2^{2/3}` stays
+  `Power(2, 2/3)`, so `Multiply`'s common-base exponent addition (which
+  works for symbols) misses numeric bases; needs the `Root`/`Power`
+  representations unified for same-base combination.
 - **Sum/Product closed forms.** Telescoping detection for sums
   (`Σ g(k+1)−g(k) → g(n+1)−g(0)`) and products (`Π (1+1/k) → n`); symbolic
   products (`Π k → n!`); closed forms for classic infinite series and
@@ -400,20 +404,20 @@ separate tracking is needed. Grouped by theme:
   `.N()` owns the numeric path — but `.N()` is a plain 10⁴-term truncation
   (off by ~1e-4 for `Σ 1/k²`) and wants tail acceleration
   (Richardson/Euler–Maclaurin) or a wider cap.
-- **Trigonometric simplification.** `cos³x + cos x·sin²x − cos x → 0` (factor
-  out `cos x`, then Pythagorean identity). The same missing rewrite blocks the
-  rank-1 detection of the trig matrix in the linear-algebra group.
+- **Trigonometric simplification (Pythagorean factoring LANDED
+  2026-07-09).** `cos³x + cos x·sin²x − cos x → 0` now simplifies (general
+  `g·cos²u + g·sin²u → g` factoring). The trig-matrix rank-1 detection is
+  NOT unblocked by it — it additionally needs `simplify` to reach inside a
+  symbolic `Determinant` (see the linear-algebra bullet).
 - **Complex/abs simplification.** Kahan's `|3−√7+i·√(6√7−15)| → 1` exactly
   (the modulus-squared is rational after expansion).
 - **Assumptions.** Transitivity closure over a cycle of `≥` (Wester 21:
   `x≥y, y≥z, z≥x ⊢ x=z`) and monotonicity of `x²` on ordered positive reals
   (Wester 22: `x>y>0 ⊢ 2x²>2y²`).
-- **Rational-function cancellation in `simplify()`.** Policy decided
-  (2026-07-05): common-factor cancellation belongs in `simplify()`, not
-  `evaluate()`. Remaining work: `simplify()` does not yet cancel Wester 14,
-  `(x²−4)/(x²+4x+4) → (x−2)/(x+2)`.
-- **Linear algebra.** Exact rational RREF (`RowReduce` currently leaves float
-  artifacts like `2.999…` on an integer matrix); `M·M⁻¹` not simplifying its
+- **Linear algebra.** `NullSpace`/`Kernel`, `MatrixRank`'s rank-via-nullity
+  path, and the eigenvector null-space solver still run float Gaussian
+  elimination on exact input (`RowReduce` itself got the exact rational
+  path 2026-07-09 — extend the same treatment); `M·M⁻¹` not simplifying its
   diagonal to `1` for a symbolic 2×2; elementwise `D` over matrix literals
   (the rotation-matrix second derivative currently yields a scalar `Add`);
   a matrix-valued `Add` fed unevaluated into `MatrixMultiply` is

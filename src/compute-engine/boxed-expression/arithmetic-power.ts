@@ -3,7 +3,7 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression } from '../global-types.js';
 import { SMALL_INTEGER, machineNthRoot } from '../numerics/numeric.js';
-import { rationalize } from '../numerics/rationals.js';
+import { rationalize, reduceRationalRoot } from '../numerics/rationals.js';
 import type { Rational } from '../numerics/types.js';
 
 import { asRational } from './numerics.js';
@@ -411,6 +411,45 @@ export function canonicalRoot(
       }
     }
     return ce._fn('Sqrt', [a], { canonical: a.isCanonical || a.isStructural });
+  }
+
+  // Exact NON-INTEGER rational radicand with an integer index ≥ 3: extract
+  // perfect `exp`-th power factors from the numerator and denominator
+  // independently, the general-index analog of the square-root reduction
+  // above (8/9 → (2/3)√2). e.g. (1029/1000)^(1/3) = (7/10)·3^(1/3) since
+  // 1029 = 3·7³ and 1000 = 10³. The denominator is not rationalized, so a
+  // radicand with no extractable factor (e.g. (1/2)^(1/3)) is left as a Root.
+  // Integer radicands are intentionally excluded here: like the higher
+  // integer roots (Root(8,3), root6(997³)) they stay symbolic at
+  // canonicalization and only reduce under evaluate(), a convention this
+  // preserves. Factoring effort is bounded by SMALL_INTEGER (and by
+  // canonicalInteger, which declines to factor magnitudes ≥ MAX_SAFE_INTEGER).
+  if (
+    exp !== undefined &&
+    Number.isInteger(exp) &&
+    exp >= 3 &&
+    isNumber(a) &&
+    a.isPositive === true &&
+    a.type.matches('rational') &&
+    !a.type.matches('integer')
+  ) {
+    const rad = asRational(a);
+    if (rad !== undefined) {
+      const [num, den] = rad;
+      const numAbs = Math.abs(Number(num));
+      const denAbs = Math.abs(Number(den));
+      if (numAbs < SMALL_INTEGER && denAbs < SMALL_INTEGER) {
+        const [factor, radicand] = reduceRationalRoot(rad, exp);
+        const factorExpr = ce.number(factor);
+        if (!factorExpr.isSame(1)) {
+          const radExpr = ce.number(radicand);
+          const rootExpr = radExpr.isSame(1)
+            ? ce.One
+            : ce._fn('Root', [radExpr, ce.number(exp)], { canonical: true });
+          return ce.function('Multiply', [factorExpr, rootExpr]);
+        }
+      }
+    }
   }
 
   // A negative root index denotes a reciprocal. Normalize to the

@@ -101,14 +101,14 @@ describe('Numbers', () => {
     expect(ce.expr(['GCD', 1776, 1554, 5698]).evaluate().json).toBe(74);
   });
 
-  test.skip(`10/7 (1029/1000)^(1/3) => 3^(1/3)`, () => {
-    // 1029 = 3·7³, so the 7³/10³ extracts from the cube root. CURRENT:
-    // stays as (10·root3(1029/1000))/7 — no rational-radicand extraction.
+  test(`10/7 (1029/1000)^(1/3) => 3^(1/3)`, () => {
+    // 1029 = 3·7³, so the 7³/10³ extracts from the cube root. (Canonical
+    // form of 3^(1/3) is Root(3, 3).)
     expect(
       ce
         .expr(['Multiply', ['Rational', 10, 7], ['Power', ['Rational', 1029, 1000], ['Rational', 1, 3]]])
         .simplify().json
-    ).toEqual(['Power', 3, ['Rational', 1, 3]]);
+    ).toEqual(['Root', 3, 3]);
   });
 
   test(`Wester 8: denest sqrt(2 sqrt(3) + 4) = 1 + sqrt(3)`, () => {
@@ -196,9 +196,8 @@ describe('Combinatorics', () => {
     expect(ce.expr(['Binomial', 8, 3]).evaluate().json).toBe(56);
   });
 
-  test.skip(`Binomial(n, 3) => n (n - 1) (n - 2) / 6`, () => {
-    // CURRENT: stays as Binomial(n, 3) — no polynomial expansion for a
-    // symbolic first argument with small integer second argument.
+  test(`Binomial(n, 3) => n (n - 1) (n - 2) / 6`, () => {
+    // Falling-factorial expansion for symbolic n, small literal integer k.
     expect(ce.expr(['Binomial', 'n', 3]).evaluate().json).toEqual([
       'Divide',
       ['Multiply', 'n', ['Subtract', 'n', 1], ['Subtract', 'n', 2]],
@@ -206,8 +205,8 @@ describe('Combinatorics', () => {
     ]);
   });
 
-  test.skip(`Pochhammer(a, 3) => a (a + 1) (a + 2)`, () => {
-    // CURRENT: stays as Pochhammer(a, 3) — no expansion for small integer n.
+  test(`Pochhammer(a, 3) => a (a + 1) (a + 2)`, () => {
+    // Rising-factorial expansion for symbolic a, small literal integer n.
     expect(ce.expr(['Pochhammer', 'a', 3]).evaluate().json).toEqual([
       'Multiply',
       'a',
@@ -287,9 +286,8 @@ describe('Zero equivalence', () => {
     ).toBe(0);
   });
 
-  test.skip(`cos^3 x + cos x sin^2 x - cos x = 0`, () => {
-    // cos x (cos²x + sin²x − 1) = 0. CURRENT: simplify does not factor out
-    // cos x to apply the Pythagorean identity; stays unsimplified.
+  test(`cos^3 x + cos x sin^2 x - cos x = 0`, () => {
+    // cos x (cos²x + sin²x − 1) = 0, via Pythagorean factoring in simplify.
     expect(
       ce.parse('\\cos^3{x} + \\cos{x}\\sin^2{x} - \\cos{x}').simplify().json
     ).toBe(0);
@@ -645,11 +643,9 @@ describe('Matrix theory', () => {
     ]);
   });
 
-  test.skip(`reduced row echelon form of the 4x5 Cullen matrix`, () => {
+  test(`reduced row echelon form of the 4x5 Cullen matrix`, () => {
     // => [[1,0,-1,0,2],[0,1,2,0,-1],[0,0,0,1,3],[0,0,0,0,0]] (Cullen, p. 43).
-    // CURRENT: RowReduce uses numeric Gaussian elimination, so the last two
-    // pivots carry float artifacts (…-0.9999999999999998, …2.9999999999999996)
-    // instead of the exact -1 and 3.
+    // Exact rational elimination for all-exact entries.
     expect(
       ce
         .expr([
@@ -1015,12 +1011,12 @@ describe('Series', () => {
 });
 
 describe('Algebra', () => {
-  test.skip(`Wester 14: (x^2 - 4)/(x^2 + 4x + 4) => (x - 2)/(x + 2)`, () => {
+  test(`Wester 14: (x^2 - 4)/(x^2 + 4x + 4) => (x - 2)/(x + 2)`, () => {
     // Policy decision 2026-07-05: common-factor cancellation belongs in
-    // simplify(), not evaluate(). CURRENT: simplify() does not cancel the
-    // common (x + 2) factor either — that is the remaining gap.
+    // simplify(), not evaluate(). (Canonical .json spells x − 2 as
+    // ['Add', 'x', -2].)
     expect(
       ce.parse('\\frac{x ^{2} - 4}{x ^{2} + 4 x + 4}').simplify().json
-    ).toEqual(['Divide', ['Subtract', 'x', 2], ['Add', 'x', 2]]);
+    ).toEqual(['Divide', ['Add', 'x', -2], ['Add', 'x', 2]]);
   });
 });

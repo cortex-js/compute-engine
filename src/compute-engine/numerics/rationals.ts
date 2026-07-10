@@ -316,3 +316,40 @@ export function reduceRationalSquareRoot(
   const [dFactor, dRoot] = canonicalInteger(den, 2);
   return [reducedRational([nFactor, dFactor * dRoot]), nRoot * dRoot];
 }
+
+/**
+ * Return `[factor, radicand]` (both rationals) such that
+ *   factor * root(radicand, exponent) = root(n, exponent)
+ *
+ * Perfect `exponent`-th power factors are extracted from the numerator and
+ * denominator of `n` independently, mirroring `reduceRationalSquareRoot` for
+ * the general index. The denominator is NOT rationalized: a non-extractable
+ * radicand comes back unchanged with `factor = 1`.
+ *
+ *   reduceRationalRoot(1029/1000, 3) -> [7/10, 3/1]   (1029 = 3·7³, 1000 = 10³)
+ *   reduceRationalRoot(1/2, 3)       -> [1/1, 1/2]     (nothing to extract)
+ *
+ * The factoring effort is bounded by `canonicalInteger`, which declines to
+ * factor magnitudes at/above `Number.MAX_SAFE_INTEGER`.
+ */
+export function reduceRationalRoot(
+  n: Rational,
+  exponent: number
+): [factor: Rational, radicand: Rational] {
+  if (isBigRational(n)) {
+    const [num, den] = n;
+    const [nFactor, nRoot] = bigCanonicalInteger(num, exponent);
+    const [dFactor, dRoot] = bigCanonicalInteger(den, exponent);
+    return [
+      reducedRational([nFactor, dFactor]),
+      reducedRational([nRoot, dRoot]),
+    ];
+  }
+  const [num, den] = n;
+  const [nFactor, nRoot] = canonicalInteger(num, exponent);
+  const [dFactor, dRoot] = canonicalInteger(den, exponent);
+  return [
+    reducedRational([nFactor, dFactor]),
+    reducedRational([nRoot, dRoot]),
+  ];
+}

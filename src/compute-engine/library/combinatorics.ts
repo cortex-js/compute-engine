@@ -16,6 +16,14 @@ import { checkDeadline } from '../../common/interruptible.js';
  */
 const MAX_EXACT_COMBINATORICS_DIGITS = 1_000_000;
 
+/**
+ * Largest literal integer second argument for which `Binomial`/`Pochhammer`
+ * with a *symbolic* first argument expand to their explicit product form
+ * (Wester B13). The expansion has `k` factors, so keep the cap small to avoid
+ * churning out large factored polynomials.
+ */
+const SYMBOLIC_EXPANSION_CAP = 20n;
+
 /** log10(φ): F(n) has ≈ n·log10(φ) decimal digits (φ = golden ratio). */
 const LOG10_PHI = Math.log10((1 + Math.sqrt(5)) / 2);
 
@@ -149,7 +157,80 @@ function evaluateBinomial(
     );
   }
 
+  // Symbolic first argument with a small nonnegative integer second argument:
+  // expand to the explicit falling-factorial form n(n-1)…(n-k+1)/k! (Wester
+  // B13). This is an exact closed form. It is built non-canonically so the
+  // factored structure survives serialization — canonicalizing it would fold
+  // the 1/k! into a leading rational coefficient and, on evaluation, distribute
+  // into an expanded polynomial.
+  if (
+    !isNumber(nExpr) &&
+    isNumber(kExpr) &&
+    kExpr.im === 0 &&
+    kExpr.isInteger
+  ) {
+    const k = toBigint(kExpr);
+    if (k !== null && k >= 0n && k <= SYMBOLIC_EXPANSION_CAP) {
+      const kn = Number(k);
+      if (kn === 0) return ce.One;
+      if (kn === 1) return nExpr;
+      const factors: Expression[] = [nExpr];
+      for (let i = 1; i < kn; i++)
+        factors.push(
+          ce.function('Subtract', [nExpr, ce.number(i)], { structural: true })
+        );
+      let fact = 1n;
+      for (let i = 2n; i <= k; i++) fact *= i;
+      return ce.function(
+        'Divide',
+        [
+          ce.function('Multiply', factors, { structural: true }),
+          ce.number(fact),
+        ],
+        { structural: true }
+      );
+    }
+  }
+
   return undefined;
+}
+
+/**
+ * Evaluate `Pochhammer(a, k)` — the rising factorial (a)_k = a(a+1)…(a+k-1)
+ * — for a small nonnegative integer `k` (Wester B13).
+ *
+ * - `k` not a small nonnegative integer literal: stay symbolic (inert).
+ * - Numeric `a`: fold to the numeric value (exact for integer/rational `a`,
+ *   float for an inexact `a`).
+ * - Symbolic `a`: return the explicit factored product, kept non-canonical so
+ *   the factored structure survives serialization.
+ */
+function evaluatePochhammer(
+  aExpr: Expression,
+  kExpr: Expression,
+  ce: Expression['engine']
+): Expression | undefined {
+  if (!isNumber(kExpr) || kExpr.im !== 0 || !kExpr.isInteger) return undefined;
+  const k = toBigint(kExpr);
+  if (k === null || k < 0n || k > SYMBOLIC_EXPANSION_CAP) return undefined;
+  const kn = Number(k);
+  if (kn === 0) return ce.One;
+  if (kn === 1) return aExpr;
+
+  // Numeric first argument: fold the product to a number (evaluate() respects
+  // the exact/float split — floats are otherwise excluded from canonical
+  // folding, so the product must be evaluated rather than merely constructed).
+  if (isNumber(aExpr) && aExpr.im === 0) {
+    const factors: Expression[] = [];
+    for (let i = 0; i < kn; i++) factors.push(aExpr.add(ce.number(i)));
+    return ce.function('Multiply', factors).evaluate();
+  }
+
+  // Symbolic first argument: explicit rising-factorial product, non-canonical.
+  const factors: Expression[] = [aExpr];
+  for (let i = 1; i < kn; i++)
+    factors.push(ce.function('Add', [aExpr, ce.number(i)], { structural: true }));
+  return ce.function('Multiply', factors, { structural: true });
 }
 
 export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
@@ -220,6 +301,13 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       type: () => 'finite_integer',
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
         evaluateBinomial(n, k, numericApproximation, ce),
+    },
+    Pochhammer: {
+      description:
+        'Rising factorial (Pochhammer symbol) (a)_k = a(a+1)…(a+k-1).',
+      wikidata: 'Q2367490',
+      signature: '(number, number) -> number',
+      evaluate: ([a, k], { engine: ce }) => evaluatePochhammer(a, k, ce),
     },
     CartesianProduct: {
       description: 'Return the Cartesian product of input sets.',

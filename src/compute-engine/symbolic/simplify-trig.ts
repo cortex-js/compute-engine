@@ -720,6 +720,74 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       }
     }
 
+    // -- g·sin²(u) + g·cos²(u) -> g, for an arbitrary common factor g.
+    //
+    // Generalizes the two special cases above: the shared factor may itself be
+    // a product (or a residual power of the same trig), so this reaches the
+    // factored form `cos³x + cos x·sin²x` = `cos x·(cos²x + sin²x)` -> `cos x`,
+    // which then cancels a trailing `−cos x` to 0. The rewrite `g·(cos²u +
+    // sin²u) = g` is unconditionally valid, so it is always sound; requiring the
+    // residual factor `g` to be structurally identical keeps it from firing on
+    // mismatched terms.
+    //
+    // View a term as `rest · f(u)²` (f ∈ {Sin, Cos}) by peeling one squared
+    // Sin/Cos factor. Enumerate every way this can be done for the term.
+    const squareViews = (
+      term: Expression
+    ): { fn: string; arg: Expression; rest: Expression }[] => {
+      const factors = isFunction(term, 'Multiply') ? term.ops : [term];
+      const views: { fn: string; arg: Expression; rest: Expression }[] = [];
+      for (let k = 0; k < factors.length; k++) {
+        const f = factors[k];
+        if (!isFunction(f, 'Power')) continue;
+        const base = f.op1;
+        const exp = f.op2;
+        if (
+          !isFunction(base) ||
+          (base.operator !== 'Sin' && base.operator !== 'Cos') ||
+          !base.op1
+        )
+          continue;
+        if (exp?.isInteger !== true) continue;
+        const n = exp.re;
+        if (typeof n !== 'number' || n < 2) continue;
+        // The factors left after removing f(u)², plus the residual power of the
+        // squared trig itself (f(u)^(n-2)).
+        const residualFactors = factors.filter((_, m) => m !== k);
+        if (n === 3) residualFactors.push(base);
+        else if (n > 3) residualFactors.push(ce._fn('Power', [base, ce.number(n - 2)]));
+        const rest =
+          residualFactors.length === 0
+            ? ce.One
+            : residualFactors.length === 1
+              ? residualFactors[0]
+              : ce._fn('Multiply', residualFactors);
+        views.push({ fn: base.operator, arg: base.op1, rest });
+      }
+      return views;
+    };
+
+    for (let i = 0; i < ops.length; i++) {
+      const vis = squareViews(ops[i]);
+      if (vis.length === 0) continue;
+      for (let j = 0; j < ops.length; j++) {
+        if (j === i) continue;
+        const vjs = squareViews(ops[j]);
+        if (vjs.length === 0) continue;
+        for (const vi of vis) {
+          const wantFn = vi.fn === 'Sin' ? 'Cos' : 'Sin';
+          const match = vjs.find(
+            (vj) =>
+              vj.fn === wantFn &&
+              vj.arg.isSame(vi.arg) &&
+              vj.rest.isSame(vi.rest)
+          );
+          if (match)
+            return combinePair(i, j, vi.rest, 'g*sin²(x) + g*cos²(x) -> g');
+        }
+      }
+    }
+
     // -- tan²(u) + 1 -> sec²(u); cot²(u) + 1 -> csc²(u) (needs a literal 1)
     const oneIndex = ops.findIndex((t) => t.isSame(1));
     if (oneIndex >= 0) {

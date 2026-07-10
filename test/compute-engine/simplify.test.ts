@@ -17,8 +17,8 @@ function checkSimplify(
     typeof expected === 'number'
       ? ce.expr(expected)
       : typeof expected === 'string'
-        ? ce.parse(expected)
-        : ce.expr(expected);
+      ? ce.parse(expected)
+      : ce.expr(expected);
 
   const result = a.simplify();
   if (!result.isSame(b)) {
@@ -257,8 +257,7 @@ describe('Canonicalization: Operations Involving 1', () => {
 });
 
 describe('Canonicalization: Ln', () => {
-  test('ln(9)/ln(3) = 2', () =>
-    checkSimplify('\\frac{\\ln(9)}{\\ln(3)}', 2));
+  test('ln(9)/ln(3) = 2', () => checkSimplify('\\frac{\\ln(9)}{\\ln(3)}', 2));
   test('ln(e^x/y)-x = -ln(y)', () =>
     checkSimplify('\\ln(e^x/y)-x', '-\\ln(y)'));
   test('ln(y/e^x) = ln(y)-x', () => checkSimplify('\\ln(y/e^x)', '\\ln(y)-x'));
@@ -466,7 +465,11 @@ describe('Rules: Powers and Roots', () => {
     checkSimplify('\\sqrt[4]{16b^{4}}', '2|b|'));
   test('sqrt(x^4) = x^2', () => checkSimplify('\\sqrt{x^4}', 'x^2'));
   test('root4(x^6) = |x|^{3/2}', () =>
-    checkSimplify('\\sqrt[4]{x^6}', ['Power', ['Abs', 'x'], ['Rational', 3, 2]]));
+    checkSimplify('\\sqrt[4]{x^6}', [
+      'Power',
+      ['Abs', 'x'],
+      ['Rational', 3, 2],
+    ]));
   test('sqrt(x^6) = |x|^3', () => checkSimplify('\\sqrt{x^6}', '|x|^3'));
   test('root4(x^4) = |x|', () => checkSimplify('\\sqrt[4]{x^4}', '|x|'));
 });
@@ -490,9 +493,15 @@ describe('Rules: Ln', () => {
   test('ln(x^sqrt(2)) = sqrt(2)*ln(x)', () =>
     checkSimplify('\\ln(x^\\sqrt{2})', '\\sqrt{2} \\ln(x)'));
   test('ln(x^{2/3})-4/3*ln(x) = -2/3*ln(x)', () =>
-    checkSimplify('\\ln(x^{\\frac{2}{3}})-\\frac{4}{3}\\ln(x)', '-\\frac{2}{3} \\ln(x)'));
+    checkSimplify(
+      '\\ln(x^{\\frac{2}{3}})-\\frac{4}{3}\\ln(x)',
+      '-\\frac{2}{3} \\ln(x)'
+    ));
   test('ln(pi^{2/3})-1/3*ln(pi) = 1/3*ln(pi)', () =>
-    checkSimplify('\\ln(\\pi^{\\frac{2}{3}})-\\frac{1}{3}\\ln(\\pi)', '\\frac{1}{3} \\ln(\\pi)'));
+    checkSimplify(
+      '\\ln(\\pi^{\\frac{2}{3}})-\\frac{1}{3}\\ln(\\pi)',
+      '\\frac{1}{3} \\ln(\\pi)'
+    ));
   test('ln(sqrt(x))-ln(x)/2 = 0', () =>
     checkSimplify('\\ln(\\sqrt{x})-\\ln(x)/2', 0));
   test('ln(3)+ln(1/3) = 0', () =>
@@ -505,7 +514,11 @@ describe('Rules: Ln', () => {
   test('e^{ln(x)-2x} = x*e^{-2x}', () =>
     checkSimplify('e^{\\ln(x)-2x}', 'x*e^{-2x}'));
   test('e^{ln(x)-y^2} = x*exp(-y^2)', () =>
-    checkSimplify('e^{\\ln(x)-y^2}', ['Multiply', 'x', ['Exp', ['Negate', ['Power', 'y', 2]]]]));
+    checkSimplify('e^{\\ln(x)-y^2}', [
+      'Multiply',
+      'x',
+      ['Exp', ['Negate', ['Power', 'y', 2]]],
+    ]));
   test('e^{ln(x)-2*x} = x*e^{-2*x}', () =>
     checkSimplify('e^{\\ln(x)-2*x}', 'x*e^{-2*x}'));
   test('e^ln(x) = x', () => checkSimplify('e^\\ln(x)', 'x'));
@@ -930,13 +943,9 @@ describe('POLYNOMIAL DIVISION REGRESSION', () => {
     ));
 
   test('Cancel common polynomial factors (x-1)', () =>
-    expect(simplify('\\frac{(x-1)(x+2)}{(x-1)(x+3)}')).toMatchInlineSnapshot(`
-      [
-        "Add",
-        ["Divide", "x", ["Add", "x", 3]],
-        ["Divide", 2, ["Add", "x", 3]]
-      ]
-    `));
+    expect(simplify('\\frac{(x-1)(x+2)}{(x-1)(x+3)}')).toMatchInlineSnapshot(
+      `["Divide", ["Add", "x", 2], ["Add", "x", 3]]`
+    ));
 });
 
 describe('RELATIONAL OPERATORS', () => {
@@ -1090,10 +1099,7 @@ describe('PYTHAGOREAN IDENTITIES', () => {
     checkSimplify('a \\sin(x)^2 + a \\cos(x)^2 + y', 'a + y'));
 
   test('two independent pairs collapse: sin²x+cos²x+sin²z+cos²z = 2', () =>
-    checkSimplify(
-      '\\sin(x)^2 + \\cos(x)^2 + \\sin(z)^2 + \\cos(z)^2',
-      2
-    ));
+    checkSimplify('\\sin(x)^2 + \\cos(x)^2 + \\sin(z)^2 + \\cos(z)^2', 2));
 });
 
 describe('NEGATIVE BASE POWER RULES', () => {
@@ -1187,9 +1193,7 @@ describe('SIGN-PRESERVING POWER FOLDING (x/√(x²) ≠ 1)', () => {
   // canonicalized to 1, losing sign(x) (wrong for x < 0).
 
   test('x/sqrt(x^2) does not collapse to 1', () => {
-    const e = ce
-      .expr(['Divide', 'x', ['Sqrt', ['Power', 'x', 2]]])
-      .simplify();
+    const e = ce.expr(['Divide', 'x', ['Sqrt', ['Power', 'x', 2]]]).simplify();
     expect(e.isSame(1)).toBe(false);
     // Sign-correct: at x = -2 the value is -1
     expect(e.subs({ x: -2 }).N().re).toBeCloseTo(-1, 10);
@@ -1198,7 +1202,11 @@ describe('SIGN-PRESERVING POWER FOLDING (x/√(x²) ≠ 1)', () => {
 
   test('x·(x²)^(-1/2) does not collapse to 1', () => {
     const e = ce
-      .expr(['Multiply', 'x', ['Power', ['Power', 'x', 2], ['Rational', -1, 2]]])
+      .expr([
+        'Multiply',
+        'x',
+        ['Power', ['Power', 'x', 2], ['Rational', -1, 2]],
+      ])
       .simplify();
     expect(e.isSame(1)).toBe(false);
   });
@@ -1272,9 +1280,7 @@ describe('PRINCIPAL-BRANCH FRACTIONAL POWERS (ROADMAP item 15)', () => {
     ));
 
   test('same-base fractional powers still combine: √x·√x = x', () => {
-    const e = ce
-      .expr(['Multiply', ['Sqrt', 'x'], ['Sqrt', 'x']])
-      .evaluate();
+    const e = ce.expr(['Multiply', ['Sqrt', 'x'], ['Sqrt', 'x']]).evaluate();
     expect(e.isSame(ce.symbol('x'))).toBe(true);
   });
 });
@@ -1563,7 +1569,10 @@ describe('Denest nested radicals: √(a+b√c) → √x+√y (ROADMAP B2)', () =
   test('√(3−2√2) = √2−1', () =>
     checkSimplify('\\sqrt{3-2\\sqrt2}', '\\sqrt2-1'));
   test('√(2+√3) = √2/2 + √6/2', () =>
-    checkSimplify('\\sqrt{2+\\sqrt3}', '\\frac{\\sqrt2}{2}+\\frac{\\sqrt6}{2}'));
+    checkSimplify(
+      '\\sqrt{2+\\sqrt3}',
+      '\\frac{\\sqrt2}{2}+\\frac{\\sqrt6}{2}'
+    ));
 
   // Non-denestable (a²−b²c not a perfect square, or radicand < a) — stay nested.
   test('√(1+√2) stays nested (a²−b²c < 0)', () =>
@@ -1618,15 +1627,15 @@ describe('Rules: ln(a)/ln(b) -> k uses exact bigint verification', () => {
 
 describe('Rules: sine angle-addition (default path)', () => {
   test('sin(x)cos(y)+cos(x)sin(y) = sin(x+y)', () =>
-    checkSimplify(
-      '\\sin(x)\\cos(y)+\\cos(x)\\sin(y)',
-      ['Sin', ['Add', 'x', 'y']]
-    ));
+    checkSimplify('\\sin(x)\\cos(y)+\\cos(x)\\sin(y)', [
+      'Sin',
+      ['Add', 'x', 'y'],
+    ]));
   test('sin(x)cos(y)-cos(x)sin(y) = sin(x-y)', () =>
-    checkSimplify(
-      '\\sin(x)\\cos(y)-\\cos(x)\\sin(y)',
-      ['Sin', ['Subtract', 'x', 'y']]
-    ));
+    checkSimplify('\\sin(x)\\cos(y)-\\cos(x)\\sin(y)', [
+      'Sin',
+      ['Subtract', 'x', 'y'],
+    ]));
   // Strictly gated: a non-unit coefficient or a third term must not fire.
   test('2sin(x)cos(y)+2cos(x)sin(y) stays a product sum (coeff != 1)', () => {
     const r = ce.parse('2\\sin(x)\\cos(y)+2\\cos(x)\\sin(y)').simplify();

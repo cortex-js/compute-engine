@@ -2397,4 +2397,69 @@ describe('RowReduce', () => {
       false
     );
   });
+
+  it('reduces the 4x5 Cullen matrix exactly (no float artifacts)', () => {
+    // Wester B13 (Cullen, p. 43). Exact integer entries must produce the
+    // exact RREF, free of the …2.999… / …-0.9999… float artifacts the numeric
+    // path introduces.
+    expect(
+      ce
+        .expr([
+          'RowReduce',
+          [
+            'List',
+            ['List', 1, 2, 3, 1, 3],
+            ['List', 3, 2, 1, 1, 7],
+            ['List', 0, 2, 4, 1, 1],
+            ['List', 1, 1, 1, 1, 4],
+          ],
+        ])
+        .evaluate().json
+    ).toEqual([
+      'List',
+      ['List', 1, 0, -1, 0, 2],
+      ['List', 0, 1, 2, 0, -1],
+      ['List', 0, 0, 0, 1, 3],
+      ['List', 0, 0, 0, 0, 0],
+    ]);
+  });
+
+  it('reduces a rational-entry matrix exactly', () => {
+    // [[1/2, 1/3], [2, 3/4]] is invertible, so its RREF is the identity.
+    expect(
+      ce
+        .expr([
+          'RowReduce',
+          [
+            'List',
+            ['List', ['Rational', 1, 2], ['Rational', 1, 3]],
+            ['List', 2, ['Rational', 3, 4]],
+          ],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['List', 1, 0], ['List', 0, 1]]);
+  });
+
+  it('preserves exact rational pivots in the reduced rows', () => {
+    // A rank-deficient rational RREF whose reduced entries are non-integer
+    // rationals — checks the exact fraction arithmetic end to end.
+    expect(
+      ce
+        .expr([
+          'RowReduce',
+          ['List', ['List', 2, 3], ['List', 4, 6]],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['List', 1, ['Rational', 3, 2]], ['List', 0, 0]]);
+  });
+
+  it('leaves the float path unchanged for inexact input', () => {
+    // Fractional floats route through the numeric Gaussian elimination path.
+    expect(
+      ce
+        .expr(['RowReduce', ['List', ['List', 1.5, 2.7], ['List', 3.1, 2.2]]])
+        .evaluate()
+        .toString()
+    ).toBe('[[1,0],[0,1]]');
+  });
 });
