@@ -1,32 +1,32 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
   "sliceEntries": 1650,
-  "emitted": 1400,
+  "emitted": 1403,
   "ledger": {
     "box-error": 1,
-    "compat-signature": 39,
+    "compat-signature": 30,
     "curated-exclude": 4,
     "duplicate-undirected": 14,
-    "guard-uncompilable": 64,
+    "guard-uncompilable": 69,
     "lhs-not-value-form": 94,
-    "no-fire": 26,
+    "no-fire": 27,
     "not-equation": 8
   },
   "byPurpose": {
     "expand": 112,
-    "simplify": 1280,
+    "simplify": 1283,
     "transform": 8
   },
   "byClass": {
-    "identity": 1072,
-    "specific-value": 328
+    "identity": 1074,
+    "specific-value": 329
   },
   "byTarget": {
-    "simplify": 1400
+    "simplify": 1403
   },
   "sampleKinds": {
     "numeric": 47,
-    "symbolic": 1353
+    "symbolic": 1356
   },
   "headBuckets": {
     "Multiply": 279,
@@ -59,6 +59,7 @@
     "CarlsonRC": 11,
     "Conjugate": 9,
     "Imaginary": 9,
+    "LambertW": 9,
     "Abs": 8,
     "Argument": 8,
     "ChebyshevU": 8,
@@ -72,7 +73,6 @@
     "SloaneA": 7,
     "Count": 6,
     "EllipticE": 6,
-    "LambertW": 6,
     "NPartition": 6,
     "Set": 6,
     "Tuple": 6,
@@ -127,7 +127,7 @@
     "WeierstrassSigma": 1,
     "WeierstrassZeta": 1
   },
-  "declaredShells": 98,
+  "declaredShells": 97,
   "injected": [
     "zeta-trivial-zeros"
   ],
@@ -158,12 +158,12 @@
     {
       "id": "039051",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "03aca0",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "0479f5",
@@ -282,18 +282,18 @@
     },
     {
       "id": "1fc63b",
-      "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "21f4f9",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "2251c6",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "2371b9",
@@ -303,7 +303,7 @@
     {
       "id": "24c9e9",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "2744d4",
@@ -383,12 +383,12 @@
     {
       "id": "34fafa",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "361f61",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "3d276b",
@@ -448,7 +448,7 @@
     {
       "id": "4a30f1",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "4af6db",
@@ -513,7 +513,7 @@
     {
       "id": "595f46",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "5aad5c",
@@ -523,12 +523,12 @@
     {
       "id": "5ce30b",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "5db5f2",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "5ec9c0",
@@ -597,13 +597,13 @@
     },
     {
       "id": "6d936e",
-      "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "6db9fc",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "6ed553",
@@ -622,8 +622,8 @@
     },
     {
       "id": "72b6ca",
-      "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "72cef9",
@@ -668,7 +668,7 @@
     {
       "id": "78c19c",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "791c44",
@@ -703,7 +703,7 @@
     {
       "id": "807c7d",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "818008",
@@ -738,7 +738,7 @@
     {
       "id": "84196a",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "859856",
@@ -757,8 +757,8 @@
     },
     {
       "id": "88168b",
-      "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "8d304b",
@@ -767,8 +767,8 @@
     },
     {
       "id": "8d486c",
-      "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "8ee7c9",
@@ -793,7 +793,7 @@
     {
       "id": "90b26f",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "90b367",
@@ -818,7 +818,7 @@
     {
       "id": "921d61",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "927e6e",
@@ -888,7 +888,7 @@
     {
       "id": "9ee737",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "a020e9",
@@ -897,8 +897,8 @@
     },
     {
       "id": "a172c7",
-      "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
     },
     {
       "id": "a249f6",
@@ -923,7 +923,7 @@
     {
       "id": "a62320",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "a637cd",
@@ -973,7 +973,7 @@
     {
       "id": "b31fd2",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "b788a1",
@@ -993,7 +993,7 @@
     {
       "id": "babd3c",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "bad5d9",
@@ -1013,12 +1013,12 @@
     {
       "id": "bb88c8",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "bba4ec",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "bcdfc6",
@@ -1063,7 +1063,7 @@
     {
       "id": "c687d6",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "c77f9a",
@@ -1101,11 +1101,6 @@
       "detail": "symbol"
     },
     {
-      "id": "d09380",
-      "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
-    },
-    {
       "id": "d17d0b",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -1123,7 +1118,7 @@
     {
       "id": "d2f9fb",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "d316bc",
@@ -1153,7 +1148,7 @@
     {
       "id": "d6fbc8",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "d7962e",
@@ -1198,7 +1193,7 @@
     {
       "id": "ddc7e1",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "df52fc",
@@ -1248,7 +1243,7 @@
     {
       "id": "e83059",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "e85723",
@@ -1276,11 +1271,6 @@
       "detail": "unsupported conjunct \"Or\""
     },
     {
-      "id": "ed7dac",
-      "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
-    },
-    {
       "id": "ee86fb",
       "reason": "lhs-not-value-form",
       "detail": "Set"
@@ -1303,12 +1293,7 @@
     {
       "id": "f1e02b",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
-    },
-    {
-      "id": "f372e9",
-      "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "f4750b",
@@ -1363,7 +1348,7 @@
     {
       "id": "fa0292",
       "reason": "compat-signature",
-      "detail": "2-arg LambertW/Digamma"
+      "detail": "2-arg Digamma"
     },
     {
       "id": "faa118",

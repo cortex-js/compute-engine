@@ -80,7 +80,7 @@ describe('loadIdentities (full artifact)', () => {
       (r) => r.target === 'simplify'
     ).length;
     expect(report.loaded).toBe(simplifyCount);
-    expect(report.loaded).toBe(1400);
+    expect(report.loaded).toBe(1403);
     // The only default-load skips are the solve templates (solve-disabled).
     expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
       true
@@ -98,14 +98,14 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1400,
+      simplify: 1403,
       solve: 0,
       harmonization: 0,
     });
     expect(report.byPurpose).toEqual({
       // 8 Digamma specific-value rules are tagged 'transform' (cost-gate
       // exempt) so they fire in simplify() — SYM P2-25.
-      simplify: 1280,
+      simplify: 1283,
       transform: 8,
       expand: 112,
     });
@@ -312,6 +312,25 @@ describe('guard controls', () => {
         ce.expr(['RiemannZetaZero', -3])
       )
     ).toBe(true);
+  });
+
+  it('positive: W₋₁(x·eˣ) → x for a real symbol ≤ −1  [fungrim:ed7dac]', () => {
+    // The 2-arg branch form ["LambertW", x·eˣ, −1] simplifies to x only where
+    // W₋₁ inverts x·eˣ, i.e. x ≤ −1 (guards: x real, x ≤ −1).
+    ce.declare('w', 'real');
+    ce.assume(ce.expr(['LessEqual', 'w', -1]));
+    expect(
+      ce
+        .expr(['LambertW', ['Multiply', 'w', ['Exp', 'w']], -1])
+        .simplify()
+        .isSame(ce.expr('w'))
+    ).toBe(true);
+  });
+
+  it('negative: W₋₁(x·eˣ) does NOT rewrite for a real symbol without the ≤ −1 guard', () => {
+    ce.declare('u', 'real');
+    const expr = ce.expr(['LambertW', ['Multiply', 'u', ['Exp', 'u']], -1]);
+    expect(expr.simplify().operator).toBe('LambertW');
   });
 
   it('negative: Sin(πx) does NOT rewrite for a real (non-integer-typed) symbol', () => {
@@ -674,9 +693,10 @@ describe('solve routing', () => {
     // apply-solve-templates.ts. They carry no domain guards (validateRoots is
     // the safety net) and are skipped on a default load.
     const solveRules = FUNGRIM_CORE.rules.filter((r) => r.target === 'solve');
-    // 5 derived seed templates + 4 curated LambertW templates (linear-exp and
-    // exp-bare, each with a W₋₁ branch companion).
-    expect(solveRules.length).toBeGreaterThanOrEqual(9);
+    // 6 derived seed templates (incl. the ed7dac W₋₁ branch seed) + 4 curated
+    // LambertW templates (linear-exp and exp-bare, each with a W₋₁ branch
+    // companion).
+    expect(solveRules.length).toBeGreaterThanOrEqual(10);
     for (const r of solveRules) {
       // Derived seed templates carry a 6-hex id; curated LambertW templates
       // (curation-overrides.json `solveTemplates`) carry a kebab-case id.
@@ -725,6 +745,18 @@ describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
     const r = solved('x e^x = 3');
     expect(r.length).toBe(1);
     expect(r[0]).toBeCloseTo(1.0499088949640398, 10); // W(3)
+  });
+
+  it('LambertW: x·eˣ = −0.1 → BOTH real roots via W₀ and W₋₁  [fungrim:ed7dac:solve]', () => {
+    // For −1/e < c < 0 the equation x·eˣ = c has two real roots: the principal
+    // branch W₀(c) (from fungrim:8654a3:solve) and the second branch W₋₁(c)
+    // (from the ed7dac W₋₁ seed unblocked this round). A rational RHS (−1/10)
+    // triggers clearDenominators, which rescales the eˣ term out of the
+    // unscaled ed7dac shape, so probe with the decimal value.
+    const r = solved('x e^x = -0.1');
+    expect(r.some((v) => Math.abs(v - -0.11183255915896297) < 1e-9)).toBe(true); // W₀(−0.1)
+    expect(r.some((v) => Math.abs(v - -3.577152063957297) < 1e-9)).toBe(true); // W₋₁(−0.1)
+    for (const v of r) expect(v * Math.exp(v)).toBeCloseTo(-0.1, 9);
   });
 
   it('Arctan: arctan(x) = 0.5 → tan(0.5)  [fungrim:1f026d:solve]', () => {

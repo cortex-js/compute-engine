@@ -691,14 +691,14 @@ describe('compileEntries: curation overrides', () => {
 // ---------------------------------------------------------------------------
 
 describe('compileEntries: compat-signature', () => {
-  it('statically rejects 2-arg LambertW/Digamma (widened COMPAT signatures)', () => {
+  it('statically rejects 2-arg Digamma (widened COMPAT polygamma-order signature)', () => {
     const result = compileEntries(
       [
         entry(
           'cmp001',
-          ['Equal', ['LambertW', ['Multiply', 'x', ['Exp', 'x']], -1], 'x'],
-          ['x'],
-          ['Element', 'x', 'RealNumbers']
+          ['Equal', ['Digamma', 'z', 2], ['Digamma', 'z', 2]],
+          ['z'],
+          ['Element', 'z', 'RealNumbers']
         ),
       ],
       EMPTY_DECLS
@@ -708,6 +708,26 @@ describe('compileEntries: compat-signature', () => {
       id: 'cmp001',
       reason: 'compat-signature',
     });
+  });
+
+  it('does NOT statically reject 2-arg LambertW (CE gained a genuine branch form)', () => {
+    // ["LambertW", z, k] is now a real 2-arg operator (branch k last), so these
+    // entries box and go through the standard self-test instead of the static
+    // compat-signature gate — cf. ed7dac in the shipped artifact.
+    const result = compileEntries(
+      [
+        entry(
+          'cmp002',
+          ['Equal', ['LambertW', ['Multiply', 'x', ['Exp', 'x']], -1], 'x'],
+          ['x'],
+          ['LessEqual', 'x', -1]
+        ),
+      ],
+      EMPTY_DECLS
+    );
+    // Whatever its disposition, it is NOT the static compat-signature skip.
+    for (const s of result.skips)
+      expect(s.reason).not.toBe('compat-signature');
   });
 });
 

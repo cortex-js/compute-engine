@@ -175,8 +175,11 @@ export function deriveSolveTemplate(
 // ---------------------------------------------------------------------------
 
 /** Probe values for the solve self-test (positive bias: many inner functions
- *  — `Ln`, `Sqrt` — are real only for positive arguments). */
-const SOLVE_SELFTEST_PROBES = [0.5, 1.5, 2.5, 0.7, 3.25];
+ *  — `Ln`, `Sqrt` — are real only for positive arguments). The negative
+ *  probes exercise templates that only validate for x0 < −1, e.g. the W₋₁
+ *  branch seed ed7dac (`A(x0) = x0·e^{x0} ∈ (−1/e, 0)` where W₋₁ inverts);
+ *  probes whose image is non-real for a given seed are skipped structurally. */
+const SOLVE_SELFTEST_PROBES = [0.5, 1.5, 2.5, 0.7, 3.25, -2, -1.5, -3.25];
 
 /** The no-capture filter (mirrors `solve.ts`'s `filter` and the loader copy):
  *  no wildcard other than `_x` may capture `_x`. */

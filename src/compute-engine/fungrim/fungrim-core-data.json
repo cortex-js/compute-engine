@@ -20,29 +20,29 @@
     "entries": 1650
   },
   "counts": {
-    "rules": 1409,
+    "rules": 1413,
     "byPurpose": {
       "expand": 112,
-      "simplify": 1289,
+      "simplify": 1293,
       "transform": 8
     },
     "byClass": {
-      "identity": 1081,
-      "specific-value": 328
+      "identity": 1084,
+      "specific-value": 329
     },
     "byTarget": {
-      "simplify": 1400,
-      "solve": 9
+      "simplify": 1403,
+      "solve": 10
     }
   },
   "ledger": {
     "box-error": 1,
-    "compat-signature": 39,
+    "compat-signature": 30,
     "curated-exclude": 4,
     "duplicate-undirected": 14,
-    "guard-uncompilable": 64,
+    "guard-uncompilable": 69,
     "lhs-not-value-form": 94,
-    "no-fire": 26,
+    "no-fire": 27,
     "not-equation": 8
   }
 },
@@ -1300,6 +1300,7 @@
 {"id":"fungrim:cfb999","match":["Add",["Ln","_z"],["Integrate",["Function",["Block",["Multiply",["Add",["Divide",-1,["Add",["Negate",["Power","ExponentialE",["Negate","t"]]],1]],["Divide",1,"t"]],["Power","ExponentialE",["Negate",["Multiply","_z","t"]]]]],"t"],["Limits","t",0,"PositiveInfinity"]]],"replace":["Digamma","_z"],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"part-cmp","wc":"_z","part":"re","op":"gt","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Digamma","Exp","Integrate","Ln"],"topics":["digamma_function"]},
 {"id":"fungrim:cfc5c3","match":["Negate",["Multiply","ImaginaryUnit",["Sinh",["Multiply","ImaginaryUnit","_z"]]]],"replace":["Sin","_z"],"guards":[{"k":"type","wc":"_z","t":"complex"}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Sin","Sinh"],"topics":["sine"]},
 {"id":"fungrim:d0505f","match":["Add",["Multiply","ImaginaryUnit",["Sin",["Multiply","_n","_z"]]],["Cos",["Multiply","_n","_z"]]],"replace":["Power",["Add",["Cos","_z"],["Multiply","ImaginaryUnit",["Sin","_z"]]],"_n"],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"type","wc":"_n","t":"integer"}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Cos","Sin"],"topics":["sine"]},
+{"id":"fungrim:d09380","match":["LambertW",["Negate",["Divide",1,"ExponentialE"]],-1],"replace":-1,"guards":[],"purpose":"simplify","target":"simplify","class":"specific-value","heads":["LambertW"],"topics":["lambertw"]},
 {"id":"fungrim:d0a331","match":["Sqrt",["Divide",1,"_z"]],"replace":["Divide",1,["Sqrt","_z"]],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"eval","pred":["NotElement","_z",["Interval",["Open","NegativeInfinity"],0]]}],"purpose":"expand","target":"simplify","class":"identity","heads":[],"topics":["sqrt"]},
 {"id":"fungrim:d0c9ff","match":["Multiply",["Rational",1,2],"Pi",["CarlsonHypergeometricR",["Rational",-1,2],["List",["Rational",1,2],["Rational",1,2]],["List","_y","_z"]]],"replace":["CarlsonRF",0,"_y","_z"],"guards":[{"k":"type","wc":"_y","t":"complex"},{"k":"eval","pred":["NotElement","_y",["Interval",["Open","NegativeInfinity"],0]]},{"k":"type","wc":"_z","t":"complex"},{"k":"eval","pred":["NotElement","_z",["Interval",["Open","NegativeInfinity"],0]]}],"purpose":"simplify","target":"simplify","class":"identity","heads":["CarlsonHypergeometricR","CarlsonRF"],"topics":["carlson_elliptic"]},
 {"id":"fungrim:d0d03b","match":["Apply",["Derivative",["Function",["Block",["HurwitzZeta","_s","_a"]],"_s"],"_r"],"_s"],"replace":["HurwitzZeta","_s","_a","_r"],"guards":[{"k":"type","wc":"_s","t":"complex"},{"k":"ne","lhs":"_s","rhs":1},{"k":"type","wc":"_a","t":"complex"},{"k":"part-cmp","wc":"_a","part":"re","op":"gt","bound":0},{"k":"type","wc":"_r","t":"integer"},{"k":"cmp","wc":"_r","op":"ge","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Derivative","HurwitzZeta"],"topics":["hurwitz_zeta"]},
@@ -1455,6 +1456,8 @@
 {"id":"fungrim:ed3ff9","match":["JacobiTheta",3,["Multiply",2,"_z"],"_tau"],"replace":["Divide",["Add",["Power",["JacobiTheta",2,"_z","_tau"],4],["Power",["JacobiTheta",4,"_z","_tau"],4]],["Power",["JacobiTheta",3,0,"_tau"],3]],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"part-cmp","wc":"_tau","part":"im","op":"gt","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["JacobiTheta"],"topics":["jacobi_theta"]},
 {"id":"fungrim:ed5222","match":["Multiply",["Rational",1,2],["Add",["ChebyshevT",["Add","_m","_n"],"_x"],["ChebyshevT",["Abs",["Add","_m",["Negate","_n"]]],"_x"]]],"replace":["Multiply",["ChebyshevT","_m","_x"],["ChebyshevT","_n","_x"]],"guards":[{"k":"type","wc":"_m","t":"integer"},{"k":"type","wc":"_n","t":"integer"},{"k":"type","wc":"_x","t":"complex"}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Abs","ChebyshevT"],"topics":["chebyshev"]},
 {"id":"fungrim:ed65c8","match":["Set","chi",["Element","chi",["DirichletGroup","_q"],["ForAll",["Element","d",["Range",1,["Subtract","_q",1]]],["Implies",["Divides","d","_q"],["Exists",["Element","a",["Range",0,["Subtract","_q",1]]],["And",["CongruentMod","a",1,"d"],["Equal",["GCD","a","_q"],1],["NotEqual",["chi","a"],1]]]]]]],"replace":["PrimitiveDirichletCharacters","_q"],"guards":[{"k":"type","wc":"_q","t":"integer"},{"k":"cmp","wc":"_q","op":"gt","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["CongruentMod","DirichletGroup","Divides","GCD","PrimitiveDirichletCharacters"],"topics":["dirichlet"]},
+{"id":"fungrim:ed7dac","match":["LambertW",["Multiply","_x",["Power","ExponentialE","_x"]],-1],"replace":"_x","guards":[{"k":"type","wc":"_x","t":"real"},{"k":"cmp","wc":"_x","op":"le","bound":-1}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Exp","LambertW"],"topics":["lambertw"]},
+{"id":"fungrim:ed7dac:solve","match":["Add","__b",["Multiply","_x",["Power","ExponentialE","_x"]]],"replace":["LambertW",["Negate","__b"],-1],"guards":[],"purpose":"simplify","target":"solve","class":"identity","heads":["Exp","LambertW"],"topics":["lambertw"]},
 {"id":"fungrim:ed8ba7","match":["Multiply",["JacobiTheta",2,["Multiply","_tau","_z"],"_tau"],["Power","ExponentialE",["Multiply","ImaginaryUnit","Pi","_tau",["Power","_z",2]]],["Sqrt",["Divide","_tau","ImaginaryUnit"]]],"replace":["JacobiTheta",4,"_z",["Divide",-1,"_tau"]],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"part-cmp","wc":"_tau","part":"im","op":"gt","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Exp","JacobiTheta"],"topics":["jacobi_theta"]},
 {"id":"fungrim:eda0f3","match":["HurwitzZeta",3,["Rational",1,4]],"replace":["Add",["Multiply",28,["Zeta",3]],["Power","Pi",3]],"guards":[],"purpose":"simplify","target":"simplify","class":"specific-value","heads":["HurwitzZeta","Zeta"],"topics":["hurwitz_zeta"]},
 {"id":"fungrim:eda57d","match":["CarlsonRD",2,2,1],"replace":["Subtract",3,["Divide",["Multiply",3,"Pi"],4]],"guards":[],"purpose":"simplify","target":"simplify","class":"specific-value","heads":["CarlsonRD"],"topics":["carlson_elliptic"]},
@@ -1487,6 +1490,7 @@
 {"id":"fungrim:f2e28a","match":["Multiply","Pi",["JacobiTheta",2,0,"_tau"],["JacobiTheta",3,0,"_tau"],["JacobiTheta",4,0,"_tau"]],"replace":["JacobiTheta",1,0,"_tau",1],"guards":[{"k":"part-cmp","wc":"_tau","part":"im","op":"gt","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["JacobiTheta"],"topics":["jacobi_theta"]},
 {"id":"fungrim:f303c9","match":["Add",["Multiply",["Add",["Negate",["Power","_n",2]],["Power","_r",2],["Multiply",4,"_r"],4],["Apply",["Derivative",["Function",["Block",["BesselI","_n","z"]],"z"],["Add","_r",2]],0]],["Negate",["Multiply",["Add","_r",1],["Add","_r",2],["Apply",["Derivative",["Function",["Block",["BesselI","_n","z"]],"z"],"_r"],0]]]],"replace":0,"guards":[{"k":"type","wc":"_n","t":"integer"},{"k":"type","wc":"_r","t":"integer"},{"k":"cmp","wc":"_r","op":"ge","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["BesselI","Derivative"],"topics":["bessel"]},
 {"id":"fungrim:f35a37","match":["Add",["Multiply",2,["Floor",["Add",["Divide",["Real","_phi"],"Pi"],["Rational",1,2]]]],["Multiply",["Sin","_phi"],["Power",-1,["Floor",["Add",["Divide",["Real","_phi"],"Pi"],["Rational",1,2]]]]]],"replace":["IncompleteEllipticE","_phi",1],"guards":[{"k":"type","wc":"_phi","t":"complex"}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Floor","IncompleteEllipticE","Real","Sin"],"topics":["legendre_elliptic"]},
+{"id":"fungrim:f372e9","match":["LambertW",0,"_k"],"replace":"NegativeInfinity","guards":[{"k":"type","wc":"_k","t":"integer"},{"k":"ne","lhs":"_k","rhs":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["LambertW"],"topics":["lambertw"]},
 {"id":"fungrim:f3b870","match":["Add",["HurwitzZeta",0,"_z",1],["Multiply",["Rational",1,2],["Ln",["Multiply",2,"Pi"]]]],"replace":["GammaLn","_z"],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"eval","pred":["NotElement","_z","NonPositiveIntegers"]}],"purpose":"simplify","target":"simplify","class":"identity","heads":["GammaLn","HurwitzZeta","Ln"],"topics":["hurwitz_zeta"]},
 {"id":"fungrim:f3e75c","match":["Add",["Multiply",2,["Sum",["Multiply",["Cos",["Multiply",2,"Pi","_z","n"]],["Power","ExponentialE",["Multiply","ImaginaryUnit","Pi","_tau",["Power","n",2]]]],["Limits","n",1,"PositiveInfinity"]]],1],"replace":["JacobiTheta",3,"_z","_tau"],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"part-cmp","wc":"_tau","part":"im","op":"gt","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Cos","Exp","JacobiTheta","Sum"],"topics":["jacobi_theta"]},
 {"id":"fungrim:f4554f","match":["Add",["Multiply",["JacobiTheta",3,["Add","_w","_z"],["Multiply",2,"_tau"]],["JacobiTheta",3,["Add",["Negate","_w"],"_z"],["Multiply",2,"_tau"]]],["Multiply",["JacobiTheta",2,["Add","_w","_z"],["Multiply",2,"_tau"]],["JacobiTheta",2,["Add",["Negate","_w"],"_z"],["Multiply",2,"_tau"]]]],"replace":["Multiply",["JacobiTheta",3,"_z","_tau"],["JacobiTheta",3,"_w","_tau"]],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"type","wc":"_w","t":"complex"},{"k":"part-cmp","wc":"_tau","part":"im","op":"gt","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["JacobiTheta"],"topics":["jacobi_theta"]},
