@@ -217,8 +217,7 @@ function rationalizeRadicalDenominator(x: Expression): Expression | undefined {
   // single exact number (e.g. √3·√2 → √6); ce.function('Add', …) then folds
   // like radicals (3 + √6 + √6 + 2 → 5 + 2√6).
   const products: Expression[] = [];
-  for (const a of numTerms)
-    for (const b of conjTerms) products.push(a.mul(b));
+  for (const a of numTerms) for (const b of conjTerms) products.push(a.mul(b));
   const newNum = ce.function('Add', products);
 
   const result = ce.function('Divide', [newNum, newDenom]);
@@ -226,7 +225,12 @@ function rationalizeRadicalDenominator(x: Expression): Expression | undefined {
   // Numeric safety gate: the rationalized form must match the original.
   const xN = x.N().re;
   const rN = result.N().re;
-  if (xN !== null && rN !== null && Number.isFinite(xN) && Number.isFinite(rN)) {
+  if (
+    xN !== null &&
+    rN !== null &&
+    Number.isFinite(xN) &&
+    Number.isFinite(rN)
+  ) {
     if (Math.abs(xN - rN) > 1e-9 * (1 + Math.abs(xN))) return undefined;
   }
 

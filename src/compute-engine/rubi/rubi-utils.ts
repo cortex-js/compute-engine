@@ -118,8 +118,7 @@ export function build(json: Json, ctx: Ctx): Expression {
       // substituting ctx.x for those compound middles rewrites `x` itself and
       // corrupts the antiderivative (spurious powers in the log argument).
       const target = build(args[1], ctx);
-      if (target.symbol === ctx.x)
-        return u.subs({ [ctx.x]: v }).evaluate();
+      if (target.symbol === ctx.x) return u.subs({ [ctx.x]: v }).evaluate();
       return replaceSubexpr(u, target, v).evaluate();
     }
     case 'Rational':
@@ -1043,15 +1042,12 @@ const PRED_FNS: Record<string, PredFn> = {
     const list = args[0];
     if (!Array.isArray(list) || list[0] !== 'List') return false;
     const elem = build(args[1], ctx);
-    return (list as Json[])
-      .slice(1)
-      .some((e) => build(e, ctx).isSame(elem));
+    return (list as Json[]).slice(1).some((e) => build(e, ctx).isSame(elem));
   },
   // IntegralFreeQ[u] := u contains no inert integral node
   // (IntegrationUtilityFunctions.m: FreeQ of Int/Integral/Unintegrable/
   // CannotIntegrate). Gates a Chapter-3 rule on its IntHide result closing.
-  IntegralFreeQ: (args, ctx) =>
-    !build(args[0], ctx).has('Integrate'),
+  IntegralFreeQ: (args, ctx) => !build(args[0], ctx).has('Integrate'),
   AtomQ: (args, ctx) => !build(args[0], ctx).ops,
   OddQ: (args, ctx) => {
     const r = realNum(build(args[0], ctx).evaluate());
@@ -4294,10 +4290,16 @@ const VALUE_FNS: Record<string, ValueFn> = {
   Part: (args, ctx) => {
     const list = build(args[0], ctx);
     const n = realNum(build(args[1], ctx));
-    if (list.operator !== 'List' || !list.ops || n === null || !Number.isInteger(n))
+    if (
+      list.operator !== 'List' ||
+      !list.ops ||
+      n === null ||
+      !Number.isInteger(n)
+    )
       return fail('Part: not a list / bad index');
     const idx = n < 0 ? list.ops.length + n : n - 1;
-    if (idx < 0 || idx >= list.ops.length) return fail('Part: index out of range');
+    if (idx < 0 || idx >= list.ops.length)
+      return fail('Part: index out of range');
     return list.ops[idx];
   },
 
@@ -4825,8 +4827,7 @@ export function expandRationalOverComplexLinears(
     out.push(f);
   }
   if (!hasQuadratic) return null; // no quadratic to split — leave to linear path
-  const linearized =
-    out.length === 1 ? out[0] : ce.function('Multiply', out);
+  const linearized = out.length === 1 ? out[0] : ce.function('Multiply', out);
   let expanded: Expression;
   try {
     const ctx: Ctx = { ce, env: new Map(), x, hooks: { int: () => null } };
@@ -4910,7 +4911,10 @@ function factorLinearsY(
   while (d > 0 && zeroQ(coeffs[d])) d--;
   if (d === 0) return { lead: coeffs[0], roots: [] };
   if (d === 1)
-    return { lead: coeffs[1], roots: [coeffs[0].neg().div(coeffs[1]).evaluate()] };
+    return {
+      lead: coeffs[1],
+      roots: [coeffs[0].neg().div(coeffs[1]).evaluate()],
+    };
   if (d === 2) {
     const [c0, c1, c2] = coeffs;
     // Normalize to monic (b₁ = c₁/c₂, b₀ = c₀/c₂) BEFORE the quadratic formula:
@@ -4937,10 +4941,7 @@ function factorLinearsY(
 /** The single shared LINEAR trig argument `w` of every inert trig head in the
  *  (deactivated) expression, or null if the heads disagree, some argument is
  *  non-linear in `x`, or no trig head appears (mixed-angle / nonlinear decline). */
-function sharedLinearTrigArg(
-  u: Expression,
-  x: string
-): Expression | null {
+function sharedLinearTrigArg(u: Expression, x: string): Expression | null {
   let w: Expression | null = null;
   let ok = true;
   const walk = (e: Expression): void => {
@@ -4988,8 +4989,10 @@ function splitTrigTerm(
         if (head !== null) return null; // two trig factors in one term
         if (!f.ops[0].isSame(w)) return null;
         head = f.operator;
-      } else if (containsInertTrig(f)) return null; // trig power / nested trig
-      else if (f.has(x)) return null; // x-dependent coefficient
+      } else if (containsInertTrig(f))
+        return null; // trig power / nested trig
+      else if (f.has(x))
+        return null; // x-dependent coefficient
       else rest.push(f);
     }
     if (head === null) return null;
@@ -5035,7 +5038,10 @@ function trigAtomNumDen(
     const nd = trigHeadYForm(ce, head, y);
     if (nd === null) return null;
     const [N, D] = nd;
-    return { num: ce.function('Add', [constSum.mul(D), coefSum.mul(N)]), den: D };
+    return {
+      num: ce.function('Add', [constSum.mul(D), coefSum.mul(N)]),
+      den: D,
+    };
   }
   return null;
 }
@@ -5069,15 +5075,13 @@ function analyzeSingleAngleTrigRational(
   ce: ComputeEngine,
   integrand: Expression,
   x: string
-):
-  | {
-      w: Expression;
-      P: Expression;
-      C: Expression;
-      roots: Map<string, { root: Expression; exp: number }>;
-      yName: string;
-    }
-  | null {
+): {
+  w: Expression;
+  P: Expression;
+  C: Expression;
+  roots: Map<string, { root: Expression; exp: number }>;
+  yName: string;
+} | null {
   const inert = toTimesPower(ce, deactivateTrig(ce, integrand, x));
   if (inert.operator !== 'Multiply' || !inert.ops) return null;
   const w = sharedLinearTrigArg(inert, x);

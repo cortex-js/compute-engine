@@ -701,8 +701,7 @@ function integratingFactorExp(integralP: Expression): Expression {
     if (split) powers.push(ce.function('Power', [split.base, split.exponent]));
     else rest.push(term);
   }
-  if (powers.length === 0)
-    return ce.function('Exp', [integralP]).simplify();
+  if (powers.length === 0) return ce.function('Exp', [integralP]).simplify();
   if (rest.length > 0)
     powers.push(ce.function('Exp', [ce.function('Add', rest)]));
   return (
@@ -1689,10 +1688,7 @@ function termDependentPower(
   if (isFunction(term, 'Divide')) {
     const numerator = termDependentPower(term.op1, dependentCall);
     if (!numerator) return undefined;
-    if (
-      isFunction(dependentCall) &&
-      term.op2.has(dependentCall.operator)
-    )
+    if (isFunction(dependentCall) && term.op2.has(dependentCall.operator))
       return undefined;
     return {
       power: numerator.power,

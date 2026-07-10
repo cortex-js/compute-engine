@@ -713,7 +713,9 @@ function harmonicExpr(ce: ComputeEngine, n: number, s: number): Expression {
   if (n === 0) return ce.Zero;
   const terms: Expression[] = [];
   for (let m = 1; m <= n; m++)
-    terms.push(ce.function('Divide', [ce.One, ce.number(BigInt(m) ** BigInt(s))]));
+    terms.push(
+      ce.function('Divide', [ce.One, ce.number(BigInt(m) ** BigInt(s))])
+    );
   return (terms.length === 1 ? terms[0] : ce.function('Add', terms)).evaluate();
 }
 
@@ -814,10 +816,12 @@ function specialLaurent(
     // series; verified at 30 digits with mpmath (n = 0, 1, 3).
     const c: Coeffs = [
       ce.NegativeOne,
-      ce.function('Add', [
-        ce.symbol('EulerGamma').neg(),
-        harmonicExpr(ce, n, 1),
-      ]).evaluate(),
+      ce
+        .function('Add', [
+          ce.symbol('EulerGamma').neg(),
+          harmonicExpr(ce, n, 1),
+        ])
+        .evaluate(),
     ];
     for (let k = 1; k <= W; k++) {
       const zk = k % 2 === 1 ? zetaAt(ce, k + 1) : zetaAt(ce, k + 1).neg();

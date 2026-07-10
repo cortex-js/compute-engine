@@ -731,10 +731,7 @@ volumes
 
         const dependent = symbolOrListArg(engine, ops[1]);
         const equation = ops[0]
-          ? repairDependentApplications(
-              ops[0],
-              dependentSymbolNames(dependent)
-            )
+          ? repairDependentApplications(ops[0], dependentSymbolNames(dependent))
           : missing;
 
         return engine._fn('NDSolve', [

@@ -1009,7 +1009,7 @@ export class RubiDriver {
         if (F === null || F.has('Integrate')) return null;
         parts.push(F);
       }
-      let F = this.cleanExpansionResult(
+      const F = this.cleanExpansionResult(
         parts.length === 1 ? parts[0] : ce.function('Add', parts)
       );
       if (F.has('Integrate')) return null;
