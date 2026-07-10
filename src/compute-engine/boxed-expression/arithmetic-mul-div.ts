@@ -396,16 +396,29 @@ export class Product {
       // fall through: tally the Divide expression as an opaque term
     }
 
+    // Unify numeric-base radical representations for a positive rational base
+    // so same-base factors combine exactly: `Root(2,3)` and `Power(2,2/3)` both
+    // tally on base 2, and 1/3 + 2/3 = 1 gives `2^1 → 2`. The materialization
+    // path (termsAsExpression) rebuilds `base^exp` symbolically, so a lone
+    // radical stays exact (e.g. `2^{1/3}` → `Root(2,3)`).
+    let tallyTerm = term;
+    let tallyExp = exponent;
+    const norm = numericRadicalBaseExp(term);
+    if (norm && norm.base.isPositive === true) {
+      tallyTerm = norm.base;
+      tallyExp = rationalMul(exponent, norm.exp);
+    }
+
     // Look for the base, and add the exponent if already in the list of terms
     let found = false;
     for (const x of this.terms) {
-      if (x.term.isSame(term)) {
-        x.exponent = rationalAdd(x.exponent, exponent);
+      if (x.term.isSame(tallyTerm)) {
+        x.exponent = rationalAdd(x.exponent, tallyExp);
         found = true;
         break;
       }
     }
-    if (!found) this.terms.push({ term, exponent });
+    if (!found) this.terms.push({ term: tallyTerm, exponent: tallyExp });
   }
 
   /** Divide the product by a term of coefficient */
@@ -665,6 +678,29 @@ export function commonTerms(
 
   // Put everything together
   return [coef, xs.length === 0 ? ce.One : mul(...xs)];
+}
+
+/**
+ * A numeric-base radical `Root(b, n)`, `Power(b, p/q)` (fractional exponent)
+ * — normalized to a `(base, exponent)` pair so the two representations of the
+ * same base unify (e.g. `Root(2,3)` and `Power(2, 2/3)` both key on base 2).
+ * Returns undefined for integer exponents (folded elsewhere), non-numeric
+ * bases, and other operators.
+ */
+function numericRadicalBaseExp(
+  term: Expression
+): { base: Expression; exp: Rational } | undefined {
+  if (isFunction(term, 'Power') && term.op1 && term.op2 && isNumber(term.op1)) {
+    const r = asRational(term.op2);
+    // Only fractional exponents (integer powers of a numeric base fold into
+    // the coefficient before reaching here).
+    if (r && r[1] !== 1 && r[1] !== -1) return { base: term.op1, exp: r };
+  }
+  if (isFunction(term, 'Root') && term.op1 && term.op2 && isNumber(term.op1)) {
+    const r = asRational(term.op2);
+    if (r) return { base: term.op1, exp: inverse(r) };
+  }
+  return undefined;
 }
 
 function termsAsExpression(

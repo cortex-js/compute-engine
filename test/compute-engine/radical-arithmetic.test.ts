@@ -151,3 +151,96 @@ describe('exactness-contract leak in toNumericValue(Root)', () => {
     expect(Math.abs(e.N().re)).toBeLessThan(1e-12);
   });
 });
+
+/**
+ * Rationalizing a two-term radical denominator in simplify()
+ * (num / (p + q) -> num·(p − q) / (p² − q²)), next to `denestSqrt` in
+ * `symbolic/simplify-power.ts`.
+ */
+describe('rationalize radical denominator', () => {
+  test('(√3+√2)/(√3−√2) -> 5 + 2√6', () => {
+    const e = ce.parse('\\frac{\\sqrt{3}+\\sqrt{2}}{\\sqrt{3}-\\sqrt{2}}');
+    expect(e.simplify().json).toEqual(['Add', 5, ['Multiply', 2, ['Sqrt', 6]]]);
+    // old (unrationalized) and new forms agree numerically
+    expect(e.N().re).toBeCloseTo(e.simplify().N().re, 12);
+  });
+
+  test('1/(1+√2) -> √2 − 1', () => {
+    const e = ce.parse('\\frac{1}{1+\\sqrt2}');
+    const s = e.simplify();
+    expect(s.isEqual(ce.parse('\\sqrt2-1'))).toBe(true);
+    expect(Math.abs(e.N().re - s.N().re)).toBeLessThan(1e-12);
+  });
+
+  test('1/(√5−√3) -> (√5+√3)/2 (two-surd denominator)', () => {
+    const e = ce.parse('\\frac{1}{\\sqrt5-\\sqrt3}');
+    const s = e.simplify();
+    expect(s.isEqual(ce.parse('\\frac{\\sqrt5+\\sqrt3}{2}'))).toBe(true);
+    expect(Math.abs(e.N().re - s.N().re)).toBeLessThan(1e-12);
+  });
+
+  test('1/(1+2^{1/3}) declines (cube-root denominator stays put)', () => {
+    const e = ce.parse('\\frac{1}{1+2^{1/3}}');
+    // Not a two-term sum of exact-real (√) terms: no rationalization.
+    expect(e.simplify().json).toEqual([
+      'Divide',
+      1,
+      ['Add', 1, ['Root', 2, 3]],
+    ]);
+  });
+});
+
+/**
+ * Same-base combination of Root(b,n) and Power(b,p/q) for a positive rational
+ * base (arithmetic-mul-div.ts): 2^{1/3}·2^{2/3} -> 2^1 -> 2, exactly.
+ */
+describe('same-base numeric radical combination', () => {
+  test('2^{1/3}·2^{2/3} -> 2 (Root × Power, same base)', () => {
+    expect(ce.parse('2^{1/3}\\cdot 2^{2/3}').evaluate().json).toBe(2);
+  });
+
+  test('2^{1/3}·4^{1/3} -> 2 (same-exponent fusion, 8^{1/3})', () => {
+    expect(ce.parse('2^{1/3}\\cdot 4^{1/3}').evaluate().json).toBe(2);
+  });
+
+  test('3^{1/4}·3^{1/4} -> √3', () => {
+    expect(ce.parse('3^{1/4}\\cdot 3^{1/4}').evaluate().json).toEqual([
+      'Sqrt',
+      3,
+    ]);
+  });
+
+  test('a lone numeric radical stays symbolic and exact', () => {
+    expect(ce.parse('2^{1/3}').evaluate().json).toEqual(['Root', 2, 3]);
+    expect(ce.parse('2^{2/3}').evaluate().json).toEqual([
+      'Power',
+      2,
+      ['Rational', 2, 3],
+    ]);
+  });
+});
+
+/**
+ * Three-surd nested-radical denesting (denestSqrt3, next to denestSqrt):
+ * √(a + 2√p + 2√q + 2√r) -> √x + √y + √z.
+ */
+describe('three-surd sqrt denesting', () => {
+  test('√(10+2√6+2√10+2√15) -> √2+√3+√5', () => {
+    expect(
+      ce.parse('\\sqrt{10+2\\sqrt6+2\\sqrt{10}+2\\sqrt{15}}').simplify().json
+    ).toEqual(['Add', ['Sqrt', 2], ['Sqrt', 3], ['Sqrt', 5]]);
+  });
+
+  test('√(6+2√2+2√3+2√6) -> 1+√2+√3 (perfect-square unknown)', () => {
+    const e = ce.parse('\\sqrt{6+2\\sqrt2+2\\sqrt3+2\\sqrt6}');
+    const s = e.simplify();
+    expect(s.isEqual(ce.parse('1+\\sqrt2+\\sqrt3'))).toBe(true);
+    expect(Math.abs(e.N().re - s.N().re)).toBeLessThan(1e-12);
+  });
+
+  test('declines when the rational part does not match x+y+z', () => {
+    // 9 ≠ 2+3+5: not a perfect (√x+√y+√z)² — stays put.
+    const e = ce.parse('\\sqrt{9+2\\sqrt6+2\\sqrt{10}+2\\sqrt{15}}');
+    expect(e.simplify().operator).toBe('Sqrt');
+  });
+});

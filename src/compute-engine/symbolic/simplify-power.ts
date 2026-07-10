@@ -88,6 +88,152 @@ function denestSqrt(arg: Expression): Expression | undefined {
 }
 
 /**
+ * Denest a three-surd nested radical
+ *   √(a + 2√p + 2√q + 2√r) → √x + √y + √z
+ * where the radicand is the expansion of (√x + √y + √z)² =
+ *   x + y + z + 2√(xy) + 2√(xz) + 2√(yz).
+ *
+ * From the three cross terms 2√p, 2√q, 2√r (each with coefficient exactly 2),
+ * the pairwise products are {xy, xz, yz} = {p, q, r}. Then xyz = √(pqr), and
+ * the unknowns are x = xyz/(yz), etc. — i.e. {xyz/p, xyz/q, xyz/r}. Accept only
+ * when pqr is a perfect square, each unknown is a positive rational, and their
+ * sum equals the rational part a. Verified numerically.
+ *
+ * Example: √(10 + 2√6 + 2√10 + 2√15) → √2 + √3 + √5.
+ */
+function denestSqrt3(arg: Expression): Expression | undefined {
+  if (!isFunction(arg, 'Add') || arg.nops !== 4) return undefined;
+  const ce = arg.engine;
+
+  // Partition the 4 terms into one rational `a` and three surds `2√p`.
+  let aTerm: Expression | undefined;
+  const radicals: number[] = [];
+  for (const t of arg.ops!) {
+    if (!isNumber(t)) return undefined;
+    const nv = t.numericValue;
+    if (!(nv instanceof ExactNumericValue) || nv.im !== 0) return undefined;
+    if (nv.radical <= 1) {
+      if (aTerm) return undefined; // more than one rational term
+      aTerm = t;
+    } else {
+      // Cross term must be exactly 2√p.
+      if (Number(nv.rational[0]) !== 2 || Number(nv.rational[1]) !== 1)
+        return undefined;
+      radicals.push(nv.radical);
+    }
+  }
+  if (!aTerm || radicals.length !== 3) return undefined;
+
+  const aVal = aTerm.re;
+  if (aVal === null || !(aVal > 0)) return undefined;
+
+  const [p, q, r] = radicals;
+  const prod = p * q * r;
+  const xyz = Math.sqrt(prod);
+  if (!Number.isInteger(xyz)) return undefined; // pqr not a perfect square
+
+  // x,y,z = xyz/p, xyz/q, xyz/r (exact rationals). Their pairwise products
+  // reproduce {p,q,r} automatically.
+  const xs = radicals.map((v) => ce.number([xyz, v]));
+  const sumXs = xs.reduce((s, x) => s + (x.re ?? NaN), 0);
+  if (!Number.isFinite(sumXs)) return undefined;
+  if (Math.abs(sumXs - aVal) > 1e-9 * (1 + aVal)) return undefined;
+
+  const result = ce.function(
+    'Add',
+    xs.map((x) => ce.function('Sqrt', [x]))
+  );
+
+  // Numeric safety gate: result must be the positive principal root.
+  const argN = aVal + 2 * (Math.sqrt(p) + Math.sqrt(q) + Math.sqrt(r));
+  const resN = result.N().re;
+  if (resN === null || !(resN >= 0)) return undefined;
+  if (Math.abs(resN * resN - argN) > 1e-9 * (1 + Math.abs(argN)))
+    return undefined;
+
+  return result;
+}
+
+/**
+ * A term of a radical denominator is "rationalizable" when it is an exact real
+ * value whose square is rational — i.e. a rational `a`, or a single surd `r√c`
+ * (r rational, c a positive integer). Such a term squares to a rational, so a
+ * two-term sum of them has a rational conjugate product.
+ */
+function squaresToRational(t: Expression): boolean {
+  if (!isNumber(t)) return false;
+  if (asRational(t)) return true;
+  const nv = t.numericValue;
+  return nv instanceof ExactNumericValue && nv.im === 0;
+}
+
+/** A genuine surd `r√c` with c > 1 (as opposed to a pure rational). */
+function isSurd(t: Expression): boolean {
+  if (!isNumber(t)) return false;
+  const nv = t.numericValue;
+  return nv instanceof ExactNumericValue && nv.im === 0 && nv.radical > 1;
+}
+
+/**
+ * Rationalize a quotient with a two-term radical denominator:
+ *   num / (p + q)  →  num·(p − q) / (p² − q²)
+ *
+ * Fires when the denominator is a two-term `Add` whose terms each square to a
+ * rational (a rational, or a single surd `r√c`), and at least one term is a
+ * genuine surd — covering `a + b√c` and `b√c + d√e` forms (either term may be
+ * the surd). The conjugate `p − q` makes the denominator rational (p² − q²);
+ * the numerator is expanded pairwise and folded to rational + radical terms.
+ *
+ * Examples: (√3+√2)/(√3−√2) → 5 + 2√6, 1/(1+√2) → √2 − 1,
+ *           1/(√5−√3) → (√5+√3)/2. Declines cube roots (Root(2,3) is not an
+ *           exact real numeric value here) and 3-term denominators.
+ */
+function rationalizeRadicalDenominator(x: Expression): Expression | undefined {
+  if (!isFunction(x)) return undefined;
+  const ce = x.engine;
+  const num = x.op1;
+  const denom = x.op2;
+  if (!num || !denom) return undefined;
+  if (!isFunction(denom, 'Add') || denom.nops !== 2) return undefined;
+
+  const [p, q] = denom.ops!;
+  if (!squaresToRational(p) || !squaresToRational(q)) return undefined;
+  // Require at least one genuine surd; a purely rational denominator would
+  // already have been folded by canonicalization.
+  if (!isSurd(p) && !isSurd(q)) return undefined;
+
+  // newDenom = p² − q² (a nonzero rational). Fold via ce.function('Add', …) so
+  // exact squares combine rather than collapsing to a float.
+  const newDenom = ce.function('Add', [p.mul(p), q.mul(q).neg()]);
+  if (!isNumber(newDenom) || asRational(newDenom) === null) return undefined;
+  if (newDenom.isSame(0)) return undefined;
+
+  // conjugate = p − q
+  const conjugate = ce.function('Add', [p, q.neg()]);
+  const conjTerms = isFunction(conjugate, 'Add') ? conjugate.ops! : [conjugate];
+  const numTerms = isFunction(num, 'Add') ? num.ops! : [num];
+
+  // Expand num · conjugate pairwise. Each pair of exact reals multiplies to a
+  // single exact number (e.g. √3·√2 → √6); ce.function('Add', …) then folds
+  // like radicals (3 + √6 + √6 + 2 → 5 + 2√6).
+  const products: Expression[] = [];
+  for (const a of numTerms)
+    for (const b of conjTerms) products.push(a.mul(b));
+  const newNum = ce.function('Add', products);
+
+  const result = ce.function('Divide', [newNum, newDenom]);
+
+  // Numeric safety gate: the rationalized form must match the original.
+  const xN = x.N().re;
+  const rN = result.N().re;
+  if (xN !== null && rN !== null && Number.isFinite(xN) && Number.isFinite(rN)) {
+    if (Math.abs(xN - rN) > 1e-9 * (1 + Math.abs(xN))) return undefined;
+  }
+
+  return result;
+}
+
+/**
  * Power simplification rules consolidated from simplify-rules.ts.
  * Handles ~25 patterns for simplifying Power expressions.
  *
@@ -350,6 +496,16 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       const denested = denestSqrt(arg);
       if (denested !== undefined) {
         return { value: denested, because: 'denest √(a+b√c) -> √x+√y' };
+      }
+
+      // Denest a three-surd nested radical:
+      // √(a + 2√p + 2√q + 2√r) → √x + √y + √z.
+      const denested3 = denestSqrt3(arg);
+      if (denested3 !== undefined) {
+        return {
+          value: denested3,
+          because: 'denest √(a+2√p+2√q+2√r) -> √x+√y+√z',
+        };
       }
     }
 
@@ -734,6 +890,16 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     const denom = x.op2;
 
     if (!num || !denom) return undefined;
+
+    // Rationalize a two-term radical denominator: num / (p + q) ->
+    // num·(p − q) / (p² − q²). E.g. (√3+√2)/(√3−√2) → 5 + 2√6.
+    const rationalized = rationalizeRadicalDenominator(x);
+    if (rationalized !== undefined) {
+      return {
+        value: rationalized,
+        because: 'rationalize radical denominator',
+      };
+    }
 
     // Same-base division: a^m / a^n -> a^{m-n}
     if (

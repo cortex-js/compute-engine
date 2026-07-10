@@ -129,15 +129,14 @@ describe('Numbers', () => {
     ).toEqual(['Add', 3, ['Sqrt', 2]]);
   });
 
-  test.skip(`denest sqrt(10 + 2 sqrt(6) + 2 sqrt(10) + 2 sqrt(15))`, () => {
-    // [Jeffrey & Rich] => sqrt(2) + sqrt(3) + sqrt(5). CURRENT: unsimplified.
+  test(`denest sqrt(10 + 2 sqrt(6) + 2 sqrt(10) + 2 sqrt(15))`, () => {
+    // [Jeffrey & Rich] => sqrt(2) + sqrt(3) + sqrt(5).
     expect(
       ce.parse('\\sqrt{10+2\\sqrt{6}+2\\sqrt{10}+2\\sqrt{15}}').simplify().json
     ).toEqual(['Add', ['Sqrt', 2], ['Sqrt', 3], ['Sqrt', 5]]);
   });
 
-  test.skip(`rationalize (sqrt(3) + sqrt(2))/(sqrt(3) - sqrt(2)) => 5 + 2 sqrt(6)`, () => {
-    // CURRENT: stays as the unrationalized quotient.
+  test(`rationalize (sqrt(3) + sqrt(2))/(sqrt(3) - sqrt(2)) => 5 + 2 sqrt(6)`, () => {
     expect(
       ce.parse('\\frac{\\sqrt{3}+\\sqrt{2}}{\\sqrt{3}-\\sqrt{2}}').simplify().json
     ).toEqual(['Add', 5, ['Multiply', 2, ['Sqrt', 6]]]);

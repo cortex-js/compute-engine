@@ -376,20 +376,21 @@ asserting the **correct** answer — unskipping is the acceptance test, so no
 separate tracking is needed. Grouped by theme:
 
 - **Radical arithmetic & denesting** (the largest cluster; rational-radicand
-  extraction `(1029/1000)^{1/3} → 7·3^{1/3}/10` and the Wester-28 float-leak
-  fix landed 2026-07-09). Denesting beyond the single-level `√(a+b√c)` case:
-  multi-term (`√(10+2√6+2√10+2√15) → √2+√3+√5`), recursive (Wester 9, the
-  Putnam radical), and cube-root (`(90+34√7)^{1/3} → 3+√7`). Rationalizing
-  denominators (`(√3+√2)/(√3−√2) → 5+2√6`) — home decided 2026-07-09: the
-  simplify subsystem, next to `denestSqrt` in `symbolic/simplify-power.ts`
-  (NOT `canonicalDivide`, which would make rationalized form canonical; and
-  not the exact numeric-value layer, which has no multi-radical sum
-  representation). Exact zero-recognition over `ℚ(2^{1/3})` (Wester 28):
-  diagnosed 2026-07-09 — `2^{1/3}·2^{2/3}` never combines because unit
-  fractions canonicalize to `Root(2,3)` while `2^{2/3}` stays
-  `Power(2, 2/3)`, so `Multiply`'s common-base exponent addition (which
-  works for symbols) misses numeric bases; needs the `Root`/`Power`
-  representations unified for same-base combination.
+  extraction `(1029/1000)^{1/3} → 7·3^{1/3}/10`, the Wester-28 float-leak
+  fix, rationalizing denominators (`(√3+√2)/(√3−√2) → 5+2√6`, in the
+  simplify subsystem next to `denestSqrt`), three-surd denesting
+  (`√(10+2√6+2√10+2√15) → √2+√3+√5`), and same-base `Root`/`Power`
+  combination (`2^{1/3}·2^{2/3} → 2`, `2^{1/3}·4^{1/3} → 2`, positive
+  rational bases) all landed 2026-07-09). Denesting still open beyond
+  those cases: recursive (Wester 9, the Putnam radical) and cube-root
+  (`(90+34√7)^{1/3} → 3+√7`). Exact zero-recognition over `ℚ(2^{1/3})`
+  (Wester 28) still fails on the remaining mechanisms: `simplify()` does
+  not expand the numeric-radical trinomial cube `(2^{1/3}+4^{1/3})^3`, and
+  `Power(4, 2/3)` is not reduced to base 2 (asymmetry: `Root(4,3)`
+  evaluates to `Power(2, 2/3)` but `Power(4, 2/3)` stays put, so even an
+  explicit `Expand` leaves `2^{1/3}·4^{2/3}` uncombined). Adjacent defect
+  spotted 2026-07-09: `Expand` of that cube gives an expression whose
+  `.N()` is `NaN` even though each term evaluates finitely.
 - **Sum/Product closed forms.** Telescoping detection for sums
   (`Σ g(k+1)−g(k) → g(n+1)−g(0)`) and products (`Π (1+1/k) → n`); symbolic
   products (`Π k → n!`); closed forms for classic infinite series and
