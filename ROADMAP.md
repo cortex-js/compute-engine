@@ -880,6 +880,30 @@ opt-in/nightly harnesses that pin these fixes (exactness grid, type-soundness
 grid, mpmath kernel harness, JS/Python parity fuzz, round-trip battery) are being
 adopted from the archived sources in `docs/reviews/2026-07-archive/`.
 
+**Stage-2 corpus audit findings (2026-07-10)** — the per-topic numeric sweep
+(all 57 topics, 120 s kill guard per topic; the two upstream formula bugs it
+caught — a172c7, b16177 — are fixed in the fork and PR'd) surfaced three
+engine/tooling items:
+
+- **Deadline escape in the numeric limit prober (P1).** `N()` of
+  `Limit@+∞` whose body contains a `Sum` with a variable-dependent bound
+  (`γ = lim (Hₙ − ln n)`, corpus `const_gamma/4644c0`; `π` via
+  `(4/n²)·Σ√(n²−k²)`, `pi/dea83d`) runs unbounded — >30 s with
+  `ce.timeLimit = 2000` (reproduced in isolation) — because the prober
+  substitutes astronomically large `n` and the summation loop runs in a
+  region that does not honor the engine deadline. This is a hole in the
+  interruptible-evaluation contract (ROADMAP item 2); until it is fixed,
+  full-corpus Stage-2 runs hang on these two entries (per-topic runs with
+  an external kill guard are the workaround).
+- **`Count(Range(1, n))` → `1` for symbolic `n`.** Should stay inert (or
+  return `n`); the wrong scalar is the `undefined → value` collapse class.
+- **Set-builder translation fidelity (corpus-side).** Fungrim
+  comprehensions translate to a 3-operand literal `["Set", var,
+  membership, condition]`, which CE counts as a 3-element literal set
+  (corpus `gcd/4099d2` graded False from `Count` = 3). The translator
+  should skip (or find a real encoding for) set-builder forms; CE-side
+  semantics are arguably correct.
+
 Two design-level residues are deliberately carried forward:
 
 - **D10 — `real ⊄ complex` in the type lattice.** `real` admits ±∞, so it is not
