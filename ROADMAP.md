@@ -526,7 +526,7 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-10, R1–R24 landed):** the shipped bundle
+**State (2026-07-10, R1–R25 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 3 (Logarithms), 5 (Inverse trig), 6 (Hyperbolics),
@@ -545,6 +545,13 @@ Inverse hyperbolic (R22): 7.1 sine 79/120, 7.2 cosine 51,
 56.7%, R22 +2 — ch7's hyperbolic sub-integrals were already covered by the
 ungated `containsHyperbolic` fallback)**, ch1 exhaustive ≈90–91%,
 ch2 ≈72% / ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
+**R25 (2026-07-10)** closed the symbolic-coefficient quartic-denominator rational
+family `∫(d+e·x²)/(a+b·x⁴)` and its reductions (`∫x^m/(a+b·x⁴)`, `∫Pq/(a+b·x⁴)`,
+quartic products) — an ExpandIntegrand ⇄ binomial-split ping-pong, fixed by
+failing the distribution on the `(d+e·x^(n/2))/(a+b·x^n)` shape so the driver
+reaches the 1.2.2.3 trinomial terminal rules (behind `RUBI_NO_R25`; A/B: 1.1.3
+General 173→180/200, ch1 1.1 109/5w→111/4w fixing one genuine wrong, and the
+R20-noted arctan/arccot(a·x²) chains 5.3 60→61 / 5.4 60→62); genuine wrongs 0.
 **Genuine wrongs are 0 across all suites** (incl. ch3 after the R17
 back-substitution fix, and ch7's 11 flags — all symbolic-exponent /
 complex-log-branch / fractional-power false-wrongs) — every flagged "wrong" is a documented
@@ -578,7 +585,7 @@ fail-closed D-check; native-rational). A/B env switches:
 `RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`, `RUBI_NO_COFN`, `RUBI_NO_COFN_COT`,
 `RUBI_NO_SKELETON`, `RUBI_NO_SICI`, `RUBI_NO_SICI_COMPLEX`, `RUBI_NO_SECBIN`,
 `RUBI_NO_TRIGSQ`, `RUBI_NO_TRIGEXP`, `RUBI_NO_TRIGSUB` (R22 subproblem
-trig-bridge).
+trig-bridge), `RUBI_NO_R25` (R25 quartic-denominator ExpandIntegrand guard).
 **Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
 power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
 shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`

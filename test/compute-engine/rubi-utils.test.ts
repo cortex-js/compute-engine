@@ -150,6 +150,52 @@ describe('integrability gates', () => {
   });
 });
 
+describe('ExpandIntegrand binomial-denominator guard (R25)', () => {
+  // A proper `(d+e·x^(n/2))/(a+b·x^n)` (pure even binomial denominator, n ≥ 4)
+  // must NOT be distributed: the split pieces ping-pong with the 1.1.3.2
+  // binomial rule and the family never closes. ExpandIntegrand fails so the
+  // driver falls through to the binomial/trinomial terminal rules.
+  const quadOverQuartic = (): Json => [
+    'Divide',
+    ['Add', ['Sqrt', 'a'], ['Multiply', ['Sqrt', 'b'], ['Power', 'x', 2]]],
+    ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 4]]],
+  ];
+  test('fails (no distribution) on (√a+√b·x²)/(a+b·x⁴)', () => {
+    expect(() =>
+      build(['ExpandIntegrand', quadOverQuartic(), 'x'], ctx)
+    ).toThrow(RuleFail);
+  });
+  test('fails on pure x²/(a+b·x⁴) as well', () => {
+    const j: Json = [
+      'Divide',
+      ['Power', 'x', 2],
+      ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 4]]],
+    ];
+    expect(() => build(['ExpandIntegrand', j, 'x'], ctx)).toThrow(RuleFail);
+  });
+  test('still distributes a linear numerator (a+b·x)/(2+3·x⁴)', () => {
+    // degree-1 numerator is NOT a polynomial in x² → guard does not fire;
+    // ExpandIntegrand distributes into a+b·x monomial pieces that each close
+    const j: Json = [
+      'Divide',
+      ['Add', 'a', ['Multiply', 'b', 'x']],
+      ['Add', 2, ['Multiply', 3, ['Power', 'x', 4]]],
+    ];
+    const r = build(['ExpandIntegrand', j, 'x'], ctx);
+    expect(r.operator).toBe('Add');
+  });
+  test('unaffected: quadratic denominator (a+b·x²) still distributes', () => {
+    const j: Json = [
+      'Divide',
+      ['Add', 1, ['Power', 'x', 2]],
+      ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 2]]],
+    ];
+    expect(() =>
+      build(['ExpandIntegrand', j, 'x'], ctx)
+    ).not.toThrow();
+  });
+});
+
 describe('EqQ/NeQ arity', () => {
   // Rubi defines both the binary form EqQ[u,v] := PossibleZeroQ[u-v] and the
   // unary form EqQ[u] := PossibleZeroQ[u]. The unary form appears in the

@@ -2774,6 +2774,10 @@ const RECIP_BASE: Record<string, string> = { csc: 'sin', sec: 'cos' };
 // Gated by RUBI_NO_SECBIN for A/B.
 const NO_SECBIN = process.env.RUBI_NO_SECBIN !== undefined;
 
+// RUBI_NO_R25: disable the ExpandIntegrand `(d+e·x^(n/2))/(a+b·x^n)` guard
+// (Phase R25 symbolic-quartic closer) — for A/B measuring its effect.
+const NO_R25 = process.env.RUBI_NO_R25 !== undefined;
+
 /** True if `e` is a shift-TARGET reciprocal head (`csc`) whose single argument
  * carries the +π/2 reflection signature (a linear arg plus a π/2 summand), i.e.
  * a head produced by `cofunctionShift`'s `sec→csc[·+π/2]` reflection. */
@@ -4498,6 +4502,23 @@ const VALUE_FNS: Record<string, ValueFn> = {
     }
     if (args.length !== 2) return fail('ExpandIntegrand arity');
     const u = build(args[0], ctx);
+    // Proper rational Pq/(a+b·x^n) with n an even integer ≥ 4 and the
+    // denominator a pure binomial: DON'T distribute. The `expand` branch
+    // below would split the sum-numerator over the shared denominator
+    // (e.g. (√a+√b·x²)/(a+b·x⁴) → √a/(a+b·x⁴) + √b·x²/(a+b·x⁴)); those
+    // monomial pieces route to the 1.1.3.1/1.1.3.2 binomial rules, which
+    // split `1/(a+b·x⁴)` and `x²/(a+b·x⁴)` right back into a quadratic-
+    // numerator `(r±s·x²)/(a+b·x⁴)` — the exact shape we started from — so
+    // ExpandIntegrand and the binomial split ping-pong and the family never
+    // closes (Rubi relies on the 1.2.2.3 trinomial `(d+e·x²)/(a+c·x⁴)`
+    // terminal rules to break out to `∫1/(quadratic)` → ArcTan/Log). Failing
+    // here lets the driver fall through to those terminal rules. Branch-safe:
+    // the binomial/trinomial closers carry their own PosQ/NegQ/GtQ sign
+    // guards, so no unconditional √(a/b) factorization is imposed. Only pure
+    // binomials are affected (a real-factorable trinomial or a denominator
+    // with rational linear factors keeps the normal ExpandIntegrand path).
+    if (!NO_R25 && isProperRationalOverEvenBinomial(u, ctx.x))
+      return fail('ExpandIntegrand: binomial denominator → binomial rules');
     const e = expand(u);
     if (e.operator === 'Add') return e;
     return expandPolyOverLinear(u, ctx);
@@ -4962,6 +4983,38 @@ function expandPolyOverLinear(u: Expression, ctx: Ctx): Expression {
   if (terms.length === 0) return ce.Zero;
   if (terms.length === 1) return terms[0];
   return ce.function('Add', terms);
+}
+
+// True iff u is a proper rational Pq(x)/(a+b·x^n) where the denominator is a
+// pure binomial (only the constant and the x^n term non-zero) with n an even
+// integer ≥ 4, AND the numerator is a polynomial in x^(n/2) (only the constant
+// and x^(n/2) terms non-zero) — i.e. the exact `(d + e·x^(n/2))/(a+b·x^n)`
+// shape. Gates the ExpandIntegrand distribution guard above.
+//
+// The guard is deliberately narrow: it is ONLY this shape that ping-pongs.
+// `∫x^(n/2)/(a+b·x^n)` is split by rule 1.1.3.2 into `(d±e·x^(n/2))/(a+b·x^n)`,
+// which distribution turns back into `{1/(a+b·x^n), x^(n/2)/(a+b·x^n)}` — the
+// cycle. A numerator with any OTHER exponent (e.g. the linear `a+b·x` residual
+// of a P(x)/(a+b·x⁴) reduction) must still distribute normally: `∫x/(a+b·x⁴)`
+// closes directly (arctan of x²) with no cycle, and blocking its split would
+// strand the P(x) family. Restricting to the x^(n/2)-polynomial numerator keeps
+// both behaviours correct.
+function isProperRationalOverEvenBinomial(u: Expression, x: string): boolean {
+  const { num, den } = asNumDen(u);
+  const dn = polyDegreeX(den, x);
+  const nn = polyDegreeX(num, x);
+  if (dn < 4 || dn % 2 !== 0) return false;
+  if (nn < 0 || nn >= dn) return false; // must be a proper fraction
+  const dc = polyCoeffsX(den, x);
+  if (dc === null) return false;
+  for (let i = 1; i < dn; i++) if (!dc[i]?.isSame(0)) return false;
+  // numerator must be a polynomial in x^(n/2): non-zero only at 0 and n/2
+  const nc = polyCoeffsX(num, x);
+  if (nc === null) return false;
+  const half = dn / 2;
+  for (let i = 0; i < nc.length; i++)
+    if (i !== 0 && i !== half && !nc[i]?.isSame(0)) return false;
+  return true;
 }
 
 function powOrOne(base: Expression, exp: Expression): Expression {

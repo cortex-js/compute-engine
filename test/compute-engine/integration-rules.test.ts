@@ -174,6 +174,48 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     test('∫x/√(1+x) dx', () => verify('\\frac{x}{\\sqrt{1+x}}'));
   });
 
+  // Symbolic-coefficient quartic-denominator rationals (RUBI.md §5 Phase R25).
+  // ∫(d+e·x²)/(a+b·x⁴) and relatives close to ArcTan/Log for SYMBOLIC a,b:
+  // the `(d+e·x^(n/2))/(a+b·x^n)` numerator no longer ping-pongs between
+  // ExpandIntegrand and the 1.1.3.2 split (see rubi-utils ExpandIntegrand
+  // guard). D-verify by differentiating and sampling at fixed parameter values.
+  describe('symbolic quartic-denominator rationals (R25)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string, params: Record<string, number>) => {
+      const integrand = ce.parse(latex);
+      let F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // closed form, not inert
+      let g = integrand;
+      for (const [k, v] of Object.entries(params)) {
+        F = F.subs({ [k]: v });
+        g = g.subs({ [k]: v });
+      }
+      const dF = ce.expr(['D', F, 'x']).evaluate();
+      let sampled = 0;
+      for (const x of [0.31, 0.73, 1.27, -0.41, -1.31]) {
+        const a = dF.subs({ x }).N().re;
+        const b = g.subs({ x }).N().re;
+        if (a === undefined || b === undefined) continue;
+        expect(a).toBeCloseTo(b, 6);
+        sampled++;
+      }
+      expect(sampled).toBeGreaterThan(0);
+    };
+    test('∫1/(a+b·x⁴) dx', () =>
+      verify('\\frac{1}{a+b x^4}', { a: 2, b: 3 }));
+    test('∫x²/(a+b·x⁴) dx', () =>
+      verify('\\frac{x^2}{a+b x^4}', { a: 2, b: 3 }));
+    test('∫(c+d·x²)/(a+b·x⁴) dx', () =>
+      verify('\\frac{c+d x^2}{a+b x^4}', { a: 2, b: 3, c: 1.7, d: 0.9 }));
+    test('∫(a+b·x+d·x³)/(2+3·x⁴) dx', () =>
+      verify('\\frac{a+b x+d x^3}{2+3x^4}', { a: 1.3, b: 0.7, d: 2.1 }));
+    test('∫x⁶/(a+c·x⁴)³ dx', () =>
+      verify('\\frac{x^6}{(a+c x^4)^3}', { a: 2, c: 3 }));
+    test('∫1/((a+b·x⁴)(c+d·x⁴)) dx', () =>
+      verify('\\frac{1}{(a+b x^4)(c+d x^4)}', { a: 2, b: 3, c: 5, d: 0.7 }));
+  });
+
   describe('integrates the (a+b cos+c sin) trig family (Chapter-4 pilot)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce);

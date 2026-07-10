@@ -37,6 +37,13 @@ fallback behind `RUBI_NO_SICI_COMPLEX`, and the reciprocal-argument
 `∫xᵐ·sin(a+b/x)` exp route un-gated), then R19 (the `FunctionOfLog` recognizer
 implemented, closing the 3.5 `∫F(Log[a·xⁿ])/x` family; ch3 census established
 that the rest of the tail is bundling-inert — full-corpus closes nothing new).
+R25 (2026-07-10) closed the symbolic-coefficient quartic-denominator rational
+family — `∫(d+e·x²)/(a+b·x⁴)` and everything reducing to it — by failing the
+ExpandIntegrand distribution on the `(d+e·x^(n/2))/(a+b·x^n)` ping-pong shape so
+the driver reaches the 1.2.2.3 trinomial terminal rules (behind `RUBI_NO_R25`):
+1.1.3 General **173→180/200**, ch1 1.1 **109/5w→111/4w** (fixes one genuine
+wrong), 5.3 tangent **60→61**, 5.4 cotangent **60→62** (the R20-noted
+arctan/arccot(a·x²) chains), genuine wrongs still 0.
 **Next rungs live in ROADMAP §R** (R3′ deep chains, R5; then the Ch6 tail
 R6–R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
@@ -1631,6 +1638,63 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     `4.1.0.x` `(c+d·x)^m·trig^n` expansion rules) that closes `5.1.2#408/#410/#336`.
     That capability — NOT the predicate — is the next rung, and it is a
     disproportionate port for R24, so Part A is deferred with this map.
+- **Phase R25 — symbolic-coefficient quartic-denominator closer LANDED
+  (2026-07-10).** The `∫(d+e·x²)/(a+b·x⁴)` family (and everything that reduces to
+  it — `∫x^m/(a+b·x⁴)`, `∫Pq/(a+b·x⁴)`, `∫(a+b·x⁴)^p/(c+d·x⁴)^q`, products of
+  quartics) failed to close for BOTH symbolic and numeric `a,b`, fail-closed to an
+  inert `Integrate`. **Root cause — an ExpandIntegrand ⇄ binomial-split
+  ping-pong, not a predicate or `Rt` fault.** Rubi's `1/(a+b·x⁴)` (1.1.3.1) and
+  `x²/(a+b·x⁴)` (1.1.3.2) split rules DELIBERATELY emit a quadratic-numerator
+  `(r±s·x²)/(a+b·x⁴)` sub-integral, relying on the 1.2.2.3 trinomial
+  `(d+e·x²)/(a+c·x⁴)` TERMINAL rules (treating `a+b·x⁴` as the degenerate
+  `a+0·x²+b·x⁴`) to break out to `∫1/(quadratic)` → ArcTan/Log. But CE's
+  `ExpandIntegrand` (rule 1.1.3.7 `Int[Pq/(a+b·x^n)] := Int[ExpandIntegrand[…]]`,
+  higher file-order priority) just *distributed* the sum-numerator over the
+  shared denominator — `(√a+√b·x²)/(a+b·x⁴) → √a/(a+b·x⁴) + √b·x²/(a+b·x⁴)` — and
+  those monomial pieces route straight back into the 1.1.3.1/1.1.3.2 splits,
+  which re-emit `(r±s·x²)/(a+b·x⁴)`: an infinite cycle that the driver's dedup/
+  depth guards cap into an inert residual. (The `Rt`/`PosQ` machinery was fine —
+  `Rt[a/b,2]` correctly yields `r=√a, s=√b` for symbolic operands.)
+  - **Fix (surgical, branch-safe; `rubi-utils.ts` `ExpandIntegrand`).** Fail the
+    distribution — so the driver falls through to the 1.2.2.3 terminal rules —
+    for exactly the ping-pong shape: a proper rational `Pq/(a+b·x^n)` whose
+    denominator is a pure even binomial (n ≥ 4) AND whose numerator is a
+    polynomial in `x^(n/2)` (only the constant and `x^(n/2)` coefficients
+    non-zero), i.e. `(d+e·x^(n/2))/(a+b·x^n)` (`isProperRationalOverEvenBinomial`).
+    The `x^(n/2)`-only restriction is load-bearing: an odd/other-degree numerator
+    (e.g. the linear `a+b·x` residual of a `P(x)/(a+b·x⁴)` reduction) MUST still
+    distribute — `∫x/(a+b·x⁴)` closes directly (arctan of x²) with no cycle, and
+    blocking its split would strand the `P(x)` family. Branch-safe: the fix
+    imposes NO factorization; the downstream binomial/trinomial rules keep their
+    own `PosQ`/`NegQ`/`GtQ` sign guards, so both `a/b>0` and `a/b<0` route
+    correctly (R10 lesson). Non-rational integrands are untouched (`polyDegreeX`
+    of a Sin/Exp numerator is < 0, so the guard never fires). Gated by
+    `RUBI_NO_R25` for A/B.
+  - **Before→after (s200 seed5, 1.1.3 General; clean A/B toggling only the
+    guard; genuine wrongs 0).** solved-correct **173 → 180** (+7), unsolved
+    **12 → 6** (−6) — the quartic-RATIONAL unsolved subfamily (`∫x⁶/(a+c·x⁴)³`,
+    `∫x⁶/(2+3·x⁴)`, `∫(a+b·x⁴)²/(c+d·x⁴)³`, `∫(c+d·x⁴)⁴/(a+b·x⁴)`,
+    `∫1/((a+b·x⁴)(c+d·x⁴))`, `∫(a+b·x+d·x³)/(2+3·x⁴)`) went **6 → 0**; the 6
+    remaining unsolved are all elliptic/cubic (EllipticF/E, `(a+b·x³)^(3/2)`,
+    `Sqrt[a+b·x⁴]` in the numerator, `(a+b·x⁴)^(3/2)`) — genuinely out of scope.
+    The 8 `solved-wrong` are byte-identical before/after (the pre-existing
+    symbolic-exponent / two-binomial cluster).
+  - **Guards (s120 seed5, clean A/B; NEW wrongs from R25 = 0 everywhere).**
+    ch1 1.1 **109/5w → 111/4w** (+2 correct AND R25 *fixes* one pre-existing
+    genuine wrong, `∫x⁸/(a−b·x⁴)^(1/4)` wrong→correct); ch2 **82/3w** identical;
+    ch3 **70/4w** identical (net-zero — no quartic sub-integrals in the sample;
+    the ROADMAP "71" was pre-existing baseline drift, not R25); 4.1 Sine
+    (chapter-dir) **108/0w** identical. **Chapter 5 (the R20-noted dependency):**
+    the arctan/arccot(a·x²) by-parts chains bottom out in `∫x²/(1+c²·x⁴)`, so
+    5.3 Inverse tangent **60 → 61** (+1, `∫(a+b·ArcTan[c·x²])/x²`) and 5.4 Inverse
+    cotangent **60 → 62** (+2, `∫ArcCot[a·x²]`, `∫ArcCot[a·x²]/x²`), 5.4 wrongs
+    **4 → 4** identical (pre-existing).
+  - **Tests.** `integration-rules.test.ts` — a `symbolic quartic-denominator
+    rationals (R25)` block D-verifying six representatives at fixed parameter
+    values; `rubi-utils.test.ts` — an `ExpandIntegrand binomial-denominator guard
+    (R25)` block asserting the guard fails on `(√a+√b·x²)/(a+b·x⁴)` and pure
+    `x²/(a+b·x⁴)` yet still distributes the linear `(a+b·x)/(2+3·x⁴)` and leaves
+    quadratic-denominator shapes alone. Both blocks fail under `RUBI_NO_R25=1`.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the
