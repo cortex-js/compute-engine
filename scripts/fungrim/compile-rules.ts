@@ -1342,20 +1342,6 @@ function findNumericSeed(
 // Pipeline
 // ---------------------------------------------------------------------------
 
-/** Static detection of widened-compat-signature usage (§2.2: `compat-signature`). */
-export function usesWidenedCompatSignature(formula: MathJSON): boolean {
-  // CE's Digamma is 1-arg; the corpus' 2-arg form (polygamma order) requires the
-  // COMPAT widening that the loader never applies. LambertW is NOT gated here —
-  // CE gained a genuine 2-arg form `["LambertW", z, k]` (branch k last), so those
-  // corpus entries box and go through the standard self-test on their own merits.
-  const walk = (x: MathJSON): boolean => {
-    if (!Array.isArray(x)) return false;
-    if (x[0] === 'Digamma' && x.length > 2) return true;
-    return x.some((y) => walk(y));
-  };
-  return walk(formula);
-}
-
 function referencesCompatHead(formula: MathJSON): boolean {
   const symbols = collectSymbols(formula);
   return Object.keys(COMPAT_OVERRIDES).some((h) => symbols.has(h));
@@ -1437,11 +1423,12 @@ export function compileEntries(
       }
     }
 
-    // 3. Static compat-signature check (2-arg Digamma → polygamma order)
-    if (usesWidenedCompatSignature(formula)) {
-      skip(e, 'compat-signature', '2-arg Digamma');
-      continue;
-    }
+    // 3. (Retired 2026-07-09: the static 2-arg-Digamma compat gate. The
+    //    translator now emits ["PolyGamma", m, z] for the polygamma order
+    //    form, a native CE head, so those entries compile on their own
+    //    merits; entries that lean on the remaining COMPAT_OVERRIDES
+    //    Stage-1 widenings are labeled by `referencesCompatHead` on the
+    //    failure path below.)
 
     // 4. Compile assumptions to guards (fail-closed)
     const compiled = compileGuards(e.assumptions, e.variables);

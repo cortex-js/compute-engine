@@ -1214,9 +1214,9 @@
    "property": "IsHolomorphic",
    "operator": "Digamma",
    "expr": [
-    "Digamma",
-    "z",
-    "m"
+    "PolyGamma",
+    "m",
+    "z"
    ],
    "var": "z",
    "domain": [
@@ -2335,9 +2335,9 @@
    "property": "Poles",
    "operator": "Digamma",
    "expr": [
-    "Digamma",
-    "z",
-    "m"
+    "PolyGamma",
+    "m",
+    "z"
    ],
    "var": "z",
    "domain": "ComplexNumbers",
@@ -3949,9 +3949,9 @@
    "property": "IsMeromorphic",
    "operator": "Digamma",
    "expr": [
-    "Digamma",
-    "z",
-    "m"
+    "PolyGamma",
+    "m",
+    "z"
    ],
    "var": "z",
    "domain": "ComplexNumbers",

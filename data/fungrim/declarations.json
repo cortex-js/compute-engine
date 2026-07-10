@@ -1,19 +1,6 @@
 {
  "generator": "grim2mathjson 0.1.0",
  "declarations": {
-  "AGM": {
-   "fungrimId": "b0d256",
-   "description": "Arithmetic-geometric mean",
-   "arity": [
-    1,
-    2
-   ],
-   "signature": "(complex, complex) -> complex",
-   "signatureSource": "verified",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
   "AGMSequence": {
    "fungrimId": "eda1e3",
    "description": "Convergents in AGM iteration",
@@ -92,33 +79,6 @@
    "signatureSource": "usage",
    "signatureInferred": true,
    "domainTable": null,
-   "wikidata": null
-  },
-  "BernoulliB": {
-   "fungrimId": "ac8eca",
-   "description": "Bernoulli number",
-   "arity": 1,
-   "signature": "(integer) -> rational",
-   "signatureSource": "verified",
-   "signatureInferred": true,
-   "domainTable": [
-    {
-     "section": null,
-     "domain": [
-      "Element",
-      "n",
-      "NonNegativeIntegers"
-     ],
-     "codomain": [
-      "Element",
-      [
-       "BernoulliB",
-       "n"
-      ],
-      "RationalNumbers"
-     ]
-    }
-   ],
    "wikidata": null
   },
   "BernoulliPolynomial": {
@@ -469,16 +429,6 @@
    "domainTable": null,
    "wikidata": null
   },
-  "DedekindEta": {
-   "fungrimId": "a203bb",
-   "description": "Dedekind eta function",
-   "arity": 1,
-   "signature": "(complex) -> complex",
-   "signatureSource": "verified",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
   "DedekindEtaEpsilon": {
    "fungrimId": "f4dc79",
    "description": "Root of unity in the functional equation of the Dedekind eta function",
@@ -572,81 +522,11 @@
    "domainTable": null,
    "wikidata": null
   },
-  "Divides": {
-   "fungrimId": null,
-   "description": null,
-   "arity": 2,
-   "signature": "(integer, integer) -> boolean",
-   "signatureSource": "verified",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
-  "DivisorSigma": {
-   "fungrimId": null,
-   "description": null,
-   "arity": 2,
-   "signature": "(integer, integer) -> complex",
-   "signatureSource": "usage",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
-  "Divisors": {
-   "fungrimId": null,
-   "description": null,
-   "arity": 1,
-   "signature": "(integer) -> collection<integer>",
-   "signatureSource": "verified",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
-  "EisensteinE": {
-   "fungrimId": "df3334",
-   "description": "Normalized Eisenstein series",
-   "arity": 2,
-   "signature": "(integer, complex) -> complex",
-   "signatureSource": "usage",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
   "EisensteinG": {
    "fungrimId": "9bb960",
    "description": "Eisenstein series",
    "arity": 2,
    "signature": "(integer, complex) -> complex",
-   "signatureSource": "usage",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
-  "EllipticE": {
-   "fungrimId": "723fd0",
-   "description": "Legendre complete elliptic integral of the second kind",
-   "arity": 1,
-   "signature": "(complex) -> complex",
-   "signatureSource": "usage",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
-  "EllipticK": {
-   "fungrimId": "e8ae42",
-   "description": "Legendre complete elliptic integral of the first kind",
-   "arity": 1,
-   "signature": "(complex) -> complex",
-   "signatureSource": "usage",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
-  "EllipticPi": {
-   "fungrimId": "34482b",
-   "description": "Legendre complete elliptic integral of the third kind",
-   "arity": 2,
-   "signature": "(complex, complex) -> complex",
    "signatureSource": "usage",
    "signatureInferred": true,
    "domainTable": null,
@@ -668,16 +548,6 @@
    "arity": 3,
    "signature": "(any, any, integer) -> boolean",
    "signatureSource": "curated",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
-  "Erfi": {
-   "fungrimId": "d2914b",
-   "description": "Imaginary error function",
-   "arity": 1,
-   "signature": "(complex) -> complex",
-   "signatureSource": "verified",
    "signatureInferred": true,
    "domainTable": null,
    "wikidata": null
@@ -993,16 +863,6 @@
    "domainTable": null,
    "wikidata": null
   },
-  "Hypergeometric1F1": {
-   "fungrimId": "512bea",
-   "description": "Kummer confluent hypergeometric function",
-   "arity": 3,
-   "signature": "(complex, complex, complex) -> complex",
-   "signatureSource": "usage",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
   "Hypergeometric1F1Regularized": {
    "fungrimId": "cee331",
    "description": "Regularized Kummer confluent hypergeometric function",
@@ -1018,16 +878,6 @@
    "description": "Tricomi confluent hypergeometric function, alternative notation",
    "arity": 3,
    "signature": "(complex, any, any) -> complex",
-   "signatureSource": "usage",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
-  "Hypergeometric2F1": {
-   "fungrimId": "e03016",
-   "description": "Gauss hypergeometric function",
-   "arity": 4,
-   "signature": "(complex, complex, complex, complex) -> complex",
    "signatureSource": "usage",
    "signatureInferred": true,
    "domainTable": null,
@@ -1181,100 +1031,6 @@
    "signatureSource": "curated",
    "signatureInferred": true,
    "domainTable": null,
-   "wikidata": null
-  },
-  "JacobiTheta": {
-   "fungrimId": "f96eac",
-   "description": "Jacobi theta function",
-   "arity": [
-    3,
-    4
-   ],
-   "signature": "(integer, complex, complex, integer?) -> complex",
-   "signatureSource": "verified",
-   "signatureInferred": true,
-   "domainTable": [
-    {
-     "section": null,
-     "domain": [
-      "And",
-      [
-       "Element",
-       "j",
-       [
-        "Set",
-        1,
-        2,
-        3,
-        4
-       ]
-      ],
-      [
-       "Element",
-       "z",
-       "ComplexNumbers"
-      ],
-      [
-       "Element",
-       "tau",
-       "HH"
-      ]
-     ],
-     "codomain": [
-      "Element",
-      [
-       "JacobiTheta",
-       "j",
-       "z",
-       "tau"
-      ],
-      "ComplexNumbers"
-     ]
-    },
-    {
-     "section": null,
-     "domain": [
-      "And",
-      [
-       "Element",
-       "j",
-       [
-        "Set",
-        1,
-        2,
-        3,
-        4
-       ]
-      ],
-      [
-       "Element",
-       "z",
-       "ComplexNumbers"
-      ],
-      [
-       "Element",
-       "tau",
-       "HH"
-      ],
-      [
-       "Element",
-       "r",
-       "NonNegativeIntegers"
-      ]
-     ],
-     "codomain": [
-      "Element",
-      [
-       "JacobiTheta",
-       "j",
-       "z",
-       "tau",
-       "r"
-      ],
-      "ComplexNumbers"
-     ]
-    }
-   ],
    "wikidata": null
   },
   "JacobiThetaEpsilon": {
@@ -1434,16 +1190,6 @@
    "domainTable": null,
    "wikidata": null
   },
-  "LogIntegral": {
-   "fungrimId": null,
-   "description": null,
-   "arity": 1,
-   "signature": "(real) -> complex",
-   "signatureSource": "usage",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
   "Matrices": {
    "fungrimId": null,
    "description": null,
@@ -1547,16 +1293,6 @@
    "domainTable": null,
    "wikidata": null
   },
-  "MoebiusMu": {
-   "fungrimId": null,
-   "description": null,
-   "arity": 1,
-   "signature": "(integer) -> complex",
-   "signatureSource": "usage",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
   "MultiZetaValue": {
    "fungrimId": "aab550",
    "description": "Multiple zeta value (MZV)",
@@ -1588,92 +1324,6 @@
    "signatureSource": "curated",
    "signatureInferred": true,
    "domainTable": null,
-   "wikidata": null
-  },
-  "PolyLog": {
-   "fungrimId": null,
-   "description": null,
-   "arity": 2,
-   "signature": "(complex, complex) -> complex",
-   "signatureSource": "usage",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
-  "PrimeNumber": {
-   "fungrimId": "0b643d",
-   "description": "nth prime number",
-   "arity": 1,
-   "signature": "(integer) -> integer",
-   "signatureSource": "table",
-   "signatureInferred": true,
-   "domainTable": [
-    {
-     "section": null,
-     "domain": [
-      "Element",
-      "n",
-      "PositiveIntegers"
-     ],
-     "codomain": [
-      "Element",
-      [
-       "PrimeNumber",
-       "n"
-      ],
-      "Primes"
-     ]
-    }
-   ],
-   "wikidata": null
-  },
-  "PrimePi": {
-   "fungrimId": "6c22c8",
-   "description": "Prime counting function",
-   "arity": 1,
-   "signature": "(real) -> integer",
-   "signatureSource": "table",
-   "signatureInferred": true,
-   "domainTable": [
-    {
-     "section": null,
-     "domain": [
-      "Element",
-      "x",
-      "RealNumbers"
-     ],
-     "codomain": [
-      "Element",
-      [
-       "PrimePi",
-       "x"
-      ],
-      "NonNegativeIntegers"
-     ]
-    },
-    {
-     "section": null,
-     "domain": [
-      "Element",
-      "x",
-      [
-       "Set",
-       "PositiveInfinity"
-      ]
-     ],
-     "codomain": [
-      "Element",
-      [
-       "PrimePi",
-       "x"
-      ],
-      [
-       "Set",
-       "PositiveInfinity"
-      ]
-     ]
-    }
-   ],
    "wikidata": null
   },
   "Primes": {
@@ -1845,16 +1495,6 @@
    "arity": 2,
    "signature": "(function, any) -> any",
    "signatureSource": "curated",
-   "signatureInferred": true,
-   "domainTable": null,
-   "wikidata": null
-  },
-  "SinIntegral": {
-   "fungrimId": null,
-   "description": null,
-   "arity": 1,
-   "signature": "(complex) -> complex",
-   "signatureSource": "usage",
    "signatureInferred": true,
    "domainTable": null,
    "wikidata": null
@@ -2310,6 +1950,7 @@
   }
  },
  "existing": {
+  "AGM": {},
   "Abs": {},
   "Add": {},
   "AiryAi": {},
@@ -2362,6 +2003,7 @@
    ]
   },
   "BellNumber": {},
+  "BernoulliB": {},
   "BesselI": {},
   "BesselJ": {},
   "BesselK": {},
@@ -2398,6 +2040,7 @@
     "Cardinality"
    ]
   },
+  "DedekindEta": {},
   "Derivative": {},
   "Determinant": {
    "fungrimNames": [
@@ -2414,7 +2057,14 @@
     "Div"
    ]
   },
+  "Divides": {},
+  "DivisorSigma": {},
+  "Divisors": {},
+  "EisensteinE": {},
   "Element": {},
+  "EllipticE": {},
+  "EllipticK": {},
+  "EllipticPi": {},
   "Equal": {
    "fungrimNames": [
     "Same"
@@ -2427,6 +2077,7 @@
   "Erfc": {
    "note": "CE numeric kernel is ~1e-7 accurate (SPIKE-DECISIONS.md #15); tolerance >= 1e-6 for numeric validation"
   },
+  "Erfi": {},
   "EulerGamma": {
    "fungrimNames": [
     "ConstGamma"
@@ -2459,6 +2110,8 @@
   "GoldenRatio": {},
   "Greater": {},
   "GreaterEqual": {},
+  "Hypergeometric1F1": {},
+  "Hypergeometric2F1": {},
   "Imaginary": {
    "fungrimNames": [
     "Im"
@@ -2493,6 +2146,7 @@
     "Odd"
    ]
   },
+  "JacobiTheta": {},
   "KroneckerDelta": {},
   "LCM": {},
   "LambertW": {
@@ -2508,6 +2162,7 @@
     "Log"
    ]
   },
+  "LogIntegral": {},
   "Matrix": {},
   "Max": {
    "fungrimNames": [
@@ -2520,6 +2175,7 @@
    ]
   },
   "Mod": {},
+  "MoebiusMu": {},
   "Multiply": {
    "fungrimNames": [
     "Mul"
@@ -2548,6 +2204,8 @@
   "NotEqual": {},
   "Or": {},
   "Pi": {},
+  "PolyGamma": {},
+  "PolyLog": {},
   "PositiveInfinity": {
    "fungrimNames": [
     "Infinity"
@@ -2559,6 +2217,8 @@
     "Pow"
    ]
   },
+  "PrimeNumber": {},
+  "PrimePi": {},
   "Product": {},
   "Range": {},
   "RationalNumbers": {
@@ -2581,6 +2241,7 @@
   "SetMinus": {},
   "Sign": {},
   "Sin": {},
+  "SinIntegral": {},
   "Sinc": {},
   "Sinh": {},
   "Sqrt": {},

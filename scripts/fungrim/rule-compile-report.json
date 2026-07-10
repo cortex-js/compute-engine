@@ -1,39 +1,39 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
   "sliceEntries": 1650,
-  "emitted": 1404,
+  "emitted": 1432,
   "ledger": {
     "box-error": 1,
-    "compat-signature": 33,
+    "compat-signature": 3,
     "curated-exclude": 4,
-    "duplicate-undirected": 14,
+    "duplicate-undirected": 15,
     "guard-uncompilable": 69,
     "lhs-not-value-form": 94,
-    "no-fire": 23,
+    "no-fire": 24,
     "not-equation": 8
   },
   "byPurpose": {
-    "expand": 112,
-    "simplify": 1284,
+    "expand": 113,
+    "simplify": 1311,
     "transform": 8
   },
   "byClass": {
-    "identity": 1075,
-    "specific-value": 329
+    "identity": 1091,
+    "specific-value": 341
   },
   "byTarget": {
-    "simplify": 1404
+    "simplify": 1432
   },
   "sampleKinds": {
     "numeric": 48,
-    "symbolic": 1356
+    "symbolic": 1384
   },
   "headBuckets": {
-    "Multiply": 279,
-    "Add": 218,
+    "Multiply": 285,
+    "Add": 223,
     "Divide": 92,
+    "Apply": 63,
     "JacobiTheta": 62,
-    "Apply": 60,
     "Which": 46,
     "CarlsonRJ": 36,
     "Negate": 36,
@@ -51,6 +51,7 @@
     "CarlsonRG": 14,
     "Digamma": 14,
     "LCM": 14,
+    "PolyGamma": 14,
     "ChebyshevT": 13,
     "EllipticK": 13,
     "DedekindEta": 12,
@@ -127,7 +128,7 @@
     "WeierstrassSigma": 1,
     "WeierstrassZeta": 1
   },
-  "declaredShells": 96,
+  "declaredShells": 97,
   "injected": [
     "zeta-trivial-zeros"
   ],
@@ -154,16 +155,6 @@
       "id": "033c51",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "039051",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
-      "id": "03aca0",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "0479f5",
@@ -286,24 +277,9 @@
       "detail": "unsupported conjunct \"Or\""
     },
     {
-      "id": "21f4f9",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
-      "id": "2251c6",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "2371b9",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "24c9e9",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "2744d4",
@@ -381,16 +357,6 @@
       "detail": "symbol"
     },
     {
-      "id": "34fafa",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
-      "id": "361f61",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "3d276b",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -444,11 +410,6 @@
       "id": "488a30",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "4a30f1",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "4af6db",
@@ -511,24 +472,9 @@
       "detail": "symbol"
     },
     {
-      "id": "595f46",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "5aad5c",
       "reason": "duplicate-undirected",
       "detail": "same equality as 499cfc"
-    },
-    {
-      "id": "5ce30b",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
-      "id": "5db5f2",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "5ec9c0",
@@ -601,11 +547,6 @@
       "detail": "unsupported conjunct \"Or\""
     },
     {
-      "id": "6db9fc",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "6ed553",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -666,11 +607,6 @@
       "detail": "same equality as 563d18"
     },
     {
-      "id": "78c19c",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "791c44",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
@@ -701,11 +637,6 @@
       "detail": "unsupported conjunct \"Or\""
     },
     {
-      "id": "807c7d",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "818008",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -734,11 +665,6 @@
       "id": "8332d8",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "84196a",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "859856",
@@ -791,11 +717,6 @@
       "detail": "same equality as 055b0a"
     },
     {
-      "id": "90b26f",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "90b367",
       "reason": "lhs-not-value-form",
       "detail": "Apply"
@@ -814,11 +735,6 @@
       "id": "9206a3",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "921d61",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "927e6e",
@@ -887,8 +803,8 @@
     },
     {
       "id": "9ee737",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
+      "reason": "no-fire",
+      "detail": "rule did not fire"
     },
     {
       "id": "a020e9",
@@ -914,11 +830,6 @@
       "id": "a54fb0",
       "reason": "lhs-not-value-form",
       "detail": "Apply"
-    },
-    {
-      "id": "a62320",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "a637cd",
@@ -966,11 +877,6 @@
       "detail": "unsupported conjunct \"Or\""
     },
     {
-      "id": "b31fd2",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "b788a1",
       "reason": "guard-uncompilable",
       "detail": "unsupported domain \"PrimitiveDirichletCharacters\""
@@ -984,11 +890,6 @@
       "id": "b89166",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "babd3c",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "bad5d9",
@@ -1006,14 +907,9 @@
       "detail": "unsupported conjunct \"Or\""
     },
     {
-      "id": "bb88c8",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "bba4ec",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
+      "reason": "duplicate-undirected",
+      "detail": "same equality as 90b26f"
     },
     {
       "id": "bcdfc6",
@@ -1054,11 +950,6 @@
       "id": "c53d94",
       "reason": "no-fire",
       "detail": "rule did not fire"
-    },
-    {
-      "id": "c687d6",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "c77f9a",
@@ -1111,11 +1002,6 @@
       "detail": "Phase 3 triage: nondeterministic self-test (random-probe isEqual over Coulomb shell expressions) — see 01af55."
     },
     {
-      "id": "d2f9fb",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "d316bc",
       "reason": "no-fire",
       "detail": "rule did not fire"
@@ -1139,11 +1025,6 @@
       "id": "d6703a",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "d6fbc8",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "d7962e",
@@ -1184,11 +1065,6 @@
       "id": "dcc8b1",
       "reason": "lhs-not-value-form",
       "detail": "Set"
-    },
-    {
-      "id": "ddc7e1",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "df52fc",
@@ -1236,11 +1112,6 @@
       "detail": "rule did not fire"
     },
     {
-      "id": "e83059",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
-    },
-    {
       "id": "e85723",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -1284,11 +1155,6 @@
       "id": "f178f2",
       "reason": "lhs-not-value-form",
       "detail": "Apply"
-    },
-    {
-      "id": "f1e02b",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "f4750b",
@@ -1339,11 +1205,6 @@
       "id": "f8dfaf",
       "reason": "compat-signature",
       "detail": "no-fire: no seed satisfying the guards"
-    },
-    {
-      "id": "fa0292",
-      "reason": "compat-signature",
-      "detail": "2-arg Digamma"
     },
     {
       "id": "faa118",

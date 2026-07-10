@@ -75,8 +75,6 @@ export function loadCorpus(dir: string): Corpus {
  * (numeric evaluation is lost), so Stage 2 runs with `compat: false` and
  * treats the affected entries as not-evaluable instead.
  *
- *  - Digamma: Fungrim DigammaFunction(z, m) is the order-m polygamma;
- *    CE Digamma is (number) -> number (1-arg). ~40 entries.
  *  - Binomial: Fungrim Binomial(z, k) is the generalized binomial over
  *    complex z; CE is (integer, integer) -> integer. ~17 entries.
  *  - Fibonacci: Fungrim generalizes Fibonacci to complex argument (Binet);
@@ -111,7 +109,6 @@ export function loadCorpus(dir: string): Corpus {
  * (compat:false) keeps the real strict evaluators.
  */
 export const COMPAT_OVERRIDES: Record<string, string> = {
-  Digamma: '(complex, integer?) -> complex',
   Binomial: '(complex, complex) -> complex',
   Fibonacci: '(complex) -> complex',
   HilbertMatrix: '(integer) -> matrix',

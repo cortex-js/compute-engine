@@ -2374,13 +2374,13 @@
       ]
      ],
      [
-      "Digamma",
-      "a",
+      "PolyGamma",
       [
        "Subtract",
        "n",
        1
-      ]
+      ],
+      "a"
      ]
     ]
    ],
@@ -2408,9 +2408,9 @@
    "class": "identity",
    "subclass": null,
    "heads": [
-    "Digamma",
     "Factorial",
-    "HurwitzZeta"
+    "HurwitzZeta",
+    "PolyGamma"
    ],
    "guardLevel": "complex-domain",
    "flavor": null,

@@ -271,13 +271,13 @@
      [
       "Subtract",
       [
-       "Digamma",
+       "PolyGamma",
+       1,
        [
         "Divide",
         1,
         4
-       ],
-       1
+       ]
       ],
       [
        "Power",
@@ -292,7 +292,7 @@
    "class": "specific-value",
    "subclass": null,
    "heads": [
-    "Digamma"
+    "PolyGamma"
    ],
    "guardLevel": "none",
    "flavor": null,

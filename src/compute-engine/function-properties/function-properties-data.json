@@ -540,11 +540,11 @@
     "id": "394cdc",
     "property": "IsHolomorphic",
     "var": "z",
-    "argIndex": 0,
+    "argIndex": 1,
     "expr": [
-     "Digamma",
-     "z",
-     "m"
+     "PolyGamma",
+     "m",
+     "z"
     ],
     "domain": [
      "SetMinus",
@@ -605,11 +605,11 @@
     "id": "86333d",
     "property": "Poles",
     "var": "z",
-    "argIndex": 0,
+    "argIndex": 1,
     "expr": [
-     "Digamma",
-     "z",
-     "m"
+     "PolyGamma",
+     "m",
+     "z"
     ],
     "domain": "ComplexNumbers",
     "point": null,
@@ -625,11 +625,11 @@
     "id": "d9403e",
     "property": "IsMeromorphic",
     "var": "z",
-    "argIndex": 0,
+    "argIndex": 1,
     "expr": [
-     "Digamma",
-     "z",
-     "m"
+     "PolyGamma",
+     "m",
+     "z"
     ],
     "domain": "ComplexNumbers",
     "point": null,

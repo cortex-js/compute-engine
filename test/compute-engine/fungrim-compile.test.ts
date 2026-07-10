@@ -691,7 +691,12 @@ describe('compileEntries: curation overrides', () => {
 // ---------------------------------------------------------------------------
 
 describe('compileEntries: compat-signature', () => {
-  it('statically rejects 2-arg Digamma (widened COMPAT polygamma-order signature)', () => {
+  it('a stray 2-arg Digamma fails closed at boxing (the corpus emits PolyGamma since fork ce338d5)', () => {
+    // The static 2-arg-Digamma gate was retired 2026-07-09: the translator
+    // now emits the native ["PolyGamma", m, z] for the polygamma-order form,
+    // so those entries compile on their own merits. A hypothetical straggler
+    // still cannot produce a rule — CE's Digamma is 1-arg, so it fails the
+    // box check (a skip, never a wrong rule).
     const result = compileEntries(
       [
         entry(
@@ -706,7 +711,7 @@ describe('compileEntries: compat-signature', () => {
     expect(result.rules).toHaveLength(0);
     expect(result.skips[0]).toMatchObject({
       id: 'cmp001',
-      reason: 'compat-signature',
+      reason: 'box-error',
     });
   });
 

@@ -80,7 +80,7 @@ describe('loadIdentities (full artifact)', () => {
       (r) => r.target === 'simplify'
     ).length;
     expect(report.loaded).toBe(simplifyCount);
-    expect(report.loaded).toBe(1404);
+    expect(report.loaded).toBe(1432);
     // The only default-load skips are the solve templates (solve-disabled).
     expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
       true
@@ -98,16 +98,16 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1404,
+      simplify: 1432,
       solve: 0,
       harmonization: 0,
     });
     expect(report.byPurpose).toEqual({
       // 8 Digamma specific-value rules are tagged 'transform' (cost-gate
       // exempt) so they fire in simplify() — SYM P2-25.
-      simplify: 1284,
+      simplify: 1311,
       transform: 8,
-      expand: 112,
+      expand: 113,
     });
     expect(
       report.byPurpose.simplify +
@@ -1050,6 +1050,21 @@ describe('M5 before/after: guarded identities via simplify()', () => {
     simplifiesTo(
       ['Subtract', ['HarmonicNumber', ['Add', 'n', -1]], 'EulerGamma'],
       ['Digamma', 'n']
+    ));
+
+  // polygamma (2-arg DigammaFunction upstream, translated to the native
+  // PolyGamma head since fork ce338d5 — these entries were compat-signature
+  // compile skips before)
+  it('PolyGamma(1, 1) → π²/6', () =>
+    simplifiesTo(
+      ['PolyGamma', 1, 1],
+      ['Multiply', ['Rational', 1, 6], ['Square', 'Pi']]
+    ));
+
+  it('PolyGamma(1, 1/4) → π² + 8·Catalan  [fungrim:2744d4]', () =>
+    simplifiesTo(
+      ['PolyGamma', 1, ['Rational', 1, 4]],
+      ['Add', ['Square', 'Pi'], ['Multiply', 8, 'CatalanConstant']]
     ));
 
   it('Digamma(2) → 1 − γ  [fungrim:ada157]', () =>
