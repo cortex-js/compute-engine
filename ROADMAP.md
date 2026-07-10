@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-08.
+**Last updated:** 2026-07-10.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -11,7 +11,7 @@ files, and `docs/rubi/RUBI.md` / `docs/fungrim/`.
 The 2026-06 release shipped:
 
 - the Fungrim-derived identities library
-  (`@cortex-js/compute-engine/identities`, 1,413 rules incl. 10 solve
+  (`@cortex-js/compute-engine/identities`, 1,442 rules incl. 10 solve
   templates), the
   complex-domain assumptions extension, the operator-indexed rule dispatcher
   with purpose tags, `ce.solveRules`/`ce.harmonizationRules`, and exact `Zeta`;
@@ -33,15 +33,13 @@ clean-parse 3/345 → 278/345, throws 9 → 0). Fresh unseen-sample validation
 measured 97.4% clean parse with 0 throws/0 hangs; the remaining MathNet work
 is a small notation tail tracked below.
 
-**Pending 0.69.0 (feature-complete on `main`, 2026-07-08):** the
-`Measurement`/uncertainty MVP (`\pm`), the control-flow/scoping overhaul
-(`Loop`/`Comprehension` split, `Block` lexical-scope fixes, `Declare`
-attributes), `digits` display control, numeric tuples as points/vectors, and
-the Desmos-compatibility lists wave (relational broadcast + honest
-`list<…>` typing, `L[condition]` filtering, `When` over list conditions,
-parsing batch). Neyret-corpus parse coverage 78.6% → 92.9%; the remaining
-Desmos gaps are importer-side (tracked in tycho's `COMPUTE_ENGINE.md`), not
-engine items.
+**0.73.0 released 2026-07-09** (solving parity 38/40 with SymPy/Mathematica,
+Rubi R13–R16, `Interpret`, number theory; earlier 0.7x releases carried the
+`Measurement`/uncertainty MVP, the control-flow/scoping overhaul, `digits`
+display control, numeric tuples as points/vectors, and the
+Desmos-compatibility lists wave). Neyret-corpus parse coverage 78.6% → 92.9%;
+the remaining Desmos gaps are importer-side (tracked in tycho's
+`COMPUTE_ENGINE.md`), not engine items.
 
 **Cortex language shipped (2026-07-09):** the revived Cortex language
 (parser, serializer, `executeCortex` interpreter — phases 0–5 of the revival)
@@ -53,10 +51,9 @@ validation) are release-protocol steps tracked in
 `roadmap/cortex/STATUS_REPORT.md`, not here.
 
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
-status:** R1 and R2 gates cleared (full-Chapter-1 exhaustive run ≈90%, ≈91.3%
-with the committed `Numer/Denom` + upstream-1.1.3.6 fixes). Remaining Rubi
-coverage gaps and packaging follow-ups are tracked in `docs/rubi/RUBI.md` §5,
-not here.
+status:** R1–R18 landed — chapters 1/2/3/6, 4.1/4.3/4.5, §8.8 Polylogarithm,
+5,191 rules bundled; see the **Coverage tracks → Rubi** section below for
+current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 **Related documents:** `docs/fungrim/FUNGRIM.md` (feasibility + feature map),
 `docs/fungrim/FUNGRIM-PLAN-1…5` (executed architecture plans), `data/fungrim/`
@@ -298,11 +295,11 @@ principled ceiling. CE now _exceeds_ SymPy on the two inverse-trig equations
 SymPy errors on — `arcsin x = arctan x → {0}` and
 `arccos x = arctan x → √((√5−1)/2)` (solved by applying `tan` to both sides) —
 and the `Solve(eq, x)` operator now dispatches to `.solve()` instead of letting
-its `Equal` collapse to `False` (both landed). What remains, on its own merits
-rather than by Wester:
-
-- **LambertW / Ln-Exp inverse forms** via the solve templates
-  (`loadIdentities(ce, { solve: true })`) — see the Fungrim coverage track.
+its `Equal` collapse to `False` (both landed). The LambertW / Ln-Exp inverse
+forms landed too (solve templates + the native W₋₁ branch — see the Fungrim
+coverage track, at 38/40 parity with SymPy/Mathematica on its own benchmark),
+so **no open items remain here**; the section is kept for the
+harness-artifact explanation the Fungrim track cross-references.
 
 #### B11. Multivariate polynomial GCD — Stage C (Fateman-scale)
 
@@ -322,10 +319,11 @@ fractions, and `Resultant` all want the same representation. Tracked against the
 #### B6. Audit-harness expansion
 
 The CE-vs-SymPy audit (`benchmarks/audit/`) already grades the
-`Solve`/`Resultant`/`GCD` heads through the real opt-in loaders. **Next:** add
-the Bondarenko integration set. (Rubi chapter translation — the lever for the
-indefinite-∫ gap, where Rubi recovers only 1 of 8 hard Wester integrals today —
-is its own track: see **Coverage tracks → Rubi**.)
+`Solve`/`Resultant`/`GCD` heads (and, since 2026-07-10, `DSolve` — see B12)
+through the real opt-in loaders. **Next:** add the Bondarenko integration
+set. (Rubi chapter translation — the lever for the indefinite-∫ gap, with
+Rubi now recovering 6 of the 8 hard Wester integrals — is its own track: see
+**Coverage tracks → Rubi**.)
 
 #### B12. ODE solving — `DSolve`/`NDSolve` beyond the first slice
 
