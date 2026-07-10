@@ -373,6 +373,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Trace of a matrix or pair of tensor axes.',
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
+      // The trace of a rank-2 matrix (or a scalar 1×1) is a scalar `number`;
+      // tracing a pair of axes of a higher-rank tensor reduces two axes and
+      // stays a collection, so only claim `number` for the matrix/scalar case
+      // and otherwise defer to the general `value`.
+      type: ([m]) => {
+        if (m === undefined) return 'value';
+        const t = m.type.type;
+        if (typeof t !== 'string' && t.kind === 'list') {
+          // A matrix carries 2 dimensions (e.g. `matrix` = `[-1, -1]`); a
+          // vector (rank-1 list) has no `dimensions` and has no trace.
+          if (t.dimensions?.length === 2) return 'number';
+          return 'value';
+        }
+        if (m.isNumber) return 'number';
+        return 'value';
+      },
       evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0].evaluate();
 

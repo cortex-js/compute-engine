@@ -183,11 +183,21 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   `At(f, S)`; decide whether set contexts need a distinct structural
   function-image head for expressions such as
   `f[\operatorname{divs}(m)] = \operatorname{divs}(n)`.
-- **Matrix-operator typing (M):** `\det(A+2B)` — `Add` infers its symbols
-  `real` before `Det` sees them; inference-ordering problem. Note this is a
-  general class (any matrix/collection-expecting function whose arguments
-  contain sibling arithmetic), so it warrants its own design pass, not a
-  spot fix.
+- **Matrix-operator typing (M; declared path FIXED 2026-07-09):** what
+  remains is the *undeclared*-symbol case: in `\det(A+2B)` with fresh
+  `A`/`B`, `Add` infers its symbols `real` before `Det` sees them
+  (inference-ordering), so the argument types `number` and validation
+  errors. Interim contract: declare matrix/vector symbols for symbolic
+  matrix algebra (with declared operands, products/sums/`Det`/`Trace` now
+  type correctly — see CHANGELOG "Linear Algebra"). Chosen approach for the
+  residual: a **validation-time repair pass** — on an argument type
+  mismatch traceable to symbols whose types were *inferred during the same
+  expression's canonicalization* (never session-wide, and never overriding
+  a declared type), reset those inferences to the parameter's expected type
+  and re-canonicalize that argument once. Bidirectional expected-type
+  inference and lazy arithmetic inference were considered and rejected as
+  too invasive (canonicalization is structurally bottom-up; eager numeric
+  commitment underpins exact folding).
 
 **`Interpret` — generalization ladder (design:
 `docs/plans/2026-07-09-ellipsis-interpretation-design.md`):** v1 landed

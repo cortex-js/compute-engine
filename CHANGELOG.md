@@ -79,6 +79,20 @@
   reduces to `2^n \cdot n!` and `(2n+1)!!` reduces to
   `\frac{(2n+1)!}{2^n \cdot n!}` when `n` is integer-typed.
 
+### Linear Algebra
+
+- **Products of declared matrices type correctly.** A product with a
+  matrix/vector/list-typed operand now carries the collection type instead
+  of collapsing to a numeric type: with `X` and `Y` declared `matrix`, `2Y`,
+  `XY`, `X - Y` and `3X + 2Y` all type as `matrix` (previously
+  `finite_number`, which made `\det(XY)` fail validation as an
+  `incompatible-type` error). `Trace` of a matrix now types as `number`.
+  All-scalar products are unchanged. Note: *undeclared* symbols in a
+  matrix-expecting argument (`\det(A+2B)` with fresh `A`, `B`) still infer
+  as numbers — declare matrix/vector symbols for symbolic matrix algebra
+  (see the ROADMAP "Matrix-operator typing" item for the planned
+  inference-ordering fix).
+
 ### Units
 
 - **Compound units cancel in quantity arithmetic.** Multiplying or dividing

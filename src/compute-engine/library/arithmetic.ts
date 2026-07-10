@@ -140,10 +140,13 @@ import {
   isNumber,
   isFunction,
   isString,
-  isSymbol,
+  isContinuationOperand,
 } from '../boxed-expression/type-guards.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
-import { isNumericTuple } from '../collection-utils.js';
+import {
+  isNumericTuple,
+  isLinearAlgebraCollection,
+} from '../collection-utils.js';
 import { isTensor } from '../boxed-expression/boxed-tensor.js';
 import { signFromAssumedPart } from './complex.js';
 
@@ -289,7 +292,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Ellipsis fold barrier: an `Add` with a direct `ContinuationPlaceholder`
         // operand is a notational object; leave it unchanged rather than summing
         // across the elided terms.
-        if (ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+        if (ops.some((x) => isContinuationOperand(x)))
           return undefined;
         // Check if any operand is a Quantity expression
         const evaluated = ops.map((x) => x.evaluate());
@@ -1352,6 +1355,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // the honest list type must come from here.
         const tensorOps = ops.filter((x) => isTensor(x));
         if (tensorOps.length === 1) return tensorOps[0].type;
+        // Collection-typed operands (declared matrix/vector/list symbols, or
+        // any operand whose type is a collection) make the product a
+        // collection: `2Y`, `XY`, `X·Y` on declared-matrix symbols are
+        // `matrix`, `2v` is `vector`. Scalar factors scale/combine
+        // element-wise or via the matrix product, but the result carries the
+        // collection type either way (shape-aware refinement is out of scope).
+        // Mirrors `addType`'s widening. Numeric tuples are handled above, and
+        // scalars/unknown-typed symbols are not collection types, so the
+        // all-scalar numeric paths below are untouched.
+        const collectionOps = ops.filter((x) => isLinearAlgebraCollection(x));
+        if (collectionOps.length === 1) return collectionOps[0].type;
+        if (collectionOps.length > 1)
+          return widen(...collectionOps.map((x) => x.type.type));
         if (ops.some((x) => x.isNaN)) return 'number';
         if (ops.some((x) => x.isFinite === false)) {
           // 0 · ±∞ = NaN (indeterminate).
@@ -1462,7 +1478,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Ellipsis fold barrier: a `Multiply` with a direct
         // `ContinuationPlaceholder` operand is a notational object; leave it
         // unchanged rather than multiplying across the elided terms.
-        if (ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+        if (ops.some((x) => isContinuationOperand(x)))
           return undefined;
         // Check if any operand is a Quantity expression
         const evaluated = ops.map((x) => x.evaluate());

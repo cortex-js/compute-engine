@@ -12,8 +12,14 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isTensor } from './boxed-tensor.js';
-import { isNumber, isFunction, isSymbol } from './type-guards.js';
 import {
+  isNumber,
+  isFunction,
+  isSymbol,
+  isContinuationOperand,
+} from './type-guards.js';
+import {
+  isLinearAlgebraCollection,
   isNumericTuple,
   numericTupleArity,
   hasAccessibleComponents,
@@ -30,6 +36,46 @@ import { BigNumericValue } from '../numeric-value/big-numeric-value.js';
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
 
 /**
+ * Test whether `x` carries a `ContinuationPlaceholder` reachable through
+ * additive structure (`Add`/`Subtract`/`Negate`). Used by the ellipsis fold
+ * barrier to detect a subtraction-spelled ellipsis (`… - \dots`) whose
+ * placeholder the parser buries inside a `Subtract` grouping.
+ */
+function hasAdditiveContinuation(x: Expression): boolean {
+  if (isContinuationOperand(x)) return true;
+  if (isFunction(x, 'Add') || isFunction(x, 'Subtract'))
+    return x.ops.some((op) => hasAdditiveContinuation(op));
+  if (isFunction(x, 'Negate')) return hasAdditiveContinuation(x.op1);
+  return false;
+}
+
+/**
+ * Expand `x` into a flat list of additive terms, decomposing `Add`/`Subtract`/
+ * `Negate` structure WITHOUT folding numeric literals, so a notational sum's
+ * visible samples are preserved. `negate` tracks the accumulated sign from
+ * enclosing `Subtract`/`Negate`. Leaves are canonicalized individually (e.g.
+ * `Negate(2)` → `-2`) but never combined with one another.
+ */
+function additiveTerms(x: Expression, negate: boolean, out: Expression[]): void {
+  if (isFunction(x, 'Add')) {
+    for (const op of x.ops) additiveTerms(op, negate, out);
+    return;
+  }
+  if (isFunction(x, 'Subtract')) {
+    additiveTerms(x.op1, negate, out);
+    additiveTerms(x.op2, !negate, out);
+    return;
+  }
+  // Preserve `Negate(ContinuationPlaceholder)` as an atomic term; otherwise
+  // descend through the negation.
+  if (isFunction(x, 'Negate') && !isContinuationOperand(x)) {
+    additiveTerms(x.op1, !negate, out);
+    return;
+  }
+  out.push(negate ? x.engine._fn('Negate', [x]).canonical : x.canonical);
+}
+
+/**
  *
  * The canonical form of `Add`:
  * - canonicalize the arguments
@@ -42,17 +88,23 @@ export function canonicalAdd(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression {
-  // Ellipsis fold barrier: an `Add` with a direct `ContinuationPlaceholder`
-  // operand (from `\dots`/`\cdots` in a sum) is a *notational* object, not an
-  // arithmetic one. Do not flatten, remove zeros, fold numerics, or sort —
-  // preserve the source operand order and structure so the elided pattern
-  // reads correctly, e.g. `1 + 2 + … + n` stays `Add(1, 2, …, n)`. Checked
-  // before `flatten` so nested anchors (`2n`) are not lifted.
-  if (ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
-    return ce._fn(
-      'Add',
-      ops.map((x) => x.canonical)
-    );
+  // Ellipsis fold barrier: an `Add` carrying a `ContinuationPlaceholder`
+  // (from `\dots`/`\cdots` in a sum) is a *notational* object, not an
+  // arithmetic one. Do not remove zeros, fold numerics, or sort — preserve
+  // the source samples so the elided pattern reads correctly, e.g.
+  // `1 + 2 + … + n` stays `Add(1, 2, …, n)`.
+  //
+  // A subtraction-spelled ellipsis buries the placeholder inside the `Subtract`
+  // groupings the parser emits: `1 - 2 + 4 - \dots + x` parses to
+  // `Add(Subtract(1,2), Subtract(4, …), x)`. Detect the continuation through
+  // that additive structure and expand into flat signed terms *without*
+  // folding, so `1` and `-2` stay distinct samples rather than collapsing to
+  // `-1`. Checked before `flatten` so nested anchors (`2n`) are not lifted.
+  if (ops.some((x) => hasAdditiveContinuation(x))) {
+    const terms: Expression[] = [];
+    for (const op of ops) additiveTerms(op, false, terms);
+    return ce._fn('Add', terms);
+  }
 
   // Make canonical, flatten, and lift nested expressions (associative)
   ops = flatten(ops, 'Add');
@@ -61,7 +113,7 @@ export function canonicalAdd(
   // (e.g. `x + (1 + 2 + … + n)`); if a placeholder surfaced, stay inert and
   // skip the fold/sort below. (Operand order for the nested case is not
   // guaranteed to match the source.)
-  if (ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+  if (ops.some((x) => isContinuationOperand(x)))
     return ce._fn('Add', ops);
 
   // A numeric tuple (point/vector in ℝⁿ) cannot be added to a scalar. Reject
@@ -228,6 +280,16 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // final `widen` used to produce.
   const tensors = args.filter((x) => isTensor(x));
   if (tensors.length === 1) return tensors[0].type.type;
+  // Collection-typed operands (declared matrix/vector/list symbols, OR a
+  // `Multiply` etc. that the type handlers now type as a collection — e.g.
+  // `2Y`, `-1·Y` for `X-Y`, `3X`) widen to the collection type. Hoisted above
+  // the NaN/finiteness early-returns: a collection's `isFinite` is `false`
+  // (like a tuple's), which would otherwise collapse the sum to `number`
+  // (this is why `X-Y`/`3X+2Y` used to mis-type once their scaled terms
+  // became collection-typed). The final `widen` still produces the honest
+  // `finite_integer | matrix` union for a scalar-plus-matrix mix like `X+1`.
+  if (args.some((x) => isLinearAlgebraCollection(x)))
+    return widen(...args.map((x) => x.type.type));
   if (args.some((x) => x.isNaN)) return 'number';
   // (+∞) + (−∞) = NaN: two or more non-finite operands can cancel to NaN.
   const nonFinite = args.filter((x) => x.isFinite === false);
@@ -258,7 +320,7 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
 
   // Ellipsis fold barrier: a direct `ContinuationPlaceholder` operand makes
   // this a notational sum; stay inert (do not fold via `Terms`).
-  if (xs.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+  if (xs.some((x) => isContinuationOperand(x)))
     return xs[0].engine._fn(
       'Add',
       xs.map((x) => x.canonical)
@@ -280,7 +342,7 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
 
   // Ellipsis fold barrier: stay inert for a notational sum.
-  if (xs.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+  if (xs.some((x) => isContinuationOperand(x)))
     return xs[0].engine._fn(
       'Add',
       xs.map((x) => x.canonical)

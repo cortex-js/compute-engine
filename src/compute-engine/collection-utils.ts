@@ -42,6 +42,30 @@ export function isNumericTuple(expr: Expression): boolean {
 }
 
 /**
+ * True when `expr`'s TYPE is a matrix/vector/list-style collection (a `list`,
+ * `collection`, or `indexed_collection` kind) — i.e. the kind of collection
+ * that participates in linear-algebra arithmetic (`Add`/`Multiply`). Numeric
+ * tuples (points/vectors typed `tuple<…>`) are deliberately EXCLUDED: they are
+ * handled separately (component-wise) by `isNumericTuple`.
+ *
+ * Used by the `Add`/`Multiply` type handlers so that a product or sum with a
+ * declared-matrix (or -vector, -list) operand carries the collection type
+ * instead of collapsing to a numeric type. Type-based, so it covers literal
+ * collections AND symbols declared with a collection type (e.g. `X: matrix`).
+ */
+export function isLinearAlgebraCollection(expr: Expression): boolean {
+  const t = expr.type.type;
+  if (t === 'list' || t === 'collection' || t === 'indexed_collection')
+    return true;
+  return (
+    typeof t !== 'string' &&
+    (t.kind === 'list' ||
+      t.kind === 'collection' ||
+      t.kind === 'indexed_collection')
+  );
+}
+
+/**
  * True when `expr` is provably a **scalar** number — a subtype of `number`
  * that is not a numeric tuple — established by one of three shapes:
  *
