@@ -32,6 +32,74 @@ import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
 import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
 
+/**
+ * Collect the dependent-function symbol name(s) from the second argument of
+ * `DSolve`/`NDSolve` (a symbol or a `List` of symbols).
+ */
+function dependentSymbolNames(dependent: Expression): Set<string> {
+  const names = new Set<string>();
+  if (isSymbol(dependent)) names.add(dependent.symbol);
+  else if (isFunction(dependent, 'List'))
+    for (const op of dependent.ops) if (isSymbol(op)) names.add(op.symbol);
+  return names;
+}
+
+/**
+ * Repair a differential equation parsed from LaTeX on a *fresh* engine where
+ * the dependent function `y` is not yet declared as a function. In that state,
+ * `y(x)` parses as an invisible product `InvisibleOperator(y, Delimiter(x))`
+ * instead of the function application `y(x)`, leaving `DSolve` inert. The
+ * `DSolve`/`NDSolve` canonical handlers know the dependent name(s) (the second
+ * argument), so we can locally rewrite `InvisibleOperator(y, Delimiter(args))`
+ * → `y(args)` for those names — including nested occurrences inside `List`
+ * conditions — without perturbing global parser inference. A second parse on
+ * the same engine parses `y(x)` correctly (once `y` is known to be a function),
+ * so this only affects the first-parse form.
+ */
+function repairDependentApplications(
+  expr: Expression,
+  names: Set<string>
+): Expression {
+  if (names.size === 0 || !isFunction(expr)) return expr;
+  const ce = expr.engine;
+
+  if (expr.operator === 'InvisibleOperator') {
+    const ops = expr.ops;
+    const newOps: Expression[] = [];
+    for (let i = 0; i < ops.length; i++) {
+      const cur = ops[i];
+      const next = ops[i + 1];
+      if (
+        isSymbol(cur) &&
+        names.has(cur.symbol) &&
+        next &&
+        isFunction(next, 'Delimiter')
+      ) {
+        const inner = next.op1;
+        const args =
+          inner && isFunction(inner, 'Sequence')
+            ? inner.ops
+            : inner
+              ? [inner]
+              : [];
+        newOps.push(ce.function(cur.symbol, args));
+        i += 1; // consume the delimiter
+      } else newOps.push(repairDependentApplications(cur, names));
+    }
+    if (newOps.length === 1) return newOps[0];
+    return ce.function('InvisibleOperator', newOps);
+  }
+
+  let changed = false;
+  const newOps = expr.ops.map((op) => {
+    const repaired = repairDependentApplications(op, names);
+    if (repaired !== op) changed = true;
+    return repaired;
+  });
+  if (!changed) return expr;
+  return ce.function(expr.operator, newOps);
+}
+
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
   {
     /* @todo
@@ -591,16 +659,21 @@ volumes
             engine.error('missing'),
             engine.error('missing'),
           ]);
+        const dependent = symbolOrListArg(engine, ops[1]);
+        const equation = repairDependentApplications(
+          ops[0],
+          dependentSymbolNames(dependent)
+        );
         if (ops.length === 2)
           return engine._fn('DSolve', [
-            ops[0],
-            symbolOrListArg(engine, ops[1]),
+            equation,
+            dependent,
             engine.error('missing'),
           ]);
 
         return engine._fn('DSolve', [
-          ops[0],
-          symbolOrListArg(engine, ops[1]),
+          equation,
+          dependent,
           symbolArg(engine, ops[2]),
         ]);
       },
@@ -656,9 +729,17 @@ volumes
             ? canonicalLimits(ops[2].ops, { engine })
             : canonicalLimits(ops[2] ? [ops[2]] : [], { engine });
 
+        const dependent = symbolOrListArg(engine, ops[1]);
+        const equation = ops[0]
+          ? repairDependentApplications(
+              ops[0],
+              dependentSymbolNames(dependent)
+            )
+          : missing;
+
         return engine._fn('NDSolve', [
-          ops[0] ?? missing,
-          symbolOrListArg(engine, ops[1]),
+          equation,
+          dependent,
           limits ?? missing,
           ops[3]?.canonical ?? missing,
           ...(ops[4] ? [ops[4].canonical] : []),

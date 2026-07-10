@@ -332,47 +332,40 @@ is its own track: see **Coverage tracks → Rubi**.)
 
 #### B12. ODE solving — `DSolve`/`NDSolve` beyond the first slice
 
-The initial slice landed via contributed PRs #315/#317: first-order linear
-(integrating factor), constant-coefficient homogeneous up to order _n_
-(numeric characteristic roots with clustering), second-order nonhomogeneous
-with polynomial forcing, second-order Cauchy–Euler homogeneous, and fixed-step
-RK4 (scalar + higher-order reduction to systems). Unsupported forms stay
-**inert rather than wrong** — preserve that contract as coverage grows.
-Ranked next steps (good contributor territory):
+`DSolve` now covers first-order linear (integrating factor),
+constant-coefficient homogeneous up to order _n_ (numeric characteristic roots
+with clustering), nonhomogeneous constant-coefficient with polynomial, sine,
+and exponential forcing via undetermined coefficients — including resonance
+(forcing `sin(ωx)` when `±iω` is a characteristic root) and orders ≥ 3 —
+second-order Cauchy–Euler homogeneous, the first-order nonlinear classes
+(separable with _implicit_ `F(y) = G(x) + C` solutions, Bernoulli `v = y^{1−n}`,
+first-order homogeneous `y′ = F(y/x)`, and exact `M dx + N dy = 0`), and
+initial/boundary conditions (solving the linear system for the integration
+constants). `NDSolve` provides fixed-step RK4 (scalar + higher-order reduction
+to systems). Unsupported forms stay **inert rather than wrong** — preserve that
+contract as coverage grows. Ranked next steps (good contributor territory):
 
-- **ODE P2 residue** (from the 2026-07-04 review; all currently inert, no
-  wrong answers): sin/exp forcing via undetermined coefficients including
-  resonance (forcing `sin(ωx)` when `±iω` is a characteristic root),
-  nonhomogeneous support at order ≥ 3, and tolerance hardening in the numeric
-  root clustering.
-- **Initial/boundary conditions.** Accept
-  `DSolve([eq, y(0)=1, y'(0)=0], y, x)` and solve the resulting linear system
-  for the integration constants. Mostly reuses existing machinery
-  (substitute, differentiate, solve); makes `DSolve` the symbolic counterpart
-  of the `NDSolve` IVP.
 - **Verification oracle + graded corpus.** Grade every solver path by
   substituting the solution back into the equation and checking the residual
   vanishes (symbolically or numerically) — the ODE analog of the
   root-substitution oracle in `benchmarks/audit/solve.ts`. Add a CE-vs-SymPy
   `dsolve` harness under `benchmarks/audit/` (update its README index),
   seeded from SymPy's `test_ode.py` (BSD) or the Kamke collection.
-- **First-order nonlinear classes.** Separable `y′ = f(x)·g(y)` first (the
-  largest missing textbook class; requires deciding whether `DSolve` may
-  return _implicit_ solutions `F(y) = G(x) + C`), then the cheap reductions
-  to existing solvers: Bernoulli (`v = y^{1−n}` → linear), first-order
-  homogeneous (`y′ = F(y/x)`, `v = y/x` → separable), and exact
-  `M dx + N dy = 0` with the two classic integrating-factor tests.
 - **`NDSolve` numerics.** Adaptive stepping (RK45 / Dormand–Prince) with an
   error tolerance — fixed-step RK4 silently loses accuracy near rapid
   transients; expose first-order vector IVPs in the API (`rk4System` already
   exists internally); dense-output/interpolating result usable at arbitrary
   `x` instead of a raw sample `List` (composes with `compile()`).
-- **Adjacent, reusing the same kernel:** `RSolve` for linear
-  constant-coefficient recurrences — same characteristic-polynomial /
-  root-multiplicity machinery with an `rⁿ·n^k` basis instead of
-  `e^{rx}·x^k`; and a `LaplaceTransform`/`InverseLaplaceTransform` pair,
-  which is a capability on its own and a second, independent route to
-  constant-coefficient IVPs (cross-checks the initial-conditions work).
+- **Tolerance hardening** in the numeric characteristic-root clustering, so
+  near-degenerate roots are grouped reliably as coverage of higher-order
+  nonhomogeneous problems grows.
+- **Adjacent, reusing the same kernel:** a
+  `LaplaceTransform`/`InverseLaplaceTransform` pair (currently inert) — a
+  capability on its own and a second, independent route to constant-coefficient
+  IVPs that cross-checks the initial-conditions work. (`RSolve` already reuses
+  the characteristic-polynomial / root-multiplicity machinery for linear
+  constant-coefficient recurrences, with an `rⁿ·n^k` basis instead of
+  `e^{rx}·x^k`.)
 
 #### B13. Wester capability gaps — the skip ledger in `wester.test.ts`
 

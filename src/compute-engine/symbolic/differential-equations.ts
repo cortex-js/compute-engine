@@ -134,6 +134,27 @@ function hasDependentOrDerivative(
 }
 
 /**
+ * Whether `expr` contains a derivative (order ≥ 1) of the dependent function
+ * anywhere. Unlike `hasDependentOrDerivative`, a bare `y(x)` does not match —
+ * only genuine derivative terms do.
+ */
+function hasDerivativeOfDependent(
+  expr: Expression,
+  dependentName: string,
+  independentName: string
+): boolean {
+  if (
+    derivativeOrderOfDependent(expr, dependentName, independentName) !==
+    undefined
+  )
+    return true;
+  if (!isFunction(expr)) return false;
+  return expr.ops.some((op) =>
+    hasDerivativeOfDependent(op, dependentName, independentName)
+  );
+}
+
+/**
  * Whether `expr` mentions the dependent function head (or symbol) anywhere,
  * regardless of its argument. Unlike `hasDependentOrDerivative`, this also
  * matches non-standard occurrences such as `y(2x)`, which are not valid
@@ -1583,6 +1604,23 @@ function termDependentPower(
       : undefined;
   }
 
+  // A term like `y(x)/x` stays a `Divide` after simplification. Fold it into a
+  // coefficient of the same power, provided the denominator is free of the
+  // dependent function (otherwise the division would shift the power).
+  if (isFunction(term, 'Divide')) {
+    const numerator = termDependentPower(term.op1, dependentCall);
+    if (!numerator) return undefined;
+    if (
+      isFunction(dependentCall) &&
+      term.op2.has(dependentCall.operator)
+    )
+      return undefined;
+    return {
+      power: numerator.power,
+      coefficient: numerator.coefficient.div(term.op2).simplify(),
+    };
+  }
+
   if (!isFunction(term, 'Multiply')) return undefined;
 
   let power: Expression | undefined;
@@ -1602,7 +1640,18 @@ function termDependentPower(
   };
 }
 
-function solveBernoulliFirstOrder(
+/**
+ * Isolate `y'` from a first-order ODE, returning the explicit right-hand side
+ * `f` of `y' = f(x, y)`.
+ *
+ * The fast path handles a derivative already alone on one side (`y' = f` or
+ * `f = y'`). Otherwise it normalizes a general first-order equation — e.g.
+ * `y' + y = x·y³` — by splitting it into `a·y' + b·y + rest = 0` and returning
+ * `-(b·y + rest)/a`, provided the derivative coefficient `a` is nonzero and
+ * free of the dependent function, and no higher-order derivative survives (this
+ * is a *first*-order normalizer).
+ */
+function firstOrderExplicitRhs(
   equation: Expression,
   dependentCall: Expression,
   dependentName: string,
@@ -1613,12 +1662,47 @@ function solveBernoulliFirstOrder(
     dependentName,
     independentName
   );
-  if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+  if (rhsInfo) return rhsInfo.order === 1 ? rhsInfo.rhs : undefined;
+
+  if (!isFunction(equation, 'Equal')) return undefined;
+
+  const { derivative, dependent, rest } = equationCoefficients(
+    equation,
+    dependentName,
+    independentName
+  );
+  if (
+    derivative.isSame(0) ||
+    hasDependentOrDerivative(derivative, dependentName, independentName) ||
+    hasDerivativeOfDependent(dependent, dependentName, independentName) ||
+    hasDerivativeOfDependent(rest, dependentName, independentName)
+  )
+    return undefined;
+
+  return dependent
+    .mul(dependentCall)
+    .add(rest)
+    .neg()
+    .div(derivative)
+    .simplify();
+}
+
+function solveBernoulliFirstOrder(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const rhs = firstOrderExplicitRhs(
+    equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (rhs === undefined) return undefined;
 
   const ce = equation.engine;
-  const terms = isFunction(rhsInfo.rhs, 'Add')
-    ? rhsInfo.rhs.ops
-    : [rhsInfo.rhs];
+  const terms = isFunction(rhs, 'Add') ? rhs.ops : [rhs];
   let linearCoefficient = ce.Zero;
   let nonlinearCoefficient: Expression | undefined;
   let nonlinearPower: Expression | undefined;

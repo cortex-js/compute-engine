@@ -151,6 +151,22 @@ function tryIntegrationByParts(
 }
 
 /**
+ * If `expr` is linear in `index` (`a·index + b` with `a`, `b` free of the
+ * index and `a ≠ 0`), return its slope `a`; otherwise null. `expr` is linear
+ * in the index exactly when it mentions the index and its derivative is a
+ * nonzero index-free constant.
+ */
+function linearIndexCoefficient(
+  expr: Expression,
+  index: string
+): Expression | null {
+  if (!expr.has(index)) return null;
+  const d = differentiate(expr, index);
+  if (!d || d.has(index) || d.isSame(0)) return null;
+  return d;
+}
+
+/**
  * Simple antiderivative without integration by parts (to avoid recursion).
  */
 function antiderivativeSimple(
@@ -173,14 +189,17 @@ function antiderivativeSimple(
   if (isFunction(fn, 'Cos') && sym(fn.op1) === index)
     return ce.expr(['Sin', index]);
 
-  // Exponential
-  if (isFunction(fn, 'Exp') && sym(fn.op1) === index) return fn;
-  if (
-    isFunction(fn, 'Power') &&
-    sym(fn.op1) === 'ExponentialE' &&
-    sym(fn.op2) === index
-  )
-    return fn;
+  // Exponential with a linear argument: ∫e^{a·x+b} dx = e^{a·x+b}/a.
+  // (Covers the plain `e^x` case with a = 1.) The exponent is linear in the
+  // index exactly when its derivative is a nonzero index-free constant.
+  if (isFunction(fn, 'Exp')) {
+    const a = linearIndexCoefficient(fn.op1, index);
+    if (a) return fn.div(a).simplify();
+  }
+  if (isFunction(fn, 'Power') && sym(fn.op1) === 'ExponentialE') {
+    const a = linearIndexCoefficient(fn.op2, index);
+    if (a) return fn.div(a).simplify();
+  }
 
   // Power rule: x^n -> x^(n+1)/(n+1)
   if (isFunction(fn, 'Power') && sym(fn.op1) === index) {

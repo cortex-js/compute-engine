@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
 
 function dsolve(equation: unknown, dependent = 'y', independent = 'x') {
@@ -364,6 +365,37 @@ describe('DSolve', () => {
     expect(solution.operator).toBe('List');
     expect(
       verifyEquationSolution(equation, solution, { c_1: 2, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves Bernoulli equations with the linear term on the left', () => {
+    // `y' + y = x·y³` — the derivative is not alone on one side, so the
+    // recognizer must first isolate `y'` before splitting the Bernoulli terms.
+    const equation = [
+      'Equal',
+      ['Add', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+      ['Multiply', 'x', ['Power', ['y', 'x'], 3]],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 2, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves Bernoulli equations with a Divide linear term', () => {
+    // `y' − y/x = y²` — the linear term stays a `Divide` after canonicalization.
+    const equation = [
+      'Equal',
+      ['Subtract', ['D', ['y', 'x'], 'x'], ['Divide', ['y', 'x'], 'x']],
+      ['Power', ['y', 'x'], 2],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 3, x: 0.75 })
     ).toBe(true);
   });
 
@@ -1188,6 +1220,36 @@ describe('DSolve', () => {
     expect(implicit.operator).toBe('List');
     expect(implicit.toString()).toEqual(explicit.toString());
     expect(implicit.toString()).toMatchInlineSnapshot(`[y(x) === "c_1" * e^x]`);
+  });
+});
+
+// On a *fresh* engine, the dependent function `y` is not yet known to be a
+// function, so the first LaTeX parse of `y(x)` yields an invisible product
+// `InvisibleOperator(y, Delimiter(x))` instead of a function application,
+// leaving DSolve inert. These tests must therefore each construct their own
+// engine — the shared engine in `../utils` would mask the bug because a prior
+// parse would already have declared `y` as a function.
+describe('DSolve LaTeX parsing on a fresh engine', () => {
+  test('solves a first-order equation entered as LaTeX', () => {
+    const ce = new ComputeEngine();
+    const solution = ce
+      .parse(String.raw`\operatorname{DSolve}(y'(x)=y(x), y, x)`)
+      .evaluate();
+
+    expect(solution.operator).toBe('List');
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === "c_1" * e^x]`);
+  });
+
+  test('solves a second-order IC list entered as LaTeX', () => {
+    const ce = new ComputeEngine();
+    const solution = ce
+      .parse(
+        String.raw`\operatorname{DSolve}(\left[y''(x)+y(x)=0, y(0)=1, y'(0)=0\right], y, x)`
+      )
+      .evaluate();
+
+    expect(solution.operator).toBe('List');
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) === cos(x)]`);
   });
 });
 
