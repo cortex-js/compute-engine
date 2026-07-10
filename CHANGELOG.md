@@ -23,6 +23,53 @@
   \psi^{(m+1)}(u)`. The `Gamma`/`Digamma` pole expansions themselves were
   rebuilt on closed-form coefficients (exp-of-log recurrence, harmonic-number
   sums) — `Series` at a `Digamma` pole is ~20× faster.
+- **Numeric limits of sums converge instead of hanging.** `N()` of a `Limit`
+  at `\infty` whose body contains a `Sum` with a variable-dependent bound ran
+  an unbounded, uninterruptible loop — past any `ce.timeLimit` (the numeric
+  ladder samples at geometrically increasing arguments, so a single compiled
+  summation could run for hours). The probe paths now compile `Sum`/`Product`
+  loops with an iteration budget (over-budget samples read as the ladder's
+  existing "unreliable" signal) and the sampling ladder checks the evaluation
+  deadline between rungs. The flagship cases now *converge, quickly*:
+  `\lim_{n\to\infty}(\sum_{k=1}^{n} 1/k - \ln n)` evaluates to the
+  Euler–Mascheroni constant (to 12 digits) and
+  `\lim_{n\to\infty}\frac{4}{n^2}\sum_{k=1}^{n}\sqrt{n^2-k^2}` to `\pi` — in
+  milliseconds, where both previously hung.
+- **Richardson extrapolation uses the correct series assumption.** The
+  numeric limit fallback's extrapolation defaulted to an *even*-series
+  acceleration (`power = 2`, a transcription bug — its own documentation and
+  Richardson.jl say 1), so any approach with odd-power terms (e.g.
+  `H_n - \ln n - \gamma \sim 1/2n`) never converged its error estimate and
+  was reported as `NaN`. With the Taylor default, decaying oscillations now
+  resolve too (`\operatorname{sinc}` at `-\infty` → `0`) while genuinely
+  divergent oscillations (`\sin x` at `\infty`) still correctly return `NaN`.
+
+### Collections
+
+- **Symbolic-bound `Range` and `Linspace` stay inert instead of collapsing.**
+  A symbolic bound was silently coerced to `1`, so `Range(1, n)` behaved as
+  the one-element range `[1]` everywhere: `Count(Range(1, n))` evaluated to
+  `1`, `Sum(Range(1, n))` to `1`, `Range(1, n) = Range(1, m)` to `True`, and
+  materialization produced the literal `[1]`. All of these now stay
+  symbolic/indeterminate, across the scalar accessors (`Count`, `At`,
+  equality, `SubsetOf`, element sign), iteration, materialization, and the
+  extrema (`Supremum`/`Infimum`/`Min`/`Max`). Likewise for `Linspace`: a
+  *symbolic* point count is indeterminate (only a *missing* count selects
+  the default of 50), and symbolic endpoints no longer materialize as `NaN`
+  literals or fold `Sum(Linspace(a, 1, 3))` to `0` — a collection that
+  reports a size but cannot compute its elements now keeps its lazy form
+  rather than fold to the reduction's initial value. Concrete bounds are
+  unaffected.
+
+### Compilation
+
+- **New `iterationBudget` compile option.** `expr.compile({ iterationBudget:
+  1e6 })` caps the trip count of emitted `Sum`/`Product` loops: a loop whose
+  iteration count would exceed the budget — including an *infinite* bound,
+  which previously compiled to a loop that never terminated — evaluates to
+  `NaN` instead of running. Compilation without the option is unchanged
+  (unbounded loops, zero overhead); the engine's numeric limit probes use it
+  internally to stay interruptible.
 
 ### Special Functions
 
@@ -51,6 +98,18 @@
   special values compile and fire: `simplify(PolyGamma(1, 1)) → π²/6`,
   `PolyGamma(1, 1/4) → π² + 8·Catalan`, `PolyGamma(1, 1/2) → π²/2`, the
   digamma/polygamma recurrence and reflection identities, and more.
+- **Fungrim identities: set-builder comprehensions get a real encoding (+8
+  rules, artifact 1,450).** Corpus formulas of the shape
+  `{f(x) : x \in S, P(x)}` used to translate to a literal `Set` that CE read
+  as a two-element enumeration — producing wrong scalars where one was
+  consulted (`Count` of a set-builder returned its operand count). They now
+  translate to the faithful `Map(Filter(S, P), f)` form, which both fixed
+  the miscounts and *recovered* nine identities whose match side had been
+  untranslatable — notably the prime-counting definition, so with
+  `loadIdentities(ce)`, `simplify` rewrites
+  `Count(\{p \in \mathrm{Primes} : p \le x\})` to `\operatorname{PrimePi}(x)`.
+  The full 2,551-entry corpus now validates with **zero** numerically false
+  entries.
 
 ## 0.73.0 _2026-07-09_
 
