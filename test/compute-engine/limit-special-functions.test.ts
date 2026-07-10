@@ -9,24 +9,49 @@ function lim(body: any, a: any) {
 
 describe('LIMITS AT SPECIAL-FUNCTION POLES (soundness)', () => {
   // Regression: the symbolic limit engine used to substitute `Digamma(-1)` as a
-  // finite symbol and return a WRONG 0 for `lim (x+1)·Digamma(x)`. It must now
-  // never return that wrong value (it defers; the result stays unevaluated or is
-  // computed correctly).
-  test('a cancelled Digamma pole does not return a wrong finite value', () => {
+  // finite symbol and return a WRONG 0 for `lim (x+1)·Digamma(x)`. Since the
+  // 7c pole-asymptotics wiring (the pole guard resolves the limit from the
+  // exact Laurent expansion) the answer is the exact −1 — never the wrong 0.
+  test('a cancelled Digamma pole evaluates exactly (item 7c)', () => {
     const e = lim(['Multiply', ['Add', 'x', 1], ['Digamma', 'x']], -1).evaluate();
-    // The true limit is -1; the engine must NOT claim it is 0.
     expect(e.is(0)).not.toBe(true);
-    // It defers rather than guessing: stays an unevaluated Limit.
-    expect(e.operator).toBe('Limit');
+    expect(e.is(-1)).toBe(true);
   });
 
-  test('cancelled Gamma/Zeta poles are not given a wrong value', () => {
+  test('cancelled Gamma/Zeta poles evaluate exactly (item 7c)', () => {
+    // lim x·Γ(x) at 0 = 1 (the residue of Γ at 0)
+    expect(lim(['Multiply', 'x', ['Gamma', 'x']], 0).evaluate().is(1)).toBe(
+      true
+    );
+    // lim Γ(x) − 1/x at 0 = −γ — the constant term of the Laurent expansion,
+    // exactly the quantity a leading-term-only rewrite gets wrong.
+    const g = lim(['Subtract', ['Gamma', 'x'], ['Divide', 1, 'x']], 0)
+      .evaluate();
+    expect(g.is(0)).not.toBe(true);
+    expect(g.json).toEqual(['Negate', 'EulerGamma']);
+    // lim (x−1)·ζ(x) at 1 = 1 (the residue of ζ at 1)
     expect(
-      lim(['Multiply', 'x', ['Gamma', 'x']], 0).evaluate().is(0)
-    ).not.toBe(true);
+      lim(['Multiply', ['Subtract', 'x', 1], ['Zeta', 'x']], 1).evaluate().is(1)
+    ).toBe(true);
+  });
+
+  test('the polygamma ladder evaluates at its poles (item 7c)', () => {
+    // ψ₁(x) ~ 1/x² near 0, so x²·ψ₁(x) → 1
     expect(
-      lim(['Subtract', ['Gamma', 'x'], ['Divide', 1, 'x']], 0).evaluate().is(0)
-    ).not.toBe(true);
+      lim(['Multiply', ['Square', 'x'], ['Trigamma', 'x']], 0).evaluate().is(1)
+    ).toBe(true);
+    // ψ⁽²⁾(x) ~ −2/x³ near 0, so x³·ψ⁽²⁾(x) → −2
+    expect(
+      lim(['Multiply', ['Power', 'x', 3], ['PolyGamma', 2, 'x']], 0)
+        .evaluate()
+        .is(-2)
+    ).toBe(true);
+  });
+
+  test('a bare pole still defers (two-sided pole limits stay inert)', () => {
+    // Matches the engine-wide convention (`lim 1/x²` at 0 is inert too): a
+    // negative-valuation expansion is not converted to ±∞ by this path.
+    expect(lim(['Gamma', 'x'], 0).evaluate().operator).toBe('Limit');
   });
 
   // The numeric path still works where its sample ladder avoids the (integer-

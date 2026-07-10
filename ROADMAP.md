@@ -101,9 +101,6 @@ scipy is installed in `./venv`.
 
 **Series residue (small follow-ups from the landed feature):**
 
-- Phase 3 (design-gated): wire the limit engine's pole-deferral slot
-  (`symbolic/limit.ts`) to the Laurent kernel — closes Strategic 7(c) — and
-  rebase `Residue` on it.
 - AsciiMath `toString()` still prints series in canonical (descending) order;
   the LaTeX serializer has the textbook ascending/BigO-last rule
   (`definitions-arithmetic.ts`), AsciiMath would need a parallel sort in
@@ -756,18 +753,25 @@ the store are only partially built:
   `complex` are excluded from these rewrites entirely — see
   [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md#generic-real-simplification-policy).)_
 
-- **(c) Exact asymptotics at special-function poles.** `Residue` and the limit
-  engine currently _defer_ when a gamma/zeta-family function sits at a pole (the
-  limit-side deferral is the pole soundness guard in `symbolic/limit.ts`, where
-  the exact asymptotic would slot in): `lim_{x→-1}(x+1)·Digamma(x)` stays
-  unevaluated instead of computing `-1`, and a residue whose cofactor is itself
-  an unreduced special function (`Gamma·Zeta` at
-  1. is not handled. Both need real Laurent-series asymptotics for these
-     functions — a leading-term rewrite is unsound
-     (`lim_{x→0} Gamma(x) − 1/x = −γ`, not 0). Smaller adjacent gaps: residue at
-     infinity, and a "sum of residues in a region" helper.
+- **(c) Exact asymptotics at special-function poles — LANDED 2026-07-10**
+  (the limit guard and `Residue` are wired to the exact Laurent kernel;
+  design + record in
+  [`docs/plans/2026-07-10-pole-asymptotics-design.md`](./docs/plans/2026-07-10-pole-asymptotics-design.md)).
+  Remaining rungs on the same `laurentData` API, demand-paced:
+  - **Residue at infinity** — `Res_∞ f = −Res_{s=0} f(1/s)/s²`; the
+    `seriesAtInfinity` substitution machinery already exists.
+  - **Sum-of-residues-in-a-region helper** — needs a pole-enumeration API
+    over the analytic-property store.
+  - **Directional/`±∞` limits at poles** — a negative-valuation expansion is
+    deliberately not converted to `±∞` today, matching the engine-wide
+    convention that two-sided pole limits stay inert (`lim 1/x²` at 0); an
+    engine-wide convention decision, not a kernel gap.
+  - **`Beta` at its poles** — needs the `Γ`-quotient rewrite first
+    (`GammaLn` is a genuine non-goal: logarithmic branch point, not
+    meromorphic).
 
-**Effort:** open-ended; each is a design item in its own right.
+**Effort:** (a) residual and the (c) rungs are each small-to-medium,
+self-contained items.
 
 #### 8. Disjunctive guards (`Or`) in the assumptions system
 

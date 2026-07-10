@@ -9,6 +9,7 @@ import {
   getPolynomialCoefficients,
 } from '../boxed-expression/polynomials.js';
 import { reduceTransformerHead } from '../boxed-expression/utils.js';
+import { laurentData } from './series.js';
 import { limit as numericLimit } from '../numerics/numeric.js';
 import {
   checkDeadline,
@@ -73,17 +74,32 @@ export function symbolicLimit(
     // Soundness guard for special-function poles. The structural strategies
     // (notably direct substitution) don't model the poles of Gamma/Digamma/…,
     // so `(x+1)·Digamma(x)` at -1 substitutes `Digamma(-1)` as a finite symbol
-    // and returns a WRONG 0. If a special function provably blows up at a finite
-    // limit point, defer (return undefined) so the caller falls back to the
-    // numeric path rather than risk a wrong value. (Exact asymptotic expansion
-    // of these is future work — a leading-term rewrite is unsound, e.g.
-    // `lim_{x→0} Gamma(x) − 1/x = −γ`, not 0.) Detection uses the pole-aware
-    // `N()` store (item 7), so it covers any argument that lands on a pole.
+    // and returns a WRONG 0. If a special function provably blows up at the
+    // finite limit point, resolve the limit from the exact Laurent expansion
+    // about the point instead (item 7c: the constant term is exactly the
+    // quantity a leading-term rewrite gets wrong — `lim_{x→0} Gamma(x) − 1/x
+    // = −γ`, not 0). When the Laurent kernel declines (branch point,
+    // essential singularity, exhausted window) or the expansion has a pole
+    // (negative valuation), defer (return undefined) so the caller falls back
+    // rather than risk a wrong value — two-sided pole limits stay inert
+    // engine-wide (`lim 1/x²` at 0), and this path keeps that convention.
+    // Detection uses the pole-aware `N()` store (item 7), so it covers any
+    // argument that lands on a pole.
     if (point.isFinite === true && b.has(SPECIAL_POLE_FNS)) {
       for (const fn of SPECIAL_POLE_FNS) {
         for (const s of b.getSubexpressions(fn)) {
           const at = s.subs({ [x]: point }).N();
-          if (at.isNaN === true || at.isFinite !== true) return undefined;
+          if (at.isNaN === true || at.isFinite !== true) {
+            // W = 3: only the constant term is consulted, and the kernel
+            // deepens internally where a denominator demands it.
+            const L = laurentData(b, x, point, ce, 3);
+            if (L && L.v > 0) return ce.Zero;
+            if (L && L.v === 0) {
+              const c0 = L.coeff(0).evaluate();
+              if (c0.isValid && c0.isNaN !== true) return c0;
+            }
+            return undefined;
+          }
         }
       }
     }

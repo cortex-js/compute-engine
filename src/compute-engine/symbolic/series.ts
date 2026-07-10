@@ -11,7 +11,6 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
 import { differentiate } from './derivative.js';
-import { symbolicLimit } from './limit.js';
 import { trigToExp } from './trig-rewrite.js';
 import { getFunctionProperties } from '../function-properties/index.js';
 
@@ -621,6 +620,19 @@ function mulLaurent(
   return { v, c, hi };
 }
 
+/** Termwise derivative `d/dt` of a Laurent value: `Σ cᵢ t^{v+i}` →
+ * `Σ (v+i)·cᵢ t^{v+i−1}`. Each differentiation consumes one order of
+ * reliability (`hi` drops by 1). Used for the polygamma ladder
+ * (ψ⁽ᵐ⁾ = dᵐ/dtᵐ ψ), where the pole data of `Digamma` generates the rest. */
+function diffLaurent(ce: ComputeEngine, a: Laurent): Laurent {
+  const c = a.c.map((ci, i) => {
+    const p = a.v + i;
+    if (p === 0 || ci.isSame(0)) return ce.Zero;
+    return ce.function('Multiply', [ce.number(p), ci]);
+  });
+  return { v: a.v - 1, c, hi: a.hi - 1 };
+}
+
 function powLaurent(
   ce: ComputeEngine,
   base: Laurent,
@@ -662,7 +674,13 @@ function reciprocalLaurent(
 // coefficient *data* lives here, because the store records only the pole set,
 // not Laurent coefficients.
 
-const SPECIAL_POLE_FNS = new Set(['Gamma', 'Digamma', 'Zeta']);
+const SPECIAL_POLE_FNS = new Set([
+  'Gamma',
+  'Digamma',
+  'Trigamma',
+  'PolyGamma',
+  'Zeta',
+]);
 
 /** Confirm `point` is a recorded pole of `op` per the analytic-property store. */
 function isRecordedPole(
@@ -670,6 +688,9 @@ function isRecordedPole(
   op: string,
   point: Expression
 ): boolean {
+  // The polygamma ladder ψ⁽ᵐ⁾ shares ψ's pole set exactly (differentiation
+  // introduces no new poles); the store records the set under `Digamma`.
+  if (op === 'Trigamma' || op === 'PolyGamma') op = 'Digamma';
   const poles = getFunctionProperties(ce, op)?.poles;
   if (!poles) return false;
   try {
@@ -679,50 +700,73 @@ function isRecordedPole(
   }
 }
 
-/** The Taylor series (as an expression in a fresh variable) of `ln Γ(1+u)`,
- * i.e. `−γ·u + Σ_{k≥2} (−1)^k ζ(k)/k · u^k`, truncated to degree `deg`. */
-function lnGammaShiftExpr(
-  ce: ComputeEngine,
-  u: Expression,
-  deg: number
-): Expression {
-  const terms: Expression[] = [
-    ce.function('Multiply', [
-      ce.function('Negate', [ce.symbol('EulerGamma')]),
-      u,
-    ]),
-  ];
-  for (let k = 2; k <= deg; k++) {
-    const coeff = ce.function('Multiply', [
-      ce.function('Divide', [ce.number(k % 2 === 0 ? 1n : -1n), ce.number(k)]),
-      ce.function('Zeta', [ce.number(k)]),
-    ]);
-    terms.push(
-      ce.function('Multiply', [coeff, ce.function('Power', [u, ce.number(k)])])
-    );
-  }
-  return ce.function('Add', terms);
+/** `ζ(k)` in its exact evaluated form: `π²/6`-style closed forms for even
+ * `k` (exact `Zeta` evaluation via Bernoulli rationals), symbolic `Zeta(k)`
+ * for odd `k`. */
+function zetaAt(ce: ComputeEngine, k: number): Expression {
+  return ce.function('Zeta', [ce.number(k)]).evaluate();
+}
+
+/** The generalized harmonic number `Hₙ⁽ˢ⁾ = Σ_{m=1}^{n} 1/mˢ` as an exact
+ * rational expression. */
+function harmonicExpr(ce: ComputeEngine, n: number, s: number): Expression {
+  if (n === 0) return ce.Zero;
+  const terms: Expression[] = [];
+  for (let m = 1; m <= n; m++)
+    terms.push(ce.function('Divide', [ce.One, ce.number(BigInt(m) ** BigInt(s))]));
+  return (terms.length === 1 ? terms[0] : ce.function('Add', terms)).evaluate();
 }
 
 /**
- * The regular part `R(u)` of `Γ(x)` near its pole `x = −n`, as an expression in
- * `u = x + n`: `Γ(x) = (1/u)·R(u)` with `R(u) = Γ(1+u) / ∏_{j=1}^{n}(u − j)` and
- * `Γ(1+u) = exp(lnΓShift)`. `R(0) = (−1)^n/n! ≠ 0`, so `R` is analytic.
+ * Taylor coefficients `g₀ … g_W` of `Γ(1+u)` via the exp-of-log recurrence
+ * `k·gₖ = Σ_{j=1}^{k} sⱼ·g_{k−j}` with `s₁ = −γ`, `sⱼ = (−1)ʲ ζ(j)` (j ≥ 2)
+ * — the log-derivative form of `Γ(1+u) = exp(−γu + Σ_{k≥2} (−1)^k ζ(k)/k·uᵏ)`.
+ * Exact, and far cheaper than generic symbolic series composition of the
+ * `exp` (the previous implementation, which cost seconds per order).
  */
-function gammaRegularPartExpr(
-  ce: ComputeEngine,
-  u: Expression,
-  n: number,
-  deg: number
-): Expression {
-  const gammaShift = ce.function('Exp', [lnGammaShiftExpr(ce, u, deg)]);
-  if (n === 0) return gammaShift;
-  const factors: Expression[] = [];
-  for (let j = 1; j <= n; j++)
-    factors.push(ce.function('Subtract', [u, ce.number(j)]));
-  const denom =
-    factors.length === 1 ? factors[0] : ce.function('Multiply', factors);
-  return ce.function('Divide', [gammaShift, denom]);
+function gammaShiftCoeffs(ce: ComputeEngine, W: number): Coeffs {
+  const s: Expression[] = [ce.Zero, ce.symbol('EulerGamma').neg()];
+  for (let j = 2; j <= W; j++)
+    s.push(j % 2 === 0 ? zetaAt(ce, j) : zetaAt(ce, j).neg());
+  const g: Coeffs = [ce.One];
+  for (let k = 1; k <= W; k++) {
+    const terms: Expression[] = [];
+    for (let j = 1; j <= k; j++) {
+      if (s[j].isSame(0) || g[k - j].isSame(0)) continue;
+      terms.push(ce.function('Multiply', [s[j], g[k - j]]));
+    }
+    const sum =
+      terms.length === 0
+        ? ce.Zero
+        : terms.length === 1
+          ? terms[0]
+          : ce.function('Add', terms);
+    g.push(ce.function('Divide', [sum, ce.number(k)]).evaluate());
+  }
+  return g;
+}
+
+/** Series-divide Taylor coefficients by the linear factor `(u − j)`, `j ≠ 0`:
+ * `b_k = −(1/j)·Σ_{i=0}^{k} a_i/j^{k−i}` (exact convolution). */
+function divideByLinear(ce: ComputeEngine, a: Coeffs, j: number): Coeffs {
+  const b: Coeffs = [];
+  for (let k = 0; k < a.length; k++) {
+    const terms: Expression[] = [];
+    for (let i = 0; i <= k; i++) {
+      if (a[i].isSame(0)) continue;
+      terms.push(
+        ce.function('Divide', [a[i], ce.number(BigInt(j) ** BigInt(k - i))])
+      );
+    }
+    const sum =
+      terms.length === 0
+        ? ce.Zero
+        : terms.length === 1
+          ? terms[0]
+          : ce.function('Add', terms);
+    b.push(ce.function('Divide', [sum, ce.number(-j)]).evaluate());
+  }
+  return b;
 }
 
 /**
@@ -738,8 +782,10 @@ function specialLaurent(
   W: number
 ): Laurent | null {
   if (point.im !== 0) return null;
+  // ψ₁ = dψ/dx: differentiate the Digamma pole data (the PolyGamma general
+  // order goes through `polygammaLaurent` from its own `expandLaurent` case).
+  if (op === 'Trigamma') return polygammaLaurent(ce, 1, point, W);
   if (!isRecordedPole(ce, op, point)) return null;
-  const u = ce.symbol('_seriesU');
 
   if (op === 'Zeta') {
     // ζ(s) = 1/(s−1) + γ + Σ_{k≥1} (−1)^k/k!·γ_k·(s−1)^k. Only the residue and
@@ -754,34 +800,57 @@ function specialLaurent(
   const n = -re;
 
   if (op === 'Gamma') {
-    // Γ(x) = (1/u)·R(u); expand R to degree W+1 → Laurent powers −1..W.
-    const R = gammaRegularPartExpr(ce, u, n, W + 1);
-    const taylor = expandViaSeeds(R, '_seriesU', ce.Zero, ce, W + 1);
-    if (!taylor) return null;
-    return { v: -1, c: taylor.map((c) => c.evaluate()), hi: W };
+    // Γ(−n+u) = (1/u)·R(u) with R(u) = Γ(1+u)/∏_{j=1}^{n}(u−j): the exact
+    // Γ(1+u) Taylor coefficients divided by each linear factor in turn.
+    // R(0) = (−1)ⁿ/n! ≠ 0, so R is analytic. Laurent powers −1..W.
+    let R = gammaShiftCoeffs(ce, W + 1);
+    for (let j = 1; j <= n; j++) R = divideByLinear(ce, R, j);
+    return { v: -1, c: R, hi: W };
   }
 
   if (op === 'Digamma') {
-    // ψ(x) = d/dx ln Γ(x) = −1/u + R'(u)/R(u), R the Gamma regular part.
-    const R = gammaRegularPartExpr(ce, u, n, W + 1);
-    const dR = differentiate(R, '_seriesU');
-    if (dR === undefined) return null;
-    const reg = expandViaSeeds(
-      ce.function('Divide', [dR, R]),
-      '_seriesU',
-      ce.Zero,
-      ce,
-      W
-    );
-    if (!reg) return null;
-    return {
-      v: -1,
-      c: [ce.NegativeOne, ...reg.map((c) => c.evaluate())],
-      hi: W,
-    };
+    // ψ(−n+u) = −1/u + (−γ + Hₙ) + Σ_{k≥1} ((−1)^{k+1} ζ(k+1) + Hₙ⁽ᵏ⁺¹⁾)·uᵏ
+    // — from ψ(x) = ψ(1+x+n) − Σ_{j=0}^{n} 1/(x+j) and the ψ(1+u) Taylor
+    // series; verified at 30 digits with mpmath (n = 0, 1, 3).
+    const c: Coeffs = [
+      ce.NegativeOne,
+      ce.function('Add', [
+        ce.symbol('EulerGamma').neg(),
+        harmonicExpr(ce, n, 1),
+      ]).evaluate(),
+    ];
+    for (let k = 1; k <= W; k++) {
+      const zk = k % 2 === 1 ? zetaAt(ce, k + 1) : zetaAt(ce, k + 1).neg();
+      c.push(ce.function('Add', [zk, harmonicExpr(ce, n, k + 1)]).evaluate());
+    }
+    return { v: -1, c, hi: W };
   }
 
   return null;
+}
+
+/**
+ * Laurent data of the order-`m` polygamma ψ⁽ᵐ⁾ about a (recorded) pole of ψ:
+ * the `Digamma` data differentiated termwise `m` times. Each differentiation
+ * consumes one reliable order, so the base expansion is computed `m` orders
+ * deeper. `m = 0` is ψ itself.
+ */
+function polygammaLaurent(
+  ce: ComputeEngine,
+  m: number,
+  point: Expression,
+  W: number
+): Laurent | null {
+  const base = specialLaurent(
+    ce,
+    'Digamma',
+    point,
+    Math.min(W + m, MAX_SERIES_ORDER)
+  );
+  if (!base) return null;
+  let L = base;
+  for (let i = 0; i < m; i++) L = diffLaurent(ce, L);
+  return L;
 }
 
 /** Compose a Laurent outer series (in `u`) with an inner composition variable
@@ -991,6 +1060,21 @@ function expandLaurent(
     }
     case 'Power':
       return powerSeriesLaurent(expr, x, x0, ce, W);
+    case 'PolyGamma': {
+      // ψ⁽ᵐ⁾(g(x)) for a literal integer order m ≥ 0: the ψ pole data
+      // differentiated m times, composed with the inner series. (The binary
+      // shape cannot ride the unary default path below; a symbolic or
+      // x-dependent order defers.)
+      const m = asSmallInteger(ops[0]);
+      if (m === null || m < 0 || ops[0].has(x)) return null;
+      const inner = expandLaurent(ops[1], x, x0, ce, W);
+      if (!inner) return null;
+      const b0 = coeffAt(ce, inner, 0);
+      const outer = polygammaLaurent(ce, m, b0, W);
+      if (!outer) return null;
+      const w = addLaurent(ce, inner, lConst(ce, b0.neg(), W), W);
+      return composeSpecial(ce, outer, w, W);
+    }
     case 'Root': {
       const m = asSmallInteger(ops[1]);
       if (m === null || m === 0) return null;
@@ -1038,6 +1122,47 @@ function expandLaurent(
       return null;
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+//  Laurent data accessor (the 7c pole-asymptotics API)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Exact local Laurent data of a function about a finite point — the shared
+ * accessor behind the limit engine's pole handling and `Residue` (Strategic
+ * item 7c; see `docs/plans/2026-07-10-pole-asymptotics-design.md`).
+ * Coefficients are exact/symbolic and reliable only inside `[v, hi]`.
+ */
+export interface LaurentData {
+  /** True valuation: the lowest power with a (known-)nonzero coefficient. */
+  v: number;
+  /** Highest reliable power; coefficients beyond `hi` are truncation noise. */
+  hi: number;
+  /** Exact coefficient of `(x − x0)^p`, reliable for `v ≤ p ≤ hi`. */
+  coeff: (p: number) => Expression;
+}
+
+/**
+ * Laurent-expand `f` in `x` about the finite point `x0`. Returns `null` when
+ * the kernel declines (branch point, essential singularity, unexpandable
+ * operator) or when the reliable window is exhausted (every retained
+ * coefficient is zero — cancellation past `hi` cannot be distinguished from
+ * an exact zero). `null` always means "defer", never "zero".
+ */
+export function laurentData(
+  f: Expression,
+  x: string,
+  x0: Expression,
+  ce: ComputeEngine,
+  W = 6
+): LaurentData | null {
+  if (x0.isFinite !== true) return null;
+  const L = expandLaurent(f, x, x0, ce, Math.min(W, MAX_SERIES_ORDER));
+  if (!L) return null;
+  const v = trueVal(L);
+  if (v === null || v > L.hi) return null; // window exhausted — undecidable
+  return { v, hi: L.hi, coeff: (p: number) => coeffAt(ce, L, p) };
 }
 
 /**
@@ -1102,18 +1227,38 @@ function freshSymbol(f: Expression, avoid: string): string {
 }
 
 /**
+ * A limit resolver with the shape of `symbolicLimit` (symbolic/limit.ts).
+ * `computeSeries` receives it as a parameter instead of importing it — the
+ * limit engine imports this module's `laurentData` (the 7c pole-asymptotics
+ * wiring), so a static import here would be a cycle. The single caller
+ * (`library/calculus.ts`, one layer up) injects the real function.
+ */
+export type LimitResolver = (
+  body: Expression,
+  x: string,
+  point: Expression,
+  dir: number | undefined,
+  ce: ComputeEngine
+) => Expression | undefined;
+
+/**
  * Compute the series expansion of `f` in the variable `x` about `x0` to order
  * `n` (the highest retained power). Returns the expansion expression, or
  * `undefined` if the expansion cannot be computed (a pole, essential
  * singularity, or non-differentiable operand), in which case the caller leaves
  * `Series(...)` unevaluated.
+ *
+ * `resolveLimit` is consulted only by the ±∞ path (one-sided coefficient
+ * limits); when absent those coefficients defer, so pass it whenever
+ * expansions at infinity should resolve (see `LimitResolver`).
  */
 export function computeSeries(
   f: Expression,
   x: string,
   x0: Expression,
   n: number,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  resolveLimit?: LimitResolver
 ): Expression | undefined {
   n = Math.max(0, Math.min(n, MAX_SERIES_ORDER));
   const W = Math.min(n + BIGO_LOOKAHEAD, MAX_SERIES_ORDER);
@@ -1122,7 +1267,7 @@ export function computeSeries(
   if (x0.isInfinity) {
     const re = x0.re;
     if (!(re === Infinity || re === -Infinity)) return undefined; // ~∞ unsigned
-    return seriesAtInfinity(f, x, re > 0 ? 1 : -1, n, W, ce);
+    return seriesAtInfinity(f, x, re > 0 ? 1 : -1, n, W, ce, resolveLimit);
   }
 
   // A non-finite, non-±∞ point (NaN, unsigned ∞): cannot expand.
@@ -1166,7 +1311,8 @@ function specialPoleInvolved(
   for (const op of SPECIAL_POLE_FNS) {
     for (const sub of f.getSubexpressions(op)) {
       if (!isFunction(sub)) continue;
-      const arg = sub.ops[0];
+      // PolyGamma carries the order first; the function argument is last.
+      const arg = sub.ops[op === 'PolyGamma' ? 1 : 0];
       if (!arg) continue;
       const at = arg.subs({ [x]: x0 }).evaluate();
       if (isRecordedPole(ce, op, at)) return true;
@@ -1187,7 +1333,8 @@ function seriesAtInfinity(
   sign: number,
   n: number,
   W: number,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  resolveLimit?: LimitResolver
 ): Expression | undefined {
   const s = freshSymbol(f, x);
   // g(s) = f(1/s); simplify to expose rational cancellations (e.g.
@@ -1199,14 +1346,16 @@ function seriesAtInfinity(
   // Coefficients are evaluated at s = 0. When direct substitution is
   // non-finite, the coefficient is a one-sided limit: c_0 is lim_{x→±∞} f, and
   // higher coefficients are limits of the substituted derivatives from the
-  // correct side (s → 0⁺ for +∞, s → 0⁻ for −∞).
+  // correct side (s → 0⁺ for +∞, s → 0⁻ for −∞). Without an injected limit
+  // resolver these coefficients defer.
   const resolve = (gk: Expression, k: number): Expression | null => {
+    if (!resolveLimit) return null;
     if (k === 0) {
       const inf = sign > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
-      const L = symbolicLimit(f, x, inf, undefined, ce);
+      const L = resolveLimit(f, x, inf, undefined, ce);
       if (L && L.isFinite !== false && L.isValid) return L;
     }
-    const L2 = symbolicLimit(gk, s, ce.Zero, sign, ce);
+    const L2 = resolveLimit(gk, s, ce.Zero, sign, ce);
     return L2 && L2.isFinite !== false && L2.isValid ? L2 : null;
   };
 

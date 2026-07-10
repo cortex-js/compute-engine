@@ -117,11 +117,48 @@ describe('RESIDUE (ROADMAP item 7c)', () => {
       // come from the generic method (→ 1), not a spurious Zeta factorization.
       expect(res(['Divide', 1, ['Subtract', 'x', 1]], 'x', 1).re).toBe(1);
     });
-    test('a second singularity defers rather than returning a wrong value', () => {
-      // Gamma(x)/(x+2) at -2 is an order-2 pole; the simple-pole factorization
-      // must not fire, and the generic method can't expand Gamma → unevaluated.
+    test('a second singularity is resolved exactly by the Laurent kernel (item 7c)', () => {
+      // Gamma(x)/(x+2) at -2 is an order-2 pole (Γ's own pole times the
+      // rational one). This used to defer; the Laurent expansion gives the
+      // exact residue: Γ(x) = ½·u⁻¹ + (¾ − γ/2) + O(u) with u = x+2, so
+      // Γ(x)/(x+2) has c₋₁ = ¾ − γ/2 ≈ 0.46139. Verified numerically against
+      // ε-probes of u·(Γ(−2+u)/u − ½u⁻²).
       const r = res(['Divide', ['Gamma', 'x'], ['Add', 'x', 2]], 'x', -2);
-      expect(r.operator).toBe('Residue');
+      expect(r.N().re).toBeCloseTo(0.75 - 0.5772156649015329 / 2, 10);
+    });
+  });
+
+  describe('Laurent-kernel residues (item 7c)', () => {
+    test('a special-function cofactor: Γ(x)·ζ(x) at 1 → Γ(1) = 1', () => {
+      // The h·s factorization can't reach this (the cofactor is itself a
+      // special function); the Laurent product expansion can.
+      const r = res(['Multiply', ['Gamma', 'x'], ['Zeta', 'x']], 'x', 1);
+      expect(r.N().re).toBeCloseTo(1, 12);
+    });
+    test('a double special pole: Γ(x)² at 0 → −2γ', () => {
+      // Γ(x)² = x⁻² − 2γ·x⁻¹ + …; verified numerically against
+      // ε·(Γ(ε)² − ε⁻²) → −2γ.
+      const r = res(['Square', ['Gamma', 'x']], 'x', 0);
+      expect(r.json).toEqual(['Multiply', -2, 'EulerGamma']);
+    });
+    test('a double special pole: ζ(s)² at 1 → 2γ', () => {
+      // (1/u + γ + …)² = u⁻² + 2γ·u⁻¹ + …
+      const r = res(['Square', ['Zeta', 'x']], 'x', 1);
+      expect(r.json).toEqual(['Multiply', 2, 'EulerGamma']);
+    });
+    test('the polygamma ladder: ψ₁(x)/x at 0 → π²/6', () => {
+      // ψ₁(x) = x⁻² + π²/6 − 2ζ(3)x + …, so ψ₁/x has c₋₁ = ψ₁'s constant
+      // term π²/6. Verified numerically against ε·(ψ₁(ε)/ε − ε⁻³).
+      const r = res(['Divide', ['Trigamma', 'x'], 'x'], 'x', 0);
+      expect(r.N().re).toBeCloseTo(Math.PI ** 2 / 6, 10);
+    });
+    test('a deep rational pole through the kernel: 1/(x⁵(1−x)) at 0 → 1', () => {
+      const r = res(
+        ['Divide', 1, ['Multiply', ['Power', 'x', 5], ['Subtract', 1, 'x']]],
+        'x',
+        0
+      );
+      expect(r.re).toBe(1);
     });
   });
 

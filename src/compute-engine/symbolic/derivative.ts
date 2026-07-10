@@ -205,6 +205,8 @@ const DERIVATIVES_TABLE = {
   // d/dx ψ(x) = ψ₁(x) (trigamma function)
   // https://en.wikipedia.org/wiki/Trigamma_function
   Digamma: ['Trigamma', '_'],
+  // d/dx ψ₁(x) = ψ⁽²⁾(x) — the polygamma ladder continues past Trigamma
+  Trigamma: ['PolyGamma', 2, '_'],
   // d/dx W(x) = W(x)/(x·(1+W(x))) where W is the Lambert W function
   // https://en.wikipedia.org/wiki/Lambert_W_function#Derivative
   LambertW: [
@@ -747,6 +749,22 @@ export function differentiate(
   if (['GCD', 'LCM'].includes(expr.operator)) {
     recordD(trace, expr, v, 'derivative.zero', () => ce.Zero);
     return ce.Zero;
+  }
+
+  // PolyGamma(m, u): d/du ψ⁽ᵐ⁾(u) = ψ⁽ᵐ⁺¹⁾(u), so the derivative climbs the
+  // order ladder. Only ∂/∂u is elementary; an order that depends on v has no
+  // closed form — stay symbolic (inert rather than wrong).
+  if (expr.operator === 'PolyGamma' && expr.nops === 2) {
+    const [m, u] = expr.ops;
+    if (m.has(v)) return ce._fn('D', [expr, ce.symbol(v)]);
+    if (!u.has(v)) return ce.Zero;
+    const next = ce._fn('PolyGamma', [ce.function('Add', [m, ce.One]), u]);
+    recordD(trace, expr, v, 'derivative.known-derivative', () =>
+      ce.function('Multiply', [next, dPlaceholder(u, v)])
+    );
+    const uPrime =
+      differentiate(u, v, depth + 1, trace) ?? ce._fn('D', [u, ce.symbol(v)]);
+    return simplifyDerivative(next.mul(uPrime));
   }
 
   // Lambert W, 2-argument form W(z, k) — the branch index k is the SECOND

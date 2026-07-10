@@ -24,6 +24,7 @@ import type {
 } from '../global-types.js';
 
 import { symbolicLimit } from './limit.js';
+import { laurentData } from './series.js';
 import { differentiate } from './derivative.js';
 import { sym } from '../boxed-expression/type-guards.js';
 import { getFunctionProperties } from '../function-properties/index.js';
@@ -54,9 +55,31 @@ export function residue(
 ): Expression | undefined {
   if (point.isFinite === false || point.isInfinity === true) return undefined;
 
+  // The Laurent kernel runs FIRST (item 7c): the residue is, by definition,
+  // the coefficient of `(x − a)⁻¹` in the exact Laurent expansion, and the
+  // kernel models the special-function poles (Gamma/Digamma/Zeta) and their
+  // meromorphic combinations — including the shapes the paths below cannot
+  // reach (a special-function cofactor like `Γ(s)·ζ(s)` at 1, higher-order
+  // special poles like `Γ(x)²` at 0). A `null` (kernel declined or window
+  // exhausted) falls through to the closed-form table and the limit-based
+  // order probing; those remain authoritative for what the kernel can't
+  // expand.
+  // W = 4 is ample: the residue is the single coefficient at power −1, and
+  // the kernel deepens internally where a denominator's pole order demands
+  // it (`reciprocalOfExpr` re-expands to `W + 2m`). Larger windows only
+  // inflate the exact symbolic γ/ζ(k) coefficient arithmetic (the Γ
+  // coefficients grow quickly with order).
+  const lau = laurentData(body, varName, point, ce, 4);
+  if (lau) {
+    if (lau.v >= 0) return ce.Zero; // analytic or removable — residue 0
+    const c = lau.coeff(-1).evaluate();
+    if (c.isValid && c.isNaN !== true) return c;
+  }
+
   // Authoritative closed-form residues for recognized special functions. This
-  // runs FIRST: the generic limit method can't see a special function's poles
-  // (it would treat e.g. Digamma(-1) as finite and return a wrong 0).
+  // runs before the generic limit method, which can't see a special
+  // function's poles (it would treat e.g. Digamma(-1) as finite and return a
+  // wrong 0).
   const special = specialFunctionResidue(body, varName, point, ce);
   if (special !== undefined) return special;
 

@@ -908,7 +908,10 @@ volumes
         if (!x || !x0) return undefined;
         let n = Math.floor(nExpr?.N().re ?? 5);
         if (!Number.isFinite(n)) n = 5;
-        const result = computeSeries(f, x, x0, n, ce);
+        // Inject the limit resolver: series.ts cannot import symbolicLimit
+        // (limit.ts imports its laurentData — the 7c pole wiring), so the
+        // ±∞ coefficient limits are resolved through this parameter.
+        const result = computeSeries(f, x, x0, n, ce, symbolicLimit);
         // No result: leave `Series(...)` unevaluated (deferred singular case).
         if (!result) return undefined;
         return numericApproximation ? result.N() : result;

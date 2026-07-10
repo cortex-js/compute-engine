@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+### Calculus
+
+- **Limits and residues at special-function poles evaluate exactly.** The
+  symbolic limit engine and `Residue` are now wired to the exact Laurent
+  kernel behind `Series`, so expressions that used to stay inert at the
+  poles of `Gamma`, `Digamma`, `Trigamma`, `PolyGamma`, and `Zeta` resolve
+  in closed form: `\lim_{x\to-1}(x+1)\psi(x) = -1`,
+  `\lim_{x\to0}(\Gamma(x)-1/x) = -\gamma`,
+  `\lim_{s\to1}(s-1)\zeta(s) = 1`, `\operatorname{Res}_{s=1}\Gamma(s)\zeta(s)
+  = 1`, `\operatorname{Res}_{x=0}\Gamma(x)^2 = -2\gamma`, and higher-order
+  poles that previously deferred (`\operatorname{Res}_{x=-2}
+  \Gamma(x)/(x+2) = 3/4 - \gamma/2`). Deferral behavior is unchanged where
+  no exact expansion exists (branch points, essential singularities,
+  two-sided pole limits). Design:
+  `docs/plans/2026-07-10-pole-asymptotics-design.md`.
+- **The polygamma family expands, differentiates and integrates through the
+  ladder.** `Series` now produces correct Laurent expansions of `Trigamma`
+  and integer-order `PolyGamma(m, x)` at their poles (previously a spurious
+  regular expansion could be produced), and `D` knows
+  `\psi_1' = \psi^{(2)}` and the general `d/du\,\psi^{(m)}(u) =
+  \psi^{(m+1)}(u)`. The `Gamma`/`Digamma` pole expansions themselves were
+  rebuilt on closed-form coefficients (exp-of-log recurrence, harmonic-number
+  sums) — `Series` at a `Digamma` pole is ~20× faster.
+
 ### Special Functions
 
 - **Subscripted special-function notation parses.** `\operatorname{W}_{-1}(x)`
