@@ -2150,9 +2150,7 @@
   "JacobiTheta": {},
   "KroneckerDelta": {},
   "LCM": {},
-  "LambertW": {
-   "note": "CE LambertW is 1-arg (principal branch); the corpus emits 2-arg [LambertW, z, k] for non-principal branches -- re-declare '(complex, integer?) -> complex' in a child scope before boxing (mapping.py note)"
-  },
+  "LambertW": {},
   "Less": {},
   "LessEqual": {},
   "Limit": {},
