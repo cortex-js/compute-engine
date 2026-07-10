@@ -51,8 +51,8 @@ validation) are release-protocol steps tracked in
 `roadmap/cortex/STATUS_REPORT.md`, not here.
 
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
-status:** R1–R19 landed — chapters 1/2/3/6, 4.1/4.3/4.5, §8.8 Polylogarithm,
-5,191 rules bundled; see the **Coverage tracks → Rubi** section below for
+status:** R1–R20 landed — chapters 1/2/3/5/6, 4.1/4.3/4.5, §8.8 Polylogarithm,
+5,858 rules bundled; see the **Coverage tracks → Rubi** section below for
 current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 **Related documents:** `docs/fungrim/FUNGRIM.md` (feasibility + feature map),
@@ -488,15 +488,17 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-10, R1–R19 landed):** the shipped bundle
+**State (2026-07-10, R1–R20 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
-(Algebraic), 2 (Exponentials), 3 (Logarithms), 6 (Hyperbolics), 4.1 Sine, 4.3
-Tangent, 4.5 Secant, and §8.8 Polylogarithm** — 5,191 rules, 5.64 MB (CI has a
-bundle-freshness gate). Scores (seed 5): **4.1 Sine 107/120 and 331/400 (4.1.11
-file 93/113, post-R18)**, **4.3 Tangent 72/120**, **4.5 Secant 69/120**, **ch3 Logarithms
-69/120 (R19)**, ch1 exhaustive ≈90–91%, ch2 ≈72% / ch6 ≈45% effective (seed
-42), Wester indefinite-∫ 6/8.
+(Algebraic), 2 (Exponentials), 3 (Logarithms), 5 (Inverse trig), 6 (Hyperbolics),
+4.1 Sine, 4.3 Tangent, 4.5 Secant, and §8.8 Polylogarithm** — 5,858 rules, 6.28 MB
+(CI has a bundle-freshness gate). Scores (seed 5): **4.1 Sine 107/120 and 331/400
+(4.1.11 file 93/113, post-R18)**, **4.3 Tangent 72/120**, **4.5 Secant 69/120**,
+**ch3 Logarithms 71/120 (R20, +2 from ch5 family-C producers)**, **Chapter 5
+Inverse trig (R20): 5.1 sine 38/120, 5.2 cosine 40, 5.3 tangent 53, 5.4 cotangent
+60, 5.5 secant 54, 5.6 cosecant 49 (294/720 = 40.8%)**, ch1 exhaustive ≈90–91%,
+ch2 ≈72% / ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
 **Genuine wrongs are 0 across all suites** (incl. ch3 after the R17
 back-substitution fix) — every flagged "wrong" is a documented
 **verification false-wrong** (numeric ₂F₁/AppellF1
@@ -580,18 +582,20 @@ climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
 hypergeometric verification false-wrongs). Diagnose any stall per the Method
 note — trace the residual integrand, don't trust the predicate census.
 
-- **Ch3 unsolved tail** (45/120 at s120 seed5, post-R19). **R19 censused all 46
-  and found NO bundling lever** (the full corpus closes nothing the ship
-  foundation doesn't) and one bounded fix: `FunctionOfLog` (→ #261). The
-  residual 45 splits into **15 expected-`Unintegrable`** (Rubi itself returns
+- **Ch3 unsolved tail** (43/120 at s120 seed5, post-R20; was 45 post-R19).
+  **R19 censused all 46** and found one bounded fix: `FunctionOfLog` (→ #261).
+  The residual splits into **15 expected-`Unintegrable`** (Rubi itself returns
   unevaluated — CE's inert `Integrate` is the correct match, not a defect) and
-  **30 genuinely deep**, all bundling-inert. Next-rung shopping list from the
-  census (see `docs/rubi/RUBI.md` §5 R19 for the full family table):
-  - **Biggest family (13): poly×log by-parts residuals** bottoming in
+  **~30 genuinely deep**. Next-rung shopping list from the census (see
+  `docs/rubi/RUBI.md` §5 R19/R20 for the full family table):
+  - **Biggest family (was 13): poly×log by-parts residuals** bottoming in
     `∫arctan(kx)/x`, `∫artanh(√)/x`, symbolic-order-`k` `PolyLog` recurrences,
-    or `ArcSinh·Log` (3.1.4/3.1.5). Unblocking needs a Log/PolyLog producer for
-    the inverse-trig/hyperbolic-log Chapter-5 base cases (NOT bundled) — the
-    single highest-value ch3 lever.
+    or `ArcSinh·Log` (3.1.4/3.1.5). **R20 bundled ch5, which supplied the
+    `∫arctan(kx)/x → PolyLog[2,±i·x]` producer: family-C members #31 and #226
+    flipped to solved (ch3 69 → 71).** The rest still bottoms out in
+    `∫artanh(√)/x`, symbolic-order `PolyLog`, and `ArcSinh·Log` shapes ch5's
+    bundled base cases don't reach (hyperbolic-log/ch7 producers + a
+    symbolic-order `PolyLog` recurrence remain the levers).
   - **6: `∫Log[Sin/Tan/Csc²]`** (3.5) — a two-part gap: an inert-trig `D`
     reduction (CE's `D` knows `Tan`, not the inert `tan` head the driver
     carries) PLUS a Chapter-4 trig-integration foundation for the by-parts

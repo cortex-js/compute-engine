@@ -710,6 +710,14 @@ const PRED_FNS: Record<string, PredFn> = {
       const e = build(a, ctx).evaluate();
       return isLiteralRational(e) && e.isInteger === false;
     }),
+  // HalfIntegerQ[u__] := every argument is a Rational with denominator 2
+  // (i.e. an odd multiple of 1/2). Gates the 5.1.3/5.1.4 arcsin power rules
+  // that reduce (d+e·x²)^p with p a half-integer. (IntegrationUtilityFunctions.m)
+  HalfIntegerQ: (args, ctx) =>
+    args.every((a) => {
+      const r = ratParts(build(a, ctx).evaluate());
+      return r !== null && Math.abs(r[1]) === 2;
+    }),
 
   // IGtQ[u,n] := IntegerQ[u] && u > n, and family
   IGtQ: (args, ctx) => intCmp(args, ctx, (a, b) => a > b),
@@ -4426,6 +4434,98 @@ const VALUE_FNS: Record<string, ValueFn> = {
       : ctx.ce.function('List', [r.f, r.v, r.n]);
   },
   SubstForFractionalPowerOfLinear: (_args, ctx) => ctx.ce.symbol('False'),
+
+  // ── Chapter-5 (inverse trig) utilities ──────────────────────────────────
+  // Discriminant[v, x] — the discriminant b²−4ac of a quadratic
+  // v = a + b·x + c·x². Only referenced by the 5.3.7 #27/#28
+  // ArcTan/ArcCot-substitution rules, always behind a `QuadraticQ[v,x]` gate
+  // (so v is a genuine quadratic here). Fed to `NegQ[Discriminant[v,x]]`.
+  Discriminant: (args, ctx) => {
+    const v = build(args[0], ctx);
+    const c0 = coeffX(v, ctx.x, 0);
+    const c1 = coeffX(v, ctx.x, 1);
+    const c2 = coeffX(v, ctx.x, 2);
+    return c1.pow(2).sub(c0.mul(c2).mul(4));
+  },
+
+  // Head[u] — WL's operator head, as a symbol. Only reached by 5.3.7 #27/#28
+  // (`EqQ[Head[tmp],ArcTan]`); those rules decline earlier because
+  // InverseFunctionOfLinear (below) is a fail-closed stub, so this never
+  // actually gates a firing. Returns CE's operator name (e.g. 'Arctan',
+  // 'Multiply'), which differs from WL's ('ArcTan', 'Times') — irrelevant
+  // while the call site is unreachable.
+  Head: (args, ctx) => ctx.ce.symbol(build(args[0], ctx).operator),
+
+  // FunctionOfLinear[u, x] — Rubi detects u ≡ F(a+b·x) and, on success,
+  // returns {subst, a, b} so a linear substitution rule can fire; on failure
+  // it returns False. In the bundled corpus it appears ONLY as the guard
+  // `FalseQ[FunctionOfLinear[v·(a+b·ArcTan[u]),x]]` on the 5.3.7 #73/#74
+  // integration-by-parts rules (v·ArcTan/ArcCot via IntHide) — there is NO
+  // bundled rule that consumes a non-False result (Rubi's linear-substitution
+  // rule lives in 9.3, out of scope). Returning False therefore lets the
+  // by-parts rules fire (they are exact and numerically D-verified), whereas a
+  // faithful non-False detection would only STRAND those integrands as inert
+  // Integrals. A faithful port is also unbounded here (it needs CommonFactors /
+  // MonomialFactor / LeadFactor). So: return False (fail-open guard). See
+  // RUBI.md §5 R20.
+  FunctionOfLinear: (_args, ctx) => ctx.ce.symbol('False'),
+
+  // PowerVariableExpn[u, m, x] — Rubi detects u ≡ f(x^k) (k>1) for a
+  // power-variable substitution; else False. Referenced ONLY as the guard
+  // `FalseQ[PowerVariableExpn[u,m+1,x]]` on 5.3.7 #71/#72 (the (c+d·x)^m·ArcTan
+  // by-parts rules); as with FunctionOfLinear, no bundled rule consumes a
+  // non-False result, so returning False lets the exact by-parts rules fire
+  // rather than stranding the integrand. Return False (fail-open guard).
+  PowerVariableExpn: (_args, ctx) => ctx.ce.symbol('False'),
+
+  // InverseFunctionOfLinear[u, x] — detects an inverse-function subexpression
+  // of a linear argument, F(a+b·x), inside u. Only the 5.3.7 #27/#28
+  // ∫r·f^ArcTan(a+b·x)/quadratic rules bind it (tmp=…), then substitute via
+  // SubstForInverseFunction. That substitution machinery is a disproportionate
+  // port and the "exponential of inverse tangent" integrands it targets are
+  // largely covered by the dedicated 5.3.6 rules (higher priority). Fail-closed
+  // stub → `Not[FalseQ[tmp]]` is False → #27/#28 decline cleanly. See RUBI.md §5 R20.
+  InverseFunctionOfLinear: (_args, ctx) => ctx.ce.symbol('False'),
+  // SubstForInverseFunction[u, v, x] — the inverse-function back-substitution
+  // used in the #27/#28 RHS. Unreachable while InverseFunctionOfLinear is
+  // stubbed (the innerCondition short-circuits first); kept as a fail-closed
+  // stub for safety.
+  SubstForInverseFunction: (_args, ctx) => ctx.ce.symbol('False'),
+
+  // SplitProduct[func, u] — {first factor v of u with func[v], u/v}, else the
+  // atom `False` (IntegrationUtilityFunctions.m). In the bundled corpus it
+  // appears ONLY inside `AtomQ[SplitProduct[SumBaseQ, a]]` guards on the
+  // Chapter-1 biquadratic rules 1.1.3.1 #10 / 1.1.3.2 #36 (the ∫xᵐ/(a+b·x⁴)
+  // POSITIVE-ratio branch), so only the atom-vs-list outcome is consumed.
+  // Discovered during R20: while it stayed an inert head, `AtomQ[…]` was always
+  // false, so for a symbolic positive ratio (where `GtQ[a/b,0]` can't prove
+  // positivity) the wrong NEGATIVE-ratio rule (#37 / #11, the `1/(r±s·x²)`
+  // split of `a−b·x⁴`) fired instead — mis-integrating e.g. ∫x²/(1+a²·x⁴) and
+  // hence the ch5 by-parts residual of ∫arctan/arccot(a·x²). See RUBI.md §5 R20.
+  SplitProduct: (args, ctx) => {
+    const pred = args[0] === 'SumBaseQ' ? sumBaseQ : undefined;
+    if (pred === undefined)
+      return fail(`SplitProduct: unsupported predicate ${String(args[0])}`);
+    const ce = ctx.ce;
+    const u = build(args[1], ctx);
+    const factors = u.operator === 'Multiply' && u.ops ? u.ops : null;
+    if (factors) {
+      for (let i = 0; i < factors.length; i++) {
+        if (pred(factors[i])) {
+          const rest = factors.filter((_, j) => j !== i);
+          const restExpr =
+            rest.length === 0
+              ? ce.One
+              : rest.length === 1
+                ? rest[0]
+                : ce.function('Multiply', rest);
+          return ce.function('List', [factors[i], restExpr]);
+        }
+      }
+      return ce.symbol('False');
+    }
+    return pred(u) ? ce.function('List', [u, ce.One]) : ce.symbol('False');
+  },
 
   // SubstFor[w, v, u, x] / SubstFor[v, u, x] — substitute the trig
   // subexpression v by x in u (times w), for the trig-substitution rules

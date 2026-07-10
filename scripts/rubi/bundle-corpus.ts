@@ -40,6 +40,11 @@ const ch1Dir = 'data/rubi/corpus/1 Algebraic functions';
 const ch2Dir = 'data/rubi/corpus/2 Exponentials';
 const ch3Dir = 'data/rubi/corpus/3 Logarithms';
 const ch6Dir = 'data/rubi/corpus/6 Hyperbolic functions';
+// Chapter 5 (inverse trig): the arcsin/arctan/arcsec families (5.1/5.3/5.5),
+// which also author the ArcCos/ArcCot/ArcCsc cofunction variants inline (no
+// runtime cofunction-shift machinery needed — all heads are active native CE
+// heads). Walked whole (667 rules, 0 skips). See docs/rubi/RUBI.md §5 Phase R20.
+const ch5Dir = 'data/rubi/corpus/5 Inverse trig functions';
 const trigSineDir = 'data/rubi/corpus/4 Trig functions/4.1 Sine';
 const trigTangentDir = 'data/rubi/corpus/4 Trig functions/4.3 Tangent';
 const trigSecantDir = 'data/rubi/corpus/4 Trig functions/4.5 Secant';
@@ -58,6 +63,7 @@ const docs = [
   ...readCorpusDocs(ch1Dir),
   ...readCorpusDocs(ch2Dir),
   ...readCorpusDocs(ch3Dir),
+  ...readCorpusDocs(ch5Dir),
   ...readCorpusDocs(ch6Dir),
   ...readCorpusDocs(trigSineDir),
   ...readCorpusDocs(trigTangentDir),

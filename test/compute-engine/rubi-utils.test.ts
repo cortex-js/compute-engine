@@ -1180,3 +1180,46 @@ describe('singleAngleTrigRationalQ (R17 gate)', () => {
       singleAngleExponentialPieces(ce, ce.parse('(1+x) \\csc(x)^2'), 'x')
     ).toBeNull());
 });
+
+describe('Chapter-5 inverse-trig utilities', () => {
+  beforeAll(() => {
+    // v = 1 + 3x + 2x²  → discriminant 3² − 4·1·2 = 1
+    bind('quadPos', ['Add', 1, ['Multiply', 3, 'x'], ['Multiply', 2, ['Power', 'x', 2]]]);
+    // v = 1 + x + x²  → discriminant 1 − 4 = −3
+    bind('quadNeg', ['Add', 1, 'x', ['Power', 'x', 2]]);
+  });
+
+  test('HalfIntegerQ: every arg is an odd multiple of 1/2', () => {
+    expect(cond(['HalfIntegerQ', ['Rational', 3, 2]])).toBe(true);
+    expect(cond(['HalfIntegerQ', ['Rational', -1, 2]])).toBe(true);
+    expect(cond(['HalfIntegerQ', ['Rational', 3, 2], ['Rational', 5, 2]])).toBe(true);
+    // integers, thirds, and mixed lists are not half-integers
+    expect(cond(['HalfIntegerQ', 2])).toBe(false);
+    expect(cond(['HalfIntegerQ', ['Rational', 1, 3]])).toBe(false);
+    expect(cond(['HalfIntegerQ', ['Rational', 3, 2], 2])).toBe(false);
+  });
+
+  test('Discriminant: b²−4ac of a quadratic in x', () => {
+    expect(build(['Discriminant', 'quadPos', 'x'], ctx).evaluate().isSame(1)).toBe(true);
+    expect(build(['Discriminant', 'quadNeg', 'x'], ctx).evaluate().isSame(-3)).toBe(true);
+  });
+
+  test('Head returns the CE operator name as a symbol', () => {
+    expect(build(['Head', ['Arctan', 'x']], ctx).symbol).toBe('Arctan');
+    expect(build(['Head', ['Multiply', 'a', 'x']], ctx).symbol).toBe('Multiply');
+  });
+
+  test('fail-open / fail-closed guards return the False sentinel', () => {
+    // These four are stubs (see rubi-utils.ts): each returns Rubi False, so the
+    // FalseQ-guarded #71–#74 by-parts rules fire and #27/#28 decline cleanly.
+    for (const head of [
+      'FunctionOfLinear',
+      'PowerVariableExpn',
+      'InverseFunctionOfLinear',
+      'SubstForInverseFunction',
+    ]) {
+      expect(build([head, 'quadNeg', 'x'], ctx).symbol).toBe('False');
+      expect(cond(['FalseQ', [head, 'quadNeg', 'x']])).toBe(true);
+    }
+  });
+});

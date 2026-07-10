@@ -565,4 +565,50 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
         .has('Integrate')
     ).toBe(true);
   });
+
+  // Chapter-5 inverse-trig family (RUBI.md §5, Phase R20). The arcsin/arctan/
+  // arcsec families (5.1/5.3/5.5), including the (a+b·arcsin)^n by-parts /
+  // IntHide chain and the arctan/x → PolyLog telescope. Verified by
+  // finite-differencing F.N() (not symbolic D[F]): the arctan/x result carries
+  // PolyLog[2,±i·x] whose symbolic derivative is inert but whose F.N() is
+  // numerically evaluable.
+  describe('integrates the inverse-trig family (Chapter-5, R20)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      let checked = 0;
+      // sample both the |x|<1 (arcsin/√(1−x²)) and |x|>1 (arcsec) real
+      // domains; skip points where either side goes complex/non-finite
+      for (const x of [0.31, 0.52, 0.73, 1.42, 2.3]) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ x }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        expect(d).toBeCloseTo(f, 5);
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    };
+    // Base cases: ∫arcsin(x) = x·arcsin(x)+√(1−x²); ∫arctan(x) = x·arctan(x)
+    // − ½·log(1+x²) (5.1.1 / 5.3.1).
+    test('∫arcsin(x) dx', () => verify('\\arcsin(x)'));
+    test('∫arctan(x) dx', () => verify('\\arctan(x)'));
+    test('∫arcsec(x) dx', () => verify('\\operatorname{arcsec}(x)'));
+    // xᵐ·arctan by-parts (5.3.2 #1).
+    test('∫x·arctan(x) dx', () => verify('x\\arctan(x)'));
+    // (a+b·arcsin)ⁿ via IntHide-driven by-parts (5.1.1 #2 / 5.1.5).
+    test('∫arcsin(2x)² dx', () => verify('\\arcsin(2x)^2'));
+    // ch3 family-C connection: ∫arctan(x)/x closes to the inverse-tangent
+    // integral Ti₂(x) in PolyLog form (½i·(PolyLog[2,−ix] − PolyLog[2,ix])).
+    test('∫arctan(x)/x dx → PolyLog(2, ±i·x)', () => {
+      const F = ce.parse('\\int \\frac{\\arctan(x)}{x} \\, dx').evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toContain('PolyLog');
+      verify('\\frac{\\arctan(x)}{x}');
+    });
+  });
 });

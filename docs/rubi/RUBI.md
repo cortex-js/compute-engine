@@ -1,11 +1,13 @@
 # Rubi → Compute Engine: Feasibility Analysis
 
 **Date:** 2026-06-10 (feasibility); last status update 2026-07-10.
-**Status:** shipped bundle = **Chapters 1, 2, 3, 6 + 4.1 Sine + 4.3 Tangent +
-4.5 Secant + §8.8 Polylogarithm** (5,191 rules, 5.64 MB). Chapter-1 exhaustive
+**Status:** shipped bundle = **Chapters 1, 2, 3, 5, 6 + 4.1 Sine + 4.3 Tangent +
+4.5 Secant + §8.8 Polylogarithm** (5,858 rules, 6.28 MB). Chapter-1 exhaustive
 ≈90–91%; ch2 ≈72% / ch6 ≈45% effective; **4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
-69/120 (R19, +1 FunctionOfLog); genuine wrongs 0 across ALL suites incl. ch3** (all flagged
+71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R20, s120 seed5):
+5.1 sine 38/120, 5.2 cosine 40, 5.3 tangent 53, 5.4 cotangent 60, 5.5 secant 54,
+5.6 cosecant 49 (294/720 = 40.8%); genuine wrongs 0 across ALL suites incl. ch3/ch5** (all flagged
 "wrongs" are documented verification false-wrong classes — see the
 ROADMAP §R state note). The nested `Log[c·(b·x^n)^p]` power-in-log family
 (§3.1.5 / §3.3) that R17 first shipped with ~3 genuine wrongs was **fixed**
@@ -1253,11 +1255,108 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     30 genuinely-deep.** Next-rung shopping list: the biggest single family is
     **C** (13) — a Log/PolyLog producer for `∫arctan(kx)/x` and `∫artanh(kx)/x`
     (the inverse-trig/hyperbolic-log Chapter-5 base cases) would unlock the
-    by-parts tails; **G** (6) needs an inert-trig `D` reduction plus a Chapter-4
+    by-parts tails — **R20 UPDATE: ch5 now bundled, and family-C members #31 and
+    #226 flipped to solved (ch3 s120 seed5 69 → 71); the `∫arctan(kx)/x` residual
+    closes to `PolyLog[2,±i·x]`. The rest of C still bottoms out in shapes ch5's
+    bundled base cases don't reach** (`∫artanh(√)/x`, symbolic-order-`k` `PolyLog`
+    recurrence, `ArcSinh·Log`); **G** (6) needs an inert-trig `D` reduction plus a Chapter-4
     trig-integration foundation.
   - **Tests.** `FunctionOfLog` unit test (triple extraction incl. the
     `cancelCommonXPower` path + three fail-closed cases) in `rubi-utils.test.ts`;
     #261 end-to-end D-verified in `integration-rules.test.ts`.
+- **Phase R20 — Chapter 5 (Inverse trig functions) bundled LANDED (2026-07-10).**
+  The arcsin/arctan/arcsec families (5.1/5.3/5.5), which author the
+  ArcCos/ArcCot/ArcCsc cofunction variants INLINE (all active native CE heads —
+  no cofunction-shift machinery, unlike ch4). Bundle: **5,191 → 5,858 rules**
+  (+667, all 15 files compile 0 skips), **5.64 → 6.28 MB**; compile time
+  ~0.5–0.8s (well under the 1.5s budget). D-coverage probe: CE's `D` handles all
+  six inverse-trig heads incl. **Arcsec/Arccsc/Arccot** (`arcsec → 1/(|x|√(x²−1))`
+  etc.) — no derivative-table gap.
+  - **First-ever ch5 baselines (s120 seed5, foundation ch1/2/3/6/§8.8 + ch5):**
+    5.1 sine **38/120**, 5.2 cosine **40**, 5.3 tangent **53**, 5.4 cotangent
+    **60**, 5.5 secant **54**, 5.6 cosecant **49** (294/720 = 40.8%). The
+    5.2/5.4/5.6 co-suites exercise the ArcCos/ArcCot/ArcCsc variants living in the
+    5.1/5.3/5.5 files. **Genuine wrongs 0**; the 6 residual wrong flags (5.4 ×4:
+    #50/#8/#9/#10, 5.5 #41, 5.6 #39) are all documented false-wrongs — negative-x
+    branch cuts of complex-log / fractional-power (`E^{n·ArcCot}/(c+a²c·x²)^{k/3}`
+    with `((a−I/x)/(a+I/x))^{fractional}`; `x^{n−1}·ArcSec(a+b·xⁿ)` with
+    non-integer `n`), each verified clean at positive x by finite-difference D.
+  - **Utility gap.** Census MISSING (word-boundary): HalfIntegerQ(8),
+    Discriminant(6), HypergeometricPFQ(2), SubstForInverseFunction(2),
+    InverseFunctionOfLinear(2), Head(2), PowerVariableExpn(2), FunctionOfLinear(2).
+    `ExpandExpression`/`InverseFunctionOfLinear` also appeared but ONLY in the
+    stripped `source` text (not the parsed rule) → moot. Implemented in
+    `rubi-utils.ts`:
+    - **`HalfIntegerQ`** (pred) — every arg a Rational with denominator 2. Gates
+      the 5.1.3/5.1.4 `(d+e·x²)^p` half-integer arcsin reductions.
+    - **`Discriminant`** (b²−4ac of a quadratic) — feeds `NegQ[Discriminant[v,x]]`
+      in 5.3.7 #27/#28 (always behind a `QuadraticQ[v,x]` gate).
+    - **`Head`** — CE operator name as a symbol (only 5.3.7 #27/#28, which decline
+      earlier; see below).
+    - **`FunctionOfLinear` / `PowerVariableExpn`** → **return `False`
+      (fail-OPEN guards).** Both appear ONLY as `FalseQ[…]` guards on the 5.3.7
+      #71–#74 by-parts rules (`(c+d·x)^m·ArcTan[u]` and general `v·ArcTan[u]` via
+      `IntHide`); **no bundled rule consumes a non-False result** (Rubi's
+      linear/power-variable substitution rules live in ch9, out of scope). So
+      returning False lets the exact, D-verified by-parts rules fire, where a
+      faithful non-False detection would only STRAND those integrands. A faithful
+      `FunctionOfLinear` is also unbounded here (needs `CommonFactors` /
+      `MonomialFactor` / `LeadFactor`). **This is a reasoned deviation from
+      "port faithfully"** — the guard polarity makes fail-OPEN the safe,
+      coverage-optimal choice (by-parts is a universal antiderivative identity).
+    - **`InverseFunctionOfLinear` / `SubstForInverseFunction`** → return `False`
+      (fail-CLOSED). Only the 5.3.7 #27/#28 `∫r·f^ArcTan(a+b·x)/quadratic` rules
+      bind them; that substitution machinery is a disproportionate port and the
+      "exponential of inverse tangent" integrands are largely covered by the
+      dedicated 5.3.6 rules (higher priority). `Not[FalseQ[tmp]]` → False → the
+      rules decline cleanly (short-circuiting before `Head`/`SubstFor…`).
+    - **`HypergeometricPFQ`** — left INERT: CE has `Hypergeometric2F1`/`1F1` but
+      no generalized ₚFq head, and its 2 uses (5.1.4 #41/#42) are the
+      `Not[IntegerQ[m]]` symbolic-`m` branch whose ₃F₂ result would not numericize
+      anyway.
+  - **Genuine-wrong found + fixed: `SplitProduct` (a Chapter-1 foundation bug
+    exposed by ch5).** The ch5 by-parts of `∫arctan/arccot(a·x²)` produces the
+    residual `∫x²/(1+a²·x⁴)` with a SYMBOLIC coefficient. The correct ch1 rule
+    1.1.3.2 #36 (POSITIVE-ratio, √2 four-term form) is gated on
+    `GtQ[a/b,0] || PosQ[a/b] && AtomQ[SplitProduct[SumBaseQ,a]] &&
+    AtomQ[SplitProduct[SumBaseQ,b]]`; `GtQ` can't prove `1/a² > 0` symbolically, so
+    it needs the `AtomQ[SplitProduct[…]]` fallback — but `SplitProduct` was
+    unimplemented (inert head → `AtomQ` always false), so the WRONG NEGATIVE-ratio
+    rule #37 (`1/(r±s·x²)` split of `a−b·x⁴`) fired instead, mis-integrating the
+    family (initially 3 ch5 wrongs: 5.3.2 #71, 5.4.1 #82/#83, all failing at
+    POSITIVE x). Fix: implement `SplitProduct[func,u]` (returns `{v,u/v}` or the
+    atom `False`; only ever used inside `AtomQ[…]` with `SumBaseQ`, 4 occurrences
+    across ch1 1.1.3.1/1.1.3.2 — tiny blast radius). #36 now correctly fires; its
+    deeper symbolic-coefficient sub-integrals `∫(r±s·x²)/(a+b·x⁴)` don't further
+    close in CE, so the family is now **unsolved (inert), not wrong** — the
+    fail-closed outcome. Post-fix: 5.3 tangent **1→0 wrong**, 5.4 cotangent
+    **6→4 wrong** (the 3 biquadratic wrongs → unsolved). Numeric biquadratics
+    (`GtQ` decides) are unaffected; no ch1 regression (ch1 1.1 s120 seed5: 109
+    correct, 5 wrong — all pre-existing false-wrong classes, none biquadratic).
+    The full symbolic-coefficient quartic closure is a deeper ch1 lever, deferred.
+  - **ch3 family-C knock-on (R19 census re-probe).** R19 flagged 13 ch3-unsolved
+    (family C) bottoming out in `∫arctan(kx)/x`-type residuals "needing ch5
+    producers". With ch5 in the foundation, ch3 s120 seed5 climbs **69 → 71
+    correct** (4 wrong unchanged = the R19 false-wrongs #394/#442/#44/#538); the
+    two flips are family-C members **#31 and #226** (their `∫arctan/x` residual now
+    closes to the `PolyLog[2,±i·x]` inverse-tangent-integral form). The rest of
+    family C (#10/#43/#48/#111/#150/#190/#207/#209/#219/#382/#439) still bottoms
+    out in shapes ch5's bundled base cases don't reach.
+  - **Regression guards (all clean).** ch2 s120 seed5 **82 correct / 2 wrong**
+    (=baseline), 4.1 Sine s120 seed5 **107 / 0** (=baseline) — ch5 in the
+    foundation does NOT shadow them (ch5 rules only match inverse-trig heads).
+  - **Residual / next-rung shopping list** (dominant unsolved family per suite):
+    5.1 sine — `(f·x)^m·(d+e·x²)^p·(a+b·arcsin)^n` (50, the m·p·n triple-power,
+    needs the `(d+e·x²)^p` half-integer machinery + the ₃F₂ `HypergeometricPFQ`
+    kernel); 5.2 cosine — `(d·x)^m·(a+b·arccos)^n` (59); 5.3 tangent — `u·(a+b·
+    arctan(c·x))^p` (51, the 161-rule misc-`u` family); 5.4 cotangent — 5.4.1
+    misc (51); 5.5 secant / 5.6 cosecant — `u·(a+b·arcsec/arccsc)^n` (51/54). The
+    common thread is the high-power `(a+b·InvTrig)^n` reduction recursions whose
+    sub-integrals CE doesn't close, plus the symbolic-quartic and ₃F₂ kernels.
+  - **Tests.** ch5 utility unit tests (HalfIntegerQ, Discriminant, Head, the four
+    False-sentinel stubs) in `rubi-utils.test.ts`; D-verified loader cases
+    (∫arcsin, ∫arctan, ∫arcsec, ∫x·arctan, ∫arcsin(2x)², and the ch3-connection
+    ∫arctan(x)/x → PolyLog) in `integration-rules.test.ts`.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the
