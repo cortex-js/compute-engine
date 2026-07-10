@@ -26,6 +26,7 @@ import {
   singleAngleTrigRationalQ,
   singleAngleExponentialPieces,
   hasSingleAngleTrigRationalCandidate,
+  circularTrigReduce,
   RuleFail,
 } from '../../src/compute-engine/rubi/rubi-utils';
 import { toTimesPower } from '../../src/compute-engine/rubi/normal-form';
@@ -1247,5 +1248,87 @@ describe('Chapter-5 inverse-trig utilities', () => {
       expect(build([head, 'quadNeg', 'x'], ctx).symbol).toBe('False');
       expect(cond(['FalseQ', [head, 'quadNeg', 'x']])).toBe(true);
     }
+  });
+});
+
+// circularTrigReduce — the ExpandTrigReduce circular product-to-sum (RUBI.md §5,
+// Phase R23). Reduces products/powers of Sin[u]/Cos[u] to a REAL multiple-angle
+// sum, so the arcsin substitution rules' ∫θⁿ·Sin^m·Cos^k inner integrals reach
+// the ∫Cos[k·u]/θ → CosIntegral closure. The reduction is an exact identity:
+// reduce(u) ≡ u, verified numerically. It must emit only single-angle Cos/Sin
+// (no residual powers) or the θⁿ·Cos[k·u] rules never match.
+describe('circularTrigReduce (ExpandTrigReduce circular product-to-sum, R23)', () => {
+  const engine = new ComputeEngine();
+  // reduce(u) ≡ u at a spread of points (u, x, a free), and the reduced form
+  // contains no Power-of-Sin/Cos (single-angle real trig only).
+  const identityCases: [Expression, string][] = [
+    [['Power', ['Sin', 'u'], 2] as Expression, 'Sin²'],
+    [['Power', ['Sin', 'u'], 3] as Expression, 'Sin³'],
+    [['Power', ['Cos', 'u'], 4] as Expression, 'Cos⁴'],
+    [['Power', ['Cos', 'u'], 5] as Expression, 'Cos⁵'],
+    [
+      ['Multiply', ['Power', ['Sin', 'u'], 4], ['Cos', 'u']] as Expression,
+      'Sin⁴·Cos',
+    ],
+    [
+      [
+        'Multiply',
+        ['Power', ['Sin', 'u'], 3],
+        ['Power', ['Cos', 'u'], 6],
+      ] as Expression,
+      'Sin³·Cos⁶',
+    ],
+    // rule 5.1.2#7 shape: a scalar Add distributed over a Sin power
+    [
+      [
+        'Multiply',
+        ['Sin', 'u'],
+        ['Subtract', 2, ['Multiply', 3, ['Power', ['Sin', 'u'], 2]]],
+      ] as Expression,
+      'Sin·(2−3Sin²)',
+    ],
+    // symbolic linear argument (as produced by the arcsin substitution)
+    [
+      [
+        'Power',
+        ['Sin', ['Add', ['Multiply', -1, 'a'], ['Multiply', 2, 'x']]],
+        2,
+      ] as Expression,
+      'Sin(−a+2x)²',
+    ],
+  ];
+
+  test.each(identityCases)('reduce(%s) ≡ %s numerically', (input) => {
+    const u = engine.box(input as any);
+    const reduced = circularTrigReduce(engine, u);
+    let maxErr = 0;
+    for (let i = 0; i < 10; i++) {
+      const sub = { u: 0.4 * i - 1.7, x: 0.3 * i - 1.1, a: 0.7 };
+      const A = u.subs(sub).N();
+      const B = reduced.subs(sub).N();
+      maxErr = Math.max(
+        maxErr,
+        Math.hypot(
+          ((A.re as number) ?? NaN) - ((B.re as number) ?? NaN),
+          ((A.im as number) ?? 0) - ((B.im as number) ?? 0)
+        )
+      );
+    }
+    expect(maxErr).toBeLessThan(1e-10);
+    // no residual Sin/Cos POWER survives — output is a sum of single angles
+    const json = JSON.stringify(reduced.json);
+    expect(/\["Power",\["Sin"/.test(json)).toBe(false);
+    expect(/\["Power",\["Cos"/.test(json)).toBe(false);
+  });
+
+  test('the closure requires the reduction (Sin² is the load-bearing step)', () => {
+    // Without the reduction ∫Sin[x]²/x stays inert; with it, Sin²→½−½Cos[2x]
+    // and the CosIntegral fallback closes it. Assert the reduced integrand is
+    // the multiple-angle form the ∫Cos[2x]/x rule needs.
+    const reduced = circularTrigReduce(
+      engine,
+      engine.box(['Power', ['Sin', 'x'], 2] as any)
+    );
+    expect(reduced.toString()).toContain('cos(2x)');
   });
 });

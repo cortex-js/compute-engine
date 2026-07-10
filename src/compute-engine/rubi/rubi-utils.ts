@@ -3984,9 +3984,178 @@ function deepExpand(ce: ComputeEngine, e: Expression): Expression {
   return e;
 }
 
-/** ExpandTrigReduce[u,x] (2-arg) — the exponential-expansion of u (see the
- *  section comment). Returns a sum the linearity prelude integrates termwise. */
+// ---------------------------------------------------------------------------
+// Circular product-to-sum reduction (ExpandTrigReduce for Sin/Cos).
+//
+// The hyperbolic ExpandTrigReduce above routes Sinh/Cosh through E^(±w). Rubi
+// ALSO feeds ExpandTrigReduce products/powers of *circular* Sin/Cos — the
+// inverse-sine substitution rules (5.1.2#7/#8, and the inner integrals of
+// 5.1.2#11 / 5.1.4#45 which reach 4.1.10#17/#18) reduce `∫θⁿ·Sin[u]^m·Cos[u]^k`
+// to a linear combination of `θⁿ·Cos[j·u]` / `θⁿ·Sin[j·u]`, each of which
+// closes to CosIntegral/SinIntegral (n=−1) or a poly×trig antiderivative.
+//
+// We do this in REAL trig form via the pairwise product-to-sum identities
+// (Cos·Cos, Sin·Sin, Sin·Cos), NOT through exponentials: the θⁿ·Cos[j·u] rules
+// and the ∫Cos[j·u]/θ → CosIntegral fallback match Cos/Sin heads, not E^(i·w).
+// SCOPED to the ExpandTrigReduce call sites (rule RHSs); it is never wired as a
+// global driver fallback — a chapter-wide exp/trig reduction preempts the
+// trig-form rules (the R9 lesson).
+// ---------------------------------------------------------------------------
+
+/** An atom of a real-trig linear combination: `coef` (a numeric/symbolic
+ *  scalar) times `Cos[arg]` / `Sin[arg]`, or a bare constant (`kind` = null). */
+type TrigAtom = {
+  coef: Expression;
+  kind: 'Sin' | 'Cos' | null;
+  arg: Expression;
+};
+
+/** True iff any active circular Sin/Cos head appears in `u`. */
+function containsCircularSinCos(u: Expression): boolean {
+  if ((u.operator === 'Sin' || u.operator === 'Cos') && u.ops?.length === 1)
+    return true;
+  return (u.ops ?? []).some(containsCircularSinCos);
+}
+
+/** `Sin[w]`/`Cos[w]` (single arg) → {'Sin'|'Cos', w}, else null. */
+function asSinCos(f: Expression): { head: 'Sin' | 'Cos'; arg: Expression } | null {
+  if ((f.operator === 'Sin' || f.operator === 'Cos') && f.ops?.length === 1)
+    return { head: f.operator, arg: f.ops[0] };
+  return null;
+}
+
+/** Multiply every atom of `atoms` by a single `Sin[w]` / `Cos[w]` factor,
+ *  applying the product-to-sum identities (verified numerically):
+ *    Cos·Cos = ½Cos[a−w] + ½Cos[a+w];  Sin·Sin = ½Cos[a−w] − ½Cos[a+w];
+ *    Sin·Cos = ½Sin[a+w] + ½Sin[a−w];  Cos·Sin = ½Sin[a+w] − ½Sin[a−w].
+ *  Bare constants become the factor itself. Args are combined with add/sub
+ *  (exact linear folding, no simplify); `Cos[0]`→constant, `Sin[0]`→dropped. */
+function mulAtomsByTrig(
+  ce: ComputeEngine,
+  atoms: TrigAtom[],
+  head: 'Sin' | 'Cos',
+  w: Expression
+): TrigAtom[] {
+  const half = ce.number([1, 2]);
+  const out: TrigAtom[] = [];
+  const push = (coef: Expression, kind: 'Sin' | 'Cos', arg: Expression): void => {
+    if (arg.isSame(0)) {
+      if (kind === 'Cos') out.push({ coef, kind: null, arg: ce.One });
+      // Sin[0] = 0 — drop
+      return;
+    }
+    out.push({ coef, kind, arg });
+  };
+  for (const a of atoms) {
+    const c = a.coef;
+    const ch = half.mul(c);
+    if (a.kind === null) {
+      out.push({ coef: c, kind: head, arg: w });
+    } else if (a.kind === 'Cos' && head === 'Cos') {
+      push(ch, 'Cos', a.arg.sub(w));
+      push(ch, 'Cos', a.arg.add(w));
+    } else if (a.kind === 'Sin' && head === 'Sin') {
+      push(ch, 'Cos', a.arg.sub(w));
+      push(ch.neg(), 'Cos', a.arg.add(w));
+    } else if (a.kind === 'Sin' && head === 'Cos') {
+      push(ch, 'Sin', a.arg.add(w));
+      push(ch, 'Sin', a.arg.sub(w));
+    } else {
+      // a.kind === 'Cos' && head === 'Sin'
+      push(ch, 'Sin', a.arg.add(w));
+      push(ch.neg(), 'Sin', a.arg.sub(w));
+    }
+  }
+  return out;
+}
+
+/** Reduce ONE additive term `scalar·∏Sin[uᵢ]^aᵢ·∏Cos[vⱼ]^bⱼ` to a real-trig
+ *  linear combination. Non-trig factors accumulate into the scalar; each
+ *  circular Sin/Cos of INTEGER power ≥1 is folded in pairwise. Returns null if
+ *  the term carries an unreducible circular trig factor (non-integer power),
+ *  so the caller can keep it verbatim (a safe no-op). */
+function reduceTrigTerm(ce: ComputeEngine, term: Expression): TrigAtom[] | null {
+  const factors =
+    term.operator === 'Multiply' && term.ops ? term.ops : [term];
+  const scalars: Expression[] = [];
+  const trigFactors: { head: 'Sin' | 'Cos'; arg: Expression }[] = [];
+  for (const f of factors) {
+    const sc = asSinCos(f);
+    if (sc) {
+      trigFactors.push(sc);
+      continue;
+    }
+    if (
+      f.operator === 'Power' &&
+      f.ops &&
+      asSinCos(f.ops[0]) &&
+      isNumber(f.ops[1])
+    ) {
+      const n = f.ops[1];
+      const ni = n.re;
+      if (typeof ni !== 'number' || !Number.isInteger(ni) || ni < 1 || !n.isSame(ni))
+        return null; // non-integer / reciprocal circular power — unreducible
+      const sc2 = asSinCos(f.ops[0])!;
+      for (let i = 0; i < ni; i++) trigFactors.push(sc2);
+      continue;
+    }
+    // any remaining factor that still hides a circular trig head is unsafe to
+    // treat as an opaque scalar (it would leave an unreduced Sin/Cos product)
+    if (containsCircularSinCos(f)) return null;
+    scalars.push(f);
+  }
+  const scalar =
+    scalars.length === 0
+      ? ce.One
+      : scalars.length === 1
+        ? scalars[0]
+        : ce.function('Multiply', scalars);
+  let atoms: TrigAtom[] = [{ coef: ce.One, kind: null, arg: ce.One }];
+  for (const t of trigFactors) atoms = mulAtomsByTrig(ce, atoms, t.head, t.arg);
+  // fold the term scalar into every atom's coefficient
+  return atoms.map((a) => ({
+    coef: scalar.isSame(1) ? a.coef : ce.function('Multiply', [scalar, a.coef]),
+    kind: a.kind,
+    arg: a.arg,
+  }));
+}
+
+/** Materialize a list of trig atoms as a canonical Add. */
+function atomsToExpr(ce: ComputeEngine, atoms: TrigAtom[]): Expression {
+  const terms = atoms.map((a) =>
+    a.kind === null
+      ? a.coef
+      : ce.function('Multiply', [a.coef, ce.function(a.kind, [a.arg])])
+  );
+  if (terms.length === 0) return ce.Zero;
+  if (terms.length === 1) return terms[0];
+  return ce.function('Add', terms);
+}
+
+/** ExpandTrigReduce for circular Sin/Cos: product-to-sum into a real-trig
+ *  linear combination. `deepExpand` first distributes products and expands
+ *  integer powers of sums, then each additive term is reduced. A term that
+ *  cannot be reduced (unexpected shape) is kept verbatim — a safe no-op.
+ *  Exported for the rubi-utils unit test (the reduction is an exact identity). */
+export function circularTrigReduce(ce: ComputeEngine, u: Expression): Expression {
+  const expanded = deepExpand(ce, u);
+  const terms = expanded.operator === 'Add' && expanded.ops ? expanded.ops : [expanded];
+  const out: Expression[] = [];
+  for (const t of terms) {
+    const atoms = reduceTrigTerm(ce, t);
+    out.push(atoms === null ? t : atomsToExpr(ce, atoms));
+  }
+  if (out.length === 0) return ce.Zero;
+  if (out.length === 1) return out[0];
+  return ce.function('Add', out);
+}
+
+/** ExpandTrigReduce[u,x] (2-arg) — product/power reduction of u. Circular
+ *  Sin/Cos reduce to a real multiple-angle sum (`circularTrigReduce`);
+ *  Sinh/Cosh route through the exponential expansion (see the section
+ *  comment). Returns a sum the linearity prelude integrates termwise. */
 function expandTrigReduce(ce: ComputeEngine, u: Expression): Expression {
+  if (containsCircularSinCos(u)) return circularTrigReduce(ce, u);
   return deepExpand(ce, hyperbolicToExp(ce, u));
 }
 

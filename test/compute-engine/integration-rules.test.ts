@@ -728,4 +728,51 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       expect(F.toString()).toContain('PolyLog');
     });
   });
+
+  // R23: the InvTrig^n multiple-angle reduction (RUBI.md §5, Phase R23). The
+  // arcsin substitution rules (5.1.4#45, 5.1.2#7/#8, and the 4.1.10#17/#18
+  // sine rules they reach) hand ∫θⁿ·Sin[u]^m·Cos[u]^k to ExpandTrigReduce.
+  // Extending ExpandTrigReduce's CIRCULAR branch to a REAL product-to-sum
+  // (Sin²→½−½Cos[2u], …) lets each ∫Cos[k·u]/θ close to CosIntegral (and
+  // Sin→SinIntegral) via the R15 Si/Ci fallback. Verified by finite-
+  // differencing F.N() (sampled inside |x|<1, the arcsin real domain).
+  describe('the InvTrig^n multiple-angle → CosIntegral reduction (Chapter-5, R23)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string, xs = [0.17, 0.31, 0.52, 0.73]) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      let checked = 0;
+      for (const x of xs) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ x }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        expect(d).toBeCloseTo(f, 5);
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    };
+    // 5.1.4a #348: ∫x²/(√(1−x²)·arcsin(x)) → −½Ci(2·arcsin) + ½Log(arcsin).
+    // The inner ∫Sin²/θ needs the circular product-to-sum to reach CosIntegral.
+    test('∫x²/(√(1−x²)·arcsin(x)) dx → CosIntegral', () => {
+      const F = ce
+        .parse('\\int \\frac{x^2}{\\sqrt{1-x^2}\\arcsin(x)} \\, dx')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toContain('CosIntegral');
+      verify('\\frac{x^2}{\\sqrt{1-x^2}\\arcsin(x)}');
+    });
+    // arccos co-variant (5.2 analog, Cos-power reduction).
+    test('∫x²/(√(1−x²)·arccos(x)) dx → CosIntegral', () => {
+      const F = ce
+        .parse('\\int \\frac{x^2}{\\sqrt{1-x^2}\\arccos(x)} \\, dx')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toContain('CosIntegral');
+      verify('\\frac{x^2}{\\sqrt{1-x^2}\\arccos(x)}');
+    });
+  });
 });

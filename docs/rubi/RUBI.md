@@ -5,13 +5,14 @@
 4.5 Secant + §8.8 Polylogarithm** (6,574 rules, 6.98 MB). Chapter-1 exhaustive
 ≈90–91%; ch2 ≈72% / ch6 ≈45% effective; **4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
-71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R22, s120 seed5):
-5.1 sine 54/120, 5.2 cosine 52, 5.3 tangent 57, 5.4 cotangent 60, 5.5 secant 56,
-5.6 cosecant 52 (331/720 = 46.0%, R22 +37 vs R20's 294 — the trig-subproblem
-bridge); Chapter 7 Inverse hyperbolic (R22, s120 seed5):
+71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R23, s120 seed5):
+5.1 sine 55/120, 5.2 cosine 55, 5.3 tangent 58, 5.4 cotangent 60, 5.5 secant 56,
+5.6 cosecant 52 (336/720 = 46.7%, R23 +5 vs R22's 331 — the InvTrig^n
+multiple-angle → CosIntegral reduction); Chapter 7 Inverse hyperbolic (R22, s120 seed5):
 7.1 sine 79/120, 7.2 cosine 51, 7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44,
 7.6 cosecant 54 (408/720 = 56.7%, R22 +2 — ch7's arsinh sub-integrals already
-routed via the ungated hyperbolic fallback); genuine wrongs 0 across ALL suites incl. ch3/ch5/ch7** (all flagged
+routed via the ungated hyperbolic fallback; unchanged at R23, which touches only the
+circular ExpandTrigReduce branch); genuine wrongs 0 across ALL suites incl. ch3/ch5/ch7** (all flagged
 "wrongs" are documented verification false-wrong classes — see the
 ROADMAP §R state note). The nested `Log[c·(b·x^n)^p]` power-in-log family
 (§3.1.5 / §3.3) that R17 first shipped with ~3 genuine wrongs was **fixed**
@@ -1510,6 +1511,60 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     fallback control that already passed). Four of the five FAIL under
     `RUBI_NO_TRIGSUB=1`. `rubi-utils.test.ts`: a `HalfIntegerQ` grading test
     (p = ±1/2, ±3/2, −5/2 → true; integers/denom≠2 → false; multi-arg all-true).
+- **Phase R23 — the InvTrig^n multiple-angle → CosIntegral reduction LANDED
+  (2026-07-10).** R22's census named subfamily (B) — `x^m·(a+b·ArcSin(c·x))^n`
+  with `n` negative / fractional-half — as the dominant remaining
+  non-`Unintegrable` cluster, closing to **CosIntegral/SinIntegral** via a
+  `Cos[k·θ]`-expansion CE lacked. **Root cause (one utility gap, no bundling):**
+  the arcsin substitution rules (5.1.4#45, and the 5.1.2#7/#8 and 4.1.10#17/#18
+  sine rules they reach) hand `∫θⁿ·Sin[u]^m·Cos[u]^k dθ` to `ExpandTrigReduce`,
+  whose CIRCULAR branch left `Sin/Cos` **unchanged** — only Sinh/Cosh routed
+  through the exponential expander (`hyperbolicToExp`). So rule 4.1.10#17 fired,
+  called `ExpandTrigReduce[x⁻¹, Sin[x]², x]`, got the integrand back unchanged,
+  and failed "no progress"; the `∫Sin[x]²/θ` inner integral stranded. **Fix
+  (`rubi-utils.ts` `circularTrigReduce`, ~110 lines, no toggle):** extend the
+  circular branch to a REAL product-to-sum — pairwise `Cos·Cos = ½Cos[a−w]+½Cos[a+w]`,
+  `Sin·Sin`, `Sin·Cos`, `Cos·Sin` identities (numerically verified), reducing
+  `Sin[u]^m·Cos[u]^k` to a linear combination of single-angle `Cos[j·u]`/`Sin[j·u]`.
+  Kept in TRIG (not exp) form deliberately — the downstream `θⁿ·Cos[j·u]` rules
+  and the R15 `∫Cos[j·u]/θ → CosIntegral` fallback match `Cos`/`Sin` heads, and
+  a chapter-wide exp reduction preempts the trig rules (the R9 lesson). SCOPED to
+  the `ExpandTrigReduce` call sites (rule RHSs) — never a global driver fallback,
+  so no toggle is warranted. The reduction is an **exact identity**
+  (`reduce(u) ≡ u`), unit-verified. Once the circular branch reduces, the whole
+  chain (5.1.4#45 → 4.1.10#17 → R15 Si/Ci) already existed: `∫x²/(√(1−x²)·arcsin)`
+  now closes to `−½Ci(2·arcsin)+½Log(arcsin)`.
+  - **Per-suite before→after (s120 seed5, genuine wrongs 0 throughout).** 5.1
+    sine **54 → 55** (+1: #348 `x²/(√·arcsin)` → CosIntegral), 5.2 cosine
+    **52 → 55** (+3: #55/#56/#69 `xᵐ/arccos^k` → CosIntegral), 5.3 tangent
+    **57 → 58** (+1, arctan reaches the same reduction), 5.4/5.5/5.6 unchanged —
+    **331 → 336 (+5, 46.0% → 46.7%)**. Chapter 7 unchanged (the fix touches only
+    the circular branch; hyperbolic routes through `hyperbolicToExp`).
+  - **Census — what the +5 leaves.** The **mixed** `∫θⁿ·Sin[u]^m·Cos[u]^k` inner
+    integral of rule 5.1.2#11 (needed by #408/#410/#336, the `(a+b·ArcSin)⁻²`
+    cases) has NO closing CE rule — Rubi's `FunctionOfTrigOfLinearQ`-gated rule is
+    unimplemented, so it never reaches an `ExpandTrigReduce` call. The reduction
+    ALSO unlocks the fractional-`n` (`Sqrt[arcsin]`, `^(3/2)`, `^(5/2)`) families:
+    these produce a **correct** complex-`Erfi`/Fresnel antiderivative CE cannot
+    `.N()` (complex-argument Erfi), so the harness grades them `not-evaluable` /
+    `inconclusive` rather than solved (5.2 gains +7 such; symbolic-`D` verification
+    at rel-err ~1e-16 confirms they are correct, not wrong — same faithful-Rubi
+    `not-evaluable` class as the 9 baseline ch5.2 cases). The mixed-product path
+    and a native complex-Erfi kernel are the next rung.
+  - **Regression guards (all = baseline, genuine wrongs 0).** 4.1 Sine
+    **107/120** (0w — the chapter most exercised by the circular ExpandTrigReduce
+    change, unchanged), ch2 **83/2w**, ch3 **71/4w**, ch6 s60 **18/0w**, 7.1
+    **79/2w**, 7.2 **51** (byte-identical results; one case flaked to
+    `inconclusive` on a `verification budget exceeded` under concurrent CPU load —
+    not a regression), 5.3 **58** (the +1 above). All wrongs are the documented
+    false-wrong classes.
+  - **Tests.** `integration-rules.test.ts`: an R23 describe block, D-verified via
+    finite-differenced `F.N()` — `∫x²/(√(1−x²)·arcsin)` and the `arccos`
+    co-variant, both asserting a `CosIntegral` form (each is inert without the
+    reduction). `rubi-utils.test.ts`: a `circularTrigReduce` block — the
+    `reduce(u) ≡ u` identity over pure powers, mixed products, a scalar-Add shape,
+    and a symbolic linear argument, plus a single-angle-only output assertion and
+    the load-bearing `Sin²→½−½cos(2x)` step.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the
