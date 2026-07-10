@@ -1,19 +1,19 @@
 {
   "schemaVersion": 1,
-  "generated": "2026-06-10",
+  "generated": "2026-07-09",
   "generator": "grim2mathjson 0.1.0",
   "upstream": {
     "name": "fungrim",
     "repository": "https://github.com/arnog/fungrim",
     "branch": "grim2mathjson",
-    "commit": "de62e7aae1918f1fdab6d836ea2efe453ae007ea",
+    "commit": "7ab84ea4588c1e7643a710d703fbfe8888c263ae",
     "parent": {
       "repository": "https://github.com/fredrik-johansson/fungrim",
       "commit": "b7c3ca6e565e1058638cab6ba2bc811090296767",
-      "note": "pygrim/ content = upstream commit + 2 fix commits (Equal-paren in 6c2b31/e54e61; Element(w,CC) x24 in jacobi_theta.py) \u2014 submitted upstream as PRs; numerically verified at 30 digits"
+      "note": "pygrim/ content = upstream commit + 3 fix commits (Equal-paren in 6c2b31/e54e61; Element(w,CC) x24 in jacobi_theta.py; empty assumption interval in a172c7) \u2014 submitted upstream as PRs; numerically verified at 30 digits"
     },
     "pin": {
-      "sha256": "953c2afd2822d487c47a4247b74915d79a3598a9da251c374b996513bf026044",
+      "sha256": "1b52772dee84d3170f76eda97621f5c6db18e3579b09076e09282125e37238b4",
       "method": "cd fungrim && find pygrim -name '*.py' -type f | LC_ALL=C sort | xargs cat | shasum -a 256",
       "fileCount": 70
     },

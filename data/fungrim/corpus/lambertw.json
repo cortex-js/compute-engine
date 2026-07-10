@@ -2171,12 +2171,9 @@
       0
      ],
      [
-      "Negate",
-      [
-       "Divide",
-       1,
-       "ExponentialE"
-      ]
+      "Divide",
+      1,
+      "ExponentialE"
      ]
     ]
    ],

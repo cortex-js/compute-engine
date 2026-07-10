@@ -1,6 +1,6 @@
 {
-  "generated": "2026-07-10T03:31:41.379Z",
-  "corpus": "/Users/arno/dev/compute-engine/.claude/worktrees/fungrim-f-followups/data/fungrim",
+  "generated": "2026-07-10T05:50:38.059Z",
+  "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
   "stage1": {
     "total": 2551,
     "ok": 2551,
@@ -8,7 +8,7 @@
     "unknownSymbol": 0,
     "timeout": 0,
     "passRate": 1,
-    "elapsedMs": 1935,
+    "elapsedMs": 4328,
     "failureBuckets": [],
     "perTopic": {
       "agm": {

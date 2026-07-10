@@ -80,7 +80,7 @@ describe('loadIdentities (full artifact)', () => {
       (r) => r.target === 'simplify'
     ).length;
     expect(report.loaded).toBe(simplifyCount);
-    expect(report.loaded).toBe(1403);
+    expect(report.loaded).toBe(1404);
     // The only default-load skips are the solve templates (solve-disabled).
     expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
       true
@@ -98,14 +98,14 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1403,
+      simplify: 1404,
       solve: 0,
       harmonization: 0,
     });
     expect(report.byPurpose).toEqual({
       // 8 Digamma specific-value rules are tagged 'transform' (cost-gate
       // exempt) so they fire in simplify() — SYM P2-25.
-      simplify: 1283,
+      simplify: 1284,
       transform: 8,
       expand: 112,
     });
@@ -993,6 +993,12 @@ describe('M5 before/after: guarded identities via simplify()', () => {
     // numeric-retry path of the cmp guard closure)
     ce.declare('q', 'real');
     ce.assume(ce.expr(['Greater', 'q', 1]));
+    // u: real in (0, 1/4] (⇒ the banded guards 0 < u ≤ 1/e of a172c7 both
+    // decidable — the composite 1/e bound discharges numerically against the
+    // stored rational upper bound)
+    ce.declare('u', 'real');
+    ce.assume(ce.expr(['Greater', 'u', 0]));
+    ce.assume(ce.expr(['LessEqual', 'u', ['Rational', 1, 4]]));
   });
 
   const simplifiesTo = (input: unknown, expected: unknown) => {
@@ -1022,6 +1028,22 @@ describe('M5 before/after: guarded identities via simplify()', () => {
       ['Divide', ['Factorial', ['Multiply', 2, 'n']], ['Square', ['Factorial', 'n']]],
       ['Binomial', ['Multiply', 2, 'n'], 'n']
     ));
+
+  // Lambert W₋₁ (2-arg), banded cmp guards (gt 0, le 1/e). Compiles since the
+  // upstream a172c7 assumption-interval fix (the band was empty as published:
+  // OpenClosedInterval(0, −1/e)); fork commit 7ab84ea.
+  it('W₋₁(u·ln u) → ln u for real 0 < u ≤ 1/4  [fungrim:a172c7]', () =>
+    simplifiesTo(
+      ['LambertW', ['Multiply', 'u', ['Ln', 'u']], -1],
+      ['Ln', 'u']
+    ));
+
+  it('W₋₁(p·ln p) stays inert without an upper bound inside (0, 1/e]', () => {
+    const r = ce
+      .expr(['LambertW', ['Multiply', 'p', ['Ln', 'p']], -1])
+      .simplify();
+    expect(r.operator).toBe('LambertW');
+  });
 
   // digamma, recognition direction (large match → small replace)
   it('HarmonicNumber(n−1) − γ → Digamma(n) for integer n > 0  [fungrim:00c02a]', () =>

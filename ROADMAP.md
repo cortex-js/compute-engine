@@ -610,13 +610,8 @@ branches). Residual, none benchmark-reachable:
 
 - **FR1/FR3** (Dottie-style transcendental fixed points): unsolved by SymPy
   and Mathematica too — outside the closed-form ceiling, not a gap to chase.
-- `a172c7` (`W(x·ln x, −1) → ln x`) honestly no-fires — its guard band
-  `x·ln x ∈ (−1/e, 0)` defeats seeding; the remaining 30 `compat-signature`
-  compile skips are all genuine 2-arg `Digamma` (polygamma order — still
-  unimplemented).
-- **Small tails**: `\operatorname{W}_{-1}` subscript parse (BesselJ has the
-  same one-way limitation), derivative of the 2-arg form (kept inert, not
-  wrong).
+- The remaining `compat-signature` compile skips are all genuine 2-arg
+  `Digamma` (polygamma order — still unimplemented).
 
 (Fungrim's _simplify_-side work is separate again — see Strategic item 7,
 Fungrim Phase 4.)

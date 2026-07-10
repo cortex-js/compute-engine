@@ -1,31 +1,31 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
   "sliceEntries": 1650,
-  "emitted": 1403,
+  "emitted": 1404,
   "ledger": {
     "box-error": 1,
-    "compat-signature": 30,
+    "compat-signature": 33,
     "curated-exclude": 4,
     "duplicate-undirected": 14,
     "guard-uncompilable": 69,
     "lhs-not-value-form": 94,
-    "no-fire": 27,
+    "no-fire": 23,
     "not-equation": 8
   },
   "byPurpose": {
     "expand": 112,
-    "simplify": 1283,
+    "simplify": 1284,
     "transform": 8
   },
   "byClass": {
-    "identity": 1074,
+    "identity": 1075,
     "specific-value": 329
   },
   "byTarget": {
-    "simplify": 1403
+    "simplify": 1404
   },
   "sampleKinds": {
-    "numeric": 47,
+    "numeric": 48,
     "symbolic": 1356
   },
   "headBuckets": {
@@ -57,9 +57,9 @@
     "ModularLambda": 12,
     "Sqrt": 12,
     "CarlsonRC": 11,
+    "LambertW": 10,
     "Conjugate": 9,
     "Imaginary": 9,
-    "LambertW": 9,
     "Abs": 8,
     "Argument": 8,
     "ChebyshevU": 8,
@@ -242,8 +242,8 @@
     },
     {
       "id": "10cdf4",
-      "reason": "no-fire",
-      "detail": "no seed satisfying the guards"
+      "reason": "compat-signature",
+      "detail": "no-fire: no seed satisfying the guards"
     },
     {
       "id": "12ce84",
@@ -896,11 +896,6 @@
       "detail": "unsupported conjunct \"Not\""
     },
     {
-      "id": "a172c7",
-      "reason": "no-fire",
-      "detail": "no seed satisfying the guards"
-    },
-    {
       "id": "a249f6",
       "reason": "no-fire",
       "detail": "rule did not fire"
@@ -1212,8 +1207,8 @@
     },
     {
       "id": "e20db0",
-      "reason": "no-fire",
-      "detail": "no seed satisfying the guards"
+      "reason": "compat-signature",
+      "detail": "no-fire: no seed satisfying the guards"
     },
     {
       "id": "e2bfdb",
@@ -1342,8 +1337,8 @@
     },
     {
       "id": "f8dfaf",
-      "reason": "no-fire",
-      "detail": "no seed satisfying the guards"
+      "reason": "compat-signature",
+      "detail": "no-fire: no seed satisfying the guards"
     },
     {
       "id": "fa0292",
