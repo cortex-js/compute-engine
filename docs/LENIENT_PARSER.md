@@ -213,3 +213,24 @@ Specifically:
 > 14. `vec(...)` / `mat(...)` notation
 > 15. Calculus shortcuts (`d/dx`, `partial`)
 > 16. `binom(n,k)` / `nCr` combinatorics
+
+## Documented parsing conventions (intentional, occasionally surprising)
+
+These behaviors are by design; they are recorded here so they are not
+re-reported as bugs (CORRECTNESS P3-1/2/3):
+
+- **Trailing ellipsis on decimals is dropped.** `0.999\ldots` parses as the
+  literal `0.999` — the ellipsis is not interpreted as a repeating decimal.
+  (Use `0.\overline{9}` for a repeating decimal.)
+- **Comma is a group separator inside numbers.** `1{,}234.5` parses as the
+  number `1234.5`; a bare `1,234.5` parses as the *tuple* `(1, 234.5)`
+  because the unbraced comma is a list separator. Locale conventions that
+  use `,` as a decimal separator are not supported.
+- **Undeclared function symbols are arity-dependent.** For an undeclared
+  `f`: `f(x)` parses as the product `f·x` (single juxtaposed operand),
+  while `f(1, 2)` parses as the function application `f(1, 2)` (a comma
+  inside the parentheses makes function intent unambiguous). Consequently
+  `f(x) = x^2` parses as `Equal(f·x, x²)` — declare `f` as a function (or
+  use `\operatorname{f}`) to get an applied form with a single argument.
+- **Unterminated `\text{…` is accepted** (the text runs to the end of the
+  input) rather than producing an error.

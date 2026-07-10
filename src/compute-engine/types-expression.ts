@@ -1822,6 +1822,12 @@ export interface Expression {
    * `this.evaluate()`.
    *
    * The result is in canonical form.
+   *
+   * Note on typing (SYMBOLIC P2-24, by design): `N()` produces a float
+   * literal, so its `type` can widen relative to the exact input's — e.g.
+   * `1/3` has type `finite_rational` while `(1/3).N()` has type
+   * `finite_real`. The result type reflects the representation produced,
+   * not the mathematical value's tightest type.
    */
   N(): Expression;
 

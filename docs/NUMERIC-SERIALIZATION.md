@@ -124,6 +124,13 @@ We considered rounding `.json` to the working precision but decided against it:
   violates the principle of least surprise for data serialization.
 - **Round-trip safety**: `ce.expr(expr.json)` must reconstruct the original
   internal state. Rounding `.json` would make this impossible.
+
+  Two known limitations to this guarantee (documented, won't-fix for now —
+  CORRECTNESS RT-P2-2/3): the `.latex` route (not `.json`) serializes a
+  large exact integer like `1e300` as `10^{300}`, which re-parses as
+  `Power(10, 300)` — the value is preserved after evaluation but the
+  literal-ness is lost; and negative zero is not representable — `box(-0)`,
+  `{num: '-0'}` and `parse('-0.0')` all normalize to `+0`.
 - **Consumer choice**: Different consumers may want different precision. The raw
   data lets them decide.
 - **Explicit opt-in**: `toMathJson({ fractionalDigits: 'auto' })` provides

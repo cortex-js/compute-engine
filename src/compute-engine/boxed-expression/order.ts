@@ -273,9 +273,11 @@ function rank(expr: Expression): Rank {
  * 1/ Literal numeric values (rational,  machine numbers and Decimal numbers),
  *  ordered by their numeric value (smaller numbers before larger numbers)
  *
- * 2/ Literal complex numbers, ordered by their real parts. In case of a tie,
- * ordered by the absolute value of their imaginary parts. In case of a tie,
- * ordered by the value of their imaginary parts.
+ * 2/ Literal complex numbers, ordered by their imaginary parts. In case of a
+ * tie, ordered by their real parts. (An arbitrary but established total
+ * order — canonical operand order in existing expressions and snapshots
+ * depends on it, so it is documented as implemented rather than changed;
+ * CORRECTNESS P3-7.)
  *
  * 3/ Symbols, ordered by their name as strings
  *

@@ -1247,6 +1247,20 @@ export function applyRule(
  * `CancellationError` (deadline/interrupt) propagates out, so timeouts are not
  * swallowed as "the rule failed".
  *
+ * **Ordering contract** (SYMBOLIC P3-14). Rules are tried in declaration
+ * order. Within a pass, after rule *k* fires, only rules with ordinal > k
+ * are tried on the result — earlier rules do not see later rules' output
+ * unless another iteration runs. The default `iterationLimit` is **1**, so
+ * by default there is a single pass; pass a larger `iterationLimit` (or use
+ * `simplify()`, which iterates to a fixed point with its own guards) when
+ * rules are meant to feed each other.
+ *
+ * **Capture convention** (SYMBOLIC P3-13). When several distinct bindings
+ * of a pattern's sequence wildcards would match, which one is produced is
+ * operator-dependent: the commutative-anchor path and the plain
+ * argument-list path resolve greedy-vs-lazy differently. Both results are
+ * valid matches; replacements built from captures should not rely on a
+ * specific split.
  */
 export function replace(
   expr: Expression,

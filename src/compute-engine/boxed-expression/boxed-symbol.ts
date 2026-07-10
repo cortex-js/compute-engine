@@ -602,6 +602,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   // The sign of the value of the symbol
+  //
+  // Mixed binding semantics (SYMBOLIC P2-13, documented): type-backed
+  // predicates (`type`, `isInteger`, …) read the definition captured in
+  // `_def` at construction/binding time, while sign predicates resolve
+  // *dynamically* by symbol name against the live assumptions. In the
+  // common path both agree — `assume()` mutates the bound definition in
+  // place — but a held instance whose symbol is re-declared in a new scope
+  // keeps its construction-time type while its sign tracks the current
+  // scope's assumptions.
   get sgn(): Sign | undefined {
     // First check if there's an assigned value
     if (this.value) return this.value.sgn;

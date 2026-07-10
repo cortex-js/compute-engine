@@ -477,6 +477,12 @@ that fixes a sign is reflected identically whether queried through `expr.sgn` /
 `isPositive` or through `verify(Greater(x, 0))`. A legacy linear scan remains
 only as a fallback for facts the index does not capture.
 
+One binding nuance: on a held `BoxedSymbol` instance, type-backed predicates
+(`type`, `isInteger`, …) read the definition captured when the symbol was
+bound, while sign predicates resolve dynamically by symbol name against the
+live assumptions (see the note on `sgn` in `boxed-symbol.ts`). Both agree in
+the common path — `assume()` mutates the bound definition in place.
+
 **`forget()` and provenance.** `forget(symbol)` removes every stored fact that
 references the symbol and resets any value the symbol received **from an
 assumption** — `declare()` / `assign()` values are left intact. To tell the two

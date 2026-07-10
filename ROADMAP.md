@@ -902,16 +902,24 @@ not a hack.
 ### Correctness & symbolic findings (2026-07) — residue
 
 The July 2026 correctness and symbolic reviews are fully dispositioned: every
-verified P0 and P1 from both reviews landed across the Wave 1–4 commits. The
-findings docs are kept for the record — [`CORRECTNESS_FINDINGS.md`](./CORRECTNESS_FINDINGS.md),
-[`SYMBOLIC_FINDINGS.md`](./SYMBOLIC_FINDINGS.md), with the per-wave
-implementation log (decisions D1–D9, gate protocol, per-package status) in
-[`docs/reviews/2026-07-findings-tracker.md`](./docs/reviews/2026-07-findings-tracker.md).
-The condensed P2/P3 lists at the
-bottom of each findings doc are the remaining low-priority sweep. The
-opt-in/nightly harnesses that pin these fixes (exactness grid, type-soundness
-grid, mpmath kernel harness, JS/Python parity fuzz, round-trip battery) are being
-adopted from the archived sources in `docs/reviews/2026-07-archive/`.
+verified P0 and P1 landed across the Wave 1–4 commits, and the **P2/P3 sweep
+itself completed in the tail-phase rounds 8–10** (`72f3a353`, `f5e0e339`,
+`a2b78928`, plus the P2-1 dispatch index `8667a0aa` and the benchmark
+capstone `c20a4b2e`) and the follow-on round (`e65eee11` complex-type
+inference, `99fa7276` D12-A exact Gaussians + parser perf, `c4def410`
+non-finite typing convention). The findings docs are kept for the record —
+[`CORRECTNESS_FINDINGS.md`](./CORRECTNESS_FINDINGS.md),
+[`SYMBOLIC_FINDINGS.md`](./SYMBOLIC_FINDINGS.md), with the full
+implementation log, the closed-as-measured-no-wins list (do not re-attempt
+without new evidence), and the residual inventory in
+[`docs/reviews/2026-07-findings-tracker.md`](./docs/reviews/2026-07-findings-tracker.md)
+(see its "RESUME HERE" section). What remains from the reviews is that
+residual tail: the item-4 filed residuals (Artanh/Arcoth-class literal
+poles, `∞+i` numeric-value finiteness, the `~oo` lattice question, the
+`Multiply(x, +∞)` fold positivity review), the non-blocking tracked
+residuals (fu `sin⁴−cos⁴`, defint error-bar/tanh-sinh, machine `gamma()`
+mid-range digits, …), and the item-5 perf levers (per-opDef signature
+caches, bundle cold-start).
 
 **Stage-2 corpus audit findings (2026-07-10)** — the per-topic numeric sweep
 (all 57 topics; the two upstream formula bugs it caught — a172c7, b16177 —
