@@ -1762,6 +1762,104 @@ function binomialPartsX(u: Expression, x: string): BinParts | null {
   return null;
 }
 
+/** Rubi FunctionOfLog[u,x] → {f, v, n} with u ≡ f(Log[v]), v = a·x^n (n≠0), or
+ * null. Faithful port of IntegrationUtilityFunctions.m FunctionOfLog: detects
+ * that u is a function of a single Log[a·x^n], returning the substituted body
+ * f (each Log[a·x^n] leaf → the substitution variable x), the log argument v,
+ * and the exponent n. Every Log leaf must share the same argument v; a bare
+ * integration variable outside a log, or any calculus head, fails closed
+ * (null). Drives the 3.5 `∫F(Log[a·x^n]) [/x]` rules (Miscellaneous
+ * logarithms), whose reduction is `1/n·Subst[∫f dx, x, Log[v]]`. */
+/** Integer power of x appearing as a factor of a single product term (0 if x
+ * is not a monomial factor, e.g. it sits inside Log). */
+function xPowerOfTerm(t: Expression, x: string): number {
+  if (t.symbol === x) return 1;
+  if (t.operator === 'Negate' && t.ops) return xPowerOfTerm(t.ops[0], x);
+  if (t.operator === 'Power' && t.ops) {
+    if (t.ops[0].symbol !== x) return 0;
+    const e = t.ops[1].re;
+    return typeof e === 'number' && Number.isInteger(e) && e > 0 ? e : 0;
+  }
+  if (t.operator === 'Multiply' && t.ops)
+    return t.ops.reduce((s, f) => s + xPowerOfTerm(f, x), 0);
+  return 0;
+}
+
+/** Minimum power of x dividing every additive term of e (0 if some term is
+ * x-free as a monomial). */
+function minXPower(e: Expression, x: string): number {
+  const terms = e.operator === 'Add' && e.ops ? e.ops : [e];
+  let m = Infinity;
+  for (const t of terms) {
+    m = Math.min(m, xPowerOfTerm(t, x));
+    if (m <= 0) return 0;
+  }
+  return Number.isFinite(m) ? m : 0;
+}
+
+/** Cancel the common x^k monomial factor between numerator and denominator —
+ * the rational cancellation Mathematica's `Cancel[x*u]` performs but CE's
+ * `simplify` does not (e.g. x/(x+x·Log²) → 1/(1+Log²)). Scoped to the
+ * FunctionOfLog entry point (the 3.5 `∫F(Log[a·x^n])/x` rules always feed it
+ * `Cancel[x*u]`). Divides each additive term by x^k structurally. */
+function cancelCommonXPower(e: Expression, x: string): Expression {
+  const { num, den } = asNumDen(e);
+  const k = Math.min(minXPower(num, x), minXPower(den, x));
+  if (k <= 0) return e;
+  const ce = e.engine;
+  const xk = ce.function('Power', [ce.symbol(x), ce.number(k)]);
+  const divTerms = (u: Expression): Expression => {
+    const terms = u.operator === 'Add' && u.ops ? u.ops : [u];
+    const out = terms.map((t) => t.div(xk));
+    return out.length === 1 ? out[0] : ce.function('Add', out);
+  };
+  return divTerms(num).div(divTerms(den));
+}
+
+function functionOfLog(
+  u: Expression,
+  x: string
+): { f: Expression; v: Expression; n: Expression } | null {
+  const ce = u.engine;
+  u = cancelCommonXPower(u, x);
+  // (vAcc,nAcc) accumulate the shared log argument and exponent; vAcc===null
+  // is Rubi's `False` sentinel meaning "not yet bound".
+  let vAcc: Expression | null = null;
+  let nAcc: Expression | null = null;
+  const rec = (e: Expression): Expression | null => {
+    // AtomQ[u]: a constant passes through; the bare integration variable
+    // (u===x) cannot be expressed as a function of a log → False.
+    if (e.ops == null || e.ops.length === 0)
+      return e.symbol === x ? null : e;
+    const head = e.operator;
+    if (CALCULUS_FNS.has(head)) return null; // CalculusQ[u] → False
+    // Log[a·x^n] leaf (zero constant term): substitute → x, record (v,n).
+    if (head === 'Ln' || (head === 'Log' && e.ops.length === 1)) {
+      const bp = binomialPartsX(e.ops[0], x);
+      if (bp !== null && (bp.a.isSame(0) || zeroQ(bp.a))) {
+        if (vAcc === null || e.ops[0].isSame(vAcc)) {
+          vAcc = e.ops[0];
+          nAcc = bp.n;
+          return ce.symbol(x);
+        }
+        return null; // a second, distinct log argument → False
+      }
+      // otherwise fall through: recurse structurally into the log's argument
+    }
+    // Map FunctionOfLog over the operands, threading (v,n), reconstruct head.
+    const parts: Expression[] = [];
+    for (const op of e.ops) {
+      const r = rec(op);
+      if (r === null) return null; // Throw[False]
+      parts.push(r);
+    }
+    return ce.function(head, parts);
+  };
+  const f = rec(u);
+  if (f === null || vAcc === null) return null;
+  return { f, v: vAcc, n: nAcc! };
+}
+
 /** Rubi BinomialParts product combination: (a+b·x^m)·(c+d·x^n) */
 function combineBinProduct(p: BinParts, q: BinParts): BinParts | null {
   const aZ = p.a.isSame(0) || zeroQ(p.a);
@@ -4317,11 +4415,16 @@ const VALUE_FNS: Record<string, ValueFn> = {
     return ctx.ce.function('List', [ctx.ce.number(dn), ctx.ce.number(dd)]);
   },
 
-  // FunctionOfLog[u, x] and SubstForFractionalPowerOfLinear[u, x] — Rubi
-  // pattern-recognizers returning a substitution tuple or False. Each is used
-  // by a single Chapter-3 rule gated on `Not[FalseQ[lst]]`; a faithful
-  // implementation is disproportionate, so return False (rule fails closed).
-  FunctionOfLog: (_args, ctx) => ctx.ce.symbol('False'),
+  // FunctionOfLog[u, x] — detects u = F(Log[a·x^n]) and returns the
+  // substitution tuple {F(x), a·x^n, n} (faithful port; see functionOfLog).
+  // Drives the 3.5 `∫F(Log[a·x^n])/x` rules. SubstForFractionalPowerOfLinear
+  // stays a fail-closed stub (its single 3.5 rule is a disproportionate port).
+  FunctionOfLog: (args, ctx) => {
+    const r = functionOfLog(build(args[0], ctx), ctx.x);
+    return r === null
+      ? ctx.ce.symbol('False')
+      : ctx.ce.function('List', [r.f, r.v, r.n]);
+  },
   SubstForFractionalPowerOfLinear: (_args, ctx) => ctx.ce.symbol('False'),
 
   // SubstFor[w, v, u, x] / SubstFor[v, u, x] — substitute the trig

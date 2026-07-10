@@ -5,7 +5,7 @@
 4.5 Secant + §8.8 Polylogarithm** (5,191 rules, 5.64 MB). Chapter-1 exhaustive
 ≈90–91%; ch2 ≈72% / ch6 ≈45% effective; **4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
-67/120 (new); genuine wrongs 0 across ALL suites incl. ch3** (all flagged
+69/120 (R19, +1 FunctionOfLog); genuine wrongs 0 across ALL suites incl. ch3** (all flagged
 "wrongs" are documented verification false-wrong classes — see the
 ROADMAP §R state note). The nested `Log[c·(b·x^n)^p]` power-in-log family
 (§3.1.5 / §3.3) that R17 first shipped with ~3 genuine wrongs was **fixed**
@@ -26,7 +26,9 @@ single-angle trig→exp partial-fraction fallback behind `RUBI_NO_TRIGEXP`), the
 R18 (complex special-function closures on the 2026-07-09 kernels: irreducible-
 quadratic denominators split over complex-conjugate linear roots in the Si/Ci
 fallback behind `RUBI_NO_SICI_COMPLEX`, and the reciprocal-argument
-`∫xᵐ·sin(a+b/x)` exp route un-gated).
+`∫xᵐ·sin(a+b/x)` exp route un-gated), then R19 (the `FunctionOfLog` recognizer
+implemented, closing the 3.5 `∫F(Log[a·xⁿ])/x` family; ch3 census established
+that the rest of the tail is bundling-inert — full-corpus closes nothing new).
 **Next rungs live in ROADMAP §R** (R3′ deep chains, R5; then the Ch6 tail
 R6–R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
@@ -1204,6 +1206,58 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     quadratic) + R18 end-to-end closures in `rubi-utils.test.ts`; complex-Si and
     reciprocal-arg end-to-end D-verified cases in `integration-rules.test.ts`;
     the R9-gate unit test flipped to assert `sin(a+b/x)` is now admitted.
+- **Phase R19 — Chapter-3 (Logarithms) unsolved-tail census + `FunctionOfLog`
+  LANDED (2026-07-10).** Triaged all 46 ch3 unsolved (s120 seed 5); implemented
+  the one bounded lever the census revealed. ch3 s120 seed 5:
+  **68 → 69 correct / 45 unsolved** (was 46), **4 wrong unchanged** (the same
+  R17-documented verification false-wrongs #394/#442/#44/#538 — probed clean at
+  positive x), 1 not-evaluable, 1 inconclusive. Regression guards clean: ch2
+  s120 **82 correct / 2 wrong** (=baseline), 4.1 Sine s120 **107 / 0** (=baseline).
+  - **Census method + headline finding.** Every unsolved re-run through BOTH the
+    ship/benchmark foundation (ch1/2/3/6/§8.8) AND the FULL corpus (every
+    chapter). **The full corpus closes NOTHING the foundation doesn't** — so
+    there is NO single-file bundling lever in this tail (unlike R16→R17 §8.8).
+    The residuals bottom out in sub-integrals that don't close even with all
+    5,921 rules loaded: they need capability CE lacks in ship config, not more
+    bundled rules.
+  - **The lever: `FunctionOfLog[u,x]`** (`rubi-utils.ts`, faithful port of
+    `IntegrationUtilityFunctions.m`; was a fail-closed stub). Detects
+    `u = F(Log[a·xⁿ])` and returns the substitution triple `{F(x), a·xⁿ, n}`;
+    every `Log` leaf must share the same argument (purely structural — no
+    `Log[x²]=2Log[x]`), a bare integration variable or any calculus head fails
+    closed. Drives the 3.5 catch-all `∫F(Log[a·xⁿ])/x → 1/n·Subst[∫F dx, x,
+    Log[a·xⁿ]]`. **Bug found in verification:** the rule feeds
+    `FunctionOfLog[Cancel[x·u], x]`, but CE's `Cancel`/`simplify` cannot cancel a
+    common `x` monomial (`x/(x+x·Log²) ↛ 1/(1+Log²)`), so the recognizer saw a
+    bare `x` and declined. Fix: `cancelCommonXPower` inside `functionOfLog`
+    divides each additive numerator/denominator term by the common `x^k`
+    (scoped to this entry point — no change to the general `Cancel`). Closes
+    3.5 #261 (`∫(Log[3x]²−1)/(x(1+Log[3x]+Log[3x]²)) → arctan/log of Log[3x]`),
+    D-verified. `SubstForFractionalPowerOfLinear` stays a fail-closed stub (its
+    single 3.5 rule is a disproportionate port; census showed its candidate
+    problems bottom out elsewhere anyway).
+  - **Census table — all 46 classified (family / count / where the chain dies /
+    verdict).** `C*`/`D`/`E`/`F`/`G` are all genuinely deep (bundling-inert):
+    | Family | n | Chain dies at | Verdict |
+    |---|---|---|---|
+    | A — expected-`Unintegrable`/`CannotIntegrate` | 15 | Rubi itself returns unevaluated (or partial with embedded `Unintegrable`) | **CE's inert `Integrate` is the CORRECT match** — not a defect (#127/#249/#444/#144/#155/#216/#544/#145/#152/#583/#287 full; #13/#35/#121/#203 partial) |
+    | B — `FunctionOfLog` `F(Log[a·xⁿ])/x` | 1 | recognizer was fail-closed stub | **FIXED this rung** (#261) |
+    | C — poly×log by-parts → non-elementary sub-integral | 13 | residual `∫arctan(kx)/x`, `∫artanh(√)/x`, symbolic-order-`k` `PolyLog` recurrence, `ArcSinh·Log` (#150/#439/#226/#382/#10/#31/#43/#48/#111/#207/#209/#219/#190) | deep — needs Log/PolyLog production from inverse-trig/hyperbolic-log chapters (ch4/ch5, NOT bundled) or symbolic-`k` `PolyLog` |
+    | D — `∫Log[·]/rational` → `PolyLog[2]` | 4 | direct Log/(cubic-or-Möbius) rule not firing → generic by-parts leaves a non-closing log/rational residual (#257/#85/#224/#292) | deep — missing `PolyLog[2]` production |
+    | E — `(a+b·Log[c(d+ex)ⁿ])^p × rational` half-integer | 3 | reduction residual `∫(a+b·Log)^{p-1}/(f+gx)^k` doesn't close (#324/#457/#491) | deep |
+    | F — fractional/negative power in the log argument | 4 | expected carries `Gamma[1+p,·]`/`ExpIntegralEi`/`LogIntegral` with fractional `x^(2/3)`/`e/√x` (#123/#476/#555/#586) | deep — kernel + fractional-power substitution |
+    | G — `∫Log[Sin/Tan/Csc²]`, `Log[quadratic-surd]` | 6 | by-parts leaves `D[inert-trig]` unreduced (CE's `D` knows `Tan`, not the inert `tan` head) AND the sub-integral needs ch4 trig integration (only 4.1/4.3/4.5 bundled) (#167/#177/#190/#191/#305/#101) | deep — two-part gap (inert-trig `D` + ch4 dependency) |
+
+    Bundling-inert total (C+D+E+F+G) = 30; expected-Unintegrable (A) = 15;
+    fixed (B) = 1. **Residual after R19 = 45 unsolved: 15 correct-by-design +
+    30 genuinely-deep.** Next-rung shopping list: the biggest single family is
+    **C** (13) — a Log/PolyLog producer for `∫arctan(kx)/x` and `∫artanh(kx)/x`
+    (the inverse-trig/hyperbolic-log Chapter-5 base cases) would unlock the
+    by-parts tails; **G** (6) needs an inert-trig `D` reduction plus a Chapter-4
+    trig-integration foundation.
+  - **Tests.** `FunctionOfLog` unit test (triple extraction incl. the
+    `cancelCommonXPower` path + three fail-closed cases) in `rubi-utils.test.ts`;
+    #261 end-to-end D-verified in `integration-rules.test.ts`.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

@@ -219,6 +219,44 @@ describe('Chapter-3 utilities (IntHide / MemberQ / ProductQ / Cancel / ...)', ()
     expect(r.ops![1].isSame(3)).toBe(true);
   });
 
+  test('FunctionOfLog[u, x] detects u = F(Log[a·xⁿ]) (RUBI.md §5, R19)', () => {
+    // The 3.5 `∫F(Log[a·xⁿ])/x` rule feeds Cancel[x·u]; the CE `Cancel` cannot
+    // cancel a common x monomial (x/(x+x·Log²) → 1/(1+Log²)), so functionOfLog
+    // does it itself. Result is the triple {F(x), a·xⁿ, n}.
+    const asTriple = (j: Json) => build(['FunctionOfLog', j, 'x'], ctx);
+
+    // uncanceled x·u form (exercises cancelCommonXPower): F(t)=1/(1+t²)
+    const r1 = asTriple(
+      ce.parse('x/(x+x(\\ln x)^2)').json as Json
+    );
+    expect(r1.operator).toBe('List');
+    expect(r1.ops![0].isSame(ce.parse('1/(1+x^2)'))).toBe(true); // F(x)
+    expect(r1.ops![1].isSame(ce.symbol('x'))).toBe(true); // v = a·xⁿ = x
+    expect(r1.ops![2].isSame(1)).toBe(true); // n
+
+    // nested log leaf Log[3x]² → x², records a·xⁿ = 3x, n = 1
+    const r2 = asTriple(ce.parse('(\\ln(3x))^2').json as Json);
+    expect(r2.operator).toBe('List');
+    expect(r2.ops![0].isSame(ce.parse('x^2'))).toBe(true);
+    expect(r2.ops![1].isSame(ce.parse('3x'))).toBe(true);
+    expect(r2.ops![2].isSame(1)).toBe(true);
+
+    // Fail-closed cases (return the symbol False):
+    // (a) a bare integration variable outside any log
+    expect(build(['FunctionOfLog', 'x', 'x'], ctx).symbol).toBe('False');
+    // (b) no log at all
+    expect(build(['FunctionOfLog', ['Sin', 'x'], 'x'], ctx).symbol).toBe(
+      'False'
+    );
+    // (c) two logs with distinct arguments (purely structural, no Log[x²]=2Log[x])
+    expect(
+      build(
+        ['FunctionOfLog', ce.parse('\\ln x + \\ln(x^2)').json as Json, 'x'],
+        ctx
+      ).symbol
+    ).toBe('False');
+  });
+
   test('IntHide integrates via the int hook, else fails the rule', () => {
     // A hook that closes the sub-integral: IntHide returns its antiderivative.
     const solving: Ctx = {

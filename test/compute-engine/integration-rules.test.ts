@@ -371,6 +371,19 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     });
     test('∫log(2+eˣ) dx (PolyLog)', () => verify('\\ln(2+e^x)'));
 
+    // FunctionOfLog (RUBI.md §5, R19): the 3.5 catch-all
+    // ∫F(Log[a·xⁿ])/x → 1/n·Subst[∫F dx, x, Log[a·xⁿ]]. Detecting u=F(Log[3x])
+    // requires the FunctionOfLog recognizer (was a fail-closed stub), whose
+    // input Cancel[x·u] also needs a common-x-monomial cancel CE lacks.
+    // ∫(Log[3x]²−1)/(x·(1+Log[3x]+Log[3x]²)) → arctan/log of Log[3x].
+    test('∫(log(3x)²−1)/(x(1+log(3x)+log(3x)²)) dx (FunctionOfLog)', () => {
+      const latex = '\\frac{\\ln(3x)^2-1}{x(1+\\ln(3x)+\\ln(3x)^2)}';
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toContain('arctan');
+      verify(latex);
+    });
+
     // Regression (RUBI.md §5, R17): the "power-in-log" back-substitution rule
     // 3.3 #60 rewrites Log[c·(d·(e+f·x)^m)^n] via Rubi's general
     // Subst[u, expr, repl] := u /. expr -> repl — a subexpression replacement,

@@ -51,7 +51,7 @@ validation) are release-protocol steps tracked in
 `roadmap/cortex/STATUS_REPORT.md`, not here.
 
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
-status:** R1–R18 landed — chapters 1/2/3/6, 4.1/4.3/4.5, §8.8 Polylogarithm,
+status:** R1–R19 landed — chapters 1/2/3/6, 4.1/4.3/4.5, §8.8 Polylogarithm,
 5,191 rules bundled; see the **Coverage tracks → Rubi** section below for
 current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
@@ -488,14 +488,14 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-10, R1–R18 landed):** the shipped bundle
+**State (2026-07-10, R1–R19 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 3 (Logarithms), 6 (Hyperbolics), 4.1 Sine, 4.3
 Tangent, 4.5 Secant, and §8.8 Polylogarithm** — 5,191 rules, 5.64 MB (CI has a
 bundle-freshness gate). Scores (seed 5): **4.1 Sine 107/120 and 331/400 (4.1.11
 file 93/113, post-R18)**, **4.3 Tangent 72/120**, **4.5 Secant 69/120**, **ch3 Logarithms
-67/120 (new)**, ch1 exhaustive ≈90–91%, ch2 ≈72% / ch6 ≈45% effective (seed
+69/120 (R19)**, ch1 exhaustive ≈90–91%, ch2 ≈72% / ch6 ≈45% effective (seed
 42), Wester indefinite-∫ 6/8.
 **Genuine wrongs are 0 across all suites** (incl. ch3 after the R17
 back-substitution fix) — every flagged "wrong" is a documented
@@ -580,11 +580,26 @@ climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
 hypergeometric verification false-wrongs). Diagnose any stall per the Method
 note — trace the residual integrand, don't trust the predicate census.
 
-- **Ch3 unsolved tail** (47/120 at s120 seed5). Dominant families: the deep
-  multi-step `(f x)^m (d+e x^r)^q (a+b Log[c x^n])^p` and Möbius-argument
-  `Log[e((a+b x)/(c+d x))^n]` chains (3.1.4 / 3.2.x) that exceed the by-parts
-  recursion depth, plus `Log`-of-nested-power forms (3.3–3.5). Tractable
-  incrementally.
+- **Ch3 unsolved tail** (45/120 at s120 seed5, post-R19). **R19 censused all 46
+  and found NO bundling lever** (the full corpus closes nothing the ship
+  foundation doesn't) and one bounded fix: `FunctionOfLog` (→ #261). The
+  residual 45 splits into **15 expected-`Unintegrable`** (Rubi itself returns
+  unevaluated — CE's inert `Integrate` is the correct match, not a defect) and
+  **30 genuinely deep**, all bundling-inert. Next-rung shopping list from the
+  census (see `docs/rubi/RUBI.md` §5 R19 for the full family table):
+  - **Biggest family (13): poly×log by-parts residuals** bottoming in
+    `∫arctan(kx)/x`, `∫artanh(√)/x`, symbolic-order-`k` `PolyLog` recurrences,
+    or `ArcSinh·Log` (3.1.4/3.1.5). Unblocking needs a Log/PolyLog producer for
+    the inverse-trig/hyperbolic-log Chapter-5 base cases (NOT bundled) — the
+    single highest-value ch3 lever.
+  - **6: `∫Log[Sin/Tan/Csc²]`** (3.5) — a two-part gap: an inert-trig `D`
+    reduction (CE's `D` knows `Tan`, not the inert `tan` head the driver
+    carries) PLUS a Chapter-4 trig-integration foundation for the by-parts
+    sub-integral (only 4.1/4.3/4.5 bundled).
+  - **4 (D): `∫Log[·]/rational`→`PolyLog[2]`**; **3 (E): `(a+b·Log[c(d+ex)ⁿ])^p
+    × rational` half-integer residuals**; **4 (F): fractional/negative power in
+    the log arg → `Gamma`/`Ei`/`LogIntegral`** with `x^(2/3)`/`e/√x`
+    substitution. All need new production/kernels, not bundling.
 - **R3′ — residual half-integer/elliptic chains.** #604/#609/#1395 were closed
   by R9's cosine shift, #294 by R17's exp-route telescope; what remains is the
   genuinely deep tail: #53 (23-step half-integer Fresnel chain), #248 (48
