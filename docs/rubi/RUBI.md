@@ -4,7 +4,7 @@
 **Status:** shipped bundle = **Chapters 1, 2, 6 + 4.1 Sine + 4.3 Tangent +
 4.5 Secant** (4,831 rules, 5.29 MB). Chapter-1 exhaustive ≈90–91%; ch2 ≈72% /
 ch6 ≈45% effective; **4.1 Sine 106/120 and 321/400 (seed 5; 4.1.11 file
-71/113); 4.3 Tangent 70/120; 4.5 Secant 56/120; genuine wrongs 0 across all
+71/113); 4.3 Tangent 70/120; 4.5 Secant 69/120; genuine wrongs 0 across all
 suites** (all flagged "wrongs" are documented verification false-wrong
 classes — see the ROADMAP §R state note).
 The 2026-07-04 rung series (R1/R2/R4, R10, R11, R9, R14 — §5 below) added the
@@ -12,9 +12,10 @@ cofunction product clauses, the ch1-foundation benchmark fix,
 `reciprocalToPower`, the `cofunctionShift` and `standaloneCosineShift` runtime
 routing, the trig→exp fallback, and argument-aware `deactivateTrig`; the
 2026-07-09 rungs added R15 (rational×sin(linear) → Si/Ci partial-fraction
-fallback) and R12 (4.3 Tangent bundled, cot→tan shift default-ON behind
-`RUBI_NO_COFN_COT`).
-**Next rungs live in ROADMAP §R** (R13 sec binomials, R16 the 4.1.10
+fallback), R12 (4.3 Tangent bundled, cot→tan shift default-ON behind
+`RUBI_NO_COFN_COT`), and R13 (sec-binomial routing: reflected `csc[·+π/2]`
+kept raw through `reciprocalToPower`, behind `RUBI_NO_SECBIN`).
+**Next rungs live in ROADMAP §R** (R16 the 4.1.10
 `(a+b·sin)`-denominator Si/Ci chains, R3′ deep chains, R5;
 then the Ch6 tail R6–R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
@@ -746,7 +747,8 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     rewrites the reflected `csc` inside a summand to `1/sin` before a csc
     binomial rule can match, and the Add-summand exemption that would fix it
     regresses 4.1 Sine (−20, csc-binomial sine families) — so binomial routing
-    awaits a sec-specific (not global) fix. `cot` wins appear only in `--rubi`
+    awaits a sec-specific (not global) fix. *(→ Landed as Phase R13,
+    2026-07-09.)* `cot` wins appear only in `--rubi`
     corpus runs with `RUBI_COFN_COT` once 4.3 Tangent is bundled. *(→ Both
     landed in Phase R12.)*
 - **Phase R9 — poly×trig + nonlinear-argument families LANDED (2026-07-04).**
@@ -962,6 +964,46 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     half-integer `√(cot)` family, which goes inert→"wrong" (same branch-cut
     false-wrong class) rather than correct when shifted — excluded from the
     loader tests deliberately. Triage before picking a 4.3-tail rung.
+- **Phase R13 — sec-specific binomial routing LANDED (2026-07-09).** The
+  carve-out the R11 landing scoped out: integer-power symbolic sec binomials
+  (`∫1/(a+b·sec)`, `∫(a+b·sec)^n`, `∫sec^k/(a+a·sec)`, …) were inert because
+  `reciprocalToPower` rewrote the reflected `csc[θ+π/2]` inside the Add
+  summand to `1/sin` before the 4.5.1 csc-binomial rules could match.
+  - **Mechanism: shift-signature detection** (`rubi-utils.ts` only, no driver
+    change; `RUBI_NO_SECBIN` A/B). A `csc` produced by the R11 reflection
+    carries a literal `+π/2` term in its argument — a structural provenance
+    signature natural csc never has (`isReflectedReciprocal`). Reflected csc
+    is kept RAW across the whole integrand (reduction-chain subproblems with
+    bare `csc^k` factors need raw too), while natural csc/sec still convert —
+    which is what avoids R11's measured −20 global-exemption regression on the
+    4.1 Sine csc-binomial families. Inherently sec-specific: cot→tan reflects
+    to `tan`, not a reciprocal head, so it never reaches this code.
+  - **The exception that took iteration:** the 4.5.7 `(a+b·sec²)^p` family
+    ROUTES THROUGH the sin/cos-power rules via `sec²→cos⁻²`, so raw-keeping
+    switches OFF when the integrand carries a **Power whose base is a pure
+    `a+b·sec²` binomial** (reflected csc at power ≥2 with no power-1 term:
+    `hasReflectedNonLinearBinomial`). Keying on the Power-base — not any
+    quadratic Add — is what separates `(a+b·sec²)³` (#206, wants conversion)
+    from `A+C·sec²` factors at power 1 and `A+B·sec+C·sec²` trinomials
+    (want raw). Measured dead ends: Add-only raw-keeping broke `(2+3·sec)²`'s
+    reduction chain; keep-all-raw regressed #206; any-quadratic-Add gating
+    dropped 4.5 to 60 via #675-class misfires.
+  - **Numbers (seed 5, `--rubi`).** 4.5 Secant 120: **56 → 69 correct (+13)**
+    (+1 formal), genuine wrongs 0 — the 3 flags are the unchanged documented
+    R11 false-wrongs (`4.5.1.2 #333` re-verified: differentiates back exactly
+    at integer exponents; `4.5.3.1 #27/#30` symbolic-exponent/cube-root
+    class). Flipped: 4.5.0 #50; 4.5.1.2 #44/#46 (+#156 formal); 4.5.2.3
+    #48/#55; 4.5.4.1 #2/#56; 4.5.4.2 #84/#675/#701/#768/#803/#888. ZERO
+    movement on 4.1 Sine (106/120, 321/400), 4.3 Tangent (70), ch1 (183),
+    ch2 (33), ch6 (19); `RUBI_NO_SECBIN=1` reproduces the 56-correct baseline
+    exactly.
+  - **Tests.** Unit tests on `reciprocalToPower` (reflected kept raw, natural
+    converts, `(a+b·sec²)^p` still converts) + 8 shipped-path D-verified
+    secant-binomial integrals across the two test files; 8 of them fail under
+    `RUBI_NO_SECBIN=1` (meaningfulness check).
+  - **Residual 4.5 tail (45 unsolved at 120):** `(d·tan)^n(a+b·sec)^m` mixed
+    cross-pair families (4.5.1.4), half-integer/elliptic `√(a+b·sec)` chains,
+    `(g·sec)^p` triple products — different mechanisms, outside R13's scope.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

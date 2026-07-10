@@ -2587,41 +2587,150 @@ export function cofunctionShift(
 // (§4.1.2.2) and bare `∫csc^n`/`∫sec^n` families close. Value-preserving.
 const RECIP_BASE: Record<string, string> = { csc: 'sin', sec: 'cos' };
 
+// R13 — sec-specific binomial routing. A `csc` produced by the R11
+// `sec[θ]→csc[θ+π/2]` reflection carries a +π/2 term in its (linear) argument —
+// the structural signature of a reflection-produced head. The default
+// `reciprocalToPower` rewrite would convert such a csc to `1/sin[θ+π/2]`; inside
+// a binomial (`a + b·sec → a + b·csc[θ+π/2] → a + b/sin[θ+π/2]`) that matches NO
+// csc-binomial rule, so `∫1/(a+b·sec)`, `∫(a+b·sec)^n`, `∫sec^k/(a+a·sec)` and
+// their pure-sec relatives stay inert. Keeping the reflected csc RAW instead
+// leaves the `(a+b·csc)` / `(d·csc)^n (a+b·csc)^m` forms the 4.5.1 csc-binomial
+// rule family matches. Because `cofunctionShift` fires only for pure-source
+// (pure-sec) integrands, the reflected csc appears only in a pure-sec context;
+// natural (unshifted) csc/sec heads carry no +π/2 term and always convert, so
+// the 4.1 Sine csc-binomial families that RELY on `csc→1/sin` are untouched
+// (R11 measured a −20 regression from the naive GLOBAL Add-summand exemption).
+// Only the sec→csc reflection produces the +π/2 signature; the cot→tan
+// reflection produces `tan`, which is not a reciprocal head and never reaches
+// this code — so this is inherently sec-specific.
+//
+// The carve-out is kept raw across the WHOLE integrand (so its reduction-chain
+// subproblems — bare `csc^k` factors with no binomial present — also stay raw),
+// UNLESS the integrand carries a POWER of a pure `a+b·sec^2` binomial:
+// `(a+b·sec^2)^p` with an `Add` base that has a reflected-csc summand of power
+// ≥2 and NO power-1 reflected-csc summand. That is the 4.5.7
+// `(d trig)^m (a+b·(c·sec)^n)^p` family, which routes through the sin/cos-power
+// rules via `sec^2→cos^-2` — keeping it raw there leaves it inert. Everything
+// else keeps the raw form: the `a+b·sec` linear binomials (4.5.1), the
+// `A+B·sec+C·sec^2` trinomials (4.5.4, which carry a power-1 sec term), AND a
+// bare `A+C·sec^2` polynomial FACTOR at power +1 (4.5.4, not a `Power` base).
+// Gated by RUBI_NO_SECBIN for A/B.
+const NO_SECBIN = process.env.RUBI_NO_SECBIN !== undefined;
+
+/** True if `e` is a shift-TARGET reciprocal head (`csc`) whose single argument
+ * carries the +π/2 reflection signature (a linear arg plus a π/2 summand), i.e.
+ * a head produced by `cofunctionShift`'s `sec→csc[·+π/2]` reflection. */
+function isReflectedReciprocal(ce: ComputeEngine, e: Expression): boolean {
+  if (RECIP_BASE[e.operator] === undefined) return false; // csc/sec heads only
+  if (!SHIFT_TARGET_HEADS.has(e.operator)) return false; // reflection target (csc)
+  const arg = e.ops?.[0];
+  if (!arg || arg.operator !== 'Add') return false;
+  const piHalf = ce.Pi.div(2);
+  return arg.ops?.some((t) => t.isSame(piHalf)) ?? false;
+}
+
+/** The power at which a reflected csc appears in `f` (a single `Add` summand,
+ * up to a scalar `Multiply` coefficient): 1 for `b·csc`, ≥2 for `b·csc^n`, and
+ * 0 if `f` carries no reflected csc. */
+function reflectedCscDegree(ce: ComputeEngine, f: Expression): number {
+  if (isReflectedReciprocal(ce, f)) return 1;
+  if (f.operator === 'Power' && f.ops?.length === 2) {
+    const [base, exp] = f.ops;
+    if (isReflectedReciprocal(ce, base) && isLiteralInteger(exp)) {
+      const n = exp.re;
+      return typeof n === 'number' ? Math.abs(n) : 0;
+    }
+    return 0;
+  }
+  if (f.operator === 'Multiply')
+    return Math.max(0, ...(f.ops?.map((g) => reflectedCscDegree(ce, g)) ?? []));
+  return 0;
+}
+
+/** True if `add` is a PURE non-linear reflected-csc binomial: an `Add` with a
+ * reflected-csc summand of power ≥2 and no power-1 reflected-csc summand
+ * (`a+b·sec^2`, no linear `sec` term). */
+function isPureQuadraticReflectedBinomial(
+  ce: ComputeEngine,
+  add: Expression
+): boolean {
+  if (add.operator !== 'Add') return false;
+  let hasLinear = false;
+  let hasHigher = false;
+  for (const o of add.ops ?? []) {
+    const d = reflectedCscDegree(ce, o);
+    if (d === 1) hasLinear = true;
+    else if (d >= 2) hasHigher = true;
+  }
+  return hasHigher && !hasLinear;
+}
+
+/** True if the tree contains a POWER whose base is a pure `a+b·sec^2` binomial
+ * (`(a+b·sec^2)^p`) — the 4.5.7 signature that switches the R13 carve-out OFF
+ * for this integrand, so the reflected csc convert and route to the sin/cos
+ * rules. A bare `A+C·sec^2` polynomial factor at power +1 (a `Multiply` term,
+ * not a `Power` base — 4.5.4) does NOT trip this and keeps the raw form. */
+function hasReflectedNonLinearBinomial(
+  ce: ComputeEngine,
+  e: Expression
+): boolean {
+  if (
+    e.operator === 'Power' &&
+    e.ops?.length === 2 &&
+    isPureQuadraticReflectedBinomial(ce, e.ops[0])
+  )
+    return true;
+  return e.ops?.some((o) => hasReflectedNonLinearBinomial(ce, o)) ?? false;
+}
+
 /** Rewrite one node. `frozen` is set inside the base of a NON-integer power:
  * there the reciprocal must NOT be converted, because `(b·sec[θ])^(1/2)` and
  * `(b·cos[θ]^-1)^(1/2)` disagree on the principal branch (the √ of a reciprocal
  * ≠ the reciprocal of the √ where the base is negative) — converting there
  * flips the sign on part of the real axis (observed as wrong magnitudes on the
  * half-integer `√(b·sec)` cases). Only integer powers of a reciprocal head are
- * branch-safe, and those still fold. */
+ * branch-safe, and those still fold. `keepRaw` (R13) holds back every reflected
+ * `csc` from conversion when the integrand carries a linear-in-sec binomial. */
 function reciprocalToPowerRec(
   ce: ComputeEngine,
   e: Expression,
-  frozen: boolean
+  frozen: boolean,
+  keepRaw: boolean
 ): Expression {
   if (e.operator === 'Power' && e.ops?.length === 2) {
     const [base, exp] = e.ops;
     const expInt = isLiteralInteger(exp);
     const recip = RECIP_BASE[base.operator];
-    if (!frozen && expInt && recip !== undefined && base.ops?.length === 1)
+    if (
+      !frozen &&
+      !(keepRaw && isReflectedReciprocal(ce, base)) &&
+      expInt &&
+      recip !== undefined &&
+      base.ops?.length === 1
+    )
       return ce.function('Power', [
-        ce.function(recip, [reciprocalToPowerRec(ce, base.ops[0], false)]),
+        ce.function(recip, [reciprocalToPowerRec(ce, base.ops[0], false, keepRaw)]),
         exp.neg(),
       ]);
-    const newBase = reciprocalToPowerRec(ce, base, frozen || !expInt);
-    const newExp = reciprocalToPowerRec(ce, exp, frozen);
+    const newBase = reciprocalToPowerRec(ce, base, frozen || !expInt, keepRaw);
+    const newExp = reciprocalToPowerRec(ce, exp, frozen, keepRaw);
     if (newBase === base && newExp === exp) return e;
     return ce.function('Power', [newBase, newExp]);
   }
   const recip = RECIP_BASE[e.operator];
-  if (!frozen && recip !== undefined && e.ops?.length === 1)
+  if (
+    !frozen &&
+    !(keepRaw && isReflectedReciprocal(ce, e)) &&
+    recip !== undefined &&
+    e.ops?.length === 1
+  )
     return ce.function('Power', [
-      ce.function(recip, [reciprocalToPowerRec(ce, e.ops[0], false)]),
+      ce.function(recip, [reciprocalToPowerRec(ce, e.ops[0], false, keepRaw)]),
       ce.NegativeOne,
     ]);
   const ops = e.ops;
   if (!ops || ops.length === 0) return e;
-  const newOps = ops.map((o) => reciprocalToPowerRec(ce, o, frozen));
+  const newOps = ops.map((o) => reciprocalToPowerRec(ce, o, frozen, keepRaw));
   if (newOps.every((o, i) => o === ops[i])) return e;
   return ce.function(e.operator, newOps);
 }
@@ -2660,7 +2769,11 @@ export function reciprocalToPower(
   e: Expression
 ): Expression {
   if (hasFractionalReciprocalTrig(e)) return e;
-  return reciprocalToPowerRec(ce, e, false);
+  // R13: keep reflected csc raw across the integrand for the 4.5.1 csc-binomial
+  // rules, unless it carries a `a+b·sec^2` non-linear binomial (→ 4.5.7, which
+  // needs the sin/cos-power routing). Disabled entirely under RUBI_NO_SECBIN.
+  const keepRaw = !NO_SECBIN && !hasReflectedNonLinearBinomial(ce, e);
+  return reciprocalToPowerRec(ce, e, false, keepRaw);
 }
 
 // ---------------------------------------------------------------------------

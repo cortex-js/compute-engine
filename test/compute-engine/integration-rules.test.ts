@@ -251,6 +251,34 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       verify('(2+3\\cot x)^2'));
   });
 
+  // §4.5 Secant — integer-power SYMBOLIC binomials of sec. These are INERT
+  // without the R13 carve-out: the R11 sec→csc[·+π/2] reflection makes them a
+  // csc binomial, but `reciprocalToPower` then rewrites the reflected csc to
+  // `1/sin` before a csc-binomial rule can match. R13 keeps the reflected csc
+  // raw so the 4.5.1 csc-binomial rule family closes them. D-verified.
+  describe('integrates the secant binomial family (Chapter-4 §4.5, R13)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string, subs: Record<string, number> = {}) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const dF = ce.expr(['D', F, 'x']).evaluate();
+      for (const x of [0.31, 0.73, 1.18]) {
+        const a = dF.subs({ ...subs, x }).N().re;
+        const b = integrand.subs({ ...subs, x }).N().re;
+        if (a === undefined || b === undefined) continue;
+        expect(a).toBeCloseTo(b, 6);
+      }
+    };
+    test('∫1/(2+3sec x) dx (binomial denominator)', () =>
+      verify('\\frac{1}{2+3\\sec x}'));
+    test('∫(2+3sec x)² dx (binomial power)', () =>
+      verify('(2+3\\sec x)^2'));
+    test('∫1/(a+b·sec x) dx (symbolic params)', () =>
+      verify('\\frac{1}{a+b\\sec x}', { a: 1.7, b: 0.6 }));
+  });
+
   describe('integrates exponential integrands (Chapter 2)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce);

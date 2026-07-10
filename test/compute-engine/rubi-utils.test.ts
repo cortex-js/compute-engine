@@ -14,6 +14,7 @@ import {
   deactivateTrig,
   activateTrig,
   cofunctionShift,
+  reciprocalToPower,
   standaloneCosineShift,
   expandTrigToExp,
   sinCosArgNonlinearExpandableQ,
@@ -460,6 +461,100 @@ describe('cofunction shift — end-to-end secant integrals (shipped bundle)', ()
   test('closes 1/sec^(3/2)', () =>
     expect(closes('\\frac{1}{\\sec(x)^{3/2}}')).toBe(true));
   test('closes sec^3', () => expect(closes('\\sec(x)^3')).toBe(true));
+});
+
+// R13 — sec-specific binomial routing (docs/rubi/RUBI.md §R). `reciprocalToPower`
+// normally rewrites csc→1/sin, sec→1/cos so reciprocal integrands route through
+// the sine/cosine POWER rules. But a `csc` produced by the R11 sec→csc[·+π/2]
+// reflection, inside a binomial `a+b·csc[·+π/2]`, must stay RAW — converting it
+// to `a+b/sin[·]` matches no csc-binomial rule. The carve-out keeps such
+// reflected csc raw (keyed on the +π/2 argument signature) while natural
+// (unshifted) csc/sec still convert, and switches back OFF for the 4.5.7
+// `(a+b·sec^2)^p` family (a pure sec^2 binomial raised to a power).
+describe('reciprocalToPower — reflected-csc binomial carve-out (R13)', () => {
+  const arg = ['Add', 'a', ['Multiply', 'b', 'x']] as Json; // a + b·x (linear)
+  // (a + b·sec[arg]) reflected by cofunctionShift → (a + b·csc[arg+π/2])
+  const reflectedBinom = (): Expression =>
+    cofunctionShift(
+      ce,
+      ce.box(['Add', 2, ['Multiply', 3, ['sec', arg]]] as any),
+      'x'
+    );
+
+  test('keeps a reflected-csc binomial summand raw (no csc→1/sin)', () => {
+    const out = reciprocalToPower(ce, reflectedBinom()).toString();
+    // the reflected csc is preserved; no sine reciprocal is introduced
+    expect(out.includes('csc')).toBe(true);
+    expect(out.includes('sin')).toBe(false);
+  });
+
+  test('still converts a NATURAL (unshifted) csc binomial to 1/sin', () => {
+    // no +π/2 signature ⇒ not a reflected head ⇒ normal reciprocal rewrite
+    const natural = ce.box(['Add', 2, ['Multiply', 3, ['csc', arg]]] as any);
+    const out = reciprocalToPower(ce, natural).toString();
+    expect(out.includes('sin')).toBe(true);
+    expect(out.includes('csc')).toBe(false);
+  });
+
+  test('converts a reflected pure sec^2 binomial power (4.5.7 routing)', () => {
+    // (a + b·sec[arg]^2)^3 reflects to (a + b·csc[arg+π/2]^2)^3 — a pure
+    // quadratic binomial raised to a power ⇒ the carve-out stays OFF here so
+    // the csc convert (routing to the sin/cos-power rules, not the csc rules).
+    const q = cofunctionShift(
+      ce,
+      ce.box([
+        'Power',
+        ['Add', 'a', ['Multiply', 'b', ['Power', ['sec', arg], 2]]],
+        3,
+      ] as any),
+      'x'
+    );
+    const out = reciprocalToPower(ce, q).toString();
+    expect(out.includes('sin')).toBe(true);
+    expect(out.includes('csc')).toBe(false);
+  });
+});
+
+// R13 end-to-end: the shipped bundle now closes integer-power SYMBOLIC secant
+// binomials — `∫1/(a+b·sec)`, `∫(a+b·sec)^2`, `∫sec^k/(a+a·sec)` and the
+// `A+B·sec+C·sec^2` polynomials — via the reflected csc-binomial rule family.
+// These stay inert without the R13 carve-out (RUBI_NO_SECBIN reproduces that).
+describe('R13 end-to-end secant binomials (shipped bundle)', () => {
+  let engine: ComputeEngine;
+  beforeAll(() => {
+    engine = new ComputeEngine();
+    loadIntegrationRules(engine);
+  });
+
+  // D-verify: differentiate the antiderivative and compare to the integrand.
+  const closes = (latex: string, subs: Record<string, number> = {}): boolean => {
+    const integ = engine.parse(latex);
+    const F = engine.box(['Integrate', integ, 'x']).evaluate();
+    if (F.operator === 'Integrate') return false; // stayed inert
+    for (const xv of [0.4, 0.9, 1.3]) {
+      const h = 1e-6;
+      const fp = (v: number) => F.subs({ ...subs, x: v }).N().re as number;
+      const d = (fp(xv + h) - fp(xv - h)) / (2 * h);
+      const f = integ.subs({ ...subs, x: xv }).N().re as number;
+      if (typeof d !== 'number' || typeof f !== 'number') return false;
+      if (Math.abs(d - f) > 1e-4 * Math.max(1, Math.abs(f))) return false;
+    }
+    return true;
+  };
+
+  test('∫1/(2+3·sec x) dx', () =>
+    expect(closes('\\frac{1}{2+3\\sec x}')).toBe(true));
+  test('∫(2+3·sec x)^2 dx', () =>
+    expect(closes('(2+3\\sec x)^2')).toBe(true));
+  test('∫1/(a+b·sec x) dx (symbolic params)', () =>
+    expect(closes('\\frac{1}{a+b\\sec x}', { a: 1.7, b: 0.6 })).toBe(true));
+  test('∫sec^3 x/(a+a·sec x) dx', () =>
+    expect(closes('\\frac{\\sec^3 x}{a+a\\sec x}', { a: 1.4 })).toBe(true));
+  // 4.5.7 must remain closed (pure sec^2 binomial → sin/cos routing, unaffected)
+  test('∫sec^5 x/(a+b·sec^2 x)^3 dx (4.5.7, still closes)', () =>
+    expect(closes('\\frac{\\sec^5 x}{(a+b\\sec^2 x)^3}', { a: 1.3, b: 0.6 })).toBe(
+      true
+    ));
 });
 
 // R9: standalone-cosine leaf shift for poly·cos products. cosBaseToSin/
