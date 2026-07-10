@@ -1289,6 +1289,96 @@ describe('COMPLEX-ARGUMENT Ei, Si, Ci', () => {
   });
 });
 
+// Complex-argument numeric evaluation of Erf, Erfi (closes a Rubi 5.2
+// verification gap: fractional-n antiderivatives carry Erfi/Erf of complex
+// arguments). Both build on erf(z) = 1 − Γ(1/2, z²)/√π via
+// incompleteGammaUpperComplex, reflected into the right half-plane (erf odd),
+// with erfi(z) = −i·erf(i·z). Accuracy tracks that kernel (≲1e-12 for
+// small/moderate |z|, degrading toward ~1e-7 in the large-|z| asymptotic
+// region). Reference values from mpmath (dps=25).
+describe('COMPLEX-ARGUMENT Erf, Erfi', () => {
+  const expectComplex = (expr: any, re: number, im: number, tol = 1e-11) => {
+    const v = expr.N();
+    const scale = Math.hypot(re, im) * tol + tol;
+    expect(Math.abs(v.re - re)).toBeLessThan(scale);
+    expect(Math.abs(v.im - im)).toBeLessThan(scale);
+  };
+  const z = (re: number, im: number): any => ['Complex', re, im];
+
+  // --- Four quadrants (moderate |z|) ---
+  test('Erf/Erfi at 2+3i (first quadrant)', () => {
+    expectComplex(ce.expr(['Erf', z(2, 3)]),
+      -20.829461427614568389, 8.6873182714701631444, 1e-9);
+    expectComplex(ce.expr(['Erfi', z(2, 3)]),
+      -0.000011546724379290603406, 0.99896327885681726888);
+  });
+
+  test('Erf/Erfi at −1+i (second quadrant)', () => {
+    expectComplex(ce.expr(['Erf', z(-1, 1)]),
+      -1.3161512816979476449, 0.19045346923783468628);
+    expectComplex(ce.expr(['Erfi', z(-1, 1)]),
+      -0.19045346923783468628, 1.3161512816979476449);
+  });
+
+  test('Erf/Erfi at −1.1−0.6i (third quadrant)', () => {
+    expectComplex(ce.expr(['Erf', z(-1.1, -0.6)]),
+      -1.0173394257145264194, -0.16223808642011858935);
+    expectComplex(ce.expr(['Erfi', z(-1.1, -0.6)]),
+      -0.89517263985726984948, -1.5341786741365234343);
+  });
+
+  test('Erf/Erfi at 1.2−0.8i (fourth quadrant)', () => {
+    expectComplex(ce.expr(['Erf', z(1.2, -0.8)]),
+      1.1120024118899950729, -0.10945253283933434356);
+    expectComplex(ce.expr(['Erfi', z(1.2, -0.8)]),
+      0.37549985876614111924, -1.768539829348981166);
+  });
+
+  // --- Both imaginary half-axes (branch-cut / signed-zero sensitive):
+  // z² lands on the Γ(1/2, ·) cut, so the sign here pins the +0i approach. ---
+  test('Erf/Erfi on the upper imaginary axis (1.5i)', () => {
+    expectComplex(ce.expr(['Erf', z(0, 1.5)]),
+      0.0, 4.5847332572844269422);
+    expectComplex(ce.expr(['Erfi', z(0, 1.5)]),
+      0.0, 0.96610514647531072707);
+  });
+
+  test('Erf/Erfi on the lower imaginary axis (−1.5i)', () => {
+    expectComplex(ce.expr(['Erf', z(0, -1.5)]),
+      0.0, -4.5847332572844269422);
+    expectComplex(ce.expr(['Erfi', z(0, -1.5)]),
+      0.0, -0.96610514647531072707);
+  });
+
+  // --- Large |z| asymptotic region (the incomplete-Γ kernel's harder band) ---
+  test('Erf/Erfi at 3+2i and 0.1+3i (large |z|)', () => {
+    expectComplex(ce.expr(['Erf', z(3, 2)]),
+      0.99896327885681726888, -0.000011546724379290603406, 1e-6);
+    expectComplex(ce.expr(['Erfi', z(3, 2)]),
+      8.6873182714701631444, -20.829461427614568389, 1e-6);
+    expectComplex(ce.expr(['Erf', z(0.1, 3)]),
+      857.73642788747450969, 1365.1380099649577041, 1e-8);
+    expectComplex(ce.expr(['Erfi', z(0.1, 3)]),
+      0.000013146330996617972419, 0.99998198339146270305, 1e-8);
+  });
+
+  // --- Exactness contract: a Gaussian-integer argument stays symbolic under
+  // evaluate(), numericizes under N(). ---
+  test('Erfi(2+3i) stays symbolic under evaluate(), numericizes under N()', () => {
+    expect(ce.expr(['Erfi', z(2, 3)]).evaluate().toString()).toEqual(
+      'Erfi((2 + 3i))'
+    );
+    expectComplex(ce.expr(['Erfi', z(2, 3)]),
+      -0.000011546724379290603406, 0.99896327885681726888);
+  });
+
+  // --- Regression: the real-argument path is untouched ---
+  test('real-argument path unchanged (Erf(1), Erfi(2))', () => {
+    expectApprox(ce.expr(['Erf', 1]), 0.8427007929497149, 1e-12);
+    expectApprox(ce.expr(['Erfi', 2]), 18.564802414575553, 1e-11);
+  });
+});
+
 // Hyperbolic sine and cosine integrals (Shi, Chi) — the engine-side kernels
 // behind the Rubi Chapter-7 inverse-hyperbolic corpus (RUBI.md §5, Phase R21).
 // Real kernels build on Ei: Shi(x) = (Ei(x)−Ei(−x))/2, Chi(|x|) =

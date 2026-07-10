@@ -341,8 +341,49 @@ export function coshIntegralComplex(z: Complex): Complex {
 }
 
 //
+// ---------------- Error functions erf / erfi (complex) ----------------
+//
+// erf(z) = 1 − Γ(1/2, z²)/√π, built on the complex upper incomplete-gamma
+// kernel `incompleteGammaUpperComplex`. The identity is valid in the right
+// half-plane; erf is odd and entire, so Re(z) < 0 (and the lower imaginary
+// axis) is reflected with erf(−z) = −erf(z). (Real z is handled by the
+// machine kernel in numerics/special-functions.ts.)
+//
+// Signed-zero trap: on the imaginary axis z² lands exactly on the negative
+// real axis, which is the branch cut of Γ(1/2, ·). Complex multiplication can
+// give z² a −0 imaginary part there, selecting the wrong side of the cut (the
+// wrong sign of erf). In the reflected right half-plane the correct approach
+// is from above (+0i), so force Im(z²) = +0 when it is zero. Validated against
+// mpmath (erf/erfi) to ≲1e-12 for small/moderate |z|, degrading toward ~1e-7
+// in the large-|z| asymptotic region of the incomplete-gamma kernel.
+//
+
+const SQRT_PI = Math.sqrt(Math.PI);
+
+/** Gauss error function erf(z) for complex z. */
+export function erfComplex(z: Complex): Complex {
+  if (z.isNaN()) return C_NAN;
+  // Reflect into the right half-plane (erf is odd and entire).
+  if (z.re < 0 || (z.re === 0 && z.im < 0)) return erfComplex(z.neg()).neg();
+  let zsq = z.mul(z);
+  // Approach the Γ(1/2, ·) branch cut on the negative real axis from above.
+  if (zsq.im === 0) zsq = new Complex(zsq.re, 0);
+  const g = incompleteGammaUpperComplex(new Complex(0.5, 0), zsq);
+  return C_ONE.sub(g.div(new Complex(SQRT_PI, 0)));
+}
+
+/** Imaginary error function erfi(z) = −i·erf(i·z) for complex z. */
+export function erfiComplex(z: Complex): Complex {
+  if (z.isNaN()) return C_NAN;
+  const iz = new Complex(-z.im, z.re); // i·z
+  const e = erfComplex(iz);
+  return new Complex(e.im, -e.re); // −i·e
+}
+
+//
 // ---------------- Polylogarithm Liₙ(z), integer order n ≥ 2 (complex) ----
 //
+// Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ, analytically continued over the whole plane with
 // Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ, analytically continued over the whole plane with
 // the standard branch cut along z ∈ (1, ∞) (mpmath's convention: the value
 // on the cut matches the limit from below, Im < 0). Three bands, mirroring

@@ -298,17 +298,21 @@ describe('B23: machine-precision engine still uses machine kernels', () => {
   });
 });
 
-describe('B23: complex arguments stay symbolic (no complex kernel)', () => {
+describe('B23: complex arguments (kernel vs still-symbolic)', () => {
   let ce: ComputeEngine;
   beforeAll(() => {
     ce = new ComputeEngine();
   });
 
-  // Previously Erf(1+i) silently evaluated erf(Re z) = erf(1), which was
-  // incorrect. There is no complex kernel, so the expression now stays
-  // symbolic.
-  test('Erf(1+i), Sinc(i), FresnelS(i) stay symbolic under N()', () => {
-    expect(ce.expr(['Erf', ['Complex', 1, 1]]).N().operator).toBe('Erf');
+  // Erf/Erfi gained a Γ(1/2, ·)-based complex kernel (RUBI R24), so a complex
+  // argument now numericizes correctly under N() (mpmath erf(1+i) =
+  // 1.316151… + 0.190453…i). Sinc and FresnelS still have no complex kernel
+  // and stay symbolic. (Previously Erf(1+i) silently used erf(Re z), which was
+  // incorrect.)
+  test('Erf(1+i) numericizes; Sinc(i), FresnelS(i) stay symbolic', () => {
+    const erf = ce.expr(['Erf', ['Complex', 1, 1]]).N();
+    expect(Math.abs(erf.re - 1.3161512816979476449)).toBeLessThan(1e-11);
+    expect(Math.abs(erf.im - 0.19045346923783468628)).toBeLessThan(1e-11);
     expect(ce.expr(['Sinc', ['Complex', 0, 1]]).N().operator).toBe('Sinc');
     expect(ce.expr(['FresnelS', ['Complex', 0, 1]]).N().operator).toBe(
       'FresnelS'

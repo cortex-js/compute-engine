@@ -1,117 +1,989 @@
 {
   "summary": {
     "suite": "/Users/arno/dev/rubi/MathematicaSyntaxTestSuite-master",
-    "chapter": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear",
-    "seed": 42,
-    "total": 12,
+    "chapter": "2 Exponentials",
+    "seed": 5,
+    "total": 120,
     "counts": {
-      "solved-correct": 12,
-      "solved-formal": 0,
-      "solved-wrong": 0,
+      "solved-correct": 83,
+      "solved-formal": 6,
+      "solved-wrong": 2,
       "inconclusive": 0,
-      "unsolved": 0,
-      "not-evaluable": 0,
+      "unsolved": 26,
+      "not-evaluable": 3,
       "error": 0
     },
-    "solvedCorrectRate": "1.0000",
-    "solvedRate": "1.0000"
+    "solvedCorrectRate": "0.6917",
+    "solvedRate": "0.7417"
   },
   "results": [
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
-      "index": 578,
-      "source": "{1/(Sqrt[x]*Sqrt[a + b*x]), x, 3, (2*ArcTanh[(Sqrt[b]*Sqrt[x])/Sqrt[a + b*x]])/Sqrt[b]}",
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 5,
+      "source": "{F^(c*(a + b*x))*(d + e*x)^1, x, 2, -((e*F^(c*(a + b*x)))/(b^2*c^2*Log[F]^2)) + (F^(c*(a + b*x))*(d + e*x))/(b*c*Log[F])}",
       "outcome": "solved-correct",
-      "ms": 189,
-      "result": "2artanh((sqrt(b) * sqrt(x)) / sqrt(b * x + a)) / sqrt(b)"
+      "ms": 114,
+      "result": "(\"e_var\" * x + d) * F^(c * (b * x + a)) / (b * c * ln(F)) - \"e_var\" / (b * c * ln(F)) * F^(c * (b * x + a)) / (b * c * ln(F))"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
-      "index": 582,
-      "source": "{1/(x^(9/2)*Sqrt[a + b*x]), x, 4, -((2*Sqrt[a + b*x])/(7*a*x^(7/2))) + (12*b*Sqrt[a + b*x])/(35*a^2*x^(5/2)) - (16*b^2*Sqrt[a + b*x])/(35*a^3*x^(3/2)) + (32*b^3*Sqrt[a + b*x])/(35*a^4*Sqrt[x])}",
-      "outcome": "solved-correct",
-      "ms": 388,
-      "result": "-(6b) / (7(a + 0b)) * (-(4b) / (5(a + 0b)) * (-(2b) / (3(a + 0b)) * (-2 * 1 / sqrt(x) * sqrt(b * x + a)) / a + (-2x^(-3/2) * sqrt(b * x + a)) / (3(a + 0b))) + (-2x^(-5/2) * sqrt(b * x + a)) / (5(a + 0b))) + (-2x^(-7/2) * sqrt(b * x + a)) / (7(a + 0b))"
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 14,
+      "source": "{F^(c*(a + b*x))*Expand[(d + e*x)^2], x, 4, (2*e^2*F^(c*(a + b*x)))/(b^3*c^3*Log[F]^3) - (2*e*F^(c*(a + b*x))*(d + e*x))/(b^2*c^2*Log[F]^2) + (F^(c*(a + b*x))*(d + e*x)^2)/(b*c*Log[F])}",
+      "outcome": "not-evaluable",
+      "ms": 11,
+      "result": "(Error(ErrorCode(\"incompatible-type\", \"number\", \"value\")) * F^(c * (b * x + a))) / (b * c * ln(F))"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
-      "index": 588,
-      "source": "{1/(x^(5/2)*(a + b*x)^(3/2)), x, 3, 2/(a*x^(3/2)*Sqrt[a + b*x]) - (8*Sqrt[a + b*x])/(3*a^2*x^(3/2)) + (16*b*Sqrt[a + b*x])/(3*a^3*Sqrt[x])}",
-      "outcome": "solved-correct",
-      "ms": 156,
-      "result": "--4 / a * (-(2b) / (3(a + 0b)) * (-2 * 1 / sqrt(x) * sqrt(b * x + a)) / a + (-2x^(-3/2) * sqrt(b * x + a)) / (3(a + 0b))) + (2 * 1 / sqrt(b * x + a) * x^(-3/2)) / a"
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 22,
+      "source": "{F^(c*(a + b*x))*Expand[(d + e*x)^2]^m, x, 2, (F^(c*(a - (b*d)/e))*((d + e*x)^2)^m*Gamma[1 + 2*m, -((b*c*(d + e*x)*Log[F])/e)])/((-((b*c*(d + e*x)*Log[F])/e))^(2*m)*(b*c*Log[F]))}",
+      "outcome": "not-evaluable",
+      "ms": 12,
+      "result": "(F^(c * (b * x + a)) * Error(ErrorCode(\"incompatible-type\", \"number\", \"value\"))^m) / (b * c * ln(F))"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
-      "index": 793,
-      "source": "{(a + b*x)/(x^4*Sqrt[c*x^2]), x, 3, -a/(4*x^3*Sqrt[c*x^2]) - b/(3*x^2*Sqrt[c*x^2])}",
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 30,
+      "source": "{x^(7/2)*F^(a + b*x), x, 6, (105*F^a*Sqrt[Pi]*Erfi[Sqrt[b]*Sqrt[x]*Sqrt[Log[F]]])/(16*b^(9/2)*Log[F]^(9/2)) - (105*F^(a + b*x)*Sqrt[x])/(8*b^4*Log[F]^4) + (35*F^(a + b*x)*x^(3/2))/(4*b^3*Log[F]^3) - (7*F^(a + b*x)*x^(5/2))/(2*b^2*Log[F]^2) + (F^(a + b*x)*x^(7/2))/(b*Log[F])}",
       "outcome": "solved-correct",
-      "ms": 66,
-      "result": "x * 1 / sqrt(c * x^2) * (-a / (4x^4) - b / (3x^3)) * c^0"
+      "ms": 447,
+      "result": "(F^(b * x + a) * x^(7/2)) / (b * ln(F)) - 7 / (2b * ln(F)) * (F^(b * x + a) * x^(5/2)) / (b * ln(F)) - 5 / (2b * ln(F)) * (F^(b * x + a) * x^(3/2)) / (b * ln(F)) - 3 / (2b * ln(F)) * (-2 * 1 / (2b * ln(F)) * (Erfi(sqrt(b) * sqrt(x) * sqrt(ln(F))) * sqrt(pi) * F^a) / (2sqrt(b) * sqrt(ln(F))) + (F^(b * x + a) * sqrt(x)) / (b * ln(F)))"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
-      "index": 1036,
-      "source": "{(a + b*x)*(a*c - b*c*x)^1, x, 2, a^2*c*x - (1/3)*b^2*c*x^3}",
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 50,
+      "source": "{(d + e*x)^(4/3)*(F^(c*(a + b*x)))^n, x, 2, -((e*F^(c*(a - (b*d)/e)*n - c*n*(a + b*x))*(F^(c*(a + b*x)))^n*(d + e*x)^(1/3)*Gamma[7/3, -((b*c*n*(d + e*x)*Log[F])/e)])/(b^2*c^2*n^2*Log[F]^2*(-((b*c*n*(d + e*x)*Log[F])/e))^(1/3)))}",
+      "outcome": "solved-formal",
+      "ms": 238,
+      "result": "-(-(F^(c * n * (-(b * d) / \"e_var\" + a)) * root(3)(\"e_var\" * x + d)) / (\"e_var\" * ((b * c * n * ln(F)) / \"e_var\")^2 * root(3)((b * c * n * (\"e_var\" * x + d) * ln(F)) / \"e_var\")) * F^(c * (b * x + a))^n / F^(c * n * (b * x + a)) * Gamma(7/3, -(b * c * n * ln(F)) / \"e_var\" * (\"e_var\" * x + d)))",
+      "detail": "region-phase formal match: passes=4 phase-fails=16; x=0.31 {\"d\":1.6650094721699134,\"e_var\":1.9160233811708167,\"F\":1.308142905589193,\"c\":0.62022799346596,\"a\":1.9964846608927473,\"b\":1.791984835988842,\"n\":2.4483868655515835} dF=-4.197+-7.27i f=8.394; x=0.73 {\"d\":1.6650094721699134,\"e_var\":1.9160233811708167,\"F\":1.308142905589193,\"c\":0.62022799346596,\"a\":1.9964846608927473,\"b\":1.791984835988842,\"n\":2.4483868655515835} dF=-8.565+-14.8i f=17.13"
+    },
+    {
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 60,
+      "source": "{(a + b*x)^3/(x^1*E^(a + b*x)), x, 9, -2*E^(-a - b*x) - 3*a*E^(-a - b*x) - 3*a^2*E^(-a - b*x) - 2*b*E^(-a - b*x)*x - 3*a*b*E^(-a - b*x)*x - b^2*E^(-a - b*x)*x^2 + (a^3*ExpIntegralEi[(-b)*x])/E^a}",
       "outcome": "solved-correct",
+      "ms": 261,
+      "result": "-b^2 * x^2 * e^(-b * x - a) + ExpIntegralEi(-(b * x)) * a^3 * e^(-a + 0b) + 2(-(x * e^(-b * x - a)) / b - (e^(-b * x - a)) / b^2) * b^2 - 3a * b * x * e^(-b * x - a) - 3a^2 * e^(-b * x - a) - 3a * e^(-b * x - a)"
+    },
+    {
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 65,
+      "source": "{x^3*(e + f*x)^2*F^(a + b*(c + d*x)), x, 17, -((120*f^2*F^(a + b*c + b*d*x))/(b^6*d^6*Log[F]^6)) + (48*e*f*F^(a + b*c + b*d*x))/(b^5*d^5*Log[F]^5) + (120*f^2*F^(a + b*c + b*d*x)*x)/(b^5*d^5*Log[F]^5) - (6*e^2*F^(a + b*c + b*d*x))/(b^4*d^4*Log[F]^4) - (48*e*f*F^(a + b*c + b*d*x)*x)/(b^4*d^4*Log[F]^4) - (60*f^2*F^(a + b*c + b*d*x)*x^2)/(b^4*d^4*Log[F]^4) + (6*e^2*F^(a + b*c + b*d*x)*x)/(b^3*d^3*Log[F]^3) + (24*e*f*F^(a + b*c + b*d*x)*x^2)/(b^3*d^3*Log[F]^3) + (20*f^2*F^(a + b*c + b*d*x)*x^3)/(b^3*d^3*Log[F]^3) - (3*e^2*F^(a + b*c + b*d*x)*x^2)/(b^2*d^2*Log[F]^2) - (8*e*f*F^(a + b*c + b*d*x)*x^3)/(b^2*d^2*Log[F]^2) - (5*f^2*F^(a + b*c + b*d*x)*x^4)/(b^2*d^2*Log[F]^2) + (e^2*F^(a + b*c + b*d*x)*x^3)/(b*d*Log[F]) + (2*e*f*F^(a + b*c + b*d*x)*x^4)/(b*d*Log[F]) + (f^2*F^(a + b*c + b*d*x)*x^5)/(b*d*Log[F])}",
+      "outcome": "solved-correct",
+      "ms": 811,
+      "result": "(x^5 * f^2 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) + (2 * \"e_var\" * f * x^4 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) + (-5(x^4 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 4 / (b * d * ln(F)) * (x^3 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 3 / (b * d * ln(F)) * (x^2 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 2 / (b * d * ln(F)) * (x * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 1 / (b * d * ln(F)) * F^(b * d * x + b * c + a) / (b * d * ln(F)) * f^2) / (b * d * ln(F)) + (-8 * \"e_var\" * f * (x^3 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 3 / (b * d * ln(F)) * (x^2 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 2 / (b * d * ln(F)) * (x * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 1 / (b * d * ln(F)) * F^(b * d * x + b * c + a) / (b * d * ln(F))) / (b * d * ln(F)) + (x^3 * \"e_var\"^2 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) + (-3(x^2 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 2 / (b * d * ln(F)) * (x * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 1 / (b * d * ln(F)) * F^(b * d * x + b * c + a) / (b * d * ln(F)) * \"e_var\"^2) / (b * d * ln(F))"
+    },
+    {
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 66,
+      "source": "{x^2*(e + f*x)^2*F^(a + b*(c + d*x)), x, 14, (24*f^2*F^(a + b*c + b*d*x))/(b^5*d^5*Log[F]^5) - (12*e*f*F^(a + b*c + b*d*x))/(b^4*d^4*Log[F]^4) - (24*f^2*F^(a + b*c + b*d*x)*x)/(b^4*d^4*Log[F]^4) + (2*e^2*F^(a + b*c + b*d*x))/(b^3*d^3*Log[F]^3) + (12*e*f*F^(a + b*c + b*d*x)*x)/(b^3*d^3*Log[F]^3) + (12*f^2*F^(a + b*c + b*d*x)*x^2)/(b^3*d^3*Log[F]^3) - (2*e^2*F^(a + b*c + b*d*x)*x)/(b^2*d^2*Log[F]^2) - (6*e*f*F^(a + b*c + b*d*x)*x^2)/(b^2*d^2*Log[F]^2) - (4*f^2*F^(a + b*c + b*d*x)*x^3)/(b^2*d^2*Log[F]^2) + (e^2*F^(a + b*c + b*d*x)*x^2)/(b*d*Log[F]) + (2*e*f*F^(a + b*c + b*d*x)*x^3)/(b*d*Log[F]) + (f^2*F^(a + b*c + b*d*x)*x^4)/(b*d*Log[F])}",
+      "outcome": "solved-correct",
+      "ms": 609,
+      "result": "(x^4 * f^2 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) + (2 * \"e_var\" * f * x^3 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) + (-4(x^3 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 3 / (b * d * ln(F)) * (x^2 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 2 / (b * d * ln(F)) * (x * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 1 / (b * d * ln(F)) * F^(b * d * x + b * c + a) / (b * d * ln(F)) * f^2) / (b * d * ln(F)) + (-6 * \"e_var\" * f * (x^2 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 2 / (b * d * ln(F)) * (x * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 1 / (b * d * ln(F)) * F^(b * d * x + b * c + a) / (b * d * ln(F))) / (b * d * ln(F)) + (\"e_var\"^2 * x^2 * F^(b * d * x + b * c + a)) / (b * d * ln(F)) + (-2(x * F^(b * d * x + b * c + a)) / (b * d * ln(F)) - 1 / (b * d * ln(F)) * F^(b * d * x + b * c + a) / (b * d * ln(F)) * \"e_var\"^2) / (b * d * ln(F))"
+    },
+    {
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 71,
+      "source": "{(e + f*x)^2*F^(a + b*(c + d*x))/x^3, x, 8, -((e^2*F^(a + b*c + b*d*x))/(2*x^2)) - (2*e*f*F^(a + b*c + b*d*x))/x + f^2*F^(a + b*c)*ExpIntegralEi[b*d*x*Log[F]] - (b*d*e^2*F^(a + b*c + b*d*x)*Log[F])/(2*x) + 2*b*d*e*f*F^(a + b*c)*ExpIntegralEi[b*d*x*Log[F]]*Log[F] + (1/2)*b^2*d^2*e^2*F^(a + b*c)*ExpIntegralEi[b*d*x*Log[F]]*Log[F]^2}",
+      "outcome": "solved-correct",
+      "ms": 315,
+      "result": "1/2 * b * d * (b * d * ln(F) * ExpIntegralEi(b * d * x * ln(F)) * F^(b * c + 0b * d + a) - 1 / x * F^(b * d * x + b * c + a)) * ln(F) * \"e_var\"^2 + 2b * d * \"e_var\" * f * ln(F) * ExpIntegralEi(b * d * x * ln(F)) * F^(b * c + 0b * d + a) + ExpIntegralEi(b * d * x * ln(F)) * f^2 * F^(b * c + 0b * d + a) - (\"e_var\"^2 * F^(b * d * x + b * c + a)) / (2x^2) + (-2 * \"e_var\" * f * F^(b * d * x + b * c + a)) / x"
+    },
+    {
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 82,
+      "source": "{(a + b*x)^4/((c + d*x)^5*E^(a + b*x)), x, 17, -(((b*c - a*d)^4*E^(-a - b*x))/(4*d^5*(c + d*x)^4)) + (4*b*(b*c - a*d)^3*E^(-a - b*x))/(3*d^5*(c + d*x)^3) + (b*(b*c - a*d)^4*E^(-a - b*x))/(12*d^6*(c + d*x)^3) - (3*b^2*(b*c - a*d)^2*E^(-a - b*x))/(d^5*(c + d*x)^2) - (2*b^2*(b*c - a*d)^3*E^(-a - b*x))/(3*d^6*(c + d*x)^2) - (b^2*(b*c - a*d)^4*E^(-a - b*x))/(24*d^7*(c + d*x)^2) + (4*b^3*(b*c - a*d)*E^(-a - b*x))/(d^5*(c + d*x)) + (3*b^3*(b*c - a*d)^2*E^(-a - b*x))/(d^6*(c + d*x)) + (2*b^3*(b*c - a*d)^3*E^(-a - b*x))/(3*d^7*(c + d*x)) + (b^3*(b*c - a*d)^4*E^(-a - b*x))/(24*d^8*(c + d*x)) + (b^4*E^(-a + (b*c)/d)*ExpIntegralEi[-((b*(c + d*x))/d)])/d^5 + (4*b^4*(b*c - a*d)*E^(-a + (b*c)/d)*ExpIntegralEi[-((b*(c + d*x))/d)])/d^6 + (3*b^4*(b*c - a*d)^2*E^(-a + (b*c)/d)*ExpIntegralEi[-((b*(c + d*x))/d)])/d^7 + (2*b^4*(b*c - a*d)^3*E^(-a + (b*c)/d)*ExpIntegralEi[-((b*(c + d*x))/d)])/(3*d^8) + (b^4*(b*c - a*d)^4*E^(-a + (b*c)/d)*ExpIntegralEi[-((b*(c + d*x))/d)])/(24*d^9)}",
+      "outcome": "solved-correct",
+      "ms": 2718,
+      "result": "-((b * (b * (-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c)))) / d + e^(-b * x - a) / (d * (d * x + c)^2)) / d + (-2e^(-b * x - a)) / (d * (d * x + c)^3) * b^5 * c^4) / (24d^5) + (a * (b * (b * (-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c)))) / d + e^(-b * x - a) / (d * (d * x + c)^2)) / d + (-2e^(-b * x - a)) / (d * (d * x + c)^3) * b^4 * c^3) / (6d^4) + (-2(b * (-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c)))) / d + e^(-b * x - a) / (d * (d * x + c)^2) * b^5 * c^3) / (3d^5) - ((b * (b * (-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c)))) / d + e^(-b * x - a) / (d * (d * x + c)^2)) / d + (-2e^(-b * x - a)) / (d * (d * x + c)^3) * b^3 * a^2 * c^2) / (4d^3) + (2a * (b * (-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c)))) / d + e^(-b * x - a) / (d * (d * x + c)^2) * b^4 * c^2) / d^4 + (c * (b * (b * (-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c)))) / d + e^(-b * x - a) / (d * (d * x + c)^2)) / d + (-2e^(-b * x - a)) / (d * (d * x + c)^3) * a^3 * b^2) / (6d^2) + (-2c * (b * (-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c)))) / d + e^(-b * x - a) / (d * (d * x + c)^2) * b^3 * a^2) / d^3 + (-3(-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c))) * b^5 * c^2) / d^5 - (b^4 * c^4 * e^(-b * x - a)) / (4d^5 * (d * x + c)^4) - (b * (b * (b * (-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c)))) / d + e^(-b * x - a) / (d * (d * x + c)^2)) / d + (-2e^(-b * x - a)) / (d * (d * x + c)^3) * a^4) / (24d) + (4b^4 * c^3 * e^(-b * x - a)) / (3d^5 * (d * x + c)^3) + (6a * c * (-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c))) * b^4) / d^4 + (2((b * (-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c)))) / d + e^(-b * x - a) / (d * (d * x + c)^2) * a^3 * b^2) / d + (-2b * a^3 * e^(-b * x - a)) / (d * (d * x + c)^3)) / (3d) + (a * b^3 * c^3 * e^(-b * x - a)) / (d^4 * (d * x + c)^4) + (-3b^4 * c^2 * e^(-b * x - a)) / (d^5 * (d * x + c)^2) + (-4a * b^3 * c^2 * e^(-b * x - a)) / (d^4 * (d * x + c)^3) + (-3(-(b * ExpIntegralEi(-(b * (d * x + c)) / d) * e^((b * c) / d - a)) / d^2 - (e^(-b * x - a)) / (d * (d * x + c))) * b^3 * a^2) / d^3 + (4c * ExpIntegralEi(-(b * (d * x + c)) / d) * b^5 * e^((b * c) / d - a)) / d^6 + (-3a^2 * b^2 * c^2 * e^(-b * x - a)) / (2(d * x + c)^4 * d^3) + (4c * a^2 * b^2 * e^(-b * x - a)) / (d^3 * (d * x + c)^3) + (6a * c * b^3 * e^(-b * x - a)) / (d^4 * (d * x + c)^2) + (-4a * ExpIntegralEi(-(b * (d * x + c)) / d) * b^4 * e^((b * c) / d - a)) / d^5 + (4c * b^4 * e^(-b * x - a)) / ((d * x + c) * d^5) + (b * c * a^3 * e^(-b * x - a)) / ((d * x + c)^4 * d^2) - (a^4 * e^(-b * x - a)) / (4d * (d * x + c)^4) + (-3a^2 * b^2 * e^(-b * x - a)) / (d^3 * (d * x + c)^2) + (ExpIntegralEi(-(b * (d * x + c)) / d) * b^4 * e^((b * c) / d - a)) / d^5 + (-4a * b^3 * e^(-b * x - a)) / ((d * x + c) * d^4)"
+    },
+    {
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 89,
+      "source": "{1/x^3*F^(c*(a + b*x))*Log[d*x]^n*(e + e*n + e*(1 - 3 + b*c*x*Log[F])*Log[d*x]), x, 1, (e*F^(c*(a + b*x))*Log[d*x]^(1 + n))/x^2}",
+      "outcome": "solved-correct",
+      "ms": 81,
+      "result": "(\"e_var\" * n + \"e_var\") * F^(c * (b * x + a)) * x^(-2) * ln(d * x)^(n + 1) / (n + 1)"
+    },
+    {
+      "file": "2 Exponentials/2.1 u (F^(c (a+b x)))^n.m",
+      "index": 94,
+      "source": "{Sqrt[E^(a + b*x)]*x^0, x, 1, (2*Sqrt[E^(a + b*x)])/b}",
+      "outcome": "solved-correct",
+      "ms": 12,
+      "result": "(2e^(1/2 * (b * x + a))) / b"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 2,
+      "source": "{x^2/(a + b*E^(c + d*x)), x, 5, x^3/(3*a) - (x^2*Log[1 + (b*E^(c + d*x))/a])/(a*d) - (2*x*PolyLog[2, -((b*E^(c + d*x))/a)])/(a*d^2) + (2*PolyLog[3, -((b*E^(c + d*x))/a)])/(a*d^3)}",
+      "outcome": "solved-correct",
+      "ms": 170,
+      "result": "x^3 / (3a) - b / a * (x^2 / (b * d) * ln((b * e^(d * x + c)) / a + 1) - 2 / (b * d) * (-(x * PolyLog(2, -(b * 1 / a * e^(d * x + c)))) / d + 1 / d * PolyLog(3, -(b * 1 / a * e^(d * x + c))) / d))"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 6,
+      "source": "{1/(x^2*(a + b*E^(c + d*x))), x, 0, Unintegrable[1/((a + b*E^(c + d*x))*x^2), x]}",
+      "outcome": "unsolved",
+      "ms": 47,
+      "result": "int(1 / ((a + b * e^(d * x + c)) * x^2) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 9,
+      "source": "{x^3/(a + b*E^(c + d*x))^2, x, 13, -(x^3/(a^2*d)) + x^3/(a*d*(a + b*E^(c + d*x))) + x^4/(4*a^2) + (3*x^2*Log[1 + (b*E^(c + d*x))/a])/(a^2*d^2) - (x^3*Log[1 + (b*E^(c + d*x))/a])/(a^2*d) + (6*x*PolyLog[2, -((b*E^(c + d*x))/a)])/(a^2*d^3) - (3*x^2*PolyLog[2, -((b*E^(c + d*x))/a)])/(a^2*d^2) - (6*PolyLog[3, -((b*E^(c + d*x))/a)])/(a^2*d^4) + (6*x*PolyLog[3, -((b*E^(c + d*x))/a)])/(a^2*d^3) - (6*PolyLog[4, -((b*E^(c + d*x))/a)])/(a^2*d^4)}",
+      "outcome": "solved-correct",
+      "ms": 454,
+      "result": "1 / a * (x^4 / (4a) - b / a * (x^3 / (b * d) * ln((b * e^(d * x + c)) / a + 1) - 3 / (b * d) * (-(PolyLog(2, -(b * 1 / a * e^(d * x + c))) * x^2) / d + 2 / d * ((x * PolyLog(3, -(b * 1 / a * e^(d * x + c)))) / d - 1 / d * PolyLog(4, -(b * 1 / a * e^(d * x + c))) / d)))) - b / a * (-(1 / (a + b * e^(d * x + c)) * x^3) / (b * d) + 3 / (b * d) * (x^3 / (3a) - b / a * (x^2 / (b * d) * ln((b * e^(d * x + c)) / a + 1) - 2 / (b * d) * (-(x * PolyLog(2, -(b * 1 / a * e^(d * x + c)))) / d + 1 / d * PolyLog(3, -(b * 1 / a * e^(d * x + c))) / d))))"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 14,
+      "source": "{1/(x^2*(a + b*E^(c + d*x))^2), x, 0, Unintegrable[1/((a + b*E^(c + d*x))^2*x^2), x]}",
+      "outcome": "unsolved",
+      "ms": 40,
+      "result": "int(1 / (x^2 * (a + b * e^(d * x + c))^2) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 16,
+      "source": "{1/(a + b*E^(-c - d*x))^2, x, 3, -(1/(a*d*(a + b*E^(-c - d*x)))) + x/a^2 + Log[a + b*E^(-c - d*x)]/(a^2*d)}",
+      "outcome": "solved-correct",
+      "ms": 76,
+      "result": "-(e^(-d * x - c)) / (d * e^(-d * x - c)) * (-d * x - c) / a^2 - ln(a^3 + b * a^2 * e^(-d * x - c)) / a^2 + 1 / (a^2 + a * b * e^(-d * x - c))"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 21,
+      "source": "{1/(x^1*(a + b*E^(c + d*x))^3), x, 0, Unintegrable[1/((a + b*E^(c + d*x))^3*x), x]}",
+      "outcome": "unsolved",
+      "ms": 41,
+      "result": "int(1 / (x * (a + b * e^(d * x + c))^3) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 32,
+      "source": "{(c + d*x)^3*(a + b*(F^(g*(e + f*x)))^n)^2, x, 10, (a^2*(c + d*x)^4)/(4*d) - (12*a*b*d^3*(F^(e*g + f*g*x))^n)/(f^4*g^4*n^4*Log[F]^4) - (3*b^2*d^3*(F^(e*g + f*g*x))^(2*n))/(8*f^4*g^4*n^4*Log[F]^4) + (12*a*b*d^2*(F^(e*g + f*g*x))^n*(c + d*x))/(f^3*g^3*n^3*Log[F]^3) + (3*b^2*d^2*(F^(e*g + f*g*x))^(2*n)*(c + d*x))/(4*f^3*g^3*n^3*Log[F]^3) - (6*a*b*d*(F^(e*g + f*g*x))^n*(c + d*x)^2)/(f^2*g^2*n^2*Log[F]^2) - (3*b^2*d*(F^(e*g + f*g*x))^(2*n)*(c + d*x)^2)/(4*f^2*g^2*n^2*Log[F]^2) + (2*a*b*(F^(e*g + f*g*x))^n*(c + d*x)^3)/(f*g*n*Log[F]) + (b^2*(F^(e*g + f*g*x))^(2*n)*(c + d*x)^3)/(2*f*g*n*Log[F])}",
+      "outcome": "solved-correct",
+      "ms": 530,
+      "result": "(-6a * b * d * (-(2d) / (f * g * n * ln(F)) * ((d * x + c) * F^(g * (f * x + \"e_var\"))^n) / (f * g * n * ln(F)) - d / (f * g * n * ln(F)) * F^(g * (f * x + \"e_var\"))^n / (f * g * n * ln(F)) + ((d * x + c)^2 * F^(g * (f * x + \"e_var\"))^n) / (f * g * n * ln(F)))) / (f * g * n * ln(F)) + (-3d * (-d * 1 / (f * g * n * ln(F)) * (2(d * x + c) * F^(g * (f * x + \"e_var\"))^(2n)) / (f * g * n * ln(F)) - d * f^(-2) * g^(-2) * n^(-2) * ln(F)^(-2) * F^(g * (f * x + \"e_var\"))^(2n) + (2(d * x + c)^2 * F^(g * (f * x + \"e_var\"))^(2n)) / (f * g * n * ln(F))) * b^2) / (8f * g * n * ln(F)) + ((d * x + c)^4 * a^2) / (4d) + (2a * b * (d * x + c)^3 * F^(g * (f * x + \"e_var\"))^n) / (f * g * n * ln(F)) + (d * x + c)^3 * b^2 * F^(g * (f * x + \"e_var\"))^(2n) / (2f * g * n * ln(F))"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 35,
+      "source": "{(c + d*x)^0*(a + b*(F^(g*(e + f*x)))^n)^2, x, 4, a^2*x + (2*a*b*(F^(g*(e + f*x)))^n)/(f*g*n*Log[F]) + (b^2*(F^(g*(e + f*x)))^(2*n))/(2*f*g*n*Log[F])}",
+      "outcome": "solved-correct",
+      "ms": 82,
+      "result": "(f * g * n * x * ln(F) * a^2 + \"e_var\" * g * n * ln(F) * a^2 + 1/2 * b^2 * F^(f * g * x + \"e_var\" * g)^(2n) + 2a * b * F^(f * g * x + \"e_var\" * g)^n) / n * F^(f * g * x + \"e_var\" * g) / (f * g * ln(F) * F^(f * g * x + \"e_var\" * g))"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 45,
+      "source": "{(a + b*(F^(g*(e + f*x)))^n)^3/(c + d*x)^3, x, 14, -(a^3/(2*d*(c + d*x)^2)) - (3*a^2*b*(F^(e*g + f*g*x))^n)/(2*d*(c + d*x)^2) - (3*a*b^2*(F^(e*g + f*g*x))^(2*n))/(2*d*(c + d*x)^2) - (b^3*(F^(e*g + f*g*x))^(3*n))/(2*d*(c + d*x)^2) - (3*a^2*b*f*(F^(e*g + f*g*x))^n*g*n*Log[F])/(2*d^2*(c + d*x)) - (3*a*b^2*f*(F^(e*g + f*g*x))^(2*n)*g*n*Log[F])/(d^2*(c + d*x)) - (3*b^3*f*(F^(e*g + f*g*x))^(3*n)*g*n*Log[F])/(2*d^2*(c + d*x)) + (3*a^2*b*f^2*F^((e - (c*f)/d)*g*n - g*n*(e + f*x))*(F^(e*g + f*g*x))^n*g^2*n^2*ExpIntegralEi[(f*g*n*(c + d*x)*Log[F])/d]*Log[F]^2)/(2*d^3) + (6*a*b^2*f^2*F^(2*(e - (c*f)/d)*g*n - 2*g*n*(e + f*x))*(F^(e*g + f*g*x))^(2*n)*g^2*n^2*ExpIntegralEi[(2*f*g*n*(c + d*x)*Log[F])/d]*Log[F]^2)/d^3 + (9*b^3*f^2*F^(3*(e - (c*f)/d)*g*n - 3*g*n*(e + f*x))*(F^(e*g + f*g*x))^(3*n)*g^2*n^2*ExpIntegralEi[(3*f*g*n*(c + d*x)*Log[F])/d]*Log[F]^2)/(2*d^3)}",
+      "outcome": "solved-correct",
+      "ms": 628,
+      "result": "(3b * f * g * n * (--(f * g * n * ln(F)) / d * F^(g * n * (-(c * f) / d + \"e_var\")) / d * F^(g * (f * x + \"e_var\"))^n / F^(g * n * (f * x + \"e_var\")) * ExpIntegralEi((f * g * n * (d * x + c) * ln(F)) / d) - (1 / (d * x + c) * F^(g * (f * x + \"e_var\"))^n) / d) * ln(F) * a^2) / (2d) + (3f * g * n * (-(-3f * g * n * ln(F)) / d * F^(3g * n * (-(c * f) / d + \"e_var\")) / d * F^(g * (f * x + \"e_var\"))^(3n) / F^(3g * n * (f * x + \"e_var\")) * ExpIntegralEi((3f * g * n * (d * x + c) * ln(F)) / d) - (1 / (d * x + c) * F^(g * (f * x + \"e_var\"))^(3n)) / d) * ln(F) * b^3) / (2d) + (3a * f * g * n * (-(-2f * g * n * ln(F)) / d * F^(2g * n * (-(c * f) / d + \"e_var\")) / d * F^(g * (f * x + \"e_var\"))^(2n) / F^(2g * n * (f * x + \"e_var\")) * ExpIntegralEi((2f * g * n * (d * x + c) * ln(F)) / d) - (1 / (d * x + c) * F^(g * (f * x + \"e_var\"))^(2n)) / d) * ln(F) * b^2) / d - (a^3) / (2d * (d * x + c)^2) + (-3b * a^2 * F^(g * (f * x + \"e_var\"))^n) / (2d * (d * x + c)^2) - (b^3 * F^(g * (f * x + \"e_var\"))^(3n)) / (2d * (d * x + c)^2) + (-3a * b^2 * F^(g * (f * x + \"e_var\"))^(2n)) / (2d * (d * x + c)^2)"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 47,
+      "source": "{(c + d*x)^2/(a + b*(F^(g*(e + f*x)))^n), x, 5, (c + d*x)^3/(3*a*d) - ((c + d*x)^2*Log[1 + (b*(F^(g*(e + f*x)))^n)/a])/(a*f*g*n*Log[F]) - (2*d*(c + d*x)*PolyLog[2, -((b*(F^(g*(e + f*x)))^n)/a)])/(a*f^2*g^2*n^2*Log[F]^2) + (2*d^2*PolyLog[3, -((b*(F^(g*(e + f*x)))^n)/a)])/(a*f^3*g^3*n^3*Log[F]^3)}",
+      "outcome": "solved-correct",
+      "ms": 246,
+      "result": "-b / a * (-(2d) / (b * f * g * n * ln(F)) * (-(d * x + c) * PolyLog(2, -(b * 1 / a * F^(g * (f * x + \"e_var\"))^n)) / (f * g * n * ln(F)) + d / (f * g * n * ln(F)) * PolyLog(3, -(b * 1 / a * F^(g * (f * x + \"e_var\"))^n)) / (f * g * n * ln(F))) + (d * x + c)^2 / (b * f * g * n * ln(F)) * ln((b * F^(g * (f * x + \"e_var\"))^n) / a + 1)) + (d * x + c)^3 / (3a * d)"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 51,
+      "source": "{1/((c + d*x)^2*(a + b*(F^(g*(e + f*x)))^n)), x, 1, Unintegrable[1/((a + b*(F^(e*g + f*g*x))^n)*(c + d*x)^2), x]}",
+      "outcome": "unsolved",
+      "ms": 93,
+      "result": "int(1 / ((a + b * F^(g * (f * x + \"e_var\"))^n) * (d * x + c)^2) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 64,
+      "source": "{Sqrt[c + d*x]*(a + b*E^x), x, 5, b*E^x*Sqrt[c + d*x] + (2*a*(c + d*x)^(3/2))/(3*d) - ((1/2)*b*Sqrt[d]*Sqrt[Pi]*Erfi[Sqrt[c + d*x]/Sqrt[d]])/E^(c/d)}",
+      "outcome": "solved-correct",
+      "ms": 98,
+      "result": "b * e^x * sqrt(d * x + c) + (2a * (d * x + c)^(3/2)) / (3d) - (b * Erfi(sqrt(1 / d) * sqrt(d * x + c)) * e^(-c / d) * sqrt(pi)) / (2sqrt(1 / d))"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 77,
+      "source": "{x^2*F^(c + d*x)/(a + b*F^(c + d*x)), x, 4, (x^2*Log[1 + (b*F^(c + d*x))/a])/(b*d*Log[F]) + (2*x*PolyLog[2, -((b*F^(c + d*x))/a)])/(b*d^2*Log[F]^2) - (2*PolyLog[3, -((b*F^(c + d*x))/a)])/(b*d^3*Log[F]^3)}",
+      "outcome": "solved-correct",
+      "ms": 128,
+      "result": "x^2 / (b * d * ln(F)) * ln((b * F^(d * x + c)) / a + 1) - 2 / (b * d * ln(F)) * (-(x * PolyLog(2, -(b * 1 / a * F^(d * x + c)))) / (d * ln(F)) + 1 / (d * ln(F)) * PolyLog(3, -(b * 1 / a * F^(d * x + c))) / (d * ln(F)))"
+    },
+    {
+      "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+      "index": 80,
+      "source": "{1/x^1*F^(c + d*x)/(a + b*F^(c + d*x)), x, 0, Unintegrable[F^(c + d*x)/((a + b*F^(c + d*x))*x), x]}",
+      "outcome": "unsolved",
+      "ms": 79,
+      "result": "int((1 / x * F^(d * x + c)) / (a + b * F^(d * x + c)) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 1,
+      "source": "{E^x/(4 + 6*E^x), x, 2, (1/6)*Log[2 + 3*E^x]}",
+      "outcome": "solved-correct",
+      "ms": 22,
+      "result": "1/6 * ln(3e^x + 2)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 7,
+      "source": "{E^(c + d*x)*(a + b*E^(c + d*x))^n, x, 2, (a + b*E^(c + d*x))^(1 + n)/(b*d*(1 + n))}",
+      "outcome": "solved-correct",
+      "ms": 41,
+      "result": "1 / d * (a + b * e^(d * x + c))^(n + 1) / (b * n + b)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 14,
+      "source": "{(E^x)^n*(a + b*(E^x)^n)^p, x, 2, (a + b*(E^x)^n)^(1 + p)/(b*n*(1 + p))}",
+      "outcome": "solved-correct",
+      "ms": 32,
+      "result": "1 / n * (a + b * e^(n * x))^(p + 1) / (b * p + b)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 24,
+      "source": "{E^(4*x)/(a + b*E^(2*x))^3, x, 2, E^(4*x)/(4*a*(a + b*E^(2*x))^2)}",
+      "outcome": "solved-correct",
+      "ms": 36,
+      "result": "1/2 * e^(4x) / (2a * (a + b * e^(2x))^2)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 28,
+      "source": "{E^(-n*x)*(a + b*E^(n*x))^2, x, 3, -(a^2/(E^(n*x)*n)) + (b^2*E^(n*x))/n + 2*a*b*x}",
+      "outcome": "solved-correct",
+      "ms": 43,
+      "result": "1 / n * (2a * b * n * x - (a^2) / e^(n * x) + b^2 * e^(n * x))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 39,
+      "source": "{x^0*E^x/(1 - E^(2*x)), x, 2, ArcTanh[E^x]}",
+      "outcome": "solved-correct",
+      "ms": 16,
+      "result": "artanh(e^x)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 42,
+      "source": "{x^3*E^x/(1 - E^(2*x)), x, 10, x^3*ArcTanh[E^x] + (3/2)*x^2*PolyLog[2, -E^x] - (3/2)*x^2*PolyLog[2, E^x] - 3*x*PolyLog[3, -E^x] + 3*x*PolyLog[3, E^x] + 3*PolyLog[4, -E^x] - 3*PolyLog[4, E^x]}",
+      "outcome": "solved-correct",
+      "ms": 168,
+      "result": "artanh(e^x) * x^3 - 3(-1/2 * (-PolyLog(2, e^x) * x^2 + 2(x * PolyLog(3, e^x) - PolyLog(4, e^x))) + 1/2 * (-PolyLog(2, -(e^x)) * x^2 + 2(x * PolyLog(3, -(e^x)) - PolyLog(4, -(e^x)))))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 52,
+      "source": "{x^1*f^x/(a + b*f^(2*x))^3, x, 11, -(f^x/(8*a^2*(a + b*f^(2*x))*Log[f]^2)) - ArcTan[(Sqrt[b]*f^x)/Sqrt[a]]/(2*a^(5/2)*Sqrt[b]*Log[f]^2) + (f^x*x)/(4*a*(a + b*f^(2*x))^2*Log[f]) + (3*f^x*x)/(8*a^2*(a + b*f^(2*x))*Log[f]) + (3*x*ArcTan[(Sqrt[b]*f^x)/Sqrt[a]])/(8*a^(5/2)*Sqrt[b]*Log[f]) - (3*I*PolyLog[2, -((I*Sqrt[b]*f^x)/Sqrt[a])])/(16*a^(5/2)*Sqrt[b]*Log[f]^2) + (3*I*PolyLog[2, (I*Sqrt[b]*f^x)/Sqrt[a]])/(16*a^(5/2)*Sqrt[b]*Log[f]^2)}",
+      "outcome": "unsolved",
+      "ms": 171,
+      "result": "(0.1875i * x * ln(i * 1 / sqrt(a) * sqrt(b) * f^x + 1)) / ln(f) + (-0.1875i * int((i * x * ln(f) * sqrt(b) * f^x) / (i * 1 / sqrt(a) * sqrt(b) * f^x + 1) * sqrt(a) dx)) / ln(f) / (a^(5/2) * sqrt(b)) + (0.1875i * x * ln(1 - i * 1 / sqrt(a) * sqrt(b) * f^x)) / ln(f) + (-3/8i * x * ln(1 - i * 1 / sqrt(a) * sqrt(b) * f^x)) / ln(f) + (0.1875i * int((-i * x * ln(f) * sqrt(b) * f^x) / (1 - i * 1 / sqrt(a) * sqrt(b) * f^x) * sqrt(a) dx)) / ln(f) / (a^(5/2) * sqrt(b)) + x * (3(arctan((sqrt(b) * f^x) / sqrt(a)) / (a^(3/2) * sqrt(b)) + f^x / (a^2 + a * b * f^(2x)))) / a + (2f^x) / (a * (a + b * f^(2x))^2) / (8ln(f)) + (-arctan((sqrt(b) * f^x) / sqrt(a)) / (ln(f) * a^(3/2) * sqrt(b)) - (f^x) / (a^2 + a * b * f^(2x)) * ln(f)) / (8a * ln(f)) + (-3arctan((sqrt(b) * f^x) / sqrt(a))) / (8a^(5/2) * sqrt(b) * ln(f)^2)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 60,
+      "source": "{x^2/(a*f^x + b*f^(-x))^2, x, 6, x^2/(2*a*b*Log[f]) - x^2/(2*a*(b + a*f^(2*x))*Log[f]) - (x*Log[1 + (a*f^(2*x))/b])/(2*a*b*Log[f]^2) - PolyLog[2, -((a*f^(2*x))/b)]/(4*a*b*Log[f]^3)}",
+      "outcome": "unsolved",
+      "ms": 115,
+      "result": "-1 / (b * ln(f)) * (x^2 / (2a) - b / a * (-1 / (-2b * ln(f)) * (x * ln(b * 1 / a * f^(-2x) + 1) - int((-2b * x * ln(f) * f^(-2x)) / (a * (b * 1 / a * f^(-2x) + 1)) dx)) - x / (2b * ln(f)) * ln((b * f^(-2x)) / a + 1))) + (1 / (a + b * f^(-2x)) * x^2) / (2b * ln(f))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 61,
+      "source": "{x^3/(a*f^x + b*f^(-x))^2, x, 7, x^3/(2*a*b*Log[f]) - x^3/(2*a*(b + a*f^(2*x))*Log[f]) - (3*x^2*Log[1 + (a*f^(2*x))/b])/(4*a*b*Log[f]^2) - (3*x*PolyLog[2, -((a*f^(2*x))/b)])/(4*a*b*Log[f]^3) + (3*PolyLog[3, -((a*f^(2*x))/b)])/(8*a*b*Log[f]^4)}",
+      "outcome": "solved-correct",
+      "ms": 283,
+      "result": "(1 / (a + b * f^(-2x)) * x^3) / (2b * ln(f)) - 3 / (2b * ln(f)) * (x^3 / (3a) - b / a * (-(x^2) / (2b * ln(f)) * ln((b * f^(-2x)) / a + 1) + 1 / (b * ln(f)) * (--(x * PolyLog(2, -(b * 1 / a * f^(-2x)))) / (2ln(f)) + 1 / (-2ln(f)) * (-PolyLog(3, -(b * 1 / a * f^(-2x))) / (2ln(f))))))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 67,
+      "source": "{F^(e*(c + d*x))*H^(t*(r + s*x))/(a + b*F^(e*(c + d*x))), x, 2, (H^(t*(r + s*x))*Hypergeometric2F1[1, -((s*t*Log[H])/(d*e*Log[F])), 1 - (s*t*Log[H])/(d*e*Log[F]), -(a/(F^(e*(c + d*x))*b))])/(b*s*t*Log[H])}",
+      "outcome": "solved-correct",
+      "ms": 177,
+      "result": "(1 / b * H^(t * (s * x + r))) / (s * t * ln(H)) * Hypergeometric2F1(1, -(s * t * ln(H)) / (d * \"e_var\" * ln(F)), -(s * t * ln(H)) / (d * \"e_var\" * ln(F)) + 1, -(a * F^(-(\"e_var\" * (d * x + c)))) / b) * F^(\"e_var\" * (c - c))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 70,
+      "source": "{f^(a + b*x^2)*x^11, x, 1, -((f^(a + b*x^2)*(120 - 120*b*x^2*Log[f] + 60*b^2*x^4*Log[f]^2 - 20*b^3*x^6*Log[f]^3 + 5*b^4*x^8*Log[f]^4 - b^5*x^10*Log[f]^5))/(2*b^6*Log[f]^6))}",
+      "outcome": "not-evaluable",
+      "ms": 116,
+      "result": "-(f^a / (2(b * ln(f))^6) * FunctionExpand(Gamma(6, -(b * ln(f) * x^2))))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 77,
+      "source": "{f^(a + b*x^2)/x^3, x, 2, -(f^(a + b*x^2)/(2*x^2)) + (1/2)*b*f^a*ExpIntegralEi[b*x^2*Log[f]]*Log[f]}",
+      "outcome": "solved-correct",
+      "ms": 57,
+      "result": "1/2 * b * ln(f) * ExpIntegralEi(b * ln(f) * x^2) * f^a - 1/2 * f^(b * x^2 + a) * x^(-2)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 82,
+      "source": "{f^(a + b*x^2)*x^12, x, 1, -((f^a*x^13*Gamma[13/2, (-b)*x^2*Log[f]])/(2*((-b)*x^2*Log[f])^(13/2)))}",
+      "outcome": "solved-correct",
+      "ms": 41,
+      "result": "-(x^(13) * f^a) / (2(-(b * ln(f) * x^2))^(13/2)) * Gamma(13/2, -(b * ln(f) * x^2))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 87,
+      "source": "{f^(a + b*x^2)*x^2, x, 2, -((f^a*Sqrt[Pi]*Erfi[Sqrt[b]*x*Sqrt[Log[f]]])/(4*b^(3/2)*Log[f]^(3/2))) + (f^(a + b*x^2)*x)/(2*b*Log[f])}",
+      "outcome": "solved-correct",
+      "ms": 88,
+      "result": "(x * f^(b * x^2 + a)) / (2b * ln(f)) - 1 / (2b * ln(f)) * (Erfi(x * sqrt(b) * sqrt(ln(f))) * sqrt(pi) * f^a) / (2sqrt(b) * sqrt(ln(f)))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 123,
+      "source": "{f^(a + b/x)/x^3, x, 2, f^(a + b/x)/(b^2*Log[f]^2) - f^(a + b/x)/(b*x*Log[f])}",
+      "outcome": "solved-correct",
+      "ms": 63,
+      "result": "-(1 / x * f^(a + b * 1 / x)) / (b * ln(f)) - 1 / (b * ln(f)) * (-(1 / x * f^(a + b * 1 / x)) / (b * 1 / x * ln(f)))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 124,
+      "source": "{f^(a + b/x)/x^4, x, 3, -((2*f^(a + b/x))/(b^3*Log[f]^3)) + (2*f^(a + b/x))/(b^2*x*Log[f]^2) - f^(a + b/x)/(b*x^2*Log[f])}",
+      "outcome": "solved-correct",
+      "ms": 114,
+      "result": "-(f^(a + b * 1 / x) * x^(-2)) / (b * ln(f)) - 2 / (b * ln(f)) * (-(1 / x * f^(a + b * 1 / x)) / (b * ln(f)) - 1 / (b * ln(f)) * (-(1 / x * f^(a + b * 1 / x)) / (b * 1 / x * ln(f))))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 129,
+      "source": "{f^(a + b/x^2)*x^9, x, 1, (-(1/2))*b^5*f^a*Gamma[-5, -((b*Log[f])/x^2)]*Log[f]^5}",
+      "outcome": "solved-correct",
+      "ms": 44,
+      "result": "-(x^(10) * f^a) / (2(b * ln(f) * x^(-2))^(-5)) * Gamma(-5, -(b * ln(f) * x^(-2)))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 152,
+      "source": "{f^(a + b/x^2)/x^12, x, 1, (f^a*Gamma[11/2, -((b*Log[f])/x^2)])/(2*x^11*(-((b*Log[f])/x^2))^(11/2))}",
+      "outcome": "solved-correct",
+      "ms": 46,
+      "result": "-(-(f^a * x^(-11)) / (2(-(b * ln(f) * x^(-2)))^(11/2)) * Gamma(11/2, -(b * ln(f) * x^(-2))))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 154,
+      "source": "{f^(a + b/x^3)*x^m, x, 1, (1/3)*f^a*x^(1 + m)*Gamma[(1/3)*(-1 - m), -((b*Log[f])/x^3)]*(-((b*Log[f])/x^3))^((1 + m)/3)}",
+      "outcome": "solved-formal",
+      "ms": 86,
+      "result": "-(-(f^a * x^(m + 1)) / (3(-(b * ln(f) * x^(-3)))^(-1/3 * (m + 1))) * Gamma(-1/3 * (m + 1), -(b * ln(f) * x^(-3))))",
+      "detail": "region-phase formal match: passes=9 phase-fails=10; x=0.31 {\"f\":1.0761791055556387,\"a\":0.601867140037939,\"b\":2.4439620221965015,\"m\":0.6425135153112933} dF=-30.22+-201i f=203.3; x=0.73 {\"f\":1.0761791055556387,\"a\":0.601867140037939,\"b\":2.4439620221965015,\"m\":0.6425135153112933} dF=-0.2014+-1.34i f=1.354"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 155,
+      "source": "{f^(a + b/x^3)*x^14, x, 1, (-(1/3))*b^5*f^a*Gamma[-5, -((b*Log[f])/x^3)]*Log[f]^5}",
+      "outcome": "solved-correct",
+      "ms": 44,
+      "result": "-(x^(15) * f^a) / (3(b * ln(f) * x^(-3))^(-5)) * Gamma(-5, -(b * ln(f) * x^(-3)))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 167,
+      "source": "{f^(a + b/x^3)*x^4, x, 1, (1/3)*f^a*x^5*Gamma[-(5/3), -((b*Log[f])/x^3)]*(-((b*Log[f])/x^3))^(5/3)}",
+      "outcome": "solved-wrong",
+      "ms": 59,
+      "result": "-(-(x^5 * f^a) / (3(-(b * ln(f) * x^(-3)))^(-5/3)) * Gamma(-5/3, -(b * ln(f) * x^(-3))))",
+      "detail": "worst rel err 8.66e-1; x=-0.23 {\"f\":0.9644064430613071,\"a\":2.1394305042922497,\"b\":1.3003585285041481} dF=-0.06229+-0.108i f=0.1246; x=-0.41 {\"f\":0.9644064430613071,\"a\":2.1394305042922497,\"b\":1.3003585285041481} dF=-0.02591+-0.0449i f=0.05181"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 181,
+      "source": "{f^(a + b*x^n)/x^3, x, 1, -((f^a*Gamma[-(2/n), (-b)*x^n*Log[f]]*((-b)*x^n*Log[f])^(2/n))/(n*x^2))}",
+      "outcome": "solved-formal",
+      "ms": 70,
+      "result": "-(f^a * x^(-2)) / (n * (-(b * ln(f) * x^n))^(-2 / n)) * Gamma(-2 / n, -(b * ln(f) * x^n))",
+      "detail": "region-phase formal match: passes=10 phase-fails=9; x=-0.23 {\"f\":0.8323330555576831,\"a\":1.0743846122641116,\"b\":2.7939821740146726,\"n\":1.9027603407157585} dF=-68.73+11.1i f=-69.63; x=-0.41 {\"f\":0.8323330555576831,\"a\":1.0743846122641116,\"b\":2.7939821740146726,\"n\":1.9027603407157585} dF=-12.92+2.09i f=-13.09"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 182,
+      "source": "{f^(a + b*x^n)/x^4, x, 1, -((f^a*Gamma[-(3/n), (-b)*x^n*Log[f]]*((-b)*x^n*Log[f])^(3/n))/(n*x^3))}",
+      "outcome": "solved-correct",
+      "ms": 46,
+      "result": "-(f^a * x^(-3)) / (n * (-(b * ln(f) * x^n))^(-3 / n)) * Gamma(-3 / n, -(b * ln(f) * x^n))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 191,
+      "source": "{f^(a + b*x^n)*x^(1*n/2-1), x, 2, (f^a*Sqrt[Pi]*Erfi[Sqrt[b]*x^(n/2)*Sqrt[Log[f]]])/(Sqrt[b]*n*Sqrt[Log[f]])}",
+      "outcome": "solved-correct",
+      "ms": 53,
+      "result": "1 / (1/2 * n) * (Erfi(sqrt(b) * x^(1/2 * n) * sqrt(ln(f))) * sqrt(pi) * f^a) / (2sqrt(b) * sqrt(ln(f)))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 198,
+      "source": "{f^(c*(a + b*x)^2)*x^0, x, 1, (Sqrt[Pi]*Erfi[Sqrt[c]*(a + b*x)*Sqrt[Log[f]]])/(2*b*Sqrt[c]*Sqrt[Log[f]])}",
+      "outcome": "solved-correct",
+      "ms": 31,
+      "result": "(Erfi((b * x + a) * sqrt(c) * sqrt(ln(f))) * sqrt(pi) * f^0) / (2b * sqrt(c) * sqrt(ln(f)))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 217,
+      "source": "{f^(c/(a + b*x))*x^3, x, 12, -((a^3*f^(c/(a + b*x))*(a + b*x))/b^4) + (3*a^2*f^(c/(a + b*x))*(a + b*x)^2)/(2*b^4) - (a*f^(c/(a + b*x))*(a + b*x)^3)/b^4 + (3*a^2*c*f^(c/(a + b*x))*(a + b*x)*Log[f])/(2*b^4) - (a*c*f^(c/(a + b*x))*(a + b*x)^2*Log[f])/(2*b^4) + (a^3*c*ExpIntegralEi[(c*Log[f])/(a + b*x)]*Log[f])/b^4 - (a*c^2*f^(c/(a + b*x))*(a + b*x)*Log[f]^2)/(2*b^4) - (3*a^2*c^2*ExpIntegralEi[(c*Log[f])/(a + b*x)]*Log[f]^2)/(2*b^4) + (a*c^3*ExpIntegralEi[(c*Log[f])/(a + b*x)]*Log[f]^3)/(2*b^4) + (c^4*Gamma[-4, -((c*Log[f])/(a + b*x))]*Log[f]^4)/b^4}",
+      "outcome": "unsolved",
       "ms": 52,
-      "result": "-1/3 * c * x^3 * b^2 + c * x * a^2"
+      "result": "int(x^3 * f^(c / (b * x + a)) dx)"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
-      "index": 1958,
-      "source": "{x^(-5) + x + x^5, x, 1, -(1/(4*x^4)) + x^2/2 + x^6/6}",
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 220,
+      "source": "{f^(c/(a + b*x))*x^0, x, 2, (f^(c/(a + b*x))*(a + b*x))/b - (c*ExpIntegralEi[(c*Log[f])/(a + b*x)]*Log[f])/b}",
       "outcome": "solved-correct",
-      "ms": 14,
-      "result": "1/6 * x^6 + 1/2 * x^2 - 1/4 * x^(-4)"
+      "ms": 64,
+      "result": "(b * x + a) * f^(c * 1 / (b * x + a)) / b + c * (-(ExpIntegralEi(c * 1 / (b * x + a) * ln(f)) * f^0) / b) * ln(f)"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.3 (a+b x)^m (c+d x)^n (e+f x)^p.m",
-      "index": 538,
-      "source": "{((a + b*x)^(5/2)*(A + B*x))/x^(5/2), x, 7, (5*b*(4*A*b + 3*a*B)*Sqrt[x]*Sqrt[a + b*x])/4 + (5*b*(4*A*b + 3*a*B)*Sqrt[x]*(a + b*x)^(3/2))/(6*a) - (2*(4*A*b + 3*a*B)*(a + b*x)^(5/2))/(3*a*Sqrt[x]) - (2*A*(a + b*x)^(7/2))/(3*a*x^(3/2)) + (5*a*Sqrt[b]*(4*A*b + 3*a*B)*ArcTanh[(Sqrt[b]*Sqrt[x])/Sqrt[a + b*x]])/4}",
-      "outcome": "solved-correct",
-      "ms": 340,
-      "result": "-(-3B * a - 4A * b) / (3(a + 0b)) * (5b * (3/4 * (a + 0b) * (artanh((sqrt(b) * sqrt(x)) / sqrt(b * x + a)) / sqrt(b) * (a + 0b) + sqrt(x) * sqrt(b * x + a)) + 1/2 * sqrt(x) * (b * x + a)^(3/2)) - 2 * 1 / sqrt(x) * (b * x + a)^(5/2)) - (2A * x^(-3/2) * (b * x + a)^(7/2)) / (3(a + 0b))"
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 227,
+      "source": "{f^(c/(a + b*x)^2)*x^1, x, 7, -((a*f^(c/(a + b*x)^2)*(a + b*x))/b^2) + (f^(c/(a + b*x)^2)*(a + b*x)^2)/(2*b^2) + (a*Sqrt[c]*Sqrt[Pi]*Erfi[(Sqrt[c]*Sqrt[Log[f]])/(a + b*x)]*Sqrt[Log[f]])/b^2 - (c*ExpIntegralEi[(c*Log[f])/(a + b*x)^2]*Log[f])/(2*b^2)}",
+      "outcome": "unsolved",
+      "ms": 37,
+      "result": "int(x * f^(c / (b * x + a)^2) dx)"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.3 (a+b x)^m (c+d x)^n (e+f x)^p.m",
-      "index": 711,
-      "source": "{(a + b*x)^(5/2)/(x^3*Sqrt[c + d*x]), x, 8, -((a*(7*b*c - 3*a*d)*Sqrt[a + b*x]*Sqrt[c + d*x])/(4*c^2*x)) - (a*(a + b*x)^(3/2)*Sqrt[c + d*x])/(2*c*x^2) - (Sqrt[a]*(15*b^2*c^2 - 10*a*b*c*d + 3*a^2*d^2)*ArcTanh[(Sqrt[c]*Sqrt[a + b*x])/(Sqrt[a]*Sqrt[c + d*x])])/(4*c^(5/2)) + (2*b^(5/2)*ArcTanh[(Sqrt[d]*Sqrt[a + b*x])/(Sqrt[b]*Sqrt[c + d*x])])/Sqrt[d]}",
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 228,
+      "source": "{f^(c/(a + b*x)^2)*x^0, x, 3, (f^(c/(a + b*x)^2)*(a + b*x))/b - (Sqrt[c]*Sqrt[Pi]*Erfi[(Sqrt[c]*Sqrt[Log[f]])/(a + b*x)]*Sqrt[Log[f]])/b}",
       "outcome": "solved-correct",
-      "ms": 1086,
-      "result": "1 / (-2(c + 0d)) * (-1 / (-c + 0d) * ((-2 * 1 / a * sqrt(b * x + a)) / (b * c - a * d)^0 * sqrt(d * x + c) * (-3/4 * a^3 * d^2 + 5/2 * b * c * d * a^2 - 15/4 * a * b^2 * c^2) * Hypergeometric2F1(1/2, 1, 3/2, -(-(c + 0d) * (b * x + a) / (a * (d * x + c)))) - 4artanh((sqrt(d) * sqrt(b * x + a)) / (sqrt(b) * sqrt(d * x + c))) / (sqrt(b) * sqrt(d)) * b^3 * c^2) - (1 / x * (3d * a^2 - 7a * b * c) * sqrt(b * x + a) * sqrt(d * x + c)) / (2c)) - (a + 0b) * x^(-2) * (b * x + a)^(3/2) * sqrt(d * x + c) / (2(c + 0d))"
+      "ms": 96,
+      "result": "(b * x + a) * f^(c * (b * x + a)^(-2)) / b + 2c * (-1 / b) * (Erfi((sqrt(c) * sqrt(ln(f))) / (b * x + a)) * sqrt(pi)) / (2sqrt(c) * sqrt(ln(f))) * ln(f)"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.3 (a+b x)^m (c+d x)^n (e+f x)^p.m",
-      "index": 724,
-      "source": "{(x*(a + b*x)^(5/2))/(c + d*x)^(5/2), x, 7, (-2*c*(a + b*x)^(7/2))/(3*d*(b*c - a*d)*(c + d*x)^(3/2)) - (2*(7*b*c - 3*a*d)*(a + b*x)^(5/2))/(3*d^2*(b*c - a*d)*Sqrt[c + d*x]) - (5*b*(7*b*c - 3*a*d)*Sqrt[a + b*x]*Sqrt[c + d*x])/(4*d^4) + (5*b*(7*b*c - 3*a*d)*(a + b*x)^(3/2)*Sqrt[c + d*x])/(6*d^3*(b*c - a*d)) + (5*Sqrt[b]*(7*b*c - 3*a*d)*(b*c - a*d)*ArcTanh[(Sqrt[d]*Sqrt[a + b*x])/(Sqrt[b]*Sqrt[c + d*x])])/(4*d^(9/2))}",
-      "outcome": "solved-correct",
-      "ms": 330,
-      "result": "-(7b * c - 3a * d) / (3d * (-b * c + a * d)) * (-(-5b) / d * (3(-b * c + a * d)) / (4d) * (2(-b * c + a * d) / (2d) * artanh((sqrt(d) * sqrt(b * x + a)) / (sqrt(b) * sqrt(d * x + c))) / (sqrt(b) * sqrt(d)) + (sqrt(b * x + a) * sqrt(d * x + c)) / d) + (b * x + a)^(3/2) * sqrt(d * x + c) / (2d) + (-2 * 1 / sqrt(d * x + c) * (b * x + a)^(5/2)) / d) - (-2(c + 0d) * (b * x + a)^(7/2) * (d * x + c)^(-3/2)) / (3d * (-b * c + a * d))"
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 229,
+      "source": "{f^(c/(a + b*x)^2)/x^1, x, 0, Unintegrable[f^(c/(a + b*x)^2)/x, x]}",
+      "outcome": "unsolved",
+      "ms": 49,
+      "result": "int(f^(c / (b * x + a)^2) / x dx)"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.3 (a+b x)^m (c+d x)^n (e+f x)^p.m",
-      "index": 2869,
-      "source": "{(3 + 5*x)^(5/2)/(Sqrt[1 - 2*x]*(2 + 3*x)^(7/2)), x, 6, (544*Sqrt[1 - 2*x]*Sqrt[3 + 5*x])/(6615*(2 + 3*x)^(3/2)) - (53194*Sqrt[1 - 2*x]*Sqrt[3 + 5*x])/(46305*Sqrt[2 + 3*x]) + (2*Sqrt[1 - 2*x]*(3 + 5*x)^(3/2))/(105*(2 + 3*x)^(5/2)) + (53194*Sqrt[11/3]*EllipticE[ArcSin[Sqrt[3/7]*Sqrt[1 - 2*x]], 35/33])/46305 - (34154*Sqrt[11/3]*EllipticF[ArcSin[Sqrt[3/7]*Sqrt[1 - 2*x]], 35/33])/46305}",
-      "outcome": "solved-correct",
-      "ms": 829,
-      "result": "2/105 * sqrt(-2x + 1) * (3x + 2)^(-5/2) * (5x + 3)^(3/2) - 2/105 * (-272/63 * sqrt(-2x + 1) * (3x + 2)^(-3/2) * sqrt(5x + 3) + 2/63 * (26597/14 * 1 / sqrt(3x + 2) * sqrt(-2x + 1) * sqrt(5x + 3) + 2/7 * (13090 * 2/3sqrt(6) / -sqrt(22) * EllipticF(arcsin(sqrt(21)/7 * sqrt(-2x + 1)), 35/33) - 2/105sqrt(231) * 132985/4 / -2 * (sqrt(7) * sqrt(-5x - 3) * sqrt(-2x + 1)) / (sqrt(-2x + 1) * sqrt(5x + 3)) * EllipticE(arcsin(sqrt(3) * sqrt(-5x - 3)), -2/33))))"
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 251,
+      "source": "{f^(c*(a + b*x)^n)/x^1, x, 0, Unintegrable[f^(c*(a + b*x)^n)/x, x]}",
+      "outcome": "unsolved",
+      "ms": 43,
+      "result": "int(f^(c * (b * x + a)^n) / x dx)"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.3 (a+b x)^m (c+d x)^n (e+f x)^p.m",
-      "index": 2936,
-      "source": "{(3 + 5*x)^(3/2)/((1 - 2*x)^(3/2)*(2 + 3*x)^(3/2)), x, 5, (11*Sqrt[3 + 5*x])/(7*Sqrt[1 - 2*x]*Sqrt[2 + 3*x]) - (31*Sqrt[1 - 2*x]*Sqrt[3 + 5*x])/(49*Sqrt[2 + 3*x]) + (31*Sqrt[11/3]*EllipticE[ArcSin[Sqrt[3/7]*Sqrt[1 - 2*x]], 35/33])/49 + (4*Sqrt[11/3]*EllipticF[ArcSin[Sqrt[3/7]*Sqrt[1 - 2*x]], 35/33])/49}",
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 264,
+      "source": "{F^(a + b*(c + d*x)^2)/(c + d*x)^7, x, 4, -(F^(a + b*(c + d*x)^2)/(6*d*(c + d*x)^6)) - (b*F^(a + b*(c + d*x)^2)*Log[F])/(12*d*(c + d*x)^4) - (b^2*F^(a + b*(c + d*x)^2)*Log[F]^2)/(12*d*(c + d*x)^2) + (b^3*F^a*ExpIntegralEi[b*(c + d*x)^2*Log[F]]*Log[F]^3)/(12*d)}",
       "outcome": "solved-correct",
-      "ms": 565,
-      "result": "11/7 * 1 / sqrt(-2x + 1) * 1 / sqrt(3x + 2) * sqrt(5x + 3) - 1/7 * (31/7 * 1 / sqrt(3x + 2) * sqrt(-2x + 1) * sqrt(5x + 3) + 2/7 * (-385/2 / -2 * 2/3sqrt(6) / -sqrt(22) * EllipticF(arcsin(sqrt(21)/7 * sqrt(-2x + 1)), 35/33) - 2/105sqrt(231) * 155/2 / -2 * (sqrt(7) * sqrt(-5x - 3) * sqrt(-2x + 1)) / (sqrt(-2x + 1) * sqrt(5x + 3)) * EllipticE(arcsin(sqrt(3) * sqrt(-5x - 3)), -2/33)))"
+      "ms": 364,
+      "result": "1/3 * b * (1/2 * b * (b * (ExpIntegralEi(b * ln(F) * (d * x + c)^2) * F^a) / (2d) * ln(F) - (F^(b * (d * x + c)^2 + a) * (d * x + c)^(-2)) / (2d)) * ln(F) - (F^(b * (d * x + c)^2 + a) * (d * x + c)^(-4)) / (4d)) * ln(F) - (F^(b * (d * x + c)^2 + a) * (d * x + c)^(-6)) / (6d)"
     },
     {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.4 (a+b x)^m (c+d x)^n (e+f x)^p (g+h x)^q.m",
-      "index": 49,
-      "source": "{Sqrt[2 - 3*x]*Sqrt[1 + 4*x]/((7 + 5*x)^2*Sqrt[-5 + 2*x]), x, 10, (Sqrt[2 - 3*x]*Sqrt[-5 + 2*x]*Sqrt[1 + 4*x])/(39*(7 + 5*x)) - (2*Sqrt[11]*Sqrt[-5 + 2*x]*EllipticE[ArcSin[(2*Sqrt[2 - 3*x])/Sqrt[11]], -(1/2)])/(195*Sqrt[5 - 2*x]) - (2*Sqrt[6/11]*Sqrt[5 - 2*x]*EllipticF[ArcSin[Sqrt[3/11]*Sqrt[1 + 4*x]], 1/3])/(25*Sqrt[-5 + 2*x]) - (6101*Sqrt[5 - 2*x]*EllipticPi[55/124, ArcSin[(2*Sqrt[2 - 3*x])/Sqrt[11]], -(1/2)])/(20150*Sqrt[11]*Sqrt[-5 + 2*x])}",
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 286,
+      "source": "{F^(a + b*(c + d*x)^3)*(c + d*x)^2, x, 1, F^(a + b*(c + d*x)^3)/(3*b*d*Log[F])}",
       "outcome": "solved-correct",
-      "ms": 952,
-      "result": "1/39 * 1 / (5x + 7) * sqrt(-3x + 2) * sqrt(2x - 5) * sqrt(4x + 1) - 1/78 * (-121/3 * 2(3sqrt(11) * EllipticPi(55/124, arcsin(2/11sqrt(11) * sqrt(-3x + 2)), -1/2) * sqrt(-2x + 5)) / (682sqrt(2x - 5)) + (2sqrt(22) * EllipticE(arcsin(sqrt(11)/11 * sqrt(4x + 1)), 3) * sqrt(-2x + 5)) / (5sqrt(2x - 5)) - 688/15 * (-3/5 * sqrt(3) / -3 * (sqrt(33) * sqrt(-2x + 5)) / (11sqrt(2x - 5)) * EllipticF(arcsin(2/11sqrt(11) * sqrt(-3x + 2)), -1/2) - 31/5 * 2(3sqrt(11) * EllipticPi(55/124, arcsin(2/11sqrt(11) * sqrt(-3x + 2)), -1/2) * sqrt(-2x + 5)) / (682sqrt(2x - 5))))"
+      "ms": 89,
+      "result": "(d * x + c)^3 * F^(b * (d * x + c)^3 + a) / (3b * d * ln(F) * (d * x + c)^3)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 293,
+      "source": "{F^(a + b*(c + d*x)^3)*(c + d*x)^3, x, 1, -((F^a*(c + d*x)^4*Gamma[4/3, (-b)*(c + d*x)^3*Log[F]])/(3*d*((-b)*(c + d*x)^3*Log[F])^(4/3)))}",
+      "outcome": "solved-formal",
+      "ms": 189,
+      "result": "-((d * x + c)^4 * F^a) / (3d * (-(b * ln(F) * (d * x + c)^3))^(4/3)) * Gamma(4/3, -(b * ln(F) * (d * x + c)^3))",
+      "detail": "region-phase formal match: passes=3 phase-fails=17; x=0.31 {\"F\":1.7602528114803135,\"a\":2.94991373619996,\"b\":2.4971216173144057,\"c\":1.384719414752908,\"d\":1.0877795408014208} dF=-1.830e+4+-3.17e+4i f=3.659e+4; x=0.73 {\"F\":1.7602528114803135,\"a\":2.94991373619996,\"b\":2.4971216173144057,\"c\":1.384719414752908,\"d\":1.0877795408014208} dF=-6.036e+7+-1.05e+8i f=1.207e+8"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 315,
+      "source": "{F^(a + b/(c + d*x)^2)*(c + d*x)^9, x, 1, -((b^5*F^a*Gamma[-5, -((b*Log[F])/(c + d*x)^2)]*Log[F]^5)/(2*d))}",
+      "outcome": "solved-correct",
+      "ms": 163,
+      "result": "-((d * x + c)^(10) * F^a) / (2d * (b * ln(F) * (d * x + c)^(-2))^(-5)) * Gamma(-5, -(b * ln(F) * (d * x + c)^(-2)))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 322,
+      "source": "{F^(a + b/(c + d*x)^2)/(c + d*x)^5, x, 2, F^(a + b/(c + d*x)^2)/(2*b^2*d*Log[F]^2) - F^(a + b/(c + d*x)^2)/(2*b*d*(c + d*x)^2*Log[F])}",
+      "outcome": "solved-correct",
+      "ms": 194,
+      "result": "-(F^(a + b * (d * x + c)^(-2)) * (d * x + c)^(-2)) / (2b * d * ln(F)) - 1 / (b * ln(F)) * (-(F^(a + b * (d * x + c)^(-2)) * (d * x + c)^(-2)) / (2b * d * ln(F) * (d * x + c)^(-2)))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 323,
+      "source": "{F^(a + b/(c + d*x)^2)/(c + d*x)^7, x, 3, -(F^(a + b/(c + d*x)^2)/(b^3*d*Log[F]^3)) + F^(a + b/(c + d*x)^2)/(b^2*d*(c + d*x)^2*Log[F]^2) - F^(a + b/(c + d*x)^2)/(2*b*d*(c + d*x)^4*Log[F])}",
+      "outcome": "solved-correct",
+      "ms": 295,
+      "result": "-(F^(a + b * (d * x + c)^(-2)) * (d * x + c)^(-4)) / (2b * d * ln(F)) - 2 / (b * ln(F)) * (-(F^(a + b * (d * x + c)^(-2)) * (d * x + c)^(-2)) / (2b * d * ln(F)) - 1 / (b * ln(F)) * (-(F^(a + b * (d * x + c)^(-2)) * (d * x + c)^(-2)) / (2b * d * ln(F) * (d * x + c)^(-2))))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 327,
+      "source": "{F^(a + b/(c + d*x)^2)*(c + d*x)^10, x, 1, (F^a*(c + d*x)^11*Gamma[-(11/2), -((b*Log[F])/(c + d*x)^2)]*(-((b*Log[F])/(c + d*x)^2))^(11/2))/(2*d)}",
+      "outcome": "solved-correct",
+      "ms": 168,
+      "result": "-(-((d * x + c)^(11) * F^a) / (2d * (-(b * ln(F) * (d * x + c)^(-2)))^(-11/2)) * Gamma(-11/2, -(b * ln(F) * (d * x + c)^(-2))))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 332,
+      "source": "{F^(a + b/(c + d*x)^2)*(c + d*x)^0, x, 3, (F^(a + b/(c + d*x)^2)*(c + d*x))/d - (Sqrt[b]*F^a*Sqrt[Pi]*Erfi[(Sqrt[b]*Sqrt[Log[F]])/(c + d*x)]*Sqrt[Log[F]])/d}",
+      "outcome": "solved-correct",
+      "ms": 186,
+      "result": "(d * x + c) * F^(a + b * (d * x + c)^(-2)) / d + 2b * (-1 / d) * (Erfi((sqrt(b) * sqrt(ln(F))) / (d * x + c)) * sqrt(pi) * F^a) / (2sqrt(b) * sqrt(ln(F))) * ln(F)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 340,
+      "source": "{F^(a + b/(c + d*x)^3)*(c + d*x)^m, x, 1, (F^a*(c + d*x)^(1 + m)*Gamma[(1/3)*(-1 - m), -((b*Log[F])/(c + d*x)^3)]*(-((b*Log[F])/(c + d*x)^3))^((1 + m)/3))/(3*d)}",
+      "outcome": "solved-formal",
+      "ms": 195,
+      "result": "-(-(F^a * (d * x + c)^(m + 1)) / (3d * (-(b * ln(F) * (d * x + c)^(-3)))^(-1/3 * (m + 1))) * Gamma(-1/3 * (m + 1), -(b * ln(F) * (d * x + c)^(-3))))",
+      "detail": "region-phase formal match: passes=3 phase-fails=17; x=0.31 {\"F\":1.0980578169692308,\"a\":2.7898927581263706,\"b\":2.9852054147049785,\"c\":2.89687712630257,\"d\":2.947528959601186,\"m\":0.6945514819817618} dF=-0.6685+-3.24i f=3.304; x=0.73 {\"F\":1.0980578169692308,\"a\":2.7898927581263706,\"b\":2.9852054147049785,\"c\":2.89687712630257,\"d\":2.947528959601186,\"m\":0.6945514819817618} dF=-0.8104+-3.92i f=4.006"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 348,
+      "source": "{F^(a + b/(c + d*x)^3)/(c + d*x)^7, x, 2, F^(a + b/(c + d*x)^3)/(3*b^2*d*Log[F]^2) - F^(a + b/(c + d*x)^3)/(3*b*d*(c + d*x)^3*Log[F])}",
+      "outcome": "solved-correct",
+      "ms": 184,
+      "result": "-(F^(a + b * (d * x + c)^(-3)) * (d * x + c)^(-3)) / (3b * d * ln(F)) - 1 / (b * ln(F)) * (-(F^(a + b * (d * x + c)^(-3)) * (d * x + c)^(-3)) / (3b * d * ln(F) * (d * x + c)^(-3)))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 360,
+      "source": "{F^(a + b*(c + d*x)^n)*(c + d*x)^3, x, 1, -((F^a*(c + d*x)^4*Gamma[4/n, (-b)*(c + d*x)^n*Log[F]])/(((-b)*(c + d*x)^n*Log[F])^(4/n)*(d*n)))}",
+      "outcome": "solved-correct",
+      "ms": 114,
+      "result": "-((d * x + c)^4 * F^a) / (d * n * (-(b * ln(F) * (d * x + c)^n))^(4 / n)) * Gamma(4 / n, -(b * ln(F) * (d * x + c)^n))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 370,
+      "source": "{F^(a + b*(c + d*x)^n)*(c + d*x)^(4*n - 1), x, 4, -((6*F^(a + b*(c + d*x)^n))/(b^4*d*n*Log[F]^4)) + (6*F^(a + b*(c + d*x)^n)*(c + d*x)^n)/(b^3*d*n*Log[F]^3) - (3*F^(a + b*(c + d*x)^n)*(c + d*x)^(2*n))/(b^2*d*n*Log[F]^2) + (F^(a + b*(c + d*x)^n)*(c + d*x)^(3*n))/(b*d*n*Log[F])}",
+      "outcome": "solved-correct",
+      "ms": 496,
+      "result": "-(4n - n) / (b * n * ln(F)) * (-(3n - n) / (b * n * ln(F)) * (-(2n - n) / (b * n * ln(F)) * (F^(a + b * (d * x + c)^n) * (d * x + c)^n) / (b * d * n * ln(F) * (d * x + c)^n) + (F^(a + b * (d * x + c)^n) * (d * x + c)^(2n - n)) / (b * d * n * ln(F))) + (F^(a + b * (d * x + c)^n) * (d * x + c)^(3n - n)) / (b * d * n * ln(F))) + (F^(a + b * (d * x + c)^n) * (d * x + c)^(4n - n)) / (b * d * n * ln(F))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 372,
+      "source": "{F^(a + b*(c + d*x)^n)*(c + d*x)^(2*n - 1), x, 2, -(F^(a + b*(c + d*x)^n)/(b^2*d*n*Log[F]^2)) + (F^(a + b*(c + d*x)^n)*(c + d*x)^n)/(b*d*n*Log[F])}",
+      "outcome": "solved-formal",
+      "ms": 203,
+      "result": "-(2n - n) / (b * n * ln(F)) * (F^(a + b * (d * x + c)^n) * (d * x + c)^n) / (b * d * n * ln(F) * (d * x + c)^n) + (F^(a + b * (d * x + c)^n) * (d * x + c)^(2n - n)) / (b * d * n * ln(F))",
+      "detail": "region-phase formal match: passes=17 phase-fails=2; x=-0.87 {\"F\":1.810554837109521,\"a\":1.8429339864524081,\"b\":0.7415988949360326,\"c\":1.1587265856796876,\"d\":2.6630340319825336,\"n\":2.8913092690054327} dF=-3.074 f=3.074; x=-1.31 {\"F\":1.810554837109521,\"a\":1.8429339864524081,\"b\":0.7415988949360326,\"c\":1.1587265856796876,\"d\":2.6630340319825336,\"n\":2.8913092690054327} dF=-1.062 f=1.062"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 384,
+      "source": "{F^(a + b*(c + d*x)^2)*(e + f*x)^3, x, 8, -((f^3*F^(a + b*(c + d*x)^2))/(2*b^2*d^4*Log[F]^2)) - (3*f^2*(d*e - c*f)*F^a*Sqrt[Pi]*Erfi[Sqrt[b]*(c + d*x)*Sqrt[Log[F]]])/(4*b^(3/2)*d^4*Log[F]^(3/2)) + (3*f*(d*e - c*f)^2*F^(a + b*(c + d*x)^2))/(2*b*d^4*Log[F]) + (3*f^2*(d*e - c*f)*F^(a + b*(c + d*x)^2)*(c + d*x))/(2*b*d^4*Log[F]) + (f^3*F^(a + b*(c + d*x)^2)*(c + d*x)^2)/(2*b*d^4*Log[F]) + ((d*e - c*f)^3*F^a*Sqrt[Pi]*Erfi[Sqrt[b]*(c + d*x)*Sqrt[Log[F]]])/(2*Sqrt[b]*d^4*Sqrt[Log[F]])}",
+      "outcome": "solved-correct",
+      "ms": 1300,
+      "result": "-(-b * \"e_var\" * d^2 + b * c * d * f) / (b * d^2) * (-(-b * \"e_var\" * d^2 + b * c * d * f) / (b * d^2) * (-(-b * \"e_var\" * d^2 + b * c * d * f) / (b * d^2) * (Erfi(sqrt(ln(F)) / (d * sqrt(b)) * (b * x * d^2 + b * c * d)) * sqrt(pi) * F^0) / (2b * sqrt(ln(F)) / (d * sqrt(b)) * d^2) * F^(b * c^2 - b * c^2 + a) + (f * F^(b * d^2 * x^2 + 2b * c * d * x + b * c^2 + a)) / (2b * ln(F) * d^2)) + (f * (f * x + \"e_var\") * F^(b * d^2 * x^2 + 2b * c * d * x + b * c^2 + a)) / (2b * ln(F) * d^2) - f^2 / (2b * ln(F) * d^2) * (Erfi(sqrt(ln(F)) / (d * sqrt(b)) * (b * x * d^2 + b * c * d)) * sqrt(pi) * F^0) / (2b * sqrt(ln(F)) / (d * sqrt(b)) * d^2) * F^(b * c^2 - b * c^2 + a)) - f^2 / (b * ln(F) * d^2) * (-(-b * \"e_var\" * d^2 + b * c * d * f) / (b * d^2) * (Erfi(sqrt(ln(F)) / (d * sqrt(b)) * (b * x * d^2 + b * c * d)) * sqrt(pi) * F^0) / (2b * sqrt(ln(F)) / (d * sqrt(b)) * d^2) * F^(b * c^2 - b * c^2 + a) + (f * F^(b * d^2 * x^2 + 2b * c * d * x + b * c^2 + a)) / (2b * ln(F) * d^2)) + (f * (f * x + \"e_var\")^2 * F^(b * d^2 * x^2 + 2b * c * d * x + b * c^2 + a)) / (2b * ln(F) * d^2)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 389,
+      "source": "{F^(a + b*(c + d*x)^2)/(e + f*x)^2, x, 2, -(F^(a + b*(c + d*x)^2)/(f*(e + f*x))) + (Sqrt[b]*d*F^a*Sqrt[Pi]*Erfi[Sqrt[b]*(c + d*x)*Sqrt[Log[F]]]*Sqrt[Log[F]])/f^2 - (2*b*d*(d*e - c*f)*Log[F]*Unintegrable[F^(a + b*(c + d*x)^2)/(e + f*x), x])/f^2}",
+      "outcome": "unsolved",
+      "ms": 351,
+      "result": "(-2b * d * (d * \"e_var\" - c * f) * ln(F)) / f^2 * int(1 / (f * x + \"e_var\") * F^(b * (d * x + c)^2 + a) dx) - (-2b * ln(F) * d^2) / f^2 * (Erfi((d * x + c) * sqrt(b) * sqrt(ln(F))) * sqrt(pi) * F^a) / (2d * sqrt(b) * sqrt(ln(F))) - (f * 1 / (f * x + \"e_var\") * F^(b * (d * x + c)^2 + a)) / f^2"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 394,
+      "source": "{E^(e*(c + d*x)^3)*(a + b*x)^0, x, 1, -(((c + d*x)*Gamma[1/3, (-e)*(c + d*x)^3])/(3*d*((-e)*(c + d*x)^3)^(1/3)))}",
+      "outcome": "solved-wrong",
+      "ms": 37,
+      "result": "-(-(d * x + c) * Gamma(1/3, -(\"e_var\" * (d * x + c)^3)) / (3d * root(3)(\"e_var\" * (d * x + c)^3)))",
+      "detail": "worst rel err 8.66e-1; x=0.31 {\"e_var\":0.6276924693956971,\"c\":2.4966390170156956,\"d\":2.46656703366898,\"a\":0.6660605624783784,\"b\":2.2009647516533732} dF=-1.428e+9+-2.47e+9i f=2.856e+9; x=0.73 {\"e_var\":0.6276924693956971,\"c\":2.4966390170156956,\"d\":2.46656703366898,\"a\":0.6660605624783784,\"b\":2.2009647516533732} dF=-2.143e+21+-3.71e+21i f=4.286e+21"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 396,
+      "source": "{E^(e*(c + d*x)^3)/(a + b*x)^2, x, 5, -(E^(e*(c + d*x)^3)/(b*(a + b*x))) - (d*(b*c - a*d)*e*(c + d*x)*Gamma[1/3, (-e)*(c + d*x)^3])/(b^3*((-e)*(c + d*x)^3)^(1/3)) - (d*e*(c + d*x)^2*Gamma[2/3, (-e)*(c + d*x)^3])/(b^2*((-e)*(c + d*x)^3)^(2/3)) + (3*d*(b*c - a*d)^2*e*Unintegrable[E^(e*(c + d*x)^3)/(a + b*x), x])/b^3}",
+      "outcome": "unsolved",
+      "ms": 194,
+      "result": "-(-3d * \"e_var\") / b * int(1 / (b * x + a) * (d * x + c)^2 * e^(\"e_var\" * (d * x + c)^3) dx) - (1 / (b * x + a) * e^(\"e_var\" * (d * x + c)^3)) / b"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 416,
+      "source": "{E^(e/(c + d*x)^3)*(a + b*x)^3, x, 7, -((b^2*(b*c - a*d)*E^(e/(c + d*x)^3)*(c + d*x)^3)/d^4) + (b^2*(b*c - a*d)*e*ExpIntegralEi[e/(c + d*x)^3])/d^4 + (b^3*(-(e/(c + d*x)^3))^(4/3)*(c + d*x)^4*Gamma[-(4/3), -(e/(c + d*x)^3)])/(3*d^4) + (b*(b*c - a*d)^2*(-(e/(c + d*x)^3))^(2/3)*(c + d*x)^2*Gamma[-(2/3), -(e/(c + d*x)^3)])/d^4 - ((b*c - a*d)^3*(-(e/(c + d*x)^3))^(1/3)*(c + d*x)*Gamma[-(1/3), -(e/(c + d*x)^3)])/(3*d^4)}",
+      "outcome": "unsolved",
+      "ms": 95,
+      "result": "int((b * x + a)^3 * e^(\"e_var\" / (d * x + c)^3) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 434,
+      "source": "{x*E^(a + b*x - c*x^2), x, 3, -(E^(a + b*x - c*x^2)/(2*c)) - (b*E^(a + b^2/(4*c))*Sqrt[Pi]*Erf[(b - 2*c*x)/(2*Sqrt[c])])/(4*c^(3/2))}",
+      "outcome": "solved-correct",
+      "ms": 117,
+      "result": "--b / (2c) * (-(Erf(1 / (2sqrt(c)) * (-2c * x + b)) * sqrt(pi)) / (2c * 1 / sqrt(c))) * e^(b^2 / (4c) + a) - (e^(-c * x^2 + b * x + a)) / (2c)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 441,
+      "source": "{E^((a + b*x)*(c + d*x)), x, 3, (Sqrt[Pi]*Erfi[(b*c + a*d + 2*b*d*x)/(2*Sqrt[b]*Sqrt[d])])/(E^((b*c - a*d)^2/(4*b*d))*(2*Sqrt[b]*Sqrt[d]))}",
+      "outcome": "unsolved",
+      "ms": 24,
+      "result": "int(e^(b * x + a) * (d * x + c) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 444,
+      "source": "{(d + e*x)^3*f^(a + b*x + c*x^2), x, 10, -((e^3*f^(a + b*x + c*x^2))/(2*c^2*Log[f]^2)) - (3*e^2*(2*c*d - b*e)*f^(a - b^2/(4*c))*Sqrt[Pi]*Erfi[((b + 2*c*x)*Sqrt[Log[f]])/(2*Sqrt[c])])/(8*c^(5/2)*Log[f]^(3/2)) + (e*(2*c*d - b*e)^2*f^(a + b*x + c*x^2))/(8*c^3*Log[f]) + (e*(2*c*d - b*e)*f^(a + b*x + c*x^2)*(d + e*x))/(4*c^2*Log[f]) + (e*f^(a + b*x + c*x^2)*(d + e*x)^2)/(2*c*Log[f]) + ((2*c*d - b*e)^3*f^(a - b^2/(4*c))*Sqrt[Pi]*Erfi[((b + 2*c*x)*Sqrt[Log[f]])/(2*Sqrt[c])])/(16*c^(7/2)*Sqrt[Log[f]])}",
+      "outcome": "solved-correct",
+      "ms": 705,
+      "result": "-(-2c * d + b * \"e_var\") / (2c) * (-(-2c * d + b * \"e_var\") / (2c) * (-(-2c * d + b * \"e_var\") / (2c) * (Erfi(sqrt(ln(f)) / (2sqrt(c)) * (2c * x + b)) * sqrt(pi) * f^0) / (2c * sqrt(ln(f)) / sqrt(c)) * f^(-(b^2) / (4c) + a) + (\"e_var\" * f^(c * x^2 + b * x + a)) / (2c * ln(f))) + (\"e_var\" * (\"e_var\" * x + d) * f^(c * x^2 + b * x + a)) / (2c * ln(f)) - \"e_var\"^2 / (2c * ln(f)) * (Erfi(sqrt(ln(f)) / (2sqrt(c)) * (2c * x + b)) * sqrt(pi) * f^0) / (2c * sqrt(ln(f)) / sqrt(c)) * f^(-(b^2) / (4c) + a)) - \"e_var\"^2 / (c * ln(f)) * (-(-2c * d + b * \"e_var\") / (2c) * (Erfi(sqrt(ln(f)) / (2sqrt(c)) * (2c * x + b)) * sqrt(pi) * f^0) / (2c * sqrt(ln(f)) / sqrt(c)) * f^(-(b^2) / (4c) + a) + (\"e_var\" * f^(c * x^2 + b * x + a)) / (2c * ln(f))) + (\"e_var\" * (\"e_var\" * x + d)^2 * f^(c * x^2 + b * x + a)) / (2c * ln(f))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 446,
+      "source": "{(d + e*x)*f^(a + b*x + c*x^2), x, 3, (e*f^(a + b*x + c*x^2))/(2*c*Log[f]) + ((2*c*d - b*e)*f^(a - b^2/(4*c))*Sqrt[Pi]*Erfi[((b + 2*c*x)*Sqrt[Log[f]])/(2*Sqrt[c])])/(4*c^(3/2)*Sqrt[Log[f]])}",
+      "outcome": "solved-correct",
+      "ms": 149,
+      "result": "-(-2c * d + b * \"e_var\") / (2c) * (Erfi(sqrt(ln(f)) / (2sqrt(c)) * (2c * x + b)) * sqrt(pi) * f^0) / (2c * sqrt(ln(f)) / sqrt(c)) * f^(-(b^2) / (4c) + a) + (\"e_var\" * f^(c * x^2 + b * x + a)) / (2c * ln(f))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 448,
+      "source": "{f^(a + b*x + c*x^2)/(d + e*x)^2, x, 3, -(f^(a + b*x + c*x^2)/(e*(d + e*x))) + (Sqrt[c]*f^(a - b^2/(4*c))*Sqrt[Pi]*Erfi[((b + 2*c*x)*Sqrt[Log[f]])/(2*Sqrt[c])]*Sqrt[Log[f]])/e^2 - ((2*c*d - b*e)*Unintegrable[f^(a + b*x + c*x^2)/(d + e*x), x]*Log[f])/e^2}",
+      "outcome": "unsolved",
+      "ms": 103,
+      "result": "--(-2c * d + b * \"e_var\") * ln(f) / \"e_var\"^2 * int(1 / (\"e_var\" * x + d) * f^(c * x^2 + b * x + a) dx) - (-2c * ln(f)) / \"e_var\"^2 * (Erfi(sqrt(ln(f)) / (2sqrt(c)) * (2c * x + b)) * sqrt(pi) * f^0) / (2c * sqrt(ln(f)) / sqrt(c)) * f^(-(b^2) / (4c) + a) - (1 / (\"e_var\" * x + d) * f^(c * x^2 + b * x + a)) / \"e_var\""
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 457,
+      "source": "{(b + 2*c*x)^2*f^(b*x + c*x^2), x, 3, -((Sqrt[c]*Sqrt[Pi]*Erfi[((b + 2*c*x)*Sqrt[Log[f]])/(2*Sqrt[c])])/(f^(b^2/(4*c))*Log[f]^(3/2))) + (f^(b*x + c*x^2)*(b + 2*c*x))/Log[f]}",
+      "outcome": "solved-correct",
+      "ms": 170,
+      "result": "(c * (2c * x + b) * f^(c * x^2 + b * x)) / (c * ln(f)) - (2c^2) / (c * ln(f)) * (Erfi(sqrt(ln(f)) / (2sqrt(c)) * (2c * x + b)) * sqrt(pi) * f^0) / (2c * sqrt(ln(f)) / sqrt(c)) * f^(-(b^2) / (4c))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 459,
+      "source": "{f^(b*x + c*x^2)/(b + 2*c*x), x, 1, ExpIntegralEi[((b + 2*c*x)^2*Log[f])/(4*c)]/(f^(b^2/(4*c))*(4*c))}",
+      "outcome": "solved-correct",
+      "ms": 56,
+      "result": "1 / (4c) * ExpIntegralEi((ln(f) * (2c * x + b)^2) / (4c)) * f^(-(b^2) / (4c))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 468,
+      "source": "{E^(d + e*x)/(x^1*(a + b*x + c*x^2)), x, 7, (E^d*ExpIntegralEi[e*x])/a - ((1 + b/Sqrt[b^2 - 4*a*c])*E^(d - ((b - Sqrt[b^2 - 4*a*c])*e)/(2*c))*ExpIntegralEi[(e*(b - Sqrt[b^2 - 4*a*c] + 2*c*x))/(2*c)])/(2*a) - ((1 - b/Sqrt[b^2 - 4*a*c])*E^(d - ((b + Sqrt[b^2 - 4*a*c])*e)/(2*c))*ExpIntegralEi[(e*(b + Sqrt[b^2 - 4*a*c] + 2*c*x))/(2*c)])/(2*a)}",
+      "outcome": "unsolved",
+      "ms": 112,
+      "result": "int(e^(\"e_var\" * x + d) / (x * (c * x^2 + b * x + a)) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 473,
+      "source": "{4^x/(a + b*2^x), x, 3, 2^x/(b*Log[2]) - (a*Log[a + 2^x*b])/(b^2*Log[2])}",
+      "outcome": "solved-correct",
+      "ms": 44,
+      "result": "1 / ln(2) * (-(a * ln(b^2 * 2^x + a * b)) / b^2 + 2^x / b)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 476,
+      "source": "{2^(2*x)/(a - b*2^x), x, 3, -(2^x/(b*Log[2])) - (a*Log[a - 2^x*b])/(b^2*Log[2])}",
+      "outcome": "solved-correct",
+      "ms": 47,
+      "result": "1 / ln(2) * (-(a * ln(-b^2 * 2^x + a * b)) / b^2 - (2^x) / b)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 489,
+      "source": "{2^x/Sqrt[a + b*4^x], x, 3, ArcTanh[(2^x*Sqrt[b])/Sqrt[a + 4^x*b]]/(Sqrt[b]*Log[2])}",
+      "outcome": "solved-correct",
+      "ms": 41,
+      "result": "1 / ln(2) * artanh((2^x * sqrt(b)) / sqrt(a + b * 2^(2x))) / sqrt(b)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 501,
+      "source": "{4^x/Sqrt[a + b/2^x], x, 5, (2^(-1 + 2*x)*Sqrt[a + b/2^x])/(a*Log[2]) - (3*2^(-2 + x)*b*Sqrt[a + b/2^x])/(a^2*Log[2]) + (3*b^2*ArcTanh[Sqrt[a + b/2^x]/Sqrt[a]])/(4*a^(5/2)*Log[2])}",
+      "outcome": "solved-correct",
+      "ms": 380,
+      "result": "-1 / ln(2) * (3(-(artanh(sqrt(a + b * 2^(-x)) / sqrt(a)) * b^2) / a^(3/2) + (b * 2^x * sqrt(a + b * 2^(-x))) / a)) / (4a) - (2^(2x) * sqrt(a + b * 2^(-x))) / (2a)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 506,
+      "source": "{1/(2 + 3*E^x + E^(2*x)), x, 6, x/2 - Log[1 + E^x] + (1/2)*Log[2 + E^x]}",
+      "outcome": "solved-correct",
+      "ms": 28,
+      "result": "1/2 * x + 1/2 * ln(e^x + 2) - ln(e^x + 1)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 530,
+      "source": "{x/(2 + E^(-x) + E^x), x, 7, x - x/(1 + E^x) - Log[1 + E^x]}",
+      "outcome": "unsolved",
+      "ms": 68,
+      "result": "int(x / (e^(-x) + e^x + 2) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 541,
+      "source": "{x/(a + b*f^(-c - d*x) + c*f^(c + d*x)), x, 8, (x*Log[1 + (2*c*f^(c + d*x))/(a - Sqrt[a^2 - 4*b*c])])/(Sqrt[a^2 - 4*b*c]*d*Log[f]) - (x*Log[1 + (2*c*f^(c + d*x))/(a + Sqrt[a^2 - 4*b*c])])/(Sqrt[a^2 - 4*b*c]*d*Log[f]) + PolyLog[2, -((2*c*f^(c + d*x))/(a - Sqrt[a^2 - 4*b*c]))]/(Sqrt[a^2 - 4*b*c]*d^2*Log[f]^2) - PolyLog[2, -((2*c*f^(c + d*x))/(a + Sqrt[a^2 - 4*b*c]))]/(Sqrt[a^2 - 4*b*c]*d^2*Log[f]^2)}",
+      "outcome": "unsolved",
+      "ms": 56,
+      "result": "int(x / (a + b * f^(-d * x - c) + c * f^(d * x + c)) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 558,
+      "source": "{(F^(Sqrt[1 - a*x]/Sqrt[1 + a*x]))^3/(1 - a^2*x^2), x, 2, -(ExpIntegralEi[(3*Sqrt[1 - a*x]*Log[F])/Sqrt[1 + a*x]]/a)}",
+      "outcome": "solved-correct",
+      "ms": 131,
+      "result": "-(a * a) / (a * a^2) * ExpIntegralEi((3ln(F) * sqrt(1 - a * x)) / sqrt(a * x + 1))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 569,
+      "source": "{a^x*b^x*c^x, x, 3, (a^x*b^x*c^x)/(Log[a] + Log[b] + Log[c])}",
+      "outcome": "solved-correct",
+      "ms": 6,
+      "result": "(a * b * c)^x / ln(a * b * c)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 570,
+      "source": "{a^x/b^x, x, 2, a^x/(b^x*(Log[a] - Log[b]))}",
+      "outcome": "solved-correct",
+      "ms": 7,
+      "result": "(a / b)^x / ln(a / b)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 574,
+      "source": "{(f + g*x)^1*(d + e*E^(h + i*x))/(a + b*E^(h + i*x) + c*E^(2*h + 2*i*x)), x, 9, ((e - (2*c*d - b*e)/Sqrt[b^2 - 4*a*c])*(f + g*x)^2)/(2*(b + Sqrt[b^2 - 4*a*c])*g) + ((e + (2*c*d - b*e)/Sqrt[b^2 - 4*a*c])*(f + g*x)^2)/(2*(b - Sqrt[b^2 - 4*a*c])*g) - ((e + (2*c*d - b*e)/Sqrt[b^2 - 4*a*c])*(f + g*x)*Log[1 + (2*c*E^(h + i*x))/(b - Sqrt[b^2 - 4*a*c])])/((b - Sqrt[b^2 - 4*a*c])*i) - ((e - (2*c*d - b*e)/Sqrt[b^2 - 4*a*c])*(f + g*x)*Log[1 + (2*c*E^(h + i*x))/(b + Sqrt[b^2 - 4*a*c])])/((b + Sqrt[b^2 - 4*a*c])*i) - ((e + (2*c*d - b*e)/Sqrt[b^2 - 4*a*c])*g*PolyLog[2, -((2*c*E^(h + i*x))/(b - Sqrt[b^2 - 4*a*c]))])/((b - Sqrt[b^2 - 4*a*c])*i^2) - ((e - (2*c*d - b*e)/Sqrt[b^2 - 4*a*c])*g*PolyLog[2, -((2*c*E^(h + i*x))/(b + Sqrt[b^2 - 4*a*c]))])/((b + Sqrt[b^2 - 4*a*c])*i^2)}",
+      "outcome": "unsolved",
+      "ms": 281,
+      "result": "(-(2c) / (b - sqrt(b^2 - 4a * c)) * (g * x + f) / (2c * \"i_var\") * ln((2c * e^(\"i_var\" * x + h)) / (b - sqrt(b^2 - 4a * c)) + 1) - g / (2c * \"i_var\") * (x * ln(2c * 1 / (b - sqrt(b^2 - 4a * c)) * e^(\"i_var\" * x + h) + 1) + x * ln(2c * 1 / (b - sqrt(b^2 - 4a * c)) * e^(\"i_var\" * x + h) + 1) - x * ln(2c * 1 / (b - sqrt(b^2 - 4a * c)) * e^(\"i_var\" * x + h) + 1) - int((2c * \"i_var\" * x * e^(\"i_var\" * x + h)) / (b - sqrt(b^2 - 4a * c)) * (2c * 1 / (b - sqrt(b^2 - 4a * c)) * e^(\"i_var\" * x + h) + 1) dx)) + (g * x + f)^2 / (2g * (b - sqrt(b^2 - 4a * c)))) * ((2c * d - b * \"e_var\") / sqrt(b^2 - 4a * c) + \"e_var\") - (-(2c) / (b + sqrt(b^2 - 4a * c)) * (g * x + f) / (2c * \"i_var\") * ln((2c * e^(\"i_var\" * x + h)) / (b + sqrt(b^2 - 4a * c)) + 1) - g / (2c * \"i_var\") * (x * ln(2c * 1 / (b + sqrt(b^2 - 4a * c)) * e^(\"i_var\" * x + h) + 1) + x * ln(2c * 1 / (b + sqrt(b^2 - 4a * c)) * e^(\"i_var\" * x + h) + 1) - x * ln(2c * 1 / (b + sqrt(b^2 - 4a * c)) * e^(\"i_var\" * x + h) + 1) - int((2c * \"i_var\" * x * e^(\"i_var\" * x + h)) / (b + sqrt(b^2 - 4a * c)) * (2c * 1 / (b + sqrt(b^2 - 4a * c)) * e^(\"i_var\" * x + h) + 1) dx)) + (g * x + f)^2 / (2g * (b + sqrt(b^2 - 4a * c)))) * ((2c * d - b * \"e_var\") / sqrt(b^2 - 4a * c) - \"e_var\")"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 576,
+      "source": "{1/(f + g*x)^1*(d + e*E^(h + i*x))/(a + b*E^(h + i*x) + c*E^(2*h + 2*i*x)), x, 2, d*CannotIntegrate[1/((a + b*E^(h + i*x) + c*E^(2*h + 2*i*x))*(f + g*x)), x] + e*CannotIntegrate[E^(h + i*x)/((a + b*E^(h + i*x) + c*E^(2*h + 2*i*x))*(f + g*x)), x]}",
+      "outcome": "unsolved",
+      "ms": 114,
+      "result": "int((1 / (g * x + f) * (d + \"e_var\" * e^(\"i_var\" * x + h))) / (a + b * e^(\"i_var\" * x + h) + c * e^(2 * \"i_var\" * x + 2h)) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 584,
+      "source": "{F^(a + b*Log[c + d*x^n])/x^3, x, 4, -((F^a*(c + d*x^n)^(b*Log[F])*Hypergeometric2F1[-(2/n), (-b)*Log[F], -((2 - n)/n), -((d*x^n)/c)])/((1 + (d*x^n)/c)^(b*Log[F])*(2*x^2)))}",
+      "outcome": "solved-correct",
+      "ms": 232,
+      "result": "-(Hypergeometric2F1(-(b * ln(F)), -2 / n, -2 / n + 1, -(d * 1 / c * x^n)) * F^a * (c + d * x^n)^(b * ln(F)) * ((d * x^n) / c + 1)^(-(b * ln(F)))) / (2x^2)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 587,
+      "source": "{(d*g + e*g*x)^m*F^(f*(a + b*Log[c*(d + e*x)^n]^2)), x, 3, (F^(a*f)*Sqrt[Pi]*(d*g + e*g*x)^(1 + m)*Erfi[(1 + m + 2*b*f*n*Log[F]*Log[c*(d + e*x)^n])/(2*Sqrt[b]*Sqrt[f]*n*Sqrt[Log[F]])])/(E^((1 + m)^2/(4*b*f*n^2*Log[F]))*(c*(d + e*x)^n)^((1 + m)/n)*(2*Sqrt[b]*e*Sqrt[f]*g*n*Sqrt[Log[F]]))}",
+      "outcome": "solved-correct",
+      "ms": 357,
+      "result": "(Erfi((2b * f * ln(F) * ln(c * (\"e_var\" * x + d)^n) + (m + 1) / n) / (2sqrt(b) * sqrt(f) * sqrt(ln(F)))) * e^(-((m + 1)^2) / (4b * f * ln(F) * n^2) + a * f * ln(F)) * sqrt(pi)) / (2sqrt(b) * sqrt(f) * sqrt(ln(F))) * (\"e_var\" * g * x + d * g)^(m + 1) / (\"e_var\" * g * n * (c * (\"e_var\" * x + d)^n)^((m + 1) / n))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 592,
+      "source": "{F^(f*(a + b*Log[c*(d + e*x)^n]^2))/(d*g + e*g*x)^2, x, 3, If[$VersionNumber>=8, -((F^(a*f)*Sqrt[Pi]*(c*(d + e*x)^n)^(1/n)*Erfi[(1 - 2*b*f*n*Log[F]*Log[c*(d + e*x)^n])/(2*Sqrt[b]*Sqrt[f]*n*Sqrt[Log[F]])])/(E^(1/(4*b*f*n^2*Log[F]))*(2*Sqrt[b]*e*Sqrt[f]*g^2*n*(d + e*x)*Sqrt[Log[F]]))), (F^(a*f)*Sqrt[Pi]*(c*(d + e*x)^n)^(1/n)*Erfi[-((1 - 2*b*f*n*Log[F]*Log[c*(d + e*x)^n])/(2*Sqrt[b]*Sqrt[f]*n*Sqrt[Log[F]]))])/(E^(1/(4*b*f*n^2*Log[F]))*(2*Sqrt[b]*e*Sqrt[f]*g^2*n*(d + e*x)*Sqrt[Log[F]]))]}",
+      "outcome": "solved-correct",
+      "ms": 322,
+      "result": "1 / (\"e_var\" * g * n * (\"e_var\" * g * x + d * g) * (c * (\"e_var\" * x + d)^n)^(-1 / n)) * (Erfi((2b * f * ln(F) * ln(c * (\"e_var\" * x + d)^n) - 1 / n) / (2sqrt(b) * sqrt(f) * sqrt(ln(F)))) * e^(a * f * ln(F) - 1 / (4b * f * ln(F) * n^2)) * sqrt(pi)) / (2sqrt(b) * sqrt(f) * sqrt(ln(F)))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 593,
+      "source": "{F^(f*(a + b*Log[c*(d + e*x)^n]^2))/(d*g + e*g*x)^3, x, 3, If[$VersionNumber>=8, -((F^(a*f)*Sqrt[Pi]*(c*(d + e*x)^n)^(2/n)*Erfi[(1 - b*f*n*Log[F]*Log[c*(d + e*x)^n])/(Sqrt[b]*Sqrt[f]*n*Sqrt[Log[F]])])/(E^(1/(b*f*n^2*Log[F]))*(2*Sqrt[b]*e*Sqrt[f]*g^3*n*(d + e*x)^2*Sqrt[Log[F]]))), (F^(a*f)*Sqrt[Pi]*(c*(d + e*x)^n)^(2/n)*Erfi[-((1 - b*f*n*Log[F]*Log[c*(d + e*x)^n])/(Sqrt[b]*Sqrt[f]*n*Sqrt[Log[F]]))])/(E^(1/(b*f*n^2*Log[F]))*(2*Sqrt[b]*e*Sqrt[f]*g^3*n*(d + e*x)^2*Sqrt[Log[F]]))]}",
+      "outcome": "solved-correct",
+      "ms": 339,
+      "result": "(Erfi((b * f * ln(F) * ln(c * (\"e_var\" * x + d)^n) - 1 / n) / (sqrt(b) * sqrt(f) * sqrt(ln(F)))) * e^(a * f * ln(F) - 1 / (b * f * ln(F) * n^2)) * sqrt(pi)) / (2sqrt(b) * sqrt(f) * sqrt(ln(F))) * (\"e_var\" * g * x + d * g)^(-2) / (\"e_var\" * g * n * (c * (\"e_var\" * x + d)^n)^(-2 / n))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 602,
+      "source": "{(d*g + e*g*x)^m*F^(f*(a + b*Log[c*(d + e*x)^n])^2), x, 4, (F^(a^2*f)*Sqrt[Pi]*(d + e*x)*(d*g + e*g*x)^m*Erfi[(1 + m + 2*a*b*f*n*Log[F] + 2*b^2*f*n*Log[F]*Log[c*(d + e*x)^n])/(2*b*Sqrt[f]*n*Sqrt[Log[F]])])/(E^((1 + m + 2*a*b*f*n*Log[F])^2/(4*b^2*f*n^2*Log[F]))*(c*(d + e*x)^n)^((1 + m)/n)*(2*b*e*Sqrt[f]*n*Sqrt[Log[F]]))}",
+      "outcome": "solved-correct",
+      "ms": 651,
+      "result": "(Erfi(((2a * b * f * n * ln(F) + m + 1) / n + 2f * ln(F) * ln(c * (\"e_var\" * x + d)^n) * b^2) / (2b * sqrt(f) * sqrt(ln(F)))) * e^(f * ln(F) * a^2 - ((2a * b * f * n * ln(F) + m + 1)^2) / (4f * ln(F) * b^2 * n^2)) * sqrt(pi)) / (2b * sqrt(f) * sqrt(ln(F))) * ((c * (\"e_var\" * x + d)^n)^(2a * b * f * ln(F)) * (\"e_var\" * g * x + d * g)^m) / (\"e_var\" * x + d)^(2a * b * f * n * ln(F) + m) * (\"e_var\" * x + d)^(2a * b * f * n * ln(F) + m + 1) / (\"e_var\" * n * (c * (\"e_var\" * x + d)^n)^((2a * b * f * n * ln(F) + m + 1) / n))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 617,
+      "source": "{F^(a + b*x + c*x^3)*(b + 3*c*x^2), x, 1, F^(a + b*x + c*x^3)/Log[F]}",
+      "outcome": "unsolved",
+      "ms": 66,
+      "result": "int((3c * x^2 + b) * F^(c * x^3 + b * x + a) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 621,
+      "source": "{E^(a + b*x + c*x^2)*(a + b*x + c*x^2)^2*(b + 2*c*x), x, 4, 2*E^(a + b*x + c*x^2) - 2*E^(a + b*x + c*x^2)*(a + b*x + c*x^2) + E^(a + b*x + c*x^2)*(a + b*x + c*x^2)^2}",
+      "outcome": "unsolved",
+      "ms": 335,
+      "result": "int((2c * x + b) * (c * x^2 + b * x + a)^2 * e^(c * x^2 + b * x + a) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 647,
+      "source": "{(-1 + E^(2*x))/(3 + E^(2*x)), x, 3, -(x/3) + (2/3)*Log[3 + E^(2*x)]}",
+      "outcome": "solved-correct",
+      "ms": 37,
+      "result": "e^(2x) / (2e^(2x)) * (-2/3 * x + 4/3 * ln(e^(2x) + 3))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 648,
+      "source": "{E^x/Sqrt[1 - E^(2*x)], x, 2, ArcSin[E^x]}",
+      "outcome": "solved-correct",
+      "ms": 17,
+      "result": "arcsin(e^x)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 650,
+      "source": "{1/(-3*E^x + E^(2*x)), x, 3, 1/(E^x*3) - x/9 + (1/9)*Log[3 - E^x]}",
+      "outcome": "solved-correct",
+      "ms": 17,
+      "result": "-1/9 * x + 1/9 * ln(e^x - 3) + 1/3 * e^(-x)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 660,
+      "source": "{E^x*Sqrt[9 + E^(2*x)], x, 3, (1/2)*E^x*Sqrt[9 + E^(2*x)] + (9/2)*ArcSinh[E^x/3]}",
+      "outcome": "solved-correct",
+      "ms": 31,
+      "result": "9/2 * arsinh(1/3 * e^x) + 1/2 * e^x * sqrt(e^(2x) + 9)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 661,
+      "source": "{E^x*Sqrt[1 + E^(2*x)], x, 3, (1/2)*E^x*Sqrt[1 + E^(2*x)] + ArcSinh[E^x]/2}",
+      "outcome": "solved-correct",
+      "ms": 28,
+      "result": "1/2 * arsinh(e^x) + 1/2 * e^x * sqrt(e^(2x) + 1)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 665,
+      "source": "{E^x/(16 - E^(2*x)), x, 2, ArcTanh[E^x/4]/4}",
+      "outcome": "solved-correct",
+      "ms": 18,
+      "result": "1/4 * artanh(1/4 * e^x)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 667,
+      "source": "{E^(4*x)/Sqrt[16 + E^(8*x)], x, 2, ArcSinh[E^(4*x)/4]/4}",
+      "outcome": "solved-correct",
+      "ms": 21,
+      "result": "1/4 * arsinh(1/4 * e^(4x))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 677,
+      "source": "{Cos[3*x]/E^x, x, 1, ((-(1/10))*Cos[3*x])/E^x + ((3/10)*Sin[3*x])/E^x}",
+      "outcome": "unsolved",
+      "ms": 17,
+      "result": "int(cos(3x) / e^x dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 684,
+      "source": "{E^x*Sec[1 - E^x]^3, x, 3, (-(1/2))*ArcTanh[Sin[1 - E^x]] - (1/2)*Sec[1 - E^x]*Tan[1 - E^x]}",
+      "outcome": "unsolved",
+      "ms": 21,
+      "result": "int(e^x * sec(1 - e^x)^3 dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 687,
+      "source": "{E^(2*x)/(1 + E^x)^(1/3), x, 3, (-(3/2))*(1 + E^x)^(2/3) + (3/5)*(1 + E^x)^(5/3)}",
+      "outcome": "solved-correct",
+      "ms": 28,
+      "result": "-3/2 * (e^x + 1)^(2/3) + 3/5 * (e^x + 1)^(5/3)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 694,
+      "source": "{x^(-2 - x^(-1))*(1 - Log[x]), x, -2, -x^(-x^(-1))}",
+      "outcome": "unsolved",
+      "ms": 29,
+      "result": "int((1 - ln(x)) * x^(-1 / x - 2) dx)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 698,
+      "source": "{1/Sqrt[a + b*E^(c + d*x)], x, 3, -((2*ArcTanh[Sqrt[a + b*E^(c + d*x)]/Sqrt[a]])/(Sqrt[a]*d))}",
+      "outcome": "solved-correct",
+      "ms": 167,
+      "result": "(-2artanh(sqrt(a + b * e^(d * x + c)) / sqrt(a))) / sqrt(a) * e^(d * x + c) / (d * e^(d * x + c))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 721,
+      "source": "{1/(-E^(-x) + E^x)^2, x, 2, 1/(2*(1 - E^(2*x)))}",
+      "outcome": "solved-correct",
+      "ms": 12,
+      "result": "-1 / (2(e^(2x) - 1))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 731,
+      "source": "{E^(3*x)/Sqrt[25 + 16*E^(2*x)], x, 3, (1/32)*E^x*Sqrt[25 + 16*E^(2*x)] - (25/128)*ArcSinh[(4*E^x)/5]}",
+      "outcome": "solved-correct",
+      "ms": 44,
+      "result": "-25/128 * arsinh(4/5 * e^x) + 1/32 * e^x * sqrt(16e^(2x) + 25)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 737,
+      "source": "{3^(1 + x^2)*x, x, 1, 3^(1 + x^2)/(2*Log[3])}",
+      "outcome": "solved-correct",
+      "ms": 17,
+      "result": "(x^2 * 3^(x^2 + 1)) / (2ln(3) * x^2)"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 739,
+      "source": "{2^x^(-1)/x^2, x, 1, -(2^x^(-1)/Log[2])}",
+      "outcome": "solved-correct",
+      "ms": 8,
+      "result": "-(1 / x * 2^(1 / x)) / (1 / x * ln(2))"
+    },
+    {
+      "file": "2 Exponentials/2.3 Exponential functions.m",
+      "index": 741,
+      "source": "{(2 - 3*x + x^2)/E^(4*x), x, 8, -(11/32)/E^(4*x) + ((5/8)*x)/E^(4*x) - ((1/4)*x^2)/E^(4*x)}",
+      "outcome": "solved-correct",
+      "ms": 64,
+      "result": "-1/4 * x^2 * e^(-4x) + 3/4 * x * e^(-4x) + 1/2 * (-1/4 * x * e^(-4x) - 1/16 * e^(-4x)) - 1/2 * e^(-4x) + 3/16 * e^(-4x)"
     }
   ]
 }

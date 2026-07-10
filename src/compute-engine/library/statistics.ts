@@ -8,6 +8,7 @@ import {
   erfi,
   erfInv,
 } from '../numerics/special-functions.js';
+import { erfComplex, erfiComplex } from '../numerics/numeric-complex.js';
 import { apply, shouldNumericize } from '../boxed-expression/apply.js';
 import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
 import {
@@ -117,25 +118,38 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     // (policy D2 — no exactness to preserve), and `numericApproximation`
     // (`.N()`) always numericizes. `shouldNumericize()` dispatches to the
     // machine kernel or, when the engine precision exceeds machine
-    // precision, the bignum kernel. Complex arguments stay symbolic (no
-    // complex kernel — previously the real part was used silently, which
-    // was incorrect).
+    // precision, the bignum kernel. Complex arguments route through the
+    // Γ(1/2, ·)-based complex kernel (Erf/Erfi); Erfc/ErfInv stay symbolic
+    // for complex (no complex kernel).
     //
     Erf: {
       description: 'Gauss error function',
       complexity: 7500,
       signature: '(number) -> number',
-      type: () => 'finite_real',
+      // Erf is entire and bounded on the reals (Erf(±∞) = ±1); a finite
+      // complex argument gives a finite complex value.
+      type: (ops) => {
+        const x = ops[0];
+        if (!x || x.isNaN) return 'number';
+        if (x.isReal === false)
+          return x.isFinite === true ? 'finite_complex' : 'number';
+        return 'finite_real';
+      },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
-        // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.Zero;
-        if (x.isInfinity) return x.isPositive ? ce.One : ce.NegativeOne;
+        if (!isNumber(x)) return undefined;
+        if (x.im === 0) {
+          // Exact special values, regardless of numericApproximation
+          if (x.isSame(0)) return ce.Zero;
+          if (x.isInfinity) return x.isPositive ? ce.One : ce.NegativeOne;
+        }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // Real args use the machine/bignum kernel; complex args the
+        // Γ(1/2, ·)-based kernel.
         return apply(
           x,
           (x) => erf(x),
-          (x) => bigErf(ce, x)
+          (x) => bigErf(ce, x),
+          erfComplex
         );
       },
     },
@@ -185,19 +199,31 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Imaginary error function: -i·Erf(i·x)',
       complexity: 7500,
       signature: '(number) -> number',
-      // Not finite_real: Erfi(±∞) = ±∞
-      type: () => 'real',
+      // Not finite_real on the reals: Erfi(±∞) = ±∞. A finite complex
+      // argument gives a finite complex value.
+      type: (ops) => {
+        const x = ops[0];
+        if (!x || x.isNaN) return 'number';
+        if (x.isReal === false)
+          return x.isFinite === true ? 'finite_complex' : 'number';
+        return x.isFinite === true ? 'finite_real' : 'real';
+      },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
-        // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.Zero;
-        if (x.isInfinity)
-          return x.isPositive ? ce.PositiveInfinity : ce.NegativeInfinity;
+        if (!isNumber(x)) return undefined;
+        if (x.im === 0) {
+          // Exact special values, regardless of numericApproximation
+          if (x.isSame(0)) return ce.Zero;
+          if (x.isInfinity)
+            return x.isPositive ? ce.PositiveInfinity : ce.NegativeInfinity;
+        }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // Real args use the machine/bignum kernel; complex args the
+        // Γ(1/2, ·)-based kernel.
         return apply(
           x,
           (x) => erfi(x),
-          (x) => bigErfi(ce, x)
+          (x) => bigErfi(ce, x),
+          erfiComplex
         );
       },
     },
