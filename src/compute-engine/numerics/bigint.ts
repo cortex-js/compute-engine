@@ -50,6 +50,12 @@ export function bigint(
     // Group 2 is the exponent
     const exp = parseInt(m[2]);
     if (exp < 0) return null;
+    // Materializing the integer appends `exp` zero digits. Guard against
+    // exponents so large the digit string cannot be allocated (`'0'.repeat`
+    // throws `RangeError: Invalid string length`). A 1M-digit integer still
+    // works today and stays supported; anything larger has no exact reading
+    // here, so bail like the `exp < 0` case (the caller falls back to a float).
+    if (exp > 1_000_000) return null;
     s = m[1] + '0'.repeat(exp);
   }
 

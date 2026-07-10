@@ -44,6 +44,25 @@ describe('PARSING OF NUMBER', () => {
     expect(parseVal('\\mathrm{NaN}')).toEqual(NaN);
   });
 
+  test('Exponent too large to materialize does not throw (regression)', () => {
+    // `1e1000000000000000000000` has an exponent (1e21) far larger than any
+    // digit string that can be allocated. Parsing must not throw a RangeError
+    // ("Invalid string length"); it falls back to a machine ±∞ float, and the
+    // result must be serializable through the public API without throwing.
+    expect(() => parse('1e1000000000000000000000')).not.toThrow();
+    const expr = parse('1e1000000000000000000000');
+    expect(expr.type.toString()).toBe('non_finite_number');
+    expect(() => expr.json).not.toThrow();
+    expect(expr.re).toBe(Infinity);
+    // The decimal-mantissa variant never reaches bigint() and crashed at
+    // serialize time instead — same class, same fallback.
+    expect(() => parse('1.5e1000000000000000000000').json).not.toThrow();
+    expect(parse('1.5e1000000000000000000000').re).toBe(Infinity);
+    expect(parse('-2.75e9999999999').re).toBe(-Infinity);
+    // A legitimately large integer (100k digits) is still parsed exactly.
+    expect(parse('1e100000').isInteger).toBe(true);
+  });
+
   test('Parsing plus/minus', () => {
     expect(parseVal('+1')).toEqual(1);
     expect(parseVal('-1')).toEqual(-1);

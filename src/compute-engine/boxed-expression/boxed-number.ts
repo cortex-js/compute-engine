@@ -1095,5 +1095,15 @@ function canonicalNumberString(
     return ce._numericValue(n);
   }
 
+  // A scientific form whose exponent is too large to materialize as digits
+  // (integer forms make bigint() bail, see numerics/bigint.ts; decimal
+  // mantissas never reach bigint() at all): it has no exact representation
+  // and a BigDecimal built from it would crash on serialization ("Invalid
+  // string length" through the public API). Fall back to the machine float
+  // (±∞), matching the ±∞ reading of the value.
+  const expMatch = s.match(/^[+-]?[0-9]+(?:\.[0-9]*)?e([0-9]+)$/);
+  if (expMatch && parseInt(expMatch[1]) > 1_000_000)
+    return ce._numericValue(Number(s));
+
   return ce._numericValue(ce.bignum(s));
 }

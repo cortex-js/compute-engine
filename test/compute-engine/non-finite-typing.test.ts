@@ -10,6 +10,8 @@
  * - Unknown finiteness is a generic point (finite); zero-ness must be proven.
  */
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
 
 function typeOf(expr: any): string {
   return ce.box(expr).type.toString();
@@ -89,6 +91,53 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       // `1/0` canonicalizes directly to the ~oo value (`x/0 → ~∞` fold),
       // so this reports the value's type, not a Divide handler claim.
       expect(typeOf(['Divide', 1, 0])).toBe('complex');
+    });
+  });
+
+  describe('complex values with a non-finite component type as complex', () => {
+    // A finite complex number requires BOTH components finite. A non-finite
+    // component (e.g. ∞ + i) is not `finite_complex`; it types as `complex`,
+    // matching the ~oo convention (`isComplexInfinity` early-return in the
+    // numeric-value type getters). `imaginary` is reserved for a finite
+    // non-zero imaginary part paired with a zero real part.
+    //
+    // Both numeric-value lanes are exercised: the default engine (precision
+    // 21) uses BigNumericValue; a machine-precision engine uses
+    // MachineNumericValue.
+    let savedPrecision: number;
+    let ceMachine: ComputeEngine;
+    beforeAll(() => {
+      savedPrecision = BigDecimal.precision;
+      ceMachine = new ComputeEngine();
+      ceMachine.precision = 'machine';
+    });
+    afterAll(() => {
+      BigDecimal.precision = savedPrecision;
+    });
+
+    const inf = { num: '+Infinity' };
+    // A high-precision imaginary literal forces the BigNumericValue lane even
+    // for the default engine.
+    const hiPrec = { num: '1.00000000000000000000000001' };
+
+    test('bignum lane (default engine, precision 21)', () => {
+      expect(typeOf(['Complex', inf, 1])).toBe('complex'); // ∞ + i
+      expect(typeOf(['Complex', 1, inf])).toBe('complex'); // 1 + ∞i
+      expect(typeOf(['Complex', 0, inf])).toBe('complex'); // 0 + ∞i
+      // ∞ real part with a high-precision (bignum) imaginary part
+      expect(typeOf(['Complex', inf, hiPrec])).toBe('complex');
+    });
+
+    test('machine lane (precision = machine)', () => {
+      const t = (expr: any) => ceMachine.box(expr).type.toString();
+      expect(t(['Complex', inf, 1])).toBe('complex'); // ∞ + i
+      expect(t(['Complex', 1, inf])).toBe('complex'); // 1 + ∞i
+      expect(t(['Complex', 0, inf])).toBe('complex'); // 0 + ∞i
+    });
+
+    test('finite complex values keep their finite types', () => {
+      expect(typeOf(['Complex', 2, 3])).toBe('finite_complex');
+      expect(typeOf(['Complex', 0, 3])).toBe('imaginary');
     });
   });
 

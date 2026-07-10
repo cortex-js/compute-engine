@@ -44,6 +44,13 @@ export class BigNumericValue extends NumericValue {
     if (this.isNaN) return 'number';
     if (this.isComplexInfinity) return 'complex';
     if (this.im !== 0) {
+      // A value with a non-finite component (e.g. ∞ + i) is not a *finite*
+      // complex number. Match the ~oo convention of the isComplexInfinity
+      // early-return above: any non-finite component types as `complex`, and
+      // `imaginary` is reserved for a finite non-zero imaginary part paired
+      // with a zero real part.
+      if (!this.decimal.isFinite() || !Number.isFinite(this.im))
+        return 'complex';
       if (this.decimal.isZero()) return 'imaginary';
       return 'finite_complex';
     }
