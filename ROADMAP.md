@@ -11,7 +11,7 @@ files, and `docs/rubi/RUBI.md` / `docs/fungrim/`.
 The 2026-06 release shipped:
 
 - the Fungrim-derived identities library
-  (`@cortex-js/compute-engine/identities`, 1,442 rules incl. 10 solve
+  (`@cortex-js/compute-engine/identities`, 1,450 rules incl. 10 solve
   templates), the
   complex-domain assumptions extension, the operator-indexed rule dispatcher
   with purpose tags, `ce.solveRules`/`ce.harmonizationRules`, and exact `Zeta`;
@@ -892,31 +892,31 @@ grid, mpmath kernel harness, JS/Python parity fuzz, round-trip battery) are bein
 adopted from the archived sources in `docs/reviews/2026-07-archive/`.
 
 **Stage-2 corpus audit findings (2026-07-10)** — the per-topic numeric sweep
-(all 57 topics, 120 s kill guard per topic; the two upstream formula bugs it
-caught — a172c7, b16177 — are fixed in the fork and PR'd) surfaced three
-engine/tooling items. The P1 deadline escape in the numeric limit prober and
-the `Count(Range(1, n))` collapse are **fixed** (compiled `Sum`/`Product`
-loops on the probe paths carry an `iterationBudget` and over-budget rungs
-read as NaN; the Richardson ladder checks the deadline between rungs and the
-`extrapolate` default `power` was corrected from 2 to 1, so
-`const_gamma/4644c0` and `pi/dea83d` now *converge* — γ to 1e-12, π to 1e-8 —
-in milliseconds; symbolic-bound `Range` handlers with an indeterminate
-channel now use it). What remains:
+(all 57 topics; the two upstream formula bugs it caught — a172c7, b16177 —
+are fixed in the fork and PR'd) surfaced three engine/tooling items; **all
+three are fixed** and the full-corpus Stage-2 run now grades **0 False**
+(True 1589, seed 42, 142 s, no kill guard):
 
-- **Set-builder translation fidelity (corpus-side).** Fungrim
-  comprehensions translate to a 3-operand literal `["Set", var,
-  membership, condition]`, which CE counts as a 3-element literal set
-  (corpus `gcd/4099d2` graded False from `Count` = 3). The translator
-  should skip (or find a real encoding for) set-builder forms; CE-side
-  semantics are arguably correct.
-- **Symbolic-bound `Range` iteration channel.** The `iterator` collection
-  handler (and thus materialization / `each()`) has no indeterminate
-  channel, so a symbolic `Range(1, n)` still iterates as the collapsed
-  `[1]` there (`range()` coerces a NaN bound to 1). The scalar-producing
-  handlers (`count`, `at`, `eq`, `subsetOf`, `eltsgn`) are guarded; fixing
-  iteration means deciding what `Reduce`/materialization over a
-  symbolic-bound collection should return (inert, most likely) before
-  un-coercing `range()` itself.
+- the P1 deadline escape in the numeric limit prober (probe-path
+  `iterationBudget` on compiled `Sum`/`Product` loops, ladder deadline
+  checks, `extrapolate` default `power` corrected 2 → 1 — `const_gamma/4644c0`
+  and `pi/dea83d` now converge to γ/π in milliseconds);
+- the `Count(Range(1, n))` collapse, including the iteration channel
+  (symbolic-bound `Range`/`Linspace` stay inert through `count`/`at`/`eq`/
+  `subsetOf`/`eltsgn`, `iterator`, materialization, and every fold seam);
+- the set-builder mistranslation (fork `4b88330`: comprehensions emit
+  `Map(Filter(S, Function(P, x)), Function(f, x))` instead of a literal
+  `Set`; +9 recovered simplify rules incl.
+  `Count(Filter(Primes, p ≤ x)) → PrimePi(x)`, artifact 1450).
+
+One translator residue is carried forward: **optimum image sets**
+(`translate_optimum`) still emit `Min/Max/Supremum/Infimum(["Set", f,
+indexing])` — the literal-Set fiction — because the honest
+`Min(Map(Interval(…), f))` encoding currently grinds to the evaluation
+deadline in CE (`Map` over a continuous `Interval` iterates instead of
+staying lazy/inert; `Min`'s collection path would need an
+enumerability guard like the fold seams got). Re-encode once CE keeps
+`Map`-over-`Interval` inert.
 
 Two design-level residues are deliberately carried forward:
 

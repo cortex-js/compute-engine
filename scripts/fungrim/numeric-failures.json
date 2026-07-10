@@ -1,43 +1,10 @@
 {
-  "generated": "2026-07-10T15:56:34.091Z",
+  "generated": "2026-07-10T16:53:29.780Z",
   "seed": 42,
   "slice": [
     "none",
     "real-simple"
   ],
-  "falseEntryCount": 1,
-  "entries": [
-    {
-      "id": "4099d2",
-      "topic": "gcd",
-      "class": "representation",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "n": 4
-          },
-          "detail": "sides differ: 0 vs 0.9239384029215901"
-        },
-        {
-          "assignment": {
-            "n": 3
-          },
-          "detail": "sides differ: 0 vs 0.8319073725807075"
-        },
-        {
-          "assignment": {
-            "n": 5
-          },
-          "detail": "sides differ: 0 vs 0.9643873404292624"
-        },
-        {
-          "assignment": {
-            "n": 2
-          },
-          "detail": "sides differ: 0 vs 0.6079271018540267"
-        }
-      ]
-    }
-  ]
+  "falseEntryCount": 0,
+  "entries": []
 }
