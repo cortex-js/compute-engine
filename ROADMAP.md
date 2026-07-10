@@ -926,16 +926,13 @@ three are fixed** and the full-corpus Stage-2 run now grades **0 False**
 - the set-builder mistranslation (fork `4b88330`: comprehensions emit
   `Map(Filter(S, Function(P, x)), Function(f, x))` instead of a literal
   `Set`; +9 recovered simplify rules incl.
-  `Count(Filter(Primes, p ≤ x)) → PrimePi(x)`, artifact 1450).
-
-One translator residue is carried forward: **optimum image sets**
-(`translate_optimum`) still emit `Min/Max/Supremum/Infimum(["Set", f,
-indexing])` — the literal-Set fiction — because the honest
-`Min(Map(Interval(…), f))` encoding currently grinds to the evaluation
-deadline in CE (`Map` over a continuous `Interval` iterates instead of
-staying lazy/inert; `Min`'s collection path would need an
-enumerability guard like the fold seams got). Re-encode once CE keeps
-`Map`-over-`Interval` inert.
+  `Count(Filter(Primes, p ≤ x)) → PrimePi(x)`, artifact 1450). The
+  follow-on optimum image sets (`Min/Max/Supremum/Infimum` over a
+  comprehension, the last carrier of the literal-`Set` fiction) are
+  re-encoded too (fork `a832b59`), after CE's extrema learned to keep
+  unenumerable collection operands symbolic instead of grinding an
+  `Interval`'s dyadic sampler to the deadline or silently dropping a
+  declined operand.
 
 Two design-level residues are deliberately carried forward:
 

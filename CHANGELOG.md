@@ -60,6 +60,16 @@
   reports a size but cannot compute its elements now keeps its lazy form
   rather than fold to the reduction's initial value. Concrete bounds are
   unaffected.
+- **`Min`/`Max`/`Supremum`/`Infimum` keep unenumerable collections
+  symbolic.** The extrema used to iterate any collection operand: an
+  infinite one (a `Map` over a continuous `Interval`) ground through the
+  interval's dense sampler until the evaluation deadline, and one that
+  reports elements it cannot compute (a `Map` over a `Linspace` with a
+  symbolic endpoint) silently *vanished* from the result —
+  `Min(Map(...), 5)` returned `5` even though the mapped values could be
+  smaller. Both now stay in the symbolic result. A genuinely empty lazy
+  collection (a `Filter` with no matches) still folds away, and finite
+  collections fold as before.
 
 ### Compilation
 
@@ -108,8 +118,9 @@
   untranslatable — notably the prime-counting definition, so with
   `loadIdentities(ce)`, `simplify` rewrites
   `Count(\{p \in \mathrm{Primes} : p \le x\})` to `\operatorname{PrimePi}(x)`.
-  The full 2,551-entry corpus now validates with **zero** numerically false
-  entries.
+  Extrema over comprehensions (`\min\{f(x) : x \in S\}`) get the same
+  encoding. The full 2,551-entry corpus now validates with **zero**
+  numerically false entries.
 
 ## 0.73.0 _2026-07-09_
 
