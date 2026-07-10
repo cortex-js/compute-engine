@@ -700,68 +700,68 @@
    "formula": [
     "Equal",
     [
-     "Set",
+     "Map",
      [
-      "LambertW",
-      "x"
-     ],
-     [
-      "Element",
-      "x",
+      "Interval",
       [
-       "Interval",
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
        [
-        "Open",
-        "NegativeInfinity"
-       ],
-       [
-        "Open",
+        "Negate",
         [
-         "Negate",
-         [
-          "Exp",
-          -1
-         ]
+         "Exp",
+         -1
         ]
        ]
       ]
+     ],
+     [
+      "Function",
+      [
+       "LambertW",
+       "x"
+      ],
+      "x"
      ]
     ],
     [
-     "Set",
+     "Map",
      [
-      "Add",
+      "Interval",
       [
-       "Multiply",
-       [
-        "Negate",
-        "y"
-       ],
-       [
-        "Cot",
-        "y"
-       ]
+       "Open",
+       0
       ],
       [
-       "Multiply",
-       "y",
-       "ImaginaryUnit"
+       "Open",
+       "Pi"
       ]
      ],
      [
-      "Element",
-      "y",
+      "Function",
       [
-       "Interval",
+       "Add",
        [
-        "Open",
-        0
+        "Multiply",
+        [
+         "Negate",
+         "y"
+        ],
+        [
+         "Cot",
+         "y"
+        ]
        ],
        [
-        "Open",
-        "Pi"
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
        ]
-      ]
+      ],
+      "y"
      ]
     ]
    ],
@@ -772,7 +772,8 @@
    "heads": [
     "Cot",
     "Exp",
-    "LambertW"
+    "LambertW",
+    "Map"
    ],
    "guardLevel": "none",
    "flavor": null,
@@ -786,24 +787,24 @@
    "formula": [
     "Equal",
     [
-     "Set",
+     "Map",
      [
-      "LambertW",
-      "x"
-     ],
-     [
-      "Element",
-      "x",
+      "Set",
       [
-       "Set",
+       "Negate",
        [
-        "Negate",
-        [
-         "Exp",
-         -1
-        ]
+        "Exp",
+        -1
        ]
       ]
+     ],
+     [
+      "Function",
+      [
+       "LambertW",
+       "x"
+      ],
+      "x"
      ]
     ],
     [
@@ -817,7 +818,8 @@
    "subclass": null,
    "heads": [
     "Exp",
-    "LambertW"
+    "LambertW",
+    "Map"
    ],
    "guardLevel": "none",
    "flavor": null,
@@ -3775,31 +3777,31 @@
    "formula": [
     "Equal",
     [
-     "Set",
+     "Map",
      [
-      "LambertW",
-      "x"
+      "Interval",
+      [
+       "Open",
+       [
+        "Negate",
+        [
+         "Exp",
+         -1
+        ]
+       ]
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
      ],
      [
-      "Element",
-      "x",
+      "Function",
       [
-       "Interval",
-       [
-        "Open",
-        [
-         "Negate",
-         [
-          "Exp",
-          -1
-         ]
-        ]
-       ],
-       [
-        "Open",
-        "PositiveInfinity"
-       ]
-      ]
+       "LambertW",
+       "x"
+      ],
+      "x"
      ]
     ],
     [
@@ -3820,7 +3822,8 @@
    "subclass": null,
    "heads": [
     "Exp",
-    "LambertW"
+    "LambertW",
+    "Map"
    ],
    "guardLevel": "none",
    "flavor": null,

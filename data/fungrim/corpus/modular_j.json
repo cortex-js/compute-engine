@@ -1081,15 +1081,15 @@
    "formula": [
     "Equal",
     [
-     "Set",
+     "Map",
+     "ModularGroupFundamentalDomain",
      [
-      "ModularJ",
+      "Function",
+      [
+       "ModularJ",
+       "tau"
+      ],
       "tau"
-     ],
-     [
-      "Element",
-      "tau",
-      "ModularGroupFundamentalDomain"
      ]
     ],
     "ComplexNumbers"
@@ -1099,6 +1099,7 @@
    "class": "specific-value",
    "subclass": null,
    "heads": [
+    "Map",
     "ModularGroupFundamentalDomain",
     "ModularJ"
    ],

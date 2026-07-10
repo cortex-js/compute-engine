@@ -1088,23 +1088,30 @@
    "formula": [
     "Equal",
     [
-     "Set",
+     "Map",
      [
-      "ModularLambda",
-      "tau"
-     ],
-     [
-      "Element",
-      "tau",
+      "Filter",
       "HH",
       [
-       "Equal",
+       "Function",
        [
-        "Real",
-        "tau"
+        "Equal",
+        [
+         "Real",
+         "tau"
+        ],
+        -1
        ],
-       -1
+       "tau"
       ]
+     ],
+     [
+      "Function",
+      [
+       "ModularLambda",
+       "tau"
+      ],
+      "tau"
      ]
     ],
     [
@@ -1124,7 +1131,9 @@
    "class": "specific-value",
    "subclass": null,
    "heads": [
+    "Filter",
     "HH",
+    "Map",
     "ModularLambda",
     "Real"
    ],
@@ -1447,12 +1456,10 @@
     "Equal",
     "ModularLambdaFundamentalDomain",
     [
-     "Set",
-     "tau",
+     "Filter",
+     "HH",
      [
-      "Element",
-      "tau",
-      "HH",
+      "Function",
       [
        "Or",
        [
@@ -1539,7 +1546,8 @@
          2
         ]
        ]
-      ]
+      ],
+      "tau"
      ]
     ]
    ],
@@ -1551,6 +1559,7 @@
    "subclass": null,
    "heads": [
     "Abs",
+    "Filter",
     "HH",
     "Min",
     "ModularLambdaFundamentalDomain",
@@ -1613,18 +1622,18 @@
    "formula": [
     "Equal",
     [
-     "Set",
+     "Map",
      [
-      "ModularLambda",
-      "tau"
+      "Interior",
+      "ModularLambdaFundamentalDomain"
      ],
      [
-      "Element",
-      "tau",
+      "Function",
       [
-       "Interior",
-       "ModularLambdaFundamentalDomain"
-      ]
+       "ModularLambda",
+       "tau"
+      ],
+      "tau"
      ]
     ],
     [
@@ -1657,6 +1666,7 @@
    "subclass": null,
    "heads": [
     "Interior",
+    "Map",
     "ModularLambda",
     "ModularLambdaFundamentalDomain"
    ],
@@ -1742,27 +1752,27 @@
    "formula": [
     "Equal",
     [
-     "Set",
+     "Map",
+     "HH",
      [
-      "ModularLambda",
+      "Function",
+      [
+       "ModularLambda",
+       "tau"
+      ],
       "tau"
-     ],
-     [
-      "Element",
-      "tau",
-      "HH"
      ]
     ],
     [
-     "Set",
+     "Map",
+     "ModularLambdaFundamentalDomain",
      [
-      "ModularLambda",
+      "Function",
+      [
+       "ModularLambda",
+       "tau"
+      ],
       "tau"
-     ],
-     [
-      "Element",
-      "tau",
-      "ModularLambdaFundamentalDomain"
      ]
     ],
     [
@@ -1781,6 +1791,7 @@
    "subclass": null,
    "heads": [
     "HH",
+    "Map",
     "ModularLambda",
     "ModularLambdaFundamentalDomain"
    ],
@@ -1827,16 +1838,16 @@
      "Element",
      "tau",
      [
-      "Set",
+      "Map",
+      "Integers",
       [
-       "Multiply",
-       2,
+       "Function",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
        "n"
-      ],
-      [
-       "Element",
-       "n",
-       "Integers"
       ]
      ]
     ],
@@ -1859,6 +1870,7 @@
    "class": "logical",
    "subclass": null,
    "heads": [
+    "Map",
     "ModularLambda"
    ],
    "guardLevel": "none",
@@ -1970,12 +1982,10 @@
       "ModularLambdaFundamentalDomain"
      ],
      [
-      "Set",
-      "tau",
+      "Filter",
+      "HH",
       [
-       "Element",
-       "tau",
-       "HH",
+       "Function",
        [
         "Equal",
         [
@@ -1983,7 +1993,8 @@
          "tau"
         ],
         1
-       ]
+       ],
+       "tau"
       ]
      ]
     ]
@@ -1994,7 +2005,7 @@
     "EllipticK",
     "ModularLambda"
    ],
-   "guardLevel": "complex-domain",
+   "guardLevel": "undischargeable",
    "flavor": null,
    "references": null,
    "topics": [
@@ -2210,35 +2221,42 @@
    "formula": [
     "Equal",
     [
-     "Set",
+     "Map",
      [
-      "ModularLambda",
-      "tau"
-     ],
-     [
-      "Element",
-      "tau",
+      "Filter",
       "HH",
       [
-       "Equal",
+       "Function",
        [
-        "Abs",
+        "Equal",
         [
-         "Add",
-         "tau",
+         "Abs",
          [
-          "Divide",
-          1,
-          2
+          "Add",
+          "tau",
+          [
+           "Divide",
+           1,
+           2
+          ]
          ]
+        ],
+        [
+         "Divide",
+         1,
+         2
         ]
        ],
-       [
-        "Divide",
-        1,
-        2
-       ]
+       "tau"
       ]
+     ],
+     [
+      "Function",
+      [
+       "ModularLambda",
+       "tau"
+      ],
+      "tau"
      ]
     ],
     [
@@ -2259,7 +2277,9 @@
    "subclass": null,
    "heads": [
     "Abs",
+    "Filter",
     "HH",
+    "Map",
     "ModularLambda"
    ],
    "guardLevel": "none",

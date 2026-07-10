@@ -2097,6 +2097,7 @@
    ]
   },
   "Fibonacci": {},
+  "Filter": {},
   "Floor": {},
   "ForAll": {},
   "Function": {},
@@ -2163,6 +2164,7 @@
    ]
   },
   "LogIntegral": {},
+  "Map": {},
   "Matrix": {},
   "Max": {
    "fungrimNames": [

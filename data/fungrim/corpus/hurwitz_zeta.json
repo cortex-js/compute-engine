@@ -289,12 +289,10 @@
       "s"
      ],
      [
-      "Set",
-      "t",
+      "Filter",
+      "ComplexNumbers",
       [
-       "Element",
-       "t",
-       "ComplexNumbers",
+       "Function",
        [
         "Less",
         [
@@ -302,7 +300,8 @@
          "t"
         ],
         0
-       ]
+       ],
+       "t"
       ]
      ]
     ]
@@ -314,6 +313,7 @@
    "class": "logical",
    "subclass": null,
    "heads": [
+    "Filter",
     "HurwitzZeta",
     "IsHolomorphic",
     "Real"

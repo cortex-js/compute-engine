@@ -1076,12 +1076,10 @@
     [
      "Count",
      [
-      "Set",
-      "n",
+      "Filter",
+      "PositiveIntegers",
       [
-       "Element",
-       "n",
-       "PositiveIntegers",
+       "Function",
        [
         "Less",
         [
@@ -1106,7 +1104,8 @@
           ]
          ]
         ]
-       ]
+       ],
+       "n"
       ]
      ]
     ]
@@ -1117,6 +1116,7 @@
    "subclass": null,
    "heads": [
     "Exp",
+    "Filter",
     "Ln",
     "Totient"
    ],
@@ -2225,16 +2225,14 @@
     [
      "Count",
      [
-      "Set",
-      "k",
+      "Filter",
       [
-       "Element",
-       "k",
-       [
-        "Range",
-        1,
-        "n"
-       ],
+       "Range",
+       1,
+       "n"
+      ],
+      [
+       "Function",
        [
         "Equal",
         [
@@ -2243,7 +2241,8 @@
          "k"
         ],
         1
-       ]
+       ],
+       "k"
       ]
      ]
     ]
@@ -2259,6 +2258,7 @@
    "class": "identity",
    "subclass": null,
    "heads": [
+    "Filter",
     "GCD",
     "Totient"
    ],

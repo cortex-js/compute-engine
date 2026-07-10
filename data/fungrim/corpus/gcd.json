@@ -1157,20 +1157,18 @@
        [
         "Count",
         [
-         "Set",
-         "T",
+         "Filter",
          [
-          "Element",
-          "T",
+          "Power",
           [
-           "Power",
-           [
-            "Range",
-            1,
-            "N_var"
-           ],
-           "n"
+           "Range",
+           1,
+           "N_var"
           ],
+          "n"
+         ],
+         [
+          "Function",
           [
            "Equal",
            [
@@ -1178,7 +1176,8 @@
             "T"
            ],
            1
-          ]
+          ],
+          "T"
          ]
         ]
        ]
@@ -1211,6 +1210,7 @@
    "class": "representation",
    "subclass": "limit",
    "heads": [
+    "Filter",
     "GCD",
     "Limit",
     "Zeta"
@@ -2119,12 +2119,10 @@
     [
      "Max",
      [
-      "Set",
-      "d",
+      "Filter",
+      "PositiveIntegers",
       [
-       "Element",
-       "d",
-       "PositiveIntegers",
+       "Function",
        [
         "And",
         [
@@ -2137,7 +2135,8 @@
          "d",
          "b"
         ]
-       ]
+       ],
+       "d"
       ]
      ]
     ]
@@ -2176,6 +2175,7 @@
    "subclass": null,
    "heads": [
     "Divides",
+    "Filter",
     "GCD",
     "Max"
    ],
@@ -2574,16 +2574,14 @@
     [
      "Count",
      [
-      "Set",
-      "k",
+      "Filter",
       [
-       "Element",
-       "k",
-       [
-        "Range",
-        1,
-        "n"
-       ],
+       "Range",
+       1,
+       "n"
+      ],
+      [
+       "Function",
        [
         "Equal",
         [
@@ -2592,7 +2590,8 @@
          "k"
         ],
         1
-       ]
+       ],
+       "k"
       ]
      ]
     ],
@@ -2612,6 +2611,7 @@
    "class": "identity",
    "subclass": null,
    "heads": [
+    "Filter",
     "GCD",
     "Totient"
    ],
@@ -2634,12 +2634,10 @@
     [
      "Min",
      [
-      "Set",
-      "m",
+      "Filter",
+      "PositiveIntegers",
       [
-       "Element",
-       "m",
-       "PositiveIntegers",
+       "Function",
        [
         "And",
         [
@@ -2652,7 +2650,8 @@
          "b",
          "m"
         ]
-       ]
+       ],
+       "m"
       ]
      ]
     ]
@@ -2692,6 +2691,7 @@
    "subclass": null,
    "heads": [
     "Divides",
+    "Filter",
     "LCM",
     "Min"
    ],

@@ -15,17 +15,16 @@
     [
      "Count",
      [
-      "Set",
-      "p",
+      "Filter",
+      "Primes",
       [
-       "Element",
-       "p",
-       "Primes",
+       "Function",
        [
         "LessEqual",
         "p",
         "x"
-       ]
+       ],
+       "p"
       ]
      ]
     ]
@@ -41,6 +40,7 @@
    "class": "identity",
    "subclass": null,
    "heads": [
+    "Filter",
     "PrimePi"
    ],
    "guardLevel": "real-simple",
@@ -257,15 +257,15 @@
     "Equal",
     "Primes",
     [
-     "Set",
+     "Map",
+     "PositiveIntegers",
      [
-      "PrimeNumber",
+      "Function",
+      [
+       "PrimeNumber",
+       "n"
+      ],
       "n"
-     ],
-     [
-      "Element",
-      "n",
-      "PositiveIntegers"
      ]
     ]
    ],
@@ -274,6 +274,7 @@
    "class": "specific-value",
    "subclass": null,
    "heads": [
+    "Map",
     "PrimeNumber"
    ],
    "guardLevel": "none",

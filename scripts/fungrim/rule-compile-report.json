@@ -1,35 +1,35 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
-  "sliceEntries": 1650,
-  "emitted": 1432,
+  "sliceEntries": 1648,
+  "emitted": 1440,
   "ledger": {
     "box-error": 1,
     "compat-signature": 3,
     "curated-exclude": 4,
     "duplicate-undirected": 15,
     "guard-uncompilable": 69,
-    "lhs-not-value-form": 94,
-    "no-fire": 24,
+    "lhs-not-value-form": 85,
+    "no-fire": 23,
     "not-equation": 8
   },
   "byPurpose": {
     "expand": 113,
-    "simplify": 1311,
+    "simplify": 1319,
     "transform": 8
   },
   "byClass": {
-    "identity": 1091,
-    "specific-value": 341
+    "identity": 1090,
+    "specific-value": 350
   },
   "byTarget": {
-    "simplify": 1432
+    "simplify": 1440
   },
   "sampleKinds": {
     "numeric": 48,
-    "symbolic": 1384
+    "symbolic": 1392
   },
   "headBuckets": {
-    "Multiply": 285,
+    "Multiply": 284,
     "Add": 223,
     "Divide": 92,
     "Apply": 63,
@@ -58,6 +58,7 @@
     "ModularLambda": 12,
     "Sqrt": 12,
     "CarlsonRC": 11,
+    "Map": 11,
     "LambertW": 10,
     "Conjugate": 9,
     "Imaginary": 9,
@@ -75,7 +76,6 @@
     "Count": 6,
     "EllipticE": 6,
     "NPartition": 6,
-    "Set": 6,
     "Tuple": 6,
     "BarnesG": 5,
     "Binomial": 5,
@@ -83,6 +83,7 @@
     "Ln": 5,
     "MultiZetaValue": 5,
     "FallingFactorial": 4,
+    "Filter": 4,
     "Min": 4,
     "Real": 4,
     "CarlsonHypergeometricR": 3,
@@ -387,11 +388,6 @@
       "detail": "symbol"
     },
     {
-      "id": "44ad09",
-      "reason": "lhs-not-value-form",
-      "detail": "Set"
-    },
-    {
       "id": "458198",
       "reason": "guard-uncompilable",
       "detail": "unsupported domain \"DirichletGroup\""
@@ -417,11 +413,6 @@
       "detail": "Apply"
     },
     {
-      "id": "4b20ab",
-      "reason": "lhs-not-value-form",
-      "detail": "Set"
-    },
-    {
       "id": "4c166d",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -440,11 +431,6 @@
       "id": "54c80d",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "55498b",
-      "reason": "lhs-not-value-form",
-      "detail": "Set"
     },
     {
       "id": "5636db",
@@ -652,11 +638,6 @@
       "detail": "symbol"
     },
     {
-      "id": "830dd4",
-      "reason": "lhs-not-value-form",
-      "detail": "Set"
-    },
-    {
       "id": "831ea4",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -722,11 +703,6 @@
       "detail": "Apply"
     },
     {
-      "id": "90b419",
-      "reason": "lhs-not-value-form",
-      "detail": "Set"
-    },
-    {
       "id": "912ff9",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -787,11 +763,6 @@
       "detail": "rule did not fire"
     },
     {
-      "id": "9d26d2",
-      "reason": "lhs-not-value-form",
-      "detail": "Set"
-    },
-    {
       "id": "9d66de",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
@@ -848,11 +819,6 @@
     },
     {
       "id": "aa15f0",
-      "reason": "no-fire",
-      "detail": "no seed satisfying the guards"
-    },
-    {
-      "id": "acf63c",
       "reason": "no-fire",
       "detail": "no seed satisfying the guards"
     },
@@ -1062,11 +1028,6 @@
       "detail": "Apply"
     },
     {
-      "id": "dcc8b1",
-      "reason": "lhs-not-value-form",
-      "detail": "Set"
-    },
-    {
       "id": "df52fc",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Not\""
@@ -1095,11 +1056,6 @@
       "id": "e3d274",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
-    },
-    {
-      "id": "e4315f",
-      "reason": "lhs-not-value-form",
-      "detail": "Set"
     },
     {
       "id": "e4f73a",
@@ -1135,11 +1091,6 @@
       "id": "ed4f6f",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
-    },
-    {
-      "id": "ee86fb",
-      "reason": "lhs-not-value-form",
-      "detail": "Set"
     },
     {
       "id": "f0414a",

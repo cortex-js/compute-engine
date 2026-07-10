@@ -135,12 +135,10 @@
     [
      "Max",
      [
-      "Set",
-      "p",
+      "Filter",
+      "Primes",
       [
-       "Element",
-       "p",
-       "Primes",
+       "Function",
        [
         "Divides",
         "p",
@@ -148,7 +146,8 @@
          "LandauG",
          "n"
         ]
-       ]
+       ],
+       "p"
       ]
      ]
     ],
@@ -186,6 +185,7 @@
    "subclass": null,
    "heads": [
     "Divides",
+    "Filter",
     "LandauG",
     "Ln",
     "Max"

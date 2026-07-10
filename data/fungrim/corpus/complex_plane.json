@@ -13,60 +13,60 @@
      "rho"
     ],
     [
-     "Set",
+     "Map",
      [
-      "Divide",
+      "Interval",
+      0,
       [
-       "Add",
+       "Open",
        [
         "Multiply",
-        "rho",
-        [
-         "Exp",
-         [
-          "Multiply",
-          "ImaginaryUnit",
-          "theta"
-         ]
-        ]
-       ],
+        2,
+        "Pi"
+       ]
+      ]
+     ],
+     [
+      "Function",
+      [
+       "Divide",
        [
-        "Multiply",
+        "Add",
         [
-         "Power",
+         "Multiply",
          "rho",
-         -1
-        ],
-        [
-         "Exp",
          [
-          "Negate",
+          "Exp",
           [
            "Multiply",
            "ImaginaryUnit",
            "theta"
           ]
          ]
-        ]
-       ]
-      ],
-      2
-     ],
-     [
-      "Element",
-      "theta",
-      [
-       "Interval",
-       0,
-       [
-        "Open",
+        ],
         [
          "Multiply",
-         2,
-         "Pi"
+         [
+          "Power",
+          "rho",
+          -1
+         ],
+         [
+          "Exp",
+          [
+           "Negate",
+           [
+            "Multiply",
+            "ImaginaryUnit",
+            "theta"
+           ]
+          ]
+         ]
         ]
-       ]
-      ]
+       ],
+       2
+      ],
+      "theta"
      ]
     ]
    ],
@@ -90,7 +90,8 @@
    "subclass": null,
    "heads": [
     "BernsteinEllipse",
-    "Exp"
+    "Exp",
+    "Map"
    ],
    "guardLevel": "real-simple",
    "flavor": null,
@@ -105,30 +106,30 @@
     "Equal",
     "UnitCircle",
     [
-     "Set",
+     "Map",
      [
-      "Exp",
+      "Interval",
+      0,
       [
-       "Multiply",
-       "ImaginaryUnit",
-       "theta"
+       "Open",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ]
       ]
      ],
      [
-      "Element",
-      "theta",
+      "Function",
       [
-       "Interval",
-       0,
+       "Exp",
        [
-        "Open",
-        [
-         "Multiply",
-         2,
-         "Pi"
-        ]
+        "Multiply",
+        "ImaginaryUnit",
+        "theta"
        ]
-      ]
+      ],
+      "theta"
      ]
     ]
    ],
@@ -138,6 +139,7 @@
    "subclass": null,
    "heads": [
     "Exp",
+    "Map",
     "UnitCircle"
    ],
    "guardLevel": "none",
@@ -157,12 +159,10 @@
      "r"
     ],
     [
-     "Set",
-     "t",
+     "Filter",
+     "ComplexNumbers",
      [
-      "Element",
-      "t",
-      "ComplexNumbers",
+      "Function",
       [
        "Less",
        [
@@ -174,7 +174,8 @@
         ]
        ],
        "r"
-      ]
+      ],
+      "t"
      ]
     ]
    ],
@@ -204,6 +205,7 @@
    "subclass": null,
    "heads": [
     "Abs",
+    "Filter",
     "OpenDisk"
    ],
    "guardLevel": "complex-domain",
@@ -223,12 +225,10 @@
      "r"
     ],
     [
-     "Set",
-     "t",
+     "Filter",
+     "ComplexNumbers",
      [
-      "Element",
-      "t",
-      "ComplexNumbers",
+      "Function",
       [
        "LessEqual",
        [
@@ -240,7 +240,8 @@
         ]
        ],
        "r"
-      ]
+      ],
+      "t"
      ]
     ]
    ],
@@ -270,7 +271,8 @@
    "subclass": null,
    "heads": [
     "Abs",
-    "ClosedDisk"
+    "ClosedDisk",
+    "Filter"
    ],
    "guardLevel": "complex-domain",
    "flavor": null,
@@ -285,12 +287,10 @@
     "Equal",
     "HH",
     [
-     "Set",
-     "tau",
+     "Filter",
+     "ComplexNumbers",
      [
-      "Element",
-      "tau",
-      "ComplexNumbers",
+      "Function",
       [
        "Greater",
        [
@@ -298,7 +298,8 @@
         "tau"
        ],
        0
-      ]
+      ],
+      "tau"
      ]
     ]
    ],
@@ -307,6 +308,7 @@
    "class": "specific-value",
    "subclass": null,
    "heads": [
+    "Filter",
     "HH",
     "Imaginary"
    ],
@@ -324,12 +326,10 @@
     "Equal",
     "UnitCircle",
     [
-     "Set",
-     "z",
+     "Filter",
+     "ComplexNumbers",
      [
-      "Element",
-      "z",
-      "ComplexNumbers",
+      "Function",
       [
        "Equal",
        [
@@ -337,7 +337,8 @@
         "z"
        ],
        1
-      ]
+      ],
+      "z"
      ]
     ]
    ],
@@ -347,6 +348,7 @@
    "subclass": null,
    "heads": [
     "Abs",
+    "Filter",
     "UnitCircle"
    ],
    "guardLevel": "none",

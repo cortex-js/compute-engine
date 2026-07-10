@@ -1193,15 +1193,9 @@
      "q"
     ],
     [
-     "Set",
+     "Map",
      [
-      "DirichletCharacter",
-      "q",
-      "ell"
-     ],
-     [
-      "Element",
-      "ell",
+      "Filter",
       [
        "Range",
        1,
@@ -1216,14 +1210,27 @@
        ]
       ],
       [
-       "Equal",
+       "Function",
        [
-        "GCD",
-        "ell",
-        "q"
+        "Equal",
+        [
+         "GCD",
+         "ell",
+         "q"
+        ],
+        1
        ],
-       1
+       "ell"
       ]
+     ],
+     [
+      "Function",
+      [
+       "DirichletCharacter",
+       "q",
+       "ell"
+      ],
+      "ell"
      ]
     ]
    ],
@@ -1240,7 +1247,9 @@
    "heads": [
     "DirichletCharacter",
     "DirichletGroup",
+    "Filter",
     "GCD",
+    "Map",
     "Max"
    ],
    "guardLevel": "real-simple",
@@ -1803,31 +1812,29 @@
      [
       "Min",
       [
-       "Set",
-       "a",
+       "Filter",
+       "PositiveIntegers",
        [
-        "Element",
-        "a",
-        "PositiveIntegers",
+        "Function",
         [
          "Equal",
          [
           "Count",
           [
-           "Set",
+           "Map",
+           "NonNegativeIntegers",
            [
-            "Mod",
+            "Function",
             [
-             "Power",
-             "a",
-             "k"
+             "Mod",
+             [
+              "Power",
+              "a",
+              "k"
+             ],
+             "p"
             ],
-            "p"
-           ],
-           [
-            "Element",
-            "k",
-            "NonNegativeIntegers"
+            "k"
            ]
           ]
          ],
@@ -1836,7 +1843,8 @@
           "p",
           1
          ]
-        ]
+        ],
+        "a"
        ]
       ]
      ]
@@ -1871,6 +1879,8 @@
    "subclass": null,
    "heads": [
     "ConreyGenerator",
+    "Filter",
+    "Map",
     "Min",
     "Mod"
    ],
@@ -1892,34 +1902,34 @@
     [
      "Union",
      [
-      "Set",
+      "Map",
+      "Integers",
       [
-       "Exp",
+       "Function",
        [
-        "Divide",
+        "Exp",
         [
-         "Multiply",
+         "Divide",
          [
           "Multiply",
           [
            "Multiply",
-           2,
-           "Pi"
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "ImaginaryUnit"
           ],
-          "ImaginaryUnit"
+          "k"
          ],
-         "k"
-        ],
-        [
-         "Totient",
-         "q"
+         [
+          "Totient",
+          "q"
+         ]
         ]
-       ]
-      ],
-      [
-       "Element",
-       "k",
-       "Integers"
+       ],
+       "k"
       ]
      ],
      [
@@ -1958,6 +1968,7 @@
    "subclass": null,
    "heads": [
     "Exp",
+    "Map",
     "Totient"
    ],
    "guardLevel": "complex-domain",
@@ -2479,12 +2490,10 @@
     [
      "Min",
      [
-      "Set",
-      "a",
+      "Filter",
+      "PositiveIntegers",
       [
-       "Element",
-       "a",
-       "PositiveIntegers",
+       "Function",
        [
         "And",
         [
@@ -2492,20 +2501,20 @@
          [
           "Count",
           [
-           "Set",
+           "Map",
+           "NonNegativeIntegers",
            [
-            "Mod",
+            "Function",
             [
-             "Power",
-             "a",
-             "k"
+             "Mod",
+             [
+              "Power",
+              "a",
+              "k"
+             ],
+             "p"
             ],
-            "p"
-           ],
-           [
-            "Element",
-            "k",
-            "NonNegativeIntegers"
+            "k"
            ]
           ]
          ],
@@ -2520,24 +2529,24 @@
          [
           "Count",
           [
-           "Set",
+           "Map",
+           "NonNegativeIntegers",
            [
-            "Mod",
+            "Function",
             [
-             "Power",
-             "a",
-             "k"
+             "Mod",
+             [
+              "Power",
+              "a",
+              "k"
+             ],
+             [
+              "Power",
+              "p",
+              2
+             ]
             ],
-            [
-             "Power",
-             "p",
-             2
-            ]
-           ],
-           [
-            "Element",
-            "k",
-            "NonNegativeIntegers"
+            "k"
            ]
           ]
          ],
@@ -2551,7 +2560,8 @@
           ]
          ]
         ]
-       ]
+       ],
+       "a"
       ]
      ]
     ]
@@ -2576,6 +2586,8 @@
    "subclass": null,
    "heads": [
     "ConreyGenerator",
+    "Filter",
+    "Map",
     "Min",
     "Mod"
    ],
@@ -3436,19 +3448,19 @@
        1
       ],
       [
-       "Set",
+       "Map",
+       "NonNegativeIntegers",
        [
-        "Negate",
+        "Function",
         [
-         "Multiply",
-         2,
-         "n"
-        ]
-       ],
-       [
-        "Element",
-        "n",
-        "NonNegativeIntegers"
+         "Negate",
+         [
+          "Multiply",
+          2,
+          "n"
+         ]
+        ],
+        "n"
        ]
       ],
       [
@@ -3460,23 +3472,23 @@
        -1
       ],
       [
-       "Set",
+       "Map",
+       "NonNegativeIntegers",
        [
-        "Subtract",
+        "Function",
         [
-         "Negate",
+         "Subtract",
          [
-          "Multiply",
-          2,
-          "n"
-         ]
+          "Negate",
+          [
+           "Multiply",
+           2,
+           "n"
+          ]
+         ],
+         1
         ],
-        1
-       ],
-       [
-        "Element",
-        "n",
-        "NonNegativeIntegers"
+        "n"
        ]
       ]
      ]
@@ -4467,15 +4479,13 @@
      "q"
     ],
     [
-     "Set",
-     "chi",
+     "Filter",
      [
-      "Element",
-      "chi",
-      [
-       "DirichletGroup",
-       "q"
-      ],
+      "DirichletGroup",
+      "q"
+     ],
+     [
+      "Function",
       [
        "ForAll",
        [
@@ -4541,7 +4551,8 @@
          ]
         ]
        ]
-      ]
+      ],
+      "chi"
      ]
     ]
    ],
@@ -4559,6 +4570,7 @@
     "CongruentMod",
     "DirichletGroup",
     "Divides",
+    "Filter",
     "GCD",
     "PrimitiveDirichletCharacters"
    ],

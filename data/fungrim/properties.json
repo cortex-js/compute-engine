@@ -262,17 +262,16 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
-    "n",
+    "Filter",
+    "Integers",
     [
-     "Element",
-     "n",
-     "Integers",
+     "Function",
      [
       "NotEqual",
       "n",
       0
-     ]
+     ],
+     "n"
     ]
    ],
    "assumptions": null,
@@ -426,31 +425,31 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
+    "PSL2Z",
     [
-     "ModularGroupAction",
-     "gamma",
+     "Function",
      [
-      "Exp",
+      "ModularGroupAction",
+      "gamma",
       [
-       "Divide",
+       "Exp",
        [
-        "Multiply",
+        "Divide",
         [
          "Multiply",
-         2,
-         "Pi"
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ],
+         "ImaginaryUnit"
         ],
-        "ImaginaryUnit"
-       ],
-       3
+        3
+       ]
       ]
-     ]
-    ],
-    [
-     "Element",
-     "gamma",
-     "PSL2Z"
+     ],
+     "gamma"
     ]
    ],
    "assumptions": null,
@@ -899,23 +898,23 @@
     ]
    ],
    "value": [
-    "Set",
+    "Map",
     [
-     "DirichletLZero",
-     "n",
-     "chi"
+     "SetMinus",
+     "Integers",
+     [
+      "Set",
+      0
+     ]
     ],
     [
-     "Element",
-     "n",
+     "Function",
      [
-      "SetMinus",
-      "Integers",
-      [
-       "Set",
-       0
-      ]
-     ]
+      "DirichletLZero",
+      "n",
+      "chi"
+     ],
+     "n"
     ]
    ],
    "assumptions": [
@@ -1018,19 +1017,19 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
+    "PositiveIntegers",
     [
-     "Negate",
+     "Function",
      [
-      "Multiply",
-      2,
-      "n"
-     ]
-    ],
-    [
-     "Element",
-     "n",
-     "PositiveIntegers"
+      "Negate",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ],
+     "n"
     ]
    ],
    "assumptions": null,
@@ -1052,16 +1051,16 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
+    "Integers",
     [
-     "Multiply",
-     "Pi",
+     "Function",
+     [
+      "Multiply",
+      "Pi",
+      "n"
+     ],
      "n"
-    ],
-    [
-     "Element",
-     "n",
-     "Integers"
     ]
    ],
    "assumptions": null,
@@ -1326,27 +1325,27 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
     [
-     "Cos",
-     [
-      "Multiply",
-      [
-       "Divide",
-       "k",
-       "n"
-      ],
-      "Pi"
-     ]
+     "Range",
+     0,
+     "n"
     ],
     [
-     "Element",
-     "k",
+     "Function",
      [
-      "Range",
-      0,
-      "n"
-     ]
+      "Cos",
+      [
+       "Multiply",
+       [
+        "Divide",
+        "k",
+        "n"
+       ],
+       "Pi"
+      ]
+     ],
+     "k"
     ]
    ],
    "assumptions": [
@@ -1606,15 +1605,15 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
+    "NonNegativeIntegers",
     [
-     "DigammaFunctionZero",
+     "Function",
+     [
+      "DigammaFunctionZero",
+      "n"
+     ],
      "n"
-    ],
-    [
-     "Element",
-     "n",
-     "NonNegativeIntegers"
     ]
    ],
    "assumptions": null,
@@ -1765,36 +1764,43 @@
    "value": [
     "Union",
     [
-     "Set",
+     "Map",
+     "PositiveIntegers",
      [
-      "Negate",
+      "Function",
       [
-       "Multiply",
-       2,
+       "Negate",
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ],
+      "n"
+     ]
+    ],
+    [
+     "Map",
+     [
+      "Filter",
+      "Integers",
+      [
+       "Function",
+       [
+        "NotEqual",
+        "n",
+        0
+       ],
        "n"
       ]
      ],
      [
-      "Element",
-      "n",
-      "PositiveIntegers"
-     ]
-    ],
-    [
-     "Set",
-     [
-      "RiemannZetaZero",
-      "n"
-     ],
-     [
-      "Element",
-      "n",
-      "Integers",
+      "Function",
       [
-       "NotEqual",
-       "n",
-       0
-      ]
+       "RiemannZetaZero",
+       "n"
+      ],
+      "n"
      ]
     ]
    ],
@@ -2204,39 +2210,39 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
     [
-     "Cos",
+     "Range",
+     1,
+     "n"
+    ],
+    [
+     "Function",
      [
-      "Multiply",
+      "Cos",
       [
-       "Divide",
+       "Multiply",
        [
-        "Subtract",
+        "Divide",
+        [
+         "Subtract",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         1
+        ],
         [
          "Multiply",
          2,
-         "k"
-        ],
-        1
+         "n"
+        ]
        ],
-       [
-        "Multiply",
-        2,
-        "n"
-       ]
-      ],
-      "Pi"
-     ]
-    ],
-    [
-     "Element",
-     "k",
-     [
-      "Range",
-      1,
-      "n"
-     ]
+       "Pi"
+      ]
+     ],
+     "k"
     ]
    ],
    "assumptions": [
@@ -2731,19 +2737,19 @@
      1
     ],
     [
-     "Set",
+     "Map",
+     "PositiveIntegers",
      [
-      "Negate",
+      "Function",
       [
-       "Multiply",
-       2,
-       "n"
-      ]
-     ],
-     [
-      "Element",
-      "n",
-      "PositiveIntegers"
+       "Negate",
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ],
+      "n"
      ]
     ],
     [
@@ -2763,19 +2769,19 @@
      ]
     ],
     [
-     "Set",
+     "Map",
+     "NonNegativeIntegers",
      [
-      "Negate",
+      "Function",
       [
-       "Multiply",
-       2,
-       "n"
-      ]
-     ],
-     [
-      "Element",
-      "n",
-      "NonNegativeIntegers"
+       "Negate",
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ],
+      "n"
      ]
     ],
     [
@@ -2787,23 +2793,23 @@
      -1
     ],
     [
-     "Set",
+     "Map",
+     "NonNegativeIntegers",
      [
-      "Subtract",
+      "Function",
       [
-       "Negate",
+       "Subtract",
        [
-        "Multiply",
-        2,
-        "n"
-       ]
+        "Negate",
+        [
+         "Multiply",
+         2,
+         "n"
+        ]
+       ],
+       1
       ],
-      1
-     ],
-     [
-      "Element",
-      "n",
-      "NonNegativeIntegers"
+      "n"
      ]
     ]
    ],
@@ -2959,20 +2965,27 @@
     1
    ],
    "value": [
-    "Set",
+    "Map",
     [
-     "RiemannZetaZero",
-     "n"
-    ],
-    [
-     "Element",
-     "n",
+     "Filter",
      "Integers",
      [
-      "NotEqual",
-      "n",
-      0
+      "Function",
+      [
+       "NotEqual",
+       "n",
+       0
+      ],
+      "n"
      ]
+    ],
+    [
+     "Function",
+     [
+      "RiemannZetaZero",
+      "n"
+     ],
+     "n"
     ]
    ],
    "assumptions": null,
@@ -3120,21 +3133,28 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
     [
-     "Multiply",
-     "Pi",
-     "n"
-    ],
-    [
-     "Element",
-     "n",
+     "Filter",
      "Integers",
      [
-      "NotEqual",
-      "n",
-      0
+      "Function",
+      [
+       "NotEqual",
+       "n",
+       0
+      ],
+      "n"
      ]
+    ],
+    [
+     "Function",
+     [
+      "Multiply",
+      "Pi",
+      "n"
+     ],
+     "n"
     ]
    ],
    "assumptions": null,
@@ -3161,38 +3181,38 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
     [
-     "Cos",
+     "Range",
+     0,
      [
-      "Multiply",
+      "Floor",
       [
        "Divide",
-       [
-        "Multiply",
-        2,
-        "k"
-       ],
-       "n"
-      ],
-      "Pi"
+       "n",
+       2
+      ]
      ]
     ],
     [
-     "Element",
-     "k",
+     "Function",
      [
-      "Range",
-      0,
+      "Cos",
       [
-       "Floor",
+       "Multiply",
        [
         "Divide",
-        "n",
-        2
-       ]
+        [
+         "Multiply",
+         2,
+         "k"
+        ],
+        "n"
+       ],
+       "Pi"
       ]
-     ]
+     ],
+     "k"
     ]
    ],
    "assumptions": [
@@ -3354,23 +3374,23 @@
      ]
     ],
     [
-     "Set",
+     "Map",
      [
-      "DirichletLZero",
-      "n",
-      "chi"
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
      ],
      [
-      "Element",
-      "n",
+      "Function",
       [
-       "SetMinus",
-       "Integers",
-       [
-        "Set",
-        0
-       ]
-      ]
+       "DirichletLZero",
+       "n",
+       "chi"
+      ],
+      "n"
      ]
     ]
    ],
@@ -3670,23 +3690,23 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
+    "Integers",
     [
-     "Add",
+     "Function",
      [
-      "Arctan",
-      "z"
+      "Add",
+      [
+       "Arctan",
+       "z"
+      ],
+      [
+       "Multiply",
+       "Pi",
+       "n"
+      ]
      ],
-     [
-      "Multiply",
-      "Pi",
-      "n"
-     ]
-    ],
-    [
-     "Element",
-     "n",
-     "Integers"
+     "n"
     ]
    ],
    "assumptions": [
@@ -3790,31 +3810,31 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
     [
-     "Cos",
-     [
-      "Multiply",
-      [
-       "Divide",
-       "k",
-       [
-        "Add",
-        "n",
-        1
-       ]
-      ],
-      "Pi"
-     ]
+     "Range",
+     1,
+     "n"
     ],
     [
-     "Element",
-     "k",
+     "Function",
      [
-      "Range",
-      1,
-      "n"
-     ]
+      "Cos",
+      [
+       "Multiply",
+       [
+        "Divide",
+        "k",
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ],
+       "Pi"
+      ]
+     ],
+     "k"
     ]
    ],
    "assumptions": [
@@ -3910,29 +3930,36 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
     [
-     "LambertW",
-     "z",
-     "k"
-    ],
-    [
-     "Element",
-     "k",
+     "Filter",
      "Integers",
      [
-      "Or",
+      "Function",
       [
-       "NotEqual",
-       "z",
-       0
+       "Or",
+       [
+        "NotEqual",
+        "z",
+        0
+       ],
+       [
+        "Equal",
+        "k",
+        0
+       ]
       ],
-      [
-       "Equal",
-       "k",
-       0
-      ]
+      "k"
      ]
+    ],
+    [
+     "Function",
+     [
+      "LambertW",
+      "z",
+      "k"
+     ],
+     "k"
     ]
    ],
    "assumptions": [
@@ -3987,46 +4014,46 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
     [
-     "Cos",
+     "Range",
+     1,
      [
-      "Multiply",
+      "Floor",
       [
        "Divide",
        [
-        "Subtract",
-        [
-         "Multiply",
-         2,
-         "k"
-        ],
+        "Add",
+        "n",
         1
        ],
-       "n"
-      ],
-      "Pi"
+       2
+      ]
      ]
     ],
     [
-     "Element",
-     "k",
+     "Function",
      [
-      "Range",
-      1,
+      "Cos",
       [
-       "Floor",
+       "Multiply",
        [
         "Divide",
         [
-         "Add",
-         "n",
+         "Subtract",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
          1
         ],
-        2
-       ]
+        "n"
+       ],
+       "Pi"
       ]
-     ]
+     ],
+     "k"
     ]
    ],
    "assumptions": [
@@ -4216,32 +4243,32 @@
    "path": null,
    "condition": null,
    "value": [
-    "Set",
+    "Map",
+    "NonNegativeIntegers",
     [
-     "Interval",
+     "Function",
      [
-      "Open",
+      "Interval",
       [
-       "Subtract",
+       "Open",
+       [
+        "Subtract",
+        [
+         "Negate",
+         "n"
+        ],
+        1
+       ]
+      ],
+      [
+       "Open",
        [
         "Negate",
         "n"
-       ],
-       1
+       ]
       ]
      ],
-     [
-      "Open",
-      [
-       "Negate",
-       "n"
-      ]
-     ]
-    ],
-    [
-     "Element",
-     "n",
-     "NonNegativeIntegers"
+     "n"
     ]
    ],
    "assumptions": null,

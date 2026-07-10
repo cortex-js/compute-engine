@@ -3076,28 +3076,28 @@
      "NotElement",
      "z",
      [
-      "Set",
+      "Map",
+      "Integers",
       [
-       "Divide",
+       "Function",
        [
-        "Multiply",
+        "Divide",
         [
-         "Add",
+         "Multiply",
          [
-          "Multiply",
-          2,
-          "n"
+          "Add",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          1
          ],
-         1
+         "Pi"
         ],
-        "Pi"
+        2
        ],
-       2
-      ],
-      [
-       "Element",
-       "n",
-       "Integers"
+       "n"
       ]
      ]
     ]
@@ -3108,7 +3108,7 @@
     "Sin",
     "Tan"
    ],
-   "guardLevel": "complex-domain",
+   "guardLevel": "undischargeable",
    "flavor": null,
    "references": null,
    "topics": [
@@ -3132,28 +3132,28 @@
      "RealNumbers"
     ],
     [
-     "Set",
+     "Map",
+     "Integers",
      [
-      "Multiply",
-      "Pi",
+      "Function",
       [
-       "Subtract",
+       "Multiply",
+       "Pi",
        [
-        "Multiply",
-        2,
-        "n"
-       ],
-       [
-        "Divide",
-        1,
-        2
+        "Subtract",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
        ]
-      ]
-     ],
-     [
-      "Element",
-      "n",
-      "Integers"
+      ],
+      "n"
      ]
     ]
    ],
@@ -3163,6 +3163,7 @@
    "subclass": null,
    "heads": [
     "ArgMin",
+    "Map",
     "Sin"
    ],
    "guardLevel": "none",
@@ -3588,28 +3589,28 @@
      "RealNumbers"
     ],
     [
-     "Set",
+     "Map",
+     "Integers",
      [
-      "Multiply",
-      "Pi",
+      "Function",
       [
-       "Add",
+       "Multiply",
+       "Pi",
        [
-        "Multiply",
-        2,
-        "n"
-       ],
-       [
-        "Divide",
-        1,
-        2
+        "Add",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
        ]
-      ]
-     ],
-     [
-      "Element",
-      "n",
-      "Integers"
+      ],
+      "n"
      ]
     ]
    ],
@@ -3619,6 +3620,7 @@
    "subclass": null,
    "heads": [
     "ArgMax",
+    "Map",
     "Sin"
    ],
    "guardLevel": "none",

@@ -1425,35 +1425,35 @@
      "ModularGroupFundamentalDomain"
     ],
     [
-     "Set",
+     "Map",
      [
-      "Exp",
+      "Interval",
       [
-       "Multiply",
-       "ImaginaryUnit",
-       "theta"
+       "Divide",
+       "Pi",
+       2
+      ],
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       3
       ]
      ],
      [
-      "Element",
-      "theta",
+      "Function",
       [
-       "Interval",
+       "Exp",
        [
-        "Divide",
-        "Pi",
-        2
-       ],
-       [
-        "Divide",
-        [
-         "Multiply",
-         2,
-         "Pi"
-        ],
-        3
+        "Multiply",
+        "ImaginaryUnit",
+        "theta"
        ]
-      ]
+      ],
+      "theta"
      ]
     ]
    ],
@@ -1477,6 +1477,7 @@
    "heads": [
     "EisensteinE",
     "Exp",
+    "Map",
     "ModularGroupFundamentalDomain",
     "Zeros"
    ],
@@ -1889,26 +1890,26 @@
      [
       "Infimum",
       [
-       "Set",
+       "Map",
        [
-        "Abs",
-        "s"
+        "SetMinus",
+        [
+         "Lattice",
+         1,
+         "tau"
+        ],
+        [
+         "Set",
+         0
+        ]
        ],
        [
-        "Element",
-        "s",
+        "Function",
         [
-         "SetMinus",
-         [
-          "Lattice",
-          1,
-          "tau"
-         ],
-         [
-          "Set",
-          0
-         ]
-        ]
+         "Abs",
+         "s"
+        ],
+        "s"
        ]
       ]
      ]
@@ -3329,26 +3330,26 @@
      [
       "Infimum",
       [
-       "Set",
+       "Map",
        [
-        "Abs",
-        "s"
+        "SetMinus",
+        [
+         "Lattice",
+         1,
+         "tau"
+        ],
+        [
+         "Set",
+         0
+        ]
        ],
        [
-        "Element",
-        "s",
+        "Function",
         [
-         "SetMinus",
-         [
-          "Lattice",
-          1,
-          "tau"
-         ],
-         [
-          "Set",
-          0
-         ]
-        ]
+         "Abs",
+         "s"
+        ],
+        "s"
        ]
       ]
      ]

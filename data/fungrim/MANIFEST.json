@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "generated": "2026-07-09",
+  "generated": "2026-07-10",
   "generator": "grim2mathjson 0.1.0",
   "upstream": {
     "name": "fungrim",
     "repository": "https://github.com/arnog/fungrim",
     "branch": "grim2mathjson",
-    "commit": "e020d76abb6db8b0fe592fdd2d52c296747bdada",
+    "commit": "4b883302ea7fa0e9a8a0418a68eb077f09abad74",
     "parent": {
       "repository": "https://github.com/fredrik-johansson/fungrim",
       "commit": "b7c3ca6e565e1058638cab6ba2bc811090296767",
@@ -28,22 +28,21 @@
     "skippedRecords": 448,
     "symbolDefinitionEntries": 366,
     "shellDeclarations": 132,
-    "existingCESymbols": 143,
+    "existingCESymbols": 145,
     "topicFiles": 57
   },
   "classCounts": {
-    "identity": 1226,
+    "identity": 1228,
     "inequality": 242,
     "logical": 179,
-    "other": 2,
     "representation": 459,
     "specific-value": 443
   },
   "guardLevelCounts": {
     "none": 681,
     "real-simple": 546,
-    "complex-domain": 1283,
-    "undischargeable": 41
+    "complex-domain": 1281,
+    "undischargeable": 43
   },
   "skipReasons": {
     "symbol-definition": 366,

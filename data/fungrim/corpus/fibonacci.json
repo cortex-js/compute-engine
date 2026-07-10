@@ -1450,12 +1450,10 @@
     [
      "Count",
      [
-      "Set",
-      "k",
+      "Filter",
+      "Integers",
       [
-       "Element",
-       "k",
-       "Integers",
+       "Function",
        [
         "Divides",
         "n",
@@ -1463,7 +1461,8 @@
          "Fibonacci",
          "k"
         ]
-       ]
+       ],
+       "k"
       ]
      ]
     ],
@@ -1491,7 +1490,8 @@
    "subclass": null,
    "heads": [
     "Divides",
-    "Fibonacci"
+    "Fibonacci",
+    "Filter"
    ],
    "guardLevel": "real-simple",
    "flavor": null,
@@ -2432,26 +2432,33 @@
    "formula": [
     "Equal",
     [
-     "Set",
+     "Map",
      [
-      "Fibonacci",
-      "n"
-     ],
-     [
-      "Element",
-      "n",
+      "Filter",
       "NonNegativeIntegers",
       [
-       "Element",
+       "Function",
        [
-        "Sqrt",
+        "Element",
         [
-         "Fibonacci",
-         "n"
-        ]
+         "Sqrt",
+         [
+          "Fibonacci",
+          "n"
+         ]
+        ],
+        "Integers"
        ],
-       "Integers"
+       "n"
       ]
+     ],
+     [
+      "Function",
+      [
+       "Fibonacci",
+       "n"
+      ],
+      "n"
      ]
     ],
     [
@@ -2485,7 +2492,9 @@
    "class": "specific-value",
    "subclass": null,
    "heads": [
-    "Fibonacci"
+    "Fibonacci",
+    "Filter",
+    "Map"
    ],
    "guardLevel": "none",
    "flavor": null,
@@ -2502,15 +2511,15 @@
      "Element",
      "x",
      [
-      "Set",
+      "Map",
+      "NonNegativeIntegers",
       [
-       "Fibonacci",
+       "Function",
+       [
+        "Fibonacci",
+        "n"
+       ],
        "n"
-      ],
-      [
-       "Element",
-       "n",
-       "NonNegativeIntegers"
       ]
      ]
     ],
@@ -2569,7 +2578,8 @@
    "class": "logical",
    "subclass": null,
    "heads": [
-    "Fibonacci"
+    "Fibonacci",
+    "Map"
    ],
    "guardLevel": "real-simple",
    "flavor": null,

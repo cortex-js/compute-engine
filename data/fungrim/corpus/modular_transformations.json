@@ -346,12 +346,10 @@
     "Equal",
     "ModularGroupFundamentalDomain",
     [
-     "Set",
-     "tau",
+     "Filter",
+     "HH",
      [
-      "Element",
-      "tau",
-      "HH",
+      "Function",
       [
        "And",
        [
@@ -410,7 +408,8 @@
          ]
         ]
        ]
-      ]
+      ],
+      "tau"
      ]
     ]
    ],
@@ -420,6 +419,7 @@
    "subclass": null,
    "heads": [
     "Abs",
+    "Filter",
     "HH",
     "ModularGroupFundamentalDomain",
     "Real"
