@@ -476,6 +476,44 @@ under CE names: `NthPrime`, `NPartition`, `PowerMod`, `PrimitiveRoot`,
 - **Hypothesis testing:** `MeanTest` etc. — undeclared; only worth pursuing
   if the statistics track (GP items) calls for it.
 
+#### B15. Parameter-conditional results — producers never emit `Which`
+
+The **representation** side is done: `Which` stays inert while its conditions
+are undecidable, resolves once `ce.assume()` decides one (assuming `a > 2`
+collapses `Which(|a| < 1, 2π, |a| > 1, 0)` to `0`), and serializes to a LaTeX
+`cases` environment. The gap is the **producer** side — no operation ever
+*returns* a parameter-conditioned result; each either picks the generic
+branch, silently drops the validity condition, or stays inert:
+
+- **Definite integration:** results that are genuinely piecewise in a free
+  parameter stay inert. Motivating case (2026-07-10):
+  `∫_{−π}^{π} (1 − x·cos t)/(x² − 2x·cos t + 1) dt` = `2π` for `|x| < 1`,
+  `0` for `|x| > 1` — CE returns the unevaluated integral (correctly, since
+  emitting either branch would be wrong; `.N()` at concrete `x` is right).
+- **Solve:** the trig rules admit symbolic ratios unconditionally —
+  `a·sin(x) + b = 0 → arcsin(−b/a)` is emitted without recording the
+  `|b/a| ≤ 1` validity condition the rule's own guard checks for numeric
+  ratios. Same for the extraneous-root conditions on radical equations.
+- **Sum/Limit:** convergence conditions are dropped or block evaluation —
+  `Σ xⁿ = 1/(1−x)` holds only for `|x| < 1`; a conditional result would
+  let the closed form be returned with its region attached.
+
+**Design questions to settle first:** emit `Which` directly vs. a dedicated
+wrapper head (Mathematica's `ConditionalExpression` — a value with a validity
+condition — is semantically different from a piecewise case split, and both
+needs occur above); consult the assumption store *at emission time* so a
+conditional is produced only when the condition is genuinely undecidable; and
+decide how downstream ops (arithmetic on a `Which`, integrating one) should
+behave, since a conditional that no operation can consume just moves the
+inertness one level up. Mathematica-name policy per B14: probe CE names
+first, no aliasing.
+
+**Effort:** the wrapper/emission design is the real work (medium); each
+producer is then an incremental adopter, integration first (its
+region-splitting analysis is also the hardest part — knowing *that* the
+answer splits at `|x| = 1` requires locating the parameter values where poles
+cross the contour).
+
 ### Coverage tracks
 
 Two opt-in libraries extend coverage **without touching the core engine**:

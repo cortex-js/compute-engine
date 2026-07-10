@@ -278,7 +278,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
-      ((!sub.__a.isSame(0) && sub.__c.div(sub.__a).isNegative) ?? false),
+      // Captures of multiple operands are raw (unbound): canonicalize
+      // before arithmetic, which asserts on non-canonical expressions
+      ((!sub.__a.isSame(0) &&
+        sub.__c.canonical.div(sub.__a.canonical).isNegative) ??
+        false),
   },
 
   // a * e^(x) + c = 0
@@ -289,7 +293,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
-      ((!sub.__a.isSame(0) && sub.__c.div(sub.__a).isNegative) ?? false) &&
+      ((!sub.__a.isSame(0) &&
+        sub.__c.canonical.div(sub.__a.canonical).isNegative) ??
+        false) &&
       !sub.__a.has('_x') &&
       !sub.__c.has('_x'),
   },
@@ -482,7 +488,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const a = sub.__a;
       const b = sub.__b;
       if (!a || !b) return false;
-      const ratio = b.div(a);
+      const ratio = b.canonical.div(a.canonical);
       return ratio.isNonPositive ?? true; // Allow if we can't determine sign
     },
   },
@@ -525,7 +531,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const a = sub.__a;
       const b = sub.__b;
       if (!a || a.isSame(0)) return false;
-      const ratio = b.div(a).neg();
+      const ratio = b.canonical.div(a.canonical).neg();
       const val = numericValue(ratio);
       if (val === undefined) return true; // Allow symbolic ratios
       if (typeof val === 'number') return Math.abs(val) <= 1;
@@ -548,7 +554,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const a = sub.__a;
       const b = sub.__b;
       if (!a || a.isSame(0)) return false;
-      const ratio = b.div(a).neg();
+      const ratio = b.canonical.div(a.canonical).neg();
       const val = numericValue(ratio);
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
@@ -600,7 +606,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const a = sub.__a;
       const b = sub.__b;
       if (!a || a.isSame(0)) return false;
-      const ratio = b.div(a).neg();
+      const ratio = b.canonical.div(a.canonical).neg();
       const val = numericValue(ratio);
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
@@ -619,7 +625,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const a = sub.__a;
       const b = sub.__b;
       if (!a || a.isSame(0)) return false;
-      const ratio = b.div(a).neg();
+      const ratio = b.canonical.div(a.canonical).neg();
       const val = numericValue(ratio);
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;

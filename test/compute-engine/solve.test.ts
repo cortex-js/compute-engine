@@ -715,6 +715,19 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
     // cos(x) can only be in [-1, 1]
     expect(result).toEqual([]);
   });
+
+  // Regression: multi-operand wildcard captures (__a = -2x, __b = x²+1) are
+  // raw expressions; the rule conditions used to throw "Not canonical" doing
+  // arithmetic on them, logging errors and returning no solutions.
+  test('should solve x² - 2x·cos(t) + 1 = 0 for t (symbolic coefficients)', () => {
+    const e = expr('x^2 - 2x\\cos t + 1 = 0');
+    const result = e.solve('t')?.map((r) => r.toString());
+    // t = ±arccos((x² + 1)/(2x))
+    expect(result).toEqual([
+      'arccos(1/2 * x + 1 / (2x))',
+      '-arccos(1/2 * x + 1 / (2x))',
+    ]);
+  });
 });
 
 // Tests for absolute-value equations
