@@ -411,7 +411,10 @@ function cancelCompoundUnit(
   if (!flat) return null;
   const cancelled = cancelUnitFactors(flat);
   if (!cancelled) return null;
-  if (cancelled.magnitudeScale === 1 && factorMapsEqual(cancelled.factors, flat))
+  if (
+    cancelled.magnitudeScale === 1 &&
+    factorMapsEqual(cancelled.factors, flat)
+  )
     return null;
   return {
     magnitudeScale: cancelled.magnitudeScale,

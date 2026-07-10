@@ -246,9 +246,7 @@ export class Product {
 
         if (isOne(exp)) {
           this.coefficient = this.coefficient.mul(num);
-        } else if (
-          exactPowExceedsBudget(this.engine._numericValue(num), exp)
-        ) {
+        } else if (exactPowExceedsBudget(this.engine._numericValue(num), exp)) {
           // Materializing this exact power would exceed the digit budget:
           // keep it symbolic (an inert Power term) rather than folding it
           // into the coefficient — mirrors the guard in arithmetic-power.ts,

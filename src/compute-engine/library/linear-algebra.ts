@@ -2444,7 +2444,10 @@ function tensorToRationalMatrix(
       const r = asRational(boxed);
       if (r === undefined) return undefined;
       const [n, d] = r;
-      row.push([typeof n === 'bigint' ? n : BigInt(n), typeof d === 'bigint' ? d : BigInt(d)]);
+      row.push([
+        typeof n === 'bigint' ? n : BigInt(n),
+        typeof d === 'bigint' ? d : BigInt(d),
+      ]);
     }
     matrix.push(row);
   }
@@ -2477,8 +2480,7 @@ function exactRationalRref(matrix: BigRat[][]): {
     }
     if (sel === -1) continue;
 
-    if (sel !== pivotRow)
-      [out[pivotRow], out[sel]] = [out[sel], out[pivotRow]];
+    if (sel !== pivotRow) [out[pivotRow], out[sel]] = [out[sel], out[pivotRow]];
 
     // Normalize the pivot row so the pivot entry is 1.
     const pivot = out[pivotRow][col];

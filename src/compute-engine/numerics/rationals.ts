@@ -348,8 +348,5 @@ export function reduceRationalRoot(
   const [num, den] = n;
   const [nFactor, nRoot] = canonicalInteger(num, exponent);
   const [dFactor, dRoot] = canonicalInteger(den, exponent);
-  return [
-    reducedRational([nFactor, dFactor]),
-    reducedRational([nRoot, dRoot]),
-  ];
+  return [reducedRational([nFactor, dFactor]), reducedRational([nRoot, dRoot])];
 }

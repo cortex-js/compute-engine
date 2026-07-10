@@ -26,9 +26,7 @@ export function holdMap(
   // Ellipsis fold barrier: a `ContinuationPlaceholder` operand marks a
   // notational sum/product; do not lift nested associative operands (it would
   // tear a coefficient out of an anchor like the `2n` in `Multiply(2, n)`).
-  const hasContinuation = xs.some(
-    (x) => isContinuationOperand(x)
-  );
+  const hasContinuation = xs.some((x) => isContinuationOperand(x));
   if (def?.associative && !hasContinuation)
     xs = flatten(xs, expr.operator, false);
 
@@ -69,9 +67,7 @@ export async function holdMapAsync(
   // f(a, f(b, c), d) -> f(a, b, c, d)
   // Ellipsis fold barrier (see `holdMap`): a `ContinuationPlaceholder` operand
   // marks a notational sum/product; keep nested associative anchors intact.
-  const hasContinuation = xs.some(
-    (x) => isContinuationOperand(x)
-  );
+  const hasContinuation = xs.some((x) => isContinuationOperand(x));
   if (def?.associative && !hasContinuation)
     xs = flatten(xs, expr.operator, false);
 

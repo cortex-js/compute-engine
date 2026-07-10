@@ -1,5 +1,9 @@
 import type { Expression } from '../global-types.js';
-import { isFunction, isNumber, isSymbol } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import { collectSymbols, freshSymbolName } from './solver-utils.js';
 
 /**
@@ -38,9 +42,7 @@ interface Continuation {
 
 /** Exact real integer/rational literal (samples are admitted only as these). */
 function isExactRationalLiteral(x: Expression): boolean {
-  return (
-    isNumber(x) && x.isExact && x.isReal === true && x.isRational === true
-  );
+  return isNumber(x) && x.isExact && x.isReal === true && x.isRational === true;
 }
 
 /**
@@ -342,8 +344,7 @@ function ratOf(n: bigint, d: bigint): Rational {
 
 const RAT_ZERO = ratOf(0n, 1n);
 const ratIsZero = (a: Rational): boolean => a.n === 0n;
-const ratEq = (a: Rational, b: Rational): boolean =>
-  a.n === b.n && a.d === b.d;
+const ratEq = (a: Rational, b: Rational): boolean => a.n === b.n && a.d === b.d;
 const ratAdd = (a: Rational, b: Rational): Rational =>
   ratOf(a.n * b.d + b.n * a.d, a.d * b.d);
 const ratSub = (a: Rational, b: Rational): Rational =>
@@ -389,11 +390,9 @@ function fromRational(ce: Expression['engine'], r: Rational): Expression {
  * Returns the coefficients and order `L`, or `null` when the sequence has no
  * linear complexity (empty input).
  */
-function berlekampMassey(
-  s: Rational[]
-): { rec: Rational[]; L: number } | null {
+function berlekampMassey(s: Rational[]): { rec: Rational[]; L: number } | null {
   const n = s.length;
-  let c: Rational[] = [ratOf(1n, 1n)];
+  const c: Rational[] = [ratOf(1n, 1n)];
   let b: Rational[] = [ratOf(1n, 1n)];
   let L = 0;
   let m = 1;
@@ -439,7 +438,8 @@ function recurrenceReproduces(
 ): boolean {
   for (let i = L; i < s.length; i++) {
     let acc = RAT_ZERO;
-    for (let j = 1; j <= L; j++) acc = ratAdd(acc, ratMul(rec[j - 1], s[i - j]));
+    for (let j = 1; j <= L; j++)
+      acc = ratAdd(acc, ratMul(rec[j - 1], s[i - j]));
     if (!ratEq(acc, s[i])) return false;
   }
   return true;
@@ -519,9 +519,7 @@ function solveLinearSystem(
           .simplify();
     }
   }
-  return A.map((row, i) =>
-    ce.function('Divide', [row[L], row[i]]).simplify()
-  );
+  return A.map((row, i) => ce.function('Divide', [row[L], row[i]]).simplify());
 }
 
 /**
@@ -541,7 +539,12 @@ function fibonacciBody(
   if (L !== 2) return null;
   if (!(ratEq(rec[0], ratOf(1n, 1n)) && ratEq(rec[1], ratOf(1n, 1n))))
     return null;
-  if (!ce.function('Fibonacci', [ce.number(5)]).evaluate().isSame(5))
+  if (
+    !ce
+      .function('Fibonacci', [ce.number(5)])
+      .evaluate()
+      .isSame(5)
+  )
     return null;
   for (let i = 0; i < samples.length; i++) {
     const f = ce.function('Fibonacci', [ce.number(i + 1)]).evaluate();
@@ -576,7 +579,9 @@ function rSolveBody(
       const shift = L - j;
       const arg = shift === 0 ? n : ce.function('Add', [n, ce.number(shift)]);
       const call = ce.function('a', [arg]);
-      rhsTerms.push(coef.isSame(1) ? call : ce.function('Multiply', [coef, call]));
+      rhsTerms.push(
+        coef.isSame(1) ? call : ce.function('Multiply', [coef, call])
+      );
     }
     const equation = ce.function('Equal', [lhs, ce.function('Add', rhsTerms)]);
     const solution = ce
@@ -592,11 +597,7 @@ function rSolveBody(
       .filter((v) => /^c_\d+$/.test(v))
       .sort();
     if (constants.length !== L) return null;
-    if (
-      generalTerm.freeVariables.some(
-        (v) => v !== 'n' && !/^c_\d+$/.test(v)
-      )
-    )
+    if (generalTerm.freeVariables.some((v) => v !== 'n' && !/^c_\d+$/.test(v)))
       return null;
 
     // Basis functions B_i(n): the general term with c_i = 1 and c_{j≠i} = 0.
@@ -779,8 +780,7 @@ function findNumericUpperBound(
 ): Expression | null {
   const CAP = 100000;
   const anchorValue = anchor.N().re;
-  const increasing =
-    samples[samples.length - 1].N().re >= samples[0].N().re;
+  const increasing = samples[samples.length - 1].N().re >= samples[0].N().re;
   const name = isSymbol(index) ? index.symbol : '';
 
   for (let u = m + 1; u <= CAP; u++) {

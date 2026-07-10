@@ -411,10 +411,7 @@ function simplifyExpression(
   // `ContinuationPlaceholder` operand is a notational object. Leave it and its
   // operand structure unchanged rather than folding across the elided terms.
   //
-  if (
-    isFunction(expr) &&
-    expr.ops.some((x) => isContinuationOperand(x))
-  )
+  if (isFunction(expr) && expr.ops.some((x) => isContinuationOperand(x)))
     return steps;
 
   //

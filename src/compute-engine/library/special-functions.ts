@@ -1,4 +1,8 @@
-import type { SymbolDefinitions } from '../global-types.js';
+import type {
+  SymbolDefinitions,
+  Expression,
+  IComputeEngine,
+} from '../global-types.js';
 import { applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
@@ -39,7 +43,6 @@ import {
   agmComplex,
   polylogComplex,
 } from '../numerics/numeric-complex.js';
-import type { Expression, IComputeEngine } from '../global-types.js';
 
 /**
  * Tier-2 numeric kernels for special functions (ROADMAP item 4).
@@ -264,7 +267,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // Exact reductions (see `polylogReduce`). Evaluate the reduced form so
         // an inexact argument still numericizes (exactness contract).
         const reduced = polylogReduce(engine, s, z);
-        if (reduced !== undefined) return reduced.evaluate({ numericApproximation });
+        if (reduced !== undefined)
+          return reduced.evaluate({ numericApproximation });
 
         // Numeric kernel: integer order s ≥ 2 only (dilog/trilog/Li₄ …).
         // Other orders have no kernel here → stay symbolic.

@@ -2063,7 +2063,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: COMPARISON_PRECEDENCE,
     parse: (parser) => {
       const rhs = parser.parseGroup() ?? parser.parseToken();
-      return ['Mod', parser.error('missing', parser.index), missingIfEmpty(rhs)];
+      return [
+        'Mod',
+        parser.error('missing', parser.index),
+        missingIfEmpty(rhs),
+      ];
     },
   },
   {

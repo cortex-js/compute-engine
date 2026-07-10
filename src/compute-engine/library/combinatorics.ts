@@ -229,7 +229,9 @@ function evaluatePochhammer(
   // Symbolic first argument: explicit rising-factorial product, non-canonical.
   const factors: Expression[] = [aExpr];
   for (let i = 1; i < kn; i++)
-    factors.push(ce.function('Add', [aExpr, ce.number(i)], { structural: true }));
+    factors.push(
+      ce.function('Add', [aExpr, ce.number(i)], { structural: true })
+    );
   return ce.function('Multiply', factors, { structural: true });
 }
 

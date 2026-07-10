@@ -755,7 +755,8 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
         // squared trig itself (f(u)^(n-2)).
         const residualFactors = factors.filter((_, m) => m !== k);
         if (n === 3) residualFactors.push(base);
-        else if (n > 3) residualFactors.push(ce._fn('Power', [base, ce.number(n - 2)]));
+        else if (n > 3)
+          residualFactors.push(ce._fn('Power', [base, ce.number(n - 2)]));
         const rest =
           residualFactors.length === 0
             ? ce.One

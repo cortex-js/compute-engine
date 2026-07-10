@@ -56,7 +56,11 @@ function hasAdditiveContinuation(x: Expression): boolean {
  * enclosing `Subtract`/`Negate`. Leaves are canonicalized individually (e.g.
  * `Negate(2)` → `-2`) but never combined with one another.
  */
-function additiveTerms(x: Expression, negate: boolean, out: Expression[]): void {
+function additiveTerms(
+  x: Expression,
+  negate: boolean,
+  out: Expression[]
+): void {
   if (isFunction(x, 'Add')) {
     for (const op of x.ops) additiveTerms(op, negate, out);
     return;
@@ -113,8 +117,7 @@ export function canonicalAdd(
   // (e.g. `x + (1 + 2 + … + n)`); if a placeholder surfaced, stay inert and
   // skip the fold/sort below. (Operand order for the nested case is not
   // guaranteed to match the source.)
-  if (ops.some((x) => isContinuationOperand(x)))
-    return ce._fn('Add', ops);
+  if (ops.some((x) => isContinuationOperand(x))) return ce._fn('Add', ops);
 
   // A numeric tuple (point/vector in ℝⁿ) cannot be added to a scalar. Reject
   // `scalar + tuple` at canonicalization when provable: some operand is a

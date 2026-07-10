@@ -1039,8 +1039,8 @@ function repeatingDecimalToRational(
 
   const f = BigInt(F.length);
   const r = BigInt(R.length);
-  const WFR = BigInt((W + F + R) || '0');
-  const WF = BigInt((W + F) || '0');
+  const WFR = BigInt(W + F + R || '0');
+  const WF = BigInt(W + F || '0');
   let numerator = sign * (WFR - WF);
   let denominator = BigInt(10) ** (f + r) - BigInt(10) ** f;
 

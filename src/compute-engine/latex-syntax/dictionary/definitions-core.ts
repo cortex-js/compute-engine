@@ -134,7 +134,11 @@ function parseBaseFormNumeral(
     }
 
     const poly: MathJsonExpression =
-      terms.length === 0 ? 0 : terms.length === 1 ? terms[0] : ['Add', ...terms];
+      terms.length === 0
+        ? 0
+        : terms.length === 1
+          ? terms[0]
+          : ['Add', ...terms];
 
     return ['BaseForm', poly, baseSym];
   }
@@ -3232,9 +3236,7 @@ export function latexToDelimiterShorthand(s: string): string | undefined {
 /** Invert the index-binding call form for serialization: `["a_", sub]` →
  * `["Subscript", "a", sub]`, recursively, so an `IndexedSequence` term
  * serializes back to `a_n` notation. */
-function lowerIndexedTerm(
-  expr: MathJsonExpression | null
-): MathJsonExpression {
+function lowerIndexedTerm(expr: MathJsonExpression | null): MathJsonExpression {
   if (expr === null) return 'Nothing';
   const op = operator(expr);
   if (!op) return expr; // atom (number or symbol)

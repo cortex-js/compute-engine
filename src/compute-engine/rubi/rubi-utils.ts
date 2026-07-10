@@ -2709,7 +2709,9 @@ function reciprocalToPowerRec(
       base.ops?.length === 1
     )
       return ce.function('Power', [
-        ce.function(recip, [reciprocalToPowerRec(ce, base.ops[0], false, keepRaw)]),
+        ce.function(recip, [
+          reciprocalToPowerRec(ce, base.ops[0], false, keepRaw),
+        ]),
         exp.neg(),
       ]);
     const newBase = reciprocalToPowerRec(ce, base, frozen || !expInt, keepRaw);

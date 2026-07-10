@@ -815,7 +815,8 @@ export class RubiDriver {
       let matched: { kind: 'sin' | 'cos'; arg: Expression } | null = null;
       const rest: Expression[] = [];
       for (const f of inert.ops) {
-        const m = matched === null ? inverseSquareTrigFactor(f, variable) : null;
+        const m =
+          matched === null ? inverseSquareTrigFactor(f, variable) : null;
         if (m !== null) matched = m;
         else rest.push(f);
       }
@@ -966,18 +967,12 @@ function hasReciprocalSquareTrigCandidate(e: Expression): boolean {
     const base = e.ops[0].operator;
     const exp = e.ops[1];
     if (
-      (base === 'Csc' ||
-        base === 'csc' ||
-        base === 'Sec' ||
-        base === 'sec') &&
+      (base === 'Csc' || base === 'csc' || base === 'Sec' || base === 'sec') &&
       exp.isSame(2)
     )
       return true;
     if (
-      (base === 'Sin' ||
-        base === 'sin' ||
-        base === 'Cos' ||
-        base === 'cos') &&
+      (base === 'Sin' || base === 'sin' || base === 'Cos' || base === 'cos') &&
       exp.isSame(-2)
     )
       return true;

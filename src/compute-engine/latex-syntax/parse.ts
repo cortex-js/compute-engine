@@ -93,7 +93,9 @@ function liftIndexBinding(
   // Otherwise recurse into operands, leaving the operator head untouched.
   return [
     expr[0],
-    ...expr.slice(1).map((o) => liftIndexBinding(o as MathJsonExpression, index)),
+    ...expr
+      .slice(1)
+      .map((o) => liftIndexBinding(o as MathJsonExpression, index)),
   ] as MathJsonExpression;
 }
 
@@ -113,9 +115,7 @@ function setLeastElement(set: MathJsonExpression | null): number | undefined {
  *   - `["Power", ["Subscript", ["Set", term], sub], up]` (with upper bound)
  * where `sub` is `Equal(index, lower)` or `Element(index, set)`. Returns the
  * expression unchanged if it is not a sequence-braces pattern. */
-function parseIndexedSequence(
-  expr: MathJsonExpression
-): MathJsonExpression {
+function parseIndexedSequence(expr: MathJsonExpression): MathJsonExpression {
   let upper: MathJsonExpression | undefined;
   let inner: MathJsonExpression | null = expr;
   if (operator(expr) === 'Power') {

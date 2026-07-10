@@ -259,7 +259,9 @@ function binomialInt(n: number, k: number): number {
 function bernoulliPolyComplex(n: number, x: Complex): Complex {
   let result = C_ZERO;
   for (let k = 0; k <= n; k++)
-    result = result.add(x.pow(n - k).mul(binomialInt(n, k) * bernoulliFloat(k)));
+    result = result.add(
+      x.pow(n - k).mul(binomialInt(n, k) * bernoulliFloat(k))
+    );
   return result;
 }
 
