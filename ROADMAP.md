@@ -815,20 +815,19 @@ the store are only partially built:
   (the limit guard and `Residue` are wired to the exact Laurent kernel;
   design + record in
   [`docs/plans/2026-07-10-pole-asymptotics-design.md`](./docs/plans/2026-07-10-pole-asymptotics-design.md)).
-  Remaining rungs on the same `laurentData` API, demand-paced:
-  - **Residue at infinity** — `Res_∞ f = −Res_{s=0} f(1/s)/s²`; the
-    `seriesAtInfinity` substitution machinery already exists.
+  The follow-up rungs landed the same day: **residue at infinity**
+  (`Res_∞ f = −Res_{s=0} f(1/s)/s²`, any infinite point naming the
+  Riemann-sphere point), **signed pole limits** (convention decision:
+  directional limits at poles resolve to `±∞`, two-sided only on even
+  valuation — `lim 1/x²` at 0 is `+∞`, `lim 1/x` at 0 stays inert; no
+  `ComplexInfinity` limits; `ln`/`log` divergence rides the argument's
+  expansion), and **`Beta` pole data** via the `Γ`-quotient rewrite in the
+  kernel (`GammaLn` remains a genuine non-goal: logarithmic branch point,
+  not meromorphic). One rung remains, demand-paced:
   - **Sum-of-residues-in-a-region helper** — needs a pole-enumeration API
     over the analytic-property store.
-  - **Directional/`±∞` limits at poles** — a negative-valuation expansion is
-    deliberately not converted to `±∞` today, matching the engine-wide
-    convention that two-sided pole limits stay inert (`lim 1/x²` at 0); an
-    engine-wide convention decision, not a kernel gap.
-  - **`Beta` at its poles** — needs the `Γ`-quotient rewrite first
-    (`GammaLn` is a genuine non-goal: logarithmic branch point, not
-    meromorphic).
 
-**Effort:** (a) residual and the (c) rungs are each small-to-medium,
+**Effort:** (a) residual and the (c) rung are each small-to-medium,
 self-contained items.
 
 #### 8. Disjunctive guards (`Or`) in the assumptions system
