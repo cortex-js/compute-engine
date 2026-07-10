@@ -104,6 +104,23 @@ describe('COUNT', () => {
 
   test('Count tuple', () =>
     expect(evaluate(['Count', tuple])).toMatchInlineSnapshot(`3`));
+
+  // Stage-2 corpus-audit finding: a symbolic bound reads as NaN through
+  // `.re` and `range()` coerced it to 1, so `Count(Range(1, n))` collapsed
+  // to the wrong scalar 1. The count is indeterminate: stay inert.
+  // (Plain evaluation: materialization would first collapse the lazy range
+  // through the still-unguarded iterator channel.)
+  test('Count range with symbolic bound stays inert', () =>
+    expect(
+      exprToString(engine.expr(['Count', ['Range', 1, 'n']]).evaluate())
+    ).toMatchInlineSnapshot(`["Count", ["Range", 1, "n"]]`));
+
+  test('Count infinite range', () =>
+    expect(
+      exprToString(
+        engine.expr(['Count', ['Range', 1, { num: '+Infinity' }]]).evaluate()
+      )
+    ).toMatchInlineSnapshot(`PositiveInfinity`));
 });
 
 describe('TAKE', () => {

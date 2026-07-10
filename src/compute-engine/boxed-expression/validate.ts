@@ -2,6 +2,7 @@ import { isFiniteIndexedCollection } from '../collection-utils.js';
 
 import { flatten } from './flatten.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { parseType } from '../../common/type/parse.js';
 import { Type } from '../../common/type/types.js';
 import type {
   Expression,
@@ -283,6 +284,16 @@ export function checkNumericArgs(
       }
       if (!isValid) xs.push(ce.typeError('number', op.type, op));
       else xs.push(op);
+    } else if (
+      op.isIndexedCollection &&
+      op.isFiniteCollection === undefined &&
+      op.type.matches(parseType('indexed_collection<number>'))
+    ) {
+      // An indexed collection of numbers whose size is indeterminate (e.g.
+      // `Range(1, n)` with symbolic `n`). Accept it for broadcasting on the
+      // strength of the element type: iterating to validate the elements —
+      // what the finite branch above does — is not possible here.
+      xs.push(op);
     } else if (
       op.valueDefinition?.inferredType &&
       isSubtype('number', op.type.type)

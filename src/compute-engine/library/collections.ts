@@ -376,6 +376,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     eq: (a: Expression, b: Expression) => {
       if (a.operator !== b.operator) return false;
+      // Symbolic bounds (e.g. Range(1, n)): `range()` coerces them to 1, so
+      // the numeric comparison below would equate every symbolic range
+      // (Range(1, n) = Range(1, m) → true). Compare structurally instead;
+      // structurally different symbolic ranges are indeterminate.
+      if (hasSymbolicRangeBounds(a) || hasSymbolicRangeBounds(b)) {
+        if (!isFunction(a) || !isFunction(b) || a.nops !== b.nops)
+          return undefined;
+        return a.ops.every((op, i) => op.isSame(b.ops[i])) ? true : undefined;
+      }
       const [al, au, as] = range(a);
       const [bl, bu, bs] = range(b);
       return al === bl && au === bu && as === bs;
@@ -384,6 +393,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
+        // Symbolic bounds (e.g. Range(1, n)): the count is indeterminate —
+        // `range()` would coerce the bound to 1 and report a count of 1.
+        if (hasSymbolicRangeBounds(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return 0;
         if (!isFinite(lower) || !isFinite(upper)) return Infinity;
@@ -456,6 +468,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
+        // Symbolic bounds: whether the index is within range is indeterminate
+        if (hasSymbolicRangeBounds(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return undefined;
         const maxCount = Math.max(0, Math.floor((upper - lower) / step) + 1);
@@ -468,6 +482,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       subsetOf: (expr, target) => {
         // Note: Linspace is not considered a subset of Range
         if (target.operator === 'Range') {
+          // Symbolic bounds on either side: indeterminate
+          if (hasSymbolicRangeBounds(expr) || hasSymbolicRangeBounds(target))
+            return undefined;
           const [al, au, as] = range(expr);
           const [bl, bu, bs] = range(target);
           return al >= bl && au <= bu && as % bs === 0;
@@ -485,6 +502,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
 
       eltsgn: (expr) => {
+        // Symbolic bounds: the elements' common sign is indeterminate
+        if (hasSymbolicRangeBounds(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return 'zero';
         if (step > 0) return lower <= upper ? 'positive' : 'negative';
@@ -2698,6 +2717,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 };
+
+/**
+ * Does this `Range` expression have a bound with no concrete numeric value
+ * (e.g. `Range(1, n)` with symbolic `n`)? Such a bound reads as NaN through
+ * `.re`, and `range()` silently coerces it to 1 — so every handler that
+ * consumes `range()` must first bail to its indeterminate channel, or a
+ * symbolic range collapses to the 1-element range [1, 1, 1] (the
+ * `undefined → value` collapse class: `Count(Range(1, n))` evaluated to 1).
+ *
+ * Note the `iterator` handler is *not* guarded: iteration has no
+ * indeterminate channel, and its consumers (Reduce, each) predate this
+ * guard. A symbolic range still iterates as the collapsed [1] there.
+ */
+function hasSymbolicRangeBounds(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  return expr.ops.some((op) => Number.isNaN(op.re));
+}
 
 /**
  * Normalize the arguments of range:
