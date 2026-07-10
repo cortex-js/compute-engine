@@ -18,6 +18,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { loadCorpus, Entry } from './load';
 import { runStage1 } from './box-check';
@@ -31,12 +32,19 @@ import {
 
 const PASS_RATE_GATE = 0.99;
 
+/** Path to the committed Stage-1 report (written by report.ts to this dir). */
+const REPORT_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'validation-report.json'
+);
+
 function parseArgs(argv: string[]): {
   corpus: string;
   numeric: boolean;
   topic?: string;
   id?: string;
   seed: number;
+  check: boolean;
 } {
   const args = {
     corpus: 'data/fungrim',
@@ -44,6 +52,7 @@ function parseArgs(argv: string[]): {
     topic: undefined as string | undefined,
     id: undefined as string | undefined,
     seed: 42,
+    check: false,
   };
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
@@ -62,12 +71,70 @@ function parseArgs(argv: string[]): {
       case '--seed':
         args.seed = Number(argv[++i]);
         break;
+      case '--check':
+        args.check = true;
+        break;
       default:
         console.error(`Unknown argument: ${argv[i]}`);
         process.exit(2);
     }
   }
   return args;
+}
+
+/** Read the committed report's Stage-1 failing-entry id set. */
+function committedFailureIds(): Set<string> {
+  if (!fs.existsSync(REPORT_PATH))
+    throw new Error(
+      `No committed report at ${REPORT_PATH}; run without --check to generate one.`
+    );
+  const report = JSON.parse(fs.readFileSync(REPORT_PATH, 'utf8'));
+  const failures: { id: string }[] = report?.stage1?.failures ?? [];
+  return new Set(failures.map((f) => f.id));
+}
+
+/**
+ * Drift gate (`--check`): compare the fresh Stage-1 failure set against the
+ * committed report WITHOUT rewriting it. This is the hard CI gate that the
+ * old soft pass-rate threshold (PASS_RATE_GATE) let a multi-entry drift slip
+ * under. Exit codes:
+ *   1  newly-failing entries (regressions) — investigate and fix.
+ *   1  only newly-passing entries — the committed report is stale; regenerate
+ *      it (`npx tsx scripts/fungrim/validate.ts --corpus data/fungrim`) and
+ *      commit. Newly-passing is never a correctness problem, but it is failed
+ *      (not merely warned) on purpose: a soft warning is exactly what allowed
+ *      the baseline to silently drift out of date. The remedy is mechanical.
+ *   0  fresh failure set matches the committed report exactly.
+ * The `--check` run itself never writes the report, so CI stays clean.
+ */
+function runCheckGate(freshFailureIds: Set<string>): never {
+  const committed = committedFailureIds();
+  const newlyFailing = [...freshFailureIds].filter((id) => !committed.has(id)).sort();
+  const newlyPassing = [...committed].filter((id) => !freshFailureIds.has(id)).sort();
+
+  if (newlyFailing.length === 0 && newlyPassing.length === 0) {
+    console.log(
+      `\n[--check] OK — Stage-1 failure set matches the committed report ` +
+        `(${freshFailureIds.size} failing).`
+    );
+    process.exit(0);
+  }
+  if (newlyFailing.length > 0) {
+    console.error(
+      `\n[--check] REGRESSION — ${newlyFailing.length} entr` +
+        `${newlyFailing.length === 1 ? 'y' : 'ies'} newly failing Stage 1:`
+    );
+    for (const id of newlyFailing) console.error(`  ${id}`);
+  }
+  if (newlyPassing.length > 0) {
+    console.error(
+      `\n[--check] STALE REPORT — ${newlyPassing.length} entr` +
+        `${newlyPassing.length === 1 ? 'y' : 'ies'} in the committed report ` +
+        `now pass: ${newlyPassing.join(', ')}.\n` +
+        `  Regenerate: npx tsx scripts/fungrim/validate.ts --corpus data/fungrim`
+    );
+  }
+  process.exit(1);
 }
 
 function main(): void {
@@ -94,6 +161,18 @@ function main(): void {
   // --- Stage 1 ---------------------------------------------------------
   const stage1 = runStage1(corpus, filter);
   printStage1Summary(stage1);
+
+  // --- Drift gate (--check): compare against the committed report, do not
+  //     rewrite it, and exit non-zero on any divergence. -----------------
+  if (args.check) {
+    if (args.topic || args.id) {
+      console.error(
+        '--check requires a full run; do not combine it with --topic/--id.'
+      );
+      process.exit(2);
+    }
+    runCheckGate(new Set(stage1.failures.map((f) => f.id)));
+  }
 
   // --- Stage 2 ---------------------------------------------------------
   let stage2;

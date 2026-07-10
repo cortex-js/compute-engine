@@ -1,82 +1,15 @@
 {
-  "generated": "2026-07-10T03:04:12.588Z",
-  "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
+  "generated": "2026-07-10T03:31:41.379Z",
+  "corpus": "/Users/arno/dev/compute-engine/.claude/worktrees/fungrim-f-followups/data/fungrim",
   "stage1": {
     "total": 2551,
-    "ok": 2539,
-    "boxError": 12,
+    "ok": 2551,
+    "boxError": 0,
     "unknownSymbol": 0,
     "timeout": 0,
-    "passRate": 0.9953,
-    "elapsedMs": 1847,
-    "failureBuckets": [
-      {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_rational'\"]]",
-        "count": 3,
-        "ids": [
-          "0ba38f",
-          "a05466",
-          "a766f2"
-        ]
-      },
-      {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'complex'\",\"'number'\"]]",
-        "count": 2,
-        "ids": [
-          "c6be24",
-          "e8252c"
-        ]
-      },
-      {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_number'\"]]",
-        "count": 1,
-        "ids": [
-          "420007"
-        ]
-      },
-      {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'matrix<2x2>'\"]]",
-        "count": 1,
-        "ids": [
-          "21839d"
-        ]
-      },
-      {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'number'\"]]",
-        "count": 1,
-        "ids": [
-          "b7e899"
-        ]
-      },
-      {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'rational'\"]]",
-        "count": 1,
-        "ids": [
-          "b41c49"
-        ]
-      },
-      {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'real'\"]]",
-        "count": 1,
-        "ids": [
-          "acdce8"
-        ]
-      },
-      {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer, fini",
-        "count": 1,
-        "ids": [
-          "099301"
-        ]
-      },
-      {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-        "count": 1,
-        "ids": [
-          "9bda2f"
-        ]
-      }
-    ],
+    "passRate": 1,
+    "elapsedMs": 1935,
+    "failureBuckets": [],
     "perTopic": {
       "agm": {
         "total": 42,
@@ -104,12 +37,9 @@
       },
       "bell_numbers": {
         "total": 29,
-        "ok": 27,
-        "passRate": 0.931,
-        "failures": [
-          "b41c49",
-          "b7e899"
-        ]
+        "ok": 29,
+        "passRate": 1,
+        "failures": []
       },
       "bernoulli_numbers": {
         "total": 24,
@@ -161,11 +91,9 @@
       },
       "const_catalan": {
         "total": 34,
-        "ok": 33,
-        "passRate": 0.9706,
-        "failures": [
-          "a766f2"
-        ]
+        "ok": 34,
+        "passRate": 1,
+        "failures": []
       },
       "const_gamma": {
         "total": 14,
@@ -193,19 +121,15 @@
       },
       "dirichlet": {
         "total": 64,
-        "ok": 63,
-        "passRate": 0.9844,
-        "failures": [
-          "0ba38f"
-        ]
+        "ok": 64,
+        "passRate": 1,
+        "failures": []
       },
       "eisenstein": {
         "total": 61,
-        "ok": 60,
-        "passRate": 0.9836,
-        "failures": [
-          "c6be24"
-        ]
+        "ok": 61,
+        "passRate": 1,
+        "failures": []
       },
       "error_functions": {
         "total": 15,
@@ -299,11 +223,9 @@
       },
       "jacobi_theta": {
         "total": 310,
-        "ok": 309,
-        "passRate": 0.9968,
-        "failures": [
-          "9bda2f"
-        ]
+        "ok": 310,
+        "passRate": 1,
+        "failures": []
       },
       "lambertw": {
         "total": 42,
@@ -343,13 +265,9 @@
       },
       "modular_lambda": {
         "total": 38,
-        "ok": 35,
-        "passRate": 0.9211,
-        "failures": [
-          "099301",
-          "21839d",
-          "e8252c"
-        ]
+        "ok": 38,
+        "passRate": 1,
+        "failures": []
       },
       "modular_transformations": {
         "total": 7,
@@ -371,19 +289,15 @@
       },
       "partitions": {
         "total": 20,
-        "ok": 19,
-        "passRate": 0.95,
-        "failures": [
-          "acdce8"
-        ]
+        "ok": 20,
+        "passRate": 1,
+        "failures": []
       },
       "pi": {
         "total": 83,
-        "ok": 82,
-        "passRate": 0.988,
-        "failures": [
-          "420007"
-        ]
+        "ok": 83,
+        "passRate": 1,
+        "failures": []
       },
       "powers": {
         "total": 13,
@@ -429,11 +343,9 @@
       },
       "totient": {
         "total": 49,
-        "ok": 48,
-        "passRate": 0.9796,
-        "failures": [
-          "a05466"
-        ]
+        "ok": 49,
+        "passRate": 1,
+        "failures": []
       },
       "weierstrass_elliptic": {
         "total": 13,
@@ -442,122 +354,6 @@
         "failures": []
       }
     },
-    "failures": [
-      {
-        "id": "099301",
-        "topic": "modular_lambda",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer, finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer, finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer, finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer, finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer, finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer, finite_integer, finite_integer>'\"]]"
-        ]
-      },
-      {
-        "id": "0ba38f",
-        "topic": "dirichlet",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_rational'\"]]"
-        ]
-      },
-      {
-        "id": "21839d",
-        "topic": "modular_lambda",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'matrix<2x2>'\"]]"
-        ]
-      },
-      {
-        "id": "420007",
-        "topic": "pi",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_number'\"]]"
-        ]
-      },
-      {
-        "id": "9bda2f",
-        "topic": "jacobi_theta",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'tuple<finite_integer, finite_integer>'\"]]"
-        ]
-      },
-      {
-        "id": "a05466",
-        "topic": "totient",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_rational'\"]]"
-        ]
-      },
-      {
-        "id": "a766f2",
-        "topic": "const_catalan",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_rational'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_rational'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_rational'\"]]"
-        ]
-      },
-      {
-        "id": "acdce8",
-        "topic": "partitions",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'real'\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'real'\"]]"
-        ]
-      },
-      {
-        "id": "b41c49",
-        "topic": "bell_numbers",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'rational'\"]]"
-        ]
-      },
-      {
-        "id": "b7e899",
-        "topic": "bell_numbers",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'number'\"]]"
-        ]
-      },
-      {
-        "id": "c6be24",
-        "topic": "eisenstein",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'complex'\",\"'number'\"]]"
-        ]
-      },
-      {
-        "id": "e8252c",
-        "topic": "modular_lambda",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'complex'\",\"'number'\"]]"
-        ]
-      }
-    ]
+    "failures": []
   }
 }

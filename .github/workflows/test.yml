@@ -40,9 +40,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Stage-1 box-check of the full Fungrim corpus (exit gates on >= 99%)
+      # Stage-1 box-check of the full Fungrim corpus. `--check` is a hard drift
+      # gate: it re-runs Stage 1 and compares the fresh failure set against the
+      # committed scripts/fungrim/validation-report.json (without rewriting it),
+      # failing on ANY newly-failing entry (a regression) or newly-passing entry
+      # (the committed report is stale — regenerate it). The prior soft >=99%
+      # pass-rate gate silently absorbed a multi-entry drift; this does not.
       - name: Corpus box-check
-        run: npx --yes tsx scripts/fungrim/validate.ts --corpus data/fungrim
+        run: npx --yes tsx scripts/fungrim/validate.ts --corpus data/fungrim --check
 
       # Recompile a deterministic rule sample and assert the checked-in
       # artifact is still in sync with the engine (catches canonicalization

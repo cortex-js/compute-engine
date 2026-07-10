@@ -68,12 +68,12 @@ export function loadCorpus(dir: string): Corpus {
 }
 
 /**
- * Compatibility re-declarations: CE built-ins whose declared signature is
- * narrower than the Fungrim semantics the corpus relies on. Shadowing them
- * in the shells scope makes the corpus boxable; the cost is that the
- * shadowing declaration has NO evaluator (numeric evaluation is lost), so
- * Stage 2 runs with `compat: false` and treats the affected entries as
- * not-evaluable instead.
+ * Compatibility re-declarations: heads (CE built-ins or declarations.json
+ * shells) whose declared signature is narrower than the Fungrim semantics the
+ * corpus relies on. Shadowing them in the shells scope makes the corpus
+ * boxable; the cost is that the shadowing declaration has NO evaluator
+ * (numeric evaluation is lost), so Stage 2 runs with `compat: false` and
+ * treats the affected entries as not-evaluable instead.
  *
  *  - Digamma: Fungrim DigammaFunction(z, m) is the order-m polygamma;
  *    CE Digamma is (number) -> number (1-arg). ~40 entries.
@@ -83,12 +83,49 @@ export function loadCorpus(dir: string): Corpus {
  *    CE is (integer) -> integer.
  *  - HilbertMatrix: declarations.json mis-declares the codomain as
  *    `complex`; it is a matrix (Determinant(HilbertMatrix(n)) occurs).
+ *
+ * Corrected shell signatures (the translator emitted signatures narrower than
+ * the Fungrim head's true domain; declarations.json is regenerated from the
+ * translator, so the fix lives here rather than in the data file):
+ *  - CongruentMod: `x ≡ y (mod n)`, applied component-wise to tuples and
+ *    matrices as well as scalars (`CongruentMod(Tuple(a,b,c,d), …, 2)`,
+ *    `CongruentMod(Matrix(…), Matrix(…), 2)`); the shell was
+ *    (integer,integer,integer).
+ *  - Hypergeometric3F2: the ₃F₂ parameters a₁a₂a₃;b₁b₂ are all complex
+ *    (`Hypergeometric3F2(1/2,1/2,1,3/2,3/2,-1)`); the shell had integer slots.
+ *  - ModularLambda / EisensteinG: evaluated at the cusp i·∞, which types as
+ *    `number` (ComplexInfinity, per the non-finite typing convention — see
+ *    ARCHITECTURE.md), so the relevant slot must admit `number`, not `complex`.
+ *
+ * Integer-domain CE built-ins widened to accept symbolic integer-valued
+ * arguments that CE's type lattice cannot prove integral. Fungrim applies
+ * these only to integers, but the argument expressions carry a wider inferred
+ * type because the lattice cannot track divisibility (`n/d` with d ∈
+ * Divisors(n) → finite_rational), positivity (`p^m` with m ∈ PositiveIntegers
+ * → finite_rational), parity (`k(3k-1)/2` → real), or the type of a Limit's
+ * bound variable (`BernoulliB(2n)` under `Limit(Function(…), n, ∞)` → n is
+ * untyped → finite_number). These were shells (looser arg-checking) until the
+ * number-theory/combinatorics kernels were promoted to strict `(integer)`
+ * built-ins (2026-06-27), which is what regressed the Stage-1 box check. The
+ * widening is a Stage-1 (representability) accommodation only; Stage 2
+ * (compat:false) keeps the real strict evaluators.
  */
 export const COMPAT_OVERRIDES: Record<string, string> = {
   Digamma: '(complex, integer?) -> complex',
   Binomial: '(complex, complex) -> complex',
   Fibonacci: '(complex) -> complex',
   HilbertMatrix: '(integer) -> matrix',
+  // Corrected shell signatures
+  CongruentMod: '(any, any, integer) -> boolean',
+  Hypergeometric3F2: '(complex, complex, complex, complex, complex, complex) -> complex',
+  ModularLambda: '(number) -> complex',
+  EisensteinG: '(integer, number) -> complex',
+  // Integer-domain built-ins widened for Stage-1 boxing
+  BellNumber: '(number) -> integer',
+  MoebiusMu: '(number) -> integer',
+  DivisorSigma: '(complex, number) -> complex',
+  NPartition: '(number) -> integer',
+  BernoulliB: '(number) -> rational',
 };
 
 /**
