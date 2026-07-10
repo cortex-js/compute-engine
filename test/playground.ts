@@ -18,6 +18,13 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
+// We currently don't resolve this because we do not return conditional solutions. We should return either a Which or a new ConditionalExpression with the condition and solution.
+console.log(
+  ce
+    .parse('\\int_{-\\pi}^{\\pi} \\frac{1-x\\cos t}{x^2-2x\\cos t + 1}dt')
+    .evaluate().latex
+);
+
 console.log(ce.parse('\\operatorname{Solve}(x^2+2x+1, x)').evaluate().json);
 
 console.log(ce.assign('n', 12));
