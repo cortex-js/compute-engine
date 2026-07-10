@@ -70,44 +70,54 @@ describe('PARSING OF NUMBER', () => {
   });
 
   test('Parsing numbers with repeating pattern', () => {
-    expect(parse('1.(3)')).toMatchInlineSnapshot(`1.(3)`);
-    expect(parse('0.(142857)')).toMatchInlineSnapshot(`0.(142857)`);
+    expect(parse('1.(3)')).toMatchInlineSnapshot(`["Rational", 4, 3]`);
+    expect(parse('0.(142857)')).toMatchInlineSnapshot(`["Rational", 1, 7]`);
     expect(exprToString(ce.expr({ num: '1.(3)' }))).toMatchInlineSnapshot(
-      `1.(3)`
+      `["Rational", 4, 3]`
     );
     expect(exprToString(ce.expr({ num: '0.(142857)' }))).toMatchInlineSnapshot(
-      `0.(142857)`
+      `["Rational", 1, 7]`
     );
     expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", "x", 0.123]`);
     expect(parse('x=.123(45)')).toMatchInlineSnapshot(
-      `["Equal", "x", "0.123(45)"]`
+      `["Equal", "x", ["Rational", 679, 5500]]`
     );
     expect(parse('x=-987.123(45)')).toMatchInlineSnapshot(
-      `["Equal", "x", "-987.123(45)"]`
+      `["Equal", "x", ["Rational", -5429179, 5500]]`
     );
 
     // Vinculum
-    expect(parse('0.\\overline{142857}')).toMatchInlineSnapshot(`0.(142857)`);
+    expect(parse('0.\\overline{142857}')).toMatchInlineSnapshot(
+      `["Rational", 1, 7]`
+    );
 
     // Dots
-    expect(parse('1.\\overset{.}{3}')).toMatchInlineSnapshot(`1.(3)`);
+    expect(parse('1.\\overset{.}{3}')).toMatchInlineSnapshot(
+      `["Rational", 4, 3]`
+    );
     expect(parse('0.\\overset{.}{1}4285\\overset{.}{7}')).toMatchInlineSnapshot(
-      `0.(142857)`
+      `["Rational", 1, 7]`
     );
 
     // Parentheses
     expect(parse('1.54\\left(2345\\right)')).toMatchInlineSnapshot(
-      `1.54(2345)`
+      `["Rational", 1542191, 999900]`
     );
 
     // Arc
-    expect(parse('1.54\\overarc{2345}')).toMatchInlineSnapshot(`1.54(2345)`);
+    expect(parse('1.54\\overarc{2345}')).toMatchInlineSnapshot(
+      `["Rational", 1542191, 999900]`
+    );
 
     // Repeating number with no whole part
-    expect(parse('.\\overline{1234}')).toMatchInlineSnapshot(`0.(1234)`);
+    expect(parse('.\\overline{1234}')).toMatchInlineSnapshot(
+      `["Rational", 1234, 9999]`
+    );
 
     // Repeating number with trailing dots
-    expect(parse('.\\overline{1234}\\ldots')).toMatchInlineSnapshot(`0.(1234)`);
+    expect(parse('.\\overline{1234}\\ldots')).toMatchInlineSnapshot(
+      `["Rational", 1234, 9999]`
+    );
   });
 
   // RT-P0-5: short repetends (length 1-2) must serialize with a `\overline{…}`
@@ -117,7 +127,9 @@ describe('PARSING OF NUMBER', () => {
     expect(ce.parse('1/3').N().latex).toMatchInlineSnapshot(`0.\\overline{3}`);
     expect(ce.parse('2/3').N().latex).toMatchInlineSnapshot(`0.\\overline{6}`);
     expect(ce.parse('1/6').N().latex).toMatchInlineSnapshot(`0.1\\overline{6}`);
-    expect(ce.parse('1/11').N().latex).toMatchInlineSnapshot(`0.\\overline{09}`);
+    expect(ce.parse('1/11').N().latex).toMatchInlineSnapshot(
+      `0.\\overline{09}`
+    );
     // Longer repetends keep working
     expect(ce.parse('1/7').N().latex).toMatchInlineSnapshot(
       `0.\\overline{142857}`
@@ -152,7 +164,7 @@ describe('PARSING OF NUMBER', () => {
   test('Parsing numbers with INVALID truncation mark', () => {
     // Invalid: \ldots after repeating pattern
     expect(parse('x=.123(45)\\ldots')).toMatchInlineSnapshot(
-      `["Equal", "x", "0.123(45)"]`
+      `["Equal", "x", ["Rational", 679, 5500]]`
     );
   });
 
@@ -615,22 +627,20 @@ describe('SERIALIZATION OF NUMBERS', () => {
   });
 
   test('Number with repeating pattern', () => {
-    const format = (num: string, p: string) =>
-      ce.expr({ num }).toLatex({
-        repeatingDecimal: p as any,
-      });
-    expect(format('0.(142857)', 'vinculum')).toMatchInlineSnapshot(
-      `0.\\overline{142857}`
-    );
-    expect(format('0.(142857)', 'dots')).toMatchInlineSnapshot(
+    // A repeating-decimal *literal* now boxes as an exact Rational (which
+    // serializes as a fraction), so exercise the four repeatingDecimal
+    // serialization styles on a float, where pattern detection applies.
+    const format = (p: string) =>
+      ce
+        .parse('1/7')
+        .N()
+        .toLatex({ repeatingDecimal: p as any });
+    expect(format('vinculum')).toMatchInlineSnapshot(`0.\\overline{142857}`);
+    expect(format('dots')).toMatchInlineSnapshot(
       `0.\\overset{\\cdots}{1}42857\\overset{\\cdots}{7}`
     );
-    expect(format('0.(142857)', 'parentheses')).toMatchInlineSnapshot(
-      `0.(142857)`
-    );
-    expect(format('0.(142857)', 'arc')).toMatchInlineSnapshot(
-      `0.\\wideparen{142857}`
-    );
+    expect(format('parentheses')).toMatchInlineSnapshot(`0.(142857)`);
+    expect(format('arc')).toMatchInlineSnapshot(`0.\\wideparen{142857}`);
   });
 });
 
@@ -642,6 +652,6 @@ describe('Repeating decimal arc after a leading separator (REVIEW.md C6)', () =>
     const withLeadingZero = exprToString(parse('0.\\wideparen{3}'));
     const withoutLeadingZero = exprToString(parse('.\\wideparen{3}'));
     expect(withoutLeadingZero).toBe(withLeadingZero);
-    expect(withoutLeadingZero).toContain('(3)');
+    expect(withoutLeadingZero).toBe(`["Rational", 1, 3]`);
   });
 });

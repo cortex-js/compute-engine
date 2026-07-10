@@ -990,6 +990,67 @@ export function canonicalNumber(
   return ce._numericValue(value);
 }
 
+/**
+ * Convert a repeating-decimal num string component into an exact rational
+ * `NumericValue`.
+ *
+ * The string was matched as `body(repeat)trail?` where `body` is the
+ * (optionally signed) `W.F` part, `repeat` is the repetend digits, and `trail`
+ * is an optional exponent suffix (`e±n`).
+ *
+ * For `W.F(R)` with fixed-fraction length `f` and repetend length `r`:
+ *   value = sign · (WFR − WF) / (10^(f+r) − 10^f)
+ * where `WFR` and `WF` are the base-10 integers formed by concatenating the
+ * digit groups. A trailing `e±n` scales the result by `10^±n`.
+ *
+ * Returns `null` (so the caller falls back to digit expansion) when:
+ * - `body` is not a `[sign]W.F` decimal,
+ * - `trail` is present but not a well-formed exponent suffix,
+ * - the repetend is all zeros (`(0)`), which denotes a plain terminating
+ *   decimal and must box like one.
+ */
+function repeatingDecimalToRational(
+  ce: ComputeEngine,
+  body: string,
+  repeat: string,
+  trail: string | undefined
+): NumericValue | null {
+  if (body === undefined || repeat === undefined) return null;
+
+  // Parse an optional exponent trail (e.g. `e2`, `e-3`).
+  let exp = BigInt(0);
+  if (trail !== undefined) {
+    const em = trail.match(/^e([+-]?[0-9]+)$/);
+    if (!em) return null;
+    exp = BigInt(em[1]);
+  }
+
+  // Parse `body` into sign, integer digits (W) and fixed fraction digits (F).
+  const bm = body.match(/^([+-]?)([0-9]*)\.([0-9]*)$/);
+  if (!bm) return null;
+  const sign = bm[1] === '-' ? BigInt(-1) : BigInt(1);
+  const W = bm[2];
+  const F = bm[3];
+  const R = repeat;
+
+  // A `(0)` repetend is a terminating decimal; let the fallback handle it so
+  // it boxes identically to the plain decimal.
+  if (/^0+$/.test(R)) return null;
+
+  const f = BigInt(F.length);
+  const r = BigInt(R.length);
+  const WFR = BigInt((W + F + R) || '0');
+  const WF = BigInt((W + F) || '0');
+  let numerator = sign * (WFR - WF);
+  let denominator = BigInt(10) ** (f + r) - BigInt(10) ** f;
+
+  // Apply the exponent trail (scale by 10^exp).
+  if (exp > BigInt(0)) numerator *= BigInt(10) ** exp;
+  else if (exp < BigInt(0)) denominator *= BigInt(10) ** -exp;
+
+  return ce._numericValue({ rational: [numerator, denominator] });
+}
+
 function canonicalNumberString(
   ce: ComputeEngine,
   s: string
@@ -1015,6 +1076,11 @@ function canonicalNumberString(
   // Do we have repeating digits?
   if (/\([0-9]+\)/.test(s)) {
     const [_, body, repeat, trail] = s.match(/(.+)\(([0-9]+)\)(.+)?$/) ?? [];
+    // A repeating decimal denotes an exact rational. Convert it exactly
+    // (per the exactness contract) rather than expanding to a truncated float.
+    const exact = repeatingDecimalToRational(ce, body, repeat, trail);
+    if (exact !== null) return exact;
+    // Fallback for degenerate/malformed forms: expand the repetend.
     // @todo we probably shouldn't be using the ce.precision since it may change later
     s =
       body +

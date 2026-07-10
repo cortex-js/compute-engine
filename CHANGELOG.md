@@ -22,6 +22,31 @@
   including non-coprime moduli — into a single family (`x \equiv 2 \pmod 3`,
   `x \equiv 3 \pmod 5`, `x \equiv 2 \pmod 7` → `105t + 23`); an inconsistent
   system reports no solution.
+- **Huge exact products stay symbolic instead of overflowing.** `Multiply`
+  now applies the same digit-count budget as `Power` when an exact power
+  term (`base^exp`) would be folded into a product's numeric coefficient:
+  if materializing that power would exceed the budget, the factor is kept
+  as a symbolic `Power` term rather than computed eagerly (`2 \cdot 3^{5000000}`
+  stays `2 \cdot 3^{5000000}` instead of building a multi-million-digit
+  `bigint`). This also lets `Mod`/`Congruent` reduce such products —
+  `2 \cdot 3^{5000000} \pmod 7` evaluates to `4` — without ever
+  materializing the giant intermediate value.
+
+### Arithmetic
+
+- **Repeating decimals box as exact rationals.** A LaTeX repeating-decimal
+  literal — vinculum (`0.\overline{3}`), dots
+  (`0.\overset{.}{1}4285\overset{.}{7}`), parenthetical (`1.54(2345)`), or
+  arc (`0.\wideparen{142857}`) notation — and the MathJSON `{num: "0.(3)"}`
+  shorthand now box directly to the exact `Rational` they represent
+  (`0.\overline{3}` → `["Rational", 1, 3]`, `1.(2345)` →
+  `["Rational", 12344, 9999]`) instead of a truncated decimal float carrying
+  a repeating-decimal marker.
+- **`Norm` accepts point-like `Tuple`s.** `\|(-3, 4)\|` now evaluates to
+  `5` instead of leaving the expression inert.
+- **Double-factorial symbolic reductions.** Under `simplify()`, `(2n)!!`
+  reduces to `2^n \cdot n!` and `(2n+1)!!` reduces to
+  `\frac{(2n+1)!}{2^n \cdot n!}` when `n` is integer-typed.
 
 ### New Notations
 
