@@ -3,21 +3,16 @@ import { engine as ce, latex, check } from '../../utils';
 
 describe('OPERATOR oprel', () => {
   test('x=1', () =>
-    expect(check('x=1')).toMatchInlineSnapshot(`
-      box       = ["Equal", "x", 1]
-      eval-auto = "False"
-    `));
+    expect(check('x=1')).toMatchInlineSnapshot(`["Equal", "x", 1]`));
   test('x=1+1', () =>
     expect(check('x=1+1')).toMatchInlineSnapshot(`
       box       = ["Equal", "x", ["Add", 1, 1]]
       canonical = ["Equal", "x", 2]
-      eval-auto = "False"
     `));
   test('x+y=1+1', () =>
     expect(check('x+y=1+1')).toMatchInlineSnapshot(`
       box       = ["Equal", ["Add", "x", "y"], ["Add", 1, 1]]
       canonical = ["Equal", ["Add", "x", "y"], 2]
-      eval-auto = "False"
     `));
 
   test('x<1', () =>
@@ -711,9 +706,9 @@ describe('APPLY', () => {
         .json
     ).toEqual(['Function', ['Solve', '_', 'x'], '_']));
   test('prefix pipeline evaluates when applied', () =>
-    expect(ce.box(['Apply', ce.parse('|> \\cos'), 'Pi']).evaluate().json).toEqual(
-      -1
-    ));
+    expect(
+      ce.box(['Apply', ce.parse('|> \\cos'), 'Pi']).evaluate().json
+    ).toEqual(-1));
 });
 
 // `--`/`++` are read as repeated unary minus/plus (double negation), not as

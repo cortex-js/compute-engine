@@ -287,17 +287,17 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           const test = eq(lhs, arg);
           if (test === false) return ce.False;
 
-          // Handle undefined (unknown) comparisons differently based on context:
-          //
-          // In verification mode (ce.isVerifying = true):
-          //   Return undefined to preserve 3-valued logic (true/false/unknown).
-          //   This is needed for verify() to correctly handle unprovable predicates.
-          //
-          // In normal evaluation mode:
-          //   Return False because Equal(x, 1) should evaluate to False when we
-          //   can't prove it's true. This matches expected behavior for equations.
-          if (test === undefined && ce.isVerifying) return undefined;
-          if (test === undefined) return ce.False;
+          // An undecidable comparison (free variables present, no proof
+          // either way) stays INERT: `x^2 = 4` is a *condition*, not a
+          // falsity — it evaluates to itself, like the inequality operators
+          // (`x^2 < 4` already stays symbolic) and like Mathematica's `==`.
+          // Decidable comparisons are unchanged (`2+2=4` → True,
+          // `x = x+1` → False when provable). This replaced the earlier
+          // pragmatic collapse-to-False, which silently ruined equations
+          // that were later piped into `Solve` (Tycho 0.72.0 report,
+          // item 8). Three-valued verification mode (`ce.isVerifying`)
+          // behaves identically.
+          if (test === undefined) return undefined;
         }
       }
       return ce.True;
@@ -347,22 +347,16 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           const test = lhs.isEqual(arg);
           if (test === true) return ce.False;
 
-          // Handle undefined (unknown) comparisons differently based on context:
-          //
-          // In verification mode (ce.isVerifying = true):
-          //   Preserve 3-valued logic — but first try to *prove* the two sides
-          //   distinct from assumed bounds. A proven strict inequality in
-          //   either direction entails ≠ (e.g. `assume(z > 0)` ⇒ `z ≠ 0`), so
-          //   rule guards like `; z ≠ 0` fire under such assumptions even
-          //   though the pragmatic collapse below is suppressed. If distinctness
-          //   is not provable, stay undefined.
-          //
-          // In normal evaluation mode:
-          //   Return True because NotEqual(x, 1) should evaluate to True when we
-          //   can't prove equality. This matches expected behavior (though note
-          //   this is not strictly correct three-valued logic - it's a pragmatic
-          //   choice for usability).
-          if (test === undefined && ce.isVerifying) {
+          // An undecidable comparison stays INERT (three-valued logic in
+          // every mode, matching `Equal` and the inequality operators) —
+          // but first try to *prove* the two sides distinct from assumed
+          // bounds. A proven strict inequality in either direction entails
+          // ≠ (e.g. `assume(z > 0)` ⇒ `z ≠ 0`), so rule guards like
+          // `; z ≠ 0` fire under such assumptions. If distinctness is not
+          // provable, stay symbolic: `x ≠ 4` is a condition, not a truth.
+          // (This replaced the earlier pragmatic collapse-to-True in normal
+          // evaluation mode — Tycho 0.72.0 report, item 8.)
+          if (test === undefined) {
             const distinct =
               compareFromAssumedBounds(lhs, arg, true) === true ||
               compareFromAssumedBounds(arg, lhs, true) === true;

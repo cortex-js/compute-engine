@@ -82,11 +82,19 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           )
         ),
       evaluate: ([cond, ifTrue, ifFalse], { engine }) => {
-        const evaluatedCond = sym(cond.evaluate());
+        const evaluated = cond.evaluate();
+        const evaluatedCond = sym(evaluated);
         if (evaluatedCond === 'True')
           return ifTrue?.evaluate() ?? engine.Nothing;
         if (evaluatedCond === 'False')
           return ifFalse?.evaluate() ?? engine.Nothing;
+        // An UNDECIDED boolean condition — e.g. a relation with free
+        // variables (`x = 4` stays symbolic under evaluate()) — leaves the
+        // `If` unevaluated rather than erroring: it may become decidable
+        // once the variables are bound. The throw below is reserved for
+        // conditions that are not boolean at all (a number, a misspelled
+        // symbol), where the spell-check hint is the useful outcome.
+        if (evaluated.type.matches('boolean')) return undefined;
         throw new Error(
           `Condition must evaluate to "True" or "False". ${spellCheckMessage(
             cond
@@ -275,14 +283,21 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 function evaluateWhich(
   args: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> & { engine: ComputeEngine }
-): Expression {
+): Expression | undefined {
   let i = 0;
   while (i < args.length - 1) {
-    const cond = sym(args[i].evaluate());
+    const evaluated = args[i].evaluate();
+    const cond = sym(evaluated);
     if (cond === 'True') {
       if (!args[i + 1]) return options.engine.symbol('Undefined');
       return args[i + 1].evaluate(options);
     } else if (cond !== 'False') {
+      // An UNDECIDED boolean condition (e.g. `x = 4` with a free `x`, which
+      // stays symbolic under evaluate()) leaves the `Which` unevaluated:
+      // picking a later branch would be wrong once the condition becomes
+      // decidable. The throw is reserved for conditions that are not
+      // boolean at all, where the spell-check hint is the useful outcome.
+      if (evaluated.type.matches('boolean')) return undefined;
       throw new Error(
         `Condition must evaluate to "True" or "False". ${spellCheckMessage(
           args[i]
