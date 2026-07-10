@@ -124,6 +124,23 @@
   and simplification to named derived SI units still applies afterwards
   (`2 \text{ N} \cdot 3 \text{ m}` → `6 \text{ J}`). Works with
   measurement (uncertainty-carrying) magnitudes as well.
+- **New units: `yd`, `qt`, `pt`, `cup`, `wk`.** Yards, quarts, pints, cups
+  (US liquid convention, consistent with the existing US `gal`) and weeks
+  join the unit registry, with their English word aliases
+  (`5 \text{ yards}` → `5 \text{ yd}`), and convert exactly:
+  `1 \text{ gal} / 1 \text{ qt}` evaluates to `4`.
+- **Currency: dollars and cents.** A new currency dimension backs the
+  `USD` and `cent` units (`18 \text{ dollars}` → `18 \text{ USD}`,
+  `1 \text{ dollar} + 50 \text{ cents}` → `1.5 \text{ USD}`), and currency
+  participates in unit cancellation
+  (`\$6 / (\$2/\text{lb})` → `3 \text{ lb}`). Other currencies are
+  deliberately not modeled: exchange rates are not fixed constants, so
+  cross-currency expressions stay inert rather than silently wrong.
+- **Spaced unit phrases parse.** Multi-word unit text such as
+  `60 \text{ miles per hour}` now parses to `60 \text{ mi/h}` — spaces
+  inside `\text{...}` unit annotations are preserved and `per` reads as
+  division — where previously the words ran together and the unit was not
+  recognized.
 
 ### New Notations
 

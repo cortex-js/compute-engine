@@ -2,7 +2,10 @@
  * Unit registry: dimension vectors, SI base units, prefixes, and conversion.
  *
  * A DimensionVector encodes the exponents for each of the 7 SI base
- * dimensions: [length, mass, time, current, temperature, amount, luminosity].
+ * dimensions plus currency: [length, mass, time, current, temperature,
+ * amount, luminosity, currency].  Currency (the 8th slot) is not an SI
+ * dimension; it is included so monetary quantities (USD) participate in
+ * dimensional analysis and cancellation.
  *
  * Every unit in the registry stores its dimension vector and a scale factor
  * relative to the coherent SI unit for that dimension.  For example the meter
@@ -18,10 +21,11 @@
 // ---------------------------------------------------------------------------
 
 /**
- * 7-tuple of exponents over the SI base dimensions:
- * [length, mass, time, current, temperature, amount, luminosity]
+ * 8-tuple of exponents over the SI base dimensions plus currency:
+ * [length, mass, time, current, temperature, amount, luminosity, currency]
  */
 export type DimensionVector = [
+  number,
   number,
   number,
   number,
@@ -119,85 +123,101 @@ const PREFIXABLE_UNITS: Set<string> = new Set([
 // Unit data tables
 // ---------------------------------------------------------------------------
 
-//                        L  M  T  I  Θ  N  J
-// Indices:               0  1  2  3  4  5  6
+//                        L  M  T  I  Θ  N  J  $
+// Indices:               0  1  2  3  4  5  6  7
+// ($ = currency, non-SI; see DimensionVector doc above)
 
 const UNIT_TABLE: Record<string, UnitEntry> = {
   // ---- SI base units ----
-  'm': { dimension: [1, 0, 0, 0, 0, 0, 0], scale: 1 },
-  'kg': { dimension: [0, 1, 0, 0, 0, 0, 0], scale: 1 },
-  'g': { dimension: [0, 1, 0, 0, 0, 0, 0], scale: 1e-3 },
-  's': { dimension: [0, 0, 1, 0, 0, 0, 0], scale: 1 },
-  'A': { dimension: [0, 0, 0, 1, 0, 0, 0], scale: 1 },
-  'K': { dimension: [0, 0, 0, 0, 1, 0, 0], scale: 1 },
-  'mol': { dimension: [0, 0, 0, 0, 0, 1, 0], scale: 1 },
-  'cd': { dimension: [0, 0, 0, 0, 0, 0, 1], scale: 1 },
+  'm': { dimension: [1, 0, 0, 0, 0, 0, 0, 0], scale: 1 },
+  'kg': { dimension: [0, 1, 0, 0, 0, 0, 0, 0], scale: 1 },
+  'g': { dimension: [0, 1, 0, 0, 0, 0, 0, 0], scale: 1e-3 },
+  's': { dimension: [0, 0, 1, 0, 0, 0, 0, 0], scale: 1 },
+  'A': { dimension: [0, 0, 0, 1, 0, 0, 0, 0], scale: 1 },
+  'K': { dimension: [0, 0, 0, 0, 1, 0, 0, 0], scale: 1 },
+  'mol': { dimension: [0, 0, 0, 0, 0, 1, 0, 0], scale: 1 },
+  'cd': { dimension: [0, 0, 0, 0, 0, 0, 1, 0], scale: 1 },
 
   // ---- Named derived SI units ----
-  'Hz': { dimension: [0, 0, -1, 0, 0, 0, 0], scale: 1 },
-  'N': { dimension: [1, 1, -2, 0, 0, 0, 0], scale: 1 },
-  'Pa': { dimension: [-1, 1, -2, 0, 0, 0, 0], scale: 1 },
-  'J': { dimension: [2, 1, -2, 0, 0, 0, 0], scale: 1 },
-  'W': { dimension: [2, 1, -3, 0, 0, 0, 0], scale: 1 },
-  'C': { dimension: [0, 0, 1, 1, 0, 0, 0], scale: 1 },
-  'V': { dimension: [2, 1, -3, -1, 0, 0, 0], scale: 1 },
-  'F': { dimension: [-2, -1, 4, 2, 0, 0, 0], scale: 1 },
-  'ohm': { dimension: [2, 1, -3, -2, 0, 0, 0], scale: 1 },
-  'S': { dimension: [-2, -1, 3, 2, 0, 0, 0], scale: 1 },
-  'Wb': { dimension: [2, 1, -2, -1, 0, 0, 0], scale: 1 },
-  'T': { dimension: [0, 1, -2, -1, 0, 0, 0], scale: 1 },
-  'H': { dimension: [2, 1, -2, -2, 0, 0, 0], scale: 1 },
-  'lm': { dimension: [0, 0, 0, 0, 0, 0, 1], scale: 1 },
-  'lx': { dimension: [-2, 0, 0, 0, 0, 0, 1], scale: 1 },
-  'Bq': { dimension: [0, 0, -1, 0, 0, 0, 0], scale: 1 },
-  'Gy': { dimension: [2, 0, -2, 0, 0, 0, 0], scale: 1 },
-  'Sv': { dimension: [2, 0, -2, 0, 0, 0, 0], scale: 1 },
-  'kat': { dimension: [0, 0, -1, 0, 0, 1, 0], scale: 1 },
+  'Hz': { dimension: [0, 0, -1, 0, 0, 0, 0, 0], scale: 1 },
+  'N': { dimension: [1, 1, -2, 0, 0, 0, 0, 0], scale: 1 },
+  'Pa': { dimension: [-1, 1, -2, 0, 0, 0, 0, 0], scale: 1 },
+  'J': { dimension: [2, 1, -2, 0, 0, 0, 0, 0], scale: 1 },
+  'W': { dimension: [2, 1, -3, 0, 0, 0, 0, 0], scale: 1 },
+  'C': { dimension: [0, 0, 1, 1, 0, 0, 0, 0], scale: 1 },
+  'V': { dimension: [2, 1, -3, -1, 0, 0, 0, 0], scale: 1 },
+  'F': { dimension: [-2, -1, 4, 2, 0, 0, 0, 0], scale: 1 },
+  'ohm': { dimension: [2, 1, -3, -2, 0, 0, 0, 0], scale: 1 },
+  'S': { dimension: [-2, -1, 3, 2, 0, 0, 0, 0], scale: 1 },
+  'Wb': { dimension: [2, 1, -2, -1, 0, 0, 0, 0], scale: 1 },
+  'T': { dimension: [0, 1, -2, -1, 0, 0, 0, 0], scale: 1 },
+  'H': { dimension: [2, 1, -2, -2, 0, 0, 0, 0], scale: 1 },
+  'lm': { dimension: [0, 0, 0, 0, 0, 0, 1, 0], scale: 1 },
+  'lx': { dimension: [-2, 0, 0, 0, 0, 0, 1, 0], scale: 1 },
+  'Bq': { dimension: [0, 0, -1, 0, 0, 0, 0, 0], scale: 1 },
+  'Gy': { dimension: [2, 0, -2, 0, 0, 0, 0, 0], scale: 1 },
+  'Sv': { dimension: [2, 0, -2, 0, 0, 0, 0, 0], scale: 1 },
+  'kat': { dimension: [0, 0, -1, 0, 0, 1, 0, 0], scale: 1 },
 
   // ---- Temperature units with affine offset ----
   // To convert to kelvin: K = (value + offset) * scale
-  'degC': { dimension: [0, 0, 0, 0, 1, 0, 0], scale: 1, offset: 273.15 },
-  'degF': { dimension: [0, 0, 0, 0, 1, 0, 0], scale: 5 / 9, offset: 459.67 },
+  'degC': { dimension: [0, 0, 0, 0, 1, 0, 0, 0], scale: 1, offset: 273.15 },
+  'degF': { dimension: [0, 0, 0, 0, 1, 0, 0, 0], scale: 5 / 9, offset: 459.67 },
 
   // ---- Non-SI accepted for use with SI ----
-  'min': { dimension: [0, 0, 1, 0, 0, 0, 0], scale: 60 },
-  'h': { dimension: [0, 0, 1, 0, 0, 0, 0], scale: 3600 },
-  'd': { dimension: [0, 0, 1, 0, 0, 0, 0], scale: 86400 },
-  'ha': { dimension: [2, 0, 0, 0, 0, 0, 0], scale: 1e4 },
-  'L': { dimension: [3, 0, 0, 0, 0, 0, 0], scale: 1e-3 },
-  't': { dimension: [0, 1, 0, 0, 0, 0, 0], scale: 1e3 },
-  'eV': { dimension: [2, 1, -2, 0, 0, 0, 0], scale: 1.602176634e-19 },
-  'Da': { dimension: [0, 1, 0, 0, 0, 0, 0], scale: 1.6605390666e-27 },
-  'au': { dimension: [1, 0, 0, 0, 0, 0, 0], scale: 1.495978707e11 },
+  'min': { dimension: [0, 0, 1, 0, 0, 0, 0, 0], scale: 60 },
+  'h': { dimension: [0, 0, 1, 0, 0, 0, 0, 0], scale: 3600 },
+  'd': { dimension: [0, 0, 1, 0, 0, 0, 0, 0], scale: 86400 },
+  'wk': { dimension: [0, 0, 1, 0, 0, 0, 0, 0], scale: 604800 },
+  'ha': { dimension: [2, 0, 0, 0, 0, 0, 0, 0], scale: 1e4 },
+  'L': { dimension: [3, 0, 0, 0, 0, 0, 0, 0], scale: 1e-3 },
+  't': { dimension: [0, 1, 0, 0, 0, 0, 0, 0], scale: 1e3 },
+  'eV': { dimension: [2, 1, -2, 0, 0, 0, 0, 0], scale: 1.602176634e-19 },
+  'Da': { dimension: [0, 1, 0, 0, 0, 0, 0, 0], scale: 1.6605390666e-27 },
+  'au': { dimension: [1, 0, 0, 0, 0, 0, 0, 0], scale: 1.495978707e11 },
 
   // Angle units (dimensionless)
-  'deg': { dimension: [0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 180 },
-  'rad': { dimension: [0, 0, 0, 0, 0, 0, 0], scale: 1 },
-  'grad': { dimension: [0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 200 },
-  'turn': { dimension: [0, 0, 0, 0, 0, 0, 0], scale: 2 * Math.PI },
-  'arcmin': { dimension: [0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 10800 },
-  'arcsec': { dimension: [0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 648000 },
+  'deg': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 180 },
+  'rad': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 1 },
+  'grad': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 200 },
+  'turn': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 2 * Math.PI },
+  'arcmin': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 10800 },
+  'arcsec': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 648000 },
 
   // Dimensionless ratios
-  'percent': { dimension: [0, 0, 0, 0, 0, 0, 0], scale: 0.01 },
-  'ppm': { dimension: [0, 0, 0, 0, 0, 0, 0], scale: 1e-6 },
+  'percent': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 0.01 },
+  'ppm': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 1e-6 },
 
   // Logarithmic (dimensionless, scale is nominal)
-  'dB': { dimension: [0, 0, 0, 0, 0, 0, 0], scale: 1 },
-  'Np': { dimension: [0, 0, 0, 0, 0, 0, 0], scale: 1 },
+  'dB': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 1 },
+  'Np': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 1 },
 
   // ---- Common non-SI units ----
-  'in': { dimension: [1, 0, 0, 0, 0, 0, 0], scale: 0.0254 },
-  'ft': { dimension: [1, 0, 0, 0, 0, 0, 0], scale: 0.3048 },
-  'mi': { dimension: [1, 0, 0, 0, 0, 0, 0], scale: 1609.344 },
-  'lb': { dimension: [0, 1, 0, 0, 0, 0, 0], scale: 0.45359237 },
-  'oz': { dimension: [0, 1, 0, 0, 0, 0, 0], scale: 0.028349523125 },
-  'gal': { dimension: [3, 0, 0, 0, 0, 0, 0], scale: 3.785411784e-3 },
-  'atm': { dimension: [-1, 1, -2, 0, 0, 0, 0], scale: 101325 },
-  'bar': { dimension: [-1, 1, -2, 0, 0, 0, 0], scale: 1e5 },
-  'cal': { dimension: [2, 1, -2, 0, 0, 0, 0], scale: 4.184 },
-  'kWh': { dimension: [2, 1, -2, 0, 0, 0, 0], scale: 3.6e6 },
-  '\u00C5': { dimension: [1, 0, 0, 0, 0, 0, 0], scale: 1e-10 }, // Å
+  'in': { dimension: [1, 0, 0, 0, 0, 0, 0, 0], scale: 0.0254 },
+  'ft': { dimension: [1, 0, 0, 0, 0, 0, 0, 0], scale: 0.3048 },
+  'yd': { dimension: [1, 0, 0, 0, 0, 0, 0, 0], scale: 0.9144 },
+  'mi': { dimension: [1, 0, 0, 0, 0, 0, 0, 0], scale: 1609.344 },
+  'lb': { dimension: [0, 1, 0, 0, 0, 0, 0, 0], scale: 0.45359237 },
+  'oz': { dimension: [0, 1, 0, 0, 0, 0, 0, 0], scale: 0.028349523125 },
+  'gal': { dimension: [3, 0, 0, 0, 0, 0, 0, 0], scale: 3.785411784e-3 },
+  // Volume: US liquid convention (matching gal = 3.785411784e-3). Imperial
+  // qt/pt differ by ~20%; gal already established the US convention here.
+  'qt': { dimension: [3, 0, 0, 0, 0, 0, 0, 0], scale: 9.46352946e-4 },
+  'pt': { dimension: [3, 0, 0, 0, 0, 0, 0, 0], scale: 4.73176473e-4 },
+  'cup': { dimension: [3, 0, 0, 0, 0, 0, 0, 0], scale: 2.365882365e-4 },
+  'atm': { dimension: [-1, 1, -2, 0, 0, 0, 0, 0], scale: 101325 },
+  'bar': { dimension: [-1, 1, -2, 0, 0, 0, 0, 0], scale: 1e5 },
+  'cal': { dimension: [2, 1, -2, 0, 0, 0, 0, 0], scale: 4.184 },
+  'kWh': { dimension: [2, 1, -2, 0, 0, 0, 0, 0], scale: 3.6e6 },
+  '\u00C5': { dimension: [1, 0, 0, 0, 0, 0, 0, 0], scale: 1e-10 }, // Å
+
+  // ---- Currency (8th dimension) ----
+  // Only USD is represented. EUR/GBP/etc. have no fixed exchange rate to USD,
+  // so they are deliberately unrepresentable rather than encoded with a wrong
+  // (drifting) scale — same principle as the "NO ton(s) alias" note in
+  // definitions-units.ts.
+  'USD': { dimension: [0, 0, 0, 0, 0, 0, 0, 1], scale: 1 },
+  'cent': { dimension: [0, 0, 0, 0, 0, 0, 0, 1], scale: 0.01 },
 };
 
 // ---------------------------------------------------------------------------
@@ -215,7 +235,8 @@ export function dimensionsEqual(
     a[3] === b[3] &&
     a[4] === b[4] &&
     a[5] === b[5] &&
-    a[6] === b[6]
+    a[6] === b[6] &&
+    a[7] === b[7]
   );
 }
 
@@ -227,7 +248,8 @@ export function isDimensionless(dim: DimensionVector): boolean {
     dim[3] === 0 &&
     dim[4] === 0 &&
     dim[5] === 0 &&
-    dim[6] === 0
+    dim[6] === 0 &&
+    dim[7] === 0
   );
 }
 
@@ -427,11 +449,11 @@ export function getExpressionDimension(
   const op = expr[0];
 
   if (op === 'Multiply') {
-    const result: DimensionVector = [0, 0, 0, 0, 0, 0, 0];
+    const result: DimensionVector = [0, 0, 0, 0, 0, 0, 0, 0];
     for (let i = 1; i < expr.length; i++) {
       const d = getExpressionDimension(expr[i]);
       if (!d) return null;
-      for (let j = 0; j < 7; j++) result[j] += d[j];
+      for (let j = 0; j < 8; j++) result[j] += d[j];
     }
     return result;
   }

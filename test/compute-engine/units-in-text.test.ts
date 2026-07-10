@@ -72,6 +72,19 @@ describe('UNIT WORDS IN TEXT', () => {
         ['Divide', 'mi', 'h'],
       ]);
     });
+
+    test('spaced phrase `miles per hour` → mi/h', () => {
+      expect(parse('60 \\text{ miles per hour}')).toEqual([
+        'Quantity',
+        60,
+        ['Divide', 'mi', 'h'],
+      ]);
+    });
+
+    test('non-unit multi-word text does not become a unit', () => {
+      const json = JSON.stringify(parse('\\text{hello world}'));
+      expect(json).not.toContain('Quantity');
+    });
   });
 
   describe('exponent outside the braced text', () => {

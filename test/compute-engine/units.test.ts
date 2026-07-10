@@ -7,6 +7,7 @@ import {
   getExpressionScale,
   parseUnitDSL,
   convertCompoundUnit,
+  convertUnit,
   dimensionsEqual,
   isDimensionless,
 } from '../../src/compute-engine/library/unit-data';
@@ -62,25 +63,25 @@ describe('UNITS LIBRARY', () => {
 
 describe('UNIT REGISTRY', () => {
   test('Base SI unit dimension - meter', () => {
-    expect(getUnitDimension('m')).toEqual([1, 0, 0, 0, 0, 0, 0]);
+    expect(getUnitDimension('m')).toEqual([1, 0, 0, 0, 0, 0, 0, 0]);
   });
   test('Base SI unit dimension - kilogram', () => {
-    expect(getUnitDimension('kg')).toEqual([0, 1, 0, 0, 0, 0, 0]);
+    expect(getUnitDimension('kg')).toEqual([0, 1, 0, 0, 0, 0, 0, 0]);
   });
   test('Base SI unit dimension - second', () => {
-    expect(getUnitDimension('s')).toEqual([0, 0, 1, 0, 0, 0, 0]);
+    expect(getUnitDimension('s')).toEqual([0, 0, 1, 0, 0, 0, 0, 0]);
   });
   test('Named derived unit - newton', () => {
-    expect(getUnitDimension('N')).toEqual([1, 1, -2, 0, 0, 0, 0]);
+    expect(getUnitDimension('N')).toEqual([1, 1, -2, 0, 0, 0, 0, 0]);
   });
   test('Named derived unit - joule', () => {
-    expect(getUnitDimension('J')).toEqual([2, 1, -2, 0, 0, 0, 0]);
+    expect(getUnitDimension('J')).toEqual([2, 1, -2, 0, 0, 0, 0, 0]);
   });
   test('Named derived unit - hertz', () => {
-    expect(getUnitDimension('Hz')).toEqual([0, 0, -1, 0, 0, 0, 0]);
+    expect(getUnitDimension('Hz')).toEqual([0, 0, -1, 0, 0, 0, 0, 0]);
   });
   test('Prefixed unit - kilometer', () => {
-    expect(getUnitDimension('km')).toEqual([1, 0, 0, 0, 0, 0, 0]);
+    expect(getUnitDimension('km')).toEqual([1, 0, 0, 0, 0, 0, 0, 0]);
   });
   test('Prefixed unit scale - kilometer', () => {
     expect(getUnitScale('km')).toBe(1000);
@@ -92,7 +93,7 @@ describe('UNIT REGISTRY', () => {
     expect(getUnitScale('cm')).toBe(0.01);
   });
   test('Prefixed unit - microsecond', () => {
-    expect(getUnitDimension('µs')).toEqual([0, 0, 1, 0, 0, 0, 0]);
+    expect(getUnitDimension('µs')).toEqual([0, 0, 1, 0, 0, 0, 0, 0]);
     expect(getUnitScale('µs')).toBe(1e-6);
   });
   test('Compatible units - m and km', () => {
@@ -105,24 +106,24 @@ describe('UNIT REGISTRY', () => {
     expect(areCompatibleUnits('N', 'kg')).toBe(false);
   });
   test('Non-SI unit - liter', () => {
-    expect(getUnitDimension('L')).toEqual([3, 0, 0, 0, 0, 0, 0]);
+    expect(getUnitDimension('L')).toEqual([3, 0, 0, 0, 0, 0, 0, 0]);
     expect(getUnitScale('L')).toBe(0.001);
   });
   test('Non-SI unit - minute', () => {
-    expect(getUnitDimension('min')).toEqual([0, 0, 1, 0, 0, 0, 0]);
+    expect(getUnitDimension('min')).toEqual([0, 0, 1, 0, 0, 0, 0, 0]);
     expect(getUnitScale('min')).toBe(60);
   });
   test('Non-SI unit - electronvolt', () => {
-    expect(getUnitDimension('eV')).toEqual([2, 1, -2, 0, 0, 0, 0]);
+    expect(getUnitDimension('eV')).toEqual([2, 1, -2, 0, 0, 0, 0, 0]);
   });
   test('Unknown unit returns null', () => {
     expect(getUnitDimension('xyz')).toBeNull();
   });
   test('Logarithmic unit - dB', () => {
-    expect(getUnitDimension('dB')).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    expect(getUnitDimension('dB')).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
   });
   test('Angle unit - degree', () => {
-    expect(getUnitDimension('deg')).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    expect(getUnitDimension('deg')).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
   });
 });
 
@@ -332,14 +333,14 @@ describe('UNIT CONVERT', () => {
 describe('COMPOUND UNITS', () => {
   test('Dimension of m/s', () => {
     expect(getExpressionDimension(['Divide', 'm', 's'])).toEqual([
-      1, 0, -1, 0, 0, 0, 0,
+      1, 0, -1, 0, 0, 0, 0, 0,
     ]);
   });
 
   test('Dimension of m/s^2', () => {
     expect(
       getExpressionDimension(['Divide', 'm', ['Power', 's', 2]])
-    ).toEqual([1, 0, -2, 0, 0, 0, 0]);
+    ).toEqual([1, 0, -2, 0, 0, 0, 0, 0]);
   });
 
   test('Dimension of kg*m*s^-2 (newton)', () => {
@@ -350,7 +351,7 @@ describe('COMPOUND UNITS', () => {
         'm',
         ['Power', 's', -2],
       ])
-    ).toEqual([1, 1, -2, 0, 0, 0, 0]);
+    ).toEqual([1, 1, -2, 0, 0, 0, 0, 0]);
   });
 
   test('Scale of km/h', () => {
@@ -560,7 +561,7 @@ describe('UNIT SIMPLIFY', () => {
     ]).evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(5);
-    // kg/L has dimension [0, 1, 0, 0, 0, 0, 0] - [3, 0, 0, 0, 0, 0, 0] = [-3, 1, 0, 0, 0, 0, 0]
+    // kg/L has dimension [0, 1, 0, 0, 0, 0, 0, 0] - [3, 0, 0, 0, 0, 0, 0, 0] = [-3, 1, 0, 0, 0, 0, 0, 0]
     // which has no named SI unit (it's density), so should remain unchanged
     expect(expr.op2.operator).toBe('Divide');
   });
@@ -767,7 +768,7 @@ describe('COMPOUND UNIT QUERIES', () => {
       ['Divide', 'm', ['Power', 's', 2]],
     ]).evaluate();
     expect(expr.operator).toBe('List');
-    // [1, 0, -2, 0, 0, 0, 0] = acceleration
+    // [1, 0, -2, 0, 0, 0, 0, 0] = acceleration
     expect(expr.op1.re).toBe(1);  // length
   });
 });
@@ -995,7 +996,7 @@ describe('N SYMBOL AS NEWTON', () => {
   test('UnitDimension(N) returns force dimension', () => {
     const expr = engine.expr(['UnitDimension', 'N']).evaluate();
     expect(expr.operator).toBe('List');
-    // Force: [1, 1, -2, 0, 0, 0, 0]
+    // Force: [1, 1, -2, 0, 0, 0, 0, 0]
     expect(expr.op1.re).toBe(1); // length
   });
 
@@ -1163,19 +1164,19 @@ describe('QUANTITY COMPARISON', () => {
 
 describe('DIMENSIONS EQUAL / IS DIMENSIONLESS', () => {
   test('Same dimension vectors are equal', () => {
-    expect(dimensionsEqual([1, 0, -2, 0, 0, 0, 0], [1, 0, -2, 0, 0, 0, 0])).toBe(true);
+    expect(dimensionsEqual([1, 0, -2, 0, 0, 0, 0, 0], [1, 0, -2, 0, 0, 0, 0, 0])).toBe(true);
   });
 
   test('Different dimension vectors are not equal', () => {
-    expect(dimensionsEqual([1, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0])).toBe(false);
+    expect(dimensionsEqual([1, 0, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0, 0])).toBe(false);
   });
 
   test('Zero vector is dimensionless', () => {
-    expect(isDimensionless([0, 0, 0, 0, 0, 0, 0])).toBe(true);
+    expect(isDimensionless([0, 0, 0, 0, 0, 0, 0, 0])).toBe(true);
   });
 
   test('Non-zero vector is not dimensionless', () => {
-    expect(isDimensionless([1, 0, 0, 0, 0, 0, 0])).toBe(false);
+    expect(isDimensionless([1, 0, 0, 0, 0, 0, 0, 0])).toBe(false);
   });
 });
 
@@ -1293,5 +1294,140 @@ describe('TEMPERATURE ARITHMETIC EDGE CASES', () => {
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(30);
+  });
+});
+
+describe('ADDED UNITS (yd, qt, pt, cup, wk)', () => {
+  test('yard is length with scale 0.9144', () => {
+    expect(getUnitDimension('yd')).toEqual([1, 0, 0, 0, 0, 0, 0, 0]);
+    expect(getUnitScale('yd')).toBe(0.9144);
+  });
+
+  test('quart/pint/cup are volume', () => {
+    expect(getUnitDimension('qt')).toEqual([3, 0, 0, 0, 0, 0, 0, 0]);
+    expect(getUnitDimension('pt')).toEqual([3, 0, 0, 0, 0, 0, 0, 0]);
+    expect(getUnitDimension('cup')).toEqual([3, 0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  test('week is time with scale 604800', () => {
+    expect(getUnitDimension('wk')).toEqual([0, 0, 1, 0, 0, 0, 0, 0]);
+    expect(getUnitScale('wk')).toBe(604800);
+  });
+
+  test('US-liquid volume relations: 1 gal = 4 qt = 8 pt = 16 cup', () => {
+    expect(convertUnit(1, 'gal', 'qt')).toBe(4);
+    expect(convertUnit(1, 'qt', 'pt')).toBe(2);
+    expect(convertUnit(1, 'pt', 'cup')).toBe(2);
+  });
+
+  test('length relation: 1 yd = 3 ft', () => {
+    expect(convertUnit(1, 'yd', 'ft')).toBe(3);
+  });
+
+  test('time relation: 1 wk = 7 d', () => {
+    expect(convertUnit(1, 'wk', 'd')).toBe(7);
+  });
+
+  test('word aliases parse to canonical symbols', () => {
+    expect(engine.parse('5 \\text{ yards}').json).toEqual([
+      'Quantity',
+      5,
+      'yd',
+    ]);
+    expect(engine.parse('2 \\text{ quarts}').json).toEqual([
+      'Quantity',
+      2,
+      'qt',
+    ]);
+    expect(engine.parse('3 \\text{ pints}').json).toEqual([
+      'Quantity',
+      3,
+      'pt',
+    ]);
+    expect(engine.parse('4 \\text{ cups}').json).toEqual([
+      'Quantity',
+      4,
+      'cup',
+    ]);
+    expect(engine.parse('2 \\text{ weeks}').json).toEqual([
+      'Quantity',
+      2,
+      'wk',
+    ]);
+  });
+
+  test('gal/qt division cancels to exactly 4', () => {
+    const expr = engine
+      .box(['Divide', ['Quantity', 1, 'gal'], ['Quantity', 1, 'qt']])
+      .evaluate();
+    expect(expr.re).toBe(4);
+  });
+});
+
+describe('CURRENCY (USD, cent)', () => {
+  test('USD and cent occupy the 8th (currency) dimension', () => {
+    expect(getUnitDimension('USD')).toEqual([0, 0, 0, 0, 0, 0, 0, 1]);
+    expect(getUnitDimension('cent')).toEqual([0, 0, 0, 0, 0, 0, 0, 1]);
+  });
+
+  test('1 USD = 100 cent', () => {
+    expect(convertUnit(1, 'USD', 'cent')).toBe(100);
+  });
+
+  test('dollars/cents word aliases parse to canonical symbols', () => {
+    expect(engine.parse('18 \\text{ dollars}').json).toEqual([
+      'Quantity',
+      18,
+      'USD',
+    ]);
+    expect(engine.parse('50 \\text{ cents}').json).toEqual([
+      'Quantity',
+      50,
+      'cent',
+    ]);
+  });
+
+  test('$ symbol normalizes to USD', () => {
+    expect(engine.parse('5\\text{$}').json).toEqual(['Quantity', 5, 'USD']);
+  });
+
+  test('cancellation across the currency dimension', () => {
+    const expr = engine
+      .box([
+        'Divide',
+        ['Quantity', 6, 'USD'],
+        ['Quantity', 2, ['Divide', 'USD', 'lb']],
+      ])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(3);
+    expect(expr.op2.symbol).toBe('lb');
+  });
+
+  test('adding dollars and cents uses largest-scale convention', () => {
+    const expr = engine
+      .box(['Add', ['Quantity', 1, 'USD'], ['Quantity', 50, 'cent']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(1.5);
+    expect(expr.op2.symbol).toBe('USD');
+  });
+});
+
+describe('SPACED MULTI-WORD UNITS', () => {
+  test('miles per hour → mi/h', () => {
+    expect(engine.parse('60 \\text{ miles per hour}').json).toEqual([
+      'Quantity',
+      60,
+      ['Divide', 'mi', 'h'],
+    ]);
+  });
+
+  test('mph abbreviation still works', () => {
+    expect(engine.parse('80\\text{ mph}').json).toEqual([
+      'Quantity',
+      80,
+      ['Divide', 'mi', 'h'],
+    ]);
   });
 });

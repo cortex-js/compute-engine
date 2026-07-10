@@ -93,8 +93,20 @@ function readBracedText(parser: Parser): string | null {
       continue;
     }
 
-    // Skip space tokens inside the group
+    // Emit a single space for space tokens, collapsing consecutive spaces.
+    // Multi-word unit phrases like `miles per hour` depend on the word
+    // boundaries surviving to the alias pass; `resolveUnitText` trims and
+    // strips the spaces before the unit lookup.
     if (token === '<space>') {
+      if (text.length > 0 && !text.endsWith(' ')) text += ' ';
+      parser.nextToken();
+      continue;
+    }
+
+    // A literal `$` tokenizes as `<$>`; emit it as `$` so the currency alias
+    // (`$` → USD) can match in `\text{$}`.
+    if (token === '<$>') {
+      text += '$';
       parser.nextToken();
       continue;
     }
@@ -144,10 +156,8 @@ const UNIT_BLOCKLIST = new Set(['d']);
  * system stays canonical; the parser normalizes words before lookup.
  *
  * Every target below is asserted to exist in `unit-data.ts` (via
- * `getUnitDimension`) — aliases whose target is missing (`yard`, `quart`,
- * `pint`, `cup`, `week`, …) are intentionally omitted.  Singular and
- * plural forms are listed explicitly (words are case-sensitive lowercase,
- * matching corpus usage).
+ * `getUnitDimension`).  Singular and plural forms are listed explicitly
+ * (words are case-sensitive lowercase, matching corpus usage).
  *
  * Values may themselves be compound DSL strings (e.g. `mph` → `mi/h`);
  * `normalizeUnitText` re-parses the result through the DSL path.
@@ -162,6 +172,8 @@ const UNIT_ALIASES: Record<string, string> = {
   'ft.': 'ft',
   mile: 'mi',
   miles: 'mi',
+  yard: 'yd',
+  yards: 'yd',
   meter: 'm',
   meters: 'm',
   metre: 'm',
@@ -177,6 +189,12 @@ const UNIT_ALIASES: Record<string, string> = {
   // Volume
   gallon: 'gal',
   gallons: 'gal',
+  quart: 'qt',
+  quarts: 'qt',
+  pint: 'pt',
+  pints: 'pt',
+  cup: 'cup',
+  cups: 'cup',
   liter: 'L',
   liters: 'L',
   litre: 'L',
@@ -202,11 +220,23 @@ const UNIT_ALIASES: Record<string, string> = {
   hours: 'h',
   day: 'd',
   days: 'd',
+  week: 'wk',
+  weeks: 'wk',
+  // Currency (USD only; see unit-data.ts for why other currencies are omitted)
+  dollar: 'USD',
+  dollars: 'USD',
+  $: 'USD',
+  cent: 'cent',
+  cents: 'cent',
   // Angle
   degree: 'deg',
   degrees: 'deg',
   // Compound
   mph: 'mi/h',
+  // `per` → `/` so multi-word phrases like `miles per hour` become `mi/h`.
+  // The word regex matches `per` only as a maximal run, so `person` etc.
+  // are unaffected.
+  per: '/',
 };
 
 /**
@@ -218,9 +248,9 @@ const UNIT_ALIASES: Record<string, string> = {
  * subsequent `getUnitDimension` / DSL check still rejects them.
  */
 function normalizeUnitText(text: string): string {
-  // Replace each maximal run of letters/period with its alias, leaving
-  // DSL operators (`/ * ^`) and digits untouched.
-  return text.replace(/[A-Za-z.]+/g, (w) => UNIT_ALIASES[w] ?? w);
+  // Replace each maximal run of letters/period (or a literal `$`) with its
+  // alias, leaving DSL operators (`/ * ^`), spaces, and digits untouched.
+  return text.replace(/\$|[A-Za-z.]+/g, (w) => UNIT_ALIASES[w] ?? w);
 }
 
 /**
@@ -230,15 +260,22 @@ function normalizeUnitText(text: string): string {
  * Returns a MathJSON unit expression, or `null` if not recognised.
  */
 function resolveUnitText(text: string): MathJsonExpression | null {
-  if (!text || text.length === 0) return null;
+  if (!text) return null;
+
+  // Trim surrounding whitespace so the blocklist and unit lookups see the
+  // bare base text (e.g. `\mathrm{ d }` still blocks the differential `d`).
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
 
   // Block symbols that have primary mathematical meanings.  Checked on the
-  // RAW text so that bare `\mathrm{d}` (differential) stays blocked while
+  // trimmed text so that bare `\mathrm{d}` (differential) stays blocked while
   // the word `days` still normalizes to the `d` unit below.
-  if (UNIT_BLOCKLIST.has(text)) return null;
+  if (UNIT_BLOCKLIST.has(trimmed)) return null;
 
-  // Normalize English unit words (singular/plural) to canonical symbols.
-  const normalized = normalizeUnitText(text);
+  // Normalize English unit words (singular/plural, `per` → `/`) to canonical
+  // symbols, then drop the internal spaces that separated the words:
+  // `miles per hour` → `mi / h` → `mi/h`.
+  const normalized = normalizeUnitText(trimmed).replace(/\s+/g, '');
 
   // Simple unit check: is the whole string a known unit?
   if (getUnitDimension(normalized) !== null) return normalized;
