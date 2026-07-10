@@ -439,6 +439,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
 
       iterator: (expr) => {
+        // Symbolic bounds (e.g. Range(1, n)): the elements cannot be
+        // enumerated — return undefined (no iterator) rather than iterating
+        // the collapsed [1]. Consumers keep the lazy form (materialize) or
+        // stay inert (Reduce guards on isFiniteCollection).
+        if (hasSymbolicRangeBounds(expr)) return undefined;
         const [lower, upper, step] = range(expr);
 
         // Number of elements in the range. Math.max guards against a
@@ -701,6 +706,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
+        // A symbolic count (e.g. Linspace(0, 1, m)) is indeterminate; only a
+        // *missing* count selects the default.
+        if (isSymbolicOperand(expr.op3)) return undefined;
         let count = expr.op3.re;
         if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
         return Math.max(0, Math.floor(count));
@@ -711,6 +719,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
+        // Symbolic count: whether the index is in range is indeterminate
+        if (isSymbolicOperand(expr.op3)) return undefined;
         const lower = expr.op1.re;
         const upper = expr.op2.re;
         let count = expr.op3.re;
@@ -728,6 +738,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
+        // A symbolic endpoint or count cannot be enumerated (the arithmetic
+        // below would yield NaN literals) — no iterator; consumers keep the
+        // lazy form. Missing (`Nothing`) operands still select the defaults.
+        if (expr.ops.some((op) => isSymbolicOperand(op))) return undefined;
         let lower = expr.op1.re;
         let upper = expr.op2.re;
         let totalCount: number;
@@ -777,6 +791,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Symbolic bounds cannot be decided structurally
         if (Number.isNaN(lower) || Number.isNaN(upper)) return undefined;
         if (t < lower || t > upper) return false;
+        // A symbolic count: the sample grid is indeterminate (the bounds
+        // check above may still have refuted membership definitively)
+        if (isSymbolicOperand(expr.op3)) return undefined;
         let count = expr.op3.re;
         if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
         count = Math.floor(count);
@@ -1088,6 +1105,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     evaluate: ([collection, fn, initial], { engine: ce }) => {
       if (!collection.isFiniteCollection) return undefined;
+      // A collection may report a finite count yet decline enumeration
+      // (e.g. Linspace(a, 1, 3) with a symbolic endpoint: size 3, but the
+      // elements have no numeric value, so its iterator returns undefined
+      // and each() yields nothing). Folding that would silently produce the
+      // initial value (Sum → 0): stay inert instead.
+      if (enumerationDeclined(collection)) return undefined;
       const hasInitial = initial !== undefined;
       initial ??= ce.Nothing;
 
@@ -2730,9 +2753,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
  * indeterminate channel, and its consumers (Reduce, each) predate this
  * guard. A symbolic range still iterates as the collapsed [1] there.
  */
-function hasSymbolicRangeBounds(expr: Expression): boolean {
+export function hasSymbolicRangeBounds(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
   return expr.ops.some((op) => Number.isNaN(op.re));
+}
+
+/**
+ * A *present* operand with no concrete numeric value (a symbolic
+ * expression), as opposed to a missing / `Nothing` operand — which selects a
+ * documented default (e.g. `Linspace`'s default count) rather than being
+ * indeterminate.
+ */
+function isSymbolicOperand(op: Expression | undefined): boolean {
+  if (op === undefined) return false;
+  if (isSymbol(op) && op.symbol === 'Nothing') return false;
+  return Number.isNaN(op.re);
 }
 
 /**
@@ -2750,18 +2785,17 @@ export function range(
   if (!isFunction(expr)) return [1, 0, 0];
   if (expr.nops === 0) return [1, 0, 0];
 
-  let op1 = expr.op1.re;
-  if (!isFinite(op1) && !op1) op1 = 1;
+  // A symbolic (non-numeric) operand reads as NaN and propagates: callers
+  // must check `hasSymbolicRangeBounds()` first. (These used to be coerced
+  // to 1, which collapsed every symbolic range to [1, 1, 1] — the
+  // `Count(Range(1, n)) → 1` class of wrong scalars.)
+  const op1 = expr.op1.re;
   if (expr.nops === 1) return [1, op1, 1];
 
-  let op2 = expr.op2.re;
-  if (!isFinite(op2) && !op2) op2 = 1;
+  const op2 = expr.op2.re;
   if (expr.nops === 2) return [op1, op2, op2 >= op1 ? 1 : -1];
 
-  let op3 = expr.op3.re;
-  if (!isFinite(op3) && !op3) op3 = 1;
-
-  return [op1, op2, op3];
+  return [op1, op2, expr.op3.re];
 }
 
 /** Return the last value in the range
@@ -2811,6 +2845,9 @@ function _indexRangeArg(
   const h = op.operator;
   if (!h || typeof h !== 'string' || !/^(Single|Pair|Triple|Tuple|)$/.test(h))
     return [0, 0, 0];
+  // A symbolic tuple entry has no concrete numeric value: invalid as an
+  // index range (range() no longer coerces it to 1).
+  if (hasSymbolicRangeBounds(op)) return [0, 0, 0];
   let [lower, upper, step] = range(op);
 
   if ((lower < 0 || upper < 0) && l === undefined) return [0, 0, 0];
@@ -3157,6 +3194,19 @@ function tally(collection: Expression): [ReadonlyArray<Expression>, number[]] {
   }
 
   return [values, counts];
+}
+
+/**
+ * True when a collection claims to have elements (`isEmptyCollection` is
+ * not `true`) yet its iterator declines to enumerate them — e.g.
+ * `Linspace(a, 1, 3)` with a symbolic endpoint: the size (3) is known, but
+ * the elements have no computable value, so `each()` yields nothing.
+ * Folding such a collection would silently produce the fold's initial
+ * value (`Sum → 0`); callers should stay inert instead.
+ */
+export function enumerationDeclined(collection: Expression): boolean {
+  if (collection.isEmptyCollection === true) return false;
+  return collection.each().next().done === true;
 }
 
 /**

@@ -11,7 +11,11 @@ import {
 } from '../boxed-expression/type-guards.js';
 
 import { MAX_ITERATION } from '../numerics/numeric.js';
-import { fromRange, reduceCollection } from './collections.js';
+import {
+  fromRange,
+  reduceCollection,
+  enumerationDeclined,
+} from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 
 /**
@@ -566,8 +570,13 @@ export function* reduceBigOp<T>(
 ): Generator<T | typeof NON_ENUMERABLE_DOMAIN | undefined> {
   // If the body is a collection, reduce it
   // i.e. Sum({1, 2, 3}) = 6
-  if (body.isCollection)
-    return yield* reduceCollection(body.evaluate(), fn, initial);
+  if (body.isCollection) {
+    const collection = body.evaluate();
+    // A collection whose iterator declines (e.g. symbolic elements or
+    // bounds) would fold to the bare initial value: keep it symbolic.
+    if (enumerationDeclined(collection)) return NON_ENUMERABLE_DOMAIN;
+    return yield* reduceCollection(collection, fn, initial);
+  }
 
   // If there are no indexes, the summation is a constant
   // i.e. Sum(3) = 3

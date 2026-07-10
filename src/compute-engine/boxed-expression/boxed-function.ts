@@ -1896,6 +1896,11 @@ function materialize(
 ): Expression {
   if (!expr.isValid || options?.materialization === false) return expr;
 
+  // Emptiness indeterminate (e.g. Range(1, n) with a symbolic bound): the
+  // collection cannot be enumerated, so fabricating a literal would collapse
+  // it (previously to the 1-element list [1]). Keep the lazy form.
+  if (expr.isEmptyCollection === undefined) return expr;
+
   let materialization = options?.materialization ?? false;
   if (typeof materialization === 'boolean')
     materialization = DEFAULT_MATERIALIZATION;
@@ -1953,6 +1958,11 @@ function materialize(
         if (i > headSize) break;
       }
 
+      // Nothing enumerable despite claiming elements (e.g. Linspace with a
+      // symbolic endpoint: concrete count, but its iterator declines): keep
+      // the lazy form rather than fabricate a placeholder literal.
+      if (xs.length === 0) return expr;
+
       const count = expr.count;
       if (count === undefined || count <= headSize) {
         // If the collection is smaller than the head, we don't need to evaluate the tail
@@ -1978,6 +1988,11 @@ function materialize(
       }
     }
   }
+
+  // A collection that claims elements but yielded none cannot be enumerated
+  // (e.g. Linspace with a symbolic endpoint, whose iterator declines): keep
+  // the lazy form rather than fabricate an empty or placeholder literal.
+  if (xs.length === 0 && expr.isEmptyCollection === false) return expr;
 
   //
   // Convert to a List, Set or Dictionary depending on the type of

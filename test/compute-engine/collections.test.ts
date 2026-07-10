@@ -108,8 +108,6 @@ describe('COUNT', () => {
   // Stage-2 corpus-audit finding: a symbolic bound reads as NaN through
   // `.re` and `range()` coerced it to 1, so `Count(Range(1, n))` collapsed
   // to the wrong scalar 1. The count is indeterminate: stay inert.
-  // (Plain evaluation: materialization would first collapse the lazy range
-  // through the still-unguarded iterator channel.)
   test('Count range with symbolic bound stays inert', () =>
     expect(
       exprToString(engine.expr(['Count', ['Range', 1, 'n']]).evaluate())
@@ -121,6 +119,13 @@ describe('COUNT', () => {
         engine.expr(['Count', ['Range', 1, { num: '+Infinity' }]]).evaluate()
       )
     ).toMatchInlineSnapshot(`PositiveInfinity`));
+
+  test('Count linspace with symbolic count stays inert', () =>
+    expect(
+      exprToString(
+        engine.expr(['Count', ['Linspace', 0, 1, 'n']]).evaluate()
+      )
+    ).toMatchInlineSnapshot(`["Count", ["Linspace", 0, 1, "n"]]`));
 });
 
 describe('TAKE', () => {
@@ -944,5 +949,67 @@ describe('Binning, Reduce, Filter, Zip (REVIEW.md B15/B17/B18)', () => {
     expect(
       engine.expr(['Zip', ['List', 1, 2], ['List', 3, 4]]).isEmptyCollection
     ).toBe(false);
+  });
+});
+
+describe('SYMBOLIC-BOUND COLLECTIONS STAY INERT', () => {
+  // Stage-2 corpus-audit follow-up: a symbolic Range/Linspace reports an
+  // indeterminate count (or declines enumeration), and every consumer must
+  // stay inert rather than collapse to a fabricated scalar or literal —
+  // previously Sum(Range(1,n)) → 1 and materialization produced [1].
+  test('Sum over symbolic Range stays inert', () =>
+    expect(
+      exprToString(engine.expr(['Sum', ['Range', 1, 'n']]).evaluate())
+    ).toMatchInlineSnapshot(`["Sum", ["Range", 1, "n"]]`));
+
+  test('Sum over Linspace with symbolic endpoint stays inert', () =>
+    // Concrete count (3) but unenumerable elements: folding would
+    // silently produce the initial value 0
+    expect(
+      exprToString(engine.expr(['Sum', ['Linspace', 'x_1', 1, 3]]).evaluate())
+    ).toMatchInlineSnapshot(`["Sum", ["Linspace", "x_1", 1, 3]]`));
+
+  test('materialization keeps the lazy form', () => {
+    expect(
+      exprToString(
+        engine.expr(['Range', 1, 'n']).evaluate({ materialization: true })
+      )
+    ).toMatchInlineSnapshot(`["Range", 1, "n"]`);
+    expect(
+      exprToString(
+        engine
+          .expr(['Linspace', 'x_1', 1, 3])
+          .evaluate({ materialization: true })
+      )
+    ).toMatchInlineSnapshot(`["Linspace", "x_1", 1, 3]`);
+  });
+
+  test('each() yields nothing for a symbolic Range', () =>
+    expect([...engine.expr(['Range', 1, 'n']).each()]).toHaveLength(0));
+
+  test('extrema of a symbolic Range stay inert', () => {
+    expect(
+      exprToString(engine.expr(['Supremum', ['Range', 1, 'n']]).evaluate())
+    ).toMatchInlineSnapshot(`["Supremum", ["Range", 1, "n"]]`);
+    expect(
+      exprToString(engine.expr(['Infimum', ['Range', 1, 'n']]).evaluate())
+    ).toMatchInlineSnapshot(`["Infimum", ["Range", 1, "n"]]`);
+  });
+
+  test('concrete controls are unaffected', () => {
+    expect(exprToString(engine.expr(['Sum', ['Range', 1, 10]]).evaluate())).toBe(
+      '55'
+    );
+    expect(
+      exprToString(engine.expr(['Sum', ['Linspace', 0, 1, 3]]).evaluate())
+    ).toBe('1.5');
+    expect(
+      exprToString(
+        engine.expr(['Range', 1, 5]).evaluate({ materialization: true })
+      )
+    ).toMatchInlineSnapshot(`["List", 1, 2, 3, 4, 5]`);
+    expect(
+      exprToString(engine.expr(['Supremum', ['Range', 2, 9, 3]]).evaluate())
+    ).toBe('8');
   });
 });

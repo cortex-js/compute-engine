@@ -124,7 +124,12 @@ import {
   measurementLn,
   measurementLog,
 } from './measurement-arithmetic.js';
-import { range, rangeLast } from './collections.js';
+import {
+  range,
+  rangeLast,
+  hasSymbolicRangeBounds,
+  enumerationDeclined,
+} from './collections.js';
 import {
   run,
   runAsync,
@@ -2734,8 +2739,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Arity-1 collection-reducer form: Sum(L).
         if (rest.length === 0 && first?.isCollection) {
           // Non-finite collections stay symbolic — infinite iteration would
-          // hang the thread and bypass `engine._timeRemaining`.
+          // hang the thread and bypass `engine._timeRemaining`. A finite
+          // collection whose iterator declines (symbolic elements) would
+          // silently fold to 0 — stay symbolic too.
           if (first.isFiniteCollection !== true) return undefined;
+          if (enumerationDeclined(first)) return undefined;
           const result = run(
             reduceCollection(first, engine.Zero, (acc, x) =>
               sumAccumulate(
@@ -2788,6 +2796,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Arity-1 collection-reducer form: Sum(L).
         if (rest.length === 0 && first?.isCollection) {
           if (first.isFiniteCollection !== true) return undefined;
+          if (enumerationDeclined(first)) return undefined;
           const result = await runAsync(
             reduceCollection(first, engine.Zero, (acc, x) =>
               sumAccumulate(
@@ -2993,6 +3002,8 @@ function processMinMaxItem(
 
   // A range is discrete, the last element may not be included
   if (item.operator === 'Range') {
+    // Symbolic bounds (e.g. Range(1, n)): the extremum is indeterminate
+    if (hasSymbolicRangeBounds(item)) return [undefined, [item]];
     if (upper) {
       const r = range(item);
       const last = rangeLast(r);
