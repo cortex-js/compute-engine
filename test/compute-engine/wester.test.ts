@@ -518,7 +518,7 @@ describe('Matrix theory', () => {
     ]);
   });
 
-  test.skip(`row-vector . (a M1 + M2) in fused form`, () => {
+  test(`row-vector . (a M1 + M2) in fused form`, () => {
     // The natural single-expression form errors: the matrix-valued Add operand
     // is assigned the union type `finite_number | matrix<2x3>` during
     // canonicalization and rejected by MatrixMultiply's signature. CURRENT:
