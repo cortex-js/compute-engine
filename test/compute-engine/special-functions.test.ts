@@ -422,6 +422,29 @@ describe('LAMBERT W FUNCTION', () => {
     );
     expect(ce.box(['LambertW', 'x', 0]).latex).toBe('\\operatorname{W}_{0}(x)');
   });
+
+  test('parsing: subscripted W_{k}(x) parses to the 2-argument form (branch last)', () => {
+    expect(ce.parse('\\operatorname{W}(x)').json).toEqual(['LambertW', 'x']);
+    expect(ce.parse('\\operatorname{W}_{-1}(x)').json).toEqual([
+      'LambertW',
+      'x',
+      -1,
+    ]);
+    expect(ce.parse('\\operatorname{W}_0(x)').json).toEqual([
+      'LambertW',
+      'x',
+      0,
+    ]);
+    // Full round-trip through the serializer
+    expect(ce.parse(ce.box(['LambertW', 'x', -1]).latex).json).toEqual([
+      'LambertW',
+      'x',
+      -1,
+    ]);
+    // The parsed form reaches the W₋₁ numeric kernel
+    const w = ce.parse('\\operatorname{W}_{-1}(-0.1)').N().re;
+    expect(Math.abs(w - -3.577152063957297)).toBeLessThan(1e-10);
+  });
 });
 
 describe('BESSEL J FUNCTION', () => {
@@ -457,6 +480,31 @@ describe('BESSEL J FUNCTION', () => {
   test('J_0(50) asymptotic regime', () => {
     // Tests asymptotic expansion for large x
     expectApprox(ce.expr(['BesselJ', 0, 50]), 0.05581232766925048, 1e-6);
+  });
+
+  test('parsing: subscripted J_{n}(x) parses to BesselJ(n, x) (order first)', () => {
+    expect(ce.parse('\\operatorname{J}_{2}(x)').json).toEqual([
+      'BesselJ',
+      2,
+      'x',
+    ]);
+    expect(ce.parse('\\operatorname{Y}_{n}(x)').json).toEqual([
+      'BesselY',
+      'n',
+      'x',
+    ]);
+    expect(ce.parse('\\operatorname{I}_0(x)').json).toEqual(['BesselI', 0, 'x']);
+    expect(ce.parse('\\operatorname{K}_{1}(2x)').json).toEqual([
+      'BesselK',
+      1,
+      ['Multiply', 2, 'x'],
+    ]);
+    // Full round-trip through the serializer
+    expect(ce.parse(ce.box(['BesselJ', 2, 'x']).latex).json).toEqual([
+      'BesselJ',
+      2,
+      'x',
+    ]);
   });
 
   test('BesselJ without numericApproximation returns unevaluated', () => {

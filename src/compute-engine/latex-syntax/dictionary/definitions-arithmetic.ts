@@ -825,6 +825,33 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
   return ['Divide', numer, denom];
 }
 
+/**
+ * Parse a function written with an index subscript, e.g.
+ * `\operatorname{W}_{-1}(x)` or `\operatorname{J}_{n}(x)`. The subscript is
+ * carried as a regular argument: Bessel-style heads take it FIRST (the
+ * order), `LambertW` takes it LAST (the branch — SymPy/Fungrim convention).
+ * Without a subscript, mirror the default function-kind parse: enclosure
+ * arguments, bare trigger → the function symbol.
+ */
+function parseSubscriptedFunction(
+  parser: Parser,
+  head: string,
+  subscriptPosition: 'first' | 'last'
+): MathJsonExpression | null {
+  if (parser.match('_')) {
+    const sub = parser.parseGroup() ?? parser.parseToken();
+    if (sub === null) return null;
+    const args = parser.parseArguments('implicit');
+    if (args === null || args.length === 0) return null;
+    return subscriptPosition === 'first'
+      ? [head, sub, ...args]
+      : [head, ...args, sub];
+  }
+  const args = parser.parseArguments('enclosure');
+  if (args === null) return head;
+  return [head, ...args];
+}
+
 function unwrapSingleItemList(expr: MathJsonExpression): MathJsonExpression {
   if (operator(expr) === 'List' && nops(expr) === 1) return operand(expr, 1)!;
   return expr;
@@ -1560,6 +1587,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     // (BesselJ-style), e.g. W₋₁(x) → `\operatorname{W}_{-1}(x)`. The branch is
     // the SECOND argument (the value is first); one-argument W(x) prints
     // without a subscript.
+    parse: (parser: Parser) =>
+      parseSubscriptedFunction(parser, 'LambertW', 'last'),
     serialize: (serializer, expr) => {
       const x = operand(expr, 1);
       const k = operand(expr, 2);
@@ -1580,6 +1609,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'BesselJ',
     latexTrigger: ['\\operatorname{J}'],
     kind: 'function',
+    parse: (parser: Parser) =>
+      parseSubscriptedFunction(parser, 'BesselJ', 'first'),
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
@@ -1598,6 +1629,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'BesselY',
     latexTrigger: ['\\operatorname{Y}'],
     kind: 'function',
+    parse: (parser: Parser) =>
+      parseSubscriptedFunction(parser, 'BesselY', 'first'),
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
@@ -1616,6 +1649,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'BesselI',
     latexTrigger: ['\\operatorname{I}'],
     kind: 'function',
+    parse: (parser: Parser) =>
+      parseSubscriptedFunction(parser, 'BesselI', 'first'),
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
@@ -1634,6 +1669,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'BesselK',
     latexTrigger: ['\\operatorname{K}'],
     kind: 'function',
+    parse: (parser: Parser) =>
+      parseSubscriptedFunction(parser, 'BesselK', 'first'),
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
