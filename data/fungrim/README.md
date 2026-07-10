@@ -29,7 +29,7 @@ integration plan (`docs/fungrim/FUNGRIM-PLAN-1-TRANSLATOR.md` at the repository 
 |---|---|
 | `MANIFEST.json` | schema version, generation date, upstream pin, counts |
 | `corpus/<topic>.json` | 57 per-topic files, 2,551 annotated formula entries |
-| `declarations.json` | 152 symbol-shell declarations for heads CE does not define |
+| `declarations.json` | 132 symbol-shell declarations for heads CE does not define |
 | `properties.json` | 131 analytic-property records (Poles, Zeros, BranchCuts, …) |
 | `skipped.json` | full skip ledger: 448 records with machine-readable reason codes |
 | `LICENSE` | upstream MIT license |

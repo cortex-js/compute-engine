@@ -611,8 +611,10 @@ branches). Residual, none benchmark-reachable:
 
 - **FR1/FR3** (Dottie-style transcendental fixed points): unsolved by SymPy
   and Mathematica too — outside the closed-form ceiling, not a gap to chase.
-- The remaining `compat-signature` compile skips are all genuine 2-arg
-  `Digamma` (polygamma order — still unimplemented).
+- The `existing.LambertW` audit note in `data/fungrim/declarations.json`
+  (emitted by the translator's `shells.py`) still describes CE's LambertW
+  as 1-arg; CE gained the native 2-arg branch form — drop the note on the
+  next translator touch (cosmetic, audit metadata only).
 
 (Fungrim's _simplify_-side work is separate again — see Strategic item 7,
 Fungrim Phase 4.)

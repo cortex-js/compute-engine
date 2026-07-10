@@ -18,9 +18,15 @@
   `a172c7` published an *empty* assumption interval
   (`OpenClosedInterval(0, −1/e)`); the corrected band `x ∈ (0, 1/e]` was
   fixed in the corpus fork (submitted upstream), and the recompiled
-  identities artifact now carries the rule (1,414 rules): with
-  `loadIdentities(ce)` and `assume(0 < x ≤ 1/4)`,
-  `simplify(W(x·ln x, −1))` returns `ln x`.
+  identities artifact now carries the rule: with `loadIdentities(ce)` and
+  `assume(0 < x ≤ 1/4)`, `simplify(W(x·ln x, −1))` returns `ln x`.
+- **Fungrim identities: the polygamma family is live (+28 rules, artifact
+  1,442).** The corpus' 2-argument `DigammaFunction(z, m)` (the order-`m`
+  polygamma) now translates to CE's native `PolyGamma(m, z)` instead of a
+  compat-shadowed 2-arg `Digamma`, so 28 previously skipped identities and
+  special values compile and fire: `simplify(PolyGamma(1, 1)) → π²/6`,
+  `PolyGamma(1, 1/4) → π² + 8·Catalan`, `PolyGamma(1, 1/2) → π²/2`, the
+  digamma/polygamma recurrence and reflection identities, and more.
 
 ## 0.73.0 _2026-07-09_
 
