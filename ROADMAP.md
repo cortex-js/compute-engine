@@ -51,8 +51,8 @@ validation) are release-protocol steps tracked in
 `roadmap/cortex/STATUS_REPORT.md`, not here.
 
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
-status:** R1–R20 landed — chapters 1/2/3/5/6, 4.1/4.3/4.5, §8.8 Polylogarithm,
-5,858 rules bundled; see the **Coverage tracks → Rubi** section below for
+status:** R1–R21 landed — chapters 1/2/3/5/6/7, 4.1/4.3/4.5, §8.8 Polylogarithm,
+6,574 rules bundled; see the **Coverage tracks → Rubi** section below for
 current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 **Related documents:** `docs/fungrim/FUNGRIM.md` (feasibility + feature map),
@@ -488,19 +488,23 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-10, R1–R20 landed):** the shipped bundle
+**State (2026-07-10, R1–R21 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 3 (Logarithms), 5 (Inverse trig), 6 (Hyperbolics),
-4.1 Sine, 4.3 Tangent, 4.5 Secant, and §8.8 Polylogarithm** — 5,858 rules, 6.28 MB
-(CI has a bundle-freshness gate). Scores (seed 5): **4.1 Sine 107/120 and 331/400
-(4.1.11 file 93/113, post-R18)**, **4.3 Tangent 72/120**, **4.5 Secant 69/120**,
-**ch3 Logarithms 71/120 (R20, +2 from ch5 family-C producers)**, **Chapter 5
-Inverse trig (R20): 5.1 sine 38/120, 5.2 cosine 40, 5.3 tangent 53, 5.4 cotangent
-60, 5.5 secant 54, 5.6 cosecant 49 (294/720 = 40.8%)**, ch1 exhaustive ≈90–91%,
+7 (Inverse hyperbolic), 4.1 Sine, 4.3 Tangent, 4.5 Secant, and §8.8 Polylogarithm**
+— 6,574 rules, 6.98 MB (CI has a bundle-freshness gate). Scores (seed 5): **4.1
+Sine 107/120 and 331/400 (4.1.11 file 93/113, post-R18)**, **4.3 Tangent 72/120**,
+**4.5 Secant 69/120**, **ch3 Logarithms 71/120 (R20, +2 from ch5 family-C
+producers)**, **Chapter 5 Inverse trig (R20): 5.1 sine 38/120, 5.2 cosine 40,
+5.3 tangent 53, 5.4 cotangent 60, 5.5 secant 54, 5.6 cosecant 49 (294/720 =
+40.8%)**, **Chapter 7 Inverse hyperbolic (R21): 7.1 sine 79/120, 7.2 cosine 49,
+7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44, 7.6 cosecant 54 (406/720 =
+56.4%)**, ch1 exhaustive ≈90–91%,
 ch2 ≈72% / ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
 **Genuine wrongs are 0 across all suites** (incl. ch3 after the R17
-back-substitution fix) — every flagged "wrong" is a documented
+back-substitution fix, and ch7's 11 flags — all symbolic-exponent /
+complex-log-branch / fractional-power false-wrongs) — every flagged "wrong" is a documented
 **verification false-wrong** (numeric ₂F₁/AppellF1
 mis-grading at non-integer symbolic-exponent substitution; `√(sin²)=|sin|`;
 cube-root/fractional-power branch at negative x): before believing a wrong
@@ -560,7 +564,13 @@ route, and the complex-Si family R15 declined (4.1.11 #61/#71/#72 —
 irreducible-quadratic denominators) closes via the R18 complex-linear split.
 Both are D-verified on the real axis (the complex Ei/Si and conjugate-pair terms
 recombine to a real antiderivative). Remaining hard cubic-and-higher x-denominator
-Si/Ci shapes still decline cleanly (unsolved, not wrong).
+Si/Ci shapes still decline cleanly (unsolved, not wrong). **R21 added the
+hyperbolic sine/cosine integral kernels Shi/Chi** (`SinhIntegral`/`CoshIntegral`,
+previously inert generic heads): real via Ei, complex via Shi(z)=−i·Si(iz) /
+Chi(z)=Ci(iz)−iπ/2 reflected into the left half-plane, mpmath-validated ≲1e-13
+(a naïve Ei-composition fails off-axis — mpmath's complex `ei` branch; and the
+positive-imaginary-axis case needs a signed-zero +iπ branch restoration). They
+close the ch7 §7.2.6 reciprocal-arccosh family end-to-end.
 
 **Method note (hard-won).** The "unimplemented-predicate" trace census is
 *misleading* for picking levers: the late catch-all rules
@@ -592,10 +602,11 @@ note — trace the residual integrand, don't trust the predicate census.
     `∫arctan(kx)/x`, `∫artanh(√)/x`, symbolic-order-`k` `PolyLog` recurrences,
     or `ArcSinh·Log` (3.1.4/3.1.5). **R20 bundled ch5, which supplied the
     `∫arctan(kx)/x → PolyLog[2,±i·x]` producer: family-C members #31 and #226
-    flipped to solved (ch3 69 → 71).** The rest still bottoms out in
-    `∫artanh(√)/x`, symbolic-order `PolyLog`, and `ArcSinh·Log` shapes ch5's
-    bundled base cases don't reach (hyperbolic-log/ch7 producers + a
-    symbolic-order `PolyLog` recurrence remain the levers).
+    flipped to solved (ch3 69 → 71).** **R21 bundled ch7 (inverse hyperbolic),
+    but ch3 s120 seed5 is unchanged at 71/4w — no additional family-C member
+    flips** (the `ArcSinh·Log/x` and symbolic-order `PolyLog` residuals still
+    bottom out in shapes ch7's bundled base cases don't reach, or fall outside
+    this sample). A symbolic-order `PolyLog` recurrence remains the lever.
   - **6: `∫Log[Sin/Tan/Csc²]`** (3.5) — a two-part gap: an inert-trig `D`
     reduction (CE's `D` knows `Tan`, not the inert `tan` head the driver
     carries) PLUS a Chapter-4 trig-integration foundation for the by-parts

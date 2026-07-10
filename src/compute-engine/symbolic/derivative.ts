@@ -224,6 +224,10 @@ const DERIVATIVES_TABLE = {
   SinIntegral: ['Divide', ['Sin', '_'], '_'],
   // d/dx Ci(x) = cos(x)/x where Ci is the cosine integral
   CosIntegral: ['Divide', ['Cos', '_'], '_'],
+  // d/dx Shi(x) = sinh(x)/x where Shi is the hyperbolic sine integral
+  SinhIntegral: ['Divide', ['Sinh', '_'], '_'],
+  // d/dx Chi(x) = cosh(x)/x where Chi is the hyperbolic cosine integral
+  CoshIntegral: ['Divide', ['Cosh', '_'], '_'],
   // d/dx Ei(x) = e^x/x where Ei is the exponential integral
   ExpIntegralEi: ['Divide', ['Exp', '_'], '_'],
   // d/dx li(x) = 1/ln(x) where li is the logarithmic integral

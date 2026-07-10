@@ -34,14 +34,18 @@ import {
   bigFresnelS,
   bigSinc,
   cosIntegral,
+  coshIntegral,
   fresnelC,
   fresnelS,
   sinc,
+  sinhIntegral,
   sinIntegral,
 } from '../numerics/special-functions.js';
 import {
   sinIntegralComplex,
   cosIntegralComplex,
+  sinhIntegralComplex,
+  coshIntegralComplex,
 } from '../numerics/numeric-complex.js';
 
 //
@@ -507,6 +511,81 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the E₁-based kernel.
         return apply(x, (x) => cosIntegral(x), undefined, cosIntegralComplex);
+      },
+    },
+
+    /**
+     * SinhIntegral(x) = ∫₀ˣ sinh(t)/t dt — odd and entire, Shi(±∞) = ±∞.
+     * Machine-precision only (no bignum kernel; ROADMAP B1).
+     */
+    SinhIntegral: {
+      description: 'Hyperbolic sine integral: ∫₀ˣ sinh(t)/t dt.',
+      complexity: 5200,
+      broadcastable: true,
+      signature: '(number) -> number',
+      // Shi is entire and odd: a finite real → finite real, a finite complex
+      // argument → finite complex value.
+      type: (ops) => {
+        const x = ops[0];
+        if (!x || x.isNaN) return 'number';
+        if (x.isReal === false)
+          return x.isFinite === true ? 'finite_complex' : 'number';
+        return x.isFinite === true ? 'finite_real' : 'real';
+      },
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x)) return undefined;
+        if (x.im === 0) {
+          // Exact special values, regardless of numericApproximation
+          if (x.isSame(0)) return ce.Zero;
+          if (x.isInfinity)
+            return x.isPositive ? ce.PositiveInfinity : ce.NegativeInfinity;
+        }
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // Real args use the machine kernel; complex args the Si-based kernel.
+        return apply(
+          x,
+          (x) => sinhIntegral(x),
+          undefined,
+          sinhIntegralComplex
+        );
+      },
+    },
+
+    /**
+     * CoshIntegral(x) = γ + ln|x| + ∫₀ˣ (cosh t − 1)/t dt — Chi(0⁺) = −∞,
+     * Chi(∞) = ∞. For x < 0 the function is complex; the real part Chi(|x|) is
+     * returned. Machine-precision only (no bignum kernel; ROADMAP B1).
+     */
+    CoshIntegral: {
+      description: 'Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.',
+      complexity: 5200,
+      broadcastable: true,
+      signature: '(number) -> number',
+      // Real argument → real (not finite_real: Chi(0) = −∞); a finite complex
+      // argument → finite complex value.
+      type: (ops) => {
+        const x = ops[0];
+        if (!x || x.isNaN) return 'number';
+        if (x.isReal === false)
+          return x.isFinite === true ? 'finite_complex' : 'number';
+        return 'real';
+      },
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x)) return undefined;
+        if (x.im === 0) {
+          // Exact special values, regardless of numericApproximation.
+          // For real x < 0 the machine kernel returns the real part Chi(|x|).
+          if (x.isSame(0)) return ce.NegativeInfinity;
+          if (x.isInfinity) return ce.PositiveInfinity;
+        }
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // Real args use the machine kernel; complex args the Ci-based kernel.
+        return apply(
+          x,
+          (x) => coshIntegral(x),
+          undefined,
+          coshIntegralComplex
+        );
       },
     },
 

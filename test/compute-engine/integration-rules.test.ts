@@ -611,4 +611,56 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       verify('\\frac{\\arctan(x)}{x}');
     });
   });
+
+  // Chapter-7 inverse-hyperbolic family (RUBI.md §5, Phase R21). The
+  // arsinh/arcosh/artanh/arsech families (7.1/7.2/7.3/7.5), including the
+  // (a+b·arsinh)ⁿ by-parts / IntHide chain and the 7.2.6 arccosh reciprocal
+  // that closes to the hyperbolic cosine/sine integral Chi/Shi (exercising the
+  // new Shi/Chi kernels end-to-end). Verified by finite-differencing F.N().
+  describe('integrates the inverse-hyperbolic family (Chapter-7, R21)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    ce.timeLimit = 30_000; // Chi/Shi results carry slow complex kernels
+    const verify = (latex: string, xs = [0.31, 0.52, 0.73, 1.42, 2.3]) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      let checked = 0;
+      for (const x of xs) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ x }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        expect(d).toBeCloseTo(f, 4);
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    };
+    // Base cases: ∫arsinh(x) = x·arsinh(x)−√(1+x²); ∫artanh(x) =
+    // x·artanh(x)+½·ln(1−x²) (7.1.1 / 7.3.1). arsinh domain is all reals;
+    // artanh needs |x|<1, so sample the unit interval there.
+    test('∫arcsinh(x) dx', () => verify('\\operatorname{arcsinh}(x)'));
+    test('∫arctanh(x) dx', () =>
+      verify('\\operatorname{arctanh}(x)', [0.11, 0.33, 0.55, 0.72, 0.88]));
+    test('∫arccosh(x) dx', () =>
+      verify('\\operatorname{arccosh}(x)', [1.2, 1.6, 2.1, 2.7, 3.3]));
+    // xᵐ·artanh by-parts (7.3.2 #1).
+    test('∫x·arctanh(x) dx', () =>
+      verify('x\\operatorname{arctanh}(x)', [0.11, 0.33, 0.55, 0.72, 0.88]));
+    // (a+b·arsinh)ⁿ via IntHide-driven by-parts (7.1.1 #2 / 7.1.5).
+    test('∫arcsinh(2x)² dx', () => verify('\\operatorname{arcsinh}(2x)^2'));
+    // 7.2.6 reciprocal-arccosh closes to the hyperbolic cosine/sine integral
+    // Chi/Shi — exercises the new Shi/Chi numeric kernels end-to-end.
+    test('∫1/arccosh(1+2x²) dx → CoshIntegral/SinhIntegral', () => {
+      const F = ce
+        .parse('\\int \\frac{1}{\\operatorname{arccosh}(1+2x^2)} \\, dx')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toMatch(/CoshIntegral|SinhIntegral/);
+      verify('\\frac{1}{\\operatorname{arccosh}(1+2x^2)}', [
+        0.4, 0.7, 1.1, 1.6, 2.2,
+      ]);
+    });
+  });
 });

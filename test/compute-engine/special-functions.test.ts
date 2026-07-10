@@ -1289,6 +1289,141 @@ describe('COMPLEX-ARGUMENT Ei, Si, Ci', () => {
   });
 });
 
+// Hyperbolic sine and cosine integrals (Shi, Chi) — the engine-side kernels
+// behind the Rubi Chapter-7 inverse-hyperbolic corpus (RUBI.md §5, Phase R21).
+// Real kernels build on Ei: Shi(x) = (Ei(x)−Ei(−x))/2, Chi(|x|) =
+// (Ei(|x|)+Ei(−|x|))/2. Complex kernels reuse the validated Si/Ci kernels:
+// Shi(z) = −i·Si(iz), Chi(z) = Ci(iz) − iπ/2 (reflected into the left
+// half-plane). Reference values from mpmath (dps=25).
+describe('HYPERBOLIC SINE & COSINE INTEGRALS (Shi, Chi)', () => {
+  test('Shi(1) ≈ 1.0572508753757285', () =>
+    expectApprox(ce.expr(['SinhIntegral', 1]), 1.0572508753757285, 1e-12));
+
+  test('Shi(2) ≈ 2.5015674333549756', () =>
+    expectApprox(ce.expr(['SinhIntegral', 2]), 2.5015674333549756, 1e-12));
+
+  test('Shi(10) ≈ 1246.1144901994233', () =>
+    expectApprox(ce.expr(['SinhIntegral', 10]), 1246.1144901994233, 1e-9));
+
+  test('Shi is odd: Shi(−1) = −Shi(1)', () =>
+    expectApprox(ce.expr(['SinhIntegral', -1]), -1.0572508753757285, 1e-12));
+
+  test('Shi(0) = 0, Shi(±∞) = ±∞', () => {
+    expect(ce.expr(['SinhIntegral', 0]).N().re).toBe(0);
+    expect(
+      ce.expr(['SinhIntegral', ce.PositiveInfinity]).evaluate().re
+    ).toBe(Infinity);
+    expect(
+      ce.expr(['SinhIntegral', ce.NegativeInfinity]).evaluate().re
+    ).toBe(-Infinity);
+  });
+
+  test('Chi(1) ≈ 0.8378669409802082', () =>
+    expectApprox(ce.expr(['CoshIntegral', 1]), 0.8378669409802082, 1e-12));
+
+  test('Chi(2) ≈ 2.4526669226469145', () =>
+    expectApprox(ce.expr(['CoshIntegral', 2]), 2.4526669226469145, 1e-12));
+
+  test('Chi(10) ≈ 1246.1144860424544', () =>
+    expectApprox(ce.expr(['CoshIntegral', 10]), 1246.1144860424544, 1e-9));
+
+  test('Chi(0) = −∞, Chi(∞) = ∞', () => {
+    expect(ce.expr(['CoshIntegral', 0]).evaluate().re).toBe(-Infinity);
+    expect(
+      ce.expr(['CoshIntegral', ce.PositiveInfinity]).evaluate().re
+    ).toBe(Infinity);
+  });
+
+  test('Chi(−2): machine kernel returns the real part Chi(|x|)', () => {
+    const c = ce.expr(['CoshIntegral', -2]).N();
+    expect(Math.abs(c.re - 2.4526669226469145)).toBeLessThan(1e-12);
+    expect(c.im ?? 0).toBe(0);
+  });
+
+  test('d/dx Shi(x) = sinh(x)/x, d/dx Chi(x) = cosh(x)/x', () => {
+    expect(
+      ce.expr(['D', ['SinhIntegral', 'x'], 'x']).evaluate().toString()
+    ).toEqual('sinh(x) / x');
+    expect(
+      ce.expr(['D', ['CoshIntegral', 'x'], 'x']).evaluate().toString()
+    ).toEqual('cosh(x) / x');
+  });
+
+  // --- Complex arguments (reuse the Si/Ci complex kernels) ---
+  const expectComplex = (
+    expr: any,
+    re: number,
+    im: number,
+    tol = 1e-11
+  ) => {
+    const v = expr.N();
+    const scale = Math.hypot(re, im) * tol + tol;
+    expect(Math.abs(v.re - re)).toBeLessThan(scale);
+    expect(Math.abs(v.im - im)).toBeLessThan(scale);
+  };
+  const z = (re: number, im: number): any => ['Complex', re, im];
+
+  test('Shi/Chi at 2+3i (first quadrant)', () => {
+    expectComplex(ce.expr(['SinhIntegral', z(2, 3)]),
+      -0.19318907627191982917, 2.6454325553623696248);
+    expectComplex(ce.expr(['CoshIntegral', z(2, 3)]),
+      -0.16836286832772046624, 2.6251158804513250022);
+  });
+
+  test('Shi/Chi at 5−4i (fourth quadrant)', () => {
+    expectComplex(ce.expr(['SinhIntegral', z(5, -4)]),
+      -12.929624901285743606, -1.0334513164518749546);
+    expectComplex(ce.expr(['CoshIntegral', z(5, -4)]),
+      -12.929521399630599609, -1.032515755401885031);
+  });
+
+  test('Shi/Chi at −5+4i (second quadrant)', () => {
+    expectComplex(ce.expr(['SinhIntegral', z(-5, 4)]),
+      12.929624901285743606, 1.0334513164518749546);
+    expectComplex(ce.expr(['CoshIntegral', z(-5, 4)]),
+      -12.929521399630599609, 2.1090768981879082075);
+  });
+
+  test('Shi/Chi at −0.1−0.2i (third quadrant, small |z|)', () => {
+    expectComplex(ce.expr(['SinhIntegral', z(-0.1, -0.2)]),
+      -0.099389572304054796745, -0.19988825634331751975);
+    expectComplex(ce.expr(['CoshIntegral', z(-0.1, -0.2)]),
+      -0.92815773647513330525, -2.0244689256001094676);
+  });
+
+  // Branch-cut / signed-zero sensitive: on the imaginary axis iz lands on the
+  // real axis, so Chi's +iπ upper-branch restoration is exercised here.
+  test('Shi/Chi on the upper imaginary axis (3i)', () => {
+    expectComplex(ce.expr(['SinhIntegral', z(0, 3)]),
+      0.0, 1.8486525279994682564);
+    expectComplex(ce.expr(['CoshIntegral', z(0, 3)]),
+      0.11962978600800032763, 1.5707963267948966192);
+  });
+
+  test('Shi/Chi on the lower imaginary axis (−3i)', () => {
+    expectComplex(ce.expr(['SinhIntegral', z(0, -3)]),
+      0.0, -1.8486525279994682564);
+    expectComplex(ce.expr(['CoshIntegral', z(0, -3)]),
+      0.11962978600800032763, -1.5707963267948966192);
+  });
+
+  test('Shi/Chi at 50+10i (large |z|)', () => {
+    expectComplex(ce.expr(['SinhIntegral', z(50, 10)]),
+      -48276795819412289925.0, -18932703106696627910.0, 1e-9);
+    expectComplex(ce.expr(['CoshIntegral', z(50, 10)]),
+      -48276795819412289925.0, -18932703106696627910.0, 1e-9);
+  });
+
+  // Exactness contract: a Gaussian-integer argument stays symbolic under
+  // evaluate(), numericizes under N().
+  test('Shi(2) stays symbolic under evaluate(), numericizes under N()', () => {
+    expect(ce.expr(['SinhIntegral', 2]).evaluate().toString()).toEqual(
+      'SinhIntegral(2)'
+    );
+    expectApprox(ce.expr(['SinhIntegral', 2]).N(), 2.5015674333549756, 1e-12);
+  });
+});
+
 //
 // ---------------- Tier-2 kernels (ROADMAP item 4) ----------------
 // Reference values computed independently (Simpson quadrature for K/E,

@@ -307,6 +307,39 @@ export function cosIntegralComplex(z: Complex): Complex {
   return val;
 }
 
+/**
+ * Hyperbolic sine integral Shi(z) for complex z, via Shi(z) = −i·Si(iz). Shi is
+ * odd and entire, so complex arguments give finite complex values. (Real z is
+ * handled by the machine kernel in numerics/special-functions.ts.)
+ */
+export function sinhIntegralComplex(z: Complex): Complex {
+  if (z.isNaN()) return C_NAN;
+  const iz = new Complex(-z.im, z.re); // i·z
+  const si = sinIntegralComplex(iz);
+  return new Complex(si.im, -si.re); // −i·si
+}
+
+/**
+ * Hyperbolic cosine integral Chi(z) for complex z: Chi(z) = Ci(iz) − iπ/2 in
+ * the right half-plane, reflected into the left half-plane with
+ * Chi(z) = Chi(−z) + iπ·sign(Im z). (Real z is handled by the machine kernel,
+ * which returns the real part Chi(|x|) for x < 0.)
+ */
+export function coshIntegralComplex(z: Complex): Complex {
+  if (z.isNaN()) return C_NAN;
+  if (z.re < 0 || (z.re === 0 && z.im < 0))
+    return coshIntegralComplex(z.neg()).add(
+      new Complex(0, Math.PI * signOf(z.im))
+    );
+  const iz = new Complex(-z.im, z.re); // i·z
+  let ci = cosIntegralComplex(iz);
+  // On the positive imaginary axis (z = i·b, b > 0), iz = −b is a negative
+  // real, where cosIntegralComplex returns the real-part convention Ci(b);
+  // restore the upper-branch +iπ that the Chi continuation requires.
+  if (z.re === 0) ci = ci.add(new Complex(0, Math.PI));
+  return ci.sub(new Complex(0, Math.PI / 2));
+}
+
 //
 // ---------------- Polylogarithm Liₙ(z), integer order n ≥ 2 (complex) ----
 //

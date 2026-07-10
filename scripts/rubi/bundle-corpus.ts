@@ -45,6 +45,14 @@ const ch6Dir = 'data/rubi/corpus/6 Hyperbolic functions';
 // runtime cofunction-shift machinery needed — all heads are active native CE
 // heads). Walked whole (667 rules, 0 skips). See docs/rubi/RUBI.md §5 Phase R20.
 const ch5Dir = 'data/rubi/corpus/5 Inverse trig functions';
+// Chapter 7 (inverse hyperbolic): the arsinh/arcosh/artanh/arsech families
+// (7.1/7.2/7.3/7.5), which also author the Arcosh/Arcoth/Arcsch co-variants
+// inline (no runtime cofunction machinery — all heads are active native CE
+// heads). Walked whole (716 rules, 0 skips). Result heads SinhIntegral/
+// CoshIntegral now numericize (Shi/Chi kernels); PolyLog/Erfi already do;
+// HypergeometricPFQ/Hypergeometric2F1 stay inert (no pFq head). See
+// docs/rubi/RUBI.md §5 Phase R21.
+const ch7Dir = 'data/rubi/corpus/7 Inverse hyperbolic functions';
 const trigSineDir = 'data/rubi/corpus/4 Trig functions/4.1 Sine';
 const trigTangentDir = 'data/rubi/corpus/4 Trig functions/4.3 Tangent';
 const trigSecantDir = 'data/rubi/corpus/4 Trig functions/4.5 Secant';
@@ -65,6 +73,7 @@ const docs = [
   ...readCorpusDocs(ch3Dir),
   ...readCorpusDocs(ch5Dir),
   ...readCorpusDocs(ch6Dir),
+  ...readCorpusDocs(ch7Dir),
   ...readCorpusDocs(trigSineDir),
   ...readCorpusDocs(trigTangentDir),
   ...readCorpusDocs(trigSecantDir),

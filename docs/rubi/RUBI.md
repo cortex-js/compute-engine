@@ -1,13 +1,15 @@
 # Rubi → Compute Engine: Feasibility Analysis
 
 **Date:** 2026-06-10 (feasibility); last status update 2026-07-10.
-**Status:** shipped bundle = **Chapters 1, 2, 3, 5, 6 + 4.1 Sine + 4.3 Tangent +
-4.5 Secant + §8.8 Polylogarithm** (5,858 rules, 6.28 MB). Chapter-1 exhaustive
+**Status:** shipped bundle = **Chapters 1, 2, 3, 5, 6, 7 + 4.1 Sine + 4.3 Tangent +
+4.5 Secant + §8.8 Polylogarithm** (6,574 rules, 6.98 MB). Chapter-1 exhaustive
 ≈90–91%; ch2 ≈72% / ch6 ≈45% effective; **4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
 71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R20, s120 seed5):
 5.1 sine 38/120, 5.2 cosine 40, 5.3 tangent 53, 5.4 cotangent 60, 5.5 secant 54,
-5.6 cosecant 49 (294/720 = 40.8%); genuine wrongs 0 across ALL suites incl. ch3/ch5** (all flagged
+5.6 cosecant 49 (294/720 = 40.8%); Chapter 7 Inverse hyperbolic (R21, s120 seed5):
+7.1 sine 79/120, 7.2 cosine 49, 7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44,
+7.6 cosecant 54 (406/720 = 56.4%); genuine wrongs 0 across ALL suites incl. ch3/ch5/ch7** (all flagged
 "wrongs" are documented verification false-wrong classes — see the
 ROADMAP §R state note). The nested `Log[c·(b·x^n)^p]` power-in-log family
 (§3.1.5 / §3.3) that R17 first shipped with ~3 genuine wrongs was **fixed**
@@ -1357,6 +1359,84 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     False-sentinel stubs) in `rubi-utils.test.ts`; D-verified loader cases
     (∫arcsin, ∫arctan, ∫arcsec, ∫x·arctan, ∫arcsin(2x)², and the ch3-connection
     ∫arctan(x)/x → PolyLog) in `integration-rules.test.ts`.
+- **Phase R21 — Chapter 7 (Inverse hyperbolic functions) bundled LANDED (2026-07-10).**
+  The structural mirror of R20: the arsinh/arcosh/artanh/arsech families
+  (7.1/7.2/7.3/7.5), which author the Arcosh/Arcoth/Arcsch co-variants INLINE
+  (all active native CE heads — no cofunction machinery, unlike ch4). Bundle:
+  **5,858 → 6,574 rules** (+716, all 21 files compile 0 skips; 157 → 178 docs),
+  **6.28 → 6.98 MB**; compile time ~0.6–0.7s (well under the 1.5s budget).
+  - **Engine-side kernel (the one new engine piece): Shi/Chi.** The result heads
+    `SinhIntegral`/`CoshIntegral` existed as inert generic heads (did not
+    numericize). Added machine + complex numeric kernels: real
+    `sinhIntegral`/`coshIntegral` in `numerics/special-functions.ts` built on Ei
+    (Shi(x) = (Ei(x)−Ei(−x))/2; Chi(|x|) = (Ei(|x|)+Ei(−|x|))/2, real part for
+    x<0 matching CosIntegral); complex `sinhIntegralComplex`/`coshIntegralComplex`
+    in `numerics/numeric-complex.ts` reusing the validated Si/Ci kernels
+    (Shi(z) = −i·Si(iz); Chi(z) = Ci(iz) − iπ/2, reflected into the left
+    half-plane via Chi(z) = Chi(−z) + iπ·sign(Im z)). The **naïve Ei-composition
+    fails off-axis** (mpmath's complex `ei` uses an inconsistent branch — real
+    parts agree but the iπ terms don't cancel); the Si/Ci route is exact.
+    **Signed-zero trap:** on the positive imaginary axis iz = −b lands on the
+    negative real axis, where `cosIntegralComplex` returns the real-part
+    convention Ci(b) (signOf(0)=0 drops the branch iπ); the kernel restores the
+    +iπ upper-branch there. mpmath-validated (dps=25) at 8+ points incl.
+    negative reals, all four quadrants, both imaginary half-axes, and large |z|
+    — relative error ≲1e-13 (better than Si/Ci; it is just a rotation of them).
+    Exactness contract honored (exact args stay symbolic under evaluate,
+    numericize under N()/inexact — modeled on SinIntegral). Derivative-table
+    entries (d/dx Shi = sinh/x, d/dx Chi = cosh/x) added in
+    `symbolic/derivative.ts`. Unit tests in `special-functions.test.ts` (real,
+    all quadrants, imaginary-axis branch, large |z|, exactness).
+  - **First-ever ch7 baselines (s120 seed5, foundation ch1/2/3/5/6/§8.8 + ch7):**
+    7.1 sine **79/120**, 7.2 cosine **49**, 7.3 tangent **85**, 7.4 cotangent
+    **95**, 7.5 secant **44**, 7.6 cosecant **54** (406/720 = 56.4% — well above
+    ch5's 40.8%). The 7.4/7.6 co-suites exercise the Arcoth/Arcsch variants
+    living in the 7.3/7.5 files. **Genuine wrongs 0**; the 11 residual wrong
+    flags are all documented false-wrongs, each verified clean by the real-part
+    D-check at domain-valid positive x:
+    - **symbolic-exponent grading (5):** 7.1 #130/#96, 7.2 #386/#396, 7.3 #246 —
+      `(a+b·Ar{sinh,cosh,tanh}[…])^n` / `x^n` with symbolic `n`, closing to
+      `Gamma[1+n,·]` / `Hypergeometric2F1`; verified by substituting a concrete
+      integer `n` (D-ok 4/4).
+    - **complex-log branch (4):** 7.4 #66/#71/#112/#279 — `ArcCoth[c+d·x]`
+      antiderivatives carrying `Log[2/(1+c+d·x)]` + PolyLog whose imaginary part
+      picks a `ln(−|·|) = ln|·|+iπ` / `PolyLog(2,>1)` branch; the **real part
+      of D(F) matches the integrand exactly** (#66/#71/#279 D-ok 4/4 at
+      arccoth-arg>1; #112 is symbolic-param, reproduces Rubi's own
+      ArcCoth²·Log+PolyLog form, same class).
+    - **fractional-power / domain branch (2):** 7.5 #20/#21 — `x^m·ArcSech[√x]`
+      with `√(−1+1/√x)·√(1+1/√x)` factors (arcsech domain (0,1]); D-ok 4/4 on
+      that interval.
+  - **No foundation bug found** (unlike R20's SplitProduct): ch7's reduction
+    chains bottom out in the same ch1 algebraic base cases R20 already exercised;
+    the inline Arcoth/Arcsch co-variants reuse the ch5-proven cofunction-free
+    authoring, so nothing new was exposed.
+  - **ch3 family-C knock-on (R19/R20 re-probe).** R19 listed `ArcSinh·Log`
+    shapes among the remaining family-C members "needing ch7 producers". With ch7
+    in the foundation, ch3 s120 seed5 is **unchanged at 71/4w** — **no additional
+    family-C member flips** (the R20 flips #31/#226 hold; the `ArcSinh·Log/x` and
+    symbolic-order-`PolyLog` residuals still bottom out in shapes ch7's bundled
+    inverse-hyperbolic base cases don't reach, or fall outside this sample).
+  - **Regression guards (all clean, ch7 in foundation).** 5.1 sine **38/0**, 5.3
+    tangent **53/0**, ch6 s60 **18/0**, ch3 **71/4**, 4.1 Sine s120 **107/0** —
+    all = baseline; ch2 s120 **83/2** (**+1** vs baseline 82 — a positive
+    knock-on, wrongs unchanged). ch7 in the foundation shadows nothing (its rules
+    only match inverse-hyperbolic heads).
+  - **Residual / next-rung shopping list** (dominant unsolved family per suite,
+    mirroring ch5): 7.1 sine — `(f·x)^m·(d+e·x²)^p·(a+b·arsinh)^n` triple-power
+    (23); 7.2 cosine — `(f·x)^m·(d−c²d·x²)^p·(a+b·arcosh)^n` (30); 7.3 tangent —
+    7.3.7 misc + `u·(a+b·artanh(c·x))^p` (13/12); 7.4 cotangent — 7.4.1 misc (13);
+    7.5 secant — `u·(a+b·arsech(c·x))^n` (58); 7.6 cosecant —
+    `u·(a+b·arcsch(c·x))^n` (54). Same thread as ch5: the high-power
+    `(a+b·InvHyp)^n` reduction recursions whose sub-integrals CE doesn't close,
+    plus the `(d±e·x²)^p` half-integer machinery and the ₃F₂ kernel. `Erfi(7)`
+    numericizes already; `HypergeometricPFQ(3)`/`Hypergeometric2F1(3)` stay inert
+    (no generalized ₚFq head — ch5 precedent).
+  - **Tests.** D-verified loader cases (∫arcsinh, ∫arctanh, ∫arccosh, ∫x·arctanh,
+    ∫arcsinh(2x)² by-parts/IntHide, and ∫1/arccosh(1+2x²) → CoshIntegral/
+    SinhIntegral exercising the new kernel end-to-end) in
+    `integration-rules.test.ts` (30s timeLimit for the Chi/Shi-carrying case);
+    Shi/Chi kernel unit tests in `special-functions.test.ts`.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

@@ -577,6 +577,7 @@ function main(): void {
             '3 Logarithms',
             '5 Inverse trig functions',
             '6 Hyperbolic functions',
+            '7 Inverse hyperbolic functions',
             '8 Special functions/8.8 Polylogarithm function.json',
           ]
     )

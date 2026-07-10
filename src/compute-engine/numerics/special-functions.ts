@@ -3032,6 +3032,28 @@ export function cosIntegral(x: number): number {
 }
 
 /**
+ * Hyperbolic sine integral Shi(x) = ∫₀ˣ sinh(t)/t dt. Odd and entire, so it is
+ * real for every real x. Built on Ei: Shi(x) = (Ei(x) − Ei(−x))/2.
+ */
+export function sinhIntegral(x: number): number {
+  if (Number.isNaN(x)) return NaN;
+  if (x === 0) return 0;
+  return (expIntegralEi(x) - expIntegralEi(-x)) / 2;
+}
+
+/**
+ * Hyperbolic cosine integral Chi(x) = γ + ln|x| + ∫₀ˣ (cosh t − 1)/t dt.
+ * For real x < 0 the function is complex (Chi(−|x|) = Chi(|x|) + iπ); like the
+ * cosine-integral kernel, this returns the real part Chi(|x|). Built on Ei:
+ * Chi(|x|) = (Ei(|x|) + Ei(−|x|))/2.
+ */
+export function coshIntegral(x: number): number {
+  if (Number.isNaN(x)) return NaN;
+  const a = Math.abs(x);
+  return (expIntegralEi(a) + expIntegralEi(-a)) / 2;
+}
+
+/**
  * E₁(x) = ∫ₓ^∞ e^{−t}/t dt for x > 0 (Numerical Recipes §6.3 `expint`,
  * specialised to n = 1): the power series for x ≤ 1, Lentz's continued
  * fraction for x > 1. Used to extend Ei to negative arguments via
