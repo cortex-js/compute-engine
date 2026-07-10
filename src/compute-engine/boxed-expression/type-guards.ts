@@ -85,6 +85,28 @@ export function isIndexedCollection(
 }
 
 /**
+ * Ellipsis fold barrier predicate.
+ *
+ * Returns `true` if `expr` is a continuation operand: either the bare
+ * `ContinuationPlaceholder` symbol, or a `Negate` whose single operand is it
+ * (as produced by parsing `… - \dots`, i.e. a subtraction-spelled ellipsis).
+ *
+ * An `Add`/`Multiply` carrying such an operand is a notational object (e.g.
+ * `1 - 2 + 4 - \dots`) and must be left inert — no folding of the surrounding
+ * samples, source order preserved. All fold-barrier sites use this predicate.
+ */
+export function isContinuationOperand(
+  expr: Expression | null | undefined
+): boolean {
+  if (isSymbol(expr, 'ContinuationPlaceholder')) return true;
+  if (isFunction(expr, 'Negate')) {
+    const fn = expr as Expression & FunctionInterface;
+    return fn.nops === 1 && isSymbol(fn.ops[0], 'ContinuationPlaceholder');
+  }
+  return false;
+}
+
+/**
  * Return the numeric value if `expr` is a number literal, otherwise `undefined`.
  *
  * Convenience helper that combines `isNumber()` with `.numericValue` access.

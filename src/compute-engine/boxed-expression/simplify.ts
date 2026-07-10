@@ -8,7 +8,13 @@ import type {
   BoxedRuleSet,
   RuleSteps,
 } from '../global-types.js';
-import { isNumber, isSymbol, isFunction, isString } from './type-guards.js';
+import {
+  isNumber,
+  isSymbol,
+  isFunction,
+  isString,
+  isContinuationOperand,
+} from './type-guards.js';
 
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;
@@ -407,7 +413,7 @@ function simplifyExpression(
   //
   if (
     isFunction(expr) &&
-    expr.ops.some((x) => isSymbol(x, 'ContinuationPlaceholder'))
+    expr.ops.some((x) => isContinuationOperand(x))
   )
     return steps;
 

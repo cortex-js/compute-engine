@@ -26,8 +26,24 @@
   overfitting: a degree-g polynomial needs its constant difference row
   witnessed twice, or one fewer sample when the anchor structurally confirms
   the general term — three samples fit *any* quadratic, so
-  `1 + 2 + 4 + \dots + m` stays untouched. The design (including the
-  ladder toward recurrence closed forms via `RSolve`, and
+  `1 + 2 + 4 + \dots + m` stays untouched.
+- **Linear recurrences are recognized (v3).** An exact-rational
+  Berlekamp–Massey pass finds the minimal constant-coefficient recurrence
+  (order ≥ 2) behind the samples, obtains a verified closed form through
+  `RSolve`, and resolves numeric anchors by iterating the recurrence
+  exactly: `Interpret(1 + 1 + 2 + 3 + 5 + 8 + \dots + 55)` →
+  `\sum_{k=1}^{10} \operatorname{Fibonacci}(k)`, which evaluates exactly
+  to `143`; Pell-number sums likewise (with a Binet-style body). The same
+  evidence discipline applies — a recurrence of order L needs `2L+1`
+  samples (or `2L` with a confirming anchor), so primes and factorials
+  stay untouched. Closed forms are verified against every sample before
+  being trusted.
+- **Subtraction-spelled ellipses are protected too.** `1 - 2 + 4 - \dots
+  + x` used to fold its samples across the continuation (the
+  `Negate`-wrapped placeholder evaded the fold barrier); the barrier now
+  treats a negated ellipsis like a bare one, so subtraction chains stay
+  unfolded, in source order, and inert.
+  The design (including the ladder toward
   OEIS-backed proposals through the existing async `ce.lookupOEIS`) is in
   `docs/plans/2026-07-09-ellipsis-interpretation-design.md`.
 
@@ -262,12 +278,32 @@ that corpus from 97.09% to 97.38% clean parse:
   into the unknown slot so a *prefix* pipeline stage
   (`\rhd \operatorname{Solve}`) computed `Solve(expr, expr)` → `[0]` where
   the infix spelling returned `[-1]`. `Solve` re-infers the unknown when
-  the applied stage evaluates; the two spellings now agree. (Known
-  limitation, pre-existing: piping an *equation* through the prefix form
-  still collapses upstream — lambda arguments are pre-evaluated when
-  bound, and evaluating a free-standing `Equal` decides it — so such a
-  stage stays inert rather than returning a wrong answer; the infix
-  spelling is unaffected.)
+  the applied stage evaluates; the two spellings now agree. Piping an
+  *equation* through the prefix form works too, now that an undecidable
+  `Equal` survives the lambda's argument pre-evaluation (see "Undecidable
+  Relations Stay Symbolic" below): `Apply(\rhd Solve, x^2 = 4)` → `[2, -2]`.
+
+### Undecidable Relations Stay Symbolic
+
+- **An equation with free variables is a condition, not a falsity.**
+  `Equal` and `NotEqual` with an undecidable comparison now stay **inert**
+  under `evaluate()`: `x^2 = 4` evaluates to itself instead of `False`
+  (and `x \ne 4` to itself instead of `True`). This matches the inequality
+  operators — `x^2 < 4` already stayed symbolic — and Mathematica's `==`.
+  Decidable comparisons are unchanged (`2+2=4` → `True`, `2=3` → `False`,
+  `x=x` → `True`), list/scalar elementwise comparisons are unchanged, and
+  assumption discharge still applies (`assume(z > 0)` ⇒ `z \ne 0` → `True`).
+  The previous collapse silently ruined stored equations: a notebook cell
+  holding `x^2 = 4` evaluated to `False` at storage time, breaking every
+  answer-referencing `Solve` pipe downstream.
+- **`If` and `Which` stay unevaluated on an undecided condition.**
+  A condition that is boolean-typed but not yet decidable (e.g. `x = 4`
+  with a free `x`) leaves the conditional inert — it may become decidable
+  once the variables are bound — instead of throwing
+  `Condition must evaluate to "True" or "False"` (or, previously for
+  `Equal` conditions, silently taking the else branch). Genuinely
+  non-boolean conditions (a number, a misspelled symbol) still throw with
+  the spell-check hint.
 
 ### Issues Resolved
 

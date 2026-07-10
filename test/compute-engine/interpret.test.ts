@@ -17,6 +17,13 @@ function interpret(latex: string) {
   return ce.function('Interpret', [ce.parse(latex)]).evaluate();
 }
 
+// Build a continuation-bearing Add directly (the fold barrier keeps it inert
+// and in source order). Used for signed/alternating samples, whose LaTeX
+// spelling `1 - 2 + …` depends on a separate subtraction-ellipsis parser path.
+function interpretBox(expr: unknown) {
+  return ce.function('Interpret', [ce.box(expr as any)]).evaluate();
+}
+
 describe('Interpret — continuation → Sum/Product', () => {
   test('1 + 2 + … + n → Sum(k, (k, 1, n))', () => {
     expect(interpret('1 + 2 + \\dots + n').json).toEqual([
@@ -220,6 +227,116 @@ describe('Interpret — v2 negative gates stay inert', () => {
       2,
       'ContinuationPlaceholder',
       2,
+    ]);
+  });
+});
+
+describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => {
+  test('Fibonacci 1+1+2+3+5+8+…+55 → Sum(Fibonacci(k), (k,1,10)) = 143', () => {
+    // BM finds a(k)=a(k−1)+a(k−2) (L=2); m=6 ≥ 2L+1=5. The samples match the
+    // library `Fibonacci` head, so the display body is `Fibonacci(k)`, which
+    // evaluates exactly (a Binet radical body would not collapse to 143). The
+    // anchor 55 = a(10), so U = 10.
+    const sum = interpret('1 + 1 + 2 + 3 + 5 + 8 + \\dots + 55');
+    expect(sum.json).toEqual([
+      'Sum',
+      ['Fibonacci', 'k'],
+      ['Limits', 'k', 1, 10],
+    ]);
+    // 1+1+2+3+5+8+13+21+34+55 = 143.
+    expect(sum.evaluate().json).toEqual(143);
+    // The body reproduces the samples at k = 1..6.
+    const body = ce.function('Fibonacci', [ce.symbol('k')]);
+    expect([1, 2, 3, 4, 5, 6].map((k) => body.subs({ k }).evaluate().re)).toEqual(
+      [1, 1, 2, 3, 5, 8]
+    );
+  });
+
+  test('Pell 1+2+5+12+29+70+…+169 (non-Fibonacci, L=2) → U=7, sum = 288', () => {
+    // BM finds a(k)=2·a(k−1)+a(k−2). The closed form is a Binet radical body
+    // (verified numerically against every sample). Pell: 1,2,5,12,29,70,169 —
+    // anchor 169 = a(7), so U = 7 and Σ = 1+2+5+12+29+70+169 = 288.
+    const sum = interpretBox([
+      'Add',
+      1,
+      2,
+      5,
+      12,
+      29,
+      70,
+      'ContinuationPlaceholder',
+      169,
+    ]);
+    expect(sum.operator).toBe('Sum');
+    expect((sum.json as unknown[])[2]).toEqual(['Limits', 'k', 1, 7]);
+    // Binet body does not collapse to an exact integer; verify numerically.
+    expect(sum.N().re).toBeCloseTo(288, 6);
+  });
+
+  test('alternating signed-Fibonacci 1,−1,2,−3,5,−8 (a(k)=−a(k−1)+a(k−2)) → U=7, sum = 9', () => {
+    // BM finds a(k) = −a(k−1) + a(k−2) (L=2) over the signed samples; the
+    // sequence continues …,−8,13. Anchor 13 = a(7), so U = 7 and
+    // Σ = 1−1+2−3+5−8+13 = 9.
+    const sum = interpretBox([
+      'Add',
+      1,
+      -1,
+      2,
+      -3,
+      5,
+      -8,
+      'ContinuationPlaceholder',
+      13,
+    ]);
+    expect(sum.operator).toBe('Sum');
+    expect((sum.json as unknown[])[2]).toEqual(['Limits', 'k', 1, 7]);
+    expect(sum.N().re).toBeCloseTo(9, 6);
+  });
+});
+
+describe('Interpret — v3 negative gates stay inert', () => {
+  test('primes 2+3+5+7+11+…+31 (BM order 3, m=5 < 2L+1=7) stays inert', () => {
+    // Berlekamp–Massey finds a spurious order-3 recurrence from 5 samples; the
+    // evidence gate m ≥ 2L+1 rejects it (5 < 7).
+    expect(interpret('2 + 3 + 5 + 7 + 11 + \\dots + 31').json).toEqual([
+      'Add',
+      2,
+      3,
+      5,
+      7,
+      11,
+      'ContinuationPlaceholder',
+      31,
+    ]);
+  });
+
+  test('factorials 1+2+6+24+120+…+720 (not constant-coefficient) stays inert', () => {
+    // Factorials are not C-finite; BM order grows with the sample count, so the
+    // evidence gate (order 3 from 5 samples) rejects it.
+    expect(interpret('1 + 2 + 6 + 24 + 120 + \\dots + 720').json).toEqual([
+      'Add',
+      1,
+      2,
+      6,
+      24,
+      120,
+      'ContinuationPlaceholder',
+      720,
+    ]);
+  });
+
+  test('symbolic anchor 1+1+2+3+5+…+F (genuine recurrence, bare symbol) stays inert', () => {
+    // The recurrence is recognized (Fibonacci, L=2), but v3 declines symbolic
+    // anchors — the closed form cannot be validated against a bare symbol.
+    expect(interpret('1 + 1 + 2 + 3 + 5 + \\dots + F').json).toEqual([
+      'Add',
+      1,
+      1,
+      2,
+      3,
+      5,
+      'ContinuationPlaceholder',
+      'F',
     ]);
   });
 });

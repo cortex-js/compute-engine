@@ -151,4 +151,86 @@ describe('Continuation placeholder (ellipsis fold barrier)', () => {
     // A List with an ellipsis is a separate (Range) path and must keep working.
     expect(ce.parse('[1, 2, \\ldots, 10]').json).toEqual(['Range', 1, 10, 1]);
   });
+
+  // ---------------------------------------------------------------------------
+  // Subtraction-spelled ellipsis (`… - \dots`). The parser encodes a trailing
+  // `- \dots` as a `Subtract`, so after canonicalization the placeholder
+  // surfaces as a `Negate(ContinuationPlaceholder)` operand rather than the
+  // bare symbol. The fold barrier must recognize it too.
+  // ---------------------------------------------------------------------------
+
+  test('Add (subtraction): 1 - 2 + 4 - … + x does not fold across the continuation', () => {
+    const e = ce.parse('1 - 2 + 4 - \\dots + x');
+    // The parser groups `1 - 2` as an independent `Subtract` that folds to
+    // `-1` before the barrier sees the sibling continuation (this is the
+    // context-free canonicalization of `Subtract(1,2)`, not a fold *across*
+    // the continuation). The key invariants hold: `-1` and `4` are NOT
+    // combined (that would give `3`), source order is preserved, and the
+    // negated placeholder is kept as `Negate(ContinuationPlaceholder)`.
+    expect(e.json).toEqual([
+      'Add',
+      -1,
+      4,
+      ['Negate', 'ContinuationPlaceholder'],
+      'x',
+    ]);
+    // No fold across the continuation.
+    expect(e.json).not.toContain(3);
+  });
+
+  test('Add (subtraction): evaluate() / N() / simplify() are inert', () => {
+    const e = ce.parse('1 - 2 + 4 - \\dots + x');
+    const expected = ['Add', -1, 4, ['Negate', 'ContinuationPlaceholder'], 'x'];
+    expect(e.evaluate().json).toEqual(expected);
+    expect(e.N().json).toEqual(expected);
+    expect(e.simplify().json).toEqual(expected);
+  });
+
+  test('Add (subtraction): LaTeX round-trip preserves the continuation', () => {
+    const e = ce.parse('1 - 2 + 4 - \\dots + x');
+    expect(e.latex).toContain('\\dots');
+    expect(ce.parse(e.latex).json).toEqual([
+      'Add',
+      -1,
+      4,
+      ['Negate', 'ContinuationPlaceholder'],
+      'x',
+    ]);
+  });
+
+  test('Add (subtraction): symbolic samples a - b - … - c stay unfolded and ordered', () => {
+    // With non-numeric samples nothing can fold, so the barrier preserves every
+    // signed sample: `a, -b, …, -c`.
+    const e = ce.parse('a - b - \\dots - c');
+    const expected = [
+      'Add',
+      'a',
+      ['Negate', 'b'],
+      ['Negate', 'ContinuationPlaceholder'],
+      ['Negate', 'c'],
+    ];
+    expect(e.json).toEqual(expected);
+    expect(e.evaluate().json).toEqual(expected);
+    expect(e.N().json).toEqual(expected);
+    expect(e.simplify().json).toEqual(expected);
+    // Round-trips through LaTeX.
+    expect(ce.parse(e.latex).json).toEqual(expected);
+  });
+
+  test('Non-regression: additive-ellipsis fix leaves + spelled sums unchanged', () => {
+    expect(ce.parse('1 + 2 + \\dots + n').json).toEqual([
+      'Add',
+      1,
+      2,
+      'ContinuationPlaceholder',
+      'n',
+    ]);
+    expect(ce.parse('2 \\cdot 4 \\cdot \\dots \\cdot 2n').json).toEqual([
+      'Multiply',
+      2,
+      4,
+      'ContinuationPlaceholder',
+      ['Multiply', 2, 'n'],
+    ]);
+  });
 });

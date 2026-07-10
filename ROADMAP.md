@@ -206,15 +206,29 @@ sums/products into formal `Sum`/`Product` under a strict arithmetic-
 progression gate (`1+2+\dots+n` → `Sum(k,(k,1,n))`; parity mismatches and
 anything unproven stay inert). Remaining rungs, demand-paced:
 
-- **v3 (M):** Berlekamp–Massey → linear recurrence → closed form via the
-  existing `RSolve`; optional hand-curated famous-sequence table.
-  (v2 — finite differences → polynomial terms + constant-ratio geometric,
-  with the twice-witnessed/anchor-confirmation evidence discipline —
-  landed 2026-07-09.) Known edge for a future rung: `1 - 2 + 4 - \dots`
-  wraps the placeholder in `Negate`, so the fold barrier's direct-operand
-  gate doesn't protect it (samples fold to `3`) — subtraction-ellipsis
-  needs its own barrier clause before alternating patterns can be
-  recognized.
+  (v2 — finite differences → polynomial terms + constant-ratio geometric —
+  and v3 — exact-rational Berlekamp–Massey → recurrence → verified
+  `RSolve` closed form, `Fibonacci`-head display mapping, numeric anchors
+  by exact recurrence iteration — both landed 2026-07-09, along with the
+  subtraction-ellipsis fold-barrier extension, `isContinuationOperand`.)
+
+- **Alternating sequences through natural LaTeX (S/M, parse-level):** the
+  barrier now protects `Negate`-wrapped placeholders, but bottom-up parse
+  grouping still pair-folds adjacent signed numeric samples *before* the
+  continuation-bearing `Add` exists (`1 - 1 + 2 - 3 + 5 - 8 + \dots + 13`
+  → operands `[0, -1, -3, …]`; the recognizer correctly declines the
+  corrupted samples, so no wrong answers). Fix belongs in the additive
+  parse chain (emit n-ary `Add` with `Negate` terms when the chain
+  contains an ellipsis, instead of nested `Subtract` pairs). Related
+  smaller edge: `simplify()` on `-(2·4·\dots·2n)` distributes the outer
+  sign into the product and folds (pre-existing).
+- **Engine findings from the v3 work (belong to B12/library):** `RSolve`'s
+  initial-condition resolution is broken for order-2 recurrences (returns
+  undefined on the Fibonacci/√5 system; deadline-timeout on Pell) — the
+  Interpret path works around it by resolving constants against the no-IC
+  general solution; fixing `solveLinearSystem` over radical entries would
+  benefit `RSolve` users directly. The `Lucas` head exists but does not
+  evaluate (`Lucas(1)` inert).
 - **v4 (M):** OEIS-backed *proposals* through the existing async
   `ce.lookupOEIS` (parse the free-text `formula` field, verify against the
   samples with the recognizer core, return attributed candidates). Sync
@@ -440,14 +454,13 @@ under CE names: `NthPrime`, `NPartition`, `PowerMod`, `PrimitiveRoot`,
   rationalizes (at full working precision: `√3 → 50843527/29354524`) — the
   gap is only the tolerance parameter selecting the shortest fraction
   within a bound (a continued-fraction convergent cut).
-- **Repeating-decimal representation:** an equivalent of `ToPeriodicForm`
-  (exact `1/7 → 0.(142857)` and arithmetic on such forms). MathJSON already
-  has repeating-decimal *syntax* in `num` strings — the gap is an operator
-  that produces/consumes it.
-- **Congruence solving:** no input form for `Solve[9x ≡ 15 (mod 21)]` — the
-  diophantine solver landed (2026-07-04) but a modulus-constrained equation
-  cannot be stated. Design question: a `Modulus` option, a `Mod`-equation
-  pattern, or `ℤ/nℤ` domains.
+- **Repeating-decimal representation (consumer side DONE 2026-07-09):**
+  repeating-decimal literals now box as exact rationals
+  (`0.(142857)`/`0.\overline{142857}` → `1/7`), so arithmetic on such forms
+  is exact. The residual is the *producer* direction: an equivalent of
+  `ToPeriodicForm` — an operator that renders an exact rational as its
+  periodic-decimal object (the LaTeX serializer's `repeatingDecimal` option
+  covers only float display).
 - **Quantifier elimination over ℝ:** `ForAll`/`Exists` evaluate only over
   finite domains; the Wester/Liska–Steinberg stability problems need QE over
   real closed fields (CAD or virtual substitution) — a major subsystem,

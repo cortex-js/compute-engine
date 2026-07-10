@@ -17,7 +17,8 @@ import { collectSymbols, freshSymbolName } from './solver-utils.js';
  *
  * See `docs/plans/2026-07-09-ellipsis-interpretation-design.md` for the gate
  * and the generalization ladder. Recognizers are tried in order: arithmetic
- * progression (v1) → polynomial via finite differences → geometric (v2).
+ * progression (v1) → polynomial via finite differences → geometric (v2) →
+ * linear recurrence via Berlekamp–Massey + `RSolve` closed form (v3).
  */
 
 /**
@@ -91,7 +92,8 @@ function buildInterpretation(
   return (
     tryArithmeticProgression(expr, op, continuation) ??
     tryPolynomial(expr, op, continuation) ??
-    tryGeometric(expr, op, continuation)
+    tryGeometric(expr, op, continuation) ??
+    tryRecurrence(expr, op, continuation)
   );
 }
 
@@ -305,6 +307,397 @@ function tryGeometric(
   if (!U) return null;
 
   return assemble(expr, op, leftover, term, index, U);
+}
+
+// ---------------------------------------------------------------------------
+// v3 — linear recurrence via Berlekamp–Massey + `RSolve` closed form.
+// ---------------------------------------------------------------------------
+
+/**
+ * An exact rational as a normalized `bigint` pair (`d > 0`, `gcd(|n|, d) = 1`).
+ * Berlekamp–Massey and the anchor search run entirely in this exact arithmetic;
+ * floats are never used for the recognition or the bound.
+ */
+interface Rational {
+  n: bigint;
+  d: bigint;
+}
+
+function bigintGcd(a: bigint, b: bigint): bigint {
+  a = a < 0n ? -a : a;
+  b = b < 0n ? -b : b;
+  while (b) [a, b] = [b, a % b];
+  return a;
+}
+
+function ratOf(n: bigint, d: bigint): Rational {
+  if (d === 0n) throw new Error('division by zero');
+  if (d < 0n) {
+    n = -n;
+    d = -d;
+  }
+  const g = bigintGcd(n, d) || 1n;
+  return { n: n / g, d: d / g };
+}
+
+const RAT_ZERO = ratOf(0n, 1n);
+const ratIsZero = (a: Rational): boolean => a.n === 0n;
+const ratEq = (a: Rational, b: Rational): boolean =>
+  a.n === b.n && a.d === b.d;
+const ratAdd = (a: Rational, b: Rational): Rational =>
+  ratOf(a.n * b.d + b.n * a.d, a.d * b.d);
+const ratSub = (a: Rational, b: Rational): Rational =>
+  ratOf(a.n * b.d - b.n * a.d, a.d * b.d);
+const ratMul = (a: Rational, b: Rational): Rational =>
+  ratOf(a.n * b.n, a.d * b.d);
+const ratDiv = (a: Rational, b: Rational): Rational =>
+  ratOf(a.n * b.d, a.d * b.n);
+const ratNeg = (a: Rational): Rational => ({ n: -a.n, d: a.d });
+const ratMagnitude = (a: Rational): Rational => ({
+  n: a.n < 0n ? -a.n : a.n,
+  d: a.d,
+});
+/** Sign of `a − b` (both denominators positive). */
+const ratCompare = (a: Rational, b: Rational): number => {
+  const t = a.n * b.d - b.n * a.d;
+  return t < 0n ? -1 : t > 0n ? 1 : 0;
+};
+
+/** Extract an exact rational literal as a {@link Rational} (else `null`). */
+function toRational(x: Expression): Rational | null {
+  if (!isExactRationalLiteral(x)) return null;
+  const num = (x as unknown as { numerator?: Expression }).numerator;
+  const den = (x as unknown as { denominator?: Expression }).denominator;
+  if (!num || !den) return null;
+  try {
+    return ratOf(BigInt(num.toString()), BigInt(den.toString()));
+  } catch {
+    return null;
+  }
+}
+
+/** Build an exact-rational literal `Expression` from a {@link Rational}. */
+function fromRational(ce: Expression['engine'], r: Rational): Expression {
+  if (r.d === 1n) return ce.number(r.n);
+  return ce.function('Divide', [ce.number(r.n), ce.number(r.d)]).evaluate();
+}
+
+/**
+ * Berlekamp–Massey over the exact rationals: the minimal-order linear
+ * constant-coefficient recurrence
+ * `s[i] = Σⱼ rec[j−1]·s[i−j]` (`j = 1…L`) generating the sample sequence.
+ * Returns the coefficients and order `L`, or `null` when the sequence has no
+ * linear complexity (empty input).
+ */
+function berlekampMassey(
+  s: Rational[]
+): { rec: Rational[]; L: number } | null {
+  const n = s.length;
+  let c: Rational[] = [ratOf(1n, 1n)];
+  let b: Rational[] = [ratOf(1n, 1n)];
+  let L = 0;
+  let m = 1;
+  let bb: Rational = ratOf(1n, 1n);
+  for (let i = 0; i < n; i++) {
+    // Discrepancy d = Σ_{j=0}^{L} c[j]·s[i−j].
+    let d = s[i];
+    for (let j = 1; j <= L; j++) d = ratAdd(d, ratMul(c[j], s[i - j]));
+
+    if (ratIsZero(d)) {
+      m += 1;
+    } else if (2 * L <= i) {
+      const t = c.slice();
+      const coef = ratDiv(d, bb);
+      while (c.length < b.length + m) c.push(RAT_ZERO);
+      for (let j = 0; j < b.length; j++)
+        c[j + m] = ratSub(c[j + m], ratMul(coef, b[j]));
+      L = i + 1 - L;
+      b = t;
+      bb = d;
+      m = 1;
+    } else {
+      const coef = ratDiv(d, bb);
+      while (c.length < b.length + m) c.push(RAT_ZERO);
+      for (let j = 0; j < b.length; j++)
+        c[j + m] = ratSub(c[j + m], ratMul(coef, b[j]));
+      m += 1;
+    }
+  }
+  if (L === 0) return null;
+  // Connection polynomial C(x) = 1 + c[1]·x + … ; the recurrence is
+  // s[i] = −Σ_{j=1}^{L} c[j]·s[i−j].
+  const rec: Rational[] = [];
+  for (let j = 1; j <= L; j++) rec.push(ratNeg(c[j] ?? RAT_ZERO));
+  return { rec, L };
+}
+
+/** The recurrence reproduces every sample beyond the first `L` (exact). */
+function recurrenceReproduces(
+  s: Rational[],
+  rec: Rational[],
+  L: number
+): boolean {
+  for (let i = L; i < s.length; i++) {
+    let acc = RAT_ZERO;
+    for (let j = 1; j <= L; j++) acc = ratAdd(acc, ratMul(rec[j - 1], s[i - j]));
+    if (!ratEq(acc, s[i])) return false;
+  }
+  return true;
+}
+
+/**
+ * Iterate the recurrence in exact rational arithmetic from the samples to find
+ * the least `U ≥ m + 1` with `a(U) = anchor`. Bounded by a hard cap; the search
+ * also stops once the term magnitude grows past the anchor (the recognized
+ * sequences are eventually magnitude-monotone, so a later exact match is then
+ * impossible — this handles sign-alternating sequences too, whose magnitudes
+ * still grow).
+ */
+function findRecurrenceUpperBound(
+  samples: Rational[],
+  rec: Rational[],
+  L: number,
+  anchor: Rational,
+  m: number
+): number | null {
+  const CAP = 10000;
+  const seq = samples.slice();
+  const anchorMag = ratMagnitude(anchor);
+  let prevMag = ratMagnitude(seq[seq.length - 1]);
+  for (let u = m + 1; u <= CAP; u++) {
+    let acc = RAT_ZERO;
+    for (let j = 1; j <= L; j++)
+      acc = ratAdd(acc, ratMul(rec[j - 1], seq[u - 1 - j]));
+    seq.push(acc);
+    if (ratEq(acc, anchor)) return u;
+    const mag = ratMagnitude(acc);
+    if (ratCompare(mag, anchorMag) > 0 && ratCompare(mag, prevMag) > 0)
+      return null;
+    prevMag = mag;
+  }
+  return null;
+}
+
+/** Numeric magnitude `|z|` of an `Expression` via `.N()`. */
+function numericMagnitude(x: Expression): number {
+  const v = x.N();
+  return Math.hypot(v.re, v.im ?? 0);
+}
+
+/**
+ * Solve the `L × L` linear system `M·x = b` over `Expression` entries by
+ * Gauss–Jordan elimination with exact arithmetic (pivots chosen by numeric
+ * magnitude for stability). Returns the solution vector, or `null` if singular.
+ */
+function solveLinearSystem(
+  ce: Expression['engine'],
+  M: Expression[][],
+  b: Expression[]
+): Expression[] | null {
+  const L = b.length;
+  const A: Expression[][] = M.map((row, i) => [...row, b[i]]);
+  for (let col = 0; col < L; col++) {
+    let pivot = -1;
+    for (let r = col; r < L; r++) {
+      if (numericMagnitude(A[r][col]) > 1e-9) {
+        pivot = r;
+        break;
+      }
+    }
+    if (pivot < 0) return null;
+    [A[col], A[pivot]] = [A[pivot], A[col]];
+    const pv = A[col][col];
+    for (let r = 0; r < L; r++) {
+      if (r === col) continue;
+      const factor = ce.function('Divide', [A[r][col], pv]).simplify();
+      for (let cc = col; cc <= L; cc++)
+        A[r][cc] = ce
+          .function('Subtract', [
+            A[r][cc],
+            ce.function('Multiply', [factor, A[col][cc]]),
+          ])
+          .simplify();
+    }
+  }
+  return A.map((row, i) =>
+    ce.function('Divide', [row[L], row[i]]).simplify()
+  );
+}
+
+/**
+ * Famous-sequence display body. When the recurrence is exactly `a(k) = a(k−1) +
+ * a(k−2)` and the samples match the library `Fibonacci` head at `k = 1…m`
+ * (its convention is `Fibonacci(1) = Fibonacci(2) = 1`), return `Fibonacci(k)`
+ * — a compact, exactly-evaluable body. Returns `null` otherwise (including when
+ * no such head is available in the loaded library).
+ */
+function fibonacciBody(
+  ce: Expression['engine'],
+  rec: Rational[],
+  L: number,
+  samples: Expression[],
+  index: Expression
+): Expression | null {
+  if (L !== 2) return null;
+  if (!(ratEq(rec[0], ratOf(1n, 1n)) && ratEq(rec[1], ratOf(1n, 1n))))
+    return null;
+  if (!ce.function('Fibonacci', [ce.number(5)]).evaluate().isSame(5))
+    return null;
+  for (let i = 0; i < samples.length; i++) {
+    const f = ce.function('Fibonacci', [ce.number(i + 1)]).evaluate();
+    if (!f.isSame(samples[i])) return null;
+  }
+  return ce.function('Fibonacci', [index]);
+}
+
+/**
+ * Closed-form body via the engine's `RSolve` (never a static import — the
+ * solver is reached through `ce.function('RSolve', …)`). The general solution
+ * (no initial conditions) is reliable and fast; its arbitrary constants
+ * `c_1…c_L` are then resolved against the first `L` samples by an exact linear
+ * solve here, yielding a Binet-style body. Returns `null` when `RSolve` is
+ * inert, its solution has an unexpected shape, or the constant solve fails.
+ */
+function rSolveBody(
+  ce: Expression['engine'],
+  rec: Rational[],
+  L: number,
+  samples: Expression[],
+  index: Expression
+): Expression | null {
+  try {
+    const n = ce.symbol('n');
+    // a(n + L) = Σⱼ rec[j−1]·a(n + L − j).
+    const lhs = ce.function('a', [ce.function('Add', [n, ce.number(L)])]);
+    const rhsTerms: Expression[] = [];
+    for (let j = 1; j <= L; j++) {
+      const coef = fromRational(ce, rec[j - 1]);
+      if (coef.isSame(0)) continue;
+      const shift = L - j;
+      const arg = shift === 0 ? n : ce.function('Add', [n, ce.number(shift)]);
+      const call = ce.function('a', [arg]);
+      rhsTerms.push(coef.isSame(1) ? call : ce.function('Multiply', [coef, call]));
+    }
+    const equation = ce.function('Equal', [lhs, ce.function('Add', rhsTerms)]);
+    const solution = ce
+      .function('RSolve', [equation, ce.symbol('a'), n])
+      .evaluate();
+
+    if (!isFunction(solution, 'List') || solution.nops !== 1) return null;
+    const solEq = solution.op1;
+    if (!isFunction(solEq, 'Equal')) return null;
+    const generalTerm = solEq.op2;
+
+    const constants = generalTerm.freeVariables
+      .filter((v) => /^c_\d+$/.test(v))
+      .sort();
+    if (constants.length !== L) return null;
+    if (
+      generalTerm.freeVariables.some(
+        (v) => v !== 'n' && !/^c_\d+$/.test(v)
+      )
+    )
+      return null;
+
+    // Basis functions B_i(n): the general term with c_i = 1 and c_{j≠i} = 0.
+    const basis = constants.map((ci) => {
+      const map: Record<string, number> = {};
+      for (const cj of constants) map[cj] = cj === ci ? 1 : 0;
+      return generalTerm.subs(map).simplify();
+    });
+
+    // Resolve the constants: Σᵢ cᵢ·Bᵢ(j) = sⱼ for j = 1…L.
+    const matrix: Expression[][] = [];
+    for (let j = 1; j <= L; j++)
+      matrix.push(basis.map((b) => b.subs({ n: j }).evaluate()));
+    const coefficients = solveLinearSystem(ce, matrix, samples.slice(0, L));
+    if (!coefficients) return null;
+
+    const terms = basis.map((b, i) =>
+      ce.function('Multiply', [coefficients[i], b.subs({ n: index })])
+    );
+    return ce.function('Add', terms).simplify();
+  } catch {
+    return null;
+  }
+}
+
+/** The closed-form body reproduces every sample numerically (high precision). */
+function bodyReproducesSamples(
+  body: Expression,
+  index: Expression,
+  samples: Expression[]
+): boolean {
+  const name = isSymbol(index) ? index.symbol : '';
+  for (let i = 0; i < samples.length; i++) {
+    const bv = body.subs({ [name]: i + 1 }).N();
+    const sv = samples[i].N();
+    const tol = 1e-8 * Math.max(1, Math.abs(sv.re), Math.abs(sv.im ?? 0));
+    if (Math.hypot(bv.re - sv.re, (bv.im ?? 0) - (sv.im ?? 0)) > tol)
+      return false;
+  }
+  return true;
+}
+
+/**
+ * Linear-recurrence recognizer (order `L ≥ 2`). Berlekamp–Massey over the exact
+ * rational samples finds the minimal recurrence; a length-`L` recurrence needs
+ * `2L` samples to be determined, so the evidence gate requires `m ≥ 2L` (the
+ * `m = 2L` case is confirmed by the anchor, an extra witness). Order 1 is the
+ * geometric family and is excluded here.
+ *
+ * The closed form is obtained through the engine's `RSolve` (or a famous-
+ * sequence head such as `Fibonacci` for display), then trust-but-verified
+ * against every sample. The upper bound `U` comes from iterating the recurrence
+ * itself in exact arithmetic to a numeric anchor; symbolic anchors decline in
+ * v3 (per the design gate).
+ */
+function tryRecurrence(
+  expr: Expression,
+  op: 'Add' | 'Multiply',
+  { samples, anchor, leftover }: Continuation
+): Expression | null {
+  const ce = expr.engine;
+  const m = samples.length;
+
+  const sampleRationals: Rational[] = [];
+  for (const s of samples) {
+    const r = toRational(s);
+    if (!r) return null;
+    sampleRationals.push(r);
+  }
+
+  const bm = berlekampMassey(sampleRationals);
+  if (!bm || bm.L < 2) return null;
+  const { rec, L } = bm;
+  if (!recurrenceReproduces(sampleRationals, rec, L)) return null;
+
+  // Evidence: m ≥ 2L (m = 2L confirmed below by a successful anchor witness).
+  if (m < 2 * L) return null;
+
+  // Anchor: numeric only in v3. Symbolic anchors decline.
+  if (anchor.freeVariables.length !== 0) return null;
+  const anchorRational = toRational(anchor);
+  if (!anchorRational) return null;
+  const U = findRecurrenceUpperBound(
+    sampleRationals,
+    rec,
+    L,
+    anchorRational,
+    m
+  );
+  if (U === null) return null;
+
+  const index = freshIndex(expr);
+  const body =
+    fibonacciBody(ce, rec, L, samples, index) ??
+    rSolveBody(ce, rec, L, samples, index);
+  if (!body) return null;
+
+  // Trust but verify: the closed form must reproduce every sample.
+  if (!bodyReproducesSamples(body, index, samples)) return null;
+
+  return assemble(expr, op, leftover, body, index, ce.number(U));
 }
 
 // ---------------------------------------------------------------------------

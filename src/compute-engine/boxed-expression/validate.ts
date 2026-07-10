@@ -11,7 +11,7 @@ import type {
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isTensor } from './boxed-tensor.js';
-import { isSymbol, isFunction } from './type-guards.js';
+import { isSymbol, isFunction, isContinuationOperand } from './type-guards.js';
 
 /**
  * Return true if a type could be a collection type at runtime.
@@ -196,7 +196,7 @@ export function checkNumericArgs(
   // present (a notational sum/product like `2 · 4 · … · 2n`), do not lift
   // nested associative operands — that would tear a coefficient out of its
   // anchor (the `2n` in `Multiply(2, n)`). Still lift `Sequence`/`Nothing`.
-  if (flattenHead && ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+  if (flattenHead && ops.some((x) => isContinuationOperand(x)))
     ops = flatten(ops);
   else ops = flatten(ops, flattenHead);
 

@@ -6,7 +6,13 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isTensor } from './boxed-tensor.js';
-import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import {
+  isNumber,
+  isFunction,
+  isSymbol,
+  numericValue,
+  isContinuationOperand,
+} from './type-guards.js';
 import {
   isNumericTuple,
   hasAccessibleComponents,
@@ -1088,7 +1094,7 @@ export function canonicalMultiply(
   // an arithmetic one. Do not unnegate, filter ones, fold numerics, or sort —
   // preserve the source operand order and structure so the elided pattern reads
   // correctly, e.g. `2 · 4 · … · 2n` keeps the `2n` anchor as `Multiply(2, n)`.
-  if (ops.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+  if (ops.some((x) => isContinuationOperand(x)))
     return ce._fn(
       'Multiply',
       ops.map((x) => x.canonical)
@@ -1405,7 +1411,7 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
 
   // Ellipsis fold barrier: a direct `ContinuationPlaceholder` operand makes
   // this a notational product; stay inert (do not fold via `Product`).
-  if (xs.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+  if (xs.some((x) => isContinuationOperand(x)))
     return ce._fn(
       'Multiply',
       xs.map((x) => x.canonical)
@@ -1431,7 +1437,7 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   const ce = xs[0].engine;
   // Ellipsis fold barrier: stay inert for a notational product.
-  if (xs.some((x) => isSymbol(x, 'ContinuationPlaceholder')))
+  if (xs.some((x) => isContinuationOperand(x)))
     return ce._fn(
       'Multiply',
       xs.map((x) => x.canonical)

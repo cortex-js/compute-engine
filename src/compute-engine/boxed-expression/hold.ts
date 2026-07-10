@@ -1,7 +1,7 @@
 import type { Expression } from '../global-types.js';
 
 import { flatten } from './flatten.js';
-import { isFunction, isSymbol } from './type-guards.js';
+import { isFunction, isContinuationOperand } from './type-guards.js';
 
 /** Apply the function `f` to each operand of the expression `expr`,
  * account for the 'lazy' property of the operator definition:
@@ -27,7 +27,7 @@ export function holdMap(
   // notational sum/product; do not lift nested associative operands (it would
   // tear a coefficient out of an anchor like the `2n` in `Multiply(2, n)`).
   const hasContinuation = xs.some(
-    (x) => isSymbol(x, 'ContinuationPlaceholder')
+    (x) => isContinuationOperand(x)
   );
   if (def?.associative && !hasContinuation)
     xs = flatten(xs, expr.operator, false);
@@ -70,7 +70,7 @@ export async function holdMapAsync(
   // Ellipsis fold barrier (see `holdMap`): a `ContinuationPlaceholder` operand
   // marks a notational sum/product; keep nested associative anchors intact.
   const hasContinuation = xs.some(
-    (x) => isSymbol(x, 'ContinuationPlaceholder')
+    (x) => isContinuationOperand(x)
   );
   if (def?.associative && !hasContinuation)
     xs = flatten(xs, expr.operator, false);

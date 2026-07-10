@@ -101,11 +101,42 @@ after it, leading terms re-attached, fresh index).
     `1+2+4+\dots+n²` stays inert (anchor fits neither family's term).
 - Alternating signs (`r < 0` covers sign-alternating geometric; other
   alternating patterns), mixed families, and anything unproven: inert.
-- **v3 — recurrences via `RSolve`:** Berlekamp–Massey over the samples → a
-  linear constant-coefficient recurrence → feed the existing `RSolve`
-  (landed 0.71.0) for the closed form (Fibonacci → Binet, no lookup tables).
-  Optionally a small hand-curated famous-sequence table (factorial, Catalan;
-  primes stay inert).
+- **v3 — recurrences via `RSolve`** (spec below): Berlekamp–Massey over the
+  samples → a linear constant-coefficient recurrence → closed form via the
+  existing `RSolve` (landed 0.71.0), no lookup tables.
+
+### v3 gate (agreed 2026-07-09)
+
+Tried after AP → polynomial → geometric all decline. Same operand handling.
+
+- **Berlekamp–Massey** over the exact-rational samples finds the minimal
+  linear constant-coefficient recurrence of order `L ≥ 2` (L = 1 is the
+  geometric family; constant is excluded). **Evidence:** a length-L
+  recurrence is determined by `2L` samples, so require `m ≥ 2L + 1` (one
+  surplus witness), or `m = 2L` with anchor confirmation.
+- **Closed form:** construct and evaluate an `RSolve` expression *through
+  the engine* (`ce.box(['RSolve', …]).evaluate()`, NOT a static import —
+  the solver must not be imported into `symbolic/`) with the recurrence and
+  the first `L` samples as initial conditions. **Trust but verify:** the
+  returned closed form must reproduce ALL samples (exact where possible,
+  else within tolerance at high precision); on mismatch or an inert
+  `RSolve`, decline.
+- **Anchor validation:** numeric anchor — iterate the *recurrence itself*
+  in exact rational arithmetic to find `U ≥ m+1` with `a(U) = A` (bounded;
+  do NOT search on the closed form — Binet-style radicals make exact
+  comparison fragile). Symbolic anchors: decline in v3 (a Fibonacci anchor
+  is typically a fused subscript symbol like `F_n`, which cannot be
+  validated against a closed form — future work alongside the famous-
+  sequence table).
+- **Result:** `Sum(t(k), (k, 1, U))` / `Product(…)` with `t` the verified
+  closed form. If a hand-curated famous-sequence head matches the
+  recurrence + initial conditions exactly (e.g. `Fibonacci`, if the head
+  exists), prefer it as the body for display.
+- Alternating-sign sequences are in scope for the recognizer (negative
+  coefficients/samples are natural to Berlekamp–Massey); the *parser
+  spelling* `1 - 2 + 4 - \dots` additionally requires the subtraction-
+  ellipsis fold-barrier extension (a `Negate`-wrapped
+  `ContinuationPlaceholder` must trigger the barrier like a bare one).
 - **v4 — OEIS-backed proposals, via the EXISTING async API.** The engine
   already ships `ce.lookupOEIS(terms)` (async, `OEISSequenceInfo[]` with
   `formula`/`terms`/`url`) and `checkSequence`, alongside the
