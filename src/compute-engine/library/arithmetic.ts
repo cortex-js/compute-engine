@@ -3021,6 +3021,16 @@ function processMinMaxItem(
   }
 
   if (item.isCollection) {
+    // Only a finite, enumerable collection can be folded for an extremum.
+    // An infinite one (an Interval's dyadic sampler, a Map over it) would
+    // grind until the evaluation deadline; one that reports elements but
+    // declines enumeration (e.g. Map over a Linspace with a symbolic
+    // endpoint) would silently VANISH from the result — Min(Map(...), 5)
+    // returned 5. Keep the operand symbolic instead. (A genuinely empty
+    // lazy collection — Filter over a finite source with no matches — has
+    // isEmptyCollection === true, is not "declined", and still folds away.)
+    if (item.isFiniteCollection !== true || enumerationDeclined(item))
+      return [undefined, [item]];
     let result: Expression | undefined = undefined;
     const rest: Expression[] = [];
     for (const op of item.each()) {

@@ -996,6 +996,61 @@ describe('SYMBOLIC-BOUND COLLECTIONS STAY INERT', () => {
     ).toMatchInlineSnapshot(`["Infimum", ["Range", 1, "n"]]`);
   });
 
+  test('extrema over an unenumerable collection stay inert (no grind, no drop)', () => {
+    // Map over a continuous Interval: the dyadic sampler used to grind
+    // until the evaluation deadline (>seconds); now inert immediately.
+    const start = Date.now();
+    const r = engine
+      .expr([
+        'Min',
+        [
+          'Map',
+          ['Interval', ['Open', 0], ['Open', 'PositiveInfinity']],
+          ['Function', ['GammaLn', 'x_1'], 'x_1'],
+        ],
+      ])
+      .evaluate();
+    expect(r.operator).toBe('Min');
+    expect(Date.now() - start).toBeLessThan(2000);
+
+    // Map over a Linspace with a symbolic endpoint reports count 3 but
+    // declines enumeration: it used to VANISH from the result
+    // (Min(Map(...), 5) → 5). It must stay in the symbolic Min.
+    const m = engine
+      .expr([
+        'Min',
+        ['Map', ['Linspace', 'x_1', 1, 3], ['Function', ['Square', '_'], '_']],
+        5,
+      ])
+      .evaluate();
+    expect(m.operator).toBe('Min');
+    expect(m.nops).toBe(2);
+
+    // Controls: a genuinely empty lazy Filter still folds away, and finite
+    // collections still fold.
+    expect(
+      exprToString(
+        engine
+          .expr([
+            'Min',
+            ['Filter', ['List', 1, 2], ['Function', ['Greater', '_', 5], '_']],
+            9,
+          ])
+          .evaluate()
+      )
+    ).toBe('9');
+    expect(
+      exprToString(
+        engine
+          .expr([
+            'Min',
+            ['Filter', ['List', 1, 2, 8], ['Function', ['Greater', '_', 1], '_']],
+          ])
+          .evaluate()
+      )
+    ).toBe('2');
+  });
+
   test('concrete controls are unaffected', () => {
     expect(exprToString(engine.expr(['Sum', ['Range', 1, 10]]).evaluate())).toBe(
       '55'
