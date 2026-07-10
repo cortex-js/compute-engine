@@ -5,11 +5,13 @@
 4.5 Secant + §8.8 Polylogarithm** (6,574 rules, 6.98 MB). Chapter-1 exhaustive
 ≈90–91%; ch2 ≈72% / ch6 ≈45% effective; **4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
-71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R20, s120 seed5):
-5.1 sine 38/120, 5.2 cosine 40, 5.3 tangent 53, 5.4 cotangent 60, 5.5 secant 54,
-5.6 cosecant 49 (294/720 = 40.8%); Chapter 7 Inverse hyperbolic (R21, s120 seed5):
-7.1 sine 79/120, 7.2 cosine 49, 7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44,
-7.6 cosecant 54 (406/720 = 56.4%); genuine wrongs 0 across ALL suites incl. ch3/ch5/ch7** (all flagged
+71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R22, s120 seed5):
+5.1 sine 54/120, 5.2 cosine 52, 5.3 tangent 57, 5.4 cotangent 60, 5.5 secant 56,
+5.6 cosecant 52 (331/720 = 46.0%, R22 +37 vs R20's 294 — the trig-subproblem
+bridge); Chapter 7 Inverse hyperbolic (R22, s120 seed5):
+7.1 sine 79/120, 7.2 cosine 51, 7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44,
+7.6 cosecant 54 (408/720 = 56.7%, R22 +2 — ch7's arsinh sub-integrals already
+routed via the ungated hyperbolic fallback); genuine wrongs 0 across ALL suites incl. ch3/ch5/ch7** (all flagged
 "wrongs" are documented verification false-wrong classes — see the
 ROADMAP §R state note). The nested `Log[c·(b·x^n)^p]` power-in-log family
 (§3.1.5 / §3.3) that R17 first shipped with ~3 genuine wrongs was **fixed**
@@ -1437,6 +1439,77 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     SinhIntegral exercising the new kernel end-to-end) in
     `integration-rules.test.ts` (30s timeLimit for the Chi/Shi-carrying case);
     Shi/Chi kernel unit tests in `special-functions.test.ts`.
+- **Phase R22 — the trig-subproblem bridge (ch5 inverse-trig lever) LANDED
+  (2026-07-10).** The R20/R21 residual censuses named the
+  `(f·x)^m·(d+e·x²)^p·(a+b·InvFn(c·x))^n` family (half-integer `p`) as the biggest
+  cross-chapter unsolved cluster. **Root cause (one driver bug, not bundling):**
+  the 5.1.2/5.1.3/5.1.4 arcsin reductions close via
+  `Subst[∫(a+b·x)^n·Cot[x] dx, x, ArcSin[c·x]]` (and the `(d+e·x²)^p` analogs) —
+  they hand a poly/rational·`Cot[x]` sub-integral to the Chapter-4 §4.3 Tangent
+  rules, which reduce `∫(a+b·x)^n·Cot[x]` to Log/PolyLog[n+1]. But `driver.int`
+  computes `trigActive = hasActiveTrig(integrand)` **once** at the top-level
+  call, and an arcsin/arctan integrand carries **no active trig** → `trigActive`
+  is false → the inert-trig bridge (deactivate → match ch4 → re-activate) is
+  gated OFF for the entire call → the `Cot` sub-integral never reaches the ch4
+  rules and strands as an inert `Integrate`. **Fix (driver.ts `intRec`, ~15
+  lines behind `RUBI_NO_TRIGSUB`):** when a subproblem introduces active trig
+  into a non-trig context (`!this.trigActive && hasActiveTrig(integrand)`),
+  engage the bridge for that subtree — flip `trigActive`, integrate, then
+  re-activate the (possibly trig-carrying) result, since the top-level `int()`
+  activation is gated on the top-level flag and would skip it. The re-entry sees
+  `trigActive` true and falls through (no recursion; the guard is now false).
+  Benchmark alignment: `scripts/rubi/benchmark.ts` foundation now also loads
+  §4.1 Sine / §4.3 Tangent / §4.5 Secant (the shipped bundle has them since
+  R4/R10/R12) — without §4.3 Tangent in the rule set the bridge engages but finds
+  no rule to close the `Cot` sub-integral. **Attribution (5.1 sine, s120 seed5,
+  ch4 foundation present): fix OFF 38 → fix ON 54** — the entire +16 is the
+  driver fix; the ch4 foundation alone (fix off) changes nothing, confirming the
+  bridge is the lever.
+  - **Per-suite before→after (s120 seed5, genuine wrongs 0 throughout).** Ch5:
+    5.1 sine **38 → 54** (+16), 5.2 cosine **40 → 52** (+12), 5.3 tangent
+    **53 → 57** (+4), 5.4 cotangent **60 → 60**, 5.5 secant **54 → 56** (+2),
+    5.6 cosecant **49 → 52** (+3) — **294 → 331 (+37, 40.8% → 46.0%)**. Ch7:
+    7.1 sinh **79 → 79**, 7.2 cosh **49 → 51** (+2), 7.3 tanh **85**, 7.4 coth
+    **95**, 7.5 sech **44**, 7.6 csch **54** — **406 → 408 (+2)**. The ch5/ch7
+    asymmetry is structural: arcsin/arctan reductions bottom out in **trig**
+    (`Cot`/`Tan`) sub-integrals that the `trigActive` snapshot gated off (fixed
+    here), whereas arsinh/arcosh reductions bottom out in **hyperbolic**
+    (`Coth`/`Tanh`) sub-integrals routed by the driver's `containsHyperbolic`
+    fallback, which is UNGATED — so ch7 was already covered at R21 (7.2's +2 is
+    the handful of arccosh cases whose `√(1−c²x²)` factor yields a trig, not
+    hyperbolic, sub-integral).
+  - **Census — what stays unsolved (5.1 after, 65 unsolved).** (A) **22 =
+    `Unintegrable`** — Rubi itself returns non-elementary; CE's inert `Integrate`
+    is the CORRECT match, not a gap. (B) **`x^m·ArcSin^n` with `n` negative /
+    fractional-half / symbolic** → CosIntegral/SinIntegral (n<0, e.g.
+    `∫x/(√(1−c²x²)·ArcSin)` = the `Cos[k·ArcSin]` expansion), `Gamma[1+n,·]`
+    (symbolic n), or `Hypergeometric2F1`/₃F₂ (fractional) — a SEPARATE
+    "`InvTrig^n` reduction" machinery (`Cos[k·θ]`-expansion + a generalized
+    ₚFq head CE lacks), the next rung. (C) **high-power `(d+e·x²)^p/x^k` with
+    n≥2** whose `∫(a+b·x)^n·Cot` residual needs PolyLog[3+] — mostly closes now
+    (`∫x²·cot`, `∫x³·cot` verified) but a few deep ones remain. (D)
+    **₃F₂/HypergeometricPFQ terminal forms** (5.1.4 #41/#42 symbolic-m) —
+    out of scope, no pFq head (R20 precedent). Ch5 wrong flags unchanged from R20
+    (5.4 ×4, 5.5 ×1, 5.6 ×1 — all documented negative-x branch false-wrongs);
+    ch7 wrong flags unchanged from R21 (7.1 #130/#96, 7.2 #386/#396 symbolic-
+    exponent grading; 7.3 ×1; 7.4 ×4; 7.5 ×2 — all documented false-wrongs).
+  - **Regression guards (all = baseline or better, genuine wrongs 0).** 5.3
+    tangent **53 → 57** (+4, arctan benefits from the same bridge), 5.4/7.3/7.4/
+    7.5/7.6 unchanged, ch3 **71/4w**, ch2 **83/2w**, ch1 1.1 **109/5w** — all
+    = baseline. The `--rubi ".../4.1 Sine"` (ch4 SUBSECTION) benchmark still
+    reports its pre-existing driver-only 58 (that invocation's `corpusRoot` is
+    the `4 Trig functions` dir, so NO foundation loads — a long-standing
+    benchmark quirk, unaffected by this rung); the SHIPPED §4.1 Sine is 107
+    (`loadIntegrationRules` closed-rate, unchanged — the driver fix is a strict
+    no-op for a trig top-level integrand, and this rung touches neither the
+    bundle nor the built-in antiderivative).
+  - **Tests.** `integration-rules.test.ts`: an R22 describe block, D-verified via
+    finite-differenced `F.N()` — `∫x·arcsin/(1−x²)` (integer p, → PolyLog),
+    `∫arcsin²·√(1−x²)/x²` (p=1/2, n=2), `∫x²·arcsin²/(1−x²)^(5/2)` (p=−5/2, n=2),
+    `∫x·arccos/(1−x²)` (arccos co-variant), and `∫arcsinh/x` (the hyperbolic-
+    fallback control that already passed). Four of the five FAIL under
+    `RUBI_NO_TRIGSUB=1`. `rubi-utils.test.ts`: a `HalfIntegerQ` grading test
+    (p = ±1/2, ±3/2, −5/2 → true; integers/denom≠2 → false; multi-arg all-true).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

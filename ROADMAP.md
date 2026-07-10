@@ -488,7 +488,7 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-10, R1–R21 landed):** the shipped bundle
+**State (2026-07-10, R1–R22 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 3 (Logarithms), 5 (Inverse trig), 6 (Hyperbolics),
@@ -496,11 +496,13 @@ gate each other.
 — 6,574 rules, 6.98 MB (CI has a bundle-freshness gate). Scores (seed 5): **4.1
 Sine 107/120 and 331/400 (4.1.11 file 93/113, post-R18)**, **4.3 Tangent 72/120**,
 **4.5 Secant 69/120**, **ch3 Logarithms 71/120 (R20, +2 from ch5 family-C
-producers)**, **Chapter 5 Inverse trig (R20): 5.1 sine 38/120, 5.2 cosine 40,
-5.3 tangent 53, 5.4 cotangent 60, 5.5 secant 54, 5.6 cosecant 49 (294/720 =
-40.8%)**, **Chapter 7 Inverse hyperbolic (R21): 7.1 sine 79/120, 7.2 cosine 49,
-7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44, 7.6 cosecant 54 (406/720 =
-56.4%)**, ch1 exhaustive ≈90–91%,
+producers)**, **Chapter 5 Inverse trig (R22): 5.1 sine 54/120, 5.2 cosine 52,
+5.3 tangent 57, 5.4 cotangent 60, 5.5 secant 56, 5.6 cosecant 52 (331/720 =
+46.0%, R22 +37 over R20's 294 via the trig-subproblem bridge)**, **Chapter 7
+Inverse hyperbolic (R22): 7.1 sine 79/120, 7.2 cosine 51,
+7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44, 7.6 cosecant 54 (408/720 =
+56.7%, R22 +2 — ch7's hyperbolic sub-integrals were already covered by the
+ungated `containsHyperbolic` fallback)**, ch1 exhaustive ≈90–91%,
 ch2 ≈72% / ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
 **Genuine wrongs are 0 across all suites** (incl. ch3 after the R17
 back-substitution fix, and ch7's 11 flags — all symbolic-exponent /
@@ -534,7 +536,8 @@ partial-fractions and routed through the §2.2→Ch3→§8.8 PolyLog telescope,
 fail-closed D-check; native-rational). A/B env switches:
 `RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`, `RUBI_NO_COFN`, `RUBI_NO_COFN_COT`,
 `RUBI_NO_SKELETON`, `RUBI_NO_SICI`, `RUBI_NO_SICI_COMPLEX`, `RUBI_NO_SECBIN`,
-`RUBI_NO_TRIGSQ`, `RUBI_NO_TRIGEXP`.
+`RUBI_NO_TRIGSQ`, `RUBI_NO_TRIGEXP`, `RUBI_NO_TRIGSUB` (R22 subproblem
+trig-bridge).
 **Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
 power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
 shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`
@@ -551,10 +554,15 @@ Per-rung blow-by-blow
 "data/rubi/corpus/4 Trig functions" --chapter "4 Trig functions/4.1 Sine"
 --sample 120 --seed 5 --report /tmp/x.json`. Always pass `--report` (the
 default path clobbers the committed baseline); `--rubi` mode preloads the
-ch1/2/3/6/§8.8 foundation (so it measures the integrator as it ships —
-`RUBI_NO_FOUNDATION` to disable; **pre-2026-07-04 4.1 baselines are not
-comparable**); run suites **sequentially** — concurrent benchmark runs
-contaminate each other's driver/verifier timing.
+ch1/2/3/**4.1/4.3/4.5**/5/6/7/§8.8 foundation (matching the shipped bundle so it
+measures the integrator as it ships — `RUBI_NO_FOUNDATION` to disable;
+**pre-2026-07-04 4.1 baselines are not comparable**); run suites
+**sequentially** — concurrent benchmark runs contaminate each other's
+driver/verifier timing. NB: a `--rubi` target that is a Chapter-4 SUBSECTION
+(e.g. `.../4 Trig functions/4.1 Sine`) resolves `corpusRoot` to the ch4 dir,
+so no foundation loads and the driver-only score (58) understates the shipped
+§4.1 Sine (107, `loadIntegrationRules`) — measure ch4 sections via the shipped
+bundle, not `--rubi` on the subsection.
 
 **Kernel status.** The complex-argument `ExpIntegralEi`/`SinIntegral`/
 `CosIntegral` and negative-order incomplete Γ kernels landed 2026-07-09 (commit
@@ -628,6 +636,17 @@ note — trace the residual integrand, don't trust the predicate census.
   (multiple-angle elementary form) for `sin^n` products — the exp-form
   reduction works but verifies past the harness budget and preempts trig-form
   rules chapter-wide, so it was deliberately gated off.
+- **R22 residual — the `InvTrig^n` reduction machinery.** R22's trig-subproblem
+  bridge (`RUBI_NO_TRIGSUB`) closed the `(f·x)^m·(d+e·x²)^p·(a+b·arcsin/arccos)^n`
+  family whose reductions bottom out in `∫f(x)·Cot[x]` sub-integrals (ch5
+  294 → 331). What remains in ch5 (43 non-`Unintegrable` unsolved in 5.1) is a
+  DIFFERENT machinery: `∫x^m·ArcSin^n` with `n` negative / half-integer /
+  symbolic, which Rubi closes via a `Cos[k·θ]`-expansion into
+  CosIntegral/SinIntegral (n<0) or `Gamma[1+n,·]`/`Hypergeometric2F1`/₃F₂
+  (symbolic / fractional n). The ₃F₂/`HypergeometricPFQ` terminal forms need a
+  generalized ₚFq head CE lacks (out of scope); the CosIntegral n<0 family is the
+  next cheap lever (a `Cos[k·ArcSin]` multiple-angle producer). Ch7's analog is
+  smaller and already partly covered (arsinh → hyperbolic fallback).
 
 **Exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules) are
 DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty). The

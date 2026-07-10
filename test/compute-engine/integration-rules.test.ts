@@ -663,4 +663,69 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       ]);
     });
   });
+
+  // R22: the (f·x)^m·(d+e·x²)^p·(a+b·arcsin(c·x))^n trig-subproblem bridge
+  // (RUBI.md §5, Phase R22). The 5.1.2/5.1.3/5.1.4 arcsin reductions substitute
+  //   Subst[∫(a+b·x)^n·Cot[x] dx, x, ArcSin[c·x]]  (and (d+e·x²)^p analogs),
+  // handing a poly/rational·Cot[x] sub-integral to the Chapter-4 §4.3 Tangent
+  // rules that close it to Log/PolyLog. Because the top-level arcsin integrand
+  // carries no ACTIVE trig, the driver's inert-trig bridge was gated off for the
+  // whole call, so the Cot sub-integral stranded as an inert Integrate. The fix
+  // (driver.ts intRec) engages the bridge for any subproblem that introduces
+  // active trig into a non-trig context. Verified by finite-differencing F.N()
+  // (the PolyLog[2, ±E^(2i·arcsin)] results have inert symbolic D but evaluable
+  // F.N()); sampled inside |x|<1 (arcsin/√(1−x²) real domain).
+  describe('the arcsin (d+e·x²)^p trig-subproblem bridge (Chapter-5, R22)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string, xs = [0.17, 0.31, 0.52, 0.73]) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      let checked = 0;
+      for (const x of xs) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ x }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        expect(d).toBeCloseTo(f, 5);
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    };
+    // integer p = −1 (5.1.4a #31): closes to Log/PolyLog[2, −E^(2i·arcsin)].
+    test('∫x·arcsin(x)/(1−x²) dx → PolyLog', () => {
+      const F = ce
+        .parse('\\int \\frac{x\\arcsin(x)}{1-x^2} \\, dx')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toContain('PolyLog');
+      verify('\\frac{x\\arcsin(x)}{1-x^2}');
+    });
+    // half-integer p = 1/2, n = 2 (5.1.4a #215).
+    test('∫arcsin(x)²·√(1−x²)/x² dx', () =>
+      verify('\\frac{\\arcsin(x)^2\\sqrt{1-x^2}}{x^2}'));
+    // half-integer p = −5/2, n = 2 (5.1.4a #257).
+    test('∫x²·arcsin(x)²/(1−x²)^(5/2) dx', () =>
+      verify('\\frac{x^2\\arcsin(x)^2}{(1-x^2)^{5/2}}'));
+    // arccos co-variant (5.2, authored inline in the 5.1 files).
+    test('∫x·arccos(x)/(1−x²) dx → PolyLog', () => {
+      const F = ce
+        .parse('\\int \\frac{x\\arccos(x)}{1-x^2} \\, dx')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toContain('PolyLog');
+      verify('\\frac{x\\arccos(x)}{1-x^2}');
+    });
+    // The arsinh analog already routed via the ungated hyperbolic fallback, but
+    // confirm the reciprocal ∫arcsinh(x)/x closes to PolyLog too (7.1.2).
+    test('∫arcsinh(x)/x dx → PolyLog', () => {
+      const F = ce
+        .parse('\\int \\frac{\\operatorname{arcsinh}(x)}{x} \\, dx')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toContain('PolyLog');
+    });
+  });
 });

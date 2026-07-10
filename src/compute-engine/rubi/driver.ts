@@ -93,6 +93,11 @@ const NO_TRIGSQ = process.env.RUBI_NO_TRIGSQ !== undefined;
 // RUBI_NO_TRIGEXP: disable the R17 single-angle trig-rational → single-
 // exponential normalization fallback (A/B measuring its effect on 4.1.10).
 const NO_TRIGEXP = process.env.RUBI_NO_TRIGEXP !== undefined;
+// RUBI_NO_TRIGSUB: disable the R22 subproblem trig-bridge (engage the inert-trig
+// bridge for a subproblem that introduces ACTIVE trig into a non-trig top-level
+// integrand — the inverse-trig `Subst[∫f(x)·Cot[x],…]` reductions). A/B measures
+// its effect on the ch5/ch7 (d+e·x²)^p·(a+b·arcsin/arccos)^n families.
+const NO_TRIGSUB = process.env.RUBI_NO_TRIGSUB !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -341,6 +346,29 @@ export class RubiDriver {
     // the engine deadline is armed only inside evaluate(); the driver
     // keeps its own wall-clock budget per top-level int() call
     if (Date.now() > this.deadline || ce._timeRemaining <= 0) return null;
+
+    // A reduction / Subst RHS can introduce ACTIVE trig into a subproblem of a
+    // NON-trig top-level integrand: the inverse-trig `Subst` rules (5.1.2#1
+    // `∫(a+b·ArcSin[c·x])^n/x = Subst[∫(a+b·x)^n·Cot[x],x,ArcSin[c·x]]`, the
+    // 5.1.3/5.1.4 `(d+e·x²)^p` reductions, and their arctan/arcosh analogs)
+    // hand a `∫(a+b·x)^n·Cot[x]`-type sub-integral to the Chapter-4 rules. The
+    // top-level `trigActive` snapshot is FALSE for an arcsin/arctan integrand,
+    // so the inert-trig bridge below (and the Chapter-4 rules it feeds) would
+    // never engage and the cot/tan sub-integral strands as an inert Integrate.
+    // Engage the bridge for this subtree — flip `trigActive`, integrate, then
+    // re-activate the (possibly trig-carrying) result, since the top-level
+    // `int()` activation is gated on the top-level flag and would skip it.
+    // Restored on the way out. The re-entry sees `trigActive` true and falls
+    // through to the normal body (no recursion: the guard is now false).
+    if (!NO_TRIGSUB && !this.trigActive && hasActiveTrig(integrand)) {
+      this.trigActive = true;
+      try {
+        const r = this.intRec(integrand, variable, depth);
+        return r === null ? null : cleanTrig(ce, activateTrig(ce, r));
+      } finally {
+        this.trigActive = false;
+      }
+    }
 
     // Chapter-4 rules match against inert trig; deactivate active heads
     // (Cos→cos) before normalizing. Reduction-rule RHSs re-introduce active

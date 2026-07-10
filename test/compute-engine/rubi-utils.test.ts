@@ -171,6 +171,32 @@ describe('EqQ/NeQ arity', () => {
   });
 });
 
+// HalfIntegerQ gates the 5.1.3/5.1.4 (d+e·x²)^p arcsin reductions (RUBI.md §5,
+// Phase R20/R22): true iff EVERY argument is a Rational with denominator 2
+// (an odd multiple of 1/2). The exponents these rules see are p = ±1/2, ±3/2,
+// ±5/2, so verify those box as CE Rationals and grade correctly.
+describe('HalfIntegerQ (gates the (d+e·x²)^p arcsin power rules)', () => {
+  test('true only for odd multiples of 1/2', () => {
+    expect(cond(['HalfIntegerQ', ['Rational', 1, 2]])).toBe(true);
+    expect(cond(['HalfIntegerQ', ['Rational', 3, 2]])).toBe(true);
+    expect(cond(['HalfIntegerQ', ['Rational', -1, 2]])).toBe(true);
+    expect(cond(['HalfIntegerQ', ['Rational', -5, 2]])).toBe(true);
+    // integers, other denominators, and non-rationals are NOT half-integers
+    expect(cond(['HalfIntegerQ', 2])).toBe(false);
+    expect(cond(['HalfIntegerQ', ['Rational', 1, 3]])).toBe(false);
+    expect(cond(['HalfIntegerQ', ['Rational', 1, 4]])).toBe(false);
+    // 2/4 reduces to 1/2 (denominator 2) → still a half-integer
+    expect(cond(['HalfIntegerQ', ['Rational', 2, 4]])).toBe(true);
+  });
+
+  test('multi-argument: every argument must be a half-integer', () => {
+    expect(
+      cond(['HalfIntegerQ', ['Rational', 1, 2], ['Rational', 3, 2]])
+    ).toBe(true);
+    expect(cond(['HalfIntegerQ', ['Rational', 1, 2], 2])).toBe(false);
+  });
+});
+
 // Chapter-3 Logarithms utility layer (RUBI.md §5, Phase R17).
 describe('Chapter-3 utilities (IntHide / MemberQ / ProductQ / Cancel / ...)', () => {
   test('ProductQ[u] is true only for a Times expression', () => {

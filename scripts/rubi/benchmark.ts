@@ -554,19 +554,30 @@ function main(): void {
     // to ∫1/(a+2b·x+a·x²), an algebraic quadratic-rational integral closed by
     // Chapter-1 rules 1082/1083/217. Loading a higher chapter WITHOUT its
     // Chapter-1 foundation strands every such residual as an inert Integrate.
-    // The shipped `loadIntegrationRules` bundles exactly this foundation
-    // (Chapters 1, 2, 3, 6, §8.8 + the target section); mirror it here so the
-    // benchmark measures the integrator as it actually ships. Chapter 3
+    // The shipped `loadIntegrationRules` bundles this foundation (Chapters 1,
+    // 2, 3, 5, 6, 7, §4.1/§4.3/§4.5, §8.8 + the target section); mirror it here
+    // so the benchmark measures the integrator with the shipped rule set — see
+    // scripts/rubi/bundle-corpus.ts for the authoritative list. Chapter 3
     // (logarithms) is in the foundation because Chapter-2 §2.2 reduces
-    // ∫(c+dx)^m·F^{gx}/(a+b·F^{gx}) into a Chapter-3 log/PolyLog integral,
-    // and §8.8 (polylogarithm) terminates that telescope
-    // (∫x^m·PolyLog[n,·] → PolyLog[n+1]). Only the 8.8 FILE is in the shipped
-    // bundle — preloading the rest of Chapter 8 here would diverge from
-    // production (and 8.7 Zeta has known compile skips).
-    // Foundation dirs are
-    // prepended (higher rule priority, matching Rubi's global rule order where
-    // the algebraic rules precede the trig rules) and de-duplicated against the
-    // target so pointing `--rubi` at a foundation chapter is a no-op.
+    // ∫(c+dx)^m·F^{gx}/(a+b·F^{gx}) into a Chapter-3 log/PolyLog integral, and
+    // §8.8 (polylogarithm) terminates that telescope (∫x^m·PolyLog[n,·] →
+    // PolyLog[n+1]). Only the 8.8 FILE is in the shipped bundle — preloading the
+    // rest of Chapter 8 here would diverge from production (and 8.7 Zeta has
+    // known compile skips). The Chapter-4 §4.1 Sine / §4.3 Tangent / §4.5 Secant
+    // sections are bundled (RUBI.md §5 Phases R4/R10/R12): the inverse-trig
+    // `Subst` reductions (5.1.2#1 etc.) bottom out in `∫(a+b·x)^n·Cot[x]`-type
+    // poly×trig sub-integrals that §4.3 Tangent closes to Log/PolyLog, so
+    // omitting them here undercounts ch5/ch7 (RUBI.md §5 Phase R22). Foundation
+    // dirs are prepended (higher rule priority, matching Rubi's global rule
+    // order where the algebraic rules precede the trig rules) and de-duplicated
+    // against the target so pointing `--rubi` at a foundation chapter is a
+    // no-op. (These three ch4 entries only take effect when `corpusRoot` =
+    // the corpus root, i.e. for a CHAPTER-dir `--rubi` target such as ch5/ch7.
+    // A ch4-SUBSECTION target like `4 Trig functions/4.1 Sine` has
+    // `corpusRoot` = the `4 Trig functions` dir, so every foundation path is
+    // looked up under it, fails `existsSync`, and the section runs with no
+    // foundation — a pre-existing quirk; the shipped `loadIntegrationRules`
+    // score for 4.1 Sine is 107 regardless.)
     const corpusRoot = path.dirname(rubiRules);
     const foundationDirs = (
       process.env.RUBI_NO_FOUNDATION !== undefined
@@ -575,6 +586,9 @@ function main(): void {
             '1 Algebraic functions',
             '2 Exponentials',
             '3 Logarithms',
+            '4 Trig functions/4.1 Sine',
+            '4 Trig functions/4.3 Tangent',
+            '4 Trig functions/4.5 Secant',
             '5 Inverse trig functions',
             '6 Hyperbolic functions',
             '7 Inverse hyperbolic functions',
