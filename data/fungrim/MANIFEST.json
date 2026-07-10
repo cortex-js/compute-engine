@@ -6,7 +6,7 @@
     "name": "fungrim",
     "repository": "https://github.com/arnog/fungrim",
     "branch": "grim2mathjson",
-    "commit": "4b883302ea7fa0e9a8a0418a68eb077f09abad74",
+    "commit": "a832b598ef1b8502412a36223c37bfe17ccc90c5",
     "parent": {
       "repository": "https://github.com/fredrik-johansson/fungrim",
       "commit": "b7c3ca6e565e1058638cab6ba2bc811090296767",

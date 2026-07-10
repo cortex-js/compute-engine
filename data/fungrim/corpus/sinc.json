@@ -1366,15 +1366,15 @@
     [
      "Min",
      [
-      "Set",
+      "Map",
+      "RealNumbers",
       [
-       "Sinc",
+       "Function",
+       [
+        "Sinc",
+        "x"
+       ],
        "x"
-      ],
-      [
-       "Element",
-       "x",
-       "RealNumbers"
       ]
      ]
     ],
@@ -1389,6 +1389,7 @@
    "subclass": null,
    "heads": [
     "EqualNearestDecimal",
+    "Map",
     "Min",
     "Sinc"
    ],
@@ -2648,15 +2649,15 @@
     [
      "Max",
      [
-      "Set",
+      "Map",
+      "RealNumbers",
       [
-       "Sinc",
+       "Function",
+       [
+        "Sinc",
+        "x"
+       ],
        "x"
-      ],
-      [
-       "Element",
-       "x",
-       "RealNumbers"
       ]
      ]
     ],
@@ -2667,6 +2668,7 @@
    "class": "specific-value",
    "subclass": null,
    "heads": [
+    "Map",
     "Max",
     "Sinc"
    ],
@@ -4575,15 +4577,15 @@
     [
      "Min",
      [
-      "Set",
+      "Map",
+      "RealNumbers",
       [
-       "Sinc",
+       "Function",
+       [
+        "Sinc",
+        "x"
+       ],
        "x"
-      ],
-      [
-       "Element",
-       "x",
-       "RealNumbers"
       ]
      ]
     ],
@@ -4606,6 +4608,7 @@
    "subclass": null,
    "heads": [
     "BesselJZero",
+    "Map",
     "Min",
     "Sinc"
    ],

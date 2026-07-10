@@ -900,15 +900,15 @@
     [
      "Min",
      [
-      "Set",
+      "Map",
+      "RealNumbers",
       [
-       "Sin",
+       "Function",
+       [
+        "Sin",
+        "x"
+       ],
        "x"
-      ],
-      [
-       "Element",
-       "x",
-       "RealNumbers"
       ]
      ]
     ],
@@ -919,6 +919,7 @@
    "class": "specific-value",
    "subclass": null,
    "heads": [
+    "Map",
     "Min",
     "Sin"
    ],
@@ -3482,15 +3483,15 @@
     [
      "Max",
      [
-      "Set",
+      "Map",
+      "RealNumbers",
       [
-       "Sin",
+       "Function",
+       [
+        "Sin",
+        "x"
+       ],
        "x"
-      ],
-      [
-       "Element",
-       "x",
-       "RealNumbers"
       ]
      ]
     ],
@@ -3501,6 +3502,7 @@
    "class": "specific-value",
    "subclass": null,
    "heads": [
+    "Map",
     "Max",
     "Sin"
    ],

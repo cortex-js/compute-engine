@@ -2522,25 +2522,25 @@
     [
      "Min",
      [
-      "Set",
+      "Map",
       [
-       "GammaLn",
-       "x"
+       "Interval",
+       [
+        "Open",
+        0
+       ],
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
       ],
       [
-       "Element",
-       "x",
+       "Function",
        [
-        "Interval",
-        [
-         "Open",
-         0
-        ],
-        [
-         "Open",
-         "PositiveInfinity"
-        ]
-       ]
+        "GammaLn",
+        "x"
+       ],
+       "x"
       ]
      ]
     ],
@@ -2560,6 +2560,7 @@
    "subclass": null,
    "heads": [
     "GammaLn",
+    "Map",
     "Min",
     "RealBall"
    ],
@@ -3186,25 +3187,25 @@
     [
      "Min",
      [
-      "Set",
+      "Map",
       [
-       "Gamma",
-       "x"
+       "Interval",
+       [
+        "Open",
+        0
+       ],
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
       ],
       [
-       "Element",
-       "x",
+       "Function",
        [
-        "Interval",
-        [
-         "Open",
-         0
-        ],
-        [
-         "Open",
-         "PositiveInfinity"
-        ]
-       ]
+        "Gamma",
+        "x"
+       ],
+       "x"
       ]
      ]
     ],
@@ -3224,6 +3225,7 @@
    "subclass": null,
    "heads": [
     "Gamma",
+    "Map",
     "Min",
     "RealBall"
    ],

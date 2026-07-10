@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-10T16:53:29.783Z",
+  "generated": "2026-07-10T17:52:19.533Z",
   "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
   "stage1": {
     "total": 2551,
@@ -8,7 +8,7 @@
     "unknownSymbol": 0,
     "timeout": 0,
     "passRate": 1,
-    "elapsedMs": 1694,
+    "elapsedMs": 1844,
     "failureBuckets": [],
     "perTopic": {
       "agm": {
@@ -374,10 +374,10 @@
     "outcomes": {
       "True": 1589,
       "False": 0,
-      "Unknown": 34,
-      "not-evaluable": 444
+      "Unknown": 31,
+      "not-evaluable": 447
     },
     "falseEntries": [],
-    "elapsedMs": 141612
+    "elapsedMs": 132652
   }
 }

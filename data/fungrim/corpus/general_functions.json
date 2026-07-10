@@ -177,30 +177,37 @@
       [
        "Supremum",
        [
-        "Set",
+        "Map",
         [
-         "Abs",
+         "Filter",
+         "ComplexNumbers",
          [
-          "f",
+          "Function",
+          [
+           "Equal",
+           [
+            "Abs",
+            [
+             "Subtract",
+             "t",
+             "z"
+            ]
+           ],
+           "R"
+          ],
           "t"
          ]
         ],
         [
-         "Element",
-         "t",
-         "ComplexNumbers",
+         "Function",
          [
-          "Equal",
+          "Abs",
           [
-           "Abs",
-           [
-            "Subtract",
-            "t",
-            "z"
-           ]
-          ],
-          "R"
-         ]
+           "f",
+           "t"
+          ]
+         ],
+         "t"
         ]
        ]
       ],
@@ -294,6 +301,8 @@
     "Abs",
     "Derivative",
     "Factorial",
+    "Filter",
+    "Map",
     "Sum",
     "Supremum"
    ],
@@ -596,30 +605,37 @@
      [
       "Supremum",
       [
-       "Set",
+       "Map",
        [
-        "Abs",
+        "Filter",
+        "ComplexNumbers",
         [
-         "f",
+         "Function",
+         [
+          "Equal",
+          [
+           "Abs",
+           [
+            "Subtract",
+            "t",
+            "z"
+           ]
+          ],
+          "R"
+         ],
          "t"
         ]
        ],
        [
-        "Element",
-        "t",
-        "ComplexNumbers",
+        "Function",
         [
-         "Equal",
+         "Abs",
          [
-          "Abs",
-          [
-           "Subtract",
-           "t",
-           "z"
-          ]
-         ],
-         "R"
-        ]
+          "f",
+          "t"
+         ]
+        ],
+        "t"
        ]
       ]
      ],
@@ -684,6 +700,8 @@
     "Abs",
     "Derivative",
     "Factorial",
+    "Filter",
+    "Map",
     "Supremum"
    ],
    "guardLevel": "undischargeable",

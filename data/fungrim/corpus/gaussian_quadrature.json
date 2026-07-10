@@ -60,21 +60,21 @@
       [
        "Supremum",
        [
-        "Set",
+        "Map",
         [
-         "Abs",
-         [
-          "f",
-          "t"
-         ]
+         "BernsteinEllipse",
+         "rho"
         ],
         [
-         "Element",
-         "t",
+         "Function",
          [
-          "BernsteinEllipse",
-          "rho"
-         ]
+          "Abs",
+          [
+           "f",
+           "t"
+          ]
+         ],
+         "t"
         ]
        ]
       ]
@@ -155,6 +155,7 @@
     "GaussLegendreWeight",
     "Integrate",
     "LegendrePolynomialZero",
+    "Map",
     "Sum",
     "Supremum"
    ],
@@ -274,45 +275,45 @@
        [
         "Supremum",
         [
-         "Set",
+         "Map",
          [
-          "Abs",
+          "BernsteinEllipse",
+          "rho"
+         ],
+         [
+          "Function",
           [
-           "f",
+           "Abs",
            [
-            "Add",
+            "f",
             [
-             "Multiply",
+             "Add",
+             [
+              "Multiply",
+              [
+               "Divide",
+               [
+                "Subtract",
+                "b",
+                "a"
+               ],
+               2
+              ],
+              "t"
+             ],
              [
               "Divide",
               [
-               "Subtract",
-               "b",
-               "a"
+               "Add",
+               "a",
+               "b"
               ],
               2
-             ],
-             "t"
-            ],
-            [
-             "Divide",
-             [
-              "Add",
-              "a",
-              "b"
-             ],
-             2
+             ]
             ]
            ]
-          ]
-         ],
-         [
-          "Element",
-          "t",
-          [
-           "BernsteinEllipse",
-           "rho"
-          ]
+          ],
+          "t"
          ]
         ]
        ]
@@ -409,6 +410,7 @@
     "GaussLegendreWeight",
     "Integrate",
     "LegendrePolynomialZero",
+    "Map",
     "Sum",
     "Supremum"
    ],
