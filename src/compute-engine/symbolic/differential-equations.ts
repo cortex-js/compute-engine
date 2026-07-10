@@ -15,6 +15,7 @@ import {
   explicitDerivativeRhs,
   isDependentFunction,
   isDerivativeOfDependent,
+  replaceDerivativeOfDependent,
 } from '../differential-equation-utils.js';
 import { durandKernerRoots } from '../numerics/polynomial-roots.js';
 import {
@@ -585,8 +586,8 @@ function splitTrigSquareTerm(
       rest.length === 0
         ? ce.One
         : rest.length === 1
-          ? rest[0]
-          : ce.function('Multiply', rest);
+        ? rest[0]
+        : ce.function('Multiply', rest);
     return { ...found, coefficient };
   }
 
@@ -768,8 +769,8 @@ function collectSystemLinearTerms(
   const terms = isFunction(rhs, 'Add')
     ? rhs.ops
     : isFunction(rhs, 'Subtract')
-      ? [rhs.op1, rhs.op2.neg()]
-      : [rhs];
+    ? [rhs.op1, rhs.op2.neg()]
+    : [rhs];
   const coefficients = dependentNames.map(() => ce.Zero);
   let rest = ce.Zero;
 
@@ -1487,8 +1488,8 @@ function splitSeparableRhs(
   const factors = isFunction(rhs, 'Multiply')
     ? rhs.ops
     : isFunction(rhs, 'Divide')
-      ? [rhs.op1, ce._fn('Power', [rhs.op2, ce.number(-1)])]
-      : [rhs];
+    ? [rhs.op1, ce._fn('Power', [rhs.op2, ce.number(-1)])]
+    : [rhs];
   const xFactors: Expression[] = [];
   const yFactors: Expression[] = [];
 
@@ -1835,6 +1836,228 @@ function solveBernoulliFirstOrder(
   return ceListSolution(dependentCall, solution);
 }
 
+function riccatiCoefficients(
+  rhs: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+):
+  | { quadratic: Expression; linear: Expression; constant: Expression }
+  | undefined {
+  const ce = rhs.engine;
+  const terms = isFunction(rhs, 'Add') ? rhs.ops : [rhs];
+  const quadraticTerms: Expression[] = [];
+  const linearTerms: Expression[] = [];
+  const constantTerms: Expression[] = [];
+
+  for (const term of terms) {
+    const split = termDependentPower(term, dependentCall);
+    if (!split) {
+      if (hasDependentOrDerivative(term, dependentName, independentName))
+        return undefined;
+      constantTerms.push(term);
+      continue;
+    }
+
+    if (
+      hasDependentOrDerivative(
+        split.coefficient,
+        dependentName,
+        independentName
+      )
+    )
+      return undefined;
+
+    if (split.power.isSame(2)) quadraticTerms.push(split.coefficient);
+    else if (split.power.isSame(1)) linearTerms.push(split.coefficient);
+    else return undefined;
+  }
+
+  const quadratic = structuralSum(ce, quadraticTerms);
+  const linear = structuralSum(ce, linearTerms);
+  const constant = structuralSum(ce, constantTerms);
+  if (quadratic.isSame(0)) return undefined;
+  return { quadratic, linear, constant };
+}
+
+function constantRiccatiParticularSolution(
+  coefficients: {
+    quadratic: Expression;
+    linear: Expression;
+    constant: Expression;
+  },
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const ce = coefficients.quadratic.engine;
+  const candidates = [-2, -1, 0, 1, 2].map((n) => ce.number(n));
+  for (const candidate of candidates) {
+    const residual = coefficients.quadratic
+      .mul(candidate.pow(2))
+      .add(coefficients.linear.mul(candidate))
+      .add(coefficients.constant)
+      .simplify();
+    if (
+      residual.isSame(0) &&
+      !hasDependentOrDerivative(residual, dependentName, independentName)
+    )
+      return candidate;
+  }
+  return undefined;
+}
+
+function solveRiccatiWithConstantParticular(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const rhsInfo = explicitDerivativeRhs(
+    equation.structural,
+    dependentName,
+    independentName
+  );
+  if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+
+  const coefficients = riccatiCoefficients(
+    rhsInfo.rhs.structural,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (!coefficients) return undefined;
+
+  const particular = constantRiccatiParticularSolution(
+    coefficients,
+    dependentName,
+    independentName
+  );
+  if (!particular) return undefined;
+
+  const p = structuralSum(equation.engine, [
+    coefficients.quadratic.mul(particular).mul(2),
+    coefficients.linear,
+  ]).simplify();
+  const q = coefficients.quadratic.neg().simplify();
+  const integralP = dSolveAntiderivative(p, independentName);
+  if (hasOperator(integralP, 'Integrate')) return undefined;
+  const integratingFactor = equation.engine
+    .function('Exp', [integralP])
+    .simplify();
+  const integralQ = dSolveAntiderivative(
+    integratingFactor.mul(q).simplify(),
+    independentName
+  );
+  if (hasOperator(integralQ, 'Integrate')) return undefined;
+
+  const [c] = integrationConstants(equation, 1);
+  const solution = structuralSum(equation.engine, [
+    particular,
+    integratingFactor.div(c.add(integralQ)).simplify(),
+  ]).simplify();
+  return ceListSolution(dependentCall, solution);
+}
+
+function abelFirstKindCoefficients(
+  rhs: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Map<number, Expression> | undefined {
+  const ce = rhs.engine;
+  const terms = isFunction(rhs, 'Add') ? rhs.ops : [rhs];
+  const coefficients = new Map<number, Expression>();
+
+  for (const term of terms) {
+    const split = termDependentPower(term, dependentCall);
+    if (!split) {
+      if (hasDependentOrDerivative(term, dependentName, independentName))
+        return undefined;
+      coefficients.set(
+        0,
+        structuralSum(ce, [coefficients.get(0) ?? ce.Zero, term])
+      );
+      continue;
+    }
+
+    if (
+      hasDependentOrDerivative(
+        split.coefficient,
+        dependentName,
+        independentName
+      )
+    )
+      return undefined;
+
+    const power = split.power.N().re;
+    if (!Number.isInteger(power) || power < 1 || power > 3) return undefined;
+    coefficients.set(
+      power,
+      structuralSum(ce, [coefficients.get(power) ?? ce.Zero, split.coefficient])
+    );
+  }
+
+  const cubic = coefficients.get(3);
+  if (!cubic || cubic.isSame(0)) return undefined;
+  return coefficients;
+}
+
+function solveConstantCoefficientAbelFirstKind(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const rhsInfo = explicitDerivativeRhs(
+    equation.structural,
+    dependentName,
+    independentName
+  );
+  if (!rhsInfo || rhsInfo.order !== 1) return undefined;
+
+  const coefficients = abelFirstKindCoefficients(
+    rhsInfo.rhs.structural,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (!coefficients) return undefined;
+
+  for (const coefficient of coefficients.values()) {
+    if (
+      coefficient.has(independentName) ||
+      hasDependentOrDerivative(coefficient, dependentName, independentName)
+    )
+      return undefined;
+  }
+
+  const ce = equation.engine;
+  const ySymbolName = freshSymbolName(
+    `${dependentName}_value`,
+    collectSymbols(equation)
+  );
+  const y = ce.symbol(ySymbolName);
+  const polynomial = structuralSum(
+    ce,
+    [0, 1, 2, 3].map((power) => {
+      const coefficient = coefficients.get(power) ?? ce.Zero;
+      return power === 0 ? coefficient : coefficient.mul(y.pow(power));
+    })
+  ).simplify();
+  if (polynomial.isSame(0)) return undefined;
+
+  const left = dSolveAntiderivative(polynomial.pow(-1).simplify(), ySymbolName);
+  if (hasOperator(left, 'Integrate')) return undefined;
+
+  const [c] = integrationConstants(equation, 1);
+  return ce.function('List', [
+    ce.function('Equal', [
+      replaceSymbol(left, ySymbolName, dependentCall).simplify(),
+      ce.symbol(independentName).add(c).simplify(),
+    ]),
+  ]);
+}
+
 function solveExactFirstOrder(
   equation: Expression,
   dependentCall: Expression,
@@ -1893,6 +2116,164 @@ function solveExactFirstOrder(
     dependentCall
   ).simplify();
   return ce.function('List', [ce.function('Equal', [potential, c])]);
+}
+
+function isClairautLinearTerm(
+  term: Expression,
+  dependentName: string,
+  independentName: string
+): boolean {
+  const x = term.engine.symbol(independentName);
+
+  if (
+    isFunction(term, 'Multiply') &&
+    term.ops.length === 2 &&
+    term.ops.some((op) => op.isSame(x)) &&
+    term.ops.some((op) =>
+      isDerivativeOfDependent(op, dependentName, independentName)
+    )
+  )
+    return true;
+
+  return (
+    isFunction(term, 'Multiply') &&
+    term.ops.length === 3 &&
+    term.ops.some((op) => op.isSame(1)) &&
+    term.ops.some((op) => op.isSame(x)) &&
+    term.ops.some((op) =>
+      isDerivativeOfDependent(op, dependentName, independentName)
+    )
+  );
+}
+
+function solveClairautFirstOrder(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  if (!isFunction(equation, 'Equal')) return undefined;
+
+  const ce = equation.engine;
+  const [lhs, rhs] = equation.op1.isSame(dependentCall)
+    ? [equation.op1, equation.op2]
+    : equation.op2.isSame(dependentCall)
+    ? [equation.op2, equation.op1]
+    : [undefined, undefined];
+  if (!lhs || !rhs) return undefined;
+
+  const terms = isFunction(rhs, 'Add') ? rhs.ops : [rhs];
+  const linearTerms = terms.filter((term) =>
+    isClairautLinearTerm(term, dependentName, independentName)
+  );
+  if (linearTerms.length !== 1) return undefined;
+
+  const restTerms = terms.filter((term) => term !== linearTerms[0]);
+  if (restTerms.length === 0) return undefined;
+  const rest = structuralSum(ce, restTerms);
+  if (!hasDependentOrDerivative(rest, dependentName, independentName))
+    return undefined;
+
+  const pName = freshSymbolName('dsolvep', collectSymbols(equation));
+  const p = ce.symbol(pName);
+  const restInP = replaceDerivativeOfDependent(
+    rest,
+    dependentName,
+    independentName,
+    1,
+    p
+  ).simplify();
+  if (
+    restInP.has(independentName) ||
+    hasDependentOrDerivative(restInP, dependentName, independentName) ||
+    !restInP.has(pName)
+  )
+    return undefined;
+
+  const [c] = integrationConstants(equation, 1);
+  const solution = c
+    .mul(ce.symbol(independentName))
+    .add(replaceSymbol(restInP, pName, c))
+    .simplify();
+  return ceListSolution(dependentCall, solution);
+}
+
+function besselOrderFromSquare(expr: Expression): Expression | undefined {
+  const ce = expr.engine;
+  const square = expr.simplify();
+  if (square.isSame(0)) return ce.Zero;
+  if (isFunction(square, 'Power') && square.op2.isSame(2)) return square.op1;
+  return ce.function('Sqrt', [square]).simplify();
+}
+
+function solveSecondOrderBesselFamily(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const collected = equationDerivativeCoefficients(
+    equation,
+    dependentName,
+    independentName
+  );
+  if (!collected.rest.isSame(0)) return undefined;
+  for (const order of collected.coefficients.keys()) {
+    if (order > 2) return undefined;
+  }
+
+  const ce = equation.engine;
+  const x = ce.symbol(independentName);
+  const xSquared = x.pow(2).simplify();
+  const second = (collected.coefficients.get(2) ?? ce.Zero).simplify();
+  const first = (collected.coefficients.get(1) ?? ce.Zero).simplify();
+  const dependent = (collected.coefficients.get(0) ?? ce.Zero).simplify();
+
+  if (!second.isSame(xSquared) || !first.isSame(x)) return undefined;
+
+  const ordinaryOrderSquared = xSquared.sub(dependent).simplify();
+  if (
+    !ordinaryOrderSquared.has(independentName) &&
+    !hasDependentOrDerivative(
+      ordinaryOrderSquared,
+      dependentName,
+      independentName
+    )
+  ) {
+    const order = besselOrderFromSquare(ordinaryOrderSquared);
+    if (!order) return undefined;
+    const [c1, c2] = integrationConstants(equation, 2);
+    return ceListSolution(
+      dependentCall,
+      c1
+        .mul(ce.function('BesselJ', [order, x]))
+        .add(c2.mul(ce.function('BesselY', [order, x])))
+        .simplify()
+    );
+  }
+
+  const modifiedOrderSquared = dependent.neg().sub(xSquared).simplify();
+  if (
+    !modifiedOrderSquared.has(independentName) &&
+    !hasDependentOrDerivative(
+      modifiedOrderSquared,
+      dependentName,
+      independentName
+    )
+  ) {
+    const order = besselOrderFromSquare(modifiedOrderSquared);
+    if (!order) return undefined;
+    const [c1, c2] = integrationConstants(equation, 2);
+    return ceListSolution(
+      dependentCall,
+      c1
+        .mul(ce.function('BesselI', [order, x]))
+        .add(c2.mul(ce.function('BesselK', [order, x])))
+        .simplify()
+    );
+  }
+
+  return undefined;
 }
 
 function secondOrderConstantCoefficientBasis(
@@ -2485,9 +2866,7 @@ export function dSolve(
 
   const { dependentName, independentName, dependentCall } = names;
   const ce = equation.engine;
-  const finalize = (
-    solution: Expression | undefined
-  ): Expression | undefined =>
+  const finalize = (solution: Expression | undefined): Expression | undefined =>
     solution
       ? applyScalarConditions(
           solution,
@@ -2512,6 +2891,14 @@ export function dSolve(
     independentName
   );
   if (cauchyEuler) return finalize(cauchyEuler);
+
+  const besselFamily = solveSecondOrderBesselFamily(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (besselFamily) return finalize(besselFamily);
 
   const higherOrderNonhomogeneous =
     solveHigherOrderNonhomogeneousConstantCoefficient(
@@ -2541,6 +2928,14 @@ export function dSolve(
   );
   if (secondOrder) return finalize(secondOrder);
 
+  const clairaut = solveClairautFirstOrder(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (clairaut) return finalize(clairaut);
+
   const separable = solveSeparableFirstOrder(
     problem.equation,
     dependentCall,
@@ -2556,6 +2951,22 @@ export function dSolve(
     independentName
   );
   if (bernoulli) return finalize(bernoulli);
+
+  const riccati = solveRiccatiWithConstantParticular(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (riccati) return finalize(riccati);
+
+  const constantCoefficientAbel = solveConstantCoefficientAbelFirstKind(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (constantCoefficientAbel) return finalize(constantCoefficientAbel);
 
   const homogeneousFirstOrder = solveHomogeneousFirstOrder(
     problem.equation,

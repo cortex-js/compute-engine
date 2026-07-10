@@ -112,6 +112,34 @@ export function explicitDerivativeRhs(
   return undefined;
 }
 
+export function replaceDerivativeOfDependent(
+  expr: Expression,
+  dependentName: string,
+  independentName: string,
+  order: number,
+  replacement: Expression
+): Expression {
+  const derivativeOrder = derivativeOrderOfDependent(
+    expr,
+    dependentName,
+    independentName
+  );
+  if (derivativeOrder === order) return replacement;
+  if (!isFunction(expr)) return expr;
+  return expr.engine._fn(
+    expr.operator,
+    expr.ops.map((op) =>
+      replaceDerivativeOfDependent(
+        op,
+        dependentName,
+        independentName,
+        order,
+        replacement
+      )
+    )
+  );
+}
+
 function dependentNames(dependent: Expression): string[] | undefined {
   if (isSymbol(dependent)) return [dependent.symbol];
   if (!isFunction(dependent, 'List')) return undefined;

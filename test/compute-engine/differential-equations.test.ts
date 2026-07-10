@@ -341,6 +341,46 @@ describe('DSolve', () => {
     expect(text).not.toContain('y_value');
   });
 
+  test('solves Clairaut first-order equations', () => {
+    const equation = [
+      'Equal',
+      ['y', 'x'],
+      [
+        'Add',
+        ['Multiply', 'x', ['D', ['y', 'x'], 'x']],
+        ['Power', ['D', ['y', 'x'], 'x'], 2],
+      ],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1"^2 + "c_1" * x]`
+    );
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 2, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves Clairaut equations with non-polynomial derivative terms', () => {
+    const equation = [
+      'Equal',
+      ['y', 'x'],
+      [
+        'Add',
+        ['Multiply', 'x', ['D', ['y', 'x'], 'x']],
+        ['Sin', ['D', ['y', 'x'], 'x']],
+      ],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * x + sin("c_1")]`
+    );
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 0.5, x: 0.75 })
+    ).toBe(true);
+  });
+
   test('solves first-order homogeneous equations by substitution', () => {
     const equation = [
       'Equal',
@@ -384,6 +424,25 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
+  test('solves Riccati equations with a constant particular solution', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      [
+        'Add',
+        ['Multiply', 'x', ['Power', ['y', 'x'], 2]],
+        ['Multiply', ['Subtract', 1, ['Multiply', 2, 'x']], ['y', 'x']],
+        ['Subtract', 'x', 1],
+      ],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.operator).toBe('List');
+    expect(
+      verifyEquationSolution(equation, solution, { c_1: 2, x: 0.75 })
+    ).toBe(true);
+  });
+
   test('solves Bernoulli equations with a Divide linear term', () => {
     // `y' − y/x = y²` — the linear term stays a `Divide` after canonicalization.
     const equation = [
@@ -397,6 +456,33 @@ describe('DSolve', () => {
     expect(
       verifyEquationSolution(equation, solution, { c_1: 3, x: 0.75 })
     ).toBe(true);
+  });
+
+  test('solves constant-coefficient Abel first-kind equations implicitly', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Add', ['Power', ['y', 'x'], 3], ['Power', ['y', 'x'], 2]],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.operator).toBe('List');
+    expect(solution.toString()).toContain('y(x)');
+    expect(solution.toString()).toContain('c_1');
+    expect(solution.toString()).toContain('x');
+  });
+
+  test('routes cubic-linear Abel equations through the Bernoulli reduction', () => {
+    const equation = [
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Add', ['Power', ['y', 'x'], 3], ['y', 'x']],
+    ];
+    const solution = dsolve(equation);
+
+    expect(solution.operator).toBe('List');
+    expect(solution.toString()).toContain('y(x)');
+    expect(solution.toString()).toContain('c_1');
   });
 
   test('solves exact first-order equations implicitly', () => {
@@ -852,6 +938,48 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
+  test('solves the ordinary Bessel equation', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['Multiply', ['Power', 'x', 2], ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['Multiply', 'x', ['D', ['y', 'x'], 'x']],
+        ['Multiply', ['Subtract', ['Power', 'x', 2], 4], ['y', 'x']],
+      ],
+      0,
+    ];
+    const result = dsolve(equation);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * BesselJ(2, x) + "c_2" * BesselY(2, x)]`
+    );
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 1, c_2: 2, x: 1.5 })
+    ).toBe(true);
+  });
+
+  test('solves the modified Bessel equation', () => {
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['Multiply', ['Power', 'x', 2], ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['Multiply', 'x', ['D', ['y', 'x'], 'x']],
+        ['Negate', ['Multiply', ['Add', ['Power', 'x', 2], 1], ['y', 'x']]],
+      ],
+      0,
+    ];
+    const result = dsolve(equation);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * BesselI(1, x) + "c_2" * BesselK(1, x)]`
+    );
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 1, c_2: 2, x: 1.5 })
+    ).toBe(true);
+  });
+
   test('stays inert when variation of parameters cannot integrate', () => {
     const result = dsolve([
       'Equal',
@@ -1066,8 +1194,8 @@ describe('DSolve', () => {
           rest.length === 0
             ? engine.One
             : rest.length === 1
-              ? rest[0]
-              : engine.function('Multiply', rest);
+            ? rest[0]
+            : engine.function('Multiply', rest);
         return { ...found, coef };
       }
       return undefined;
@@ -1247,7 +1375,11 @@ describe('DSolve', () => {
       'Equal',
       [
         'Subtract',
-        ['Subtract', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['D', ['y', 'x'], 'x']],
+        [
+          'Subtract',
+          ['D', ['D', ['y', 'x'], 'x'], 'x'],
+          ['D', ['y', 'x'], 'x'],
+        ],
         ['y', 'x'],
       ],
       0,
