@@ -33,6 +33,8 @@ import {
   containsHyperbolic,
   expandHyperbolicToExp,
   containsInertSinCos,
+  containsInertTrig,
+  inverseSquareTrigFactor,
   expandTrigToExp,
   expandRationalOverLinears,
   polyDegreeX,
@@ -77,6 +79,9 @@ const NO_COFN = process.env.RUBI_NO_COFN !== undefined;
 // RUBI_NO_SICI: disable the R15 rational×sin/cos(linear) → Si/Ci
 // partial-fraction fallback (A/B measuring its effect on the 4.1 benchmark).
 const NO_SICI = process.env.RUBI_NO_SICI !== undefined;
+// RUBI_NO_TRIGSQ: disable the R16 poly×csc(u)²/sec(u)² integration-by-parts
+// fallback (A/B measuring its effect on the 4.1.10 benchmark).
+const NO_TRIGSQ = process.env.RUBI_NO_TRIGSQ !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -690,6 +695,21 @@ export class RubiDriver {
       }
     }
 
+    // ---- poly × csc(u)²/sec(u)² → by-parts fallback (R16) -------------
+    // `∫P(x)·csc(e+f·x)² dx` (and sec²), P a polynomial in x. The elementary
+    // reduction `∫P·csc² = −P·cot/f + (1/f)∫P′·cot` (and `∫P·sec² = P·tan/f −
+    // (1/f)∫P′·tan`) closes when the residual `∫P′·cot` / `∫P′·tan` closes —
+    // for P linear (P′ constant) that residual is `∫cot`/`∫tan`, which the
+    // bundled rules integrate to `ln(sin)` / `−ln(cos)`. Rubi routes these
+    // through a by-parts rule on the reciprocal-square trig; CE has the poly×sin
+    // by-parts but not the reciprocal-square analog, so `(c+d·x)·csc²` distributes
+    // and strands its `x·csc²` piece. Fail-closed with a numeric self-check;
+    // higher-degree P whose `∫P′·cot` needs PolyLog stays cleanly unsolved.
+    if (this.trigActive && !NO_TRIGSQ) {
+      const F = this.polyTrigSquaredByParts(integrand, variable, depth);
+      if (F !== null) return F;
+    }
+
     // ---- rational × sin/cos(linear) → Si/Ci fallback (R15) ------------
     // `∫ R(x)·sin(c+d·x) dx` (and cos) where R is a rational function of x
     // whose x-dependent denominator factors are all LINEAR. Rubi closes these
@@ -758,6 +778,83 @@ export class RubiDriver {
       return this.cleanExpansionResult(
         ratio.mul(inner.subs({ [variable]: v }))
       );
+    } catch {
+      return null;
+    }
+  }
+
+  /** R16: `∫ P(x)·csc(e+f·x)² dx` (and sec²) with P a trig-free polynomial in x,
+   * closed by the elementary integration-by-parts reduction
+   *   ∫P·csc(u)² = −P·cot(u)/f + (1/f)∫P′·cot(u) dx
+   *   ∫P·sec(u)² =  P·tan(u)/f − (1/f)∫P′·tan(u) dx
+   * (u = e+f·x, f = du/dx), routing the residual `∫P′·cot`/`∫P′·tan` back through
+   * the driver — for P linear it bottoms out in `∫cot`/`∫tan` (bundled). Reached
+   * only after every rule declined (CE has the poly×sin by-parts but not the
+   * reciprocal-square analog, so `(c+d·x)·csc²` distributes and strands its
+   * `x·csc²` piece). Fail-closed: returns null unless the residual closes AND
+   * D(F) matches the integrand numerically, so a higher-degree P whose residual
+   * needs PolyLog stays cleanly unsolved. Body wrapped in try/catch → null. */
+  private polyTrigSquaredByParts(
+    integrand: Expression,
+    variable: string,
+    depth: number
+  ): Expression | null {
+    const ce = this.ce;
+    const x = ce.symbol(variable);
+    // Cheap syntactic pre-filter: bail before the (allocating) deactivate +
+    // normal-form pass unless a reciprocal-square trig candidate literally
+    // occurs — a `Csc/Sec[…]²` or a `Sin/Cos[…]^-2` node. Keeps the fallback a
+    // near-zero-cost no-op on the vast majority of trig subproblems (otherwise
+    // the per-subproblem normalization overhead tips borderline slow-verifiers
+    // over their deadline). Both active and inert heads are matched.
+    if (!hasReciprocalSquareTrigCandidate(integrand)) return null;
+    try {
+      const inert = toTimesPower(ce, deactivateTrig(ce, integrand));
+      if (inert.operator !== 'Multiply' || !inert.ops) return null;
+      // Exactly one reciprocal-square trig factor of a LINEAR argument.
+      let matched: { kind: 'sin' | 'cos'; arg: Expression } | null = null;
+      const rest: Expression[] = [];
+      for (const f of inert.ops) {
+        const m = matched === null ? inverseSquareTrigFactor(f, variable) : null;
+        if (m !== null) matched = m;
+        else rest.push(f);
+      }
+      if (matched === null) return null;
+      // Every other factor must be trig-free.
+      if (rest.some((f) => containsInertTrig(f))) return null;
+      const P = recanonicalize(
+        ce,
+        rest.length === 0 ? ce.One : ce._fn('Multiply', rest)
+      );
+      // P must be a polynomial in x (so the P′ recursion terminates).
+      if (polyCoeffsX(P, variable) === null) return null;
+      const u = matched.arg;
+      const f = ce.function('D', [u, x]).evaluate();
+      if (f.isSame(0) || f.has(variable)) return null;
+      // V = ∫T² dx : sin^-2 → −cot(u)/f ; cos^-2 → tan(u)/f.
+      const V =
+        matched.kind === 'sin'
+          ? ce.function('Cot', [u]).neg().div(f)
+          : ce.function('Tan', [u]).div(f);
+      const PV = ce.function('Multiply', [P, V]);
+      const Pp = ce.function('D', [P, x]).evaluate();
+      let F: Expression;
+      if (Pp.isSame(0)) {
+        F = PV;
+      } else {
+        const inner = this.intRec(
+          recanonicalize(ce, ce.function('Multiply', [Pp, V])),
+          variable,
+          depth + 1
+        );
+        if (inner === null || inner.has('Integrate')) return null;
+        F = ce.function('Subtract', [PV, inner]);
+      }
+      F = this.cleanExpansionResult(F);
+      if (F.has('Integrate')) return null;
+      if (!antiderivativeVerifies(ce, activateTrig(ce, F), integrand, variable))
+        return null;
+      return F;
     } catch {
       return null;
     }
@@ -858,6 +955,34 @@ export class RubiDriver {
     }
     return foldLnExponentialE(ce, simplified);
   }
+}
+
+/** Fast syntactic pre-filter for the R16 poly×csc²/sec² by-parts fallback: does
+ * a reciprocal-square trig node (`Csc/csc[…]²`, `Sec/sec[…]²`, or `Sin/sin[…]^-2`,
+ * `Cos/cos[…]^-2`) literally occur? Purely structural (no allocation / no
+ * deactivation) so the fallback stays a near-zero-cost no-op off its shape. */
+function hasReciprocalSquareTrigCandidate(e: Expression): boolean {
+  if (e.operator === 'Power' && e.ops && e.ops.length === 2) {
+    const base = e.ops[0].operator;
+    const exp = e.ops[1];
+    if (
+      (base === 'Csc' ||
+        base === 'csc' ||
+        base === 'Sec' ||
+        base === 'sec') &&
+      exp.isSame(2)
+    )
+      return true;
+    if (
+      (base === 'Sin' ||
+        base === 'sin' ||
+        base === 'Cos' ||
+        base === 'cos') &&
+      exp.isSame(-2)
+    )
+      return true;
+  }
+  return (e.ops ?? []).some(hasReciprocalSquareTrigCandidate);
 }
 
 /** Numeric self-check for the R15 fallback: verify D(F) ≈ integrand by CENTRAL

@@ -491,7 +491,7 @@ gate each other.
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 6 (Hyperbolics), 4.1 Sine, 4.3 Tangent, and
 4.5 Secant** — 4,831 rules, 5.29 MB (CI has a bundle-freshness gate). Scores
-(seed 5): **4.1 Sine 106/120 and 321/400 (4.1.11 file 71/113)**, **4.3
+(seed 5): **4.1 Sine 106/120 and 322/400 (4.1.11 file 71/113)**, **4.3
 Tangent 70/120**, **4.5 Secant 69/120**, ch1 exhaustive ≈90–91%, ch2 ≈72% /
 ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
 **Genuine wrongs are 0 across all suites** — every flagged "wrong" is a
@@ -511,11 +511,13 @@ R13 it also keeps REFLECTION-produced `csc[·+π/2]` heads raw — the +π/2
 shift signature — so pure-sec binomials `(a+b·sec)^n` reach the 4.5.1
 csc-binomial rules, with a `(a+b·sec²)^p`-Power exception routing 4.5.7 to
 the sin/cos rules), and
-three driver fallbacks (trig→exp with a numeric-evaluability self-check;
+four driver fallbacks (trig→exp with a numeric-evaluability self-check;
 R15's rational×sin/cos(linear) → Si/Ci partial-fraction split with a
-central-difference D-self-check; native-rational). A/B env switches:
+central-difference D-self-check; R16's poly×csc²/sec²(linear) by-parts;
+native-rational). A/B env switches:
 `RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`, `RUBI_NO_COFN`, `RUBI_NO_COFN_COT`,
-`RUBI_NO_SKELETON`, `RUBI_NO_SICI`, `RUBI_NO_SECBIN`. Per-rung blow-by-blow
+`RUBI_NO_SKELETON`, `RUBI_NO_SICI`, `RUBI_NO_SECBIN`, `RUBI_NO_TRIGSQ`.
+Per-rung blow-by-blow
 (R1–R15, incl. the cofunction-audit table and each rung's dead ends):
 `docs/rubi/RUBI.md` §5; the rest is git history.
 
@@ -554,13 +556,19 @@ climb while genuine `wrong`/`not-evaluable` stay 0 — but see the R2 note on
 hypergeometric verification false-wrongs). Diagnose any stall per the Method
 note — trace the residual integrand, don't trust the predicate census.
 
-- **R16 — the 4.1.10 `(c+d·x)^m·trig/(a+b·sin)` Si/Ci chains**
-  (#30/#112/#197/#294). Confirmed by R15 to be a genuinely different
-  mechanism from the rational-in-x family R15 closed: the denominator is
-  `(a+b·sin(e+f·x))`, not a rational in x, so R15's trig-free-rational gate
-  declines them (correctly — cleanly unsolved). Rubi routes them through
-  `ExpandIntegrand`/`E^(i·x)` rewrites on active linear-arg Sin, up to 48-step
-  chains; needs its own scoped routing.
+- **R17 — bundle the PolyLog-producing rule families** (closes the R16
+  residual #112/#197/#294 — `(c+d·x)^m·trig/(a+b·sin)` chains whose results
+  carry `Log[complex]` + `PolyLog[2..4]`; the numeric PolyLog kernel landed
+  2026-07-09, so the results now VERIFY, but the symbolic rules that PRODUCE
+  PolyLog are not bundled — confirmed `∫x³·Eˣ/(a+b·Eˣ)` does not close).
+  Shopping list from the R16 Rubi traces: (a) the missing Ch2 `2.2
+  (c+d x)^m (F^(g(e+f x)))^n (a+b …)^p` reductions (`∫x^m·F^{gx}/(a+b·F^{gx})^p`;
+  only 4 of the family are currently bundled; Rubi rule 5030 is the 4.1.10
+  entry point), and (b) the Chapter-3 Logarithms PolyLog producers —
+  sections 3.1.5, 3.2.3, 3.3, 3.4, 3.5 (`∫x^k·Log[a+b·F^{gx}]` → PolyLog
+  telescope). None of Ch3 is bundled today. Then a trig→exp routing fallback
+  (single-exponential normalization + partial fractions in `y=E^{iw}`, gated
+  by the fail-closed numeric self-check) closes all three targets.
 - **R3′ — residual half-integer/elliptic chains.** #604/#609/#1395 were closed
   by R9's cosine shift; what remains is the genuinely deep tail: #53 (23-step
   half-integer Fresnel chain), #248 (48 steps), #294, plus the composite

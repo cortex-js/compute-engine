@@ -3,7 +3,7 @@
 **Date:** 2026-06-10 (feasibility); last status update 2026-07-09.
 **Status:** shipped bundle = **Chapters 1, 2, 6 + 4.1 Sine + 4.3 Tangent +
 4.5 Secant** (4,831 rules, 5.29 MB). Chapter-1 exhaustive ≈90–91%; ch2 ≈72% /
-ch6 ≈45% effective; **4.1 Sine 106/120 and 321/400 (seed 5; 4.1.11 file
+ch6 ≈45% effective; **4.1 Sine 106/120 and 322/400 (seed 5; 4.1.11 file
 71/113); 4.3 Tangent 70/120; 4.5 Secant 69/120; genuine wrongs 0 across all
 suites** (all flagged "wrongs" are documented verification false-wrong
 classes — see the ROADMAP §R state note).
@@ -13,11 +13,12 @@ cofunction product clauses, the ch1-foundation benchmark fix,
 routing, the trig→exp fallback, and argument-aware `deactivateTrig`; the
 2026-07-09 rungs added R15 (rational×sin(linear) → Si/Ci partial-fraction
 fallback), R12 (4.3 Tangent bundled, cot→tan shift default-ON behind
-`RUBI_NO_COFN_COT`), and R13 (sec-binomial routing: reflected `csc[·+π/2]`
-kept raw through `reciprocalToPower`, behind `RUBI_NO_SECBIN`).
-**Next rungs live in ROADMAP §R** (R16 the 4.1.10
-`(a+b·sin)`-denominator Si/Ci chains, R3′ deep chains, R5;
-then the Ch6 tail R6–R8). The §1–§4 analysis below is
+`RUBI_NO_COFN_COT`), R13 (sec-binomial routing: reflected `csc[·+π/2]`
+kept raw through `reciprocalToPower`, behind `RUBI_NO_SECBIN`), and R16
+(poly×csc²/sec² by-parts fallback behind `RUBI_NO_TRIGSQ`; its triage mapped
+the PolyLog-bundling residual → R17).
+**Next rungs live in ROADMAP §R** (R17 bundle the Ch2-2.2/Ch3 PolyLog
+producers, R3′ deep chains, R5; then the Ch6 tail R6–R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
 phasing status, and the project memory (`project_rubi.md`) has the
 session-by-session log.
@@ -1004,6 +1005,47 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
   - **Residual 4.5 tail (45 unsolved at 120):** `(d·tan)^n(a+b·sec)^m` mixed
     cross-pair families (4.5.1.4), half-integer/elliptic `√(a+b·sec)` chains,
     `(g·sec)^p` triple products — different mechanisms, outside R13's scope.
+- **Phase R16 — poly×csc²/sec² by-parts + the PolyLog-residual map LANDED
+  (2026-07-09).** Target was the 4.1.10 `(c+d·x)^m·trig/(a+b·sin)` four
+  (#30/#112/#197/#294). Outcome: **#30 closed** (the only elementary member);
+  #112/#197/#294 triaged to a precisely-mapped bundling dependency (→ R17).
+  - **#30 triage finding.** The 2-step chain `∫(c+dx)·csc²` was blocked by ONE
+    missing capability: CE's by-parts reduction exists for positive sin/cos
+    powers but not reciprocal-square trig (`∫xᵐ·csc²`, `∫xᵐ·cot`, `∫xᵐ·csc`
+    all failed while `∫xᵐ·sin` worked), even though the base cases `∫csc²`
+    and `∫cot` close.
+  - **Mechanism.** `polyTrigSquaredByParts` driver fallback (before the R15
+    Si/Ci fallback; `RUBI_NO_TRIGSQ` A/B): for exactly one csc²/sin⁻²/sec²/
+    cos⁻² factor of a LINEAR argument times a trig-free polynomial,
+    `∫P·csc² = −P·cot/f + (1/f)·∫P′·cot`, recursing through `intRec`; linear P
+    bottoms out in the bundled `∫cot`→`ln(sin)`; higher-degree P (residual
+    `∫xᵏ·cot` → dilog) returns null → cleanly unsolved. Guarded by a cheap
+    O(nodes) syntactic pre-filter (`hasReciprocalSquareTrigCandidate`) and the
+    R15 central-difference D-self-check.
+  - **PERF DEAD END (the lesson of the rung):** the first version without the
+    pre-filter regressed 3 non-target slow-verifiers (#1395/#706/#1466)
+    correct→inconclusive — the per-subproblem `deactivateTrig`+`toTimesPower`
+    overhead tipped them past their verify deadline. Cheap syntactic
+    pre-filters are MANDATORY for per-intRec fallback gates.
+  - **Numbers (seed 5, `--rubi`).** 4.1 Sine 400: **321 → 322** (+1 = #30, the
+    SOLE outcome diff across every suite; A/B byte-identical elsewhere); s120,
+    4.3 (70), 4.5 (69), ch1/ch2/ch6 all unchanged; 3 documented s400
+    false-wrongs unchanged; genuine wrongs 0. Win boundary (probed):
+    linear-poly×csc²/sin⁻² closes; `(c+dx)²·csc²`/`x²·sec²` correctly decline.
+  - **The residual map (corrects the R16-planning premise).** #112/#197/#294
+    results carry `Log[complex]`+`PolyLog[2..4]` — and the rules that PRODUCE
+    PolyLog are NOT in the bundle (the planning note "the Ch2 PolyLog rules
+    are bundled" was wrong: PolyLog production lives in the unbundled Ch3
+    Logarithm sections; confirmed `∫x³·Eˣ/(a+b·Eˣ)` does not close). The
+    numeric PolyLog kernel (landed separately the same day) makes these forms
+    VERIFIABLE — what's missing is symbolic production. Shopping list → R17:
+    Ch2 2.2 `∫x^m·F^{gx}/(a+b·F^{gx})^p` reductions (rule 5030 is the 4.1.10
+    entry point) + Ch3 sections 3.1.5 / 3.2.3 / 3.3 / 3.4 / 3.5 (the
+    `∫x^k·Log[a+b·F^{gx}]` → PolyLog telescope), then a trig→exp
+    single-exponential normalization fallback.
+  - **Tests.** +11 in `rubi-utils.test.ts` (8 structural-gate unit + 3
+    end-to-end D-verified); the two csc² close tests fail under
+    `RUBI_NO_TRIGSQ=1`.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

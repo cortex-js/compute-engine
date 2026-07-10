@@ -20,6 +20,8 @@ import {
   sinCosArgNonlinearExpandableQ,
   numericallyEvaluable,
   expandRationalOverLinears,
+  inverseSquareTrigFactor,
+  containsInertTrig,
 } from '../../src/compute-engine/rubi/rubi-utils';
 import { loadIntegrationRules } from '../../src/integration-rules';
 import type { Ctx } from '../../src/compute-engine/rubi/rubi-utils';
@@ -832,4 +834,87 @@ describe('R15 end-to-end Si/Ci partial-fraction routing (shipped bundle)', () =>
     expect(closesLatex('\\frac{\\sin(1+2 x)}{x(3+2 x)}')).toBe(true));
   test('declines ∫sin(1+2x)/(2+3x²) (#61-shape, complex-Si) — stays inert', () =>
     expect(stayInert('\\frac{\\sin(1+2 x)}{2+3 x^2}')).toBe(true));
+});
+
+// R16: poly×csc(u)²/sec(u)² → integration-by-parts fallback. The structural
+// matcher recognizes the reciprocal-square trig factor (both the reciprocal-head
+// power `csc²` and the negative sine power `sin^-2` forms) of a LINEAR argument.
+describe('inverseSquareTrigFactor (R16 structural matcher)', () => {
+  const arg = ['Add', 'a', ['Multiply', 'b', 'x']] as any;
+  const inert = (mj: any) => deactivateTrig(ce, ce.box(mj));
+
+  test('matches csc(a+bx)² as kind sin', () => {
+    const m = inverseSquareTrigFactor(inert(['Power', ['Csc', arg], 2]), 'x');
+    expect(m?.kind).toBe('sin');
+  });
+  test('matches sin(a+bx)^-2 as kind sin', () => {
+    const m = inverseSquareTrigFactor(inert(['Power', ['Sin', arg], -2]), 'x');
+    expect(m?.kind).toBe('sin');
+  });
+  test('matches sec(a+bx)² as kind cos', () => {
+    const m = inverseSquareTrigFactor(inert(['Power', ['Sec', arg], 2]), 'x');
+    expect(m?.kind).toBe('cos');
+  });
+  test('matches cos(a+bx)^-2 as kind cos', () => {
+    const m = inverseSquareTrigFactor(inert(['Power', ['Cos', arg], -2]), 'x');
+    expect(m?.kind).toBe('cos');
+  });
+  test('declines csc(a+bx) (power 1, not squared)', () =>
+    expect(inverseSquareTrigFactor(inert(['Csc', arg]), 'x')).toBeNull());
+  test('declines csc(a+bx²)² (nonlinear argument)', () =>
+    expect(
+      inverseSquareTrigFactor(
+        inert(['Power', ['Csc', ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 2]]]], 2]),
+        'x'
+      )
+    ).toBeNull());
+  test('declines csc(a+bx)³ (wrong power)', () =>
+    expect(inverseSquareTrigFactor(inert(['Power', ['Csc', arg], 3]), 'x')).toBeNull());
+  test('containsInertTrig sees cot/csc, not a bare polynomial', () => {
+    expect(containsInertTrig(inert(['Cot', arg]))).toBe(true);
+    expect(containsInertTrig(ce.box(['Add', 'c', ['Multiply', 'd', 'x']]))).toBe(false);
+  });
+});
+
+// R16 end-to-end: the shipped bundle now closes `∫P(x)·csc(linear)²` /
+// `∫P(x)·sec(linear)²` (the `(c+d·x)·csc²` #30-shape) via the by-parts reduction,
+// D-verified with concrete integer parameters (avoiding the reserved `e`/`i`).
+// These two close tests FAIL under `RUBI_NO_TRIGSQ=1` — they exercise the R16
+// rung, not a bundled rule.
+describe('R16 end-to-end poly×csc²/sec² by-parts (shipped bundle)', () => {
+  let eng: ComputeEngine;
+  beforeAll(() => {
+    eng = new ComputeEngine();
+    loadIntegrationRules(eng);
+  });
+  const closesLatex = (latex: string): boolean => {
+    const integ = eng.parse(latex);
+    const F = eng.box(['Integrate', integ, 'x']).evaluate();
+    if (F.operator === 'Integrate' || F.has('Integrate')) return false;
+    let ok = 0;
+    for (const xv of [0.4, 0.9, 1.3, 1.7]) {
+      const h = 1e-4;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      const d = (fp(xv + h) - fp(xv - h)) / (2 * h);
+      const f = integ.subs({ x: xv }).N().re as number;
+      if (typeof d !== 'number' || typeof f !== 'number') return false;
+      if (Math.abs(d - f) > 1e-4 * Math.max(1, Math.abs(f))) return false;
+      ok++;
+    }
+    return ok >= 3;
+  };
+  const stayInert = (latex: string): boolean => {
+    const F = eng.box(['Integrate', eng.parse(latex), 'x']).evaluate();
+    return F.operator === 'Integrate' || F.has('Integrate');
+  };
+
+  // Both close tests are gated on the R16 rung: `∫x·csc(linear)²` stays inert
+  // without the fallback (unlike sec², which the existing cofunction/reciprocal
+  // route already closes) — so these two FAIL under `RUBI_NO_TRIGSQ=1`.
+  test('closes ∫(3+2x)·csc(1+2x)² (#30-shape)', () =>
+    expect(closesLatex('(3+2 x) \\csc(1+2 x)^2')).toBe(true));
+  test('closes ∫x·csc(2+x)² (bare monomial)', () =>
+    expect(closesLatex('x \\csc(2+x)^2')).toBe(true));
+  test('leaves ∫x³·csc(1+2x) (power-1, needs PolyLog) cleanly unsolved', () =>
+    expect(stayInert('x^3 \\csc(1+2 x)')).toBe(true));
 });

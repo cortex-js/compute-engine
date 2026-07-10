@@ -4010,6 +4010,38 @@ export function containsInertSinCos(u: Expression): boolean {
   return (u.ops ?? []).some(containsInertSinCos);
 }
 
+/** True if any inert trig head (sin/cos/tan/cot/sec/csc) appears. */
+export function containsInertTrig(u: Expression): boolean {
+  if (INERT_TRIG.has(u.operator)) return true;
+  return (u.ops ?? []).some(containsInertTrig);
+}
+
+/** R16 structural matcher: recognize a single factor that is the reciprocal
+ *  SQUARE of a sine or cosine of a LINEAR argument — `csc(u)²` / `sin(u)^-2`
+ *  (kind `'sin'`, antiderivative `-cot(u)/b`) or `sec(u)²` / `cos(u)^-2`
+ *  (kind `'cos'`, antiderivative `tan(u)/b`), with `u` linear in `x`. Returns
+ *  `{ kind, arg }` or null. The factor must be a fully deactivated inert head
+ *  (lowercase); both the reciprocal-head power (`csc²`) and the negative sine
+ *  power (`sin^-2`) forms are accepted, since the reciprocal normalization may
+ *  or may not have rewritten it before the fallback runs. Used by the driver's
+ *  `∫P(x)·csc(u)²` / `∫P(x)·sec(u)²` integration-by-parts fallback (R16). */
+export function inverseSquareTrigFactor(
+  f: Expression,
+  x: string
+): { kind: 'sin' | 'cos'; arg: Expression } | null {
+  if (f.operator !== 'Power' || !f.ops || f.ops.length !== 2) return null;
+  const [base, exp] = f.ops;
+  if (!base.ops || base.ops.length !== 1) return null;
+  const arg = base.ops[0];
+  if (polyDegreeX(arg, x) !== 1) return null;
+  const h = base.operator;
+  if ((h === 'csc' && exp.isSame(2)) || (h === 'sin' && exp.isSame(-2)))
+    return { kind: 'sin', arg };
+  if ((h === 'sec' && exp.isSame(2)) || (h === 'cos' && exp.isSame(-2)))
+    return { kind: 'cos', arg };
+  return null;
+}
+
 /** Driver fallback: rewrite a nonlinear-argument trig integrand to exponential
  *  form and expand it into a sum, so the bundled Chapter-2 exponential rules
  *  (incl. the incomplete-Γ kernel) close each `coef·xᵏ·E^(k·xⁿ)` term. The
