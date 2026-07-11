@@ -1011,6 +1011,74 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     });
   });
 
+  // R29: algebraic-in-hyperbolic substitution plumbing (RUBI.md §5, Phase R29;
+  // driver `algebraicHyperbolicSub` + rubi-utils `algebraicHyperbolicSubstitutions`).
+  // An integrand algebraic (half-integer power) in one hyperbolic family with a
+  // common linear argument v — `(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh²)`, half-integer
+  // hyperbolic powers — is not a rational function of e^v, so the exp-substitution
+  // fallback strands it. Substituting u = Sinh/Cosh/Tanh[v] turns it into
+  // `∫R(u,√(a+b·u²)) du`, closed by the bundled 1.1.2 quadratic-radical rules in
+  // elementary artanh form. The antiderivatives carry ArcTanh of an argument > 1
+  // (complex principal value — R28b), so they are D-verified on Re of a
+  // central-differenced F.N() with symbolic parameters fixed positive.
+  describe('algebraic-in-hyperbolic substitution (Chapter-6, R29)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    ce.timeLimit = 30_000; // ArcTanh/radical pieces are slow under ts-jest
+
+    // Integrate `latex` over x and central-difference Re(F.N()) == integrand at
+    // several sample points, substituting `params` (fixed so the radicands are
+    // positive). Samples stay away from x = 0 (the hyperbolic argument's zero,
+    // where the ArcTanh branch jumps).
+    const verify = (
+      latex: string,
+      params: Record<string, number> = { a: 0.7, b: 1.3 },
+      samples: number[] = [0.35, 0.62, 0.88, 1.15]
+    ) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ ...params, x: v }).N().re as number;
+      let checked = 0;
+      for (const x of samples) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ ...params, x }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        expect(Math.abs(d - f)).toBeLessThan(1e-4 * (1 + Math.abs(f)));
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    };
+
+    // #471-shape: Coth·(a+b·Sinh²)^{3/2} — u=Sinh gives ∫(a+b·u²)^{3/2}/u du.
+    test('∫Coth(x)·(a+b·Sinh(x)²)^{3/2} dx (#471)', () =>
+      verify('\\coth(x)(a+b\\sinh(x)^2)^{3/2}'));
+
+    // #109-shape: Csch/(a+b·Sinh²)^{3/2} — net odd Sinh power, u=Cosh.
+    test('∫Csch(x)/(a+b·Sinh(x)²)^{3/2} dx (#109)', () =>
+      verify('\\frac{\\csch(x)}{(a+b\\sinh(x)^2)^{3/2}}'));
+
+    // #35-shape: 1/(a·Sech²)^{1/2} — the Tanh-substitution path (Sech=√(1−u²)),
+    // u=Tanh gives ∫a^{-1/2}(1−u²)^{-3/2} du → Tanh/√(a·Sech²).
+    test('∫1/(a·Sech(x)²)^{1/2} dx (#35, Tanh path)', () =>
+      verify('\\frac{1}{(a\\sech(x)^2)^{1/2}}', { a: 0.7 }));
+
+    // #11-shape: √(a+b·Csch²) — a bare hyperbolic radical.
+    test('∫√(a+b·Csch(x)²) dx (#11)', () =>
+      verify('(a+b\\csch(x)^2)^{1/2}'));
+
+    // Toggle meaningfulness: `NO_R29` is captured at module load, so this
+    // branches on the env var present at process start — the default suite
+    // proves the closure, a `RUBI_NO_R29=1` run proves it goes inert.
+    test('∫Coth(x)·(a+b·Sinh(x)²)^{3/2} is gated by RUBI_NO_R29', () => {
+      const F = ce.parse('\\int \\coth(x)(a+b\\sinh(x)^2)^{3/2} \\, dx').evaluate();
+      if (process.env.RUBI_NO_R29 === undefined)
+        expect(F.has('Integrate')).toBe(false);
+      else expect(F.has('Integrate')).toBe(true);
+    });
+  });
+
   // ── Integration variable other than `x` (R26A). ──
   // The bundled rules all carry `variable: "x"`; every RHS references the
   // integration variable as the string token `"x"`. The match env does not

@@ -54,6 +54,8 @@ import {
   polyTrigProductPieces,
   mixedParityRadicalPieces,
   hasMixedParityRadicalCandidate,
+  algebraicHyperbolicSubstitutions,
+  hasAlgebraicHyperbolicCandidate,
   RuleFail,
   Ctx,
   Hooks,
@@ -126,6 +128,14 @@ const NO_R27 = process.env.RUBI_NO_R27 !== undefined;
 // whose residue-class regrouping RHS uses non-functional Sum/Coeff/Expon
 // operators and never fires in CE. A/B measures its 1.1.3 effect.
 const NO_R28 = process.env.RUBI_NO_R28 !== undefined;
+// RUBI_NO_R29: disable the R29 algebraic-in-hyperbolic substitution fallback
+// (an integrand algebraic in one hyperbolic family with a common linear
+// argument `v` → substitute `u = Sinh/Cosh/Tanh[v]`, integrate the resulting
+// `∫R(u,√(a+b·u²)) du` algebraic subproblem via the bundled 1.1.2 quadratic-
+// radical rules, back-substitute). Reaches shapes the exp-substitution
+// fallback strands because they are not rational functions of `e^v`. A/B
+// measures its ch6 effect.
+const NO_R29 = process.env.RUBI_NO_R29 !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -1168,6 +1178,35 @@ export class RubiDriver {
       }
     }
 
+    // ---- algebraic-in-hyperbolic substitution (R29) -------------------------
+    // `∫R(hyp(v)) dx`, the integrand ALGEBRAIC (half-integer power) in a single
+    // hyperbolic family with a common linear argument `v = c+d·x`:
+    // `(a+b·Sinh[v]²)^(p/2)`, `√(a+b·Tanh[v])`, `Csch[v]/(a+b·Sinh[v]²)^(3/2)`,
+    // half-integer hyperbolic powers. These are NOT rational functions of `e^v`,
+    // so the exp-substitution fallback above strands them as inert. Substituting
+    // `u = Sinh[v]` / `Cosh[v]` / `Tanh[v]` turns them into `∫R(u,√(a+b·u²)) du`,
+    // which the bundled 1.1.2 quadratic-radical rules close in elementary
+    // artanh-of-radical form (R28's diagnosis: NOT elliptic, bar #463/#500).
+    // Reached LAST (after every rule and the exp/mixed-parity fallbacks decline),
+    // so it never preempts a cleaner route and currently-solved integrands are
+    // untouched. Cheap O(nodes) pre-filter; fail-closed with a BRANCH-SAFE
+    // (mixed-sign) D-check, so a branch-wrong `u=Cosh` (Sinh=±√(u²−1)) or a
+    // double-radical (elliptic) subproblem stays cleanly unsolved. The
+    // substituted pieces are hyperbolic-free, so they cannot re-enter here.
+    if (!NO_R29 && hasAlgebraicHyperbolicCandidate(integrand)) {
+      this.suppressRecording++;
+      let F: Expression | null;
+      try {
+        F = this.algebraicHyperbolicSub(integrand, variable, depth);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (F !== null) {
+        this.record(entryNode, () => F, 'integrate.hyperbolic-substitution');
+        return F;
+      }
+    }
+
     return null;
   }
 
@@ -1508,6 +1547,46 @@ export class RubiDriver {
     }
   }
 
+  /** R29: `∫R(hyp(v)) dx`, algebraic in one hyperbolic family with a common
+   * linear argument `v` — closed by the substitution `u = Sinh[v]` / `Cosh[v]` /
+   * `Tanh[v]` (see `algebraicHyperbolicSubstitutions`): each candidate rewrites
+   * the integrand to a pure algebraic `∫R(u,√(a+b·u²)) du` (reusing `x` as `u`),
+   * routes it through the driver — the bundled 1.1.2 quadratic-radical rules
+   * close it in elementary artanh form — and back-substitutes `u → hyp(v)`. Try
+   * each candidate; accept the first that closes AND passes the BRANCH-SAFE
+   * (mixed-sign, so a wrong `u=Cosh` branch is caught) numeric D-check against
+   * the ORIGINAL hyperbolic integrand. Fail-closed: a double-radical (elliptic)
+   * or non-verifying subproblem → null. Body try/catch → null. */
+  private algebraicHyperbolicSub(
+    integrand: Expression,
+    variable: string,
+    depth: number
+  ): Expression | null {
+    const ce = this.ce;
+    try {
+      const cands = algebraicHyperbolicSubstitutions(ce, integrand, variable);
+      for (const { g, back } of cands) {
+        const G = this.intRec(recanonicalize(ce, g), variable, depth + 1);
+        if (G === null || G.has('Integrate')) continue;
+        const F = this.cleanExpansionResult(G.subs({ [variable]: back }));
+        if (F.has('Integrate')) continue;
+        // Mixed-sign sample points: a `u=Cosh` substitution loses the sign of
+        // Sinh = √(u²−1) for v<0, so the D-check MUST probe v<0 (negative x with
+        // the seeded c,d) to reject a branch-wrong antiderivative.
+        if (
+          !antiderivativeVerifies(ce, F, integrand, variable, [
+            0.37, -0.53, 0.83, -1.11, 1.29, -0.71, 1.71,
+          ])
+        )
+          continue;
+        return F;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Clean the exponential-fallback antiderivative: collect like terms via a
    * bounded simplify (the raw expansion repeats `c·x` once per exponential
    * term, which otherwise bloats high-degree results past the verifier's leaf
@@ -1606,7 +1685,8 @@ function antiderivativeVerifies(
   ce: ComputeEngine,
   F: Expression,
   integrand: Expression,
-  variable: string
+  variable: string,
+  xs: number[] = [0.37, 0.83, 1.29, 1.71, 2.13]
 ): boolean {
   const target = activateTrig(ce, integrand);
   const known = new Set([
@@ -1637,7 +1717,6 @@ function antiderivativeVerifies(
   collect(F);
   collect(target);
   const h = 1e-4;
-  const xs = [0.37, 0.83, 1.29, 1.71, 2.13];
   const MIN_OK = 3;
   const finite = (v: unknown): v is number =>
     typeof v === 'number' && Number.isFinite(v);

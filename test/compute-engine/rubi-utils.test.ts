@@ -29,6 +29,8 @@ import {
   circularTrigReduce,
   polyTrigProductPieces,
   mixedParityRadicalPieces,
+  algebraicHyperbolicSubstitutions,
+  hasAlgebraicHyperbolicCandidate,
   rationalNormalFormX,
   polyDegreeX,
   RuleFail,
@@ -1561,6 +1563,85 @@ describe('mixedParityRadicalPieces (R28a mixed-parity radical split)', () => {
         'x'
       )
     ).toBeNull();
+  });
+});
+
+// algebraicHyperbolicSubstitutions / hasAlgebraicHyperbolicCandidate — the R29
+// algebraic-in-hyperbolic substitution plumbing (RUBI.md §5, Phase R29). The
+// pre-filter recognizes a fractional power of a hyperbolic; the substitution
+// builder returns the `u = Sinh/Cosh/Tanh[v]` change-of-variable integrands,
+// each of which satisfies the change-of-variable identity
+// `g(u)·(du/dx) = integrand` where u = hyp(v).
+describe('algebraicHyperbolicSubstitutions (R29 hyperbolic substitution)', () => {
+  const engine = new ComputeEngine();
+
+  test('pre-filter: true on algebraic-in-hyperbolic, false off-shape', () => {
+    const yes = [
+      '\\coth(x)(a+b\\sinh(x)^2)^{3/2}',
+      '\\sqrt{a+b\\tanh(x)^2}',
+      '(a+b\\csch(x)^2)^{1/2}',
+      '\\frac{\\csch(x)}{(a+b\\sinh(x)^2)^{3/2}}',
+    ];
+    for (const s of yes)
+      expect(hasAlgebraicHyperbolicCandidate(engine.parse(s).canonical)).toBe(
+        true
+      );
+    const no = [
+      '\\sinh(x)^3', // pure power, no fractional radical
+      '\\frac{1}{a+b\\sinh(x)^2}', // rational-in-hyperbolic (integer power)
+      '(a+b x^2)^{3/2}', // fractional radical but NO hyperbolic
+      'x^2+1',
+    ];
+    for (const s of no)
+      expect(hasAlgebraicHyperbolicCandidate(engine.parse(s).canonical)).toBe(
+        false
+      );
+  });
+
+  test('the u=Sinh substitution satisfies g(Sinh(x))·Cosh(x) = integrand', () => {
+    // #471-shape: Coth·(a+b·Sinh²)^{3/2}. The first candidate is u=Sinh
+    // (branch-exact, Cosh=+√(1+u²)); du/dx = Cosh(x) here (v = x, d = 1).
+    const integrand = engine.parse('\\coth(x)(a+b\\sinh(x)^2)^{3/2}').canonical;
+    const cands = algebraicHyperbolicSubstitutions(engine, integrand, 'x');
+    expect(cands.length).toBe(3); // Sinh, Cosh, Tanh
+    const { g } = cands[0];
+    // g must be purely algebraic (no hyperbolic heads survived).
+    expect(containsHyperbolic(g)).toBe(false);
+    const sub = { a: 0.7, b: 1.3 };
+    for (const xv of [0.6, -0.8, 1.3]) {
+      const u0 = Math.sinh(xv);
+      const lhs = integrand.subs({ ...sub, x: xv }).N().re as number;
+      const rhs =
+        (g.subs({ ...sub, x: u0 }).N().re as number) * Math.cosh(xv);
+      expect(rhs).toBeCloseTo(lhs, 8);
+    }
+  });
+
+  test('declines when x occurs outside a hyperbolic head or the argument is nonlinear', () => {
+    // bare `x` factor (poly × hyperbolic) — the change of variable is invalid
+    expect(
+      algebraicHyperbolicSubstitutions(
+        engine,
+        engine.parse('(e+f x)\\sqrt{a+b\\sinh(x)^2}').canonical,
+        'x'
+      ).length
+    ).toBe(0);
+    // nonlinear hyperbolic argument (v = x², not linear)
+    expect(
+      algebraicHyperbolicSubstitutions(
+        engine,
+        engine.parse('\\sqrt{a+b\\sinh(x^2)}').canonical,
+        'x'
+      ).length
+    ).toBe(0);
+    // no hyperbolic at all
+    expect(
+      algebraicHyperbolicSubstitutions(
+        engine,
+        engine.parse('(a+b x^2)^{3/2}').canonical,
+        'x'
+      ).length
+    ).toBe(0);
   });
 });
 

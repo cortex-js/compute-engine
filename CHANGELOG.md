@@ -24,6 +24,13 @@
   `\int\frac{c+dx}{\sqrt{-a-bx^4}}dx`,
   `\int\frac{x^2(c+dx+ex^2+fx^3)}{(a+bx^4)^{3/2}}dx`, and Laurent variants with
   denominators of the form `(a+b·x^n)^{3/2}`.
+- **More integrals that are algebraic in a hyperbolic function are supported.**
+  Half-integer powers of hyperbolic expressions such as
+  `\int\coth(x)(a+b\sinh^2 x)^{3/2}\,dx`, `\int\coth^2 x\sqrt{a+b\tanh^2 x}\,dx`,
+  `\int\frac{\operatorname{csch} x}{(a+b\sinh^2 x)^{3/2}}\,dx`, and
+  `\int\sqrt{a+b\operatorname{csch}^2 x}\,dx` now close in elementary form via a
+  hyperbolic substitution. This also fixes a wrong-answer case,
+  `\int\frac{\sqrt{\coth(a+b\ln(cx^n))}}{x}\,dx`.
 
 ### Library and Definitions
 

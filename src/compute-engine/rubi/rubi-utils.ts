@@ -17,7 +17,7 @@ import { isNumber } from '../boxed-expression/type-guards.js';
 import { expand } from '../boxed-expression/expand.js';
 
 import type { Env } from './match.js';
-import { toTimesPower } from './normal-form.js';
+import { toTimesPower, recanonicalize } from './normal-form.js';
 
 export class RuleFail extends Error {
   constructor(reason: string) {
@@ -6068,6 +6068,198 @@ export function hasMixedParityRadicalCandidate(e: Expression): boolean {
     if (f.operator === 'Add') hasAdd = true;
   }
   return hasRadical && hasAdd;
+}
+
+// ---------------------------------------------------------------------------
+// R29 — algebraic-in-hyperbolic substitution plumbing
+//
+// A ch6 integrand that is ALGEBRAIC (half-integer power) in a single hyperbolic
+// family with a common LINEAR argument `v = c+d·x` — `(a+b·Sinh[v]²)^(p/2)`,
+// `√(a+b·Tanh[v])`, `Csch[v]/(a+b·Sinh[v]²)^(3/2)`, half-integer hyperbolic
+// powers — is NOT a rational function of `e^v`, so the exp-substitution
+// fallback (`functionOfExponentialFallback`) declines it (its `intRec` on the
+// substituted radical-of-exponential never closes) and it strands as an inert
+// `Integrate`. Under the substitution `u = Sinh[v]` (du = d·Cosh[v] dx,
+// Cosh = √(1+u²)), `u = Cosh[v]`, or `u = Tanh[v]` (du = d·Sech[v]² dx,
+// Sech² = 1−u²) the integrand becomes `∫R(u, √(a+b·u²)) du`, whose terminals
+// the bundled 1.1.2 quadratic-radical rules close in ELEMENTARY artanh-of-
+// radical form (probes confirm; the R28 diagnosis established these are NOT
+// elliptic — only ~2 ch6 rows, #463/#500, genuinely need elliptic kernels).
+// Viable only since R28b: the resulting `artanh(>1)`/complex-branch forms now
+// numericize, so they D-verify.
+
+/** Fast O(nodes) syntactic pre-filter for the R29 algebraic-in-hyperbolic
+ *  substitution fallback: does the integrand contain a hyperbolic head AND a
+ *  fractional (non-integer rational) power whose base contains a hyperbolic
+ *  head? That is the algebraic-in-hyperbolic signature — `(a+b·Sinh²)^(p/2)`,
+ *  `√(a+b·Tanh)`, `(a·Sinh⁴)^(3/2)`, `(Sinh·Tanh)^(1/2)`, `(Sech²)^(1/2)`.
+ *  Purely structural (no allocation), so the fallback stays a near-zero-cost
+ *  no-op off its shape. */
+export function hasAlgebraicHyperbolicCandidate(e: Expression): boolean {
+  return containsHyperbolic(e) && fracPowerOfHyperbolic(e);
+}
+function fracPowerOfHyperbolic(e: Expression): boolean {
+  // `Sqrt(hyp)` (the raw canonical form) and `Power(hyp, p)` with p a
+  // non-integer rational (the Times/Power normal form the driver passes) both
+  // count — the pre-filter runs before AND after `toTimesPower` folds Sqrt→Power.
+  if (e.operator === 'Sqrt' && e.ops && containsHyperbolic(e.ops[0]))
+    return true;
+  if (
+    e.operator === 'Power' &&
+    e.ops &&
+    e.ops.length === 2 &&
+    isNumber(e.ops[1]) &&
+    e.ops[1].isInteger !== true &&
+    e.ops[1].isRational === true &&
+    containsHyperbolic(e.ops[0])
+  )
+    return true;
+  return (e.ops ?? []).some(fracPowerOfHyperbolic);
+}
+
+/** The common argument of every x-containing hyperbolic head in `e`, or null if
+ *  there is none or they disagree (a mixed-angle integrand R29 cannot handle
+ *  with one substitution). */
+function commonHyperbolicArg(e: Expression, x: string): Expression | null {
+  let arg: Expression | null = null;
+  let ok = true;
+  const walk = (u: Expression): void => {
+    if (!ok) return;
+    if (HYPERBOLIC_HEADS.has(u.operator) && u.ops?.length === 1) {
+      const a = u.ops[0];
+      if (a.has(x)) {
+        if (arg === null) arg = a;
+        else if (!arg.isSame(a)) ok = false;
+      }
+    }
+    (u.ops ?? []).forEach(walk);
+  };
+  walk(e);
+  return ok ? arg : null;
+}
+
+/** True iff every occurrence of `x` in `e` sits inside a hyperbolic head's
+ *  argument — the pure-algebraic-in-hyperbolic gate. A bare `x` factor (a
+ *  `(e+f·x)` polynomial coefficient, an `x^k` — the poly×hyperbolic /
+ *  nonlinear-argument families) makes the `u = hyp(v)` change of variable
+ *  invalid (the leftover `x` would silently become the new variable). */
+function onlyXInHyperbolic(e: Expression, x: string): boolean {
+  if (!e.has(x)) return true;
+  if (HYPERBOLIC_HEADS.has(e.operator)) return true; // arg may carry x
+  if (e.symbol === x) return false;
+  if (!e.ops) return false;
+  return e.ops.every((o) => onlyXInHyperbolic(o, x));
+}
+
+/** Build the R29 substituted integrand `g(u)` for `u = kind(v)` (kind ∈
+ *  {Sinh,Cosh,Tanh}), reusing `x` as the new variable `u`: replace every
+ *  hyperbolic head of the common argument `v` by its `u`-expression (Cosh =
+ *  √(1+u²) for u=Sinh, etc.) and divide by the Jacobian `du/dx`. Returns null
+ *  if any hyperbolic head survives (a residual different-angle head) or the
+ *  build throws. Branch handling: `u=Sinh` and `u=Tanh` are branch-EXACT on the
+ *  real axis (Cosh = +√(1+u²) ≥ 1; Sech = +√(1−u²) > 0), so the identities hold
+ *  for all real v; `u=Cosh` uses Sinh = √(u²−1), which drops the sign for v<0,
+ *  but a surviving `√(u²−1)` (odd net Sinh power) leaves a second radical the
+ *  algebraic rules cannot close AND fails the caller's mixed-sign D-check, so it
+ *  is rejected there. */
+function substituteHyperbolic(
+  ce: ComputeEngine,
+  e: Expression,
+  x: string,
+  v: Expression,
+  kind: 'Sinh' | 'Cosh' | 'Tanh',
+  d: Expression
+): Expression | null {
+  const X = ce.symbol(x);
+  const one = ce.One;
+  let jac: Expression;
+  let map: Record<string, Expression>;
+  if (kind === 'Sinh') {
+    const R = ce.function('Sqrt', [X.pow(2).add(one)]); // Cosh = √(1+u²)
+    map = {
+      Sinh: X,
+      Cosh: R,
+      Tanh: X.div(R),
+      Coth: R.div(X),
+      Sech: one.div(R),
+      Csch: one.div(X),
+    };
+    jac = d.mul(R);
+  } else if (kind === 'Cosh') {
+    const R = ce.function('Sqrt', [X.pow(2).sub(one)]); // Sinh = √(u²−1)
+    map = {
+      Cosh: X,
+      Sinh: R,
+      Tanh: R.div(X),
+      Coth: X.div(R),
+      Sech: one.div(X),
+      Csch: one.div(R),
+    };
+    jac = d.mul(R);
+  } else {
+    const R = ce.function('Sqrt', [one.sub(X.pow(2))]); // Sech = √(1−u²)
+    map = {
+      Tanh: X,
+      Coth: one.div(X),
+      Sinh: X.div(R),
+      Cosh: one.div(R),
+      Sech: R,
+      Csch: R.div(X),
+    };
+    jac = d.mul(one.sub(X.pow(2)));
+  }
+  const walk = (u: Expression): Expression => {
+    if (!u.has(x)) return u;
+    if (
+      HYPERBOLIC_HEADS.has(u.operator) &&
+      u.ops?.length === 1 &&
+      u.ops[0].isSame(v)
+    )
+      return map[u.operator];
+    if (u.symbol === x || !u.ops) return u;
+    return ce.function(
+      u.operator,
+      u.ops.map(walk)
+    );
+  };
+  try {
+    const g = recanonicalize(ce, walk(e).div(jac));
+    if (containsHyperbolic(g)) return null;
+    return g;
+  } catch {
+    return null;
+  }
+}
+
+/** R29 support: `∫ R(hyp(v)) dx` for an integrand algebraic in a single
+ *  hyperbolic family with a common LINEAR argument `v = c+d·x`. Returns the list
+ *  of `{ g, back }` candidate substitutions `u = Sinh[v]` / `Cosh[v]` /
+ *  `Tanh[v]`, where `g` is the (pure algebraic, in the reused variable `x`)
+ *  integrand `f(x)·dx/du` and `back` is the expression to substitute for `x` in
+ *  the antiderivative (`Sinh[v]` etc.). Empty unless the integrand's ONLY
+ *  x-dependence is through hyperbolic heads of one common linear argument. The
+ *  caller routes each `g` through the driver and fail-closes on a non-closing
+ *  piece or a failing branch-safe (mixed-sign) numeric D-check, so a
+ *  branch-wrong `u=Cosh` result and a double-radical (elliptic) shape are both
+ *  rejected. */
+export function algebraicHyperbolicSubstitutions(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): { g: Expression; back: Expression }[] {
+  const v = commonHyperbolicArg(integrand, x);
+  if (v === null || polyDegreeX(v, x) !== 1) return [];
+  if (!onlyXInHyperbolic(integrand, x)) return [];
+  const coeffs = polyCoeffsX(v, x);
+  if (coeffs === null || coeffs.length < 2 || zeroQ(coeffs[1])) return [];
+  const d = coeffs[1];
+  const out: { g: Expression; back: Expression }[] = [];
+  for (const kind of ['Sinh', 'Cosh', 'Tanh'] as const) {
+    const g = substituteHyperbolic(ce, integrand, x, v, kind, d);
+    if (g === null) continue;
+    out.push({ g, back: ce.function(kind, [v]) });
+  }
+  return out;
 }
 
 function coeff(args: Json[], ctx: Ctx): Expression {

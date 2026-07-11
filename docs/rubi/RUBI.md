@@ -1,9 +1,10 @@
 # Rubi → Compute Engine: Feasibility Analysis
 
-**Date:** 2026-06-10 (feasibility); last status update 2026-07-10.
+**Date:** 2026-06-10 (feasibility); last status update 2026-07-11.
 **Status:** shipped bundle = **Chapters 1, 2, 3, 5, 6, 7 + 4.1 Sine + 4.3 Tangent +
 4.5 Secant + §8.8 Polylogarithm** (6,574 rules, 6.98 MB). Chapter-1 exhaustive
-≈90–91%; ch2 ≈72% / ch6 ≈45% effective; **4.1 Sine 107/120 and 331/400 (seed 5;
+≈90–91%; ch2 ≈72% / ch6 ≈52% effective (R29: **62/120** s120 seed5, +16);
+**4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
 71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R24, s120 seed5):
 5.1 sine 57/120, 5.2 cosine 67, 5.3 tangent 59 (R24 +15 vs R23's 55/55/58 — a
@@ -64,8 +65,18 @@ product to a multiple-angle sum, re-linearize the angle arguments, distribute
 the polynomial coefficient, close each piece via the bundled by-parts /
 R15 Si/Ci machinery, fail-closed D-check. 5.1 **57→65**, 5.2 **67→78**,
 guards byte-identical, genuine wrongs 0.
+R29 (2026-07-11) is the ROADMAP "R7" — algebraic-in-hyperbolic substitution
+plumbing. An integrand algebraic in one hyperbolic family with a common linear
+argument `v` (`(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh²)`, half-integer hyperbolic
+powers) is not a rational function of `e^v`, so the exp-substitution fallback
+strands it; substituting `u = Sinh/Cosh/Tanh[v]` turns it into `∫R(u,√(a+b·u²))
+du`, closed by the bundled 1.1.2 quadratic-radical rules in elementary artanh
+form (new `algebraicHyperbolicSub` driver fallback behind `RUBI_NO_R29`,
+fail-closed with a branch-safe mixed-sign D-check). ch6 **46→62/120** (+16),
+solved-wrong **1→0** (the R28-named #158 genuine wrong → branch-artifact formal),
+guards byte-identical, genuine wrongs 0.
 **Next rungs live in ROADMAP §R** (complex-Erfi evaluator, R3′ deep
-chains; then the Ch6 elliptic/by-parts tail R7–R8). The §1–§4 analysis below is
+chains; then the Ch6 by-parts tail R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
 phasing status, and the project memory (`project_rubi.md`) has the
 session-by-session log.
@@ -1891,6 +1902,74 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     engine** — a `new ComputeEngine()` at describe-collection time resets
     the process-global `BigDecimal.precision` and broke the 100-digit
     arccos snapshot); `solve.test.ts` domain-guard block.
+- **Phase R29 — algebraic-in-hyperbolic substitution plumbing LANDED
+  (2026-07-11).** The ROADMAP "R7" item. Ch6's census named **21
+  algebraic-in-hyperbolic** unsolved rows — `(a+b·Sinh[v]²)^(p/2)`,
+  `√(a+b·Tanh[v]²)`, `Csch[v]/(a+b·Sinh[v]²)^(3/2)`, half-integer hyperbolic
+  powers. **Diagnosis (R28 established it):** these are NOT elliptic. Under the
+  substitution `u = Sinh[v]` (du = d·Cosh[v] dx, Cosh = √(1+u²)), `u = Cosh[v]`,
+  or `u = Tanh[v]` (du = d·Sech[v]² dx, Sech² = 1−u²) with the common linear
+  argument `v = c+d·x`, they become `∫R(u,√(a+b·u²)) du`, whose terminals the
+  bundled **1.1.2** quadratic-radical rules close in **elementary
+  artanh-of-radical** form (probes confirm). They stranded because they are not
+  rational functions of `e^v`, so `functionOfExponentialFallback`'s `intRec` on
+  the radical-of-exponential never closed. Viable only since **R28b** made the
+  resulting `artanh(>1)`/complex-branch antiderivatives numericize (so they
+  D-verify).
+  - **Mechanism.** New driver fallback `algebraicHyperbolicSub` (the LAST
+    fallback in `intUncached`, after the exp/mixed-parity fallbacks — so it
+    never preempts a cleaner route and currently-solved integrands are
+    untouched; behind `RUBI_NO_R29`) + `algebraicHyperbolicSubstitutions` in
+    `rubi-utils.ts`. Cheap O(nodes) pre-filter (`hasAlgebraicHyperbolicCandidate`
+    — a fractional power of a hyperbolic). Gate: the integrand's ONLY
+    x-dependence is through hyperbolic heads of a single common LINEAR argument
+    (excludes the poly×hyperbolic / nonlinear-argument families). For each of
+    `u = Sinh/Cosh/Tanh[v]` it rewrites every hyperbolic head to its
+    `u`-expression, divides by the Jacobian `du/dx`, routes the (reused-`x`,
+    pure-algebraic) `∫R(u,√(a+b·u²)) du` subproblem through `intRec`, and
+    back-substitutes `u → hyp(v)`. Accept the first candidate that closes AND
+    passes a **branch-safe** (MIXED-SIGN sample points) `antiderivativeVerifies`
+    D-check against the ORIGINAL hyperbolic integrand — so a branch-wrong
+    `u=Cosh` result (Sinh = ±√(u²−1), sign lost for v<0) and a double-radical
+    (elliptic) subproblem are both rejected. (The shared D-check gained an
+    optional `xs` parameter; its default positive-only points are unchanged for
+    the other fallbacks, but R29 passes negative x — REQUIRED, since the branch
+    ambiguity only manifests at v<0.)
+  - **Before→after (ch6 Hyperbolic s120 seed5, clean A/B via `RUBI_NO_R29=1`
+    — byte-identical to the pre-change baseline, 0 per-problem diffs).**
+    solved-correct **46 → 62** (+16), solved-wrong **1 → 0**, unsolved
+    **69 → 53** (−16), not-evaluable 4 → 4, +1 solved-formal. **16 flips**
+    unsolved→correct: 6.1.5 #123 (`(A+B·Sinh)/√(a+aI·Sinh)`), #156
+    (`1/(a·Sinh⁴)^(3/2)`); 6.1.7 #109 (`Csch/(a+b·Sinh²)^(3/2)`), #471
+    (`Coth·(a+b·Sinh²)^(3/2)`), **#463/#500** (the "genuinely elliptic" pair —
+    a substitution found an ELEMENTARY form that D-verifies at many mixed-sign
+    points, so they are elementary after all, Rubi's elliptic reference
+    non-optimal); 6.3.7 #215 (`Coth²·√(a+b·Tanh²)`); 6.4.2 #10 (`(b·Coth)^(2/3)`),
+    #42 (`1/(b·Coth⁴)^(1/2)`); 6.4.7 #36 (`Tanh/√(a+b·Coth²)`); 6.5.3 #28/#35
+    (`(Sech²)^(-1/2)`), #133 (`Tanh⁵/√(a+b·Sech)`); 6.5.7 #186
+    (`Coth⁵·√(a+b·Sech²)`); 6.6.7 #11 (`√(a+b·Csch²)`), #15
+    (`1/(a+b·Csch²)^(7/2)`). **6.4.2 #158** (`√(Coth[a+b·Log[c·xⁿ]])/x`, the R28
+    named GENUINE WRONG) **solved-wrong → solved-formal**: the driver's
+    Log-substitution reduces it to the pure sub-integral `∫√(Coth w) dw`, which
+    now hits R29 and gives an `arctan(√tanh)+artanh(√tanh)` form whose MAGNITUDE
+    matches (the R28 `arcosh(−u)` form's magnitude was wrong); the residual
+    disagreement is a √-branch sign at negative radicand (a documented
+    false-wrong class), so it is no longer a genuine wrong. **New genuine wrongs
+    = 0.** The only rows NOT flipped from the ~21-class are `(a+b·Sinh²)^(3/2)`
+    bare (genuinely elliptic EllipticE/F — both parities even), the pFq #518,
+    and the `√(Sinh·Tanh)`/`√(Cosh·Coth)` quarter-power oddballs (6.7.1
+    #560/#563).
+  - **Guards (all byte-identical / = baseline; R29 is structurally inert off
+    ch6 — the `containsHyperbolic` pre-filter can't fire in the algebraic /
+    exponential / log / inverse-trig chapters).** ch1 1.1, ch2, ch3, 5.3, 1.1.3
+    s200 all unchanged from baseline; genuine wrongs 0.
+  - **Tests.** `integration-rules.test.ts` R29 block (4 D-verified end-to-ends —
+    #471/#109/#215/#11 shapes, D-verified on Re of a central-differenced F.N() —
+    + `RUBI_NO_R29` gate meaningful in both directions); `rubi-utils.test.ts`
+    `algebraicHyperbolicSubstitutions` block (the pre-filter true/false, the
+    change-of-variable identity `g(Sinh(x))·Cosh(x) ≡ integrand` at mixed-sign
+    points, and off-shape → empty for a bare-`x`/nonlinear-argument/no-hyperbolic
+    integrand).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the
