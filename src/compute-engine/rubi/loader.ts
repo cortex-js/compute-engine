@@ -16,10 +16,13 @@
 
 import RUBI_RULES_DATA from './rubi-rules-data.json';
 
-import type { IComputeEngine as ComputeEngine } from '../global-types.js';
+import type {
+  IComputeEngine as ComputeEngine,
+  RuleSteps,
+} from '../global-types.js';
 import type { Expr as Expression, RubiRuleDoc } from './types.js';
 import { compileRuleDocs, type CompileResult } from './compile.js';
-import { RubiDriver } from './driver.js';
+import { RubiDriver, type IntStepRecord } from './driver.js';
 
 export interface IntegrationRulesLoadOptions {
   /** Per-integral wall-clock budget for the rule driver, in milliseconds.
@@ -66,7 +69,11 @@ export function loadIntegrationRules(
     timeLimitMs: options?.timeLimitMs ?? 10_000,
   });
 
-  ce._integrationProvider = (integrand: Expression, variable: string) => {
+  ce._integrationProvider = (
+    integrand: Expression,
+    variable: string,
+    trace?: RuleSteps
+  ) => {
     // The `Integrate` evaluator passes the integrand wrapped in
     // `Function`/`Block`/`Delimiter` scaffolding; the rule driver wants the
     // bare integrand (the built-in antiderivative unwraps these too).
@@ -77,11 +84,20 @@ export function loadIntegrationRules(
       f.operator === 'Delimiter'
     )
       f = f.op1!; // Function/Block/Delimiter always have a first operand
-    const result = driver.int(f, variable);
+    // Only accumulate a step trace when `explain('Integrate')` asked for one.
+    const records: IntStepRecord[] | undefined = trace ? [] : undefined;
+    const result = driver.int(f, variable, records);
     // Only a fully-closed antiderivative is usable; a residual inert
     // `Integrate` means the rules couldn't finish — defer to the built-in
     // antiderivative instead of returning a partial result.
     if (result === null || containsIntegrate(result)) return null;
+    if (trace && records) {
+      // Replay the recorded steps into whole-state steps, then close with the
+      // driver's returned antiderivative (the caller de-duplicates it if it
+      // already equals the last state).
+      for (const s of driver.replayTrace(records)) trace.push(s);
+      trace.push({ value: result, because: 'integrate.simplify' });
+    }
     return result;
   };
 

@@ -27,6 +27,8 @@ import {
   singleAngleExponentialPieces,
   hasSingleAngleTrigRationalCandidate,
   circularTrigReduce,
+  rationalNormalFormX,
+  polyDegreeX,
   RuleFail,
 } from '../../src/compute-engine/rubi/rubi-utils';
 import { toTimesPower } from '../../src/compute-engine/rubi/normal-form';
@@ -1376,5 +1378,51 @@ describe('circularTrigReduce (ExpandTrigReduce circular product-to-sum, R23)', (
       engine.box(['Power', ['Sin', 'x'], 2] as any)
     );
     expect(reduced.toString()).toContain('cos(2x)');
+  });
+});
+
+// R26B rational normal form: flatten a nested rational function of x into a
+// single N/D of expanded x-polynomials (the shape the `t=eˣ` hyperbolic
+// substitution lands and no bundled rule matches).
+describe('rationalNormalFormX (R26B)', () => {
+  // Numerically identical to the input at several (a,b,x) samples — the
+  // transform must preserve the rational function exactly.
+  const sameRationalFn = (e: Expression, x: string) => {
+    const nf = rationalNormalFormX(e, x);
+    expect(nf).not.toBeNull();
+    for (const [a, b, xv] of [
+      [3, 5, 0.7],
+      [2, 7, 1.3],
+      [1, 4, 2.1],
+    ]) {
+      const orig = e.subs({ a, b, [x]: xv }).N().re;
+      const got = nf!.subs({ a, b, [x]: xv }).N().re;
+      expect(typeof got).toBe('number');
+      expect(got as number).toBeCloseTo(orig as number, 8);
+    }
+    return nf!;
+  };
+
+  test('flattens the sinh substitution shape 1/(x·(a+b/2·(x−1/x)))', () => {
+    // ≡ 1/((b/2)x²+a·x−b/2) — a single flat quadratic denominator.
+    const e = ce.parse('\\frac{1}{x\\left(a+\\frac{b}{2}\\left(x-\\frac1x\\right)\\right)}');
+    const nf = sameRationalFn(e, 'x');
+    // no nested reciprocal-of-x survives: the denominator is a polynomial in x
+    const den = nf.numeratorDenominator[1];
+    expect(polyDegreeX(den, 'x')).toBeGreaterThanOrEqual(1);
+  });
+
+  test('flattens the tanh substitution shape, keeping the x monomial factored', () => {
+    // 1/(x·(a+b·(x−1/x)/(x+1/x))) ≡ (x²+1)/(x·((a+b)x²+(a−b)))
+    const e = ce.parse(
+      '\\frac{1}{x\\left(a+b\\frac{x-\\frac1x}{x+\\frac1x}\\right)}'
+    );
+    sameRationalFn(e, 'x');
+  });
+
+  test('returns null for a non-rational (irrational) integrand', () => {
+    // √x is not a rational function of x → the normal form declines.
+    const e = ce.parse('\\frac{1}{a+\\sqrt{x}}');
+    expect(rationalNormalFormX(e, 'x')).toBeNull();
   });
 });

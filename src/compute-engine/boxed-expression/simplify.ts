@@ -6,6 +6,7 @@ import type {
   Expression,
   SimplifyOptions,
   BoxedRuleSet,
+  RuleStep,
   RuleSteps,
 } from '../global-types.js';
 import {
@@ -18,6 +19,11 @@ import {
 
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;
+  /** When set (only by `expr.explain()`), `simplifyOperands` records the
+   * lifted operand-level sub-chain into each `'simplified operands'` aggregate
+   * step's `substeps`. Off (undefined) in the plain `simplify()` path — no
+   * allocation, byte-identical driver behavior. */
+  collectSubsteps?: boolean;
 };
 
 const BASIC_ARITHMETIC = [
@@ -261,9 +267,78 @@ function isCheaper(
   return false;
 }
 
+/**
+ * Lift the sub-chain produced by fully simplifying an operand into
+ * whole-expression context and append it to `substepsOut`. Only reached when
+ * collecting (during `expr.explain()`); the plain `simplify()` path passes
+ * `substepsOut === undefined` and never allocates.
+ *
+ * `build` is the same constructor the branch's return path uses (so lifted
+ * intermediate states match how the aggregate value is built); `prefix` is the
+ * already-simplified earlier operands and `suffix` the untouched original
+ * later operands (operands are processed in order).
+ */
+function collectOperandSubsteps(
+  chain: RuleSteps,
+  substepsOut: RuleSteps,
+  prefix: readonly Expression[],
+  suffix: readonly Expression[],
+  build: (ops: Expression[]) => Expression
+): void {
+  const lift = (v: Expression) => build([...prefix, v, ...suffix]);
+  // Skip index 0 (the `'initial'` seed of the operand's own chain).
+  for (let i = 1; i < chain.length; i++) {
+    const s = chain[i];
+    // Flatten a nested `'simplified operands'` aggregate that carries its own
+    // substeps: those values are already lifted into this operand's context by
+    // the deeper recursion, so re-lift them one level up. A bare
+    // `'simplified operands'` step (no substeps) is kept as-is and curated
+    // generically upstream.
+    const inner =
+      s.because === 'simplified operands' && s.substeps ? s.substeps : [s];
+    for (const sub of inner) {
+      const step: RuleStep = { value: lift(sub.value), because: sub.because };
+      if (sub.purpose !== undefined) step.purpose = sub.purpose;
+      substepsOut.push(step);
+    }
+  }
+}
+
+/**
+ * Fully simplify one operand `x` at position `index` (of `ops`), capturing its
+ * lifted sub-chain into `substepsOut` when collecting. `prefix` is the running
+ * array of already-simplified operands (indices `< index`). Returns the
+ * simplified operand value.
+ */
+function simplifyOperandCapture(
+  x: Expression,
+  index: number,
+  ops: readonly Expression[],
+  prefix: readonly Expression[],
+  options: Partial<SimplifyOptions> | undefined,
+  substepsOut: RuleSteps | undefined,
+  build: (ops: Expression[]) => Expression
+): Expression {
+  const chain = simplify(x, options);
+  if (substepsOut && chain.length > 1)
+    collectOperandSubsteps(
+      chain,
+      substepsOut,
+      prefix,
+      ops.slice(index + 1),
+      build
+    );
+  return chain.at(-1)!.value;
+}
+
 function simplifyOperands(
   expr: Expression,
-  options?: Partial<SimplifyOptions>
+  options?: Partial<SimplifyOptions>,
+  // Out-param: when provided (only by `simplifyExpression` during
+  // `expr.explain()`), the operand-level sub-chains are lifted and appended
+  // here to enrich the `'simplified operands'` aggregate step. When undefined,
+  // this function is byte-for-byte the plain simplify path.
+  substepsOut?: RuleSteps
 ): Expression {
   if (!isFunction(expr)) return expr;
 
@@ -271,16 +346,30 @@ function simplifyOperands(
 
   // For scoped functions (Sum, Product, D), use holdMap but simplify non-body operands
   if (def?.scoped === true) {
-    const simplifiedOps = [...expr.ops].map((x, i) => {
-      // Don't simplify the body (first operand) to allow pattern-matching rules to work
-      if (i === 0) return x;
-      // Simplify other operands (like Limits)
-      return simplify(x, options).at(-1)!.value;
-    });
     // Use _fn() to bypass canonicalization - operands are already canonical.
     // This avoids triggering handlers like D's canonicalFunctionLiteralArguments
     // which would add extra Function wrappers.
-    return expr.engine._fn(expr.operator, simplifiedOps);
+    const build = (o: Expression[]) => expr.engine._fn(expr.operator, o);
+    const simplifiedOps: Expression[] = [];
+    for (let i = 0; i < expr.ops.length; i++) {
+      const x = expr.ops[i];
+      // Don't simplify the body (first operand) to allow pattern-matching rules to work
+      if (i === 0) simplifiedOps.push(x);
+      // Simplify other operands (like Limits)
+      else
+        simplifiedOps.push(
+          simplifyOperandCapture(
+            x,
+            i,
+            expr.ops,
+            simplifiedOps,
+            options,
+            substepsOut,
+            build
+          )
+        );
+    }
+    return build(simplifiedOps);
   }
 
   // For non-scoped functions, we need to balance simplification with holdMap semantics
@@ -293,10 +382,23 @@ function simplifyOperands(
   // element. Unlike Add/Multiply, a List has no cross-element simplify rules
   // to interfere with, so simplifying elements independently is safe.
   if (expr.operator === 'List') {
-    const simplifiedOps = ops.map((x) => simplify(x, options).at(-1)!.value);
+    const build = (o: Expression[]) => expr.engine.function('List', o);
+    const simplifiedOps: Expression[] = [];
+    for (let i = 0; i < ops.length; i++)
+      simplifiedOps.push(
+        simplifyOperandCapture(
+          ops[i],
+          i,
+          ops,
+          simplifiedOps,
+          options,
+          substepsOut,
+          build
+        )
+      );
     const changed = simplifiedOps.some((op, i) => !op.isSame(ops[i]));
     if (!changed) return expr;
-    return expr.engine.function('List', simplifiedOps);
+    return build(simplifiedOps);
   }
 
   // For lazy functions (Multiply, Add), only simplify Sum/Product operands
@@ -307,42 +409,48 @@ function simplifyOperands(
   // Also simplify Power expressions with negative bases and fractional exponents
   // to ensure proper sign factoring (e.g., (-2x)^{3/5} -> -(2x)^{3/5}).
   if (def?.lazy) {
-    const simplifiedOps = ops.map((x) => {
+    const build = (o: Expression[]) => expr.engine.function(expr.operator, o);
+    const simplifiedOps: Expression[] = [];
+    const full = (x: Expression, i: number) =>
+      simplifyOperandCapture(
+        x,
+        i,
+        ops,
+        simplifiedOps,
+        options,
+        substepsOut,
+        build
+      );
+    for (let i = 0; i < ops.length; i++) {
+      const x = ops[i];
       if (
         x.operator === 'Sum' ||
         x.operator === 'Product' ||
         containsConstructibleTrig(x)
-      ) {
-        return simplify(x, options).at(-1)!.value;
-      }
+      )
+        simplifiedOps.push(full(x, i));
       // Simplify Ln/Log operands within Add/Multiply to enable term cancellation
       // (e.g., ln(x^3) -> 3*ln(x) so that ln(x^3) - 3*ln(x) = 0)
       // Only simplify Ln (natural log), not Log (which may lose base info)
-      if (x.operator === 'Ln') {
-        return simplify(x, options).at(-1)!.value;
-      }
+      else if (x.operator === 'Ln') simplifiedOps.push(full(x, i));
       // Simplify Abs operands to enable cancellation
       // (e.g., |xy| -> |x||y| so that |xy| - |x||y| = 0)
       // Also handle Negate(Abs(...)) which appears in subtraction expressions
-      if (x.operator === 'Abs') {
-        return simplify(x, options).at(-1)!.value;
-      }
-      if (isFunction(x, 'Negate') && x.op1?.operator === 'Abs') {
-        return simplify(x, options).at(-1)!.value;
-      }
+      else if (x.operator === 'Abs') simplifiedOps.push(full(x, i));
+      else if (isFunction(x, 'Negate') && x.op1?.operator === 'Abs')
+        simplifiedOps.push(full(x, i));
       // Power expressions with fractional exponents may need sign factoring
       // e.g., (-2x)^{3/5} should become -(2x)^{3/5} for correct real evaluation
-      if (
+      else if (
         isFunction(x, 'Power') &&
         x.op2?.isRational === true &&
         !x.op2.isInteger
-      ) {
-        return simplify(x, options).at(-1)!.value;
-      }
+      )
+        simplifiedOps.push(full(x, i));
       // Evaluate purely numeric subexpressions in all operands
-      return evaluateNumericSubexpressions(x);
-    });
-    return expr.engine.function(expr.operator, simplifiedOps);
+      else simplifiedOps.push(evaluateNumericSubexpressions(x));
+    }
+    return build(simplifiedOps);
   }
 
   // For non-lazy, non-scoped functions (e.g., Factorial2, Sqrt, Degrees),
@@ -355,43 +463,65 @@ function simplifyOperands(
   // e.g., (x-1)(x+2)/((x-1)(x+3)) should cancel to (x+2)/(x+3), not expand first.
   // But x^(1+2)/(1+2) should still simplify to x^3/3.
   if (expr.operator === 'Divide') {
+    // Numeric folding only — no operand sub-chain, so nothing to capture.
     const simplifiedOps = ops.map((x) => evaluateNumericSubexpressions(x));
     const changed = simplifiedOps.some((op, i) => op !== ops[i]);
     if (!changed) return expr;
     return expr.engine._fn(expr.operator, simplifiedOps);
   }
 
-  const simplifiedOps = ops.map((x) => {
+  // Use _fn() since operands are already canonical (simplified above)
+  const build = (o: Expression[]) => expr.engine._fn(expr.operator, o);
+  const simplifiedOps: Expression[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    const x = ops[i];
     // For purely numeric basic arithmetic expressions, evaluate directly
     // to get simpler results like √(1+2) → √3
     // BUT skip Power expressions that should stay symbolic:
     // - e^n and n^{p/q} with non-integer exponent
-    if (!isNumber(x) && isFunction(x) && x.unknowns.length === 0) {
-      if (BASIC_ARITHMETIC.includes(x.operator)) {
-        // Don't evaluate Power expressions that produce irrational results
-        if (x.operator === 'Power') {
-          if (isSymbol(x.op1, 'ExponentialE')) return x;
-          if (x.op2?.isRational === true && x.op2?.isInteger === false)
-            return x;
-        }
-        const evaluated = x.evaluate();
-        if (isNumber(evaluated)) return evaluated;
+    if (
+      !isNumber(x) &&
+      isFunction(x) &&
+      x.unknowns.length === 0 &&
+      BASIC_ARITHMETIC.includes(x.operator)
+    ) {
+      // Don't evaluate Power expressions that produce irrational results
+      const symbolicPower =
+        x.operator === 'Power' &&
+        (isSymbol(x.op1, 'ExponentialE') ||
+          (x.op2?.isRational === true && x.op2?.isInteger === false));
+      if (symbolicPower) {
+        simplifiedOps.push(x);
+        continue;
+      }
+      const evaluated = x.evaluate();
+      if (isNumber(evaluated)) {
+        simplifiedOps.push(evaluated);
+        continue;
       }
     }
     // For other expressions with ops (like Tan, Sqrt, etc.), recursively simplify
-    if (isFunction(x)) {
-      return simplify(x, options).at(-1)!.value;
-    }
-    return x;
-  });
-  // Use _fn() since operands are already canonical (simplified above)
-  return expr.engine._fn(expr.operator, simplifiedOps);
+    if (isFunction(x))
+      simplifiedOps.push(
+        simplifyOperandCapture(
+          x,
+          i,
+          ops,
+          simplifiedOps,
+          options,
+          substepsOut,
+          build
+        )
+      );
+    else simplifiedOps.push(x);
+  }
+  return build(simplifiedOps);
 }
 
 function simplifyExpression(
   expr: Expression,
   rules: BoxedRuleSet,
-  options: SimplifyOptions,
+  options: Partial<InternalSimplifyOptions>,
   steps: RuleSteps
 ): RuleSteps {
   // Respect the engine deadline (`ce.timeLimit`): simplifyExpression is the
@@ -430,9 +560,21 @@ function simplifyExpression(
   //
 
   // Simplify the operands...
-  const alt = simplifyOperands(expr, options);
+  // When `expr.explain()` asks for it, collect the operand-level sub-chain so
+  // the aggregate `'simplified operands'` step can surface the real rule work
+  // it summarizes. `substeps` stays undefined (no allocation) otherwise, and
+  // is inert enrichment — the chain length, ordering, and driver logic
+  // (`hasSeen`, length comparisons, cycle checks) are unaffected.
+  const substeps: RuleSteps | undefined = options.collectSubsteps
+    ? []
+    : undefined;
+  const alt = simplifyOperands(expr, options, substeps);
   if (!alt.isSame(expr)) {
-    steps = [...steps, { value: alt, because: 'simplified operands' }];
+    const aggregate: RuleStep =
+      substeps && substeps.length > 0
+        ? { value: alt, because: 'simplified operands', substeps }
+        : { value: alt, because: 'simplified operands' };
+    steps = [...steps, aggregate];
     expr = alt;
   }
 
@@ -484,6 +626,8 @@ function simplifyNonCommutativeFunction(
   let last = result.at(-1)!.value;
   if (last.isSame(expr)) return steps;
 
+  // Post-rule operand cleanup: NOT captured as substeps — it stays absorbed
+  // into the rule step (as today), so `explain()` attributes it to the rule.
   last = simplifyOperands(last, options);
 
   // If the simplified expression is not cheaper, we're done.

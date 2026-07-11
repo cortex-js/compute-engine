@@ -130,6 +130,11 @@ export type RuleStep<Expr = unknown> = {
   /** The purpose of the rule that produced this step, stamped by
    * `applyRule` from the firing rule. */
   purpose?: RulePurpose;
+  /** For an aggregate step (e.g. simplify's 'simplified operands'), the
+   * operand-level sub-chain it summarizes, each value lifted into
+   * whole-expression context. Populated only when a trace consumer asks
+   * for it (expr.explain()); plain simplify() never allocates it. */
+  substeps?: RuleSteps<Expr>;
 };
 
 /** @category Rules */
@@ -140,7 +145,7 @@ export type RuleSteps<Expr = unknown> = RuleStep<Expr>[];
  *
  * @category Rules
  */
-export type ExplainOperation = 'simplify' | 'solve' | 'D';
+export type ExplainOperation = 'simplify' | 'solve' | 'D' | 'Integrate';
 
 /**
  * How much of the raw rule trace `expr.explain()` returns:

@@ -44,8 +44,19 @@ the driver reaches the 1.2.2.3 trinomial terminal rules (behind `RUBI_NO_R25`):
 1.1.3 General **173→180/200**, ch1 1.1 **109/5w→111/4w** (fixes one genuine
 wrong), 5.3 tangent **60→61**, 5.4 cotangent **60→62** (the R20-noted
 arctan/arccot(a·x²) chains), genuine wrongs still 0.
-**Next rungs live in ROADMAP §R** (R3′ deep chains, R5; then the Ch6 tail
-R6–R8). The §1–§4 analysis below is
+R26 (2026-07-10) has two parts. **R26A (P0 correctness, no toggle):** the
+driver returned wrong answers for ANY integration variable not literally
+named `x` (`∫t² dt → x³/3`) — rule-RHS `"x"` tokens fell through to the
+literal symbol because the match env never bound the variable pattern; fixed
+by binding `env['x'] →` the actual variable at dispatch (invisible to every
+suite because the whole corpus integrates wrt `x`). **R26B (behind
+`RUBI_NO_R26`):** symbolic-coefficient reciprocal hyperbolics
+(`∫1/(a+b·sinh x)` and friends) now close — the exp-substitution fallback's
+nested `1/(x·(a+b/2·(x−1/x)))` sub-integrand is retried in rational normal
+form (`rationalNormalFormX`) so the bundled 1.2.1 rules reach it: ch6
+**35→46/120**, genuine wrongs 0.
+**Next rungs live in ROADMAP §R** (poly×trig-after-deactivation, R3′ deep
+chains; then the Ch6 elliptic/by-parts tail R7–R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
 phasing status, and the project memory (`project_rubi.md`) has the
 session-by-session log.
@@ -1695,6 +1706,67 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     (R25)` block asserting the guard fails on `(√a+√b·x²)/(a+b·x⁴)` and pure
     `x²/(a+b·x⁴)` yet still distributes the linear `(a+b·x)/(2+3·x⁴)` and leaves
     quadratic-denominator shapes alone. Both blocks fail under `RUBI_NO_R25=1`.
+- **Phase R26 — integration-variable soundness + symbolic reciprocal
+  hyperbolics LANDED (2026-07-10).** Two parts, dispatched as separate rungs
+  from the ROADMAP "R6 symbolic-coefficient rational integration" item after
+  triage narrowed it (symbolic products-of-linears and quadratics already
+  closed via the bundled rules; the framing "the native rational fallback
+  requires numeric coefficients" was true but not the lever).
+  - **R26A — literal-`x` leak (P0 correctness, NO toggle, per the R17
+    precedent).** The shipped driver returned **wrong answers for any
+    integration variable not literally named `x`**: `∫t² dt → x³/3` (wrong
+    symbol), `∫t·cos t dt → −t·sin(x)+x·sin(x)` (mixed corruption),
+    `∫1/(a+b·t+c·t²) dt` → garbage from 1.2.1.1#6. Root cause: `build()`
+    resolves a rule-RHS string token via `env.get(token)` with a
+    `ce.symbol(token)` fallthrough, and `matchAll` matches the variable
+    pattern **positionally** without binding `"x"` into the env — so every
+    RHS variable reference built the literal symbol `x`. Conditions were
+    unaffected (they use `ctx.x`), and the entire corpus/benchmark/test
+    surface integrates wrt `x`, which is why nothing ever caught it. Fix:
+    one line at the dispatch site (`driver.ts`), `env.set('x', x)` after the
+    env-recanonicalize loop — safe because all 6,574 bundled rules have
+    `variable: "x"` and zero pattern slots or with-bindings named `x`
+    (verified), and behavior-identical on the x-variable corpus by
+    construction. Also makes `∫1/(x+t) dt` (literal `x` as a free parameter)
+    work — impossible under the rejected α-rename design. 9 regression
+    tests (power/by-parts/Subst/trig-bridge/exp-fallback families, all in
+    non-`x` variables, D-verified); guards byte-identical (ch1 1.1 111/4w,
+    ch3 70, 4.1 chapter-dir 108).
+  - **R26B — symbolic-coefficient reciprocal hyperbolics (behind
+    `RUBI_NO_R26`).** `∫1/(a+b·sinh x)` with symbolic `a,b` stayed inert
+    while numeric coefficients closed: `functionOfExponentialFallback` hands
+    `intRec` the substituted integrand in the nested shape
+    `1/(x·(a+b/2·(x−1/x)))`, which no bundled pattern matches; numeric
+    coefficients were rescued by the (deliberately numeric-only)
+    `nativeRationalFallback`, symbolic ones had no route — yet the flat
+    equivalent `2/(b·x²+2a·x−b)` closes via 1.2.1.1 to the correct artanh
+    form. Fix: `rationalNormalFormX` (`rubi-utils.ts`) — cross-multiply the
+    nested `Divide`/`Power` structure into one fraction, expand numerator
+    and denominator as polynomials in x, cancel the common `x^k` the `1/x`
+    substitution introduces, and **keep the residual `x^m` denominator
+    monomial factored** (`x^m·R`): the partial-fraction rules match
+    `poly/(x^m·R)` but not the expanded equivalent. Wired as a fail-closed
+    **retry**: the raw `g/x` integrates first (preserving every existing
+    closure, e.g. `∫csch⁴x` — an unconditional replace regressed it), and
+    the normalized form is tried once only when the raw shape comes back
+    inert.
+  - **Before→after (ch6 Hyperbolic s120 seed5, clean A/B via
+    `RUBI_NO_R26=1`).** solved-correct **35 → 46** (+11), wrongs **0 → 0**,
+    +3 unsolved→not-evaluable (soft outcome, correct-but-unverifiable at the
+    harness's sample points). The 11 flips are the additive-denominator
+    reciprocal families: `1/(1+cosh²x)`, `(a+b·coth)²`, `csch²/(a+b·coth)`,
+    `cosh³/(a+b·coth)`, `cosh³/(1+coth)`, `sech·(a+b·tanh²)`,
+    `sech²/(1+tanh²)`, complex-coefficient variants
+    (`cosh³/(a+I·a·sinh)`, `sinh⁴/(I+csch)`, `1/(sech−I·tanh)`), and
+    `(B·cosh+C·sinh)/(a+b·cosh+c·sinh)`. Headline form (D-checked exact):
+    `∫1/(a+b·sinh y) dy → −2·artanh((a+b·eʸ)/√(a²+b²))/√(a²+b²)`.
+  - **Guards.** ch2 Exponentials shares this fallback and is proven a
+    strict no-op by per-problem A/B diff (zero outcome differences); ch1
+    1.1/ch3/4.1 are structurally unreachable (`containsHyperbolic` gate).
+  - **Tests.** `integration-rules.test.ts` — `integration variable other
+    than x (R26A)` (9 tests) and a ch6/R26B block (6 tests, D-verified at
+    two parameter points, toggle-meaningfulness under `RUBI_NO_R26=1`);
+    `rubi-utils.test.ts` — `rationalNormalFormX` unit tests (3).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

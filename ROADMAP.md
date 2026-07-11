@@ -51,7 +51,7 @@ validation) are release-protocol steps tracked in
 `roadmap/cortex/STATUS_REPORT.md`, not here.
 
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
-status:** R1–R21 landed — chapters 1/2/3/5/6/7, 4.1/4.3/4.5, §8.8 Polylogarithm,
+status:** R1–R26 landed — chapters 1/2/3/5/6/7, 4.1/4.3/4.5, §8.8 Polylogarithm,
 6,574 rules bundled; see the **Coverage tracks → Rubi** section below for
 current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
@@ -81,13 +81,6 @@ list — the record lives in `CHANGELOG.md` and the design docs under
 `docs/plans/` (`2026-07-04-statistics-design.md`,
 `2026-07-04-explain-design.md`, `2026-07-07-uncertainty-design.md`). What
 remains (effort S/M/L):
-
-1. **Explain API — residue (M/L).** Semantic step coalescing for simplify
-   (merging operand-descent chains — design doc §4 flags it as a quality
-   follow-up once real traces are visible in the product); `Integrate`
-   traces via Rubi's rule chain (its own design, per the doc's non-goals);
-   tracing systems of *inequalities* and mixed equality/inequality systems
-   (`explain('solve')` throws a precise error for them today).
 
 **Statistics residue (demand-gated Phase 3, design doc §10):** inverse
 regularized incomplete gamma/beta kernels and the distributions that need
@@ -394,38 +387,39 @@ separate tracking is needed. Grouped by theme:
   explicit `Expand` leaves `2^{1/3}·4^{2/3}` uncombined). Adjacent defect
   spotted 2026-07-09: `Expand` of that cube gives an expression whose
   `.N()` is `NaN` even though each term evaluates finitely.
-- **Sum/Product closed forms (telescoping sums/products and `Π k → n!`
-  LANDED 2026-07-10).** Remaining: closed forms for classic infinite series
-  and products (`Σ 1/k²+1/k³ → π²/6+ζ(3)`, Wallis `→ 2/π`). Under the revised
-  EL-4 contract exact `evaluate()` stays symbolic on infinite domains and
-  `.N()` owns the numeric path — but `.N()` is a plain 10⁴-term truncation
-  (off by ~1e-4 for `Σ 1/k²`) and wants tail acceleration
-  (Richardson/Euler–Maclaurin) or a wider cap.
-- **Trigonometric simplification (Pythagorean factoring LANDED
-  2026-07-09).** `cos³x + cos x·sin²x − cos x → 0` now simplifies (general
-  `g·cos²u + g·sin²u → g` factoring). The trig-matrix rank-1 detection is
-  NOT unblocked by it — it additionally needs `simplify` to reach inside a
-  symbolic `Determinant` (see the linear-algebra bullet).
+- **Sum/Product closed forms (telescoping sums/products, `Π k → n!`,
+  p-series `→ ζ(s)`, Wallis `→ 2/π`, and Richardson tail acceleration for
+  `.N()` of infinite sums ALL LANDED 2026-07-10).** Remaining small tails:
+  `Product.N()` on an infinite domain is still a plain truncation (the Sum
+  acceleration pattern applies directly); the p-series closed form requires
+  lower bound 1 (a general lower bound needs a `ζ(s) − Σ_{k<a}` adjustment);
+  the closed-form table is minimal (p-series + Wallis) and could grow.
+- **Trigonometric simplification (Pythagorean factoring LANDED 2026-07-09;
+  trig-matrix rank-1 detection LANDED 2026-07-10** via the symbolic
+  determinant rank path with a `TrigReduce` fallback — see the
+  linear-algebra bullet**).**
 - **Complex/abs simplification.** Kahan's `|3−√7+i·√(6√7−15)| → 1` exactly
   (the modulus-squared is rational after expansion).
 - **Assumptions.** Transitivity closure over a cycle of `≥` (Wester 21:
   `x≥y, y≥z, z≥x ⊢ x=z`) and monotonicity of `x²` on ordered positive reals
   (Wester 22: `x>y>0 ⊢ 2x²>2y²`).
-- **Linear algebra (exact rational elimination extended to
-  `Kernel`/`MatrixRank`/eigenvectors 2026-07-10, joining `RowReduce`).**
-  Remaining: `M·M⁻¹` not simplifying its
-  diagonal to `1` for a symbolic 2×2; elementwise `D` over matrix literals
+- **Linear algebra (2026-07-10 round ALL LANDED: exact rational elimination
+  extended to `Kernel`/`MatrixRank`/eigenvectors, joining `RowReduce`;
+  `M·M⁻¹ → I` via same-denominator fraction combining + `simplify()`
+  recursing into `List` elements; symbolic small-matrix rank from the
+  simplified determinant; Vandermonde determinants return the difference
+  product; QR eigensolver rebuilt as Hessenberg + Francis double-shift with
+  deflation — the 8×8 Rosser matrix converges; `MatrixPower(M, 1/2)`
+  principal square root for exact 2×2; new `SingularValues` head, exact for
+  ≤2×2 Gram matrices).** Remaining: elementwise `D` over matrix literals
   (the rotation-matrix second derivative currently yields a scalar `Add`);
   a matrix-valued `Add` fed unevaluated into `MatrixMultiply` is
-  type-rejected (union-type inference gap); `Factor`/`simplify` do not reach
-  inside a symbolic `Determinant` (the Vandermonde difference-product);
-  `MatrixPower(M, 1/2)` (principal square root) rejects rational exponents;
-  no exact/symbolic singular values (`SVD` is float-only, no
-  `SingularValues` head); the numeric QR eigensolver fails to converge on
-  the 8×8 Rosser matrix (wants Wilkinson shifts + deflation). Missing heads
-  noted in comments: `MatrixExp` (`Exp` of a matrix broadcasts elementwise —
-  it is *not* the matrix exponential), matrix functions generally (sine of a
-  matrix), Jordan / Smith normal forms.
+  type-rejected (union-type inference gap); matrix square root beyond exact
+  2×2 (n×n wants eigendecomposition or Denman–Beavers); exact singular
+  values beyond a 2×2 Gram matrix. Missing heads noted in comments:
+  `MatrixExp` (`Exp` of a matrix broadcasts elementwise — it is *not* the
+  matrix exponential), matrix functions generally (sine of a matrix),
+  Jordan / Smith normal forms.
 
 Untranscribed corpus categories (future tranches): systems of equations /
 congruence solving, special functions, transforms, ODEs/PDEs (→ B12),
@@ -524,7 +518,7 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-10, R1–R25 landed):** the shipped bundle
+**State (2026-07-10, R1–R26 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 3 (Logarithms), 5 (Inverse trig), 6 (Hyperbolics),
@@ -542,7 +536,19 @@ Inverse hyperbolic (R22): 7.1 sine 79/120, 7.2 cosine 51,
 7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44, 7.6 cosecant 54 (408/720 =
 56.7%, R22 +2 — ch7's hyperbolic sub-integrals were already covered by the
 ungated `containsHyperbolic` fallback)**, ch1 exhaustive ≈90–91%,
-ch2 ≈72% / ch6 ≈45% effective (seed 42), Wester indefinite-∫ 6/8.
+ch2 ≈72% effective (seed 42), **ch6 Hyperbolics 46/120 (s120 seed 5,
+post-R26B; was ≈45% effective at seed 42 pre-R26)**, Wester indefinite-∫ 6/8.
+**R26 (2026-07-10)** — two parts. **R26A (P0 correctness, no toggle):** the
+driver returned wrong answers for ANY integration variable not literally
+named `x` (`∫t² dt → x³/3`; `∫t·cos t dt` mixed-corrupted) — rule-RHS `"x"`
+tokens fell through to the literal symbol because the match env never bound
+the variable pattern; fixed by binding `env['x']` to the actual variable at
+dispatch. Invisible to every suite (the whole corpus integrates wrt `x`);
+CHANGELOG-worthy at release. **R26B (`RUBI_NO_R26`):** symbolic-coefficient
+reciprocal hyperbolics (`∫1/(a+b·sinh x)`, cosh/tanh/coth/sech/csch
+variants) close via a rational-normal-form retry (`rationalNormalFormX`) in
+the exp-substitution fallback — ch6 35→46/120, +11 flips, wrongs 0, ch2
+proven no-op by per-problem A/B.
 **R25 (2026-07-10)** closed the symbolic-coefficient quartic-denominator rational
 family `∫(d+e·x²)/(a+b·x⁴)` and its reductions (`∫x^m/(a+b·x⁴)`, `∫Pq/(a+b·x⁴)`,
 quartic products) — an ExpandIntegrand ⇄ binomial-split ping-pong, fixed by
@@ -583,7 +589,9 @@ fail-closed D-check; native-rational). A/B env switches:
 `RUBI_NO_FOUNDATION`, `RUBI_NO_RECIP`, `RUBI_NO_COFN`, `RUBI_NO_COFN_COT`,
 `RUBI_NO_SKELETON`, `RUBI_NO_SICI`, `RUBI_NO_SICI_COMPLEX`, `RUBI_NO_SECBIN`,
 `RUBI_NO_TRIGSQ`, `RUBI_NO_TRIGEXP`, `RUBI_NO_TRIGSUB` (R22 subproblem
-trig-bridge), `RUBI_NO_R25` (R25 quartic-denominator ExpandIntegrand guard).
+trig-bridge), `RUBI_NO_R25` (R25 quartic-denominator ExpandIntegrand guard),
+`RUBI_NO_R26` (R26B rational-normal-form retry in the exp-substitution
+fallback).
 **Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
 power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
 shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`
@@ -698,17 +706,22 @@ note — trace the residual integrand, don't trust the predicate census.
   hyperbolic fallback).
 
 **Exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules) are
-DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty). The
-Chapter-6 residual (no single lever; ≈55 of 100 in the sample) is the next Rubi
-coverage work, and most of it is shared capability rather than Ch6-specific:
+DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty).
+The former R6 item (symbolic-coefficient rational integration) landed as R25
+(quartic denominators) + R26 (integration-variable soundness + the
+rational-normal-form retry that closes the parametric reciprocal families
+`∫1/(a+b·Sinh x)` etc.); what survives of it is folded into the residual
+below. The Chapter-6 residual (69 unsolved at s120 seed 5, post-R26; no
+single lever) is mostly shared capability rather than Ch6-specific:
 
-- **R6 — symbolic-coefficient rational integration.** Parametric reciprocal
-  denominators (`∫1/(a+b·Sinh x)`, etc.) substitute to a rational in `eˣ` with
-  free parameters, which the native rational fallback declines (it requires
-  numeric coefficients). This is the shared 1.3.2 gap too — symbolic polynomial
-  factoring/partial-fractions. Highest-value Ch6 lever.
+- **R6′ — general symbolic factoring/partial fractions.** The substituted
+  rationals now close through the quadratic / `x^m·R` shapes; higher-degree
+  symbolic denominators that need genuine polynomial factoring over free
+  parameters (the shared 1.3.2 gap) still decline — a smaller item than the
+  original R6 framing, worth pursuing only against a named family.
 - **R7 — algebraic-in-hyperbolic → elliptic** (`(a+b·Sinh²)^(p/2)`,
   `√(a+b·Tanh)`): needs the elliptic-integral route (the kernels exist).
+  The same route serves the 1.1.3 elliptic/cubic tail R25 left (6 problems).
 - **R8 — poly×reciprocal by-parts / CoshIntegral·SinhIntegral heads** for the
   nonlinear-argument reciprocal families.
 

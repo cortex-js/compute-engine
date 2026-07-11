@@ -817,4 +817,181 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       verify('\\frac{x^2}{\\sqrt{1-x^2}\\arccos(x)}');
     });
   });
+
+  // ── Integration variable other than `x` (R26A). ──
+  // The bundled rules all carry `variable: "x"`; every RHS references the
+  // integration variable as the string token `"x"`. The match env does not
+  // bind the variable pattern (it is matched positionally), so `build()` used
+  // to resolve that `"x"` to the LITERAL symbol `x` instead of the actual
+  // integration variable — corrupting (or garbling) every integral taken with
+  // respect to any variable not literally named `x`. The driver now binds
+  // `env['x']` to the real integration variable before RHS construction.
+  describe('integration variable other than x (R26A)', () => {
+    const ce = new ComputeEngine();
+    ce.timeLimit = 30_000; // Subst / exp-substitution classes are slow under ts-jest
+    loadIntegrationRules(ce);
+
+    // Integrate `latex` (parsed over variable `v`) and numerically D-verify
+    // F'(v) == integrand at several sample points, substituting any extra
+    // symbolic parameters from `params`.
+    const dVerify = (
+      latex: string,
+      v: string,
+      params: Record<string, number> = {},
+      samples: number[] = [0.31, 0.73, 1.27]
+    ) => {
+      const integrand = ce.parse(latex);
+      const F = ce.function('Integrate', [integrand, ce.symbol(v)]).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      // Regression guard: no result taken w.r.t. a non-`x` variable may leak
+      // the literal symbol `x` (unless `x` is an explicit free parameter).
+      if (v !== 'x' && !('x' in params)) expect(F.has('x')).toBe(false);
+      let g = integrand;
+      let Fp = F;
+      for (const [k, val] of Object.entries(params)) {
+        Fp = Fp.subs({ [k]: val });
+        g = g.subs({ [k]: val });
+      }
+      const dF = ce.expr(['D', Fp, v]).evaluate();
+      let sampled = 0;
+      for (const s of samples) {
+        const a = dF.subs({ [v]: s }).N().re;
+        const b = g.subs({ [v]: s }).N().re;
+        if (a === undefined || b === undefined) continue;
+        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+        expect(a).toBeCloseTo(b, 6);
+        sampled++;
+      }
+      expect(sampled).toBeGreaterThan(0);
+    };
+
+    // 1. power rule → t³/3
+    test('∫t² dt = t³/3', () => {
+      const F = ce
+        .function('Integrate', [ce.parse('t^2'), ce.symbol('t')])
+        .evaluate();
+      expect(F.isSame(ce.parse('\\frac{t^3}{3}'))).toBe(true);
+      dVerify('t^2', 't');
+    });
+
+    // 2. elementary trig → −cos(t)
+    test('∫sin(t) dt = −cos(t)', () => {
+      const F = ce
+        .function('Integrate', [ce.parse('\\sin t'), ce.symbol('t')])
+        .evaluate();
+      expect(F.isSame(ce.parse('-\\cos t'))).toBe(true);
+      dVerify('\\sin t', 't');
+    });
+
+    // 3. linear-binomial rule → (2t+3)⁶/12
+    test('∫(3+2t)⁵ dt = (2t+3)⁶/12', () => dVerify('(3+2t)^5', 't'));
+
+    // 4. by-parts (the mixed-corruption case) → t·sin(t)+cos(t)
+    test('∫t·cos(t) dt = t·sin(t)+cos(t)', () => dVerify('t\\cos t', 't'));
+
+    // 5. symbolic coefficients → ln(a+bt)/b
+    test('∫1/(a+b·t) dt = ln(a+bt)/b', () =>
+      dVerify('\\frac{1}{a+b t}', 't', { a: 2, b: 3 }));
+
+    // 6. the Subst-rule path 1.2.1.1 (garbage pre-fix) → artanh form
+    test('∫1/(a+b·t+c·t²) dt (Subst path)', () =>
+      dVerify('\\frac{1}{a+b t+c t^2}', 't', { a: 2, b: 3, c: 5 }));
+
+    // 7. literal `x` as a FREE PARAMETER while integrating w.r.t. `t`
+    //    (impossible to get right pre-fix; guards against a rename-based fix).
+    test('∫1/(x+t) dt = ln(x+t)', () => {
+      const F = ce
+        .function('Integrate', [ce.parse('\\frac{1}{x+t}'), ce.symbol('t')])
+        .evaluate();
+      expect(F.isSame(ce.parse('\\ln(x+t)'))).toBe(true);
+      dVerify('\\frac{1}{x+t}', 't', { x: 1.5 });
+    });
+
+    // 8. trig deactivation bridge in a non-x variable
+    test('∫cos⁴(y) dy', () => dVerify('\\cos^4 y', 'y'));
+
+    // 9. exp-substitution fallback + native-rational rescue end-to-end
+    test('∫1/(3+5·sinh(u)) du', () =>
+      dVerify('\\frac{1}{3+5\\sinh u}', 'u'));
+  });
+
+  // ── R26B: symbolic-coefficient reciprocal-hyperbolic closure. ──
+  // `∫1/(a+b·sinh x)` (and cosh/tanh/…) with SYMBOLIC a,b. The `t=eˣ`
+  // substitution lands the integrand at a NESTED rational shape
+  // (`1/(x·(a+b/2·(x−1/x)))`) that no bundled rule matches, so these stayed
+  // inert while the NUMERIC-coefficient forms closed (rescued by the
+  // numeric-only native fallback). The R26B rational-normal-form step flattens
+  // `g/x` into a single `N/D` of expanded x-polynomials (denominator's residual
+  // `x^m` monomial kept factored) so the 1.2.1.1 rational rules close it. All
+  // D-verified at concrete (a,b) — the corpus grader mis-scores some
+  // symbolic-parameter antiderivatives, so we differentiate F back here.
+  describe('symbolic-coefficient reciprocal-hyperbolic closure (Chapter-6, R26B)', () => {
+    const ce = new ComputeEngine();
+    ce.timeLimit = 30_000; // the exp-substitution rational chain is slow under ts-jest
+    loadIntegrationRules(ce);
+
+    // Close ∫1/(a+b·F(v)) symbolically, then D-verify F'(v) == integrand at
+    // concrete (a,b) over several sample points.
+    const dVerifyHyp = (
+      latex: string,
+      v: string = 'x',
+      params: [number, number][] = [
+        [3, 5],
+        [2, 7],
+      ],
+      samples: number[] = [0.4, 0.9, 1.3, 1.7]
+    ) => {
+      const integrand = ce.parse(latex);
+      const F = ce.function('Integrate', [integrand, ce.symbol(v)]).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      if (v !== 'x') expect(F.has('x')).toBe(false); // no leaked literal `x`
+      const dF = ce.function('D', [F, ce.symbol(v)]).evaluate();
+      let sampled = 0;
+      for (const [a, b] of params)
+        for (const s of samples) {
+          const sub = { a, b, [v]: s };
+          const g = integrand.subs(sub).N().re;
+          const d = dF.subs(sub).N().re;
+          if (typeof g !== 'number' || typeof d !== 'number') continue;
+          if (!Number.isFinite(g) || !Number.isFinite(d)) continue;
+          expect(d).toBeCloseTo(g, 6);
+          sampled++;
+        }
+      expect(sampled).toBeGreaterThan(2);
+    };
+
+    test('∫1/(a+b·sinh x) dx', () => dVerifyHyp('\\frac{1}{a+b\\sinh x}'));
+    test('∫1/(a+b·cosh x) dx', () => dVerifyHyp('\\frac{1}{a+b\\cosh x}'));
+    test('∫1/(a+b·tanh x) dx', () => dVerifyHyp('\\frac{1}{a+b\\tanh x}'));
+
+    // Exercises R26A (non-`x` variable binding) + R26B (normal form) together.
+    test('∫1/(a+b·sinh u) du', () => dVerifyHyp('\\frac{1}{a+b\\sinh u}', 'u'));
+
+    // Numeric regression: the native-fallback path still closes.
+    test('∫1/(3+5·sinh x) dx still closes', () => {
+      const F = ce
+        .function('Integrate', [
+          ce.parse('\\frac{1}{3+5\\sinh x}'),
+          ce.symbol('x'),
+        ])
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+    });
+
+    // Toggle meaningfulness: the symbolic sinh closure is R26B's. `NO_R26` is
+    // captured at module load, so this branches on the env var present at
+    // process start — the default suite proves the closure, a `RUBI_NO_R26=1`
+    // run proves it goes inert without the rung.
+    test('∫1/(a+b·sinh x) is gated by RUBI_NO_R26', () => {
+      const F = ce
+        .function('Integrate', [
+          ce.parse('\\frac{1}{a+b\\sinh x}'),
+          ce.symbol('x'),
+        ])
+        .evaluate();
+      if (process.env.RUBI_NO_R26 === undefined)
+        expect(F.has('Integrate')).toBe(false);
+      else expect(F.has('Integrate')).toBe(true);
+    });
+  });
 });

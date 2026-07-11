@@ -52,6 +52,25 @@ export function labelFor(because: string): StepLabel {
   if (registered !== undefined)
     return { id, description: registered, registered: true };
 
+  // Rubi integration-rule ids get a uniform description keyed off the
+  // underlying rule id (a systematic family, like 'fungrim:'). The id embeds
+  // the full corpus file path ('rubi:1 Algebraic functions/…/1.1.1.1 (a+b
+  // x)^m.m#7') for stability; the description uses only the last path
+  // segment — the section number and rule index — to stay readable.
+  if (id.startsWith('rubi:')) {
+    const ruleId = id.slice('rubi:'.length);
+    const tail = ruleId.slice(ruleId.lastIndexOf('/') + 1);
+    // '1.1.1.1 (a+b x)^m.m#7' → section '1.1.1.1', rule index '7'
+    const m = tail.match(/^([\d.]+)\s?.*#(\d+)$/);
+    return {
+      id,
+      description: m
+        ? `Apply integration rule ${m[1]}#${m[2]} (Rubi)`
+        : `Apply integration rule ${tail} (Rubi)`,
+      registered: true,
+    };
+  }
+
   return { id, description: prettify(id), registered: false };
 }
 
@@ -258,6 +277,16 @@ registerStepLabels({
   'solve.system.product-sum':
     'Rewrite the sum and product conditions as a quadratic',
   'solve.case': 'Consider the next case',
+  // System-of-inequalities phases
+  'solve.system.normalize-inequality':
+    'Rewrite the inequality with zero on the right-hand side',
+  'solve.system.intersect-boundaries':
+    'Find the intersection points of the boundary lines',
+  'solve.system.vertices':
+    'Keep the corner points that satisfy every inequality',
+  'solve.system.check-constraints':
+    'Substitute the candidate solution into each constraint',
+  'solve.system.reject': 'Reject the candidate: it violates a constraint',
 });
 
 //
@@ -324,6 +353,29 @@ registerStepLabels({
   'solve.cotangent-unit': 'Apply the inverse cotangent',
   'solve.sine-cosine-linear-combination':
     'Rewrite a·sin x + b·cos x as a single sinusoid',
+});
+
+//
+// ── Integration: rule-driver phase steps (`expr.explain('Integrate')`) ──
+//
+registerStepLabels({
+  'integrate.constant': 'The integral of a constant: ∫c dx = c·x',
+  'integrate.variable': 'The integral of the variable: ∫x dx = x²/2',
+  'integrate.sum': 'Integrate term by term: ∫(u+v) dx = ∫u dx + ∫v dx',
+  'integrate.constant-factor': 'Move the constant factor out of the integral',
+  'integrate.collected-power': 'Integrate the power of the linear expression',
+  'integrate.hyperbolic-to-exp': 'Rewrite the hyperbolic functions as exponentials',
+  'integrate.trig-to-exp': 'Rewrite the trigonometric functions as exponentials',
+  'integrate.by-parts': 'Integrate by parts',
+  'integrate.si-ci':
+    'Express the integral with the sine and cosine integral functions Si and Ci',
+  'integrate.trig-to-single-exp':
+    'Substitute a single exponential for the trigonometric functions',
+  'integrate.exponential-substitution':
+    'Substitute for the exponential and integrate the rational function',
+  'integrate.partial-fractions': 'Integrate using partial-fraction decomposition',
+  'integrate.previous-result': 'Use the integral computed earlier',
+  'integrate.simplify': 'Simplify the result',
 });
 
 //

@@ -1824,6 +1824,61 @@ function cancelCommonXPower(e: Expression, x: string): Expression {
   return divTerms(num).div(divTerms(den));
 }
 
+/** R26B: rewrite a (possibly deeply nested) rational function of `x` into a
+ * single FLAT `N/D` whose numerator and denominator are fully-expanded
+ * polynomials in `x` sharing no common `x^k` monomial factor. Used by the
+ * hyperbolic function-of-exponential fallback: the `t = e^x` substitution
+ * lands `∫1/(a+b·sinh x)` at the nested shape `1/(x·(a + b/2·(x − 1/x)))`,
+ * which no bundled rule matches, whereas the flat equivalent `2/(b·x²+2a·x−b)`
+ * closes via the 1.2.1.1 quadratic-denominator rules.
+ *
+ * `asNumDen` cross-multiplies the nested Divide/Subtract/Power structure into a
+ * single fraction; `expand` turns each side into a polynomial in x; the common
+ * `x^k` factor (introduced by the outer `1/x` of the substitution) is cancelled
+ * the way `Cancel` would. Returns null when the result is NOT a rational
+ * function of x (some expanded side is not a polynomial in x, or the
+ * denominator vanishes), so the caller can fall back to the un-normalized form.
+ */
+export function rationalNormalFormX(
+  e: Expression,
+  x: string
+): Expression | null {
+  const ce = e.engine;
+  const divByXk = (u: Expression, kk: number): Expression => {
+    if (kk <= 0) return u;
+    const xk = ce.function('Power', [ce.symbol(x), ce.number(kk)]);
+    const terms = u.operator === 'Add' && u.ops ? u.ops : [u];
+    const out = terms.map((t) => t.div(xk));
+    return expand(out.length === 1 ? out[0] : ce.function('Add', out));
+  };
+  const { num, den } = asNumDen(e);
+  let n = expand(num);
+  let d = expand(den);
+  if (d.isSame(0)) return null;
+  // Cancel the common `x^k` monomial factor shared by numerator and denominator
+  // (introduced by the substitution's outer `1/x`).
+  const k = Math.min(minXPower(n, x), minXPower(d, x));
+  n = divByXk(n, k);
+  d = divByXk(d, k);
+  if (polyCoeffsX(n, x) === null) return null;
+  // Keep the residual `x^m` monomial of the denominator FACTORED rather than
+  // expanded: the partial-fraction rules match `poly/(x^m·R)` (e.g. tanh's
+  // `(x²+1)/(x·((a+b)x²+(a−b)))`) but NOT the same denominator expanded into a
+  // single cubic. When m = 0 the denominator is already a single polynomial
+  // (e.g. sinh's flat quadratic), which is exactly the shape those rules want.
+  const m = minXPower(d, x);
+  const R = divByXk(d, m);
+  if (polyCoeffsX(R, x) === null) return null;
+  const denExpr =
+    m > 0
+      ? ce.function('Multiply', [
+          ce.function('Power', [ce.symbol(x), ce.number(m)]),
+          R,
+        ])
+      : R;
+  return n.div(denExpr);
+}
+
 function functionOfLog(
   u: Expression,
   x: string

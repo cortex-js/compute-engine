@@ -280,13 +280,6 @@ describe('explain: serialization', () => {
 // ============================================================
 
 describe('explain: unsupported operations throw', () => {
-  test("explain('solve') on a system of inequalities throws", () => {
-    // Systems of *equations* are supported (see the system sections below);
-    // inequality systems remain out of scope.
-    expect(() =>
-      ce.box(['List', ce.parse('x + y < 2'), ce.parse('x - y > 0')]).explain('solve')
-    ).toThrow();
-  });
   test("explain('solve') with several unknowns throws", () => {
     expect(() => ce.parse('x + y = 2').explain('solve')).toThrow();
   });
@@ -1142,20 +1135,29 @@ describe('explain: solve Or (alternatives)', () => {
 // ============================================================
 
 describe('explain: solve systems — unsupported cases throw', () => {
-  test('system of inequalities throws', () => {
+  test('unsolvable inequality system throws the precise inequalities error', () => {
+    // Nonlinear inequality: the 2-var linear solver declines, so the system
+    // has no traced solution. The error names inequalities (not the confusing
+    // univariate "requires exactly one unknown").
     expect(() =>
       ce
-        .box(['List', ce.parse('x + y < 5'), ce.parse('x - y > 1')])
-        .explain('solve')
+        .box(['List', ce.parse('x^2 + y < 1'), ce.parse('x > 0')])
+        .explain('solve', { variable: ['x', 'y'] })
     ).toThrow(/inequalit/i);
   });
 
-  test('mixed equality + inequality system throws', () => {
-    expect(() =>
-      ce
-        .box(['List', ce.parse('x + y = 5'), ce.parse('x - y > 1')])
-        .explain('solve')
-    ).toThrow(/mixed/i);
+  test('unsolvable mixed system throws the precise mixed-system error', () => {
+    // The equalities pin x=3, y=2, which violates x>10: no candidate survives.
+    const sys = ce.box([
+      'List',
+      ce.parse('x + y = 5'),
+      ce.parse('x - y = 1'),
+      ce.parse('x > 10'),
+    ]);
+    expect(sys.solve(['x', 'y'])).toBeNull();
+    expect(() => sys.explain('solve', { variable: ['x', 'y'] })).toThrow(
+      /mixed/i
+    );
   });
 
   test('multivariate Or throws', () => {
@@ -1179,5 +1181,164 @@ describe('explain: solve system does not perturb solve()', () => {
     const after = sys.solve(['x', 'y']) as Record<string, any>;
     expect(after.x.isSame(before.x)).toBe(true);
     expect(after.y.isSame(before.y)).toBe(true);
+  });
+});
+
+// ============================================================
+// 25. Systems of inequalities (pure) and mixed systems
+// ============================================================
+
+describe('explain: solve inequality systems (pure)', () => {
+  test('x+y<=4, x>=0, y>=0: vertex parity, new ids, curation, golden', () => {
+    const sys = ce.box([
+      'List',
+      ce.parse('x + y \\le 4'),
+      ce.parse('x \\ge 0'),
+      ce.parse('y \\ge 0'),
+    ]);
+    const ex = sys.explain('solve', { variable: ['x', 'y'] });
+
+    expect(ex.operation).toBe('solve');
+
+    // Result matches the plain solver's vertex list (shape + order + values).
+    const solved = sys.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(Array.isArray(solved)).toBe(true);
+    expect(ex.result.operator).toBe('List');
+    expect(ex.result.ops!.length).toBe(solved.length);
+    for (let i = 0; i < solved.length; i++)
+      expect(
+        ex.result.ops![i].isSame(
+          ce.box([
+            'List',
+            ['Equal', 'x', solved[i].x.json],
+            ['Equal', 'y', solved[i].y.json],
+          ])
+        )
+      ).toBe(true);
+
+    // The three new inequality-system phase ids are present.
+    const ids = ex.steps.map((s: any) => s.id);
+    expect(ids).toContain('solve.system.normalize-inequality');
+    expect(ids).toContain('solve.system.intersect-boundaries');
+    expect(ids).toContain('solve.system.vertices');
+
+    // Every step carries a registered `solve.*` label with a non-empty
+    // description, and no step value repeats the previous state (default
+    // verbosity curation).
+    assertSystemContract(ex);
+
+    expect({
+      initial: ex.initial.toString(),
+      result: ex.result.toString(),
+      steps: ex.steps.map((s: any) => `${s.id}: ${s.value.toString()}`),
+    }).toMatchSnapshot();
+  });
+});
+
+describe('explain: solve mixed systems (accepted)', () => {
+  test('x+y=5, x-y=1, x>0: elimination + check-constraints, x=3 y=2', () => {
+    const sys = ce.box([
+      'List',
+      ce.parse('x + y = 5'),
+      ce.parse('x - y = 1'),
+      ce.parse('x > 0'),
+    ]);
+    const ex = sys.explain('solve', { variable: ['x', 'y'] });
+
+    // Parity with the plain solver: single record {x:3, y:2}.
+    const solved = sys.solve(['x', 'y']) as Record<string, any>;
+    expect(solved.x.isSame(3)).toBe(true);
+    expect(solved.y.isSame(2)).toBe(true);
+    expect(
+      ex.result.isSame(ce.box(['List', ['Equal', 'x', 3], ['Equal', 'y', 2]]))
+    ).toBe(true);
+
+    // Both the Gaussian-elimination phase AND the constraint check appear.
+    const ids = ex.steps.map((s: any) => s.id);
+    expect(ids).toContain('solve.system.eliminate');
+    expect(ids).toContain('solve.system.check-constraints');
+
+    assertSystemContract(ex);
+  });
+});
+
+// ============================================================
+// 26. Simplify: operand-substep surfacing & coalescing
+// ============================================================
+
+describe('explain: simplify operand-substep surfacing', () => {
+  test('operand rule work surfaces: tan(x)cot(x) -> 1 before expand', () => {
+    // The tan·cot rewrite happens on an operand and was previously discarded
+    // (only the final `expand` step showed). It now surfaces with its real
+    // rule id, ahead of the `expand` step.
+    const ex = ce
+      .parse('\\tan(x)\\cot(x) + \\frac{x^3+x^2}{x^2} + 2^3 \\cdot 2^{-1}')
+      .explain();
+    const ids = ex.steps.map((s) => s.id);
+    const iTan = ids.indexOf('tan(x)*cot(x) -> 1');
+    const iExpand = ids.indexOf('expand');
+    expect(iTan).toBeGreaterThanOrEqual(0);
+    expect(iExpand).toBeGreaterThan(iTan);
+
+    // Terminal contract and every step is described.
+    expect(ex.steps.at(-1)!.value.isSame(ex.result)).toBe(true);
+    for (const s of ex.steps) {
+      expect(typeof s.description).toBe('string');
+      expect(s.description.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('ln(e^2) -> 2 operand work surfaces (real id)', () => {
+    // `ln(e^2)` reduces to 2 inside a lazy `Add`, via the Ln full-simplify
+    // branch, so the work surfaces with the real `ln` id.
+    const ex = ce
+      .parse('\\frac{\\sin(2x)}{2\\cos(x)} + \\ln(e^2) + \\frac{4}{\\sqrt{2}}')
+      .explain();
+    expect(ex.steps.some((s) => s.id === 'ln')).toBe(true);
+    expect(ex.steps.at(-1)!.value.isSame(ex.result)).toBe(true);
+    for (const s of ex.steps)
+      expect(s.description.length).toBeGreaterThan(0);
+  });
+
+  test('coalesces a run of same-id substeps (ln x² + ln y² + ln z²)', () => {
+    // Each of the three logs fires the same `ln` rule; the three substeps are
+    // consecutive and share an id, so default verbosity collapses them into a
+    // single step ending at the final value.
+    const src = '\\ln(x^2)+\\ln(y^2)+\\ln(z^2)';
+    const def = ce.parse(src).explain();
+    const all = ce.parse(src).explain('simplify', { verbosity: 'all' });
+
+    const lnDefault = def.steps.filter((s) => s.id === 'ln');
+    expect(lnDefault.length).toBe(1);
+    expect(lnDefault[0].value.isSame(def.result)).toBe(true);
+
+    // 'all' keeps the raw run uncoalesced (>= 2 `ln` occurrences).
+    const lnAll = all.steps.filter((s) => s.id === 'ln');
+    expect(lnAll.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("'all' retains the raw 'simplified operands' aggregate", () => {
+    const all = ce
+      .parse('\\ln(x^2)+\\ln(y^2)+\\ln(z^2)')
+      .explain('simplify', { verbosity: 'all' });
+    expect(all.steps.some((s) => s.id === 'simplified operands')).toBe(true);
+  });
+
+  test('substep capture does not perturb simplify()', () => {
+    const cases = [
+      '\\tan(x)\\cot(x) + \\frac{x^3+x^2}{x^2} + 2^3 \\cdot 2^{-1}',
+      '\\frac{\\sin(2x)}{2\\cos(x)} + \\ln(e^2) + \\frac{4}{\\sqrt{2}}',
+      '\\ln(x^2)+\\ln(y^2)+\\ln(z^2)',
+    ];
+    for (const src of cases) {
+      const expr = ce.parse(src);
+      const before = expr.simplify();
+      const ex = expr.explain();
+      // explain result agrees with plain simplify.
+      expect(ex.result.isSame(before)).toBe(true);
+      // calling explain() did not change a subsequent simplify().
+      const after = expr.simplify();
+      expect(after.isSame(before)).toBe(true);
+    }
   });
 });

@@ -985,7 +985,7 @@ export abstract class _BoxedExpression implements Expression {
     operation ??= 'simplify';
     if (operation !== 'simplify') {
       throw new Error(
-        `explain("${operation}") is not supported yet: only "simplify" explanations are available`
+        `explain("${operation}") is not supported here: use "simplify", "solve", "D" or "Integrate" on a function expression`
       );
     }
     const initial = this.canonical;

@@ -103,15 +103,20 @@ export function solveSystem(
     equations &&
     equations.every((eq) => inequalityOps.includes(eq.operator ?? ''))
   ) {
+    const inqTrace: RuleSteps | undefined = trace ? [] : undefined;
     const inequalityResult = solveLinearInequalitySystem(
       [...equations],
-      varNames
+      varNames,
+      inqTrace
     );
     if (inequalityResult) {
       const filtered = inequalityResult.filter((s) =>
         filterSolutionByTypes(ce, varNames, s)
       );
-      if (filtered.length > 0) return filtered;
+      if (filtered.length > 0) {
+        if (trace && inqTrace) trace.push(...inqTrace);
+        return filtered;
+      }
     }
   }
 
@@ -128,30 +133,95 @@ export function solveSystem(
       inequalities.length > 0 &&
       equalities.length + inequalities.length === equations.length
     ) {
+      // Provisional trace for the whole mixed branch: the Gaussian-elimination
+      // steps, the per-candidate constraint checks, and any rejections. Spliced
+      // into `trace` only when this branch produces the returned solution.
+      const mixTrace: RuleSteps | undefined = trace ? [] : undefined;
+
       // Solve equalities first
-      const linearResult = solveLinearSystem([...equalities], varNames);
+      const linearResult = solveLinearSystem([...equalities], varNames, mixTrace);
       if (linearResult) {
         // Single parametric solution — check against inequalities
-        if (satisfiesInequalities(linearResult, inequalities))
-          return filterSolutionByTypes(ce, varNames, linearResult)
-            ? linearResult
-            : null;
+        if (mixTrace)
+          mixTrace.push({
+            value: constraintsWithCandidate(ce, inequalities, linearResult),
+            because: 'solve.system.check-constraints',
+          });
+        if (satisfiesInequalities(linearResult, inequalities)) {
+          if (filterSolutionByTypes(ce, varNames, linearResult)) {
+            if (trace && mixTrace) trace.push(...mixTrace);
+            return linearResult;
+          }
+          return null;
+        }
+        // Candidate violates a constraint: reject and try the polynomial route.
+        if (mixTrace)
+          mixTrace.push({
+            value: candidateAsEquationList(ce, varNames, linearResult),
+            because: 'solve.system.reject',
+          });
       }
 
       // Try polynomial system
-      const polyResult = solvePolynomialSystem([...equalities], varNames);
+      const polyResult = solvePolynomialSystem(
+        [...equalities],
+        varNames,
+        mixTrace
+      );
       if (polyResult) {
-        const filtered = polyResult.filter(
-          (s) =>
+        const accepted: Array<Record<string, Expression>> = [];
+        for (const s of polyResult) {
+          const ok =
             satisfiesInequalities(s, inequalities) &&
-            filterSolutionByTypes(ce, varNames, s)
-        );
-        if (filtered.length > 0) return filtered;
+            filterSolutionByTypes(ce, varNames, s);
+          if (mixTrace)
+            mixTrace.push({
+              value: constraintsWithCandidate(ce, inequalities, s),
+              because: 'solve.system.check-constraints',
+            });
+          if (ok) accepted.push(s);
+          else if (mixTrace)
+            mixTrace.push({
+              value: candidateAsEquationList(ce, varNames, s),
+              because: 'solve.system.reject',
+            });
+        }
+        if (accepted.length > 0) {
+          if (trace && mixTrace) trace.push(...mixTrace);
+          return accepted;
+        }
       }
     }
   }
 
   return null;
+}
+
+/** The list of inequality constraints with a candidate solution substituted
+ * (unevaluated, so it shows e.g. `List(Greater(3, 0))` rather than `True`). */
+function constraintsWithCandidate(
+  ce: ComputeEngine,
+  inequalities: ReadonlyArray<Expression>,
+  solution: Record<string, Expression>
+): Expression {
+  return ce.function(
+    'List',
+    inequalities.map((ineq) => ineq.subs(solution, { canonical: true }))
+  );
+}
+
+/** A candidate solution record as `List(Equal(x, …), Equal(y, …))` in
+ * `varNames` order. */
+function candidateAsEquationList(
+  ce: ComputeEngine,
+  varNames: string[],
+  solution: Record<string, Expression>
+): Expression {
+  const eqs: Expression[] = [];
+  for (const v of varNames)
+    if (v in solution)
+      eqs.push(ce.function('Equal', [ce.symbol(v), solution[v]]));
+  return ce.function('List', eqs);
 }
 
 /** Check whether a solution record satisfies all inequality constraints.

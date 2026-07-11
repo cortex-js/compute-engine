@@ -14,7 +14,7 @@ import { findUnivariateRoots, rootsAsEquations } from './solve.js';
 import { filterRootsByAssumptions } from './solve-domain.js';
 import { solveSystem } from './solve-system.js';
 import { normalizedUnknownsForSolve } from './utils.js';
-import { isFunction } from './type-guards.js';
+import { isFunction, isSymbol } from './type-guards.js';
 import { labelFor } from './explain-labels.js';
 
 /**
@@ -60,9 +60,11 @@ export function explainExpression(
     );
   }
 
+  if (operation === 'Integrate') return explainIntegrate(expr, options);
+
   if (operation !== 'simplify') {
     throw new Error(
-      `explain("${operation}") is not supported: use "simplify", "solve" or "D"`
+      `explain("${operation}") is not supported: use "simplify", "solve", "D" or "Integrate"`
     );
   }
 
@@ -74,7 +76,10 @@ export function explainExpression(
   } = options ?? {};
 
   const raw = withDeadline(expr.engine, () =>
-    simplify(expr, simplifyOptions as Partial<SimplifyOptions>)
+    simplify(expr, {
+      ...simplifyOptions,
+      collectSubsteps: true,
+    } as Partial<SimplifyOptions>)
   )();
 
   return explanationFromRuleSteps('simplify', raw, verbosity ?? 'default');
@@ -173,14 +178,22 @@ function explainSolveUnivariate(
 }
 
 /**
- * System of equations (a `List`/`And` of `Equal`): the same `solveSystem`
- * dispatch the plain `solve()` runs, with the trace attached. Returns `null`
- * when the system path declines (so the caller can fall through to the
- * univariate path). Throws for inequality or mixed systems (out of scope).
+ * System of (in)equalities (a `List`/`And` of `Equal` / `Less` / `LessEqual`
+ * / `Greater` / `GreaterEqual`): the same `solveSystem` dispatch the plain
+ * `solve()` runs, with the trace attached.
  *
- * Step values are the whole system as a `List` of equations — the state after
- * each Gaussian-elimination / back-substitution phase — ending with the
- * solution(s) as `List(Equal(x, …), Equal(y, …))`.
+ * - Pure-equality systems: the Gaussian-elimination / back-substitution
+ *   phases, ending with the solution(s) as `List(Equal(x, …), Equal(y, …))`.
+ * - Pure-inequality systems (2-var linear): the normalized constraints, the
+ *   candidate boundary intersections, and the feasible hull vertices.
+ * - Mixed systems: the elimination phases, then each candidate checked
+ *   against the inequality constraints (accepted or rejected).
+ *
+ * Returns `null` when the system path declines. For pure-equality systems the
+ * caller then falls through to the univariate path; for systems that contain
+ * an inequality, this throws a precise error instead (so the caller never
+ * reaches the confusing "requires exactly one unknown" univariate error).
+ * `Congruent` systems are not traced: they decline via `return null`.
  */
 function explainSolveSystem(
   ce: ComputeEngine,
@@ -189,28 +202,43 @@ function explainSolveSystem(
   verbosity: 'default' | 'all'
 ): Explanation | null {
   const equations = isFunction(canonical) ? canonical.ops : [];
+  const relationalOps = [
+    'Equal',
+    'Less',
+    'LessEqual',
+    'Greater',
+    'GreaterEqual',
+  ];
   const inequalityOps = ['Less', 'LessEqual', 'Greater', 'GreaterEqual'];
-  if (equations.some((eq) => inequalityOps.includes(eq.operator ?? ''))) {
-    const allInequality = equations.every((eq) =>
-      inequalityOps.includes(eq.operator ?? '')
-    );
-    throw new Error(
-      allInequality
-        ? 'explain("solve") does not support systems of inequalities'
-        : 'explain("solve") does not support mixed equality and inequality systems'
-    );
-  }
 
-  // Only pure systems of equations are traced; anything else declines.
+  // Only systems whose operands are all (in)equalities are traced; anything
+  // else (e.g. `Congruent`) declines and falls through untraced.
   if (
     equations.length === 0 ||
-    !equations.every((eq) => eq.operator === 'Equal')
+    !equations.every((eq) => relationalOps.includes(eq.operator ?? ''))
   )
     return null;
 
+  const hasInequality = equations.some((eq) =>
+    inequalityOps.includes(eq.operator ?? '')
+  );
+
   const trace: RuleSteps = [];
   const solution = solveSystem(ce, equations, varNames, trace);
-  if (solution === null) return null;
+  if (solution === null) {
+    if (hasInequality) {
+      const allInequality = equations.every((eq) =>
+        inequalityOps.includes(eq.operator ?? '')
+      );
+      throw new Error(
+        allInequality
+          ? 'explain("solve") could not solve this system of inequalities'
+          : 'explain("solve") could not solve this mixed equality/inequality system'
+      );
+    }
+    // Pure-equality system that declined: fall through to the univariate path.
+    return null;
+  }
 
   const result = systemSolutionToExpression(ce, varNames, solution);
   trace.push({ value: result, because: 'solve.roots' });
@@ -318,6 +346,112 @@ function explainSolveOr(
 }
 
 /**
+ * Explanation of `Integrate` (indefinite antiderivatives): a step-by-step
+ * trace of the opt-in Rubi integration rule driver, which must be loaded via
+ * `loadIntegrationRules()`. Each step's `value` is the whole evolving
+ * antiderivative (with inert `∫…` placeholders for the not-yet-integrated
+ * pieces), so the chain reads as a textbook derivation ending in the closed
+ * form. The result is exactly what `.evaluate()` returns (a deterministic
+ * second run of the same provider).
+ */
+function explainIntegrate(
+  expr: Expression,
+  options?: ExplainOptions
+): Explanation {
+  const ce = expr.engine;
+  const verbosity = options?.verbosity ?? 'default';
+
+  let canonical = expr.canonical;
+
+  // If the receiver isn't already an `Integrate`, wrap it with the integration
+  // variable (from `options.variable`, else the sole unknown).
+  if (canonical.operator !== 'Integrate') {
+    let x: string;
+    const v = options?.variable;
+    if (v !== undefined) {
+      if (Array.isArray(v)) {
+        if (v.length !== 1)
+          throw new Error(
+            'explain("Integrate") supports a single integration variable: pass options.variable as a string'
+          );
+        x = v[0];
+      } else x = v;
+    } else {
+      const unknowns = canonical.unknowns;
+      if (unknowns.length !== 1)
+        throw new Error(
+          'explain("Integrate") requires the integration variable: specify it with options.variable'
+        );
+      x = unknowns[0];
+    }
+    canonical = ce.function('Integrate', [canonical, ce.symbol(x)]);
+  }
+
+  // Extract the integration variable; reject definite and multivariate forms.
+  const limits = isFunction(canonical) ? canonical.ops.slice(1) : [];
+  if (limits.length !== 1)
+    throw new Error(
+      'explain("Integrate") supports a single integration variable'
+    );
+  const limit = limits[0];
+  const lo = isFunction(limit) ? limit.op2 : undefined;
+  const hi = isFunction(limit) ? limit.op3 : undefined;
+  const isIndefinite =
+    (lo === undefined || isSymbol(lo, 'Nothing')) &&
+    (hi === undefined || isSymbol(hi, 'Nothing'));
+  if (!isIndefinite)
+    throw new Error('explain("Integrate") supports indefinite integrals only');
+
+  const varExpr = isFunction(limit) ? limit.op1 : undefined;
+  const variable = isSymbol(varExpr) ? varExpr.symbol : undefined;
+  if (!variable || variable === 'Nothing')
+    throw new Error(
+      'explain("Integrate") requires the integration variable: specify it with options.variable'
+    );
+
+  if (!ce._integrationProvider)
+    throw new Error(
+      'explain("Integrate") requires the integration rules: load them with loadIntegrationRules() from "@cortex-js/compute-engine/integration-rules"'
+    );
+
+  // Pass the same wrapped integrand form `library/calculus.ts` passes, so the
+  // provider's unwrap loop and the trace it records line up with the real run.
+  const integrand = isFunction(canonical) ? canonical.ops[0] : canonical;
+
+  const trace: RuleSteps = [];
+  const anti = withDeadline(ce, () =>
+    ce._integrationProvider!(integrand, variable, trace)
+  )();
+  if (anti === null || anti === undefined)
+    throw new Error(
+      'explain("Integrate"): the integration rules could not integrate this expression'
+    );
+
+  // Result parity by construction: evaluate the real `Integrate` operator (a
+  // deterministic second run of the same provider plus the calculus.ts
+  // shaping), so the explanation's result equals what `.evaluate()` returns.
+  const result = withDeadline(ce, () => canonical.evaluate())();
+  if (result.operator === 'Integrate')
+    throw new Error(
+      'explain("Integrate"): the integration rules could not integrate this expression'
+    );
+
+  const initial = canonical;
+  const steps = curateChain(initial, trace, verbosity);
+
+  // Tail repair: ensure the last displayed state matches the returned result
+  // (the provider's raw antiderivative may differ from the evaluate()-shaped
+  // one by a final simplification).
+  const last = steps.at(-1);
+  if (last === undefined || !last.value.isSame(result)) {
+    const { id, description } = labelFor('integrate.simplify');
+    steps.push({ value: result, id, description });
+  }
+
+  return { operation: 'Integrate', initial, result, steps };
+}
+
+/**
  * Curate a state-progression chain (each step's `value` is the whole
  * state after the step): at `'default'` verbosity, steps whose value is
  * unchanged from the previous state are dropped.
@@ -355,21 +489,70 @@ function explanationFromRuleSteps(
   const initial = raw[0].value;
   const result = raw.at(-1)!.value;
 
-  if (verbosity === 'all')
-    return {
-      operation,
-      initial,
-      result,
-      steps: raw.slice(1).map(toExplainStep),
-    };
+  // 'all': raw fidelity. For an aggregate `'simplified operands'` step, emit
+  // its lifted substeps (labeled) first, then the raw aggregate step itself,
+  // so nothing the raw chain records is hidden.
+  if (verbosity === 'all') {
+    const steps: ExplainStep[] = [];
+    for (const s of raw.slice(1)) {
+      if (s.because === 'simplified operands' && s.substeps)
+        for (const sub of s.substeps) steps.push(toExplainStep(sub));
+      steps.push(toExplainStep(s));
+    }
+    return { operation, initial, result, steps };
+  }
 
+  // 'default': curate. Bookkeeping and no-op steps are dropped; an aggregate
+  // `'simplified operands'` step with captured substeps is replaced by those
+  // substeps (surfacing the real operand-level rule work), then closed with a
+  // generic `simplify-terms` step for any numeric-fold residue.
   const steps: ExplainStep[] = [];
   let prev = initial;
-  for (const s of raw.slice(1)) {
-    if (BOOKKEEPING_IDS.has(s.because)) continue;
-    if (s.value.isSame(prev)) continue;
+
+  const emit = (s: RuleStep): void => {
+    if (BOOKKEEPING_IDS.has(s.because)) return;
+    if (s.value.isSame(prev)) return;
     steps.push(toExplainStep(s));
     prev = s.value;
+  };
+
+  for (const s of raw.slice(1)) {
+    if (
+      s.because === 'simplified operands' &&
+      s.substeps &&
+      s.substeps.length > 0
+    ) {
+      for (const sub of s.substeps) emit(sub);
+      // Residue not captured in substeps (e.g. a numeric fold via
+      // `evaluateNumericSubexpressions`): close the gap to the aggregate value
+      // with a generic step so no work is silently dropped.
+      if (!s.value.isSame(prev)) {
+        const { id, description } = labelFor('simplify-terms');
+        steps.push({ value: s.value, id, description });
+        prev = s.value;
+      }
+      continue;
+    }
+    // A bare `'simplified operands'` step (no substeps) stays filtered; the
+    // tail repair below is the safety net for any real work it did.
+    emit(s);
+  }
+
+  // Coalesce noisy runs: merge each maximal run of >= 2 consecutive steps that
+  // share the same `id` into one step, keeping the last value (and the first
+  // step's purpose, if any).
+  const coalesced: ExplainStep[] = [];
+  for (const s of steps) {
+    const last = coalesced.at(-1);
+    if (last !== undefined && last.id === s.id) {
+      const merged: ExplainStep = {
+        value: s.value,
+        id: last.id,
+        description: last.description,
+      };
+      if (last.purpose !== undefined) merged.purpose = last.purpose;
+      coalesced[coalesced.length - 1] = merged;
+    } else coalesced.push(s);
   }
 
   // Tail repair: if the chain ended on a filtered bookkeeping step that did
@@ -378,10 +561,10 @@ function explanationFromRuleSteps(
   // value always matches `result`.
   if (!prev.isSame(result)) {
     const { id, description } = labelFor('simplify-terms');
-    steps.push({ value: result, id, description });
+    coalesced.push({ value: result, id, description });
   }
 
-  return { operation, initial, result, steps };
+  return { operation, initial, result, steps: coalesced };
 }
 
 /** Map an internal `RuleStep` to a public, labeled `ExplainStep`. */

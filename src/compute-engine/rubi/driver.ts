@@ -9,8 +9,12 @@
 // sums. Recursion is bounded by depth and by the engine deadline; failed
 // subproblems stay as inert `Integrate` expressions.
 
-import type { IComputeEngine as ComputeEngine } from '../global-types.js';
+import type {
+  IComputeEngine as ComputeEngine,
+  RuleSteps,
+} from '../global-types.js';
 import type { Expr as Expression } from './types.js';
+import { replayIntRecords } from './explain-trace.js';
 
 import { matchAll } from './match.js';
 import type { CompiledRule } from './compile.js';
@@ -43,6 +47,7 @@ import {
   numericallyEvaluable,
   foldLnExponentialE,
   functionOfExponentialSubstitution,
+  rationalNormalFormX,
   sinhCoshArgsPolynomialQ,
   hasSingleAngleTrigRationalCandidate,
   singleAngleExponentialPieces,
@@ -98,6 +103,12 @@ const NO_TRIGEXP = process.env.RUBI_NO_TRIGEXP !== undefined;
 // integrand — the inverse-trig `Subst[∫f(x)·Cot[x],…]` reductions). A/B measures
 // its effect on the ch5/ch7 (d+e·x²)^p·(a+b·arcsin/arccos)^n families.
 const NO_TRIGSUB = process.env.RUBI_NO_TRIGSUB !== undefined;
+// RUBI_NO_R26: disable the R26B rational-normal-form step inside the hyperbolic
+// function-of-exponential fallback (the `t = e^v` substitution's nested
+// `1/(x·(a+b/2·(x−1/x)))` shape → flat `N/D` of expanded x-polynomials, so the
+// additive-denominator reciprocals `1/(a+b·sinh/cosh/tanh/…)` with SYMBOLIC
+// coefficients close via the 1.2.1.1 rational rules). A/B measures its ch6 effect.
+const NO_R26 = process.env.RUBI_NO_R26 !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -140,6 +151,27 @@ function cleanTrig(ce: ComputeEngine, e: Expression): Expression {
   return (step?.value as Expression) ?? node;
 }
 
+/**
+ * One recorded integration step, captured by the driver only when a `records`
+ * accumulator is threaded through `int()` (i.e. under `explain('Integrate')`).
+ *
+ * - `node` is an inert `Integrate(g, x)` in the driver's INTERNAL
+ *   (deactivated / Times-Power normal-form) representation — the placeholder
+ *   that this step replaces in the evolving replay state. It is built from the
+ *   integrand as it ENTERS `intRec`, so it matches the placeholder the parent
+ *   step wrote into its own `replacement`.
+ * - `replacement` is what takes its place: a template that itself contains
+ *   inert sub-`Integrate` placeholders (structural / rule steps), or a final
+ *   sub-result for opaque steps. `null` means "patch me later" (the template
+ *   build failed and the real result is filled in on success).
+ * - `because` is the step id (a `rubi:<rule-id>` or an `integrate.*` phase id).
+ */
+export type IntStepRecord = {
+  node: Expression;
+  replacement: Expression | null;
+  because: string;
+};
+
 export type DriverStats = {
   calls: number;
   ruleFirings: Record<string, number>;
@@ -163,6 +195,21 @@ export class RubiDriver {
   // zero-regression gate. Sound because no algebraic rule emits trig, so a
   // trig-free integrand stays trig-free through the whole recursion.
   private trigActive = false;
+  // Step-trace accumulator for `explain('Integrate')`. `undefined` on every
+  // ordinary (untraced) call — every recording site is guarded by it, so a
+  // non-tracing integration has ZERO overhead and behaves exactly as before.
+  private records: IntStepRecord[] | undefined = undefined;
+  // Nesting counter: while > 0, recording is suppressed. The opaque fallbacks
+  // (native-rational, hyperbolic→exp, by-parts, Si/Ci, …) bump it around their
+  // internal `intRec` recursion so each surfaces as a SINGLE step rather than
+  // exposing its (unmodeled) internals.
+  private suppressRecording = 0;
+  // Set while building a display-only rule template (via `build` with an
+  // `int: () => null` hook). A `Subst` template can `.evaluate()` an inert
+  // `Integrate`, which re-enters the provider → this driver; the flag makes
+  // that re-entrant `int()` bail immediately so it cannot clobber the outer
+  // call's deadline/memo.
+  private templateBuilding = false;
   readonly stats: DriverStats = {
     calls: 0,
     ruleFirings: {},
@@ -202,12 +249,59 @@ export class RubiDriver {
     return list;
   }
 
+  // ── step recording (active only when `this.records` is set) ────────────
+  /** The current `records` length, or 0 when not tracing. Capture before an
+   * attempt so it can be rolled back with `truncate` if the attempt fails. */
+  private mark(): number {
+    return this.records?.length ?? 0;
+  }
+  /** Drop every record pushed since `mark` (attempt-scoped rollback). */
+  private truncate(mark: number): void {
+    if (this.records) this.records.length = mark;
+  }
+  /** Push a step record, returning its index (or -1 when not recording).
+   * `node`/`replacement` are thunks so their (sometimes non-trivial)
+   * construction is skipped entirely on the hot, non-tracing path. */
+  private record(
+    node: () => Expression,
+    replacement: () => Expression | null,
+    because: string
+  ): number {
+    if (this.records === undefined || this.suppressRecording > 0) return -1;
+    const idx = this.records.length;
+    this.records.push({ node: node(), replacement: replacement(), because });
+    return idx;
+  }
+
+  /** Replay a completed `records` list into a curated whole-state step chain
+   * (for `explain('Integrate')`). Uses the driver's current `trigActive`
+   * snapshot — valid immediately after the top-level `int()` returns — to
+   * re-activate inert trig heads so displayed states read cleanly. */
+  replayTrace(records: IntStepRecord[]): RuleSteps {
+    const ce = this.ce;
+    const trigActive = this.trigActive;
+    const activate = (e: Expression): Expression => {
+      const a = trigActive ? cleanTrig(ce, activateTrig(ce, e)) : e;
+      return foldLnExponentialE(ce, a);
+    };
+    return replayIntRecords(ce, records, activate);
+  }
+
   /** Integrate `integrand` with respect to `variable`. Returns null when
    * no rule chain applies (caller decides on inert/fallback).
    * NOTE: the integrand must be canonical but NOT evaluated — evaluate()
    * expands products like (a+bx)(c+dx), destroying the structure the
    * rules match on. */
-  int(integrand: Expression, variable: string): Expression | null {
+  int(
+    integrand: Expression,
+    variable: string,
+    records?: IntStepRecord[]
+  ): Expression | null {
+    // Bail if this is a re-entrant call triggered while building a display-only
+    // rule template (a `Subst` template can `.evaluate()` an inert `Integrate`,
+    // which re-enters the provider): pretend we can't integrate rather than
+    // clobber the outer call's deadline/memo.
+    if (this.templateBuilding) return null;
     // The native-rational fallback re-enters this method via
     // `ce.Integrate.evaluate()` (see nativeRationalFallback). A re-entrant
     // call must NOT clobber the outer call's per-call state: resetting the
@@ -221,6 +315,11 @@ export class RubiDriver {
     const reentrant = this.inNativeFallback;
     const savedTrig = this.trigActive;
     const savedCaches = getActiveCaches();
+    // Step-tracing accumulator (only when `explain('Integrate')` threads one
+    // in). A re-entrant call passes no `records`, so the outer's accumulator is
+    // left in place and (via `suppressRecording`) not written to.
+    const savedRecords = this.records;
+    if (records !== undefined) this.records = records;
     if (!reentrant) {
       this.deadline = Date.now() + (this.options.timeLimitMs ?? 30_000);
       // Bound the memo to a single top-level call: it is a per-call cache +
@@ -265,7 +364,20 @@ export class RubiDriver {
       // rules don't yet cover. Bounded by the same wall-clock budget. This
       // rules+native coexistence is exactly how `loadIntegrationRules` is
       // meant to ship.
-      return this.nativeRationalFallback(integrand, variable);
+      this.suppressRecording++;
+      let nf: Expression | null;
+      try {
+        nf = this.nativeRationalFallback(integrand, variable);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (nf !== null)
+        this.record(
+          () => this.ce._fn('Integrate', [integrand, this.ce.symbol(variable)]),
+          () => nf,
+          'integrate.partial-fractions'
+        );
+      return nf;
     } catch (e) {
       // An engine deadline firing inside evaluate()/simplify(), or the
       // matcher's own deadline (see match.ts), surfaces as a
@@ -284,6 +396,7 @@ export class RubiDriver {
         this.trigActive = savedTrig;
         installCaches(savedCaches);
       }
+      this.records = savedRecords;
     }
   }
 
@@ -346,6 +459,15 @@ export class RubiDriver {
     // the engine deadline is armed only inside evaluate(); the driver
     // keeps its own wall-clock budget per top-level int() call
     if (Date.now() > this.deadline || ce._timeRemaining <= 0) return null;
+
+    // The integrand as it ENTERS this call — before the trig deactivation /
+    // normal-form pipeline below rewrites it. Step records use `Integrate(entry)`
+    // as their placeholder `node`, so it matches the inert placeholder the
+    // PARENT step wrote into its `replacement` (the parent hands this exact
+    // expression to `intRec`). Only built when tracing.
+    const entry = integrand;
+    const entryNode = (): Expression =>
+      ce._fn('Integrate', [entry, ce.symbol(variable)]);
 
     // A reduction / Subst RHS can introduce ACTIVE trig into a subproblem of a
     // NON-trig top-level integrand: the inverse-trig `Subst` rules (5.1.2#1
@@ -432,18 +554,34 @@ export class RubiDriver {
     if (collected !== null) integrand = toTimesPower(ce, collected);
 
     const key = variable + '§' + integrand.toString();
-    if (this.memo.has(key)) return this.memo.get(key)!;
+    if (this.memo.has(key)) {
+      // Cache hit: replay it as a single "use the integral computed earlier"
+      // step. A `null` entry is the cycle guard (an in-flight identical
+      // subproblem), not a real result — never recorded.
+      const v = this.memo.get(key)!;
+      if (v !== null)
+        this.record(entryNode, () => v, 'integrate.previous-result');
+      return v;
+    }
     this.memo.set(key, null); // cycle guard: a recursive identical subproblem fails
 
-    let result = this.intUncached(integrand, variable, depth);
+    let result = this.intUncached(integrand, variable, depth, entry);
     // Recursive subproblems get the native rational fallback too (the
     // top-level call in int() only covers depth 0). The trig-substitution
     // rules (4.7.5 #15–#34) substitute a trig variable away and leave an
     // ALGEBRAIC sub-integral (e.g. ∫cos·g(sin) → ∫g(t) dt) that no Chapter-4
     // rule can close; this lets that sub-integral resolve. Bounded by the
     // driver deadline and the re-entry guard; can only turn null → solved.
-    if (result === null && depth > 0)
-      result = this.nativeRationalFallback(integrand, variable);
+    if (result === null && depth > 0) {
+      this.suppressRecording++;
+      try {
+        result = this.nativeRationalFallback(integrand, variable);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (result !== null)
+        this.record(entryNode, () => result, 'integrate.partial-fractions');
+    }
     this.memo.set(key, result);
     if (result === null) this.stats.failures++;
     return result;
@@ -452,7 +590,8 @@ export class RubiDriver {
   private intUncached(
     integrand: Expression,
     variable: string,
-    depth: number
+    depth: number,
+    entry: Expression
   ): Expression | null {
     const ce = this.ce;
     const x = ce.symbol(variable);
@@ -461,6 +600,8 @@ export class RubiDriver {
     // inert unsolved subproblem — _fn to avoid the canonical Integrate
     // handler wrapping the integrand in a multi-variable Function literal
     const inert = (e: Expression): Expression => ce._fn('Integrate', [e, x]);
+    // The placeholder this call's steps replace (see intRec `entry`).
+    const entryNode = (): Expression => ce._fn('Integrate', [entry, x]);
 
     // ---- structural prelude -------------------------------------------
     // The integrand here is in (synthetic) Times/Power normal form;
@@ -468,22 +609,36 @@ export class RubiDriver {
     // ∫ c dx = c·x
     if (!integrand.has(variable)) {
       this.stats.preludeFirings++;
-      return recanonicalize(ce, integrand).mul(x);
+      const r = recanonicalize(ce, integrand).mul(x);
+      this.record(entryNode, () => r, 'integrate.constant');
+      return r;
     }
     // ∫ x dx = x²/2
     if (integrand.isSame(x)) {
       this.stats.preludeFirings++;
-      return x.pow(2).div(2);
+      const r = x.pow(2).div(2);
+      this.record(entryNode, () => r, 'integrate.variable');
+      return r;
     }
     // ∫ (u + v) dx term-wise; unsolved terms stay inert
     if (integrand.operator === 'Add' && integrand.ops) {
       this.stats.preludeFirings++;
+      const tcs = integrand.ops.map((t) => recanonicalize(ce, t));
+      // Record the split BEFORE recursing (preorder): the replacement is a sum
+      // of inert `Integrate(term)` placeholders, each patched by its term's own
+      // recorded steps as the recursion below fills them in.
+      this.record(
+        entryNode,
+        () =>
+          ce.function(
+            'Add',
+            tcs.map((tc) => inert(tc))
+          ),
+        'integrate.sum'
+      );
       return ce.function(
         'Add',
-        integrand.ops.map((t) => {
-          const tc = recanonicalize(ce, t);
-          return recurse(tc) ?? inert(tc);
-        })
+        tcs.map((tc) => recurse(tc) ?? inert(tc))
       );
     }
     // ∫ c·u dx = c·∫u dx
@@ -500,8 +655,20 @@ export class RubiDriver {
           rest.length === 1 ? rest[0] : ce._fn('Multiply', rest)
         );
         this.stats.preludeFirings++;
+        // Record the constant pull BEFORE recursing (preorder); roll it back if
+        // the residual integral fails so an aborted attempt leaves no records.
+        const mark = this.mark();
+        this.record(
+          entryNode,
+          () => ce.function('Multiply', [c, inert(u)]),
+          'integrate.constant-factor'
+        );
         const F = this.intRec(u, variable, depth + 1);
-        return F === null ? null : c.mul(F);
+        if (F === null) {
+          this.truncate(mark);
+          return null;
+        }
+        return c.mul(F);
       }
     }
 
@@ -554,6 +721,12 @@ export class RubiDriver {
           // bindings may hold synthetic normal-form subtrees —
           // re-canonicalize before conditions and RHS construction
           for (const [k, v] of env) env.set(k, recanonicalize(ce, v));
+          // RHS tokens named `x` must resolve to the actual integration
+          // variable; the match env does not bind the variable pattern (it is
+          // matched positionally), so bind it here. When the variable IS `x`,
+          // this reproduces the `build()` fallthrough (`ce.symbol('x')`)
+          // exactly, so the x-variable corpus is behavior-identical.
+          env.set('x', x);
           const ctx: Ctx = { ce, env, x: variable, hooks };
           try {
             if (rule.condition && !evalCondition(rule.condition, ctx)) {
@@ -577,6 +750,39 @@ export class RubiDriver {
               trace(rule.id, 'inner-condition');
               continue;
             }
+            // Trace: capture a display-only template of this rule's RHS with
+            // nested `Int[…]` left as inert placeholders (an `int: () => null`
+            // hook), and record it BEFORE the real build recurses. The real
+            // build's recursive steps append after this one (preorder). The
+            // whole attempt is rolled back to `stepMark` if the rule then
+            // fails. Guarded by `templateBuilding` so a `Subst` template that
+            // `.evaluate()`s an inert integral can't re-enter and clobber
+            // state; a throwing template records `null` and is patched with
+            // the real result on success.
+            const stepMark = this.mark();
+            let templateIdx = -1;
+            if (this.records !== undefined && this.suppressRecording === 0) {
+              let template: Expression | null = null;
+              this.templateBuilding = true;
+              try {
+                template = build(rule.rhs, {
+                  ce,
+                  env,
+                  x: variable,
+                  hooks: { int: () => null },
+                });
+              } catch {
+                template = null;
+              } finally {
+                this.templateBuilding = false;
+              }
+              const tpl = template;
+              templateIdx = this.record(
+                entryNode,
+                () => tpl,
+                'rubi:' + rule.id
+              );
+            }
             const result = build(rule.rhs, ctx);
             // A result that is exactly an inert integral made no progress
             // (e.g. a normalization rule like Int[u^m] := Int[ExpandToSum…]
@@ -585,6 +791,7 @@ export class RubiDriver {
             // fallback below get their chance.
             if (result.operator === 'Integrate') {
               trace(rule.id, 'rule-fail: no progress (inert result)');
+              this.truncate(stepMark);
               continue;
             }
             // A result carrying an `Error` node is not a valid antiderivative:
@@ -595,8 +802,17 @@ export class RubiDriver {
             // non-evaluable result to the caller.
             if (containsError(result)) {
               trace(rule.id, 'rule-fail: result contains Error');
+              this.truncate(stepMark);
               continue;
             }
+            // The rule fired: if its display template could not be built
+            // (a throwing `Subst`), patch the record with the real result so
+            // the step is at least whole-state accurate (opaque, not detailed).
+            if (
+              templateIdx >= 0 &&
+              this.records![templateIdx].replacement === null
+            )
+              this.records![templateIdx].replacement = result;
             this.stats.ruleFirings[rule.id] =
               (this.stats.ruleFirings[rule.id] ?? 0) + 1;
             if (DEBUG_FIRE && rule.id.includes(DEBUG_FIRE)) {
@@ -660,9 +876,11 @@ export class RubiDriver {
           const [alpha, beta] = coeffs;
           const u = alpha.add(beta.mul(x));
           this.stats.preludeFirings++;
-          if (expo.isSame(-1)) return u.ln().div(beta);
-          const n1 = expo.add(1);
-          return u.pow(n1).div(beta.mul(n1));
+          const r = expo.isSame(-1)
+            ? u.ln().div(beta)
+            : u.pow(expo.add(1)).div(beta.mul(expo.add(1)));
+          this.record(entryNode, () => r, 'integrate.collected-power');
+          return r;
         }
       }
     }
@@ -682,13 +900,18 @@ export class RubiDriver {
     ) {
       const expanded = expandHyperbolicToExp(ce, integrand);
       if (!containsHyperbolic(expanded)) {
-        const F = this.intRec(
-          recanonicalize(ce, expanded),
-          variable,
-          depth + 1
-        );
-        if (F !== null && !F.has('Integrate'))
-          return this.cleanExpansionResult(F);
+        this.suppressRecording++;
+        let F: Expression | null;
+        try {
+          F = this.intRec(recanonicalize(ce, expanded), variable, depth + 1);
+        } finally {
+          this.suppressRecording--;
+        }
+        if (F !== null && !F.has('Integrate')) {
+          const r = this.cleanExpansionResult(F);
+          this.record(entryNode, () => r, 'integrate.hyperbolic-to-exp');
+          return r;
+        }
       }
     }
 
@@ -714,11 +937,13 @@ export class RubiDriver {
     ) {
       const expanded = expandTrigToExp(ce, inertIntegrand);
       if (!containsInertSinCos(expanded)) {
-        const F = this.intRec(
-          recanonicalize(ce, expanded),
-          variable,
-          depth + 1
-        );
+        this.suppressRecording++;
+        let F: Expression | null;
+        try {
+          F = this.intRec(recanonicalize(ce, expanded), variable, depth + 1);
+        } finally {
+          this.suppressRecording--;
+        }
         // Take the exp-route antiderivative only if it is numerically
         // EVALUABLE: `∫x·sin(a+b/x)` → complex `ExpIntegralEi`, `∫sin(a+b·xⁿ)/
         // x^(2n+1)` → negative-order incomplete Γ, etc. produce a result that is
@@ -729,8 +954,11 @@ export class RubiDriver {
           F !== null &&
           !F.has('Integrate') &&
           numericallyEvaluable(F, variable)
-        )
-          return this.cleanExpansionResult(F);
+        ) {
+          const r = this.cleanExpansionResult(F);
+          this.record(entryNode, () => r, 'integrate.trig-to-exp');
+          return r;
+        }
       }
     }
 
@@ -745,8 +973,17 @@ export class RubiDriver {
     // and strands its `x·csc²` piece. Fail-closed with a numeric self-check;
     // higher-degree P whose `∫P′·cot` needs PolyLog stays cleanly unsolved.
     if (this.trigActive && !NO_TRIGSQ) {
-      const F = this.polyTrigSquaredByParts(integrand, variable, depth);
-      if (F !== null) return F;
+      this.suppressRecording++;
+      let F: Expression | null;
+      try {
+        F = this.polyTrigSquaredByParts(integrand, variable, depth);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (F !== null) {
+        this.record(entryNode, () => F, 'integrate.by-parts');
+        return F;
+      }
     }
 
     // ---- rational × sin/cos(linear) → Si/Ci fallback (R15) ------------
@@ -764,8 +1001,17 @@ export class RubiDriver {
     // fail-closed with a numeric self-check so the complex-root families
     // (irreducible-quadratic denominators → complex Si/Ci) stay unsolved.
     if (this.trigActive && !NO_SICI) {
-      const F = this.rationalTrigSiCiFallback(integrand, variable, depth);
-      if (F !== null) return F;
+      this.suppressRecording++;
+      let F: Expression | null;
+      try {
+        F = this.rationalTrigSiCiFallback(integrand, variable, depth);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (F !== null) {
+        this.record(entryNode, () => F, 'integrate.si-ci');
+        return F;
+      }
     }
 
     // ---- single-angle trig-rational → single-exponential fallback (R17) --
@@ -788,8 +1034,17 @@ export class RubiDriver {
     // same numeric D-check as R15/R16; the emitted pieces are trig-free after the
     // exponential substitution, so they cannot re-enter this fallback.
     if (this.trigActive && !NO_TRIGEXP) {
-      const F = this.singleAngleTrigExpFallback(integrand, variable, depth);
-      if (F !== null) return F;
+      this.suppressRecording++;
+      let F: Expression | null;
+      try {
+        F = this.singleAngleTrigExpFallback(integrand, variable, depth);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (F !== null) {
+        this.record(entryNode, () => F, 'integrate.trig-to-single-exp');
+        return F;
+      }
     }
 
     // ---- function-of-a-single-exponential fallback --------------------
@@ -803,8 +1058,17 @@ export class RubiDriver {
     // (the bundled rational rules / native fallback close it fast), then undo
     // the substitution. Reached only after all rules + the expansion fallback.
     if (containsHyperbolic(integrand)) {
-      const F = this.functionOfExponentialFallback(integrand, variable, depth);
-      if (F !== null) return F;
+      this.suppressRecording++;
+      let F: Expression | null;
+      try {
+        F = this.functionOfExponentialFallback(integrand, variable, depth);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (F !== null) {
+        this.record(entryNode, () => F, 'integrate.exponential-substitution');
+        return F;
+      }
     }
 
     return null;
@@ -831,11 +1095,25 @@ export class RubiDriver {
       // v = F^(linear) ⇒ v′ = (const)·v, so v/v′ is x-free; bail otherwise.
       const ratio = v.div(dv);
       if (dv.isSame(0) || ratio.has(variable)) return null;
-      const inner = this.intRec(
-        recanonicalize(ce, g.div(x)),
-        variable,
-        depth + 1
-      );
+      // Integrate the substituted rational function `g/x` of the new variable.
+      let inner = this.intRec(recanonicalize(ce, g.div(x)), variable, depth + 1);
+      // R26B: when that un-normalized shape does NOT close, retry once on its
+      // rational normal form. The additive-denominator reciprocals
+      // (`1/(a+b·sinh)`, cosh/tanh/coth/sech/csch) land here as a NESTED shape
+      // like `1/(x·(a+b/2·(x−1/x)))` that no bundled rule matches; flattening it
+      // into a single `N/D` of expanded x-polynomials lets the 1.2.1.1 rational
+      // rules close it — for SYMBOLIC coefficients, where the native rational
+      // fallback (numeric-only) can't rescue the nested form. Guarded on the raw
+      // path failing so anything that already closed (e.g. `∫csch⁴x`) is
+      // untouched; fail-closed on a null / non-rational normal form or the
+      // toggle.
+      if (!NO_R26 && (inner === null || inner.has('Integrate'))) {
+        const nf = rationalNormalFormX(g.div(x), variable);
+        if (nf !== null) {
+          const retry = this.intRec(recanonicalize(ce, nf), variable, depth + 1);
+          if (retry !== null && !retry.has('Integrate')) inner = retry;
+        }
+      }
       if (inner === null || inner.has('Integrate')) return null;
       // ∫u dx = (v / v′) · (∫ g/x dx)[x → v]
       return this.cleanExpansionResult(

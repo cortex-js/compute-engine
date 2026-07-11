@@ -1253,7 +1253,8 @@ interface LinearConstraint {
  */
 export function solveLinearInequalitySystem(
   inequalities: Expression[],
-  variables: string[]
+  variables: string[],
+  trace?: RuleSteps
 ): Array<Record<string, Expression>> | null {
   // Only support 2-variable systems
   if (variables.length !== 2) return null;
@@ -1265,7 +1266,7 @@ export function solveLinearInequalitySystem(
   // Extract constraints
   const constraints: LinearConstraint[] = [];
   for (const ineq of inequalities) {
-    const constraint = extractLinearConstraint(ineq, xVar, yVar, ce);
+    const constraint = extractLinearConstraint(ineq, xVar, yVar, ce, trace);
     if (!constraint) return null; // Not a linear inequality
     constraints.push(constraint);
   }
@@ -1282,6 +1283,16 @@ export function solveLinearInequalitySystem(
     }
   }
 
+  // Record the candidate boundary-intersection points.
+  if (trace)
+    trace.push({
+      value: ce.function(
+        'List',
+        candidates.map((pt) => pointToEquationList(ce, xVar, yVar, pt))
+      ),
+      because: 'solve.system.intersect-boundaries',
+    });
+
   // Filter candidates: keep only points that satisfy ALL constraints
   const vertices = candidates.filter((pt) =>
     constraints.every((c) => satisfiesConstraint(pt, c))
@@ -1297,6 +1308,16 @@ export function solveLinearInequalitySystem(
   // Order vertices in convex hull order (counterclockwise)
   const orderedVertices = orderConvexHull(uniqueVertices);
 
+  // Record the feasible, dedup'd, hull-ordered vertices (the result shape).
+  if (trace)
+    trace.push({
+      value: ce.function(
+        'List',
+        orderedVertices.map((pt) => pointToEquationList(ce, xVar, yVar, pt))
+      ),
+      because: 'solve.system.vertices',
+    });
+
   // Convert to Expression result format
   return orderedVertices.map((pt) => ({
     [xVar]: ce.number(pt.x).simplify(),
@@ -1304,15 +1325,33 @@ export function solveLinearInequalitySystem(
   }));
 }
 
+/** A single candidate point `{x, y}` as `List(Equal(x, vx), Equal(y, vy))` —
+ * the shape used by the solve-system explanation trace. */
+function pointToEquationList(
+  ce: ComputeEngine,
+  xVar: string,
+  yVar: string,
+  pt: { x: number; y: number }
+): Expression {
+  return ce.function('List', [
+    ce.function('Equal', [ce.symbol(xVar), ce.number(pt.x).simplify()]),
+    ce.function('Equal', [ce.symbol(yVar), ce.number(pt.y).simplify()]),
+  ]);
+}
+
 /**
  * Extract a linear constraint from an inequality expression.
  * Normalizes to form: a*x + b*y + c <= 0 (or < 0)
+ *
+ * When a `trace` accumulator is present (from `expr.explain('solve')`),
+ * records the symbolic normalized form `expr < 0` / `expr ≤ 0`.
  */
 function extractLinearConstraint(
   ineq: Expression,
   xVar: string,
   yVar: string,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  trace?: RuleSteps
 ): LinearConstraint | null {
   const op = ineq.operator;
   if (!isInequalityOperator(op)) return null;
@@ -1339,6 +1378,13 @@ function extractLinearConstraint(
     expr = expand(diff2).simplify();
     strict = op === 'Greater';
   }
+
+  // Record the symbolic normalized inequality `expr < 0` / `expr ≤ 0`.
+  if (trace)
+    trace.push({
+      value: ce.function(strict ? 'Less' : 'LessEqual', [expr, ce.Zero]),
+      because: 'solve.system.normalize-inequality',
+    });
 
   // Check if linear in both variables
   const degX = polynomialDegree(expr, xVar);

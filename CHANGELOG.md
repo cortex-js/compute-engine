@@ -64,6 +64,41 @@
   resolve too (`\operatorname{sinc}` at `-\infty` → `0`) while genuinely
   divergent oscillations (`\sin x` at `\infty`) still correctly return `NaN`.
 
+### Step-by-Step Explanations
+
+- **`explain('Integrate')` traces symbolic integration through the Rubi rule
+  chain.** With the opt-in integration rules loaded
+  (`loadIntegrationRules(ce)` from
+  `@cortex-js/compute-engine/integration-rules`),
+  `ce.parse('\\int x\\sqrt{1+x}\\,dx').explain('Integrate')` replays the
+  driver's derivation as whole-expression states — term-by-term splits
+  (`integrate.sum`), constant factors moved out
+  (`integrate.constant-factor`), each corpus rule application (a stable
+  `rubi:…` id with a compact description such as _"Apply integration rule
+  1.1.1.2#19 (Rubi)"_), reductions to special functions
+  (`integrate.si-ci`, `integrate.partial-fractions`, …), and a closing
+  simplification. The result is identical to `evaluate()`; indefinite
+  integrals only. Without the rules loaded, or when the rules cannot close
+  the integral, a precise error is thrown.
+
+- **`explain('solve')` traces systems of inequalities and mixed systems.** A
+  `List`/`And` of linear inequalities in two variables is traced through
+  constraint normalization (`solve.system.normalize-inequality`), boundary
+  intersection (`solve.system.intersect-boundaries`), and the feasible
+  vertices (`solve.system.vertices`); mixed equality/inequality systems show
+  the elimination steps, then each candidate checked against the constraints
+  (`solve.system.check-constraints`, `solve.system.reject`). Both previously
+  threw "not supported" errors.
+
+- **`explain('simplify')` surfaces the work done inside operands.**
+  Simplifications applied while descending into the operands of a sum,
+  product or function argument — previously summarized by an opaque
+  bookkeeping step — now appear as labeled steps with their own rule ids
+  (`\tan x\cot x + \frac{x^3+x^2}{x^2}` shows the $\tan x\cot x \to 1$
+  rewrite before the expansion). At default verbosity, consecutive
+  applications of the same rule are coalesced into a single step; pass
+  `verbosity: 'all'` for the raw chain.
+
 ### Collections
 
 - **Symbolic-bound `Range` and `Linspace` stay inert instead of collapsing.**
@@ -262,8 +297,21 @@
   `\prod_{k=1}^{n-1}\left(1 + \frac{1}{k}\right)` evaluates to `n`.
 - **`\prod_{k=1}^{n} k` evaluates to `n!`.** The bare-index product with a
   symbolic upper bound returns `Factorial(n)` instead of staying inert.
-  (Three more Wester CAS-review tests unskipped; the `wester.test.ts` skip
-  ledger drops to 15.)
+- **Classic infinite series and products evaluate to their exact closed
+  forms.** p-series reduce to the zeta function —
+  `\sum_{k=1}^{\infty} \frac{1}{k^2}` evaluates to `\frac{\pi^2}{6}`,
+  `\sum \frac{1}{k^2} + \frac{1}{k^3}` to `\frac{\pi^2}{6} + \zeta(3)`
+  (term-wise splitting applies only when every summand has a closed form) —
+  and the Wallis product
+  `\prod_{k=1}^{\infty}\left(1 - \frac{1}{(2k)^2}\right)` evaluates to
+  `\frac{2}{\pi}`. Series with no known closed form stay symbolic under
+  exact `evaluate()`, per the infinite-domain contract.
+- **`.N()` of convergent infinite sums reaches near machine precision.** The
+  numeric path Richardson-extrapolates the partial sums instead of returning
+  a plain 10⁴-term truncation: `\sum 1/k^2` now numericizes to ~2·10⁻¹⁶ of
+  `π²/6` (previously ~10⁻⁴ off), and series without closed forms benefit
+  equally (`\sum 1/(k^2+1)` to ~2·10⁻¹⁴). Divergent or non-smooth series are
+  detected and fall back to the capped truncation.
 
 ### Equation Solving
 
@@ -376,6 +424,40 @@ New rule coverage in the `integration-rules` bundle (`loadIntegrationRules`):
   `A`, `B`) still infer as numbers — declare matrix/vector symbols for symbolic
   matrix algebra (see the ROADMAP "Matrix-operator typing" item for the planned
   inference-ordering fix).
+- **`M · M^{-1}` simplifies to the identity for symbolic matrices.** Two
+  fixes combine: `simplify()` now recurses into `List` elements (matrix
+  entries were previously unreachable by any simplify rule), and a new rule
+  combines a sum of fractions sharing an identical denominator into a single
+  fraction so the diagonal entries `\frac{a^2 b}{a^2 b - b} +
+  \frac{-b}{a^2 b - b}` cancel to `1`.
+- **Symbolic matrix rank via the determinant.** `MatrixRank` of a small
+  symbolic matrix now concludes when the simplified determinant settles the
+  question: the trigonometric matrix
+  `[[\sin 2t, \cos 2t], [2\sin t\cos t, \cos^2 t - \sin^2 t]]` has rank `1`
+  (its determinant vanishes under `TrigReduce`). Indeterminate cases stay
+  symbolic, as before.
+- **Vandermonde determinants return the difference product.** The
+  determinant of a symbolic Vandermonde matrix (either orientation) is
+  produced directly in its factored closed form
+  `\prod_{i<j}(x_j - x_i)` instead of an unfactored expansion.
+- **The numeric eigensolver converges on hard spectra.** The QR iteration
+  was rebuilt as Householder reduction to Hessenberg form followed by the
+  Francis double-shift algorithm with deflation. The classic 8×8 Rosser
+  stress matrix — double eigenvalue `1000`, a `±10\sqrt{10405}` pair, and a
+  tiny eigenvalue `≈0.098` — now yields the true spectrum (the unshifted
+  iteration returned wrong values), and non-symmetric matrices get proper
+  complex-conjugate eigenvalue pairs (`[[0,-1],[1,0]]` → `\{i, -i\}`).
+- **`MatrixPower(M, 1/2)` — principal matrix square root.** Half-integer
+  powers of an exact 2×2 positive-semidefinite matrix evaluate exactly via
+  the closed form `\sqrt{M} = (M + \sqrt{\det M}\,I)/\sqrt{\operatorname{tr}
+  M + 2\sqrt{\det M}}`: `MatrixPower([[10,7],[7,17]], 1/2)` →
+  `[[3,1],[1,4]]`, and `3/2`, `-1/2` etc. compose with the integer path.
+- **New operator: `SingularValues`** — the singular values of a matrix,
+  descending, zeros included; exact when the Gram matrix is at most 2×2
+  with rational entries (`SingularValues([[1,1],[2,2],[3,3]])` →
+  `\{2\sqrt{7}, 0\}`), numeric via the SVD machinery otherwise.
+  (Across this release's Wester rounds the `wester.test.ts` skip ledger
+  drops from 21 to 7.)
 
 ### Units
 

@@ -338,6 +338,20 @@ exports[`explain: solve Or (alternatives) Or(x^2=1, x=3): per-case steps + merge
 }
 `;
 
+exports[`explain: solve inequality systems (pure) x+y<=4, x>=0, y>=0: vertex parity, new ids, curation, golden 1`] = `
+{
+  "initial": "[x + y <= 4,0 <= x,0 <= y]",
+  "result": "[[x === 0,y === 0],[x === 4,y === 0],[x === 0,y === 4]]",
+  "steps": [
+    "solve.system.normalize-inequality: x + y - 4 <= 0",
+    "solve.system.normalize-inequality: -x <= 0",
+    "solve.system.normalize-inequality: -y <= 0",
+    "solve.system.intersect-boundaries: [[x === 0,y === 4],[x === 4,y === 0],[x === 0,y === 0]]",
+    "solve.system.vertices: [[x === 0,y === 0],[x === 4,y === 0],[x === 0,y === 4]]",
+  ],
+}
+`;
+
 exports[`explain: solve linear systems 2x2 golden: eliminate + back-substitute, parity, empirical 1`] = `
 {
   "initial": "[2x + y === 5,x - y === 1]",

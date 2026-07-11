@@ -87,10 +87,16 @@ export type SymbolInfo = {
 /** @internal */
 /** A symbolic-integration provider: given an integrand and the integration
  * variable, returns a closed-form antiderivative (an expression in `variable`),
- * or `null` when it cannot integrate it. See `IComputeEngine._integrationProvider`. */
+ * or `null` when it cannot integrate it. See `IComputeEngine._integrationProvider`.
+ *
+ * When an optional `trace` accumulator is passed (by `expr.explain('Integrate')`),
+ * the provider appends a curated, whole-state step chain describing how the
+ * antiderivative was found. The argument is backward-compatible: the plain
+ * `Integrate` evaluator calls the provider with two arguments and never traces. */
 export type IntegrationProvider = (
   integrand: Expression,
-  variable: string
+  variable: string,
+  trace?: RuleStep[]
 ) => Expression | null;
 
 export interface IComputeEngine {
