@@ -27,6 +27,7 @@ import {
   singleAngleExponentialPieces,
   hasSingleAngleTrigRationalCandidate,
   circularTrigReduce,
+  polyTrigProductPieces,
   rationalNormalFormX,
   polyDegreeX,
   RuleFail,
@@ -1378,6 +1379,109 @@ describe('circularTrigReduce (ExpandTrigReduce circular product-to-sum, R23)', (
       engine.box(['Power', ['Sin', 'x'], 2] as any)
     );
     expect(reduced.toString()).toContain('cos(2x)');
+  });
+});
+
+// polyTrigProductPieces — the R27 poly × same-angle trig-PRODUCT reduction.
+// Given `∫P(x)·Sin[u]^m·Cos[u]^k` (u linear, P trig-free), it reduces the trig
+// product to a real multiple-angle sum and distributes P, returning the list of
+// single-angle `P·c_j·sin/cos(j·u)` pieces the driver routes through R15/by-
+// parts. The reduction is an exact identity (Σ pieces ≡ integrand); the pieces
+// must be single-angle (no residual Sin/Cos power) with a collected linear
+// argument, else the R15 Si/Ci matcher cannot bind them.
+describe('polyTrigProductPieces (R27 poly × same-angle trig product)', () => {
+  const engine = new ComputeEngine();
+  // linear argument u = −a + 2x (as the arcsin substitution produces)
+  const lin = ['Add', ['Multiply', -1, 'a'], ['Multiply', 2, 'x']];
+  const sumOf = (pieces: Expression[]) =>
+    pieces.length === 1 ? pieces[0] : engine.function('Add', pieces);
+
+  test('reduces x⁻¹·Sin²·Cos to single-angle pieces summing to the integrand', () => {
+    const integrand = engine.box([
+      'Multiply',
+      ['Power', 'x', -1],
+      ['Power', ['Sin', lin], 2],
+      ['Cos', lin],
+    ] as any);
+    const pieces = polyTrigProductPieces(engine, integrand, 'x');
+    expect(pieces).not.toBeNull();
+    // Σ pieces ≡ integrand numerically (exact identity)
+    const S = sumOf(pieces!);
+    let maxErr = 0;
+    for (let i = 0; i < 8; i++) {
+      const sub = { x: 0.35 * i + 0.2, a: 0.7 };
+      const A = integrand.subs(sub).N();
+      const B = S.subs(sub).N();
+      maxErr = Math.max(
+        maxErr,
+        Math.abs(((A.re as number) ?? NaN) - ((B.re as number) ?? NaN))
+      );
+    }
+    expect(maxErr).toBeLessThan(1e-9);
+    // every piece is single-angle (no residual Sin/Cos power) with a linear arg
+    for (const p of pieces!) {
+      const json = JSON.stringify(p.json);
+      expect(/\["Power",\["Sin"/.test(json)).toBe(false);
+      expect(/\["Power",\["Cos"/.test(json)).toBe(false);
+    }
+  });
+
+  test('reduces the degree-9 Sin³·Cos⁶ product (#336 inner)', () => {
+    const integrand = engine.box([
+      'Multiply',
+      ['Power', 'x', -1],
+      ['Power', ['Sin', lin], 3],
+      ['Power', ['Cos', lin], 6],
+    ] as any);
+    const pieces = polyTrigProductPieces(engine, integrand, 'x');
+    expect(pieces).not.toBeNull();
+    const S = sumOf(pieces!);
+    let maxErr = 0;
+    for (let i = 0; i < 8; i++) {
+      const sub = { x: 0.35 * i + 0.2, a: 0.7 };
+      const A = integrand.subs(sub).N();
+      const B = S.subs(sub).N();
+      maxErr = Math.max(
+        maxErr,
+        Math.abs(((A.re as number) ?? NaN) - ((B.re as number) ?? NaN))
+      );
+    }
+    expect(maxErr).toBeLessThan(1e-9);
+  });
+
+  test('declines off-shape integrands (returns null)', () => {
+    // single sin^1 (degree 1 — R15's domain, not a product)
+    expect(
+      polyTrigProductPieces(
+        engine,
+        engine.box(['Multiply', ['Power', 'x', -1], ['Sin', lin]] as any),
+        'x'
+      )
+    ).toBeNull();
+    // no trig
+    expect(
+      polyTrigProductPieces(engine, engine.box(['Power', 'x', 2] as any), 'x')
+    ).toBeNull();
+    // nonlinear trig argument
+    expect(
+      polyTrigProductPieces(
+        engine,
+        engine.box(['Power', ['Sin', ['Power', 'x', 2]], 2] as any),
+        'x'
+      )
+    ).toBeNull();
+    // mixed trig angles (Sin[x]·Cos[2x])
+    expect(
+      polyTrigProductPieces(
+        engine,
+        engine.box([
+          'Multiply',
+          ['Sin', 'x'],
+          ['Cos', ['Multiply', 2, 'x']],
+        ] as any),
+        'x'
+      )
+    ).toBeNull();
   });
 });
 

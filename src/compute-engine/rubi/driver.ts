@@ -51,6 +51,7 @@ import {
   sinhCoshArgsPolynomialQ,
   hasSingleAngleTrigRationalCandidate,
   singleAngleExponentialPieces,
+  polyTrigProductPieces,
   RuleFail,
   Ctx,
   Hooks,
@@ -109,6 +110,13 @@ const NO_TRIGSUB = process.env.RUBI_NO_TRIGSUB !== undefined;
 // additive-denominator reciprocals `1/(a+b·sinh/cosh/tanh/…)` with SYMBOLIC
 // coefficients close via the 1.2.1.1 rational rules). A/B measures its ch6 effect.
 const NO_R26 = process.env.RUBI_NO_R26 !== undefined;
+// RUBI_NO_R27: disable the R27 poly×same-angle-trig-product reduction fallback
+// (`∫P(x)·Sin[u]^m·Cos[u]^k` with u linear → circularTrigReduce to a multiple-
+// angle sum, distribute P, route each `∫P·sin/cos(j·u)` piece through R15/by-
+// parts). Closes the inverse-sine reciprocal family (5.1.2 #11 / 5.1.4 #45
+// Subst inner integral `∫xⁿ·sinᵐ·cosᵏ`, n=−1) that R15's single-sin/cos and
+// R16's csc²/sec² gates both decline. A/B measures its ch5/ch7 effect.
+const NO_R27 = process.env.RUBI_NO_R27 !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -189,6 +197,11 @@ export class RubiDriver {
   // loader's driver) calls back into this driver — without this flag a rational
   // the rules can't close would re-enter the fallback until the deadline.
   private inNativeFallback = false;
+  // In-flight `int()` depth. Any `int()` entered while this is > 0 is a
+  // re-entrant call (via an `.evaluate()` seam — the native fallback, a
+  // With-binding, a `Subst` — reaching the provider) and must inherit the
+  // outer call's deadline and memo instead of resetting them (see `int()`).
+  private activeCalls = 0;
   // Set once per top-level int() call: true iff the integrand contains an
   // active trig head. When false, the trig bridge in intRec is never entered,
   // so trig-free (algebraic) integrands behave exactly as before — the
@@ -302,24 +315,34 @@ export class RubiDriver {
     // which re-enters the provider): pretend we can't integrate rather than
     // clobber the outer call's deadline/memo.
     if (this.templateBuilding) return null;
-    // The native-rational fallback re-enters this method via
-    // `ce.Integrate.evaluate()` (see nativeRationalFallback). A re-entrant
-    // call must NOT clobber the outer call's per-call state: resetting the
-    // deadline would grant the outer integration a fresh time budget
-    // (violating the interruptible-evaluation contract), and resetting
-    // `trigActive` (and the caches) would leak the subproblem's state back
-    // into the outer recursion — a trig integrand whose subproblem hits the
-    // fallback could otherwise emit inert lowercase trig heads. So: a
-    // re-entrant call inherits the outer deadline and memo, and its clobber
-    // of `trigActive`/caches is snapshotted and restored on the way out.
-    const reentrant = this.inNativeFallback;
+    // This method can be re-entered while a call is in flight: the
+    // native-rational fallback goes through `ce.Integrate.evaluate()` (see
+    // nativeRationalFallback), and `build()` can `.evaluate()` an expression
+    // containing an inert `Integrate` (a With-binding whose `Int[…]` didn't
+    // close, the general `Subst` path) — both land back here via the
+    // provider. A re-entrant call must NOT clobber the outer call's
+    // per-call state: resetting the deadline would grant the outer
+    // integration a fresh time budget (violating the interruptible-
+    // evaluation contract), clearing the memo would wipe the outer call's
+    // in-flight cycle-guard entries (re-opening infinite recursion on
+    // cyclic subproblems), and resetting `trigActive` (and the caches)
+    // would leak the subproblem's state back into the outer recursion — a
+    // trig integrand whose subproblem hits the fallback could otherwise
+    // emit inert lowercase trig heads. So: a re-entrant call — detected by
+    // the in-flight counter, NOT just the native-fallback flag — inherits
+    // the outer deadline and memo, and its clobber of `trigActive`/caches
+    // is snapshotted and restored on the way out.
+    const reentrant = this.activeCalls > 0;
     const savedTrig = this.trigActive;
     const savedCaches = getActiveCaches();
     // Step-tracing accumulator (only when `explain('Integrate')` threads one
     // in). A re-entrant call passes no `records`, so the outer's accumulator is
-    // left in place and (via `suppressRecording`) not written to.
+    // left in place; recording is suppressed for its duration — a re-entrant
+    // subproblem is internal to whatever expression the outer step records.
     const savedRecords = this.records;
     if (records !== undefined) this.records = records;
+    if (reentrant) this.suppressRecording++;
+    this.activeCalls++;
     if (!reentrant) {
       this.deadline = Date.now() + (this.options.timeLimitMs ?? 30_000);
       // Bound the memo to a single top-level call: it is a per-call cache +
@@ -392,7 +415,9 @@ export class RubiDriver {
     } finally {
       // Restore the outer call's state clobbered by this re-entry (see the
       // header comment); a genuine top-level call leaves its state in place.
+      this.activeCalls--;
       if (reentrant) {
+        this.suppressRecording--;
         this.trigActive = savedTrig;
         installCaches(savedCaches);
       }
@@ -1047,6 +1072,43 @@ export class RubiDriver {
       }
     }
 
+    // ---- poly × same-angle trig product → multiple-angle reduction (R27) --
+    // `∫P(x)·Sin[u]^m·Cos[u]^k dx`, u = e+f·x linear, P a trig-free factor
+    // (typically `x⁻¹`). The inverse-sine reciprocal family (5.1.2 #11 /
+    // 5.1.4 #45) reduces `∫xᵐ·(a+b·ArcSin[c·x])ⁿ` (and its `(1−c²x²)^p` variant)
+    // via `Subst` to exactly this `∫xⁿ·sinᵐ·cos^{2p+1}` shape (n = the arcsin
+    // power, −1 after the reciprocal by-parts) — a product of trig POWERS that
+    // R15's single-sin/cos gate and R16's csc²/sec² gate both decline, so the
+    // inner integral strands and the whole reciprocal-arcsin problem is left
+    // unsolved. Reduce the trig product to a real multiple-angle sum
+    // (`circularTrigReduce`), distribute P, and route each `∫P·sin/cos(j·u)`
+    // piece back through the driver — R15 closes the `/x` pieces to Si/Ci and
+    // by-parts closes the `xᵏ` pieces. Placed AFTER R15/R16/R17 (they handle —
+    // and decline — the single-trig / csc²-sec² / additive-denominator shapes
+    // first) and before the mutually-exclusive hyperbolic fallback. Cheap
+    // O(nodes) pre-filter gates it to a near-zero-cost no-op off its shape;
+    // fail-closed with the same numeric D-check as R15/R16/R17, so any piece
+    // that does not close (a higher-degree `/xᵏ` needing complex Si/Ci, a
+    // non-verifying assembly) stays cleanly unsolved. The emitted pieces are
+    // single-trig (degree 1), so they cannot re-enter this fallback.
+    if (
+      this.trigActive &&
+      !NO_R27 &&
+      hasTrigProductCandidate(integrand)
+    ) {
+      this.suppressRecording++;
+      let F: Expression | null;
+      try {
+        F = this.polyTrigProductReduce(integrand, variable, depth);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (F !== null) {
+        this.record(entryNode, () => F, 'integrate.trig-product-reduce');
+        return F;
+      }
+    }
+
     // ---- function-of-a-single-exponential fallback --------------------
     // A pure hyperbolic of a LINEAR argument is a rational function of
     // e^(linear) — including the reciprocals Tanh/Coth/Sech/Csch that the
@@ -1327,6 +1389,45 @@ export class RubiDriver {
     }
   }
 
+  /** R27: `∫P(x)·Sin[u]^m·Cos[u]^k dx` for u = e+f·x linear and P a trig-free
+   * factor (typically `x⁻¹`) — closed by reducing the SAME-ANGLE trig product to
+   * a real multiple-angle sum (`circularTrigReduce`, see `polyTrigProductPieces`)
+   * and distributing P, routing each `∫P·sin/cos(j·u)` piece back through the
+   * driver (R15 Si/Ci closes the `/x` pieces, poly×sin by-parts the `xᵏ` ones).
+   * Supplies the `Subst` inner integral of the inverse-sine reciprocal family
+   * (5.1.2 #11 / 5.1.4 #45 `∫xⁿ·sinᵐ·cos^{2p+1}`, n=−1) that R15's single-sin/cos
+   * and R16's csc²/sec² gates decline. Fail-closed: returns null unless every
+   * piece closes AND D(ΣF) matches the integrand numerically, so a higher-degree
+   * `/xᵏ` piece needing complex Si/Ci stays cleanly unsolved. Body try/catch →
+   * null. */
+  private polyTrigProductReduce(
+    integrand: Expression,
+    variable: string,
+    depth: number
+  ): Expression | null {
+    const ce = this.ce;
+    try {
+      const pieces = polyTrigProductPieces(ce, integrand, variable);
+      if (pieces === null) return null;
+      const parts: Expression[] = [];
+      for (const pc of pieces) {
+        const term = recanonicalize(ce, pc);
+        const F = this.intRec(term, variable, depth + 1);
+        if (F === null || F.has('Integrate')) return null;
+        parts.push(F);
+      }
+      const F = this.cleanExpansionResult(
+        parts.length === 1 ? parts[0] : ce.function('Add', parts)
+      );
+      if (F.has('Integrate')) return null;
+      if (!antiderivativeVerifies(ce, activateTrig(ce, F), integrand, variable))
+        return null;
+      return F;
+    } catch {
+      return null;
+    }
+  }
+
   /** Clean the exponential-fallback antiderivative: collect like terms via a
    * bounded simplify (the raw expansion repeats `c·x` once per exponential
    * term, which otherwise bloats high-degree results past the verifier's leaf
@@ -1377,6 +1478,40 @@ function hasReciprocalSquareTrigCandidate(e: Expression): boolean {
       return true;
   }
   return (e.ops ?? []).some(hasReciprocalSquareTrigCandidate);
+}
+
+/** Fast syntactic pre-filter for the R27 poly×trig-product reduction fallback:
+ * does a GENUINE same-angle trig product/power literally occur — a `Sin/Cos[…]`
+ * raised to an integer power ≥ 2, or a `Multiply` with total sin/cos degree ≥ 2?
+ * Purely structural (no allocation / no deactivation), matching both active
+ * (`Sin`/`Cos`) and inert (`sin`/`cos`) heads, so the fallback stays a
+ * near-zero-cost no-op off its shape (the single-sin/cos degree-1 shape is
+ * R15's domain and is deliberately NOT matched here). */
+function trigFactorDegree(f: Expression): number {
+  const op = f.operator;
+  if (op === 'Sin' || op === 'sin' || op === 'Cos' || op === 'cos') return 1;
+  if (op === 'Power' && f.ops && f.ops.length === 2) {
+    const b = f.ops[0].operator;
+    const e = f.ops[1];
+    if (
+      (b === 'Sin' || b === 'sin' || b === 'Cos' || b === 'cos') &&
+      isNumber(e) &&
+      e.isInteger === true &&
+      typeof e.re === 'number' &&
+      e.re >= 1
+    )
+      return e.re;
+  }
+  return 0;
+}
+function hasTrigProductCandidate(e: Expression): boolean {
+  if (trigFactorDegree(e) >= 2) return true;
+  if (e.operator === 'Multiply' && e.ops) {
+    let deg = 0;
+    for (const f of e.ops) deg += trigFactorDegree(f);
+    if (deg >= 2) return true;
+  }
+  return (e.ops ?? []).some(hasTrigProductCandidate);
 }
 
 /** Numeric self-check for the R15 fallback: verify D(F) ≈ integrand by CENTRAL

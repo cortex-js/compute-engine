@@ -843,6 +843,72 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     });
   });
 
+  // R27: poly × same-angle trig PRODUCT reduction (RUBI.md §5, Phase R27;
+  // driver `polyTrigProductReduce` + rubi-utils `polyTrigProductPieces`). The
+  // inverse-sine reciprocal family `∫xᵐ/(√(1−c²x²)·(a+b·arcsin(cx))²)` and its
+  // `(1−c²x²)^p` variant reduce (5.1.2 #11 / 5.1.4 #45 Subst, after the
+  // reciprocal by-parts) to the inner `∫xⁿ·sinᵐ[u]·cosᵏ[u]` — a product of trig
+  // POWERS that R23's pure-power ExpandTrigReduce rule and R15's single-sin/cos
+  // gate both decline, so the inner strands and the whole problem is left
+  // unsolved. R27 reduces the same-angle trig product to a real multiple-angle
+  // sum (circularTrigReduce), distributes the `xⁿ` coefficient, and routes each
+  // `∫xⁿ·sin/cos(j·u)` piece through R15 (Si/Ci) / by-parts. These flipped
+  // 5.1.4a #336/#408/#410 (and 5.2 arccos analogs) from unsolved → solved. The
+  // antiderivative carries SinIntegral/CosIntegral of a·+b·arcsin; D-verified by
+  // finite-differencing F.N(). Concrete integer params (a=2,b=3,c=1) avoid the
+  // reserved `e`/`i`; the |x|<1 arcsin domain sets the sample points.
+  describe('poly × same-angle trig-product reduction (Chapter-5, R27)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    ce.timeLimit = 30_000; // high-degree Sin·Cos reductions carry many Si/Ci
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      let checked = 0;
+      for (const x of [0.17, 0.31, 0.52, 0.73]) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ x }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        expect(d).toBeCloseTo(f, 4);
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    };
+    // 5.1.4a #410: ∫x³/(√(1−x²)·(a+b·arcsin)²) — reciprocal-square by-parts to
+    // ∫x²/(a+b·arcsin), whose Subst inner is ∫x⁻¹·sin²·cos (R27 reduces the
+    // sin²·cos product). The antiderivative carries Sin/CosIntegral.
+    test('∫x³/(√(1−x²)·(2+3·arcsin x)²) dx (#410) → Sin/CosIntegral', () => {
+      const F = ce
+        .parse('\\int \\frac{x^3}{\\sqrt{1-x^2}(2+3\\arcsin(x))^2} \\, dx')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).toMatch(/SinIntegral|CosIntegral/);
+      verify('\\frac{x^3}{\\sqrt{1-x^2}(2+3\\arcsin(x))^2}');
+    });
+    // 5.1.4a #408: ∫x⁵/(√(1−x²)·(a+b·arcsin)²) — inner ∫x⁻¹·sin⁴·cos.
+    test('∫x⁵/(√(1−x²)·(2+3·arcsin x)²) dx (#408)', () =>
+      verify('\\frac{x^5}{\\sqrt{1-x^2}(2+3\\arcsin(x))^2}'));
+    // 5.1.4a #336: the (1−c²x²)^p variant ∫x³·(1−x²)^{5/2}/(a+b·arcsin) — inner
+    // ∫x⁻¹·sin³·cos⁶ (5.1.4 #45, cos power 2p+1=6), a degree-9 trig product.
+    test('∫x³·(1−x²)^{5/2}/(2+3·arcsin x) dx (#336)', () =>
+      verify('\\frac{x^3(1-x^2)^{5/2}}{2+3\\arcsin(x)}'));
+    // Toggle meaningfulness: `NO_R27` is captured at module load, so this
+    // branches on the env var present at process start — the default suite
+    // proves the closure, a `RUBI_NO_R27=1` run proves it goes inert without
+    // the rung (R23's pure-power rule cannot close the sin²·cos product).
+    test('∫x³/(√(1−x²)·(2+3·arcsin x)²) is gated by RUBI_NO_R27', () => {
+      const F = ce
+        .parse('\\int \\frac{x^3}{\\sqrt{1-x^2}(2+3\\arcsin(x))^2} \\, dx')
+        .evaluate();
+      if (process.env.RUBI_NO_R27 === undefined)
+        expect(F.has('Integrate')).toBe(false);
+      else expect(F.has('Integrate')).toBe(true);
+    });
+  });
+
   // ── Integration variable other than `x` (R26A). ──
   // The bundled rules all carry `variable: "x"`; every RHS references the
   // integration variable as the string token `"x"`. The match env does not

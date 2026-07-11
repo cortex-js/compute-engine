@@ -5709,6 +5709,140 @@ export function singleAngleExponentialPieces(
   });
 }
 
+/** A single sin/cos power factor `sin/cos[arg]` or `(sin/cos[arg])^k` (k a
+ *  positive integer): its head, argument, and integer degree, else null. */
+function trigPowerFactor(
+  f: Expression
+): { head: 'sin' | 'cos'; arg: Expression; power: number } | null {
+  if ((f.operator === 'sin' || f.operator === 'cos') && f.ops?.length === 1)
+    return { head: f.operator, arg: f.ops[0], power: 1 };
+  if (f.operator === 'Power' && f.ops && f.ops.length === 2) {
+    const [b, e] = f.ops;
+    if (
+      (b.operator === 'sin' || b.operator === 'cos') &&
+      b.ops?.length === 1 &&
+      isNumber(e) &&
+      e.isInteger === true &&
+      typeof e.re === 'number' &&
+      e.re >= 1
+    )
+      return { head: b.operator, arg: b.ops[0], power: e.re };
+  }
+  return null;
+}
+
+/** R27 support: `∫ P(x)·Sin[u]^m·Cos[u]^k dx` (u linear in x, P a trig-free
+ *  factor) — expand the SAME-ANGLE circular trig product to a real multiple-
+ *  angle sum (`circularTrigReduce` — `sin²u·cos u → ¼cos u − ¼cos 3u`, etc.)
+ *  and distribute P, returning the list of `P·c_j·sin/cos(j·u)` (and pure
+ *  `P·const`) pieces. Each emitted piece is a single-trig (or trig-free)
+ *  integrand the R15 Si/Ci fallback (`∫sin/cos(linear)/x → Si/Ci`) and the
+ *  poly×sin by-parts rules (`∫xᵏ·sin/cos(linear)`) close.
+ *
+ *  This is the `Subst` inner integral of the inverse-sine reciprocal family
+ *  (Rubi 5.1.2 #11 / 5.1.4 #45): `∫xᵐ·(a+b·ArcSin[c·x])ⁿ` and its
+ *  `(1−c²x²)^p` variant reduce to `∫xⁿ·sinᵐ[u]·cos^{2p+1}[u]` (n = the arcsin
+ *  power, typically −1 after the reciprocal by-parts), a product of trig
+ *  POWERS that R15's single-sin/cos gate and R16's csc²/sec² gate both
+ *  decline.
+ *
+ *  Returns null unless the (deactivated, normal-form) integrand is a product
+ *  whose trig factors are all sin/cos powers of one common LINEAR argument
+ *  with total degree ≥ 2 (a genuine product/power — the single-trig degree-1
+ *  shape is R15's domain and is declined here), and whose remaining factors
+ *  are trig-free. The caller routes each piece back through the driver and
+ *  fail-closes on a piece that does not integrate or a failing numeric
+ *  D-check. */
+export function polyTrigProductPieces(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): Expression[] | null {
+  const inert = toTimesPower(ce, deactivateTrig(ce, integrand, x));
+  if (inert.operator !== 'Multiply' || !inert.ops) return null;
+  let arg: Expression | null = null;
+  let degree = 0;
+  const trigParts: { head: 'sin' | 'cos'; power: number }[] = [];
+  const rest: Expression[] = [];
+  for (const f of inert.ops) {
+    const t = trigPowerFactor(f);
+    if (t === null) {
+      rest.push(f);
+      continue;
+    }
+    if (arg === null) arg = t.arg;
+    else if (!arg.isSame(t.arg)) return null; // mixed trig angles
+    degree += t.power;
+    trigParts.push({ head: t.head, power: t.power });
+  }
+  // No trig, or only a single sin/cos^1 (R15's domain): decline.
+  if (arg === null || degree < 2) return null;
+  // The common trig argument must be linear in x (so the reduced multiple-
+  // angle pieces are `sin/cos(linear)`, which R15 / by-parts close).
+  if (polyDegreeX(arg, x) !== 1) return null;
+  // Every non-trig factor must itself be trig-free (the `P` coefficient).
+  if (rest.some((f) => containsInertTrig(f))) return null;
+  const P =
+    rest.length === 0
+      ? ce.One
+      : rest.length === 1
+        ? rest[0]
+        : ce.function('Multiply', rest);
+  // Rebuild the trig product with ACTIVE heads (circularTrigReduce recognizes —
+  // and emits — active Sin/Cos; the partition above ran on the deactivated
+  // form). The reduced multiple-angle sum comes back active and is re-
+  // deactivated as each routed piece re-enters intRec.
+  const factors = trigParts.map(({ head, power }) => {
+    const t = ce.function(head === 'sin' ? 'Sin' : 'Cos', [arg!]);
+    return power === 1 ? t : t.pow(power);
+  });
+  const prod =
+    factors.length === 1 ? factors[0] : ce.function('Multiply', factors);
+  // `simplify` COLLECTS the like multiple-angle terms circularTrigReduce leaves
+  // uncombined (`sin³·cos⁶` folds to ~130 raw atoms sharing a handful of
+  // distinct angles); collecting them keeps the routed-piece count — and the
+  // assembled result — small. A deadline throw propagates to the driver's
+  // fallback try/catch.
+  const reduced = circularTrigReduce(ce, prod).simplify();
+  // circularTrigReduce accumulates each multiple-angle argument by repeated
+  // add/sub, leaving it an uncollected sum (`x·b⁻¹ + 6·x·b⁻¹`) that the R15
+  // Si/Ci matcher cannot bind. Rewrite every Sin/Cos argument into its
+  // collected linear `c₀ + c₁·x` form so each routed piece is a clean
+  // `∫P·sin/cos(linear)`.
+  const linearized = linearizeTrigArgs(ce, reduced, x);
+  const terms =
+    linearized.operator === 'Add' && linearized.ops
+      ? linearized.ops
+      : [linearized];
+  return terms.map((t) => ce.function('Multiply', [P, t]));
+}
+
+/** Rewrite every `Sin/Cos[arg]` node in `e` with its collected linear form
+ *  `c₀ + c₁·x` (via `polyCoeffsX`), so a same-angle-reduced multiple-angle
+ *  argument that circularTrigReduce left as an uncollected sum becomes a clean
+ *  `c+d·x` the R15 Si/Ci fallback can bind. Non-linear (degree > 1) or
+ *  non-polynomial arguments are left untouched. */
+function linearizeTrigArgs(
+  ce: ComputeEngine,
+  e: Expression,
+  x: string
+): Expression {
+  if ((e.operator === 'Sin' || e.operator === 'Cos') && e.ops?.length === 1) {
+    const c = polyCoeffsX(e.ops[0], x);
+    if (c !== null && c.length <= 2) {
+      const c0 = c[0] ?? ce.Zero;
+      const c1 = c[1] ?? ce.Zero;
+      return ce.function(e.operator, [c0.add(c1.mul(ce.symbol(x)))]);
+    }
+    return e;
+  }
+  if (!e.ops) return e;
+  return ce.function(
+    e.operator,
+    e.ops.map((o) => linearizeTrigArgs(ce, o, x))
+  );
+}
+
 function coeff(args: Json[], ctx: Ctx): Expression {
   const u = build(args[0], ctx);
   const n = args.length >= 3 ? (realNum(build(args[2], ctx)) ?? NaN) : 1;

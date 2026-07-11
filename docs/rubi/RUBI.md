@@ -55,7 +55,16 @@ suite because the whole corpus integrates wrt `x`). **R26B (behind
 nested `1/(x·(a+b/2·(x−1/x)))` sub-integrand is retried in rational normal
 form (`rationalNormalFormX`) so the bundled 1.2.1 rules reach it: ch6
 **35→46/120**, genuine wrongs 0.
-**Next rungs live in ROADMAP §R** (poly×trig-after-deactivation, R3′ deep
+R27 (2026-07-10) closed the ch5 reciprocal-arcsin/arccos family (file
+5.1.4a per-file #336/#408/#410 and relatives): the 5.1.2#11 / 5.1.4#45
+Subst chains strand on mixed inner integrals `∫x⁻¹·Sinᵐu·Cosᵏu` — trig
+*products* every earlier fallback declined. New `polyTrigProductReduce`
+driver fallback (behind `RUBI_NO_R27`): `circularTrigReduce` the same-angle
+product to a multiple-angle sum, re-linearize the angle arguments, distribute
+the polynomial coefficient, close each piece via the bundled by-parts /
+R15 Si/Ci machinery, fail-closed D-check. 5.1 **57→65**, 5.2 **67→78**,
+guards byte-identical, genuine wrongs 0.
+**Next rungs live in ROADMAP §R** (complex-Erfi evaluator, R3′ deep
 chains; then the Ch6 elliptic/by-parts tail R7–R8). The §1–§4 analysis below is
 the original feasibility study (still accurate); §5 carries the current
 phasing status, and the project memory (`project_rubi.md`) has the
@@ -1767,6 +1776,50 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     than x (R26A)` (9 tests) and a ch6/R26B block (6 tests, D-verified at
     two parameter points, toggle-meaningfulness under `RUBI_NO_R26=1`);
     `rubi-utils.test.ts` — `rationalNormalFormX` unit tests (3).
+- **Phase R27 — poly×same-angle-trig-product reduction LANDED (2026-07-10).**
+  Closes the ch5 reciprocal-arcsin class carried across three rungs (R22
+  named it, R23/R24 both triaged and deferred it). **Index clarification for
+  trackers:** the long-tracked "#408/#410/#336" are **per-file** indices in
+  `5.1.4a` — the `(a+b·ArcSin[c·x])⁻¹ᐟ⁻²` reciprocal family (the
+  running-section problems with those numbers already solved).
+  - **Diagnosis (trace-confirmed).** #408 `∫x⁵/(√(1−c²x²)(a+b·arcsin)²)`
+    reduces via reciprocal-square by-parts then rule 5.1.2#11's Subst to the
+    inner `∫x⁻¹·Sin[u]⁴·Cos[u]` (u linear); #410 → `∫x⁻¹·Sin[u]²·Cos[u]`;
+    #336 → 5.1.4#45's `∫x⁻¹·Sin[u]³·Cos[u]⁶`. These are trig **products**:
+    R15's single-sin/cos gate, R16's csc²/sec² gate, and R23's pure-`Sinᵐ/θ`
+    reduction all decline them, so the inner strands and the parent Subst
+    rule fails ("inner Int unsolved"). Re-confirmed the R24 finding: the
+    `FunctionOfTrigOfLinearQ` predicate was never the lever.
+  - **Mechanism.** `polyTrigProductReduce` driver fallback (after
+    R15/R16/R17, before the hyperbolic fallback; gated `trigActive` +
+    `hasTrigProductCandidate` O(nodes) pre-filter; behind `RUBI_NO_R27`) +
+    `polyTrigProductPieces` in `rubi-utils.ts`: partition the deactivated
+    normal form into a same-angle trig product and a trig-free coefficient
+    `P`; `circularTrigReduce` the product to a real multiple-angle sum;
+    **re-linearize each `Sin/Cos` argument via `polyCoeffsX`** (the reducer
+    leaves multiple-angle arguments as uncollected sums the R15 gate cannot
+    bind — this step is load-bearing); distribute `P`; route each
+    `∫P·sin/cos(j·u)` piece through `intRec` (R15 Si/Ci closes the `/x`
+    pieces, bundled by-parts the `xᵏ` pieces). Every piece must close;
+    `antiderivativeVerifies` D-check on the assembled result; try/catch →
+    null.
+  - **Before→after (s120 seed 5, toggle A/B; fresh baselines — the
+    documented ones predate R25/R26 tree drift).** 5.1 Inverse sine
+    **57 → 65** (+8: per-file #336/#408/#410 — all three targets — plus
+    #60 `x⁴/arcsin³`, #107 `x⁴/arcsin^{5/2}`, #130 `x³·arcsinⁿ`, #326,
+    #432); 5.2 Inverse cosine **67 → 78** (+11 arccos analogs). Wrongs
+    0 → 0 on both. Independently D-verified at concrete parameters
+    (rel-err ≤ 3e-8).
+  - **Guards (toggle byte-identical).** 4.1 Sine 58/58 (chapter-dir on this
+    tree config — not comparable to the shipped-bundle 108), ch3 70/70
+    (4w/4w), ch6 46/46, ch2 82/82 (3w/3w). The guard wrongs are
+    toggle-invariant pre-existing symbolic-exponent false-wrongs; R27 is
+    structurally inert outside trig-active integrands.
+  - **Tests.** `integration-rules.test.ts` — R27 block: three D-verified
+    end-to-end closures via the shipped loader, a Si/Ci-presence assertion,
+    and a `RUBI_NO_R27` gate test meaningful in both directions;
+    `rubi-utils.test.ts` — `polyTrigProductPieces` unit tests
+    (Σ pieces ≡ integrand incl. the degree-9 case; off-shape → null).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

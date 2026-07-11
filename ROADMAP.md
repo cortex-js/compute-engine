@@ -51,7 +51,7 @@ validation) are release-protocol steps tracked in
 `roadmap/cortex/STATUS_REPORT.md`, not here.
 
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
-status:** R1–R26 landed — chapters 1/2/3/5/6/7, 4.1/4.3/4.5, §8.8 Polylogarithm,
+status:** R1–R27 landed — chapters 1/2/3/5/6/7, 4.1/4.3/4.5, §8.8 Polylogarithm,
 6,574 rules bundled; see the **Coverage tracks → Rubi** section below for
 current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
@@ -520,7 +520,7 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-10, R1–R26 landed):** the shipped bundle
+**State (2026-07-10, R1–R27 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 3 (Logarithms), 5 (Inverse trig), 6 (Hyperbolics),
@@ -528,12 +528,13 @@ gate each other.
 — 6,574 rules, 6.98 MB (CI has a bundle-freshness gate). Scores (seed 5): **4.1
 Sine 107/120 and 331/400 (4.1.11 file 93/113, post-R18)**, **4.3 Tangent 72/120**,
 **4.5 Secant 69/120**, **ch3 Logarithms 71/120 (R20, +2 from ch5 family-C
-producers)**, **Chapter 5 Inverse trig (R24): 5.1 sine 57/120, 5.2 cosine 67,
-5.3 tangent 59, 5.4 cotangent 60, 5.5 secant 56, 5.6 cosecant 52 (≥351/720 =
-≥48.8%; R24 +15 on 5.1/5.2/5.3 via a complex-argument Erf/Erfi kernel flipping
-fractional-`n` Erfi antiderivatives not-evaluable→correct — 5.4/5.5/5.6 not
-re-run; R23 +5 over R22's 331 via the InvTrig^n multiple-angle → CosIntegral
-reduction)**, **Chapter 7
+producers)**, **Chapter 5 Inverse trig (R27): 5.1 sine 65/120, 5.2 cosine 78,
+5.3 tangent 59, 5.4 cotangent 62, 5.5 secant 56, 5.6 cosecant 52 (≥372/720 =
+≥51.7%; R27 +19 on 5.1/5.2 via the poly×trig-product reduction closing the
+reciprocal-arcsin/arccos family — 5.1.4a per-file #336/#408/#410 and
+relatives; earlier: R24 +15 via the complex-argument Erf/Erfi kernel, R23 +5
+via the InvTrig^n multiple-angle → CosIntegral reduction; 5.3/5.5/5.6 scores
+predate R25–R27 re-runs)**, **Chapter 7
 Inverse hyperbolic (R22): 7.1 sine 79/120, 7.2 cosine 51,
 7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44, 7.6 cosecant 54 (408/720 =
 56.7%, R22 +2 — ch7's hyperbolic sub-integrals were already covered by the
@@ -593,7 +594,7 @@ fail-closed D-check; native-rational). A/B env switches:
 `RUBI_NO_TRIGSQ`, `RUBI_NO_TRIGEXP`, `RUBI_NO_TRIGSUB` (R22 subproblem
 trig-bridge), `RUBI_NO_R25` (R25 quartic-denominator ExpandIntegrand guard),
 `RUBI_NO_R26` (R26B rational-normal-form retry in the exp-substitution
-fallback).
+fallback), `RUBI_NO_R27` (poly×trig-product reduction fallback).
 **Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
 power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
 shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`
@@ -692,20 +693,21 @@ note — trace the residual integrand, don't trust the predicate census.
   (multiple-angle elementary form) for `sin^n` products — the exp-form
   reduction works but verifies past the harness budget and preempts trig-form
   rules chapter-wide, so it was deliberately gated off.
-- **R23 residual — the mixed-product inner integral + complex-Erfi kernel.**
-  R22's bridge (`RUBI_NO_TRIGSUB`) closed the `∫f(x)·Cot[x]`-bottoming family
-  (ch5 294 → 331); **R23 landed the `Cos[k·θ]` multiple-angle producer**
-  (`circularTrigReduce` — the circular branch of `ExpandTrigReduce`), closing the
-  `∫x^m·ArcSin^n / √(1−c²x²)` (n<0) family into CosIntegral/SinIntegral (ch5
-  331 → 336). What remains: (a) the **mixed** `∫θⁿ·Sin[u]^m·Cos[u]^k` inner
-  integral of rule 5.1.2#11 (the `(a+b·ArcSin)⁻²` cases #408/#410/#336) has no
-  closing CE rule — Rubi's `FunctionOfTrigOfLinearQ`-gated rule is unimplemented;
-  (b) the fractional-`n` (`Sqrt[arcsin]`, `^(3/2)`, `^(5/2)`) family now produces
+- **Ch5 residual — complex-Erfi evaluator + ₚFq.** The rung ladder closed the
+  chapter's structural gaps in sequence: R22's bridge (`RUBI_NO_TRIGSUB`)
+  closed the `∫f(x)·Cot[x]`-bottoming family (294 → 331), R23's
+  `circularTrigReduce` closed the `∫x^m·ArcSin^n/√(1−c²x²)` (n<0) family
+  (331 → 336), and **R27's `polyTrigProductReduce` closed the mixed
+  `∫θⁿ·Sinᵐ·Cosᵏ` inner integrals of the reciprocal-arcsin/arccos class**
+  (5.1 57→65, 5.2 67→78 — the former residual (a)). What remains:
+  (a) the fractional-`n` (`Sqrt[arcsin]`, `^(3/2)`, `^(5/2)`) family produces
   a **correct** complex-`Erfi`/Fresnel form CE cannot `.N()` (graded
-  `not-evaluable`) — a native complex-Erfi evaluator would convert those to solved;
-  (c) the ₃F₂/`HypergeometricPFQ` terminal forms need a generalized ₚFq head CE
-  lacks (out of scope). Ch7's analog is smaller and already covered (arsinh →
-  hyperbolic fallback).
+  `not-evaluable`) — a native complex-Erfi evaluator would convert those to
+  solved (nearest-rung candidate; the R24 `erfiComplex` kernel covers the
+  numeric side, the gap is the symbolic-result `.N()` path);
+  (b) the ₃F₂/`HypergeometricPFQ` terminal forms need a generalized ₚFq head
+  CE lacks (out of scope). Ch7's analog is smaller and already covered
+  (arsinh → hyperbolic fallback).
 
 **Exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules) are
 DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty).
