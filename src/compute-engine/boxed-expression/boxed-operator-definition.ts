@@ -26,6 +26,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'engine',
   'name',
   'description',
+  'keywords',
   'examples',
   'wikidata',
   'url',
@@ -67,6 +68,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   name: string;
   description?: string | string[];
+  keywords?: string[];
   url?: string;
   wikidata?: string;
 
@@ -155,6 +157,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     const result: Record<string, unknown> = { name: this.name };
     if (this.wikidata) result.wikidata = this.wikidata;
     if (this.description) result.description = this.description;
+    if (this.keywords) result.keywords = this.keywords;
     if (this.url) result.url = this.url;
     result.broadcastable = this.broadcastable;
     result.associative = this.associative;
@@ -216,6 +219,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.involution = involution;
 
     this.description = def.description ?? this.description;
+    this.keywords = def.keywords ?? this.keywords;
     this.collection = def.collection ?? this.collection;
     this.url = def.url ?? this.url;
     this.wikidata = def.wikidata ?? this.wikidata;

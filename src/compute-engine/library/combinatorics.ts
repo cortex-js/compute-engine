@@ -294,6 +294,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Binomial: {
       description:
         'Compute the binomial coefficient C(n, k) = n! / (k! (n-k)!). Agrees with Choose for all defined values.',
+      keywords: ['choose', 'nCr', 'combination'],
       wikidata: 'Q209875',
       // Was `(integer, integer) -> integer`: too strict — it turned any
       // non-integer (rational, radical, symbolic n/k inferred as `number`)
@@ -367,6 +368,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Permutations: {
       description:
         'Return all permutations of length k (default full length) of a collection.',
+      keywords: ['nPr'],
       signature: '(collection, integer?) -> list<list>',
       evaluate: ([xs, kExpr], { engine: ce }) => {
         if (!xs.isFiniteCollection) return undefined;

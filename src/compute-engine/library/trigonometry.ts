@@ -177,6 +177,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     //
     Arctan: {
       description: 'Inverse tangent.',
+      keywords: ['atan'],
       wikidata: 'Q2257242',
       complexity: 5200,
       broadcastable: true,
@@ -203,6 +204,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     Arctan2: {
       description: 'Two-argument arctangent giving the angle of a vector.',
+      keywords: ['atan2'],
       wikidata: 'Q776598',
       complexity: 5200,
       broadcastable: true,
@@ -298,7 +300,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // since these functions relate to areas on a hyperbola, not arc lengths.
     Arcosh: trigFunction('Arcosh', 6200),
 
-    Arcsin: trigFunction('Arcsin', 5500),
+    Arcsin: { ...trigFunction('Arcsin', 5500), keywords: ['asin'] },
 
     Arsinh: trigFunction('Arsinh', 6100),
 
@@ -354,7 +356,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Tanh: trigFunction('Tanh', 6200, 'Hyperbolic tangent'),
   },
   {
-    Arccos: trigFunction('Arccos', 5550),
+    Arccos: { ...trigFunction('Arccos', 5550), keywords: ['acos'] },
 
     Arccot: trigFunction('Arccot', 5650),
 

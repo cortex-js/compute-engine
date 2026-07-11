@@ -32,13 +32,17 @@
 
 - **Reverse library search**: `ce.searchDefinitions(query)` returns a ranked,
   deterministic list of `{ id, kind }` identifiers matching a plain-text
-  concept query. Matching spans three case-insensitive axes — the
-  identifier name, the definition's description, and its LaTeX triggers
-  (e.g. `\gcd` → `GCD`, `\lfloor` → `Floor`, `\binom` → `Binomial`). `kind`
-  uses the same semantics as `operatorInfo()`/`symbolInfo()` (`function`,
-  `opaque`, `constant`, `variable`), and every returned `id` resolves via
-  `ce.lookupDefinition(id)`. Results are capped by an optional `limit`
-  (default 10); an empty or unmatched query returns `[]`.
+  concept query. Matching spans four case-insensitive axes — the
+  identifier name, the definition's description, a curated `keywords`
+  synonym list (e.g. `average` → `Mean`, `antiderivative` → `Integrate`,
+  `nCr` → `Binomial`), and its LaTeX triggers (e.g. `\gcd` → `GCD`,
+  `\lfloor` → `Floor`, `\binom` → `Binomial`). Definitions now accept an
+  optional `keywords` field, so `ce.declare()`d symbols can supply their own
+  synonyms. `kind` uses the same semantics as
+  `operatorInfo()`/`symbolInfo()` (`function`, `opaque`, `constant`,
+  `variable`), and every returned `id` resolves via `ce.lookupDefinition(id)`.
+  Results are capped by an optional `limit` (default 10); an empty or
+  unmatched query returns `[]`.
 - **New builtin operators**: `Pipe(x, f)` applies `f` to `x` (so the
   pipeline operator `x |> f` now evaluates), `Append(collection, element)`,
   `Fold(f, init, collection)` (a `Reduce` variant with an explicit initial

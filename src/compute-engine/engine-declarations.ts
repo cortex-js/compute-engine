@@ -59,6 +59,17 @@ function descriptionLines(def: BoxedDefinition): string[] {
   return typeof d === 'string' ? [d] : d;
 }
 
+/** The curated search keywords of a definition, as a list of searchable
+ * strings. */
+function keywordsOf(def: BoxedDefinition): string[] {
+  const k = isOperatorDef(def)
+    ? def.operator.keywords
+    : isValueDef(def)
+      ? def.value.keywords
+      : undefined;
+  return k ?? [];
+}
+
 /**
  * Reverse library search: map a plain-text concept query to a ranked list of
  * matching identifiers. See `ComputeEngine.searchDefinitions`.
@@ -109,8 +120,14 @@ export function searchDefinitions(
         t.toLowerCase()
       );
       const descriptions = descriptionLines(def).map((d) => d.toLowerCase());
+      const keywordsLower = keywordsOf(def).map((k) => k.toLowerCase());
 
-      const searchable = [idLower, ...triggersLower, ...descriptions];
+      const searchable = [
+        idLower,
+        ...triggersLower,
+        ...keywordsLower,
+        ...descriptions,
+      ];
 
       // Gate: every query token must be a substring of at least one
       // searchable string.
@@ -121,11 +138,14 @@ export function searchDefinitions(
 
       // Tier (lower is better). Pins the ranking invariants for single-token
       // queries; multi-token queries that only match via description land in
-      // the last tier.
+      // the last tier. An exact keyword match ranks with exact triggers (tier
+      // 2) so a curated alias wins over name-substring noise; keyword
+      // substring matches fall through to the description tier.
       let tier: number;
       if (idLower === q) tier = 0;
       else if (idLower.startsWith(q)) tier = 1;
       else if (triggersLower.some((t) => t === q)) tier = 2;
+      else if (keywordsLower.some((k) => k === q)) tier = 2;
       else if (idLower.includes(q)) tier = 3;
       else if (triggersLower.some((t) => t.includes(q))) tier = 4;
       else tier = 5;

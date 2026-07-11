@@ -680,6 +680,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     Dot: {
       description: 'Dot product (vector inner product) or matrix product.',
+      keywords: ['dot product', 'inner product', 'scalar product'],
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> value',
       // `Dot` is Mathematica's `.`: it reduces to the inner product for two

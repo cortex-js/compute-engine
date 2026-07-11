@@ -48,6 +48,7 @@ export class _BoxedValueDefinition
 
   wikidata?: string;
   description?: string | string[];
+  keywords?: string[];
   url?: string;
 
   private _engine: ComputeEngine;
@@ -100,6 +101,7 @@ export class _BoxedValueDefinition
 
     if (def.wikidata) this.wikidata = def.wikidata;
     if (def.description) this.description = def.description;
+    if (def.keywords) this.keywords = def.keywords;
     if (def.url) this.url = def.url;
 
     if (def.holdUntil) this.holdUntil = def.holdUntil;
@@ -189,6 +191,7 @@ export class _BoxedValueDefinition
     };
     if (this.wikidata) result.wikidata = this.wikidata;
     if (this.description) result.description = this.description;
+    if (this.keywords) result.keywords = this.keywords;
     if (this.url) result.url = this.url;
     if (this._type) result.type = this._type.toString();
     result.inferredType = this.inferredType;

@@ -1053,6 +1053,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         "The unknown may be omitted: it defaults to the equation's single free",
         'variable, or to `x` when there are several and one of them is `x`.',
       ],
+      keywords: ['roots', 'zeros'],
       // Hold the arguments: the equation must NOT be pre-evaluated, or an
       // `Equal` collapses to a boolean (`x^2 = 1` → `False`) before solving.
       lazy: true,

@@ -1279,9 +1279,11 @@ export class ComputeEngine implements IComputeEngine {
    *
    * The query is tokenized on whitespace; a definition matches when **every**
    * token is a case-insensitive substring of at least one of its searchable
-   * strings, drawn from three axes:
+   * strings, drawn from four axes:
    * - its **identifier** (e.g. `GCD`, `Floor`),
-   * - its **description** text, and
+   * - its **description** text,
+   * - its curated **keywords** (synonyms and alternate names, e.g. `average`
+   *   → `Mean`, `antiderivative` → `Integrate`, `nCr` → `Binomial`), and
    * - its **LaTeX triggers** (e.g. `\gcd` → `GCD`, `\lfloor` → `Floor`,
    *   `\binom` → `Binomial`) — available only when a LaTeX syntax is present.
    *
@@ -1291,9 +1293,9 @@ export class ComputeEngine implements IComputeEngine {
    * chain that call for full detail.
    *
    * Ranking, best first: exact identifier match, identifier prefix, exact
-   * trigger, identifier substring, trigger substring, then description-only
-   * matches; ties break by shorter id, then alphabetically. An empty or
-   * whitespace-only query returns `[]`.
+   * trigger or exact keyword, identifier substring, trigger substring, then
+   * keyword-substring and description-only matches; ties break by shorter id,
+   * then alphabetically. An empty or whitespace-only query returns `[]`.
    *
    * ```ts
    * ce.searchDefinitions('gcd');       // → [{ id: 'GCD', kind: 'function' }, …]

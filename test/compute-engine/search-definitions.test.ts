@@ -79,6 +79,48 @@ describe('searchDefinitions', () => {
     expect(a).toEqual(b);
   });
 
+  test('keyword synonym: average → Mean (function) first', () => {
+    // "average" appears in neither the id nor (originally) any description;
+    // the curated keyword surfaces it, and an exact keyword ranks first.
+    expect(ce.searchDefinitions('average')[0]).toEqual({
+      id: 'Mean',
+      kind: 'function',
+    });
+  });
+
+  test('keyword synonym: antiderivative → includes Integrate', () => {
+    expect(ids('antiderivative')).toContain('Integrate');
+  });
+
+  test('keyword synonym: choose → includes Binomial', () => {
+    expect(ids('choose')).toContain('Binomial');
+  });
+
+  test('keyword synonym is case-insensitive: NCR → includes Binomial', () => {
+    expect(ids('NCR')).toContain('Binomial');
+  });
+
+  test('exact keyword outranks an id-substring match', () => {
+    // `Abs` carries the exact keyword "magnitude" (tier 2); `QuantityMagnitude`
+    // only contains "magnitude" as an id substring (tier 3). The exact keyword
+    // must win.
+    const results = ids('magnitude');
+    expect(results).toContain('Abs');
+    expect(results).toContain('QuantityMagnitude');
+    expect(results.indexOf('Abs')).toBeLessThan(
+      results.indexOf('QuantityMagnitude')
+    );
+  });
+
+  test('user-declared keywords are findable', () => {
+    const fresh = new ComputeEngine();
+    fresh.declare('gizmo', { type: 'real', keywords: ['doohickey'] });
+    const result = fresh
+      .searchDefinitions('doohickey')
+      .find((r) => r.id === 'gizmo');
+    expect(result).toEqual({ id: 'gizmo', kind: 'variable' });
+  });
+
   test('graceful degradation with a minimal injected latexSyntax', () => {
     const minimal = new ComputeEngine({
       latexSyntax: { parse: () => null, serialize: () => '' },

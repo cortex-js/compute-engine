@@ -237,7 +237,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature: '((collection|number|distribution)+) -> number',
       type: () => 'finite_real',
-      description: 'Arithmetic mean of a collection of numbers.',
+      description: 'Arithmetic mean (average) of a collection of numbers.',
+      keywords: ['average'],
       evaluate: (ops, { engine, numericApproximation }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
           const r = distributionMean(engine, ops[0]);
@@ -325,6 +326,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       description: 'Sample Standard Deviation of a collection of numbers.',
+      keywords: ['stdev', 'std'],
       signature: '((collection|number|distribution)+) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine, numericApproximation }) => {

@@ -193,6 +193,7 @@ volumes
     //
     Derivative: {
       description: 'Derivative operator that returns a derivative function.',
+      keywords: ['differentiate'],
       broadcastable: false,
 
       lazy: true,
@@ -258,6 +259,7 @@ volumes
     D: {
       description:
         'Symbolic partial derivative with respect to one or more variables.',
+      keywords: ['differentiate'],
       broadcastable: false,
 
       scoped: true,
@@ -399,6 +401,7 @@ volumes
 
     Integrate: {
       description: 'Symbolic integral with optional bounds.',
+      keywords: ['antiderivative', 'primitive'],
       wikidata: 'Q80091',
       broadcastable: false,
 

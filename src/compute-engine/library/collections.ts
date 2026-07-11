@@ -285,6 +285,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Length: {
     description:
       'Number of elements in a collection. Returns undefined for non-collections and for infinite collections.',
+    keywords: ['size'],
     complexity: 4000,
     signature: '(any) -> integer',
     type: () => 'integer' as Type,

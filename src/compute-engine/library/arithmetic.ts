@@ -252,6 +252,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     //
     Abs: {
       description: 'Absolute value (magnitude) of a number.',
+      keywords: ['magnitude', 'modulus'],
       wikidata: 'Q3317982', // magnitude 'Q120812 (for reals)
       broadcastable: true,
       idempotent: true,
@@ -349,6 +350,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Ceil: {
       description: 'Rounds a number up to the next largest integer',
+      keywords: ['round up', 'ceiling'],
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> integer',
@@ -700,6 +702,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Floor: {
       description: 'Rounds a number down to the nearest integer.',
+      keywords: ['round down', 'integer part'],
       wikidata: 'Q56860783',
       complexity: 1250,
       broadcastable: true,
@@ -973,6 +976,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Also known as the product logarithm or omega function
     LambertW: {
       description: 'Lambert W function (product logarithm)',
+      keywords: ['product log', 'omega function'],
       wikidata: 'Q429963',
       complexity: 8300,
       broadcastable: true,
@@ -1239,6 +1243,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     Mod: {
       description:
         'Modulo: the remainder of the floored division of x by y. The sign of the result follows the sign of the divisor y (floored-division convention, matching most CAS). For a truncated/round-to-nearest remainder, see `Remainder`.',
+      keywords: ['remainder', 'modulo', 'modulus'],
       wikidata: 'Q1799665',
       complexity: 2500,
       broadcastable: true,
@@ -1658,6 +1663,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Power: {
       description: 'Exponentiation: raise a base to a power.',
+      keywords: ['exponent', 'exponentiation'],
       wikidata: 'Q33456',
       broadcastable: true,
       complexity: 3500,
@@ -2053,6 +2059,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Sqrt: {
       description: 'Square Root',
+      keywords: ['square root', 'radical'],
       wikidata: 'Q134237',
       complexity: 3000,
       broadcastable: true,

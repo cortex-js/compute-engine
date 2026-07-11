@@ -539,6 +539,12 @@ export interface BaseDefinition {
    */
   description: string | string[];
 
+  /**
+   * Search keywords (synonyms, alternate names) used by
+   * `ce.searchDefinitions()`. Not shown in documentation.
+   */
+  keywords?: string[];
+
   /** A list of examples of how to use this symbol or operator.
    *
    * Each example is a string, which can be a MathJSON expression or LaTeX, bracketed by `$` signs.
