@@ -1894,12 +1894,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (args.length === 0) return '';
       if (args.length === 1)
         return '1..' + serializer.serialize(operand(expr, 1));
+      // Operands must be wrapped at the `..` parse precedence (800):
+      // `..` binds tighter than prefix minus or addition, so an unwrapped
+      // low-precedence start (`-N..N`, `a+1..b`) would reparse incorrectly
+      // (e.g. as `-(N..N)`).
       // 1..2
       if (args.length === 2)
         return (
-          serializer.wrap(operand(expr, 1), 10) +
+          serializer.wrap(operand(expr, 1), 800) +
           '..' +
-          serializer.wrap(operand(expr, 2), 10)
+          serializer.wrap(operand(expr, 2), 800)
         );
       // 1..3..7
       if (args.length === 3) {
@@ -1908,24 +1912,24 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         const start = machineValue(operand(expr, 1));
         if (step !== null && start !== null) {
           return (
-            serializer.wrap(operand(expr, 1), 10) +
+            serializer.wrap(operand(expr, 1), 800) +
             '..' +
-            serializer.wrap(start + step, 10) +
+            serializer.wrap(start + step, 800) +
             '..' +
-            serializer.wrap(operand(expr, 2), 10)
+            serializer.wrap(operand(expr, 2), 800)
           );
         }
 
         // We have arbitrary expressions for start (a) or step (b)...
         // i.e. a..(a+b)..c
         return (
-          serializer.wrap(operand(expr, 1), 10) +
+          serializer.wrap(operand(expr, 1), 800) +
           '..(' +
           (serializer.wrap(operand(expr, 1), ADDITION_PRECEDENCE) +
             '+' +
             serializer.wrap(operand(expr, 3), ADDITION_PRECEDENCE)) +
           ')..' +
-          serializer.wrap(operand(expr, 2), 10)
+          serializer.wrap(operand(expr, 2), 800)
         );
       }
       return '';
@@ -3127,11 +3131,13 @@ function tryInferRangeFromElements(
 
   // Single-anchor continuation: `[1, ..., 10]` (no second sample to infer a
   // step). Produce the default-step `Range(start, end)`, matching `[1...10]`.
+  // The start may be symbolic (`[-N, ..., N]`) — no step inference is needed.
   // The `ContinuationPlaceholder` must never survive as a list element.
   if (samples.length === 1) {
-    const start = machineValue(samples[0]);
-    if (start === null) return null;
-    return ['Range', start, endExpr];
+    const start = samples[0];
+    if (symbol(start) === 'ContinuationPlaceholder') return null;
+    const startNum = machineValue(start);
+    return ['Range', startNum ?? start, endExpr];
   }
 
   // Need at least 2 samples to infer a step

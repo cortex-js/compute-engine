@@ -398,3 +398,33 @@ describe('TYPE INFERENCE FOR ROUNDING AND DIVISOR FUNCTIONS', () => {
     expect(ce.expr(['LCM', 4, 6]).type.toString()).toBe('finite_integer');
   });
 });
+
+describe('INFERENCE ON OPERATOR-BOUND SYMBOLS (definition corruption guard)', () => {
+  // Regression (Tycho, 2026-07-11): a symbol assigned a SYMBOLIC list
+  // containing `N` (which names a builtin operator) corrupted the shared
+  // `N` operator definition when the list elements were inferred numeric:
+  // narrow((any, integer?) -> unknown, real) = never, and since `never`
+  // matches `function`, the signature was overwritten engine-wide. Every
+  // later parse of the token `N` then failed with `unexpected-symbol`.
+  it('inferring an incompatible type on an operator symbol leaves its definition intact', () => {
+    const engine = new ComputeEngine();
+    engine.pushScope();
+    engine.assign('L_1', engine.parse('\\left[N,2N\\right]').evaluate());
+
+    // Any of these used to trigger the corruption:
+    expect(engine.parse('2x').subs({ x: 'L_1' }).json).toEqual([
+      'Multiply',
+      2,
+      'L_1',
+    ]);
+    expect(engine.box(['Multiply', 2, 'L_1']).isValid).toBe(true);
+    engine.popScope();
+
+    // The `N` operator definition is unchanged and `N` still parses.
+    expect(engine.parse('N').json).toEqual('N');
+    expect(engine.parse('\\left[N,2N\\right]').isValid).toBe(true);
+    expect(engine.expr(['N', 'Pi']).evaluate().isSame(engine.Pi.N())).toBe(
+      true
+    );
+  });
+});

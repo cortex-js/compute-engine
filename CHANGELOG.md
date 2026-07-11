@@ -145,6 +145,21 @@
   `.N()`.** For example, `["List", "y", ["Add", "y", 1]]` with `y = 7`
   evaluates to `[7, 8]`, and `[1/3].N()` is numericized. Lazy collections such
   as `Range`, `Map`, and `Filter` remain lazily enumerated.
+- **Ellipsis lists with symbolic bounds parse to `Range`.**
+  `\left[-N,\ldots,N\right]` and `\left[-3N,\ldots,3N\right]` now parse to
+  `Range(-N, N)` and `Range(-3N, 3N)`, matching the numeric-start forms
+  (`[1,\ldots,N]`). Previously a symbolic start fell through to a raw `List`
+  containing a literal `ContinuationPlaceholder`, which enumerated as `NaN`.
+  In addition, a `Range` whose bounds bind looser than the `..` operator now
+  serializes with parentheses (`(-N)..N`) so it round-trips through LaTeX
+  (an unwrapped `-N..N` reads back as `-(N..N)`).
+- **Using a symbol bound to a symbolic list no longer corrupts builtin
+  definitions.** After `ce.assign('L_1', ce.parse('\\left[N,2N\\right]'))`,
+  constructing `2 L_1` — via `subs()`, `ce.box()`, or `ce.function()` —
+  permanently broke the builtin `N` operator for the lifetime of the engine:
+  every subsequent parse of the token `N` returned an `unexpected-symbol`
+  error. Type inference on the list elements no longer overwrites an
+  operator definition with an unsatisfiable (`never`) type.
 
 ### Cortex
 

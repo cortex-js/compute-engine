@@ -408,6 +408,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           ? widen(def.operator.signature.type, t)
           : narrow(def.operator.signature.type, t)
       );
+      // An incompatible constraint (e.g. a symbol bound to an operator
+      // definition used where a number is expected) narrows to `never`.
+      // Since `never` matches any type, it would be written into the
+      // shared definition below, corrupting it engine-wide. Leave the
+      // definition unchanged instead.
+      if (newType.matches('never')) return false;
       if (newType.matches('function')) {
         // The function signature was modified
         def.operator.signature = newType;

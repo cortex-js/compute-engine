@@ -152,6 +152,40 @@ describe('Continuation placeholder (ellipsis fold barrier)', () => {
     expect(ce.parse('[1, 2, \\ldots, 10]').json).toEqual(['Range', 1, 10, 1]);
   });
 
+  test('List → Range: symbolic single-anchor bounds (Tycho 2026-07-11)', () => {
+    // Compound bounds used to fall through to a raw List with a literal
+    // ContinuationPlaceholder that enumerated as NaN.
+    expect(ce.parse('\\left[-N,\\ldots,N\\right]').json).toEqual([
+      'Range',
+      ['Negate', 'N'],
+      'N',
+    ]);
+    expect(ce.parse('\\left[-3N,\\ldots,3N\\right]').json).toEqual([
+      'Range',
+      ['Multiply', -3, 'N'],
+      ['Multiply', 3, 'N'],
+    ]);
+    // Substituting the free variable yields an enumerable range
+    const r = ce
+      .parse('\\left[-N,\\ldots,N\\right]')
+      .subs({ N: 2 })
+      .evaluate();
+    expect([...r.each()].map((x) => x.toString())).toEqual([
+      '-2',
+      '-1',
+      '0',
+      '1',
+      '2',
+    ]);
+  });
+
+  test('Range with low-precedence start round-trips through LaTeX', () => {
+    // `..` binds tighter than prefix minus: an unwrapped `-N..N` reparses
+    // as -(N..N), so the serializer must parenthesize the start.
+    const e = ce.parse('\\left[-N,\\ldots,N\\right]');
+    expect(ce.parse(e.latex).json).toEqual(e.json);
+  });
+
   // ---------------------------------------------------------------------------
   // Subtraction-spelled ellipsis (`… - \dots`). When the additive chain carries
   // a continuation, the parser rewrites its `Subtract` groupings into explicit
