@@ -139,6 +139,43 @@ equivalent (`let fact` followed by
 *mutually* recursive functions still require declaring all the names with
 `let` before defining any of them.
 
+## Higher-Order Functions
+
+Functions are values: they can be passed as arguments and returned from other
+functions. A `|->` lambda captures the variables in scope where it is created.
+
+**A numeric-derivative factory.** `deriv` returns a lambda that closes over
+both the function `f` and the step `h`. The central-difference estimate is
+computed *exactly* (as a rational):
+
+```cortex
+deriv(f, h) = x |-> (f(x + h) - f(x - h)) / (2h)
+g(x) = x^3
+let dg = deriv(g, 1/1000)
+dg(2)
+// ➔ 12000001/1000000
+```
+
+Wrap the call in `N(…)` for a floating-point value — numericization reaches
+through the user-function/closure call:
+
+```cortex
+N(dg(2))
+// ➔ 12.000001
+```
+
+**Function composition.** `compose` returns `f ∘ g`; the two orders give
+different results, confirming each lambda captures the right binding:
+
+```cortex
+compose(f, g) = x |-> f(g(x))
+inc(x) = x + 1
+sq(x) = x^2
+let h = compose(sq, inc)
+(h(4), compose(inc, sq)(4))
+// ➔ (25, 17)
+```
+
 ## Numeric Methods
 
 **Newton's method for √2.** The iteration runs exactly (each `x` is a
@@ -175,6 +212,65 @@ for k in Range(1, total) {
 }
 N(4 * inside / total)
 // ➔ ≈ 3.14 (varies by run)
+```
+
+## Calculus
+
+The calculus operators work symbolically, keeping parameters exact.
+
+**Integration.** The work to stretch an ideal spring (force `F = kx`) from 0 to
+a displacement `d` is `∫₀ᵈ kx dx`:
+
+```cortex
+Integrate(k*x, (x, 0, d))
+// ➔ 1/2 * k * d^2
+```
+
+A definite integral with numeric bounds evaluates exactly:
+
+```cortex
+Integrate(Sin(x), (x, 0, Pi))
+// ➔ 2
+```
+
+**Limits.** The leading relative error of the small-angle approximation
+`sin x ≈ x` is governed by a limit at 0:
+
+```cortex
+Limit((Sin(x) - x)/x^3, x, 0)
+// ➔ -1/6
+```
+
+**Series.** The Maclaurin expansion of sine, with a `BigO` tail marking the
+first dropped term:
+
+```cortex
+Series(Sin(x), x, 0)
+// ➔ 1/120 * x^5 - 1/6 * x^3 + x + BigO(x^7)
+```
+
+## Units and Measurements
+
+Units and measured quantities enter through `$…$` LaTeX islands and carry
+through the computation.
+
+**Unit conversion.** Convert a posted 30 km/h speed limit to SI m/s:
+
+```cortex
+N(UnitConvert($30\,\mathrm{km/h}$, $\mathrm{m/s}$))
+// ➔ 8.333333333333334 m/s
+```
+
+**Uncertainty propagation.** `Measurement(value, error)` carries an absolute
+uncertainty that `*` propagates in quadrature. For a plot measured
+L = 10 ± 0.1 m by W = 20 ± 0.2 m, the area error is
+√(20²·0.1² + 10²·0.2²) = √8 ≈ 2.83:
+
+```cortex
+let L = Measurement(10, 0.1)
+let W = Measurement(20, 0.2)
+N(L * W)
+// ➔ 200.0 ± 2.8
 ```
 
 ## Exact and Symbolic Computation
@@ -238,6 +334,38 @@ N(Abs(x - phi))
 // ➔ 6.2e-18
 ```
 
+**Trailing zeros of 100!, two ways.** Legendre's formula counts the factors of
+5 in the factorial:
+
+```cortex
+let n = 100
+let p = 5
+let z = 0
+while p <= n { z = z + Floor(n / p); p = p * 5 }
+z
+// ➔ 24
+```
+
+Cross-check by stripping factors of 10 off the *exact* 158-digit integer `100!`:
+
+```cortex
+let f = 100!
+let count = 0
+while f % 10 == 0 { f = f / 10; count = count + 1 }
+count
+// ➔ 24
+```
+
+**Roots of unity.** The five 5th-roots of unity are the vertices of a regular
+pentagon on the unit circle; their vector sum is exactly zero:
+
+```cortex
+Sum(Exp(2*Pi*ImaginaryUnit*k/5), (k, 0, 4))
+// ➔ 0
+```
+
+(`N(…)` of the same sum returns zero to floating-point roundoff, ≈ 1e-16.)
+
 ## Strings
 
 **String interpolation.** A `\( … )` escape splices any expression's value
@@ -247,6 +375,27 @@ into a string:
 let x = 2^11 - 1
 "\(x) has type \(Type(x))"
 // ➔ "2047 has type integer"
+```
+
+**A formatted table.** `\t` and `\n` escapes in a string literal are real
+control characters. Build a table of `n`, `n²`, `n³` — a plain header string
+plus one interpolated row per value, joined with `Fold`/`StringJoin`:
+
+```cortex
+let header = "n\tn^2\tn^3\n"
+let lines = Map(Range(1, 5), n |-> "\(n)\t\(n^2)\t\(n^3)\n")
+StringJoin(header, Fold((acc, line) |-> StringJoin(acc, line), "", lines))
+```
+
+produces (tabs aligned, newline-separated rows):
+
+```
+n	n^2	n^3
+1	1	1
+2	4	8
+3	9	27
+4	16	64
+5	25	125
 ```
 
 ## Collections
@@ -299,4 +448,78 @@ explicit initial value:
 ```cortex
 Fold((acc, n) |-> acc + n^2, 0, Range(1, 5))
 // ➔ 55
+```
+
+**Solve a linear system.** `LinearSolve(A, b)` solves `A·x = b`, exactly for
+exact input. Here `2x + y = 5`, `x + 3y = 10`:
+
+```cortex
+let A = [[2, 1], [1, 3]]
+let b = [5, 10]
+LinearSolve(A, b)
+// ➔ [1, 3]
+```
+
+**Errors are values.** A type-incompatible element does not abort the
+computation — it surfaces as `NaN` while the valid inputs still compute. Here
+`Sqrt` is mapped over a list containing a string:
+
+```cortex
+let inputs = [16, -4, "banana", 81]
+Map(inputs, x |-> Sqrt(x))
+// ➔ [4, 2i, NaN, 9]
+```
+
+## Dictionaries
+
+A dictionary maps keys to values; index it with `d[key]`.
+
+**A lookup table.** Decode the Roman numeral MCMXCIV, using a dictionary as a
+symbol-value table and the subtractive rule:
+
+```cortex
+let value = {"I" -> 1, "V" -> 5, "X" -> 10, "L" -> 50, "C" -> 100, "D" -> 500, "M" -> 1000}
+let s = ["M","C","M","X","C","I","V"]
+let n = Length(s)
+let total = 0
+for i in Range(1, n) {
+  let cur = value[s[i]]
+  if i < n && cur < value[s[i + 1]] { total = total - cur } else { total = total + cur }
+}
+total
+// ➔ 1994
+```
+
+**A frequency table.** `Tally` returns `(values, counts)`; `Zip` pairs them and
+`DictionaryFrom` builds the dictionary. This is the idiomatic build-then-read
+pattern (there is no in-place `d[k] = v` update):
+
+```cortex
+let words = ["red","blue","red","green","blue","red","blue"]
+let t = Tally(words)
+let freq = DictionaryFrom(Zip(t[1], t[2]))
+(freq["red"], freq["blue"], freq["green"])
+// ➔ (3, 3, 1)
+```
+
+**Enumerating a dictionary** with `Keys` and `Values`:
+
+```cortex
+let scores = {"alice" -> 90, "bob" -> 85, "carol" -> 95}
+(Keys(scores), Max(Values(scores)))
+// ➔ (["alice", "bob", "carol"], 95)
+```
+
+## Sets
+
+`Intersection`, `Union` and set equality work on sets. Passing lists to
+`Intersection` deduplicates and returns a `Set`. The common divisors of 48 and
+36 are the intersection of their divisor lists (equivalently, the divisors of
+gcd(48, 36) = 12):
+
+```cortex
+let d48 = [1, 2, 3, 4, 6, 8, 12, 16, 24, 48]
+let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
+Intersection(d48, d36)
+// ➔ Set(1, 2, 3, 4, 6, 12)
 ```

@@ -110,6 +110,26 @@ mirrored them in the repo-root `ROADMAP.md` has been retired.
   2026-07-11).** No `+` overload or dedicated operator; `"a" + "b"` remains
   a type error by design.
 
+### Language-design candidates from the examples sweep 2 (2026-07-11)
+
+Found while writing the second examples wave; each is a design decision, not
+a bug — decide when Tycho demand appears:
+
+- **Unit-literal notation (M — design).** Cortex has no native unit syntax:
+  bare `km` is a free symbol. Units are expressible today via `$…$` LaTeX
+  islands (`$30\,\mathrm{km/h}$`) or `Quantity(30, "km/h")`. A first-class
+  unit literal (e.g. `30 `km/h``?) needs a grammar decision.
+- **`RandomSeed` from Cortex (S — design).** Seeding is host-side only
+  (`ce.randomSeed`); a `RandomSeed(n)` statement would make notebook
+  simulations self-contained and reproducible.
+- **Strings as character collections (S/M — design).** Strings can't be
+  iterated/indexed/`Tally`'d; there is no `Characters`/`StringSplit`.
+  Character- or word-frequency programs must start from an explicit list.
+- **Block-expression closure bodies (M — design).** `{…}` in expression
+  position is a set literal, so a stateful `makeCounter`-style closure (a
+  lambda whose body is a statement block) is not expressible; pure
+  capturing closures work.
+
 ### Serializer / compile-target polish
 
 - **Formatter trailing-space artifact (S).** One cosmetic

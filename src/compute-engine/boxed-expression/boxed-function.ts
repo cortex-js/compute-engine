@@ -1803,18 +1803,16 @@ function applyFunctionLiteral(
       while (true) {
         const { done, value: zipped } = items.next();
         if (done) break;
-        results.push(apply(value, zipped).evaluate(options));
+        results.push(apply(value, zipped, options));
       }
       return expr.engine._fn('List', results);
     }
   }
 
-  // The value is a function literal. Apply the arguments to it.
-  // Re-evaluate the result with the caller's options so that
-  // `numericApproximation` (from `.N()`) is honored through the
-  // user-function application seam — `apply()` evaluates the body without
-  // options, so without this a float request would return an exact value.
-  return apply(value, ops).evaluate(options);
+  // The value is a function literal. Apply the arguments to it, threading
+  // the caller's options — `numericApproximation` is honored inside the
+  // function's scope frame (see makeLambda), preserving lexical scoping.
+  return apply(value, ops, options);
 }
 
 /** Returns true when every formal parameter of a signature is a scalar

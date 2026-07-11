@@ -1042,6 +1042,40 @@ Two design-level residues are deliberately carried forward:
   `library/calculus.ts`); it is blocked on evaluate-recursion and
   underscore-lambda LaTeX serialization, so it waits on those.
 
+### Cortex examples sweep 2 (2026-07-11) — engine residuals
+
+The second Cortex examples sweep (units, calculus, linear algebra,
+dictionaries/sets, closures, strings) surfaced and same-day **fixed**: plain
+string escape double-processing (Cortex), `N()` not numericizing through
+user-function application (threaded inside the closure's scope frame —
+re-evaluating outside it breaks lexical scoping), exact `Inverse` +
+matrix-typed results + new `LinearSolve`, 3-arg `Limit(expr, var, point)`,
+`Quantity` string units, dictionary `Keys`/`Values`, and `Intersection` on
+lists. Still open:
+
+- **Multi-variable `Solve([eq1, eq2], [x, y])` output shape (design
+  decision).** The system-solving machinery works internally
+  (`solveSystem` returns `Record` shapes, reachable via
+  `expr.solve(['x','y'])`); wiring the operator needs
+  `canonicalSolveSpec` (`solve-domain.ts:96`) to accept a `List` spec and
+  `evaluateSolve` (`solve-domain.ts:196`) to choose an output expression
+  form for solution records (list of `Equal`s? tuples per variable order?)
+  — deliberately deferred as a design call.
+- **`Inverse` of matrices with radical entries still floats.** The exact
+  path requires rational entries; a matrix containing `√2` takes the
+  numeric path under plain `evaluate()`.
+- **A 2-element list in set context is read as an `Interval`.**
+  `Intersection([1,2], [2,3])` intersects intervals, not 2-element sets
+  (`listToIntervalInSetContext`, shared with `Union` — pre-existing).
+- **`Intersection` of two lazy `Filter` results overflows the stack.**
+  `Intersection(Filter(...), Filter(...))` recurses without bound; plain
+  list operands work (found during examples integration, needs a repro
+  reduction + triage).
+- **Set equality is representation-sensitive.** A computed
+  `Set(...)` (e.g. an `Intersection` result) compares `==` False against a
+  `{…}` set literal with the same elements, while literal-vs-literal
+  compares by membership (`{1,2,3} == {3,2,1}` → True).
+
 ### Review residue (open low-priority items)
 
 The June 2026 codebase review (REVIEW.md) is fully dispositioned; its full text

@@ -951,7 +951,7 @@ describe('Inverse', () => {
 
   it('should calculate the inverse of a numeric matrix', () => {
     const result = ce.expr(['Inverse', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`[[-2,1],[1.5,-0.5]]`);
+    expect(result.toString()).toMatchInlineSnapshot(`[[-2,1],[3/2,-1/2]]`);
   });
 
   it('should calculate the inverse of a matrix with unknowns', () => {
@@ -974,6 +974,83 @@ describe('Inverse', () => {
     expect(result.toString()).toMatchInlineSnapshot(
       `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
     );
+  });
+
+  // Exactness contract: an exact integer/rational matrix inverts to an exact
+  // rational matrix under `evaluate()`; only `.N()` floats.
+  it('inverts an exact integer matrix exactly (not to floats)', () => {
+    const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
+    const result = ce.expr(['Inverse', A]).evaluate();
+    expect(result.toString()).toEqual('[[3/5,-1/5],[-1/5,2/5]]');
+    // The result carries a matrix type (not `list<list<…>>`).
+    expect(result.type.toString()).toEqual('matrix<2x2>');
+  });
+
+  it('floats the exact inverse under .N()', () => {
+    const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
+    expect(ce.expr(['Inverse', A]).N().toString()).toEqual(
+      '[[0.6,-0.2],[-0.2,0.4]]'
+    );
+  });
+
+  it('inverts a genuinely inexact (float) matrix numerically', () => {
+    // 0.5 is inexact, so the exact path does not fire.
+    const A: Expression = ['List', ['List', 0.5, 1], ['List', 1, 3]];
+    expect(ce.expr(['Inverse', A]).evaluate().toString()).toEqual(
+      '[[6,-2],[-2,1]]'
+    );
+  });
+
+  it('returns a matrix-typed result that Dot accepts', () => {
+    const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
+    const b: Expression = ['List', 1, 1];
+    // Dot(A⁻¹, b) solves A·x = b: x = [2/5, 1/5].
+    expect(ce.expr(['Dot', ['Inverse', A], b]).evaluate().toString()).toEqual(
+      '[2/5,1/5]'
+    );
+  });
+});
+
+describe('LinearSolve', () => {
+  it('solves an exact 2x2 system exactly', () => {
+    const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
+    const b: Expression = ['List', 1, 1];
+    expect(ce.expr(['LinearSolve', A, b]).evaluate().toString()).toEqual(
+      '[2/5,1/5]'
+    );
+  });
+
+  it('solves an exact 3x3 system exactly', () => {
+    const A: Expression = [
+      'List',
+      ['List', 2, 1, 1],
+      ['List', 1, 3, 2],
+      ['List', 1, 0, 0],
+    ];
+    const b: Expression = ['List', 4, 5, 6];
+    expect(ce.expr(['LinearSolve', A, b]).evaluate().toString()).toEqual(
+      '[6,15,-23]'
+    );
+  });
+
+  it('floats the solution under .N()', () => {
+    const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
+    const b: Expression = ['List', 1, 1];
+    expect(ce.expr(['LinearSolve', A, b]).N().toString()).toEqual('[0.4,0.2]');
+  });
+
+  it('stays inert for a singular system', () => {
+    const A: Expression = ['List', ['List', 1, 2], ['List', 2, 4]];
+    const b: Expression = ['List', 1, 1];
+    expect(ce.expr(['LinearSolve', A, b]).evaluate().toString()).toEqual(
+      'LinearSolve([[1,2],[2,4]], [1,1])'
+    );
+  });
+
+  it('errors on a non-square coefficient matrix', () => {
+    const A: Expression = ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]];
+    const b: Expression = ['List', 1, 2];
+    expect(ce.expr(['LinearSolve', A, b]).evaluate().isValid).toBe(false);
   });
 });
 
@@ -2095,7 +2172,7 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
           .evaluate()
           .toString()
       ).toMatchInlineSnapshot(
-        `[[0.5,0,0,0],[0,0.25,0,0],[0,0,0.2,0],[0,0,0,0.1]]`
+        `[[1/2,0,0,0],[0,1/4,0,0],[0,0,1/5,0],[0,0,0,1/10]]`
       ));
   });
 
@@ -2350,7 +2427,7 @@ describe('MatrixPower', () => {
     // Regression: the negative branch bailed early on a non-BoxedTensor
     // inverse, collapsing A^{-2} to A^{-1}.
     expect(ce.expr(['MatrixPower', m, -2]).evaluate().toString()).toBe(
-      '[[5.5,-2.5],[-3.75,1.75]]'
+      '[[11/2,-5/2],[-15/4,7/4]]'
     );
   });
 
@@ -2426,13 +2503,13 @@ describe('Power of a matrix (^)', () => {
   });
 
   it('A^{-1} is the inverse', () => {
-    expect(ev(['Power', m, -1])).toMatchInlineSnapshot(`[[-2,1],[1.5,-0.5]]`);
+    expect(ev(['Power', m, -1])).toMatchInlineSnapshot(`[[-2,1],[3/2,-1/2]]`);
     expect(ce.box(['Power', m, -1]).canonical.json[0]).toBe('Inverse');
   });
 
   it('A^{-2} is the inverse squared', () => {
     expect(ev(['Power', m, -2])).toMatchInlineSnapshot(
-      `[[5.5,-2.5],[-3.75,1.75]]`
+      `[[11/2,-5/2],[-15/4,7/4]]`
     );
   });
 

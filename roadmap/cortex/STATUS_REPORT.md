@@ -111,6 +111,33 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-11 — **Examples sweep 2 + fix round.** Two drafting agents wrote
+  and empirically verified 16 notebook-scale programs across the previously
+  unexercised subsystems (units/uncertainty, Integrate/Limit/Series, linear
+  systems, number theory/complex, dictionaries, sets, closures, seeded
+  randomness, errors-as-values, strings), surfacing 18 findings. Fixed same
+  day: **plain-string escape double-processing** (parser.ts single-segment
+  path re-escaped cooked segments; multiline strings were affected too; two
+  pre-existing tests had locked in the buggy output and were corrected);
+  **`N()` through user-function application** — first fix attempt
+  re-evaluated the applied body in the caller's context and SILENTLY BROKE
+  LEXICAL SCOPING (caught by scope.test.ts "Dynamic scoping"; the subagent
+  misattributed the failure to concurrent WIP — attribution re-proven by
+  reverting); redone by threading `EvaluateOptions` through
+  `apply`/`applicable`/`makeLambda` (function-utils.ts) so the
+  approximation happens INSIDE the closure's scope frame; **exact
+  `Inverse`** (Gauss-Jordan over BigRat; result typed `matrix` so
+  `Dot(Inverse(A), b)` composes; 5 inline snapshots corrected float→exact)
+  + **new `LinearSolve`**; **3-arg `Limit(expr, var, point)`**
+  (free-variable disambiguation vs. the `(fn, point, direction)` reading);
+  **`Quantity(n, "unit")` string units** via the shared unit DSL parser;
+  **dictionary `Keys`/`Values`**; **`Intersection` on lists**. Engine
+  residuals (multi-var Solve output shape, radical-matrix exactness,
+  2-element-list-as-Interval quirk) recorded in ROADMAP.md; Cortex design
+  candidates (unit literals, `RandomSeed`, `Characters`/`StringSplit`,
+  block-expression closures) added to README backlog. Full suite after the
+  round: 16 067 passed / 0 failed / 4 080 snapshots unchanged. All 16
+  programs integrated into `programs.test.ts`/`examples.md`.
 - 2026-07-11 — **Lazy-collections decision RATIFIED + implemented: literals
   are values, pipelines are generators.** Collection *literals* evaluate
   their elements: the `List` evaluate handler (`library/collections.ts`) and

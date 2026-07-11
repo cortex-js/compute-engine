@@ -47,11 +47,47 @@
   notation; and `RandomInteger` uses inclusive bounds and honors the seeded
   random-number generator.
 
+### Calculus
+
+- **`Limit` accepts the explicit-variable form.** `Limit(expr, var, point)` —
+  e.g. `["Limit", ["Divide", ["Sin", "x"], "x"], "x", 0]` → `1` — now
+  canonicalizes to the same internal form as `Limit(expr, point)`, matching
+  the convention `Series` already uses. The `(function, point, direction)`
+  reading is preserved when the middle operand is not a free variable of the
+  expression.
+
+### Linear Algebra
+
+- **`Inverse` of an exact matrix is exact.** An integer or rational matrix
+  now inverts over the rationals — `Inverse([[2,1],[1,3]])` →
+  `[[3/5,-1/5],[-1/5,2/5]]` instead of floats — with `.N()` and inexact
+  matrices using the numeric path as before.
+- **New `LinearSolve(A, b)` operator** solves the linear system `A·x = b`,
+  exactly for exact input. Composed forms like `Dot(Inverse(A), b)` also
+  work now: `Inverse`'s result is typed as a matrix, so matrix operators
+  accept it.
+
+### Units and Quantities
+
+- **`Quantity` accepts a string unit.** `Quantity(30, "km/h")` parses the
+  string through the same unit grammar as the LaTeX path and canonicalizes
+  identically to the symbolic form; a malformed unit string produces a clear
+  error instead of a partially-built expression.
+
 ### Programming and Collections
 
 - **Recursive functions can be defined without a separate declaration.** A
   function assignment that refers to itself, such as
   `ce.parse('f(n) := n \\cdot f(n-1)')`, now works directly.
+- **`N()` numericizes through user-defined functions.** For `f(x) := x/3`,
+  `N(f(2))` now returns `0.666…` instead of the exact `2/3`; plain
+  `evaluate()` still returns the exact form, and the approximation is
+  applied within the function's own scope, preserving lexical scoping.
+- **`Keys(dict)` and `Values(dict)` evaluate**, returning the keys (as
+  strings) and values in the dictionary's iteration order — the same order
+  `for kv in dict` yields.
+- **`Intersection` accepts lists** (any finite collection), deduplicating
+  into a `Set`; `Union` already did.
 - **Indexing a matrix once returns a correctly typed row.** Expressions such as
   `At(At(m, 2), 1)` now validate and evaluate correctly for matrices and other
   rank-2-or-higher collections.
@@ -66,6 +102,14 @@
   precedence) and `n!` is `Factorial(n)` (the `!` must directly follow its
   operand; prefix `!x` is still `Not` and `x != y` is still `NotEqual`).
 - **Chained indexing**: `m[2][1]` now works alongside `m[2, 1]`.
+- **String escape sequences are processed correctly.** `"a\tb\nc"` now
+  contains a real tab and newline (escapes were previously double-processed
+  in plain and multiline strings; interpolated strings were already
+  correct).
+- **The examples suite roughly doubled** (`src/cortex/docs/examples.md`),
+  adding units and uncertainty, calculus, linear systems, dictionaries,
+  sets, closures, seeded randomness, errors-as-values, and string
+  formatting — every example verified by an executable test.
 
 ## 0.74.0 _2026-07-10_
 

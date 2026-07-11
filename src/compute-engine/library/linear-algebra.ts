@@ -344,7 +344,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // reject).
           const inv = op1.tensor.inverse();
           if (inv === undefined) return undefined;
-          return ce.function('List', inv.expression.ops);
+          const invExpr = inv.expression;
+          return isFunction(invExpr)
+            ? ce.function('List', invExpr.ops)
+            : invExpr;
         }
 
         return undefined;
@@ -367,6 +370,34 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (isTensor(op1)) return op1.tensor.pseudoInverse()?.expression;
 
         return undefined;
+      },
+    },
+
+    // Solve the linear system A·x = b for the unknown vector (or matrix) x.
+    LinearSolve: {
+      description: 'Solve the linear system A·x = b for x.',
+      keywords: ['linear system', 'solve'],
+      complexity: 8300,
+      signature: '(matrix, matrix|vector) -> value',
+      evaluate: ([a, b], { engine: ce, numericApproximation }) => {
+        const A = a.evaluate({ numericApproximation });
+        const B = b.evaluate({ numericApproximation });
+
+        if (!isTensor(A) || !isTensor(B)) return undefined;
+
+        // A must be a square matrix.
+        if (A.shape.length !== 2 || A.shape[0] !== A.shape[1])
+          return ce.error('expected-square-matrix', A.toString());
+
+        // x = A⁻¹·b. `Inverse` honors the exactness contract (exact rational
+        // for an exact matrix, numeric otherwise) and returns a `matrix<…>`
+        // typed result that feeds straight into `MatrixMultiply`. A singular
+        // A leaves `Inverse` symbolic, so the product stays inert.
+        const inv = ce.function('Inverse', [A]).evaluate({ numericApproximation });
+        if (!isTensor(inv)) return undefined;
+        return ce
+          .function('MatrixMultiply', [inv, B])
+          .evaluate({ numericApproximation });
       },
     },
 

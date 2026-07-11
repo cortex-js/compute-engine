@@ -245,6 +245,35 @@ N(Abs(x - phi))`);
     expect(diagnostics).toEqual([]);
     expect(Math.abs(value.re)).toBeLessThan(1e-12);
   });
+
+  test('trailing zeros of 100! by Legendre’s formula', () => {
+    const { text, diagnostics } = run(`
+let n = 100
+let p = 5
+let z = 0
+while p <= n { z = z + Floor(n / p); p = p * 5 }
+z`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('24');
+  });
+
+  test('trailing zeros of 100! by stripping the exact factorial', () => {
+    // 100! is the exact 158-digit integer, so factors of 10 can be divided off.
+    const { text, diagnostics } = run(`
+let f = 100!
+let count = 0
+while f % 10 == 0 { f = f / 10; count = count + 1 }
+count`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('24');
+  });
+
+  test('the five 5th-roots of unity sum to exactly zero', () => {
+    const { text, diagnostics } = run(`
+Sum(Exp(2*Pi*ImaginaryUnit*k/5), (k, 0, 4))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('0');
+  });
 });
 
 describe('CORTEX PROGRAMS — strings', () => {
@@ -254,6 +283,19 @@ let x = 2^11 - 1
 "\\(x) has type \\(Type(x))"`);
     expect(diagnostics).toEqual([]);
     expect(value.string).toBe('2047 has type integer');
+  });
+
+  test('a formatted table with StringJoin, interpolation and escapes', () => {
+    // The header is a plain string literal whose `\t`/`\n` escapes are real
+    // control characters; each body row splices computed numbers with `\(…)`.
+    const { value, diagnostics } = run(`
+let header = "n\\tn^2\\tn^3\\n"
+let lines = Map(Range(1, 5), n |-> "\\(n)\\t\\(n^2)\\t\\(n^3)\\n")
+StringJoin(header, Fold((acc, line) |-> StringJoin(acc, line), "", lines))`);
+    expect(diagnostics).toEqual([]);
+    expect(value.string).toBe(
+      'n\tn^2\tn^3\n1\t1\t1\n2\t4\t8\n3\t9\t27\n4\t16\t64\n5\t25\t125\n'
+    );
   });
 });
 
@@ -306,6 +348,26 @@ Fold((acc, n) |-> acc + n^2, 0, Range(1, 5))`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('55');
   });
+
+  test('solve a 2x2 linear system exactly with LinearSolve', () => {
+    // 2x + y = 5, x + 3y = 10  ->  (x, y) = (1, 3), exact for exact input.
+    const { text, diagnostics } = run(`
+let A = [[2, 1], [1, 3]]
+let b = [5, 10]
+LinearSolve(A, b)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[1,3]');
+  });
+
+  test('errors are values: a bad element becomes NaN, the aggregate survives', () => {
+    // "banana" is out of Sqrt's domain, so its slot materializes as NaN while
+    // the valid inputs still compute — the Map never throws.
+    const { text, diagnostics } = run(`
+let inputs = [16, -4, "banana", 81]
+Map(inputs, x |-> Sqrt(x))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[4,2i,NaN,9]');
+  });
 });
 
 describe('CORTEX PROGRAMS — collection literals evaluate their elements', () => {
@@ -327,5 +389,132 @@ let d = 5
 [d, d + 1]`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('[5,6]');
+  });
+});
+
+describe('CORTEX PROGRAMS — higher-order functions', () => {
+  test('a numeric-derivative factory (a lambda closing over f and h)', () => {
+    // Central difference of x^3 at 2 with h = 1/1000 is exact: 3·2² + h².
+    const { text, diagnostics } = run(`
+deriv(f, h) = x |-> (f(x + h) - f(x - h)) / (2h)
+g(x) = x^3
+let dg = deriv(g, 1/1000)
+dg(2)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('12000001/1000000');
+  });
+
+  test('N numericizes a user-function/closure call in one step', () => {
+    const { text, diagnostics } = run(`
+deriv(f, h) = x |-> (f(x + h) - f(x - h)) / (2h)
+g(x) = x^3
+let dg = deriv(g, 1/1000)
+N(dg(2))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('12.000001');
+  });
+
+  test('function composition captures the right bindings', () => {
+    const { text, diagnostics } = run(`
+compose(f, g) = x |-> f(g(x))
+inc(x) = x + 1
+sq(x) = x^2
+let h = compose(sq, inc)
+(h(4), compose(inc, sq)(4))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(25, 17)');
+  });
+});
+
+describe('CORTEX PROGRAMS — calculus', () => {
+  test('symbolic Integrate keeps parameters (work to stretch a spring)', () => {
+    const { text, diagnostics } = run(`Integrate(k*x, (x, 0, d))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('1/2 * k * d^2');
+  });
+
+  test('a definite integral evaluates exactly', () => {
+    const { text, diagnostics } = run(`Integrate(Sin(x), (x, 0, Pi))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('2');
+  });
+
+  test('Limit — leading error of the small-angle approximation', () => {
+    const { text, diagnostics } = run(`Limit((Sin(x) - x)/x^3, x, 0)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('-1/6');
+  });
+
+  test('Series — Taylor expansion of sine', () => {
+    const { text, diagnostics } = run(`Series(Sin(x), x, 0)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('1/120 * x^5 - 1/6 * x^3 + x + BigO(x^7)');
+  });
+});
+
+describe('CORTEX PROGRAMS — units and measurements', () => {
+  test('unit conversion through a $…$ LaTeX island (km/h → m/s)', () => {
+    const { text, diagnostics } = run(
+      `N(UnitConvert($30\\,\\mathrm{km/h}$, $\\mathrm{m/s}$))`
+    );
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('8.333333333333334 m/s');
+  });
+
+  test('uncertainty propagates in quadrature through a product', () => {
+    // σ = √(20²·0.1² + 10²·0.2²) = √8 ≈ 2.83
+    const { text, diagnostics } = run(`
+let L = Measurement(10, 0.1)
+let W = Measurement(20, 0.2)
+N(L * W)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('200.0 ± 2.8');
+  });
+});
+
+describe('CORTEX PROGRAMS — dictionaries', () => {
+  test('a dictionary as a lookup table (Roman numeral decoder)', () => {
+    const { text, diagnostics } = run(`
+let value = {"I" -> 1, "V" -> 5, "X" -> 10, "L" -> 50, "C" -> 100, "D" -> 500, "M" -> 1000}
+let s = ["M","C","M","X","C","I","V"]
+let n = Length(s)
+let total = 0
+for i in Range(1, n) {
+  let cur = value[s[i]]
+  if i < n && cur < value[s[i + 1]] { total = total - cur } else { total = total + cur }
+}
+total`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('1994');
+  });
+
+  test('build a frequency dictionary from a stream and read it back', () => {
+    const { text, diagnostics } = run(`
+let words = ["red","blue","red","green","blue","red","blue"]
+let t = Tally(words)
+let freq = DictionaryFrom(Zip(t[1], t[2]))
+(freq["red"], freq["blue"], freq["green"])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(3, 3, 1)');
+  });
+
+  test('Keys and Values enumerate a dictionary', () => {
+    const { text, diagnostics } = run(`
+let scores = {"alice" -> 90, "bob" -> 85, "carol" -> 95}
+(Keys(scores), Max(Values(scores)))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(["alice","bob","carol"], 95)');
+  });
+});
+
+describe('CORTEX PROGRAMS — sets', () => {
+  test('common divisors as the intersection of two divisor lists', () => {
+    // Intersection over lists deduplicates and returns a Set.
+    const { text, diagnostics } = run(`
+let d48 = [1, 2, 3, 4, 6, 8, 12, 16, 24, 48]
+let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
+Intersection(d48, d36)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('Set(1, 2, 3, 4, 6, 12)');
   });
 });

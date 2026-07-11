@@ -351,17 +351,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         this._isLambda = true;
 
       const fn = applicable(boxedFn);
-      // Re-evaluate the applied body with the caller's options so that
-      // `numericApproximation` (from `.N()`) is honored through the
-      // user-function application seam. `applicable()` evaluates the body
-      // without options, so without this a float request (`N(f(2))`) would
-      // return an exact value. A plain `evaluate()` (no approximation) leaves
-      // exact results exact, preserving the exactness contract
-      // (`f(x) := ln(x)` still yields symbolic `ln(2)`).
-      evaluate = (xs, options) => {
-        const result = fn(xs);
-        return result?.evaluate(options) ?? result;
-      };
+      // Thread the caller's options (esp. `numericApproximation` from
+      // `.N()`) into the lambda: the approximation is applied INSIDE the
+      // function's scope frame (see makeLambda), never by re-evaluating
+      // the result in the caller's dynamic context — which would break
+      // lexical scoping.
+      evaluate = (xs, options) => fn(xs, options);
       Object.defineProperty(evaluate, 'toString', {
         value: () => boxedFn.toString(),
       }); // For debugging/_printScope

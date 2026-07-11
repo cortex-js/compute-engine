@@ -2,6 +2,7 @@ import { MathJsonSymbol } from '../math-json.js';
 import { cmp } from './boxed-expression/compare.js';
 import type {
   BoxedDefinition,
+  EvaluateOptions,
   Expression,
   FunctionInterface,
   IComputeEngine as ComputeEngine,
@@ -278,7 +279,8 @@ export function canonicalFunctionLiteralArguments(
  */
 export function apply(
   fn: Expression,
-  args: ReadonlyArray<Expression>
+  args: ReadonlyArray<Expression>,
+  options?: Partial<EvaluateOptions>
 ): Expression {
   // An unresolved symbolic derivative applied to an argument must stay
   // symbolic. `derivative()` represents the derivative of a function with no
@@ -296,7 +298,7 @@ export function apply(
     return fn.engine._fn('Apply', [fn.op1, ...args]);
   }
 
-  const result = makeLambda(fn)?.(args);
+  const result = makeLambda(fn)?.(args, options);
   if (result) return result;
   return fn.engine.function('Apply', [fn, ...args]);
 }
@@ -467,12 +469,18 @@ function captureClosures(
  * instead of overflowing the native JS call stack with a `RangeError`. */
 function wrapRecursion(
   ce: ComputeEngine,
-  fn: (params: ReadonlyArray<Expression>) => Expression | undefined
-): (params: ReadonlyArray<Expression>) => Expression | undefined {
-  return (params) => {
+  fn: (
+    params: ReadonlyArray<Expression>,
+    options?: Partial<EvaluateOptions>
+  ) => Expression | undefined
+): (
+  params: ReadonlyArray<Expression>,
+  options?: Partial<EvaluateOptions>
+) => Expression | undefined {
+  return (params, options) => {
     ce._enterRecursion();
     try {
-      return fn(params);
+      return fn(params, options);
     } finally {
       ce._exitRecursion();
     }
@@ -481,13 +489,16 @@ function wrapRecursion(
 
 function makeLambda(
   expr: Expression
-): (params: ReadonlyArray<Expression>) => Expression | undefined {
+): (
+  params: ReadonlyArray<Expression>,
+  options?: Partial<EvaluateOptions>
+) => Expression | undefined {
   const ce = expr.engine;
 
   // If the expression is a symbol, interpret it as an operator
   if (isSymbol(expr)) {
     const sym = expr.symbol;
-    return (args) => ce.function(sym, args).evaluate();
+    return (args, options) => ce.function(sym, args).evaluate(options);
   }
 
   const canonicalExpr = canonicalFunctionLiteral(expr);
@@ -506,7 +517,9 @@ function makeLambda(
   //
   if (fnExpr.ops.length === 1) {
     console.assert(fnExpr.ops[0] !== undefined);
-    return wrapRecursion(ce, () => fnExpr.ops[0].evaluate());
+    return wrapRecursion(ce, (_args, options) =>
+      fnExpr.ops[0].evaluate(options)
+    );
   }
 
   const [body, ...params] = fnExpr.ops;
@@ -518,7 +531,10 @@ function makeLambda(
   // body is a Block (scoped) — safe to access .ops and .localScope
   const bodyFn = body as Expression & FunctionInterface;
 
-  const invoke = (args: ReadonlyArray<Expression>): Expression | undefined => {
+  const invoke = (
+    args: ReadonlyArray<Expression>,
+    options?: Partial<EvaluateOptions>
+  ): Expression | undefined => {
     //
     // 1/ If there are more arguments than expected, exit
     //
@@ -658,6 +674,14 @@ function makeLambda(
       // the static defining scope, so outer-call parameters are lost once
       // freshScope is popped.
       result = captureClosures(ce, result, freshScope);
+
+      // Honor a numeric-approximation request (`N(f(2))`) by approximating
+      // the (exactly-evaluated) result HERE, while the function's scope
+      // frame is still pushed. Approximating after the frame is popped
+      // would re-resolve free symbols in the *caller's* dynamic context,
+      // breaking lexical scoping (see scope.test.ts "Dynamic scoping").
+      if (options?.numericApproximation)
+        result = result.evaluate({ numericApproximation: true });
     } finally {
       ce.popScope();
       bodyScope.parent = savedParent;
@@ -695,10 +719,14 @@ export function makeLambdaN1(
  */
 export function applicable(
   fn: Expression
-): (xs: ReadonlyArray<Expression>) => Expression | undefined {
+): (
+  xs: ReadonlyArray<Expression>,
+  options?: Partial<EvaluateOptions>
+) => Expression | undefined {
   return (
     makeLambda(fn) ??
-    ((xs) => fn.engine.function('Apply', [fn, ...xs]).evaluate())
+    ((xs, options) =>
+      fn.engine.function('Apply', [fn, ...xs]).evaluate(options))
   );
 }
 
