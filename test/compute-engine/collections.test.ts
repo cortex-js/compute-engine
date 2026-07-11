@@ -1294,4 +1294,127 @@ describe('UNION / INTERSECTION ON COLLECTIONS', () => {
       ce.box(['Intersection', ['Set', 1, 2, 3], setB]).evaluate().json
     ).toEqual(['Set', 2, 3]);
   });
+
+  test('Intersection of two lazy Filter results (regression: stack overflow)', () => {
+    // `Filter`'s `contains` handler used to call `expr.contains()` on the
+    // Filter expression itself, recursing without bound when `Intersection`
+    // probed membership.
+    const ce = new ComputeEngine();
+    const even: Expression = ['Function', ['Equal', ['Mod', '_1', 2], 0], '_1'];
+    const big: Expression = ['Function', ['Greater', '_1', 4], '_1'];
+    expect(
+      ce
+        .box([
+          'Intersection',
+          ['Filter', ['Range', 1, 10], even],
+          ['Filter', ['Range', 1, 10], big],
+        ])
+        .evaluate().json
+    ).toEqual(['Set', 6, 8, 10]);
+  });
+
+  test('Filter membership checks the source collection and the predicate', () => {
+    const ce = new ComputeEngine();
+    const f = ce.box([
+      'Filter',
+      ['Range', 1, 10],
+      ['Function', ['Greater', '_1', 4], '_1'],
+    ]);
+    expect(f.contains(ce.number(7))).toBe(true); // in source, passes predicate
+    expect(f.contains(ce.number(2))).toBe(false); // in source, fails predicate
+    expect(f.contains(ce.number(42))).toBe(false); // not in source
+  });
+});
+
+describe('COLLECTION EQUALITY IS REPRESENTATION-INSENSITIVE', () => {
+  // `Equal` is lazy, so its operands reach the comparison unevaluated. The
+  // collection `eq` handlers used to return a definitive `false` on operator
+  // mismatch, so any computed collection (`Intersection(…)`, `Map(…)`, a
+  // symbol assigned a set…) compared `False` against a literal with the same
+  // elements.
+  const T = (expr: Expression) => {
+    const ce = new ComputeEngine();
+    return ce.box(expr).evaluate().json;
+  };
+
+  test('Set literal vs Intersection', () =>
+    expect(
+      T([
+        'Equal',
+        ['Intersection', ['Set', 1, 2, 3, 4], ['Set', 2, 3, 5]],
+        ['Set', 2, 3],
+      ])
+    ).toEqual('True'));
+
+  test('Set literal vs Union (equal and unequal)', () => {
+    expect(
+      T(['Equal', ['Union', ['Set', 1, 2], ['Set', 3]], ['Set', 1, 2, 3]])
+    ).toEqual('True');
+    expect(
+      T(['Equal', ['Union', ['Set', 1, 2], ['Set', 3]], ['Set', 1, 2, 9]])
+    ).toEqual('False');
+  });
+
+  test('List literal vs lazy Map / Join pipelines', () => {
+    const inc: Expression = ['Function', ['Add', '_1', 1], '_1'];
+    expect(T(['Equal', ['Map', ['List', 1, 2], inc], ['List', 2, 3]])).toEqual(
+      'True'
+    );
+    expect(T(['Equal', ['Map', ['List', 1, 2], inc], ['List', 2, 4]])).toEqual(
+      'False'
+    );
+    expect(
+      T(['Equal', ['Join', ['List', 1], ['List', 2]], ['List', 1, 2]])
+    ).toEqual('True');
+  });
+
+  test('lazy Filter vs literal (list-flavored and set-flavored)', () => {
+    const big: Expression = ['Function', ['Greater', '_1', 8], '_1'];
+    expect(
+      T(['Equal', ['Filter', ['Range', 1, 10], big], ['List', 9, 10]])
+    ).toEqual('True');
+    expect(
+      T([
+        'Equal',
+        ['Filter', ['Set', 1, 2, 3], ['Function', ['Greater', '_1', 1], '_1']],
+        ['Set', 2, 3],
+      ])
+    ).toEqual('True');
+  });
+
+  test('symbol assigned a collection vs the same literal', () => {
+    const ce = new ComputeEngine();
+    ce.assign('s', ce.box(['Set', 1, 2]));
+    expect(ce.box(['Equal', 's', ['Set', 1, 2]]).evaluate().json).toEqual(
+      'True'
+    );
+    ce.assign('r', ce.box(['Range', 1, 3]));
+    expect(ce.box(['Equal', 'r', ['Range', 1, 3]]).evaluate().json).toEqual(
+      'True'
+    );
+    ce.assign('iv', ce.box(['Interval', 1, 3]));
+    expect(ce.box(['Equal', 'iv', ['Interval', 1, 3]]).evaluate().json).toEqual(
+      'True'
+    );
+  });
+
+  test('cross-kind comparisons stay definitively unequal', () => {
+    expect(T(['Equal', ['List', 1, 2], ['Tuple', 1, 2]])).toEqual('False');
+    expect(T(['Equal', ['Set', 1], 5])).toEqual('False');
+    // A set never equals a sequence, whatever the elements
+    expect(
+      T([
+        'Equal',
+        ['Filter', ['Set', 1, 2, 3], ['Function', ['Greater', '_1', 1], '_1']],
+        ['List', 2, 3],
+      ])
+    ).toEqual('False');
+  });
+
+  test('literal-vs-literal comparisons are unchanged', () => {
+    expect(T(['Equal', ['Set', 1, 2, 3], ['Set', 3, 2, 1]])).toEqual('True');
+    expect(T(['Equal', ['Set', 1, 2], ['Set', 1, 3]])).toEqual('False');
+    expect(T(['Equal', ['List', 1, 2], ['List', 2, 1]])).toEqual('False');
+    expect(T(['Equal', ['Range', 1, 3], ['Range', 1, 4]])).toEqual('False');
+  });
 });

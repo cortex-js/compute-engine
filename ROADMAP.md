@@ -523,8 +523,9 @@ Inverse hyperbolic (R22): 7.1 sine 79/120, 7.2 cosine 51,
 ungated `containsHyperbolic` fallback)**, **ch1 1.1 Binomial products 112/120
 (post-R28)**, **1.1.3 General 185/200 s200 (post-R28: unsolved 6 → 1; the
 survivor #259 is an integer-power rational)**, ch1 exhaustive ≈90–91%,
-ch2 ≈72% effective (seed 42), **ch6 Hyperbolics 46/120 (s120 seed 5,
-post-R26B; plus one newly-unmasked genuine wrong, 6.4.2 #158 — see R28)**,
+ch2 ≈72% effective (seed 42), **ch6 Hyperbolics 62/120 (s120 seed 5,
+post-R29: 46 → 62, +16 algebraic-in-hyperbolic flips, and the 6.4.2 #158
+genuine wrong resolved → 0 wrongs — see R29)**,
 Wester indefinite-∫ 6/8.
 **R28 (2026-07-11)** — two composable parts; the "elliptic route" premise
 dissolved under diagnosis (atomic elliptic terminals already close and
@@ -552,7 +553,21 @@ ch6 6.4.2 #158 (`∫√(Coth[a+b·Log[c·xⁿ]])/x`, pre-R28 `inconclusive`) is 
 honestly graded a **genuine wrong** — the exp-substitution route's
 `arcosh(−u)`-form antiderivative fails the real-axis D-check now that it
 evaluates; Rubi's reference form is `[artanh(√coth) − arctan(√coth)]/(b·n)`
-(named fix target for the exp-substitution route).
+(fixed by R29 below).
+**R29 (2026-07-11, `RUBI_NO_R29`)** — algebraic-in-hyperbolic substitution
+plumbing (the former "R7"). A ch6 integrand algebraic in one hyperbolic family
+with a common linear argument `v` (`(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh²)`,
+half-integer hyperbolic powers) is not a rational function of `e^v`, so the
+exp-substitution fallback strands it as inert. A LAST-resort driver fallback
+substitutes `u = Sinh/Cosh/Tanh[v]`, routes the resulting `∫R(u,√(a+b·u²)) du`
+algebraic subproblem through the bundled 1.1.2 quadratic-radical rules
+(elementary artanh form), and back-substitutes; fail-closed with a branch-safe
+mixed-sign D-check (rejecting the `u=Cosh` sign ambiguity and elliptic
+double-radicals). ch6 **46 → 62/120** (+16, A/B byte-identical under
+`RUBI_NO_R29=1`), and it resolved the R28-named genuine wrong **6.4.2 #158**
+(→ branch-artifact solved-formal; its Log-sub sub-integral `∫√(Coth w) dw`
+now hits R29) — ch6 genuine wrongs **1 → 0**. #463/#500 (thought elliptic)
+also flipped correct. Guards byte-identical (R29 is inert off ch6).
 **R26 (2026-07-10)** — two parts. **R26A (P0 correctness, no toggle):** the
 driver returned wrong answers for ANY integration variable not literally
 named `x` (`∫t² dt → x³/3`; `∫t·cos t dt` mixed-corrupted) — rule-RHS `"x"`
@@ -608,7 +623,8 @@ trig-bridge), `RUBI_NO_R25` (R25 quartic-denominator ExpandIntegrand guard),
 `RUBI_NO_R26` (R26B rational-normal-form retry in the exp-substitution
 fallback), `RUBI_NO_R27` (poly×trig-product reduction fallback),
 `RUBI_NO_R28` (R28a mixed-parity Laurent-numerator × binomial-radical
-linearity split).
+linearity split), `RUBI_NO_R29` (R29 algebraic-in-hyperbolic
+`u = Sinh/Cosh/Tanh[v]` substitution fallback).
 **Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
 power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
 shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`
@@ -741,17 +757,22 @@ Ch6-specific:
   symbolic denominators that need genuine polynomial factoring over free
   parameters (the shared 1.3.2 gap) still decline — a smaller item than the
   original R6 framing, worth pursuing only against a named family.
-- **R7 — algebraic-in-hyperbolic substitution plumbing** (21 rows:
-  `(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh)`, half-integer hyperbolic powers).
-  **Reframed by the R28 diagnosis: this is NOT an elliptic-kernel item.**
-  Under the `u = Sinh/Cosh/Tanh` substitution these become
-  `∫R(u, √(a+b·u²))du`, whose terminals close in **elementary arctanh**
-  form via the bundled 1.1.2 quadratic-radical rules (probes confirm);
-  only ~2 rows (#463/#500) are genuinely elliptic. What's missing is the
-  driver plumbing that performs the substitution and hands the algebraic
-  subproblem to ch1 — now viable since R28b lets the resulting
-  `arctanh(>1)` forms verify. Also in ch6: the 6.4.2 #158 exp-substitution
-  wrong-form fix (see R28 above).
+- **R7 — algebraic-in-hyperbolic substitution plumbing — LANDED as R29
+  (2026-07-11, behind `RUBI_NO_R29`).** The 21-row algebraic-in-hyperbolic
+  class (`(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh²)`, half-integer hyperbolic powers)
+  closed via a driver fallback that substitutes `u = Sinh/Cosh/Tanh[v]`
+  (common linear arg `v`), routes the resulting `∫R(u,√(a+b·u²)) du` algebraic
+  subproblem through the bundled 1.1.2 quadratic-radical rules, and
+  back-substitutes; fail-closed with a branch-safe mixed-sign D-check. ch6
+  **46 → 62/120** (+16, s120 seed5, A/B byte-identical under `RUBI_NO_R29=1`),
+  and it **fixed the R28-named genuine wrong 6.4.2 #158** (solved-wrong →
+  branch-artifact solved-formal: its Log-substitution sub-integral `∫√(Coth w)
+  dw` now hits R29). Surprise: **#463/#500** — flagged "genuinely elliptic" —
+  flipped to correct too (a substitution found an elementary D-verifying form;
+  Rubi's EllipticE/F reference was non-optimal). **Residual (still unsolved):**
+  the bare `(a+b·Sinh²)^(3/2)` even-parity shape (genuinely EllipticE/F), the
+  pFq #518, and the `√(Sinh·Tanh)`/`√(Cosh·Coth)` quarter-power oddballs
+  (6.7.1 #560/#563). See docs/rubi/RUBI.md §5 R29.
 - **R8 — poly×reciprocal by-parts / CoshIntegral·SinhIntegral heads** for the
   nonlinear-argument reciprocal families.
 
@@ -1051,7 +1072,11 @@ user-function application (threaded inside the closure's scope frame —
 re-evaluating outside it breaks lexical scoping), exact `Inverse` +
 matrix-typed results + new `LinearSolve`, 3-arg `Limit(expr, var, point)`,
 `Quantity` string units, dictionary `Keys`/`Values`, and `Intersection` on
-lists. Still open:
+lists; a follow-up round fixed the `Intersection(Filter, Filter)` stack
+overflow (`Filter.contains` recursed into itself) and representation-sensitive
+collection equality (computed/lazy/symbol-valued collections now compare equal
+to literals with the same elements, and collection-vs-collection `Equal` no
+longer broadcasts). Still open:
 
 - **Multi-variable `Solve([eq1, eq2], [x, y])` output shape (design
   decision).** The system-solving machinery works internally
@@ -1067,14 +1092,6 @@ lists. Still open:
 - **A 2-element list in set context is read as an `Interval`.**
   `Intersection([1,2], [2,3])` intersects intervals, not 2-element sets
   (`listToIntervalInSetContext`, shared with `Union` — pre-existing).
-- **`Intersection` of two lazy `Filter` results overflows the stack.**
-  `Intersection(Filter(...), Filter(...))` recurses without bound; plain
-  list operands work (found during examples integration, needs a repro
-  reduction + triage).
-- **Set equality is representation-sensitive.** A computed
-  `Set(...)` (e.g. an `Intersection` result) compares `==` False against a
-  `{…}` set literal with the same elements, while literal-vs-literal
-  compares by membership (`{1,2,3} == {3,2,1}` → True).
 
 ### Review residue (open low-priority items)
 

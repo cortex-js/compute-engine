@@ -517,4 +517,16 @@ Intersection(d48, d36)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('Set(1, 2, 3, 4, 6, 12)');
   });
+
+  test('set equality compares by membership, not representation', () => {
+    // A computed set (here an Intersection result) equals a set literal with
+    // the same elements. Regression: the collection `eq` handlers used to
+    // return a definitive False on operator mismatch, so this compared False.
+    const { text, diagnostics } = run(`
+let d48 = [1, 2, 3, 4, 6, 8, 12, 16, 24, 48]
+let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
+Intersection(d48, d36) == {1, 2, 3, 4, 6, 12}`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('"True"');
+  });
 });

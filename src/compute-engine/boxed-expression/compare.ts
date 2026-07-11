@@ -177,6 +177,37 @@ export function eq(
     // If the expressions are structurally identical, they are equal
     if (a.isSame(b)) return true;
 
+    // Two collections compare by their elements. Lazy pipelines (`Map(…)`,
+    // `Join(…)`, `Filter(…)`) deliberately do not materialize under `.N()`
+    // ("pipelines are generators"), so the operator-based handlers above
+    // decline and the numeric-difference logic below cannot decide.
+    // Ordered comparison when both are indexed; membership otherwise.
+    if (a.isCollection && b.isCollection) {
+      // A set never equals a sequence, whatever the elements
+      if (a.type.matches('set') !== b.type.matches('set')) return false;
+      const ca = a.count;
+      const cb = b.count;
+      if (ca === undefined || cb === undefined) return undefined;
+      if (ca !== cb) return false;
+      if (!Number.isFinite(ca)) return undefined;
+      if (a.isIndexedCollection && b.isIndexedCollection) {
+        const itB = b.each();
+        for (const xa of a.each()) {
+          const xb = itB.next();
+          if (xb.done) return false;
+          const cmp = eq(xa, xb.value);
+          if (cmp !== true) return cmp;
+        }
+        return true;
+      }
+      // Unordered (set-like): equal counts + one-way membership
+      for (const xa of a.each()) {
+        const inB = b.contains(xa);
+        if (inB !== true) return inB;
+      }
+      return true;
+    }
+
     // If the difference is zero (within tolerance), the expressions are equal
     if (a.unknowns.length === 0 && b.unknowns.length === 0) {
       // No free variables, so `.N()` already evaluates the difference fully —

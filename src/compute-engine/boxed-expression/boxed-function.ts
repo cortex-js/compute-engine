@@ -1614,11 +1614,13 @@ function skipBroadcastForVectorOps(
   // `Equal`/`NotEqual` broadcast only in the list-vs-scalar case (Desmos
   // `L[d=4]`). When two or more operands are collections, keep the whole-list
   // (structural/mathematical) equality semantics — `Equal(L, M)` stays a scalar
-  // boolean rather than a list of element-wise comparisons. See
+  // boolean rather than a list of element-wise comparisons. Any collection
+  // counts, not just finite indexed ones: `Equal(Set(…), List(…))` must not
+  // broadcast over the list either. See
   // docs/plans/2026-07-07-desmos-list-filtering.md (highest-risk item).
   if (
     (operator === 'Equal' || operator === 'NotEqual') &&
-    ops.filter((x) => isFiniteIndexedCollection(x)).length >= 2
+    ops.filter((x) => x.isCollection).length >= 2
   )
     return true;
   return false;

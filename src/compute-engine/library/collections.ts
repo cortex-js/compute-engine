@@ -205,7 +205,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
     },
     eq: (a: Expression, b: Expression) => {
-      if (a.operator !== b.operator) return false;
+      // `b` may be an unevaluated set-valued expression (`Intersection(…)`,
+      // `Union(…)`, a symbol assigned a set…): decline so `eq()` in
+      // compare.ts can evaluate both sides and re-consult. A value whose
+      // type cannot be a set is definitively unequal.
+      if (a.operator !== b.operator)
+        return b.type.matches('set') ? undefined : false;
       if (!isFunction(a) || !isFunction(b)) return false;
       if (a.nops !== b.nops) return false;
       // The elements are not indexed
@@ -432,7 +437,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
 
     eq: (a: Expression, b: Expression) => {
-      if (a.operator !== b.operator) return false;
+      // Decline on operator mismatch when `b` could still evaluate to a
+      // range (e.g. a symbol assigned a `Range`) — `eq()` in compare.ts
+      // evaluates both sides and re-consults.
+      if (a.operator !== b.operator)
+        return b.type.matches('indexed_collection') ? undefined : false;
       // Symbolic bounds (e.g. Range(1, n)): `range()` coerces them to 1, so
       // the numeric comparison below would equate every symbolic range
       // (Range(1, n) = Range(1, m) → true). Compare structurally instead;
@@ -619,6 +628,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     eq: (a: Expression, b: Expression) => {
       const intervalA = interval(a);
       const intervalB = interval(b);
+      // `b` may be an unevaluated set-valued expression (a symbol assigned
+      // an interval, a set operation…): decline so `eq()` in compare.ts can
+      // evaluate both sides and re-consult.
+      if (!intervalB && b.type.matches('set')) return undefined;
       if (!intervalA || !intervalB) return false;
       return (
         intervalA.start === intervalB.start &&
@@ -1039,10 +1052,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return n;
       },
       contains: (expr, target) => {
-        // True if target is in the collection and the predicate returns True
-        // for that target.
+        // True if target is in the source collection and the predicate returns
+        // True for that target. Note: query the source (`op1`), not `expr` —
+        // `expr.contains()` would dispatch back into this handler.
         if (!isFunction(expr)) return false;
-        if (!expr.contains(target)) return false;
+        if (!(expr.op1.contains(target) ?? false)) return false;
         const f = applicable(expr.op2);
         return sym(f([target])) === 'True';
       },
@@ -3393,7 +3407,18 @@ function joinResultType(ops: ReadonlyArray<Expression>): Type {
 
 function defaultCollectionEq(a: Expression, b: Expression) {
   // Compare two collections
-  if (a.operator !== b.operator) return false;
+  if (a.operator !== b.operator) {
+    // `b` may be an unevaluated expression that evaluates to this literal
+    // kind (`Map(…)`, `Join(…)`, `Filter(…)`, a symbol assigned a
+    // collection…): decline so `eq()` in compare.ts can evaluate both sides,
+    // re-consult, or fall back to its element-wise collection comparison. A
+    // value whose type cannot be this kind is definitively unequal.
+    const compatible =
+      a.operator === 'Tuple'
+        ? b.type.matches('tuple')
+        : b.type.matches('indexed_collection') && !b.type.matches('tuple');
+    return compatible ? undefined : false;
+  }
   if (!isFunction(a) || !isFunction(b)) return false;
   if (a.nops !== b.nops) return false;
 

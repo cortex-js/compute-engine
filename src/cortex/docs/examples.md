@@ -523,3 +523,14 @@ let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
 Intersection(d48, d36)
 // ➔ Set(1, 2, 3, 4, 6, 12)
 ```
+
+Set equality compares by membership, not by how the set was produced: a
+computed set (an `Intersection` result, a filtered set…) equals a set literal
+with the same elements.
+
+```cortex
+let d48 = [1, 2, 3, 4, 6, 8, 12, 16, 24, 48]
+let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
+Intersection(d48, d36) == {1, 2, 3, 4, 6, 12}
+// ➔ True
+```
