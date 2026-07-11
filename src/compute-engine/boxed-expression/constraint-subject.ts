@@ -237,11 +237,22 @@ export type MembershipFacts = {
 export type FactIndex = {
   bySubject: Map<string, SubjectFacts>;
   membership: Map<string, MembershipFacts>;
+  /**
+   * Directed ≥ edges between bare symbols derived from symbol-vs-symbol
+   * inequality assumptions. An edge `u → { to: v, strict }` means the
+   * assumptions entail `u ≥ v` (`u > v` when `strict`). Used by
+   * `relationFromChains` for transitive-closure / antisymmetry reasoning.
+   */
+  geEdges: Map<string, GeEdge[]>;
 };
+
+/** A single ≥ edge `u ≥ to` (strict = `u > to`) in the assumed-inequality graph. */
+type GeEdge = { to: string; strict: boolean };
 
 const EMPTY_FACT_INDEX: FactIndex = Object.freeze({
   bySubject: new Map<string, SubjectFacts>(),
   membership: new Map<string, MembershipFacts>(),
+  geEdges: new Map<string, GeEdge[]>(),
 });
 
 type FactIndexCacheEntry = {
@@ -280,11 +291,50 @@ function subjectsInNormalizedLhs(lhs: Expression): Subject[] {
   return [...found.values()];
 }
 
+/**
+ * Recognize a normalized inequality lhs of the pure symbol-difference shape
+ * `Add(sym, Negate(sym))` (i.e. `pos - neg`) with two bare symbols and no other
+ * terms. Returns `{ pos, neg }` (the bare symbol name and the negated symbol
+ * name), or `undefined`.
+ */
+function symbolDifference(
+  lhs: Expression
+): { pos: string; neg: string } | undefined {
+  if (!isFunction(lhs, 'Add') || lhs.ops.length !== 2) return undefined;
+  let pos: string | undefined;
+  let neg: string | undefined;
+  for (const t of lhs.ops) {
+    if (isSymbol(t)) {
+      if (pos !== undefined) return undefined; // two bare terms
+      pos = t.symbol;
+    } else if (
+      isFunction(t, 'Negate') &&
+      t.ops.length === 1 &&
+      isSymbol(t.op1)
+    ) {
+      if (neg !== undefined) return undefined;
+      neg = t.op1.symbol;
+    } else return undefined;
+  }
+  if (pos === undefined || neg === undefined) return undefined;
+  return { pos, neg };
+}
+
 function buildFactIndex(
   assumptions: Iterable<[Expression, boolean]>
 ): FactIndex {
   const bySubject = new Map<string, SubjectFacts>();
   const membership = new Map<string, MembershipFacts>();
+  const geEdges = new Map<string, GeEdge[]>();
+
+  const addGeEdge = (from: string, to: string, strict: boolean): void => {
+    let arr = geEdges.get(from);
+    if (!arr) {
+      arr = [];
+      geEdges.set(from, arr);
+    }
+    arr.push({ to, strict });
+  };
 
   const subjectFacts = (subject: Subject): SubjectFacts => {
     const key = subjectKey(subject);
@@ -321,6 +371,10 @@ function buildFactIndex(
         if (partial !== undefined)
           mergeTightestBounds(subjectFacts(subject).bounds, partial);
       }
+      // Symbol-vs-symbol edge: `pos - neg (≤|<) 0` ⇔ `neg ≥ pos` (or `neg > pos`).
+      const diff = symbolDifference(ops[0]);
+      if (diff !== undefined)
+        addGeEdge(diff.neg, diff.pos, op === 'Less');
       continue;
     }
 
@@ -353,7 +407,7 @@ function buildFactIndex(
     }
   }
 
-  return { bySubject, membership };
+  return { bySubject, membership, geEdges };
 }
 
 /**
@@ -516,4 +570,255 @@ export function signFromBounds(bounds: IntervalBounds): Sign | undefined {
     if (upper === 0) return 'non-positive';
   }
   return undefined;
+}
+
+//
+// ─── Transitive-closure reasoning over assumed ≥/≤ chains ────────────────────
+//
+
+/**
+ * Reachability from `start` over the directed ≥ edges. Returns a map from each
+ * reachable node to a boolean: `true` if some path `start → … → node` uses at
+ * least one strict edge (so `start > node`), `false` otherwise (`start ≥ node`).
+ * `start` itself maps to `false`.
+ *
+ * A monotone fixpoint (a node's flag only flips `false → true`, and nodes are
+ * only added), bounded by the number of edges so a cyclic graph cannot loop.
+ */
+function reachGE(
+  geEdges: Map<string, GeEdge[]>,
+  start: string
+): Map<string, boolean> {
+  const reached = new Map<string, boolean>([[start, false]]);
+  let edgeCount = 0;
+  for (const arr of geEdges.values()) edgeCount += arr.length;
+
+  let changed = true;
+  let guard = 0;
+  const maxIterations = (edgeCount + 1) * (edgeCount + 1) + 1;
+  while (changed && guard++ < maxIterations) {
+    changed = false;
+    for (const [u, strictU] of [...reached]) {
+      const edges = geEdges.get(u);
+      if (!edges) continue;
+      for (const e of edges) {
+        const newStrict = strictU || e.strict;
+        const prev = reached.get(e.to);
+        if (prev === undefined) {
+          reached.set(e.to, newStrict);
+          changed = true;
+        } else if (!prev && newStrict) {
+          reached.set(e.to, true);
+          changed = true;
+        }
+      }
+    }
+  }
+  return reached;
+}
+
+/**
+ * Decide the order relation between two bare symbols purely from the assumed
+ * ≥/≤ chains (transitive closure + antisymmetry).
+ *
+ * Returns:
+ * - `'='` when `a ≥ … ≥ b` and `b ≥ … ≥ a` (an antisymmetric cycle),
+ * - `'>'` / `'>='` when only `a` reaches `b` (strict if the chain has a strict link),
+ * - `'<'` / `'<='` when only `b` reaches `a`,
+ * - `undefined` when the chains do not relate them.
+ */
+export function relationFromChains(
+  ce: ComputeEngine,
+  a: string,
+  b: string
+): '>' | '>=' | '=' | '<' | '<=' | undefined {
+  if (a === b) return '=';
+  const geEdges = getFactIndex(ce).geEdges;
+  if (geEdges.size === 0) return undefined;
+
+  const fromA = reachGE(geEdges, a);
+  const fromB = reachGE(geEdges, b);
+  const aGeB = fromA.has(b); // a ≥ … ≥ b
+  const bGeA = fromB.has(a); // b ≥ … ≥ a
+
+  // Antisymmetry: a ≥ b and b ≥ a ⇒ a = b (takes precedence over any strict
+  // flag; a strict link inside such a cycle is an inconsistent assumption set).
+  if (aGeB && bGeA) return '=';
+  if (aGeB) return fromA.get(b) === true ? '>' : '>=';
+  if (bGeA) return fromB.get(a) === true ? '<' : '<=';
+  return undefined;
+}
+
+/** Map an order relation to the sign of `lhs - rhs`. */
+function relationToSign(
+  rel: '>' | '>=' | '=' | '<' | '<=' | undefined
+): Sign | undefined {
+  switch (rel) {
+    case '>':
+      return 'positive';
+    case '>=':
+      return 'non-negative';
+    case '<':
+      return 'negative';
+    case '<=':
+      return 'non-positive';
+    case '=':
+      return 'zero';
+    default:
+      return undefined;
+  }
+}
+
+/** Multiply two (strict) signs; only strict/zero inputs yield a definite sign. */
+function multiplySigns(
+  a: Sign | undefined,
+  b: Sign | undefined
+): Sign | undefined {
+  const v = (s: Sign | undefined): number | undefined =>
+    s === 'positive' ? 1 : s === 'negative' ? -1 : s === 'zero' ? 0 : undefined;
+  const va = v(a);
+  const vb = v(b);
+  if (va === 0 || vb === 0) return 'zero';
+  if (va === undefined || vb === undefined) return undefined;
+  return va * vb > 0 ? 'positive' : 'negative';
+}
+
+/** Parse a term shaped `coef · sym²` (coef a numeric literal, exponent 2). */
+function scaledSquare(
+  term: Expression
+): { coef: number; base: string } | undefined {
+  let coef = 1;
+  // Unwrap a leading Negate (e.g. `-y²` canonicalizes to `Negate(Power(y,2))`
+  // when the coefficient magnitude is 1).
+  if (isFunction(term, 'Negate') && term.ops.length === 1) {
+    coef = -1;
+    term = term.op1;
+  }
+  let powerTerm: Expression | undefined;
+  if (isFunction(term, 'Power')) {
+    powerTerm = term;
+  } else if (isFunction(term, 'Multiply')) {
+    for (const f of term.ops) {
+      if (isFunction(f, 'Power')) {
+        if (powerTerm !== undefined) return undefined;
+        powerTerm = f;
+      } else {
+        const val = finiteNumericValue(f);
+        if (val === undefined) return undefined;
+        coef *= val;
+      }
+    }
+  } else return undefined;
+
+  if (powerTerm === undefined || !isFunction(powerTerm, 'Power')) return undefined;
+  if (powerTerm.ops.length !== 2) return undefined;
+  const base = powerTerm.op1;
+  if (!isSymbol(base)) return undefined;
+  if (finiteNumericValue(powerTerm.op2) !== 2) return undefined;
+  return { coef, base: base.symbol };
+}
+
+/**
+ * Recognize a difference of equally-scaled squares
+ * `k·a² − k·b²` (`k > 0`). Returns the base symbols so the sign reduces to
+ * `sign(a − b) · sign(a + b)`.
+ */
+function differenceOfSquares(
+  expr: Expression
+): { a: string; b: string } | undefined {
+  if (!isFunction(expr, 'Add') || expr.ops.length !== 2) return undefined;
+  const t0 = scaledSquare(expr.ops[0]);
+  const t1 = scaledSquare(expr.ops[1]);
+  if (t0 === undefined || t1 === undefined) return undefined;
+  if (t0.coef === 0 || t1.coef === 0) return undefined;
+  if (Math.sign(t0.coef) === Math.sign(t1.coef)) return undefined;
+  if (Math.abs(t0.coef) !== Math.abs(t1.coef)) return undefined;
+  const pos = t0.coef > 0 ? t0 : t1;
+  const neg = t0.coef > 0 ? t1 : t0;
+  return { a: pos.base, b: neg.base };
+}
+
+/**
+ * Best-effort sign of `expr` derived from assumed ≥/≤ chains, beyond what the
+ * bounds-based `expr.sgn` already delivers. Deliberately NARROW — it handles
+ * exactly two structures:
+ * - a bare symbol difference `a − b` (from the transitive closure),
+ * - a difference of equally-scaled squares `k(a² − b²)` via
+ *   `sign(a − b)·sign(a + b)` (even-power monotonicity), where only the inner
+ *   `a ± b` factors may consult the engine's own `.sgn` machinery.
+ *
+ * There is intentionally no general `.sgn` fallback at the top level: routing
+ * ambient sign knowledge (e.g. `√a > 0` under `a > 0`) into relational
+ * comparisons changes behaviors that deliberately stay conservative, such as
+ * solve()'s root filtering keeping both `±√a` roots.
+ *
+ * Returns a definite `Sign` only when the chains entail it; `undefined`
+ * otherwise.
+ */
+export function signFromChains(
+  ce: ComputeEngine,
+  expr: Expression
+): Sign | undefined {
+  // Bare symbol difference a - b.
+  const d = symbolDifference(expr);
+  if (d !== undefined) {
+    const s = relationToSign(relationFromChains(ce, d.pos, d.neg));
+    if (s !== undefined) return s;
+  }
+
+  // Difference of equally-scaled squares k(a² − b²) = k(a−b)(a+b), k > 0.
+  const dsq = differenceOfSquares(expr);
+  if (dsq !== undefined) {
+    const a = ce.symbol(dsq.a);
+    const b = ce.symbol(dsq.b);
+    const s = multiplySigns(
+      innerFactorSign(ce, a, b, -1),
+      innerFactorSign(ce, a, b, +1)
+    );
+    if (s !== undefined) return s;
+  }
+
+  return undefined;
+}
+
+/**
+ * Sign of the inner factor `a − b` (direction −1) or `a + b` (direction +1) of
+ * a difference of squares. Consults the assumed chains first; for the sum
+ * factor it may combine a chain relation with the engine's own `.sgn` of the
+ * operands (x > y and y > 0 ⇒ x + y > 0), and finally falls back to the
+ * factor's own `.sgn` (bounds machinery). This `.sgn` use is scoped to these
+ * inner factors only — see the `signFromChains` doc comment.
+ */
+function innerFactorSign(
+  ce: ComputeEngine,
+  a: Expression,
+  b: Expression,
+  direction: -1 | 1
+): Sign | undefined {
+  if (direction === -1) {
+    if (isSymbol(a) && isSymbol(b)) {
+      const s = relationToSign(relationFromChains(ce, a.symbol, b.symbol));
+      if (s !== undefined) return s;
+    }
+    return a.sub(b).sgn ?? undefined;
+  }
+
+  // Sum factor a + b: positive when one operand is positive and the other is
+  // at least as large (chains) or itself non-negative (bounds).
+  const sa = a.sgn;
+  const sb = b.sgn;
+  if (sa === 'positive' && (sb === 'positive' || sb === 'non-negative'))
+    return 'positive';
+  if (sb === 'positive' && (sa === 'positive' || sa === 'non-negative'))
+    return 'positive';
+  if (sb === 'positive' && isSymbol(a) && isSymbol(b)) {
+    // a ≥ b (chains) and b > 0 (bounds) ⇒ a + b > 0.
+    const rel = relationFromChains(ce, a.symbol, b.symbol);
+    if (rel === '>' || rel === '>=' || rel === '=') return 'positive';
+  }
+  if (sa === 'positive' && isSymbol(a) && isSymbol(b)) {
+    const rel = relationFromChains(ce, b.symbol, a.symbol);
+    if (rel === '>' || rel === '>=' || rel === '=') return 'positive';
+  }
+  return a.add(b).sgn ?? undefined;
 }

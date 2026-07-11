@@ -481,3 +481,61 @@ describe('domainToType SIGNED-SET COVERAGE (SYM P2-11)', () => {
     expect(ce.assume(ce.parse('m < 0'))).toBe('contradiction');
   });
 });
+
+describe('TRANSITIVE-CHAIN INEQUALITY REASONING (Wester 21/22)', () => {
+  test('antisymmetric ≥-cycle: x≥y, y≥z, z≥x ⇒ x = z (Wester 21)', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x \\geq y'));
+    ce.assume(ce.parse('y \\geq z'));
+    ce.assume(ce.parse('z \\geq x'));
+    expect(ce.parse('x = z').evaluate().json).toBe('True');
+    expect(ce.parse('x = y').evaluate().json).toBe('True');
+  });
+
+  test('a ≥-chain without a back-edge does NOT prove equality', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x \\geq y'));
+    ce.assume(ce.parse('y \\geq z'));
+    // x ≥ z is entailed, but x = z is NOT (they could be strictly ordered).
+    expect(ce.parse('x \\geq z').evaluate().json).toBe('True');
+    expect(ce.parse('x = z').evaluate().json).toEqual(['Equal', 'x', 'z']);
+  });
+
+  test('length-3 transitive ≥-chain: a≥b≥c≥d ⇒ a ≥ d', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('a \\geq b'));
+    ce.assume(ce.parse('b \\geq c'));
+    ce.assume(ce.parse('c \\geq d'));
+    expect(ce.parse('a \\geq d').evaluate().json).toBe('True');
+    // Only non-strict links, so a > d and a = d stay undecided.
+    expect(ce.parse('a > d').evaluate().json).toEqual(['Less', 'd', 'a']);
+    expect(ce.parse('a = d').evaluate().json).toEqual(['Equal', 'a', 'd']);
+  });
+
+  test('strict transitive chain: p>q>r ⇒ p > r (and p ≠ r)', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('p > q'));
+    ce.assume(ce.parse('q > r'));
+    expect(ce.parse('p > r').evaluate().json).toBe('True');
+    expect(ce.parse('p = r').evaluate().json).toBe('False');
+  });
+
+  test('squaring monotonicity: x>y>0 ⇒ 2x^2 > 2y^2 (Wester 22)', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x > y'));
+    ce.assume(ce.parse('y > 0'));
+    expect(ce.parse('2x^2 > 2y^2').evaluate().json).toBe('True');
+    expect(ce.parse('x^2 > y^2').evaluate().json).toBe('True');
+  });
+
+  test('squaring monotonicity needs positivity: x>y alone does NOT give x^2>y^2', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x > y'));
+    // Without y > 0, the sign of x+y is unknown, so x^2 > y^2 stays inert.
+    expect(ce.parse('2x^2 > 2y^2').evaluate().json).toEqual([
+      'Less',
+      ['Multiply', 2, ['Power', 'y', 2]],
+      ['Multiply', 2, ['Power', 'x', 2]],
+    ]);
+  });
+});

@@ -1,5 +1,5 @@
 import type { Expression, RuleStep } from '../global-types.js';
-import { isFunction } from '../boxed-expression/type-guards.js';
+import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { isEligibleRealRewrite } from '../function-properties/index.js';
 
 /**
@@ -77,6 +77,23 @@ function simplifyAbsCore(x: Expression): RuleStep | undefined {
   // Note: -0 = 0, so this is mathematically correct
   if (op.isNonPositive === true)
     return { value: op.neg(), because: '|x| -> -x' };
+
+  // |z| -> exact modulus when z is a constant complex expression whose
+  // magnitude reduces to a real number: |3+4i| -> 5, |1+i| -> √2, and the
+  // Kahan value |3 - √7 + i√(6√7 - 15)| -> 1. The evaluate() handler
+  // (arithmetic.ts, evaluateAbs) computes the exact √(a²+b²) split and only
+  // succeeds when it genuinely folds, so a non-reducing complex Abs stays
+  // symbolic. Gate on an unknown-free operand so this never touches a
+  // symbolic |x|.
+  if (op.unknowns.length === 0) {
+    const evaluated = x.evaluate();
+    if (
+      isNumber(evaluated) &&
+      evaluated.im === 0 &&
+      !evaluated.isSame(x)
+    )
+      return { value: evaluated, because: '|z| -> exact modulus' };
+  }
 
   const opOperator = op.operator;
 

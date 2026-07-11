@@ -153,6 +153,7 @@ import {
   isContinuationOperand,
 } from '../boxed-expression/type-guards.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
+import { expand } from '../boxed-expression/expand.js';
 import {
   isNumericTuple,
   isLinearAlgebraCollection,
@@ -3032,7 +3033,133 @@ function evaluateAbs(
   }
   if (arg.isNonNegative) return arg;
   if (arg.isNegative) return arg.neg();
+
+  // Exact modulus of a complex expression with radical/rational real and
+  // imaginary parts, e.g. |3 − √7 + i√(6√7 − 15)| → 1 (W. Kahan). Split
+  // z = a + b·i, then |z| = √(a² + b²) with the square expanded so exact
+  // arithmetic folds the radicals. Fire only when the squared modulus folds
+  // to a concrete non-negative real number AND the exact result matches |z|
+  // numerically — this rejects an incorrect real/imaginary split (e.g. a
+  // radical whose radicand is actually negative, so √(…) is itself imaginary)
+  // and keeps every non-reducing complex `Abs` symbolic.
+  //
+  // Gate on an unknown-free operand first: a symbolic `Abs(f(x))` can never
+  // fold to a numeric modulus, and this cheap cached check avoids the `arg.N()`
+  // numeric probe below on every symbolic Abs in a hot simplify loop.
+  if (arg.unknowns.length === 0) {
+    const zn = arg.N();
+    const zre = zn.re;
+    const zim = zn.im;
+    if (Number.isFinite(zre) && Number.isFinite(zim) && zim !== 0) {
+      const parts = splitComplexParts(arg);
+      if (parts) {
+        const [a, b] = parts;
+        const m = ce.function('Add', [
+          ce.function('Multiply', [a, a]),
+          ce.function('Multiply', [b, b]),
+        ]);
+        const mVal = expand(m).evaluate();
+        if (isNumber(mVal) && mVal.im === 0 && mVal.isNonNegative === true) {
+          const modSq = zre * zre + zim * zim;
+          const mn = mVal.re;
+          if (
+            Number.isFinite(mn) &&
+            Math.abs(mn - modSq) <= 1e-10 * (1 + Math.abs(modSq))
+          )
+            return ce
+              .function('Sqrt', [mVal])
+              .evaluate({ numericApproximation });
+        }
+      }
+    }
+  }
+
   return undefined;
+}
+
+/**
+ * Split a complex expression `z` into `[a, b]` such that `z = a + b·i`, with
+ * `a` and `b` real expressions, or `undefined` if `z` cannot be put in that
+ * form structurally. The realness of `a` and `b` is not fully trusted here (a
+ * `Sqrt` of an unresolved-sign radicand reports `isReal === true`
+ * optimistically); callers confirm the split numerically before relying on it.
+ */
+function splitComplexParts(
+  z: Expression
+): [Expression, Expression] | undefined {
+  const ce = z.engine;
+
+  // A numeric leaf. Its `.json` is a lossless exact representation: a complex
+  // exact number serializes as `['Complex', reExpr, imExpr]` with exact-shape
+  // components (e.g. `['Complex', 0, ['Sqrt', 3]]`), so boxing them preserves
+  // the radicals. A real number contributes only a real part.
+  if (isNumber(z)) {
+    const j = z.json;
+    if (Array.isArray(j) && j[0] === 'Complex')
+      return [ce.box(j[1]), ce.box(j[2])];
+    return [z, ce.Zero];
+  }
+
+  if (isFunction(z)) {
+    const op = z.operator;
+
+    if (op === 'Add') {
+      const as: Expression[] = [];
+      const bs: Expression[] = [];
+      for (const t of z.ops) {
+        const p = splitComplexParts(t);
+        if (!p) return undefined;
+        as.push(p[0]);
+        bs.push(p[1]);
+      }
+      return [ce.function('Add', as), ce.function('Add', bs)];
+    }
+
+    if (op === 'Negate') {
+      const p = splitComplexParts(z.op1);
+      if (!p) return undefined;
+      return [p[0].neg(), p[1].neg()];
+    }
+
+    if (op === 'Subtract') {
+      const p1 = splitComplexParts(z.op1);
+      const p2 = splitComplexParts(z.op2);
+      if (!p1 || !p2) return undefined;
+      return [
+        ce.function('Subtract', [p1[0], p2[0]]),
+        ce.function('Subtract', [p1[1], p2[1]]),
+      ];
+    }
+
+    if (op === 'Multiply') {
+      let a: Expression = ce.One;
+      let b: Expression = ce.Zero;
+      for (const t of z.ops) {
+        const p = splitComplexParts(t);
+        if (!p) return undefined;
+        const [fa, fb] = p;
+        // (a + b·i)(fa + fb·i) = (a·fa − b·fb) + (a·fb + b·fa)·i
+        const na = ce.function('Subtract', [
+          ce.function('Multiply', [a, fa]),
+          ce.function('Multiply', [b, fb]),
+        ]);
+        const nb = ce.function('Add', [
+          ce.function('Multiply', [a, fb]),
+          ce.function('Multiply', [b, fa]),
+        ]);
+        a = na;
+        b = nb;
+      }
+      return [a, b];
+    }
+
+    if (op === 'Complex') return [z.op1, z.op2];
+  }
+
+  // A leaf: treat it as a real contribution. If it is in fact imaginary (an
+  // unresolved-sign radical), the caller's numeric confirmation rejects the
+  // split.
+  return [z, ce.Zero];
 }
 
 function processMinMaxItem(

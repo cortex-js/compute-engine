@@ -1,7 +1,7 @@
 import { NumericValue } from '../numeric-value/types.js';
 import type { Expression } from '../global-types.js';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
-import { compareBounds } from './constraint-subject.js';
+import { compareBounds, relationFromChains } from './constraint-subject.js';
 import {
   isNumber,
   isFunction,
@@ -240,6 +240,17 @@ export function eq(
     if (a.isInfinity && b.isInfinity && a.sgn === b.sgn) return true;
     return false;
   }
+
+  //
+  // Antisymmetry over assumed ≥/≤ chains: if a ≥ … ≥ b and b ≥ … ≥ a
+  // (a directed cycle in the assumed inequalities), then a = b.
+  //
+  if (
+    isSymbol(a) &&
+    isSymbol(b) &&
+    relationFromChains(ce, a.symbol, b.symbol) === '='
+  )
+    return true;
 
   //
   // If we didn't come to a resolution yet, check the assumptions DB

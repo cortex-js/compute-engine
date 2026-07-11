@@ -17,6 +17,7 @@ import {
   finiteNumericValue,
   hasAssumptions,
   decideComparisonFromBounds,
+  signFromChains,
 } from '../boxed-expression/constraint-subject.js';
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
 import { isQuantity } from './quantity-arithmetic.js';
@@ -100,6 +101,21 @@ function compareFromAssumedBounds(
         k,
         strict ? 'greater' : 'greaterEqual'
       );
+  }
+
+  // Symbol/expression comparison via assumed inequality chains and the sign of
+  // the difference `rhs - lhs` (transitive ≥-closure, and even-power
+  // monotonicity such as x > y > 0 ⇒ 2x² > 2y²).
+  // `s` is the sign of `diff = rhs - lhs`.
+  const s = signFromChains(ce, rhs.sub(lhs));
+  if (strict) {
+    // lhs < rhs  ⇔  diff > 0
+    if (s === 'positive') return true;
+    if (s === 'negative' || s === 'zero' || s === 'non-positive') return false;
+  } else {
+    // lhs ≤ rhs  ⇔  diff ≥ 0
+    if (s === 'positive' || s === 'zero' || s === 'non-negative') return true;
+    if (s === 'negative') return false;
   }
 
   return undefined;

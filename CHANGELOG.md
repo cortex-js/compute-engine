@@ -99,6 +99,17 @@
   applications of the same rule are coalesced into a single step; pass
   `verbosity: 'all'` for the raw chain.
 
+### Integration (opt-in Rubi rules)
+
+- **The per-integral time budget is now airtight.** A re-entrant call into
+  the rule driver through an `evaluate()` seam (a `With`-binding or
+  substitution containing an unsolved sub-integral) was treated as a fresh
+  top-level integration: it reset the wall-clock budget (`timeLimitMs`) —
+  letting a pathological integrand exceed it — and cleared the in-flight
+  recursion guards, re-opening potential infinite recursion on cyclic
+  subproblems. Re-entrancy is now detected by an in-flight counter, so every
+  re-entrant call inherits the outer deadline and guards.
+
 ### Collections
 
 - **Symbolic-bound `Range` and `Linspace` stay inert instead of collapsing.**

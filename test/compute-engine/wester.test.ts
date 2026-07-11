@@ -393,9 +393,10 @@ describe('Complex domain', () => {
     });
   });
 
-  test.skip(`|3 - sqrt(7) + i sqrt(6 sqrt(7) - 15)| => 1 exactly`, () => {
-    // [W. Kahan] (3−√7)² + (6√7−15) = 1. CURRENT: stays symbolic under
-    // simplify; N() gives 1.0000000000000000315 (float residue).
+  test(`|3 - sqrt(7) + i sqrt(6 sqrt(7) - 15)| => 1 exactly`, () => {
+    // [W. Kahan] (3−√7)² + (6√7−15) = 1. The exact √(a²+b²) split folds the
+    // radicals so simplify() reduces to the integer 1 (N() alone leaves a
+    // 1.0000000000000000315 float residue).
     expect(
       ce.parse('\\left|3 - \\sqrt{7} + i\\sqrt{6\\sqrt{7} - 15}\\right|').simplify().json
     ).toBe(1);
@@ -424,17 +425,29 @@ describe('Inequalities', () => {
     expect(ce.parse('e^\\pi > \\pi^e').evaluate().json).toBe('True');
   });
 
-  test.skip(`Wester 21: x >= y, y >= z, z >= x implies x = z`, () => {
-    ce.assume(ce.parse('x \\geq y'));
-    ce.assume(ce.parse('y \\geq z'));
-    ce.assume(ce.parse('z \\geq x'));
-    expect(ce.parse('x = z').evaluate().json).toBe('True');
+  test(`Wester 21: x >= y, y >= z, z >= x implies x = z`, () => {
+    // Isolate the assumptions in a pushed scope so the ≥-cycle (which forces
+    // x = y = z globally) does not poison later tests using the shared `ce`.
+    ce.pushScope();
+    try {
+      ce.assume(ce.parse('x \\geq y'));
+      ce.assume(ce.parse('y \\geq z'));
+      ce.assume(ce.parse('z \\geq x'));
+      expect(ce.parse('x = z').evaluate().json).toBe('True');
+    } finally {
+      ce.popScope();
+    }
   });
 
-  test.skip(`Wester 22: x > y > 0 implies 2x^2 > 2y^2`, () => {
-    ce.assume(ce.parse('x > y'));
-    ce.assume(ce.parse('y > 0'));
-    expect(ce.parse('2x^2 > 2y^2').evaluate().json).toBe('True');
+  test(`Wester 22: x > y > 0 implies 2x^2 > 2y^2`, () => {
+    ce.pushScope();
+    try {
+      ce.assume(ce.parse('x > y'));
+      ce.assume(ce.parse('y > 0'));
+      expect(ce.parse('2x^2 > 2y^2').evaluate().json).toBe('True');
+    } finally {
+      ce.popScope();
+    }
   });
 });
 
@@ -448,7 +461,7 @@ describe('Matrix theory', () => {
     ).toEqual(['List', ['List', 1, 1], ['List', 1, 0]]);
   });
 
-  test.skip(`2nd derivative of the rotation matrix => -[[cos t, sin t],[-sin t, cos t]]`, () => {
+  test(`2nd derivative of the rotation matrix => -[[cos t, sin t],[-sin t, cos t]]`, () => {
     // D[{{cos t, sin t},{-sin t, cos t}}, {t, 2}] => [[-cos t, -sin t], [sin t, -cos t]].
     // CURRENT: D applied to a matrix (list of lists) does not differentiate
     // elementwise; it produces a nonsensical *scalar* Add expression (treating

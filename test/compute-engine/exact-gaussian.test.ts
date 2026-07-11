@@ -126,6 +126,34 @@ describe('exact Gaussian arithmetic', () => {
     expect(abs2.json).toEqual(['Sqrt', 2]);
   });
 
+  it('|3 − √7 + i√(6√7 − 15)| = 1 exactly (W. Kahan)', () => {
+    // (3−√7)² + (6√7−15) = 1. The a+bi split with radical parts folds the
+    // radicals exactly under both evaluate() and simplify().
+    const e = ce.parse('\\left|3 - \\sqrt{7} + i\\sqrt{6\\sqrt{7} - 15}\\right|');
+    expect(e.evaluate().json).toBe(1);
+    expect(e.simplify().json).toBe(1);
+  });
+
+  it('exact modulus of complex expressions with radical parts', () => {
+    // |5 − 12i| = 13, |2 + √5·i| = 3 (perfect-square modulus), |1 + 2i| = √5.
+    expect(ce.parse('|5-12i|').simplify().json).toBe(13);
+    expect(
+      ce.expr(['Abs', ['Add', 2, ['Multiply', ['Sqrt', 5], i]]]).simplify().json
+    ).toBe(3);
+    expect(ce.parse('|1+2i|').simplify().json).toEqual(['Sqrt', 5]);
+  });
+
+  it('non-reducing complex Abs stays symbolic', () => {
+    // Here 2√7 − 15 ≈ −9.7 < 0, so √(2√7−15) is itself imaginary and the
+    // a+bi split does not describe a real modulus: keep Abs symbolic rather
+    // than fold to a wrong value.
+    const e = ce.parse('\\left|3 - \\sqrt{7} + i\\sqrt{2\\sqrt{7} - 15}\\right|');
+    expect(e.simplify().operator).toBe('Abs');
+    // |x + iy| with free variables must never fold.
+    const sym = ce.parse('|x+iy|').simplify();
+    expect(sym.operator).toBe('Abs');
+  });
+
   it('√(−4) = 2i and √(−1/2) = (√2/2)i exactly', () => {
     const a = ce.expr(['Sqrt', -4]).evaluate();
     expect(exactness(a)).toBe(true);
