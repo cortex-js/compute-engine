@@ -102,12 +102,16 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     });
   });
 
-  // ── SYM P2-26 / P3-11: a re-entrant driver call (the native-rational
-  // fallback re-enters int() via ce.Integrate.evaluate()) must not clobber
-  // the outer call's per-call state — deadline, trigActive — and the memo is
-  // bounded to a single top-level call. ──
+  // ── SYM P2-26 / P3-11: a re-entrant driver call (any `.evaluate()` seam —
+  // the native-rational fallback, a With-binding, a `Subst` — re-enters
+  // int() via ce.Integrate.evaluate()) must not clobber the outer call's
+  // per-call state — deadline, trigActive — and the memo is bounded to a
+  // single top-level call. Re-entrancy is detected by the in-flight
+  // `activeCalls` counter, NOT the native-fallback flag: an unflagged
+  // evaluate()-seam re-entry used to reset the deadline (granting a fresh
+  // time budget) and wipe the outer call's in-flight memo cycle-guards. ──
   describe('re-entrant state isolation and memo bounding', () => {
-    test('a re-entrant int() call does not extend the deadline or leak trig/caches', () => {
+    test('a native-fallback re-entrant int() call does not extend the deadline or leak trig/caches', () => {
       const ce = new ComputeEngine();
       const driver = new RubiDriver(ce, [], { timeLimitMs: 10_000 });
       const d = driver as any;
@@ -117,7 +121,8 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       d.deadline = OUTER_DEADLINE;
       d.trigActive = true;
       d.memo.set('x§sentinel', ce.symbol('bar'));
-      d.inNativeFallback = true; // ⇒ this int() call is re-entrant
+      d.activeCalls = 1; // an outer int() is in flight
+      d.inNativeFallback = true; // …inside its native fallback
       driver.int(ce.symbol('x'), 'x'); // trivial ∫x dx subproblem
       // deadline NOT reset/extended (interruptible-evaluation contract)
       expect(d.deadline).toBe(OUTER_DEADLINE);
@@ -125,6 +130,25 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       expect(d.trigActive).toBe(true);
       // memo NOT cleared on re-entry (outer cycle-guard entries survive)
       expect(d.memo.has('x§sentinel')).toBe(true);
+      // the in-flight count is back to the outer call's
+      expect(d.activeCalls).toBe(1);
+    });
+
+    test('an evaluate()-seam re-entry (no native-fallback flag) also inherits deadline and memo', () => {
+      const ce = new ComputeEngine();
+      const driver = new RubiDriver(ce, [], { timeLimitMs: 10_000 });
+      const d = driver as any;
+      const OUTER_DEADLINE = Date.now() + 999_999;
+      d.deadline = OUTER_DEADLINE;
+      d.trigActive = true;
+      d.memo.set('x§sentinel', null); // an in-flight cycle guard
+      d.activeCalls = 1; // an outer int() is in flight (e.g. a With-binding
+      // `.evaluate()` on an inert Integrate re-entered the provider)
+      driver.int(ce.symbol('x'), 'x');
+      expect(d.deadline).toBe(OUTER_DEADLINE); // no fresh time budget
+      expect(d.memo.has('x§sentinel')).toBe(true); // cycle guard survives
+      expect(d.trigActive).toBe(true);
+      expect(d.activeCalls).toBe(1);
     });
 
     test('a top-level int() call clears the memo (bounds unbounded growth)', () => {
@@ -132,9 +156,10 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       const driver = new RubiDriver(ce, [], { timeLimitMs: 10_000 });
       const d = driver as any;
       d.memo.set('x§stale', ce.One); // residue from a prior top-level call
-      expect(d.inNativeFallback).toBe(false); // genuine top-level entry
+      expect(d.activeCalls).toBe(0); // genuine top-level entry
       driver.int(ce.symbol('x'), 'x');
       expect(d.memo.has('x§stale')).toBe(false);
+      expect(d.activeCalls).toBe(0); // balanced on the way out
     });
   });
 
