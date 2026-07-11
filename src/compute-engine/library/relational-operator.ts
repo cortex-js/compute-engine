@@ -134,6 +134,7 @@ function compareFromAssumedBounds(
 export const RELOP_LIBRARY: SymbolDefinitions = {
   Congruent: {
     description: 'Indicate that two expressions are congruent modulo a number',
+    keywords: ['congruence'],
     complexity: 11000,
     // `modulo` is `number` (not `integer`) so a symbolic modulus expression
     // such as `p^{k+1}` (statically typed `finite_number`, not `integer`) is
@@ -184,6 +185,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   Equal: {
+    description: 'Equality comparison (equal to).',
     complexity: 11000,
     signature: '(any, any) -> boolean',
 
@@ -321,6 +323,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   } as OperatorDefinition,
 
   NotEqual: {
+    description: 'Inequality comparison (not equal to).',
     wikidata: 'Q28113351',
     complexity: 11000,
 
@@ -386,6 +389,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   } as OperatorDefinition,
 
   Less: {
+    description: 'Less-than comparison (strictly less than).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
 
@@ -439,6 +443,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   } as OperatorDefinition,
 
   NotLess: {
+    description: 'Negated less-than relation (not less than).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
     canonical: (ops, { engine: ce }) =>
@@ -446,6 +451,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   Greater: {
+    description: 'Greater-than comparison (strictly greater than).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
     lazy: true,
@@ -460,6 +466,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotGreater: {
+    description: 'Negated greater-than relation (not greater than).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
@@ -467,6 +474,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   LessEqual: {
+    description: 'Less-than-or-equal comparison (less than or equal to).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
 
@@ -521,6 +529,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   } as OperatorDefinition,
 
   NotLessNotEqual: {
+    description: 'Neither less than nor equal to.',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
     canonical: (ops, { engine: ce }) =>
@@ -528,6 +537,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   GreaterEqual: {
+    description: 'Greater-than-or-equal comparison (greater than or equal to).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
 
@@ -542,6 +552,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotGreaterNotEqual: {
+    description: 'Neither greater than nor equal to.',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
@@ -558,6 +569,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotTildeFullEqual: {
+    description:
+      'Negated isomorphism/congruence relation (not isomorphic or congruent).',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
 
@@ -574,6 +587,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotTilde: {
+    description: 'Negated similarity relation (not similar).',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
@@ -590,6 +604,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotTildeEqual: {
+    description:
+      'Negated approximately/asymptotically-equal relation (not approximately equal).',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
 
@@ -598,6 +614,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   Approx: {
+    description: 'Approximate-equality relation (approximately equal).',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
@@ -606,6 +623,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotApprox: {
+    description: 'Negated approximate-equality relation (not approximately equal).',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
@@ -613,6 +631,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   ApproxEqual: {
+    description: 'Approximately-equal relation.',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
@@ -621,12 +640,14 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotApproxEqual: {
+    description: 'Negated approximately-equal relation.',
     complexity: 11100,
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'ApproxEqual', args)]),
   },
 
   ApproxNotEqual: {
+    description: 'Approximately-not-equal relation.',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
@@ -639,6 +660,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotApproxNotEqual: {
+    description: 'Negated approximately-not-equal relation.',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine }) =>
@@ -646,6 +668,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   Precedes: {
+    description: 'Precedes relation in an ordering (comes before).',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
@@ -664,6 +687,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotPrecedes: {
+    description: 'Negated precedes relation (does not precede).',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine }) =>
@@ -671,6 +695,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   Succeeds: {
+    description: 'Succeeds relation in an ordering (comes after).',
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine }) =>
       canonicalRelational(engine, 'Succeeds', args),
@@ -688,6 +713,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotSucceeds: {
+    description: 'Negated succeeds relation (does not succeed).',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine }) =>

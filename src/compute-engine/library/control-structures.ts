@@ -254,6 +254,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 
     Which: {
       description: 'Return the value for the first condition that is true.',
+      keywords: ['piecewise'],
       lazy: true,
       signature: '(expression+) -> unknown',
       type: (args) => {

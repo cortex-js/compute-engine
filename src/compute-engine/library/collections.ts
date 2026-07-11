@@ -125,6 +125,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Data Structures
   //
   List: {
+    description: 'An ordered collection of elements (a list).',
     complexity: 8200,
 
     signature: '(any*) -> list',
@@ -166,6 +167,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Comprehensions are not literal 2-element sets: their elements are the
   // substituted bodies over the (filtered) domain.
   Set: {
+    description: 'An unordered collection of distinct elements (a set).',
     complexity: 8200,
 
     signature: '(any*) -> set',
@@ -361,6 +363,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   //
 
   Range: {
+    description:
+      'A sequence of numbers from a start to an end value with an optional step.',
     complexity: 8200,
     signature: '(number, number?, step: number?) -> indexed_collection<number>',
 
@@ -711,6 +715,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   } as OperatorDefinition,
 
   Linspace: {
+    description:
+      'A sequence of evenly spaced numbers between a start and end value, both endpoints included.',
     complexity: 8200,
     signature:
       '(start: number, end: number?, count: number?) -> indexed_collection',
@@ -841,6 +847,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Count: {
     description: ['Return the number of elements in the collection.'],
+    keywords: ['cardinality'],
     complexity: 8200,
     signature: '(collection) -> integer',
     evaluate: ([xs], { engine }) => {
@@ -1102,6 +1109,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Haskell: "foldl"
   // For "foldr", apply Reverse() first
   Reduce: {
+    description:
+      'Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value.',
     complexity: 8200,
     lazy: true,
     signature: '(collection, function, initial:value?) -> value',
@@ -1179,6 +1188,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // c)`. Canonicalizes directly to the equivalent `Reduce(list, f, x)`, so it
   // shares Reduce's evaluation, laziness, and inert-when-symbolic behavior.
   Fold: {
+    description:
+      'Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value.',
     complexity: 8200,
     lazy: true,
     signature: '(function, value, collection) -> value',
@@ -1587,6 +1598,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   First: {
+    description: 'The first element of a collection.',
     complexity: 8200,
     signature: '(any) -> any',
     type: ([xs]) => componentType(xs, 1),
@@ -1594,6 +1606,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Second: {
+    description: 'The second element of a collection.',
     complexity: 8200,
     signature: '(any) -> any',
     type: ([xs]) => componentType(xs, 2),
@@ -1601,6 +1614,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Third: {
+    description: 'The third element of a collection.',
     complexity: 8200,
     signature: '(any) -> any',
     type: ([xs]) => componentType(xs, 3),
@@ -1608,6 +1622,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Last: {
+    description: 'The last element of a collection.',
     complexity: 8200,
     signature: '(collection) -> any',
     type: ([xs]) => componentType(xs, -1),
@@ -1821,6 +1836,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // APL: rotate ⌽
   Reverse: {
+    description: 'Reverse the order of the elements of an indexed collection.',
     complexity: 8200,
     signature: '(indexed_collection) -> indexed_collection',
     type: ([xs]) => xs.type,
@@ -2278,6 +2294,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // Partition a collection into k nearly equal parts or by a predicate function
   Partition: {
+    description:
+      'Partition a collection into a number of groups, or into two groups selected by a predicate.',
     wikidata: 'Q381060',
     complexity: 8200,
     signature: '(collection, integer | function) -> list',

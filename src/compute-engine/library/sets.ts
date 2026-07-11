@@ -626,6 +626,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   //
   Element: {
     complexity: 11200,
+    keywords: ['element of', 'member'],
     // EL-3: Extended signature to support optional condition for filtered iteration
     // The condition is used by Sum/Product to filter values when iterating
     signature: '(value, collection, boolean?) -> boolean',

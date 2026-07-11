@@ -1868,6 +1868,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Root: {
       description: 'n-th root of a value.',
+      keywords: ['nth root', 'cube root'],
       complexity: 3200,
       broadcastable: true,
 
@@ -2191,6 +2192,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // (Add...) that are defined above. This avoid circular references.
     //
     ImaginaryUnit: {
+      description: 'The imaginary unit, whose square is −1.',
       type: 'imaginary',
       isConstant: true,
       holdUntil: 'never',
@@ -2200,6 +2202,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     // Alias of 'ImaginaryUnit'
     i: {
+      description: 'The imaginary unit, whose square is −1.',
       type: 'imaginary',
       isConstant: true,
       holdUntil: 'never',
@@ -2207,6 +2210,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     ExponentialE: {
+      description:
+        "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
+      keywords: ['euler number'],
       type: 'finite_real',
       wikidata: 'Q82435',
       isConstant: true,
@@ -2219,6 +2225,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     e: {
+      description:
+        "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
       type: 'finite_real',
       isConstant: true,
       holdUntil: 'never',
@@ -2226,6 +2234,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     ComplexInfinity: {
+      description:
+        'Complex infinity, a single unsigned infinity in the complex plane.',
       type: 'complex',
       isConstant: true,
       holdUntil: 'never',
@@ -2233,6 +2243,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     PositiveInfinity: {
+      description: 'Positive infinity (+∞).',
       type: 'non_finite_number',
       isConstant: true,
       holdUntil: 'never',
@@ -2240,6 +2251,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     NegativeInfinity: {
+      description: 'Negative infinity (−∞).',
       type: 'non_finite_number',
       isConstant: true,
       holdUntil: 'never',
@@ -2247,6 +2259,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     NaN: {
+      description:
+        'Not a Number, the result of an undefined or unrepresentable numeric operation.',
       type: 'number',
       isConstant: true,
       holdUntil: 'never',
@@ -2268,18 +2282,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
        *
        * See https://en.wikipedia.org/wiki/Machine_epsilon
        */
+      description:
+        'The difference between 1 and the next larger floating point number (machine epsilon).',
       type: 'finite_real',
       holdUntil: 'N',
       isConstant: true,
       value: { num: Number.EPSILON.toString() },
     },
     Half: {
+      description: 'The rational number one half (1/2).',
       type: 'finite_rational',
       isConstant: true,
       holdUntil: 'never',
       value: ['Rational', 1, 2],
     },
     GoldenRatio: {
+      description: 'The golden ratio φ = (1+√5)/2 ≈ 1.618.',
       type: 'finite_real', // Golden ratio is an algebraic number
       wikidata: 'Q41690',
       isConstant: true,
@@ -2287,6 +2305,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
     },
     CatalanConstant: {
+      description: "Catalan's constant G ≈ 0.9160.",
       type: 'finite_real',
       wikidata: 'Q855282',
       isConstant: true,
@@ -2317,6 +2336,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
     },
     EulerGamma: {
+      description: 'The Euler–Mascheroni constant γ ≈ 0.5772.',
+      keywords: ['euler-mascheroni', 'euler gamma'],
       type: 'finite_real',
       wikidata: 'Q273023',
       holdUntil: 'N',
@@ -2747,6 +2768,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     Sum: {
       description:
         '`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`',
+      keywords: ['summation', 'sigma'],
       wikidata: 'Q218005',
       complexity: 1000,
       broadcastable: false,

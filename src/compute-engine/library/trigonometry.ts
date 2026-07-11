@@ -71,6 +71,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // Constants
     //
     Pi: {
+      description:
+        "The constant π ≈ 3.14159, the ratio of a circle's circumference to its diameter.",
       type: 'finite_real',
       isConstant: true,
       holdUntil: 'N',
@@ -168,7 +170,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     // The definition of other trig functions may rely on Sin, so it is defined
     // first in this preliminary section
-    Sin: trigFunction('Sin', 5000),
+    Sin: { ...trigFunction('Sin', 5000, 'Sine of an angle.'), keywords: ['sine'] },
   },
   {
     //
@@ -279,9 +281,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    Cos: trigFunction('Cos', 5050),
+    Cos: trigFunction('Cos', 5050, 'Cosine of an angle.'),
 
-    Tan: trigFunction('Tan', 5100),
+    Tan: trigFunction('Tan', 5100, 'Tangent of an angle.'),
 
     /* converts (x, y) -> (radius, angle) */
     // ToPolarCoordinates: {
@@ -298,23 +300,41 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // functions: Arsinh, Arcosh, Artanh, etc. (not Arcsinh, Arccosh, Arctanh)
     // The "ar" prefix stands for "area", which is mathematically correct
     // since these functions relate to areas on a hyperbola, not arc lengths.
-    Arcosh: trigFunction('Arcosh', 6200),
+    Arcosh: trigFunction(
+      'Arcosh',
+      6200,
+      'Inverse hyperbolic cosine (area hyperbolic cosine).'
+    ),
 
-    Arcsin: { ...trigFunction('Arcsin', 5500), keywords: ['asin'] },
+    Arcsin: {
+      ...trigFunction('Arcsin', 5500, 'Arcsine, the inverse sine function.'),
+      keywords: ['asin', 'inverse sine'],
+    },
 
-    Arsinh: trigFunction('Arsinh', 6100),
+    Arsinh: trigFunction(
+      'Arsinh',
+      6100,
+      'Inverse hyperbolic sine (area hyperbolic sine).'
+    ),
 
-    Artanh: trigFunction('Artanh', 6300),
+    Artanh: trigFunction(
+      'Artanh',
+      6300,
+      'Inverse hyperbolic tangent (area hyperbolic tangent).'
+    ),
 
-    Cosh: trigFunction('Cosh', 6050),
+    Cosh: trigFunction('Cosh', 6050, 'Hyperbolic cosine.'),
 
-    Cot: trigFunction('Cot', 5600),
+    Cot: trigFunction('Cot', 5600, 'Cotangent, the reciprocal of tangent.'),
 
-    Csc: trigFunction('Csc', 5600, 'Cosecant'),
+    Csc: trigFunction('Csc', 5600, 'Cosecant, the reciprocal of sine.'),
 
-    Sec: trigFunction('Sec', 5600, 'Secant, inverse of cosine'),
+    Sec: trigFunction('Sec', 5600, 'Secant, the reciprocal of cosine.'),
 
-    Sinh: trigFunction('Sinh', 6000),
+    Sinh: {
+      ...trigFunction('Sinh', 6000, 'Hyperbolic sine.'),
+      keywords: ['hyperbolic sine'],
+    },
 
     /** = sin(z/2)^2 = (1 - cos z) / 2*/
     Haversine: {
@@ -349,28 +369,67 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
   },
   {
-    Csch: trigFunction('Csch', 6200, 'Hyperbolic cosecant'),
+    Csch: trigFunction(
+      'Csch',
+      6200,
+      'Hyperbolic cosecant, the reciprocal of hyperbolic sine.'
+    ),
 
-    Sech: trigFunction('Sech', 6200, 'Hyperbolic secant'),
+    Sech: trigFunction(
+      'Sech',
+      6200,
+      'Hyperbolic secant, the reciprocal of hyperbolic cosine.'
+    ),
 
-    Tanh: trigFunction('Tanh', 6200, 'Hyperbolic tangent'),
+    Tanh: trigFunction('Tanh', 6200, 'Hyperbolic tangent.'),
   },
   {
-    Arccos: { ...trigFunction('Arccos', 5550), keywords: ['acos'] },
+    Arccos: {
+      ...trigFunction('Arccos', 5550, 'Arccosine, the inverse cosine function.'),
+      keywords: ['acos', 'inverse cosine'],
+    },
 
-    Arccot: trigFunction('Arccot', 5650),
+    Arccot: trigFunction(
+      'Arccot',
+      5650,
+      'Arccotangent, the inverse cotangent function.'
+    ),
 
-    Arcoth: trigFunction('Arcoth', 6350),
+    Arcoth: trigFunction(
+      'Arcoth',
+      6350,
+      'Inverse hyperbolic cotangent (area hyperbolic cotangent).'
+    ),
 
-    Arcsch: trigFunction('Arcsch', 6250),
+    Arcsch: trigFunction(
+      'Arcsch',
+      6250,
+      'Inverse hyperbolic cosecant (area hyperbolic cosecant).'
+    ),
 
-    Arcsec: trigFunction('Arcsec', 5650),
+    Arcsec: trigFunction(
+      'Arcsec',
+      5650,
+      'Arcsecant, the inverse secant function.'
+    ),
 
-    Arsech: trigFunction('Arsech', 6250),
+    Arsech: trigFunction(
+      'Arsech',
+      6250,
+      'Inverse hyperbolic secant (area hyperbolic secant).'
+    ),
 
-    Arccsc: trigFunction('Arccsc', 5650),
+    Arccsc: trigFunction(
+      'Arccsc',
+      5650,
+      'Arccosecant, the inverse cosecant function.'
+    ),
 
-    Coth: trigFunction('Coth', 6300),
+    Coth: trigFunction(
+      'Coth',
+      6300,
+      'Hyperbolic cotangent, the reciprocal of hyperbolic tangent.'
+    ),
 
     //
     // Sinc/FresnelS/FresnelC/SinIntegral/CosIntegral follow the same pattern

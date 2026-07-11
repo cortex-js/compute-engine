@@ -440,6 +440,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'split at its median, and Q1/Q3 are the medians of the lower/upper ' +
         'halves with the overall median excluded from both halves when the ' +
         'sample size is odd.',
+      keywords: ['percentile'],
       complexity: 1200,
       broadcastable: false,
       signature:

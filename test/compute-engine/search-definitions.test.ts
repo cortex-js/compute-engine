@@ -121,6 +121,44 @@ describe('searchDefinitions', () => {
     expect(result).toEqual({ id: 'gizmo', kind: 'variable' });
   });
 
+  // Regression block for the definition-description fill-in (searchable
+  // descriptions + a few curated keywords). The `inverse cosine` case guards
+  // the P0 fix: `Sec`'s description used to say "inverse of cosine" (secant is
+  // the *reciprocal*), so the query returned `Sec`.
+  test('P0: "inverse cosine" → Arccos first, not Sec', () => {
+    const results = ids('inverse cosine');
+    expect(results[0]).toBe('Arccos');
+    expect(results[0]).not.toBe('Sec');
+  });
+
+  test('"sine" → Sin first', () => {
+    expect(ids('sine')[0]).toBe('Sin');
+  });
+
+  test('"hyperbolic sine" → Sinh first', () => {
+    expect(ids('hyperbolic sine')[0]).toBe('Sinh');
+  });
+
+  test('"summation" → includes Sum', () => {
+    expect(ids('summation')).toContain('Sum');
+  });
+
+  test('"integral" → Integrate first', () => {
+    expect(ids('integral')[0]).toBe('Integrate');
+  });
+
+  test('"piecewise" → Which first', () => {
+    expect(ids('piecewise')[0]).toBe('Which');
+  });
+
+  test('"there exists" → includes Exists', () => {
+    expect(ids('there exists')).toContain('Exists');
+  });
+
+  test('"nth root" → includes Root', () => {
+    expect(ids('nth root')).toContain('Root');
+  });
+
   test('graceful degradation with a minimal injected latexSyntax', () => {
     const minimal = new ComputeEngine({
       latexSyntax: { parse: () => null, serialize: () => '' },

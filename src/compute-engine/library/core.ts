@@ -71,7 +71,10 @@ import {
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
     // The sole member of the unit type, `nothing`
-    Nothing: { type: 'nothing' },
+    Nothing: {
+      description: 'The absence of a value; the sole member of the unit type.',
+      type: 'nothing',
+    },
   },
 
   //

@@ -34,11 +34,13 @@ import {
 
 export const LOGIC_LIBRARY: SymbolDefinitions = {
   True: {
+    description: 'The boolean truth value true.',
     wikidata: 'Q16751793',
     type: 'boolean',
     isConstant: true,
   },
   False: {
+    description: 'The boolean truth value false.',
     wikidata: 'Q5432619',
     type: 'boolean',
     isConstant: true,
@@ -51,6 +53,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   // logic rules for simplify)
   // See also: https://en.wikipedia.org/wiki/Prenex_normal_form
   And: {
+    description: 'Logical conjunction (AND): true when all operands are true.',
     wikidata: 'Q191081',
     broadcastable: true,
     associative: true,
@@ -61,6 +64,8 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: evaluateAnd,
   },
   Or: {
+    description:
+      'Logical disjunction (OR): true when at least one operand is true.',
     wikidata: 'Q1651704',
     broadcastable: true,
     associative: true,
@@ -72,6 +77,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: evaluateOr,
   },
   Not: {
+    description: 'Logical negation (NOT).',
     wikidata: 'Q190558',
     broadcastable: true,
     involution: true,
@@ -81,6 +87,8 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: evaluateNot,
   },
   Equivalent: {
+    description:
+      'Logical equivalence (if and only if): true when both operands have the same truth value.',
     wikidata: 'Q220433',
     broadcastable: true,
     complexity: 10200,
@@ -103,6 +111,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: evaluateEquivalent,
   },
   Implies: {
+    description: 'Logical implication (if–then).',
     wikidata: 'Q7881229',
     broadcastable: true,
     complexity: 10200,
@@ -143,12 +152,16 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   // - a symbol (e.g., "x") for symbolic quantification
   // - an Element expression (e.g., ["Element", "x", ["Set", 1, 2, 3]]) for finite domain evaluation
   Exists: {
+    description:
+      'Existential quantifier (there exists): true when the predicate holds for at least one value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
     scoped: true,
     evaluate: evaluateExists,
   },
   NotExists: {
+    description:
+      'Negated existential quantifier (there does not exist): true when the predicate holds for no value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
     scoped: true,
@@ -160,18 +173,24 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     },
   },
   ExistsUnique: {
+    description:
+      'Unique existential quantifier (there exists exactly one value satisfying the predicate).',
     signature: '(value, boolean) -> boolean',
     lazy: true,
     scoped: true,
     evaluate: evaluateExistsUnique,
   },
   ForAll: {
+    description:
+      'Universal quantifier (for all): true when the predicate holds for every value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
     scoped: true,
     evaluate: evaluateForAll,
   },
   NotForAll: {
+    description:
+      'Negated universal quantifier (not for all): true when the predicate fails for at least one value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
     scoped: true,
@@ -465,6 +484,8 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * Example: (A ∨ B) ∧ (¬A ∨ C)
    */
   ToCNF: {
+    description:
+      'Convert a boolean expression to conjunctive normal form (CNF), an AND of ORs.',
     signature: '(boolean) -> boolean',
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
@@ -480,6 +501,8 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * Example: (A ∧ B) ∨ (¬A ∧ C)
    */
   ToDNF: {
+    description:
+      'Convert a boolean expression to disjunctive normal form (DNF), an OR of ANDs.',
     signature: '(boolean) -> boolean',
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;

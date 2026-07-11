@@ -118,6 +118,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
 
     AbsArg: {
       description: 'Tuple of magnitude and argument of a complex number.',
+      keywords: ['polar form'],
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> tuple<real, real>',
