@@ -103,6 +103,17 @@
 
 ### Special Functions
 
+- **New operators: `SinhIntegral` and `CoshIntegral`** — the hyperbolic sine
+  and cosine integrals Shi and Chi, with numeric evaluation for real *and*
+  complex arguments (`Shi(2) ≈ 2.50157`, `Chi(2) ≈ 2.45267`; validated
+  against mpmath) and derivatives
+  (`\frac{d}{dx}\operatorname{Shi}(x) = \frac{\sinh x}{x}`,
+  `\frac{d}{dx}\operatorname{Chi}(x) = \frac{\cosh x}{x}`). Exact arguments
+  stay symbolic under `evaluate()`; `.N()` owns the numeric path.
+- **`Erf` and `Erfi` evaluate for complex arguments.** Both error functions
+  now have full complex-plane numeric kernels
+  (`\operatorname{erf}(1+i) ≈ 1.31615 + 0.19045i`, validated against
+  mpmath), instead of evaluating only on the real line.
 - **Subscripted special-function notation parses.** `\operatorname{W}_{-1}(x)`
   now parses to the two-argument `["LambertW", x, -1]` (branch last), and
   `\operatorname{J}_{n}(x)` / `\operatorname{Y}` / `\operatorname{I}` /
@@ -241,6 +252,19 @@
   to `2^n \cdot n!` and `(2n+1)!!` reduces to `\frac{(2n+1)!}{2^n \cdot n!}`
   when `n` is integer-typed.
 
+### Sums and Products
+
+- **Telescoping sums and products evaluate in closed form.** A sum whose body
+  is a `k \to k+1` shift pair collapses exactly, for arbitrary symbolic
+  bounds and either orientation: `\sum_{k=0}^{n} \bigl(g(k+1) - g(k)\bigr)`
+  evaluates to `g(n+1) - g(0)`. The product counterpart recognizes a
+  shift-quotient body after combining it over a common denominator:
+  `\prod_{k=1}^{n-1}\left(1 + \frac{1}{k}\right)` evaluates to `n`.
+- **`\prod_{k=1}^{n} k` evaluates to `n!`.** The bare-index product with a
+  symbolic upper bound returns `Factorial(n)` instead of staying inert.
+  (Three more Wester CAS-review tests unskipped; the `wester.test.ts` skip
+  ledger drops to 15.)
+
 ### Equation Solving
 
 On a 40-case univariate solving benchmark derived from SymPy's own test suite
@@ -334,8 +358,14 @@ New rule coverage in the `integration-rules` bundle (`loadIntegrationRules`):
   matrix now uses exact bigint-fraction elimination — the RREF of an integer
   matrix has exact `-1`/`3` pivots instead of `-0.999…`/`2.999…` float
   artifacts. Float matrices use the numeric path unchanged.
-  (`NullSpace`/`MatrixRank`'s float elimination is tracked in the ROADMAP for
-  the same treatment.)
+- **Exact null spaces, ranks, and eigenvectors.** The same exact elimination
+  now backs `Kernel` (null-space basis vectors come out as exact rationals:
+  `[[2,3],[0,0]]` → basis `[-3/2, 1]`), `MatrixRank` (rank = exact pivot
+  count, with no float-tolerance ambiguity), and eigenvector computation
+  (when the matrix and the eigenvalue are exact rationals, `A - \lambda I`
+  is solved exactly — the eigenvectors of `[[4,1],[2,3]]` are the exact
+  `[1, 1]` and `[-1/2, 1]`). Inexact or symbolic entries fall back to the
+  numeric path unchanged.
 - **Products of declared matrices type correctly.** A product with a
   matrix/vector/list-typed operand now carries the collection type instead of
   collapsing to a numeric type: with `X` and `Y` declared `matrix`, `2Y`, `XY`,
@@ -548,6 +578,14 @@ that corpus from 97.09% to 97.38% clean parse:
 
 ### Issues Resolved
 
+- **`Together` combines fractions correctly.** The `Together` operator summed
+  all numerators and all denominators independently
+  (`\frac{a}{b} + \frac{c}{d}` gave the freshman-sum
+  `\frac{a+c}{b+d}`, and `1 + \frac{1}{k}` gave `\frac{2}{k}`). It now folds
+  the terms over a common denominator:
+  `\frac{a}{b} + \frac{c}{d} \to \frac{ad + bc}{bd}`,
+  `1 + \frac{1}{k} \to \frac{k+1}{k}`, reusing the denominator when terms
+  already share it.
 - `toLatex({ digits: <number> })` no longer throws
   `RangeError: The number NaN cannot be converted to a BigInt` on a
   bignum-precision engine. A bare number — not part of the documented

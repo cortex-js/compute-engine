@@ -90,6 +90,9 @@ import {
   classifyBigopDomain,
   symbolicSumClosedForm,
   symbolicProductClosedForm,
+  infiniteSumClosedForm,
+  infiniteProductClosedForm,
+  acceleratedInfiniteSum,
 } from './utils.js';
 import { inferContinuationPattern } from '../symbolic/interpret.js';
 import {
@@ -2670,7 +2673,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return symbolicProductClosedForm(ops[0], bounds[0], ce);
           return undefined;
         }
-        if (mode === 'numeric' && !numeric) return undefined;
+        if (mode === 'numeric' && !numeric) {
+          if (bounds.length === 1)
+            return infiniteProductClosedForm(ops[0], bounds[0], ce);
+          return undefined;
+        }
         const result = run(
           reduceBigOp(
             ops[0],
@@ -2702,7 +2709,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               return symbolicProductClosedForm(ops[0], bounds[0], ce);
             return undefined;
           }
-          if (mode === 'numeric' && !numeric) return undefined;
+          if (mode === 'numeric' && !numeric) {
+            if (bounds.length === 1)
+              return infiniteProductClosedForm(ops[0], bounds[0], ce);
+            return undefined;
+          }
         }
         const result = await runAsync(
           reduceBigOp(
@@ -2782,7 +2793,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return symbolicSumClosedForm(first, rest[0], engine);
           return undefined;
         }
-        if (mode === 'numeric' && !numeric) return undefined;
+        if (mode === 'numeric' && !numeric) {
+          if (rest.length === 1)
+            return infiniteSumClosedForm(first, rest[0], engine);
+          return undefined;
+        }
+        // Infinite domain under `.N()`: accelerate the (plain-truncation)
+        // tail with Richardson extrapolation for convergent series; fall
+        // through to truncation when it declines.
+        if (mode === 'numeric' && numeric && rest.length === 1) {
+          const accel = acceleratedInfiniteSum(first, rest[0], engine);
+          if (accel !== undefined) return accel;
+        }
         const result = run(
           reduceBigOp(
             first,
@@ -2835,7 +2857,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               return symbolicSumClosedForm(first, rest[0], engine);
             return undefined;
           }
-          if (mode === 'numeric' && !numeric) return undefined;
+          if (mode === 'numeric' && !numeric) {
+            if (rest.length === 1)
+              return infiniteSumClosedForm(first, rest[0], engine);
+            return undefined;
+          }
+          if (mode === 'numeric' && numeric && rest.length === 1) {
+            const accel = acceleratedInfiniteSum(first, rest[0], engine);
+            if (accel !== undefined) return accel;
+          }
         }
         const result = await runAsync(
           reduceBigOp(

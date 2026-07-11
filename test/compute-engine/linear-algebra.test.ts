@@ -1557,6 +1557,61 @@ describe('Eigenvalues and Eigenvectors (LA-5)', () => {
       expect(eigenvalues[2]).toBeCloseTo(3, 0);
     });
 
+    it('should compute eigenvalues of a symmetric matrix with a repeated eigenvalue', () => {
+      // 3I + J (J = all-ones 4×4) has spectrum {7, 3, 3, 3}. The triple
+      // eigenvalue 3 exercises the shifted-QR deflation path (n ≥ 4, so this
+      // routes through the numeric QR solver rather than the cubic fast path).
+      const result = ce
+        .expr([
+          'Eigenvalues',
+          [
+            'List',
+            ['List', 4, 1, 1, 1],
+            ['List', 1, 4, 1, 1],
+            ['List', 1, 1, 4, 1],
+            ['List', 1, 1, 1, 4],
+          ],
+        ])
+        .evaluate();
+      const vals = (result.ops ?? [])
+        .map((o) => o.re ?? NaN)
+        .sort((a, b) => a - b);
+      expect(vals).toHaveLength(4);
+      [3, 3, 3, 7].forEach((e, i) => expect(vals[i]).toBeCloseTo(e, 8));
+    });
+
+    it('should compute eigenvalues of the 8×8 Rosser matrix', () => {
+      // Classic numeric-eigensolver stress test. Exact spectrum:
+      // {-10√10405, 0, 510-100√26, 1000, 1000, 510+100√26, 1020, 10√10405}.
+      const rosser = [
+        'List',
+        ['List', 611, 196, -192, 407, -8, -52, -49, 29],
+        ['List', 196, 899, 113, -192, -71, -43, -8, -44],
+        ['List', -192, 113, 899, 196, 61, 49, 8, 52],
+        ['List', 407, -192, 196, 611, 8, 44, 59, -23],
+        ['List', -8, -71, 61, 8, 411, -599, 208, 208],
+        ['List', -52, -43, 49, 44, -599, 411, 208, 208],
+        ['List', -49, -8, 8, 59, 208, 208, 99, -911],
+        ['List', 29, -44, 52, -23, 208, 208, -911, 99],
+      ];
+      const result = ce.expr(['Eigenvalues', rosser]).evaluate();
+      const vals = (result.ops ?? [])
+        .map((o) => o.re ?? NaN)
+        .sort((a, b) => a - b);
+      const expected = [
+        -10 * Math.sqrt(10405),
+        0,
+        510 - 100 * Math.sqrt(26),
+        1000,
+        1000,
+        510 + 100 * Math.sqrt(26),
+        1020,
+        10 * Math.sqrt(10405),
+      ];
+      expect(vals).toHaveLength(8);
+      expected.forEach((e, i) => expect(vals[i]).toBeCloseTo(e, 5));
+    });
+
     it('should return error for non-square matrix', () => {
       const result = ce.expr(['Eigenvalues', m23_n]).evaluate();
       expect(result.toString()).toContain('expected-square-matrix');

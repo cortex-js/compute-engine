@@ -637,16 +637,32 @@ describe('EL-4 (revised): Infinite series with Element notation', () => {
     expect(expr.N().operator).toBe('Sum');
   }, 10000);
 
-  test('convergent series with traditional infinite bounds: symbolic evaluate, numeric N()', () => {
-    // Σ_{n=1}^{∞} 1/n² — `.evaluate()` stays symbolic (no closed form yet);
-    // `.N()` gives the truncated approximation (the exact accumulation used
-    // to exceed the deadline and throw).
+  test('convergent series with traditional infinite bounds: exact evaluate, numeric N()', () => {
+    // Σ_{n=1}^{∞} 1/n² — `.evaluate()` returns the exact closed form π²/6
+    // (p-series → ζ(s), 2026-07-10); `.N()` gives the numeric value (the
+    // exact accumulation used to exceed the deadline and throw).
     const expr = ce.parse('\\sum_{n=1}^{\\infty} \\frac{1}{n^2}');
-    expect(expr.evaluate().operator).toBe('Sum');
+    expect(expr.evaluate().json).toEqual([
+      'Divide',
+      ['Power', 'Pi', 2],
+      6,
+    ]);
     const result = expr.N();
     expect(result.isNumber).toBe(true);
     expect(result.re).toBeGreaterThan(1.6);
     expect(result.re).toBeLessThan(1.7);
+  }, 30000);
+
+  test('convergent series with no closed form stays symbolic under evaluate()', () => {
+    // Σ_{n=1}^{∞} 1/(n²+1) has no known closed form in the engine — exact
+    // `evaluate()` stays symbolic; `.N()` owns the numeric path
+    // (≈ (π·coth π − 1)/2 ≈ 1.07667).
+    const expr = ce.parse('\\sum_{n=1}^{\\infty} \\frac{1}{n^2+1}');
+    expect(expr.evaluate().operator).toBe('Sum');
+    const result = expr.N();
+    expect(result.isNumber).toBe(true);
+    expect(result.re).toBeGreaterThan(1.07);
+    expect(result.re).toBeLessThan(1.08);
   }, 30000);
 });
 

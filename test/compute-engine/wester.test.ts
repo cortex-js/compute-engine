@@ -329,11 +329,10 @@ describe('Sums and products', () => {
     ).toEqual(['Subtract', ['g', ['Add', 'n', 1]], ['g', 0]]);
   });
 
-  test.skip(`Sum(1/k^2 + 1/k^3, k=1..oo) => pi^2/6 + zeta(3)`, () => {
-    // CURRENT: evaluate() correctly stays symbolic (an infinite domain has no
-    // exact truncated value; .N() owns the numeric path — policy decision
-    // 2026-07-05). The remaining gap is the exact closed form ≈ 2.84699.
-    // (.N() is a plain 10⁴-term truncation, off by ~1e-4 — see ROADMAP B13.)
+  test(`Sum(1/k^2 + 1/k^3, k=1..oo) => pi^2/6 + zeta(3)`, () => {
+    // Infinite p-series closed forms (ROADMAP B13): the Add body is split
+    // term-wise (each piece converges via its own closed form) into
+    // ζ(2) = π²/6 and ζ(3) (no elementary closed form, stays symbolic).
     expect(
       ce
         .expr([
@@ -361,10 +360,9 @@ describe('Sums and products', () => {
     ).toBe('n');
   });
 
-  test.skip(`Wallis: Product(1 - 1/(2k)^2, k=1..oo) => 2/pi`, () => {
-    // CURRENT: evaluate() correctly stays symbolic (infinite domains
-    // numericize only under .N() — policy decision 2026-07-05); the
-    // remaining gap is the exact closed form 2/π.
+  test(`Wallis: Product(1 - 1/(2k)^2, k=1..oo) => 2/pi`, () => {
+    // Infinite product closed form (ROADMAP B13): the Wallis product
+    // Π_{k=1}^∞ (1 − 1/(2k)²) = 2/π, matched structurally on the bound index.
     expect(
       ce
         .expr([
@@ -614,7 +612,7 @@ describe('Matrix theory', () => {
     ).toBe(7);
   });
 
-  test.skip(`M . M^-1 => identity`, () => {
+  test(`M . M^-1 => identity`, () => {
     // CURRENT: the off-diagonal entries reduce to 0, but the diagonal entries
     // stay as an unsimplified Add of two fractions with a common denominator
     // (b·a^2/(b·a^2 - b) + (-b)/(b·a^2 - b)) that is not folded to 1, even
@@ -699,7 +697,7 @@ describe('Matrix theory', () => {
     ).toBe(1);
   });
 
-  test.skip(`matrix rank of a trigonometric 2x2 matrix => 1`, () => {
+  test(`matrix rank of a trigonometric 2x2 matrix => 1`, () => {
     // Row 2 = [sin 2t, cos 2t] via double-angle identities, so rank 1. CURRENT:
     // MatrixRank stays symbolic (numeric conversion of the trig entries fails,
     // and no trig-identity simplification is applied).
@@ -754,7 +752,7 @@ describe('Matrix theory', () => {
     ).toBe(240);
   });
 
-  test.skip(`Vandermonde determinant factors to the difference product`, () => {
+  test(`Vandermonde determinant factors to the difference product`, () => {
     // => (w-x)(w-y)(w-z)(x-y)(x-z)(y-z). CURRENT: evaluate() yields a
     // value-correct but unfactored expression carrying a /(-w+x) division
     // artifact; Factor does not evaluate the inner Determinant, and simplify()
@@ -857,14 +855,13 @@ describe('Matrix theory', () => {
     expected.forEach((e, i) => expect(vals[i]).toBeCloseTo(e, 10));
   });
 
-  test.skip(`eigenvalues of the 8x8 Rosser matrix`, () => {
+  test(`eigenvalues of the 8x8 Rosser matrix`, () => {
     // The famous numeric-eigensolver stress test (Cleve Moler). Exact set:
     // {-10√10405, 0, 510-100√26, 1000, 1000, 510+100√26, 1020, 10√10405} ≈
     // {-1020.049, 0, 0.098, 1000, 1000, 1019.902, 1020, 1020.049}.
-    // CORRECTNESS ISSUE (the classic Rosser failure): CE's numeric QR does not
-    // converge to the true eigenvalues — it currently returns garbage such as
-    // [1019.88, 1019.27, 1002.70, 1017.68, -759.31, 739.69, 0.098, 0] (the
-    // trace is preserved, but the individual values are wrong). No hang.
+    // CE's numeric QR (Hessenberg reduction + Francis double-shift QR with
+    // deflation) converges to the true spectrum, including the double
+    // eigenvalue 1000 and the tiny eigenvalue ≈ 0.098.
     const rosser = [
       'List',
       ['List', 611, 196, -192, 407, -8, -52, -49, 29],
@@ -878,7 +875,10 @@ describe('Matrix theory', () => {
     ];
     const ev = ce.expr(['Eigenvalues', rosser]).evaluate();
     const vals = (ev.ops ?? [])
-      .map((o) => Math.round((o.re ?? NaN) * 1e3) / 1e3)
+      // `+ 0` normalizes signed zero: the exact-zero eigenvalue lands within a
+      // rounding error of 0, whose sign is platform-dependent, and Jest's
+      // `toEqual` treats -0 and +0 as distinct.
+      .map((o) => Math.round((o.re ?? NaN) * 1e3) / 1e3 + 0)
       .sort((a, b) => a - b);
     expect(vals).toEqual([
       -1020.049, 0, 0.098, 1000, 1000, 1019.902, 1020, 1020.049,

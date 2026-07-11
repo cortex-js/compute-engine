@@ -11,6 +11,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 
 import { MAX_ITERATION } from '../numerics/numeric.js';
+import { extrapolate } from '../numerics/richardson.js';
 import {
   fromRange,
   reduceCollection,
@@ -297,6 +298,218 @@ export function symbolicProductClosedForm(
   }
 
   return undefined;
+}
+
+/**
+ * Reformat an evaluated closed form so a rational multiple of a symbolic factor
+ * reads as a fraction: `Multiply(Rational(p, q), R)` → `Divide(p·R, q)` (and
+ * `Divide(R, q)` when `p = 1`). Mirrors the readability intent of the
+ * telescoping `Subtract` above (`π²/6` instead of `(1/6)·π²`). Any other shape
+ * is returned unchanged.
+ */
+function asReadableFraction(z: Expression, ce: ComputeEngine): Expression {
+  if (!isFunction(z, 'Multiply')) return z;
+  let coeff: Expression | undefined;
+  const rest: Expression[] = [];
+  for (const op of z.ops) {
+    if (coeff === undefined && isNumber(op) && op.im === 0) coeff = op;
+    else rest.push(op);
+  }
+  if (coeff === undefined || rest.length === 0) return z;
+  const [num, den] = coeff.numeratorDenominator;
+  if (den.isSame(1)) return z;
+  const restExpr =
+    rest.length === 1
+      ? rest[0]
+      : ce.function('Multiply', rest, { structural: true });
+  const numExpr = num.isSame(1)
+    ? restExpr
+    : ce.function('Multiply', [num, restExpr], { structural: true });
+  return ce.function('Divide', [numExpr, den], { structural: true });
+}
+
+/**
+ * Closed form of a p-series term `Σ_{k=1}^∞ k^{-s} = ζ(s)`, for an exact real
+ * `s > 1` and lower bound 1. Returns undefined otherwise (e.g. `s ≤ 1`, which
+ * diverges, or a non-index base). Even integer `s` reduce to a `π`-power
+ * fraction (`ζ(2) = π²/6`); odd `s ≥ 3` stay as `Zeta(s)`.
+ */
+function pSeriesClosedForm(
+  body: Expression,
+  index: string,
+  lower: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!lower.isSame(1)) return undefined;
+  if (!isFunction(body, 'Power')) return undefined;
+  const base = body.op1;
+  const exp = body.op2;
+  if (!(isSymbol(base) && base.symbol === index)) return undefined;
+  if (!isNumber(exp) || exp.im !== 0) return undefined;
+  const r = exp.re;
+  // s = −exp must be a real > 1 for absolute convergence (s = 1 is the
+  // harmonic/ζ(1) pole; s ≤ 1 diverges).
+  if (!(Number.isFinite(r) && r < -1)) return undefined;
+  const s = exp.neg();
+  const z = ce.function('Zeta', [s]).evaluate();
+  return asReadableFraction(z, ce);
+}
+
+/**
+ * Attempt a closed form for `Sum(body, [index, lower, +∞])` on an infinite
+ * upper domain. Handles:
+ *   - p-series `Σ_{k=1}^∞ k^{-s} = ζ(s)` (exact real `s > 1`);
+ *   - term-wise splitting `Σ (f + g) = Σ f + Σ g`, applied ONLY when every
+ *     summand individually has a known closed form (each piece's convergence is
+ *     then established by that closed form's own validity — absolute
+ *     convergence for the p-series pieces).
+ * Returns undefined when no closed form applies (caller keeps it symbolic).
+ */
+export function infiniteSumClosedForm(
+  body: Expression | undefined,
+  limits: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!body || !isFunction(limits, 'Limits')) return undefined;
+  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+  const lower = limits.op2;
+  const upper = limits.op3;
+  if (!index || !lower || !upper) return undefined;
+  if (!(upper.isInfinity === true && upper.isPositive === true))
+    return undefined;
+
+  if (isFunction(body, 'Add')) {
+    const pieces: Expression[] = [];
+    for (const term of body.ops) {
+      const cf = pSeriesClosedForm(term, index, lower, ce);
+      if (!cf) return undefined; // any piece without a closed form ⇒ stay symbolic
+      pieces.push(cf);
+    }
+    return ce.function('Add', pieces, { structural: true });
+  }
+
+  return pSeriesClosedForm(body, index, lower, ce);
+}
+
+/**
+ * Attempt a closed form for `Product(body, [index, 1, +∞])` on an infinite
+ * upper domain. Currently recognizes the Wallis product
+ *   `Π_{k=1}^∞ (1 − 1/(2k)²) = 2/π`
+ * matched structurally against the canonicalized body (the bound index is
+ * arbitrary, so the pattern is rebuilt on `index`). Returns undefined
+ * otherwise (caller keeps it symbolic).
+ */
+export function infiniteProductClosedForm(
+  body: Expression | undefined,
+  limits: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!body || !isFunction(limits, 'Limits')) return undefined;
+  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+  const lower = limits.op2;
+  const upper = limits.op3;
+  if (!index || !lower || !upper) return undefined;
+  if (!(upper.isInfinity === true && upper.isPositive === true))
+    return undefined;
+  if (!lower.isSame(1)) return undefined;
+
+  // Wallis: Π_{k=1}^∞ (1 − 1/(2k)²) = 2/π. Match the canonicalized body.
+  const wallis = ce.box([
+    'Subtract',
+    1,
+    ['Divide', 1, ['Power', ['Multiply', 2, index], 2]],
+  ]);
+  if (wallis.isSame(body)) return ce.function('Divide', [ce.number(2), ce.Pi]);
+
+  return undefined;
+}
+
+/**
+ * Accelerated `.N()` of a convergent infinite sum `Σ_{k=a}^∞ f(k)`.
+ *
+ * A plain truncation of a smooth monotone-decay series is off by ~ the tail
+ * `∫_N^∞ f` (e.g. `Σ 1/k²` truncated at 10⁴ terms is ~1e-4 low). Instead we
+ * Richardson-extrapolate the partial sums `S(N) → S(∞)`: the sequence
+ * `S(1), S(2), S(4), …, S(2ᵐ)` (exact doubling, so every sample index is an
+ * exact integer) has an asymptotic expansion in `1/N` that the Neville tableau
+ * eliminates term by term, reaching near machine precision from ~2⁹ evaluated
+ * terms.
+ *
+ * Returns undefined — so the caller falls back to plain truncation — when the
+ * domain isn't a single `[index, finite, +∞]` range, the body isn't
+ * real-numeric, or the extrapolation does not converge within the evaluation
+ * budget (divergent or slowly/non-smoothly decaying series, e.g. a half-integer
+ * p-series whose expansion is not in integer powers of `1/N`).
+ */
+export function acceleratedInfiniteSum(
+  body: Expression | undefined,
+  limits: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!body || !isFunction(limits, 'Limits')) return undefined;
+  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+  const lower = limits.op2;
+  const upper = limits.op3;
+  if (!index || !lower || !upper) return undefined;
+  if (!(upper.isInfinity === true && upper.isPositive === true))
+    return undefined;
+  const a = Math.round(lower.re);
+  if (!Number.isFinite(a)) return undefined;
+
+  // Numeric value of the body at integer index `k` (real series only).
+  const term = (k: number): number => {
+    ce.assign(index, k);
+    const v = body.N();
+    if (!isNumber(v) || v.im !== 0) return NaN;
+    return v.re;
+  };
+
+  // Partial sum S(N) = Σ_{k=a}^{N} f(k), accumulated across the strictly
+  // increasing (doubling) schedule `extrapolate` samples. Bound total work: on
+  // overflow the sequence stops changing, which would masquerade as
+  // convergence, so record it and reject below.
+  // Cap total term evaluations near the plain-truncation budget: convergent
+  // smooth series reach machine precision from ~2¹⁰ terms, well under this,
+  // while a divergent/non-converging series stops here, trips `overflow`, and
+  // is rejected below (caller falls back to truncation) without a runaway grind.
+  const MAX_TERMS = 1 << 15; // 32768
+  let cachedN = a - 1;
+  let cachedSum = 0;
+  let overflow = false;
+  const partialSum = (x: number): number => {
+    let n = Math.round(x);
+    if (n < a) return 0;
+    if (n > MAX_TERMS) {
+      n = MAX_TERMS;
+      overflow = true;
+    }
+    // The schedule is monotone increasing; guard defensively anyway.
+    if (n < cachedN) {
+      cachedN = a - 1;
+      cachedSum = 0;
+    }
+    for (let k = cachedN + 1; k <= n; k++) cachedSum += term(k);
+    cachedN = n;
+    return cachedSum;
+  };
+
+  // `contract: 0.5` samples S at exact powers of two (see doc comment);
+  // `power: 1` matches the integer-power `1/N` tail expansion.
+  const [val, err] = extrapolate(partialSum, Infinity, {
+    contract: 0.5,
+    step: 1,
+    power: 1,
+    atol: 1e-14,
+    rtol: 1e-12,
+    maxeval: 64,
+    deadline: ce._deadline,
+  });
+
+  if (overflow || !Number.isFinite(val)) return undefined;
+  // Require genuine convergence (a divergent or non-smooth series stalls with a
+  // large error estimate) before trusting the accelerated value.
+  if (!(err <= Math.max(1e-10, 1e-9 * Math.abs(val)))) return undefined;
+  return ce.number(val);
 }
 
 export type IndexingSet = {

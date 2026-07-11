@@ -288,6 +288,17 @@ function simplifyOperands(
   // First get the operands through holdMap
   const ops = holdMap(expr, (x) => x);
 
+  // Collection literals (List — including the rows of a matrix) are lazy to
+  // avoid eager element evaluation, but simplify() should still reach each
+  // element. Unlike Add/Multiply, a List has no cross-element simplify rules
+  // to interfere with, so simplifying elements independently is safe.
+  if (expr.operator === 'List') {
+    const simplifiedOps = ops.map((x) => simplify(x, options).at(-1)!.value);
+    const changed = simplifiedOps.some((op, i) => !op.isSame(ops[i]));
+    if (!changed) return expr;
+    return expr.engine.function('List', simplifiedOps);
+  }
+
   // For lazy functions (Multiply, Add), only simplify Sum/Product operands
   // and expressions containing constructible trig functions
   // to avoid interfering with their special handling in simplify-rules.

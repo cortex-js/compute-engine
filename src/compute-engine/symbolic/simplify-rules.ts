@@ -14,7 +14,7 @@ import {
   sym,
 } from '../boxed-expression/type-guards.js';
 import { expand } from '../boxed-expression/expand.js';
-import { factor, partialFraction } from '../boxed-expression/factor.js';
+import { factor, partialFraction, together } from '../boxed-expression/factor.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { SMALL_INTEGER, gcd } from '../numerics/numeric.js';
 import { primeFactors } from '../numerics/primes.js';
@@ -231,6 +231,38 @@ export const SIMPLIFY_RULES: Rule[] = [
       return { value: x.engine.One, because: 'a/a -> 1' };
     }
     return undefined;
+  },
+
+  // Combine a sum of fractions that share an identical denominator into a
+  // single fraction, letting the subsequent cancellation / a/a rules finish.
+  // e.g. b·a²/(b·a²−b) + (−b)/(b·a²−b) → (b·a²−b)/(b·a²−b) → 1 (Wester
+  // M·M⁻¹). Restricted to the same-denominator case (every operand a Divide
+  // with the same denominator) so it never re-inflates a sum of fractions
+  // over *different* denominators — that combination rarely reduces cost and
+  // would fight the partial-fraction rule.
+  //
+  // IMPORTANT: together() must not call .simplify() on its result (this rule
+  // would re-trigger). It builds canonical expressions only.
+  (x): RuleStep | undefined => {
+    if (!isFunction(x, 'Add')) return undefined;
+    const ops = x.ops;
+    if (ops.length < 2) return undefined;
+
+    // Every operand must be a Divide sharing one identical denominator.
+    let denom: Expression | undefined = undefined;
+    for (const op of ops) {
+      if (!isFunction(op, 'Divide')) return undefined;
+      if (denom === undefined) denom = op.op2;
+      else if (!op.op2.isSame(denom)) return undefined;
+    }
+
+    const result = together(x);
+    if (result.isSame(x)) return undefined;
+
+    const ce = x.engine;
+    if (ce.costFunction(result) >= ce.costFunction(x)) return undefined;
+
+    return { value: result, because: 'combine same-denominator fractions' };
   },
 
   // Try to expand the expression:

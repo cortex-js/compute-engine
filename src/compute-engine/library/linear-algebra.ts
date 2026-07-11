@@ -268,6 +268,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (shape.length === 2 && shape[0] !== shape[1])
             return ce.error('expected-square-matrix', op1.toString());
 
+          // Symbolic Vandermonde matrices: return the closed-form difference
+          // product ∏_{i<j}(nodeⱼ − nodeᵢ) directly. The general symbolic
+          // determinant (fraction-free elimination) otherwise yields a
+          // value-correct but unfactored rational form carrying a division
+          // artifact, which Factor/simplify cannot recover. Gated to symbolic
+          // matrices so numeric determinants keep their existing fast path.
+          if (op1.tensor.dtype === 'expression') {
+            const vdm = vandermondeDifferenceProduct(op1, shape[0], ce);
+            if (vdm !== undefined) return vdm;
+          }
+
           const det = op1.tensor.determinant();
           // `determinant()` returns a raw field value (e.g. a JS number for a
           // numeric matrix); box it so the operator yields a usable expression.
@@ -732,11 +743,46 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         }
 
         const matrix = tensorToNumericMatrix(op, rowCount, columnCount);
-        if (!matrix) return undefined;
+        if (matrix) {
+          // Rank–nullity theorem: rank = (number of columns) − dim(kernel).
+          const nullity = computeNullSpaceBasis(matrix).length;
+          return ce.number(columnCount - nullity);
+        }
 
-        // Rank–nullity theorem: rank = (number of columns) − dim(kernel).
-        const nullity = computeNullSpaceBasis(matrix).length;
-        return ce.number(columnCount - nullity);
+        // Symbolic path: entries could not be reduced to numbers (e.g. a
+        // matrix of trig functions). Use the symbolic determinant to decide
+        // full rank vs. rank-deficiency for a small square matrix. Stay
+        // conservative: only conclude when the simplified determinant is
+        // literally 0 or a literal nonzero constant; otherwise return
+        // undefined (stay symbolic), as before.
+        if (rowCount !== columnCount || rowCount < 2 || rowCount > 3)
+          return undefined;
+
+        let det = ce.function('Determinant', [op]).evaluate().simplify();
+        // A trig determinant may be identically zero yet only collapse under
+        // TrigReduce (which normalizes products/powers of trig to a linear
+        // combination of multiple-angle terms), which simplify() does not
+        // apply. Fall back to it before giving up on a zero determinant.
+        if (!det.isSame(0)) {
+          const reduced = ce.function('TrigReduce', [det]).evaluate();
+          if (reduced.isSame(0)) det = reduced;
+        }
+
+        if (det.isSame(0)) {
+          // Rank-deficient. Reaching the symbolic path guarantees at least
+          // one non-numeric entry (a numeric — incl. all-zero — matrix takes
+          // the rational/numeric paths above), so the matrix is not the zero
+          // matrix and its rank is ≥ 1. For a 2×2 that pins the rank at 1;
+          // for a 3×3 the rank could be 1 or 2, which the determinant alone
+          // cannot distinguish, so stay symbolic.
+          if (rowCount === 2) return ce.number(1);
+          return undefined;
+        }
+
+        // A literal nonzero determinant ⇒ full rank. A symbolic (non-literal)
+        // nonzero determinant is left undetermined.
+        if (isNumber(det)) return ce.number(rowCount);
+        return undefined;
       },
     },
 
@@ -2129,41 +2175,236 @@ function computeEigenvaluesQR(
     }
   }
 
-  // QR iteration
-  const maxIterations = 100;
-  const tolerance = 1e-10;
+  // Reduce to upper Hessenberg form, then run the shifted (Francis
+  // double-shift) QR algorithm with deflation. The double shift is an implicit
+  // Wilkinson-style shift built from the trailing 2×2 block, so the iteration
+  // converges on matrices where the naive unshifted QR stalls (e.g. the 8×8
+  // Rosser matrix) and correctly resolves clustered/repeated eigenvalues. It
+  // also handles real matrices with complex-conjugate eigenvalue pairs.
+  reduceToHessenberg(A, n);
+  const spectrum = hessenbergEigenvalues(A, n);
+  if (spectrum === undefined) return undefined;
 
-  for (let iter = 0; iter < maxIterations; iter++) {
-    // Check for convergence (matrix is nearly upper triangular)
-    let maxOffDiag = 0;
-    for (let i = 1; i < n; i++) {
-      for (let j = 0; j < i; j++) {
-        maxOffDiag = Math.max(maxOffDiag, Math.abs(A[i][j]));
-      }
-    }
-    if (maxOffDiag < tolerance) break;
-
-    // QR decomposition using Gram-Schmidt
-    const { Q, R } = qrDecomposition(A, n);
-
-    // A = R * Q
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j < n; j++) {
-        A[i][j] = 0;
-        for (let k = 0; k < n; k++) {
-          A[i][j] += R[i][k] * Q[k][j];
-        }
-      }
-    }
-  }
-
-  // Eigenvalues are on the diagonal
-  const eigenvalues: Expression[] = [];
-  for (let i = 0; i < n; i++) {
-    eigenvalues.push(ce.number(A[i][i]));
-  }
+  const eigenvalues: Expression[] = spectrum.map((r) =>
+    typeof r === 'number' ? ce.number(r) : ce.number(ce.complex(r[0], r[1]))
+  );
 
   return ce.expr(['List', ...eigenvalues]);
+}
+
+/**
+ * Reduce a real square matrix to upper Hessenberg form in place using
+ * orthogonal Householder similarity transformations `A ← PAP` (which preserve
+ * the spectrum). For a symmetric input the result is tridiagonal.
+ */
+function reduceToHessenberg(A: number[][], n: number): void {
+  const sign = (x: number) => (x >= 0 ? 1 : -1);
+  for (let k = 0; k < n - 2; k++) {
+    // Norm of the sub-column A[k+1..n-1][k] to be reduced.
+    let xnorm = 0;
+    for (let i = k + 1; i < n; i++) xnorm += A[i][k] * A[i][k];
+    xnorm = Math.sqrt(xnorm);
+    if (xnorm === 0) continue;
+
+    // Householder vector v (nonzero on rows k+1..n-1), reflecting the
+    // sub-column onto the first coordinate. The sign avoids cancellation.
+    const alpha = -sign(A[k + 1][k]) * xnorm;
+    const v: number[] = new Array(n).fill(0);
+    for (let i = k + 1; i < n; i++) v[i] = A[i][k];
+    v[k + 1] -= alpha;
+
+    let vnorm2 = 0;
+    for (let i = k + 1; i < n; i++) vnorm2 += v[i] * v[i];
+    if (vnorm2 === 0) continue;
+    const beta = 2 / vnorm2;
+
+    // Apply from the left: A ← A − β v (vᵀA).
+    for (let j = 0; j < n; j++) {
+      let s = 0;
+      for (let i = k + 1; i < n; i++) s += v[i] * A[i][j];
+      s *= beta;
+      for (let i = k + 1; i < n; i++) A[i][j] -= v[i] * s;
+    }
+    // Apply from the right: A ← A − β (Av) vᵀ.
+    for (let i = 0; i < n; i++) {
+      let s = 0;
+      for (let j = k + 1; j < n; j++) s += A[i][j] * v[j];
+      s *= beta;
+      for (let j = k + 1; j < n; j++) A[i][j] -= s * v[j];
+    }
+  }
+}
+
+/**
+ * Eigenvalues of a real upper-Hessenberg matrix via the Francis double-shift
+ * QR algorithm with deflation (the classic `hqr` scheme). Returns each
+ * eigenvalue as a real `number`, or a `[re, im]` pair for members of a
+ * complex-conjugate pair. Returns `undefined` if the iteration fails to
+ * converge within the iteration budget.
+ *
+ * `a` is modified in place.
+ */
+function hessenbergEigenvalues(
+  a: number[][],
+  n: number
+): (number | [number, number])[] | undefined {
+  const wr = new Array<number>(n).fill(0);
+  const wi = new Array<number>(n).fill(0);
+  const sign = (x: number, y: number) =>
+    y >= 0 ? Math.abs(x) : -Math.abs(x);
+
+  // Matrix norm used for the deflation test.
+  let anorm = 0;
+  for (let i = 0; i < n; i++)
+    for (let j = Math.max(i - 1, 0); j < n; j++) anorm += Math.abs(a[i][j]);
+
+  let nn = n - 1; // index of the current bottom-right of the active submatrix
+  let t = 0; // accumulated exceptional-shift offset
+  let l = 0;
+  let p = 0;
+  let q = 0;
+  let r = 0;
+
+  while (nn >= 0) {
+    let its = 0;
+    do {
+      // Search for a negligible subdiagonal element to deflate at.
+      for (l = nn; l >= 1; l--) {
+        let s = Math.abs(a[l - 1][l - 1]) + Math.abs(a[l][l]);
+        if (s === 0) s = anorm;
+        if (Math.abs(a[l][l - 1]) + s === s) {
+          a[l][l - 1] = 0;
+          break;
+        }
+      }
+
+      let x = a[nn][nn];
+      if (l === nn) {
+        // One real eigenvalue has converged.
+        wr[nn] = x + t;
+        wi[nn] = 0;
+        nn--;
+      } else {
+        let y = a[nn - 1][nn - 1];
+        let w = a[nn][nn - 1] * a[nn - 1][nn];
+        if (l === nn - 1) {
+          // A 2×2 block has converged: extract its two eigenvalues.
+          p = 0.5 * (y - x);
+          q = p * p + w;
+          let z = Math.sqrt(Math.abs(q));
+          x += t;
+          if (q >= 0) {
+            // Real pair.
+            z = p + sign(z, p);
+            wr[nn - 1] = wr[nn] = x + z;
+            if (z !== 0) wr[nn] = x - w / z;
+            wi[nn - 1] = wi[nn] = 0;
+          } else {
+            // Complex-conjugate pair.
+            wr[nn - 1] = wr[nn] = x + p;
+            wi[nn] = z;
+            wi[nn - 1] = -z;
+          }
+          nn -= 2;
+        } else {
+          // No convergence yet: perform a Francis double-shift QR step.
+          if (its >= 60) return undefined;
+          if (its === 10 || its === 20 || its === 30 || its === 40) {
+            // Exceptional shift to break out of a cycle.
+            t += x;
+            for (let i = 0; i <= nn; i++) a[i][i] -= x;
+            const s = Math.abs(a[nn][nn - 1]) + Math.abs(a[nn - 1][nn - 2]);
+            y = x = 0.75 * s;
+            w = -0.4375 * s * s;
+          }
+          ++its;
+
+          // Determine the start `m` of the bulge chase.
+          let m: number;
+          for (m = nn - 2; m >= l; m--) {
+            const z = a[m][m];
+            r = x - z;
+            let s = y - z;
+            p = (r * s - w) / a[m + 1][m] + a[m][m + 1];
+            q = a[m + 1][m + 1] - z - r - s;
+            r = a[m + 2][m + 1];
+            s = Math.abs(p) + Math.abs(q) + Math.abs(r);
+            p /= s;
+            q /= s;
+            r /= s;
+            if (m === l) break;
+            const u = Math.abs(a[m][m - 1]) * (Math.abs(q) + Math.abs(r));
+            const vv =
+              Math.abs(p) *
+              (Math.abs(a[m - 1][m - 1]) +
+                Math.abs(z) +
+                Math.abs(a[m + 1][m + 1]));
+            if (u + vv === vv) break;
+          }
+
+          for (let i = m + 2; i <= nn; i++) {
+            a[i][i - 2] = 0;
+            if (i !== m + 2) a[i][i - 3] = 0;
+          }
+
+          // Chase the bulge from row m down to nn.
+          for (let k = m; k <= nn - 1; k++) {
+            if (k !== m) {
+              p = a[k][k - 1];
+              q = a[k + 1][k - 1];
+              r = 0;
+              if (k + 1 !== nn) r = a[k + 2][k - 1];
+              x = Math.abs(p) + Math.abs(q) + Math.abs(r);
+              if (x !== 0) {
+                p /= x;
+                q /= x;
+                r /= x;
+              }
+            }
+            const s = sign(Math.sqrt(p * p + q * q + r * r), p);
+            if (s === 0) continue;
+            if (k === m) {
+              if (l !== m) a[k][k - 1] = -a[k][k - 1];
+            } else {
+              a[k][k - 1] = -s * x;
+            }
+            p += s;
+            x = p / s;
+            y = q / s;
+            const z = r / s;
+            q /= p;
+            r /= p;
+            // Row modification.
+            for (let j = k; j <= nn; j++) {
+              p = a[k][j] + q * a[k + 1][j];
+              if (k + 1 !== nn) {
+                p += r * a[k + 2][j];
+                a[k + 2][j] -= p * z;
+              }
+              a[k + 1][j] -= p * y;
+              a[k][j] -= p * x;
+            }
+            const mmin = nn < k + 3 ? nn : k + 3;
+            // Column modification.
+            for (let i = l; i <= mmin; i++) {
+              p = x * a[i][k] + y * a[i][k + 1];
+              if (k + 1 !== nn) {
+                p += z * a[i][k + 2];
+                a[i][k + 2] -= p * r;
+              }
+              a[i][k + 1] -= p * q;
+              a[i][k] -= p;
+            }
+          }
+        }
+      }
+    } while (l < nn - 1);
+  }
+
+  const result: (number | [number, number])[] = [];
+  for (let i = 0; i < n; i++)
+    result.push(wi[i] === 0 ? wr[i] : [wr[i], wi[i]]);
+  return result;
 }
 
 /**
@@ -2433,6 +2674,69 @@ function asRealNumber(value: unknown): number | undefined {
 /**
  * Convert a boxed vector/matrix tensor into a numeric matrix.
  */
+/**
+ * If `tensor` is an n×n Vandermonde matrix, return its determinant in closed
+ * form as the difference product ∏_{i<j}(nodeⱼ − nodeᵢ); otherwise return
+ * undefined.
+ *
+ * Both orientations are recognized:
+ *   - row-power:    M[i][j] = nodeⱼ^(i−1), nodes taken from the 2nd row
+ *   - column-power: M[i][j] = nodeᵢ^(j−1), nodes taken from the 2nd column
+ * (the determinant is transpose-invariant, so both share the same product).
+ *
+ * Entries are compared structurally (`isSame`) against the expected monomial,
+ * so the pattern must be presented already in `Power`/literal form (as it is
+ * after evaluate()). No `.simplify()` is called.
+ */
+function vandermondeDifferenceProduct(
+  tensor: Expression,
+  n: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!isTensor(tensor) || n < 2) return undefined;
+
+  const at = (i: number, j: number): Expression | undefined =>
+    tensor.tensor.at(i, j) as Expression | undefined;
+
+  for (const rowPower of [true, false]) {
+    const nodes: Expression[] = [];
+    for (let k = 1; k <= n; k++) {
+      const node = rowPower ? at(2, k) : at(k, 2);
+      if (node === undefined) return undefined;
+      nodes.push(node);
+    }
+
+    let matches = true;
+    for (let i = 1; i <= n && matches; i++) {
+      for (let j = 1; j <= n; j++) {
+        const power = rowPower ? i - 1 : j - 1;
+        const node = rowPower ? nodes[j - 1] : nodes[i - 1];
+        const expected =
+          power === 0
+            ? ce.number(1)
+            : power === 1
+              ? node
+              : ce.function('Power', [node, ce.number(power)]);
+        const entry = at(i, j);
+        if (entry === undefined || !entry.isSame(expected)) {
+          matches = false;
+          break;
+        }
+      }
+    }
+
+    if (matches) {
+      const diffs: Expression[] = [];
+      for (let a = 0; a < n; a++)
+        for (let b = a + 1; b < n; b++)
+          diffs.push(ce.function('Subtract', [nodes[b], nodes[a]]));
+      return ce.function('Multiply', diffs);
+    }
+  }
+
+  return undefined;
+}
+
 function tensorToNumericMatrix(
   tensor: Expression,
   rowCount: number,
