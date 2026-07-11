@@ -91,11 +91,8 @@ export function splitGraphemes(string: string): string | string[] {
         index += 2;
       }
 
-      result.push(
-        String.fromCodePoint(
-          ...codePoints.slice(baseIndex, 2 * index - baseIndex + 1)
-        )
-      );
+      // `index` is now one past the last codepoint of the sequence
+      result.push(String.fromCodePoint(...codePoints.slice(baseIndex, index)));
     } else if (isEmojiCombinator(next)) {
       // Combine emoji sequences
       // See http://unicode.org/reports/tr51/#def_emoji_tag_sequence
@@ -104,16 +101,13 @@ export function splitGraphemes(string: string): string | string[] {
         index += codePoints[index] === ZWJ ? 2 : 1;
       }
 
-      result.push(
-        String.fromCodePoint(
-          ...codePoints.slice(baseIndex, 2 * index - baseIndex - 1)
-        )
-      );
+      // `index` is now one past the last codepoint of the sequence
+      result.push(String.fromCodePoint(...codePoints.slice(baseIndex, index)));
     } else if (isRegionalIndicator(code)) {
       // Some (but not all) flags are represented by a sequence of two
       // "regional indicators" codepoints.
       index += 1;
-      result.push(String.fromCodePoint(...codePoints.slice(index - 2, 2)));
+      result.push(String.fromCodePoint(...codePoints.slice(index - 2, index)));
     } else {
       result.push(String.fromCodePoint(code));
     }

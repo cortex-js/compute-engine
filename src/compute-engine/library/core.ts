@@ -1232,6 +1232,37 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    // Seed the engine's random stream so that `Random`, `RandomInteger` and
+    // `Shuffle` produce a reproducible sequence. Sets `ce.randomSeed`, which
+    // is otherwise only reachable host-side, making notebook simulations
+    // self-contained.
+    RandomSeed: {
+      description: [
+        'RandomSeed(n): seed the random stream with an integer or string, ' +
+          'making subsequent Random/RandomInteger draws reproducible.',
+        'RandomSeed(): clear the seed, returning to a non-deterministic stream.',
+      ],
+      pure: false,
+      signature: '(integer|string?) -> nothing',
+      evaluate: (ops, { engine: ce }) => {
+        // No argument: clear the seed (back to non-deterministic).
+        if (ops.length === 0) {
+          ce.randomSeed = null;
+          return ce.Nothing;
+        }
+        const arg = ops[0];
+        if (isString(arg)) {
+          ce.randomSeed = arg.string;
+          return ce.Nothing;
+        }
+        // A non-numeric argument (e.g. a symbol) leaves it unevaluated.
+        const n = arg.re;
+        if (isNaN(n)) return undefined;
+        ce.randomSeed = Math.floor(n);
+        return ce.Nothing;
+      },
+    },
+
     // @todo: need review
     Signature: {
       description: 'Return the signature string of an operator.',
@@ -1614,6 +1645,54 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           parts.push(op.string);
         }
         return engine.string(parts.join(''));
+      },
+    },
+
+    // Split a string into a list of single-character strings, one per Unicode
+    // code point (so astral characters stay whole). A non-string argument
+    // leaves the expression unevaluated, mirroring `StringJoin`.
+    Characters: {
+      description: [
+        'Characters(s): split a string into a list of single-character ' +
+          'strings, one per Unicode code point. A non-string argument leaves ' +
+          'the expression unevaluated.',
+      ],
+      signature: '(string) -> list<string>',
+      evaluate: ([s], { engine }) => {
+        if (!isString(s)) return undefined;
+        return engine.function(
+          'List',
+          [...s.string].map((c) => engine.string(c))
+        );
+      },
+    },
+
+    // Split a string into a list of substrings. With no separator, split on
+    // runs of whitespace, dropping empty parts. With a separator string, use
+    // JS `String.split` semantics (empty parts are kept). A non-string
+    // argument leaves the expression unevaluated.
+    StringSplit: {
+      description: [
+        'StringSplit(s): split a string on runs of whitespace, dropping ' +
+          'empty parts.',
+        'StringSplit(s, sep): split a string on the separator string `sep` ' +
+          '(empty parts are kept). A non-string argument leaves the ' +
+          'expression unevaluated.',
+      ],
+      signature: '(string, string?) -> list<string>',
+      evaluate: ([s, sep], { engine }) => {
+        if (!isString(s)) return undefined;
+        let parts: string[];
+        if (sep === undefined) {
+          parts = s.string.split(/\s+/).filter((p) => p.length > 0);
+        } else {
+          if (!isString(sep)) return undefined;
+          parts = s.string.split(sep.string);
+        }
+        return engine.function(
+          'List',
+          parts.map((p) => engine.string(p))
+        );
       },
     },
 

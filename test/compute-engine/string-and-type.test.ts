@@ -73,6 +73,106 @@ describe('StringJoin concatenates strings', () => {
   });
 });
 
+describe('Characters splits a string into grapheme clusters', () => {
+  const chars = (ce: ComputeEngine, s: string): string[] =>
+    ce
+      .box(['Characters', { str: s }])
+      .evaluate()
+      .ops!.map((x) => x.string!);
+
+  test('basic ASCII', () => {
+    const ce = new ComputeEngine();
+    expect(chars(ce, 'abc')).toEqual(['a', 'b', 'c']);
+  });
+
+  test('empty string yields an empty list', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Characters', { str: '' }]).evaluate().operator).toBe(
+      'List'
+    );
+    expect(chars(ce, '')).toEqual([]);
+  });
+
+  test('astral (emoji) characters stay whole', () => {
+    const ce = new ComputeEngine();
+    expect(chars(ce, 'a😀b')).toEqual(['a', '😀', 'b']);
+  });
+
+  test('a combining-mark sequence is one character', () => {
+    const ce = new ComputeEngine();
+    // 'e' + U+0301 combining acute (NFD) is a single grapheme cluster.
+    // Strings are NFC-normalized when boxed (boxed-string.ts), so the
+    // cluster comes back as the precomposed U+00E9.
+    expect(chars(ce, 'cafe\u0301')).toEqual(['c', 'a', 'f', '\u00e9']);
+  });
+
+  test('a ZWJ emoji sequence is one character', () => {
+    const ce = new ComputeEngine();
+    expect(chars(ce, 'a👨‍👩‍👧b')).toEqual(['a', '👨‍👩‍👧', 'b']);
+  });
+
+  test('matches GraphemeClusters (synonym)', () => {
+    const ce = new ComputeEngine();
+    const viaSynonym = ce
+      .box(['GraphemeClusters', { str: 'a👨‍👩‍👧é' }])
+      .evaluate()
+      .ops!.map((x) => x.string!);
+    expect(chars(ce, 'a👨‍👩‍👧é')).toEqual(viaSynonym);
+  });
+
+  test('a non-string operand leaves it unevaluated', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Characters', 3]).evaluate().operator).toBe('Characters');
+  });
+});
+
+describe('StringSplit splits a string into substrings', () => {
+  const split = (ce: ComputeEngine, ...ops: any[]): string[] =>
+    ce
+      .box(['StringSplit', ...ops])
+      .evaluate()
+      .ops!.map((x) => x.string!);
+
+  test('no separator splits on runs of whitespace, dropping empty parts', () => {
+    const ce = new ComputeEngine();
+    expect(split(ce, { str: '  foo bar  baz ' })).toEqual([
+      'foo',
+      'bar',
+      'baz',
+    ]);
+  });
+
+  test('explicit separator uses JS split semantics (empty parts kept)', () => {
+    const ce = new ComputeEngine();
+    expect(split(ce, { str: 'a,b,,c' }, { str: ',' })).toEqual([
+      'a',
+      'b',
+      '',
+      'c',
+    ]);
+  });
+
+  test('whitespace means the Unicode White_Space code points, not just ASCII', () => {
+    const ce = new ComputeEngine();
+    // NBSP, narrow no-break space, ideographic space, NEL
+    expect(split(ce, { str: 'a\u00a0b\u202fc\u3000d\u0085e' })).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+      'e',
+    ]);
+  });
+
+  test('a non-string operand leaves it unevaluated', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['StringSplit', 3]).evaluate().operator).toBe('StringSplit');
+    expect(
+      ce.box(['StringSplit', { str: 'a' }, 3]).evaluate().operator
+    ).toBe('StringSplit');
+  });
+});
+
 describe('Type operator reports the canonical type without evaluating', () => {
   test('symbol bound to an integer', () => {
     const ce = new ComputeEngine();

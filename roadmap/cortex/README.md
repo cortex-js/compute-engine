@@ -119,12 +119,12 @@ a bug — decide when Tycho demand appears:
   bare `km` is a free symbol. Units are expressible today via `$…$` LaTeX
   islands (`$30\,\mathrm{km/h}$`) or `Quantity(30, "km/h")`. A first-class
   unit literal (e.g. `30 `km/h``?) needs a grammar decision.
-- **`RandomSeed` from Cortex (S — design).** Seeding is host-side only
-  (`ce.randomSeed`); a `RandomSeed(n)` statement would make notebook
-  simulations self-contained and reproducible.
-- **Strings as character collections (S/M — design).** Strings can't be
-  iterated/indexed/`Tally`'d; there is no `Characters`/`StringSplit`.
-  Character- or word-frequency programs must start from an explicit list.
+- **Strings as first-class collections (M — design).** `Characters(s)` and
+  `StringSplit(s, sep?)` landed 2026-07-11 (see the completed log), so
+  character/word-frequency programs work via an explicit list. What remains
+  is the deeper design decision: making strings themselves
+  iterable/indexable (`for c in s`, `s[1]`, `Tally(s)`) without the
+  `Characters` detour.
 - **Block-expression closure bodies (M — design).** `{…}` in expression
   position is a set literal, so a stateful `makeCounter`-style closure (a
   lambda whose body is a statement block) is not expressible; pure
@@ -132,9 +132,6 @@ a bug — decide when Tycho demand appears:
 
 ### Serializer / compile-target polish
 
-- **Formatter trailing-space artifact (S).** One cosmetic
-  trailing-space-before-newline case remains; a naive fix risks corrupting
-  trailing spaces inside `"""` string literals, so it needs a scoped fix.
 - **Python compile-target tails (M).** The Cortex→engine lowering currently
   fails closed in the Python target on `Comprehension`, stepped/descending
   `Range`, and multi-`Element` `Loop`; implement these when a Cortex program

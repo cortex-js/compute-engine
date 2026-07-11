@@ -452,14 +452,14 @@ describe('SYMBOLS', () => {
         [
           "Error",
           ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
-          ["LatexString", "\\mathrm{👨🏻‍🎤DavDavidBowie}"]
+          ["LatexString", "\\mathrm{👨🏻‍🎤DavidBowie}"]
         ]
       `);
       expect(parse('\\mathrm{DavidBowie👨🏻‍🎤}')).toMatchInlineSnapshot(`
         [
           "Error",
           ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
-          ["LatexString", "\\mathrm{DavidBowie👨🏻‍🎤}}"]
+          ["LatexString", "\\mathrm{DavidBowie👨🏻‍🎤}"]
         ]
       `);
     });

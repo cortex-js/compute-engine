@@ -174,6 +174,47 @@ describe('RandomInteger — evaluate()', () => {
   });
 });
 
+describe('RandomSeed — operator', () => {
+  // These use fresh engines, so the shared test engine is never left seeded.
+  it('RandomSeed(n) makes a RandomInteger sequence reproducible', () => {
+    const ce = new ComputeEngine();
+    const drawInt = () => ce.box(['RandomInteger', 0, 1000]).evaluate().re;
+    ce.box(['RandomSeed', 42]).evaluate();
+    const first = [drawInt(), drawInt(), drawInt(), drawInt()];
+    ce.box(['RandomSeed', 42]).evaluate();
+    const second = [drawInt(), drawInt(), drawInt(), drawInt()];
+    expect(first).toEqual(second);
+  });
+
+  it('RandomSeed(n) sets ce.randomSeed and returns Nothing', () => {
+    const ce = new ComputeEngine();
+    const result = ce.box(['RandomSeed', 5]).evaluate();
+    expect(result.symbol).toBe('Nothing');
+    expect(ce.randomSeed).toBe(5);
+  });
+
+  it('a string seed is supported', () => {
+    const ce = new ComputeEngine();
+    ce.box(['RandomSeed', { str: 'hi' }]).evaluate();
+    expect(ce.randomSeed).toBe('hi');
+  });
+
+  it('RandomSeed() clears the seed (back to non-deterministic)', () => {
+    const ce = new ComputeEngine();
+    ce.box(['RandomSeed', 7]).evaluate();
+    expect(ce.randomSeed).toBe(7);
+    const result = ce.box(['RandomSeed']).evaluate();
+    expect(result.symbol).toBe('Nothing');
+    expect(ce.randomSeed).toBe(null);
+  });
+
+  it('a symbolic argument leaves the expression unevaluated', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['RandomSeed', 'x']).evaluate().operator).toBe('RandomSeed');
+    expect(ce.randomSeed).toBe(null);
+  });
+});
+
 describe('ce.randomSeed — compile() baking', () => {
   it('with no seed, Random emits Math.random()', () => {
     const ce = new ComputeEngine();

@@ -111,6 +111,31 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-11 — **Backlog quick-wins round: formatter trailing space,
+  `RandomSeed`, `Characters`/`StringSplit`.** (1) *Formatter*: the cosmetic
+  trailing-space-before-newline artifact is fixed in `StackBlock.serialize`
+  (`formatter.ts`) — each fragment's end is trimmed of formatter padding
+  (space/tab + the fancy U+2005/U+2009/U+205F spacing glyphs) before the line
+  break. Safe for `"""` literals by construction: `serializeString` emits
+  every string as a single inline `TextBlock` with escaped newlines, so a
+  fragment ending in a string ends with the closing `"` and end-of-fragment
+  whitespace is always formatter-inserted; regression tests pin both the
+  no-trailing-whitespace property (default + fancy spacing) and interior
+  trailing-space preservation through a parse→serialize round-trip.
+  (2) *Engine builtins* (`library/core.ts`; no LaTeX entries, parity with
+  `RandomInteger`; no Cortex parser changes needed): `RandomSeed(n)` (integer
+  or string seed) sets `ce.randomSeed` — previously host-side only — making
+  notebook simulations self-contained; `RandomSeed()` clears back to
+  non-deterministic; returns `Nothing`, `pure: false`. `Characters(s)` →
+  list of single-code-point strings (astral chars stay whole).
+  `StringSplit(s)` splits on whitespace runs dropping empties;
+  `StringSplit(s, sep)` uses JS `split` semantics (empties kept). Non-string
+  operands stay unevaluated (StringJoin precedent). Three new notebook
+  programs in `programs.test.ts` (char frequency via `Tally(Characters(…))`,
+  word count, seeded reproducible simulation). Blast radius: cortex suite +
+  engine string/random tests 404/404, zero snapshot churn. Remaining from
+  the "strings as character collections" candidate: making strings
+  first-class iterable/indexable collections (M — still demand-gated).
 - 2026-07-11 — **Examples sweep 2 + fix round.** Two drafting agents wrote
   and empirically verified 16 notebook-scale programs across the previously
   unexercised subsystems (units/uncertainty, Integrate/Limit/Series, linear

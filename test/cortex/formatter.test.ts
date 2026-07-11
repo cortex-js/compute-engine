@@ -1,4 +1,5 @@
 import { serializeCortex } from '../../src/cortex/serialize-cortex';
+import { parseCortex } from '../../src/cortex/parse-cortex';
 import { MathJsonExpression } from '../../src/math-json/types';
 
 //
@@ -140,10 +141,55 @@ describe('CORTEX FORMATTER — fancySymbols spacing', () => {
       margin: 8,
       softMargin: 5,
     });
-    // Wrapped, so the thin separator space is now a trailing artifact but the
-    // items and fences are intact.
+    // Wrapped, but the thin separator space that used to dangle at the end of
+    // each item line is now trimmed (see the trailing-whitespace regression
+    // below); the items and fences are intact.
     expect(out.split('\n')[0]).toBe('[');
     expect(out).toContain('aa,');
     expect(out).toContain('ee,');
+  });
+});
+
+describe('CORTEX FORMATTER — no trailing whitespace', () => {
+  // The stacked/wrapped layout used to leave the separator/operator padding
+  // (a plain or "fancy" space) dangling before each line break. Assert every
+  // line of a wrapped output is free of trailing whitespace, for both the
+  // default and the fancySymbols spacing.
+  const TRAILING = /[ \t\u2005\u2009\u205f]$/;
+
+  test('default spacing: no line ends with whitespace when wrapped', () => {
+    const out = serializeCortex(['List', 1, 2, 3, 4, 5, 6, 7, 8], NARROW);
+    expect(out).toContain('\n'); // actually wrapped
+    for (const line of out.split('\n')) expect(TRAILING.test(line)).toBe(false);
+  });
+
+  test('fancySymbols spacing: no line ends with whitespace when wrapped', () => {
+    const out = serializeCortex(['List', 'aa', 'bb', 'cc', 'dd', 'ee'], {
+      fancySymbols: true,
+      margin: 8,
+      softMargin: 5,
+    });
+    expect(out).toContain('\n'); // actually wrapped
+    for (const line of out.split('\n')) expect(TRAILING.test(line)).toBe(false);
+  });
+});
+
+describe('CORTEX FORMATTER — string literals keep interior spaces', () => {
+  // The trailing-whitespace trim operates only at stacked-fragment ends. A
+  // string literal is always emitted as a single inline `"…"` block (interior
+  // line breaks are escaped to `\n`), so spaces at the end of a line inside a
+  // `"""` multi-line literal must survive serialization and a round-trip.
+  test('spaces before an escaped newline are preserved', () => {
+    const [value] = parseCortex('"""\nhello   \nworld\n"""');
+    // The multi-line literal keeps the three spaces at the end of the first
+    // interior line.
+    expect((value as { str: string }).str).toBe('hello   \nworld');
+
+    const out = serializeCortex(value);
+    expect(out).toBe('"hello   \\nworld"');
+
+    // Round-trip: re-parsing the serialized literal yields the same string.
+    const [reparsed] = parseCortex(out);
+    expect((reparsed as { str: string }).str).toBe('hello   \nworld');
   });
 });

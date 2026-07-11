@@ -38,6 +38,11 @@ export type FormattingCosts = {
   argLinebreak: number; // Adjustment to line break cost in argument expressions
 };
 
+// Whitespace that can be left dangling at the end of a stacked line: a plain
+// space or a tab (indent/separator padding) and the "fancy" spacing glyphs used
+// around operators/separators (four-per-em, thin, medium mathematical space).
+const TRAILING_PADDING = /[ \t\u2005\u2009\u205f]+$/;
+
 export abstract class FormattingBlock {
   protected fmt: Formatter;
 
@@ -187,7 +192,15 @@ export class StackBlock extends FormattingBlock {
     let result = '';
     let indent = '';
     for (const block of this.blocks) {
-      result += indent + block.serialize(offset);
+      // Trim any separator/operator padding left at the end of a fragment
+      // (e.g. the space after a `,`), which would otherwise become trailing
+      // whitespace before the line break. This only ever removes formatter-
+      // inserted padding: a fragment ending in a string literal ends with a
+      // closing `"` (string content, including trailing spaces on multi-line
+      // literals, is emitted as a single inline `TextBlock` with escaped
+      // newlines — never across a fragment boundary), so end-of-fragment
+      // whitespace is never string content.
+      result += indent + block.serialize(offset).replace(TRAILING_PADDING, '');
       // Continuation lines align to the block's starting column (`offset`),
       // per the pretty-printer contract. Use `offset` spaces — NOT
       // `indentChars(offset)`, which multiplies by `indentWidth` and treats a

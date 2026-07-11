@@ -297,6 +297,41 @@ StringJoin(header, Fold((acc, line) |-> StringJoin(acc, line), "", lines))`);
       'n\tn^2\tn^3\n1\t1\t1\n2\t4\t8\n3\t9\t27\n4\t16\t64\n5\t25\t125\n'
     );
   });
+
+  test('character frequencies via Tally(Characters(…))', () => {
+    // `Characters` splits into single-character strings; `Tally` counts them.
+    const { text, diagnostics } = run(`
+let freq = Tally(Characters("mississippi"))
+let d = DictionaryFrom(Zip(freq[1], freq[2]))
+(d["m"], d["i"], d["s"], d["p"])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(1, 4, 4, 2)');
+  });
+
+  test('word count via StringSplit on whitespace', () => {
+    const { text, diagnostics } = run(`
+let words = StringSplit("the quick brown fox the lazy dog the")
+(Length(words), Tally(words)[2])`);
+    expect(diagnostics).toEqual([]);
+    // Eight words total; "the" occurs three times.
+    expect(text).toBe('(8, [3,1,1,1,1,1])');
+  });
+});
+
+describe('CORTEX PROGRAMS — reproducible randomness', () => {
+  test('RandomSeed makes a simulation reproducible', () => {
+    // Seeding with the same value rewinds the stream, so two runs of the same
+    // draws produce identical results. List literals are eager, so each draw
+    // happens right after its `RandomSeed(7)`.
+    const { text, diagnostics } = run(`
+RandomSeed(7)
+let a = [RandomInteger(1, 100), RandomInteger(1, 100), RandomInteger(1, 100)]
+RandomSeed(7)
+let b = [RandomInteger(1, 100), RandomInteger(1, 100), RandomInteger(1, 100)]
+(a == b, a)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('("True", [97,46,38])');
+  });
 });
 
 describe('CORTEX PROGRAMS — collections', () => {
