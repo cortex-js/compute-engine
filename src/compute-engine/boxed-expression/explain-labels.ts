@@ -376,6 +376,11 @@ registerStepLabels({
   'integrate.partial-fractions': 'Integrate using partial-fraction decomposition',
   'integrate.previous-result': 'Use the integral computed earlier',
   'integrate.simplify': 'Simplify the result',
+  // Definite integrals (Fundamental Theorem of Calculus)
+  'integrate.antiderivative': 'Find the antiderivative of the integrand',
+  'integrate.fundamental-theorem':
+    'Apply the Fundamental Theorem of Calculus: ∫ᵃᵇ f dx = F(b) − F(a)',
+  'integrate.evaluate-bounds': 'Evaluate the antiderivative at the bounds',
 });
 
 //

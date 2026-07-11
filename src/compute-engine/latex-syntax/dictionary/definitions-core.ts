@@ -1312,6 +1312,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         let body = operand(fn, 1);
         if (operator(body) === 'Block' && nops(body) === 1)
           body = operand(body, 1);
+        // `EvaluateAt(Function(F, x), a, b)` — one parameter, two arguments —
+        // is the difference form F(b) − F(a) (produced by the `Integrate`
+        // evaluator applying the bounds): the textbook bracket F |_a^b.
+        if (parameters.length === 1 && args.length === 2) {
+          return `\\left.\\left(${serializer.serialize(
+            body
+          )}\\right)\\right|_{${serializer.serialize(
+            args[0]
+          )}}^{${serializer.serialize(args[1])}}`;
+        }
         if (parameters.length > 0) {
           return `\\left.\\left(${serializer.serialize(
             body

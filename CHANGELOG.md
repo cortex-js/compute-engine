@@ -77,9 +77,15 @@
   `rubi:…` id with a compact description such as _"Apply integration rule
   1.1.1.2#19 (Rubi)"_), reductions to special functions
   (`integrate.si-ci`, `integrate.partial-fractions`, …), and a closing
-  simplification. The result is identical to `evaluate()`; indefinite
-  integrals only. Without the rules loaded, or when the rules cannot close
-  the integral, a precise error is thrown.
+  simplification. A **definite** integral is presented via the Fundamental
+  Theorem of Calculus: the antiderivative derivation, then the bracket
+  `F |_a^b` (`integrate.fundamental-theorem`), the bounds substituted
+  unevaluated (`integrate.evaluate-bounds` — skipped for improper
+  integrals, where the bracket is a limit), and the value. Symbolic bounds
+  are supported. The result is identical to `evaluate()`. Without the rules
+  loaded, or when the rules cannot close the integral, a precise error is
+  thrown. (Also fixed: the LaTeX serialization of the two-bound
+  `\left. F \right|_a^b` `EvaluateAt` form dropped the upper bound.)
 
 - **`explain('solve')` traces systems of inequalities and mixed systems.** A
   `List`/`And` of linear inequalities in two variables is traced through

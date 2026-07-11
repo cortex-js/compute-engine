@@ -346,13 +346,15 @@ function explainSolveOr(
 }
 
 /**
- * Explanation of `Integrate` (indefinite antiderivatives): a step-by-step
- * trace of the opt-in Rubi integration rule driver, which must be loaded via
+ * Explanation of `Integrate`: a step-by-step trace of the opt-in Rubi
+ * integration rule driver, which must be loaded via
  * `loadIntegrationRules()`. Each step's `value` is the whole evolving
  * antiderivative (with inert `∫…` placeholders for the not-yet-integrated
  * pieces), so the chain reads as a textbook derivation ending in the closed
- * form. The result is exactly what `.evaluate()` returns (a deterministic
- * second run of the same provider).
+ * form. A definite integral is presented via the Fundamental Theorem of
+ * Calculus: find the antiderivative F, then the bracket F |_a^b, the bounds
+ * substituted, and the evaluated value. The result is exactly what
+ * `.evaluate()` returns (a deterministic second run of the same provider).
  */
 function explainIntegrate(
   expr: Expression,
@@ -387,20 +389,20 @@ function explainIntegrate(
     canonical = ce.function('Integrate', [canonical, ce.symbol(x)]);
   }
 
-  // Extract the integration variable; reject definite and multivariate forms.
+  // Extract the integration variable and bounds; reject multivariate forms.
   const limits = isFunction(canonical) ? canonical.ops.slice(1) : [];
   if (limits.length !== 1)
     throw new Error(
       'explain("Integrate") supports a single integration variable'
     );
   const limit = limits[0];
-  const lo = isFunction(limit) ? limit.op2 : undefined;
-  const hi = isFunction(limit) ? limit.op3 : undefined;
-  const isIndefinite =
-    (lo === undefined || isSymbol(lo, 'Nothing')) &&
-    (hi === undefined || isSymbol(hi, 'Nothing'));
-  if (!isIndefinite)
-    throw new Error('explain("Integrate") supports indefinite integrals only');
+  const loOp = isFunction(limit) ? limit.op2 : undefined;
+  const hiOp = isFunction(limit) ? limit.op3 : undefined;
+  const lo = loOp === undefined || isSymbol(loOp, 'Nothing') ? undefined : loOp;
+  const hi = hiOp === undefined || isSymbol(hiOp, 'Nothing') ? undefined : hiOp;
+  const isIndefinite = lo === undefined && hi === undefined;
+  if (!isIndefinite && (lo === undefined || hi === undefined))
+    throw new Error('explain("Integrate") requires both integration bounds');
 
   const varExpr = isFunction(limit) ? limit.op1 : undefined;
   const variable = isSymbol(varExpr) ? varExpr.symbol : undefined;
@@ -429,7 +431,8 @@ function explainIntegrate(
 
   // Result parity by construction: evaluate the real `Integrate` operator (a
   // deterministic second run of the same provider plus the calculus.ts
-  // shaping), so the explanation's result equals what `.evaluate()` returns.
+  // shaping — for a definite integral this includes applying the bounds), so
+  // the explanation's result equals what `.evaluate()` returns.
   const result = withDeadline(ce, () => canonical.evaluate())();
   if (result.operator === 'Integrate')
     throw new Error(
@@ -437,6 +440,59 @@ function explainIntegrate(
     );
 
   const initial = canonical;
+
+  // Definite integral: the textbook presentation via the Fundamental Theorem
+  // of Calculus — find the antiderivative F first (the provider trace), then
+  // the bracket F |_a^b, then the bounds substituted (displayed unevaluated),
+  // closing with the evaluated result.
+  if (!isIndefinite) {
+    const xSym = ce.symbol(variable);
+    const ftcTrace: RuleSteps = [
+      // Reframe: the chain switches from the definite integral to finding
+      // the antiderivative of the integrand.
+      {
+        value: ce.function('Integrate', [integrand, xSym]),
+        because: 'integrate.antiderivative',
+      },
+      ...trace,
+      // The FTC bracket, the same `EvaluateAt` form the evaluator produces.
+      {
+        value: ce.function('EvaluateAt', [
+          ce.function('Function', [anti, xSym]),
+          lo!,
+          hi!,
+        ]),
+        because: 'integrate.fundamental-theorem',
+      },
+    ];
+    // The bounds substituted into F, built non-canonically so numeric powers
+    // (`1³/3`) don't fold before the user sees them. Skipped for improper
+    // integrals (an infinite bound is a limit, not a substitution).
+    if (lo!.isFinite !== false && hi!.isFinite !== false)
+      ftcTrace.push({
+        value: ce.function(
+          'Subtract',
+          [
+            anti.subs({ [variable]: hi! }, { canonical: false }),
+            anti.subs({ [variable]: lo! }, { canonical: false }),
+          ],
+          { form: 'raw' }
+        ),
+        because: 'integrate.evaluate-bounds',
+      });
+
+    const steps = curateChain(initial, ftcTrace, verbosity);
+    // Close with the evaluated result (the arithmetic of the substituted
+    // bounds, or the limit value for an improper integral).
+    const last = steps.at(-1);
+    if (last === undefined || !last.value.isSame(result)) {
+      const { id, description } = labelFor('integrate.simplify');
+      steps.push({ value: result, id, description });
+    }
+
+    return { operation: 'Integrate', initial, result, steps };
+  }
+
   const steps = curateChain(initial, trace, verbosity);
 
   // Tail repair: ensure the last displayed state matches the returned result

@@ -122,10 +122,13 @@ describe('explain("Integrate") — errors', () => {
     );
   });
 
-  test('a definite integral is rejected', () => {
-    expect(() => ce.parse('\\int_0^1 x\\,dx').explain('Integrate')).toThrow(
-      /indefinite integrals only/
+  test('an unclosable definite integral reports could-not-integrate', () => {
+    expect(ce.parse('\\int_0^1 x^x\\,dx').evaluate().operator).toBe(
+      'Integrate'
     );
+    expect(() =>
+      ce.parse('\\int_0^1 x^x\\,dx').explain('Integrate')
+    ).toThrow(/could not integrate/);
   });
 
   test('an unclosable integrand reports could-not-integrate', () => {
@@ -134,6 +137,64 @@ describe('explain("Integrate") — errors', () => {
     expect(() =>
       ce.parse('x^x').explain('Integrate', { variable: 'x' })
     ).toThrow(/could not integrate/);
+  });
+});
+
+describe('explain("Integrate") — definite integrals (FTC)', () => {
+  // Each: [latex, expected result latex]. Verified against plain evaluate().
+  const DEFINITE = [
+    ['\\int_0^1 x^2\\,dx', '\\frac{1}{3}'],
+    ['\\int_0^a x\\,dx', '\\frac{a^2}{2}'], // symbolic bound
+    ['\\int_0^\\pi \\sin x\\,dx', '2'],
+    ['\\int_1^\\infty x^{-2}\\,dx', '1'], // improper
+  ] as const;
+
+  for (const [latex, expected] of DEFINITE) {
+    test(latex, () => {
+      const expr = ce.parse(latex);
+      const plain = expr.evaluate();
+      expect(plain.isSame(ce.parse(expected).evaluate())).toBe(true);
+
+      const ex = expr.explain('Integrate');
+      // Result parity with plain evaluate(); terminal step lands on it.
+      expect(ex.result.isSame(plain)).toBe(true);
+      expect(ex.steps.at(-1)!.value.isSame(ex.result)).toBe(true);
+      // The FTC narrative: reframe to the antiderivative, then the bracket.
+      const ids = ex.steps.map((s) => s.id);
+      expect(ids[0]).toBe('integrate.antiderivative');
+      expect(ids).toContain('integrate.fundamental-theorem');
+      // Every step is labeled.
+      for (const s of ex.steps) expect(s.description).not.toBe('');
+    });
+  }
+
+  test('finite bounds show the substitution step, improper bounds skip it', () => {
+    const finite = ce.parse('\\int_0^1 x^2\\,dx').explain('Integrate');
+    expect(finite.steps.map((s) => s.id)).toContain(
+      'integrate.evaluate-bounds'
+    );
+    const improper = ce.parse('\\int_1^\\infty x^{-2}\\,dx').explain(
+      'Integrate'
+    );
+    expect(improper.steps.map((s) => s.id)).not.toContain(
+      'integrate.evaluate-bounds'
+    );
+  });
+
+  test('golden: ∫₀¹ x² dx', () => {
+    const chain = ce
+      .parse('\\int_0^1 x^2\\,dx')
+      .explain('Integrate')
+      .steps.map((s) => `${s.id.replace(/^rubi:.*#/, 'rubi:…#')} :: ${s.value.latex}`);
+    expect(chain).toMatchInlineSnapshot(`
+      [
+        "integrate.antiderivative :: \\int\\!x^2\\, \\mathrm{d}x",
+        "rubi:…#15 :: \\frac{x^3}{3}",
+        "integrate.fundamental-theorem :: \\left.\\left(\\frac{x^3}{3}\\right)\\right|_{0}^{1}",
+        "integrate.evaluate-bounds :: \\frac{1^3}{3}-\\frac{0^3}{3}",
+        "integrate.simplify :: \\frac{1}{3}",
+      ]
+    `);
   });
 });
 
