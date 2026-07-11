@@ -398,11 +398,13 @@ separate tracking is needed. Grouped by theme:
   trig-matrix rank-1 detection LANDED 2026-07-10** via the symbolic
   determinant rank path with a `TrigReduce` fallback — see the
   linear-algebra bullet**).**
-- **Complex/abs simplification.** Kahan's `|3−√7+i·√(6√7−15)| → 1` exactly
-  (the modulus-squared is rational after expansion).
-- **Assumptions.** Transitivity closure over a cycle of `≥` (Wester 21:
-  `x≥y, y≥z, z≥x ⊢ x=z`) and monotonicity of `x²` on ordered positive reals
-  (Wester 22: `x>y>0 ⊢ 2x²>2y²`).
+- **Complex/abs simplification (LANDED 2026-07-10).** Kahan's
+  `|3−√7+i·√(6√7−15)| → 1` exactly, via the exact `√(a²+b²)` split with a
+  numeric cross-check rejecting invalid real/imaginary decompositions.
+- **Assumptions (LANDED 2026-07-10).** Transitive ≥-chain closure with
+  antisymmetry (Wester 21) and even-power monotonicity on ordered positives
+  (Wester 22), scoped narrowly so solve()'s conservative root filtering is
+  unchanged.
 - **Linear algebra (2026-07-10 round ALL LANDED: exact rational elimination
   extended to `Kernel`/`MatrixRank`/eigenvectors, joining `RowReduce`;
   `M·M⁻¹ → I` via same-denominator fraction combining + `simplify()`

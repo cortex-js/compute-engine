@@ -411,8 +411,36 @@ New rule coverage in the `integration-rules` bundle (`loadIntegrationRules`):
   integration, closing mixed-angle products the term-by-term rules could
   not reach.
 
+### Assumptions
+
+- **Transitive closure over assumed inequality chains.** Assumptions now
+  chain: `a \ge b`, `b \ge c`, `c \ge d` entails `a \ge d`, strictness
+  propagates (`p > q > r` entails `p > r` and `p \ne r`), and an
+  antisymmetric cycle collapses to equality — Wester 21's
+  `x \ge y, y \ge z, z \ge x` now proves `x = z` is `True`. A chain without
+  a back-edge deliberately does *not* prove equality.
+- **Even-power monotonicity on ordered positives.** Wester 22's
+  `x > y, y > 0 \vdash 2x^2 > 2y^2` now evaluates to `True` (a difference of
+  equally-scaled squares factors as `k(x-y)(x+y)` with both factor signs
+  settled from the assumptions). `x > y` alone deliberately does *not*
+  conclude `x^2 > y^2`, and solve()'s conservative root-filtering behavior
+  is unchanged.
+
 ### Simplification and Exact Arithmetic (Wester round 1)
 
+- **Exact modulus of complex expressions with radical parts.** `Abs` of a
+  constant `a + b\,i` with radical/rational parts computes the exact
+  `\sqrt{a^2 + b^2}` when it genuinely folds: Kahan's
+  `\left|3-\sqrt{7}+i\sqrt{6\sqrt{7}-15}\right|` simplifies to exactly `1`
+  (its `.N()` alone carries a `1.0000000000000000315` float residue),
+  `|5-12i| = 13`, `|2+\sqrt{5}\,i| = 3`, `|1+2i| = \sqrt{5}`. A split whose
+  "imaginary part" is itself imaginary (a negative radicand) is rejected by
+  a numeric cross-check, and symbolic `|x+iy|` never folds.
+- **Matrices differentiate elementwise.** `D` over a vector/matrix `List`
+  literal maps over the elements (recursively for nested lists) instead of
+  producing a nonsensical scalar chain-rule expansion: the second derivative
+  of the rotation matrix `[[\cos t, \sin t], [-\sin t, \cos t]]` is `-M`, as
+  it should be. `Derivative` shares the fix.
 - **Rational radicands extract perfect-power factors.** `(1029/1000)^{1/3}` now
   canonicalizes to `\frac{7}{10}\sqrt[3]{3}` (numerator and denominator factored
   independently), extending the existing integer-radicand extraction. Also fixed
@@ -494,7 +522,7 @@ New rule coverage in the `integration-rules` bundle (`loadIntegrationRules`):
   with rational entries (`SingularValues([[1,1],[2,2],[3,3]])` →
   `\{2\sqrt{7}, 0\}`), numeric via the SVD machinery otherwise.
   (Across this release's Wester rounds the `wester.test.ts` skip ledger
-  drops from 21 to 7.)
+  drops from 21 to 3 — the remaining three are the radical-denesting tail.)
 
 ### Units
 
