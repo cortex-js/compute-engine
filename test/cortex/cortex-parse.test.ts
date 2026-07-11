@@ -279,7 +279,9 @@ describe('CORTEX PARSING SYMBOLS', () => {
   });
   test('Verbatim symbols', () => {
     expect(validCortex('`a`')).toBe('a');
-    expect(validCortex('`a+b`')).toBe('a+b');
+    // Reserved words are the reason the verbatim form exists
+    expect(validCortex('`new`')).toBe('new');
+    expect(validCortex('`while`')).toBe('while');
     expect(validCortex('`👩🏻‍🎤🤯`')).toBe('👩🏻‍🎤🤯');
   });
   test('Invalid Symbols', () => {
@@ -331,6 +333,58 @@ describe('CORTEX PARSING SYMBOLS', () => {
           [
             invalid-symbol-name,
             #abcd,
+          ],
+        ],
+      ]
+    `);
+    // The content of a verbatim symbol is literal: no escape processing,
+    // and `\` is not a valid symbol character
+    expect(invalidCortex('`\\sin`')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-symbol-name,
+            \\sin,
+          ],
+        ],
+      ]
+    `);
+    expect(invalidCortex('`\\u{2135}0`')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-symbol-name,
+            \\u{2135}0,
+          ],
+        ],
+      ]
+    `);
+    // Not a valid MathJSON symbol (Pattern_Syntax character)
+    expect(invalidCortex('`a+b`')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-symbol-name,
+            a+b,
+          ],
+        ],
+      ]
+    `);
+    // Not a valid MathJSON symbol (whitespace)
+    expect(invalidCortex('`Hello World`')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-symbol-name,
+            Hello World,
           ],
         ],
       ]
@@ -1601,13 +1655,13 @@ describe('CORTEX PARSING FUNCTIONS', () => {
         3,
       ]
     `);
-    // A verbatim symbol (needs backticks because of the `+`) as a call head.
-    // NOTE: the roadmap's `` `\sin` `` example is not expressible as a Cortex
-    // symbol — `\` is a prohibited identifier-start character and `\s` is the
-    // Cortex space escape, so `` `\sin` `` is a genuine invalid-symbol-name.
-    expect(validCortex('`a+b`(x)')).toMatchInlineSnapshot(`
+    // A verbatim symbol (needs backticks because `new` is a reserved word)
+    // as a call head. Verbatim content is literal and must be a valid
+    // MathJSON symbol, so e.g. `` `a+b` `` or `` `\sin` `` are not
+    // expressible as Cortex symbols.
+    expect(validCortex('`new`(x)')).toMatchInlineSnapshot(`
       [
-        a+b,
+        new,
         x,
       ]
     `);

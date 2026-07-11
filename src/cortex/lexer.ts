@@ -9,6 +9,7 @@ import {
   isIdentifierContinueProhibited,
   codePointLength,
 } from './characters.js';
+import { isValidSymbol } from '../math-json/symbols.js';
 import { DiagnosticMessage } from './diagnostics.js';
 import {
   DocComment,
@@ -412,17 +413,16 @@ export class Lexer {
   }
 
   /**
-   * A verbatim symbol is enclosed in backticks and may contain characters that
-   * are otherwise invalid (e.g. `+`) plus escape sequences. Ported from
-   * `identifier-parsers.ts` `parseVerbatimIdentifier`.
+   * A verbatim symbol is enclosed in backticks: `` `while` ``. The content is
+   * taken literally — no escape processing — and must be a valid MathJSON
+   * symbol name (`isValidSymbol`), so the form only buys the ability to use
+   * names the inline form reinterprets, i.e. reserved words.
    */
   private scanVerbatimSymbol(): Token {
     const start = this.pos;
     this.pos += 1; // opening backtick
 
-    const diagnostics: DiagnosticMessage[] = [];
     let id = '';
-    let invalidChar = false;
     let done = false;
     let atLinebreak = false;
 
@@ -431,13 +431,8 @@ export class Lexer {
       atLinebreak = isLinebreak(c);
       done = c === BACKTICK;
       if (!done) {
-        if (c === BACKSLASH) {
-          id += this.scanEscapeSequence(diagnostics);
-        } else {
-          invalidChar = invalidChar || isIdentifierContinueProhibited(c);
-          id += String.fromCodePoint(c);
-          this.pos += codePointLength(c);
-        }
+        id += String.fromCodePoint(c);
+        this.pos += codePointLength(c);
       }
     }
 
@@ -456,7 +451,7 @@ export class Lexer {
         diagnostics: ['empty-verbatim-symbol'],
       });
 
-    if (invalidChar || isIdentifierStartProhibited(id.codePointAt(0)!))
+    if (!isValidSymbol(id))
       return this.makeToken('VERBATIM_SYMBOL', start, {
         value: id,
         diagnostics: [['invalid-symbol-name', id]],

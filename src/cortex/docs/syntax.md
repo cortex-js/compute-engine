@@ -84,8 +84,12 @@ _hexadecimal-number_ | _decimal-number_)
 
 _symbol_ → _verbatim-symbol_ | _inline-symbol_
 
-_verbatim-symbol_ → **`` ` ``** (_escape-sequence_ | _symbol_start_)
-(_escape-sequence_ | _symbol_continue_)\* **`` ` ``**
+_verbatim-symbol_ → **`` ` ``** _symbol-start_ (_symbol_continue_)\*
+**`` ` ``**
+
+The content of a _verbatim-symbol_ is taken literally: no escape sequences
+are applied, and it must be a valid MathJSON symbol name. The form exists to
+write symbols whose name is a reserved word, e.g. `` `while` ``.
 
 _inline-symbol_ → _symbol-start_ (_symbol_continue_)\*
 
@@ -173,7 +177,7 @@ call/index applies to. The primary forms are:
 
 - a number: `2`, `3.14`, `0x1F`, `0b101`
 - a symbol: `x`, `Add`
-- a verbatim symbol: `` `a+b` ``
+- a verbatim symbol: `` `while` ``
 - a string: `"hello"`
 - a pragma: `#env("HOME")`
 - a parenthesized expression: `(2 + 3)`

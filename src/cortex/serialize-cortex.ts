@@ -551,8 +551,13 @@ function escapeString(s: string): string {
   return result;
 }
 
-// Escape the name of a symbol.
-// Use a Verbatim Form when necessary
+// Wrap a symbol name in the Verbatim Form when necessary.
+// Verbatim symbols are literal (no escape processing), but escapeString() is
+// the identity on every valid MathJSON symbol name, so valid names — in
+// particular reserved words — are always emitted as-is. A name that is NOT a
+// valid symbol has no Cortex spelling at all; it is emitted with escapes so
+// the output stays lexically balanced (single line, closed backticks), and
+// re-parses with an `invalid-symbol-name` diagnostic.
 function escapeSymbol(s: string): string {
   // If it's a reserved word: it should be always be escaped
   if (RESERVED_WORDS.has(s)) return `\`${s}\``;

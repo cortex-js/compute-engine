@@ -132,17 +132,19 @@ describe('CORTEX LEXER — symbols', () => {
     expect(tok.text).toBe('👩🏻‍🎤🤯');
   });
 
-  test('verbatim symbols carry a cooked value', () => {
+  test('verbatim symbols carry their literal value', () => {
     expect(single('`a`').value).toBe('a');
-    const tok = single('`a+b`');
+    const tok = single('`while`');
     expect(tok.type).toBe('VERBATIM_SYMBOL');
-    expect(tok.text).toBe('`a+b`');
-    expect(tok.value).toBe('a+b');
+    expect(tok.text).toBe('`while`');
+    expect(tok.value).toBe('while');
   });
 
-  test('verbatim symbols resolve escapes', () => {
-    // `\u{2135}0` → ℵ0
-    expect(single('`\\u{2135}0`').value).toBe('ℵ0');
+  test('verbatim symbols are literal: escapes are not processed', () => {
+    // `\` is not a valid symbol character, so the name is invalid
+    const tok = single('`\\u{2135}0`');
+    expect(tok.value).toBe('\\u{2135}0');
+    expect(tok.diagnostics).toEqual([['invalid-symbol-name', '\\u{2135}0']]);
   });
 
   test('invalid verbatim symbols carry diagnostics, do not throw', () => {
@@ -155,6 +157,10 @@ describe('CORTEX LEXER — symbols', () => {
     ]);
     expect(single('`ab cd`').diagnostics).toEqual([
       ['invalid-symbol-name', 'ab cd'],
+    ]);
+    // Not a valid MathJSON symbol (Pattern_Syntax character)
+    expect(single('`a+b`').diagnostics).toEqual([
+      ['invalid-symbol-name', 'a+b'],
     ]);
   });
 });

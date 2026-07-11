@@ -111,6 +111,27 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-10 — **Verbatim symbols are truly literal (language-review §2.13
+  resolved)**: the content of a `` `…` `` verbatim symbol undergoes NO escape
+  processing and must be a valid MathJSON symbol name (checked with
+  `isValidSymbol` from `src/math-json/symbols.ts`). Rationale (ratified by
+  user): a symbol name must follow the MathJSON symbol profile (UAX31
+  XIDS/XIDC over recommended scripts + emoji), so the verbatim form exists
+  only for names the inline form reinterprets — i.e. reserved words. Since no
+  character of a valid name ever needs escaping, string-style escapes inside
+  backticks could only produce *invalid* names (space, controls, backslash,
+  quotes are never XID_Continue) — they were pure traps (`` `\sin` `` cooked
+  `\s`→space). Peers agree: Swift `` `if` ``, F# ` ``…`` `, Rust `r#if` are
+  all literal. Changes: `scanVerbatimSymbol` (lexer.ts) no longer calls
+  `scanEscapeSequence` and validates with `isValidSymbol`; serializer
+  `escapeSymbol` unchanged behaviorally (documented: `escapeString` is the
+  identity on every valid name; invalid names emit escaped for lexical
+  balance and re-parse as `invalid-symbol-name`); docs rewritten
+  (`literals.md` Symbols intro + Verbatim Form around the reserved-word
+  rationale and the MathJSON profile; `syntax.md` grammar production +
+  primary example); tests updated (`lexer.test.ts`, `cortex-parse.test.ts`
+  incl. `` `new`(x) `` call head, 4 new invalid-name snapshots). 285 cortex
+  tests, whole-src typecheck, madge clean.
 - 2026-07-09 — **Phase 5 (Ship) — packaging**: Cortex is published as the
   experimental entry point `@cortex-js/compute-engine/cortex`. Restored `cortex`
   to `TARGETS` in `scripts/build.sh` (the `.d.ts` branch already existed);

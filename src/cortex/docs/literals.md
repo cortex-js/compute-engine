@@ -11,24 +11,19 @@ sidebar:
 
 ## Symbols
 
-**Symbols** are strings of Unicode characters, except for the prohibited
-characters described below.
+**Symbols** are names that identify variables, constants and functions. The
+name of a symbol must be a valid [MathJSON symbol](/math-json/#symbols): a
+profile of [Unicode UAX31](https://unicode.org/reports/tr31/) — a letter or
+underscore followed by letters, digits and underscores, drawn from the
+Unicode recommended scripts (emoji are also allowed). The prohibited
+characters below can never appear in a symbol name.
 
 Before they are used, symbols are normalized to the
 [Unicode Normalization Form Canonical Composition (NFC)](http://www.macchiato.com/unicode/nfc-faq).
-They are stored internally and compared using the NFC.
-
-These 6 expressions represent the same symbol: once the escape sequences are
-resolved and after applying the Unicode NFC, the symbol name is the single
-Unicode character **U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE**.
-
-```cortex
-`Å`
-`\u00c5`
-`\u212b`
-`A\u030a`
-`\u0041\u030a`
-```
+They are stored internally and compared using the NFC. For example, `Å`
+written as **U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE** and as
+**U+0041 LATIN CAPITAL LETTER A** followed by **U+030A COMBINING RING ABOVE**
+represent the same symbol.
 
 ### Prohibited Symbol Characters
 
@@ -66,61 +61,36 @@ In addition, the first character of a symbol cannot be:
 
 ### Verbatim Form
 
-The Verbatim Form must be used if:
+The Verbatim Form must be used if the symbol name is a reserved word.
 
-- the first character of the symbol name is a decimal digit: **U+0030** to
-  **U+0039** (0-9) or **U+FF10** to **U+FF19** (**FULLWIDTH DIGIT ZERO** to
-  **FULLWIDTH DIGIT NINE**)
-- the symbol name includes a character with the **White_Space** or the
-  **Pattern_Syntax** Unicode property
-
-  Characters with the **White_Space** property include:
-
-  - **U+0020 SPACE**
-  - **U+0009 HORIZONTAL TABULATION**
-  - **U+000D CARRIAGE RETURN**
-  - **U+000A LINE FEED**
-
-  Characters with the **Pattern_Syntax** property include:
-  `!"#$%&'()*+,-./:;>=<?@[\\]^|{}~`.
-
-  See the
-  [Unicode Character Database](https://www.unicode.org/Public/UCD/latest/ucd/PropList.txt)
-  for a complete list of the characters with the **White_Space** or
-  **Pattern_Syntax** property.
-
-- the symbol name is a reserved word
-
-  **Reserved words** are: `abstract`, `at`, `and`, `as`, `async`, `assert`,
-  `await`, `begin`, `break`, `case`, `catch`, `class`, `const`, `continue`,
-  `debugger`, `default`, `delete`, `dynamic`, `do`, `each`, `else`, `end`,
-  `export`, `extern`, `finally`, `for`, `from`, `function`, `generator`, `get`,
-  `global`, `goto`, `if`, `in`, `inline`, `interface`, `internal`, `import`,
-  `iterator`, `label`, `lazy`, `local`, `loop`, `match`, `module`, `namespace`,
-  `native`, `new`, `not`, `of`, `on`, `optional`, `or`, `package`, `parallel`,
-  `private`, `protected`, `protocol`, `public`, `repeat`, `return`, `self`,
-  `set`, `static`, `super`, `switch`, `this`, `throw`, `to`, `try`, `union`,
-  `until`, `using`, `var`, `variant`, `warn`, `when`, `where`, `while`, `with`,
-  `xor`, `yield`.
+**Reserved words** are: `abstract`, `at`, `and`, `as`, `async`, `assert`,
+`await`, `begin`, `break`, `case`, `catch`, `class`, `const`, `continue`,
+`debugger`, `default`, `delete`, `dynamic`, `do`, `each`, `else`, `end`,
+`export`, `extern`, `finally`, `for`, `from`, `function`, `generator`, `get`,
+`global`, `goto`, `if`, `in`, `inline`, `interface`, `internal`, `import`,
+`iterator`, `label`, `lazy`, `local`, `loop`, `match`, `module`, `namespace`,
+`native`, `new`, `not`, `of`, `on`, `optional`, `or`, `package`, `parallel`,
+`private`, `protected`, `protocol`, `public`, `repeat`, `return`, `self`,
+`set`, `static`, `super`, `switch`, `this`, `throw`, `to`, `try`, `union`,
+`until`, `using`, `var`, `variant`, `warn`, `when`, `where`, `while`, `with`,
+`xor`, `yield`.
 
 **To write a symbol with the _Verbatim Form_** , put a backtick **`` ` ``**
 (**U+0060 GRAVE ACCENT**) before and after its name.
 
-The string between the two backticks can be a reserved word or it can include
-characters with the **Pattern_Syntax** property or the **White_Space** property,
-except for prohibited symbol characters.
+The characters between the two backticks are taken literally: no escape
+sequences are applied. The name must still be a valid
+[MathJSON symbol](/math-json/#symbols) — the Verbatim Form does not allow
+names that would otherwise be invalid, such as names containing whitespace,
+a backslash, or characters with the **Pattern_Syntax** Unicode property
+(`+`, `<`, `|`, ...).
 
-The string between the two ticks can include the same escape character sequences
-as in a string.
-
-The following characters must be escaped: **U+000A LINE FEED**, **U+000D
-CARRIAGE RETURN**, **U+2028 LINE SEPARATOR**, **U+2029 PARAGRAPH SEPARATOR**.
+Since the name cannot include a line break, a verbatim symbol must open and
+close on the same line.
 
 ```cortex
-`Hello World`
 `new`
-`\u{2135}0`  // same as `ℵ0` (Alef symbol)
-`\u21350`  // same as `ℵ0` (Alef symbol)
+`while`
 ```
 
 ## Numbers

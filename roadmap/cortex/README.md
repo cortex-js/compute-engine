@@ -76,17 +76,6 @@ large.
   `@cortex-js/compute-engine/cortex` from the *packed* build and executes a
   tiny program (mirrors what the benchmark harness does for CE releases).
 
-### Language design decisions still open
-
-- **Verbatim symbols vs LaTeX-command identifiers (M; language-review §2.13).**
-  A notebook user will want a symbol named `\sin`, but today `` `\sin` `` cooks
-  `\s`→space (string escapes applied to verbatim symbols) and `` `\\sin` ``
-  trips `invalid-symbol-name` (identifier-char check enforced inside backticks,
-  `lexer.ts:453`). Decide: (a) verbatim symbols become truly literal — no
-  escape processing, no identifier-char enforcement (cleanest for notebooks);
-  (b) keep escapes but drop the identifier-char check for the verbatim form; or
-  (c) add a separate raw-symbol syntax.
-
 ### Semantics gaps shipped as v0 caveats (complete on demand)
 
 - **Enforce typed function params (M).** `f(x: integer) = …` parses and holds
