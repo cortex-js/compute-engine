@@ -1925,6 +1925,50 @@ describe('Matrix Decompositions (LA-7)', () => {
       expect(singularValues[2]).toBeCloseTo(1, 5);
     });
   });
+
+  describe('SingularValues', () => {
+    it('is exact for a rank-deficient 3x2 rational matrix', () => {
+      // A^T·A = [[14,14],[14,14]] has eigenvalues {28, 0}, so the singular
+      // values are {√28 = 2√7, 0}.
+      expect(
+        ce
+          .expr([
+            'SingularValues',
+            ['List', ['List', 1, 1], ['List', 2, 2], ['List', 3, 3]],
+          ])
+          .evaluate().json
+      ).toEqual(['List', ['Multiply', 2, ['Sqrt', 7]], 0]);
+    });
+
+    it('is exact for a diagonal matrix (sorted descending)', () => {
+      expect(
+        ce
+          .expr(['SingularValues', ['List', ['List', 3, 0], ['List', 0, 4]]])
+          .evaluate().json
+      ).toEqual(['List', 4, 3]);
+    });
+
+    it('is exact for a rank-deficient 2x2 rational matrix', () => {
+      // A^T·A = [[5,10],[10,20]] has eigenvalues {25, 0}.
+      expect(
+        ce
+          .expr(['SingularValues', ['List', ['List', 1, 2], ['List', 2, 4]]])
+          .evaluate().json
+      ).toEqual(['List', 5, 0]);
+    });
+
+    it('falls back to a numeric result for inexact (float) input', () => {
+      const vals = ce
+        .expr(['SingularValues', ['List', ['List', 4.5, 0], ['List', 3, -5]]])
+        .evaluate();
+      expect(vals.operator).toBe('List');
+      const s = vals.ops!.map((o) => o.re ?? NaN);
+      // Descending, non-negative singular values of [[4.5,0],[3,-5]].
+      expect(s[0]).toBeGreaterThanOrEqual(s[1]);
+      expect(s[0]).toBeCloseTo(6.5019, 3);
+      expect(s[1]).toBeCloseTo(3.4605, 3);
+    });
+  });
 });
 
 // Regressions for the tensor linear-algebra bugs reported in REVIEW.md (F1–F4).
@@ -2320,6 +2364,45 @@ describe('MatrixPower', () => {
         ])
         .evaluate().isValid
     ).toBe(false);
+  });
+
+  it('computes the principal square root at exponent 1/2', () => {
+    // √[[10,7],[7,17]] = [[3,1],[1,4]] (the positive-definite branch).
+    expect(
+      ce
+        .expr([
+          'MatrixPower',
+          ['List', ['List', 10, 7], ['List', 7, 17]],
+          ['Rational', 1, 2],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['List', 3, 1], ['List', 1, 4]]);
+  });
+
+  it('produces a square root that reconstructs the matrix exactly', () => {
+    const root = ce
+      .expr([
+        'MatrixPower',
+        ['List', ['List', 10, 7], ['List', 7, 17]],
+        ['Rational', 1, 2],
+      ])
+      .evaluate();
+    expect(
+      ce.function('MatrixMultiply', [root, root]).evaluate().json
+    ).toEqual(['List', ['List', 10, 7], ['List', 7, 17]]);
+  });
+
+  it('supports a half-integer exponent (3/2 = √A cubed)', () => {
+    // [[3,1],[1,4]]^3 = [[37,38],[38,75]].
+    expect(
+      ce
+        .expr([
+          'MatrixPower',
+          ['List', ['List', 10, 7], ['List', 7, 17]],
+          ['Rational', 3, 2],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['List', 37, 38], ['List', 38, 75]]);
   });
 });
 

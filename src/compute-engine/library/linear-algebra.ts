@@ -858,19 +858,37 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     MatrixPower: {
       description:
-        'Square matrix raised to an integer power (repeated matrix product).',
+        'Square matrix raised to a power. Integer powers are the repeated ' +
+        'matrix product; a half-integer power (e.g. 1/2) of an exact 2×2 ' +
+        'positive-semidefinite matrix is the principal matrix square root.',
       complexity: 8300,
-      signature: '(matrix, integer) -> matrix',
+      signature: '(matrix, number) -> matrix',
       evaluate: ([mat, exponent], { engine: ce }) => {
         const A = mat.evaluate();
         if (!isTensor(A)) return undefined;
         if (!A.tensor.isSquare)
           return ce.error('expected-square-matrix', A.toString());
 
-        const n = exponent.re;
-        if (n === undefined || !Number.isInteger(n)) return undefined;
-
         const size = A.shape[0];
+        const n = exponent.re;
+        if (n === undefined) return undefined;
+
+        // Half-integer exponent p/2 (p odd): principal matrix square root
+        // A^{1/2}, then raise to the odd integer p. Only for exact 2×2
+        // positive-semidefinite matrices, where the closed form stays exact.
+        if (!Number.isInteger(n)) {
+          const den = exponent.denominator?.re;
+          const p = exponent.numerator?.re;
+          if (den !== 2 || p === undefined || !Number.isInteger(p))
+            return undefined;
+          if (size !== 2) return undefined;
+          const root = matrixSqrt2x2Exact(A, ce);
+          if (root === undefined) return undefined;
+          if (p === 1) return root;
+          // (√A)^p reuses the integer branch (including the negative case).
+          return ce.function('MatrixPower', [root, ce.number(p)]).evaluate();
+        }
+
         if (n === 0)
           return ce.function('IdentityMatrix', [ce.number(size)]).evaluate();
 
@@ -1526,6 +1544,43 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         return ce.expr(['Tuple', U, S, V]);
       },
     },
+
+    SingularValues: {
+      description:
+        'The singular values of a matrix, sorted in descending order ' +
+        '(including any zero values). Exact for a matrix whose Gram matrix ' +
+        'A^T·A (or A·A^T) is at most 2×2 with exact rational entries; ' +
+        'numeric otherwise.',
+      complexity: 8700,
+      signature: '(matrix) -> list',
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
+        const M = ops[0].evaluate();
+        if (!isTensor(M)) return undefined;
+
+        const shape = M.shape;
+        if (shape.length !== 2)
+          return ce.error('expected-matrix', M.toString());
+
+        const [m, n] = shape;
+
+        // Exact path: the singular values are √λ for λ an eigenvalue of the
+        // Gram matrix. Use the smaller of A^T·A (n×n) and A·A^T (m×m) so it
+        // has exactly min(m, n) eigenvalues. For a 1×1 or 2×2 Gram with exact
+        // rational entries, the eigenvalues (hence singular values) are exact.
+        const exact = exactSingularValues(M, m, n, ce);
+        if (exact !== undefined) return exact;
+
+        // Numeric fallback: extract the singular values from the float SVD,
+        // sorted descending, keeping min(m, n) of them (zeros included).
+        const result = computeSVD(M, m, n, ce);
+        if (!result) return undefined;
+        const vals = result.singularValues
+          .slice()
+          .sort((a, b) => b - a)
+          .slice(0, Math.min(m, n));
+        return ce.expr(['List', ...vals.map((v) => ce.number(v))]);
+      },
+    },
   },
 ];
 
@@ -1817,7 +1872,9 @@ function computeSVD(
   m: number,
   n: number,
   ce: ComputeEngine
-): { U: Expression; S: Expression; V: Expression } | undefined {
+):
+  | { U: Expression; S: Expression; V: Expression; singularValues: number[] }
+  | undefined {
   if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
@@ -1996,7 +2053,123 @@ function computeSVD(
     ...V.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
   ]);
 
-  return { U: UExpr, S: SExpr, V: VExpr };
+  return { U: UExpr, S: SExpr, V: VExpr, singularValues };
+}
+
+/**
+ * Principal matrix square root of an exact 2×2 positive-semidefinite matrix,
+ * via the closed form √M = (M + √(det M)·I) / √(tr M + 2·√(det M)). Returns
+ * `undefined` when the entries are not exact rationals, or when the matrix is
+ * not positive semidefinite (det < 0 or tr ≤ 0), so the caller can preserve
+ * its current (symbolic/inert) behavior.
+ */
+function matrixSqrt2x2Exact(
+  A: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!isTensor(A)) return undefined;
+  // Require exact rational entries.
+  if (tensorToRationalMatrix(A, 2, 2) === undefined) return undefined;
+
+  const a = ce.box(A.tensor.at(1, 1) as Expression);
+  const b = ce.box(A.tensor.at(1, 2) as Expression);
+  const c = ce.box(A.tensor.at(2, 1) as Expression);
+  const d = ce.box(A.tensor.at(2, 2) as Expression);
+
+  const tr = ce.function('Add', [a, d]).evaluate();
+  const det = ce
+    .function('Subtract', [
+      ce.function('Multiply', [a, d]),
+      ce.function('Multiply', [b, c]),
+    ])
+    .evaluate();
+
+  // Principal (real) root branch: det ≥ 0 and tr > 0 guarantee a
+  // positive-semidefinite matrix (both eigenvalues ≥ 0), hence a real result
+  // with a nonzero denominator.
+  const detVal = det.re;
+  const trVal = tr.re;
+  if (detVal === undefined || trVal === undefined) return undefined;
+  if (detVal < 0 || trVal <= 0) return undefined;
+
+  const s = ce.function('Sqrt', [det]);
+  const denom = ce.function('Sqrt', [
+    ce.function('Add', [tr, ce.function('Multiply', [2, s])]),
+  ]);
+  const inner = ce.expr([
+    'List',
+    ['List', ce.function('Add', [a, s]), b],
+    ['List', c, ce.function('Add', [d, s])],
+  ]);
+  return ce
+    .function('Multiply', [ce.function('Divide', [ce.One, denom]), inner])
+    .evaluate();
+}
+
+/**
+ * Exact singular values of a matrix, or `undefined` when they cannot be
+ * computed exactly (non-rational entries, or a Gram matrix larger than 2×2).
+ * The singular values are √λ for λ an eigenvalue of the Gram matrix; the
+ * smaller of A^T·A (n×n) and A·A^T (m×m) is used so it has exactly min(m, n)
+ * eigenvalues. Returns a `List` sorted in descending order (zeros included).
+ */
+function exactSingularValues(
+  M: Expression,
+  m: number,
+  n: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!isTensor(M)) return undefined;
+  const rational = tensorToRationalMatrix(M, m, n);
+  if (rational === undefined) return undefined;
+
+  const g = Math.min(m, n);
+  if (g > 2) return undefined;
+
+  // Gram entry: A^T·A when n ≤ m (g = n), else A·A^T (g = m).
+  const useAtA = n <= m;
+  const gram = (i: number, j: number): BigRat => {
+    let sum: BigRat = [0n, 1n];
+    const len = useAtA ? m : n;
+    for (let k = 0; k < len; k++) {
+      const x = useAtA ? rational[k][i] : rational[i][k];
+      const y = useAtA ? rational[k][j] : rational[j][k];
+      sum = ratAdd(sum, ratMul(x, y));
+    }
+    return sum;
+  };
+
+  if (g === 1) {
+    const g00 = gram(0, 0);
+    return ce.expr(['List', ce.function('Sqrt', [ce.number(g00)]).evaluate()]);
+  }
+
+  // 2×2 Gram: eigenvalues λ = (tr ± √(tr² − 4·det)) / 2, with λ₁ ≥ λ₂ ≥ 0
+  // (the Gram matrix is positive semidefinite). Singular values √λ are then
+  // already in descending order.
+  const g00 = gram(0, 0);
+  const g11 = gram(1, 1);
+  const g01 = gram(0, 1);
+  const trRat = ratAdd(g00, g11);
+  const detRat = ratSub(ratMul(g00, g11), ratMul(g01, g01));
+  const tr = ce.number(trRat);
+  const det = ce.number(detRat);
+  const disc = ce.function('Sqrt', [
+    ce.function('Subtract', [
+      ce.function('Power', [tr, 2]),
+      ce.function('Multiply', [4, det]),
+    ]),
+  ]);
+  const lambda1 = ce.function('Divide', [ce.function('Add', [tr, disc]), 2]);
+  const lambda2 = ce.function('Divide', [
+    ce.function('Subtract', [tr, disc]),
+    2,
+  ]);
+  return ce.expr([
+    'List',
+    ce.function('Sqrt', [lambda1]).evaluate(),
+    ce.function('Sqrt', [lambda2]).evaluate(),
+  ]);
 }
 
 /**
@@ -2785,6 +2958,9 @@ function ratNorm(n: bigint, d: bigint): BigRat {
   return [n / g, d / g];
 }
 
+function ratAdd([an, ad]: BigRat, [bn, bd]: BigRat): BigRat {
+  return ratNorm(an * bd + bn * ad, ad * bd);
+}
 function ratSub([an, ad]: BigRat, [bn, bd]: BigRat): BigRat {
   return ratNorm(an * bd - bn * ad, ad * bd);
 }

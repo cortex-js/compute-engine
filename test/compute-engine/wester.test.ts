@@ -885,10 +885,10 @@ describe('Matrix theory', () => {
     ]);
   });
 
-  test.skip(`matrix square root of [[10,7],[7,17]] => [[3,1],[1,4]]`, () => {
-    // CURRENT: MatrixPower's signature is (matrix, integer); a rational
-    // exponent 1/2 yields an incompatible-type error, so the principal matrix
-    // square root is not computed.
+  test(`matrix square root of [[10,7],[7,17]] => [[3,1],[1,4]]`, () => {
+    // MatrixPower accepts a half-integer exponent: A^{1/2} is the principal
+    // matrix square root of an exact 2×2 positive-semidefinite matrix, via the
+    // closed form √M = (M + √(det M)·I) / √(tr M + 2·√(det M)).
     expect(
       ce
         .expr([
@@ -900,12 +900,15 @@ describe('Matrix theory', () => {
     ).toEqual(['List', ['List', 3, 1], ['List', 1, 4]]);
   });
 
-  test.skip(`SVD singular values of [[1,1],[2,2],[3,3]] => {2√7, 0}`, () => {
-    // SVD exists and returns a numerically-correct decomposition (the Σ
-    // diagonal is [5.2915…, 0] = [2√7, 0]), but not in exact/symbolic form and
-    // with no dedicated SingularValues head to extract them.
+  test(`SVD singular values of [[1,1],[2,2],[3,3]] => {2√7, 0}`, () => {
+    // The dedicated `SingularValues` head returns the singular values in exact
+    // form (√ of the eigenvalues of the exact Gram matrix A^T·A = [[14,14],
+    // [14,14]], whose eigenvalues are {28, 0}), sorted descending: [2√7, 0].
     const singularValues = ce
-      .expr(['SVD', ['List', ['List', 1, 1], ['List', 2, 2], ['List', 3, 3]]])
+      .expr([
+        'SingularValues',
+        ['List', ['List', 1, 1], ['List', 2, 2], ['List', 3, 3]],
+      ])
       .evaluate();
     expect(singularValues.json).toEqual([
       'List',
