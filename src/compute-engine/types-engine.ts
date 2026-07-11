@@ -33,6 +33,7 @@ import type {
   SequenceInfo,
   OEISSequenceInfo,
   OEISOptions,
+  InterpretResult,
 } from './types-definitions.js';
 import type {
   AssumeResult,
@@ -77,6 +78,21 @@ export interface ILatexSyntax {
 export type OperatorInfo = {
   kind: 'function' | 'opaque';
   signature?: BoxedType;
+
+  /**
+   * `true` when the operator's definition provides an evaluation rule — an
+   * `evaluate` handler or a `collection` handler — so that applying it can
+   * produce a computed result. `false` for a registered-but-inert head that
+   * only parses/serializes (e.g. `Triangle`), which is returned unchanged by
+   * `evaluate()`.
+   *
+   * This is a "has an evaluation rule" signal, **not** a guarantee that the
+   * head computes. A few common heads reduce only through a `canonical`
+   * rewrite to a different operator and therefore report `false` even though
+   * they do compute: `Exp` (→ `Power`), `Square` (→ `Power`), `Complex`,
+   * and `Greater` (→ `Less`). Equivalent to `kind === 'function'`.
+   */
+  canEvaluate: boolean;
 };
 
 export type SymbolInfo = {
@@ -195,6 +211,18 @@ export interface IComputeEngine {
   get precision(): number;
 
   tolerance: number;
+
+  /** Seed controlling deterministic, reproducible randomness. `null` (default)
+   *  is non-deterministic. See the accessor on `ComputeEngine` for the full
+   *  semantics (stream reset on assignment, compile-time baking). */
+  randomSeed: number | string | null;
+
+  /** @internal Draw the next uniform in [0, 1) from the seeded stream (or
+   *  `Math.random()` when no seed is set). */
+  _random(): number;
+
+  /** @internal The hashed numeric seed for compile-time baking, or `null`. */
+  _randomNumericSeed(): number | null;
 
   angularUnit: AngularUnit;
 
@@ -627,6 +655,29 @@ export interface IComputeEngine {
     count?: number,
     options?: OEISOptions
   ): Promise<{ matches: OEISSequenceInfo[]; terms: number[] }>;
+
+  /**
+   * Interpret a notational expression, then propose OEIS-attributed closed
+   * forms for it (the async v4 of the `Interpret` ladder).
+   *
+   * `result.expression` is exactly what the synchronous `Interpret` head
+   * returns (a `Sum`/`Product`, or the input unchanged); `result.candidates`
+   * are OEIS-attributed closed forms, each verified to reproduce every
+   * extracted sample exactly. This is the only interpretation path that
+   * performs a network lookup. Too few samples, being offline, a timeout, or an
+   * empty result all yield an empty candidate list rather than a rejection.
+   *
+   * @param expr - The (typically inert, continuation-bearing) expression
+   * @param options - OEIS request options (timeout, maxResults)
+   *
+   * @example
+   * ```typescript
+   * const { expression, candidates } = await ce.interpret(
+   *   ce.parse('1 + 3 + 6 + 10 + \\cdots + n')
+   * );
+   * ```
+   */
+  interpret(expr: Expression, options?: OEISOptions): Promise<InterpretResult>;
 
   forget(symbol?: MathJsonSymbol | MathJsonSymbol[]): void;
 

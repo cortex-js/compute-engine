@@ -91,6 +91,7 @@ import {
   variance,
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
+import { mulberry32 } from '../numerics/random.js';
 
 import { BaseCompiler } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -550,7 +551,32 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (nConst !== undefined) return `Math.pow(${compile(arg)}, ${1 / nConst})`;
     return `Math.pow(${compile(arg)}, 1 / (${compile(exp)}))`;
   },
-  Random: (args, compile) => {
+  Random: (args, compile, target) => {
+    // Bake path: when the engine has a random seed set at compile time, each
+    // Random node compiles to a deterministic uniform derived from the seed
+    // and the node's position, so every call of the compiled function returns
+    // the same value for that call site (document-level "one draw per render").
+    const seed = target?.randomSeed;
+    const isRealSeedOverload =
+      args.length === 1 && !BaseCompiler.isIntegerValued(args[0]);
+    if (seed !== undefined && seed !== null && !isRealSeedOverload) {
+      const idx = target?.randomState ? target.randomState.counter++ : 0;
+      // Decorrelate per node: mix the seed with the node index, then draw one
+      // mulberry32 value. Two different Random nodes get different constants;
+      // the same expression + seed reproduces them.
+      const u = mulberry32((seed ^ Math.imul(idx + 1, 0x9e3779b1)) >>> 0)();
+      if (args.length === 0) return u.toString();
+      if (args.length === 2) {
+        // Random(m, n): integer in [m, n), argument-dependent but call-site
+        // stable (the uniform `u` is baked).
+        const m = compile(args[0]);
+        const n = compile(args[1]);
+        return `((${m}) + Math.floor(${u} * ((${n}) - (${m}))))`;
+      }
+      // Random(n): integer in [0, n) — the uniform `u` is baked.
+      return `Math.floor(${u} * (${compile(args[0])}))`;
+    }
+
     if (args.length === 0) return 'Math.random()';
     if (args.length === 2) {
       // Random(m, n): integer in [m, n)
@@ -1807,6 +1833,10 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       },
       preamble: (preamble ?? '') + preambleImports,
       iterationBudget,
+      // When the engine has a random seed set, bake Random nodes to
+      // deterministic, call-site-stable constants (see the `Random` handler).
+      randomSeed: expr.engine._randomNumericSeed(),
+      randomState: { counter: 0 },
     });
 
     const result = compileToTarget(expr, target, realOnly);

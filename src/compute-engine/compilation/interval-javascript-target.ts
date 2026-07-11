@@ -49,6 +49,42 @@ const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
 };
 
 /**
+ * Compile an N-ary chained relation (`Less`, `Greater`, `Equal`, …) to the
+ * conjunction of ALL pairwise comparisons, combined with the tri-state
+ * `_IA.and`. The runtime `_IA.and` is strictly binary, so the conjunction is
+ * nested. A 2-operand chain is a single comparison.
+ */
+function compileIntervalChain(
+  op: string,
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+): string {
+  if (args.length < 2) throw new Error(`${op}: expected at least two arguments`);
+  let result = `${op}(${compile(args[0])}, ${compile(args[1])})`;
+  for (let i = 1; i < args.length - 1; i++)
+    result = `_IA.and(${result}, ${op}(${compile(args[i])}, ${compile(
+      args[i + 1]
+    )}))`;
+  return result;
+}
+
+/**
+ * Fold an N-ary `And`/`Or` over ALL operands. The runtime `_IA.and`/`_IA.or`
+ * are strictly binary, so this is a left-nested fold.
+ */
+function compileIntervalFold(
+  op: string,
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+): string {
+  if (args.length === 0) throw new Error(`${op}: expected at least one argument`);
+  let result = compile(args[0]);
+  for (let i = 1; i < args.length; i++)
+    result = `${op}(${result}, ${compile(args[i])})`;
+  return result;
+}
+
+/**
  * Interval arithmetic function implementations.
  */
 const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
@@ -282,20 +318,20 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     };
     return buildPiecewise(0);
   },
-  // Comparisons
-  Equal: (args, compile) =>
-    `_IA.equal(${compile(args[0])}, ${compile(args[1])})`,
+  // Comparisons. Chained (N-ary) relations conjoin ALL pairwise comparisons
+  // with the tri-state `_IA.and` (e.g. `1 < x < 4` → less(1,x) ∧ less(x,4)).
+  Equal: (args, compile) => compileIntervalChain('_IA.equal', args, compile),
   NotEqual: (args, compile) =>
-    `_IA.notEqual(${compile(args[0])}, ${compile(args[1])})`,
+    compileIntervalChain('_IA.notEqual', args, compile),
   LessEqual: (args, compile) =>
-    `_IA.lessEqual(${compile(args[0])}, ${compile(args[1])})`,
+    compileIntervalChain('_IA.lessEqual', args, compile),
   GreaterEqual: (args, compile) =>
-    `_IA.greaterEqual(${compile(args[0])}, ${compile(args[1])})`,
-  Less: (args, compile) => `_IA.less(${compile(args[0])}, ${compile(args[1])})`,
+    compileIntervalChain('_IA.greaterEqual', args, compile),
+  Less: (args, compile) => compileIntervalChain('_IA.less', args, compile),
   Greater: (args, compile) =>
-    `_IA.greater(${compile(args[0])}, ${compile(args[1])})`,
-  And: (args, compile) => `_IA.and(${compile(args[0])}, ${compile(args[1])})`,
-  Or: (args, compile) => `_IA.or(${compile(args[0])}, ${compile(args[1])})`,
+    compileIntervalChain('_IA.greater', args, compile),
+  And: (args, compile) => compileIntervalFold('_IA.and', args, compile),
+  Or: (args, compile) => compileIntervalFold('_IA.or', args, compile),
   Not: (args, compile) => `_IA.not(${compile(args[0])})`,
 };
 

@@ -136,8 +136,31 @@
   consistent with how `Pi` behaves, rather than folding at
   canonicalization.)
 
+### Core
+
+- **`String(…)` joins values, not serialized forms.** A string operand's
+  quotes leaked into the result: `String("x = ", 3)` evaluated to a string
+  whose *content* was `"x = "3`. It now evaluates to `x = 3`. This also
+  fixes Cortex string interpolation, which lowers to `String` — the
+  documentation's headline example `"\(x) has type \(Type(x))"` now
+  produces `"2047 has type integer"`.
+- **`Type` reports the type of symbols and expressions.** The `Type`
+  operator holds its operand unevaluated, but an unevaluated operand is not
+  canonical and a non-canonical expression has no type — so `Type(y)`
+  returned `"unknown"` even for a symbol bound to an integer, and
+  `Type(1 + x)` returned `"unknown"` instead of `"number"`. The operand is
+  now canonicalized (still not evaluated) before its type is read.
+
 ### Cortex Language (Experimental)
 
+- **Runtime problems in non-final statements are no longer silent.** Only
+  the last statement's value is returned from `executeCortex`, so an error
+  value produced by an earlier statement used to vanish — an unsupported
+  indexed assignment (`xs[2] = 9`) or a mid-program `const` reassignment
+  went completely unreported. Each non-final statement that evaluates to an
+  error value now emits a `runtime-error` diagnostic carrying the
+  statement's source range; the final statement's errors stay in `value`,
+  per the errors-are-values contract.
 - **Verbatim symbols are truly literal.** The content of a backtick-quoted
   symbol (`` `while` ``) receives no escape processing and must be a valid
   MathJSON symbol name — the verbatim form exists to name reserved words.
@@ -188,6 +211,57 @@
   `NaN` instead of running. Compilation without the option is unchanged
   (unbounded loops, zero overhead); the engine's numeric limit probes use it
   internally to stay interruptible.
+- **The `interval-js` target compiles every operand of n-ary nodes.** Chained
+  relations (`1<x<4`) compiled to only their first binary comparison, and
+  n-ary `And`/`Or` dropped every operand past the first pair — for `Or` this
+  was unsound in the exclusion direction (an interval admitted only by a
+  dropped branch reported a definitive `"false"`, so a mask-driven consumer
+  would wrongly cull it). Chains now emit the tri-state conjunction of all
+  pairwise comparisons, and `And`/`Or` fold all operands; the
+  `javascript`/`glsl` targets were always correct.
+- **The `javascript` target fails closed on scalar arithmetic over a
+  list-valued operand.** `L + x` with a list-valued `L` previously compiled
+  with `success: true` to JS array coercion (returning a *string*). It now
+  reports `success: false` with an explanatory error, and the interpretation
+  fallback returns the correct broadcast list. Supported list compilation —
+  broadcast (`\sin([x, 2x])`), literals, ranges, GPU vectors, custom vector
+  operators — is unchanged.
+- **Seeded, reproducible randomness: `ce.randomSeed`.** Assigning a `number`
+  or `string` seed makes `Random()`/`Random(n)` (and `Shuffle`, `Sample`)
+  draw from a per-engine deterministic PRNG stream; re-assigning the same
+  seed resets the stream so identical evaluation sequences reproduce, and
+  `null` (the default) restores non-deterministic behavior. With a seed set
+  at compile time, each `Random` node in a `javascript`-target compilation
+  bakes to a constant derived from the seed and the node's position — a
+  compiled plot function returns the same value at the same call site on
+  every invocation (one draw per compilation), instead of flickering per
+  sample. The explicit per-call `Random(seed)` overload is unchanged.
+- **GLSL masked branches emit an overridable `_gpu_nan()` helper.** The
+  else-branch of a compiled `When`/`Which`/`If` was a bare `0.0 / 0.0`, whose
+  NaN semantics GLSL ES 1.00 leaves implementation-defined. The literal now
+  lives in a single selective-preamble helper that ES 3.00 hosts can replace
+  with `intBitsToFloat(0x7FC00000)` for a guaranteed bit pattern.
+
+### Parsing
+
+- **A matrix environment parses as a function argument.**
+  `\operatorname{Trace}\left(\begin{pmatrix}1&2\\3&4\end{pmatrix}\right)` —
+  and any library or user-declared function called on a `pmatrix`-family
+  environment, with or without `\left`/`\right` — parsed the argument as a
+  missing-argument error, so `Trace`, `Eigenvalues`, `Eigenvectors`, etc.
+  appeared broken from LaTeX while working from MathJSON. The matrix (alone
+  or among other arguments) now parses, evaluates, and round-trips.
+
+### API
+
+- **`ce.operatorInfo()` reports computability.** The returned record now
+  carries `canEvaluate: boolean` — `true` when the operator's definition has
+  an evaluation rule, `false` for a registered-but-inert head that only
+  parses/serializes (e.g. `To`, `Tilde`). Together with an `undefined` return
+  (no operator definition), integrators can gate free-form input on "can this
+  actually compute" instead of hand-maintaining allowlists. Note: heads that
+  reduce via canonicalization to another operator (`Exp` → `Power`,
+  `Greater` → `Less`) report `false`; query the canonical form.
 
 ### Special Functions
 

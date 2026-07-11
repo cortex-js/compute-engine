@@ -44,6 +44,7 @@ import type {
   SequenceInfo,
   OEISSequenceInfo,
   OEISOptions,
+  InterpretResult,
   LibraryDefinition,
   OperatorInfo,
   SymbolInfo,
@@ -99,6 +100,7 @@ import './boxed-expression/serialize.js';
 import { SIMPLIFY_RULES } from './symbolic/simplify-rules.js';
 
 import { bigint } from './numerics/bigint.js';
+import { mulberry32, hashSeed } from './numerics/random.js';
 import { isValidSymbol } from '../math-json/symbols.js';
 
 import { getFunctionProperties } from './function-properties/index.js';
@@ -143,6 +145,7 @@ import {
   lookupOEIS as lookupOEISImpl,
   checkSequenceOEIS as checkSequenceOEISImpl,
 } from './engine-sequences.js';
+import { interpret as interpretImpl } from './interpret-oeis.js';
 import { EngineCacheStore } from './engine-cache.js';
 import {
   type CommonSymbolTable,
@@ -326,6 +329,13 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   private _cost?: (expr: Expression) => number;
+
+  /** @internal Backing value for the `randomSeed` accessor. */
+  private _randomSeed: number | string | null = null;
+
+  /** @internal The seeded PRNG stream (mulberry32), or `undefined` when no
+   *  seed is set (non-deterministic `Math.random()` path). */
+  private _rng?: () => number;
 
   /** @internal Optional symbolic-integration provider consulted by the
    * `Integrate` evaluator before the built-in antiderivative. Registered by
@@ -826,6 +836,55 @@ export class ComputeEngine implements IComputeEngine {
     this._numericConfiguration.setTolerance(val);
   }
 
+  /**
+   * The seed controlling deterministic, reproducible randomness for this
+   * engine.
+   *
+   * - `null` (default): `Random()` and `Random(n)` are non-deterministic
+   *   (backed by `Math.random()`).
+   * - a `number` or `string`: `Random()`/`Random(n)` draw from a per-engine
+   *   seeded PRNG stream (a `mulberry32` generator; a string seed is hashed to
+   *   an integer). The explicit `Random(seed)` overload keeps its own per-call
+   *   deterministic semantics and is unaffected.
+   *
+   * Assigning a seed **(re)initializes and resets** the stream: assigning the
+   * same seed again rewinds it, so two identical evaluation sequences
+   * reproduce the same draws. Assigning `null` returns to non-deterministic
+   * behavior.
+   *
+   * When a seed is set at **compile time**, each `Random` node in a compiled
+   * expression is **baked** to a deterministic value derived from the seed and
+   * the node's position, so every call of the compiled function returns the
+   * same value for that call site (matching a document-level "one draw per
+   * render" model). Distinct `Random` nodes get distinct values; recompiling
+   * the same expression with the same seed reproduces them.
+   *
+   * NON-GOAL: the stream is **not** bit-compatible with any external RNG (e.g.
+   * Desmos); it is only a well-distributed, reproducible sequence.
+   */
+  get randomSeed(): number | string | null {
+    return this._randomSeed;
+  }
+
+  set randomSeed(seed: number | string | null) {
+    this._randomSeed = seed;
+    // (Re)initialize the stream. Assigning the same seed resets it, so an
+    // identical sequence of Random() evaluations reproduces.
+    this._rng = seed === null ? undefined : mulberry32(hashSeed(seed));
+  }
+
+  /** @internal Draw the next uniform in [0, 1) from the seeded stream when a
+   *  seed is set, otherwise from `Math.random()`. */
+  _random(): number {
+    return this._rng ? this._rng() : Math.random();
+  }
+
+  /** @internal The numeric (hashed) seed used to bake `Random` nodes at
+   *  compile time, or `null` when no seed is set. */
+  _randomNumericSeed(): number | null {
+    return this._randomSeed === null ? null : hashSeed(this._randomSeed);
+  }
+
   /** Replace a number that is close to 0 with the exact integer 0.
    *
    * How close to 0 the number has to be to be considered 0 is determined by {@linkcode tolerance}.
@@ -1193,9 +1252,11 @@ export class ComputeEngine implements IComputeEngine {
     const def = this.lookupDefinition(head);
     if (!def || !isOperatorDef(def)) return undefined;
     const op = def.operator;
+    const canEvaluate = !!(op.evaluate || op.collection);
     return {
-      kind: op.evaluate || op.collection ? 'function' : 'opaque',
+      kind: canEvaluate ? 'function' : 'opaque',
       signature: op.signature,
+      canEvaluate,
     };
   }
 
@@ -1502,6 +1563,38 @@ export class ComputeEngine implements IComputeEngine {
     options?: OEISOptions
   ): Promise<{ matches: OEISSequenceInfo[]; terms: number[] }> {
     return checkSequenceOEISImpl(this, name, count, options);
+  }
+
+  /**
+   * Interpret a notational expression, then propose OEIS-attributed closed
+   * forms for it (the async v4 of the `Interpret` ladder).
+   *
+   * The synchronous `Interpret` head (and `evaluate()`) never touch the
+   * network; this method is the sole path that does. It runs the same offline
+   * recognizer — so `result.expression` is exactly what `Interpret` returns
+   * (a `Sum`/`Product`, or the input unchanged) — and *additionally* looks the
+   * extracted numeric samples up in OEIS, parsing and verifying each hit's
+   * free-text formula into an attributed candidate closed form.
+   *
+   * Every candidate is verified to reproduce all samples exactly before being
+   * returned, and always carries attribution (`id`/`name`/`url` — OEIS data is
+   * CC BY-NC and is never bundled). Too few samples, being offline, a timeout,
+   * or an empty OEIS result all yield an empty `candidates` list rather than a
+   * rejection.
+   *
+   * @param expr - The (typically inert, continuation-bearing) expression
+   * @param options - OEIS request options (timeout, maxResults)
+   *
+   * @example
+   * ```typescript
+   * const expr = ce.parse('1 + 3 + 6 + 10 + \\cdots + n');
+   * const { expression, candidates } = await ce.interpret(expr);
+   * // expression → Sum(...)   (offline recognizer)
+   * // candidates → [{ id: 'A000217', url: 'https://oeis.org/A000217', ... }]
+   * ```
+   */
+  interpret(expr: Expression, options?: OEISOptions): Promise<InterpretResult> {
+    return interpretImpl(this, expr, options);
   }
 
   /**

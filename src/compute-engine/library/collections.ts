@@ -2062,9 +2062,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           s = nextSeed(s);
         }
       } else {
-        // Non-deterministic Fisher-Yates (existing).
+        // No explicit seed: draw from the engine's seeded stream when
+        // `ce.randomSeed` is set, otherwise non-deterministic Fisher-Yates.
         for (let i = data.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
+          const j = Math.floor(ce._random() * (i + 1));
           [data[i], data[j]] = [data[j], data[i]];
         }
       }

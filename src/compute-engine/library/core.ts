@@ -874,8 +874,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Return the type of an expression as a string.',
       lazy: true,
       signature: '(any) -> string',
+      // The operand is lazy (Type reports the static type, without
+      // evaluating), but a *non-canonical* expression has no type — a lazy
+      // operand is not canonicalized, so `Type(y)` reported "unknown" even
+      // for a symbol bound to an integer. Canonicalize, don't evaluate.
       evaluate: ([x], { engine: ce }) =>
-        ce.string(x.type.toString() ?? 'unknown'),
+        ce.string(x.canonical.type.toString() ?? 'unknown'),
     },
 
     Evaluate: {
@@ -1135,8 +1139,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       sgn: () => 'non-negative',
       evaluate: (ops, { engine: ce }) => {
-        // No-arg: non-deterministic float.
-        if (ops.length === 0) return ce.number(Math.random());
+        // No-arg: draws from the engine's seeded stream when `ce.randomSeed`
+        // is set, otherwise non-deterministic (`Math.random()`).
+        if (ops.length === 0) return ce.number(ce._random());
 
         const [firstOp, secondOp] = ops;
 
@@ -1146,7 +1151,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           let upper = Math.floor(secondOp.re);
           if (isNaN(lower)) lower = 0;
           if (isNaN(upper)) upper = 0;
-          return ce.number(lower + Math.floor(Math.random() * (upper - lower)));
+          return ce.number(lower + Math.floor(ce._random() * (upper - lower)));
         }
 
         // One-arg: dispatch on the argument's type.
@@ -1155,7 +1160,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (firstOp.type.matches('integer')) {
           let n = Math.floor(firstOp.re);
           if (isNaN(n)) n = 0;
-          return ce.number(Math.floor(Math.random() * n));
+          return ce.number(Math.floor(ce._random() * n));
         }
 
         // Real-typed: seeded float in [0, 1).
@@ -1519,7 +1524,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(any*) -> string',
       evaluate: (ops, { engine }) => {
         if (ops.length === 0) return engine.string('');
-        return engine.string(ops.map((x) => x.toString()).join(''));
+        // Join the *values*: a string operand contributes its content —
+        // `.toString()` on a string is its serialized form, with quotes,
+        // which used to leak into the result (`String("x = ", 3)` produced
+        // the content `"x = "3`).
+        return engine.string(
+          ops.map((x) => (isString(x) ? x.string : x.toString())).join('')
+        );
       },
     },
 

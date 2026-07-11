@@ -29,6 +29,18 @@ type CompileExpressionOptions<T extends string = string> = {
 };
 
 /**
+ * Materialize an interpreted (evaluated) result for a fallback `run`, matching
+ * `evaluate()` semantics: a scalar collapses to its real part (the
+ * compiled-runner numeric contract), while a finite indexed collection becomes
+ * a nested JS array of element values. Used so the interpretation fallback
+ * returns the right value for list-valued expressions instead of `NaN`.
+ */
+function interpretedRunValue(expr: Expression): number | unknown[] {
+  if (expr.isCollection) return [...expr.each()].map(interpretedRunValue);
+  return expr.re;
+}
+
+/**
  * Compile a boxed expression.
  *
  * Returns a `CompilationResult` with the generated source code and,
@@ -186,7 +198,12 @@ export function compile<T extends string = 'javascript'>(
               ce.assign(k, v);
             }
           }
-          return expr.evaluate().re;
+          // Return the interpreted value with `evaluate()` semantics. A scalar
+          // result yields its real part (the compiled-runner contract); a
+          // list-valued result (e.g. the list-arithmetic fail-closed cases) is
+          // materialized to a nested JS array so the fallback still returns the
+          // correct value rather than a scalar `NaN`.
+          return interpretedRunValue(expr.evaluate());
         } finally {
           ce.popScope();
         }

@@ -186,6 +186,47 @@ export class BaseCompiler {
       return BaseCompiler.compileLoop(h, args, target);
     }
 
+    // Scalar arithmetic over a list-valued operand has no committed coverage on
+    // the JavaScript target: the built-in lowering emits element-wise-impossible
+    // scalar JS and silently returns garbage (`[1,2,3] + x` → the *string*
+    // "1,2,31"; `list * scalar` → NaN). Fail closed (D6) with the offending head
+    // so the engine-level `compile()` reports `success: false` and falls back to
+    // the interpreter (which broadcasts correctly), rather than returning a
+    // wrong result behind a `success: true`.
+    //
+    // Deliberately narrow, to avoid false positives on genuinely supported list
+    // forms:
+    //   - GLSL/WGSL/GPU targets have native vector types (`vec3 + vec3`), so the
+    //     guard is scoped to `javascript` only.
+    //   - A user `operators` override that lowers the head to a *function call*
+    //     (an identifier like `add`, not a symbolic infix `+`) takes
+    //     responsibility for list operands (Issue #240) — only the built-in
+    //     symbolic lowering (`+`, `*`, `_SYS.pow`) produces garbage.
+    //   - Broadcasting a unary operator/function over a single finite indexed
+    //     collection (`-[1,2,3]`, `\sqrt{[1,4,9]}`, `\sin([x, 2x])`) is handled
+    //     below via `.map` and is supported.
+    // Materialize the list with `evaluate()` and compile a scalar element
+    // function for anything else.
+    if (
+      target.language === 'javascript' &&
+      BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h) &&
+      args.some((a) => a.isCollection)
+    ) {
+      const opMap = target.operators?.(h);
+      const lowersToScalarInfix =
+        opMap === undefined || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]);
+      const def = engine.lookupDefinition(h);
+      const isUnaryBroadcast =
+        args.length === 1 &&
+        isOperatorDef(def) &&
+        def.operator.broadcastable === true &&
+        isFiniteIndexedCollection(args[0]);
+      if (lowersToScalarInfix && !isUnaryBroadcast)
+        throw new Error(
+          `${h}: cannot compile scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Fail closed (D6). Materialize the list with evaluate() and compile a scalar element function instead.`
+        );
+    }
+
     // Handle operators
     const op = target.operators?.(h);
 
@@ -531,6 +572,15 @@ export class BaseCompiler {
    */
   private static readonly COMPLEX_TRANSPARENT_HEADS: ReadonlySet<string> =
     new Set(['Real', 'Imaginary', 'Argument', 'Conjugate']);
+
+  /**
+   * Scalar arithmetic operator heads whose codegen would emit
+   * element-wise-impossible scalar JS if handed a list-valued operand. Guarded
+   * in `compileExpr`: such a form fails closed (D6) unless it is the supported
+   * unary broadcast (e.g. `Negate([1,2,3])`), which lowers via `.map`.
+   */
+  private static readonly SCALAR_ARITHMETIC_HEADS: ReadonlySet<string> =
+    new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power']);
 
   /**
    * Extract the initial-value operand of a `Declare` expression, if any.

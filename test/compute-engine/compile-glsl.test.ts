@@ -733,8 +733,9 @@ describe('GLSL COMPILATION', () => {
   });
 
   // REVIEW.md E15: GLSL has the ternary operator, but no `NaN` identifier — the
-  // base compiler's default When/Which emitted a bare `NaN`. GLSL must use a
-  // runtime NaN (`0.0 / 0.0`).
+  // base compiler's default When/Which emitted a bare `NaN`. GLSL routes its
+  // masked/else-branch NaN through the overridable `_gpu_nan()` preamble helper
+  // instead of a bare, implementation-defined `0.0 / 0.0` literal.
   describe('GLSL control flow (E15)', () => {
     it('compiles If to a ternary', () => {
       const e = ce.expr(['If', ['Greater', 'x', 0], 1, ['Negate', 1]]);
@@ -743,11 +744,16 @@ describe('GLSL COMPILATION', () => {
       expect(/\bNaN\b/.test(code)).toBe(false);
     });
 
-    it('compiles When with a runtime NaN, never a bare NaN', () => {
+    it('compiles When with the _gpu_nan() helper, never a bare NaN', () => {
       const e = ce.expr(['When', 'x', ['Greater', 'x', 0]]);
-      const code = glsl.compile(e).code;
-      expect(code).toContain('0.0 / 0.0');
-      expect(/\bNaN\b/.test(code)).toBe(false);
+      const result = glsl.compile(e);
+      // The else branch calls the helper, not a bare `0.0 / 0.0` literal…
+      expect(result.code).toContain('_gpu_nan()');
+      expect(result.code).not.toContain('0.0 / 0.0');
+      expect(/\bNaN\b/.test(result.code)).toBe(false);
+      // …and the helper definition is emitted (selectively) into the preamble.
+      expect(result.preamble ?? '').toContain('float _gpu_nan()');
+      expect(result.preamble ?? '').toContain('return 0.0 / 0.0;');
     });
   });
 

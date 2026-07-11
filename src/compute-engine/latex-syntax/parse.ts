@@ -1797,7 +1797,12 @@ export class _Parser implements Parser {
     // We're looking for an enclosure i.e. `f(a, b, c)`
     if (kind === 'enclosure') {
       if (group === null) return null;
-      return getSequence(group) ?? [];
+      // `getSequence` unwraps a `Delimiter`/`Sequence` into its arguments, but
+      // returns `null` for a single non-sequence expression. That happens when
+      // the enclosure parselet unwraps its content (e.g. `(\begin{pmatrix}…)`
+      // collapses to a bare `Matrix`), in which case the whole group is the
+      // single argument.
+      return getSequence(group) ?? [group];
     }
 
     // We are looking for an expression inside an optional pair of `()`

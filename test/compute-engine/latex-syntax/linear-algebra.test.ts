@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../../src/compute-engine';
 import { Expression } from '../../../src/math-json';
 import { engine as ce } from '../../utils';
 
@@ -278,6 +279,47 @@ describe('Standard operator commands', () => {
 
   it('should parse \\hom with explicit argument list', () => {
     expect(ce.parse('\\hom(V, W)').json).toEqual(['Hom', 'V', 'W']);
+  });
+});
+
+describe('Matrix as a function argument', () => {
+  const M = '\\begin{pmatrix}1 & 2 \\\\ 3 & 4\\end{pmatrix}';
+
+  it('should parse a matrix argument to a library operator (\\left/\\right)', () => {
+    expect(ce.parse(`\\operatorname{Trace}\\left(${M}\\right)`).json).toEqual([
+      'Trace',
+      ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]],
+    ]);
+  });
+
+  it('should parse a matrix argument to a library operator (plain parens)', () => {
+    expect(ce.parse(`\\operatorname{Eigenvalues}(${M})`).json).toEqual([
+      'Eigenvalues',
+      ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]],
+    ]);
+  });
+
+  it('should evaluate and round-trip a matrix argument', () => {
+    const expr = ce.parse(`\\operatorname{Trace}\\left(${M}\\right)`);
+    expect(expr.evaluate().json).toEqual(5);
+    expect(() => expr.latex).not.toThrow();
+  });
+
+  it('should parse a matrix argument to a declared function', () => {
+    const engine = new ComputeEngine();
+    engine.declare('h', '(matrix) -> list<number>');
+    expect(engine.parse(`h\\left(${M}\\right)`).json).toEqual([
+      'h',
+      ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]],
+    ]);
+  });
+
+  it('should parse a matrix among several arguments', () => {
+    const engine = new ComputeEngine();
+    engine.declare('g', '(matrix, number) -> number');
+    expect(
+      engine.parse('g(\\begin{pmatrix}1 \\\\ 2\\end{pmatrix}, 3)').json
+    ).toEqual(['g', ['Matrix', ['List', ['List', 1], ['List', 2]]], 3]);
   });
 });
 

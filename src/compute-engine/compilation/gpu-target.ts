@@ -338,17 +338,22 @@ function gpuVec3(target?: CompileTarget<Expression>): string {
 }
 
 /**
- * Emit a NaN literal valid for the target shader language.
+ * Emit a NaN value valid for the target shader language.
  *
  * Neither GLSL nor WGSL has a `NaN` identifier (the base compiler's default
- * `If`/`Which`/`When` emit a bare `NaN`, which fails to compile on GPU). GLSL
- * evaluates `0.0 / 0.0` to NaN at runtime; WGSL rejects a constant `0.0 / 0.0`
- * during const-evaluation, so use a NaN bit pattern there.
+ * `If`/`Which`/`When` emit a bare `NaN`, which fails to compile on GPU). WGSL
+ * rejects a constant `0.0 / 0.0` during const-evaluation, so it uses a NaN bit
+ * pattern inline. GLSL routes through the `_gpu_nan()` preamble helper (see
+ * `GPU_NAN_PREAMBLE_GLSL`): a masked (`When`/`Which` else) branch's NaN is thus
+ * centralized in one overridable symbol rather than emitted as a bare
+ * `0.0 / 0.0` literal — whose NaN semantics GLSL ES 1.00 leaves
+ * implementation-defined, so a driver could fold it to a finite, renderable
+ * value and draw a branch that must never draw.
  */
 function gpuNaN(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl'
     ? 'bitcast<f32>(0x7fc00000u)'
-    : '(0.0 / 0.0)';
+    : '_gpu_nan()';
 }
 
 /**
@@ -3249,6 +3254,27 @@ function buildComplexPreamble(code: string, language: string): string {
   return '\n' + parts.join('\n\n') + '\n';
 }
 
+/**
+ * GLSL NaN helper preamble. Centralizes the masked/else-branch NaN (`When` /
+ * `Which` fall-through) into a single overridable symbol.
+ *
+ * GLSL ES 1.00 has no `NaN` literal and leaves the result of `0.0 / 0.0`
+ * implementation-defined — a driver may fold it to a finite, renderable value,
+ * which breaks downstream consumers that rely on a masked branch never drawing.
+ * Routing every such NaN through this one helper lets a host redefine it without
+ * touching the generated code: on WebGL2 / GLSL ES 3.00 override the body with
+ * `return intBitsToFloat(0x7FC00000);` for a guaranteed NaN bit pattern.
+ * Kept ES 1.00-compatible here (no ES 3.00-only builtins) because the target's
+ * `compileShader` still emits ES 1.00 (`attribute`/`varying`) output.
+ */
+const GPU_NAN_PREAMBLE_GLSL = `
+float _gpu_nan() {
+  // NaN semantics are implementation-defined under GLSL ES 1.00. On WebGL2 /
+  // GLSL ES 3.00, override with: return intBitsToFloat(0x7FC00000);
+  return 0.0 / 0.0;
+}
+`;
+
 /** Constants shared by both GLSL and WGSL */
 const GPU_CONSTANTS: Record<string, string> = {
   Pi: '3.14159265359',
@@ -3436,6 +3462,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     };
     let preamble = '';
     preamble += buildComplexPreamble(code, this.languageId);
+    // Only GLSL emits `_gpu_nan()` (WGSL uses an inline bit pattern); the helper
+    // is ES 1.00-compatible, so it is safe for either GLSL version.
+    if (code.includes('_gpu_nan')) preamble += GPU_NAN_PREAMBLE_GLSL;
     if (code.includes('_gpu_gamma'))
       preamble +=
         this.languageId === 'wgsl'

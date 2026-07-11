@@ -154,6 +154,24 @@ export interface CompileTarget<Expr = unknown> {
 
   /** Target language identifier (for debugging/logging) */
   language?: string;
+
+  /**
+   * When set (the engine's `randomSeed` is non-null at compile time), each
+   * `Random` node is **baked** to a deterministic value derived from this
+   * numeric seed and the node's position (see `randomState`), rather than
+   * emitting `Math.random()`. Every call of the compiled function then returns
+   * the same value for that call site — matching a document-level "one draw
+   * per render" model. `null`/`undefined` keeps the non-deterministic emission.
+   */
+  randomSeed?: number | null;
+
+  /**
+   * Mutable per-compile counter distinguishing distinct `Random` call sites,
+   * so two `Random` nodes in one expression bake to different values. Stored
+   * as an object so it survives the shallow `{ ...target }` spreads the
+   * compiler makes while recursing. Only consulted when `randomSeed` is set.
+   */
+  randomState?: { counter: number };
 }
 
 /**

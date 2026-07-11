@@ -294,6 +294,45 @@ describe('INTERVAL JS EXECUTION', () => {
     expect(result).toBe('false');
   });
 
+  // Regression: N-ary chained relations and N-ary And/Or must compile ALL
+  // operands, not just the first two. A binary-only emission silently drops
+  // the tail comparison — unsound for mask exclusion / inclusion.
+  test('chained 1 < x < 4 is false for a wholly-outside box', () => {
+    const fn = compile(ce.parse('1<x<4'), { to: 'interval-js' });
+    // [5, 6] is entirely outside 1 < x < 4.
+    expect(fn.run!({ x: { lo: 5, hi: 6 } })).toBe('false');
+  });
+
+  test('chained 1 < x < 4 is true for a wholly-inside box', () => {
+    const fn = compile(ce.parse('1<x<4'), { to: 'interval-js' });
+    expect(fn.run!({ x: { lo: 2, hi: 3 } })).toBe('true');
+  });
+
+  test('chained 1 < x < 4 is maybe for a straddling box', () => {
+    const fn = compile(ce.parse('1<x<4'), { to: 'interval-js' });
+    expect(fn.run!({ x: { lo: 0, hi: 2 } })).toBe('maybe');
+  });
+
+  test('3-operand Or admits a box via its third branch only', () => {
+    const fn = compile(ce.parse('x<-2\\lor x>2\\lor y>0'), {
+      to: 'interval-js',
+    });
+    // First two branches are false for x∈[0,1]; only y>0 (third) admits it.
+    // A binary-only fold would drop y>0 and wrongly report 'false'.
+    expect(fn.run!({ x: { lo: 0, hi: 1 }, y: { lo: 5, hi: 6 } })).toBe('true');
+  });
+
+  test('3-operand And is false when its third operand excludes the box', () => {
+    const fn = compile(ce.parse('x>-2\\land x<2\\land y>0'), {
+      to: 'interval-js',
+    });
+    // First two conjuncts hold for x∈[0,1]; y<0 (third) excludes the box.
+    // A binary-only fold would drop y>0 and wrongly report 'true'.
+    expect(fn.run!({ x: { lo: 0, hi: 1 }, y: { lo: -6, hi: -5 } })).toBe(
+      'false'
+    );
+  });
+
   test('piecewise with compound argument', () => {
     const expr = ce.expr([
       'If',

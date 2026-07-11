@@ -41,4 +41,34 @@ describe('ce.operatorInfo()', () => {
     expect(info).toBeDefined();
     expect(info?.kind).toBe('opaque');
   });
+
+  test('canEvaluate is true for operators with an evaluation rule', () => {
+    // Heads that carry an evaluate handler...
+    for (const head of ['Sin', 'Add', 'Eigenvalues', 'Which', 'If'])
+      expect(ce.operatorInfo(head)?.canEvaluate).toBe(true);
+    // ...or a collection handler (Range computes by enumeration).
+    expect(ce.operatorInfo('Range')?.canEvaluate).toBe(true);
+  });
+
+  test('canEvaluate is false for registered-but-inert heads', () => {
+    // Triangle and To are registered operators (they parse/serialize) but
+    // provide no evaluation rule: evaluate() returns them unchanged.
+    for (const head of ['Triangle', 'To'])
+      expect(ce.operatorInfo(head)?.canEvaluate).toBe(false);
+  });
+
+  test('canEvaluate tracks kind === "function"', () => {
+    for (const head of ['Sin', 'Add', 'Triangle', 'To', 'Range'])
+      expect(ce.operatorInfo(head)?.canEvaluate).toBe(
+        ce.operatorInfo(head)?.kind === 'function'
+      );
+  });
+
+  test('canEvaluate reports false for heads that reduce only via canonicalization', () => {
+    // Documented caveat: these compute through a `canonical` rewrite to a
+    // different operator (Exp/Square -> Power, Greater -> Less, Complex),
+    // so they carry no evaluate/collection handler of their own.
+    for (const head of ['Exp', 'Square', 'Greater', 'Complex'])
+      expect(ce.operatorInfo(head)?.canEvaluate).toBe(false);
+  });
 });
