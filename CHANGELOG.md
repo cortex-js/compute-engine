@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.75.0 _2026-07-11_
 
 ### Numeric Evaluation
 
