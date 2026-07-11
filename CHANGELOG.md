@@ -95,6 +95,20 @@
   `for kv in dict` yields.
 - **`Intersection` accepts lists** (any finite collection), deduplicating
   into a `Set`; `Union` already did.
+- **Collection equality no longer depends on representation.** A computed
+  collection — an `Intersection` or `Union` result, a lazy `Map`, `Filter`,
+  or `Join` pipeline, or a symbol assigned a collection — now compares equal
+  to a literal with the same elements:
+  `Intersection({1,2,3,4}, {2,3,5}) = {2,3}` is `True` (it was `False`
+  unless the operand was evaluated first). Sequences compare element-wise in
+  order, sets by membership, and a set is never equal to a sequence. In
+  addition, `Equal` between two collections now always returns a scalar
+  boolean instead of sometimes broadcasting element-wise
+  (`{1,2} = [1,2]` returned `["True","True"]`); broadcasting still applies
+  to list-vs-scalar comparisons such as `L = 4`.
+- **`Intersection` of two `Filter` collections no longer overflows the
+  stack.** Membership tests on a lazy `Filter` recursed without bound;
+  `Intersection(Filter(…), Filter(…))` now evaluates normally.
 - **Indexing a matrix once returns a correctly typed row.** Expressions such as
   `At(At(m, 2), 1)` now validate and evaluate correctly for matrices and other
   rank-2-or-higher collections.
