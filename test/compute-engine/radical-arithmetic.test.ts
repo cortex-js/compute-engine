@@ -244,3 +244,61 @@ describe('three-surd sqrt denesting', () => {
     expect(e.simplify().operator).toBe('Sqrt');
   });
 });
+
+/**
+ * Regression: `ComputeEngine._numericValue` used to throw
+ * `Unexpected value for radical part` when a numeric evaluation path landed on
+ * an exact radical whose radicand was non-integer, or an integer at/above
+ * SMALL_INTEGER (1_000_000). Such values arise, e.g., when the Rubi
+ * antiderivative D-check substitutes random parameters and a `√(large)` appears
+ * during `.N()`. The throw was caught at every Rubi call site (→ decline),
+ * making D-verified closures seed-fragile. `_numericValue` now extracts any
+ * perfect-square factor and either stays exact (square-free part below
+ * SMALL_INTEGER) or falls back to the float lane, instead of throwing.
+ */
+describe('_numericValue with a large / non-integer radical (does not throw)', () => {
+  const nv = (data: { radical: number; rational?: [number, number] }) =>
+    (ce as any)._numericValue(data);
+
+  test('perfect square at/above SMALL_INTEGER reduces to an exact integer', () => {
+    // √2_250_000 = √(1500²) = 1500
+    const r = ce.number(nv({ radical: 2_250_000 }));
+    expect(r.isSame(1500)).toBe(true);
+    expect(r.isInteger).toBe(true);
+  });
+
+  test('square factor above SMALL_INTEGER stays exact (k·√r)', () => {
+    // √4_500_000 = √(1500²·2) = 1500·√2 — exact, square-free part 2
+    const r = ce.number(nv({ radical: 4_500_000 }));
+    expect(r.isNumberLiteral).toBe(true);
+    // Exact (not a float): serializes with a symbolic radical.
+    expect(r.toString()).toBe('1500sqrt(2)');
+    expect(r.N().re).toBeCloseTo(1500 * Math.sqrt(2), 9);
+  });
+
+  test('huge square-free radicand falls back to a float', () => {
+    // √1_500_001: square-free radicand ≥ SMALL_INTEGER — not exactly
+    // representable, so return the numeric value.
+    const r = ce.number(nv({ radical: 1_500_001 }));
+    expect(r.re).toBeCloseTo(Math.sqrt(1_500_001), 9);
+  });
+
+  test('non-integer radical falls back to a float', () => {
+    const r = ce.number(nv({ radical: 2.5 }));
+    expect(r.re).toBeCloseTo(Math.sqrt(2.5), 12);
+  });
+
+  test('rational coefficient is preserved through the reduction', () => {
+    // (1/3)·√4_500_000 = (1/3)·1500·√2 = 500·√2
+    const r = ce.number(nv({ radical: 4_500_000, rational: [1, 3] }));
+    expect(r.N().re).toBeCloseTo((1500 / 3) * Math.sqrt(2), 9);
+  });
+
+  // Public-API path that reaches the same branch: √a·√b folds through
+  // `_numericValue({ radical: a·b })`. With a·b ≥ SMALL_INTEGER and a
+  // square-free product, the old code threw during canonicalization.
+  test('Multiply[√1234, √1235] canonicalizes to the correct float', () => {
+    const e = ce.box(['Multiply', ['Sqrt', 1234], ['Sqrt', 1235]]);
+    expect(e.N().re).toBeCloseTo(Math.sqrt(1234 * 1235), 6);
+  });
+});

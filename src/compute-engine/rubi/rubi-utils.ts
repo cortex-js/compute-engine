@@ -1793,6 +1793,33 @@ function xPowerOfTerm(t: Expression, x: string): number {
   return 0;
 }
 
+/** Signed x-power of a single monomial term (negative for a `1/x^k` /
+ * `Divide(_, x^k)` term). Unlike `xPowerOfTerm`, it does NOT clamp negatives to
+ * 0 — used to detect and clear the residual negative powers that `(x±1/x)^n`
+ * folds leave when the hyperbolic power is ≥ 2 (R30). */
+function xPowerOfTermSigned(t: Expression, x: string): number {
+  if (t.symbol === x) return 1;
+  if (t.operator === 'Negate' && t.ops) return xPowerOfTermSigned(t.ops[0], x);
+  if (t.operator === 'Power' && t.ops) {
+    if (t.ops[0].symbol !== x) return 0;
+    const e = t.ops[1].re;
+    return typeof e === 'number' && Number.isInteger(e) ? e : 0;
+  }
+  if (t.operator === 'Divide' && t.ops)
+    return xPowerOfTermSigned(t.ops[0], x) - xPowerOfTermSigned(t.ops[1], x);
+  if (t.operator === 'Multiply' && t.ops)
+    return t.ops.reduce((s, f) => s + xPowerOfTermSigned(f, x), 0);
+  return 0;
+}
+
+/** Signed minimum x-power over the additive terms of e (can be negative). */
+function minXPowerSigned(e: Expression, x: string): number {
+  const terms = e.operator === 'Add' && e.ops ? e.ops : [e];
+  let m = Infinity;
+  for (const t of terms) m = Math.min(m, xPowerOfTermSigned(t, x));
+  return Number.isFinite(m) ? m : 0;
+}
+
 /** Minimum power of x dividing every additive term of e (0 if some term is
  * x-free as a monomial). */
 function minXPower(e: Expression, x: string): number {
@@ -1841,7 +1868,8 @@ function cancelCommonXPower(e: Expression, x: string): Expression {
  */
 export function rationalNormalFormX(
   e: Expression,
-  x: string
+  x: string,
+  clearNegatives = false
 ): Expression | null {
   const ce = e.engine;
   const divByXk = (u: Expression, kk: number): Expression => {
@@ -1855,6 +1883,23 @@ export function rationalNormalFormX(
   let n = expand(num);
   let d = expand(den);
   if (d.isSame(0)) return null;
+  // R30: a hyperbolic power ≥ 2 substitutes to `(½(x∓1/x))^k` folds whose
+  // expansion carries genuine NEGATIVE x-powers (`x^-1`, `x^-2`, …); the outer
+  // `1/x` of the substitution clears only ONE of them, so the residual is a
+  // Laurent (not ordinary) polynomial and `polyCoeffsX` below rejects it,
+  // leaving these rows unsolved. Multiply num & den through by `x^(-negShift)`
+  // (the shared factor preserves the fraction's value) so both become genuine
+  // polynomials in x; the biquadratic/trinomial denominator that results is
+  // exactly what the bundled 1.2.x rules close. Gated (default off) so R26B and
+  // ch2 stay byte-identical unless the caller opts in.
+  if (clearNegatives) {
+    const negShift = Math.min(0, minXPowerSigned(n, x), minXPowerSigned(d, x));
+    if (negShift < 0) {
+      const xs = ce.function('Power', [ce.symbol(x), ce.number(-negShift)]);
+      n = expand(n.mul(xs));
+      d = expand(d.mul(xs));
+    }
+  }
   // Cancel the common `x^k` monomial factor shared by numerator and denominator
   // (introduced by the substitution's outer `1/x`).
   const k = Math.min(minXPower(n, x), minXPower(d, x));
@@ -6260,6 +6305,199 @@ export function algebraicHyperbolicSubstitutions(
     out.push({ g, back: ce.function(kind, [v]) });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// R30 — rational-in-hyperbolic via cyclotomic-factored exp substitution
+//
+// A ch6 integrand that is a RATIONAL function (integer powers) of hyperbolics of
+// a common LINEAR argument `v = c+d·x` becomes a rational function of `t = e^v`
+// under the substitution. `functionOfExponentialFallback`'s R26B retry flattens
+// it to `N/D` via `rationalNormalFormX`, but for a hyperbolic power ≥ 2 the
+// denominator `D` is a HIGH-degree polynomial (e.g. `(a+b·tanh²)³·csch²` lands a
+// degree-13 D) that the bundled 1.2.x rational rules cannot factor over the free
+// parameters, so it strands. Diagnosis (probe-confirmed): D ALWAYS factors as
+//   x^m · (x²+1)^p · (x²−1)^q · S(x)
+// with the cyclotomic factors NUMERIC (they come from the `sinh/cosh = (t∓1/t)/2`
+// substitution) and S a LOW-degree residual carrying the `(a+b·hyp)` parameters.
+// The bundled partial-fraction rules DO close the FACTORED form (they cannot the
+// expanded one), so the fix is to keep the cyclotomic factors factored rather
+// than let `rationalNormalFormX` expand D into one polynomial. Fail-closed at the
+// caller with a branch-safe (mixed-sign, multi-parameter-seed) D-check, since the
+// residual quadratic's `√(β²−4αγ)` arctan/artanh form is branch-hazardous.
+
+/** Exact division of a symbolic polynomial (coefficient array `nc`, index =
+ *  power of x) by a NUMERIC divisor (`dc`, e.g. `[1,0,1]` for x²+1). Returns the
+ *  quotient coefficient array, or null when the division is not exact. The
+ *  divisor's numeric leading coefficient makes every quotient coefficient
+ *  well-defined even though the dividend carries free parameters; exactness is
+ *  checked by expanding each remainder coefficient to 0. */
+function divIfExactNumeric(
+  ce: ComputeEngine,
+  nc: Expression[],
+  dc: number[]
+): Expression[] | null {
+  const dn = dc.length - 1;
+  const nn = nc.length - 1;
+  if (nn < dn) return null;
+  const lead = dc[dn];
+  const r = [...nc];
+  const q: Expression[] = new Array(nn - dn + 1).fill(ce.Zero);
+  for (let i = nn; i >= dn; i--) {
+    const c = r[i].div(lead);
+    q[i - dn] = c;
+    for (let j = 0; j <= dn; j++)
+      r[i - dn + j] = r[i - dn + j].sub(c.mul(ce.number(dc[j])));
+  }
+  for (let i = 0; i < dn; i++) if (!zeroCoeffQ(r[i])) return null;
+  return q;
+}
+
+/** A polynomial coefficient is (symbolically) zero: structural, else zero after
+ *  expansion (the residuals from `divIfExactNumeric`'s subtraction are small
+ *  parameter expressions that `expand` collapses). */
+function zeroCoeffQ(c: Expression): boolean {
+  if (c.isSame(0)) return true;
+  try {
+    return expand(c).isSame(0);
+  } catch {
+    return false;
+  }
+}
+
+/** Rebuild a polynomial in x from a coefficient array (index = power). */
+function coeffsToPolyX(ce: ComputeEngine, c: Expression[], x: string): Expression {
+  const X = ce.symbol(x);
+  const terms: Expression[] = [];
+  c.forEach((co, k) => {
+    if (zeroCoeffQ(co)) return;
+    terms.push(
+      k === 0
+        ? co
+        : ce._fn('Multiply', [
+            co,
+            k === 1 ? X : ce._fn('Power', [X, ce.number(k)]),
+          ])
+    );
+  });
+  if (terms.length === 0) return ce.Zero;
+  return terms.length === 1 ? terms[0] : ce._fn('Add', terms);
+}
+
+/** Fast O(nodes) syntactic pre-filter for the R30 fallback: a hyperbolic head
+ *  occurs and NO fractional (non-integer rational) power occurs anywhere — a
+ *  RATIONAL (integer-power) hyperbolic. Fractional powers are R29's algebraic
+ *  domain (and `rationalNormalFormX` rejects them), so excluding them keeps R30
+ *  a near-zero-cost no-op off its shape. Purely structural. */
+export function hasHyperbolicRationalCandidate(e: Expression): boolean {
+  return containsHyperbolic(e) && !anyFractionalPowerQ(e);
+}
+function anyFractionalPowerQ(e: Expression): boolean {
+  if (e.operator === 'Sqrt') return true;
+  if (
+    e.operator === 'Power' &&
+    e.ops &&
+    e.ops.length === 2 &&
+    isNumber(e.ops[1]) &&
+    e.ops[1].isInteger !== true &&
+    e.ops[1].isRational === true
+  )
+    return true;
+  return (e.ops ?? []).some(anyFractionalPowerQ);
+}
+
+/** R30: `∫R(hyp(v)) dx`, R a rational (integer-power) function of hyperbolics of
+ *  a common LINEAR argument `v`. Returns `{ form, ratio, v }` where `form` is the
+ *  substituted rational in the reused variable x (≡ `t = e^v`) with its
+ *  denominator kept FACTORED as `x^m·(x²+1)^p·(x²−1)^q·S(x)` (bundled rules close
+ *  the factored — not the expanded — form), `ratio = v/v′` (x-free) and `v =
+ *  e^(linear)`. Null off-shape (not a function of one exponential, x-dependent
+ *  Jacobian, non-rational normal form, or a denominator that does not reduce).
+ *  The caller integrates `form`, back-substitutes `x → v`, and fail-closes on a
+ *  branch-safe D-check. */
+export function hyperbolicRationalFactoredForm(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): { form: Expression; ratio: Expression; v: Expression } | null {
+  const sub = functionOfExponentialSubstitution(integrand, x);
+  if (sub === null) return null;
+  const { v, g } = sub;
+  const dv = ce.function('D', [v, ce.symbol(x)]).evaluate();
+  if (dv.isSame(0)) return null;
+  const ratio = v.div(dv);
+  if (ratio.has(x)) return null;
+  const nf = rationalNormalFormX(g.div(ce.symbol(x)), x, true);
+  if (nf === null || nf.operator !== 'Divide' || !nf.ops) return null;
+  const nc = polyCoeffsX(expand(nf.ops[0]), x);
+  const dc = polyCoeffsX(expand(nf.ops[1]), x);
+  if (nc === null || dc === null) return null;
+  const den = factorDenominatorByCyclotomics(ce, nc, dc, x);
+  if (den === null) return null;
+  return { form: coeffsToPolyX(ce, den.num, x).div(den.den), ratio, v };
+}
+
+/** Peel the numeric cyclotomic factors `x`, `x²+1`, `x²−1`, `x−1`, `x+1` from a
+ *  substituted denominator (coefficient array `dc`), cancelling the leading `x^k`
+ *  it shares with the numerator `nc`, and return the remaining numerator array +
+ *  the FACTORED denominator expression. Null when the denominator does not reduce
+ *  (degree ≤ 0 residual with nothing peeled — nothing for R30 to do). */
+function factorDenominatorByCyclotomics(
+  ce: ComputeEngine,
+  nc: Expression[],
+  dc: Expression[],
+  x: string
+): { num: Expression[]; den: Expression } | null {
+  const X = ce.symbol(x);
+  let num = [...nc];
+  let d = [...dc];
+  // Cancel the common leading x^k monomial (index-0 zero coefficients).
+  let cancel = 0;
+  while (
+    cancel < num.length - 1 &&
+    cancel < d.length - 1 &&
+    zeroCoeffQ(num[cancel]) &&
+    zeroCoeffQ(d[cancel])
+  )
+    cancel++;
+  num = num.slice(cancel);
+  d = d.slice(cancel);
+  // Peel the residual x^m monomial of the denominator.
+  let m = 0;
+  while (d.length > 1 && zeroCoeffQ(d[0])) {
+    d = d.slice(1);
+    m++;
+  }
+  // Peel the cyclotomic factors (bounded loop; each is an exact numeric divide).
+  const parts: Expression[] = [];
+  if (m > 0)
+    parts.push(m === 1 ? X : ce._fn('Power', [X, ce.number(m)]));
+  const divisors: [number[], Expression][] = [
+    [[1, 0, 1], ce._fn('Add', [ce._fn('Power', [X, ce.number(2)]), ce.One])],
+    [[-1, 0, 1], ce._fn('Add', [ce._fn('Power', [X, ce.number(2)]), ce.NegativeOne])],
+    [[-1, 1], X.sub(ce.One)],
+    [[1, 1], X.add(ce.One)],
+  ];
+  for (const [dvCoeffs, factor] of divisors) {
+    let p = 0;
+    let guard = 0;
+    let q = divIfExactNumeric(ce, d, dvCoeffs);
+    while (q !== null && d.length > dvCoeffs.length - 1 && guard++ < 64) {
+      d = q;
+      p++;
+      q = divIfExactNumeric(ce, d, dvCoeffs);
+    }
+    if (p > 0)
+      parts.push(p === 1 ? factor : ce._fn('Power', [factor, ce.number(p)]));
+  }
+  const residual = coeffsToPolyX(ce, d, x);
+  if (!residual.isSame(1)) parts.push(residual);
+  // Nothing peeled and residual == whole denominator: R30 has no factored form
+  // to offer beyond what the bundled rules already declined.
+  if (parts.length === 0) return null;
+  const den =
+    parts.length === 1 ? parts[0] : ce._fn('Multiply', parts);
+  return { num, den };
 }
 
 function coeff(args: Json[], ctx: Ctx): Expression {

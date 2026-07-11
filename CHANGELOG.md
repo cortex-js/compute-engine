@@ -9,9 +9,24 @@
   `\operatorname{arsinh}(1+i)` are also supported. Exact arguments remain
   symbolic with `evaluate()`. Incorrect complex values from `Arcoth` on part of
   its branch cut and from `Arsech` have also been fixed.
+- **Products and quotients of square roots no longer throw on large
+  radicands.** Evaluating an expression such as `\sqrt{1234}\cdot\sqrt{1235}`,
+  whose combined radicand (`1234·1235`) exceeds the exact-radical limit, no
+  longer raises an internal "Unexpected value for radical part" error. Any
+  perfect-square factor is extracted (`√(k²·r) = k·√r`), keeping the result
+  exact when the square-free part is small enough and otherwise returning the
+  numeric value.
 
 ### Solving Equations
 
+- **`Solve` handles systems of equations.** `Solve([eq1, eq2, …], [x, y, …])`
+  returns each solution as a tuple of values in the order of the variable
+  list: `Solve([x + y = 3, x - y = 1], [x, y])` → `[(2, 1)]`, and a nonlinear
+  system such as `[x^2 + y^2 = 25, x + y = 7]` returns both solutions
+  `[(3, 4), (4, 3)]`. Linear systems solve exactly (rational values), an
+  underdetermined system returns a parametric tuple (`[(5 - y, y)]` for
+  `x + y = 5`), and a system the solver cannot decide stays unevaluated. This
+  matches the tuple shape already used when solving over explicit domains.
 - **`solve()` correctly rejects trigonometric and hyperbolic equations with no
   real solutions.** Equations such as `\sin x = 2`, `\tanh x = 2`, and
   `\cosh x = 1/2` now return no solutions. Symbolic equations and equations with
@@ -95,6 +110,16 @@
   `for kv in dict` yields.
 - **`Intersection` accepts lists** (any finite collection), deduplicating
   into a `Set`; `Union` already did.
+- **A 2-element MathJSON `List` in a set operation is a collection, not an
+  interval.** `["Intersection", ["List",1,2], ["List",2,3]]` (Cortex:
+  `Intersection([1,2], [2,3])`) now intersects the two-element collections —
+  `Set(2)` — instead of reading the lists as closed intervals. The interval
+  reading of ambiguous bracket pairs is now applied where it belongs, at the
+  LaTeX boundary: `x \in \lbrack 1, 5 \rbrack`,
+  `(-\infty, 0) \cup (0, \infty)`, and the subset relations parse to
+  `Interval` exactly as before, and `\setminus` now gets the same interval
+  reading (previously `\R \setminus (0, 1)` kept a raw pair). Unambiguous
+  interval notations (`[a, b)`, `]a, b[`, …) are unchanged.
 - **Collection equality no longer depends on representation.** A computed
   collection — an `Intersection` or `Union` result, a lazy `Map`, `Filter`,
   or `Join` pipeline, or a symbol assigned a collection — now compares equal

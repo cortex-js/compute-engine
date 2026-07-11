@@ -15,7 +15,11 @@ import type {
   MathJsonNumberObject,
 } from '../math-json/types.js';
 
-import { MACHINE_PRECISION, SMALL_INTEGER } from './numerics/numeric.js';
+import {
+  canonicalInteger,
+  MACHINE_PRECISION,
+  SMALL_INTEGER,
+} from './numerics/numeric.js';
 
 import type {
   ValueDefinition,
@@ -64,7 +68,12 @@ import { getStandardLibrary } from './library/library.js';
 import { DEFAULT_COST_FUNCTION } from './cost-function.js';
 
 import type { BigNum, Rational } from './numerics/types.js';
-import { isMachineRational, isRational } from './numerics/rationals.js';
+import {
+  isMachineRational,
+  isRational,
+  mul,
+  rationalAsFloat,
+} from './numerics/rationals.js';
 import {
   ExactNumericValueData,
   NumericValue,
@@ -1105,28 +1114,50 @@ export class ComputeEngine implements IComputeEngine {
     }
 
     if ('radical' in value || 'rational' in value) {
-      // Validate radical part
-      if (
-        value.radical !== undefined &&
-        (!Number.isInteger(value.radical) || value.radical >= SMALL_INTEGER)
-      ) {
-        throw Error('Unexpected value for radical part:' + value.radical);
+      let data: ExactNumericValueData = value;
+
+      // Normalize the radical part. An exact radical must be a positive
+      // integer whose square-free part is below SMALL_INTEGER (a larger
+      // radical would lose precision under subsequent exact arithmetic).
+      // Rather than throwing when a numeric evaluation path lands on such a
+      // value, extract any perfect-square factor (√(k²·r) = k·√r); if the
+      // remaining square-free radicand is still too large — or the radical is
+      // not a positive integer at all — fall back to the (inexact) float lane.
+      if (data.radical !== undefined && data.radical !== 1) {
+        if (!Number.isInteger(data.radical) || data.radical < 1) {
+          return makeNumericValue({
+            re: rationalAsFloat(data.rational ?? [1, 1]) * Math.sqrt(data.radical),
+          });
+        }
+        if (data.radical >= SMALL_INTEGER) {
+          const [factor, root] = canonicalInteger(data.radical, 2);
+          if (root >= SMALL_INTEGER)
+            return makeNumericValue({
+              re:
+                rationalAsFloat(data.rational ?? [1, 1]) * Math.sqrt(data.radical),
+            });
+          data = {
+            ...data,
+            radical: root,
+            rational: mul(data.rational ?? [1, 1], [factor, 1]),
+          };
+        }
       }
 
       // Validate rational part
 
-      if (value.rational) {
-        if (isMachineRational(value.rational)) {
+      if (data.rational) {
+        if (isMachineRational(data.rational)) {
           if (
-            !Number.isInteger(value.rational[0]) ||
-            !Number.isInteger(value.rational[1])
+            !Number.isInteger(data.rational[0]) ||
+            !Number.isInteger(data.rational[1])
           )
             // @fixme: this may never happen
-            return makeNumericValue(value as unknown as NumericValueData);
+            return makeNumericValue(data as unknown as NumericValueData);
         }
       }
 
-      return new ExactNumericValue(value, makeNumericValue);
+      return new ExactNumericValue(data, makeNumericValue);
     }
     throw Error(
       `Unexpected value: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`

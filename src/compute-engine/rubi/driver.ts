@@ -56,6 +56,8 @@ import {
   hasMixedParityRadicalCandidate,
   algebraicHyperbolicSubstitutions,
   hasAlgebraicHyperbolicCandidate,
+  hyperbolicRationalFactoredForm,
+  hasHyperbolicRationalCandidate,
   RuleFail,
   Ctx,
   Hooks,
@@ -136,6 +138,13 @@ const NO_R28 = process.env.RUBI_NO_R28 !== undefined;
 // fallback strands because they are not rational functions of `e^v`. A/B
 // measures its ch6 effect.
 const NO_R29 = process.env.RUBI_NO_R29 !== undefined;
+// RUBI_NO_R30: disable the R30 rational-in-hyperbolic factored-denominator
+// fallback (a RATIONAL hyperbolic of a common linear argument → `t = e^v`
+// substitution → keep the `x^m·(x²+1)^p·(x²−1)^q·S(x)` denominator FACTORED so
+// the bundled partial-fraction rules close it, rather than let the normal-form
+// retry expand it into a single high-degree polynomial no rule factors). A/B
+// measures its ch6 effect; inert off ch6 (the `containsHyperbolic` pre-filter).
+const NO_R30 = process.env.RUBI_NO_R30 !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -1207,6 +1216,36 @@ export class RubiDriver {
       }
     }
 
+    // ---- rational-in-hyperbolic cyclotomic-factored substitution (R30) ------
+    // `∫R(hyp(v)) dx`, R a RATIONAL (integer-power) function of hyperbolics of a
+    // common linear argument `v`. Under `t = e^v` it is a rational function of t
+    // whose flattened denominator (via `rationalNormalFormX`) is a high-degree
+    // polynomial the bundled 1.2.x rules cannot factor over the free parameters —
+    // BUT it always factors as `x^m·(x²+1)^p·(x²−1)^q·S(x)` (the cyclotomics come
+    // from the substitution and are numeric; S is the low-degree `(a+b·hyp)`
+    // residual). The bundled partial-fraction rules close the FACTORED form the
+    // R26B retry declines when it expands the denominator, so keep it factored.
+    // Reached LAST (after every rule and the exp/mixed-parity/algebraic-hyperbolic
+    // fallbacks decline), so it never preempts a cleaner route and currently-solved
+    // integrands are untouched. Cheap O(nodes) pre-filter; fail-closed with a
+    // BRANCH-SAFE (mixed-sign points, several parameter seeds) D-check, since the
+    // residual quadratic's `√(β²−4αγ)` arctan/artanh form is branch-hazardous.
+    // The factored form is hyperbolic-free (it is in the exp variable), so it
+    // cannot re-enter here.
+    if (!NO_R30 && hasHyperbolicRationalCandidate(integrand)) {
+      this.suppressRecording++;
+      let F: Expression | null;
+      try {
+        F = this.hyperbolicRationalFactored(integrand, variable, depth);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (F !== null) {
+        this.record(entryNode, () => F, 'integrate.hyperbolic-rational-factored');
+        return F;
+      }
+    }
+
     return null;
   }
 
@@ -1587,6 +1626,47 @@ export class RubiDriver {
     }
   }
 
+  /** R30: `∫R(hyp(v)) dx`, R a rational (integer-power) function of hyperbolics
+   * of a common linear argument `v` — closed by the `t = e^v` substitution with
+   * the denominator kept FACTORED as `x^m·(x²+1)^p·(x²−1)^q·S(x)` (see
+   * `hyperbolicRationalFactoredForm`): the bundled partial-fraction rules close
+   * the factored form that the R26B normal-form retry, which expands the
+   * denominator, cannot. Integrate the factored rational (reusing `x` as the exp
+   * variable), back-substitute `x → e^v`, and accept only if the result passes a
+   * BRANCH-SAFE D-check — mixed-sign x points AND several parameter seeds, since
+   * the residual quadratic's `√(β²−4αγ)` arctan/artanh form is branch-hazardous
+   * (a form that verifies on one parameter branch but not another is rejected).
+   * Fail-closed: a non-closing subproblem or a failing D-check → null. Body
+   * try/catch → null. */
+  private hyperbolicRationalFactored(
+    integrand: Expression,
+    variable: string,
+    depth: number
+  ): Expression | null {
+    const ce = this.ce;
+    try {
+      const r = hyperbolicRationalFactoredForm(ce, integrand, variable);
+      if (r === null) return null;
+      const inner = this.intRec(recanonicalize(ce, r.form), variable, depth + 1);
+      if (inner === null || inner.has('Integrate')) return null;
+      const F = this.cleanExpansionResult(
+        r.ratio.mul(inner.subs({ [variable]: r.v }))
+      );
+      if (F.has('Integrate')) return null;
+      // Branch-safe D-check: mixed-sign x, and three distinct parameter seeds so
+      // a form correct on only one branch of the residual quadratic's radical is
+      // rejected (fail-closed — the row stays cleanly unsolved).
+      const xs = [0.37, -0.53, 0.83, -1.11, 1.29, -0.71];
+      for (const seed of [0.41, 1.31, 0.73]) {
+        if (!antiderivativeVerifies(ce, F, integrand, variable, xs, seed))
+          return null;
+      }
+      return F;
+    } catch {
+      return null;
+    }
+  }
+
   /** Clean the exponential-fallback antiderivative: collect like terms via a
    * bounded simplify (the raw expansion repeats `c·x` once per exponential
    * term, which otherwise bloats high-degree results past the verifier's leaf
@@ -1686,7 +1766,8 @@ function antiderivativeVerifies(
   F: Expression,
   integrand: Expression,
   variable: string,
-  xs: number[] = [0.37, 0.83, 1.29, 1.71, 2.13]
+  xs: number[] = [0.37, 0.83, 1.29, 1.71, 2.13],
+  paramSeed = 0.41
 ): boolean {
   const target = activateTrig(ce, integrand);
   const known = new Set([
@@ -1701,7 +1782,7 @@ function antiderivativeVerifies(
     'Nothing',
   ]);
   const sub: Record<string, number> = {};
-  let seed = 0.41;
+  let seed = paramSeed;
   const collect = (e: Expression): void => {
     if (
       e.symbol &&
