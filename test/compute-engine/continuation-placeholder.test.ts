@@ -153,23 +153,24 @@ describe('Continuation placeholder (ellipsis fold barrier)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Subtraction-spelled ellipsis (`… - \dots`). The parser encodes a trailing
-  // `- \dots` as a `Subtract`, so after canonicalization the placeholder
-  // surfaces as a `Negate(ContinuationPlaceholder)` operand rather than the
-  // bare symbol. The fold barrier must recognize it too.
+  // Subtraction-spelled ellipsis (`… - \dots`). When the additive chain carries
+  // a continuation, the parser rewrites its `Subtract` groupings into explicit
+  // `Negate` terms, so the signed samples (`1, -2, 4`) survive as distinct
+  // operands instead of pair-folding (`Subtract(1,2)` → `-1`) before the
+  // recognizer runs. The trailing `- \dots` surfaces as a
+  // `Negate(ContinuationPlaceholder)` operand; the fold barrier recognizes it.
   // ---------------------------------------------------------------------------
 
   test('Add (subtraction): 1 - 2 + 4 - … + x does not fold across the continuation', () => {
     const e = ce.parse('1 - 2 + 4 - \\dots + x');
-    // The parser groups `1 - 2` as an independent `Subtract` that folds to
-    // `-1` before the barrier sees the sibling continuation (this is the
-    // context-free canonicalization of `Subtract(1,2)`, not a fold *across*
-    // the continuation). The key invariants hold: `-1` and `4` are NOT
-    // combined (that would give `3`), source order is preserved, and the
-    // negated placeholder is kept as `Negate(ContinuationPlaceholder)`.
+    // The signed samples `1, -2, 4` stay distinct (they are NOT combined —
+    // `1 - 2` does not fold to `-1`, and `-1 + 4` does not become `3`), source
+    // order is preserved, and the negated placeholder is kept as
+    // `Negate(ContinuationPlaceholder)`.
     expect(e.json).toEqual([
       'Add',
-      -1,
+      1,
+      -2,
       4,
       ['Negate', 'ContinuationPlaceholder'],
       'x',
@@ -180,7 +181,14 @@ describe('Continuation placeholder (ellipsis fold barrier)', () => {
 
   test('Add (subtraction): evaluate() / N() / simplify() are inert', () => {
     const e = ce.parse('1 - 2 + 4 - \\dots + x');
-    const expected = ['Add', -1, 4, ['Negate', 'ContinuationPlaceholder'], 'x'];
+    const expected = [
+      'Add',
+      1,
+      -2,
+      4,
+      ['Negate', 'ContinuationPlaceholder'],
+      'x',
+    ];
     expect(e.evaluate().json).toEqual(expected);
     expect(e.N().json).toEqual(expected);
     expect(e.simplify().json).toEqual(expected);
@@ -191,7 +199,8 @@ describe('Continuation placeholder (ellipsis fold barrier)', () => {
     expect(e.latex).toContain('\\dots');
     expect(ce.parse(e.latex).json).toEqual([
       'Add',
-      -1,
+      1,
+      -2,
       4,
       ['Negate', 'ContinuationPlaceholder'],
       'x',

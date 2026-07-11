@@ -4,7 +4,11 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { collectSymbols, freshSymbolName } from './solver-utils.js';
+import {
+  collectSymbols,
+  freshSymbolName,
+  solveLinearSystem,
+} from './solver-utils.js';
 
 /**
  * Ellipsis interpretation — from *notation* to *meaning*.
@@ -46,11 +50,13 @@ function isExactRationalLiteral(x: Expression): boolean {
 }
 
 /**
- * Attempt to interpret a single expression node as a continuation-bearing
- * `Add`/`Multiply`, returning the `Sum`/`Product` interpretation, or `null`
- * when no recognizer's gate passes.
+ * Analyze a single expression node as a continuation-bearing `Add`/`Multiply`,
+ * returning the extracted {@link Continuation} (samples, anchor, leftover), or
+ * `null` when the node's shape does not qualify. This is the operand-level
+ * extraction shared by {@link interpretNode} (which then runs the recognizers)
+ * and {@link extractContinuationSamples} (which only needs the samples).
  */
-function interpretNode(expr: Expression): Expression | null {
+function nodeContinuation(expr: Expression): Continuation | null {
   if (!isFunction(expr)) return null;
   const op = expr.operator;
   if (op !== 'Add' && op !== 'Multiply') return null;
@@ -77,8 +83,22 @@ function interpretNode(expr: Expression): Expression | null {
   const leftover = ops.slice(0, start);
   if (samples.length < 2) return null;
 
-  const continuation: Continuation = { samples, anchor, leftover };
-  return buildInterpretation(expr, op, continuation);
+  return { samples, anchor, leftover };
+}
+
+/**
+ * Attempt to interpret a single expression node as a continuation-bearing
+ * `Add`/`Multiply`, returning the `Sum`/`Product` interpretation, or `null`
+ * when no recognizer's gate passes.
+ */
+function interpretNode(expr: Expression): Expression | null {
+  const continuation = nodeContinuation(expr);
+  if (!continuation) return null;
+  return buildInterpretation(
+    expr,
+    expr.operator as 'Add' | 'Multiply',
+    continuation
+  );
 }
 
 /**
@@ -478,50 +498,6 @@ function findRecurrenceUpperBound(
   return null;
 }
 
-/** Numeric magnitude `|z|` of an `Expression` via `.N()`. */
-function numericMagnitude(x: Expression): number {
-  const v = x.N();
-  return Math.hypot(v.re, v.im ?? 0);
-}
-
-/**
- * Solve the `L × L` linear system `M·x = b` over `Expression` entries by
- * Gauss–Jordan elimination with exact arithmetic (pivots chosen by numeric
- * magnitude for stability). Returns the solution vector, or `null` if singular.
- */
-function solveLinearSystem(
-  ce: Expression['engine'],
-  M: Expression[][],
-  b: Expression[]
-): Expression[] | null {
-  const L = b.length;
-  const A: Expression[][] = M.map((row, i) => [...row, b[i]]);
-  for (let col = 0; col < L; col++) {
-    let pivot = -1;
-    for (let r = col; r < L; r++) {
-      if (numericMagnitude(A[r][col]) > 1e-9) {
-        pivot = r;
-        break;
-      }
-    }
-    if (pivot < 0) return null;
-    [A[col], A[pivot]] = [A[pivot], A[col]];
-    const pv = A[col][col];
-    for (let r = 0; r < L; r++) {
-      if (r === col) continue;
-      const factor = ce.function('Divide', [A[r][col], pv]).simplify();
-      for (let cc = col; cc <= L; cc++)
-        A[r][cc] = ce
-          .function('Subtract', [
-            A[r][cc],
-            ce.function('Multiply', [factor, A[col][cc]]),
-          ])
-          .simplify();
-    }
-  }
-  return A.map((row, i) => ce.function('Divide', [row[L], row[i]]).simplify());
-}
-
 /**
  * Famous-sequence display body. When the recurrence is exactly `a(k) = a(k−1) +
  * a(k−2)` and the samples match the library `Fibonacci` head at `k = 1…m`
@@ -839,6 +815,14 @@ function isValidUpperBound(U: Expression, m: number): boolean {
  * `null` when nothing in the tree matched a gate.
  */
 export function inferContinuationPattern(expr: Expression): Expression | null {
+  // `Interpret` holds its argument lazily, so a full-string parse such as
+  // `\operatorname{Interpret}(1 - 1 + 2 - 3 + … + 13)` reaches here still
+  // non-canonical (`Add(1, Negate(1), …)`). Canonicalize so the recognizer
+  // sees the folded signed literals (`-1`) it admits as samples; the ellipsis
+  // fold barrier keeps the notational order and samples intact. Idempotent for
+  // the already-canonical arguments the `Interpret(parse(…))` path supplies.
+  if (!expr.isCanonical) expr = expr.canonical;
+
   // A node that itself is a continuation-bearing Add/Multiply: interpret it
   // directly (its samples are literals, so there is nothing deeper to descend
   // into).
@@ -859,4 +843,28 @@ export function inferContinuationPattern(expr: Expression): Expression | null {
   });
   if (!changed) return null;
   return expr.engine.function(expr.operator, newOps);
+}
+
+/**
+ * Extract the exact numeric sample run from the first continuation-bearing
+ * `Add`/`Multiply` in `expr` — the same run the recognizers see — for use by
+ * the async OEIS-backed proposal flow (`interpret-oeis.ts`). Canonicalizes
+ * first (matching {@link inferContinuationPattern}), then returns the samples
+ * in source order, or `null` when the tree carries no continuation. Runs no
+ * recognizer and performs no I/O.
+ */
+export function extractContinuationSamples(
+  expr: Expression
+): Expression[] | null {
+  if (!expr.isCanonical) expr = expr.canonical;
+
+  const direct = nodeContinuation(expr);
+  if (direct) return direct.samples;
+
+  if (!isFunction(expr)) return null;
+  for (const child of expr.ops) {
+    const r = extractContinuationSamples(child);
+    if (r) return r;
+  }
+  return null;
 }

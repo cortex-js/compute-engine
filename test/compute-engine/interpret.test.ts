@@ -18,8 +18,9 @@ function interpret(latex: string) {
 }
 
 // Build a continuation-bearing Add directly (the fold barrier keeps it inert
-// and in source order). Used for signed/alternating samples, whose LaTeX
-// spelling `1 - 2 + …` depends on a separate subtraction-ellipsis parser path.
+// and in source order). A convenient way to supply signed/alternating samples
+// without spelling them in LaTeX (the natural-LaTeX path is exercised
+// separately below).
 function interpretBox(expr: unknown) {
   return ce.function('Interpret', [ce.box(expr as any)]).evaluate();
 }
@@ -291,6 +292,58 @@ describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => 
     expect(sum.operator).toBe('Sum');
     expect((sum.json as unknown[])[2]).toEqual(['Limits', 'k', 1, 7]);
     expect(sum.N().re).toBeCloseTo(9, 6);
+  });
+});
+
+describe('Interpret — alternating sequences through natural LaTeX', () => {
+  // The bottom-up additive parse used to pair-fold adjacent signed numeric
+  // samples into a `Subtract` (`1 - 1 + 2 - 3 + …` → `Add(Subtract(1,1),
+  // Subtract(2,3), …)`), which canonicalized to `Add(0, -1, -3, …)` — the
+  // signed samples destroyed before the recognizer ran. When the additive
+  // chain carries a `ContinuationPlaceholder`, the parser now emits explicit
+  // `Negate` terms so the samples survive.
+  test('parse preserves signed samples when the chain has an ellipsis', () => {
+    expect(ce.parse('1 - 1 + 2 - 3 + 5 - 8 + \\dots + 13').json).toEqual([
+      'Add',
+      1,
+      -1,
+      2,
+      -3,
+      5,
+      -8,
+      'ContinuationPlaceholder',
+      13,
+    ]);
+  });
+
+  test('parse without an ellipsis is unchanged (folds normally)', () => {
+    // No `ContinuationPlaceholder`: the rewrite must not fire — an ordinary
+    // difference folds to a single number, exactly as before.
+    expect(ce.parse('1 - 1 + 2 - 3').json).toEqual(-1);
+  });
+
+  test('natural LaTeX 1-1+2-3+5-8+…+13 → Sum, U=7, Σ=9', () => {
+    const sum = interpret('1 - 1 + 2 - 3 + 5 - 8 + \\dots + 13');
+    expect(sum.operator).toBe('Sum');
+    expect((sum.json as unknown[])[2]).toEqual(['Limits', 'k', 1, 7]);
+    expect(sum.N().re).toBeCloseTo(9, 6);
+  });
+
+  test('full-string Interpret(...) of natural LaTeX also recognizes', () => {
+    // `Interpret` holds its argument lazily (non-canonical); the recognizer
+    // canonicalizes it so the signed samples fold before recognition.
+    const sum = ce
+      .parse('\\operatorname{Interpret}(1 - 1 + 2 - 3 + 5 - 8 + \\dots + 13)')
+      .evaluate();
+    expect(sum.operator).toBe('Sum');
+    expect(sum.N().re).toBeCloseTo(9, 6);
+  });
+
+  test('signed samples round-trip through LaTeX serialization', () => {
+    // The n-ary `Add` with `Negate` terms serializes back with `-` signs.
+    const expr = ce.parse('1 - 1 + 2 - 3 + 5 - 8 + \\dots + 13');
+    const reparsed = ce.parse(expr.latex);
+    expect(reparsed.json).toEqual(expr.json);
   });
 });
 

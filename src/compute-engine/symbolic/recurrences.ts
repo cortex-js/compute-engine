@@ -6,8 +6,9 @@ import {
   collectSymbols,
   freshSymbolName,
   integrationConstants,
+  numericMagnitude,
   rootMultiplicity,
-  solutionRecord,
+  solveLinearSystem,
 } from './solver-utils.js';
 
 interface RecurrenceProblem {
@@ -176,15 +177,16 @@ function normalizeShifts(
   return { coefficients, order: maxShift - minShift };
 }
 
-function conditionEquationForSolution(
+/**
+ * Extract the `(point, value)` pair from an initial condition such as
+ * `a(0) = 1` (either orientation). Returns `undefined` if the condition is not
+ * of the form `dependent(point) = value`.
+ */
+function conditionPointValue(
   condition: Expression,
-  solutionEquation: Expression,
-  dependentName: string,
-  indexName: string
-): Expression | undefined {
-  if (!isFunction(condition, 'Equal') || !isFunction(solutionEquation, 'Equal'))
-    return undefined;
-  const ce = condition.engine;
+  dependentName: string
+): { point: Expression; value: Expression } | undefined {
+  if (!isFunction(condition, 'Equal')) return undefined;
   const lhsTarget =
     isFunction(condition.op1) && condition.op1.operator === dependentName
       ? condition.op1
@@ -198,10 +200,7 @@ function conditionEquationForSolution(
 
   const value = lhsTarget ? condition.op2 : condition.op1;
   const point = target.op1;
-  return ce.function('Equal', [
-    solutionEquation.op2.subs({ [indexName]: point }).simplify(),
-    value,
-  ]);
+  return { point, value };
 }
 
 function applyConditions(
@@ -215,33 +214,63 @@ function applyConditions(
 
   const solutionEquation = solution.op1;
   if (!isFunction(solutionEquation, 'Equal')) return undefined;
-  const equations: Expression[] = [];
+  const ce = solution.engine;
+  const generalTerm = solutionEquation.op2;
+
+  const constantNames = [...collectSymbols(solution)]
+    .filter((name) => /^c_\d+$/.test(name))
+    .sort();
+  if (constantNames.length === 0) return undefined;
+  const order = constantNames.length;
+
+  // The general solution of a homogeneous linear recurrence is
+  // `Σᵢ cᵢ·Bᵢ(n)` — purely linear in the constants with no offset. Recover the
+  // basis functions `Bᵢ(n)` by setting `cᵢ = 1` and the others to `0`.
+  const basis = constantNames.map((ci) => {
+    const map: Record<string, number> = {};
+    for (const cj of constantNames) map[cj] = cj === ci ? 1 : 0;
+    return generalTerm.subs(map).simplify();
+  });
+
+  // Build the linear system `Σᵢ cᵢ·Bᵢ(point) = value` from the conditions.
+  const points: Expression[] = [];
+  const values: Expression[] = [];
   for (const condition of conditions) {
-    const equation = conditionEquationForSolution(
-      condition,
-      solutionEquation,
-      dependentName,
-      indexName
+    const pv = conditionPointValue(condition, dependentName);
+    if (!pv) return undefined;
+    points.push(pv.point);
+    values.push(pv.value);
+  }
+  if (points.length < order) return undefined;
+
+  const matrix: Expression[][] = [];
+  for (let k = 0; k < order; k++)
+    matrix.push(
+      basis.map((b) => b.subs({ [indexName]: points[k] }).simplify())
     );
-    if (!equation) return undefined;
-    equations.push(equation.canonical);
+
+  const coefficients = solveLinearSystem(ce, matrix, values.slice(0, order));
+  if (!coefficients) return undefined;
+
+  const resolved: Record<string, Expression> = {};
+  constantNames.forEach((name, i) => (resolved[name] = coefficients[i]));
+  const conditioned = generalTerm.subs(resolved).simplify();
+  if (constantNames.some((name) => conditioned.has(name))) return undefined;
+
+  // Over-determined system: the first `order` conditions fixed the constants;
+  // the remaining ones must be consistent with the resolved solution
+  // (numeric check, matching the pivot test above — an exact `.isSame(0)`
+  // can false-reject radical forms such as Binet powers).
+  for (let k = order; k < points.length; k++) {
+    const diff = ce.function('Subtract', [
+      conditioned.subs({ [indexName]: points[k] }),
+      values[k],
+    ]);
+    if (numericMagnitude(diff) > 1e-9) return undefined;
   }
 
-  const constantNames = [...collectSymbols(solution)].filter((name) =>
-    /^c_\d+$/.test(name)
-  );
-  if (constantNames.length === 0) return undefined;
-
-  const result = solution.engine
-    .function('List', equations)
-    .solve(constantNames);
-  const solved = solutionRecord(result);
-  if (!solved) return undefined;
-
-  const conditioned = solutionEquation.op2.subs(solved).simplify();
-  if (constantNames.some((name) => conditioned.has(name))) return undefined;
-  return solution.engine.function('List', [
-    solution.engine.function('Equal', [solutionEquation.op1, conditioned]),
+  return ce.function('List', [
+    ce.function('Equal', [solutionEquation.op1, conditioned]),
   ]);
 }
 

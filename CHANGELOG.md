@@ -404,6 +404,27 @@
 
 ### Parsing
 
+- **Bare-command function names `\abs`, `\floor`, `\mod`, `\sign` parse as
+  function calls.** `\abs\left(x\right)` → `Abs(x)`, `\floor(x)` →
+  `Floor(x)`, `\mod(a, b)` → `Mod(a, b)`, `\sign(x)` → `Sign(x)` — common
+  informal shorthand (and Desmos output) that previously errored with
+  `unexpected-command`. The infix `a \mod b` (synonym of `\bmod`) is
+  unchanged. Also, `\operatorname{sign}` now aliases to `Sign` like `sgn`
+  (it previously parsed silently as a free symbol `sign` multiplied by the
+  argument).
+- **A dot-number after a closing group multiplies.**
+  `\left(1-t\right).9\left(2\right)` and `t^{i}.4` parse the `.9`/`.4` as a
+  decimal literal juxtaposed with the preceding operand (implicit
+  multiplication), instead of erroring with `unexpected-operator`.
+  Degenerate dot sequences after a *number* (`1.2.3`) still error, and
+  member access (`v.x`), ranges (`1..2`), and trailing-dot numbers
+  (`(1., 2)`) are unaffected.
+- **`\frac{d}{X}` is a division unless the denominator is a differential.**
+  Leibniz-derivative parsing now requires an actual `d`-marker in the
+  denominator (`\frac{d}{dx}`, `\frac{dy}{dx}`, `\frac{d^2}{dx^2}`…). A
+  bare-`d` numerator over a plain denominator — `\frac{d}{L}` where `d` is
+  an ordinary variable, common in pedagogy graphs — previously parsed to a
+  malformed derivative `D(missing, L)`; it is now `Divide(d, L)`.
 - **A matrix environment parses as a function argument.**
   `\operatorname{Trace}\left(\begin{pmatrix}1&2\\3&4\end{pmatrix}\right)` —
   and any library or user-declared function called on a `pmatrix`-family

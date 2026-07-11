@@ -86,6 +86,74 @@ describe('RSolve', () => {
     ).toBe(true);
   });
 
+  test('resolves order-2 initial conditions with radical coefficients (Fibonacci)', () => {
+    const recurrence = [
+      'Equal',
+      ['a', ['Add', 'n', 2]],
+      ['Add', ['a', ['Add', 'n', 1]], ['a', 'n']],
+    ];
+    const solution = rsolve([
+      'List',
+      recurrence,
+      ['Equal', ['a', 0], 0],
+      ['Equal', ['a', 1], 1],
+    ]);
+
+    expect(solution.operator).toBe('List');
+    const rhs = solution.op1.op2;
+    const expected = [0, 1, 1, 2, 3, 5, 8];
+    for (let i = 0; i < expected.length; i++)
+      expect(Math.round(rhs.subs({ n: i }).N().re)).toBe(expected[i]);
+  });
+
+  test('resolves order-2 initial conditions without timing out (Pell)', () => {
+    const recurrence = [
+      'Equal',
+      ['a', ['Add', 'n', 2]],
+      ['Add', ['Multiply', 2, ['a', ['Add', 'n', 1]]], ['a', 'n']],
+    ];
+    const solution = rsolve([
+      'List',
+      recurrence,
+      ['Equal', ['a', 0], 0],
+      ['Equal', ['a', 1], 1],
+    ]);
+
+    expect(solution.operator).toBe('List');
+    const rhs = solution.op1.op2;
+    const expected = [0, 1, 2, 5, 12, 29];
+    for (let i = 0; i < expected.length; i++)
+      expect(Math.round(rhs.subs({ n: i }).N().re)).toBe(expected[i]);
+  });
+
+  test('verifies extra initial conditions instead of dropping them', () => {
+    const recurrence = [
+      'Equal',
+      ['a', ['Add', 'n', 2]],
+      ['Add', ['a', ['Add', 'n', 1]], ['a', 'n']],
+    ];
+    // Consistent third condition (a(2) = 1 for Fibonacci): still resolves.
+    const consistent = rsolve([
+      'List',
+      recurrence,
+      ['Equal', ['a', 0], 0],
+      ['Equal', ['a', 1], 1],
+      ['Equal', ['a', 2], 1],
+    ]);
+    expect(consistent.operator).toBe('List');
+
+    // Contradictory third condition: stays inert rather than returning a
+    // closed form that violates it.
+    const contradictory = rsolve([
+      'List',
+      recurrence,
+      ['Equal', ['a', 0], 0],
+      ['Equal', ['a', 1], 1],
+      ['Equal', ['a', 2], 99],
+    ]);
+    expect(contradictory.operator).toBe('RSolve');
+  });
+
   test('stays inert for nonhomogeneous recurrences', () => {
     const result = rsolve([
       'Equal',

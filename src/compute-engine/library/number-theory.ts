@@ -506,6 +506,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Lucas: {
+      description:
+        '`Lucas` is an alias for `LucasL`, which is the preferred name. Returns the nth Lucas number.',
+      signature: '(integer) -> integer',
+      canonical: ([n], { engine }) => engine._fn('LucasL', [n]),
+    },
+
     CatalanNumber: {
       description:
         'Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`.',

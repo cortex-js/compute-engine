@@ -198,30 +198,12 @@ anything unproven stay inert). Remaining rungs, demand-paced:
   and v3 — exact-rational Berlekamp–Massey → recurrence → verified
   `RSolve` closed form, `Fibonacci`-head display mapping, numeric anchors
   by exact recurrence iteration — both landed 2026-07-09, along with the
-  subtraction-ellipsis fold-barrier extension, `isContinuationOperand`.)
+  subtraction-ellipsis fold-barrier extension, `isContinuationOperand`.
+  v4 — the async `ce.interpret(expr)`: same offline recognizer plus OEIS-
+  attributed, sample-verified closed-form candidates — landed 2026-07-10.)
 
-- **Alternating sequences through natural LaTeX (S/M, parse-level):** the
-  barrier now protects `Negate`-wrapped placeholders, but bottom-up parse
-  grouping still pair-folds adjacent signed numeric samples *before* the
-  continuation-bearing `Add` exists (`1 - 1 + 2 - 3 + 5 - 8 + \dots + 13`
-  → operands `[0, -1, -3, …]`; the recognizer correctly declines the
-  corrupted samples, so no wrong answers). Fix belongs in the additive
-  parse chain (emit n-ary `Add` with `Negate` terms when the chain
-  contains an ellipsis, instead of nested `Subtract` pairs). Related
-  smaller edge: `simplify()` on `-(2·4·\dots·2n)` distributes the outer
+- **Known edge:** `simplify()` on `-(2·4·\dots·2n)` distributes the outer
   sign into the product and folds (pre-existing).
-- **Engine findings from the v3 work (belong to B12/library):** `RSolve`'s
-  initial-condition resolution is broken for order-2 recurrences (returns
-  undefined on the Fibonacci/√5 system; deadline-timeout on Pell) — the
-  Interpret path works around it by resolving constants against the no-IC
-  general solution; fixing `solveLinearSystem` over radical entries would
-  benefit `RSolve` users directly. The `Lucas` head exists but does not
-  evaluate (`Lucas(1)` inert).
-- **v4 (M):** OEIS-backed *proposals* through the existing async
-  `ce.lookupOEIS` (parse the free-text `formula` field, verify against the
-  samples with the recognizer core, return attributed candidates). Sync
-  `evaluate()` never performs lookups; bundling OEIS data stays out
-  (CC BY-NC).
 - **Promotion decision** (after product usage): whether bare
   `evaluate()`/`simplify()` should invoke the recognizer by default.
 
@@ -1015,6 +997,40 @@ Two design-level residues are deliberately carried forward:
   evaluated derivative of a known function is not yet tightened (documented in
   `library/calculus.ts`); it is blocked on evaluate-recursion and
   underscore-lambda LaTeX serialization, so it waits on those.
+
+### Cortex example-programs findings (2026-07-10) — engine items
+
+Writing the Cortex examples suite (`test/cortex/programs.test.ts` /
+`src/cortex/docs/examples.md`) doubled as a bug-finding exercise against the
+engine's program-style usage (mutable symbols, loop bodies canonicalized
+once and evaluated repeatedly). The headline find — canonical folds
+following symbol value bindings, so `Divide(2, x)` canonicalized to `2`
+while `x` held `1` (Newton's method from `x = 1` → `63/32`) — is **fixed**
+(structural `isLiteral` folds in `arithmetic-mul-div.ts`; zero snapshot
+churn). Also fixed same day: `String(…)` concatenation (operand quotes
+leaked into the value; string interpolation now works), the `Type` operator
+reporting `unknown` for lazy (non-canonical) operands, and silent indexed
+assignment (`executeCortex` now emits a `runtime-error` diagnostic for any
+non-final statement that evaluates to an error value). The open engine-side
+residue, with full detail and repros in
+[`roadmap/cortex/README.md`](./roadmap/cortex/README.md):
+
+- **Lazy collections vs. mutable program state (M — design decision).**
+  List literals never evaluate their elements (`[d, d+1]` is inert as a
+  statement value; `Join(xs, [k])` in a loop captures the *symbol* `k`, so
+  a later read sees only its final value), while tuples evaluate eagerly.
+  Decide: eager element evaluation at `Assign`/statement-value boundaries,
+  or document the tuple idiom as the contract.
+- **Chained indexing `m[2][1]` fails `At`-result typing (S).**
+  Canonicalizes to an `incompatible-type` error; `m[2, 1]` works.
+- **Recursive one-step definitions don't tie the knot (M).**
+  `Assign(f, Function(… f …))` canonicalizes the body before `f` exists, so
+  the self-reference unfolds once and stalls; pre-declaring the symbol
+  first works (the documented Cortex idiom).
+- **Small builtins batch (S).** `Pipe` (`a |> f`) parses but does not
+  evaluate; `Append`/`Fold`/`StringJoin`/`RandomInteger` are absent (their
+  roles are covered by `Join`/`Reduce`/interpolation/`Random`) — decide as
+  a batch together with the Cortex operator conveniences.
 
 ### Review residue (open low-priority items)
 

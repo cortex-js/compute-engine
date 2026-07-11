@@ -116,6 +116,62 @@ function negateNumberLiteral(
 }
 
 /**
+ * Raw-MathJSON predicate mirroring `isContinuationOperand` (its
+ * BoxedExpression counterpart in `boxed-expression/type-guards.ts`): true when
+ * `expr` carries a `ContinuationPlaceholder` reachable through additive
+ * structure (`Add`/`Subtract`/`Negate`). Used at parse time, where operands are
+ * still raw MathJSON, to detect an ellipsis buried in the bottom-up `Subtract`
+ * groupings the parser emits.
+ */
+function rawHasContinuation(
+  expr: MathJsonExpression | null | undefined
+): boolean {
+  if (expr === null || expr === undefined) return false;
+  if (symbol(expr) === 'ContinuationPlaceholder') return true;
+  const h = operator(expr);
+  if (h === 'Add' || h === 'Subtract' || h === 'Negate')
+    return operands(expr).some((op) => rawHasContinuation(op));
+  return false;
+}
+
+/**
+ * Expand a top-level additive operand into signed `Add` terms, rewriting a
+ * `Subtract` grouping (including a left-nested run like `a - b - c`) into its
+ * minuend followed by an explicit `['Negate', subtrahend]`. Non-`Subtract`
+ * operands pass through unchanged.
+ *
+ * Applied by the `Add` infix parser only when the additive chain carries an
+ * ellipsis, so the visible signed samples survive canonicalization instead of
+ * pair-folding (`Subtract(2,3)` → `-1`) before the `Interpret` recognizer runs.
+ */
+function expandAdditiveTerm(expr: MathJsonExpression): MathJsonExpression[] {
+  if (operator(expr) === 'Subtract') {
+    const lhs = operand(expr, 1)!;
+    const rhs = operand(expr, 2)!;
+    return [...expandAdditiveTerm(lhs), ['Negate', rhs] as MathJsonExpression];
+  }
+  return [expr];
+}
+
+/**
+ * When an additive chain carries a `ContinuationPlaceholder` (`\dots` in a
+ * sum), rewrite its top-level `Subtract` groupings into explicit `Negate`
+ * terms so the notational samples reach the `Interpret` recognizer intact.
+ * Returns `result` unchanged when there is no ellipsis (regression-critical:
+ * ordinary sums/differences must parse byte-identically).
+ */
+function expandContinuationAdd(
+  result: MathJsonExpression
+): MathJsonExpression {
+  if (operator(result) !== 'Add') return result;
+  const ops = operands(result);
+  if (!ops.some((op) => rawHasContinuation(op))) return result;
+  const terms: MathJsonExpression[] = [];
+  for (const op of ops) terms.push(...expandAdditiveTerm(op));
+  return ['Add', ...terms] as MathJsonExpression;
+}
+
+/**
  * Serialize `Measurement(value, error)` → `value \pm error`.
  *
  * When both operands are plain (machine) numbers, the physics significant-
@@ -770,12 +826,17 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     // - ['Sequence', 'd', 'x'] / ['Multiply', 'd', 'x']
     // - ['Multiply', 'd', ['Power', 'x', n]]  (n-th order denominator `dx^n`)
     const vars: MathJsonExpression[] = [];
+    let sawDiff = false;
 
     const collectVars = (expr: MathJsonExpression | null) => {
       if (!expr) return;
       const s = symbol(expr);
+      if (s && isDiffSym(s)) {
+        sawDiff = true;
+        return;
+      }
       // If it's a symbol that's not a differential operator, it's a variable
-      if (s && !isDiffSym(s)) {
+      if (s) {
         vars.push(expr);
         return;
       }
@@ -792,6 +853,11 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     };
 
     collectVars(denom);
+
+    // Leibniz notation requires an actual differential marker in the
+    // denominator (`dx`, `\mathrm{d}x`, `dx^n`…). Without one, a bare-`d`
+    // numerator is an ordinary variable: `\frac{d}{L}` is a division.
+    if (!sawDiff) vars.length = 0;
 
     // If no vars found, try parsing denom as 'dx' -> 'x'
     if (vars.length === 0) {
@@ -1339,6 +1405,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'function',
     parse: 'Abs',
   },
+  // Bare-command spelling `\abs(x)` (Desmos and informal math shorthand)
+  {
+    latexTrigger: ['\\abs'],
+    kind: 'function',
+    parse: 'Abs',
+  },
   {
     name: 'Add',
     latexTrigger: ['+'],
@@ -1360,14 +1432,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       if (operator(rhs) === 'Negate') {
         const value = operand(rhs, 1);
         if (isNumberExpression(value))
-          return foldAssociativeOperator(
-            'Add',
-            lhs,
-            negateNumberLiteral(value)
+          return expandContinuationAdd(
+            foldAssociativeOperator('Add', lhs, negateNumberLiteral(value))
           );
       }
 
-      return foldAssociativeOperator('Add', lhs, rhs);
+      return expandContinuationAdd(foldAssociativeOperator('Add', lhs, rhs));
     },
     serialize: serializeAdd,
   },
@@ -1557,6 +1627,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     symbolTrigger: 'floor',
+    kind: 'function',
+    parse: 'Floor',
+  },
+  // Bare-command spelling `\floor(x)` (Desmos and informal math shorthand)
+  {
+    latexTrigger: ['\\floor'],
     kind: 'function',
     parse: 'Floor',
   },
@@ -2094,6 +2170,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   // Function-style alias: `\operatorname{mod}(a, b)`
   { latexTrigger: '\\operatorname{mod}', parse: 'Mod' },
+  // Bare-command function call `\mod(a, b)` (Desmos shorthand). The infix
+  // form `a \mod b` above still applies in operator position.
+  {
+    latexTrigger: ['\\mod'],
+    kind: 'function',
+    parse: 'Mod',
+  },
   {
     latexTrigger: '\\pmod',
     kind: 'prefix',
@@ -2347,6 +2430,19 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     // As per ISO 80000-2, "signum" is 'sgn'
     symbolTrigger: 'sgn',
     kind: 'function',
+  },
+  // `\operatorname{sign}(x)`: common alias for `sgn` (without it, `sign`
+  // parses as a free symbol silently multiplied by the argument)
+  {
+    symbolTrigger: 'sign',
+    kind: 'function',
+    parse: 'Sign',
+  },
+  // Bare-command spelling `\sign(x)` (Desmos and informal math shorthand)
+  {
+    latexTrigger: ['\\sign'],
+    kind: 'function',
+    parse: 'Sign',
   },
   {
     name: 'Sqrt',

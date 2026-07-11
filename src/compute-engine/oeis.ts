@@ -29,8 +29,11 @@ export interface OEISSequenceInfo {
   /** First several terms of the sequence */
   terms: number[];
 
-  /** Formula or recurrence (if available) */
+  /** Formula or recurrence (if available) — the first formula line */
   formula?: string;
+
+  /** All free-text formula lines, as returned by OEIS (if available) */
+  formulas?: string[];
 
   /** Comments about the sequence */
   comments?: string[];
@@ -98,6 +101,12 @@ function parseFormula(value: unknown): string | undefined {
   return typeof first === 'string' ? first : undefined;
 }
 
+function parseFormulaLines(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const lines = value.filter((v): v is string => typeof v === 'string');
+  return lines.length > 0 ? lines : undefined;
+}
+
 function parseComments(value: unknown): string[] | undefined {
   if (typeof value === 'string') return [value];
   if (!Array.isArray(value)) return undefined;
@@ -137,6 +146,7 @@ function parseOEISResponse(data: unknown): OEISSequenceInfo[] {
       name: typeof result.name === 'string' ? result.name : '',
       terms: parseTerms(result.data),
       formula: parseFormula(result.formula),
+      formulas: parseFormulaLines(result.formula),
       comments: parseComments(result.comment),
       url: id ? `${OEIS_BASE_URL}/${id}` : '',
     };

@@ -3,6 +3,7 @@ import {
   MathJsonSymbol,
 } from '../../../math-json/types.js';
 import {
+  isNumberExpression,
   machineValue,
   mapArgs,
   operand,
@@ -303,6 +304,25 @@ function parseComponentAccess(
   lhs: MathJsonExpression
 ): MathJsonExpression | null {
   parser.skipVisualSpace();
+
+  // Dot-number juxtaposition: `\left(1-t\right).9`, `t^{i}.4`. A digit can
+  // never start a member name, so `.9` after an operand is a decimal literal
+  // juxtaposed with it (implicit multiplication, as in Desmos). A number
+  // lhs is excluded: `1.2.3` is a degenerate dot sequence, kept as an error.
+  if (
+    !isNumberExpression(lhs) &&
+    typeof parser.peek === 'string' &&
+    /^\d$/.test(parser.peek)
+  ) {
+    let digits = '';
+    while (typeof parser.peek === 'string' && /^\d$/.test(parser.peek))
+      digits += parser.nextToken();
+    return [
+      'InvisibleOperator',
+      lhs,
+      { num: '0.' + digits },
+    ] as MathJsonExpression;
+  }
 
   // Form 1: \operatorname{name}
   if (parser.match('\\operatorname')) {

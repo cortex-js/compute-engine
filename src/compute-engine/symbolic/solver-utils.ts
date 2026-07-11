@@ -131,3 +131,50 @@ export function solutionRecord(
   if (!first || 'operator' in first) return undefined;
   return first as Record<string, Expression>;
 }
+
+/** Numeric magnitude `|z|` of an `Expression` via `.N()`. */
+export function numericMagnitude(x: Expression): number {
+  const v = x.N();
+  return Math.hypot(v.re, v.im ?? 0);
+}
+
+/**
+ * Solve the `L × L` linear system `M·x = b` over `Expression` entries by
+ * Gauss–Jordan elimination with exact arithmetic (pivots chosen by numeric
+ * magnitude for stability; nonzero tested numerically). Returns the solution
+ * vector, or `null` if singular. Radical coefficients (e.g. Binet/√5 for
+ * Fibonacci) are kept exact throughout, which the generic `.solve()` cannot
+ * handle.
+ */
+export function solveLinearSystem(
+  ce: Expression['engine'],
+  M: Expression[][],
+  b: Expression[]
+): Expression[] | null {
+  const L = b.length;
+  const A: Expression[][] = M.map((row, i) => [...row, b[i]]);
+  for (let col = 0; col < L; col++) {
+    let pivot = -1;
+    for (let r = col; r < L; r++) {
+      if (numericMagnitude(A[r][col]) > 1e-9) {
+        pivot = r;
+        break;
+      }
+    }
+    if (pivot < 0) return null;
+    [A[col], A[pivot]] = [A[pivot], A[col]];
+    const pv = A[col][col];
+    for (let r = 0; r < L; r++) {
+      if (r === col) continue;
+      const factor = ce.function('Divide', [A[r][col], pv]).simplify();
+      for (let cc = col; cc <= L; cc++)
+        A[r][cc] = ce
+          .function('Subtract', [
+            A[r][cc],
+            ce.function('Multiply', [factor, A[col][cc]]),
+          ])
+          .simplify();
+    }
+  }
+  return A.map((row, i) => ce.function('Divide', [row[L], row[i]]).simplify());
+}

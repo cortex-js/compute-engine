@@ -16,6 +16,8 @@ export type {
   SequenceInfo,
   OEISSequenceInfo,
   OEISOptions,
+  OEISCandidate,
+  InterpretResult,
   OperatorDefinition,
   BaseDefinition,
   SimplifyOptions,

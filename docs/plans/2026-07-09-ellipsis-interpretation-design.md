@@ -151,5 +151,23 @@ Tried after AP → polynomial → geometric all decline. Same operand handling.
   return attributed candidates (`OEISSequenceInfo.url`). Bundling OEIS
   *data* into the library remains out (CC BY-NC); live lookup with
   attribution is fine and already shipped.
+
+  **Landed 2026-07-10** as `ce.interpret(expr, options?)` (async), returning
+  `{ expression, candidates }` — `expression` is exactly what the sync
+  `Interpret` head produces (offline recognizer, byte-for-byte unchanged), and
+  `candidates: OEISCandidate[]` are OEIS-attributed closed forms
+  (`{ expression, id, name, url, formula }`). Implementation in
+  `src/compute-engine/interpret-oeis.ts` composes the sync recognizer,
+  `extractContinuationSamples` (a minimal export from `symbolic/interpret.ts`),
+  and the existing `lookupOEISByTerms`. Formula parsing: scan `a(n) = <rhs>`
+  lines (all lines, via a new `OEISSequenceInfo.formulas` field), split
+  equality chains, strip attribution/qualifiers, map a small set of ASCII
+  function spellings (`binomial`/`C`/`sqrt`/`floor`/`ceiling`) to LaTeX, drop
+  self-referential and multi-variable lines. Every candidate is verified to
+  reproduce ALL samples exactly (index offset found by a small search window —
+  OEIS `offset` is not carried through `OEISSequenceInfo`); unverifiable
+  candidates are dropped. Lookup failures / offline / too-few-samples resolve
+  gracefully with the sync result and an empty candidate list — never a
+  rejection.
 - **Promotion decision** (deferred until real product usage): whether bare
   `evaluate()`/`simplify()` should invoke the recognizer by default.

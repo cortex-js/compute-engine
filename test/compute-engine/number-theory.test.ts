@@ -363,6 +363,10 @@ describe('LucasL', () => {
     expect(evalStr(['LucasL', -1])).toEqual('-1');
     expect(evalStr(['LucasL', -2])).toEqual('3');
   });
+  test('Lucas is an alias for LucasL', () => {
+    expect(evalStr(['Lucas', 1])).toEqual('1');
+    expect(evalStr(['Lucas', 10])).toEqual('123');
+  });
 });
 
 describe('CatalanNumber', () => {

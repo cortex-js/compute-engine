@@ -252,8 +252,11 @@ export interface OEISSequenceInfo {
   /** First several terms of the sequence */
   terms: number[];
 
-  /** Formula or recurrence (if available) */
+  /** Formula or recurrence (if available) — the first formula line */
   formula?: string;
+
+  /** All free-text formula lines, as returned by OEIS (if available) */
+  formulas?: string[];
 
   /** Comments about the sequence */
   comments?: string[];
@@ -272,6 +275,46 @@ export interface OEISOptions {
 
   /** Maximum number of results to return for lookups (default: 5) */
   maxResults?: number;
+}
+
+/**
+ * An OEIS-attributed closed-form proposal produced by `ce.interpret()`.
+ *
+ * The `expression` has been *verified* to reproduce every extracted sample
+ * exactly. Attribution (`id`, `name`, `url`, `formula`) is mandatory: OEIS data
+ * is CC BY-NC, so a candidate must always carry a link back to its source.
+ *
+ * @category OEIS
+ */
+export interface OEISCandidate {
+  /** The parsed and sample-verified closed-form expression. */
+  expression: Expression;
+
+  /** OEIS sequence ID (e.g., 'A000217'). */
+  id: string;
+
+  /** Sequence name/description. */
+  name: string;
+
+  /** URL to the OEIS page. */
+  url: string;
+
+  /** The free-text OEIS formula line the expression was parsed from. */
+  formula: string;
+}
+
+/**
+ * Result of `ce.interpret()`: the sync-recognized form of the input (the same
+ * value the `Interpret` head returns), plus any OEIS-attributed candidates.
+ *
+ * @category OEIS
+ */
+export interface InterpretResult {
+  /** The recognized expression, or the input unchanged when nothing fired. */
+  expression: Expression;
+
+  /** Verified, OEIS-attributed closed-form proposals (possibly empty). */
+  candidates: OEISCandidate[];
 }
 
 /**
