@@ -92,11 +92,13 @@ export function loadIntegrationRules(
     // antiderivative instead of returning a partial result.
     if (result === null || containsIntegrate(result)) return null;
     if (trace && records) {
-      // Replay the recorded steps into whole-state steps, then close with the
-      // driver's returned antiderivative (the caller de-duplicates it if it
-      // already equals the last state).
+      // Replay the recorded steps into whole-state steps. No closing step is
+      // pushed here: the caller (`explainIntegrate`) appends a final
+      // 'integrate.simplify' step only when the evaluated result visibly
+      // differs from the last replayed state, so a representational
+      // difference (operand order, sign shape) doesn't show as a duplicate
+      // line.
       for (const s of driver.replayTrace(records)) trace.push(s);
-      trace.push({ value: result, because: 'integrate.simplify' });
     }
     return result;
   };

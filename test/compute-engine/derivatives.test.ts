@@ -910,3 +910,71 @@ describe('Derivative of a function with no derivative table (G8)', () => {
     expect(result.N().re).toBe(1);
   });
 });
+
+// Elementwise differentiation over vector/matrix literals: a `List` is a
+// container, not a function of its elements, so `D` maps the derivative over
+// each element (recursively for nested lists), preserving shape — rather than
+// treating the list as a multivariate function and doing a chain-rule
+// expansion into a scalar `Add`.
+describe('D over List literals (elementwise)', () => {
+  it('differentiates a vector elementwise', () => {
+    const result = engine
+      .expr(['D', ['List', ['Square', 't'], ['Sin', 't']], 't'])
+      .evaluate();
+    expect(result.json).toEqual(['List', ['Multiply', 2, 't'], ['Cos', 't']]);
+  });
+
+  it('first derivative of the rotation matrix', () => {
+    const result = engine
+      .expr([
+        'D',
+        [
+          'List',
+          ['List', ['Cos', 't'], ['Sin', 't']],
+          ['List', ['Negate', ['Sin', 't']], ['Cos', 't']],
+        ],
+        't',
+      ])
+      .evaluate();
+    expect(result.json).toEqual([
+      'List',
+      ['List', ['Negate', ['Sin', 't']], ['Cos', 't']],
+      ['List', ['Negate', ['Cos', 't']], ['Negate', ['Sin', 't']]],
+    ]);
+  });
+
+  it('second derivative of the rotation matrix threads repeated variables', () => {
+    const result = engine
+      .expr([
+        'D',
+        [
+          'List',
+          ['List', ['Cos', 't'], ['Sin', 't']],
+          ['List', ['Negate', ['Sin', 't']], ['Cos', 't']],
+        ],
+        't',
+        't',
+      ])
+      .evaluate();
+    expect(result.json).toEqual([
+      'List',
+      ['List', ['Negate', ['Cos', 't']], ['Negate', ['Sin', 't']]],
+      ['List', ['Sin', 't'], ['Negate', ['Cos', 't']]],
+    ]);
+  });
+
+  it('handles nested lists of arbitrary depth', () => {
+    const result = engine
+      .expr(['D', ['List', ['List', ['List', ['Square', 't']]]], 't'])
+      .evaluate();
+    expect(result.json).toEqual([
+      'List',
+      ['List', ['List', ['Multiply', 2, 't']]],
+    ]);
+  });
+
+  it('leaves scalar differentiation unchanged', () => {
+    const result = engine.expr(['D', ['Square', 't'], 't']).evaluate();
+    expect(result.json).toEqual(['Multiply', 2, 't']);
+  });
+});

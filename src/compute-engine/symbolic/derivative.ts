@@ -471,6 +471,21 @@ export function differentiate(
     return differentiate(expr.op1, v, depth + 1, trace);
   }
 
+  // List (vector/matrix literal): a `List` is a container, not a function of
+  // its elements, so it has no chain-rule semantics. Differentiate elementwise,
+  // preserving shape (recursively for nested lists — matrices are lists of
+  // lists). Only literal `List` operands broadcast this way; a symbol declared
+  // as a matrix/vector has no visible elements and never reaches this branch.
+  if (expr.operator === 'List') {
+    const elements = expr.ops.map(
+      (op) =>
+        differentiate(op, v, depth + 1, trace) ??
+        ce._fn('D', [op, ce.symbol(v)])
+    );
+    if (elements.some((e) => !e.isValid)) return undefined;
+    return ce.function('List', elements);
+  }
+
   // D - evaluate the derivative first, then differentiate the result
   if (expr.operator === 'D') {
     const evaluated = expr.evaluate();

@@ -411,10 +411,10 @@ separate tracking is needed. Grouped by theme:
   product; QR eigensolver rebuilt as Hessenberg + Francis double-shift with
   deflation — the 8×8 Rosser matrix converges; `MatrixPower(M, 1/2)`
   principal square root for exact 2×2; new `SingularValues` head, exact for
-  ≤2×2 Gram matrices).** Remaining: elementwise `D` over matrix literals
-  (the rotation-matrix second derivative currently yields a scalar `Add`);
-  a matrix-valued `Add` fed unevaluated into `MatrixMultiply` is
-  type-rejected (union-type inference gap); matrix square root beyond exact
+  ≤2×2 Gram matrices; elementwise `D` over `List` literals — the
+  rotation-matrix second derivative; the matrix-valued-`Add`-into-
+  `MatrixMultiply` type rejection turned out already fixed by the
+  matrix-typing work).** Remaining: matrix square root beyond exact
   2×2 (n×n wants eigendecomposition or Denman–Beavers); exact singular
   values beyond a 2×2 Gram matrix. Missing heads noted in comments:
   `MatrixExp` (`Exp` of a matrix broadcasts elementwise — it is *not* the

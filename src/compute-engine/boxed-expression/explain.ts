@@ -441,11 +441,23 @@ function explainIntegrate(
 
   // Tail repair: ensure the last displayed state matches the returned result
   // (the provider's raw antiderivative may differ from the evaluate()-shaped
-  // one by a final simplification).
+  // one by a final simplification). Replay states are built structurally
+  // (`_fn`), so the last state can differ from the result in representation
+  // only — operand order, `Negate(2/3·u)` vs `-2/3·u` — and appending a
+  // step would then display two identical lines. Re-box the state from
+  // MathJSON and evaluate it (it contains no residual integrals — a closed
+  // chain is a precondition of reaching here): landing on the result means
+  // the difference is representational, so rewrite the last step's value to
+  // the result; anything else is a genuine final simplification step.
   const last = steps.at(-1);
-  if (last === undefined || !last.value.isSame(result)) {
+  if (
+    last === undefined ||
+    !ce.box(last.value.json).evaluate().isSame(result)
+  ) {
     const { id, description } = labelFor('integrate.simplify');
     steps.push({ value: result, id, description });
+  } else if (!last.value.isSame(result)) {
+    last.value = result;
   }
 
   return { operation: 'Integrate', initial, result, steps };
