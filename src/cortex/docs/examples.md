@@ -214,6 +214,19 @@ N(4 * inside / total)
 // ➔ ≈ 3.14 (varies by run)
 ```
 
+**Reproducible simulations.** `RandomSeed(n)` seeds the random stream, so a
+simulation can be replayed exactly; seeding again with the same value rewinds
+the stream (`RandomSeed()` returns to a non-deterministic stream):
+
+```cortex
+RandomSeed(7)
+let a = [RandomInteger(1, 100), RandomInteger(1, 100), RandomInteger(1, 100)]
+RandomSeed(7)
+let b = [RandomInteger(1, 100), RandomInteger(1, 100), RandomInteger(1, 100)]
+a == b
+// ➔ True
+```
+
 ## Calculus
 
 The calculus operators work symbolically, keeping parameters exact.
@@ -396,6 +409,25 @@ n	n^2	n^3
 3	9	27
 4	16	64
 5	25	125
+```
+
+**Character frequencies.** `Characters` splits a string into user-perceived
+characters (grapheme clusters); `Tally` counts them:
+
+```cortex
+let freq = Tally(Characters("mississippi"))
+let d = DictionaryFrom(Zip(freq[1], freq[2]))
+(d["m"], d["i"], d["s"], d["p"])
+// ➔ (1, 4, 4, 2)
+```
+
+**Word counts.** `StringSplit` with no separator splits on runs of
+whitespace (with a separator string, it splits on each occurrence):
+
+```cortex
+let words = StringSplit("the quick brown fox the lazy dog the")
+(Length(words), Tally(words)[2])
+// ➔ (8, [3, 1, 1, 1, 1, 1])
 ```
 
 ## Collections

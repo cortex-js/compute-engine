@@ -119,12 +119,14 @@ a bug — decide when Tycho demand appears:
   bare `km` is a free symbol. Units are expressible today via `$…$` LaTeX
   islands (`$30\,\mathrm{km/h}$`) or `Quantity(30, "km/h")`. A first-class
   unit literal (e.g. `30 `km/h``?) needs a grammar decision.
-- **Strings as first-class collections (M — design).** `Characters(s)` and
+- **Strings as first-class collections (M — design).** `Characters(s)`
+  (grapheme clusters; synonym of the pre-existing `GraphemeClusters`) and
   `StringSplit(s, sep?)` landed 2026-07-11 (see the completed log), so
-  character/word-frequency programs work via an explicit list. What remains
-  is the deeper design decision: making strings themselves
-  iterable/indexable (`for c in s`, `s[1]`, `Tally(s)`) without the
-  `Characters` detour.
+  character/word-frequency programs work. What remains is the deeper design
+  decision: making strings themselves iterable/indexable (`for c in s`,
+  `s[1]`, `Tally(s)`) without the `Characters` detour — noting that the
+  strings-are-not-collections stance is currently documented as deliberate
+  in the intro of `doc/97-reference-strings.md`.
 - **Block-expression closure bodies (M — design).** `{…}` in expression
   position is a set literal, so a stateful `makeCounter`-style closure (a
   lambda whose body is a statement block) is not expressible; pure

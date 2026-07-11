@@ -127,15 +127,40 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
   or string seed) sets `ce.randomSeed` — previously host-side only — making
   notebook simulations self-contained; `RandomSeed()` clears back to
   non-deterministic; returns `Nothing`, `pure: false`. `Characters(s)` →
-  list of single-code-point strings (astral chars stay whole).
-  `StringSplit(s)` splits on whitespace runs dropping empties;
-  `StringSplit(s, sep)` uses JS `split` semantics (empties kept). Non-string
-  operands stay unevaluated (StringJoin precedent). Three new notebook
-  programs in `programs.test.ts` (char frequency via `Tally(Characters(…))`,
-  word count, seeded reproducible simulation). Blast radius: cortex suite +
-  engine string/random tests 404/404, zero snapshot churn. Remaining from
-  the "strings as character collections" candidate: making strings
-  first-class iterable/indexable collections (M — still demand-gated).
+  **grapheme clusters** (UAX #29 via `Intl.Segmenter`) — USER-RATIFIED:
+  "characters" means user-perceived characters, and the pre-existing
+  `GraphemeClusters` (shipped v0.30) is now a synonym sharing the same
+  helper; the stable integer decompositions were already covered by
+  `UnicodeScalars`/`Utf8`/`Utf16`, so no `Codepoints` operator was added.
+  `StringSplit(s)` splits on whitespace runs dropping empties — whitespace =
+  the Unicode White_Space code points spelled out explicitly
+  (`UNICODE_WHITESPACE` in core.ts), not `\s`, so behavior is
+  host-independent; `StringSplit(s, sep)` uses JS `split` semantics (empties
+  kept). Non-string operands stay unevaluated (StringJoin precedent).
+  (3) *Opportunistic `splitGraphemes` fixes* (`common/grapheme-splitter.ts`,
+  feeds the LaTeX tokenizer + Cortex serializer — NOT used by `Characters`):
+  all three cluster branches computed their slice end wrong. ZWJ/combinator
+  sequences swallowed AND duplicated the following character mid-string
+  (`'a👨‍👩‍👧b'` → `["a","👨‍👩‍👧b","b"]`), and the regional-indicator branch
+  (`slice(index-2, 2)`) only worked at position 0, so flags broke
+  mid-string. Correct end is simply `index`. Two `symbols.test.ts` inline
+  snapshots had locked in the corrupted echoes (`👨🏻‍🎤DavDavidBowie`,
+  `DavidBowie👨🏻‍🎤}}`) and were corrected; new regression file
+  `test/common/grapheme-splitter.test.ts`. Note: `splitGraphemes` remains
+  emoji-focused — it does not join combining marks (fine for its tokenizer
+  role; `Characters` uses the real UAX #29 segmenter). Also note:
+  `BoxedString` NFC-normalizes on construction, so an NFD input reaches
+  `Characters` precomposed. Docs: `doc/97-reference-strings.md` — the
+  GraphemeClusters section renamed to `Characters` (synonym noted), new
+  `StringSplit` section with the explicit whitespace list; three new
+  notebook programs in `programs.test.ts` mirrored in `examples.md` (char
+  frequency via `Tally(Characters(…))`, word count, seeded reproducible
+  simulation). Blast radius: FULL suite 16 158 passed / 0 failed; snapshot
+  churn = exactly the 2 corrected corrupt snapshots (4 080 pass). Remaining
+  from the "strings as character collections" candidate: making strings
+  first-class iterable/indexable collections (M — still demand-gated; the
+  intro of `97-reference-strings.md` documents the current
+  strings-are-not-collections stance).
 - 2026-07-11 — **Examples sweep 2 + fix round.** Two drafting agents wrote
   and empirically verified 16 notebook-scale programs across the previously
   unexercised subsystems (units/uncertainty, Integrate/Limit/Series, linear
