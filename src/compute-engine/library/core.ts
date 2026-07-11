@@ -1055,6 +1055,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         '(read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`.',
         "The unknown may be omitted: it defaults to the equation's single free",
         'variable, or to `x` when there are several and one of them is `x`.',
+        'Solve([eq1, eq2, …], [x, y, …]): solve a system of equations; each',
+        'solution is a tuple of values in the order of the variable list, e.g.',
+        'Solve([x + y == 3, x - y == 1], [x, y]) → [(2, 1)].',
       ],
       keywords: ['roots', 'zeros'],
       // Hold the arguments: the equation must NOT be pre-evaluated, or an

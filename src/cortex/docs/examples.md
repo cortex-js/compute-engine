@@ -460,6 +460,15 @@ LinearSolve(A, b)
 // ➔ [1, 3]
 ```
 
+**Solve a system of equations.** `Solve([eq1, eq2, …], [x, y, …])` returns
+each solution as a tuple of values in the order of the variable list —
+nonlinear systems may return several tuples:
+
+```cortex
+Solve([x^2 + y^2 == 25, x + y == 7], [x, y])
+// ➔ [(3, 4), (4, 3)]
+```
+
 **Errors are values.** A type-incompatible element does not abort the
 computation — it surfaces as `NaN` while the valid inputs still compute. Here
 `Sqrt` is mapped over a list containing a string:

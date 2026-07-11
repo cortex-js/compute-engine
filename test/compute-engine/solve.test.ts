@@ -1852,6 +1852,128 @@ describe('SOLVE OPERATOR (B9)', () => {
   });
 });
 
+describe('MULTI-VARIABLE SOLVE (system of equations)', () => {
+  // `Solve([eq1, eq2, …], [x, y, …])` dispatches to the system solver
+  // (`solveSystem`) and shapes each solution as a `Tuple` of values in the
+  // order of the variable list — the same contract as the multi-domain
+  // enumeration path.
+  const ce = engine;
+
+  test('linear 2×2: Solve([x+y=3, x−y=1], [x,y]) → [(2, 1)]', () => {
+    expect(
+      ce
+        .expr([
+          'Solve',
+          [
+            'List',
+            ['Equal', ['Add', 'x', 'y'], 3],
+            ['Equal', ['Subtract', 'x', 'y'], 1],
+          ],
+          ['List', 'x', 'y'],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['Tuple', 2, 1]]);
+  });
+
+  test('nonlinear system with several solutions (circle ∩ line)', () => {
+    expect(
+      ce
+        .expr([
+          'Solve',
+          [
+            'List',
+            ['Equal', ['Add', ['Power', 'x', 2], ['Power', 'y', 2]], 25],
+            ['Equal', ['Add', 'x', 'y'], 7],
+          ],
+          ['List', 'x', 'y'],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['Tuple', 3, 4], ['Tuple', 4, 3]]);
+  });
+
+  test('bare multi-symbol spec is equivalent to the list spec', () => {
+    expect(
+      ce
+        .expr([
+          'Solve',
+          [
+            'List',
+            ['Equal', ['Add', 'x', 'y'], 3],
+            ['Equal', ['Subtract', 'x', 'y'], 1],
+          ],
+          'x',
+          'y',
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['Tuple', 2, 1]]);
+  });
+
+  test('3×3 linear system solves exactly (rational values)', () => {
+    expect(
+      ce
+        .expr([
+          'Solve',
+          [
+            'List',
+            ['Equal', ['Add', 'x', 'y', 'z'], 6],
+            ['Equal', ['Subtract', 'x', 'y'], 0],
+            ['Equal', ['Subtract', 'x', 'z'], -1],
+          ],
+          ['List', 'x', 'y', 'z'],
+        ])
+        .evaluate().json
+    ).toEqual([
+      'List',
+      ['Tuple', ['Rational', 5, 3], ['Rational', 5, 3], ['Rational', 8, 3]],
+    ]);
+  });
+
+  test('underdetermined system: parametric tuple in the free variable', () => {
+    expect(
+      ce
+        .expr([
+          'Solve',
+          ['List', ['Equal', ['Add', 'x', 'y'], 5]],
+          ['List', 'x', 'y'],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['Tuple', ['Add', ['Negate', 'y'], 5], 'y']]);
+  });
+
+  test('a system the solver cannot decide stays inert', () => {
+    // An inconsistent linear system: the solver conflates "no solution"
+    // with "cannot solve", so the honest result is inert, not [].
+    const r = ce
+      .expr([
+        'Solve',
+        [
+          'List',
+          ['Equal', ['Add', 'x', 'y'], 3],
+          ['Equal', ['Add', 'x', 'y'], 5],
+        ],
+        ['List', 'x', 'y'],
+      ])
+      .evaluate();
+    expect(r.operator).toBe('Solve');
+  });
+
+  test('variable order determines tuple order', () => {
+    expect(
+      ce
+        .expr([
+          'Solve',
+          [
+            'List',
+            ['Equal', ['Add', 'x', 'y'], 3],
+            ['Equal', ['Subtract', 'x', 'y'], 1],
+          ],
+          ['List', 'y', 'x'],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['Tuple', 1, 2]]);
+  });
+});
+
 describe('inverse trigonometric equations', () => {
   test('arcsin(x) = 1/3 → x = sin(1/3)', () => {
     // Scaled shape (clearDenominators rewrites `arcsin x − 1/3` → `3·arcsin x − 1`)

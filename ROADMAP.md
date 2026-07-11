@@ -773,8 +773,19 @@ Ch6-specific:
   the bare `(a+b·Sinh²)^(3/2)` even-parity shape (genuinely EllipticE/F), the
   pFq #518, and the `√(Sinh·Tanh)`/`√(Cosh·Coth)` quarter-power oddballs
   (6.7.1 #560/#563). See docs/rubi/RUBI.md §5 R29.
-- **R8 — poly×reciprocal by-parts / CoshIntegral·SinhIntegral heads** for the
-  nonlinear-argument reciprocal families.
+- **Engine-side fix LANDED (found by R29): `ComputeEngine._numericValue` no
+  longer throws on exact-radical `.N()` results.** `_numericValue`
+  (`src/compute-engine/index.ts`) used to throw "Unexpected value for radical
+  part" when a numeric evaluation landed on an exact radical whose radicand was
+  non-integer, or an integer at/above `SMALL_INTEGER` (1_000_000) — e.g. a
+  random parameter substitution hits `a+b = 2` and the antiderivative's value
+  contains `√2`. Every call site in the Rubi driver caught it (throw →
+  decline), so it never produced a wrong answer, but it made D-verified
+  closures **seed-fragile**: 6.4.7 #36 closed under the benchmark seed yet went
+  inert under `evaluate()`'s fixed seed. Fixed by extracting any perfect-square
+  factor (`√(k²·r) = k·√r`) and either staying exact (square-free part below
+  `SMALL_INTEGER`) or falling back to the float lane, instead of throwing.
+  Regression tests in `test/compute-engine/radical-arithmetic.test.ts`.
 
 #### F. Fungrim — solving coverage
 
@@ -1076,16 +1087,10 @@ lists; a follow-up round fixed the `Intersection(Filter, Filter)` stack
 overflow (`Filter.contains` recursed into itself) and representation-sensitive
 collection equality (computed/lazy/symbol-valued collections now compare equal
 to literals with the same elements, and collection-vs-collection `Equal` no
-longer broadcasts). Still open:
+longer broadcasts), and landed multi-variable `Solve([eq1, eq2], [x, y])`
+(ratified shape: a `List` of `Tuple`s in variable-list order, matching the
+multi-domain enumeration contract). Still open:
 
-- **Multi-variable `Solve([eq1, eq2], [x, y])` output shape (design
-  decision).** The system-solving machinery works internally
-  (`solveSystem` returns `Record` shapes, reachable via
-  `expr.solve(['x','y'])`); wiring the operator needs
-  `canonicalSolveSpec` (`solve-domain.ts:96`) to accept a `List` spec and
-  `evaluateSolve` (`solve-domain.ts:196`) to choose an output expression
-  form for solution records (list of `Equal`s? tuples per variable order?)
-  — deliberately deferred as a design call.
 - **`Inverse` of matrices with radical entries still floats.** The exact
   path requires rational entries; a matrix containing `√2` takes the
   numeric path under plain `evaluate()`.

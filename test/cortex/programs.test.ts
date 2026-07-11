@@ -359,6 +359,16 @@ LinearSolve(A, b)`);
     expect(text).toBe('[1,3]');
   });
 
+  test('solve a system of equations: a list of tuples in variable order', () => {
+    // Solve([eq1, eq2], [x, y]) returns each solution as a tuple ordered by
+    // the variable list; indexing picks a solution, then a component.
+    const { text, diagnostics } = run(`
+let sol = Solve([x + y == 3, x - y == 1], [x, y])
+(sol, sol[1][1])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('([(2, 1)], 2)');
+  });
+
   test('errors are values: a bad element becomes NaN, the aggregate survives', () => {
     // "banana" is out of Sqrt's domain, so its slot materializes as NaN while
     // the valid inputs still compute — the Map never throws.

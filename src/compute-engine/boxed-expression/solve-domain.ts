@@ -88,7 +88,16 @@ export function canonicalSolve(
   }
 
   const eq = ops[0]; // keep lazy — do not canonicalize
-  const specs = ops.slice(1).map((spec) => canonicalSolveSpec(ce, spec));
+  // A `List`/`Tuple` spec operand (`Solve(eqs, [x, y])`) is a variable list:
+  // splat its elements into individual specs.
+  const specOps = ops
+    .slice(1)
+    .flatMap((spec) =>
+      isFunction(spec, 'List') || isFunction(spec, 'Tuple')
+        ? [...spec.ops]
+        : [spec]
+    );
+  const specs = specOps.map((spec) => canonicalSolveSpec(ce, spec));
   return ce._fn('Solve', [eq, ...specs]);
 }
 
@@ -191,12 +200,31 @@ export function evaluateSolve(
       if (dio !== undefined) return ce.function('List', dio);
     }
 
-    // Multi-symbol (no domains): only wrap plain value lists; leave the
-    // system-solve `Record` shapes unevaluated (not value-shaped in Phase 1).
+    // Multi-symbol (no domains): the system solver returns `Record` shapes —
+    // one record (linear, possibly parametric) or an array of records (e.g. a
+    // polynomial system with several solutions). Shape them as a `List` of
+    // `Tuple`s in variable order, the same contract as the multi-domain
+    // enumeration path below. `null` stays inert: the solver conflates "no
+    // solution" with "cannot solve", so an empty list (a *decision*) would
+    // overclaim.
     const sol = ceq.solve(names);
     if (Array.isArray(sol) && sol.every((s) => isExpression(s)))
       return ce.function('List', sol as Expression[]);
-    return undefined;
+    const records = Array.isArray(sol)
+      ? (sol as Array<Record<string, Expression>>)
+      : sol !== null && typeof sol === 'object'
+        ? [sol as Record<string, Expression>]
+        : null;
+    if (records === null) return undefined;
+    const tuples: Expression[] = [];
+    for (const rec of records) {
+      // An underdetermined system's record omits its free variables
+      // (`{x: 5 − y}` for `x + y = 5`): a missing name IS the free variable,
+      // so the parametric tuple is `(5 − y, y)`.
+      const values = names.map((nm) => rec[nm] ?? ce.symbol(nm));
+      tuples.push(ce.tuple(...values));
+    }
+    return ce.function('List', tuples);
   }
 
   // With domains present, EVERY spec must carry one. A bare-symbol spec mixed
