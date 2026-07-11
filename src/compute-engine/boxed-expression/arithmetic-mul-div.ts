@@ -77,6 +77,21 @@ function exactPowExceedsBudget(base: NumericValue, exp: Rational): boolean {
   return baseDigits * exponent > MAX_EXACT_POW_DIGITS;
 }
 
+/**
+ * Structural check: is `op` the number literal `n`?
+ *
+ * Canonicalization folds must NOT use plain `.isSame(n)` on an operand that
+ * can be a symbol: `.isSame()` follows symbol value bindings, so a mutable
+ * symbol whose *current* value happens to be `n` would be folded into the
+ * canonical structure (`Divide(2, x)` → `2` while `x` holds `1`, →
+ * `ComplexInfinity` while it holds `0`). The structure of a canonical
+ * expression must never depend on a symbol's transient value — the fold is
+ * only sound when the operand is the literal itself.
+ */
+function isLiteral(op: Expression, n: number): boolean {
+  return isNumber(op) && op.isSame(n);
+}
+
 //
 // ── Product class ──────────────────────────────────────────────────────
 //
@@ -307,9 +322,13 @@ export class Product {
     }
 
     // Note: term should be positive, so no need to handle the -1 case
-    if (term.isSame(1) && (!exp || isOne(exp))) return;
+    // (isLiteral, not isSame: a symbol whose current value is 1/0 must not
+    // fold structurally; the value-following `isSame(0) === false` NEGATIVE
+    // guard below stays — it conservatively blocks the x^0 → 1 fold when the
+    // base is known to be 0.)
+    if (isLiteral(term, 1) && (!exp || isOne(exp))) return;
     if (term.isSame(0) === false && exp && isZero(exp)) return;
-    if (term.isSame(0)) {
+    if (isLiteral(term, 0)) {
       if (exp && isZero(exp)) this.coefficient = this.engine._numericValue(NaN);
       else this.coefficient = this.engine._numericValue(0);
       return;
@@ -553,7 +572,7 @@ export class Product {
       this.coefficient = coef;
       if (grouped === null) return ce.NaN;
       const rest = termsAsExpression(ce, grouped);
-      if (rest.isSame(0)) return ce.NaN;
+      if (isLiteral(rest, 0)) return ce.NaN;
       if (rest.isPositive === true) return infinity;
       if (rest.isNegative === true)
         return coef.isPositiveInfinity
@@ -599,7 +618,7 @@ export class Product {
       this.coefficient = coef;
       if (grouped === null) return [ce.NaN, ce.NaN];
       const rest = termsAsExpression(ce, grouped);
-      if (rest.isSame(0)) return [ce.NaN, ce.NaN];
+      if (isLiteral(rest, 0)) return [ce.NaN, ce.NaN];
       if (rest.isPositive === true) return [infinity, ce.One];
       if (rest.isNegative === true)
         return [
@@ -752,8 +771,8 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       // from this branch, and an inert Divide(tuple-typed, 1) sends the
       // pretty-JSON serializer into infinite recursion (Multiply →
       // asRationalExpression → Divide(same Multiply, 1) → …).
-      if (op2.isSame(1)) return op1;
-      if (op2.isSame(-1)) return op1.neg();
+      if (isLiteral(op2, 1)) return op1;
+      if (isLiteral(op2, -1)) return op1.neg();
       // `tuple / scalar`: scale each component when the divisor is provably a
       // scalar number and the components are accessible; else stay symbolic.
       if (
@@ -775,14 +794,14 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   const op2IsConstantExpression = op2.unknowns.length === 0 && !isNumber(op2);
 
   // 0/0 = NaN, a/0 = ~∞ (a≠0)
-  // Note: We only check .is(0) here, not .N().is(0), because .N() can be
-  // expensive (e.g., Monte Carlo integration) and canonicalization must be fast.
-  // Expressions like (1-1)/0 won't be detected as 0/0 here, but will be
-  // handled during simplification.
-  if (op2.isSame(0)) return op1.isSame(0) ? ce.NaN : ce.ComplexInfinity;
+  // Note: literal checks only — no value following (see isLiteral), and no
+  // .N() either, because .N() can be expensive (e.g., Monte Carlo
+  // integration) and canonicalization must be fast. Expressions like (1-1)/0
+  // won't be detected as 0/0 here, but will be handled during simplification.
+  if (isLiteral(op2, 0)) return isLiteral(op1, 0) ? ce.NaN : ce.ComplexInfinity;
 
   // 0/a = 0 (a≠0, a is finite)
-  if (op1.isSame(0) && op2.isFinite !== false) {
+  if (isLiteral(op1, 0) && op2.isFinite !== false) {
     // Be conservative with constant (no-unknown) denominators that aren't
     // already a literal number. Avoid 0/(1-1) -> 0 during canonicalization.
     // Use structural mode so the expression is bound and can evaluate later.
@@ -866,13 +885,13 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     return canonicalDivide(canonicalMultiply(ce, [op1, op2.op2]), op2.op1);
 
   // a/1 = a
-  if (op2.isSame(1)) return op1;
+  if (isLiteral(op2, 1)) return op1;
 
   // a/(-1) = -a
-  if (op2.isSame(-1)) return op1.neg();
+  if (isLiteral(op2, -1)) return op1.neg();
 
   // 1/a = a^-1
-  if (op1.isSame(1)) return op2.inv();
+  if (isLiteral(op1, 1)) return op2.inv();
 
   // Note: (-1)/a ≠ -(a^-1). We distribute Negate over Divide.
 
@@ -981,16 +1000,16 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // coefficient-*minting* fold below is gated on exactness.
   const coefExact = c1.isExact && c2.isExact;
 
-  if (c.isOne) return t2.isSame(1) ? t1 : ce._fn('Divide', [t1, t2]);
+  if (c.isOne) return isLiteral(t2, 1) ? t1 : ce._fn('Divide', [t1, t2]);
 
   if (c.isNegativeOne)
-    return t2.isSame(1) ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
+    return isLiteral(t2, 1) ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
 
   // If c is exact, use as a product: `c * (t1/t2)`
   // So, π/4 -> 1/4 * π (prefer multiplication over division)
   if (coefExact && c.isExact) {
-    if (t1.isSame(1) && t2.isSame(1)) return ce.number(c);
-    if (t2.isSame(1)) return canonicalMultiply(ce, [ce.number(c), t1]);
+    if (isLiteral(t1, 1) && isLiteral(t2, 1)) return ce.number(c);
+    if (isLiteral(t2, 1)) return canonicalMultiply(ce, [ce.number(c), t1]);
 
     return ce._fn('Divide', [
       canonicalMultiply(ce, [ce.number(c.numerator), t1]),
@@ -1011,7 +1030,7 @@ export function div(num: Expression, denom: number | Expression): Expression {
 
   if (typeof denom === 'number') {
     if (isNaN(denom)) return ce.NaN;
-    if (num.isSame(0)) {
+    if (isLiteral(num, 0)) {
       // 0/0 = NaN, 0/±∞ = NaN
       if (denom === 0 || !isFinite(denom)) return ce.NaN;
       return num; // 0
@@ -1035,20 +1054,20 @@ export function div(num: Expression, denom: number | Expression): Expression {
     }
   } else {
     if (denom.isNaN) return ce.NaN;
-    if (num.isSame(0)) {
-      if (denom.isSame(0) || denom.isFinite === false) return ce.NaN;
+    if (isLiteral(num, 0)) {
+      if (isLiteral(denom, 0) || denom.isFinite === false) return ce.NaN;
       return ce.Zero;
     }
 
     // a/1 = a
-    if (denom.isSame(1)) return num;
+    if (isLiteral(denom, 1)) return num;
 
     // a/(-1) = -a
-    if (denom.isSame(-1)) return num.neg();
+    if (isLiteral(denom, -1)) return num.neg();
 
     // a/0 = ~∞ (a≠0) — ComplexInfinity, consistent with the JS-number path
     // above (the boxed-zero case previously returned NaN).
-    if (denom.isSame(0)) return ce.ComplexInfinity;
+    if (isLiteral(denom, 0)) return ce.ComplexInfinity;
 
     // ∞/a = ±∞ for a finite and definitely nonzero (a known sign). The Product
     // path below returns NaN for an infinite numerator over a symbolic finite
@@ -1154,7 +1173,7 @@ export function canonicalMultiply(
   //
   // Filter out ones
   //
-  xs = xs.filter((x) => !x.isSame(1));
+  xs = xs.filter((x) => !isLiteral(x, 1));
 
   //
   // Fold exact numeric operands (integers, rationals, radicals, exact
@@ -1577,7 +1596,7 @@ function mulTensors(
   }
 
   // Apply the combined scalar factor.
-  if (scalar !== null && !scalar.isSame(1)) {
+  if (scalar !== null && !isLiteral(scalar, 1)) {
     product = isTensor(product)
       ? scaleTensor(ce, product, scalar)
       : scalar.mul(product);

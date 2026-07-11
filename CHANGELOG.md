@@ -116,6 +116,42 @@
   subproblems. Re-entrancy is now detected by an in-flight counter, so every
   re-entrant call inherits the outer deadline and guards.
 
+### Arithmetic
+
+- **Canonicalization no longer folds a variable's current value into the
+  expression's structure.** The canonical folds `a/1 = a`, `a/(-1) = -a`,
+  `a/0 = \tilde\infty`, `0/a = 0`, `\ln 1 = 0`, and unit-factor removal in
+  products used a value-following comparison, so a *mutable* symbol whose
+  value happened to be `0`, `1` or `-1` at boxing time leaked into canonical
+  structure: with `x` holding `1`, `ce.box(['Divide', 2, 'x'])`
+  canonicalized to the constant `2` — and to `ComplexInfinity` with `x`
+  holding `0`. In program-style usage (a notebook cell chain, a loop body
+  canonicalized once and evaluated repeatedly) this produced silently wrong
+  results: the Newton iteration `x_{k+1} = (x_k + 2/x_k)/2` started from
+  `x = 1` computed the `(x+2)/2` ladder — `63/32` instead of `\sqrt2`.
+  Canonical folds now require an actual number literal, so canonical
+  structure is independent of any symbol's transient value; evaluation
+  still substitutes values exactly as before. (Constants participate too:
+  a `const`-declared numeric symbol now substitutes at evaluation,
+  consistent with how `Pi` behaves, rather than folding at
+  canonicalization.)
+
+### Cortex Language (Experimental)
+
+- **Verbatim symbols are truly literal.** The content of a backtick-quoted
+  symbol (`` `while` ``) receives no escape processing and must be a valid
+  MathJSON symbol name — the verbatim form exists to name reserved words.
+  Previously, string escape sequences were applied inside the backticks
+  (`` `\sin` `` silently cooked `\s` into a space) even though no valid
+  symbol name contains an escapable character, so every such escape could
+  only produce an invalid name.
+- **New “Examples” documentation page.** Eighteen complete Cortex programs —
+  iteration and accumulation, recursion, numeric methods, exact and
+  symbolic computation, collections — from FizzBuzz-as-a-`Map` to Newton's
+  method on exact rationals, the Basel problem against `\pi^2/6`, and a
+  golden-ratio continued fraction checked against a `$…$` LaTeX island.
+  Every program on the page is verified by an executable test suite.
+
 ### Collections
 
 - **Symbolic-bound `Range` and `Linspace` stay inert instead of collapsing.**

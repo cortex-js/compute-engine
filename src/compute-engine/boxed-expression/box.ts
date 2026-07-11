@@ -931,8 +931,10 @@ function makeNumericFunction(
 
   if (name === 'Ln' || name === 'Log') {
     if (ops.length > 0) {
-      // Ln(1) -> 0, Log(1) -> 0
-      if (ops[0].isSame(1)) return ce.Zero;
+      // Ln(1) -> 0, Log(1) -> 0 — literal only: `.isSame(1)` follows symbol
+      // value bindings, and a mutable symbol's transient value must not fold
+      // into canonical structure (`Ln(x)` while `x` holds 1 stays `Ln(x)`).
+      if (isNumber(ops[0]) && ops[0].isSame(1)) return ce.Zero;
       // Ln(a) -> Ln(a), Log(a) -> Log(a)
       if (ops.length === 1)
         return new BoxedFunction(ce, name, ops, { metadata, canonical: true });

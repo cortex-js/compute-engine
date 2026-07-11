@@ -142,8 +142,11 @@ fact(10)`);
 
 describe('CORTEX PROGRAMS — numeric methods', () => {
   test("Newton's method for sqrt(2)", () => {
+    // Starting from x = 1 is also a regression test: the loop body is
+    // canonicalized while x holds 1, which used to fold `2/x` to `2`
+    // (the canonical-fold value-leak fixed 2026-07-10).
     const { value, diagnostics } = run(`
-let x = 2
+let x = 1
 for k in Range(1, 6) { x = (x + 2/x) / 2 }
 N(x)`);
     expect(diagnostics).toEqual([]);

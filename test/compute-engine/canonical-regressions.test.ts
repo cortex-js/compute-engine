@@ -178,3 +178,60 @@ describe('WP-2.12: SYM P0-7 sgn/type cache invalidated on popScope', () => {
     expect(x.isPositive).toBeUndefined();
   });
 });
+
+describe('Canonical folds must not follow symbol value bindings (2026-07-10)', () => {
+  // `.isSame(n)` follows a symbol's value binding, so canonical folds that
+  // used it leaked a mutable symbol's *transient* value into canonical
+  // structure: `Divide(2, x)` canonicalized to `2` while `x` held `1` (and
+  // to ComplexInfinity while it held `0`). Symptom: in a notebook/Cortex
+  // program, Newton's method `x = (x + 2/x)/2` starting from `x = 1`
+  // silently computed the (x+2)/2 ladder — 63/32 instead of √2. Canonical
+  // folds now require the number *literal* (isLiteral in
+  // arithmetic-mul-div.ts); evaluation still substitutes the value.
+
+  test('Divide(2, x) keeps its structure whatever x currently holds', () => {
+    for (const v of [1, 0, -1, 3]) {
+      const ce = new ComputeEngine();
+      ce.declare('x', { value: v });
+      expect(ce.box(['Divide', 2, 'x']).json).toEqual(['Divide', 2, 'x']);
+    }
+  });
+
+  test('Multiply and Ln folds are literal-only', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', { value: 1 });
+    expect(ce.box(['Multiply', 2, 'x']).json).toEqual(['Multiply', 2, 'x']);
+    expect(ce.box(['Ln', 'x']).json).toEqual(['Ln', 'x']);
+  });
+
+  test('the literal folds themselves still apply', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Divide', 'a', 1]).json).toEqual('a');
+    expect(ce.box(['Divide', 5, 0]).json).toEqual('ComplexInfinity');
+    expect(ce.box(['Ln', 1]).json).toEqual(0);
+  });
+
+  test('evaluation still substitutes the current value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', { value: 1 });
+    expect(ce.box(['Divide', 2, 'x']).evaluate().re).toBe(2);
+    ce.assign('x', 4);
+    expect(ce.box(['Divide', 2, 'x']).evaluate().toString()).toBe('1/2');
+    ce.assign('x', 1);
+    expect(ce.box(['Ln', 'x']).evaluate().re).toBe(0);
+  });
+
+  test("Newton's method from x0 = 1: canonicalize once, iterate", () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', { value: 1 });
+    // Canonicalize the update once — while x holds 1 — as a loop body would,
+    // then evaluate it repeatedly.
+    const update = ce.box([
+      'Assign',
+      'x',
+      ['Divide', ['Add', 'x', ['Divide', 2, 'x']], 2],
+    ]);
+    for (let i = 0; i < 6; i++) update.evaluate();
+    expect(ce.box('x').N().re).toBeCloseTo(Math.SQRT2, 14);
+  });
+});

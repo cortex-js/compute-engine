@@ -131,7 +131,7 @@ fact(10)
 rational number); `N(…)` converts the final result to a float:
 
 ```cortex
-let x = 2
+let x = 1
 for k in Range(1, 6) { x = (x + 2/x) / 2 }
 N(x)
 // ➔ 1.4142135623730950488

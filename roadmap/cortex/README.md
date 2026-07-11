@@ -79,21 +79,12 @@ large.
 ### Engine bugs surfaced by the example programs (2026-07-10)
 
 Found while writing `test/cortex/programs.test.ts` / `docs/examples.md`.
-The first two are **Compute Engine** bugs (pure-engine repros, no Cortex
-involved) discovered through Cortex programs; they are tracked here because
-this is where they bite.
+This is a **Compute Engine** bug (pure-engine repro, no Cortex involved)
+discovered through Cortex programs; it is tracked here because this is
+where it bites. (The canonical-fold value-leak found in the same sweep —
+`Divide(2, x)` → `2` while `x` held `1` — was FIXED 2026-07-10; see the
+completed log in `STATUS_REPORT.md`.)
 
-- **Canonicalization leaks a symbol's runtime value into structure (M —
-  wrong answers).** `ce.declare('x', {value: 1}); ce.box(['Divide', 2, 'x'])`
-  canonicalizes to `2` — and to `ComplexInfinity` when the value is `0`.
-  Cause: `canonicalDivide` uses `op2.isSame(1)`/`op2.isSame(0)`
-  (`arithmetic-mul-div.ts:755/782`) and `.isSame` follows symbol value
-  bindings. Effect in Cortex: a loop body `x = (x + 2/x) / 2` canonicalized
-  while `x` happens to be `1` silently computes the wrong ladder
-  (Newton's method → 63/32 instead of √2). The canonical structure of an
-  expression must not depend on a mutable symbol's transient value; the fix
-  (a non-value-following check in canonical folds) has engine-wide blast
-  radius — measure before landing.
 - **`String(…)` does not concatenate string values (S).**
   `String("x = ", 3)` evaluates to a string whose *content* is `"x = "3` —
   the literal's quotes leak into the value. This breaks string interpolation

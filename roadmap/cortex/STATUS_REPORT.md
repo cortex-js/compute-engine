@@ -111,6 +111,25 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-10 — **Canonical-fold value-leak FIXED (engine)**: canonical folds
+  no longer follow symbol value bindings. `.isSame(1)`/`.isSame(0)` in
+  canonicalization folded a mutable symbol's *transient* value into
+  canonical structure — `Divide(2, x)` → `2` while `x` held `1`, →
+  `ComplexInfinity` while it held `0`, `Multiply(2, x)` → `2`, `Ln(x)` → `0`
+  — so a Cortex/notebook loop `x = (x + 2/x)/2` from `x = 1` computed 63/32
+  instead of √2. Fix: a structural `isLiteral(op, n)` helper
+  (`arithmetic-mul-div.ts`) used at every *positive* canonical fold
+  (canonicalDivide ×10, Product/canonicalMultiply ×5, tensor scalar, `div()`
+  ×6, `Ln(1)→0` in `box.ts`, and `BoxedSymbol.sqrt()/ln()` folds removed);
+  *negative* guards (e.g. blocking `x/x → 1` when the denominator is
+  provably 0) deliberately keep value-following — they are conservative,
+  not structure-minting. Evaluation semantics unchanged (values still
+  substitute at evaluate). Blast radius: full suite green, **zero snapshot
+  churn**; only known timing flakes (integration-rules timeout under CPU
+  contention, tokenizer scale budget — both pass solo). Regression tests in
+  `canonical-regressions.test.ts` ("Canonical folds must not follow symbol
+  value bindings"); the Cortex Newton example now starts at the natural
+  `x = 1` and doubles as an end-to-end regression.
 - 2026-07-10 — **Example-programs suite**: 18 complete Cortex programs in
   `test/cortex/programs.test.ts` (executed through `executeCortex`, exact
   assertions) mirrored 1:1 in `src/cortex/docs/examples.md` — iteration

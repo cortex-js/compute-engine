@@ -292,9 +292,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   sqrt(): Expression {
     const ce = this.engine;
     if (this.symbol === 'ComplexInfinity') return ce.NaN;
-    if (this.isSame(0)) return this;
-    if (this.isSame(1)) return this.engine.One;
-    if (this.isSame(-1)) return ce.I;
+    // No value-following folds here (`.isSame(0|1|-1)` on a symbol follows
+    // its value binding): a mutable symbol's transient value must not leak
+    // into the structure this method builds. A number-valued symbol reduces
+    // via BoxedNumber.sqrt() when it is evaluated.
 
     return ce._fn('Sqrt', [this]);
   }
@@ -302,8 +303,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   ln(semiBase?: number | Expression): Expression {
     const base = semiBase ? this.engine.expr(semiBase) : undefined;
 
-    // Mathematica returns `Log[0]` as `-∞`
-    if (this.isSame(0)) return this.engine.NegativeInfinity;
+    // No value-following folds (see sqrt() above): `Ln(x)` while `x` happens
+    // to hold `1` must remain `Ln(x)`; BoxedNumber.ln() does the exact
+    // reductions once the symbol's value flows in at evaluation.
 
     // ln(e) = 1 (natural log)
     // ln_c(e) = 1/ln(c) (for other bases)
