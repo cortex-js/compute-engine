@@ -76,7 +76,8 @@ describe('CORTEX PHASE 4 — notebook integration', () => {
   test('errors are values: a mid-program error does not halt later statements', () => {
     // Reassigning a `const` is a runtime error. It surfaces as a value (never a
     // throw), the offending binding is unchanged, and the statements after it
-    // still execute.
+    // still execute. Because a mid-program statement's value is discarded,
+    // the problem is additionally surfaced as a `runtime-error` diagnostic.
     const ce = new ComputeEngine();
     const program = ['const c = 1', 'c = 2', 'let d = 40', 'd + 2'].join('\n');
 
@@ -84,7 +85,8 @@ describe('CORTEX PHASE 4 — notebook integration', () => {
       parseLatex: makeParseLatex(ce),
     });
 
-    expect(diagnostics).toEqual([]);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message[0]).toBe('runtime-error');
     // The final statement (after the error) evaluated normally.
     expect(value.re).toBe(42);
     // The const kept its original value — the illegal reassignment was rejected.

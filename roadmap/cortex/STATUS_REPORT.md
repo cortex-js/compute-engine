@@ -111,6 +111,24 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-10 — **String/Type/silent-error fixes (engine + executeCortex)**:
+  three more items from the examples sweep closed. (1) `String(…)` joins
+  operand *values* — a string operand contributes its content, not its
+  serialized form (`core.ts`), so Cortex interpolation works:
+  `"\(x) has type \(Type(x))"` → `"2047 has type integer"` (the `cortex.md`
+  headline example, now an executable test). (2) The `Type` operator
+  canonicalizes its lazy operand before reading `.type` — `Type(y)` for a
+  symbol bound to an integer reported `"unknown"` (a lazy operand is not
+  canonical, and a non-canonical expression has no type). (3)
+  `executeCortex` emits a `runtime-error` diagnostic (with the statement's
+  source range) for any *non-final* statement that evaluates to an error
+  value — previously such errors vanished since only the last statement's
+  value is returned; this makes `xs[2] = 9` (unsupported indexed
+  assignment) and mid-program `const` reassignment loud. Final-statement
+  errors stay in `value` per the errors-are-values contract. New
+  `runtime-error` diagnostic code; docs (`evaluation.md`), engine tests
+  (`string-and-type.test.ts`), execute tests, and a new Strings example in
+  `examples.md`/`programs.test.ts`.
 - 2026-07-10 — **Canonical-fold value-leak FIXED (engine)**: canonical folds
   no longer follow symbol value bindings. `.isSame(1)`/`.isSame(0)` in
   canonicalization folded a mutable symbol's *transient* value into

@@ -157,3 +157,48 @@ describe('CORTEX EXECUTE — pragma security', () => {
     expect(result!.value.symbol).toBe('Nothing');
   });
 });
+
+describe('CORTEX EXECUTE — string interpolation', () => {
+  test('interpolation joins values, without serialization quotes', () => {
+    const { value, diagnostics } = run('"the answer is \\(6 * 7)"');
+    expect(diagnostics).toEqual([]);
+    expect(value.string).toBe('the answer is 42');
+  });
+
+  test('the cortex.md headline example', () => {
+    const { value, diagnostics } = run(
+      'let x = 2^11 - 1\n"\\(x) has type \\(Type(x))"'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.string).toBe('2047 has type integer');
+  });
+});
+
+describe('CORTEX EXECUTE — runtime problems in non-final statements', () => {
+  // Only the last statement's value is returned, so an error value produced
+  // by an earlier statement would vanish silently. Each non-final statement
+  // that evaluates to an error value emits a `runtime-error` diagnostic.
+
+  test('an indexed assignment (unsupported) surfaces as a diagnostic', () => {
+    const { value, diagnostics } = run('let xs = [1, 2, 3]\nxs[2] = 9\nxs');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message[0]).toBe('runtime-error');
+    // The diagnostic points at the offending statement
+    expect(diagnostics[0].range).toEqual([19, 28]);
+    // The list is unchanged
+    expect(value.toString()).toBe('[1,2,3]');
+  });
+
+  test('a mid-program const reassignment surfaces as a diagnostic', () => {
+    const { value, diagnostics } = run('const c = 1\nc = 2\nc + 1');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message[0]).toBe('runtime-error');
+    expect(value.re).toBe(2);
+  });
+
+  test('a final-statement error stays in value, with no diagnostic', () => {
+    const { value, diagnostics } = run('const c = 1\nc = 2');
+    expect(diagnostics).toEqual([]);
+    expect(value.operator).toBe('Error');
+  });
+});

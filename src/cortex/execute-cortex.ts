@@ -25,7 +25,9 @@ export interface ExecuteCortexResult {
    * surface here as `["Error", …]` values, never as thrown exceptions. */
   value: BoxedExpression;
   /** Parse-time (and a few execution-time) problems: unparseable syntax, gated
-   * host pragmas, a `#error` directive. */
+   * host pragmas, a `#error` directive — plus a `runtime-error` diagnostic for
+   * each *non-final* statement that evaluated to an error value (its value is
+   * discarded, so the problem would otherwise be invisible). */
   diagnostics: ParsingDiagnostic[];
 }
 
@@ -85,7 +87,8 @@ export function executeCortex(
 
   let value: BoxedExpression = ce.Nothing;
 
-  for (const stmt of statements) {
+  for (let i = 0; i < statements.length; i++) {
+    const stmt = statements[i];
     // "Errors are values": a runtime problem becomes an `["Error", …]` value.
     // Most engine problems already flow back as `["Error", …]` boxed values;
     // the try/catch is the backstop for the few paths that throw (e.g.
@@ -95,6 +98,25 @@ export function executeCortex(
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       value = ce.box(['Error', { str: message }]);
+    }
+
+    // A runtime problem in a NON-final statement would otherwise vanish —
+    // only the last statement's value is returned — so surface it as a
+    // `runtime-error` diagnostic (e.g. `xs[2] = 9`, an indexed assignment
+    // the engine rejects, or reassigning a `const` mid-program). The final
+    // statement's problems stay in `value`, per the errors-are-values
+    // contract.
+    if (i < statements.length - 1) {
+      const errors = value.errors;
+      if (errors.length > 0) {
+        const range: [number, number] =
+          (typeof stmt === 'object' && stmt !== null && !Array.isArray(stmt)
+            ? (stmt as { sourceOffsets?: [number, number] }).sourceOffsets
+            : undefined) ?? [0, source.length];
+        diagnostics.push(
+          makeDiagnostic(['runtime-error', errors[0].toString()], range)
+        );
+      }
     }
   }
 

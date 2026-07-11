@@ -227,6 +227,16 @@ N(Abs(x - phi))`);
   });
 });
 
+describe('CORTEX PROGRAMS — strings', () => {
+  test('string interpolation splices expression values', () => {
+    const { value, diagnostics } = run(`
+let x = 2^11 - 1
+"\\(x) has type \\(Type(x))"`);
+    expect(diagnostics).toEqual([]);
+    expect(value.string).toBe('2047 has type integer');
+  });
+});
+
 describe('CORTEX PROGRAMS — collections', () => {
   test('matrix determinant, transpose and indexing', () => {
     // A final tuple evaluates its elements (a bare list literal would not)

@@ -115,6 +115,32 @@
   recursion guards, re-opening potential infinite recursion on cyclic
   subproblems. Re-entrancy is now detected by an in-flight counter, so every
   re-entrant call inherits the outer deadline and guards.
+- **Any integration variable works — not just `x`.** The rule driver
+  returned *wrong answers* for integrals in any other variable
+  (`\int t^2\,dt` gave `x^3/3`; mixed-variable corruption for
+  `\int t\cos t\,dt`) because rule right-hand sides never bound their
+  variable pattern to the actual variable. `\int t^2\,dt` now correctly
+  gives `t^3/3` across every rule family.
+- **Symbolic-coefficient quartic-denominator rationals close.**
+  `\int \frac{d+e\,x^2}{a+b\,x^4}\,dx` — and shapes that reduce to it, such
+  as `\int \frac{x^6}{(a+c\,x^4)^3}\,dx` — now reach the trinomial terminal
+  rules instead of ping-ponging between integrand expansion and binomial
+  splitting.
+- **Symbolic-coefficient reciprocal hyperbolics close.**
+  `\int \frac{1}{a+b\sinh x}\,dx` and the cosh/tanh/coth/sech/csch variants
+  resolve via a rational-normal-form retry in the exponential-substitution
+  fallback.
+- **Complex special-function closures.** Rational integrands with
+  irreducible quadratic denominators split over complex-conjugate roots in
+  the Si/Ci fallback, reciprocal-argument integrands like
+  `\int x^m \sin(a + b/x)\,dx` close, and inverse-trig antiderivatives
+  producing complex-argument `Erfi` evaluate (riding the new complex
+  error-function kernels).
+- **`\int F(\ln(a\,x^n))/x\,dx` closes** via a function-of-logarithm
+  recognizer (substitution `u = \ln(a\,x^n)`).
+- **Products of sines and cosines reduce via product-to-sum** before
+  integration, closing mixed-angle products the term-by-term rules could
+  not reach.
 
 ### Arithmetic
 
@@ -135,6 +161,140 @@
   a `const`-declared numeric symbol now substitutes at evaluation,
   consistent with how `Pi` behaves, rather than folding at
   canonicalization.)
+- **Huge scientific exponents no longer crash.** Parsing or serializing a
+  number literal whose exponent exceeds what the bignum layer can represent
+  (`1e999999999`) threw; it now overflows cleanly to `+\infty` (and `-\infty`
+  for negative mantissas), matching float semantics.
+- **Complex values with an infinite component type as `complex`.** A
+  `Complex` whose real or imaginary part is infinite was typed
+  `finite_complex`, so type-gated paths mishandled it; it now reports the
+  non-finite `complex` type.
+
+### Sums and Products
+
+- **Telescoping sums and products evaluate in closed form.** A sum whose body
+  is a `k \to k+1` shift pair collapses exactly, for arbitrary symbolic
+  bounds and either orientation: `\sum_{k=0}^{n} \bigl(g(k+1) - g(k)\bigr)`
+  evaluates to `g(n+1) - g(0)`. The product counterpart recognizes a
+  shift-quotient body after combining it over a common denominator:
+  `\prod_{k=1}^{n-1}\left(1 + \frac{1}{k}\right)` evaluates to `n`.
+- **`\prod_{k=1}^{n} k` evaluates to `n!`.** The bare-index product with a
+  symbolic upper bound returns `Factorial(n)` instead of staying inert.
+- **Classic infinite series and products evaluate to their exact closed
+  forms.** p-series reduce to the zeta function —
+  `\sum_{k=1}^{\infty} \frac{1}{k^2}` evaluates to `\frac{\pi^2}{6}`,
+  `\sum \frac{1}{k^2} + \frac{1}{k^3}` to `\frac{\pi^2}{6} + \zeta(3)`
+  (term-wise splitting applies only when every summand has a closed form) —
+  and the Wallis product
+  `\prod_{k=1}^{\infty}\left(1 - \frac{1}{(2k)^2}\right)` evaluates to
+  `\frac{2}{\pi}`. Series with no known closed form stay symbolic under
+  exact `evaluate()`, per the infinite-domain contract.
+- **`.N()` of convergent infinite sums reaches near machine precision.** The
+  numeric path Richardson-extrapolates the partial sums instead of returning
+  a plain 10⁴-term truncation: `\sum 1/k^2` now numericizes to ~2·10⁻¹⁶ of
+  `π²/6` (previously ~10⁻⁴ off), and series without closed forms benefit
+  equally (`\sum 1/(k^2+1)` to ~2·10⁻¹⁴). Divergent or non-smooth series are
+  detected and fall back to the capped truncation.
+
+### Equation Solving
+
+- **Trig equations with symbolic coefficients solve.** Multi-operand wildcard
+  captures (e.g. `__a` matching `-2x`) reached the solve rules' condition
+  checks as raw, non-canonical expressions; doing arithmetic on them threw
+  `Not canonical` internally, logged errors, and returned no solutions.
+  `x^2 - 2x\cos t + 1 = 0` solved for `t` now returns
+  `\pm\arccos\left(\frac{x^2+1}{2x}\right)`.
+
+### Assumptions
+
+- **Transitive closure over assumed inequality chains.** Assumptions now
+  chain: `a \ge b`, `b \ge c`, `c \ge d` entails `a \ge d`, strictness
+  propagates (`p > q > r` entails `p > r` and `p \ne r`), and an
+  antisymmetric cycle collapses to equality — Wester 21's
+  `x \ge y, y \ge z, z \ge x` now proves `x = z` is `True`. A chain without
+  a back-edge deliberately does *not* prove equality.
+- **Even-power monotonicity on ordered positives.** Wester 22's
+  `x > y, y > 0 \vdash 2x^2 > 2y^2` now evaluates to `True` (a difference of
+  equally-scaled squares factors as `k(x-y)(x+y)` with both factor signs
+  settled from the assumptions). `x > y` alone deliberately does *not*
+  conclude `x^2 > y^2`, and solve()'s conservative root-filtering behavior
+  is unchanged.
+
+### Simplification and Exact Arithmetic
+
+- **The Fu strategy reduces same-power sin/cos differences.**
+  `simplify({ strategy: 'fu' })` now rewrites `\sin^4 x - \cos^4 x` to
+  `-\cos 2x` (and the mirrored/2nd-power forms): a difference of squares
+  whose Pythagorean sum factor is `1`, which the exponent-2-only TR5/TR6/TR7
+  transforms could not reach. Verified numerically; the default `simplify()`
+  path is deliberately unchanged (pinned by test).
+- **Exact modulus of complex expressions with radical parts.** `Abs` of a
+  constant `a + b\,i` with radical/rational parts computes the exact
+  `\sqrt{a^2 + b^2}` when it genuinely folds: Kahan's
+  `\left|3-\sqrt{7}+i\sqrt{6\sqrt{7}-15}\right|` simplifies to exactly `1`
+  (its `.N()` alone carries a `1.0000000000000000315` float residue),
+  `|5-12i| = 13`, `|2+\sqrt{5}\,i| = 3`, `|1+2i| = \sqrt{5}`. A split whose
+  "imaginary part" is itself imaginary (a negative radicand) is rejected by
+  a numeric cross-check, and symbolic `|x+iy|` never folds.
+- **Matrices differentiate elementwise.** `D` over a vector/matrix `List`
+  literal maps over the elements (recursively for nested lists) instead of
+  producing a nonsensical scalar chain-rule expansion: the second derivative
+  of the rotation matrix `[[\cos t, \sin t], [-\sin t, \cos t]]` is `-M`, as
+  it should be. `Derivative` shares the fix.
+- **`Together` combines fractions correctly.** The `Together` operator summed
+  all numerators and all denominators independently
+  (`\frac{a}{b} + \frac{c}{d}` gave the freshman-sum
+  `\frac{a+c}{b+d}`, and `1 + \frac{1}{k}` gave `\frac{2}{k}`). It now folds
+  the terms over a common denominator:
+  `\frac{a}{b} + \frac{c}{d} \to \frac{ad + bc}{bd}`,
+  `1 + \frac{1}{k} \to \frac{k+1}{k}`, reusing the denominator when terms
+  already share it.
+
+### Linear Algebra
+
+- **Exact null spaces, ranks, and eigenvectors.** The exact bigint-fraction
+  elimination introduced for `RowReduce` in 0.73.0
+  now backs `Kernel` (null-space basis vectors come out as exact rationals:
+  `[[2,3],[0,0]]` → basis `[-3/2, 1]`), `MatrixRank` (rank = exact pivot
+  count, with no float-tolerance ambiguity), and eigenvector computation
+  (when the matrix and the eigenvalue are exact rationals, `A - \lambda I`
+  is solved exactly — the eigenvectors of `[[4,1],[2,3]]` are the exact
+  `[1, 1]` and `[-1/2, 1]`). Inexact or symbolic entries fall back to the
+  numeric path unchanged.
+- **`M · M^{-1}` simplifies to the identity for symbolic matrices.** Two
+  fixes combine: `simplify()` now recurses into `List` elements (matrix
+  entries were previously unreachable by any simplify rule), and a new rule
+  combines a sum of fractions sharing an identical denominator into a single
+  fraction so the diagonal entries `\frac{a^2 b}{a^2 b - b} +
+  \frac{-b}{a^2 b - b}` cancel to `1`.
+- **Symbolic matrix rank via the determinant.** `MatrixRank` of a small
+  symbolic matrix now concludes when the simplified determinant settles the
+  question: the trigonometric matrix
+  `[[\sin 2t, \cos 2t], [2\sin t\cos t, \cos^2 t - \sin^2 t]]` has rank `1`
+  (its determinant vanishes under `TrigReduce`). Indeterminate cases stay
+  symbolic, as before.
+- **Vandermonde determinants return the difference product.** The
+  determinant of a symbolic Vandermonde matrix (either orientation) is
+  produced directly in its factored closed form
+  `\prod_{i<j}(x_j - x_i)` instead of an unfactored expansion.
+- **The numeric eigensolver converges on hard spectra.** The QR iteration
+  was rebuilt as Householder reduction to Hessenberg form followed by the
+  Francis double-shift algorithm with deflation. The classic 8×8 Rosser
+  stress matrix — double eigenvalue `1000`, a `±10\sqrt{10405}` pair, and a
+  tiny eigenvalue `≈0.098` — now yields the true spectrum (the unshifted
+  iteration returned wrong values), and non-symmetric matrices get proper
+  complex-conjugate eigenvalue pairs (`[[0,-1],[1,0]]` → `\{i, -i\}`).
+- **`MatrixPower(M, 1/2)` — principal matrix square root.** Half-integer
+  powers of an exact 2×2 positive-semidefinite matrix evaluate exactly via
+  the closed form `\sqrt{M} = (M + \sqrt{\det M}\,I)/\sqrt{\operatorname{tr}
+  M + 2\sqrt{\det M}}`: `MatrixPower([[10,7],[7,17]], 1/2)` →
+  `[[3,1],[1,4]]`, and `3/2`, `-1/2` etc. compose with the integer path.
+- **New operator: `SingularValues`** — the singular values of a matrix,
+  descending, zeros included; exact when the Gram matrix is at most 2×2
+  with rational entries (`SingularValues([[1,1],[2,2],[3,3]])` →
+  `\{2\sqrt{7}, 0\}`), numeric via the SVD machinery otherwise.
+  (Across this release's Wester rounds the `wester.test.ts` skip ledger
+  drops from 21 to 3 — the remaining three are the radical-denesting tail.)
 
 ### Core
 
@@ -414,32 +574,6 @@
   to `2^n \cdot n!` and `(2n+1)!!` reduces to `\frac{(2n+1)!}{2^n \cdot n!}`
   when `n` is integer-typed.
 
-### Sums and Products
-
-- **Telescoping sums and products evaluate in closed form.** A sum whose body
-  is a `k \to k+1` shift pair collapses exactly, for arbitrary symbolic
-  bounds and either orientation: `\sum_{k=0}^{n} \bigl(g(k+1) - g(k)\bigr)`
-  evaluates to `g(n+1) - g(0)`. The product counterpart recognizes a
-  shift-quotient body after combining it over a common denominator:
-  `\prod_{k=1}^{n-1}\left(1 + \frac{1}{k}\right)` evaluates to `n`.
-- **`\prod_{k=1}^{n} k` evaluates to `n!`.** The bare-index product with a
-  symbolic upper bound returns `Factorial(n)` instead of staying inert.
-- **Classic infinite series and products evaluate to their exact closed
-  forms.** p-series reduce to the zeta function —
-  `\sum_{k=1}^{\infty} \frac{1}{k^2}` evaluates to `\frac{\pi^2}{6}`,
-  `\sum \frac{1}{k^2} + \frac{1}{k^3}` to `\frac{\pi^2}{6} + \zeta(3)`
-  (term-wise splitting applies only when every summand has a closed form) —
-  and the Wallis product
-  `\prod_{k=1}^{\infty}\left(1 - \frac{1}{(2k)^2}\right)` evaluates to
-  `\frac{2}{\pi}`. Series with no known closed form stay symbolic under
-  exact `evaluate()`, per the infinite-domain contract.
-- **`.N()` of convergent infinite sums reaches near machine precision.** The
-  numeric path Richardson-extrapolates the partial sums instead of returning
-  a plain 10⁴-term truncation: `\sum 1/k^2` now numericizes to ~2·10⁻¹⁶ of
-  `π²/6` (previously ~10⁻⁴ off), and series without closed forms benefit
-  equally (`\sum 1/(k^2+1)` to ~2·10⁻¹⁴). Divergent or non-smooth series are
-  detected and fall back to the capped truncation.
-
 ### Equation Solving
 
 On a 40-case univariate solving benchmark derived from SymPy's own test suite
@@ -500,63 +634,9 @@ New rule coverage in the `integration-rules` bundle (`loadIntegrationRules`):
   (`x - \frac{\tan x}{\sec x + 1}`) instead of returning unevaluated.
 - **Cotangent integrands reflect onto the tangent rules**, closing forms like
   `\int \cot^3 x\,dx` → `-\frac{\cot^2 x}{2} - \ln \sin x`.
-- **Any integration variable works — not just `x`.** The rule driver
-  returned *wrong answers* for integrals in any other variable
-  (`\int t^2\,dt` gave `x^3/3`; mixed-variable corruption for
-  `\int t\cos t\,dt`) because rule right-hand sides never bound their
-  variable pattern to the actual variable. `\int t^2\,dt` now correctly
-  gives `t^3/3` across every rule family.
-- **Symbolic-coefficient quartic-denominator rationals close.**
-  `\int \frac{d+e\,x^2}{a+b\,x^4}\,dx` — and shapes that reduce to it, such
-  as `\int \frac{x^6}{(a+c\,x^4)^3}\,dx` — now reach the trinomial terminal
-  rules instead of ping-ponging between integrand expansion and binomial
-  splitting.
-- **Symbolic-coefficient reciprocal hyperbolics close.**
-  `\int \frac{1}{a+b\sinh x}\,dx` and the cosh/tanh/coth/sech/csch variants
-  resolve via a rational-normal-form retry in the exponential-substitution
-  fallback.
-- **Complex special-function closures.** Rational integrands with
-  irreducible quadratic denominators split over complex-conjugate roots in
-  the Si/Ci fallback, reciprocal-argument integrands like
-  `\int x^m \sin(a + b/x)\,dx` close, and inverse-trig antiderivatives
-  producing complex-argument `Erfi` evaluate (riding the new complex
-  error-function kernels).
-- **`\int F(\ln(a\,x^n))/x\,dx` closes** via a function-of-logarithm
-  recognizer (substitution `u = \ln(a\,x^n)`).
-- **Products of sines and cosines reduce via product-to-sum** before
-  integration, closing mixed-angle products the term-by-term rules could
-  not reach.
-
-### Assumptions
-
-- **Transitive closure over assumed inequality chains.** Assumptions now
-  chain: `a \ge b`, `b \ge c`, `c \ge d` entails `a \ge d`, strictness
-  propagates (`p > q > r` entails `p > r` and `p \ne r`), and an
-  antisymmetric cycle collapses to equality — Wester 21's
-  `x \ge y, y \ge z, z \ge x` now proves `x = z` is `True`. A chain without
-  a back-edge deliberately does *not* prove equality.
-- **Even-power monotonicity on ordered positives.** Wester 22's
-  `x > y, y > 0 \vdash 2x^2 > 2y^2` now evaluates to `True` (a difference of
-  equally-scaled squares factors as `k(x-y)(x+y)` with both factor signs
-  settled from the assumptions). `x > y` alone deliberately does *not*
-  conclude `x^2 > y^2`, and solve()'s conservative root-filtering behavior
-  is unchanged.
 
 ### Simplification and Exact Arithmetic (Wester round 1)
 
-- **Exact modulus of complex expressions with radical parts.** `Abs` of a
-  constant `a + b\,i` with radical/rational parts computes the exact
-  `\sqrt{a^2 + b^2}` when it genuinely folds: Kahan's
-  `\left|3-\sqrt{7}+i\sqrt{6\sqrt{7}-15}\right|` simplifies to exactly `1`
-  (its `.N()` alone carries a `1.0000000000000000315` float residue),
-  `|5-12i| = 13`, `|2+\sqrt{5}\,i| = 3`, `|1+2i| = \sqrt{5}`. A split whose
-  "imaginary part" is itself imaginary (a negative radicand) is rejected by
-  a numeric cross-check, and symbolic `|x+iy|` never folds.
-- **Matrices differentiate elementwise.** `D` over a vector/matrix `List`
-  literal maps over the elements (recursively for nested lists) instead of
-  producing a nonsensical scalar chain-rule expansion: the second derivative
-  of the rotation matrix `[[\cos t, \sin t], [-\sin t, \cos t]]` is `-M`, as
-  it should be. `Derivative` shares the fix.
 - **Rational radicands extract perfect-power factors.** `(1029/1000)^{1/3}` now
   canonicalizes to `\frac{7}{10}\sqrt[3]{3}` (numerator and denominator factored
   independently), extending the existing integer-radicand extraction. Also fixed
@@ -587,14 +667,8 @@ New rule coverage in the `integration-rules` bundle (`loadIntegrationRules`):
   matrix now uses exact bigint-fraction elimination — the RREF of an integer
   matrix has exact `-1`/`3` pivots instead of `-0.999…`/`2.999…` float
   artifacts. Float matrices use the numeric path unchanged.
-- **Exact null spaces, ranks, and eigenvectors.** The same exact elimination
-  now backs `Kernel` (null-space basis vectors come out as exact rationals:
-  `[[2,3],[0,0]]` → basis `[-3/2, 1]`), `MatrixRank` (rank = exact pivot
-  count, with no float-tolerance ambiguity), and eigenvector computation
-  (when the matrix and the eigenvalue are exact rationals, `A - \lambda I`
-  is solved exactly — the eigenvectors of `[[4,1],[2,3]]` are the exact
-  `[1, 1]` and `[-1/2, 1]`). Inexact or symbolic entries fall back to the
-  numeric path unchanged.
+  (`NullSpace`/`MatrixRank`'s float elimination is tracked in the ROADMAP for
+  the same treatment.)
 - **Products of declared matrices type correctly.** A product with a
   matrix/vector/list-typed operand now carries the collection type instead of
   collapsing to a numeric type: with `X` and `Y` declared `matrix`, `2Y`, `XY`,
@@ -605,40 +679,6 @@ New rule coverage in the `integration-rules` bundle (`loadIntegrationRules`):
   `A`, `B`) still infer as numbers — declare matrix/vector symbols for symbolic
   matrix algebra (see the ROADMAP "Matrix-operator typing" item for the planned
   inference-ordering fix).
-- **`M · M^{-1}` simplifies to the identity for symbolic matrices.** Two
-  fixes combine: `simplify()` now recurses into `List` elements (matrix
-  entries were previously unreachable by any simplify rule), and a new rule
-  combines a sum of fractions sharing an identical denominator into a single
-  fraction so the diagonal entries `\frac{a^2 b}{a^2 b - b} +
-  \frac{-b}{a^2 b - b}` cancel to `1`.
-- **Symbolic matrix rank via the determinant.** `MatrixRank` of a small
-  symbolic matrix now concludes when the simplified determinant settles the
-  question: the trigonometric matrix
-  `[[\sin 2t, \cos 2t], [2\sin t\cos t, \cos^2 t - \sin^2 t]]` has rank `1`
-  (its determinant vanishes under `TrigReduce`). Indeterminate cases stay
-  symbolic, as before.
-- **Vandermonde determinants return the difference product.** The
-  determinant of a symbolic Vandermonde matrix (either orientation) is
-  produced directly in its factored closed form
-  `\prod_{i<j}(x_j - x_i)` instead of an unfactored expansion.
-- **The numeric eigensolver converges on hard spectra.** The QR iteration
-  was rebuilt as Householder reduction to Hessenberg form followed by the
-  Francis double-shift algorithm with deflation. The classic 8×8 Rosser
-  stress matrix — double eigenvalue `1000`, a `±10\sqrt{10405}` pair, and a
-  tiny eigenvalue `≈0.098` — now yields the true spectrum (the unshifted
-  iteration returned wrong values), and non-symmetric matrices get proper
-  complex-conjugate eigenvalue pairs (`[[0,-1],[1,0]]` → `\{i, -i\}`).
-- **`MatrixPower(M, 1/2)` — principal matrix square root.** Half-integer
-  powers of an exact 2×2 positive-semidefinite matrix evaluate exactly via
-  the closed form `\sqrt{M} = (M + \sqrt{\det M}\,I)/\sqrt{\operatorname{tr}
-  M + 2\sqrt{\det M}}`: `MatrixPower([[10,7],[7,17]], 1/2)` →
-  `[[3,1],[1,4]]`, and `3/2`, `-1/2` etc. compose with the integer path.
-- **New operator: `SingularValues`** — the singular values of a matrix,
-  descending, zeros included; exact when the Gram matrix is at most 2×2
-  with rational entries (`SingularValues([[1,1],[2,2],[3,3]])` →
-  `\{2\sqrt{7}, 0\}`), numeric via the SVD machinery otherwise.
-  (Across this release's Wester rounds the `wester.test.ts` skip ledger
-  drops from 21 to 3 — the remaining three are the radical-denesting tail.)
 
 ### Units
 
@@ -841,14 +881,6 @@ that corpus from 97.09% to 97.38% clean parse:
 
 ### Issues Resolved
 
-- **`Together` combines fractions correctly.** The `Together` operator summed
-  all numerators and all denominators independently
-  (`\frac{a}{b} + \frac{c}{d}` gave the freshman-sum
-  `\frac{a+c}{b+d}`, and `1 + \frac{1}{k}` gave `\frac{2}{k}`). It now folds
-  the terms over a common denominator:
-  `\frac{a}{b} + \frac{c}{d} \to \frac{ad + bc}{bd}`,
-  `1 + \frac{1}{k} \to \frac{k+1}{k}`, reusing the denominator when terms
-  already share it.
 - `toLatex({ digits: <number> })` no longer throws
   `RangeError: The number NaN cannot be converted to a BigInt` on a
   bignum-precision engine. A bare number — not part of the documented

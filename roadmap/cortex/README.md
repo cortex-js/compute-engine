@@ -76,27 +76,22 @@ large.
   `@cortex-js/compute-engine/cortex` from the *packed* build and executes a
   tiny program (mirrors what the benchmark harness does for CE releases).
 
-### Engine bugs surfaced by the example programs (2026-07-10)
+### Findings from the example programs (2026-07-10)
 
-Found while writing `test/cortex/programs.test.ts` / `docs/examples.md`.
-This is a **Compute Engine** bug (pure-engine repro, no Cortex involved)
-discovered through Cortex programs; it is tracked here because this is
-where it bites. (The canonical-fold value-leak found in the same sweep —
-`Divide(2, x)` → `2` while `x` held `1` — was FIXED 2026-07-10; see the
-completed log in `STATUS_REPORT.md`.)
+The examples sweep (`test/cortex/programs.test.ts` / `docs/examples.md`)
+surfaced engine bugs and Cortex gaps. Already **fixed** (see the completed
+log in `STATUS_REPORT.md`): the canonical-fold value-leak (`Divide(2, x)` →
+`2` while `x` held `1`), the `String(…)` concatenation bug (interpolation
+now works, incl. the `cortex.md` headline example), the `Type` operator
+reporting `unknown` for lazy operands, and silent indexed assignment
+(`xs[2] = 9` now emits a `runtime-error` diagnostic — as does any non-final
+statement that evaluates to an error value).
 
-The engine-side items from this sweep (this one, plus the lazy-collection
-semantics decision, chained indexing, silent indexed assignment, recursion
-knot-tying, and the missing-builtins batch below) are **mirrored in the
-repo-root [`ROADMAP.md`](../../ROADMAP.md)** under "Cortex example-programs
-findings" for engine-track visibility — when one lands, remove it from both
-lists.
-
-- **`String(…)` does not concatenate string values (S).**
-  `String("x = ", 3)` evaluates to a string whose *content* is `"x = "3` —
-  the literal's quotes leak into the value. This breaks string interpolation
-  (`"\(x)"` lowers to `String`), including the headline example in
-  `cortex.md`.
+The remaining engine-side items (lazy-collection semantics decision,
+chained indexing, recursion knot-tying, the missing-builtins batch) are
+**mirrored in the repo-root [`ROADMAP.md`](../../ROADMAP.md)** under
+"Cortex example-programs findings" for engine-track visibility — when one
+lands, remove it from both lists.
 
 ### Semantics gaps shipped as v0 caveats (complete on demand)
 
@@ -122,8 +117,6 @@ lists.
 - **Chained indexing `m[2][1]` fails (S).** Canonicalizes to an
   `incompatible-type` error (`At` result typing); `m[2, 1]` works and is the
   documented form.
-- **Indexed assignment `xs[2] = 9` silently no-ops (S).** Should be a
-  diagnostic (or an `Error` value) until element assignment is supported.
 - **Operator conveniences (S, decide as a batch).** No `%` (use `Mod`), no
   postfix `!` (use `Factorial`), `a |> f` parses to `Pipe` but `Pipe` does
   not evaluate, `"a" + "b"` is a type error (no string concatenation

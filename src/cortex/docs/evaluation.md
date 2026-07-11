@@ -62,6 +62,13 @@ problems that are really about the source, not the computation — a gated
 host pragma, or a `#error` directive (see below) — which also go to
 `diagnostics` rather than becoming an `Error` value.
 
+Because only the **last** statement's value is returned, an error value
+produced by an earlier statement would otherwise vanish silently. Each
+*non-final* statement that evaluates to an error value therefore also emits
+a `runtime-error` diagnostic — for example an indexed assignment
+(`xs[2] = 9`, which the engine rejects: element assignment is not
+supported), or reassigning a `const` in the middle of a program.
+
 ## Pragma security
 
 `#env(...)` and `#navigator(...)` read state from the host process (or the

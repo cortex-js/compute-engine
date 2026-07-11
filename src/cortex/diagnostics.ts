@@ -23,6 +23,7 @@ export type DiagnosticCode =
   | 'type-annotation-error' // %0 = message from the type subparser
   | 'host-pragma-disabled' // %0 = pragma name (host-state pragmas gated off)
   | 'error-directive' // %0 = message from a `#error` pragma
+  | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value)
   | 'latex-parsing-unavailable' // no LaTeX parser was injected for a `$…$` island
   | 'invalid-escape-sequence' // %0 = escape sequence char
   | 'invalid-unicode-codepoint-string' // %0 = codepoint string

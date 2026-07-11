@@ -217,6 +217,17 @@ N(Abs(x - phi))
 // ➔ 6.2e-18
 ```
 
+## Strings
+
+**String interpolation.** A `\( … )` escape splices any expression's value
+into a string:
+
+```cortex
+let x = 2^11 - 1
+"\(x) has type \(Type(x))"
+// ➔ "2047 has type integer"
+```
+
 ## Collections
 
 **Matrices.** Lists of lists are matrices; index with `m[i, j]`:
