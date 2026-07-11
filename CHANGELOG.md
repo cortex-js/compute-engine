@@ -373,6 +373,32 @@ New rule coverage in the `integration-rules` bundle (`loadIntegrationRules`):
   (`x - \frac{\tan x}{\sec x + 1}`) instead of returning unevaluated.
 - **Cotangent integrands reflect onto the tangent rules**, closing forms like
   `\int \cot^3 x\,dx` → `-\frac{\cot^2 x}{2} - \ln \sin x`.
+- **Any integration variable works — not just `x`.** The rule driver
+  returned *wrong answers* for integrals in any other variable
+  (`\int t^2\,dt` gave `x^3/3`; mixed-variable corruption for
+  `\int t\cos t\,dt`) because rule right-hand sides never bound their
+  variable pattern to the actual variable. `\int t^2\,dt` now correctly
+  gives `t^3/3` across every rule family.
+- **Symbolic-coefficient quartic-denominator rationals close.**
+  `\int \frac{d+e\,x^2}{a+b\,x^4}\,dx` — and shapes that reduce to it, such
+  as `\int \frac{x^6}{(a+c\,x^4)^3}\,dx` — now reach the trinomial terminal
+  rules instead of ping-ponging between integrand expansion and binomial
+  splitting.
+- **Symbolic-coefficient reciprocal hyperbolics close.**
+  `\int \frac{1}{a+b\sinh x}\,dx` and the cosh/tanh/coth/sech/csch variants
+  resolve via a rational-normal-form retry in the exponential-substitution
+  fallback.
+- **Complex special-function closures.** Rational integrands with
+  irreducible quadratic denominators split over complex-conjugate roots in
+  the Si/Ci fallback, reciprocal-argument integrands like
+  `\int x^m \sin(a + b/x)\,dx` close, and inverse-trig antiderivatives
+  producing complex-argument `Erfi` evaluate (riding the new complex
+  error-function kernels).
+- **`\int F(\ln(a\,x^n))/x\,dx` closes** via a function-of-logarithm
+  recognizer (substitution `u = \ln(a\,x^n)`).
+- **Products of sines and cosines reduce via product-to-sum** before
+  integration, closing mixed-angle products the term-by-term rules could
+  not reach.
 
 ### Simplification and Exact Arithmetic (Wester round 1)
 
