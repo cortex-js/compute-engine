@@ -537,6 +537,12 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('closes the single-angle trig-rational family (Chapter-4, R17)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce);
+    // The poly³×trig-rational by-parts chains take 1–2.5 s each and are slow
+    // under ts-jest — same convention as the other heavy describes in this
+    // file. (Verified 2026-07-10: not a regression — A/B timing against the
+    // recent engine commits is identical; the default deadline was simply
+    // marginal for this family under load.)
+    ce.timeLimit = 30_000;
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
