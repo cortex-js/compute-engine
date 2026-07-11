@@ -111,6 +111,17 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-11 — **Strings-as-collections decision RATIFIED: NO (closed).**
+  Strings will not behave as collections (no `for c in s`, `s[1]`,
+  `Tally(s)`). Rationale (user, from experience): string-as-collection dual
+  behavior introduces type-system problems that aren't worth it, and the
+  element type is inherently ambiguous — a "collection of what?" (graphemes?
+  code points? UTF-8 code units?). The design is explicit transformation
+  operators that each return an unambiguous collection: `Characters`
+  (graphemes), `UnicodeScalars` (code points), `Utf8`/`Utf16` (code units),
+  `StringSplit` (substrings) — all shipped as of the same-day quick-wins
+  round below. The intro of `doc/97-reference-strings.md` already documents
+  this stance; the backlog item is retired.
 - 2026-07-11 — **Backlog quick-wins round: formatter trailing space,
   `RandomSeed`, `Characters`/`StringSplit`.** (1) *Formatter*: the cosmetic
   trailing-space-before-newline artifact is fixed in `StackBlock.serialize`
@@ -156,11 +167,9 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
   notebook programs in `programs.test.ts` mirrored in `examples.md` (char
   frequency via `Tally(Characters(…))`, word count, seeded reproducible
   simulation). Blast radius: FULL suite 16 158 passed / 0 failed; snapshot
-  churn = exactly the 2 corrected corrupt snapshots (4 080 pass). Remaining
-  from the "strings as character collections" candidate: making strings
-  first-class iterable/indexable collections (M — still demand-gated; the
-  intro of `97-reference-strings.md` documents the current
-  strings-are-not-collections stance).
+  churn = exactly the 2 corrected corrupt snapshots (4 080 pass). The
+  remaining "strings as first-class collections" question was decided NO
+  the same day (see the decision entry above).
 - 2026-07-11 — **Examples sweep 2 + fix round.** Two drafting agents wrote
   and empirically verified 16 notebook-scale programs across the previously
   unexercised subsystems (units/uncertainty, Integrate/Limit/Series, linear
