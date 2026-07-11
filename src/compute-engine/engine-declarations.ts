@@ -12,6 +12,7 @@ import type {
   AssignValue,
   Expression,
   BoxedDefinition,
+  DefinitionSearchResult,
   SymbolDefinition,
   IComputeEngine,
   Scope,
@@ -32,6 +33,116 @@ export function lookupDefinition(
   id: MathJsonSymbol
 ): undefined | BoxedDefinition {
   return lookup(id, ce.context.lexicalScope);
+}
+
+/** The `kind` of a definition, matching `operatorInfo()`/`symbolInfo()`
+ * semantics, or `undefined` if the definition is neither. */
+function definitionKind(
+  def: BoxedDefinition
+): DefinitionSearchResult['kind'] | undefined {
+  if (isOperatorDef(def)) {
+    const op = def.operator;
+    return op.evaluate || op.collection ? 'function' : 'opaque';
+  }
+  if (isValueDef(def)) return def.value.isConstant ? 'constant' : 'variable';
+  return undefined;
+}
+
+/** The description line(s) of a definition, as a list of searchable strings. */
+function descriptionLines(def: BoxedDefinition): string[] {
+  const d = isOperatorDef(def)
+    ? def.operator.description
+    : isValueDef(def)
+      ? def.value.description
+      : undefined;
+  if (!d) return [];
+  return typeof d === 'string' ? [d] : d;
+}
+
+/**
+ * Reverse library search: map a plain-text concept query to a ranked list of
+ * matching identifiers. See `ComputeEngine.searchDefinitions`.
+ */
+export function searchDefinitions(
+  ce: IComputeEngine,
+  query: string,
+  options?: { limit?: number }
+): DefinitionSearchResult[] {
+  const q = query.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (q.length === 0) return [];
+
+  const tokens = q.split(' ');
+
+  // Clamp limit to [1, 100], default 10.
+  let limit = options?.limit ?? 10;
+  if (!Number.isFinite(limit)) limit = 10;
+  limit = Math.max(1, Math.min(100, Math.floor(limit)));
+
+  // Trigger axis: name -> triggers. Degrades gracefully (no triggers) when no
+  // LaTeX syntax is available or it doesn't implement `getNamedTriggers`. This
+  // only augments scope-bound candidates; it never introduces new ids.
+  const triggersByName = new Map<string, string[]>();
+  const named = ce.latexSyntax?.getNamedTriggers?.();
+  if (named)
+    for (const { name, triggers } of named) triggersByName.set(name, triggers);
+
+  type Ranked = {
+    id: MathJsonSymbol;
+    kind: DefinitionSearchResult['kind'];
+    tier: number;
+  };
+  const results: Ranked[] = [];
+  const seen = new Set<string>();
+
+  // Walk the lexical scope chain; nearest scope wins for duplicate names.
+  let scope: Scope | null = ce.context.lexicalScope;
+  while (scope) {
+    for (const [name, def] of scope.bindings) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+
+      const kind = definitionKind(def);
+      if (kind === undefined) continue;
+
+      const idLower = name.toLowerCase();
+      const triggersLower = (triggersByName.get(name) ?? []).map((t) =>
+        t.toLowerCase()
+      );
+      const descriptions = descriptionLines(def).map((d) => d.toLowerCase());
+
+      const searchable = [idLower, ...triggersLower, ...descriptions];
+
+      // Gate: every query token must be a substring of at least one
+      // searchable string.
+      const matched = tokens.every((tok) =>
+        searchable.some((s) => s.includes(tok))
+      );
+      if (!matched) continue;
+
+      // Tier (lower is better). Pins the ranking invariants for single-token
+      // queries; multi-token queries that only match via description land in
+      // the last tier.
+      let tier: number;
+      if (idLower === q) tier = 0;
+      else if (idLower.startsWith(q)) tier = 1;
+      else if (triggersLower.some((t) => t === q)) tier = 2;
+      else if (idLower.includes(q)) tier = 3;
+      else if (triggersLower.some((t) => t.includes(q))) tier = 4;
+      else tier = 5;
+
+      results.push({ id: name, kind, tier });
+    }
+    scope = scope.parent;
+  }
+
+  // Deterministic ordering: tier, then shorter id, then alphabetical.
+  results.sort((a, b) => {
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.id.length !== b.id.length) return a.id.length - b.id.length;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+
+  return results.slice(0, limit).map(({ id, kind }) => ({ id, kind }));
 }
 
 export function declareSymbolValue(

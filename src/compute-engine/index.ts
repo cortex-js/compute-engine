@@ -48,6 +48,7 @@ import type {
   LibraryDefinition,
   OperatorInfo,
   SymbolInfo,
+  DefinitionSearchResult,
 } from './global-types.js';
 
 import type {
@@ -108,6 +109,7 @@ import type { FunctionProperties } from './function-properties/index.js';
 
 import {
   lookupDefinition as lookupDefinitionImpl,
+  searchDefinitions as searchDefinitionsImpl,
   declareSymbolValue as declareSymbolValueImpl,
   declareSymbolOperator as declareSymbolOperatorImpl,
   getSymbolValue as getSymbolValueImpl,
@@ -1268,6 +1270,45 @@ export class ComputeEngine implements IComputeEngine {
       kind: v.isConstant ? 'constant' : 'variable',
       type: v.type,
     };
+  }
+
+  /**
+   * Reverse library search: map a plain-text concept `query` to a ranked,
+   * deterministic list of matching identifiers drawn from the current scope
+   * chain (the standard library plus any user declarations).
+   *
+   * The query is tokenized on whitespace; a definition matches when **every**
+   * token is a case-insensitive substring of at least one of its searchable
+   * strings, drawn from three axes:
+   * - its **identifier** (e.g. `GCD`, `Floor`),
+   * - its **description** text, and
+   * - its **LaTeX triggers** (e.g. `\gcd` → `GCD`, `\lfloor` → `Floor`,
+   *   `\binom` → `Binomial`) — available only when a LaTeX syntax is present.
+   *
+   * Results are `{ id, kind }`, where `kind` matches `operatorInfo()` /
+   * `symbolInfo()` semantics (`'function'`, `'opaque'`, `'constant'`,
+   * `'variable'`). Every returned `id` resolves via `ce.lookupDefinition(id)`;
+   * chain that call for full detail.
+   *
+   * Ranking, best first: exact identifier match, identifier prefix, exact
+   * trigger, identifier substring, trigger substring, then description-only
+   * matches; ties break by shorter id, then alphabetically. An empty or
+   * whitespace-only query returns `[]`.
+   *
+   * ```ts
+   * ce.searchDefinitions('gcd');       // → [{ id: 'GCD', kind: 'function' }, …]
+   * ce.searchDefinitions('\\lfloor');  // → includes { id: 'Floor', … }
+   * ce.searchDefinitions('golden');    // → includes { id: 'GoldenRatio', kind: 'constant' }
+   * ```
+   *
+   * @param options.limit Maximum number of results (default 10, clamped to
+   * `[1, 100]`).
+   */
+  searchDefinitions(
+    query: string,
+    options?: { limit?: number }
+  ): DefinitionSearchResult[] {
+    return searchDefinitionsImpl(this, query, options);
   }
 
   /**

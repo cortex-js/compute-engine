@@ -73,6 +73,11 @@ export interface ILatexSyntax {
     expr: import('../math-json/types.js').MathJsonExpression,
     options?: Record<string, unknown>
   ): string;
+
+  /** Named dictionary entries with their LaTeX trigger strings, for reverse
+   *  library search (`ce.searchDefinitions()`). Optional: MathJSON-only
+   *  builds and minimal injected syntaxes may not implement it. */
+  getNamedTriggers?(): ReadonlyArray<{ name: string; triggers: string[] }>;
 }
 
 export type OperatorInfo = {
@@ -98,6 +103,22 @@ export type OperatorInfo = {
 export type SymbolInfo = {
   kind: 'constant' | 'variable';
   type: BoxedType;
+};
+
+/** One result of `ce.searchDefinitions()`. */
+export type DefinitionSearchResult = {
+  /** The canonical identifier, e.g. `'GCD'`. Always resolvable via
+   * `ce.lookupDefinition(id)`. */
+  id: MathJsonSymbol;
+
+  /** The kind of definition, using the same semantics as
+   * `operatorInfo()`/`symbolInfo()`:
+   * - `'function'` — an operator with an `evaluate` or `collection` handler
+   * - `'opaque'` — a registered-but-inert operator head
+   * - `'constant'` — a constant value symbol (e.g. `Pi`)
+   * - `'variable'` — a declared, non-constant value symbol
+   */
+  kind: 'function' | 'opaque' | 'constant' | 'variable';
 };
 
 /** @internal */
@@ -743,6 +764,19 @@ export interface IComputeEngine {
    * two methods are non-overlapping).
    */
   symbolInfo(name: string): SymbolInfo | undefined;
+
+  /**
+   * Reverse library search: map a plain-text concept query to a ranked list
+   * of matching identifiers in the current scope chain (standard library plus
+   * any user declarations).
+   *
+   * Every returned `id` resolves via `ce.lookupDefinition(id)`; chain that
+   * call for full detail.
+   */
+  searchDefinitions(
+    query: string,
+    options?: { limit?: number }
+  ): DefinitionSearchResult[];
 }
 
 declare module './types-expression.js' {

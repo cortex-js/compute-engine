@@ -211,6 +211,9 @@ function defaultSerializeOptions(
 export class LatexSyntax {
   private _options: LatexSyntaxOptions;
   private _indexed: IndexedLatexDictionary | undefined;
+  private _namedTriggers:
+    | ReadonlyArray<{ name: string; triggers: string[] }>
+    | undefined;
 
   constructor(options?: LatexSyntaxOptions) {
     this._options = options ?? {};
@@ -260,6 +263,54 @@ export class LatexSyntax {
   ): string {
     const defaults = defaultSerializeOptions(this._options);
     return serializeImpl(expr, this.indexed, { ...defaults, ...options });
+  }
+
+  /**
+   * Named dictionary entries with their LaTeX trigger strings, for reverse
+   * library search (`ce.searchDefinitions()`).
+   *
+   * Multiple dictionary entries can share a name; their triggers are merged.
+   * The flattened array is cached, since the indexed dictionary is immutable
+   * once built.
+   */
+  getNamedTriggers(): ReadonlyArray<{ name: string; triggers: string[] }> {
+    if (this._namedTriggers) return this._namedTriggers;
+
+    const byName = new Map<string, Set<string>>();
+    const add = (name: string, trigger: string | undefined) => {
+      if (!trigger) return;
+      let set = byName.get(name);
+      if (!set) {
+        set = new Set<string>();
+        byName.set(name, set);
+      }
+      set.add(trigger);
+    };
+
+    const asString = (
+      trigger: string | ReadonlyArray<string> | undefined
+    ): string | undefined => {
+      if (trigger === undefined) return undefined;
+      if (typeof trigger === 'string') return trigger;
+      return trigger.join('');
+    };
+
+    for (const entry of this.indexed.defs) {
+      const name = entry.name;
+      if (!name) continue;
+      add(name, entry.latexTrigger);
+      add(name, entry.symbolTrigger);
+      if (entry.kind === 'matchfix') {
+        add(name, asString(entry.openTrigger));
+        add(name, asString(entry.closeTrigger));
+      }
+    }
+
+    this._namedTriggers = Array.from(byName, ([name, triggers]) => ({
+      name,
+      triggers: Array.from(triggers),
+    }));
+    return this._namedTriggers;
   }
 }
 
