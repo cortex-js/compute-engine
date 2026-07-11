@@ -1892,8 +1892,7 @@ function functionOfLog(
   const rec = (e: Expression): Expression | null => {
     // AtomQ[u]: a constant passes through; the bare integration variable
     // (u===x) cannot be expressed as a function of a log → False.
-    if (e.ops == null || e.ops.length === 0)
-      return e.symbol === x ? null : e;
+    if (e.ops == null || e.ops.length === 0) return e.symbol === x ? null : e;
     const head = e.operator;
     if (CALCULUS_FNS.has(head)) return null; // CalculusQ[u] → False
     // Log[a·x^n] leaf (zero constant term): substitute → x, record (v,n).
@@ -4077,7 +4076,9 @@ function containsCircularSinCos(u: Expression): boolean {
 }
 
 /** `Sin[w]`/`Cos[w]` (single arg) → {'Sin'|'Cos', w}, else null. */
-function asSinCos(f: Expression): { head: 'Sin' | 'Cos'; arg: Expression } | null {
+function asSinCos(
+  f: Expression
+): { head: 'Sin' | 'Cos'; arg: Expression } | null {
   if ((f.operator === 'Sin' || f.operator === 'Cos') && f.ops?.length === 1)
     return { head: f.operator, arg: f.ops[0] };
   return null;
@@ -4097,7 +4098,11 @@ function mulAtomsByTrig(
 ): TrigAtom[] {
   const half = ce.number([1, 2]);
   const out: TrigAtom[] = [];
-  const push = (coef: Expression, kind: 'Sin' | 'Cos', arg: Expression): void => {
+  const push = (
+    coef: Expression,
+    kind: 'Sin' | 'Cos',
+    arg: Expression
+  ): void => {
     if (arg.isSame(0)) {
       if (kind === 'Cos') out.push({ coef, kind: null, arg: ce.One });
       // Sin[0] = 0 — drop
@@ -4133,9 +4138,11 @@ function mulAtomsByTrig(
  *  circular Sin/Cos of INTEGER power ≥1 is folded in pairwise. Returns null if
  *  the term carries an unreducible circular trig factor (non-integer power),
  *  so the caller can keep it verbatim (a safe no-op). */
-function reduceTrigTerm(ce: ComputeEngine, term: Expression): TrigAtom[] | null {
-  const factors =
-    term.operator === 'Multiply' && term.ops ? term.ops : [term];
+function reduceTrigTerm(
+  ce: ComputeEngine,
+  term: Expression
+): TrigAtom[] | null {
+  const factors = term.operator === 'Multiply' && term.ops ? term.ops : [term];
   const scalars: Expression[] = [];
   const trigFactors: { head: 'Sin' | 'Cos'; arg: Expression }[] = [];
   for (const f of factors) {
@@ -4152,7 +4159,12 @@ function reduceTrigTerm(ce: ComputeEngine, term: Expression): TrigAtom[] | null 
     ) {
       const n = f.ops[1];
       const ni = n.re;
-      if (typeof ni !== 'number' || !Number.isInteger(ni) || ni < 1 || !n.isSame(ni))
+      if (
+        typeof ni !== 'number' ||
+        !Number.isInteger(ni) ||
+        ni < 1 ||
+        !n.isSame(ni)
+      )
         return null; // non-integer / reciprocal circular power — unreducible
       const sc2 = asSinCos(f.ops[0])!;
       for (let i = 0; i < ni; i++) trigFactors.push(sc2);
@@ -4196,9 +4208,13 @@ function atomsToExpr(ce: ComputeEngine, atoms: TrigAtom[]): Expression {
  *  integer powers of sums, then each additive term is reduced. A term that
  *  cannot be reduced (unexpected shape) is kept verbatim — a safe no-op.
  *  Exported for the rubi-utils unit test (the reduction is an exact identity). */
-export function circularTrigReduce(ce: ComputeEngine, u: Expression): Expression {
+export function circularTrigReduce(
+  ce: ComputeEngine,
+  u: Expression
+): Expression {
   const expanded = deepExpand(ce, u);
-  const terms = expanded.operator === 'Add' && expanded.ops ? expanded.ops : [expanded];
+  const terms =
+    expanded.operator === 'Add' && expanded.ops ? expanded.ops : [expanded];
   const out: Expression[] = [];
   for (const t of terms) {
     const atoms = reduceTrigTerm(ce, t);

@@ -109,10 +109,11 @@ export function executeCortex(
     if (i < statements.length - 1) {
       const errors = value.errors;
       if (errors.length > 0) {
-        const range: [number, number] =
-          (typeof stmt === 'object' && stmt !== null && !Array.isArray(stmt)
-            ? (stmt as { sourceOffsets?: [number, number] }).sourceOffsets
-            : undefined) ?? [0, source.length];
+        const range: [number, number] = (typeof stmt === 'object' &&
+        stmt !== null &&
+        !Array.isArray(stmt)
+          ? (stmt as { sourceOffsets?: [number, number] }).sourceOffsets
+          : undefined) ?? [0, source.length];
         diagnostics.push(
           makeDiagnostic(['runtime-error', errors[0].toString()], range)
         );

@@ -160,9 +160,7 @@ function expandAdditiveTerm(expr: MathJsonExpression): MathJsonExpression[] {
  * Returns `result` unchanged when there is no ellipsis (regression-critical:
  * ordinary sums/differences must parse byte-identically).
  */
-function expandContinuationAdd(
-  result: MathJsonExpression
-): MathJsonExpression {
+function expandContinuationAdd(result: MathJsonExpression): MathJsonExpression {
   if (operator(result) !== 'Add') return result;
   const ops = operands(result);
   if (!ops.some((op) => rawHasContinuation(op))) return result;

@@ -159,7 +159,8 @@ function telescopingParts(
   if (!new Set(neg.unknowns).has(index)) return undefined;
 
   // forward: neg shifted by k→k+1 equals pos  ⇒ body = neg(k+1) − neg(k)
-  if (shiftIndex(neg, index, ce).isSame(pos)) return { pos, neg, forward: true };
+  if (shiftIndex(neg, index, ce).isSame(pos))
+    return { pos, neg, forward: true };
   // mirror: pos shifted by k→k+1 equals neg  ⇒ body = pos(k) − pos(k+1)
   if (shiftIndex(pos, index, ce).isSame(neg))
     return { pos, neg, forward: false };

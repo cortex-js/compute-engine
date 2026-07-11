@@ -87,11 +87,7 @@ function simplifyAbsCore(x: Expression): RuleStep | undefined {
   // symbolic |x|.
   if (op.unknowns.length === 0) {
     const evaluated = x.evaluate();
-    if (
-      isNumber(evaluated) &&
-      evaluated.im === 0 &&
-      !evaluated.isSame(x)
-    )
+    if (isNumber(evaluated) && evaluated.im === 0 && !evaluated.isSame(x))
       return { value: evaluated, because: '|z| -> exact modulus' };
   }
 

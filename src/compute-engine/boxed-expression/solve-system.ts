@@ -139,7 +139,11 @@ export function solveSystem(
       const mixTrace: RuleSteps | undefined = trace ? [] : undefined;
 
       // Solve equalities first
-      const linearResult = solveLinearSystem([...equalities], varNames, mixTrace);
+      const linearResult = solveLinearSystem(
+        [...equalities],
+        varNames,
+        mixTrace
+      );
       if (linearResult) {
         // Single parametric solution — check against inequalities
         if (mixTrace)

@@ -478,7 +478,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Exact path: when every entry is an exact integer/rational, compute
         // the null-space basis with exact rational arithmetic so the result is
         // free of float artifacts. Floats-in → numeric path unchanged.
-        const rationalMatrix = tensorToRationalMatrix(op, rowCount, columnCount);
+        const rationalMatrix = tensorToRationalMatrix(
+          op,
+          rowCount,
+          columnCount
+        );
         if (rationalMatrix) {
           const basis = exactRationalNullSpaceBasis(rationalMatrix);
           return ce.expr([
@@ -736,7 +740,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Exact path: for an exact integer/rational matrix, the rank is the
         // number of pivots in the exact RREF (no tolerance ambiguity).
-        const rationalMatrix = tensorToRationalMatrix(op, rowCount, columnCount);
+        const rationalMatrix = tensorToRationalMatrix(
+          op,
+          rowCount,
+          columnCount
+        );
         if (rationalMatrix) {
           const { pivotCols } = exactRationalRref(rationalMatrix);
           return ce.number(pivotCols.length);
@@ -2423,8 +2431,7 @@ function hessenbergEigenvalues(
 ): (number | [number, number])[] | undefined {
   const wr = new Array<number>(n).fill(0);
   const wi = new Array<number>(n).fill(0);
-  const sign = (x: number, y: number) =>
-    y >= 0 ? Math.abs(x) : -Math.abs(x);
+  const sign = (x: number, y: number) => (y >= 0 ? Math.abs(x) : -Math.abs(x));
 
   // Matrix norm used for the deflation test.
   let anorm = 0;
@@ -2575,8 +2582,7 @@ function hessenbergEigenvalues(
   }
 
   const result: (number | [number, number])[] = [];
-  for (let i = 0; i < n; i++)
-    result.push(wi[i] === 0 ? wr[i] : [wr[i], wi[i]]);
+  for (let i = 0; i < n; i++) result.push(wi[i] === 0 ? wr[i] : [wr[i], wi[i]]);
   return result;
 }
 

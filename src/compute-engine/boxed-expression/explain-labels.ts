@@ -364,8 +364,10 @@ registerStepLabels({
   'integrate.sum': 'Integrate term by term: ∫(u+v) dx = ∫u dx + ∫v dx',
   'integrate.constant-factor': 'Move the constant factor out of the integral',
   'integrate.collected-power': 'Integrate the power of the linear expression',
-  'integrate.hyperbolic-to-exp': 'Rewrite the hyperbolic functions as exponentials',
-  'integrate.trig-to-exp': 'Rewrite the trigonometric functions as exponentials',
+  'integrate.hyperbolic-to-exp':
+    'Rewrite the hyperbolic functions as exponentials',
+  'integrate.trig-to-exp':
+    'Rewrite the trigonometric functions as exponentials',
   'integrate.by-parts': 'Integrate by parts',
   'integrate.si-ci':
     'Express the integral with the sine and cosine integral functions Si and Ci',
@@ -373,7 +375,8 @@ registerStepLabels({
     'Substitute a single exponential for the trigonometric functions',
   'integrate.exponential-substitution':
     'Substitute for the exponential and integrate the rational function',
-  'integrate.partial-fractions': 'Integrate using partial-fraction decomposition',
+  'integrate.partial-fractions':
+    'Integrate using partial-fraction decomposition',
   'integrate.previous-result': 'Use the integral computed earlier',
   'integrate.simplify': 'Simplify the result',
   // Definite integrals (Fundamental Theorem of Calculus)

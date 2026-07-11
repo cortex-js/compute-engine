@@ -59,7 +59,8 @@ function compileIntervalChain(
   args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string
 ): string {
-  if (args.length < 2) throw new Error(`${op}: expected at least two arguments`);
+  if (args.length < 2)
+    throw new Error(`${op}: expected at least two arguments`);
   let result = `${op}(${compile(args[0])}, ${compile(args[1])})`;
   for (let i = 1; i < args.length - 1; i++)
     result = `_IA.and(${result}, ${op}(${compile(args[i])}, ${compile(
@@ -77,7 +78,8 @@ function compileIntervalFold(
   args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string
 ): string {
-  if (args.length === 0) throw new Error(`${op}: expected at least one argument`);
+  if (args.length === 0)
+    throw new Error(`${op}: expected at least one argument`);
   let result = compile(args[0]);
   for (let i = 1; i < args.length; i++)
     result = `${op}(${result}, ${compile(args[i])})`;

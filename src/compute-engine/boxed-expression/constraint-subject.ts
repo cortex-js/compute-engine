@@ -373,8 +373,7 @@ function buildFactIndex(
       }
       // Symbol-vs-symbol edge: `pos - neg (≤|<) 0` ⇔ `neg ≥ pos` (or `neg > pos`).
       const diff = symbolDifference(ops[0]);
-      if (diff !== undefined)
-        addGeEdge(diff.neg, diff.pos, op === 'Less');
+      if (diff !== undefined) addGeEdge(diff.neg, diff.pos, op === 'Less');
       continue;
     }
 
@@ -710,7 +709,8 @@ function scaledSquare(
     }
   } else return undefined;
 
-  if (powerTerm === undefined || !isFunction(powerTerm, 'Power')) return undefined;
+  if (powerTerm === undefined || !isFunction(powerTerm, 'Power'))
+    return undefined;
   if (powerTerm.ops.length !== 2) return undefined;
   const base = powerTerm.op1;
   if (!isSymbol(base)) return undefined;

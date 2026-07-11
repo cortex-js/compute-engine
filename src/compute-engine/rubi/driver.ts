@@ -1091,11 +1091,7 @@ export class RubiDriver {
     // that does not close (a higher-degree `/xᵏ` needing complex Si/Ci, a
     // non-verifying assembly) stays cleanly unsolved. The emitted pieces are
     // single-trig (degree 1), so they cannot re-enter this fallback.
-    if (
-      this.trigActive &&
-      !NO_R27 &&
-      hasTrigProductCandidate(integrand)
-    ) {
+    if (this.trigActive && !NO_R27 && hasTrigProductCandidate(integrand)) {
       this.suppressRecording++;
       let F: Expression | null;
       try {
@@ -1158,7 +1154,11 @@ export class RubiDriver {
       const ratio = v.div(dv);
       if (dv.isSame(0) || ratio.has(variable)) return null;
       // Integrate the substituted rational function `g/x` of the new variable.
-      let inner = this.intRec(recanonicalize(ce, g.div(x)), variable, depth + 1);
+      let inner = this.intRec(
+        recanonicalize(ce, g.div(x)),
+        variable,
+        depth + 1
+      );
       // R26B: when that un-normalized shape does NOT close, retry once on its
       // rational normal form. The additive-denominator reciprocals
       // (`1/(a+b·sinh)`, cosh/tanh/coth/sech/csch) land here as a NESTED shape
@@ -1172,7 +1172,11 @@ export class RubiDriver {
       if (!NO_R26 && (inner === null || inner.has('Integrate'))) {
         const nf = rationalNormalFormX(g.div(x), variable);
         if (nf !== null) {
-          const retry = this.intRec(recanonicalize(ce, nf), variable, depth + 1);
+          const retry = this.intRec(
+            recanonicalize(ce, nf),
+            variable,
+            depth + 1
+          );
           if (retry !== null && !retry.has('Integrate')) inner = retry;
         }
       }

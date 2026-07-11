@@ -542,12 +542,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the Si-based kernel.
-        return apply(
-          x,
-          (x) => sinhIntegral(x),
-          undefined,
-          sinhIntegralComplex
-        );
+        return apply(x, (x) => sinhIntegral(x), undefined, sinhIntegralComplex);
       },
     },
 
@@ -557,7 +552,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
      * returned. Machine-precision only (no bignum kernel; ROADMAP B1).
      */
     CoshIntegral: {
-      description: 'Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.',
+      description:
+        'Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.',
       complexity: 5200,
       broadcastable: true,
       signature: '(number) -> number',
@@ -580,12 +576,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the Ci-based kernel.
-        return apply(
-          x,
-          (x) => coshIntegral(x),
-          undefined,
-          coshIntegralComplex
-        );
+        return apply(x, (x) => coshIntegral(x), undefined, coshIntegralComplex);
       },
     },
 

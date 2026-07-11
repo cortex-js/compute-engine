@@ -14,7 +14,11 @@ import {
   sym,
 } from '../boxed-expression/type-guards.js';
 import { expand } from '../boxed-expression/expand.js';
-import { factor, partialFraction, together } from '../boxed-expression/factor.js';
+import {
+  factor,
+  partialFraction,
+  together,
+} from '../boxed-expression/factor.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { SMALL_INTEGER, gcd } from '../numerics/numeric.js';
 import { primeFactors } from '../numerics/primes.js';
