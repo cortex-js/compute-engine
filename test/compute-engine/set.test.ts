@@ -361,3 +361,77 @@ describe('FINITE SET OPERATIONS (value tables)', () => {
     ).toMatchInlineSnapshot(`EmptySet`);
   });
 });
+
+describe('AMBIGUOUS BRACKET PAIRS: interval at the LaTeX boundary only', () => {
+  // `[a, b]` / `(a, b)` are read as intervals when they are direct operands
+  // of a set operator IN LATEX (`parsedIntervalOperand`,
+  // latex-syntax/dictionary/definitions-sets.ts). A directly-constructed
+  // MathJSON `List`/`Tuple` is a two-element collection, never an interval.
+
+  test('LaTeX: membership in a closed/open interval', () => {
+    expect(ce.parse('x \\in \\lbrack 1, 5 \\rbrack').json).toEqual([
+      'Element',
+      'x',
+      ['Interval', 1, 5],
+    ]);
+    expect(ce.parse('x \\in (1, 5)').json).toEqual([
+      'Element',
+      'x',
+      ['Interval', ['Open', 1], ['Open', 5]],
+    ]);
+    expect(ce.parse('1.5 \\in \\lbrack 1, 5 \\rbrack').evaluate().json).toEqual(
+      'True'
+    );
+  });
+
+  test('LaTeX: union/intersection of bracket-pair intervals', () => {
+    expect(
+      ce.parse('\\lbrack 1,2 \\rbrack \\cup \\lbrack 3,4 \\rbrack').json
+    ).toEqual(['Union', ['Interval', 1, 2], ['Interval', 3, 4]]);
+    expect(ce.parse('(-\\infty, 0) \\cup (0, \\infty)').json).toEqual([
+      'Union',
+      ['Interval', ['Open', 'NegativeInfinity'], ['Open', 0]],
+      ['Interval', ['Open', 0], ['Open', 'PositiveInfinity']],
+    ]);
+  });
+
+  test('LaTeX: set difference reads bracket pairs as intervals', () => {
+    // Regression: `\setminus` previously kept the raw Tuple/List (the
+    // engine-side coercion never covered it).
+    expect(ce.parse('\\R \\setminus (0,1)').json).toEqual([
+      'SetMinus',
+      'RealNumbers',
+      ['Interval', ['Open', 0], ['Open', 1]],
+    ]);
+  });
+
+  test('LaTeX: reversed membership and subset relations', () => {
+    expect(ce.parse('\\lbrack 1,5 \\rbrack \\ni x').json).toEqual([
+      'Element',
+      'x',
+      ['Interval', 1, 5],
+    ]);
+    expect(
+      ce.parse('\\lbrack 1,2 \\rbrack \\subset \\lbrack 0,5 \\rbrack').json
+    ).toEqual(['Subset', ['Interval', 1, 2], ['Interval', 0, 5]]);
+  });
+
+  test('MathJSON: a 2-element List is a collection, not an interval', () => {
+    // The trap this fixes: `Intersection([1,2], [2,3])` used to intersect
+    // INTERVALS ([1,2] ∩ [2,3] = {2} only by accident of the endpoints;
+    // Union([1,2],[3,4]) returned an interval union, not {1,2,3,4}).
+    expect(
+      ce.expr(['Intersection', ['List', 1, 2], ['List', 2, 3]]).evaluate().json
+    ).toEqual(['Set', 2]);
+    expect(
+      ce.expr(['Union', ['List', 1, 2], ['List', 3, 4]]).evaluate().json
+    ).toEqual(['Set', 1, 2, 3, 4]);
+    // Membership is collection membership: 1.5 is not an element of {1, 5}
+    expect(ce.expr(['Element', 1.5, ['List', 1, 5]]).evaluate().json).toEqual(
+      'False'
+    );
+    expect(ce.expr(['Element', 1, ['List', 1, 5]]).evaluate().json).toEqual(
+      'True'
+    );
+  });
+});

@@ -1,6 +1,7 @@
 import {
   operator,
   isEmptySequence,
+  missingIfEmpty,
   nops,
   operand,
   operands,
@@ -13,6 +14,7 @@ import {
   Serializer,
   LatexString,
   Parser,
+  Terminator,
   COMPARISON_PRECEDENCE,
 } from '../types.js';
 
@@ -65,6 +67,66 @@ function parseIntervalBody(
   const upperExpr: MathJsonExpression = openRight ? ['Open', upper] : upper;
 
   return ['Interval', lowerExpr, upperExpr];
+}
+
+/**
+ * Read an ambiguous bracket pair as an interval when it appears as a direct
+ * operand of a set operator or relation: in `x \in [1, 5]` or
+ * `(-\infty, 0) \cup (0, \infty)`, `[a, b]` (parsed as a 2-element `List`)
+ * is a closed interval and a parenthesized pair `(a, b)` is an open one.
+ *
+ * This reading happens HERE, at the LaTeX boundary. A directly-constructed
+ * MathJSON `["List", a, b]` (or a Cortex `[a, b]` literal) is a two-element
+ * collection, never an interval — set operations on it use collection
+ * semantics (e.g. `Intersection([1,2], [2,3])` → `Set(2)`). Unambiguous
+ * interval notations (`[a, b)`, `]a, b[`, …) have dedicated matchfix entries.
+ */
+function parsedIntervalOperand(
+  expr: MathJsonExpression | null
+): MathJsonExpression | null {
+  if (expr === null) return null;
+
+  // `[a, b]` — a bracket pair, parsed as a 2-element List
+  if (operator(expr) === 'List' && nops(expr) === 2)
+    return ['Interval', operand(expr, 1)!, operand(expr, 2)!];
+
+  // `(a, b)` — a parenthesized pair, parsed as a Delimiter sequence
+  if (operator(expr) === 'Delimiter') {
+    const delim = stringValue(operand(expr, 2)) ?? '(,)';
+    if (delim !== ',' && delim !== '(,)' && delim !== '()') return expr;
+    const body = operand(expr, 1);
+    if (operator(body) === 'Sequence' && nops(body!) === 2)
+      return [
+        'Interval',
+        ['Open', operand(body!, 1)!],
+        ['Open', operand(body!, 2)!],
+      ];
+  }
+
+  return expr;
+}
+
+/**
+ * The default infix parse (associativity `none`), reading ambiguous bracket
+ * pairs among the operands as intervals (`sides` selects which operands are
+ * set-valued: both for `\cup`, only the rhs for `\in`).
+ */
+function parseSetOperator(name: string, prec: number, sides: 'both' | 'rhs') {
+  return (
+    parser: Parser,
+    lhs: MathJsonExpression,
+    until: Readonly<Terminator>
+  ): MathJsonExpression | null => {
+    if (lhs === null) return null;
+    const rhs = missingIfEmpty(
+      parser.parseExpression({ ...until, minPrec: prec })
+    );
+    return [
+      name,
+      sides === 'both' ? parsedIntervalOperand(lhs)! : lhs,
+      parsedIntervalOperand(rhs)!,
+    ];
+  };
 }
 
 // Operator heads that indicate the LHS of a top-level Colon inside `{...}`
@@ -350,13 +412,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\cap'],
     kind: 'infix',
     precedence: 350,
+    parse: parseSetOperator('Intersection', 350, 'both'),
   },
   {
     // Unicode ∩ (U+2229 INTERSECTION): literal-glyph spelling of `\cap`.
     latexTrigger: ['∩'],
     kind: 'infix',
     precedence: 350,
-    parse: 'Intersection',
+    parse: parseSetOperator('Intersection', 350, 'both'),
   },
   {
     name: 'Interval',
@@ -479,13 +542,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\cup'],
     kind: 'infix',
     precedence: 350,
+    parse: parseSetOperator('Union', 350, 'both'),
   },
   {
     // Unicode ∪ (U+222A UNION): literal-glyph spelling of `\cup`.
     latexTrigger: ['∪'],
     kind: 'infix',
     precedence: 350,
-    parse: 'Union',
+    parse: parseSetOperator('Union', 350, 'both'),
   },
 
   // \mid as a separator/operator (used in set-builder notation: {x \mid x > 0})
@@ -624,6 +688,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\setminus'],
     kind: 'infix',
     precedence: 650,
+    parse: parseSetOperator('SetMinus', 650, 'both'),
   },
   {
     // `\backslash` between two expressions is a common spelling of set
@@ -634,7 +699,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\backslash'],
     kind: 'infix',
     precedence: 650,
-    parse: 'SetMinus',
+    parse: parseSetOperator('SetMinus', 650, 'both'),
   },
   {
     name: 'SymmetricDifference',
@@ -652,7 +717,10 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     precedence: 160, // As per MathML, lower precedence
     parse: (parser, lhs, terminator): MathJsonExpression | null => {
       const rhs = parser.parseExpression(terminator);
-      return rhs === null ? null : ['Element', rhs, lhs];
+      // Reversed membership: the COLLECTION is the lhs (`[1,5] \ni x`)
+      return rhs === null
+        ? null
+        : ['Element', rhs, parsedIntervalOperand(lhs)!];
     },
   },
   {
@@ -665,26 +733,28 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     // comprehension — rather than `Element(x, Colon(\R, x>0))`, which nested
     // the condition inside the domain. Still below comparisons (245).
     precedence: 241,
+    parse: parseSetOperator('Element', 241, 'rhs'),
   },
   {
     // Unicode ∈ (U+2208 ELEMENT OF): literal-glyph spelling of `\in`.
     latexTrigger: ['∈'],
     kind: 'infix',
     precedence: 241,
-    parse: 'Element',
+    parse: parseSetOperator('Element', 241, 'rhs'),
   },
   {
     name: 'NotElement',
     latexTrigger: ['\\notin'],
     kind: 'infix',
     precedence: 240,
+    parse: parseSetOperator('NotElement', 240, 'rhs'),
   },
   {
     // Unicode ∉ (U+2209 NOT AN ELEMENT OF): literal-glyph spelling of `\notin`.
     latexTrigger: ['∉'],
     kind: 'infix',
     precedence: 240,
-    parse: 'NotElement',
+    parse: parseSetOperator('NotElement', 240, 'rhs'),
   },
   {
     name: 'NotSubset',
@@ -719,7 +789,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\not', '\\in'],
     kind: 'infix',
     precedence: 240,
-    parse: 'NotElement',
+    parse: parseSetOperator('NotElement', 240, 'rhs'),
   },
   {
     // `\not\subset` is the composed spelling of `\nsubset` (⊄).
@@ -746,7 +816,10 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     parse: (parser, lhs, terminator): MathJsonExpression | null => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 240 });
       if (rhs === null) return null;
-      return ['Not', ['SubsetEqual', lhs, rhs]];
+      return [
+        'Not',
+        ['SubsetEqual', parsedIntervalOperand(lhs)!, parsedIntervalOperand(rhs)!],
+      ];
     },
   },
   {
@@ -783,20 +856,21 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
+    parse: parseSetOperator('Subset', 240, 'both'),
   },
   {
     latexTrigger: ['\\subsetneq'],
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: 'Subset',
+    parse: parseSetOperator('Subset', 240, 'both'),
   },
   {
     latexTrigger: ['\\varsubsetneqq'],
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: 'Subset',
+    parse: parseSetOperator('Subset', 240, 'both'),
   },
   {
     name: 'SubsetEqual',
@@ -804,6 +878,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
+    parse: parseSetOperator('SubsetEqual', 240, 'both'),
   },
   {
     name: 'Superset',
@@ -811,20 +886,21 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
+    parse: parseSetOperator('Superset', 240, 'both'),
   },
   {
     latexTrigger: ['\\supsetneq'],
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: 'Superset',
+    parse: parseSetOperator('Superset', 240, 'both'),
   },
   {
     latexTrigger: ['\\varsupsetneq'],
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: 'Superset',
+    parse: parseSetOperator('Superset', 240, 'both'),
   },
   {
     name: 'SupersetEqual',
@@ -832,6 +908,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
+    parse: parseSetOperator('SupersetEqual', 240, 'both'),
   },
 ];
 

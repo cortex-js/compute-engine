@@ -1089,14 +1089,14 @@ collection equality (computed/lazy/symbol-valued collections now compare equal
 to literals with the same elements, and collection-vs-collection `Equal` no
 longer broadcasts), and landed multi-variable `Solve([eq1, eq2], [x, y])`
 (ratified shape: a `List` of `Tuple`s in variable-list order, matching the
-multi-domain enumeration contract). Still open:
+multi-domain enumeration contract), and moved the interval reading of
+ambiguous bracket pairs to the LaTeX boundary (`x \in [1, 5]` unchanged;
+MathJSON/Cortex 2-element `List`s in set operations are now collections, so
+`Intersection([1,2], [2,3])` → `Set(2)`). Still open:
 
 - **`Inverse` of matrices with radical entries still floats.** The exact
   path requires rational entries; a matrix containing `√2` takes the
   numeric path under plain `evaluate()`.
-- **A 2-element list in set context is read as an `Interval`.**
-  `Intersection([1,2], [2,3])` intersects intervals, not 2-element sets
-  (`listToIntervalInSetContext`, shared with `Union` — pre-existing).
 
 ### Review residue (open low-priority items)
 

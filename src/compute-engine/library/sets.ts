@@ -120,36 +120,12 @@ function kleeneNot(v: boolean | undefined): boolean | undefined {
   return v === undefined ? undefined : !v;
 }
 
-/**
- * Transform a List or Tuple with exactly 2 elements to an Interval in set contexts.
- *
- * This enables contextual parsing where `[a, b]` and `(a, b)` are interpreted as
- * intervals when used as operands of set operations like Element, Union, etc.
- *
- * - `["List", a, b]` → `["Interval", a, b]` (closed interval [a, b])
- * - `["Tuple", a, b]` → `["Interval", ["Open", a], ["Open", b]]` (open interval (a, b))
- *
- * Returns the original expression unchanged if it's not a 2-element List/Tuple.
- */
-function listToIntervalInSetContext(
-  ce: ComputeEngine,
-  expr: Expression
-): Expression {
-  // Transform List with 2 elements to closed Interval
-  if (isFunction(expr, 'List') && expr.nops === 2) {
-    return ce.function('Interval', [expr.op1.canonical, expr.op2.canonical]);
-  }
-
-  // Transform Tuple with 2 elements to open Interval
-  if (isFunction(expr, 'Tuple') && expr.nops === 2) {
-    return ce.function('Interval', [
-      ce.function('Open', [expr.op1.canonical]),
-      ce.function('Open', [expr.op2.canonical]),
-    ]);
-  }
-
-  return expr.canonical;
-}
+// Note: the interval reading of ambiguous bracket pairs (`x \in [1, 5]`,
+// `(-\infty, 0) \cup (0, \infty)`) happens at the LaTeX boundary
+// (`parsedIntervalOperand` in `latex-syntax/dictionary/definitions-sets.ts`).
+// A directly-constructed MathJSON `["List", a, b]` or `["Tuple", a, b]` is a
+// two-element collection, never an interval, so set operations here apply
+// plain collection semantics to it.
 
 export const SETS_LIBRARY: SymbolDefinitions = {
   //
@@ -650,8 +626,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       }
 
       const [value, collection, condition] = args;
-      // Transform List/Tuple with 2 elements to Interval in set context
-      const canonicalCollection = listToIntervalInSetContext(ce, collection);
+      const canonicalCollection = collection.canonical;
 
       // `\mathbb{C}^+` sugar: the open upper half-plane is the part predicate
       // Im(value) > 0. Canonicalize membership away so assume()/verify(),
@@ -728,10 +703,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           ce.error('missing'),
         ]);
       const [value, collection] = args;
-      return ce._fn('NotElement', [
-        value.canonical,
-        listToIntervalInSetContext(ce, collection),
-      ]);
+      return ce._fn('NotElement', [value.canonical, collection.canonical]);
     },
     evaluate: ([value, collection], { engine: ce }) => {
       if (!collection) return undefined;
@@ -749,11 +721,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       'Test whether the first collection is a strict subset of the second.',
     canonical: (args, { engine: ce }) => {
       if (args.length !== 2) return ce._fn('Subset', args);
-      // Transform List/Tuple with 2 elements to Interval in set context
-      return ce._fn('Subset', [
-        listToIntervalInSetContext(ce, args[0]),
-        listToIntervalInSetContext(ce, args[1]),
-      ]);
+      return ce._fn('Subset', [args[0].canonical, args[1].canonical]);
     },
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(lhs, rhs);
@@ -770,11 +738,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       'Test whether the first collection is a subset (possibly equal) of the second.',
     canonical: (args, { engine: ce }) => {
       if (args.length !== 2) return ce._fn('SubsetEqual', args);
-      // Transform List/Tuple with 2 elements to Interval in set context
-      return ce._fn('SubsetEqual', [
-        listToIntervalInSetContext(ce, args[0]),
-        listToIntervalInSetContext(ce, args[1]),
-      ]);
+      return ce._fn('SubsetEqual', [args[0].canonical, args[1].canonical]);
     },
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(lhs, rhs, false);
@@ -804,11 +768,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       'Test whether the first collection is a strict superset of the second.',
     canonical: (args, { engine: ce }) => {
       if (args.length !== 2) return ce._fn('Superset', args);
-      // Transform List/Tuple with 2 elements to Interval in set context
-      return ce._fn('Superset', [
-        listToIntervalInSetContext(ce, args[0]),
-        listToIntervalInSetContext(ce, args[1]),
-      ]);
+      return ce._fn('Superset', [args[0].canonical, args[1].canonical]);
     },
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(rhs, lhs); // reversed
@@ -825,11 +785,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       'Test whether the first collection is a superset (possibly equal) of the second.',
     canonical: (args, { engine: ce }) => {
       if (args.length !== 2) return ce._fn('SupersetEqual', args);
-      // Transform List/Tuple with 2 elements to Interval in set context
-      return ce._fn('SupersetEqual', [
-        listToIntervalInSetContext(ce, args[0]),
-        listToIntervalInSetContext(ce, args[1]),
-      ]);
+      return ce._fn('SupersetEqual', [args[0].canonical, args[1].canonical]);
     },
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(rhs, lhs, true); // reversed
@@ -924,13 +880,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
       if (args.length === 1) return ce.symbol('EmptySet');
-      // Transform List/Tuple with 2 elements to Interval in set context
-      const transformedArgs = args.map((arg) =>
-        listToIntervalInSetContext(ce, arg)
-      );
       const validatedArgs = validateSetArguments(
         ce,
-        flatten(transformedArgs, 'Intersection'),
+        flatten(
+          args.map((arg) => arg.canonical),
+          'Intersection'
+        ),
         '(collection+) -> set'
       );
       return ce._fn('Intersection', validatedArgs);
@@ -955,13 +910,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description: 'Return the union of two or more collections as a set.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
-      // Transform List/Tuple with 2 elements to Interval in set context
-      const transformedArgs = args.map((arg) =>
-        listToIntervalInSetContext(ce, arg)
-      );
       const validatedArgs = validateSetArguments(
         ce,
-        flatten(transformedArgs, 'Union'),
+        flatten(
+          args.map((arg) => arg.canonical),
+          'Union'
+        ),
         '(collection+) -> set'
       );
       // Even if there is only one argument, we still need to call Union
