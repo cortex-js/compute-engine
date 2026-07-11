@@ -3,7 +3,8 @@
 **Date:** 2026-06-10 (feasibility); last status update 2026-07-11.
 **Status:** shipped bundle = **Chapters 1, 2, 3, 5, 6, 7 + 4.1 Sine + 4.3 Tangent +
 4.5 Secant + §8.8 Polylogarithm** (6,574 rules, 6.98 MB). Chapter-1 exhaustive
-≈90–91%; ch2 ≈72% / ch6 ≈52% effective (R29: **62/120** s120 seed5, +16);
+≈90–91%; ch2 ≈72% / ch6 ≈59% effective (R30: **71/120** s120 seed5, +9 over the
+R29 baseline via the rational-in-hyperbolic cyclotomic-factored substitution);
 **4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
 71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R24, s120 seed5):
@@ -1970,6 +1971,95 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     change-of-variable identity `g(Sinh(x))·Cosh(x) ≡ integrand` at mixed-sign
     points, and off-shape → empty for a bare-`x`/nonlinear-argument/no-hyperbolic
     integrand).
+- **Phase R30 — rational-in-hyperbolic cyclotomic-factored substitution LANDED
+  (2026-07-11).** The ROADMAP "R6′" item. **Phase-1 census (ch6 Hyperbolic
+  s120 seed5).** The triage was taken on a flutter-low snapshot (60c/0w/56u —
+  2c under the R29-documented 62 from verify-flutter/CPU-contention timeouts);
+  the clean-A/B baseline (`RUBI_NO_R30=1`) is 62c/0w/53u. The 56-row census
+  below is that snapshot, by expected-antiderivative content + driver mechanism:
+
+  | class | count | mechanism / blocker |
+  |---|---|---|
+  | **fn-of-exp** (pure function of one `e^v`, R6′ target) | 36 | see sub-table |
+  | poly×hyperbolic `(e+f·x)^m·hyp^n/(a+b·hyp)` | 11 | NOT a function of one exponential (poly coefficient) — by-parts machinery, out of scope |
+  | expected-`Unintegrable` | 7 | Rubi returns unevaluated — CE's inert `Integrate` is the correct match |
+  | nonlinear hyperbolic argument `sinh(a+b·x+c·x²)` | 2 | out of scope |
+
+  The 36 fn-of-exp targets, by the substituted rational's residual after
+  peeling the cyclotomic factors:
+
+  | sub-class | count | outcome |
+  |---|---|---|
+  | residual degree 0 (pure-cyclotomic, e.g. `(a+b·Tanh²)³·Tanh⁴`) | 9 | **R30 closes standalone** |
+  | residual degree 2 (one symbolic quadratic, e.g. `Tanh²/(a+b·Tanh)`) | 6 | **R30 closes standalone** (5; `Cosh⁴/(a+b·Csch)` #93 fails the branch-safe D-check → declined; it is not-evaluable in BOTH toggle states via a pre-existing `+∞` artifact from an earlier fallback, so R30 neither fixes nor regresses it) |
+  | residual degree ≥ 4 (`(a+b·hyp²)`, `(a+b·hyp)²`, `sinh⁴` → symbolic quartic+) | 14 | genuine R6′ residual — a symbolic quartic root-finder, out of a contained rung's reach |
+  | fractional/symbolic-power leak (`Tanh⁵/√(a+b·Sech)`, `(a+b·Sinh²)^p·Tanh²`) | 7 | `rationalNormalFormX` rejects — R29 / elliptic / algebraic territory |
+
+  - **Premise correction (probe-confirmed).** The blocker is NOT "genuine
+    polynomial factoring over free parameters." The `t = e^v` substitution's
+    denominator ALWAYS factors as `x^m·(x²+1)^p·(x²−1)^q·S(x)` with the
+    cyclotomic factors NUMERIC (they come from `sinh/cosh = (t∓1/t)/2`) and `S`
+    the LOW-degree `(a+b·hyp)` parameter residual. The bundled 1.2.x
+    partial-fraction rules already close `poly/(x²+c·x²+…)` symbolic denominators
+    (probes: `∫x/(a+c·x²+b·x⁴)`, `(d+e·x²)/(a+b·x⁴)`), AND they close the
+    integrand when its denominator is presented FACTORED (`x·(x²+1)²·((a+b)x²+
+    (a−b))`) — but the R26B retry `rationalNormalFormX` **expands** the
+    denominator into one high-degree polynomial no rule factors, so the row
+    strands. The fix is to keep the cyclotomic factors factored.
+  - **Mechanism.** New driver fallback `hyperbolicRationalFactored` (the LAST
+    fallback in `intUncached`, after the exp/mixed-parity/algebraic-hyperbolic
+    fallbacks — so it never preempts a cleaner route and currently-solved rows
+    are untouched; behind `RUBI_NO_R30`) + `hyperbolicRationalFactoredForm` in
+    `rubi-utils.ts`. Cheap O(nodes) pre-filter (`hasHyperbolicRationalCandidate`
+    — a hyperbolic head AND no fractional power, so the R29 algebraic family is
+    excluded). It runs the `functionOfExponentialSubstitution`, flattens `g/x` to
+    `N/D` via `rationalNormalFormX(…, clearNegatives)` (a NEW opt-in flag that
+    multiplies through by `x^(−kmin)` to clear the negative powers a hyperbolic
+    power ≥ 2 leaves; default off so R26B and ch2 stay byte-identical), peels the
+    numeric cyclotomic factors `x`, `x²+1`, `x²−1`, `x−1`, `x+1` by exact
+    coefficient-array division (`divIfExactNumeric` — the divisor's numeric
+    leading coefficient makes each quotient coefficient well-defined even with
+    free parameters; exactness by `expand`-to-0), and routes the FACTORED
+    rational (reused `x` ≡ `t`) through `intRec`, then back-substitutes
+    `x → e^v`. Accept only if the assembled antiderivative passes a **branch-safe**
+    D-check: `antiderivativeVerifies` at MIXED-SIGN x AND **three parameter
+    seeds** (0.41/1.31/0.73), so a form that verifies on one branch of the
+    residual quadratic's `√(β²−4αγ)` arctan/artanh but not another is rejected
+    (`antiderivativeVerifies` gained an optional `paramSeed`, default 0.41 →
+    every existing caller byte-identical).
+  - **Before→after (ch6 Hyperbolic s120 seed5, clean per-problem A/B: R30-on vs
+    `RUBI_NO_R30=1`, both fresh so under the same flutter conditions).**
+    solved-correct **62 → 71** (+9), solved-wrong **0 → 0**, unsolved **53 → 44**,
+    not-evaluable 4 → 4. The per-problem diff is **9 flips unsolved→correct, 0
+    regressions, 0 flutter diffs**: 6.1.5 #215/#231, 6.1.7 #213, 6.3.2 #117/#136,
+    6.5.3 #108, 6.5.7 #10, 6.6.3 #68, 6.7.1 #655. (`RUBI_NO_R30=1` is
+    byte-identical at the driver level — the `if (!NO_R30 …)` guard short-circuits
+    the whole R30 code path; the count noise vs the flutter-low triage snapshot is
+    harness verification timing, not the driver. #133/#186, which appear in a
+    triage-snapshot vs R30 diff, close in BOTH toggle states — they are flutter,
+    not R30, so they are excluded here.) A standalone driver probe over all 36
+    fn-of-exp targets closes **15** (14 D-verify; #93 declined) — the benchmark
+    realizes 9 of them net under its CPU-contention verification budget (heavy ch6
+    D-checks flutter under load), so +9 is the conservative measured figure.
+    **New genuine wrongs = 0.** The
+    residual-degree-≥4 fn-of-exp rows (`Sinh⁶/(a+b·Cosh²)`, `Csch⁴/(I+Sinh)²`,
+    `Sinh⁴/(a+b·Sech²)²`, `Coth⁵/(a+b·Coth)`) and the branch-hazard `Cosh⁴/(a+b·
+    Csch)` #93 (declined by the D-check) stay cleanly unsolved — their symbolic
+    quartic-or-higher residual is the genuine R6′ tail a contained rung cannot
+    factor.
+  - **Guards (= expected; R30 is structurally inert off the hyperbolic chapters —
+    the `containsHyperbolic` pre-filter cannot fire in the algebraic/exponential/
+    log/inverse-trig chapters, and the `clearNegatives` flag is default-off so
+    R26B/ch2's `rationalNormalFormX` retry is unchanged).** ch1 1.1 **112/4w**,
+    1.1.3 s200 **185**, ch2 (shares the exp-substitution fallback) **82/3w**,
+    ch3 **70/4w**, 5.3 **64/0w** — every guard matches its expected value exactly.
+  - **Tests.** `integration-rules.test.ts` R30 block (4 D-verified end-to-ends —
+    #136/#231/#108/#156 shapes, D-verified on Re of a central-differenced F.N() —
+    + `RUBI_NO_R30` gate meaningful in both directions); `rubi-utils.test.ts`
+    `hyperbolicRationalFactoredForm` block (the pre-filter true/false, the
+    factored form's exact-identity with the expanded normal form at several
+    (a,b,x) samples + a genuinely-factored `Multiply` denominator, and off-shape
+    → null for algebraic/no-hyperbolic integrands).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

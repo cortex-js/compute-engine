@@ -1079,6 +1079,71 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     });
   });
 
+  // R30: rational-in-hyperbolic cyclotomic-factored substitution (RUBI.md §5,
+  // Phase R30; driver `hyperbolicRationalFactored` + rubi-utils
+  // `hyperbolicRationalFactoredForm`). A RATIONAL (integer-power) hyperbolic of a
+  // common linear argument v, with a hyperbolic power ≥ 2, substitutes (t = eᵛ)
+  // to a rational function of t whose flattened denominator is a high-degree
+  // polynomial the bundled 1.2.x rules cannot factor over the free parameters —
+  // but which always factors as `x^m·(x²+1)^p·(x²−1)^q·S(x)`. Keeping the
+  // cyclotomic factors factored lets the bundled partial-fraction rules close it.
+  // The artanh/arctan antiderivatives carry the residual quadratic's √(β²−4αγ)
+  // (complex principal value off one branch — R28b), so they are D-verified on
+  // Re of a central-differenced F.N() with symbolic parameters fixed.
+  describe('rational-in-hyperbolic cyclotomic-factored substitution (Chapter-6, R30)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    ce.timeLimit = 30_000; // partial-fraction / artanh pieces are slow under ts-jest
+
+    const verify = (
+      latex: string,
+      params: Record<string, number> = { a: 1.3, b: 0.7 },
+      samples: number[] = [0.35, 0.62, 0.88, 1.15]
+    ) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ ...params, x: v }).N().re as number;
+      let checked = 0;
+      for (const x of samples) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ ...params, x }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        expect(Math.abs(d - f)).toBeLessThan(1e-4 * (1 + Math.abs(f)));
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    };
+
+    // #136-shape: tanh²/(a+b·tanh) — denominator x·(x²+1)²·((a+b)x²+(a−b)).
+    test('∫Tanh(x)²/(a+b·Tanh(x)) dx (#136)', () =>
+      verify('\\frac{\\tanh(x)^2}{a+b\\tanh(x)}'));
+
+    // #231-shape: tanh/(a+b·sinh) — residual (x²+1)·(symbolic quadratic).
+    test('∫Tanh(x)/(a+b·Sinh(x)) dx (#231)', () =>
+      verify('\\frac{\\tanh(x)}{a+b\\sinh(x)}'));
+
+    // #108-shape: tanh/(a+a·Sech) — residual carries (x+1)² and one parameter.
+    test('∫Tanh(x)/(a+a·Sech(x)) dx (#108)', () =>
+      verify('\\frac{\\tanh(x)}{a+a\\sech(x)}', { a: 1.1 }));
+
+    // #156-shape: (a+b·Tanh²)³·Tanh⁴ — a polynomial in tanh; the substituted
+    // denominator is PURE cyclotomic (x^m·(x²−1)^k, no parameter residual).
+    test('∫(a+b·Tanh(x)²)³·Tanh(x)⁴ dx (#156)', () =>
+      verify('(a+b\\tanh(x)^2)^3\\tanh(x)^4'));
+
+    // Toggle meaningfulness: `NO_R30` is captured at module load, so this branches
+    // on the env var present at process start — the default suite proves the
+    // closure, a `RUBI_NO_R30=1` run proves it goes inert.
+    test('∫Tanh(x)²/(a+b·Tanh(x)) is gated by RUBI_NO_R30', () => {
+      const F = ce.parse('\\int \\frac{\\tanh(x)^2}{a+b\\tanh(x)} \\, dx').evaluate();
+      if (process.env.RUBI_NO_R30 === undefined)
+        expect(F.has('Integrate')).toBe(false);
+      else expect(F.has('Integrate')).toBe(true);
+    });
+  });
+
   // ── Integration variable other than `x` (R26A). ──
   // The bundled rules all carry `variable: "x"`; every RHS references the
   // integration variable as the string token `"x"`. The match env does not

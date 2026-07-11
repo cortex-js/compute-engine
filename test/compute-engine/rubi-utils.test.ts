@@ -31,6 +31,8 @@ import {
   mixedParityRadicalPieces,
   algebraicHyperbolicSubstitutions,
   hasAlgebraicHyperbolicCandidate,
+  hyperbolicRationalFactoredForm,
+  hasHyperbolicRationalCandidate,
   rationalNormalFormX,
   polyDegreeX,
   RuleFail,
@@ -1690,3 +1692,115 @@ describe('rationalNormalFormX (R26B)', () => {
     expect(rationalNormalFormX(e, 'x')).toBeNull();
   });
 });
+
+// hyperbolicRationalFactoredForm / hasHyperbolicRationalCandidate — the R30
+// rational-in-hyperbolic cyclotomic-factored substitution plumbing (RUBI.md §5,
+// Phase R30). The pre-filter recognizes a rational (integer-power) hyperbolic;
+// the form builder returns the `t = e^v` substituted rational whose denominator
+// is kept FACTORED as `x^m·(x²+1)^p·(x²−1)^q·S(x)`. The factored form is the same
+// rational function as the (expanded) normal form — an exact identity.
+describe('hyperbolicRationalFactoredForm (R30 cyclotomic-factored substitution)', () => {
+  const engine = new ComputeEngine();
+
+  test('pre-filter: true on rational hyperbolics, false on algebraic/non-hyperbolic', () => {
+    const yes = [
+      '\\frac{\\tanh(x)^2}{a+b\\tanh(x)}',
+      '\\frac{\\coth(x)^5}{a+b\\coth(x)}',
+      '\\frac{1}{a+b\\sinh(x)^2}',
+      '(\\csch(x)+\\coth(x))^5',
+    ];
+    for (const s of yes)
+      expect(hasHyperbolicRationalCandidate(engine.parse(s).canonical)).toBe(
+        true
+      );
+    const no = [
+      '\\sqrt{a+b\\tanh(x)^2}', // fractional power of a hyperbolic (R29's domain)
+      '\\frac{\\csch(x)}{(a+b\\sinh(x)^2)^{3/2}}', // half-integer power
+      '\\frac{1}{a+b x^2}', // no hyperbolic
+      'x^2+1',
+    ];
+    for (const s of no)
+      expect(hasHyperbolicRationalCandidate(engine.parse(s).canonical)).toBe(
+        false
+      );
+  });
+
+  test('the factored form equals the substituted rational (exact identity), with a factored denominator', () => {
+    // ∫tanh²/(a+b·tanh) dx: t=eˣ ⇒ denominator x·(x²+1)²·((a+b)x²+(a−b)).
+    const integrand = engine.parse('\\frac{\\tanh(x)^2}{a+b\\tanh(x)}').canonical;
+    const r = hyperbolicRationalFactoredForm(engine, integrand, 'x');
+    expect(r).not.toBeNull();
+    // Compare against the un-factored normal form (x plays the role of t = eˣ):
+    // the factored and expanded denominators describe the identical rational
+    // function of the exp variable, at several (a,b,x) samples.
+    const flat = rationalNormalFormX(
+      hyperbolicSubstituted(engine, integrand),
+      'x',
+      true
+    );
+    expect(flat).not.toBeNull();
+    for (const [a, b, xv] of [
+      [1.3, 0.7, 0.6],
+      [0.7, 1.3, 1.4],
+      [2.1, 0.5, 0.8],
+    ]) {
+      const got = r!.form.subs({ a, b, x: xv }).N().re as number;
+      const want = flat!.subs({ a, b, x: xv }).N().re as number;
+      expect(typeof got).toBe('number');
+      expect(got).toBeCloseTo(want, 7);
+    }
+    // the denominator is genuinely FACTORED (a Multiply of cyclotomic factors ×
+    // the symbolic residual), not a single expanded polynomial.
+    const den = r!.form.numeratorDenominator[1];
+    expect(den.operator).toBe('Multiply');
+    // the ratio v/v′ is x-free (v = eˣ, v′ = eˣ ⇒ ratio = 1 here).
+    expect(r!.ratio.has('x')).toBe(false);
+  });
+
+  test('declines off-shape integrands (returns null)', () => {
+    // algebraic-in-hyperbolic (fractional power) — not a rational function of eˣ
+    expect(
+      hyperbolicRationalFactoredForm(
+        engine,
+        engine.parse('\\sqrt{a+b\\tanh(x)^2}').canonical,
+        'x'
+      )
+    ).toBeNull();
+    // no hyperbolic at all
+    expect(
+      hyperbolicRationalFactoredForm(
+        engine,
+        engine.parse('\\frac{1}{a+b x^2}').canonical,
+        'x'
+      )
+    ).toBeNull();
+  });
+});
+
+// Substitute t = eˣ into a hyperbolic-rational integrand, mirroring the driver
+// step, so the test can compare the factored form against the flat normal form.
+function hyperbolicSubstituted(
+  engine: ComputeEngine,
+  integrand: Expression
+): Expression {
+  // sinh = (x−1/x)/2, cosh = (x+1/x)/2, etc. (x ≡ t = eˣ); divide by the
+  // Jacobian x (dt = t dx). Uses the same functionOfExponentialSubstitution the
+  // builder does, so the two normal forms describe the identical rational fn.
+  const X = engine.symbol('x');
+  const sinh = X.sub(engine.One.div(X)).div(engine.number(2));
+  const cosh = X.add(engine.One.div(X)).div(engine.number(2));
+  const map: Record<string, Expression> = {
+    Sinh: sinh,
+    Cosh: cosh,
+    Tanh: sinh.div(cosh),
+    Coth: cosh.div(sinh),
+    Sech: engine.One.div(cosh),
+    Csch: engine.One.div(sinh),
+  };
+  const walk = (u: Expression): Expression => {
+    if (u.operator in map && u.ops?.length === 1) return map[u.operator];
+    if (!u.ops || u.ops.length === 0) return u;
+    return engine.function(u.operator, u.ops.map(walk));
+  };
+  return walk(integrand).div(X);
+}

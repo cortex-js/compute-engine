@@ -523,9 +523,9 @@ Inverse hyperbolic (R22): 7.1 sine 79/120, 7.2 cosine 51,
 ungated `containsHyperbolic` fallback)**, **ch1 1.1 Binomial products 112/120
 (post-R28)**, **1.1.3 General 185/200 s200 (post-R28: unsolved 6 → 1; the
 survivor #259 is an integer-power rational)**, ch1 exhaustive ≈90–91%,
-ch2 ≈72% effective (seed 42), **ch6 Hyperbolics 62/120 (s120 seed 5,
-post-R29: 46 → 62, +16 algebraic-in-hyperbolic flips, and the 6.4.2 #158
-genuine wrong resolved → 0 wrongs — see R29)**,
+ch2 ≈72% effective (seed 42), **ch6 Hyperbolics 71/120 (s120 seed 5,
+post-R30: 62 → 71, +9 rational-in-hyperbolic cyclotomic-factored flips over the
+post-R29 baseline; 0 wrongs — see R30/R29)**,
 Wester indefinite-∫ 6/8.
 **R28 (2026-07-11)** — two composable parts; the "elliptic route" premise
 dissolved under diagnosis (atomic elliptic terminals already close and
@@ -624,7 +624,8 @@ trig-bridge), `RUBI_NO_R25` (R25 quartic-denominator ExpandIntegrand guard),
 fallback), `RUBI_NO_R27` (poly×trig-product reduction fallback),
 `RUBI_NO_R28` (R28a mixed-parity Laurent-numerator × binomial-radical
 linearity split), `RUBI_NO_R29` (R29 algebraic-in-hyperbolic
-`u = Sinh/Cosh/Tanh[v]` substitution fallback).
+`u = Sinh/Cosh/Tanh[v]` substitution fallback), `RUBI_NO_R30` (R30
+rational-in-hyperbolic cyclotomic-factored `t = e^v` substitution fallback).
 **Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
 power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
 shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`
@@ -752,11 +753,29 @@ CE's inert `Integrate` is the correct match — 1 ₚFq, 4 Weierstrass-form
 `∞`-collapse pathology) is mostly shared capability rather than
 Ch6-specific:
 
-- **R6′ — general symbolic factoring/partial fractions.** The substituted
-  rationals now close through the quadratic / `x^m·R` shapes; higher-degree
-  symbolic denominators that need genuine polynomial factoring over free
-  parameters (the shared 1.3.2 gap) still decline — a smaller item than the
-  original R6 framing, worth pursuing only against a named family.
+- **R6′ — rational-in-hyperbolic cyclotomic-factored substitution — LANDED as
+  R30 (2026-07-11, behind `RUBI_NO_R30`).** Premise correction: the blocker was
+  NOT "genuine polynomial factoring over free parameters." A rational
+  (integer-power) hyperbolic of a common linear argument substitutes (`t = e^v`)
+  to a rational function of `t` whose denominator ALWAYS factors as
+  `x^m·(x²+1)^p·(x²−1)^q·S(x)` — cyclotomic factors NUMERIC (from `sinh/cosh =
+  (t∓1/t)/2`), `S` the low-degree `(a+b·hyp)` residual. The bundled 1.2.x
+  partial-fraction rules already close symbolic biquadratic denominators AND the
+  FACTORED integrand, but the R26B `rationalNormalFormX` retry EXPANDS the
+  denominator into one high-degree polynomial no rule factors, stranding the row.
+  A LAST-resort driver fallback keeps the cyclotomic factors factored (peeling
+  them by exact coefficient-array division after a new `clearNegatives`
+  normal-form pass), routes the factored rational through the driver, and
+  back-substitutes; fail-closed with a branch-safe (mixed-sign x, three
+  parameter seeds) D-check. ch6 **62 → 71/120** (+9, s120 seed5, clean
+  per-problem A/B via `RUBI_NO_R30=1`: 9 flips, 0 regressions, 0 wrongs).
+  **Residual
+  (still unsolved):** the residual-degree-≥4 fn-of-exp rows (`Sinh⁶/(a+b·Cosh²)`,
+  `Csch⁴/(I+Sinh)²`, `Sinh⁴/(a+b·Sech²)²`, `Coth⁵/(a+b·Coth)`) whose symbolic
+  quartic-or-higher residual needs a genuine root-finder — the true R6′ tail, out
+  of a contained rung's reach — plus the 11 poly×hyperbolic `(e+f·x)^m·hyp^n/
+  (a+b·hyp)` rows (by-parts machinery) and 7 expected-`Unintegrable`. See
+  docs/rubi/RUBI.md §5 R30.
 - **R7 — algebraic-in-hyperbolic substitution plumbing — LANDED as R29
   (2026-07-11, behind `RUBI_NO_R29`).** The 21-row algebraic-in-hyperbolic
   class (`(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh²)`, half-integer hyperbolic powers)

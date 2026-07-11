@@ -46,6 +46,10 @@
   `\int\sqrt{a+b\operatorname{csch}^2 x}\,dx` now close in elementary form via a
   hyperbolic substitution. This also fixes a wrong-answer case,
   `\int\frac{\sqrt{\coth(a+b\ln(cx^n))}}{x}\,dx`.
+- **More integrals that are rational in a hyperbolic function are supported.**
+  Ratios of hyperbolic functions with a squared-or-higher power, such as
+  `\int\frac{\tanh^2 x}{a+b\tanh x}\,dx`, `\int\frac{\tanh x}{a+b\sinh x}\,dx`,
+  and `\int(a+b\tanh^2 x)^3\tanh^4 x\,dx`, now close in elementary form.
 
 ### Library and Definitions
 

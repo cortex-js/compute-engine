@@ -68,6 +68,24 @@ import {
 // xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html
 // https://www.haskell.org/onlinereport/haskell2010/haskellch9.html#x16-1720009.1
 
+// Split a string into grapheme clusters (UAX #29, via `Intl.Segmenter`).
+// Shared by `Characters` and its synonym `GraphemeClusters`.
+function splitGraphemeClusters(s: string): string[] {
+  const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
+  return Array.from(segmenter.segment(s), (seg) => seg.segment);
+}
+
+// The Unicode White_Space property, spelled out code point by code point so
+// the definition of "whitespace" used by `StringSplit` does not depend on
+// the host's interpretation of `\s`:
+// U+0009..U+000D (tab, LF, VT, FF, CR), U+0020 (space), U+0085 (NEL),
+// U+00A0 (no-break space), U+1680 (Ogham space mark), U+2000..U+200A
+// (en quad..hair space), U+2028 (line sep), U+2029 (para sep), U+202F
+// (narrow no-break space), U+205F (medium mathematical space),
+// U+3000 (ideographic space).
+const UNICODE_WHITESPACE =
+  /[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
+
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
     // The sole member of the unit type, `nothing`
@@ -1648,33 +1666,39 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    // Split a string into a list of single-character strings, one per Unicode
-    // code point (so astral characters stay whole). A non-string argument
-    // leaves the expression unevaluated, mirroring `StringJoin`.
+    // Split a string into a list of user-perceived characters — grapheme
+    // clusters (UAX #29) — so a combining-mark sequence or a ZWJ emoji is a
+    // single element. For stable, Unicode-version-independent decompositions
+    // use `UnicodeScalars` (code points as integers) or `Utf8`/`Utf16` (code
+    // units). A non-string argument leaves the expression unevaluated,
+    // mirroring `StringJoin`.
     Characters: {
       description: [
-        'Characters(s): split a string into a list of single-character ' +
-          'strings, one per Unicode code point. A non-string argument leaves ' +
-          'the expression unevaluated.',
+        'Characters(s): split a string into a list of user-perceived ' +
+          'characters (grapheme clusters). Synonym: GraphemeClusters. For ' +
+          'stable integer decompositions see UnicodeScalars, Utf8 and Utf16. ' +
+          'A non-string argument leaves the expression unevaluated.',
       ],
       signature: '(string) -> list<string>',
       evaluate: ([s], { engine }) => {
         if (!isString(s)) return undefined;
         return engine.function(
           'List',
-          [...s.string].map((c) => engine.string(c))
+          splitGraphemeClusters(s.string).map((c) => engine.string(c))
         );
       },
     },
 
     // Split a string into a list of substrings. With no separator, split on
-    // runs of whitespace, dropping empty parts. With a separator string, use
+    // runs of whitespace — the Unicode White_Space set spelled out in
+    // `UNICODE_WHITESPACE`, not `\s`, so the behavior does not depend on the
+    // host regex engine — dropping empty parts. With a separator string, use
     // JS `String.split` semantics (empty parts are kept). A non-string
     // argument leaves the expression unevaluated.
     StringSplit: {
       description: [
-        'StringSplit(s): split a string on runs of whitespace, dropping ' +
-          'empty parts.',
+        'StringSplit(s): split a string on runs of whitespace (the Unicode ' +
+          'White_Space code points), dropping empty parts.',
         'StringSplit(s, sep): split a string on the separator string `sep` ' +
           '(empty parts are kept). A non-string argument leaves the ' +
           'expression unevaluated.',
@@ -1684,7 +1708,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (!isString(s)) return undefined;
         let parts: string[];
         if (sep === undefined) {
-          parts = s.string.split(/\s+/).filter((p) => p.length > 0);
+          parts = s.string
+            .split(UNICODE_WHITESPACE)
+            .filter((p) => p.length > 0);
         } else {
           if (!isString(sep)) return undefined;
           parts = s.string.split(sep.string);
@@ -1807,17 +1833,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    // Synonym of `Characters` (which is the preferred name); kept for
+    // compatibility (shipped since v0.30).
     GraphemeClusters: {
-      description: 'A collection of grapheme clusters from a string.',
+      description:
+        'A collection of grapheme clusters from a string. Synonym of Characters.',
       signature: '(string) -> list<string>',
       evaluate: ([str], { engine }) => {
         if (!isString(str)) return undefined;
-        // Use Intl.Segmenter to split the string into grapheme clusters
-        const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
-        const graphemes = Array.from(segmenter.segment(str.string), (seg) =>
-          engine.string(seg.segment)
+        return engine.function(
+          'List',
+          splitGraphemeClusters(str.string).map((c) => engine.string(c))
         );
-        return engine.function('List', graphemes);
       },
     },
 
