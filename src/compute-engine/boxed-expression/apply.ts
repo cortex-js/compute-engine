@@ -87,6 +87,20 @@ export function shouldNumericize(
   return ops.some((op) => op != null && !isExactNumber(op));
 }
 
+/**
+ * True if a kernel result is `undefined` or a NaN number/Complex/BigDecimal —
+ * the signal that the value is "outside this kernel's implemented (real)
+ * domain", used to trigger a cascade to a complex-valued kernel. A boxed
+ * `Expression` result is never a domain signal and never cascades.
+ */
+function isNaNKernelResult(r: unknown): boolean {
+  if (r === undefined) return true;
+  if (typeof r === 'number') return Number.isNaN(r);
+  if (r instanceof Complex) return r.isNaN();
+  if (r instanceof BigDecimal) return r.isNaN();
+  return false;
+}
+
 export function apply(
   expr: Expression,
   fn: (x: number) => number | Complex,
@@ -99,14 +113,18 @@ export function apply(
   let result: number | Complex | BigDecimal | undefined = undefined;
   if (expr.im !== 0) result = complexFn?.(ce.complex(expr.re, expr.im));
   else {
+    const re = expr.re;
     const bigRe = expr.bignumRe;
     if (bigRe !== undefined && bignumPreferred(ce) && bigFn)
       result = bigFn(bigRe);
-    else {
-      const re = expr.re;
-      if (bignumPreferred(ce) && bigFn) result = bigFn(ce.bignum(re));
-      else result = fn(re);
-    }
+    else if (bignumPreferred(ce) && bigFn) result = bigFn(ce.bignum(re));
+    else result = fn(re);
+
+    // Cascade to the complex kernel when the real-domain kernel signals
+    // "outside its domain" with NaN (e.g. `arctanh(2)`, `arcsin(2)`): the
+    // value is complex for these real inputs. Mirrors `applyN`'s NaN cascade.
+    if (complexFn && Number.isFinite(re) && isNaNKernelResult(result))
+      result = complexFn(ce.complex(re, 0));
   }
 
   if (result === undefined) return undefined;

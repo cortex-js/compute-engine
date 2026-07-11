@@ -2,6 +2,34 @@
 
 ### Compute Engine
 
+- **Inverse trig/hyperbolic functions evaluate off their real domain.**
+  `.N()` now returns the complex principal value where the real branch is
+  undefined — `\operatorname{artanh}(2)` → `0.549 − 1.571i`,
+  `\arcsin(2)` → `1.571 − 1.317i`, `\operatorname{arcosh}(0.5)` →
+  `1.047i` — and for complex arguments (`\operatorname{arsinh}(1+i)`),
+  matching mpmath. Exact arguments still stay symbolic under plain
+  `evaluate()`. Two wrong-value bugs in the complex kernels were fixed en
+  route: `Arcoth` picked the wrong side of the branch cut on `(−1, 0)`,
+  and `Arsech`'s formula dropped a square root (wrong even for in-domain
+  arguments reached through a complex intermediate).
+- **`solve()` rejects out-of-range trig/hyperbolic equations robustly.**
+  `\sin x = 2`, `\tanh x = 2`, and `\cosh x = 1/2` return no real
+  solutions via explicit domain guards on the solve rules (`cosh`/`tanh`
+  had none, and the `sin`/`cos` guards missed exact ratios, silently
+  relying on the roots failing to numericize — which they no longer do,
+  per the entry above). Symbolic ratios (`\sin x = a`) and complex
+  polynomial roots (`x^2+1=0` → `±i`) are unchanged.
+
+### Integration
+
+- **Mixed-parity numerators over binomial radicals integrate** (Rubi rung
+  R28): `\int\frac{c+dx}{\sqrt{-a-bx^4}}dx`,
+  `\int\frac{x^2(c+dx+ex^2+fx^3)}{(a+bx^4)^{3/2}}dx`, and Laurent
+  variants over `(a+b·x^n)^{3/2}` shapes now close (the corresponding
+  Rubi regrouping rule was inert in the compiled bundle) — the 1.1.3
+  benchmark section gains +5 (185/200), with knock-on gains in ch1
+  binomial products and inverse-tangent integrands.
+
 - **Reverse library search**: `ce.searchDefinitions(query)` returns a ranked,
   deterministic list of `{ id, kind }` identifiers matching a plain-text
   concept query. Matching spans three case-insensitive axes — the

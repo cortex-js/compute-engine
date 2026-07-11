@@ -502,27 +502,57 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-10, R1–R27 landed):** the shipped bundle
+**State (2026-07-11, R1–R28 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 3 (Logarithms), 5 (Inverse trig), 6 (Hyperbolics),
 7 (Inverse hyperbolic), 4.1 Sine, 4.3 Tangent, 4.5 Secant, and §8.8 Polylogarithm**
 — 6,574 rules, 6.98 MB (CI has a bundle-freshness gate). Scores (seed 5): **4.1
 Sine 107/120 and 331/400 (4.1.11 file 93/113, post-R18)**, **4.3 Tangent 72/120**,
-**4.5 Secant 69/120**, **ch3 Logarithms 71/120 (R20, +2 from ch5 family-C
-producers)**, **Chapter 5 Inverse trig (R27): 5.1 sine 65/120, 5.2 cosine 78,
-5.3 tangent 59, 5.4 cotangent 62, 5.5 secant 56, 5.6 cosecant 52 (≥372/720 =
-≥51.7%; R27 +19 on 5.1/5.2 via the poly×trig-product reduction closing the
-reciprocal-arcsin/arccos family — 5.1.4a per-file #336/#408/#410 and
-relatives; earlier: R24 +15 via the complex-argument Erf/Erfi kernel, R23 +5
-via the InvTrig^n multiple-angle → CosIntegral reduction; 5.3/5.5/5.6 scores
-predate R25–R27 re-runs)**, **Chapter 7
+**4.5 Secant 69/120**, **ch3 Logarithms 70/120 (post-R25 re-baseline)**,
+**Chapter 5 Inverse trig: 5.1 sine 65/120, 5.2 cosine 76–78 (verify-deadline
+flutter band), 5.3 tangent 64 (post-R28), 5.4 cotangent 62, 5.5 secant 56,
+5.6 cosecant 52 (≥375/720 ≈ 52%; R27 +19 on 5.1/5.2 via the
+poly×trig-product reduction closing the reciprocal-arcsin/arccos family;
+earlier: R24 +15 via the complex-argument Erf/Erfi kernel, R23 +5 via the
+InvTrig^n multiple-angle → CosIntegral reduction; 5.5/5.6 scores predate
+R25–R28 re-runs)**, **Chapter 7
 Inverse hyperbolic (R22): 7.1 sine 79/120, 7.2 cosine 51,
 7.3 tangent 85, 7.4 cotangent 95, 7.5 secant 44, 7.6 cosecant 54 (408/720 =
 56.7%, R22 +2 — ch7's hyperbolic sub-integrals were already covered by the
-ungated `containsHyperbolic` fallback)**, ch1 exhaustive ≈90–91%,
+ungated `containsHyperbolic` fallback)**, **ch1 1.1 Binomial products 112/120
+(post-R28)**, **1.1.3 General 185/200 s200 (post-R28: unsolved 6 → 1; the
+survivor #259 is an integer-power rational)**, ch1 exhaustive ≈90–91%,
 ch2 ≈72% effective (seed 42), **ch6 Hyperbolics 46/120 (s120 seed 5,
-post-R26B; was ≈45% effective at seed 42 pre-R26)**, Wester indefinite-∫ 6/8.
+post-R26B; plus one newly-unmasked genuine wrong, 6.4.2 #158 — see R28)**,
+Wester indefinite-∫ 6/8.
+**R28 (2026-07-11)** — two composable parts; the "elliptic route" premise
+dissolved under diagnosis (atomic elliptic terminals already close and
+numericize; new elliptic kernels would buy ~0 rows in 1.1.3, ~2 in ch6).
+**R28a (`RUBI_NO_R28`):** mixed-parity linearity split — Rubi rule 2424
+(bundled 1.1.3.7 #37 / 1.1.3.8 #17) never fires because its
+`Sum`/`Coeff`/`Expon` regroup-RHS is non-functional in `build()`, so
+`(c·x²+d·x+e)/√(a+b·x⁴)`-class integrands matched no rule at all; a late
+fail-closed driver fallback splits a ≥2-monomial Laurent numerator over a
+single binomial-radical factor, integrates the monomial pieces, and
+D-verifies the sum. 1.1.3 **180 → 185** (flips #213/#468/#471/#502/#544),
+ch1 1.1 **111 → 112**, 5.3 **61 → 64**, zero new genuine wrongs.
+**R28b (core engine, no toggle):** inverse trig/hyperbolic functions now
+numericize to their **complex principal values** off the real domain and
+for complex arguments (`apply()` cascades a real-kernel NaN to the complex
+kernel, mirroring `applyN`; `Artanh(2).N()`, `Arcsin(2).N()` work; exact
+arguments still stay symbolic under `evaluate()`). Fixed two pre-existing
+complex-kernel bugs en route (`Arcoth` wrong cut side on (−1,0); `Arsech`
+formula dropped a sqrt — wrong even in-domain), and hardened the solve()
+trig/hyperbolic rule guards that had silently relied on non-numericizable
+roots (`ExactNumericValue` bindings bypassed the `typeof === 'number'`
+domain check; cosh/tanh rules had no domain guards at all). CHANGELOG-worthy
+at release (user-facing capability + two wrong-value fixes). Side effect:
+ch6 6.4.2 #158 (`∫√(Coth[a+b·Log[c·xⁿ]])/x`, pre-R28 `inconclusive`) is now
+honestly graded a **genuine wrong** — the exp-substitution route's
+`arcosh(−u)`-form antiderivative fails the real-axis D-check now that it
+evaluates; Rubi's reference form is `[artanh(√coth) − arctan(√coth)]/(b·n)`
+(named fix target for the exp-substitution route).
 **R26 (2026-07-10)** — two parts. **R26A (P0 correctness, no toggle):** the
 driver returned wrong answers for ANY integration variable not literally
 named `x` (`∫t² dt → x³/3`; `∫t·cos t dt` mixed-corrupted) — rule-RHS `"x"`
@@ -576,7 +606,9 @@ fail-closed D-check; native-rational). A/B env switches:
 `RUBI_NO_TRIGSQ`, `RUBI_NO_TRIGEXP`, `RUBI_NO_TRIGSUB` (R22 subproblem
 trig-bridge), `RUBI_NO_R25` (R25 quartic-denominator ExpandIntegrand guard),
 `RUBI_NO_R26` (R26B rational-normal-form retry in the exp-substitution
-fallback), `RUBI_NO_R27` (poly×trig-product reduction fallback).
+fallback), `RUBI_NO_R27` (poly×trig-product reduction fallback),
+`RUBI_NO_R28` (R28a mixed-parity Laurent-numerator × binomial-radical
+linearity split).
 **Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
 power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
 shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`
@@ -696,17 +728,30 @@ The former R6 item (symbolic-coefficient rational integration) landed as R25
 (quartic denominators) + R26 (integration-variable soundness + the
 rational-normal-form retry that closes the parametric reciprocal families
 `∫1/(a+b·Sinh x)` etc.); what survives of it is folded into the residual
-below. The Chapter-6 residual (69 unsolved at s120 seed 5, post-R26; no
-single lever) is mostly shared capability rather than Ch6-specific:
+below. The Chapter-6 residual (69 unsolved at s120 seed 5, post-R26; census
+2026-07-10 by expected-antiderivative content: 21 algebraic-in-hyperbolic,
+29 rational-in-hyperbolic, 9 polylog, 4 CoshIntegral/Erfi nonlinear-arg,
+**7 expected-`Unintegrable`** — Rubi itself returns unevaluated there, so
+CE's inert `Integrate` is the correct match — 1 ₚFq, 4 Weierstrass-form
+`∞`-collapse pathology) is mostly shared capability rather than
+Ch6-specific:
 
 - **R6′ — general symbolic factoring/partial fractions.** The substituted
   rationals now close through the quadratic / `x^m·R` shapes; higher-degree
   symbolic denominators that need genuine polynomial factoring over free
   parameters (the shared 1.3.2 gap) still decline — a smaller item than the
   original R6 framing, worth pursuing only against a named family.
-- **R7 — algebraic-in-hyperbolic → elliptic** (`(a+b·Sinh²)^(p/2)`,
-  `√(a+b·Tanh)`): needs the elliptic-integral route (the kernels exist).
-  The same route serves the 1.1.3 elliptic/cubic tail R25 left (6 problems).
+- **R7 — algebraic-in-hyperbolic substitution plumbing** (21 rows:
+  `(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh)`, half-integer hyperbolic powers).
+  **Reframed by the R28 diagnosis: this is NOT an elliptic-kernel item.**
+  Under the `u = Sinh/Cosh/Tanh` substitution these become
+  `∫R(u, √(a+b·u²))du`, whose terminals close in **elementary arctanh**
+  form via the bundled 1.1.2 quadratic-radical rules (probes confirm);
+  only ~2 rows (#463/#500) are genuinely elliptic. What's missing is the
+  driver plumbing that performs the substitution and hands the algebraic
+  subproblem to ch1 — now viable since R28b lets the resulting
+  `arctanh(>1)` forms verify. Also in ch6: the 6.4.2 #158 exp-substitution
+  wrong-form fix (see R28 above).
 - **R8 — poly×reciprocal by-parts / CoshIntegral·SinhIntegral heads** for the
   nonlinear-argument reciprocal families.
 

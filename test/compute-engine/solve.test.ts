@@ -716,6 +716,33 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
     expect(result).toEqual([]);
   });
 
+  // R28b regression: inverse trig/hyperbolic functions now numericize to
+  // complex values off their real domain, so the out-of-domain rejection must
+  // happen in the rule guards (it used to fall out of the roots failing to
+  // numericize). The guards also used to miss exact ratios bound as
+  // `NumericValue` instances (`typeof val === 'number'` was false for the
+  // `ExactNumericValue` −2), silently admitting any exact out-of-range ratio.
+  test('should return empty for tanh(x) = 2 (no real solution)', () => {
+    // tanh(x) can only be in (-1, 1)
+    expect(expr('\\tanh(x) = 2').solve('x')).toEqual([]);
+  });
+
+  test('should return empty for tanh(x) = 1 (pole, not a root)', () => {
+    expect(expr('\\tanh(x) = 1').solve('x')).toEqual([]);
+  });
+
+  test('should return empty for cosh(x) = 1/2 (no real solution)', () => {
+    // cosh(x) ≥ 1 over the reals
+    expect(expr('\\cosh(x) = \\frac{1}{2}').solve('x')).toEqual([]);
+  });
+
+  test('sin(x) = a keeps symbolic ratios (validity condition not recorded)', () => {
+    const result = expr('\\sin(x) = a')
+      .solve('x')
+      ?.map((x) => x.toString());
+    expect(result).toEqual(['arcsin(a)', '-arcsin(a) + pi']);
+  });
+
   // Regression: multi-operand wildcard captures (__a = -2x, __b = x²+1) are
   // raw expressions; the rule conditions used to throw "Not canonical" doing
   // arithmetic on them, logging errors and returning no solutions.

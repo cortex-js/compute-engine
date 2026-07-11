@@ -329,7 +329,11 @@ export function evalTrig(
             .div(x.sub(BigDecimal.ONE))
             .ln()
             .div(BigDecimal.TWO),
-        (x) => ce.complex(1).add(x).div(x.sub(1)).log().div(2)
+        // Use the native principal-branch `acoth`: the hand-rolled
+        // `ln((1+x)/(x−1))/2` picks the wrong side of the cut for negative
+        // real arguments in `(−1, 0)` (imaginary part sign flips), whereas
+        // `acoth` matches mpmath across the plane.
+        (x) => x.acoth()
       );
 
     case 'Arcsch':
@@ -373,7 +377,10 @@ export function evalTrig(
         // arsech(x) = ln((1 + sqrt(1 - x^2)) / x)
         (x) =>
           BigDecimal.ONE.sub(x.mul(x)).sqrt().add(BigDecimal.ONE).div(x).ln(),
-        (x) => ce.complex(1).sub(x.mul(x)).add(1).div(x).log()
+        // Native principal-branch `asech`: the previous inline expression
+        // dropped the `sqrt` (computed `ln((2 − x²)/x)`), giving a wrong value
+        // even for in-domain reals; `asech` matches mpmath across the plane.
+        (x) => x.asech()
       );
 
     case 'Arsinh':

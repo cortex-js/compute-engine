@@ -28,6 +28,7 @@ import {
   hasSingleAngleTrigRationalCandidate,
   circularTrigReduce,
   polyTrigProductPieces,
+  mixedParityRadicalPieces,
   rationalNormalFormX,
   polyDegreeX,
   RuleFail,
@@ -1479,6 +1480,84 @@ describe('polyTrigProductPieces (R27 poly × same-angle trig product)', () => {
           ['Sin', 'x'],
           ['Cos', ['Multiply', 2, 'x']],
         ] as any),
+        'x'
+      )
+    ).toBeNull();
+  });
+});
+
+// mixedParityRadicalPieces — the R28a mixed-parity poly-numerator ×
+// binomial-radical linearity split. Given (normal form) `P(x)·x^m·(a+b·xⁿ)^p`
+// with p a non-integer half-integer and n ≥ 2, it splits the numerator `P·x^m`
+// into Laurent monomials and returns the list of `cⱼ·xʲ·(a+b·xⁿ)^p` pieces the
+// driver integrates individually (the bundled binomial rules close each). The
+// split is an exact identity: Σ pieces ≡ integrand.
+describe('mixedParityRadicalPieces (R28a mixed-parity radical split)', () => {
+  const engine = new ComputeEngine();
+  const sumOf = (pieces: Expression[]) =>
+    pieces.length === 1 ? pieces[0] : engine.function('Add', pieces);
+  const nf = (latex: string) => toTimesPower(engine, engine.parse(latex).canonical);
+
+  test('splits (c+d·x+e·x²+f·x³)·√(a+b·x⁴)/x³ into 4 Laurent pieces summing to the integrand', () => {
+    const integrand = engine.parse(
+      '\\frac{(c+d x+e x^2+f x^3)\\sqrt{a+b x^4}}{x^3}'
+    ).canonical;
+    const pieces = mixedParityRadicalPieces(engine, toTimesPower(engine, integrand), 'x');
+    expect(pieces).not.toBeNull();
+    expect(pieces!.length).toBe(4); // c/x³, d/x², e/x, f
+    const S = sumOf(pieces!);
+    const sub = { a: 0.7, b: 1.3, c: 0.5, d: 0.9, e: 1.1, f: 0.6 };
+    let maxErr = 0;
+    for (const xv of [0.31, 0.73, 1.29, 2.1]) {
+      const A = integrand.subs({ ...sub, x: xv }).N();
+      const B = S.subs({ ...sub, x: xv }).N();
+      maxErr = Math.max(
+        maxErr,
+        Math.abs(((A.re as number) ?? NaN) - ((B.re as number) ?? NaN))
+      );
+    }
+    expect(maxErr).toBeLessThan(1e-9);
+    // every piece is a single monomial × the radical (numerator not an Add) —
+    // so an emitted piece cannot re-match the ≥2-monomial gate.
+    for (const p of pieces!) expect(p.has('Integrate')).toBe(false);
+  });
+
+  test('admits a negative-power (Laurent) numerator from a reduction (odd n=3)', () => {
+    // The bundled reduction of (…)·(a+b·x³)^{3/2}/x⁷ leaves a Laurent numerator
+    // with a poly·x⁻¹ term; the recursive decomposer must handle it.
+    const integrand = engine.parse(
+      '\\frac{(c+d x+e x^2+f x^3+g x^4)(a+b x^3)^{3/2}}{x^7}'
+    ).canonical;
+    const pieces = mixedParityRadicalPieces(engine, toTimesPower(engine, integrand), 'x');
+    expect(pieces).not.toBeNull();
+    expect(pieces!.length).toBe(5); // c/x⁷ … g/x³
+    const S = sumOf(pieces!);
+    const sub = { a: 0.7, b: 1.3, c: 0.5, d: 0.9, e: 1.1, f: 0.6, g: 0.4 };
+    for (const xv of [0.53, 1.29, 2.1]) {
+      const A = integrand.subs({ ...sub, x: xv }).N().re as number;
+      const B = S.subs({ ...sub, x: xv }).N().re as number;
+      expect(B).toBeCloseTo(A, 8);
+    }
+  });
+
+  test('declines off-shape integrands (returns null)', () => {
+    // integer-power binomial (not a radical)
+    expect(
+      mixedParityRadicalPieces(engine, nf('\\frac{c+d x}{(a+b x^2)^2}'), 'x')
+    ).toBeNull();
+    // single-monomial numerator (not mixed — bundled rules already handle it)
+    expect(
+      mixedParityRadicalPieces(engine, nf('\\frac{x^2}{\\sqrt{a+b x^4}}'), 'x')
+    ).toBeNull();
+    // bare radical, no polynomial numerator
+    expect(
+      mixedParityRadicalPieces(engine, nf('\\sqrt{a+b x^4}'), 'x')
+    ).toBeNull();
+    // two distinct binomial radicals (exactly-one gate)
+    expect(
+      mixedParityRadicalPieces(
+        engine,
+        nf('(c+d x)\\sqrt{a+b x^2}\\sqrt{e+f x^2}'),
         'x'
       )
     ).toBeNull();

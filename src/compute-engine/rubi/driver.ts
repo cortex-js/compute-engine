@@ -52,6 +52,8 @@ import {
   hasSingleAngleTrigRationalCandidate,
   singleAngleExponentialPieces,
   polyTrigProductPieces,
+  mixedParityRadicalPieces,
+  hasMixedParityRadicalCandidate,
   RuleFail,
   Ctx,
   Hooks,
@@ -117,6 +119,13 @@ const NO_R26 = process.env.RUBI_NO_R26 !== undefined;
 // Subst inner integral `∫xⁿ·sinᵐ·cosᵏ`, n=−1) that R15's single-sin/cos and
 // R16's csc²/sec² gates both decline. A/B measures its ch5/ch7 effect.
 const NO_R27 = process.env.RUBI_NO_R27 !== undefined;
+// RUBI_NO_R28: disable the R28a mixed-parity polynomial-numerator linearity
+// split (`∫P(x)·x^m·(a+b·xⁿ)^p` with a mixed-parity numerator → distribute into
+// monomials, integrate each `xʲ·(a+b·xⁿ)^p` piece via the bundled binomial
+// rules, sum). Supplies Rubi rule 2424 (bundled 1.1.3.7 #37 / 1.1.3.8 #17),
+// whose residue-class regrouping RHS uses non-functional Sum/Coeff/Expon
+// operators and never fires in CE. A/B measures its 1.1.3 effect.
+const NO_R28 = process.env.RUBI_NO_R28 !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -1129,6 +1138,36 @@ export class RubiDriver {
       }
     }
 
+    // ---- mixed-parity poly-numerator × binomial-radical linearity split (R28a) --
+    // `∫ P(x)·x^m·(a+b·xⁿ)^p dx`, p a non-integer half-integer, n ≥ 2, and the
+    // numerator `P(x)·x^m` a Laurent polynomial with a MIXED-PARITY set of
+    // monomials (≥ 2 distinct degrees). Rubi rule 2424 (bundled 1.1.3.7 #37 and
+    // its `(c·x)^m` twin 1.1.3.8 #17) regroups such a numerator by residue
+    // classes mod n/2 with `Sum`/`Coeff`/`Expon`, which the compiled-rule
+    // `build()` layer cannot evaluate — so the combined integrand fires NO rule.
+    // But integration is linear and each individual `cⱼ·xʲ·(a+b·xⁿ)^p` monomial
+    // piece DOES close via the bundled binomial rules: distribute, integrate
+    // each piece, sum. Reached only after every rule and the trig/hyperbolic
+    // fallbacks decline (so it never preempts a cleaner route). Cheap O(nodes)
+    // pre-filter gates it to a near-zero-cost no-op off its shape; fail-closed
+    // with the same numeric D-check as R15/R27, so a piece that does not close
+    // (or a non-verifying assembly) stays cleanly unsolved. Every emitted piece
+    // has a single-monomial numerator, so it cannot re-match the ≥2-monomial
+    // gate — no recursion.
+    if (!NO_R28 && hasMixedParityRadicalCandidate(integrand)) {
+      this.suppressRecording++;
+      let F: Expression | null;
+      try {
+        F = this.mixedParityRadicalSplit(integrand, variable, depth);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (F !== null) {
+        this.record(entryNode, () => F, 'integrate.mixed-parity-split');
+        return F;
+      }
+    }
+
     return null;
   }
 
@@ -1426,6 +1465,43 @@ export class RubiDriver {
       if (F.has('Integrate')) return null;
       if (!antiderivativeVerifies(ce, activateTrig(ce, F), integrand, variable))
         return null;
+      return F;
+    } catch {
+      return null;
+    }
+  }
+
+  /** R28a: `∫ P(x)·x^m·(a+b·xⁿ)^p dx` for p a non-integer half-integer, n ≥ 2,
+   * and the numerator `P(x)·x^m` a Laurent polynomial with ≥ 2 distinct
+   * monomials — closed by the linearity split (`mixedParityRadicalPieces`
+   * distributes the numerator into `cⱼ·xʲ·(a+b·xⁿ)^p` pieces, each of which the
+   * bundled binomial rules integrate) and summing. Supplies Rubi rule 2424,
+   * whose residue-class regrouping RHS uses non-functional Sum/Coeff/Expon
+   * operators and never fires in CE. Fail-closed: returns null unless every
+   * piece closes AND D(ΣF) matches the integrand numerically (the central-
+   * difference check — the same acceptance bar as R15/R27). Body try/catch →
+   * null. */
+  private mixedParityRadicalSplit(
+    integrand: Expression,
+    variable: string,
+    depth: number
+  ): Expression | null {
+    const ce = this.ce;
+    try {
+      const pieces = mixedParityRadicalPieces(ce, integrand, variable);
+      if (pieces === null) return null;
+      const parts: Expression[] = [];
+      for (const pc of pieces) {
+        const term = recanonicalize(ce, pc);
+        const F = this.intRec(term, variable, depth + 1);
+        if (F === null || F.has('Integrate')) return null;
+        parts.push(F);
+      }
+      const F = this.cleanExpansionResult(
+        parts.length === 1 ? parts[0] : ce.function('Add', parts)
+      );
+      if (F.has('Integrate')) return null;
+      if (!antiderivativeVerifies(ce, F, integrand, variable)) return null;
       return F;
     } catch {
       return null;

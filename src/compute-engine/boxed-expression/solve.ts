@@ -62,6 +62,30 @@ function filter(sub: BoxedSubstitution): boolean {
   return true;
 }
 
+/**
+ * The real machine value of `−b/a` (or `−b` when `a` is omitted) for a
+ * rule-condition domain check, or `undefined` when the ratio is symbolic or
+ * non-real. Rule conditions bind exact operands as `NumericValue` instances
+ * (e.g. `ExactNumericValue` for `−2`), which a bare `typeof === 'number'`
+ * check misses — that hole let out-of-domain ratios (`sin x = 2`) through,
+ * silently relying on the roots later failing to numericize. Inverse
+ * trig/hyperbolic functions now evaluate to complex values off their real
+ * domain, so the emission-site guard must do the real work.
+ */
+function negatedRealRatio(
+  b: Expression,
+  a?: Expression
+): number | undefined {
+  const ratio = a
+    ? b.canonical.div(a.canonical).neg()
+    : b.canonical.neg();
+  const val = numericValue(ratio);
+  if (val === undefined) return undefined;
+  if (typeof val === 'number') return val;
+  if (val.im !== 0) return undefined;
+  return val.re;
+}
+
 //
 // ── Solve trace ─────────────────────────────────────────────────────
 //
@@ -531,11 +555,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const a = sub.__a;
       const b = sub.__b;
       if (!a || a.isSame(0)) return false;
-      const ratio = b.canonical.div(a.canonical).neg();
-      const val = numericValue(ratio);
-      if (val === undefined) return true; // Allow symbolic ratios
-      if (typeof val === 'number') return Math.abs(val) <= 1;
-      return true;
+      const v = negatedRealRatio(b, a);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return Math.abs(v) <= 1;
     },
   },
 
@@ -554,11 +576,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const a = sub.__a;
       const b = sub.__b;
       if (!a || a.isSame(0)) return false;
-      const ratio = b.canonical.div(a.canonical).neg();
-      const val = numericValue(ratio);
-      if (val === undefined) return true;
-      if (typeof val === 'number') return Math.abs(val) <= 1;
-      return true;
+      const v = negatedRealRatio(b, a);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return Math.abs(v) <= 1;
     },
   },
 
@@ -571,10 +591,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = numericValue(b);
-      if (val === undefined) return true;
-      if (typeof val === 'number') return Math.abs(val) <= 1;
-      return true;
+      const v = negatedRealRatio(b);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return Math.abs(v) <= 1;
     },
   },
 
@@ -587,10 +606,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = numericValue(b);
-      if (val === undefined) return true;
-      if (typeof val === 'number') return Math.abs(val) <= 1;
-      return true;
+      const v = negatedRealRatio(b);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return Math.abs(v) <= 1;
     },
   },
 
@@ -606,11 +624,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const a = sub.__a;
       const b = sub.__b;
       if (!a || a.isSame(0)) return false;
-      const ratio = b.canonical.div(a.canonical).neg();
-      const val = numericValue(ratio);
-      if (val === undefined) return true;
-      if (typeof val === 'number') return Math.abs(val) <= 1;
-      return true;
+      const v = negatedRealRatio(b, a);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return Math.abs(v) <= 1;
     },
   },
 
@@ -625,11 +641,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const a = sub.__a;
       const b = sub.__b;
       if (!a || a.isSame(0)) return false;
-      const ratio = b.canonical.div(a.canonical).neg();
-      const val = numericValue(ratio);
-      if (val === undefined) return true;
-      if (typeof val === 'number') return Math.abs(val) <= 1;
-      return true;
+      const v = negatedRealRatio(b, a);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return Math.abs(v) <= 1;
     },
   },
 
@@ -642,10 +656,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = numericValue(b);
-      if (val === undefined) return true;
-      if (typeof val === 'number') return Math.abs(val) <= 1;
-      return true;
+      const v = negatedRealRatio(b);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return Math.abs(v) <= 1;
     },
   },
 
@@ -658,10 +671,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = numericValue(b);
-      if (val === undefined) return true;
-      if (typeof val === 'number') return Math.abs(val) <= 1;
-      return true;
+      const v = negatedRealRatio(b);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return Math.abs(v) <= 1;
     },
   },
 
@@ -799,12 +811,18 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   },
 
   // a·cosh(x) + b = 0  =>  x = arcosh(-b/a)  (positive branch)
+  // Valid when -b/a ≥ 1 (the range of cosh over the reals)
   {
     match: ['Add', ['Multiply', '__a', ['Cosh', '_x']], '__b'],
     replace: ['Arcosh', ['Divide', ['Negate', '__b'], '__a']],
     id: 'solve.hyperbolic-cosine',
     useVariations: true,
-    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+    condition: (sub) => {
+      if (!filter(sub) || sub.__a.isSame(0)) return false;
+      const v = negatedRealRatio(sub.__b, sub.__a);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return v >= 1;
+    },
   },
 
   // Second solution for cosh: x = -arcosh(-b/a)  (since cosh(-x) = cosh(x))
@@ -813,16 +831,27 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Negate', ['Arcosh', ['Divide', ['Negate', '__b'], '__a']]],
     id: 'solve.hyperbolic-cosine-negative-branch',
     useVariations: true,
-    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+    condition: (sub) => {
+      if (!filter(sub) || sub.__a.isSame(0)) return false;
+      const v = negatedRealRatio(sub.__b, sub.__a);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return v >= 1;
+    },
   },
 
   // cosh(x) + b = 0  =>  x = arcosh(-b)  (positive branch)
+  // Valid when -b ≥ 1 (the range of cosh over the reals)
   {
     match: ['Add', ['Cosh', '_x'], '__b'],
     replace: ['Arcosh', ['Negate', '__b']],
     id: 'solve.hyperbolic-cosine-unit',
     useVariations: true,
-    condition: filter,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const v = negatedRealRatio(sub.__b);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return v >= 1;
+    },
   },
 
   // Second solution for cosh(x) + b = 0: x = -arcosh(-b)
@@ -831,16 +860,28 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Negate', ['Arcosh', ['Negate', '__b']]],
     id: 'solve.hyperbolic-cosine-unit-negative-branch',
     useVariations: true,
-    condition: filter,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const v = negatedRealRatio(sub.__b);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return v >= 1;
+    },
   },
 
   // a·tanh(x) + b = 0  =>  x = artanh(-b/a)
+  // Valid when -1 < -b/a < 1 (the range of tanh over the reals; at ±1 the
+  // "root" would be the ±∞ pole, not a solution)
   {
     match: ['Add', ['Multiply', '__a', ['Tanh', '_x']], '__b'],
     replace: ['Artanh', ['Divide', ['Negate', '__b'], '__a']],
     id: 'solve.hyperbolic-tangent',
     useVariations: true,
-    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+    condition: (sub) => {
+      if (!filter(sub) || sub.__a.isSame(0)) return false;
+      const v = negatedRealRatio(sub.__b, sub.__a);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return Math.abs(v) < 1;
+    },
   },
 
   // tanh(x) + b = 0  =>  x = artanh(-b)
@@ -849,7 +890,12 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Artanh', ['Negate', '__b']],
     id: 'solve.hyperbolic-tangent-unit',
     useVariations: true,
-    condition: filter,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const v = negatedRealRatio(sub.__b);
+      if (v === undefined) return true; // Allow symbolic ratios
+      return Math.abs(v) < 1;
+    },
   },
 
   // a·sin(x) + b·cos(x) = 0  =>  tan(x) = -b/a  =>  x = arctan(-b/a)

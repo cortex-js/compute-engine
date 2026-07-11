@@ -5859,6 +5859,217 @@ function linearizeTrigArgs(
   );
 }
 
+/** True iff `f` (a normal-form factor) is a single binomial-radical factor
+ *  `(a + b·xⁿ)^p` with `a`, `b` x-free (both nonzero), `n ≥ 2` integer, and
+ *  `p` a NON-INTEGER rational (half-integer, positive or negative). This is the
+ *  radical whose mixed-parity polynomial-numerator companions Rubi rule 2424
+ *  (bundled 1.1.3.7 #37 / 1.1.3.8 #17) regroups by residue classes mod n/2 —
+ *  a regrouping CE's compiled-rule layer cannot perform, so the whole integrand
+ *  strands. The bundled `(a+b·xⁿ)^p` rules DO close each individual
+ *  `xʲ·(a+b·xⁿ)^p` monomial piece; R28a exploits that via linearity. */
+function isRadicalBinomialFactor(
+  ce: ComputeEngine,
+  f: Expression,
+  x: string
+): boolean {
+  if (f.operator !== 'Power' || !f.ops || f.ops.length !== 2) return false;
+  const [base, expo] = f.ops;
+  if (!isNumber(expo) || expo.isInteger === true || expo.isRational !== true)
+    return false;
+  if (base.operator !== 'Add') return false;
+  const n = polyDegreeX(base, x);
+  if (n < 2) return false;
+  const coeffs = polyCoeffsX(base, x);
+  if (coeffs === null || coeffs.length !== n + 1) return false;
+  // Genuine binomial: nonzero only at the constant term and the xⁿ term.
+  for (let i = 0; i < coeffs.length; i++)
+    if (!zeroQ(coeffs[i]) && i !== 0 && i !== n) return false;
+  return !zeroQ(coeffs[0]) && !zeroQ(coeffs[n]);
+}
+
+/** Recursive Laurent-monomial decomposition: `u = Σ cⱼ·xʲ` with x-free `cⱼ`
+ *  and integer `j` (possibly NEGATIVE, so `x^(-k)` sub-factors are admitted).
+ *  Unlike `polyCoeffsX` (ordinary polynomials only), this admits negative
+ *  x-powers anywhere in the tree — needed because the bundled binomial
+ *  reduction rules leave the numerator as a genuine Laurent polynomial (an
+ *  `Add` with `poly·x^(-1)` terms, etc.) before this fallback re-splits it.
+ *  Returns null when `u` is not a Laurent polynomial in x (e.g. a fractional
+ *  power of x, or a negative power of a non-monomial base). Convolution is
+ *  size-capped to bound the cost. */
+function laurentMonomialsX(
+  ce: ComputeEngine,
+  u: Expression,
+  x: string
+): [Expression, number][] | null {
+  if (!u.has(x)) return [[u, 0]];
+  if (u.symbol === x) return [[ce.One, 1]];
+  const ops = u.ops;
+  if (!ops) return null;
+  switch (u.operator) {
+    case 'Add': {
+      const out: [Expression, number][] = [];
+      for (const t of ops) {
+        const m = laurentMonomialsX(ce, t, x);
+        if (m === null) return null;
+        out.push(...m);
+      }
+      return out;
+    }
+    case 'Negate': {
+      const m = laurentMonomialsX(ce, ops[0], x);
+      return m === null ? null : m.map(([c, d]) => [c.neg(), d]);
+    }
+    case 'Subtract': {
+      const m0 = laurentMonomialsX(ce, ops[0], x);
+      const m1 = laurentMonomialsX(ce, ops[1], x);
+      if (m0 === null || m1 === null) return null;
+      return [...m0, ...m1.map(([c, d]) => [c.neg(), d] as [Expression, number])];
+    }
+    case 'Multiply': {
+      let acc: [Expression, number][] = [[ce.One, 0]];
+      for (const f of ops) {
+        const m = laurentMonomialsX(ce, f, x);
+        if (m === null) return null;
+        const next: [Expression, number][] = [];
+        for (const [c1, d1] of acc)
+          for (const [c2, d2] of m)
+            next.push([ce.function('Multiply', [c1, c2]), d1 + d2]);
+        if (next.length > 256) return null;
+        acc = next;
+      }
+      return acc;
+    }
+    case 'Divide': {
+      const num = laurentMonomialsX(ce, ops[0], x);
+      if (num === null) return null;
+      const den = ops[1];
+      if (!den.has(x)) return num.map(([c, d]) => [c.div(den), d]);
+      const dm = laurentMonomialsX(ce, den, x);
+      // Only a single-monomial denominator (c·xᵏ) keeps the quotient Laurent.
+      if (dm === null || dm.length !== 1) return null;
+      const [dc, dd] = dm[0];
+      return num.map(([c, d]) => [c.div(dc), d - dd]);
+    }
+    case 'Power': {
+      const [b, e] = ops;
+      const k = realNum(e);
+      if (k === null || !Number.isInteger(k)) return null;
+      if (b.symbol === x) return [[ce.One, k]];
+      const mb = laurentMonomialsX(ce, b, x);
+      if (mb === null) return null;
+      if (k >= 0) {
+        let acc: [Expression, number][] = [[ce.One, 0]];
+        for (let i = 0; i < k; i++) {
+          const next: [Expression, number][] = [];
+          for (const [c1, d1] of acc)
+            for (const [c2, d2] of mb)
+              next.push([ce.function('Multiply', [c1, c2]), d1 + d2]);
+          if (next.length > 256) return null;
+          acc = next;
+        }
+        return acc;
+      }
+      // Negative power: only a single-monomial base (c·xᵈ) stays Laurent.
+      if (mb.length !== 1) return null;
+      const [c, d] = mb[0];
+      return [[ce.function('Power', [c, ce.number(k)]), d * k]];
+    }
+  }
+  return null;
+}
+
+/** R28a support: `∫ P(x)·x^m·(a+b·xⁿ)^p dx` — the mixed-parity
+ *  polynomial-numerator linearity split. Splits the numerator `P(x)·x^m` into
+ *  Laurent monomials and returns the list of `cⱼ·xʲ·(a+b·xⁿ)^p` pieces, each of
+ *  which the bundled binomial rules integrate on its own (Rubi rule 2424's RHS
+ *  regroups the numerator by residue classes mod n/2 using non-functional
+ *  `Sum`/`Coeff`/`Expon` operators, so the combined integrand never fires in
+ *  CE — but linearity over the monomials is exact and each monomial piece
+ *  closes).
+ *
+ *  Returns null unless the (normal-form) integrand is a product with EXACTLY
+ *  one binomial-radical factor `(a+b·xⁿ)^p` (p non-integer, n ≥ 2), whose other
+ *  factors form a Laurent polynomial in x with ≥ 2 distinct monomials (the
+ *  mixed-parity gate — a single monomial is a bare `xʲ·radical` the bundled
+ *  rules already handle, and admitting it would let an emitted piece re-enter
+ *  this fallback). The caller routes each piece through the driver and
+ *  fail-closes on any piece that does not integrate or a failing numeric
+ *  D-check; each piece has a single-monomial numerator, so it cannot re-match
+ *  this gate. */
+export function mixedParityRadicalPieces(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): Expression[] | null {
+  const nf = toTimesPower(ce, integrand);
+  if (nf.operator !== 'Multiply' || !nf.ops) return null;
+  let radical: Expression | null = null;
+  const rest: Expression[] = [];
+  for (const f of nf.ops) {
+    if (radical === null && isRadicalBinomialFactor(ce, f, x)) radical = f;
+    else rest.push(f);
+  }
+  if (radical === null) return null;
+  // Exactly one binomial-radical factor.
+  if (rest.some((f) => isRadicalBinomialFactor(ce, f, x))) return null;
+  // Distribute the numerator (product of the non-radical factors) into Laurent
+  // monomials.
+  const numerator =
+    rest.length === 0
+      ? ce.One
+      : rest.length === 1
+        ? rest[0]
+        : ce._fn('Multiply', rest);
+  const acc = laurentMonomialsX(ce, numerator, x);
+  if (acc === null) return null;
+  // Collect like degrees.
+  const byDeg = new Map<number, Expression>();
+  for (const [c, d] of acc) {
+    const prev = byDeg.get(d);
+    byDeg.set(d, prev ? ce.function('Add', [prev, c]) : c);
+  }
+  const monos = [...byDeg.entries()].filter(([, c]) => !zeroQ(c));
+  // Mixed-parity gate: at least two distinct monomials. A single monomial is a
+  // bare `xʲ·radical` the bundled rules already tried (this fallback is late);
+  // requiring ≥ 2 also prevents an emitted piece from re-entering here.
+  if (monos.length < 2) return null;
+  return monos.map(([d, c]) => {
+    const factors: Expression[] = [];
+    if (!c.isSame(1)) factors.push(c);
+    if (d === 1) factors.push(ce.symbol(x));
+    else if (d !== 0)
+      factors.push(ce._fn('Power', [ce.symbol(x), ce.number(d)]));
+    factors.push(radical!);
+    return factors.length === 1 ? factors[0] : ce._fn('Multiply', factors);
+  });
+}
+
+/** Fast O(nodes) syntactic pre-filter for the R28a mixed-parity linearity
+ *  split: does the (normal-form) integrand look like `Add-numerator ×
+ *  binomial-radical`? Requires a `Multiply` with (a) a `Power` factor whose
+ *  base is an `Add` and whose exponent is a non-integer number (the radical)
+ *  and (b) an `Add` factor (the polynomial numerator). Purely structural (no
+ *  allocation / factoring) so the fallback stays a near-zero-cost no-op off its
+ *  shape. */
+export function hasMixedParityRadicalCandidate(e: Expression): boolean {
+  if (e.operator !== 'Multiply' || !e.ops) return false;
+  let hasRadical = false;
+  let hasAdd = false;
+  for (const f of e.ops) {
+    if (
+      f.operator === 'Power' &&
+      f.ops &&
+      f.ops.length === 2 &&
+      f.ops[0].operator === 'Add' &&
+      isNumber(f.ops[1]) &&
+      f.ops[1].isInteger !== true
+    )
+      hasRadical = true;
+    if (f.operator === 'Add') hasAdd = true;
+  }
+  return hasRadical && hasAdd;
+}
+
 function coeff(args: Json[], ctx: Ctx): Expression {
   const u = build(args[0], ctx);
   const n = args.length >= 3 ? (realNum(build(args[2], ctx)) ?? NaN) : 1;

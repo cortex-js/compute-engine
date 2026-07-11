@@ -1820,6 +1820,77 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     and a `RUBI_NO_R27` gate test meaningful in both directions;
     `rubi-utils.test.ts` — `polyTrigProductPieces` unit tests
     (Σ pieces ≡ integrand incl. the degree-9 case; off-shape → null).
+- **Phase R28 — mixed-parity linearity split + complex-branch inverse
+  trig/hyperbolic `.N()` LANDED (2026-07-11).** Two composable parts. The
+  rung began as "the elliptic route" (1.1.3 elliptic tail + ch6
+  `(a+b·Sinh²)^(p/2)`), but diagnosis **dissolved that premise**: every
+  atomic elliptic terminal (`∫1/√(a+b·x⁴)` → `EllipticF`, `(a+b·x³)^(3/2)`,
+  quartic-radical E/F shapes) already closes and numericizes; genuinely new
+  elliptic kernels would buy ~0 rows in 1.1.3 and ~2 in ch6 (#463/#500).
+  The real blockers were the two below.
+  - **R28a — driver fallback `mixedParityRadicalSplit`** (late, after
+    R27/hyperbolic; `hasMixedParityRadicalCandidate` O(nodes) pre-filter;
+    behind `RUBI_NO_R28`) + `mixedParityRadicalPieces` in `rubi-utils.ts`.
+    **Diagnosis (wolframscript-confirmed):** Rubi rule 2424 — bundled
+    1.1.3.7 #37 / 1.1.3.8 #17 — regroups a mixed-parity polynomial
+    numerator over `(a+b·xⁿ)^p` by residue classes mod n/2 via
+    `Sum`/`Coeff`/`Expon`, which are non-functional in `build()`; so
+    `(c·x²+e)/√(a+b·x⁴)` closed while `(c·x²+d·x+e)/√(a+b·x⁴)` matched **no
+    rule at all**. The fallback splits a ≥2-monomial **Laurent** numerator
+    (negative powers admitted — #468/#471 arrive as stranded depth>0
+    subproblems with `poly·x⁻¹` terms) over a single binomial-radical
+    factor `(a+b·xⁿ)^p` (p non-integer rational, n ≥ 2), integrates each
+    monomial piece via `intRec` (all must close), sums, and D-verifies;
+    any failure → null. Emitted pieces are single-monomial, so the gate
+    cannot re-match (no recursion).
+  - **R28b — complex-branch numericization (core engine, no toggle).**
+    `apply()` (`boxed-expression/apply.ts`) now cascades a real-kernel
+    NaN/undefined to the operator's complex kernel (mirroring `applyN`),
+    so `Artanh(2)`, `Arcsin(2)`, `Arcosh(0.5)` etc. numericize to their
+    complex principal values under `.N()` (exact args still stay symbolic
+    under `evaluate()`). Two pre-existing complex-kernel bugs fixed in
+    `evalTrig`: `Arcoth` picked the wrong cut side on (−1, 0)
+    (hand-rolled `ln((1+x)/(x−1))/2` → native `acoth`), and `Arsech`'s
+    inline formula **dropped the sqrt** (wrong even in-domain) → native
+    `asech`. mpmath-validated. This is what lets the #502/#468/#471
+    antiderivatives (containing `artanh(√(a+b·xⁿ)/√a)`, argument > 1)
+    grade solved instead of not-evaluable.
+  - **Knock-on solve() fix (required by R28b).** `sin x = 2`-class
+    equations relied on the roots failing to numericize; the rule guards'
+    `typeof val === 'number'` check missed exact ratios bound as
+    `ExactNumericValue` (pre-existing hole). New `negatedRealRatio` helper;
+    the 8 sin/cos guards converted; **new** domain guards on the cosh
+    (`ratio ≥ 1`, ×4) and tanh (`|ratio| < 1`, ×2) rules. Polynomial
+    complex roots (`x²+1 → ±i`) deliberately preserved — the filter lives
+    at the emission site, not `validateRoots`.
+  - **Before→after (1.1.3 General s200 seed 5, toggle A/B byte-perfect).**
+    solved-correct **180 → 185**, unsolved **6 → 1** (flips, all in
+    1.1.3.8: #213, #468, #471, #502, #544; the survivor #259 is an
+    integer-power rational, out of scope). The 8 wrongs are byte-identical
+    (documented symbolic-exponent false-wrong set).
+  - **Guards (s120 seed 5).** ch1 1.1 **111 → 112**/4w (+1 knock-on;
+    wrongs = documented set); ch3 70/4w identical; 5.3 Inverse tangent
+    **61 → 64**/0w (+3 knock-on — more arctan(a·x²) chains bottoming out
+    in quartic rationals); ch6 46 correct with **one newly-UNMASKED
+    genuine wrong**: 6.4.2 #158 `∫√(Coth[a+b·Log[c·xⁿ]])/x` — graded
+    `inconclusive` pre-R28 ("tolerance boundary" since R17), its
+    exp-substitution antiderivative (`arcosh(−u)`/arctan-pair form)
+    became evaluable via R28b and **fails the real-axis D-check**
+    (dF ≈ 0 vs f ≈ 0.91 at x=1.1 — magnitude varies, not a phase
+    artifact; R28a proven uninvolved by toggle A/B). Rubi's reference is
+    `[arctanh(√coth) − arctan(√coth)]/(b·n)`: a named fix target for the
+    exp-substitution route, not a regression — the verifier is now doing
+    its job on a previously ungradeable form.
+  - **Tests.** `integration-rules.test.ts` R28a block (4 D-verified
+    end-to-ends incl. #213/#544/#468 shapes + `RUBI_NO_R28` gate;
+    `/x⁷` integrands need a *relative* D-verify tolerance — truncation
+    error swamps absolute bars at small x); `rubi-utils.test.ts`
+    `mixedParityRadicalPieces` unit tests (Σ pieces ≡ integrand for even
+    n=4 and odd-n Laurent; off-shape → null); `trigonometry.test.ts`
+    R28b block (mpmath-pinned values; **must use the shared test
+    engine** — a `new ComputeEngine()` at describe-collection time resets
+    the process-global `BigDecimal.precision` and broke the 100-digit
+    arccos snapshot); `solve.test.ts` domain-guard block.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

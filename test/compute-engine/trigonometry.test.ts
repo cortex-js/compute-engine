@@ -289,3 +289,69 @@ describe('Degrees is a faithful conversion (REVIEW.md B20)', () => {
     expect(symbolic).toBeCloseTo(literal, 10);
   });
 });
+
+// R28b: inverse trig/hyperbolic functions evaluate to their complex principal
+// value when the argument is off the real domain (previously `Arcsin(2).N()`
+// was NaN and `Artanh(2).N()` stayed symbolic), and for complex arguments.
+// The real-kernel NaN now cascades to the complex kernel in `apply()`.
+// Reference values from mpmath.
+describe('Complex-branch numericization of inverse trig/hyperbolic (R28b)', () => {
+  // Use the shared engine: creating a `new ComputeEngine()` at collection
+  // time would reset the process-global `BigDecimal.precision` and degrade
+  // the 100-digit snapshots earlier in this file.
+  const n = (e: unknown) => engine.box(e as any).N();
+
+  it('Artanh off-domain reals take the principal branch', () => {
+    let v = n(['Artanh', 2]);
+    expect(v.re).toBeCloseTo(0.5493061443340549, 12);
+    expect(v.im).toBeCloseTo(-1.5707963267948966, 12);
+    v = n(['Artanh', -3]);
+    expect(v.re).toBeCloseTo(-0.34657359027997264, 12);
+    expect(v.im).toBeCloseTo(1.5707963267948966, 12);
+  });
+
+  it('Arcoth inside (−1, 1), including the (−1, 0) cut side', () => {
+    let v = n(['Arcoth', 0.5]);
+    expect(v.re).toBeCloseTo(0.5493061443340549, 12);
+    expect(v.im).toBeCloseTo(-1.5707963267948966, 12);
+    // Cut-side regression: the previous hand-rolled complex kernel
+    // `ln((1+x)/(x−1))/2` flipped the imaginary sign on (−1, 0).
+    v = n(['Arcoth', -0.5]);
+    expect(v.re).toBeCloseTo(-0.5493061443340549, 12);
+    expect(v.im).toBeCloseTo(1.5707963267948966, 12);
+  });
+
+  it('Arcsin/Arcosh off-domain reals', () => {
+    let v = n(['Arcsin', 2]);
+    expect(v.re).toBeCloseTo(1.5707963267948966, 12);
+    expect(v.im).toBeCloseTo(-1.3169578969248166, 12);
+    v = n(['Arcosh', 0.5]);
+    expect(v.re).toBeCloseTo(0, 12);
+    expect(v.im).toBeCloseTo(1.0471975511965979, 12);
+  });
+
+  it('Arsech: off-domain is complex; in-domain real value is correct', () => {
+    const v = n(['Arsech', 2]);
+    expect(v.re).toBeCloseTo(0, 12);
+    expect(v.im).toBeCloseTo(1.0471975511965979, 12);
+    // Regression: the previous complex kernel dropped the sqrt (computed
+    // ln((2 − x²)/x)), wrong even for in-domain reals reached via a complex
+    // intermediate. The real path pins the true value.
+    expect(n(['Arsech', 0.5]).re).toBeCloseTo(1.3169578969248166, 12);
+    expect(n(['Arsech', 0.5]).im).toBe(0);
+  });
+
+  it('complex arguments numericize', () => {
+    let v = n(['Artanh', ['Complex', 1.5, 0.2]]);
+    expect(v.re).toBeCloseTo(0.7692088566784916, 12);
+    expect(v.im).toBeCloseTo(1.4204581310948328, 12);
+    v = n(['Arsinh', ['Complex', 1, 1]]);
+    expect(v.re).toBeCloseTo(1.0612750619050357, 12);
+    expect(v.im).toBeCloseTo(0.6662394324925153, 12);
+  });
+
+  it('exactness contract: exact off-domain args stay symbolic under evaluate()', () => {
+    expect(engine.box(['Artanh', 2]).evaluate().operator).toBe('Artanh');
+    expect(engine.box(['Arcsin', 2]).evaluate().operator).toBe('Arcsin');
+  });
+});

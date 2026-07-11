@@ -915,6 +915,102 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     });
   });
 
+  // R28a: mixed-parity poly-numerator × binomial-radical linearity split
+  // (RUBI.md §5, Phase R28a; driver `mixedParityRadicalSplit` + rubi-utils
+  // `mixedParityRadicalPieces`). `∫P(x)·x^m·(a+b·xⁿ)^p` with p a non-integer
+  // half-integer and a MIXED-PARITY numerator is Rubi rule 2424 (bundled
+  // 1.1.3.7 #37 / 1.1.3.8 #17), whose residue-class regrouping RHS uses
+  // non-functional Sum/Coeff/Expon operators and never fires in CE. Linearity
+  // over the numerator's monomials — each `xʲ·(a+b·xⁿ)^p` closes via the bundled
+  // binomial rules — supplies it. The antiderivatives carry ArcTanh / Elliptic
+  // forms, so these are D-verified by central-differencing F.N() (with symbolic
+  // parameters fixed to numeric values keeping the radicand positive).
+  describe('mixed-parity poly-numerator × binomial-radical split (1.1.3, R28a)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    ce.timeLimit = 30_000; // Elliptic/ArcTanh-heavy pieces are slow under ts-jest
+
+    // Integrate `latex` over x and central-difference F.N() == integrand at
+    // several sample points, substituting `params` (fixed so a+b·xⁿ > 0).
+    const verify = (
+      latex: string,
+      params: Record<string, number> = {},
+      samples: number[] = [0.23, 0.47, 0.68, 0.91]
+    ) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) =>
+        F.subs({ ...params, x: v }).N().re as number;
+      let checked = 0;
+      for (const x of samples) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ ...params, x }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        // Relative tolerance (matches the driver's own D-verify bar): the steep
+        // `/xᵏ` integrands reach ~1e4 at small x, where central-difference
+        // truncation error swamps an absolute `toBeCloseTo` yet the relative
+        // error stays ~1e-8.
+        expect(Math.abs(d - f)).toBeLessThan(1e-4 * (1 + Math.abs(f)));
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    };
+
+    // fully-numeric mixed-parity numerator (odd x¹ + even x⁰) over √(1+x⁴):
+    // neither piece is grouped by residue mod n/2=2, so the combined integrand
+    // fires no bundled rule; the split closes ∫1/√(1+x⁴)=EllipticF and
+    // ∫x/√(1+x⁴)=½arcsinh(x²).
+    test('∫(1+x)/√(1+x⁴) dx', () => verify('\\frac{1+x}{\\sqrt{1+x^4}}'));
+
+    // #213-shape: (c+d·x)/√(−a−b·x⁴) — NEGATIVE radicand (a,b>0), so the answer
+    // is complex; the central-difference check runs on Re. Fixed so −a−b·x⁴<0.
+    test('∫(c+d·x)/√(−a−b·x⁴) dx (#213)', () =>
+      verify('\\frac{c+d x}{\\sqrt{-a-b x^4}}', {
+        a: 0.7,
+        b: 1.3,
+        c: 0.5,
+        d: 0.9,
+      }));
+
+    // #544-shape: x²·(c+d·x+e·x²+f·x³)/(a+b·x⁴)^{3/2}, symbolic coefficients.
+    test('∫x²·(c+d·x+e·x²+f·x³)/(a+b·x⁴)^{3/2} dx (#544)', () =>
+      verify('\\frac{x^2(c+d x+e x^2+f x^3)}{(a+b x^4)^{3/2}}', {
+        a: 0.7,
+        b: 1.3,
+        c: 0.5,
+        d: 0.9,
+        e: 1.1,
+        f: 0.6,
+      }));
+
+    // #468-shape: ODD n=3 binomial radical with a /x⁷ Laurent numerator — the
+    // bundled reduction lowers (a+b·x³)^{3/2} and strands a Laurent-numerator
+    // subproblem the recursive split then closes (ArcTanh + Elliptic pieces).
+    test('∫(c+…+g·x⁴)(a+b·x³)^{3/2}/x⁷ dx (#468)', () =>
+      verify('\\frac{(c+d x+e x^2+f x^3+g x^4)(a+b x^3)^{3/2}}{x^7}', {
+        a: 0.7,
+        b: 1.3,
+        c: 0.5,
+        d: 0.9,
+        e: 1.1,
+        f: 0.6,
+        g: 0.4,
+      }));
+
+    // Toggle meaningfulness: `NO_R28` is captured at module load, so this
+    // branches on the env var present at process start — the default suite
+    // proves the closure, a `RUBI_NO_R28=1` run proves it goes inert without
+    // the rung.
+    test('∫(1+x)/√(1+x⁴) is gated by RUBI_NO_R28', () => {
+      const F = ce.parse('\\int \\frac{1+x}{\\sqrt{1+x^4}} \\, dx').evaluate();
+      if (process.env.RUBI_NO_R28 === undefined)
+        expect(F.has('Integrate')).toBe(false);
+      else expect(F.has('Integrate')).toBe(true);
+    });
+  });
+
   // ── Integration variable other than `x` (R26A). ──
   // The bundled rules all carry `variable: "x"`; every RHS references the
   // integration variable as the string token `"x"`. The match env does not
