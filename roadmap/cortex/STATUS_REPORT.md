@@ -111,6 +111,21 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-10 — **Example-programs suite**: 18 complete Cortex programs in
+  `test/cortex/programs.test.ts` (executed through `executeCortex`, exact
+  assertions) mirrored 1:1 in `src/cortex/docs/examples.md` — iteration
+  (Euler #1, FizzBuzz-as-a-Map, Collatz, Euclid, Fibonacci, trial-division
+  primes), recursion (pre-declared lambda idiom), numeric methods (Newton,
+  trapezoid, Monte Carlo), exact/symbolic showcases (harmonic H₂₀ exact,
+  Basel vs π²/6, D of a user function, Solve+verify, golden-ratio LaTeX
+  island), collections (matrix det/transpose/`m[i,j]`, exact statistics,
+  Filter+Reduce). Idioms established: tuples for multi-value display (lists
+  are lazy), `Map` result materialized with `.each()`, `Mod`/`Factorial` in
+  lieu of `%`/`!`. The exercise surfaced 2 engine bugs (canonicalDivide
+  value-leak — the `2/x → 2` when `x:=1` wrong-answer class — and
+  `String(…)` concatenation) plus 5 Cortex gaps (recursion knot-tying, lazy
+  collection capture, chained indexing, silent indexed assignment, operator
+  conveniences) — all recorded as backlog items in README.md.
 - 2026-07-10 — **Verbatim symbols are truly literal (language-review §2.13
   resolved)**: the content of a `` `…` `` verbatim symbol undergoes NO escape
   processing and must be a valid MathJSON symbol name (checked with

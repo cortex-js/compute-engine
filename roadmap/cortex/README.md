@@ -76,6 +76,30 @@ large.
   `@cortex-js/compute-engine/cortex` from the *packed* build and executes a
   tiny program (mirrors what the benchmark harness does for CE releases).
 
+### Engine bugs surfaced by the example programs (2026-07-10)
+
+Found while writing `test/cortex/programs.test.ts` / `docs/examples.md`.
+The first two are **Compute Engine** bugs (pure-engine repros, no Cortex
+involved) discovered through Cortex programs; they are tracked here because
+this is where they bite.
+
+- **Canonicalization leaks a symbol's runtime value into structure (M —
+  wrong answers).** `ce.declare('x', {value: 1}); ce.box(['Divide', 2, 'x'])`
+  canonicalizes to `2` — and to `ComplexInfinity` when the value is `0`.
+  Cause: `canonicalDivide` uses `op2.isSame(1)`/`op2.isSame(0)`
+  (`arithmetic-mul-div.ts:755/782`) and `.isSame` follows symbol value
+  bindings. Effect in Cortex: a loop body `x = (x + 2/x) / 2` canonicalized
+  while `x` happens to be `1` silently computes the wrong ladder
+  (Newton's method → 63/32 instead of √2). The canonical structure of an
+  expression must not depend on a mutable symbol's transient value; the fix
+  (a non-value-following check in canonical folds) has engine-wide blast
+  radius — measure before landing.
+- **`String(…)` does not concatenate string values (S).**
+  `String("x = ", 3)` evaluates to a string whose *content* is `"x = "3` —
+  the literal's quotes leak into the value. This breaks string interpolation
+  (`"\(x)"` lowers to `String`), including the headline example in
+  `cortex.md`.
+
 ### Semantics gaps shipped as v0 caveats (complete on demand)
 
 - **Enforce typed function params (M).** `f(x: integer) = …` parses and holds
@@ -84,6 +108,29 @@ large.
 - **Comment fidelity through serialize (M).** Comments are dropped on
   serialize (documented lossy in `comments.md`); preserve them if round-trip
   fidelity is required for the notebook use case.
+- **Recursive `f(n) = …` does not tie the knot (M).** A self-reference in a
+  one-step function definition unfolds once and then stalls
+  (`fact(10)` → `10·fact(9)`); the body is canonicalized before `f` exists.
+  Workaround (documented in `examples.md`): `let f` first, then
+  `f = n |-> …`. Fix: pre-declare the function symbol before canonicalizing
+  the definition body.
+- **Lazy collections capture mutable variables (M — design decision).**
+  `xs = Join(xs, [k])` in a loop yields `[k, k, k]` (the list holds the
+  *symbol*; a later read sees the final value), and a list literal as the
+  final statement returns unevaluated elements (`[d, d+1]` → `[d, d+1]`,
+  while the tuple `(d, d+1)` → `(5, 6)`). Engine lazy-collection semantics
+  colliding with mutable program state — decide: eager element evaluation on
+  `Assign`/statement value, or document the tuple idiom as the contract.
+- **Chained indexing `m[2][1]` fails (S).** Canonicalizes to an
+  `incompatible-type` error (`At` result typing); `m[2, 1]` works and is the
+  documented form.
+- **Indexed assignment `xs[2] = 9` silently no-ops (S).** Should be a
+  diagnostic (or an `Error` value) until element assignment is supported.
+- **Operator conveniences (S, decide as a batch).** No `%` (use `Mod`), no
+  postfix `!` (use `Factorial`), `a |> f` parses to `Pipe` but `Pipe` does
+  not evaluate, `"a" + "b"` is a type error (no string concatenation
+  operator), and `Append`/`Fold`/`StringJoin`/`RandomInteger` are not engine
+  builtins (use `Join`/`Reduce`/interpolation/`Random`).
 
 ### Serializer / compile-target polish
 
