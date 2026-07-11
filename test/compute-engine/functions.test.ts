@@ -1,4 +1,5 @@
 import { MathJsonExpression as Expression } from '../../src/math-json/types';
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine, exprToString } from '../utils';
 
 function evaluate(expr: Expression) {
@@ -285,4 +286,50 @@ describe('Function-literal head application (G4)', () => {
         .expr([['Function', ['Add', 'x', 'y'], 'x', 'y'], 3, 4])
         .evaluate().re
     ).toBe(7));
+});
+
+// N() must numericize through user-defined function application: the
+// caller's `numericApproximation` option was dropped at the
+// function-application seam, so `N(f(2))` returned an exact value (`2/3`).
+// A fresh engine (rather than the shared one) is used so each assertion
+// reproduces the reported bug faithfully and guards the fix.
+describe('N() through user-defined function application', () => {
+  const ce = new ComputeEngine();
+  ce.parse('f(x) := x/3').evaluate();
+  ce.parse('g(x) := 2x').evaluate();
+  ce.assign('lnfn', ['Function', ['Ln', 'x'], 'x']);
+
+  // Assert on the *returned form* (a float literal, not the exact rational
+  // `2/3`); reading `.re` would numericize on access and hide the bug.
+  test('N(f(2)) numericizes', () =>
+    expect(ce.parse('f(2)').N().isExact).toBe(false));
+
+  test('f(2).evaluate() stays exact', () =>
+    expect(ce.parse('f(2)').evaluate().toString()).toBe('2/3'));
+
+  test('exactness contract preserved: ln-function stays symbolic', () =>
+    expect(ce.box(['lnfn', 2]).evaluate().toString()).toBe('ln(2)'));
+
+  test('N(ln-function) numericizes', () => {
+    const r = ce.box(['lnfn', 2]).N();
+    expect(r.isNumberLiteral && r.isExact).toBe(false);
+    expect(r.re).toBeCloseTo(Math.log(2));
+  });
+
+  test('nested N(g(f(2)))', () => {
+    const r = ce.box(['g', ['f', 2]]).N();
+    expect(r.isExact).toBe(false);
+    expect(r.re).toBeCloseTo((2 / 3) * 2);
+  });
+
+  test('lambda case N((x |-> x/3)(2))', () =>
+    expect(
+      ce.box(['Apply', ['Function', ['Divide', 'x', 3], 'x'], 2]).N().isExact
+    ).toBe(false));
+
+  test('async N(f(2)) numericizes', async () =>
+    expect(
+      (await ce.parse('f(2)').evaluateAsync({ numericApproximation: true }))
+        .isExact
+    ).toBe(false));
 });

@@ -412,6 +412,25 @@ describe('DSL STRING PARSING', () => {
     const expr = engine.expr(['Quantity', 1, 'kg*m/s^2']);
     expect(expr.isValid).toBe(true);
   });
+
+  test('string unit "km/h" canonicalizes identically to the symbolic form', () => {
+    const strForm = engine.box(['Quantity', 30, { str: 'km/h' }]);
+    const symForm = engine.box(['Quantity', 30, ['Divide', 'km', 'h']]);
+    expect(strForm.json).toEqual(symForm.json);
+  });
+
+  test('simple string unit "km" becomes a symbol, not a string literal', () => {
+    const strForm = engine.box(['Quantity', 30, { str: 'km' }]);
+    const symForm = engine.box(['Quantity', 30, 'km']);
+    expect(strForm.json).toEqual(symForm.json);
+    expect(strForm.op2.symbol).toBe('km');
+  });
+
+  test('malformed unit string produces a clear error, not a partial node', () => {
+    const bad = engine.box(['Quantity', 1, { str: 'kg/(' }]);
+    expect(bad.isValid).toBe(false);
+    expect(bad.op2.operator).toBe('Error');
+  });
 });
 
 describe('COMPOUND UNIT CONVERT', () => {
@@ -420,6 +439,18 @@ describe('COMPOUND UNIT CONVERT', () => {
       .expr([
         'UnitConvert',
         ['Quantity', 36, ['Divide', 'km', 'h']],
+        ['Divide', 'm', 's'],
+      ])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(10);
+  });
+
+  test('UnitConvert works on a string-unit Quantity', () => {
+    const expr = engine
+      .box([
+        'UnitConvert',
+        ['Quantity', 36, { str: 'km/h' }],
         ['Divide', 'm', 's'],
       ])
       .evaluate();

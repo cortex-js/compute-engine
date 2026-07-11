@@ -915,9 +915,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   Intersection: {
     // notation: \cap
+    // Accepts any finite collection operand (e.g. a `List`), not just sets:
+    // list operands are coerced to a set (deduped) by `intersection`, so
+    // `Intersection([1,2,3], [2,3,4])` works without building sets by hand.
     wikidata: 'Q185837',
-    signature: '(set+) -> set',
-    description: 'Return the intersection of two or more sets.',
+    signature: '(collection+) -> set',
+    description: 'Return the intersection of two or more collections as a set.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
       if (args.length === 1) return ce.symbol('EmptySet');
@@ -928,7 +931,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       const validatedArgs = validateSetArguments(
         ce,
         flatten(transformedArgs, 'Intersection'),
-        '(set+) -> set'
+        '(collection+) -> set'
       );
       return ce._fn('Intersection', validatedArgs);
     },
@@ -1146,8 +1149,14 @@ function intersection(
   for (const op of ops.slice(1))
     elements = elements.filter((element) => op.contains(element) === true);
 
-  if (elements.length === 0) return ce.symbol('EmptySet');
-  return ce._fn('Set', elements);
+  // Preserve set semantics of the result: dedup (the first operand may be a
+  // list with repeated elements).
+  const unique: Expression[] = [];
+  for (const elem of elements)
+    if (unique.every((e) => !e.isSame(elem))) unique.push(elem);
+
+  if (unique.length === 0) return ce.symbol('EmptySet');
+  return ce._fn('Set', unique);
 }
 
 /**

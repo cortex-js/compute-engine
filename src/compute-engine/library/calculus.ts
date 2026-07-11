@@ -779,7 +779,20 @@ volumes
 
       lazy: true,
       signature: '(function, point:number, direction:number?) -> number',
-      canonical: ([f, x, dir], { engine }) => {
+      canonical: (ops, { engine }) => {
+        const [f, x, dir] = ops;
+        // Wolfram-style 3-arg form `Limit(expr, var, point)`: when the middle
+        // operand is a symbol that is a free variable of the expression, bind
+        // it explicitly as the expansion variable and treat the third operand
+        // as the point. This canonicalizes to the same internal representation
+        // as the 2-arg form `Limit(expr, point)` (which infers the variable).
+        if (ops.length === 3 && f && isSymbol(x)) {
+          if (f.canonical.unknowns.includes(x.symbol)) {
+            const fn = canonicalFunctionLiteralArguments(engine, [f, x]);
+            if (!fn) return null;
+            return engine._fn('Limit', [fn, ops[2].canonical]);
+          }
+        }
         const fn = canonicalFunctionLiteral(f);
         if (!fn || !x) return null;
         if (dir === undefined) return engine._fn('Limit', [fn, x.canonical]);

@@ -488,8 +488,12 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
   });
 
   test('String escaping', () => {
+    // Escape sequences are cooked once, by the lexer. The resulting `str`
+    // MathJSON value holds the *actual* control character (a real tab, a real
+    // newline), never a re-escaped `\t`/`\n` — the single-segment plain-string
+    // path must agree with the interpolation path (see 'String interpolating').
     expect(validCortex('"hello\\t world"')).toStrictEqual({
-      str: 'hello\\t world',
+      str: 'hello\t world',
     });
     expect(validCortex('"hello \\u0061 world"')).toStrictEqual({
       str: 'hello a world',
@@ -498,14 +502,21 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
       str: 'hello a world',
     });
     expect(validCortex('"hello \\u{1F30D}"')).toStrictEqual({
-      str: 'hello \\ud83c\\udf0d',
+      str: 'hello \u{1F30D}',
     });
     expect(validCortex('"hello \\\\ world"')).toStrictEqual({
-      str: 'hello \\\\ world',
+      str: 'hello \\ world',
     });
     expect(validCortex('"hello \\n world"')).toStrictEqual({
-      str: 'hello \\n world',
+      str: 'hello \n world',
     });
+    // A plain string that is a single cooked segment with several control
+    // characters is not double-processed (regression: `escapeJsonString` was
+    // re-escaping the cooked segment).
+    expect(validCortex('"a\\tb\\nc"')).toStrictEqual({ str: 'a\tb\nc' });
+    // An extended string (`#"…"#`) performs NO escape processing: a backslash
+    // and the following letter are both literal.
+    expect(validCortex('#"a\\tb"#')).toStrictEqual({ str: 'a\\tb' });
   });
 
   test('String interpolating', () => {
@@ -781,24 +792,27 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
 
 describe('CORTEX PARSING MULTILINE STRINGS', () => {
   test('Valid string', () => {
+    // Lines are joined with a real newline (`\n`), and any escape sequence in a
+    // line is cooked once — the `str` value holds real control characters, not
+    // re-escaped `\n`.
     expect(validCortex('"""\nhello\nworld\n"""')).toStrictEqual({
-      str: 'hello\\nworld',
+      str: 'hello\nworld',
     });
 
     expect(validCortex('"""\nhello\n \\u{1F30D}\n"""')).toStrictEqual({
-      str: 'hello\\n \\ud83c\\udf0d',
+      str: 'hello\n \u{1F30D}',
     });
 
     expect(validCortex('"""\n   hello\n   world\n   """')).toStrictEqual({
-      str: 'hello\\nworld',
+      str: 'hello\nworld',
     });
 
     expect(validCortex('"""\n\t\thello\n\t\tworld\n\t\t"""')).toStrictEqual({
-      str: 'hello\\nworld',
+      str: 'hello\nworld',
     });
 
     expect(validCortex('"""\n\t  hello\n\t  world\n\t  """')).toStrictEqual({
-      str: 'hello\\nworld',
+      str: 'hello\nworld',
     });
 
     expect(validCortex('"""\n\t  hello\\\n\t  world\n\t  """')).toStrictEqual({

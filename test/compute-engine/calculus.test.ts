@@ -1597,6 +1597,62 @@ describe('LIMIT', () => {
       ).toBeNaN();
     });
   });
+
+  describe('Wolfram-style 3-arg Limit(expr, var, point)', () => {
+    test('canonicalizes identically to the 2-arg form', () => {
+      const threeArg = engine.box([
+        'Limit',
+        ['Divide', ['Sin', 'x'], 'x'],
+        'x',
+        0,
+      ]);
+      const twoArg = engine.box(['Limit', ['Divide', ['Sin', 'x'], 'x'], 0]);
+      expect(threeArg.json).toEqual(twoArg.json);
+    });
+
+    test('sin(x)/x as x → 0 evaluates to 1', () => {
+      expect(
+        engine
+          .box(['Limit', ['Divide', ['Sin', 'x'], 'x'], 'x', 0])
+          .evaluate()
+          .re
+      ).toBe(1);
+    });
+
+    test('(1 - cos x)/x² as x → 0 evaluates to 1/2 (matches 2-arg)', () => {
+      const body = ['Divide', ['Subtract', 1, ['Cos', 'x']], ['Power', 'x', 2]];
+      const threeArg = engine
+        .box(['Limit', body, 'x', 0])
+        .evaluate()
+        .toString();
+      const twoArg = engine.box(['Limit', body, 0]).evaluate().toString();
+      expect(threeArg).toEqual(twoArg);
+      expect(threeArg).toBe('1/2');
+    });
+
+    test('directional/pole case 1/x as x → 0 matches 2-arg (stays symbolic)', () => {
+      const body = ['Divide', 1, 'x'];
+      const threeArg = engine
+        .box(['Limit', body, 'x', 0])
+        .evaluate()
+        .toString();
+      const twoArg = engine.box(['Limit', body, 0]).evaluate().toString();
+      expect(threeArg).toEqual(twoArg);
+    });
+
+    test('a symbolic (non-free) point is still read as the direction form', () => {
+      // `a` is not free in `1/x`, so this is Limit(function, point=a, dir=1),
+      // not the Wolfram (expr, var, point) form.
+      expect(
+        engine.box(['Limit', ['Divide', 1, 'x'], 'a', 1]).json
+      ).toEqual([
+        'Limit',
+        ['Function', ['Block', ['Divide', 1, 'x']], 'x'],
+        'a',
+        1,
+      ]);
+    });
+  });
 });
 
 describe('DOUBLY-INFINITE SUMS', () => {

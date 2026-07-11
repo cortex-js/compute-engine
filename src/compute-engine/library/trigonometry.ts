@@ -281,9 +281,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    Cos: trigFunction('Cos', 5050, 'Cosine of an angle.'),
+    Cos: {
+      ...trigFunction('Cos', 5050, 'Cosine of an angle.'),
+      keywords: ['cosine'],
+    },
 
-    Tan: trigFunction('Tan', 5100, 'Tangent of an angle.'),
+    Tan: {
+      ...trigFunction('Tan', 5100, 'Tangent of an angle.'),
+      keywords: ['tangent'],
+    },
 
     /* converts (x, y) -> (radius, angle) */
     // ToPolarCoordinates: {
@@ -323,7 +329,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Inverse hyperbolic tangent (area hyperbolic tangent).'
     ),
 
-    Cosh: trigFunction('Cosh', 6050, 'Hyperbolic cosine.'),
+    Cosh: {
+      ...trigFunction('Cosh', 6050, 'Hyperbolic cosine.'),
+      keywords: ['hyperbolic cosine'],
+    },
 
     Cot: trigFunction('Cot', 5600, 'Cotangent, the reciprocal of tangent.'),
 
@@ -381,7 +390,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Hyperbolic secant, the reciprocal of hyperbolic cosine.'
     ),
 
-    Tanh: trigFunction('Tanh', 6200, 'Hyperbolic tangent.'),
+    Tanh: {
+      ...trigFunction('Tanh', 6200, 'Hyperbolic tangent.'),
+      keywords: ['hyperbolic tangent'],
+    },
   },
   {
     Arccos: {

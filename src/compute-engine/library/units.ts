@@ -84,15 +84,22 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       // Canonicalize the magnitude (first arg) but leave the unit as-is
       const mag = args[0].canonical;
 
-      // If the second argument is a string containing DSL operators,
-      // parse it into a structured MathJSON unit expression.
+      // A string second argument (e.g. "km/h", "km") is parsed into a
+      // structured unit expression with the same DSL parser the LaTeX/text
+      // path uses. A simple unit becomes a symbol; a compound unit becomes a
+      // Multiply/Divide/Power expression — so the string form canonicalizes
+      // identically to the symbolic-unit form `Quantity(30, km/h)`.
       const unitArg = args[1];
-      if (isString(unitArg) && /[/*^()]/.test(unitArg.string)) {
+      if (isString(unitArg)) {
         const parsed = parseUnitDSL(unitArg.string);
-        if (parsed !== null && typeof parsed !== 'string') {
-          const boxed = ce.expr(parsed as any);
-          return ce._fn('Quantity', [mag, boxed]);
-        }
+        if (parsed === null)
+          return ce._fn('Quantity', [
+            mag,
+            ce.error(['unexpected-argument', unitArg.string]),
+          ]);
+        const boxed =
+          typeof parsed === 'string' ? ce.symbol(parsed) : ce.expr(parsed as any);
+        return ce._fn('Quantity', [mag, boxed]);
       }
 
       return ce._fn('Quantity', [mag, unitArg.canonical]);

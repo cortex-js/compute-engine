@@ -34,6 +34,12 @@
   to control the number of results (default: 10). Custom definitions declared
   with `ce.declare()` can provide an optional `keywords` list, and returned IDs
   can be passed to `ce.lookupDefinition()`.
+- **Definition descriptions filled in.** About 80 operators and constants that
+  lacked a `description` now have one (the trigonometric family, logic and
+  relational operators, collection primitives such as `List`, `Range`, and
+  `Fold`, and constants like `Pi` and `ExponentialE`), and `Sec`'s description
+  was corrected (secant is the _reciprocal_, not the inverse, of cosine). These
+  surface in `ce.searchDefinitions()` and `ce.lookupDefinition()`.
 - **New builtin operators are available:** `Pipe(x, f)`,
   `Append(collection, element)`, `Fold(f, init, collection)`,
   `StringJoin(s1, s2, …)`, and `RandomInteger(n)` or `RandomInteger(a, b)`.

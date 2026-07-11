@@ -8,8 +8,6 @@ import {
   operator,
   stringValue,
 } from '../math-json/utils.js';
-import { escapeJsonString } from '../common/json.js';
-
 import { DIGITS, FANCY_UNICODE, HEX_DIGITS } from './characters.js';
 import {
   DiagnosticMessage,
@@ -1569,11 +1567,7 @@ export class Parser {
     if (previous !== undefined) values.push(previous);
 
     if (values.length === 1 && typeof values[0] === 'string')
-      return this.wrap(
-        { str: escapeJsonString(values[0]) },
-        token.start,
-        token.end
-      );
+      return this.wrap({ str: values[0] }, token.start, token.end);
 
     const parts2: MathJsonExpression[] = values.map((x) =>
       typeof x === 'string' ? { str: x } : x

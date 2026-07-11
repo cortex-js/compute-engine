@@ -296,7 +296,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix) -> matrix',
       type: ([matrix]) => matrix.type,
-      evaluate: ([matrix], { engine: ce }) => {
+      evaluate: ([matrix], { engine: ce, numericApproximation }) => {
         const op1 = matrix.evaluate();
 
         // Inverse of scalar is 1/scalar
@@ -314,7 +314,37 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (shape.length === 2 && shape[0] !== shape[1])
             return ce.error('expected-square-matrix', op1.toString());
 
-          return op1.tensor.inverse()?.expression;
+          const n = shape[0];
+
+          // Exact path: when every entry is an exact integer/rational, invert
+          // with exact rational arithmetic so an exact matrix yields an exact
+          // result (the exactness contract). Floats-in / non-rational entries,
+          // and any `.N()` request (`numericApproximation`), fall through to
+          // the numeric path below.
+          const rationalMatrix = numericApproximation
+            ? undefined
+            : tensorToRationalMatrix(op1, n, n);
+          if (rationalMatrix) {
+            const inverse = exactRationalInverse(rationalMatrix);
+            if (inverse === undefined) return undefined; // singular
+            // Build via `ce.expr(['List', …])` (not the raw tensor
+            // `.expression`) so the result collapses to a `matrix<…>` type that
+            // `Dot`/`MatrixMultiply` accept.
+            return ce.expr([
+              'List',
+              ...inverse.map((row) =>
+                ce.expr(['List', ...row.map(([num, den]) => ce.number([num, den]))])
+              ),
+            ]);
+          }
+
+          // Numeric path. Rebuild the result through `ce.function('List', …)`
+          // so the nested list collapses to a `matrix<…>` type (the raw tensor
+          // `.expression` is typed `list<list<…>>`, which `Dot`/`MatrixMultiply`
+          // reject).
+          const inv = op1.tensor.inverse();
+          if (inv === undefined) return undefined;
+          return ce.function('List', inv.expression.ops);
         }
 
         return undefined;
@@ -3060,6 +3090,36 @@ function exactRationalRref(matrix: BigRat[][]): {
   }
 
   return { matrix: out, pivotCols };
+}
+
+/**
+ * Exact inverse of a square rational matrix via Gauss-Jordan elimination on the
+ * augmented matrix [A | I]. All arithmetic is exact rational, so an exact
+ * integer/rational matrix yields an exact rational inverse (no float
+ * artifacts). Returns `undefined` if A is singular.
+ */
+function exactRationalInverse(matrix: BigRat[][]): BigRat[][] | undefined {
+  const n = matrix.length;
+  if (n === 0 || matrix.some((row) => row.length !== n)) return undefined;
+
+  // Build the augmented matrix [A | I] (n × 2n).
+  const aug: BigRat[][] = matrix.map((row, i) => {
+    const identity: BigRat[] = Array.from(
+      { length: n },
+      (_, j) => (i === j ? [1n, 1n] : [0n, 1n]) as BigRat
+    );
+    return [...row.map((v) => [v[0], v[1]] as BigRat), ...identity];
+  });
+
+  const { matrix: reduced, pivotCols } = exactRationalRref(aug);
+
+  // A is invertible iff its columns are all pivots, i.e. the left half reduces
+  // to the identity (pivotCols === [0, 1, …, n−1]).
+  if (pivotCols.length !== n) return undefined;
+  for (let i = 0; i < n; i++) if (pivotCols[i] !== i) return undefined;
+
+  // The right half of the reduced augmented matrix is A⁻¹.
+  return reduced.map((row) => row.slice(n).map((v) => [v[0], v[1]] as BigRat));
 }
 
 /**

@@ -1809,8 +1809,12 @@ function applyFunctionLiteral(
     }
   }
 
-  // The value is a function literal. Apply the arguments to it
-  return apply(value, ops);
+  // The value is a function literal. Apply the arguments to it.
+  // Re-evaluate the result with the caller's options so that
+  // `numericApproximation` (from `.N()`) is honored through the
+  // user-function application seam — `apply()` evaluates the body without
+  // options, so without this a float request would return an exact value.
+  return apply(value, ops).evaluate(options);
 }
 
 /** Returns true when every formal parameter of a signature is a scalar

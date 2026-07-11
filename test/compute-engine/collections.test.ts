@@ -1176,3 +1176,122 @@ describe('DICTIONARY LITERAL VALUE EVALUATION', () => {
     expect(m.evaluate() === m).toBe(true);
   });
 });
+
+describe('KEYS / VALUES', () => {
+  const dict: Expression = [
+    'Dictionary',
+    ['Tuple', { str: 'a' }, 1],
+    ['Tuple', { str: 'b' }, 2],
+    ['Tuple', { str: 'c' }, 3],
+  ];
+
+  test('Keys returns the keys in iteration order', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Keys', dict]).evaluate().json).toEqual([
+      'List',
+      "'a'",
+      "'b'",
+      "'c'",
+    ]);
+  });
+
+  test('Keys type is list<string>', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Keys', dict]).type.toString()).toBe('list<string>');
+  });
+
+  test('Values returns the values in iteration order', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Values', dict]).evaluate().json).toEqual([
+      'List',
+      1,
+      2,
+      3,
+    ]);
+  });
+
+  test('Values type reflects the value types', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Values', dict]).type.toString()).toBe(
+      'list<finite_integer>'
+    );
+  });
+
+  test('Keys, Values and iteration order agree', () => {
+    const ce = new ComputeEngine();
+    const d = ce.box(dict);
+    const keys = (ce.box(['Keys', dict]).evaluate().json as any[]).slice(1);
+    const values = (ce.box(['Values', dict]).evaluate().json as any[]).slice(1);
+    const iterated = Array.from(d.each()).map((kv) => [
+      (kv as any).op1.json,
+      (kv as any).op2.json,
+    ]);
+    expect(iterated).toEqual([
+      ["'a'", 1],
+      ["'b'", 2],
+      ["'c'", 3],
+    ]);
+    expect(keys).toEqual(iterated.map((p) => p[0]));
+    expect(values).toEqual(iterated.map((p) => p[1]));
+  });
+});
+
+describe('UNION / INTERSECTION ON COLLECTIONS', () => {
+  const listA: Expression = ['List', 1, 2, 3];
+  const listB: Expression = ['List', 2, 3, 4];
+  const setB: Expression = ['Set', 2, 3, 4];
+
+  test('Union of two list literals is a deduped set', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Union', listA, listB]).evaluate().json).toEqual([
+      'Set',
+      1,
+      2,
+      3,
+      4,
+    ]);
+  });
+
+  test('Intersection of two list literals is a set', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Intersection', listA, listB]).evaluate().json).toEqual([
+      'Set',
+      2,
+      3,
+    ]);
+  });
+
+  test('Intersection of a list and a set operand', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Intersection', listA, setB]).evaluate().json).toEqual([
+      'Set',
+      2,
+      3,
+    ]);
+  });
+
+  test('Union of a list and a set operand', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Union', listA, setB]).evaluate().json).toEqual([
+      'Set',
+      1,
+      2,
+      3,
+      4,
+    ]);
+  });
+
+  test('Intersection dedups the result (set semantics)', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Intersection', ['List', 1, 2, 2, 3], listB]).evaluate().json
+    ).toEqual(['Set', 2, 3]);
+  });
+
+  test('existing set-literal intersection is unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Intersection', ['Set', 1, 2, 3], setB]).evaluate().json
+    ).toEqual(['Set', 2, 3]);
+  });
+});

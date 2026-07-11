@@ -93,6 +93,10 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
 
   // String literal
   ['string literal', { str: 'hello world' }],
+  // A string whose value holds real control characters must round-trip: the
+  // serializer emits `\t`/`\n`, and re-parsing cooks them back to the same
+  // characters (regression: the parser used to double-escape a plain string).
+  ['string with control chars', { str: 'a\tb\nc' }],
 
   // Add / Subtract
   ['Add binary', ['Add', 'a', 'b']],

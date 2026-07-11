@@ -331,6 +331,44 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
+  Keys: {
+    description: 'Return a list of the keys of a dictionary.',
+    complexity: 8200,
+    signature: '(dictionary) -> list<string>',
+    type: () => parseType('list<string>'),
+    evaluate: ([dict], { engine: ce }) => {
+      if (!isDictionary(dict)) return undefined;
+      // Iteration order matches `each()` (both enumerate the underlying
+      // key/value record in insertion order), so `Keys`, `Values` and
+      // `for kv in d` agree.
+      return ce.function(
+        'List',
+        dict.keys.map((k) => ce.string(k))
+      );
+    },
+  },
+
+  Values: {
+    description: 'Return a list of the values of a dictionary.',
+    complexity: 8200,
+    signature: '(dictionary) -> list',
+    type: ([dict]) => {
+      const t = dict.type.type;
+      if (typeof t === 'object' && t.kind === 'dictionary')
+        return parseType(`list<${typeToString(t.values)}>`);
+      if (typeof t === 'object' && t.kind === 'record')
+        return parseType(
+          `list<${typeToString(widen(...Object.values(t.elements)))}>`
+        );
+      return parseType('list<any>');
+    },
+    evaluate: ([dict], { engine: ce }) => {
+      if (!isDictionary(dict)) return undefined;
+      // Same insertion order as `Keys` and `each()`.
+      return ce.function('List', dict.values);
+    },
+  },
+
   Single: {
     description: 'A tuple with a single element',
     complexity: 8200,
