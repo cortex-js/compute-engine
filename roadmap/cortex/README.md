@@ -85,6 +85,13 @@ where it bites. (The canonical-fold value-leak found in the same sweep —
 `Divide(2, x)` → `2` while `x` held `1` — was FIXED 2026-07-10; see the
 completed log in `STATUS_REPORT.md`.)
 
+The engine-side items from this sweep (this one, plus the lazy-collection
+semantics decision, chained indexing, silent indexed assignment, recursion
+knot-tying, and the missing-builtins batch below) are **mirrored in the
+repo-root [`ROADMAP.md`](../../ROADMAP.md)** under "Cortex example-programs
+findings" for engine-track visibility — when one lands, remove it from both
+lists.
+
 - **`String(…)` does not concatenate string values (S).**
   `String("x = ", 3)` evaluates to a string whose *content* is `"x = "3` —
   the literal's quotes leak into the value. This breaks string interpolation
