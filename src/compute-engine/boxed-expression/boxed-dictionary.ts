@@ -5,6 +5,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Metadata,
   DictionaryInterface,
+  EvaluateOptions,
 } from '../global-types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
@@ -233,6 +234,23 @@ export class BoxedDictionary
     return Object.values(this._keyValues);
   }
 
+  override evaluate(options?: Partial<EvaluateOptions>): Expression {
+    // A dictionary literal evaluates its values (keys are strings and need no
+    // evaluation). Fast path: a dictionary whose values are all already
+    // fully-evaluated literals is returned unchanged.
+    const numericApproximation = options?.numericApproximation ?? false;
+    const entries = Object.entries(this._keyValues);
+    if (
+      entries.every(([, v]) => isEvaluatedValue(v, numericApproximation))
+    )
+      return this;
+    const ce = this.engine;
+    const pairs = entries.map(([k, v]) =>
+      ce._fn('KeyValuePair', [ce.string(k), v.evaluate(options)])
+    );
+    return new BoxedDictionary(ce, ce._fn('Dictionary', pairs));
+  }
+
   match(
     pattern: Expression,
     _options?: PatternMatchOptions
@@ -272,6 +290,14 @@ function boxedExpressionToDictionaryValue(value: Expression): DictionaryValue {
     return value.ops.map(boxedExpressionToDictionaryValue);
 
   return value.toMathJson({ shorthands: [] });
+}
+
+/** Is `v` an already fully-evaluated dictionary value for the requested
+ * evaluation mode? (Mirrors the `List` fast-path predicate.) */
+function isEvaluatedValue(v: Expression, numericApproximation: boolean): boolean {
+  if (isString(v)) return true;
+  if (isNumber(v)) return !numericApproximation || !v.isExact;
+  return false;
 }
 
 function dictionaryValueToBoxedExpression(

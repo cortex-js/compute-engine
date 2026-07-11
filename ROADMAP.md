@@ -675,21 +675,20 @@ note — trace the residual integrand, don't trust the predicate census.
   (multiple-angle elementary form) for `sin^n` products — the exp-form
   reduction works but verifies past the harness budget and preempts trig-form
   rules chapter-wide, so it was deliberately gated off.
-- **Ch5 residual — complex-Erfi evaluator + ₚFq.** The rung ladder closed the
-  chapter's structural gaps in sequence: R22's bridge (`RUBI_NO_TRIGSUB`)
-  closed the `∫f(x)·Cot[x]`-bottoming family (294 → 331), R23's
-  `circularTrigReduce` closed the `∫x^m·ArcSin^n/√(1−c²x²)` (n<0) family
-  (331 → 336), and **R27's `polyTrigProductReduce` closed the mixed
-  `∫θⁿ·Sinᵐ·Cosᵏ` inner integrals of the reciprocal-arcsin/arccos class**
-  (5.1 57→65, 5.2 67→78 — the former residual (a)). What remains:
-  (a) the fractional-`n` (`Sqrt[arcsin]`, `^(3/2)`, `^(5/2)`) family produces
-  a **correct** complex-`Erfi`/Fresnel form CE cannot `.N()` (graded
-  `not-evaluable`) — a native complex-Erfi evaluator would convert those to
-  solved (nearest-rung candidate; the R24 `erfiComplex` kernel covers the
-  numeric side, the gap is the symbolic-result `.N()` path);
-  (b) the ₃F₂/`HypergeometricPFQ` terminal forms need a generalized ₚFq head
-  CE lacks (out of scope). Ch7's analog is smaller and already covered
-  (arsinh → hyperbolic fallback).
+- **Ch5 residual — ₚFq only.** The rung ladder closed the chapter's
+  structural gaps in sequence: R22's bridge (`RUBI_NO_TRIGSUB`) closed the
+  `∫f(x)·Cot[x]`-bottoming family (294 → 331), R23's `circularTrigReduce`
+  closed the `∫x^m·ArcSin^n/√(1−c²x²)` (n<0) family (331 → 336), and
+  **R27's `polyTrigProductReduce` closed the mixed `∫θⁿ·Sinᵐ·Cosᵏ` inner
+  integrals of the reciprocal-arcsin/arccos class** (5.1 57→65, 5.2 67→78 —
+  the former residual (a)). What remains: only the ₃F₂/`HypergeometricPFQ`
+  terminal forms, which need a generalized ₚFq head CE lacks (out of scope).
+  _(The formerly-listed "complex-Erfi evaluator" residual is stale —
+  verified 2026-07-10 post-R27: the fractional-`n` family's complex-`Erfi`
+  results numericize via the R24 kernel, and the sole remaining
+  `not-evaluable` row in each of 5.1/5.2 (s120 seed5) is a ₚFq terminal.)_
+  Ch7's analog is smaller and already covered (arsinh → hyperbolic
+  fallback).
 
 **Exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules) are
 DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty).
@@ -997,33 +996,6 @@ Two design-level residues are deliberately carried forward:
   evaluated derivative of a known function is not yet tightened (documented in
   `library/calculus.ts`); it is blocked on evaluate-recursion and
   underscore-lambda LaTeX serialization, so it waits on those.
-
-### Cortex example-programs findings (2026-07-10) — engine items
-
-Writing the Cortex examples suite (`test/cortex/programs.test.ts` /
-`src/cortex/docs/examples.md`) doubled as a bug-finding exercise against the
-engine's program-style usage (mutable symbols, loop bodies canonicalized
-once and evaluated repeatedly). The headline find — canonical folds
-following symbol value bindings, so `Divide(2, x)` canonicalized to `2`
-while `x` held `1` (Newton's method from `x = 1` → `63/32`) — is **fixed**
-(structural `isLiteral` folds in `arithmetic-mul-div.ts`; zero snapshot
-churn). Also fixed same day: `String(…)` concatenation (operand quotes
-leaked into the value; string interpolation now works), the `Type` operator
-reporting `unknown` for lazy (non-canonical) operands, and silent indexed
-assignment (`executeCortex` now emits a `runtime-error` diagnostic for any
-non-final statement that evaluates to an error value). The 2026-07-11 round
-closed recursion knot-tying (one-step `f(n) = …` definitions), chained
-indexing `m[2][1]` (`At` sub-tensor typing), and the builtins batch (`Pipe`
-evaluation, `Append`, `Fold`, `StringJoin`, `RandomInteger`, plus Cortex
-`%`/postfix `!`). The one open engine-side item, with full detail and repros
-in [`roadmap/cortex/README.md`](./roadmap/cortex/README.md):
-
-- **Lazy collections vs. mutable program state (M — design decision).**
-  List literals never evaluate their elements (`[d, d+1]` is inert as a
-  statement value; `Join(xs, [k])` in a loop captures the *symbol* `k`, so
-  a later read sees only its final value), while tuples evaluate eagerly.
-  Decide: eager element evaluation at `Assign`/statement-value boundaries,
-  or document the tuple idiom as the contract.
 
 ### Review residue (open low-priority items)
 

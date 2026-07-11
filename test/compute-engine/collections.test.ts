@@ -1,4 +1,5 @@
 import { Expression } from '../../src/math-json/types.ts';
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine, exprToString } from '../utils';
 
 function evaluate(expr: Expression): string {
@@ -1118,5 +1119,60 @@ describe('SYMBOLIC-BOUND COLLECTIONS STAY INERT', () => {
     expect(
       exprToString(engine.expr(['Supremum', ['Range', 2, 9, 3]]).evaluate())
     ).toBe('8');
+  });
+});
+
+describe('LIST LITERAL EVALUATION', () => {
+  test('evaluates elements against bound symbols', () => {
+    const ce = new ComputeEngine();
+    ce.assign('y', 7);
+    expect(
+      exprToString(ce.box(['List', 'y', ['Add', 'y', 1]]).evaluate())
+    ).toBe('["List", 7, 8]');
+  });
+
+  test('.N() numericizes elements', () => {
+    const ce = new ComputeEngine();
+    expect(exprToString(ce.box(['List', ['Divide', 1, 3], 'Pi']).N())).toBe(
+      '["List", 0.3333333333333333, 3.141592653589793]'
+    );
+  });
+
+  test('exact elements stay symbolic under evaluate()', () => {
+    const ce = new ComputeEngine();
+    expect(exprToString(ce.box(['List', ['Ln', 2]]).evaluate())).toBe(
+      '["List", ["Ln", 2]]'
+    );
+  });
+
+  test('nested literals evaluate through', () => {
+    const ce = new ComputeEngine();
+    ce.assign('d', 5);
+    expect(
+      exprToString(
+        ce.box(['List', ['Tuple', 'd', 1], ['List', 'd']]).evaluate()
+      )
+    ).toBe('["List", ["Pair", 5, 1], ["List", 5]]');
+  });
+
+  test('all-literal list is returned unchanged (fast path, identity)', () => {
+    const ce = new ComputeEngine();
+    const big = ce.box(['List', ...Array.from({ length: 5000 }, (_, i) => i)]);
+    expect(big.evaluate() === big).toBe(true);
+  });
+});
+
+describe('DICTIONARY LITERAL VALUE EVALUATION', () => {
+  test('evaluates values against bound symbols', () => {
+    const ce = new ComputeEngine();
+    ce.assign('d', 5);
+    const m = ce.box({ dict: { a: ce.box(['Add', 'd', 1]) as any } });
+    expect(exprToString((m.evaluate() as any).get('a'))).toBe('6');
+  });
+
+  test('all-literal dictionary is returned unchanged (identity)', () => {
+    const ce = new ComputeEngine();
+    const m = ce.box({ dict: { a: 3, b: 'x' } });
+    expect(m.evaluate() === m).toBe(true);
   });
 });

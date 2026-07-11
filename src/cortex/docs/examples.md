@@ -17,9 +17,11 @@ asserts the result shown here.
 A few idioms these programs rely on:
 
 - Loops (`for`, `while`) are evaluated **for effect** — accumulate into a
-  variable, or use `Map`/`Filter`/`Reduce` for value-producing iteration.
-- A multi-value result ends in a **tuple** `( … )`, which evaluates its
-  elements.
+  variable (a number, or a list built up with `Join`/`Append`), or use
+  `Map`/`Filter`/`Reduce` for value-producing iteration.
+- Collection **literals** evaluate their elements; lazy **operators**
+  (`Range`, `Map`, `Filter`) are generators that enumerate on demand (see
+  [Evaluation](/cortex/evaluation/)).
 - `a % b` is the remainder (`Mod`), and a postfix `!` is the factorial. The
   `!` must directly follow its operand (`n!`; `x != y` is still ≠).
 
@@ -76,6 +78,16 @@ while b != 0 {
 }
 a
 // ➔ 21
+```
+
+**Collecting values in a loop.** A list accumulates through `Join`; each
+appended literal snapshots the loop variable's current value:
+
+```cortex
+let xs = []
+for k in Range(1, 3) { xs = Join(xs, [k]) }
+xs
+// ➔ [1, 2, 3]
 ```
 
 **Iterative Fibonacci.**

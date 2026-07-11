@@ -18,6 +18,16 @@
   index of a rank-≥2 collection (`At(m, 2)`) is now typed as a sub-tensor
   (`vector<2>` from a `matrix<2x2>`) instead of the scalar element type, so
   chained accesses like `At(At(m, 2), 1)` validate and evaluate.
+- **Collection literals evaluate their elements.** `List` literals and
+  `Dictionary` values now evaluate on `evaluate()`/`N()` — `["List", "y",
+  ["Add", "y", 1]]` with `y = 7` evaluates to `[7, 8]`, and `[1/3].N()`
+  numericizes — matching the existing behavior of `Set` and `Tuple`
+  (previously `List` evaluated nothing, so lists could capture dangling
+  references to mutated or out-of-scope variables). Lazy collection
+  operators (`Range`, `Map`, `Filter`, …) are unchanged: bounds and
+  operands snapshot, enumeration stays deferred. Lists whose elements are
+  already plain literals are returned by identity — no per-call rebuild for
+  large numeric lists.
 
 ### Cortex
 

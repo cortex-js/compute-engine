@@ -46,6 +46,29 @@ N(Ln(2))
 
 evaluates to `0.6931471805599453…`.
 
+## Collections: literals are values, pipelines are generators
+
+A collection **literal** — a list `[…]`, set `{…}`, tuple `(…)`, or
+dictionary — evaluates its elements when the statement executes. Assigning
+one to a variable stores a snapshot of the element *values*:
+
+```cortex
+let xs = []
+for k in Range(1, 3) { xs = Join(xs, [k]) }
+xs
+// ➔ [1, 2, 3]
+```
+
+Lazy collection **operators** — `Range`, `Map`, `Filter`, `Take`, `Join` —
+are *generators*: their operands (bounds, sources, functions) are evaluated
+when the expression is, but enumeration is deferred until the collection is
+materialized (displayed, indexed, aggregated, or iterated). A deferred
+mapping function reads program state **at materialization time**, like a
+generator in Python — if it captures a variable that later changes, the
+materialized elements reflect the later value. To snapshot, force the work
+to happen where you stand: accumulate through a loop, or apply an eager
+operation (an aggregate, an index) at the point of definition.
+
 ## Errors are values
 
 Per [Principles](/cortex/principles/), "errors are values": a *runtime*

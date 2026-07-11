@@ -132,11 +132,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       parseType(`list<${BoxedType.widen(...ops.map((op) => op.type))}>`),
     canonical: canonicalList,
     lazy: true,
-    evaluate: (ops, { engine, materialization: eager }) => {
-      if (!eager) return undefined;
-      return engine._fn(
+    evaluate: (ops, { engine, numericApproximation, materialization }) => {
+      // Eager materialization: flatten and materialize lazy sub-collections.
+      if (materialization) {
+        return engine._fn(
+          'List',
+          enlist(ops).map((op) =>
+            op.evaluate({ numericApproximation, materialization })
+          )
+        );
+      }
+      // A collection literal evaluates its elements (unlike lazy operators,
+      // which keep late binding). Fast path: a list whose elements are all
+      // already fully-evaluated literals is returned unchanged, avoiding an
+      // O(n) rebuild for large numeric lists.
+      if (ops.every((op) => isEvaluatedElement(op, numericApproximation ?? false)))
+        return undefined;
+      return engine.function(
         'List',
-        enlist(ops).map((op) => op.evaluate({ materialization: eager }))
+        ops.map((op) => op.evaluate({ numericApproximation, materialization }))
       );
     },
     eq: defaultCollectionEq,
@@ -3407,6 +3421,24 @@ function enlist(xs: ReadonlyArray<Expression>): Expression[] {
   // if (s !== undefined) result.push(ce.string(s));
 
   return result;
+}
+
+/** Is `op` an already fully-evaluated literal element for the requested
+ * evaluation mode? Used by the `List` fast path to avoid rebuilding a
+ * collection literal whose elements need no further evaluation.
+ *
+ * A string is always fully evaluated. A number literal is fully evaluated
+ * under `evaluate()`; under `.N()` (numericApproximation) only an inexact
+ * (float) number is — an exact number (integer aside) may still numericize.
+ * Symbols and function expressions are never treated as fully evaluated (they
+ * may be bound or reducible). */
+function isEvaluatedElement(
+  op: Expression,
+  numericApproximation: boolean
+): boolean {
+  if (isString(op)) return true;
+  if (isNumber(op)) return !numericApproximation || !op.isExact;
+  return false;
 }
 
 function takeIterator(expr: Expression): Iterator<Expression> {

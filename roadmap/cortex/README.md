@@ -85,13 +85,14 @@ reporting `unknown` for lazy operands, silent indexed assignment
 (`xs[2] = 9` now emits a `runtime-error` diagnostic — as does any non-final
 statement that evaluates to an error value), and — 2026-07-11 — recursion
 knot-tying (one-step `f(n) = …` now works), chained indexing `m[2][1]`,
-and the builtins batch (`Pipe` evaluation, `Append`, `Fold`, `StringJoin`,
-`RandomInteger`).
+the builtins batch (`Pipe` evaluation, `Append`, `Fold`, `StringJoin`,
+`RandomInteger`), and the lazy-collections decision (**ratified: literals
+are values, pipelines are generators** — `List`/`Dictionary` literals
+evaluate their elements like `Set`/`Tuple` always did; lazy operators keep
+late binding, documented as generator semantics in `evaluation.md`).
 
-The one remaining engine-side item (the lazy-collection semantics
-decision) is **mirrored in the repo-root [`ROADMAP.md`](../../ROADMAP.md)**
-under "Cortex example-programs findings" for engine-track visibility —
-when it lands, remove it from both lists.
+All engine-side findings from the sweep are closed; the section that
+mirrored them in the repo-root `ROADMAP.md` has been retired.
 
 ### Semantics gaps shipped as v0 caveats (complete on demand)
 
@@ -101,13 +102,6 @@ when it lands, remove it from both lists.
 - **Comment fidelity through serialize (M).** Comments are dropped on
   serialize (documented lossy in `comments.md`); preserve them if round-trip
   fidelity is required for the notebook use case.
-- **Lazy collections capture mutable variables (M — design decision).**
-  `xs = Join(xs, [k])` in a loop yields `[k, k, k]` (the list holds the
-  *symbol*; a later read sees the final value), and a list literal as the
-  final statement returns unevaluated elements (`[d, d+1]` → `[d, d+1]`,
-  while the tuple `(d, d+1)` → `(5, 6)`). Engine lazy-collection semantics
-  colliding with mutable program state — decide: eager element evaluation on
-  `Assign`/statement value, or document the tuple idiom as the contract.
 - **Mutual recursion in one-step definitions (M — on demand).** One-step
   self-recursion works (2026-07-11), but two functions defined in terms of
   each other still need `let` declarations first; a one-step form would

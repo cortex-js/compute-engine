@@ -13,8 +13,9 @@ import { executeCortex } from '../../src/cortex/execute-cortex';
 // - A recursive function can be defined in one step (`f(n) = …`, whose
 //   self-reference now resolves) or declared first (`let f`) then assigned a
 //   mapsto lambda.
-// - Multi-value results end in a tuple `( … )`: tuples evaluate their
-//   elements; list literals are inert (lazy) as a final statement.
+// - Collection literals (lists, tuples, sets, dictionaries) evaluate their
+//   elements; lazy operators (`Range`/`Map`/`Filter`) are generators that
+//   enumerate on demand and read program state at materialization time.
 // - `a % b` is `Mod(a, b)`; a postfix `!` is `Factorial` and must abut its
 //   operand (`n!`, but `x != y` stays NotEqual).
 //
@@ -258,7 +259,7 @@ let x = 2^11 - 1
 
 describe('CORTEX PROGRAMS — collections', () => {
   test('matrix determinant, transpose and indexing', () => {
-    // A final tuple evaluates its elements (a bare list literal would not)
+    // A final tuple evaluates its elements (as does a list literal)
     const { text, diagnostics } = run(`
 let m = [[2, 1], [1, 3]]
 let d = Determinant(m)
@@ -304,5 +305,27 @@ let m = [[1, 2], [3, 4]]
 Fold((acc, n) |-> acc + n^2, 0, Range(1, 5))`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('55');
+  });
+});
+
+describe('CORTEX PROGRAMS — collection literals evaluate their elements', () => {
+  // Collection LITERALS evaluate their elements (lazy operators keep late
+  // binding). Accumulating single-element list literals through a loop no
+  // longer captures the dead block-scoped loop variable.
+  test('accumulating list literals through a loop yields evaluated elements', () => {
+    const { text, diagnostics } = run(`
+let xs = []
+for k in Range(1, 3) { xs = Join(xs, [k]) }
+xs`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[1,2,3]');
+  });
+
+  test('a list literal as final statement evaluates its elements', () => {
+    const { text, diagnostics } = run(`
+let d = 5
+[d, d + 1]`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[5,6]');
   });
 });

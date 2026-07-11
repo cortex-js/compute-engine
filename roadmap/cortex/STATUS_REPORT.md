@@ -111,6 +111,27 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-11 — **Lazy-collections decision RATIFIED + implemented: literals
+  are values, pipelines are generators.** Collection *literals* evaluate
+  their elements: the `List` evaluate handler (`library/collections.ts`) and
+  a new `BoxedDictionary.evaluate()` override evaluate elements/values,
+  threading `numericApproximation` (so `[1/3].N()` numericizes) — matching
+  what `Set` (dedup) and `Tuple` always did; `List` had been the odd one
+  out, and the escaped `[k, k, k]` from a `Join(xs, [k])` loop held dangling
+  references to a dead block-scoped local. A fast path returns identity when
+  every element is already an evaluated literal (verified
+  `expr.evaluate() === expr` on a 5000-element numeric list — Tycho-scale
+  point lists pay nothing). Lazy *operators* (`Range`, `Map`, `Filter`,
+  `Join`, `Take`) deliberately keep late binding: operands/bounds snapshot
+  (a `Range(1, n)` is safe under later mutation of `n`) but enumeration is
+  deferred and closures read state at materialization time — documented as
+  generator semantics (Python-generator precedent) in `evaluation.md`
+  ("Collections: literals are values, pipelines are generators"). Blast
+  radius: zero test/snapshot changes attributable (one pre-existing arccos
+  snapshot failure traced to concurrent WIP in `apply.ts`/`trigonometry.ts`,
+  outside this work). This closes the last engine-side finding from the
+  example-programs sweep; the mirror section in the repo-root `ROADMAP.md`
+  is retired.
 - 2026-07-11 — **Release-protocol pair: runtime dist smoke + highlight
   mode.** (1) `test/consumer/cortex-runtime-smoke.mjs` (npm script
   `test:cortex-runtime`, invoked by `scripts/build.sh` right after the
