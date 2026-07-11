@@ -5968,7 +5968,10 @@ function laurentMonomialsX(
       const m0 = laurentMonomialsX(ce, ops[0], x);
       const m1 = laurentMonomialsX(ce, ops[1], x);
       if (m0 === null || m1 === null) return null;
-      return [...m0, ...m1.map(([c, d]) => [c.neg(), d] as [Expression, number])];
+      return [
+        ...m0,
+        ...m1.map(([c, d]) => [c.neg(), d] as [Expression, number]),
+      ];
     }
     case 'Multiply': {
       let acc: [Expression, number][] = [[ce.One, 0]];
@@ -6262,10 +6265,7 @@ function substituteHyperbolic(
     )
       return map[u.operator];
     if (u.symbol === x || !u.ops) return u;
-    return ce.function(
-      u.operator,
-      u.ops.map(walk)
-    );
+    return ce.function(u.operator, u.ops.map(walk));
   };
   try {
     const g = recanonicalize(ce, walk(e).div(jac));
@@ -6366,7 +6366,11 @@ function zeroCoeffQ(c: Expression): boolean {
 }
 
 /** Rebuild a polynomial in x from a coefficient array (index = power). */
-function coeffsToPolyX(ce: ComputeEngine, c: Expression[], x: string): Expression {
+function coeffsToPolyX(
+  ce: ComputeEngine,
+  c: Expression[],
+  x: string
+): Expression {
   const X = ce.symbol(x);
   const terms: Expression[] = [];
   c.forEach((co, k) => {
@@ -6470,11 +6474,13 @@ function factorDenominatorByCyclotomics(
   }
   // Peel the cyclotomic factors (bounded loop; each is an exact numeric divide).
   const parts: Expression[] = [];
-  if (m > 0)
-    parts.push(m === 1 ? X : ce._fn('Power', [X, ce.number(m)]));
+  if (m > 0) parts.push(m === 1 ? X : ce._fn('Power', [X, ce.number(m)]));
   const divisors: [number[], Expression][] = [
     [[1, 0, 1], ce._fn('Add', [ce._fn('Power', [X, ce.number(2)]), ce.One])],
-    [[-1, 0, 1], ce._fn('Add', [ce._fn('Power', [X, ce.number(2)]), ce.NegativeOne])],
+    [
+      [-1, 0, 1],
+      ce._fn('Add', [ce._fn('Power', [X, ce.number(2)]), ce.NegativeOne]),
+    ],
     [[-1, 1], X.sub(ce.One)],
     [[1, 1], X.add(ce.One)],
   ];
@@ -6495,8 +6501,7 @@ function factorDenominatorByCyclotomics(
   // Nothing peeled and residual == whole denominator: R30 has no factored form
   // to offer beyond what the bundled rules already declined.
   if (parts.length === 0) return null;
-  const den =
-    parts.length === 1 ? parts[0] : ce._fn('Multiply', parts);
+  const den = parts.length === 1 ? parts[0] : ce._fn('Multiply', parts);
   return { num, den };
 }
 

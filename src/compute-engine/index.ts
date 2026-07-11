@@ -1126,7 +1126,9 @@ export class ComputeEngine implements IComputeEngine {
       if (data.radical !== undefined && data.radical !== 1) {
         if (!Number.isInteger(data.radical) || data.radical < 1) {
           return makeNumericValue({
-            re: rationalAsFloat(data.rational ?? [1, 1]) * Math.sqrt(data.radical),
+            re:
+              rationalAsFloat(data.rational ?? [1, 1]) *
+              Math.sqrt(data.radical),
           });
         }
         if (data.radical >= SMALL_INTEGER) {
@@ -1134,7 +1136,8 @@ export class ComputeEngine implements IComputeEngine {
           if (root >= SMALL_INTEGER)
             return makeNumericValue({
               re:
-                rationalAsFloat(data.rational ?? [1, 1]) * Math.sqrt(data.radical),
+                rationalAsFloat(data.rational ?? [1, 1]) *
+                Math.sqrt(data.radical),
             });
           data = {
             ...data,

@@ -72,13 +72,8 @@ function filter(sub: BoxedSubstitution): boolean {
  * trig/hyperbolic functions now evaluate to complex values off their real
  * domain, so the emission-site guard must do the real work.
  */
-function negatedRealRatio(
-  b: Expression,
-  a?: Expression
-): number | undefined {
-  const ratio = a
-    ? b.canonical.div(a.canonical).neg()
-    : b.canonical.neg();
+function negatedRealRatio(b: Expression, a?: Expression): number | undefined {
+  const ratio = a ? b.canonical.div(a.canonical).neg() : b.canonical.neg();
   const val = numericValue(ratio);
   if (val === undefined) return undefined;
   if (typeof val === 'number') return val;

@@ -147,7 +147,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // which keep late binding). Fast path: a list whose elements are all
       // already fully-evaluated literals is returned unchanged, avoiding an
       // O(n) rebuild for large numeric lists.
-      if (ops.every((op) => isEvaluatedElement(op, numericApproximation ?? false)))
+      if (
+        ops.every((op) => isEvaluatedElement(op, numericApproximation ?? false))
+      )
         return undefined;
       return engine.function(
         'List',

@@ -282,10 +282,7 @@ const LATEX_ISLAND = {
 // A pragma `#identifier` (and the leading `#!` shebang).
 const META = {
   className: 'meta',
-  variants: [
-    { match: /^#!.*/ },
-    { match: /#[^\s#"(){}[\],;]+/ },
-  ],
+  variants: [{ match: /^#!.*/ }, { match: /#[^\s#"(){}[\],;]+/ }],
 };
 
 const COMMENT_MODES = (hljs) => [

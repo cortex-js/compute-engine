@@ -623,7 +623,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   NotApprox: {
-    description: 'Negated approximate-equality relation (not approximately equal).',
+    description:
+      'Negated approximate-equality relation (not approximately equal).',
     complexity: 11100,
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>

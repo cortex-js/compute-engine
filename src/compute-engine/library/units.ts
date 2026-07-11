@@ -98,7 +98,9 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
             ce.error(['unexpected-argument', unitArg.string]),
           ]);
         const boxed =
-          typeof parsed === 'string' ? ce.symbol(parsed) : ce.expr(parsed as any);
+          typeof parsed === 'string'
+            ? ce.symbol(parsed)
+            : ce.expr(parsed as any);
         return ce._fn('Quantity', [mag, boxed]);
       }
 

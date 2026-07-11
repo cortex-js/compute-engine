@@ -240,9 +240,7 @@ export class BoxedDictionary
     // fully-evaluated literals is returned unchanged.
     const numericApproximation = options?.numericApproximation ?? false;
     const entries = Object.entries(this._keyValues);
-    if (
-      entries.every(([, v]) => isEvaluatedValue(v, numericApproximation))
-    )
+    if (entries.every(([, v]) => isEvaluatedValue(v, numericApproximation)))
       return this;
     const ce = this.engine;
     const pairs = entries.map(([k, v]) =>
@@ -294,7 +292,10 @@ function boxedExpressionToDictionaryValue(value: Expression): DictionaryValue {
 
 /** Is `v` an already fully-evaluated dictionary value for the requested
  * evaluation mode? (Mirrors the `List` fast-path predicate.) */
-function isEvaluatedValue(v: Expression, numericApproximation: boolean): boolean {
+function isEvaluatedValue(
+  v: Expression,
+  numericApproximation: boolean
+): boolean {
   if (isString(v)) return true;
   if (isNumber(v)) return !numericApproximation || !v.isExact;
   return false;

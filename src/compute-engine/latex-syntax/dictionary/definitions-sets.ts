@@ -818,7 +818,11 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       if (rhs === null) return null;
       return [
         'Not',
-        ['SubsetEqual', parsedIntervalOperand(lhs)!, parsedIntervalOperand(rhs)!],
+        [
+          'SubsetEqual',
+          parsedIntervalOperand(lhs)!,
+          parsedIntervalOperand(rhs)!,
+        ],
       ];
     },
   },

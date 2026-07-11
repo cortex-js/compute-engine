@@ -333,7 +333,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             return ce.expr([
               'List',
               ...inverse.map((row) =>
-                ce.expr(['List', ...row.map(([num, den]) => ce.number([num, den]))])
+                ce.expr([
+                  'List',
+                  ...row.map(([num, den]) => ce.number([num, den])),
+                ])
               ),
             ]);
           }
@@ -393,7 +396,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // for an exact matrix, numeric otherwise) and returns a `matrix<…>`
         // typed result that feeds straight into `MatrixMultiply`. A singular
         // A leaves `Inverse` symbolic, so the product stays inert.
-        const inv = ce.function('Inverse', [A]).evaluate({ numericApproximation });
+        const inv = ce
+          .function('Inverse', [A])
+          .evaluate({ numericApproximation });
         if (!isTensor(inv)) return undefined;
         return ce
           .function('MatrixMultiply', [inv, B])

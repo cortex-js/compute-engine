@@ -401,7 +401,12 @@ volumes
 
     Integrate: {
       description: 'Symbolic integral with optional bounds.',
-      keywords: ['antiderivative', 'primitive', 'integral', 'definite integral'],
+      keywords: [
+        'antiderivative',
+        'primitive',
+        'integral',
+        'definite integral',
+      ],
       wikidata: 'Q80091',
       broadcastable: false,
 

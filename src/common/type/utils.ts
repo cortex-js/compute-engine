@@ -57,7 +57,11 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
     // list (or one without declared dimensions) yields the scalar element.
     const dims = type.dimensions;
     if (dims && dims.length > 1)
-      return { kind: 'list', elements: type.elements, dimensions: dims.slice(1) };
+      return {
+        kind: 'list',
+        elements: type.elements,
+        dimensions: dims.slice(1),
+      };
     return type.elements;
   }
 

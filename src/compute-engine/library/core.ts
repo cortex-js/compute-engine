@@ -1246,7 +1246,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // A non-numeric bound (e.g. a symbol) leaves the expression symbolic.
         if (isNaN(lower) || isNaN(upper)) return undefined;
         if (upper < lower) [lower, upper] = [upper, lower];
-        return ce.number(lower + Math.floor(ce._random() * (upper - lower + 1)));
+        return ce.number(
+          lower + Math.floor(ce._random() * (upper - lower + 1))
+        );
       },
     },
 

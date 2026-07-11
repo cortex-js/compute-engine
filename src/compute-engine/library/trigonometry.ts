@@ -170,7 +170,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     // The definition of other trig functions may rely on Sin, so it is defined
     // first in this preliminary section
-    Sin: { ...trigFunction('Sin', 5000, 'Sine of an angle.'), keywords: ['sine'] },
+    Sin: {
+      ...trigFunction('Sin', 5000, 'Sine of an angle.'),
+      keywords: ['sine'],
+    },
   },
   {
     //
@@ -397,7 +400,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   },
   {
     Arccos: {
-      ...trigFunction('Arccos', 5550, 'Arccosine, the inverse cosine function.'),
+      ...trigFunction(
+        'Arccos',
+        5550,
+        'Arccosine, the inverse cosine function.'
+      ),
       keywords: ['acos', 'inverse cosine'],
     },
 

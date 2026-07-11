@@ -1241,7 +1241,11 @@ export class RubiDriver {
         this.suppressRecording--;
       }
       if (F !== null) {
-        this.record(entryNode, () => F, 'integrate.hyperbolic-rational-factored');
+        this.record(
+          entryNode,
+          () => F,
+          'integrate.hyperbolic-rational-factored'
+        );
         return F;
       }
     }
@@ -1613,9 +1617,13 @@ export class RubiDriver {
         // Sinh = √(u²−1) for v<0, so the D-check MUST probe v<0 (negative x with
         // the seeded c,d) to reject a branch-wrong antiderivative.
         if (
-          !antiderivativeVerifies(ce, F, integrand, variable, [
-            0.37, -0.53, 0.83, -1.11, 1.29, -0.71, 1.71,
-          ])
+          !antiderivativeVerifies(
+            ce,
+            F,
+            integrand,
+            variable,
+            [0.37, -0.53, 0.83, -1.11, 1.29, -0.71, 1.71]
+          )
         )
           continue;
         return F;
@@ -1647,7 +1655,11 @@ export class RubiDriver {
     try {
       const r = hyperbolicRationalFactoredForm(ce, integrand, variable);
       if (r === null) return null;
-      const inner = this.intRec(recanonicalize(ce, r.form), variable, depth + 1);
+      const inner = this.intRec(
+        recanonicalize(ce, r.form),
+        variable,
+        depth + 1
+      );
       if (inner === null || inner.has('Integrate')) return null;
       const F = this.cleanExpansionResult(
         r.ratio.mul(inner.subs({ [variable]: r.v }))
