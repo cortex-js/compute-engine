@@ -171,6 +171,14 @@ if [ "$BUILD" = "production" ]; then
     node ./test/consumer/nodenext-smoke.mjs
     echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying nodenext consumer resolution$RESET"
 
+    # Runtime smoke: import the built `/cortex` and main bundles and execute a
+    # tiny Cortex program, asserting the result and cross-subpath engine
+    # identity. Complements the type-only nodenext smoke above; runs last so it
+    # exercises the exact bundles that will be published.
+    printf "$BASENAME$DOT Verifying Cortex runtime smoke"
+    node ./test/consumer/cortex-runtime-smoke.mjs
+    echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying Cortex runtime smoke$RESET"
+
 
     # Run test suite
     # printf "$BASENAME$DOT Running test suite"

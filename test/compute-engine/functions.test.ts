@@ -178,6 +178,32 @@ describe('Apply', () => {
   });
 });
 
+describe('Pipe', () => {
+  test('applies a function symbol to a value', () =>
+    // 5 is exact, so Sin stays symbolic per the exactness contract
+    expect(evaluate(['Pipe', 5, 'Sin'])).toMatchInlineSnapshot(`["Sin", 5]`));
+
+  test('applies a function symbol to an inexact value (numericizes)', () =>
+    expect(evaluate(['Pipe', 0, 'Sin'])).toMatchInlineSnapshot(`0`));
+
+  test('applies a lambda', () =>
+    expect(
+      evaluate(['Pipe', 4, ['Function', ['Add', 'x', 1], 'x']])
+    ).toMatchInlineSnapshot(`5`));
+
+  test('chains left-associate (inner stage first)', () =>
+    // Pipe(Pipe(9, Sqrt), Negate) = Negate(Sqrt(9)) = -3
+    expect(
+      evaluate(['Pipe', ['Pipe', 9, 'Sqrt'], 'Negate'])
+    ).toMatchInlineSnapshot(`-3`));
+
+  test('N() numericizes the applied result', () =>
+    expect(engine.box(['Pipe', 5, 'Sin']).N().re).toBeCloseTo(
+      Math.sin(5),
+      10
+    ));
+});
+
 describe('Argument Evaluation', () => {
   test('Hold expressions are not evaluated', () =>
     expect(evaluate(['Add', ['Hold', ['Add', 2, 5]], 7])).toMatchInlineSnapshot(

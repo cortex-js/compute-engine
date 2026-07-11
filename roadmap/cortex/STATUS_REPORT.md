@@ -111,6 +111,49 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-11 — **Release-protocol pair: runtime dist smoke + highlight
+  mode.** (1) `test/consumer/cortex-runtime-smoke.mjs` (npm script
+  `test:cortex-runtime`, invoked by `scripts/build.sh` right after the
+  nodenext smoke in the production-build block) imports the built
+  `dist/esm-min/{compute-engine,cortex}.js` bundles directly (the benchmark
+  harness's consumption pattern) and asserts a tiny program evaluates to
+  `3/2` with no diagnostics AND that `result.value.engine === ce` for a
+  host-created engine — the cross-subpath code-split identity property.
+  (2) `src/cortex/highlight-js-mode.js` could not even load (top-level
+  `hljs` reference against an `_hljs` param, undefined `FUNCTION`,
+  out-of-scope `rawDelimiter`); rebuilt against the shipped grammar —
+  keywords/reserved words, `$…$` LaTeX islands, extended `#"…"#` strings,
+  lexer-accurate operator classes incl. the new `%`/postfix `!` plus fancy
+  Unicode variants, literal-classed constants, catch-all identifier moved
+  last — with a validation header (date, grammar version, structural-check
+  one-liner). highlight.js is deliberately NOT a devDependency; validation
+  is static.
+- 2026-07-11 — **Example-programs backlog round: recursion knot-tying,
+  chained indexing, `%`/`!` operators, builtins batch.** (1) *Recursion*:
+  the `Assign` canonical handler (`library/core.ts`) pre-declares the target
+  as a function-typed symbol **before** canonicalizing a `Function` RHS, so
+  a one-step `fact(n) = …` self-reference resolves and recursion unfolds
+  fully (`fact(10) = 3628800`); the `let f` idiom remains for *mutual*
+  recursion, which is still two-step. (2) *Chained indexing*:
+  `collectionElementType` (`common/type/utils.ts`) now yields a sub-tensor
+  (one fewer dimension) for a rank-≥2 list instead of collapsing to the
+  scalar element type, so `At(At(m, 2), 1)` — Cortex `m[2][1]` — types and
+  evaluates (`3`). (3) *Cortex grammar*: `%` = infix `Mod` (precedence 80,
+  left-assoc) and postfix `!` = `Factorial` (precedence 110, must abut its
+  operand; `!=`/`!in`/prefix `Not` unchanged; serializer parenthesizes
+  `(n!)!`, never `n!!`). Lexer maximal-munch means unspaced `3!^2` is a
+  diagnostic — write `3! ^ 2`; serialized output always round-trips.
+  (4) *Engine builtins* (user-ratified as library operators, not Cortex
+  lowerings): `Pipe(x, f)` evaluates via `apply` (so `a |> f` works),
+  `Append(list, x)` (lazy, mirrors `Join`), `Fold(f, init, list)`
+  (canonicalizes to `Reduce(list, f, init)`, foldl order),
+  `StringJoin(s…)` (strict strings, unlike coercing `String(…)`; the
+  pre-existing `<>` LaTeX entry now evaluates), `RandomInteger(n)` /
+  `RandomInteger(a, b)` (inclusive bounds, seeded-RNG compliant,
+  `pure: false`). Blast radius: full suite 15 972 passed / 0 failed,
+  **zero snapshot churn** (4 080/4 080). Examples suite grew to 24 programs
+  (`%` idiom throughout, one-step recursion, binomial `10!/(3!·7!)`,
+  `m[2][1]`, `|> Mean`, `Fold`), mirrored in `examples.md`.
 - 2026-07-10 — **String/Type/silent-error fixes (engine + executeCortex)**:
   three more items from the examples sweep closed. (1) `String(…)` joins
   operand *values* — a string operand contributes its content, not its

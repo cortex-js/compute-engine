@@ -48,6 +48,31 @@ describe('String operator joins values, not serialized forms', () => {
   });
 });
 
+describe('StringJoin concatenates strings', () => {
+  test('n-ary concatenation', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['StringJoin', { str: 'foo' }, { str: 'bar' }, { str: '!' }])
+        .evaluate().string
+    ).toBe('foobar!');
+  });
+
+  test('empty StringJoin() is the empty string', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['StringJoin']).evaluate().string).toBe('');
+  });
+
+  test('a non-string operand leaves it unevaluated (stays a StringJoin)', () => {
+    const ce = new ComputeEngine();
+    // Unlike `String`, `StringJoin` does not coerce: the operand `3` is not a
+    // string, so the expression does not reduce to a string value.
+    expect(ce.box(['StringJoin', { str: 'a' }, 3]).evaluate().operator).toBe(
+      'StringJoin'
+    );
+  });
+});
+
 describe('Type operator reports the canonical type without evaluating', () => {
   test('symbol bound to an integer', () => {
     const ce = new ComputeEngine();

@@ -1011,9 +1011,12 @@ churn). Also fixed same day: `String(…)` concatenation (operand quotes
 leaked into the value; string interpolation now works), the `Type` operator
 reporting `unknown` for lazy (non-canonical) operands, and silent indexed
 assignment (`executeCortex` now emits a `runtime-error` diagnostic for any
-non-final statement that evaluates to an error value). The open engine-side
-residue, with full detail and repros in
-[`roadmap/cortex/README.md`](./roadmap/cortex/README.md):
+non-final statement that evaluates to an error value). The 2026-07-11 round
+closed recursion knot-tying (one-step `f(n) = …` definitions), chained
+indexing `m[2][1]` (`At` sub-tensor typing), and the builtins batch (`Pipe`
+evaluation, `Append`, `Fold`, `StringJoin`, `RandomInteger`, plus Cortex
+`%`/postfix `!`). The one open engine-side item, with full detail and repros
+in [`roadmap/cortex/README.md`](./roadmap/cortex/README.md):
 
 - **Lazy collections vs. mutable program state (M — design decision).**
   List literals never evaluate their elements (`[d, d+1]` is inert as a
@@ -1021,16 +1024,6 @@ residue, with full detail and repros in
   a later read sees only its final value), while tuples evaluate eagerly.
   Decide: eager element evaluation at `Assign`/statement-value boundaries,
   or document the tuple idiom as the contract.
-- **Chained indexing `m[2][1]` fails `At`-result typing (S).**
-  Canonicalizes to an `incompatible-type` error; `m[2, 1]` works.
-- **Recursive one-step definitions don't tie the knot (M).**
-  `Assign(f, Function(… f …))` canonicalizes the body before `f` exists, so
-  the self-reference unfolds once and stalls; pre-declaring the symbol
-  first works (the documented Cortex idiom).
-- **Small builtins batch (S).** `Pipe` (`a |> f`) parses but does not
-  evaluate; `Append`/`Fold`/`StringJoin`/`RandomInteger` are absent (their
-  roles are covered by `Join`/`Reduce`/interpolation/`Random`) — decide as
-  a batch together with the Cortex operator conveniences.
 
 ### Review residue (open low-priority items)
 

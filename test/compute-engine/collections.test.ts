@@ -518,6 +518,32 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
   test('At with multi-index on 2D matrix', () =>
     expect(evaluate(['At', matrix, 1, 2])).toMatchInlineSnapshot(`3`)); // Row 1, Column 2 → 3
 
+  test('Chained At on a matrix-typed symbol (m[2][1])', () => {
+    // Regression: `At(matrix, i)` must type as a row (a sub-tensor), so that a
+    // chained/nested `At` — the lowering of `m[2][1]` — validates instead of
+    // failing with `incompatible-type`. This exercises the type fall-through
+    // path (symbol operand has no collection `elttype` handler).
+    engine.assign('mtx', engine.box(matrix));
+    const m = engine.box('mtx');
+    expect(m.type.toString()).toMatchInlineSnapshot(`matrix<3x3>`);
+    // A single index into the matrix yields a row (vector), not a scalar.
+    expect(engine.box(['At', 'mtx', 2]).type.toString()).toMatchInlineSnapshot(
+      `vector<3>`
+    );
+    // Nested `At` validates and evaluates (1-based indexing): row 2, column 1.
+    expect(evaluate(['At', ['At', 'mtx', 2], 1])).toMatchInlineSnapshot(`6`);
+  });
+
+  test('Chained At on a flat-list-typed symbol stays sound', () => {
+    // Sanity: a single index into a 1D list yields the scalar element type, so
+    // a second `At` on that scalar does not validate (stays symbolic here).
+    engine.assign('vec', engine.box(list));
+    expect(engine.box(['At', 'vec', 1]).type.toString()).toMatchInlineSnapshot(
+      `number`
+    );
+    expect(evaluate(['At', 'vec', 1])).toMatchInlineSnapshot(`7`);
+  });
+
   test('First', () =>
     expect(evaluate(['First', list])).toMatchInlineSnapshot(`7`));
 
@@ -634,6 +660,32 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
 
   test('Reduce', () =>
     expect(evaluate(['Reduce', list, 'Add'])).toMatchInlineSnapshot(`60`));
+
+  test('Fold with a function symbol', () =>
+    expect(
+      evaluate(['Fold', 'Add', 10, ['List', 1, 2, 3]])
+    ).toMatchInlineSnapshot(`16`));
+
+  test('Fold with a lambda (foldl order)', () =>
+    // ((0 - 1) - 2) - 3 = -6, confirming left-fold argument order
+    expect(
+      evaluate([
+        'Fold',
+        ['Function', ['Subtract', 'a', 'b'], 'a', 'b'],
+        0,
+        ['List', 1, 2, 3],
+      ])
+    ).toMatchInlineSnapshot(`-6`));
+
+  test('Append', () =>
+    expect(
+      evaluate(['Append', ['List', 1, 2, 3], 4])
+    ).toMatchInlineSnapshot(`["List", 1, 2, 3, 4]`));
+
+  test('Append to an empty list', () =>
+    expect(evaluate(['Append', ['List'], 9])).toMatchInlineSnapshot(
+      `["List", 9]`
+    ));
 
   test('Zip', () =>
     expect(evaluate(['Zip', list1, list2])).toMatchInlineSnapshot(`

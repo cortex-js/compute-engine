@@ -12,6 +12,7 @@
     "version": "bash ./scripts/version.sh",
     "test": "bash ./scripts/test.sh",
     "test:nodenext": "node ./test/consumer/nodenext-smoke.mjs",
+    "test:cortex-runtime": "node ./test/consumer/cortex-runtime-smoke.mjs",
     "test:nightly": "CE_NIGHTLY=1 jest --config ./config/jest.config.cjs --reporters default -- test/compute-engine/nightly/",
     "check:deps": "madge --circular --extensions ts src/compute-engine && echo 'No runtime circular dependencies found (type-only cycles are expected)'",
     "lint": "eslint src --ext .ts --fix && prettier --write 'src/**/*.{ts,js,css,md}'",

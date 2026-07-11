@@ -419,4 +419,41 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
       serializeCortex(['Power', ['Multiply', 2, 'x'], ['Subtract', 1, 'n']])
     ).toMatchInlineSnapshot(`"(2x) ^ (1 - n)"`);
   });
+
+  test('Mod', () => {
+    expect(serializeCortex(['Mod', 'a', 'b'])).toMatchInlineSnapshot(`"a % b"`);
+    // `%` is multiplicative-precedence, so a `+` operand parenthesizes.
+    expect(
+      serializeCortex(['Mod', ['Add', 'a', 'b'], 'c'])
+    ).toMatchInlineSnapshot(`"(a + b) % c"`);
+    // …but a `Mod` inside an `Add` does not.
+    expect(
+      serializeCortex(['Add', 'a', ['Mod', 'b', 'c']])
+    ).toMatchInlineSnapshot(`"a + b % c"`);
+  });
+
+  test('Factorial', () => {
+    expect(serializeCortex(['Factorial', 5])).toMatchInlineSnapshot(`"5!"`);
+    expect(serializeCortex(['Factorial', 'n'])).toMatchInlineSnapshot(`"n!"`);
+    // A call operand needs no parens (`f(x)!` re-parses as Factorial(f(x))).
+    expect(
+      serializeCortex(['Factorial', ['f', 'x']])
+    ).toMatchInlineSnapshot(`"f(x)!"`);
+    // An operator operand at or below `!`'s precedence parenthesizes.
+    expect(
+      serializeCortex(['Factorial', ['Add', 'a', 'b']])
+    ).toMatchInlineSnapshot(`"(a + b)!"`);
+    expect(
+      serializeCortex(['Factorial', ['Power', 'x', 2]])
+    ).toMatchInlineSnapshot(`"(x ^ 2)!"`);
+    // A nested factorial must parenthesize — `n!!` classically means double
+    // factorial, so the serializer never emits it.
+    expect(
+      serializeCortex(['Factorial', ['Factorial', 'n']])
+    ).toMatchInlineSnapshot(`"(n!)!"`);
+    // As an operand of Power, `!` binds tighter, so no parens on the exponent.
+    expect(
+      serializeCortex(['Power', 2, ['Factorial', 3]])
+    ).toMatchInlineSnapshot(`"2 ^ 3!"`);
+  });
 });

@@ -111,11 +111,14 @@ _parenthesized_ → **`(`** _expression_ **`)`**
 
 _latex-island_ → **`$`** (_unicode-char_ | **`\$`**)\* **`$`**
 
-_expression_ → _primary_ | _prefix-expression_ | _infix-expression_
+_expression_ → _primary_ | _prefix-expression_ | _infix-expression_ |
+_postfix-expression_
 
 _prefix-expression_ → (**`-`** | **`!`**) _expression_
 
 _infix-expression_ → _expression_ _operator_ _expression_
+
+_postfix-expression_ → _expression_ **`!`**
 
 _statement_ → _expression_ | _declaration_
 
@@ -125,13 +128,14 @@ _shebang_ → **`#!`** (unicode-char)\* (_linebreak | \_eof_)
 
 _cortex_ → (\[_shebang_\] (_statement_)#_statement-separator_ \[_eof_\])
 
-The Pratt (precedence-climbing) grammar for `_infix-expression_` and
-`_prefix-expression_` — the operator set, its precedence, and its
-associativity — is documented as a table in
+The Pratt (precedence-climbing) grammar for `_infix-expression_`,
+`_prefix-expression_`, and `_postfix-expression_` — the operator set, its
+precedence, and its associativity — is documented as a table in
 [Operators](/cortex/operators/) rather than spelled out production by
 production; the whitespace rule described there (an infix operator has
-whitespace on both sides or neither; a prefix operator has none) is part of
-this grammar, not a separate lexical concern.
+whitespace on both sides or neither; a prefix operator has no whitespace after
+it, and a postfix operator none before it) is part of this grammar, not a
+separate lexical concern.
 
 ## Statements and sequencing
 

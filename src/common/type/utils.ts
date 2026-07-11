@@ -50,7 +50,16 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   if (type.kind === 'collection' || type.kind === 'indexed_collection')
     return type.elements;
 
-  if (type.kind === 'list') return type.elements;
+  if (type.kind === 'list') {
+    // A multi-dimensional list (tensor) indexed by a single index yields a
+    // sub-tensor with one fewer dimension, not its scalar element. E.g. a
+    // single index into a `matrix<2x2>` (a row) is a `vector<2>`. Only a 1D
+    // list (or one without declared dimensions) yields the scalar element.
+    const dims = type.dimensions;
+    if (dims && dims.length > 1)
+      return { kind: 'list', elements: type.elements, dimensions: dims.slice(1) };
+    return type.elements;
+  }
 
   if (type.kind === 'set') return type.elements;
 

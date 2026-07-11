@@ -173,11 +173,13 @@ export function serializeCortex(
     fancySymbol?: string;
     precedence: number;
     unary?: boolean;
+    postfix?: boolean;
     relational?: boolean;
   };
 
   // A serializer-shaped view over the single shared operator table
   // (`operators.ts`). `kind === 'prefix'` maps to the existing `unary`
+  // codepath; `kind === 'postfix'` (e.g. `!` Factorial) to the `postfix`
   // codepath; `precedence` drives parenthesization; `relational` drives
   // spacing. Keyed by MathJSON operator name.
   const OPERATORS: { [name: string]: OperatorInfo } = {};
@@ -188,6 +190,7 @@ export function serializeCortex(
       fancySymbol: def.fancySymbol,
       precedence: def.precedence,
       unary: def.kind === 'prefix',
+      postfix: def.kind === 'postfix',
       relational: def.relational,
     };
   }
@@ -456,6 +459,23 @@ export function serializeCortex(
         return fmt.line(opSymbol, '(', serializeExpression(arg), ')');
       }
       return fmt.line(opSymbol, serializeExpression(arg));
+    }
+
+    if (op.postfix) {
+      if (nops(expr) !== 1) return null;
+      const arg = operand(expr, 1);
+      const argHead = operator(arg);
+      const argOp = OPERATORS[argHead];
+      // Parenthesize an operand that is itself an operator at the same or lower
+      // precedence, so the postfix binds to the whole operand and re-parses
+      // faithfully. `<=` (not `<`) matters for a nested postfix:
+      // `Factorial(Factorial(n))` must serialize `(n!)!`, never `n!!` (which
+      // classically means double factorial), and `Factorial(Power(x, 2))`
+      // must serialize `(x^2)!`, not `x^2!` (= `x^(2!)`).
+      if (argOp && argOp.precedence <= op.precedence) {
+        return fmt.line('(', serializeExpression(arg), ')', opSymbol);
+      }
+      return fmt.line(serializeExpression(arg), opSymbol);
     }
 
     const operands = mapArgs<FormattingBlock>(expr, (arg) => {

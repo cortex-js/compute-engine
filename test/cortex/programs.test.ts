@@ -10,11 +10,13 @@ import { executeCortex } from '../../src/cortex/execute-cortex';
 //
 // Idioms these programs rely on (current v0 semantics):
 // - Loops are for-effect; value-producing iteration uses `Map`/`Filter`.
-// - A recursive function is declared first (`let f`), then assigned a
-//   mapsto lambda — a self-reference in `f(n) = …` does not resolve yet.
+// - A recursive function can be defined in one step (`f(n) = …`, whose
+//   self-reference now resolves) or declared first (`let f`) then assigned a
+//   mapsto lambda.
 // - Multi-value results end in a tuple `( … )`: tuples evaluate their
 //   elements; list literals are inert (lazy) as a final statement.
-// - There is no `%` operator or postfix `!`: use `Mod(…)`/`Factorial(…)`.
+// - `a % b` is `Mod(a, b)`; a postfix `!` is `Factorial` and must abut its
+//   operand (`n!`, but `x != y` stays NotEqual).
 //
 
 function run(
@@ -32,7 +34,7 @@ describe('CORTEX PROGRAMS — iteration and accumulation', () => {
     const { text, diagnostics } = run(`
 let total = 0
 for k in Range(1, 99) {
-  if Mod(k, 3) == 0 || Mod(k, 5) == 0 { total = total + k }
+  if k % 3 == 0 || k % 5 == 0 { total = total + k }
 }
 total`);
     expect(diagnostics).toEqual([]);
@@ -42,9 +44,9 @@ total`);
   test('FizzBuzz as a value (Map over a Range)', () => {
     const { value, diagnostics } = run(`
 Map(Range(1, 15), k |->
-  if Mod(k, 15) == 0 { "FizzBuzz" }
-  else if Mod(k, 3) == 0 { "Fizz" }
-  else if Mod(k, 5) == 0 { "Buzz" }
+  if k % 15 == 0 { "FizzBuzz" }
+  else if k % 3 == 0 { "Fizz" }
+  else if k % 5 == 0 { "Buzz" }
   else { k })`);
     expect(diagnostics).toEqual([]);
     // The result of Map is a lazy collection: materialize it with each()
@@ -73,7 +75,7 @@ Map(Range(1, 15), k |->
 let n = 27
 let steps = 0
 while n != 1 {
-  n = if Mod(n, 2) == 0 { n / 2 } else { 3n + 1 }
+  n = if n % 2 == 0 { n / 2 } else { 3n + 1 }
   steps = steps + 1
 }
 steps`);
@@ -86,7 +88,7 @@ steps`);
 let a = 1071
 let b = 462
 while b != 0 {
-  let t = Mod(a, b)
+  let t = a % b
   a = b
   b = t
 }
@@ -115,7 +117,7 @@ isPrime(n) = if n < 2 { False } else {
   let d = 2
   let prime = True
   while d * d <= n {
-    if Mod(n, d) == 0 { prime = False; d = n } else { d = d + 1 }
+    if n % d == 0 { prime = False; d = n } else { d = d + 1 }
   }
   prime
 }
@@ -128,9 +130,20 @@ count`);
 });
 
 describe('CORTEX PROGRAMS — recursion', () => {
+  test('recursive factorial (one-step `f(n) = …` definition)', () => {
+    // The Assign canonicalization pre-declares the function symbol before
+    // canonicalizing the body, so a self-reference inside `fact(n) = …`
+    // resolves and the recursion unfolds fully.
+    const { text, diagnostics } = run(`
+fact(n) = if n <= 1 { 1 } else { n * fact(n - 1) }
+fact(10)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('3628800');
+  });
+
   test('recursive factorial (declare first, then assign the lambda)', () => {
-    // A self-reference inside `fact(n) = …` does not resolve in v0; the
-    // symbol must exist before the lambda that captures it is created.
+    // The `let f` idiom still works: the symbol exists before the lambda
+    // that captures it is created.
     const { text, diagnostics } = run(`
 let fact
 fact = n |-> if n <= 1 { 1 } else { n * fact(n - 1) }
@@ -216,6 +229,12 @@ Map(roots, r |-> r^2 - 5r + 6)`);
     expect(text).toBe('[0,0]');
   });
 
+  test('binomial coefficient with postfix factorials', () => {
+    const { text, diagnostics } = run(`10! / (3! * 7!)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('120');
+  });
+
   test('golden ratio: continued fraction against a $…$ LaTeX island', () => {
     const { value, diagnostics } = run(`
 let x = 2
@@ -259,9 +278,31 @@ let xs = [4, 8, 15, 16, 23, 42]
 
   test('filter and reduce with anonymous functions', () => {
     const { text, diagnostics } = run(`
-let evens = Filter(Range(1, 10), n |-> Mod(n, 2) == 0)
+let evens = Filter(Range(1, 10), n |-> n % 2 == 0)
 Reduce(evens, (acc, n) |-> acc + n)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('30');
+  });
+
+  test('chained indexing into a matrix', () => {
+    const { text, diagnostics } = run(`
+let m = [[1, 2], [3, 4]]
+(m[2][1], m[2, 1])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(3, 3)');
+  });
+
+  test('pipe a collection into a function', () => {
+    const { text, diagnostics } = run(`
+[4, 8, 15, 16, 23, 42] |> Mean`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('18');
+  });
+
+  test('fold with an explicit initial value', () => {
+    const { text, diagnostics } = run(`
+Fold((acc, n) |-> acc + n^2, 0, Range(1, 5))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('55');
   });
 });

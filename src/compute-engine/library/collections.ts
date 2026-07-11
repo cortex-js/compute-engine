@@ -1158,6 +1158,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
+  // Mathematica `Fold[f, x, list]`: a thin variant of `Reduce` (Haskell
+  // `foldl`) with the argument order flipped so the binary function comes
+  // first and the collection last. `Fold(f, x, {a, b, c}) = f(f(f(x, a), b),
+  // c)`. Canonicalizes directly to the equivalent `Reduce(list, f, x)`, so it
+  // shares Reduce's evaluation, laziness, and inert-when-symbolic behavior.
+  Fold: {
+    complexity: 8200,
+    lazy: true,
+    signature: '(function, value, collection) -> value',
+    canonical: (ops, { engine }) => {
+      const fn = canonicalFunctionLiteral(ops[0]);
+      const initial = ops[1]?.canonical;
+      const collection = checkType(engine, ops[2], 'collection');
+      if (!fn || !initial?.isValid || !collection.isValid) return null;
+      return engine._fn('Reduce', [collection, fn, initial]);
+    },
+  },
+
   Join: {
     description: [
       'Join the elements of some collections into a flat collection.',
@@ -1226,6 +1244,69 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           if (index <= count) return op.at(index);
           index -= count;
         }
+        return undefined;
+      },
+    },
+  },
+
+  // Mathematica `Append[collection, element]`: the collection with `element`
+  // added at the end. Lazy, like `Join` — it wraps its source rather than
+  // materializing, so appending to an infinite collection stays inert until
+  // forced. `element` is the second operand (not itself a collection).
+  Append: {
+    description: ['Add an element to the end of a collection.'],
+    complexity: 8200,
+    signature: '(collection, value) -> collection',
+    type: (ops) => joinResultType([ops[0]]),
+    collection: {
+      isLazy: (_expr) => true,
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const count = expr.op1.count;
+        if (count === undefined) return undefined;
+        if (!Number.isFinite(count)) return Infinity;
+        return count + 1;
+      },
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        return expr.op1.isFiniteCollection;
+      },
+      isEmpty: (_expr) => false, // always contains at least the appended element
+      contains: (expr, target) => {
+        if (!isFunction(expr)) return false;
+        return expr.op1.contains(target) || expr.op2.isSame(target);
+      },
+      iterator: (expr) => {
+        if (!isFunction(expr))
+          return { next: () => ({ value: undefined, done: true }) };
+        const source = expr.op1.each();
+        let appended = false;
+        return {
+          next: () => {
+            const { value, done } = source.next();
+            if (!done) return { value, done: false };
+            // Source exhausted: yield the appended element once, then stop.
+            if (!appended) {
+              appended = true;
+              return { value: expr.op2, done: false };
+            }
+            return { value: undefined, done: true };
+          },
+        };
+      },
+      at: (
+        expr: Expression,
+        index: number | string
+      ): undefined | Expression => {
+        if (typeof index !== 'number' || !isFunction(expr)) return undefined;
+        const count = expr.op1.count;
+        if (count === undefined || !Number.isFinite(count)) return undefined;
+        const total = count + 1;
+        // A negative index counts from the end of the appended collection.
+        if (index < 0) index = total + index + 1;
+        if (index < 1) return undefined;
+        if (index <= count) return expr.op1.at(index);
+        if (index === total) return expr.op2;
         return undefined;
       },
     },

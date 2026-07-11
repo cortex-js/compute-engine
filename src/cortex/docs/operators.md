@@ -22,6 +22,10 @@ A few operators are prefix operators: they only have a right-hand side. Prefix
 operators are followed immediately by their operand: they cannot be separated by
 whitespace.
 
+A postfix operator (`!`, `Factorial`) has only a left-hand side and follows it
+immediately: like a prefix operator, it cannot be separated from its operand by
+whitespace.
+
 The whitespace rules are necessary to support unambiguous parsing of expressions
 spanning multiple lines without requiring a separator between expressions
 {.notice--info}
@@ -57,12 +61,14 @@ precedence (for example `+` and `-`, or `*` and `/`).
 | 60   | NotElement            | `!in`  | `∉`   | infix  | n-ary chain   |
 | 70   | Add                   | `+`    |       | infix  | left          |
 | 70   | Subtract              | `-`    | `−`   | infix  | left          |
-| 80   | Multiply              | `*`    | `×`   | infix  | left          |
-| 80   | Divide                | `/`    | `÷`   | infix  | left          |
-| 90   | Negate                | `-`    | `−`   | prefix |               |
-| 90   | Not                   | `!`    | `¬`   | prefix |               |
-| 100  | Power                 | `^`    |       | infix  | right         |
-| 100  | Power                 | `**`   |       | infix  | right         |
+| 80   | Multiply              | `*`    | `×`   | infix   | left          |
+| 80   | Divide                | `/`    | `÷`   | infix   | left          |
+| 80   | Mod                   | `%`    |       | infix   | left          |
+| 90   | Negate                | `-`    | `−`   | prefix  |               |
+| 90   | Not                   | `!`    | `¬`   | prefix  |               |
+| 100  | Power                 | `^`    |       | infix   | right         |
+| 100  | Power                 | `**`   |       | infix   | right         |
+| 110  | Factorial             | `!`    |       | postfix |               |
 
 Postfix calls and indexing (`f(x)`, `xs[i]`) bind tighter than every entry in
 this table — they are handled directly by the parser rather than through the
@@ -156,6 +162,54 @@ Because `Power` binds tighter than `Multiply`/`Divide`:
 ```cortex
 x^1/2     // (x^1)/2, i.e. ["Divide", ["Power", "x", 1], 2]
 ```
+
+## Modulo: `%`
+
+`%` is `Mod`, an infix operator at the multiplicative tier (the same
+precedence as `*` and `/`), left-associative:
+
+```cortex
+a % b       // ["Mod", "a", "b"]
+a + b % c   // a + (b % c): ["Add", "a", ["Mod", "b", "c"]]
+a % b % c   // ["Mod", ["Mod", "a", "b"], "c"] — left-associative
+```
+
+## Factorial: postfix `!`
+
+`!` in **postfix** position is `Factorial`. Position disambiguates it from the
+prefix `!` (`Not`): a `!` that abuts the preceding operand is a factorial
+(`x!`), while a `!` at the start of an operand is `Not` (`!x`).
+
+```cortex
+5!          // ["Factorial", 5]
+n!          // ["Factorial", "n"]
+!x          // ["Not", "x"] — prefix, unchanged
+```
+
+`Factorial` binds tighter than `Power` (tier 110 vs. 100), so it reaches inside
+a `Power` operand, and a leading minus stays outside it:
+
+```cortex
+2^3!        // 2^(3!): ["Power", 2, ["Factorial", 3]]
+3! ^ 2      // (3!)^2: ["Power", ["Factorial", 3], 2]
+-3!         // -(3!): ["Negate", ["Factorial", 3]]
+```
+
+It also applies after a parenthesized expression, a call, or an index:
+
+```cortex
+(a + b)!    // ["Factorial", ["Add", "a", "b"]]
+f(x)!       // ["Factorial", ["f", "x"]]
+```
+
+Like a prefix operator, a postfix `!` must **abut** its operand: `x!` is a
+factorial, but `x !y` is not — the space before `!` ends the `x` expression,
+leaving `!y` (a prefix `Not`) with no separator, which is a diagnostic. Because
+the lexer maximal-munches a run of operator characters into one token, a `!`
+directly followed by another operator character is not seen as a lone `!`
+(write `3! ^ 2`, not `3!^2`; `x! + 1`, not `x!+1`). The `!=` (`NotEqual`) and
+`!in` (`NotElement`) operators are unaffected: the lexer keeps `!=` whole and
+`!in` is recognized as a compound before the postfix `!`.
 
 ## Invisible multiplication
 

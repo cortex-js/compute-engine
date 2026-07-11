@@ -496,6 +496,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    // Pipeline application: `Pipe(x, f)` evaluates to `f(x)`. The right
+    // operand may be a function symbol (`Pipe(5, Sin)` → `Sin(5)`), a
+    // `Function` literal, or anything else applicable. Chains produced by the
+    // Cortex `|>`/`~>` operators arrive left-associated
+    // (`Pipe(Pipe(a, f), g)`) and reduce naturally, inner stage first.
+    Pipe: {
+      description:
+        'Apply a function to a value: `Pipe(x, f)` evaluates to `f(x)`.',
+      signature: '(value, function) -> unknown',
+      type: ([_x, f]) => functionResult(f.type.type) ?? 'unknown',
+      evaluate: (ops, { numericApproximation }) => {
+        const result = apply(ops[1], [ops[0]]);
+        if (!numericApproximation) return result;
+        // Mirror `Apply`: under N(), numericize the applied result unless it
+        // stayed symbolic as an `Apply` expression (re-entering N() there
+        // would recurse forever).
+        if (isFunction(result, 'Apply')) return result;
+        return result.N();
+      },
+    },
+
     Assign: {
       description:
         'Assign a value to a symbol or define a sequence. The RHS is evaluated ' +
@@ -528,20 +549,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           symbol = checkType(ce, lhs, 'symbol');
         }
 
-        const canonRhs = args[1].canonical;
-        const result = ce._fn('Assign', [symbol, canonRhs]);
-
-        // If the RHS is a Function expression, declare the symbol as
-        // having 'function' type so that subsequent parsing recognizes
-        // it as a function (e.g., `2f(x)` parses as `2 * f(x)`)
+        // If the RHS is a Function definition, pre-declare the target symbol
+        // as a function-typed symbol BEFORE canonicalizing the body. This ties
+        // the recursion knot: a self-reference in the body (e.g. `f(n) = n *
+        // f(n-1)`) then resolves to this symbol rather than to an unbound /
+        // stale binding. It also lets subsequent parsing recognize it as a
+        // function (e.g., `2f(x)` parses as `2 * f(x)`). Mirrors what an
+        // explicit `Declare`/`let f` does.
         const symbolName = sym(symbol);
-        if (symbolName && isFunction(canonRhs, 'Function')) {
+        if (symbolName && isFunction(args[1], 'Function')) {
           // Trigger auto-declaration if the symbol isn't declared yet
           if (!ce.lookupDefinition(symbolName)) ce.symbol(symbolName);
           const def = ce.lookupDefinition(symbolName);
           if (def && isValueDef(def) && def.value.inferredType)
             def.value.type = ce.type('function');
         }
+
+        const canonRhs = args[1].canonical;
+        const result = ce._fn('Assign', [symbol, canonRhs]);
 
         return result;
       },
@@ -1170,6 +1195,36 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    RandomInteger: {
+      description: [
+        'RandomInteger(n): uniform integer in [0, n] (inclusive)',
+        'RandomInteger(a, b): uniform integer in [a, b] (inclusive)',
+      ],
+      pure: false,
+      signature: '(integer, integer?) -> integer',
+      type: () => 'finite_integer',
+      // Draws from the engine's seeded stream when `ce.randomSeed` is set,
+      // otherwise non-deterministic (`Math.random()`), exactly like `Random`.
+      // Unlike `Random`, the upper bound is *inclusive* (Mathematica
+      // convention): `RandomInteger(a, b)` covers all of `a..b`.
+      evaluate: (ops, { engine: ce }) => {
+        const [firstOp, secondOp] = ops;
+        let lower: number;
+        let upper: number;
+        if (secondOp === undefined) {
+          lower = 0;
+          upper = Math.floor(firstOp.re);
+        } else {
+          lower = Math.floor(firstOp.re);
+          upper = Math.floor(secondOp.re);
+        }
+        // A non-numeric bound (e.g. a symbol) leaves the expression symbolic.
+        if (isNaN(lower) || isNaN(upper)) return undefined;
+        if (upper < lower) [lower, upper] = [upper, lower];
+        return ce.number(lower + Math.floor(ce._random() * (upper - lower + 1)));
+      },
+    },
+
     // @todo: need review
     Signature: {
       description: 'Return the signature string of an operator.',
@@ -1531,6 +1586,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return engine.string(
           ops.map((x) => (isString(x) ? x.string : x.toString())).join('')
         );
+      },
+    },
+
+    // N-ary string concatenation. Unlike `String` (which coerces any operand
+    // to its default string representation), `StringJoin` requires every
+    // argument to already be a string — a non-string operand leaves the
+    // expression unevaluated. This mirrors Mathematica's `StringJoin`, which
+    // stays symbolic on non-string arguments.
+    StringJoin: {
+      description: [
+        'Concatenate strings. Every argument must be a string; a non-string ' +
+          'argument leaves the expression unevaluated.',
+      ],
+      signature: '(string*) -> string',
+      evaluate: (ops, { engine }) => {
+        const parts: string[] = [];
+        for (const op of ops) {
+          if (!isString(op)) return undefined;
+          parts.push(op.string);
+        }
+        return engine.string(parts.join(''));
       },
     },
 

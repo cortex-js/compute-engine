@@ -23,9 +23,11 @@ import { MathJsonSymbol } from '../math-json/types.js';
 //   relational        60   (infix, n-ary chainable — see parser)
 //     == === != < > <= >= in !in
 //   Add + / Subtract -  70 (infix, left, same precedence)
-//   Multiply * / Divide / 80 (infix, left, same precedence)
+//   Multiply * / Divide / / Mod %  80 (infix, left, same precedence)
 //   Negate - / Not !  90   (prefix)
 //   Power ^  **       100  (infix, right)
+//   Factorial !       110  (postfix — binds tighter than Power's operands, so
+//                           `2^3!` = `2^(3!)`, `-3!` = `-(3!)`, `3!^2` = `(3!)^2`)
 //   (postfix call/index ~110 — Stage B)
 //
 // Deviations from the old serializer table are deliberate (see the phase
@@ -214,6 +216,13 @@ export const OPERATORS: OperatorDef[] = [
     kind: 'infix',
     assoc: 'left',
   },
+  {
+    name: 'Mod',
+    symbol: '%',
+    precedence: 80,
+    kind: 'infix',
+    assoc: 'left',
+  },
 
   {
     name: 'Negate',
@@ -244,10 +253,23 @@ export const OPERATORS: OperatorDef[] = [
     kind: 'infix',
     assoc: 'right',
   },
+
+  // Postfix factorial `n!`. Precedence 110 (above Power's 100) so it binds
+  // tighter than Power's operands: `2^3!` = `2^(3!)`, `3!^2` = `(3!)^2`,
+  // `-3!` = `-(3!)`. Shares the `!` spelling with prefix `Not` and the `!=`/
+  // `!in` operators; the lexer's longest-match keeps `!=`/`!in` whole, and
+  // prefix-vs-postfix is disambiguated by position (Swift-style).
+  {
+    name: 'Factorial',
+    symbol: '!',
+    precedence: 110,
+    kind: 'postfix',
+  },
 ];
 
 const INFIX_BY_SYMBOL = new Map<string, OperatorDef>();
 const PREFIX_BY_SYMBOL = new Map<string, OperatorDef>();
+const POSTFIX_BY_SYMBOL = new Map<string, OperatorDef>();
 const BY_NAME = new Map<MathJsonSymbol, OperatorDef>();
 
 for (const def of OPERATORS) {
@@ -255,6 +277,8 @@ for (const def of OPERATORS) {
     INFIX_BY_SYMBOL.set(def.symbol, def);
   if (def.kind === 'prefix' && !PREFIX_BY_SYMBOL.has(def.symbol))
     PREFIX_BY_SYMBOL.set(def.symbol, def);
+  if (def.kind === 'postfix' && !POSTFIX_BY_SYMBOL.has(def.symbol))
+    POSTFIX_BY_SYMBOL.set(def.symbol, def);
   // First (canonical) row wins for the serializer view.
   if (!BY_NAME.has(def.name)) BY_NAME.set(def.name, def);
 }
@@ -271,6 +295,13 @@ export function prefixOperatorForSymbol(
   symbol: string
 ): OperatorDef | undefined {
   return PREFIX_BY_SYMBOL.get(symbol);
+}
+
+/** The postfix operator for a (canonical, ASCII) spelling, if any. */
+export function postfixOperatorForSymbol(
+  symbol: string
+): OperatorDef | undefined {
+  return POSTFIX_BY_SYMBOL.get(symbol);
 }
 
 /** The canonical operator definition for a MathJSON operator name (serializer). */

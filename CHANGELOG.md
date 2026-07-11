@@ -1,3 +1,34 @@
+## [Unreleased]
+
+### Compute Engine
+
+- **New builtin operators**: `Pipe(x, f)` applies `f` to `x` (so the
+  pipeline operator `x |> f` now evaluates), `Append(collection, element)`,
+  `Fold(f, init, collection)` (a `Reduce` variant with an explicit initial
+  value and `f(acc, element)` argument order), `StringJoin(s1, s2, …)`
+  (strict string concatenation — and the pre-existing `<>` LaTeX notation
+  now evaluates), and `RandomInteger(n)` / `RandomInteger(a, b)` (uniform
+  integer with inclusive bounds, honoring the seeded RNG).
+- **Recursive function definitions work in one step.** Assigning a function
+  that refers to itself — `ce.parse('f(n) := n \\cdot f(n-1)')`-style
+  definitions, or `Assign(f, Function(… f …))` — now resolves the
+  self-reference (previously it unfolded once and stalled; the symbol had
+  to be declared beforehand).
+- **Single-indexing a matrix yields a correctly-typed row.** Accessing one
+  index of a rank-≥2 collection (`At(m, 2)`) is now typed as a sub-tensor
+  (`vector<2>` from a `matrix<2x2>`) instead of the scalar element type, so
+  chained accesses like `At(At(m, 2), 1)` validate and evaluate.
+
+### Cortex
+
+- **`%` and postfix `!` operators**: `a % b` is `Mod(a, b)` (multiplicative
+  precedence) and `n!` is `Factorial(n)` (the `!` must directly follow its
+  operand; prefix `!x` is still `Not` and `x != y` is still `NotEqual`).
+- **Chained indexing**: `m[2][1]` now works alongside `m[2, 1]`.
+- The examples suite (`src/cortex/docs/examples.md`) grew to 24 verified
+  programs, including one-step recursion, pipelines, `Fold`, and postfix
+  factorials.
+
 ## 0.74.0 _2026-07-10_
 
 ### Calculus

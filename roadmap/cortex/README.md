@@ -68,13 +68,11 @@ large.
   directions" non-goals section to `cortex.md` (§2.12 — `match`, modules,
   `try`/`catch`, `async`, macros are reserved words, *not designed*), and do a
   final grammar pass on `syntax.md`.
-- **Highlight mode (S).** Validate `src/cortex/highlight-js-mode.js` against
-  the shipped grammar (operators, `$…$` islands, verbatim symbols, extended
-  strings); derive a CodeMirror grammar for Tycho if needed (Tycho-side).
-- **Runtime dist smoke in CI (S).** The nodenext consumer smoke test covers
-  `/cortex` type resolution; add a runtime smoke that imports
-  `@cortex-js/compute-engine/cortex` from the *packed* build and executes a
-  tiny program (mirrors what the benchmark harness does for CE releases).
+- **Highlight-mode revalidation (S).** `highlight-js-mode.js` was rebuilt
+  and statically validated 2026-07-11 (see its header); highlight.js is not
+  a devDependency, so re-run the header's structural check whenever the
+  grammar changes. Deriving a CodeMirror grammar for Tycho remains a
+  Tycho-side item, gated on demand.
 
 ### Findings from the example programs (2026-07-10)
 
@@ -83,15 +81,17 @@ surfaced engine bugs and Cortex gaps. Already **fixed** (see the completed
 log in `STATUS_REPORT.md`): the canonical-fold value-leak (`Divide(2, x)` →
 `2` while `x` held `1`), the `String(…)` concatenation bug (interpolation
 now works, incl. the `cortex.md` headline example), the `Type` operator
-reporting `unknown` for lazy operands, and silent indexed assignment
+reporting `unknown` for lazy operands, silent indexed assignment
 (`xs[2] = 9` now emits a `runtime-error` diagnostic — as does any non-final
-statement that evaluates to an error value).
+statement that evaluates to an error value), and — 2026-07-11 — recursion
+knot-tying (one-step `f(n) = …` now works), chained indexing `m[2][1]`,
+and the builtins batch (`Pipe` evaluation, `Append`, `Fold`, `StringJoin`,
+`RandomInteger`).
 
-The remaining engine-side items (lazy-collection semantics decision,
-chained indexing, recursion knot-tying, the missing-builtins batch) are
-**mirrored in the repo-root [`ROADMAP.md`](../../ROADMAP.md)** under
-"Cortex example-programs findings" for engine-track visibility — when one
-lands, remove it from both lists.
+The one remaining engine-side item (the lazy-collection semantics
+decision) is **mirrored in the repo-root [`ROADMAP.md`](../../ROADMAP.md)**
+under "Cortex example-programs findings" for engine-track visibility —
+when it lands, remove it from both lists.
 
 ### Semantics gaps shipped as v0 caveats (complete on demand)
 
@@ -101,12 +101,6 @@ lands, remove it from both lists.
 - **Comment fidelity through serialize (M).** Comments are dropped on
   serialize (documented lossy in `comments.md`); preserve them if round-trip
   fidelity is required for the notebook use case.
-- **Recursive `f(n) = …` does not tie the knot (M).** A self-reference in a
-  one-step function definition unfolds once and then stalls
-  (`fact(10)` → `10·fact(9)`); the body is canonicalized before `f` exists.
-  Workaround (documented in `examples.md`): `let f` first, then
-  `f = n |-> …`. Fix: pre-declare the function symbol before canonicalizing
-  the definition body.
 - **Lazy collections capture mutable variables (M — design decision).**
   `xs = Join(xs, [k])` in a loop yields `[k, k, k]` (the list holds the
   *symbol*; a later read sees the final value), and a list literal as the
@@ -114,14 +108,13 @@ lands, remove it from both lists.
   while the tuple `(d, d+1)` → `(5, 6)`). Engine lazy-collection semantics
   colliding with mutable program state — decide: eager element evaluation on
   `Assign`/statement value, or document the tuple idiom as the contract.
-- **Chained indexing `m[2][1]` fails (S).** Canonicalizes to an
-  `incompatible-type` error (`At` result typing); `m[2, 1]` works and is the
-  documented form.
-- **Operator conveniences (S, decide as a batch).** No `%` (use `Mod`), no
-  postfix `!` (use `Factorial`), `a |> f` parses to `Pipe` but `Pipe` does
-  not evaluate, `"a" + "b"` is a type error (no string concatenation
-  operator), and `Append`/`Fold`/`StringJoin`/`RandomInteger` are not engine
-  builtins (use `Join`/`Reduce`/interpolation/`Random`).
+- **Mutual recursion in one-step definitions (M — on demand).** One-step
+  self-recursion works (2026-07-11), but two functions defined in terms of
+  each other still need `let` declarations first; a one-step form would
+  require forward-declaring sibling references.
+- **String concatenation stays interpolation + `StringJoin` (decided
+  2026-07-11).** No `+` overload or dedicated operator; `"a" + "b"` remains
+  a type error by design.
 
 ### Serializer / compile-target polish
 

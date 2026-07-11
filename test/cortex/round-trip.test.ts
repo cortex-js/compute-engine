@@ -100,10 +100,13 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   ['Subtract', ['Subtract', 'a', 'b']],
   ['Subtract chain', ['Subtract', 'a', 'b', 'c']],
 
-  // Multiply / Divide
+  // Multiply / Divide / Mod
   ['Multiply binary (symbols)', ['Multiply', 'a', 'b']],
   ['Multiply n-ary', ['Multiply', 'a', 'b', 'c']],
   ['Divide', ['Divide', 'n', 4]],
+  ['Mod', ['Mod', 'a', 'b']],
+  ['Mod in Add', ['Add', 'a', ['Mod', 'b', 'c']]],
+  ['Mod of a sum', ['Mod', ['Add', 'a', 'b'], 'c']],
 
   // Invisible multiply (documented `2x` normalization)
   ['invisible 2x', ['Multiply', 2, 'x']],
@@ -115,6 +118,15 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   ['Power negative exponent', ['Power', 'x', -2]],
   ['Power right-assoc', ['Power', 'x', ['Power', 'y', 'z']]],
   ['Power of a sum', ['Power', ['Add', 'x', 1], 2]],
+
+  // Factorial (postfix)
+  ['Factorial literal', ['Factorial', 5]],
+  ['Factorial symbol', ['Factorial', 'n']],
+  ['Factorial of a sum', ['Factorial', ['Add', 'a', 'b']]],
+  ['Factorial nested', ['Factorial', ['Factorial', 'n']]],
+  ['Factorial in Power exponent', ['Power', 2, ['Factorial', 3]]],
+  ['Factorial of a Power', ['Factorial', ['Power', 'x', 2]]],
+  ['Factorial of a call', ['Factorial', ['f', 'x']]],
 
   // Rational (documented `Rational ≡ Divide` normalization)
   ['Rational', ['Rational', 1, 2]],

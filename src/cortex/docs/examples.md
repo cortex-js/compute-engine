@@ -18,11 +18,10 @@ A few idioms these programs rely on:
 
 - Loops (`for`, `while`) are evaluated **for effect** — accumulate into a
   variable, or use `Map`/`Filter`/`Reduce` for value-producing iteration.
-- A **recursive** function is declared first (`let f`), then assigned a
-  `|->` lambda (see [Recursion](#recursion)).
 - A multi-value result ends in a **tuple** `( … )`, which evaluates its
   elements.
-- There is no `%` operator or postfix `!` — use `Mod(…)` and `Factorial(…)`.
+- `a % b` is the remainder (`Mod`), and a postfix `!` is the factorial. The
+  `!` must directly follow its operand (`n!`; `x != y` is still ≠).
 
 ## Iteration and Accumulation
 
@@ -32,7 +31,7 @@ accumulating into a variable:
 ```cortex
 let total = 0
 for k in Range(1, 99) {
-  if Mod(k, 3) == 0 || Mod(k, 5) == 0 { total = total + k }
+  if k % 3 == 0 || k % 5 == 0 { total = total + k }
 }
 total
 // ➔ 2318
@@ -43,9 +42,9 @@ is a single `Map` — no printing, no mutation:
 
 ```cortex
 Map(Range(1, 15), k |->
-  if Mod(k, 15) == 0 { "FizzBuzz" }
-  else if Mod(k, 3) == 0 { "Fizz" }
-  else if Mod(k, 5) == 0 { "Buzz" }
+  if k % 15 == 0 { "FizzBuzz" }
+  else if k % 3 == 0 { "Fizz" }
+  else if k % 5 == 0 { "Buzz" }
   else { k })
 // ➔ [1, 2, "Fizz", 4, "Buzz", "Fizz", 7, 8, "Fizz", "Buzz", 11, "Fizz", 13, 14, "FizzBuzz"]
 ```
@@ -57,7 +56,7 @@ with an `if` expression:
 let n = 27
 let steps = 0
 while n != 1 {
-  n = if Mod(n, 2) == 0 { n / 2 } else { 3n + 1 }
+  n = if n % 2 == 0 { n / 2 } else { 3n + 1 }
   steps = steps + 1
 }
 steps
@@ -71,7 +70,7 @@ temporary:
 let a = 1071
 let b = 462
 while b != 0 {
-  let t = Mod(a, b)
+  let t = a % b
   a = b
   b = t
 }
@@ -101,7 +100,7 @@ isPrime(n) = if n < 2 { False } else {
   let d = 2
   let prime = True
   while d * d <= n {
-    if Mod(n, d) == 0 { prime = False; d = n } else { d = d + 1 }
+    if n % d == 0 { prime = False; d = n } else { d = d + 1 }
   }
   prime
 }
@@ -113,17 +112,20 @@ count
 
 ## Recursion
 
-A recursive function refers to itself by name, so the name must already be
-declared when the lambda is created. In the current version, write the
-declaration first, then assign a `|->` lambda (a self-reference inside a
-one-step `fact(n) = …` definition is not supported yet):
+A recursive function refers to itself by name — a one-step definition just
+works, because the name is declared before the body is processed:
 
 ```cortex
-let fact
-fact = n |-> if n <= 1 { 1 } else { n * fact(n - 1) }
+fact(n) = if n <= 1 { 1 } else { n * fact(n - 1) }
 fact(10)
 // ➔ 3628800
 ```
+
+The two-step form — declare with `let`, then assign a `|->` lambda — is
+equivalent (`let fact` followed by
+`fact = n |-> if n <= 1 { 1 } else { n * fact(n - 1) }`). Note that
+*mutually* recursive functions still require declaring all the names with
+`let` before defining any of them.
 
 ## Numeric Methods
 
@@ -205,6 +207,13 @@ Map(roots, r |-> r^2 - 5r + 6)
 // ➔ [0, 0]
 ```
 
+**A binomial coefficient**, with postfix factorials:
+
+```cortex
+10! / (3! * 7!)
+// ➔ 120
+```
+
 **LaTeX islands.** A `$…$` span is parsed as LaTeX and spliced in as an
 expression. Here, forty steps of the continued fraction 1 + 1/x against the
 closed form of the golden ratio:
@@ -230,7 +239,8 @@ let x = 2^11 - 1
 
 ## Collections
 
-**Matrices.** Lists of lists are matrices; index with `m[i, j]`:
+**Matrices.** Lists of lists are matrices; index with `m[i, j]` (chained
+`m[i][j]` also works):
 
 ```cortex
 let m = [[2, 1], [1, 3]]
@@ -251,7 +261,30 @@ let xs = [4, 8, 15, 16, 23, 42]
 **Filter and reduce** with anonymous functions:
 
 ```cortex
-let evens = Filter(Range(1, 10), n |-> Mod(n, 2) == 0)
+let evens = Filter(Range(1, 10), n |-> n % 2 == 0)
 Reduce(evens, (acc, n) |-> acc + n)
 // ➔ 30
+```
+
+**Chained indexing** into a nested list — both index forms agree:
+
+```cortex
+let m = [[1, 2], [3, 4]]
+(m[2][1], m[2, 1])
+// ➔ (3, 3)
+```
+
+**Pipelines.** `x |> f` applies `f` to `x`:
+
+```cortex
+[4, 8, 15, 16, 23, 42] |> Mean
+// ➔ 18
+```
+
+**Fold** threads an accumulator through a collection, starting from an
+explicit initial value:
+
+```cortex
+Fold((acc, n) |-> acc + n^2, 0, Range(1, 5))
+// ➔ 55
 ```

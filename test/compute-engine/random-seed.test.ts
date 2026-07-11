@@ -106,6 +106,74 @@ describe('ce.randomSeed — evaluate()', () => {
   });
 });
 
+describe('RandomInteger — evaluate()', () => {
+  it('RandomInteger(a, b) stays within the inclusive range [a, b]', () => {
+    const ce = new ComputeEngine();
+    ce.randomSeed = 7;
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < 500; i++) {
+      const v = ce.box(['RandomInteger', 1, 6]).evaluate().re;
+      expect(Number.isInteger(v)).toBe(true);
+      expect(v).toBeGreaterThanOrEqual(1);
+      expect(v).toBeLessThanOrEqual(6);
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    // Both endpoints are reachable (inclusive upper bound).
+    expect(min).toBe(1);
+    expect(max).toBe(6);
+  });
+
+  it('the one-argument form draws from the inclusive range [0, n]', () => {
+    const ce = new ComputeEngine();
+    ce.randomSeed = 11;
+    let max = -Infinity;
+    for (let i = 0; i < 500; i++) {
+      const v = ce.box(['RandomInteger', 3]).evaluate().re;
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(3);
+      if (v > max) max = v;
+    }
+    expect(max).toBe(3);
+  });
+
+  it('a single point [k, k] always yields k', () => {
+    const ce = new ComputeEngine();
+    ce.randomSeed = 1;
+    expect(ce.box(['RandomInteger', 5, 5]).evaluate().re).toBe(5);
+  });
+
+  it('reversed bounds are normalized', () => {
+    const ce = new ComputeEngine();
+    ce.randomSeed = 3;
+    for (let i = 0; i < 100; i++) {
+      const v = ce.box(['RandomInteger', 6, 1]).evaluate().re;
+      expect(v).toBeGreaterThanOrEqual(1);
+      expect(v).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it('same seed ⇒ identical sequence across two engines', () => {
+    const a = new ComputeEngine();
+    a.randomSeed = 12345;
+    const b = new ComputeEngine();
+    b.randomSeed = 12345;
+    const drawInt = (ce: ComputeEngine) =>
+      ce.box(['RandomInteger', 0, 1000]).evaluate().re;
+    const seqA = [drawInt(a), drawInt(a), drawInt(a), drawInt(a)];
+    const seqB = [drawInt(b), drawInt(b), drawInt(b), drawInt(b)];
+    expect(seqA).toEqual(seqB);
+  });
+
+  it('a symbolic bound stays unevaluated', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['RandomInteger', 'n']).evaluate().operator).toBe(
+      'RandomInteger'
+    );
+  });
+});
+
 describe('ce.randomSeed — compile() baking', () => {
   it('with no seed, Random emits Math.random()', () => {
     const ce = new ComputeEngine();

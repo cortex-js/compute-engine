@@ -20,6 +20,7 @@ import { tokenize } from './lexer.js';
 import {
   OperatorDef,
   infixOperatorForSymbol,
+  postfixOperatorForSymbol,
   prefixOperatorForSymbol,
 } from './operators.js';
 import { RESERVED_WORDS } from './reserved-words.js';
@@ -58,7 +59,7 @@ const PREFIX_SIGILS = new Set(['!', '-', '+']);
 //              | parenthesized | tuple | list | set | dictionary
 //   postfix    = primary ( call-clause | index-clause )*   // tightest
 //   unary      = prefix-op unary | postfix
-//   expression = unary (infix-op expression | invisible-multiply)*
+//   expression = unary (postfix-op | infix-op expression | invisible-multiply)*
 //   program    = shebang? (statement separator?)* EOF
 //
 // A `call-clause` is `( args )` and an `index-clause` is `[ args ]`, neither
@@ -87,7 +88,14 @@ const PREFIX_SIGILS = new Set(['!', '-', '+']);
 //                        by treating the operator as infix so parsing continues.
 //
 // A prefix operator must have **no** whitespace before its operand (`-x`, not
-// `- x`).
+// `- x`). Symmetrically, a **postfix** operator (`!` Factorial) must have **no**
+// whitespace before itself (`x!`, not `x !`). That abutment rule is also what
+// disambiguates postfix `!` (Factorial) from prefix `!` (Not): a `!` that abuts
+// the preceding operand is a postfix factorial (`x!`), while a `!` preceded by
+// whitespace is not a postfix, so `x !y` ends the `x` expression and `!y`
+// begins a new (prefix `Not`) statement — a separator diagnostic on one line,
+// never a silent misparse. (`x!=y` stays `NotEqual`: the lexer munches `!=`
+// into one token, so no `!` postfix is ever seen.)
 //
 // ─── Statement sequencing ───────────────────────────────────────────────────
 //
@@ -993,6 +1001,21 @@ export class Parser {
     if (left === null) return null;
 
     for (;;) {
+      // Postfix operators (`!` Factorial). They bind tighter than any infix
+      // operator and must abut their operand (see the whitespace rule above),
+      // so they are consumed before `peekInfix`. `x!` → `["Factorial", x]`.
+      const post = this.peekPostfix();
+      if (post !== null && post.precedence >= minPrecedence) {
+        const start = this.localStart(left) ?? this.current.start;
+        const opTok = this.advance(); // the postfix operator token
+        left = this.wrap(
+          [post.name, left] as MathJsonExpression[],
+          start,
+          opTok.end
+        );
+        continue;
+      }
+
       const op = this.peekInfix();
       if (op === null) {
         // Invisible multiplication: a number literal immediately followed (no
@@ -1149,6 +1172,37 @@ export class Parser {
     if (leftWS === rightWS) return { def, tokenCount, asymmetric: false };
     if (leftWS && !rightWS) return null; // `a +b`: expression ends here
     return { def, tokenCount, asymmetric: true }; // `a+ b`
+  }
+
+  /**
+   * If a postfix operator (`!` Factorial) abuts the current operand, return its
+   * definition. A postfix operator must NOT be preceded by whitespace (`x!`,
+   * never `x !`); a whitespace-preceded `!` is left for the infix/statement
+   * machinery, which is how postfix `!` (Factorial) is kept distinct from prefix
+   * `!` (Not). The `!=`/`!in` operators never reach here: the lexer munches
+   * `!=` into a single token, and `!in` is handled by `peekInfix` first.
+   */
+  private peekPostfix(): OperatorDef | null {
+    const token = this.current;
+    if (token.type !== 'OPERATOR') return null;
+    if (token.precededByWhitespace) return null;
+    // NOTE: the lexer maximal-munches a run of operator characters into one
+    // token, so a `!` directly abutting another operator char is not seen here
+    // as a lone `!` (`3!^2` lexes `!^` as one token — write `3! ^ 2`; `x!+1`
+    // lexes `!+` — write `x! + 1`). This mirrors the existing operator-adjacency
+    // behavior elsewhere in the grammar. The serializer always spaces infix
+    // operators, so serialized output round-trips.
+    //
+    // A `!` that abuts an `in` starts the `!in` (NotElement) compound; leave it
+    // for `peekInfix` rather than reading it as a postfix factorial.
+    if (
+      token.text === '!' &&
+      this.peek().type === 'SYMBOL' &&
+      this.peek().text === 'in' &&
+      !this.peek().precededByWhitespace
+    )
+      return null;
+    return postfixOperatorForSymbol(token.text) ?? null;
   }
 
   /** The operator spelling a token would contribute in infix position (fancy

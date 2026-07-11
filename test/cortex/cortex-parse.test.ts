@@ -1570,6 +1570,72 @@ describe('CORTEX PARSING OPERATORS', () => {
     // `^` is right-associative.
     expect(validCortex('2^3^2')).toStrictEqual(['Power', 2, ['Power', 3, 2]]);
   });
+  test('Mod (`%`)', () => {
+    // `%` is infix Mod at multiplicative precedence (same tier as `*`/`/`).
+    expect(validCortex('a % b')).toStrictEqual(['Mod', 'a', 'b']);
+    expect(validCortex('a%b')).toStrictEqual(['Mod', 'a', 'b']);
+    // `%` binds tighter than `+`, so `a + b % c` is `a + (b % c)`.
+    expect(validCortex('a + b % c')).toStrictEqual([
+      'Add',
+      'a',
+      ['Mod', 'b', 'c'],
+    ]);
+    // Left-associative binary (same as `*`/`/`).
+    expect(validCortex('a % b % c')).toStrictEqual([
+      'Mod',
+      ['Mod', 'a', 'b'],
+      'c',
+    ]);
+    // Same tier as `*`: left-associative, left-to-right.
+    expect(validCortex('a * b % c')).toStrictEqual([
+      'Mod',
+      ['Multiply', 'a', 'b'],
+      'c',
+    ]);
+  });
+  test('Factorial (postfix `!`)', () => {
+    expect(validCortex('5!')).toStrictEqual(['Factorial', 5]);
+    expect(validCortex('n!')).toStrictEqual(['Factorial', 'n']);
+    // Prefix `!` (Not) is unchanged — position disambiguates.
+    expect(validCortex('!x')).toStrictEqual(['Not', 'x']);
+    // `!=` stays NotEqual (the lexer munches `!=` into one token).
+    expect(validCortex('x != y')).toStrictEqual(['NotEqual', 'x', 'y']);
+    expect(validCortex('x!=y')).toStrictEqual(['NotEqual', 'x', 'y']);
+    // Factorial binds tighter than Power's operands: `2^3!` = `2^(3!)`.
+    expect(validCortex('2^3!')).toStrictEqual([
+      'Power',
+      2,
+      ['Factorial', 3],
+    ]);
+    // …and `3! ^ 2` = `(3!)^2` (spaced, since the lexer munches `!^`).
+    expect(validCortex('3! ^ 2')).toStrictEqual([
+      'Power',
+      ['Factorial', 3],
+      2,
+    ]);
+    // Prefix `-` is looser than postfix `!`: `-3!` = `-(3!)`.
+    expect(validCortex('-3!')).toStrictEqual(['Negate', ['Factorial', 3]]);
+    // Applies after a parenthesized expression, a call, and an index.
+    expect(validCortex('(a + b)!')).toStrictEqual([
+      'Factorial',
+      ['Add', 'a', 'b'],
+    ]);
+    expect(validCortex('f(x)!')).toStrictEqual(['Factorial', ['f', 'x']]);
+    // Factorial as an operand of an infix operator.
+    expect(validCortex('n! + 1')).toStrictEqual([
+      'Add',
+      ['Factorial', 'n'],
+      1,
+    ]);
+  });
+  test('Invalid postfix `!`', () => {
+    // A postfix `!` must abut its operand: `x !y` (space before `!`) is not a
+    // factorial — `x` ends and the abutting `!y` (prefix Not) has no separator.
+    expect(invalidCortex('x !y')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '!']],
+    ]);
+  });
 });
 
 // The parser and serializer both read the shared `operators.ts` table, so a
@@ -1581,7 +1647,9 @@ describe('CORTEX OPERATOR ROUND-TRIP', () => {
       ['Subtract', 'a', 'b'],
       ['Multiply', 'a', 'b'],
       ['Divide', 'a', 'b'],
+      ['Mod', 'a', 'b'],
       ['Power', 'a', 'b'],
+      ['Factorial', 'a'],
       ['Equal', 'a', 'b'],
       ['Same', 'a', 'b'],
       ['And', 'a', 'b'],
