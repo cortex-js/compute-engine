@@ -113,10 +113,10 @@ The empty set is `{}`.
 
 ## Flow Control
 
-Cortex is expression-oriented: `if`/`else` yields a value, loops map onto the
-engine's iteration operators, and a `do { … }` block is an expression whose
-value is its last statement. Function definitions, anonymous functions
-(`x |-> x^2`), and the full control-flow grammar are covered in
+Cortex is expression-oriented: `if`/`else` and `match` both yield a value,
+loops map onto the engine's iteration operators, and a `do { … }` block is an
+expression whose value is its last statement. Function definitions, anonymous
+functions (`x |-> x^2`), and the full control-flow grammar are covered in
 [Control Flow](/cortex/control-flow/).
 
 ## Future Directions
@@ -126,7 +126,6 @@ future version of Cortex can introduce them without breaking existing programs,
 and using one as an ordinary name today is an error. None of the following are
 part of the language yet:
 
-- **Pattern matching** — `match`.
 - **Modules and imports** — `import`, `export`, `module`.
 - **Error-handling keywords** — `try`, `catch`, `throw`. In Cortex, errors are
   ordinary values, so these are not needed for the current design.

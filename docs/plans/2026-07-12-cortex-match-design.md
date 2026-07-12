@@ -348,8 +348,20 @@ generic matcher.
   (bignum `toString` is exponential/precision-limited for huge integers);
   out-of-range integer literals degrade to tier 1, which is correct by
   construction.
-- **Dictionary patterns are tier 3 for now** (fast-path deferred; the §4
-  tier-2 listing is aspirational for dictionaries).
+- **Dictionary patterns are tier 2** (as of the 2026-07-12 dict-matcher fix).
+  A `Dictionary` pattern whose values are all bindings / `_` / literals / pins /
+  nested fixed shapes (and no guard-breaking features) classifies tier 2; a
+  value that is a sequence wildcard, or any other non-fixed-shape value, keeps
+  the case at tier 3. **Both** match paths (the tier-2 shape matcher and the
+  tier-3 generic-reference path) use a **dedicated dict matcher**, not the
+  generic matcher: a `Dictionary(...)` *value* collapses to the engine's native
+  compact dictionary at canonicalization, so the generic matcher — which walks
+  function-form nodes — can never align a function-form `Dictionary(...)`
+  *pattern* (held raw on `MatchCase`) with it. The dict matcher reads the
+  subject through the `DictionaryInterface` (`isDictionary` guard: `.get`/`.has`)
+  and matches by key (open — the subject may carry extra keys). Nested
+  dictionaries are handled at any depth inside `List`/`Tuple` and other dict
+  values; `compile()` fails closed on dict patterns (D6, naming the keys).
 - **Plan cache** is a module-level `WeakMap` keyed on the Match's `ops`
   array (stable per canonical `BoxedFunction` under `holdAll`/`holdMap`);
   guard/body closures are built once per plan — safe because free

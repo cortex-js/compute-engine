@@ -5,7 +5,14 @@ import type {
 } from '../global-types.js';
 
 import { apply, canonicalFunctionLiteralArguments } from '../function-utils.js';
-import { isFunction, isNumber, isString, isSymbol, sym } from './type-guards.js';
+import {
+  isDictionary,
+  isFunction,
+  isNumber,
+  isString,
+  isSymbol,
+  sym,
+} from './type-guards.js';
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
 
 /**
@@ -83,7 +90,8 @@ export type LeafTest =
   | { kind: 'literal'; value: Expression } // compare with `leafEquals`
   | { kind: 'pin'; expr: Expression }; // resolve in scope, then compare
 
-/** One positional element of a tier-2 `List`/`Tuple` shape. */
+/** One positional element of a tier-2 `List`/`Tuple` shape (also the value slot
+ * of a tier-2 `Dictionary` shape). */
 export type ElementPlan =
   | { kind: 'bind'; key: string } // `_name` → capture at this position
   | { kind: 'ignore' } // `_` → consume one operand, capture nothing
@@ -91,13 +99,27 @@ export type ElementPlan =
   | { kind: 'pin'; expr: Expression } // `Pin(e)` → resolve, then `leafEquals`
   | { kind: 'shape'; node: ShapeNode }; // nested fixed shape
 
-/** A tier-2 fixed shape: fixed prefix, optional single rest, fixed suffix. */
-export interface ShapeNode {
+/** A tier-2 sequence shape (`List`/`Tuple`): fixed prefix, optional single rest,
+ * fixed suffix. */
+export interface SeqShapeNode {
+  kind: 'seq';
   operator: string; // 'List' | 'Tuple'
   prefix: ElementPlan[];
   rest: { key: string | null } | undefined; // `___name` (key) / `___` (null)
   suffix: ElementPlan[];
 }
+
+/** A tier-2 dictionary shape: an **open** match on a set of named keys, each
+ * with an element-plan value. The subject must have (at least) every listed
+ * key, with each value matching the corresponding value plan; extra subject
+ * keys are ignored (open by default, per §2 pattern rule 7). */
+export interface DictShapeNode {
+  kind: 'dict';
+  entries: { key: string; value: ElementPlan }[];
+}
+
+/** A tier-2 fixed shape: a sequence (`List`/`Tuple`) or a dictionary. */
+export type ShapeNode = SeqShapeNode | DictShapeNode;
 
 export interface CompiledCase {
   tier: Tier;
@@ -249,7 +271,7 @@ export function evaluateMatchReference(
   }
 
   for (const vc of cases) {
-    const sub = subject.match(vc.pattern);
+    const sub = matchPattern(ce, subject, vc.pattern);
     if (sub === null) continue;
 
     const captures = collectCaptures(vc.pattern);
@@ -327,10 +349,11 @@ function matchCompiled(
       return matchShape(ce, cc.shape!, subject, sub) ? sub : null;
     }
     default: {
-      // Tier 3: resolve pins per evaluation, then the generic matcher.
+      // Tier 3: resolve pins per evaluation, then the dict-aware matcher (which
+      // delegates dict-free patterns to the generic matcher).
       for (const raw of cc.rawPatterns!) {
-        const s = subject.match(resolvePins(ce, raw));
-        if (s !== null) return s as Substitution;
+        const s = matchPattern(ce, subject, resolvePins(ce, raw));
+        if (s !== null) return s;
       }
       return null;
     }
@@ -353,13 +376,15 @@ function dispatchIndex(
   return undefined;
 }
 
-/** Match a fixed-shape (`List`/`Tuple`) pattern positionally. */
+/** Match a fixed shape — a `List`/`Tuple` sequence positionally, or a
+ * `Dictionary` by key (open match). */
 function matchShape(
   ce: ComputeEngine,
   node: ShapeNode,
   subject: Expression,
   sub: Substitution
 ): boolean {
+  if (node.kind === 'dict') return matchDictShape(ce, node, subject, sub);
   if (!isFunction(subject) || subject.operator !== node.operator) return false;
 
   const ops = subject.ops;
@@ -381,6 +406,26 @@ function matchShape(
     sub[node.rest.key] = wrapRest(ce, middle);
   }
 
+  return true;
+}
+
+/** Match a tier-2 `Dictionary` shape: **open** — every listed key must be
+ * present in the subject with a matching value; extra subject keys are ignored.
+ * Reads the subject via the `DictionaryInterface` (`isDictionary` guard: the
+ * evaluated subject is the engine's native compact dictionary, not a
+ * function-form `Dictionary`). */
+function matchDictShape(
+  ce: ComputeEngine,
+  node: DictShapeNode,
+  subject: Expression,
+  sub: Substitution
+): boolean {
+  if (!isDictionary(subject)) return false;
+  for (const { key, value } of node.entries) {
+    const v = subject.get(key);
+    if (v === undefined) return false; // missing key → fall through
+    if (!matchElement(ce, value, v, sub)) return false;
+  }
   return true;
 }
 
@@ -671,11 +716,13 @@ function hashableSubjectKey(subject: Expression): string | undefined {
   return integerKey(subject);
 }
 
-/** Classify a `List`/`Tuple` pattern as a fixed shape, or `undefined` if any
- * element is not shape-compatible (operator patterns, `__` sequences, or more
- * than one `___rest`). */
+/** Classify a `List`/`Tuple`/`Dictionary` pattern as a fixed shape, or
+ * `undefined` if any element is not shape-compatible (operator patterns, `__`
+ * sequences, more than one `___rest`, or — for dictionaries — a non-literal key
+ * or a value that is not itself a fixed shape). */
 function classifyShape(p: Expression): ShapeNode | undefined {
   if (!isFunction(p)) return undefined;
+  if (p.operator === 'Dictionary') return classifyDictShape(p);
   if (p.operator !== 'List' && p.operator !== 'Tuple') return undefined;
 
   const prefix: ElementPlan[] = [];
@@ -693,9 +740,8 @@ function classifyShape(p: Expression): ShapeNode | undefined {
         continue;
       }
       if (wt === 'Sequence') return undefined; // `__` not allowed in tier 2
-      const bare = name.replace(/^_+/, '');
-      const ep: ElementPlan =
-        bare.length ? { kind: 'bind', key: name } : { kind: 'ignore' };
+      const ep = classifyValueElement(el);
+      if (ep === undefined) return undefined;
       (rest === undefined ? prefix : suffix).push(ep);
       continue;
     }
@@ -705,7 +751,43 @@ function classifyShape(p: Expression): ShapeNode | undefined {
     (rest === undefined ? prefix : suffix).push(ep);
   }
 
-  return { operator: p.operator, prefix, rest, suffix };
+  return { kind: 'seq', operator: p.operator, prefix, rest, suffix };
+}
+
+/** Classify a `Dictionary` pattern as a fixed dict shape, or `undefined` if a
+ * key is not a literal string/symbol, a key is repeated, or a value is not a
+ * fixed-shape element (binding / `_` / literal / pin / nested fixed shape — a
+ * sequence/rest wildcard value falls to tier 3). Keys are literal (not
+ * patternized), per §2 pattern rule 7. */
+function classifyDictShape(p: Expression): DictShapeNode | undefined {
+  if (!isFunction(p)) return undefined;
+  const entries: { key: string; value: ElementPlan }[] = [];
+  const seen = new Set<string>();
+  for (const kv of p.ops) {
+    const entry = dictEntry(kv);
+    if (entry === undefined) return undefined;
+    if (seen.has(entry.key)) return undefined; // repeated pattern key
+    seen.add(entry.key);
+    const value = classifyValueElement(entry.value);
+    if (value === undefined) return undefined;
+    entries.push({ key: entry.key, value });
+  }
+  return { kind: 'dict', entries };
+}
+
+/** Classify a value slot (a dict value, or a non-rest list element) as an
+ * `ElementPlan`: a binding, `_`, or a non-wildcard fixed-shape element.
+ * Sequence / optional-sequence wildcards are rejected (they are not valid in a
+ * value position — the single list rest is handled by `classifyShape`). */
+function classifyValueElement(el: Expression): ElementPlan | undefined {
+  if (isWildcard(el)) {
+    const wt = wildcardType(el);
+    if (wt === 'Sequence' || wt === 'OptionalSequence') return undefined;
+    const name = wildcardName(el)!;
+    const bare = name.replace(/^_+/, '');
+    return bare.length ? { kind: 'bind', key: name } : { kind: 'ignore' };
+  }
+  return classifyElement(el);
 }
 
 /** Classify a non-wildcard tier-2 element (literal / pin / nested shape). */
@@ -718,6 +800,24 @@ function classifyElement(el: Expression): ElementPlan | undefined {
   return undefined;
 }
 
+/** Destructure a dictionary-entry pattern (`KeyValuePair`/`Pair`/`Tuple` of a
+ * string- or symbol-literal key and a value) into its literal key and value
+ * expression, or `undefined` if the entry is not a well-formed literal-keyed
+ * pair. Mirrors the entry forms `BoxedDictionary` accepts. */
+function dictEntry(
+  kv: Expression
+): { key: string; value: Expression } | undefined {
+  if (!isFunction(kv)) return undefined;
+  const op = kv.operator;
+  if (op !== 'KeyValuePair' && op !== 'Pair' && op !== 'Tuple') return undefined;
+  if (kv.nops < 2) return undefined;
+  const key = kv.ops[0];
+  const value = kv.ops[1];
+  if (isString(key)) return { key: key.string, value };
+  if (isSymbol(key)) return { key: key.symbol, value };
+  return undefined;
+}
+
 /** True if a shape binds the same name twice (a non-linear pattern — excluded
  * from tier 2). */
 function hasRepeatedKeys(node: ShapeNode): boolean {
@@ -727,12 +827,17 @@ function hasRepeatedKeys(node: ShapeNode): boolean {
     if (seen.has(k)) dup = true;
     else seen.add(k);
   };
+  const walkElement = (el: ElementPlan): void => {
+    if (el.kind === 'bind') add(el.key);
+    else if (el.kind === 'shape') walk(el.node);
+  };
   const walk = (n: ShapeNode): void => {
-    if (n.rest?.key) add(n.rest.key);
-    for (const el of [...n.prefix, ...n.suffix]) {
-      if (el.kind === 'bind') add(el.key);
-      else if (el.kind === 'shape') walk(el.node);
+    if (n.kind === 'dict') {
+      for (const { value } of n.entries) walkElement(value);
+      return;
     }
+    if (n.rest?.key) add(n.rest.key);
+    for (const el of [...n.prefix, ...n.suffix]) walkElement(el);
   };
   walk(node);
   return dup;
@@ -745,6 +850,129 @@ function hasRepeatedKeys(node: ShapeNode): boolean {
 /** `["Error", "'match-no-case'", subject]`. */
 function noCaseError(ce: ComputeEngine, subject: Expression): Expression {
   return ce._fn('Error', [ce.string('match-no-case'), subject]);
+}
+
+/**
+ * The reference-path matcher, dict-aware.
+ *
+ * The generic matcher (`subject.match`) cannot align a **function-form**
+ * `Dictionary(...)` pattern with a **native** dictionary value: a `Dictionary`
+ * subject collapses to the engine's compact representation at canonicalization,
+ * so there is no `Dictionary(...)` node for the generic matcher to walk. So when
+ * the pattern contains a `Dictionary` node anywhere, descend structurally,
+ * matching each dictionary against the native subject by key (open match) and
+ * delegating every non-dict subtree back to the fully-capable generic matcher.
+ *
+ * **Depth.** Dictionaries are handled at any nesting inside `List`/`Tuple`
+ * patterns and inside other dictionary values (dict-in-list, dict-in-dict,
+ * list-in-dict, …). A `Dictionary` appearing as an operand of a *non-structural*
+ * operator pattern (e.g. `Add(dict, x)`) is not supported — no such pattern is
+ * reachable from Cortex surface syntax — and fails to match.
+ */
+function matchPattern(
+  ce: ComputeEngine,
+  subject: Expression,
+  pattern: Expression
+): Substitution | null {
+  if (!patternHasDict(pattern)) return subject.match(pattern) as Substitution | null;
+  const sub: Substitution = {};
+  return matchInto(ce, subject, pattern, sub) ? sub : null;
+}
+
+/** Match `pattern` against `subject`, accumulating captures into `sub`.
+ * Structurally descends `Dictionary`/`List`/`Tuple` patterns that contain a
+ * dictionary; hands every dict-free subtree to the generic matcher. */
+function matchInto(
+  ce: ComputeEngine,
+  subject: Expression,
+  pattern: Expression,
+  sub: Substitution
+): boolean {
+  if (!patternHasDict(pattern)) {
+    const s = subject.match(pattern);
+    if (s === null) return false;
+    for (const k of Object.keys(s)) sub[k] = s[k];
+    return true;
+  }
+  if (isFunction(pattern, 'Dictionary'))
+    return matchDictInto(ce, subject, pattern, sub);
+  if (isFunction(pattern, 'List') || isFunction(pattern, 'Tuple'))
+    return matchSeqInto(ce, subject, pattern, sub);
+  // A dictionary nested under an operator we do not structurally descend.
+  return false;
+}
+
+/** Open dict match against a native dictionary subject (reference path). */
+function matchDictInto(
+  ce: ComputeEngine,
+  subject: Expression,
+  pattern: Expression,
+  sub: Substitution
+): boolean {
+  if (!isDictionary(subject) || !isFunction(pattern)) return false;
+  for (const kv of pattern.ops) {
+    const entry = dictEntry(kv);
+    if (entry === undefined) return false;
+    const v = subject.get(entry.key);
+    if (v === undefined) return false; // missing key → no match
+    if (!matchInto(ce, v, entry.value, sub)) return false;
+  }
+  return true;
+}
+
+/** Positional `List`/`Tuple` match with a single optional `___rest`, recursing
+ * through `matchInto` so nested dictionaries are handled (reference path). */
+function matchSeqInto(
+  ce: ComputeEngine,
+  subject: Expression,
+  pattern: Expression,
+  sub: Substitution
+): boolean {
+  if (!isFunction(pattern) || !isFunction(subject)) return false;
+  if (subject.operator !== pattern.operator) return false;
+  const els = pattern.ops;
+  let restIdx = -1;
+  for (let i = 0; i < els.length; i++) {
+    if (!isWildcard(els[i])) continue;
+    const wt = wildcardType(els[i]);
+    if (wt === 'Sequence') return false; // `__` handled only by the generic path
+    if (wt === 'OptionalSequence') {
+      if (restIdx !== -1) return false; // >1 rest not handled here
+      restIdx = i;
+    }
+  }
+
+  const sOps = subject.ops;
+  if (restIdx === -1) {
+    if (sOps.length !== els.length) return false;
+    for (let i = 0; i < els.length; i++)
+      if (!matchInto(ce, sOps[i], els[i], sub)) return false;
+    return true;
+  }
+
+  const prefix = els.slice(0, restIdx);
+  const suffix = els.slice(restIdx + 1);
+  if (sOps.length < prefix.length + suffix.length) return false;
+  for (let i = 0; i < prefix.length; i++)
+    if (!matchInto(ce, sOps[i], prefix[i], sub)) return false;
+  for (let j = 0; j < suffix.length; j++)
+    if (!matchInto(ce, sOps[sOps.length - suffix.length + j], suffix[j], sub))
+      return false;
+
+  const restName = wildcardName(els[restIdx])!;
+  if (restName.replace(/^_+/, '').length)
+    sub[restName] = wrapRest(
+      ce,
+      sOps.slice(prefix.length, sOps.length - suffix.length)
+    );
+  return true;
+}
+
+/** True if `expr` contains a `["Dictionary", …]` node anywhere. */
+function patternHasDict(expr: Expression): boolean {
+  if (isFunction(expr, 'Dictionary')) return true;
+  if (isFunction(expr)) return expr.ops.some(patternHasDict);
+  return false;
 }
 
 /** Resolve a single pinned expression: canonicalize (so a bare symbol resolves

@@ -197,6 +197,23 @@ describe('COMPILE Match — fail closed (D6)', () => {
     );
   });
 
+  it('fails closed on a dictionary pattern, naming the keys', () => {
+    // Dictionary patterns are a tier-2 fixed shape for the interpreter, but the
+    // compiler does not implement dict destructuring — fail closed (D6).
+    const expr: MathJsonExpression = [
+      'Match',
+      'x',
+      ['MatchCase', ['Dictionary', ['KeyValuePair', { str: 'k' }, '_v']], 'v'],
+      ['MatchCase', '_', 0],
+    ];
+    expect(() => compile(ce.box(expr), { fallback: false })).toThrow(
+      /dictionary pattern .* not compilable/
+    );
+    const r = compile(ce.box(expr));
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/not compilable/);
+  });
+
   it('fails closed on an or-alternative that binds a name', () => {
     const expr: MathJsonExpression = [
       'Match',

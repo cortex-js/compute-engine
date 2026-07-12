@@ -279,6 +279,115 @@ describe('MATCH — algebraic / operator dispatch', () => {
   });
 });
 
+describe('MATCH — dictionary patterns (open match, §2 pattern rule 7)', () => {
+  // A `Dictionary(...)` VALUE collapses to the engine's native dictionary at
+  // canonicalization, so the generic matcher cannot align a function-form
+  // `Dictionary(...)` pattern with it. `match-dispatch` uses a dedicated
+  // dict-aware matcher on both paths (tier-2 shape + tier-3 reference).
+  const dict = (
+    ...kv: [string, MathJsonExpression][]
+  ): MathJsonExpression => [
+    'Dictionary',
+    ...kv.map(([k, v]) => ['KeyValuePair', { str: k }, v] as MathJsonExpression),
+  ];
+
+  it('matches an exact single-key dictionary and binds the value', () => {
+    expect(
+      m([
+        'Match',
+        dict(['x', 1], ['y', 2]),
+        ['MatchCase', dict(['x', '_px']), 'px'],
+        ['MatchCase', '_', { str: 'nope' }],
+      ])
+    ).toBe('1');
+  });
+
+  it('is open: extra subject keys are ignored', () => {
+    expect(
+      m([
+        'Match',
+        dict(['x', 1], ['y', 2], ['z', 3]),
+        ['MatchCase', dict(['x', '_px'], ['y', '_py']), ['Add', 'px', 'py']],
+        ['MatchCase', '_', { str: 'nope' }],
+      ])
+    ).toBe('3');
+  });
+
+  it('falls through when a pattern key is missing from the subject', () => {
+    expect(
+      m([
+        'Match',
+        dict(['y', 2]),
+        ['MatchCase', dict(['x', '_px']), 'px'],
+        ['MatchCase', '_', { str: 'nope' }],
+      ])
+    ).toBe('"nope"');
+  });
+
+  it('binds a captured value used in the body', () => {
+    expect(
+      m([
+        'Match',
+        dict(['a', ['Add', 3, 4]]),
+        ['MatchCase', dict(['a', '_v']), ['Multiply', 'v', 2]],
+      ])
+    ).toBe('14');
+  });
+
+  it('matches a nested dictionary inside a list pattern', () => {
+    expect(
+      m([
+        'Match',
+        ['List', 1, dict(['k', 9])],
+        [
+          'MatchCase',
+          ['List', '_a', dict(['k', '_v'])],
+          ['Add', 'a', 'v'],
+        ],
+        ['MatchCase', '_', { str: 'nope' }],
+      ])
+    ).toBe('10');
+  });
+
+  it('a literal dictionary value must match structurally', () => {
+    expect(
+      m([
+        'Match',
+        dict(['k', 5]),
+        ['MatchCase', dict(['k', 5]), { str: 'five' }],
+        ['MatchCase', dict(['k', 6]), { str: 'six' }],
+        ['MatchCase', '_', { str: 'nope' }],
+      ])
+    ).toBe('"five"');
+  });
+
+  it('a pin resolves as a dictionary value', () => {
+    expect(
+      m([
+        'Match',
+        dict(['k', 5]),
+        [
+          'MatchCase',
+          dict(['k', ['Pin', ['Add', 2, 3]]]),
+          { str: 'hit' },
+        ],
+        ['MatchCase', '_', { str: 'miss' }],
+      ])
+    ).toBe('"hit"');
+  });
+
+  it('a non-dictionary subject falls through a dictionary pattern', () => {
+    expect(
+      m([
+        'Match',
+        5,
+        ['MatchCase', dict(['k', '_v']), 'v'],
+        ['MatchCase', '_', { str: 'no' }],
+      ])
+    ).toBe('"no"');
+  });
+});
+
 describe('MATCH — exactness contract', () => {
   it('evaluate keeps an exact transcendental body symbolic; N numericizes', () => {
     const expr = ce.box(['Match', 3, ['MatchCase', '_x', ['Ln', 'x']]]);

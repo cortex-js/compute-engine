@@ -1604,6 +1604,16 @@ export class BaseCompiler {
     accessors: Map<string, string>,
     target: CompileTarget<Expression>
   ): void {
+    // Dictionary shapes are a tier-2 fixed shape for the interpreter, but the
+    // compiler does not implement dict destructuring (native dict values have no
+    // compiled array representation). Fail closed (D6), naming the keys.
+    if (node.kind === 'dict') {
+      const keys = node.entries.map((e) => `'${e.key}'`).join(', ');
+      throw new Error(
+        `Match: dictionary pattern {${keys}} is not compilable; ` +
+          `rewrite with destructuring or guards. Fail closed (D6).`
+      );
+    }
     conds.push(`Array.isArray(${base})`);
     const fixed = node.prefix.length + node.suffix.length;
     if (node.rest === undefined) conds.push(`${base}.length === ${fixed}`);

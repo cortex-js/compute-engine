@@ -124,11 +124,28 @@ describe('MATCH ladder — tier-2 fixed-shape classification', () => {
     expect(plan.segments[0].cases[0].tier).toBe(3);
   });
 
-  it('a Dictionary pattern falls to tier 3 (not compiled in v1)', () => {
+  it('a simple Dictionary pattern (binding/literal values) classifies tier 2', () => {
     const plan = planOf([
       'Match',
       'x',
-      ['MatchCase', ['Dictionary', ['Tuple', { str: 'k' }, '_v']], 'v'],
+      [
+        'MatchCase',
+        ['Dictionary', ['KeyValuePair', { str: 'k' }, '_v']],
+        'v',
+      ],
+    ]);
+    expect(plan.segments[0].cases[0].tier).toBe(2);
+  });
+
+  it('a Dictionary pattern with a sequence value falls to tier 3', () => {
+    const plan = planOf([
+      'Match',
+      'x',
+      [
+        'MatchCase',
+        ['Dictionary', ['KeyValuePair', { str: 'k' }, '__seq']],
+        { str: 'no' },
+      ],
     ]);
     expect(plan.segments[0].cases[0].tier).toBe(3);
   });
@@ -269,6 +286,8 @@ describe('MATCH ladder — property: laddered result ≡ tier-3 reference', () =
       ['Tuple', 3, 4],
       ['Add', 'x', 1],
       ['Add', ['Multiply', 2, 'x'], 1],
+      ['Dictionary', ['KeyValuePair', { str: 'x' }, 1]],
+      ['Dictionary', ['KeyValuePair', { str: 'x' }, 1], ['KeyValuePair', { str: 'y' }, 2]],
     ];
 
     // Each generator returns [pattern, wantsGuard, bindsN, isCatchAll].
@@ -299,6 +318,30 @@ describe('MATCH ladder — property: laddered result ≡ tier-3 reference', () =
       () => ({
         pattern: ['List', ['List', '_a', '_b'], '_c'],
         body: ['List', 'a', 'b', 'c'],
+      }),
+      // tier 2: dictionary shapes (matched by the dedicated dict matcher on both
+      // the tier-2 and tier-3 paths — this is the tier-2≡tier-3 dict check)
+      () => ({
+        pattern: ['Dictionary', ['KeyValuePair', { str: 'x' }, '_a']],
+        body: 'a',
+      }),
+      () => ({
+        pattern: [
+          'Dictionary',
+          ['KeyValuePair', { str: 'x' }, '_a'],
+          ['KeyValuePair', { str: 'y' }, '_b'],
+        ],
+        body: ['Add', 'a', 'b'],
+      }),
+      () => ({
+        pattern: ['Dictionary', ['KeyValuePair', { str: 'x' }, 1]],
+        body: { str: 'x1' },
+      }),
+      // tier 3: a dictionary with a sequence value routes through the dict-aware
+      // reference matcher
+      () => ({
+        pattern: ['Dictionary', ['KeyValuePair', { str: 'x' }, '__s']],
+        body: 's',
       }),
       // tier 3: algebraic / sequence / non-linear
       () => ({ pattern: ['Add', '_a', '_b'], body: 'a' }),

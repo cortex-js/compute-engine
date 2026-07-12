@@ -300,6 +300,14 @@ describe('CORTEX MATCH — execute (end-to-end)', () => {
     expect(value.re).toBe(9);
   });
 
+  test('dictionary pattern binds values by key (open match)', () => {
+    const { value, diagnostics } = run(
+      'let p = {x -> 3, y -> 4}\nmatch p {\n  {x -> px, y -> py} => px + py\n}'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(7);
+  });
+
   test('a typed binding gates on the capture type', () => {
     expect(
       run('match 3 {\n  n: integer => "int"\n  _ => "no"\n}').value.toString()
