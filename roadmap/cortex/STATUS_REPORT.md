@@ -111,6 +111,22 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-11 — **`do { … }` ladder rung 3: per-call closure state (landed).**
+  Separate `makeCounter()` invocations now capture independent `count` —
+  `[a(), a(), b(), a()]` on two counters returns `[1, 2, 1, 3]`. The "needs a
+  redesign" framing was wrong: the n-ary application path (`invoke` in
+  `function-utils.ts`) already instantiates a fresh per-call scope and runs
+  `captureClosures`, so parameterized factories were always independent; only
+  the **nullary shortcut** (`makeLambda`, `ops.length === 1`) bypassed it,
+  evaluating the body in the shared persistent canonicalization scope. Fix:
+  nullary functions with a scoped-`Block` body now evaluate their statements
+  in a fresh scope parented to the defining scope and run `captureClosures`
+  (arguments ignored, preserving the nullary "extra args are dropped"
+  contract); plain-thunk / bare-expression bodies keep the direct fast path.
+  Zero snapshot churn across the full suite; the failed 2026-07-07
+  fresh-runtime-scope redesign was never needed — the shared canon-scope model
+  stays intact everywhere else. Regression test: `programs.test.ts` "counter
+  factories produce independent closures".
 - 2026-07-11 — **Discoverability "did-you-mean" diagnostic (landed, committed
   `ad1028aa` engine + `08f1b8a8` Cortex boundary).** When a Cortex program
   calls an undeclared function whose name is close to a library operator,

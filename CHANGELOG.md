@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Programming and Collections
+
+- **Closures capture per-call state.** A zero-parameter closure returned from a
+  factory function now captures its own instance of the factory's local
+  variables, so separate invocations no longer share mutable state. For example,
+  two counters built from the same `makeCounter()` factory advance
+  independently. Parameterized factories already behaved this way; the fix
+  extends the same per-call scope instantiation to nullary functions.
+
 ### Compilation
 
 - **The deprecated `interval-glsl` compilation target has been removed.** GPU

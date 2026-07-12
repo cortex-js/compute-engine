@@ -536,13 +536,50 @@ function makeLambda(
   const fnExpr = expr as Expression & FunctionInterface;
 
   //
-  // No arguments, we just need to evaluate the body
+  // No parameters (nullary function). Extra arguments are ignored (historical
+  // contract). Two cases:
   //
   if (fnExpr.ops.length === 1) {
     console.assert(fnExpr.ops[0] !== undefined);
-    return wrapRecursion(ce, (_args, options) =>
-      fnExpr.ops[0].evaluate(options)
-    );
+    const onlyBody = fnExpr.ops[0];
+
+    // (a) The body is not a scoped Block: there is no per-call local state to
+    //     instantiate, so evaluate it directly (fast path for plain thunks and
+    //     bare-expression bodies).
+    if (!onlyBody.isScoped || !onlyBody.localScope)
+      return wrapRecursion(ce, (_args, options) => onlyBody.evaluate(options));
+
+    // (b) The body IS a scoped Block: it may declare mutable locals (`let`)
+    //     captured by an escaping closure — e.g. a counter factory
+    //     `() |-> do { let count = 0; () |-> do { count = count + 1; count } }`.
+    //     Those locals must live in a fresh per-call scope so separate
+    //     invocations don't share state. Evaluate the block's statements in a
+    //     fresh scope (parent = the defining scope) and run `captureClosures`,
+    //     mirroring the parameterized `invoke` path below — the same machinery
+    //     that already makes parameterized factories produce independent
+    //     closures. Unlike `invoke`, arguments are ignored rather than
+    //     arity-checked, preserving the nullary contract.
+    const nullaryBody = onlyBody as Expression & FunctionInterface;
+    return wrapRecursion(ce, (_args, options) => {
+      const bodyScope = nullaryBody.localScope!;
+      const capturedScope = bodyScope.parent ?? ce.context.lexicalScope;
+      const freshScope: Scope = { parent: capturedScope, bindings: new Map() };
+      const savedParent = bodyScope.parent;
+      bodyScope.parent = freshScope;
+      ce.pushScope(freshScope);
+      let result: Expression;
+      try {
+        result = unwrapReturn(ce, evaluateStatements(ce, nullaryBody.ops));
+        result = resolveEscapingLambda(ce, result);
+        result = captureClosures(ce, result, freshScope);
+        if (options?.numericApproximation)
+          result = result.evaluate({ numericApproximation: true });
+      } finally {
+        ce.popScope();
+        bodyScope.parent = savedParent;
+      }
+      return result.isValid ? result : undefined;
+    });
   }
 
   const [body, ...params] = fnExpr.ops;

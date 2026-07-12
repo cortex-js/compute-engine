@@ -164,15 +164,21 @@ bug — decide when Tycho demand appears:
   operator-def's captured `_lambdaLiteral` is resolved at the two
   value-position return points; the broader resolve-in-`BoxedSymbol.evaluate`
   approach breaks name-position `Assign`/`Declare` — don't re-attempt). The
-  single-counter `makeCounter` works end-to-end (mutating a captured binding
-  from a `do`-body lambda). **Rung 3 residual (M — open):** two
-  `makeCounter()` invocations SHARE the captured `count` — mutable captured
-  state is not instantiated per call (reproduces identically with a named
-  inner function, so it predates `do`; pure per-call capture of *parameter
-  values* is independent). A fix means per-application instantiation of the
-  body's canonical scope — adjacent to the failed fresh-runtime-scope
-  redesign (canon scope IS the runtime frame; see the 2026-07-07
-  block-scope-capture episode) — so it needs a real design, not a patch.
+  ladder is **complete: rung 3 landed 2026-07-11.** Separate `makeCounter()`
+  invocations now get independent captured state — `[a(), a(), b(), a()]` on
+  two counters returns `[1, 2, 1, 3]`. Root cause was narrower than the
+  "needs a redesign" framing: the n-ary application path (`invoke` in
+  `function-utils.ts`) already instantiates a fresh per-call scope and runs
+  `captureClosures`, so *parameterized* factories were always independent;
+  only the **nullary shortcut** (`makeLambda`, `ops.length === 1`) bypassed
+  that machinery and evaluated the body in the shared persistent
+  canonicalization scope. Fix: nullary functions with a scoped-`Block` body
+  now evaluate their statements in a fresh scope parented to the defining
+  scope and run `captureClosures` too (arguments ignored, preserving the
+  nullary contract); plain-thunk / bare-expression bodies keep the direct
+  fast path. No snapshot churn; the failed fresh-runtime-scope redesign was
+  never needed because this leaves the shared canon-scope model intact
+  everywhere else.
 
 ### Serializer / compile-target polish
 

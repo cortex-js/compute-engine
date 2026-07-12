@@ -260,6 +260,16 @@ statements in order and its value is the final one (a bare `{ … }` there is a
 set/dictionary literal instead). `() |-> …` is a lambda that takes no
 parameters.
 
+Each `makeCounter()` call captures its own `count`, so counters are
+independent:
+
+```cortex
+let a = makeCounter()
+let b = makeCounter()
+[a(), a(), b(), a()]
+// ➔ [1, 2, 1, 3]
+```
+
 ## Numeric Methods
 
 **Newton's method for √2.** The iteration runs exactly (each `x` is a

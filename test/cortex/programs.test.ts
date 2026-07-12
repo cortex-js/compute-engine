@@ -513,6 +513,22 @@ c()`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('3');
   });
+
+  test('counter factories produce independent closures (per-call captured state)', () => {
+    // Two counters built from the same factory must NOT share `count`: each
+    // `makeCounter()` call instantiates a fresh capture of the local. `a` runs
+    // 1, 2, 3; `b` runs 1 — so the interleaved calls yield [1, 2, 1, 3].
+    const { text, diagnostics } = run(`
+function makeCounter() {
+  let count = 0
+  () |-> do { count = count + 1; count }
+}
+let a = makeCounter()
+let b = makeCounter()
+[a(), a(), b(), a()]`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[1,2,1,3]');
+  });
 });
 
 describe('CORTEX PROGRAMS — calculus', () => {
