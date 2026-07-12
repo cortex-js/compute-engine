@@ -319,7 +319,7 @@ describe('Zero equivalence', () => {
     ).toBe(0);
   });
 
-  test.skip(`Wester 28: (2^(1/3) + 4^(1/3))^3 - 6 (2^(1/3) + 4^(1/3)) - 6 = 0`, () => {
+  test(`Wester 28: (2^(1/3) + 4^(1/3))^3 - 6 (2^(1/3) + 4^(1/3)) - 6 = 0`, () => {
     expect(
       ce
         .parse(

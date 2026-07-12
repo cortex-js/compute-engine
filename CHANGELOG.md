@@ -17,8 +17,8 @@
   cube-root powers to combine exactly. Real nested cube roots of the form
   `∛(a+b√c)` are denested when exact integer conjugate identities prove a
   result; in particular, `∛(90+34√7) → 3+√7` (and the conjugate form with
-  minus signs). The expanded Wester-28 cube-root identity now simplifies
-  exactly to zero and numericizes without `NaN`.
+  minus signs). The Wester-28 cube-root identity now simplifies directly to
+  exact zero (no explicit `Expand` required) and numericizes without `NaN`.
 
 - **Infinite p-series support positive-integer lower bounds beyond 1.**
   `Sum(k^(-s), k, a, +∞)` now returns

@@ -330,12 +330,10 @@ separate tracking is needed. Grouped by theme:
   rational bases) all landed 2026-07-09; cube-root denesting
   (`(90+34√7)^{1/3} → 3+√7`) landed 2026-07-11). Denesting still open beyond
   those cases: recursive Wester 9 (the Putnam radical). Exact
-  zero-recognition over `ℚ(2^{1/3})` now succeeds after explicit `Expand`:
+  zero-recognition over `ℚ(2^{1/3})` (Wester 28) now lands end-to-end:
   perfect-power bases normalize (`4^{2/3} → 2·2^{1/3}`), compatible cube-root
-  powers combine exactly, and the expanded expression numericizes without
-  `NaN`. The remaining Wester-28 gap is automatic expansion: bare `simplify()`
-  does not yet expand the numeric-radical trinomial cube
-  `(2^{1/3}+4^{1/3})^3`.
+  powers combine exactly, the existing cost-gated expansion pass exposes the
+  trinomial cube, and both `simplify()` and `.N()` return exact/finite results.
 - **Sum/Product closed forms (telescoping sums/products, `Π k → n!`,
   p-series `→ ζ(s)`, Wallis `→ 2/π`, and Richardson tail acceleration for
   `.N()` of infinite sums/products ALL LANDED by 2026-07-11).** Remaining small
