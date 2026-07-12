@@ -735,6 +735,30 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
     );
   });
 
+  test('lazy op iterates an eager collection source', () => {
+    // Regression: a `lazy: true` op (`Map`, `Filter`) keeps its source
+    // un-evaluated. When that source is an *eager* collection operator
+    // (`UnicodeScalars`, which only materializes a List on evaluation), the
+    // op must still iterate it — `each()` materializes a non-iterable source
+    // instead of yielding nothing.
+    const m: Expression = [
+      'Map',
+      ['UnicodeScalars', { str: 'abc' }],
+      ['Function', 'c', 'c'],
+    ];
+    expect(
+      [...engine.box(m).evaluate().each()].map((x) => x.toString())
+    ).toEqual(['97', '98', '99']);
+    const f: Expression = [
+      'Filter',
+      ['UnicodeScalars', { str: 'abc' }],
+      ['Function', ['Greater', 'c', 97], 'c'],
+    ];
+    expect(
+      [...engine.box(f).evaluate().each()].map((x) => x.toString())
+    ).toEqual(['98', '99']);
+  });
+
   test('Append', () =>
     expect(
       evaluate(['Append', ['List', 1, 2, 3], 4])

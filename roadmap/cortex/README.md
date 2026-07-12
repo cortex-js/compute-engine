@@ -104,11 +104,6 @@ applied function bodies.
 
 Residuals (engine, small):
 
-- **`StringFrom` still doesn't join a _lazy_ collection (S).**
-  `StringFrom(Map(UnicodeScalars(s), …), "unicode-scalars")` returns `""` — the
-  `isIndexedCollection` guard rejects the unmaterialized `Map`. The eager
-  loop-built list works (that form is in the examples). Materialize finite lazy
-  arguments instead.
 - **Exact big integers can serialize in exponent form (S).** `Fold`-computed
   `25!` prints as `15511210043330985984e+6` and `String(100!)` uses scientific
   notation, so string-based digit manipulation silently loses zeros. The values

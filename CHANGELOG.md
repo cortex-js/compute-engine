@@ -8,6 +8,12 @@
   two counters built from the same `makeCounter()` factory advance
   independently. Parameterized factories already behaved this way; the fix
   extends the same per-call scope instantiation to nullary functions.
+- **Lazy collection operations iterate eager sources.** A lazy operation such as
+  `Map` or `Filter` applied to a collection that only materializes on evaluation
+  (e.g. `UnicodeScalars(s)`, `Characters(s)`) now iterates its elements instead
+  of behaving as empty. For example,
+  `StringFrom(Map(UnicodeScalars(s), c -> c + 1), "unicode-scalars")` now
+  produces the shifted string rather than `""`.
 
 ### Compilation
 

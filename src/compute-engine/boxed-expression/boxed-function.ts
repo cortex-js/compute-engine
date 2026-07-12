@@ -1239,10 +1239,23 @@ export class BoxedFunction
   }
 
   each(): Generator<Expression> {
-    const iter = this.operatorDefinition?.collection?.iterator?.(this);
+    let iter = this.operatorDefinition?.collection?.iterator?.(this);
 
-    // Return an empty generator if no iterator is defined
-    if (!iter) return (function* () {})();
+    if (!iter) {
+      // No lazy iterator of our own. An *eager* collection operator (e.g.
+      // `UnicodeScalars(s)`, `Characters(s)`) only materializes a concrete
+      // collection when evaluated; a lazy op that wraps such a source
+      // (`Map`, `Filter`, `Reduce`, …) keeps it un-evaluated and would
+      // otherwise iterate nothing. Evaluate once and iterate the materialized
+      // result by building its iterator here (not via `evaluated.each()`),
+      // so this branch is never re-entered — no recursion.
+      const evaluated = this.evaluate();
+      if (evaluated !== this)
+        iter = evaluated.operatorDefinition?.collection?.iterator?.(evaluated);
+
+      // Return an empty generator if no iterator is defined
+      if (!iter) return (function* () {})();
+    }
 
     const engine = this.engine;
     return (function* () {

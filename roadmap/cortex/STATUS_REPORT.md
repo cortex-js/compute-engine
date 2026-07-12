@@ -111,6 +111,20 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-11 — **`StringFrom` joins a lazy collection over an eager source
+  (landed).** `StringFrom(Map(UnicodeScalars(s), …), "unicode-scalars")`
+  returned `""` because a `lazy: true` op (`Map`, `Filter`) keeps its source
+  un-evaluated, and an *eager* collection operator (`UnicodeScalars`,
+  `Characters` — they only materialize a `List` on evaluation) is not iterable
+  until evaluated, so `expr.op1.each()` yielded nothing. Root-cause fix in the
+  central `BoxedFunction.each()`: when an expression has no lazy-iterator
+  handler of its own, evaluate it once and build the materialized result's
+  iterator directly (not via `evaluated.each()`, so the branch is never
+  re-entered — no recursion). Additive: only expressions that previously
+  iterated empty are affected; Map/Filter/Reduce and every downstream
+  `xs.each()` site benefit uniformly. Full suite: zero snapshot churn.
+  Regression tests: `collections.test.ts` "lazy op iterates an eager
+  collection source" + `programs.test.ts` "StringFrom joins a lazy Map".
 - 2026-07-11 — **`do { … }` ladder rung 3: per-call closure state (landed).**
   Separate `makeCounter()` invocations now capture independent `count` —
   `[a(), a(), b(), a()]` on two counters returns `[1, 2, 1, 3]`. The "needs a

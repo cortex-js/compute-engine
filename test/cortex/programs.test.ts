@@ -332,6 +332,17 @@ function shift(s, k) {
     expect(text).toBe('("khoor", "hello")');
   });
 
+  test('StringFrom joins a lazy Map over an eager collection source', () => {
+    // Regression: a lazy op (`Map`) wrapping an eager collection operator
+    // (`UnicodeScalars`) must still iterate — the source is materialized when
+    // iterated rather than yielding nothing. Here the identity Map round-trips.
+    const { text, diagnostics } = run(
+      `StringFrom(Map(UnicodeScalars("abc"), c |-> c + 1), "unicode-scalars")`
+    );
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('"bcd"');
+  });
+
   test('anagram and palindrome checks via Sort/Reverse of Characters', () => {
     // Two strings are anagrams when their sorted characters match; a string is
     // a palindrome when its characters equal their reverse.
