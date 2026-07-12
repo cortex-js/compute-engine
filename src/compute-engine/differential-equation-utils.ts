@@ -125,6 +125,10 @@ export function replaceDerivativeOfDependent(
     independentName
   );
   if (derivativeOrder === order) return replacement;
+  // A derivative of a different order must be left intact: recursing into its
+  // operands would replace the lower-order derivative it is built from, e.g.
+  // `D(D(y(x), x), x)` with order 1 would become `D(replacement, x)`.
+  if (derivativeOrder !== undefined) return expr;
   if (!isFunction(expr)) return expr;
   return expr.engine._fn(
     expr.operator,

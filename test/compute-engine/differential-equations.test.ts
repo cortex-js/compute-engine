@@ -381,6 +381,22 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
+  test('stays inert for Lagrange equations that are not Clairaut', () => {
+    // `y = 2x·y' + y'²` — the linear term has a non-unit coefficient, so the
+    // Clairaut family `y = Cx + f(C)` is not a solution.
+    const result = dsolve([
+      'Equal',
+      ['y', 'x'],
+      [
+        'Add',
+        ['Multiply', 2, 'x', ['D', ['y', 'x'], 'x']],
+        ['Power', ['D', ['y', 'x'], 'x'], 2],
+      ],
+    ]);
+
+    expect(result.operator).toBe('DSolve');
+  });
+
   test('solves first-order homogeneous equations by substitution', () => {
     const equation = [
       'Equal',
@@ -458,7 +474,10 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
-  test('solves constant-coefficient Abel first-kind equations implicitly', () => {
+  // Note: constant-coefficient Abel equations have an x-free right-hand
+  // side, so the separable rung (tried first) handles them; these two tests
+  // lock in the implicit separable solution.
+  test('solves constant-coefficient cubic (Abel first-kind) equations implicitly', () => {
     const equation = [
       'Equal',
       ['D', ['y', 'x'], 'x'],
@@ -467,12 +486,12 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.operator).toBe('List');
-    expect(solution.toString()).toContain('y(x)');
-    expect(solution.toString()).toContain('c_1');
-    expect(solution.toString()).toContain('x');
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[-1 / y(x) + ln(|y(x) + 1| / |y(x)|) === "c_1" + x]`
+    );
   });
 
-  test('routes cubic-linear Abel equations through the Bernoulli reduction', () => {
+  test('solves cubic-linear (Abel-form) equations implicitly', () => {
     const equation = [
       'Equal',
       ['D', ['y', 'x'], 'x'],
@@ -481,8 +500,21 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.operator).toBe('List');
-    expect(solution.toString()).toContain('y(x)');
-    expect(solution.toString()).toContain('c_1');
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[-1/2 * ln(|y(x)^2 + 1|) + ln(|y(x)|) === "c_1" + x]`
+    );
+  });
+
+  test('stays inert for Riccati equations without a small constant particular solution', () => {
+    // `y' = y² + x` (an Airy-type Riccati): no constant particular solution
+    // exists, so the constant-particular Riccati path must not fire.
+    const result = dsolve([
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Add', ['Power', ['y', 'x'], 2], 'x'],
+    ]);
+
+    expect(result.operator).toBe('DSolve');
   });
 
   test('solves exact first-order equations implicitly', () => {
@@ -980,6 +1012,40 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
+  test('stays inert for scaled Bessel equations', () => {
+    // `2x²y'' + 2xy' + 2(x² − 4)y = 0` is the Bessel equation times 2, but the
+    // recognizer matches the exact `x²`/`x` normalization only.
+    const result = dsolve([
+      'Equal',
+      [
+        'Add',
+        ['Multiply', 2, ['Power', 'x', 2], ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['Multiply', 2, 'x', ['D', ['y', 'x'], 'x']],
+        ['Multiply', 2, ['Subtract', ['Power', 'x', 2], 4], ['y', 'x']],
+      ],
+      0,
+    ]);
+
+    expect(result.operator).toBe('DSolve');
+  });
+
+  test('stays inert for Bessel-form equations with complex order', () => {
+    // `x²y'' + xy' + (x² + 1)y = 0` has ν² = −1; emitting `BesselJ(i, x)`
+    // would be unevaluatable, so the recognizer declines.
+    const result = dsolve([
+      'Equal',
+      [
+        'Add',
+        ['Multiply', ['Power', 'x', 2], ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['Multiply', 'x', ['D', ['y', 'x'], 'x']],
+        ['Multiply', ['Add', ['Power', 'x', 2], 1], ['y', 'x']],
+      ],
+      0,
+    ]);
+
+    expect(result.operator).toBe('DSolve');
+  });
+
   test('stays inert when variation of parameters cannot integrate', () => {
     const result = dsolve([
       'Equal',
@@ -1194,8 +1260,8 @@ describe('DSolve', () => {
           rest.length === 0
             ? engine.One
             : rest.length === 1
-            ? rest[0]
-            : engine.function('Multiply', rest);
+              ? rest[0]
+              : engine.function('Multiply', rest);
         return { ...found, coef };
       }
       return undefined;

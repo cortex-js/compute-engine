@@ -586,8 +586,8 @@ function splitTrigSquareTerm(
       rest.length === 0
         ? ce.One
         : rest.length === 1
-        ? rest[0]
-        : ce.function('Multiply', rest);
+          ? rest[0]
+          : ce.function('Multiply', rest);
     return { ...found, coefficient };
   }
 
@@ -769,8 +769,8 @@ function collectSystemLinearTerms(
   const terms = isFunction(rhs, 'Add')
     ? rhs.ops
     : isFunction(rhs, 'Subtract')
-    ? [rhs.op1, rhs.op2.neg()]
-    : [rhs];
+      ? [rhs.op1, rhs.op2.neg()]
+      : [rhs];
   const coefficients = dependentNames.map(() => ce.Zero);
   let rest = ce.Zero;
 
@@ -1488,8 +1488,8 @@ function splitSeparableRhs(
   const factors = isFunction(rhs, 'Multiply')
     ? rhs.ops
     : isFunction(rhs, 'Divide')
-    ? [rhs.op1, ce._fn('Power', [rhs.op2, ce.number(-1)])]
-    : [rhs];
+      ? [rhs.op1, ce._fn('Power', [rhs.op2, ce.number(-1)])]
+      : [rhs];
   const xFactors: Expression[] = [];
   const yFactors: Expression[] = [];
 
@@ -1880,15 +1880,11 @@ function riccatiCoefficients(
   return { quadratic, linear, constant };
 }
 
-function constantRiccatiParticularSolution(
-  coefficients: {
-    quadratic: Expression;
-    linear: Expression;
-    constant: Expression;
-  },
-  dependentName: string,
-  independentName: string
-): Expression | undefined {
+function constantRiccatiParticularSolution(coefficients: {
+  quadratic: Expression;
+  linear: Expression;
+  constant: Expression;
+}): Expression | undefined {
   const ce = coefficients.quadratic.engine;
   const candidates = [-2, -1, 0, 1, 2].map((n) => ce.number(n));
   for (const candidate of candidates) {
@@ -1897,11 +1893,7 @@ function constantRiccatiParticularSolution(
       .add(coefficients.linear.mul(candidate))
       .add(coefficients.constant)
       .simplify();
-    if (
-      residual.isSame(0) &&
-      !hasDependentOrDerivative(residual, dependentName, independentName)
-    )
-      return candidate;
+    if (residual.isSame(0)) return candidate;
   }
   return undefined;
 }
@@ -1927,11 +1919,7 @@ function solveRiccatiWithConstantParticular(
   );
   if (!coefficients) return undefined;
 
-  const particular = constantRiccatiParticularSolution(
-    coefficients,
-    dependentName,
-    independentName
-  );
+  const particular = constantRiccatiParticularSolution(coefficients);
   if (!particular) return undefined;
 
   const p = structuralSum(equation.engine, [
@@ -1941,9 +1929,7 @@ function solveRiccatiWithConstantParticular(
   const q = coefficients.quadratic.neg().simplify();
   const integralP = dSolveAntiderivative(p, independentName);
   if (hasOperator(integralP, 'Integrate')) return undefined;
-  const integratingFactor = equation.engine
-    .function('Exp', [integralP])
-    .simplify();
+  const integratingFactor = integratingFactorExp(integralP);
   const integralQ = dSolveAntiderivative(
     integratingFactor.mul(q).simplify(),
     independentName
@@ -2118,29 +2104,22 @@ function solveExactFirstOrder(
   return ce.function('List', [ce.function('Equal', [potential, c])]);
 }
 
+/** Match the `x·y'` term of a Clairaut equation: a product of exactly the
+ *  independent variable and a first derivative of the dependent function
+ *  (unit coefficient — `2x·y'` is Lagrange/d'Alembert, not Clairaut).
+ *  Literal `1` factors are ignored in case a structural form retains them. */
 function isClairautLinearTerm(
   term: Expression,
   dependentName: string,
   independentName: string
 ): boolean {
+  if (!isFunction(term, 'Multiply')) return false;
   const x = term.engine.symbol(independentName);
-
-  if (
-    isFunction(term, 'Multiply') &&
-    term.ops.length === 2 &&
-    term.ops.some((op) => op.isSame(x)) &&
-    term.ops.some((op) =>
-      isDerivativeOfDependent(op, dependentName, independentName)
-    )
-  )
-    return true;
-
+  const factors = term.ops.filter((op) => !op.isSame(1));
   return (
-    isFunction(term, 'Multiply') &&
-    term.ops.length === 3 &&
-    term.ops.some((op) => op.isSame(1)) &&
-    term.ops.some((op) => op.isSame(x)) &&
-    term.ops.some((op) =>
+    factors.length === 2 &&
+    factors.some((op) => op.isSame(x)) &&
+    factors.some((op) =>
       isDerivativeOfDependent(op, dependentName, independentName)
     )
   );
@@ -2158,8 +2137,8 @@ function solveClairautFirstOrder(
   const [lhs, rhs] = equation.op1.isSame(dependentCall)
     ? [equation.op1, equation.op2]
     : equation.op2.isSame(dependentCall)
-    ? [equation.op2, equation.op1]
-    : [undefined, undefined];
+      ? [equation.op2, equation.op1]
+      : [undefined, undefined];
   if (!lhs || !rhs) return undefined;
 
   const terms = isFunction(rhs, 'Add') ? rhs.ops : [rhs];
@@ -2202,10 +2181,22 @@ function besselOrderFromSquare(expr: Expression): Expression | undefined {
   const ce = expr.engine;
   const square = expr.simplify();
   if (square.isSame(0)) return ce.Zero;
+  // A provably negative square would yield a complex order (e.g.
+  // `x²y'' + xy' + (x² + 1)y = 0` → order `i`), which CE cannot evaluate or
+  // verify — stay inert rather than emit `BesselJ(i, x)`.
+  if (square.isNegative) return undefined;
   if (isFunction(square, 'Power') && square.op2.isSame(2)) return square.op1;
   return ce.function('Sqrt', [square]).simplify();
 }
 
+/** Recognize the ordinary (`x²y'' + xy' + (x² − ν²)y = 0`) and modified
+ *  (`x²y'' + xy' − (x² + ν²)y = 0`) Bessel equations.
+ *
+ *  Matching is exact-form only: the equation must be homogeneous with
+ *  derivative coefficients literally `x²` and `x` (after per-coefficient
+ *  simplification). Scaled forms like `2x²y'' + 2xy' + …`, the normalized
+ *  `y'' + y'/x + …`, and generalized arguments (`x² − λx²`) are not
+ *  recognized. */
 function solveSecondOrderBesselFamily(
   equation: Expression,
   dependentCall: Expression,
@@ -2866,7 +2857,9 @@ export function dSolve(
 
   const { dependentName, independentName, dependentCall } = names;
   const ce = equation.engine;
-  const finalize = (solution: Expression | undefined): Expression | undefined =>
+  const finalize = (
+    solution: Expression | undefined
+  ): Expression | undefined =>
     solution
       ? applyScalarConditions(
           solution,
