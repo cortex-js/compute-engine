@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.76.0 _2026-07-11_
 
 ### Programming and Collections
 
