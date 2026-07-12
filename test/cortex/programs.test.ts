@@ -316,6 +316,33 @@ let words = StringSplit("the quick brown fox the lazy dog the")
     // Eight words total; "the" occurs three times.
     expect(text).toBe('(8, [3,1,1,1,1,1])');
   });
+
+  test('Caesar cipher via UnicodeScalars and StringFrom', () => {
+    // `UnicodeScalars` turns a string into its code points; shifting each and
+    // rebuilding with `StringFrom(…, "unicode-scalars")` is the inverse. The
+    // list is built eagerly with `Join` so the round-trip decodes cleanly.
+    const { text, diagnostics } = run(`
+function shift(s, k) {
+  let out = []
+  for c in UnicodeScalars(s) { out = Join(out, [c + k]) }
+  StringFrom(out, "unicode-scalars")
+}
+(shift("hello", 3), shift(shift("hello", 3), -3))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('("khoor", "hello")');
+  });
+
+  test('anagram and palindrome checks via Sort/Reverse of Characters', () => {
+    // Two strings are anagrams when their sorted characters match; a string is
+    // a palindrome when its characters equal their reverse.
+    const { text, diagnostics } = run(`
+let anagram = Sort(Characters("listen")) == Sort(Characters("silent"))
+let s = "racecar"
+let palindrome = Characters(s) == Reverse(Characters(s))
+(anagram, palindrome)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('("True", "True")');
+  });
 });
 
 describe('CORTEX PROGRAMS — reproducible randomness', () => {
@@ -493,7 +520,7 @@ describe('CORTEX PROGRAMS — calculus', () => {
   test('Series — Taylor expansion of sine', () => {
     const { text, diagnostics } = run(`Series(Sin(x), x, 0)`);
     expect(diagnostics).toEqual([]);
-    expect(text).toBe('1/120 * x^5 - 1/6 * x^3 + x + BigO(x^7)');
+    expect(text).toBe('x - 1/6 * x^3 + 1/120 * x^5 + BigO(x^7)');
   });
 });
 
@@ -550,6 +577,18 @@ let scores = {"alice" -> 90, "bob" -> 85, "carol" -> 95}
     expect(diagnostics).toEqual([]);
     expect(text).toBe('(["alice","bob","carol"], 95)');
   });
+
+  test('a dictionary lookup used directly in arithmetic', () => {
+    // `d[key]` is a value usable inline in arithmetic — here summed over the
+    // keys without laundering each lookup through a `let` binding.
+    const { text, diagnostics } = run(`
+let d = {"a" -> 1, "b" -> 2, "c" -> 3}
+let s = 0
+for k in Keys(d) { s = s + d[k] }
+s`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('6');
+  });
 });
 
 describe('CORTEX PROGRAMS — sets', () => {
@@ -573,5 +612,142 @@ let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
 Intersection(d48, d36) == {1, 2, 3, 4, 6, 12}`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('"True"');
+  });
+});
+
+describe('CORTEX PROGRAMS — control flow and predicates', () => {
+  test('nested while loops with block-scoped counters', () => {
+    // Each `while` owns its own `j`, re-initialized every outer pass; the
+    // product sum Σ_{i,j=1}^{3} i·j is (1+2+3)² = 36.
+    const { text, diagnostics } = run(`
+let i = 1
+let total = 0
+while i <= 3 {
+  let j = 1
+  while j <= 3 { total = total + i * j; j = j + 1 }
+  i = i + 1
+}
+total`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('36');
+  });
+
+  test('chained relational operators read as a conjunction', () => {
+    // `1 < x <= 4` is `1 < x && x <= 4`.
+    const { text, diagnostics } = run(`
+let x = 4
+let y = 5
+(1 < x <= 4, 1 < y <= 4)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('("True", "False")');
+  });
+
+  test('a truth table for logical AND, as a Map over pairs', () => {
+    const { text, diagnostics } = run(`
+Map([(True, True), (True, False), (False, True), (False, False)],
+    p |-> p[1] && p[2])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('["True","False","False","False"]');
+  });
+});
+
+describe('CORTEX PROGRAMS — integers and number theory', () => {
+  test('modular exponentiation (Fermat: 7^222 mod 13)', () => {
+    // 7^12 ≡ 1 (mod 13); 222 = 18·12 + 6, so 7^222 ≡ 7^6 ≡ 12 (mod 13).
+    const { text, diagnostics } = run(`(7^222) % 13`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('12');
+  });
+
+  test('gcd/lcm, prime factorization and divisors', () => {
+    const { text, diagnostics } = run(`
+(GCD(48, 36), LCM(48, 36), FactorInteger(360), Divisors(28))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(12, 144, [(2, 3),(3, 2),(5, 1)], [1,2,4,7,14,28])');
+  });
+
+  test('iterative Fibonacci to F(200), an exact big integer', () => {
+    // The accumulator is a two-element list literal [a, b]; big integers
+    // survive it exactly (F(200) is far past Float64's 2^53 range).
+    const { text, diagnostics } = run(`
+Fold((p, _) |-> [p[2], p[1] + p[2]], [0, 1], Range(1, 200))[1]`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('280571172992510140037611932413038677189525');
+  });
+});
+
+describe('CORTEX PROGRAMS — complex numbers', () => {
+  test('complex arithmetic, conjugate and modulus', () => {
+    const { text, diagnostics } = run(`
+((2 + 3i) * (1 - i), Conjugate(2 + 3i), Abs(3 + 4i))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('((5 + i), (2 - 3i), 5)');
+  });
+
+  test('exact Euler identity: e^{iπ/3} stays symbolic', () => {
+    // Assembled from exact cos(π/3)=1/2 and sin(π/3)=√3/2 — no float. The
+    // `$…$` island is LaTeX, so the JS template literal escapes the backslash.
+    const { text, diagnostics } = run(`$e^{i\\pi/3}$`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('1/2 + sqrt(3)/2i');
+  });
+
+  test('a product of complex numbers over a mapped Range', () => {
+    // (1+i)(2+i)(3+i) = 10i — the imaginary parts survive the reduction.
+    const { text, diagnostics } = run(`
+Product(Map(Range(1, 3), k |-> k + i))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('10i');
+  });
+});
+
+describe('CORTEX PROGRAMS — linear algebra', () => {
+  test('eigenvalues of a symmetric and of a rotation matrix', () => {
+    const { text, diagnostics } = run(`
+let A = [[2, 1], [1, 2]]
+let B = [[0, -1], [1, 0]]
+(Eigenvalues(A), Eigenvalues(B))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('([3,1], [i,-i])');
+  });
+
+  test('cross product and dot product of vectors', () => {
+    const { text, diagnostics } = run(`
+(Cross([1, 0, 0], [0, 1, 0]), Dot([1, 2, 3], [4, 5, 6]))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('([0,0,1], 32)');
+  });
+});
+
+describe('CORTEX PROGRAMS — exact sums and special values', () => {
+  test('an exact rational Fold: the 10th harmonic number', () => {
+    // Folding 1/k over a Range keeps the accumulator an exact rational.
+    const { text, diagnostics } = run(`
+Fold((a, k) |-> a + 1/k, 0, Range(1, 10))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('7381/2520');
+  });
+
+  test('closed forms: a telescoping and a geometric partial sum', () => {
+    const { text, diagnostics } = run(`
+($\\sum_{k=1}^{100}(1/k - 1/(k+1))$, $\\sum_{k=0}^{10}(1/2)^k$)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(100/101, 2047/1024)');
+  });
+
+  test('exact trigonometric special values', () => {
+    const { text, diagnostics } = run(`
+($\\sin(\\pi/3)$, $\\arctan(1)$, $\\arcsin(1/2)$, $\\tan(\\pi/4)$)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(sqrt(3)/2, 1/4 * pi, 1/6 * pi, 1)');
+  });
+});
+
+describe('CORTEX PROGRAMS — equations, exactly solved', () => {
+  test('a cubic, an absolute-value and an exponential equation', () => {
+    const { text, diagnostics } = run(`
+(Solve($x^3 - 6x^2 + 11x - 6 = 0$, x), Solve($|x-3| = 5$, x), Solve($2^x = 8$, x))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('([1,2,3], [-2,8], [3])');
   });
 });

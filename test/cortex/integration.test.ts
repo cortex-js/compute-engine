@@ -92,6 +92,35 @@ describe('CORTEX PHASE 4 — notebook integration', () => {
     // The const kept its original value — the illegal reassignment was rejected.
     expect(ce.box('c').evaluate().re).toBe(1);
   });
+
+  test('a one-step function definition inside a function body binds and applies', () => {
+    // Regression: `sq(m) = m * m` inside an applied function body creates an
+    // *operator* definition at runtime (via `ce.assign`), while the call
+    // site's cached binding is the function-typed *value* placeholder from
+    // the canonical pass. `applyFunctionLiteral` now falls back to the
+    // operator definition instead of leaving the call symbolic.
+    const forms = [
+      'function outer(n) { sq(m) = m * m; sq(n) }\nouter(3)',
+      'function outer(n) { let sq; sq(m) = m * m; sq(n) }\nouter(3)',
+      'function outer(n) { let sq = m |-> m * m; sq(n) }\nouter(3)',
+      'sq(m) = m * m\nsq(3)',
+    ];
+    for (const program of forms) {
+      const ce = new ComputeEngine();
+      const { value, diagnostics } = executeCortex(ce, program, {
+        parseLatex: makeParseLatex(ce),
+      });
+      expect(diagnostics).toEqual([]);
+      expect(value.re).toBe(9);
+    }
+    // A genuinely undefined function stays symbolic (no operator-def
+    // fallback, no recursion).
+    const ce = new ComputeEngine();
+    const { value } = executeCortex(ce, 'gg(3)', {
+      parseLatex: makeParseLatex(ce),
+    });
+    expect(value.toString()).toBe('gg(3)');
+  });
 });
 
 //

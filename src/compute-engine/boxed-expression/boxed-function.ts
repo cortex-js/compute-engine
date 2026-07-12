@@ -1788,8 +1788,18 @@ function applyFunctionLiteral(
   }
 
   const ops = expr.ops.map((x) => x.evaluate(options));
-  if (!value || value.type.isUnknown)
+  if (!value || value.type.isUnknown) {
+    // The cached `_def` may be a function-typed *value* placeholder (created
+    // by the `Assign`/`Declare` canonical pass, e.g. a block-local one-step
+    // definition `f(x) = …` inside a function body) while the runtime
+    // `ce.assign` created an *operator* definition, which
+    // `_getSymbolValue` cannot read. If the symbol now resolves to an
+    // operator definition, dispatch through it; otherwise stay symbolic.
+    const opDef = expr.engine.lookupDefinition(expr.operator);
+    if (opDef && isOperatorDef(opDef))
+      return expr.engine.function(expr.operator, ops).evaluate(options);
     return expr.engine.function(expr.operator, ops);
+  }
 
   // Broadcast if any operand is a finite indexed collection and the
   // function's parameter types are scalar. Zip operands and apply

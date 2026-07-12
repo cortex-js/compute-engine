@@ -94,6 +94,46 @@ late binding, documented as generator semantics in `evaluation.md`).
 All engine-side findings from the sweep are closed; the section that
 mirrored them in the repo-root `ROADMAP.md` has been retired.
 
+### Findings from the examples sweep 3 (2026-07-11)
+
+A third exploration wave (control flow/predicates, integers/strings, math
+depth) added 18 programs to the suite (now 68) and surfaced seven engine
+bugs, all **fixed same day** (see CHANGELOG `[Unreleased]`): dictionary-`At`
+value typing, big-integer truncation in tensor-promoted list literals,
+`Reduce`/`Fold` float fast-path exactness + imaginary-part drop, `Map`
+element-type inference, `StringFrom` broadcast pre-empting its collection
+join, non-exact `e^{iθ}` for constructible angles, and one-step function
+definitions not binding inside applied function bodies.
+
+Residuals (engine, small):
+
+- **`StringFrom` still doesn't join a *lazy* collection (S).**
+  `StringFrom(Map(UnicodeScalars(s), …), "unicode-scalars")` returns `""` —
+  the `isIndexedCollection` guard rejects the unmaterialized `Map`. The eager
+  loop-built list works (that form is in the examples). Materialize finite
+  lazy arguments instead.
+- **Exact big integers can serialize in exponent form (S).** `Fold`-computed
+  `25!` prints as `15511210043330985984e+6` and `String(100!)` uses
+  scientific notation, so string-based digit manipulation silently loses
+  zeros. The values are exact; only the default integer serialization
+  collapses trailing digits.
+- **`Solve` on inequalities returns `[]` (M).** `Solve(x^2 < 4, x)` reads as
+  "no solutions" when it means "unsupported" — should stay inert (or
+  eventually solve inequalities).
+
+Language-design candidates (decide when demand appears):
+
+- **Lowercase `true`/`false` (S — design).** They are undeclared symbols
+  today, so `false && …` stays inert with no diagnostic; every other keyword
+  is lowercase. Alias to `True`/`False`?
+- **ASCII `..` range operator (S — design).** Only the Unicode `‥` (U+2025)
+  is mapped; programs must write `Range(a, b)`.
+- **`StringJoin` over a list (S — design).** Varargs only, which blocks
+  `StringJoin(Reverse(Characters(s)))`; accept a single list argument?
+- **Discoverability aliases (S — design).** `Quotient` (integer division),
+  `Arg` (engine op is `Argument`), `Quartile` (`Quartiles`) all stay silently
+  symbolic when guessed.
+
 ### Semantics gaps shipped as v0 caveats (complete on demand)
 
 - **Enforce typed function params (M).** `f(x: integer) = …` parses and holds

@@ -122,6 +122,68 @@ count
 // ➔ 25
 ```
 
+## Control Flow and Predicates
+
+**Nested loops.** Each `while` owns its own block-scoped counter; the inner
+loop re-runs in full for every pass of the outer one. Here Σ i·j over
+1 ≤ i, j ≤ 3 is (1+2+3)² = 36:
+
+```cortex
+let i = 1
+let total = 0
+while i <= 3 {
+  let j = 1
+  while j <= 3 { total = total + i * j; j = j + 1 }
+  i = i + 1
+}
+total
+// ➔ 36
+```
+
+**Chained comparisons.** A chain like `1 < x <= 4` reads as the conjunction
+`1 < x && x <= 4`:
+
+```cortex
+let x = 4
+let y = 5
+(1 < x <= 4, 1 < y <= 4)
+// ➔ (True, False)
+```
+
+**A truth table**, as a `Map` over the four boolean pairs:
+
+```cortex
+Map([(True, True), (True, False), (False, True), (False, False)],
+    p |-> p[1] && p[2])
+// ➔ [True, False, False, False]
+```
+
+## Integers and Number Theory
+
+**Modular exponentiation.** `a^b % m` is computed exactly, then reduced. By
+Fermat's little theorem 7¹² ≡ 1 (mod 13), and 222 = 18·12 + 6, so:
+
+```cortex
+(7^222) % 13
+// ➔ 12
+```
+
+**gcd/lcm, factorization and divisors** of a number:
+
+```cortex
+(GCD(48, 36), LCM(48, 36), FactorInteger(360), Divisors(28))
+// ➔ (12, 144, [(2, 3), (3, 2), (5, 1)], [1, 2, 4, 7, 14, 28])
+```
+
+**Arbitrary-precision integers.** The iterative Fibonacci, with the running
+pair carried in a two-element list literal, stays exact all the way to F(200)
+— far past the 2⁵³ limit of floating point:
+
+```cortex
+Fold((p, _) |-> [p[2], p[1] + p[2]], [0, 1], Range(1, 200))[1]
+// ➔ 280571172992510140037611932413038677189525
+```
+
 ## Recursion
 
 A recursive function refers to itself by name — a one-step definition just
@@ -259,7 +321,7 @@ first dropped term:
 
 ```cortex
 Series(Sin(x), x, 0)
-// ➔ 1/120 * x^5 - 1/6 * x^3 + x + BigO(x^7)
+// ➔ x - 1/6 * x^3 + 1/120 * x^5 + BigO(x^7)
 ```
 
 ## Units and Measurements
@@ -284,6 +346,32 @@ let L = Measurement(10, 0.1)
 let W = Measurement(20, 0.2)
 N(L * W)
 // ➔ 200.0 ± 2.8
+```
+
+## Complex Numbers
+
+The imaginary unit is `i`; complex arithmetic, `Conjugate` and `Abs` (the
+modulus) all work:
+
+```cortex
+((2 + 3i) * (1 - i), Conjugate(2 + 3i), Abs(3 + 4i))
+// ➔ ((5 + i), (2 - 3i), 5)
+```
+
+**Euler's formula stays exact.** `e^{iπ/3}` is assembled from the exact
+cos(π/3) = 1/2 and sin(π/3) = √3/2, without ever numericizing:
+
+```cortex
+$e^{i\pi/3}$
+// ➔ 1/2 + sqrt(3)/2i
+```
+
+**A product of complex numbers** taken over a mapped `Range` keeps its
+imaginary part: (1+i)(2+i)(3+i) = 10i:
+
+```cortex
+Product(Map(Range(1, 3), k |-> k + i))
+// ➔ 10i
 ```
 
 ## Exact and Symbolic Computation
@@ -379,6 +467,37 @@ Sum(Exp(2*Pi*ImaginaryUnit*k/5), (k, 0, 4))
 
 (`N(…)` of the same sum returns zero to floating-point roundoff, ≈ 1e-16.)
 
+**An exact rational Fold.** Folding `1/k` over a `Range` keeps the accumulator
+an exact rational — the 10th harmonic number:
+
+```cortex
+Fold((a, k) |-> a + 1/k, 0, Range(1, 10))
+// ➔ 7381/2520
+```
+
+**Closed-form sums.** A telescoping sum and a finite geometric sum, both exact:
+
+```cortex
+($\sum_{k=1}^{100}(1/k - 1/(k+1))$, $\sum_{k=0}^{10}(1/2)^k$)
+// ➔ (100/101, 2047/1024)
+```
+
+**Exact trigonometric values.** Constructible angles evaluate to exact
+symbolic values, never floats:
+
+```cortex
+($\sin(\pi/3)$, $\arctan(1)$, $\arcsin(1/2)$, $\tan(\pi/4)$)
+// ➔ (sqrt(3)/2, 1/4 * pi, 1/6 * pi, 1)
+```
+
+**Solving equations exactly.** `Solve` returns the exact solution set — for a
+cubic, an absolute-value equation and an exponential equation:
+
+```cortex
+(Solve($x^3 - 6x^2 + 11x - 6 = 0$, x), Solve($|x-3| = 5$, x), Solve($2^x = 8$, x))
+// ➔ ([1, 2, 3], [-2, 8], [3])
+```
+
 ## Strings
 
 **String interpolation.** A `\( … )` escape splices any expression's value
@@ -428,6 +547,32 @@ whitespace (with a separator string, it splits on each occurrence):
 let words = StringSplit("the quick brown fox the lazy dog the")
 (Length(words), Tally(words)[2])
 // ➔ (8, [3, 1, 1, 1, 1, 1])
+```
+
+**A Caesar cipher.** `UnicodeScalars` turns a string into its code points;
+shifting each and rebuilding with `StringFrom(…, "unicode-scalars")` is the
+inverse operation, so encoding then decoding round-trips:
+
+```cortex
+function shift(s, k) {
+  let out = []
+  for c in UnicodeScalars(s) { out = Join(out, [c + k]) }
+  StringFrom(out, "unicode-scalars")
+}
+(shift("hello", 3), shift(shift("hello", 3), -3))
+// ➔ ("khoor", "hello")
+```
+
+**Anagrams and palindromes.** Two words are anagrams when their sorted
+characters agree; a word is a palindrome when its characters equal their
+reverse:
+
+```cortex
+let anagram = Sort(Characters("listen")) == Sort(Characters("silent"))
+let s = "racecar"
+let palindrome = Characters(s) == Reverse(Characters(s))
+(anagram, palindrome)
+// ➔ (True, True)
 ```
 
 ## Collections
@@ -511,6 +656,26 @@ Map(inputs, x |-> Sqrt(x))
 // ➔ [4, 2i, NaN, 9]
 ```
 
+## Linear Algebra
+
+**Eigenvalues.** A symmetric matrix has real eigenvalues; a rotation matrix
+has complex ones:
+
+```cortex
+let A = [[2, 1], [1, 2]]
+let B = [[0, -1], [1, 0]]
+(Eigenvalues(A), Eigenvalues(B))
+// ➔ ([3, 1], [i, -i])
+```
+
+**Vector products.** `Cross` is the 3-D cross product; `Dot` the inner
+product:
+
+```cortex
+(Cross([1, 0, 0], [0, 1, 0]), Dot([1, 2, 3], [4, 5, 6]))
+// ➔ ([0, 0, 1], 32)
+```
+
 ## Dictionaries
 
 A dictionary maps keys to values; index it with `d[key]`.
@@ -549,6 +714,17 @@ let freq = DictionaryFrom(Zip(t[1], t[2]))
 let scores = {"alice" -> 90, "bob" -> 85, "carol" -> 95}
 (Keys(scores), Max(Values(scores)))
 // ➔ (["alice", "bob", "carol"], 95)
+```
+
+**A lookup in arithmetic.** A value read with `d[key]` is an ordinary number,
+usable directly in an expression — here summing the values over the keys:
+
+```cortex
+let d = {"a" -> 1, "b" -> 2, "c" -> 3}
+let s = 0
+for k in Keys(d) { s = s + d[k] }
+s
+// ➔ 6
 ```
 
 ## Sets

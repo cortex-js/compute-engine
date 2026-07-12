@@ -26,6 +26,53 @@
   `Sum(1/k², k, 3, +∞)` evaluates to `π²/6 − 5/4`. The existing lower-bound-1
   behavior and divergence guards are unchanged.
 
+- **`e^{iθ}` stays exact for constructible angles.** `e^{i\pi/3}` now evaluates
+  to `1/2 + (√3/2)i` instead of a machine float (the exact cosine/sine values
+  were being recombined through float-folding arithmetic). `.N()` numericizes
+  as before, and the degenerate angles (`e^{i\pi} → -1`, `e^{i\pi/2} → i`) are
+  unchanged.
+
+### Programming and Collections
+
+- **Dictionary lookups have the value's type.** `At(dict, key)` — and thus
+  `d["a"]` in Cortex — was statically typed as the key-value *pair*
+  (`tuple<string, T>`), so using a lookup directly in arithmetic
+  (`d["a"] + 10`) failed with an `incompatible-type` error. It is now typed as
+  the value; a record indexed by a literal string gets that field's precise
+  type.
+
+- **`Reduce`/`Fold` honor the exactness contract.** The compiled floating-point
+  fast path no longer runs under plain `evaluate()`: exact operands fold
+  exactly (`Fold((a, k) ↦ a + 1/k, 0, Range(1, 5))` → `137/60` instead of
+  `2.2833…`). The fast path is reserved for `.N()` and already-inexact inputs.
+  Complex-valued folds no longer silently drop imaginary parts
+  (`Product(Map(Range(1, 3), k ↦ k + i))` → `10i`, previously `6`).
+
+- **`Map` infers its element type from the mapped function.** The result of
+  `Map(Range(1, 3), k ↦ k + i)` was typed with the *source* element type
+  (`integer`); it now reflects the lambda's result type, so downstream
+  operations dispatch correctly.
+
+- **Big integers survive numeric list literals.** A list literal promoted to a
+  tensor stored oversized integers in float64 and truncated them
+  (`[100!]` lost digits, breaking exact iterative algorithms such as a
+  Fibonacci pair accumulator). Integers beyond the float-safe range now keep
+  their exact representation.
+
+- **`StringFrom` joins collections.** With a list argument and the
+  `"unicode-scalars"`, `"utf-8"`, or `"utf-16"` format,
+  `StringFrom([100, 101, 102], "unicode-scalars")` returns `"def"`; it
+  previously broadcast element-wise and returned a list of one-character
+  strings.
+
+- **One-step function definitions bind inside function bodies (Cortex).**
+  `function outer(n) { sq(m) = m * m; sq(n) }` left `sq(n)` unevaluated
+  because the call site resolved a value placeholder while the runtime created
+  an operator definition; function application now falls back to the operator
+  definition. The example-program suite grew by 18 programs covering control
+  flow, number theory, complex numbers, linear algebra, and exact sums
+  (mirrored in the Cortex documentation).
+
 ### Serialization
 
 - **AsciiMath prints series in textbook order.** Taylor-series terms are
