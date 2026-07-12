@@ -35,6 +35,26 @@
   condition now numericizes (previously the option was dropped and the value
   stayed symbolic).
 
+### Calculus
+
+- **Improper integrals with symbolic parameters return convergence-guarded
+  results.** `∫₀^∞ e^(−ax)dx` with a free `a` previously stayed unevaluated;
+  it now returns `1/a {0 < a}`. Results that formerly leaked indeterminate
+  endpoint forms are fixed: `∫₀^1 xⁿdx` returned an expression containing
+  `0^(n+1)`, and `∫₁^∞ x^(−s)dx` one containing `∞^(1−s)`; they now return
+  `1/(n+1) {0 < n+1}` and `1/(s−1) {1 < s}`. Integrals whose endpoint
+  behavior cannot be classified stay unevaluated rather than leaking
+  indeterminates. Numeric-parameter integrals are unchanged.
+
+### Sums and Products
+
+- **Geometric series closed form.** `Σ_{n=0}^∞ rⁿ` now evaluates: exactly for
+  a numeric ratio (`Σ(1/2)ⁿ → 2`, `Σ(1/√2)ⁿ → 2 + √2`), and with its
+  convergence condition for a symbolic ratio (`Σxⁿ → 1/(1−x) {|x| < 1}`).
+  Constant multiples and integer start indices are handled
+  (`Σ_{n=2}^∞ xⁿ → x²/(1−x) {|x| < 1}`); divergent numeric ratios stay
+  unevaluated.
+
 ### Solving Equations
 
 - **Trigonometric and hyperbolic equations with symbolic coefficients record

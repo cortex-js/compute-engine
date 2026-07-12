@@ -1035,11 +1035,13 @@ describe('DEFINITE INTEGRATION', () => {
     expect(evaluate('\\int_0^1 x^3 dx')).toMatchInlineSnapshot(`1/4`));
 
   test('power of n', () =>
-    // The limits are applied even though the antiderivative is parametric in
-    // `n` (consistent with this block's contract). `1^(n+1)` reduces to 1, but
-    // without an assumption on `n` the `0^(n+1)` term can't reduce further.
+    // The parameter-dependent endpoint term `0^(n+1)` (the value of the
+    // antiderivative at the lower bound 0) is resolved to its limit 0 under the
+    // convergence condition `n + 1 > 0`, so the improper integral emits a
+    // `When`-guarded value instead of leaking the indeterminate `0^(n+1)`
+    // (conditional-values design, Phase 3a).
     expect(evaluate('\\int_0^1 x^n dx')).toMatchInlineSnapshot(
-      `1 / (n + 1) - (0^(n + 1)) / (n + 1)`
+      `1 / (n + 1) {0 < n + 1}`
     ));
 
   test('symbolic bounds', () =>

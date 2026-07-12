@@ -452,10 +452,19 @@ the Solve adopter (14 trig/hyperbolic validity rules emit `When`-guarded
 roots — `Solve(sin x = a, x)` → `When(arcsin a, |a| ≤ 1)` — with pruning in
 root assembly and the audit oracle grading guarded roots). Remaining:
 
-- **Demand-paced adopters:** radical extraneous roots, Sum convergence
-  regions, definite integration (its region-splitting analysis — locating
-  where poles cross the contour — is the hardest part and stays with that
-  adopter). Each is an incremental consumer of the landed machinery.
+- **Convergence-conditions adopter landed 2026-07-12 (Phase 3a):** improper
+  integrals emit endpoint convergence guards (`∫₀^∞e^(−ax)dx → 1/a {0<a}`),
+  fixing the pre-existing `0^(n+1)`/`∞^(1−s)` FTC endpoint leaks
+  (fail-closed outside the `x^p`/`e^{px}` table), and the geometric series
+  gets its closed form (`Σ(1/2)ⁿ → 2` exact; symbolic ratio →
+  `1/(1−x) {|x|<1}`). Policy ratified: measure-zero exceptional parameter
+  points (`∫xⁿ`'s `n=−1`) stay generic (Rubi-consistent); only fat
+  convergence regions guard.
+- **Demand-paced adopters remaining:** radical extraneous roots, definite
+  integration region splitting (`Which` — locating where poles cross the
+  contour is the hardest part and stays with that adopter), and the
+  `e^{−a·x}` antiderivative-table gap (the `Negate`-headed exponent misses
+  the linear-exponential rule; the improper path carries a local fallback).
 - **Known Phase-1 limitation** (accepted, revisit on evidence): a
   conditional nested under a lazy operand (`5 − When(x,c)`) lifts fully
   only on a second `evaluate()`; the guard is never dropped.

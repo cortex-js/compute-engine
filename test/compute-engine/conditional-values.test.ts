@@ -273,3 +273,100 @@ describe('CONDITIONAL VALUES — Solve emission (Phase 2)', () => {
     expect(roots).toEqual(['-1/6 * pi', '7/6 * pi']);
   });
 });
+
+describe('Convergence guards (Phase 3a)', () => {
+  const evalStr = (latex: string): string =>
+    ce.parse(latex).evaluate().toString();
+
+  // ── The six acceptance rows ────────────────────────────────────────────
+
+  it('∫₀^∞ e^(−a·x) dx → 1/a {0 < a}', () => {
+    expect(evalStr('\\int_0^\\infty e^{-a x} dx')).toBe('1 / a {0 < a}');
+  });
+
+  it('∫₀^∞ e^(−2x) dx → 1/2 (decidable, unchanged)', () => {
+    expect(evalStr('\\int_0^\\infty e^{-2 x} dx')).toBe('1/2');
+  });
+
+  it('∫₀^1 xⁿ dx → 1/(n+1) {−1 < n} (no leaked 0^(n+1))', () => {
+    expect(evalStr('\\int_0^1 x^n dx')).toBe('1 / (n + 1) {0 < n + 1}');
+  });
+
+  it('∫₁^∞ x^(−s) dx → 1/(s−1) {1 < s} (no leaked ∞^(1−s))', () => {
+    expect(evalStr('\\int_1^\\infty x^{-s} dx')).toBe(
+      '-1 / (1 - s) {1 - s < 0}'
+    );
+  });
+
+  it('Σ_{n=0}^∞ xⁿ → 1/(1−x) {|x| < 1}', () => {
+    expect(evalStr('\\sum_{n=0}^\\infty x^n')).toBe('1 / (1 - x) {|x| < 1}');
+  });
+
+  it('Σ_{n=0}^∞ (1/2)ⁿ → 2 (exact)', () => {
+    expect(evalStr('\\sum_{n=0}^\\infty (1/2)^n')).toBe('2');
+  });
+
+  // ── Guard collapse (integral) ──────────────────────────────────────────
+
+  it('substituting a = 2 into ∫₀^∞ e^(−a·x) dx collapses to 1/2', () => {
+    const r = ce.parse('\\int_0^\\infty e^{-a x} dx').evaluate();
+    expect(r.subs({ a: 2 }).evaluate().toString()).toBe('1/2');
+  });
+
+  it('substituting a = −1 (outside the guard) gives Undefined', () => {
+    const r = ce.parse('\\int_0^\\infty e^{-a x} dx').evaluate();
+    expect(r.subs({ a: -1 }).evaluate().symbol).toBe('Undefined');
+  });
+
+  it('an assumption a > 0 discharges the guard to a bare 1/a', () => {
+    const engine = new ComputeEngine();
+    engine.assume(engine.parse('a > 0'));
+    expect(engine.parse('\\int_0^\\infty e^{-a x} dx').evaluate().toString()).toBe(
+      '1 / a'
+    );
+  });
+
+  // ── Fail-closed: no indeterminate form leaks ───────────────────────────
+
+  it('the two leak cases no longer contain 0^… / ∞^… indeterminates', () => {
+    const xn = evalStr('\\int_0^1 x^n dx');
+    const xs = evalStr('\\int_1^\\infty x^{-s} dx');
+    expect(xn).not.toMatch(/0\^/);
+    expect(xs).not.toMatch(/oo\^/);
+    // And the correct guarded values survived.
+    expect(xn).toContain('1 / (n + 1)');
+    expect(xs).toContain('1 - s');
+  });
+
+  it('∫₁^∞ x^(−1/2) dx stays +∞ (divergent-when-decidable, unchanged)', () => {
+    expect(evalStr('\\int_1^\\infty x^{-1/2} dx')).toBe('+oo');
+  });
+
+  it('∫₀^∞ e^(2x) dx stays +∞ (divergent-when-decidable, unchanged)', () => {
+    expect(evalStr('\\int_0^\\infty e^{2 x} dx')).toBe('+oo');
+  });
+
+  // ── Geometric series exactness ─────────────────────────────────────────
+
+  it('Σ (1/2)ⁿ evaluate → exact integer 2 (not 2.)', () => {
+    const r = ce.parse('\\sum_{n=0}^\\infty (1/2)^n').evaluate();
+    expect(r.isSame(2)).toBe(true);
+  });
+
+  it('Σ (1/3)ⁿ → 3/2 (exact)', () => {
+    expect(evalStr('\\sum_{n=0}^\\infty (1/3)^n')).toBe('3/2');
+  });
+
+  it('Σ (1/√2)ⁿ → exact closed form 2 + √2', () => {
+    const r = ce.parse('\\sum_{n=0}^\\infty (1/\\sqrt{2})^n').evaluate();
+    expect(r.isEqual(ce.box(['Add', 2, ['Sqrt', 2]]))).toBe(true);
+  });
+
+  it('numeric divergent geometric (Σ 2ⁿ) stays symbolic', () => {
+    expect(ce.parse('\\sum_{n=0}^\\infty 2^n').evaluate().operator).toBe('Sum');
+  });
+
+  it('.N() of Σ (1/2)ⁿ composes to 2', () => {
+    expect(ce.parse('\\sum_{n=0}^\\infty (1/2)^n').N().re).toBeCloseTo(2, 12);
+  });
+});

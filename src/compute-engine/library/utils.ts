@@ -9,6 +9,7 @@ import {
   isSymbol,
   isFunction,
 } from '../boxed-expression/type-guards.js';
+import { conditionalValue } from '../boxed-expression/conditional-value.js';
 
 import { MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
@@ -170,8 +171,12 @@ function telescopingParts(
 
 /**
  * Attempt a symbolic closed form for `Sum(body, [index, lower, upper])` when the
- * domain is symbolic (free bounds). Currently handles telescoping sums:
- *   Σ_{k=a}^{b} (g(k+1) − g(k)) = g(b+1) − g(a)   (and the mirror orientation).
+ * domain is symbolic (free bounds or a body with free variables beyond the
+ * index). Handles:
+ *   - telescoping sums `Σ_{k=a}^{b} (g(k+1) − g(k)) = g(b+1) − g(a)` (and the
+ *     mirror orientation);
+ *   - the geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio `r` (infinite upper
+ *     bound), emitting `When(c·r^{n₀}/(1 − r), |r| < 1)`.
  * Returns undefined when no closed form applies (caller keeps it symbolic).
  */
 export function symbolicSumClosedForm(
@@ -184,6 +189,12 @@ export function symbolicSumClosedForm(
   const lower = limits.op2;
   const upper = limits.op3;
   if (!index || !lower || !upper) return undefined;
+
+  // Geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio (infinite upper bound).
+  if (upper.isInfinity === true && upper.isPositive === true) {
+    const geo = geometricSumClosedForm(body, index, lower, ce);
+    if (geo) return geo;
+  }
 
   const tele = telescopingParts(body, index, ce);
   if (tele) {
@@ -370,10 +381,78 @@ function pSeriesClosedForm(
 }
 
 /**
+ * Closed form of a geometric series `Σ_{k=n₀}^∞ c·rᵏ = c·r^{n₀}/(1 − r)`, valid
+ * for `|r| < 1` (conditional-values design, Phase 3a). `r` must be free of the
+ * index `k`; `n₀` is an integer-literal lower bound; an index-free constant
+ * factor `c` is allowed (`c·rᵏ`).
+ *
+ * The convergence condition `|r| < 1` is routed through the `conditionalValue`
+ * chokepoint:
+ *   - numeric `r` with `|r| < 1`  → the bare exact value (per the exactness
+ *     contract: `Σ(1/2)ᵏ → 2`, not `2.`);
+ *   - numeric `r` with `|r| ≥ 1`  → `undefined` (decidable-divergent: caller
+ *     keeps the sum symbolic, mirroring the p-series entry);
+ *   - symbolic `r`                → `When(c·r^{n₀}/(1 − r), |r| < 1)`.
+ *
+ * Scope is deliberately just this family: no x-dependent ratios (`Σ n·xⁿ`),
+ * symbolic start indices, or derivative-of-geometric shapes.
+ */
+function geometricSumClosedForm(
+  body: Expression,
+  index: string,
+  lower: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!lower.isInteger) return undefined;
+  const n0 = lower.re;
+  if (!Number.isSafeInteger(n0)) return undefined;
+
+  // Separate an optional index-free constant factor `c` from the `rᵏ` power.
+  let coeff: Expression = ce.One;
+  let power: Expression = body;
+  if (isFunction(body, 'Multiply')) {
+    const consts: Expression[] = [];
+    const varying: Expression[] = [];
+    for (const f of body.ops) (f.has(index) ? varying : consts).push(f);
+    if (varying.length !== 1) return undefined;
+    power = varying[0];
+    if (consts.length > 0) coeff = ce.function('Multiply', consts);
+  }
+
+  if (!isFunction(power, 'Power')) return undefined;
+  const r = power.op1;
+  const exp = power.op2;
+  // The exponent must be exactly the summation index, and the ratio free of it.
+  if (!(isSymbol(exp) && exp.symbol === index)) return undefined;
+  if (r.has(index)) return undefined;
+
+  // value = c·r^{n₀} / (1 − r)
+  const rPow =
+    n0 === 0 ? ce.One : ce.function('Power', [r, ce.number(n0)]);
+  const numerator = coeff.isSame(1)
+    ? rPow
+    : rPow.isSame(1)
+      ? coeff
+      : ce.function('Multiply', [coeff, rPow]);
+  // `simplify` (not just `evaluate`) so a radical ratio rationalizes to its
+  // simplest exact form (`Σ(1/√2)ᵏ → 2 + √2`, not `1/(1 − √2/2)`); a symbolic
+  // ratio keeps the readable `1/(1 − r)`. Safe here — the closed form no longer
+  // contains a `Sum`, so simplifying it cannot re-enter this handler.
+  const value = ce
+    .function('Divide', [numerator, ce.function('Subtract', [ce.One, r])])
+    .simplify();
+
+  const guard = ce.function('Less', [ce.function('Abs', [r]), ce.One]);
+  return conditionalValue(ce, value, guard) ?? undefined;
+}
+
+/**
  * Attempt a closed form for `Sum(body, [index, lower, +∞])` on an infinite
  * upper domain. Handles:
  *   - p-series `Σ_{k=a}^∞ k^{-s} = ζ(s) − Σ_{k=1}^{a−1} k^{-s}`
  *     (exact real `s > 1`, positive-integer `a`);
+ *   - geometric series `Σ_{k=n₀}^∞ c·rᵏ = c·r^{n₀}/(1 − r)` for numeric
+ *     `|r| < 1` (divergent numeric ratios stay symbolic);
  *   - term-wise splitting `Σ (f + g) = Σ f + Σ g`, applied ONLY when every
  *     summand individually has a known closed form (each piece's convergence is
  *     then established by that closed form's own validity — absolute
@@ -403,7 +482,10 @@ export function infiniteSumClosedForm(
     return ce.function('Add', pieces, { structural: true });
   }
 
-  return pSeriesClosedForm(body, index, lower, ce);
+  return (
+    pSeriesClosedForm(body, index, lower, ce) ??
+    geometricSumClosedForm(body, index, lower, ce)
+  );
 }
 
 /**

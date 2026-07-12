@@ -8,6 +8,7 @@ import type {
   RuleSteps,
 } from '../global-types.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import { conditionalValue } from './conditional-value.js';
 import {
   polynomialDegree,
   getPolynomialCoefficients,
@@ -95,18 +96,15 @@ function negatedRealRatio(b: Expression, a?: Expression): number | undefined {
  * conditions already refuse to fire on a decidable-False ratio, so a numeric
  * ratio reaching here has a `True` guard and collapses to the bare root.
  *
- * Kept module-local for now; later `When`-producers (Sum/Integrate) will lift
- * it to a shared location.
+ * Thin alias over the shared `conditionalValue` chokepoint
+ * (`boxed-expression/conditional-value.ts`), which Sum/Integrate now also use.
  */
 function conditionalRoot(
   ce: ComputeEngine,
   root: Expression,
   guard: Expression
 ): Expression | null {
-  const g = guard.evaluate();
-  if (isSymbol(g, 'True')) return root;
-  if (isSymbol(g, 'False')) return null;
-  return ce.function('When', [root, g]);
+  return conditionalValue(ce, root, guard);
 }
 
 //

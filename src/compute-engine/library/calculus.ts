@@ -1,11 +1,22 @@
-import type { Expression, SymbolDefinitions } from '../global-types.js';
+import type {
+  Expression,
+  IComputeEngine as ComputeEngine,
+  SymbolDefinitions,
+} from '../global-types.js';
 
 import { checkType } from '../boxed-expression/validate.js';
 import {
   defaultUnknown,
   hasSymbolicTranscendental,
 } from '../boxed-expression/utils.js';
-import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+  sym,
+} from '../boxed-expression/type-guards.js';
+import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { BoxedNumber } from '../boxed-expression/boxed-number.js';
 
 import {
@@ -35,6 +46,166 @@ import { symbolicLimit } from '../symbolic/limit.js';
 import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
 import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
+
+//
+// ── Improper-integral endpoint limits (conditional-values Phase 3a) ──────
+//
+// FTC substitutes each bound into the antiderivative. At a *limit-point* bound
+// (0, ±∞) the substitution can leave a parameter-dependent indeterminate — a
+// Power with a base of 0/±∞ and a symbolic exponent (`0^{n+1}`, `∞^{1−s}`), or
+// `e^{c·(±∞)}` with a symbolic rate `c`. Each such term has a limit of 0 on a
+// convergence condition (`n+1 > 0`, `1−s < 0`, `c > 0`); we resolve it to 0 and
+// carry the condition, so the definite integral becomes a `When`-guarded value.
+// Anything outside this small table fails closed (caller stays inert) rather
+// than leaking an indeterminate form.
+//
+
+/**
+ * Classify a single node as a limit-point endpoint leak. Returns:
+ *   - `{ value, guard }`  — a resolvable leak: its limit `value` under `guard`;
+ *   - `'unresolvable'`    — a leak-family shape not covered (fail closed);
+ *   - `null`             — not a leak (recurse into children).
+ * A decidable (numeric) exponent is not a leak: it would already have folded.
+ */
+function classifyEndpointLeak(
+  node: Expression,
+  ce: ComputeEngine
+): { value: Expression; guard: Expression } | 'unresolvable' | null {
+  if (!isFunction(node, 'Power')) return null;
+  const base = node.op1;
+  const exp = node.op2;
+
+  // x^p as x → 0⁺ : residual `0^p` → 0 when Re(p) > 0.
+  if (base.isSame(0)) {
+    if (isNumber(exp)) return null;
+    return { value: ce.Zero, guard: ce.function('Greater', [exp, ce.Zero]) };
+  }
+
+  // x^p as x → +∞ : residual `(+∞)^p` → 0 when Re(p) < 0.
+  if (base.isInfinity === true && base.isPositive === true) {
+    if (isNumber(exp)) return null;
+    return { value: ce.Zero, guard: ce.function('Less', [exp, ce.Zero]) };
+  }
+
+  // (−∞)^p : sign oscillation — not in the table.
+  if (base.isInfinity === true && base.isNegative === true) {
+    if (isNumber(exp)) return null;
+    return 'unresolvable';
+  }
+
+  // e^{c·(±∞)} as x → ±∞ : → 0 when the exponent → −∞.
+  if (isSymbol(base, 'ExponentialE')) return classifyExpEndpointLeak(exp, ce);
+
+  return null;
+}
+
+/**
+ * Classify an exponential endpoint leak `e^{q}` by its exponent `q`. Resolves
+ * only `q = (±∞)·c` with a single infinite factor and a finite, non-numeric
+ * cofactor `c`: the limit is 0 when `q → −∞`, i.e. `c > 0` for a `−∞` factor,
+ * `c < 0` for a `+∞` factor.
+ */
+function classifyExpEndpointLeak(
+  q: Expression,
+  ce: ComputeEngine
+): { value: Expression; guard: Expression } | 'unresolvable' | null {
+  if (!isFunction(q, 'Multiply')) return null;
+  let infSign = 0;
+  const rest: Expression[] = [];
+  for (const f of q.ops) {
+    if (f.isInfinity === true) {
+      if (infSign !== 0) return 'unresolvable';
+      infSign = f.isPositive === true ? 1 : -1;
+    } else rest.push(f);
+  }
+  if (infSign === 0 || rest.length === 0) return null;
+  const cofactor = rest.length === 1 ? rest[0] : ce.function('Multiply', rest);
+  if (isNumber(cofactor)) return null; // decidable → would have folded
+  const guard =
+    infSign < 0
+      ? ce.function('Greater', [cofactor, ce.Zero])
+      : ce.function('Less', [cofactor, ce.Zero]);
+  return { value: ce.Zero, guard };
+}
+
+/**
+ * Walk an FTC result, replacing endpoint-limit leaks (`classifyEndpointLeak`)
+ * by their resolved values and conjoining their convergence guards. Returns
+ * `{ value, guard }` (guard `True` when leak-free — the value is then the
+ * untouched input), or `null` when a leak cannot be resolved (fail closed).
+ */
+function resolveEndpointLeaks(
+  expr: Expression,
+  ce: ComputeEngine
+): { value: Expression; guard: Expression } | null {
+  const leak = classifyEndpointLeak(expr, ce);
+  if (leak === 'unresolvable') return null;
+  if (leak) return leak;
+  if (!isFunction(expr)) return { value: expr, guard: ce.True };
+
+  const guards: Expression[] = [];
+  const newOps: Expression[] = [];
+  let changed = false;
+  for (const op of expr.ops) {
+    const r = resolveEndpointLeaks(op, ce);
+    if (r === null) return null;
+    newOps.push(r.value);
+    if (r.value !== op) changed = true;
+    if (!isSymbol(r.guard, 'True')) guards.push(r.guard);
+  }
+  const value = changed ? ce.function(expr.operator, newOps) : expr;
+  const guard =
+    guards.length === 0
+      ? ce.True
+      : guards.length === 1
+        ? guards[0]
+        : ce.function('And', guards);
+  return { value, guard };
+}
+
+/**
+ * Antiderivative of `c·e^{L(x)}` (linear `L`, index-free nonzero slope) as a
+ * local fallback for the improper-integral path only, when the general
+ * antiderivative stalls (e.g. `e^{−a·x}`, whose `Negate`-headed exponent the
+ * pattern rules miss). Returns `null` for any other shape. Does NOT change what
+ * indefinite integration returns — used solely to close a `±∞` bound.
+ */
+function improperExpAntiderivative(
+  integrand: Expression,
+  variable: string,
+  ce: ComputeEngine
+): Expression | null {
+  let fn = integrand;
+  while (
+    isFunction(fn, 'Function') ||
+    isFunction(fn, 'Block') ||
+    isFunction(fn, 'Delimiter')
+  )
+    fn = fn.op1;
+
+  let coeff: Expression = ce.One;
+  let core: Expression = fn;
+  if (isFunction(fn, 'Multiply')) {
+    const consts: Expression[] = [];
+    const varying: Expression[] = [];
+    for (const f of fn.ops) (f.has(variable) ? varying : consts).push(f);
+    if (varying.length !== 1) return null;
+    core = varying[0];
+    if (consts.length > 0) coeff = ce.function('Multiply', consts);
+  }
+
+  let exponent: Expression | undefined;
+  if (isFunction(core, 'Power') && isSymbol(core.op1, 'ExponentialE'))
+    exponent = core.op2;
+  else if (isFunction(core, 'Exp')) exponent = core.op1;
+  if (!exponent) return null;
+
+  const slope = differentiate(exponent, variable);
+  if (!slope || slope.has(variable) || slope.isSame(0)) return null;
+
+  // ∫ c·e^{L} dx = (c/slope)·e^{L}
+  return ce.function('Divide', [ce.function('Multiply', [coeff, core]), slope]);
+}
 
 /**
  * Collect the dependent-function symbol name(s) from the second argument of
@@ -231,7 +402,9 @@ volumes
         // function literal, differentiate the body the requested number of
         // times with respect to each parameter; otherwise stay symbolic.
         if (isFunction(op, 'Function')) {
-          const params = op.ops.slice(1).map((p) => sym(p));
+          const params = op.ops
+            .slice(1)
+            .map((p) => functionLiteralParameterName(p));
           if (params.length === orders.length && params.every((p) => !!p)) {
             let body: Expression | undefined = op.op1;
             for (let i = 0; i < orders.length && body; i++)
@@ -560,6 +733,18 @@ volumes
           if (!antideriv || antideriv.operator === 'Integrate')
             antideriv = antiderivative(expr, variable);
 
+          // Improper-integral fallback: the general antiderivative can stall on
+          // an exponential whose rate is a `Negate`-headed product (`e^{−a·x}`).
+          // For a ±∞ bound, close it locally so the endpoint-limit analysis can
+          // apply — this does not change what indefinite integration returns.
+          if (
+            antideriv.has('Integrate') &&
+            (lower.isInfinity === true || upper.isInfinity === true)
+          ) {
+            const expAd = improperExpAntiderivative(expr, variable, ce);
+            if (expAd) antideriv = expAd;
+          }
+
           if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
             // Indefinite integral: keep the antiderivative, whether it was
             // resolved (a closed form) or left inert (an `Integrate` node, or
@@ -588,7 +773,28 @@ volumes
             // (∫₀^a x dx → a²/2; see commit 9b818ec8).
             isIndefinite = false;
             const F = ce.expr(['Function', antideriv, variable]);
-            expr = ce.expr(['EvaluateAt', F, lower, upper]);
+            const at = ce.expr(['EvaluateAt', F, lower, upper]);
+            // Resolve any parameter-dependent endpoint indeterminate left by
+            // FTC at a limit-point bound (0, ±∞): emit a convergence-guarded
+            // `When`, or keep the integral inert (fail closed) rather than leak
+            // an indeterminate form (`0^…`, `∞^…`).
+            const raw = at.evaluate({ numericApproximation });
+            const resolved = resolveEndpointLeaks(raw, ce);
+            if (resolved !== null && isSymbol(resolved.guard, 'True')) {
+              // Leak-free: preserve the original evaluation path exactly.
+              expr = at;
+            } else {
+              const guarded =
+                resolved === null
+                  ? null
+                  : conditionalValue(ce, resolved.value, resolved.guard);
+              expr =
+                guarded ??
+                ce.function('Integrate', [
+                  expr,
+                  ce.function('Limits', [ce.symbol(variable), lower, upper]),
+                ]);
+            }
           }
         }
         if (expr.operator !== 'Integrate') {

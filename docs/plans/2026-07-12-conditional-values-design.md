@@ -287,6 +287,35 @@ condition attached, which is the desired UX.
      match pre-Phase-2 output (symbolic traces surface the `When`).
 3. **Demand-paced adopters**: radical extraneous roots, Sum convergence,
    definite-integral region splitting (each a separate reviewed step).
+   **Phase 3a done 2026-07-12** — convergence conditions (the fat-region
+   subset), per the policy split ratified for antiderivatives: measure-zero
+   exceptional parameter points (`∫xⁿ`'s `n = −1`) keep the generic branch
+   (matches Rubi's `NeQ`-style generic-by-default predicates, protects the
+   D-verification pipeline); fat convergence regions emit `When`.
+   Implementation:
+   - `conditionalValue` lifted to `boxed-expression/conditional-value.ts`
+     (shared chokepoint; `solve.ts`'s `conditionalRoot` is a thin alias).
+   - Improper-integral endpoint guards (`library/calculus.ts`): FTC results
+     are walked for parameter-dependent endpoint indeterminates (`0^p`,
+     `(+∞)^p`, `e^{c·(±∞)}`), resolved to 0 under the convergence condition
+     (`∫₀^∞e^(−ax)dx → 1/a {0 < a}`; `∫₀^1xⁿdx → 1/(n+1) {0 < n+1}`,
+     previously **leaking `0^(n+1)`**; `∫₁^∞x^(−s)dx` previously leaked
+     `∞^(1−s)`). Anything outside the table fails closed (inert, no leak).
+     A local `c·e^{L}` antiderivative closes `e^{−a·x}`-shaped integrands
+     for ±∞ bounds only (the general antiderivative misses the
+     `Negate`-headed exponent — an antiderivative-table gap noted for a
+     separate fix; indefinite results unchanged).
+   - Geometric series (`library/utils.ts`): `Σ_{k=n₀}^∞ c·rᵏ` →
+     `c·r^{n₀}/(1−r)` — exact for numeric `|r| < 1` (`Σ(1/2)ᵏ → 2`,
+     `Σ(1/√2)ᵏ → 2+√2`), `When(…, |r| < 1)` for symbolic `r`, inert for
+     decidable-divergent ratios.
+   - Known cosmetic residual: `∫₀^∞xᵖdx → 0 {0 < p+1 ∧ p+1 < 0}` — an
+     unsatisfiable guard (correct: the integral converges for no real `p`;
+     a never-true `When` is `Undefined` everywhere), left undetected
+     rather than adding contradiction analysis.
+   Zero unexpected snapshot churn (one authorized inline-snapshot update:
+   the `∫₀^1xⁿdx` leak fix in `calculus.test.ts`). Still demand-paced:
+   radical extraneous roots, definite-integral region splitting (`Which`).
 
 ## Non-goals
 
