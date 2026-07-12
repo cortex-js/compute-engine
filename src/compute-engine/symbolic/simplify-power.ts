@@ -396,9 +396,23 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // root(sqrt(x), n) -> x^{1/(2n)} (nth root of square root)
+    // Simplify may fold Sqrt(literal) to exact (1)·√a before this rule runs,
+    // so match both the Sqrt node and that numeric square-root form.
+    let innerBase: Expression | null = null;
     if (isFunction(arg, 'Sqrt') && arg.op1) {
-      const innerBase = arg.op1;
-      // root(sqrt(x), n) = x^{1/(2n)}
+      innerBase = arg.op1;
+    } else if (isNumber(arg)) {
+      const nv = arg.numericValue;
+      if (
+        nv instanceof ExactNumericValue &&
+        nv.im === 0 &&
+        nv.radical > 1 &&
+        nv.rational[0] === nv.rational[1]
+      ) {
+        innerBase = ce.number(nv.radical);
+      }
+    }
+    if (innerBase) {
       return {
         value: innerBase.pow(ce.One.div(ce.number(2).mul(rootIndex))),
         because: 'root(sqrt(x), n) -> x^{1/(2n)}',

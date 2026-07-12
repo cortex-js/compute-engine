@@ -383,6 +383,8 @@ describe('Rules: Roots', () => {
 });
 
 describe('Rules: Nested Roots', () => {
+  test('sqrt(sqrt(sqrt(5))) = 5^{1/8}', () =>
+    checkSimplify('\\sqrt{\\sqrt{\\sqrt{5}}}', '\\sqrt[8]{5}'));
   test('sqrt(sqrt(x)) = x^{1/4}', () =>
     checkSimplify('\\sqrt{\\sqrt{x}}', '\\sqrt[4]{x}'));
   test('cbrt(sqrt(x)) = x^{1/6}', () =>
