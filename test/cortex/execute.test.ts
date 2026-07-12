@@ -49,6 +49,26 @@ describe('CORTEX EXECUTE — programs', () => {
     expect(value.re).toBe(1);
   });
 
+  test('the `..` range operator drives a Sum', () => {
+    const { value, diagnostics } = run('Sum(k, k in 1..5)');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(15);
+  });
+
+  test('the `..` range operator drives a for loop', () => {
+    const { value, diagnostics } = run(
+      'let t = 0\nfor k in 1..3 { t = t + k }\nt'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(6);
+  });
+
+  test('`true`/`false` evaluate as booleans', () => {
+    expect(run('false && (1 > 0)').value.symbol).toBe('False');
+    expect(run('!true').value.symbol).toBe('False');
+    expect(run('let b = true\nb').value.symbol).toBe('True');
+  });
+
   test('a for loop executes (evaluated for effect → Nothing)', () => {
     // `for x in xs` DOES execute today via the engine `Loop`, but `Loop` is
     // evaluated *for effect*: its value is `Nothing` (the collecting/scoping
@@ -113,6 +133,36 @@ describe('CORTEX EXECUTE — while', () => {
     const { value, diagnostics } = run('let c = 0\nwhile c > 0 { c = c - 1 }\nc');
     expect(diagnostics).toHaveLength(0);
     expect(value.re).toBe(0);
+  });
+});
+
+describe('CORTEX EXECUTE — do-block expressions', () => {
+  test('a top-level do-block yields its final statement', () => {
+    const { value, diagnostics } = run('do { let t = 3; t + 1 }');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
+  });
+
+  test('a do-block as an assignment RHS', () => {
+    const { value, diagnostics } = run('let y = do { let t = 3; t + 1 }\ny');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
+  });
+
+  test('a do-block lambda body', () => {
+    const { value, diagnostics } = run(
+      'let f = x |-> do { let t = x * x; t + 1 }\nf(3)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(10);
+  });
+});
+
+describe('CORTEX EXECUTE — zero-parameter lambdas', () => {
+  test('a zero-parameter lambda applies with no arguments', () => {
+    const { value, diagnostics } = run('let f = () |-> 42\nf()');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(42);
   });
 });
 

@@ -71,6 +71,36 @@ describe('StringJoin concatenates strings', () => {
       'StringJoin'
     );
   });
+
+  test('a single list of strings is joined', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['StringJoin', ['List', { str: 'a' }, { str: 'b' }, { str: 'c' }]])
+        .evaluate().string
+    ).toBe('abc');
+  });
+
+  test('a single lazy collection (Map result) of strings is joined', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'StringJoin',
+          ['Map', ['List', { str: 'a' }, { str: 'b' }], ['Function', 'c', 'c']],
+        ])
+        .evaluate().string
+    ).toBe('ab');
+  });
+
+  test('reversing the characters of a string round-trips through StringJoin', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['StringJoin', ['Reverse', ['Characters', { str: 'hello' }]]])
+        .evaluate().string
+    ).toBe('olleh');
+  });
 });
 
 describe('StringFrom joins a collection of code points', () => {

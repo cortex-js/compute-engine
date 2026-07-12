@@ -17,12 +17,13 @@ export const RESERVED_WORDS = new Set<string>([
   'default', // Not in use
   'delete', // Not in use
   'dynamic', // Not in use
-  'do', // Not in use
+  'do', // Block-expression head: `do { … }` (see parser `parseDoBlock`)
   'each', // Not in use
   'else',
   'end', // Not in use
   'export', // Not in use
   'extern', // Not in use
+  'false', // Boolean literal — parsed as the `False` symbol
   'finally', // Not in use
   'for', // Not in use
   'from', // Not in use
@@ -68,6 +69,7 @@ export const RESERVED_WORDS = new Set<string>([
   'this', // Not in use
   'throw', // Not in use
   'to', // Not in use
+  'true', // Boolean literal — parsed as the `True` symbol
   'try', // Not in use
   'union', // Not in use
   'until', // Not in use

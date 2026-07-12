@@ -54,6 +54,42 @@ describe('WGSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`sqrt(x)`);
     });
 
+    // Regression (Tycho WebGL2 parity audit): like GLSL, WGSL `pow` is
+    // undefined for a negative base. Integer exponents must lower to
+    // sign-preserving code, never `pow`.
+    describe('integer power sign-correctness (no pow)', () => {
+      it('small exponent → repeated multiplication', () => {
+        expect(wgsl.compile(ce.parse('x^3')).code).toMatchInlineSnapshot(
+          `(x * x * x)`
+        );
+      });
+
+      it('larger exponent → helper, not pow', () => {
+        const r = wgsl.compile(ce.parse('x^{12}'));
+        expect(r.code).toMatchInlineSnapshot(`_gpu_powi(x, 12.0)`);
+        expect(r.code).not.toContain('pow(');
+        expect(r.preamble).toContain('_gpu_powi');
+      });
+
+      it('negative integer exponent → reciprocal', () => {
+        expect(wgsl.compile(ce.parse('x^{-3}')).code).toMatchInlineSnapshot(
+          `(1.0 / (x * x * x))`
+        );
+      });
+
+      it('compound base → helper (base not duplicated)', () => {
+        const r = wgsl.compile(ce.parse('(x+y)^3'));
+        expect(r.code).toMatchInlineSnapshot(`_gpu_powi(x + y, 3.0)`);
+        expect(r.code).not.toContain('pow(');
+      });
+
+      it('fractional exponent still uses pow', () => {
+        expect(wgsl.compile(ce.parse('x^{2.5}')).code).toMatchInlineSnapshot(
+          `pow(x, 2.5)`
+        );
+      });
+    });
+
     it('should compile sqrt', () => {
       const expr = ce.parse('\\sqrt{x}');
       const code = wgsl.compile(expr).code;

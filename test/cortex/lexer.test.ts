@@ -95,10 +95,13 @@ describe('CORTEX LEXER — numbers', () => {
     expect(tok.text).toBe('１２３');
   });
 
-  test('a second decimal point ends the number and errors', () => {
+  test('a second decimal point ends the number and starts an operator', () => {
+    // `.` is an operator character (it spells the `..` range operator), so the
+    // trailing `.` lexes as an OPERATOR token, not an ERROR. A lone `.` has no
+    // operator definition, so the parser (not the lexer) diagnoses it.
     expect(pairs('1.2.3')).toEqual([
       ['NUMBER', '1.2'],
-      ['ERROR', '.'],
+      ['OPERATOR', '.'],
       ['NUMBER', '3'],
     ]);
   });
@@ -108,6 +111,16 @@ describe('CORTEX LEXER — numbers', () => {
       ['NUMBER', '2'],
       ['SYMBOL', 'et'],
     ]);
+  });
+
+  test('`1..5` lexes as a range, not `1.` `.5`', () => {
+    expect(pairs('1..5')).toEqual([
+      ['NUMBER', '1'],
+      ['OPERATOR', '..'],
+      ['NUMBER', '5'],
+    ]);
+    // A trailing single dot (no following dot) is still a fractional part.
+    expect(pairs('1.')).toEqual([['NUMBER', '1.']]);
   });
 });
 
@@ -439,11 +452,14 @@ describe('CORTEX LEXER — multiline strings', () => {
 
 describe('CORTEX LEXER — error tokens', () => {
   test('a run of unrecognized characters is a single ERROR token', () => {
-    // `.` is not a valid token start.
+    // `.` is an operator character (the `..` range operator), so a leading `.`
+    // lexes as an OPERATOR token followed by the number.
     expect(pairs('.5')).toEqual([
-      ['ERROR', '.'],
+      ['OPERATOR', '.'],
       ['NUMBER', '5'],
     ]);
+    // `@` remains an unrecognized character run.
+    expect(pairs('@@@')).toEqual([['ERROR', '@@@']]);
   });
 
   test('the lexer never throws on invalid input', () => {

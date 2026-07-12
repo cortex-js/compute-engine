@@ -238,6 +238,28 @@ let h = compose(sq, inc)
 // ➔ (25, 17)
 ```
 
+**A counter factory.** `makeCounter` returns a zero-parameter lambda
+(`() |-> …`) whose **block body** (`do { … }`) runs several statements and
+yields the last one. The lambda closes over `count` and mutates it on each
+call:
+
+```cortex
+function makeCounter() {
+  let count = 0
+  () |-> do { count = count + 1; count }
+}
+let c = makeCounter()
+c()
+c()
+c()
+// ➔ 3
+```
+
+`do { … }` opens a statement block in expression position: it evaluates its
+statements in order and its value is the final one (a bare `{ … }` there is a
+set/dictionary literal instead). `() |-> …` is a lambda that takes no
+parameters.
+
 ## Numeric Methods
 
 **Newton's method for √2.** The iteration runs exactly (each `x` is a

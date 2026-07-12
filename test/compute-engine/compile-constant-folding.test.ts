@@ -258,9 +258,12 @@ describe('GPU HANDLER CONSTANT FOLDING', () => {
       expect(glsl.compile(ce.expr(['Square', 'x'])).code).toBe('(x * x)');
     });
 
-    it('Square(Sin(x)) uses pow to avoid duplicate computation', () => {
+    it('Square(Sin(x)) uses the _gpu_powi helper (evaluated once, sign-safe)', () => {
+      // A compound base must not be duplicated; `pow(sin(x), 2.0)` is also NaN
+      // for sin(x) < 0 on a real GPU (log2 of a negative). The sign-preserving
+      // helper evaluates the base once and is defined for negative bases.
       expect(glsl.compile(ce.expr(['Square', ['Sin', 'x']])).code).toBe(
-        'pow(sin(x), 2.0)'
+        '_gpu_powi(sin(x), 2.0)'
       );
     });
   });
@@ -286,15 +289,19 @@ describe('GPU HANDLER CONSTANT FOLDING', () => {
       expect(glsl.compile(ce.expr(['Power', 'x', 2])).code).toBe('(x * x)');
     });
 
-    it('should NOT fold Power(Sin(x), 2) to avoid duplicate computation', () => {
+    it('should route Power(Sin(x), 2) through the helper (base evaluated once)', () => {
+      // Compound base: the helper avoids duplicating `sin(x)` and is
+      // sign-correct (`pow(neg, 2.0)` is NaN on a real GPU).
       expect(glsl.compile(ce.expr(['Power', ['Sin', 'x'], 2])).code).toBe(
-        'pow(sin(x), 2.0)'
+        '_gpu_powi(sin(x), 2.0)'
       );
     });
 
-    it('should compile Power(x, 3) as pow(x, 3.0)', () => {
+    it('should compile Power(x, 3) as repeated multiplication (not pow)', () => {
+      // GLSL `pow(x, 3.0)` is undefined for x < 0 (returns +8 for -2, wrong
+      // sign). Repeated multiplication is exact and sign-correct.
       expect(glsl.compile(ce.expr(['Power', 'x', 3])).code).toBe(
-        'pow(x, 3.0)'
+        '(x * x * x)'
       );
     });
   });

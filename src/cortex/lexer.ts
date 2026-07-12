@@ -91,9 +91,12 @@ const RBRACE_ESCAPE = 0x7d; // }
 // of these into a single `OPERATOR` token; it does NOT classify the operator
 // or assign precedence (Phase 2). Comment sequences (`//`, `/*`) and the
 // number/string/bracket starters are handled before this set is consulted, so
-// including `/` here is safe.
+// including `/` here is safe. `.` is included so the range operator `..` lexes
+// as a single OPERATOR token; a bare `.` is not currently a valid operator (it
+// is diagnosed by the parser), and decimal literals are handled by `scanNumber`
+// before this set is consulted.
 const OPERATOR_CHARS = new Set(
-  [...'+-*/^=<>!&|~:?%'].map((c) => c.codePointAt(0)!)
+  [...'+-*/^=<>!&|~:?%.'].map((c) => c.codePointAt(0)!)
 );
 
 export class Lexer {
@@ -475,7 +478,7 @@ export class Lexer {
       // Binary: `0b` / `0B`
       this.pos += 2;
       this.scanBinaryRun();
-      if (this.cp() === DOT) {
+      if (this.cp() === DOT && this.cp(1) !== DOT) {
         this.pos += 1;
         this.scanBinaryRun();
       }
@@ -488,7 +491,7 @@ export class Lexer {
       // exponent marker is only `p`/`P`.
       this.pos += 2;
       this.scanHexRun();
-      if (this.cp() === DOT) {
+      if (this.cp() === DOT && this.cp(1) !== DOT) {
         this.pos += 1;
         this.scanHexRun();
       }
@@ -496,7 +499,9 @@ export class Lexer {
     } else {
       // Decimal
       this.scanDecimalRun();
-      if (this.cp() === DOT) {
+      // Consume a fractional part, but not when the dot begins a `..` range
+      // operator (`1..5` must lex as `1`, `..`, `5`, not `1.`, `.5`).
+      if (this.cp() === DOT && this.cp(1) !== DOT) {
         this.pos += 1;
         this.scanDecimalRun();
       }

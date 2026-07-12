@@ -185,6 +185,10 @@ export function serializeCortex(
   const OPERATORS: { [name: string]: OperatorInfo } = {};
   for (const def of SHARED_OPERATORS) {
     if (def.name in OPERATORS) continue; // canonical (first) row wins
+    // `Range` has an infix parse spelling (`a..b`) but is serialized in
+    // function-call form `Range(a, b)`: that form also covers the 3-argument
+    // `Range(a, b, step)`, which has no binary infix spelling.
+    if (def.name === 'Range') continue;
     OPERATORS[def.name] = {
       symbol: def.symbol,
       fancySymbol: def.fancySymbol,
@@ -402,6 +406,29 @@ export function serializeCortex(
     // `If` has no `if`-expression spelling in the Phase 2 grammar, so it is
     // left to the generic `If(cond, then, else)` function form (which
     // round-trips). Phase 4 owns the statement form.
+
+    //
+    // Block (expression position): `do { stmt; stmt; … }`
+    //
+    // A `Block` reached here is nested inside another expression (the root
+    // multi-statement program is handled separately, below `FUNCTIONS`, as a
+    // bare statement list). The `do { … }` block-expression form is the only
+    // spelling that makes a `Block` re-parse as a `Block` in expression
+    // position (a bare `{ … }` there is the collection grammar). Statements are
+    // `;`-separated; the block scopes and yields its final statement's value.
+    //
+    Block: (expr: MathJsonExpression): FormattingBlock => {
+      if (nops(expr) === 0) return fmt.text('do {}');
+      return fmt.line(
+        'do ',
+        fmt.fencedList(
+          '{',
+          fmt.separator(';'),
+          '}',
+          mapArgs<FormattingBlock>(expr, serializeExpression)
+        )
+      );
+    },
   };
 
   function serializeFunction(expr: MathJsonExpression): FormattingBlock | null {

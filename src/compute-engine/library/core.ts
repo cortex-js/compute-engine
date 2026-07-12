@@ -1651,16 +1651,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     // to its default string representation), `StringJoin` requires every
     // argument to already be a string — a non-string operand leaves the
     // expression unevaluated. This mirrors Mathematica's `StringJoin`, which
-    // stays symbolic on non-string arguments.
+    // stays symbolic on non-string arguments. As a convenience, a single
+    // finite collection of strings may be passed instead of the strings as
+    // separate arguments (e.g. `StringJoin(Reverse(Characters(s)))`).
     StringJoin: {
       description: [
-        'Concatenate strings. Every argument must be a string; a non-string ' +
-          'argument leaves the expression unevaluated.',
+        'Concatenate strings. Pass the strings as separate arguments, or a ' +
+          'single finite collection of strings. A non-string argument (or ' +
+          'collection element) leaves the expression unevaluated.',
       ],
-      signature: '(string*) -> string',
+      signature: '((string | collection<string>)*) -> string',
       evaluate: (ops, { engine }) => {
+        // A single collection argument (e.g. `StringJoin(Reverse(Characters(s)))`):
+        // join its elements. A lazy collection (e.g. a `Map` result) is
+        // materialized via `.each()`; a non-finite collection stays symbolic.
+        let items = ops;
+        if (ops.length === 1 && !isString(ops[0]) && ops[0].isCollection) {
+          if (ops[0].isFiniteCollection !== true) return undefined;
+          items = [...ops[0].each()];
+        }
         const parts: string[] = [];
-        for (const op of ops) {
+        for (const op of items) {
           if (!isString(op)) return undefined;
           parts.push(op.string);
         }

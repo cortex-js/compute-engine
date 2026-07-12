@@ -496,6 +496,23 @@ let h = compose(sq, inc)
     expect(diagnostics).toEqual([]);
     expect(text).toBe('(25, 17)');
   });
+
+  test('a counter factory: a zero-parameter lambda with a do-block body mutating a captured binding', () => {
+    // The flagship `do { … }` example: `makeCounter` returns a zero-parameter
+    // closure whose block body increments the captured `count` and yields it.
+    // Each call advances the shared counter.
+    const { text, diagnostics } = run(`
+function makeCounter() {
+  let count = 0
+  () |-> do { count = count + 1; count }
+}
+let c = makeCounter()
+c()
+c()
+c()`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('3');
+  });
 });
 
 describe('CORTEX PROGRAMS — calculus', () => {

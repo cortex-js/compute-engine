@@ -421,6 +421,15 @@ function compileIntArg(
 const GPU_UNROLL_LIMIT = 100;
 
 /**
+ * Maximum absolute exponent for inlining an integer `Power` as repeated
+ * multiplication (`x*x*x`), for a *simple* base only (symbol or number, so the
+ * base subexpression can be safely repeated). Larger exponents — or any
+ * compound base — route through the `_gpu_powi` preamble helper instead, which
+ * evaluates the base once and keeps the sign correct for a negative base.
+ */
+const GPU_POWI_INLINE_LIMIT = 4;
+
+/**
  * Compile a Sum or Product expression for GPU targets.
  *
  * Two compilation strategies:
@@ -801,17 +810,41 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return formatFloat(Math.pow(bConst, eConst));
     if (eConst === 0) return '1.0';
     if (eConst === 1) return compile(base);
-    if (eConst === 2 && (isSymbol(base) || isNumber(base))) {
-      const code = compile(base);
-      return `(${code} * ${code})`;
-    }
-    if (eConst === -1) return `(1.0 / ${compile(base)})`;
     if (eConst === 0.5) return `sqrt(${compile(base)})`;
+    // Literal integer exponent: emit sign-preserving code. GLSL/WGSL `pow(x, y)`
+    // is spec-defined as `exp2(y·log2(x))` and is undefined for a negative base
+    // even when `y` is an integer-valued literal — on a real GPU `pow(-2.0, 3.0)`
+    // returns `+8`, flipping the sign of odd powers (and `pow(-2.0, 2.0)` is NaN,
+    // since `log2` of a negative is NaN). Emit repeated multiplication (small
+    // exponents, simple base) or the sign-preserving `_gpu_powi` helper instead.
+    if (eConst !== undefined && Number.isInteger(eConst)) {
+      const n = eConst;
+      const absN = Math.abs(n);
+      let pos: string;
+      if (absN === 1) {
+        pos = `(${compile(base)})`;
+      } else if (
+        (isSymbol(base) || isNumber(base)) &&
+        absN <= GPU_POWI_INLINE_LIMIT
+      ) {
+        // Simple base (no side effects, cheap to repeat) with a small exponent:
+        // unroll to repeated multiplication — exact and free of any `pow` call.
+        const code = compile(base);
+        pos = `(${Array(absN).fill(code).join(' * ')})`;
+      } else {
+        // Compound or large: route through the helper so the base subexpression
+        // is evaluated once (not duplicated) and the sign stays correct.
+        pos = `_gpu_powi(${compile(base)}, ${formatGPUNumber(absN)})`;
+      }
+      return n < 0 ? `(1.0 / ${pos})` : pos;
+    }
     // DIVERGENCE (documented, CO-P2-24): a literal `0^0` folds to NaN at
     // canonicalization and then fails closed here (no GPU NaN literal); `x^0`
     // folds to 1. A *runtime* dynamic `0^0` reaches `pow(0.0, 0.0)`, which is
     // undefined in GLSL/WGSL and cannot be made to yield NaN (no NaN literal),
     // so it is left to the hardware — the JS target aligns this via `_SYS.pow`.
+    // A genuinely fractional exponent (e.g. `x^2.5`) stays `pow`: it is
+    // undefined for a negative base mathematically too under realOnly.
     return `pow(${compile(base)}, ${compile(exp)})`;
   },
   Radians: 'radians',
@@ -1096,7 +1129,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const arg = compile(x);
       return `(${arg} * ${arg})`;
     }
-    return `pow(${compile(x)}, 2.0)`;
+    // Compound base: `pow(x, 2.0)` is NaN for x < 0 on a real GPU (log2 of a
+    // negative). Route through the sign-preserving helper, which also evaluates
+    // the base subexpression once instead of duplicating it.
+    return `_gpu_powi(${compile(x)}, 2.0)`;
   },
   Root: ([x, n], compile) => {
     if (x === null) throw new Error('Root: no argument');
@@ -3288,6 +3324,35 @@ float _gpu_nan() {
 }
 `;
 
+/**
+ * Sign-preserving integer power (GLSL syntax). GLSL `pow(x, n)` is
+ * `exp2(n·log2(x))`, undefined for a negative base — it returns `+8` for
+ * `pow(-2.0, 3.0)` (wrong sign) and NaN for even powers of a negative. Compute
+ * the magnitude from `abs(x)` and restore the sign for odd exponents. `n` is a
+ * non-negative integer value; matches JS `Math.pow` for integer exponents
+ * (including `0^0 = 1`). GLSL ES 1.00-compatible (no recursion, no loops).
+ */
+export const GPU_POWI_PREAMBLE_GLSL = `
+float _gpu_powi(float x, float n) {
+  if (n == 0.0) return 1.0;
+  float r = pow(abs(x), n);
+  if (x < 0.0 && mod(n, 2.0) == 1.0) return -r;
+  return r;
+}
+`;
+
+/**
+ * Sign-preserving integer power (WGSL syntax). See GPU_POWI_PREAMBLE_GLSL.
+ */
+export const GPU_POWI_PREAMBLE_WGSL = `
+fn _gpu_powi(x: f32, n: f32) -> f32 {
+  if (n == 0.0) { return 1.0; }
+  let r = pow(abs(x), n);
+  if (x < 0.0 && (n % 2.0) == 1.0) { return -r; }
+  return r;
+}
+`;
+
 /** Constants shared by both GLSL and WGSL */
 const GPU_CONSTANTS: Record<string, string> = {
   Pi: '3.14159265359',
@@ -3478,6 +3543,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // Only GLSL emits `_gpu_nan()` (WGSL uses an inline bit pattern); the helper
     // is ES 1.00-compatible, so it is safe for either GLSL version.
     if (code.includes('_gpu_nan')) preamble += GPU_NAN_PREAMBLE_GLSL;
+    if (code.includes('_gpu_powi'))
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_POWI_PREAMBLE_WGSL
+          : GPU_POWI_PREAMBLE_GLSL;
     if (code.includes('_gpu_gamma'))
       preamble +=
         this.languageId === 'wgsl'

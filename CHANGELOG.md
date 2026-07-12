@@ -73,6 +73,27 @@
   flow, number theory, complex numbers, linear algebra, and exact sums
   (mirrored in the Cortex documentation).
 
+- **Cortex: `do { … }` block expressions and zero-parameter lambdas.** A
+  statement block can now appear in any expression position with the explicit
+  `do` prefix — its value is its final statement — so multi-statement closure
+  bodies are expressible: `x |-> do { let t = x * x; t + 1 }`. Set literals
+  are unchanged (`x |-> {1, 2}` still returns a set). Zero-parameter lambdas
+  (`() |-> …`) now parse and apply, enabling the stateful
+  `makeCounter`-style closure documented in the examples.
+
+- **Cortex: a named inner function escapes its scope as a value.**
+  `function make() { helper(x) = x + 1; helper }` now returns a callable
+  first-class function — previously the returned symbol went inert once the
+  call frame popped. Captured locals and parameters of the enclosing call are
+  preserved; returned `|->` lambdas are unchanged.
+
+- **Cortex: lowercase `true`/`false`, ASCII `..` ranges, and `StringJoin`
+  over a list.** `true`/`false` are now input aliases for `True`/`False` (and
+  reserved as binding names); `1..n` is a range (`for k in 1..5`), equivalent
+  to the existing `‥`, without disturbing decimal literals like `1.5`; and
+  `StringJoin` accepts a single collection of strings —
+  `StringJoin(Reverse(Characters("hello")))` → `"olleh"`.
+
 ### Serialization
 
 - **AsciiMath prints series in textbook order.** Taylor-series terms are

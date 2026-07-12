@@ -39,6 +39,68 @@ describe('GLSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`sqrt(x)`);
     });
 
+    // Regression (Tycho WebGL2 parity audit): GLSL `pow(x, y)` is
+    // `exp2(y·log2(x))`, undefined for a negative base even with an
+    // integer-valued literal exponent — `pow(-2.0, 3.0)` returns +8 on a real
+    // GPU, flipping the sign of odd powers. Integer exponents must lower to
+    // sign-preserving code (repeated multiplication / `_gpu_powi`), never `pow`.
+    describe('integer power sign-correctness (no pow)', () => {
+      it('small odd exponent → repeated multiplication', () => {
+        expect(glsl.compile(ce.parse('x^3')).code).toMatchInlineSnapshot(
+          `(x * x * x)`
+        );
+      });
+
+      it('exponent 4 (at inline cutoff) → repeated multiplication', () => {
+        expect(glsl.compile(ce.parse('x^4')).code).toMatchInlineSnapshot(
+          `(x * x * x * x)`
+        );
+      });
+
+      it('larger exponent → sign-preserving helper, not pow', () => {
+        const r = glsl.compile(ce.parse('x^7'));
+        expect(r.code).toMatchInlineSnapshot(`_gpu_powi(x, 7.0)`);
+        expect(r.code).not.toContain('pow(');
+        expect(r.preamble).toContain('_gpu_powi');
+      });
+
+      it('exponent 12 → helper', () => {
+        expect(glsl.compile(ce.parse('x^{12}')).code).toMatchInlineSnapshot(
+          `_gpu_powi(x, 12.0)`
+        );
+      });
+
+      it('negative integer exponent → reciprocal of positive form', () => {
+        expect(glsl.compile(ce.parse('x^{-3}')).code).toMatchInlineSnapshot(
+          `(1.0 / (x * x * x))`
+        );
+      });
+
+      it('compound base → helper (base not duplicated)', () => {
+        const r = glsl.compile(ce.parse('(x+y)^3'));
+        expect(r.code).toMatchInlineSnapshot(`_gpu_powi(x + y, 3.0)`);
+        expect(r.code).not.toContain('pow(');
+      });
+
+      it('compound base squared → helper (pow(neg,2) is NaN on GPU)', () => {
+        expect(glsl.compile(ce.parse('(x+y)^2')).code).toMatchInlineSnapshot(
+          `_gpu_powi(x + y, 2.0)`
+        );
+      });
+
+      it('cubic term does NOT emit pow', () => {
+        const r = glsl.compile(ce.parse('x-0.01x^3y'));
+        expect(r.code).toMatchInlineSnapshot(`-0.01 * y * (x * x * x) + x`);
+        expect(r.code).not.toContain('pow(');
+      });
+
+      it('genuinely fractional exponent still uses pow', () => {
+        expect(glsl.compile(ce.parse('x^{2.5}')).code).toMatchInlineSnapshot(
+          `pow(x, 2.5)`
+        );
+      });
+    });
+
     it('should compile sqrt', () => {
       const expr = ce.parse('\\sqrt{x}');
       const code = glsl.compile(expr).code;

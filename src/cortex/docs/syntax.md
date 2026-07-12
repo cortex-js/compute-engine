@@ -105,9 +105,11 @@ _extended-string_ →
 _string_ → _single-line-string_ | _multiline-string_ | _extended-string_
 
 _primary_ → _signed-number_ | _symbol_ | _string_ | _pragma_ | _latex-island_ |
-_parenthesized_ | _list_ | _set_ | _dictionary_ | _call_ | _index_
+_parenthesized_ | _list_ | _set_ | _dictionary_ | _do-block_ | _call_ | _index_
 
 _parenthesized_ → **`(`** _expression_ **`)`**
+
+_do-block_ → **`do`** **`{`** (_statement_)#_statement-separator_ **`}`**
 
 _latex-island_ → **`$`** (_unicode-char_ | **`\$`**)\* **`$`**
 
@@ -188,6 +190,7 @@ call/index applies to. The primary forms are:
 - a list: `[1, 2, 3]`
 - a set: `{1, 2, 3}`
 - a dictionary: `{one -> 1, two -> 2}`
+- a `do { … }` block expression: `do { let t = 3; t + 1 }`
 - a `$…$` LaTeX island: `$\frac{1}{2}$` — see
   [LaTeX Islands](/cortex/literals/#latex-islands)
 - a function call: `f(x, y)`
@@ -231,7 +234,9 @@ call/index — the same whitespace-sensitivity that governs operators.
 - **Set**: `{a, b}` → `["Set", "a", "b"]`; `{}` → `["Set"]`.
 - **Tuple**: `(a, b)` → `["Tuple", "a", "b"]`; a single parenthesized element,
   `(a)`, is just the parenthesized expression `a`, not a one-element tuple;
-  `()` is a diagnostic (`expression-expected`) — there is no empty tuple.
+  `()` is a diagnostic (`expression-expected`) — there is no empty tuple —
+  **except** immediately before a mapsto arrow, where `() |-> expr` is a
+  zero-parameter lambda (`["Function", body]`).
 - **Dictionary**: `{k -> v}` → `["Dictionary", ["KeyValuePair", {str: "k"}, "v"]]`;
   an unquoted key becomes a string key. The empty dictionary is spelled
   `{->}` (not `{}`, which is the empty set) and compiles to
@@ -241,6 +246,12 @@ call/index — the same whitespace-sensitivity that governs operators.
 parsed: if it is followed by a top-level `->`, the whole `{ … }` is a
 dictionary and every subsequent element must also be a `key -> value` pair;
 otherwise `{ … }` is a set.
+
+A `{` in expression position is therefore **always** a collection literal (set
+or dictionary); to open a statement block in expression position, prefix it
+with `do`. `do { … }` is a block expression (the engine's `Block`) — a
+statement sequence whose value is its last statement — while a bare `{ … }`
+stays a set/dictionary. See [Blocks](/cortex/control-flow/#blocks).
 
 ```cortex
 { one -> 1, two -> 2 }

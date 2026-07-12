@@ -197,6 +197,10 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   // Block / If
   ['Block', ['Block', 'a', 2]],
   ['Block (3 statements)', ['Block', 'a', 'b', 'c']],
+  ['Block empty', ['Block']],
+  ['Block single statement', ['Block', 'a']],
+  ['Block nested in expression', ['Add', ['Block', 'a', 'b'], 1]],
+  ['Function with do-block body', ['Function', ['Block', 'a', 'b'], 'x']],
   ['If (generic function form)', ['If', 'c', 't', 'e']],
 
   // Interpolated string

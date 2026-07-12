@@ -394,6 +394,29 @@ function restoreBodyScopeParams(
 }
 
 /**
+ * If `expr` is a bare symbol bound to a user-defined function literal (an
+ * operator definition created by `helper(x) = …`), return the underlying
+ * `Function` literal so the function can escape its defining scope as a
+ * first-class value. Otherwise return `expr` unchanged.
+ *
+ * Must be called while the defining call frame is still pushed, so the
+ * operator definition is reachable via `lookupDefinition`.
+ */
+export function resolveEscapingLambda(
+  ce: ComputeEngine,
+  expr: Expression
+): Expression {
+  if (!isSymbol(expr)) return expr;
+  const def = ce.lookupDefinition(expr.symbol);
+  if (def && 'operator' in def) {
+    const literal = (def.operator as { _lambdaLiteral?: Expression })
+      ._lambdaLiteral;
+    if (literal !== undefined) return literal;
+  }
+  return expr;
+}
+
+/**
  * Recursively walk `expr` and rebind any Function literals so their body
  * scopes close over `closureParent`. This handles Functions nested inside
  * List, Tuple, Pair, or any other compound expression.
@@ -666,6 +689,17 @@ function makeLambda(
     let result: Expression;
     try {
       result = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));
+
+      // A function body whose final value is a *bare symbol* bound to a
+      // user-defined function literal (`helper(x) = …`, which creates an
+      // operator definition local to this call frame) must return that
+      // function as a first-class value so it can escape the frame. The
+      // operator definition is unreachable once the frame is popped, but its
+      // stored literal (`_lambdaLiteral`) is a plain value. Resolve it here,
+      // while the frame is still pushed and the definition is reachable;
+      // `captureClosures` (next) then rebinds the literal's free variables to
+      // this frame. (Built-in operators are not lambdas and are unaffected.)
+      result = resolveEscapingLambda(ce, result);
 
       // Closure capture: walk the result tree and rebind any Function literals
       // so their body scopes close over the current freshScope.

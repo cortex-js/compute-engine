@@ -95,6 +95,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    */
   _isLambda = false;
 
+  /** When this operator definition was created from a user-defined function
+   * literal (`_isLambda === true`), this holds the boxed `Function` literal
+   * it was built from. Lets a *bare* symbol bound to this definition resolve
+   * to a first-class function value in value position (e.g. returning a
+   * locally-defined `helper` from a function body so it can escape its
+   * defining scope). `undefined` for built-in operators.
+   * @internal
+   */
+  _lambdaLiteral?: Expression;
+
   type?: (
     ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine }
@@ -347,8 +357,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
       // Mark this operator definition as backed by a user-defined function
       // literal. Enables auto-broadcasting at apply time.
-      if (isFunction(boxedFn) && boxedFn.operator === 'Function')
+      if (isFunction(boxedFn) && boxedFn.operator === 'Function') {
         this._isLambda = true;
+        this._lambdaLiteral = boxedFn;
+      }
 
       const fn = applicable(boxedFn);
       // Thread the caller's options (esp. `numericApproximation` from

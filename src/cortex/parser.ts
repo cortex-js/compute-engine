@@ -411,6 +411,34 @@ export class Parser {
     );
   }
 
+  /** `do { … }`: a statement block in expression position. The `do` keyword
+   * turns the brace-delimited block (otherwise the `{…}` collection grammar)
+   * into a `Block`, so it can appear anywhere an expression can (a lambda body
+   * `x |-> do { … }`, an assignment RHS, an argument). A `do` not followed by
+   * `{` is a diagnostic (with a fix-it suggesting `{`). */
+  private parseDoBlock(): MathJsonExpression | null {
+    const kw = this.advance(); // 'do'
+    if (!this.check('OPEN_BRACE')) {
+      this.diagnostics.push({
+        severity: 'error',
+        message: ['opening-bracket-expected', '{'],
+        range: [
+          this.baseOffset + this.current.start,
+          this.baseOffset + this.current.end,
+        ],
+        fixits: [[this.baseOffset + kw.end, this.baseOffset + kw.end, ' {}']],
+      });
+      return null;
+    }
+    const block = this.parseBlock();
+    // Widen the block's span to include the `do` keyword.
+    return this.wrap(
+      fnOps(block) ?? (['Block'] as MathJsonExpression[]),
+      kw.start,
+      this.localEnd(block) ?? this.previousEnd()
+    );
+  }
+
   //
   // ─── Declarations (`let` / `const`) ───────────────────────────────────────
   //
@@ -446,6 +474,11 @@ export class Parser {
     this.harvest(nameTok);
     const name =
       nameTok.type === 'VERBATIM_SYMBOL' ? (nameTok.value ?? '') : nameTok.text;
+    // The boolean-literal words `true`/`false` are reserved: they cannot name a
+    // binding (the `` `true` `` verbatim form still can). Other reserved words
+    // are contextual and remain usable as identifiers here.
+    if (nameTok.type === 'SYMBOL' && (name === 'true' || name === 'false'))
+      this.error(['reserved-word', name], nameTok.start, nameTok.end);
     const nameNode = this.wrap({ sym: name }, nameTok.start, nameTok.end);
     return this.finishDeclaration(isConst, kw.start, nameNode);
   }
@@ -1424,6 +1457,11 @@ export class Parser {
         // not only as a top-level statement. (`while`/`for` stay statement-only:
         // they evaluate for effect to `Nothing`.)
         if (token.text === 'if') return this.parseIf();
+        // `do { … }` is a block expression: a statement block whose value is
+        // its final statement, usable in any expression position. It lowers to
+        // the same `["Block", …]` an `if`/`function` body produces, so block
+        // scoping and the final-statement value come from the engine unchanged.
+        if (token.text === 'do') return this.parseDoBlock();
         return this.parseSymbol();
       case 'VERBATIM_SYMBOL':
         return this.parseVerbatimSymbol();
@@ -1470,6 +1508,16 @@ export class Parser {
       return this.wrap({ num: 'NaN' }, token.start, token.end);
     if (token.text === 'Infinity')
       return this.wrap({ num: '+Infinity' }, token.start, token.end);
+
+    // `true`/`false` are reserved-word input aliases for the boolean constants
+    // `True`/`False` (the serializer emits the capitalized spelling). Handled
+    // here, before the reserved-word rejection below, so they parse in
+    // expression position; a `let true = …` binding is still rejected in
+    // `parseDeclaration`.
+    if (token.text === 'true')
+      return this.wrap({ sym: 'True' }, token.start, token.end);
+    if (token.text === 'false')
+      return this.wrap({ sym: 'False' }, token.start, token.end);
 
     // A reserved word is rejected in expression position (the verbatim
     // `` `word` `` form, handled by `parseVerbatimSymbol`, still works). Word
@@ -1607,6 +1655,12 @@ export class Parser {
     const { values, open, end } = this.parseBracketedList('CLOSE_PAREN', ')');
 
     if (values.length === 0) {
+      // An empty `()` immediately before a mapsto arrow is a zero-parameter
+      // lambda parameter list: `() |-> expr` → `["Function", body]`. Emit an
+      // empty `Tuple` so `mapstoParams` yields no parameters. Anywhere else,
+      // an empty parenthesis is a diagnostic (no empty tuple in v0).
+      if (this.check('OPERATOR') && this.current.text === '|->')
+        return this.wrap(['Tuple'] as MathJsonExpression[], open.start, end);
       if (this.diagnostics.length === diagBefore)
         this.error(['expression-expected'], open.start, end);
       return null;

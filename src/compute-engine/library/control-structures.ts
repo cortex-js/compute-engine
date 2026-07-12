@@ -1,4 +1,7 @@
-import { evaluateStatements } from '../function-utils.js';
+import {
+  evaluateStatements,
+  resolveEscapingLambda,
+} from '../function-utils.js';
 import { checkConditions } from '../boxed-expression/rules.js';
 import { widen } from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
@@ -340,7 +343,12 @@ function evaluateBlock(
       scope.bindings.delete(name);
   }
 
-  return evaluateStatements(ce, ops);
+  // If the block's final value is a bare symbol bound to a user-defined
+  // function literal (`helper(x) = …` → a block-local operator definition),
+  // return the underlying `Function` literal so the function escapes the
+  // block as a first-class value. Resolved here, while the block scope (which
+  // holds the operator definition) is still the current lexical scope.
+  return resolveEscapingLambda(ce, evaluateStatements(ce, ops));
 }
 
 /**

@@ -66,14 +66,14 @@ The Verbatim Form must be used if the symbol name is a reserved word.
 **Reserved words** are: `abstract`, `at`, `and`, `as`, `async`, `assert`,
 `await`, `begin`, `break`, `case`, `catch`, `class`, `const`, `continue`,
 `debugger`, `default`, `delete`, `dynamic`, `do`, `each`, `else`, `end`,
-`export`, `extern`, `finally`, `for`, `from`, `function`, `generator`, `get`,
-`global`, `goto`, `if`, `in`, `inline`, `interface`, `internal`, `import`,
-`iterator`, `label`, `lazy`, `local`, `loop`, `match`, `module`, `namespace`,
-`native`, `new`, `not`, `of`, `on`, `optional`, `or`, `package`, `parallel`,
-`private`, `protected`, `protocol`, `public`, `repeat`, `return`, `self`,
-`set`, `static`, `super`, `switch`, `this`, `throw`, `to`, `try`, `union`,
-`until`, `using`, `var`, `variant`, `warn`, `when`, `where`, `while`, `with`,
-`xor`, `yield`.
+`export`, `extern`, `false`, `finally`, `for`, `from`, `function`, `generator`,
+`get`, `global`, `goto`, `if`, `in`, `inline`, `interface`, `internal`,
+`import`, `iterator`, `label`, `lazy`, `local`, `loop`, `match`, `module`,
+`namespace`, `native`, `new`, `not`, `of`, `on`, `optional`, `or`, `package`,
+`parallel`, `private`, `protected`, `protocol`, `public`, `repeat`, `return`,
+`self`, `set`, `static`, `super`, `switch`, `this`, `throw`, `to`, `true`,
+`try`, `union`, `until`, `using`, `var`, `variant`, `warn`, `when`, `where`,
+`while`, `with`, `xor`, `yield`.
 
 **To write a symbol with the _Verbatim Form_** , put a backtick **`` ` ``**
 (**U+0060 GRAVE ACCENT**) before and after its name.

@@ -89,6 +89,17 @@ f = x |-> x + 1
 ["Assign", "f", ["Function", ["Add", "x", 1], "x"]]
 ```
 
+A lambda can take **no** parameters — an empty parameter list `()` before the
+arrow:
+
+```cortex
+() |-> 42
+```
+
+```json
+["Function", 42]
+```
+
 ## `if` / `else`
 
 `if`/`else` is an **expression**, not a statement — it evaluates to a value:
@@ -222,6 +233,35 @@ if a { if b { 1 } }
 ```json
 ["If", "a", ["Block", ["If", "b", ["Block", 1]]]]
 ```
+
+### `do { … }` block expressions
+
+To use a statement block **in expression position** — where a bare `{ … }`
+would be the collection grammar — prefix it with `do`. `do { … }` opens a
+statement block usable anywhere an expression can appear: a lambda body, an
+assignment right-hand side, a function argument. Its value is its last
+statement, and it pushes its own lexical scope, exactly like a keyword-led
+block:
+
+```cortex
+let y = do { let t = 3; t + 1 }
+```
+
+```json
+["Declare", "y", ["Dictionary", ["KeyValuePair", "value",
+  ["Block", ["Declare", "t", ["Dictionary", ["KeyValuePair", "value", 3]]],
+    ["Add", "t", 1]]]]]
+```
+
+Because a lambda body is an ordinary expression, `x |-> do { … }` produces the
+same `Function(Block(…), x)` shape a named `function` body does — so a closure
+whose body runs several statements is written with `do`:
+
+```cortex
+counter |-> do { counter = counter + 1; counter }
+```
+
+A `do` **not** followed by `{` is an `opening-bracket-expected` diagnostic.
 
 ## `return` / `break` / `continue`
 

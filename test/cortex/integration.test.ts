@@ -123,6 +123,41 @@ describe('CORTEX PHASE 4 — notebook integration', () => {
   });
 });
 
+describe('CORTEX — named inner function escapes its defining scope', () => {
+  // Rung 4 of the do-expression ladder: a named inner function
+  // (`helper(x) = …`) creates a block-local *operator* definition. When the
+  // enclosing function returns the bare `helper` symbol, the block's final
+  // value must resolve to the underlying function literal so it can escape the
+  // (soon-popped) call frame as a first-class value — matching how a returned
+  // lambda (`x |-> …`) already escapes.
+  const run = (src: string) =>
+    executeCortex(new ComputeEngine(), src).value.toString();
+
+  test('a returned named helper is callable after the frame is popped', () => {
+    expect(
+      run('function make() { helper(x) = x + 1; helper }\nlet h = make()\nh(41)')
+    ).toBe('42');
+  });
+
+  test('a returned named helper captures the enclosing frame', () => {
+    expect(
+      run('function make() { let s = 100; g(x) = s + x; g }\nlet h = make()\nh(5)')
+    ).toBe('105');
+  });
+
+  test('a returned named helper captures a parameter of the enclosing call', () => {
+    expect(
+      run('function make(a) { helper(x) = x + a; helper }\nlet h = make(10)\nh(5)')
+    ).toBe('15');
+  });
+
+  test('a returned lambda still escapes (unchanged)', () => {
+    expect(
+      run('function make() { let s = 10; x |-> s + x }\nlet f = make()\nf(5)')
+    ).toBe('15');
+  });
+});
+
 //
 // The remaining DoD behaviors — errors-are-values for a plain runtime/type
 // error, `#env`/`#navigator` pragma gating (off by default, on with

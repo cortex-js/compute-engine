@@ -1650,6 +1650,63 @@ describe('CORTEX PARSING OPERATORS', () => {
       ['String', ['unexpected-symbol', '!']],
     ]);
   });
+  test('Range operator `..` (and Unicode `‥`)', () => {
+    expect(validCortex('1..5')).toStrictEqual(['Range', 1, 5]);
+    expect(validCortex('1‥5')).toStrictEqual(['Range', 1, 5]);
+    expect(validCortex('1 .. 5')).toStrictEqual(['Range', 1, 5]);
+    expect(validCortex('x..y')).toStrictEqual(['Range', 'x', 'y']);
+    expect(validCortex('(a + 1)..(b - 1)')).toStrictEqual([
+      'Range',
+      ['Add', 'a', 1],
+      ['Subtract', 'b', 1],
+    ]);
+    // `..` binds looser than `-` (so `1..n-1` is `1..(n-1)`) and tighter than
+    // the relational operators (so `k in 1..5` is `k in (1..5)`).
+    expect(validCortex('1..n - 1')).toStrictEqual([
+      'Range',
+      1,
+      ['Subtract', 'n', 1],
+    ]);
+    expect(validCortex('k in 1..5')).toStrictEqual([
+      'Element',
+      'k',
+      ['Range', 1, 5],
+    ]);
+  });
+  test('`..` does not disturb decimal literals', () => {
+    // The maximal-munch fix keeps `1.5`/`1.`/`3.14` as numbers, and `1..5` as a
+    // range (not `1.` `.5`).
+    expect(validCortex('1.5')).toStrictEqual(1.5);
+    expect(validCortex('3.14')).toStrictEqual(3.14);
+    expect(validCortex('1..5')).toStrictEqual(['Range', 1, 5]);
+  });
+});
+
+describe('CORTEX PARSING BOOLEAN LITERALS', () => {
+  test('`true`/`false` are input aliases for `True`/`False`', () => {
+    expect(validCortex('true')).toStrictEqual('True');
+    expect(validCortex('false')).toStrictEqual('False');
+    expect(validCortex('true && false')).toStrictEqual(['And', 'True', 'False']);
+    expect(validCortex('!true')).toStrictEqual(['Not', 'True']);
+    expect(validCortex('let x = true')).toStrictEqual([
+      'Declare',
+      'x',
+      ['Dictionary', ['KeyValuePair', 'value', 'True']],
+    ]);
+  });
+  test('the verbatim form still names a plain symbol', () => {
+    expect(validCortex('`true`')).toStrictEqual('true');
+  });
+  test('`true`/`false` are reserved as binding names', () => {
+    expect(invalidCortex('let true = 1')).toStrictEqual([
+      'Error',
+      ['String', ['reserved-word', 'true']],
+    ]);
+    expect(invalidCortex('const false = 2')).toStrictEqual([
+      'Error',
+      ['String', ['reserved-word', 'false']],
+    ]);
+  });
 });
 
 // The parser and serializer both read the shared `operators.ts` table, so a
@@ -1762,5 +1819,104 @@ describe('CORTEX PARSING FUNCTIONS', () => {
         ],
       ]
     `);
+  });
+});
+
+describe('CORTEX PARSING `do { … }` BLOCK EXPRESSIONS', () => {
+  test('a do-block in expression position is a Block', () => {
+    // The `do` keyword turns the brace-delimited statement block (otherwise the
+    // `{…}` collection grammar) into a `Block` usable anywhere an expression
+    // can. Its value is its final statement.
+    expect(validCortex('do { let t = 3; t + 1 }')).toStrictEqual([
+      'Block',
+      ['Declare', 't', ['Dictionary', ['KeyValuePair', 'value', 3]]],
+      ['Add', 't', 1],
+    ]);
+  });
+
+  test('a do-block as an assignment RHS', () => {
+    expect(validCortex('let y = do { let t = 3; t + 1 }')).toStrictEqual([
+      'Declare',
+      'y',
+      [
+        'Dictionary',
+        [
+          'KeyValuePair',
+          'value',
+          [
+            'Block',
+            ['Declare', 't', ['Dictionary', ['KeyValuePair', 'value', 3]]],
+            ['Add', 't', 1],
+          ],
+        ],
+      ],
+    ]);
+  });
+
+  test('a do-block as a lambda body', () => {
+    expect(
+      validCortex('x |-> do { let t = x * x; t + 1 }')
+    ).toStrictEqual([
+      'Function',
+      [
+        'Block',
+        ['Declare', 't', ['Dictionary', ['KeyValuePair', 'value', ['Multiply', 'x', 'x']]]],
+        ['Add', 't', 1],
+      ],
+      'x',
+    ]);
+  });
+
+  test('an empty do-block is `["Block"]`', () => {
+    expect(validCortex('do {}')).toStrictEqual(['Block']);
+  });
+
+  test('a single-statement do-block', () => {
+    expect(validCortex('do { 42 }')).toStrictEqual(['Block', 42]);
+  });
+
+  test('a bare `{…}` lambda body stays a Set (no regression)', () => {
+    expect(validCortex('x |-> {1, 2}')).toStrictEqual([
+      'Function',
+      ['Set', 1, 2],
+      'x',
+    ]);
+  });
+
+  test('`do` not followed by `{` is a diagnostic', () => {
+    const [, diags] = parseCortex('do 5');
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].message).toStrictEqual(['opening-bracket-expected', '{']);
+  });
+
+  test('`do` used as a bare value (no `{`) is a diagnostic', () => {
+    // In expression position `do` opens a block; without a following `{` it is
+    // an `opening-bracket-expected` diagnostic (not a bare reserved-word one).
+    const [, diags] = parseCortex('y = do');
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].message).toStrictEqual(['opening-bracket-expected', '{']);
+  });
+
+  test('`do` stays contextually usable as a binding name', () => {
+    // Reserved words other than the boolean literals `true`/`false` remain
+    // usable as identifiers (existing convention), so `let do = 1` is accepted.
+    const [, diags] = parseCortex('let do = 1');
+    expect(diags).toEqual([]);
+  });
+});
+
+describe('CORTEX PARSING ZERO-PARAMETER LAMBDAS', () => {
+  test('`() |-> expr` is a zero-parameter Function', () => {
+    expect(validCortex('() |-> 42')).toStrictEqual(['Function', 42]);
+  });
+
+  test('a zero-argument call `c()` parses', () => {
+    expect(validCortex('c()')).toStrictEqual(['c']);
+  });
+
+  test('a bare `()` (not before `|->`) is still a diagnostic', () => {
+    const [, diags] = parseCortex('()');
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].message).toStrictEqual(['expression-expected']);
   });
 });

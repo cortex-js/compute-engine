@@ -30,7 +30,13 @@ function typeCouldBeCollection(type: Type): boolean {
       type === 'any'
     );
   }
-  if (type.kind === 'list' || type.kind === 'set' || type.kind === 'tuple')
+  if (
+    type.kind === 'collection' ||
+    type.kind === 'indexed_collection' ||
+    type.kind === 'list' ||
+    type.kind === 'set' ||
+    type.kind === 'tuple'
+  )
     return true;
   if (type.kind === 'union')
     return type.types.some((t) => typeCouldBeCollection(t));
@@ -52,7 +58,13 @@ function typeCouldBeNumericCollection(type: Type): boolean {
       type === 'indexed_collection'
     );
   }
-  if (type.kind === 'list' || type.kind === 'set') return true;
+  if (
+    type.kind === 'collection' ||
+    type.kind === 'indexed_collection' ||
+    type.kind === 'list' ||
+    type.kind === 'set'
+  )
+    return true;
   if (type.kind === 'union')
     return type.types.some((t) => typeCouldBeNumericCollection(t));
   return false;
