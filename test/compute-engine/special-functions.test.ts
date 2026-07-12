@@ -1,6 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { erfInv } from '../../src/compute-engine/numerics/special-functions';
+import { erfInv, gamma } from '../../src/compute-engine/numerics/special-functions';
 import { engine } from '../utils';
 
 const ce = engine;
@@ -197,6 +197,16 @@ describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
   test('Γ(z) overflows only past the IEEE-754 cutoff', () => {
     expectApprox(ce.expr(['Gamma', 171.624]), 1.7942117599248104e308, 1e-12);
     expect(ce.expr(['Gamma', 171.625]).N().re).toBe(Infinity);
+  });
+
+  test('machine Γ(n) is bit-exact at integer arguments (= (n-1)!)', () => {
+    // Regression: the Lanczos factor Γ(1) ≈ 1 - 3e-16 used to poison the
+    // otherwise-exact integer product (Γ(5) returned 23.999999999999993).
+    let factorial = 1;
+    for (let n = 1; n <= 19; n++) {
+      expect(gamma(n)).toBe(factorial);
+      factorial *= n;
+    }
   });
 });
 

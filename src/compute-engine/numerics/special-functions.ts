@@ -67,6 +67,10 @@ function gammaBalancedProduct(start: number, count: number): number {
 export function gamma(z: number): number {
   if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
   if (z > GAMMA_OVERFLOW_THRESHOLD) return Infinity;
+  // Positive integer: Γ(z) = (z-1)!, exact as a product of doubles
+  // (bit-exact through 18!, correctly rounded beyond) — the Lanczos factor
+  // Γ(1) ≈ 1 - 3e-16 would otherwise poison it.
+  if (Number.isInteger(z)) return gammaBalancedProduct(1, z - 1);
   if (z >= 2) {
     const shift = Math.floor(z) - 1;
     const residue = z - shift;
