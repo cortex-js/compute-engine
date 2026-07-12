@@ -1,85 +1,47 @@
 ## [Unreleased]
 
-### Numeric Evaluation
-
-- **Numeric infinite products use tail acceleration.** `.N()` now
-  Richardson-extrapolates the logarithms of positive real factors instead of
-  returning a plain finite truncation. This gives accurate values for products
-  such as `Product(1 + 1/k², k, 1, +∞) = sinh(π)/π`. Products with non-real,
-  non-positive, or non-convergent factors decline the accelerator and retain
-  the existing bounded-truncation behavior.
-
-- **Machine `Gamma` keeps full relative accuracy through the overflow edge.**
-  Positive real arguments now use a balanced recurrence from the Lanczos core
-  instead of reconstructing large values from `exp(gammaln(z))`, which
-  preserves about 15-16 digits up to the IEEE-754 limit near `Gamma(171.624)`.
-
-### Symbolic Computation
-
-- **Exact cube-root arithmetic handles more algebraic forms.** Positive
-  perfect-power bases with rational exponents normalize to a common base and
-  extract their integer part (`4^(2/3) → 2·2^(1/3)`), allowing compatible
-  cube-root powers to combine exactly. Real nested cube roots of the form
-  `∛(a+b√c)` are denested when exact integer conjugate identities prove a
-  result; in particular, `∛(90+34√7) → 3+√7` (and the conjugate form with
-  minus signs). The Wester-28 cube-root identity now simplifies directly to
-  exact zero (no explicit `Expand` required) and numericizes without `NaN`.
-
-- **Infinite p-series support positive-integer lower bounds beyond 1.**
-  `Sum(k^(-s), k, a, +∞)` now returns
-  `Zeta(s) − Sum(k^(-s), k, 1, a−1)` for exact real `s > 1`; for example,
-  `Sum(1/k², k, 3, +∞)` evaluates to `π²/6 − 5/4`. The existing lower-bound-1
-  behavior and divergence guards are unchanged.
-
-- **`e^{iθ}` stays exact for constructible angles.** `e^{i\pi/3}` now evaluates
-  to `1/2 + (√3/2)i` instead of a machine float (the exact cosine/sine values
-  were being recombined through float-folding arithmetic). `.N()` numericizes
-  as before, and the degenerate angles (`e^{i\pi} → -1`, `e^{i\pi/2} → i`) are
-  unchanged.
-
 ### Programming and Collections
 
 - **Dictionary lookups have the value's type.** `At(dict, key)` — and thus
-  `d["a"]` in Cortex — was statically typed as the key-value *pair*
-  (`tuple<string, T>`), so using a lookup directly in arithmetic
-  (`d["a"] + 10`) failed with an `incompatible-type` error. It is now typed as
-  the value; a record indexed by a literal string gets that field's precise
-  type.
+  `d["a"]` in Cortex — was statically typed as the key-value _pair_
+  (`tuple<string, T>`), so using a lookup directly in arithmetic (`d["a"] + 10`)
+  failed with an `incompatible-type` error. It is now typed as the value; a
+  record indexed by a literal string gets that field's precise type.
 
 - **`Reduce`/`Fold` honor the exactness contract.** The compiled floating-point
-  fast path no longer runs under plain `evaluate()`: exact operands fold
-  exactly (`Fold((a, k) ↦ a + 1/k, 0, Range(1, 5))` → `137/60` instead of
-  `2.2833…`). The fast path is reserved for `.N()` and already-inexact inputs.
+  fast path no longer runs under plain `evaluate()`: exact operands fold exactly
+  (`Fold((a, k) ↦ a + 1/k, 0, Range(1, 5))` → `137/60` instead of `2.2833…`).
+  The fast path is reserved for `.N()` and already-inexact inputs.
   Complex-valued folds no longer silently drop imaginary parts
   (`Product(Map(Range(1, 3), k ↦ k + i))` → `10i`, previously `6`).
 
 - **`Map` infers its element type from the mapped function.** The result of
-  `Map(Range(1, 3), k ↦ k + i)` was typed with the *source* element type
+  `Map(Range(1, 3), k ↦ k + i)` was typed with the _source_ element type
   (`integer`); it now reflects the lambda's result type, so downstream
   operations dispatch correctly.
 
 - **Elementwise broadcasting is uniform across lazy and eager collections.** A
   finite lazy `Range` now broadcasts like an eager `List` in tuple products:
-  with `R = Range(-2, 2)`, `R·(2,3)` yields a list of five scaled points
-  instead of distributing the range inside the tuple components. A scalar also
-  folds into a collection produced by an inner broadcast step: `L^2 - 2`
-  evaluates to `[-1, 2, 7]` instead of the unevaluated `Add(-2, [1, 4, 9])`,
-  and evaluation is idempotent again on these shapes. Infinite or
-  unknown-length ranges stay symbolic rather than transposing.
+  with `R = Range(-2, 2)`, `R·(2,3)` yields a list of five scaled points instead
+  of distributing the range inside the tuple components. A scalar also folds
+  into a collection produced by an inner broadcast step: `L^2 - 2` evaluates to
+  `[-1, 2, 7]` instead of the unevaluated `Add(-2, [1, 4, 9])`, and evaluation
+  is idempotent again on these shapes. Infinite or unknown-length ranges stay
+  symbolic rather than transposing.
 
 - **Scalar operations accept lazy collection operands during validation.**
-  `Mod([0,\ldots,kN], N)` with a symbolic bound produced an
-  `incompatible-type` error at canonicalization even though the eager-list
-  form broadcast fine; the argument validator now recognizes parametrized
-  `indexed_collection<T>` wherever broadcasting applies. Declared types follow
-  the values: broadcast results type `list<…>` (previously a scalar-or-list
-  union, or a scalar type for symbolic-length ranges).
+  `Mod([0,\ldots,kN], N)` with a symbolic bound produced an `incompatible-type`
+  error at canonicalization even though the eager-list form broadcast fine; the
+  argument validator now recognizes parametrized `indexed_collection<T>`
+  wherever broadcasting applies. Declared types follow the values: broadcast
+  results type `list<…>` (previously a scalar-or-list union, or a scalar type
+  for symbolic-length ranges).
 
 - **Big integers survive numeric list literals.** A list literal promoted to a
-  tensor stored oversized integers in float64 and truncated them
-  (`[100!]` lost digits, breaking exact iterative algorithms such as a
-  Fibonacci pair accumulator). Integers beyond the float-safe range now keep
-  their exact representation.
+  tensor stored oversized integers in float64 and truncated them (`[100!]` lost
+  digits, breaking exact iterative algorithms such as a Fibonacci pair
+  accumulator). Integers beyond the float-safe range now keep their exact
+  representation.
 
 - **`StringFrom` joins collections.** With a list argument and the
   `"unicode-scalars"`, `"utf-8"`, or `"utf-16"` format,
@@ -88,43 +50,135 @@
   strings.
 
 - **One-step function definitions bind inside function bodies (Cortex).**
-  `function outer(n) { sq(m) = m * m; sq(n) }` left `sq(n)` unevaluated
-  because the call site resolved a value placeholder while the runtime created
-  an operator definition; function application now falls back to the operator
+  `function outer(n) { sq(m) = m * m; sq(n) }` left `sq(n)` unevaluated because
+  the call site resolved a value placeholder while the runtime created an
+  operator definition; function application now falls back to the operator
   definition. The example-program suite grew by 18 programs covering control
-  flow, number theory, complex numbers, linear algebra, and exact sums
-  (mirrored in the Cortex documentation).
+  flow, number theory, complex numbers, linear algebra, and exact sums (mirrored
+  in the Cortex documentation).
 
 - **Cortex: `do { … }` block expressions and zero-parameter lambdas.** A
   statement block can now appear in any expression position with the explicit
   `do` prefix — its value is its final statement — so multi-statement closure
-  bodies are expressible: `x |-> do { let t = x * x; t + 1 }`. Set literals
-  are unchanged (`x |-> {1, 2}` still returns a set). Zero-parameter lambdas
-  (`() |-> …`) now parse and apply, enabling the stateful
-  `makeCounter`-style closure documented in the examples.
+  bodies are expressible: `x |-> do { let t = x * x; t + 1 }`. Set literals are
+  unchanged (`x |-> {1, 2}` still returns a set). Zero-parameter lambdas
+  (`() |-> …`) now parse and apply, enabling the stateful `makeCounter`-style
+  closure documented in the examples.
 
 - **Cortex: a named inner function escapes its scope as a value.**
   `function make() { helper(x) = x + 1; helper }` now returns a callable
-  first-class function — previously the returned symbol went inert once the
-  call frame popped. Captured locals and parameters of the enclosing call are
+  first-class function — previously the returned symbol went inert once the call
+  frame popped. Captured locals and parameters of the enclosing call are
   preserved; returned `|->` lambdas are unchanged.
 
-- **Cortex: lowercase `true`/`false`, ASCII `..` ranges, and `StringJoin`
-  over a list.** `true`/`false` are now input aliases for `True`/`False` (and
-  reserved as binding names); `1..n` is a range (`for k in 1..5`), equivalent
-  to the existing `‥`, without disturbing decimal literals like `1.5`; and
-  `StringJoin` accepts a single collection of strings —
+- **Cortex: lowercase `true`/`false`, ASCII `..` ranges, and `StringJoin` over a
+  list.** `true`/`false` are now input aliases for `True`/`False` (and reserved
+  as binding names); `1..n` is a range (`for k in 1..5`), equivalent to the
+  existing `‥`, without disturbing decimal literals like `1.5`; and `StringJoin`
+  accepts a single collection of strings —
   `StringJoin(Reverse(Characters("hello")))` → `"olleh"`.
 
 - **Cortex: "did you mean" warnings for near-miss function names.** Calling an
-  undeclared function whose name is close to a library operator no longer
-  fails silently symbolic: `executeCortex` emits a warning diagnostic with the
+  undeclared function whose name is close to a library operator no longer fails
+  silently symbolic: `executeCortex` emits a warning diagnostic with the
   suggestion (`Quartile(xs)` → _did you mean `Quartiles`?_). The match is
   conservative (case-insensitive, singular/plural, small edit distance, unique
   prefix) and the diagnostic only fires when a suggestion exists, so
   intentionally symbolic calls are never flagged; the returned value is
   unchanged. The matcher is also available as `ce.suggestOperatorName(name)`.
   `Arg` is now an alias for `Argument`.
+
+### Compilation
+
+- **Calls to user-defined functions compile.** After `f(x) := e^{-x^2/2}`,
+  compiling `f(2)` — or any expression referencing `f` — emits the definition as
+  a named local function instead of throwing ``Unknown operator `f` ``. Nested
+  user functions are emitted in dependency order; recursive definitions fail
+  closed with an explanatory error. This also removes a silent interpreted
+  fallback in numeric integration: definite integrals of user-defined functions
+  now run compiled quadrature (10⁷ samples instead of 10⁴ — comparable wall
+  time, ~30× tighter error estimate). Applies to the `javascript` and
+  `interval-js` targets.
+
+- **Collection-valued conditions fail closed instead of compiling wrong code.**
+  `Equal`/`NotEqual` over a collection-typed operand, and `If`/`Which`/`When`
+  with a collection-typed condition, previously compiled with `success: true`
+  and returned `null` or the wrong branch at run time; they now throw an
+  explanatory compile-time error. Interpreted evaluation is unchanged:
+  comparisons broadcast elementwise, conditionals require a scalar boolean.
+
+- **`Reduce`, `Length`, and `At` compile on the `javascript` target.**
+  `Reduce(xs, Add|Multiply|Min|Max, init?)` compiles to a loop; `Length` returns
+  the element count; `At` follows the interpreter's 1-based, negative-from-end
+  indexing (out-of-range yields `NaN`).
+
+- **GLSL: `Length` no longer collides with the `length()` builtin.** CE's
+  `Length` (element count) compiled to GLSL `length()` — the Euclidean norm —
+  reporting success while computing the wrong value, or emitting invalid GLSL
+  for lists longer than four. `length()` is now emitted for `Norm`; collection
+  `Length` fails closed on the GPU targets.
+
+- **GLSL/WGSL: literal integer powers are sign-correct on the GPU.** `x^3`
+  compiled to `pow(x, 3.0)`, which the GLSL specification leaves undefined for
+  negative bases — real GPUs returned `pow(-2, 3) = +8`, silently flipping the
+  sign of odd-power terms. Small integer exponents now emit repeated
+  multiplication; larger and compound-base cases use a sign-preserving
+  `_gpu_powi` preamble helper; negative integer exponents wrap the reciprocal.
+  Fractional exponents still emit `pow`.
+
+- **The `interval-glsl` target is deprecated.** GPU interval evaluation only
+  pays off when the entire pipeline stays on the GPU, and the target cannot
+  compile relational operators, so it cannot host restriction conditions. A
+  once-per-process warning now points to `interval-js` and the scalar
+  `glsl`/`wgsl` targets. It will be removed in a future release.
+
+### Numeric Evaluation
+
+- **Numeric infinite products use tail acceleration.** `.N()` now
+  Richardson-extrapolates the logarithms of positive real factors instead of
+  returning a plain finite truncation. This gives accurate values for products
+  such as `Product(1 + 1/k², k, 1, +∞) = sinh(π)/π`. Products with non-real,
+  non-positive, or non-convergent factors decline the accelerator and retain the
+  existing bounded-truncation behavior.
+
+- **Machine `Gamma` keeps full relative accuracy through the overflow edge.**
+  Positive real arguments now use a balanced recurrence from the Lanczos core
+  instead of reconstructing large values from `exp(gammaln(z))`, which preserves
+  about 15-16 digits up to the IEEE-754 limit near `Gamma(171.624)`.
+
+### Linear Algebra
+
+- **Matrix operators infer fresh symbolic operands from context.** An expression
+  such as `\det(A+2B)` no longer fails because bottom-up arithmetic
+  canonicalization provisionally typed `A` and `B` as numbers before
+  `Determinant` required a matrix. Validation now repairs only inferences made
+  while constructing the current expression and canonicalizes the argument once
+  more with matrix context. Explicit declarations and inferences from earlier
+  expressions are never overwritten, and ambiguous products remain unchanged
+  rather than guessing which factor is the matrix.
+
+### Symbolic Computation
+
+- **Exact cube-root arithmetic handles more algebraic forms.** Positive
+  perfect-power bases with rational exponents normalize to a common base and
+  extract their integer part (`4^(2/3) → 2·2^(1/3)`), allowing compatible
+  cube-root powers to combine exactly. Real nested cube roots of the form
+  `∛(a+b√c)` are denested when exact integer conjugate identities prove a
+  result; in particular, `∛(90+34√7) → 3+√7` (and the conjugate form with minus
+  signs). The Wester-28 cube-root identity now simplifies directly to exact zero
+  (no explicit `Expand` required) and numericizes without `NaN`.
+
+- **Infinite p-series support positive-integer lower bounds beyond 1.**
+  `Sum(k^(-s), k, a, +∞)` now returns `Zeta(s) − Sum(k^(-s), k, 1, a−1)` for
+  exact real `s > 1`; for example, `Sum(1/k², k, 3, +∞)` evaluates to
+  `π²/6 − 5/4`. The existing lower-bound-1 behavior and divergence guards are
+  unchanged.
+
+- **`e^{iθ}` stays exact for constructible angles.** `e^{i\pi/3}` now evaluates
+  to `1/2 + (√3/2)i` instead of a machine float (the exact cosine/sine values
+  were being recombined through float-folding arithmetic). `.N()` numericizes as
+  before, and the degenerate angles (`e^{i\pi} → -1`, `e^{i\pi/2} → i`) are
+  unchanged.
 
 ### Serialization
 
@@ -140,80 +194,24 @@
   leading sample fell back to a literal list containing a
   `ContinuationPlaceholder` that enumerated as `NaN`. Symbolic stepped forms
   infer a symbolic step when the samples are numeric multiples of one common
-  symbol (`[-3N,-2N,\ldots,3N]` → `Range(-3N, 3N, N)`, progression-validated
-  on the coefficients); generic sequence notation (`[x_1,x_2,\ldots,x_n]`)
+  symbol (`[-3N,-2N,\ldots,3N]` → `Range(-3N, 3N, N)`, progression-validated on
+  the coefficients); generic sequence notation (`[x_1,x_2,\ldots,x_n]`)
   intentionally still parses as a plain list.
-
-### Compilation
-
-- **Calls to user-defined functions compile.** After `f(x) := e^{-x^2/2}`,
-  compiling `f(2)` — or any expression referencing `f` — emits the definition
-  as a named local function instead of throwing ``Unknown operator `f` ``.
-  Nested user functions are emitted in dependency order; recursive definitions
-  fail closed with an explanatory error. This also removes a silent
-  interpreted fallback in numeric integration: definite integrals of
-  user-defined functions now run compiled quadrature (10⁷ samples instead of
-  10⁴ — comparable wall time, ~30× tighter error estimate). Applies to the
-  `javascript` and `interval-js` targets.
-
-- **Collection-valued conditions fail closed instead of compiling wrong
-  code.** `Equal`/`NotEqual` over a collection-typed operand, and
-  `If`/`Which`/`When` with a collection-typed condition, previously compiled
-  with `success: true` and returned `null` or the wrong branch at run time;
-  they now throw an explanatory compile-time error. Interpreted evaluation is
-  unchanged: comparisons broadcast elementwise, conditionals require a scalar
-  boolean.
-
-- **`Reduce`, `Length`, and `At` compile on the `javascript` target.**
-  `Reduce(xs, Add|Multiply|Min|Max, init?)` compiles to a loop; `Length`
-  returns the element count; `At` follows the interpreter's 1-based,
-  negative-from-end indexing (out-of-range yields `NaN`).
-
-- **GLSL: `Length` no longer collides with the `length()` builtin.** CE's
-  `Length` (element count) compiled to GLSL `length()` — the Euclidean norm —
-  reporting success while computing the wrong value, or emitting invalid GLSL
-  for lists longer than four. `length()` is now emitted for `Norm`; collection
-  `Length` fails closed on the GPU targets.
-
-- **GLSL/WGSL: literal integer powers are sign-correct on the GPU.** `x^3`
-  compiled to `pow(x, 3.0)`, which the GLSL specification leaves undefined for
-  negative bases — real GPUs returned `pow(-2, 3) = +8`, silently flipping
-  the sign of odd-power terms. Small integer exponents now emit repeated
-  multiplication; larger and compound-base cases use a sign-preserving
-  `_gpu_powi` preamble helper; negative integer exponents wrap the reciprocal.
-  Fractional exponents still emit `pow`.
-
-- **The `interval-glsl` target is deprecated.** GPU interval evaluation only
-  pays off when the entire pipeline stays on the GPU, and the target cannot
-  compile relational operators, so it cannot host restriction conditions. A
-  once-per-process warning now points to `interval-js` and the scalar
-  `glsl`/`wgsl` targets. It will be removed in a future release.
-
-### Linear Algebra
-
-- **Matrix operators infer fresh symbolic operands from context.** An expression
-  such as `\det(A+2B)` no longer fails because bottom-up arithmetic
-  canonicalization provisionally typed `A` and `B` as numbers before
-  `Determinant` required a matrix. Validation now repairs only inferences made
-  while constructing the current expression and canonicalizes the argument
-  once more with matrix context. Explicit declarations and inferences from
-  earlier expressions are never overwritten, and ambiguous products remain
-  unchanged rather than guessing which factor is the matrix.
 
 ### Engine Lifecycle
 
 - **Popping a scope releases configuration listeners owned by its constants.**
   Constant definitions now retain and invoke the unsubscribe closure returned
   when they register for precision and angular-unit changes. Local constants
-  from discarded scopes therefore no longer remain reachable for the lifetime
-  of the compute engine.
+  from discarded scopes therefore no longer remain reachable for the lifetime of
+  the compute engine.
 
 - **Cancellation errors carry a structured cause.** A cap breach reports
-  `'timeout'`, `'iteration-limit-exceeded'`, or `'recursion-depth-exceeded'`
-  via the exported `CancellationCause` type. In Cortex, a final-statement
-  breach carries the cause as a second operand on the `Error` value, and
-  non-final statements emit a dedicated `evaluation-canceled` diagnostic.
-  Error messages are unchanged, so existing string matching keeps working.
+  `'timeout'`, `'iteration-limit-exceeded'`, or `'recursion-depth-exceeded'` via
+  the exported `CancellationCause` type. In Cortex, a final-statement breach
+  carries the cause as a second operand on the `Error` value, and non-final
+  statements emit a dedicated `evaluation-canceled` diagnostic. Error messages
+  are unchanged, so existing string matching keeps working.
 
 ## 0.75.0 _2026-07-11_
 

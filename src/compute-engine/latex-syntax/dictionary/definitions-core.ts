@@ -22,6 +22,7 @@ import {
   ADDITION_PRECEDENCE,
   ARROW_PRECEDENCE,
   ASSIGNMENT_PRECEDENCE,
+  INVISIBLE_OP_PRECEDENCE,
   LatexDictionary,
   LatexDictionaryEntry,
   Parser,
@@ -1888,7 +1889,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // Not `parse: parseRange` directly: infix callbacks are invoked with
     // (parser, lhs, terminator), and the terminator must not land in
     // parseRange's `trailingDots` parameter.
-    parse: (parser: Parser, lhs: MathJsonExpression) => parseRange(parser, lhs),
+    parse: (parser: Parser, lhs: MathJsonExpression) => {
+      // A third dot means this is really the prose ellipsis `...`, which
+      // binds looser (see the entries below). Without this guard, in a
+      // context whose minPrec is above the ellipsis precedence (e.g. the
+      // prefix-minus operand in `[-9...9]`), `..` would poach the first two
+      // dots and misread the rest as a decimal (`9..(.9)`).
+      if (parser.peek === '.') return null;
+      return parseRange(parser, lhs);
+    },
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (args.length === 0) return '';
@@ -1940,24 +1949,32 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // No `name` field here — names must be unique per the dictionary rules;
   // the first Range entry owns the name. When there is no LHS the symbol
   // entries near the top of the file still fire (ContinuationPlaceholder).
+  //
+  // Unlike programmatic `..` (800), the prose ellipses bind BELOW implicit
+  // multiplication (650, rhs at 651) and the prefix-minus operand (703), so a
+  // leading sign or coefficient attaches to the first sample: `[-9...9]` →
+  // Range(-9, 9), `[-3N...3N]` → Range(-3N, 3N) — the Desmos comma-less
+  // range idiom. Must stay above the `/` rhs (601) so `1/(2...5)` broadcast
+  // division is unchanged, and above parseRange's rhs floor (270) so the
+  // stepped chain `a...b...c` still nests.
   {
     latexTrigger: ['.', '.', '.'],
     kind: 'infix',
-    precedence: 800,
+    precedence: INVISIBLE_OP_PRECEDENCE - 10,
     parse: (parser: Parser, lhs: MathJsonExpression) =>
       parseRange(parser, lhs, true),
   },
   {
     latexTrigger: ['\\ldots'],
     kind: 'infix',
-    precedence: 800,
+    precedence: INVISIBLE_OP_PRECEDENCE - 10,
     parse: (parser: Parser, lhs: MathJsonExpression) =>
       parseRange(parser, lhs, true),
   },
   {
     latexTrigger: ['\\dots'],
     kind: 'infix',
-    precedence: 800,
+    precedence: INVISIBLE_OP_PRECEDENCE - 10,
     parse: (parser: Parser, lhs: MathJsonExpression) =>
       parseRange(parser, lhs, true),
   },

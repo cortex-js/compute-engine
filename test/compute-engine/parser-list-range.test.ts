@@ -27,6 +27,75 @@ describe('Parser: list range ellipsis', () => {
     });
   });
 
+  // Comma-less forms with a compound first sample: the prose ellipsis binds
+  // looser than a prefix sign or implicit multiplication, so `[-9...9]` is
+  // Range(-9, 9), not List(Negate(Range(9, 9))). (Desmos emits these
+  // comma-less; the comma forms were fixed in 0.75.0.)
+  describe('comma-less form with signed/coefficiented first sample', () => {
+    test('`[-9...9]` → Range(-9, 9)', () => {
+      expect(parse('\\left[-9...9\\right]')).toEqual(['Range', -9, 9]);
+    });
+
+    test('`[-9...9]` enumerates 19 values', () => {
+      const expr = ce.parse('\\left[-9...9\\right]').evaluate();
+      const values = [...expr.each()].map((x) => x.valueOf());
+      expect(values).toEqual([
+        -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+      ]);
+    });
+
+    test('`[-N...N]` → Range(-N, N)', () => {
+      expect(parse('\\left[-N...N\\right]')).toEqual([
+        'Range',
+        ['Negate', 'N'],
+        'N',
+      ]);
+    });
+
+    test('`[-3N...3N]` → Range(-3N, 3N)', () => {
+      expect(parse('\\left[-3N...3N\\right]')).toEqual([
+        'Range',
+        ['Multiply', -3, 'N'],
+        ['Multiply', 3, 'N'],
+      ]);
+    });
+
+    test('`[-0.5...5]` (signed decimal first sample) → Range(-0.5, 5)', () => {
+      expect(parse('\\left[-0.5...5\\right]')).toEqual(['Range', -0.5, 5]);
+    });
+
+    test('`[0...kN]` (compound end) → Range(0, kN)', () => {
+      expect(parse('\\left[0...kN\\right]')).toMatchObject([
+        'Range',
+        0,
+        ['Multiply', 'N', 'k'],
+      ]);
+    });
+
+    test('`[-9\\ldots 9]` (\\ldots variant) → Range(-9, 9)', () => {
+      expect(parse('\\left[-9\\ldots 9\\right]')).toEqual(['Range', -9, 9]);
+    });
+
+    test('programmatic `..` unchanged: `1..5` and `1..3..9`', () => {
+      expect(parse('1..5')).toEqual(['Range', 1, 5]);
+      expect(parse('1..3..9')).toEqual(['Range', 1, 9, 2]);
+    });
+
+    test('ellipsis in an equation rhs: `x=1...5` → Equal(x, Range(1, 5))', () => {
+      expect(parse('x=1...5')).toEqual(['Equal', 'x', ['Range', 1, 5]]);
+    });
+
+    test('additive continuation unchanged: `1+2+\\ldots+n`', () => {
+      expect(parse('1+2+\\ldots+n')).toEqual([
+        'Add',
+        1,
+        2,
+        'ContinuationPlaceholder',
+        'n',
+      ]);
+    });
+  });
+
   // Single-anchor continuation `[1, ..., 10]`: one sample, so no step can be
   // inferred — it means the same as the endpoint-only `[1...10]`, i.e.
   // Range(1, 10). The internal `ContinuationPlaceholder` must never leak as a
