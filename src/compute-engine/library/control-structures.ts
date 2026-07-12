@@ -211,7 +211,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         }
         return ce._fn('When', [expr.canonical, cond.canonical]);
       },
-      evaluate: ([expr, cond], { engine: ce }) => {
+      evaluate: ([expr, cond], options) => {
+        const ce = options.engine;
         const c = cond.evaluate();
 
         // Desmos-style broadcast: a finite indexed collection of booleans
@@ -228,7 +229,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             // elementwise (expr_i masked by c_i); otherwise mask the scalar
             // `expr` by each c_i. Different lengths truncate to the shorter,
             // matching `At`'s mask alignment.
-            const ev = expr.evaluate();
+            const ev = expr.evaluate(options);
             const zip = ev.isCollection && ev.isFiniteCollection;
             const elems = zip ? (Array.from(ev.each()) as Expression[]) : [];
             const n = zip ? Math.min(conds.length, elems.length) : conds.length;
@@ -248,8 +249,11 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         }
 
         const cs = sym(c);
-        if (cs === 'True') return expr.evaluate();
+        if (cs === 'True') return expr.evaluate(options);
         if (cs === 'False') return ce.symbol('Undefined');
+        // A guard that evaluates to `Undefined` masks (decision 9): no value,
+        // treated as not-True rather than held.
+        if (cs === 'Undefined') return ce.symbol('Undefined');
         // Indeterminate: hold
         return ce._fn('When', [expr, c]);
       },
@@ -295,7 +299,7 @@ function evaluateWhich(
     if (cond === 'True') {
       if (!args[i + 1]) return options.engine.symbol('Undefined');
       return args[i + 1].evaluate(options);
-    } else if (cond !== 'False') {
+    } else if (cond !== 'False' && cond !== 'Undefined') {
       // An UNDECIDED boolean condition (e.g. `x = 4` with a free `x`, which
       // stays symbolic under evaluate()) leaves the `Which` unevaluated:
       // picking a later branch would be wrong once the condition becomes
@@ -308,6 +312,8 @@ function evaluateWhich(
         )}`
       );
     }
+    // `False` — or `Undefined` (decision 9), treated as not-True — falls
+    // through to the next clause.
     i += 2;
   }
 

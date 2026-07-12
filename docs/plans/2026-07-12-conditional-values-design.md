@@ -1,6 +1,16 @@
 # Conditional values — producer emission & threading for `When`/`Which` (B15)
 
-**Status:** design ratified 2026-07-12; not yet implemented.
+**Status:** design ratified 2026-07-12; **Phases 1–2 implemented
+2026-07-12.** Phase 1 (threading algebra) — step-4c pre-pass in
+`boxed-expression/boxed-function.ts` (`threadConditional`), decision-9 +
+`When` options-threading fixes in `library/control-structures.ts`. Phase 2
+(Solve adopter) — 14 trig/hyperbolic validity rules emit `When`-guarded
+roots via templates, `conditionalRoot` chokepoint + pruning in
+`findUnivariateRoots`/`validateRoots` (`boxed-expression/solve.ts`),
+`benchmarks/audit/solve.ts` oracle grades guarded roots. Tests in
+`test/compute-engine/conditional-values.test.ts`. Snapshot blast radius:
+**zero** across both phases; solve benchmark held at 38/40 (= SymPy =
+Mathematica). Phase 3 (Sum/Integrate adopters) demand-paced.
 **Scope:** make operations able to *return* parameter-conditional results, by
 (1) fixing the semantic split between the two existing conditional heads,
 (2) adding the threading algebra that lets arithmetic and function application
@@ -237,12 +247,44 @@ condition attached, which is the desired UX.
 
 1. **Threading algebra** (T1–T7, decisions 5/9/10, predicate conservatism):
    generic lift + regression tests; zero producer changes; snapshot blast
-   radius measured and reviewed before landing.
+   radius measured and reviewed before landing. **Done 2026-07-12.**
+   Implementation notes:
+   - The inner `op(strippedTail)` application is **evaluated before
+     wrapping** in the lifted `When`/`Which` — required so folds run inside
+     the guard (`0·x → 0` giving `When(0, c)`) and an inner `Which`
+     distributes (the guard-outermost layering).
+   - En route, this fixed a pre-existing guard-dropping bug: evaluate-time
+     like-term cancellation folded `When(x,c) − When(x,c)` to plain `0`
+     (fat-complement drop); it now yields `When(0, c)` because `Add`/
+     `Multiply` operands are threaded before the arithmetic handler runs.
+   - **Known limitation (accepted):** the pre-pass gate checks *direct*
+     operands only, so a conditional nested one level under a lazy
+     operator's operand (`5 − When(x,c)` = `Add(5, Negate(When))`) is not
+     lifted outermost in one pass — the result is `When(−x, c) + 5`, fully
+     lifting on a second `evaluate()`. The guard is never dropped. Fixing
+     it would require evaluating lazy operands before the gate on every
+     `Add`/`Multiply` evaluation — rejected on the zero-churn/perf
+     discipline; revisit only with evidence.
 2. **Emission + Solve adopter**: `conditionalValue`, the trig-rule guards,
    the pruning contract, the audit-oracle update. Acceptance:
    `Solve(a·sin x + b = 0, x)` with symbolic `a, b` returns `When`-guarded
    roots; after `ce.assume(…)` decides the ratio bound, the same call
-   returns bare roots or `[]`; solve benchmark stays 38/40.
+   returns bare roots or `[]`; solve benchmark stays 38/40. **Done
+   2026-07-12.** Implementation notes:
+   - The **template route worked**: a `When` head in a rule `replace`
+     template boxes/evaluates correctly through the solve pipeline (the
+     clean-scope rule pitfall did not bite); no per-rule metadata needed.
+   - Wrapped all 14 `negatedRealRatio` validity rules: sin/cos
+     (`|−b/a| ≤ 1`), cosh (`−b/a ≥ 1`), tanh (`|−b/a| < 1`, strict — open
+     range excludes the pole). `tan`/`cot` have no validity bound and are
+     untouched. Condition callbacks unchanged, so numeric decidable-False
+     still never fires.
+   - The chokepoint helper is `conditionalRoot` in `solve.ts`
+     (module-local; lift to a shared location when Sum/Integrate adopt).
+   - `validateRoots` verifies a guarded root by its **value** (`op1`) —
+     substituting the `When` itself would thread a guard-wrapped residual.
+   - The explain trace resolves decidable guards so numeric narratives
+     match pre-Phase-2 output (symbolic traces surface the `When`).
 3. **Demand-paced adopters**: radical extraneous roots, Sum convergence,
    definite-integral region splitting (each a separate reviewed step).
 

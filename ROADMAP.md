@@ -443,17 +443,22 @@ Solve/Sum) and `Which` the case split (= `Piecewise`; integration), split by
 vs. cross-product-of-regions), a single `conditionalValue` emission helper
 consulting the assumption store, guards exempt from generic folds
 (fat-complement argument), conservative predicate threading, and a
-solution-set pruning contract. Remaining work is implementation, phased:
+solution-set pruning contract.
 
-1. **Threading algebra** (generic lift per the broadcast-lift playbook;
-   zero producer changes; snapshot blast radius reviewed).
-2. **Emission + Solve adopter** (trig-rule symbolic-ratio guards →
-   `When`-wrapped roots; pruning; `benchmarks/audit/solve.ts` oracle
-   update; 38/40 must not regress).
-3. **Demand-paced adopters:** radical extraneous roots, Sum convergence,
-   definite integration (its region-splitting analysis — locating where
-   poles cross the contour — is the hardest part and stays with that
-   adopter).
+**Phases 1–2 landed 2026-07-12** (zero snapshot churn; solve benchmark held
+at 38/40): the threading algebra (step-4c pre-pass in `boxed-function.ts`,
+which also fixed the pre-existing `When − When → 0` guard-dropping fold) and
+the Solve adopter (14 trig/hyperbolic validity rules emit `When`-guarded
+roots — `Solve(sin x = a, x)` → `When(arcsin a, |a| ≤ 1)` — with pruning in
+root assembly and the audit oracle grading guarded roots). Remaining:
+
+- **Demand-paced adopters:** radical extraneous roots, Sum convergence
+  regions, definite integration (its region-splitting analysis — locating
+  where poles cross the contour — is the hardest part and stays with that
+  adopter). Each is an incremental consumer of the landed machinery.
+- **Known Phase-1 limitation** (accepted, revisit on evidence): a
+  conditional nested under a lazy operand (`5 − When(x,c)`) lifts fully
+  only on a second `evaluate()`; the guard is never dropped.
 
 ### Coverage tracks
 

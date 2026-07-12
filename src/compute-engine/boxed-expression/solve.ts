@@ -81,6 +81,34 @@ function negatedRealRatio(b: Expression, a?: Expression): number | undefined {
   return val.re;
 }
 
+/**
+ * Producer-side chokepoint for a validity-guarded root (conditional-values
+ * design, decision 7). Resolves a *decidable* guard against evaluation + the
+ * assumption store:
+ *   - guard evaluates to `True`  → the bare `root` (guard discharged);
+ *   - guard evaluates to `False` → `null` (the caller drops the root — the
+ *     solution-set pruning contract, decision 8);
+ *   - otherwise (undecidable)    → `When(root, guard)`, retained until the
+ *     guard becomes decidable.
+ *
+ * Numeric ratios therefore keep today's behavior exactly: the trig rules'
+ * conditions already refuse to fire on a decidable-False ratio, so a numeric
+ * ratio reaching here has a `True` guard and collapses to the bare root.
+ *
+ * Kept module-local for now; later `When`-producers (Sum/Integrate) will lift
+ * it to a shared location.
+ */
+function conditionalRoot(
+  ce: ComputeEngine,
+  root: Expression,
+  guard: Expression
+): Expression | null {
+  const g = guard.evaluate();
+  if (isSymbol(g, 'True')) return root;
+  if (isSymbol(g, 'False')) return null;
+  return ce.function('When', [root, g]);
+}
+
 //
 // ── Solve trace ─────────────────────────────────────────────────────
 //
@@ -541,7 +569,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Valid when -1 ≤ -b/a ≤ 1
   {
     match: ['Add', ['Multiply', '__a', ['Sin', '_x']], '__b'],
-    replace: ['Arcsin', ['Divide', ['Negate', '__b'], '__a']],
+    replace: [
+      'When',
+      ['Arcsin', ['Divide', ['Negate', '__b'], '__a']],
+      ['LessEqual', ['Abs', ['Divide', ['Negate', '__b'], '__a']], 1],
+    ],
     id: 'solve.sine',
     useVariations: true,
     condition: (sub) => {
@@ -560,9 +592,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Sin', '_x']], '__b'],
     replace: [
-      'Subtract',
-      'Pi',
-      ['Arcsin', ['Divide', ['Negate', '__b'], '__a']],
+      'When',
+      ['Subtract', 'Pi', ['Arcsin', ['Divide', ['Negate', '__b'], '__a']]],
+      ['LessEqual', ['Abs', ['Divide', ['Negate', '__b'], '__a']], 1],
     ],
     id: 'solve.sine-second-branch',
     useVariations: true,
@@ -580,7 +612,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // sin(x) + b = 0  =>  x = arcsin(-b)  (when a = 1)
   {
     match: ['Add', ['Sin', '_x'], '__b'],
-    replace: ['Arcsin', ['Negate', '__b']],
+    replace: [
+      'When',
+      ['Arcsin', ['Negate', '__b']],
+      ['LessEqual', ['Abs', ['Negate', '__b']], 1],
+    ],
     id: 'solve.sine-unit',
     useVariations: true,
     condition: (sub) => {
@@ -595,7 +631,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Second solution for sin(x) + b = 0: x = π - arcsin(-b)
   {
     match: ['Add', ['Sin', '_x'], '__b'],
-    replace: ['Subtract', 'Pi', ['Arcsin', ['Negate', '__b']]],
+    replace: [
+      'When',
+      ['Subtract', 'Pi', ['Arcsin', ['Negate', '__b']]],
+      ['LessEqual', ['Abs', ['Negate', '__b']], 1],
+    ],
     id: 'solve.sine-unit-second-branch',
     useVariations: true,
     condition: (sub) => {
@@ -611,7 +651,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Valid when -1 ≤ -b/a ≤ 1
   {
     match: ['Add', ['Multiply', '__a', ['Cos', '_x']], '__b'],
-    replace: ['Arccos', ['Divide', ['Negate', '__b'], '__a']],
+    replace: [
+      'When',
+      ['Arccos', ['Divide', ['Negate', '__b'], '__a']],
+      ['LessEqual', ['Abs', ['Divide', ['Negate', '__b'], '__a']], 1],
+    ],
     id: 'solve.cosine',
     useVariations: true,
     condition: (sub) => {
@@ -628,7 +672,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Second solution for cos: x = -arccos(-b/a)  (since cos(-x) = cos(x))
   {
     match: ['Add', ['Multiply', '__a', ['Cos', '_x']], '__b'],
-    replace: ['Negate', ['Arccos', ['Divide', ['Negate', '__b'], '__a']]],
+    replace: [
+      'When',
+      ['Negate', ['Arccos', ['Divide', ['Negate', '__b'], '__a']]],
+      ['LessEqual', ['Abs', ['Divide', ['Negate', '__b'], '__a']], 1],
+    ],
     id: 'solve.cosine-negative-branch',
     useVariations: true,
     condition: (sub) => {
@@ -645,7 +693,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // cos(x) + b = 0  =>  x = arccos(-b)  (when a = 1)
   {
     match: ['Add', ['Cos', '_x'], '__b'],
-    replace: ['Arccos', ['Negate', '__b']],
+    replace: [
+      'When',
+      ['Arccos', ['Negate', '__b']],
+      ['LessEqual', ['Abs', ['Negate', '__b']], 1],
+    ],
     id: 'solve.cosine-unit',
     useVariations: true,
     condition: (sub) => {
@@ -660,7 +712,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Second solution for cos(x) + b = 0: x = -arccos(-b)
   {
     match: ['Add', ['Cos', '_x'], '__b'],
-    replace: ['Negate', ['Arccos', ['Negate', '__b']]],
+    replace: [
+      'When',
+      ['Negate', ['Arccos', ['Negate', '__b']]],
+      ['LessEqual', ['Abs', ['Negate', '__b']], 1],
+    ],
     id: 'solve.cosine-unit-negative-branch',
     useVariations: true,
     condition: (sub) => {
@@ -809,7 +865,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Valid when -b/a ≥ 1 (the range of cosh over the reals)
   {
     match: ['Add', ['Multiply', '__a', ['Cosh', '_x']], '__b'],
-    replace: ['Arcosh', ['Divide', ['Negate', '__b'], '__a']],
+    replace: [
+      'When',
+      ['Arcosh', ['Divide', ['Negate', '__b'], '__a']],
+      ['GreaterEqual', ['Divide', ['Negate', '__b'], '__a'], 1],
+    ],
     id: 'solve.hyperbolic-cosine',
     useVariations: true,
     condition: (sub) => {
@@ -823,7 +883,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Second solution for cosh: x = -arcosh(-b/a)  (since cosh(-x) = cosh(x))
   {
     match: ['Add', ['Multiply', '__a', ['Cosh', '_x']], '__b'],
-    replace: ['Negate', ['Arcosh', ['Divide', ['Negate', '__b'], '__a']]],
+    replace: [
+      'When',
+      ['Negate', ['Arcosh', ['Divide', ['Negate', '__b'], '__a']]],
+      ['GreaterEqual', ['Divide', ['Negate', '__b'], '__a'], 1],
+    ],
     id: 'solve.hyperbolic-cosine-negative-branch',
     useVariations: true,
     condition: (sub) => {
@@ -838,7 +902,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Valid when -b ≥ 1 (the range of cosh over the reals)
   {
     match: ['Add', ['Cosh', '_x'], '__b'],
-    replace: ['Arcosh', ['Negate', '__b']],
+    replace: [
+      'When',
+      ['Arcosh', ['Negate', '__b']],
+      ['GreaterEqual', ['Negate', '__b'], 1],
+    ],
     id: 'solve.hyperbolic-cosine-unit',
     useVariations: true,
     condition: (sub) => {
@@ -852,7 +920,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Second solution for cosh(x) + b = 0: x = -arcosh(-b)
   {
     match: ['Add', ['Cosh', '_x'], '__b'],
-    replace: ['Negate', ['Arcosh', ['Negate', '__b']]],
+    replace: [
+      'When',
+      ['Negate', ['Arcosh', ['Negate', '__b']]],
+      ['GreaterEqual', ['Negate', '__b'], 1],
+    ],
     id: 'solve.hyperbolic-cosine-unit-negative-branch',
     useVariations: true,
     condition: (sub) => {
@@ -868,7 +940,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // "root" would be the ±∞ pole, not a solution)
   {
     match: ['Add', ['Multiply', '__a', ['Tanh', '_x']], '__b'],
-    replace: ['Artanh', ['Divide', ['Negate', '__b'], '__a']],
+    replace: [
+      'When',
+      ['Artanh', ['Divide', ['Negate', '__b'], '__a']],
+      ['Less', ['Abs', ['Divide', ['Negate', '__b'], '__a']], 1],
+    ],
     id: 'solve.hyperbolic-tangent',
     useVariations: true,
     condition: (sub) => {
@@ -882,7 +958,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // tanh(x) + b = 0  =>  x = artanh(-b)
   {
     match: ['Add', ['Tanh', '_x'], '__b'],
-    replace: ['Artanh', ['Negate', '__b']],
+    replace: [
+      'When',
+      ['Artanh', ['Negate', '__b']],
+      ['Less', ['Abs', ['Negate', '__b']], 1],
+    ],
     id: 'solve.hyperbolic-tangent-unit',
     useVariations: true,
     condition: (sub) => {
@@ -2399,12 +2479,21 @@ export function findUnivariateRoots(
     ): void => {
       if (!trace || matches.length === 0) return;
       if (via) traceStep(trace, via.because, asEquation(via.form, x));
-      for (const m of matches)
+      for (const m of matches) {
+        // A validity-guarded candidate `When(root, guard)` (Phase 2): resolve a
+        // decidable guard for the narrative (a numeric ratio collapses to the
+        // bare root, matching the pre-Phase-2 trace; a False guard drops the
+        // step). An undecidable guard is displayed as the `When`.
+        let value: Expression | null = m.value;
+        if (isFunction(value, 'When'))
+          value = conditionalRoot(ce, value.op1, value.op2);
+        if (value === null) continue;
         traceStep(
           trace,
           m.because !== '' ? m.because : 'solve.template',
-          rootsAsEquations(ce, x, [m.value])
+          rootsAsEquations(ce, x, [value])
         );
+      }
     };
 
     // FAST PATH: a univariate polynomial of degree ≥ 2 is solved directly from
@@ -2546,15 +2635,26 @@ export function findUnivariateRoots(
     ce.popScope();
   }
 
+  // Evaluate/simplify each candidate root, resolving any validity guard a
+  // trig rule attached (`When(root, guard)`) through the single chokepoint:
+  // a decidable-True guard collapses to the bare root (numeric ratios keep
+  // today's behavior), a decidable-False guard drops the root (pruning
+  // contract, decision 8), and an undecidable guard is retained as a `When`
+  // whose *value* is verified below.
+  const resolved: Expression[] = [];
+  for (const r of result) {
+    if (isFunction(r, 'When')) {
+      const root = conditionalRoot(ce, r.op1.evaluate().simplify(), r.op2);
+      if (root !== null) resolved.push(root);
+    } else {
+      resolved.push(r.evaluate().simplify());
+    }
+  }
+
   // Validate the roots against the ORIGINAL expression (before clearing
   // denominators and harmonization). This filters out extraneous roots that
   // may have been introduced by algebraic transformations.
-  const validatedRoots = validateRoots(
-    originalExpr,
-    x,
-    result.map((x) => x.evaluate().simplify()),
-    trace
-  );
+  const validatedRoots = validateRoots(originalExpr, x, resolved, trace);
 
   // Filter solutions by the declared type of the variable
   return filterRootsByType(ce, x, validatedRoots, trace);
@@ -2852,8 +2952,13 @@ function validateRoots(
   trace?: RuleSteps
 ): Expression[] {
   const validRoots = roots.filter((root) => {
+    // A validity-guarded root `When(v, guard)` is verified by its *value* `v`
+    // (the guard already restricts the domain, decision 8): substituting the
+    // `When` itself threads a guard-wrapped residual that never compares equal
+    // to 0. The `When` (guard carried) is what stays in the solution list.
+    const probe = isFunction(root, 'When') ? root.op1 : root;
     // Evaluate the expression at the root
-    const value = expr.subs({ [x]: root }).canonical.evaluate();
+    const value = expr.subs({ [x]: probe }).canonical.evaluate();
     if (value === null) return false;
     if (!value.isValid) return false;
     if (value.isNaN) return false;

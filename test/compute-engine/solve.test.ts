@@ -736,11 +736,17 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
     expect(expr('\\cosh(x) = \\frac{1}{2}').solve('x')).toEqual([]);
   });
 
-  test('sin(x) = a keeps symbolic ratios (validity condition not recorded)', () => {
+  test('sin(x) = a wraps symbolic ratios in a validity guard (When)', () => {
+    // Phase 2 of the conditional-values design: a symbolic ratio no longer
+    // waves the root through unconditionally — it is emitted with its
+    // |−b/a| ≤ 1 validity guard, which collapses (or prunes) once decidable.
     const result = expr('\\sin(x) = a')
       .solve('x')
       ?.map((x) => x.toString());
-    expect(result).toEqual(['arcsin(a)', '-arcsin(a) + pi']);
+    expect(result).toEqual([
+      'When(arcsin(a), |a| <= 1)',
+      'When(-arcsin(a) + pi, |a| <= 1)',
+    ]);
   });
 
   // Regression: multi-operand wildcard captures (__a = -2x, __b = x²+1) are
@@ -749,10 +755,11 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
   test('should solve x² - 2x·cos(t) + 1 = 0 for t (symbolic coefficients)', () => {
     const e = expr('x^2 - 2x\\cos t + 1 = 0');
     const result = e.solve('t')?.map((r) => r.toString());
-    // t = ±arccos((x² + 1)/(2x))
+    // t = ±arccos((x² + 1)/(2x)), guarded by the |ratio| ≤ 1 validity
+    // condition (conditional-values design, Phase 2).
     expect(result).toEqual([
-      'arccos(1/2 * x + 1 / (2x))',
-      '-arccos(1/2 * x + 1 / (2x))',
+      'When(arccos(1/2 * x + 1 / (2x)), |(x^2 + 1) / (2x)| <= 1)',
+      'When(-arccos(1/2 * x + 1 / (2x)), |(x^2 + 1) / (2x)| <= 1)',
     ]);
   });
 });

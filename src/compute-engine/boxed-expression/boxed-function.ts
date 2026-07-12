@@ -1417,6 +1417,34 @@ export class BoxedFunction
       }
 
       //
+      // 4c/ Thread over conditional values (`When`/`Which`) — lift the
+      // conditional outward so arithmetic and function application flow
+      // through it (design: docs/plans/2026-07-12-conditional-values-design.md,
+      // "Threading rules"). Structurally the same lift as the broadcast steps
+      // above; gated on `broadcastable` and reusing the evaluated `tail`, so a
+      // scalar call pays only a cheap `isFunction` test. Logic operators are
+      // excluded: Kleene logic is not strict (`And(Undefined, False)` stays
+      // `False`), so lifting a guard out of them would be unsound. `Add`/
+      // `Multiply` are NOT excluded (unlike step 4b): threading them before the
+      // arithmetic evaluate handler is what stops a fold from silently dropping
+      // a guard (`When − When`, `0·When`; see decision 5).
+      //
+      if (
+        def.broadcastable &&
+        !CONDITIONAL_THREADING_SKIP.has(this.operator) &&
+        tail.some((x) => isFunction(x, 'When') || isFunction(x, 'Which'))
+      ) {
+        const threaded = threadConditional(
+          this.engine,
+          this.operator,
+          tail,
+          def.lazy === true,
+          options
+        );
+        if (threaded) return threaded;
+      }
+
+      //
       // 5/ Create a scope if needed
       //
       const isScoped = this._localScope !== undefined;
@@ -1638,6 +1666,130 @@ function skipBroadcastForVectorOps(
   )
     return true;
   return false;
+}
+
+/**
+ * Broadcastable logic operators excluded from conditional-value threading.
+ * Kleene logic is not strict — `And(Undefined, False)` must stay `False` — so
+ * lifting a `When` guard out of them would be unsound (design decision 2/9).
+ */
+const CONDITIONAL_THREADING_SKIP = new Set([
+  'And',
+  'Or',
+  'Not',
+  'Xor',
+  'Nand',
+  'Nor',
+  'Implies',
+  'Equivalent',
+]);
+
+/**
+ * Threading pre-pass for conditional values (`When`/`Which`), modeled on the
+ * broadcast lift (step 4b). Given the already-evaluated `tail` of operator
+ * `op`, lift a conditional operand outward:
+ *
+ * - **When (T1–T3), guard-outermost normal form:** if any operand is a `When`,
+ *   strip each `When` to its value and collect its guard, then wrap the
+ *   *evaluated* `op(strippedTail)` in a single `When` whose guard is the
+ *   conjunction of the collected guards and re-evaluate. `When`'s canonical
+ *   handler And-folds the guards and its evaluate handler resolves a decidable
+ *   guard (T4/T5), so a True guard collapses to the bare value and a False
+ *   guard to `Undefined`. Evaluating the inner application is what lets a fold
+ *   run inside the guard (`0·x → 0`, `x − x → 0`) and an inner `Which`
+ *   distribute (yielding `When(Which(…), g)`, decision 6).
+ * - **Which (T6/T7), only when no `When` operand is present:** distribute over
+ *   the lexicographic cross-product of branches — a non-`Which` operand is a
+ *   single unconditional branch, each branch's condition is the `And` of the
+ *   selected operands' conditions, and the branch value is `op` applied to the
+ *   selected values. Lexicographic order preserves first-true-wins without a
+ *   disjointness requirement. Cost-gated (decision 10): a product above 16
+ *   branches stays inert (returns `undefined`).
+ *
+ * `lazy` operators (`Add`/`Multiply`/relations) reach the pre-pass with an
+ * *un-evaluated* tail, so operands are evaluated here first — this both
+ * surfaces a conditional nested under a lazy operand (e.g. `Negate(When)` in
+ * `When − When`) and is a cheap cache hit for the already-evaluated tail of a
+ * strict operator.
+ *
+ * Returns `undefined` when there is nothing to thread, so the caller falls
+ * through to normal evaluation.
+ */
+function threadConditional(
+  ce: ComputeEngine,
+  op: string,
+  rawTail: ReadonlyArray<Expression>,
+  lazy: boolean,
+  options: Partial<EvaluateOptions> | undefined
+): Expression | undefined {
+  const tail = lazy ? rawTail.map((x) => x.evaluate(options)) : rawTail;
+
+  // --- `When` lift (guard-outermost) ---
+  if (tail.some((x) => isFunction(x, 'When'))) {
+    const guards: Expression[] = [];
+    const stripped = tail.map((x) => {
+      if (isFunction(x, 'When')) {
+        guards.push(x.op2);
+        return x.op1;
+      }
+      return x;
+    });
+    const guard = guards.length === 1 ? guards[0] : ce._fn('And', guards);
+    const inner = ce._fn(op, stripped).evaluate(options);
+    return ce._fn('When', [inner, guard]).evaluate(options);
+  }
+
+  // --- `Which` distribution ---
+  if (tail.some((x) => isFunction(x, 'Which'))) {
+    // Each operand contributes a list of (condition, value) branches; a
+    // non-`Which` operand is a single unconditional branch (condition = null).
+    const branchSets = tail.map((x) => {
+      if (isFunction(x, 'Which')) {
+        const branches: { cond: Expression | null; value: Expression }[] = [];
+        const ops = x.ops;
+        for (let i = 0; i + 1 < ops.length; i += 2)
+          branches.push({ cond: ops[i], value: ops[i + 1] });
+        return branches;
+      }
+      return [{ cond: null as Expression | null, value: x }];
+    });
+
+    // Cost gate (decision 10): product of branch counts.
+    let count = 1;
+    for (const bs of branchSets) count *= bs.length;
+    if (count > 16) return undefined;
+
+    // Lexicographic cross-product: the first operand varies slowest, so every
+    // lexicographically earlier branch has a false conjunct at the selected
+    // point — first-true-wins is preserved without disjointness.
+    let combos: { conds: Expression[]; value: Expression[] }[] = [
+      { conds: [], value: [] },
+    ];
+    for (const bs of branchSets) {
+      const next: typeof combos = [];
+      for (const combo of combos)
+        for (const b of bs)
+          next.push({
+            conds: b.cond ? [...combo.conds, b.cond] : combo.conds,
+            value: [...combo.value, b.value],
+          });
+      combos = next;
+    }
+
+    const resultOps: Expression[] = [];
+    for (const combo of combos) {
+      const cond =
+        combo.conds.length === 0
+          ? ce.True
+          : combo.conds.length === 1
+            ? combo.conds[0]
+            : ce._fn('And', combo.conds);
+      resultOps.push(cond, ce._fn(op, combo.value).evaluate(options));
+    }
+    return ce._fn('Which', resultOps).evaluate(options);
+  }
+
+  return undefined;
 }
 
 /** Return the type of the value of the expression, without actually

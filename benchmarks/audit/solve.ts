@@ -84,7 +84,27 @@ function runCE(engine: ComputeEngine, c: Case): { v: Verdict; note?: string } {
   // Keep real roots; check each is sound by substitution.
   const sound: number[] = [];
   let badReal = 0;
-  for (const root of roots) {
+  let vacuous = 0;
+  for (const rawRoot of roots) {
+    // A validity-guarded root `When(value, guard)` (conditional-values design,
+    // Phase 2): grade its *value* wherever the guard holds. Substituting the
+    // `When` itself would thread a guard-wrapped residual (never real). If the
+    // guard resolves False at this case's (numeric) coefficients the root is
+    // vacuous — skip it rather than count it wrong.
+    let root = rawRoot;
+    if (rawRoot?.operator === 'When') {
+      let guardSym: string | null = null;
+      try {
+        guardSym = rawRoot.op2.evaluate().symbol;
+      } catch {
+        guardSym = null;
+      }
+      if (guardSym === 'False') {
+        vacuous++;
+        continue;
+      }
+      root = rawRoot.op1;
+    }
     const rv = realOf(root);
     if (rv === null) continue; // complex / unevaluable root — ignore for real grading
     let res: number | null = null;
@@ -96,7 +116,7 @@ function runCE(engine: ComputeEngine, c: Case): { v: Verdict; note?: string } {
     if (res !== null && Math.abs(res) < TOL) sound.push(rv);
     else badReal++;
   }
-  return judge(c, roots.length, sound, badReal);
+  return judge(c, roots.length - vacuous, sound, badReal);
 }
 
 /** Grade SymPy's precomputed outcome the same way (its roots are real numeric,

@@ -141,9 +141,34 @@ accepts a single collection of strings, including a lazy `Map` result, so
 - **Enforce typed function params (M).** `f(x: integer) = …` parses and holds
   the annotation but `executeCortex` does not enforce it at call time — wire the
   annotation into parameter binding.
-- **Comment fidelity through serialize (M).** Comments are dropped on serialize
-  (documented lossy in `comments.md`); preserve them if round-trip fidelity is
-  required for the notebook use case.
+- **Comment fidelity through serialize (M — investigated 2026-07-12, deferred).**
+  Comments are dropped on a `parseCortex → serializeCortex` round-trip
+  (documented lossy in `comments.md`). The gap is **one-sided**: the serializer
+  already emits `/* … */` from a MathJSON `comment` metadata field
+  (`serialize-cortex.ts` `serializeComment`), and the lexer already captures
+  doc comments (`///`, `/** */`) with text + offsets onto `token.docComments`
+  — but the parser never reads `token.docComments`, and ordinary `//` / `/*`
+  comments are discarded as trivia, so nothing on the parse side ever populates
+  the `comment` field the serializer knows how to print. Making it faithful is
+  a cluster of design decisions, not a thread-through: (1) **attachment model**
+  — a leading comment maps to the following statement (the lexer's
+  "for the next token" model), but MathJSON has no trailing-comment slot
+  (`x + 1 // note`) and no host for an orphan comment on its own line;
+  (2) **style is lossy** — one `comment` string per node, always re-emitted as
+  `/* … */`, so `//` vs `///` vs `/* */` all collapse and delimiters must be
+  stripped on parse to avoid double-wrapping; (3) **multiplicity** — one field
+  can't hold several comments on one node; (4) **boxing strips it** — verified
+  `ce.box({fn:[…], comment:'…'}).json` drops the field, so a parser fix alone
+  buys fidelity only for a *pure* parse→serialize pass on raw MathJSON, not
+  through `evaluate()`/`box()` (that would need `comment` metadata carried in
+  core CE's boxed layer — a cross-cutting change outside Cortex). The tractable
+  ~M-sized subset is "leading comments on statements" (lexer captures ordinary
+  comments too → parser attaches them to the next node's `comment` field →
+  orphan/trailing comments hang off the enclosing `Block`); trailing-comment
+  and through-engine fidelity are separately larger. **Deferred**: the v0
+  lossiness is a deliberate scope call (notebooks keep prose in markdown cells,
+  not code comments), and there's no current consumer demand for code-comment
+  round-tripping — revisit only if a Tycho use case needs it.
 - **Mutual recursion in one-step definitions (M — on demand).** One-step
   self-recursion works (2026-07-11), but two functions defined in terms of each
   other still need `let` declarations first; a one-step form would require

@@ -15,8 +15,38 @@
   `StringFrom(Map(UnicodeScalars(s), c -> c + 1), "unicode-scalars")` now
   produces the shifted string rather than `""`.
 
+### Symbolic Computation
+
+- **Arithmetic and function application thread through conditional values.**
+  A restricted value `When(v, cond)` and a piecewise `Which(c_1, v_1, …)` now
+  flow through scalar operations instead of staying inert:
+  `sin(When(x, x > 0))` → `When(sin(x), x > 0)`, guards combining by
+  conjunction (`When(x, x > 0) · When(y, y < 1)` →
+  `When(x·y, x > 0 ∧ y < 1)`), and `Which(x > 0, 1, x < 0, -1) + 2` →
+  `Which(x > 0, 3, x < 0, 1)`. Logic operators are excluded (so
+  `And(When(A, g), False)` still short-circuits to `False`), and piecewise
+  products above 16 combined branches stay unevaluated.
+- **Restriction guards survive arithmetic cancellation.** Evaluating
+  `When(x, c) − When(x, c)` previously folded to plain `0`, silently
+  discarding the restriction on the (fat) region where `c` fails; it now
+  yields `When(0, c)`. Similarly `0 · When(x, c)` → `When(0, c)` and
+  `When(x, c) / When(x, c)` → `When(1, c)`.
+- **`When` respects numeric approximation.** `When(π, cond).N()` with a true
+  condition now numericizes (previously the option was dropped and the value
+  stayed symbolic).
+
 ### Solving Equations
 
+- **Trigonometric and hyperbolic equations with symbolic coefficients record
+  their validity condition.** `Solve(sin(x) = a, x)` previously returned
+  `arcsin(a)` and `π − arcsin(a)` unconditionally — wrong whenever
+  `|a| > 1`. Roots now carry their domain-of-validity guard:
+  `When(arcsin(a), |a| ≤ 1)`. The guard resolves as soon as it is decidable:
+  substituting `a = 1/2` collapses the root to `π/6`, while `a = 3` yields
+  `Undefined`, and a guard known false at solve time prunes the root (down
+  to `[]`). Numeric-coefficient equations are unchanged. The same applies to
+  `cos` (`|ratio| ≤ 1`), `cosh` (`ratio ≥ 1`), and `tanh` (`|ratio| < 1`)
+  equations.
 - **`Solve` of an inequality stays inert instead of returning an empty list.**
   `Solve(x^2 < 4, x)` previously returned `[]`, which reads as "no solutions";
   univariate inequality solving is unsupported, so the expression now stays
