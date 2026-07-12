@@ -1,5 +1,35 @@
 ## [Unreleased]
 
+### Pattern Matching
+
+- **New `Match` operator for structural pattern matching.**
+  `["Match", subject, ["MatchCase", pattern, body], …]` selects the first
+  case whose pattern matches the structure of the subject and applies its
+  body to the captured values:
+  `["Match", ["List", 3, 4], ["MatchCase", ["List", "_a", "_b"], ["Add", "a", "b"]]]`
+  → `7`. Cases may carry a guard (`["MatchCase", pattern, guard, body]`);
+  `["Pin", expr]` matches the *value* of an expression (a constant like
+  `Pi`, or the current value of a variable); `["Alternatives", p1, p2, …]`
+  shares one body among several binding-free patterns. Unlike `Which`,
+  which stays unevaluated while a condition is undecidable, `Match` always
+  decides — a symbolic subject falls through to a wildcard case. No
+  matching case yields an `["Error", "'match-no-case'"]` value.
+- **Cortex: `match` expression.** The reserved `match` keyword is now a
+  full pattern-matching expression:
+  `match x { 0 => "zero"; 1 | 2 | == Pi => "small"; [first, ...rest] => first; n if n > 3 => n; _ => "other" }`.
+  Bare identifiers in a pattern always bind (a non-final catch-all like
+  `Pi => …` is a parse error suggesting `== Pi` to match the constant);
+  `== expr` pins a value; `|` gives or-alternatives; `[…]`, `(…)` and
+  `{key -> pat}` destructure lists, tuples and dictionaries (open
+  matching); `n: integer` adds a type guard; `...rest` captures the tail.
+- **Constant-time dispatch and compilation.** Matches over constant cases
+  dispatch through a cached table instead of the general pattern matcher,
+  and fixed-shape destructuring compiles to direct positional checks.
+  `compile()` emits comparison chains or a JavaScript `switch` for
+  constant cases and destructuring closures for fixed shapes; symbolic
+  patterns (e.g. `a + b`) fail closed with a clear error rather than
+  producing incorrect code.
+
 ### Typed Function Literals
 
 - **Function literals can declare parameter and return types.** A `Function`

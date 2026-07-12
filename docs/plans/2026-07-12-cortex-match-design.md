@@ -1,8 +1,11 @@
 # Cortex `match` — structural pattern matching (design)
 
-**Status:** draft 2026-07-12, revised same day (pin patterns promoted to v1,
-`MatchCase` naming, binding-free or-alternatives promoted to v1); not yet
-implemented. **Scope:** (1) surface grammar and
+**Status:** design 2026-07-12 (revised same day: pin patterns promoted to
+v1, `MatchCase` naming, binding-free or-alternatives promoted to v1);
+**IMPLEMENTED 2026-07-12, all five phases** plus the dictionary-pattern fix
+— see the "Phase-N implementation notes" blocks in §3–§5 for the binding
+conventions and deviations that shipped. Remaining §7 items are v2
+deferrals. **Scope:** (1) surface grammar and
 lowering for a `match` expression in Cortex (the reserved word held since
 v0), (2) a new engine head `Match` with structural, total, first-match
 semantics, (3) a **classification ladder** so trivial matches (constant
