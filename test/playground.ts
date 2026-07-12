@@ -18,6 +18,8 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
+console.log(ce.parse('\\mathrm{Solve}(\\sin x = a, x)').evaluate().print());
+
 // We currently don't resolve this because we do not return conditional solutions. We should return either a Which or a new ConditionalExpression with the condition and solution.
 console.log(
   ce
