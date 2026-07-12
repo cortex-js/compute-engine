@@ -124,6 +124,7 @@ import type { FunctionProperties } from './function-properties/index.js';
 import {
   lookupDefinition as lookupDefinitionImpl,
   searchDefinitions as searchDefinitionsImpl,
+  suggestOperatorName as suggestOperatorNameImpl,
   declareSymbolValue as declareSymbolValueImpl,
   declareSymbolOperator as declareSymbolOperatorImpl,
   getSymbolValue as getSymbolValueImpl,
@@ -1350,6 +1351,26 @@ export class ComputeEngine implements IComputeEngine {
     options?: { limit?: number }
   ): DefinitionSearchResult[] {
     return searchDefinitionsImpl(this, query, options);
+  }
+
+  /**
+   * Given a `name` that is **not** a known operator, return the closest known
+   * operator name — a "did you mean" suggestion — or `undefined` when nothing
+   * is close enough. Powers the Cortex `unknown-function` diagnostic.
+   *
+   * Matching is conservative and applied in priority order (first match wins):
+   * case-insensitive exact match, singular/plural, Damerau–Levenshtein
+   * distance (≤ 2 for names of length ≥ 6, ≤ 1 for length 5, never for
+   * shorter names), then a prefix match against exactly one operator. Ties
+   * prefer the candidate sharing the longest prefix with the query.
+   *
+   * ```ts
+   * ce.suggestOperatorName('Quartile'); // → 'Quartiles'
+   * ce.suggestOperatorName('foo');      // → undefined
+   * ```
+   */
+  suggestOperatorName(name: string): string | undefined {
+    return suggestOperatorNameImpl(this, name);
   }
 
   /**

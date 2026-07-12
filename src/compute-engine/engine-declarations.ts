@@ -2,6 +2,7 @@ import type { Type, TypeString } from '../common/type/types.js';
 import { isValidType, isValidTypeName, widen } from '../common/type/utils.js';
 import { parseType } from '../common/type/parse.js';
 import { BoxedType } from '../common/type/boxed-type.js';
+import { osaDistance } from '../common/fuzzy-string-match.js';
 
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
 import type { MathJsonSymbol } from '../math-json/types.js';
@@ -163,6 +164,124 @@ export function searchDefinitions(
   });
 
   return results.slice(0, limit).map(({ id, kind }) => ({ id, kind }));
+}
+
+// Per-engine cache of the operator-name pool, invalidated when the definition
+// generation changes.
+const operatorPoolCache = new WeakMap<
+  IComputeEngine,
+  { generation: number; names: string[] }
+>();
+
+/**
+ * The names of all operator (function) definitions visible in the current
+ * scope chain — the candidate pool for `suggestOperatorName`. Nearest scope
+ * wins for duplicate names. Cached per engine, invalidated by generation.
+ */
+function operatorNamePool(ce: IComputeEngine): string[] {
+  const cached = operatorPoolCache.get(ce);
+  if (cached && cached.generation === ce._generation) return cached.names;
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let scope: Scope | null = ce.context.lexicalScope;
+  while (scope) {
+    for (const [name, def] of scope.bindings) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      if (isOperatorDef(def)) names.push(name);
+    }
+    scope = scope.parent;
+  }
+
+  operatorPoolCache.set(ce, { generation: ce._generation, names });
+  return names;
+}
+
+/**
+ * Given a name that is *not* a known operator, return the closest known
+ * operator name (a "did you mean" suggestion), or `undefined` when nothing is
+ * close enough. Matching is conservative and applied in priority order, the
+ * first tier that yields a match wins:
+ *
+ *  1. case-insensitive exact match (`arg` → `Arg`),
+ *  2. singular/plural (`Quartile` → `Quartiles`, or vice-versa),
+ *  3. Damerau–Levenshtein distance ≤ 2 for names of length ≥ 6, ≤ 1 for
+ *     length 5, never for length < 5 (short names produce junk suggestions:
+ *     `vec` → `Sec`, `rand` → `And`, `print` → `Prime`),
+ *  4. the name is a prefix (≥ 3 chars) of exactly one known operator.
+ *
+ * Within a tier, ties break to the candidate sharing the longest prefix with
+ * the query (`integral` → `Integrate`, not `Interval`), then the shortest,
+ * then alphabetically.
+ */
+export function suggestOperatorName(
+  ce: IComputeEngine,
+  name: string
+): string | undefined {
+  if (!name) return undefined;
+
+  const pool = operatorNamePool(ce);
+  const lower = name.toLowerCase();
+
+  // Longest common prefix between the query and a candidate, case-insensitive.
+  const lcp = (n: string): number => {
+    const nl = n.toLowerCase();
+    let i = 0;
+    while (i < lower.length && i < nl.length && lower[i] === nl[i]) i += 1;
+    return i;
+  };
+
+  const pick = (cands: string[]): string | undefined => {
+    if (cands.length === 0) return undefined;
+    return cands.sort((a, b) => {
+      const pa = lcp(a);
+      const pb = lcp(b);
+      if (pa !== pb) return pb - pa;
+      if (a.length !== b.length) return a.length - b.length;
+      return a < b ? -1 : a > b ? 1 : 0;
+    })[0];
+  };
+
+  // Tier 1: case-insensitive exact match (excluding identity).
+  const ciExact = pool.filter((n) => n !== name && n.toLowerCase() === lower);
+  if (ciExact.length > 0) return pick(ciExact);
+
+  // Tier 2: singular/plural.
+  const plural: string[] = [];
+  for (const n of pool) {
+    const nl = n.toLowerCase();
+    if (nl === `${lower}s` || (lower.endsWith('s') && nl === lower.slice(0, -1)))
+      plural.push(n);
+  }
+  if (plural.length > 0) return pick(plural);
+
+  // Tier 3: Damerau–Levenshtein distance.
+  if (name.length >= 5) {
+    const max = name.length >= 6 ? 2 : 1;
+    let bestDist = max + 1;
+    let ties: string[] = [];
+    for (const n of pool) {
+      if (n === name) continue;
+      const d = osaDistance(lower, n.toLowerCase(), max);
+      if (d > max) continue;
+      if (d < bestDist) {
+        bestDist = d;
+        ties = [n];
+      } else if (d === bestDist) ties.push(n);
+    }
+    if (ties.length > 0) return pick(ties);
+  }
+
+  // Tier 4: the name is a prefix (≥ 3 chars) of exactly one known operator.
+  if (name.length >= 3) {
+    const prefixed = pool.filter(
+      (n) => n !== name && n.toLowerCase().startsWith(lower)
+    );
+    if (prefixed.length === 1) return prefixed[0];
+  }
+
+  return undefined;
 }
 
 export function declareSymbolValue(

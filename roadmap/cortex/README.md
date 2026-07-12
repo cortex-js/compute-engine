@@ -117,11 +117,16 @@ Residuals (engine, small):
   solutions" when it means "unsupported" — should stay inert (or eventually
   solve inequalities).
 
-Language-design candidates (decide when demand appears):
-
-- **Discoverability aliases (S — design).** `Quotient` (integer division), `Arg`
-  (engine op is `Argument`), `Quartile` (`Quartiles`) all stay silently symbolic
-  when guessed.
+Discoverability — **RATIFIED 2026-07-11, in progress:** a "did-you-mean"
+warning diagnostic at the Cortex boundary — when a program calls an
+undeclared function whose name is close to a library operator
+(case-insensitive / singular-plural / small edit distance / unique prefix),
+`executeCortex` warns with the suggestion; no near-miss → no diagnostic, so
+intentionally symbolic `f(x)` is never nagged, and the value is unchanged
+(warning, not error). Fixes the silent-inert class (`Quartile`, typos)
+without piecemeal aliases. One alias ratified alongside: `Arg` → `Argument`
+(the guess is field-canonical). `Quotient` remains undefined (workaround
+`Floor(a/b)`); no other aliases planned.
 
 Ratified and **landed 2026-07-11** (record in `STATUS_REPORT.md` completed
 log): lowercase `true`/`false` are input aliases for `True`/`False` (reserved

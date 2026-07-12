@@ -99,6 +99,16 @@
   `StringJoin` accepts a single collection of strings —
   `StringJoin(Reverse(Characters("hello")))` → `"olleh"`.
 
+- **Cortex: "did you mean" warnings for near-miss function names.** Calling an
+  undeclared function whose name is close to a library operator no longer
+  fails silently symbolic: `executeCortex` emits a warning diagnostic with the
+  suggestion (`Quartile(xs)` → _did you mean `Quartiles`?_). The match is
+  conservative (case-insensitive, singular/plural, small edit distance, unique
+  prefix) and the diagnostic only fires when a suggestion exists, so
+  intentionally symbolic calls are never flagged; the returned value is
+  unchanged. The matcher is also available as `ce.suggestOperatorName(name)`.
+  `Arg` is now an alias for `Argument`.
+
 ### Serialization
 
 - **AsciiMath prints series in textbook order.** Taylor-series terms are

@@ -50,6 +50,28 @@ describe('Argument', () => {
   });
 });
 
+describe('Arg (alias for Argument)', () => {
+  it('canonicalizes Arg(z) to Argument(z)', () => {
+    expect(engine.expr(['Arg', 'ImaginaryUnit']).operator).toBe('Argument');
+  });
+
+  it('evaluates Arg(i) to the exact value pi/2', () => {
+    const result = engine.expr(['Arg', 'ImaginaryUnit']).evaluate();
+    expect(result.isSame(engine.Pi.div(2))).toBe(true);
+  });
+
+  it('numerically approximates Arg(1+i) to pi/4', () => {
+    const value = engine.expr(['Arg', ['Complex', 1, 1]]).N().re;
+    expect(value).toBeCloseTo(Math.PI / 4, 10);
+  });
+
+  it('serializes back as Argument (alias is input-side)', () => {
+    expect(engine.expr(['Arg', ['Complex', 1, 1]]).toString()).toMatch(
+      /Argument/
+    );
+  });
+});
+
 describe('AbsArg', () => {
   it('produces a sane (magnitude, argument) tuple for 1+i', () => {
     const result = engine.expr(['AbsArg', ['Complex', 1, 1]]).evaluate();

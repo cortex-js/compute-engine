@@ -114,6 +114,15 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Arg: {
+      description:
+        '`Arg` is an alias for `Argument`, which is the preferred name. Returns the complex argument (phase angle) of a number.',
+      broadcastable: true,
+      complexity: 1200,
+      signature: '(number) -> real',
+      canonical: (ops, { engine: ce }) => ce._fn('Argument', ops),
+    },
+
     // For Abs (magnitude) see src/compute-engine/library/processAbs
 
     AbsArg: {
