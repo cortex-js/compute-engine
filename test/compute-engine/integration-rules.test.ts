@@ -206,7 +206,11 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // guard). D-verify by differentiating and sampling at fixed parameter values.
   describe('symbolic quartic-denominator rationals (R25)', () => {
     const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    // The two-quartic product case runs 5–8.5 s idle — right against the 10 s
+    // default driver budget under worker contention, so raise both budgets
+    // (same convention as the other heavy describes).
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    ce.timeLimit = 30_000;
     const verify = (latex: string, params: Record<string, number>) => {
       const integrand = ce.parse(latex);
       let F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -536,12 +540,16 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // does not numericize). Concrete integer params avoid the reserved `e`/`i`.
   describe('closes the single-angle trig-rational family (Chapter-4, R17)', () => {
     const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
     // The poly³×trig-rational by-parts chains take 1–2.5 s each and are slow
     // under ts-jest — same convention as the other heavy describes in this
     // file. (Verified 2026-07-10: not a regression — A/B timing against the
     // recent engine commits is identical; the default deadline was simply
-    // marginal for this family under load.)
+    // marginal for this family under load.) NOTE: the driver keeps its OWN
+    // wall-clock budget (loader default 10 s), independent of ce.timeLimit;
+    // exhausting it declines cleanly to an inert Integrate — no
+    // CancellationError. Under full-suite worker contention the ~2 s chain
+    // can stretch past 10 s, so the heavy describes raise BOTH budgets.
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
     ce.timeLimit = 30_000;
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
@@ -587,7 +595,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // Concrete integer params avoid the reserved `e`/`i`.
   describe('closes complex-Si / reciprocal-arg families (Chapter-4, R18)', () => {
     const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
     ce.timeLimit = 30_000; // complex Si/Ci/Ei kernels are slow under ts-jest
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
@@ -692,7 +700,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // new Shi/Chi kernels end-to-end). Verified by finite-differencing F.N().
   describe('integrates the inverse-hyperbolic family (Chapter-7, R21)', () => {
     const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
     ce.timeLimit = 30_000; // Chi/Shi results carry slow complex kernels
     const verify = (latex: string, xs = [0.31, 0.52, 0.73, 1.42, 2.3]) => {
       const integrand = ce.parse(latex);
@@ -865,7 +873,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // reserved `e`/`i`; the |x|<1 arcsin domain sets the sample points.
   describe('poly × same-angle trig-product reduction (Chapter-5, R27)', () => {
     const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
     ce.timeLimit = 30_000; // high-degree Sin·Cos reductions carry many Si/Ci
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
@@ -927,7 +935,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // parameters fixed to numeric values keeping the radicand positive).
   describe('mixed-parity poly-numerator × binomial-radical split (1.1.3, R28a)', () => {
     const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
     ce.timeLimit = 30_000; // Elliptic/ArcTanh-heavy pieces are slow under ts-jest
 
     // Integrate `latex` over x and central-difference F.N() == integrand at
@@ -1023,7 +1031,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // central-differenced F.N() with symbolic parameters fixed positive.
   describe('algebraic-in-hyperbolic substitution (Chapter-6, R29)', () => {
     const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
     ce.timeLimit = 30_000; // ArcTanh/radical pieces are slow under ts-jest
 
     // Integrate `latex` over x and central-difference Re(F.N()) == integrand at
@@ -1092,7 +1100,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // Re of a central-differenced F.N() with symbolic parameters fixed.
   describe('rational-in-hyperbolic cyclotomic-factored substitution (Chapter-6, R30)', () => {
     const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
     ce.timeLimit = 30_000; // partial-fraction / artanh pieces are slow under ts-jest
 
     const verify = (
@@ -1155,7 +1163,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('integration variable other than x (R26A)', () => {
     const ce = new ComputeEngine();
     ce.timeLimit = 30_000; // Subst / exp-substitution classes are slow under ts-jest
-    loadIntegrationRules(ce);
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
 
     // Integrate `latex` (parsed over variable `v`) and numerically D-verify
     // F'(v) == integrand at several sample points, substituting any extra
@@ -1254,7 +1262,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('symbolic-coefficient reciprocal-hyperbolic closure (Chapter-6, R26B)', () => {
     const ce = new ComputeEngine();
     ce.timeLimit = 30_000; // the exp-substitution rational chain is slow under ts-jest
-    loadIntegrationRules(ce);
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
 
     // Close ∫1/(a+b·F(v)) symbolically, then D-verify F'(v) == integrand at
     // concrete (a,b) over several sample points.

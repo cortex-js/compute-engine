@@ -1133,6 +1133,46 @@ export class RubiDriver {
       }
     }
 
+    // ---- rational-in-hyperbolic cyclotomic-factored substitution (R30) ------
+    // `∫R(hyp(v)) dx`, R a RATIONAL (integer-power) function of hyperbolics of a
+    // common linear argument `v`. Under `t = e^v` it is a rational function of t
+    // whose flattened denominator (via `rationalNormalFormX`) is a high-degree
+    // polynomial the bundled 1.2.x rules cannot factor over the free parameters —
+    // BUT it always factors as `x^m·(x²+1)^p·(x²−1)^q·S(x)` (the cyclotomics come
+    // from the substitution and are numeric; S is the low-degree `(a+b·hyp)`
+    // residual). The bundled partial-fraction rules close the FACTORED form the
+    // R26B retry declines when it expands the denominator, so keep it factored.
+    // Placed BEFORE the function-of-exponential fallback: for R30's own family
+    // that fallback's raw-nested and expanded-retry routes are documented to
+    // decline — but only after consuming most of the driver budget grinding a
+    // hopeless form, which starved this rung nondeterministically (whether the
+    // family closed depended on wall-clock noise). Running the cheap, shape-
+    // gated, fail-closed factored route first is deterministic; when it
+    // declines (form-guard null, stranded subproblem, or failed D-check) the
+    // exp fallback below proceeds exactly as before, so nothing it closes is
+    // lost. Cheap O(nodes) pre-filter; fail-closed with a BRANCH-SAFE
+    // (mixed-sign points, several parameter seeds) D-check, since the residual
+    // quadratic's `√(β²−4αγ)` arctan/artanh form is branch-hazardous. The
+    // factored form is hyperbolic-free (it is in the exp variable), so it
+    // cannot re-enter here.
+    if (!NO_R30 && hasHyperbolicRationalCandidate(integrand)) {
+      this.suppressRecording++;
+      let F: Expression | null;
+      try {
+        F = this.hyperbolicRationalFactored(integrand, variable, depth);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (F !== null) {
+        this.record(
+          entryNode,
+          () => F,
+          'integrate.hyperbolic-rational-factored'
+        );
+        return F;
+      }
+    }
+
     // ---- function-of-a-single-exponential fallback --------------------
     // A pure hyperbolic of a LINEAR argument is a rational function of
     // e^(linear) — including the reciprocals Tanh/Coth/Sech/Csch that the
@@ -1142,7 +1182,8 @@ export class RubiDriver {
     // bare-hyperbolic reductions Rubi applies instead are not standalone corpus
     // rules): substitute t = F^v, integrate the resulting rational function of t
     // (the bundled rational rules / native fallback close it fast), then undo
-    // the substitution. Reached only after all rules + the expansion fallback.
+    // the substitution. Reached only after all rules + the expansion fallback
+    // (and after the R30 factored route above declines).
     if (containsHyperbolic(integrand)) {
       this.suppressRecording++;
       let F: Expression | null;
@@ -1212,40 +1253,6 @@ export class RubiDriver {
       }
       if (F !== null) {
         this.record(entryNode, () => F, 'integrate.hyperbolic-substitution');
-        return F;
-      }
-    }
-
-    // ---- rational-in-hyperbolic cyclotomic-factored substitution (R30) ------
-    // `∫R(hyp(v)) dx`, R a RATIONAL (integer-power) function of hyperbolics of a
-    // common linear argument `v`. Under `t = e^v` it is a rational function of t
-    // whose flattened denominator (via `rationalNormalFormX`) is a high-degree
-    // polynomial the bundled 1.2.x rules cannot factor over the free parameters —
-    // BUT it always factors as `x^m·(x²+1)^p·(x²−1)^q·S(x)` (the cyclotomics come
-    // from the substitution and are numeric; S is the low-degree `(a+b·hyp)`
-    // residual). The bundled partial-fraction rules close the FACTORED form the
-    // R26B retry declines when it expands the denominator, so keep it factored.
-    // Reached LAST (after every rule and the exp/mixed-parity/algebraic-hyperbolic
-    // fallbacks decline), so it never preempts a cleaner route and currently-solved
-    // integrands are untouched. Cheap O(nodes) pre-filter; fail-closed with a
-    // BRANCH-SAFE (mixed-sign points, several parameter seeds) D-check, since the
-    // residual quadratic's `√(β²−4αγ)` arctan/artanh form is branch-hazardous.
-    // The factored form is hyperbolic-free (it is in the exp variable), so it
-    // cannot re-enter here.
-    if (!NO_R30 && hasHyperbolicRationalCandidate(integrand)) {
-      this.suppressRecording++;
-      let F: Expression | null;
-      try {
-        F = this.hyperbolicRationalFactored(integrand, variable, depth);
-      } finally {
-        this.suppressRecording--;
-      }
-      if (F !== null) {
-        this.record(
-          entryNode,
-          () => F,
-          'integrate.hyperbolic-rational-factored'
-        );
         return F;
       }
     }
