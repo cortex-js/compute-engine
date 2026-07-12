@@ -1085,11 +1085,7 @@ longer broadcasts), and landed multi-variable `Solve([eq1, eq2], [x, y])`
 multi-domain enumeration contract), and moved the interval reading of
 ambiguous bracket pairs to the LaTeX boundary (`x \in [1, 5]` unchanged;
 MathJSON/Cortex 2-element `List`s in set operations are now collections, so
-`Intersection([1,2], [2,3])` → `Set(2)`). Still open:
-
-- **`Inverse` of matrices with radical entries still floats.** The exact
-  path requires rational entries; a matrix containing `√2` takes the
-  numeric path under plain `evaluate()`.
+`Intersection([1,2], [2,3])` → `Set(2)`).
 
 ### Review residue (open low-priority items)
 

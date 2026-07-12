@@ -986,6 +986,38 @@ describe('Inverse', () => {
     expect(result.type.toString()).toEqual('matrix<2x2>');
   });
 
+  it('inverts an exact-radical 2x2 matrix exactly', () => {
+    const A: Expression = [
+      'List',
+      ['List', ['Sqrt', 2], 1],
+      ['List', 1, ['Sqrt', 2]],
+    ];
+    const result = ce.expr(['Inverse', A]).evaluate();
+    expect(result.json).toEqual([
+      'List',
+      ['List', ['Sqrt', 2], -1],
+      ['List', -1, ['Sqrt', 2]],
+    ]);
+    expect(result.type.toString()).toEqual('matrix<2x2>');
+  });
+
+  it('inverts an exact-radical 3x3 matrix exactly', () => {
+    const A: Expression = [
+      'List',
+      ['List', ['Sqrt', 2], 0, 0],
+      ['List', 0, ['Sqrt', 3], 0],
+      ['List', 0, 0, 2],
+    ];
+    const result = ce.expr(['Inverse', A]).evaluate();
+    expect(result.json).toEqual([
+      'List',
+      ['List', ['Divide', ['Sqrt', 2], 2], 0, 0],
+      ['List', 0, ['Divide', ['Sqrt', 3], 3], 0],
+      ['List', 0, 0, ['Rational', 1, 2]],
+    ]);
+    expect(result.type.toString()).toEqual('matrix<3x3>');
+  });
+
   it('floats the exact inverse under .N()', () => {
     const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
     expect(ce.expr(['Inverse', A]).N().toString()).toEqual(
