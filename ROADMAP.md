@@ -434,21 +434,26 @@ branch, silently drops the validity condition, or stays inert:
   `Σ xⁿ = 1/(1−x)` holds only for `|x| < 1`; a conditional result would
   let the closed form be returned with its region attached.
 
-**Design questions to settle first:** emit `Which` directly vs. a dedicated
-wrapper head (Mathematica's `ConditionalExpression` — a value with a validity
-condition — is semantically different from a piecewise case split, and both
-needs occur above); consult the assumption store *at emission time* so a
-conditional is produced only when the condition is genuinely undecidable; and
-decide how downstream ops (arithmetic on a `Which`, integrating one) should
-behave, since a conditional that no operation can consume just moves the
-inertness one level up. Mathematica-name policy per B14: probe CE names
-first, no aliasing.
+**Design ratified 2026-07-12**
+([`docs/plans/2026-07-12-conditional-values-design.md`](./docs/plans/2026-07-12-conditional-values-design.md)):
+no new head — `When` is the guarded value (= `ConditionalExpression`;
+Solve/Sum) and `Which` the case split (= `Piecewise`; integration), split by
+"what is the answer where the condition is false?" (a genuine other value →
+`Which`; no value → `When`). Threading rules T1–T7 (conjunction-of-guards
+vs. cross-product-of-regions), a single `conditionalValue` emission helper
+consulting the assumption store, guards exempt from generic folds
+(fat-complement argument), conservative predicate threading, and a
+solution-set pruning contract. Remaining work is implementation, phased:
 
-**Effort:** the wrapper/emission design is the real work (medium); each
-producer is then an incremental adopter, integration first (its
-region-splitting analysis is also the hardest part — knowing *that* the
-answer splits at `|x| = 1` requires locating the parameter values where poles
-cross the contour).
+1. **Threading algebra** (generic lift per the broadcast-lift playbook;
+   zero producer changes; snapshot blast radius reviewed).
+2. **Emission + Solve adopter** (trig-rule symbolic-ratio guards →
+   `When`-wrapped roots; pruning; `benchmarks/audit/solve.ts` oracle
+   update; 38/40 must not regress).
+3. **Demand-paced adopters:** radical extraneous roots, Sum convergence,
+   definite integration (its region-splitting analysis — locating where
+   poles cross the contour — is the hardest part and stays with that
+   adopter).
 
 ### Coverage tracks
 

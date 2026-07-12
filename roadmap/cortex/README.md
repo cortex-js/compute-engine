@@ -107,14 +107,25 @@ applied function bodies.
 
 Residuals (engine, small):
 
-- **Exact big integers can serialize in exponent form (S).** `Fold`-computed
-  `25!` prints as `15511210043330985984e+6` and `String(100!)` uses scientific
-  notation, so string-based digit manipulation silently loses zeros. The values
-  are exact; only the default integer serialization collapses trailing digits.
-  (Root cause is `BigDecimal.toString`'s `adjustedExp > 20` scientific-notation
-  threshold, which fires for large exact integers too — changing it touches
-  core number display everywhere, so it needs a scoped approach + a
-  snapshot-blast-radius pass before landing.)
+- **Exact big integers serialize in a compact exponent form (S) — investigated
+  2026-07-12, closed as intentional.** `Fold`-computed `25!` prints as
+  `15511210043330985984e+6` and `String(100!)` as `…e+24`, so naive string-based
+  digit manipulation reads scientific notation instead of full digits. On
+  investigation this is **not** a bug: the root cause is not
+  `BigDecimal.toString` (that path isn't reached) but `numberToString`
+  (`numerics/strings.ts`), which compacts any bigint with > 5 trailing zeros to
+  `<head>e+<zeros>`. That form is **exact and round-trips losslessly** — it is
+  the deliberate serialization mandated by the `RT-P0-1` contract
+  (`numbers.test.ts`): exact big integers must emit a compact *string*
+  (`{num:"1e+23"}`), never a JSON float (`Number(10n**23n) === 1e+23 ≠ 10^23`,
+  which would corrupt on reconstruction). Non-round integers (`7^30`) already
+  serialize as full digits; only trailing-zero runs compact. The behavior is
+  locked by `RT-P0-1` plus inline snapshots (`602e+21`, `1234567e+19`). A
+  targeted refinement exists (compact only when trailing-zeros ≥ head-length,
+  which would leave every existing snapshot unchanged while giving factorials
+  full digits), but per the 2026-07-12 decision we keep the current tested
+  behavior; the fix is a Cortex-side `String()` boundary formatting choice if a
+  consumer ever needs full-digit output.
 
 Ratified and **landed 2026-07-11** (record in `STATUS_REPORT.md` completed
 log): lowercase `true`/`false` are input aliases for `True`/`False` (reserved
