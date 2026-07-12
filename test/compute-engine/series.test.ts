@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { toAsciiMath } from '../../src/compute-engine/boxed-expression/ascii-math';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
 
 export const ce = new ComputeEngine();
@@ -402,6 +403,18 @@ describe('series display order', () => {
     // Regression guard: the display-order rule only applies to sums that
     // actually contain a `BigO` term.
     expect(ce.parse('x^5 - x^3 + x').latex).toBe('x^5-x^3+x');
+  });
+
+  test('AsciiMath uses ascending degree with BigO last', () => {
+    expect(toAsciiMath(series('\\sin x'))).toBe(
+      'x - 1/6 * x^3 + 1/120 * x^5 + BigO(x^7)'
+    );
+  });
+
+  test('AsciiMath uses descending degree for an expansion at infinity', () => {
+    expect(toAsciiMath(series('\\arctan x', '+\\infty'))).toBe(
+      '1/2 * pi - 1 / x + 1/3 * x^(-3) - 1/5 * x^(-5) + BigO(x^(-7))'
+    );
   });
 });
 

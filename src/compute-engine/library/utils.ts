@@ -330,9 +330,9 @@ function asReadableFraction(z: Expression, ce: ComputeEngine): Expression {
 }
 
 /**
- * Closed form of a p-series term `Σ_{k=1}^∞ k^{-s} = ζ(s)`, for an exact real
- * `s > 1` and lower bound 1. Returns undefined otherwise (e.g. `s ≤ 1`, which
- * diverges, or a non-index base). Even integer `s` reduce to a `π`-power
+ * Closed form of a p-series term `Σ_{k=a}^∞ k^{-s}` for an exact real `s > 1`
+ * and a positive integer lower bound `a`. Uses
+ * `ζ(s) − Σ_{k=1}^{a−1} k^{-s}`. Even integer `s` reduce to a `π`-power
  * fraction (`ζ(2) = π²/6`); odd `s ≥ 3` stay as `Zeta(s)`.
  */
 function pSeriesClosedForm(
@@ -341,7 +341,10 @@ function pSeriesClosedForm(
   lower: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!lower.isSame(1)) return undefined;
+  if (!lower.isInteger || lower.isPositive !== true) return undefined;
+  const lowerValue = lower.re;
+  if (!Number.isSafeInteger(lowerValue) || lowerValue > 10_000)
+    return undefined;
   if (!isFunction(body, 'Power')) return undefined;
   const base = body.op1;
   const exp = body.op2;
@@ -353,13 +356,19 @@ function pSeriesClosedForm(
   if (!(Number.isFinite(r) && r < -1)) return undefined;
   const s = exp.neg();
   const z = ce.function('Zeta', [s]).evaluate();
-  return asReadableFraction(z, ce);
+  if (lowerValue === 1) return asReadableFraction(z, ce);
+
+  const terms: Expression[] = [z];
+  for (let k = 1; k < lowerValue; k++)
+    terms.push(body.subs({ [index]: k }).evaluate().neg());
+  return asReadableFraction(ce.function('Add', terms).evaluate(), ce);
 }
 
 /**
  * Attempt a closed form for `Sum(body, [index, lower, +∞])` on an infinite
  * upper domain. Handles:
- *   - p-series `Σ_{k=1}^∞ k^{-s} = ζ(s)` (exact real `s > 1`);
+ *   - p-series `Σ_{k=a}^∞ k^{-s} = ζ(s) − Σ_{k=1}^{a−1} k^{-s}`
+ *     (exact real `s > 1`, positive-integer `a`);
  *   - term-wise splitting `Σ (f + g) = Σ f + Σ g`, applied ONLY when every
  *     summand individually has a known closed form (each piece's convergence is
  *     then established by that closed form's own validity — absolute

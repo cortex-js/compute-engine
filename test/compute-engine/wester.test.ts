@@ -344,6 +344,34 @@ describe('Sums and products', () => {
     ).toEqual(['Add', ['Divide', ['Power', 'Pi', 2], 6], ['Zeta', 3]]);
   });
 
+  test(`Sum(1/k^2, k=2..oo) => pi^2/6 - 1`, () => {
+    expect(
+      ce
+        .expr([
+          'Sum',
+          ['Power', 'k', -2],
+          ['Tuple', 'k', 2, 'PositiveInfinity'],
+        ])
+        .evaluate().json
+    ).toEqual(['Add', -1, ['Multiply', ['Rational', 1, 6], ['Power', 'Pi', 2]]]);
+  });
+
+  test(`Sum(1/k^2, k=3..oo) => pi^2/6 - 5/4`, () => {
+    expect(
+      ce
+        .expr([
+          'Sum',
+          ['Power', 'k', -2],
+          ['Tuple', 'k', 3, 'PositiveInfinity'],
+        ])
+        .evaluate().json
+    ).toEqual([
+      'Add',
+      ['Rational', -5, 4],
+      ['Multiply', ['Rational', 1, 6], ['Power', 'Pi', 2]],
+    ]);
+  });
+
   test(`Product(k, k=1..n) => n!`, () => {
     // CURRENT: stays symbolic (no closed form for products).
     expect(ce.expr(['Product', 'k', ['Tuple', 'k', 1, 'n']]).evaluate().json).toEqual(
@@ -1020,7 +1048,7 @@ describe('Statistics', () => {
 describe('Series', () => {
   test(`Taylor series of sin x about 0, order 7`, () => {
     expect(ce.expr(['Series', ['Sin', 'x'], 'x', 0, 7]).evaluate().toString()).toBe(
-      '-1/5040 * x^7 + 1/120 * x^5 - 1/6 * x^3 + x + BigO(x^9)'
+      'x - 1/6 * x^3 + 1/120 * x^5 - 1/5040 * x^7 + BigO(x^9)'
     );
   });
 });

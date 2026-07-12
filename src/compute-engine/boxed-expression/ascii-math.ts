@@ -17,6 +17,101 @@ import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
 /** Helper type for expressions known to be function expressions (in operator/function callbacks) */
 type FnExpr = Expression & FunctionInterface;
 
+const SERIES_NAMED_CONSTANTS = new Set([
+  'Pi',
+  'ExponentialE',
+  'ImaginaryUnit',
+  'GoldenRatio',
+  'EulerGamma',
+  'CatalanConstant',
+  'MachineEpsilon',
+]);
+
+function expressionHasSymbol(expr: Expression, variable: string): boolean {
+  if (isSymbol(expr)) return expr.symbol === variable;
+  return isFunction(expr) && expr.ops.some((x) => expressionHasSymbol(x, variable));
+}
+
+function asciiSeriesVariable(expr: Expression): string | undefined {
+  if (isSymbol(expr))
+    return SERIES_NAMED_CONSTANTS.has(expr.symbol) ? undefined : expr.symbol;
+  if (!isFunction(expr)) return undefined;
+  for (const op of expr.ops) {
+    const result = asciiSeriesVariable(op);
+    if (result) return result;
+  }
+  return undefined;
+}
+
+function asciiSeriesDegree(
+  expr: Expression,
+  variable: string
+): number | undefined {
+  if (isNumber(expr)) return 0;
+  if (isSymbol(expr)) return expr.symbol === variable ? 1 : 0;
+  if (!isFunction(expr)) return 0;
+  if (expr.operator === 'Negate')
+    return asciiSeriesDegree(expr.op1, variable);
+  if (expr.operator === 'Multiply') {
+    let total = 0;
+    for (const factor of expr.ops) {
+      const degree = asciiSeriesDegree(factor, variable);
+      if (degree === undefined) return undefined;
+      total += degree;
+    }
+    return total;
+  }
+  if (expr.operator === 'Divide') {
+    const numerator = asciiSeriesDegree(expr.op1, variable);
+    const denominator = asciiSeriesDegree(expr.op2, variable);
+    return numerator === undefined || denominator === undefined
+      ? undefined
+      : numerator - denominator;
+  }
+  if (expr.operator === 'Power') {
+    const baseDegree = asciiSeriesDegree(expr.op1, variable);
+    if (baseDegree === undefined) return undefined;
+    if (baseDegree === 0)
+      return expressionHasSymbol(expr.op2, variable) ? undefined : 0;
+    const exponent = expr.op2.re;
+    return Number.isInteger(exponent) ? baseDegree * exponent : undefined;
+  }
+  if (expr.operator === 'Add' || expr.operator === 'Subtract') {
+    let maximum: number | undefined;
+    for (const term of expr.ops) {
+      const degree = asciiSeriesDegree(term, variable);
+      if (degree !== undefined && (maximum === undefined || degree > maximum))
+        maximum = degree;
+    }
+    return maximum;
+  }
+  return expressionHasSymbol(expr, variable) ? undefined : 0;
+}
+
+function asciiBigOArgument(expr: Expression): Expression | undefined {
+  if (isFunction(expr, 'Negate')) expr = expr.op1;
+  return isFunction(expr, 'BigO') ? expr.op1 : undefined;
+}
+
+function reorderAsciiSeriesTerms(
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  const bigOArgs = ops.map(asciiBigOArgument);
+  const firstBigOArg = bigOArgs.find((x) => x !== undefined);
+  if (!firstBigOArg) return ops;
+  const variable = asciiSeriesVariable(firstBigOArg);
+  if (!variable) return ops;
+  const ascending = (asciiSeriesDegree(firstBigOArg, variable) ?? 0) >= 0;
+  const terms = ops.filter((_, i) => bigOArgs[i] === undefined);
+  const bigOTerms = ops.filter((_, i) => bigOArgs[i] !== undefined);
+  const degree = (term: Expression) =>
+    asciiSeriesDegree(term, variable) ?? 0;
+  terms.sort((a, b) =>
+    ascending ? degree(a) - degree(b) : degree(b) - degree(a)
+  );
+  return [...terms, ...bigOTerms];
+}
+
 /** Serialize a unit expression to a human-readable string like "m/s^2". */
 function unitToString(expr: Expression): string {
   if (isSymbol(expr)) return expr.symbol;
@@ -136,7 +231,7 @@ const OPERATORS: Record<
   Add: [
     (expr_, serialize) => {
       const expr = expr_ as FnExpr;
-      let ops = [...expr.ops];
+      let ops = [...reorderAsciiSeriesTerms(expr.ops)];
 
       // For binary sums like "-x^2 + 1", swap to display as "1 - x^2"
       // Only applies when: exactly 2 terms, first is negative, second is a positive constant

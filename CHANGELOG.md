@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+### Symbolic Computation
+
+- **Infinite p-series support positive-integer lower bounds beyond 1.**
+  `Sum(k^(-s), k, a, +∞)` now returns
+  `Zeta(s) − Sum(k^(-s), k, 1, a−1)` for exact real `s > 1`; for example,
+  `Sum(1/k², k, 3, +∞)` evaluates to `π²/6 − 5/4`. The existing lower-bound-1
+  behavior and divergence guards are unchanged.
+
+### Serialization
+
+- **AsciiMath prints series in textbook order.** Taylor-series terms are
+  serialized in ascending degree and asymptotic series in descending degree,
+  with the `BigO` remainder last, matching LaTeX output. Canonical expression
+  order and ordinary sums without a `BigO` term are unchanged.
+
 ### Linear Algebra
 
 - **Matrix operators infer fresh symbolic operands from context.** An expression
