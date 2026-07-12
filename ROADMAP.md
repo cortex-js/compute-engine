@@ -92,6 +92,18 @@ scipy is installed in `./venv`.
 **Series residue:** bare `O(…)` parsing remains deferred (design doc §8 Q3);
 revisit for lenient mode once the parser work settles.
 
+**Typed function literals residue (demand-gated, design doc
+`docs/plans/2026-07-12-typed-function-literals-design.md` §10):** the typed
+`Function`/`Typed` core landed 2026-07-12 (652a20fc). Deferred until a
+consumer asks: **(S/M)** optional/variadic parameter annotations
+(`["Typed", "xs", "'number+'"]` — the encoding already admits it; needs
+`makeLambda` arity handling), **(S)** a strict-mode runtime check of the
+result against the declared return type (returns are pure ascriptions today),
+**(S)** LaTeX typed-parameter notation behind a serialization style flag
+(annotations currently drop in LaTeX), and **(S)** signature-string sugar
+(`["Function", body, "'(x: integer) -> real'"]` canonicalizing into the
+structural form).
+
 **MathNet parser tail (S/M; corpus at 371/428 after the 2026-07-09 rounds —
 trailing-`?`/`\ldots` recovery, Unicode `±`/`∓`/`ℓ`, un-applied-operator
 devolution (`N`, `D`), `\measuredangle`/`\Varangle`, decorated operators

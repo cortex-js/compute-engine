@@ -138,31 +138,15 @@ accepts a single collection of strings, including a lazy `Map` result, so
 
 ### Semantics gaps shipped as v0 caveats (complete on demand)
 
-- **Enforce typed function params — native typed function literals LANDED
-  2026-07-12, not yet committed.** Superseded the v1-via-`Declare` workaround
-  with the native design in
+- **Typed function params: CLOSED (native typed function literals, committed
+  652a20fc 2026-07-12).** Typed defs (`f(x: integer) -> real = …`,
+  `function f(x) -> real { … }`), anonymous `(x: integer) |-> …`, enforcement,
+  return types, and faithful serialize round-trip all ship natively via
+  `["Typed", …]` annotations on the `Function` literal — see
   [`docs/plans/2026-07-12-typed-function-literals-design.md`](../../docs/plans/2026-07-12-typed-function-literals-design.md).
-  A typed parameter is now carried inline as a `["Typed", sym, type]` node on
-  the `Function` literal itself, and a return type is ascribed onto the body as
-  `["Typed", body, type]`. Both def forms are back to a plain
-  `["Assign", "f", ["Function", …]]` (the `Declare` side-channel is gone):
-  - `f(x: integer) = …` → `["Assign","f",["Function",["Add","x",1],["Typed","x",{str:"integer"}]]]`
-  - `f(x: integer) -> real = …` and `function f(x) -> real { … }` → the body is
-    wrapped `["Typed", body, {str:"real"}]` (the engine normalizes it into the
-    Block).
-  - `(x: integer) |-> …` (anonymous, real grammar work) →
-    `["Function",["Add","x",1],["Typed","x",{str:"integer"}]]`.
-  A mistyped call still boxes to an `incompatible-type` Error value
-  (`f(2.5) → …`; `f(3) → 4`), partial annotation enforces only the typed params,
-  and unannotated defs are unchanged. `serializeCortex` reconstructs the source
-  syntax faithfully (`f(x: integer) -> real = …`, `function … { … }`,
-  `(x: integer) |-> …`); untyped literals serialize exactly as before. Both
-  prior residuals are **CLOSED**: **(a)** return types are honored (the
-  literal's type uses the declared return verbatim — ascription, not a
-  covariant check), and **(b)** the parse↔serialize round-trip is faithful.
-  Nothing genuinely remains for Cortex; the only follow-on lives in the engine
-  design doc (§10: optional/variadic params, a strict-mode runtime return
-  check).
+  Nothing remains for Cortex; the demand-gated engine follow-ons
+  (optional/variadic annotations, strict-mode runtime return check) are
+  tracked in the root `ROADMAP.md`.
 - **Comment fidelity through serialize (M — investigated 2026-07-12, deferred).**
   Comments are dropped on a `parseCortex → serializeCortex` round-trip
   (documented lossy in `comments.md`). The gap is **one-sided**: the serializer
