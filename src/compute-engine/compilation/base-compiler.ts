@@ -516,7 +516,12 @@ export class BaseCompiler {
       // literal (`f(x) := …`, `x ↦ …`). Emit it as a named local function and
       // compile the call site as `_fn_f(arg)`. Returns undefined for a truly
       // unknown operator (no such definition) or a target that opts out.
-      const userFn = BaseCompiler.tryCompileUserFunction(engine, h, args, target);
+      const userFn = BaseCompiler.tryCompileUserFunction(
+        engine,
+        h,
+        args,
+        target
+      );
       if (userFn !== undefined) return userFn;
       throw new Error(`Unknown operator \`${h}\``);
     }

@@ -251,7 +251,10 @@ export function suggestOperatorName(
   const plural: string[] = [];
   for (const n of pool) {
     const nl = n.toLowerCase();
-    if (nl === `${lower}s` || (lower.endsWith('s') && nl === lower.slice(0, -1)))
+    if (
+      nl === `${lower}s` ||
+      (lower.endsWith('s') && nl === lower.slice(0, -1))
+    )
       plural.push(n);
   }
   if (plural.length > 0) return pick(plural);

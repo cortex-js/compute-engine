@@ -388,7 +388,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   At: (args, compile) => {
     const coll = args[0];
     const index = args[1];
-    if (coll === null || coll === undefined || index === null || index === undefined)
+    if (
+      coll === null ||
+      coll === undefined ||
+      index === null ||
+      index === undefined
+    )
       throw new Error('At: missing argument');
     if (args.length !== 2)
       throw new Error(
@@ -1793,7 +1798,11 @@ export class ComputeEngineFunctionLiteral extends Function {
   SYS = SYS_HELPERS;
 
   constructor(body: string, args: string[], preamble = '') {
-    super('_SYS', ...args, preamble ? `${preamble}return ${body}` : `return ${body}`);
+    super(
+      '_SYS',
+      ...args,
+      preamble ? `${preamble}return ${body}` : `return ${body}`
+    );
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
         super.apply(thisArg, [this.SYS, ...argumentsList]),

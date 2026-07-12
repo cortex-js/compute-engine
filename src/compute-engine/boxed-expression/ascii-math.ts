@@ -29,7 +29,9 @@ const SERIES_NAMED_CONSTANTS = new Set([
 
 function expressionHasSymbol(expr: Expression, variable: string): boolean {
   if (isSymbol(expr)) return expr.symbol === variable;
-  return isFunction(expr) && expr.ops.some((x) => expressionHasSymbol(x, variable));
+  return (
+    isFunction(expr) && expr.ops.some((x) => expressionHasSymbol(x, variable))
+  );
 }
 
 function asciiSeriesVariable(expr: Expression): string | undefined {
@@ -50,8 +52,7 @@ function asciiSeriesDegree(
   if (isNumber(expr)) return 0;
   if (isSymbol(expr)) return expr.symbol === variable ? 1 : 0;
   if (!isFunction(expr)) return 0;
-  if (expr.operator === 'Negate')
-    return asciiSeriesDegree(expr.op1, variable);
+  if (expr.operator === 'Negate') return asciiSeriesDegree(expr.op1, variable);
   if (expr.operator === 'Multiply') {
     let total = 0;
     for (const factor of expr.ops) {
@@ -104,8 +105,7 @@ function reorderAsciiSeriesTerms(
   const ascending = (asciiSeriesDegree(firstBigOArg, variable) ?? 0) >= 0;
   const terms = ops.filter((_, i) => bigOArgs[i] === undefined);
   const bigOTerms = ops.filter((_, i) => bigOArgs[i] !== undefined);
-  const degree = (term: Expression) =>
-    asciiSeriesDegree(term, variable) ?? 0;
+  const degree = (term: Expression) => asciiSeriesDegree(term, variable) ?? 0;
   terms.sort((a, b) =>
     ascending ? degree(a) - degree(b) : degree(b) - degree(a)
   );

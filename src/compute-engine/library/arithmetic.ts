@@ -1394,7 +1394,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ops.some((x) => isNumericTuple(x))
         )
           return broadcastResultType(
-            widen(...ops.filter((x) => isNumericTuple(x)).map((x) => x.type.type))
+            widen(
+              ...ops.filter((x) => isNumericTuple(x)).map((x) => x.type.type)
+            )
           );
         // A numeric tuple (point/vector) scaled by scalars keeps the tuple
         // type. Hoisted above the NaN/finiteness early-returns (a tuple's

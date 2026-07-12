@@ -360,7 +360,12 @@ function pSeriesClosedForm(
 
   const terms: Expression[] = [z];
   for (let k = 1; k < lowerValue; k++)
-    terms.push(body.subs({ [index]: k }).evaluate().neg());
+    terms.push(
+      body
+        .subs({ [index]: k })
+        .evaluate()
+        .neg()
+    );
   return asReadableFraction(ce.function('Add', terms).evaluate(), ce);
 }
 
@@ -590,8 +595,7 @@ export function acceleratedInfiniteProduct(
   });
 
   if (invalid || overflow || !Number.isFinite(logValue)) return undefined;
-  if (!(error <= Math.max(1e-10, 1e-9 * Math.abs(logValue))))
-    return undefined;
+  if (!(error <= Math.max(1e-10, 1e-9 * Math.abs(logValue)))) return undefined;
   const value = Math.exp(logValue);
   return Number.isFinite(value) ? ce.number(value) : undefined;
 }

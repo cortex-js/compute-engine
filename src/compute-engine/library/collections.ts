@@ -1224,7 +1224,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     type: (ops) => parseType(functionResult(ops[1].type.type) ?? 'unknown'),
 
-    evaluate: ([collection, fn, initial], { engine: ce, numericApproximation }) => {
+    evaluate: (
+      [collection, fn, initial],
+      { engine: ce, numericApproximation }
+    ) => {
       if (!collection.isFiniteCollection) return undefined;
       // A collection may report a finite count yet decline enumeration
       // (e.g. Linspace(a, 1, 3) with a symbolic endpoint: size 3, but the

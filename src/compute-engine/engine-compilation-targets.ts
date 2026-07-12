@@ -23,7 +23,10 @@ import { IntervalGLSLTarget } from './compilation/interval-glsl-target.js';
  *
  * @internal
  */
-const DEPRECATED_COMPILATION_TARGETS = new Set(['interval-glsl', 'interval-wgsl']);
+const DEPRECATED_COMPILATION_TARGETS = new Set([
+  'interval-glsl',
+  'interval-wgsl',
+]);
 
 /**
  * Module-level guard so the deprecation notice for a given target is emitted at
