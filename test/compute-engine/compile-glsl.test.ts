@@ -874,3 +874,17 @@ describe('GLSL COMPILATION', () => {
     });
   });
 });
+
+// CE `Length` (element count) must NOT lower to the GLSL `length()` builtin,
+// which is the Euclidean NORM. The `length()` mapping now belongs to CE `Norm`.
+describe('GLSL Length/Norm name collision (Tycho round)', () => {
+  it('CE Length fails closed (was: emitted length() = norm, or invalid source)', () => {
+    const expr = ce.box(['Length', ['List', 1, 2, 3]]);
+    expect(() => glsl.compile(expr)).toThrow(/Norm|not supported|Fail closed/);
+  });
+
+  it('CE Norm lowers to the length() builtin', () => {
+    const code = glsl.compile(ce.box(['Norm', ['List', 3, 4]])).code;
+    expect(code).toBe('length(vec2(3.0, 4.0))');
+  });
+});

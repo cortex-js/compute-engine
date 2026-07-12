@@ -145,6 +145,19 @@ function compileJSEquality(
 ): string {
   if (args.length < 2)
     throw new Error(`${kind}: expected at least two arguments`);
+  // Scalar equality over a collection-valued operand has no committed coverage
+  // on the JavaScript target: a raw `Math.abs(a - b)` over a list silently
+  // coerces (`[1,2,3] - 2` → NaN), so `Equal`/`NotEqual` would return a wrong
+  // boolean behind a `success: true`. Fail closed (D6) with the offending head
+  // so the engine-level `compile()` reports `success: false` and falls back to
+  // the interpreter. Uses the declared type (not `.isCollection`, which is
+  // false for a `list<finite_number>` such as `Power(L, 2)`).
+  for (const a of args)
+    if (a.type.matches('collection'))
+      throw new Error(
+        `${kind}: cannot compile — operand is a collection-valued expression. ` +
+          `Materialize the collection first. Fail closed (D6).`
+      );
   const tol = args[0]?.engine?.tolerance ?? 1e-10;
   const cmp = kind === 'Equal' ? '<=' : '>';
   const distance = (a: Expression, b: Expression): string => {
@@ -170,6 +183,22 @@ function compileJSEquality(
   for (let i = 0; i < args.length - 1; i++)
     parts.push(pair(args[i], args[i + 1]));
   return `(${parts.join(' && ')})`;
+}
+
+/**
+ * True when `e` compiles to a JavaScript array that supports index access and
+ * `.length` — an indexed collection (list / vector / range) or a `list`-typed
+ * expression (e.g. `Power(L, 2)`, which types as `list<finite_number>` but is
+ * not reported by `.isCollection`). Dictionaries and strings are excluded: they
+ * are collections but do not lower to a JS array with count/positional access.
+ *
+ * Uses the declared type rather than `isFiniteIndexedCollection` from
+ * `collection-utils`: importing that module here reorders module init and
+ * breaks a runtime binding in the arithmetic broadcast path.
+ */
+function isIndexedCollectionOperand(e: Expression): boolean {
+  const t = e.type;
+  return t.matches('list') || t.matches('indexed_collection');
 }
 
 /**
@@ -338,6 +367,85 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Matrix: (args, compile) => compile(args[0]),
   // Tuple compiles identically to List
   Tuple: (args, compile) => `[${args.map((x) => compile(x)).join(', ')}]`,
+  // Element count of a compiled collection. Only an indexed collection lowers
+  // to a JS array; a dictionary or string operand fails closed (D6).
+  Length: (args, compile) => {
+    const arg = args[0];
+    if (arg === null || arg === undefined)
+      throw new Error('Length: no argument');
+    if (!isIndexedCollectionOperand(arg))
+      throw new Error(
+        `Length: cannot compile — operand is not an indexed collection ` +
+          `(list/vector/range). Fail closed (D6).`
+      );
+    return `(${compile(arg)}).length`;
+  },
+  // Positional access. CE `At` is 1-based and supports negative indices from
+  // the end; an out-of-range or zero index yields NaN (matching the
+  // interpreter's `Nothing`, projected to NaN on a real target). Only the
+  // single-index form over an indexed collection compiles; nested/multi-index
+  // access and non-collection operands fail closed (D6).
+  At: (args, compile) => {
+    const coll = args[0];
+    const index = args[1];
+    if (coll === null || coll === undefined || index === null || index === undefined)
+      throw new Error('At: missing argument');
+    if (args.length !== 2)
+      throw new Error(
+        `At: only the single-index form compiles; multi-index (nested) ` +
+          `access is not supported. Fail closed (D6).`
+      );
+    if (!isIndexedCollectionOperand(coll))
+      throw new Error(
+        `At: cannot compile — first operand is not an indexed collection ` +
+          `(list/vector/range). Fail closed (D6).`
+      );
+    return `_SYS.at(${compile(coll)}, ${compile(index)})`;
+  },
+  // Fold a collection with one of the common associative folds. CE `Reduce`
+  // canonicalizes `\sum_{i=d}^{d} d` to `Reduce(d, Add, 0)`. Only the
+  // Add/Multiply/Min/Max folds compile; any other combiner fails closed (D6).
+  Reduce: (args, compile) => {
+    const coll = args[0];
+    const op = args[1];
+    const init = args[2];
+    if (coll === null || coll === undefined || op === null || op === undefined)
+      throw new Error('Reduce: missing argument');
+    if (!isIndexedCollectionOperand(coll))
+      throw new Error(
+        `Reduce: cannot compile — first operand is not an indexed collection ` +
+          `(list/vector/range). Fail closed (D6).`
+      );
+    let combiner: string | undefined;
+    if (isSymbol(op)) {
+      switch (op.symbol) {
+        case 'Add':
+          combiner = '(_a, _b) => _a + _b';
+          break;
+        case 'Multiply':
+          combiner = '(_a, _b) => _a * _b';
+          break;
+        case 'Min':
+          combiner = '(_a, _b) => Math.min(_a, _b)';
+          break;
+        case 'Max':
+          combiner = '(_a, _b) => Math.max(_a, _b)';
+          break;
+      }
+    }
+    if (combiner === undefined)
+      throw new Error(
+        `Reduce: only Add/Multiply/Min/Max folds compile on the JavaScript ` +
+          `target. Fail closed (D6).`
+      );
+    const collCode = compile(coll);
+    // With an initial value, seed the reduce; without one, the native reduce
+    // uses the first element as the seed (matching the interpreter, which
+    // returns the sole/first element for a singleton and folds pairwise).
+    if (init !== undefined && init !== null)
+      return `(${collCode}).reduce(${combiner}, ${compile(init)})`;
+    return `(${collCode}).reduce(${combiner})`;
+  },
   Log: (args, compile) => {
     if (args.length === 1) return `Math.log10(${compile(args[0])})`;
     return `(Math.log(${compile(args[0])}) / Math.log(${compile(args[1])}))`;
@@ -1507,6 +1615,16 @@ const SYS_HELPERS = {
     throw new Error('Condition must evaluate to "True" or "False".');
   },
   heaviside: (x: number) => (x < 0 ? 0 : x === 0 ? 0.5 : 1),
+  // Positional access for compiled `At`. CE `At` is 1-based; a negative index
+  // counts from the end. A zero or out-of-range index yields NaN (the
+  // interpreter returns `Nothing`, projected to NaN on a real target).
+  at: (arr: unknown, i: number): number => {
+    if (!Array.isArray(arr)) return NaN;
+    const n = arr.length;
+    const idx = i > 0 ? i - 1 : n + i;
+    if (i === 0 || idx < 0 || idx >= n) return NaN;
+    return arr[idx] as number;
+  },
   // Definite integral via Monte-Carlo (1e7 uniform samples). STOCHASTIC and
   // approximate (~1e-4 typical error, ~200 ms/call) — see `compileIntegrate`.
   integrate: (f: (x: number) => number, a: number, b: number) =>

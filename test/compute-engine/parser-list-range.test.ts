@@ -66,6 +66,136 @@ describe('Parser: list range ellipsis', () => {
     });
   });
 
+  // At parse time a negative literal is raw `["Negate", n]`, not the number
+  // `-n`, so a negative *leading* sample used to make `machineValue` return
+  // `null` and the range inference bailed to a `ContinuationPlaceholder` list
+  // that enumerated as NaN downstream (Tycho 2026-07-11).
+  describe('inferred-step form with negative leading samples', () => {
+    test('`[-9, -6, ..., 9]` → Range(-9, 9, 3)', () => {
+      expect(parse('\\left[-9,-6,\\ldots,9\\right]')).toEqual([
+        'Range', -9, 9, 3,
+      ]);
+    });
+
+    test('`[0, -2, ..., -10]` → Range(0, -10, -2)', () => {
+      expect(parse('\\left[0,-2,\\ldots,-10\\right]')).toEqual([
+        'Range', 0, -10, -2,
+      ]);
+    });
+
+    test('`[-1, -0.5, ..., 1]` → Range(-1, 1, 0.5)', () => {
+      expect(parse('\\left[-1,-0.5,\\ldots,1\\right]')).toMatchObject([
+        'Range', -1, 1, 0.5,
+      ]);
+    });
+
+    test('`[10, 8, ..., -4]` (negative end only) → Range(10, -4, -2)', () => {
+      expect(parse('\\left[10,8,\\ldots,-4\\right]')).toEqual([
+        'Range', 10, -4, -2,
+      ]);
+    });
+
+    test('does not leak ContinuationPlaceholder', () => {
+      const json = JSON.stringify(parse('\\left[-9,-6,\\ldots,9\\right]'));
+      expect(json).not.toContain('ContinuationPlaceholder');
+    });
+
+    test('inconsistent negative samples → parse error', () => {
+      // samples [-9, -6, -4]: step = -4 - -6 = 2, but -6 - -9 = 3 ≠ 2
+      const result = ce.parse('\\left[-9,-6,-4,\\ldots,9\\right]');
+      expect(result.isValid).toBe(false);
+    });
+
+  });
+
+  // Symbolic stepped samples: infer a step ONLY when every leading sample is a
+  // numeric multiple of ONE common plain symbol (the Desmos-corpus idiom
+  // `[-3N, -2N, ..., 3N]`). Generic-sequence notation (`[x_1, x_2, ..., x_n]`)
+  // is NOT an arithmetic progression and must stay a placeholder List.
+  describe('inferred-step form with symbolic leading samples', () => {
+    test('`[-3N, -2N, ..., 3N]` → Range(-3N, 3N, N)', () => {
+      expect(parse('\\left[-3N,-2N,\\ldots,3N\\right]')).toEqual([
+        'Range',
+        ['Multiply', -3, 'N'],
+        ['Multiply', 3, 'N'],
+        'N',
+      ]);
+    });
+
+    test('`[N, 2N, ..., 10N]` → Range(N, 10N, N)', () => {
+      expect(parse('\\left[N,2N,\\ldots,10N\\right]')).toEqual([
+        'Range',
+        'N',
+        ['Multiply', 10, 'N'],
+        'N',
+      ]);
+    });
+
+    test('`[2N, 4N, ..., 20N]` → step Multiply(2, N)', () => {
+      expect(parse('\\left[2N,4N,\\ldots,20N\\right]')).toEqual([
+        'Range',
+        ['Multiply', 2, 'N'],
+        ['Multiply', 20, 'N'],
+        ['Multiply', 2, 'N'],
+      ]);
+    });
+
+    test('`[3N, 2N, ..., -3N]` (descending) → step Negate(N)', () => {
+      expect(parse('\\left[3N,2N,\\ldots,-3N\\right]')).toEqual([
+        'Range',
+        ['Multiply', 3, 'N'],
+        ['Multiply', -3, 'N'],
+        ['Negate', 'N'],
+      ]);
+    });
+
+    test('does not leak ContinuationPlaceholder', () => {
+      const json = JSON.stringify(parse('\\left[-3N,-2N,\\ldots,3N\\right]'));
+      expect(json).not.toContain('ContinuationPlaceholder');
+    });
+
+    // Generic sequence: distinct symbols per sample → not a progression.
+    test('`[x_1, x_2, ..., x_n]` stays a placeholder List', () => {
+      expect(parse('\\left[x_1,x_2,\\ldots,x_n\\right]')).toEqual([
+        'List',
+        'x_1',
+        'x_2',
+        'ContinuationPlaceholder',
+        'x_n',
+      ]);
+    });
+
+    // Different symbols across samples → not a progression over one symbol.
+    test('`[N, 2M, ..., 10N]` (mixed symbols) stays a placeholder List', () => {
+      expect(parse('\\left[N,2M,\\ldots,10N\\right]')).toEqual([
+        'List',
+        'N',
+        ['Multiply', 2, 'M'],
+        'ContinuationPlaceholder',
+        ['Multiply', 10, 'N'],
+      ]);
+    });
+
+    // Coefficients 1, 2, 4 are not an arithmetic progression.
+    test('`[N, 2N, 4N, ..., 10N]` (inconsistent) → parse error', () => {
+      const result = ce.parse('\\left[N,2N,4N,\\ldots,10N\\right]');
+      expect(result.isValid).toBe(false);
+    });
+
+    // End-to-end: once N is assigned, the symbolic Range enumerates concretely.
+    test('`[-3N, -2N, ..., 3N]` with N=2 enumerates to -6..6 step 2', () => {
+      const ceLocal = new ComputeEngine();
+      ceLocal.assign('N', 2);
+      const values = [
+        ...ceLocal
+          .parse('\\left[-3N,-2N,\\ldots,3N\\right]')
+          .evaluate()
+          .each(),
+      ].map((x) => x.re);
+      expect(values).toEqual([-6, -4, -2, 0, 2, 4, 6]);
+    });
+  });
+
   describe('error cases', () => {
     test('inconsistent intermediate sample → parse error', () => {
       // step is 0.1 but third element is 0.5 (not 0.2)

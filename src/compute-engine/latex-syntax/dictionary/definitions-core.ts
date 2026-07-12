@@ -3107,6 +3107,23 @@ function parseBrackets(
 }
 
 /**
+ * Like `machineValue`, but also unwraps a raw `["Negate", <numeric>]` node.
+ *
+ * At parse time the samples are raw MathJSON where a negative literal is
+ * `["Negate", 9]` (not the number `-9`), for which `machineValue` returns
+ * `null`. Returns the signed number, or `null` if not numeric.
+ */
+function signedMachineValue(expr: MathJsonExpression): number | null {
+  const value = machineValue(expr);
+  if (value !== null) return value;
+  if (operator(expr) === 'Negate') {
+    const inner = machineValue(operand(expr, 1));
+    if (inner !== null) return -inner;
+  }
+  return null;
+}
+
+/**
  * Detect the inferred-step list-range form: elements ending with
  * `[..., s0, s1, ..., sk, ContinuationPlaceholder, end]`.
  *
@@ -3143,26 +3160,123 @@ function tryInferRangeFromElements(
   // Need at least 2 samples to infer a step
   if (samples.length < 2) return null;
 
-  // All samples must be numeric
-  const sampleNums = samples.map(machineValue);
-  if (sampleNums.some((n) => n === null)) return null;
-  const nums = sampleNums as number[];
-
-  // Step = difference between the last two samples
-  const step = nums[nums.length - 1] - nums[nums.length - 2];
-
-  // Degenerate: step is zero (or effectively zero)
   const tol = parser.options.tolerance;
-  if (Math.abs(step) < tol)
+
+  // Numeric path: all samples reduce to signed numbers. At parse time the
+  // samples are raw MathJSON, so a negative literal is `["Negate", <numeric>]`
+  // rather than a negative number — unwrap it so signed leading samples are
+  // recognized.
+  const sampleNums = samples.map(signedMachineValue);
+  if (sampleNums.every((n) => n !== null)) {
+    const nums = sampleNums as number[];
+
+    // Step = difference between the last two samples
+    const step = nums[nums.length - 1] - nums[nums.length - 2];
+
+    // Degenerate: step is zero (or effectively zero)
+    if (Math.abs(step) < tol)
+      return parser.error('degenerate-range-step', parser.index);
+
+    // Validate all consecutive sample differences equal `step` within tolerance
+    for (let i = 1; i < nums.length; i++) {
+      if (Math.abs(nums[i] - nums[i - 1] - step) > tol)
+        return parser.error('inconsistent-range-samples', parser.index);
+    }
+
+    return ['Range', nums[0], endExpr, step];
+  }
+
+  // Symbolic path: infer a step ONLY under a narrow structural gate — every
+  // leading sample is a numeric multiple of ONE common plain symbol
+  // (e.g. `[-3N, -2N, ..., 3N]`). Generic-sequence notation
+  // (`[x_1, x_2, ..., x_n]`) is NOT an arithmetic progression and must keep
+  // falling through to a `ContinuationPlaceholder` list: the shared-symbol
+  // gate rejects it (distinct symbols), as do mixed numeric/symbolic samples
+  // and any non `(coefficient · symbol)` shape.
+  const pairs = samples.map(extractCoeffAndSymbol);
+  if (pairs.some((p) => p === null)) return null;
+  const coeffs = (pairs as { coeff: number; sym: string }[]).map(
+    (p) => p.coeff
+  );
+  const sym = (pairs as { coeff: number; sym: string }[])[0].sym;
+  if ((pairs as { coeff: number; sym: string }[]).some((p) => p.sym !== sym))
+    return null;
+
+  // Step = difference between the last two coefficients, times the symbol.
+  const stepCoeff = coeffs[coeffs.length - 1] - coeffs[coeffs.length - 2];
+
+  if (Math.abs(stepCoeff) < tol)
     return parser.error('degenerate-range-step', parser.index);
 
-  // Validate all consecutive sample differences equal `step` within tolerance
-  for (let i = 1; i < nums.length; i++) {
-    if (Math.abs(nums[i] - nums[i - 1] - step) > tol)
+  for (let i = 1; i < coeffs.length; i++) {
+    if (Math.abs(coeffs[i] - coeffs[i - 1] - stepCoeff) > tol)
       return parser.error('inconsistent-range-samples', parser.index);
   }
 
-  return ['Range', nums[0], endExpr, step];
+  return [
+    'Range',
+    coeffTimesSymbol(coeffs[0], sym),
+    endExpr,
+    coeffTimesSymbol(stepCoeff, sym),
+  ];
+}
+
+/**
+ * Extract a `(coefficient, symbol)` pair from a raw MathJSON sample of the
+ * form `k·sym` (a rational multiple of a single plain symbol).
+ *
+ * Recognizes the raw shapes produced at parse time:
+ * - a bare symbol `"N"` → coefficient `1`
+ * - `["Negate", <sample>]` → negated coefficient (`-N` → `-1`)
+ * - `["InvisibleOperator", <coeff>, "N"]` / `["Multiply", <coeff>, "N"]`
+ *   with a numeric coefficient and a single symbol operand
+ *
+ * Returns `null` for subscripted/compound bases (`x_1`), multi-symbol
+ * products (`N·M`), powers (`n^2`), or any other non-matching shape.
+ */
+function extractCoeffAndSymbol(
+  expr: MathJsonExpression
+): { coeff: number; sym: string } | null {
+  // A bare, non-subscripted symbol → coefficient 1
+  const sym = symbol(expr);
+  if (sym !== null) {
+    if (sym.includes('_')) return null; // subscripted/compound base
+    return { coeff: 1, sym };
+  }
+
+  const op = operator(expr);
+
+  // Negation flips the coefficient of the inner sample
+  if (op === 'Negate') {
+    const arg = operand(expr, 1);
+    if (!arg) return null;
+    const inner = extractCoeffAndSymbol(arg);
+    if (inner === null) return null;
+    return { coeff: -inner.coeff, sym: inner.sym };
+  }
+
+  // A numeric coefficient times a single symbol
+  if (op === 'Multiply' || op === 'InvisibleOperator') {
+    const args = operands(expr);
+    if (args.length !== 2) return null;
+    const coeff = signedMachineValue(args[0]);
+    const innerSym = symbol(args[1]);
+    if (coeff === null || innerSym === null) return null;
+    if (innerSym.includes('_')) return null;
+    return { coeff, sym: innerSym };
+  }
+
+  return null;
+}
+
+/**
+ * Emit raw MathJSON for `coeff · sym`: coefficient `1` → the bare symbol,
+ * `-1` → `["Negate", sym]`, otherwise `["Multiply", coeff, sym]`.
+ */
+function coeffTimesSymbol(coeff: number, sym: string): MathJsonExpression {
+  if (coeff === 1) return sym;
+  if (coeff === -1) return ['Negate', sym];
+  return ['Multiply', coeff, sym];
 }
 
 /** A "List" expression can represent a collection of arbitrary elements,

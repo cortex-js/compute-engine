@@ -1019,3 +1019,133 @@ describe('COMPILE chained relation binds shared middle once (CO-P2-23c)', () => 
     expect(r.run!({ x: 5 })).toBe(false);
   });
 });
+
+// Compilation-target contract for collection-shaped operands (Tycho round).
+// The target-based API must FAIL CLOSED (throw) on shapes it cannot lower —
+// never return `success: true` with null/wrong code — while the folds it *does*
+// support (Reduce/Length/At) compile to correct JS.
+describe('COMPILE collections (fail-closed + supported folds)', () => {
+  const mkEngine = () => {
+    const e = new ComputeEngine();
+    e.pushScope();
+    e.assign('d', e.parse('[10, 20, 30]').evaluate());
+    e.assign('m', e.box(2));
+    return e;
+  };
+
+  it('Equal over a collection operand fails closed (was success:true → null)', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    expect(() =>
+      js.compile(e.parse('d = m', { strict: false }), { realOnly: true })
+    ).toThrow(/collection-valued/);
+  });
+
+  it('Which with a collection condition fails closed (was success:true, wrong branch)', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    const cases = e.parse('\\begin{cases}10^{9} & d = m \\\\ d\\end{cases}', {
+      strict: false,
+    });
+    expect(() => js.compile(cases, { realOnly: true })).toThrow(
+      /Fail closed/
+    );
+  });
+
+  it('If with a collection condition fails closed', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    expect(() =>
+      js.compile(e.box(['If', 'd', 1, 2]), { realOnly: true })
+    ).toThrow(/collection/);
+  });
+
+  it('the free-function compile() converts the throw to success:false + fallback', () => {
+    const e = mkEngine();
+    const r = compile(e.parse('d = m', { strict: false }));
+    // Fallback path still returns a runnable interpreter-backed function.
+    expect(r?.success).toBe(false);
+    expect(typeof r?.run).toBe('function');
+  });
+
+  it('Reduce(d, Add, 0) compiles and runs to the fold (was: Unknown operator)', () => {
+    const e = mkEngine();
+    e.assign('d', e.parse('[1, 2, 3]').evaluate());
+    const r = compile(e.box(['Reduce', 'd', 'Add', 0]), { fallback: false })!;
+    expect(r.success).toBe(true);
+    expect(r.run!()).toBe(6);
+  });
+
+  it('the \\sum_{i=d}^{d} d control (canonicalizes to Reduce) compiles and runs to 6', () => {
+    const e = mkEngine();
+    e.assign('d', e.parse('[1, 2, 3]').evaluate());
+    const r = compile(e.parse('\\sum_{i=d}^{d}d', { strict: false }), {
+      fallback: false,
+    })!;
+    expect(r.success).toBe(true);
+    expect(r.run!()).toBe(6);
+  });
+
+  it('Reduce compiles Multiply/Min/Max folds', () => {
+    const e = mkEngine();
+    e.assign('d', e.parse('[1, 2, 3, 4]').evaluate());
+    expect(compile(e.box(['Reduce', 'd', 'Multiply', 1]), { fallback: false })!.run!()).toBe(24);
+    expect(compile(e.box(['Reduce', 'd', 'Min']), { fallback: false })!.run!()).toBe(1);
+    expect(compile(e.box(['Reduce', 'd', 'Max']), { fallback: false })!.run!()).toBe(4);
+  });
+
+  it('Reduce with an unsupported combiner fails closed', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    expect(() =>
+      js.compile(e.box(['Reduce', 'd', 'Subtract', 0]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+  });
+
+  it('Length compiles to array length (was: Unknown operator)', () => {
+    const e = mkEngine();
+    const r = compile(e.box(['Length', 'd']), { fallback: false })!;
+    expect(r.success).toBe(true);
+    expect(r.run!()).toBe(3);
+  });
+
+  it('At compiles 1-based access with negative-from-end and NaN out-of-range', () => {
+    const e = mkEngine();
+    expect(compile(e.box(['At', 'd', 1]), { fallback: false, realOnly: true })!.run!()).toBe(10);
+    expect(compile(e.box(['At', 'd', 3]), { fallback: false, realOnly: true })!.run!()).toBe(30);
+    expect(compile(e.box(['At', 'd', -1]), { fallback: false, realOnly: true })!.run!()).toBe(30);
+    expect(compile(e.box(['At', 'd', -3]), { fallback: false, realOnly: true })!.run!()).toBe(10);
+    expect(Number.isNaN(compile(e.box(['At', 'd', 0]), { fallback: false, realOnly: true })!.run!() as number)).toBe(true);
+    expect(Number.isNaN(compile(e.box(['At', 'd', 4]), { fallback: false, realOnly: true })!.run!() as number)).toBe(true);
+  });
+
+  it('At with a nested/multi-index access fails closed', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    const m = e.box(['List', ['List', 1, 2], ['List', 3, 4]]);
+    expect(() =>
+      js.compile(e.box(['At', m, 1, 2]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+  });
+});
+
+describe('COMPILE deprecated targets', () => {
+  // No other test in this file resolves `interval-glsl`, so the module-level
+  // once-per-process dedup flag is still untripped here — this test observes
+  // the first (and only) warning.
+  it('warns once when the deprecated interval-glsl target is resolved', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const e = new ComputeEngine();
+      // Resolve the target several times; the deprecation notice must fire
+      // exactly once per process, not once per resolution.
+      e.getCompilationTarget('interval-glsl');
+      e.getCompilationTarget('interval-glsl');
+      compile(e.parse('x^2 + y^2'), { to: 'interval-glsl' });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(/interval-glsl.*deprecated/i);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

@@ -129,6 +129,54 @@ export function hasAccessibleComponents(expr: Expression): boolean {
   );
 }
 
+/**
+ * Broadcast an element-wise `operator` (`Add`/`Multiply`/…) over the finite
+ * indexed-collection operands in `xs` — e.g. the `List` a broadcast `Power`
+ * produced (`L^2`), or a lazy `Range`. Every *other* operand — scalars AND
+ * numeric tuples (which carry point/vector semantics, not collection
+ * semantics) — is kept whole and repeated across the elements. So
+ * `Multiply(Range(-2,2), Tuple(2,3))` broadcasts the range and yields a `List`
+ * of 5 `Tuple`s, mirroring the eager-`List` (`mulTensors`) behavior.
+ *
+ * Returns the eager `List` of per-element results, or `undefined` when there is
+ * no finite indexed collection to broadcast over, or a broadcastable operand's
+ * length is not statically known (the caller then stays inert). This is the
+ * post-evaluation counterpart to the pre-evaluation broadcast in
+ * `BoxedFunction._computeValue` (step 2): the lazy `Add`/`Multiply` operators
+ * only see their collection-shaped operands *after* evaluating them, so their
+ * `evaluate` handlers dispatch through here to keep `evaluate` idempotent.
+ */
+export function broadcastOverIndexedCollections(
+  ce: Expression['engine'],
+  operator: string,
+  xs: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): Expression | undefined {
+  const isBroadcast = (x: Expression): boolean =>
+    isFiniteIndexedCollection(x) && !isNumericTuple(x);
+
+  const cols = xs.filter(isBroadcast);
+  if (cols.length === 0) return undefined;
+
+  // Broadcast length = shortest participating collection. Bail (stay inert) if
+  // any length is not statically known.
+  let n = Infinity;
+  for (const c of cols) {
+    const len = c.count;
+    if (len === undefined || len < 0) return undefined;
+    if (len < n) n = len;
+  }
+  if (!Number.isFinite(n)) return undefined;
+
+  const options = { numericApproximation };
+  const results: Expression[] = [];
+  for (let i = 1; i <= n; i++) {
+    const args = xs.map((x) => (isBroadcast(x) ? (x.at(i) ?? ce.Nothing) : x));
+    results.push(ce._fn(operator, args).evaluate(options));
+  }
+  return ce._fn('List', results);
+}
+
 export function repeat(
   value: Expression,
   count?: number

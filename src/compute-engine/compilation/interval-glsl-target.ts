@@ -391,7 +391,12 @@ vec2 _iv_mod(vec2 a, vec2 b) {
 }
 `;
 
-/** Options that shape the emitted interval-glsl preamble. */
+/**
+ * Options that shape the emitted interval-glsl preamble.
+ *
+ * @deprecated Part of the deprecated `interval-glsl` target (removed in a future
+ * release). Use `interval-js` or the scalar `glsl`/`wgsl` targets instead.
+ */
 export interface IntervalGLSLPreambleOptions {
   /**
    * Absolute outward pad (in output units) added to `sin`/`cos` bounds, on top
@@ -410,6 +415,9 @@ export interface IntervalGLSLPreambleOptions {
  * (`IV_EPS`/`IV_EPS_FN`/`IV_EPS_POW`) are a stable, public part of the output: a
  * renderer that boxes its own cell coordinates should outward-round them with
  * `_iv_widen_t` (§13/Q1).
+ *
+ * @deprecated Part of the deprecated `interval-glsl` target (removed in a future
+ * release). Use `interval-js` or the scalar `glsl`/`wgsl` targets instead.
  */
 export function intervalGLSLPreamble(
   options: IntervalGLSLPreambleOptions = {}
@@ -421,7 +429,12 @@ export function intervalGLSLPreamble(
   );
 }
 
-/** Default preamble (no absolute trig pad). */
+/**
+ * Default preamble (no absolute trig pad).
+ *
+ * @deprecated Part of the deprecated `interval-glsl` target (removed in a future
+ * release). Use `interval-js` or the scalar `glsl`/`wgsl` targets instead.
+ */
 export const INTERVAL_GLSL_PREAMBLE = intervalGLSLPreamble();
 
 /**
@@ -604,6 +617,14 @@ const INTERVAL_GLSL_CONSTANTS: Record<string, string> = {
  * GLSL interval-arithmetic compilation target. Reuses `GLSLTarget`'s shader
  * assembly; swaps in the interval function table, the `vec2` point-interval
  * number/var hooks, and the `_iv_*` preamble.
+ *
+ * @deprecated The `interval-glsl` target is deprecated and will be removed in a
+ * future release. GPU interval evaluation only pays off when the whole pipeline
+ * stays on the GPU; the compile → FBO → readPixels → CPU round-trip is
+ * net-negative versus CPU `interval-js`, and this target cannot compile any
+ * relational operator (so it cannot host restriction/masking conditions). Use
+ * `interval-js` (CPU interval arithmetic) or the scalar `glsl`/`wgsl` targets
+ * instead.
  */
 export class IntervalGLSLTarget extends GLSLTarget {
   protected readonly languageId = 'interval-glsl';

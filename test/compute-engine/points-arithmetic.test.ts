@@ -396,3 +396,143 @@ describe('POINT/TUPLE ARITHMETIC — T3 end-to-end (needs T4)', () => {
     expect(r.type.toString()).toBe('tuple<number, number>');
   });
 });
+
+/**
+ * Elementwise-broadcast regressions from the Tycho Desmos-import corpus.
+ *
+ * (a) A lazy indexed collection (a finite `Range`) multiplied by a numeric
+ *     tuple must broadcast the collection over its elements — a `List` of
+ *     `Tuple`s — matching the eager-`List` behavior, NOT transpose into a
+ *     `Tuple` of `Multiply`s (which `mulTuples` did when the range fell through
+ *     the tuple branch as a phantom scalar).
+ *
+ * (b) `Add`/`Multiply`/`Divide` must broadcast over a collection produced BY
+ *     evaluating an operand (e.g. `L^2` → `List(1,4,9)`), not just over a
+ *     collection that was already a collection before evaluation. `Add`/
+ *     `Multiply` are lazy, so the collection shape only surfaces inside their
+ *     `evaluate` handler; missing it left an inert `Add(-2, List(...))` and
+ *     broke evaluate-idempotence.
+ */
+describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
+  test('(a) finite Range · tuple → List of Tuples (broadcast, not transpose)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('R', ce.box(['Range', -2, 2]).evaluate());
+    const r = ce.parse('R\\cdot\\left(2,3\\right)', { strict: false }).evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.json).toEqual([
+      'List',
+      ['Tuple', -4, -6],
+      ['Tuple', -2, -3],
+      ['Tuple', 0, 0],
+      ['Tuple', 2, 3],
+      ['Tuple', 4, 6],
+    ]);
+    // The result is a real collection: materialization/each works on it.
+    expect(r.isCollection).toBe(true);
+    expect(r.count).toBe(5);
+    expect([...r.each()].map((x) => x.json)).toEqual([
+      ['Tuple', -4, -6],
+      ['Tuple', -2, -3],
+      ['Tuple', 0, 0],
+      ['Tuple', 2, 3],
+      ['Tuple', 4, 6],
+    ]);
+  });
+
+  test('(a) eager List · tuple still broadcasts (no regression)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('L', ce.parse('[1,2,3]').evaluate());
+    const r = ce.parse('L\\cdot\\left(2,3\\right)', { strict: false }).evaluate();
+    expect(r.json).toEqual([
+      'List',
+      ['Tuple', 2, 3],
+      ['Tuple', 4, 6],
+      ['Tuple', 6, 9],
+    ]);
+  });
+
+  test('(a) Range · (cos a, sin a) with a declared-real symbol', () => {
+    const ce = new ComputeEngine();
+    ce.assign('R', ce.box(['Range', -2, 2]).evaluate());
+    ce.declare('a', 'real');
+    const r = ce
+      .parse('R\\cdot\\left(\\cos a, \\sin a\\right)', { strict: false })
+      .evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.count).toBe(5);
+    // Middle element (range value 0) collapses to (0, 0); the others scale the
+    // (cos a, sin a) tuple by the range value.
+    const els = [...r.each()];
+    expect(els.every((x) => x.operator === 'Tuple')).toBe(true);
+    expect(els[2].json).toEqual(['Tuple', 0, 0]);
+    expect(els[3].json).toEqual(['Tuple', ['Cos', 'a'], ['Sin', 'a']]);
+  });
+
+  test('(b) L^2 - 2 broadcasts over the evaluated Power result', () => {
+    const ce = new ComputeEngine();
+    ce.assign('L', ce.parse('[1,2,3]').evaluate());
+    const r = ce.parse('L^2-2').evaluate();
+    expect(r.json).toEqual(['List', -1, 2, 7]);
+  });
+
+  test('(b) 1 - L broadcasts', () => {
+    const ce = new ComputeEngine();
+    ce.assign('L', ce.parse('[1,2,3]').evaluate());
+    const r = ce.parse('1-L').evaluate();
+    expect(r.json).toEqual(['List', 0, -1, -2]);
+  });
+
+  test('(b) R^2 - 2 broadcasts over a lazy Range', () => {
+    const ce = new ComputeEngine();
+    ce.assign('R', ce.box(['Range', -2, 2]).evaluate());
+    const r = ce.parse('R^2-2').evaluate();
+    expect(r.json).toEqual(['List', 2, -1, -2, -1, 2]);
+  });
+
+  test('(b) Multiply and Divide broadcast over an evaluated collection', () => {
+    const ce = new ComputeEngine();
+    ce.assign('L', ce.parse('[1,2,3]').evaluate());
+    // (L^2)/2 = Multiply(1/2, List(1,4,9))
+    expect(ce.box(['Divide', ['Power', 'L', 2], 2]).evaluate().json).toEqual([
+      'List',
+      ['Rational', 1, 2],
+      2,
+      ['Rational', 9, 2],
+    ]);
+    // 2·(L+1) = Multiply(2, List(2,3,4))
+    expect(ce.box(['Multiply', 2, ['Add', 'L', 1]]).evaluate().json).toEqual([
+      'List',
+      4,
+      6,
+      8,
+    ]);
+  });
+
+  test('(b) evaluate is idempotent on the broadcast results', () => {
+    const ce = new ComputeEngine();
+    ce.assign('L', ce.parse('[1,2,3]').evaluate());
+    ce.assign('R', ce.box(['Range', -2, 2]).evaluate());
+    for (const tex of ['L^2-2', '1-L', 'R^2-2']) {
+      const once = ce.parse(tex).evaluate();
+      const twice = once.evaluate();
+      expect(twice.isSame(once)).toBe(true);
+    }
+    const rc = ce
+      .parse('R\\cdot\\left(2,3\\right)', { strict: false })
+      .evaluate();
+    expect(rc.evaluate().isSame(rc)).toBe(true);
+  });
+
+  test('scalar · tuple and tuple · tuple are unchanged', () => {
+    const ce = new ComputeEngine();
+    // scalar · tuple scales component-wise (stays a Tuple)
+    expect(ce.box(['Multiply', 2, ['Tuple', 1, 2]]).evaluate().json).toEqual([
+      'Tuple',
+      2,
+      4,
+    ]);
+    // tuple · tuple stays an error (no implicit dot/cross product)
+    const tt = ce.box(['Multiply', ['Tuple', 1, 2], ['Tuple', 3, 4]]).evaluate();
+    expect(errorCode(tt.op1) ?? errorCode(tt)).toBe('incompatible-type');
+  });
+});

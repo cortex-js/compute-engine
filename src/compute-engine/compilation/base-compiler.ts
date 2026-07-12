@@ -420,6 +420,7 @@ export class BaseCompiler {
 
     if (h === 'If') {
       if (args.length !== 3) throw new Error('If: wrong number of arguments');
+      BaseCompiler.assertScalarCondition(args[0]);
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
@@ -1266,10 +1267,27 @@ export class BaseCompiler {
    * that contract (D6) where the target can express it. A provably boolean
    * condition — the common case — is emitted bare (no overhead, no churn).
    */
+  /**
+   * A branch condition (`If`/`Which`/`When`) must be a scalar boolean. A
+   * collection-valued condition can never be one — the interpreter throws
+   * ("Condition must evaluate to True or False") rather than silently taking a
+   * branch — so fail closed (D6) at compile time. Uses the declared type (not
+   * `.isCollection`, which is false for a `list<finite_number>`).
+   */
+  static assertScalarCondition(cond: Expression): void {
+    if (cond.type.matches('collection'))
+      throw new Error(
+        'Cannot compile: a branch condition is a collection-valued expression, ' +
+          'which is never a scalar boolean. Materialize the collection first. ' +
+          'Fail closed (D6).'
+      );
+  }
+
   static guardCondition(
     cond: Expression,
     target: CompileTarget<Expression>
   ): TargetSource {
+    BaseCompiler.assertScalarCondition(cond);
     const code = BaseCompiler.compile(cond, target);
     if (target.assertBoolean && !BaseCompiler.isBooleanValued(cond))
       return target.assertBoolean(code);

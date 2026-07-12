@@ -1315,7 +1315,20 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Cross: 'cross',
   Distance: 'distance',
   Dot: 'dot',
-  Length: 'length',
+  // The GLSL/WGSL `length()` builtin is the Euclidean NORM of a vector, which
+  // is CE `Norm` — NOT CE `Length` (element count). Mapping CE `Length` here
+  // silently emitted a norm, and for >4 elements produced invalid shader source
+  // (`length(float[5](...))`). `Norm` carries the `length()` builtin; CE
+  // `Length` fails closed on GPU targets (below).
+  Norm: 'length',
+  Length: (_args, _compile, target) => {
+    throw new Error(
+      `Length (collection element count) is not supported on the ` +
+        `${target.language ?? 'GPU'} target: the '${target.language ?? 'GPU'}' ` +
+        `'length()' builtin is the Euclidean norm (CE 'Norm'), not a count. ` +
+        `Fail closed (D6).`
+    );
+  },
   Normalize: 'normalize',
   Reflect: 'reflect',
   Refract: 'refract',

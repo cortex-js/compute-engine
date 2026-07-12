@@ -24,6 +24,8 @@ import {
   numericTupleArity,
   hasAccessibleComponents,
   isDeclaredScalarNumber,
+  isFiniteIndexedCollection,
+  broadcastOverIndexedCollections,
 } from '../collection-utils.js';
 
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
@@ -337,6 +339,16 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   if (xs.some((x) => isNumericTuple(x)))
     return addTuples(xs[0].engine, xs, false);
 
+  // Broadcast over a non-tensor finite indexed collection that only became a
+  // collection through evaluation — e.g. `L^2 - 2` = `Add(-2, List(1,4,9))`,
+  // where `Power(L, 2)` already evaluated to a plain (non-tensor) List. The
+  // pre-evaluation broadcast in `_computeValue` misses these (the raw operand
+  // was still a `Power`), and `Add` is lazy, so the shape only surfaces here.
+  if (xs.some((x) => isFiniteIndexedCollection(x))) {
+    const r = broadcastOverIndexedCollections(xs[0].engine, 'Add', xs, false);
+    if (r) return r;
+  }
+
   return new Terms(xs[0].engine, xs).asExpression();
 }
 
@@ -362,6 +374,12 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
   // Numeric tuples (points/vectors) add component-wise (never broadcast).
   if (xs.some((x) => isNumericTuple(x)))
     return addTuples(xs[0].engine, xs, true);
+
+  // Broadcast over a non-tensor finite indexed collection (see `add`).
+  if (xs.some((x) => isFiniteIndexedCollection(x))) {
+    const r = broadcastOverIndexedCollections(xs[0].engine, 'Add', xs, true);
+    if (r) return r;
+  }
 
   // Don't N() the number literals (fractions) to avoid losing precision
   xs = xs.map((x) => (isNumber(x) ? x.evaluate() : x.N()));

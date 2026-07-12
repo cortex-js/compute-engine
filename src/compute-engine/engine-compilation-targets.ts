@@ -13,6 +13,38 @@ import { IntervalJavaScriptTarget } from './compilation/interval-javascript-targ
 import { IntervalGLSLTarget } from './compilation/interval-glsl-target.js';
 
 /**
+ * Compilation target names that are deprecated and scheduled for removal in a
+ * future release. GPU interval evaluation only pays off when the whole pipeline
+ * stays on the GPU; the compile → FBO → readPixels → CPU round-trip is
+ * net-negative versus CPU `interval-js`, and these targets cannot compile any
+ * relational operator (so they cannot host restriction/masking conditions).
+ * Use `interval-js` (CPU interval arithmetic) or the scalar `glsl`/`wgsl`
+ * targets instead.
+ *
+ * @internal
+ */
+const DEPRECATED_COMPILATION_TARGETS = new Set(['interval-glsl', 'interval-wgsl']);
+
+/**
+ * Module-level guard so the deprecation notice for a given target is emitted at
+ * most once per process (not once per compile). `console.*` is stripped in the
+ * minified production build; that is expected.
+ *
+ * @internal
+ */
+const _warnedDeprecatedTargets = new Set<string>();
+
+function warnDeprecatedTarget(name: string): void {
+  if (_warnedDeprecatedTargets.has(name)) return;
+  _warnedDeprecatedTargets.add(name);
+  console.warn(
+    `The "${name}" compilation target is deprecated and will be removed in a ` +
+      `future release. Use "interval-js" (CPU interval arithmetic) or the ` +
+      `scalar "glsl"/"wgsl" targets instead.`
+  );
+}
+
+/**
  * Internal registry for compilation targets.
  *
  * Keeps compilation target registration concerns out of ComputeEngine.
@@ -29,6 +61,7 @@ export class CompilationTargetRegistry {
   }
 
   get(name: string): LanguageTarget<Expression> | undefined {
+    if (DEPRECATED_COMPILATION_TARGETS.has(name)) warnDeprecatedTarget(name);
     return this._targets.get(name);
   }
 
@@ -48,6 +81,9 @@ export class CompilationTargetRegistry {
     // `compile({ to: 'python' })` name resolves; it produces `.code` (no `run`).
     this.register('python', new PythonTarget());
     this.register('interval-js', new IntervalJavaScriptTarget());
+    // @deprecated `interval-glsl` (and the never-rebuilt `interval-wgsl`) are
+    // deprecated and will be removed in a future release. Use `interval-js`
+    // (CPU interval arithmetic) or the scalar `glsl`/`wgsl` targets instead.
     this.register('interval-glsl', new IntervalGLSLTarget());
   }
 }
