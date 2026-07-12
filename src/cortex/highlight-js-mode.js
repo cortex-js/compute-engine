@@ -7,8 +7,10 @@ Category: scientific
 
 Grammar validation
 ------------------
-Last validated: 2026-07-11 against the Cortex grammar shipped in
-`src/cortex/` (compute-engine 0.74.0):
+Last validated: 2026-07-12 against the Cortex grammar shipped in
+`src/cortex/` (compute-engine 0.74.0). This pass added the lowercase
+`true`/`false` literal aliases (ratified 2026-07-11) to the constants table.
+Tables cross-checked against source:
   - operators.ts   — operator spellings incl. `%` (Mod) and postfix `!`
                      (Factorial), plus `|>`/`~>` (Pipe), `**` (Power), `!in`
                      (NotElement) and the fancy-Unicode aliases.
@@ -178,10 +180,13 @@ const BUILT_IN = {
   match: concat(/\b/, either(...BUILT_INS_LIST), /(?=\()/),
 };
 
-// Literal constants.
+// Literal constants. `true`/`false` are the lowercase input aliases for the
+// `True`/`False` symbols (ratified 2026-07-11).
 const CONSTANTS_LIST = [
   'True',
   'False',
+  'true',
+  'false',
   'Maybe',
   'Missing',
   'Nothing',

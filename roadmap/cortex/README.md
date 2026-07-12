@@ -60,16 +60,19 @@ large.
 ### Release-protocol (do at/around each release)
 
 - **Docs sync (S).** Route `src/cortex/docs/` through the normal `doc/` workflow
-  to cortexjs.io at release time (never edit cortexjs.io directly). Before
-  syncing: fill `naming.md` (language-review §2.10), add the "Future directions"
-  non-goals section to `cortex.md` (§2.12 — `match`, modules, `try`/`catch`,
-  `async`, macros are reserved words, _not designed_), and do a final grammar
-  pass on `syntax.md`.
-- **Highlight-mode revalidation (S).** `highlight-js-mode.js` was rebuilt and
-  statically validated 2026-07-11 (see its header); highlight.js is not a
-  devDependency, so re-run the header's structural check whenever the grammar
-  changes. Deriving a CodeMirror grammar for Tycho remains a Tycho-side item,
-  gated on demand.
+  to cortexjs.io at release time (never edit cortexjs.io directly). The
+  page-content prep is **done** (2026-07-12): `naming.md` is filled
+  (language-review §2.10), `cortex.md` has the "Future directions" non-goals
+  section (§2.12) plus a Flow-Control summary, and `syntax.md` had its final
+  grammar pass (undefined `_exponent_` production defined, `_extended-string_`
+  and `_signed-number_` productions completed, `_` digit separators noted). Only
+  the user-driven sync itself remains.
+- **Highlight-mode revalidation (S).** `highlight-js-mode.js` was re-validated
+  2026-07-12 (see its header) — the structural check passes and the lowercase
+  `true`/`false` literal aliases were added to the constants table. highlight.js
+  is not a devDependency, so re-run the header's structural check whenever the
+  grammar changes. Deriving a CodeMirror grammar for Tycho remains a Tycho-side
+  item, gated on demand.
 
 ### Findings from the example programs (2026-07-10)
 

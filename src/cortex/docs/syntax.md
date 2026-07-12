@@ -69,18 +69,25 @@ _base-10-exponent_ → (**`e`** | **`E`**) \[_sign_\](_digit_)+
 
 _base-2-exponent_ → (**`p`** | **`P`**) \[_sign_\](_digit_)+
 
+_exponent_ → _base-10-exponent_ | _base-2-exponent_
+
 _binary-number_ → **`0b`** (_binary-digit_)+ \[**`.`** (_binary-digit_)+
 \]\[_exponent_\]
 
 _hexadecimal-number_ → **`0x`** (_hex-digit_)+ \[**`.`** (_hex-digit_)+
-\]\[_exponent_\]
+\]\[_base-2-exponent_\]
 
 _decimal-number_ → (_digit_)+ \[**`.`** (_digit_)+ \]\[_exponent_\]
+
+The digit runs of a number literal may contain **`_`** grouping separators
+(`1_000`, `0xFF_FF`); an underscore is ignored and never begins or ends a
+run. A _hexadecimal-number_ takes only a _base-2-exponent_ because `e` and
+`E` are hexadecimal digits, so they cannot double as an exponent marker.
 
 _sign_ → **`+`** | **`-`**
 
 _signed-number_ → _numerical-constant_ | (\[_sign_\] (_binary-number_ |
-_hexadecimal-number_ | _decimal-number_)
+_hexadecimal-number_ | _decimal-number_))
 
 _symbol_ → _verbatim-symbol_ | _inline-symbol_
 
@@ -100,7 +107,11 @@ _quoted-text-item_)\* **`"`**
 
 _multiline-string_ → **`"""`** _multiline-string-line_ **`"""`**
 
-_extended-string_ →
+_extended-string_ → (**`#`**)+ **`"`** (_unicode-char_)\* **`"`** (**`#`**)+
+
+The number of trailing **`#`** must match the number of leading **`#`** that
+opened the literal (`#"…"#`, `##"…"##`, …). No escape sequences are applied
+inside an extended string, so it can hold `"` and `\` literally.
 
 _string_ → _single-line-string_ | _multiline-string_ | _extended-string_
 
