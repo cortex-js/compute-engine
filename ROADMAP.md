@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-11.
+**Last updated:** 2026-07-12.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -51,7 +51,7 @@ validation) are release-protocol steps tracked in
 `roadmap/cortex/STATUS_REPORT.md`, not here.
 
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
-status:** R1–R27 landed — chapters 1/2/3/5/6/7, 4.1/4.3/4.5, §8.8 Polylogarithm,
+status:** R1–R30 + R8 landed — chapters 1/2/3/5/6/7, 4.1/4.3/4.5, §8.8 Polylogarithm,
 6,574 rules bundled; see the **Coverage tracks → Rubi** section below for
 current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
@@ -462,7 +462,7 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State (2026-07-11, R1–R28 landed):** the shipped bundle
+**State (2026-07-12, R1–R30 + R8 landed):** the shipped bundle
 (`src/compute-engine/rubi/rubi-rules-data.json`, via
 `@cortex-js/compute-engine/integration-rules`) contains **Chapters 1
 (Algebraic), 2 (Exponentials), 3 (Logarithms), 5 (Inverse trig), 6 (Hyperbolics),
