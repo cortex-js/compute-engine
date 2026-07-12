@@ -103,6 +103,42 @@ describe('CORTEX EXECUTE — programs', () => {
     expect(value.re).toBe(15);
   });
 
+  test('a block-style return type is carried and honored', () => {
+    // The return type is native now (no longer dropped): a good call evaluates
+    // and the operator signature carries the declared return type.
+    const { value, diagnostics } = run(
+      'function f(x: integer) -> integer { x + 1 }\nf(3)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
+  });
+
+  test('a return type shows in the definition signature', () => {
+    const { value, diagnostics } = run(
+      'function f(x: integer) -> integer { x + 1 }\n"\\(Type(f))"'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.string).toBe('(x: integer) -> integer');
+  });
+
+  test('a math-style return type is carried and honored', () => {
+    const { value, diagnostics } = run('f(x: integer) -> real = x + 1\nf(3)');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
+  });
+
+  test('a typed mapsto rejects a bad-typed call', () => {
+    const { value } = run('((x: integer) |-> x + 1)(2.5)');
+    expect(value.re).not.toBe(3.5);
+    expect(value.toString()).toContain('incompatible-type');
+  });
+
+  test('a typed mapsto accepts a good-typed call', () => {
+    const { value, diagnostics } = run('((x: integer) |-> x + 1)(3)');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
+  });
+
   test('an if expression', () => {
     const { value, diagnostics } = run('if 3 > 0 { 1 } else { 2 }');
     expect(diagnostics).toEqual([]);

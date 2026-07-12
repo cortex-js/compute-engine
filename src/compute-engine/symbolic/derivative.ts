@@ -10,6 +10,7 @@ import {
   isString,
   sym,
 } from '../boxed-expression/type-guards.js';
+import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 
 /**
  * Maximum recursion depth for differentiation.
@@ -264,7 +265,7 @@ export function derivative(
   }
   if (isFunction(fn, 'Function')) {
     // We have, e.g. fn = ['Function', ['Sin', 'x'], 'x']
-    v = sym(fn.ops[1]) ?? '_';
+    v = functionLiteralParameterName(fn.ops[1]) || '_';
     fn = fn.ops[0];
   }
   const originalOrder = order;

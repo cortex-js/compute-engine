@@ -117,12 +117,26 @@ describe('CORTEX FUNCTION DEFINITIONS', () => {
     ]);
   });
 
-  test('math-style with typed params (enforced via Declare signature)', () => {
+  test('math-style with typed params (annotated function literal)', () => {
+    // A typed parameter is carried inline as a `["Typed", sym, {str}]` node,
+    // so the def is a plain `Assign` of an annotated `Function` literal (the
+    // engine enforces the parameter types).
     expect(validCortex('f(x: real) = x + 1')).toStrictEqual([
-      'Declare',
+      'Assign',
       'f',
-      { str: '(real) -> any' },
-      ['Function', ['Add', 'x', 1], 'x'],
+      ['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'real' }]],
+    ]);
+  });
+
+  test('math-style with a return type (ascribed onto the body)', () => {
+    expect(validCortex('f(x: integer) -> real = x + 1')).toStrictEqual([
+      'Assign',
+      'f',
+      [
+        'Function',
+        ['Typed', ['Add', 'x', 1], { str: 'real' }],
+        ['Typed', 'x', { str: 'integer' }],
+      ],
     ]);
   });
 
@@ -134,12 +148,38 @@ describe('CORTEX FUNCTION DEFINITIONS', () => {
     ]);
   });
 
-  test('block-style with a return type (dropped for v0)', () => {
+  test('block-style with a return type (ascribed onto the body)', () => {
     expect(validCortex('function f(x) -> real { x + 1 }')).toStrictEqual([
       'Assign',
       'f',
-      ['Function', ['Block', ['Add', 'x', 1]], 'x'],
+      [
+        'Function',
+        ['Typed', ['Block', ['Add', 'x', 1]], { str: 'real' }],
+        'x',
+      ],
     ]);
+  });
+
+  test('anonymous mapsto with a typed parameter `(x: integer) |-> …`', () => {
+    expect(validCortex('(x: integer) |-> x + 1')).toStrictEqual([
+      'Function',
+      ['Add', 'x', 1],
+      ['Typed', 'x', { str: 'integer' }],
+    ]);
+  });
+
+  test('anonymous mapsto with typed parameters `(x: integer, y: real) |-> …`', () => {
+    expect(validCortex('(x: integer, y: real) |-> x + y')).toStrictEqual([
+      'Function',
+      ['Add', 'x', 'y'],
+      ['Typed', 'x', { str: 'integer' }],
+      ['Typed', 'y', { str: 'real' }],
+    ]);
+  });
+
+  test('a typed parenthesized group not followed by `|->` is a diagnostic', () => {
+    const [, diags] = parseCortex('(x: integer)');
+    expect(diags.length).toBeGreaterThan(0);
   });
 
   test('anonymous mapsto `x |-> expr`', () => {

@@ -494,13 +494,26 @@ export interface IComputeEngine {
   /**
    * Push a set of parameter names that, while canonicalizing a function body,
    * shadow any same-named constant (`i`, `e`, ...) so they resolve as ordinary
-   * local variables. Balanced with `_popShadowedParameters`.
+   * local variables. Balanced with `_popShadowedParameters`. Optional `types`
+   * carry declared types for annotated parameters so the auto-declaration
+   * during body canonicalization uses the declared (non-inferred) type.
    * @internal */
-  _pushShadowedParameters(names: ReadonlyArray<string>): void;
+  _pushShadowedParameters(
+    names: ReadonlyArray<string>,
+    types?: ReadonlyMap<string, Type>
+  ): void;
   /** @internal */
   _popShadowedParameters(): void;
   /** True if `name` is an active shadowed parameter (see above). @internal */
   _isShadowedParameter(name: string): boolean;
+  /** The declared type of an active shadowed parameter, if any. @internal */
+  _shadowedParameterType(name: string): Type | undefined;
+  /** The binding already auto-declared for an active shadowed parameter during
+   * the current body's canonicalization, if any. @internal */
+  _shadowedParameterDef(name: string): BoxedDefinition | undefined;
+  /** Cache the binding auto-declared for an active shadowed parameter so later
+   * references reuse it. @internal */
+  _setShadowedParameterDef(name: string, def: BoxedDefinition): void;
 
   /** Enter a user-function application, throwing a `CancellationError`
    * (`cause: 'recursion-depth-exceeded'`) when `recursionLimit` is exceeded.

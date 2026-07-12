@@ -1111,6 +1111,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // Functions
   //
 
+  // Type ascription: no LaTeX notation in v1, serialize the expression alone
+  // (drops the annotation — design §8). Covers the return-type marker inside a
+  // `Function` body and any stray `Typed` node.
+  {
+    name: 'Typed',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      serializer.serialize(operand(expr, 1)),
+  },
+
   // Anonymous function, i.e. `(x) \mapsto x^2`
   {
     name: 'Function',
@@ -1139,6 +1148,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
+      // Drop parameter type annotations (`["Typed", x, type]` -> `x`): no
+      // typed-parameter LaTeX notation in v1 (design §8).
+      const unwrapParam = (x: MathJsonExpression): MathJsonExpression =>
+        operator(x) === 'Typed' ? (operand(x, 1) ?? x) : x;
       if (args.length < 1) return '()\\mapsto()';
       if (args.length === 1)
         return joinLatex([
@@ -1149,7 +1162,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
       if (args.length === 2) {
         return joinLatex([
-          serializer.serialize(operand(expr, 2)),
+          serializer.serialize(unwrapParam(operand(expr, 2)!)),
           '\\mapsto',
           serializer.serialize(operand(expr, 1)),
         ]);
@@ -1159,7 +1172,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         serializer.wrapString(
           operands(expr)
             ?.slice(1)
-            .map((x) => serializer.serialize(x))
+            .map((x) => serializer.serialize(unwrapParam(x)))
             .join(', '),
           'normal'
         ),

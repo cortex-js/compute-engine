@@ -88,6 +88,11 @@ import {
 } from './sgn.js';
 import { cachedValue, CachedValue } from './cache.js';
 import { apply, lookup } from '../function-utils.js';
+import {
+  functionLiteralParameters,
+  functionLiteralReturnType,
+} from './function-literal.js';
+import { typeToString } from '../../common/type/serialize.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import {
   applyPoleOverride,
@@ -1801,17 +1806,42 @@ function type(expr: BoxedFunction): Type {
   if (expr.operator === 'Function') {
     // What is the type of the body of the function?
     const body = expr.ops[0];
-    const args = expr.ops.slice(1);
+    const params = functionLiteralParameters(expr);
+
+    // Result type: an explicit return-type ascription (the §4.2 marker) is
+    // used verbatim, bypassing the widening rule. A Block's type is its last
+    // statement's type, so `body.type` already surfaces the ascribed return.
+    const ascribedReturn = functionLiteralReturnType(expr);
     let bodyType: Type | string = `${body.type}`;
     // The parameters of a bare function literal have unknown type, so a
     // finite-numeric body claim is unsound: the lambda may later be applied to
     // a non-finite argument — `(x ↦ x²)(∞) = +∞` — so widen a finite-numeric
     // result to the top numeric type `number`. (A nullary function has no such
-    // parameter, so its exact body type is kept.)
-    if (args.length > 0 && body.type.matches('finite_number'))
+    // parameter, so its exact body type is kept.) Suppress the widening only
+    // when EVERY parameter type is provably finite (`finite_number`); in this
+    // type system `integer`/`rational`/`real` all admit non-finite values, so
+    // a param annotated `integer` still widens. A bare param (type undefined)
+    // never suppresses widening.
+    if (
+      ascribedReturn === undefined &&
+      params.length > 0 &&
+      body.type.matches('finite_number') &&
+      !params.every(
+        (p) => p.type !== undefined && isSubtype(p.type, 'finite_number')
+      )
+    )
       bodyType = 'number';
+
+    // Parameter slots: an annotated param emits its declared type, named
+    // (`x: integer`); a bare param stays `unknown` as today.
+    const paramSig = params
+      .map((p) =>
+        p.type !== undefined ? `${p.name}: ${typeToString(p.type)}` : 'unknown'
+      )
+      .join(', ');
+
     return parseType(
-      `(${args.map((_) => 'unknown').join(', ')}) -> ${bodyType}`,
+      `(${paramSig}) -> ${bodyType}`,
       expr.engine._typeResolver
     );
   }

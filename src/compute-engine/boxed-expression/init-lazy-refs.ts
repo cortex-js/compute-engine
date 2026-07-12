@@ -23,6 +23,9 @@ import { findUnivariateRoots } from './solve.js';
 import { compile } from '../compilation/compile-expression.js';
 import { _setCompile } from './stochastic-equal.js';
 
+import { validateArguments } from './validate.js';
+import { _setValidateArguments } from '../function-utils.js';
+
 _setExpand(expand);
 _setExpandForIs(expand);
 _setSerializeJson(serializeJson);
@@ -31,3 +34,4 @@ _setCompile(compile);
 _setGetPolynomialCoefficients(getPolynomialCoefficients);
 _setGetPolynomialDegree(polynomialDegree);
 _setFindUnivariateRoots(findUnivariateRoots);
+_setValidateArguments(validateArguments);

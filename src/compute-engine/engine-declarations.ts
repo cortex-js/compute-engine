@@ -1,5 +1,11 @@
 import type { Type, TypeString } from '../common/type/types.js';
-import { isValidType, isValidTypeName, widen } from '../common/type/utils.js';
+import {
+  functionResult,
+  functionSignature,
+  isValidType,
+  isValidTypeName,
+  widen,
+} from '../common/type/utils.js';
 import { parseType } from '../common/type/parse.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import { osaDistance } from '../common/fuzzy-string-match.js';
@@ -28,6 +34,11 @@ import {
   updateDef,
 } from './boxed-expression/utils.js';
 import { canonicalFunctionLiteral, lookup } from './function-utils.js';
+import { isFunction } from './boxed-expression/type-guards.js';
+import {
+  functionLiteralParameters,
+  functionLiteralReturnType,
+} from './boxed-expression/function-literal.js';
 
 export function lookupDefinition(
   ce: IComputeEngine,
@@ -468,7 +479,30 @@ export function declareFn(
   const def = arg2;
 
   if (isValidValueDef(def)) {
-    ce._declareSymbolValue(id, def, scope);
+    // Phase 3 §6.3 — declared-signature reconciliation (declare-with-value and
+    // `Declare(f, type, value)` evaluate paths). When declaring a function
+    // literal against an explicit function signature, ascribe the declared
+    // return type onto the literal (if it lacks its own) so a merely-wider body
+    // inference does not trip the covariant compatibility check. Genuine
+    // conflicts still throw in the value-definition constructor.
+    let valueDef: Partial<ValueDefinition> = def;
+    if (
+      def.type !== undefined &&
+      isFunction(def.value as Expression | undefined, 'Function')
+    ) {
+      const declaredType =
+        def.type instanceof BoxedType ? def.type.type : parseType(def.type);
+      if (functionSignature(declaredType) !== undefined)
+        valueDef = {
+          ...def,
+          value: reconcileFunctionLiteralReturn(
+            ce,
+            def.value as Expression,
+            declaredType
+          ),
+        };
+    }
+    ce._declareSymbolValue(id, valueDef, scope);
     return ce;
   }
 
@@ -522,6 +556,44 @@ export function assignFn(
   if (id === 'Nothing') return ce;
 
   const def = ce.lookupDefinition(id);
+
+  // Phase 3 §6.3 — declared-signature reconciliation (assign path).
+  // Assigning a function literal to a symbol that carries an EXPLICIT declared
+  // function signature (a non-inferred, function-typed value definition): the
+  // declaration is authoritative. Ascribe its return type onto the literal (if
+  // the literal lacks its own) and keep the value under the declared signature,
+  // rather than dropping the signature by converting to an inferred operator
+  // definition. Genuine parameter/return conflicts are still rejected.
+  if (
+    isValueDef(def) &&
+    !def.value.isConstant &&
+    !def.value.inferredType &&
+    arg2 !== undefined &&
+    arg2 !== null &&
+    typeof arg2 !== 'function' &&
+    functionSignature(def.value.type.type) !== undefined
+  ) {
+    const literal = canonicalFunctionLiteral(ce.expr(arg2));
+    if (literal !== undefined) {
+      const declaredType = def.value.type;
+      const reconciled = reconcileFunctionLiteralReturn(
+        ce,
+        literal,
+        declaredType.type
+      );
+      if (!reconciled.type.matches(declaredType))
+        throw new Error(
+          [
+            `Symbol "${id}"`,
+            `The value "${reconciled.toString()}" of type "${
+              reconciled.type
+            }" is not compatible with the type "${declaredType}"`,
+          ].join('\n|   ')
+        );
+      ce._setSymbolValue(id, reconciled);
+      return ce;
+    }
+  }
 
   if (isOperatorDef(def)) {
     const value = assignValueAsValue(ce, arg2);
@@ -633,8 +705,73 @@ function assignValueAsOperatorDef(
   const body = canonicalFunctionLiteral(ce.expr(value));
   if (body === undefined) return undefined;
 
-  // Don't set an explicit signature - let it be inferred from the body.
-  // This ensures inferredSignature = true, which allows the return type
-  // to be properly narrowed during type checking (e.g., in Add operands).
+  // Phase 3 (§9.2): when the literal carries type annotations (an annotated
+  // parameter or a return-type ascription), derive an explicit operator
+  // signature from its type so that calls to the symbol validate the annotated
+  // parameter types and carry the ascribed return type — exactly as the
+  // `Declare(f, "(…) -> any", Function(…))` workaround does. This flips
+  // `inferredSignature = false` for the operator.
+  if (functionLiteralHasAnnotation(body))
+    return { evaluate: body, signature: body.type };
+
+  // Untyped literal: don't set an explicit signature - let it be inferred from
+  // the body. This ensures inferredSignature = true, which allows the return
+  // type to be properly narrowed during type checking (e.g., in Add operands).
   return { evaluate: body };
+}
+
+/** True if a canonical `Function` literal carries at least one type annotation
+ * — an annotated parameter or a return-type ascription (the Phase-1 §4.2
+ * marker). Untyped literals return `false` and keep the inferred-signature
+ * behavior. */
+function functionLiteralHasAnnotation(literal: Expression): boolean {
+  if (functionLiteralReturnType(literal) !== undefined) return true;
+  return functionLiteralParameters(literal).some((p) => p.type !== undefined);
+}
+
+/**
+ * §6.3 declared-signature reconciliation. When a `Function` literal is assigned
+ * to a symbol carrying an explicit declared signature and the literal lacks its
+ * own return-type ascription, the declared return type is *ascribed* onto the
+ * literal (the declaration is authoritative, TypeScript-style) rather than
+ * covariantly checked against weak body inference — which would otherwise throw
+ * at `boxed-value-definition.ts`.
+ *
+ * Returns the (possibly rebuilt) literal. Genuine parameter/return conflicts
+ * are left for the caller's compatibility check to reject.
+ */
+function reconcileFunctionLiteralReturn(
+  ce: IComputeEngine,
+  literal: Expression,
+  declaredType: Type
+): Expression {
+  if (!isFunction(literal, 'Function')) return literal;
+
+  // The declaration must be a function signature with a result type.
+  const declaredResult = functionResult(declaredType);
+  if (declaredResult === undefined) return literal;
+
+  // Respect an author-supplied return ascription.
+  if (functionLiteralReturnType(literal) !== undefined) return literal;
+
+  // Only ascribe when the inferred body result would otherwise fail the
+  // covariant check (e.g. inferred `number` vs declared `integer`). When it
+  // already satisfies the declaration (e.g. declared `any`), leave the literal
+  // untouched so the stored value is unchanged.
+  const inferredResult = functionResult(literal.type.type);
+  if (
+    inferredResult !== undefined &&
+    ce.type(inferredResult).matches(ce.type(declaredResult))
+  )
+    return literal;
+
+  // Rebuild via the Phase-1 authoring form: wrap the body in a `Typed`
+  // ascription and re-box so canonicalization normalizes it (§4.2 — the marker
+  // moves inside the Block, wrapping the last statement).
+  const rebuilt = ce.box([
+    'Function',
+    ['Typed', literal.ops[0].json, `'${ce.type(declaredResult).toString()}'`],
+    ...literal.ops.slice(1).map((p) => p.json),
+  ]);
+  return isFunction(rebuilt, 'Function') ? rebuilt : literal;
 }

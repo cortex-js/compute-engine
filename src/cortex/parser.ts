@@ -712,12 +712,12 @@ export class Parser {
   //
 
   /** Block form `function f(x) { … }` →
-   * `["Assign", "f", ["Function", ["Block", …], …params]]`. When any param is
-   * typed (`function f(x: real) { … }`), a `Declare` carrying a
-   * `(…) -> any` signature is emitted instead so the annotations are enforced
-   * at box time: `["Declare", "f", {str: sig}, ["Function", …]]`. A return type
-   * (`… -> real { … }`) is still accepted syntactically but dropped (the body's
-   * inferred return type governs). */
+   * `["Assign", "f", ["Function", ["Block", …], …params]]`. Typed params
+   * (`function f(x: real) { … }`) are carried inline as `["Typed", sym, type]`
+   * parameters, and a return type (`… -> real { … }`) is ascribed onto the body
+   * as `["Typed", body, type]` (the engine normalizes it into the Block). Both
+   * annotations are then enforced by the engine's typed-function-literal
+   * machinery; no `Declare` side-channel is needed. */
   private parseFunctionDefinition(): MathJsonExpression | null {
     const kw = this.advance(); // 'function'
     const nameTok = this.current;
@@ -739,12 +739,13 @@ export class Parser {
       );
       return null;
     }
-    const { params, types } = this.parseParameterList();
+    const params = this.parseParameterList();
 
-    // Optional return type `-> Type` (parsed and dropped for v0).
+    // Optional return type `-> Type` (ascribed onto the body below).
+    let returnType: MathJsonExpression | null = null;
     if (this.check('OPERATOR') && this.current.text === '->') {
       this.advance(); // '->'
-      this.parseHeldType();
+      returnType = this.parseHeldType();
     }
 
     if (!this.check('OPEN_BRACE')) {
@@ -758,24 +759,20 @@ export class Parser {
     const body = this.parseBlock();
     const end = this.localEnd(body) ?? this.previousEnd();
 
+    const ascribedBody =
+      returnType !== null
+        ? this.wrap(
+            ['Typed', body, returnType] as MathJsonExpression[],
+            this.localStart(body) ?? nameTok.start,
+            end
+          )
+        : body;
+
     const fnNode = this.wrap(
-      ['Function', body, ...params] as MathJsonExpression[],
+      ['Function', ascribedBody, ...params] as MathJsonExpression[],
       nameTok.start,
       end
     );
-    const signature = this.buildSignature(types);
-    if (signature !== null) {
-      return this.wrap(
-        [
-          'Declare',
-          nameNode,
-          this.wrap({ str: signature }, nameTok.start, end),
-          fnNode,
-        ] as MathJsonExpression[],
-        kw.start,
-        end
-      );
-    }
     return this.wrap(
       ['Assign', nameNode, fnNode] as MathJsonExpression[],
       kw.start,
@@ -784,8 +781,9 @@ export class Parser {
   }
 
   /** Whether the statement at the cursor is a math-style function definition
-   * `f( … ) = …`: a bare symbol, an abutting `(`, its matching `)`, then `=`.
-   * A lookahead only — it consumes nothing. */
+   * `f( … ) = …` or `f( … ) -> Type = …`: a bare symbol, an abutting `(`, its
+   * matching `)`, then either `=` or an `-> Type =` return ascription. A
+   * lookahead only — it consumes nothing. */
   private isMathFunctionDef(): boolean {
     if (this.current.type !== 'SYMBOL') return false;
     const paren = this.peek(1);
@@ -803,16 +801,29 @@ export class Parser {
       } else if (t === 'EOF') return false;
     }
     const after = this.tokens[i + 1];
-    return (
-      after !== undefined && after.type === 'OPERATOR' && after.text === '='
-    );
+    if (after === undefined) return false;
+    if (after.type === 'OPERATOR' && after.text === '=') return true;
+    // Optional return type `-> Type =`: past `->`, scan for the `=` that ends
+    // the (type) prefix, stopping at a statement boundary. Type spellings never
+    // contain `=`, so the first `=` on the line closes the definition head.
+    if (after.type === 'OPERATOR' && after.text === '->') {
+      for (let j = i + 2; j < this.tokens.length; j++) {
+        const t = this.tokens[j];
+        if (t.type === 'EOF' || t.type === 'SEMICOLON') return false;
+        if (t.precededByLinebreak) return false;
+        if (t.type === 'OPERATOR' && t.text === '=') return true;
+      }
+    }
+    return false;
   }
 
   /** Math-style `f(x) = expr` →
-   * `["Assign", "f", ["Function", expr, …params]]`. When any param is typed
-   * (`f(x: integer) = …`), a `Declare` carrying a `(…) -> any` signature is
-   * emitted instead — `["Declare", "f", {str: sig}, ["Function", …]]` — so the
-   * annotations are enforced at box time. */
+   * `["Assign", "f", ["Function", expr, …params]]`. Typed params
+   * (`f(x: integer) = …`) are carried inline as `["Typed", sym, type]`
+   * parameters, and a return type (`f(x: integer) -> real = …`) is ascribed
+   * onto the body as `["Typed", body, type]` (the engine normalizes it). Both
+   * annotations are enforced by the engine's typed-function-literal machinery;
+   * no `Declare` side-channel is needed. */
   private parseMathFunctionDef(): MathJsonExpression | null {
     const nameTok = this.advance(); // SYMBOL
     this.harvest(nameTok);
@@ -821,7 +832,14 @@ export class Parser {
       nameTok.start,
       nameTok.end
     );
-    const { params, types } = this.parseParameterList();
+    const params = this.parseParameterList();
+
+    // Optional return type `-> Type` (ascribed onto the body below).
+    let returnType: MathJsonExpression | null = null;
+    if (this.check('OPERATOR') && this.current.text === '->') {
+      this.advance(); // '->'
+      returnType = this.parseHeldType();
+    }
 
     if (!(this.check('OPERATOR') && this.current.text === '=')) {
       this.error(
@@ -839,24 +857,20 @@ export class Parser {
     }
     const end = this.localEnd(rhs) ?? this.previousEnd();
 
+    const ascribedBody =
+      returnType !== null
+        ? this.wrap(
+            ['Typed', rhs, returnType] as MathJsonExpression[],
+            this.localStart(rhs) ?? nameTok.start,
+            end
+          )
+        : rhs;
+
     const fnNode = this.wrap(
-      ['Function', rhs, ...params] as MathJsonExpression[],
+      ['Function', ascribedBody, ...params] as MathJsonExpression[],
       nameTok.start,
       end
     );
-    const signature = this.buildSignature(types);
-    if (signature !== null) {
-      return this.wrap(
-        [
-          'Declare',
-          nameNode,
-          this.wrap({ str: signature }, nameTok.start, end),
-          fnNode,
-        ] as MathJsonExpression[],
-        nameTok.start,
-        end
-      );
-    }
     return this.wrap(
       ['Assign', nameNode, fnNode] as MathJsonExpression[],
       nameTok.start,
@@ -865,18 +879,16 @@ export class Parser {
   }
 
   /** Parse a `( param, … )` parameter list. Each param is a symbol with an
-   * optional `: Type` annotation. Returns the bare param symbol nodes together
-   * with their annotation type strings (`null` for an unannotated param); the
-   * caller uses the types to build an enforced function signature. */
-  private parseParameterList(): {
-    params: MathJsonExpression[];
-    types: (string | null)[];
-  } {
+   * optional `: Type` annotation. An annotated param is emitted as a typed
+   * function-literal parameter `["Typed", sym, {str: type}]` (the engine's
+   * native form); a bare param is the plain symbol node. The `Function` literal
+   * built from these carries its parameter types inline, so no separate
+   * signature side-channel is needed. */
+  private parseParameterList(): MathJsonExpression[] {
     const open = this.advance(); // '('
     this.brackets.push(open);
 
     const params: MathJsonExpression[] = [];
-    const types: (string | null)[] = [];
     if (!this.check('CLOSE_PAREN')) {
       for (;;) {
         const tok = this.current;
@@ -889,16 +901,24 @@ export class Parser {
         this.harvest(tok);
         const pname =
           tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
-        params.push(this.wrap({ sym: pname }, tok.start, tok.end));
+        const symNode = this.wrap({ sym: pname }, tok.start, tok.end);
 
-        // Optional `: Type` — captured as the param's annotation type string.
-        let type: string | null = null;
+        // Optional `: Type` — an annotated param is a typed function-literal
+        // parameter `["Typed", sym, {str: type}]`.
         if (this.check('OPERATOR') && this.current.text === ':') {
           const annotation = this.parseTypeAnnotation();
           if (annotation !== null)
-            type = (annotation.node as { str?: string }).str ?? null;
+            params.push(
+              this.wrap(
+                ['Typed', symNode, annotation.node] as MathJsonExpression[],
+                tok.start,
+                annotation.end
+              )
+            );
+          else params.push(symNode);
+        } else {
+          params.push(symNode);
         }
-        types.push(type);
 
         if (!this.match('COMMA')) break;
         if (this.check('CLOSE_PAREN')) break; // trailing comma
@@ -910,34 +930,24 @@ export class Parser {
     if (this.check('CLOSE_PAREN')) this.advance();
     else this.error(['closing-bracket-expected', ')'], open.start, open.end);
 
-    return { params, types };
-  }
-
-  /** Build a function-signature type string from per-parameter annotation type
-   * strings: `(t1, t2, …) -> any`, where an unannotated param contributes
-   * `any`. A param type containing a `->` or `,` (e.g. a function- or
-   * tuple-typed param) is wrapped in parentheses so it cannot leak into the
-   * outer signature grammar; simple types are left bare. Returns `null` when no
-   * param is annotated (the caller then emits a plain `Assign`). */
-  private buildSignature(types: (string | null)[]): string | null {
-    if (!types.some((t) => t !== null)) return null;
-    const parts = types.map((t) => {
-      const type = t ?? 'any';
-      return /->|,/.test(type) ? `(${type})` : type;
-    });
-    return `(${parts.join(', ')}) -> any`;
+    return params;
   }
 
   /** Consume a `Type` starting at the current token (a return type after
-   * `->`). Parsed and dropped for v0. */
-  private parseHeldType(): void {
+   * `->`). Returns the held `{str: type}` node (to be ascribed onto the
+   * function body as `["Typed", body, {str: type}]`), or `null` on a malformed
+   * type (the following `{` / `=` expectation reports the problem). */
+  private parseHeldType(): MathJsonExpression | null {
     const start = this.current.start;
     try {
       const { end } = parseTypePrefix(this.source.slice(start));
+      const typeString = this.source.slice(start, start + end).trim();
       this.advanceToOffset(start + end);
+      return this.wrap({ str: typeString }, start, start + end);
     } catch {
       // A malformed return type: leave the cursor; the following
-      // `{`-expectation reports the problem.
+      // `{` / `=` expectation reports the problem.
+      return null;
     }
   }
 
@@ -1363,10 +1373,11 @@ export class Parser {
     );
   }
 
-  /** Extract the parameter symbols from a mapsto LHS: a bare symbol (one
-   * parameter), or a `Tuple` of symbols (`(x, y) |-> …`). A parenthesized
-   * single symbol arrives here already unwrapped. A non-symbol parameter is a
-   * diagnostic and is dropped. */
+  /** Extract the parameters from a mapsto LHS: a bare symbol (one parameter),
+   * or a `Tuple` of parameters (`(x, y) |-> …`). Each parameter is either a
+   * bare symbol or a typed `["Typed", sym, type]` node (`(x: integer) |-> …`).
+   * A parenthesized single parameter arrives here already unwrapped. A
+   * non-parameter LHS element is a diagnostic and is dropped. */
   private mapstoParams(left: MathJsonExpression): MathJsonExpression[] {
     const emit = (bad: MathJsonExpression) => {
       const o = nodeOffsets(bad);
@@ -1377,17 +1388,24 @@ export class Parser {
       );
     };
 
+    // A parameter is a bare symbol or a `["Typed", sym, type]` node.
+    const isParam = (p: MathJsonExpression): boolean => {
+      if (symbolNameOf(p) !== null) return true;
+      const pops = fnOps(p);
+      return pops !== null && pops[0] === 'Typed';
+    };
+
     const ops = fnOps(left);
     if (ops !== null && ops[0] === 'Tuple') {
       const params: MathJsonExpression[] = [];
       for (const p of ops.slice(1)) {
-        if (symbolNameOf(p) === null) emit(p);
-        else params.push(p);
+        if (isParam(p)) params.push(p);
+        else emit(p);
       }
       return params;
     }
 
-    if (symbolNameOf(left) !== null) return [left];
+    if (isParam(left)) return [left];
 
     emit(left);
     return [];
@@ -1708,7 +1726,14 @@ export class Parser {
    */
   private parseParenthesized(): MathJsonExpression | null {
     const diagBefore = this.diagnostics.length;
-    const { values, open, end } = this.parseBracketedList('CLOSE_PAREN', ')');
+    // Allow `bare-symbol : Type` elements so a typed mapsto parameter list
+    // `(x: integer) |-> …` parses (a `:` has no infix parselet, so it would
+    // otherwise die with `closing-bracket-expected`).
+    const { values, open, end, typed } = this.parseBracketedList(
+      'CLOSE_PAREN',
+      ')',
+      true
+    );
 
     if (values.length === 0) {
       // An empty `()` immediately before a mapsto arrow is a zero-parameter
@@ -1720,6 +1745,17 @@ export class Parser {
       if (this.diagnostics.length === diagBefore)
         this.error(['expression-expected'], open.start, end);
       return null;
+    }
+    // A type annotation is only meaningful in a mapsto parameter list. If the
+    // annotated group is not the LHS of a `|->`, it is a type annotation in an
+    // invalid position.
+    if (typed && !(this.check('OPERATOR') && this.current.text === '|->')) {
+      const o = nodeOffsets(values[values.length - 1]);
+      this.error(
+        ['unexpected-symbol', ':'],
+        o ? o[0] - this.baseOffset : open.start,
+        o ? o[1] - this.baseOffset : end
+      );
     }
     // A single value is a parenthesized expression, not a 1-tuple.
     if (values.length === 1) return values[0];
@@ -1843,12 +1879,19 @@ export class Parser {
    */
   private parseBracketedList(
     closeType: TokenType,
-    closeText: string
-  ): { values: MathJsonExpression[]; open: Token; end: number } {
+    closeText: string,
+    allowTypedParams = false
+  ): {
+    values: MathJsonExpression[];
+    open: Token;
+    end: number;
+    typed: boolean;
+  } {
     const open = this.advance(); // the opening bracket
     this.brackets.push(open);
 
     const values: MathJsonExpression[] = [];
+    let typed = false;
     if (!this.check(closeType)) {
       for (;;) {
         const expr = this.parseExpression(0);
@@ -1857,7 +1900,28 @@ export class Parser {
           this.recoverInBracket();
           break;
         }
-        values.push(expr);
+        // A `bare-symbol : Type` element is a typed lambda parameter
+        // `["Typed", sym, {str: type}]` (only valid in a `( … ) |->` mapsto
+        // parameter list; the caller checks the `|->` follows).
+        let element = expr;
+        if (
+          allowTypedParams &&
+          symbolNameOf(expr) !== null &&
+          this.check('OPERATOR') &&
+          this.current.text === ':'
+        ) {
+          const start = this.localStart(expr) ?? this.current.start;
+          const annotation = this.parseTypeAnnotation();
+          if (annotation !== null) {
+            element = this.wrap(
+              ['Typed', expr, annotation.node] as MathJsonExpression[],
+              start,
+              annotation.end
+            );
+            typed = true;
+          }
+        }
+        values.push(element);
         if (!this.match('COMMA')) break;
         if (this.check(closeType)) break; // trailing comma
       }
@@ -1876,7 +1940,7 @@ export class Parser {
       if (isCloseToken(this.current.type)) this.advance();
     }
 
-    return { values, open, end };
+    return { values, open, end, typed };
   }
 
   /** Within a bracketed construct, skip to (but do not consume) the matching

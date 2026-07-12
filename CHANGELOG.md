@@ -1,5 +1,33 @@
 ## [Unreleased]
 
+### Typed Function Literals
+
+- **Function literals can declare parameter and return types.** A `Function`
+  parameter may be annotated — `["Typed", "x", "'integer'"]` — and the body
+  may carry a return-type ascription, so
+  `["Function", ["Add", "x", 1], ["Typed", "x", "'integer'"]]` now has type
+  `(x: integer) -> integer` instead of `(unknown) -> number`. Annotations feed
+  body type inference, and in strict mode arguments are checked at
+  application: applying `2.5` to an `integer` parameter yields an
+  `incompatible-type` error instead of silently computing. Partial application
+  preserves the remaining annotations and the return type. Assigning an
+  annotated literal to a symbol gives it the full typed signature — including
+  the declared return type, which is an *ascription* (authoritative, like a
+  TypeScript annotation) rather than a check against inference. Untyped
+  literals are unchanged.
+- **New `Typed` operator for type ascription.** `["Typed", expr, type]`
+  asserts the type of an expression for the type system and is transparent at
+  evaluation. It accepts a type string (`"'integer'"`) or a type-name symbol
+  (`integer`). LaTeX serialization drops annotations (no typed-parameter
+  notation in v1); MathJSON round-trips them.
+- **Cortex: typed function definitions are enforced end to end.**
+  `f(x: integer) -> real = x + 1`, `function g(n: integer) -> integer {…}`,
+  and the anonymous form `(x: integer) |-> x + 1` (new grammar) all parse to
+  native annotated literals; mistyped calls error, declared return types are
+  carried, and `serializeCortex` reconstructs the typed syntax faithfully.
+  Recursive typed definitions work
+  (`fact(n: integer) -> integer = if n <= 1 {1} else {n * fact(n - 1)}`).
+
 ### Programming and Collections
 
 - **Closures capture per-call state.** A zero-parameter closure returned from a

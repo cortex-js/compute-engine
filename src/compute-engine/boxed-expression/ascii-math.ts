@@ -570,22 +570,28 @@ const FUNCTIONS: Record<
     const expr = expr_ as FnExpr;
     const args = expr.ops.slice(1);
 
-    const serializedArgs = () => args.map((x) => serialize(x)).join(', ');
+    // Drop type annotations (`["Typed", x, type]` -> `x`) from parameters and
+    // the return-type marker on body statements (design §8).
+    const unwrap = (x: Expression): Expression =>
+      isFunction(x, 'Typed') ? x.op1 : x;
+
+    const serializedArgs = () =>
+      args.map((x) => serialize(unwrap(x))).join(', ');
 
     if (isFunction(expr.op1, 'Block')) {
       if (expr.op1.nops === 0) return `(${serializedArgs()}) |-> {}`;
       if (expr.op1.nops === 1) {
         if (args.length === 1 && isSymbol(args[0], '_1')) {
           // If there is a single argument and it's _1, we can use _ instead
-          return `(_) |-> ${serialize(expr.op1.op1.subs({ _1: '_' }))}`;
+          return `(_) |-> ${serialize(unwrap(expr.op1.op1).subs({ _1: '_' }))}`;
         }
-        return `(${serializedArgs()}) |-> ${serialize(expr.op1.op1)}`;
+        return `(${serializedArgs()}) |-> ${serialize(unwrap(expr.op1.op1))}`;
       }
       return `(${serializedArgs()}) |-> {\n    ${expr.op1.ops
-        .map((x) => serialize(x))
+        .map((x) => serialize(unwrap(x)))
         .join(';\n     ')}\n}`;
     }
-    return `(${serializedArgs()}) |-> ${serialize(expr.op1)}`;
+    return `(${serializedArgs()}) |-> ${serialize(unwrap(expr.op1))}`;
   },
 
   Domain: (expr: Expression) => JSON.stringify(expr.json),

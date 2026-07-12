@@ -14,6 +14,7 @@ import {
   isFunction,
   isDictionary,
 } from '../boxed-expression/type-guards.js';
+import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 
 import type { CompileTarget, TargetSource } from './types.js';
 
@@ -366,7 +367,9 @@ export class BaseCompiler {
           target
         );
       // Default: JavaScript arrow function
-      const params = args.slice(1).map((x) => (isSymbol(x) ? x.symbol : '_'));
+      const params = args
+        .slice(1)
+        .map((x) => functionLiteralParameterName(x) || '_');
       return `((${params.join(', ')}) => ${BaseCompiler.compile(
         args[0].canonical,
         {
@@ -1438,7 +1441,7 @@ export class BaseCompiler {
       try {
         const params = literal.ops
           .slice(1)
-          .map((x) => (isSymbol(x) ? x.symbol : '_'));
+          .map((x) => functionLiteralParameterName(x) || '_');
         // Compile the body with the parameters shadowing the target's `var`
         // resolution (matching the `Function`-literal handler), so a parameter
         // compiles to its bare name rather than a folded value or `_.<name>`.

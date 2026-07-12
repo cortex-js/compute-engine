@@ -429,6 +429,133 @@ export function serializeCortex(
         )
       );
     },
+
+    //
+    // Function literal (typed function literals, Phase 4)
+    //
+    // An annotated `Function` literal — one carrying `["Typed", …]` parameters
+    // and/or a `["Typed", body, type]` return ascription — is serialized as an
+    // anonymous mapsto `(x: integer) |-> body`. An UNANNOTATED literal is left
+    // to the generic `Function(body, …params)` form (unchanged round-trip).
+    // (Named typed defs go through the `Assign` handler, which reconstructs the
+    // `f(x: integer) -> real = …` / `function … { … }` syntax.)
+    //
+    Function: (expr: MathJsonExpression): FormattingBlock => {
+      const params = operands(expr).slice(1);
+      const op1 = operand(expr, 1);
+      const hasTypedParam = params.some((p) => operator(p) === 'Typed');
+      const hasReturn = operator(op1) === 'Typed';
+      if (!hasTypedParam && !hasReturn) return serializeGenericFunction(expr);
+      // The return type has no anonymous-mapsto spelling; drop it (the body is
+      // serialized without the ascription).
+      const { bodyExpr } = fnLiteralParts(expr);
+      const arrow = options?.fancySymbols ? '↦' : '|->';
+      return fmt.line(
+        serializeParamList(params),
+        ` ${arrow} `,
+        serializeExpression(bodyExpr)
+      );
+    },
+
+    //
+    // Type ascription: serialized transparently (the annotation is dropped, as
+    // in LaTeX / ASCII-math). Reached only for a stray `Typed` outside a
+    // function literal; the `Function`/`Assign` handlers read the annotation
+    // directly.
+    //
+    Typed: (expr: MathJsonExpression): FormattingBlock =>
+      serializeExpression(operand(expr, 1)),
+
+    //
+    // Assignment — and named function definitions (Phase 4)
+    //
+    // `["Assign", "f", ‹annotated Function literal›]` reconstructs the Cortex
+    // definition syntax: `f(x: integer) -> real = body` for an expression body,
+    // or `function f(x: integer) -> real { … }` for a `Block` body. Every other
+    // `Assign` (including an UNANNOTATED function literal) keeps the generic
+    // infix `a = b` form (unchanged).
+    //
+    Assign: (expr: MathJsonExpression): FormattingBlock => {
+      const name = operand(expr, 1);
+      const rhs = operand(expr, 2);
+      if (name !== null && rhs !== null && operator(rhs) === 'Function') {
+        const params = operands(rhs).slice(1);
+        const op1 = operand(rhs, 1);
+        const hasTypedParam = params.some((p) => operator(p) === 'Typed');
+        const hasReturn = operator(op1) === 'Typed';
+        if (hasTypedParam || hasReturn) return serializeNamedDef(name, rhs);
+      }
+      return serializeOperator(expr) ?? serializeGenericFunction(expr);
+    },
+  };
+
+  // The type text of a `Typed` type operand (`{str: 'integer'}`, a quoted
+  // MathJSON string `'integer'`, or a bare type-name symbol `integer`).
+  const typeText = (t: MathJsonExpression | null): string | null => {
+    if (t === null) return null;
+    const s = stringValue(t);
+    if (s !== null) return s;
+    return symbol(t);
+  };
+
+  // Split a `Function` literal's body slot into its (un-ascribed) body and the
+  // ascribed return type. Only the authoring form `["Typed", body, type]` is
+  // recognized here; the engine's canonical Block-embedded ascription is not
+  // produced by the Cortex parser.
+  const fnLiteralParts = (
+    fn: MathJsonExpression
+  ): { bodyExpr: MathJsonExpression | null; retType: string | null } => {
+    const op1 = operand(fn, 1);
+    if (operator(op1) === 'Typed')
+      return { bodyExpr: operand(op1, 1), retType: typeText(operand(op1, 2)) };
+    return { bodyExpr: op1, retType: null };
+  };
+
+  // A single function-literal parameter: `x` (bare) or `x: integer` (typed).
+  const serializeParam = (p: MathJsonExpression): FormattingBlock => {
+    const typed = operator(p) === 'Typed';
+    const nameSym = typed ? symbol(operand(p, 1)) : symbol(p);
+    const nameStr = nameSym !== null ? escapeSymbol(nameSym) : '';
+    const t = typed ? typeText(operand(p, 2)) : null;
+    return fmt.text(t !== null ? `${nameStr}: ${t}` : nameStr);
+  };
+
+  const serializeParamList = (
+    params: MathJsonExpression[]
+  ): FormattingBlock =>
+    fmt.fencedList('(', fmt.separator(','), ')', params.map(serializeParam));
+
+  // Reconstruct a named function definition from `f` and its `Function`
+  // literal: `f(params) -> ret = body`, or `function f(params) -> ret { … }`
+  // for a `Block` body.
+  const serializeNamedDef = (
+    name: MathJsonExpression,
+    fn: MathJsonExpression
+  ): FormattingBlock => {
+    const nameSym = symbol(name);
+    const nameStr = nameSym !== null ? escapeSymbol(nameSym) : '';
+    const params = operands(fn).slice(1);
+    const { bodyExpr, retType } = fnLiteralParts(fn);
+    const retPart = retType !== null ? ` -> ${retType}` : '';
+    if (operator(bodyExpr) === 'Block') {
+      return fmt.line(
+        `function ${nameStr}`,
+        serializeParamList(params),
+        `${retPart} `,
+        fmt.fencedList(
+          '{',
+          fmt.separator(';'),
+          '}',
+          mapArgs<FormattingBlock>(bodyExpr!, serializeExpression)
+        )
+      );
+    }
+    return fmt.line(
+      nameStr,
+      serializeParamList(params),
+      `${retPart} = `,
+      serializeExpression(bodyExpr)
+    );
   };
 
   function serializeFunction(expr: MathJsonExpression): FormattingBlock | null {

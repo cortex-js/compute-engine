@@ -5,6 +5,7 @@ import {
   isNumber,
   isFunction,
 } from '../boxed-expression/type-guards.js';
+import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { Complex } from 'complex-esm';
 import { tryGetConstant } from './constant-folding.js';
 
@@ -2015,7 +2016,9 @@ function compileToTarget(
 ): CompilationResult<'javascript'> {
   if (isFunction(expr, 'Function')) {
     const args = expr.ops;
-    const params = args.slice(1).map((x) => (isSymbol(x) ? x.symbol : '_'));
+    const params = args
+      .slice(1)
+      .map((x) => functionLiteralParameterName(x) || '_');
     const body = BaseCompiler.compile(args[0].canonical, {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
@@ -2310,8 +2313,8 @@ function compileIntegrate(
   let lambdaVar = index;
   let bodyExpr = args[0];
   if (isFunction(args[0], 'Function')) {
-    const params = args[0].ops.slice(1).filter((x) => isSymbol(x));
-    if (params.length >= 1 && isSymbol(params[0])) lambdaVar = params[0].symbol;
+    const name = functionLiteralParameterName(args[0].ops[1]);
+    if (name) lambdaVar = name;
     bodyExpr = args[0].ops[0];
   }
 

@@ -106,6 +106,42 @@ export function createSymbolExpression(
   // relies on free/captured variables auto-declaring in the innermost function
   // scope) completely untouched.
   if (engine._isShadowedParameter(name)) {
+    // An annotated parameter (`["Typed", x, type]`) carries a declared type on
+    // the shadowed-parameter stack. Bind it with that type, non-inferred, in
+    // the body scope so canonicalization sees the annotation — even when an
+    // outer non-constant binding of the same name exists (a parameter is a
+    // fresh local and must shadow it, not reuse it).
+    const declaredType = engine._shadowedParameterType(name);
+    if (declaredType !== undefined) {
+      // Reuse the parameter's own pre-declaration if a prior reference in this
+      // body already created one — even in an ANCESTOR block scope (e.g. the
+      // condition of an `If` whose branch Blocks reference the same parameter).
+      // The binding is cached on the shadowed-parameter stack, so reuse is
+      // bounded to THIS body's canonicalization (never an outer/global binding
+      // of the same name, which a parameter must shadow). Sharing one binding
+      // across all references avoids stray per-block copies that apply-time
+      // parameter hiding never removes — those break recursion through
+      // Block-wrapped branches.
+      const cached = engine._shadowedParameterDef(name);
+      if (cached !== undefined)
+        return new BoxedSymbol(engine, name, { metadata, def: cached });
+
+      let autoScope = engine.context.lexicalScope;
+      while (autoScope.noAutoDeclare && autoScope.parent)
+        autoScope = autoScope.parent;
+      // Reuse an existing local in this exact scope (a prior reference here)
+      // rather than re-declaring.
+      const pdef =
+        autoScope.bindings.get(name) ??
+        engine._declareSymbolValue(
+          name,
+          { type: declaredType, inferred: false },
+          autoScope
+        );
+      engine._setShadowedParameterDef(name, pdef);
+      return new BoxedSymbol(engine, name, { metadata, def: pdef });
+    }
+
     let pdef = engine.lookupDefinition(name);
     if (!pdef || (isValueDef(pdef) && pdef.value.isConstant)) {
       let autoScope = engine.context.lexicalScope;

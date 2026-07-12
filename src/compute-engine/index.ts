@@ -1455,12 +1455,30 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** Stack of parameter-name sets active while canonicalizing function bodies.
+   * Each frame optionally carries declared types for annotated parameters so
+   * the auto-declaration of a parameter during body canonicalization can
+   * create the binding with the declared (non-inferred) type directly.
    * @internal */
-  private _shadowedParameterStack: Set<string>[] = [];
+  private _shadowedParameterStack: {
+    names: Set<string>;
+    types?: ReadonlyMap<string, Type>;
+    /** The binding auto-declared for an annotated parameter on its first
+     * reference during this body's canonicalization, cached so later
+     * references (including those in nested Block scopes) reuse the SAME
+     * binding instead of spawning a stray per-block copy. */
+    defs: Map<string, BoxedDefinition>;
+  }[] = [];
 
   /** @internal */
-  _pushShadowedParameters(names: ReadonlyArray<string>): void {
-    this._shadowedParameterStack.push(new Set(names));
+  _pushShadowedParameters(
+    names: ReadonlyArray<string>,
+    types?: ReadonlyMap<string, Type>
+  ): void {
+    this._shadowedParameterStack.push({
+      names: new Set(names),
+      types,
+      defs: new Map(),
+    });
   }
 
   /** @internal */
@@ -1472,8 +1490,36 @@ export class ComputeEngine implements IComputeEngine {
   _isShadowedParameter(name: string): boolean {
     const stack = this._shadowedParameterStack;
     for (let i = stack.length - 1; i >= 0; i--)
-      if (stack[i].has(name)) return true;
+      if (stack[i].names.has(name)) return true;
     return false;
+  }
+
+  /** The declared type of an active shadowed parameter, if any. @internal */
+  _shadowedParameterType(name: string): Type | undefined {
+    const stack = this._shadowedParameterStack;
+    for (let i = stack.length - 1; i >= 0; i--)
+      if (stack[i].names.has(name)) return stack[i].types?.get(name);
+    return undefined;
+  }
+
+  /** The binding already auto-declared for an active shadowed parameter during
+   * this body's canonicalization, if any. @internal */
+  _shadowedParameterDef(name: string): BoxedDefinition | undefined {
+    const stack = this._shadowedParameterStack;
+    for (let i = stack.length - 1; i >= 0; i--)
+      if (stack[i].names.has(name)) return stack[i].defs.get(name);
+    return undefined;
+  }
+
+  /** Cache the binding auto-declared for an active shadowed parameter, so later
+   * references reuse it. @internal */
+  _setShadowedParameterDef(name: string, def: BoxedDefinition): void {
+    const stack = this._shadowedParameterStack;
+    for (let i = stack.length - 1; i >= 0; i--)
+      if (stack[i].names.has(name)) {
+        stack[i].defs.set(name, def);
+        return;
+      }
   }
 
   /**

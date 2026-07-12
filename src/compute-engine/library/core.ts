@@ -398,6 +398,40 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // xcompile: (expr) => expr.op1.compile(),
     },
 
+    Typed: {
+      description:
+        'Ascribe a type to an expression. The type is asserted for the type ' +
+        'system (ascription, not a check); evaluation is transparent. Used to ' +
+        'annotate `Function` literal parameters and return types.',
+      complexity: 9000,
+      // `lazy` so the type operand stays raw (a type-name symbol such as `real`
+      // is not auto-declared as a variable).
+      lazy: true,
+      signature: '(any, string | symbol) -> unknown',
+      type: ([x, t], { engine: ce }) => {
+        if (!t) return x?.type ?? 'unknown';
+        const s = isString(t) ? t.string : sym(t);
+        let parsed: Type | undefined;
+        try {
+          parsed = parseType(s, ce._typeResolver);
+        } catch {
+          parsed = undefined;
+        }
+        return parsed ?? x?.type ?? 'unknown';
+      },
+      canonical: ([x, t], { engine: ce }) => {
+        if (t === undefined) return x?.canonical ?? ce.Nothing;
+        // Normalize the type operand to a string WITHOUT canonicalizing it
+        // (so a type-name symbol such as `real` is not auto-declared as a
+        // variable), mirroring how `Declare` keeps its type operand raw.
+        const s = isString(t) ? t.string : sym(t);
+        const typeOp = s !== undefined ? ce.string(s) : t;
+        return ce._fn('Typed', [x.canonical, typeOp]);
+      },
+      // Ascription is transparent at evaluation.
+      evaluate: ([x], options) => x?.evaluate(options),
+    },
+
     Text: {
       description:
         'A sequence of strings, annotated expressions and other Text expressions',
@@ -1027,7 +1061,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'A function literal',
       complexity: 9876,
       lazy: true,
-      signature: '(expression, symbol*) -> function',
+      // A parameter is a bare symbol or an annotated `["Typed", symbol, type]`
+      // expression, so parameters are `symbol | function`.
+      signature: '(expression, (symbol | function)*) -> function',
       // NOTE: for a `Function` *expression* the type is actually computed by the
       // special case in `boxed-function.ts` (`type()`), which bypasses this
       // handler; the finite-numeric widening for unknown params lives there.

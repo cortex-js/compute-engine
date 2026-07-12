@@ -12,7 +12,32 @@ import {
   isSymbol,
   isFunction,
   isString,
+  sym,
 } from './boxed-expression/type-guards.js';
+import {
+  functionLiteralParameterName,
+  functionLiteralParameterType,
+} from './boxed-expression/function-literal.js';
+import type { Type } from '../common/type/types.js';
+
+// Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
+// A static import would create a cycle: `validate.ts → utils.ts →
+// boxed-operator-definition.ts → function-utils.ts`. Injected once by
+// `boxed-expression/init-lazy-refs.ts` at engine load. The type is written
+// inline (not `import type`) so madge does not detect a type-only cycle.
+type ValidateArgumentsFn = (
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  signature: Type,
+  lazy?: boolean,
+  threadable?: boolean,
+  inferredBefore?: ReadonlySet<string>
+) => ReadonlyArray<Expression> | null;
+
+let _validateArguments: ValidateArgumentsFn | undefined;
+export function _setValidateArguments(fn: ValidateArgumentsFn): void {
+  _validateArguments = fn;
+}
 
 /***
  * ### THEORY OF OPERATIONS
@@ -224,11 +249,38 @@ export function canonicalFunctionLiteralArguments(
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
 
-  const params = ops
-    .slice(1)
-    .map((x) =>
-      isSymbol(x) ? x : ce.error('expected-a-symbol', x.toString())
-    );
+  // Parameters: a bare symbol (inferred type) or an annotated parameter
+  // `["Typed", symbol, type]`. Anything else is an error. An annotated
+  // parameter keeps its `Typed` wrapper, normalized so the type operand is a
+  // string (mirroring how `Declare` keeps its type operand raw).
+  const params = ops.slice(1).map((x) => {
+    if (isSymbol(x)) return x;
+    if (isFunction(x, 'Typed') && isSymbol(x.op1))
+      return normalizeTypedParameter(ce, x);
+    return ce.error('expected-a-symbol', x.toString());
+  });
+
+  // Collect the declared types of annotated parameters so they are visible
+  // during body canonicalization (the §6.1 pre-declare mechanism).
+  const shadowNames: string[] = [];
+  const shadowTypes = new Map<string, Type>();
+  for (const param of params) {
+    const name = functionLiteralParameterName(param);
+    if (!name) continue;
+    shadowNames.push(name);
+    const t = functionLiteralParameterType(param);
+    if (t !== undefined) shadowTypes.set(name, t);
+  }
+
+  // A body-slot return-type ascription `["Typed", body, type]` is normalized
+  // per §4.2: the `Typed` wrapper moves INSIDE the Block, wrapping the last
+  // statement, so the body slot stays a scoped Block.
+  let bodyOp = ops[0];
+  let returnTypeOp: Expression | undefined;
+  if (isFunction(bodyOp, 'Typed')) {
+    returnTypeOp = normalizeTypeOperand(ce, bodyOp.op2);
+    bodyOp = bodyOp.op1;
+  }
 
   // If the body is not scoped, we need to create a new scope
   // and add the parameters to it.
@@ -241,35 +293,101 @@ export function canonicalFunctionLiteralArguments(
   // `Function(2·i, i)` stays `(i) ↦ 2·i` instead of becoming `(i) ↦ 2i`. The
   // shadowing only blocks the constant substitution; the parameter is still
   // auto-declared as an ordinary local in the body scope, so the closure-capture
-  // machinery is unaffected.
+  // machinery is unaffected. Annotated parameters additionally carry their
+  // declared type so the auto-declaration uses that type (see §6.1).
   ce._pushShadowedParameters(
-    params.filter((p) => isSymbol(p)).map((p) => p.symbol)
+    shadowNames,
+    shadowTypes.size > 0 ? shadowTypes : undefined
   );
   let block: Expression;
   try {
-    block =
-      ops[0].operator === 'Block'
-        ? ops[0].canonical
-        : ce.function('Block', [ops[0]]);
+    if (returnTypeOp === undefined) {
+      block =
+        bodyOp.operator === 'Block'
+          ? bodyOp.canonical
+          : ce.function('Block', [bodyOp]);
+    } else {
+      // Wrap the body Block's last statement in the return-type ascription.
+      const statements: Expression[] = isFunction(bodyOp, 'Block')
+        ? [...bodyOp.ops]
+        : [bodyOp];
+      if (statements.length === 0) statements.push(ce.Nothing);
+      const lastIdx = statements.length - 1;
+      statements[lastIdx] = ce._fn(
+        'Typed',
+        [statements[lastIdx], returnTypeOp],
+        { canonical: false }
+      );
+      block = ce.function('Block', statements);
+    }
   } finally {
     ce._popShadowedParameters();
   }
 
   console.assert(block.isScoped);
-  // Declare the arguments in the scope of the body of the function.
+  // Declare the arguments in the scope of the body of the function, for any
+  // parameter that was not already auto-declared during body canonicalization
+  // (e.g. a parameter unreferenced in the body). Annotated parameters get
+  // their declared type, non-inferred.
   for (const param of params) {
-    // We only declare the parameters that are not already declared
-    // in the scope of the body
-    if (isSymbol(param) && !block.localScope!.bindings.has(param.symbol)) {
-      // @todo: we could use the signature to declare a more specific, non-inferred, type
-      ce.declare(
-        param.symbol,
-        { inferred: true, type: 'unknown' },
-        block.localScope
-      );
-    }
+    const name = functionLiteralParameterName(param);
+    if (!name || block.localScope!.bindings.has(name)) continue;
+    const t = functionLiteralParameterType(param);
+    if (t !== undefined)
+      ce.declare(name, { inferred: false, type: t }, block.localScope);
+    else
+      ce.declare(name, { inferred: true, type: 'unknown' }, block.localScope);
   }
   return ce._fn('Function', [block, ...params]);
+}
+
+/** Normalize a `Typed` type operand (a string literal or a type-name symbol)
+ * to a string literal, so a type-name symbol such as `real` is not
+ * auto-declared as a variable. */
+function normalizeTypeOperand(
+  ce: ComputeEngine,
+  t: Expression | undefined
+): Expression {
+  if (!t) return ce.string('unknown');
+  const s = isString(t) ? t.string : sym(t);
+  return s !== undefined ? ce.string(s) : t;
+}
+
+/** Rebuild an annotated parameter `["Typed", symbol, type]` with its type
+ * operand normalized to a string literal. */
+function normalizeTypedParameter(
+  ce: ComputeEngine,
+  param: Expression
+): Expression {
+  if (!isFunction(param)) return param;
+  return ce._fn('Typed', [param.op1, normalizeTypeOperand(ce, param.op2)], {
+    canonical: false,
+  });
+}
+
+/**
+ * The declared type to bind an annotated parameter's fresh-scope binding with
+ * (`inferred: false`), or `undefined` to fall back to the historical inferred
+ * binding (`{ value, inferred: true }`).
+ *
+ * Only strict mode attaches a declared type — that is where step 4/step 3
+ * validation runs, so a provably-wrong value has already been rejected. The
+ * value is nonetheless bound under the declared type only when it is provably
+ * compatible: an `unknown`/`any`/symbolic value passes validation as "not
+ * provably wrong", but binding it under a narrower fixed type would trip the
+ * value-definition covariant check (`value.type.matches(declaredType)`), which
+ * throws. Falling back to inferred there keeps the historical symbolic
+ * beta-reduction (e.g. an undeclared-symbol argument).
+ */
+function typedBinding(
+  ce: ComputeEngine,
+  param: Expression,
+  value: Expression
+): Type | undefined {
+  if (!ce.strict) return undefined;
+  const t = functionLiteralParameterType(param);
+  if (t === undefined) return undefined;
+  return value.type.matches(t) ? t : undefined;
 }
 
 /**
@@ -448,7 +566,7 @@ function captureClosures(
       const innerParamNames = new Set(
         expr.ops
           .slice(1)
-          .map((op) => (isSymbol(op) ? op.symbol : ''))
+          .map((op) => functionLiteralParameterName(op))
           .filter((s) => s)
       );
       const closureBindings: Map<string, BoxedDefinition> = new Map();
@@ -591,6 +709,23 @@ function makeLambda(
   // body is a Block (scoped) — safe to access .ops and .localScope
   const bodyFn = body as Expression & FunctionInterface;
 
+  // Apply-time enforcement (§6.4) is a strict-mode feature gated on the literal
+  // carrying at least one annotated parameter — untyped literals skip it
+  // entirely (zero overhead). Computed once; `ce.strict` is re-checked at
+  // invocation time.
+  const hasAnnotatedParam = params.some(
+    (p) => functionLiteralParameterType(p) !== undefined
+  );
+
+  // The return-type ascription operand (§4.2 marker: the last Block statement
+  // wrapped in `["Typed", stmt, type]`), reused verbatim when re-attaching the
+  // return type onto a curried literal (§6.5 point 3). `undefined` when the
+  // literal has no return ascription.
+  const lastStatement = bodyFn.ops[bodyFn.ops.length - 1];
+  const returnTypeOp = isFunction(lastStatement, 'Typed')
+    ? lastStatement.op2
+    : undefined;
+
   const invoke = (
     args: ReadonlyArray<Expression>,
     options?: Partial<EvaluateOptions>
@@ -616,11 +751,12 @@ function makeLambda(
     //
     if (args.length < params.length) {
       // Generate unique parameter names for the remaining (unapplied) params
+      const unappliedParams = params.slice(args.length);
       const allSymbols = new Set([
         ...body.symbols,
-        ...params.map((p) => (isSymbol(p) ? p.symbol : '')),
+        ...params.map((p) => functionLiteralParameterName(p)),
       ]);
-      const extras = params.slice(args.length).map((_, i) => {
+      const extraSymbols = unappliedParams.map((_, i) => {
         let name = `_${i + 1}`;
         let counter = 0;
         while (allSymbols.has(name)) name = `_${i + 1}_${counter++}`;
@@ -628,15 +764,48 @@ function makeLambda(
         return ce.symbol(name, { canonical: false });
       });
 
+      // The curried literal's remaining params keep their annotations (§6.5
+      // point 2): an unapplied `["Typed", p, T]` is re-wrapped around the fresh
+      // symbol with its original (already-normalized) type operand. The bare
+      // fresh symbols are used for body substitution; the wrapped versions
+      // become the new Function parameters.
+      const extras = unappliedParams.map((param, i) =>
+        isFunction(param, 'Typed')
+          ? ce._fn('Typed', [extraSymbols[i], param.op2], { canonical: false })
+          : extraSymbols[i]
+      );
+
       // Rename remaining params to fresh names in the body
       const substitutions = Object.fromEntries(
-        params
-          .slice(args.length)
-          .map((param, i) => [isSymbol(param) ? param.symbol : '', extras[i]])
+        unappliedParams.map((param, i) => [
+          functionLiteralParameterName(param),
+          extraSymbols[i],
+        ])
       );
 
       // Evaluate body with known args in a fresh scope
       const evaluatedKnownArgs = args.map((a) => a.evaluate());
+
+      // Validate the applied prefix against the declared parameter types
+      // (§6.4/§6.5). On mismatch, return the inert application with the
+      // error-marked arguments (§13 decision 6).
+      if (ce.strict && hasAnnotatedParam && _validateArguments) {
+        const fullSig = fnExpr.type.type;
+        if (typeof fullSig !== 'string' && fullSig.kind === 'signature') {
+          const prefixSig: Type = {
+            kind: 'signature',
+            args: (fullSig.args ?? []).slice(0, args.length),
+            result: fullSig.result,
+          };
+          const validated = _validateArguments(
+            ce,
+            evaluatedKnownArgs,
+            prefixSig
+          );
+          if (validated !== null)
+            return ce._fn('Apply', [fnExpr, ...validated]);
+        }
+      }
       const capturedScope =
         bodyFn.localScope!.parent ?? ce.context.lexicalScope;
       const freshScope: Scope = {
@@ -644,14 +813,24 @@ function makeLambda(
         bindings: new Map(),
       };
       for (let i = 0; i < args.length; i++) {
-        const p = params[i];
-        const name = isSymbol(p) ? p.symbol : '';
-        if (name)
-          ce.declare(
-            name,
-            { value: evaluatedKnownArgs[i], inferred: true },
-            freshScope
-          );
+        const name = functionLiteralParameterName(params[i]);
+        if (name) {
+          // See the full-application path: typed binding only in strict mode,
+          // where the applied prefix was validated in step 3.
+          const pType = typedBinding(ce, params[i], evaluatedKnownArgs[i]);
+          if (pType !== undefined)
+            ce.declare(
+              name,
+              { value: evaluatedKnownArgs[i], type: pType, inferred: false },
+              freshScope
+            );
+          else
+            ce.declare(
+              name,
+              { value: evaluatedKnownArgs[i], inferred: true },
+              freshScope
+            );
+        }
       }
 
       // Re-parent body scope to chain through freshScope, so nested
@@ -664,7 +843,7 @@ function makeLambda(
       bodyScope.parent = freshScope;
       const curryParamNames = params
         .slice(0, args.length)
-        .map((p) => (isSymbol(p) ? p.symbol : ''));
+        .map((p) => functionLiteralParameterName(p));
       const hiddenBindings = hideBodyScopeParams(bodyScope, curryParamNames);
 
       ce.pushScope(freshScope);
@@ -677,13 +856,36 @@ function makeLambda(
         restoreBodyScopeParams(bodyScope, hiddenBindings);
       }
 
-      return ce.function('Function', [newBody.subs(substitutions), ...extras]);
+      // Re-attach the original return-type ascription onto the curried literal
+      // (§6.5 point 3): partial application does not change the result type.
+      // `newBody` is the evaluated body (the marker was consumed by
+      // evaluation), so wrap it again; canonicalization re-normalizes the
+      // ascription inside the Block (Phase 1).
+      const curriedBody = newBody.subs(substitutions);
+      const finalBody =
+        returnTypeOp !== undefined
+          ? ce._fn('Typed', [curriedBody, returnTypeOp], { canonical: false })
+          : curriedBody;
+      return ce.function('Function', [finalBody, ...extras]);
     }
 
     //
     // 4/ Evaluate arguments in the calling scope before switching context
     //
     const evaluatedArgs = args.map((a) => a.evaluate());
+
+    //
+    // 4b/ In strict mode, validate the evaluated arguments against the
+    //     literal's declared parameter types (only when the literal carries at
+    //     least one annotated parameter — untyped literals skip this entirely,
+    //     §6.4). On mismatch, return the inert application carrying the
+    //     error-marked arguments (§13 decision 6), matching the named-`Declare`
+    //     path so broadcast consumers (`Map`, …) surface the same diagnostic.
+    //
+    if (ce.strict && hasAnnotatedParam && _validateArguments) {
+      const validated = _validateArguments(ce, evaluatedArgs, fnExpr.type.type);
+      if (validated !== null) return ce._fn('Apply', [fnExpr, ...validated]);
+    }
 
     //
     // 5/ Create a fresh scope per call with parent = the defining scope.
@@ -698,15 +900,31 @@ function makeLambda(
       bindings: new Map(),
     };
 
-    // Declare parameters in the fresh scope
-    const paramNames = params.map((p) => (isSymbol(p) ? p.symbol : ''));
+    // Declare parameters in the fresh scope. Annotated parameters are declared
+    // with their declared type, non-inferred (§6.4); bare parameters stay
+    // inferred as before.
+    const paramNames = params.map((p) => functionLiteralParameterName(p));
     for (let i = 0; i < params.length; i++) {
-      if (paramNames[i])
-        ce.declare(
-          paramNames[i],
-          { value: evaluatedArgs[i], inferred: true },
-          freshScope
-        );
+      if (paramNames[i]) {
+        // Only strict mode declares with the declared type (`inferred: false`),
+        // and only there — arguments were validated in step 4b, so the value is
+        // compatible. See `typedBinding` for why an `unknown`/`any`/symbolic
+        // value (which passed validation as "not provably wrong") still falls
+        // back to the historical inferred binding.
+        const pType = typedBinding(ce, params[i], evaluatedArgs[i]);
+        if (pType !== undefined)
+          ce.declare(
+            paramNames[i],
+            { value: evaluatedArgs[i], type: pType, inferred: false },
+            freshScope
+          );
+        else
+          ce.declare(
+            paramNames[i],
+            { value: evaluatedArgs[i], inferred: true },
+            freshScope
+          );
+      }
     }
 
     // Re-parent body scope to chain through freshScope, so nested

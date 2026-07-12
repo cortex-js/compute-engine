@@ -201,6 +201,47 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   ['Block single statement', ['Block', 'a']],
   ['Block nested in expression', ['Add', ['Block', 'a', 'b'], 1]],
   ['Function with do-block body', ['Function', ['Block', 'a', 'b'], 'x']],
+
+  // Typed function literals (Phase 4): typed params + return ascriptions
+  // reconstruct their Cortex syntax (`f(x: integer) -> real = …`,
+  // `(x: integer) |-> …`).
+  [
+    'typed math-style def',
+    ['Assign', 'f', ['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'integer' }]]],
+  ],
+  [
+    'typed math-style def with return type',
+    [
+      'Assign',
+      'f',
+      [
+        'Function',
+        ['Typed', ['Add', 'x', 1], { str: 'real' }],
+        ['Typed', 'x', { str: 'integer' }],
+      ],
+    ],
+  ],
+  [
+    'typed block def with return type',
+    [
+      'Assign',
+      'f',
+      ['Function', ['Typed', ['Block', ['Add', 'x', 1]], { str: 'real' }], 'x'],
+    ],
+  ],
+  [
+    'typed mapsto (single param)',
+    ['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'integer' }]],
+  ],
+  [
+    'typed mapsto (multiple params)',
+    [
+      'Function',
+      ['Add', 'x', 'y'],
+      ['Typed', 'x', { str: 'integer' }],
+      ['Typed', 'y', { str: 'real' }],
+    ],
+  ],
   ['If (generic function form)', ['If', 'c', 't', 'e']],
 
   // Interpolated string

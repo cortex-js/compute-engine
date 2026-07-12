@@ -138,25 +138,31 @@ accepts a single collection of strings, including a lazy `Map` result, so
 
 ### Semantics gaps shipped as v0 caveats (complete on demand)
 
-- **Enforce typed function params — v1 (params) LANDED 2026-07-12, not yet
-  committed.** `f(x: integer) = …` now emits
-  `["Declare", "f", {str:"(integer) -> any"}, ["Function", …]]` instead of a
-  bare `Assign`, so the parameter annotations are enforced at box time via the
-  engine's existing `validateArguments` (a mistyped call boxes to an
-  `incompatible-type` Error value: `f(2.5) → f(Error(…"integer","finite_real"…))`;
-  `f(3) → 4`). Unannotated defs are unchanged (`g(x)=… → Assign`), and partial
-  annotation enforces only the typed params (`(integer, any) -> any`). This was
-  simpler than the "M" implied — the enforcement machinery already existed; the
-  work was (1) capturing the annotation the parser was discarding and (2)
-  routing through `Declare` with a `(…) -> any` signature so `ce.assign`'s
-  inference can't clobber it. Residuals (deferred): **(a)** the RETURN type is
-  still dropped — a literal `(integer) -> integer` signature is rejected by the
-  engine (the body's inferred return `number` ⊄ `integer`, covariant return), so
-  enforcing declared return types needs a separate reconciliation and is not in
-  v1; **(b)** `serializeCortex` emits the generic
-  `Declare(f, "(integer) -> any", Function(x + 1, x))` rather than reconstructing
-  `f(x: integer) = …` syntax (round-trips semantically; a syntactic serializer
-  is a nice-to-have if a consumer needs faithful source round-trip).
+- **Enforce typed function params — native typed function literals LANDED
+  2026-07-12, not yet committed.** Superseded the v1-via-`Declare` workaround
+  with the native design in
+  [`docs/plans/2026-07-12-typed-function-literals-design.md`](../../docs/plans/2026-07-12-typed-function-literals-design.md).
+  A typed parameter is now carried inline as a `["Typed", sym, type]` node on
+  the `Function` literal itself, and a return type is ascribed onto the body as
+  `["Typed", body, type]`. Both def forms are back to a plain
+  `["Assign", "f", ["Function", …]]` (the `Declare` side-channel is gone):
+  - `f(x: integer) = …` → `["Assign","f",["Function",["Add","x",1],["Typed","x",{str:"integer"}]]]`
+  - `f(x: integer) -> real = …` and `function f(x) -> real { … }` → the body is
+    wrapped `["Typed", body, {str:"real"}]` (the engine normalizes it into the
+    Block).
+  - `(x: integer) |-> …` (anonymous, real grammar work) →
+    `["Function",["Add","x",1],["Typed","x",{str:"integer"}]]`.
+  A mistyped call still boxes to an `incompatible-type` Error value
+  (`f(2.5) → …`; `f(3) → 4`), partial annotation enforces only the typed params,
+  and unannotated defs are unchanged. `serializeCortex` reconstructs the source
+  syntax faithfully (`f(x: integer) -> real = …`, `function … { … }`,
+  `(x: integer) |-> …`); untyped literals serialize exactly as before. Both
+  prior residuals are **CLOSED**: **(a)** return types are honored (the
+  literal's type uses the declared return verbatim — ascription, not a
+  covariant check), and **(b)** the parse↔serialize round-trip is faithful.
+  Nothing genuinely remains for Cortex; the only follow-on lives in the engine
+  design doc (§10: optional/variadic params, a strict-mode runtime return
+  check).
 - **Comment fidelity through serialize (M — investigated 2026-07-12, deferred).**
   Comments are dropped on a `parseCortex → serializeCortex` round-trip
   (documented lossy in `comments.md`). The gap is **one-sided**: the serializer
