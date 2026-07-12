@@ -14,6 +14,7 @@ import {
   MISSING,
   getSequence,
 } from '../../../math-json/utils.js';
+import { reducedRational } from '../../numerics/rationals.js';
 import {
   Serializer,
   Parser,
@@ -1157,9 +1158,9 @@ function serializePower(
  * Only interprets ' and " as arcmin/arcsec when immediately following
  * a degree symbol, avoiding conflict with Prime (derivative) notation.
  *
- * When all components are numeric, computes decimal degrees and returns
- * Degrees(total). This ensures negation works correctly: -9°30' becomes
- * Negate(Degrees(9.5)) which canonicalizes to -9.5°.
+ * When all components are numeric, returns exact rational degrees
+ * (3600·d + 60·m + s) / 3600 so downstream exact arithmetic works
+ * (e.g. 5°37'30" → π/32).
  */
 function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
   parser.skipSpace();
@@ -1195,13 +1196,14 @@ function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
     return ['Degrees', lhs];
   }
 
-  // Compute total decimal degrees when all components are numeric.
+  // Compute exact rational degrees when d and m are numeric.
   // This avoids Negate(Add(Quantity...)) which fails canonicalization.
   const degNum = machineValue(lhs);
   if (degNum !== null && minNum !== null) {
-    let total = degNum + minNum / 60;
-    if (secNum !== null) total += secNum / 3600;
-    return ['Degrees', total];
+    const totalSec = 3600 * degNum + 60 * minNum + (secNum ?? 0);
+    const [numer, denom] = reducedRational([totalSec, 3600]);
+    if (denom === 1) return ['Degrees', numer];
+    return ['Degrees', ['Rational', numer, denom]];
   }
 
   // Fallback for symbolic values: return structured Add form
