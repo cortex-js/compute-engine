@@ -105,8 +105,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // and corrupted faithful values such as `Degrees(-45.5)`. Angle
         // normalization to a range is a *serialization* concern, controlled by
         // the `angleNormalization` option.)
-        if (Number.isInteger(fArg)) {
-          const fRadians = reducedRational([fArg, 180]);
+        if (arg.isRational === true) {
+          const degNumer = arg.numerator.re;
+          const degDenom = arg.denominator.re;
+          const fRadians = reducedRational([degNumer, degDenom * 180]);
           if (fRadians[0] === 0) return ce.Zero;
           if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
           if (fRadians[0] === 1) return ce.Pi.div(fRadians[1]);
@@ -134,8 +136,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
         if (Number.isNaN(deg)) return ce._fn('DMS', ops);
 
-        const total = deg + min / 60 + sec / 3600;
-        return ce.function('Degrees', [ce.number(total)]);
+        const totalSec = 3600 * deg + 60 * min + sec;
+        return ce.function('Degrees', [ce.number([totalSec, 3600])]);
       },
       evaluate: (ops, options) => {
         const ce = options.engine;
