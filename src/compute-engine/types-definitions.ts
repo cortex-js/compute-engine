@@ -898,6 +898,9 @@ export interface BoxedBaseDefinition extends Partial<BaseDefinition> {
  * @category Definitions
  */
 export interface BoxedValueDefinition extends BoxedBaseDefinition {
+  /** Release resources owned by this definition when its scope is disposed. */
+  dispose(): void;
+
   /**
     * If the symbol has a value, it is held as indicated in the table below.
     * A green checkmark indicate that the symbol is substituted.

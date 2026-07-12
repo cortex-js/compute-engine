@@ -53,6 +53,8 @@ export class _BoxedValueDefinition
 
   private _engine: ComputeEngine;
 
+  private _unsubscribeFromConfigurationChange?: () => void;
+
   // The defValue is the value as specified in the original definition.
   // It is used to update the actual value when the environment changes,
   // for example when the precision of the Compute Engine is changed.
@@ -180,7 +182,9 @@ export class _BoxedValueDefinition
     // from `_defValue` when the precision or angular unit changes. See
     // `onConfigurationChange()`. Non-constants and operator definitions don't
     // listen, which keeps engine construction cheap.
-    if (this.isConstant) ce.listenToConfigurationChange(this);
+    if (this.isConstant)
+      this._unsubscribeFromConfigurationChange =
+        ce.listenToConfigurationChange(this);
   }
 
   /** For debugging */
@@ -241,6 +245,11 @@ export class _BoxedValueDefinition
   onConfigurationChange(): void {
     // Force the value to be recalculated based on the original definition
     if (this.isConstant) this._value = null;
+  }
+
+  dispose(): void {
+    this._unsubscribeFromConfigurationChange?.();
+    this._unsubscribeFromConfigurationChange = undefined;
   }
 }
 

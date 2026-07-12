@@ -230,6 +230,26 @@ describe('HIGHER-ORDER FUNCTIONS', () => {
 // 4. forget() on constants and undeclared symbols
 // ─────────────────────────────────────────────────────────────────────────────
 describe('FORGET edge cases', () => {
+  test('popping a scope disposes constant configuration listeners', () => {
+    const localCe = new ComputeEngine();
+    localCe.pushScope();
+    localCe.declare('local_constant', {
+      type: 'number',
+      value: 42,
+      isConstant: true,
+    });
+
+    const definition = localCe.lookupDefinition('local_constant');
+    if (!definition || !('value' in definition))
+      throw new Error('Expected a value definition');
+    const listener = jest.spyOn(definition.value, 'onConfigurationChange');
+
+    localCe.popScope();
+    localCe.precision = localCe.precision === 50 ? 51 : 50;
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   test('forget() on a constant does not clear its value', () => {
     ce.pushScope();
     try {

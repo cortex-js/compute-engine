@@ -101,6 +101,9 @@ interface BoxedBaseDefinition extends Partial<BaseDefinition> {
 }
 
 interface BoxedValueDefinition extends BoxedBaseDefinition {
+  /** Release resources owned by this definition when its scope is disposed. */
+  dispose(): void;
+
   holdUntil: 'never' | 'evaluate' | 'N';
   value: Expression | undefined;
   eq?: (a: Expression) => boolean | undefined;

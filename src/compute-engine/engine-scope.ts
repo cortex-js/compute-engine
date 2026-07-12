@@ -44,7 +44,15 @@ export function pushEvalContext(
 }
 
 export function popEvalContext(ce: IComputeEngine): void {
-  ce._evalContextStack.pop();
+  const context = ce._evalContextStack.pop();
+
+  // Definitions owned by a scope may subscribe to engine-wide lifecycle
+  // events. Release those subscriptions as soon as the scope is discarded,
+  // rather than retaining otherwise-dead local constants for the lifetime of
+  // the engine. Disposal is intentionally idempotent.
+  for (const binding of context?.lexicalScope.bindings.values() ?? []) {
+    if (isValueDef(binding)) binding.value.dispose();
+  }
 
   // Popping an eval context reverts the active assumptions and local
   // declarations to the enclosing context. Per-expression caches keyed on
