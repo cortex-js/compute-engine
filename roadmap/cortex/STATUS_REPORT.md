@@ -111,6 +111,20 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-11 — **Discoverability "did-you-mean" diagnostic (landed, committed
+  `ad1028aa` engine + `08f1b8a8` Cortex boundary).** When a Cortex program
+  calls an undeclared function whose name is close to a library operator,
+  `executeCortex` emits an `unknown-function` warning with the suggestion; a
+  near-miss is required, so intentionally-symbolic `f(x)` is never nagged and
+  the value is unchanged. Matcher = public `ce.suggestOperatorName`
+  (`engine-declarations.ts`): case-insensitive → singular/plural → OSA edit
+  distance → unique prefix, tie-broken by longest-common-prefix. OSA kernel
+  consolidated into `src/common/fuzzy-string-match.ts` (shared with strict-mode
+  validation suggestions; policies kept separate). One alias ratified alongside:
+  `Arg` → `Argument` (canonical rewrite in `library/complex.ts`, input-side
+  only; LaTeX `\arg` untouched). `Quotient` stays undefined (`Floor(a/b)`); no
+  other aliases planned. Verified end-to-end: `Quartile`→`Quartiles`,
+  `Integrales`→`Integrate`, `f(x)`→no diagnostic, `Arg(2+3i)`→`arctan(3/2)`.
 - 2026-07-11 — **Strings-as-collections decision RATIFIED: NO (closed).**
   Strings will not behave as collections (no `for c in s`, `s[1]`,
   `Tally(s)`). Rationale (user, from experience): string-as-collection dual
