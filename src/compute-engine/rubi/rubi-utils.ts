@@ -5770,6 +5770,345 @@ export function singleAngleExponentialPieces(
   });
 }
 
+// ---------------------------------------------------------------------------
+// R8: poly × single-angle HYPERBOLIC-rational → single-exponential PolyLog
+// fallback — the exact REAL-exponential analog of the R17 trig fallback above.
+//
+// For `∫P(x)·R(hyp(w)) dx` with P a NONTRIVIAL polynomial in x, w = c+d·x LINEAR,
+// and R a rational function of hyperbolic heads (Sinh/Cosh/Tanh/Coth/Sech/Csch)
+// all sharing the SAME linear argument w, rewrite every hyperbolic factor via the
+// single REAL exponential y = E^{w} (`sinh w = (y−1/y)/2`, `cosh w = (y+1/y)/2`,
+// …; NO factor of i anywhere — that is the only difference from R17). The
+// hyperbolic part becomes a rational function Q(y); its denominator (from
+// `a+b·sinh`, `csch`, …) factors into LINEAR factors in y (roots
+// `(−a±√(a²+b²))/b` — real surds, cleaner than trig's `√(a²−b²)`). A linear-
+// factor partial fraction of Q(y) (reusing `expandRationalOverLinears`) then
+// yields pieces `c·y^k/(y−r)^s`, and substituting back y = E^{w} turns each into
+// `∫P(x)·E^{k·w}/(a+b·E^{w})^s` — the Chapter-2 §2.2 / Chapter-3 / §8.8 PolyLog
+// telescope the bundle already closes.
+//
+// Unlike trig (which CE deliberately INERTS via `deactivateTrig`), hyperbolics
+// stay ACTIVE (`Sinh`, `Cosh`, …), so we walk the integrand as-is via
+// `toTimesPower` and match the active capitalized heads (`HYPERBOLIC_HEADS`).
+// Declines fast (and fail-closed with the driver's branch-safe numeric D-check)
+// on anything but the single-angle additive-denominator shape.
+// ---------------------------------------------------------------------------
+
+/** For an active hyperbolic head, the pair [N(y), D(y)] with `head(w) = N(y)/D(y)`
+ *  at y = E^{w}: `sinh=(y²−1)/(2y)`, `cosh=(y²+1)/(2y)`, `tanh=(y²−1)/(y²+1)`,
+ *  `coth=(y²+1)/(y²−1)`, `sech=2y/(y²+1)`, `csch=2y/(y²−1)`. (Numerically
+ *  verified — no factor of i, unlike the trig `trigHeadYForm`.) */
+export function hyperbolicHeadYForm(
+  ce: ComputeEngine,
+  head: string,
+  y: Expression
+): [Expression, Expression] | null {
+  const y2 = y.pow(2);
+  const two = ce.number(2);
+  const yPlus = (k: number): Expression =>
+    ce.function('Add', [y2, ce.number(k)]);
+  switch (head) {
+    case 'Sinh':
+      return [yPlus(-1), two.mul(y)];
+    case 'Cosh':
+      return [yPlus(1), two.mul(y)];
+    case 'Tanh':
+      return [yPlus(-1), yPlus(1)];
+    case 'Coth':
+      return [yPlus(1), yPlus(-1)];
+    case 'Sech':
+      return [two.mul(y), yPlus(1)];
+    case 'Csch':
+      return [two.mul(y), yPlus(-1)];
+  }
+  return null;
+}
+
+/** The single shared LINEAR hyperbolic argument `w` of every hyperbolic head in
+ *  the expression, or null if the heads disagree, some argument is non-linear in
+ *  `x`, or no hyperbolic head appears (mixed-angle / nonlinear decline). */
+function sharedLinearHyperbolicArg(u: Expression, x: string): Expression | null {
+  let w: Expression | null = null;
+  let ok = true;
+  const walk = (e: Expression): void => {
+    if (!ok) return;
+    if (HYPERBOLIC_HEADS.has(e.operator) && e.ops?.length === 1) {
+      const arg = e.ops[0];
+      if (polyDegreeX(arg, x) !== 1) {
+        ok = false;
+        return;
+      }
+      if (w === null) w = arg;
+      else if (!w.isSame(arg)) {
+        ok = false;
+        return;
+      }
+    }
+    (e.ops ?? []).forEach(walk);
+  };
+  walk(u);
+  return ok ? w : null;
+}
+
+/** Split one term of an additive hyperbolic atom (`a + b·hyp(w)`) into either a
+ *  hyperbolic-free constant (`head: null`) or `coef · hyp(w)` (bare, power-1).
+ *  Returns null on anything else (x-dependent coefficient, a hyperbolic power, a
+ *  nested hyperbolic, a wrong argument). */
+function splitHyperbolicTerm(
+  ce: ComputeEngine,
+  t: Expression,
+  w: Expression,
+  x: string
+): { head: string | null; coef: Expression } | null {
+  t = toTimesPower(ce, t);
+  if (!containsHyperbolic(t)) {
+    if (t.has(x)) return null; // x-dependent additive term ⇒ not (a+b·hyp)
+    return { head: null, coef: t };
+  }
+  if (HYPERBOLIC_HEADS.has(t.operator) && t.ops?.length === 1)
+    return t.ops[0].isSame(w) ? { head: t.operator, coef: ce.One } : null;
+  if (t.operator === 'Multiply' && t.ops) {
+    let head: string | null = null;
+    const rest: Expression[] = [];
+    for (const f of t.ops) {
+      if (HYPERBOLIC_HEADS.has(f.operator) && f.ops?.length === 1) {
+        if (head !== null) return null; // two hyperbolic factors in one term
+        if (!f.ops[0].isSame(w)) return null;
+        head = f.operator;
+      } else if (containsHyperbolic(f))
+        return null; // hyperbolic power / nested hyperbolic
+      else if (f.has(x))
+        return null; // x-dependent coefficient
+      else rest.push(f);
+    }
+    if (head === null) return null;
+    return {
+      head,
+      coef: rest.length === 0 ? ce.One : ce.function('Multiply', rest),
+    };
+  }
+  return null;
+}
+
+/** Rewrite one hyperbolic atom's `base` as the y-rational `num(y)/den(y)` (both
+ *  polynomials in y). Handles a bare hyperbolic head `hyp(w)` and an additive
+ *  `a + b·hyp(w)` whose hyperbolic terms all share ONE head with argument w.
+ *  Returns null for mixed-head sums, wrong argument, or a non-additive/non-
+ *  hyperbolic base. */
+function hyperbolicAtomNumDen(
+  ce: ComputeEngine,
+  base: Expression,
+  w: Expression,
+  y: Expression,
+  x: string
+): { num: Expression; den: Expression } | null {
+  if (HYPERBOLIC_HEADS.has(base.operator) && base.ops?.length === 1) {
+    if (!base.ops[0].isSame(w)) return null;
+    const nd = hyperbolicHeadYForm(ce, base.operator, y);
+    return nd === null ? null : { num: nd[0], den: nd[1] };
+  }
+  if (base.operator === 'Add' && base.ops) {
+    let head: string | null = null;
+    let coefSum: Expression = ce.Zero;
+    let constSum: Expression = ce.Zero;
+    for (const t of base.ops) {
+      const info = splitHyperbolicTerm(ce, t, w, x);
+      if (info === null) return null;
+      if (info.head === null) constSum = constSum.add(info.coef);
+      else {
+        if (head !== null && head !== info.head) return null; // mixed heads
+        head = info.head;
+        coefSum = coefSum.add(info.coef);
+      }
+    }
+    if (head === null) return null;
+    const nd = hyperbolicHeadYForm(ce, head, y);
+    if (nd === null) return null;
+    const [N, D] = nd;
+    return {
+      num: ce.function('Add', [constSum.mul(D), coefSum.mul(N)]),
+      den: D,
+    };
+  }
+  return null;
+}
+
+/** Analyze `∫P(x)·R(hyp(w))` into the polynomial part P, the exponential variable
+ *  name, and the factored y-rational tally `{C, roots}` of R (so that
+ *  R(hyp(w)) = C·∏(y−root)^exp at y = E^{w}). Returns null unless the integrand is
+ *  a product of a NONTRIVIAL polynomial in x and single-angle hyperbolic factors
+ *  WITH an additive `(a+b·hyp)`-type denominator — the shape that distinguishes
+ *  this R8 fallback from the pure rational-in-hyperbolic P=1 family (R30). */
+function analyzeSingleAngleHyperbolicRational(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): {
+  w: Expression;
+  P: Expression;
+  C: Expression;
+  roots: Map<string, { root: Expression; exp: number }>;
+  yName: string;
+} | null {
+  const u = toTimesPower(ce, integrand);
+  if (u.operator !== 'Multiply' || !u.ops) return null;
+  const w = sharedLinearHyperbolicArg(u, x);
+  if (w === null) return null;
+  const y = freshYSymbol(ce, integrand, x);
+  const yName = y.symbol!;
+  let C: Expression = ce.One;
+  const roots = new Map<string, { root: Expression; exp: number }>();
+  const addRoot = (r: Expression, e: number): void => {
+    const k = r.toString();
+    const cur = roots.get(k);
+    roots.set(k, { root: r, exp: (cur?.exp ?? 0) + e });
+  };
+  const pFactors: Expression[] = [];
+  for (const f of u.ops) {
+    if (!containsHyperbolic(f)) {
+      if (f.has(x)) pFactors.push(f);
+      else C = C.mul(f);
+      continue;
+    }
+    let base = f;
+    let p = 1;
+    if (f.operator === 'Power' && f.ops) {
+      const pn = f.ops[1];
+      if (!(isNumber(pn) && pn.isInteger === true)) return null;
+      const pv = realNum(pn);
+      if (pv === null) return null;
+      base = f.ops[0];
+      p = pv;
+    }
+    const nd = hyperbolicAtomNumDen(ce, base, w, y, x);
+    if (nd === null) return null;
+    const fn = factorLinearsY(ce, nd.num, yName);
+    const fd = factorLinearsY(ce, nd.den, yName);
+    if (fn === null || fd === null) return null;
+    C = C.mul(fn.lead.div(fd.lead).pow(p));
+    for (const r of fn.roots) addRoot(r, p);
+    for (const r of fd.roots) addRoot(r, -p);
+  }
+  // Require a genuine `(a+b·hyp)`-type denominator: a y-factor with a NONZERO
+  // root left in the denominator (net exp < 0). This is the hyperbolic analog of
+  // R17's `Add && p<0` gate, but broadened because the RECIPROCAL heads
+  // (Tanh/Coth/Sech/Csch) carry an intrinsic `y²±1` denominator (roots ±1) even
+  // at POSITIVE power — so `(a+b·Coth)³` (6.4.1 #47) is a genuine PolyLog shape
+  // although it has no syntactic `Add^{negative}`. A monomial `2y` denominator
+  // (root 0, from a bare Sinh/Cosh) does NOT count — those close by ordinary
+  // reduction and must not be preempted here.
+  const hasAddDenom = [...roots.values()].some(
+    ({ root, exp }) => exp < 0 && !zeroQ(root)
+  );
+  if (!hasAddDenom) return null;
+  const P =
+    pFactors.length === 0
+      ? ce.One
+      : pFactors.length === 1
+        ? pFactors[0]
+        : ce.function('Multiply', pFactors);
+  if (polyDegreeX(P, x) < 1) return null; // require a nontrivial polynomial
+  if (polyCoeffsX(P, x) === null) return null;
+  return { w, P, C, roots, yName };
+}
+
+/** The hyperbolic heads whose `y = E^w` form has a NONZERO-root denominator
+ *  (`y²±1`), so an additive block containing one denominates even at positive
+ *  power. Sinh/Cosh have only a monomial `2y` denominator and are excluded. */
+const RECIPROCAL_HYPERBOLIC_HEADS = new Set([
+  'Tanh',
+  'Coth',
+  'Sech',
+  'Csch',
+]);
+
+function containsReciprocalHyperbolic(u: Expression): boolean {
+  if (RECIPROCAL_HYPERBOLIC_HEADS.has(u.operator)) return true;
+  return (u.ops ?? []).some(containsReciprocalHyperbolic);
+}
+
+/** Cheap O(nodes) syntactic pre-filter for the R8 single-angle hyperbolic→exp
+ *  fallback: does a genuine additive-hyperbolic DENOMINATOR literally occur — a
+ *  `Power(Add, negative)` whose `Add` base contains a hyperbolic head (the
+ *  `(a+b·sinh)^{−n}` shape), a positive-power `Power(Add, k)` whose `Add` base
+ *  carries a RECIPROCAL head (Tanh/Coth/Sech/Csch, whose own `y²±1` denominator
+ *  denominates even at positive power — e.g. `(a+b·Coth)³`, 6.4.1 #47), or the raw
+ *  `Divide(_, Add-with-hyperbolic)` form? Keeps R8 a near-zero-cost no-op off its
+ *  shape. */
+export function hasSingleAngleHyperbolicRationalCandidate(
+  e: Expression
+): boolean {
+  if (e.operator === 'Power' && e.ops && e.ops.length === 2) {
+    const [base, exp] = e.ops;
+    if (
+      base.operator === 'Add' &&
+      isNumber(exp) &&
+      typeof exp.re === 'number' &&
+      exp.re !== 0 &&
+      containsHyperbolic(base) &&
+      (exp.re < 0 || containsReciprocalHyperbolic(base))
+    )
+      return true;
+  }
+  // Also match the raw (un-normalized) `Divide(_, Add-with-hyperbolic)` form: the
+  // driver normalizes to `Power(Add,−1)` before calling this, but a caller may
+  // pass a parsed integrand directly.
+  if (e.operator === 'Divide' && e.ops && e.ops.length === 2) {
+    const den = e.ops[1];
+    if (den.operator === 'Add' && containsHyperbolic(den)) return true;
+  }
+  return (e.ops ?? []).some(hasSingleAngleHyperbolicRationalCandidate);
+}
+
+/** R8 support: expand `∫P(x)·R(hyp(w))` into the list of x-integrand pieces
+ *  `P(x)·(c·y^k/(y−r)^s)[y → E^{w}]` — each a Chapter-2 §2.2 / §8.8 shape the
+ *  bundled rules close. Rewrites R to the y-rational tally, builds Q(y), partial-
+ *  fractions it over its linear y-factors (reusing `expandRationalOverLinears`),
+ *  and substitutes y = E^{w}. Returns null when the integrand is not in the
+ *  single-angle additive-denominator shape. */
+export function singleAngleHyperbolicExponentialPieces(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): Expression[] | null {
+  const info = analyzeSingleAngleHyperbolicRational(ce, integrand, x);
+  if (info === null) return null;
+  const { w, P, C, roots, yName } = info;
+  const y = ce.symbol(yName);
+  // Build Q(y) WITHOUT the (y-free) constant C: a symbolic C carrying a
+  // parameter in a denominator (e.g. `−4/a`, `1/b`) is a `Power(a,−1)` factor
+  // that `expandPolyOverLinear` rejects as non-polynomial. Partial fraction is
+  // linear, so factoring C out and multiplying it back into each piece is exact.
+  const factors: Expression[] = [];
+  for (const { root, exp } of roots.values()) {
+    if (exp === 0) continue;
+    const lin = ce.function('Add', [y, root.neg()]); // (y − root)
+    factors.push(exp === 1 ? lin : lin.pow(exp));
+  }
+  const Qy =
+    factors.length === 0
+      ? ce.One
+      : factors.length === 1
+        ? factors[0]
+        : ce.function('Multiply', factors);
+  // Linear-factor partial fraction in y (reuses R15's machinery). When it does
+  // not split (single piece — a proper `c/(y−r)^s`), integrate the whole thing;
+  // that single piece is still a §2.2 shape and, being hyperbolic-free after the
+  // y = E^{w} substitution, cannot re-enter this fallback.
+  const pieces = expandRationalOverLinears(ce, Qy, yName) ?? [Qy];
+  const Y = ce.E.pow(w); // E^{w}
+  return pieces.map((pc) => {
+    // Collapse each piece's (possibly messy surd) residue coefficient to a clean
+    // constant BEFORE the substitution: a symbolic-root residue like
+    // `1/(r₁−r₂)` otherwise leaves the denominator an un-collected sum that the
+    // §2.2 matcher can't see as `a+b·E^{w}`. The piece is a small rational
+    // function of y, so this simplify is cheap; a deadline throw propagates to
+    // the driver's fallback try/catch. Value-preserving.
+    const pcs = pc.simplify();
+    return ce.function('Multiply', [P, C, pcs.subs({ [yName]: Y })]);
+  });
+}
+
 /** A single sin/cos power factor `sin/cos[arg]` or `(sin/cos[arg])^k` (k a
  *  positive integer): its head, argument, and integer degree, else null. */
 function trigPowerFactor(

@@ -1152,6 +1152,92 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     });
   });
 
+  // R8: poly × single-angle-hyperbolic → single-exponential PolyLog fallback
+  // (RUBI.md §5, Phase R8; driver `singleAngleHyperbolicExpFallback` + rubi-utils
+  // `singleAngleHyperbolicExponentialPieces`). The real-exponential analog of R17:
+  // `∫P(x)·R(hyp(w)) dx` with P a NONTRIVIAL polynomial in x, w = c+d·x linear, and
+  // an additive `(a+b·hyp)`-type denominator is rewritten via y = E^{w} (no factor
+  // of i) into a linear-factor partial fraction, each piece
+  // `∫P(x)·E^{k·w}/(a+b·E^{w})^s` closing through the §2.2 → Chapter-3 → §8.8 PolyLog
+  // telescope (Log + PolyLog[2]/PolyLog[3]). These are the 6.1.1 #230/#233 and the
+  // 6.4.1 #47 (positive-power reciprocal `(a+b·Coth)ᵏ`) shapes. Placed LAST among
+  // the hyperbolic fallbacks, so every case here goes INERT under `RUBI_NO_R8=1`
+  // (exercises the R8 rung, not a bundled rule). D-verified by finite-differencing
+  // F.N() (the antiderivative carries PolyLog/complex-Log terms whose symbolic
+  // derivative does not numericize). NOTE: the sinh additive-denominator rows keep
+  // their `√(a²+b²)` root cleanest with SYMBOLIC parameters, while the coth
+  // reciprocal rows are fastest with concrete numeric coefficients — chosen per
+  // case accordingly. Heavy PolyLog family: both budgets raised (see R30 above),
+  // and each test carries an explicit generous jest timeout.
+  describe('poly × single-angle-hyperbolic → single-exponential (Chapter-6, R8)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce, { timeLimitMs: 60_000 });
+    ce.timeLimit = 60_000; // PolyLog telescope / partial-fraction pieces are slow
+
+    // Integrate `latex` over x and central-difference F.N() == integrand at
+    // several sample points, substituting `params` (fixed so the radicands are
+    // positive and the additive denominator stays nonzero on the samples).
+    const verify = (
+      latex: string,
+      params: Record<string, number> = {},
+      samples: number[] = [0.35, 0.62, 0.88]
+    ) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ ...params, x: v }).N().re as number;
+      let checked = 0;
+      for (const x of samples) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ ...params, x }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        expect(Math.abs(d - f)).toBeLessThan(1e-3 * (1 + Math.abs(f)));
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    };
+
+    const P = { a: 1.3, b: 0.7, c: 0.2, d: 1.0, e: 0.5, f: 0.9 };
+
+    // 6.1.1 #230: (e+f·x)·Sinh²/(a+b·Sinh) — additive denominator, linear poly.
+    test('∫(e+f·x)·Sinh(c+d·x)²/(a+b·Sinh(c+d·x)) dx (#230)', () =>
+      verify(
+        '\\frac{(e+f x)\\sinh(c+d x)^2}{a+b\\sinh(c+d x)}',
+        P
+      ), 120_000);
+
+    // 6.1.1 #233-shape: (e+f·x)³·Sinh³/(a+b·Sinh) — cubic poly → PolyLog[3]. The
+    // heavy .N() is capped at two sample points.
+    test('∫(e+f·x)³·Sinh(c+d·x)³/(a+b·Sinh(c+d·x)) dx (#233-shape)', () =>
+      verify(
+        '\\frac{(e+f x)^3\\sinh(c+d x)^3}{a+b\\sinh(c+d x)}',
+        P,
+        [0.35, 0.62]
+      ), 120_000);
+
+    // 6.4.1 #47-shape: (c+d·x)·(a+b·Coth)² — a POSITIVE-power reciprocal head,
+    // whose intrinsic `y²−1` denominator (roots ±1) needs the PolyLog route even
+    // without a syntactic `Add^{negative}`. Concrete numeric coefficients (the exact
+    // #47 cube×cube closes+D-verifies too but is far too slow for CI).
+    test('∫(3+2x)·(3+2·Coth(1+2x))² dx (#47-shape, positive-power reciprocal)', () =>
+      verify(
+        '(3+2 x)(3+2\\coth(1+2 x))^2',
+        {},
+        [0.4, 0.9, 1.3]
+      ), 120_000);
+
+    // Toggle meaningfulness: `NO_R8` is captured at module load, so this branches
+    // on the env var present at process start — the default suite proves the
+    // closure, a `RUBI_NO_R8=1` run proves it goes inert.
+    test('∫(3+2x)·(3+2·Coth(1+2x))² is gated by RUBI_NO_R8', () => {
+      const F = ce.parse('\\int (3+2 x)(3+2\\coth(1+2 x))^2 \\, dx').evaluate();
+      if (process.env.RUBI_NO_R8 === undefined)
+        expect(F.has('Integrate')).toBe(false);
+      else expect(F.has('Integrate')).toBe(true);
+    }, 120_000);
+  });
+
   // ── Integration variable other than `x` (R26A). ──
   // The bundled rules all carry `variable: "x"`; every RHS references the
   // integration variable as the string token `"x"`. The match env does not

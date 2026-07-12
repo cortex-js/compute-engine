@@ -26,6 +26,9 @@ import {
   singleAngleTrigRationalQ,
   singleAngleExponentialPieces,
   hasSingleAngleTrigRationalCandidate,
+  hyperbolicHeadYForm,
+  singleAngleHyperbolicExponentialPieces,
+  hasSingleAngleHyperbolicRationalCandidate,
   circularTrigReduce,
   polyTrigProductPieces,
   mixedParityRadicalPieces,
@@ -1260,6 +1263,116 @@ describe('singleAngleTrigRationalQ (R17 gate)', () => {
     expect(
       singleAngleExponentialPieces(ce, ce.parse('(1+x) \\csc(x)^2'), 'x')
     ).toBeNull());
+});
+
+// R8: poly × single-angle-hyperbolic → single-exponential normalization (the
+// real-exponential analog of R17). `hyperbolicHeadYForm` gives the exact
+// [N(y),D(y)] with `hyp(w)=N(y)/D(y)` at y=E^{w} (NO factor of i). The pre-filter
+// `hasSingleAngleHyperbolicRationalCandidate` matches an additive-hyperbolic
+// denominator (`(a+b·sinh)^{−n}`) OR a positive-power reciprocal head whose own
+// `y²±1` denominator denominates (`(a+b·Coth)ᵏ`, 6.4.1 #47), and rejects bare
+// poly·Sinh powers. `singleAngleHyperbolicExponentialPieces` returns the linear-
+// factor pieces that reconstruct the integrand at y=E^{w}.
+describe('singleAngleHyperbolicExponentialPieces (R8 gate)', () => {
+  test('hyperbolicHeadYForm matches the true hyperbolic value at y=E^{w}', () => {
+    const y = ce.symbol('y');
+    const heads: [string, (w: number) => number][] = [
+      ['Sinh', Math.sinh],
+      ['Cosh', Math.cosh],
+      ['Tanh', Math.tanh],
+      ['Coth', (w) => 1 / Math.tanh(w)],
+      ['Sech', (w) => 1 / Math.cosh(w)],
+      ['Csch', (w) => 1 / Math.sinh(w)],
+    ];
+    for (const [head, fn] of heads) {
+      const nd = hyperbolicHeadYForm(ce, head, y);
+      expect(nd).not.toBeNull();
+      const [N, D] = nd!;
+      for (const w of [0.3, 0.7, 1.4, -0.5]) {
+        const yv = Math.exp(w);
+        const nv = N.subs({ y: yv }).N().re as number;
+        const dv = D.subs({ y: yv }).N().re as number;
+        expect(nv / dv).toBeCloseTo(fn(w), 9);
+      }
+    }
+    // A trig (non-hyperbolic) head is not recognized.
+    expect(hyperbolicHeadYForm(ce, 'Sin', y)).toBeNull();
+  });
+
+  test('hasSingleAngleHyperbolicRationalCandidate matches on/off shape', () => {
+    // additive-hyperbolic denominator (#230 shape)
+    expect(
+      hasSingleAngleHyperbolicRationalCandidate(
+        ce.parse('\\frac{(e+f x)\\sinh(c+d x)^2}{a+b\\sinh(c+d x)}')
+      )
+    ).toBe(true);
+    // positive-power reciprocal head (#47 shape): (a+b·Coth)²
+    expect(
+      hasSingleAngleHyperbolicRationalCandidate(
+        ce.parse('(c+d x)(a+b\\coth(e+f x))^2')
+      )
+    ).toBe(true);
+    // bare poly·Sinh power — no denominator at all
+    expect(
+      hasSingleAngleHyperbolicRationalCandidate(ce.parse('(1+x)\\sinh(x)^2'))
+    ).toBe(false);
+    // positive-power NON-reciprocal additive (a+b·Sinh)²: Sinh's denominator is
+    // the monomial `2y` (root 0), so it does not denominate — not a candidate.
+    expect(
+      hasSingleAngleHyperbolicRationalCandidate(ce.parse('(1+x)(a+b\\sinh(x))^2'))
+    ).toBe(false);
+  });
+
+  test('singleAngleHyperbolicExponentialPieces reconstructs the #230 integrand at y=E^{w}', () => {
+    const integrand = ce.parse(
+      '\\frac{(e+f x)\\sinh(c+d x)^2}{a+b\\sinh(c+d x)}'
+    );
+    const pieces = singleAngleHyperbolicExponentialPieces(ce, integrand, 'x');
+    expect(pieces).not.toBeNull();
+    const params = { a: 1.3, b: 0.7, c: 0.2, d: 1.0, e: 0.5, f: 0.9 };
+    for (const xv of [0.5, 1.1]) {
+      let sum = ce.number(0);
+      for (const p of pieces!) sum = sum.add(p.subs({ ...params, x: xv }));
+      expect(sum.N().re as number).toBeCloseTo(
+        integrand.subs({ ...params, x: xv }).N().re as number,
+        6
+      );
+    }
+  });
+
+  test('singleAngleHyperbolicExponentialPieces reconstructs the #47 positive-power reciprocal shape', () => {
+    const integrand = ce.parse('(c+d x)(a+b\\coth(e+f x))^2');
+    const pieces = singleAngleHyperbolicExponentialPieces(ce, integrand, 'x');
+    expect(pieces).not.toBeNull();
+    const params = { a: 1.3, b: 0.7, c: 0.5, d: 0.9, e: 0.2, f: 1.0 };
+    for (const xv of [0.5, 1.1]) {
+      let sum = ce.number(0);
+      for (const p of pieces!) sum = sum.add(p.subs({ ...params, x: xv }));
+      expect(sum.N().re as number).toBeCloseTo(
+        integrand.subs({ ...params, x: xv }).N().re as number,
+        6
+      );
+    }
+  });
+
+  test('singleAngleHyperbolicExponentialPieces declines off-shape integrands', () => {
+    // no hyperbolic head at all
+    expect(
+      singleAngleHyperbolicExponentialPieces(ce, ce.parse('\\frac{x}{a+b x}'), 'x')
+    ).toBeNull();
+    // bare poly·Sinh power — no genuine (nonzero-root) denominator
+    expect(
+      singleAngleHyperbolicExponentialPieces(ce, ce.parse('(1+x)\\sinh(x)^2'), 'x')
+    ).toBeNull();
+    // trivial polynomial P=1 (R30 territory, not R8)
+    expect(
+      singleAngleHyperbolicExponentialPieces(
+        ce,
+        ce.parse('\\frac{1}{a+b\\sinh(x)}'),
+        'x'
+      )
+    ).toBeNull();
+  });
 });
 
 describe('Chapter-5 inverse-trig utilities', () => {

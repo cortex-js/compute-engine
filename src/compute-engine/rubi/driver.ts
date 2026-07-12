@@ -51,6 +51,8 @@ import {
   sinhCoshArgsPolynomialQ,
   hasSingleAngleTrigRationalCandidate,
   singleAngleExponentialPieces,
+  hasSingleAngleHyperbolicRationalCandidate,
+  singleAngleHyperbolicExponentialPieces,
   polyTrigProductPieces,
   mixedParityRadicalPieces,
   hasMixedParityRadicalCandidate,
@@ -145,6 +147,14 @@ const NO_R29 = process.env.RUBI_NO_R29 !== undefined;
 // retry expand it into a single high-degree polynomial no rule factors). A/B
 // measures its ch6 effect; inert off ch6 (the `containsHyperbolic` pre-filter).
 const NO_R30 = process.env.RUBI_NO_R30 !== undefined;
+// RUBI_NO_R8: disable the R8 poly×single-angle-hyperbolic → single-exponential
+// PolyLog fallback (the real-exponential analog of R17: `∫P(x)·R(hyp(w))` with P
+// a nontrivial polynomial in x and an additive `(a+b·hyp)`-type denominator →
+// rewrite each hyperbolic via y = E^{w}, linear-factor partial fraction, route
+// each `∫P(x)·E^{k·w}/(a+b·E^{w})^s` piece through the §2.2/§8.8 PolyLog telescope).
+// Placed LAST among the hyperbolic fallbacks (after R30/exp-sub/R29 decline). A/B
+// measures its ch6 effect; inert off ch6 (the `containsHyperbolic` pre-filter).
+const NO_R8 = process.env.RUBI_NO_R8 !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -1257,6 +1267,47 @@ export class RubiDriver {
       }
     }
 
+    // ---- poly × single-angle-hyperbolic → single-exponential (R8) -----------
+    // `∫P(x)·R(hyp(w)) dx`, P a NONTRIVIAL polynomial in x, w = c+d·x linear, and
+    // R a rational function of same-angle hyperbolics with an additive
+    // `(a+b·hyp)`-type denominator — the real-exponential analog of the R17 trig
+    // fallback. Rewrite each hyperbolic via y = E^{w} (`sinh=(y²−1)/2y`, …; no
+    // factor of i), linear-factor partial fraction (denominator roots
+    // `(−a±√(a²+b²))/b`), then substitute back so each piece is
+    // `∫P(x)·E^{k·w}/(a+b·E^{w})^s` — the Chapter-2 §2.2 / Chapter-3 / §8.8 PolyLog
+    // telescope the bundle already closes (Log + PolyLog[2]/PolyLog[3]). Rubi
+    // reaches these via ExpandIntegrand's E^v expansion of active linear-arg
+    // hyperbolics; the bundled reductions don't, hence this driver-level route.
+    // Placed LAST among the hyperbolic fallbacks (after R30 factored, the exp
+    // substitution, and R29 have all declined), so it never preempts a cleaner
+    // route and only takes the nontrivial-polynomial shape that R30 (P=1) leaves.
+    // Cheap O(nodes) pre-filter; fail-closed with a BRANCH-SAFE (mixed-sign
+    // points, several parameter seeds) D-check on the emitted PolyLog/complex-log
+    // form, so a wrong-branch `√(a²+b²)` residue is rejected and the row stays
+    // cleanly unsolved. The emitted pieces are hyperbolic-free (in the exp
+    // variable), so they cannot re-enter here.
+    if (
+      !NO_R8 &&
+      containsHyperbolic(integrand) &&
+      hasSingleAngleHyperbolicRationalCandidate(integrand)
+    ) {
+      this.suppressRecording++;
+      let F: Expression | null;
+      try {
+        F = this.singleAngleHyperbolicExpFallback(integrand, variable, depth);
+      } finally {
+        this.suppressRecording--;
+      }
+      if (F !== null) {
+        this.record(
+          entryNode,
+          () => F,
+          'integrate.hyperbolic-to-single-exp'
+        );
+        return F;
+      }
+    }
+
     return null;
   }
 
@@ -1515,6 +1566,59 @@ export class RubiDriver {
       if (F.has('Integrate')) return null;
       if (!antiderivativeVerifies(ce, activateTrig(ce, F), integrand, variable))
         return null;
+      return F;
+    } catch {
+      return null;
+    }
+  }
+
+  /** R8: `∫P(x)·R(hyp(w)) dx` for P a nontrivial polynomial in x, w = c+d·x
+   * linear, and R a rational function of same-angle hyperbolic heads with an
+   * additive `(a+b·hyp)`-type denominator — the real-exponential analog of R17,
+   * closed by the single-exponential normalization y = E^{w} (see
+   * `singleAngleHyperbolicExponentialPieces`) plus a linear-factor partial
+   * fraction, routing each `∫P(x)·E^{k·w}/(a+b·E^{w})^s` piece back through the
+   * driver (§2.2 / Chapter-3 / §8.8 PolyLog telescope). Cheap syntactic pre-filter
+   * gates it to a near-zero-cost no-op off its shape. Fail-closed: returns null
+   * unless every piece closes AND D(ΣF) matches the integrand — the BRANCH-SAFE
+   * D-check (mixed-sign x points AND several parameter seeds) rejects a wrong-
+   * branch `√(a²+b²)` residue. Unlike R17, F is already active (hyperbolics are
+   * not inerted), so it is NOT wrapped in `activateTrig`. Body wrapped try/catch. */
+  private singleAngleHyperbolicExpFallback(
+    integrand: Expression,
+    variable: string,
+    depth: number
+  ): Expression | null {
+    // Cheap O(nodes) pre-filter: an additive-hyperbolic denominator must
+    // literally occur, else bail before any factoring work.
+    if (!hasSingleAngleHyperbolicRationalCandidate(integrand)) return null;
+    const ce = this.ce;
+    try {
+      const pieces = singleAngleHyperbolicExponentialPieces(
+        ce,
+        integrand,
+        variable
+      );
+      if (pieces === null) return null;
+      const parts: Expression[] = [];
+      for (const pc of pieces) {
+        const term = recanonicalize(ce, pc);
+        const F = this.intRec(term, variable, depth + 1);
+        if (F === null || F.has('Integrate')) return null;
+        parts.push(F);
+      }
+      const F = this.cleanExpansionResult(
+        parts.length === 1 ? parts[0] : ce.function('Add', parts)
+      );
+      if (F.has('Integrate')) return null;
+      // Branch-safe D-check: mixed-sign x, and three distinct parameter seeds so a
+      // form correct on only one branch of the residual quadratic's `√(a²+b²)` is
+      // rejected (fail-closed — the row stays cleanly unsolved).
+      const xs = [0.37, -0.53, 0.83, -1.11, 1.29, -0.71];
+      for (const seed of [0.41, 1.31, 0.73]) {
+        if (!antiderivativeVerifies(ce, F, integrand, variable, xs, seed))
+          return null;
+      }
       return F;
     } catch {
       return null;

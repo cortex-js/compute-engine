@@ -3,8 +3,10 @@
 **Date:** 2026-06-10 (feasibility); last status update 2026-07-11.
 **Status:** shipped bundle = **Chapters 1, 2, 3, 5, 6, 7 + 4.1 Sine + 4.3 Tangent +
 4.5 Secant + §8.8 Polylogarithm** (6,574 rules, 6.98 MB). Chapter-1 exhaustive
-≈90–91%; ch2 ≈72% / ch6 ≈59% effective (R30: **71/120** s120 seed5, +9 over the
-R29 baseline via the rational-in-hyperbolic cyclotomic-factored substitution);
+≈90–91%; ch2 ≈72% / ch6 ≈60% effective (R30: **71/120** s120 seed5, +9 over the
+R29 baseline via the rational-in-hyperbolic cyclotomic-factored substitution;
+R8: **+3** via the poly×hyperbolic single-exponential PolyLog fallback —
+#230/#233/#47, clean per-problem A/B, 0 wrongs);
 **4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
 71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R24, s120 seed5):
@@ -2060,6 +2062,57 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     factored form's exact-identity with the expanded normal form at several
     (a,b,x) samples + a genuinely-factored `Multiply` denominator, and off-shape
     → null for algebraic/no-hyperbolic integrands).
+- **Phase R8 — poly × single-angle-hyperbolic → single-exponential PolyLog
+  fallback LANDED (2026-07-11, behind `RUBI_NO_R8`).** The real-exponential
+  analog of R17 (`singleAngleTrigExpFallback`), for the ROADMAP "poly×hyperbolic
+  by-parts" residual — closed via the PolyLog telescope, NOT by-parts. An
+  integrand `∫P(x)·R(hyp(w)) dx` with `P` a NONTRIVIAL polynomial in x (degree
+  ≥ 1 — this makes it disjoint from R30's P=1 rational family), `w = c+d·x`
+  linear, and a genuine additive-`(a+b·hyp)`-type denominator, is rewritten via
+  `y = E^{w}` (`sinh=(y²−1)/2y`, `cosh=(y²+1)/2y`, `tanh=(y²−1)/(y²+1)`, … — NO
+  factor of i, unlike R17's `y=E^{i·w}`). Linear-factor partial fraction over
+  the y-roots (`a+b·sinh` → `b·y²+2a·y−b`, roots `(−a±√(a²+b²))/b` — real surds)
+  gives pieces `∫P(x)·E^{k·w}/(a+b·E^{w})^s` that the bundled §2.2 → Ch3 → §8.8
+  telescope closes to `Log + PolyLog[2]/PolyLog[3]`. New driver method
+  `singleAngleHyperbolicExpFallback` (imports `singleAngleHyperbolicExponentialPieces`
+  + `hasSingleAngleHyperbolicRationalCandidate` from `rubi-utils.ts`), placed
+  **LAST** among the hyperbolic fallbacks (after R30-factored / exp-substitution
+  / R29 all decline), so it never preempts a cleaner route and currently-solved
+  rows are untouched. Fail-closed with the R30-style **branch-safe** D-check
+  (mixed-sign x × 3 parameter seeds), so a wrong-branch `√(a²+b²)` residue is
+  rejected. R17 and its helpers are untouched — R8 is a parallel hyperbolic
+  pipeline (`hyperbolicHeadYForm`, `sharedLinearHyperbolicArg`,
+  `splitHyperbolicTerm`, `hyperbolicAtomNumDen`,
+  `analyzeSingleAngleHyperbolicRational`, reusing the shared `factorLinearsY`
+  / `expandRationalOverLinears` / `freshYSymbol`).
+  - **Gate deviation from a literal R17 mirror (needed for 6.4.1 #47).** R17's
+    `hasAddDenom` gate is `Add && p<0` (a syntactic `Add^{negative}`).
+    `(c+d·x)³·(a+b·Coth)³` has its additive block at POSITIVE power, yet
+    `coth=(y²+1)/(y²−1)` puts the nonzero roots ±1 in the denominator — a genuine
+    PolyLog shape. The gate is therefore generalized to "the reduced y-rational
+    has a denominator y-root that is NONZERO" (`exp<0 && !zeroQ(root)`), which
+    subsumes R17's surd-root case, admits the reciprocal heads' intrinsic `y²±1`
+    denominators, and still excludes bare `Sinh/Cosh` powers (monomial `2y`, root
+    0 only). The pre-filter is correspondingly broadened to accept a positive-
+    power `Add` carrying a reciprocal head (Tanh/Coth/Sech/Csch).
+  - **Before→after (ch6 Hyperbolic s120 seed5, clean per-problem A/B: R8-on vs
+    `RUBI_NO_R8=1`, same conditions).** solved-correct **+3** (#230
+    `(e+f·x)·Sinh²/(a+b·Sinh)`, #233 `(e+f·x)³·Sinh³/(a+b·Sinh)`, 6.4.1 #47
+    `(c+d·x)³·(a+b·Coth)³` — all D-verified), solved-wrong **0**, 0 regressions.
+    The heavier same-family rows (#243 `Csch²/(a+b·Sinh)`, #408
+    `Sinh²·Tanh/(a+b·Sinh)`, #455 `Coth²/(a+b·Sinh)`) analyze but their
+    higher-degree PolyLog telescope + 3-seed D-check exceed the per-problem
+    verification budget under CPU contention, so they decline cleanly (fail-
+    closed, not wrong) — R8's standalone ceiling is higher than the measured +3.
+    (Absolute counts fluttered 75→80; the ±2 band is timing, e.g. #213
+    `a+b·Sinh⁴` — a hyperbolic POWER in the additive, which R8's gate rejects —
+    and #37's `√x` nonlinear arg both flipped without R8 touching them.)
+  - **Tests.** `integration-rules.test.ts` R8 block (#230 / #233-shape /
+    #47-shape end-to-ends, D-verified on Re of a central-differenced F.N(), +
+    `RUBI_NO_R8` gate meaningful in both directions); `rubi-utils.test.ts`
+    `singleAngleHyperbolicExponentialPieces` block (`hyperbolicHeadYForm` numeric
+    identity vs the true hyperbolic value, pre-filter on/off-shape, piece
+    reconstruction for #230/#47, off-shape → null).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

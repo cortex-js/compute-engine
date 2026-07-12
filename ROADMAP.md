@@ -585,7 +585,9 @@ fallback), `RUBI_NO_R27` (poly×trig-product reduction fallback),
 `RUBI_NO_R28` (R28a mixed-parity Laurent-numerator × binomial-radical
 linearity split), `RUBI_NO_R29` (R29 algebraic-in-hyperbolic
 `u = Sinh/Cosh/Tanh[v]` substitution fallback), `RUBI_NO_R30` (R30
-rational-in-hyperbolic cyclotomic-factored `t = e^v` substitution fallback).
+rational-in-hyperbolic cyclotomic-factored `t = e^v` substitution fallback),
+`RUBI_NO_R8` (R8 poly×single-angle-hyperbolic → single-exponential `y = e^w`
+PolyLog fallback).
 **Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
 power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
 shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`
@@ -733,9 +735,24 @@ Ch6-specific:
   (still unsolved):** the residual-degree-≥4 fn-of-exp rows (`Sinh⁶/(a+b·Cosh²)`,
   `Csch⁴/(I+Sinh)²`, `Sinh⁴/(a+b·Sech²)²`, `Coth⁵/(a+b·Coth)`) whose symbolic
   quartic-or-higher residual needs a genuine root-finder — the true R6′ tail, out
-  of a contained rung's reach — plus the 11 poly×hyperbolic `(e+f·x)^m·hyp^n/
-  (a+b·hyp)` rows (by-parts machinery) and 7 expected-`Unintegrable`. See
+  of a contained rung's reach — plus 7 expected-`Unintegrable`. See
   docs/rubi/RUBI.md §5 R30.
+- **R8 — poly×hyperbolic single-exponential PolyLog fallback — LANDED
+  (2026-07-11, behind `RUBI_NO_R8`).** The former "11 poly×hyperbolic
+  `(e+f·x)^m·hyp^n/(a+b·hyp)` by-parts" residual, closed NOT by by-parts but by
+  the real-exponential (`y = e^w`) analog of R17's trig telescope: rewrite the
+  same-angle hyperbolics via `y = e^w`, linear-factor partial fraction, and route
+  each `∫P(x)·e^{k·w}/(a+b·e^w)^s` piece through the §2.2 → Ch3 → §8.8 PolyLog
+  telescope the bundle already closes (→ `Log + PolyLog[2]/PolyLog[3]`). Placed
+  last among the hyperbolic fallbacks, fail-closed with a branch-safe 3-seed
+  D-check, disjoint from R30 via a nontrivial-polynomial gate. ch6 **+3**
+  (#230/#233/#47, clean per-problem A/B, 0 wrongs/0 regressions); the heavier
+  same-family rows (#243/#408/#455) analyze but decline cleanly under the
+  per-problem verification budget, so R8's standalone ceiling is higher. See
+  docs/rubi/RUBI.md §5 R8. **Residual:** the by-parts-only tail
+  (`(e+f·x)^m·hyp^n/(a+b·hyp)` rows whose numerator hyperbolic is itself a POWER
+  in the additive denominator, e.g. `a+b·Sinh⁴`) still wants genuine by-parts
+  machinery.
 - **R7 — algebraic-in-hyperbolic substitution plumbing — LANDED as R29
   (2026-07-11, behind `RUBI_NO_R29`).** The 21-row algebraic-in-hyperbolic
   class (`(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh²)`, half-integer hyperbolic powers)
