@@ -42,18 +42,37 @@ export function gammaln(z: number): number {
   );
 }
 
-// From https://github.com/substack/gamma.js/blob/master/index.js
-export function gamma(z: number): number {
-  if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
-  if (z > 100) return Math.exp(gammaln(z));
+const GAMMA_OVERFLOW_THRESHOLD = 171.6243769563027;
 
+function gammaLanczos(z: number): number {
   z -= 1;
   let x = lanczos_7_c[0];
   for (let i = 1; i < gammaG + 2; i++) x += lanczos_7_c[i] / (z + i);
 
   const t = z + gammaG + 0.5;
-
   return Math.sqrt(2 * Math.PI) * Math.pow(t, z + 0.5) * Math.exp(-t) * x;
+}
+
+function gammaBalancedProduct(start: number, count: number): number {
+  if (count <= 0) return 1;
+  if (count === 1) return start;
+
+  const leftCount = count >>> 1;
+  return (
+    gammaBalancedProduct(start, leftCount) *
+    gammaBalancedProduct(start + leftCount, count - leftCount)
+  );
+}
+
+export function gamma(z: number): number {
+  if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
+  if (z > GAMMA_OVERFLOW_THRESHOLD) return Infinity;
+  if (z >= 2) {
+    const shift = Math.floor(z) - 1;
+    const residue = z - shift;
+    return gammaLanczos(residue) * gammaBalancedProduct(residue, shift);
+  }
+  return gammaLanczos(z);
 }
 
 /**

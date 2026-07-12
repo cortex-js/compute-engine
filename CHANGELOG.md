@@ -9,6 +9,11 @@
   non-positive, or non-convergent factors decline the accelerator and retain
   the existing bounded-truncation behavior.
 
+- **Machine `Gamma` keeps full relative accuracy through the overflow edge.**
+  Positive real arguments now use a balanced recurrence from the Lanczos core
+  instead of reconstructing large values from `exp(gammaln(z))`, which
+  preserves about 15-16 digits up to the IEEE-754 limit near `Gamma(171.624)`.
+
 ### Symbolic Computation
 
 - **Exact cube-root arithmetic handles more algebraic forms.** Positive

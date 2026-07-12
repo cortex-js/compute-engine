@@ -214,8 +214,6 @@ items: Beta poles, `x·∞`, inverse-hyperbolic poles, the rules.ts edge bugs).
 Full record: [`docs/reviews/2026-07-04-review.md`](./docs/reviews/2026-07-04-review.md).
 Still open from its ranked list:
 
-- **Machine gamma accuracy at z ≳ 80** (~13 digits by z≈140; full precision
-  to z≈46) — snapshot-heavy, needs a careful lane fix.
 - **defint error bar 1.6× optimistic on endpoint-singular integrands** —
   large (tanh-sinh quadrature).
 - **Perf tail** (measurement-gated): per-opDef `allParamsNumeric` cache,

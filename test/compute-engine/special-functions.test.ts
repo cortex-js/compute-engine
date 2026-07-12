@@ -179,6 +179,25 @@ describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
     expectApprox(ce.expr(['Gamma', 5]), 24);
     expect(ce.expr(['Gamma', 0]).N().toString()).toContain('oo');
   });
+
+  test('Γ(z) keeps full relative accuracy for large positive reals', () => {
+    const cases: Array<[number, number]> = [
+      [40.5, 1.2860502482549915e47],
+      [46.5, 8.091157444918836e56],
+      [80.5, 7.989215727687125e117],
+      [140.5, 1.1367323214599712e240],
+      [170.5, 5.56209241456e305],
+    ];
+    for (const [z, expected] of cases) {
+      const actual = ce.expr(['Gamma', z]).N().re;
+      expect(Math.abs(actual / expected - 1)).toBeLessThan(5e-15);
+    }
+  });
+
+  test('Γ(z) overflows only past the IEEE-754 cutoff', () => {
+    expectApprox(ce.expr(['Gamma', 171.624]), 1.7942117599248104e308, 1e-12);
+    expect(ce.expr(['Gamma', 171.625]).N().re).toBe(Infinity);
+  });
 });
 
 describe('BETA FUNCTION', () => {
