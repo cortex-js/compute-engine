@@ -1055,8 +1055,10 @@ volumes
     //
     // The result is a plain expression: the truncated sum plus an inert
     // `BigO` remainder head (e.g. `Sin(x)` → `x − x³/6 + x⁵/120 + O(x⁷)`).
-    // A pole, essential singularity, or non-differentiable operand leaves the
-    // `Series(...)` expression unevaluated (never a partial/wrong expansion).
+    // At a pole the result is a Laurent expansion (e.g. `Cot(x)` →
+    // `1/x − x/3 − …`), via the Laurent engine in symbolic/series.ts. An
+    // essential singularity, branch point, or non-differentiable operand
+    // leaves `Series(...)` unevaluated (never a partial/wrong expansion).
     //
     Series: {
       description:
