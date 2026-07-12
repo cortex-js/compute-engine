@@ -261,6 +261,35 @@ export function reducedRational(r: Rational): Rational {
   return [n, d];
 }
 
+/**
+ * Return `value / denom` as an exact reduced machine rational, or `null` if
+ * no exact representation is reachable.
+ *
+ * `value` may have a short decimal part (e.g. a DMS angle total in seconds
+ * with decimal seconds): it is scaled by a power of ten (up to 10^6) until
+ * it lands on a safe integer. Returns `null` for dirty floats that never
+ * scale to an integer and for magnitudes beyond safe-integer range — callers
+ * should then fall back to float arithmetic rather than feed non-integers to
+ * `reducedRational()`, which would produce NaN.
+ */
+export function reducedRationalFromDecimal(
+  value: number,
+  denom: SmallInteger
+): [SmallInteger, SmallInteger] | null {
+  if (!Number.isFinite(value)) return null;
+  for (let scale = 1; scale <= 1e6; scale *= 10) {
+    // Scale from `value` each time (a single rounding) rather than
+    // multiplying the previous iterate by 10 (compounding roundings).
+    const n = value * scale;
+    if (Number.isInteger(n)) {
+      if (!Number.isSafeInteger(n) || !Number.isSafeInteger(denom * scale))
+        return null;
+      return reducedRational([n, denom * scale]);
+    }
+  }
+  return null;
+}
+
 /** Return a rational approximation of x */
 export function rationalize(x: number): [n: number, d: number] | number {
   if (!Number.isFinite(x)) return x;

@@ -161,6 +161,90 @@ describe('Edge Cases', () => {
   });
 });
 
+describe('Decimal Components', () => {
+  test('decimal arc-seconds stay exact', () => {
+    // (3600·9 + 60·30 + 15.5)/3600 = 34215.5/3600 = 68431/7200
+    check('9°30\'15.5"', ['Degrees', ['Rational', 68431, 7200]]);
+  });
+
+  test('decimal arc-seconds evaluate exactly', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('9°30\'15.5"');
+    const expected = ce.expr(['Divide', ['Multiply', 68431, 'Pi'], 1296000]);
+    expect(expr.simplify().isSame(expected.simplify())).toBe(true);
+  });
+
+  test('dirty decimal arc-minutes recover the exact decimal', () => {
+    // 60·30.000001 is not exactly representable in binary; the
+    // scaled-rational recovery still lands on the intended
+    // 9.500000016666...° = 570000001/60000000
+    check("9°30.000001'", ['Degrees', ['Rational', 570000001, 60000000]]);
+  });
+
+  test('unrecoverable decimals fall back to float degrees, not NaN', () => {
+    const ce = new ComputeEngine();
+    // 15.123456789" needs a 10^9 scale factor, beyond exact recovery
+    const expr = ce.parse('9°30\'15.123456789"');
+    expect(expr.N().re).toBeCloseTo(
+      ((9 + 30 / 60 + 15.123456789 / 3600) * Math.PI) / 180,
+      12
+    );
+  });
+
+  test('DMS() with decimal seconds stays exact', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.expr(['DMS', 9, 30, 15.5]);
+    const expected = ce.expr(['Divide', ['Multiply', 68431, 'Pi'], 1296000]);
+    expect(expr.simplify().isSame(expected.simplify())).toBe(true);
+  });
+
+  test('DMS() with unrecoverable decimals is not NaN', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.expr(['DMS', 9, 30, 15.123456789]);
+    expect(expr.N().re).toBeCloseTo(
+      ((9 + 30 / 60 + 15.123456789 / 3600) * Math.PI) / 180,
+      12
+    );
+  });
+
+  test('exact result agrees with numeric evaluation', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('9°30\'15"');
+    expect(expr.N().re).toBeCloseTo(
+      ((9 + 30 / 60 + 15 / 3600) * Math.PI) / 180,
+      12
+    );
+  });
+});
+
+describe('Bignum Degrees', () => {
+  test('Degrees of an integer beyond 2^53 stays exact', () => {
+    const ce = new ComputeEngine();
+    // 2^53 + 1 = 9007199254740993 is divisible by 3:
+    // (2^53+1)/180 = 3002399751580331/60. Truncation through `.re` would
+    // silently produce a *wrong* exact result (2251799813685248/45).
+    const expr = ce.function('Degrees', [
+      ce.number(BigInt('9007199254740993')),
+    ]);
+    const expected = ce.expr([
+      'Divide',
+      ['Multiply', 3002399751580331, 'Pi'],
+      60,
+    ]);
+    expect(expr.isSame(expected)).toBe(true);
+  });
+
+  test('Degrees of a bignum rational stays exact', () => {
+    const ce = new ComputeEngine();
+    const arg = ce.number([BigInt('123456789012345678901'), BigInt(7)]);
+    const expr = ce.function('Degrees', [arg]);
+    const expected = ce
+      .number([BigInt('123456789012345678901'), BigInt(1260)])
+      .mul(ce.Pi);
+    expect(expr.isSame(expected)).toBe(true);
+  });
+});
+
 describe('DMS Function', () => {
   test('DMS(45) is equivalent to Degrees(45)', () => {
     const ce = new ComputeEngine();

@@ -14,7 +14,7 @@ import {
   MISSING,
   getSequence,
 } from '../../../math-json/utils.js';
-import { reducedRational } from '../../numerics/rationals.js';
+import { reducedRationalFromDecimal } from '../../numerics/rationals.js';
 import {
   Serializer,
   Parser,
@@ -1201,7 +1201,12 @@ function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
   const degNum = machineValue(lhs);
   if (degNum !== null && minNum !== null) {
     const totalSec = 3600 * degNum + 60 * minNum + (secNum ?? 0);
-    const [numer, denom] = reducedRational([totalSec, 3600]);
+    // Decimal components (9°30.5', 9°30'15.5") make totalSec non-integer:
+    // recover the exact decimal as a scaled rational, or fall back to
+    // decimal degrees as a float.
+    const rational = reducedRationalFromDecimal(totalSec, 3600);
+    if (rational === null) return ['Degrees', totalSec / 3600];
+    const [numer, denom] = rational;
     if (denom === 1) return ['Degrees', numer];
     return ['Degrees', ['Rational', numer, denom]];
   }

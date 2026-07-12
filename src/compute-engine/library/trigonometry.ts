@@ -13,7 +13,10 @@ import {
 
 import { apply, apply2, shouldNumericize } from '../boxed-expression/apply.js';
 
-import { reducedRational } from '../numerics/rationals.js';
+import {
+  reducedRational,
+  reducedRationalFromDecimal,
+} from '../numerics/rationals.js';
 import type {
   OperatorDefinition,
   SymbolDefinitions,
@@ -108,6 +111,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (arg.isRational === true) {
           const degNumer = arg.numerator.re;
           const degDenom = arg.denominator.re;
+          // `.re` truncates bignum operands beyond 2^53 (and degDenom·180 can
+          // overflow the safe-integer range), which would produce a *wrong*
+          // exact result: use exact boxed arithmetic instead.
+          if (
+            !Number.isSafeInteger(degNumer) ||
+            !Number.isSafeInteger(degDenom * 180)
+          )
+            return arg.div(180).mul(ce.Pi);
           const fRadians = reducedRational([degNumer, degDenom * 180]);
           if (fRadians[0] === 0) return ce.Zero;
           if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
@@ -136,8 +147,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
         if (Number.isNaN(deg)) return ce._fn('DMS', ops);
 
+        // Decimal components make totalSec non-integer: recover an exact
+        // scaled rational, or fall back to float degrees (a non-integer
+        // rational pair would box to NaN).
         const totalSec = 3600 * deg + 60 * min + sec;
-        return ce.function('Degrees', [ce.number([totalSec, 3600])]);
+        const rational = reducedRationalFromDecimal(totalSec, 3600);
+        return ce.function('Degrees', [
+          rational !== null ? ce.number(rational) : ce.number(totalSec / 3600),
+        ]);
       },
       evaluate: (ops, options) => {
         const ce = options.engine;
@@ -147,9 +164,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
         if (Number.isNaN(deg)) return ce._fn('DMS', ops);
 
-        const total = deg + min / 60 + sec / 3600;
-        if (ce.angularUnit === 'deg') return ce.number(total);
-        return ce.number(total).div(180).mul(ce.Pi).evaluate(options);
+        // Match the canonical handler: keep exact arguments exact.
+        const totalSec = 3600 * deg + 60 * min + sec;
+        const rational = reducedRationalFromDecimal(totalSec, 3600);
+        const degrees =
+          rational !== null ? ce.number(rational) : ce.number(totalSec / 3600);
+        if (ce.angularUnit === 'deg') return degrees;
+        return degrees.div(180).mul(ce.Pi).evaluate(options);
       },
     },
 

@@ -62,6 +62,16 @@
 - **`When` respects numeric approximation.** `When(π, cond).N()` with a true
   condition now numericizes (previously the option was dropped and the value
   stayed symbolic).
+- **DMS angles stay exact.** (contributed by
+  [yelliver](https://github.com/yelliver)) Degrees-minutes-seconds notation
+  now parses to an exact rational number of degrees instead of a float
+  (`9°30'` is `19/2°`),
+  and `Degrees` converts any rational — not just integers — to an exact
+  multiple of π, so `5°37'30"` simplifies to `π/32`. Decimal components are
+  recovered exactly when possible (`9°30'15.5"` → `68431/7200°`) and
+  otherwise fall back to floats. `Degrees` of values beyond 2⁵³ no longer
+  loses precision. In raw (non-canonical) parsing, DMS angles that previously
+  produced a float now produce a `Rational`. (#321)
 
 ### Calculus
 
