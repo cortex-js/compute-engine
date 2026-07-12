@@ -2100,10 +2100,14 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     `(e+f·x)·Sinh²/(a+b·Sinh)`, #233 `(e+f·x)³·Sinh³/(a+b·Sinh)`, 6.4.1 #47
     `(c+d·x)³·(a+b·Coth)³` — all D-verified), solved-wrong **0**, 0 regressions.
     The heavier same-family rows (#243 `Csch²/(a+b·Sinh)`, #408
-    `Sinh²·Tanh/(a+b·Sinh)`, #455 `Coth²/(a+b·Sinh)`) analyze but their
-    higher-degree PolyLog telescope + 3-seed D-check exceed the per-problem
-    verification budget under CPU contention, so they decline cleanly (fail-
-    closed, not wrong) — R8's standalone ceiling is higher than the measured +3.
+    `Sinh²·Tanh/(a+b·Sinh)`, #455 `Coth²/(a+b·Sinh)`) decline cleanly and FAST
+    (1–3 s even at a 180 s budget — structural, not budget-limited; fail-closed,
+    not wrong): their y-rational carries a partial-fraction shape the shared
+    `expandRationalOverLinears` helper does not split — REPEATED denominator
+    roots (`Csch²`/`Coth²` → `(y−1)²(y+1)²`) or a COMPLEX pair (`Tanh` → `y²+1`),
+    where #230/#233's denominator roots are all simple and real. Extending the
+    linear-factor partial fraction to repeated/complex roots (which would also
+    reach the analogous R17 trig rows) is the natural R8 follow-up rung.
     (Absolute counts fluttered 75→80; the ±2 band is timing, e.g. #213
     `a+b·Sinh⁴` — a hyperbolic POWER in the additive, which R8's gate rejects —
     and #37's `√x` nonlinear arg both flipped without R8 touching them.)

@@ -746,13 +746,15 @@ Ch6-specific:
   telescope the bundle already closes (→ `Log + PolyLog[2]/PolyLog[3]`). Placed
   last among the hyperbolic fallbacks, fail-closed with a branch-safe 3-seed
   D-check, disjoint from R30 via a nontrivial-polynomial gate. ch6 **+3**
-  (#230/#233/#47, clean per-problem A/B, 0 wrongs/0 regressions); the heavier
-  same-family rows (#243/#408/#455) analyze but decline cleanly under the
-  per-problem verification budget, so R8's standalone ceiling is higher. See
-  docs/rubi/RUBI.md §5 R8. **Residual:** the by-parts-only tail
-  (`(e+f·x)^m·hyp^n/(a+b·hyp)` rows whose numerator hyperbolic is itself a POWER
-  in the additive denominator, e.g. `a+b·Sinh⁴`) still wants genuine by-parts
-  machinery.
+  (#230/#233/#47, clean per-problem A/B, 0 wrongs/0 regressions). See
+  docs/rubi/RUBI.md §5 R8. **Residual:** (1) the heavier same-family rows
+  (#243/#408/#455) decline structurally — their y-rational has REPEATED
+  (`Csch²`/`Coth²` → `(y−1)²(y+1)²`) or COMPLEX (`Tanh` → `y²+1`) denominator
+  roots that the shared linear-factor partial fraction (`expandRationalOverLinears`)
+  does not split; extending it to repeated/complex roots (also reaching the
+  analogous R17 trig rows) is the natural R8 follow-up; (2) the by-parts-only
+  tail (rows whose numerator hyperbolic is itself a POWER in the additive
+  denominator, e.g. `a+b·Sinh⁴`) still wants genuine by-parts machinery.
 - **R7 — algebraic-in-hyperbolic substitution plumbing — LANDED as R29
   (2026-07-11, behind `RUBI_NO_R29`).** The 21-row algebraic-in-hyperbolic
   class (`(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh²)`, half-integer hyperbolic powers)
