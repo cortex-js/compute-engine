@@ -1798,6 +1798,18 @@ describe('SOLVE OPERATOR (B9)', () => {
     expect(r.json).toEqual(['List', 0, 1]);
   });
 
+  test('a univariate inequality stays inert, not an empty list', () => {
+    // `Solve(x² < 4, x)` is unsupported. Returning `[]` would misread as "no
+    // solutions"; instead it stays inert so the caller sees the request was
+    // not solved (a genuine no-solution equation still returns `[]`).
+    for (const op of ['Less', 'LessEqual', 'Greater', 'GreaterEqual']) {
+      const r = ce
+        .expr(['Solve', [op, ['Power', 'x', 2], 4], 'x'])
+        .evaluate();
+      expect(r.operator).toBe('Solve');
+    }
+  });
+
   test('Solve also reaches the inverse-trig strategy', () => {
     expect(
       ce

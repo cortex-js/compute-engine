@@ -108,9 +108,10 @@ Residuals (engine, small):
   `25!` prints as `15511210043330985984e+6` and `String(100!)` uses scientific
   notation, so string-based digit manipulation silently loses zeros. The values
   are exact; only the default integer serialization collapses trailing digits.
-- **`Solve` on inequalities returns `[]` (M).** `Solve(x^2 < 4, x)` reads as "no
-  solutions" when it means "unsupported" — should stay inert (or eventually
-  solve inequalities).
+  (Root cause is `BigDecimal.toString`'s `adjustedExp > 20` scientific-notation
+  threshold, which fires for large exact integers too — changing it touches
+  core number display everywhere, so it needs a scoped approach + a
+  snapshot-blast-radius pass before landing.)
 
 Ratified and **landed 2026-07-11** (record in `STATUS_REPORT.md` completed
 log): lowercase `true`/`false` are input aliases for `True`/`False` (reserved

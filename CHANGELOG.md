@@ -15,6 +15,13 @@
   `StringFrom(Map(UnicodeScalars(s), c -> c + 1), "unicode-scalars")` now
   produces the shifted string rather than `""`.
 
+### Solving Equations
+
+- **`Solve` of an inequality stays inert instead of returning an empty list.**
+  `Solve(x^2 < 4, x)` previously returned `[]`, which reads as "no solutions";
+  univariate inequality solving is unsupported, so the expression now stays
+  unevaluated. Solving equations is unchanged.
+
 ### Compilation
 
 - **The deprecated `interval-glsl` compilation target has been removed.** GPU

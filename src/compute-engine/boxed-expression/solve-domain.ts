@@ -14,6 +14,13 @@ import { interval } from '../numerics/interval.js';
 import { tryDiophantineSolve, isIntegerDomain } from './diophantine.js';
 
 /**
+ * Inequality relational operators. A univariate `Solve` of one of these is
+ * unsupported and stays inert rather than returning an empty (misleading)
+ * root list. Mirrors the local list in `solve-system.ts`.
+ */
+const INEQUALITY_OPERATORS = ['Less', 'LessEqual', 'Greater', 'GreaterEqual'];
+
+/**
  * Solving over a domain (Phase 1, univariate).
  *
  * `Solve(equation, Element(unknown, domain[, condition]))` restricts the
@@ -181,6 +188,13 @@ export function evaluateSolve(
     // A single (string) unknown always yields the univariate root list
     // (`Expression[]`), never the system-solve `Record` shapes.
     if (names.length === 1) {
+      // A univariate inequality (`Solve(x^2 < 4, x)`) has no root list.
+      // `ceq.solve()` returns `[]`, which would serialize as "no solutions" —
+      // misleading, since the request is simply unsupported. Stay inert
+      // instead so the caller sees the unevaluated `Solve(...)`. (Linear
+      // inequality *systems* are handled by the multi-variable path.)
+      if (INEQUALITY_OPERATORS.includes(ceq.operator ?? ''))
+        return undefined;
       const roots = ceq.solve(names[0]) as ReadonlyArray<Expression> | null;
       if (roots === null) return ce.function('List', []);
       return ce.function('List', [...roots]);

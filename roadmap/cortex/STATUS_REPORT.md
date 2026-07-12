@@ -111,6 +111,19 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-11 — **`Solve` of a univariate inequality stays inert (landed).**
+  `Solve(x^2 < 4, x)` returned `[]` — the univariate path calls `ceq.solve()`,
+  which yields `[]` for an inequality, serializing as "no solutions" when the
+  request is simply unsupported. Fix in `evaluateSolve` (`solve-domain.ts`):
+  when the single-unknown equation's operator is an inequality
+  (`Less`/`LessEqual`/`Greater`/`GreaterEqual`), return inert instead of an
+  empty list, so the caller sees the unevaluated `Solve(...)`. Equations are
+  unaffected (`x²=4 → [2,-2]`; a genuine no-solution equation still returns
+  `[]`); linear inequality *systems* keep their existing multi-variable
+  handling. Regression test: `solve.test.ts` "a univariate inequality stays
+  inert". Follow-up (not done): `Unequal` (`≠`) has the same misleading-`[]`
+  shape; actually *solving* univariate inequalities (interval results) is a
+  larger feature.
 - 2026-07-11 — **`StringFrom` joins a lazy collection over an eager source
   (landed).** `StringFrom(Map(UnicodeScalars(s), …), "unicode-scalars")`
   returned `""` because a `lazy: true` op (`Map`, `Filter`) keeps its source
