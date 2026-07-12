@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### Linear Algebra
+
+- **Matrix operators infer fresh symbolic operands from context.** An expression
+  such as `\det(A+2B)` no longer fails because bottom-up arithmetic
+  canonicalization provisionally typed `A` and `B` as numbers before
+  `Determinant` required a matrix. Validation now repairs only inferences made
+  while constructing the current expression and canonicalizes the argument
+  once more with matrix context. Explicit declarations and inferences from
+  earlier expressions are never overwritten, and ambiguous products remain
+  unchanged rather than guessing which factor is the matrix.
+
+### Engine Lifecycle
+
+- **Popping a scope releases configuration listeners owned by its constants.**
+  Constant definitions now retain and invoke the unsubscribe closure returned
+  when they register for precision and angular-unit changes. Local constants
+  from discarded scopes therefore no longer remain reachable for the lifetime
+  of the compute engine.
+
 ## 0.75.0 _2026-07-11_
 
 ### Numeric Evaluation
@@ -9,20 +30,19 @@
   `\operatorname{arsinh}(1+i)` are also supported. Exact arguments remain
   symbolic with `evaluate()`. Incorrect complex values from `Arcoth` on part of
   its branch cut and from `Arsech` have also been fixed.
-- **Products and quotients of square roots no longer throw on large
-  radicands.** Evaluating an expression such as `\sqrt{1234}\cdot\sqrt{1235}`,
-  whose combined radicand (`1234·1235`) exceeds the exact-radical limit, no
-  longer raises an internal "Unexpected value for radical part" error. Any
-  perfect-square factor is extracted (`√(k²·r) = k·√r`), keeping the result
-  exact when the square-free part is small enough and otherwise returning the
-  numeric value.
+- **Products and quotients of square roots no longer throw on large radicands.**
+  Evaluating an expression such as `\sqrt{1234}\cdot\sqrt{1235}`, whose combined
+  radicand (`1234·1235`) exceeds the exact-radical limit, no longer raises an
+  internal "Unexpected value for radical part" error. Any perfect-square factor
+  is extracted (`√(k²·r) = k·√r`), keeping the result exact when the square-free
+  part is small enough and otherwise returning the numeric value.
 
 ### Solving Equations
 
 - **`Solve` handles systems of equations.** `Solve([eq1, eq2, …], [x, y, …])`
-  returns each solution as a tuple of values in the order of the variable
-  list: `Solve([x + y = 3, x - y = 1], [x, y])` → `[(2, 1)]`, and a nonlinear
-  system such as `[x^2 + y^2 = 25, x + y = 7]` returns both solutions
+  returns each solution as a tuple of values in the order of the variable list:
+  `Solve([x + y = 3, x - y = 1], [x, y])` → `[(2, 1)]`, and a nonlinear system
+  such as `[x^2 + y^2 = 25, x + y = 7]` returns both solutions
   `[(3, 4), (4, 3)]`. Linear systems solve exactly (rational values), an
   underdetermined system returns a parametric tuple (`[(5 - y, y)]` for
   `x + y = 5`), and a system the solver cannot decide stays unevaluated. This
@@ -41,7 +61,8 @@
   denominators of the form `(a+b·x^n)^{3/2}`.
 - **More integrals that are algebraic in a hyperbolic function are supported.**
   Half-integer powers of hyperbolic expressions such as
-  `\int\coth(x)(a+b\sinh^2 x)^{3/2}\,dx`, `\int\coth^2 x\sqrt{a+b\tanh^2 x}\,dx`,
+  `\int\coth(x)(a+b\sinh^2 x)^{3/2}\,dx`,
+  `\int\coth^2 x\sqrt{a+b\tanh^2 x}\,dx`,
   `\int\frac{\operatorname{csch} x}{(a+b\sinh^2 x)^{3/2}}\,dx`, and
   `\int\sqrt{a+b\operatorname{csch}^2 x}\,dx` now close in elementary form via a
   hyperbolic substitution. This also fixes a wrong-answer case,
@@ -77,28 +98,26 @@
 
 - **`Limit` accepts the explicit-variable form.** `Limit(expr, var, point)` —
   e.g. `["Limit", ["Divide", ["Sin", "x"], "x"], "x", 0]` → `1` — now
-  canonicalizes to the same internal form as `Limit(expr, point)`, matching
-  the convention `Series` already uses. The `(function, point, direction)`
-  reading is preserved when the middle operand is not a free variable of the
-  expression.
+  canonicalizes to the same internal form as `Limit(expr, point)`, matching the
+  convention `Series` already uses. The `(function, point, direction)` reading
+  is preserved when the middle operand is not a free variable of the expression.
 
 ### Linear Algebra
 
-- **`Inverse` of an exact matrix is exact.** An integer or rational matrix
-  now inverts over the rationals — `Inverse([[2,1],[1,3]])` →
-  `[[3/5,-1/5],[-1/5,2/5]]` instead of floats — with `.N()` and inexact
-  matrices using the numeric path as before.
+- **`Inverse` of an exact matrix is exact.** An integer or rational matrix now
+  inverts over the rationals — `Inverse([[2,1],[1,3]])` →
+  `[[3/5,-1/5],[-1/5,2/5]]` instead of floats — with `.N()` and inexact matrices
+  using the numeric path as before.
 - **New `LinearSolve(A, b)` operator** solves the linear system `A·x = b`,
-  exactly for exact input. Composed forms like `Dot(Inverse(A), b)` also
-  work now: `Inverse`'s result is typed as a matrix, so matrix operators
-  accept it.
+  exactly for exact input. Composed forms like `Dot(Inverse(A), b)` also work
+  now: `Inverse`'s result is typed as a matrix, so matrix operators accept it.
 
 ### Units and Quantities
 
-- **`Quantity` accepts a string unit.** `Quantity(30, "km/h")` parses the
-  string through the same unit grammar as the LaTeX path and canonicalizes
-  identically to the symbolic form; a malformed unit string produces a clear
-  error instead of a partially-built expression.
+- **`Quantity` accepts a string unit.** `Quantity(30, "km/h")` parses the string
+  through the same unit grammar as the LaTeX path and canonicalizes identically
+  to the symbolic form; a malformed unit string produces a clear error instead
+  of a partially-built expression.
 
 ### Programming and Collections
 
@@ -106,60 +125,59 @@
   function assignment that refers to itself, such as
   `ce.parse('f(n) := n \\cdot f(n-1)')`, now works directly.
 - **`N()` numericizes through user-defined functions.** For `f(x) := x/3`,
-  `N(f(2))` now returns `0.666…` instead of the exact `2/3`; plain
-  `evaluate()` still returns the exact form, and the approximation is
-  applied within the function's own scope, preserving lexical scoping.
-- **`Keys(dict)` and `Values(dict)` evaluate**, returning the keys (as
-  strings) and values in the dictionary's iteration order — the same order
+  `N(f(2))` now returns `0.666…` instead of the exact `2/3`; plain `evaluate()`
+  still returns the exact form, and the approximation is applied within the
+  function's own scope, preserving lexical scoping.
+- **`Keys(dict)` and `Values(dict)` evaluate**, returning the keys (as strings)
+  and values in the dictionary's iteration order — the same order
   `for kv in dict` yields.
-- **`Intersection` accepts lists** (any finite collection), deduplicating
-  into a `Set`; `Union` already did.
+- **`Intersection` accepts lists** (any finite collection), deduplicating into a
+  `Set`; `Union` already did.
 - **A 2-element MathJSON `List` in a set operation is a collection, not an
   interval.** `["Intersection", ["List",1,2], ["List",2,3]]` (Cortex:
   `Intersection([1,2], [2,3])`) now intersects the two-element collections —
   `Set(2)` — instead of reading the lists as closed intervals. The interval
   reading of ambiguous bracket pairs is now applied where it belongs, at the
-  LaTeX boundary: `x \in \lbrack 1, 5 \rbrack`,
-  `(-\infty, 0) \cup (0, \infty)`, and the subset relations parse to
-  `Interval` exactly as before, and `\setminus` now gets the same interval
-  reading (previously `\R \setminus (0, 1)` kept a raw pair). Unambiguous
-  interval notations (`[a, b)`, `]a, b[`, …) are unchanged.
+  LaTeX boundary: `x \in \lbrack 1, 5 \rbrack`, `(-\infty, 0) \cup (0, \infty)`,
+  and the subset relations parse to `Interval` exactly as before, and
+  `\setminus` now gets the same interval reading (previously
+  `\R \setminus (0, 1)` kept a raw pair). Unambiguous interval notations
+  (`[a, b)`, `]a, b[`, …) are unchanged.
 - **Collection equality no longer depends on representation.** A computed
-  collection — an `Intersection` or `Union` result, a lazy `Map`, `Filter`,
-  or `Join` pipeline, or a symbol assigned a collection — now compares equal
-  to a literal with the same elements:
-  `Intersection({1,2,3,4}, {2,3,5}) = {2,3}` is `True` (it was `False`
-  unless the operand was evaluated first). Sequences compare element-wise in
-  order, sets by membership, and a set is never equal to a sequence. In
-  addition, `Equal` between two collections now always returns a scalar
-  boolean instead of sometimes broadcasting element-wise
-  (`{1,2} = [1,2]` returned `["True","True"]`); broadcasting still applies
-  to list-vs-scalar comparisons such as `L = 4`.
-- **`Intersection` of two `Filter` collections no longer overflows the
-  stack.** Membership tests on a lazy `Filter` recursed without bound;
+  collection — an `Intersection` or `Union` result, a lazy `Map`, `Filter`, or
+  `Join` pipeline, or a symbol assigned a collection — now compares equal to a
+  literal with the same elements: `Intersection({1,2,3,4}, {2,3,5}) = {2,3}` is
+  `True` (it was `False` unless the operand was evaluated first). Sequences
+  compare element-wise in order, sets by membership, and a set is never equal to
+  a sequence. In addition, `Equal` between two collections now always returns a
+  scalar boolean instead of sometimes broadcasting element-wise (`{1,2} = [1,2]`
+  returned `["True","True"]`); broadcasting still applies to list-vs-scalar
+  comparisons such as `L = 4`.
+- **`Intersection` of two `Filter` collections no longer overflows the stack.**
+  Membership tests on a lazy `Filter` recursed without bound;
   `Intersection(Filter(…), Filter(…))` now evaluates normally.
 - **Indexing a matrix once returns a correctly typed row.** Expressions such as
   `At(At(m, 2), 1)` now validate and evaluate correctly for matrices and other
   rank-2-or-higher collections.
 - **List elements and dictionary values are evaluated by `evaluate()` and
-  `.N()`.** For example, `["List", "y", ["Add", "y", 1]]` with `y = 7`
-  evaluates to `[7, 8]`, and `[1/3].N()` is numericized. Lazy collections such
-  as `Range`, `Map`, and `Filter` remain lazily enumerated.
+  `.N()`.** For example, `["List", "y", ["Add", "y", 1]]` with `y = 7` evaluates
+  to `[7, 8]`, and `[1/3].N()` is numericized. Lazy collections such as `Range`,
+  `Map`, and `Filter` remain lazily enumerated.
 - **Ellipsis lists with symbolic bounds parse to `Range`.**
   `\left[-N,\ldots,N\right]` and `\left[-3N,\ldots,3N\right]` now parse to
   `Range(-N, N)` and `Range(-3N, 3N)`, matching the numeric-start forms
   (`[1,\ldots,N]`). Previously a symbolic start fell through to a raw `List`
-  containing a literal `ContinuationPlaceholder`, which enumerated as `NaN`.
-  In addition, a `Range` whose bounds bind looser than the `..` operator now
-  serializes with parentheses (`(-N)..N`) so it round-trips through LaTeX
-  (an unwrapped `-N..N` reads back as `-(N..N)`).
+  containing a literal `ContinuationPlaceholder`, which enumerated as `NaN`. In
+  addition, a `Range` whose bounds bind looser than the `..` operator now
+  serializes with parentheses (`(-N)..N`) so it round-trips through LaTeX (an
+  unwrapped `-N..N` reads back as `-(N..N)`).
 - **Using a symbol bound to a symbolic list no longer corrupts builtin
   definitions.** After `ce.assign('L_1', ce.parse('\\left[N,2N\\right]'))`,
   constructing `2 L_1` — via `subs()`, `ce.box()`, or `ce.function()` —
   permanently broke the builtin `N` operator for the lifetime of the engine:
-  every subsequent parse of the token `N` returned an `unexpected-symbol`
-  error. Type inference on the list elements no longer overwrites an
-  operator definition with an unsatisfiable (`never`) type.
+  every subsequent parse of the token `N` returned an `unexpected-symbol` error.
+  Type inference on the list elements no longer overwrites an operator
+  definition with an unsatisfiable (`never`) type.
 
 ### Cortex
 
@@ -167,14 +185,13 @@
   precedence) and `n!` is `Factorial(n)` (the `!` must directly follow its
   operand; prefix `!x` is still `Not` and `x != y` is still `NotEqual`).
 - **Chained indexing**: `m[2][1]` now works alongside `m[2, 1]`.
-- **String escape sequences are processed correctly.** `"a\tb\nc"` now
-  contains a real tab and newline (escapes were previously double-processed
-  in plain and multiline strings; interpolated strings were already
-  correct).
-- **The examples suite roughly doubled** (`src/cortex/docs/examples.md`),
-  adding units and uncertainty, calculus, linear systems, dictionaries,
-  sets, closures, seeded randomness, errors-as-values, and string
-  formatting — every example verified by an executable test.
+- **String escape sequences are processed correctly.** `"a\tb\nc"` now contains
+  a real tab and newline (escapes were previously double-processed in plain and
+  multiline strings; interpolated strings were already correct).
+- **The examples suite roughly doubled** (`src/cortex/docs/examples.md`), adding
+  units and uncertainty, calculus, linear systems, dictionaries, sets, closures,
+  seeded randomness, errors-as-values, and string formatting — every example
+  verified by an executable test.
 
 ## 0.74.0 _2026-07-10_
 
@@ -199,8 +216,8 @@ round out the release.
 - **Limits and residues at special-function poles evaluate exactly.**
   Expressions at poles of `Gamma`, `Digamma`, `Trigamma`, `PolyGamma`, and
   `Zeta` that previously stayed symbolic now resolve in closed form:
-  `\lim_{x\to-1}(x+1)\psi(x) = -1`,
-  `\lim_{x\to0}(\Gamma(x)-1/x) = -\gamma`, `\lim_{s\to1}(s-1)\zeta(s) = 1`,
+  `\lim_{x\to-1}(x+1)\psi(x) = -1`, `\lim_{x\to0}(\Gamma(x)-1/x) = -\gamma`,
+  `\lim_{s\to1}(s-1)\zeta(s) = 1`,
   `\operatorname{Res}_{s=1}\Gamma(s)\zeta(s) = 1`,
   `\operatorname{Res}_{x=0}\Gamma(x)^2 = -2\gamma`, and higher-order poles that
   previously deferred
@@ -243,8 +260,8 @@ round out the release.
 - **Numeric limits with odd-power error terms now converge correctly.** This
   fixes cases such as `H_n - \ln n - \gamma \sim 1/2n`, which previously
   returned `NaN`. Decaying oscillations such as `\operatorname{sinc}` at
-  `-\infty` now resolve to `0`, while divergent oscillations such as `\sin x`
-  at `\infty` still return `NaN`.
+  `-\infty` now resolve to `0`, while divergent oscillations such as `\sin x` at
+  `\infty` still return `NaN`.
 
 ### Step-by-Step Explanations
 

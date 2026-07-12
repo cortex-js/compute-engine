@@ -428,7 +428,8 @@ export function validateArguments(
   ops: ReadonlyArray<Expression>,
   signature: Type,
   lazy?: boolean,
-  threadable?: boolean
+  threadable?: boolean,
+  inferredBefore?: ReadonlySet<string>
 ): ReadonlyArray<Expression> | null {
   // @fastpath
   if (!ce.strict) {
@@ -514,6 +515,16 @@ export function validateArguments(
     }
 
     if (!op.type.matches(param)) {
+      const repaired = repairFreshMatrixInference(
+        ce,
+        op,
+        param,
+        inferredBefore
+      );
+      if (repaired) {
+        result.push(repaired);
+        continue;
+      }
       // A bare uppercase symbol bound to a standard-library operator (`N`,
       // `D`) used where a value is required almost always means a variable
       // (`N \equiv 1 \pmod k`): devolve it to an unknown symbol, mirroring
@@ -692,6 +703,103 @@ export function validateArguments(
       i += 1;
     }
   }
+  return null;
+}
+
+/**
+ * Repair bottom-up numeric inference when a matrix-consuming operator gives
+ * the enclosing context that was unavailable to Add/Multiply. Only symbols
+ * first inferred while canonicalizing this argument are eligible. The repair
+ * is deliberately structural and fail-closed: an ambiguous product such as
+ * `a A` (both names fresh) is not guessed.
+ */
+function repairFreshMatrixInference(
+  ce: ComputeEngine,
+  op: Expression,
+  expected: Type,
+  inferredBefore?: ReadonlySet<string>
+): Expression | null {
+  if (!inferredBefore || !ce.type(expected).matches(parseType('matrix')))
+    return null;
+
+  const eligible = new Set<string>();
+  for (const name of op.freeVariables) {
+    if (inferredBefore.has(name)) continue;
+    const def = ce.lookupDefinition(name);
+    if (def && isValueDef(def) && def.value.inferredType) eligible.add(name);
+  }
+  if (eligible.size === 0) return null;
+
+  const names = matrixInferencePlan(op, eligible);
+  if (!names || names.size === 0) return null;
+
+  const previous = new Map<string, Type>();
+  for (const name of names) {
+    const def = ce.lookupDefinition(name);
+    if (!def || !isValueDef(def) || !def.value.inferredType) return null;
+    previous.set(name, def.value.type.type);
+    def.value.type = ce.type('matrix');
+    // Freeze the contextual assignment during re-canonicalization so the
+    // numeric fast path cannot immediately narrow it back to `real`.
+    def.value.inferredType = false;
+  }
+  ce._generation += 1;
+
+  const repaired = ce.box(op.json);
+  if (repaired.type.matches(expected)) {
+    for (const name of names) {
+      const def = ce.lookupDefinition(name);
+      if (def && isValueDef(def)) def.value.inferredType = true;
+    }
+    return repaired;
+  }
+
+  for (const [name, type] of previous) {
+    const def = ce.lookupDefinition(name);
+    if (def && isValueDef(def)) {
+      def.value.type = ce.type(type);
+      def.value.inferredType = true;
+    }
+  }
+  ce._generation += 1;
+  return null;
+}
+
+function matrixInferencePlan(
+  expr: Expression,
+  eligible: ReadonlySet<string>
+): Set<string> | null {
+  if (isSymbol(expr))
+    return eligible.has(expr.symbol) ? new Set([expr.symbol]) : null;
+
+  if (!isFunction(expr)) return null;
+
+  if (expr.operator === 'Negate')
+    return matrixInferencePlan(expr.op1, eligible);
+
+  if (expr.operator === 'Add' || expr.operator === 'Subtract') {
+    const result = new Set<string>();
+    for (const term of expr.ops) {
+      const plan = matrixInferencePlan(term, eligible);
+      if (!plan) return null;
+      for (const name of plan) result.add(name);
+    }
+    return result;
+  }
+
+  if (expr.operator === 'Multiply') {
+    const candidates = expr.ops
+      .map((factor) => matrixInferencePlan(factor, eligible))
+      .filter((x): x is Set<string> => x !== null);
+    // Numeric literals and already-declared scalar factors may scale the one
+    // matrix factor. More than one candidate is underdetermined (`a A`).
+    if (candidates.length !== 1) return null;
+    return candidates[0];
+  }
+
+  if (expr.operator === 'Power' && expr.op2?.isInteger === true)
+    return matrixInferencePlan(expr.op1, eligible);
+
   return null;
 }
 

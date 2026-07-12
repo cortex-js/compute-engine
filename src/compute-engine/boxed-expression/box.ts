@@ -417,7 +417,42 @@ export function boxFunction(
  *
  */
 
+const inferenceTransactions = new WeakMap<
+  ComputeEngine,
+  { depth: number; inferredBefore: ReadonlySet<string> }
+>();
+
+export function beginInferenceTransaction(ce: ComputeEngine): () => void {
+  let transaction = inferenceTransactions.get(ce);
+  if (!transaction) {
+    transaction = { depth: 0, inferredBefore: inferredSymbolNames(ce) };
+    inferenceTransactions.set(ce, transaction);
+  }
+  transaction.depth += 1;
+  return () => {
+    transaction!.depth -= 1;
+    if (transaction!.depth === 0) inferenceTransactions.delete(ce);
+  };
+}
+
 export function box(
+  ce: ComputeEngine,
+  expr: null | undefined | NumericValue | ExpressionInput,
+  options?: {
+    canonical?: CanonicalOptions;
+    structural?: boolean;
+    scope?: Scope;
+  }
+): Expression {
+  const endTransaction = beginInferenceTransaction(ce);
+  try {
+    return boxInternal(ce, expr, options);
+  } finally {
+    endTransaction();
+  }
+}
+
+function boxInternal(
   ce: ComputeEngine,
   expr: null | undefined | NumericValue | ExpressionInput,
   options?: {
@@ -743,6 +778,10 @@ function makeCanonicalFunction(
     return result;
   }
 
+  // Keep a boundary around inference performed while canonicalizing these
+  // operands. Signature validation may use this to retract only fresh,
+  // provisional guesses; inferences from earlier expressions are never
+  // eligible for repair.
   const xs = ops.map((x) => ce.expr(x));
 
   //
@@ -833,7 +872,8 @@ function makeCanonicalFunction(
         args,
         opDef.signature.type,
         opDef.lazy,
-        opDef.broadcastable
+        opDef.broadcastable,
+        inferenceTransactions.get(ce)?.inferredBefore
       );
 
   // If we have some adjusted arguments, the arguments did not
@@ -871,6 +911,22 @@ function makeCanonicalFunction(
     canonical: true,
     scope,
   });
+}
+
+function inferredSymbolNames(ce: ComputeEngine): ReadonlySet<string> {
+  const result = new Set<string>();
+  let scope: Scope | null = ce.context.lexicalScope;
+  while (scope) {
+    for (const [name, binding] of scope.bindings)
+      if (
+        isValueDef(binding) &&
+        binding.value.inferredType &&
+        !binding.value.type.isUnknown
+      )
+        result.add(name);
+    scope = scope.parent;
+  }
+  return result;
 }
 
 function makeNumericFunction(

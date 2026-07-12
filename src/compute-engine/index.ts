@@ -83,7 +83,12 @@ import { ExactNumericValue } from './numeric-value/exact-numeric-value.js';
 import { BigNumericValue } from './numeric-value/big-numeric-value.js';
 import { MachineNumericValue } from './numeric-value/machine-numeric-value.js';
 
-import { box, boxFunction, optionsToInternal } from './boxed-expression/box.js';
+import {
+  beginInferenceTransaction,
+  box,
+  boxFunction,
+  optionsToInternal,
+} from './boxed-expression/box.js';
 import type { FormOption } from './types-serialization.js';
 import { boxRules } from './boxed-expression/rules.js';
 import { aggregateHotHeadDispatch } from './boxed-expression/rule-index.js';
@@ -1857,30 +1862,35 @@ export class ComputeEngine implements IComputeEngine {
     // `parseOpts` (which is forwarded to the LaTeX parser).
     const { form, canonical, structural, ...parseOpts } = options ?? {};
 
-    const result = syntax.parse(latex, {
-      getSymbolType: (id) => {
-        const def = this.lookupDefinition(id);
-        if (!def) return BoxedType.unknown;
-        if (isOperatorDef(def)) return def.operator.signature;
-        if (isValueDef(def)) return def.value.type;
-        return BoxedType.unknown;
-      },
-      hasSubscriptEvaluate: (id) => {
-        const def = this.lookupDefinition(id);
-        return !!(isValueDef(def) && def.value.subscriptEvaluate);
-      },
-      tolerance: this.tolerance,
-      ...this._latexOptions,
-      ...parseOpts,
-    });
+    const endInferenceTransaction = beginInferenceTransaction(this);
+    try {
+      const result = syntax.parse(latex, {
+        getSymbolType: (id) => {
+          const def = this.lookupDefinition(id);
+          if (!def) return BoxedType.unknown;
+          if (isOperatorDef(def)) return def.operator.signature;
+          if (isValueDef(def)) return def.value.type;
+          return BoxedType.unknown;
+        },
+        hasSubscriptEvaluate: (id) => {
+          const def = this.lookupDefinition(id);
+          return !!(isValueDef(def) && def.value.subscriptEvaluate);
+        },
+        tolerance: this.tolerance,
+        ...this._latexOptions,
+        ...parseOpts,
+      });
 
-    if (result === null) return null;
+      if (result === null) return null;
 
-    return box(
-      this,
-      result,
-      optionsToInternal({ form, canonical, structural })
-    );
+      return box(
+        this,
+        result,
+        optionsToInternal({ form, canonical, structural })
+      );
+    } finally {
+      endInferenceTransaction();
+    }
   }
 
   /**

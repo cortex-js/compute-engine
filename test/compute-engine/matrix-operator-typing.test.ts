@@ -95,22 +95,28 @@ describe('Matrix-operator typing (declared symbols)', () => {
   });
 });
 
-describe('Matrix-operator typing (undeclared symbols — documented behavior lock)', () => {
-  // OUT OF SCOPE / KNOWN LIMITATION: with FRESH (undeclared) symbols, the
-  // determinant's argument type check runs before the arithmetic sub-terms are
-  // inferred as matrices (inference-ordering), so the expression is rejected.
-  // Locked here as a documented behavior. The residual fix — a validation-time
-  // repair pass that re-infers symbols typed during the same expression's
-  // canonicalization — is tracked under ROADMAP "Matrix-operator typing (M)".
-  // Interim contract: declare matrix/vector symbols for symbolic matrix algebra.
-  test('det(A+2B) with fresh A/B is (still) an incompatible-type error', () => {
+describe('Matrix-operator typing (undeclared symbols)', () => {
+  test('det(A+2B) repairs fresh bottom-up numeric inference', () => {
     const ce = new ComputeEngine();
     const e = ce.parse('\\det(A+2B)');
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe('number');
+    expect(ce.symbol('A').type.toString()).toBe('matrix');
+    expect(ce.symbol('B').type.toString()).toBe('matrix');
+  });
+
+  test('does not rewrite an inference made by an earlier expression', () => {
+    const ce = new ComputeEngine();
+    ce.parse('A+1');
+    const e = ce.parse('\\det(A)');
     expect(e.isValid).toBe(false);
-    expect(e.json).toMatchObject([
-      'Determinant',
-      ['Error', ['ErrorCode', "'incompatible-type'", "'matrix'", "'number'"]],
-    ]);
+    expect(ce.symbol('A').type.matches('number')).toBe(true);
+  });
+
+  test('fails closed for an ambiguous product of fresh symbols', () => {
+    const ce = new ComputeEngine();
+    const e = ce.parse('\\det(x y)');
+    expect(e.isValid).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-10.
+**Last updated:** 2026-07-11.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -152,16 +152,6 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   Ascii-pipe divisibility evidence doubled (36 more hits, tracked below).
   Skip: `array`-env long-division layouts, `\nabla` puzzle ops, repeating
   decimals `0.abab\overline{ab}`.
-- **Constant-definition listener disposal (S/M, residual of the engine
-  memory fix):** the 2026-07-09 fix for synchronous-burst engine retention
-  (see CHANGELOG) holds configuration-change listeners strongly, so a
-  `constant` definition declared in a scope that is later popped now stays
-  reachable for the engine's lifetime (variables/operators don't subscribe;
-  system constants live engine-long anyway). Proper fix: call the
-  `unsubscribe` closure returned by `listen()` (currently discarded at
-  `boxed-value-definition.ts:181`) when a definition/scope is disposed —
-  needs a disposal hook, hence design-gated.
-
 *Rest of the tail:*
 
 - **Polynomial-ring notation (M):** parse blackboard-bold rings followed by a
@@ -171,22 +161,6 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
   `At(f, S)`; decide whether set contexts need a distinct structural
   function-image head for expressions such as
   `f[\operatorname{divs}(m)] = \operatorname{divs}(n)`.
-- **Matrix-operator typing (M; declared path FIXED 2026-07-09):** what
-  remains is the *undeclared*-symbol case: in `\det(A+2B)` with fresh
-  `A`/`B`, `Add` infers its symbols `real` before `Det` sees them
-  (inference-ordering), so the argument types `number` and validation
-  errors. Interim contract: declare matrix/vector symbols for symbolic
-  matrix algebra (with declared operands, products/sums/`Det`/`Trace` now
-  type correctly — see CHANGELOG "Linear Algebra"). Chosen approach for the
-  residual: a **validation-time repair pass** — on an argument type
-  mismatch traceable to symbols whose types were *inferred during the same
-  expression's canonicalization* (never session-wide, and never overriding
-  a declared type), reset those inferences to the parameter's expected type
-  and re-canonicalize that argument once. Bidirectional expected-type
-  inference and lazy arithmetic inference were considered and rejected as
-  too invasive (canonicalization is structurally bottom-up; eager numeric
-  commitment underpins exact folding).
-
 **`Interpret` — generalization ladder (design:
 `docs/plans/2026-07-09-ellipsis-interpretation-design.md`):** v1 landed
 2026-07-09 — the explicit `Interpret(expr)` head turns continuation-bearing
