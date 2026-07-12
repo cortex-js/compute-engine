@@ -205,7 +205,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   toNumericValue(): [NumericValue, Expression] {
-    console.assert(this.isCanonical);
+    // Structural symbols are bound and behave identically here; only raw
+    // (unbound) expressions are excluded from arithmetic, matching
+    // `BoxedFunction.toNumericValue()` and `Product.mul()`.
+    console.assert(this.isCanonical || this.isStructural);
     const ce = this.engine;
 
     if (this.symbol === 'ImaginaryUnit')
