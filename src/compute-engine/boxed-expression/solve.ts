@@ -1304,7 +1304,8 @@ function sqrtEquationRhsGuard(
     if (isFunction(node)) for (const op of node.ops!) scan(op);
   };
   scan(expr);
-  if (otherRadical || sqrtKeys.size !== 1 || sqrtTerm === undefined) return null;
+  if (otherRadical || sqrtKeys.size !== 1 || sqrtTerm === undefined)
+    return null;
 
   // Substitute a fresh symbol t for √R and require the linear-in-√R shape
   // `A·t + B` (the radical appears to the first power only).

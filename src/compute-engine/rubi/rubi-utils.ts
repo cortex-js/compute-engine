@@ -5827,7 +5827,10 @@ export function hyperbolicHeadYForm(
 /** The single shared LINEAR hyperbolic argument `w` of every hyperbolic head in
  *  the expression, or null if the heads disagree, some argument is non-linear in
  *  `x`, or no hyperbolic head appears (mixed-angle / nonlinear decline). */
-function sharedLinearHyperbolicArg(u: Expression, x: string): Expression | null {
+function sharedLinearHyperbolicArg(
+  u: Expression,
+  x: string
+): Expression | null {
   let w: Expression | null = null;
   let ok = true;
   const walk = (e: Expression): void => {
@@ -6015,12 +6018,7 @@ function analyzeSingleAngleHyperbolicRational(
 /** The hyperbolic heads whose `y = E^w` form has a NONZERO-root denominator
  *  (`y²±1`), so an additive block containing one denominates even at positive
  *  power. Sinh/Cosh have only a monomial `2y` denominator and are excluded. */
-const RECIPROCAL_HYPERBOLIC_HEADS = new Set([
-  'Tanh',
-  'Coth',
-  'Sech',
-  'Csch',
-]);
+const RECIPROCAL_HYPERBOLIC_HEADS = new Set(['Tanh', 'Coth', 'Sech', 'Csch']);
 
 function containsReciprocalHyperbolic(u: Expression): boolean {
   if (RECIPROCAL_HYPERBOLIC_HEADS.has(u.operator)) return true;

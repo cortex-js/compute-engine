@@ -1840,10 +1840,7 @@ function type(expr: BoxedFunction): Type {
       )
       .join(', ');
 
-    return parseType(
-      `(${paramSig}) -> ${bodyType}`,
-      expr.engine._typeResolver
-    );
+    return parseType(`(${paramSig}) -> ${bodyType}`, expr.engine._typeResolver);
   }
 
   // Is there a definition associated with the operator of the function?

@@ -62,9 +62,7 @@ export function functionLiteralParameters(
 /** The ascribed return type of a `Function` literal (the §4.2 marker: a
  * `Typed` wrapping the body Block's last statement), or `undefined` when the
  * return type is left to inference. */
-export function functionLiteralReturnType(
-  expr: Expression
-): Type | undefined {
+export function functionLiteralReturnType(expr: Expression): Type | undefined {
   if (!isFunction(expr, 'Function')) return undefined;
   const body = expr.ops[0];
   if (!body) return undefined;

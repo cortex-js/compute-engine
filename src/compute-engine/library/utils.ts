@@ -427,8 +427,7 @@ function geometricSumClosedForm(
   if (r.has(index)) return undefined;
 
   // value = c·r^{n₀} / (1 − r)
-  const rPow =
-    n0 === 0 ? ce.One : ce.function('Power', [r, ce.number(n0)]);
+  const rPow = n0 === 0 ? ce.One : ce.function('Power', [r, ce.number(n0)]);
   const numerator = coeff.isSame(1)
     ? rPow
     : rPow.isSame(1)

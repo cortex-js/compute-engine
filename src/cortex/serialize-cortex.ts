@@ -542,8 +542,7 @@ export function serializeCortex(
   // the parser's `patternize` pass.
   function serializePattern(p: MathJsonExpression): FormattingBlock {
     const h = operator(p);
-    if (h === 'Pin')
-      return fmt.line('== ', serializeExpression(operand(p, 1)));
+    if (h === 'Pin') return fmt.line('== ', serializeExpression(operand(p, 1)));
     if (h === 'Alternatives') {
       const alts = operands(p);
       const parts: (string | FormattingBlock)[] = [];
@@ -605,7 +604,8 @@ export function serializeCortex(
       return fmt.text(serializeNumber(p, NUMBER_FORMATTING_OPTIONS));
     if (typeof p === 'object' && p !== null && 'str' in p)
       return serializeString((p as { str: string }).str);
-    const sv = typeof p === 'string' && /^'[\s\S]*'$/.test(p) ? stringValue(p) : null;
+    const sv =
+      typeof p === 'string' && /^'[\s\S]*'$/.test(p) ? stringValue(p) : null;
     if (sv !== null) return serializeString(sv);
 
     // A general operator/call pattern (`a + b`, `f(p…)`): revert bindings to
@@ -661,9 +661,7 @@ export function serializeCortex(
     return fmt.text(t !== null ? `${nameStr}: ${t}` : nameStr);
   };
 
-  const serializeParamList = (
-    params: MathJsonExpression[]
-  ): FormattingBlock =>
+  const serializeParamList = (params: MathJsonExpression[]): FormattingBlock =>
     fmt.fencedList('(', fmt.separator(','), ')', params.map(serializeParam));
 
   // Reconstruct a named function definition from `f` and its `Function`

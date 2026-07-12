@@ -1390,7 +1390,9 @@ export class BaseCompiler {
    * Unifies tier-0 (`dispatchKeys`) and tier-1 (`tests`). */
   private static matchCaseComparisons(
     cc: CompiledCase
-  ): Array<{ kind: 'literal'; value: Expression } | { kind: 'pin'; expr: Expression }> {
+  ): Array<
+    { kind: 'literal'; value: Expression } | { kind: 'pin'; expr: Expression }
+  > {
     if (cc.tier === 0)
       return (cc.dispatchKeys ?? []).map((d) => ({
         kind: 'literal' as const,
@@ -1405,7 +1407,9 @@ export class BaseCompiler {
    * with no string type. */
   private static compileMatchConstant(
     engine: ComputeEngine,
-    cmp: { kind: 'literal'; value: Expression } | { kind: 'pin'; expr: Expression },
+    cmp:
+      | { kind: 'literal'; value: Expression }
+      | { kind: 'pin'; expr: Expression },
     allowStrings: boolean,
     target: CompileTarget<Expression>
   ): string {
@@ -1537,7 +1541,9 @@ export class BaseCompiler {
             cc.captureNames.length === 1
               ? new Map([[cc.captureNames[0], s]])
               : undefined;
-          stmts.push(`return ${BaseCompiler.compileMatchBody(cc, acc, target)};`);
+          stmts.push(
+            `return ${BaseCompiler.compileMatchBody(cc, acc, target)};`
+          );
           done = true;
           break;
         }
@@ -1575,7 +1581,14 @@ export class BaseCompiler {
     if (cc.tier === 2) {
       const conds: string[] = [];
       const accessors = new Map<string, string>();
-      BaseCompiler.walkMatchShape(engine, cc.shape!, s, conds, accessors, target);
+      BaseCompiler.walkMatchShape(
+        engine,
+        cc.shape!,
+        s,
+        conds,
+        accessors,
+        target
+      );
       const guard = BaseCompiler.compileMatchGuard(cc, accessors, target);
       if (guard !== undefined) conds.push(`(${guard})`);
       const body = BaseCompiler.compileMatchBody(cc, accessors, target);
@@ -1620,7 +1633,14 @@ export class BaseCompiler {
     else conds.push(`${base}.length >= ${fixed}`);
 
     node.prefix.forEach((el, i) =>
-      BaseCompiler.walkMatchElement(engine, el, `${base}[${i}]`, conds, accessors, target)
+      BaseCompiler.walkMatchElement(
+        engine,
+        el,
+        `${base}[${i}]`,
+        conds,
+        accessors,
+        target
+      )
     );
     const sLen = node.suffix.length;
     node.suffix.forEach((el, j) =>
@@ -1668,7 +1688,14 @@ export class BaseCompiler {
         );
         return;
       case 'shape':
-        BaseCompiler.walkMatchShape(engine, el.node, access, conds, accessors, target);
+        BaseCompiler.walkMatchShape(
+          engine,
+          el.node,
+          access,
+          conds,
+          accessors,
+          target
+        );
         return;
     }
   }
@@ -1676,7 +1703,9 @@ export class BaseCompiler {
   /** True when a tier-0 dispatch segment qualifies for `switch` emission: every
    * case dispatches only on safe machine integers (`n:` keys) and there are at
    * least `MATCH_SWITCH_THRESHOLD` of them. */
-  private static matchSwitchable(seg: Extract<Segment, { kind: 'dispatch' }>): boolean {
+  private static matchSwitchable(
+    seg: Extract<Segment, { kind: 'dispatch' }>
+  ): boolean {
     let count = 0;
     for (const cc of seg.cases) {
       for (const d of cc.dispatchKeys ?? []) {

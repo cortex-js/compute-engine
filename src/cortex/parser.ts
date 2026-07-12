@@ -1028,7 +1028,11 @@ export class Parser {
     const end = this.localEnd(operand) ?? this.previousEnd();
     // A literal pin matches structurally; drop the `Pin` head.
     if (isLiteralNode(operand)) return operand;
-    return this.wrap(['Pin', operand] as MathJsonExpression[], eqTok.start, end);
+    return this.wrap(
+      ['Pin', operand] as MathJsonExpression[],
+      eqTok.start,
+      end
+    );
   }
 
   /** Operator-precedence pattern parsing: a primary pattern followed by infix
@@ -1108,9 +1112,7 @@ export class Parser {
         this.advance();
         this.harvest(token);
         const name =
-          token.type === 'VERBATIM_SYMBOL'
-            ? (token.value ?? '')
-            : token.text;
+          token.type === 'VERBATIM_SYMBOL' ? (token.value ?? '') : token.text;
         // A call clause `(…)` abutting the name: the name is an operator head
         // kept verbatim (design rule 9), with patternized operands.
         if (this.check('OPEN_PAREN') && !this.current.precededByWhitespace)
@@ -1177,10 +1179,7 @@ export class Parser {
   }
 
   /** A call pattern `head( p, … )` → `[head, …patternized]`. */
-  private parsePatternCall(
-    head: string,
-    start: number
-  ): MathJsonExpression {
+  private parsePatternCall(head: string, start: number): MathJsonExpression {
     const { values, end } = this.parsePatternElements('CLOSE_PAREN', ')');
     return this.wrap([head, ...values] as MathJsonExpression[], start, end);
   }
@@ -1210,7 +1209,11 @@ export class Parser {
       ']'
     );
     this.checkSingleRest(values, open.start, end);
-    return this.wrap(['List', ...values] as MathJsonExpression[], open.start, end);
+    return this.wrap(
+      ['List', ...values] as MathJsonExpression[],
+      open.start,
+      end
+    );
   }
 
   /** `(p, …)` → `["Tuple", …]` for 2+ elements; a single element is grouping
@@ -1254,7 +1257,11 @@ export class Parser {
     const { values, open, end } = this.parsePatternElements('CLOSE_BRACE', '}');
     if (values.length > 0 && operator(values[0]) === 'KeyValuePair')
       return this.buildDictionary(values, open.start, end);
-    return this.wrap(['Set', ...values] as MathJsonExpression[], open.start, end);
+    return this.wrap(
+      ['Set', ...values] as MathJsonExpression[],
+      open.start,
+      end
+    );
   }
 
   /** Parse a comma-separated list of pattern elements delimited by the current

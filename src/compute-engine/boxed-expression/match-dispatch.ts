@@ -259,10 +259,7 @@ export function evaluateMatchReference(
       for (const alt of patternRaw.ops) {
         const resolved = resolvePins(ce, alt);
         if (collectCaptures(resolved).length > 0)
-          return ce._fn('Error', [
-            ce.string('match-alternative-binding'),
-            alt,
-          ]);
+          return ce._fn('Error', [ce.string('match-alternative-binding'), alt]);
         cases.push({ pattern: resolved, guard, body });
       }
     } else {
@@ -453,7 +450,10 @@ function matchElement(
 /** Wrap a captured `___rest` sequence the way the generic matcher does for a
  * non-associative operand (`List`/`Tuple`): empty → `Nothing`, one → the
  * element itself, many → `Sequence(…)`. */
-function wrapRest(ce: ComputeEngine, ops: ReadonlyArray<Expression>): Expression {
+function wrapRest(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression {
   if (ops.length === 0) return ce.Nothing;
   if (ops.length === 1) return ops[0];
   return ce.function('Sequence', ops, { form: 'raw' });
@@ -468,9 +468,12 @@ function wrapRest(ce: ComputeEngine, ops: ReadonlyArray<Expression>): Expression
  */
 function leafEquals(subject: Expression, value: Expression): boolean {
   // The matcher treats an undecidable `isEqual` (undefined) as no-match.
-  if (isNumber(value)) return isNumber(subject) && value.isEqual(subject) === true;
-  if (isString(value)) return isString(subject) && subject.string === value.string;
-  if (isSymbol(value)) return isSymbol(subject) && subject.symbol === value.symbol;
+  if (isNumber(value))
+    return isNumber(subject) && value.isEqual(subject) === true;
+  if (isString(value))
+    return isString(subject) && subject.string === value.string;
+  if (isSymbol(value))
+    return isSymbol(subject) && subject.symbol === value.symbol;
   return subject.match(value) !== null;
 }
 
@@ -666,7 +669,10 @@ function classifyLeaf(
   if (isNumber(p)) {
     const key = integerKey(p);
     if (key !== undefined)
-      return { dispatch: { key, value: p }, test: { kind: 'literal', value: p } };
+      return {
+        dispatch: { key, value: p },
+        test: { kind: 'literal', value: p },
+      };
     // Float / rational / radical: tier-1 only (exactness contract).
     return { test: { kind: 'literal', value: p } };
   }
@@ -809,7 +815,8 @@ function dictEntry(
 ): { key: string; value: Expression } | undefined {
   if (!isFunction(kv)) return undefined;
   const op = kv.operator;
-  if (op !== 'KeyValuePair' && op !== 'Pair' && op !== 'Tuple') return undefined;
+  if (op !== 'KeyValuePair' && op !== 'Pair' && op !== 'Tuple')
+    return undefined;
   if (kv.nops < 2) return undefined;
   const key = kv.ops[0];
   const value = kv.ops[1];
@@ -874,7 +881,8 @@ function matchPattern(
   subject: Expression,
   pattern: Expression
 ): Substitution | null {
-  if (!patternHasDict(pattern)) return subject.match(pattern) as Substitution | null;
+  if (!patternHasDict(pattern))
+    return subject.match(pattern) as Substitution | null;
   const sub: Substitution = {};
   return matchInto(ce, subject, pattern, sub) ? sub : null;
 }

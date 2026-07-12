@@ -290,7 +290,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'Structural pattern match. `Match(subject, MatchCase(pattern, body), …)` ' +
         'evaluates `subject` once, then selects the first case whose pattern ' +
         'matches (structurally, `isSame`-like) and whose guard holds, applying ' +
-        "its body to the captured values. Unlike `Which`, `Match` always " +
+        'its body to the captured values. Unlike `Which`, `Match` always ' +
         'decides: a symbolic subject that is not structurally a case still ' +
         'falls through to a wildcard case. No matching case yields ' +
         '`Error("match-no-case", subject)`.',

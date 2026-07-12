@@ -193,8 +193,7 @@ export function evaluateSolve(
       // misleading, since the request is simply unsupported. Stay inert
       // instead so the caller sees the unevaluated `Solve(...)`. (Linear
       // inequality *systems* are handled by the multi-variable path.)
-      if (INEQUALITY_OPERATORS.includes(ceq.operator ?? ''))
-        return undefined;
+      if (INEQUALITY_OPERATORS.includes(ceq.operator ?? '')) return undefined;
       const roots = ceq.solve(names[0]) as ReadonlyArray<Expression> | null;
       if (roots === null) return ce.function('List', []);
       return ce.function('List', [...roots]);

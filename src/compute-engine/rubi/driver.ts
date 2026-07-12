@@ -1299,11 +1299,7 @@ export class RubiDriver {
         this.suppressRecording--;
       }
       if (F !== null) {
-        this.record(
-          entryNode,
-          () => F,
-          'integrate.hyperbolic-to-single-exp'
-        );
+        this.record(entryNode, () => F, 'integrate.hyperbolic-to-single-exp');
         return F;
       }
     }
