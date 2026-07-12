@@ -89,14 +89,8 @@ them (Student-t, χ², F, Geometric…), `RandomVariate` sampling (reuse the
 execution-parity suite for the new scipy mappings is guarded/skipped until
 scipy is installed in `./venv`.
 
-**Series residue (small follow-ups from the landed feature):**
-
-- AsciiMath `toString()` still prints series in canonical (descending) order;
-  the LaTeX serializer has the textbook ascending/BigO-last rule
-  (`definitions-arithmetic.ts`), AsciiMath would need a parallel sort in
-  `ascii-math.ts`.
-- Bare `O(…)` parsing deferred (design doc §8 Q3); revisit for lenient mode
-  once the parser work settles.
+**Series residue:** bare `O(…)` parsing remains deferred (design doc §8 Q3);
+revisit for lenient mode once the parser work settles.
 
 **MathNet parser tail (S/M; corpus at 371/428 after the 2026-07-09 rounds —
 trailing-`?`/`\ldots` recovery, Unicode `±`/`∓`/`ℓ`, un-applied-operator
@@ -345,11 +339,8 @@ separate tracking is needed. Grouped by theme:
   `.N()` is `NaN` even though each term evaluates finitely.
 - **Sum/Product closed forms (telescoping sums/products, `Π k → n!`,
   p-series `→ ζ(s)`, Wallis `→ 2/π`, and Richardson tail acceleration for
-  `.N()` of infinite sums ALL LANDED 2026-07-10).** Remaining small tails:
-  `Product.N()` on an infinite domain is still a plain truncation (the Sum
-  acceleration pattern applies directly); the p-series closed form requires
-  lower bound 1 (a general lower bound needs a `ζ(s) − Σ_{k<a}` adjustment);
-  the closed-form table is minimal (p-series + Wallis) and could grow.
+  `.N()` of infinite sums/products ALL LANDED by 2026-07-11).** Remaining small
+  tail: the closed-form table is minimal (p-series + Wallis) and could grow.
 - **Trigonometric simplification (Pythagorean factoring LANDED 2026-07-09;
   trig-matrix rank-1 detection LANDED 2026-07-10** via the symbolic
   determinant rank path with a `TrigReduce` fallback — see the

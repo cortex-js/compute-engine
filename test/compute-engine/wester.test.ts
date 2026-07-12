@@ -401,6 +401,28 @@ describe('Sums and products', () => {
         .evaluate().json
     ).toEqual(['Divide', 2, 'Pi']);
   });
+
+  test(`N(Product(1 - 1/(2k)^2, k=1..oo)) is accelerated`, () => {
+    const result = ce
+      .expr([
+        'Product',
+        ['Subtract', 1, ['Divide', 1, ['Power', ['Multiply', 2, 'k'], 2]]],
+        ['Tuple', 'k', 1, 'PositiveInfinity'],
+      ])
+      .N();
+    expect(result.re).toBeCloseTo(2 / Math.PI, 10);
+  });
+
+  test(`N(Product(1 + 1/k^2, k=1..oo)) = sinh(pi)/pi`, () => {
+    const product = ce.expr([
+      'Product',
+      ['Add', 1, ['Power', 'k', -2]],
+      ['Tuple', 'k', 1, 'PositiveInfinity'],
+    ]);
+    // No exact table entry: exact evaluation remains symbolic.
+    expect(product.evaluate().operator).toBe('Product');
+    expect(product.N().re).toBeCloseTo(Math.sinh(Math.PI) / Math.PI, 9);
+  });
 });
 
 describe('Complex domain', () => {

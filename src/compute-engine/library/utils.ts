@@ -522,6 +522,80 @@ export function acceleratedInfiniteSum(
   return ce.number(val);
 }
 
+/**
+ * Accelerated `.N()` of a convergent infinite product
+ * `Π_{k=a}^∞ f(k)`. For positive real factors, accumulate
+ * `L(N) = Σ log(f(k))` and Richardson-extrapolate `L(N)` using the same
+ * doubling schedule as infinite sums, then return `exp(L(∞))`.
+ *
+ * Restricting factors to finite positive reals avoids branch/sign ambiguity
+ * and makes zero-crossing or oscillatory products fail closed to the existing
+ * truncation path.
+ */
+export function acceleratedInfiniteProduct(
+  body: Expression | undefined,
+  limits: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!body || !isFunction(limits, 'Limits')) return undefined;
+  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+  const lower = limits.op2;
+  const upper = limits.op3;
+  if (!index || !lower || !upper) return undefined;
+  if (!(upper.isInfinity === true && upper.isPositive === true))
+    return undefined;
+  const a = lower.re;
+  if (!Number.isSafeInteger(a)) return undefined;
+
+  let invalid = false;
+  const logTerm = (k: number): number => {
+    ce.assign(index, k);
+    const value = body.N();
+    if (!isNumber(value) || value.im !== 0 || !(value.re > 0)) {
+      invalid = true;
+      return NaN;
+    }
+    return Math.log(value.re);
+  };
+
+  const MAX_TERMS = 1 << 15;
+  const maxN = a + MAX_TERMS - 1;
+  let cachedN = a - 1;
+  let cachedLogSum = 0;
+  let overflow = false;
+  const partialLogSum = (x: number): number => {
+    let n = Math.round(x);
+    if (n < a) return 0;
+    if (n > maxN) {
+      n = maxN;
+      overflow = true;
+    }
+    if (n < cachedN) {
+      cachedN = a - 1;
+      cachedLogSum = 0;
+    }
+    for (let k = cachedN + 1; k <= n; k++) cachedLogSum += logTerm(k);
+    cachedN = n;
+    return cachedLogSum;
+  };
+
+  const [logValue, error] = extrapolate(partialLogSum, Infinity, {
+    contract: 0.5,
+    step: 1,
+    power: 1,
+    atol: 1e-14,
+    rtol: 1e-12,
+    maxeval: 64,
+    deadline: ce._deadline,
+  });
+
+  if (invalid || overflow || !Number.isFinite(logValue)) return undefined;
+  if (!(error <= Math.max(1e-10, 1e-9 * Math.abs(logValue))))
+    return undefined;
+  const value = Math.exp(logValue);
+  return Number.isFinite(value) ? ce.number(value) : undefined;
+}
+
 export type IndexingSet = {
   index: string | undefined;
   lower: number;

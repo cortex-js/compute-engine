@@ -93,6 +93,7 @@ import {
   infiniteSumClosedForm,
   infiniteProductClosedForm,
   acceleratedInfiniteSum,
+  acceleratedInfiniteProduct,
 } from './utils.js';
 import { inferContinuationPattern } from '../symbolic/interpret.js';
 import {
@@ -2707,6 +2708,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return infiniteProductClosedForm(ops[0], bounds[0], ce);
           return undefined;
         }
+        if (mode === 'numeric' && numeric && bounds.length === 1) {
+          const accel = acceleratedInfiniteProduct(ops[0], bounds[0], ce);
+          if (accel !== undefined) return accel;
+        }
         const result = run(
           reduceBigOp(
             ops[0],
@@ -2742,6 +2747,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             if (bounds.length === 1)
               return infiniteProductClosedForm(ops[0], bounds[0], ce);
             return undefined;
+          }
+          if (mode === 'numeric' && numeric && bounds.length === 1) {
+            const accel = acceleratedInfiniteProduct(ops[0], bounds[0], ce);
+            if (accel !== undefined) return accel;
           }
         }
         const result = await runAsync(

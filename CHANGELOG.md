@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Numeric Evaluation
+
+- **Numeric infinite products use tail acceleration.** `.N()` now
+  Richardson-extrapolates the logarithms of positive real factors instead of
+  returning a plain finite truncation. This gives accurate values for products
+  such as `Product(1 + 1/k², k, 1, +∞) = sinh(π)/π`. Products with non-real,
+  non-positive, or non-convergent factors decline the accelerator and retain
+  the existing bounded-truncation behavior.
+
 ### Symbolic Computation
 
 - **Infinite p-series support positive-integer lower bounds beyond 1.**
