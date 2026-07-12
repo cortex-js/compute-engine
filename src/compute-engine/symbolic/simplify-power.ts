@@ -244,6 +244,27 @@ function isSurd(t: Expression): boolean {
 }
 
 /**
+ * If `t` is a square root — the `Sqrt` node itself, or a numeric literal
+ * folded to the exact pure surd `(1)·√a` — return the radicand `a`.
+ * Simplify may fold `Sqrt(literal)` into that numeric form before the
+ * nested-root rules run, so they must recognize both shapes.
+ */
+function sqrtRadicand(t: Expression): Expression | null {
+  if (isFunction(t, 'Sqrt') && t.op1) return t.op1;
+  if (isNumber(t)) {
+    const nv = t.numericValue;
+    if (
+      nv instanceof ExactNumericValue &&
+      nv.im === 0 &&
+      nv.radical > 1 &&
+      nv.rational[0] === nv.rational[1]
+    )
+      return t.engine.number(nv.radical);
+  }
+  return null;
+}
+
+/**
  * Rationalize a quotient with a two-term radical denominator:
  *   num / (p + q)  →  num·(p − q) / (p² − q²)
  *
@@ -396,25 +417,10 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // root(sqrt(x), n) -> x^{1/(2n)} (nth root of square root)
-    // Simplify may fold Sqrt(literal) to exact (1)·√a before this rule runs,
-    // so match both the Sqrt node and that numeric square-root form.
-    let innerBase: Expression | null = null;
-    if (isFunction(arg, 'Sqrt') && arg.op1) {
-      innerBase = arg.op1;
-    } else if (isNumber(arg)) {
-      const nv = arg.numericValue;
-      if (
-        nv instanceof ExactNumericValue &&
-        nv.im === 0 &&
-        nv.radical > 1 &&
-        nv.rational[0] === nv.rational[1]
-      ) {
-        innerBase = ce.number(nv.radical);
-      }
-    }
-    if (innerBase) {
+    const sqrtArg = sqrtRadicand(arg);
+    if (sqrtArg) {
       return {
-        value: innerBase.pow(ce.One.div(ce.number(2).mul(rootIndex))),
+        value: sqrtArg.pow(ce.One.div(ce.number(2).mul(rootIndex))),
         because: 'root(sqrt(x), n) -> x^{1/(2n)}',
       };
     }
@@ -618,9 +624,10 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // sqrt(sqrt(x)) -> x^{1/4} (nested square roots)
-    if (isFunction(arg, 'Sqrt') && arg.op1) {
+    const nestedRadicand = sqrtRadicand(arg);
+    if (nestedRadicand) {
       return {
-        value: arg.op1.pow(ce.number([1, 4])),
+        value: nestedRadicand.pow(ce.number([1, 4])),
         because: 'sqrt(sqrt(x)) -> x^{1/4}',
       };
     }
