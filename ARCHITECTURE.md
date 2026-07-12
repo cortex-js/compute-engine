@@ -579,10 +579,6 @@ and delegates formatting to a `LanguageTarget` / `CompileTarget`
 - `glsl-target.ts`, `wgsl-target.ts`, `gpu-target.ts` — GPU shaders.
 - `python-target.ts` — Python 3.
 - `interval-javascript-target.ts` — JavaScript with interval arithmetic.
-- `interval-glsl-target.ts` — GLSL with interval arithmetic (`vec2` intervals,
-  outward rounding for float32 soundness); powers `compileExclusionShader()`
-  for implicit-curve plotting. Design notes in
-  [`docs/INTERVAL_GLSL_PLAN.md`](./docs/INTERVAL_GLSL_PLAN.md).
 
 Targets are registered in the engine's compilation-target registry and validated
 by the extension contracts. Consumers can register custom targets via

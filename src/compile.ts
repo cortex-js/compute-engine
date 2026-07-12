@@ -13,12 +13,6 @@ export { GLSLTarget } from './compute-engine/compilation/glsl-target.js';
 export { WGSLTarget } from './compute-engine/compilation/wgsl-target.js';
 export { PythonTarget } from './compute-engine/compilation/python-target.js';
 export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-javascript-target.js';
-/**
- * @deprecated The `interval-glsl` compilation target is deprecated and will be
- * removed in a future release. Use `IntervalJavaScriptTarget` (`interval-js`,
- * CPU interval arithmetic) or the scalar `glsl`/`wgsl` targets instead.
- */
-export { IntervalGLSLTarget } from './compute-engine/compilation/interval-glsl-target.js';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler.js';
 
 // Types

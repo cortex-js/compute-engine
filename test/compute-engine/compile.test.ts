@@ -1129,24 +1129,18 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   });
 });
 
-describe('COMPILE deprecated targets', () => {
-  // No other test in this file resolves `interval-glsl`, so the module-level
-  // once-per-process dedup flag is still untripped here — this test observes
-  // the first (and only) warning.
-  it('warns once when the deprecated interval-glsl target is resolved', () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const e = new ComputeEngine();
-      // Resolve the target several times; the deprecation notice must fire
-      // exactly once per process, not once per resolution.
-      e.getCompilationTarget('interval-glsl');
-      e.getCompilationTarget('interval-glsl');
-      compile(e.parse('x^2 + y^2'), { to: 'interval-glsl' });
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0][0]).toMatch(/interval-glsl.*deprecated/i);
-    } finally {
-      warn.mockRestore();
-    }
+describe('COMPILE removed targets', () => {
+  it('does not register the removed interval-glsl target', () => {
+    const e = new ComputeEngine();
+    expect(e.getCompilationTarget('interval-glsl')).toBeUndefined();
+    expect(e.listCompilationTargets()).not.toContain('interval-glsl');
+  });
+
+  it('throws an unregistered-target error when fallback is disabled', () => {
+    const e = new ComputeEngine();
+    expect(() =>
+      compile(e.parse('x^2 + y^2'), { to: 'interval-glsl', fallback: false })
+    ).toThrow(/interval-glsl.*not registered/i);
   });
 });
 

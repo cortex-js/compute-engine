@@ -1,3 +1,15 @@
+## 0.77.0
+
+### Compilation
+
+- **The deprecated `interval-glsl` compilation target has been removed.** GPU
+  interval evaluation only pays off when the entire pipeline stays on the GPU,
+  and the target could not compile relational operators, so it could not host
+  restriction conditions. Use `interval-js` (CPU interval arithmetic) or the
+  scalar `glsl`/`wgsl` targets instead. The `IntervalGLSLTarget` export from
+  `@cortex-js/compute-engine/compile` is gone, and `compile(expr, { to:
+  'interval-glsl' })` now throws an unregistered-target error.
+
 ## 0.76.0 _2026-07-11_
 
 ### Programming and Collections

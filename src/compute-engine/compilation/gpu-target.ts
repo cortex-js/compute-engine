@@ -3443,7 +3443,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // block forms (loop-form Sum/Product, Loop, Block) are only valid at
       // statement position. Flag it so the base compiler fails closed (D6)
       // rather than splice a bare block into a sub-expression. Gated to the pure
-      // GPU languages — the interval-glsl subclass keeps its own semantics.
+      // GPU languages by language id.
       bareStatementBlocks:
         this.languageId === 'glsl' || this.languageId === 'wgsl',
       // A free symbol emitted as a bare identifier must not be a reserved word
