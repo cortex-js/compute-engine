@@ -25,6 +25,24 @@ describe('Degrees Function Serialization', () => {
     const latex = expr.toLatex({ dmsFormat: true });
     expect(latex).toBe("-45°30'");
   });
+
+  test('serialize rational Degrees with DMS format', () => {
+    // The parser produces exact rational degrees: 9°30' → Degrees(19/2)
+    const expr = ce._fn('Degrees', [ce.number([19, 2])]);
+    const latex = expr.toLatex({ dmsFormat: true });
+    expect(latex).toBe("9°30'");
+  });
+
+  test('parse/serialize DMS round-trip', () => {
+    const expr = ce.parse('9°30\'15"', { form: 'raw' });
+    expect(expr.toLatex({ dmsFormat: true })).toBe('9°30\'15"');
+  });
+
+  test('serialize rational Degrees with normalization', () => {
+    const expr = ce._fn('Degrees', [ce.number([741, 2])]); // 370.5°
+    const latex = expr.toLatex({ angleNormalization: '0...360' });
+    expect(latex).toBe('10.5°');
+  });
 });
 
 describe('DMS Serialization Integration', () => {

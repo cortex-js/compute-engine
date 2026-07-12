@@ -1238,7 +1238,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         options.dmsFormat ||
         (options.angleNormalization && options.angleNormalization !== 'none')
       ) {
-        const argValue = machineValue(arg);
+        // The parser produces exact rational degrees (9°30' → 19/2°), so
+        // accept rationals as well as number literals.
+        let argValue = machineValue(arg);
+        if (argValue === null) {
+          const r = rationalValue(arg);
+          if (r !== null && r[1] !== 0) argValue = r[0] / r[1];
+        }
         if (argValue !== null) {
           let degrees = argValue;
           if (
