@@ -543,6 +543,15 @@ const FUNCTIONS: Record<
     return `{    ${expr.ops.map((x) => serialize(x)).join(';\n     ')}\n    }`;
   },
 
+  // Restriction/conditional value: `arcsin(a) {|a| <= 1}` — mirrors the
+  // LaTeX restriction notation `expr\left\{cond\right\}` (D3).
+  When: (expr_: Expression, serialize) => {
+    const expr = expr_ as FnExpr;
+    if (expr.nops !== 2)
+      return `When(${expr.ops.map((x) => serialize(x)).join(', ')})`;
+    return `${serialize(expr.op1)} {${serialize(expr.op2)}}`;
+  },
+
   EvaluateAt: (expr_: Expression, serialize) => {
     const expr = expr_ as FnExpr;
     // Output f|_(...)

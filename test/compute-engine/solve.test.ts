@@ -744,8 +744,8 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
       .solve('x')
       ?.map((x) => x.toString());
     expect(result).toEqual([
-      'When(arcsin(a), |a| <= 1)',
-      'When(-arcsin(a) + pi, |a| <= 1)',
+      'arcsin(a) {|a| <= 1}',
+      '-arcsin(a) + pi {|a| <= 1}',
     ]);
   });
 
@@ -758,8 +758,8 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
     // t = ±arccos((x² + 1)/(2x)), guarded by the |ratio| ≤ 1 validity
     // condition (conditional-values design, Phase 2).
     expect(result).toEqual([
-      'When(arccos(1/2 * x + 1 / (2x)), |(x^2 + 1) / (2x)| <= 1)',
-      'When(-arccos(1/2 * x + 1 / (2x)), |(x^2 + 1) / (2x)| <= 1)',
+      'arccos(1/2 * x + 1 / (2x)) {|(x^2 + 1) / (2x)| <= 1}',
+      '-arccos(1/2 * x + 1 / (2x)) {|(x^2 + 1) / (2x)| <= 1}',
     ]);
   });
 });

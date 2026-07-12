@@ -23,21 +23,21 @@ describe('CONDITIONAL VALUES — When threading (T1–T5)', () => {
   it('T1: threads a scalar function through a When guard', () => {
     // sin(When(x, x>0)) → When(sin(x), x>0)
     expect(ce.box(['Sin', whenX]).evaluate().toString()).toBe(
-      'When(sin(x), 0 < x)'
+      'sin(x) {0 < x}'
     );
   });
 
   it('T2: absorbs a plain operand into the guard', () => {
     // When(x, x>0) + 1 → When(x + 1, x>0)
     expect(ce.box(['Add', whenX, 1]).evaluate().toString()).toBe(
-      'When(x + 1, 0 < x)'
+      'x + 1 {0 < x}'
     );
   });
 
   it('T3: conjoins guards of two Whens', () => {
     // When(x, x>0) · When(y, y<1) → When(x·y, (x>0) ∧ (y<1))
     expect(ce.box(['Multiply', whenX, whenY]).evaluate().toString()).toBe(
-      'When(x * y, 0 < x && y < 1)'
+      'x * y {0 < x && y < 1}'
     );
   });
 
@@ -67,7 +67,7 @@ describe('CONDITIONAL VALUES — fold regressions (decision 5)', () => {
     const r = ce.box(['Multiply', 0, whenX]).evaluate();
     expect(r.operator).toBe('When');
     expect(r.op1.isSame(0)).toBe(true);
-    expect(r.toString()).toBe('When(0, 0 < x)');
+    expect(r.toString()).toBe('0 {0 < x}');
   });
 
   it('When − When keeps the guard: → When(0, c), not plain 0', () => {
@@ -227,16 +227,16 @@ describe('CONDITIONAL VALUES — Solve emission (Phase 2)', () => {
   it('symbolic a·sin(x) + b = 0 → both branches guarded by |−b/a| ≤ 1', () => {
     const eq = ['Equal', ['Add', ['Multiply', 'a', ['Sin', 'x']], 'b'], 0];
     expect(solveStrings(ce, eq, 'x')).toEqual([
-      'When(arcsin(-b / a), |-b / a| <= 1)',
-      'When(-arcsin(-b / a) + pi, |-b / a| <= 1)',
+      'arcsin(-b / a) {|-b / a| <= 1}',
+      '-arcsin(-b / a) + pi {|-b / a| <= 1}',
     ]);
   });
 
   it('symbolic a·cos(x) + b = 0 → both branches guarded by |−b/a| ≤ 1', () => {
     const eq = ['Equal', ['Add', ['Multiply', 'a', ['Cos', 'x']], 'b'], 0];
     expect(solveStrings(ce, eq, 'x')).toEqual([
-      'When(arccos(-b / a), |-b / a| <= 1)',
-      'When(-arccos(-b / a), |-b / a| <= 1)',
+      'arccos(-b / a) {|-b / a| <= 1}',
+      '-arccos(-b / a) {|-b / a| <= 1}',
     ]);
   });
 

@@ -40,8 +40,10 @@
 - **Trigonometric and hyperbolic equations with symbolic coefficients record
   their validity condition.** `Solve(sin(x) = a, x)` previously returned
   `arcsin(a)` and `π − arcsin(a)` unconditionally — wrong whenever
-  `|a| > 1`. Roots now carry their domain-of-validity guard:
-  `When(arcsin(a), |a| ≤ 1)`. The guard resolves as soon as it is decidable:
+  `|a| > 1`. Roots now carry their domain-of-validity guard — a `When`
+  restriction, displayed `arcsin(a) {|a| <= 1}` (LaTeX
+  `\arcsin(a)\left\{|a|\le 1\right\}`). The guard resolves as soon as it is
+  decidable:
   substituting `a = 1/2` collapses the root to `π/6`, while `a = 3` yields
   `Undefined`, and a guard known false at solve time prunes the root (down
   to `[]`). Numeric-coefficient equations are unchanged. The same applies to
