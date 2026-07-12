@@ -25,6 +25,19 @@ function isSqrt(expr: Expression): boolean {
   );
 }
 
+/** Return the maximal decomposition `n = base^exponent`, or undefined. */
+function maximalPerfectPower(
+  n: number
+): { base: number; exponent: number } | undefined {
+  if (!Number.isSafeInteger(n) || n <= 1) return undefined;
+  for (let exponent = Math.floor(Math.log2(n)); exponent >= 2; exponent--) {
+    const base = Math.round(Math.pow(n, 1 / exponent));
+    if (base > 1 && BigInt(base) ** BigInt(exponent) === BigInt(n))
+      return { base, exponent };
+  }
+  return undefined;
+}
+
 // If the expression is of the form
 // : sqrt(n), return n/1
 // : sqrt(n/m), return n/m
@@ -949,6 +962,36 @@ export function pow(
         q > 1 &&
         realRootExists
       ) {
+        // Normalize a positive perfect-power base before attempting the root:
+        // `(m^k)^(p/q) -> m^(kp/q)`. This exposes a common base to product
+        // tallying (`4^(2/3) -> 2^(4/3)`) without materializing a float.
+        if (x.isPositive === true) {
+          const decomposition = maximalPerfectPower(x.re);
+          if (decomposition)
+            return pow(
+              ce.number(decomposition.base),
+              ce.number([decomposition.exponent * p, q]),
+              { numericApproximation: false }
+            );
+
+          // Extract the integer part of a positive improper exponent so like
+          // radicals share the same proper fractional power:
+          // `2^(4/3) -> 2 * 2^(1/3)`.
+          if (p > q) {
+            const whole = Math.floor(p / q);
+            const remainder = p % q;
+            const integerPart = pow(x, whole, {
+              numericApproximation: false,
+            });
+            if (remainder === 0) return integerPart;
+            return ce.function('Multiply', [
+              integerPart,
+              pow(x, ce.number([remainder, q]), {
+                numericApproximation: false,
+              }),
+            ]);
+          }
+        }
         const rt = root(x, ce.number(q), { numericApproximation: false });
         if (isNumber(rt)) return pow(rt, p, { numericApproximation: false });
       }
@@ -1058,15 +1101,17 @@ export function root(
     ) {
       const n = a.re;
       if (Number.isSafeInteger(n) && n > 1) {
-        for (let k = Math.floor(Math.log2(n)); k >= 2; k--) {
-          const m = Math.round(Math.pow(n, 1 / k));
-          if (m > 1 && BigInt(m) ** BigInt(k) === BigInt(n)) {
-            // m is not itself a perfect power (k is maximal), so the
-            // rational-exponent path in pow() terminates.
-            return pow(a.engine.number(m), a.engine.number([k, e]), {
+        const decomposition = maximalPerfectPower(n);
+        if (decomposition) {
+          // The base is not itself a perfect power (the exponent is maximal),
+          // so the rational-exponent path in pow() terminates.
+          return pow(
+            a.engine.number(decomposition.base),
+            a.engine.number([decomposition.exponent, e]),
+            {
               numericApproximation: false,
-            });
-          }
+            }
+          );
         }
       }
     }

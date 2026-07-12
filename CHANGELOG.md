@@ -11,6 +11,15 @@
 
 ### Symbolic Computation
 
+- **Exact cube-root arithmetic handles more algebraic forms.** Positive
+  perfect-power bases with rational exponents normalize to a common base and
+  extract their integer part (`4^(2/3) → 2·2^(1/3)`), allowing compatible
+  cube-root powers to combine exactly. Real nested cube roots of the form
+  `∛(a+b√c)` are denested when exact integer conjugate identities prove a
+  result; in particular, `∛(90+34√7) → 3+√7` (and the conjugate form with
+  minus signs). The expanded Wester-28 cube-root identity now simplifies
+  exactly to zero and numericizes without `NaN`.
+
 - **Infinite p-series support positive-integer lower bounds beyond 1.**
   `Sum(k^(-s), k, a, +∞)` now returns
   `Zeta(s) − Sum(k^(-s), k, 1, a−1)` for exact real `s > 1`; for example,

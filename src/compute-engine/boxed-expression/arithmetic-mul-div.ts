@@ -16,6 +16,8 @@ import {
 import {
   isNumericTuple,
   hasAccessibleComponents,
+  isFiniteIndexedCollection,
+  broadcastOverIndexedCollections,
 } from '../collection-utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -730,7 +732,14 @@ function termsAsExpression(
     const t = flatten(terms, 'Multiply');
     const base =
       t.length <= 1 ? t[0] : ce._fn('Multiply', sortProductOperands(t));
-    return isOne(exponent) ? base : base.pow(ce.number(exponent));
+    if (isOne(exponent)) return base;
+    // Numeric rational powers may expose an exact coefficient plus a proper
+    // radical (`2^(5/3) -> 2*2^(2/3)`). Route them through evaluation so
+    // same-base tallying produces the canonical exact form, not an improper
+    // Power that later terms cannot recognize as like.
+    if (isNumber(base))
+      return ce.function('Power', [base, ce.number(exponent)]).evaluate();
+    return base.pow(ce.number(exponent));
   });
 
   result = flatten(result, 'Multiply');
@@ -1474,6 +1483,19 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
   // semantics rather than the scalar Product machinery.
   if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs);
 
+  // A non-tensor finite indexed collection (a lazy `Range`, or a `List` that
+  // emerged from evaluating a broadcast operand): broadcast the product over
+  // its elements, keeping any numeric-tuple factor whole. This makes
+  // `Range(-2,2)·(2,3)` a `List` of `Tuple`s — matching the eager-`List`
+  // behavior (`mulTensors`) — instead of the transposed tuple `mulTuples`
+  // would otherwise produce. Checked BEFORE the tuple branch so the collection
+  // wins the dispatch; an unknown/infinite length returns `undefined` and
+  // falls through (to `mulTuples`/`Product`, leaving an inert product).
+  if (xs.some((x) => isFiniteIndexedCollection(x) && !isNumericTuple(x))) {
+    const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, false);
+    if (r) return r;
+  }
+
   // Numeric tuples (points/vectors): scalar · tuple scales component-wise.
   if (xs.some((x) => isNumericTuple(x))) return mulTuples(ce, xs, false);
 
@@ -1496,6 +1518,11 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
       xs.map((x) => x.canonical)
     );
   if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs, true);
+  // Broadcast over a non-tensor finite indexed collection (see `mul`).
+  if (xs.some((x) => isFiniteIndexedCollection(x) && !isNumericTuple(x))) {
+    const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true);
+    if (r) return r;
+  }
   if (xs.some((x) => isNumericTuple(x))) return mulTuples(ce, xs, true);
   xs = xs.map((x) => x.N());
   const exp = expandProducts(ce, xs);

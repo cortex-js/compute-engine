@@ -155,6 +155,75 @@ function denestSqrt3(arg: Expression): Expression | undefined {
 }
 
 /**
+ * Denest a real cube root `∛(a + b√c) = u + v√c` when `a,b,c,u,v` are
+ * integers. Taking the quadratic conjugate gives
+ * `(a²-b²c) = (u²-v²c)³`; writing `d = ∛(a²-b²c)` then yields
+ * `4u³-3du=a` and `v²=(u²-d)/c`. These integer identities provide a small,
+ * exact decision procedure with no branch ambiguity (the real cube root is
+ * single-valued).
+ */
+function denestCubeRoot(arg: Expression): Expression | undefined {
+  if (!isFunction(arg, 'Add') || arg.nops !== 2) return undefined;
+  const ce = arg.engine;
+  const [t0, t1] = arg.ops;
+  if (!isNumber(t0) || !isNumber(t1)) return undefined;
+
+  const r0 = asRational(t0);
+  const r1 = asRational(t1);
+  const aTerm = r0 && !r1 ? t0 : r1 && !r0 ? t1 : undefined;
+  const surd = aTerm === t0 ? t1 : aTerm === t1 ? t0 : undefined;
+  if (!aTerm || !surd) return undefined;
+
+  const aRat = asRational(aTerm);
+  const snv = surd.numericValue;
+  if (
+    !aRat ||
+    aRat[1] !== 1 ||
+    !(snv instanceof ExactNumericValue) ||
+    snv.im !== 0 ||
+    snv.rational[1] !== 1 ||
+    !Number.isInteger(snv.radical) ||
+    snv.radical <= 1
+  )
+    return undefined;
+
+  const a = Number(aRat[0]);
+  const b = Number(snv.rational[0]);
+  const c = snv.radical;
+  if (![a, b, c].every(Number.isSafeInteger)) return undefined;
+
+  const norm = a * a - b * b * c;
+  if (!Number.isSafeInteger(norm)) return undefined;
+  const d = Math.round(Math.cbrt(norm));
+  if (BigInt(d) ** 3n !== BigInt(norm)) return undefined;
+
+  // |u| is small relative to the cube root's magnitude. The conservative
+  // bound keeps this exact search bounded for machine-safe inputs.
+  const bound = Math.min(
+    100_000,
+    Math.ceil(Math.cbrt(Math.abs(a) + Math.abs(b) * Math.sqrt(c))) + 2
+  );
+  for (let u = -bound; u <= bound; u++) {
+    if (4 * u * u * u - 3 * d * u !== a) continue;
+    const vSquaredNumerator = u * u - d;
+    if (vSquaredNumerator < 0 || vSquaredNumerator % c !== 0) continue;
+    const vAbs = Math.round(Math.sqrt(vSquaredNumerator / c));
+    if (vAbs * vAbs * c !== vSquaredNumerator) continue;
+    for (const v of vAbs === 0 ? [0] : [vAbs, -vAbs]) {
+      if (v * (3 * u * u + v * v * c) !== b) continue;
+      return ce.function('Add', [
+        ce.number(u),
+        ce.function('Multiply', [
+          ce.number(v),
+          ce.function('Sqrt', [ce.number(c)]),
+        ]),
+      ]);
+    }
+  }
+  return undefined;
+}
+
+/**
  * A term of a radical denominator is "rationalizable" when it is an exact real
  * value whose square is rational — i.e. a rational `a`, or a single surd `r√c`
  * (r rational, c a positive integer). Such a term squares to a rational, so a
@@ -261,6 +330,27 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     const rootIndex = x.op2;
 
     if (!arg || !rootIndex) return undefined;
+
+    if (rootIndex.isSame(3)) {
+      const denested = denestCubeRoot(arg);
+      if (denested)
+        return {
+          value: denested,
+          because: 'denest ∛(a+b√c) -> u+v√c',
+        };
+    }
+
+    // Let exact numeric root evaluation expose perfect-power structure during
+    // simplify as well as evaluate (`Root(4,3) -> 2^(2/3)`).
+    if (isNumber(arg) && rootIndex.isInteger === true) {
+      const evaluated = x.evaluate();
+      if (!evaluated.isSame(x))
+        return {
+          value: evaluated,
+          because: 'normalize exact numeric root',
+          purpose: 'transform',
+        };
+    }
 
     // Edge case: 0th root is undefined -> NaN
     if (rootIndex.isSame(0)) {

@@ -327,16 +327,15 @@ separate tracking is needed. Grouped by theme:
   simplify subsystem next to `denestSqrt`), three-surd denesting
   (`√(10+2√6+2√10+2√15) → √2+√3+√5`), and same-base `Root`/`Power`
   combination (`2^{1/3}·2^{2/3} → 2`, `2^{1/3}·4^{1/3} → 2`, positive
-  rational bases) all landed 2026-07-09). Denesting still open beyond
-  those cases: recursive (Wester 9, the Putnam radical) and cube-root
-  (`(90+34√7)^{1/3} → 3+√7`). Exact zero-recognition over `ℚ(2^{1/3})`
-  (Wester 28) still fails on the remaining mechanisms: `simplify()` does
-  not expand the numeric-radical trinomial cube `(2^{1/3}+4^{1/3})^3`, and
-  `Power(4, 2/3)` is not reduced to base 2 (asymmetry: `Root(4,3)`
-  evaluates to `Power(2, 2/3)` but `Power(4, 2/3)` stays put, so even an
-  explicit `Expand` leaves `2^{1/3}·4^{2/3}` uncombined). Adjacent defect
-  spotted 2026-07-09: `Expand` of that cube gives an expression whose
-  `.N()` is `NaN` even though each term evaluates finitely.
+  rational bases) all landed 2026-07-09; cube-root denesting
+  (`(90+34√7)^{1/3} → 3+√7`) landed 2026-07-11). Denesting still open beyond
+  those cases: recursive Wester 9 (the Putnam radical). Exact
+  zero-recognition over `ℚ(2^{1/3})` now succeeds after explicit `Expand`:
+  perfect-power bases normalize (`4^{2/3} → 2·2^{1/3}`), compatible cube-root
+  powers combine exactly, and the expanded expression numericizes without
+  `NaN`. The remaining Wester-28 gap is automatic expansion: bare `simplify()`
+  does not yet expand the numeric-radical trinomial cube
+  `(2^{1/3}+4^{1/3})^3`.
 - **Sum/Product closed forms (telescoping sums/products, `Π k → n!`,
   p-series `→ ζ(s)`, Wallis `→ 2/π`, and Richardson tail acceleration for
   `.N()` of infinite sums/products ALL LANDED by 2026-07-11).** Remaining small

@@ -40,7 +40,9 @@ describe('Numbers', () => {
   });
 
   test(`Wester 2: prime factorization of 50!`, () => {
-    expect(ce.expr(['FactorInteger', ['Factorial', 50]]).evaluate().json).toEqual([
+    expect(
+      ce.expr(['FactorInteger', ['Factorial', 50]]).evaluate().json
+    ).toEqual([
       'List',
       ['Tuple', 2, 47],
       ['Tuple', 3, 22],
@@ -79,7 +81,9 @@ describe('Numbers', () => {
     // True value 262537412640768743.99999999999925…; correctly rounded to the
     // default 21 significant digits this is …744 (NOT the integer …743 — a
     // CAS that prints …743.0 or an integer at this precision is wrong).
-    expect(ce.expr(['Exp', ['Multiply', 'Pi', ['Sqrt', 163]]]).N().json).toEqual({
+    expect(
+      ce.expr(['Exp', ['Multiply', 'Pi', ['Sqrt', 163]]]).N().json
+    ).toEqual({
       num: '262537412640768744',
     });
   });
@@ -106,7 +110,11 @@ describe('Numbers', () => {
     // form of 3^(1/3) is Root(3, 3).)
     expect(
       ce
-        .expr(['Multiply', ['Rational', 10, 7], ['Power', ['Rational', 1029, 1000], ['Rational', 1, 3]]])
+        .expr([
+          'Multiply',
+          ['Rational', 10, 7],
+          ['Power', ['Rational', 1029, 1000], ['Rational', 1, 3]],
+        ])
         .simplify().json
     ).toEqual(['Root', 3, 3]);
   });
@@ -124,7 +132,9 @@ describe('Numbers', () => {
     // single-level sqrt(a + b√c) denesting is implemented).
     expect(
       ce
-        .parse('\\sqrt{14 + 3 \\sqrt{3 + 2 \\sqrt{5 - 12 \\sqrt{3 - 2 \\sqrt{2}}}}}')
+        .parse(
+          '\\sqrt{14 + 3 \\sqrt{3 + 2 \\sqrt{5 - 12 \\sqrt{3 - 2 \\sqrt{2}}}}}'
+        )
         .simplify().json
     ).toEqual(['Add', 3, ['Sqrt', 2]]);
   });
@@ -138,16 +148,25 @@ describe('Numbers', () => {
 
   test(`rationalize (sqrt(3) + sqrt(2))/(sqrt(3) - sqrt(2)) => 5 + 2 sqrt(6)`, () => {
     expect(
-      ce.parse('\\frac{\\sqrt{3}+\\sqrt{2}}{\\sqrt{3}-\\sqrt{2}}').simplify().json
+      ce.parse('\\frac{\\sqrt{3}+\\sqrt{2}}{\\sqrt{3}-\\sqrt{2}}').simplify()
+        .json
     ).toEqual(['Add', 5, ['Multiply', 2, ['Sqrt', 6]]]);
   });
 
-  test.skip(`(90 + 34 sqrt(7))^(1/3) => 3 + sqrt(7)`, () => {
-    // [Jeffrey & Rich] CURRENT: stays as root3(90 + 34√7).
+  test(`(90 + 34 sqrt(7))^(1/3) => 3 + sqrt(7)`, () => {
+    // [Jeffrey & Rich]
     expect(ce.parse('(90+34\\sqrt{7})^{1/3}').simplify().json).toEqual([
       'Add',
       3,
       ['Sqrt', 7],
+    ]);
+  });
+
+  test(`(90 - 34 sqrt(7))^(1/3) => 3 - sqrt(7)`, () => {
+    expect(ce.parse('(90-34\\sqrt{7})^{1/3}').simplify().json).toEqual([
+      'Add',
+      3,
+      ['Negate', ['Sqrt', 7]],
     ]);
   });
 
@@ -184,9 +203,31 @@ describe('Number theory', () => {
 
   test(`continued fraction of sqrt(23) = [4; 1,3,1,8 repeating]`, () => {
     // Wester (via Stark): 4 + 1/(1 + 1/(3 + 1/(1 + 1/(8 + …
-    expect(ce.expr(['ContinuedFraction', ['Sqrt', 23]]).evaluate().json).toEqual(
-      ['List', 4, 1, 3, 1, 8, 1, 3, 1, 8, 1, 3, 1, 8, 1, 3, 1, 8, 1, 3, 1]
-    );
+    expect(
+      ce.expr(['ContinuedFraction', ['Sqrt', 23]]).evaluate().json
+    ).toEqual([
+      'List',
+      4,
+      1,
+      3,
+      1,
+      8,
+      1,
+      3,
+      1,
+      8,
+      1,
+      3,
+      1,
+      8,
+      1,
+      3,
+      1,
+      8,
+      1,
+      3,
+      1,
+    ]);
   });
 });
 
@@ -264,8 +305,12 @@ describe('Zero equivalence', () => {
     // needs (Wester 27's bigint radicand stayed structural, so it worked) —
     // and evaluate leaked a float residue. Fixed 2026-07-05 via
     // perfect-power decomposition of the radicand in root().
-    expect(ce.parse('\\sqrt{997} - (997^3)^{\\frac16}').evaluate().json).toBe(0);
-    expect(ce.parse('\\sqrt{997} - (997^3)^{\\frac16}').simplify().json).toBe(0);
+    expect(ce.parse('\\sqrt{997} - (997^3)^{\\frac16}').evaluate().json).toBe(
+      0
+    );
+    expect(ce.parse('\\sqrt{997} - (997^3)^{\\frac16}').simplify().json).toBe(
+      0
+    );
   });
 
   test(`Wester 27: sqrt(999983) - (999983^3)^(1/6) = 0`, () => {
@@ -275,14 +320,47 @@ describe('Zero equivalence', () => {
   });
 
   test.skip(`Wester 28: (2^(1/3) + 4^(1/3))^3 - 6 (2^(1/3) + 4^(1/3)) - 6 = 0`, () => {
-    // CURRENT: evaluate returns a float difference (17.0839… − 17.0839…·root3(1))
-    // and simplify the residue 1.94e-20 — algebraic-number arithmetic over
-    // Q(2^(1/3)) is not exact.
     expect(
       ce
-        .parse('(2^{\\frac13} + 4^{\\frac13})^3 - 6(2^{\\frac13} + 4^{\\frac13}) - 6')
+        .parse(
+          '(2^{\\frac13} + 4^{\\frac13})^3 - 6(2^{\\frac13} + 4^{\\frac13}) - 6'
+        )
         .simplify().json
     ).toBe(0);
+  });
+
+  test(`Wester 28 is recognized exactly after explicit expansion`, () => {
+    const expression = ce.parse(
+      '(2^{\\frac13} + 4^{\\frac13})^3 - 6(2^{\\frac13} + 4^{\\frac13}) - 6'
+    );
+    expect(ce.function('Expand', [expression]).evaluate().simplify().json).toBe(
+      0
+    );
+  });
+
+  test(`Wester 28 expanded cube-root polynomial numericizes`, () => {
+    const expanded = ce
+      .function('Expand', [ce.parse('(2^{\\frac13} + 4^{\\frac13})^3')])
+      .evaluate();
+    const result = expanded.N();
+    expect(result.isNaN).toBe(false);
+    expect(result.re).toBeCloseTo(Math.pow(Math.cbrt(2) + Math.cbrt(4), 3), 10);
+  });
+
+  test(`Power(4, 2/3) normalizes to base 2`, () => {
+    expect(ce.parse('4^{\\frac23}').evaluate().json).toEqual([
+      'Multiply',
+      2,
+      ['Root', 2, 3],
+    ]);
+  });
+
+  test(`compatible cube-root powers combine on their common base`, () => {
+    expect(ce.parse('2^{\\frac13} 4^{\\frac23}').simplify().json).toEqual([
+      'Power',
+      2,
+      ['Rational', 5, 3],
+    ]);
   });
 
   test(`cos^3 x + cos x sin^2 x - cos x = 0`, () => {
@@ -297,14 +375,19 @@ describe('Sums and products', () => {
   test(`Sum(k, k=1..n) closed form = n(n+1)/2`, () => {
     // evaluate() stays symbolic for a free upper bound; simplify() produces
     // the closed form (as (n² + n)/2).
-    expect(ce.expr(['Sum', 'k', ['Tuple', 'k', 1, 'n']]).simplify().json).toEqual(
-      ['Multiply', ['Rational', 1, 2], ['Add', ['Power', 'n', 2], 'n']]
-    );
+    expect(
+      ce.expr(['Sum', 'k', ['Tuple', 'k', 1, 'n']]).simplify().json
+    ).toEqual([
+      'Multiply',
+      ['Rational', 1, 2],
+      ['Add', ['Power', 'n', 2], 'n'],
+    ]);
   });
 
   test(`Sum(k^3, k=1..n) closed form = n^2(n+1)^2/4`, () => {
     expect(
-      ce.expr(['Sum', ['Power', 'k', 3], ['Tuple', 'k', 1, 'n']]).simplify().json
+      ce.expr(['Sum', ['Power', 'k', 3], ['Tuple', 'k', 1, 'n']]).simplify()
+        .json
     ).toEqual([
       'Multiply',
       ['Rational', 1, 4],
@@ -315,16 +398,20 @@ describe('Sums and products', () => {
   test(`Sum with free upper bound stays symbolic under evaluate()`, () => {
     // Regression: this used to enumerate to the internal iteration cap and
     // return 50015001 (the sum to 10001) for an unbound n.
-    expect(ce.expr(['Sum', 'k', ['Tuple', 'k', 1, 'n']]).evaluate().json).toEqual(
-      ['Sum', 'k', ['Limits', 'k', 1, 'n']]
-    );
+    expect(
+      ce.expr(['Sum', 'k', ['Tuple', 'k', 1, 'n']]).evaluate().json
+    ).toEqual(['Sum', 'k', ['Limits', 'k', 1, 'n']]);
   });
 
   test(`telescoping Sum(g(k+1) - g(k), k=0..n) => g(n+1) - g(0)`, () => {
     // CURRENT: stays symbolic (no telescoping detection).
     expect(
       ce
-        .expr(['Sum', ['Subtract', ['g', ['Add', 'k', 1]], ['g', 'k']], ['Tuple', 'k', 0, 'n']])
+        .expr([
+          'Sum',
+          ['Subtract', ['g', ['Add', 'k', 1]], ['g', 'k']],
+          ['Tuple', 'k', 0, 'n'],
+        ])
         .evaluate().json
     ).toEqual(['Subtract', ['g', ['Add', 'n', 1]], ['g', 0]]);
   });
@@ -337,7 +424,11 @@ describe('Sums and products', () => {
       ce
         .expr([
           'Sum',
-          ['Add', ['Divide', 1, ['Power', 'k', 2]], ['Divide', 1, ['Power', 'k', 3]]],
+          [
+            'Add',
+            ['Divide', 1, ['Power', 'k', 2]],
+            ['Divide', 1, ['Power', 'k', 3]],
+          ],
           ['Tuple', 'k', 1, 'PositiveInfinity'],
         ])
         .evaluate().json
@@ -353,7 +444,11 @@ describe('Sums and products', () => {
           ['Tuple', 'k', 2, 'PositiveInfinity'],
         ])
         .evaluate().json
-    ).toEqual(['Add', -1, ['Multiply', ['Rational', 1, 6], ['Power', 'Pi', 2]]]);
+    ).toEqual([
+      'Add',
+      -1,
+      ['Multiply', ['Rational', 1, 6], ['Power', 'Pi', 2]],
+    ]);
   });
 
   test(`Sum(1/k^2, k=3..oo) => pi^2/6 - 5/4`, () => {
@@ -374,16 +469,20 @@ describe('Sums and products', () => {
 
   test(`Product(k, k=1..n) => n!`, () => {
     // CURRENT: stays symbolic (no closed form for products).
-    expect(ce.expr(['Product', 'k', ['Tuple', 'k', 1, 'n']]).evaluate().json).toEqual(
-      ['Factorial', 'n']
-    );
+    expect(
+      ce.expr(['Product', 'k', ['Tuple', 'k', 1, 'n']]).evaluate().json
+    ).toEqual(['Factorial', 'n']);
   });
 
   test(`Product(1 + 1/k, k=1..n-1) => n`, () => {
     // CURRENT: stays symbolic (no telescoping product detection).
     expect(
       ce
-        .expr(['Product', ['Add', 1, ['Divide', 1, 'k']], ['Tuple', 'k', 1, ['Subtract', 'n', 1]]])
+        .expr([
+          'Product',
+          ['Add', 1, ['Divide', 1, 'k']],
+          ['Tuple', 'k', 1, ['Subtract', 'n', 1]],
+        ])
         .evaluate().json
     ).toBe('n');
   });
@@ -448,7 +547,9 @@ describe('Complex domain', () => {
     // radicals so simplify() reduces to the integer 1 (N() alone leaves a
     // 1.0000000000000000315 float residue).
     expect(
-      ce.parse('\\left|3 - \\sqrt{7} + i\\sqrt{6\\sqrt{7} - 15}\\right|').simplify().json
+      ce
+        .parse('\\left|3 - \\sqrt{7} + i\\sqrt{6\\sqrt{7} - 15}\\right|')
+        .simplify().json
     ).toBe(1);
   });
 });
@@ -462,10 +563,16 @@ describe('Set theory', () => {
       ['Set', 'b', 'f'],
     ];
     expect(ce.expr(['Union', ...sets]).evaluate().json).toEqual([
-      'Set', 'a', 'b', 'c', 'd', 'f',
+      'Set',
+      'a',
+      'b',
+      'c',
+      'd',
+      'f',
     ]);
     expect(ce.expr(['Intersection', ...sets]).evaluate().json).toEqual([
-      'Set', 'b',
+      'Set',
+      'b',
     ]);
   });
 });
@@ -505,9 +612,8 @@ describe('Matrix theory', () => {
   test(`Mod of an integer matrix mod 2 => [[1,1],[1,0]]`, () => {
     // Elementwise Mod broadcasts over the matrix.
     expect(
-      ce
-        .expr(['Mod', ['List', ['List', 7, 11], ['List', 3, 8]], 2])
-        .evaluate().json
+      ce.expr(['Mod', ['List', ['List', 7, 11], ['List', 3, 8]], 2]).evaluate()
+        .json
     ).toEqual(['List', ['List', 1, 1], ['List', 1, 0]]);
   });
 
@@ -543,9 +649,7 @@ describe('Matrix theory', () => {
     // trips a type-check error (see the skipped fused-form test below).
     const M1 = ['List', ['List', 1, 3, 5], ['List', 2, 4, 6]];
     const M2 = ['List', ['List', 7, -9, 11], ['List', -8, 10, -12]];
-    const inner = ce
-      .expr(['Add', ['Multiply', 'a', M1], M2])
-      .evaluate();
+    const inner = ce.expr(['Add', ['Multiply', 'a', M1], M2]).evaluate();
     expect(
       ce
         .expr(['MatrixMultiply', ['List', ['List', 'x', 'y']], inner])
@@ -593,8 +697,7 @@ describe('Matrix theory', () => {
           ['List', ['List', 'x', 'y']],
           ['Add', ['Multiply', 'a', M1], M2],
         ])
-        .evaluate()
-        .operator
+        .evaluate().operator
     ).toBe('List');
   });
 
@@ -668,7 +771,11 @@ describe('Matrix theory', () => {
       ce
         .expr([
           'Norm',
-          ['List', ['List', 1, ['Complex', 0, -2]], ['List', ['Complex', 0, -3], 4]],
+          [
+            'List',
+            ['List', 1, ['Complex', 0, -2]],
+            ['List', ['Complex', 0, -3], 4],
+          ],
           'PositiveInfinity',
         ])
         .evaluate().json
@@ -682,7 +789,10 @@ describe('Matrix theory', () => {
     // under simplify().
     const M = ['List', ['List', 'a', 'b'], ['List', 1, ['Multiply', 'a', 'b']]];
     expect(
-      ce.expr(['MatrixMultiply', M, ['Inverse', M]]).evaluate().simplify().json
+      ce
+        .expr(['MatrixMultiply', M, ['Inverse', M]])
+        .evaluate()
+        .simplify().json
     ).toEqual(['List', ['List', 1, 0], ['List', 0, 1]]);
   });
 
@@ -753,7 +863,11 @@ describe('Matrix theory', () => {
           [
             'List',
             ['List', ['Multiply', 2, ['Sqrt', 2]], 8],
-            ['List', ['Multiply', 6, ['Sqrt', 6]], ['Multiply', 24, ['Sqrt', 3]]],
+            [
+              'List',
+              ['Multiply', 6, ['Sqrt', 6]],
+              ['Multiply', 24, ['Sqrt', 3]],
+            ],
           ],
         ])
         .evaluate().json
@@ -851,7 +965,12 @@ describe('Matrix theory', () => {
       ce
         .expr([
           'CharacteristicPolynomial',
-          ['List', ['List', 5, -3, -7], ['List', -2, 1, 2], ['List', 2, -3, -4]],
+          [
+            'List',
+            ['List', 5, -3, -7],
+            ['List', -2, 1, 2],
+            ['List', 2, -3, -4],
+          ],
           'lambda',
         ])
         .evaluate()
@@ -989,11 +1108,15 @@ describe('Matrix theory', () => {
 
 describe('Statistics', () => {
   test(`Mean({3, 7, 11, 5, 19}) = 9`, () => {
-    expect(ce.expr(['Mean', ['List', 3, 7, 11, 5, 19]]).evaluate().json).toBe(9);
+    expect(ce.expr(['Mean', ['List', 3, 7, 11, 5, 19]]).evaluate().json).toBe(
+      9
+    );
   });
 
   test(`Median({3, 7, 11, 5, 19}) = 7`, () => {
-    expect(ce.expr(['Median', ['List', 3, 7, 11, 5, 19]]).evaluate().json).toBe(7);
+    expect(ce.expr(['Median', ['List', 3, 7, 11, 5, 19]]).evaluate().json).toBe(
+      7
+    );
   });
 
   test(`Mode({3, 7, 11, 7, 3, 5, 7}) = 7`, () => {
@@ -1069,9 +1192,12 @@ describe('Statistics', () => {
 
 describe('Series', () => {
   test(`Taylor series of sin x about 0, order 7`, () => {
-    expect(ce.expr(['Series', ['Sin', 'x'], 'x', 0, 7]).evaluate().toString()).toBe(
-      'x - 1/6 * x^3 + 1/120 * x^5 - 1/5040 * x^7 + BigO(x^9)'
-    );
+    expect(
+      ce
+        .expr(['Series', ['Sin', 'x'], 'x', 0, 7])
+        .evaluate()
+        .toString()
+    ).toBe('x - 1/6 * x^3 + 1/120 * x^5 - 1/5040 * x^7 + BigO(x^9)');
   });
 });
 
