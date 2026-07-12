@@ -472,11 +472,17 @@ root assembly and the audit oracle grading guarded roots). Remaining:
   `1/(1−x) {|x|<1}`). Policy ratified: measure-zero exceptional parameter
   points (`∫xⁿ`'s `n=−1`) stay generic (Rubi-consistent); only fat
   convergence regions guard.
-- **Demand-paced adopters remaining:** radical extraneous roots, definite
-  integration region splitting (`Which` — locating where poles cross the
-  contour is the hardest part and stays with that adopter), and the
-  `e^{−a·x}` antiderivative-table gap (the `Negate`-headed exponent misses
-  the linear-exponential rule; the improper path carries a local fallback).
+- **Phase 3b landed 2026-07-12:** radical extraneous-root guards
+  (`Solve(√(x+3) = a) → a²−3 {0 ≤ a}`, was `[]`; the guard is exact
+  per-root for an x-free RHS) and the `e^{−a·x}` antiderivative gap fixed
+  at the source (`∫e^{−ax}dx → −e^{−ax}/a`, was inert; any linear exponent
+  integrates; the Phase-3a improper-path fallback retired).
+- **Remaining (the only open producer):** definite-integration region
+  splitting (`Which` — locating where poles cross the contour is the
+  hardest part and stays with that adopter). Cosmetic residual: an
+  unsatisfiable conjoined guard (`∫₀^∞xᵖdx`) displays rather than
+  collapsing — needs contradiction detection in assumptions; not worth it
+  standalone.
 - **Known Phase-1 limitation** (accepted, revisit on evidence): a
   conditional nested under a lazy operand (`5 − When(x,c)`) lifts fully
   only on a second `evaluate()`; the guard is never dropped.

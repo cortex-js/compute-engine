@@ -786,6 +786,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     };
     return build(0);
   },
+  // Cortex `Match`: tier-0/1 constant dispatch as a nested `select`/ternary with
+  // `==` comparisons, the subject inlined into each comparison (deterministic on
+  // GPU). Tier-2 destructuring, refutable tier-3, and string constants (no
+  // string type) fail closed (D6). See BaseCompiler.compileMatchTernary.
+  Match: (args, _compile, target) =>
+    BaseCompiler.compileMatchTernary(args[0]!.engine, args, target, {
+      ternary: (c, t, e) => gpuConditional(c, t, e, target),
+      eq: '==',
+      noMatch: gpuNaN(target),
+      allowStrings: false,
+    }),
   Power: (args, compile, target) => {
     const base = args[0];
     const exp = args[1];

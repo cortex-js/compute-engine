@@ -164,50 +164,6 @@ function resolveEndpointLeaks(
 }
 
 /**
- * Antiderivative of `c·e^{L(x)}` (linear `L`, index-free nonzero slope) as a
- * local fallback for the improper-integral path only, when the general
- * antiderivative stalls (e.g. `e^{−a·x}`, whose `Negate`-headed exponent the
- * pattern rules miss). Returns `null` for any other shape. Does NOT change what
- * indefinite integration returns — used solely to close a `±∞` bound.
- */
-function improperExpAntiderivative(
-  integrand: Expression,
-  variable: string,
-  ce: ComputeEngine
-): Expression | null {
-  let fn = integrand;
-  while (
-    isFunction(fn, 'Function') ||
-    isFunction(fn, 'Block') ||
-    isFunction(fn, 'Delimiter')
-  )
-    fn = fn.op1;
-
-  let coeff: Expression = ce.One;
-  let core: Expression = fn;
-  if (isFunction(fn, 'Multiply')) {
-    const consts: Expression[] = [];
-    const varying: Expression[] = [];
-    for (const f of fn.ops) (f.has(variable) ? varying : consts).push(f);
-    if (varying.length !== 1) return null;
-    core = varying[0];
-    if (consts.length > 0) coeff = ce.function('Multiply', consts);
-  }
-
-  let exponent: Expression | undefined;
-  if (isFunction(core, 'Power') && isSymbol(core.op1, 'ExponentialE'))
-    exponent = core.op2;
-  else if (isFunction(core, 'Exp')) exponent = core.op1;
-  if (!exponent) return null;
-
-  const slope = differentiate(exponent, variable);
-  if (!slope || slope.has(variable) || slope.isSame(0)) return null;
-
-  // ∫ c·e^{L} dx = (c/slope)·e^{L}
-  return ce.function('Divide', [ce.function('Multiply', [coeff, core]), slope]);
-}
-
-/**
  * Collect the dependent-function symbol name(s) from the second argument of
  * `DSolve`/`NDSolve` (a symbol or a `List` of symbols).
  */
@@ -732,18 +688,6 @@ volumes
           }
           if (!antideriv || antideriv.operator === 'Integrate')
             antideriv = antiderivative(expr, variable);
-
-          // Improper-integral fallback: the general antiderivative can stall on
-          // an exponential whose rate is a `Negate`-headed product (`e^{−a·x}`).
-          // For a ±∞ bound, close it locally so the endpoint-limit analysis can
-          // apply — this does not change what indefinite integration returns.
-          if (
-            antideriv.has('Integrate') &&
-            (lower.isInfinity === true || upper.isInfinity === true)
-          ) {
-            const expAd = improperExpAntiderivative(expr, variable, ce);
-            if (expAd) antideriv = expAd;
-          }
 
           if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
             // Indefinite integral: keep the antiderivative, whether it was

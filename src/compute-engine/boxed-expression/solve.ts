@@ -1264,6 +1264,74 @@ function solveSingleSqrtEquation(
 }
 
 /**
+ * For a single-sqrt equation `A·√R(x) + B = 0` whose coefficients `A`, `B` are
+ * free of `x` (A ≠ 0) — the `√(u(x)) = rhs` and `k·√u = rhs` shapes with an
+ * x-free RHS — return the non-negativity guard `0 ≤ −B/A`. Isolating gives
+ * `√R = −B/A`, and a square root is non-negative, so a real root exists only
+ * where `−B/A ≥ 0`. The caller wraps each squared-equation root in this guard
+ * through `conditionalValue`: a *numeric* RHS is decidable (the guard collapses
+ * to the bare root or prunes it — today's behavior byte-for-byte), a symbolic
+ * RHS yields `When(root, 0 ≤ −B/A)`.
+ *
+ * Returns null for any other shape (x-dependent coefficient — the two-sqrt and
+ * `A(x)·√R` cases — multiple or other radicals, or no radical), so the guard is
+ * attached only for this scoped case.
+ */
+function sqrtEquationRhsGuard(
+  expr: Expression,
+  variable: string
+): Expression | null {
+  const ce = expr.engine;
+
+  // Exactly one distinct x-dependent `Sqrt`, and no other radical of x.
+  const sqrtKeys = new Set<string>();
+  let sqrtTerm: Expression | undefined;
+  let otherRadical = false;
+  const scan = (node: Expression): void => {
+    if (!node.has(variable)) return;
+    if (isFunction(node, 'Sqrt')) {
+      const key = node.toString();
+      if (!sqrtKeys.has(key)) {
+        sqrtKeys.add(key);
+        sqrtTerm = node;
+      }
+      return; // the radicand's inner variable is fine — don't recurse
+    }
+    if (isFunction(node, 'Root')) {
+      otherRadical = true;
+      return;
+    }
+    if (isFunction(node)) for (const op of node.ops!) scan(op);
+  };
+  scan(expr);
+  if (otherRadical || sqrtKeys.size !== 1 || sqrtTerm === undefined) return null;
+
+  // Substitute a fresh symbol t for √R and require the linear-in-√R shape
+  // `A·t + B` (the radical appears to the first power only).
+  const tName = ['t', 'u', 'w', 's', 'v', 'y', 'z'].find(
+    (n) => n !== variable && !expr.unknowns.includes(n)
+  );
+  if (tName === undefined) return null;
+  const t = ce.symbol(tName);
+  const sqrtTermNode: Expression = sqrtTerm;
+  const substitute = (node: Expression): Expression => {
+    if (node.isSame(sqrtTermNode)) return t;
+    if (isFunction(node))
+      return ce.function(node.operator, node.ops!.map(substitute));
+    return node;
+  };
+  const coeffs = getPolynomialCoefficients(substitute(expr), tName);
+  if (coeffs === null || coeffs.length !== 2) return null;
+  const b = coeffs[0];
+  const a = coeffs[1];
+  if (a.isSame(0) || a.has(variable) || b.has(variable)) return null;
+
+  // √R = −B/A must be non-negative for a real root.
+  const rhs = b.neg().div(a).simplify();
+  return ce.function('LessEqual', [ce.Zero, rhs]);
+}
+
+/**
  * Detect and solve equations with two sqrt terms: √(f(x)) + √(g(x)) = e
  *
  * Pattern 3: √(ax + b) + √(cx + d) = e
@@ -2639,10 +2707,20 @@ export function findUnivariateRoots(
   // today's behavior), a decidable-False guard drops the root (pruning
   // contract, decision 8), and an undecidable guard is retained as a `When`
   // whose *value* is verified below.
+  // A single-sqrt equation with an x-free RHS — `√(u(x)) = rhs` and its
+  // `k·√u = rhs` variants — needs `rhs ≥ 0` (a square root is non-negative).
+  // The squared-equation roots reach here bare; wrap each in that guard through
+  // the conditional-value chokepoint. Numeric RHS is decidable and keeps
+  // today's behavior exactly; a symbolic RHS emits `When(root, 0 ≤ rhs)`.
+  const sqrtGuard = sqrtEquationRhsGuard(originalExpr, x);
+
   const resolved: Expression[] = [];
   for (const r of result) {
     if (isFunction(r, 'When')) {
       const root = conditionalRoot(ce, r.op1.evaluate().simplify(), r.op2);
+      if (root !== null) resolved.push(root);
+    } else if (sqrtGuard !== null) {
+      const root = conditionalRoot(ce, r.evaluate().simplify(), sqrtGuard);
       if (root !== null) resolved.push(root);
     } else {
       resolved.push(r.evaluate().simplify());
@@ -2954,7 +3032,8 @@ function validateRoots(
     // (the guard already restricts the domain, decision 8): substituting the
     // `When` itself threads a guard-wrapped residual that never compares equal
     // to 0. The `When` (guard carried) is what stays in the solution list.
-    const probe = isFunction(root, 'When') ? root.op1 : root;
+    const isWhen = isFunction(root, 'When');
+    const probe = isWhen ? root.op1 : root;
     // Evaluate the expression at the root
     const value = expr.subs({ [x]: probe }).canonical.evaluate();
     if (value === null) return false;
@@ -2979,7 +3058,15 @@ function validateRoots(
     // symbolic simplification. An unsimplified `evaluate()` leaves it as a
     // non-zero-looking expression, so without this the valid root would be
     // discarded (issue #300).
-    return value.simplify().isEqual(0);
+    const zero = value.simplify().isEqual(0);
+
+    // Three-valued discipline (undefined ≠ false): only a *decidably* extraneous
+    // root is pruned. For a guarded `When` root the substitute-back check can be
+    // undecidable — e.g. `√(x+3) = a` at `x = a²−3` gives `|a| − a`, whose
+    // vanishing is unknown for free `a` — and the guard (`0 ≤ a`) already carves
+    // out the domain, so keep it. A bare root keeps today's strict behavior
+    // (undecidable ⇒ dropped), avoiding domain-collapsing false positives.
+    return isWhen ? zero !== false : zero === true;
   });
 
   // Record the extraneous candidates rejected by substitution into the

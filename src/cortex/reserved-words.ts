@@ -43,7 +43,7 @@ export const RESERVED_WORDS = new Set<string>([
   'lazy', // Not in use
   'local', // Not in use
   'loop', // Not in use
-  'match', // Not in use
+  'match', // Match-expression head: `match subject { case… }` (see parser `parseMatch`)
   'module', // Not in use
   'namespace', // Not in use
   'native', // Not in use

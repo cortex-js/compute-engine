@@ -5,6 +5,7 @@ import {
 import { checkConditions } from '../boxed-expression/rules.js';
 import { widen } from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
+import type { Type } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
   CancellationError,
@@ -20,6 +21,7 @@ import type {
 } from '../global-types.js';
 import { spellCheckMessage } from '../boxed-expression/validate.js';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
@@ -278,6 +280,87 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         );
       },
       evaluate: (ops, options) => evaluateWhich(ops, options),
+    },
+
+    // Structural pattern matching (Cortex `match`). See
+    // `docs/plans/2026-07-12-cortex-match-design.md` and
+    // `boxed-expression/match-dispatch.ts`.
+    Match: {
+      description:
+        'Structural pattern match. `Match(subject, MatchCase(pattern, body), …)` ' +
+        'evaluates `subject` once, then selects the first case whose pattern ' +
+        'matches (structurally, `isSame`-like) and whose guard holds, applying ' +
+        "its body to the captured values. Unlike `Which`, `Match` always " +
+        'decides: a symbolic subject that is not structurally a case still ' +
+        'falls through to a wildcard case. No matching case yields ' +
+        '`Error("match-no-case", subject)`.',
+      lazy: true,
+      signature: '(expression, expression+) -> unknown',
+      type: (ops) => {
+        // Result is the widened type of the case bodies (the last operand of
+        // each `MatchCase`), mirroring `If`/`Which`. Bodies reference capture
+        // names free at this scope, so most resolve to `unknown` — widen is a
+        // best-effort hint.
+        const bodyTypes: Type[] = [];
+        for (const c of ops.slice(1)) {
+          if (!isFunction(c, 'MatchCase') || c.nops < 2) continue;
+          bodyTypes.push(c.ops[c.nops - 1].type.type);
+        }
+        if (bodyTypes.length === 0) return 'nothing';
+        return widen(...bodyTypes);
+      },
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length === 0) return ce.Nothing;
+        // Canonicalize the subject (op 0); keep each case's pattern/guard/body
+        // raw (via the `MatchCase` canonical handler) so wildcards are not
+        // mangled by canonicalization before matching.
+        return ce._fn('Match', [
+          ops[0].canonical,
+          ...ops.slice(1).map((c) => c.canonical),
+        ]);
+      },
+      evaluate: (ops, options) => evaluateMatch(ops, options),
+    },
+
+    // A single match case: `MatchCase(pattern, body)` or
+    // `MatchCase(pattern, guard, body)`. Inert data (`holdAll`): the operands
+    // are kept raw — the pattern holds engine wildcards (`_x`, `__x`, …) as-is,
+    // and the guard/body are lowered to `Function` closures at match time.
+    MatchCase: {
+      description:
+        'A case of a `Match`: `MatchCase(pattern, body)` or ' +
+        '`MatchCase(pattern, guard, body)`. The pattern holds engine ' +
+        'wildcards; the body references the bound capture names.',
+      lazy: true,
+      signature: '(expression, expression, expression?) -> nothing',
+      // Keep the operands raw (do not canonicalize the pattern): return a
+      // canonical-tagged node whose operands are preserved verbatim.
+      canonical: (ops, { engine: ce }) =>
+        ce._fn('MatchCase', ops, { canonical: true }),
+    },
+
+    // Marker for a pinned computed expression inside a pattern: `Pin(expr)`
+    // matches the *value* of `expr` (evaluated in the enclosing lexical scope
+    // at match time), not its structure. Inert (resolved by `Match`).
+    Pin: {
+      description:
+        'Inside a `Match` pattern, `Pin(expr)` matches the value of `expr` ' +
+        '(evaluated at match time) rather than its structure.',
+      lazy: true,
+      signature: '(expression) -> nothing',
+    },
+
+    // Marker for top-level or-alternatives in a `MatchCase` pattern:
+    // `Alternatives(p1, p2, …)`. Binding-free by contract. Inert (expanded by
+    // `Match` into consecutive virtual cases sharing the guard and body).
+    Alternatives: {
+      description:
+        'Inside a `Match` pattern, `Alternatives(p1, p2, …)` matches if any ' +
+        'alternative matches. Alternatives must be binding-free.',
+      lazy: true,
+      signature: '(expression+) -> nothing',
+      canonical: (ops, { engine: ce }) =>
+        ce._fn('Alternatives', ops, { canonical: true }),
     },
 
     FixedPoint: {

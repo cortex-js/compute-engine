@@ -370,3 +370,121 @@ describe('Convergence guards (Phase 3a)', () => {
     expect(ce.parse('\\sum_{n=0}^\\infty (1/2)^n').N().re).toBeCloseTo(2, 12);
   });
 });
+
+describe('Phase 3b', () => {
+  const evalStr = (latex: string): string =>
+    ce.parse(latex).evaluate().toString();
+
+  // D-verify an indefinite integral: differentiate the closed form back and
+  // check it equals the integrand numerically at three sample points (house
+  // rule — verify math empirically, not from recall). The integrand is parsed
+  // separately (the `Integrate` node stores it as a `Function` lambda binding
+  // `x`, so it is not directly substitutable). `x` is the integration variable,
+  // `a` a free parameter.
+  const dVerify = (
+    integralLatex: string,
+    integrandLatex: string,
+    samples: Record<string, number>[]
+  ): void => {
+    const F = ce.parse(integralLatex).evaluate();
+    expect(F.has('Integrate')).toBe(false);
+    const dF = ce.box(['D', F, 'x']).evaluate();
+    const integrand = ce.parse(integrandLatex);
+    for (const s of samples) {
+      const sub = Object.fromEntries(
+        Object.entries(s).map(([k, v]) => [k, ce.number(v)])
+      );
+      const lhs = dF.subs(sub).N().re;
+      const rhs = integrand.subs(sub).N().re;
+      expect(rhs).not.toBeNaN();
+      expect(lhs).toBeCloseTo(rhs!, 10);
+    }
+  };
+
+  // ── Item 1: linear-exponential antiderivatives (D-verified) ────────────
+
+  it('∫ e^(−a·x) dx → closed form (was inert)', () => {
+    expect(evalStr('\\int e^{-a x} dx')).toBe('-(e^(-(a * x))) / a');
+    dVerify('\\int e^{-a x} dx', 'e^{-a x}', [
+      { x: 0.3, a: 0.7 },
+      { x: 1.1, a: 1.3 },
+      { x: -0.6, a: 0.5 },
+    ]);
+  });
+
+  it('∫ e^(−2x) dx → −e^(−2x)/2 (D-verified)', () => {
+    dVerify('\\int e^{-2x} dx', 'e^{-2x}', [{ x: 0.2 }, { x: 1.4 }, { x: -0.9 }]);
+  });
+
+  it('∫ e^(3−2x) dx → closed form (D-verified)', () => {
+    dVerify('\\int e^{3-2x} dx', 'e^{3-2x}', [
+      { x: 0.2 },
+      { x: 1.4 },
+      { x: -0.9 },
+    ]);
+  });
+
+  it('∫ 5·e^(−x/2) dx → closed form (D-verified)', () => {
+    dVerify('\\int 5e^{-x/2} dx', '5e^{-x/2}', [
+      { x: 0.2 },
+      { x: 1.4 },
+      { x: -0.9 },
+    ]);
+  });
+
+  it('∫ e^(a·x) dx behavior unchanged', () => {
+    expect(evalStr('\\int e^{ax} dx')).toBe('e^(a * x) / a');
+  });
+
+  // The improper-integral acceptance behavior is preserved through the general
+  // antiderivative path (the `improperExpAntiderivative` workaround is retired).
+  it('∫₀^∞ e^(−a·x) dx → 1/a {0 < a} (preserved)', () => {
+    expect(evalStr('\\int_0^\\infty e^{-a x} dx')).toBe('1 / a {0 < a}');
+  });
+
+  it('∫₀^∞ e^(−2x) dx → 1/2 (preserved)', () => {
+    expect(evalStr('\\int_0^\\infty e^{-2 x} dx')).toBe('1/2');
+  });
+
+  // ── Item 2: radical equations with a symbolic RHS ──────────────────────
+
+  const solveStrings = (
+    engine: ComputeEngine,
+    latex: string
+  ): string[] | undefined =>
+    engine
+      .box(['Solve', engine.parse(latex), 'x'])
+      .evaluate()
+      .ops?.map((r) => r.toString());
+
+  it('√(x+3) = a (symbolic) → one guarded root a² − 3 {0 ≤ a}', () => {
+    expect(solveStrings(ce, '\\sqrt{x+3} = a')).toEqual(['a^2 - 3 {0 <= a}']);
+  });
+
+  it('the guarded root collapses under substitution', () => {
+    const root = ce
+      .box(['Solve', ce.parse('\\sqrt{x+3} = a'), 'x'])
+      .evaluate().op1;
+    expect(root?.subs({ a: 2 }).evaluate().toString()).toBe('1');
+    expect(root?.subs({ a: -2 }).evaluate().symbol).toBe('Undefined');
+  });
+
+  it('numeric RHS unchanged: √(x+3) = 2 → [1]', () => {
+    expect(solveStrings(ce, '\\sqrt{x+3} = 2')).toEqual(['1']);
+  });
+
+  it('numeric out-of-range RHS unchanged: √(x+3) = −2 → []', () => {
+    expect(solveStrings(ce, '\\sqrt{x+3} = -2')).toEqual([]);
+  });
+
+  it('x-dependent coefficient is untouched: x·√(x²+1) = 1', () => {
+    // No guard is attached (the √ coefficient contains x); result unchanged.
+    expect(solveStrings(ce, 'x\\sqrt{x^2+1} = 1')).toEqual([
+      'sqrt(-1/2 + sqrt(5)/2)',
+    ]);
+  });
+
+  it('x-dependent RHS is untouched: √(2x+3) = x − 1', () => {
+    expect(solveStrings(ce, '\\sqrt{2x+3} = x-1')).toEqual(['2 + sqrt(6)']);
+  });
+});

@@ -75,6 +75,10 @@
 
 ### Calculus
 
+- **Exponentials with any linear exponent integrate.** `∫e^{−ax}dx` with a
+  symbolic `a` previously stayed unevaluated (only `e^{a·x}`-shaped
+  exponents were recognized); it now returns `−e^{−ax}/a`. Any linear
+  exponent works: `∫e^{3−2x}dx`, `∫5e^{−x/2}dx`.
 - **Improper integrals with symbolic parameters return convergence-guarded
   results.** `∫₀^∞ e^(−ax)dx` with a free `a` previously stayed unevaluated;
   it now returns `1/a {0 < a}`. Results that formerly leaked indeterminate
@@ -95,6 +99,12 @@
 
 ### Solving Equations
 
+- **Radical equations with a symbolic right-hand side return guarded roots.**
+  `Solve(√(x+3) = a, x)` previously returned `[]`; it now returns
+  `a² − 3 {0 <= a}` (a square root is non-negative, so a real solution
+  exists only for `a ≥ 0`). Substituting a concrete value resolves the
+  guard: `a = 2` gives `1`, `a = −2` gives `Undefined`. Numeric right-hand
+  sides are unchanged.
 - **Trigonometric and hyperbolic equations with symbolic coefficients record
   their validity condition.** `Solve(sin(x) = a, x)` previously returned
   `arcsin(a)` and `π − arcsin(a)` unconditionally — wrong whenever

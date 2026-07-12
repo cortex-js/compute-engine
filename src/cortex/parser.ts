@@ -137,6 +137,12 @@ export class Parser {
   /** Stack of open-bracket tokens, for bracket-level panic recovery. */
   private brackets: Token[] = [];
 
+  /** Implicit guards accumulated while patternizing a single `match` case:
+   * one `Element(name, type)` per type-annotated binding (`n: integer`). Reset
+   * at the start of each case's pattern parse and conjoined with the explicit
+   * guard. See `parseMatch`. */
+  private matchTypeGuards: MathJsonExpression[] = [];
+
   constructor(
     source: string,
     options?: {
@@ -333,6 +339,8 @@ export class Parser {
           return this.parseWhile();
         case 'for':
           return this.parseFor();
+        case 'match':
+          return this.parseMatch();
       }
     }
 
@@ -705,6 +713,626 @@ export class Parser {
       kw.start,
       end
     );
+  }
+
+  //
+  // ─── Match (structural pattern matching) ──────────────────────────────────
+  //
+  // `match subject { case… }` — a keyword-led, statement-block-style `{ }`
+  // (same brace rule as `if`/`while`, NOT the collection grammar). Lowers to
+  // the engine `Match` head:
+  //
+  //   ["Match", subject,
+  //     ["MatchCase", pattern, body],
+  //     ["MatchCase", pattern, guard, body]]
+  //
+  // Cases are separated like block statements (a linebreak or `;`). Each case
+  // is `pattern [if guard] => body`. See the `parsePattern`/`patternize`
+  // helpers below and `docs/plans/2026-07-12-cortex-match-design.md` §2–3.
+  //
+
+  private parseMatch(): MathJsonExpression | null {
+    const kw = this.advance(); // 'match'
+    const subject = this.parseExpression(0);
+    if (subject === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+    if (!this.check('OPEN_BRACE')) {
+      this.error(
+        ['opening-bracket-expected', '{'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+
+    const open = this.advance(); // '{'
+    this.brackets.push(open);
+
+    // A case, plus the metadata needed for the irrefutable-non-final check.
+    type CaseInfo = {
+      node: MathJsonExpression;
+      irrefutable: boolean; // pattern binds/matches anything, and no guard
+      name: string; // the binding name (for the fix-it message)
+      start: number;
+      end: number;
+    };
+    const cases: CaseInfo[] = [];
+
+    for (;;) {
+      if (this.check('CLOSE_BRACE') || this.check('EOF')) break;
+      const startPos = this.pos;
+      const info = this.parseMatchCase();
+      if (info === null) {
+        this.recoverInBracket();
+        break;
+      }
+      cases.push(info);
+      // Separator: `;`, a linebreak, or the closing brace/EOF (as in a block).
+      if (this.check('SEMICOLON')) {
+        this.advance();
+      } else if (
+        this.check('CLOSE_BRACE') ||
+        this.check('EOF') ||
+        this.current.precededByLinebreak
+      ) {
+        // A valid case boundary.
+      } else {
+        this.error(
+          ['unexpected-symbol', this.current.text],
+          this.current.start,
+          this.current.end
+        );
+        this.recoverInBracket();
+        break;
+      }
+      if (this.pos === startPos) this.advance();
+    }
+
+    this.brackets.pop();
+
+    let end: number;
+    if (this.check('CLOSE_BRACE')) {
+      end = this.current.end;
+      this.advance();
+    } else {
+      this.error(['closing-bracket-expected', '}'], open.start, open.end);
+      end = this.current.start;
+      if (isCloseToken(this.current.type)) this.advance();
+    }
+
+    // Irrefutable-case diagnostic: a non-final case whose pattern is a bare
+    // binding or `_` (with no guard) makes every later case dead code.
+    for (let i = 0; i < cases.length - 1; i++) {
+      if (cases[i].irrefutable)
+        this.error(
+          ['match-irrefutable-case', cases[i].name],
+          cases[i].start,
+          cases[i].end
+        );
+    }
+
+    return this.wrap(
+      ['Match', subject, ...cases.map((c) => c.node)] as MathJsonExpression[],
+      kw.start,
+      end
+    );
+  }
+
+  /** Parse a single `pattern [if guard] => body` case. Returns the
+   * `["MatchCase", …]` node plus the irrefutability metadata used by the
+   * non-final-irrefutable-case diagnostic, or `null` on an unrecoverable case. */
+  private parseMatchCase(): {
+    node: MathJsonExpression;
+    irrefutable: boolean;
+    name: string;
+    start: number;
+    end: number;
+  } | null {
+    const start = this.current.start;
+    this.matchTypeGuards = [];
+    const pattern = this.parseCasePattern();
+    if (pattern === null) {
+      if (!(this.current.diagnostics && this.current.diagnostics.length))
+        this.error(
+          ['expression-expected'],
+          this.current.start,
+          this.current.end
+        );
+      return null;
+    }
+    const typeGuards = this.matchTypeGuards;
+
+    // Optional guard: `if <expr>`. A case-leading `if` never starts a pattern,
+    // so an `if` here unambiguously introduces the guard.
+    let explicitGuard: MathJsonExpression | null = null;
+    if (this.check('SYMBOL') && this.current.text === 'if') {
+      this.advance(); // 'if'
+      explicitGuard = this.parseExpression(0);
+      if (explicitGuard === null) {
+        this.error(
+          ['expression-expected'],
+          this.current.start,
+          this.current.end
+        );
+        return null;
+      }
+    }
+
+    // The arrow `=>` (an OPERATOR token; not an expression operator).
+    if (!(this.check('OPERATOR') && this.current.text === '=>')) {
+      this.error(
+        ['match-case-arrow-expected'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    this.advance(); // '=>'
+
+    const body = this.parseExpression(0);
+    if (body === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+    const end = this.localEnd(body) ?? this.previousEnd();
+
+    // Conjoin the implicit type guards with the explicit guard (implicit
+    // first), building a single guard operand.
+    const guard = this.combineGuards(typeGuards, explicitGuard, start, end);
+
+    const ops: MathJsonExpression[] = ['MatchCase', pattern];
+    if (guard !== null) ops.push(guard);
+    ops.push(body);
+
+    const irrefutable = guard === null && isIrrefutablePattern(pattern);
+    return {
+      node: this.wrap(ops, start, end),
+      irrefutable,
+      name: bindingName(pattern),
+      start,
+      end,
+    };
+  }
+
+  /** Conjoin the implicit type guards with an optional explicit guard into a
+   * single guard node (implicit first, per the design), or `null` when there
+   * are none. */
+  private combineGuards(
+    typeGuards: MathJsonExpression[],
+    explicit: MathJsonExpression | null,
+    start: number,
+    end: number
+  ): MathJsonExpression | null {
+    const parts = [...typeGuards];
+    if (explicit !== null) parts.push(explicit);
+    if (parts.length === 0) return null;
+    if (parts.length === 1) return parts[0];
+    return this.wrap(['And', ...parts] as MathJsonExpression[], start, end);
+  }
+
+  /** Parse a case pattern, including top-level or-alternatives
+   * (`p₁ | p₂ | …`). Bare `|` is unclaimed by the expression grammar, so it is
+   * consumed here. Alternatives lower to `["Alternatives", …]`; each must be
+   * binding-free. */
+  private parseCasePattern(): MathJsonExpression | null {
+    const first = this.parsePattern();
+    if (first === null) return null;
+
+    const alts: MathJsonExpression[] = [first];
+    while (this.isAlternativeSeparator()) {
+      this.consumeAlternativeSeparator();
+      const alt = this.parsePattern();
+      if (alt === null) {
+        this.error(
+          ['expression-expected'],
+          this.current.start,
+          this.current.end
+        );
+        break;
+      }
+      alts.push(alt);
+    }
+
+    if (alts.length === 1) return first;
+
+    // Every alternative must be binding-free (v1 restriction).
+    for (const alt of alts) {
+      if (patternHasBinding(alt)) {
+        const o = nodeOffsets(alt);
+        this.error(
+          ['match-alternative-binding'],
+          o ? o[0] - this.baseOffset : this.current.start,
+          o ? o[1] - this.baseOffset : this.current.end
+        );
+      }
+    }
+
+    const start = this.localStart(first) ?? this.current.start;
+    const end = this.localEnd(alts[alts.length - 1]) ?? this.previousEnd();
+    return this.wrap(
+      ['Alternatives', ...alts] as MathJsonExpression[],
+      start,
+      end
+    );
+  }
+
+  /** Whether the current token is a bare `|` (an or-alternative separator),
+   * including a maximal-munched pipe such as the `|-` of `1 |-2` (only the
+   * leading `|` is the separator). The real pipe operators (`||`, `|>`,
+   * `|->`, `||>`) are NOT separators — they parse as infix operators. */
+  private isAlternativeSeparator(): boolean {
+    const t = this.current;
+    if (t.type !== 'OPERATOR' || t.text[0] !== '|') return false;
+    // A token that is itself a defined infix operator (`||`, `|>`, `|->`) is
+    // consumed by the expression grammar, not the case parser.
+    return infixOperatorForSymbol(t.text) === undefined;
+  }
+
+  /** Consume the leading `|` of an or-alternative. When maximal munch glued the
+   * `|` to following operator characters (`|-` in `1 |-2`), rewrite the current
+   * token in place to drop the leading `|`, leaving the remainder (`-2`) to be
+   * parsed as the next alternative. */
+  private consumeAlternativeSeparator(): void {
+    const t = this.current;
+    if (t.text === '|') {
+      this.advance();
+      return;
+    }
+    // Split the munched token: keep everything after the leading `|`.
+    this.tokens[this.pos] = {
+      ...t,
+      text: t.text.slice(1),
+      start: t.start + 1,
+      precededByWhitespace: false,
+      precededByLinebreak: false,
+    };
+  }
+
+  //
+  // ─── Patternize (parse an expression, patternizing leaves) ────────────────
+  //
+  // A pattern is parsed by a dedicated recursive descent that mirrors the
+  // ordinary expression grammar but transforms leaves as it goes (the
+  // `patternize` rules of the design §2): `_` → anonymous wildcard, a bare
+  // identifier → binding `_name`, literals → themselves, `...name` → sequence
+  // wildcard `___name`, and operator/call/collection expressions keep their
+  // operator with patternized operands. A dedicated parser (rather than
+  // "parse then transform") is required because `==` (pin), `...` (rest), and
+  // `n: type` are not part of the ordinary expression grammar.
+  //
+
+  /** A single pattern (no top-level `|` alternatives — the caller handles
+   * those). Handles a leading `==` pin, then an operator-precedence pattern. */
+  private parsePattern(): MathJsonExpression | null {
+    // Pin: a leading `==` matches the *value* of the following expression.
+    if (this.check('OPERATOR') && this.current.text === '==')
+      return this.parsePin();
+    return this.parsePatternInfix(0);
+  }
+
+  /** `== <operand>` → a pin pattern. The operand grammar is a primary/postfix
+   * expression (`== Pi`, `== limit`, `== f(2)`), NOT patternized: it is an
+   * ordinary expression evaluated at match time in the enclosing scope. A pin
+   * of a literal lowers to the literal verbatim (it matches structurally); a
+   * pin of any other expression — including a bare symbol, whose value is only
+   * known at match time — lowers to `["Pin", expr]`. */
+  private parsePin(): MathJsonExpression | null {
+    const eqTok = this.advance(); // '=='
+    const operand = this.parsePostfix();
+    if (operand === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+    const end = this.localEnd(operand) ?? this.previousEnd();
+    // A literal pin matches structurally; drop the `Pin` head.
+    if (isLiteralNode(operand)) return operand;
+    return this.wrap(['Pin', operand] as MathJsonExpression[], eqTok.start, end);
+  }
+
+  /** Operator-precedence pattern parsing: a primary pattern followed by infix
+   * operator patterns (`a + b` → `["Add", _a, _b]`) and postfix (`n!`). */
+  private parsePatternInfix(minPrecedence: number): MathJsonExpression | null {
+    let left = this.parsePatternPostfix();
+    if (left === null) return null;
+
+    for (;;) {
+      const post = this.peekPostfix();
+      if (post !== null && post.precedence >= minPrecedence) {
+        const start = this.localStart(left) ?? this.current.start;
+        const opTok = this.advance();
+        left = this.wrap(
+          [post.name, left] as MathJsonExpression[],
+          start,
+          opTok.end
+        );
+        continue;
+      }
+
+      const op = this.peekInfix();
+      if (op === null) break;
+      if (op.def.precedence < minPrecedence) break;
+
+      if (op.asymmetric) this.emitAsymmetric(this.current, op.def.symbol);
+      for (let i = 0; i < op.tokenCount; i++) this.advance();
+
+      const rightMin =
+        op.def.assoc === 'right' ? op.def.precedence : op.def.precedence + 1;
+      const right = this.parsePatternInfix(rightMin);
+      if (right === null) {
+        this.error(
+          ['expression-expected'],
+          this.current.start,
+          this.current.end
+        );
+        break;
+      }
+      left = this.combineInfix(op.def, left, right);
+    }
+
+    return left;
+  }
+
+  /** A primary pattern followed by call clauses (`f(p…)`). A prefix sign
+   * (`-2`, `+n`) and `!` are folded first. */
+  private parsePatternPostfix(): MathJsonExpression | null {
+    const token = this.current;
+
+    // Prefix sign/negation run (`-2` folds into the literal; `!p` → Not).
+    const sigils = this.prefixSigils(token);
+    if (sigils !== null) {
+      const operandToken = this.peek();
+      if (operandToken.precededByWhitespace) {
+        this.error(['unexpected-symbol', token.text], token.start, token.end);
+        this.advance();
+        return null;
+      }
+      const start = token.start;
+      this.advance();
+      const operand = this.parsePatternPostfix();
+      if (operand === null) {
+        this.error(['expression-expected'], token.start, token.end);
+        return null;
+      }
+      return this.applyPrefix(sigils, operand, start);
+    }
+
+    switch (token.type) {
+      case 'NUMBER':
+        return this.parseNumber();
+      case 'STRING':
+        return this.parseString();
+      case 'SYMBOL':
+      case 'VERBATIM_SYMBOL': {
+        this.advance();
+        this.harvest(token);
+        const name =
+          token.type === 'VERBATIM_SYMBOL'
+            ? (token.value ?? '')
+            : token.text;
+        // A call clause `(…)` abutting the name: the name is an operator head
+        // kept verbatim (design rule 9), with patternized operands.
+        if (this.check('OPEN_PAREN') && !this.current.precededByWhitespace)
+          return this.parsePatternCall(name, token.start);
+        return this.finishBindingPattern(name, token.start, token.end);
+      }
+      case 'OPERATOR':
+        // `...name` / `...` sequence wildcard (valid inside a list/tuple; the
+        // collection builders enforce the single-rest rule). A bare `...` node
+        // is produced and lowered to `___name`/`___`.
+        if (token.text === '...') return this.parseRestPattern();
+        return null;
+      case 'OPEN_BRACKET':
+        return this.parseListPattern();
+      case 'OPEN_PAREN':
+        return this.parseTuplePattern();
+      case 'OPEN_BRACE':
+        return this.parseBracePattern();
+      default:
+        return null;
+    }
+  }
+
+  /** Lower a bare identifier to its pattern leaf: `_` → anonymous wildcard,
+   * boolean/numeric literals → themselves, any other identifier → a binding
+   * `_name` (all plain identifiers bind, including constants like `Pi`/`e`/`i`
+   * — design rule 2). A trailing `: Type` annotation on a binding records an
+   * implicit type guard. */
+  private finishBindingPattern(
+    name: string,
+    start: number,
+    end: number
+  ): MathJsonExpression {
+    if (name === '_') return this.wrap({ sym: '_' }, start, end);
+    // Boolean and numeric-constant literals match structurally.
+    if (name === 'true') return this.wrap({ sym: 'True' }, start, end);
+    if (name === 'false') return this.wrap({ sym: 'False' }, start, end);
+    if (name === 'NaN') return this.wrap({ num: 'NaN' }, start, end);
+    if (name === 'Infinity') return this.wrap({ num: '+Infinity' }, start, end);
+
+    const binding = this.wrap({ sym: '_' + name }, start, end);
+
+    // Optional `: Type` → an implicit `Element(name, type)` guard, conjoined
+    // with any explicit guard by the caller.
+    if (this.check('OPERATOR') && this.current.text === ':') {
+      const annotation = this.parseTypeAnnotation();
+      if (annotation !== null) {
+        const typeText = stringValue(annotation.node) ?? '';
+        this.matchTypeGuards.push(
+          this.wrap(
+            [
+              'Element',
+              this.wrap({ sym: name }, start, end),
+              this.wrap({ sym: typeText }, start, annotation.end),
+            ] as MathJsonExpression[],
+            start,
+            annotation.end
+          )
+        );
+      }
+    }
+
+    return binding;
+  }
+
+  /** A call pattern `head( p, … )` → `[head, …patternized]`. */
+  private parsePatternCall(
+    head: string,
+    start: number
+  ): MathJsonExpression {
+    const { values, end } = this.parsePatternElements('CLOSE_PAREN', ')');
+    return this.wrap([head, ...values] as MathJsonExpression[], start, end);
+  }
+
+  /** `...name` / `...` → a sequence-wildcard leaf `___name` / `___`. */
+  private parseRestPattern(): MathJsonExpression {
+    const dots = this.advance(); // '...'
+    if (
+      (this.check('SYMBOL') || this.check('VERBATIM_SYMBOL')) &&
+      !this.current.precededByLinebreak
+    ) {
+      const nameTok = this.advance();
+      this.harvest(nameTok);
+      const name =
+        nameTok.type === 'VERBATIM_SYMBOL'
+          ? (nameTok.value ?? '')
+          : nameTok.text;
+      return this.wrap({ sym: '___' + name }, dots.start, nameTok.end);
+    }
+    return this.wrap({ sym: '___' }, dots.start, dots.end);
+  }
+
+  /** `[p, …]` → `["List", …patternized]`, at most one `...rest`. */
+  private parseListPattern(): MathJsonExpression {
+    const { values, open, end } = this.parsePatternElements(
+      'CLOSE_BRACKET',
+      ']'
+    );
+    this.checkSingleRest(values, open.start, end);
+    return this.wrap(['List', ...values] as MathJsonExpression[], open.start, end);
+  }
+
+  /** `(p, …)` → `["Tuple", …]` for 2+ elements; a single element is grouping
+   * (returned bare). At most one `...rest`. */
+  private parseTuplePattern(): MathJsonExpression | null {
+    const { values, open, end } = this.parsePatternElements('CLOSE_PAREN', ')');
+    this.checkSingleRest(values, open.start, end);
+    if (values.length === 0) {
+      this.error(['expression-expected'], open.start, end);
+      return null;
+    }
+    if (values.length === 1) return values[0];
+    return this.wrap(
+      ['Tuple', ...values] as MathJsonExpression[],
+      open.start,
+      end
+    );
+  }
+
+  /** A brace pattern: `{k -> p, …}` → `Dictionary` (keys literal, values
+   * patternized); `{p, …}` → `Set` of patterns; `{}` → empty `Set`. */
+  private parseBracePattern(): MathJsonExpression {
+    // `{}` → empty Set.
+    if (this.peek().type === 'CLOSE_BRACE') {
+      const open = this.advance();
+      const close = this.advance();
+      return this.wrap(['Set'], open.start, close.end);
+    }
+    // `{->}` → empty Dictionary.
+    if (
+      this.peek().type === 'OPERATOR' &&
+      this.peek().text === '->' &&
+      this.peek(2).type === 'CLOSE_BRACE'
+    ) {
+      const open = this.advance();
+      this.advance(); // '->'
+      const close = this.advance();
+      return this.wrap(['Dictionary'], open.start, close.end);
+    }
+
+    const { values, open, end } = this.parsePatternElements('CLOSE_BRACE', '}');
+    if (values.length > 0 && operator(values[0]) === 'KeyValuePair')
+      return this.buildDictionary(values, open.start, end);
+    return this.wrap(['Set', ...values] as MathJsonExpression[], open.start, end);
+  }
+
+  /** Parse a comma-separated list of pattern elements delimited by the current
+   * opening bracket and `closeType`. Each element is a full pattern (so pins
+   * and nested alternatives-free patterns nest). A `k -> p` element is a
+   * dictionary entry: the key stays literal, the value is patternized. */
+  private parsePatternElements(
+    closeType: TokenType,
+    closeText: string
+  ): { values: MathJsonExpression[]; open: Token; end: number } {
+    const open = this.advance(); // the opening bracket
+    this.brackets.push(open);
+
+    const values: MathJsonExpression[] = [];
+    if (!this.check(closeType)) {
+      for (;;) {
+        const element = this.parsePatternEntry();
+        if (element === null) {
+          this.reportUnexpected(this.current);
+          this.recoverInBracket();
+          break;
+        }
+        values.push(element);
+        if (!this.match('COMMA')) break;
+        if (this.check(closeType)) break; // trailing comma
+      }
+    }
+
+    this.brackets.pop();
+
+    let end: number;
+    if (this.check(closeType)) {
+      end = this.current.end;
+      this.advance();
+    } else {
+      this.error(['closing-bracket-expected', closeText], open.start, open.end);
+      end = this.current.start;
+      if (isCloseToken(this.current.type)) this.advance();
+    }
+
+    return { values, open, end };
+  }
+
+  /** A pattern element inside a collection: either a `key -> value` dictionary
+   * entry (key literal, value patternized) or a plain pattern. The `->`
+   * (KeyValuePair) is an infix operator, so `parsePattern` already folds
+   * `key -> value` into a `KeyValuePair` node with *both* sides patternized;
+   * here the key is reverted to its literal written form. */
+  private parsePatternEntry(): MathJsonExpression | null {
+    const pat = this.parsePattern();
+    if (pat === null) return null;
+    if (operator(pat) === 'KeyValuePair') {
+      const rawKey = operand(pat, 1);
+      const value = operand(pat, 2) ?? 'Nothing';
+      const key = rawKey === null ? { str: '' } : unpatternizeKey(rawKey);
+      const o = nodeOffsets(pat);
+      return this.wrap(
+        ['KeyValuePair', key, value] as MathJsonExpression[],
+        o ? o[0] - this.baseOffset : this.current.start,
+        o ? o[1] - this.baseOffset : this.previousEnd()
+      );
+    }
+    return pat;
+  }
+
+  /** Emit a `match-multiple-rest` diagnostic if a list/tuple pattern has more
+   * than one `...rest` element (v1 allows at most one). */
+  private checkSingleRest(
+    values: MathJsonExpression[],
+    start: number,
+    end: number
+  ): void {
+    let rests = 0;
+    for (const v of values) {
+      const s = symbolNameOf(v);
+      if (s !== null && s.startsWith('___')) rests += 1;
+    }
+    if (rests > 1) this.error(['match-multiple-rest'], start, end);
   }
 
   //
@@ -1531,6 +2159,10 @@ export class Parser {
         // not only as a top-level statement. (`while`/`for` stay statement-only:
         // they evaluate for effect to `Nothing`.)
         if (token.text === 'if') return this.parseIf();
+        // `match subject { … }` is an expression (it yields a value, like the
+        // conditional-value heads `Which`/`When`), so it is a primary usable as
+        // an assignment RHS, argument, or operand — not only a statement.
+        if (token.text === 'match') return this.parseMatch();
         // `do { … }` is a block expression: a statement block whose value is
         // its final statement, usable in any expression position. It lowers to
         // the same `["Block", …]` an `if`/`function` body produces, so block
@@ -2183,6 +2815,66 @@ function symbolNameOf(expr: MathJsonExpression): string | null {
   )
     return (expr as { sym: string }).sym;
   return null;
+}
+
+/** Whether a pattern leaf is a literal that matches structurally (a number, a
+ * string, or a boolean-literal symbol `True`/`False`). Used by pin lowering to
+ * decide between a bare literal and a `["Pin", …]` node. */
+function isLiteralNode(expr: MathJsonExpression): boolean {
+  if (isNumberNode(expr)) return true;
+  if (typeof expr === 'object' && expr !== null && 'str' in expr) return true;
+  if (typeof expr === 'string' && /^'[\s\S]*'$/.test(expr)) return true;
+  const s = symbolNameOf(expr) ?? (typeof expr === 'string' ? expr : null);
+  return s === 'True' || s === 'False';
+}
+
+/** Whether a pattern is irrefutable on its own: a lone binding (`_name`) or the
+ * anonymous wildcard (`_`). A non-final irrefutable case (with no guard) makes
+ * later cases dead. Rests and typed bindings are handled via guards, so only a
+ * bare single-symbol wildcard/binding qualifies. */
+function isIrrefutablePattern(pattern: MathJsonExpression): boolean {
+  const s = symbolNameOf(pattern);
+  if (s === null) return false;
+  if (s === '_') return true; // anonymous wildcard
+  if (s.startsWith('___')) return false; // a rest is only meaningful in a list
+  return s.startsWith('_'); // a binding `_name`
+}
+
+/** The written binding name of an irrefutable pattern (`_Pi` → `Pi`, `_` →
+ * `_`), for the irrefutable-case fix-it message. */
+function bindingName(pattern: MathJsonExpression): string {
+  const s = symbolNameOf(pattern);
+  if (s === null) return '';
+  if (s === '_') return '_';
+  return s.replace(/^_+/, '');
+}
+
+/** Whether a pattern contains a *named* wildcard binding (`_name` / `___name`),
+ * anywhere but inside a `Pin` (whose operand is an ordinary value expression).
+ * Anonymous wildcards (`_` / `___`) do not bind. Used to reject bindings inside
+ * or-alternatives. */
+function patternHasBinding(pattern: MathJsonExpression): boolean {
+  const s = symbolNameOf(pattern);
+  if (s !== null) {
+    const m = s.match(/^_+/);
+    return m !== null && s.length > m[0].length;
+  }
+  const ops = fnOps(pattern);
+  if (ops === null) return false;
+  if (ops[0] === 'Pin') return false; // the pinned expr is an ordinary value
+  return ops.slice(1).some(patternHasBinding);
+}
+
+/** Un-patternize a dictionary key node: a bare-binding key `_foo` reverts to
+ * the written symbol `foo` (dictionary keys are literal, not bindings). */
+function unpatternizeKey(key: MathJsonExpression): MathJsonExpression {
+  const s = symbolNameOf(key);
+  if (s !== null && s.startsWith('_') && s !== '_') {
+    const name = s.replace(/^_+/, '');
+    const offsets = nodeOffsets(key);
+    return offsets ? { sym: name, sourceOffsets: offsets } : { sym: name };
+  }
+  return key;
 }
 
 /** A dictionary key: an unquoted symbol key (`one`) becomes a string

@@ -666,6 +666,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     return build(0);
   },
 
+  // Cortex `Match`: structural pattern matching. Not supported by the Python
+  // target in v1 (a chained conditional lowering is a possible future bonus, not
+  // required — design §5). Fail closed (D6).
+  Match: () => {
+    throw new Error(
+      'Match: pattern matching is not supported by the Python compile target in v1. Fail closed (D6).'
+    );
+  },
+
   // Loop — a Python statement loop (`while True:` / `for … in range(…):`), not
   // the base compiler's JS `for`-IIFE (a Python SyntaxError). See
   // compilePythonLoop for the supported shapes.

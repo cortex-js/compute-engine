@@ -487,7 +487,148 @@ export function serializeCortex(
       }
       return serializeOperator(expr) ?? serializeGenericFunction(expr);
     },
+
+    //
+    // Match (structural pattern matching): the keyword-led block form
+    //
+    //   match <subject> {
+    //     <pattern> [if <guard>] => <body>
+    //     …
+    //   }
+    //
+    // Cases serialize one per line; patterns go through `serializePattern`
+    // (bindings `_n` → `n`, `___rest` → `...rest`, `Pin`/bare symbol → `== …`,
+    // `Alternatives` → ` | `-joined). See the Cortex `match` design §2–3.
+    //
+    Match: (expr: MathJsonExpression): FormattingBlock => {
+      const subject = operand(expr, 1);
+      const cases = operands(expr).slice(1);
+      const head = fmt.line('match ', serializeExpression(subject), ' {');
+      if (cases.length === 0)
+        return fmt.line('match ', serializeExpression(subject), ' {}');
+      return fmt.stack(
+        head,
+        fmt.indent(fmt.stack(...cases.map(serializeMatchCase))),
+        fmt.text('}')
+      );
+    },
+
+    // A stray `MatchCase` outside a `Match` (or the entry used by `Match`).
+    MatchCase: (expr: MathJsonExpression): FormattingBlock =>
+      serializeMatchCase(expr),
+
+    // A stray `Pin` / `Alternatives` outside pattern position: serialize in the
+    // pattern spelling so it round-trips.
+    Pin: (expr: MathJsonExpression): FormattingBlock => serializePattern(expr),
+    Alternatives: (expr: MathJsonExpression): FormattingBlock =>
+      serializePattern(expr),
   };
+
+  // A single `match` case: `pattern [if guard] => body`.
+  function serializeMatchCase(expr: MathJsonExpression): FormattingBlock {
+    const args = operands(expr);
+    const pattern = serializePattern(args[0] ?? 'Nothing');
+    const hasGuard = args.length >= 3;
+    const guard = hasGuard ? args[1] : null;
+    const body = hasGuard ? args[2] : args[1];
+    const parts: (string | FormattingBlock)[] = [pattern];
+    if (guard !== null && guard !== undefined)
+      parts.push(' if ', serializeExpression(guard));
+    parts.push(' => ', serializeExpression(body ?? 'Nothing'));
+    return fmt.line(...parts);
+  }
+
+  // Serialize a MathJSON pattern back to Cortex pattern syntax. The inverse of
+  // the parser's `patternize` pass.
+  function serializePattern(p: MathJsonExpression): FormattingBlock {
+    const h = operator(p);
+    if (h === 'Pin')
+      return fmt.line('== ', serializeExpression(operand(p, 1)));
+    if (h === 'Alternatives') {
+      const alts = operands(p);
+      const parts: (string | FormattingBlock)[] = [];
+      alts.forEach((a, i) => {
+        if (i > 0) parts.push(' | ');
+        parts.push(serializePattern(a));
+      });
+      return fmt.line(...parts);
+    }
+    if (h === 'List')
+      return fmt.fencedList(
+        '[',
+        fmt.separator(','),
+        ']',
+        operands(p).map(serializePattern)
+      );
+    if (h === 'Tuple')
+      return fmt.fencedList(
+        '(',
+        fmt.separator(','),
+        ')',
+        operands(p).map(serializePattern)
+      );
+    if (h === 'Dictionary') {
+      const entries = operands(p);
+      if (entries.length === 0)
+        return fmt.line(
+          fmt.fence('{'),
+          fmt.relationalOperator('->'),
+          fmt.fence('}')
+        );
+      return fmt.fencedList(
+        '{',
+        fmt.separator(','),
+        '}',
+        entries.map((kv) =>
+          fmt.line(
+            serializeExpression(operand(kv, 1)),
+            fmt.relationalOperator('->'),
+            serializePattern(operand(kv, 2) ?? 'Nothing')
+          )
+        )
+      );
+    }
+
+    // Symbol leaves: wildcard, binding, rest, boolean literal, or a bare
+    // constant symbol (which must re-parse as a pin, not a binding).
+    const s = symbol(p);
+    if (s !== null) {
+      if (s === '_') return fmt.text('_');
+      if (s === 'True') return fmt.text('true');
+      if (s === 'False') return fmt.text('false');
+      if (s.startsWith('___')) return fmt.text('...' + s.slice(3));
+      if (s.startsWith('_')) return fmt.text(escapeSymbol(s.slice(1)));
+      return fmt.line('== ', fmt.text(escapeSymbol(s)));
+    }
+
+    if (isNumberLiteral(p))
+      return fmt.text(serializeNumber(p, NUMBER_FORMATTING_OPTIONS));
+    if (typeof p === 'object' && p !== null && 'str' in p)
+      return serializeString((p as { str: string }).str);
+    const sv = typeof p === 'string' && /^'[\s\S]*'$/.test(p) ? stringValue(p) : null;
+    if (sv !== null) return serializeString(sv);
+
+    // A general operator/call pattern (`a + b`, `f(p…)`): revert bindings to
+    // their written names, then serialize as an ordinary expression.
+    return serializeExpression(unpatternizeForDisplay(p));
+  }
+
+  // Revert a pattern's bindings (`_n` → `n`) recursively so a general
+  // operator/call pattern can be serialized by the ordinary path.
+  function unpatternizeForDisplay(p: MathJsonExpression): MathJsonExpression {
+    const s = symbol(p);
+    if (s !== null) {
+      if (s !== '_' && !s.startsWith('___') && s.startsWith('_'))
+        return { sym: s.slice(1) };
+      return p;
+    }
+    const h = operator(p);
+    if (h)
+      return {
+        fn: [h, ...operands(p).map(unpatternizeForDisplay)],
+      } as MathJsonExpression;
+    return p;
+  }
 
   // The type text of a `Typed` type operand (`{str: 'integer'}`, a quoted
   // MathJSON string `'integer'`, or a bare type-name symbol `integer`).

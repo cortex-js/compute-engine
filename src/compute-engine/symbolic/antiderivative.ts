@@ -3893,9 +3893,14 @@ export function antiderivative(fn: Expression, index: string): Expression {
   }
 
   // Handle basic functions: e^x, sin(x), cos(x), ln(x), x^n
-  if (isFunction(fn, 'Exp') && sym(fn.op1) === index) {
-    // ∫e^x dx = e^x
-    return fn;
+  // ∫ e^{L(x)} dx = e^{L(x)} / L′ for any linear exponent L (L′ index-free and
+  // nonzero). Covers ∫e^x (L′=1), ∫e^{−a·x} (a `Negate`-headed exponent the
+  // `Multiply`/`Add`-only linear-substitution and rule paths miss), ∫e^{a·x+b},
+  // ∫e^{−x/2}, ∫e^{3−2x}, … The generic convention applies: L′ can be zero only
+  // on a measure-zero set, so no `When` guard is emitted.
+  if (isFunction(fn, 'Exp')) {
+    const a = linearIndexCoefficient(fn.op1, index);
+    if (a) return fn.div(a);
   }
 
   if (isFunction(fn, 'Sin') && sym(fn.op1) === index) {
@@ -3914,9 +3919,12 @@ export function antiderivative(fn: Expression, index: string): Expression {
   }
 
   if (isFunction(fn, 'Power')) {
-    // ∫e^x dx = e^x (e^x is parsed as ['Power', 'ExponentialE', 'x'])
-    if (sym(fn.op1) === 'ExponentialE' && sym(fn.op2) === index) {
-      return fn;
+    // ∫e^{L(x)} dx = e^{L(x)} / L′ for a linear exponent (e^x is the L′=1 case;
+    // e^x is canonicalized to ['Power', 'ExponentialE', …]). See the `Exp`
+    // handler above — this is the same rule for the `Power`-headed form.
+    if (sym(fn.op1) === 'ExponentialE') {
+      const a = linearIndexCoefficient(fn.op2, index);
+      if (a) return fn.div(a);
     }
 
     // ∫secⁿx dx / ∫cscⁿx dx (bare index, integer n ≥ 2) via reduction.

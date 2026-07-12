@@ -170,6 +170,31 @@ subexpressions verbatim: `Pi` in a pattern only matches `Pi`). A pinned
 evaluate handler resolves all `Pin` nodes (evaluate in lexical scope, embed
 the value) once per match evaluation, before case selection.
 
+**Phase-3 implementation notes** (deviations fixed during implementation):
+
+- **The Cortex parser emits `Pin` for ALL non-literal pin operands**,
+  including plain symbols: `== Pi` → `["Pin", "Pi"]`, not bare `"Pi"`. The
+  parser cannot distinguish a constant from a runtime variable lexically,
+  and a bare-symbol pattern does *not* resolve a runtime variable's value
+  in the matcher — `Pin` is correct for both, and Phase-2 tier-0 already
+  dispatches `Pin`-of-constant-symbol. (The "plain symbol lowers without a
+  head" shortcut below remains valid for hand-written MathJSON.)
+- **`Infinity`/`NaN` are numeric literals in Cortex**, so `== Infinity`
+  lowers to the literal (no `Pin`), and — better — a *bare* `Infinity`
+  pattern is a literal, not a binding: the binding trap doesn't exist for
+  them.
+- **Typed patterns** `n: integer` lower to `_n` + implicit guard
+  `["Element", "n", type]` conjoined (`And`) with any explicit guard.
+  Only simple named types resolve; a compound/parametric type annotation
+  currently yields an always-symbolic guard (case falls through) rather
+  than a parse diagnostic — candidate for a later hard check.
+- **`...` needs no new lexing** (`.` is an operator char; `...`
+  maximal-munches into one token consumed only in pattern position).
+  The `|-` munch in `1 |-2` is handled by splitting the munched token in
+  the case parser.
+- **Not pattern forms** (do not parse in pattern position): invisible
+  multiplication (`2n`) and index clauses (`xs[i]`).
+
 Or-alternatives lower to an `["Alternatives", p₁, p₂, …]` head as the
 case's pattern — kept in the MathJSON (rather than desugared into duplicate
 cases) so Cortex round-trips `1 | 2 | == Pi` faithfully. The evaluate and
@@ -210,6 +235,23 @@ same expansion into consecutive rules.
   swallowing a non-exhaustive match hides bugs), not a throw. Static
   exhaustiveness checking is a later nicety, not v1 (the irrefutable-case
   diagnostic in §2 *is* v1).
+- **Phase-1 implementation notes** (conventions fixed during
+  implementation, binding on later phases):
+  - **Guards lower like bodies**: a guard is a `Function` closure over the
+    *bare* capture names (`n`, not `_n`) — one convention for guard and
+    body, same constant-shadowing behavior. Phase-3 Cortex lowering emits
+    bare names in both.
+  - **Subject evaluates exactly, always**: under `numericApproximation`
+    the subject is still evaluated exactly (matching is structural;
+    `Match(Pi, MatchCase(Pi, …)).N()` must select the same case as
+    `evaluate()`); only the selected body is numericized.
+  - **Pin resolution** requires `.canonical.evaluate()` on the held pinned
+    expression — a raw bare symbol does not resolve its scope binding
+    under bare `.evaluate()`.
+  - **`MatchCase` canonical form holds raw operands** (canonical-tagged
+    node, operands preserved verbatim, like `Hold`). Phase 2 must build
+    dispatch tables from these raw operands — never re-canonicalize a
+    pattern.
 - **Serialization.** Cortex round-trips to the surface syntax
   (`serialize-cortex.ts` gets a `Match` case). LaTeX serialization uses the
   generic function form `\operatorname{Match}(…)`; the `cases` environment
@@ -288,6 +330,35 @@ indexed operand reads, literal/pin `isSame` checks at fixed positions, then
 one closure application with the extracted operands. No backtracking, no
 generic matcher.
 
+**Phase-2 implementation notes** (deviations fixed during implementation):
+
+- **Number leaves compare with the matcher's semantics — `isEqual` with
+  tolerance — not strict `isSame`.** The generic matcher (`matchOnce`)
+  already uses `isEqual` for number leaves, so `Match(1/3,
+  MatchCase(0.3333333333333333, …))` *selects* that case. Tiers 0–2 must be
+  observationally identical to tier 3, so `leafEquals` follows `isEqual`
+  for numbers. The §1 "structural" framing is exact for symbols/operators
+  and tolerance-based for number leaves.
+- **Tier-0 keeps a faithful linear fallback**: hashable-exact subjects
+  (safe machine integer / string / symbol) probe the `Map`; any other
+  subject (floats, rationals, operator expressions) scans the segment's
+  constants with `leafEquals` — this is what keeps a near-integer float
+  subject selecting the same case as tier 3.
+- **Integer dispatch keys are restricted to safe machine integers**
+  (bignum `toString` is exponential/precision-limited for huge integers);
+  out-of-range integer literals degrade to tier 1, which is correct by
+  construction.
+- **Dictionary patterns are tier 3 for now** (fast-path deferred; the §4
+  tier-2 listing is aspirational for dictionaries).
+- **Plan cache** is a module-level `WeakMap` keyed on the Match's `ops`
+  array (stable per canonical `BoxedFunction` under `holdAll`/`holdMap`);
+  guard/body closures are built once per plan — safe because free
+  variables in closures resolve at apply time (late binding; verified by
+  scope-reuse tests).
+- **Bare constant-symbol patterns** resolve constness via
+  `ce.box(name).isConstant` (a raw held symbol reports `isConstant ===
+  false`); this is a metadata lookup, not a pattern re-canonicalization.
+
 ### Tier 3 — general
 
 Everything else — operator/algebraic patterns (`a + b`), commutative
@@ -350,6 +421,26 @@ is **fail-closed** (better to refuse than emit wrong code).
 Note the ordering consequence: mixed-tier case lists compile as a fast
 prefix + fail-closed only if a *reachable* tail case is tier 3. A tier-3
 case that is provably shadowed (earlier `_` case) is dead and ignorable.
+
+**Phase-4 implementation notes** (deviations fixed during implementation):
+
+- **Interval-JS is fail closed in v1**, not mirrored on interval-`Which`:
+  `_IA.piecewise` is inequality-piecewise, and a faithful interval
+  treatment of *structural equality dispatch* is exactly the
+  discontinuity semantics this section defers — so it was not invented.
+- **Rest-capture seam**: compiled `...rest` binds a JS sub-array
+  (`.slice`); the interpreter wraps multi-element rests as `Sequence(…)`.
+  Bodies treating `rest` as a collection agree; a body relying on the
+  `Sequence` wrapper would diverge in compiled code.
+- **Guarded bare-binding cases** (`n if n > 0 => …`) classify tier 3 and
+  fail closed — compilable in principle, a candidate future rung. Only an
+  *unguarded* trailing `_`/bare binding compiles (as the final `else`,
+  binding the subject).
+- **No-match compiles to `NaN`** (the interpreted error-value seam is
+  accepted, same as `Which`). Python target: fail closed in v1.
+- Compiled float comparisons are native `===`/`==` vs. the interpreter's
+  tolerant `isEqual` — the same seam compiled `Which` carries (documented
+  in `match-compile.test.ts`).
 
 ## 6. Implementation plan
 

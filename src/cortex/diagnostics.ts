@@ -27,6 +27,10 @@ export type DiagnosticCode =
   | 'evaluation-canceled' // %0 = machine-readable CancellationCause, %1 = error description (non-final statement hit a cap breach: timeout/iteration/recursion)
   | 'unknown-function' // %0 = called name, %1 = suggested known operator ("did you mean")
   | 'latex-parsing-unavailable' // no LaTeX parser was injected for a `$…$` island
+  | 'match-case-arrow-expected' // a `match` case is missing its `=>` arrow
+  | 'match-alternative-binding' // a named binding appears inside an or-alternative
+  | 'match-multiple-rest' // more than one `...rest` in a single list/tuple pattern
+  | 'match-irrefutable-case' // %0 = binding name — a non-final case that matches anything
   | 'invalid-escape-sequence' // %0 = escape sequence char
   | 'invalid-unicode-codepoint-string' // %0 = codepoint string
   | 'invalid-unicode-codepoint-value' // %0 = codepoint

@@ -15,6 +15,17 @@ import {
   isDictionary,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { isWildcard } from '../boxed-expression/pattern-utils.js';
+import {
+  getMatchPlan,
+  matchPatternReferences,
+} from '../boxed-expression/match-dispatch.js';
+import type {
+  CompiledCase,
+  Segment,
+  ShapeNode,
+  ElementPlan,
+} from '../boxed-expression/match-dispatch.js';
 
 import type { CompileTarget, TargetSource } from './types.js';
 
@@ -506,6 +517,20 @@ export class BaseCompiler {
       const val = BaseCompiler.compile(args[0], target);
       const cond = BaseCompiler.guardCondition(args[1], target);
       return `((${cond}) ? (${val}) : NaN)`;
+    }
+
+    if (h === 'Match') {
+      // A target may override the whole construct (GPU emits target-specific
+      // ternaries; interval/Python fail closed). Otherwise the default is the
+      // JavaScript emission (chained `if`/`switch` in an arrow-IIFE).
+      const fn = target.functions?.(h);
+      if (typeof fn === 'function')
+        return fn(
+          args,
+          (expr) => BaseCompiler.compileValueOperand(expr, target),
+          target
+        );
+      return BaseCompiler.compileMatchJS(engine, args, target);
     }
 
     if (h === 'Block') {
@@ -1324,6 +1349,433 @@ export class BaseCompiler {
     return expr.isNonNegative === true;
   }
 
+  // ───────────────────────────────────────────────────────────────────────
+  // `Match` compilation (Cortex structural pattern matching, Phase 4 —
+  // docs/plans/2026-07-12-cortex-match-design.md §5).
+  //
+  // Compilation reuses the classification ladder from `match-dispatch.ts`
+  // (`getMatchPlan`): tier 0/1 (constant / literal / pin-of-constant) dispatch,
+  // tier 2 fixed-shape `List`/`Tuple` destructuring, and fail-closed (D6) for
+  // tier 3 and anything a target cannot express. The subject is evaluated once
+  // (an IIFE parameter on JS; inlined where the target has no binding form).
+  //
+  // Compiled-vs-interpreted seam (accepted, §4 Phase-2 note): number leaves are
+  // compared with the target's native `===`/`==`, not the interpreter's
+  // tolerant `isEqual` — the same float-equality seam compiled `Which` already
+  // has. No-match falls through to `NaN` (matching compiled `Which`), not the
+  // interpreter's `["Error", "match-no-case", …]` value.
+  // ───────────────────────────────────────────────────────────────────────
+
+  /** Above this many integer-constant tier-0 cases, a dispatch run is emitted
+   * as a `switch` (JS engines jump-table dense integer switches) instead of a
+   * chain of `if (s === k)` comparisons. Below it, comparisons are simpler and
+   * JIT-equivalent. */
+  private static readonly MATCH_SWITCH_THRESHOLD = 8;
+
+  /** True when `cc` is an irrefutable tier-3 case — a bare wildcard (`_` or a
+   * single binding `_n`) with no guard. It matches anything, so it compiles to
+   * the final unconditional branch (binding the subject to the capture). */
+  private static isIrrefutableCase(cc: CompiledCase): boolean {
+    return (
+      cc.tier === 3 &&
+      !cc.hasGuard &&
+      cc.rawPatterns !== undefined &&
+      cc.rawPatterns.length === 1 &&
+      isWildcard(cc.rawPatterns[0])
+    );
+  }
+
+  /** The ordered comparison targets of a tier-0/1 case: a constant to compare
+   * the subject against (`{kind:'literal'}`) or a pin to resolve (`{kind:'pin'}`).
+   * Unifies tier-0 (`dispatchKeys`) and tier-1 (`tests`). */
+  private static matchCaseComparisons(
+    cc: CompiledCase
+  ): Array<{ kind: 'literal'; value: Expression } | { kind: 'pin'; expr: Expression }> {
+    if (cc.tier === 0)
+      return (cc.dispatchKeys ?? []).map((d) => ({
+        kind: 'literal' as const,
+        value: d.value,
+      }));
+    return cc.tests ?? [];
+  }
+
+  /** Compile one comparison constant/pin of a tier-0/1 case to target source,
+   * throwing (fail closed, D6) when it cannot be represented: a pin of a runtime
+   * value (only `isConstant` symbols and literals fold), or a string on a target
+   * with no string type. */
+  private static compileMatchConstant(
+    engine: ComputeEngine,
+    cmp: { kind: 'literal'; value: Expression } | { kind: 'pin'; expr: Expression },
+    allowStrings: boolean,
+    target: CompileTarget<Expression>
+  ): string {
+    const expr = cmp.kind === 'literal' ? cmp.value : cmp.expr;
+    if (isString(expr)) {
+      if (!allowStrings)
+        throw new Error(
+          `Match: a string constant is not compilable to "${target.language ?? 'this'}" (no string type). Fail closed (D6).`
+        );
+      return BaseCompiler.compile(expr, target);
+    }
+    if (cmp.kind === 'pin') {
+      // A pin folds only when its value is fixed at compile time: a literal, or
+      // a symbol declared `isConstant` (`== Pi` → `Math.PI`). A pin of a runtime
+      // variable (`== limit`) has no compile-time value → fail closed (D6).
+      const ok =
+        isNumber(expr) ||
+        isString(expr) ||
+        (isSymbol(expr) && engine.box(expr.symbol).isConstant);
+      if (!ok)
+        throw new Error(
+          `Match: pin '== ${expr.toString()}' references a runtime value; not compilable. Fail closed (D6).`
+        );
+    }
+    return BaseCompiler.compile(expr, target);
+  }
+
+  /** The OR-chain condition for a tier-0/1 case: `s === c1 || s === c2 || …`. */
+  private static matchLeafCondition(
+    engine: ComputeEngine,
+    cc: CompiledCase,
+    subject: string,
+    eq: string,
+    allowStrings: boolean,
+    target: CompileTarget<Expression>
+  ): string {
+    const parts = BaseCompiler.matchCaseComparisons(cc).map(
+      (cmp) =>
+        `${subject} ${eq} ${BaseCompiler.compileMatchConstant(engine, cmp, allowStrings, target)}`
+    );
+    if (parts.length === 0) return 'false';
+    return parts.length === 1 ? parts[0] : `(${parts.join(' || ')})`;
+  }
+
+  /** Compile a case body, substituting each captured name with its target
+   * accessor code. Bodies with no captures compile directly (the common
+   * tier-0/1 case); bodies with captures compile the shadow-correct canonical
+   * body held on the case's closure, with the capture names rebound to their
+   * accessors. */
+  private static compileMatchBody(
+    cc: CompiledCase,
+    accessors: Map<string, string> | undefined,
+    target: CompileTarget<Expression>
+  ): string {
+    if (cc.captureNames.length === 0)
+      return BaseCompiler.compile(cc.body.canonical, target);
+    if (cc.bodyClosure === undefined || !isFunction(cc.bodyClosure))
+      throw new Error('Match: case body is not compilable. Fail closed (D6).');
+    return BaseCompiler.compile(
+      cc.bodyClosure.op1,
+      BaseCompiler.matchCaptureTarget(accessors, target)
+    );
+  }
+
+  /** Compile a case guard the same way as its body (captures rebound to
+   * accessors), or `undefined` when the case has no guard. */
+  private static compileMatchGuard(
+    cc: CompiledCase,
+    accessors: Map<string, string> | undefined,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    if (!cc.hasGuard || cc.guard === undefined) return undefined;
+    if (cc.captureNames.length === 0)
+      return BaseCompiler.compile(cc.guard.canonical, target);
+    if (cc.guardClosure === undefined || !isFunction(cc.guardClosure))
+      throw new Error('Match: case guard is not compilable. Fail closed (D6).');
+    return BaseCompiler.compile(
+      cc.guardClosure.op1,
+      BaseCompiler.matchCaptureTarget(accessors, target)
+    );
+  }
+
+  /** A target that resolves each captured name to its accessor code (e.g.
+   * `a → s[0]`), delegating everything else to the base target. */
+  private static matchCaptureTarget(
+    accessors: Map<string, string> | undefined,
+    target: CompileTarget<Expression>
+  ): CompileTarget<Expression> {
+    if (accessors === undefined || accessors.size === 0) return target;
+    return {
+      ...target,
+      var: (id) => accessors.get(id) ?? target.var(id),
+    };
+  }
+
+  /**
+   * Compile a `["Match", subject, …cases]` to JavaScript: an arrow-IIFE that
+   * binds the subject once, then a chain of `if (cond) return body;` statements
+   * (tier 0/1 constant comparisons, tier 2 fixed-shape destructuring),
+   * optionally a `switch` for a large integer-constant dispatch run, ending in
+   * a trailing irrefutable case or `return NaN`.
+   */
+  static compileMatchJS(
+    engine: ComputeEngine,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    const plan = getMatchPlan(engine, args);
+    if (plan.errorAlt !== undefined)
+      throw new Error(
+        `Match: an or-alternative binds the name '${plan.errorAlt.toString()}'; not compilable. Fail closed (D6).`
+      );
+
+    const s = BaseCompiler.tempVar();
+    const nl = target.ws('\n');
+    const stmts: string[] = [];
+    let done = false;
+
+    for (const seg of plan.segments) {
+      if (done) break;
+      if (seg.kind === 'dispatch' && BaseCompiler.matchSwitchable(seg)) {
+        stmts.push(BaseCompiler.emitMatchSwitch(engine, seg, s, target));
+        continue;
+      }
+      for (const cc of seg.cases) {
+        if (done) break;
+        if (BaseCompiler.isIrrefutableCase(cc)) {
+          const acc =
+            cc.captureNames.length === 1
+              ? new Map([[cc.captureNames[0], s]])
+              : undefined;
+          stmts.push(`return ${BaseCompiler.compileMatchBody(cc, acc, target)};`);
+          done = true;
+          break;
+        }
+        stmts.push(BaseCompiler.emitMatchCaseJS(engine, cc, s, target));
+      }
+    }
+
+    if (!done) stmts.push('return NaN;');
+
+    const subjCode = BaseCompiler.compile(args[0], target);
+    return `((${s}) => {${nl}${stmts.join(nl)}${nl}})(${subjCode})`;
+  }
+
+  /** Emit one non-irrefutable case as a guarded early-return `if`. */
+  private static emitMatchCaseJS(
+    engine: ComputeEngine,
+    cc: CompiledCase,
+    s: string,
+    target: CompileTarget<Expression>
+  ): string {
+    if (cc.tier === 0 || cc.tier === 1) {
+      const cond = BaseCompiler.matchLeafCondition(
+        engine,
+        cc,
+        s,
+        '===',
+        true,
+        target
+      );
+      const guard = BaseCompiler.compileMatchGuard(cc, undefined, target);
+      const full = guard === undefined ? cond : `(${cond}) && (${guard})`;
+      return `if (${full}) return ${BaseCompiler.compileMatchBody(cc, undefined, target)};`;
+    }
+
+    if (cc.tier === 2) {
+      const conds: string[] = [];
+      const accessors = new Map<string, string>();
+      BaseCompiler.walkMatchShape(engine, cc.shape!, s, conds, accessors, target);
+      const guard = BaseCompiler.compileMatchGuard(cc, accessors, target);
+      if (guard !== undefined) conds.push(`(${guard})`);
+      const body = BaseCompiler.compileMatchBody(cc, accessors, target);
+      return `if (${conds.join(' && ')}) return ${body};`;
+    }
+
+    // Tier 3, refutable: no compiled reference implementation of the generic
+    // matcher — fail closed (D6), naming the offending pattern so the caller can
+    // rewrite it with destructuring or guards.
+    const p = cc.rawPatterns?.[0];
+    throw new Error(
+      `Match: pattern '${p?.toString() ?? '?'}' is not compilable; ` +
+        `rewrite with destructuring or guards. Fail closed (D6).`
+    );
+  }
+
+  /** Walk a tier-2 fixed shape, appending JS boolean conditions (arity + literal
+   * / pin element checks) and populating `accessors` (capture name → element
+   * access code). Compiled `List`/`Tuple` values are JS arrays, so shapes lower
+   * to `Array.isArray`, `.length`, `[i]`, and `.slice`. */
+  private static walkMatchShape(
+    engine: ComputeEngine,
+    node: ShapeNode,
+    base: string,
+    conds: string[],
+    accessors: Map<string, string>,
+    target: CompileTarget<Expression>
+  ): void {
+    conds.push(`Array.isArray(${base})`);
+    const fixed = node.prefix.length + node.suffix.length;
+    if (node.rest === undefined) conds.push(`${base}.length === ${fixed}`);
+    else conds.push(`${base}.length >= ${fixed}`);
+
+    node.prefix.forEach((el, i) =>
+      BaseCompiler.walkMatchElement(engine, el, `${base}[${i}]`, conds, accessors, target)
+    );
+    const sLen = node.suffix.length;
+    node.suffix.forEach((el, j) =>
+      BaseCompiler.walkMatchElement(
+        engine,
+        el,
+        `${base}[${base}.length - ${sLen} + ${j}]`,
+        conds,
+        accessors,
+        target
+      )
+    );
+    if (node.rest !== undefined && node.rest.key !== null) {
+      const name = node.rest.key.replace(/^_+/, '');
+      accessors.set(
+        name,
+        `${base}.slice(${node.prefix.length}, ${base}.length - ${sLen})`
+      );
+    }
+  }
+
+  /** Handle one positional element of a tier-2 shape (see `walkMatchShape`). */
+  private static walkMatchElement(
+    engine: ComputeEngine,
+    el: ElementPlan,
+    access: string,
+    conds: string[],
+    accessors: Map<string, string>,
+    target: CompileTarget<Expression>
+  ): void {
+    switch (el.kind) {
+      case 'ignore':
+        return;
+      case 'bind':
+        accessors.set(el.key.replace(/^_+/, ''), access);
+        return;
+      case 'literal':
+        conds.push(
+          `${access} === ${BaseCompiler.compileMatchConstant(engine, { kind: 'literal', value: el.value }, true, target)}`
+        );
+        return;
+      case 'pin':
+        conds.push(
+          `${access} === ${BaseCompiler.compileMatchConstant(engine, { kind: 'pin', expr: el.expr }, true, target)}`
+        );
+        return;
+      case 'shape':
+        BaseCompiler.walkMatchShape(engine, el.node, access, conds, accessors, target);
+        return;
+    }
+  }
+
+  /** True when a tier-0 dispatch segment qualifies for `switch` emission: every
+   * case dispatches only on safe machine integers (`n:` keys) and there are at
+   * least `MATCH_SWITCH_THRESHOLD` of them. */
+  private static matchSwitchable(seg: Extract<Segment, { kind: 'dispatch' }>): boolean {
+    let count = 0;
+    for (const cc of seg.cases) {
+      for (const d of cc.dispatchKeys ?? []) {
+        if (!d.key.startsWith('n:')) return false;
+        count++;
+      }
+    }
+    return count >= BaseCompiler.MATCH_SWITCH_THRESHOLD;
+  }
+
+  /** Emit an integer dispatch run as a `switch (s) { case k: … }` (no default —
+   * a non-match falls through to the following statements, preserving
+   * first-match order across segments). Or-alternatives share one body via
+   * `case`-fallthrough; a constant already claimed by an earlier (first-match)
+   * case is skipped to avoid a duplicate `case` label. */
+  private static emitMatchSwitch(
+    engine: ComputeEngine,
+    seg: Extract<Segment, { kind: 'dispatch' }>,
+    s: string,
+    target: CompileTarget<Expression>
+  ): string {
+    const nl = target.ws('\n');
+    const seen = new Set<number>();
+    const parts: string[] = [];
+    for (const cc of seg.cases) {
+      const labels: string[] = [];
+      for (const d of cc.dispatchKeys ?? []) {
+        const n = Number(d.key.slice(2));
+        if (seen.has(n)) continue; // first-match-wins: earlier case owns it
+        seen.add(n);
+        labels.push(`case ${n}:`);
+      }
+      if (labels.length === 0) continue; // wholly shadowed → unreachable
+      parts.push(
+        `${labels.join(' ')} return ${BaseCompiler.compileMatchBody(cc, undefined, target)};`
+      );
+    }
+    return `switch (${s}) {${nl}${parts.join(nl)}${nl}}`;
+  }
+
+  /**
+   * Compile a `["Match", …]` to a nested ternary via a target-provided
+   * `ternary` primitive — the path GPU targets use (they have no statement-level
+   * IIFE or `switch`). Only tier 0/1 constant dispatch and a trailing
+   * irrefutable case compile; tier 2 destructuring and refutable tier 3 fail
+   * closed (D6). The subject is compiled once and inlined into each comparison
+   * (safe: compiled shader expressions are deterministic).
+   */
+  static compileMatchTernary(
+    engine: ComputeEngine,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    opts: {
+      ternary: (cond: string, whenTrue: string, whenFalse: string) => string;
+      eq: string;
+      noMatch: string;
+      allowStrings: boolean;
+    }
+  ): TargetSource {
+    const plan = getMatchPlan(engine, args);
+    if (plan.errorAlt !== undefined)
+      throw new Error(
+        `Match: an or-alternative binds the name '${plan.errorAlt.toString()}'; not compilable. Fail closed (D6).`
+      );
+
+    const subj = BaseCompiler.compile(args[0], target);
+    const cases = plan.segments.flatMap((seg) => seg.cases);
+
+    const build = (i: number): string => {
+      if (i >= cases.length) return opts.noMatch;
+      const cc = cases[i];
+      if (BaseCompiler.isIrrefutableCase(cc)) {
+        const acc =
+          cc.captureNames.length === 1
+            ? new Map([[cc.captureNames[0], subj]])
+            : undefined;
+        return BaseCompiler.compileMatchBody(cc, acc, target);
+      }
+      if (cc.tier === 0 || cc.tier === 1) {
+        const cond = BaseCompiler.matchLeafCondition(
+          engine,
+          cc,
+          subj,
+          opts.eq,
+          opts.allowStrings,
+          target
+        );
+        const guard = BaseCompiler.compileMatchGuard(cc, undefined, target);
+        const full = guard === undefined ? cond : `(${cond}) && (${guard})`;
+        return opts.ternary(
+          full,
+          BaseCompiler.compileMatchBody(cc, undefined, target),
+          build(i + 1)
+        );
+      }
+      if (cc.tier === 2)
+        throw new Error(
+          `Match: list/tuple destructuring is not compilable to "${target.language ?? 'this'}". Fail closed (D6).`
+        );
+      const p = cc.rawPatterns?.[0];
+      throw new Error(
+        `Match: pattern '${p?.toString() ?? '?'}' is not compilable; ` +
+          `rewrite with destructuring or guards. Fail closed (D6).`
+      );
+    };
+
+    return build(0);
+  }
+
   /**
    * If `id` names a symbol that is *known* to the engine — it has an assigned
    * value (`ce.assign("a", 1.5)`) or is a declared constant — return the
@@ -1498,6 +1950,7 @@ export class BaseCompiler {
     'If',
     'Which',
     'When',
+    'Match',
     'Block',
     // Indexing-set wrappers consumed by Sum/Product/Loop — never compiled
     // standalone.
@@ -1657,6 +2110,25 @@ export class BaseCompiler {
             locals.push(stmt.ops[0].symbol);
         const inner = locals.length ? union(bound, locals) : bound;
         for (const op of ops) visit(op, inner);
+        return;
+      }
+      if (h === 'Match') {
+        // The subject is evaluated in the enclosing scope.
+        if (ops[0] !== undefined) visit(ops[0], bound);
+        for (const c of ops.slice(1)) {
+          if (!isFunction(c, 'MatchCase') || c.ops.length < 2) continue;
+          const cops = c.ops;
+          const pattern = cops[0];
+          const guard = cops.length >= 3 ? cops[1] : undefined;
+          const body = cops[cops.length - 1];
+          // Captures shadow the guard/body; pin operands are external references
+          // (evaluated in the enclosing scope at match time).
+          const { captures, pinExprs } = matchPatternReferences(pattern);
+          const inner = captures.length ? union(bound, captures) : bound;
+          if (guard !== undefined) visit(guard, inner);
+          visit(body, inner);
+          for (const pin of pinExprs) visit(pin, bound);
+        }
         return;
       }
 

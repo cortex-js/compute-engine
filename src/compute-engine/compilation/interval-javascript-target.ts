@@ -320,6 +320,16 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     };
     return buildPiecewise(0);
   },
+  // Cortex `Match`: structural pattern matching. An interval subject spanning
+  // two cases' constants has the same discontinuity hazard as compiled `Which`,
+  // but a faithful interval treatment (per-branch `singular` semantics for
+  // structural equality dispatch) is an explicit v1 out (design §5). Fail closed
+  // (D6) rather than invent it.
+  Match: () => {
+    throw new Error(
+      'Match: pattern matching is not supported by the interval-js compile target in v1. Fail closed (D6).'
+    );
+  },
   // Comparisons. Chained (N-ary) relations conjoin ALL pairwise comparisons
   // with the tri-state `_IA.and` (e.g. `1 < x < 4` → less(1,x) ∧ less(x,4)).
   Equal: (args, compile) => compileIntervalChain('_IA.equal', args, compile),

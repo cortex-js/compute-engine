@@ -314,8 +314,29 @@ condition attached, which is the desired UX.
      a never-true `When` is `Undefined` everywhere), left undetected
      rather than adding contradiction analysis.
    Zero unexpected snapshot churn (one authorized inline-snapshot update:
-   the `∫₀^1xⁿdx` leak fix in `calculus.test.ts`). Still demand-paced:
-   radical extraneous roots, definite-integral region splitting (`Which`).
+   the `∫₀^1xⁿdx` leak fix in `calculus.test.ts`).
+
+   **Phase 3b done 2026-07-12** — the final contained round:
+   - **Antiderivative gap fixed at the source** (`symbolic/antiderivative.ts`):
+     the `Exp`/`Power(ExponentialE,·)` handlers now integrate any linear
+     exponent via `linearIndexCoefficient` (`∫c·e^{L}dx = (c/L′)·e^{L}`), so
+     `∫e^{−ax}dx → −e^{−ax}/a` (was inert — the `Negate`-headed exponent
+     missed the `Multiply`/`Add`-only patterns). Generic branch, no guard
+     (measure-zero policy). The Phase-3a `improperExpAntiderivative`
+     workaround in `calculus.ts` is retired; the improper rows flow through
+     the general path unchanged.
+   - **Radical extraneous-root guards** (`solve.ts`): single-sqrt equations
+     `A·√R(x) + B = 0` with x-free `A, B` attach the guard `0 ≤ −B/A`
+     (`Solve(√(x+3) = a) → a²−3 {0 ≤ a}`, was `[]`). With an x-free RHS the
+     guard is *exact* per-root (at any squared-equation root,
+     `√R = |−B/A|`). `validateRoots` keeps a `When` root whose
+     substitute-back is undecidable (`|a| − a` for free `a`) — three-valued
+     discipline, scoped to `When` roots only so bare-root pruning is
+     unchanged. Two-sqrt and x-dependent-RHS paths untouched.
+   Zero snapshot churn; solve benchmark 38/40 held.
+
+   Still demand-paced: definite-integral region splitting (`Which`) — the
+   only remaining producer, gated on the pole/contour region analysis.
 
 ## Non-goals
 
