@@ -780,7 +780,15 @@ export function pow(
         // recursion when pow() is called from simplification rules.
         const cosVal = ce.function('Cos', [theta]).evaluate();
         const sinVal = ce.function('Sin', [theta]).evaluate();
-        return cosVal.add(sinVal.mul(ce.I));
+        // Assemble with the non-folding canonical constructors: the `.add()`/
+        // `.mul()` methods fold exact literals (e.g. 1/2, √3/2) to machine
+        // floats, which would violate the evaluate-vs-N exactness contract.
+        // Canonicalization folds the degenerate cases structurally
+        // (`e^{iπ/2}→i`, `e^{iπ}→-1`).
+        return ce.function('Add', [
+          cosVal,
+          ce.function('Multiply', [sinVal, ce.I]),
+        ]);
       }
     } else if (numericApproximation) {
       // e^x = exp(x): evaluate exp directly. Going through e.pow(x) would

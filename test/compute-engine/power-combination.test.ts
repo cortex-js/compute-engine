@@ -223,6 +223,25 @@ describe('Complex exponents (regression)', () => {
     expect(v.re).toBeCloseTo(Math.cos(Math.PI / 12), 14);
     expect(v.im).toBeCloseTo(Math.sin(Math.PI / 12), 14);
   });
+
+  test('e^{iπ/3} evaluates to an EXACT expression, not a float (Euler form)', () => {
+    // Regression: the Euler branch assembled the result with the `.add()`/
+    // `.mul()` methods, which fold the exact cos/sin literals (1/2, √3/2) to
+    // machine floats — violating the evaluate-vs-N exactness contract.
+    const e = engine.parse('e^{i\\pi/3}').evaluate();
+    // No decimal float appears in the serialization (exact radical/rational).
+    expect(e.toString()).toBe('1/2 + sqrt(3)/2i');
+    expect(e.isSame(engine.parse('\\frac12 + \\frac{\\sqrt3}{2}i'))).toBe(true);
+    // .N() still numericizes.
+    const n = e.N();
+    expect(n.re).toBeCloseTo(Math.cos(Math.PI / 3), 15);
+    expect(n.im).toBeCloseTo(Math.sin(Math.PI / 3), 15);
+  });
+
+  test('e^{iπ/2} → i and e^{iπ} → -1 (degenerate cases fold structurally)', () => {
+    expect(engine.parse('e^{i\\pi/2}').evaluate().toString()).toBe('i');
+    expect(engine.parse('e^{i\\pi}').evaluate().toString()).toBe('-1');
+  });
 });
 
 describe('Exponential of an imaginary argument stays symbolic', () => {

@@ -17,7 +17,7 @@ import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
 // (collections → compile-expression → base-compiler → library/utils → collections)
 import { parseType } from '../../common/type/parse.js';
-import { Type } from '../../common/type/types.js';
+import { ListType, Type } from '../../common/type/types.js';
 import {
   collectionElementType,
   functionResult,
@@ -77,6 +77,42 @@ function componentType(xs: Expression, position: number): Type {
     if (e) return e;
   }
   return collectionElementType(t) ?? 'any';
+}
+
+// Build the result type of `Map`: a collection with the same shape and
+// indexed-ness as the `source` collection, but whose elements are the
+// mapping lambda's result type (`elementType`) — not the source element
+// type. `Map(Range(1,3), k |-> k + i)` is thus `indexed_collection<complex>`,
+// not `indexed_collection<integer>`.
+function mapResultType(
+  source: Readonly<Type>,
+  elementType: Readonly<Type>
+): Type {
+  if (typeof source === 'string') {
+    if (
+      source === 'indexed_collection' ||
+      source === 'list' ||
+      source === 'set' ||
+      source === 'collection'
+    )
+      return parseType(`${source}<${typeToString(elementType)}>`);
+    // dictionary/record/tuple/etc.: yield a plain collection of the results.
+    return parseType(`collection<${typeToString(elementType)}>`);
+  }
+  if (source.kind === 'list') {
+    const t: ListType = { kind: 'list', elements: elementType as Type };
+    if (source.dimensions) t.dimensions = source.dimensions;
+    return t;
+  }
+  if (source.kind === 'indexed_collection')
+    return { kind: 'indexed_collection', elements: elementType as Type };
+  if (source.kind === 'set')
+    return { kind: 'set', elements: elementType as Type };
+  if (source.kind === 'collection')
+    return { kind: 'collection', elements: elementType as Type };
+  // tuple/dictionary/record and anything else: fall back to a plain
+  // collection of the lambda results.
+  return parseType(`collection<${typeToString(elementType)}>`);
 }
 
 // Access the element of `xs` at 1-based `position` (`-1` = last), used by the
@@ -969,8 +1005,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     lazy: true,
     signature: '(collection, function) -> collection',
-    // If the input collection is indexed, the output collection is indexed.
-    type: (ops) => ops[0].type,
+    // The mapped collection keeps the source's shape/indexed-ness, but its
+    // elements are the lambda's RESULT type — not the source element type.
+    // (If the input collection is indexed, the output collection is indexed.)
+    type: (ops) => {
+      const resultType = functionResult(ops[1].type.type);
+      if (!resultType || resultType === 'unknown' || resultType === 'any')
+        return ops[0].type;
+      return mapResultType(ops[0].type.type, resultType);
+    },
     canonical: (ops, { engine }) => {
       const collection = checkType(engine, ops[0]?.canonical, 'collection');
       const fn = canonicalFunctionLiteral(ops[1]);
@@ -1181,7 +1224,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     type: (ops) => parseType(functionResult(ops[1].type.type) ?? 'unknown'),
 
-    evaluate: ([collection, fn, initial], { engine: ce }) => {
+    evaluate: ([collection, fn, initial], { engine: ce, numericApproximation }) => {
       if (!collection.isFiniteCollection) return undefined;
       // A collection may report a finite count yet decline enumeration
       // (e.g. Linspace(a, 1, 3) with a symbolic endpoint: size 3, but the
@@ -1192,7 +1235,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const hasInitial = initial !== undefined;
       initial ??= ce.Nothing;
 
+      // The compiled fast path folds with JS numbers, so it always yields a
+      // float. Under exact evaluation that violates the Evaluate-vs-N
+      // exactness contract (e.g. `a + 1/k` over a Range would collapse the
+      // exact rational sum to a float). Only take it under numeric
+      // approximation, or when the inputs are already inexact (a float result
+      // is then correct anyway). Otherwise fall through to the interpreted
+      // path, which is contract-correct.
+      const inputsInexact =
+        numericApproximation || (isNumber(initial) && !initial.isExact);
+
       if (
+        inputsInexact &&
         initial.type.matches('real') &&
         collection.type.matches(ce.type('collection<real>'))
       ) {
@@ -1407,10 +1461,33 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature:
       '(value: indexed_collection | dictionary, index: (number|string|boolean|indexed_collection)+) -> unknown',
-    type: ([xs]) =>
-      xs.operatorDefinition?.collection?.elttype?.(xs) ??
-      collectionElementType(xs.type.type) ??
-      'any',
+    type: (ops) => {
+      const xs = ops[0];
+      const t = xs.type.type;
+      // A dictionary/record is a keyed collection whose `At` returns the
+      // VALUE, not the iteration pair `tuple<string, T>` that
+      // `collectionElementType` reports (that is correct for iteration, but
+      // wrong here). Special-case it.
+      if (typeof t === 'string') {
+        if (t === 'dictionary' || t === 'record') return 'any';
+      } else if (t.kind === 'dictionary') {
+        return t.values;
+      } else if (t.kind === 'record') {
+        // A literal string index selecting a known field yields that field's
+        // type; otherwise widen across all field value types.
+        const key = ops[1];
+        if (key && isString(key)) {
+          const fieldType = t.elements[key.string];
+          if (fieldType) return fieldType;
+        }
+        return widen(...Object.values(t.elements)) as Type;
+      }
+      return (
+        xs.operatorDefinition?.collection?.elttype?.(xs) ??
+        collectionElementType(t) ??
+        'any'
+      );
+    },
 
     // Custom canonical handler delegating operand validation to
     // `validateArguments` (matching the standard signature-validation flags).

@@ -1728,7 +1728,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     StringFrom: {
       description:
         'Create a string by converting its arguments to a string and joining them.',
-      broadcastable: true,
       signature: '(any, format:string?) -> string',
       evaluate: ([value, format], { engine }) => {
         if (value === undefined) return engine.string('');

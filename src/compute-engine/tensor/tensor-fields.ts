@@ -543,6 +543,10 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
 
       case 'finite_integer': {
         const val = expr.re;
+        // An integer outside the safely-representable range (|n| > 2^53) would
+        // be truncated in a float64-backed buffer, so preserve it exactly via
+        // the `expression` dtype (mirrors the exact rational/real case above).
+        if (!Number.isSafeInteger(val)) return 'expression';
         if (val >= 0 && val <= 255) return 'uint8';
         return 'int32';
       }

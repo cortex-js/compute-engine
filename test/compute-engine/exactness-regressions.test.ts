@@ -478,6 +478,25 @@ describe('P0-16h — statistics of exact data stay exact under evaluate()', () =
   });
 });
 
+describe('numeric list literals preserve oversized integers exactly', () => {
+  // A `finite_integer` beyond the safely-representable range (|n| > 2^53) must
+  // not be stored in a float64-backed tensor buffer, which would truncate it.
+  const big = '2880067194370816120';
+  test(`['List', ${big}] round-trips exactly`, () => {
+    expect(evalStr(['List', { num: big }])).toEqual(`[${big}]`);
+  });
+  test("['List', 100!] keeps every digit", () => {
+    const fact = ce.box(['Factorial', 100]).evaluate().toString();
+    expect(evalStr(['List', ['Factorial', 100]])).toEqual(`[${fact}]`);
+  });
+  test('small-int list still promotes to a numeric tensor (fast path)', () => {
+    // The exactness fix must not disturb the safe-range integer dtype selection.
+    expect(ce.box(['List', 1, 2, 3]).evaluate().type.toString()).toEqual(
+      'vector<3>'
+    );
+  });
+});
+
 describe('P0-16j — Distance routes through the exact path', () => {
   test('Distance((0,0),(1,1)) → √2', () => {
     expect(

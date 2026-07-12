@@ -545,6 +545,18 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     expect(evaluate(['At', 'vec', 1])).toMatchInlineSnapshot(`7`);
   });
 
+  test('At on a dictionary returns the value type (not the iteration pair)', () => {
+    // Regression: `At(dict, key)` returns the VALUE, so its static type must be
+    // the dictionary's value type — not the `tuple<string, T>` iteration pair
+    // that `collectionElementType` reports for iteration. Otherwise `d["a"] + 10`
+    // fails with `incompatible-type`.
+    const at = engine.box(['At', dict, { str: 'x' }]);
+    expect(at.type.toString()).toMatchInlineSnapshot(`finite_integer`);
+    expect(
+      engine.box(['Add', ['At', dict, { str: 'x' }], 10]).evaluate().toString()
+    ).toMatchInlineSnapshot(`11`);
+  });
+
   test('First', () =>
     expect(evaluate(['First', list])).toMatchInlineSnapshot(`7`));
 
@@ -677,6 +689,51 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
         ['List', 1, 2, 3],
       ])
     ).toMatchInlineSnapshot(`-6`));
+
+  test('Fold rational sum stays exact under evaluate(), float under N()', () => {
+    // Regression: the compiled fast path folds with JS numbers and returns a
+    // float, violating the Evaluate-vs-N exactness contract. `a + 1/k` over
+    // Range(1,5) must stay exact (137/60) under evaluate(), and only numericize
+    // under .N().
+    const fold: Expression = [
+      'Reduce',
+      ['Range', 1, 5],
+      ['Function', ['Add', 'a', ['Divide', 1, 'k']], 'a', 'k'],
+      0,
+    ];
+    expect(engine.box(fold).evaluate().toString()).toMatchInlineSnapshot(
+      `137/60`
+    );
+    expect(engine.box(fold).N().toString()).toMatchInlineSnapshot(
+      `2.283333333333333`
+    );
+  });
+
+  test('Product of a complex-valued Map keeps imaginary parts', () => {
+    // Regression: (1+i)(2+i)(3+i) = 10i. A mis-typed real fast path would drop
+    // the imaginary parts (via `item.re`) and return 6. Map must type as
+    // complex so the fast path is correctly skipped.
+    const p: Expression = [
+      'Product',
+      ['Map', ['Range', 1, 3], ['Function', ['Add', 'k', 'ImaginaryUnit'], 'k']],
+    ];
+    expect(engine.box(p).evaluate().toString()).toMatchInlineSnapshot(`10i`);
+  });
+
+  test('Map element type reflects the lambda result, not the source', () => {
+    // Regression: `Map(Range(1,3), k |-> k + i)` must NOT be typed with the
+    // source element type (integer). Its element type is the lambda's result
+    // type (a complex-capable `number`), which keeps it out of the real-only
+    // compiled fast path.
+    const m: Expression = [
+      'Map',
+      ['Range', 1, 3],
+      ['Function', ['Add', 'k', 'ImaginaryUnit'], 'k'],
+    ];
+    expect(engine.box(m).type.toString()).toMatchInlineSnapshot(
+      `indexed_collection<number>`
+    );
+  });
 
   test('Append', () =>
     expect(

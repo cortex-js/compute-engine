@@ -73,6 +73,37 @@ describe('StringJoin concatenates strings', () => {
   });
 });
 
+describe('StringFrom joins a collection of code points', () => {
+  // Regression: `StringFrom` was declared `broadcastable: true`, so a list
+  // argument was mapped element-wise BEFORE the evaluate handler ran, defeating
+  // the handler's collection-join branches (['List',100,101,102] became the
+  // list ["d","e","f"] instead of the joined "def").
+  test('unicode-scalars over a list joins the code points', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['StringFrom', ['List', 100, 101, 102], { str: 'unicode-scalars' }])
+        .evaluate().string
+    ).toBe('def');
+  });
+
+  test('unicode-scalars over a single integer (scalar path)', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['StringFrom', 100, { str: 'unicode-scalars' }]).evaluate().string
+    ).toBe('d');
+  });
+
+  test('utf-8 round-trips through Utf8', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['StringFrom', ['Utf8', { str: 'héllo' }], { str: 'utf-8' }])
+        .evaluate().string
+    ).toBe('héllo');
+  });
+});
+
 describe('Characters splits a string into grapheme clusters', () => {
   const chars = (ce: ComputeEngine, s: string): string[] =>
     ce
