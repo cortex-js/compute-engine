@@ -712,10 +712,12 @@ export class Parser {
   //
 
   /** Block form `function f(x) { … }` →
-   * `["Assign", "f", ["Function", ["Block", …], …params]]`. Typed params
-   * (`function f(x: real) { … }`) and a return type (`… -> real { … }`) are
-   * accepted syntactically; both are held-and-dropped for v0 (the engine
-   * `Function` takes bare symbol params). */
+   * `["Assign", "f", ["Function", ["Block", …], …params]]`. When any param is
+   * typed (`function f(x: real) { … }`), a `Declare` carrying a
+   * `(…) -> any` signature is emitted instead so the annotations are enforced
+   * at box time: `["Declare", "f", {str: sig}, ["Function", …]]`. A return type
+   * (`… -> real { … }`) is still accepted syntactically but dropped (the body's
+   * inferred return type governs). */
   private parseFunctionDefinition(): MathJsonExpression | null {
     const kw = this.advance(); // 'function'
     const nameTok = this.current;
@@ -737,7 +739,7 @@ export class Parser {
       );
       return null;
     }
-    const params = this.parseParameterList();
+    const { params, types } = this.parseParameterList();
 
     // Optional return type `-> Type` (parsed and dropped for v0).
     if (this.check('OPERATOR') && this.current.text === '->') {
@@ -761,6 +763,19 @@ export class Parser {
       nameTok.start,
       end
     );
+    const signature = this.buildSignature(types);
+    if (signature !== null) {
+      return this.wrap(
+        [
+          'Declare',
+          nameNode,
+          this.wrap({ str: signature }, nameTok.start, end),
+          fnNode,
+        ] as MathJsonExpression[],
+        kw.start,
+        end
+      );
+    }
     return this.wrap(
       ['Assign', nameNode, fnNode] as MathJsonExpression[],
       kw.start,
@@ -793,8 +808,11 @@ export class Parser {
     );
   }
 
-  /** Math-style `f(x) = expr` (typed params supported) →
-   * `["Assign", "f", ["Function", expr, …params]]`. */
+  /** Math-style `f(x) = expr` →
+   * `["Assign", "f", ["Function", expr, …params]]`. When any param is typed
+   * (`f(x: integer) = …`), a `Declare` carrying a `(…) -> any` signature is
+   * emitted instead — `["Declare", "f", {str: sig}, ["Function", …]]` — so the
+   * annotations are enforced at box time. */
   private parseMathFunctionDef(): MathJsonExpression | null {
     const nameTok = this.advance(); // SYMBOL
     this.harvest(nameTok);
@@ -803,7 +821,7 @@ export class Parser {
       nameTok.start,
       nameTok.end
     );
-    const params = this.parseParameterList();
+    const { params, types } = this.parseParameterList();
 
     if (!(this.check('OPERATOR') && this.current.text === '=')) {
       this.error(
@@ -826,6 +844,19 @@ export class Parser {
       nameTok.start,
       end
     );
+    const signature = this.buildSignature(types);
+    if (signature !== null) {
+      return this.wrap(
+        [
+          'Declare',
+          nameNode,
+          this.wrap({ str: signature }, nameTok.start, end),
+          fnNode,
+        ] as MathJsonExpression[],
+        nameTok.start,
+        end
+      );
+    }
     return this.wrap(
       ['Assign', nameNode, fnNode] as MathJsonExpression[],
       nameTok.start,
@@ -834,13 +865,18 @@ export class Parser {
   }
 
   /** Parse a `( param, … )` parameter list. Each param is a symbol with an
-   * optional `: Type` annotation (parsed and dropped for v0). Returns the bare
-   * param symbol nodes. */
-  private parseParameterList(): MathJsonExpression[] {
+   * optional `: Type` annotation. Returns the bare param symbol nodes together
+   * with their annotation type strings (`null` for an unannotated param); the
+   * caller uses the types to build an enforced function signature. */
+  private parseParameterList(): {
+    params: MathJsonExpression[];
+    types: (string | null)[];
+  } {
     const open = this.advance(); // '('
     this.brackets.push(open);
 
     const params: MathJsonExpression[] = [];
+    const types: (string | null)[] = [];
     if (!this.check('CLOSE_PAREN')) {
       for (;;) {
         const tok = this.current;
@@ -855,9 +891,14 @@ export class Parser {
           tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
         params.push(this.wrap({ sym: pname }, tok.start, tok.end));
 
-        // Optional `: Type` — consumed and dropped for v0.
-        if (this.check('OPERATOR') && this.current.text === ':')
-          this.parseTypeAnnotation();
+        // Optional `: Type` — captured as the param's annotation type string.
+        let type: string | null = null;
+        if (this.check('OPERATOR') && this.current.text === ':') {
+          const annotation = this.parseTypeAnnotation();
+          if (annotation !== null)
+            type = (annotation.node as { str?: string }).str ?? null;
+        }
+        types.push(type);
 
         if (!this.match('COMMA')) break;
         if (this.check('CLOSE_PAREN')) break; // trailing comma
@@ -869,7 +910,22 @@ export class Parser {
     if (this.check('CLOSE_PAREN')) this.advance();
     else this.error(['closing-bracket-expected', ')'], open.start, open.end);
 
-    return params;
+    return { params, types };
+  }
+
+  /** Build a function-signature type string from per-parameter annotation type
+   * strings: `(t1, t2, …) -> any`, where an unannotated param contributes
+   * `any`. A param type containing a `->` or `,` (e.g. a function- or
+   * tuple-typed param) is wrapped in parentheses so it cannot leak into the
+   * outer signature grammar; simple types are left bare. Returns `null` when no
+   * param is annotated (the caller then emits a plain `Assign`). */
+  private buildSignature(types: (string | null)[]): string | null {
+    if (!types.some((t) => t !== null)) return null;
+    const parts = types.map((t) => {
+      const type = t ?? 'any';
+      return /->|,/.test(type) ? `(${type})` : type;
+    });
+    return `(${parts.join(', ')}) -> any`;
   }
 
   /** Consume a `Type` starting at the current token (a return type after

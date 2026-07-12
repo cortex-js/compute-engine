@@ -117,10 +117,11 @@ describe('CORTEX FUNCTION DEFINITIONS', () => {
     ]);
   });
 
-  test('math-style with typed params (types held/dropped for v0)', () => {
+  test('math-style with typed params (enforced via Declare signature)', () => {
     expect(validCortex('f(x: real) = x + 1')).toStrictEqual([
-      'Assign',
+      'Declare',
       'f',
+      { str: '(real) -> any' },
       ['Function', ['Add', 'x', 1], 'x'],
     ]);
   });

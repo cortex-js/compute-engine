@@ -43,6 +43,66 @@ describe('CORTEX EXECUTE — programs', () => {
     expect(value.re).toBe(11);
   });
 
+  test('a typed param rejects a bad-typed call', () => {
+    // `2.5` is not an `integer`, so the call boxes to an `incompatible-type`
+    // Error value rather than evaluating to `3.5`.
+    const { value } = run('f(x: integer) = x + 1\nf(2.5)');
+    expect(value.re).not.toBe(3.5);
+    expect(value.toString()).toContain('incompatible-type');
+  });
+
+  test('a typed param accepts a good-typed call', () => {
+    const { value, diagnostics } = run('f(x: integer) = x + 1\nf(3)');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
+  });
+
+  test('a multi-param typed function rejects a bad arg', () => {
+    const { value } = run('f(x: integer, y: integer) = x + y\nf(2.5, 1)');
+    expect(value.toString()).toContain('incompatible-type');
+  });
+
+  test('a multi-param typed function accepts all-good args', () => {
+    const { value, diagnostics } = run(
+      'f(x: integer, y: integer) = x + y\nf(2, 3)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(5);
+  });
+
+  test('a partially-annotated function enforces only the typed param', () => {
+    // Signature is `(integer, any) -> any`: the first arg is checked, the
+    // second is unconstrained.
+    const bad = run('f(x: integer, y) = x + y\nf(2.5, 1)');
+    expect(bad.value.toString()).toContain('incompatible-type');
+
+    const good = run('f(x: integer, y) = x + y\nf(2, 1.5)');
+    expect(good.diagnostics).toEqual([]);
+    expect(good.value.re).toBe(3.5);
+  });
+
+  test('an unannotated function is unchanged (no enforcement)', () => {
+    const { value, diagnostics } = run('g(x) = x + 1\ng(2.5)');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(3.5);
+  });
+
+  test('recursion with a typed param still works', () => {
+    const { value, diagnostics } = run(
+      'f(n: integer) = if n <= 1 { 1 } else { n * f(n - 1) }\nf(5)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(120);
+  });
+
+  test('a closure-capturing typed function still captures', () => {
+    const { value, diagnostics } = run(
+      'let a = 10\nf(x: integer) = x + a\nf(5)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(15);
+  });
+
   test('an if expression', () => {
     const { value, diagnostics } = run('if 3 > 0 { 1 } else { 2 }');
     expect(diagnostics).toEqual([]);

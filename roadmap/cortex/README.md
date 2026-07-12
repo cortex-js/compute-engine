@@ -138,9 +138,25 @@ accepts a single collection of strings, including a lazy `Map` result, so
 
 ### Semantics gaps shipped as v0 caveats (complete on demand)
 
-- **Enforce typed function params (M).** `f(x: integer) = …` parses and holds
-  the annotation but `executeCortex` does not enforce it at call time — wire the
-  annotation into parameter binding.
+- **Enforce typed function params — v1 (params) LANDED 2026-07-12, not yet
+  committed.** `f(x: integer) = …` now emits
+  `["Declare", "f", {str:"(integer) -> any"}, ["Function", …]]` instead of a
+  bare `Assign`, so the parameter annotations are enforced at box time via the
+  engine's existing `validateArguments` (a mistyped call boxes to an
+  `incompatible-type` Error value: `f(2.5) → f(Error(…"integer","finite_real"…))`;
+  `f(3) → 4`). Unannotated defs are unchanged (`g(x)=… → Assign`), and partial
+  annotation enforces only the typed params (`(integer, any) -> any`). This was
+  simpler than the "M" implied — the enforcement machinery already existed; the
+  work was (1) capturing the annotation the parser was discarding and (2)
+  routing through `Declare` with a `(…) -> any` signature so `ce.assign`'s
+  inference can't clobber it. Residuals (deferred): **(a)** the RETURN type is
+  still dropped — a literal `(integer) -> integer` signature is rejected by the
+  engine (the body's inferred return `number` ⊄ `integer`, covariant return), so
+  enforcing declared return types needs a separate reconciliation and is not in
+  v1; **(b)** `serializeCortex` emits the generic
+  `Declare(f, "(integer) -> any", Function(x + 1, x))` rather than reconstructing
+  `f(x: integer) = …` syntax (round-trips semantically; a syntactic serializer
+  is a nice-to-have if a consumer needs faithful source round-trip).
 - **Comment fidelity through serialize (M — investigated 2026-07-12, deferred).**
   Comments are dropped on a `parseCortex → serializeCortex` round-trip
   (documented lossy in `comments.md`). The gap is **one-sided**: the serializer
