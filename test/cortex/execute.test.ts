@@ -252,3 +252,149 @@ describe('CORTEX EXECUTE — runtime problems in non-final statements', () => {
     expect(value.operator).toBe('Error');
   });
 });
+
+describe('CORTEX EXECUTE — structured cancellation cause', () => {
+  // A cap breach (timeLimit / iterationLimit / recursionLimit) throws a
+  // `CancellationError`; executeCortex surfaces its machine-readable `cause`
+  // additively — as a second operand on the final-statement Error VALUE, and
+  // as `['evaluation-canceled', cause, …]` on a non-final diagnostic — while
+  // the legacy message operand (which hosts may still string-match) is
+  // unchanged. See Tycho's "structured cancellation cause" request.
+
+  /** Run against an engine with caps applied, no LaTeX island parser needed. */
+  function runWith(
+    source: string,
+    apply: (ce: ComputeEngine) => void
+  ): ReturnType<typeof executeCortex> {
+    const ce = new ComputeEngine();
+    apply(ce);
+    return executeCortex(ce, source);
+  }
+
+  test('recursion-depth-exceeded on the final-statement Error value', () => {
+    const { value, diagnostics } = runWith('f(n) = f(n + 1)\nf(0)', (ce) => {
+      ce.recursionLimit = 20;
+    });
+    expect(diagnostics).toEqual([]);
+    expect(value.operator).toBe('Error');
+    // Machine-readable cause is the second operand
+    expect(value.op2?.string).toBe('recursion-depth-exceeded');
+    // Legacy message operand is unchanged (hosts may still string-match it)
+    expect(value.op1?.string).toBe('Recursion limit exceeded');
+  });
+
+  test('iteration-limit-exceeded on the final-statement Error value', () => {
+    const { value } = runWith(
+      'let c = 0\nwhile c >= 0 { c = c + 1 }',
+      (ce) => {
+        ce.iterationLimit = 100;
+      }
+    );
+    expect(value.operator).toBe('Error');
+    expect(value.op2?.string).toBe('iteration-limit-exceeded');
+    // Legacy default message operand is unchanged
+    expect(value.op1?.string).toBe('Operation canceled');
+  });
+
+  test('timeout on the final-statement Error value', () => {
+    const { value } = runWith('let c = 0\nwhile c >= 0 { c = c + 1 }', (ce) => {
+      ce.timeLimit = 1;
+      ce.iterationLimit = 100_000_000;
+    });
+    expect(value.operator).toBe('Error');
+    expect(value.op2?.string).toBe('timeout');
+  });
+
+  test('a non-final cap breach surfaces an evaluation-canceled diagnostic', () => {
+    const { diagnostics } = runWith('f(n) = f(n + 1)\nf(0)\n1 + 1', (ce) => {
+      ce.recursionLimit = 20;
+    });
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message[0]).toBe('evaluation-canceled');
+    // The cause is carried as the first message argument
+    expect(diagnostics[0].message[1]).toBe('recursion-depth-exceeded');
+  });
+
+  test('a non-cancellation throw keeps the single-operand Error shape', () => {
+    // Back-compat: only cap breaches gain the cause operand.
+    const { value } = runWith('const k = 1\nk = 2', () => {});
+    expect(value.operator).toBe('Error');
+    expect(value.nops).toBe(1);
+    expect(value.op2?.symbol).toBe('Nothing');
+  });
+});
+
+describe('CORTEX EXECUTE — did-you-mean for unknown functions', () => {
+  // Calling an unknown function stays *silently* symbolic (an inert
+  // `["Quartile", …]` value). When the unknown name is close to a known
+  // operator, a `warning`-severity `unknown-function` diagnostic surfaces the
+  // suggestion; the returned value is unchanged. A name with no near match is
+  // never nagged.
+
+  test('a plural typo suggests the known operator', () => {
+    const { value, diagnostics } = run('Quartile([1, 2, 3, 4, 5])');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].severity).toBe('warning');
+    expect(diagnostics[0].message).toEqual([
+      'unknown-function',
+      'Quartile',
+      'Quartiles',
+    ]);
+    // The value is still the inert symbolic form.
+    expect(value.operator).toBe('Quartile');
+  });
+
+  test('a transposition typo suggests the known operator', () => {
+    const { diagnostics } = run('Argmuent(3)');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toEqual([
+      'unknown-function',
+      'Argmuent',
+      'Argument',
+    ]);
+  });
+
+  test('a one-edit typo suggests the known operator', () => {
+    const { diagnostics } = run('Facorial(5)');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toEqual([
+      'unknown-function',
+      'Facorial',
+      'Factorial',
+    ]);
+  });
+
+  test('an unknown function with no near match is not nagged', () => {
+    const { value, diagnostics } = run('foo(3)');
+    expect(diagnostics).toEqual([]);
+    expect(value.operator).toBe('foo');
+  });
+
+  test('a declared function is not flagged', () => {
+    const { diagnostics } = run('f(x) = x + 1\nf(3)');
+    expect(diagnostics).toEqual([]);
+  });
+
+  test('a lambda parameter used as a function is not flagged', () => {
+    const { value, diagnostics } = run(
+      'apply(g, x) = g(x)\napply(y |-> y * 2, 5)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(10);
+  });
+
+  test('a name used twice fires a single diagnostic', () => {
+    const { diagnostics } = run('Quartile([1, 2, 3])\nQuartile([4, 5, 6])');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message[1]).toBe('Quartile');
+  });
+
+  test('the `Arg` alias is defined, so it evaluates without a diagnostic', () => {
+    const { value, diagnostics } = run('Arg(i)');
+    expect(diagnostics).toEqual([]);
+    // `Arg` canonicalizes to `Argument`; `Argument(i)` is π/2.
+    expect(value.isSame(new ComputeEngine().parse('\\frac{\\pi}{2}'))).toBe(
+      true
+    );
+  });
+});

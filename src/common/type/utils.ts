@@ -101,3 +101,19 @@ export function broadcastResultType(elementType: Readonly<Type>): Type {
   const result: ListType = { kind: 'list', elements: elementType as Type };
   return result;
 }
+
+/**
+ * The scalar element type that a broadcastable operator's result contributes to
+ * its broadcast `list<…>`. A handler may have computed the scalar per-element
+ * type directly (`number`), leaked the collection type (`list<number>` — e.g.
+ * `Negate` returning `x.type`), or — when a collection operand reached a naive
+ * handler such as `Mod`'s or `Remainder`'s `widen(…)` — a `scalar | list<E>`
+ * union. Unwrap any collection branch to its element type and widen the
+ * branches, so the wrapper never nests a list or a union inside the broadcast
+ * result. (For a plain scalar this is the identity.)
+ */
+export function broadcastElementType(type: Readonly<Type>): Type {
+  if (typeof type !== 'string' && type.kind === 'union')
+    return widen(...type.types.map((t) => broadcastElementType(t)));
+  return collectionElementType(type) ?? (type as Type);
+}

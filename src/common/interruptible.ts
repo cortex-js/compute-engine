@@ -1,12 +1,40 @@
+/**
+ * Machine-readable reason a `CancellationError` was thrown.
+ *
+ * These are the engine's own cap-breach codes; the union is intentionally
+ * **extendable** (new caps add a member). An `AbortSignal`-driven cancellation
+ * instead carries the signal's `reason` through `cause`, which may be any
+ * value, so consumers should treat an unrecognized `cause` as opaque.
+ *
+ *  - `'timeout'`: the evaluation deadline (`engine.timeLimit`) was exceeded.
+ *  - `'iteration-limit-exceeded'`: a loop/iterator exceeded
+ *    `engine.iterationLimit`.
+ *  - `'recursion-depth-exceeded'`: user-function recursion exceeded
+ *    `engine.recursionLimit`.
+ */
+export type CancellationCause =
+  | 'timeout'
+  | 'iteration-limit-exceeded'
+  | 'recursion-depth-exceeded';
+
 export class CancellationError<T = unknown> extends Error {
-  cause: unknown;
+  /**
+   * Machine-readable reason for the cancellation. Engine cap breaches set one
+   * of the {@linkcode CancellationCause} codes; an `AbortSignal` abort carries
+   * the signal's `reason` through instead (arbitrary value).
+   */
+  cause: CancellationCause | unknown;
   value?: T;
 
   constructor({
     message,
     value,
     cause,
-  }: { message?: string; value?: T; cause?: unknown } = {}) {
+  }: {
+    message?: string;
+    value?: T;
+    cause?: CancellationCause | unknown;
+  } = {}) {
     super(message ?? 'Operation canceled');
     if (value) this.value = value;
     this.cause = cause;

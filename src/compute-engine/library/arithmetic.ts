@@ -103,7 +103,7 @@ import {
   root,
 } from '../boxed-expression/arithmetic-power.js';
 import { parseType } from '../../common/type/parse.js';
-import { widen } from '../../common/type/utils.js';
+import { broadcastResultType, widen } from '../../common/type/utils.js';
 import {
   numericTypeHandler,
   elementaryFunctionType,
@@ -158,6 +158,7 @@ import { expand } from '../boxed-expression/expand.js';
 import {
   isNumericTuple,
   isLinearAlgebraCollection,
+  isBroadcastCollectionType,
 } from '../collection-utils.js';
 import { isTensor } from '../boxed-expression/boxed-tensor.js';
 import { signFromAssumedPart } from './complex.js';
@@ -1379,6 +1380,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops) => {
         if (ops.length === 0) return 'finite_integer'; // = 1
         if (ops.length === 1) return ops[0].type;
+        // A dimensionless list/indexed-collection factor together with a
+        // numeric-tuple (point) factor broadcasts the collection while scaling
+        // the point component-wise: the value path (`mul()`) checks the
+        // collection BEFORE the tuple branch, yielding a `List` of `Tuple`s
+        // (e.g. `Range(-2,2)·(2,3)`). The honest-typing wrapper is skip-listed
+        // for `Multiply`-with-a-numeric-tuple, so the list type must come from
+        // here. (The tuple-free broadcast — `2R`, `R·x` — is handled by the
+        // wrapper.) Tensors keep their matrix-product typing below.
+        if (
+          !ops.some((x) => isTensor(x)) &&
+          ops.some((x) => isBroadcastCollectionType(x)) &&
+          ops.some((x) => isNumericTuple(x))
+        )
+          return broadcastResultType(
+            widen(...ops.filter((x) => isNumericTuple(x)).map((x) => x.type.type))
+          );
         // A numeric tuple (point/vector) scaled by scalars keeps the tuple
         // type. Hoisted above the NaN/finiteness early-returns (a tuple's
         // `isFinite` is `false`, which would otherwise collapse to `number`).

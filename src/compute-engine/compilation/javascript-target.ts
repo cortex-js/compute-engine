@@ -1792,14 +1792,17 @@ export class ComputeEngineFunction extends Function {
 export class ComputeEngineFunctionLiteral extends Function {
   SYS = SYS_HELPERS;
 
-  constructor(body: string, args: string[]) {
-    super('_SYS', ...args, `return ${body}`);
+  constructor(body: string, args: string[], preamble = '') {
+    super('_SYS', ...args, preamble ? `${preamble}return ${body}` : `return ${body}`);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
         super.apply(thisArg, [this.SYS, ...argumentsList]),
       get: (target, prop) => {
         if (prop === 'toString')
-          return (): string => `(${args.join(', ')}) => ${body}`;
+          return (): string =>
+            preamble
+              ? `(${args.join(', ')}) => { ${preamble}return ${body}; }`
+              : `(${args.join(', ')}) => ${body}`;
         if (prop === 'isCompiled') return true;
         return Reflect.get(target, prop);
       },
@@ -1955,6 +1958,9 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // deterministic, call-site-stable constants (see the `Random` handler).
       randomSeed: expr.engine._randomNumericSeed(),
       randomState: { counter: 0 },
+      // Opt in to compiling calls to user-defined function literals (`f(x) :=
+      // …`) as named local functions collected into the preamble.
+      userFunctions: { defs: new Map(), compiling: new Set() },
     });
 
     const result = compileToTarget(expr, target, realOnly);
@@ -2005,11 +2011,16 @@ function compileToTarget(
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
     });
-    const fn = new ComputeEngineFunctionLiteral(body, params);
+    // A lambda body may call user-defined functions (`t ↦ f(t)`); emit their
+    // definitions as a preamble inside the lambda's own body.
+    const userDefs = BaseCompiler.userFunctionsPreamble(target);
+    const fn = new ComputeEngineFunctionLiteral(body, params, userDefs);
     const result = {
       target: 'javascript' as const,
       success: true,
-      code: `(${params.join(', ')}) => ${body}`,
+      code: userDefs
+        ? `(${params.join(', ')}) => { ${userDefs}return ${body}; }`
+        : `(${params.join(', ')}) => ${body}`,
       calling: 'lambda' as const,
       run: fn as unknown as CompiledRunner,
     };
@@ -2032,7 +2043,17 @@ function compileToTarget(
   }
 
   const js = BaseCompiler.compile(expr, target);
-  const fn = new ComputeEngineFunction(js, target.preamble);
+  // Collect any user-defined function definitions accumulated while compiling
+  // `expr` (a symbol with a `Function`-literal definition used as an operator)
+  // and prepend them to the preamble so their named local functions are in
+  // scope for the compiled body.
+  const userDefs = BaseCompiler.userFunctionsPreamble(target);
+  const preamble = userDefs
+    ? target.preamble
+      ? `${target.preamble}\n${userDefs}`
+      : userDefs
+    : target.preamble;
+  const fn = new ComputeEngineFunction(js, preamble);
   const result = {
     target: 'javascript' as const,
     success: true,

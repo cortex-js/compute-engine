@@ -141,6 +141,83 @@ describe('BROADCAST LIFT Phase 1 — eager forms unchanged', () => {
   });
 });
 
+describe('BROADCAST LIFT Phase 2 — declared type agrees with the broadcast value', () => {
+  // R := Range(-2,2) = [-2,-1,0,1,2]; L := [1,2,3]; N declared integer.
+  let ce: ComputeEngine;
+  beforeEach(() => {
+    ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('N', 'integer');
+    ce.assign('R', ce.box(['Range', -2, 2]));
+    ce.assign('L', ce.box(['List', 1, 2, 3]));
+  });
+
+  /** The declared type is an unbounded list (no scalar/union artifact), and the
+   * evaluated type is a subtype of it (`expr.type ⊇ expr.evaluate().type`). */
+  function expectListTyped(expr: BoxedExpression): void {
+    expect(expr.isValid).toBe(true);
+    expect(expr.type.matches('list<any>')).toBe(true);
+    expect(expr.type.matches('number')).toBe(false);
+    // No `scalar | list<…>` union at the top level.
+    expect(expr.type.toString()).not.toContain('|');
+    expect(expr.evaluate().type.matches(expr.type.type)).toBe(true);
+  }
+
+  describe('Add/Multiply post-eval fold — no scalar|list union', () => {
+    test.each([
+      ['R^2-2', ['Subtract', ['Power', 'R', 2], 2], ['List', 2, -1, -2, -1, 2]],
+      ['1-L', ['Subtract', 1, 'L'], ['List', 0, -1, -2]],
+      ['L^2-2', ['Subtract', ['Power', 'L', 2], 2], ['List', -1, 2, 7]],
+    ])('%s → list<…>, value matches', (_label, mj, expected) => {
+      const e = ce.box(mj as any);
+      expectListTyped(e);
+      expect(JSON.stringify(e.evaluate().json)).toBe(JSON.stringify(expected));
+      // Exactness stable under .N(): the value stays an element-wise collection
+      // (a list/vector), never collapsing to a scalar.
+      expect(e.N().type.matches('list<any>')).toBe(true);
+    });
+
+    test('R·(2,3) → list<tuple<…>> (range × point), value matches', () => {
+      const e = ce.box(['Multiply', 'R', ['Tuple', 2, 3]]);
+      expectListTyped(e);
+      expect(e.type.matches('list<tuple<number, number>>')).toBe(true);
+      const evaluated = e.evaluate();
+      expect(evaluated.operator).toBe('List');
+      expect(evaluated.nops).toBe(5);
+      expect(JSON.stringify(evaluated.json)).toBe(
+        JSON.stringify([
+          'List',
+          ['Tuple', -4, -6],
+          ['Tuple', -2, -3],
+          ['Tuple', 0, 0],
+          ['Tuple', 2, 3],
+          ['Tuple', 4, 6],
+        ])
+      );
+    });
+  });
+
+  describe('symbolic-length shape — declared list<…> before the bound resolves', () => {
+    // `Mod(Range(0,3N),N)` / `Remainder(Range(0,3N),N)`: valid since Phase 1,
+    // now declared `list<…>` even while N is symbolic (declared, unassigned).
+    test.each([
+      ['Mod', ['Mod', ['Range', 0, ['Multiply', 3, 'N']], 'N']],
+      ['Remainder', ['Remainder', ['Range', 0, ['Multiply', 3, 'N']], 'N']],
+    ])('%s(Range(0,3N),N) declares list<…>', (_label, mj) => {
+      expectListTyped(ce.box(mj as any));
+    });
+
+    test('Mod value broadcasts once N resolves == element-wise Map', () => {
+      ce.assign('N', ce.box(5));
+      const e = ce.box(['Mod', ['Range', 0, ['Multiply', 3, 'N']], 'N']);
+      const xs = Array.from({ length: 16 }, (_, i) => i); // 0..15
+      expect(JSON.stringify(e.evaluate().json)).toBe(
+        JSON.stringify(mapValues(ce, 'Mod', xs, [ce.box(5)]))
+      );
+    });
+  });
+});
+
 describe('BROADCAST LIFT Phase 1 — boundaries not crossed', () => {
   const ce = new ComputeEngine();
 

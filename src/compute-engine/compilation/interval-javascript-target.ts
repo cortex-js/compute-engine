@@ -651,6 +651,9 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         return `_.${id}`;
       },
       preamble: (preamble ?? '') + preambleImports,
+      // Opt in to compiling calls to user-defined function literals (`f(x) :=
+      // …`) as named local functions collected into the preamble.
+      userFunctions: { defs: new Map(), compiling: new Set() },
     });
 
     const result = compileToIntervalTarget(expr, target);
@@ -682,7 +685,16 @@ function compileToIntervalTarget(
       code: '',
     } as CompilationResult<'interval-js', IntervalResult | Interval>;
   }
-  const fn = new ComputeEngineIntervalFunction(js, target.preamble);
+  // Prepend any user-defined function definitions accumulated while compiling
+  // `expr` (a symbol with a `Function`-literal definition used as an operator)
+  // to the preamble so their named local functions are in scope.
+  const userDefs = BaseCompiler.userFunctionsPreamble(target);
+  const preamble = userDefs
+    ? target.preamble
+      ? `${target.preamble}\n${userDefs}`
+      : userDefs
+    : target.preamble;
+  const fn = new ComputeEngineIntervalFunction(js, preamble);
   return {
     target: 'interval-js',
     success: true,

@@ -58,6 +58,23 @@
   (`integer`); it now reflects the lambda's result type, so downstream
   operations dispatch correctly.
 
+- **Elementwise broadcasting is uniform across lazy and eager collections.** A
+  finite lazy `Range` now broadcasts like an eager `List` in tuple products:
+  with `R = Range(-2, 2)`, `R·(2,3)` yields a list of five scaled points
+  instead of distributing the range inside the tuple components. A scalar also
+  folds into a collection produced by an inner broadcast step: `L^2 - 2`
+  evaluates to `[-1, 2, 7]` instead of the unevaluated `Add(-2, [1, 4, 9])`,
+  and evaluation is idempotent again on these shapes. Infinite or
+  unknown-length ranges stay symbolic rather than transposing.
+
+- **Scalar operations accept lazy collection operands during validation.**
+  `Mod([0,\ldots,kN], N)` with a symbolic bound produced an
+  `incompatible-type` error at canonicalization even though the eager-list
+  form broadcast fine; the argument validator now recognizes parametrized
+  `indexed_collection<T>` wherever broadcasting applies. Declared types follow
+  the values: broadcast results type `list<…>` (previously a scalar-or-list
+  union, or a scalar type for symbolic-length ranges).
+
 - **Big integers survive numeric list literals.** A list literal promoted to a
   tensor stored oversized integers in float64 and truncated them
   (`[100!]` lost digits, breaking exact iterative algorithms such as a
@@ -116,6 +133,62 @@
   with the `BigO` remainder last, matching LaTeX output. Canonical expression
   order and ordinary sums without a `BigO` term are unchanged.
 
+### Parsing
+
+- **Stepped ellipsis ranges accept negative and symbolic samples.**
+  `[-9,-6,\ldots,9]` now parses to `Range(-9, 9, 3)` — previously any negative
+  leading sample fell back to a literal list containing a
+  `ContinuationPlaceholder` that enumerated as `NaN`. Symbolic stepped forms
+  infer a symbolic step when the samples are numeric multiples of one common
+  symbol (`[-3N,-2N,\ldots,3N]` → `Range(-3N, 3N, N)`, progression-validated
+  on the coefficients); generic sequence notation (`[x_1,x_2,\ldots,x_n]`)
+  intentionally still parses as a plain list.
+
+### Compilation
+
+- **Calls to user-defined functions compile.** After `f(x) := e^{-x^2/2}`,
+  compiling `f(2)` — or any expression referencing `f` — emits the definition
+  as a named local function instead of throwing ``Unknown operator `f` ``.
+  Nested user functions are emitted in dependency order; recursive definitions
+  fail closed with an explanatory error. This also removes a silent
+  interpreted fallback in numeric integration: definite integrals of
+  user-defined functions now run compiled quadrature (10⁷ samples instead of
+  10⁴ — comparable wall time, ~30× tighter error estimate). Applies to the
+  `javascript` and `interval-js` targets.
+
+- **Collection-valued conditions fail closed instead of compiling wrong
+  code.** `Equal`/`NotEqual` over a collection-typed operand, and
+  `If`/`Which`/`When` with a collection-typed condition, previously compiled
+  with `success: true` and returned `null` or the wrong branch at run time;
+  they now throw an explanatory compile-time error. Interpreted evaluation is
+  unchanged: comparisons broadcast elementwise, conditionals require a scalar
+  boolean.
+
+- **`Reduce`, `Length`, and `At` compile on the `javascript` target.**
+  `Reduce(xs, Add|Multiply|Min|Max, init?)` compiles to a loop; `Length`
+  returns the element count; `At` follows the interpreter's 1-based,
+  negative-from-end indexing (out-of-range yields `NaN`).
+
+- **GLSL: `Length` no longer collides with the `length()` builtin.** CE's
+  `Length` (element count) compiled to GLSL `length()` — the Euclidean norm —
+  reporting success while computing the wrong value, or emitting invalid GLSL
+  for lists longer than four. `length()` is now emitted for `Norm`; collection
+  `Length` fails closed on the GPU targets.
+
+- **GLSL/WGSL: literal integer powers are sign-correct on the GPU.** `x^3`
+  compiled to `pow(x, 3.0)`, which the GLSL specification leaves undefined for
+  negative bases — real GPUs returned `pow(-2, 3) = +8`, silently flipping
+  the sign of odd-power terms. Small integer exponents now emit repeated
+  multiplication; larger and compound-base cases use a sign-preserving
+  `_gpu_powi` preamble helper; negative integer exponents wrap the reciprocal.
+  Fractional exponents still emit `pow`.
+
+- **The `interval-glsl` target is deprecated.** GPU interval evaluation only
+  pays off when the entire pipeline stays on the GPU, and the target cannot
+  compile relational operators, so it cannot host restriction conditions. A
+  once-per-process warning now points to `interval-js` and the scalar
+  `glsl`/`wgsl` targets. It will be removed in a future release.
+
 ### Linear Algebra
 
 - **Matrix operators infer fresh symbolic operands from context.** An expression
@@ -134,6 +207,13 @@
   when they register for precision and angular-unit changes. Local constants
   from discarded scopes therefore no longer remain reachable for the lifetime
   of the compute engine.
+
+- **Cancellation errors carry a structured cause.** A cap breach reports
+  `'timeout'`, `'iteration-limit-exceeded'`, or `'recursion-depth-exceeded'`
+  via the exported `CancellationCause` type. In Cortex, a final-statement
+  breach carries the cause as a second operand on the `Error` value, and
+  non-final statements emit a dedicated `evaluation-canceled` diagnostic.
+  Error messages are unchanged, so existing string matching keeps working.
 
 ## 0.75.0 _2026-07-11_
 

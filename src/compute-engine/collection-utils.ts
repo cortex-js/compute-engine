@@ -1,5 +1,6 @@
 import { widen } from '../common/type/utils.js';
 import { isSubtype } from '../common/type/subtype.js';
+import { Type } from '../common/type/types.js';
 import { Expression, CollectionHandlers } from './global-types.js';
 import {
   isFunction,
@@ -63,6 +64,58 @@ export function isLinearAlgebraCollection(expr: Expression): boolean {
       t.kind === 'collection' ||
       t.kind === 'indexed_collection')
   );
+}
+
+/**
+ * True when `expr`'s TYPE is an **unbounded (dimensionless) 1-D** list or
+ * indexed-collection — the exact shape the `Add`/`Multiply` value path folds
+ * into a plain `List` (`broadcastOverIndexedCollections`, and the step-2/4b
+ * broadcast in `_computeValue`) and materializes at evaluation. This is the
+ * *type-level* companion to `isFiniteIndexedCollection` (a value-level check):
+ * it catches operands that are not yet a materialized collection but whose
+ * declared type guarantees they will broadcast once evaluated — a
+ * symbolic-length `Range` (`indexed_collection<…>`, whose `isFiniteCollection`
+ * is `undefined`) or an un-evaluated broadcast result (`R^2`, typed
+ * `list<number>`).
+ *
+ * Fixed-shape tensors (`matrix` = `list` with `dimensions`, `vector<n>` = `[n]`)
+ * are EXCLUDED: they carry dedicated component-wise typing via
+ * `addTensors`/`mulTensors` and their operators' own handlers. Numeric tuples
+ * (points/vectors typed `tuple<…>`) are likewise not matched — they are
+ * handled component-wise by `isNumericTuple`.
+ */
+export function isBroadcastCollectionType(expr: Expression): boolean {
+  return broadcastCollectionElementType(expr) !== undefined;
+}
+
+/**
+ * The element type of a broadcast collection operand (see
+ * `isBroadcastCollectionType`), or `undefined` when `expr`'s type is not an
+ * unbounded 1-D list / indexed-collection. Descends into a union (an operand
+ * typed `scalar | list<E>`) and returns the first collection branch's element.
+ */
+export function broadcastCollectionElementType(
+  expr: Expression
+): Type | undefined {
+  return dimensionlessIndexedElement(expr.type.type);
+}
+
+function dimensionlessIndexedElement(t: Type): Type | undefined {
+  if (t === 'list' || t === 'indexed_collection') return 'any';
+  if (typeof t === 'string') return undefined;
+  if (t.kind === 'indexed_collection') return t.elements;
+  // A `list` broadcasts only when it is unbounded/dimensionless (a plain
+  // `list<E>`). A fixed shape (`vector<n>`, `matrix`) carries `dimensions` and
+  // is left to tensor typing.
+  if (t.kind === 'list')
+    return t.dimensions === undefined ? t.elements : undefined;
+  if (t.kind === 'union') {
+    for (const b of t.types) {
+      const e = dimensionlessIndexedElement(b);
+      if (e !== undefined) return e;
+    }
+  }
+  return undefined;
 }
 
 /**

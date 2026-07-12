@@ -172,6 +172,28 @@ export interface CompileTarget<Expr = unknown> {
    * compiler makes while recursing. Only consulted when `randomSeed` is set.
    */
   randomState?: { counter: number };
+
+  /**
+   * Mutable per-compile registry for user-defined functions — a symbol whose
+   * engine definition is a `Function` literal (`f(x) := …`, `x ↦ …`, or an
+   * `ce.assign(name, lambda)`) encountered as an *operator* (`f(2)`). Each such
+   * function is emitted **once** as a named local function
+   * (`const _fn_f = (x) => …;`), collected here and prepended to the compiled
+   * preamble; its call sites compile to `_fn_f(arg)`. Stored as an object so it
+   * survives the `{ ...target }` spreads the compiler makes while recursing.
+   *
+   * A target opts in by providing this registry (the executable JS targets do,
+   * in their `compile()`); a target that leaves it undefined keeps the historic
+   * `Unknown operator` throw for a user-function head (raw direct-target /
+   * GPU / source-only paths). `defs` is keyed by the generated local name, in
+   * insertion order, so a dependency (`f`) is emitted before a dependent
+   * (`g(x) := f(x)+1`). `compiling` is the in-progress stack used to fail
+   * closed (D6) on recursive / mutually-recursive definitions.
+   */
+  userFunctions?: {
+    defs: Map<string, string>;
+    compiling: Set<string>;
+  };
 }
 
 /**

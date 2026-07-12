@@ -51,6 +51,7 @@ export { BigDecimal } from './big-decimal/index.js';
 // ── Execution constraints ───────────────────────────────────────────
 // Thrown when an evaluation exceeds `ce.timeLimit` or `ce.iterationLimit`
 export { CancellationError } from './common/interruptible.js';
+export type { CancellationCause } from './common/interruptible.js';
 
 // ── Compilation targets ─────────────────────────────────────────────
 export type {

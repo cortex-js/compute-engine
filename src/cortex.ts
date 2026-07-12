@@ -20,5 +20,6 @@ export type {
   ExecuteCortexOptions,
   ExecuteCortexResult,
 } from './cortex/execute-cortex.js';
+export type { CancellationCause } from './common/interruptible.js';
 
 export const version = '{{SDK_VERSION}}';

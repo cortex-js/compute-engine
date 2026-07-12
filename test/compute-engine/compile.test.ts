@@ -1149,3 +1149,132 @@ describe('COMPILE deprecated targets', () => {
     }
   });
 });
+
+// A symbol whose engine definition is a function literal (`f(x) := …`, `x ↦ …`,
+// or `ce.assign(name, lambda)`) used as an operator (`f(2)`) must compile: it is
+// emitted as a named local function `_fn_f` in the preamble and the call site as
+// `_fn_f(arg)`. Nested/user-calls-user chains resolve in dependency order;
+// (mutually) recursive definitions fail closed (D6); a truly unknown operator
+// keeps throwing.
+describe('COMPILE user-defined function calls', () => {
+  it('compiles a call to a := -defined function (f(2) ≈ 0.1353)', () => {
+    const e = new ComputeEngine();
+    e.parse('f(x) \\coloneq e^{-x^2/2}').evaluate();
+    const js = new JavaScriptTarget();
+    const r = js.compile(e.box(['f', 2]), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_fn_f(2)');
+    expect(r.run(2 as unknown as Record<string, number>)).toBeCloseTo(
+      0.1353352832366127,
+      12
+    );
+  });
+
+  it('compiles a call to an ce.assign(name, x ↦ …) lambda', () => {
+    const e = new ComputeEngine();
+    e.assign('n', e.parse('x \\mapsto x^2 + 1'));
+    const js = new JavaScriptTarget();
+    const r = js.compile(e.box(['n', 3]), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run(3 as unknown as Record<string, number>)).toBeCloseTo(10, 12);
+  });
+
+  it('compiles nested user-calls-user chains, matching evaluate()/N()', () => {
+    const e = new ComputeEngine();
+    e.parse('f(x) \\coloneq e^{-x^2/2}').evaluate();
+    e.parse('g(x) \\coloneq f(x) + 1').evaluate();
+    const js = new JavaScriptTarget();
+    for (const x of [0, 1, 2, -1.5]) {
+      const r = js.compile(e.box(['g', ['f', x]]), { realOnly: true });
+      expect(r.success).toBe(true);
+      const want = e.box(['g', ['f', x]]).N().re;
+      expect(r.run(x as unknown as Record<string, number>)).toBeCloseTo(
+        want,
+        10
+      );
+    }
+  });
+
+  it('reuses one named local across multiple call sites', () => {
+    const e = new ComputeEngine();
+    e.parse('f(x) \\coloneq e^{-x^2/2}').evaluate();
+    const js = new JavaScriptTarget();
+    // f appears twice; both call sites reference the same `_fn_f` local (emitted
+    // once into the preamble — keyed by name in the userFunctions registry).
+    const r = js.compile(e.box(['Add', ['f', 1], ['f', 2]]), {
+      realOnly: true,
+    });
+    expect(r.success).toBe(true);
+    expect(r.code.match(/_fn_f\(/g)?.length ?? 0).toBe(2);
+    const want = e.box(['Add', ['f', 1], ['f', 2]]).N().re;
+    expect(r.run({})).toBeCloseTo(want, 12);
+  });
+
+  it('fails closed (D6) on a directly recursive definition', () => {
+    const e = new ComputeEngine();
+    e.parse(
+      '\\mathrm{fact}(n) \\coloneq \\mathrm{If}(n \\le 1, 1, n \\cdot \\mathrm{fact}(n-1))'
+    ).evaluate();
+    const js = new JavaScriptTarget();
+    expect(() => js.compile(e.box(['fact', 5]), { realOnly: true })).toThrow(
+      /[Rr]ecursive user-defined function `fact`/
+    );
+  });
+
+  it('fails closed (D6) on mutual recursion', () => {
+    const e = new ComputeEngine();
+    e.parse('f(x) \\coloneq x').evaluate(); // stub so g's f(x) is a call
+    e.parse('g(x) \\coloneq f(x) + 1').evaluate();
+    e.parse('f(x) \\coloneq g(x) - 1').evaluate(); // redefine → f↔g mutual
+    const js = new JavaScriptTarget();
+    expect(() => js.compile(e.box(['f', 3]), { realOnly: true })).toThrow(
+      /[Rr]ecursive user-defined function/
+    );
+  });
+
+  it('keeps throwing Unknown operator for a truly unknown head', () => {
+    const e = new ComputeEngine();
+    const js = new JavaScriptTarget();
+    expect(() => js.compile(e.box(['zzz', 5]), { realOnly: true })).toThrow(
+      /Unknown operator `zzz`/
+    );
+  });
+
+  it('compiles a user function on the interval-js target', () => {
+    const e = new ComputeEngine();
+    e.parse('f(x) \\coloneq e^{-x^2/2}').evaluate();
+    const iv = new IntervalJavaScriptTarget();
+    const r = iv.compile(e.box(['f', 2])) as unknown as {
+      success: boolean;
+      run: (x: number) => { value: { lo: number; hi: number } };
+    };
+    expect(r.success).toBe(true);
+    expect(r.run(2).value.lo).toBeCloseTo(0.1353352832366127, 12);
+  });
+
+  it('does not emit a compilation fallback warning for ∫ of a user function', () => {
+    const e = new ComputeEngine();
+    // Generous budget so the (now compiled) 1e7-sample quadrature completes
+    // deterministically under CI/CPU contention rather than hitting the engine
+    // deadline and returning NaN. Timing is not asserted here.
+    e.timeLimit = 60000;
+    e.parse('f(x) \\coloneq e^{-x^2/2}').evaluate();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const r = e.parse('\\int_{-10}^{10} f(x) dx').N();
+      // The real-world win: the integrand compiles, so the fallback warning that
+      // previously fired ("Compilation fallback … Unknown operator `f`") is gone.
+      const fallbackWarned = warn.mock.calls.some((c) =>
+        /Compilation fallback/.test(String(c[0]))
+      );
+      expect(fallbackWarned).toBe(false);
+      // Value sanity (loose — Monte-Carlo): ∫_{-10}^{10} e^{-x²/2} dx ≈ √(2π).
+      // The quadrature returns a `Measurement(estimate, error)`; read the
+      // estimate off the first operand.
+      const estimate = r.operator === 'Measurement' ? r.op1.re : r.re;
+      expect(estimate).toBeCloseTo(Math.sqrt(2 * Math.PI), 1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

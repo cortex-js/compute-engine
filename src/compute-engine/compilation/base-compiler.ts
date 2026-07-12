@@ -1,5 +1,6 @@
 import type {
   Expression,
+  FunctionInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
@@ -510,7 +511,15 @@ export class BaseCompiler {
 
     // Handle function calls
     const fn = target.functions?.(h);
-    if (!fn) throw new Error(`Unknown operator \`${h}\``);
+    if (!fn) {
+      // `h` may be a symbol whose engine definition is a user-defined function
+      // literal (`f(x) := …`, `x ↦ …`). Emit it as a named local function and
+      // compile the call site as `_fn_f(arg)`. Returns undefined for a truly
+      // unknown operator (no such definition) or a target that opts out.
+      const userFn = BaseCompiler.tryCompileUserFunction(engine, h, args, target);
+      if (userFn !== undefined) return userFn;
+      throw new Error(`Unknown operator \`${h}\``);
+    }
 
     if (typeof fn === 'function') {
       // Handle broadcastable operators
@@ -1347,6 +1356,120 @@ export class BaseCompiler {
   }
 
   /**
+   * If `id` names a symbol whose engine definition is a user-defined function
+   * literal, return that `["Function", body, …params]` literal; otherwise
+   * `undefined`. Covers both storage routes:
+   *  - an operator definition backed by a lambda (`f(x) := …`, `x ↦ …`, or
+   *    `ce.assign(name, lambda)`), where the literal is kept on the operator
+   *    definition as `_lambdaLiteral`; and
+   *  - a plain symbol whose assigned value is itself a `Function` literal.
+   */
+  private static userFunctionLiteral(
+    engine: ComputeEngine,
+    id: string
+  ): (Expression & FunctionInterface) | undefined {
+    const def = engine.lookupDefinition(id);
+    if (def && 'operator' in def) {
+      const literal = (def.operator as { _lambdaLiteral?: Expression })
+        ._lambdaLiteral;
+      if (literal !== undefined && isFunction(literal, 'Function'))
+        return literal;
+    }
+    const value = engine._getSymbolValue(id);
+    if (value !== undefined && isFunction(value, 'Function')) return value;
+    return undefined;
+  }
+
+  /**
+   * Generated local-function name for a user-defined function `id`. Prefixed to
+   * avoid colliding with the vars object (`_.<name>`) and with target helpers;
+   * non-identifier characters are folded to `_` so the emitted declaration is a
+   * valid target identifier.
+   */
+  private static userFunctionName(id: string): string {
+    return `_fn_${id.replace(/[^\w$]/g, '_')}`;
+  }
+
+  /**
+   * If head `h` names a user-defined function (see `userFunctionLiteral`),
+   * ensure its definition is emitted once into `target.userFunctions.defs` as a
+   * named local function and return the call-site source `_fn_h(arg, …)`.
+   * Returns `undefined` when `h` is a genuinely unknown operator (no such
+   * definition — the caller then throws), or when the target opts out of user
+   * functions by not providing a `userFunctions` registry.
+   *
+   * Recursion (including mutual recursion) is not compiled in this pass: while a
+   * definition's body is being compiled its name sits in `compiling`, so a
+   * (mutually) recursive reference is detected and **fails closed (D6)** with an
+   * explanatory error rather than looping.
+   *
+   * Capture semantics: the body is compiled once, at compile time, through the
+   * *same* `target` var/fold rules as the surrounding expression (only the
+   * parameters are shadowed). Free symbols and constants the body references are
+   * therefore snapshotted exactly like the constant-baking `tryFoldKnownSymbol`
+   * performs elsewhere — a later reassignment of a captured outer symbol does
+   * not affect an already-compiled function.
+   */
+  static tryCompileUserFunction(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    const registry = target.userFunctions;
+    if (!registry) return undefined;
+
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return undefined;
+
+    const name = BaseCompiler.userFunctionName(h);
+
+    if (!registry.defs.has(name)) {
+      if (registry.compiling.has(name))
+        throw new Error(
+          `Recursive user-defined function \`${h}\` cannot be compiled. Fail closed (D6).`
+        );
+      registry.compiling.add(name);
+      try {
+        const params = literal.ops
+          .slice(1)
+          .map((x) => (isSymbol(x) ? x.symbol : '_'));
+        // Compile the body with the parameters shadowing the target's `var`
+        // resolution (matching the `Function`-literal handler), so a parameter
+        // compiles to its bare name rather than a folded value or `_.<name>`.
+        // Compiling the body here may register nested user-function
+        // dependencies first, so they are emitted before this definition.
+        const body = BaseCompiler.compile(literal.ops[0].canonical, {
+          ...target,
+          var: (id) => (params.includes(id) ? id : target.var(id)),
+        });
+        registry.defs.set(
+          name,
+          `const ${name} = (${params.join(', ')}) => ${body};`
+        );
+      } finally {
+        registry.compiling.delete(name);
+      }
+    }
+
+    const callArgs = args
+      .map((a) => BaseCompiler.compileValueOperand(a, target))
+      .join(', ');
+    return `${name}(${callArgs})`;
+  }
+
+  /**
+   * Concatenate the user-defined function definitions accumulated in
+   * `target.userFunctions` (see `tryCompileUserFunction`) into a preamble
+   * fragment, in dependency order. Empty string when there are none.
+   */
+  static userFunctionsPreamble(target: CompileTarget<Expression>): string {
+    const defs = target.userFunctions?.defs;
+    if (!defs || defs.size === 0) return '';
+    return [...defs.values()].join('\n') + '\n';
+  }
+
+  /**
    * Operator heads the compiler lowers directly in `compileExpr`, independent
    * of any target operator/function mapping (control-flow, binding, and
    * indexing-set forms). `analyzeReferences` never reports these as
@@ -1405,6 +1528,8 @@ export class BaseCompiler {
     const unsupported = new Set<string>();
     // Guard against a symbol whose value (transitively) references itself.
     const foldedSeen = new Set<string>();
+    // Guard against a (mutually) recursive user-defined function body.
+    const userFnSeen = new Set<string>();
 
     const union = (a: ReadonlySet<string>, more: string[]): Set<string> => {
       const s = new Set(a);
@@ -1447,13 +1572,44 @@ export class BaseCompiler {
       // below would otherwise strip `.ops` from `e` in the fall-through.
       const h = e.operator;
       const ops: ReadonlyArray<Expression> = e.ops;
+
+      // A head that names a user-defined function literal is lowerable (emitted
+      // as a named local function — see `tryCompileUserFunction`), not
+      // unsupported. Descend into its body (parameters bound) so free symbols it
+      // references transitively are surfaced; guard against recursion.
+      const userLiteral =
+        target.userFunctions !== undefined &&
+        !BaseCompiler.STRUCTURAL_HEADS.has(h) &&
+        target.functions?.(h) === undefined &&
+        target.operators?.(h) === undefined
+          ? BaseCompiler.userFunctionLiteral(engine, h)
+          : undefined;
+
       if (
         h !== 'Error' &&
         !BaseCompiler.STRUCTURAL_HEADS.has(h) &&
         target.functions?.(h) === undefined &&
-        target.operators?.(h) === undefined
+        target.operators?.(h) === undefined &&
+        userLiteral === undefined
       )
         unsupported.add(h);
+
+      if (userLiteral !== undefined) {
+        if (!userFnSeen.has(h)) {
+          userFnSeen.add(h);
+          const params = userLiteral.ops
+            .slice(1)
+            .filter((p) => isSymbol(p))
+            .map((p) => (p as Expression & { symbol: string }).symbol);
+          visit(
+            userLiteral.ops[0],
+            params.length ? union(bound, params) : bound
+          );
+        }
+        // The call arguments are evaluated in the surrounding scope.
+        for (const op of ops) visit(op, bound);
+        return;
+      }
 
       // Binding forms: shadow their bound variables in the body, but visit the
       // bound expressions (limits / collections) in the outer scope.

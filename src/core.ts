@@ -8,6 +8,7 @@ export { ComputeEngine } from './compute-engine/index.js';
 
 // Thrown when an evaluation exceeds `ce.timeLimit` or `ce.iterationLimit`
 export { CancellationError } from './common/interruptible.js';
+export type { CancellationCause } from './common/interruptible.js';
 
 export type * from './compute-engine/types.js';
 

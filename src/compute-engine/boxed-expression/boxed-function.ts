@@ -26,6 +26,7 @@ import type {
 } from '../global-types.js';
 
 import {
+  isBroadcastCollectionType,
   isFiniteIndexedCollection,
   isNumericTuple,
   zip,
@@ -45,8 +46,8 @@ import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { NUMERIC_TYPES } from '../../common/type/primitive.js';
 import {
+  broadcastElementType,
   broadcastResultType,
-  collectionElementType,
   functionResult,
   isSignatureType,
   narrow,
@@ -1706,21 +1707,28 @@ function type(expr: BoxedFunction): Type {
     // Honest typing for list broadcast: when this operator will broadcast
     // element-wise over a finite indexed collection operand, its value is a
     // List, so its declared type must be the broadcast list type — not the
-    // scalar per-element type the handler computed. Use the SAME predicate as
-    // the value path (step 2, `:1286-1290`) so type and value never disagree:
-    // this leaves numeric tuples/points and tensor Add/Multiply (which have
-    // dedicated component-wise typing) untouched via `skipBroadcastForVectorOps`.
+    // scalar per-element type the handler computed. The predicate matches the
+    // value path so type and value never disagree: a materialized finite
+    // collection (`isFiniteIndexedCollection`, step 2 / step 4b), OR an operand
+    // whose declared type is an unbounded list / indexed-collection that will
+    // materialize into a List at evaluation (`isBroadcastCollectionType` — a
+    // symbolic-length `Range`, or an un-evaluated broadcast result like `R^2`).
+    // Numeric tuples/points and tensor Add/Multiply (dedicated component-wise
+    // typing) stay untouched via `skipBroadcastForVectorOps`.
     if (def.broadcastable) {
       const hasTensors = expr.ops.some((x) => isTensor(x));
       if (
-        expr.ops.some((x) => isFiniteIndexedCollection(x)) &&
+        expr.ops.some(
+          (x) => isFiniteIndexedCollection(x) || isBroadcastCollectionType(x)
+        ) &&
         !skipBroadcastForVectorOps(expr.operator, hasTensors, expr.ops)
       ) {
-        // The handler computed the scalar per-element result. A few handlers
-        // leak the collection type (e.g. `Negate` returns `x.type`); unwrap to
-        // the element type so the wrapper does not nest lists.
-        const element = collectionElementType(sigResult) ?? sigResult;
-        return broadcastResultType(element);
+        // The handler computed the scalar per-element result. Some handlers
+        // leak the collection type (e.g. `Negate` returns `x.type`) or a
+        // `scalar | list<E>` union (a naive `widen(…)` over a collection
+        // operand); `broadcastElementType` unwraps both so the wrapper does not
+        // nest a list or a union inside the broadcast result.
+        return broadcastResultType(broadcastElementType(sigResult));
       }
     }
 

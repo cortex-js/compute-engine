@@ -24,6 +24,8 @@ export type DiagnosticCode =
   | 'host-pragma-disabled' // %0 = pragma name (host-state pragmas gated off)
   | 'error-directive' // %0 = message from a `#error` pragma
   | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value)
+  | 'evaluation-canceled' // %0 = machine-readable CancellationCause, %1 = error description (non-final statement hit a cap breach: timeout/iteration/recursion)
+  | 'unknown-function' // %0 = called name, %1 = suggested known operator ("did you mean")
   | 'latex-parsing-unavailable' // no LaTeX parser was injected for a `$…$` island
   | 'invalid-escape-sequence' // %0 = escape sequence char
   | 'invalid-unicode-codepoint-string' // %0 = codepoint string
