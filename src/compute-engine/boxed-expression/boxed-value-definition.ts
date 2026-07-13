@@ -67,6 +67,10 @@ export class _BoxedValueDefinition
   // If `undefined`, the value is not defined (for example, the symbol `True` does not have a value: the symbol itself *is* the value)
   private _value: Expression | undefined | null;
 
+  // True if `_value` refers to this symbol by name (a self-referential
+  // binding like `a := a + 1`). Computed once whenever the value is set.
+  private _isSelfReferential = false;
+
   // If `null`, the type is the type of the value
   // Note that `_type` may be different (wider) than the value's type
   private _type: BoxedType | undefined | null;
@@ -131,6 +135,7 @@ export class _BoxedValueDefinition
     }
 
     this._value = dynamicValue(this._engine, def.value);
+    this._isSelfReferential = isSelfReferentialValue(this.name, this._value);
 
     if (this._value) {
       if (!this._type || this._type.isUnknown) {
@@ -209,6 +214,10 @@ export class _BoxedValueDefinition
     return this._isConstant;
   }
 
+  get isSelfReferential(): boolean {
+    return this._isSelfReferential;
+  }
+
   get value(): Expression | undefined {
     if (this._value === null)
       this._value = dynamicValue(this._engine, this._defValue);
@@ -219,6 +228,7 @@ export class _BoxedValueDefinition
     if (this._isConstant)
       throw new Error(`Cannot set value of constant "${this.name}"`);
     this._value = v;
+    this._isSelfReferential = isSelfReferentialValue(this.name, v);
     this._engine._generation += 1;
   }
 
@@ -271,6 +281,23 @@ function dynamicValue(
   if (value instanceof _BoxedExpression) return value;
 
   return ce.expr(value);
+}
+
+/**
+ * A binding is self-referential when its value mentions the symbol being
+ * defined (e.g. `a := a + 1` over an unbound `a`). Resolving such a value
+ * would re-resolve the symbol without end, overflowing the stack in `.N()`
+ * and in collection-shape queries. We detect it once, at assignment time, by
+ * a structural symbol scan — `.symbols` includes bound occurrences too, so
+ * this over-approximates the pathological self-shadowing case
+ * (`a := \sum_{a=…} a`), which then degrades to a symbolic result rather than
+ * crashing. That trade is deliberate.
+ */
+function isSelfReferentialValue(
+  name: string,
+  value: Expression | undefined | null
+): boolean {
+  return !!value && value.symbols.includes(name);
 }
 
 function inferTypeFromValue(

@@ -136,7 +136,6 @@
 "Spectrum": {"signature":"(matrix) -> set<complex>","description":null,"arity":1},
 "StieltjesGamma": {"signature":"(integer, complex?) -> complex","description":"Stieltjes constant","arity":[1,2]},
 "StirlingCycle": {"signature":"(integer, integer) -> integer","description":"Unsigned Stirling number of the first kind","arity":2},
-"StirlingS1": {"signature":"(integer, integer) -> integer","description":"Signed Stirling number of the first kind","arity":2},
 "StirlingSeriesRemainder": {"signature":"(integer, complex) -> complex","description":"Remainder term in the Stirling series for the logarithmic gamma function","arity":2},
 "UniqueZero": {"signature":"(function, any*) -> complex","description":"Unique zero (root) of function","arity":2},
 "WeierstrassP": {"signature":"(complex, complex) -> complex","description":"Weierstrass elliptic function","arity":2},

@@ -930,6 +930,16 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    */
   value: Expression | undefined;
 
+  /**
+   * True if the current value refers to the symbol itself (a degenerate
+   * self-referential binding, e.g. `a := a + 1` over an unbound `a`). Such a
+   * binding forms a cycle: resolving the value would re-resolve the symbol
+   * forever. When set, the symbol is treated as unbound during resolution so
+   * that `evaluate()`/`.N()`/collection queries stay symbolic instead of
+   * overflowing the stack. Computed once when the value is assigned.
+   */
+  readonly isSelfReferential: boolean;
+
   eq?: (a: Expression) => boolean | undefined;
   neq?: (a: Expression) => boolean | undefined;
   cmp?: (a: Expression) => '=' | '>' | '<' | undefined;

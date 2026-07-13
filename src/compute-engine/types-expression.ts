@@ -106,6 +106,7 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
 
   holdUntil: 'never' | 'evaluate' | 'N';
   value: Expression | undefined;
+  readonly isSelfReferential: boolean;
   eq?: (a: Expression) => boolean | undefined;
   neq?: (a: Expression) => boolean | undefined;
   cmp?: (a: Expression) => '=' | '>' | '<' | undefined;
@@ -1980,6 +1981,21 @@ export interface Expression {
    * @category Type Properties
    */
   readonly isReal: boolean | undefined;
+
+  /**
+   * The value of this expression is a function.
+   *
+   * This is equivalent to `this.type.matches("function")`, that is, the
+   * expression evaluates to a function (for example a symbol bound to a
+   * function literal, or a function literal itself).
+   *
+   * This is distinct from `isFunctionExpression`, which is a *structural*
+   * property (`true` when the expression is a function application node such
+   * as `["Add", 1, 2]`).
+   *
+   * @category Type Properties
+   */
+  readonly isFunction: boolean | undefined;
 
   /** Mathematical equality (strong equality), that is the value
    * of this expression and the value of `other` are numerically equal.

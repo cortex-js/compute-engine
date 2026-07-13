@@ -26,6 +26,7 @@ _setDefaultEngineFactory(
   () => new ComputeEngine({ latexSyntax: new LatexSyntax() })
 );
 
+import { LATEX_DICTIONARY } from './compute-engine/latex-syntax/dictionary/default-dictionary.js';
 export {
   LATEX_DICTIONARY,
   CORE_DICTIONARY,
@@ -111,6 +112,19 @@ export {
 export type { StepLabel } from './compute-engine/boxed-expression/explain-labels.js';
 
 // ── Type guards ─────────────────────────────────────────────────────
+import {
+  isExpression,
+  isNumber,
+  isSymbol,
+  isFunction,
+  isString,
+  isTensor,
+  isDictionary,
+  isCollection,
+  isIndexedCollection,
+  numericValue,
+  sym,
+} from './compute-engine/boxed-expression/type-guards.js';
 export {
   isExpression,
   isNumber,
@@ -122,6 +136,7 @@ export {
   isCollection,
   isIndexedCollection,
   numericValue,
+  sym,
 } from './compute-engine/boxed-expression/type-guards.js';
 
 // ── Boxed expression types ──────────────────────────────────────────
@@ -137,9 +152,33 @@ export type {
 } from './compute-engine/function-properties/index.js';
 
 // ── Global registration ─────────────────────────────────────────────
+// The self-registration slot is the only discovery channel that works with
+// zero host cooperation (a page that just script-tags the bundle next to a
+// standalone consumer element). It carries not just the constructor but the
+// value exports a consumer needs to work with boxed expressions from a copy of
+// the bundle it did not itself import: the structural type guards, `LatexSyntax`
+// and `LATEX_DICTIONARY`. The guards are structural (`_kind` checks, no
+// `instanceof`), so a slot-discovered guard from one copy is safe on
+// expressions from another. Treat this object's shape as an additive contract —
+// consumers feature-detect each name, so new entries can be added but existing
+// ones should not change meaning or be removed.
 (globalThis as Record<symbol, unknown>)[
   Symbol.for('io.cortexjs.compute-engine')
 ] = {
   ComputeEngine: ComputeEngine.prototype.constructor,
   version: '{{SDK_VERSION}}',
+  LatexSyntax,
+  LATEX_DICTIONARY,
+  // Runtime type guards (structural — safe across bundle copies)
+  isExpression,
+  isNumber,
+  isSymbol,
+  isFunction,
+  isString,
+  isTensor,
+  isDictionary,
+  isCollection,
+  isIndexedCollection,
+  numericValue,
+  sym,
 };

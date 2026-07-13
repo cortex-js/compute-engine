@@ -438,11 +438,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // If the symbol is a constant, the definition has the value
     if (this._def.value.isConstant) return this._def.value.value;
 
+    // Guard (static): a value that mentions this symbol by name (`a := a + 1`)
+    // forms a cycle — following it would re-resolve this symbol forever.
+    // Treat it as unbound so resolution stays symbolic instead of overflowing
+    // the stack. Detected once, when the value is assigned.
+    if (this._def.value.isSelfReferential) return undefined;
+
     // Lookup the value by walking the scope chain
     const result = this.engine._getSymbolValue(this._id);
 
-    // Guard: if the value is the symbol itself (degenerate self-assignment),
-    // return undefined to avoid infinite loops.
+    // Guard (dynamic): the resolved value IS this symbol (degenerate `a := a`,
+    // or a function parameter bound in the call scope to an argument of the
+    // same name — e.g. evaluating `f(x)` for `f(x) := 2x`). Such bindings are
+    // created directly on the scope, bypassing the value setter, so the static
+    // flag above does not see them; this O(1) check catches them.
     if (
       result !== undefined &&
       'symbol' in result &&
@@ -674,12 +683,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return nonNegativeSign(this.sgn);
   }
 
-  get isFunction(): boolean | undefined {
-    const t = this.type;
-    if (t.isUnknown) return undefined;
-    return this.type.matches('function');
-  }
-
   get isNumber(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
@@ -801,10 +804,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // it never *prevents* numeric evaluation. (A previous version returned
     // `this` for 'never', which made `ImaginaryUnit.N()` a no-op and left
     // products like `0.25 * i` unfolded under N().)
-    // For non-constants, check the scope-chain value first
+    // For non-constants, resolve the scope-chain value via the guarded
+    // `_value` (which returns `undefined` for a self-referential binding);
+    // an unbound or self-referential symbol stays symbolic rather than
+    // recursing forever.
     if (def && !def.isConstant) {
-      const contextValue = this.engine._getSymbolValue(this._id);
-      if (contextValue) return contextValue.N();
+      const contextValue = this._value;
+      return contextValue ? contextValue.N() : this;
     }
     return def?.value?.N() ?? this;
   }

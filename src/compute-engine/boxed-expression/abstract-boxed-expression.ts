@@ -947,6 +947,12 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
+  get isFunction(): boolean | undefined {
+    const t = this.type;
+    if (t.isUnknown) return undefined;
+    return t.matches('function');
+  }
+
   toSignedFunction(): Expression | undefined {
     const op = this.operator;
     if (op === undefined || this.ops === undefined || this.ops.length < 2) {

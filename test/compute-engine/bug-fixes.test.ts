@@ -285,4 +285,45 @@ describe('Playground regressions', () => {
       expect(Date.now() - start).toBeLessThan(5_000);
     });
   });
+
+  // A self-referential binding (`a := a + 1` over an unbound `a`) forms a
+  // value cycle: the stored value mentions the symbol it defines. `evaluate()`
+  // always terminated (it substitutes one level), but `.N()` — and the
+  // collection-shape queries reached from numeric `Add` — used to follow the
+  // cycle without a guard and overflow the stack. Reported by Tycho (surfaced
+  // through `.latex` on a cortex read-back, which calls `.N()`).
+  describe('self-referential binding does not overflow the stack', () => {
+    test('.N() on `a := a + 1` stays symbolic', () => {
+      const ce = new ComputeEngine();
+      ce.assign('a', ce.parse('a + 1'));
+      expect(() => ce.box('a').N()).not.toThrow();
+      expect(ce.box('a').N().json).toEqual('a');
+      expect(ce.box('a').N().latex).toEqual('a');
+      // collection-shape queries reached from numeric Add must not recurse
+      expect(() => ce.box('a').isFiniteCollection).not.toThrow();
+    });
+
+    test('degenerate `a := a` stays symbolic', () => {
+      const ce = new ComputeEngine();
+      ce.assign('a', ce.symbol('a'));
+      expect(() => ce.box('a').N()).not.toThrow();
+      expect(ce.box('a').N().json).toEqual('a');
+    });
+
+    test('non-self-referential bindings still resolve', () => {
+      const ce = new ComputeEngine();
+      ce.assign('y', ce.parse('2x'));
+      expect(ce.box('y').evaluate().json).toEqual(['Multiply', 2, 'x']);
+      ce.assign('x', ce.number(3));
+      expect(ce.box('y').N().json).toEqual(6);
+    });
+
+    test('reassigning away from a self-reference clears the guard', () => {
+      const ce = new ComputeEngine();
+      ce.assign('a', ce.parse('a + 1'));
+      expect(ce.box('a').N().json).toEqual('a');
+      ce.assign('a', ce.number(7));
+      expect(ce.box('a').N().json).toEqual(7);
+    });
+  });
 });
