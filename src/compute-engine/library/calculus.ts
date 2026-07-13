@@ -1056,14 +1056,22 @@ volumes
     // The result is a plain expression: the truncated sum plus an inert
     // `BigO` remainder head (e.g. `Sin(x)` → `x − x³/6 + x⁵/120 + O(x⁷)`).
     // At a pole the result is a Laurent expansion (e.g. `Cot(x)` →
-    // `1/x − x/3 − …`), via the Laurent engine in symbolic/series.ts. An
-    // essential singularity, branch point, or non-differentiable operand
-    // leaves `Series(...)` unevaluated (never a partial/wrong expansion).
+    // `1/x − x/3 − …`), via the Laurent engine in symbolic/series.ts. That
+    // engine also produces **Puiseux** expansions with fractional powers
+    // (`√(sin x)` → `√x − x^{5/2}/12 + …`) and **log-aware** expansions
+    // (`ln(sin x)` → `ln x − x²/6 − …`, `x^x` → `1 + x ln x + …`). Only an
+    // essential singularity (`e^{1/x}`), an irrational/symbolic exponent
+    // (`x^π`), a nested/reciprocal logarithm (`ln(ln x)`, `1/ln x`), or a
+    // non-differentiable operand leaves `Series(...)` unevaluated (never a
+    // partial/wrong expansion).
     //
     Series: {
       description:
         'Taylor series expansion of an expression about a point (or an ' +
-        'asymptotic expansion at ±∞). ' +
+        'asymptotic expansion at ±∞), including Laurent, Puiseux ' +
+        '(fractional-power), and log-aware expansions at poles and branch ' +
+        'points. Only essential singularities, irrational exponents, and ' +
+        'nested/reciprocal logarithms are left unevaluated. ' +
         'Example: Series(\\sin x, x) → x - x^3/6 + x^5/120 + O(x^7)',
       broadcastable: false,
       lazy: true,

@@ -117,6 +117,23 @@
   `1/(n+1) {0 < n+1}` and `1/(s−1) {1 < s}`. Integrals whose endpoint
   behavior cannot be classified stay unevaluated rather than leaking
   indeterminates. Numeric-parameter integrals are unchanged.
+- **`Series` expands at algebraic branch points (Puiseux series).** A series
+  expansion may now carry fractional powers: `Series(√(sin x), x)` →
+  `√x − x^{5/2}/12 + x^{9/2}/1440 + O(x^{13/2})`. This covers `√x`, `1/√x`,
+  `x^{3/2}·e^x`, `Root(g, r)` and rational powers `g^{p/r}` where the base
+  vanishes (or has a pole), as well as compositions: `cos(√x)`, `csc(√x)`
+  (→ `1/√x + √x/6 + …`), and `Γ(√x)` (→ `1/√x − γ + …`).
+- **`Series` expands through logarithmic singularities.** Expanding about a
+  zero or pole of a logarithm's argument now yields a log-carrying series:
+  `Series(ln(sin x), x)` → `ln x − x²/6 − x⁴/180 + O(x⁶)`, and
+  `Series(x^x, x)` → `1 + x·ln x + x²·ln²x/2 + …`. Base-`b` logarithms
+  (`log₂ x`, `log₁₀ x`) expand through the same path. Nested or reciprocal
+  logarithms (`ln(ln x)`, `1/ln x`) and essential singularities (`e^{1/x}`)
+  still stay unevaluated rather than returning a partial expansion.
+- **`Series` of an irrational power no longer returns an invalid expansion.**
+  `Series(x^π, x)` previously produced coefficients containing unresolved
+  `0^{π−1}`-style indeterminates; it now stays unevaluated at 0 (the
+  expansion about a regular point, e.g. `x^π` about 2, is unchanged).
 
 ### Sums and Products
 

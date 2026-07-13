@@ -203,14 +203,41 @@ describe('Series — deferred singular cases', () => {
     expect(s.operator).toBe('Series');
   });
 
-  test('ln x at 0 stays unevaluated (branch point)', () => {
-    const s = series('\\ln x');
+  test('1/ln x at 0 stays unevaluated (reciprocal log)', () => {
+    const s = series('\\frac{1}{\\ln x}');
     expect(s.operator).toBe('Series');
   });
 
-  test('sqrt(x) at 0 stays unevaluated (branch point)', () => {
-    const s = series('\\sqrt{x}');
+  test('ln(ln x) at 0 stays unevaluated (nested log)', () => {
+    const s = series('\\ln(\\ln x)');
     expect(s.operator).toBe('Series');
+  });
+
+  test('x^π at 0 stays unevaluated (irrational exponent)', () => {
+    // Regression: the derivative fallback used to keep unresolved `0^{π−k}`
+    // indeterminates as coefficients, emitting a garbage expansion.
+    const s = series('x^{\\pi}');
+    expect(s.operator).toBe('Series');
+    expect(s.toString()).not.toContain('0^');
+  });
+
+  test('x^π about a regular point still expands (binomial)', () => {
+    const s = ce
+      .function('Series', [
+        ce.parse('x^{\\pi}'),
+        ce.symbol('x'),
+        ce.number(2),
+        ce.number(2),
+      ])
+      .evaluate();
+    expect(s.operator).not.toBe('Series');
+    // Leading term is 2^π; check the truncation numerically at x = 2.1.
+    const poly = ce.function('Normal', [s]).evaluate();
+    const err = Math.abs(
+      poly.subs({ x: ce.number(2.1) }).N().re -
+        ce.parse('x^{\\pi}').subs({ x: ce.number(2.1) }).N().re
+    );
+    expect(err).toBeLessThan(1e-3);
   });
 
   test('deferred result equals its input (pill guard: no expansion)', () => {
@@ -620,5 +647,228 @@ describe('Series — Laurent numeric equivalence and N() poisoning', () => {
     expect(normal('\\frac{1}{\\sin x}').subs({ x: ce.number(0.3) }).N().isNaN).not.toBe(
       true
     );
+  });
+});
+
+//
+// §7 Puiseux battery — fractional-power expansions (Phase A)
+//
+
+describe('Series — Puiseux expansions (§7)', () => {
+  test('√x = √x (a bare fractional monomial)', () => {
+    expect(series('\\sqrt{x}').latex).toBe('\\sqrt{x}+O\\left(x^7\\right)');
+  });
+
+  test('1/√x matches numerically near 0', () => {
+    expectNumericNearPole(
+      normal('\\frac{1}{\\sqrt{x}}'),
+      (x) => 1 / Math.sqrt(x),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-6
+    );
+  });
+
+  test('√(sin x) = √x − x^{5/2}/12 + x^{9/2}/1440 + …', () => {
+    // Cross-checked against SymPy: sqrt(x) - x**(5/2)/12 + x**(9/2)/1440 + …
+    expectNumericNearPole(
+      normal('\\sqrt{\\sin x}', '0', 6),
+      (x) => Math.sqrt(Math.sin(x)),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-6
+    );
+  });
+
+  test('x^{3/2}·e^x matches numerically near 0', () => {
+    expectNumericNearPole(
+      normal('x^{3/2}e^x', '0', 5),
+      (x) => Math.pow(x, 1.5) * Math.exp(x),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-3
+    );
+  });
+
+  test('√x + x (mixed denominators)', () => {
+    expect(series('\\sqrt{x}+x').latex).toBe('\\sqrt{x}+x+O\\left(x^7\\right)');
+  });
+
+  test('√x·√x reduces to plain x (integer power)', () => {
+    expect(normal('\\sqrt{x}\\sqrt{x}').isSame(ce.symbol('x'))).toBe(true);
+  });
+
+  test('Root(1+x, 3)·√x matches numerically near 0', () => {
+    expectNumericNearPole(
+      normal('\\sqrt[3]{1+x}\\cdot\\sqrt{x}', '0', 5),
+      (x) => Math.cbrt(1 + x) * Math.sqrt(x),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-3
+    );
+  });
+
+  test('√x at +∞ is √x', () => {
+    const s = series('\\sqrt{x}', '+\\infty');
+    expect(s.operator).toBe('Add');
+    expect(s.latex).toContain('\\sqrt{x}');
+  });
+
+  test('cos(√x) = 1 − x/2 + x²/24 − x³/720 (integer powers)', () => {
+    // Cross-checked against SymPy: 1 - x/2 + x**2/24 - x**3/720 + O(x**4).
+    // A composition with a Puiseux argument that collapses to integer powers.
+    expect(series('\\cos(\\sqrt{x})', '0', 3).latex).toBe(
+      '1-\\frac{x}{2}+\\frac{x^2}{24}-\\frac{x^3}{720}+O\\left(x^4\\right)'
+    );
+  });
+
+  test('sin(√x) matches numerically near 0', () => {
+    expectNumericNearPole(
+      normal('\\sin(\\sqrt{x})', '0', 3),
+      (x) => Math.sin(Math.sqrt(x)),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-5
+    );
+  });
+
+  test('e^{√x} matches numerically near 0', () => {
+    expectNumericNearPole(
+      normal('e^{\\sqrt{x}}', '0', 3),
+      (x) => Math.exp(Math.sqrt(x)),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-5
+    );
+  });
+
+  test('csc(√x) = 1/√x + √x/6 + 7x^{3/2}/360 + … (Laurent–Puiseux mix)', () => {
+    // Cross-checked against SymPy: 1/sqrt(x) + sqrt(x)/6 + 7*x**(3/2)/360 + …
+    expectNumericNearPole(
+      normal('\\csc(\\sqrt{x})', '0', 3),
+      (x) => 1 / Math.sin(Math.sqrt(x)),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-5
+    );
+  });
+
+  test('tan(√x) matches numerically near 0', () => {
+    expectNumericNearPole(
+      normal('\\tan(\\sqrt{x})', '0', 3),
+      (x) => Math.tan(Math.sqrt(x)),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-3
+    );
+  });
+
+  test('Γ(√x) = 1/√x − γ + … (special-function pole with Puiseux arg)', () => {
+    const p = normal('\\Gamma(\\sqrt{x})', '0', 2);
+    // Leading behaviour is the Γ pole: residue 1 at √x = 0, constant −γ.
+    expect(p.toString()).toContain('EulerGamma');
+    expectNumericNearPole(
+      p,
+      (x) => ce.function('Gamma', [ce.number(Math.sqrt(x))]).N().re,
+      0,
+      [0.05, 0.1, 0.2],
+      2e-2
+    );
+  });
+
+  test('x^π at 0 does not produce a Puiseux expansion', () => {
+    // Irrational exponent: the Puiseux path declines (there is no finite
+    // ramification). (The Taylor engine's own handling of `x^π` is unchanged.)
+    const s = normal('x^\\pi', '0', 3);
+    expect(s.toString()).not.toContain('Sqrt');
+  });
+
+  test('e^{1/x} at 0 stays unevaluated (essential singularity)', () => {
+    expect(series('e^{1/x}').operator).toBe('Series');
+  });
+});
+
+//
+// §8 Log-aware battery — logarithmic expansions (Phase B)
+//
+
+describe('Series — log-aware expansions (§8)', () => {
+  test('ln x = ln x', () => {
+    expect(series('\\ln x').latex).toBe('\\ln(x)+O\\left(x^7\\right)');
+  });
+
+  test('x·ln x = x ln x', () => {
+    expect(series('x\\ln x').latex).toBe('x\\ln(x)+O\\left(x^8\\right)');
+  });
+
+  test('ln(sin x) = ln x − x²/6 − x⁴/180 + O(x⁶)', () => {
+    // Cross-checked against SymPy: log(x) - x**2/6 - x**4/180 + O(x**6).
+    expect(series('\\ln(\\sin x)').latex).toBe(
+      '\\ln(x)-\\frac{x^2}{6}-\\frac{x^4}{180}+O\\left(x^6\\right)'
+    );
+  });
+
+  test('ln(tan x) = ln x + x²/3 + 7x⁴/90 + O(x⁶)', () => {
+    // Cross-checked against SymPy: log(x) + x**2/3 + 7*x**4/90 + O(x**6).
+    expect(series('\\ln(\\tan x)').latex).toBe(
+      '\\ln(x)+\\frac{x^2}{3}+\\frac{7x^4}{90}+O\\left(x^6\\right)'
+    );
+  });
+
+  test('x^x = 1 + x ln x + x²ln²x/2 + …', () => {
+    // Cross-checked against SymPy: 1 + x*log(x) + x**2*log(x)**2/2 + …
+    expectNumericNearPole(
+      normal('x^x', '0', 3),
+      (x) => Math.pow(x, x),
+      0,
+      [0.05, 0.1, 0.2],
+      1e-3
+    );
+    // The constant term is 1, and log atoms appear in higher coefficients.
+    expect(normal('x^x', '0', 3).toString()).toContain('ln(x)');
+  });
+
+  test('ln(x)/x = ln x / x', () => {
+    expect(series('\\frac{\\ln x}{x}').latex).toBe(
+      '\\frac{\\ln(x)}{x}+O\\left(x^7\\right)'
+    );
+  });
+
+  test('Log(x, 2) = ln x / ln 2', () => {
+    expect(series('\\log_2(x)').latex).toBe(
+      '\\frac{\\ln(x)}{\\ln(2)}+O\\left(x^7\\right)'
+    );
+  });
+
+  test('ln(x²(1+x)) = 2 ln x + x − x²/2 + x³/3 − x⁴/4 + O(x⁵)', () => {
+    // Cross-checked against SymPy: 2*log(x) + x - x**2/2 + x**3/3 - x**4/4.
+    expect(series('\\ln(x^2(1+x))', '0', 4).latex).toBe(
+      '2\\ln(x)+x-\\frac{x^2}{2}+\\frac{x^3}{3}-\\frac{x^4}{4}+O\\left(x^5\\right)'
+    );
+  });
+
+  test('1/ln x at 0 stays unevaluated (reciprocal log)', () => {
+    expect(series('\\frac{1}{\\ln x}').operator).toBe('Series');
+  });
+
+  test('ln(ln x) at 0 stays unevaluated (nested log)', () => {
+    expect(series('\\ln(\\ln x)').operator).toBe('Series');
+  });
+});
+
+//
+// §9 Regression — a Puiseux-shaped Residue must defer, not return a wrong value
+//
+
+describe('Series — Puiseux/log Residue regression', () => {
+  test('Residue of x^{-3/2} stays unevaluated', () => {
+    const r = ce
+      .function('Residue', [
+        ce.parse('\\frac{1}{x\\sqrt{x}}'),
+        ce.symbol('x'),
+        ce.Zero,
+      ])
+      .evaluate();
+    expect(r.operator).toBe('Residue');
   });
 });

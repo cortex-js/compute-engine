@@ -9,7 +9,7 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { asSmallInteger } from '../boxed-expression/numerics.js';
+import { asSmallInteger, asRational } from '../boxed-expression/numerics.js';
 import { differentiate } from './derivative.js';
 import { trigToExp } from './trig-rewrite.js';
 import { getFunctionProperties } from '../function-properties/index.js';
@@ -50,9 +50,19 @@ import { getFunctionProperties } from '../function-properties/index.js';
 // of `g/h` (`1/sin x`, `cot x`, `1/(x²(1−x))`, `tan` at `π/2`), the special
 // functions `Gamma`/`Digamma`/`Zeta` at their poles (leading Laurent data from
 // closed-form generating series), and poles at `±∞` (via the `t = 1/x` path).
-// Genuinely non-meromorphic points still defer: an essential singularity
-// (`e^{1/x}` at 0) or a branch point (`ln x`, `√x` at 0) leaves `Series(...)`
-// unevaluated rather than returning a partial or wrong expansion.
+//
+// The Laurent value also carries a ramification index `d ≥ 1`, extending it to
+// **Puiseux** series with fractional powers `Σ c[i]·t^{(v+i)/d}`. This covers
+// algebraic branch points — `√x`, `√(sin x)`, `x^{3/2}·e^x`, `Root(g, r)`,
+// `Power(g, p/r)` — where the base vanishes (or has a pole) at the expansion
+// point. Coefficients may additionally carry a literal `Ln(t)` atom, giving
+// **log-aware** expansions — `ln(sin x)`, `ln(x²(1+x))`, `x^x`, `log_b(g)` —
+// about a zero or pole of the logarithm's argument.
+//
+// Genuinely intractable points still defer, leaving `Series(...)` unevaluated
+// rather than returning a partial or wrong expansion: an essential singularity
+// (`e^{1/x}` at 0), an irrational/symbolic exponent (`x^π`), and nested or
+// reciprocal logarithms (`ln(ln x)`, `1/ln x`).
 //
 // None of these functions are reachable from simplification rules; the `Series`
 // operator handler is a lazy transformation verb (like `DSolve`/`TrigExpand`),
@@ -212,10 +222,16 @@ function unaryTaylor(
     // exponential form so the coefficient is a clean number.
     if (reduceHyp && !isNumber(val)) val = trigToExp(val).evaluate();
     if (!val || !val.isValid) return null;
-    // Defer only on a genuine singularity (pole / essential singularity). An
-    // unknown *symbolic* value (e.g. `f(0)` for an undeclared `f`) reports
-    // `isFinite === false` yet is not infinite — it must be kept.
-    if (val.isNaN === true || val.isInfinity === true) return null;
+    // Defer only on a genuine singularity (pole / essential singularity) or an
+    // unresolved `0^e` indeterminate. An unknown *symbolic* value (e.g. `f(0)`
+    // for an undeclared `f`) reports `isFinite === false` yet is not infinite —
+    // it must be kept.
+    if (
+      val.isNaN === true ||
+      val.isInfinity === true ||
+      hasIndeterminateZeroPower(val)
+    )
+      return null;
     coeffs.push(ce.function('Divide', [val, ce.number(factorialBig(k))]));
     if (k < W) {
       const gd = differentiate(g, v);
@@ -416,6 +432,20 @@ function powerSeries(
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
+ * True when a coefficient value contains an unresolved `0^e` power. Such a
+ * term is an indeterminate the engine declined to decide (e.g. `0^{π−1}` from
+ * differentiating `x^π` at 0) — it reports neither NaN nor infinite, yet is
+ * not a usable value, so the expansion must defer. A genuinely symbolic
+ * coefficient (`f(0)` for an undeclared `f`) contains no zero-base power and
+ * is unaffected.
+ */
+function hasIndeterminateZeroPower(val: Expression): boolean {
+  const isZeroPower = (e: Expression): boolean =>
+    isFunction(e, 'Power') && e.op1.isSame(0);
+  return isZeroPower(val) || val.getSubexpressions('Power').some(isZeroPower);
+}
+
+/**
  * Iterated differentiation of `expr` with respect to `varName`, evaluating each
  * derivative at `at`. `resolve` supplies a value when direct substitution is
  * non-finite (used for the ±∞ expansion, where a coefficient is a limit).
@@ -434,7 +464,13 @@ function expandByDerivative(
   for (let k = 0; k <= W; k++) {
     checkDeadline(ce._deadline);
     let val: Expression | undefined = g.subs({ [varName]: at }).evaluate();
-    if (!val || !val.isValid || val.isNaN === true || val.isInfinity === true) {
+    if (
+      !val ||
+      !val.isValid ||
+      val.isNaN === true ||
+      val.isInfinity === true ||
+      hasIndeterminateZeroPower(val)
+    ) {
       val = resolve ? (resolve(g, k) ?? undefined) : undefined;
       if (!val) return null;
     }
@@ -528,13 +564,44 @@ function assemble(
 // smaller `hi`, and that boundary propagates through the arithmetic so the
 // remainder is never overstated.
 
+// A `Laurent` carries a ramification index `d ≥ 1` so it can represent
+// **Puiseux** series (fractional powers): `Σ c[i]·t^{(v+i)/d}`. `v` and `hi`
+// are in *numerator units* (the represented power of `t` is `p/d`). An ordinary
+// (integer-power) Laurent series has `d = 1`; every legacy constructor sets it.
 interface Laurent {
   v: number;
+  d: number;
   c: Coeffs;
   hi: number;
 }
 
-/** Coefficient of `t^p` in `L` (Zero outside the stored window). */
+function gcdInt(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) [a, b] = [b, a % b];
+  return a || 1;
+}
+
+function lcmInt(a: number, b: number): number {
+  return (a / gcdInt(a, b)) * b;
+}
+
+/** Re-express `L` over the common denominator `D` (a multiple of `L.d`): the
+ * powers are stretched by `k = D/d`, with `k−1` zeros inserted between the
+ * stored coefficients. A no-op when `L.d === D`. */
+function withDenom(ce: ComputeEngine, L: Laurent, D: number): Laurent {
+  if (L.d === D) return L;
+  const k = D / L.d;
+  const c: Coeffs = [];
+  for (let i = 0; i < L.c.length; i++) {
+    if (i > 0) for (let z = 0; z < k - 1; z++) c.push(ce.Zero);
+    c.push(L.c[i]);
+  }
+  return { v: L.v * k, d: D, c, hi: L.hi * k };
+}
+
+/** Coefficient of `t^{p/d}` in `L` (Zero outside the stored window); `p` is in
+ * numerator units. */
 function coeffAt(ce: ComputeEngine, L: Laurent, p: number): Expression {
   const i = p - L.v;
   return i >= 0 && i < L.c.length ? L.c[i] : ce.Zero;
@@ -548,12 +615,12 @@ function trueVal(L: Laurent): number | null {
 }
 
 function lConst(ce: ComputeEngine, value: Expression, W: number): Laurent {
-  return { v: 0, c: constCoeffs(ce, value, W), hi: W };
+  return { v: 0, d: 1, c: constCoeffs(ce, value, W), hi: W };
 }
 
 /** A Taylor series (valuation ≥ 0) as a Laurent value. */
 function lFromTaylor(c: Coeffs, hi: number): Laurent {
-  return { v: 0, c, hi };
+  return { v: 0, d: 1, c, hi };
 }
 
 /** A Laurent value with valuation ≥ 0 as a dense Taylor array of length W+1. */
@@ -569,21 +636,26 @@ function addLaurent(
   b: Laurent,
   W: number
 ): Laurent {
+  const D = lcmInt(a.d, b.d);
+  a = withDenom(ce, a, D);
+  b = withDenom(ce, b, D);
+  const Wn = W * D; // numerator-unit bound
   const v = Math.min(a.v, b.v);
   const c: Coeffs = [];
-  for (let p = v; p <= W; p++) {
+  for (let p = v; p <= Wn; p++) {
     const ai = coeffAt(ce, a, p);
     const bi = coeffAt(ce, b, p);
     c.push(
       ai.isSame(0) ? bi : bi.isSame(0) ? ai : ce.function('Add', [ai, bi])
     );
   }
-  return { v, c, hi: Math.min(a.hi, b.hi) };
+  return { v, d: D, c, hi: Math.min(a.hi, b.hi) };
 }
 
 function scaleLaurent(ce: ComputeEngine, k: Expression, a: Laurent): Laurent {
   return {
     v: a.v,
+    d: a.d,
     c: a.c.map((ai) =>
       ai.isSame(0) ? ce.Zero : ce.function('Multiply', [k, ai])
     ),
@@ -597,8 +669,12 @@ function mulLaurent(
   b: Laurent,
   W: number
 ): Laurent {
+  const D = lcmInt(a.d, b.d);
+  a = withDenom(ce, a, D);
+  b = withDenom(ce, b, D);
+  const Wn = W * D; // numerator-unit bound
   const v = a.v + b.v;
-  const len = Math.max(0, W - v + 1);
+  const len = Math.max(0, Wn - v + 1);
   const terms: Expression[][] = Array.from({ length: len }, () => []);
   for (let i = 0; i < a.c.length; i++) {
     if (a.c[i].isSame(0)) continue;
@@ -616,8 +692,9 @@ function mulLaurent(
   // known (p ≤ a.hi + val(b)) and every needed b_j is known (p ≤ b.hi + val(a)).
   const la = trueVal(a);
   const lb = trueVal(b);
-  const hi = la === null || lb === null ? W : Math.min(a.hi + lb, b.hi + la, W);
-  return { v, c, hi };
+  const hi =
+    la === null || lb === null ? Wn : Math.min(a.hi + lb, b.hi + la, Wn);
+  return { v, d: D, c, hi };
 }
 
 /** Termwise derivative `d/dt` of a Laurent value: `Σ cᵢ t^{v+i}` →
@@ -625,12 +702,14 @@ function mulLaurent(
  * reliability (`hi` drops by 1). Used for the polygamma ladder
  * (ψ⁽ᵐ⁾ = dᵐ/dtᵐ ψ), where the pole data of `Digamma` generates the rest. */
 function diffLaurent(ce: ComputeEngine, a: Laurent): Laurent {
+  // Only used by the polygamma ladder, whose seeds are integer-power (d = 1).
+  console.assert(a.d === 1, 'diffLaurent: fractional (Puiseux) input');
   const c = a.c.map((ci, i) => {
     const p = a.v + i;
     if (p === 0 || ci.isSame(0)) return ce.Zero;
     return ce.function('Multiply', [ce.number(p), ci]);
   });
-  return { v: a.v - 1, c, hi: a.hi - 1 };
+  return { v: a.v - 1, d: 1, c, hi: a.hi - 1 };
 }
 
 function powLaurent(
@@ -653,14 +732,15 @@ function reciprocalLaurent(
 ): Laurent | null {
   const m = trueVal(b);
   if (m === null) return null; // 1/0
-  // Unit part U (Taylor, U[0] = coeff of t^m ≠ 0). `1/b = t^{-m}·(1/U)`, and to
-  // reach power W in the result we need 1/U to index W + m.
-  const targetIdx = Math.max(0, W + m);
+  // Unit part U (a series in `s = t^{1/d}`, U[0] = coeff of t^{m/d} ≠ 0).
+  // `1/b = t^{-m/d}·(1/U)`, and to reach integer power W (numerator W·d) in the
+  // result we need 1/U to index W·d + m.
+  const targetIdx = Math.max(0, W * b.d + m);
   const U: Coeffs = [];
   for (let k = 0; k <= targetIdx; k++) U.push(coeffAt(ce, b, m + k));
   const recU = reciprocalC(ce, U, targetIdx);
   if (!recU) return null;
-  return { v: -m, c: recU, hi: Math.min(b.hi - 2 * m, W) };
+  return { v: -m, d: b.d, c: recU, hi: Math.min(b.hi - 2 * m, W * b.d) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -794,7 +874,7 @@ function specialLaurent(
     // the constant (Stieltjes γ_0 = γ) are elementary; higher γ_k are not in
     // the engine, so `hi = 0` (residue + constant only).
     if (point.re !== 1) return null;
-    return { v: -1, c: [ce.One, ce.symbol('EulerGamma')], hi: 0 };
+    return { v: -1, d: 1, c: [ce.One, ce.symbol('EulerGamma')], hi: 0 };
   }
 
   const re = point.re;
@@ -807,7 +887,7 @@ function specialLaurent(
     // R(0) = (−1)ⁿ/n! ≠ 0, so R is analytic. Laurent powers −1..W.
     let R = gammaShiftCoeffs(ce, W + 1);
     for (let j = 1; j <= n; j++) R = divideByLinear(ce, R, j);
-    return { v: -1, c: R, hi: W };
+    return { v: -1, d: 1, c: R, hi: W };
   }
 
   if (op === 'Digamma') {
@@ -827,7 +907,7 @@ function specialLaurent(
       const zk = k % 2 === 1 ? zetaAt(ce, k + 1) : zetaAt(ce, k + 1).neg();
       c.push(ce.function('Add', [zk, harmonicExpr(ce, n, k + 1)]).evaluate());
     }
-    return { v: -1, c, hi: W };
+    return { v: -1, d: 1, c, hi: W };
   }
 
   return null;
@@ -867,12 +947,13 @@ function composeSpecial(
   W: number
 ): Laurent | null {
   // Fast path: `w` is exactly the monomial `t` (arg is the plain shifted
-  // variable) — the outer series already IS the answer in `t`.
+  // variable) — the outer series already IS the answer in `t`. In numerator
+  // units the monomial `t` has valuation `w.d`.
   const wv = trueVal(w);
   if (
-    wv === 1 &&
-    coeffAt(ce, w, 1).isSame(1) &&
-    w.c.every((c, i) => i === 1 - w.v || c.isSame(0))
+    wv === w.d &&
+    coeffAt(ce, w, w.d).isSame(1) &&
+    w.c.every((c, i) => i === w.d - w.v || c.isSame(0))
   )
     return outer;
 
@@ -928,11 +1009,147 @@ function reciprocalOfExpr(
   if (!probe) return null;
   const m = trueVal(probe);
   if (m === null) return null; // sub ≡ 0
+  // A log-carrying leading coefficient (e.g. `1/ln x`) has no Laurent
+  // reciprocal — defer.
+  if (coeffAt(ce, probe, m).has(x)) return null;
   if (m <= 0) return reciprocalLaurent(ce, probe, W);
   const Wb = Math.min(W + 2 * m, MAX_SERIES_ORDER);
   const boosted = Wb === W ? probe : expandLaurent(sub, x, x0, ce, Wb);
   if (!boosted) return null;
   return reciprocalLaurent(ce, boosted, W);
+}
+
+/** A literal *non-integer* rational exponent `p/r` (reduced, `r > 0`, `r ≤ 12`),
+ * or `null` for an integer, an irrational/symbolic exponent, or a denominator
+ * beyond the cap. */
+function asSmallNonIntegerRational(
+  expo: Expression
+): { p: number; r: number } | null {
+  const rat = asRational(expo);
+  if (!rat) return null;
+  let p = Number(rat[0]);
+  let r = Number(rat[1]);
+  if (!Number.isFinite(p) || !Number.isFinite(r) || r === 0) return null;
+  if (r < 0) {
+    p = -p;
+    r = -r;
+  }
+  if (r === 1) return null; // integer — handled elsewhere
+  if (r > 12) return null; // ramification cap
+  return { p, r };
+}
+
+/**
+ * Puiseux expansion of `base^{p/r}` (`r ≥ 2`) about `x0`. Factors the base as
+ * `G = t^{m/d}·U` with unit part `U` (leading coefficient `≠ 0`); the result is
+ * `t^{m·p/(d·r)}·U^{p/r}`, a Laurent value with ramification `d·r` (`U^{p/r}`
+ * via the binomial `powerOuter` machinery). Returns `null` (defer) at a genuine
+ * branch obstruction: a base that vanishes identically, a log-carrying leading
+ * coefficient, or a window that would exceed `MAX_SERIES_ORDER`.
+ */
+function puiseuxPower(
+  ce: ComputeEngine,
+  base: Expression,
+  x: string,
+  x0: Expression,
+  p: number,
+  r: number,
+  W: number
+): Laurent | null {
+  const bs = expandLaurent(base, x, x0, ce, W);
+  if (!bs) return null;
+  const m = trueVal(bs);
+  if (m === null) return null; // base ≡ 0 → 0^{p/r}
+  if (m > bs.hi) return null; // leading term past the reliable window
+  const U0 = coeffAt(ce, bs, m);
+  if (U0.isSame(0) || U0.has(x)) return null; // log-carrying leading coeff
+  const dB = bs.d;
+  const D = dB * r;
+  if (W * D > MAX_SERIES_ORDER) return null; // window too large — defer
+  const vNew = m * p;
+  const Wnum = W * D;
+  // `U^{p/r}` is a series in `s = t^{1/dB}`; its k-th term lands at numerator
+  // power `vNew + k·r` (in the denom-`D` result). Compute enough of them.
+  const Wu = Math.max(0, Math.floor((Wnum - vNew) / r));
+  const Uarr: Coeffs = [];
+  for (let k = 0; k <= Wu; k++) Uarr.push(coeffAt(ce, bs, m + k));
+  const outer = powerOuter(ce, ce.number([p, r]), U0, Wu);
+  if (!outer) return null;
+  const Upow = composeOuter(ce, outer, Uarr, Wu);
+  const c: Coeffs = [];
+  for (let k = 0; k <= Wu; k++) {
+    const idx = k * r;
+    while (c.length < idx) c.push(ce.Zero);
+    c[idx] = Upow[k];
+  }
+  if (c.length === 0) c.push(ce.Zero);
+  const hi = Math.min(vNew + (bs.hi - m) * r, Wnum);
+  return { v: vNew, d: D, c, hi };
+}
+
+/**
+ * Log-aware Laurent expansion of `ln(g)` about `x0`. Writing
+ * `g = c₀·t^{m/d}·(1 + h)` (leading coefficient `c₀ ≠ 0`, `h` of valuation ≥ 1),
+ *
+ *   `ln(g) = (m/d)·ln(t) + ln(c₀) + log1p(h)`,
+ *
+ * where the first two pieces are constant (power-0) coefficients — one carrying
+ * a literal `Ln(t)` atom — and `log1p(h) = h − h²/2 + h³/3 − …` is an ordinary
+ * Taylor series. Returns `null` (defer) when `g` vanishes identically (`ln 0`),
+ * carries a log atom in its leading coefficient (`ln(ln x)`), or the window
+ * would exceed `MAX_SERIES_ORDER`. Because the Taylor engines already handle
+ * regular points, this only fires at a genuine zero or pole of `g`.
+ */
+function lnLaurent(
+  ce: ComputeEngine,
+  arg: Expression,
+  x: string,
+  x0: Expression,
+  W: number
+): Laurent | null {
+  const inner = expandLaurent(arg, x, x0, ce, W);
+  if (!inner) return null;
+  const m = trueVal(inner);
+  if (m === null) return null; // ln 0
+  if (m > inner.hi) return null; // leading term past the reliable window
+  const c0 = coeffAt(ce, inner, m);
+  if (c0.has(x)) return null; // log-carrying leading coeff (e.g. ln(ln x))
+  const d = inner.d;
+  if (W * d > MAX_SERIES_ORDER) return null; // window too large — defer
+  const Wn = W * d;
+
+  // h = U/c₀ − 1 (a series in `s = t^{1/d}`, valuation ≥ 1).
+  const hArr: Coeffs = [ce.Zero];
+  for (let k = 1; k <= Wn; k++) {
+    const Uk = coeffAt(ce, inner, m + k);
+    hArr.push(Uk.isSame(0) ? ce.Zero : ce.function('Divide', [Uk, c0]));
+  }
+  // log1p outer coefficients: [0, 1, −1/2, 1/3, −1/4, …].
+  const log1p: Coeffs = [ce.Zero];
+  for (let k = 1; k <= Wn; k++)
+    log1p.push(ce.number([k % 2 === 1 ? 1 : -1, k]));
+  const series = composeOuter(ce, log1p, hArr, Wn);
+
+  // Constant coefficient: (m/d)·Ln(t) + Ln(c₀). (`series[0]` is 0.)
+  const tExpr = x0.isSame(0)
+    ? ce.symbol(x)
+    : ce.function('Subtract', [ce.symbol(x), x0]);
+  const constTerms: Expression[] = [];
+  if (m !== 0)
+    constTerms.push(
+      ce.function('Multiply', [ce.number([m, d]), ce.function('Ln', [tExpr])])
+    );
+  const lnC0 = ce.function('Ln', [c0]).evaluate();
+  if (!lnC0.isSame(0)) constTerms.push(lnC0);
+  const c = series.slice();
+  c[0] =
+    constTerms.length === 0
+      ? ce.Zero
+      : constTerms.length === 1
+        ? constTerms[0]
+        : ce.function('Add', constTerms);
+
+  return { v: 0, d, c, hi: Math.min(inner.hi - m, Wn) };
 }
 
 function powerSeriesLaurent(
@@ -962,12 +1179,17 @@ function powerSeriesLaurent(
         ce,
         W
       );
-    // Non-integer constant exponent: binomial series around base0 ≠ 0. A
+    // Literal non-integer rational exponent: a Puiseux series (fractional
+    // powers). This subsumes the vanishing-base branch point the previous
+    // `base0 = 0` guard deferred.
+    const rat = asSmallNonIntegerRational(expo);
+    if (rat) return puiseuxPower(ce, base, x, x0, rat.p, rat.r, W);
+    // Irrational/symbolic exponent: binomial series around base0 ≠ 0. A
     // vanishing base is a branch point — defer.
     const bs = expandLaurent(base, x, x0, ce, W);
-    if (!bs || bs.v < 0) return null;
+    if (!bs || bs.v < 0 || bs.d !== 1) return null;
     const base0 = coeffAt(ce, bs, 0);
-    if (base0.isSame(0)) return null;
+    if (base0.isSame(0) || base0.has(x)) return null;
     const outer = powerOuter(ce, expo, base0, W);
     if (!outer) return null;
     return lFromTaylor(
@@ -983,12 +1205,27 @@ function powerSeriesLaurent(
     : ce.function('Multiply', [expo, ce.function('Ln', [base])]);
   const inner = expandLaurent(g0, x, x0, ce, W);
   if (!inner || inner.v < 0) return null;
-  const outer = unaryTaylor(ce, 'Exp', coeffAt(ce, inner, 0), W);
+  const b0 = coeffAt(ce, inner, 0);
+  // The exp is composed at the constant term `b0`; a log-carrying `b0` has no
+  // elementary composition (e.g. `x^{ln x}`) — defer. (For `x^x` the constant
+  // term is 0, so the `x·ln x` log atoms live only in higher coefficients,
+  // which compose fine.)
+  if (b0.has(x)) return null;
+  // Compose in numerator units so a Puiseux exponent (`e^{√x}`) composes like
+  // an integer-power one; for `d = 1` this is exactly the Taylor path.
+  const d = inner.d;
+  const Wn = W * d;
+  if (Wn > MAX_SERIES_ORDER) return null; // window too large — defer
+  const a: Coeffs = [];
+  for (let i = 0; i <= Wn; i++) a.push(coeffAt(ce, inner, i));
+  const outer = unaryTaylor(ce, 'Exp', b0, Wn);
   if (!outer) return null;
-  return lFromTaylor(
-    composeOuter(ce, outer, laurentToTaylor(ce, inner, W), W),
-    inner.hi
-  );
+  return {
+    v: 0,
+    d,
+    c: composeOuter(ce, outer, a, Wn),
+    hi: Math.min(inner.hi, Wn),
+  };
 }
 
 /**
@@ -1014,7 +1251,7 @@ function expandLaurent(
       const c = zeroCoeffs(ce, W);
       c[0] = x0;
       if (W >= 1) c[1] = ce.One;
-      return { v: 0, c, hi: W };
+      return { v: 0, d: 1, c, hi: W };
     }
     return lConst(ce, expr, W);
   }
@@ -1072,8 +1309,9 @@ function expandLaurent(
       const m = asSmallInteger(ops[0]);
       if (m === null || m < 0 || ops[0].has(x)) return null;
       const inner = expandLaurent(ops[1], x, x0, ce, W);
-      if (!inner) return null;
+      if (!inner || inner.d !== 1) return null;
       const b0 = coeffAt(ce, inner, 0);
+      if (b0.has(x)) return null;
       const outer = polygammaLaurent(ce, m, b0, W);
       if (!outer) return null;
       const w = addLaurent(ce, inner, lConst(ce, b0.neg(), W), W);
@@ -1102,17 +1340,33 @@ function expandLaurent(
       );
     }
     case 'Root': {
-      const m = asSmallInteger(ops[1]);
-      if (m === null || m === 0) return null;
-      const bs = expandLaurent(ops[0], x, x0, ce, W);
-      if (!bs || bs.v < 0) return null;
-      const base0 = coeffAt(ce, bs, 0);
-      if (base0.isSame(0)) return null; // branch point
-      const outer = powerOuter(ce, ce.number(1).div(ce.number(m)), base0, W);
-      if (!outer) return null;
-      return lFromTaylor(
-        composeOuter(ce, outer, laurentToTaylor(ce, bs, W), W),
-        bs.hi
+      // `Root(g, r) = g^{1/r}` — a Puiseux expansion via the unit-part
+      // factorization (subsumes the former "defer when base vanishes" branch).
+      const r = asSmallInteger(ops[1]);
+      if (r === null || r === 0 || Math.abs(r) > 12) return null;
+      return r > 0
+        ? puiseuxPower(ce, ops[0], x, x0, 1, r, W)
+        : puiseuxPower(ce, ops[0], x, x0, -1, -r, W);
+    }
+    case 'Sqrt':
+      // `√g = g^{1/2}` — Puiseux (branch point at a zero of `g`).
+      return puiseuxPower(ce, ops[0], x, x0, 1, 2, W);
+    case 'Ln':
+      return lnLaurent(ce, ops[0], x, x0, W);
+    case 'Log': {
+      // `Log(g)` = `Ln(g)/Ln(10)`; `Log(g, b)` (base is the 2nd operand,
+      // independent of x) = `Ln(g)/Ln(b)`; otherwise defer.
+      const base = ops.length === 2 ? ops[1] : ce.number(10);
+      if (ops.length === 2 && base.has(x)) return null;
+      return expandLaurent(
+        ce.function('Divide', [
+          ce.function('Ln', [ops[0]]),
+          ce.function('Ln', [base]),
+        ]),
+        x,
+        x0,
+        ce,
+        W
       );
     }
     default: {
@@ -1121,7 +1375,20 @@ function expandLaurent(
       if (!inner) return null;
       const b0 = coeffAt(ce, inner, 0);
 
+      // A log-carrying argument (e.g. `sin(ln x)`, `Γ(ln x)`) has no
+      // elementary composition — defer.
+      if (b0.has(x)) return null;
+
+      // The composition is carried out in *numerator units* (`Wn = W·d`), so a
+      // Puiseux argument (`cos(√x)`, `sin(√x)`, `e^{√x}`, …) composes just like
+      // an integer-power one; for `d = 1` this is exactly the Taylor path.
+      const d = inner.d;
+      const Wn = W * d;
+      if (Wn > MAX_SERIES_ORDER) return null; // window too large — defer
+
       // Special-function pole: expand `Op` about the pole `b0` and compose.
+      // `composeSpecial` operates in numerator units, so a Puiseux argument
+      // (`Γ(√x)` → `1/√x − γ + …`) rides the same path.
       if (SPECIAL_POLE_FNS.has(op)) {
         const special = specialLaurent(ce, op, b0, W);
         if (special) {
@@ -1133,15 +1400,24 @@ function expandLaurent(
 
       // Regular composition needs a pole-free argument.
       if (inner.v >= 0) {
-        const outer = unaryTaylor(ce, op, b0, W);
+        // The inner series as a dense numerator-unit array (`a[i]` is the
+        // coefficient of `t^{i/d}`), composed with the order-`Wn` Taylor
+        // series of `Op` at `b0`.
+        const a: Coeffs = [];
+        for (let i = 0; i <= Wn; i++) a.push(coeffAt(ce, inner, i));
+        const outer = unaryTaylor(ce, op, b0, Wn);
         if (outer)
-          return lFromTaylor(
-            composeOuter(ce, outer, laurentToTaylor(ce, inner, W), W),
-            inner.hi
-          );
+          return {
+            v: 0,
+            d,
+            c: composeOuter(ce, outer, a, Wn),
+            hi: Math.min(inner.hi, Wn),
+          };
       }
 
-      // Pole-carrying trig/hyperbolic: rewrite to a quotient and retry.
+      // Pole-carrying trig/hyperbolic: rewrite to a quotient and retry. The
+      // quotient's reciprocal path is denominator-aware, so a Puiseux argument
+      // (`csc(√x)` → `1/√x + √x/6 + …`) works too.
       const rewrite = POLE_QUOTIENT[op];
       if (rewrite) return expandLaurent(rewrite(ce, ops[0]), x, x0, ce, W);
 
@@ -1188,6 +1464,25 @@ export function laurentData(
   if (!L) return null;
   const v = trueVal(L);
   if (v === null || v > L.hi) return null; // window exhausted — undecidable
+
+  // (a) A log-carrying coefficient in the reliable window is not a Laurent
+  // datum — defer (protects `limit`/`residue` from `Ln`-atom coefficients).
+  for (let p = v; p <= L.hi; p++) if (coeffAt(ce, L, p).has(x)) return null;
+
+  // (b) A Puiseux value (d > 1): if any nonzero reliable power is not a
+  // multiple of d, there is no integer-power Laurent datum — defer. Otherwise
+  // present the integer view (power P reads the numerator power P·d), so
+  // `limit`/`residue` see exactly what they did before.
+  if (L.d > 1) {
+    for (let p = v; p <= L.hi; p++)
+      if (!coeffAt(ce, L, p).isSame(0) && p % L.d !== 0) return null;
+    return {
+      v: v / L.d,
+      hi: Math.floor(L.hi / L.d),
+      coeff: (p: number) => coeffAt(ce, L, p * L.d),
+    };
+  }
+
   return { v, hi: L.hi, coeff: (p: number) => coeffAt(ce, L, p) };
 }
 
@@ -1202,9 +1497,11 @@ function assembleLaurent(
   ce: ComputeEngine,
   L: Laurent,
   n: number,
-  power: (p: number) => Expression
+  power: (p: number, d: number) => Expression
 ): Expression {
-  const top = Math.min(n, L.hi);
+  const d = L.d;
+  // Retain powers `p/d ≤ n`, i.e. numerator `p ≤ n·d`, up to the reliable `hi`.
+  const top = Math.min(n * d, L.hi);
   const terms: Expression[] = [];
   for (let p = L.v; p <= top; p++) {
     const c = coeffAt(ce, L, p);
@@ -1212,7 +1509,7 @@ function assembleLaurent(
     if (p === 0) {
       terms.push(c);
     } else {
-      const pw = power(p);
+      const pw = power(p, d);
       terms.push(c.isSame(1) ? pw : ce.function('Multiply', [c, pw]));
     }
   }
@@ -1224,7 +1521,7 @@ function assembleLaurent(
       break;
     }
   }
-  terms.push(ce.function('BigO', [power(m)]));
+  terms.push(ce.function('BigO', [power(m, d)]));
 
   if (terms.length === 0) return ce.Zero;
   return terms.length === 1 ? terms[0] : ce.function('Add', terms);
@@ -1301,8 +1598,13 @@ export function computeSeries(
 
   const xExpr = ce.symbol(x);
   const t = x0.isSame(0) ? xExpr : ce.function('Subtract', [xExpr, x0]);
-  const power = (k: number): Expression =>
-    k === 1 ? t : ce.function('Power', [t, ce.number(k)]);
+  // `power(p, d)` is the basis element `t^{p/d}`. For `d = 1` (the Taylor and
+  // integer-power Laurent paths) this is the plain integer power; for `d > 1`
+  // (Puiseux) the fractional exponent renders `t^{1/2}` as `√t`, etc.
+  const power = (p: number, d = 1): Expression => {
+    if (d === 1) return p === 1 ? t : ce.function('Power', [t, ce.number(p)]);
+    return ce.function('Power', [t, ce.number([p, d])]);
+  };
 
   // Regular point: the Taylor engines. A `null` here means a singularity was
   // hit (or the operator is not differentiable) — retry with the Laurent engine
@@ -1399,10 +1701,15 @@ function seriesAtInfinity(
   };
 
   const xExpr = ce.symbol(x);
-  // Map s^p back to x^{−p} (a negative s-power — a pole at ∞ — becomes a
+  // Map s^{p/d} back to x^{−p/d} (a negative s-power — a pole at ∞ — becomes a
   // positive power of x, i.e. the polynomial part of the asymptotic expansion).
-  const power = (p: number): Expression =>
-    p === 0 ? ce.One : ce.function('Power', [xExpr, ce.number(-p)]);
+  const power = (p: number, d = 1): Expression => {
+    if (p === 0) return ce.One;
+    return ce.function('Power', [
+      xExpr,
+      d === 1 ? ce.number(-p) : ce.number([-p, d]),
+    ]);
+  };
 
   const coeffs = expandByDerivative(g, s, ce.Zero, ce, W, resolve);
   if (coeffs) {
@@ -1414,6 +1721,10 @@ function seriesAtInfinity(
   // differentiation path cannot carry — expand it as a Laurent series in s.
   const laurent = expandLaurent(g, s, ce.Zero, ce, W);
   if (!laurent) return undefined;
+  // A log-carrying expansion at ±∞ would leak the fresh variable `s`
+  // (`Ln(s) = −Ln(x)`); rather than rewrite the atom, defer (stretch goal).
+  for (let p = laurent.v; p <= laurent.hi; p++)
+    if (coeffAt(ce, laurent, p).has(s)) return undefined;
   return assembleLaurent(ce, laurent, n, power);
 }
 
