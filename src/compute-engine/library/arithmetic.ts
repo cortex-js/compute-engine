@@ -1898,7 +1898,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         'Approximate a real number by a rational. With a second argument `tolerance`, return the rational with the smallest denominator that approximates the number to within `tolerance` (a continued-fraction convergent); with no tolerance, rationalize at full working precision, as single-argument `Rational`.',
       complexity: 2400,
       signature: '(number, number?) -> rational',
-      examples: ['Rationalize(1.75)  // 7/4', 'Rationalize(Sqrt(3), 1/500)  // 26/15'],
+      examples: [
+        'Rationalize(1.75)  // 7/4',
+        'Rationalize(Sqrt(3), 1/500)  // 26/15',
+      ],
       evaluate: (ops, { engine }) => {
         const ce = engine;
         const f = ops[0].N();

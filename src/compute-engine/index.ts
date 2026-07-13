@@ -1893,6 +1893,17 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Uses the engine's symbol definitions for accurate parsing
    * (e.g., recognizing `f` as a function).
+   *
+   * Malformed or incomplete LaTeX does **not** throw: it returns a boxed
+   * expression containing `["Error", ...]` nodes (check `expr.isValid`).
+   * Parsing `null` returns `null`.
+   *
+   * @throws Only in edge cases:
+   * - the argument is neither a string nor `null`/`undefined`;
+   * - no LaTeX syntax is available (minimal entry point without a
+   *   `LatexSyntax` instance passed to the `ComputeEngine` constructor);
+   * - an internal parser safety guard trips (e.g. the infinite-loop
+   *   detector), which indicates a bug rather than bad input.
    */
   parse(
     latex: string,
