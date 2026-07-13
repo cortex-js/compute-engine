@@ -385,6 +385,12 @@ describe('Rules: Roots', () => {
 describe('Rules: Nested Roots', () => {
   test('sqrt(sqrt(5)) = 5^{1/4}', () =>
     checkSimplify('\\sqrt{\\sqrt{5}}', '\\sqrt[4]{5}'));
+  test('sqrt(sqrt(12)) = 12^{1/4}', () =>
+    checkSimplify('\\sqrt{\\sqrt{12}}', '\\sqrt[4]{12}'));
+  test('sqrt(2 sqrt(5)) = 20^{1/4}', () =>
+    checkSimplify('\\sqrt{2\\sqrt{5}}', '\\sqrt[4]{20}'));
+  test('sqrt(-sqrt(5)) does not flatten', () =>
+    checkSimplify('\\sqrt{-\\sqrt{5}}', '\\sqrt{-\\sqrt{5}}'));
   test('sqrt(sqrt(sqrt(5))) = 5^{1/8}', () =>
     checkSimplify('\\sqrt{\\sqrt{\\sqrt{5}}}', '\\sqrt[8]{5}'));
   test('sqrt(sqrt(x)) = x^{1/4}', () =>

@@ -245,21 +245,27 @@ function isSurd(t: Expression): boolean {
 
 /**
  * If `t` is a square root — the `Sqrt` node itself, or a numeric literal
- * folded to the exact pure surd `(1)·√a` — return the radicand `a`.
- * Simplify may fold `Sqrt(literal)` into that numeric form before the
- * nested-root rules run, so they must recognize both shapes.
+ * folded to the exact surd `r·√a` with rational coefficient r > 0 — return
+ * the radicand: `a` for the node, `r²·a` for the surd (since r√a = √(r²a)
+ * when r > 0). Simplify may fold `Sqrt(literal)` into that numeric form
+ * before the nested-root rules run, so they must recognize both shapes.
  */
 function sqrtRadicand(t: Expression): Expression | null {
   if (isFunction(t, 'Sqrt') && t.op1) return t.op1;
   if (isNumber(t)) {
     const nv = t.numericValue;
-    if (
-      nv instanceof ExactNumericValue &&
-      nv.im === 0 &&
-      nv.radical > 1 &&
-      nv.rational[0] === nv.rational[1]
-    )
-      return t.engine.number(nv.radical);
+    if (nv instanceof ExactNumericValue && nv.im === 0 && nv.radical > 1) {
+      // By invariant rational is a pair of integers (possibly unreduced).
+      const p = BigInt(nv.rational[0]);
+      const q = BigInt(nv.rational[1]);
+      if (p > 0 === q > 0) {
+        const num = p * p * BigInt(nv.radical);
+        const den = q * q;
+        return den === 1n
+          ? t.engine.number(num)
+          : t.engine.number([num, den]);
+      }
+    }
   }
   return null;
 }
