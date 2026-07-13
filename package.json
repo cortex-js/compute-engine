@@ -16,7 +16,9 @@
     "test:nightly": "CE_NIGHTLY=1 jest --config ./config/jest.config.cjs --reporters default -- test/compute-engine/nightly/",
     "check:deps": "madge --circular --extensions ts src/compute-engine && echo 'No runtime circular dependencies found (type-only cycles are expected)'",
     "check:corpus": "npx --yes tsx docs/mathnet/scripts/check-corpus.ts",
-    "lint": "eslint src --ext .ts --fix && prettier --write 'src/**/*.{ts,js,css,md}' && npm run check:corpus",
+    "lint": "eslint src --ext .ts --fix && prettier --write 'src/**/*.{ts,js,css,md}'",
+    "ci:corpus-pipeline": "npx --yes tsx scripts/fungrim/validate.ts --corpus data/fungrim --check && npx --yes tsx scripts/fungrim/artifact-freshness.ts && npx --yes tsx scripts/fungrim/apply-solve-templates.ts --check && npx --yes tsx scripts/fungrim/recompile-drift.ts && npx --yes tsx scripts/fungrim/compile-properties.ts --check && npx --yes tsx scripts/rubi/bundle-corpus.ts && git diff --exit-code -- src/compute-engine/rubi/rubi-rules-data.json && npm run check:corpus",
+    "ci": "npm run lint && npm run typecheck && npm run ci:corpus-pipeline && npm test",
     "typecheck": "bash ./scripts/typecheck.sh"
   },
   "name": "@cortex-js/compute-engine",
