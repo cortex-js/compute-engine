@@ -227,6 +227,20 @@
   second argument produced an `unexpected-argument` error. The single-argument
   round-to-integer form is unchanged, and the two-argument form compiles on the
   `javascript` and `interval-js` targets.
+- **New `Rationalize` operator for rational approximation.**
+  `Rationalize(x)` approximates a real number by a rational at full working
+  precision (like single-argument `Rational`); with a tolerance,
+  `Rationalize(x, tolerance)` returns the rational with the smallest
+  denominator within the bound — `Rationalize(√3, 1/500) → 26/15`,
+  `Rationalize(π, 1/100) → 22/7` — a continued-fraction convergent cut.
+
+### Number Theory
+
+- **New `StirlingS1` operator: signed Stirling numbers of the first kind.**
+  `StirlingS1(n, m)` is the coefficient of xᵐ in the falling factorial
+  x(x−1)…(x−n+1); its absolute value counts the permutations of n elements
+  with m disjoint cycles — `StirlingS1(5, 2) → −50`. Complements the existing
+  `Stirling` (second kind).
 
 ### Relational Operators
 

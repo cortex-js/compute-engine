@@ -291,28 +291,36 @@ export function reducedRationalFromDecimal(
 }
 
 /** Return a rational approximation of x */
-export function rationalize(x: number): [n: number, d: number] | number {
+/**
+ * Approximate `x` by a rational `[n, d]` via its continued-fraction
+ * convergents.
+ *
+ * With no `tolerance`, expand to full working precision. With a positive
+ * `tolerance`, stop at the first convergent that approximates `x` to within it
+ * — the rational with the smallest denominator inside the bound
+ * (`rationalize(Math.sqrt(3), 1/500)` → `[26, 15]`).
+ */
+export function rationalize(
+  x: number,
+  tolerance?: number
+): [n: number, d: number] | number {
   if (!Number.isFinite(x)) return x;
 
   const fractional = x % 1;
 
   if (fractional === 0) return x;
 
-  // const real = x - fractional;
-  // const exponent = String(fractional).length - 2; // Number of fractional digits
-  // const denominator = Math.pow(10, exponent);
-  // const mantissa = fractional * denominator;
-  // const numerator = real * denominator + mantissa;
-  // const g = gcd(numerator, denominator);
-  // return [numerator / g, denominator / g];
-
   const eps = 1.0e-15;
+  const tol = tolerance !== undefined && tolerance > 0 ? tolerance : 0;
+  const x0 = x;
 
   let a = Math.floor(x);
   let h1 = 1;
   let k1 = 0;
   let h = a;
   let k = 1;
+
+  if (tol > 0 && Math.abs(h / k - x0) <= tol) return [h, k];
 
   while (x - a > eps * k * k) {
     x = 1 / (x - a);
@@ -323,6 +331,7 @@ export function rationalize(x: number): [n: number, d: number] | number {
     k1 = k;
     h = h2 + a * h1;
     k = k2 + a * k1;
+    if (tol > 0 && Math.abs(h / k - x0) <= tol) return [h, k];
   }
 
   return [h, k];

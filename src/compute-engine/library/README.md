@@ -41,6 +41,7 @@ Factorization & divisors:
 Modular arithmetic & GCD:
 
 - PowerMod: modular exponentiation (negative exponent → modular inverse)
+- ModularInverse: modular multiplicative inverse a⁻¹ mod m
 - ExtendedGCD: GCD with Bézout coefficients
 - ChineseRemainder: solve simultaneous congruences
 - MultiplicativeOrder, PrimitiveRoot
@@ -56,3 +57,4 @@ Other primitives:
 
 - Binomial
 - Fibonacci
+- Stirling (second kind), StirlingS1 (signed first kind)

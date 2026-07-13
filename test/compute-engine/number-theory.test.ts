@@ -381,6 +381,28 @@ describe('CatalanNumber', () => {
   });
 });
 
+describe('StirlingS1 — signed Stirling numbers of the first kind', () => {
+  test('known values', () => {
+    expect(evalStr(['StirlingS1', 5, 2])).toEqual('-50');
+    expect(evalStr(['StirlingS1', 4, 2])).toEqual('11');
+    expect(evalStr(['StirlingS1', 3, 1])).toEqual('2');
+    expect(evalStr(['StirlingS1', 6, 3])).toEqual('-225');
+  });
+  test('boundary cases', () => {
+    expect(evalStr(['StirlingS1', 0, 0])).toEqual('1');
+    expect(evalStr(['StirlingS1', 5, 5])).toEqual('1'); // s(n,n) = 1
+    expect(evalStr(['StirlingS1', 5, 0])).toEqual('0'); // s(n,0) = 0 for n>0
+    // s(n, 1) = (-1)^(n-1) (n-1)!
+    expect(evalStr(['StirlingS1', 5, 1])).toEqual('24');
+    expect(evalStr(['StirlingS1', 6, 1])).toEqual('-120');
+  });
+  test('out-of-range and non-integer arguments stay symbolic', () => {
+    expect(evalStr(['StirlingS1', 3, 5])).toEqual('StirlingS1(3, 5)'); // k > n
+    expect(evalStr(['StirlingS1', -1, 2])).toEqual('StirlingS1(-1, 2)');
+    expect(evalStr(['StirlingS1', 'n', 2])).toEqual('StirlingS1(n, 2)');
+  });
+});
+
 describe('IsPerfectPower', () => {
   test('true for perfect powers', () => {
     expect(evalStr(['IsPerfectPower', 64])).toEqual('"True"'); // 2^6, 4^3, 8^2

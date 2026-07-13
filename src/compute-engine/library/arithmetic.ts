@@ -1893,6 +1893,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Rationalize: {
+      description:
+        'Approximate a real number by a rational. With a second argument `tolerance`, return the rational with the smallest denominator that approximates the number to within `tolerance` (a continued-fraction convergent); with no tolerance, rationalize at full working precision, as single-argument `Rational`.',
+      complexity: 2400,
+      signature: '(number, number?) -> rational',
+      examples: ['Rationalize(1.75)  // 7/4', 'Rationalize(Sqrt(3), 1/500)  // 26/15'],
+      evaluate: (ops, { engine }) => {
+        const ce = engine;
+        const f = ops[0].N();
+        if (!isNumber(f) || f.im !== 0) return undefined;
+        if (ops.length >= 2) {
+          const tol = ops[1].N();
+          if (!isNumber(tol) || tol.im !== 0) return undefined;
+          return ce.number(rationalize(f.re, Math.abs(tol.re)));
+        }
+        return ce.number(rationalize(f.re));
+      },
+    },
+
     Root: {
       description: 'n-th root of a value.',
       keywords: ['nth root', 'cube root'],

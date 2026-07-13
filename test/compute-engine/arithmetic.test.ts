@@ -849,6 +849,26 @@ describe('RATIONAL', () => {
     expect(checkJson(['Rational', 'Pi'])).toMatchSnapshot());
 });
 
+describe('RATIONALIZE', () => {
+  const r = (expr: any) => ce.box(expr).evaluate().toString();
+  test('full-precision rationalization (as single-arg Rational)', () => {
+    expect(r(['Rationalize', 1.75])).toEqual('7/4');
+    expect(r(['Rationalize', 2.5])).toEqual('5/2');
+  });
+  test('tolerance selects the shortest convergent within the bound', () => {
+    // √3 ≈ 1.7320508; 26/15 ≈ 1.73333 is within 1/500, 19/11 is not.
+    expect(r(['Rationalize', ['Sqrt', 3], ['Rational', 1, 500]])).toEqual(
+      '26/15'
+    );
+    // The classic π ≈ 22/7 within 1/100.
+    expect(r(['Rationalize', 'Pi', ['Rational', 1, 100]])).toEqual('22/7');
+  });
+  test('integers and free variables stay put', () => {
+    expect(r(['Rationalize', 4])).toEqual('4');
+    expect(r(['Rationalize', 'x'])).toEqual('Rationalize(x)');
+  });
+});
+
 describe('Log', () => {
   test(`Log 1.1`, () => expect(checkJson(['Log', 1.1])).toMatchSnapshot());
   test(`Log 1`, () => expect(checkJson(['Log', 1])).toMatchSnapshot());

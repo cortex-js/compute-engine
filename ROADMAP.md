@@ -390,20 +390,10 @@ spellings are deliberately NOT aliased (decision 2026-07-05); the
 Mathematica→CE correspondence table lives in
 [`docs/MATHEMATICA-NAMES.md`](./docs/MATHEMATICA-NAMES.md) — **probe CE's
 own names before adding an entry here** (many presumed-missing heads exist
-under CE names: `NthPrime`, `NPartition`, `PowerMod`, `PrimitiveRoot`,
-`ContinuedFraction`, matrix ∞-`Norm`, `BaseForm`, finite-domain
-`ForAll`/`Exists`).
+under CE names: `NthPrime`, `NPartition`, `PowerMod`, `ModularInverse`,
+`StirlingS1`, `Rationalize`, `PrimitiveRoot`, `ContinuedFraction`,
+matrix ∞-`Norm`, `BaseForm`, finite-domain `ForAll`/`Exists`).
 
-- **Number theory / combinatorics operators:** Stirling numbers of the
-  **first** kind (`StirlingS1(5, 2) → −50`; the second kind exists as
-  `Stirling`); `ModularInverse` (head is undeclared; `PowerMod(a, -1, m)`
-  already covers the semantics — either implement it as an alias or drop
-  the name).
-- **Tolerance-controlled rational approximation:**
-  `Rationalize(√3., 1/500) → 26/15`. Single-argument `Rational` already
-  rationalizes (at full working precision: `√3 → 50843527/29354524`) — the
-  gap is only the tolerance parameter selecting the shortest fraction
-  within a bound (a continued-fraction convergent cut).
 - **Repeating-decimal representation (consumer side DONE 2026-07-09):**
   repeating-decimal literals now box as exact rationals
   (`0.(142857)`/`0.\overline{142857}` → `1/7`), so arithmetic on such forms

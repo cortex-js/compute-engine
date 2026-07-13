@@ -1042,6 +1042,35 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    StirlingS1: {
+      description:
+        'Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). Its absolute value counts the permutations of n elements with exactly m disjoint cycles.',
+      signature: '(integer, integer) -> integer',
+      type: () => 'finite_integer',
+      examples: ['StirlingS1(5, 2)  // -50'],
+      evaluate: ([n, m], { engine: ce }) => {
+        const nn = toBigint(n);
+        const mm = toBigint(m);
+        if (nn === null || mm === null || nn < 0n || mm < 0n || mm > nn)
+          return undefined;
+        const memo = new Map<string, bigint>();
+        let steps = 0;
+        const s = (n: bigint, k: bigint): bigint => {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          if (n === 0n && k === 0n) return 1n;
+          if (n === 0n || k === 0n) return 0n;
+          const key = `${n},${k}`;
+          const cached = memo.get(key);
+          if (cached !== undefined) return cached;
+          // s(n, k) = s(n−1, k−1) − (n−1)·s(n−1, k)
+          const v = s(n - 1n, k - 1n) - (n - 1n) * s(n - 1n, k);
+          memo.set(key, v);
+          return v;
+        };
+        return ce.number(s(nn, mm));
+      },
+    },
+
     NPartition: {
       description: 'Number of integer partitions of n.',
       signature: '(integer) -> integer',
