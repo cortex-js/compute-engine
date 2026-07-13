@@ -46,7 +46,12 @@ import type {
   Scope as KernelScope,
   EvalContext as KernelEvalContext,
 } from './types-kernel-evaluation.js';
-import type { LanguageTarget, CompilationResult } from './compilation/types.js';
+import type {
+  LanguageTarget,
+  CompilationResult,
+  ComplexResult,
+} from './compilation/types.js';
+import type { Interval, IntervalResult } from './interval/types.js';
 
 export type { RulePurpose } from './types-kernel-evaluation.js';
 
@@ -353,7 +358,31 @@ export interface IComputeEngine {
     options?: Record<string, unknown>
   ): CompilationResult;
 
-  /** @internal Get a registered compilation target by name. */
+  /**
+   * @internal Get a registered compilation target by name.
+   *
+   * The two built-in executable targets are typed concretely so their compiled
+   * `run` needs no cast: `interval-js` accepts `number | Interval` variables
+   * and returns `IntervalResult`; `javascript` accepts `number | ComplexResult`
+   * variables (plain reals or complex domain-coloring inputs) and returns
+   * `number | ComplexResult`. Any other name (source-only or custom targets)
+   * falls back to the generic `LanguageTarget<Expression>`.
+   */
+  getCompilationTarget(
+    name: 'interval-js'
+  ):
+    | LanguageTarget<Expression, 'interval-js', IntervalResult, number | Interval>
+    | undefined;
+  getCompilationTarget(
+    name: 'javascript'
+  ):
+    | LanguageTarget<
+        Expression,
+        'javascript',
+        number | ComplexResult,
+        number | ComplexResult
+      >
+    | undefined;
   getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
 
   /** @internal Return the names of all registered compilation targets. */

@@ -238,7 +238,8 @@ export { IntervalJavaScriptTarget } from './compilation/interval-javascript-targ
 export { BaseCompiler } from './compilation/base-compiler.js';
 
 // Import for internal use
-import type { LanguageTarget } from './compilation/types.js';
+import type { LanguageTarget, ComplexResult } from './compilation/types.js';
+import type { Interval, IntervalResult } from './interval/types.js';
 import { compile as _compile } from './compilation/compile-expression.js';
 import { fu as _fu } from './symbolic/fu.js';
 
@@ -643,6 +644,22 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal Get a registered compilation target by name. */
+  getCompilationTarget(
+    name: 'interval-js'
+  ):
+    | LanguageTarget<Expression, 'interval-js', IntervalResult, number | Interval>
+    | undefined;
+  getCompilationTarget(
+    name: 'javascript'
+  ):
+    | LanguageTarget<
+        Expression,
+        'javascript',
+        number | ComplexResult,
+        number | ComplexResult
+      >
+    | undefined;
+  getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
   getCompilationTarget(name: string): LanguageTarget<Expression> | undefined {
     return this._compilationTargets.get(name);
   }

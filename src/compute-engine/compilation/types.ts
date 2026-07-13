@@ -197,9 +197,22 @@ export interface CompileTarget<Expr = unknown> {
 }
 
 /**
- * Base interface for language-specific compilation targets
+ * Base interface for language-specific compilation targets.
+ *
+ * `T`/`R`/`V` describe the shape of this target's `compile()` result — its
+ * target name, `run` return type, and `run` variable/argument value type. They
+ * default to the generic `string`/`unknown`/`number`, so `LanguageTarget<Expr>`
+ * keeps its historical meaning; the executable targets bind them concretely
+ * (see the `getCompilationTarget` overloads on the engine) so a caller gets a
+ * precisely-typed runner without a cast — e.g. the `interval-js` target's
+ * `run` is `(vars: Record<string, number | Interval>) => IntervalResult`.
  */
-export interface LanguageTarget<Expr = unknown> {
+export interface LanguageTarget<
+  Expr = unknown,
+  T extends string = string,
+  R = unknown,
+  V = number,
+> {
   /** Get the default operators for this language */
   getOperators(): CompiledOperators;
 
@@ -213,7 +226,7 @@ export interface LanguageTarget<Expr = unknown> {
   compile(
     expr: Expr,
     options?: CompilationOptions<Expr>
-  ): CompilationResult<string, unknown>;
+  ): CompilationResult<T, R, V>;
 }
 
 /**
@@ -346,8 +359,8 @@ export type ComplexResult = { re: number; im: number };
  * result.run({ x: 0.5, y: 1.0 })
  * ```
  */
-export type ExpressionRunner<R = number | ComplexResult> = (
-  vars: Record<string, number>
+export type ExpressionRunner<R = number | ComplexResult, V = number> = (
+  vars: Record<string, V>
 ) => R;
 
 /**
@@ -358,7 +371,9 @@ export type ExpressionRunner<R = number | ComplexResult> = (
  * result.run(0.5, 1.0)
  * ```
  */
-export type LambdaRunner<R = number | ComplexResult> = (...args: number[]) => R;
+export type LambdaRunner<R = number | ComplexResult, V = number> = (
+  ...args: V[]
+) => R;
 
 /**
  * Overloaded callable that accepts both calling conventions.
@@ -369,22 +384,32 @@ export type LambdaRunner<R = number | ComplexResult> = (...args: number[]) => R;
  *
  * Check `calling` on the `CompilationResult` to know which convention
  * the compiled expression actually uses.
+ *
+ * `V` is the type of the variable/argument values. It defaults to `number`
+ * (the `javascript` target's real-valued convention). Non-`number` targets
+ * bind it to their own value type — e.g. `interval-js` uses
+ * `number | Interval` (a plain number is auto-converted to a point interval),
+ * and a complex domain-coloring runner uses `number | ComplexResult`.
  */
-export interface CompiledRunner<R = number | ComplexResult> {
+export interface CompiledRunner<R = number | ComplexResult, V = number> {
   /** Call with a variables object (for compiled expressions) */
-  (vars: Record<string, number>): R;
+  (vars: Record<string, V>): R;
   /** Call with positional arguments (for compiled lambda expressions) */
-  (...args: number[]): R;
+  (...args: V[]): R;
 }
 
 /**
  * Result of compiling an expression.
  *
- * Two type parameters control the shape:
+ * Three type parameters control the shape:
  * - `T` — the target name. For executable targets (`'javascript'` |
  *   `'interval-js'`), `run` and `calling` are guaranteed present.
  * - `R` — the return type of `run`. Defaults to `number | ComplexResult`.
  *   Pass `number` when `realOnly: true`.
+ * - `V` — the type of the variable/argument values `run` accepts. Defaults to
+ *   `number`; `interval-js` binds it to `number | Interval`, a complex runner
+ *   to `number | ComplexResult`. (Positioned after `R` so existing
+ *   `CompilationResult<T, R>` uses keep the `number` default.)
  *
  * The `calling` field indicates which convention `run` uses:
  * - `'expression'` — call with a vars object: `run({ x: 0.5 })`
@@ -413,6 +438,7 @@ export interface CompiledRunner<R = number | ComplexResult> {
 export type CompilationResult<
   T extends string = string,
   R = number | ComplexResult,
+  V = number,
 > = {
   /** Target language name */
   target: T;
@@ -480,8 +506,8 @@ export type CompilationResult<
   calling?: 'expression' | 'lambda';
 
   /** Executable function (present for JS-executable targets only). */
-  run?: CompiledRunner<R>;
+  run?: CompiledRunner<R, V>;
 } & (T extends ExecutableTarget
-  ? { calling: 'expression' | 'lambda'; run: CompiledRunner<R> }
+  ? { calling: 'expression' | 'lambda'; run: CompiledRunner<R, V> }
   : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     {});
