@@ -231,13 +231,14 @@ describe('Series — deferred singular cases', () => {
       ])
       .evaluate();
     expect(s.operator).not.toBe('Series');
-    // Leading term is 2^π; check the truncation numerically at x = 2.1.
+    // Check the order-2 truncation numerically at x = 2.1: the remainder is
+    // ≈ f‴(2)/6·(0.1)³ ≈ 1.4e-3.
     const poly = ce.function('Normal', [s]).evaluate();
     const err = Math.abs(
       poly.subs({ x: ce.number(2.1) }).N().re -
         ce.parse('x^{\\pi}').subs({ x: ce.number(2.1) }).N().re
     );
-    expect(err).toBeLessThan(1e-3);
+    expect(err).toBeLessThan(5e-3);
   });
 
   test('deferred result equals its input (pill guard: no expansion)', () => {
