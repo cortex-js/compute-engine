@@ -1897,9 +1897,7 @@ function seriesAtInfinity(
     if (sign < 0) return undefined;
     laurent = {
       ...laurent,
-      c: laurent.c.map((c) =>
-        c.has(s) ? rewriteLnAtom(ce, c, s, xExpr) : c
-      ),
+      c: laurent.c.map((c) => (c.has(s) ? rewriteLnAtom(ce, c, s, xExpr) : c)),
     };
     // Safety net: never leak the fresh variable `s`.
     for (let p = laurent.v; p <= laurent.hi; p++)

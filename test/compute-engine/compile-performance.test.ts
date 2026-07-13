@@ -313,9 +313,6 @@ describe('COMPILATION PERFORMANCE', () => {
 
       // Baseline compiled
       const baseline = compile(expr);
-      const baselineExec = benchmark(() => {
-        baseline.run!({ x: 1, y: 2 });
-      }, 10000);
 
       // Custom operator compiled
       const custom = compile(expr, {
@@ -326,17 +323,30 @@ describe('COMPILATION PERFORMANCE', () => {
           customAdd: (a: number, b: number) => a + b,
         },
       });
-      const customExec = benchmark(() => {
-        custom.run!({ x: 1, y: 2 });
-      }, 10000);
+
+      // A single 10,000-call benchmark of either function is only a few
+      // milliseconds, so the difference between two single-shot runs is
+      // dominated by timer and scheduler noise on shared CI runners (a single
+      // GC pause or deschedule is enough to trip a tight budget). Noise only
+      // ever *adds* time, so measure each function best-of-N and compare the
+      // minima: that filters out transient stalls and leaves the true
+      // per-call cost. Warm up first so JIT compilation isn't charged to the
+      // first measured trial.
+      const bestOf = (fn: () => any): number => {
+        for (let i = 0; i < 2000; i++) fn(); // warm up
+        let best = Infinity;
+        for (let trial = 0; trial < 7; trial++)
+          best = Math.min(best, benchmark(fn, 10000));
+        return best;
+      };
+
+      const baselineExec = bestOf(() => baseline.run!({ x: 1, y: 2 }));
+      const customExec = bestOf(() => custom.run!({ x: 1, y: 2 }));
 
       log(`  Baseline execution: ${baselineExec.toFixed(2)}ms`);
       log(`  Custom op execution: ${customExec.toFixed(2)}ms`);
       log(`  Overhead: ${(customExec - baselineExec).toFixed(2)}ms`);
 
-      // The baseline is only a few milliseconds, so both this difference and a
-      // ratio are sensitive to timer and scheduler noise on shared CI runners
-      // (a single GC pause or deschedule is enough to trip a tight budget).
       // Keep the added overhead below 15ms across 10,000 calls (1.5
       // microseconds per call) to catch real regressions without flaking.
       expect(customExec - baselineExec).toBeLessThan(15);

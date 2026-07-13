@@ -383,7 +383,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // list-vs-scalar only (see `Equal`'s handler for why 2+ collections stay
       // a scalar boolean and would otherwise recurse).
       if (ops.filter((op) => op.isCollection).length < 2) {
-        const bc = broadcastComparison(ce, 'NotEqual', ops, numericApproximation);
+        const bc = broadcastComparison(
+          ce,
+          'NotEqual',
+          ops,
+          numericApproximation
+        );
         if (bc) return bc;
       }
       let lhs: Expression | undefined = undefined;
