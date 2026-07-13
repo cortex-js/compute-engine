@@ -911,21 +911,21 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // (sqrt(x))^n -> x^{n/2}
-    if (isFunction(base, 'Sqrt')) {
-      const innerBase = base.op1;
+    const sqrtBase = sqrtRadicand(base);
+    if (sqrtBase) {
       // sqrt(x)^n = x^{n/2}
       // Safe when: n is even (result is integer power), or x is non-negative
       if (exp.isEven === true) {
         // sqrt(x)^{2k} = x^k - always valid
         return {
-          value: innerBase.pow(exp.div(2)),
+          value: sqrtBase.pow(exp.div(2)),
           because: 'sqrt(x)^n -> x^{n/2} when n is even',
         };
       }
-      if (innerBase.isNonNegative === true) {
+      if (sqrtBase.isNonNegative === true) {
         // sqrt(x)^n = x^{n/2} when x >= 0
         return {
-          value: innerBase.pow(exp.div(2)),
+          value: sqrtBase.pow(exp.div(2)),
           because: 'sqrt(x)^n -> x^{n/2} when x >= 0',
         };
       }
