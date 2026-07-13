@@ -94,6 +94,20 @@ describe('Parser: list range ellipsis', () => {
         'n',
       ]);
     });
+
+    // Prose ellipses bind below implicit multiplication, so the lhs can be a
+    // whole juxtaposition chain. When that chain includes a `\text{…}` run,
+    // the ellipsis is prose, not a range: a string can never be a Range
+    // endpoint. MathNet corpus regression (`… = k \text{ und } a_1 a_2
+    // \ldots a_n = M`).
+    test('juxtaposition chain with \\text{…} stays a continuation, not a Range', () => {
+      const expr = ce.parse(
+        'k \\quad \\text{ und } \\quad a_{1} a_{2} \\ldots a_{n}=M'
+      );
+      expect(expr.isValid).toBe(true);
+      expect(JSON.stringify(expr.json)).not.toContain('"Range"');
+      expect(JSON.stringify(expr.json)).toContain('ContinuationPlaceholder');
+    });
   });
 
   // Single-anchor continuation `[1, ..., 10]`: one sample, so no step can be

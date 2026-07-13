@@ -3364,6 +3364,24 @@ function parseRange(
     return null;
   }
 
+  // Since prose ellipses bind below implicit multiplication, the lhs can be
+  // a whole juxtaposition chain. If that chain contains a `\text{…}` run
+  // (e.g. `k \text{ und } a_1 a_2 \ldots a_n`), the ellipsis is prose — a
+  // string can never be a Range endpoint — so keep it as a continuation:
+  // the chain, a ContinuationPlaceholder, and the right-hand sample.
+  if (
+    trailingDots &&
+    operator(lhs) === 'InvisibleOperator' &&
+    operands(lhs).some((op) => stringValue(op) !== null)
+  ) {
+    return [
+      'InvisibleOperator',
+      ...operands(lhs),
+      'ContinuationPlaceholder',
+      second,
+    ] as MathJsonExpression;
+  }
+
   // If we have 1..2..3, we have a range with a step, and second returned
   // ["Range", 2, 3]
   if (operator(second) === 'Range') {
