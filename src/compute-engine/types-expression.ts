@@ -1880,6 +1880,14 @@ export interface Expression {
   get value(): Expression | undefined;
 
   /**
+   * If this expression is constant (see `isConstant`), return its value,
+   * otherwise `undefined`.
+   *
+   * @category Value Properties
+   */
+  readonly constantValue: number | boolean | string | object | undefined;
+
+  /**
    * If the expression is a symbol, set the value of the symbol.
    *
    * Will throw a runtime error if either not a symbol, or a symbol with the
@@ -2226,6 +2234,12 @@ export interface FunctionInterface {
  */
 export interface StringInterface {
   readonly string: string;
+
+  /** The UTF-8 encoding of the string, as a byte buffer. */
+  readonly buffer: Uint8Array;
+
+  /** The Unicode scalar values (code points) of the string. */
+  readonly unicodeScalars: number[];
 }
 
 /**

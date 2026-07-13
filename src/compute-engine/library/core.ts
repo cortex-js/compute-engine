@@ -49,7 +49,6 @@ import type {
   CanonicalForm,
 } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
-import { BoxedString } from '../boxed-expression/boxed-string.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { isDictionary, isValueDef } from '../boxed-expression/utils.js';
 import {
@@ -1840,7 +1839,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(string) -> list<integer>',
       evaluate: ([str], { engine }) => {
         if (!isString(str)) return undefined;
-        const utf8Buffer = (str as BoxedString).buffer;
+        const utf8Buffer = str.buffer;
         // Convert the Uint8Array to a list of integers
         return engine.function(
           'List',
@@ -1873,7 +1872,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(string) -> list<integer>',
       evaluate: ([str], { engine }) => {
         if (!isString(str)) return undefined;
-        const codePoints = (str as BoxedString).unicodeScalars;
+        const codePoints = str.unicodeScalars;
         return engine.function(
           'List',
           codePoints.map((cp) => engine.number(cp))

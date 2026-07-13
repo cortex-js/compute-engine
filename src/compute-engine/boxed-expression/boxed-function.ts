@@ -270,10 +270,6 @@ export class BoxedFunction
     return this.isPure && this._ops.every((x) => x.isConstant);
   }
 
-  get constantValue(): number | boolean | string | object | undefined {
-    return this.isConstant ? this.value : undefined;
-  }
-
   get json(): MathJsonExpression {
     const s = this.structural;
     const ops = isFunction(s) ? s.ops : this._ops;
@@ -655,12 +651,15 @@ export class BoxedFunction
     return true;
   }
 
-  get isOne(): boolean | undefined {
+  // Internal negative-guard helpers (never return `true`): used only via
+  // `this` within BoxedFunction. Not part of the public expression surface —
+  // hence the `_` prefix. Use `.is(1)` / `.is(-1)` for a real equality check.
+  get _isOne(): boolean | undefined {
     if (this.isNonPositive === true || this.isReal === false) return false;
     return undefined;
   }
 
-  get isNegativeOne(): boolean | undefined {
+  get _isNegativeOne(): boolean | undefined {
     if (this.isNonNegative === true || this.isReal === false) return false;
     return undefined;
   }
@@ -787,8 +786,8 @@ export class BoxedFunction
   inv(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
-    if (this.isOne) return this;
-    if (this.isNegativeOne) return this;
+    if (this._isOne) return this;
+    if (this._isNegativeOne) return this;
 
     // 1/√u = √(1/u) only holds for u ≥ 0: on the negative real axis the
     // principal branch gives 1/√(-a) = -i/√a but √(-1/a) = +i/√a

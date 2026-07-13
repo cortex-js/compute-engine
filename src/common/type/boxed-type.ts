@@ -43,8 +43,11 @@ export class BoxedType {
     else this.type = type;
   }
 
-  matches(other: Type | BoxedType): boolean {
+  matches(other: Type | TypeString | BoxedType): boolean {
     if (other instanceof BoxedType) return isSubtype(this.type, other.type);
+    // `isSubtype` parses any non-primitive `TypeString` (e.g. `'matrix'`,
+    // `'vector'`, `'list<number>'`), so a bare string type name is accepted
+    // here just like the `BoxedType` constructor accepts one — no need to box.
     return isSubtype(this.type, other);
   }
 

@@ -923,6 +923,10 @@ export abstract class _BoxedExpression implements Expression {
     throw new Error(`Can't change the value of \\(${this.toString()}\\)`);
   }
 
+  get constantValue(): number | boolean | string | object | undefined {
+    return this.isConstant ? this.value : undefined;
+  }
+
   get type(): BoxedType {
     return BoxedType.unknown;
   }
