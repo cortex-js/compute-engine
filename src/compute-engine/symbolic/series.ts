@@ -10,6 +10,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { asSmallInteger, asRational } from '../boxed-expression/numerics.js';
+import { bernoulliRational } from '../numerics/bernoulli.js';
 import { differentiate } from './derivative.js';
 import { trigToExp } from './trig-rewrite.js';
 import { getFunctionProperties } from '../function-properties/index.js';
@@ -57,12 +58,19 @@ import { getFunctionProperties } from '../function-properties/index.js';
 // `Power(g, p/r)` — where the base vanishes (or has a pole) at the expansion
 // point. Coefficients may additionally carry a literal `Ln(t)` atom, giving
 // **log-aware** expansions — `ln(sin x)`, `ln(x²(1+x))`, `x^x`, `log_b(g)` —
-// about a zero or pole of the logarithm's argument.
+// about a zero or pole of the logarithm's argument. On the `+∞` side the log
+// atom is rewritten back to `x` (`Ln(s) = −Ln(x)`), so `ln x`, `ln(x²+x)` and
+// the log-gamma Stirling asymptotic `GammaLn(x)` (a divergent asymptotic
+// series, its `BigO` placed at the first omitted term) expand there.
+//
+// When the retained sum is *provably equal* to the whole function (verified by
+// `.simplify()`, with a `Together` fallback for rational functions), the `BigO`
+// remainder is dropped — `Series(√x, x) → √x`, `Series(1/(x−2), x, 2) → …`.
 //
 // Genuinely intractable points still defer, leaving `Series(...)` unevaluated
 // rather than returning a partial or wrong expansion: an essential singularity
-// (`e^{1/x}` at 0), an irrational/symbolic exponent (`x^π`), and nested or
-// reciprocal logarithms (`ln(ln x)`, `1/ln x`).
+// (`e^{1/x}` at 0), an irrational/symbolic exponent (`x^π`), nested or
+// reciprocal logarithms (`ln(ln x)`, `1/ln x`), and a log-of-negative at `−∞`.
 //
 // None of these functions are reachable from simplification rules; the `Series`
 // operator handler is a lazy transformation verb (like `DSolve`/`TrigExpand`),
@@ -1107,6 +1115,18 @@ function lnLaurent(
   x0: Expression,
   W: number
 ): Laurent | null {
+  // `ln(Γ(g))` with `g → ∞` is the log-Γ Stirling asymptotic; delegate so that
+  // parsed `\ln\Gamma(x)` behaves like `GammaLn(x)`. Fall through if it declines.
+  if (isFunction(arg, 'Gamma')) {
+    const gArg = arg.ops[0];
+    const gL = expandLaurent(gArg, x, x0, ce, W);
+    const gm = gL ? trueVal(gL) : null;
+    if (gm !== null && gm < 0) {
+      const viaStirling = gammaLnLaurent(ce, gArg, x, x0, W);
+      if (viaStirling) return viaStirling;
+    }
+  }
+
   const inner = expandLaurent(arg, x, x0, ce, W);
   if (!inner) return null;
   const m = trueVal(inner);
@@ -1150,6 +1170,82 @@ function lnLaurent(
         : ce.function('Add', constTerms);
 
   return { v: 0, d, c, hi: Math.min(inner.hi - m, Wn) };
+}
+
+/**
+ * Stirling's asymptotic expansion of `GammaLn(u) = ln Γ(u)` where `u → ∞` at
+ * the expansion point (its expansion has a pole there, `valuation < 0`) and its
+ * leading coefficient is a positive real (Stirling holds for `u → +∞`):
+ *
+ *   `ln Γ(u) = (u − ½)·ln u − u + ½·ln(2π) + Σ_{k≥1} B_{2k}/(2k(2k−1))·u^{1−2k}`.
+ *
+ * The rewrite is expanded through the existing machinery (`ln u` rides
+ * `lnLaurent`, `u^{1−2k}` rides the reciprocal path) and contains no `GammaLn`,
+ * so the recursion terminates. The series is *divergent* (asymptotic): term `k`
+ * has valuation `mu·(2k−1)` (`mu = |val u|`), so only terms below the requested
+ * window are kept and the reliable `hi` is capped at the first omitted term —
+ * the `BigO` then lands at the true remainder order.
+ */
+function gammaLnLaurent(
+  ce: ComputeEngine,
+  u: Expression,
+  x: string,
+  x0: Expression,
+  W: number
+): Laurent | null {
+  const uL = expandLaurent(u, x, x0, ce, W);
+  if (!uL) return null;
+  const m = trueVal(uL);
+  if (m === null || m >= 0) return null; // Stirling only for u → ∞
+  const c0 = coeffAt(ce, uL, m);
+  if (c0.has(x)) return null; // log-free leading coefficient required
+  if (c0.isPositive !== true) return null; // valid only for u → +∞
+  const mu = -m; // |valuation of u|, in numerator units of dR
+  const dR = uL.d;
+
+  // Honest truncation: keep Bernoulli terms strictly below the requested order
+  // window `nEff·dR` (the divergent tail is not trustworthy), then place the
+  // BigO at the first omitted term. `nEff` is the requested order recovered
+  // from the internal working order `W = nEff + BIGO_LOOKAHEAD`.
+  const nEff = Math.max(0, W - BIGO_LOOKAHEAD);
+  let K = 0;
+  while (mu * (2 * (K + 1) - 1) < nEff * dR) K++;
+
+  const half = ce.function('Divide', [ce.One, ce.number(2)]);
+  const terms: Expression[] = [
+    // (u − ½)·ln u
+    ce.function('Multiply', [
+      ce.function('Subtract', [u, half]),
+      ce.function('Ln', [u]),
+    ]),
+    // − u
+    ce.function('Negate', [u]),
+    // ½·ln(2π)
+    ce.function('Multiply', [
+      half,
+      ce.function('Ln', [ce.function('Multiply', [ce.number(2), ce.Pi])]),
+    ]),
+  ];
+  for (let k = 1; k <= K; k++) {
+    // B_{2k}/(2k(2k−1)). Numerators grow past 2^53, so build the rational from
+    // bigints (never via `ce.number([Number, Number])`).
+    const [bn, bd] = bernoulliRational(2 * k);
+    const denom = bd * BigInt(2 * k) * BigInt(2 * k - 1);
+    const coeff = ce
+      .function('Divide', [ce.number(bn), ce.number(denom)])
+      .evaluate();
+    terms.push(
+      ce.function('Multiply', [
+        coeff,
+        ce.function('Power', [u, ce.number(1 - 2 * k)]),
+      ])
+    );
+  }
+
+  const stirling = expandLaurent(ce.function('Add', terms), x, x0, ce, W);
+  if (!stirling) return null;
+  // Cap `hi` at the first omitted Bernoulli term (valuation `mu·(2K+1)`).
+  return { ...stirling, hi: Math.min(stirling.hi, mu * (2 * K + 1) - 1) };
 }
 
 function powerSeriesLaurent(
@@ -1353,6 +1449,16 @@ function expandLaurent(
       return puiseuxPower(ce, ops[0], x, x0, 1, 2, W);
     case 'Ln':
       return lnLaurent(ce, ops[0], x, x0, W);
+    case 'GammaLn': {
+      // Stirling's log-Γ asymptotic when the argument → ∞ at the point.
+      const stirling = gammaLnLaurent(ce, ops[0], x, x0, W);
+      if (stirling) return stirling;
+      // Otherwise expand as `ln(Γ(u))` through the log-aware path — at a
+      // finite pole of Γ this gives e.g. `GammaLn(x)` at 0 → `−ln x − γx + …`.
+      // No recursion loop: `lnLaurent` only delegates back here when the
+      // argument → ∞, which `gammaLnLaurent` just declined.
+      return lnLaurent(ce, ce.function('Gamma', [ops[0]]), x, x0, W);
+    }
     case 'Log': {
       // `Log(g)` = `Ln(g)/Ln(10)`; `Log(g, b)` (base is the 2nd operand,
       // independent of x) = `Ln(g)/Ln(b)`; otherwise defer.
@@ -1497,7 +1603,8 @@ function assembleLaurent(
   ce: ComputeEngine,
   L: Laurent,
   n: number,
-  power: (p: number, d: number) => Expression
+  power: (p: number, d: number) => Expression,
+  f: Expression
 ): Expression {
   const d = L.d;
   // Retain powers `p/d ≤ n`, i.e. numerator `p ≤ n·d`, up to the reliable `hi`.
@@ -1511,6 +1618,42 @@ function assembleLaurent(
     } else {
       const pw = power(p, d);
       terms.push(c.isSame(1) ? pw : ce.function('Multiply', [c, pw]));
+    }
+  }
+
+  // Exact-expansion detection: when the requested order is fully inside the
+  // reliable window (`hi ≥ n·d`) and every reliable coefficient past the cut is
+  // zero, the retained sum *might* equal `f` exactly. Prove it symbolically
+  // (`.simplify()` is safe here — top-level verb, never reached from expansion
+  // internals) and, if proven, drop the `BigO` remainder. The cheap gates run
+  // first so genuinely-truncated series (`1/sin x`, `Γ(x)`, `ζ` at 1) never pay
+  // for the `simplify`.
+  if (L.hi >= n * d && terms.length >= 1) {
+    let tailZero = true;
+    for (let p = top + 1; p <= L.hi; p++)
+      if (!coeffAt(ce, L, p).isSame(0)) {
+        tailZero = false;
+        break;
+      }
+    if (tailZero) {
+      const candidate =
+        terms.length === 1 ? terms[0] : ce.function('Add', terms);
+      const diff = ce.function('Subtract', [f, candidate]);
+      // `.simplify()` proves most cases; a rational function needs a common
+      // denominator (`Together`) before its numerator folds to 0.
+      let proven = diff.simplify().isSame(0);
+      if (!proven) {
+        try {
+          proven = ce
+            .function('Together', [diff])
+            .evaluate()
+            .simplify()
+            .isSame(0);
+        } catch {
+          proven = false;
+        }
+      }
+      if (proven) return candidate;
     }
   }
 
@@ -1624,7 +1767,7 @@ export function computeSeries(
 
   const laurent = expandLaurent(f, x, x0, ce, W);
   if (!laurent) return undefined;
-  return assembleLaurent(ce, laurent, n, power);
+  return assembleLaurent(ce, laurent, n, power, f);
 }
 
 /** True when `f` applies a pole-carrying special function to an argument that
@@ -1666,6 +1809,29 @@ function allZeroBeyond(coeffs: Coeffs, n: number, W: number): boolean {
   for (let k = n + 1; k <= W && k < coeffs.length; k++)
     if (!coeffs[k].isSame(0)) return false;
   return true;
+}
+
+/** Rewrite the exact atom `Ln(<s>)` to `Negate(Ln(x))` throughout `e` (the ∞
+ * substitution `x = 1/s` gives `Ln(s) = −Ln(x)`, which does not fold via
+ * `.subs()`). Rebuilds a function node only when a child actually changed. */
+function rewriteLnAtom(
+  ce: ComputeEngine,
+  e: Expression,
+  s: string,
+  xExpr: Expression
+): Expression {
+  if (isFunction(e, 'Ln') && isSymbol(e.ops[0]) && e.ops[0].symbol === s)
+    return ce.function('Negate', [ce.function('Ln', [xExpr])]);
+  if (isFunction(e)) {
+    let changed = false;
+    const ops = e.ops.map((op) => {
+      const r = rewriteLnAtom(ce, op, s, xExpr);
+      if (r !== op) changed = true;
+      return r;
+    });
+    return changed ? ce.function(e.operator, ops) : e;
+  }
+  return e;
 }
 
 function seriesAtInfinity(
@@ -1719,13 +1885,28 @@ function seriesAtInfinity(
 
   // A pole at ∞ (e.g. x²/(x−1)): `g` has a pole at s = 0 that the
   // differentiation path cannot carry — expand it as a Laurent series in s.
-  const laurent = expandLaurent(g, s, ce.Zero, ce, W);
+  let laurent = expandLaurent(g, s, ce.Zero, ce, W);
   if (!laurent) return undefined;
-  // A log-carrying expansion at ±∞ would leak the fresh variable `s`
-  // (`Ln(s) = −Ln(x)`); rather than rewrite the atom, defer (stretch goal).
-  for (let p = laurent.v; p <= laurent.hi; p++)
-    if (coeffAt(ce, laurent, p).has(s)) return undefined;
-  return assembleLaurent(ce, laurent, n, power);
+
+  // Log-carrying coefficients hold exact `Ln(s)` atoms (from `lnLaurent`).
+  const logCarrying = laurent.c.some((c) => c.has(s));
+  if (logCarrying) {
+    // For +∞, `s = 1/x` so `Ln(s) = −Ln(x)`: rewrite the atom back to `x`. For
+    // −∞ (x < 0) the logarithm's argument is negative — no real expansion — so
+    // keep deferring.
+    if (sign < 0) return undefined;
+    laurent = {
+      ...laurent,
+      c: laurent.c.map((c) =>
+        c.has(s) ? rewriteLnAtom(ce, c, s, xExpr) : c
+      ),
+    };
+    // Safety net: never leak the fresh variable `s`.
+    for (let p = laurent.v; p <= laurent.hi; p++)
+      if (coeffAt(ce, laurent, p).has(s)) return undefined;
+  }
+
+  return assembleLaurent(ce, laurent, n, power, f);
 }
 
 // ─────────────────────────────────────────────────────────────────────────

@@ -134,6 +134,27 @@
   `Series(x^π, x)` previously produced coefficients containing unresolved
   `0^{π−1}`-style indeterminates; it now stays unevaluated at 0 (the
   expansion about a regular point, e.g. `x^π` about 2, is unchanged).
+- **Logarithmic asymptotic expansions at `±∞`.** A log-carrying expansion at
+  `+∞` now resolves back to `x` instead of deferring:
+  `Series(ln x, x, +∞)` → `ln x`, and
+  `Series(ln(x²+x), x, +∞)` → `2 ln x + 1/x − 1/(2x²) + …`. At `−∞` (a
+  logarithm of a negative quantity) such expansions still stay unevaluated.
+- **Stirling asymptotics for the log-gamma.** `Series(GammaLn(x), x, +∞)` (and
+  the parsed `ln Γ(x)`) now returns Stirling's series
+  `x·ln x − x − ½ln x + ½ln(2π) + 1/(12x) − 1/(360x³) + O(1/x⁵)`. The series is
+  asymptotic (divergent), so the `BigO` is placed at the true remainder order.
+  `Series(Γ(x), x, +∞)` — the exponential of a trans-series — still defers.
+- **`GammaLn` evaluates to `+∞` at the poles of `Γ`** (the non-positive
+  integers, where `ln|Γ| → +∞` — as in Mathematica's `LogGamma` and SymPy's
+  `loggamma`); it previously stayed inert there. Consequently
+  `Series(GammaLn(x), x)` at such a pole now returns the log-aware expansion
+  `−ln x − γ·x + (π²/12)·x² + …` (matching the parsed `ln Γ(x)`) instead of an
+  invalid expansion with inert `GammaLn(0)`, `Digamma(0)`, … coefficients.
+- **Provably-exact expansions drop the `BigO` remainder.** When the truncated
+  sum is symbolically equal to the whole function, `Series` now returns it
+  without a remainder term: `Series(√x, x)` → `√x`, `Series(ln x, x)` → `ln x`,
+  `Series(x/(x−2)², x, 2)` → `2(x−2)⁻² + (x−2)⁻¹`. Genuinely-truncated series
+  (`1/sin x`, `Γ(x)` at 0, `ζ` at 1) keep their `BigO`.
 
 ### Sums and Products
 

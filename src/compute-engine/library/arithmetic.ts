@@ -820,15 +820,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: (ops) => gammaPoleType(ops[0]),
 
-      evaluate: (ops, { numericApproximation, engine }) =>
-        shouldNumericize(numericApproximation, ops[0])
+      evaluate: (ops, { numericApproximation, engine }) => {
+        const x = ops[0];
+        // At the poles of Γ (the non-positive integers) |Γ| → ∞, so
+        // ln Γ → +∞ (as in Mathematica's LogGamma and SymPy's loggamma).
+        // This is exact, so return it regardless of numericApproximation.
+        if (isNumber(x) && x.im === 0 && x.isInteger && x.isNonPositive)
+          return engine.PositiveInfinity;
+        return shouldNumericize(numericApproximation, x)
           ? apply(
-              ops[0],
+              x,
               (x) => gammaln(x),
               (x) => bigGammaln(engine, x),
               (x) => lngammaComplex(x)
             )
-          : undefined,
+          : undefined;
+      },
     },
 
     // Digamma function ψ(x) = d/dx ln(Γ(x)) = Γ'(x)/Γ(x)

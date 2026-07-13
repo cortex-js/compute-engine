@@ -180,6 +180,16 @@ describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
     expect(ce.expr(['Gamma', 0]).N().toString()).toContain('oo');
   });
 
+  test('GammaLn is +oo at the poles of Γ (non-positive integers)', () => {
+    // ln|Γ| → +∞ at 0, −1, −2, … (as in Mathematica's LogGamma and SymPy's
+    // loggamma). Exact under evaluate, not just N().
+    expect(ce.expr(['GammaLn', 0]).evaluate().toString()).toBe('+oo');
+    expect(ce.expr(['GammaLn', -3]).evaluate().toString()).toBe('+oo');
+    // Regular arguments unchanged: exact-symbolic, numericizes under N().
+    expect(ce.expr(['GammaLn', 4]).evaluate().toString()).toBe('GammaLn(4)');
+    expectApprox(ce.expr(['GammaLn', 4]), Math.log(6));
+  });
+
   test('Γ(z) keeps full relative accuracy for large positive reals', () => {
     const cases: Array<[number, number]> = [
       [40.5, 1.2860502482549915e47],

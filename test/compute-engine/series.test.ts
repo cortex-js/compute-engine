@@ -656,8 +656,8 @@ describe('Series — Laurent numeric equivalence and N() poisoning', () => {
 //
 
 describe('Series — Puiseux expansions (§7)', () => {
-  test('√x = √x (a bare fractional monomial)', () => {
-    expect(series('\\sqrt{x}').latex).toBe('\\sqrt{x}+O\\left(x^7\\right)');
+  test('√x = √x exactly (no BigO — provably exact)', () => {
+    expect(series('\\sqrt{x}').latex).toBe('\\sqrt{x}');
   });
 
   test('1/√x matches numerically near 0', () => {
@@ -691,8 +691,8 @@ describe('Series — Puiseux expansions (§7)', () => {
     );
   });
 
-  test('√x + x (mixed denominators)', () => {
-    expect(series('\\sqrt{x}+x').latex).toBe('\\sqrt{x}+x+O\\left(x^7\\right)');
+  test('√x + x (mixed denominators, provably exact)', () => {
+    expect(series('\\sqrt{x}+x').latex).toBe('x+\\sqrt{x}');
   });
 
   test('√x·√x reduces to plain x (integer power)', () => {
@@ -709,10 +709,8 @@ describe('Series — Puiseux expansions (§7)', () => {
     );
   });
 
-  test('√x at +∞ is √x', () => {
-    const s = series('\\sqrt{x}', '+\\infty');
-    expect(s.operator).toBe('Add');
-    expect(s.latex).toContain('\\sqrt{x}');
+  test('√x at +∞ is √x exactly (no BigO)', () => {
+    expect(series('\\sqrt{x}', '+\\infty').latex).toBe('\\sqrt{x}');
   });
 
   test('cos(√x) = 1 − x/2 + x²/24 − x³/720 (integer powers)', () => {
@@ -794,12 +792,12 @@ describe('Series — Puiseux expansions (§7)', () => {
 //
 
 describe('Series — log-aware expansions (§8)', () => {
-  test('ln x = ln x', () => {
-    expect(series('\\ln x').latex).toBe('\\ln(x)+O\\left(x^7\\right)');
+  test('ln x = ln x exactly (no BigO)', () => {
+    expect(series('\\ln x').latex).toBe('\\ln(x)');
   });
 
-  test('x·ln x = x ln x', () => {
-    expect(series('x\\ln x').latex).toBe('x\\ln(x)+O\\left(x^8\\right)');
+  test('x·ln x = x ln x exactly (no BigO)', () => {
+    expect(series('x\\ln x').latex).toBe('x\\ln(x)');
   });
 
   test('ln(sin x) = ln x − x²/6 − x⁴/180 + O(x⁶)', () => {
@@ -829,10 +827,8 @@ describe('Series — log-aware expansions (§8)', () => {
     expect(normal('x^x', '0', 3).toString()).toContain('ln(x)');
   });
 
-  test('ln(x)/x = ln x / x', () => {
-    expect(series('\\frac{\\ln x}{x}').latex).toBe(
-      '\\frac{\\ln(x)}{x}+O\\left(x^7\\right)'
-    );
+  test('ln(x)/x = ln x / x exactly (no BigO)', () => {
+    expect(series('\\frac{\\ln x}{x}').latex).toBe('\\frac{\\ln(x)}{x}');
   });
 
   test('Log(x, 2) = ln x / ln 2', () => {
@@ -871,5 +867,141 @@ describe('Series — Puiseux/log Residue regression', () => {
       ])
       .evaluate();
     expect(r.operator).toBe('Residue');
+  });
+});
+
+//
+// §10 Log-carrying expansions at ±∞ (Phase 1)
+//
+
+describe('Series — logarithms at ±∞', () => {
+  test('ln x at +∞ is ln x exactly', () => {
+    expect(series('\\ln x', '+\\infty').latex).toBe('\\ln(x)');
+  });
+
+  test('x·ln x at +∞ is x ln x exactly', () => {
+    expect(series('x\\ln x', '+\\infty').latex).toBe('x\\ln(x)');
+  });
+
+  test('ln(x²+x) at +∞ = 2 ln x + 1/x − 1/(2x²) + …', () => {
+    // 2 ln x + ln(1 + 1/x) = 2 ln x + Σ (−1)^{k+1}/(k·x^k).
+    expect(series('\\ln(x^2+x)', '+\\infty').latex).toBe(
+      '2\\ln(x)+\\frac{1}{x}-\\frac{1}{2x^2}+\\frac{1}{3x^3}-\\frac{1}{4x^4}' +
+        '+\\frac{1}{5x^5}+O\\left(\\frac{1}{x^6}\\right)'
+    );
+    const p = normal('\\ln(x^2+x)', '+\\infty', 2);
+    const approx = p.subs({ x: ce.number(50) }).N().re;
+    expect(Math.abs(approx - Math.log(50 * 50 + 50))).toBeLessThan(1e-4);
+  });
+
+  test('ln x at −∞ stays unevaluated (log of a negative quantity)', () => {
+    expect(series('\\ln x', '-\\infty').operator).toBe('Series');
+  });
+});
+
+//
+// §11 Provably-exact expansions render without a BigO remainder (Phase 2)
+//
+
+describe('Series — exact expansions drop the BigO remainder', () => {
+  test('1/(x−2) at 2 is exact', () => {
+    expect(series('\\frac{1}{x-2}', '2').latex).toBe('\\frac{1}{x-2}');
+  });
+
+  test('x/(x−2)² at 2 = 2(x−2)⁻² + (x−2)⁻¹ exactly', () => {
+    expect(series('\\frac{x}{(x-2)^2}', '2').latex).toBe(
+      '\\frac{2}{(x-2)^2}+\\frac{1}{x-2}'
+    );
+  });
+
+  test('1/sin x keeps its BigO (not exact)', () => {
+    expect(series('\\frac{1}{\\sin x}').latex).toContain('O\\left(');
+  });
+
+  test('ζ(x) at 1 keeps its BigO (hi = 0 fails the gate cheaply)', () => {
+    expect(series('\\zeta(x)', '1').latex).toContain('O\\left(');
+  });
+
+  test('Γ(x) at 0 keeps its BigO (not exact)', () => {
+    expect(series('\\Gamma(x)', '0').latex).toContain('O\\left(');
+  });
+});
+
+//
+// §12 Stirling asymptotics for GammaLn / ln∘Gamma at +∞ (Phase 3)
+//
+
+describe('Series — GammaLn Stirling asymptotics', () => {
+  test('GammaLn(x) at +∞ = x ln x − x − ½ln x + ½ln(2π) + 1/(12x) − …', () => {
+    // Cross-checked against SymPy sp.loggamma series at oo.
+    expect(series('\\operatorname{GammaLn}(x)', '+\\infty').latex).toBe(
+      'x(\\ln(x)-1)-\\frac{\\ln(x)}{2}+\\frac{\\ln(2\\pi)}{2}' +
+        '+\\frac{1}{12x}-\\frac{1}{360x^3}+O\\left(\\frac{1}{x^5}\\right)'
+    );
+    const p = normal('\\operatorname{GammaLn}(x)', '+\\infty');
+    for (const xv of [10, 20]) {
+      const approx = p.subs({ x: ce.number(xv) }).N().re;
+      const exact = ce.function('GammaLn', [ce.number(xv)]).N().re;
+      // Error is on the order of the first omitted term ~ 1/(1260 x⁵).
+      expect(Math.abs(approx - exact)).toBeLessThan(2 / (1000 * xv ** 5));
+    }
+  });
+
+  test('parsed ln Γ(x) at +∞ matches GammaLn(x)', () => {
+    expect(series('\\ln\\Gamma(x)', '+\\infty').latex).toBe(
+      series('\\operatorname{GammaLn}(x)', '+\\infty').latex
+    );
+  });
+
+  test('GammaLn(x²) at +∞ matches numerically', () => {
+    const p = normal('\\operatorname{GammaLn}(x^2)', '+\\infty');
+    for (const xv of [5, 10]) {
+      const approx = p.subs({ x: ce.number(xv) }).N().re;
+      const exact = ce.function('GammaLn', [ce.number(xv * xv)]).N().re;
+      expect(Math.abs(approx - exact)).toBeLessThan(1e-5);
+    }
+  });
+
+  test('Γ(x) at +∞ stays unevaluated (exp of a trans-series)', () => {
+    expect(series('\\Gamma(x)', '+\\infty').operator).toBe('Series');
+  });
+
+  test('GammaLn(x) at 0 expands as ln Γ: −ln x − γx + …', () => {
+    // Regression: the derivative fallback used to keep the symbolic-inert
+    // `GammaLn(0)`, `Digamma(0)`, … as coefficients (same class as `x^π`);
+    // `GammaLn(0)` now evaluates to +∞ so the Taylor engines defer, and the
+    // Laurent path expands `ln(Γ(x))` through the log-aware machinery.
+    const s = series('\\operatorname{GammaLn}(x)', '0', 3);
+    expect(s.operator).not.toBe('Series');
+    expect(s.toString()).not.toContain('GammaLn(0)');
+    // Identical to the composed ln Γ(x) expansion. (`evaluate` first: the
+    // nested γ-polynomial coefficients need folding before `simplify` can
+    // recognize the difference as 0.)
+    const composed = normal('\\ln\\Gamma(x)', '0', 3);
+    const mine = ce.function('Normal', [s]).evaluate();
+    expect(
+      ce.function('Subtract', [mine, composed]).evaluate().simplify().isSame(0)
+    ).toBe(true);
+    // Numeric: error at x = 0.1 is small and consistent with O(x⁴).
+    const err = Math.abs(
+      mine.subs({ x: ce.number(0.1) }).N().re -
+        ce.function('GammaLn', [ce.number(0.1)]).N().re
+    );
+    expect(err).toBeLessThan(1e-4);
+  });
+
+  test('GammaLn(x) at a negative pole (−2) expands with exact data', () => {
+    // −ln(x+2) + ln(1/2) + (3/2 − γ)(x+2) + … — the ψ constant at −2 is
+    // −γ + H₂ = 3/2 − γ.
+    const p = normal('\\operatorname{GammaLn}(x)', '-2', 1);
+    const t = ce.parse('x + 2');
+    const expected = ce
+      .parse('-\\ln(x+2) + \\ln(\\frac{1}{2})')
+      .add(
+        ce.parse('\\frac{3}{2}').sub(ce.symbol('EulerGamma')).mul(t)
+      );
+    expect(
+      ce.function('Subtract', [p, expected]).evaluate().simplify().isSame(0)
+    ).toBe(true);
   });
 });
