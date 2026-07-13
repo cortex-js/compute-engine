@@ -1992,12 +1992,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Round: {
-      description: 'Rounds a number to the nearest integer.',
+      description:
+        'Rounds a number to the nearest integer, or (with a precision argument) to `n` decimal places.',
       complexity: 1250,
       broadcastable: true,
-      signature: '(number) -> integer',
-      type: ([x]) => roundingFunctionType(x),
-      sgn: ([x]) => {
+      // Optional precision arg (Desmos/spreadsheet `round(x, n)`): round to `n`
+      // decimal places. Without it, rounds to the nearest integer.
+      signature: '(number, integer?) -> number',
+      type: ([x, n]) =>
+        n === undefined
+          ? roundingFunctionType(x)
+          : // With a precision arg the result is generally non-integer; keep
+            // the complex/non-finite/NaN classification but never claim integer.
+            x.isFinite === true && x.isReal === true
+            ? 'finite_real'
+            : roundingFunctionType(x),
+      sgn: ([x, n]) => {
+        // Only reason about the sign in the single-argument (round-to-integer)
+        // case; a precision arg rescales the value and the interval reasoning
+        // below no longer holds.
+        if (n !== undefined) return undefined;
         if (x.isNaN) return 'unsigned';
         if (isNumber(x))
           return x.im! >= 0.5 || x.im! <= -0.5
@@ -2010,13 +2024,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x]) =>
-        apply(
-          x,
-          Math.round,
-          (x) => x.round(),
-          (x) => x.round(0)
-        ),
+      evaluate: ([x, n], { engine: ce }) => {
+        const roundToInteger = (v: Expression) =>
+          apply(
+            v,
+            Math.round,
+            (v) => v.round(),
+            (v) => v.round(0)
+          );
+        if (n === undefined) return roundToInteger(x);
+        // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places.
+        if (!isNumber(n) || n.isFinite !== true) return undefined;
+        const factor = ce.number(10).pow(n);
+        const scaled = roundToInteger(x.mul(factor));
+        return scaled === undefined ? undefined : scaled.div(factor);
+      },
     },
 
     /** Heaviside step function: H(x) = 0 for x < 0, 1/2 for x = 0, 1 for x > 0 */

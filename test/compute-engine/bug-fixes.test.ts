@@ -238,4 +238,51 @@ describe('Playground regressions', () => {
       expect(placeholder.type.toString()).toBe('unknown');
     });
   });
+
+  describe('parse() must not blow up exponentially on repeated `]`', () => {
+    // The reversed-bracket ISO interval `]a, b[` opens on `]` — a token that
+    // also closes ordinary index brackets (`a[6]`). A stray `]` therefore
+    // speculatively parsed as an interval open, and because the body parse was
+    // unbounded and re-entrant, each of the many `]` tokens in input like
+    // `a[6]a[6]…` fanned out another full-tail parse: exponential (a garbage
+    // LaTeX string a few hundred code points long hung the parser for tens of
+    // seconds). Reported by Tycho (Gemini-Nano on-device eval output scoring).
+    test('reversed-bracket interval notation still parses', () => {
+      const ce = new ComputeEngine();
+      expect(ce.parse(']0, 1[', { canonical: false }).json).toEqual([
+        'Interval',
+        ['Open', 0],
+        ['Open', 1],
+      ]);
+      expect(ce.parse(']a, b[', { canonical: false }).json).toEqual([
+        'Interval',
+        ['Open', 'a'],
+        ['Open', 'b'],
+      ]);
+    });
+
+    test('index bracket after a symbol still parses', () => {
+      const ce = new ComputeEngine();
+      expect(ce.parse('a[6]', { canonical: false }).json).toEqual([
+        'At',
+        'a',
+        6,
+      ]);
+      expect(ce.parse('a[b=c]', { canonical: false }).json).toEqual([
+        'At',
+        'a',
+        ['Equal', 'b', 'c'],
+      ]);
+    });
+
+    test('repeated `]` groups parse in polynomial time', () => {
+      const ce = new ComputeEngine();
+      const start = Date.now();
+      // 200 repeats of a symbol-indexing group — every group ends in `]`.
+      // Before the fix this was tens of seconds even at ~14 groups.
+      const expr = ce.parse('a[b=c]'.repeat(200), { canonical: false });
+      expect(expr.isValid).toBe(true);
+      expect(Date.now() - start).toBeLessThan(5_000);
+    });
+  });
 });

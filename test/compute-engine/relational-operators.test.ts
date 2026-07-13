@@ -400,3 +400,48 @@ describe('Chained NotEqual (pairwise, not all-distinct)', () => {
     ]);
   });
 });
+
+describe('Equal / NotEqual broadcast over a named list operand (Tycho)', () => {
+  // A symbol bound to a list must broadcast the same whether it appears bare
+  // (`R`) or inside a function (`R^2`, which evaluates to a list). `Equal` and
+  // `NotEqual` are `lazy`, so before the fix their evaluate handlers saw the
+  // unevaluated `Power(R, 2)` — not a collection — and collapsed the whole
+  // relation to a scalar `False`/`True` instead of broadcasting like `<`.
+  const bce = new ComputeEngine();
+  bce.assign('R', bce.parse('[1,2,3]'));
+
+  it('Equal broadcasts over a named list raised to a power', () => {
+    expect(bce.parse('x^2+y^2 = R^2').evaluate().json).toEqual([
+      'List',
+      ['Equal', ['Add', ['Power', 'x', 2], ['Power', 'y', 2]], 1],
+      ['Equal', ['Add', ['Power', 'x', 2], ['Power', 'y', 2]], 4],
+      ['Equal', ['Add', ['Power', 'x', 2], ['Power', 'y', 2]], 9],
+    ]);
+  });
+
+  it('NotEqual broadcasts over a named list raised to a power', () => {
+    expect(bce.parse('x^2+y^2 \\ne R^2').evaluate().json).toEqual([
+      'List',
+      ['NotEqual', ['Add', ['Power', 'x', 2], ['Power', 'y', 2]], 1],
+      ['NotEqual', ['Add', ['Power', 'x', 2], ['Power', 'y', 2]], 4],
+      ['NotEqual', ['Add', ['Power', 'x', 2], ['Power', 'y', 2]], 9],
+    ]);
+  });
+
+  it('whole-list equality stays a scalar boolean (no runaway broadcast)', () => {
+    expect(bce.parse('[1,2] = [1,2]').evaluate().json).toBe('True');
+    expect(bce.parse('[1,2] = [1,3]').evaluate().json).toBe('False');
+    // Set vs list: representation-independent, still a single boolean.
+    expect(bce.parse('\\lbrace1,2\\rbrace = [1,2]').evaluate().json).toBe(
+      'False'
+    );
+  });
+
+  it('undecidable scalar equality still stays inert', () => {
+    expect(bce.parse('x^2 = 4').evaluate().json).toEqual([
+      'Equal',
+      ['Power', 'x', 2],
+      4,
+    ]);
+  });
+});

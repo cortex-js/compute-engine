@@ -231,7 +231,7 @@ describe('MATH-MODE BOLD', () => {
     expect(check('\\bold{v} = \\begin{pmatrix} 5 \\\\ -3 \\end{pmatrix}'))
       .toMatchInlineSnapshot(`
       box       = ["Equal", "v_bold", ["Matrix", ["List", ["List", 5], ["List", -3]]]]
-      eval-auto = "False"
+      eval-auto = ["v_bold" === 5,"v_bold" === -3]
     `);
   });
 });

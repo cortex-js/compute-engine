@@ -710,13 +710,24 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(() => { const _s = (${a}) * 12.9898; const _v = Math.sin(_s) * 43758.5453; return _v - Math.floor(_v); })()`;
   },
   Round: (args, compile) => {
-    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     // The interpreter rounds half away from zero (Round(-2.5) = -3); JS
     // `Math.round` rounds half toward +∞ (Round(-2.5) = -2). Reconstruct
     // half-away as `sign(x)·round(|x|)`.
-    return BaseCompiler.inlineExpression(
-      '(Math.sign(${x}) * Math.round(Math.abs(${x})))',
-      compile(args[0])
+    if (args.length < 2) {
+      if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+      return BaseCompiler.inlineExpression(
+        '(Math.sign(${x}) * Math.round(Math.abs(${x})))',
+        compile(args[0])
+      );
+    }
+    // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places
+    // (Desmos/spreadsheet form). Bind both operands once.
+    const xv = BaseCompiler.tempVar();
+    const fv = BaseCompiler.tempVar();
+    return (
+      `(() => { const ${fv} = Math.pow(10, ${compile(args[1])}); ` +
+      `const ${xv} = ${compile(args[0])} * ${fv}; ` +
+      `return (Math.sign(${xv}) * Math.round(Math.abs(${xv}))) / ${fv}; })()`
     );
   },
   Square: (args, compile) => {

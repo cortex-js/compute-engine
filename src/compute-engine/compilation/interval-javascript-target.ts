@@ -205,7 +205,17 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       exp
     )}))`;
   },
-  Round: (args, compile) => `_IA.round(${compile(args[0])})`,
+  Round: (args, compile) => {
+    if (args.length < 2) return `_IA.round(${compile(args[0])})`;
+    // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places. Only the
+    // constant-`n` form is representable here (the factor must be a point);
+    // a non-constant precision throws to fail closed to scalar JS.
+    const n = args[1];
+    if (!isNumber(n) || n.im !== 0 || !Number.isInteger(n.re))
+      throw new Error('Round: interval target requires a constant precision');
+    const factor = `_IA.point(${Math.pow(10, n.re)})`;
+    return `_IA.div(_IA.round(_IA.mul(${compile(args[0])}, ${factor})), ${factor})`;
+  },
   Heaviside: (args, compile) => `_IA.heaviside(${compile(args[0])})`,
   Sign: (args, compile) => `_IA.sign(${compile(args[0])})`,
   Sqrt: (args, compile) => `_IA.sqrt(${compile(args[0])})`,

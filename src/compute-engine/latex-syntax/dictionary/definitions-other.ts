@@ -794,10 +794,24 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   // ---------------------------------------------------------------------------
   { latexTrigger: '\\operatorname{count}', parse: 'Length' },
   { latexTrigger: '\\operatorname{length}', parse: 'Length' },
-  // `nCr(n, r)` = binomial coefficient. (No `nPr` alias: CE's `Permutations`
-  // enumerates arrangements of a collection; there is no n!/(n−r)! counting
-  // operator to map it to.)
+  // `nCr(n, r)` = binomial coefficient (Desmos/spreadsheet notation).
   { latexTrigger: '\\operatorname{nCr}', parse: 'Choose' },
+  // `nPr(n, r)` = number of r-permutations of n = n!/(n−r)!. CE's
+  // `Permutations` enumerates arrangements of a collection, so there is no
+  // counting operator to alias to; lower to the equivalent `Choose(n,r)·r!`
+  // (Desmos ships both `nCr` and `nPr`).
+  {
+    latexTrigger: '\\operatorname{nPr}',
+    parse: (parser: Parser) => {
+      const args = parser.parseArguments('enclosure');
+      if (!args || args.length !== 2) return null;
+      return [
+        'Multiply',
+        ['Choose', args[0], args[1]],
+        ['Factorial', args[1]],
+      ] as MathJsonExpression;
+    },
+  },
   { latexTrigger: '\\operatorname{random}', parse: 'Random' },
   { latexTrigger: '\\operatorname{shuffle}', parse: 'Shuffle' },
   { latexTrigger: '\\operatorname{repeat}', parse: 'Repeat' },

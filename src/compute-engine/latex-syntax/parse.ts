@@ -478,6 +478,16 @@ export class _Parser implements Parser {
     this.symbolTable.ids[id] = type;
   }
 
+  // Track whether we're currently speculatively parsing the body of a
+  // reversed-bracket ISO interval (`]a, b[`, open `]`/`\rbrack`). Because that
+  // matchfix opens on `]` — a token that also closes ordinary index brackets
+  // (`a[6]`) — a stray `]` triggers a speculative body parse of everything
+  // ahead. Left unbounded, nested `]` tokens make each speculation spawn
+  // another over the same tail: exponential. A genuine `]a, b[` body holds only
+  // its two endpoints (no inner `]`), so forbidding re-entry caps the nesting
+  // at depth 1 without rejecting any valid interval. See parseEnclosure.
+  private _reversedIntervalDepth = 0;
+
   // Track whether we're inside a quantifier body (ForAll, Exists, etc.)
   // When true, single uppercase letters followed by () are parsed as predicates
   private _quantifierScopeDepth = 0;
@@ -769,12 +779,33 @@ export class _Parser implements Parser {
     boundary: LatexToken[],
     sameTrigger: boolean
   ): boolean {
-    return (
-      !sameTrigger && // Not same open/close (e.g., not ||)
-      boundary.length === 1 && // No prefix like \right
-      (openTrigger === '(' || openTrigger === '\\lparen') && // Only for (
-      (boundary[0] === ']' || boundary[0] === '\\rbrack') // Only when expecting ]
-    );
+    if (sameTrigger) return false; // Not same open/close (e.g., not ||)
+    if (boundary.length !== 1) return false; // No prefix like \right
+
+    // Mismatched-bracket interval notations: when the bounded body parse
+    // failed to land on the close delimiter, the input is not one of these
+    // intervals, so the boundary-less re-parse only over-consumes. Skipping it
+    // also avoids exponential blowup: a stray delimiter that recurs many times
+    // (e.g. the `]` closing each `a[6]` index, whose At-postfix swallows the
+    // `[` this interval def expected as its close) would otherwise re-parse the
+    // whole tail unbounded at every occurrence. A genuine interval matches its
+    // close on the first (bounded) parse and never reaches here.
+
+    // `(a, b]` — `(` open expecting `]` close (e.g. input `()`).
+    if (
+      (openTrigger === '(' || openTrigger === '\\lparen') &&
+      (boundary[0] === ']' || boundary[0] === '\\rbrack')
+    )
+      return true;
+
+    // `]a, b[` — reversed-bracket ISO interval, `]` open expecting `[` close.
+    if (
+      (openTrigger === ']' || openTrigger === '\\rbrack') &&
+      (boundary[0] === '[' || boundary[0] === '\\lbrack')
+    )
+      return true;
+
+    return false;
   }
 
   latex(start: number, end?: number): string {
@@ -1871,6 +1902,20 @@ export class _Parser implements Parser {
     for (const def of defs) {
       this.index = start;
 
+      // Reversed-bracket ISO interval (`]a, b[`): opens on `]`/`\rbrack`, closes
+      // on `[`/`\lbrack`. Its open token also closes ordinary index brackets, so
+      // forbid re-entry while already inside such a speculation (see
+      // `_reversedIntervalDepth`) — this caps nesting at depth 1 and prevents an
+      // exponential fan-out over the tail on input like `a[6]a[6]…`.
+      const isReversedInterval =
+        Array.isArray(def.openTrigger) &&
+        def.openTrigger.length === 1 &&
+        (def.openTrigger[0] === ']' || def.openTrigger[0] === '\\rbrack') &&
+        Array.isArray(def.closeTrigger) &&
+        def.closeTrigger.length === 1 &&
+        (def.closeTrigger[0] === '[' || def.closeTrigger[0] === '\\lbrack');
+      if (isReversedInterval && this._reversedIntervalDepth > 0) continue;
+
       // Pre-check: if no token that could begin a close-delimiter match
       // appears ahead, this def cannot match. Skip without parsing the
       // body — otherwise speculative body parses can compound
@@ -1923,7 +1968,9 @@ export class _Parser implements Parser {
       // 2. Collect the expression in between the delimiters
       const bodyStart = this.index;
       this.skipSpace();
+      if (isReversedInterval) this._reversedIntervalDepth += 1;
       let body = this.parseExpression();
+      if (isReversedInterval) this._reversedIntervalDepth -= 1;
       this.skipSpace();
       const boundary = this._boundaries[this._boundaries.length - 1]?.tokens;
       const matchedBoundary = this.matchBoundary();
@@ -1941,7 +1988,9 @@ export class _Parser implements Parser {
         // Retry parsing without the boundary and look for the closing delimiter.
         this.index = bodyStart;
         this.skipSpace();
+        if (isReversedInterval) this._reversedIntervalDepth += 1;
         body = this.parseExpression();
+        if (isReversedInterval) this._reversedIntervalDepth -= 1;
         this.skipSpace();
         if (!this.matchAll(boundary)) {
           this.index = start;
@@ -1963,7 +2012,9 @@ export class _Parser implements Parser {
           this.removeBoundary();
           this.index = bodyStart;
           this.skipSpace();
+          if (isReversedInterval) this._reversedIntervalDepth += 1;
           body = this.parseExpression();
+          if (isReversedInterval) this._reversedIntervalDepth -= 1;
           this.skipSpace();
           if (!this.matchAll(boundary)) {
             this.index = start;

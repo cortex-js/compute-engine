@@ -2530,3 +2530,38 @@ describe('Transcendentals stay symbolic under evaluate (ROADMAP B3)', () => {
     expect(ev('\\arcsin(1/3)')).toBe('arcsin(1/3)');
   });
 });
+
+describe('nPr / nCr (Desmos combinatorics notation)', () => {
+  const n = (s: string) => ce.parse(s).N().valueOf();
+  it('nCr is the binomial coefficient', () => {
+    expect(n('\\operatorname{nCr}(5,2)')).toBe(10);
+  });
+  it('nPr counts r-permutations of n = n!/(n−r)!', () => {
+    expect(ce.parse('\\operatorname{nPr}(5,2)').json).toEqual([
+      'Multiply',
+      ['Choose', 5, 2],
+      ['Factorial', 2],
+    ]);
+    expect(n('\\operatorname{nPr}(5,2)')).toBe(20);
+    expect(n('\\operatorname{nPr}(10,3)')).toBe(720);
+    expect(n('\\operatorname{nPr}(5,0)')).toBe(1);
+    expect(n('\\operatorname{nPr}(5,5)')).toBe(120);
+  });
+});
+
+describe('Round with an optional precision argument (Desmos/spreadsheet)', () => {
+  const n = (s: string) => ce.parse(s).N().valueOf();
+  it('rounds to the nearest integer without the precision arg', () => {
+    expect(n('\\operatorname{round}(2.567)')).toBe(3);
+    expect(n('\\operatorname{round}(-2.5)')).toBe(-3); // half away from zero
+  });
+  it('rounds to n decimal places with the precision arg', () => {
+    expect(n('\\operatorname{round}(2.567, 2)')).toBe(2.57);
+    expect(n('\\operatorname{round}(-2.567, 2)')).toBe(-2.57);
+    expect(n('\\operatorname{round}(3.14159, 4)')).toBe(3.1416);
+    expect(n('\\operatorname{round}(1234.5, -2)')).toBe(1200);
+  });
+  it('does not manufacture an Error operand for the 2-arg form', () => {
+    expect(ce.parse('\\operatorname{round}(2.567, 2)').isValid).toBe(true);
+  });
+});

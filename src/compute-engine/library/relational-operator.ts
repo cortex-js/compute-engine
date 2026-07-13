@@ -288,8 +288,27 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       return undefined;
     },
 
-    evaluate: (ops, { engine: ce }) => {
-      if (ops.length < 2) return ce.True;
+    evaluate: (rawOps, { engine: ce, numericApproximation }) => {
+      if (rawOps.length < 2) return ce.True;
+      // This operator is `lazy` (so its `canonical` handler sees raw,
+      // direction-intact operands for chain decomposition). `lazy` also skips
+      // evaluating the arguments before this handler runs, so evaluate them
+      // here — otherwise a compound operand like `R^2` (with `R = [1,2,3]`)
+      // never folds to the list `[1,4,9]`.
+      const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
+      // Element-wise broadcast when an operand evaluated to a collection, so a
+      // named list behaves like a literal one: `x^2+y^2 = R^2` broadcasts to a
+      // list of `Equal`s, matching the inequality operators (which already
+      // broadcast via the same helper) and Desmos semantics (Tycho report).
+      // Restricted to the list-vs-scalar case: when two or more operands are
+      // collections, whole-list equality stays a scalar boolean — broadcasting
+      // there would also recurse forever, since re-dispatching `Equal` on the
+      // same two collections re-enters this handler (`skipBroadcastForVectorOps`
+      // enforces the same rule for the engine-level broadcast).
+      if (ops.filter((op) => op.isCollection).length < 2) {
+        const bc = broadcastComparison(ce, 'Equal', ops, numericApproximation);
+        if (bc) return bc;
+      }
       let lhs: Expression | undefined = undefined;
       for (const arg of ops) {
         if (!lhs) lhs = arg;
@@ -359,6 +378,14 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // `Less` handler): evaluate the operands here so compound operands fold.
       const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
       if (ops.length < 2) return ce.False;
+      // Broadcast over a list operand that only appeared after evaluation (e.g.
+      // `R^2` with `R = [1,2,3]`), matching `Equal` and the literal-list form;
+      // list-vs-scalar only (see `Equal`'s handler for why 2+ collections stay
+      // a scalar boolean and would otherwise recurse).
+      if (ops.filter((op) => op.isCollection).length < 2) {
+        const bc = broadcastComparison(ce, 'NotEqual', ops, numericApproximation);
+        if (bc) return bc;
+      }
       let lhs: Expression | undefined = undefined;
       for (const arg of ops!) {
         if (!lhs) lhs = arg;

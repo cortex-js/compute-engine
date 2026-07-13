@@ -180,6 +180,43 @@
   `compile(expr, { to: 'interval-glsl' })` now throws an unregistered-target
   error.
 
+### Parsing
+
+- **`ce.parse()` no longer blows up on repeated `\command[opt]{}` groups.**
+  Adjacent bracketed groups — a garbage `\begin{tikzpicture}katu[scale=0.6]{}…`
+  run, or even plain index notation `a[6]a[6]…` — triggered exponential-time
+  backtracking, so a few-hundred-character string could hang the parser for tens
+  of seconds (and `timeLimit`, which bounds evaluation, did not stop it). The
+  reversed-bracket ISO interval notation `]a, b[` opens on `]`, the same token
+  that closes an index bracket, so every stray `]` speculatively re-parsed the
+  rest of the input as an interval body, nesting exponentially. Parsing is now
+  polynomial; the interval (`]0, 1[`) and indexing (`a[6]`) notations are
+  unchanged.
+- **`\operatorname{nPr}(n, r)` now has a definition.** Matching
+  `\operatorname{nCr}` (the binomial coefficient), the Desmos
+  permutation-count notation lowers to `Choose(n, r)·r!` (= n!/(n−r)!), so
+  `nPr(5, 2)` evaluates to `20`. Previously it parsed to an inert symbol and
+  stayed symbolic under `N()`, silently producing `NaN` in a compiled function.
+
+### Arithmetic
+
+- **`Round` accepts an optional precision argument.** `Round(x, n)` rounds `x`
+  to `n` decimal places — `Round(2.567, 2) → 2.57`, `Round(1234.5, −2) → 1200`
+  — matching the Desmos/spreadsheet `round(x, n)` convention. Previously the
+  second argument produced an `unexpected-argument` error. The single-argument
+  round-to-integer form is unchanged, and the two-argument form compiles on the
+  `javascript` and `interval-js` targets.
+
+### Relational Operators
+
+- **`Equal` and `NotEqual` broadcast over a named list operand.** With
+  `R = [1, 2, 3]`, `x² + y² = R²` now broadcasts to a list of three
+  element-wise equations — matching the literal-list form
+  (`x² + y² = [1, 2, 3]`) and the inequality operators (`<`, `≤`, …), which
+  already broadcast. Previously the named form collapsed to a single `False`.
+  Whole-list equality, where two or more operands are collections
+  (`[1, 2] = [1, 2]`), still returns a single boolean.
+
 ## 0.76.0 _2026-07-11_
 
 ### Programming and Collections
