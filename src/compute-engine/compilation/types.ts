@@ -1,4 +1,5 @@
 import type { MathJsonSymbol } from '../../math-json/types.js';
+import type { Interval, IntervalResult } from '../interval/types.js';
 
 /**
  * Source code in the target language
@@ -228,6 +229,35 @@ export interface LanguageTarget<
     options?: CompilationOptions<Expr>
   ): CompilationResult<T, R, V>;
 }
+
+/**
+ * The `interval-js` target, typed concretely: its compiled `run` accepts
+ * `number | Interval` variables (a plain number is auto-converted to a point
+ * interval) and returns an `IntervalResult`. Returned by
+ * `getCompilationTarget("interval-js")` so callers get this without a cast.
+ *
+ * Defined here (not in a `types-*.ts` file) because the layering rules forbid
+ * the type-definition layer from importing `interval/`; `compilation/` may.
+ */
+export type IntervalJsCompilationTarget<Expr = unknown> = LanguageTarget<
+  Expr,
+  'interval-js',
+  IntervalResult,
+  number | Interval
+>;
+
+/**
+ * The `javascript` target, typed concretely: its compiled `run` accepts
+ * `number | ComplexResult` variables (plain reals or complex domain-coloring
+ * inputs) and returns `number | ComplexResult`. Returned by
+ * `getCompilationTarget("javascript")`.
+ */
+export type JavaScriptCompilationTarget<Expr = unknown> = LanguageTarget<
+  Expr,
+  'javascript',
+  number | ComplexResult,
+  number | ComplexResult
+>;
 
 /**
  * Options for compilation

@@ -49,9 +49,9 @@ import type {
 import type {
   LanguageTarget,
   CompilationResult,
-  ComplexResult,
+  IntervalJsCompilationTarget,
+  JavaScriptCompilationTarget,
 } from './compilation/types.js';
-import type { Interval, IntervalResult } from './interval/types.js';
 
 export type { RulePurpose } from './types-kernel-evaluation.js';
 
@@ -370,19 +370,10 @@ export interface IComputeEngine {
    */
   getCompilationTarget(
     name: 'interval-js'
-  ):
-    | LanguageTarget<Expression, 'interval-js', IntervalResult, number | Interval>
-    | undefined;
+  ): IntervalJsCompilationTarget<Expression> | undefined;
   getCompilationTarget(
     name: 'javascript'
-  ):
-    | LanguageTarget<
-        Expression,
-        'javascript',
-        number | ComplexResult,
-        number | ComplexResult
-      >
-    | undefined;
+  ): JavaScriptCompilationTarget<Expression> | undefined;
   getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
 
   /** @internal Return the names of all registered compilation targets. */
