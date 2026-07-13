@@ -261,9 +261,7 @@ function sqrtRadicand(t: Expression): Expression | null {
       if (p > 0 === q > 0) {
         const num = p * p * BigInt(nv.radical);
         const den = q * q;
-        return den === 1n
-          ? t.engine.number(num)
-          : t.engine.number([num, den]);
+        return den === 1n ? t.engine.number(num) : t.engine.number([num, den]);
       }
     }
   }
