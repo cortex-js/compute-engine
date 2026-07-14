@@ -1655,6 +1655,74 @@ describe('LIMIT', () => {
       ]);
     });
   });
+
+  describe('ONE-SIDED LIMITS', () => {
+    // Regression: `0^+`/`0^-` on the limit point parse as
+    // `PseudoInverse(0)`/`Superminus(0)` (generic superscript postfix); in
+    // the limit-point position they are direction markers and must unwrap
+    // into `Limit`'s direction operand.
+    test('1/x as x → 0⁺ is +∞', () =>
+      expect(
+        engine.parse('\\lim_{x\\to 0^+} \\frac{1}{x}').evaluate().toString()
+      ).toBe('+oo'));
+
+    test('1/x as x → 0⁻ is −∞', () =>
+      expect(
+        engine.parse('\\lim_{x\\to 0^-} \\frac{1}{x}').evaluate().toString()
+      ).toBe('-oo'));
+
+    test('braced marker ^{+} parses the same', () =>
+      expect(
+        engine.parse('\\lim_{x\\to 0^{+}} \\frac{1}{x}').evaluate().toString()
+      ).toBe('+oo'));
+
+    test('ln x as x → 0⁺ is −∞', () =>
+      expect(
+        engine.parse('\\lim_{x\\to 0^+} \\ln x').evaluate().toString()
+      ).toBe('-oo'));
+
+    test('rule-arrow function-call form carries the direction', () => {
+      expect(
+        engine
+          .parse('\\mathrm{Limit}(\\frac{1}{x}, x\\to 0^+)')
+          .evaluate()
+          .toString()
+      ).toBe('+oo');
+      expect(
+        engine
+          .parse('\\mathrm{Limit}(\\frac{1}{x}, x\\to 0^-)')
+          .evaluate()
+          .toString()
+      ).toBe('-oo');
+    });
+
+    test('two-sided limit is unchanged', () =>
+      expect(
+        engine
+          .parse('\\lim_{x\\to 0} \\frac{\\sin x}{x}')
+          .evaluate()
+          .toString()
+      ).toBe('1'));
+
+    test('direction serializes as a ^{+}/^{-} marker (round-trip)', () => {
+      expect(engine.parse('\\lim_{x\\to 0^+} \\frac{1}{x}').latex).toBe(
+        '\\lim_{x\\to0^{+}}\\frac{1}{x}'
+      );
+      expect(engine.parse('\\lim_{x\\to 0^-} \\frac{1}{x}').latex).toBe(
+        '\\lim_{x\\to0^{-}}\\frac{1}{x}'
+      );
+    });
+
+    test('a symbolic point with a direction round-trips', () =>
+      expect(engine.parse('\\lim_{x\\to a^+} \\frac{1}{x-a}').latex).toBe(
+        '\\lim_{x\\to a^{+}}\\frac{1}{x-a}'
+      ));
+
+    test('superscript +/− outside a limit point keep their meanings', () => {
+      expect(engine.parse('A^+').json).toEqual(['PseudoInverse', 'A']);
+      expect(engine.parse('3^-').json).toEqual(['Superminus', 3]);
+    });
+  });
 });
 
 describe('DOUBLY-INFINITE SUMS', () => {

@@ -979,28 +979,56 @@ volumes
       signature: '(function, point:number, direction:number?) -> number',
       canonical: (ops, { engine }) => {
         // Rule-arrow form `Limit(expr, x -> x0)`: the second operand is a held
-        // (raw) `To(var, point)`. Rewrite to the Wolfram 3-arg form
-        // `Limit(expr, var, point)` handled below. (One-sided arrows like
-        // `x -> 0^+` are not supported — `0^+` parses to `PseudoInverse(0)`,
-        // which no limit path recognizes, so we leave them untouched.)
+        // (raw) `To(var, point)`. Rewrite to the Wolfram-style form
+        // `Limit(expr, var, point[, direction])` handled below. A `^+`/`^-`
+        // direction marker on the point parses as `PseudoInverse(point)` /
+        // `Superminus(point)` (generic superscript postfix); in the
+        // limit-point position those shapes are direction markers, matching
+        // the `\lim_{x \to 0^+}` parser: unwrap them to the direction operand
+        // (1 = from above, -1 = from below).
         if (
           ops.length === 2 &&
           isFunction(ops[1], 'To') &&
           isSymbol(ops[1].op1)
         ) {
-          ops = [ops[0], ops[1].op1, ops[1].op2];
+          let point = ops[1].op2;
+          let direction: Expression | undefined = undefined;
+          if (isFunction(point, 'PseudoInverse') && point.nops === 1) {
+            direction = engine.number(1);
+            point = point.op1;
+          } else if (isFunction(point, 'Superminus') && point.nops === 1) {
+            direction = engine.number(-1);
+            point = point.op1;
+          }
+          ops = direction
+            ? [ops[0], ops[1].op1, point, direction]
+            : [ops[0], ops[1].op1, point];
         }
         const [f, x, dir] = ops;
-        // Wolfram-style 3-arg form `Limit(expr, var, point)`: when the middle
-        // operand is a symbol that is a free variable of the expression, bind
-        // it explicitly as the expansion variable and treat the third operand
-        // as the point. This canonicalizes to the same internal representation
-        // as the 2-arg form `Limit(expr, point)` (which infers the variable).
-        if (ops.length === 3 && f && isSymbol(x)) {
+        // Wolfram-style form `Limit(expr, var, point[, direction])`: when the
+        // middle operand is a symbol that is a free variable of the
+        // expression, bind it explicitly as the expansion variable and treat
+        // the third operand as the point. This canonicalizes to the same
+        // internal representation as the 2-arg form `Limit(expr, point)`
+        // (which infers the variable). A first operand that is already a
+        // `Function` literal is NOT this form: its variable is bound in the
+        // literal, so a symbol in second position is a (symbolic) limit
+        // point — e.g. `Limit(Function(1/(x-a), x), a, 1)` from
+        // `\lim_{x \to a^+}` — not the expansion variable.
+        if (
+          (ops.length === 3 || ops.length === 4) &&
+          f &&
+          isSymbol(x) &&
+          !isFunction(f, 'Function')
+        ) {
           if (f.canonical.unknowns.includes(x.symbol)) {
             const fn = canonicalFunctionLiteralArguments(engine, [f, x]);
             if (!fn) return null;
-            return engine._fn('Limit', [fn, ops[2].canonical]);
+            return engine._fn('Limit', [
+              fn,
+              ops[2].canonical,
+              ...(ops.length === 4 ? [ops[3].canonical] : []),
+            ]);
           }
         }
         const fn = canonicalFunctionLiteral(f);

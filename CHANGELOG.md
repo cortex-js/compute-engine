@@ -81,9 +81,8 @@
   stage, `x^2 \rhd \operatorname{D}` → `2x`).
 - **`Limit(f, x \to x_0)` rule-arrow form.**
   `\mathrm{Limit}(\frac{\sin x}{x}, x\to 0)` → `1`, equivalent to
-  `\lim_{x\to 0}`. (One-sided arrows such as `x\to 0^+` are not yet
-  recognized — the direction notation currently has no working parse even in
-  the native `\lim` form.)
+  `\lim_{x\to 0}`. One-sided arrows carry the direction:
+  `\mathrm{Limit}(\frac{1}{x}, x\to 0^+)` → `+∞`.
 - **`Simplify(expr, assumptions)`.** An optional second argument supplies one
   or more boolean assumptions (a bare predicate, or a `List`/`And` of them)
   that hold only for the duration of the simplification:
@@ -102,6 +101,16 @@
 
 ### LaTeX Parsing
 
+- **One-sided limits: `\lim_{x\to 0^+}` and `\lim_{x\to 0^-}`.** The `^+`/`^-`
+  direction marker on a limit point was previously captured by the generic
+  superscript entries as `PseudoInverse(0)` / `Superminus(0)`, making every
+  one-sided limit unevaluatable. The marker now maps to `Limit`'s direction
+  operand (`["Limit", f, 0, 1]` / `…, -1]`), which the limit evaluator already
+  supported: `\lim_{x\to 0^+} \frac{1}{x}` → `+∞`,
+  `\lim_{x\to 0^-} \frac{1}{x}` → `-∞`, `\lim_{x\to 0^+} \ln x` → `-∞`.
+  Directions serialize back as `^{+}`/`^{-}` (round-trip), symbolic points
+  (`\lim_{x\to a^+}`) keep a correct representation, and superscript `+`/`-`
+  everywhere else (`A^+` pseudoinverse, `3^-` signed value) is unaffected.
 - **`\mapsto` lambda bodies extend through comparisons.**
   `n \mapsto n > 102` now parses as `n \mapsto (n > 102)` — previously the
   body closed at the comparison, mis-parsing as `(n \mapsto n) > 102`, which

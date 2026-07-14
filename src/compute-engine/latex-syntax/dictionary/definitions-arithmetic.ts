@@ -1982,21 +1982,39 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         parser.pruneUndeclared([limitVar], diagCp, bodyStartToken, [
           [declStartToken, bodyStartToken],
         ]);
-      return [
-        'Limit',
-        ['Function', expr, operand(base, 1)],
-        operand(base, 2),
-      ] as MathJsonExpression;
+      // One-sided limits: a `^+`/`^-` on the limit point (`x \to 0^+`) is
+      // grabbed by the generic superscript postfix entries as
+      // `PseudoInverse(0)` / `Superminus(0)` before this parser sees it. In
+      // the limit-point position those shapes are direction markers, not
+      // matrix/sign operations: unwrap them into `Limit`'s direction operand
+      // (1 = from above, -1 = from below).
+      let point = operand(base, 2);
+      let direction: 1 | -1 | undefined = undefined;
+      if (operator(point) === 'PseudoInverse' && nops(point) === 1) {
+        direction = 1;
+        point = operand(point, 1);
+      } else if (operator(point) === 'Superminus' && nops(point) === 1) {
+        direction = -1;
+        point = operand(point, 1);
+      }
+      const fn = ['Function', expr, operand(base, 1)] as MathJsonExpression;
+      if (direction === undefined)
+        return ['Limit', fn, point] as MathJsonExpression;
+      return ['Limit', fn, point, direction] as MathJsonExpression;
     },
     serialize: (serializer, expr) => {
       const fn = operand(expr, 1);
       const fnVar = operand(fn, 2);
       const to = operand(expr, 2);
+      // A direction operand (1 / -1) serializes as a `^{+}` / `^{-}` marker
+      // on the limit point.
+      const dir = machineValue(operand(expr, 3));
+      const dirMarker = dir === 1 ? '^{+}' : dir === -1 ? '^{-}' : '';
       return joinLatex([
         '\\lim_{',
         serializer.serialize(fnVar),
         '\\to',
-        serializer.serialize(to),
+        serializer.serialize(to) + dirMarker,
         '}',
         serializer.serialize(operand(fn, 1)),
       ]);
