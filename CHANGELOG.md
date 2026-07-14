@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.78.1 _2026-07-14_
 
 ### Parse Diagnostics
 
