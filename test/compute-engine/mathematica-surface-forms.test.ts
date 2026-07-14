@@ -87,6 +87,54 @@ describe('\\mathrm{D} function-call derivative', () => {
   });
 });
 
+describe('Table (alias for Tabulate) with iterator specs', () => {
+  test('Table(i^2, {i, 1, 5}) tabulates the squares', () => {
+    expect(evalStr('\\mathrm{Table}(i^2, \\{i, 1, 5\\})')).toBe(
+      '[1,4,9,16,25]'
+    );
+  });
+
+  test('Table with a step: {i, 0, 10, 2}', () => {
+    expect(evalStr('\\mathrm{Table}(i, \\{i, 0, 10, 2\\})')).toBe(
+      '[0,2,4,6,8,10]'
+    );
+  });
+
+  test('Table with a non-unit lower bound: {i, 3, 5}', () => {
+    expect(evalStr('\\mathrm{Table}(i^2, \\{i, 3, 5\\})')).toBe('[9,16,25]');
+  });
+
+  test('Table with two specs is a nested table (row order)', () => {
+    expect(evalStr('\\mathrm{Table}(i j, \\{i, 1, 2\\}, \\{j, 1, 3\\})')).toBe(
+      '[[1,2,3],[2,4,6]]'
+    );
+  });
+
+  test('alias form: Table(fn, n) matches Tabulate(fn, n)', () => {
+    const fn = ['Function', ['Square', '_'], '_'];
+    expect(
+      ce
+        .box(['Table', fn, 5])
+        .evaluate()
+        .isSame(ce.box(['Tabulate', fn, 5]).evaluate())
+    ).toBe(true);
+  });
+
+  test('searchDefinitions surfaces Tabulate for "table"', () => {
+    expect(ce.searchDefinitions('table').map((r) => r.id)).toContain(
+      'Tabulate'
+    );
+  });
+
+  test('malformed iterator spec stays inert', () => {
+    // The `{i, n}` two-element shorthand is deliberately out of scope: it must
+    // not be guessed as `{i, 1, n}`. The expression stays an inert `Table`.
+    const expr = ce.box(['Table', 'i', ['Set', 'i', 5]]);
+    expect(expr.operator).toBe('Table');
+    expect(expr.evaluate().operator).toBe('Table');
+  });
+});
+
 describe('Limit with a rule-arrow argument', () => {
   test('Limit(f, x -> x0) evaluates the two-sided limit', () => {
     expect(evalStr('\\mathrm{Limit}(\\frac{\\sin x}{x}, x\\to 0)')).toBe('1');

@@ -1126,7 +1126,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\mapsto'],
     kind: 'infix',
     precedence: ARROW_PRECEDENCE, // MathML rightwards arrow
-    parse: (parser: Parser, lhs: MathJsonExpression, _until) => {
+    parse: (parser: Parser, lhs: MathJsonExpression, until) => {
       // Diagnostics: the parameter(s) are the (already-parsed) left operand.
       // `operandDiagnosticCheckpoint` points just before it, so pruning covers
       // both the parameter references and the body below.
@@ -1143,8 +1143,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         params = [symbol(lhs)!];
       }
 
+      // The body extends as far as possible — through comparisons and logical
+      // connectives (`n \mapsto n > 102`, `n \mapsto n > 2 \wedge n < 5`) —
+      // stopping only at the comma/sequence level (20), so a lambda in an
+      // argument list does not swallow the following `, arg`. Parsing the body
+      // at ARROW_PRECEDENCE (270) instead would close the lambda before a
+      // comparison (245), mis-parsing `n \mapsto n > 102` as
+      // `(n \mapsto n) > 102`.
       let rhs =
-        parser.parseExpression({ minPrec: ARROW_PRECEDENCE }) ?? 'Nothing';
+        parser.parseExpression({ ...(until ?? {}), minPrec: 21 }) ?? 'Nothing';
       if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? 'Nothing';
       if (operator(rhs) === 'Sequence') rhs = ['Block', ...operands(rhs)];
 

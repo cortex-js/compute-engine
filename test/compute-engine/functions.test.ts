@@ -333,3 +333,44 @@ describe('N() through user-defined function application', () => {
         .isExact
     ).toBe(false));
 });
+
+describe('MAPSTO BODY PRECEDENCE', () => {
+  // The `\mapsto` body extends through comparisons and logical connectives,
+  // stopping only at the comma/sequence level. Regression: at the previous
+  // rhs floor (ARROW_PRECEDENCE), `n \mapsto n > 102` mis-parsed as
+  // `(n \mapsto n) > 102`.
+  test('comparison in body', () =>
+    // (canonical form: `Block`-wrapped body, `n > 102` normalized to
+    // `Less(102, n)`)
+    expect(engine.parse('n \\mapsto n > 102').json).toEqual([
+      'Function',
+      ['Block', ['Less', 102, 'n']],
+      'n',
+    ]));
+
+  test('logical connective in body', () =>
+    expect(engine.parse('n \\mapsto n > 2 \\wedge n < 5').json).toEqual([
+      'Function',
+      ['Block', ['And', ['Less', 2, 'n'], ['Less', 'n', 5]]],
+      'n',
+    ]));
+
+  test('lambda in non-final argument does not swallow the next argument', () =>
+    expect(
+      engine.parse(
+        '\\mathrm{Map}(n \\mapsto n > 102, \\mathrm{Range}(100,105))'
+      ).json
+    ).toEqual([
+      'Map',
+      ['Function', ['Greater', 'n', 102], 'n'],
+      ['Range', 100, 105],
+    ]));
+
+  test('filter with unparenthesized predicate evaluates', () =>
+    expect(
+      engine
+        .parse('\\mathrm{Filter}(\\mathrm{Range}(100,105), n \\mapsto n > 102)')
+        .evaluate()
+        .toString()
+    ).toBe('[103,104,105]'));
+});

@@ -64,6 +64,15 @@
   strictly positional — a brace set anywhere else keeps its literal set
   meaning — and operates on held (raw) operands, so the index symbol is scoped
   like a binder (an `i` index does not collapse to the imaginary unit).
+- **New `Table` operator, an alias for `Tabulate`.**
+  `\mathrm{Table}(i^2, \{i, 1, 5\})` → `[1, 4, 9, 16, 25]`, with general
+  iterator bounds and step (`\mathrm{Table}(i, \{i, 0, 10, 2\})` →
+  `[0, 2, 4, 6, 8, 10]`) and multiple iterator specs for nested dimensions
+  (`\mathrm{Table}(i j, \{i, 1, 2\}, \{j, 1, 3\})` → `[[1,2,3],[2,4,6]]`,
+  first spec outermost). `\{v, 1, n\}` specs canonicalize directly to
+  `Tabulate`; general bounds map to `Map` over `Range`. `Tabulate` also
+  gained the `table` search keyword so `ce.searchDefinitions('table')` finds
+  it.
 - **`\mathrm{D}(f, x)` differentiation.** Applied to an argument list,
   `\mathrm{D}` / `\operatorname{D}` is the derivative operator:
   `\mathrm{D}(x^3, x)` → `3x^2`, `\mathrm{D}(x^2 y, x, y)` takes sequential
@@ -93,6 +102,14 @@
 
 ### LaTeX Parsing
 
+- **`\mapsto` lambda bodies extend through comparisons.**
+  `n \mapsto n > 102` now parses as `n \mapsto (n > 102)` — previously the
+  body closed at the comparison, mis-parsing as `(n \mapsto n) > 102`, which
+  made unparenthesized predicates like
+  `\mathrm{Filter}(\mathrm{Range}(100,105), n \mapsto n > 102)` fail. The
+  body now extends through comparisons and logical connectives
+  (`n \mapsto n > 2 \wedge n < 5`), stopping at the comma/sequence level, so
+  a lambda in an argument list still does not swallow the following argument.
 - **Ellipsis ranges in set braces.** `\{1,\dots,9\}` now parses to
   `["Range", 1, 9]`, matching the existing bracket form `\lbrack1,\dots,9\rbrack`;
   the stepped form `\{0, 2, \dots, 10\}` yields `["Range", 0, 10, 2]`.

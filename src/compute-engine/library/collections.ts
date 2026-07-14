@@ -2323,6 +2323,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Tabulate: {
     description:
       'Create a collection by applying a function to each index in the specified dimensions.',
+    keywords: ['table'],
     // @todo: do a lazy version of this (implemented as a collection handler)
     complexity: 8200,
 
@@ -2382,6 +2383,87 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       };
 
       return ce.expr(fillArray(dims as number[], Array(dims.length).fill(0)));
+    },
+  },
+
+  Table: {
+    description: [
+      'An alias for `Tabulate` (the preferred name) that additionally accepts',
+      'Mathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or',
+      '`Table(i, {i, lo, hi, step})`.',
+    ],
+    complexity: 8200,
+
+    // Lazy so the iterator `Set`s are held (raw): their index symbols are not
+    // canonicalized (which would fold `i` to the imaginary unit) before this
+    // handler can reinterpret them as iterator specs.
+    lazy: true,
+    signature: '(function, integer, integer?) -> collection',
+    canonical: (ops, { engine: ce }) => {
+      const specs = ops.slice(1);
+
+      // Alias form: no iterator `Set` present (e.g. `Table(fn, 5)`). Delegate
+      // to `Tabulate`, which — also being lazy — canonicalizes the raw held
+      // ops through its own canonical handler.
+      if (!specs.some((op) => isFunction(op, 'Set')))
+        return ce.function('Tabulate', ops);
+
+      // Iterator form: EVERY operand after the body must be a valid iterator
+      // triple `{sym, lo, hi}` or `{sym, lo, hi, step}` — the same shape
+      // validation as the `Set` branch of `canonicalIndexingSet`. A malformed
+      // spec (non-symbol first element, wrong arity, or a mix of `Set` and
+      // non-`Set` operands) keeps the strict posture: return `null` so the
+      // expression stays inert rather than guessing a bound.
+      type Spec = {
+        index: Expression;
+        lo: Expression;
+        hi: Expression;
+        step?: Expression;
+      };
+      const parsed: Spec[] = [];
+      for (const op of specs) {
+        if (!isFunction(op, 'Set')) return null;
+        const setOps = op.ops ?? [];
+        const idx = setOps[0];
+        if (!idx || !isSymbol(idx) || setOps.length < 3 || setOps.length > 4)
+          return null;
+        parsed.push({
+          index: idx,
+          lo: setOps[1],
+          hi: setOps[2],
+          step: setOps.length === 4 ? setOps[3] : undefined,
+        });
+      }
+
+      // All-ones fast path: every spec is exactly `{v, 1, n}` (lower bound the
+      // literal integer 1, no step). Canonicalize to
+      // `Tabulate(Function(expr, v₁, …), n₁, …)`; `Tabulate` applies the
+      // function to 1-based indices, matching the iterator semantics.
+      if (parsed.every((s) => s.step === undefined && s.lo.isSame(1))) {
+        const fn = ce._fn('Function', [ops[0], ...parsed.map((s) => s.index)], {
+          canonical: false,
+        });
+        return ce.function('Tabulate', [fn, ...parsed.map((s) => s.hi)]);
+      }
+
+      // General `lo`/`step` case: nested `Map` over `Range`. Fold from the LAST
+      // spec inward so the FIRST spec is the outermost dimension (Mathematica
+      // row order: `Table[i·j, {i,1,2}, {j,1,3}]` → `[[1,2,3],[2,4,6]]`). Build
+      // the tree raw and canonicalize it in a single top-down pass so each
+      // `Function`'s parameters shadow their index symbols (keeping the inner
+      // body symbolic).
+      let acc: Expression = ops[0];
+      for (let k = parsed.length - 1; k >= 0; k--) {
+        const s = parsed[k];
+        const range = ce._fn(
+          'Range',
+          s.step ? [s.lo, s.hi, s.step] : [s.lo, s.hi],
+          { canonical: false }
+        );
+        const fn = ce._fn('Function', [acc, s.index], { canonical: false });
+        acc = ce._fn('Map', [range, fn], { canonical: false });
+      }
+      return acc.canonical;
     },
   },
 
