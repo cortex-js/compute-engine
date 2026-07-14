@@ -18,7 +18,13 @@ module.exports = {
     //, '<rootDir>/../src'
   ],
   setupFilesAfterEnv: ['../test/jest-config.ts'],
-  reporters: ['jest-silent-reporter'],
+  // The silent reporter prints only failure details — no per-test lines, but
+  // also no final counts, so a full-suite run that fails can end with nothing
+  // after the last failure block (and `jest | tail`/`| grep` pipes lose the
+  // exit code too). The built-in `summary` reporter adds exactly one
+  // unambiguous `Test Suites:/Tests:/Snapshots:` block at the end of every
+  // run, pass or fail.
+  reporters: ['jest-silent-reporter', 'summary'],
   transformIgnorePatterns: ['node_modules/(?!(complex-esm)/)'],
   // Source imports carry explicit `.js` extensions (nodenext-style) that
   // resolve to `.ts` files under bundler resolution. Strip the extension so
