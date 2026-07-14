@@ -506,15 +506,19 @@ describe('bound-variable post-filter + assert (follow-up item 2)', () => {
         'x \\mapsto x^2',
         '\\lim_{x \\to 0} x',
         'f(x) := x^2',
+        // Same-named free limit: the deliberately-kept lower-bound `x` reads
+        // bound-only in the canonical result (the name collides with the
+        // dummy), but the binder registered it via `onBoundVariable`, so the
+        // post-check must stay silent.
+        '\\int_x^1 x \\, dx',
+        '\\lim_{x \\to y} x',
       ]) {
         new ComputeEngine().parse(latex, { diagnostics: true });
       }
     } finally {
       console.assert = realAssert;
     }
-    expect(
-      asserts.filter((m) => m.includes('bound-variable false fire'))
-    ).toEqual([]);
+    expect(asserts.filter((m) => m.includes('bound-only'))).toEqual([]);
   });
 
   test('the post-filter is skipped for non-canonical parses', () => {

@@ -1962,8 +1962,13 @@ export class ComputeEngine implements IComputeEngine {
       parseOpts.diagnostics ?? this._latexOptions?.diagnostics ?? false;
     let diagnostics: ParseDiagnostic[] | undefined;
     let onDiagnostic: ((d: ParseDiagnostic) => void) | undefined;
+    let onBoundVariable: ((name: string) => void) | undefined;
+    // Bound names a binder parselet deliberately processed (pruneUndeclared):
+    // exempt from the bound-only post-check assertion below.
+    const processedBoundNames = new Set<string>();
     if (wantDiagnostics) {
       diagnostics = [];
+      onBoundVariable = (name) => processedBoundNames.add(name);
       const seen = new Set<string>();
       onDiagnostic = (d) => {
         // Belt-and-braces dedupe: identical-span re-emissions (same
@@ -1999,6 +2004,7 @@ export class ComputeEngine implements IComputeEngine {
         // Resolved diagnostics wiring wins over both spreads.
         diagnostics: wantDiagnostics,
         onDiagnostic,
+        onBoundVariable,
       });
 
       if (result === null) return null;
@@ -2032,6 +2038,12 @@ export class ComputeEngine implements IComputeEngine {
         // production) to surface case 1 to test runs / the corpus gate. Skipped
         // for non-canonical parses (free-variable analysis is unreliable there),
         // and wrapped so a throw never breaks the parse.
+        //
+        // Names in `processedBoundNames` are exempt: a binder parselet DID run
+        // its `pruneUndeclared` wiring for them, so a surviving diagnostic is a
+        // deliberately-kept free occurrence whose name collides with the dummy
+        // (`\int_x^1 x\,dx` — the canonical result then reports the shared
+        // name as bound-only, hiding the free lower bound from this check).
         if (boxed.isCanonical) {
           try {
             const symbols = new Set(boxed.symbols);
@@ -2040,6 +2052,7 @@ export class ComputeEngine implements IComputeEngine {
               if (d.code !== 'undeclared-symbol') continue;
               const name = d.detail?.name;
               if (typeof name !== 'string') continue;
+              if (processedBoundNames.has(name)) continue;
               if (symbols.has(name) && !free.has(name))
                 console.assert(
                   false,

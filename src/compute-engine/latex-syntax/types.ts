@@ -847,6 +847,19 @@ export type ParseLatexOptions = NumberFormat & {
   onDiagnostic?: (diagnostic: ParseDiagnostic) => void;
 
   /**
+   * Internal hook invoked (when `diagnostics` is enabled) with each bound-
+   * variable name a binder parselet deliberately processed via
+   * `pruneUndeclared()`. `ce.parse()` uses this to exempt those names from its
+   * bound-only post-check assertion: a surviving `undeclared-symbol` for a
+   * processed name is a deliberately-kept *free* occurrence (e.g. the lower
+   * bound in `\int_x^1 x\,dx`), not a wiring gap. Not part of the public
+   * parsing surface.
+   *
+   * @internal
+   */
+  onBoundVariable?: (name: string) => void;
+
+  /**
    * Internal hook reporting whether a symbol has a declaration in the engine
    * scope — declaration *presence*, independent of whether its type is known.
    * Wired by `ce.parse()` via `lookupDefinition`. Used to decide the

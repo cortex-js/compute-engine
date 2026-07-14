@@ -704,6 +704,13 @@ export class _Parser implements Parser {
     const set = names instanceof Set ? names : new Set(names);
     if (set.size === 0) return;
 
+    // Register each deliberately-processed bound name: the post-check in
+    // `ce.parse()` exempts these from its bound-only assertion, since any
+    // surviving diagnostic for them is a deliberately-kept free occurrence
+    // (span-aware pruning), not a missing-wiring gap.
+    if (this.options.onBoundVariable)
+      for (const name of set) this.options.onBoundVariable(name);
+
     const offsets = this.tokenPrefixOffsets();
     const n = this._tokens.length;
     const toOffset = (t: number): number =>
