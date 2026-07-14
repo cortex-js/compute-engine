@@ -23,7 +23,11 @@ export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
  * - `"juxtaposition-as-multiply"` — a symbol immediately followed by a
  *   delimited group `(…)` or a matrix environment was read as multiplication
  *   rather than function application. `detail: { name, declaredAs }` with
- *   `declaredAs` one of `"unknown" | "value" | "function"`.
+ *   `declaredAs` one of `"unknown" | "value" | "function"`. `name` is the
+ *   source symbol even when it was lexed as a unit (`\mathrm{N}(2)`) or
+ *   segmented into a letter run (`divisors(60)` → `"divisors"`). When the
+ *   symbol was read as a unit, `detail` additionally carries
+ *   `lexedAs: "unit"`.
  * - `"comment-discarded"` — an unescaped `%` discarded the rest of a line.
  *   `detail: { discardedLength }`.
  * - `"recovered"` — trailing tokens skipped/coerced by non-strict error

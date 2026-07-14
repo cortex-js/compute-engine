@@ -1,5 +1,5 @@
-import * as fs from 'fs';
-import * as path from 'path';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { ComputeEngine } from '../../src/compute-engine';
 
 /**
@@ -54,7 +54,7 @@ const SKIP_LEDGER: { input: string; reason: string }[] = [
 type Hit = { input: string; name: string };
 
 function loadCorpus(): { input: string; category: string }[] {
-  const corpusPath = path.join(
+  const corpusPath = join(
     __dirname,
     '..',
     '..',
@@ -62,7 +62,7 @@ function loadCorpus(): { input: string; category: string }[] {
     'mathnet',
     'parser-test-cases.json'
   );
-  const c = JSON.parse(fs.readFileSync(corpusPath, 'utf8'));
+  const c = JSON.parse(readFileSync(corpusPath, 'utf8'));
   const out: { input: string; category: string }[] = [];
   for (const f of c.fragments ?? [])
     if (typeof f.latex === 'string')
@@ -148,7 +148,9 @@ describe('parse-diagnostics corpus bound-variable gate', () => {
     const unexpected = hits.filter((h) => !ledgerInputs.has(h.input));
     if (unexpected.length > 0) {
       const summary = unexpected
-        .map((h) => `  ${JSON.stringify(h.input)} — bound-only name "${h.name}"`)
+        .map(
+          (h) => `  ${JSON.stringify(h.input)} — bound-only name "${h.name}"`
+        )
         .join('\n');
       throw new Error(
         `Bound-only name(s) in canonical result not in the skip-ledger:\n${summary}\n` +

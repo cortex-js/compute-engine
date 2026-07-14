@@ -3483,7 +3483,11 @@ export class _Parser implements Parser {
               // A \text infix keyword is ahead but has lower precedence
               // than our current minPrec — stop and let the caller handle it.
             } else {
-              // No infix operator, join the expressions with a Sequence
+              // No infix operator, join the expressions with a Sequence.
+              // Capture the token position where the right operand begins (the
+              // delimiter/environment) — used to reconstruct the source span of
+              // an applied letter-run (`divisors(…)`) in the diagnostic below.
+              const rhsStartToken = this.index;
               const rhs = this.parseExpression({
                 ...until,
                 minPrec: INVISIBLE_OP_PRECEDENCE + 1,
@@ -3494,7 +3498,12 @@ export class _Parser implements Parser {
                 // environment) read as multiplication. `lhs`/`rhs` here are the
                 // as-parsed operands, before the InvisibleOperator flattening
                 // below, so the source shape is still directly visible.
-                this.emitJuxtapositionDiagnostic(lhs, rhs, start);
+                this.emitJuxtapositionDiagnostic(
+                  lhs,
+                  rhs,
+                  start,
+                  rhsStartToken
+                );
                 if (operator(lhs) === 'InvisibleOperator') {
                   if (operator(rhs) === 'InvisibleOperator')
                     result = [
@@ -3588,30 +3597,61 @@ export class _Parser implements Parser {
   }
 
   /**
-   * Emit a `juxtaposition-as-multiply` diagnostic when a bare symbol `lhs` is
-   * juxtaposed with an application-like group `rhs` (a delimited group `(…)` or
-   * a matrix environment) — the source shape reads as a function application
-   * but is parsed as multiplication. No-op unless diagnostics are enabled or
-   * the shape does not match (e.g. `2\pi`, `xy`, `2x`).
+   * Emit a `juxtaposition-as-multiply` diagnostic when an application-shaped
+   * left operand `lhs` is juxtaposed with an application-like group `rhs` (a
+   * delimited group `(…)` or a matrix environment) — the source shape reads as
+   * a function application but is parsed as multiplication. No-op unless
+   * diagnostics are enabled and the shape matches.
+   *
+   * Three left-operand shapes are recognized (all report the *source* symbol):
+   * - a bare symbol (`x(3)`, `\mathrm{Frobnicate}(x)`);
+   * - a unit-lexed symbol (`\mathrm{N}(2)`, where `N` was read as the newton
+   *   unit and wrapped `["__unit__", …]`) — reported with `detail.lexedAs:
+   *   'unit'` so the generator sees "your `N` was read as a unit";
+   * - an applied letter-run (`divisors(60)`, segmented into single-letter
+   *   symbols) — one diagnostic for the joined run `divisors`, not per letter.
+   *
+   * `startToken` is the start of the enclosing expression; `rhsStartToken` is
+   * the token where `rhs` begins, used to recover the run's source span.
    */
   private emitJuxtapositionDiagnostic(
     lhs: MathJsonExpression,
     rhs: MathJsonExpression,
-    startToken: number
+    startToken: number,
+    rhsStartToken: number
   ): void {
     if (this.diagnostics === null) return;
-
-    // `lhs` must be a single symbol reference (not a number, not a compound
-    // InvisibleOperator such as the `2x` of `2x(3)`). Use the shared `symbol()`
-    // util so backtick-verbatim symbols and the object form are handled
-    // identically to the rest of the codebase.
-    const name = symbol(lhs);
-    if (name === null) return;
 
     // `rhs` must be an application-like group: a parenthesized/delimited group
     // or a matrix environment. `2\pi` (rhs is a symbol) and `xy` do not match.
     const rhsOp = operator(rhs);
     if (rhsOp !== 'Delimiter' && rhsOp !== 'Matrix') return;
+
+    // Resolve the applied source name, its span start, and any lexing hint.
+    let name: string | null = null;
+    let spanStartToken = startToken;
+    let lexedAs: string | undefined;
+
+    const bare = symbol(lhs);
+    if (bare !== null) {
+      // A single bare symbol reference (`x`, `Frobnicate`).
+      name = bare;
+    } else if (operator(lhs) === '__unit__') {
+      // A symbol the unit lexer read as a unit (`\mathrm{N}` → newton). Report
+      // the inner source symbol and flag the unit interpretation.
+      name = symbol(operand(lhs, 1));
+      if (name !== null) lexedAs = 'unit';
+    } else if (operator(lhs) === 'InvisibleOperator') {
+      // An applied letter-run (`divisors(60)`). Reconstruct the maximal
+      // contiguous run of single-letter tokens immediately before the group;
+      // this stops at a number (`2x(3)` → run is `x`) or a multi-char command
+      // (`\pi r(2)` → run is `r`).
+      const run = this.trailingLetterRun(rhsStartToken);
+      if (run === null) return;
+      name = run.name;
+      spanStartToken = run.startToken;
+    }
+    if (name === null) return;
 
     // `declaredAs` keys on declaration *presence*, not type knowledge: a
     // declared-but-unknown-type symbol is a `value`, and only a truly
@@ -3622,10 +3662,37 @@ export class _Parser implements Parser {
         ? 'function'
         : 'value';
 
-    this.emitDiagnostic('juxtaposition-as-multiply', startToken, this.index, {
-      name,
-      declaredAs,
-    });
+    this.emitDiagnostic(
+      'juxtaposition-as-multiply',
+      spanStartToken,
+      this.index,
+      lexedAs !== undefined
+        ? { name, declaredAs, lexedAs }
+        : { name, declaredAs }
+    );
+  }
+
+  /**
+   * Walk backward from `beforeToken` over a maximal contiguous run of
+   * single-letter symbol tokens (skipping any immediately-preceding spaces),
+   * returning the joined run name and the token where it starts, or `null` if
+   * no such run precedes `beforeToken`. Used to reconstruct an applied
+   * letter-run symbol (`divisors(…)`) for the `juxtaposition-as-multiply`
+   * diagnostic.
+   */
+  private trailingLetterRun(
+    beforeToken: number
+  ): { name: string; startToken: number } | null {
+    let i = beforeToken;
+    // Skip spaces between the run and the group (`x (3)`).
+    while (i > 0 && this._tokens[i - 1] === '<space>') i--;
+    let letters = '';
+    while (i > 0 && /^[a-zA-Z]$/.test(this._tokens[i - 1])) {
+      letters = this._tokens[i - 1] + letters;
+      i--;
+    }
+    if (letters.length === 0) return null;
+    return { name: letters, startToken: i };
   }
 
   private isFunctionOperator(id: MathJsonSymbol | null): boolean {

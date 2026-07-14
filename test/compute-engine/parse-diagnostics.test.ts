@@ -114,9 +114,7 @@ describe('additive: no output change, absent when flag omitted', () => {
     const ce = new ComputeEngine();
     for (const row of rows) {
       const withOff = JSON.stringify(ce.parse(row).json);
-      const withOn = JSON.stringify(
-        ce.parse(row, { diagnostics: true }).json
-      );
+      const withOn = JSON.stringify(ce.parse(row, { diagnostics: true }).json);
       expect(withOn).toBe(withOff);
     }
   });
@@ -172,8 +170,9 @@ describe('interned-instance non-pollution', () => {
 describe('canonical:false still emits parse-time diagnostics', () => {
   test('codes 1 & 2 fire under { canonical: false }', () => {
     const ds = diags('x(3)', { canonical: false });
-    expect(byCode(ds, 'undeclared-symbol').some((d) => d.detail?.name === 'x'))
-      .toBe(true);
+    expect(
+      byCode(ds, 'undeclared-symbol').some((d) => d.detail?.name === 'x')
+    ).toBe(true);
     expect(byCode(ds, 'juxtaposition-as-multiply')).toHaveLength(1);
   });
 });
@@ -206,7 +205,9 @@ describe('recovered (trailing noise)', () => {
 
 describe('bound variables do not fire undeclared-symbol (A1)', () => {
   const undeclaredNames = (latex: string): string[] =>
-    byCode(diags(latex), 'undeclared-symbol').map((d) => d.detail?.name as string);
+    byCode(diags(latex), 'undeclared-symbol').map(
+      (d) => d.detail?.name as string
+    );
 
   test('sum index is bound; only the free bound `n` fires', () => {
     // `i` is the imaginary unit (declared); use `j` to exercise a genuinely
@@ -374,9 +375,92 @@ describe('structural auto-prune on backtrack (follow-up item 1)', () => {
       true
     );
     // `j` is bound; `n` is free.
-    expect(
-      byCode(ds, 'undeclared-symbol').map((d) => d.detail?.name)
-    ).toEqual(['n']);
+    expect(byCode(ds, 'undeclared-symbol').map((d) => d.detail?.name)).toEqual([
+      'n',
+    ]);
+  });
+});
+
+describe('code-2 coverage: unit-lexed and letter-run applications (Tycho 0.78.0)', () => {
+  const jux = (
+    latex: string,
+    opts: Record<string, unknown> = {}
+  ): ParseDiagnostic[] =>
+    byCode(diags(latex, opts), 'juxtaposition-as-multiply');
+
+  test('a unit-lexed symbol applied fires code 2 with lexedAs:"unit" (undeclared)', () => {
+    // `\mathrm{T}` is lexed as the tesla unit; `T` is undeclared here.
+    const js = jux('\\mathrm{T}(2)');
+    expect(js).toHaveLength(1);
+    expect(js[0].detail).toMatchObject({
+      name: 'T',
+      declaredAs: 'unknown',
+      lexedAs: 'unit',
+    });
+  });
+
+  test('a unit-lexed symbol declared as a value reports declaredAs:"value"', () => {
+    const ce = new ComputeEngine();
+    ce.declare('N', 'real');
+    const js = byCode(
+      ce.parse('\\mathrm{N}(2)', { diagnostics: true }).parseDiagnostics ?? [],
+      'juxtaposition-as-multiply'
+    );
+    expect(js).toHaveLength(1);
+    expect(js[0].detail).toMatchObject({
+      name: 'N',
+      declaredAs: 'value',
+      lexedAs: 'unit',
+    });
+  });
+
+  test('an applied letter-run fires ONE code 2 for the joined name', () => {
+    const latex = 'divisors(60)';
+    const js = jux(latex);
+    expect(js).toHaveLength(1);
+    expect(js[0].detail).toMatchObject({
+      name: 'divisors',
+      declaredAs: 'unknown',
+    });
+    // No `lexedAs` for a plain letter run.
+    expect(js[0].detail).not.toHaveProperty('lexedAs');
+    // Span covers the run start through the delimiter end.
+    expect(latex.slice(js[0].start, js[0].end)).toBe('divisors(60)');
+  });
+
+  test('the letter-run stops at a leading number (2x(3) → x)', () => {
+    const latex = '2x(3)';
+    const js = jux(latex);
+    expect(js).toHaveLength(1);
+    expect(js[0].detail).toMatchObject({ name: 'x', declaredAs: 'unknown' });
+    expect(latex.slice(js[0].start, js[0].end)).toBe('x(3)');
+  });
+
+  test('the letter-run stops at a multi-char command (\\pi r(2) → r, not πr)', () => {
+    const js = jux('\\pi r(2)');
+    expect(js).toHaveLength(1);
+    expect(js[0].detail).toMatchObject({ name: 'r', declaredAs: 'unknown' });
+  });
+
+  test('existing rows unchanged: x(3), Frobnicate, Eigenvalues+pmatrix', () => {
+    expect(jux('x(3)')[0].detail).toMatchObject({
+      name: 'x',
+      declaredAs: 'unknown',
+    });
+    expect(jux('\\mathrm{Frobnicate}(x)')[0].detail).toMatchObject({
+      name: 'Frobnicate',
+      declaredAs: 'unknown',
+    });
+    const eig = jux(
+      '\\mathrm{Eigenvalues}\\begin{pmatrix}2&1\\\\1&2\\end{pmatrix}'
+    );
+    expect(eig).toHaveLength(1);
+    expect(eig[0].detail).toMatchObject({
+      name: 'Eigenvalues',
+      declaredAs: 'function',
+    });
+    // None of these carry a `lexedAs` hint.
+    expect(jux('x(3)')[0].detail).not.toHaveProperty('lexedAs');
   });
 });
 

@@ -177,3 +177,28 @@ before cutting the release.
 - Channel: new `diagnostics` flag in `ParseLatexOptions`; collector on the
   parser; `parseDiagnostics` attached to the top-level boxed result alongside
   the existing `latex`/`sourceOffsets` metadata.
+
+### Addendum (2026-07-14): code-2 coverage
+
+Field testing on the 0.78.0 pre-release surfaced two application-shaped
+sources that were parsed as multiplication but produced **no**
+`juxtaposition-as-multiply` (code 2). Both are now covered:
+
+1. **Unit-lexed symbol applied** — `\mathrm{N}(2)` lexes `N` as the newton
+   unit, so the left operand is a `["__unit__", …]` wrapper rather than a bare
+   symbol. Code 2 now fires with `name` set to the inner source symbol (`N`)
+   and `declaredAs` classified exactly as for a bare symbol (`N` declared as a
+   value → `"value"`; undeclared → `"unknown"`; a function head → `"function"`).
+
+2. **Applied letter-run** — `divisors(60)` segments into single-letter symbols
+   (`d`, `i`, `v`, …), so the left operand is a flat `InvisibleOperator` of
+   letters. Code 2 now fires **once** for the maximal contiguous run of
+   single-letter symbols immediately preceding the group, with `name` set to the
+   joined run (`"divisors"`) and a span covering the run start through the
+   delimiter. The run stops at a number (`2x(3)` → `x`) or a multi-char command
+   (`\pi r(2)` → `r`).
+
+New additive `detail` key (open shape, backward-compatible): **`lexedAs:
+"unit"`** is included on code 2 when the applied symbol was read as a unit —
+the "your `N` was read as a unit" hint for generated-LaTeX validators. It is
+absent for ordinary symbols and letter runs.

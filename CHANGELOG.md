@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Parse Diagnostics
+
+- **`juxtaposition-as-multiply` now covers unit-lexed and letter-run
+  application shapes.** Two application-shaped sources that produced no
+  diagnostic on 0.78.0 are now reported: a symbol lexed as a **unit** applied
+  to a group (`\mathrm{N}(2)`, where `N` reads as the newton unit) fires with
+  `detail.name` set to the source symbol and a new additive
+  `detail: { lexedAs: "unit" }` hint; and a **letter-run** applied to a group
+  (`divisors(60)`, which segments into `d·i·v·i·s·o·r·s`) fires a single
+  diagnostic whose `name` is the joined run (`"divisors"`) and whose span
+  covers the full `divisors(60)` source shape. Run reconstruction stops at
+  numbers and multi-character commands (`2x(3)` reports `x`; `\pi r(2)`
+  reports `r`).
+
 ## 0.78.0 _2026-07-14_
 
 ### Parse Diagnostics
