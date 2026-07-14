@@ -479,7 +479,7 @@ describe('CANONICALIZATION invisible operators', () => {
     expect(canonicalToJson("2f'(x)")).toMatchObject([
       'Multiply',
       2,
-      ['D', expect.anything(), expect.anything()],
+      ['Apply', expect.anything(), expect.anything()],
     ]);
   });
 });

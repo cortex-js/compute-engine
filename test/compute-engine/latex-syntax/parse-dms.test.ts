@@ -62,7 +62,7 @@ describe('Prime Disambiguation', () => {
   });
 
   test('prime in function call is derivative', () => {
-    check("f'(x)", ['D', ['f', 'x'], 'x']);
+    check("f'(x)", ['Apply', ['Derivative', 'f', 1], 'x']);
   });
 
   test('degree followed by separate function with prime', () => {

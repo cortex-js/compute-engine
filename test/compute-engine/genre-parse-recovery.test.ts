@@ -171,7 +171,11 @@ describe('Genre recovery: prime after a juxtaposed function argument', () => {
 
   test("NEGATIVE: derivative notation f'(x) is unchanged", () => {
     const ce = freshEngine();
-    expect(ce.parse("f'(x)").json).toEqual(['D', ['f', 'x'], 'x']);
+    expect(ce.parse("f'(x)").json).toEqual([
+      'Apply',
+      ['Derivative', 'f', 1],
+      'x',
+    ]);
     expect(ce.parse("a''").json).toEqual(['Prime', 'a', 2]);
   });
 });
