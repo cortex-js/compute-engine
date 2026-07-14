@@ -53,6 +53,7 @@ import type {
   OperatorInfo,
   SymbolInfo,
   DefinitionSearchResult,
+  ParseDiagnostic,
 } from './global-types.js';
 
 import type {
@@ -1951,6 +1952,30 @@ export class ComputeEngine implements IComputeEngine {
     // `parseOpts` (which is forwarded to the LaTeX parser).
     const { form, canonical, structural, ...parseOpts } = options ?? {};
 
+    // Opt-in parse diagnostics: the parser reports each diagnostic through an
+    // internal sink; collect them here and attach the (possibly empty) array
+    // to the top-level result below. The effective flag is resolved after
+    // merging the engine-wide `_latexOptions` with the per-call options: an
+    // explicit per-call value (including `false`) wins over an engine-wide
+    // `diagnostics: true`.
+    const wantDiagnostics =
+      parseOpts.diagnostics ?? this._latexOptions?.diagnostics ?? false;
+    let diagnostics: ParseDiagnostic[] | undefined;
+    let onDiagnostic: ((d: ParseDiagnostic) => void) | undefined;
+    if (wantDiagnostics) {
+      diagnostics = [];
+      const seen = new Set<string>();
+      onDiagnostic = (d) => {
+        // Belt-and-braces dedupe: identical-span re-emissions (same
+        // code+start+end+detail) are always spurious duplicates left by a
+        // speculative reparse of the same tokens.
+        const key = `${d.code} ${d.start} ${d.end} ${d.detail ? JSON.stringify(d.detail) : ''}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        diagnostics!.push(d);
+      };
+    }
+
     const endInferenceTransaction = beginInferenceTransaction(this);
     try {
       const result = syntax.parse(latex, {
@@ -1965,18 +1990,77 @@ export class ComputeEngine implements IComputeEngine {
           const def = this.lookupDefinition(id);
           return !!(isValueDef(def) && def.value.subscriptEvaluate);
         },
+        // Declaration *presence* (independent of type knowledge), for the
+        // `undeclared-symbol` diagnostic predicate.
+        isSymbolDeclared: (id) => !!this.lookupDefinition(id),
         tolerance: this.tolerance,
         ...this._latexOptions,
         ...parseOpts,
+        // Resolved diagnostics wiring wins over both spreads.
+        diagnostics: wantDiagnostics,
+        onDiagnostic,
       });
 
       if (result === null) return null;
 
-      return box(
+      let boxed = box(
         this,
         result,
         optionsToInternal({ form, canonical, structural })
       );
+
+      if (diagnostics !== undefined) {
+        // Attach to a fresh top-level instance: `_unshared()` clones interned
+        // leaf literals (small integers, cached constants) and returns
+        // always-fresh function expressions as-is, so tagging never pollutes a
+        // shared/cached instance (e.g. `ce.parse('4', { diagnostics: true })`).
+        boxed = (boxed as unknown as _BoxedExpression)._unshared();
+
+        // Defense-in-depth bound-variable post-check (DETECT-ONLY — it never
+        // drops diagnostics). On a canonical result, a name that appears among
+        // the result's symbols but NOT among its free variables occurs only
+        // bound. That has two causes, and only one is a defect:
+        //   1. a binder parselet forgot its `pruneUndeclared` wiring — a real
+        //      false fire that should have been pruned at parse time; or
+        //   2. canonicalization synthesized a same-named binder from a
+        //      genuinely-free source reference (e.g. `\mathbb{R}_{>0}` builds a
+        //      set-builder reusing the membership variable's name). Here the
+        //      diagnostic is CORRECT — the consumer needs to see the free
+        //      source reference — so dropping it would be a false negative.
+        // We cannot tell the two apart from the boxed result, so we keep the
+        // diagnostic either way and only `console.assert` (stripped in
+        // production) to surface case 1 to test runs / the corpus gate. Skipped
+        // for non-canonical parses (free-variable analysis is unreliable there),
+        // and wrapped so a throw never breaks the parse.
+        if (boxed.isCanonical) {
+          try {
+            const symbols = new Set(boxed.symbols);
+            const free = new Set(boxed.freeVariables);
+            for (const d of diagnostics) {
+              if (d.code !== 'undeclared-symbol') continue;
+              const name = d.detail?.name;
+              if (typeof name !== 'string') continue;
+              if (symbols.has(name) && !free.has(name))
+                console.assert(
+                  false,
+                  `parse-diagnostics: bound-only "${name}" in canonical result — either missing pruneUndeclared wiring in a binder parselet, or a canonicalization-synthesized binder reusing a free source name (diagnostic retained either way)`
+                );
+            }
+          } catch {
+            // Never let diagnostic post-processing break a successful parse.
+          }
+        }
+
+        // Deep-freeze: each diagnostic and its `detail` are frozen too, so the
+        // exposed array is immutable all the way down (matches the JSDoc).
+        for (const d of diagnostics) {
+          if (d.detail) Object.freeze(d.detail);
+          Object.freeze(d);
+        }
+        boxed.parseDiagnostics = Object.freeze(diagnostics);
+      }
+
+      return boxed;
     } finally {
       endInferenceTransaction();
     }

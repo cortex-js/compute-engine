@@ -109,6 +109,18 @@ export class BoxedNumber
     return this._hash;
   }
 
+  override _unshared(): BoxedNumber {
+    // Small integers and other well-known values are interned by `ce.number()`;
+    // return a fresh copy so parse-time metadata does not leak onto the shared
+    // instance.
+    return new BoxedNumber(this.engine, this._value, {
+      metadata: {
+        latex: this.verbatimLatex,
+        sourceOffsets: this.sourceOffsets,
+      },
+    });
+  }
+
   get json(): MathJsonExpression {
     // `.json` is the lossless data-interchange serialization (see
     // docs/NUMERIC-SERIALIZATION.md). It emits the value exactly, with no

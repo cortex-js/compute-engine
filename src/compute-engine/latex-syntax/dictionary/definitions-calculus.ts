@@ -34,6 +34,11 @@ import { LatexDictionary, Parser, Serializer } from '../types.js';
  */
 function parseIntegral(command: string, nIntegrals = 1) {
   return (parser: Parser): MathJsonExpression | null => {
+    // Diagnostics: checkpoint before the whole integral so references to the
+    // differential (dummy) variable — in the integrand and in `dx` — can be
+    // retroactively un-flagged as `undeclared-symbol`. Bounds (`a`, `b` in
+    // `\int_a^b`) are free variables and survive.
+    const diagCp = parser.diagnosticsCheckpoint();
     //
     // 1/ Capture the limits of integration
     //
@@ -74,6 +79,12 @@ function parseIntegral(command: string, nIntegrals = 1) {
     //   and the indexes that follow it.
     //
 
+    // The integrand + differential (`dx`) begin here; the limits (`_x^1`) are
+    // already parsed. Pruning the dummy variable only within this body span
+    // leaves a same-named *limit* reference flagged, e.g. the lower bound `x`
+    // in `\int_x^1 x\,dx` fires while the integrand/differential `x` does not.
+    const bodyStartToken = parser.index;
+
     // eslint-disable-next-line prefer-const
     let [fn, indexes] = parseIntegralBody(parser, nIntegrals);
 
@@ -111,6 +122,11 @@ function parseIntegral(command: string, nIntegrals = 1) {
         }
       }
     }
+
+    // Retroactively un-flag references to the differential (dummy) variables
+    // within the integrand/differential span only (leaving same-named limits).
+    if (indexes.length > 0)
+      parser.pruneUndeclared(indexes, diagCp, bodyStartToken);
 
     //
     // 3/ Put together the limits, the function and the indexes

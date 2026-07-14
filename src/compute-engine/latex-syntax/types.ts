@@ -4,8 +4,13 @@ import type {
   MathJsonSymbol,
 } from '../../math-json/types.js';
 import type { TypeString } from '../../common/type/types.js';
-import type { DisplayDigits } from '../types-kernel-serialization.js';
+import type {
+  DisplayDigits,
+  ParseDiagnostic,
+} from '../types-kernel-serialization.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
+
+export type { ParseDiagnostic };
 
 export type SymbolTable = {
   parent: SymbolTable | null;
@@ -817,6 +822,44 @@ export type ParseLatexOptions = NumberFormat & {
   preserveLatex: boolean;
 
   /**
+   * If true, collect opt-in parse-time diagnostics (see {@link ParseDiagnostic})
+   * flagging charitable parse decisions — undeclared symbols, application-like
+   * juxtaposition read as multiply, discarded `%` comments, and trailing noise
+   * dropped by recovery.
+   *
+   * This flag only takes effect through {@link ComputeEngine.parse}, which
+   * wires up the collector and attaches the resulting array to the top-level
+   * parsed expression's `parseDiagnostics` property. On the standalone
+   * `LatexSyntax.parse()` entry point the flag is a silent no-op (that entry
+   * returns plain MathJSON with nowhere to attach diagnostics).
+   *
+   * This is purely additive: enabling it never changes the parse output.
+   *
+   * **Default:** `false`
+   */
+  diagnostics?: boolean;
+
+  /**
+   * Internal sink invoked once per collected diagnostic when `diagnostics` is
+   * enabled. `ce.parse()` wires this to a collector whose contents it attaches
+   * to the returned expression. Not part of the public parsing surface.
+   *
+   * @internal
+   */
+  onDiagnostic?: (diagnostic: ParseDiagnostic) => void;
+
+  /**
+   * Internal hook reporting whether a symbol has a declaration in the engine
+   * scope — declaration *presence*, independent of whether its type is known.
+   * Wired by `ce.parse()` via `lookupDefinition`. Used to decide the
+   * `undeclared-symbol` diagnostic (code 1) and code 2's `declaredAs`. When
+   * absent, the parser falls back to type knowledge (`getSymbolType`).
+   *
+   * @internal
+   */
+  isSymbolDeclared?: (name: MathJsonSymbol) => boolean;
+
+  /**
    * Controls how quantifier scope is determined when parsing expressions
    * like `\forall x. P(x) \rightarrow Q(x)`.
    *
@@ -894,6 +937,42 @@ export interface Parser {
   popSymbolTable(): void;
 
   addSymbol(id: MathJsonSymbol, type: BoxedType | TypeString): void;
+
+  /**
+   * @internal
+   * Diagnostics: a seq-based checkpoint (the next sequence id) for
+   * {@link rollbackDiagnostics}/{@link pruneUndeclared}.
+   */
+  diagnosticsCheckpoint(): number;
+
+  /**
+   * @internal
+   * Diagnostics: discard every diagnostic collected since `checkpoint`.
+   */
+  rollbackDiagnostics(checkpoint: number): void;
+
+  /**
+   * @internal
+   * Diagnostics: retroactively remove `undeclared-symbol` diagnostics for the
+   * bound-variable `names` collected at or after `checkpoint`. When
+   * `bodyStartToken` is given, pruning is span-aware: only references within
+   * the body (`>= bodyStartToken`) or an explicit declaration span
+   * (`declSpanTokens`, token ranges) are removed, leaving same-named free
+   * references in limit/bound sub-expressions flagged. Token indices.
+   */
+  pruneUndeclared(
+    names: Iterable<string>,
+    checkpoint: number,
+    bodyStartToken?: number,
+    declSpanTokens?: readonly [number, number][]
+  ): void;
+
+  /**
+   * @internal
+   * Diagnostics: checkpoint captured before the left operand of the innermost
+   * in-progress `parseExpression`. Used by infix binder parselets (`\mapsto`).
+   */
+  readonly operandDiagnosticCheckpoint: number;
 
   /** True if currently parsing inside a quantifier body (ForAll, Exists, etc.) */
   readonly inQuantifierScope: boolean;

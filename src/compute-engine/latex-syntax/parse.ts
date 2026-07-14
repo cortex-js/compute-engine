@@ -11,6 +11,7 @@ import {
   operand,
   isEmptySequence,
   matchesSymbol,
+  symbol,
   stringValue,
   matchesString,
   matchesNumber,
@@ -25,8 +26,10 @@ import {
   INVISIBLE_OP_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
   SymbolTable,
+  ParseDiagnostic,
 } from './types.js';
 import { tokenize, tokensToString } from './tokenizer.js';
+import type { DiscardedComment } from './tokenizer.js';
 import { parseSymbol, parseInvalidSymbol } from './parse-symbol.js';
 import type {
   IndexedLatexDictionary,
@@ -48,6 +51,14 @@ import {
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { TypeString } from '../types.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
+
+/**
+ * A collected parse diagnostic with its internal monotonic sequence id. The
+ * `_seq` field is used for seq-based checkpoints (see `_Parser.diagnostics`)
+ * and is stripped before the diagnostic is forwarded to the sink, so the
+ * public {@link ParseDiagnostic} shape is preserved.
+ */
+type CollectedDiagnostic = ParseDiagnostic & { _seq: number };
 
 /** Does the index symbol `index` occur anywhere in `expr`? A fused compound
  * symbol (`a_n`) counts as mentioning its subscript token. */
@@ -508,6 +519,37 @@ export class _Parser implements Parser {
     return this._index;
   }
   set index(val: number) {
+    // Structural diagnostics auto-prune on backtrack. Backtracking is
+    // `parser.index = savedStart` in any parselet; when the parser rewinds
+    // (`val < this._index`), every diagnostic whose span *starts* at or after
+    // the rewind point was emitted by the branch now being abandoned. Drop
+    // those — the adopted reparse re-emits whatever still applies. This makes
+    // rejected-branch diagnostics self-cleaning, with no per-site rollback
+    // convention to forget.
+    //
+    // Known imperfection: a diagnostic whose span starts *before* the rewind
+    // point but extends past it survives — only start-at-or-after entries are
+    // provably from the abandoned branch. Diagnostic `start`s are not monotone
+    // in the array (`pruneUndeclared` splices from the middle, and retro spans
+    // exist), so the whole array is filtered, not truncated from the end.
+    //
+    // The `diagnostics === null` fast path keeps normal parsing (the flag off)
+    // free of any overhead; the scan is O(#diagnostics) and only on regression.
+    if (
+      this.diagnostics !== null &&
+      this.diagnostics.length > 0 &&
+      val < this._index
+    ) {
+      const offsets = this.tokenPrefixOffsets();
+      const cutoff = offsets[Math.max(0, Math.min(val, this._tokens.length))];
+      const d = this.diagnostics;
+      let w = 0;
+      for (let r = 0; r < d.length; r++) {
+        if (d[r].start >= cutoff) continue; // drop abandoned-branch entry
+        d[w++] = d[r];
+      }
+      d.length = w;
+    }
     this._index = val;
     this._lastPeek = '';
     this._peekCounter = 0;
@@ -571,6 +613,172 @@ export class _Parser implements Parser {
   private _symCandidate: string | null = null;
   private _symCandidateCount = 0;
 
+  // Opt-in parse diagnostics (codes `undeclared-symbol`,
+  // `juxtaposition-as-multiply`). Non-null only when `options.diagnostics` is
+  // enabled; `emitDiagnostic` is a no-op otherwise.
+  //
+  // Each collected entry carries an internal monotonic `_seq` id (assigned in
+  // emission order and never reused). Checkpoints are seq *values*, not array
+  // positions, so `rollbackDiagnostics`/`pruneUndeclared` are robust to the
+  // index-setter auto-prune deleting entries from the middle of the array (a
+  // length-based checkpoint would silently mis-target after such a deletion).
+  // `_seq` is stripped before a diagnostic reaches the sink — the public
+  // `ParseDiagnostic` shape is unchanged.
+  readonly diagnostics: CollectedDiagnostic[] | null;
+  private _diagnosticSeq = 0;
+
+  /**
+   * Record a parse diagnostic spanning `[startToken, endToken)` (token
+   * indices, mapped to normalized-LaTeX character offsets via
+   * `sourceOffsets`). No-op unless diagnostics collection is enabled.
+   */
+  emitDiagnostic(
+    code: string,
+    startToken: number,
+    endToken: number,
+    detail?: Record<string, unknown>
+  ): void {
+    if (this.diagnostics === null) return;
+    const [start, end] = this.sourceOffsets(startToken, endToken);
+    const _seq = this._diagnosticSeq++;
+    this.diagnostics.push(
+      detail !== undefined
+        ? { code, start, end, detail, _seq }
+        : { code, start, end, _seq }
+    );
+  }
+
+  /**
+   * A checkpoint for {@link rollbackDiagnostics} / {@link pruneUndeclared}: the
+   * next sequence id to be assigned. Every diagnostic collected *after* this
+   * call has `_seq >= checkpoint`. Seq-based (not a length), so it stays valid
+   * even if the index-setter auto-prune later deletes entries.
+   */
+  diagnosticsCheckpoint(): number {
+    return this._diagnosticSeq;
+  }
+
+  /**
+   * Discard every diagnostic collected since `checkpoint` (a value returned by
+   * {@link diagnosticsCheckpoint}) — i.e. every entry with `_seq >= checkpoint`.
+   * Used to unwind diagnostics emitted while speculatively parsing a branch the
+   * parser then backtracks out of.
+   */
+  rollbackDiagnostics(checkpoint: number): void {
+    if (this.diagnostics === null) return;
+    const d = this.diagnostics;
+    let w = 0;
+    for (let r = 0; r < d.length; r++) if (d[r]._seq < checkpoint) d[w++] = d[r];
+    d.length = w;
+  }
+
+  /**
+   * Retroactively remove `undeclared-symbol` diagnostics for bound variables
+   * `names`, collected at or after `checkpoint` (`_seq >= checkpoint`). Called
+   * by binder parselets once the bound names are known.
+   *
+   * Pruning is **span-aware** (A-3): a reference is removed only when it is
+   * genuinely in the binder's scope — either within the construct's **body**
+   * (`start >= bodyStart`, in normalized char offsets) or within one of the
+   * explicit **declaration** spans `declSpans` (the index variable's own
+   * occurrence in a subscript). References that share the name but sit in a
+   * *limit/bound/domain* sub-expression outside those regions stay flagged: in
+   * `\int_x^1 x\,dx` the lower-bound `x` is free and must fire, even though the
+   * integrand/differential `x` is bound.
+   *
+   * With no `bodyStart` (the default), pruning is name-wide since the
+   * checkpoint — correct for binders whose bound names have no competing free
+   * occurrence (`\mapsto`/`:=` parameters, quantified variables).
+   *
+   * `bodyStart` / `declSpans` are given as **token** indices and mapped to char
+   * offsets here. Diagnostics-only — never affects parse output.
+   */
+  pruneUndeclared(
+    names: Iterable<string>,
+    checkpoint: number,
+    bodyStartToken?: number,
+    declSpanTokens?: readonly [number, number][]
+  ): void {
+    if (this.diagnostics === null) return;
+    const set = names instanceof Set ? names : new Set(names);
+    if (set.size === 0) return;
+
+    const offsets = this.tokenPrefixOffsets();
+    const n = this._tokens.length;
+    const toOffset = (t: number): number =>
+      offsets[Math.max(0, Math.min(t, n))];
+    // No body start → prune every name-match since the checkpoint (name-wide).
+    const bodyStart =
+      bodyStartToken === undefined ? -Infinity : toOffset(bodyStartToken);
+    const declSpans = (declSpanTokens ?? []).map(
+      ([a, b]) => [toOffset(a), toOffset(b)] as const
+    );
+
+    const d = this.diagnostics;
+    let w = 0;
+    for (let r = 0; r < d.length; r++) {
+      const e = d[r];
+      const name = e.detail?.name;
+      const isBoundName =
+        e.code === 'undeclared-symbol' &&
+        e._seq >= checkpoint &&
+        typeof name === 'string' &&
+        set.has(name);
+      if (isBoundName) {
+        const inBody = e.start >= bodyStart;
+        const inDecl = declSpans.some(([a, b]) => e.start >= a && e.start < b);
+        if (inBody || inDecl) continue; // drop bound reference
+      }
+      d[w++] = e;
+    }
+    d.length = w;
+  }
+
+  /**
+   * The diagnostics checkpoint captured just before the left operand of the
+   * innermost in-progress {@link parseExpression} was parsed. Infix binder
+   * parselets (notably `\mapsto`, whose parameter is the already-parsed left
+   * operand) use it to {@link pruneUndeclared} bound-parameter references that
+   * were emitted for that operand.
+   */
+  get operandDiagnosticCheckpoint(): number {
+    return this._operandDiagnosticCheckpoint;
+  }
+  private _operandDiagnosticCheckpoint = 0;
+
+  /**
+   * True if `id` resolves to a declaration — a parser-local binding tracked in
+   * `symbolTable`, or a definition in the engine scope (via the
+   * `isSymbolDeclared` hook). Declaration *presence*, not type knowledge: a
+   * symbol declared with an `unknown` type is still declared.
+   */
+  isSymbolDeclared(id: MathJsonSymbol): boolean {
+    let table: SymbolTable | null = this.symbolTable;
+    while (table) {
+      if (id in table.ids) return true;
+      table = table.parent;
+    }
+    if (this.options.isSymbolDeclared) return this.options.isSymbolDeclared(id);
+    // No declaration-presence hook: fall back to type knowledge.
+    return !this.getSymbolType(id).isUnknown;
+  }
+
+  /**
+   * Shared emission point for a symbol *reference*: records an
+   * `undeclared-symbol` diagnostic iff `id` is not declared (see
+   * {@link isSymbolDeclared}). No-op unless diagnostics are enabled. Every
+   * parser path that yields a bare symbol reference routes through here so no
+   * charitable interpretation escapes the diagnostic.
+   */
+  emitSymbolReference(id: MathJsonSymbol, startToken: number, endToken: number): void {
+    if (this.diagnostics === null) return;
+    if (!this.isSymbolDeclared(id))
+      this.emitDiagnostic('undeclared-symbol', startToken, endToken, {
+        name: id,
+        type: this.getSymbolType(id).toString(),
+      });
+  }
+
   constructor(
     tokens: LatexToken[],
     dictionary: IndexedLatexDictionary,
@@ -579,6 +787,7 @@ export class _Parser implements Parser {
     this._tokens = tokens;
     this.options = options;
     this._dictionary = dictionary;
+    this.diagnostics = options.diagnostics ? [] : null;
 
     this._positiveInfinityTokens = tokenize(this.options.positiveInfinity);
     this._negativeInfinityTokens = tokenize(this.options.negativeInfinity);
@@ -1899,6 +2108,10 @@ export class _Parser implements Parser {
     //
     // Try each potentially matching def
     //
+    // Diagnostics from a rejected def's speculative body parse are cleaned up
+    // structurally: every `this.index = start` / `this.index = bodyStart`
+    // rewind below auto-prunes diagnostics emitted by the abandoned branch (see
+    // the `set index` accessor), so no explicit rollback is needed here.
     for (const def of defs) {
       this.index = start;
 
@@ -2032,6 +2245,8 @@ export class _Parser implements Parser {
       const result = def.parse(this, body ?? 'Nothing');
       if (result !== null) return result;
     }
+    // No def matched: the `this.index = start` rewind auto-prunes any
+    // diagnostics the speculative bodies emitted (see `set index`).
     this.index = start;
     return null;
   }
@@ -2105,6 +2320,12 @@ export class _Parser implements Parser {
     if (fn === null) {
       this.index = start;
       fn = parseSymbol(this);
+      // Route the function head through the shared emission point: a bare,
+      // undeclared head (e.g. the predicate `P` in `\forall x, P(x)`) is a
+      // symbol reference that would otherwise bypass diagnostics — the raw
+      // `parseSymbol()` above does not emit. Declared heads no-op; a head on a
+      // path that backtracks below is cleaned up by the index-setter auto-prune.
+      if (typeof fn === 'string') this.emitSymbolReference(fn, start, this.index);
       if (!this.isFunctionOperator(fn)) {
         // Check if this looks like a predicate: single uppercase letter
         // followed by parentheses (e.g., P(x), Q(a,b))
@@ -2169,7 +2390,15 @@ export class _Parser implements Parser {
     this.index = start;
 
     const id = parseSymbol(this);
-    if (id !== null && !this.getSymbolType(id).matches('error')) return id;
+    if (id !== null && !this.getSymbolType(id).matches('error')) {
+      // Diagnostic: a symbol reference that resolves to no declaration —
+      // neither a parser-local binding (sum index, Block/Function parameter,
+      // tracked in `symbolTable`) nor a definition in the engine scope.
+      // Emitted at every reference site (spans differ); bound-variable
+      // references are pruned retroactively by the binder parselets.
+      this.emitSymbolReference(id, start, this.index);
+      return id;
+    }
 
     // This was a symbol, but not a valid symbol. Backtrack
     this.index = start;
@@ -2465,6 +2694,12 @@ export class _Parser implements Parser {
       return null;
     }
 
+    // Route the mapped name through the shared emission point: a spelled-out
+    // name that maps to an undeclared symbol (e.g. `alpha` under `strict:false`)
+    // is a symbol reference that would otherwise bypass diagnostics. Mapped
+    // constants (`oo`→`PositiveInfinity`, `pi`→`Pi`, …) are declared → no-op.
+    this.emitSymbolReference(symbolName, start, this.index);
+
     return symbolName;
   }
 
@@ -2534,7 +2769,10 @@ export class _Parser implements Parser {
 
     // A whole run that is a known function name but could not be applied is
     // returned as a single unknown symbol (`sin*x` → `sin·x`).
-    if (BARE_FUNCTION_MAP[name] !== undefined) return name;
+    if (BARE_FUNCTION_MAP[name] !== undefined) {
+      this.emitSymbolReference(name, start, this.index);
+      return name;
+    }
 
     // Greedy longest-match segmentation against spelled-out Greek constants.
     const symbols = _Parser.SEGMENTABLE_SYMBOLS;
@@ -2560,6 +2798,8 @@ export class _Parser implements Parser {
         // identifiers `e`/`i` to `ExponentialE`/`ImaginaryUnit`, matching how
         // they parse standalone — that is a symbol-level decision, not one the
         // parser overrides here.)
+        // Each letter is a single token, so its span is `[start+i, start+i+1)`.
+        this.emitSymbolReference(name[i], start + i, start + i + 1);
         segments.push(name[i]);
         i += 1;
       }
@@ -3132,7 +3372,12 @@ export class _Parser implements Parser {
           this.nextToken();
           this.skipVisualSpace();
           if (this.atEnd) {
-            // The `\` was trailing junk — silently discard it.
+            // The `\` was trailing junk — silently discarded, but consuming it
+            // is exactly the `recovered` case (input dropped without an Error
+            // node). Surface it as a diagnostic before discarding.
+            this.emitDiagnostic('recovered', saved, this.index, {
+              skipped: this.latex(saved, this.index),
+            });
             return this.decorate(null, start);
           }
           // Not at end: restore and fall through to the error path.
@@ -3171,6 +3416,11 @@ export class _Parser implements Parser {
       return null;
     }
 
+    // Diagnostics checkpoint before the left operand: infix binder parselets
+    // (`\mapsto`) read this via `operandDiagnosticCheckpoint` to retro-prune
+    // bound-parameter references emitted for their left operand.
+    const operandDiagCheckpoint = this.diagnosticsCheckpoint();
+
     until ??= { minPrec: 0 };
     console.assert(until.minPrec !== undefined);
     if (until.minPrec === undefined) until = { ...until, minPrec: 0 };
@@ -3194,6 +3444,9 @@ export class _Parser implements Parser {
       while (!done && !this.atTerminator(until)) {
         this.skipSpace();
 
+        // Expose this expression's operand checkpoint to the infix parselet
+        // about to run (it consumes `lhs`, the already-parsed left operand).
+        this._operandDiagnosticCheckpoint = operandDiagCheckpoint;
         let result = this.parseInfixOperator(lhs, until);
         if (result === null && until.minPrec <= INVISIBLE_OP_PRECEDENCE) {
           // If any operator, no sequence to apply
@@ -3223,6 +3476,12 @@ export class _Parser implements Parser {
                 minPrec: INVISIBLE_OP_PRECEDENCE + 1,
               });
               if (rhs !== null) {
+                // Diagnostic: an application-like juxtaposition (a bare symbol
+                // immediately followed by a delimited group or matrix
+                // environment) read as multiplication. `lhs`/`rhs` here are the
+                // as-parsed operands, before the InvisibleOperator flattening
+                // below, so the source shape is still directly visible.
+                this.emitJuxtapositionDiagnostic(lhs, rhs, start);
                 if (operator(lhs) === 'InvisibleOperator') {
                   if (operator(rhs) === 'InvisibleOperator')
                     result = [
@@ -3313,6 +3572,47 @@ export class _Parser implements Parser {
       ? this.sourceOffsets(fromToken, fromToken)
       : this.sourceOffsets(fromToken, this.index);
     return { fn, sourceOffsets };
+  }
+
+  /**
+   * Emit a `juxtaposition-as-multiply` diagnostic when a bare symbol `lhs` is
+   * juxtaposed with an application-like group `rhs` (a delimited group `(…)` or
+   * a matrix environment) — the source shape reads as a function application
+   * but is parsed as multiplication. No-op unless diagnostics are enabled or
+   * the shape does not match (e.g. `2\pi`, `xy`, `2x`).
+   */
+  private emitJuxtapositionDiagnostic(
+    lhs: MathJsonExpression,
+    rhs: MathJsonExpression,
+    startToken: number
+  ): void {
+    if (this.diagnostics === null) return;
+
+    // `lhs` must be a single symbol reference (not a number, not a compound
+    // InvisibleOperator such as the `2x` of `2x(3)`). Use the shared `symbol()`
+    // util so backtick-verbatim symbols and the object form are handled
+    // identically to the rest of the codebase.
+    const name = symbol(lhs);
+    if (name === null) return;
+
+    // `rhs` must be an application-like group: a parenthesized/delimited group
+    // or a matrix environment. `2\pi` (rhs is a symbol) and `xy` do not match.
+    const rhsOp = operator(rhs);
+    if (rhsOp !== 'Delimiter' && rhsOp !== 'Matrix') return;
+
+    // `declaredAs` keys on declaration *presence*, not type knowledge: a
+    // declared-but-unknown-type symbol is a `value`, and only a truly
+    // undeclared name is reported as `unknown`.
+    const declaredAs = !this.isSymbolDeclared(name)
+      ? 'unknown'
+      : this.getSymbolType(name).matches('function')
+        ? 'function'
+        : 'value';
+
+    this.emitDiagnostic('juxtaposition-as-multiply', startToken, this.index, {
+      name,
+      declaredAs,
+    });
   }
 
   private isFunctionOperator(id: MathJsonSymbol | null): boolean {
@@ -3419,9 +3719,14 @@ function containsError(expr: MathJsonExpression | null | undefined): boolean {
 function parseCore(
   latex: string,
   dictionary: IndexedLatexDictionary,
-  options: Readonly<ParseLatexOptions>
-): MathJsonExpression | null {
-  const parser = new _Parser(tokenize(latex), dictionary, options);
+  options: Readonly<ParseLatexOptions>,
+  comments?: DiscardedComment[]
+): { expr: MathJsonExpression | null; parser: _Parser } {
+  const parser = new _Parser(
+    tokenize(latex, [], comments),
+    dictionary,
+    options
+  );
 
   let expr = parser.parseExpression();
 
@@ -3433,7 +3738,7 @@ function parseCore(
     expr = expr !== null ? ['Sequence', expr, error] : error;
   }
 
-  return expr;
+  return { expr, parser };
 }
 
 export function parse(
@@ -3441,7 +3746,17 @@ export function parse(
   dictionary: IndexedLatexDictionary,
   options: Readonly<ParseLatexOptions>
 ): MathJsonExpression | null {
-  let expr = parseCore(latex, dictionary, options);
+  // Opt-in diagnostics collection. Comments (code `comment-discarded`) are
+  // captured from the primary tokenization in original-input coordinates.
+  const wantDiagnostics = !!options.diagnostics && !!options.onDiagnostic;
+  const comments: DiscardedComment[] | undefined = wantDiagnostics ? [] : undefined;
+  const recovered: ParseDiagnostic[] = [];
+
+  const primary = parseCore(latex, dictionary, options, comments);
+  let expr = primary.expr;
+  // The parser whose collected diagnostics (codes 1 & 2) describe the adopted
+  // parse. Updated if a trailing-noise retry is adopted below.
+  let adoptedParser = primary.parser;
 
   // Trailing-noise recovery (sentence punctuation and equation labels).
   //
@@ -3498,14 +3813,49 @@ export function parse(
 
     for (const candidate of candidates) {
       const retry = parseCore(candidate, dictionary, options);
-      if (retry !== null && !containsError(retry)) {
-        expr = retry;
+      if (retry.expr !== null && !containsError(retry.expr)) {
+        expr = retry.expr;
+        adoptedParser = retry.parser;
+        // Diagnostic: trailing tokens silently dropped by recovery. The
+        // adopted candidate is a prefix of the (trimmed) input, so the skipped
+        // fragment is the original tail. It no longer surfaces as an `Error`
+        // node (the retry is clean), which is exactly the `recovered` case.
+        if (wantDiagnostics) {
+          // Report the exact untrimmed tail so `latex.slice(start, end)`
+          // reproduces `detail.skipped` (span and detail stay consistent).
+          recovered.push({
+            code: 'recovered',
+            start: candidate.length,
+            end: latex.length,
+            detail: { skipped: latex.slice(candidate.length) },
+          });
+        }
         break;
       }
     }
   }
 
   expr ??= 'Nothing';
+
+  // Forward collected diagnostics to the sink before the `preserveLatex` block
+  // (which has early returns). Order: symbol/juxtaposition diagnostics from the
+  // adopted parser (source order), then discarded comments, then recovery.
+  if (wantDiagnostics) {
+    const sink = options.onDiagnostic!;
+    if (adoptedParser.diagnostics)
+      // Strip the internal `_seq` field so the sink sees the public
+      // `ParseDiagnostic` shape exactly.
+      for (const { code, start, end, detail } of adoptedParser.diagnostics)
+        sink(detail !== undefined ? { code, start, end, detail } : { code, start, end });
+    for (const c of comments!)
+      sink({
+        code: 'comment-discarded',
+        start: c.start,
+        end: c.end,
+        detail: { discardedLength: c.discardedLength },
+      });
+    for (const d of recovered) sink(d);
+  }
 
   if (options.preserveLatex) {
     if (Array.isArray(expr)) return { latex, fn: expr } as MathJsonExpression;

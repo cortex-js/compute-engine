@@ -1127,6 +1127,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'infix',
     precedence: ARROW_PRECEDENCE, // MathML rightwards arrow
     parse: (parser: Parser, lhs: MathJsonExpression, _until) => {
+      // Diagnostics: the parameter(s) are the (already-parsed) left operand.
+      // `operandDiagnosticCheckpoint` points just before it, so pruning covers
+      // both the parameter references and the body below.
+      const diagCp = parser.operandDiagnosticCheckpoint;
       let params: string[] = [];
       if (operator(lhs) === 'Delimiter') lhs = operand(lhs, 1) ?? 'Nothing';
       if (operator(lhs) === 'Sequence') {
@@ -1143,6 +1147,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         parser.parseExpression({ minPrec: ARROW_PRECEDENCE }) ?? 'Nothing';
       if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? 'Nothing';
       if (operator(rhs) === 'Sequence') rhs = ['Block', ...operands(rhs)];
+
+      parser.pruneUndeclared(params, diagCp);
 
       return ['Function', rhs, ...params] as MathJsonExpression;
     },
@@ -3440,11 +3446,38 @@ function lowerIndexedTerm(expr: MathJsonExpression | null): MathJsonExpression {
   return [op, ...args.map((a) => lowerIndexedTerm(a))];
 }
 
+/**
+ * Prune `undeclared-symbol` diagnostics for the symbol names among a function
+ * definition's parameters (`args`), collected since `checkpoint`. The
+ * parameters are bound throughout the function body, so their references — in
+ * the signature and the body — are not undeclared. Diagnostics-only.
+ */
+function pruneFunctionParams(
+  parser: Parser,
+  args: readonly MathJsonExpression[] | null,
+  checkpoint: number
+): void {
+  if (!args || args.length === 0) return;
+  const names: string[] = [];
+  for (const a of args) {
+    const s = symbol(a);
+    if (s) names.push(s);
+  }
+  parser.pruneUndeclared(names, checkpoint);
+}
+
 function parseAssign(
   parser: Parser,
   lhs: MathJsonExpression,
   until?: Readonly<Terminator>
 ): MathJsonExpression | null {
+  // Diagnostics: for the function-definition forms (`f(x) := …`), the
+  // parameters are the (already-parsed) left operand and are bound throughout
+  // the body. Capture the operand checkpoint now — before the rhs
+  // `parseExpression` calls below re-point it — so the parameter references (in
+  // both the LHS signature and the RHS body) can be pruned. See `\mapsto`.
+  const paramDiagCp = parser.operandDiagnosticCheckpoint;
+
   // In local-binding contexts (`;` blocks and `where` bindings), keep
   // simple subscripted names as compound symbols (e.g. `r_1`).
   const isLocalBindingContext = (until?.minPrec ?? 0) >= 19;
@@ -3501,6 +3534,7 @@ function parseAssign(
     if (operator(delimBody) === 'Sequence') args = [...operands(delimBody)];
     else if (delimBody) args = [delimBody!];
 
+    pruneFunctionParams(parser, args, paramDiagCp);
     return ['Assign', fn, ['Function', rhs, ...(args ?? [])]];
   }
 
@@ -3560,6 +3594,7 @@ function parseAssign(
     const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
     if (rhs === null) return null;
 
+    pruneFunctionParams(parser, args, paramDiagCp);
     return ['Assign', fn, ['Function', rhs, ...args]];
   }
 
@@ -3796,10 +3831,22 @@ function matchKeyword(parser: Parser, keyword: string): boolean {
   const start = parser.index;
   parser.skipVisualSpace();
 
+  // Diagnostics: a keyword probe is not a content parse — the keyword tokens
+  // are not a symbol reference. The speculative `parser.parseSymbol()` below
+  // would emit an `undeclared-symbol` for a bare/`\operatorname` keyword (e.g.
+  // `then`, `else`), which survives on the *success* path (no index rewind to
+  // trigger the structural auto-prune). Checkpoint here and roll back on every
+  // exit so no keyword probe ever contributes a diagnostic. Diagnostics-only —
+  // no parse-output effect.
+  const diagCp = parser.diagnosticsCheckpoint();
+
   // Try \text{keyword} or \keyword{keyword} — consume the brace-introducing
   // command first, then match the braced content.
   if (parser.match('\\text') || parser.match('\\keyword')) {
-    if (matchBracedKeyword(parser, keyword)) return true;
+    if (matchBracedKeyword(parser, keyword)) {
+      parser.rollbackDiagnostics(diagCp);
+      return true;
+    }
     parser.index = start;
   }
 
@@ -3807,6 +3854,7 @@ function matchKeyword(parser: Parser, keyword: string): boolean {
   // parseComplexId in parse.ts handles these via parseSymbol
   const saved = parser.index;
   const sym = parser.parseSymbol();
+  parser.rollbackDiagnostics(diagCp);
   if (sym !== null && symbol(sym) === keyword) return true;
   parser.index = saved;
 

@@ -1960,8 +1960,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: '\\lim',
     kind: 'expression',
     parse: (parser: Parser) => {
+      // Diagnostics: checkpoint before `_{x \to 0}` so the limit variable — in
+      // the `\to` clause and in the body — is not flagged as undeclared.
+      const diagCp = parser.diagnosticsCheckpoint();
       if (!parser.match('_')) return null;
+      const declStartToken = parser.index;
       const base = parser.parseGroup();
+      const bodyStartToken = parser.index;
       if (operator(base) !== 'To') return null;
       // Use parseExpression instead of parseArguments('implicit') so that
       // postfix operators like ^x are included in the limit body.
@@ -1970,6 +1975,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         minPrec: MULTIPLICATION_PRECEDENCE,
       });
       if (!expr) return null;
+      const limitVar = symbol(operand(base, 1));
+      // Prune the limit variable in the `_{x \to …}` clause (its declaration)
+      // and the body; a same-named free reference elsewhere would stay flagged.
+      if (limitVar)
+        parser.pruneUndeclared([limitVar], diagCp, bodyStartToken, [
+          [declStartToken, bodyStartToken],
+        ]);
       return [
         'Limit',
         ['Function', expr, operand(base, 1)],
@@ -2712,9 +2724,35 @@ function getIndexes(
   return results;
 }
 
+/**
+ * The names bound by an indexing-set list (the output of {@link getIndexes}):
+ * the index variable of each range (`i` in `i=1..n`) and the element variable
+ * of each membership (`n` in `n \in S`). Used to prune `undeclared-symbol`
+ * diagnostics for bound indices.
+ */
+function boundVariableNames(
+  indexes: ReturnType<typeof getIndexes>
+): Set<string> {
+  const names = new Set<string>();
+  for (const idx of indexes) {
+    if (idx.index && idx.index !== 'Nothing') names.add(idx.index);
+    if (idx.element) {
+      const v = symbol(operand(idx.element, 1));
+      if (v) names.add(v);
+    }
+  }
+  return names;
+}
+
 function parseBigOp(name: string, reduceOp: string, minPrec: number) {
   return (parser: Parser): MathJsonExpression | null => {
     parser.skipSpace();
+
+    // Diagnostics: checkpoint before the sub/superscripts so that references to
+    // the bound index variable — in the subscript (`i=1`) and in the body —
+    // can be retroactively un-flagged as `undeclared-symbol` once the index
+    // names are known. Free variables (e.g. `n` in the upper bound) survive.
+    const diagCp = parser.diagnosticsCheckpoint();
 
     // Push a symbol table early to isolate subscript/superscript parsing
     // This prevents index symbols (like 'n' in 'n \in S, n > 0') from
@@ -2727,9 +2765,17 @@ function parseBigOp(name: string, reduceOp: string, minPrec: number) {
     //
     let sup: MathJsonExpression | null = null;
     let sub: MathJsonExpression | null = null;
+    // Token span of the subscript (`_{i=1}`), where the index variable is
+    // declared. Used to un-flag the declaration occurrence while leaving a
+    // same-named free reference in the *superscript* (upper bound) alone.
+    let subStartToken = -1;
+    let subEndToken = -1;
     while (!(sub && sup) && (parser.peek === '_' || parser.peek === '^')) {
-      if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
-      else if (parser.match('^'))
+      if (parser.match('_')) {
+        subStartToken = parser.index;
+        sub = parser.parseGroup() ?? parser.parseToken();
+        subEndToken = parser.index;
+      } else if (parser.match('^'))
         sup = parser.parseGroup() ?? parser.parseToken();
       parser.skipSpace();
     }
@@ -2750,9 +2796,20 @@ function parseBigOp(name: string, reduceOp: string, minPrec: number) {
     // The index symbols are already in scope from parsing the subscripts
     //
 
+    const bodyStartToken = parser.index;
     const fn = parser.parseExpression({ minPrec: minPrec });
 
     parser.popSymbolTable();
+
+    // Retroactively un-flag references to the bound index variables in the
+    // body and at their declaration (the subscript). A same-named occurrence in
+    // the upper bound (e.g. `n` differs, but were it to collide) stays flagged.
+    parser.pruneUndeclared(
+      boundVariableNames(indexes),
+      diagCp,
+      bodyStartToken,
+      subStartToken >= 0 ? [[subStartToken, subEndToken]] : undefined
+    );
 
     if (fn === null) return [name];
 

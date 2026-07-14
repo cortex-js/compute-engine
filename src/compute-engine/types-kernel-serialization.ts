@@ -2,6 +2,60 @@
 export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
 /**
+ * An opt-in parse-time diagnostic, collected when a LaTeX string is parsed
+ * with `ce.parse(latex, { diagnostics: true })` and exposed on the top-level
+ * result via `BoxedExpression.parseDiagnostics`.
+ *
+ * Diagnostics flag *charitable* parse decisions that are usually errors in
+ * machine-generated LaTeX (LLM output, OCR): a name read as multiplication
+ * where the source looked like a function application, a reference to an
+ * undeclared symbol, an unescaped `%` that discarded input, or trailing noise
+ * silently dropped by error recovery. They are additive metadata — enabling
+ * them never changes the parse output.
+ *
+ * ## Codes (`code`, an open enum)
+ *
+ * - `"undeclared-symbol"` — a parsed symbol reference resolves to no
+ *   declaration (neither a parser-local binding such as a sum index, nor a
+ *   definition in the engine scope). `detail: { name, type }` where `type` is
+ *   the string form of the resolved type (`"unknown"`). Fires at every
+ *   reference site, including plain variables like `x`.
+ * - `"juxtaposition-as-multiply"` — a symbol immediately followed by a
+ *   delimited group `(…)` or a matrix environment was read as multiplication
+ *   rather than function application. `detail: { name, declaredAs }` with
+ *   `declaredAs` one of `"unknown" | "value" | "function"`.
+ * - `"comment-discarded"` — an unescaped `%` discarded the rest of a line.
+ *   `detail: { discardedLength }`.
+ * - `"recovered"` — trailing tokens skipped/coerced by non-strict error
+ *   recovery that do not otherwise surface as an `Error` node. `detail` may
+ *   include the skipped fragment as `{ skipped }`.
+ *
+ * ## Span convention (`start`/`end`)
+ *
+ * Spans for `undeclared-symbol` and `juxtaposition-as-multiply` are offsets
+ * into CE's **normalized** LaTeX (the re-serialized token stream), which
+ * matches the original input only when the input round-trips unchanged.
+ * `comment-discarded` is the exception: because the comment is precisely what
+ * was stripped before tokenization, its span is in **original-input**
+ * coordinates. `recovered` spans are a best-effort original-input range (equal
+ * to normalized coordinates for the comment-free trailing noise that recovery
+ * handles). Per the ratified spec, spans are informational; policy should key
+ * on `code` + `detail`.
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type ParseDiagnostic = {
+  /** A diagnostic code (open enum). */
+  code: string;
+  /** Start offset of the source span (see span convention above). */
+  start: number;
+  /** End offset of the source span. */
+  end: number;
+  /** Code-specific structured detail. */
+  detail?: Record<string, unknown>;
+};
+
+/**
  * Controls how many digits a number is **displayed** with when serialized.
  *
  * This is a display/formatting concern only: it does not change the stored

@@ -36,6 +36,7 @@ import type {
   Scope,
   Tensor,
   TensorDataType,
+  ParseDiagnostic,
 } from '../global-types.js';
 
 import type { NumericValue } from '../numeric-value/types.js';
@@ -141,6 +142,28 @@ export abstract class _BoxedExpression implements Expression {
    */
   readonly verbatimLatex?: string;
   readonly sourceOffsets?: [start: number, end: number];
+
+  /**
+   * Opt-in parse-time diagnostics, attached by `ce.parse(…, {
+   * diagnostics: true })` to the top-level result only. `undefined` otherwise.
+   * See {@link ParseDiagnostic}.
+   */
+  parseDiagnostics?: ReadonlyArray<ParseDiagnostic>;
+
+  /**
+   * @internal
+   * Return an instance safe to annotate with top-level parse metadata
+   * (`parseDiagnostics`) without mutating a shared/interned expression.
+   *
+   * Function expressions are always freshly constructed, so the base
+   * implementation returns `this`. Interned leaf literals (small integers,
+   * cached constants) override this to return a fresh copy so that tagging the
+   * result of `ce.parse('4', { diagnostics: true })` never pollutes the shared
+   * `4` returned elsewhere.
+   */
+  _unshared(): _BoxedExpression {
+    return this;
+  }
 
   constructor(ce: ComputeEngine, metadata?: Metadata) {
     this.engine = ce;

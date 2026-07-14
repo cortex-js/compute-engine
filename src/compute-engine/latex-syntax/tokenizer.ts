@@ -52,6 +52,19 @@ const UNICODE_SUBSCRIPT_MAP: Record<string, string> = {
 export type Token = string;
 
 /**
+ * A `%`-comment discarded during tokenization, in original-input coordinates.
+ * Collected only when a `comments` array is passed to {@link tokenize}.
+ */
+export type DiscardedComment = {
+  /** Offset of the `%` marker in the original input. */
+  start: number;
+  /** Offset of the end of the discarded run (end of line). */
+  end: number;
+  /** Number of characters discarded (`%` through end-of-line). */
+  discardedLength: number;
+};
+
+/**
  * Given a LaTeX expression represented as a character string,
  * the Tokenizer class will scan and return Tokens for the lexical
  * units in the string.
@@ -399,18 +412,44 @@ function expand(lex: Tokenizer, args: string[]): Token[] {
  * @param s - A string of LaTeX. It can include comments (with the `%`
  * marker) and multiple lines.
  */
-export function tokenize(s: string, args: string[] = []): Token[] {
-  // Merge multiple lines into one, and remove comments
-  const lines = s.toString().split(/\r?\n/);
+export function tokenize(
+  s: string,
+  args: string[] = [],
+  comments?: DiscardedComment[]
+): Token[] {
+  // Merge multiple lines into one, and remove comments.
+  // Split keeping the line separators (capture group) so the exact separator
+  // length — `\n` (1) or `\r\n` (2) — advances the original-input offset used
+  // to report discarded-comment spans. `parts` alternates line, separator,
+  // line, separator, …; even indices are lines, odd indices are the following
+  // separator (or `undefined` for the last line).
+  const str = s.toString();
+  const parts = str.split(/(\r?\n)/);
   let stream = '';
   let sep = '';
-  for (const line of lines) {
+  // Offset of the start of the current line in the original string. Advanced
+  // by the line length plus the actual separator length. Used only to report
+  // the original-input span of discarded comments (code `comment-discarded`).
+  let lineOffset = 0;
+  for (let i = 0; i < parts.length; i += 2) {
+    const line = parts[i];
+    const separator = parts[i + 1] ?? '';
     stream += sep;
     sep = ' ';
     // Remove everything after a % (comment marker)
     // (but \% should be preserved...)
     const m = line.match(/((?:\\%)|[^%])*/);
-    if (m !== null) stream += m[0];
+    if (m !== null) {
+      stream += m[0];
+      // An unescaped `%` was found iff the match is shorter than the line: the
+      // discarded run is `%` through end-of-line, in original-input coordinates.
+      if (comments !== undefined && m[0].length < line.length) {
+        const start = lineOffset + m[0].length;
+        const end = lineOffset + line.length;
+        comments.push({ start, end, discardedLength: line.length - m[0].length });
+      }
+    }
+    lineOffset += line.length + separator.length;
   }
 
   const tokenizer = new Tokenizer(stream);

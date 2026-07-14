@@ -21,7 +21,10 @@ import type {
   Substitution,
   BoxedSubstitution,
   CanonicalOptions,
+  ParseDiagnostic,
 } from './types-kernel-serialization.js';
+
+export type { ParseDiagnostic };
 import type {
   EvaluateOptions as KernelEvaluateOptions,
   BoxedRule as KernelBoxedRule,
@@ -723,6 +726,22 @@ export interface Expression {
 
   /** Source offsets in the original source string, when available. */
   sourceOffsets?: [start: number, end: number];
+
+  /**
+   * Parse-time diagnostics collected when the expression was produced by
+   * `ce.parse(latex, { diagnostics: true })`.
+   *
+   * This property is present (as a possibly-empty, frozen array) **only** on
+   * the top-level expression returned by a `diagnostics: true` parse; it is
+   * `undefined` everywhere else (sub-expressions, and any expression parsed
+   * without the flag). Diagnostics are purely additive metadata: enabling them
+   * never changes the parse output.
+   *
+   * See {@link ParseDiagnostic} for the code enumeration and span conventions.
+   *
+   * @category Latex Parsing and Serialization
+   */
+  parseDiagnostics?: ReadonlyArray<ParseDiagnostic>;
 
   /** If `true`, this expression is in a canonical form. */
   get isCanonical(): boolean;

@@ -1,19 +1,40 @@
+## [Unreleased]
+
+### Parse Diagnostics
+
+- **New opt-in `diagnostics` parse option.**
+  `ce.parse(latex, { diagnostics: true })` attaches a `parseDiagnostics` array
+  to the top-level result, flagging _charitable_ parse decisions that are
+  usually errors in machine-generated LaTeX (LLM output, OCR). Four codes are
+  reported: `undeclared-symbol` (a symbol reference with no declaration —
+  `detail: { name, type }`), `juxtaposition-as-multiply` (a symbol immediately
+  followed by a delimited group `(…)` or a matrix environment read as
+  multiplication — `detail: { name, declaredAs }`), `comment-discarded` (an
+  unescaped `%` dropped input — `detail: { discardedLength }`), and `recovered`
+  (trailing noise silently skipped by non-strict error recovery). Each carries a
+  `start`/`end` source span: `undeclared-symbol` and `juxtaposition-as-multiply`
+  are offsets into CE's normalized LaTeX, while `comment-discarded` (and
+  best-effort `recovered`) use original-input coordinates. The feature is purely
+  additive — enabling it never changes the parse output — and works under
+  `{ canonical: false }`. `parseDiagnostics` is present (a possibly-empty array)
+  only on the result of a `diagnostics: true` parse, and `undefined` otherwise.
+
 ## 0.77.1 _2026-07-13_
 
 ### Breaking Changes
 
 - **`f'(x)` now parses to `["Apply", ["Derivative", "f", 1], x]`** instead of
   `["D", ["f", x], x]`. Prime notation on an applied function denotes the
-  *derivative function evaluated at the argument* — Lagrange semantics, as in
+  _derivative function evaluated at the argument_ — Lagrange semantics, as in
   Mathematica and Desmos — not the derivative of the applied expression with
-  respect to an inferred variable. The previous representation produced
-  silently wrong results whenever the argument was not a bare variable:
-  `f'(2)` evaluated to `0` instead of `f'` evaluated at 2 (e.g. `6` for
-  `f(x) := x^2+2x+1`), and `f'(2x)` picked up a spurious chain-rule factor
-  (`8x+4` instead of `4x+2`). Higher orders (`f''(2)` → `2`) and the
-  `f^{(n)}(x)` superscript form follow the same rule. Serialization is
-  unchanged (`f^{\prime}(x)`), so LaTeX round-trips are unaffected; only
-  consumers pattern-matching the MathJSON parse shape need updating.
+  respect to an inferred variable. The previous representation produced silently
+  wrong results whenever the argument was not a bare variable: `f'(2)` evaluated
+  to `0` instead of `f'` evaluated at 2 (e.g. `6` for `f(x) := x^2+2x+1`), and
+  `f'(2x)` picked up a spurious chain-rule factor (`8x+4` instead of `4x+2`).
+  Higher orders (`f''(2)` → `2`) and the `f^{(n)}(x)` superscript form follow
+  the same rule. Serialization is unchanged (`f^{\prime}(x)`), so LaTeX
+  round-trips are unaffected; only consumers pattern-matching the MathJSON parse
+  shape need updating.
 
 ### Bug Fixes
 
@@ -21,73 +42,71 @@
   regression). Declaring a function symbol before assigning its body —
   `ce.declare("f", "function")` (or with an explicit signature such as
   `"(number) -> number"`) followed by `f(x) := x^2 + 2x + 1` — left the
-  function's derivative inert: `f'(x)` evaluated to itself instead of
-  `2x + 2`, and `["D", "f", "x"]` evaluated to `0`, even though direct calls
-  like `f(2)` worked. The declared-signature reconciliation introduced in
-  0.77.0 keeps the assigned function literal in the symbol's *value*
-  definition (preserving the declared signature) instead of converting it to
-  an operator definition, and the symbolic differentiation path only expanded
-  function bodies from operator definitions. Differentiation now expands
-  user-defined function bodies from both definition shapes.
+  function's derivative inert: `f'(x)` evaluated to itself instead of `2x + 2`,
+  and `["D", "f", "x"]` evaluated to `0`, even though direct calls like `f(2)`
+  worked. The declared-signature reconciliation introduced in 0.77.0 keeps the
+  assigned function literal in the symbol's _value_ definition (preserving the
+  declared signature) instead of converting it to an operator definition, and
+  the symbolic differentiation path only expanded function bodies from operator
+  definitions. Differentiation now expands user-defined function bodies from
+  both definition shapes.
 
 ## 0.77.0 _2026-07-13_
 
 ### Pattern Matching
 
 - **New `Match` operator for structural pattern matching.**
-  `["Match", subject, ["MatchCase", pattern, body], …]` selects the first
-  case whose pattern matches the structure of the subject and applies its
-  body to the captured values:
+  `["Match", subject, ["MatchCase", pattern, body], …]` selects the first case
+  whose pattern matches the structure of the subject and applies its body to the
+  captured values:
   `["Match", ["List", 3, 4], ["MatchCase", ["List", "_a", "_b"], ["Add", "a", "b"]]]`
   → `7`. Cases may carry a guard (`["MatchCase", pattern, guard, body]`);
-  `["Pin", expr]` matches the *value* of an expression (a constant like
-  `Pi`, or the current value of a variable); `["Alternatives", p1, p2, …]`
-  shares one body among several binding-free patterns. Unlike `Which`,
-  which stays unevaluated while a condition is undecidable, `Match` always
-  decides — a symbolic subject falls through to a wildcard case. No
-  matching case yields an `["Error", "'match-no-case'"]` value.
-- **Cortex: `match` expression.** The reserved `match` keyword is now a
-  full pattern-matching expression:
+  `["Pin", expr]` matches the _value_ of an expression (a constant like `Pi`, or
+  the current value of a variable); `["Alternatives", p1, p2, …]` shares one
+  body among several binding-free patterns. Unlike `Which`, which stays
+  unevaluated while a condition is undecidable, `Match` always decides — a
+  symbolic subject falls through to a wildcard case. No matching case yields an
+  `["Error", "'match-no-case'"]` value.
+- **Cortex: `match` expression.** The reserved `match` keyword is now a full
+  pattern-matching expression:
   `match x { 0 => "zero"; 1 | 2 | == Pi => "small"; [first, ...rest] => first; n if n > 3 => n; _ => "other" }`.
   Bare identifiers in a pattern always bind (a non-final catch-all like
   `Pi => …` is a parse error suggesting `== Pi` to match the constant);
   `== expr` pins a value; `|` gives or-alternatives; `[…]`, `(…)` and
-  `{key -> pat}` destructure lists, tuples and dictionaries (open
-  matching); `n: integer` adds a type guard; `...rest` captures the tail.
+  `{key -> pat}` destructure lists, tuples and dictionaries (open matching);
+  `n: integer` adds a type guard; `...rest` captures the tail.
 - **Constant-time dispatch and compilation.** Matches over constant cases
-  dispatch through a cached table instead of the general pattern matcher,
-  and fixed-shape destructuring compiles to direct positional checks.
-  `compile()` emits comparison chains or a JavaScript `switch` for
-  constant cases and destructuring closures for fixed shapes; symbolic
-  patterns (e.g. `a + b`) fail closed with a clear error rather than
-  producing incorrect code.
+  dispatch through a cached table instead of the general pattern matcher, and
+  fixed-shape destructuring compiles to direct positional checks. `compile()`
+  emits comparison chains or a JavaScript `switch` for constant cases and
+  destructuring closures for fixed shapes; symbolic patterns (e.g. `a + b`) fail
+  closed with a clear error rather than producing incorrect code.
 
 ### Typed Function Literals
 
 - **Function literals can declare parameter and return types.** A `Function`
-  parameter may be annotated — `["Typed", "x", "'integer'"]` — and the body
-  may carry a return-type ascription, so
+  parameter may be annotated — `["Typed", "x", "'integer'"]` — and the body may
+  carry a return-type ascription, so
   `["Function", ["Add", "x", 1], ["Typed", "x", "'integer'"]]` now has type
   `(x: integer) -> integer` instead of `(unknown) -> number`. Annotations feed
-  body type inference, and in strict mode arguments are checked at
-  application: applying `2.5` to an `integer` parameter yields an
-  `incompatible-type` error instead of silently computing. Partial application
-  preserves the remaining annotations and the return type. Assigning an
-  annotated literal to a symbol gives it the full typed signature — including
-  the declared return type, which is an *ascription* (authoritative, like a
-  TypeScript annotation) rather than a check against inference. Untyped
-  literals are unchanged.
-- **New `Typed` operator for type ascription.** `["Typed", expr, type]`
-  asserts the type of an expression for the type system and is transparent at
+  body type inference, and in strict mode arguments are checked at application:
+  applying `2.5` to an `integer` parameter yields an `incompatible-type` error
+  instead of silently computing. Partial application preserves the remaining
+  annotations and the return type. Assigning an annotated literal to a symbol
+  gives it the full typed signature — including the declared return type, which
+  is an _ascription_ (authoritative, like a TypeScript annotation) rather than a
+  check against inference. Untyped literals are unchanged.
+- **New `Typed` operator for type ascription.** `["Typed", expr, type]` asserts
+  the type of an expression for the type system and is transparent at
   evaluation. It accepts a type string (`"'integer'"`) or a type-name symbol
   (`integer`). LaTeX serialization drops annotations (no typed-parameter
   notation in v1); MathJSON round-trips them.
 - **Cortex: typed function definitions are enforced end to end.**
-  `f(x: integer) -> real = x + 1`, `function g(n: integer) -> integer {…}`,
-  and the anonymous form `(x: integer) |-> x + 1` (new grammar) all parse to
-  native annotated literals; mistyped calls error, declared return types are
-  carried, and `serializeCortex` reconstructs the typed syntax faithfully.
-  Recursive typed definitions work
+  `f(x: integer) -> real = x + 1`, `function g(n: integer) -> integer {…}`, and
+  the anonymous form `(x: integer) |-> x + 1` (new grammar) all parse to native
+  annotated literals; mistyped calls error, declared return types are carried,
+  and `serializeCortex` reconstructs the typed syntax faithfully. Recursive
+  typed definitions work
   (`fact(n: integer) -> integer = if n <= 1 {1} else {n * fact(n - 1)}`).
 
 ### Programming and Collections
@@ -107,70 +126,67 @@
 
 ### Symbolic Computation
 
-- **Arithmetic and function application thread through conditional values.**
-  A restricted value `When(v, cond)` and a piecewise `Which(c_1, v_1, …)` now
-  flow through scalar operations instead of staying inert:
-  `sin(When(x, x > 0))` → `When(sin(x), x > 0)`, guards combining by
-  conjunction (`When(x, x > 0) · When(y, y < 1)` →
-  `When(x·y, x > 0 ∧ y < 1)`), and `Which(x > 0, 1, x < 0, -1) + 2` →
-  `Which(x > 0, 3, x < 0, 1)`. Logic operators are excluded (so
-  `And(When(A, g), False)` still short-circuits to `False`), and piecewise
-  products above 16 combined branches stay unevaluated.
+- **Arithmetic and function application thread through conditional values.** A
+  restricted value `When(v, cond)` and a piecewise `Which(c_1, v_1, …)` now flow
+  through scalar operations instead of staying inert: `sin(When(x, x > 0))` →
+  `When(sin(x), x > 0)`, guards combining by conjunction
+  (`When(x, x > 0) · When(y, y < 1)` → `When(x·y, x > 0 ∧ y < 1)`), and
+  `Which(x > 0, 1, x < 0, -1) + 2` → `Which(x > 0, 3, x < 0, 1)`. Logic
+  operators are excluded (so `And(When(A, g), False)` still short-circuits to
+  `False`), and piecewise products above 16 combined branches stay unevaluated.
 - **Restriction guards survive arithmetic cancellation.** Evaluating
-  `When(x, c) − When(x, c)` previously folded to plain `0`, silently
-  discarding the restriction on the (fat) region where `c` fails; it now
-  yields `When(0, c)`. Similarly `0 · When(x, c)` → `When(0, c)` and
+  `When(x, c) − When(x, c)` previously folded to plain `0`, silently discarding
+  the restriction on the (fat) region where `c` fails; it now yields
+  `When(0, c)`. Similarly `0 · When(x, c)` → `When(0, c)` and
   `When(x, c) / When(x, c)` → `When(1, c)`.
 - **`When` respects numeric approximation.** `When(π, cond).N()` with a true
   condition now numericizes (previously the option was dropped and the value
   stayed symbolic).
 - **DMS angles stay exact.** (contributed by
-  [yelliver](https://github.com/yelliver)) Degrees-minutes-seconds notation
-  now parses to an exact rational number of degrees instead of a float
-  (`9°30'` is `19/2°`),
-  and `Degrees` converts any rational — not just integers — to an exact
-  multiple of π, so `5°37'30"` simplifies to `π/32`. Decimal components are
-  recovered exactly when possible (`9°30'15.5"` → `68431/7200°`) and
-  otherwise fall back to floats. `Degrees` of values beyond 2⁵³ no longer
-  loses precision. In raw (non-canonical) parsing, DMS angles that previously
-  produced a float now produce a `Rational`. (#321)
+  [yelliver](https://github.com/yelliver)) Degrees-minutes-seconds notation now
+  parses to an exact rational number of degrees instead of a float (`9°30'` is
+  `19/2°`), and `Degrees` converts any rational — not just integers — to an
+  exact multiple of π, so `5°37'30"` simplifies to `π/32`. Decimal components
+  are recovered exactly when possible (`9°30'15.5"` → `68431/7200°`) and
+  otherwise fall back to floats. `Degrees` of values beyond 2⁵³ no longer loses
+  precision. In raw (non-canonical) parsing, DMS angles that previously produced
+  a float now produce a `Rational`. (#321)
 
 ### Calculus
 
 - **Exponentials with any linear exponent integrate.** `∫e^{−ax}dx` with a
-  symbolic `a` previously stayed unevaluated (only `e^{a·x}`-shaped
-  exponents were recognized); it now returns `−e^{−ax}/a`. Any linear
-  exponent works: `∫e^{3−2x}dx`, `∫5e^{−x/2}dx`.
+  symbolic `a` previously stayed unevaluated (only `e^{a·x}`-shaped exponents
+  were recognized); it now returns `−e^{−ax}/a`. Any linear exponent works:
+  `∫e^{3−2x}dx`, `∫5e^{−x/2}dx`.
 - **Improper integrals with symbolic parameters return convergence-guarded
-  results.** `∫₀^∞ e^(−ax)dx` with a free `a` previously stayed unevaluated;
-  it now returns `1/a {0 < a}`. Results that formerly leaked indeterminate
-  endpoint forms are fixed: `∫₀^1 xⁿdx` returned an expression containing
-  `0^(n+1)`, and `∫₁^∞ x^(−s)dx` one containing `∞^(1−s)`; they now return
-  `1/(n+1) {0 < n+1}` and `1/(s−1) {1 < s}`. Integrals whose endpoint
-  behavior cannot be classified stay unevaluated rather than leaking
-  indeterminates. Numeric-parameter integrals are unchanged.
+  results.** `∫₀^∞ e^(−ax)dx` with a free `a` previously stayed unevaluated; it
+  now returns `1/a {0 < a}`. Results that formerly leaked indeterminate endpoint
+  forms are fixed: `∫₀^1 xⁿdx` returned an expression containing `0^(n+1)`, and
+  `∫₁^∞ x^(−s)dx` one containing `∞^(1−s)`; they now return `1/(n+1) {0 < n+1}`
+  and `1/(s−1) {1 < s}`. Integrals whose endpoint behavior cannot be classified
+  stay unevaluated rather than leaking indeterminates. Numeric-parameter
+  integrals are unchanged.
 - **`Series` expands at algebraic branch points (Puiseux series).** A series
   expansion may now carry fractional powers: `Series(√(sin x), x)` →
   `√x − x^{5/2}/12 + x^{9/2}/1440 + O(x^{13/2})`. This covers `√x`, `1/√x`,
   `x^{3/2}·e^x`, `Root(g, r)` and rational powers `g^{p/r}` where the base
-  vanishes (or has a pole), as well as compositions: `cos(√x)`, `csc(√x)`
-  (→ `1/√x + √x/6 + …`), and `Γ(√x)` (→ `1/√x − γ + …`).
-- **`Series` expands through logarithmic singularities.** Expanding about a
-  zero or pole of a logarithm's argument now yields a log-carrying series:
-  `Series(ln(sin x), x)` → `ln x − x²/6 − x⁴/180 + O(x⁶)`, and
-  `Series(x^x, x)` → `1 + x·ln x + x²·ln²x/2 + …`. Base-`b` logarithms
-  (`log₂ x`, `log₁₀ x`) expand through the same path. Nested or reciprocal
-  logarithms (`ln(ln x)`, `1/ln x`) and essential singularities (`e^{1/x}`)
-  still stay unevaluated rather than returning a partial expansion.
+  vanishes (or has a pole), as well as compositions: `cos(√x)`, `csc(√x)` (→
+  `1/√x + √x/6 + …`), and `Γ(√x)` (→ `1/√x − γ + …`).
+- **`Series` expands through logarithmic singularities.** Expanding about a zero
+  or pole of a logarithm's argument now yields a log-carrying series:
+  `Series(ln(sin x), x)` → `ln x − x²/6 − x⁴/180 + O(x⁶)`, and `Series(x^x, x)`
+  → `1 + x·ln x + x²·ln²x/2 + …`. Base-`b` logarithms (`log₂ x`, `log₁₀ x`)
+  expand through the same path. Nested or reciprocal logarithms (`ln(ln x)`,
+  `1/ln x`) and essential singularities (`e^{1/x}`) still stay unevaluated
+  rather than returning a partial expansion.
 - **`Series` of an irrational power no longer returns an invalid expansion.**
   `Series(x^π, x)` previously produced coefficients containing unresolved
-  `0^{π−1}`-style indeterminates; it now stays unevaluated at 0 (the
-  expansion about a regular point, e.g. `x^π` about 2, is unchanged).
+  `0^{π−1}`-style indeterminates; it now stays unevaluated at 0 (the expansion
+  about a regular point, e.g. `x^π` about 2, is unchanged).
 - **Logarithmic asymptotic expansions at `±∞`.** A log-carrying expansion at
-  `+∞` now resolves back to `x` instead of deferring:
-  `Series(ln x, x, +∞)` → `ln x`, and
-  `Series(ln(x²+x), x, +∞)` → `2 ln x + 1/x − 1/(2x²) + …`. At `−∞` (a
-  logarithm of a negative quantity) such expansions still stay unevaluated.
+  `+∞` now resolves back to `x` instead of deferring: `Series(ln x, x, +∞)` →
+  `ln x`, and `Series(ln(x²+x), x, +∞)` → `2 ln x + 1/x − 1/(2x²) + …`. At `−∞`
+  (a logarithm of a negative quantity) such expansions still stay unevaluated.
 - **Stirling asymptotics for the log-gamma.** `Series(GammaLn(x), x, +∞)` (and
   the parsed `ln Γ(x)`) now returns Stirling's series
   `x·ln x − x − ½ln x + ½ln(2π) + 1/(12x) − 1/(360x³) + O(1/x⁵)`. The series is
@@ -190,33 +206,29 @@
 
 ### Sums and Products
 
-- **Geometric series closed form.** `Σ_{n=0}^∞ rⁿ` now evaluates: exactly for
-  a numeric ratio (`Σ(1/2)ⁿ → 2`, `Σ(1/√2)ⁿ → 2 + √2`), and with its
-  convergence condition for a symbolic ratio (`Σxⁿ → 1/(1−x) {|x| < 1}`).
-  Constant multiples and integer start indices are handled
-  (`Σ_{n=2}^∞ xⁿ → x²/(1−x) {|x| < 1}`); divergent numeric ratios stay
-  unevaluated.
+- **Geometric series closed form.** `Σ_{n=0}^∞ rⁿ` now evaluates: exactly for a
+  numeric ratio (`Σ(1/2)ⁿ → 2`, `Σ(1/√2)ⁿ → 2 + √2`), and with its convergence
+  condition for a symbolic ratio (`Σxⁿ → 1/(1−x) {|x| < 1}`). Constant multiples
+  and integer start indices are handled (`Σ_{n=2}^∞ xⁿ → x²/(1−x) {|x| < 1}`);
+  divergent numeric ratios stay unevaluated.
 
 ### Solving Equations
 
 - **Radical equations with a symbolic right-hand side return guarded roots.**
   `Solve(√(x+3) = a, x)` previously returned `[]`; it now returns
-  `a² − 3 {0 <= a}` (a square root is non-negative, so a real solution
-  exists only for `a ≥ 0`). Substituting a concrete value resolves the
-  guard: `a = 2` gives `1`, `a = −2` gives `Undefined`. Numeric right-hand
-  sides are unchanged.
+  `a² − 3 {0 <= a}` (a square root is non-negative, so a real solution exists
+  only for `a ≥ 0`). Substituting a concrete value resolves the guard: `a = 2`
+  gives `1`, `a = −2` gives `Undefined`. Numeric right-hand sides are unchanged.
 - **Trigonometric and hyperbolic equations with symbolic coefficients record
   their validity condition.** `Solve(sin(x) = a, x)` previously returned
-  `arcsin(a)` and `π − arcsin(a)` unconditionally — wrong whenever
-  `|a| > 1`. Roots now carry their domain-of-validity guard — a `When`
-  restriction, displayed `arcsin(a) {|a| <= 1}` (LaTeX
-  `\arcsin(a)\left\{|a|\le 1\right\}`). The guard resolves as soon as it is
-  decidable:
-  substituting `a = 1/2` collapses the root to `π/6`, while `a = 3` yields
-  `Undefined`, and a guard known false at solve time prunes the root (down
-  to `[]`). Numeric-coefficient equations are unchanged. The same applies to
-  `cos` (`|ratio| ≤ 1`), `cosh` (`ratio ≥ 1`), and `tanh` (`|ratio| < 1`)
-  equations.
+  `arcsin(a)` and `π − arcsin(a)` unconditionally — wrong whenever `|a| > 1`.
+  Roots now carry their domain-of-validity guard — a `When` restriction,
+  displayed `arcsin(a) {|a| <= 1}` (LaTeX `\arcsin(a)\left\{|a|\le 1\right\}`).
+  The guard resolves as soon as it is decidable: substituting `a = 1/2`
+  collapses the root to `π/6`, while `a = 3` yields `Undefined`, and a guard
+  known false at solve time prunes the root (down to `[]`). Numeric-coefficient
+  equations are unchanged. The same applies to `cos` (`|ratio| ≤ 1`), `cosh`
+  (`ratio ≥ 1`), and `tanh` (`|ratio| < 1`) equations.
 - **`Solve` of an inequality stays inert instead of returning an empty list.**
   `Solve(x^2 < 4, x)` previously returned `[]`, which reads as "no solutions";
   univariate inequality solving is unsupported, so the expression now stays
@@ -246,43 +258,43 @@
   polynomial; the interval (`]0, 1[`) and indexing (`a[6]`) notations are
   unchanged.
 - **`\operatorname{nPr}(n, r)` now has a definition.** Matching
-  `\operatorname{nCr}` (the binomial coefficient), the Desmos
-  permutation-count notation lowers to `Choose(n, r)·r!` (= n!/(n−r)!), so
-  `nPr(5, 2)` evaluates to `20`. Previously it parsed to an inert symbol and
-  stayed symbolic under `N()`, silently producing `NaN` in a compiled function.
+  `\operatorname{nCr}` (the binomial coefficient), the Desmos permutation-count
+  notation lowers to `Choose(n, r)·r!` (= n!/(n−r)!), so `nPr(5, 2)` evaluates
+  to `20`. Previously it parsed to an inert symbol and stayed symbolic under
+  `N()`, silently producing `NaN` in a compiled function.
 
 ### Arithmetic
 
 - **`Round` accepts an optional precision argument.** `Round(x, n)` rounds `x`
-  to `n` decimal places — `Round(2.567, 2) → 2.57`, `Round(1234.5, −2) → 1200`
-  — matching the Desmos/spreadsheet `round(x, n)` convention. Previously the
+  to `n` decimal places — `Round(2.567, 2) → 2.57`, `Round(1234.5, −2) → 1200` —
+  matching the Desmos/spreadsheet `round(x, n)` convention. Previously the
   second argument produced an `unexpected-argument` error. The single-argument
   round-to-integer form is unchanged, and the two-argument form compiles on the
   `javascript` and `interval-js` targets.
-- **New `Rationalize` operator for rational approximation.**
-  `Rationalize(x)` approximates a real number by a rational at full working
-  precision (like single-argument `Rational`); with a tolerance,
-  `Rationalize(x, tolerance)` returns the rational with the smallest
-  denominator within the bound — `Rationalize(√3, 1/500) → 26/15`,
-  `Rationalize(π, 1/100) → 22/7` — a continued-fraction convergent cut.
+- **New `Rationalize` operator for rational approximation.** `Rationalize(x)`
+  approximates a real number by a rational at full working precision (like
+  single-argument `Rational`); with a tolerance, `Rationalize(x, tolerance)`
+  returns the rational with the smallest denominator within the bound —
+  `Rationalize(√3, 1/500) → 26/15`, `Rationalize(π, 1/100) → 22/7` — a
+  continued-fraction convergent cut.
 
 ### Number Theory
 
 - **New `StirlingS1` operator: signed Stirling numbers of the first kind.**
   `StirlingS1(n, m)` is the coefficient of xᵐ in the falling factorial
-  x(x−1)…(x−n+1); its absolute value counts the permutations of n elements
-  with m disjoint cycles — `StirlingS1(5, 2) → −50`. Complements the existing
+  x(x−1)…(x−n+1); its absolute value counts the permutations of n elements with
+  m disjoint cycles — `StirlingS1(5, 2) → −50`. Complements the existing
   `Stirling` (second kind).
 
 ### Relational Operators
 
 - **`Equal` and `NotEqual` broadcast over a named list operand.** With
-  `R = [1, 2, 3]`, `x² + y² = R²` now broadcasts to a list of three
-  element-wise equations — matching the literal-list form
-  (`x² + y² = [1, 2, 3]`) and the inequality operators (`<`, `≤`, …), which
-  already broadcast. Previously the named form collapsed to a single `False`.
-  Whole-list equality, where two or more operands are collections
-  (`[1, 2] = [1, 2]`), still returns a single boolean.
+  `R = [1, 2, 3]`, `x² + y² = R²` now broadcasts to a list of three element-wise
+  equations — matching the literal-list form (`x² + y² = [1, 2, 3]`) and the
+  inequality operators (`<`, `≤`, …), which already broadcast. Previously the
+  named form collapsed to a single `False`. Whole-list equality, where two or
+  more operands are collections (`[1, 2] = [1, 2]`), still returns a single
+  boolean.
 
 ## 0.76.0 _2026-07-11_
 

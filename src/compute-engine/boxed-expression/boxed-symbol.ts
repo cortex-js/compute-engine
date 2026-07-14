@@ -139,6 +139,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this._hash;
   }
 
+  override _unshared(): BoxedSymbol {
+    // Constants (`Pi`, `True`, …) and common symbols are interned; return a
+    // fresh copy so parse-time metadata does not leak onto the shared instance.
+    return new BoxedSymbol(this.engine, this._id, {
+      metadata: {
+        latex: this.verbatimLatex,
+        sourceOffsets: this.sourceOffsets,
+      },
+      def: this._def,
+    });
+  }
+
   get isPure(): boolean {
     return true;
   }

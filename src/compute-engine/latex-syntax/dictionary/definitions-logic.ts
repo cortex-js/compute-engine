@@ -697,6 +697,9 @@ export function parseQuantifier(
 ) => MathJsonExpression | null {
   return (parser, terminator) => {
     const index = parser.index;
+    // Diagnostics: checkpoint before the quantified variable so its references
+    // (the binder and the body) are not flagged as `undeclared-symbol`.
+    const diagCp = parser.diagnosticsCheckpoint();
     const useTightBinding = parser.options.quantifierScope !== 'loose';
 
     // There are several acceptable forms:
@@ -720,6 +723,9 @@ export function parseQuantifier(
     //
 
     const symbol = parser.parseSymbol(terminator);
+    // The quantified variable is a bound name; drop `undeclared-symbol`
+    // diagnostics for it (emitted here and in the body).
+    const boundName = typeof symbol === 'string' ? symbol : null;
     if (symbol) {
       parser.skipSpace();
       if (
@@ -742,18 +748,26 @@ export function parseQuantifier(
         parser.enterQuantifierScope();
         const body = parser.parseExpression(bodyTerminator);
         parser.exitQuantifierScope();
+        if (boundName) parser.pruneUndeclared([boundName], diagCp);
         return [kind, symbol, missingIfEmpty(body)] as MathJsonExpression;
       }
       // Enter quantifier scope so predicates are recognized
       parser.enterQuantifierScope();
       const body = parser.parseEnclosure();
       parser.exitQuantifierScope();
-      if (body) return [kind, symbol, missingIfEmpty(body)];
+      if (body) {
+        if (boundName) parser.pruneUndeclared([boundName], diagCp);
+        return [kind, symbol, missingIfEmpty(body)];
+      }
     }
 
     //
     // 2. If we didn't find a standalone symbol, we look for a condition
     //
+    // Backtracking out of the standalone-symbol attempt: the `parser.index =
+    // index` rewind auto-prunes any diagnostics it speculatively emitted (see
+    // the parser's `set index`); they are re-emitted, if still applicable,
+    // while re-parsing as a condition below.
     parser.index = index;
     // Stop at colon separators so the quantifier can consume them
     const condTerminator = {

@@ -42,6 +42,7 @@ export type {
   LatexDictionary,
   SerializeLatexOptions,
   ParseLatexOptions,
+  ParseDiagnostic,
   LatexString,
 } from './compute-engine/latex-syntax/types.js';
 
