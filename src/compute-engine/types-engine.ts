@@ -101,6 +101,12 @@ export type OperatorInfo = {
    * rewrite to a different operator and therefore report `false` even though
    * they do compute: `Exp` (→ `Power`), `Square` (→ `Power`), `Complex`,
    * and `Greater` (→ `Less`). Equivalent to `kind === 'function'`.
+   *
+   * Conversely, this is a per-operator capability, not per-call inertness:
+   * a head can report `true` yet return typical applications unevaluated —
+   * e.g. `Element` and `ForAll` have `evaluate` handlers but stay symbolic
+   * unless the proposition can be decided (`Element(x, RealNumbers)` echoes
+   * back when nothing is known about `x`).
    */
   canEvaluate: boolean;
 };
@@ -315,6 +321,11 @@ export interface IComputeEngine {
    * side-effect-free. Intended to flag calls to undefined functions in tools
    * such as notebooks; intersect with {@link Expression.freeVariables}
    * to drop deliberate multiplication of defined values.
+   *
+   * Only parenthesized-group application is detected: a symbol juxtaposed
+   * with a matrix environment (`\mathrm{Eigenvalues}\begin{pmatrix}…`) is
+   * not reported, since a matrix never reaches the symbol-with-delimiter
+   * juxtaposition analysis.
    */
   appliedNonFunctions(latex: string): string[];
 
