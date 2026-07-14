@@ -330,6 +330,41 @@ describe('TIMEOUT', () => {
     });
   });
 
+  describe('Substitution storm (nested user functions)', () => {
+    // A user function whose body references its parameter several times
+    // multiplies the expression tree at every nesting level: a symbolic
+    // Newton-iteration chain s(y, s(y, … s(y, x_0))) is Θ(4^depth) nodes.
+    // The per-node checkpoint in `_computeValue` must cancel it at the
+    // deadline — before the fix, the allocation storm never hit a
+    // checkpoint and ran to heap exhaustion (Tycho, 2026-07-14).
+    const defineNewton = () => {
+      ce.parse('f(x) := x + 0.95\\cos(x) + 1').evaluate();
+      ce.parse("s(y, x_p) := \\frac{y - f(x_p)}{f'(x_p)} + x_p").evaluate();
+      let chain = 'x_0';
+      for (let i = 0; i < 15; i++) chain = `s(y, ${chain})`;
+      return ce.parse(chain);
+    };
+
+    it('symbolic nested chain throws CancellationError (sync)', () => {
+      expect(() => defineNewton().evaluate()).toThrow(CancellationError);
+    });
+
+    it('symbolic nested chain throws CancellationError (async)', async () => {
+      await expect(defineNewton().evaluateAsync()).rejects.toThrow(
+        CancellationError
+      );
+    });
+
+    it('numeric nested chain completes (folds to a number per level)', () => {
+      ce.timeLimit = 2000;
+      ce.parse('f(x) := x + 0.95\\cos(x) + 1').evaluate();
+      ce.parse("s(y, x_p) := \\frac{y - f(x_p)}{f'(x_p)} + x_p").evaluate();
+      let chain = '1.5';
+      for (let i = 0; i < 15; i++) chain = `s(2.7, ${chain})`;
+      expect(ce.parse(chain).evaluate().isFinite).toBe(true);
+    });
+  });
+
   describe('deadline cleanup', () => {
     it('deadline is reset after timeout so subsequent evaluations work', () => {
       // First: trigger a timeout

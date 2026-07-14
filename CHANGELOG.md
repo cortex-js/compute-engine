@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+### Evaluation
+
+- **`ce.timeLimit` is now enforced during expression-tree growth.** The
+  evaluation deadline was only checked inside specific loops (collection
+  enumeration, polynomial GCD, …), so an evaluation whose cost is dominated
+  by expression construction never hit a checkpoint. The worst case is a
+  nested user-function chain whose body references a parameter several times
+  — e.g. a symbolic Newton iteration
+  `s(y, x_p) := \frac{y - f(x_p)}{f'(x_p)} + x_p` applied as
+  `s(y, s(y, … s(y, x_0)))` — which grows the result ×4 per nesting level:
+  at depth 15 it previously exhausted an 8 GB heap without ever honoring
+  `timeLimit`. A cooperative checkpoint on the per-node evaluation path now
+  cancels such evaluations at the deadline with a catchable
+  `CancellationError` (`cause: 'timeout'`), e.g. at the default 2 s limit the
+  depth-15 chain aborts using < 60 MB. Numeric chains (each level folds to a
+  number) are unaffected and remain fast. Note: long-running evaluations that
+  previously *completed* after exceeding `timeLimit` now throw — raise
+  `ce.timeLimit` (or set it to `0` for no limit) if you rely on multi-second
+  symbolic evaluations.
+
 ### Library and Definitions
 
 - **`ce.searchDefinitions()` now treats the query as OR-ed keywords.**

@@ -233,6 +233,18 @@ describe('Interpret — v2 negative gates stay inert', () => {
 });
 
 describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => {
+  // The RSolve + anchor-validation pipeline legitimately exceeds the default
+  // 2 s evaluation budget; raise it so the cooperative deadline checkpoint
+  // (see boxed-function.ts `_computeValue`) doesn't cancel the run.
+  let savedTimeLimit: number;
+  beforeAll(() => {
+    savedTimeLimit = ce.timeLimit;
+    ce.timeLimit = 60_000;
+  });
+  afterAll(() => {
+    ce.timeLimit = savedTimeLimit;
+  });
+
   test('Fibonacci 1+1+2+3+5+8+…+55 → Sum(Fibonacci(k), (k,1,10)) = 143', () => {
     // BM finds a(k)=a(k−1)+a(k−2) (L=2); m=6 ≥ 2L+1=5. The samples match the
     // library `Fibonacci` head, so the display body is `Fibonacci(k)`, which

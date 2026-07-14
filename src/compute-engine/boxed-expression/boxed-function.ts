@@ -105,6 +105,12 @@ import {
  */
 const DEFAULT_MATERIALIZATION: [number, number] = [5, 5] as const;
 
+/** Tick counter for the cooperative deadline checkpoint in
+ * `_computeValue`/`_computeValueAsync`. Module-scoped (shared across
+ * engines): the check reads the owning engine's deadline, the counter only
+ * paces how often `Date.now()` is consulted. */
+let _evalTick = 0;
+
 /**
  * A boxed function expression represent an expression composed of an operator
  * (the name of the function) and a list of arguments. For example:
@@ -1309,6 +1315,15 @@ export class BoxedFunction
 
   _computeValue(options?: Partial<EvaluateOptions>): () => Expression {
     return () => {
+      // Cooperative deadline checkpoint on the per-node evaluation path.
+      // Specialized loops (collection enumeration, polynomial GCD, Rubi
+      // matching) carry their own checks, but handler-driven evaluation —
+      // e.g. a user-function body whose parameter substitution multiplies
+      // the tree at every nesting level — never reaches them: without this
+      // check such an evaluation exhausts the heap instead of honoring
+      // `ce.timeLimit`.
+      if ((++_evalTick & 0x3ff) === 0) checkDeadline(this.engine._deadline);
+
       if (!this.isValid || !this._def) return this;
 
       const numericApproximation = options?.numericApproximation ?? false;
@@ -1486,6 +1501,9 @@ export class BoxedFunction
     options?: Partial<EvaluateOptions>
   ): () => Promise<Expression> {
     return async () => {
+      // Cooperative deadline checkpoint — see `_computeValue`.
+      if ((++_evalTick & 0x3ff) === 0) checkDeadline(this.engine._deadline);
+
       if (!this.isValid || !this._def) return this;
 
       const numericApproximation = options?.numericApproximation ?? false;
