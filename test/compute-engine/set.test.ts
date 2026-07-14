@@ -435,3 +435,37 @@ describe('AMBIGUOUS BRACKET PAIRS: interval at the LaTeX boundary only', () => {
     );
   });
 });
+
+describe('ELEMENT — tuple/list of symbols distributes over membership', () => {
+  test('(a, b) ∈ ℤ distributes to a conjunction of memberships', () => {
+    const r = ce.expr(['Element', ['Tuple', 'a', 'b'], 'Integers']).evaluate();
+    // No longer the surprising `False`; the universal idiom "a, b ∈ ℤ".
+    expect(
+      r.isSame(
+        ce.box(['And', ['Element', 'a', 'Integers'], ['Element', 'b', 'Integers']])
+      )
+    ).toBe(true);
+  });
+
+  test('(a, b) ∈ ℝ distributes as well', () => {
+    const r = ce.expr(['Element', ['Tuple', 'a', 'b'], 'RealNumbers']).evaluate();
+    expect(
+      r.isSame(
+        ce.box([
+          'And',
+          ['Element', 'a', 'RealNumbers'],
+          ['Element', 'b', 'RealNumbers'],
+        ])
+      )
+    ).toBe(true);
+  });
+
+  test('a tuple of VALUES is not distributed (product-set membership)', () => {
+    // (1, 2) is not a scalar integer, so membership stays a plain (false) test.
+    expect(ce.expr(['Element', ['Tuple', 1, 2], 'Integers']).evaluate().symbol).toBe('False');
+  });
+
+  test('scalar membership is unchanged', () => {
+    expect(ce.expr(['Element', 3, 'Integers']).evaluate().symbol).toBe('True');
+  });
+});

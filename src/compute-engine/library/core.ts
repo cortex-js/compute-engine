@@ -49,6 +49,7 @@ import type {
   CanonicalForm,
 } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
+import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { isDictionary, isValueDef } from '../boxed-expression/utils.js';
 import {
@@ -1092,13 +1093,44 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Simplify: {
-      description: 'Simplify an expression.',
+      description: [
+        'Simplify(expr): simplify an expression.',
+        'Simplify(expr, assumptions): simplify under one or more boolean',
+        'assumptions (e.g. `x > 0`), or a `List`/`And` of them. The assumptions',
+        'hold only for the duration of the simplification.',
+      ],
       lazy: true,
-      signature: '(any) -> expression',
+      signature: '(any, any?) -> expression',
       type: ([x]) => x?.type ?? undefined,
-      canonical: (ops, { engine: ce }) =>
-        ce._fn('Simplify', checkArity(ce, ops, 1)),
-      evaluate: ([x]) => x.simplify() ?? undefined,
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length === 0) return ce._fn('Simplify', checkArity(ce, ops, 1));
+        if (ops.length > 2) return ce._fn('Simplify', checkArity(ce, ops, 2));
+        // Keep the assumption held (lazy): `x > 0` must not collapse to a
+        // boolean before it is asserted in the simplification scope.
+        return ce._fn('Simplify', ops);
+      },
+      evaluate: (ops, { engine: ce }) => {
+        const x = ops[0];
+        if (x === undefined) return undefined;
+        const assumptions = ops[1];
+        if (assumptions === undefined) return x.simplify() ?? undefined;
+        // A `List`/`And`/`Set` bundles several assumptions; a bare predicate is
+        // one. Each is asserted in a temporary scope so the assumptions do not
+        // leak past this call.
+        const conjuncts =
+          isFunction(assumptions, 'List') ||
+          isFunction(assumptions, 'And') ||
+          isFunction(assumptions, 'Set')
+            ? [...assumptions.ops]
+            : [assumptions];
+        ce.pushScope();
+        try {
+          for (const a of conjuncts) ce.assume(a);
+          return x.simplify() ?? undefined;
+        } finally {
+          ce.popScope();
+        }
+      },
     },
 
     Solve: {
@@ -1123,6 +1155,64 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(any, any*) -> list',
       canonical: (ops, { engine: ce }) => canonicalSolve(ce, ops),
       evaluate: (ops, { engine: ce }) => evaluateSolve(ce, ops),
+    },
+
+    ReplaceAll: {
+      description: [
+        'ReplaceAll(expr, rules): apply one or more replacement rules to `expr`,',
+        'then evaluate the result (Mathematica `expr /. rules`).',
+        'A rule is `lhs -> rhs` (parsed as `To`) or `Rule(lhs, rhs)`. Several',
+        'rules may be given as extra arguments or as a `List`/`Set` of rules;',
+        'they are applied simultaneously in a single pass.',
+      ],
+      // Hold the arguments: the target must not evaluate before substitution,
+      // and the rules carry raw `To`/`Rule` forms.
+      lazy: true,
+      signature: '(any, any+) -> any',
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length < 2)
+          return ce._fn('ReplaceAll', checkArity(ce, ops, 2));
+        return ce._fn('ReplaceAll', ops);
+      },
+      evaluate: (ops, { engine: ce }) => {
+        const target = ops[0]?.canonical;
+        if (target === undefined) return undefined;
+
+        // Gather the rule operands: the 2nd and any further arguments, plus the
+        // members of a `List`/`Set` of rules.
+        const ruleOps: Expression[] = [];
+        for (const op of ops.slice(1)) {
+          if (
+            isFunction(op, 'List') ||
+            isFunction(op, 'Set') ||
+            isFunction(op, 'Sequence')
+          )
+            ruleOps.push(...op.ops);
+          else ruleOps.push(op);
+        }
+
+        // Split into simple symbol substitutions (applied simultaneously with a
+        // single `.subs`, so rule order does not matter) and pattern rules
+        // (applied with the rule machinery).
+        const substitution: Record<string, Expression> = {};
+        const patternRules: Rule[] = [];
+        for (const r of ruleOps) {
+          if (!isFunction(r, 'To') && !isFunction(r, 'Rule')) return undefined;
+          const lhs = r.op1;
+          const rhs = r.op2;
+          const s = sym(lhs);
+          if (s !== undefined) substitution[s] = rhs.canonical;
+          else patternRules.push({ match: lhs.canonical, replace: rhs.canonical });
+        }
+
+        let result = target;
+        if (Object.keys(substitution).length > 0)
+          result = result.subs(substitution);
+        if (patternRules.length > 0)
+          result = result.replace(patternRules) ?? result;
+
+        return result.evaluate();
+      },
     },
 
     CanonicalForm: {

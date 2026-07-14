@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/math-json/types.ts';
 
 import { engine } from '../utils';
 
@@ -620,5 +621,197 @@ describe('SOLVE — assumption bounds routed through root filtering', () => {
       ['Element', 'n', ['Range', -10, 10]],
     ]);
     expect(roots(expr)).toEqual([4]);
+  });
+});
+
+describe('SOLVE — collection-shaped first argument (lifted constraints)', () => {
+  // The digit puzzle: 100a+10b+c = 11(a²+b²+c²), a ∈ 1..9, b,c ∈ 0..9.
+  const digitEq: Expression = [
+    'Equal',
+    ['Add', ['Multiply', 100, 'a'], ['Multiply', 10, 'b'], 'c'],
+    ['Multiply', 11, ['Add', ['Power', 'a', 2], ['Power', 'b', 2], ['Power', 'c', 2]]],
+  ];
+
+  test('full LaTeX expression with brace-set constraints and brace variable list', () => {
+    const expr = ce.parse(
+      '\\mathrm{Solve}(\\{100a+10b+c=11(a^2+b^2+c^2),a\\in\\{1,\\dots,9\\},b\\in\\{0,\\dots,9\\},c\\in\\{0,\\dots,9\\}\\},\\{a,b,c\\})'
+    );
+    expect(tuples(expr)).toEqual([
+      [5, 5, 0],
+      [8, 0, 3],
+    ]);
+  });
+
+  test('bracket spelling (regression) stays working', () => {
+    const expr = ce.parse(
+      '\\mathrm{Solve}(100a+10b+c=11(a^2+b^2+c^2), a\\in\\lbrack1,\\dots,9\\rbrack, b\\in\\lbrack0,\\dots,9\\rbrack, c\\in\\lbrack0,\\dots,9\\rbrack)'
+    );
+    expect(tuples(expr)).toEqual([
+      [5, 5, 0],
+      [8, 0, 3],
+    ]);
+  });
+
+  test('Set variable list: Solve(x^2=4, {x}) returns both roots', () => {
+    const expr = ce.box(['Solve', ['Equal', ['Power', 'x', 2], 4], ['Set', 'x']]);
+    expect(solutions(expr)).toEqual([-2, 2]);
+  });
+
+  test('pure system spelled as a Set solves like the List form', () => {
+    const eq1: Expression = ['Equal', ['Add', 'x', 'y'], 3];
+    const eq2: Expression = ['Equal', ['Subtract', 'x', 'y'], 1];
+    const asSet = ce.box(['Solve', ['Set', eq1, eq2], ['List', 'x', 'y']]);
+    const asList = ce.box(['Solve', ['List', eq1, eq2], ['List', 'x', 'y']]);
+    expect(tuples(asSet)).toEqual([[2, 1]]);
+    expect(tuples(asSet)).toEqual(tuples(asList));
+  });
+
+  test('And-joined equation + Element constraints with an explicit variable list', () => {
+    const expr = ce.box([
+      'Solve',
+      [
+        'And',
+        digitEq,
+        ['Element', 'a', ['Range', 1, 9]],
+        ['Element', 'b', ['Range', 0, 9]],
+        ['Element', 'c', ['Range', 0, 9]],
+      ],
+      ['List', 'a', 'b', 'c'],
+    ]);
+    expect(tuples(expr)).toEqual([
+      [5, 5, 0],
+      [8, 0, 3],
+    ]);
+  });
+
+  test('arity-1: Set bundling equation + Elements, no variable list', () => {
+    const expr = ce.box([
+      'Solve',
+      [
+        'Set',
+        digitEq,
+        ['Element', 'a', ['Range', 1, 9]],
+        ['Element', 'b', ['Range', 0, 9]],
+        ['Element', 'c', ['Range', 0, 9]],
+      ],
+    ]);
+    expect(tuples(expr)).toEqual([
+      [5, 5, 0],
+      [8, 0, 3],
+    ]);
+  });
+
+  test('duplicate domain merges conjunctively (intersection honored)', () => {
+    // 2a = a + 5 → a = 5. The lifted domain 1..9 and the arg-position domain
+    // 1..5 both hold at a = 5.
+    const eq: Expression = ['Equal', ['Multiply', 2, 'a'], ['Add', 'a', 5]];
+    // A single unknown → Phase 1 univariate pipeline → a List of scalar values.
+    const inBoth = ce.box([
+      'Solve',
+      ['Set', eq, ['Element', 'a', ['Range', 1, 9]]],
+      ['List', ['Element', 'a', ['Range', 1, 5]]],
+    ]);
+    expect(solutions(inBoth)).toEqual([5]);
+
+    // 2a = a + 7 → a = 7: inside the lifted 1..9 but outside the arg 1..5, so
+    // the intersection rules it out (decided empty).
+    const eqOut: Expression = ['Equal', ['Multiply', 2, 'a'], ['Add', 'a', 7]];
+    const outside = ce.box([
+      'Solve',
+      ['Set', eqOut, ['Element', 'a', ['Range', 1, 9]]],
+      ['List', ['Element', 'a', ['Range', 1, 5]]],
+    ]);
+    expect(solutions(outside)).toEqual([]);
+  });
+
+  test('lifted Element for a symbol not in the variable list stays inert', () => {
+    const expr = ce.box([
+      'Solve',
+      ['Set', digitEq, ['Element', 'z', ['Range', 1, 9]]],
+      ['List', 'a', 'b'],
+    ]);
+    expect(isUnevaluated(expr)).toBe(true);
+  });
+});
+
+describe('SOLVE — trailing bare domain-name spec (Mathematica)', () => {
+  test('bare Integers domain applies to the unknown', () => {
+    // Solve(x^2 = 4, x, Integers) → both integer roots.
+    const expr = ce.box([
+      'Solve',
+      ['Equal', ['Power', 'x', 2], 4],
+      'x',
+      'Integers',
+    ]);
+    expect(solutions(expr)).toEqual([-2, 2]);
+  });
+
+  test('bare Integers domain: no integer solution decides []', () => {
+    // 2x = 3 → x = 3/2, not an integer → [] (a decision, via the integer path).
+    const linear = ce.box(['Solve', ['Equal', ['Multiply', 2, 'x'], 3], 'x', 'Integers']);
+    expect(solutions(linear)).toEqual([]);
+
+    // x^2 = 2 → ±√2, irrational → [] over the integers.
+    const quad = ce.box(['Solve', ['Equal', ['Power', 'x', 2], 2], 'x', 'Integers']);
+    expect(solutions(quad)).toEqual([]);
+  });
+
+  test('bare Reals domain applies to the unknown (real roots)', () => {
+    const expr = ce.box([
+      'Solve',
+      ['Equal', ['Power', 'x', 2], 4],
+      'x',
+      'RealNumbers',
+    ]);
+    expect(solutions(expr)).toEqual([-2, 2]);
+  });
+
+  test('no bare domain: real-domain solve is unchanged', () => {
+    // x^2 = 2 without a domain keeps the two symbolic sqrt roots.
+    const expr = ce.box(['Solve', ['Equal', ['Power', 'x', 2], 2], 'x']);
+    const r = expr.evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.nops).toBe(2);
+  });
+});
+
+describe('SOLVE — inequality/predicate side conditions', () => {
+  test('single-variable side condition filters the roots (keeps positive)', () => {
+    // Solve({x^2 = 4, x > 0}, x) → [2]  (was an overclaimed []).
+    const expr = ce.box([
+      'Solve',
+      ['Set', ['Equal', ['Power', 'x', 2], 4], ['Greater', 'x', 0]],
+      'x',
+    ]);
+    expect(solutions(expr)).toEqual([2]);
+  });
+
+  test('side condition that excludes every root decides []', () => {
+    const expr = ce.box([
+      'Solve',
+      ['Set', ['Equal', ['Power', 'x', 2], 4], ['Greater', 'x', 5]],
+      'x',
+    ]);
+    expect(solutions(expr)).toEqual([]);
+  });
+
+  test('multi-variable side condition filters candidate tuples', () => {
+    // Solve({a + b = 5, a ∈ 0..5, b ∈ 0..5, a < b}, {a, b}).
+    const expr = ce.box([
+      'Solve',
+      [
+        'Set',
+        ['Equal', ['Add', 'a', 'b'], 5],
+        ['Element', 'a', ['Range', 0, 5]],
+        ['Element', 'b', ['Range', 0, 5]],
+        ['Less', 'a', 'b'],
+      ],
+      ['List', 'a', 'b'],
+    ]);
+    expect(tuples(expr)).toEqual([
+      [0, 5],
+      [1, 4],
+      [2, 3],
+    ]);
   });
 });

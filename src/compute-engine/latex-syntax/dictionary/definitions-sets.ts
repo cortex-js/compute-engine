@@ -17,6 +17,7 @@ import {
   Terminator,
   COMPARISON_PRECEDENCE,
 } from '../types.js';
+import { tryInferRangeFromElements } from './definitions-core.js';
 
 /**
  * Parse the body of an interval expression and create an Interval MathJSON expression.
@@ -576,7 +577,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '{',
     closeTrigger: '}',
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression => {
+    parse: (parser: Parser, body: MathJsonExpression): MathJsonExpression => {
       if (isEmptySequence(body)) return 'EmptySet';
 
       // Unwrap a trailing-comma Delimiter (e.g. `{1, 2,}` parses as
@@ -655,6 +656,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
           }
           return ['Which', ...whichOps];
         }
+        // An ellipsis element sequence (`{1, \dots, 9}`, `{0, 2, \dots, 10}`)
+        // denotes an integer range, the same as the bracket form
+        // (`[1, \dots, 9]`). Infer it and return the bare `Range` (NOT wrapped
+        // in `Set`), matching `parseBrackets`. A sequence of non-numeric or
+        // non-progression elements (`{a, b, c}`, `{1, 2, 3}`) yields `null` and
+        // falls through to the enumerated `Set` below.
+        const inferred = tryInferRangeFromElements(elements, parser);
+        if (inferred) return inferred;
         return ['Set', ...elements];
       }
 

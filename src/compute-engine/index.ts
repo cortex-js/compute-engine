@@ -1329,7 +1329,8 @@ export class ComputeEngine implements IComputeEngine {
    * deterministic list of matching identifiers drawn from the current scope
    * chain (the standard library plus any user declarations).
    *
-   * The query is tokenized on whitespace; a definition matches when **every**
+   * The query is a string (tokenized on whitespace) or an array of strings
+   * (each element tokenized the same way); a definition matches when **any**
    * token is a case-insensitive substring of at least one of its searchable
    * strings, drawn from four axes:
    * - its **identifier** (e.g. `GCD`, `Floor`),
@@ -1344,22 +1345,31 @@ export class ComputeEngine implements IComputeEngine {
    * `'variable'`). Every returned `id` resolves via `ce.lookupDefinition(id)`;
    * chain that call for full detail.
    *
-   * Ranking, best first: exact identifier match, identifier prefix, exact
-   * trigger or exact keyword, identifier substring, trigger substring, then
-   * keyword-substring and description-only matches; ties break by shorter id,
-   * then alphabetically. An empty or whitespace-only query returns `[]`.
+   * Ranking, best first: definitions matching **more** query tokens rank
+   * above those matching fewer; among equals, by match quality — exact
+   * identifier match, identifier prefix, exact trigger or exact keyword,
+   * identifier substring, trigger substring, then keyword-substring and
+   * description-only matches. Multi-word phrases (the whole query string, or
+   * each array element) also count toward match quality, so
+   * `'inverse cosine'` ranks `Arccos` (exact keyword) above token-level
+   * matches. Ties break by shorter id, then alphabetically. An empty or
+   * whitespace-only query returns `[]`.
    *
    * ```ts
-   * ce.searchDefinitions('gcd');       // → [{ id: 'GCD', kind: 'function' }, …]
-   * ce.searchDefinitions('\\lfloor');  // → includes { id: 'Floor', … }
-   * ce.searchDefinitions('golden');    // → includes { id: 'GoldenRatio', kind: 'constant' }
+   * ce.searchDefinitions('gcd');           // → [{ id: 'GCD', kind: 'function' }, …]
+   * ce.searchDefinitions('\\lfloor');      // → includes { id: 'Floor', … }
+   * ce.searchDefinitions('golden');        // → includes { id: 'GoldenRatio', kind: 'constant' }
+   * ce.searchDefinitions('floor quotient integer division');
+   *                                        // → includes Floor, Mod, Remainder, …
+   * ce.searchDefinitions(['gcd', 'least common multiple']);
+   *                                        // → includes GCD and LCM
    * ```
    *
    * @param options.limit Maximum number of results (default 10, clamped to
    * `[1, 100]`).
    */
   searchDefinitions(
-    query: string,
+    query: string | string[],
     options?: { limit?: number }
   ): DefinitionSearchResult[] {
     return searchDefinitionsImpl(this, query, options);

@@ -849,6 +849,16 @@ export function canonicalLimitsSequence(
       const fnOp = op as Expression &
         import('../global-types.js').FunctionInterface;
       result.push(canonicalLimits(fnOp.ops, options) ?? ce.error('missing'));
+    } else if (op.operator === 'Set') {
+      // Mathematica-style definite-integral bounds: `{x, lo, hi}`. POSITIONAL —
+      // only recognized here, in the bounds slot. The `Set` is held (raw), so
+      // its index symbol is not yet canonicalized. Only a proper triple
+      // `{sym, lo, hi}` is recognized; any other shape is left untouched
+      // (unchanged behavior → indefinite integral).
+      const setOps = (op as Expression & import('../global-types.js').FunctionInterface).ops;
+      if (setOps && setOps.length === 3 && isSymbol(setOps[0])) {
+        result.push(canonicalLimits(setOps, options) ?? ce.error('missing'));
+      }
     } else if (isSymbol(op)) {
       // "x" or "1, 10"
       if (isNumber(ops[i + 1])) {
@@ -1005,6 +1015,42 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
       canonicalIndex,
       canonicalLower,
       canonicalUpper,
+    ]);
+  }
+
+  // Mathematica-style iterator set: `{i, lo, hi}` or `{i, lo, hi, step}`.
+  // This reinterpretation is POSITIONAL — it only applies here, in a big
+  // operator's iterator slot. The `Set` is held (raw), so its index symbol
+  // has not been canonicalized (e.g. `i` → imaginary unit) and its operands
+  // have not been sorted/de-duplicated. Only a proper iterator triple is
+  // recognized; any other `Set` shape returns `undefined` (today's behavior).
+  if (isFunction(expr, 'Set')) {
+    const setOps = expr.ops ?? [];
+    const idx = setOps[0];
+    if (!idx || !isSymbol(idx) || setOps.length < 3 || setOps.length > 4)
+      return undefined;
+    if (
+      idx.symbol !== 'Nothing' &&
+      !ce.context.lexicalScope.bindings.has(idx.symbol)
+    )
+      ce.declare(idx.symbol, 'integer');
+    if (setOps.length === 4) {
+      // With a step, use the Range/Element form: `Limits` has no step slot.
+      return ce.function('Element', [
+        idx.canonical,
+        ce.function('Range', [
+          setOps[1].canonical,
+          setOps[2].canonical,
+          setOps[3].canonical,
+        ]),
+      ]);
+    }
+    // `{i, lo, hi}` → `Limits(i, lo, hi)` — same result as the `Tuple`/
+    // `Element` forms, and (unlike Range) preserves symbolic bounds.
+    return ce.function('Limits', [
+      idx.canonical,
+      checkBound(setOps[1].canonical) ?? ce.Nothing,
+      checkBound(setOps[2].canonical) ?? ce.Nothing,
     ]);
   }
 

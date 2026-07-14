@@ -5,6 +5,7 @@ import { Complex } from 'complex-esm';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { collectionElementType } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
@@ -682,6 +683,31 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       // Note: condition is only used during Sum/Product iteration,
       // not for standalone Element evaluation
       if (!collection) return undefined;
+
+      // A `Tuple`/`List`/`Sequence` of plain SYMBOLS against a scalar (number)
+      // collection is the universal math idiom "a, b ∈ ℤ": distribute the
+      // membership over the symbols — `Element((a,b), S)` → `And(Element(a,S),
+      // Element(b,S))`. Only when every element is a symbol (a tuple of *values*
+      // may legitimately be a product-set membership test) and the collection's
+      // element type is a number (not itself a tuple/collection).
+      if (
+        value !== undefined &&
+        (isFunction(value, 'Tuple') ||
+          isFunction(value, 'List') ||
+          isFunction(value, 'Sequence')) &&
+        value.nops >= 1 &&
+        value.ops.every((el) => sym(el) !== undefined)
+      ) {
+        const et = collectionElementType(collection.type.type);
+        if (et !== undefined && ce.type(et).matches('number'))
+          return ce
+            .function(
+              'And',
+              value.ops.map((el) => ce.function('Element', [el, collection]))
+            )
+            .evaluate();
+      }
+
       const result = membershipKleene(ce, value, collection);
       if (result === true) return ce.True;
       if (result === false) return ce.False;

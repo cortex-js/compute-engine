@@ -548,11 +548,44 @@ export const DEFINITIONS_CALCULUS: LatexDictionary = [
     latexTrigger: ['\\operatorname', '<{>', 'O', '<}>'],
     parse: parseBigO,
   },
+
+  //
+  // Mathematica-style `D(f, x, …)` differential operator.
+  //
+  // Applied to an argument list, `\mathrm{D}` / `\operatorname{D}` is the
+  // derivative operator `D`. The bare (no argument list) forms keep their
+  // pre-existing meanings, which differ: `\mathrm{D}` is the `D_upright`
+  // glyph (a plain symbol), while `\operatorname{D}` is the `D` operator
+  // symbol itself (usable as a pipeline stage: `x^2 \rhd \operatorname{D}`).
+  //
+  {
+    kind: 'expression',
+    latexTrigger: ['\\mathrm', '<{>', 'D', '<}>'],
+    parse: (parser: Parser) => parseUprightD(parser, 'D_upright'),
+  },
+  {
+    kind: 'expression',
+    latexTrigger: ['\\operatorname', '<{>', 'D', '<}>'],
+    parse: (parser: Parser) => parseUprightD(parser, 'D'),
+  },
 ];
 
 function parseBigO(parser: Parser): MathJsonExpression {
   const args = parser.parseArguments();
   return args === null ? 'BigO' : ['BigO', ...args];
+}
+
+function parseUprightD(
+  parser: Parser,
+  bareForm: MathJsonExpression
+): MathJsonExpression {
+  const args = parser.parseArguments();
+  // With no argument list, keep the trigger's pre-existing bare meaning
+  // (`D_upright` glyph for `\mathrm{D}`, the `D` operator symbol for
+  // `\operatorname{D}`). Applied to arguments, it is the differential
+  // operator `D`.
+  if (args === null || args.length === 0) return bareForm;
+  return ['D', ...args];
 }
 
 function matchDifferentialOperator(parser: Parser): boolean {

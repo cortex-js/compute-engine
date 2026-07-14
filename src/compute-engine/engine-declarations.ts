@@ -88,13 +88,24 @@ function keywordsOf(def: BoxedDefinition): string[] {
  */
 export function searchDefinitions(
   ce: IComputeEngine,
-  query: string,
+  query: string | string[],
   options?: { limit?: number }
 ): DefinitionSearchResult[] {
-  const q = query.trim().toLowerCase().replace(/\s+/g, ' ');
-  if (q.length === 0) return [];
+  // Normalize into a list of phrases (one per array element, or the whole
+  // string), then a deduplicated bag of tokens. Matching is an OR over
+  // tokens; ranking rewards matching more of them.
+  const phrases = (typeof query === 'string' ? [query] : query)
+    .map((q) => q.trim().toLowerCase().replace(/\s+/g, ' '))
+    .filter((q) => q.length > 0);
+  if (phrases.length === 0) return [];
 
-  const tokens = q.split(' ');
+  const tokens = [...new Set(phrases.flatMap((p) => p.split(' ')))];
+
+  // Multi-word phrases also participate in tier scoring so an exact keyword
+  // like "inverse cosine" ranks above token-level description matches.
+  const probes = [
+    ...new Set([...tokens, ...phrases.filter((p) => p.includes(' '))]),
+  ];
 
   // Clamp limit to [1, 100], default 10.
   let limit = options?.limit ?? 10;
@@ -112,6 +123,7 @@ export function searchDefinitions(
   type Ranked = {
     id: MathJsonSymbol;
     kind: DefinitionSearchResult['kind'];
+    matched: number;
     tier: number;
   };
   const results: Ranked[] = [];
@@ -141,34 +153,42 @@ export function searchDefinitions(
         ...descriptions,
       ];
 
-      // Gate: every query token must be a substring of at least one
-      // searchable string.
-      const matched = tokens.every((tok) =>
-        searchable.some((s) => s.includes(tok))
-      );
-      if (!matched) continue;
+      // Tier of one probe string against this definition (lower is better),
+      // or undefined when it matches no axis at all. An exact keyword match
+      // ranks with exact triggers (tier 2) so a curated alias wins over
+      // name-substring noise; keyword-substring and description matches land
+      // in the last tier.
+      const tierOf = (s: string): number | undefined => {
+        if (idLower === s) return 0;
+        if (idLower.startsWith(s)) return 1;
+        if (triggersLower.some((t) => t === s)) return 2;
+        if (keywordsLower.some((k) => k === s)) return 2;
+        if (idLower.includes(s)) return 3;
+        if (triggersLower.some((t) => t.includes(s))) return 4;
+        if (searchable.some((x) => x.includes(s))) return 5;
+        return undefined;
+      };
 
-      // Tier (lower is better). Pins the ranking invariants for single-token
-      // queries; multi-token queries that only match via description land in
-      // the last tier. An exact keyword match ranks with exact triggers (tier
-      // 2) so a curated alias wins over name-substring noise; keyword
-      // substring matches fall through to the description tier.
-      let tier: number;
-      if (idLower === q) tier = 0;
-      else if (idLower.startsWith(q)) tier = 1;
-      else if (triggersLower.some((t) => t === q)) tier = 2;
-      else if (keywordsLower.some((k) => k === q)) tier = 2;
-      else if (idLower.includes(q)) tier = 3;
-      else if (triggersLower.some((t) => t.includes(q))) tier = 4;
-      else tier = 5;
+      // Gate: at least one token must match (OR semantics). Ranking then
+      // rewards matching more tokens, and matching them more exactly.
+      const matched = tokens.filter((tok) => tierOf(tok) !== undefined).length;
+      if (matched === 0) continue;
 
-      results.push({ id: name, kind, tier });
+      let tier = Infinity;
+      for (const probe of probes) {
+        const t = tierOf(probe);
+        if (t !== undefined && t < tier) tier = t;
+      }
+
+      results.push({ id: name, kind, matched, tier });
     }
     scope = scope.parent;
   }
 
-  // Deterministic ordering: tier, then shorter id, then alphabetical.
+  // Deterministic ordering: most tokens matched, then tier, then shorter id,
+  // then alphabetical.
   results.sort((a, b) => {
+    if (a.matched !== b.matched) return b.matched - a.matched;
     if (a.tier !== b.tier) return a.tier - b.tier;
     if (a.id.length !== b.id.length) return a.id.length - b.id.length;
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;

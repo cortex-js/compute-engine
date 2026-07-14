@@ -1,18 +1,120 @@
+## [Unreleased]
+
+### Library and Definitions
+
+- **`ce.searchDefinitions()` now treats the query as OR-ed keywords.**
+  Previously a multi-word query only matched definitions containing _every_
+  word, so keyword-bag queries like `"floor quotient integer division"`
+  returned nothing. Any matching word now suffices, and results are ranked by
+  how many words they match and how exactly (identifier match, then trigger or
+  curated keyword, then description). The query may also be an array of
+  strings — `ce.searchDefinitions(['gcd', 'least common multiple'])` — with
+  each element treated as an OR-ed alternative.
+
+### Solving
+
+- **`Solve` accepts Mathematica-style constraint systems.** The first argument
+  may now bundle domain constraints together with the equation —
+  `\mathrm{Solve}(\{100a+10b+c=11(a^2+b^2+c^2), a\in\{1,\dots,9\}, b\in\{0,\dots,9\}, c\in\{0,\dots,9\}\}, \{a,b,c\})`
+  → `[(5, 5, 0), (8, 0, 3)]`. `Element` items inside a `Set`/`List`/`And` first
+  operand are lifted into per-variable domain specs (equivalent to passing
+  `a \in D` as separate spec arguments), the remaining items form the
+  equation/system, and a variable list written as a set (`\{a,b,c\}`) is
+  accepted alongside the existing `[a,b,c]` list form. The variable list may be
+  omitted entirely when the bundled constraints name the unknowns:
+  `Solve(\{eq, a\in\{1,\dots,9\}, …\})` solves for the constrained symbols in
+  constraint order. A constraint for a variable that already carries a
+  spec-position domain is merged conjunctively (both must hold), and a
+  constraint naming a symbol absent from an explicit variable list leaves the
+  expression unevaluated rather than guessing. A system of equations given as a
+  `Set` (or `And`) now also solves like the equivalent `List`.
+- **Trailing domain argument: `Solve(eq, x, \mathbb{Z})`.** A trailing set
+  constant (`Integers`, `RealNumbers`, …) after the unknowns applies as the
+  domain of every unknown, Mathematica-style:
+  `\mathrm{Solve}(x^2=4, x, \mathbb{Z})` → `[2, -2]`. Unknowns that already
+  carry an explicit `Element` domain keep it. Over an unbounded integer domain
+  a *polynomial* equation with no integer roots now decides `[]`
+  (`\mathrm{Solve}(2x=3, x, \mathbb{Z})`, `\mathrm{Solve}(x^2=2, x, \mathbb{Z})`)
+  instead of staying unevaluated; non-polynomial equations stay inert rather
+  than risk over-claiming "no solutions" from a partial root set.
+- **Inequality side conditions in constraint sets.** A relational or boolean
+  predicate bundled in the first argument restricts the solution set instead of
+  being mistaken for an equation: `\mathrm{Solve}(\{x^2=4, x>0\}, x)` → `[2]`
+  (previously returned the incorrect `[]`), and a multi-variable condition
+  filters candidate tuples —
+  `\mathrm{Solve}(\{a+b=5, a\in\{0,\dots,5\}, b\in\{0,\dots,5\}, a<b\}, \{a,b\})`
+  → `[(0, 5), (1, 4), (2, 3)]`. Filtering is conservative (a candidate is
+  dropped only when a condition is definitely `False`) and applies across the
+  symbolic, diophantine-fallback, and enumeration paths. A constraint set
+  containing only predicates solves them directly by enumeration over the
+  domain (`\mathrm{Solve}(\{x \equiv 2 \pmod 5, x\in\{1,\dots,20\}\}, x)` →
+  `[2, 7, 12, 17]`).
+
+### Mathematica-Style Operator Forms
+
+- **Iterator triples: `\{i, lo, hi\}` and `\{i, lo, hi, step\}`.** The
+  Mathematica iterator spec is now recognized in the iterator/bounds slot of
+  `Sum`, `Product`, `Integrate` and `D`:
+  `\mathrm{Sum}(i^2, \{i, 1, 10\})` → `385`,
+  `\mathrm{Sum}(i, \{i, 0, 10, 2\})` → `30`,
+  `\mathrm{Integrate}(x^2, \{x, 0, 1\})` → `1/3` (the bounds were previously
+  silently dropped, yielding an indefinite integral), and
+  `\mathrm{D}(f, \{x, n\})` is the n-th derivative. Symbolic bounds work
+  (`\mathrm{Sum}(k, \{k, 1, n\})` ≡ `\sum_{k=1}^n k`). The interpretation is
+  strictly positional — a brace set anywhere else keeps its literal set
+  meaning — and operates on held (raw) operands, so the index symbol is scoped
+  like a binder (an `i` index does not collapse to the imaginary unit).
+- **`\mathrm{D}(f, x)` differentiation.** Applied to an argument list,
+  `\mathrm{D}` / `\operatorname{D}` is the derivative operator:
+  `\mathrm{D}(x^3, x)` → `3x^2`, `\mathrm{D}(x^2 y, x, y)` takes sequential
+  partials. The bare forms keep their previous meanings (`\mathrm{D}` is the
+  upright-D glyph symbol; `\operatorname{D}` remains usable as a pipeline
+  stage, `x^2 \rhd \operatorname{D}` → `2x`).
+- **`Limit(f, x \to x_0)` rule-arrow form.**
+  `\mathrm{Limit}(\frac{\sin x}{x}, x\to 0)` → `1`, equivalent to
+  `\lim_{x\to 0}`. (One-sided arrows such as `x\to 0^+` are not yet
+  recognized — the direction notation currently has no working parse even in
+  the native `\lim` form.)
+- **`Simplify(expr, assumptions)`.** An optional second argument supplies one
+  or more boolean assumptions (a bare predicate, or a `List`/`And` of them)
+  that hold only for the duration of the simplification:
+  `\mathrm{Simplify}(\sqrt{x^2}, x>0)` → `x`,
+  `\mathrm{Simplify}(|x|, x<0)` → `-x`.
+- **New `ReplaceAll` operator.** `\mathrm{ReplaceAll}(x^2+x, x\to 2)` → `6`
+  (Mathematica `expr /. rules`). Rules are `lhs \to rhs` (or
+  `Rule(lhs, rhs)`), given as extra arguments or bundled in a set/list:
+  `\mathrm{ReplaceAll}(x+y, \{x\to 1, y\to 2\})` → `3`. Symbol rules are
+  applied simultaneously in a single pass; non-symbol left-hand sides use the
+  pattern-rule machinery. The result is evaluated after substitution.
+- **Tuple membership distributes: `(a,b) \in \mathbb{Z}`.** Membership of a
+  tuple of symbols in a scalar (number-element) collection now distributes to
+  a conjunction — `Element(a, Integers) ∧ Element(b, Integers)` — instead of
+  evaluating to `False`. Value tuples against product sets are unaffected.
+
+### LaTeX Parsing
+
+- **Ellipsis ranges in set braces.** `\{1,\dots,9\}` now parses to
+  `["Range", 1, 9]`, matching the existing bracket form `\lbrack1,\dots,9\rbrack`;
+  the stepped form `\{0, 2, \dots, 10\}` yields `["Range", 0, 10, 2]`.
+  Previously the ellipsis was kept as a literal placeholder element
+  (`["Set", 1, "ContinuationPlaceholder", 9]`), which made
+  `a \in \{1,\dots,9\}` unusable as a domain. Enumerated sets of non-numeric or
+  non-progression elements (`\{a, b, c\}`, `\{1, 2, 3\}`) are unaffected.
+
 ## 0.78.1 _2026-07-14_
 
 ### Parse Diagnostics
 
-- **`juxtaposition-as-multiply` now covers unit-lexed and letter-run
-  application shapes.** Two application-shaped sources that produced no
-  diagnostic on 0.78.0 are now reported: a symbol lexed as a **unit** applied
-  to a group (`\mathrm{N}(2)`, where `N` reads as the newton unit) fires with
-  `detail.name` set to the source symbol and a new additive
-  `detail: { lexedAs: "unit" }` hint; and a **letter-run** applied to a group
-  (`divisors(60)`, which segments into `d·i·v·i·s·o·r·s`) fires a single
-  diagnostic whose `name` is the joined run (`"divisors"`) and whose span
-  covers the full `divisors(60)` source shape. Run reconstruction stops at
-  numbers and multi-character commands (`2x(3)` reports `x`; `\pi r(2)`
-  reports `r`).
+- **`juxtaposition-as-multiply` now covers unit-lexed and letter-run application
+  shapes.** Two application-shaped sources that produced no diagnostic on 0.78.0
+  are now reported: a symbol lexed as a **unit** applied to a group
+  (`\mathrm{N}(2)`, where `N` reads as the newton unit) fires with `detail.name`
+  set to the source symbol and a new additive `detail: { lexedAs: "unit" }`
+  hint; and a **letter-run** applied to a group (`divisors(60)`, which segments
+  into `d·i·v·i·s·o·r·s`) fires a single diagnostic whose `name` is the joined
+  run (`"divisors"`) and whose span covers the full `divisors(60)` source shape.
+  Run reconstruction stops at numbers and multi-character commands (`2x(3)`
+  reports `x`; `\pi r(2)` reports `r`).
 
 ## 0.78.0 _2026-07-14_
 

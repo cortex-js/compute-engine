@@ -21,6 +21,68 @@ import { tryDiophantineSolve, isIntegerDomain } from './diophantine.js';
 const INEQUALITY_OPERATORS = ['Less', 'LessEqual', 'Greater', 'GreaterEqual'];
 
 /**
+ * Relational operators that mark a `Solve` constraint-set item as a *side
+ * condition* (a filter on the solution set) rather than an equation to solve.
+ * A boolean-typed non-`Equal` expression is treated the same way.
+ */
+const SIDE_CONDITION_OPERATORS = new Set([
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'NotEqual',
+]);
+
+/**
+ * Whether `item` is a side-condition predicate: a relational operator above, or
+ * any boolean-typed expression that is not an `Equal` (an `Equal` defines the
+ * equation to solve, never a filter).
+ */
+function isSideConditionPredicate(item: Expression): boolean {
+  const op = item.operator;
+  if (op && SIDE_CONDITION_OPERATORS.has(op)) return true;
+  if (op === 'Equal') return false;
+  return item.type.matches('boolean');
+}
+
+/**
+ * Evaluate the shared (multi-unknown) side-condition predicates at a concrete
+ * substitution. Returns `false` only when some predicate reduces to a definite
+ * `False` (the conservative Kleene posture: `True` and undecidable keep the
+ * candidate).
+ */
+function passesSideConditions(
+  sideConditions: ReadonlyArray<Expression>,
+  subs: Record<string, Expression>
+): boolean {
+  for (const cond of sideConditions) {
+    const v = cond.subs(subs).evaluate();
+    if (sym(v) === 'False') return false;
+  }
+  return true;
+}
+
+/**
+ * Keep a candidate tuple `values` (aligned with `specs`) unless a per-spec
+ * `condition` or a shared side condition reduces to a definite `False`. Same
+ * conservative posture as `passesSideConditions`.
+ */
+function keepUnderConditions(
+  specs: ReadonlyArray<SolveSpec>,
+  sideConditions: ReadonlyArray<Expression>,
+  values: ReadonlyArray<Expression>
+): boolean {
+  const subs: Record<string, Expression> = {};
+  for (let i = 0; i < specs.length; i++) subs[specs[i].unknown] = values[i];
+  for (let i = 0; i < specs.length; i++) {
+    const c = specs[i].condition;
+    if (c && conditionValue(c, specs[i].unknown, values[i]) === false)
+      return false;
+  }
+  return passesSideConditions(sideConditions, subs);
+}
+
+/**
  * Solving over a domain (Phase 1, univariate).
  *
  * `Solve(equation, Element(unknown, domain[, condition]))` restricts the
@@ -85,6 +147,21 @@ export function canonicalSolve(
     // the stage is applied, `_` is *bound* in the call scope (so it is no
     // longer an unknown) but the operand is still the `_` symbol.
     if (ops[0].has('_')) return ce._fn('Solve', [ops[0]]);
+
+    // A collection/`And` first argument bundling `Element(symbol, collection)`
+    // domain constraints (`Solve(\{eq, a ∈ 1..9, b ∈ 0..9\})`) carries its own
+    // unknowns — the constrained symbols. `defaultUnknown` cannot pick one out
+    // of several, so keep the arity-1 form here and let `evaluateSolve` lift
+    // the `Element`s into specs, rather than padding with a `missing` error
+    // (which would make the whole call inert).
+    if (
+      (isFunction(ops[0], 'Set') ||
+        isFunction(ops[0], 'List') ||
+        isFunction(ops[0], 'Tuple') ||
+        isFunction(ops[0], 'And')) &&
+      (ops[0].ops ?? []).some((op) => isFunction(op, 'Element'))
+    )
+      return ce._fn('Solve', [ops[0]]);
   }
 
   if (ops.length < 2) {
@@ -95,15 +172,45 @@ export function canonicalSolve(
   }
 
   const eq = ops[0]; // keep lazy — do not canonicalize
-  // A `List`/`Tuple` spec operand (`Solve(eqs, [x, y])`) is a variable list:
-  // splat its elements into individual specs.
+  // A `List`/`Tuple`/`Set` spec operand (`Solve(eqs, [x, y])`,
+  // `Solve(eq, \{a, b, c\})`) is a variable list: splat its elements into
+  // individual specs. The splat is on the raw (non-canonical) operand, so the
+  // written order — which defines the result-tuple order — is preserved.
   const specOps = ops
     .slice(1)
     .flatMap((spec) =>
-      isFunction(spec, 'List') || isFunction(spec, 'Tuple')
+      isFunction(spec, 'List') ||
+      isFunction(spec, 'Tuple') ||
+      isFunction(spec, 'Set')
         ? [...spec.ops]
         : [spec]
     );
+
+  // Mathematica-style trailing bare domain-set spec (`Solve(eq, x, ℤ)`): the
+  // LAST spec is not an unknown but a set naming the domain for ALL the
+  // unknowns. Detect a bare symbol whose canonical form is a collection
+  // (`Integers`, `Reals`, …), with at least one other spec preceding it, then
+  // strip it and wrap every BARE-SYMBOL spec `s` as `Element(s, domain)`. A
+  // spec that already carries an explicit `Element` domain keeps it (the
+  // explicit domain wins — no intersection).
+  if (specOps.length >= 2) {
+    const last = specOps[specOps.length - 1];
+    if (sym(last) !== undefined) {
+      const domain = last.canonical;
+      if (domain.isCollection) {
+        const specs = specOps.slice(0, -1).map((spec) => {
+          const s = sym(spec);
+          const wrapped =
+            s !== undefined
+              ? ce.function('Element', [ce.symbol(s), domain])
+              : spec;
+          return canonicalSolveSpec(ce, wrapped);
+        });
+        return ce._fn('Solve', [eq, ...specs]);
+      }
+    }
+  }
+
   const specs = specOps.map((spec) => canonicalSolveSpec(ce, spec));
   return ce._fn('Solve', [eq, ...specs]);
 }
@@ -158,6 +265,161 @@ export function evaluateSolve(
   let specs = parseSolveSpecs(ops.slice(1));
   if (specs === undefined) return undefined; // invalid spec → stay inert
 
+  // Shared (multi-unknown) side-condition predicates lifted out of a constraint
+  // set (e.g. `a < b` in `Solve(\{a+b=5, a<b\}, \{a,b\})`). Single-unknown side
+  // conditions merge into their spec's `condition` slot instead; these are the
+  // ones that constrain several unknowns at once and so filter whole tuples.
+  const sideConditions: Expression[] = [];
+
+  // A collection-shaped (or `And`) first argument may bundle the equations/
+  // predicates together with `Element(symbol, collection)` domain constraints
+  // (e.g. `Solve(\{eq, a ∈ 1..9, b ∈ 0..9\}, \{a, b\})`). Lift the `Element`
+  // items out onto the arg-position specs (spec order defines the result-tuple
+  // order), and keep the remaining items as the equation/system to solve.
+  //
+  // This runs before the arity-1 `_`-inference below so the lifted domains can
+  // supply the specs when there is no variable list — `defaultUnknown` cannot
+  // pick a single unknown out of a multi-unknown constraint set. A bare `_`
+  // pipeline placeholder is a plain symbol (never a collection head), so this
+  // guard never intercepts it and the `_` handling stays intact.
+  if (
+    isFunction(ceq, 'Set') ||
+    isFunction(ceq, 'List') ||
+    isFunction(ceq, 'Tuple') ||
+    isFunction(ceq, 'And')
+  ) {
+    // Only a `List` that actually bundles domain constraints is rewritten; an
+    // ordinary `List` equation system (no `Element` items) must reach the
+    // existing `.solve(names)` path unchanged.
+    const wasList = isFunction(ceq, 'List');
+    const hadArgSpecs = specs.length > 0;
+
+    const lifted: SolveSpec[] = [];
+    const remaining: Expression[] = [];
+    for (const item of ceq.ops ?? []) {
+      // An `Element(symbol, collection[, condition])` item is a lifted domain
+      // constraint. Validate it with the same posture as `parseSolveSpecs`:
+      // op1 a symbol, op2 a collection, an optional non-`Nothing` 3rd operand
+      // a per-candidate condition.
+      if (isFunction(item, 'Element')) {
+        const u = sym(item.op1);
+        const domain = item.op2;
+        if (u !== undefined && domain !== undefined && domain.isCollection) {
+          const condition =
+            item.nops >= 3 && sym(item.op3) !== 'Nothing'
+              ? item.op3
+              : undefined;
+          lifted.push({ unknown: u, domain, condition });
+          continue;
+        }
+      }
+      remaining.push(item);
+    }
+
+    if (lifted.length > 0 || !wasList) {
+      if (lifted.length > 0) {
+        if (!hadArgSpecs) {
+          // No variable list: the lifted `Element`s ARE the specs, in
+          // first-argument order.
+          specs = lifted;
+        } else {
+          // Merge each lifted domain into its arg-position spec by unknown
+          // name, preserving arg-position order.
+          for (const lift of lifted) {
+            const target = specs.find((s) => s.unknown === lift.unknown);
+            // A lifted domain for an unknown NOT in the explicit variable list
+            // would silently change the result-tuple arity → stay inert.
+            if (target === undefined) return undefined;
+            if (target.domain === undefined) {
+              target.domain = lift.domain;
+              if (lift.condition !== undefined)
+                target.condition = lift.condition;
+            } else {
+              // The spec already fixes a domain for this unknown: rather than
+              // replace it, And-merge the lifted membership (and its optional
+              // condition) into the spec's `condition` slot. `conditionValue`
+              // evaluates the condition per candidate, so both the arg-position
+              // domain and the lifted membership must hold (their intersection).
+              const parts: Expression[] = [
+                ce.function('Element', [ce.symbol(lift.unknown), lift.domain!]),
+              ];
+              if (lift.condition !== undefined) parts.push(lift.condition);
+              const liftConstraint =
+                parts.length === 1 ? parts[0] : ce.function('And', parts);
+              target.condition =
+                target.condition !== undefined
+                  ? ce.function('And', [target.condition, liftConstraint])
+                  : liftConstraint;
+            }
+          }
+        }
+      }
+
+      // Partition the remaining items into equations and side-condition
+      // predicates (inequalities/disequalities/boolean predicates that are not
+      // `Equal`). A side condition whose free variables are all spec unknowns
+      // restricts the solution set rather than defining it: a single-unknown
+      // predicate And-merges into that spec's `condition`; a multi-unknown one
+      // (e.g. `a < b`) joins the shared post-filter applied to candidate
+      // tuples. A predicate mentioning a non-spec symbol stays an equation
+      // (there is nothing to filter it against) — the solver then decides it.
+      //
+      // Classify first WITHOUT merging: when no equation remains, the
+      // predicates are not filters of anything — they ARE what is being solved
+      // (`Solve(\{x ≡ 2 mod 5, x ∈ 1..20\}, x)`), so they all stay in the
+      // equation slot and `classifyPredicate` routes them to the
+      // predicate-enumeration path.
+      const specNames = new Set(specs.map((s) => s.unknown));
+      let equations: Expression[] = [];
+      const sideCandidates: Expression[] = [];
+      for (const item of remaining) {
+        if (
+          isSideConditionPredicate(item) &&
+          item.unknowns.every((u) => specNames.has(u))
+        )
+          sideCandidates.push(item);
+        else equations.push(item);
+      }
+
+      if (equations.length === 0) {
+        equations = [...remaining];
+      } else {
+        for (const item of sideCandidates) {
+          const free = item.unknowns;
+          if (free.length === 1) {
+            const target = specs.find((s) => s.unknown === free[0]);
+            if (target !== undefined) {
+              target.condition =
+                target.condition !== undefined
+                  ? ce.function('And', [target.condition, item])
+                  : item;
+              continue;
+            }
+          }
+          // Multi-unknown (or constant) predicate: a shared post-filter.
+          sideConditions.push(item);
+        }
+      }
+
+      // The equations (side conditions removed) are what the solver sees.
+      // Nothing at all left (a constraint-only set) → inert.
+      if (equations.length === 0) return undefined;
+      if (equations.length === 1) {
+        ceq = equations[0];
+      } else if (specs.some((s) => s.domain !== undefined)) {
+        // Several equations with domains present: a conjunction tested per
+        // candidate tuple (`classifyPredicate` routes a boolean `And` to the
+        // predicate-enumeration path).
+        ceq = ce.function('And', equations);
+      } else {
+        // A pure system with no domains anywhere, spelled as `Set`/`Tuple`/
+        // `And`: rebuild as a `List` so it takes the existing multi-equation
+        // `.solve(names)` path (fixing the Set-of-equations inertness).
+        ceq = ce.function('List', equations);
+      }
+    }
+  }
+
   // An arity-1 `Solve` is a deferred pipeline stage whose unknown-inference
   // was postponed at canonicalization (the operand contained the pipe topic
   // placeholder `_` — see `canonicalSolve`). If the stage has been applied,
@@ -196,7 +458,17 @@ export function evaluateSolve(
       if (INEQUALITY_OPERATORS.includes(ceq.operator ?? '')) return undefined;
       const roots = ceq.solve(names[0]) as ReadonlyArray<Expression> | null;
       if (roots === null) return ce.function('List', []);
-      return ce.function('List', [...roots]);
+      // Apply any spec condition (a single-unknown side condition merged onto
+      // the spec) and shared side conditions: drop a root only on a definite
+      // `False` (keep `True`/undecidable). An empty result AFTER filtering is a
+      // decision — roots were found and all excluded — not an inert solve.
+      const kept =
+        specs[0].condition !== undefined || sideConditions.length > 0
+          ? [...roots].filter((r) =>
+              keepUnderConditions([specs[0]], sideConditions, [r.evaluate()])
+            )
+          : [...roots];
+      return ce.function('List', kept);
     }
     // Phase 3: a single integer equation in several unknowns that are ALL
     // declared integer-typed has a symbolic diophantine solution — parametric
@@ -207,7 +479,12 @@ export function evaluateSolve(
     if (
       names.length >= 2 &&
       isFunction(ceq, 'Equal') &&
-      names.every((nm) => ce.symbol(nm).type.matches('integer'))
+      names.every((nm) => ce.symbol(nm).type.matches('integer')) &&
+      // A condition/side-condition would have to filter the (possibly
+      // parametric, unbounded) diophantine family, which substitution cannot
+      // do — defer to the records path below, which filters concrete tuples.
+      specs.every((s) => s.condition === undefined) &&
+      sideConditions.length === 0
     ) {
       const dio = tryDiophantineSolve(ce, ceq, names, undefined);
       if (dio !== undefined) return ce.function('List', dio);
@@ -235,6 +512,10 @@ export function evaluateSolve(
       // (`{x: 5 − y}` for `x + y = 5`): a missing name IS the free variable,
       // so the parametric tuple is `(5 − y, y)`.
       const values = names.map((nm) => rec[nm] ?? ce.symbol(nm));
+      // Drop a tuple only when a spec condition or shared side condition
+      // reduces to a definite `False` (a parametric tuple stays undecidable and
+      // is kept — the conservative posture).
+      if (!keepUnderConditions(specs, sideConditions, values)) continue;
       tuples.push(ce.tuple(...values));
     }
     return ce.function('List', tuples);
@@ -247,13 +528,13 @@ export function evaluateSolve(
 
   // Exactly one domain spec → Phase 1 univariate pipeline.
   if (specs.length === 1) {
-    const result = solveOverDomain(ce, ceq, specs[0]);
+    const result = solveOverDomain(ce, ceq, specs[0], sideConditions);
     if (result === undefined) return undefined; // undecidable → stay inert
     return ce.function('List', result);
   }
 
   // Several domain specs → Phase 2 multi-variable enumeration.
-  const tuples = solveOverMultipleDomains(ce, ceq, specs);
+  const tuples = solveOverMultipleDomains(ce, ceq, specs, sideConditions);
   if (tuples === undefined) return undefined; // undecidable → stay inert
   return ce.function('List', tuples);
 }
@@ -305,10 +586,21 @@ function parseSolveSpecs(
 export function solveOverDomain(
   ce: ComputeEngine,
   ceq: Expression,
-  spec: SolveSpec
+  spec: SolveSpec,
+  sideConditions: ReadonlyArray<Expression> = []
 ): Expression[] | undefined {
   const { unknown, domain, condition } = spec;
   if (domain === undefined) return undefined;
+
+  // A shared side condition (usually empty for a single spec — single-unknown
+  // conditions merge into `spec.condition`) drops a value only on a definite
+  // `False`.
+  const filterSide = (values: Expression[]): Expression[] =>
+    sideConditions.length === 0
+      ? values
+      : values.filter((v) =>
+          passesSideConditions(sideConditions, { [unknown]: v.evaluate() })
+        );
 
   // `ceq` is the canonical equation/predicate. Classify it: an `Equal` (or a
   // bare numeric expression, read as `= 0`) is an equation and gets a
@@ -351,7 +643,28 @@ export function solveOverDomain(
       // Assumptions and the explicit domain restrict conjunctively: also drop
       // roots ruled out by an in-scope bound assumption on the unknown (e.g.
       // `assume(n > 3)` alongside `n ∈ -10..10`).
-      return [...filterRootsByAssumptions(ce, inDomain, unknown)];
+      return filterSide([...filterRootsByAssumptions(ce, inDomain, unknown)]);
+    }
+
+    // The type-refined solve found no roots in the domain's element type. For
+    // an UNBOUNDED domain (enumeration impossible) a *polynomial* equation is
+    // still decidable: its complete real root set is finite, so if none of
+    // those roots lies in the domain the answer is a decision `[]`, not inert.
+    // This resolves e.g. `Solve(2x=3, x, ℤ)` and `Solve(x²=2, x, ℤ)` → `[]`.
+    // Restricted to polynomials so a solver that returns a *partial* root set
+    // (transcendental equations) never over-claims "no solutions".
+    const domainCount = domain.count;
+    const unbounded = domainCount === undefined || !Number.isFinite(domainCount);
+    if (unbounded && getPolynomialCoefficients(predBody, unknown)) {
+      const realRoots = symbolicRoots(ce, ceq, unknown, 'number');
+      if (realRoots.length > 0) {
+        const inDomain = realRoots.filter((r) =>
+          keepInDomain(ce, domain, unknown, r, condition)
+        );
+        return filterSide([
+          ...filterRootsByAssumptions(ce, inDomain, unknown),
+        ]);
+      }
     }
   }
 
@@ -411,7 +724,7 @@ export function solveOverDomain(
   // the unknown, so the sweep above is unaffected. (Enumeration candidates are
   // concrete domain members, so an assumption like `n > 3` is usually already
   // implied by the domain — but not always, e.g. `n > 3` with `n ∈ 1..10`.)
-  return [...filterRootsByAssumptions(ce, results, unknown)];
+  return filterSide([...filterRootsByAssumptions(ce, results, unknown)]);
 }
 
 /**
@@ -445,10 +758,20 @@ function classifyPredicate(ceq: Expression): {
 export function solveOverMultipleDomains(
   ce: ComputeEngine,
   ceq: Expression,
-  specs: SolveSpec[]
+  specs: SolveSpec[],
+  sideConditions: ReadonlyArray<Expression> = []
 ): Expression[] | undefined {
   const { predBody, isEquation } = classifyPredicate(ceq);
   const unknowns = specs.map((s) => s.unknown);
+
+  // Filter a candidate tuple (spec order) by the shared side conditions: drop
+  // only on a definite `False`.
+  const passesSide = (tuple: ReadonlyArray<Expression>): boolean => {
+    if (sideConditions.length === 0) return true;
+    const subs: Record<string, Expression> = {};
+    for (let d = 0; d < unknowns.length; d++) subs[unknowns[d]] = tuple[d];
+    return passesSideConditions(sideConditions, subs);
+  };
 
   // Phase 3: symbolic diophantine dispatch. Before the enumeration budget check,
   // when the equation is an integer equation and every domain is integer-valued
@@ -461,6 +784,7 @@ export function solveOverMultipleDomains(
   // the materialization cap) falls through to enumeration unchanged.
   if (
     isEquation &&
+    sideConditions.length === 0 &&
     specs.every(
       (s) =>
         s.domain !== undefined &&
@@ -564,7 +888,8 @@ export function solveOverMultipleDomains(
             break;
           }
         }
-        if (keep) results.push(ce.tuple(...tuple));
+        // Shared (multi-unknown) side conditions apply across the whole tuple.
+        if (keep && passesSide(tuple)) results.push(ce.tuple(...tuple));
       }
     }
 

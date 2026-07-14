@@ -369,4 +369,25 @@ describe('Parser: list range ellipsis', () => {
       expect(expr.isValid).toBe(true);
     });
   });
+
+  // A brace-set ellipsis sequence denotes an integer range, exactly like the
+  // bracket form: `{1, \dots, 9}` → Range(1, 9), NOT a 3-element Set with a
+  // stray `ContinuationPlaceholder`. Non-progression brace sets are untouched.
+  describe('brace-set ellipsis form {a, \\dots, b}', () => {
+    test('`\\{1, \\dots, 9\\}` → Range(1, 9)', () => {
+      expect(parse('\\{1, \\dots, 9\\}')).toEqual(['Range', 1, 9]);
+    });
+
+    test('`\\{0, 2, \\dots, 10\\}` (stepped) → Range(0, 10, 2)', () => {
+      expect(parse('\\{0, 2, \\dots, 10\\}')).toEqual(['Range', 0, 10, 2]);
+    });
+
+    test('`\\{a, b, c\\}` stays a Set (non-numeric)', () => {
+      expect(parse('\\{a, b, c\\}')).toEqual(['Set', 'a', 'b', 'c']);
+    });
+
+    test('`\\{1, 2, 3\\}` stays a Set (no ellipsis)', () => {
+      expect(parse('\\{1, 2, 3\\}')).toEqual(['Set', 1, 2, 3]);
+    });
+  });
 });

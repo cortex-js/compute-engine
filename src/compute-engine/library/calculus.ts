@@ -446,6 +446,25 @@ volumes
         // `ops[0].canonical` below.
         if (!ops[0]) return null;
 
+        // Mathematica-style higher-order spec: `D(f, {x, n})` → the n-th
+        // derivative with respect to `x` (`D(f, x, x, …, x)`, n repetitions).
+        // POSITIONAL — only a raw held `{symbol, positive-integer}` pair in the
+        // variable slot is expanded; any other `Set` shape is left untouched.
+        if (ops.length > 1 && ops.slice(1).some((o) => isFunction(o, 'Set'))) {
+          const expanded: Expression[] = [ops[0]];
+          for (const o of ops.slice(1)) {
+            if (isFunction(o, 'Set') && o.nops === 2 && isSymbol(o.op1)) {
+              const n = o.op2.canonical.re;
+              if (n !== undefined && Number.isInteger(n) && n >= 1) {
+                for (let k = 0; k < n; k++) expanded.push(o.op1);
+                continue;
+              }
+            }
+            expanded.push(o);
+          }
+          ops = expanded;
+        }
+
         // The differentiation variable may be omitted (`D(expr)`, e.g. from
         // `expr |> D`): default to the expression's single free variable, or
         // to `x` when there are several and one of them is `x`. A function
@@ -959,6 +978,18 @@ volumes
       lazy: true,
       signature: '(function, point:number, direction:number?) -> number',
       canonical: (ops, { engine }) => {
+        // Rule-arrow form `Limit(expr, x -> x0)`: the second operand is a held
+        // (raw) `To(var, point)`. Rewrite to the Wolfram 3-arg form
+        // `Limit(expr, var, point)` handled below. (One-sided arrows like
+        // `x -> 0^+` are not supported — `0^+` parses to `PseudoInverse(0)`,
+        // which no limit path recognizes, so we leave them untouched.)
+        if (
+          ops.length === 2 &&
+          isFunction(ops[1], 'To') &&
+          isSymbol(ops[1].op1)
+        ) {
+          ops = [ops[0], ops[1].op1, ops[1].op2];
+        }
         const [f, x, dir] = ops;
         // Wolfram-style 3-arg form `Limit(expr, var, point)`: when the middle
         // operand is a symbol that is a free variable of the expression, bind

@@ -1656,3 +1656,26 @@ describe('Rules: sine angle-addition (default path)', () => {
     expect(r.isSame(ce.parse('\\sin(x+y)+z'))).toBe(false);
   });
 });
+
+describe('Simplify with assumptions', () => {
+  test('sqrt(x^2) simplifies to x under x > 0', () => {
+    const r = ce.parse('\\mathrm{Simplify}(\\sqrt{x^2}, x>0)').evaluate();
+    expect(r.symbol).toBe('x');
+  });
+
+  test('sqrt(x^2) is unchanged without an assumption', () => {
+    const r = ce.parse('\\mathrm{Simplify}(\\sqrt{x^2})').evaluate();
+    expect(r.isSame(ce.parse('|x|'))).toBe(true);
+  });
+
+  test('|x| simplifies to -x under x < 0', () => {
+    const r = ce.parse('\\mathrm{Simplify}(|x|, x<0)').evaluate();
+    expect(r.isSame(ce.box(['Negate', 'x']))).toBe(true);
+  });
+
+  test('assumptions do not leak out of the Simplify scope', () => {
+    ce.parse('\\mathrm{Simplify}(\\sqrt{x^2}, x>0)').evaluate();
+    // After the call, `x` is not known to be positive.
+    expect(ce.box(['Greater', 'x', 0]).evaluate().symbol).not.toBe('True');
+  });
+});

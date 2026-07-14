@@ -3158,7 +3158,7 @@ function signedMachineValue(expr: MathJsonExpression): number | null {
  * If the pattern is found, returns `['Range', start, end, step]`,
  * an Error node for inconsistent/degenerate cases, or `null` to fall through.
  */
-function tryInferRangeFromElements(
+export function tryInferRangeFromElements(
   elems: readonly MathJsonExpression[],
   parser: Parser
 ): MathJsonExpression | null {

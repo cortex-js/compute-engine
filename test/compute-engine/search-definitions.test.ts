@@ -159,6 +159,45 @@ describe('searchDefinitions', () => {
     expect(ids('nth root')).toContain('Root');
   });
 
+  // Keyword-bag (OR) semantics: agents pass several concepts in one query;
+  // any-token matching with match-count ranking must surface each concept.
+  test('OR semantics: keyword-bag query matches each concept', () => {
+    // Under the old every-token (AND) gate this returned [].
+    const results = ids('Mod floor Div digits');
+    expect(results).toContain('Mod');
+    expect(results).toContain('Floor');
+  });
+
+  test('OR semantics: unmatched tokens do not suppress results', () => {
+    const results = ids('gcd xyzzy-no-such-thing');
+    expect(results).toContain('GCD');
+  });
+
+  test('match-count ranking: multi-word concept still wins over single-token noise', () => {
+    // Sinh matches both "hyperbolic" and "sine"; Sin matches only "sine".
+    const results = ids('hyperbolic sine');
+    expect(results.indexOf('Sinh')).toBeLessThan(results.indexOf('Sin'));
+  });
+
+  test('array query: elements are OR-ed alternatives', () => {
+    const results = ce
+      .searchDefinitions(['gcd', 'least common multiple'])
+      .map((r) => r.id);
+    expect(results).toContain('GCD');
+    expect(results).toContain('LCM');
+  });
+
+  test('array query: empty array and blank elements → []', () => {
+    expect(ce.searchDefinitions([])).toEqual([]);
+    expect(ce.searchDefinitions(['', '   '])).toEqual([]);
+  });
+
+  test('array query: single-element array behaves like the string form', () => {
+    expect(ce.searchDefinitions(['inverse cosine'])).toEqual(
+      ce.searchDefinitions('inverse cosine')
+    );
+  });
+
   test('graceful degradation with a minimal injected latexSyntax', () => {
     const minimal = new ComputeEngine({
       latexSyntax: { parse: () => null, serialize: () => '' },
