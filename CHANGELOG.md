@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **Symbolic derivatives of declared-then-assigned functions** (0.77.0
+  regression). Declaring a function symbol before assigning its body —
+  `ce.declare("f", "function")` (or with an explicit signature such as
+  `"(number) -> number"`) followed by `f(x) := x^2 + 2x + 1` — left the
+  function's derivative inert: `f'(x)` evaluated to itself instead of
+  `2x + 2`, and `["D", "f", "x"]` evaluated to `0`, even though direct calls
+  like `f(2)` worked. The declared-signature reconciliation introduced in
+  0.77.0 keeps the assigned function literal in the symbol's *value*
+  definition (preserving the declared signature) instead of converting it to
+  an operator definition, and the symbolic differentiation path only expanded
+  function bodies from operator definitions. Differentiation now expands
+  user-defined function bodies from both definition shapes.
+
 ## 0.77.0 _2026-07-13_
 
 ### Pattern Matching

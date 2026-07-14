@@ -1,4 +1,5 @@
 import type { Expression } from '../../src/compute-engine/global-types';
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
 
 function parse(expr: string): Expression {
@@ -465,6 +466,28 @@ describe('Symbolic derivatives for unknown functions', () => {
       `Apply(Derivative(g, 1), x) * Apply(Derivative(f, 2), g(x))`
     );
   });
+});
+
+describe('Derivatives of declared-then-assigned functions', () => {
+  // Regression (Tycho, 0.77.0): a symbol declared with a function type keeps
+  // its later-assigned Function literal in a *value* definition
+  // (declared-signature reconciliation, engine-declarations.ts §6.3) rather
+  // than converting to an operator definition. The derivative path must
+  // expand that body just like an operator definition: on 0.77.0 `f'(x)`
+  // stayed inert and `D(f, x)` evaluated to 0.
+  it.each(['function', '(number) -> number'])(
+    "declare('f', '%s') then f(x) := … keeps symbolic derivatives",
+    (type) => {
+      const ce = new ComputeEngine();
+      ce.declare('f', type);
+      ce.parse('f(x) := x^2 + 2x + 1').evaluate();
+      expect(ce.parse('f(2)').evaluate().json).toEqual(9);
+      expect(ce.parse("f'(x)").evaluate().latex).toEqual('2x+2');
+      expect(ce.expr(['D', ['f', 'x'], 'x']).evaluate().latex).toEqual('2x+2');
+      expect(ce.expr(['D', 'f', 'x']).evaluate().latex).toEqual('2x+2');
+      expect(ce.parse("f''(x)").evaluate().latex).toEqual('2');
+    }
+  );
 });
 
 describe('Partial derivatives of unknown multivariate functions', () => {

@@ -244,6 +244,21 @@ const DERIVATIVES_TABLE = {
 };
 
 /**
+ * True if `sym` names a user-defined function whose body can be resolved by
+ * applying the symbol to wildcards and evaluating. Two definition shapes
+ * qualify: an operator definition (a bare `f(x) := …` assignment), or a value
+ * definition whose value is a `Function` literal — a symbol declared with a
+ * function type and then assigned, where declared-signature reconciliation
+ * (engine-declarations.ts §6.3) keeps the literal as the symbol's value
+ * instead of converting to an operator definition.
+ */
+function isUserFunction(sym: Expression): boolean {
+  if (sym.operatorDefinition !== undefined) return true;
+  const value = sym.valueDefinition?.value;
+  return value !== undefined && isFunction(value, 'Function');
+}
+
+/**
  *
  * @param fn The function to differentiate, a function literal.
  *
@@ -432,7 +447,7 @@ export function differentiate(
     if (expr.symbol === v) return expr.engine.One;
 
     // Resolve user-defined functions: e.g. f where f(x) := 2x
-    if (expr.operatorDefinition) {
+    if (isUserFunction(expr)) {
       const ce = expr.engine;
       const wildcard = ce.symbol('_');
       const body = ce.function(expr.symbol, [wildcard]).evaluate();
@@ -893,7 +908,7 @@ export function differentiate(
     // symbolic chain rule. Apply the function to wildcards, evaluate to
     // get the body, substitute actual arguments, and differentiate.
     const opSym = ce.symbol(expr.operator);
-    if (opSym.operatorDefinition) {
+    if (isUserFunction(opSym)) {
       const args = expr.ops;
       const wildcards =
         args.length === 1
