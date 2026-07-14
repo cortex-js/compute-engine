@@ -42,9 +42,10 @@ export type {
   LatexDictionary,
   SerializeLatexOptions,
   ParseLatexOptions,
-  ParseDiagnostic,
   LatexString,
 } from './compute-engine/latex-syntax/types.js';
+
+export type { ParseDiagnostic } from './compute-engine/types-kernel-serialization.js';
 
 export type { MathJsonExpression } from './math-json/types.js';
 

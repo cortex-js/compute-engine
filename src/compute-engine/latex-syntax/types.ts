@@ -10,8 +10,6 @@ import type {
 } from '../types-kernel-serialization.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 
-export type { ParseDiagnostic };
-
 export type SymbolTable = {
   parent: SymbolTable | null;
   ids: { [id: MathJsonSymbol]: BoxedType };

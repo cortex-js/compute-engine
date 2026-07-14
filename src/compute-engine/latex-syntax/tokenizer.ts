@@ -446,7 +446,11 @@ export function tokenize(
       if (comments !== undefined && m[0].length < line.length) {
         const start = lineOffset + m[0].length;
         const end = lineOffset + line.length;
-        comments.push({ start, end, discardedLength: line.length - m[0].length });
+        comments.push({
+          start,
+          end,
+          discardedLength: line.length - m[0].length,
+        });
       }
     }
     lineOffset += line.length + separator.length;

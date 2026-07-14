@@ -3024,11 +3024,7 @@ function parsePrime(
     // into the derivative, not differentiated over. The former D-based parse,
     // ["D", ["f", args], v] with v inferred from the first argument (or an
     // invented "x"), collapsed f'(2) to 0 and gave f'(2x) a spurious ×2.
-    return [
-      'Apply',
-      ['Derivative', lhs, order],
-      ...args,
-    ] as MathJsonExpression;
+    return ['Apply', ['Derivative', lhs, order], ...args] as MathJsonExpression;
   }
 
   // No arguments

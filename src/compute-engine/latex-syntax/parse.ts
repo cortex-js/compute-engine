@@ -26,8 +26,8 @@ import {
   INVISIBLE_OP_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
   SymbolTable,
-  ParseDiagnostic,
 } from './types.js';
+import type { ParseDiagnostic } from '../types-kernel-serialization.js';
 import { tokenize, tokensToString } from './tokenizer.js';
 import type { DiscardedComment } from './tokenizer.js';
 import { parseSymbol, parseInvalidSymbol } from './parse-symbol.js';
@@ -668,7 +668,8 @@ export class _Parser implements Parser {
     if (this.diagnostics === null) return;
     const d = this.diagnostics;
     let w = 0;
-    for (let r = 0; r < d.length; r++) if (d[r]._seq < checkpoint) d[w++] = d[r];
+    for (let r = 0; r < d.length; r++)
+      if (d[r]._seq < checkpoint) d[w++] = d[r];
     d.length = w;
   }
 
@@ -770,7 +771,11 @@ export class _Parser implements Parser {
    * parser path that yields a bare symbol reference routes through here so no
    * charitable interpretation escapes the diagnostic.
    */
-  emitSymbolReference(id: MathJsonSymbol, startToken: number, endToken: number): void {
+  emitSymbolReference(
+    id: MathJsonSymbol,
+    startToken: number,
+    endToken: number
+  ): void {
     if (this.diagnostics === null) return;
     if (!this.isSymbolDeclared(id))
       this.emitDiagnostic('undeclared-symbol', startToken, endToken, {
@@ -2325,7 +2330,8 @@ export class _Parser implements Parser {
       // symbol reference that would otherwise bypass diagnostics — the raw
       // `parseSymbol()` above does not emit. Declared heads no-op; a head on a
       // path that backtracks below is cleaned up by the index-setter auto-prune.
-      if (typeof fn === 'string') this.emitSymbolReference(fn, start, this.index);
+      if (typeof fn === 'string')
+        this.emitSymbolReference(fn, start, this.index);
       if (!this.isFunctionOperator(fn)) {
         // Check if this looks like a predicate: single uppercase letter
         // followed by parentheses (e.g., P(x), Q(a,b))
@@ -3749,7 +3755,9 @@ export function parse(
   // Opt-in diagnostics collection. Comments (code `comment-discarded`) are
   // captured from the primary tokenization in original-input coordinates.
   const wantDiagnostics = !!options.diagnostics && !!options.onDiagnostic;
-  const comments: DiscardedComment[] | undefined = wantDiagnostics ? [] : undefined;
+  const comments: DiscardedComment[] | undefined = wantDiagnostics
+    ? []
+    : undefined;
   const recovered: ParseDiagnostic[] = [];
 
   const primary = parseCore(latex, dictionary, options, comments);
@@ -3846,7 +3854,11 @@ export function parse(
       // Strip the internal `_seq` field so the sink sees the public
       // `ParseDiagnostic` shape exactly.
       for (const { code, start, end, detail } of adoptedParser.diagnostics)
-        sink(detail !== undefined ? { code, start, end, detail } : { code, start, end });
+        sink(
+          detail !== undefined
+            ? { code, start, end, detail }
+            : { code, start, end }
+        );
     for (const c of comments!)
       sink({
         code: 'comment-discarded',
