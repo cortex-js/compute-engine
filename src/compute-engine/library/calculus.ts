@@ -4,6 +4,7 @@ import type {
   SymbolDefinitions,
 } from '../global-types.js';
 
+import { functionResult } from '../../common/type/utils.js';
 import { checkType } from '../boxed-expression/validate.js';
 import {
   defaultUnknown,
@@ -328,9 +329,32 @@ volumes
       // argument of the function. A single order is the ordinary (univariate)
       // n-th derivative; `Derivative(f, 1, 0)` is ∂f/∂arg₁ of a bivariate f.
       signature: '(function, order:number*) -> function',
+      type: ([fn], { engine }) => {
+        // A derivative function has the same signature as the function it
+        // derives (same parameters and codomain). Preserving it lets an
+        // application — `Apply(Derivative(f, 1), x)`, the parse of `f'(x)` —
+        // type as the function's return type instead of `any`.
+        const t = fn?.type.type;
+        const result = t !== undefined ? functionResult(t) : undefined;
+        if (result !== undefined && result !== 'any' && result !== 'unknown')
+          return engine.type(t!);
+        // The function's codomain is uninformative (e.g. a symbol declared
+        // plain `function`, whose type is `(any*) -> any`). Its derivative is
+        // still scalar-valued, so report a number-valued function — the same
+        // compromise as the `D` type handler below — rather than passing the
+        // `any` through, which would type applications as `any`.
+        return engine.type('(any*) -> number');
+      },
       canonical: (ops, { engine }) => {
         const fn = canonicalFunctionLiteral(ops[0].canonical);
         if (!fn) return null;
+        // A bare symbol here is being used as a function (e.g. `y` in
+        // `Apply(Derivative(y, 2), x)` from parsing `y''(x)`): infer its type
+        // so later uses in the same expression — like the `y(x)` term of an
+        // ODE, parsed as an invisible product while `y` was still unknown —
+        // canonicalize to a function application, exactly as an
+        // operator-position use (`["y", "x"]`) would have inferred it.
+        if (isSymbol(fn)) fn.infer('function');
         const orders = ops
           .slice(1)
           .map((o) => checkType(engine, o.canonical, 'number'));

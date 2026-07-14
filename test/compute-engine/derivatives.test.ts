@@ -490,6 +490,40 @@ describe('Derivatives of declared-then-assigned functions', () => {
   );
 });
 
+describe('Prime notation applies the derivative function to its argument', () => {
+  // f'(expr) denotes (Df)(expr) — Lagrange semantics: the derivative
+  // function evaluated at the argument, NOT d/dx of the applied expression.
+  // The former parse, ["D", ["f", expr], v] with v inferred from the
+  // argument (or an invented "x"), collapsed f'(2) to 0 and gave f'(2x) a
+  // spurious chain-rule factor.
+  it("parses f'(args) to Apply(Derivative(f, n), args)", () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse("f'(2)").json).toEqual(['Apply', ['Derivative', 'f', 1], 2]);
+    expect(ce.parse("f''(x)").json).toEqual([
+      'Apply',
+      ['Derivative', 'f', 2],
+      'x',
+    ]);
+  });
+
+  it('evaluates the derivative function at the argument', () => {
+    const ce = new ComputeEngine();
+    ce.parse('f(x) := x^2 + 2x + 1').evaluate();
+    expect(ce.parse("f'(2)").evaluate().json).toEqual(6);
+    expect(ce.parse("f''(2)").evaluate().json).toEqual(2);
+    // No chain-rule factor: f'(2x) = (Df)(2x) = 2(2x)+2, not d/dx f(2x)
+    expect(ce.parse("f'(2x)").evaluate().latex).toEqual('4x+2');
+    expect(ce.parse("\\sin'(x)").evaluate().latex).toEqual('\\cos(x)');
+  });
+
+  it('stays inert and round-trips for unknown functions', () => {
+    const ce = new ComputeEngine();
+    const e = ce.parse("h'(2)").evaluate();
+    expect(e.json).toEqual(['Apply', ['Derivative', 'h', 1], 2]);
+    expect(e.latex).toEqual('h^{\\prime}(2)');
+  });
+});
+
 describe('Partial derivatives of unknown multivariate functions', () => {
   it('∂/∂x f(x, y) is the partial with respect to the first argument', () => {
     const expr = engine.expr(['D', ['f', 'x', 'y'], 'x']);

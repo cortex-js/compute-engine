@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`f'(x)` now parses to `["Apply", ["Derivative", "f", 1], x]`** instead of
+  `["D", ["f", x], x]`. Prime notation on an applied function denotes the
+  *derivative function evaluated at the argument* — Lagrange semantics, as in
+  Mathematica and Desmos — not the derivative of the applied expression with
+  respect to an inferred variable. The previous representation produced
+  silently wrong results whenever the argument was not a bare variable:
+  `f'(2)` evaluated to `0` instead of `f'` evaluated at 2 (e.g. `6` for
+  `f(x) := x^2+2x+1`), and `f'(2x)` picked up a spurious chain-rule factor
+  (`8x+4` instead of `4x+2`). Higher orders (`f''(2)` → `2`) and the
+  `f^{(n)}(x)` superscript form follow the same rule. Serialization is
+  unchanged (`f^{\prime}(x)`), so LaTeX round-trips are unaffected; only
+  consumers pattern-matching the MathJSON parse shape need updating.
+
 ### Bug Fixes
 
 - **Symbolic derivatives of declared-then-assigned functions** (0.77.0

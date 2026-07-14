@@ -416,9 +416,9 @@ int(sin(x) dx) + 1 === 2
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS \\sin'(x) - known function with prime 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}x}\\sin(x)
-D(sin(x), x)
-["D", ["Sin", "x"], "x"]
+\\sin^{\\prime}(x)
+Apply(Derivative(sin, 1), x)
+["Apply", ["Derivative", "Sin", 1], "x"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f' without arguments - returns Derivative 1`] = `
@@ -428,33 +428,33 @@ Derivative(f)
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f'''(x) - triple prime with argument 1`] = `
-\\frac{\\mathrm{d}^{3}}{\\mathrm{d}x^{3}}f(x)
-D(D(D(f(x), x), x), x)
-["D", ["D", ["D", ["f", "x"], "x"], "x"], "x"]
+f^{\\tripleprime}(x)
+Apply(Derivative(f, 3), x)
+["Apply", ["Derivative", "f", 3], "x"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f''(x) - double prime with argument 1`] = `
-\\frac{\\mathrm{d}^{2}}{\\mathrm{d}x^{2}}f(x)
-D(D(f(x), x), x)
-["D", ["D", ["f", "x"], "x"], "x"]
+f^{\\doubleprime}(x)
+Apply(Derivative(f, 2), x)
+["Apply", ["Derivative", "f", 2], "x"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f'(x) - single prime with argument 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}x}f(x)
-D(f(x), x)
-["D", ["f", "x"], "x"]
+f^{\\prime}(x)
+Apply(Derivative(f, 1), x)
+["Apply", ["Derivative", "f", 1], "x"]
 `;
 
-exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f'(x, y) - multiple arguments uses first as variable 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}x}f(x, y)
-D(f(x, y), x)
-["D", ["f", "x", "y"], "x"]
+exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f'(x, y) - multi-argument prime is a first-argument partial 1`] = `
+f^{\\prime}(x, y)
+Apply(Derivative(f, 1), x, y)
+["Apply", ["Derivative", "f", 1], "x", "y"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS g'(t) - different variable 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}t}g(t)
-D(g(t), t)
-["D", ["g", "t"], "t"]
+g^{\\prime}(t)
+Apply(Derivative(g, 1), t)
+["Apply", ["Derivative", "g", 1], "t"]
 `;
 
 exports[`MULTIPLE INTEGRALS Double integral 1`] = `

@@ -190,7 +190,7 @@ describe('LAGRANGE PRIME NOTATION WITH ARGUMENTS', () => {
   test("g'(t) - different variable", () =>
     expect(parse("g'(t)")).toMatchSnapshot());
 
-  test("f'(x, y) - multiple arguments uses first as variable", () =>
+  test("f'(x, y) - multi-argument prime is a first-argument partial", () =>
     expect(parse("f'(x, y)")).toMatchSnapshot());
 
   test("f' without arguments - returns Derivative", () =>
@@ -315,8 +315,15 @@ describe('HIGHER-ORDER LEIBNIZ ROUND-TRIP', () => {
     expect(d2.evaluate().isSame(ce.parse('-\\sin(x)'))).toBe(true);
   });
 
-  test('first-order Leibniz is unchanged', () => {
-    expect(ce.parse('\\frac{d}{dx}f(x)').isSame(ce.parse("f'(x)"))).toBe(true);
+  test('first-order Leibniz and prime notation agree after evaluation', () => {
+    // Leibniz `d/dx f(x)` parses to D(f(x), x) — the derivative of an applied
+    // expression — while prime `f'(x)` parses to Apply(Derivative(f, 1), x):
+    // the derivative *function* evaluated at x. Distinct trees (so not
+    // isSame at parse time), but both evaluate to the same symbolic
+    // derivative.
+    const leibniz = ce.parse('\\frac{d}{dx}f(x)').evaluate();
+    const prime = ce.parse("f'(x)").evaluate();
+    expect(leibniz.isSame(prime)).toBe(true);
   });
 });
 
