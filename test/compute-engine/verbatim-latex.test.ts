@@ -73,7 +73,7 @@ describe('verbatimLatex: top-level preservation across parse paths', () => {
   });
 
   test('function without custom canonical handler preserves verbatim', () => {
-    // `p.x` parses to `First(p)`. First has no canonical handler, so the
+    // `p.x` parses to `PointX(p)`. PointX has no canonical handler, so the
     // default path in boxFunction propagates metadata to the result.
     const ce = new ComputeEngine();
     expect(ce.parse('p.x', { preserveLatex: true }).verbatimLatex).toBe('p.x');

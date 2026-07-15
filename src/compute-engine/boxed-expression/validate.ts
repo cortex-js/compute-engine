@@ -350,9 +350,21 @@ export function checkNumericArgs(
         break;
       }
     for (const x of xs)
-      if (isFiniteIndexedCollection(x))
+      if (isFiniteIndexedCollection(x)) {
+        // `.each()` on a *lazy* collection (e.g. a large `Range`) materializes
+        // every element, so walking it just to run no-op inferences enumerates
+        // the whole range at parse time (item 16: `\frac{[1...1e8]}{2}` hung
+        // `ce.parse`). Skip the walk for a lazy collection with no free
+        // variables — `unknowns` reads the structural operands (the range's
+        // bounds), never the materialized elements, so this guard is O(1) for
+        // a Range. Eager collections (e.g. `List`) already store their
+        // elements as operands, so walking them is cheap regardless of
+        // `unknowns`: `BoxedFunction.infer()` also narrows an inferred
+        // *result signature* (not just free symbols), so a concrete literal
+        // list containing an inferred function call still needs the walk.
+        if (x.isLazyCollection && x.unknowns.length === 0) continue;
         for (const y of x.each()) y.infer(inferredType);
-      else x.infer(inferredType);
+      } else x.infer(inferredType);
   }
 
   return xs;

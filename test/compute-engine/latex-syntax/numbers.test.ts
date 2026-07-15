@@ -246,8 +246,8 @@ describe('PARSING OF NUMBER', () => {
     });
 
     test('Dot before a letter stays member access', () => {
-      // `1.x` is member access (parses to First(1)), NOT `1` then `.x`.
-      expect(parse('1.x')).toMatchInlineSnapshot(`["First", 1]`);
+      // `1.x` is member access (parses to PointX(1)), NOT `1` then `.x`.
+      expect(parse('1.x')).toMatchInlineSnapshot(`["PointX", 1]`);
       // `1.\operatorname{count}` is member access, not a trailing-dot number.
       expect(parse('1.\\operatorname{count}')).toMatchInlineSnapshot(
         `["Length", 1]`

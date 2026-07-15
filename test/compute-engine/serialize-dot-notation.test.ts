@@ -6,17 +6,27 @@ describe('Serializer: dotNotation option', () => {
     expect(ce.expr(['First', 'p']).toLatex()).not.toContain('.x');
   });
 
-  test('on: First serializes as p.x', () => {
+  test('on: PointX serializes as p.x', () => {
     const ce = new ComputeEngine();
     ce.latexOptions = { dotNotation: true };
-    expect(ce.expr(['First', 'p']).toLatex()).toBe('p.x');
+    expect(ce.expr(['PointX', 'p']).toLatex()).toBe('p.x');
   });
 
-  test('on: Second → .y, Third → .z', () => {
+  test('on: PointY → .y, PointZ → .z', () => {
     const ce = new ComputeEngine();
     ce.latexOptions = { dotNotation: true };
-    expect(ce.expr(['Second', 'p']).toLatex()).toBe('p.y');
-    expect(ce.expr(['Third', 'p']).toLatex()).toBe('p.z');
+    expect(ce.expr(['PointY', 'p']).toLatex()).toBe('p.y');
+    expect(ce.expr(['PointZ', 'p']).toLatex()).toBe('p.z');
+  });
+
+  test('on: First/Second/Third do NOT dot-serialize (would not round-trip to PointX)', () => {
+    const ce = new ComputeEngine();
+    ce.latexOptions = { dotNotation: true };
+    // `.x`/`.y`/`.z` reparse as PointX/PointY/PointZ, so element-indexing
+    // First/Second/Third must not use dot notation.
+    expect(ce.expr(['First', 'p']).toLatex()).not.toContain('.x');
+    expect(ce.expr(['Second', 'p']).toLatex()).not.toContain('.y');
+    expect(ce.expr(['Third', 'p']).toLatex()).not.toContain('.z');
   });
 
   test('on: Length, Sum, Max, Min serialize with operator-name dot form', () => {
@@ -48,7 +58,7 @@ describe('Serializer: dotNotation option', () => {
     const expr = ce.parse('p.x.\\operatorname{real}');
     // Should round-trip to something parseable that gives the same AST.
     const back = expr.toLatex();
-    expect(ce.parse(back).json).toEqual(['Real', ['First', 'p']]);
+    expect(ce.parse(back).json).toEqual(['Real', ['PointX', 'p']]);
   });
 
   test('on: multi-arg Sum (with index) still uses standard form', () => {
@@ -74,8 +84,8 @@ describe('Serializer: dotNotation option', () => {
   test('per-call option override', () => {
     const ce = new ComputeEngine();
     // Engine-wide is off, per-call turns it on
-    expect(ce.expr(['First', 'p']).toLatex({ dotNotation: true })).toBe('p.x');
+    expect(ce.expr(['PointX', 'p']).toLatex({ dotNotation: true })).toBe('p.x');
     // Engine-wide off means default call has standard form
-    expect(ce.expr(['First', 'p']).toLatex()).not.toBe('p.x');
+    expect(ce.expr(['PointX', 'p']).toLatex()).not.toBe('p.x');
   });
 });

@@ -39,9 +39,14 @@ import { EMOJIS } from '../../math-json/symbols.js';
  * one operand.
  */
 const DOT_NOTATION_MAP: Readonly<Record<string, string>> = {
-  First: '.x',
-  Second: '.y',
-  Third: '.z',
+  // Only the point-coordinate accessors serialize to `.x`/`.y`/`.z`: the parser
+  // reparses that syntax as `PointX`/`PointY`/`PointZ`, so serializing
+  // `First`/`Second`/`Third` (element indexing) to `.x`/`.y`/`.z` would not
+  // round-trip — `First(L)` would come back as `PointX(L)`, which broadcasts
+  // over a list of points instead of returning the first element.
+  PointX: '.x',
+  PointY: '.y',
+  PointZ: '.z',
   Real: '.\\operatorname{real}',
   Imaginary: '.\\operatorname{imag}',
   Length: '.\\operatorname{count}',

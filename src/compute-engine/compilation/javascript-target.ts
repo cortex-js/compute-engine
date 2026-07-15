@@ -8,6 +8,7 @@ import {
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { Complex } from 'complex-esm';
 import { tryGetConstant } from './constant-folding.js';
+import { collectionElementType } from '../../common/type/utils.js';
 
 import {
   chop,
@@ -201,6 +202,57 @@ function compileJSEquality(
 function isIndexedCollectionOperand(e: Expression): boolean {
   const t = e.type;
   return t.matches('list') || t.matches('indexed_collection');
+}
+
+/**
+ * Compile a point-coordinate accessor (`.x`/`.y`/`.z` → PointX/PointY/PointZ),
+ * `idx` is the 0-based coordinate. On a single point (a tuple, compiled to a JS
+ * array) it indexes the coordinate; on a list of points it broadcasts, mapping
+ * the coordinate over the array — matching the interpreter's `pointComponentAt`
+ * and Desmos semantics. The tuple case is checked first because a tuple type
+ * also matches `indexed_collection`.
+ */
+function compilePointComponent(
+  arg: Expression,
+  idx: number,
+  compile: (e: Expression) => string
+): string {
+  const compiled = compile(arg);
+  const t = arg.type.type;
+  // A single point (tuple): index the coordinate directly.
+  if (typeof t !== 'string' && t.kind === 'tuple') return `${compiled}[${idx}]`;
+  // A list of points broadcasts the coordinate — but only when the operand is
+  // confirmably a list of points, matching the interpreter's `pointComponentAt`
+  // (which inspects concrete elements rather than trusting the declared element
+  // type). Any other collection is element-indexing, like First/Second/Third,
+  // which is the same `[idx]` access as the single-point case.
+  if (isPointListOperand(arg))
+    return `(${compiled}).map((_pt) => _pt[${idx}])`;
+  return `${compiled}[${idx}]`;
+}
+
+/**
+ * True when `e` is (confirmably) a list of points, so a coordinate accessor
+ * broadcasts. Mirrors the interpreter's `pointComponentAt` decision in
+ * `collections.ts`: a symbolic operand whose declared element type is a tuple,
+ * or a literal collection whose first element is a point. Kept as a local
+ * predicate (rather than importing from `collections.ts`) to avoid the
+ * module-init reordering hazard noted on `isIndexedCollectionOperand`.
+ */
+function isPointListOperand(e: Expression): boolean {
+  const elt = collectionElementType(e.type.type);
+  if (elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple')
+    return true;
+  if (e.isFiniteCollection) {
+    const first = e.at(1);
+    if (first === undefined) return false;
+    const ft = first.type.type;
+    return (
+      (typeof ft !== 'string' && ft.kind === 'tuple') ||
+      first.operator === 'Tuple'
+    );
+  }
+  return false;
 }
 
 /**
@@ -859,6 +911,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.tanh(${compile(args[0])})`;
   },
   Third: (args, compile) => `${compile(args[0])}[2]`,
+  PointX: (args, compile) => compilePointComponent(args[0], 0, compile),
+  PointY: (args, compile) => compilePointComponent(args[0], 1, compile),
+  PointZ: (args, compile) => compilePointComponent(args[0], 2, compile),
   Mod: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Mod: missing argument');
     const ca = compile(a);
@@ -1669,11 +1724,40 @@ const colorHelpers = {
   },
 };
 
+/** A compiled numeric value: a scalar, a complex `{re,im}`, or a (possibly
+ * nested) array of these. */
+type BcastValue = number | { re: number; im: number } | BcastValue[];
+
+/**
+ * Element-wise broadcast of a scalar function `f` over its arguments (the
+ * runtime side of the compile target's list broadcasting — see
+ * `tryCompileBroadcast`). Any array argument makes the result an array; the
+ * broadcast length is the shortest participating array (matching the
+ * interpreter's `broadcastOverIndexedCollections`), a scalar argument is reused
+ * for every element, and nested arrays recurse. When no argument is an array,
+ * `f` is applied directly. `f` therefore only ever sees scalar (or complex)
+ * operands.
+ */
+function bcast(
+  f: (...xs: BcastValue[]) => BcastValue,
+  ...args: BcastValue[]
+): BcastValue {
+  let n = -1;
+  for (const a of args)
+    if (Array.isArray(a)) n = n < 0 ? a.length : Math.min(n, a.length);
+  if (n < 0) return f(...args);
+  const out: BcastValue[] = new Array(n);
+  for (let i = 0; i < n; i++)
+    out[i] = bcast(f, ...args.map((a) => (Array.isArray(a) ? a[i] : a)));
+  return out;
+}
+
 /**
  * Runtime helpers injected as `_SYS` into compiled JavaScript functions.
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
  */
 const SYS_HELPERS = {
+  bcast,
   chop,
   factorial,
   factorial2,

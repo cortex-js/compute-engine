@@ -130,6 +130,85 @@ function componentAt(
   return ce.error(['incompatible-type', `'collection'`, xs.type.toString()]);
 }
 
+// A point is a tuple (its coordinates are its elements). The `.x`/`.y`/`.z`
+// accessors — `PointX`/`PointY`/`PointZ` — extract a coordinate. Unlike
+// `First`/`Second`/`Third` (which index a collection and return an *element*),
+// they broadcast over a *list of points*, returning the list of coordinates —
+// matching Desmos and the threadable `Real`/`Imaginary` accessors. On a single
+// point the two coincide (`First` of a 2-tuple is its x-coordinate); on a list
+// of points they diverge (`First` returns the first point, not the x-list).
+function isPointLike(e: Expression): boolean {
+  const t = e.type.type;
+  return (typeof t !== 'string' && t.kind === 'tuple') || e.operator === 'Tuple';
+}
+
+// True when the operand's declared type says its elements are points (tuples).
+// Used to decide how an *empty* collection broadcasts: a declared `list<tuple>`
+// with no elements is still a (empty) list of points, so a coordinate accessor
+// yields an empty list — matching the JS compiler's `[].map(...)` → `[]`.
+function hasPointElementType(xs: Expression): boolean {
+  const elt = collectionElementType(xs.type.type);
+  return elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple';
+}
+
+// Result type of a point-component accessor: a single point yields the
+// coordinate type; a collection of points broadcasts to a collection of
+// coordinates.
+function pointComponentType(xs: Expression, position: number): Type {
+  const t = xs.type.type;
+  if (typeof t !== 'string' && t.kind === 'tuple')
+    return componentType(xs, position);
+  // A list of points broadcasts. The coordinate type is not reliably
+  // recoverable (a literal list of tuples is often mis-typed as `vector<n>`
+  // with numeric elements), so use `number` — honest for the geometric point
+  // case, and it keeps the result an (honest) collection type, not a scalar.
+  if (xs.type.matches('indexed_collection')) return mapResultType(t, 'number');
+  return componentType(xs, position);
+}
+
+// Evaluate a point-component accessor, broadcasting the coordinate over a list
+// of points. We inspect the actual elements (not the declared element type,
+// which is unreliable for a literal list of points) to decide whether to
+// broadcast; a collection whose elements are not points falls back to the
+// `First`/`Second`/`Third` element-indexing behavior.
+function pointComponentAt(
+  xs: Expression,
+  position: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  // A single point (tuple): the coordinate.
+  const t = xs.type.type;
+  if (typeof t !== 'string' && t.kind === 'tuple')
+    return componentAt(xs, position, ce);
+
+  // A finite collection: decide broadcast-vs-index WITHOUT materializing the
+  // whole collection. A large lazy `Range` is finite, so enumerating every
+  // element just to test point-ness would hang (the case the `validate.ts`
+  // guard also protects against). Peek at the first element only: if it is a
+  // point, broadcast the coordinate element-wise; otherwise fall back to O(1)
+  // element indexing, like First/Second/Third.
+  if (xs.isFiniteCollection) {
+    const first = xs.at(1);
+    if (first !== undefined) {
+      if (isPointLike(first))
+        return ce.function(
+          'List',
+          [...xs.each()].map((e) => e.at(position) ?? ce.Nothing)
+        );
+      // Elements are not points → element indexing, like First/Second/Third.
+      return componentAt(xs, position, ce);
+    }
+    // Empty collection: if the declared element type is a point, broadcast to
+    // an empty list (matching the JS compiler's `[].map(...)` → `[]`);
+    // otherwise index (→ Nothing), like First/Second/Third on an empty list.
+    if (hasPointElementType(xs)) return ce.function('List', []);
+    return componentAt(xs, position, ce);
+  }
+
+  // Symbolic / non-finite operand: stay symbolic (or error) like componentAt.
+  return componentAt(xs, position, ce);
+}
+
 // @todo: future thoughts. Consider
 // - operations from the Scala library, which is particularly well designed:
 //    - https://scala-lang.org/api/3.3.1/scala/language$.html#
@@ -1753,6 +1832,34 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(any) -> any',
     type: ([xs]) => componentType(xs, 3),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 3, ce),
+  },
+
+  // Point-coordinate accessors (`.x`/`.y`/`.z`). On a single point they return
+  // the coordinate; on a list of points they broadcast, returning the list of
+  // coordinates (Desmos semantics). Distinct from First/Second/Third, which
+  // index a collection — see `pointComponentAt`.
+  PointX: {
+    description: 'The x-coordinate of a point, broadcasting over a list of points.',
+    complexity: 8200,
+    signature: '(any) -> any',
+    type: ([xs]) => pointComponentType(xs, 1),
+    evaluate: ([xs], { engine: ce }) => pointComponentAt(xs, 1, ce),
+  },
+
+  PointY: {
+    description: 'The y-coordinate of a point, broadcasting over a list of points.',
+    complexity: 8200,
+    signature: '(any) -> any',
+    type: ([xs]) => pointComponentType(xs, 2),
+    evaluate: ([xs], { engine: ce }) => pointComponentAt(xs, 2, ce),
+  },
+
+  PointZ: {
+    description: 'The z-coordinate of a point, broadcasting over a list of points.',
+    complexity: 8200,
+    signature: '(any) -> any',
+    type: ([xs]) => pointComponentType(xs, 3),
+    evaluate: ([xs], { engine: ce }) => pointComponentAt(xs, 3, ce),
   },
 
   Last: {

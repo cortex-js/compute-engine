@@ -28,6 +28,41 @@
   overwrites an existing binding; inference of a concrete parameter type still
   narrows an open argument as before. (Reported by the Tycho/Graph Paper team.)
 
+### Collections
+
+- **The `.x`/`.y`/`.z` point-coordinate accessors now broadcast over a list of
+  points.** They previously parsed to `First`/`Second`/`Third` — the collection
+  element-indexing operators. On a single point that is correct (`(3,4).x` = 3,
+  since the first element of a 2-tuple is its x-coordinate), but on a _list of
+  points_ the two diverge: `[(1,2),(3,4),(5,6)].x` returned the first _point_
+  `(1,2)` instead of the list of x-coordinates `[1,3,5]`. The accessors now parse
+  to dedicated `PointX`/`PointY`/`PointZ` operators that extract a coordinate and
+  map element-wise over a list of points (matching Desmos and the threadable
+  `.real`/`.imag` accessors), while a single point still returns the scalar
+  coordinate. `First`/`Second`/`Third` are unchanged and continue to index a
+  collection. The new operators broadcast on the `javascript` compile target
+  (`L.x` → `(L).map((p) => p[0])`) and, for a single point, swizzle on the GPU
+  target as before. (Reported by the Tycho/Graph Paper team.)
+
+### Compilation
+
+- **Element-wise (scalar↔list) arithmetic now broadcasts on the `javascript`
+  compile target.** An arithmetic or element-wise math operator applied to a
+  list-valued operand — `x - L`, `2L`, `L^2`, `-L`, `\sin(L)`, `\sqrt{L}`, or two
+  lists `L + M` — previously compiled to scalar JavaScript that returned garbage
+  (`-_.L + _.x` → `NaN`) behind a `success: true`, unless an operand was a
+  _concrete_ collection at compile time (which failed closed). A symbolic
+  list-valued **parameter** (bound at run time — the normal compile case) slipped
+  through entirely. These now compile to a `_SYS.bcast` runtime helper that maps
+  the operator element-wise, matching the interpreter's broadcasting: scalars are
+  reused for every element, two lists zip to the shorter length, and nested lists
+  (matrices) recurse. The pure-scalar fast path is unchanged. A **complex**-valued
+  list still has no coverage and now fails closed correctly (`success: false` →
+  interpreter fallback) instead of silently returning garbage. Combined with the
+  `.x`/`.y` point-broadcast change above, a compiled Desmos expression such as
+  `\min((x - V.x)^2 + (y - V.y)^2)` over a list of points `V` now evaluates
+  correctly. (Reported by the Tycho/Graph Paper team.)
+
 ## 0.79.2 _2026-07-15_
 
 ### Compilation

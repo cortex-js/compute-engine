@@ -40,9 +40,12 @@ import { parseQuantifier } from './definitions-logic.js';
 // ---------------------------------------------------------------------------
 
 const COMPONENT_ACCESS_HEADS: Record<string, string> = {
-  x: 'First',
-  y: 'Second',
-  z: 'Third',
+  // Point-coordinate accessors: `PointX`/`PointY`/`PointZ` extract a coordinate
+  // and broadcast over a list of points (Desmos semantics), unlike the
+  // element-indexing `First`/`Second`/`Third`. On a single point they coincide.
+  x: 'PointX',
+  y: 'PointY',
+  z: 'PointZ',
   real: 'Real',
   re: 'Real',
   imag: 'Imaginary',

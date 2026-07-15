@@ -160,7 +160,7 @@ describe('Desmos gap fixes', () => {
       });
 
       test('member access still parses', () => {
-        expect(parse('v.x')).toEqual(['First', 'v']);
+        expect(parse('v.x')).toEqual(['PointX', 'v']);
         expect(parse('x.\\max')).toEqual(['Max', 'x']);
       });
     });

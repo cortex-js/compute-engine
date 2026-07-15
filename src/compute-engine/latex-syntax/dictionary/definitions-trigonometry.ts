@@ -1,9 +1,11 @@
 import { MathJsonExpression } from '../../../math-json/types.js';
+import { operand } from '../../../math-json/utils.js';
 import {
   ExpressionParseHandler,
   LatexDictionary,
   MULTIPLICATION_PRECEDENCE,
   Parser,
+  Serializer,
   Terminator,
 } from '../types.js';
 import { PIPE_TOPIC_MARKER } from './definitions-core.js';
@@ -149,6 +151,18 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     latexTrigger: ['\\arctan'],
 
     parse: parseTrig('Arctan'),
+  },
+  {
+    // Two-argument arctangent (atan2). It has no `latexTrigger`/`parse` of its
+    // own — a 2-arg `\arctan(y, x)` is lowered to `Arctan2` by `parseTrig`
+    // (the Desmos-compatibility branch above). This entry exists only to
+    // serialize `Arctan2` back to that round-tripping `\arctan(y, x)` form.
+    // Without it the default operator serializer emits `\mathrm{Arctan_2}`,
+    // which re-parses as a DISTINCT symbol (`Arctan` subscript `2`) that no
+    // compilation target recognizes.
+    name: 'Arctan2',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      `\\arctan(${serializer.serialize(operand(expr, 1))}, ${serializer.serialize(operand(expr, 2))})`,
   },
   {
     // Variant, non-standard command

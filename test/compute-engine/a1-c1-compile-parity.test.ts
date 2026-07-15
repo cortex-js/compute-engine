@@ -1,8 +1,10 @@
 /**
- * A1 — First/Second/Third / Range compile parity tests.
+ * A1 — PointX/PointY/PointZ / Range compile parity tests.
  *
  * Verifies that the AST nodes produced by p.x / p.y / p.z
- * (First/Second/Third) and Range compile correctly to both JS and GLSL targets.
+ * (PointX/PointY/PointZ) and Range compile correctly to both JS and GLSL
+ * targets. On a single point they index the coordinate; on a list of points
+ * the JS target broadcasts (see the broadcast tests below).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -10,9 +12,9 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
-describe('A1 — First/Second/Third compile', () => {
+describe('A1 — PointX/PointY/PointZ compile', () => {
   describe('JS target', () => {
-    test('First compiles to JS array index 0', () => {
+    test('PointX on a point compiles to JS array index 0', () => {
       const ce = new ComputeEngine();
       ce.declare('p', 'tuple<number, number>');
       const result = compile(ce.parse('p.x'));
@@ -21,7 +23,7 @@ describe('A1 — First/Second/Third compile', () => {
       expect(result?.run?.({ p: [10, 20] })).toEqual(10);
     });
 
-    test('Second compiles to JS array index 1', () => {
+    test('PointY on a point compiles to JS array index 1', () => {
       const ce = new ComputeEngine();
       ce.declare('p', 'tuple<number, number>');
       const result = compile(ce.parse('p.y'));
@@ -30,7 +32,7 @@ describe('A1 — First/Second/Third compile', () => {
       expect(result?.run?.({ p: [10, 20] })).toEqual(20);
     });
 
-    test('Third compiles to JS array index 2', () => {
+    test('PointZ on a point compiles to JS array index 2', () => {
       const ce = new ComputeEngine();
       ce.declare('p', 'tuple<number, number, number>');
       const result = compile(ce.parse('p.z'));
@@ -39,7 +41,17 @@ describe('A1 — First/Second/Third compile', () => {
       expect(result?.run?.({ p: [10, 20, 30] })).toEqual(30);
     });
 
-    test('First in a larger expression compiles cleanly', () => {
+    test('PointX/PointY broadcast the coordinate over a list of points', () => {
+      const ce = new ComputeEngine();
+      ce.declare('L', 'list<tuple<number, number>>');
+      const rx = compile(ce.parse('L.x'));
+      expect(rx?.success).toBe(true);
+      expect(rx?.run?.({ L: [[1, 2], [3, 4], [5, 6]] })).toEqual([1, 3, 5]);
+      const ry = compile(ce.parse('L.y'));
+      expect(ry?.run?.({ L: [[1, 2], [3, 4], [5, 6]] })).toEqual([2, 4, 6]);
+    });
+
+    test('PointX in a larger expression compiles cleanly', () => {
       const ce = new ComputeEngine();
       ce.declare('p', 'tuple<number, number>');
       // Distance from origin to p: sqrt(p.x^2 + p.y^2)
@@ -52,7 +64,7 @@ describe('A1 — First/Second/Third compile', () => {
   describe('GLSL target', () => {
     const glsl = new GLSLTarget();
 
-    test('First compiles to .x swizzle in GLSL', () => {
+    test('PointX compiles to .x swizzle in GLSL', () => {
       const ce = new ComputeEngine();
       ce.declare('p', 'tuple<number, number>');
       const result = glsl.compile(ce.parse('p.x'));
@@ -60,7 +72,7 @@ describe('A1 — First/Second/Third compile', () => {
       expect(result.code).toBe('p.x');
     });
 
-    test('Second compiles to .y swizzle in GLSL', () => {
+    test('PointY compiles to .y swizzle in GLSL', () => {
       const ce = new ComputeEngine();
       ce.declare('p', 'tuple<number, number>');
       const result = glsl.compile(ce.parse('p.y'));
@@ -68,7 +80,7 @@ describe('A1 — First/Second/Third compile', () => {
       expect(result.code).toBe('p.y');
     });
 
-    test('Third compiles to .z swizzle in GLSL', () => {
+    test('PointZ compiles to .z swizzle in GLSL', () => {
       const ce = new ComputeEngine();
       ce.declare('p', 'tuple<number, number, number>');
       const result = glsl.compile(ce.parse('p.z'));

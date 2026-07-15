@@ -39,7 +39,7 @@ describe('Desmos composition: multi-feature corpus rows', () => {
   });
 
   test('component access composed: L.x.real', () => {
-    expect(parse('L.x.\\operatorname{real}')).toEqual(['Real', ['First', 'L']]);
+    expect(parse('L.x.\\operatorname{real}')).toEqual(['Real', ['PointX', 'L']]);
   });
 
   test('for-comp with dependent binding and component access in body', () => {

@@ -4,7 +4,11 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
-import { isFiniteIndexedCollection } from '../collection-utils.js';
+import {
+  isFiniteIndexedCollection,
+  isNumericTuple,
+} from '../collection-utils.js';
+import { collectionElementType } from '../../common/type/utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { normalizeIndexingSet } from '../library/utils.js';
 import {
@@ -13,6 +17,7 @@ import {
   isString,
   isFunction,
   isDictionary,
+  isTensor,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
@@ -199,45 +204,87 @@ export class BaseCompiler {
       return BaseCompiler.compileLoop(h, args, target);
     }
 
-    // Scalar arithmetic over a list-valued operand has no committed coverage on
-    // the JavaScript target: the built-in lowering emits element-wise-impossible
-    // scalar JS and silently returns garbage (`[1,2,3] + x` → the *string*
-    // "1,2,31"; `list * scalar` → NaN). Fail closed (D6) with the offending head
-    // so the engine-level `compile()` reports `success: false` and falls back to
-    // the interpreter (which broadcasts correctly), rather than returning a
-    // wrong result behind a `success: true`.
+    // Element-wise broadcast of a `broadcastable` head (arithmetic + unary
+    // math) over one or more list-valued operands, for the JavaScript target.
+    // Emits a `_SYS.bcast` call wrapping the head's own scalar codegen — see
+    // `tryCompileBroadcast`. Other targets have native vector types (GLSL/WGSL
+    // `vec3 + vec3`) or their own broadcasting, so this is JavaScript-only.
+    if (target.language === 'javascript') {
+      const broadcast = BaseCompiler.tryCompileBroadcast(
+        engine,
+        h,
+        args,
+        target
+      );
+      if (broadcast !== null) return broadcast;
+    }
+
+    // A broadcastable head with a list/collection-typed operand that
+    // `tryCompileBroadcast` did NOT handle would otherwise fall through to the
+    // legacy scalar path and silently return garbage behind a `success: true`.
+    // Two cases reach here:
+    //   - Arithmetic (`SCALAR_ARITHMETIC_HEADS`): the built-in symbolic lowering
+    //     emits element-wise-impossible JS (`[1,2,3] + x` → the *string*
+    //     "1,2,31"; `list * scalar` → NaN), and a complex-valued list is
+    //     declined by the broadcast closure (can't carry complex scalar
+    //     codegen).
+    //   - Any *other* broadcastable numeric head that is *string*-mapped to a
+    //     scalar helper with no array codegen (`Arctan2` → `Math.atan2`,
+    //     `Hypot` → `Math.hypot`, `Sinc` → `_SYS.sinc`): handed an array it
+    //     returns `NaN`/`null`. These are not in `SCALAR_ARITHMETIC_HEADS`, so
+    //     without this widened net they escape the guard entirely.
+    // Fail closed (D6) with the offending head so the engine-level `compile()`
+    // reports `success: false` and falls back to the interpreter (which
+    // broadcasts correctly).
     //
     // Deliberately narrow, to avoid false positives on genuinely supported list
     // forms:
     //   - GLSL/WGSL/GPU targets have native vector types (`vec3 + vec3`), so the
     //     guard is scoped to `javascript` only.
+    //   - Relational (`Equal`/`Less`/…) and logical (`And`/`Or`/…) heads are
+    //     excluded — they return booleans and are handled by their own codegen
+    //     (`compileJSEquality` fails closed on collection operands).
     //   - A user `operators` override that lowers the head to a *function call*
     //     (an identifier like `add`, not a symbolic infix `+`) takes
     //     responsibility for list operands (Issue #240) — only the built-in
     //     symbolic lowering (`+`, `*`, `_SYS.pow`) produces garbage.
-    //   - Broadcasting a unary operator/function over a single finite indexed
-    //     collection (`-[1,2,3]`, `\sqrt{[1,4,9]}`, `\sin([x, 2x])`) is handled
-    //     below via `.map` and is supported.
-    // Materialize the list with `evaluate()` and compile a scalar element
-    // function for anything else.
-    if (
-      target.language === 'javascript' &&
-      BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h) &&
-      args.some((a) => a.isCollection)
-    ) {
-      const opMap = target.operators?.(h);
-      const lowersToScalarInfix =
-        opMap === undefined || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]);
+    //   - A unary broadcast over a single *concrete* finite indexed collection
+    //     whose head has *function* codegen (`-[1,2,3]`, `\sqrt{[1,4,9]}`) is
+    //     handled below via `.map` (a string-mapped unary head has no such
+    //     path, so it must fail closed).
+    // The operand check is type-based (not just `isCollection`) so a symbolic
+    // list *parameter* fails closed too, rather than silently emitting garbage.
+    if (target.language === 'javascript') {
       const def = engine.lookupDefinition(h);
-      const isUnaryBroadcast =
-        args.length === 1 &&
-        isOperatorDef(def) &&
-        def.operator.broadcastable === true &&
-        isFiniteIndexedCollection(args[0]);
-      if (lowersToScalarInfix && !isUnaryBroadcast)
-        throw new Error(
-          `${h}: cannot compile scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Fail closed (D6). Materialize the list with evaluate() and compile a scalar element function instead.`
-        );
+      const isBroadcastableHead =
+        BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h) ||
+        (isOperatorDef(def) &&
+          def.operator.broadcastable === true &&
+          !isRelationalOperator(h) &&
+          !BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h));
+      if (
+        isBroadcastableHead &&
+        args.some(
+          (a) =>
+            a.isCollection ||
+            a.type.matches('list') ||
+            a.type.matches('indexed_collection')
+        )
+      ) {
+        const opMap = target.operators?.(h);
+        const lowersToScalarInfix =
+          opMap === undefined || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]);
+        const isUnaryBroadcast =
+          args.length === 1 &&
+          isOperatorDef(def) &&
+          def.operator.broadcastable === true &&
+          typeof target.functions?.(h) === 'function' &&
+          isFiniteIndexedCollection(args[0]);
+        if (lowersToScalarInfix && !isUnaryBroadcast)
+          throw new Error(
+            `${h}: cannot compile scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Fail closed (D6). Materialize the list with evaluate() and compile a scalar element function instead.`
+          );
+      }
     }
 
     // Handle operators
@@ -624,6 +671,139 @@ export class BaseCompiler {
    */
   private static readonly SCALAR_ARITHMETIC_HEADS: ReadonlySet<string> =
     new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power']);
+
+  /**
+   * Logical operator heads that are `broadcastable` but return booleans. Like
+   * relational operators, they are excluded from numeric element-wise
+   * broadcasting on the compile target (a boolean-list has no coverage).
+   */
+  private static readonly LOGICAL_BROADCAST_HEADS: ReadonlySet<string> =
+    new Set([
+      'And',
+      'Or',
+      'Not',
+      'Xor',
+      'Nand',
+      'Nor',
+      'Implies',
+      'Equivalent',
+    ]);
+
+  /**
+   * Element-wise broadcast of a `broadcastable` head (arithmetic + element-wise
+   * math functions such as `Sin`/`Sqrt`) over one or more list-valued operands,
+   * for the JavaScript target. Emits a call to the `_SYS.bcast` runtime helper
+   * wrapping a scalar closure built from the head's OWN scalar codegen, so
+   * complex handling and constant folding stay identical to the scalar path.
+   * `_SYS.bcast` performs the shape logic at run time (shortest-length zip,
+   * scalar broadcast, nested lists), matching the interpreter's
+   * `broadcastOverIndexedCollections`.
+   *
+   * Returns `null` — deferring to the scalar / fail-closed path — when the head
+   * is not broadcastable, no operand is list-valued, the head has no function
+   * codegen, or any operand is complex-valued (the bare element parameters
+   * below cannot carry the complex scalar codegen).
+   */
+  private static tryCompileBroadcast(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): string | null {
+    const def = engine.lookupDefinition(h);
+    if (!isOperatorDef(def) || def.operator.broadcastable !== true) return null;
+
+    // Comparison and logical heads are also `broadcastable`, but they return
+    // booleans; element-wise boolean-over-list has no compile coverage and is
+    // handled by the separate collection-condition guard (which fails closed).
+    // Restrict broadcasting to numeric element-wise operators.
+    if (
+      isRelationalOperator(h) ||
+      BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h)
+    )
+      return null;
+
+    // A user `operators` override that lowers the head to a *function call*
+    // (an identifier like `add(...)`, not a symbolic infix `+`) takes
+    // responsibility for list operands (Issue #240) — don't intercept it.
+    const opMap = target.operators?.(h);
+    if (opMap !== undefined && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]))
+      return null;
+
+    // Mirror the interpreter's `skipBroadcastForVectorOps` carve-outs
+    // (`boxed-function.ts`) for the compile target, but only where element-wise
+    // broadcast would produce a *different value* than the interpreter's
+    // dedicated tensor/tuple handling — namely `Multiply` of two or more
+    // tensors/numeric-tuples, which **contracts** (dot / matrix product via
+    // `mulTensors`) where `_SYS.bcast` would instead compute an element-wise
+    // Hadamard product. Decline so the fail-closed / interpreter path takes
+    // over (both operands are collection-typed, so the D6 `Multiply` guard
+    // below fails it closed → interpreter, which contracts correctly).
+    //
+    // The interpreter's carve-out is broader (it skips broadcast for a *single*
+    // tensor `Add`/`Multiply` and for tuple `Add`/`Negate`/`Subtract`/`Divide`
+    // too), but there it merely reroutes to `addTensors`/`mulTensors`, which
+    // are element-wise for those cases — exactly what `_SYS.bcast` already
+    // produces. Failing those closed would only lose coverage (a `list<number>`
+    // is a `vector` tensor, so it would break the committed scalar↔list
+    // broadcast — see `compile-fallback.test.ts`). Only the contraction case
+    // genuinely diverges in value.
+    if (
+      h === 'Multiply' &&
+      args.filter((a) => isTensor(a) || isNumericTuple(a)).length >= 2
+    )
+      return null;
+
+    const fn = target.functions?.(h);
+    if (typeof fn !== 'function') return null;
+
+    // An operand lowers to a JS array at run time when it is a concrete
+    // collection or is statically list/collection-typed (a symbolic list
+    // parameter). If none is, this is ordinary scalar code — leave it be.
+    const isArrayOperand = (a: Expression): boolean =>
+      a.isCollection ||
+      a.type.matches('list') ||
+      a.type.matches('indexed_collection');
+    if (!args.some(isArrayOperand)) return null;
+
+    // Complex-valued operands need complex scalar codegen, which the bare
+    // element parameters below can't carry — defer (scalar / fail-closed path).
+    // For a list operand this means a genuinely complex *element* type
+    // (`list<complex>`); a `list<number>` is treated as real, mirroring the
+    // scalar `isComplexValued` convention (`number` matches neither `complex`
+    // nor `real`, so it stays on the real path).
+    const hasComplexElement = (a: Expression): boolean => {
+      const elt = collectionElementType(a.type.type);
+      if (elt === undefined) return false;
+      const t = engine.type(elt);
+      return t.matches('complex') && !t.matches('real');
+    };
+    if (
+      args.some(
+        (a) => BaseCompiler.isComplexValued(a) || hasComplexElement(a)
+      )
+    )
+      return null;
+
+    // Bind one element parameter per operand and build the scalar body by
+    // re-invoking the head's own scalar codegen with those parameters (shadow
+    // `target.var` so they compile bare, not as `_.<name>` lookups — same
+    // pattern as the Sum/Product loop index).
+    const params = args.map(() => BaseCompiler.tempVar());
+    const innerTarget: CompileTarget<Expression> = {
+      ...target,
+      var: (id: string) => (params.includes(id) ? id : target.var(id)),
+    };
+    const scalarBody = fn(
+      params.map((p) => engine.expr(p)),
+      (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
+      innerTarget
+    );
+    const compiledArgs = args
+      .map((a) => BaseCompiler.compile(a, target))
+      .join(', ');
+    return `_SYS.bcast((${params.join(', ')}) => ${scalarBody}, ${compiledArgs})`;
+  }
 
   /**
    * Extract the initial-value operand of a `Declare` expression, if any.

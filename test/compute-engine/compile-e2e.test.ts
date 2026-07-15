@@ -7,6 +7,7 @@
  */
 
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 describe('E2E: Real-world Expressions', () => {
@@ -279,6 +280,85 @@ describe('E2E: Real-world Expressions', () => {
       const out = result?.run?.({ x: 0.5 }) as unknown as number[];
       expect(out[0]).toBeCloseTo(Math.sin(0.5), 12);
       expect(out[1]).toBeCloseTo(Math.sin(1), 12);
+    });
+  });
+
+  // Scalar↔list arithmetic broadcasts element-wise over a symbolic list
+  // parameter (compiled via the `_SYS.bcast` runtime helper), matching the
+  // interpreter. Previously these emitted scalar JS and returned garbage.
+  describe('Scalar↔list arithmetic broadcast', () => {
+    const list = (t: string) => {
+      const e = new ComputeEngine();
+      e.declare('L', 'list<number>');
+      e.declare('M', 'list<number>');
+      e.declare('x', 'number');
+      e.declare('y', 'number');
+      return compile(e.parse(t));
+    };
+
+    it('scalar − list, scalar · list, list^2, −list', () => {
+      expect(list('x-L')?.run?.({ x: 1, L: [0, 2, 0] })).toEqual([1, -1, 1]);
+      expect(list('2L')?.run?.({ L: [1, 2, 3] })).toEqual([2, 4, 6]);
+      expect(list('L^2')?.run?.({ L: [1, 2, 3] })).toEqual([1, 4, 9]);
+      expect(list('-L')?.run?.({ L: [1, 2, 3] })).toEqual([-1, -2, -3]);
+    });
+
+    it('list + list zips element-wise to the shortest length', () => {
+      expect(list('L+M')?.run?.({ L: [1, 2, 3], M: [10, 20, 30] })).toEqual([
+        11, 22, 33,
+      ]);
+      expect(list('L+M')?.run?.({ L: [1, 2, 3], M: [10, 20] })).toEqual([
+        11, 22,
+      ]);
+    });
+
+    it('nested list (matrix) broadcasts a scalar', () => {
+      const e = new ComputeEngine();
+      e.declare('A', 'list<list<number>>');
+      expect(
+        compile(e.parse('2A'))?.run?.({
+          A: [
+            [1, 2],
+            [3, 4],
+          ],
+        })
+      ).toEqual([
+        [2, 4],
+        [6, 8],
+      ]);
+    });
+
+    it('end-to-end: per-candidate distances over a list of points', () => {
+      // Item-15 point broadcast + scalar↔list arithmetic together — the Desmos
+      // Voronoï shape `d = (x - V.x)^2 + (y - V.y)^2`, then `min(d)`.
+      const e = new ComputeEngine();
+      e.declare('V', 'list<tuple<number, number>>');
+      e.declare('x', 'number');
+      e.declare('y', 'number');
+      const vars = {
+        V: [
+          [0, 0],
+          [2, 0],
+          [0, 2],
+        ],
+        x: 1,
+        y: 1,
+      };
+      expect(compile(e.parse('(x-V.x)^2+(y-V.y)^2'))?.run?.(vars)).toEqual([
+        2, 2, 2,
+      ]);
+      expect(
+        compile(e.parse('\\min((x-V.x)^2+(y-V.y)^2)'))?.run?.(vars)
+      ).toEqual(2);
+    });
+
+    it('a pure-scalar expression is unaffected (no broadcast wrapper)', () => {
+      const e = new ComputeEngine();
+      e.declare('a', 'number');
+      e.declare('b', 'number');
+      const r = compile(e.parse('a+b'));
+      expect(r?.code).not.toContain('bcast');
+      expect(r?.run?.({ a: 2, b: 3 })).toEqual(5);
     });
   });
 });

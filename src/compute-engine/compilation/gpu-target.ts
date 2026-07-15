@@ -394,6 +394,29 @@ function foldNaryBuiltin(
 }
 
 /**
+ * Compile a point-coordinate accessor (`PointX`/`PointY`/`PointZ`) as a GPU
+ * swizzle. A single point is a `vec2`/`vec3`/`vec4`, so `.x`/`.y`/`.z` is
+ * valid. A *list* of points is not a GPU value — a swizzle on it is invalid
+ * shader source, so a list-of-points operand fails closed (D6) rather than
+ * silently emitting garbage. A tuple type also matches `indexed_collection`, so
+ * the single-point case is checked first.
+ */
+function compilePointSwizzle(
+  arg: Expression,
+  comp: 'x' | 'y' | 'z',
+  compile: (e: Expression) => string
+): string {
+  const t = arg.type.type;
+  const isSinglePoint = typeof t !== 'string' && t.kind === 'tuple';
+  if (!isSinglePoint && arg.type.matches('indexed_collection'))
+    throw new Error(
+      `Point${comp.toUpperCase()}: a list of points has no GPU lowering ` +
+        `(a point must be a single vec2/vec3/vec4). Fail closed.`
+    );
+  return `${compile(arg)}.${comp}`;
+}
+
+/**
  * Extract a lowercase string literal from a boxed expression, or `null`
  * if it isn't a string literal. Operators that need to switch on a
  * colorspace name at compile time use this to peek at the argument.
@@ -725,6 +748,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   First: (args, compile) => `${compile(args[0])}.x`,
   Second: (args, compile) => `${compile(args[0])}.y`,
   Third: (args, compile) => `${compile(args[0])}.z`,
+  // Point-coordinate accessors. On the GPU a point is a `vec2`/`vec3`/`vec4`,
+  // so a single point maps to the same swizzle as First/Second/Third. A list of
+  // points is not a GPU value: emitting a swizzle on it produces invalid shader
+  // source, so a list-of-points operand fails closed (D6) rather than compiling
+  // to garbage behind `success: true`.
+  PointX: (args, compile) => compilePointSwizzle(args[0], 'x', compile),
+  PointY: (args, compile) => compilePointSwizzle(args[0], 'y', compile),
+  PointZ: (args, compile) => compilePointSwizzle(args[0], 'z', compile),
   Floor: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `floor(${compile(args[0])})`;
