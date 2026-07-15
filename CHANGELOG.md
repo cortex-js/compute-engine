@@ -16,6 +16,25 @@
   falling back. The indexing-set forms (`\sum_{n=1}^{5}`) and the scalar
   variadic `\max(a,b,c)` are unchanged; a non-collection operand still fails
   closed. (Reported by the Tycho/Graph Paper team.)
+- **List-shaped collection operators now compile on the `javascript` target.**
+  `Last`, `Rest`, `Take`, `Drop`, `Join`, `Reverse`, `Sort`, `IndexOf`, `Map`,
+  and `Filter` previously fell back to interpretation (`Unknown operator`); they
+  now lower to native array operations (`.slice`, `.reverse`, `.sort`,
+  `.indexOf`, `.map`, `.filter`, …). `Take`/`Drop` clamp a negative count to
+  match the interpreter (`Take(xs, -2) = []`, `Drop(xs, -2) = xs`); `Reverse`
+  and `Sort` copy first so the source is not mutated; `Sort` compiles the
+  default ascending numeric order (a custom comparator fails closed); `IndexOf`
+  is 1-based (0 when absent); `Map`/`Filter` compile their lambda operand. A
+  non-indexed-collection operand fails closed. (Requested by the Tycho/Graph
+  Paper team.)
+
+### Evaluation
+
+- **`IndexOf` / `IndexWhere` now work on a tensor-backed list.** A rectangular
+  numeric list is represented as a `BoxedTensor`, which inherited the abstract
+  no-op `indexWhere` and so made `IndexOf`/`IndexWhere` always return `0` (not
+  found) even for a present element. The base `indexWhere` now scans any finite
+  indexed collection for the 1-based index of the first match.
 
 ### Serialization
 

@@ -1127,6 +1127,89 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       js.compile(e.box(['At', m, 1, 2]), { realOnly: true })
     ).toThrow(/Fail closed/);
   });
+
+  // List-shaped collection operators (Last/Rest/Take/Drop/Join/Reverse/Sort/
+  // IndexOf/Map/Filter) — previously `Unknown operator`, now native array ops.
+  // `d = [10, 20, 30]`. Values checked against the interpreter's materialized
+  // result.
+  const runJs = (e: ComputeEngine, mathjson: any) => {
+    const r = compile(e.box(mathjson), { fallback: false, realOnly: true })!;
+    expect(r.success).toBe(true);
+    return r.run!();
+  };
+
+  it('Last compiles to the final element', () => {
+    expect(runJs(mkEngine(), ['Last', 'd'])).toBe(30);
+  });
+
+  it('Rest / Take / Drop compile to slices (count clamped ≥ 0)', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Rest', 'd'])).toEqual([20, 30]);
+    expect(runJs(e, ['Take', 'd', 2])).toEqual([10, 20]);
+    expect(runJs(e, ['Take', 'd', -1])).toEqual([]); // negative → []
+    expect(runJs(e, ['Take', 'd', 9])).toEqual([10, 20, 30]); // past end → all
+    expect(runJs(e, ['Drop', 'd', 1])).toEqual([20, 30]);
+    expect(runJs(e, ['Drop', 'd', -1])).toEqual([10, 20, 30]); // negative → all
+    expect(runJs(e, ['Drop', 'd', 9])).toEqual([]); // past end → []
+  });
+
+  it('Reverse / Sort compile (source not mutated)', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Reverse', 'd'])).toEqual([30, 20, 10]);
+    expect(runJs(e, ['Sort', e.box(['List', 3, 1, 2, -5])])).toEqual([
+      -5, 1, 2, 3,
+    ]);
+    // `d` itself is unchanged after Reverse/Sort
+    expect(runJs(e, ['At', 'd', 1])).toBe(10);
+  });
+
+  it('Join concatenates the elements of each collection operand', () => {
+    const e = mkEngine();
+    expect(
+      runJs(e, ['Join', 'd', e.box(['List', 40, 50])])
+    ).toEqual([10, 20, 30, 40, 50]);
+  });
+
+  it('IndexOf compiles to a 1-based index (0 when absent)', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['IndexOf', 'd', 20])).toBe(2);
+    expect(runJs(e, ['IndexOf', 'd', 99])).toBe(0);
+  });
+
+  it('Map / Filter compile the lambda and use native map/filter', () => {
+    const e = mkEngine();
+    expect(
+      runJs(e, ['Map', 'd', ['Function', ['Divide', 'x', 10], 'x']])
+    ).toEqual([1, 2, 3]);
+    expect(
+      runJs(e, ['Filter', 'd', ['Function', ['Greater', 'x', 15], 'x']])
+    ).toEqual([20, 30]);
+  });
+
+  it('a custom Sort comparator fails closed', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    expect(() =>
+      js.compile(
+        e.box(['Sort', 'd', ['Function', ['Subtract', 'b', 'a'], 'a', 'b']]),
+        { realOnly: true }
+      )
+    ).toThrow(/Fail closed/);
+  });
+
+  it('a non-indexed / non-collection operand fails closed', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    // `Last` accepts any collection by signature, but a non-indexed `set`
+    // cannot lower to a JS array — the handler's own check fires.
+    expect(() =>
+      js.compile(e.box(['Last', ['Set', 1, 2, 3]]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+    // A scalar operand is rejected earlier by the type system (still closed).
+    expect(() =>
+      js.compile(e.box(['Reverse', 'm']), { realOnly: true })
+    ).toThrow();
+  });
 });
 
 describe('COMPILE removed targets', () => {

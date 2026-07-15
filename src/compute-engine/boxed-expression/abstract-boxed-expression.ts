@@ -1093,7 +1093,18 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
-  indexWhere(_predicate: (element: Expression) => boolean): number | undefined {
+  indexWhere(predicate: (element: Expression) => boolean): number | undefined {
+    // Default for any finite indexed collection that does not supply a
+    // dedicated `indexWhere` handler (e.g. a `BoxedTensor`-backed list): scan
+    // the elements and return the 1-based index of the first match, or
+    // `undefined` if none. Non-collections keep returning `undefined`.
+    if (!this.isIndexedCollection || this.isFiniteCollection !== true)
+      return undefined;
+    let i = 1;
+    for (const x of this.each()) {
+      if (predicate(x)) return i;
+      i += 1;
+    }
     return undefined;
   }
 }

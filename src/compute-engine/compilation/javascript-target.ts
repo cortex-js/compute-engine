@@ -453,6 +453,69 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `(${collCode}).reduce(${combiner}, ${compile(init)})`;
     return `(${collCode}).reduce(${combiner})`;
   },
+  // --- List-shaped collection operators ---------------------------------
+  // Each lowers to a native array operation. Only an indexed collection
+  // (list/vector/range) lowers to a JS array; other operands fail closed (D6),
+  // matching `Length`/`At`/`Reduce`.
+  //
+  // `Last` is the last element (`At(coll, -1)`); an empty collection yields NaN
+  // (the interpreter's `Nothing` projected onto a real target).
+  Last: (args, compile) =>
+    `_SYS.at(${collArg('Last', args[0], compile)}, -1)`,
+  // All-but-first / all-but-first-n / first-n. `Take`/`Drop` clamp the count to
+  // ≥ 0 so a negative count matches the interpreter (`Take(xs, -2) = []`,
+  // `Drop(xs, -2) = xs`), and JS `slice` already clamps a count past the end.
+  Rest: (args, compile) => `(${collArg('Rest', args[0], compile)}).slice(1)`,
+  Take: (args, compile) => {
+    const coll = collArg('Take', args[0], compile);
+    if (args[1] == null) throw new Error('Take: missing count');
+    return `(${coll}).slice(0, Math.max(0, ${compile(args[1])}))`;
+  },
+  Drop: (args, compile) => {
+    const coll = collArg('Drop', args[0], compile);
+    if (args[1] == null) throw new Error('Drop: missing count');
+    return `(${coll}).slice(Math.max(0, ${compile(args[1])}))`;
+  },
+  // Reverse and (ascending, numeric) Sort — copy first so the source array is
+  // not mutated. A custom `Sort` comparator is not lowered (fails closed).
+  Reverse: (args, compile) =>
+    `(${collArg('Reverse', args[0], compile)}).slice().reverse()`,
+  Sort: (args, compile) => {
+    const coll = collArg('Sort', args[0], compile);
+    if (args.length > 1)
+      throw new Error(
+        `Sort: a custom comparator does not compile; only the default ` +
+          `ascending numeric sort is supported. Fail closed (D6).`
+      );
+    return `(${coll}).slice().sort((_a, _b) => _a - _b)`;
+  },
+  // Flat concatenation of the (top-level) elements of each collection operand.
+  Join: (args, compile) => {
+    if (args.length === 0) return '[]';
+    return `[${args
+      .map((a, i) => `...(${collArg('Join', a, compile, i + 1)})`)
+      .join(', ')}]`;
+  },
+  // 1-based index of the first element strictly equal to `value`, or 0 if not
+  // found — `Array.indexOf` is 0-based and returns -1, so `+ 1` maps both.
+  IndexOf: (args, compile) => {
+    const coll = collArg('IndexOf', args[0], compile);
+    if (args[1] == null) throw new Error('IndexOf: missing value');
+    return `((${coll}).indexOf(${compile(args[1])}) + 1)`;
+  },
+  // Higher-order: the mapping/predicate operand is compiled as a lambda
+  // (`Function` literal → `(x) => …`) and handed to native `.map`/`.filter`.
+  // A mapping operand that does not compile to a lambda fails closed.
+  Map: (args, compile) => {
+    const coll = collArg('Map', args[0], compile);
+    if (args[1] == null) throw new Error('Map: missing mapping function');
+    return `(${coll}).map(${compile(args[1])})`;
+  },
+  Filter: (args, compile) => {
+    const coll = collArg('Filter', args[0], compile);
+    if (args[1] == null) throw new Error('Filter: missing predicate');
+    return `(${coll}).filter(${compile(args[1])})`;
+  },
   Log: (args, compile) => {
     if (args.length === 1) return `Math.log10(${compile(args[0])})`;
     return `(Math.log(${compile(args[0])}) / Math.log(${compile(args[1])}))`;
@@ -2189,6 +2252,25 @@ function compileSumProduct(
     throw new Error(`${kind}: no indexing set`);
   }
   return emitSumProduct(kind, args[0], args.slice(1), target);
+}
+
+/**
+ * Compile a collection operand, failing closed (D6) if it is not an indexed
+ * collection (list/vector/range) — shared by the list-shaped collection
+ * operators. `position` labels the operand in the error (e.g. for `Join`).
+ */
+function collArg(
+  kind: string,
+  arg: Expression | undefined,
+  compile: (expr: Expression) => string,
+  position?: number
+): string {
+  if (!arg || !isIndexedCollectionOperand(arg))
+    throw new Error(
+      `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
+        `is not an indexed collection (list/vector/range). Fail closed (D6).`
+    );
+  return compile(arg);
 }
 
 /**

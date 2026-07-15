@@ -1298,7 +1298,8 @@ export class BoxedFunction
       return this.operatorDefinition.collection.indexWhere(this, predicate);
     if (!this.isIndexedCollection) return undefined;
     if (!this.isFiniteCollection) return undefined;
-    let i = 0;
+    // 1-based, matching the `indexWhere` collection handlers and `IndexOf`.
+    let i = 1;
     for (const x of this.each()) {
       if (predicate(x)) return i;
       i += 1;

@@ -1407,6 +1407,21 @@ describe('UNION / INTERSECTION ON COLLECTIONS', () => {
   });
 });
 
+describe('INDEXOF ON A TENSOR-BACKED LIST', () => {
+  // A rectangular numeric list is boxed as a `BoxedTensor`, which inherited the
+  // abstract no-op `indexWhere` and so made `IndexOf`/`IndexWhere` always return
+  // 0. The base now provides a working 1-based scan for any finite indexed
+  // collection.
+  test('IndexOf returns the 1-based index of the first match', () => {
+    expect(evaluate(['IndexOf', ['List', 3, 1, 2], 3])).toBe('1');
+    expect(evaluate(['IndexOf', ['List', 3, 1, 2], 2])).toBe('3');
+    expect(evaluate(['IndexOf', ['List', 5, 5, 5], 5])).toBe('1');
+  });
+  test('IndexOf returns 0 when the value is absent', () => {
+    expect(evaluate(['IndexOf', ['List', 3, 1, 2], 9])).toBe('0');
+  });
+});
+
 describe('COLLECTION EQUALITY IS REPRESENTATION-INSENSITIVE', () => {
   // `Equal` is lazy, so its operands reach the comparison unevaluated. The
   // collection `eq` handlers used to return a definitive `false` on operator
