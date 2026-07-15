@@ -781,6 +781,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Upper incomplete gamma Γ(s, z) (Mathematica/Rubi `Gamma[s, z]`).
         if (ops.length === 2) {
           const [s, z] = ops;
+          // Γ(s, +∞) = ∫_{+∞}^∞ tˢ⁻¹e⁻ᵗ dt = 0 for any finite s (the e⁻ᵗ tail
+          // vanishes). Exact, so return it regardless of numericApproximation.
+          // A non-finite s (Γ(∞, ∞)) is indeterminate — leave it symbolic.
+          if (
+            z.isInfinity === true &&
+            z.isPositive === true &&
+            s.isFinite !== false
+          )
+            return engine.Zero;
           // Γ(s, 0) = Γ(s): reduce so the 1-arg exact paths (incl. poles)
           // apply.
           if (isNumber(z) && z.isSame(0))
