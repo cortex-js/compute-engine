@@ -139,7 +139,9 @@ function componentAt(
 // of points they diverge (`First` returns the first point, not the x-list).
 function isPointLike(e: Expression): boolean {
   const t = e.type.type;
-  return (typeof t !== 'string' && t.kind === 'tuple') || e.operator === 'Tuple';
+  return (
+    (typeof t !== 'string' && t.kind === 'tuple') || e.operator === 'Tuple'
+  );
 }
 
 // True when the operand's declared type says its elements are points (tuples).
@@ -1839,7 +1841,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // coordinates (Desmos semantics). Distinct from First/Second/Third, which
   // index a collection — see `pointComponentAt`.
   PointX: {
-    description: 'The x-coordinate of a point, broadcasting over a list of points.',
+    description:
+      'The x-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
     signature: '(any) -> any',
     type: ([xs]) => pointComponentType(xs, 1),
@@ -1847,7 +1850,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   PointY: {
-    description: 'The y-coordinate of a point, broadcasting over a list of points.',
+    description:
+      'The y-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
     signature: '(any) -> any',
     type: ([xs]) => pointComponentType(xs, 2),
@@ -1855,7 +1859,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   PointZ: {
-    description: 'The z-coordinate of a point, broadcasting over a list of points.',
+    description:
+      'The z-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
     signature: '(any) -> any',
     type: ([xs]) => pointComponentType(xs, 3),

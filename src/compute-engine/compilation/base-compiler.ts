@@ -717,10 +717,7 @@ export class BaseCompiler {
     // booleans; element-wise boolean-over-list has no compile coverage and is
     // handled by the separate collection-condition guard (which fails closed).
     // Restrict broadcasting to numeric element-wise operators.
-    if (
-      isRelationalOperator(h) ||
-      BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h)
-    )
+    if (isRelationalOperator(h) || BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h))
       return null;
 
     // A user `operators` override that lowers the head to a *function call*
@@ -779,9 +776,7 @@ export class BaseCompiler {
       return t.matches('complex') && !t.matches('real');
     };
     if (
-      args.some(
-        (a) => BaseCompiler.isComplexValued(a) || hasComplexElement(a)
-      )
+      args.some((a) => BaseCompiler.isComplexValued(a) || hasComplexElement(a))
     )
       return null;
 

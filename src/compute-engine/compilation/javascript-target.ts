@@ -226,8 +226,7 @@ function compilePointComponent(
   // (which inspects concrete elements rather than trusting the declared element
   // type). Any other collection is element-indexing, like First/Second/Third,
   // which is the same `[idx]` access as the single-point case.
-  if (isPointListOperand(arg))
-    return `(${compiled}).map((_pt) => _pt[${idx}])`;
+  if (isPointListOperand(arg)) return `(${compiled}).map((_pt) => _pt[${idx}])`;
   return `${compiled}[${idx}]`;
 }
 
