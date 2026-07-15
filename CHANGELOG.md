@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.79.1 _2026-07-15_
 
 ### Evaluation
 
