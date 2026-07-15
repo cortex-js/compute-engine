@@ -165,6 +165,43 @@ function resolveEndpointLeaks(
 }
 
 /**
+ * Evaluate the definite value `F(upper) − F(lower)` of an antiderivative when a
+ * bound is improper (±∞). At an infinite bound, naive substitution can leave an
+ * `∞·0` product — an antiderivative term such as `poly(var)·e^{−c·var}` — which
+ * `evaluate()` collapses to `NaN`; the mathematically correct endpoint value is
+ * the limit `lim_{var→±∞} F(var)`. A finite bound is still a direct
+ * substitution. Returns `undefined` (caller falls back to an inert integral)
+ * when an endpoint cannot be resolved to a definite value.
+ */
+function improperEndpointValue(
+  antideriv: Expression,
+  variable: string,
+  lower: Expression,
+  upper: Expression,
+  ce: ComputeEngine,
+  numericApproximation: boolean
+): Expression | undefined {
+  const endpoint = (bound: Expression): Expression | undefined => {
+    if (bound.isInfinity === true) {
+      const lim = symbolicLimit(antideriv, variable, bound, undefined, ce);
+      if (lim === undefined || lim.operator === 'Limit' || lim.isNaN === true)
+        return undefined;
+      return lim;
+    }
+    const v = antideriv
+      .subs({ [variable]: bound })
+      .evaluate({ numericApproximation });
+    return v.isNaN === true ? undefined : v;
+  };
+  const fUpper = endpoint(upper);
+  if (fUpper === undefined) return undefined;
+  const fLower = endpoint(lower);
+  if (fLower === undefined) return undefined;
+  const result = fUpper.sub(fLower).evaluate({ numericApproximation });
+  return result.isNaN === true ? undefined : result;
+}
+
+/**
  * Collect the dependent-function symbol name(s) from the second argument of
  * `DSolve`/`NDSolve` (a symbol or a `List` of symbols).
  */
@@ -765,11 +802,34 @@ volumes
             // FTC at a limit-point bound (0, ±∞): emit a convergence-guarded
             // `When`, or keep the integral inert (fail closed) rather than leak
             // an indeterminate form (`0^…`, `∞^…`).
-            const raw = at.evaluate({ numericApproximation });
-            const resolved = resolveEndpointLeaks(raw, ce);
+            let raw = at.evaluate({ numericApproximation });
+            // FTC at an infinite bound can leave a `poly(var)·e^{−c·var}`-type
+            // `∞·0` product that naive substitution collapses to NaN. Re-resolve
+            // each improper endpoint as a genuine limit of the antiderivative.
+            let viaLimit: Expression | undefined;
+            if (
+              raw.isNaN === true &&
+              (lower.isInfinity === true || upper.isInfinity === true)
+            ) {
+              viaLimit = improperEndpointValue(
+                antideriv,
+                variable,
+                lower,
+                upper,
+                ce,
+                numericApproximation ?? false
+              );
+              if (viaLimit !== undefined) raw = viaLimit;
+            }
+            // A NaN result is an unresolved indeterminate, not a leak-free
+            // value — fail closed (inert) rather than leak the NaN.
+            const resolved =
+              raw.isNaN === true ? null : resolveEndpointLeaks(raw, ce);
             if (resolved !== null && isSymbol(resolved.guard, 'True')) {
-              // Leak-free: preserve the original evaluation path exactly.
-              expr = at;
+              // Leak-free: preserve the original evaluation path exactly,
+              // except when a limit re-resolved an improper endpoint (then `at`
+              // itself still collapses to NaN, so keep the limit value).
+              expr = viaLimit !== undefined ? viaLimit : at;
             } else {
               const guarded =
                 resolved === null

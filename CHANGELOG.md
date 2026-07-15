@@ -147,6 +147,52 @@
   `a \in \{1,\dots,9\}` unusable as a domain. Enumerated sets of non-numeric or
   non-progression elements (`\{a, b, c\}`, `\{1, 2, 3\}`) are unaffected.
 
+### Calculus
+
+- **Improper integrals of `polynomial × exp-decay` no longer return `NaN`.** A
+  definite integral to `±∞` whose antiderivative carries a term like
+  `y^2 e^{-y}` was evaluated at the infinite bound by naive substitution,
+  producing an `∞·0` indeterminate that collapsed to `NaN` — so
+  `\int_0^\infty y^2 e^{-y}\,dy` (which is `\Gamma(3) = 2`) returned `NaN`. Such
+  an endpoint is now resolved as the limit `\lim_{y\to\infty} F(y)` (exponential
+  decay dominates polynomial growth), giving the exact closed form (`2`); with
+  the Rubi integration rules loaded the same fix closes the χ²-tail
+  `\int_x^\infty y^{3/2} e^{-y/2}\,dy` to `3\sqrt{2\pi} - F(x)`. An endpoint that
+  still cannot be resolved keeps the integral inert (so `N()` quadrature
+  applies) rather than leaking `NaN`.
+- **`Limit` at infinity resolves `Erf`/`Erfc` and `\sqrt{}`/`\sqrt[n]{}`.**
+  `\lim_{x\to\infty}\operatorname{erf}(x) = 1`,
+  `\lim_{x\to-\infty}\operatorname{erf}(x) = -1`, `\operatorname{erfc}`
+  saturating to `0`/`2`, and `\lim_{x\to\infty}\sqrt{x} = +\infty` (likewise
+  `\sqrt[n]{x}`) were previously left unevaluated. Besides being correct in
+  their own right, these fill the gaps behind the improper-integral endpoints
+  above — an antiderivative's `\operatorname{erf}(\sqrt{y})` term needs both.
+
+### Compilation
+
+- **Compiled definite integrals now resolve symbolically before falling back to
+  quadrature.** `compile()` of an expression containing a definite `Integrate`
+  first attempts a closed form (the same antiderivative machinery `evaluate()`
+  uses); if one is found, the generated code is straight-line arithmetic rather
+  than a per-call numerical integration. A plotted
+  `\int_0^x 0.1\sqrt{1+t^2}\,dt` compiles to its closed form
+  `0.05\,(x\sqrt{1+x^2} + \operatorname{arsinh} x)`, evaluated in microseconds
+  per sample (exact and deterministic) instead of ~150 ms/sample of quadrature.
+  The symbolic attempt is bounded by `ce.timeLimit` (default 2 s), so a hard
+  integrand degrades to quadrature rather than stalling compilation, and it is
+  skipped when the integral references a symbol supplied through the `vars`
+  option (which must stay a live runtime input, not be folded to a constant).
+- **The compiled quadrature fallback is now deterministic adaptive
+  Gauss–Kronrod (GK15), not Monte-Carlo.** An integral that does not resolve
+  symbolically is estimated with adaptive Gauss–Kronrod quadrature: near machine
+  precision on smooth integrands, microseconds-to-milliseconds per call, and —
+  unlike the previous 10⁷-sample Monte-Carlo estimator (~1e-4 error, a different
+  value on every call, ~150 ms/call) — the **same** value on every call.
+  Infinite bounds are handled by a smooth variable transform. Monte-Carlo
+  remains an automatic fallback when the adaptive rule does not converge, and
+  can be forced with the new `compile(expr, { quadrature: 'monte-carlo' })`
+  option (`'adaptive'` is the default).
+
 ## 0.78.1 _2026-07-14_
 
 ### Parse Diagnostics

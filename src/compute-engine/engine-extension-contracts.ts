@@ -280,4 +280,14 @@ export function assertCompilationOptionsContract(
       'Invalid compilation option "iterationBudget": expected a positive number'
     );
   }
+
+  if (
+    options.quadrature !== undefined &&
+    options.quadrature !== 'adaptive' &&
+    options.quadrature !== 'monte-carlo'
+  ) {
+    throw new Error(
+      'Invalid compilation option "quadrature": expected "adaptive" or "monte-carlo"'
+    );
+  }
 }

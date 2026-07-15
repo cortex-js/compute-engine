@@ -157,6 +157,41 @@ describe('CANCELLING ln/√ DIFFERENCES (CORRECTNESS_FINDINGS P0-3)', () => {
   });
 });
 
+describe('SATURATING & RADICAL LIMITS AT INFINITY', () => {
+  // Erf/Erfc saturate and √/ⁿ√ carry the radicand's limit. These were missing
+  // dispatch cases (`lim Erf(√y)`, `lim √y` stayed inert), which in turn left
+  // improper integrals like ∫ₓ^∞ y^{3/2}e^{−y/2} unable to resolve their ∞
+  // endpoint (the antiderivative's Erf argument is √y).
+  const INF = { sym: 'PositiveInfinity' };
+  const NEGINF = { sym: 'NegativeInfinity' };
+
+  test('Erf saturates: Erf(x)→1, Erf(−x)→−1, Erf(√x)→1', () => {
+    expect(lim(['Erf', 'x'], INF).evaluate().isSame(ce.One)).toBe(true);
+    expect(lim(['Erf', 'x'], NEGINF).evaluate().isSame(ce.number(-1))).toBe(
+      true
+    );
+    expect(lim(['Erf', ['Sqrt', 'x']], INF).evaluate().isSame(ce.One)).toBe(
+      true
+    );
+  });
+
+  test('Erfc saturates: Erfc(x)→0, Erfc(−x)→2', () => {
+    expect(lim(['Erfc', 'x'], INF).evaluate().isSame(ce.Zero)).toBe(true);
+    expect(lim(['Erfc', 'x'], NEGINF).evaluate().isSame(ce.number(2))).toBe(
+      true
+    );
+  });
+
+  test('√x → +∞, ∛x → +∞ (radicals carry the radicand)', () => {
+    expect(
+      lim(['Sqrt', 'x'], INF).evaluate().isSame(ce.PositiveInfinity)
+    ).toBe(true);
+    expect(
+      lim(['Root', 'x', 3], INF).evaluate().isSame(ce.PositiveInfinity)
+    ).toBe(true);
+  });
+});
+
 describe('HARD GRUNTZ LIMITS RESPECT THE DEADLINE (CORRECTNESS_FINDINGS #28)', () => {
   // These iterated-exponential (Gruntz-class) limits used to burn ~18 min of CPU
   // in `Limit.N()` — the symbolic recursion (L'Hôpital differentiation of

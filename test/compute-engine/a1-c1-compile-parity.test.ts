@@ -276,16 +276,17 @@ describe('A1 — Loop / Integrate JS compile', () => {
     expect(result?.run?.({})).toEqual([1, 4, 9, 16, 25]);
   });
 
-  test('Integrate compiles in JS to a numeric estimate of the integral', () => {
-    // Integrate(Function(Block(Power(x,2)), x), Limits(x, 0, 1)). The integrand
-    // is now compiled to a single lambda (not a double-lambda), so the
-    // Monte-Carlo estimator returns ≈ 1/3 instead of NaN.
+  test('Integrate compiles in JS (antiderivative-first: ∫₀¹ x² = 1/3)', () => {
+    // Integrate(Function(Block(Power(x,2)), x), Limits(x, 0, 1)). This resolves
+    // symbolically, so the compiler emits the exact closed form (1/3) rather
+    // than a quadrature call — deterministic and exact. (Non-resolvable
+    // integrands fall back to quadrature; see compile-integrate.test.ts.)
     const ce = new ComputeEngine();
     const expr = ce.parse('\\int_{0}^{1} x^2 \\, dx');
     const result = compile(expr);
     expect(result?.success).toBe(true);
-    expect(result?.code).toMatch(/_SYS\.integrate/);
-    expect(result?.run?.({})).toBeCloseTo(1 / 3, 2);
+    expect(result?.code).not.toMatch(/_SYS\.integrate/);
+    expect(result?.run?.({})).toBeCloseTo(1 / 3, 10);
   });
 
   test('Integrate honors non-integer bounds (no flooring)', () => {

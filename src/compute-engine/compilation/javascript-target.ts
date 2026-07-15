@@ -92,6 +92,7 @@ import {
   variance,
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
+import { adaptiveQuadrature } from '../numerics/gauss-kronrod.js';
 import { mulberry32 } from '../numerics/random.js';
 
 import { BaseCompiler } from './base-compiler.js';
@@ -1642,9 +1643,19 @@ const SYS_HELPERS = {
     if (i === 0 || idx < 0 || idx >= n) return NaN;
     return arr[idx] as number;
   },
+  // Definite integral via deterministic adaptive Gauss–Kronrod (GK15) — near
+  // machine precision on smooth integrands, µs-scale. On non-convergence
+  // (pathological integrand), fall back to the Monte-Carlo estimator. See
+  // `compileIntegrate`.
+  integrate: (f: (x: number) => number, a: number, b: number) => {
+    const r = adaptiveQuadrature(f, a, b);
+    if (r.converged) return r.estimate;
+    return monteCarloEstimate(f, a, b, 10e6).estimate;
+  },
   // Definite integral via Monte-Carlo (1e7 uniform samples). STOCHASTIC and
-  // approximate (~1e-4 typical error, ~200 ms/call) — see `compileIntegrate`.
-  integrate: (f: (x: number) => number, a: number, b: number) =>
+  // approximate (~1e-4 typical error, ~200 ms/call). Emitted when
+  // `quadrature: 'monte-carlo'` is requested — see `compileIntegrate`.
+  integrateMC: (f: (x: number) => number, a: number, b: number) =>
     monteCarloEstimate(f, a, b, 10e6).estimate,
   lcm,
   lngamma: gammaln,
@@ -1899,6 +1910,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       preamble,
       realOnly,
       iterationBudget,
+      quadrature,
     } = options;
     const unknowns = expr.unknowns;
 
@@ -1975,6 +1987,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       },
       preamble: (preamble ?? '') + preambleImports,
       iterationBudget,
+      quadrature,
+      varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
       // When the engine has a random seed set, bake Random nodes to
       // deterministic, call-site-stable constants (see the `Random` handler).
       randomSeed: expr.engine._randomNumericSeed(),
@@ -2297,25 +2311,64 @@ function emitSumProduct(
  * `∫₀^0`), so we compile the bound expressions directly instead.
  */
 /**
- * Compile `Integrate(f, (x, a, b))` to a call to the `_SYS.integrate` runtime
- * helper.
+ * Whether any operand of the integral references a `vars`-mapped symbol — one
+ * the caller pinned to a runtime input. Such a symbol must not be folded, so
+ * the antiderivative-first path is skipped when the integral touches one.
+ */
+function referencesVarsSymbol(
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): boolean {
+  const keys = target.varsKeys;
+  if (!keys || keys.size === 0) return false;
+  for (const k of keys) if (args.some((a) => a.has(k))) return true;
+  return false;
+}
+
+/**
+ * Compile `Integrate(f, (x, a, b))`.
  *
- * NOTE — the compiled definite integral is a **Monte-Carlo estimate**, not an
- * exact/adaptive quadrature. `_SYS.integrate` draws 1e7 uniform samples over
- * `[a, b]`, so a compiled `Integrate` is **stochastic** (a different result
- * each call, unseeded), converges at only ~1/√N (typical error ~1e-4), and is
- * comparatively slow (~200 ms/call). It exists so that an expression containing
- * a definite integral can still be compiled to a self-contained numeric
- * function; callers needing a deterministic or high-accuracy value should use
- * the interpreter's `.N()` (adaptive quadrature) instead. Only real, finite,
- * constant bounds are meaningful; an unbounded or symbolic-bound integral is
- * out of scope for the compiled target.
+ * **Antiderivative-first.** The integral is first resolved symbolically via
+ * `evaluate()` (the provider/Rubi + built-in antiderivative + FTC). If it
+ * closes to a form free of any residual `Integrate` — e.g. a plotted
+ * `∫₀ˣ f(t) dt` whose closed form is a function of the free bound `x` — that
+ * straight-line expression is compiled directly, so each sample costs ~µs
+ * instead of a full quadrature. The symbolic attempt is bounded by the engine
+ * deadline (`ce.timeLimit`, default 2 s), so a non-elementary integrand
+ * degrades to quadrature rather than hanging. Skipped when the integral
+ * references a `vars`-mapped symbol, which must survive to run time as a live
+ * input (the vars contract) rather than be folded into a baked closed form.
+ *
+ * **Quadrature fallback.** Otherwise the compiled definite integral defaults to
+ * **deterministic adaptive Gauss–Kronrod (GK15)**: near machine precision on
+ * smooth integrands and µs-scale, so a compiled `Integrate` returns the same
+ * value on every call. Infinite bounds are handled by a smooth variable
+ * transform. Monte-Carlo survives as the automatic non-convergence fallback
+ * (pathological integrands) and can be forced with the
+ * `quadrature: 'monte-carlo'` option, in which case `_SYS.integrateMC` (the
+ * legacy stochastic estimator, ~1e-4 error) is emitted instead.
  */
 function compileIntegrate(
   args: ReadonlyArray<Expression>,
-  _: (expr: Expression) => TargetSource,
+  compile: (expr: Expression) => TargetSource,
   target: CompileTarget<Expression>
 ): string {
+  // Antiderivative-first: compile a closed form when the integral resolves to
+  // one (and does not reference a `vars`-mapped symbol, which must not fold).
+  if (!referencesVarsSymbol(args, target)) {
+    try {
+      const closed = args[0].engine._fn('Integrate', [...args]).evaluate();
+      if (!closed.has('Integrate') && closed.isValid && closed.isNaN !== true)
+        // Parenthesize: the closed form can be a low-precedence expression
+        // (e.g. an `Add`), whereas the caller splices this handler's result as
+        // an atomic operand (like the `_SYS.integrate(…)` call it replaces).
+        return `(${compile(closed)})`;
+    } catch {
+      // Non-elementary / deadline / unlowerable head: fall through to
+      // quadrature below.
+    }
+  }
+
   const { index, lowerExpr, upperExpr } = extractLimits(args[1]);
 
   // Unwrap a `Function(body, param)` integrand to its body, binding the
@@ -2337,7 +2390,9 @@ function compileIntegrate(
   const lo = BaseCompiler.compile(lowerExpr, target);
   const hi = BaseCompiler.compile(upperExpr, target);
 
-  return `_SYS.integrate((${lambdaVar}) => (${f}), ${lo}, ${hi})`;
+  const fn =
+    target.quadrature === 'monte-carlo' ? '_SYS.integrateMC' : '_SYS.integrate';
+  return `${fn}((${lambdaVar}) => (${f}), ${lo}, ${hi})`;
 }
 
 /**

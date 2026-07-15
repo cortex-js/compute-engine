@@ -382,6 +382,21 @@ function limitAtPosInf(
 
   if (op === 'Power') return limitPowerAtPosInf(o1(e), o2(e), x, ce, depth);
 
+  // √u and ⁿ√u (canonical forms of u^{1/2}, u^{1/n}): monotone for a real
+  // radicand, so they carry the argument's limit. A radicand → −∞ heads to an
+  // imaginary infinity — deferred (undefined) rather than resolved.
+  if (op === 'Sqrt' || op === 'Root') {
+    const inner = limitAtPosInf(o1(e), x, ce, depth + 1);
+    if (!inner) return undefined;
+    if (inner.isInfinity === true)
+      return inner.isPositive === true ? ce.PositiveInfinity : undefined;
+    if (isDefiniteValue(inner)) {
+      const rest = op === 'Root' ? [inner, o2(e)] : [inner];
+      return ce.function(op, rest).evaluate();
+    }
+    return undefined;
+  }
+
   if (op === 'Exp') {
     const inner = limitAtPosInf(o1(e), x, ce, depth + 1);
     return expOfLimit(inner, ce);
@@ -416,6 +431,20 @@ function limitAtPosInf(
       return inner.isNegative === true ? ce.number(-1) : ce.One;
     if (inner && isDefiniteValue(inner))
       return ce.function('Tanh', [inner]).evaluate();
+    return undefined;
+  }
+
+  // Erf saturates: Erf(+∞) = 1, Erf(−∞) = −1. Erfc = 1 − Erf: Erfc(+∞) = 0,
+  // Erfc(−∞) = 2. (The argument's own limit decides which end applies.)
+  if (op === 'Erf' || op === 'Erfc') {
+    const inner = limitAtPosInf(o1(e), x, ce, depth + 1);
+    if (!inner) return undefined;
+    if (inner.isInfinity === true) {
+      const neg = inner.isNegative === true;
+      if (op === 'Erf') return neg ? ce.number(-1) : ce.One;
+      return neg ? ce.number(2) : ce.Zero;
+    }
+    if (isDefiniteValue(inner)) return ce.function(op, [inner]).evaluate();
     return undefined;
   }
 

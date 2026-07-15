@@ -1414,4 +1414,32 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       else expect(F.has('Integrate')).toBe(true);
     });
   });
+
+  // Improper (±∞ bound) integrals whose Rubi antiderivative carries a
+  // `poly(y)·e^{−c·y}` term: naive endpoint substitution collapses the `∞·0`
+  // to NaN. The definite-integral evaluator now re-resolves the ∞ endpoint as
+  // lim_{y→∞} F(y) (exp decay beats polynomial growth; Erf(∞)=1), yielding an
+  // exact closed form instead of NaN.
+  describe('improper-integral endpoint at ∞ (poly × exp decay)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+
+    test('∫ₓ^∞ y^(3/2) e^(−y/2) dy → exact closed form (χ²-tail k=5)', () => {
+      const F = ce.parse('\\int_x^\\infty y^{3/2} e^{-y/2} dy').evaluate();
+      expect(F.isNaN).not.toBe(true);
+      expect(F.has('Integrate')).toBe(false);
+      // Independent reference (fine composite Simpson on [2, 200]).
+      expect(F.subs({ x: ce.number(2) }).N().re).toBeCloseTo(
+        6.385472870122,
+        6
+      );
+    });
+
+    test('∫ₓ^∞ y² e^(−y) dy → e^(−x)(x²+2x+2)', () => {
+      const F = ce.parse('\\int_x^\\infty y^2 e^{-y} dy').evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      // e^(−1)(1+2+2) = 5/e at x = 1.
+      expect(F.subs({ x: ce.number(1) }).N().re).toBeCloseTo(5 / Math.E, 9);
+    });
+  });
 });

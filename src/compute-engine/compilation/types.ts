@@ -153,6 +153,24 @@ export interface CompileTarget<Expr = unknown> {
    */
   iterationBudget?: number;
 
+  /**
+   * Quadrature strategy for compiled definite integrals (`Integrate`).
+   * `'adaptive'` (default) emits deterministic adaptive Gauss–Kronrod with an
+   * automatic Monte-Carlo fallback on non-convergence; `'monte-carlo'` forces
+   * the legacy stochastic estimator. See `CompilationOptions.quadrature`.
+   */
+  quadrature?: 'adaptive' | 'monte-carlo';
+
+  /**
+   * The keys of the `vars` option (symbols the caller mapped to explicit
+   * runtime inputs / uniforms). A `vars`-mapped symbol must never be folded to
+   * a constant — it stays a live input. Consulted by the `Integrate` handler:
+   * the antiderivative-first optimization resolves a definite integral to a
+   * closed form via `evaluate()`, which *would* fold such a symbol, so it is
+   * skipped when the integral references any `vars`-mapped symbol.
+   */
+  varsKeys?: ReadonlySet<string>;
+
   /** Target language identifier (for debugging/logging) */
   language?: string;
 
@@ -370,6 +388,17 @@ export interface CompilationOptions<Expr = unknown> {
    * evaluates to `NaN` instead of running. See `CompileTarget.iterationBudget`.
    */
   iterationBudget?: number;
+
+  /**
+   * Quadrature strategy for compiled definite integrals (`Integrate`).
+   *
+   * - `'adaptive'` (default) — deterministic adaptive Gauss–Kronrod (GK15):
+   *   near machine precision on smooth integrands, µs-scale, with automatic
+   *   Monte-Carlo fallback on non-convergence.
+   * - `'monte-carlo'` — force the legacy stochastic Monte-Carlo estimator
+   *   (~1e-4 typical error, different result each call).
+   */
+  quadrature?: 'adaptive' | 'monte-carlo';
 }
 
 /**

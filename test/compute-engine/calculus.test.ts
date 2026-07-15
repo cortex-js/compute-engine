@@ -1201,6 +1201,36 @@ describe('IMPROPER INTEGRATION (ROADMAP B3)', () => {
     expect(evaluate('\\int_0^\\infty \\sin(x^2) dx')).toMatchInlineSnapshot(
       `sqrt(2)/4 * sqrt(pi)`
     ));
+
+  // `poly(y)·e^{−c·y}` antiderivative terms make the ∞ endpoint an `∞·0`
+  // indeterminate that naive substitution collapses to NaN. These resolve via
+  // the limit lim_{y→∞} F(y) = 0 (exp decay beats polynomial growth) rather
+  // than leaking NaN or falling back to quadrature.
+  test('∫₀^∞ y² e^(−y) → 2 (Γ(3), was NaN)', () =>
+    expect(evaluate('\\int_0^\\infty y^2 e^{-y} dy')).toMatchInlineSnapshot(
+      `2`
+    ));
+
+  test('∫₀^∞ y³ e^(−y) → 6 (Γ(4), was NaN)', () =>
+    expect(evaluate('\\int_0^\\infty y^3 e^{-y} dy')).toMatchInlineSnapshot(
+      `6`
+    ));
+
+  test('∫ₓ^∞ y e^(−y) → e^(−x)(x+1) (symbolic bound, was NaN)', () =>
+    expect(evaluate('\\int_x^\\infty y e^{-y} dy')).toMatchInlineSnapshot(
+      `x * e^(-x) + e^(-x)`
+    ));
+
+  // χ²-tail shape (k=5): the antiderivative (an Erf form) needs both Erf(∞)=1
+  // and lim_{y→∞} poly·e^{−y/2}=0 at the ∞ endpoint. The built-in
+  // antiderivative can't close this integrand (no Erf), so on the shared engine
+  // it stays inert — but must never leak NaN. (The Rubi-closed exact form is
+  // asserted in integration-rules.test.ts.)
+  test('∫ₓ^∞ y^(3/2) e^(−y/2) never leaks NaN (was NaN)', () => {
+    const F = engine.parse('\\int_x^\\infty y^{3/2} e^{-y/2} dy').evaluate();
+    expect(F.isNaN).not.toBe(true);
+    expect(['Add', 'Integrate']).toContain(F.operator);
+  });
 });
 
 describe('∞ / finite-nonzero divide (B3 Fresnel unblock)', () => {
