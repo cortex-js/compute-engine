@@ -460,8 +460,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   //
   // `Last` is the last element (`At(coll, -1)`); an empty collection yields NaN
   // (the interpreter's `Nothing` projected onto a real target).
-  Last: (args, compile) =>
-    `_SYS.at(${collArg('Last', args[0], compile)}, -1)`,
+  Last: (args, compile) => `_SYS.at(${collArg('Last', args[0], compile)}, -1)`,
   // All-but-first / all-but-first-n / first-n. `Take`/`Drop` clamp the count to
   // ≥ 0 so a negative count matches the interpreter (`Take(xs, -2) = []`,
   // `Drop(xs, -2) = xs`), and JS `slice` already clamps a count past the end.
