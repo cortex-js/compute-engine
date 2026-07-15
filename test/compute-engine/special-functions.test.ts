@@ -145,6 +145,28 @@ describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
     expectApprox(ce.expr(['Gamma', 2.5, 0]), 1.3293403881791370); // Γ(2.5)
   });
 
+  test('Γ(s, +∞) = 0 for finite s (exact)', () => {
+    // The e⁻ᵗ tail of ∫_z^∞ tˢ⁻¹e⁻ᵗ dt vanishes for any finite s.
+    expect(ce.expr(['Gamma', 2.5, 'PositiveInfinity']).evaluate().isSame(0)).toBe(
+      true
+    );
+    expect(ce.expr(['Gamma', -1, 'PositiveInfinity']).evaluate().isSame(0)).toBe(
+      true
+    );
+    // Symbolic s reduces too (a parameter is implicitly finite).
+    expect(ce.parse('\\Gamma(s, \\infty)').evaluate().isSame(0)).toBe(true);
+    expect(ce.parse('\\Gamma(\\frac{k}{2}, \\infty)').evaluate().isSame(0)).toBe(
+      true
+    );
+    // A provably-infinite first argument stays symbolic (Γ(∞,∞) is indeterminate).
+    expect(
+      ce
+        .expr(['Gamma', 'PositiveInfinity', 'PositiveInfinity'])
+        .evaluate()
+        .operator
+    ).toBe('Gamma');
+  });
+
   test('Γ(2, -1) = 0 (real, integer s, negative z)', () => {
     const v = ce.expr(['Gamma', 2, -1]).N();
     expect(Math.abs(v.re)).toBeLessThan(1e-12);

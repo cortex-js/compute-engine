@@ -1441,6 +1441,22 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       // e^(−1)(1+2+2) = 5/e at x = 1.
       expect(F.subs({ x: ce.number(1) }).N().re).toBeCloseTo(5 / Math.E, 9);
     });
+
+    // Free-parameter χ² tail: the antiderivative is an incomplete-gamma form
+    // whose ∞ endpoint leaves Γ(k/2, ∞); the Γ(s, +∞) = 0 reduction closes it
+    // to a form free of the inert Γ(·, ∞) term (numerically exact).
+    test('∫ₓ^∞ y^(k/2−1) e^(−y/2) dy closes via Γ(s, +∞) = 0', () => {
+      const F = ce
+        .parse('\\int_x^\\infty y^{\\frac{k}{2}-1} e^{-\\frac{y}{2}} dy')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      expect(F.toString()).not.toContain('+oo'); // no leftover Γ(·, ∞)
+      // χ²(k=5) upper tail at x=2, reference 6.385472870122 (Simpson).
+      expect(F.subs({ k: ce.number(5), x: ce.number(2) }).N().re).toBeCloseTo(
+        6.385472870122,
+        6
+      );
+    });
   });
 
   // Regression: a rational integrand with fully symbolic coefficients used to

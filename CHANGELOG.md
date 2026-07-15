@@ -167,6 +167,14 @@
   `\sqrt[n]{x}`) were previously left unevaluated. Besides being correct in
   their own right, these fill the gaps behind the improper-integral endpoints
   above — an antiderivative's `\operatorname{erf}(\sqrt{y})` term needs both.
+- **The upper incomplete gamma reduces at infinity: `\Gamma(s, +\infty) = 0`.**
+  The tail `\int_{+\infty}^\infty t^{s-1} e^{-t}\,dt` vanishes for any finite `s`
+  (the `e^{-t}` factor dominates), so `\Gamma(s, \infty)` — including symbolic
+  `s` such as `\Gamma(\frac{k}{2}, \infty)` — now evaluates to `0` instead of
+  staying inert (a provably infinite first argument stays symbolic). This closes
+  the free-parameter χ²-tail antiderivative
+  `\int_x^\infty y^{\frac{k}{2}-1} e^{-\frac{y}{2}}\,dy` to a form free of the
+  leftover `\Gamma(\cdot, \infty)` term.
 - **A rational integrand with fully symbolic coefficients no longer hangs.**
   `\int_0^x \frac{u-a}{b_2 u^2 + b_1 u + b_0}\,du` spun for ~109 s (ignoring a
   3 s `timeLimit`) inside the polynomial-GCD used to cancel common factors: its
