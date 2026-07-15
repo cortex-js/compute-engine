@@ -319,6 +319,38 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
     ce.declare('w', ce.type('tuple<string, number>'));
     expect(ce.parse('3w').json).toEqual(['Tuple', 3, 'w']);
   });
+
+  // Defect 5 (Tycho item 10): a symbol *declared* with an abstract
+  // `indexed_collection` / `collection` type but not yet assigned a value
+  // juxtaposed with a function call collapsed to a spurious `Tuple` instead of
+  // `Multiply`. Its concrete subtypes (`list`, `vector`, …) already scaled, so
+  // the abstract supertype was the inconsistent case. `set` (no scaling
+  // semantics) and heterogeneous `tuple` must still group as `Tuple`.
+  test('collection-typed symbol (no value) juxtaposition is Multiply', () => {
+    const scaling = ['Multiply', 'y_r', ['Sin', 'a']];
+    for (const type of [
+      'indexed_collection',
+      'indexed_collection<number>',
+      'collection',
+      'list',
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('y_r', ce.type(type)); // declared, NO value
+      ce.pushScope();
+      ce.declare('x', { type: 'unknown' });
+      expect(ce.parse('y_r\\sin\\left(a\\right)').json).toEqual(scaling);
+    }
+    // A non-indexed `set` has no scaling semantics: still a Tuple.
+    const ce = new ComputeEngine();
+    ce.declare('y_r', ce.type('set<number>'));
+    ce.pushScope();
+    ce.declare('x', { type: 'unknown' });
+    expect(ce.parse('y_r\\sin\\left(a\\right)').json).toEqual([
+      'Tuple',
+      'y_r',
+      ['Sin', 'a'],
+    ]);
+  });
 });
 
 // A list-broadcast such as `Multiply([...], x)` reports a dishonest

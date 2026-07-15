@@ -1173,7 +1173,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (ops.length < 2) return ce._fn('ReplaceAll', checkArity(ce, ops, 2));
         return ce._fn('ReplaceAll', ops);
       },
-      evaluate: (ops, { engine: ce }) => {
+      evaluate: (ops, { engine: _ce }) => {
         const target = ops[0]?.canonical;
         if (target === undefined) return undefined;
 

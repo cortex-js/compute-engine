@@ -459,7 +459,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   GammaLn: '_SYS.lngamma',
   Lb: 'Math.log2',
-  Max: 'Math.max',
+  Max: (args, compile) => compileExtremum('Max', args, compile),
   Mean: (args, compile) => {
     if (args.length === 0) return 'NaN';
     if (args.length === 1) return `_SYS.mean(${compile(args[0])})`;
@@ -549,7 +549,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.correlation(${compile(args[0])}, ${compile(args[1])})`;
   },
-  Min: 'Math.min',
+  Min: (args, compile) => compileExtremum('Min', args, compile),
   Power: (args, compile) => {
     const base = args[0];
     const exp = args[1];
@@ -2178,8 +2178,58 @@ function compileSumProduct(
   target: CompileTarget<Expression>
 ): string {
   if (!args[0]) throw new Error(`${kind}: no body`);
-  if (!args[1]) throw new Error(`${kind}: no indexing set`);
+  if (!args[1]) {
+    // Collection form: `Sum(collection)` / `Product(collection)` with no
+    // indexing set — this is what `.total` (→ `Sum`) and a bare list product
+    // canonicalize to. Reduce over the elements. Only an indexed collection
+    // lowers to a JS array; a dictionary/string/scalar operand fails closed
+    // (D6), matching `Length`/`At`/`Reduce`.
+    if (isIndexedCollectionOperand(args[0]))
+      return emitCollectionReduce(kind, args[0], target);
+    throw new Error(`${kind}: no indexing set`);
+  }
   return emitSumProduct(kind, args[0], args.slice(1), target);
+}
+
+/**
+ * Compile `Max`/`Min`. Two shapes:
+ *   - a single indexed-collection operand (`[3,4,5].max`, `Max(range)`) reduces
+ *     over the elements. A reduce (not `Math.max(...spread)`) is used so a large
+ *     list can't overflow the call-stack argument limit. The identity seed
+ *     (`-Infinity`/`Infinity`) makes the empty collection agree with the
+ *     interpreter (`Max([]) = -oo`, `Min([]) = +oo`).
+ *   - the scalar variadic form (`Max(a, b, c)`) lowers to `Math.max(a, b, c)`.
+ * A non-collection single operand takes the variadic path (`Math.max(x)` = x).
+ */
+function compileExtremum(
+  kind: 'Max' | 'Min',
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+): string {
+  const fn = kind === 'Max' ? 'Math.max' : 'Math.min';
+  if (args.length === 1 && args[0] && isIndexedCollectionOperand(args[0])) {
+    const identity = kind === 'Max' ? '-Infinity' : 'Infinity';
+    return `(${compile(args[0])}).reduce((_a, _b) => ${fn}(_a, _b), ${identity})`;
+  }
+  return `${fn}(${args.map((x) => compile(x)).join(', ')})`;
+}
+
+/**
+ * Compile the collection form of `Sum`/`Product` — a reduce over the elements
+ * of an indexed collection (e.g. `[3,4,5].total` → `Sum([3,4,5])`). The
+ * identity seed (`0` for Sum, `1` for Product) makes the empty collection agree
+ * with the interpreter (`Sum([]) = 0`, `Product([]) = 1`). Real-valued reduce,
+ * consistent with the `Reduce` handler (complex-element folds are not lowered).
+ */
+function emitCollectionReduce(
+  kind: 'Sum' | 'Product',
+  coll: Expression,
+  target: CompileTarget<Expression>
+): string {
+  const code = BaseCompiler.compile(coll, target);
+  const op = kind === 'Sum' ? '+' : '*';
+  const identity = kind === 'Sum' ? '0' : '1';
+  return `(${code}).reduce((_a, _b) => _a ${op} _b, ${identity})`;
 }
 
 /**

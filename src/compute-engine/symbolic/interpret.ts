@@ -251,7 +251,7 @@ function tryPolynomial(
   const index = freshIndex(expr);
   const term = newtonTerm(ce, coefficients, index);
 
-  const U = validateAnchor(ce, term, index, anchor, m, samples, null);
+  const U = validateAnchor(ce, term, index, anchor, m, null);
   if (!U) return null;
 
   return assemble(expr, op, leftover, term, index, U);
@@ -325,7 +325,7 @@ function tryGeometric(
     ])
     .simplify();
 
-  const U = validateAnchor(ce, term, index, anchor, m, samples, { s1, r });
+  const U = validateAnchor(ce, term, index, anchor, m, { s1, r });
   if (!U) return null;
 
   return assemble(expr, op, leftover, term, index, U);
@@ -698,13 +698,12 @@ function validateAnchor(
   index: Expression,
   anchor: Expression,
   m: number,
-  samples: Expression[],
   geo: { s1: Expression; r: Expression } | null
 ): Expression | null {
   const free = anchor.freeVariables;
 
   if (free.length === 0)
-    return findNumericUpperBound(ce, term, index, anchor, m, samples);
+    return findNumericUpperBound(ce, term, index, anchor, m);
 
   if (free.length !== 1) return null;
 
@@ -751,8 +750,7 @@ function findNumericUpperBound(
   term: Expression,
   index: Expression,
   anchor: Expression,
-  m: number,
-  samples: Expression[]
+  m: number
 ): Expression | null {
   const CAP = 100000;
   const anchorValue = anchor.N().re;

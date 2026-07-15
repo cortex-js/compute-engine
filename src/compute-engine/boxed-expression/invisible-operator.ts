@@ -6,7 +6,10 @@ import type {
 } from '../global-types.js';
 import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
-import { isNumericTuple } from '../collection-utils.js';
+import {
+  isNumericTuple,
+  isLinearAlgebraCollection,
+} from '../collection-utils.js';
 
 const MATRIX_TYPE = new BoxedType('matrix');
 const FUNCTION_TYPE = new BoxedType('function');
@@ -273,6 +276,17 @@ export function canonicalInvisibleOperator(
           // collections (raw `List`), so match the value type here as well.
           // `list` deliberately excludes heterogeneous `tuple` and `set`.
           x.type.matches(LIST_TYPE) ||
+          // A symbol *declared* with an abstract `indexed_collection` /
+          // `collection` type but not yet assigned a value (e.g. Tycho's
+          // importer head-pre-pass, which derives `indexed_collection` for a
+          // List/Range value) is still a value-like operand: juxtaposition is
+          // scaling, not a silent `Tuple`. This is the same predicate the
+          // `Add`/`Multiply` type handlers use, so the invisible-operator
+          // decision stays consistent with them. It deliberately EXCLUDES
+          // `tuple` kinds — numeric tuples are handled by `isNumericTuple`
+          // just below, and heterogeneous tuples must stay a `Tuple` — and
+          // `set` (no scaling semantics).
+          isLinearAlgebraCollection(x) ||
           // Numeric-tuple-typed operands (points/vectors in ℝⁿ, e.g. `3z`
           // with `z: tuple<number, number>`) are value-like: juxtaposition
           // is scaling. Literal tuples are already caught by the

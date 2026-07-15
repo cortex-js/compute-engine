@@ -224,6 +224,47 @@ describe('MathNet Tier-3 Task 5: divisibility', () => {
     expect(evalStr(ce, '26 \\bmod 5')).toBe('1');
   });
 
+  // Tycho item 12: infix `\bmod` binds tighter than `+`/`-` on re-parse, so a
+  // `Mod` with a compound (addition-precedence) operand must serialize with
+  // that operand parenthesized, or the LaTeX round trip silently changes the
+  // expression. Also covers right-associative nesting (`Mod(Mod(a,b),c)`) and
+  // confirms juxtaposition/self-delimiting operands stay unparenthesized.
+  test('Mod serializes with compound operands parenthesized (round-trips)', () => {
+    const ce = freshEngine();
+    const roundTrips = (mathjson: any) => {
+      const boxed = ce.box(mathjson);
+      return JSON.stringify(ce.parse(boxed.latex).json) === JSON.stringify(boxed.json);
+    };
+    // Compound operands MUST be parenthesized to round-trip.
+    expect(ce.box(['Mod', ['Add', 'x', 5], ['Multiply', 2, 'Pi']]).latex).toBe(
+      '(x+5)\\bmod2\\pi'
+    );
+    expect(ce.box(['Mod', 5, ['Add', 'x', 5]]).latex).toBe('5\\bmod(x+5)');
+    expect(ce.box(['Mod', ['Subtract', 'x', 5], 2]).latex).toBe('(x-5)\\bmod2');
+    // Left-nested Mod is parenthesized (parser is right-associative).
+    expect(ce.box(['Mod', ['Mod', 'a', 'b'], 'c']).latex).toBe(
+      '(a\\bmod b)\\bmod c'
+    );
+    // Juxtaposition products, fractions, powers, and negation already re-parse
+    // as tight units — they stay unwrapped.
+    expect(ce.box(['Mod', ['Multiply', 3, 'k'], ['Multiply', 2, 'Pi']]).latex).toBe(
+      '3k\\bmod2\\pi'
+    );
+    expect(ce.box(['Mod', 'x', 2]).latex).toBe('x\\bmod2');
+    for (const c of [
+      ['Mod', ['Add', 'x', 5], ['Multiply', 2, 'Pi']],
+      ['Mod', 5, ['Add', 'x', 5]],
+      ['Mod', ['Subtract', 'x', 5], 2],
+      ['Mod', ['Mod', 'a', 'b'], 'c'],
+      ['Mod', 'a', ['Mod', 'b', 'c']],
+      ['Mod', ['Multiply', 3, 'k'], ['Multiply', 2, 'Pi']],
+      ['Mod', ['Negate', 'x'], 2],
+      ['Mod', ['Divide', 'a', 'b'], 'c'],
+    ]) {
+      expect(roundTrips(c)).toBe(true);
+    }
+  });
+
   test('a \\mid b parses to Divides(a, b)', () => {
     const ce = freshEngine();
     expect(ce.parse('a \\mid b').json).toEqual(['Divides', 'a', 'b']);

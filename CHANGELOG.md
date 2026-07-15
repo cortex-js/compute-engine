@@ -1,3 +1,44 @@
+## [Unreleased]
+
+### Compilation
+
+- **The collection form of `Sum`, `Product`, `Max`, and `Min` now compiles on
+  the `javascript` target.** Applied to a collection with no indexing set —
+  e.g. `[3,4,5].\operatorname{total}` (which canonicalizes to `Sum([3,4,5])`), a
+  list
+  product, or `\max(v)` for a list `v` — these previously threw
+  `Sum: no indexing set` (dropping the whole expression to interpretation) or,
+  for `Max`/`Min`, compiled to `Math.max([…])` and returned `NaN`. They now
+  lower to a native `.reduce`, with empty-collection identities matching the
+  interpreter (`Sum([]) = 0`, `Product([]) = 1`, `Max([]) = -\infty`,
+  `Min([]) = +\infty`). This lets a compiled list comprehension whose body uses
+  `.total`/`.count`/`\min`/`\max` compile end-to-end into a loop instead of
+  falling back. The indexing-set forms (`\sum_{n=1}^{5}`) and the scalar
+  variadic `\max(a,b,c)` are unchanged; a non-collection operand still fails
+  closed. (Reported by the Tycho/Graph Paper team.)
+
+### Serialization
+
+- **`Mod` (`\bmod`) parenthesizes compound operands so its LaTeX round-trips.**
+  Infix `\bmod` binds tighter than `+`/`-` on re-parse, so `Mod(x+5, 2\pi)`
+  serialized to `x+5\bmod2\pi` and re-parsed as `x + (5 \bmod 2\pi)`. An operand
+  at addition precedence is now wrapped — `(x+5)\bmod2\pi` — while juxtaposition
+  products (`3k`, `2\pi`), fractions, powers, and negation stay unwrapped since
+  they already re-parse as tight units. A left-nested `Mod` is also now
+  parenthesized (`\bmod` is right-associative, so `Mod(Mod(a,b),c)` →
+  `(a\bmod b)\bmod c`). (Reported by the Tycho/Graph Paper team.)
+
+### Parsing
+
+- **Juxtaposition of a collection-typed symbol with a function call parses as
+  multiplication.** A symbol declared with an abstract `indexed_collection` or
+  `collection` type but not yet assigned a value — e.g. `y_r` in
+  `y_r\sin(a)` — grouped into a `Tuple` instead of a `Multiply`, even though its
+  concrete subtypes (`list`, `vector`, `matrix`, numeric `tuple`) and the
+  assigned-value case already multiplied. The abstract collection type now
+  scales like its subtypes; non-indexed `set` and heterogeneous `tuple` operands
+  still group as a `Tuple`. (Reported by the Tycho/Graph Paper team.)
+
 ## 0.79.1 _2026-07-15_
 
 ### Evaluation

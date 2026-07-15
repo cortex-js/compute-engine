@@ -346,6 +346,76 @@ describe('COMPILE Sum/Product - multi-index (P0-43 regression)', () => {
   });
 });
 
+// Collection form: `Sum(collection)` / `Product(collection)` with no indexing
+// set — what `[…].total` (→ Sum) and a bare list product canonicalize to. These
+// used to throw `… : no indexing set`, dropping the whole compile to
+// interpretation (Tycho item 11: `.total` inside a compiled comprehension body).
+// `Max`/`Min` over a collection used to compile to `Math.max([…])` → NaN.
+describe('COMPILE Sum/Product/Max/Min - collection form', () => {
+  const engine = new ComputeEngine();
+  engine.declare('V', engine.type('list<number>'));
+
+  const jsRun = (mathjson: any, vars: any = {}) => {
+    const r = compile(engine.box(mathjson));
+    expect(r.success).toBe(true);
+    return r.run!(vars);
+  };
+
+  test('Sum(collection) reduces (empty → 0)', () => {
+    expect(jsRun(['Sum', 'V'], { V: [3, 4, 5] })).toBe(12);
+    expect(jsRun(['Sum', 'V'], { V: [] })).toBe(0);
+  });
+
+  test('Product(collection) reduces (empty → 1)', () => {
+    expect(jsRun(['Product', 'V'], { V: [3, 4, 5] })).toBe(60);
+    expect(jsRun(['Product', 'V'], { V: [] })).toBe(1);
+  });
+
+  test('Max/Min(collection) reduce (empty → ∓∞)', () => {
+    expect(jsRun(['Max', 'V'], { V: [3, 9, 2] })).toBe(9);
+    expect(jsRun(['Min', 'V'], { V: [3, 9, 2] })).toBe(2);
+    expect(jsRun(['Max', 'V'], { V: [] })).toBe(-Infinity);
+    expect(jsRun(['Min', 'V'], { V: [] })).toBe(Infinity);
+  });
+
+  test('Max/Min scalar variadic form is unchanged', () => {
+    expect(jsRun(['Max', 1, 7, 3])).toBe(7);
+    expect(jsRun(['Min', 1, 7, 3])).toBe(1);
+  });
+
+  test('`.total` over a list literal compiles', () => {
+    const r = compile(engine.parse('[1,2,3,4].\\operatorname{total}'));
+    expect(r.success).toBe(true);
+    expect(r.run!()).toBe(10);
+  });
+
+  test('`.total` inside a compiled comprehension body (item 11)', () => {
+    engine.declare('P', engine.type('list<number>'));
+    const r = compile(
+      engine.parse(
+        '\\left[([P[n],P[n]]).\\operatorname{total} \\operatorname{for} n=\\left[1...3\\right]\\right]'
+      )
+    );
+    expect(r.success).toBe(true);
+    expect(r.run!({ P: [10, 20, 30] })).toEqual([[20, 40, 60]]);
+  });
+
+  test('indexing-set (range) form is unaffected', () => {
+    const r = compile(engine.parse('\\sum_{n=1}^{5} n'));
+    expect(r.success).toBe(true);
+    expect(r.run!()).toBe(15);
+  });
+
+  test('non-collection operand still fails closed (D6)', () => {
+    engine.declare('s', engine.type('number'));
+    // Sum of a bare scalar has neither an indexing set nor a collection
+    // operand: it still fails closed (throws with fallback disabled).
+    expect(() =>
+      compile(engine.box(['Sum', 's']), { fallback: false })
+    ).toThrow('no indexing set');
+  });
+});
+
 describe('COMPILE Integrate - symbolic bounds', () => {
   test('JS: int_0^a x dx with a=2 => 2', () => {
     const expr = ce.parse('\\int_0^a x \\, dx');

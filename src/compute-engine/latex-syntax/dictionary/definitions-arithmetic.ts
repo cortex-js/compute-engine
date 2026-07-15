@@ -2197,8 +2197,25 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: DIVISION_PRECEDENCE,
     serialize: (serializer, expr) => {
       if (nops(expr) !== 2) return '';
-      const lhs = serializer.serialize(operand(expr, 1));
-      const rhs = serializer.serialize(operand(expr, 2));
+      // Infix `\bmod` binds tighter than `+`/`-` on re-parse, so a compound
+      // operand at addition precedence (e.g. `x+5`) must be parenthesized or
+      // the round trip changes the expression (`(x+5)\bmod2` would otherwise
+      // serialize to `x+5\bmod2` = `x+(5\bmod2)`). Wrapping at
+      // MULTIPLICATION_PRECEDENCE parenthesizes Add/Subtract operands while
+      // leaving juxtaposition products (`3k`, `2\pi`), fractions, and powers —
+      // which already re-parse as tight units — unwrapped. This mirrors the
+      // `Multiply` serializer's own operand wrapping just above.
+      const op1 = operand(expr, 1);
+      // `\bmod` re-parses right-associatively (`a\bmod b\bmod c` →
+      // `Mod(a, Mod(b, c))`), so a *left*-nested `Mod` must be parenthesized to
+      // preserve `Mod(Mod(a, b), c)`. Its DIVISION_PRECEDENCE is above the
+      // multiplication threshold, so wrap it explicitly. (A right-nested `Mod`
+      // needs no parens — right associativity already recovers it.)
+      const lhs =
+        operator(op1) === 'Mod'
+          ? serializer.wrap(op1, DIVISION_PRECEDENCE + 1)
+          : serializer.wrap(op1, MULTIPLICATION_PRECEDENCE);
+      const rhs = serializer.wrap(operand(expr, 2), MULTIPLICATION_PRECEDENCE);
       return joinLatex([lhs, '\\bmod', rhs]);
     },
   },

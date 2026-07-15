@@ -1,6 +1,9 @@
 import type { MathJsonExpression } from '../../math-json/types.js';
 
-import { CancellationError, checkDeadline } from '../../common/interruptible.js';
+import {
+  CancellationError,
+  checkDeadline,
+} from '../../common/interruptible.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import type {
   BoxedRule,
