@@ -407,11 +407,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       if (def.value.isConstant) return false;
 
       if (def.value.inferredType || def.value.type.isUnknown) {
-        def.value.type = this.engine.type(
+        const inferred = this.engine.type(
           inferenceMode === 'widen'
             ? widen(def.value.type.type, t)
             : narrow(def.value.type.type, t)
         );
+        // Inferring `unknown` adds no information — the argument's type is
+        // still open. It is a no-op, so skip the write: assigning `unknown`
+        // to the value definition's type triggers the value-reset in the type
+        // setter, which would silently destroy an existing binding. This is
+        // what un-assigned a value-holding symbol merely by *parsing* a call
+        // that passes it as a bare argument to a callee with an `unknown`/`any`
+        // parameter type (e.g. `f(S)` with `f: (unknown) -> unknown`).
+        if (inferred.isUnknown) return false;
+        def.value.type = inferred;
         return true;
       }
       return false;

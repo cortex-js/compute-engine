@@ -16,6 +16,18 @@
   stays ambiguous and keeps the `f(x)` function-application default. (Reported
   by the Tycho/Graph Paper team.)
 
+- **Parsing a call no longer un-assigns a bare-symbol argument.** Parsing an
+  application like `f(S)` runs argument-type inference on each operand. When the
+  callee's parameter type was `unknown` or `any` and the argument symbol had been
+  declared `unknown` and assigned a value, inference computed `unknown` (a no-op
+  narrowing) and wrote it back to the symbol's type — and the value-definition
+  type setter discards the held value whenever the type is set to `unknown`. So
+  merely _parsing_ `f(S)` (no `evaluate`/`N`) silently cleared `S`'s assigned
+  value, leaving it unbound and every dependent expression `NaN`. Inferring
+  `unknown` adds no information, so it is now skipped entirely and never
+  overwrites an existing binding; inference of a concrete parameter type still
+  narrows an open argument as before. (Reported by the Tycho/Graph Paper team.)
+
 ## 0.79.2 _2026-07-15_
 
 ### Compilation

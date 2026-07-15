@@ -326,4 +326,42 @@ describe('Playground regressions', () => {
       expect(ce.box('a').N().json).toEqual(7);
     });
   });
+
+  // Parsing a call `f(S)` ran argument-type inference on `S`; when the callee
+  // parameter type was `unknown`/`any` and `S` was declared `unknown` and
+  // assigned a value, inference narrowed to `unknown` (a no-op) and wrote it
+  // back — and the value-definition type setter discards the value whenever the
+  // type is set to `unknown`. So merely *parsing* the call silently un-assigned
+  // `S`. Inferring `unknown` adds no information and must never destroy a
+  // binding. Reported by Tycho (item 14, `cvwtsabmtb`).
+  describe('parsing a call does not un-assign a bare-symbol argument', () => {
+    test('unknown-param callee keeps an assigned collection binding', () => {
+      const ce = new ComputeEngine();
+      ce.declare('f', { signature: '(unknown) -> unknown' });
+      ce.declare('S', { type: 'unknown' });
+      ce.assign('S', ce.box(['List', 1, 2, 3]));
+      ce.parse('f(S)'); // parse only — no evaluate
+      expect(ce.box('S').evaluate().json).toEqual(['List', 1, 2, 3]);
+    });
+
+    test('any-param callee and a scalar binding are equally preserved', () => {
+      const ce = new ComputeEngine();
+      ce.declare('f', { signature: '(any, any) -> unknown' });
+      ce.declare('A', { type: 'unknown' });
+      ce.assign('A', ce.number(9));
+      ce.declare('S', { type: 'unknown' });
+      ce.assign('S', ce.box(['List', 1, 2, 3]));
+      ce.parse('f(A, S)');
+      expect(ce.box('A').evaluate().json).toEqual(9);
+      expect(ce.box('S').evaluate().json).toEqual(['List', 1, 2, 3]);
+    });
+
+    test('a concrete parameter type still narrows an open argument', () => {
+      const ce = new ComputeEngine();
+      ce.declare('g', { signature: '(integer) -> number' });
+      ce.declare('y', { type: 'unknown' });
+      ce.parse('g(y)');
+      expect(ce.box('y').type.toString()).toBe('integer');
+    });
+  });
 });
