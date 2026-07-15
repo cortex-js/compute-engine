@@ -1170,8 +1170,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any, any+) -> any',
       canonical: (ops, { engine: ce }) => {
-        if (ops.length < 2)
-          return ce._fn('ReplaceAll', checkArity(ce, ops, 2));
+        if (ops.length < 2) return ce._fn('ReplaceAll', checkArity(ce, ops, 2));
         return ce._fn('ReplaceAll', ops);
       },
       evaluate: (ops, { engine: ce }) => {
@@ -1202,7 +1201,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const rhs = r.op2;
           const s = sym(lhs);
           if (s !== undefined) substitution[s] = rhs.canonical;
-          else patternRules.push({ match: lhs.canonical, replace: rhs.canonical });
+          else
+            patternRules.push({ match: lhs.canonical, replace: rhs.canonical });
         }
 
         let result = target;

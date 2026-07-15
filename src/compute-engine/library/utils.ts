@@ -855,7 +855,9 @@ export function canonicalLimitsSequence(
       // its index symbol is not yet canonicalized. Only a proper triple
       // `{sym, lo, hi}` is recognized; any other shape is left untouched
       // (unchanged behavior → indefinite integral).
-      const setOps = (op as Expression & import('../global-types.js').FunctionInterface).ops;
+      const setOps = (
+        op as Expression & import('../global-types.js').FunctionInterface
+      ).ops;
       if (setOps && setOps.length === 3 && isSymbol(setOps[0])) {
         result.push(canonicalLimits(setOps, options) ?? ce.error('missing'));
       }

@@ -654,16 +654,15 @@ export function solveOverDomain(
     // Restricted to polynomials so a solver that returns a *partial* root set
     // (transcendental equations) never over-claims "no solutions".
     const domainCount = domain.count;
-    const unbounded = domainCount === undefined || !Number.isFinite(domainCount);
+    const unbounded =
+      domainCount === undefined || !Number.isFinite(domainCount);
     if (unbounded && getPolynomialCoefficients(predBody, unknown)) {
       const realRoots = symbolicRoots(ce, ceq, unknown, 'number');
       if (realRoots.length > 0) {
         const inDomain = realRoots.filter((r) =>
           keepInDomain(ce, domain, unknown, r, condition)
         );
-        return filterSide([
-          ...filterRootsByAssumptions(ce, inDomain, unknown),
-        ]);
+        return filterSide([...filterRootsByAssumptions(ce, inDomain, unknown)]);
       }
     }
   }
