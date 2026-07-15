@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { adaptiveQuadrature } from '../../src/compute-engine/numerics/gauss-kronrod';
 
@@ -160,6 +161,33 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       const noVars = compile(ce.parse('\\int_0^k t\\,dt'), { realOnly: true });
       expect(noVars.code).not.toContain('_SYS.integrate');
       expect(noVars.run({ k: 4 }) as number).toBeCloseTo(8, 10); // k²/2
+    });
+
+    // A high-power integrand's symbolic-antiderivative attempt expands
+    // `(trinomial)^p` into a multinomial (`C(p+2,2)` terms) and scans the
+    // integration rule set against it — unboundedly slow. The compile-time
+    // attempt is bounded by `ce.timeLimit`: `evaluate()` now checkpoints its
+    // power expansion (`expandPower`) and rule scan (`matchAnyRules`) against
+    // the deadline, so compilation degrades to quadrature instead of hanging.
+    // (Tycho item 8, 2026-07-15.)
+    test('high-power integrand degrades to quadrature at the deadline', () => {
+      const engine = new ComputeEngine();
+      engine.timeLimit = 500;
+      const start = Date.now();
+      const r = compile(
+        engine.parse(
+          '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
+        ),
+        { realOnly: true }
+      );
+      const elapsed = Date.now() - start;
+      expect(r.success).toBe(true);
+      // Fell back to quadrature rather than baking a closed form.
+      expect(r.code).toContain('_SYS.integrate(');
+      // Bounded by a small multiple of the 500ms limit, not the ~5s hang.
+      expect(elapsed).toBeLessThan(3000);
+      // The compiled quadrature runner still produces a finite value.
+      expect(Number.isFinite(r.run() as number)).toBe(true);
     });
   });
 

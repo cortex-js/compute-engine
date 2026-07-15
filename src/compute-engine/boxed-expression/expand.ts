@@ -4,6 +4,7 @@ import type {
 } from '../global-types.js';
 
 import { isRelationalOperator } from '../latex-syntax/utils.js';
+import { checkDeadline } from '../../common/interruptible.js';
 import { isFunction, isNumber } from './type-guards.js';
 
 import { asSmallInteger } from './numerics.js';
@@ -103,7 +104,15 @@ function expandPower(base: Expression, exp: number): Expression | null {
   const it = powers(terms.length, exp);
 
   const result: Expression[] = [];
+  const deadline = ce._deadline;
+  let count = 0;
   for (const val of it) {
+    // A high power of a sum enumerates a multinomial with `C(exp+m-1, m-1)`
+    // terms — e.g. `(a+b+c)^350` is ~6·10⁴ — so this loop can run for many
+    // seconds. Checkpoint the engine deadline (stride-amortized) so a runaway
+    // expansion honors `ce.timeLimit` instead of stalling (e.g. the compiler's
+    // symbolic-antiderivative attempt on `(trinomial)^p`).
+    if ((++count & 0xff) === 0) checkDeadline(deadline);
     const product = [ce.number(multinomialCoefficient(val))];
     for (let i = 0; i < val.length; i += 1) {
       if (val[i] !== 0) {

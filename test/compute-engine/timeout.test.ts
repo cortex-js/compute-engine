@@ -366,6 +366,41 @@ describe('TIMEOUT', () => {
     });
   });
 
+  describe('Symbolic integration (power expansion / rule scan)', () => {
+    // Integrating `(trinomial)^p` symbolically expands the power into a
+    // multinomial with `C(p+2, 2)` terms, then scans the integration rule set
+    // against that huge `Add` (~100ms per rule). Neither the multinomial
+    // expansion (`expandPower`) nor the rule scan (`matchAnyRules`) is on the
+    // per-node `_computeValue` checkpoint path, so before the fix `evaluate()`
+    // ran unboundedly past `ce.timeLimit` (Tycho item 8, 2026-07-15). Both now
+    // checkpoint the deadline.
+    it('high-power integrand throws CancellationError, bounded (sync)', () => {
+      const start = Date.now();
+      expect(() =>
+        ce
+          .parse(
+            '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
+          )
+          .evaluate()
+      ).toThrow(CancellationError);
+      // Interrupted near the 200ms limit, not after seconds.
+      expect(Date.now() - start).toBeLessThan(3000);
+    });
+
+    it('deadline is reset after the integration timeout', () => {
+      expect(() =>
+        ce
+          .parse(
+            '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
+          )
+          .evaluate()
+      ).toThrow(CancellationError);
+      expect(ce._deadline).toBeUndefined();
+      // Subsequent evaluation still works.
+      expect(ce.parse('2 + 3').evaluate().re).toBe(5);
+    });
+  });
+
   describe('deadline cleanup', () => {
     it('deadline is reset after timeout so subsequent evaluations work', () => {
       // First: trigger a timeout

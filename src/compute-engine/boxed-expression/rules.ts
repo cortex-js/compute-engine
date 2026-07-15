@@ -1,6 +1,6 @@
 import type { MathJsonExpression } from '../../math-json/types.js';
 
-import { CancellationError } from '../../common/interruptible.js';
+import { CancellationError, checkDeadline } from '../../common/interruptible.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import type {
   BoxedRule,
@@ -1447,6 +1447,12 @@ export function matchAnyRulesWithSteps(
   const results: RuleStep[] = [];
 
   const collect = (rule: BoxedRule): void => {
+    // Matching a single rule against a large expression (e.g. a
+    // multinomial-expanded integrand with thousands of operands) can take
+    // ~100 ms; scanning a rule set then runs for seconds. Checkpoint the
+    // engine deadline once per rule so a runaway rule scan honors
+    // `ce.timeLimit` (e.g. the compiler's symbolic-antiderivative attempt).
+    checkDeadline(expr.engine._deadline);
     const r = applyRule(rule, expr, sub, options);
 
     // Verify that the results are unique

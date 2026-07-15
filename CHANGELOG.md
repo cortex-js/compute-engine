@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Evaluation
+
+- **`ce.timeLimit` is now enforced during symbolic integration and rule
+  matching.** Extends the 0.79.0 expression-tree-growth checkpoint to two paths
+  that previously ran unbounded: the multinomial expansion of a power of a sum
+  (`expandPower`) and the rule-set scan (`matchAnyRules`). The worst case is
+  compiling a definite integral of a high-power integrand — e.g.
+  `\int_{-15}^{15} (2 + \sin(3y) + \cos(\pi^2 y))^p\,dy`: the compiler's
+  antiderivative-first attempt expands `(trinomial)^p` into a multinomial with
+  `C(p+2, 2)` terms (≈ 6·10⁴ at `p=350`) and matches the integration rule set
+  against it (~100 ms per rule), neither of which hit the per-node checkpoint,
+  so compilation stalled for many seconds (or hung outright) instead of honoring
+  the deadline. Both paths now cooperatively check the deadline, so a hard
+  integrand degrades to Gauss–Kronrod quadrature at `ce.timeLimit` (default 2 s)
+  as intended, and a bare `evaluate()` of such an integral throws a catchable
+  `CancellationError` (`cause: 'timeout'`) rather than running unbounded.
+  (Reported by the Tycho/Graph Paper team.)
+
 ## 0.79.0 _2026-07-14_
 
 ### Evaluation
