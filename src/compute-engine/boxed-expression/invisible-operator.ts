@@ -139,6 +139,27 @@ export function canonicalInvisibleOperator(
         return ce.function('Multiply', [lhsCanon, ...args]);
       }
 
+      // The single argument is non-numeric (e.g. a collection like `\cos(S)`
+      // where `S` is bound to a list). If the leading symbol is KNOWN to be a
+      // non-function value — declared with a concrete type or assigned a value
+      // (a number, list, tuple, …) — it cannot be a function application, so
+      // the juxtaposition is multiplication (scaling / broadcast over the
+      // collection), matching the scalar-arg case above and the multi-operand
+      // invisible-multiplication path. Only an undeclared or unknown-typed
+      // symbol stays genuinely ambiguous and falls through to the function-call
+      // heuristic below. (Tycho item 13: `k(\cos(S))` with `k` a number and `S`
+      // a collection parsed as `k` applied — an illegal application of a
+      // number — instead of `k·\cos(S)`.)
+      if (
+        def &&
+        !isOperatorDef(def) &&
+        def.value?.type &&
+        !def.value.type.isUnknown &&
+        !def.value.type.matches('function')
+      ) {
+        return ce.function('Multiply', [lhsCanon, ...args]);
+      }
+
       // Non-numeric args → treat as function call
       // Inferred (see above): a heuristic auto-declaration the user can
       // later widen/override.

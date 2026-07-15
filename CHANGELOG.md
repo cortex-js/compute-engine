@@ -1,11 +1,28 @@
+## [Unreleased]
+
+### Parsing
+
+- **A number-valued symbol juxtaposed with a parenthesized collection now parses
+  as multiplication, not a function application.** When a symbol known to be a
+  non-function value — declared with a numeric type or assigned a value — was
+  juxtaposed against `(…)` whose body referenced a collection (e.g. `k(\cos(S))`
+  with `k` a number and `S` a bound list), it parsed as `k` _applied_ to the
+  body — an illegal application of a number, yielding `NaN` — instead of
+  `k\cdot\cos(S)`. The single-argument invisible-operator rule only treated a
+  scalar-numeric argument as multiplication; a collection-typed argument fell
+  through to the function-call heuristic even when the leading symbol could not
+  be a function. Such a symbol now scales over the argument, matching the
+  scalar-argument and multi-operand cases. An undeclared or unknown-typed symbol
+  stays ambiguous and keeps the `f(x)` function-application default. (Reported
+  by the Tycho/Graph Paper team.)
+
 ## 0.79.2 _2026-07-15_
 
 ### Compilation
 
 - **The collection form of `Sum`, `Product`, `Max`, and `Min` now compiles on
-  the `javascript` target.** Applied to a collection with no indexing set —
-  e.g. `[3,4,5].\operatorname{total}` (which canonicalizes to `Sum([3,4,5])`), a
-  list
+  the `javascript` target.** Applied to a collection with no indexing set — e.g.
+  `[3,4,5].\operatorname{total}` (which canonicalizes to `Sum([3,4,5])`), a list
   product, or `\max(v)` for a list `v` — these previously threw
   `Sum: no indexing set` (dropping the whole expression to interpretation) or,
   for `Max`/`Min`, compiled to `Math.max([…])` and returned `NaN`. They now
@@ -51,12 +68,12 @@
 
 - **Juxtaposition of a collection-typed symbol with a function call parses as
   multiplication.** A symbol declared with an abstract `indexed_collection` or
-  `collection` type but not yet assigned a value — e.g. `y_r` in
-  `y_r\sin(a)` — grouped into a `Tuple` instead of a `Multiply`, even though its
-  concrete subtypes (`list`, `vector`, `matrix`, numeric `tuple`) and the
-  assigned-value case already multiplied. The abstract collection type now
-  scales like its subtypes; non-indexed `set` and heterogeneous `tuple` operands
-  still group as a `Tuple`. (Reported by the Tycho/Graph Paper team.)
+  `collection` type but not yet assigned a value — e.g. `y_r` in `y_r\sin(a)` —
+  grouped into a `Tuple` instead of a `Multiply`, even though its concrete
+  subtypes (`list`, `vector`, `matrix`, numeric `tuple`) and the assigned-value
+  case already multiplied. The abstract collection type now scales like its
+  subtypes; non-indexed `set` and heterogeneous `tuple` operands still group as
+  a `Tuple`. (Reported by the Tycho/Graph Paper team.)
 
 ## 0.79.1 _2026-07-15_
 

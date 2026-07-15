@@ -351,6 +351,50 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
       ['Sin', 'a'],
     ]);
   });
+
+  // Defect 6 (Tycho item 13): a symbol KNOWN to be a non-function value (a
+  // number by declaration or assignment) juxtaposed against a parenthesized
+  // expression whose body references a collection (`k(\cos(S))` with `S` a
+  // list) parsed as `k` APPLIED to the body — an illegal application of a
+  // number — instead of `k·\cos(S)`. The single-arg branch only treated a
+  // scalar-numeric argument as multiplication; a collection-typed argument fell
+  // through to the function-call heuristic even when the leading symbol could
+  // not possibly be a function. An undeclared / unknown-typed symbol stays
+  // genuinely ambiguous and keeps the `f(x)` function-application default.
+  test('number-valued symbol · (collection arg) juxtaposition is Multiply', () => {
+    const mul = ['Multiply', 'k', ['Cos', 'S']];
+
+    // Declared with a concrete numeric type.
+    {
+      const ce = new ComputeEngine();
+      ce.assign('S', ce.parse('\\left[1,2,3\\right]').evaluate());
+      ce.declare('k', 'number');
+      expect(ce.parse('k\\left(\\cos(S)\\right)').json).toEqual(mul);
+    }
+
+    // Assigned a numeric value (Desmos slider shape).
+    {
+      const ce = new ComputeEngine();
+      ce.assign('S', ce.parse('\\left[1,2,3\\right]').evaluate());
+      ce.assign('k', ce.parse('5').evaluate());
+      expect(ce.parse('k\\left(\\cos(S)\\right)').json).toEqual(mul);
+    }
+
+    // A genuinely undeclared symbol is ambiguous: it keeps the function-call
+    // default (unchanged behavior — the user may be applying a function).
+    {
+      const ce = new ComputeEngine();
+      ce.assign('S', ce.parse('\\left[1,2,3\\right]').evaluate());
+      expect(ce.parse('k\\left(\\cos(S)\\right)').operator).toBe('k');
+    }
+
+    // An explicitly declared function still applies.
+    {
+      const ce = new ComputeEngine();
+      ce.declare('f', 'function');
+      expect(ce.parse('f\\left(\\left[1,2,3\\right]\\right)').operator).toBe('f');
+    }
+  });
 });
 
 // A list-broadcast such as `Multiply([...], x)` reports a dishonest
