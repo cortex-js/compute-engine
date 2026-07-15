@@ -147,6 +147,21 @@
   `a \in \{1,\dots,9\}` unusable as a domain. Enumerated sets of non-numeric or
   non-progression elements (`\{a, b, c\}`, `\{1, 2, 3\}`) are unaffected.
 
+### Performance
+
+- **`Interpret` no longer spends ~13 s rejecting a non-polynomial sequence.**
+  Interpreting a continuation such as `1 + 1 + 2 + 3 + 5 + 8 + \dots + 55`
+  (Fibonacci) first tries the polynomial recognizer, which fits a degree-5
+  interpolant through the samples and searches for the index where it reaches
+  the anchor. That interpolant has a negative leading coefficient, so it
+  eventually decreases — but the search's overshoot test used the sample trend
+  ("increasing"), which never fired, so it ground through all 100 000 candidate
+  indices before falling through to the recurrence recognizer. The search now
+  stops on the interpolant's *local* trend (a polynomial is eventually
+  monotonic, so once it is past the anchor and still diverging it cannot
+  return), cutting this interpretation from ~13 s to a few milliseconds.
+  Legitimate polynomial sums (triangular numbers, squares) are unaffected.
+
 ### Calculus
 
 - **Improper integrals of `polynomial × exp-decay` no longer return `NaN`.** A

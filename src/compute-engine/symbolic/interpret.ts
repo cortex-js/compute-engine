@@ -756,16 +756,26 @@ function findNumericUpperBound(
 ): Expression | null {
   const CAP = 100000;
   const anchorValue = anchor.N().re;
-  const increasing = samples[samples.length - 1].N().re >= samples[0].N().re;
   const name = isSymbol(index) ? index.symbol : '';
 
+  // A polynomial term is eventually monotonic, so once its value is on the far
+  // side of the anchor AND still moving further away it can never return: stop.
+  // The break uses the *local* trend (previous → current), not the sample
+  // endpoints — a spurious high-degree interpolant of non-polynomial data (e.g.
+  // the degree-5 fit to Fibonacci samples, leading coefficient −1/40) climbs
+  // like the samples yet eventually falls, so a sample-derived "increasing"
+  // flag never fires and the search used to grind all `CAP` steps.
+  let prev: number | undefined;
   for (let u = m + 1; u <= CAP; u++) {
     const value = term.subs({ [name]: u }).evaluate();
     if (value.isSame(anchor)) return ce.number(u);
     const numeric = value.N().re;
     if (!Number.isFinite(numeric)) break;
-    if (increasing && numeric > anchorValue) break;
-    if (!increasing && numeric < anchorValue) break;
+    if (prev !== undefined) {
+      if (numeric > anchorValue && numeric > prev) break; // above and rising
+      if (numeric < anchorValue && numeric < prev) break; // below and falling
+    }
+    prev = numeric;
   }
   return null;
 }

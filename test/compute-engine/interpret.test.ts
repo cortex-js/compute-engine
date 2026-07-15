@@ -233,13 +233,16 @@ describe('Interpret — v2 negative gates stay inert', () => {
 });
 
 describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => {
-  // The RSolve + anchor-validation pipeline legitimately exceeds the default
-  // 2 s evaluation budget; raise it so the cooperative deadline checkpoint
-  // (see boxed-function.ts `_computeValue`) doesn't cancel the run.
+  // The RSolve + anchor-validation pipeline can exceed the default 2 s
+  // evaluation budget; raise it modestly so the cooperative deadline checkpoint
+  // (see boxed-function.ts `_computeValue`) doesn't cancel a run that is slow
+  // under parallel CI load. (The former ~13 s cost — an anchor search grinding
+  // all 100 000 steps against a spurious high-degree interpolant — is fixed in
+  // findNumericUpperBound, so a large budget is no longer needed.)
   let savedTimeLimit: number;
   beforeAll(() => {
     savedTimeLimit = ce.timeLimit;
-    ce.timeLimit = 60_000;
+    ce.timeLimit = 15_000;
   });
   afterAll(() => {
     ce.timeLimit = savedTimeLimit;
@@ -263,6 +266,19 @@ describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => 
     expect([1, 2, 3, 4, 5, 6].map((k) => body.subs({ k }).evaluate().re)).toEqual(
       [1, 1, 2, 3, 5, 8]
     );
+  });
+
+  // Performance guard: the polynomial recognizer's anchor search must reject the
+  // spurious high-degree interpolant of these non-polynomial samples quickly.
+  // It used to grind all 100 000 steps (~13 s); a tight budget here would throw
+  // CancellationError on a regression.
+  test('interpret rejects the spurious polynomial fit fast (< 2 s budget)', () => {
+    const fast = new ComputeEngine();
+    fast.timeLimit = 2000;
+    const sum = fast
+      .function('Interpret', [fast.parse('1 + 1 + 2 + 3 + 5 + 8 + \\dots + 55')])
+      .evaluate();
+    expect(sum.json).toEqual(['Sum', ['Fibonacci', 'k'], ['Limits', 'k', 1, 10]]);
   });
 
   test('Pell 1+2+5+12+29+70+…+169 (non-Fibonacci, L=2) → U=7, sum = 288', () => {
