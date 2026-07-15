@@ -1,35 +1,35 @@
+## [Unreleased]
+
 ## 0.79.0 _2026-07-14_
 
 ### Evaluation
 
 - **`ce.timeLimit` is now enforced during expression-tree growth.** The
   evaluation deadline was only checked inside specific loops (collection
-  enumeration, polynomial GCD, …), so an evaluation whose cost is dominated
-  by expression construction never hit a checkpoint. The worst case is a
-  nested user-function chain whose body references a parameter several times
-  — e.g. a symbolic Newton iteration
-  `s(y, x_p) := \frac{y - f(x_p)}{f'(x_p)} + x_p` applied as
-  `s(y, s(y, … s(y, x_0)))` — which grows the result ×4 per nesting level:
-  at depth 15 it previously exhausted an 8 GB heap without ever honoring
+  enumeration, polynomial GCD, …), so an evaluation whose cost is dominated by
+  expression construction never hit a checkpoint. The worst case is a nested
+  user-function chain whose body references a parameter several times — e.g. a
+  symbolic Newton iteration `s(y, x_p) := \frac{y - f(x_p)}{f'(x_p)} + x_p`
+  applied as `s(y, s(y, … s(y, x_0)))` — which grows the result ×4 per nesting
+  level: at depth 15 it previously exhausted an 8 GB heap without ever honoring
   `timeLimit`. A cooperative checkpoint on the per-node evaluation path now
-  cancels such evaluations at the deadline with a catchable
-  `CancellationError` (`cause: 'timeout'`), e.g. at the default 2 s limit the
-  depth-15 chain aborts using < 60 MB. Numeric chains (each level folds to a
-  number) are unaffected and remain fast. Note: long-running evaluations that
-  previously *completed* after exceeding `timeLimit` now throw — raise
-  `ce.timeLimit` (or set it to `0` for no limit) if you rely on multi-second
-  symbolic evaluations.
+  cancels such evaluations at the deadline with a catchable `CancellationError`
+  (`cause: 'timeout'`), e.g. at the default 2 s limit the depth-15 chain aborts
+  using < 60 MB. Numeric chains (each level folds to a number) are unaffected
+  and remain fast. Note: long-running evaluations that previously _completed_
+  after exceeding `timeLimit` now throw — raise `ce.timeLimit` (or set it to `0`
+  for no limit) if you rely on multi-second symbolic evaluations.
 
 ### Library and Definitions
 
 - **`ce.searchDefinitions()` now treats the query as OR-ed keywords.**
   Previously a multi-word query only matched definitions containing _every_
-  word, so keyword-bag queries like `"floor quotient integer division"`
-  returned nothing. Any matching word now suffices, and results are ranked by
-  how many words they match and how exactly (identifier match, then trigger or
-  curated keyword, then description). The query may also be an array of
-  strings — `ce.searchDefinitions(['gcd', 'least common multiple'])` — with
-  each element treated as an OR-ed alternative.
+  word, so keyword-bag queries like `"floor quotient integer division"` returned
+  nothing. Any matching word now suffices, and results are ranked by how many
+  words they match and how exactly (identifier match, then trigger or curated
+  keyword, then description). The query may also be an array of strings —
+  `ce.searchDefinitions(['gcd', 'least common multiple'])` — with each element
+  treated as an OR-ed alternative.
 
 ### Solving
 
@@ -52,11 +52,12 @@
   constant (`Integers`, `RealNumbers`, …) after the unknowns applies as the
   domain of every unknown, Mathematica-style:
   `\mathrm{Solve}(x^2=4, x, \mathbb{Z})` → `[2, -2]`. Unknowns that already
-  carry an explicit `Element` domain keep it. Over an unbounded integer domain
-  a *polynomial* equation with no integer roots now decides `[]`
-  (`\mathrm{Solve}(2x=3, x, \mathbb{Z})`, `\mathrm{Solve}(x^2=2, x, \mathbb{Z})`)
-  instead of staying unevaluated; non-polynomial equations stay inert rather
-  than risk over-claiming "no solutions" from a partial root set.
+  carry an explicit `Element` domain keep it. Over an unbounded integer domain a
+  _polynomial_ equation with no integer roots now decides `[]`
+  (`\mathrm{Solve}(2x=3, x, \mathbb{Z})`,
+  `\mathrm{Solve}(x^2=2, x, \mathbb{Z})`) instead of staying unevaluated;
+  non-polynomial equations stay inert rather than risk over-claiming "no
+  solutions" from a partial root set.
 - **Inequality side conditions in constraint sets.** A relational or boolean
   predicate bundled in the first argument restricts the solution set instead of
   being mistaken for an equation: `\mathrm{Solve}(\{x^2=4, x>0\}, x)` → `[2]`
@@ -66,57 +67,55 @@
   → `[(0, 5), (1, 4), (2, 3)]`. Filtering is conservative (a candidate is
   dropped only when a condition is definitely `False`) and applies across the
   symbolic, diophantine-fallback, and enumeration paths. A constraint set
-  containing only predicates solves them directly by enumeration over the
-  domain (`\mathrm{Solve}(\{x \equiv 2 \pmod 5, x\in\{1,\dots,20\}\}, x)` →
+  containing only predicates solves them directly by enumeration over the domain
+  (`\mathrm{Solve}(\{x \equiv 2 \pmod 5, x\in\{1,\dots,20\}\}, x)` →
   `[2, 7, 12, 17]`).
 
 ### Mathematica-Style Operator Forms
 
 - **Iterator triples: `\{i, lo, hi\}` and `\{i, lo, hi, step\}`.** The
   Mathematica iterator spec is now recognized in the iterator/bounds slot of
-  `Sum`, `Product`, `Integrate` and `D`:
-  `\mathrm{Sum}(i^2, \{i, 1, 10\})` → `385`,
-  `\mathrm{Sum}(i, \{i, 0, 10, 2\})` → `30`,
+  `Sum`, `Product`, `Integrate` and `D`: `\mathrm{Sum}(i^2, \{i, 1, 10\})` →
+  `385`, `\mathrm{Sum}(i, \{i, 0, 10, 2\})` → `30`,
   `\mathrm{Integrate}(x^2, \{x, 0, 1\})` → `1/3` (the bounds were previously
   silently dropped, yielding an indefinite integral), and
   `\mathrm{D}(f, \{x, n\})` is the n-th derivative. Symbolic bounds work
   (`\mathrm{Sum}(k, \{k, 1, n\})` ≡ `\sum_{k=1}^n k`). The interpretation is
-  strictly positional — a brace set anywhere else keeps its literal set
-  meaning — and operates on held (raw) operands, so the index symbol is scoped
-  like a binder (an `i` index does not collapse to the imaginary unit).
+  strictly positional — a brace set anywhere else keeps its literal set meaning
+  — and operates on held (raw) operands, so the index symbol is scoped like a
+  binder (an `i` index does not collapse to the imaginary unit).
 - **New `Table` operator, an alias for `Tabulate`.**
   `\mathrm{Table}(i^2, \{i, 1, 5\})` → `[1, 4, 9, 16, 25]`, with general
   iterator bounds and step (`\mathrm{Table}(i, \{i, 0, 10, 2\})` →
   `[0, 2, 4, 6, 8, 10]`) and multiple iterator specs for nested dimensions
-  (`\mathrm{Table}(i j, \{i, 1, 2\}, \{j, 1, 3\})` → `[[1,2,3],[2,4,6]]`,
-  first spec outermost). `\{v, 1, n\}` specs canonicalize directly to
-  `Tabulate`; general bounds map to `Map` over `Range`. `Tabulate` also
-  gained the `table` search keyword so `ce.searchDefinitions('table')` finds
-  it.
+  (`\mathrm{Table}(i j, \{i, 1, 2\}, \{j, 1, 3\})` → `[[1,2,3],[2,4,6]]`, first
+  spec outermost). `\{v, 1, n\}` specs canonicalize directly to `Tabulate`;
+  general bounds map to `Map` over `Range`. `Tabulate` also gained the `table`
+  search keyword so `ce.searchDefinitions('table')` finds it.
 - **`\mathrm{D}(f, x)` differentiation.** Applied to an argument list,
   `\mathrm{D}` / `\operatorname{D}` is the derivative operator:
   `\mathrm{D}(x^3, x)` → `3x^2`, `\mathrm{D}(x^2 y, x, y)` takes sequential
   partials. The bare forms keep their previous meanings (`\mathrm{D}` is the
-  upright-D glyph symbol; `\operatorname{D}` remains usable as a pipeline
-  stage, `x^2 \rhd \operatorname{D}` → `2x`).
+  upright-D glyph symbol; `\operatorname{D}` remains usable as a pipeline stage,
+  `x^2 \rhd \operatorname{D}` → `2x`).
 - **`Limit(f, x \to x_0)` rule-arrow form.**
   `\mathrm{Limit}(\frac{\sin x}{x}, x\to 0)` → `1`, equivalent to
   `\lim_{x\to 0}`. One-sided arrows carry the direction:
   `\mathrm{Limit}(\frac{1}{x}, x\to 0^+)` → `+∞`.
-- **`Simplify(expr, assumptions)`.** An optional second argument supplies one
-  or more boolean assumptions (a bare predicate, or a `List`/`And` of them)
-  that hold only for the duration of the simplification:
-  `\mathrm{Simplify}(\sqrt{x^2}, x>0)` → `x`,
-  `\mathrm{Simplify}(|x|, x<0)` → `-x`.
+- **`Simplify(expr, assumptions)`.** An optional second argument supplies one or
+  more boolean assumptions (a bare predicate, or a `List`/`And` of them) that
+  hold only for the duration of the simplification:
+  `\mathrm{Simplify}(\sqrt{x^2}, x>0)` → `x`, `\mathrm{Simplify}(|x|, x<0)` →
+  `-x`.
 - **New `ReplaceAll` operator.** `\mathrm{ReplaceAll}(x^2+x, x\to 2)` → `6`
-  (Mathematica `expr /. rules`). Rules are `lhs \to rhs` (or
-  `Rule(lhs, rhs)`), given as extra arguments or bundled in a set/list:
-  `\mathrm{ReplaceAll}(x+y, \{x\to 1, y\to 2\})` → `3`. Symbol rules are
-  applied simultaneously in a single pass; non-symbol left-hand sides use the
+  (Mathematica `expr /. rules`). Rules are `lhs \to rhs` (or `Rule(lhs, rhs)`),
+  given as extra arguments or bundled in a set/list:
+  `\mathrm{ReplaceAll}(x+y, \{x\to 1, y\to 2\})` → `3`. Symbol rules are applied
+  simultaneously in a single pass; non-symbol left-hand sides use the
   pattern-rule machinery. The result is evaluated after substitution.
 - **Tuple membership distributes: `(a,b) \in \mathbb{Z}`.** Membership of a
-  tuple of symbols in a scalar (number-element) collection now distributes to
-  a conjunction — `Element(a, Integers) ∧ Element(b, Integers)` — instead of
+  tuple of symbols in a scalar (number-element) collection now distributes to a
+  conjunction — `Element(a, Integers) ∧ Element(b, Integers)` — instead of
   evaluating to `False`. Value tuples against product sets are unaffected.
 
 ### LaTeX Parsing
@@ -126,24 +125,23 @@
   superscript entries as `PseudoInverse(0)` / `Superminus(0)`, making every
   one-sided limit unevaluatable. The marker now maps to `Limit`'s direction
   operand (`["Limit", f, 0, 1]` / `…, -1]`), which the limit evaluator already
-  supported: `\lim_{x\to 0^+} \frac{1}{x}` → `+∞`,
-  `\lim_{x\to 0^-} \frac{1}{x}` → `-∞`, `\lim_{x\to 0^+} \ln x` → `-∞`.
-  Directions serialize back as `^{+}`/`^{-}` (round-trip), symbolic points
-  (`\lim_{x\to a^+}`) keep a correct representation, and superscript `+`/`-`
-  everywhere else (`A^+` pseudoinverse, `3^-` signed value) is unaffected.
-- **`\mapsto` lambda bodies extend through comparisons.**
-  `n \mapsto n > 102` now parses as `n \mapsto (n > 102)` — previously the
-  body closed at the comparison, mis-parsing as `(n \mapsto n) > 102`, which
-  made unparenthesized predicates like
-  `\mathrm{Filter}(\mathrm{Range}(100,105), n \mapsto n > 102)` fail. The
-  body now extends through comparisons and logical connectives
-  (`n \mapsto n > 2 \wedge n < 5`), stopping at the comma/sequence level, so
-  a lambda in an argument list still does not swallow the following argument.
+  supported: `\lim_{x\to 0^+} \frac{1}{x}` → `+∞`, `\lim_{x\to 0^-} \frac{1}{x}`
+  → `-∞`, `\lim_{x\to 0^+} \ln x` → `-∞`. Directions serialize back as
+  `^{+}`/`^{-}` (round-trip), symbolic points (`\lim_{x\to a^+}`) keep a correct
+  representation, and superscript `+`/`-` everywhere else (`A^+` pseudoinverse,
+  `3^-` signed value) is unaffected.
+- **`\mapsto` lambda bodies extend through comparisons.** `n \mapsto n > 102`
+  now parses as `n \mapsto (n > 102)` — previously the body closed at the
+  comparison, mis-parsing as `(n \mapsto n) > 102`, which made unparenthesized
+  predicates like `\mathrm{Filter}(\mathrm{Range}(100,105), n \mapsto n > 102)`
+  fail. The body now extends through comparisons and logical connectives
+  (`n \mapsto n > 2 \wedge n < 5`), stopping at the comma/sequence level, so a
+  lambda in an argument list still does not swallow the following argument.
 - **Ellipsis ranges in set braces.** `\{1,\dots,9\}` now parses to
-  `["Range", 1, 9]`, matching the existing bracket form `\lbrack1,\dots,9\rbrack`;
-  the stepped form `\{0, 2, \dots, 10\}` yields `["Range", 0, 10, 2]`.
-  Previously the ellipsis was kept as a literal placeholder element
-  (`["Set", 1, "ContinuationPlaceholder", 9]`), which made
+  `["Range", 1, 9]`, matching the existing bracket form
+  `\lbrack1,\dots,9\rbrack`; the stepped form `\{0, 2, \dots, 10\}` yields
+  `["Range", 0, 10, 2]`. Previously the ellipsis was kept as a literal
+  placeholder element (`["Set", 1, "ContinuationPlaceholder", 9]`), which made
   `a \in \{1,\dots,9\}` unusable as a domain. Enumerated sets of non-numeric or
   non-progression elements (`\{a, b, c\}`, `\{1, 2, 3\}`) are unaffected.
 
@@ -157,7 +155,7 @@
   eventually decreases — but the search's overshoot test used the sample trend
   ("increasing"), which never fired, so it ground through all 100 000 candidate
   indices before falling through to the recurrence recognizer. The search now
-  stops on the interpolant's *local* trend (a polynomial is eventually
+  stops on the interpolant's _local_ trend (a polynomial is eventually
   monotonic, so once it is past the anchor and still diverging it cannot
   return), cutting this interpretation from ~13 s to a few milliseconds.
   Legitimate polynomial sums (triangular numbers, squares) are unaffected.
@@ -172,8 +170,8 @@
   an endpoint is now resolved as the limit `\lim_{y\to\infty} F(y)` (exponential
   decay dominates polynomial growth), giving the exact closed form (`2`); with
   the Rubi integration rules loaded the same fix closes the χ²-tail
-  `\int_x^\infty y^{3/2} e^{-y/2}\,dy` to `3\sqrt{2\pi} - F(x)`. An endpoint that
-  still cannot be resolved keeps the integral inert (so `N()` quadrature
+  `\int_x^\infty y^{3/2} e^{-y/2}\,dy` to `3\sqrt{2\pi} - F(x)`. An endpoint
+  that still cannot be resolved keeps the integral inert (so `N()` quadrature
   applies) rather than leaking `NaN`.
 - **`Limit` at infinity resolves `Erf`/`Erfc` and `\sqrt{}`/`\sqrt[n]{}`.**
   `\lim_{x\to\infty}\operatorname{erf}(x) = 1`,
@@ -183,16 +181,16 @@
   their own right, these fill the gaps behind the improper-integral endpoints
   above — an antiderivative's `\operatorname{erf}(\sqrt{y})` term needs both.
 - **The upper incomplete gamma reduces at infinity: `\Gamma(s, +\infty) = 0`.**
-  The tail `\int_{+\infty}^\infty t^{s-1} e^{-t}\,dt` vanishes for any finite `s`
-  (the `e^{-t}` factor dominates), so `\Gamma(s, \infty)` — including symbolic
-  `s` such as `\Gamma(\frac{k}{2}, \infty)` — now evaluates to `0` instead of
-  staying inert (a provably infinite first argument stays symbolic). This closes
-  the free-parameter χ²-tail antiderivative
+  The tail `\int_{+\infty}^\infty t^{s-1} e^{-t}\,dt` vanishes for any finite
+  `s` (the `e^{-t}` factor dominates), so `\Gamma(s, \infty)` — including
+  symbolic `s` such as `\Gamma(\frac{k}{2}, \infty)` — now evaluates to `0`
+  instead of staying inert (a provably infinite first argument stays symbolic).
+  This closes the free-parameter χ²-tail antiderivative
   `\int_x^\infty y^{\frac{k}{2}-1} e^{-\frac{y}{2}}\,dy` to a form free of the
   leftover `\Gamma(\cdot, \infty)` term.
 - **A rational integrand with fully symbolic coefficients no longer hangs.**
-  `\int_0^x \frac{u-a}{b_2 u^2 + b_1 u + b_0}\,du` spun for ~109 s (ignoring a
-  3 s `timeLimit`) inside the polynomial-GCD used to cancel common factors: its
+  `\int_0^x \frac{u-a}{b_2 u^2 + b_1 u + b_0}\,du` spun for ~109 s (ignoring a 3
+  s `timeLimit`) inside the polynomial-GCD used to cancel common factors: its
   Euclidean loop divided by a symbolic constant, which produced a spurious
   nonzero constant remainder that never tested as zero, so the loop iterated
   forever building ever-larger coefficient expressions. A nonzero constant
@@ -216,16 +214,16 @@
   integrand degrades to quadrature rather than stalling compilation, and it is
   skipped when the integral references a symbol supplied through the `vars`
   option (which must stay a live runtime input, not be folded to a constant).
-- **The compiled quadrature fallback is now deterministic adaptive
-  Gauss–Kronrod (GK15), not Monte-Carlo.** An integral that does not resolve
-  symbolically is estimated with adaptive Gauss–Kronrod quadrature: near machine
-  precision on smooth integrands, microseconds-to-milliseconds per call, and —
-  unlike the previous 10⁷-sample Monte-Carlo estimator (~1e-4 error, a different
-  value on every call, ~150 ms/call) — the **same** value on every call.
-  Infinite bounds are handled by a smooth variable transform. Monte-Carlo
-  remains an automatic fallback when the adaptive rule does not converge, and
-  can be forced with the new `compile(expr, { quadrature: 'monte-carlo' })`
-  option (`'adaptive'` is the default).
+- **The compiled quadrature fallback is now deterministic adaptive Gauss–Kronrod
+  (GK15), not Monte-Carlo.** An integral that does not resolve symbolically is
+  estimated with adaptive Gauss–Kronrod quadrature: near machine precision on
+  smooth integrands, microseconds-to-milliseconds per call, and — unlike the
+  previous 10⁷-sample Monte-Carlo estimator (~1e-4 error, a different value on
+  every call, ~150 ms/call) — the **same** value on every call. Infinite bounds
+  are handled by a smooth variable transform. Monte-Carlo remains an automatic
+  fallback when the adaptive rule does not converge, and can be forced with the
+  new `compile(expr, { quadrature: 'monte-carlo' })` option (`'adaptive'` is the
+  default).
 
 ## 0.78.1 _2026-07-14_
 

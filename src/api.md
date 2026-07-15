@@ -1813,16 +1813,21 @@ two methods are non-overlapping).
 searchDefinitions(query, options?): DefinitionSearchResult[]
 ```
 
-Reverse library search: map a plain-text concept query to a ranked list
+Reverse library search: map plain-text concept keywords to a ranked list
 of matching identifiers in the current scope chain (standard library plus
 any user declarations).
+
+The query is a string (tokenized on whitespace) or an array of strings;
+tokens are OR-ed — a definition matches when **any** token matches — and
+definitions matching more tokens, or matching them more exactly, rank
+higher.
 
 Every returned `id` resolves via `ce.lookupDefinition(id)`; chain that
 call for full detail.
 
 ####### query
 
-`string`
+`string` \| `string`[]
 
 ####### options?
 
@@ -8865,16 +8870,21 @@ two methods are non-overlapping).
 searchDefinitions(query, options?): DefinitionSearchResult[]
 ```
 
-Reverse library search: map a plain-text concept query to a ranked list
+Reverse library search: map plain-text concept keywords to a ranked list
 of matching identifiers in the current scope chain (standard library plus
 any user declarations).
+
+The query is a string (tokenized on whitespace) or an array of strings;
+tokens are OR-ed — a definition matches when **any** token matches — and
+definitions matching more tokens, or matching them more exactly, rank
+higher.
 
 Every returned `id` resolves via `ce.lookupDefinition(id)`; chain that
 call for full detail.
 
 ####### query
 
-`string`
+`string` \| `string`[]
 
 ####### options?
 
