@@ -3,6 +3,7 @@ import { Complex } from 'complex-esm';
 import type { Expression, BoxedSubstitution, Rule } from '../global-types.js';
 
 import { durandKernerRoots } from '../numerics/polynomial-roots.js';
+import { checkDeadline } from '../../common/interruptible.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { matchAnyRules } from '../boxed-expression/rules.js';
@@ -2884,6 +2885,12 @@ function tryRationalizeRadicalSum(
 }
 
 export function antiderivative(fn: Expression, index: string): Expression {
+  // Bound the symbolic-integration recursion by the engine deadline: some
+  // rational/parametric integrands (e.g. a linear numerator over a fully
+  // symbolic quadratic) explore an unbounded search here, and without a
+  // checkpoint the recursion ignored `ce.timeLimit` entirely.
+  checkDeadline(fn.engine._deadline);
+
   if (isFunction(fn, 'Function')) return antiderivative(fn.op1, index);
   if (isFunction(fn, 'Block')) return antiderivative(fn.op1, index);
   if (isFunction(fn, 'Delimiter')) return antiderivative(fn.op1, index);

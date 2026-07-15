@@ -506,6 +506,11 @@ export function polynomialGCD(
   let q = b;
 
   while (true) {
+    // Bound the remainder sequence by the engine deadline (defense in depth):
+    // with symbolic coefficients a single step's remainder can fail to reduce
+    // in degree, so without a checkpoint the loop could spin unboundedly.
+    checkDeadline(ce._deadline);
+
     const qCoeffs = getPolynomialCoefficients(q, variable);
     // `null` means the coefficients could not be extracted (e.g. they
     // contain parameter divisions like (a/b)·x², which Euclid remainders
@@ -514,6 +519,15 @@ export function polynomialGCD(
     // cancelCommonFactors then used to silently drop terms.
     if (!qCoeffs) return ce.One; // cannot continue: no provable common factor
     if (qCoeffs.every((c) => c.isSame(0))) break;
+    // A nonzero *constant* remainder (degree 0 in `variable`) means the
+    // operands are coprime over the coefficient field, so the GCD is a unit
+    // → 1. Detecting this here is also load-bearing for termination: dividing
+    // a polynomial by a symbolic constant can yield a spurious nonzero
+    // constant remainder (never structurally 0), which would otherwise loop
+    // forever building ever-larger coefficient expressions (e.g.
+    // gcd(u − a, b₂u² + b₁u + b₀), the symbolic-coefficient rational-integrand
+    // path).
+    if (leadingIndex(qCoeffs) === 0) return ce.One;
 
     const divResult = polynomialDivide(p, q, variable);
     if (!divResult) {

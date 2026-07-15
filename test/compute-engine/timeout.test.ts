@@ -2,6 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { CancellationError } from '../../src/common/interruptible';
 import { extrapolate } from '../../src/compute-engine/numerics/richardson';
 import { monteCarloEstimate } from '../../src/compute-engine/numerics/monte-carlo';
+import { polynomialGCD } from '../../src/compute-engine/boxed-expression/polynomials';
 
 // Use a dedicated engine with a short timeout for all tests
 let ce: ComputeEngine;
@@ -432,5 +433,35 @@ describe('RECURSION LIMIT', () => {
     ce.recursionLimit = 32;
     define('f', 'f(x) := x^2');
     expect(ce.parse('\\sum_{i=1}^{200} f(i)').evaluate().re).toBe(2686700);
+  });
+});
+
+describe('Symbolic polynomial GCD terminates', () => {
+  // The Euclidean loop divided by a symbolic constant, which produced a
+  // spurious nonzero constant remainder (never structurally 0), so the loop
+  // spun forever building ever-larger coefficient expressions. This surfaced
+  // as a definite integral hanging ~109 s under a 3 s `timeLimit`
+  // (∫₀ˣ (u−a)/(b₂u²+b₁u+b₀) du). A nonzero constant remainder now correctly
+  // resolves the GCD to 1 (coprime over the field); the test hanging at all
+  // would fail via Jest's own timeout.
+  it('coprime linear / symbolic-quadratic GCD returns 1 (was a hang)', () => {
+    const engine = new ComputeEngine();
+    const gcd = polynomialGCD(
+      engine.parse('u - a'),
+      engine.parse('b_2 u^2 + b_1 u + b_0'),
+      'u'
+    );
+    expect(gcd.isSame(1)).toBe(true);
+  });
+
+  it('the symbolic-coefficient rational integral no longer hangs', () => {
+    const engine = new ComputeEngine();
+    engine.timeLimit = 3000;
+    // Completes quickly now (stays inert without the Rubi rules); the point is
+    // it returns rather than spinning past the deadline.
+    const r = engine
+      .parse('\\int_0^x \\frac{u-a}{b_2 u^2 + b_1 u + b_0}\\,du')
+      .evaluate();
+    expect(r.isValid).toBe(true);
   });
 });

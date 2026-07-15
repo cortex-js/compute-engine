@@ -1442,4 +1442,20 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       expect(F.subs({ x: ce.number(1) }).N().re).toBeCloseTo(5 / Math.E, 9);
     });
   });
+
+  // Regression: a rational integrand with fully symbolic coefficients used to
+  // hang (~109 s under a 3 s `timeLimit`) in the polynomial-GCD Euclidean loop.
+  // It now closes to an ArcTanh/Ln form. The test completing at all proves the
+  // hang is gone; the assertion pins the closure.
+  describe('symbolic-coefficient rational integrand (was a hang)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+
+    test('∫₀ˣ (u−a)/(b₂u²+b₁u+b₀) du closes', () => {
+      const F = ce
+        .parse('\\int_0^x \\frac{u-a}{b_2 u^2 + b_1 u + b_0}\\,du')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+    });
+  });
 });

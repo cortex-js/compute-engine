@@ -167,6 +167,17 @@
   `\sqrt[n]{x}`) were previously left unevaluated. Besides being correct in
   their own right, these fill the gaps behind the improper-integral endpoints
   above — an antiderivative's `\operatorname{erf}(\sqrt{y})` term needs both.
+- **A rational integrand with fully symbolic coefficients no longer hangs.**
+  `\int_0^x \frac{u-a}{b_2 u^2 + b_1 u + b_0}\,du` spun for ~109 s (ignoring a
+  3 s `timeLimit`) inside the polynomial-GCD used to cancel common factors: its
+  Euclidean loop divided by a symbolic constant, which produced a spurious
+  nonzero constant remainder that never tested as zero, so the loop iterated
+  forever building ever-larger coefficient expressions. A nonzero constant
+  remainder now correctly resolves the GCD to `1` (coprime over the coefficient
+  field), and the loop carries a deadline checkpoint as a backstop. The integral
+  closes in ~200 ms (to an `ArcTanh`/`Ln` form with the Rubi rules loaded);
+  `polynomialGCD` of coprime symbolic polynomials returns `1` instead of
+  spinning.
 
 ### Compilation
 
