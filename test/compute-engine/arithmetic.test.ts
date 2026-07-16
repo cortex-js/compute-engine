@@ -1844,13 +1844,12 @@ describe('GCD/LCM', () => {
       6
     ));
 
-  it('should compute the GCD of a list', () =>
+  // A list argument is reduced over its elements; the non-integer 3.1415
+  // numericizes the fold via the tolerant float GCD.
+  it('reduces the GCD of a list over its elements', () =>
     expect(
-      ce
-        .expr(['GCD', ['List', 60, 12, 3.1415]])
-        .evaluate()
-        .toString()
-    ).toMatchInlineSnapshot(`gcd([60,12,3.1415])`));
+      ce.expr(['GCD', ['List', 60, 12, 3.1415]]).evaluate().re
+    ).toBeCloseTo(0.0005, 6));
 
   it('should compute the LCM of some integers and other stuff', () =>
     expect(
@@ -1873,13 +1872,10 @@ describe('GCD/LCM', () => {
       3
     ));
 
-  it('should compute the LCM of a list', () =>
+  it('reduces the LCM of a list over its elements', () =>
     expect(
-      ce
-        .expr(['LCM', ['List', 60, 12, 3.1415]])
-        .evaluate()
-        .toString()
-    ).toMatchInlineSnapshot(`lcm([60,12,3.1415])`));
+      ce.expr(['LCM', ['List', 60, 12, 3.1415]]).evaluate().re
+    ).toBeCloseTo(376980.0012, 3));
 
   // ROADMAP B5: the variadic GCD operator computes a univariate polynomial GCD
   // when the operands share a non-trivial common factor (the variable is

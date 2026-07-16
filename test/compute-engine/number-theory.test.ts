@@ -751,6 +751,31 @@ describe('GCD/LCM on non-integer reals (tolerant float Euclid)', () => {
     expect(ce.box(['LCM', 4, 6]).type.toString()).toEqual('finite_integer');
   });
 
+  it('reduces a finite collection operand (gcd/lcm of a list)', () => {
+    expect(ce.box(['GCD', ['List', 12, 18]]).evaluate().toString()).toEqual('6');
+    expect(ce.box(['GCD', ['List', 12, 18, 24]]).evaluate().toString()).toEqual(
+      '6'
+    );
+    expect(ce.box(['LCM', ['List', 4, 6]]).evaluate().toString()).toEqual('12');
+    // Mixed list + scalar, and a list of reals.
+    expect(ce.box(['GCD', ['List', 12, 18], 8]).evaluate().toString()).toEqual(
+      '2'
+    );
+    expect(ce.box(['GCD', ['List', 2.25, 2.1]]).evaluate().re).toBeCloseTo(
+      0.15,
+      6
+    );
+    // Identities for the empty collection.
+    expect(ce.box(['GCD', ['List']]).evaluate().toString()).toEqual('0');
+    expect(ce.box(['LCM', ['List']]).evaluate().toString()).toEqual('1');
+  });
+
+  it('leaves an infinite collection symbolic (no grind to the deadline)', () => {
+    expect(
+      ce.box(['GCD', ['Range', 1, 'PositiveInfinity']]).evaluate().operator
+    ).toEqual('GCD');
+  });
+
   it('compiles gcd of reals to a finite value (plot render, not NaN)', () => {
     const engine = new ComputeEngine();
     const target = engine.getCompilationTarget('javascript');

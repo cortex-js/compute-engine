@@ -35,6 +35,12 @@
   and the value that reproduces a given renderer's output is a consumer choice.
   (Requested by the Tycho/Graph Paper team for Desmos "art" imports such as
   `r ≤ gcd(θ², θ + a)`.)
+- **`GCD`/`LCM` reduce a finite collection argument.** `\gcd([12, 18, 24])` →
+  `6` and `\operatorname{lcm}([4, 6])` → `12` (a list argument is folded over
+  its elements, matching Desmos); previously the whole call stayed symbolic even
+  for integers. Mixed list-and-scalar arguments (`GCD([12, 18], 8)` → `2`) and
+  lists of reals are handled; an infinite or enumeration-declined collection
+  stays symbolic rather than grinding to the evaluation deadline.
 - **`Max`/`Min` of a scalar and a collection no longer mis-compiles to `NaN`.**
   `Max(0, [1, -2, 3])` evaluates to `3` (the reduction folds the collection's
   elements), but on the JavaScript target it compiled to `Math.max(0, [1,-2,3])`

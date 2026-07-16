@@ -3504,6 +3504,28 @@ function evaluateGcdLcm(
   const fn = mode === 'LCM' ? lcm : gcd;
   const bigFn = mode === 'LCM' ? bigLcm : bigGcd;
 
+  // A finite collection operand contributes its elements: `gcd([12, 18]) → 6`,
+  // `lcm([4, 6]) → 12` (a list argument is reduced, matching Desmos). An
+  // infinite or enumeration-declined collection would grind to the deadline or
+  // silently vanish, so it stays symbolic instead (mirrors the Min/Max fold).
+  if (ops.some((x) => x.isCollection)) {
+    const expanded: Expression[] = [];
+    let ok = true;
+    for (const op of ops) {
+      if (op.isCollection) {
+        if (op.isFiniteCollection !== true || enumerationDeclined(op)) {
+          ok = false;
+          break;
+        }
+        for (const el of op.each()) expanded.push(el);
+      } else expanded.push(op);
+    }
+    if (ok) {
+      if (expanded.length === 0) return mode === 'LCM' ? ce.One : ce.Zero;
+      ops = expanded;
+    }
+  }
+
   // Exactness contract: an inexact (float) argument numericizes, like
   // `cos(5.1) → 0.377`. GCD/LCM of non-integer reals fold via the tolerant
   // floating Euclidean algorithm (`realGcd`/`realLcm`, ε = REAL_GCD_TOLERANCE).
