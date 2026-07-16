@@ -212,6 +212,10 @@ export interface CompileTarget<Expr = unknown> {
   userFunctions?: {
     defs: Map<string, string>;
     compiling: Set<string>;
+    /** Symbols proven (this compile) NOT to name a user-defined function, so a
+     * repeated bare free symbol in value position doesn't re-hit
+     * `lookupDefinition` on every occurrence. Populated lazily. */
+    misses?: Set<string>;
   };
 }
 

@@ -5,6 +5,7 @@ import type {
   OperatorDefinition,
   Expression,
   BoxedOperatorDefinition,
+  LambdaDefinition,
   CollectionHandlers,
   CompiledExpression,
   EvaluateOptions,
@@ -17,6 +18,10 @@ import { applicable } from '../function-utils.js';
 
 import { DEFAULT_COMPLEXITY } from './constants.js';
 import { isFunction } from './type-guards.js';
+import {
+  functionLiteralBody,
+  functionLiteralParameters,
+} from './function-literal.js';
 import { functionResult } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { defaultCollectionHandlers } from '../collection-utils.js';
@@ -104,6 +109,18 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * @internal
    */
   _lambdaLiteral?: Expression;
+
+  /** Public, traversable view of a user-defined function literal: its
+   * parameters and body. `undefined` for built-in operators. Backed by the
+   * internal `_lambdaLiteral`. */
+  get lambda(): LambdaDefinition | undefined {
+    const literal = this._lambdaLiteral;
+    if (literal === undefined || !isFunction(literal, 'Function'))
+      return undefined;
+    const body = functionLiteralBody(literal);
+    if (body === undefined) return undefined;
+    return { parameters: functionLiteralParameters(literal), body };
+  }
 
   type?: (
     ops: ReadonlyArray<Expression>,

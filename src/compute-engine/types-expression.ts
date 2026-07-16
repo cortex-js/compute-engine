@@ -136,11 +136,17 @@ type OperatorDefinitionFlags = {
   pure: boolean;
 };
 
+type LambdaDefinition = {
+  parameters: ReadonlyArray<{ name: string; type: Type | undefined }>;
+  body: Expression;
+};
+
 interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
   complexity: number;
   inferredSignature: boolean;
   signature: BoxedType;
+  readonly lambda: LambdaDefinition | undefined;
   type?: (
     ops: ReadonlyArray<Expression>,
     options: { engine: ExpressionComputeEngine }

@@ -37,6 +37,7 @@ export type {
   BoxedValueDefinition,
   OperatorDefinitionFlags,
   BoxedOperatorDefinition,
+  LambdaDefinition,
 } from './types-definitions.js';
 export type * from './types-evaluation.js';
 export type * from './types-engine.js';

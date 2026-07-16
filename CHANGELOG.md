@@ -33,6 +33,31 @@
   `Permutations` of a 9-element list took ~33 s just to answer `.count`),
   elements stream from the iterator, and `at(n)` walks only as far as needed.
 
+### Compilation
+
+- **A user-defined function passed as a higher-order operand now compiles by
+  reference.** Compiling `Map(list, f)` / `Filter(list, f)` — where `f` is a
+  function declared on the engine (`f(x) := …`, `x ↦ …`) rather than an inline
+  lambda — previously emitted a dangling `_.f` and threw at run time. The
+  function operand now resolves to the same shared local (`_fn_f`) the call-site
+  path already emitted, so a user function used as a first-class value works
+  wherever it is referenced, not only when it is called. Its `freeSymbols` are
+  computed from the operand function's body (so a free symbol used only inside
+  `f` is reported), and inline-lambda operands are unaffected. (Reported by the
+  Tycho/Graph Paper team.)
+
+### API
+
+- **`BoxedOperatorDefinition.lambda` exposes a user-defined function's body and
+  parameters.** `ce.lookupDefinition(name).operator.lambda` returns
+  `{ parameters, body }` — the parameter names/types and the body as a boxed
+  expression — for a definition created from a function literal (`f(x) := …`,
+  `x ↦ …`, `ce.assign('f', lambda)`), or `undefined` for a built-in operator.
+  This is a supported, stable accessor over the internal `_lambdaLiteral`,
+  letting a consumer traverse or resolve a function reference structurally
+  without re-parsing or textually inlining its source. (Requested by the
+  Tycho/Graph Paper team.)
+
 ## 0.79.3 _2026-07-15_
 
 ### Parsing

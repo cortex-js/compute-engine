@@ -1067,6 +1067,25 @@ export type OperatorDefinitionFlags = {
 };
 
 /**
+ * A traversable, public view of a user-defined function literal
+ * (`f(x) := …`, `x ↦ …`, or `ce.assign('f', lambda)`): its parameters and
+ * its body as a boxed expression. Returned by
+ * {@link BoxedOperatorDefinition.lambda}.
+ *
+ * @category Definitions
+ */
+export type LambdaDefinition = {
+  /** The declared parameters, in order. `type` is `undefined` for a bare
+   * (unannotated) parameter such as the `x` in `f(x) := x^2`. */
+  parameters: ReadonlyArray<{ name: string; type: Type | undefined }>;
+
+  /** The body of the function as a boxed expression, ready to traverse. This
+   * is the canonical (scoped `Block`) body; any return-type ascription is
+   * included. */
+  body: Expression;
+};
+
+/**
  *
  * The definition includes information specific about an operator, such as
  * handlers to canonicalize or evaluate a function expression with this
@@ -1086,6 +1105,18 @@ export interface BoxedOperatorDefinition
 
   /** The type of the arguments and return value of this function */
   signature: BoxedType;
+
+  /** If this operator definition was created from a user-defined function
+   * literal (`f(x) := …`, `x ↦ …`, `ce.assign('f', lambda)`), a structured
+   * view of it for traversal and classification: the parameters and the body
+   * as a boxed expression. `undefined` for built-in operators.
+   *
+   * The return shape and per-argument types are also available via
+   * {@link signature}; this accessor additionally exposes the body so a
+   * consumer can resolve a function reference structurally — without
+   * re-parsing or textually inlining its source.
+   */
+  readonly lambda: LambdaDefinition | undefined;
 
   /** If present, this handler can be used to more precisely determine the
    * return type based on the type of the arguments. The arguments themselves

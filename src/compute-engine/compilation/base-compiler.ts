@@ -114,6 +114,32 @@ export class BaseCompiler {
         return `(a,b) => a ${op[0]} b`;
       }
       const resolved = target.var?.(s);
+      // A bare symbol naming a user-defined function, used in value position (a
+      // higher-order operand such as `Map(list, f)` / `Filter(list, f)`),
+      // resolves to the shared emitted local `_fn_f` — the same definition the
+      // call-site path emits — rather than a dangling `_.f`. But two kinds of
+      // symbol must NOT be captured this way, or a same-named user function
+      // would silently shadow them:
+      //   - a **bound** name (a parameter / block local / loop index): the
+      //     enclosing binding form's `var` override resolves it to the bare
+      //     identifier (`resolved === s`), whereas the base resolver only ever
+      //     emits `_.<s>`, a constant, or a mapped literal — so `resolved === s`
+      //     uniquely identifies a bound name;
+      //   - a **`vars`-mapped** key: the caller's external-input contract, which
+      //     always wins (see `CompileTarget.vars`).
+      const registry = target.userFunctions;
+      const isBoundOrMapped = resolved === s || target.varsKeys?.has(s) === true;
+      if (registry && !isBoundOrMapped && !registry.misses?.has(s)) {
+        const userFn = BaseCompiler.ensureUserFunctionEmitted(
+          expr.engine,
+          s,
+          target
+        );
+        if (userFn !== undefined) return userFn;
+        // Memoize the negative lookup so a repeated free symbol doesn't re-hit
+        // `lookupDefinition` on every occurrence during this compile.
+        (registry.misses ??= new Set()).add(s);
+      }
       if (resolved !== undefined) return resolved;
       // The target did not resolve the symbol (no `vars` mapping, constant, or
       // free-symbol plumbing). Before falling back to a bare reference — which
@@ -2090,6 +2116,33 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): TargetSource | undefined {
+    const name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
+    if (name === undefined) return undefined;
+
+    const callArgs = args
+      .map((a) => BaseCompiler.compileValueOperand(a, target))
+      .join(', ');
+    return `${name}(${callArgs})`;
+  }
+
+  /**
+   * If `h` names a user-defined function (see `userFunctionLiteral`) and the
+   * target hosts a `userFunctions` registry, ensure its definition is emitted
+   * once into `registry.defs` as a named local function (`const _fn_h = …`) and
+   * return that local name — so both the call-site path
+   * (`tryCompileUserFunction`) and the value-position path (a bare symbol used
+   * as a higher-order operand, e.g. `Map(list, h)`) reference the *same* shared
+   * local rather than inlining or emitting a dangling identifier.
+   *
+   * Returns `undefined` when `h` is not a user function or the target opts out
+   * of user functions (no registry — GPU / raw direct targets). Recursion is
+   * detected via `registry.compiling` and fails closed (D6).
+   */
+  static ensureUserFunctionEmitted(
+    engine: ComputeEngine,
+    h: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
     const registry = target.userFunctions;
     if (!registry) return undefined;
 
@@ -2126,10 +2179,7 @@ export class BaseCompiler {
       }
     }
 
-    const callArgs = args
-      .map((a) => BaseCompiler.compileValueOperand(a, target))
-      .join(', ');
-    return `${name}(${callArgs})`;
+    return name;
   }
 
   /**
@@ -2220,10 +2270,37 @@ export class BaseCompiler {
         // to a lambda, not a free input.
         if (target.operators?.(s) !== undefined) return;
         // A `vars`-mapped symbol is an external input the caller supplies; the
-        // mapping wins over folding.
+        // mapping always wins (see `CompileTarget.vars`) — checked before the
+        // user-function lowering so a `vars` key that shadows a user-function
+        // name stays an external input, consistent with the value-position
+        // codegen in `compile`.
         if (varsKeys?.has(s)) {
           free.add(s);
           return;
+        }
+        // A bare symbol naming a user-defined function, used in value position
+        // (a higher-order operand like `Map(list, f)`), is lowered to the
+        // shared emitted local `_fn_f` — not a free input. Descend into its
+        // body (parameters bound) to surface transitively referenced free
+        // symbols; guard against recursion. Mirrors the value-position codegen
+        // in `compile` and the head-position handling below. (A bound name is
+        // already handled by the `bound.has(s)` guard above.)
+        if (target.userFunctions !== undefined) {
+          const symLiteral = BaseCompiler.userFunctionLiteral(engine, s);
+          if (symLiteral !== undefined) {
+            if (!userFnSeen.has(s)) {
+              userFnSeen.add(s);
+              const params = symLiteral.ops
+                .slice(1)
+                .map((p) => functionLiteralParameterName(p))
+                .filter((name) => name !== '');
+              visit(
+                symLiteral.ops[0],
+                params.length ? union(bound, params) : bound
+              );
+            }
+            return;
+          }
         }
         // A symbol with a value (assigned, or a constant like `Pi`) is folded
         // into the code; descend into the value to surface any transitively
@@ -2274,8 +2351,8 @@ export class BaseCompiler {
           userFnSeen.add(h);
           const params = userLiteral.ops
             .slice(1)
-            .filter((p) => isSymbol(p))
-            .map((p) => (p as Expression & { symbol: string }).symbol);
+            .map((p) => functionLiteralParameterName(p))
+            .filter((name) => name !== '');
           visit(
             userLiteral.ops[0],
             params.length ? union(bound, params) : bound
@@ -2291,8 +2368,8 @@ export class BaseCompiler {
       if (h === 'Function') {
         const params = ops
           .slice(1)
-          .filter((p) => isSymbol(p))
-          .map((p) => (p as Expression & { symbol: string }).symbol);
+          .map((p) => functionLiteralParameterName(p))
+          .filter((name) => name !== '');
         visit(ops[0], params.length ? union(bound, params) : bound);
         return;
       }

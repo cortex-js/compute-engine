@@ -513,3 +513,40 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     expect(ce.box('f').type.toString()).toBe('(integer) -> any');
   });
 });
+
+describe('BoxedOperatorDefinition.lambda — public function-body accessor', () => {
+  test('exposes parameters and body of a user-defined function', () => {
+    const ce = new ComputeEngine();
+    ce.parse('f(x) := x^2 + 1').evaluate();
+    const def = ce.lookupDefinition('f')!;
+    expect('operator' in def).toBe(true);
+    const lambda = (def as any).operator.lambda;
+    expect(lambda).toBeDefined();
+    // Bare parameter: name preserved, type undefined.
+    expect(lambda.parameters).toEqual([{ name: 'x', type: undefined }]);
+    // Body is a boxed expression ready to traverse.
+    expect(lambda.body.toString()).toBe('{x^2 + 1}');
+  });
+
+  test('surfaces annotated parameter types and multiple parameters', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.box(['Function', ['Add', 'x', 1], ['Typed', 'x', 'integer']]));
+    ce.parse('m := (u, v) \\mapsto u \\cdot v').evaluate();
+
+    const g = (ce.lookupDefinition('g') as any).operator.lambda;
+    expect(g.parameters).toEqual([{ name: 'x', type: 'integer' }]);
+
+    const m = (ce.lookupDefinition('m') as any).operator.lambda;
+    expect(m.parameters).toEqual([
+      { name: 'u', type: undefined },
+      { name: 'v', type: undefined },
+    ]);
+    expect(m.body.toString()).toBe('{u * v}');
+  });
+
+  test('is undefined for a built-in operator', () => {
+    const ce = new ComputeEngine();
+    const sin = ce.lookupDefinition('Sin')!;
+    expect((sin as any).operator.lambda).toBeUndefined();
+  });
+});
