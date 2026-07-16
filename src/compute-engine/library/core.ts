@@ -395,7 +395,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return ce._fn('Annotated', [x, style]);
       },
       evaluate: ([x, _style], options) => x.evaluate(options),
-      // xcompile: (expr) => expr.op1.compile(),
+      // Annotated is transparent at run time; a custom compile handler could
+      // lower it to its value: `compile: (args, compile) => compile(args[0])`.
     },
 
     Typed: {

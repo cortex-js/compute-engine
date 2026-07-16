@@ -5,7 +5,7 @@ import type { LatexString } from './latex-syntax/types.js';
 import type {
   Expression,
   ExpressionInput,
-  CompiledExpression,
+  OperatorCompileHandler,
 } from './types-expression.js';
 import type {
   EvaluateOptions as KernelEvaluateOptions,
@@ -514,8 +514,14 @@ export type OperatorDefinition = Partial<BaseDefinition> &
       options: Partial<EvaluateOptions> & { engine: ComputeEngine }
     ) => Expression;
 
-    /** Return a compiled (optimized) expression. */
-    xcompile?: (expr: Expression) => CompiledExpression;
+    /**
+     * A custom compilation handler for this operator: emit target-language
+     * source for a call to this operator. Takes precedence over the target's
+     * built-in mapping (so it can override how a built-in operator compiles).
+     * Return `undefined` to fall back to the default compilation. See
+     * {@link OperatorCompileHandler}.
+     */
+    compile?: OperatorCompileHandler;
 
     eq?: (a: Expression, b: Expression) => boolean | undefined;
     neq?: (a: Expression, b: Expression) => boolean | undefined;
@@ -1165,7 +1171,7 @@ export interface BoxedOperatorDefinition
     options: Partial<EvaluateOptions> & { engine: ComputeEngine }
   ) => Expression;
 
-  compile?: (expr: Expression) => CompiledExpression;
+  compile?: OperatorCompileHandler;
 
   /** @internal */
   update(def: OperatorDefinition): void;

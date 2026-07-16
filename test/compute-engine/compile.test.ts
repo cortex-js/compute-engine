@@ -1354,4 +1354,50 @@ describe('COMPILE user-defined function calls', () => {
       warn.mockRestore();
     }
   });
+
+  describe('custom operator compile handler', () => {
+    it('emits a custom operator definition compile handler', () => {
+      const e = new ComputeEngine();
+      e.declare('Quadrance', {
+        signature: '(number, number) -> number',
+        compile: (args, compile, { language }) =>
+          language === 'javascript'
+            ? `((${compile(args[0])})**2 + (${compile(args[1])})**2)`
+            : undefined,
+      });
+      const target = e.getCompilationTarget('javascript');
+      const fn = target.compile(e.parse('\\mathrm{Quadrance}(x, y)'));
+      expect(fn.code).toEqual('((_.x)**2 + (_.y)**2)');
+      expect(fn.run!({ x: 3, y: 4 })).toEqual(25);
+    });
+
+    it('takes precedence over a built-in operator mapping', () => {
+      const e = new ComputeEngine();
+      e.declare('GCD', {
+        signature: '(number, number) -> number',
+        compile: (args, compile, { language }) =>
+          language === 'javascript'
+            ? `__mygcd(${compile(args[0])}, ${compile(args[1])})`
+            : undefined,
+      });
+      const code = e
+        .getCompilationTarget('javascript')
+        .compile(e.parse('\\gcd(a, b)')).code;
+      expect(code).toEqual('__mygcd(_.a, _.b)');
+    });
+
+    it('falls back to default compilation when the handler returns undefined', () => {
+      // The handler only emits for javascript; on another target it returns
+      // undefined, so compilation proceeds as if there were no handler.
+      const e = new ComputeEngine();
+      e.declare('GCD', {
+        signature: '(number, number) -> number',
+        compile: (args, compile, { language }) =>
+          language === 'javascript' ? `__mygcd(...)` : undefined,
+      });
+      // glsl has a built-in GCD mapping; the undefined handler defers to it.
+      const r = e.getCompilationTarget('glsl').compile(e.parse('\\gcd(a, b)'));
+      expect(r.code).toContain('_gpu_gcd');
+    });
+  });
 });

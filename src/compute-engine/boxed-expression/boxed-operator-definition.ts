@@ -7,7 +7,7 @@ import type {
   BoxedOperatorDefinition,
   LambdaDefinition,
   CollectionHandlers,
-  CompiledExpression,
+  OperatorCompileHandler,
   EvaluateOptions,
   IComputeEngine as ComputeEngine,
   Scope,
@@ -160,7 +160,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     options: Partial<EvaluateOptions> & { engine: ComputeEngine }
   ) => Expression;
 
-  compile?: (expr: Expression) => CompiledExpression;
+  compile?: OperatorCompileHandler;
 
   collection?: CollectionHandlers;
 
@@ -305,7 +305,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.evalDimension = def.evalDimension ?? this.evalDimension;
     this.sgn = def.sgn ?? this.sgn;
     this.even = def.even ?? this.even;
-    this.compile = def.xcompile ?? this.compile;
+    this.compile = def.compile ?? this.compile;
     this.eq = def.eq ?? this.eq;
     this.neq = def.neq ?? this.neq;
     this.scoped = def.scoped ?? this.scoped;

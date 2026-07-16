@@ -173,7 +173,7 @@ interface BoxedOperatorDefinition
     ops: ReadonlyArray<Expression>,
     options: Partial<EvaluateOptions> & { engine: ExpressionComputeEngine }
   ) => Expression;
-  compile?: (expr: Expression) => CompiledExpression;
+  compile?: OperatorCompileHandler;
   update(def: unknown): void;
 }
 
@@ -215,6 +215,48 @@ export type JSSource = string;
 export type CompiledExpression = {
   evaluate?: (scope: { [symbol: string]: Expression }) => number | Expression;
 };
+
+/**
+ * The context passed to a custom operator {@link OperatorCompileHandler}. A
+ * curated, stable subset of the internal compilation target: enough to emit
+ * target-specific source without exposing the full internal machinery.
+ *
+ * @category Compiling
+ */
+export type OperatorCompileContext = {
+  /** The target language, e.g. `"javascript"`, `"glsl"`, `"wgsl"`, `"python"`.
+   * Branch on this to emit target-specific source. */
+  readonly language: string;
+};
+
+/**
+ * A custom compilation handler for an operator, set on an
+ * `OperatorDefinition`. It mirrors a built-in compiled-function handler:
+ * it receives the (canonical) operands, a `compile` callback to lower a
+ * sub-expression to target source, and the compilation `context` (branch on
+ * `context.language`). It returns target source, or `undefined` to fall back
+ * to the target's default compilation of this operator.
+ *
+ * Takes precedence over the target's built-in mapping, so it can also override
+ * how a built-in operator compiles (e.g. a custom-tolerance `GCD`).
+ *
+ * ```ts
+ * ce.declare('MyGcd', {
+ *   signature: '(number, number) -> number',
+ *   compile: (args, compile, { language }) =>
+ *     language === 'javascript'
+ *       ? `_gcd(${compile(args[0])}, ${compile(args[1])})`
+ *       : undefined,
+ * });
+ * ```
+ *
+ * @category Compiling
+ */
+export type OperatorCompileHandler = (
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  context: OperatorCompileContext
+) => string | undefined;
 
 /**
  * Map of `TensorDataType` to JavaScript type.

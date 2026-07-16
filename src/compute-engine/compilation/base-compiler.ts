@@ -610,6 +610,22 @@ export class BaseCompiler {
       return BaseCompiler.compileBlock(args, target);
     }
 
+    // A user operator definition may supply its own target-aware compile
+    // handler (the public per-operator compilation extension point). It takes
+    // precedence over the target's built-in mapping — so it can override how a
+    // built-in operator compiles (e.g. a custom-tolerance `GCD`) — and receives
+    // the same (args, compile, context) contract as a built-in handler.
+    // Returning undefined falls through to the default compilation.
+    const opDef = engine.lookupDefinition(h);
+    if (isOperatorDef(opDef) && typeof opDef.operator.compile === 'function') {
+      const custom = opDef.operator.compile(
+        args,
+        (expr) => BaseCompiler.compileValueOperand(expr, target),
+        { language: target.language ?? 'javascript' }
+      );
+      if (custom !== undefined && custom !== null) return custom;
+    }
+
     // Handle function calls
     const fn = target.functions?.(h);
     if (!fn) {

@@ -2,6 +2,16 @@
 
 ### New Features
 
+- **Custom per-operator compilation handler.** An `OperatorDefinition` can now
+  supply a `compile` handler — `(args, compile, { language }) => string |
+  undefined` — that emits target-language source for a call to that operator. It
+  mirrors a built-in compiled-function handler (recursively `compile` operands,
+  branch on `language` for `javascript`/`glsl`/`wgsl`/`python`) and **takes
+  precedence over the target's built-in mapping**, so a consumer can override
+  how even a built-in operator compiles (e.g. a custom-tolerance `GCD`), or add
+  compilation for an operator the target doesn't know. Returning `undefined`
+  falls back to the default compilation. This replaces the never-wired,
+  interpreter-only `xcompile` stub. See `OperatorCompileHandler`.
 - **`ElementMax`, `ElementMin` — element-wise (broadcasting) maximum and
   minimum** (the NumPy `maximum`/`minimum` primitive). Unlike `Max`/`Min`,
   which _reduce_ all operands — including a collection's elements — to a single
