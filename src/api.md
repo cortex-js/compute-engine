@@ -1094,7 +1094,7 @@ declare(id, def, scope?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `xcompile`: (`expr`) => [`CompiledExpression`](#compiledexpression);
+  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -1172,7 +1172,7 @@ declare(id, def, scope?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `xcompile`: (`expr`) => [`CompiledExpression`](#compiledexpression);
+  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -1282,7 +1282,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `xcompile`: (`expr`) => [`CompiledExpression`](#compiledexpression);
+  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -1360,7 +1360,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `xcompile`: (`expr`) => [`CompiledExpression`](#compiledexpression);
+  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -2599,6 +2599,52 @@ type CompiledExpression = {
 
 </MemberCard>
 
+<MemberCard>
+
+### OperatorCompileContext
+
+```ts
+type OperatorCompileContext = {
+  language: string;
+};
+```
+
+The context passed to a custom operator [OperatorCompileHandler](#operatorcompilehandler). A
+curated, stable subset of the internal compilation target: enough to emit
+target-specific source without exposing the full internal machinery.
+
+</MemberCard>
+
+<MemberCard>
+
+### OperatorCompileHandler
+
+```ts
+type OperatorCompileHandler = (args, compile, context) => string | undefined;
+```
+
+A custom compilation handler for an operator, set on an
+`OperatorDefinition`. It mirrors a built-in compiled-function handler:
+it receives the (canonical) operands, a `compile` callback to lower a
+sub-expression to target source, and the compilation `context` (branch on
+`context.language`). It returns target source, or `undefined` to fall back
+to the target's default compilation of this operator.
+
+Takes precedence over the target's built-in mapping, so it can also override
+how a built-in operator compiles (e.g. a custom-tolerance `GCD`).
+
+```ts
+ce.declare('MyGcd', {
+  signature: '(number, number) -> number',
+  compile: (args, compile, { language }) =>
+    language === 'javascript'
+      ? `_gcd(${compile(args[0])}, ${compile(args[1])})`
+      : undefined,
+});
+```
+
+</MemberCard>
+
 ## Definitions
 
 <MemberCard>
@@ -3041,7 +3087,7 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
      | Expression;
   evaluateAsync: (ops, options) => Promise<Expression | undefined>;
   evalDimension: (args, options) => Expression;
-  xcompile: (expr) => CompiledExpression;
+  compile: OperatorCompileHandler;
   eq: (a, b) => boolean | undefined;
   neq: (a, b) => boolean | undefined;
   collection: CollectionHandlers;
@@ -3259,13 +3305,17 @@ optional evalDimension?: (args, options) => Expression;
 
 Dimensional analysis
 
-#### OperatorDefinition.xcompile?
+#### OperatorDefinition.compile?
 
 ```ts
-optional xcompile?: (expr) => CompiledExpression;
+optional compile?: OperatorCompileHandler;
 ```
 
-Return a compiled (optimized) expression.
+A custom compilation handler for this operator: emit target-language
+source for a call to this operator. Takes precedence over the target's
+built-in mapping (so it can override how a built-in operator compiles).
+Return `undefined` to fall back to the default compilation. See
+[OperatorCompileHandler](#operatorcompilehandler).
 
 </MemberCard>
 
@@ -3875,6 +3925,27 @@ properties of the operator.
 
 </MemberCard>
 
+<MemberCard>
+
+### LambdaDefinition
+
+```ts
+type LambdaDefinition = {
+  parameters: ReadonlyArray<{
+     name: string;
+     type: Type | undefined;
+    }>;
+  body: Expression;
+};
+```
+
+A traversable, public view of a user-defined function literal
+(`f(x) := …`, `x ↦ …`, or `ce.assign('f', lambda)`): its parameters and
+its body as a boxed expression. Returned by
+[BoxedOperatorDefinition.lambda](#lambda).
+
+</MemberCard>
+
 ### BoxedOperatorDefinition
 
 The definition includes information specific about an operator, such as
@@ -3917,6 +3988,26 @@ signature: BoxedType;
 ```
 
 The type of the arguments and return value of this function
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.lambda
+
+```ts
+readonly lambda: LambdaDefinition | undefined;
+```
+
+If this operator definition was created from a user-defined function
+literal (`f(x) := …`, `x ↦ …`, `ce.assign('f', lambda)`), a structured
+view of it for traversal and classification: the parameters and the body
+as a boxed expression. `undefined` for built-in operators.
+
+The return shape and per-argument types are also available via
+[signature](#signature); this accessor additionally exposes the body so a
+consumer can resolve a function reference structurally — without
+re-parsing or textually inlining its source.
 
 </MemberCard>
 
@@ -4036,7 +4127,7 @@ optional evalDimension?: (ops, options) => Expression;
 ##### BoxedOperatorDefinition.compile?
 
 ```ts
-optional compile?: (expr) => CompiledExpression;
+optional compile?: OperatorCompileHandler;
 ```
 
 </MemberCard>
@@ -8151,7 +8242,7 @@ declare(id, def, scope?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `xcompile`: (`expr`) => [`CompiledExpression`](#compiledexpression);
+  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -8229,7 +8320,7 @@ declare(id, def, scope?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `xcompile`: (`expr`) => [`CompiledExpression`](#compiledexpression);
+  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -8339,7 +8430,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `xcompile`: (`expr`) => [`CompiledExpression`](#compiledexpression);
+  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -8417,7 +8508,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `xcompile`: (`expr`) => [`CompiledExpression`](#compiledexpression);
+  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
   `eq`: (`a`, `b`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
