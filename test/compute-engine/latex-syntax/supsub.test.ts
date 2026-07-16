@@ -699,6 +699,19 @@ describe('TYPE-AWARE SUBSCRIPT HANDLING', () => {
       ce2.box(['At', 'A', 'k', 'j']).toLatex({ indexStyle: () => 'bracket' })
     ).toMatchInlineSnapshot(`A[k, j]`);
 
+    // A compound base is parenthesized so the index binds to the whole base,
+    // not just its trailing operand (regression: `At(x+1, 2)` serialized to the
+    // ambiguous `x+1_2`, dropping the base grouping). Built structurally to keep
+    // the raw `At` (canonicalizing would flag indexing a scalar as a type error).
+    expect(
+      ce2.box(['At', ['Add', 'x', 1], 2], { structural: true }).latex
+    ).toMatchInlineSnapshot(`(x+1)_2`);
+    expect(
+      ce2
+        .box(['At', ['Add', 'x', 1], 2], { structural: true })
+        .toLatex({ indexStyle: () => 'bracket' })
+    ).toMatchInlineSnapshot(`(x+1)[2]`);
+
     // Both forms round-trip back to At (collection symbol in scope)
     expect(ce2.parse(ce2.box(['At', 'v', 1]).latex).json)
       .toMatchInlineSnapshot(`

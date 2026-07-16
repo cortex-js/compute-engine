@@ -49,6 +49,16 @@
   collection operand with `np.max`/`np.min` and combine the per-operand results
   element-wise (keeping a scalar/array operand — e.g. the plot variable —
   vectorized), matching `evaluate()` and the JavaScript target.
+- **`At(base, index)` serialization now parenthesizes a compound base.**
+  `At(x+1, 2)` serialized to `x+1_2` (subscript) / `x+1[2]` (bracket index
+  style) — the index bound only to the trailing operand, dropping the base
+  grouping so the LaTeX re-parsed to something other than element access. A base
+  whose precedence falls below the postfix index operator is now wrapped:
+  `(x+1)_2` / `(x+1)[2]`. Symbol and function-application bases (`v_1`,
+  `H(x, y)[1]`) are unchanged. (Serialization round-trip reported by the
+  Tycho/Graph Paper team. The default subscript index style is unchanged;
+  programming-style bracket output — which re-parses to `At` independent of the
+  base's declared type — remains available via `indexStyle: () => 'bracket'`.)
 
 ### Collections
 

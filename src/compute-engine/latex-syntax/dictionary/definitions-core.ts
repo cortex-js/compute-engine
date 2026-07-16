@@ -23,6 +23,7 @@ import {
   ARROW_PRECEDENCE,
   ASSIGNMENT_PRECEDENCE,
   INVISIBLE_OP_PRECEDENCE,
+  POSTFIX_PRECEDENCE,
   LatexDictionary,
   LatexDictionaryEntry,
   Parser,
@@ -1727,7 +1728,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // `At(collection, index, ...)`: the first operand is the collection
       // being indexed, the rest are the indices.
       const ops = operands(expr);
-      const base = serializer.serialize(ops[0] ?? 'Nothing');
+      // Parenthesize a compound base whose precedence is below the postfix
+      // index operator, so `At(x+1, 2)` serializes with a grouped base
+      // (`(x+1)_2` / `(x+1)[2]`) instead of the ambiguous `x+1_2`, where the
+      // subscript/bracket would otherwise bind only to the trailing operand.
+      // A symbol or function-application base is left unwrapped.
+      const base = serializer.wrap(ops[0] ?? 'Nothing', POSTFIX_PRECEDENCE);
       const indices = ops.slice(1).map((i) => serializer.serialize(i));
       if (serializer.indexStyle(expr, serializer.level) === 'bracket') {
         // Programming-style `v[1]` / `M[i,j]`. Uses literal brackets (not
