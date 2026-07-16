@@ -28,7 +28,7 @@ import type {
 import {
   isBroadcastCollectionType,
   isFiniteIndexedCollection,
-  isNumericTuple,
+  isTuple,
   zip,
 } from '../collection-utils.js';
 import { isTensor } from './boxed-tensor.js';
@@ -1673,7 +1673,7 @@ function skipBroadcastForVectorOps(
       operator === 'Negate' ||
       operator === 'Subtract' ||
       operator === 'Divide') &&
-    ops.some((x) => isNumericTuple(x))
+    ops.some((x) => isTuple(x))
   )
     return true;
   // `Equal`/`NotEqual` broadcast only in the list-vs-scalar case (Desmos

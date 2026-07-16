@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### New Features
+
+- **A `Tuple` with collection components transposes to a list of tuples**
+  (the Desmos point-list idiom, completing the outer `Tuple⊗List` transpose
+  shipped in 0.80.0): `(-6, n)` with `n` a 21-element list evaluates to the
+  21-element list of points, and arithmetic over such tuples broadcasts
+  (`2\cdot(1, 0.3n)` → the transposed list) instead of reporting an
+  `incompatible-type` error that invalidated any definition containing the
+  form. Zip-to-shortest for multiple list components; scalars broadcast; an
+  infinite or unknown-length component stays inert. The transpose happens at
+  evaluation, not canonicalization — tuples used as plain data are unaffected.
+
 ### Breaking Changes
 
 - **`Partition(xs, n)` now returns chunks of size `n`, not `n` groups.**
@@ -20,6 +32,22 @@
 - **Negative indexing on a lazy `Take` was off by one.** `Take(xs, n).at(-1)`
   returned the second-to-last element of the taken prefix (`at(-1)` on
   `Take([10, 20, 30], 2)` was `10` instead of `20`).
+- **The display preview of a lazy `Take` sampled the wrong tail.** Displaying
+  `Take(xs, 50)` over a lazily-enumerated source showed the *source's* last
+  elements (`[1, 2, …, 98, 99]`) instead of the taken prefix's
+  (`[1, 2, …, 49, 50]`): the operands were materialized to their own display
+  preview — continuation placeholder included — before `Take` consumed them.
+- **A boolean `Sort` comparator now orders instead of silently doing
+  nothing.** A comparator returning `True`/`False` (e.g.
+  `(a, b) -> a > b`) never reordered — only signed-number comparators
+  worked. Boolean comparators are now interpreted Elixir-style: `True` means
+  the first argument sorts first, so `(a, b) -> a > b` sorts descending.
+- **A mistyped `GroupBy` key function is now reported.** `GroupBy(xs, Even)`
+  (an unknown symbol auto-declared by its own use) silently placed every
+  element in its own garbage group keyed `"Even(1)"`, `"Even(2)"`, …; it now
+  throws with a spell-check suggestion, like `Filter` and `Partition` do for
+  broken predicates. Grouping by explicitly declared symbolic functions is
+  unaffected.
 - **The optimization form of `ArgMax`/`ArgMin` canonicalizes its function
   operand again.** `ArgMin(f, RealNumbers)` (the "locations of the minimum
   over a domain" form, used by the identities library) short-circuited

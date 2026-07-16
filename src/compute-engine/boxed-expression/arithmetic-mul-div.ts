@@ -15,6 +15,7 @@ import {
 } from './type-guards.js';
 import {
   isNumericTuple,
+  isTuple,
   hasAccessibleComponents,
   isFiniteIndexedCollection,
   broadcastOverIndexedCollections,
@@ -1491,13 +1492,18 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
   // would otherwise produce. Checked BEFORE the tuple branch so the collection
   // wins the dispatch; an unknown/infinite length returns `undefined` and
   // falls through (to `mulTuples`/`Product`, leaving an inert product).
-  if (xs.some((x) => isFiniteIndexedCollection(x) && !isNumericTuple(x))) {
+  // Tuples (points/vectors, incl. Desmos point-lists like `(1, 0.3n)` with a
+  // list component) are EXCLUDED — they scale component-wise via `mulTuples`,
+  // never broadcast as a list.
+  if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
     const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, false);
     if (r) return r;
   }
 
-  // Numeric tuples (points/vectors): scalar · tuple scales component-wise.
-  if (xs.some((x) => isNumericTuple(x))) return mulTuples(ce, xs, false);
+  // Tuples (points/vectors): scalar · tuple scales component-wise. A tuple with
+  // a collection component stays a tuple here; the `Tuple` evaluate handler
+  // transposes it to a `List` of point-tuples.
+  if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, false);
 
   const exp = expandProducts(ce, xs);
   if (exp) {

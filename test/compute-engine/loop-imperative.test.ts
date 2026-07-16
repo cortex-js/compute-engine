@@ -443,4 +443,116 @@ describe('Comprehension (interpreter)', () => {
     expect(b.operator).toBe('Break');
     expect(b.evaluate().operator).toBe('Break');
   });
+
+  // Tycho item 23.2: a piecewise (`Which`) body whose condition BROADCASTS to a
+  // collection of booleans (e.g. a predicate mapped element-wise over a slice)
+  // must not crash the comprehension with "Condition must evaluate to True or
+  // False". The broadcast guard is well-typed for a conditional, so the `Which`
+  // is held (stays symbolic) and the comprehension yields a flat List — one
+  // held `Which` per (m, n) — instead of throwing.
+  test('comprehension over a Which with a broadcast (list<boolean>) condition yields a List, not a throw', () => {
+    ce.assign('P', ce.box(['Range', 1, 30]));
+    // `total` is left undeclared, so `total(P[…])` broadcasts the (unknown)
+    // symbol over the slice, making the `=5` comparison a list of booleans.
+    const comp = ce.box([
+      'Comprehension',
+      [
+        'Which',
+        ['Equal', ['Abs', ['Multiply', 'total', ['At', 'P', ['Range', 'm', ['Add', 'm', 4]]]]], 5],
+        ['Add', 'm', 'n'],
+      ],
+      ['Element', 'm', ['List', 0, 5, 10]],
+      ['Element', 'n', ['Range', 1, 5]],
+    ]);
+    let els: any[] = [];
+    expect(() => {
+      els = [...comp.each()];
+    }).not.toThrow();
+    expect(els.length).toBe(15);
+    // Each element is a held `Which` (the broadcast condition never reduced to
+    // a scalar True/False).
+    expect(els.every((e) => e.operator === 'Which')).toBe(true);
+  });
+
+  // Tycho item 23.2 (scalar path unaffected): a comprehension whose piecewise
+  // condition IS a scalar boolean still evaluates its branches normally.
+  test('comprehension over a Which with a scalar condition evaluates its branches', () => {
+    const comp = ce.box([
+      'Comprehension',
+      ['Which', ['Greater', 'n', 2], 'n', 'True', 0],
+      ['Element', 'n', ['Range', 1, 5]],
+    ]);
+    expect([...comp.each()].map((e) => e.json)).toEqual([0, 0, 3, 4, 5]);
+  });
+
+  // Tycho item 23.3: a multi-index `At(list, i, range)` inside a comprehension
+  // behaves EXACTLY as it does standalone — there is no comprehension-specific
+  // evaluation gap. On a 2-D collection (matrix) the multi-index reduces (row
+  // `i`, columns in `range`); on a flat 1-D list it stays inert (a scalar has
+  // no second dimension to index), which is correct, not a bug.
+  test('multi-index At(matrix, i, range) reduces both standalone and in a comprehension', () => {
+    ce.assign('M', ce.box([
+      'List',
+      ['List', 10, 11, 12, 13, 14, 15],
+      ['List', 20, 21, 22, 23, 24, 25],
+      ['List', 30, 31, 32, 33, 34, 35],
+    ]));
+    // Standalone.
+    expect(ce.box(['At', 'M', 1, ['Range', 2, 4]]).evaluate().json).toEqual([
+      'List', 11, 12, 13,
+    ]);
+    // Inside a comprehension over rows: identical reduction per row.
+    const comp = ce.box([
+      'Comprehension',
+      ['At', 'M', 'n', ['Range', 2, 4]],
+      ['Element', 'n', ['Range', 1, 3]],
+    ]);
+    expect([...comp.each()].map((e) => e.json)).toEqual([
+      ['List', 11, 12, 13],
+      ['List', 21, 22, 23],
+      ['List', 31, 32, 33],
+    ]);
+  });
+
+  // Tycho item 23.1: elements of a materialized comprehension are memoized
+  // (prefix cache), so repeated `at(n)`/`each()` do not re-walk the domain. The
+  // memo MUST invalidate when a FREE variable the comprehension reads is
+  // rebound, so a reactive/live document never sees stale elements.
+  test('comprehension memoizes elements but invalidates when a free variable is rebound', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('k', 3);
+    const comp = ce2
+      .expr(['Comprehension', ['Multiply', 'k', 'i'], ['Element', 'i', ['Range', 1, 5]]])
+      .evaluate();
+
+    // Repeated reads are stable (served from the memo).
+    expect(comp.at(2)?.json).toEqual(6);
+    expect(comp.at(2)?.json).toEqual(6);
+    expect([...comp.each()].map((e) => e.json)).toEqual([3, 6, 9, 12, 15]);
+    // A second full walk returns the identical values (cache hit).
+    expect([...comp.each()].map((e) => e.json)).toEqual([3, 6, 9, 12, 15]);
+
+    // Rebinding the free variable `k` invalidates the memo.
+    ce2.assign('k', 100);
+    expect(comp.at(2)?.json).toEqual(200);
+    expect([...comp.each()].map((e) => e.json)).toEqual([100, 200, 300, 400, 500]);
+  });
+
+  test('multi-index At(flatList, i, range) is inert (no second dimension) — standalone and in a comprehension', () => {
+    ce.assign('P', ce.box(['Range', 1, 30]));
+    // Standalone: a flat list has no second dimension for the range, so `At`
+    // correctly declines to reduce and stays symbolic.
+    const standalone = ce.box(['At', 'P', 1, ['Range', 3, 8]]).evaluate();
+    expect(standalone.operator).toBe('At');
+    // In a comprehension, the index `n` is substituted but the multi-index
+    // `At` stays inert for the same reason — matching the standalone form.
+    const comp = ce.box([
+      'Comprehension',
+      ['At', 'P', 'n', ['Add', 'n', ['Range', 2, ['Add', 'n', 6]]]],
+      ['Element', 'n', ['Range', 1, 3]],
+    ]);
+    const els = [...comp.each()];
+    expect(els.length).toBe(3);
+    expect(els.every((e) => e.operator === 'At')).toBe(true);
+  });
 });

@@ -258,8 +258,12 @@ export abstract class _BoxedExpression implements Expression {
    * from precision-bounded operations are not displayed.
    */
   get latex(): string {
-    // Materialize lazy collections before serializing
-    if (this.isLazyCollection) {
+    // Materialize lazy collections before serializing.
+    // Exception: `Comprehension` has a faithful serializer that round-trips
+    // (`body \operatorname{for} x = domain`). Materializing it would replace
+    // it with an elided preview List (e.g. `[1, 4, …, 62500]`) that re-parses
+    // to a corrupt finite List, so serialize it directly instead.
+    if (this.isLazyCollection && this.operator !== 'Comprehension') {
       const materialized = this.evaluate({ materialization: true });
       if (!materialized.isLazyCollection) return materialized.latex;
     }
@@ -289,8 +293,11 @@ export abstract class _BoxedExpression implements Expression {
     if (options?.verbatim === true && this.verbatimLatex !== undefined)
       return this.verbatimLatex;
 
-    // Materialize lazy collections before serializing
-    if (this.isLazyCollection) {
+    // Materialize lazy collections before serializing.
+    // Exception: `Comprehension` has a faithful serializer that round-trips;
+    // materializing it would substitute an elided preview List that re-parses
+    // incorrectly (see the `latex` getter above).
+    if (this.isLazyCollection && this.operator !== 'Comprehension') {
       const materialized = this.evaluate({
         materialization: options?.materialization ?? true,
       });

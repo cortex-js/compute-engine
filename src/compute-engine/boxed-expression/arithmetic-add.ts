@@ -21,6 +21,7 @@ import {
 import {
   isLinearAlgebraCollection,
   isNumericTuple,
+  isTuple,
   numericTupleArity,
   hasAccessibleComponents,
   isDeclaredScalarNumber,
@@ -335,9 +336,10 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   const hasTensors = xs.some((x) => isTensor(x));
   if (hasTensors) return addTensors(xs[0].engine, xs);
 
-  // Numeric tuples (points/vectors) add component-wise (never broadcast).
-  if (xs.some((x) => isNumericTuple(x)))
-    return addTuples(xs[0].engine, xs, false);
+  // Tuples (points/vectors, incl. Desmos point-lists with a list component)
+  // add component-wise (never broadcast). The `Tuple` evaluate handler
+  // transposes a tuple with a collection component to a `List` of point-tuples.
+  if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, false);
 
   // Broadcast over a non-tensor finite indexed collection that only became a
   // collection through evaluation — e.g. `L^2 - 2` = `Add(-2, List(1,4,9))`,
@@ -371,9 +373,8 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
     return addTensors(xs[0].engine, xs);
   }
 
-  // Numeric tuples (points/vectors) add component-wise (never broadcast).
-  if (xs.some((x) => isNumericTuple(x)))
-    return addTuples(xs[0].engine, xs, true);
+  // Tuples (points/vectors, incl. Desmos point-lists) add component-wise.
+  if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, true);
 
   // Broadcast over a non-tensor finite indexed collection (see `add`).
   if (xs.some((x) => isFiniteIndexedCollection(x))) {

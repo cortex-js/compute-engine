@@ -83,11 +83,16 @@ function typeCouldBeNumericCollection(type: Type): boolean {
  * canonicalization use the stricter `isNumericTuple`.)
  */
 function typeCouldBeNumericTuple(type: Type): boolean {
+  // A component may itself be a numeric collection (a Desmos-style point-list
+  // like `(-6, n)` with `n` a list): the tuple then transposes to a `List` of
+  // point-tuples at evaluation. Accept such a component here so the tuple is
+  // not rejected during arithmetic operand validation (`2·(1, 0.3n)`).
   const elementCouldBeNumeric = (el: Type): boolean =>
     el === 'any' ||
     el === 'unknown' ||
     isSubtype(el, 'number') ||
-    isSubtype('number', el);
+    isSubtype('number', el) ||
+    typeCouldBeNumericCollection(el);
   if (typeof type === 'string') return type === 'tuple';
   if (type.kind === 'tuple')
     return type.elements.every((el) => elementCouldBeNumeric(el.type));

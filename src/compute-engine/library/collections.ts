@@ -2226,13 +2226,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(xs: indexed_collection, count: number) -> indexed_collection',
     type: ([xs]) =>
       `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
-    evaluate: (ops, { engine, materialization: eager }) => {
-      if (!eager) return undefined;
-      // Force materialization by converting iterator to List
-      const takeExpr = engine._fn('Take', ops);
-      const elements = Array.from(takeExpr.each());
-      return engine._fn('List', elements);
-    },
+    // No `evaluate` handler: materialization goes through the generic lazy-
+    // collection path, driven by the `count`/`at`/`iterator` handlers below.
+    // (A previous handler materialized eagerly from its operands — but the
+    // operands are evaluated first, so an unknown-length lazy source arrived
+    // already collapsed to its display preview, placeholder included, and
+    // `Take` returned the preview's elements instead of its own.)
     collection: {
       isLazy: (_expr) => true,
       count: takeCount,
@@ -2242,6 +2241,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (xs.isEmptyCollection) return true;
         if (xs.isFiniteCollection === false) return false;
         const n = Math.max(0, toInteger(op2) ?? 0);
+        // A known non-empty source with n ≥ 1 gives a non-empty Take even
+        // when the source's count is unknown (e.g. Dedup of an infinite
+        // Iterate) — required for the generic materializer, which keeps the
+        // lazy form when emptiness is indeterminate.
+        if (xs.isEmptyCollection === false && n >= 1) return false;
         const count = xs.count;
         if (count === undefined) return undefined;
         if (!Number.isFinite(n)) return false;
@@ -3606,6 +3610,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       for (const item of xs.each()) {
         const keyExpr = f([item]) ?? ce.Nothing;
+
+        // A key that is an inert application of an operator that was only
+        // auto-declared by this very use (no operator definition, inferred
+        // value type) is almost certainly a typo (`Even` for `IsEven`): every
+        // element would land in its own garbage group ("Even(1)", "Even(2)",
+        // …). Report it like Filter reports a broken predicate. Explicitly
+        // declared symbols are untouched — grouping by a symbolic key is
+        // legitimate.
+        if (isFunction(keyExpr)) {
+          const keyDef = ce.lookupDefinition(keyExpr.operator);
+          if (
+            keyDef !== undefined &&
+            'value' in keyDef &&
+            keyDef.value?.inferredType === true
+          ) {
+            throw new Error(
+              `Unknown function "${keyExpr.operator}" in GroupBy key function. ${spellCheckMessage(keyExpr)}`
+            );
+          }
+        }
+
         const key =
           (isSymbol(keyExpr) ? keyExpr.symbol : undefined) ??
           (isString(keyExpr) ? keyExpr.string : undefined) ??
@@ -4702,6 +4727,13 @@ export function sortedIndices(
   const cmpFn = f
     ? (a: Expression, b: Expression) => {
         const r = f([a, b]);
+        // A boolean comparator (Elixir-style): True means the first argument
+        // sorts first. Previously a boolean result was silently treated as
+        // "greater" (never negative, never zero), so e.g.
+        // `Sort(xs, (a,b) -> a > b)` did not reorder at all.
+        const s = sym(r);
+        if (s === 'True') return -1;
+        if (s === 'False') return 1;
         return r?.isNegative ? -1 : r?.isSame(0) ? 0 : 1;
       }
     : defaultCmp;

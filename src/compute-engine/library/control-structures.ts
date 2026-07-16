@@ -101,7 +101,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // once the variables are bound. The throw below is reserved for
         // conditions that are not boolean at all (a number, a misspelled
         // symbol), where the spell-check hint is the useful outcome.
-        if (evaluated.type.matches('boolean')) return undefined;
+        if (isBooleanishCondition(evaluated)) return undefined;
         throw new Error(
           `Condition must evaluate to "True" or "False". ${spellCheckMessage(
             cond
@@ -373,6 +373,24 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   },
 ];
 
+/**
+ * A conditional guard is "boolean-ish" — well-typed for `If`/`Which` even
+ * though it did not reduce to a bare `True`/`False` — when it is a scalar
+ * boolean OR a broadcast finite collection of booleans. The latter arises when
+ * a predicate maps element-wise over a collection (e.g. `total(P[i..j])` where
+ * `total` broadcasts over the slice, yielding `[b1, …, bn]`). Such a guard is
+ * held (the conditional stays symbolic) rather than throwing the "not a
+ * boolean" error: a scalar relation may become decidable once free variables
+ * are bound, and crashing an enclosing `Comprehension` on a broadcast guard is
+ * worse than yielding a held value. Mirrors `When`'s broadcast detection.
+ */
+function isBooleanishCondition(evaluated: Expression): boolean {
+  if (evaluated.type.matches('boolean')) return true;
+  if (!evaluated.isCollection || !evaluated.isFiniteCollection) return false;
+  const items = Array.from(evaluated.each()) as Expression[];
+  return items.length > 0 && items.every((x) => x.type.matches('boolean'));
+}
+
 function evaluateWhich(
   args: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> & { engine: ComputeEngine }
@@ -390,7 +408,7 @@ function evaluateWhich(
       // picking a later branch would be wrong once the condition becomes
       // decidable. The throw is reserved for conditions that are not
       // boolean at all, where the spell-check hint is the useful outcome.
-      if (evaluated.type.matches('boolean')) return undefined;
+      if (isBooleanishCondition(evaluated)) return undefined;
       throw new Error(
         `Condition must evaluate to "True" or "False". ${spellCheckMessage(
           args[i]
@@ -955,12 +973,123 @@ function comprehensionIsFinite(expr: Expression): boolean | undefined {
 }
 
 /**
+ * Prefix element cache for a materialized `Comprehension` (Tycho item 23.1).
+ *
+ * Without memoization, every `at(n)` and every `each()` re-walks the whole
+ * domain, so a document that reads a comprehension's elements repeatedly pays
+ * O(domain) per read (`at(100)` called 100× on a 200-element body ≈ 5 s here).
+ * `elements` holds the materialized prefix (`elements[i-1]` is the 1-based
+ * `at(i)`); `complete` is set once the whole finite domain has been drained.
+ */
+interface ComprehensionCache {
+  /** `ce._generation` snapshot taken AFTER the prefix was filled. */
+  generation: number;
+  elements: Expression[];
+  complete: boolean;
+}
+
+/**
+ * Keyed on the boxed comprehension instance. A `WeakMap` so an unreferenced
+ * comprehension (and its cached elements) is collectable.
+ */
+const comprehensionCaches = new WeakMap<Expression, ComprehensionCache>();
+
+/**
+ * Cap the memoized prefix. Beyond this many elements we stop caching and fall
+ * back to streaming, so an enormous (or effectively unbounded) finite domain
+ * cannot pin an arbitrarily large array in memory.
+ */
+const COMPREHENSION_CACHE_CAP = 100_000;
+
+/**
+ * Correctness: the cache is invalidated whenever `ce._generation` differs from
+ * the stamped value. `_generation` is bumped by every `ce.assign`/`declare`/
+ * `assume`/`forget`, so rebinding a FREE variable the comprehension reads (the
+ * `[k*n for n in 1..3]` → reassign `k` case) invalidates the memo. This is
+ * sound even though the walk ITSELF bumps `_generation` (it assigns the index
+ * variables per iteration): a cache HIT performs no walk, so the generation is
+ * stable across hits, and the stamp is taken AFTER a (re)fill, so the walk's
+ * own bumps are absorbed. Any external rebind between reads is the only thing
+ * that can move the generation while the cache is untouched.
+ */
+function comprehensionValidCache(
+  expr: Expression
+): ComprehensionCache | undefined {
+  const entry = comprehensionCaches.get(expr);
+  if (entry && entry.generation === expr.engine._generation) return entry;
+  return undefined;
+}
+
+/**
+ * Ensure the cache holds at least the first `n` elements (or the whole domain,
+ * if shorter). Re-walks from the start on a miss or an invalidation; the stream
+ * is not resumable, so extending a valid-but-short prefix also restarts — fine
+ * for the reported pattern (repeated reads at a stable index). Returns the
+ * (possibly still short, if capped) cache entry.
+ */
+function comprehensionFillTo(expr: Expression, n: number): ComprehensionCache {
+  const ce = expr.engine;
+  let entry = comprehensionValidCache(expr);
+  if (entry && (entry.complete || entry.elements.length >= n)) return entry;
+
+  const limit = Math.min(n, COMPREHENSION_CACHE_CAP);
+  const elements: Expression[] = [];
+  let complete = false;
+  const stream = comprehensionStream(expr);
+  while (elements.length < limit) {
+    const r = stream.next();
+    if (r.done) {
+      complete = true;
+      break;
+    }
+    elements.push(r.value);
+  }
+  // Stamp AFTER the walk (the walk bumped `_generation` via its index assigns).
+  entry = { generation: ce._generation, elements, complete };
+  comprehensionCaches.set(expr, entry);
+  return entry;
+}
+
+/**
+ * Iterate a comprehension's elements, serving from (and populating) the prefix
+ * cache. A complete, still-valid cache streams straight from memory; otherwise
+ * the underlying stream is walked once, buffered up to the cap, and committed
+ * as `complete` only if fully drained without overflowing. Early abandonment
+ * (e.g. `Take`/`First`) suspends before the commit, so it never caches a
+ * partial buffer as complete.
+ */
+function* comprehensionCachedStream(
+  expr: Expression
+): Generator<Expression, undefined, any> {
+  const cached = comprehensionValidCache(expr);
+  if (cached?.complete) {
+    yield* cached.elements;
+    return;
+  }
+  const ce = expr.engine;
+  const buffer: Expression[] = [];
+  let overflow = false;
+  for (const el of comprehensionStream(expr)) {
+    if (buffer.length < COMPREHENSION_CACHE_CAP) buffer.push(el);
+    else overflow = true;
+    yield el;
+  }
+  if (!overflow)
+    comprehensionCaches.set(expr, {
+      generation: ce._generation,
+      elements: buffer,
+      complete: true,
+    });
+}
+
+/**
  * Lazy indexed-collection handlers for `Comprehension`. `count`/`isEmpty`/
  * `isFinite` are answered from the (independent) clause counts without walking
- * elements; iteration STREAMS one element at a time and a positive `at(n)` stops
- * after the first `n`. A negative index needs the length, so it materializes —
- * but only once the comprehension is known finite. An unread comprehension
- * touches none of these, so binding it is O(1).
+ * elements; iteration STREAMS one element at a time (serving a memoized prefix,
+ * see `comprehensionCachedStream`) and a positive `at(n)` fills the prefix cache
+ * up to `n`. A negative index needs the length, so it materializes — but only
+ * once the comprehension is known finite. An unread comprehension touches none
+ * of these, so binding it is O(1).
  */
 function comprehensionCollectionHandlers(): CollectionHandlers {
   return {
@@ -975,22 +1104,28 @@ function comprehensionCollectionHandlers(): CollectionHandlers {
 
     isFinite: (expr) => comprehensionIsFinite(expr),
 
-    iterator: (expr) => comprehensionStream(expr),
+    iterator: (expr) => comprehensionCachedStream(expr),
 
     at: (expr, index) => {
       if (typeof index !== 'number' || !Number.isInteger(index) || index === 0)
         return undefined;
       if (index > 0) {
-        let i = 0;
-        for (const el of comprehensionStream(expr))
-          if (++i === index) return el;
-        return undefined;
+        // Beyond the cache cap: stream directly rather than pinning a huge
+        // prefix in memory.
+        if (index > COMPREHENSION_CACHE_CAP) {
+          let i = 0;
+          for (const el of comprehensionStream(expr))
+            if (++i === index) return el;
+          return undefined;
+        }
+        const entry = comprehensionFillTo(expr, index);
+        return entry.elements[index - 1];
       }
       // Negative index (from the end) needs the length: decline unless the
       // comprehension is provably finite, so we never try to materialize an
       // infinite domain just to index from the end.
       if (comprehensionIsFinite(expr) !== true) return undefined;
-      const all = [...comprehensionStream(expr)];
+      const all = [...comprehensionCachedStream(expr)];
       const target = all.length + index;
       return target >= 0 ? all[target] : undefined;
     },

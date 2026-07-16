@@ -2173,3 +2173,65 @@ describe('ZIP-SHAPED LAZINESS (review findings)', () => {
       engine.box(['ArgMax', ['Set', 1, 2]]).evaluate().operator
     ).toBe('ArgMax'));
 });
+
+describe('COLLECTION NITS (Take preview, Sort boolean comparator, GroupBy typo)', () => {
+  test('lazy Take of an unknown-length source previews its own tail, not the source tail', () => {
+    // Take(TakeWhile(...) [99 elements], 50): the [5,5] preview must sample
+    // the *taken* prefix (…,49,50), not the source (…,98,99). A previous
+    // evaluate handler consumed the operand's own display preview.
+    const t = engine
+      .box([
+        'Take',
+        ['TakeWhile', ['Range', 1, 1000], ['Function', ['Less', 'x', 100], 'x']],
+        50,
+      ])
+      .evaluate({ materialization: [5, 5] });
+    const ops = t.ops!.map((x) => x.toString());
+    expect(ops[0]).toBe('1');
+    expect(ops[ops.length - 1]).toBe('50');
+  });
+
+  test('negative index on a lazy Take counts from the end of the taken prefix', () => {
+    const t = engine.box(['Take', ['List', 10, 20, 30], 2]).evaluate();
+    expect(t.at?.(-1)?.toString()).toBe('20');
+  });
+
+  test('a boolean Sort comparator orders Elixir-style (True = first argument first)', () => {
+    expect(
+      engine
+        .box([
+          'Sort',
+          ['List', 3, 1, 2],
+          ['Function', ['Greater', 'a', 'b'], 'a', 'b'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[3,2,1]');
+    expect(
+      engine
+        .box([
+          'Sort',
+          ['List', 3, 1, 2],
+          ['Function', ['Less', 'a', 'b'], 'a', 'b'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,3]');
+  });
+
+  test('GroupBy with a mistyped (auto-inferred) key function throws with a suggestion', () => {
+    expect(() =>
+      engine.box(['GroupBy', ['List', 1, 2, 3, 4], 'Even']).evaluate()
+    ).toThrow(/Unknown function "Even"/);
+  });
+
+  test('GroupBy with a real predicate groups by stringified keys', () => {
+    expect(
+      JSON.stringify(
+        engine
+          .box(['GroupBy', ['List', 1, 2, 3, 4], ['Function', ['IsEven', 'x'], 'x']])
+          .evaluate().json
+      )
+    ).toBe('{"dict":{"False":[1,3],"True":[2,4]}}');
+  });
+});

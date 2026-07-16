@@ -163,6 +163,21 @@ export function isDeclaredScalarNumber(expr: Expression): boolean {
   return false;
 }
 
+/**
+ * True when `expr`'s TYPE is a `tuple` kind — a point/vector in ℝⁿ *or* a
+ * Desmos-style point-list (a tuple with a finite-collection component, e.g.
+ * `(-6, n)` with `n` a list). Broader than `isNumericTuple`, which requires
+ * every element to be a subtype of `number`: `isTuple` also matches a tuple
+ * whose components include lists/collections. Used by the `Add`/`Multiply`
+ * dispatch so a tuple is scaled/added **component-wise** (never broadcast as a
+ * list); the transpose to a `List` of point-tuples happens at evaluation (the
+ * `Tuple` evaluate handler), not here.
+ */
+export function isTuple(expr: Expression): boolean {
+  const t = expr.type.type;
+  return typeof t !== 'string' && t.kind === 'tuple';
+}
+
 /** The element count of a tuple-typed expression when statically known. */
 export function numericTupleArity(expr: Expression): number | undefined {
   const t = expr.type.type;
@@ -207,7 +222,7 @@ export function broadcastOverIndexedCollections(
   numericApproximation: boolean
 ): Expression | undefined {
   const isBroadcast = (x: Expression): boolean =>
-    isFiniteIndexedCollection(x) && !isNumericTuple(x);
+    isFiniteIndexedCollection(x) && !isTuple(x);
 
   const cols = xs.filter(isBroadcast);
   if (cols.length === 0) return undefined;

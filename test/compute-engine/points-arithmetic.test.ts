@@ -655,3 +655,117 @@ describe('POINT/TUPLE ARITHMETIC — component accessors on non-indexed collecti
     ]);
   });
 });
+
+/**
+ * Symmetric completion of the Tuple⊗List transpose (Tycho item 25, the Desmos
+ * point-list idiom). The OUTER form — a finite collection times a numeric
+ * tuple (`n·(1,2)`) — broadcasts the collection into a `List` of `Tuple`s (see
+ * the "ELEMENTWISE BROADCAST" block above). This block covers the INNER,
+ * complementary form: a `Tuple` whose component is itself a finite collection
+ * (`(-6, n)` with `n` a list) transposes — at EVALUATION, not
+ * canonicalization — into the `List` of point-tuples. Zip-to-shortest across
+ * multiple collection components, scalars broadcast, an empty component yields
+ * an empty `List`, and an infinite/lazy component fails closed (stays inert,
+ * never hangs). Arithmetic over such a tuple must broadcast, not reject the
+ * operand at canonicalization.
+ */
+describe('POINT/TUPLE ARITHMETIC — Tuple⊗List transpose (inner form)', () => {
+  // n := 2/20·[0…20] − 1 : 21 exact rationals from −1 to 1 in steps of 1/10.
+  const declN = (ce: ComputeEngine) =>
+    ce.assign(
+      'n',
+      ce.parse('\\frac{2}{20}\\cdot\\lbrack0\\ldots20\\rbrack - 1').evaluate()
+    );
+
+  test('probe 1: (-6, n) → 21-element List of Tuples', () => {
+    const ce = new ComputeEngine();
+    declN(ce);
+    const r = ce.parse('(-6, n)').evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.count).toBe(21);
+    expect(r.at(1)!.json).toEqual(['Tuple', -6, -1]);
+    expect(r.at(21)!.json).toEqual(['Tuple', -6, 1]);
+    expect([...r.each()].every((x) => x.operator === 'Tuple')).toBe(true);
+  });
+
+  test('probe 2: 2·(1, 0.3n) broadcasts (no incompatible-type error)', () => {
+    const ce = new ComputeEngine();
+    declN(ce);
+    const r = ce.box(['Multiply', 2, ['Tuple', 1, ['Multiply', 0.3, 'n']]]).evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.count).toBe(21);
+    expect(r.at(1)!.json).toEqual(['Tuple', 2, -0.6]);
+    // No baked Error anywhere in the result.
+    expect(JSON.stringify(r.json).includes('Error')).toBe(false);
+  });
+
+  test('probe 3: outer form n·(1,2) still broadcasts (regression)', () => {
+    const ce = new ComputeEngine();
+    declN(ce);
+    const r = ce.box(['Multiply', 'n', ['Tuple', 1, 2]]).evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.count).toBe(21);
+    expect(r.at(1)!.json).toEqual(['Tuple', -1, -2]);
+  });
+
+  test('probe 4: m(P) := P + s(P)·(1, 0.3n) is a valid definition (no baked Error)', () => {
+    const ce = new ComputeEngine();
+    declN(ce);
+    ce.declare('s', '(number) -> number');
+    const m = ce.parse('m(P) \\coloneq P + s(P)\\cdot(1, 0.3n)');
+    expect(m.isValid).toBe(true);
+    expect(JSON.stringify(m.json).includes('Error')).toBe(false);
+  });
+
+  test('small explicit tuple-with-list transposes', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Tuple', -6, ['List', 1, 2, 3]]).evaluate();
+    expect(r.json).toEqual([
+      'List',
+      ['Tuple', -6, 1],
+      ['Tuple', -6, 2],
+      ['Tuple', -6, 3],
+    ]);
+  });
+
+  test('two list components of different lengths zip to the shorter', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Tuple', ['List', 1, 2, 3], ['List', 10, 20]])
+      .evaluate();
+    expect(r.json).toEqual([
+      'List',
+      ['Tuple', 1, 10],
+      ['Tuple', 2, 20],
+    ]);
+  });
+
+  test('empty list component yields an empty List', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Tuple', 1, ['List']]).evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.json).toEqual(['List']);
+  });
+
+  test('infinite Range component fails closed (stays an inert Tuple, no hang)', () => {
+    const ce = new ComputeEngine();
+    const r = ce.parse('(1, \\mathrm{Range}(1, \\infty))').evaluate();
+    expect(r.operator).toBe('Tuple');
+    expect(r.op1.json).toEqual(1);
+  });
+
+  test('PointX / PointY over the transposed point-list', () => {
+    const ce = new ComputeEngine();
+    declN(ce);
+    const pts = ce.parse('(-6, n)').evaluate();
+    const xs = ce.box(['PointX', pts]).evaluate();
+    const ys = ce.box(['PointY', pts]).evaluate();
+    expect(xs.count).toBe(21);
+    // Every x-coordinate is the broadcast scalar −6.
+    expect([...xs.each()].every((x) => x.is(-6))).toBe(true);
+    expect(ys.count).toBe(21);
+    expect(ys.at(1)!.json).toEqual(-1);
+    expect(ys.at(11)!.json).toEqual(0);
+    expect(ys.at(21)!.json).toEqual(1);
+  });
+});

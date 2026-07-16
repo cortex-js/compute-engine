@@ -81,12 +81,13 @@ describe('Parser: for-comprehensions', () => {
   });
 
   describe('round-trip', () => {
-    test('concrete finite comprehension serializes to its enumerated list', () => {
-      // Intentional (and consistent with `Range`/`Map`): a comprehension over
-      // CONCRETE finite ranges is an ordinary finite collection, so `toLatex()`
-      // enumerates its elements rather than emitting the `\operatorname{for}`
-      // surface form. This documents the (non-round-tripping) behavior that the
-      // symbolic test below deliberately steps around.
+    test('concrete finite comprehension round-trips as a Comprehension', () => {
+      // Round-trip fidelity wins over the "finite comprehensions enumerate like
+      // `Range`/`Map`" convention (Tycho item 22): a CONCRETE finite
+      // comprehension serializes through the faithful `body \operatorname{for}
+      // var = domain` surface form and reparses to a STRUCTURALLY IDENTICAL
+      // Comprehension — never the elided `\dots` list form that silently
+      // reparses to a corrupt List.
       const expr = ce.expr([
         'Comprehension',
         ['Tuple', 'x', 'y'],
@@ -94,14 +95,11 @@ describe('Parser: for-comprehensions', () => {
         ['Element', 'y', ['Range', 3, 4]],
       ]);
       const latex = expr.toLatex();
-      expect(latex).not.toContain('\\operatorname{for}');
-      expect(ce.parse(latex).evaluate().json).toEqual([
-        'List',
-        ['Tuple', 1, 3],
-        ['Tuple', 1, 4],
-        ['Tuple', 2, 3],
-        ['Tuple', 2, 4],
-      ]);
+      expect(latex).toContain('\\operatorname{for}');
+      const reparsed = ce.parse(latex);
+      expect(reparsed.operator).toBe('Comprehension');
+      expect(reparsed.count).toBe(expr.count);
+      expect(reparsed.isSame(expr)).toBe(true);
     });
 
     test('multi-Element for-comprehension round-trips', () => {
