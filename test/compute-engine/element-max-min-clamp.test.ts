@@ -29,6 +29,17 @@ describe('ElementMax / ElementMin — evaluate', () => {
     expect(evalStr(['ElementMax', ['List', 1, 2], ['List', 3, 0]])).toBe('[3,2]');
   });
 
+  test('variadic (n-ary) — folds over all operands element-wise', () => {
+    expect(evalStr(['ElementMax', 0, ['List', 1, -2, 3], 2])).toBe('[2,2,3]');
+    expect(evalStr(['ElementMin', 4, ['List', 1, 9], 2])).toBe('[1,2]');
+    // all-scalar variadic reduces to the scalar extremum
+    expect(evalStr(['ElementMax', 1, 5, 3])).toBe('5');
+  });
+
+  test('requires at least two arguments', () => {
+    expect(ce.box(['ElementMax', ['List', 1, 2, 3]]).isValid).toBe(false);
+  });
+
   test('preserves exactness (returns the winning operand, not a float)', () => {
     expect(evalStr(['ElementMax', ['Sqrt', 2], 1])).toBe('sqrt(2)');
     expect(evalStr(['ElementMin', ['Sqrt', 2], 1])).toBe('1');
@@ -84,6 +95,11 @@ describe('ElementMax / ElementMin / Clamp — compile', () => {
   test('scalar⊗scalar compiles to a plain call', () => {
     expect(run(['ElementMax', 2, 5])).toBe(5);
     expect(run(['Clamp', 5, 0, 10])).toBe(5);
+  });
+
+  test('variadic (n-ary) compiles to a broadcast and runs', () => {
+    expect(run(['ElementMax', 0, ['List', 1, -2, 3], 2])).toEqual([2, 2, 3]);
+    expect(run(['ElementMax', 1, 5, 3])).toBe(5);
   });
 });
 

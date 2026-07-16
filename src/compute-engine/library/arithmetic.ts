@@ -2703,24 +2703,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // collections zip, two scalars give a scalar.
     ElementMax: {
       description:
-        'Element-wise maximum: broadcasts a scalar over a collection (and zips two collections), returning a collection; scalar arguments give a scalar.',
+        'Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic.',
       complexity: 1200,
       broadcastable: true,
-      signature: '(number, number) -> number',
+      signature: '(number, number+) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([a, b], { numericApproximation }) =>
-        scalarExtremum(a, b, true, numericApproximation === true),
+      evaluate: (ops, { numericApproximation }) =>
+        foldExtremum(ops, true, numericApproximation === true),
     },
 
     ElementMin: {
       description:
-        'Element-wise minimum: broadcasts a scalar over a collection (and zips two collections), returning a collection; scalar arguments give a scalar.',
+        'Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic.',
       complexity: 1200,
       broadcastable: true,
-      signature: '(number, number) -> number',
+      signature: '(number, number+) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([a, b], { numericApproximation }) =>
-        scalarExtremum(a, b, false, numericApproximation === true),
+      evaluate: (ops, { numericApproximation }) =>
+        foldExtremum(ops, false, numericApproximation === true),
     },
 
     Clamp: {
@@ -3422,6 +3422,28 @@ function scalarExtremum(
   if (bWins === undefined) return undefined;
   const winner = bWins ? b : a;
   return numericApproximation ? winner.N() : winner;
+}
+
+/**
+ * Variadic element-wise extremum: left-fold {@link scalarExtremum} over the
+ * operands (which the broadcasting machinery has already reduced to per-element
+ * scalars). Intermediates stay exact; only the final result is numericized
+ * under `numericApproximation`. Returns `undefined` (stay symbolic) if any
+ * pairwise comparison is undecidable. Backs `ElementMax`/`ElementMin`.
+ */
+function foldExtremum(
+  ops: ReadonlyArray<Expression>,
+  upper: boolean,
+  numericApproximation: boolean
+): Expression | undefined {
+  if (ops.length === 0) return undefined;
+  let acc: Expression = ops[0];
+  for (let i = 1; i < ops.length; i++) {
+    const next = scalarExtremum(acc, ops[i], upper, false);
+    if (next === undefined) return undefined;
+    acc = next;
+  }
+  return numericApproximation ? acc.N() : acc;
 }
 
 function evaluateMinMax(

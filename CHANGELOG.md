@@ -6,10 +6,12 @@
   minimum** (the NumPy `maximum`/`minimum` primitive). Unlike `Max`/`Min`,
   which _reduce_ all operands — including a collection's elements — to a single
   scalar, these broadcast: a scalar over a collection returns a collection of
-  the per-element extremum (`ElementMax(0, [1, -2, 3])` → `[1, 0, 3]`), two
-  collections zip, and two scalars give a scalar. Exactness is preserved
-  (`ElementMax(√2, 1)` → `√2`), and they compile on the JavaScript target
-  (scalar arguments to a direct call, a collection argument to a `_SYS.bcast`).
+  the per-element extremum (`ElementMax(0, [1, -2, 3])` → `[1, 0, 3]`),
+  collections zip, and all-scalar arguments give a scalar. They are **variadic**
+  (two or more arguments): `ElementMax(0, [1, -2, 3], 2)` → `[2, 2, 3]`.
+  Exactness is preserved (`ElementMax(√2, 1)` → `√2`), and they compile on the
+  JavaScript target (all-scalar arguments to a direct call, a collection
+  argument to a `_SYS.bcast`).
 - **`Clamp(x, lo, hi)` — clamp a value to a range** (`min(max(x, lo), hi)`),
   also broadcasting over collection arguments (`Clamp([-1, 0.5, 2], 0, 1)` →
   `[0, 0.5, 1]`).
