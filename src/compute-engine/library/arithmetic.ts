@@ -2696,6 +2696,49 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Min'),
     },
 
+    // Element-wise binary max/min (the NumPy `maximum`/`minimum` primitive).
+    // Unlike `Max`/`Min` — which *reduce* all operands (including a
+    // collection's elements) to a single scalar — these broadcast: a scalar and
+    // a collection give a collection of the per-element extremum, two
+    // collections zip, two scalars give a scalar.
+    ElementMax: {
+      description:
+        'Element-wise maximum: broadcasts a scalar over a collection (and zips two collections), returning a collection; scalar arguments give a scalar.',
+      complexity: 1200,
+      broadcastable: true,
+      signature: '(number, number) -> number',
+      type: (ops) => numericTypeHandler(ops),
+      evaluate: ([a, b], { numericApproximation }) =>
+        scalarExtremum(a, b, true, numericApproximation === true),
+    },
+
+    ElementMin: {
+      description:
+        'Element-wise minimum: broadcasts a scalar over a collection (and zips two collections), returning a collection; scalar arguments give a scalar.',
+      complexity: 1200,
+      broadcastable: true,
+      signature: '(number, number) -> number',
+      type: (ops) => numericTypeHandler(ops),
+      evaluate: ([a, b], { numericApproximation }) =>
+        scalarExtremum(a, b, false, numericApproximation === true),
+    },
+
+    Clamp: {
+      description:
+        'Clamp a value to the range [lo, hi] = min(max(x, lo), hi). Broadcasts over collection arguments.',
+      complexity: 1200,
+      broadcastable: true,
+      signature: '(number, number, number) -> number',
+      type: (ops) => numericTypeHandler(ops),
+      evaluate: ([x, lo, hi], { numericApproximation }) => {
+        // max(x, lo) then min(·, hi). Keep the intermediate exact; numericize
+        // only the final result. Stays symbolic if any comparison is undecided.
+        const lower = scalarExtremum(x, lo, true, false);
+        if (lower === undefined) return undefined;
+        return scalarExtremum(lower, hi, false, numericApproximation === true);
+      },
+    },
+
     Supremum: {
       description: 'Like Max, but defined for open sets',
       complexity: 1200,
@@ -3349,6 +3392,36 @@ function processMinMaxItem(
 
   if (!item.isNumber || !isNumber(item)) return [undefined, [item]];
   return [item, []];
+}
+
+/**
+ * The scalar maximum (`upper`) or minimum of two operands, preserving
+ * exactness: returns the winning operand itself (so `max(√2, 1)` stays `√2`),
+ * or its numeric approximation under `numericApproximation`. Used by the
+ * broadcastable `ElementMax`/`ElementMin`/`Clamp` operators — the broadcasting
+ * machinery reduces a collection argument to per-element scalar calls, so this
+ * only ever sees scalars. Returns `undefined` (stay symbolic) when the ordering
+ * is undecidable, mirroring `evaluateMinMax`'s three-valued discipline:
+ * - a `NaN` operand absorbs to `NaN`;
+ * - a non-real (complex) operand is unordered → symbolic (both operand orders
+ *   then agree);
+ * - a free/undecidable comparison → symbolic.
+ */
+function scalarExtremum(
+  a: Expression,
+  b: Expression,
+  upper: boolean,
+  numericApproximation: boolean
+): Expression | undefined {
+  const ce = a.engine;
+  if (a.isNaN === true || b.isNaN === true) return ce.NaN;
+  if ((isNumber(a) && a.im !== 0) || (isNumber(b) && b.im !== 0)) return undefined;
+  // `isGreater`/`isLess` return `undefined` when the comparison is not
+  // decidable (a free symbol); ties keep `a`.
+  const bWins = upper ? b.isGreater(a) : b.isLess(a);
+  if (bWins === undefined) return undefined;
+  const winner = bWins ? b : a;
+  return numericApproximation ? winner.N() : winner;
 }
 
 function evaluateMinMax(

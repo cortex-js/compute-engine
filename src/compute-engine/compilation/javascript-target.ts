@@ -572,6 +572,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   GammaLn: '_SYS.lngamma',
   Lb: 'Math.log2',
+  // Element-wise binary max/min and clamp. These are the scalar codegen; a
+  // collection operand is handled by `tryCompileBroadcast` (they are
+  // `broadcastable`), which wraps this body in `_SYS.bcast`.
+  ElementMax: (args, compile) =>
+    `Math.max(${args.map((x) => compile(x)).join(', ')})`,
+  ElementMin: (args, compile) =>
+    `Math.min(${args.map((x) => compile(x)).join(', ')})`,
+  Clamp: (args, compile) =>
+    `Math.min(Math.max(${compile(args[0])}, ${compile(args[1])}), ${compile(
+      args[2]
+    )})`,
   Max: (args, compile) => compileExtremum('Max', args, compile),
   Mean: (args, compile) => {
     if (args.length === 0) return 'NaN';
@@ -2371,9 +2382,21 @@ function compileExtremum(
   compile: (expr: Expression) => string
 ): string {
   const fn = kind === 'Max' ? 'Math.max' : 'Math.min';
+  const identity = kind === 'Max' ? '-Infinity' : 'Infinity';
   if (args.length === 1 && args[0] && isIndexedCollectionOperand(args[0])) {
-    const identity = kind === 'Max' ? '-Infinity' : 'Infinity';
     return `(${compile(args[0])}).reduce((_a, _b) => ${fn}(_a, _b), ${identity})`;
+  }
+  // Mixed scalars + collection operand(s): `Max`/`Min` REDUCE — fold the
+  // scalars and every collection's elements into a single scalar (matching
+  // `evaluateMinMax`, which flattens collection operands). Spreading a
+  // collection into a plain `Math.max(...)` call would pass an array as one
+  // argument → `NaN`; instead spread each collection into a combined array and
+  // reduce it.
+  if (args.some((a) => a && isIndexedCollectionOperand(a))) {
+    const parts = args.map((a) =>
+      isIndexedCollectionOperand(a) ? `...(${compile(a)})` : compile(a)
+    );
+    return `[${parts.join(', ')}].reduce((_a, _b) => ${fn}(_a, _b), ${identity})`;
   }
   return `${fn}(${args.map((x) => compile(x)).join(', ')})`;
 }

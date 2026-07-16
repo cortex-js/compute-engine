@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+### New Features
+
+- **`ElementMax`, `ElementMin` — element-wise (broadcasting) maximum and
+  minimum** (the NumPy `maximum`/`minimum` primitive). Unlike `Max`/`Min`,
+  which _reduce_ all operands — including a collection's elements — to a single
+  scalar, these broadcast: a scalar over a collection returns a collection of
+  the per-element extremum (`ElementMax(0, [1, -2, 3])` → `[1, 0, 3]`), two
+  collections zip, and two scalars give a scalar. Exactness is preserved
+  (`ElementMax(√2, 1)` → `√2`), and they compile on the JavaScript target
+  (scalar arguments to a direct call, a collection argument to a `_SYS.bcast`).
+- **`Clamp(x, lo, hi)` — clamp a value to a range** (`min(max(x, lo), hi)`),
+  also broadcasting over collection arguments (`Clamp([-1, 0.5, 2], 0, 1)` →
+  `[0, 0.5, 1]`).
+
+### Bug Fixes
+
+- **`Max`/`Min` of a scalar and a collection no longer mis-compiles to `NaN`.**
+  `Max(0, [1, -2, 3])` evaluates to `3` (the reduction folds the collection's
+  elements), but on the JavaScript target it compiled to `Math.max(0, [1,-2,3])`
+  — passing an array as an argument — and returned `NaN` at run time. It now
+  folds the scalar and every collection's elements into a single reduction,
+  matching `evaluate()`. (Surfaced by the Tycho/Graph Paper team's `max(0, …)`
+  plot expressions.)
+
 ### Collections
 
 - **A list comprehension is now a lazy collection: `evaluate()` no longer walks

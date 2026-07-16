@@ -59,6 +59,14 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Multiply', 'z_f', 'PositiveInfinity'])).toBe('number');
     });
 
+    test('ElementMax/ElementMin/Clamp with a non-finite operand widen to number', () => {
+      // Element-wise extrema use `numericTypeHandler`, which conservatively
+      // widens to `number` when any operand may be non-finite (matching `Max`).
+      expect(typeOf(['ElementMax', 'PositiveInfinity', 5])).toBe('number');
+      expect(typeOf(['ElementMin', 'NegativeInfinity', 5])).toBe('number');
+      expect(typeOf(['Clamp', 'x_r', 0, 'PositiveInfinity'])).toBe('number');
+    });
+
     test('poles that evaluate to ~oo claim number, not complex/finite', () => {
       expect(typeOf(['Csc', 0])).toBe('number'); // was `complex`
       expect(typeOf(['Tan', ['Divide', 'Pi', 2]])).toBe('number'); // was `finite_real`
