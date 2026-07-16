@@ -17,6 +17,16 @@
 
 ### Bug Fixes
 
+- **Negative indexing on a lazy `Take` was off by one.** `Take(xs, n).at(-1)`
+  returned the second-to-last element of the taken prefix (`at(-1)` on
+  `Take([10, 20, 30], 2)` was `10` instead of `20`).
+- **The optimization form of `ArgMax`/`ArgMin` canonicalizes its function
+  operand again.** `ArgMin(f, RealNumbers)` (the "locations of the minimum
+  over a domain" form, used by the identities library) short-circuited
+  canonicalization, leaving the function literal in a non-canonical shape
+  that no longer matched the identities library's stored rewrite patterns.
+  The form remains inert under evaluation; the collection form
+  (`ArgMin([3, 1, 2])` → `2`) is unchanged.
 - **A canonical `Comprehension` now serializes to LaTeX that round-trips.** Its
   `.latex` was an elided display preview (`\lbrack 1, 4, 9, \dots,
   62\,500\rbrack`) that silently re-parsed to a corrupt 11-element `List`

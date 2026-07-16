@@ -2269,7 +2269,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const count = takeCount(expr);
         if (count === undefined || count === 0) return undefined;
         if (index < -count) return undefined;
-        return expr.op1.at(count + index);
+        // Negative index counts from the end: at(-1) is the count-th element.
+        return expr.op1.at(count + index + 1);
       },
     },
   },
@@ -3102,6 +3103,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     signature: '(indexed_collection, function?) -> integer',
     canonical: (ops, { engine }) => {
+      // Optimization form `ArgMax(f, domain)` (Wolfram/Fungrim convention:
+      // the locations maximizing f over a set). The engine does not evaluate
+      // it, but it must canonicalize the function operand normally — the
+      // identities library ships rewrite rules whose stored patterns are the
+      // canonical (Block-wrapped) function form; short-circuiting here left
+      // the operand un-wrapped and made those patterns unmatchable.
+      const optForm = canonicalOptimumForm(engine, 'ArgMax', ops);
+      if (optForm !== undefined) return optForm;
       // An index result only makes sense for an INDEXED collection — match
       // the declared signature (MaxBy/MinBy, which return the element,
       // accept any collection).
@@ -3127,6 +3136,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     signature: '(indexed_collection, function?) -> integer',
     canonical: (ops, { engine }) => {
+      // Optimization form `ArgMin(f, domain)` — see the ArgMax note.
+      const optForm = canonicalOptimumForm(engine, 'ArgMin', ops);
+      if (optForm !== undefined) return optForm;
       // An index result only makes sense for an INDEXED collection — match
       // the declared signature (MaxBy/MinBy, which return the element,
       // accept any collection).
@@ -4729,6 +4741,30 @@ function compareKeys(a: Expression, b: Expression): -1 | 0 | 1 | undefined {
   if (a.isLess(b) === true) return -1;
   if (b.isLess(a) === true) return 1;
   return undefined;
+}
+
+/**
+ * Canonicalize the Wolfram/Fungrim optimization form `ArgMax(f, domain)` /
+ * `ArgMin(f, domain)`: first operand a function literal, second a domain (a
+ * set, not an indexed collection). The engine keeps it inert, but the
+ * function operand must go through `canonicalFunctionLiteral` so it gets the
+ * canonical (Block-wrapped) body that the identities library's stored rule
+ * patterns match. Returns `undefined` when `ops` is not the optimization form
+ * (the caller then proceeds with the collection form).
+ */
+function canonicalOptimumForm(
+  engine: ComputeEngine,
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): Expression | null | undefined {
+  if (ops.length !== 2) return undefined;
+  const [f, domain] = ops;
+  if (!isFunction(f, 'Function')) return undefined;
+  const d = domain.canonical;
+  if (!d.type.matches('set')) return undefined;
+  const fn = canonicalFunctionLiteral(f);
+  if (!fn) return null;
+  return engine._fn(operator, [fn, d]);
 }
 
 /** Shared driver for `MaxBy`/`MinBy`/`ArgMax`/`ArgMin`. Enumerates a finite
