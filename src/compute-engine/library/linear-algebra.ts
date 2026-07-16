@@ -17,7 +17,7 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { asRational } from '../boxed-expression/numerics.js';
+import { asRational, toInteger } from '../boxed-expression/numerics.js';
 
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
@@ -139,9 +139,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Flatten: {
       description: 'Flatten a tensor or collection into a list.',
       complexity: 8200,
-      signature: '(value) -> list',
+      signature: '(value, integer?) -> list',
       evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0].evaluate();
+
+        // With an explicit depth, flatten only that many nesting levels
+        // (Wolfram `Flatten[list, n]`). This path is guarded behind the
+        // presence of the second argument, so the no-depth behavior below is
+        // unchanged.
+        if (ops.length >= 2) {
+          const depth = toInteger(ops[1]);
+          if (depth === null || depth < 0) return undefined;
+          if (op1.isNumber) return ce.expr(['List', op1]);
+          if (!isFiniteIndexedCollection(op1) && !isTensor(op1))
+            return undefined;
+          return ce.function('List', flattenToDepth(op1, depth));
+        }
 
         // Handle scalar - return single-element list
         if (op1.isNumber) return ce.expr(['List', op1]);
@@ -3423,6 +3436,21 @@ function buildNestedList(
   }
 
   return ce.expr(['List', ...rows]);
+}
+
+/**
+ * Return the elements of the collection `xs` flattened up to `depth` nesting
+ * levels (Wolfram `Flatten[list, n]`). At `depth` 0 the elements are returned
+ * as-is; each level splices the contents of collection-valued elements.
+ */
+function flattenToDepth(xs: Expression, depth: number): Expression[] {
+  const result: Expression[] = [];
+  for (const e of xs.each()) {
+    if (depth >= 1 && isFiniteIndexedCollection(e))
+      result.push(...flattenToDepth(e, depth - 1));
+    else result.push(e);
+  }
+  return result;
 }
 
 function canonicalMatrix(

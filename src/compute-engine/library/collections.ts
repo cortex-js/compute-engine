@@ -1044,37 +1044,50 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       xs.isEmptyCollection ? ce.True : ce.False,
   },
 
-  // Exists: {
-  //   description:
-  //     'Return True if any element of the collection satisfies the predicate, False otherwise.',
-  //   complexity: 8200,
-  //   signature: '(collection, function) -> boolean',
-  //   type: () => 'boolean',
-  //   evaluate: ([xs, fn], { engine: ce }) => {
-  //     const f = applicable(fn);
-  //     if (!f) return ce.False;
-  //     for (const item of xs.each()) {
-  //       if (f([item])?.symbol === 'True') return ce.True;
-  //     }
-  //     return ce.False;
-  //   },
-  // },
+  // Any(collection, predicate?): True if the predicate holds for at least one
+  // element (or, without a predicate, if any element is itself True). The
+  // predicate is optional so a collection of booleans can be tested directly,
+  // like Julia's `any(itr)`.
+  Any: {
+    description:
+      'Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).',
+    complexity: 8200,
+    lazy: true,
+    signature: '(collection, function?) -> boolean',
+    canonical: (ops, { engine }) => {
+      const collection = checkType(engine, ops[0], 'collection');
+      if (!collection.isValid) return null;
+      if (ops[1] === undefined) return engine._fn('Any', [collection]);
+      const fn = canonicalFunctionLiteral(ops[1]);
+      if (!fn) return null;
+      return engine._fn('Any', [collection, fn]);
+    },
+    type: () => 'boolean',
+    evaluate: ([collection, fn], { engine: ce }) =>
+      evaluateQuantifier('Any', collection, fn, ce),
+  },
 
-  // ForAll: {
-  //   description:
-  //     'Return True if all elements of the collection satisfy the predicate, False otherwise.',
-  //   complexity: 8200,
-  //   signature: '(collection, function) -> boolean',
-  //   type: () => 'boolean',
-  //   evaluate: ([xs, fn], { engine: ce }) => {
-  //     const f = applicable(fn);
-  //     if (!f) return ce.False;
-  //     for (const item of xs.each()) {
-  //       if (f([item])?.symbol !== 'True') return ce.False;
-  //     }
-  //     return ce.True;
-  //   },
-  // },
+  // All(collection, predicate?): True if the predicate holds for every element
+  // (or, without a predicate, if every element is itself True). Vacuously True
+  // for an empty collection, like Julia's `all(itr)`.
+  All: {
+    description:
+      'Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given).',
+    complexity: 8200,
+    lazy: true,
+    signature: '(collection, function?) -> boolean',
+    canonical: (ops, { engine }) => {
+      const collection = checkType(engine, ops[0], 'collection');
+      if (!collection.isValid) return null;
+      if (ops[1] === undefined) return engine._fn('All', [collection]);
+      const fn = canonicalFunctionLiteral(ops[1]);
+      if (!fn) return null;
+      return engine._fn('All', [collection, fn]);
+    },
+    type: () => 'boolean',
+    evaluate: ([collection, fn], { engine: ce }) =>
+      evaluateQuantifier('All', collection, fn, ce),
+  },
 
   // { f(x) for x in xs }
   // { 2x | x ∈ [ 1 , 10 ] }
@@ -1391,6 +1404,404 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const collection = checkType(engine, ops[2], 'collection');
       if (!fn || !initial?.isValid || !collection.isValid) return null;
       return engine._fn('Reduce', [collection, fn, initial]);
+    },
+  },
+
+  // Julia `accumulate`: a cumulative fold that keeps the SAME length as the
+  // input (unlike Haskell/Wolfram `scanl`, which prepends the seed). Without an
+  // initial value, `y1 = x1` and `yk = f(y(k-1), xk)`; with an initial value,
+  // `y1 = f(initial, x1)`. Lazy — the running accumulator is computed
+  // incrementally, so `Take(Scan(Range(1, 10^9), Add), 5)` stays fast.
+  Scan: {
+    description:
+      'Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value).',
+    complexity: 8200,
+    lazy: true,
+    signature: '(collection, function, initial:value?) -> indexed_collection',
+    // Same shape/indexed-ness as the source, but elements are the fold's
+    // result type (mirrors Map).
+    type: (ops) => {
+      const resultType = functionResult(ops[1].type.type);
+      if (!resultType || resultType === 'unknown' || resultType === 'any')
+        return ops[0].type;
+      return mapResultType(ops[0].type.type, resultType);
+    },
+    canonical: (ops, { engine }) => {
+      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const fn = canonicalFunctionLiteral(ops[1]);
+      if (!collection.isValid || !fn) return null;
+      const initial = ops[2]?.canonical;
+      if (initial?.isValid) return engine._fn('Scan', [collection, fn, initial]);
+      return engine._fn('Scan', [collection, fn]);
+    },
+    collection: {
+      isLazy: (_expr) => true,
+      count: (expr) => (isFunction(expr) ? expr.op1.count : undefined),
+      isEmpty: (expr) =>
+        isFunction(expr) ? expr.op1.isEmptyCollection : undefined,
+      isFinite: (expr) =>
+        isFunction(expr) ? expr.op1.isFiniteCollection : undefined,
+      iterator: (expr) => {
+        if (!isFunction(expr))
+          return { next: () => ({ value: undefined, done: true }) };
+        const f = applicable(expr.op2);
+        if (!f) return { next: () => ({ value: undefined, done: true }) };
+        const hasInitial = expr.ops.length >= 3;
+        const initial = expr.ops[2];
+        const source = expr.op1.each();
+        let acc: Expression | undefined = undefined;
+        let started = false;
+        return {
+          next: () => {
+            const { value, done } = source.next();
+            if (done) return { value: undefined, done: true };
+            if (!started) {
+              started = true;
+              acc = hasInitial
+                ? f([initial, value]) ?? expr.engine.Nothing
+                : value;
+            } else {
+              acc = f([acc!, value]) ?? expr.engine.Nothing;
+            }
+            return { value: acc!, done: false };
+          },
+        };
+      },
+      // The k-th cumulative element requires folding the first k source
+      // elements; O(k) per call, so this stays cheap for the small indices
+      // `Take` requests. Mirrors `Iterate`'s fold-from-the-start `at`.
+      at: (expr, index) => {
+        if (typeof index !== 'number' || index < 1) return undefined;
+        if (!isFunction(expr)) return undefined;
+        const f = applicable(expr.op2);
+        if (!f) return undefined;
+        const hasInitial = expr.ops.length >= 3;
+        const initial = expr.ops[2];
+        let i = 0;
+        let acc: Expression | undefined = undefined;
+        for (const item of expr.op1.each()) {
+          i += 1;
+          if (i === 1)
+            acc = hasInitial ? f([initial, item]) ?? expr.engine.Nothing : item;
+          else acc = f([acc!, item]) ?? expr.engine.Nothing;
+          if (i === index) return acc;
+        }
+        return undefined;
+      },
+    },
+  },
+
+  // Julia/R `diff`, Wolfram `Differences`: the successive differences of a
+  // collection, `yk = x(k+1) − xk`. Length n−1. Lazy — keeps only the previous
+  // element.
+  Differences: {
+    description:
+      'Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input.',
+    complexity: 8200,
+    lazy: true,
+    signature: '(collection) -> indexed_collection',
+    type: (ops) => {
+      const elt = collectionElementType(ops[0].type.type) ?? 'number';
+      return parseType(`list<${typeToString(elt)}>`);
+    },
+    canonical: (ops, { engine }) => {
+      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      if (!collection.isValid) return null;
+      return engine._fn('Differences', [collection]);
+    },
+    collection: {
+      isLazy: (_expr) => true,
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const c = expr.op1.count;
+        if (c === undefined) return undefined;
+        if (!Number.isFinite(c)) return Infinity;
+        return Math.max(0, c - 1);
+      },
+      isFinite: (expr) =>
+        isFunction(expr) ? expr.op1.isFiniteCollection : undefined,
+      iterator: (expr) => {
+        if (!isFunction(expr))
+          return { next: () => ({ value: undefined, done: true }) };
+        const source = expr.op1.each();
+        const first = source.next();
+        if (first.done)
+          return { next: () => ({ value: undefined, done: true }) };
+        let prev = first.value as Expression;
+        return {
+          next: () => {
+            const { value, done } = source.next();
+            if (done) return { value: undefined, done: true };
+            // Build each difference as a canonical subtraction and evaluate it,
+            // so exact operands stay exact (e.g. 3/4 − 1/2 = 1/4, not 0.25).
+            const diff = expr.engine
+              .function('Subtract', [value, prev])
+              .evaluate();
+            prev = value as Expression;
+            return { value: diff, done: false };
+          },
+        };
+      },
+      at: (expr, index) => {
+        if (typeof index !== 'number' || index < 1) return undefined;
+        if (!isFunction(expr)) return undefined;
+        const a = expr.op1.at(index);
+        const b = expr.op1.at(index + 1);
+        if (a === undefined || b === undefined) return undefined;
+        return expr.engine.function('Subtract', [b, a]).evaluate();
+      },
+    },
+  },
+
+  // Haskell `takeWhile`: the leading run of elements for which the predicate is
+  // True; stops at (and excludes) the first element that is not True.
+  TakeWhile: {
+    description: [
+      'Return the leading elements of the collection for which the predicate returns True, stopping at the first element that does not.',
+    ],
+    complexity: 8200,
+    lazy: true,
+    signature: '(collection, predicate: function) -> collection',
+    // Preserve the source's element type / indexed-ness (mirrors Filter).
+    type: (ops) => ops[0].type,
+    canonical: (ops, { engine }) => {
+      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const fn = canonicalFunctionLiteral(ops[1]);
+      if (!collection.isValid || !fn) return null;
+      return engine._fn('TakeWhile', [collection, fn]);
+    },
+    collection: {
+      isLazy: (_expr) => true,
+      // Length is unknown without enumeration. For a finite source we can count
+      // the taken prefix (bounded); an infinite source stays unknown.
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.op1.isFiniteCollection !== true) return undefined;
+        let n = 0;
+        for (const _ of expr.each()) n++;
+        return n;
+      },
+      // True if the source is finite (the taken prefix is then finite too);
+      // for an infinite/unknown source we cannot know (it MAY be finite).
+      isFinite: (expr) =>
+        isFunction(expr) && expr.op1.isFiniteCollection === true
+          ? true
+          : undefined,
+      // Empty iff the first source element already fails the predicate. Cheap
+      // (one element), and keeps the collection materializable.
+      isEmpty: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.op1.isEmptyCollection === true) return true;
+        const first = expr.op1.each().next();
+        if (first.done) return true;
+        const f = applicable(expr.op2);
+        if (!f) return undefined;
+        return sym(f([first.value])) !== 'True';
+      },
+      iterator: (expr) => {
+        if (!isFunction(expr))
+          return { next: () => ({ value: undefined, done: true }) };
+        const f = applicable(expr.op2);
+        if (!f) return { next: () => ({ value: undefined, done: true }) };
+        const source = expr.op1.each();
+        let stopped = false;
+        let count = 0;
+        const limit = expr.engine.iterationLimit;
+        return {
+          next: () => {
+            if (stopped) return { value: undefined, done: true };
+            const { value, done } = source.next();
+            if (done) {
+              stopped = true;
+              return { value: undefined, done: true };
+            }
+            count += 1;
+            if (count > limit) {
+              throw new CancellationError({
+                cause: 'iteration-limit-exceeded',
+                message: `Iteration limit of ${limit} exceeded while evaluating TakeWhile()`,
+              });
+            }
+            const pred = f([value]);
+            // A predicate that cannot be applied at all is a broken predicate:
+            // throw, as Filter does. Otherwise take while the result is exactly
+            // True; stop at the first non-True result (False OR undetermined).
+            if (pred === undefined) {
+              throw new Error(
+                `Invalid TakeWhile predicate. ${spellCheckMessage(expr.op2)}`
+              );
+            }
+            if (sym(pred) === 'True') return { value, done: false };
+            stopped = true;
+            return { value: undefined, done: true };
+          },
+        };
+      },
+      // The k-th taken element: iterate the source, checking the predicate,
+      // until the k-th element is reached or the prefix ends.
+      at: (expr, index) => {
+        if (typeof index !== 'number' || index < 1) return undefined;
+        if (!isFunction(expr)) return undefined;
+        const f = applicable(expr.op2);
+        if (!f) return undefined;
+        let i = 0;
+        for (const item of expr.op1.each()) {
+          if (sym(f([item])) !== 'True') return undefined;
+          i += 1;
+          if (i === index) return item;
+        }
+        return undefined;
+      },
+    },
+  },
+
+  // Haskell `dropWhile`: discard the leading run of elements for which the
+  // predicate is True, then yield everything after (the predicate is not
+  // applied past the first non-True element).
+  DropWhile: {
+    description: [
+      'Return the collection with its leading elements for which the predicate returns True removed; the remaining elements are returned unfiltered.',
+    ],
+    complexity: 8200,
+    lazy: true,
+    signature: '(collection, predicate: function) -> collection',
+    type: (ops) => ops[0].type,
+    canonical: (ops, { engine }) => {
+      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const fn = canonicalFunctionLiteral(ops[1]);
+      if (!collection.isValid || !fn) return null;
+      return engine._fn('DropWhile', [collection, fn]);
+    },
+    collection: {
+      isLazy: (_expr) => true,
+      // For a finite source we can count the retained suffix (bounded); an
+      // infinite/unknown source stays unknown.
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.op1.isFiniteCollection !== true) return undefined;
+        let n = 0;
+        for (const _ of expr.each()) n++;
+        return n;
+      },
+      // Delegates to the source for finite sources; unknown otherwise.
+      isFinite: (expr) =>
+        isFunction(expr) && expr.op1.isFiniteCollection === true
+          ? true
+          : undefined,
+      iterator: (expr) => {
+        if (!isFunction(expr))
+          return { next: () => ({ value: undefined, done: true }) };
+        const f = applicable(expr.op2);
+        if (!f) return { next: () => ({ value: undefined, done: true }) };
+        const source = expr.op1.each();
+        let dropping = true;
+        return {
+          next: () => {
+            while (true) {
+              const { value, done } = source.next();
+              if (done) return { value: undefined, done: true };
+              if (dropping) {
+                if (sym(f([value])) === 'True') continue;
+                dropping = false;
+              }
+              return { value, done: false };
+            }
+          },
+        };
+      },
+      at: (expr, index) => {
+        if (typeof index !== 'number' || index < 1) return undefined;
+        if (!isFunction(expr)) return undefined;
+        let i = 0;
+        for (const item of expr.each()) {
+          i += 1;
+          if (i === index) return item;
+        }
+        return undefined;
+      },
+    },
+  },
+
+  // Map then flatten one level: apply `f` to each element and splice the
+  // result into the output if it is a collection, otherwise include it as a
+  // single element (singleton coercion — a CAS should not error on
+  // `FlatMap([1, 2], x -> x^2)`).
+  FlatMap: {
+    description: [
+      'Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements.',
+    ],
+    complexity: 8200,
+    lazy: true,
+    signature: '(collection, function) -> list',
+    type: (ops) => {
+      const resultType = functionResult(ops[1].type.type);
+      if (!resultType || resultType === 'unknown' || resultType === 'any')
+        return parseType('list');
+      const inner = collectionElementType(resultType);
+      return parseType(`list<${typeToString(inner ?? resultType)}>`);
+    },
+    canonical: (ops, { engine }) => {
+      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const fn = canonicalFunctionLiteral(ops[1]);
+      if (!collection.isValid || !fn) return null;
+      return engine._fn('FlatMap', [collection, fn]);
+    },
+    evaluate: (ops, { engine, materialization }) => {
+      if (!materialization) return undefined;
+      const expr = engine._fn('FlatMap', ops);
+      // Only materialize when the source is finite; an infinite source stays
+      // lazy (consumers can still bound it with Take).
+      if (!ops[0].isFiniteCollection) return undefined;
+      return engine._fn('List', Array.from(expr.each()) as Expression[]);
+    },
+    collection: {
+      isLazy: (_expr) => true,
+      count: (expr) =>
+        isFunction(expr) && expr.op1.isEmptyCollection === true ? 0 : undefined,
+      isEmpty: (expr) =>
+        isFunction(expr) && expr.op1.isEmptyCollection === true
+          ? true
+          : undefined,
+      isFinite: (expr) =>
+        isFunction(expr) && expr.op1.isEmptyCollection === true
+          ? true
+          : undefined,
+      iterator: (expr) => {
+        if (!isFunction(expr))
+          return { next: () => ({ value: undefined, done: true }) };
+        const f = applicable(expr.op2);
+        if (!f) return { next: () => ({ value: undefined, done: true }) };
+        const source = expr.op1.each();
+        let inner: Iterator<Expression> | null = null;
+        return {
+          next: () => {
+            while (true) {
+              if (inner) {
+                const r = inner.next();
+                if (!r.done) return { value: r.value, done: false };
+                inner = null;
+              }
+              const { value, done } = source.next();
+              if (done) return { value: undefined, done: true };
+              const mapped = f([value]) ?? expr.engine.Nothing;
+              if (mapped.isCollection) inner = mapped.each();
+              else return { value: mapped, done: false };
+            }
+          },
+        };
+      },
+      // Nested access requires walking the flattened stream up to `index`
+      // (O(index)); FlatMap is `list`-typed, so an `at` handler is required.
+      at: (expr, index) => {
+        if (typeof index !== 'number' || index < 1) return undefined;
+        if (!isFunction(expr)) return undefined;
+        let i = 0;
+        for (const item of expr.each()) {
+          i += 1;
+          if (i === index) return item;
+        }
+        return undefined;
+      },
     },
   },
 
@@ -3202,6 +3613,55 @@ function isSymbolicOperand(op: Expression | undefined): boolean {
   if (op === undefined) return false;
   if (isSymbol(op) && op.symbol === 'Nothing') return false;
   return Number.isNaN(op.re);
+}
+
+/**
+ * Shared evaluation for the `Any`/`All` quantifiers.
+ *
+ * Three-valued and short-circuiting: `Any` returns True at the first element
+ * whose predicate result is True; `All` returns False at the first False. With
+ * no predicate, each element is treated as the boolean value directly (Julia's
+ * `any(itr)` / `all(itr)`).
+ *
+ * If enumeration completes with every result definite (True/False), the
+ * definite answer is returned (False for `Any`, True for `All`; vacuously so on
+ * an empty collection). If any result was neither True nor False (a symbolic or
+ * undetermined element) and no short-circuit fired, `undefined` is returned so
+ * the expression stays inert — the CAS-correct behavior rather than throwing.
+ *
+ * Enumeration is driven through `run(…, ce._timeRemaining)` so that an infinite
+ * or lazy collection with no short-circuit aborts on the deadline instead of
+ * hanging.
+ */
+function evaluateQuantifier(
+  kind: 'Any' | 'All',
+  collection: Expression,
+  fn: Expression | undefined,
+  ce: ComputeEngine
+): Expression | undefined {
+  const f = fn ? applicable(fn) : undefined;
+  // `Any` short-circuits to True on the first True; `All` to False on the
+  // first False. The complementary symbol ('False' for Any, 'True' for All) is
+  // the "definite, keep going" result; anything else is undetermined.
+  const shortSym = kind === 'Any' ? 'True' : 'False';
+  const definiteSym = kind === 'Any' ? 'False' : 'True';
+  const shortValue = kind === 'Any' ? ce.True : ce.False;
+  const defaultValue = kind === 'Any' ? ce.False : ce.True;
+
+  let sawUndetermined = false;
+  return run(
+    (function* (): Generator<undefined, Expression | undefined> {
+      for (const item of collection.each()) {
+        const result = f ? f([item]) : item.evaluate();
+        const s = sym(result);
+        if (s === shortSym) return shortValue;
+        if (s !== definiteSym) sawUndetermined = true;
+        yield;
+      }
+      return sawUndetermined ? undefined : defaultValue;
+    })(),
+    ce._timeRemaining
+  );
 }
 
 /**

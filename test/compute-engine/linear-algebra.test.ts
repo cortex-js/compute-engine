@@ -671,6 +671,34 @@ describe('Flatten', () => {
       `[a,b,c,d,"e_1","f_1",g,h,"i_1",j,k,l,m,"n_1",o,p,q,r,s,t,u,v,w,"x_1"]`
     );
   });
+
+  it('should flatten one level with an explicit depth', () => {
+    const result = ce
+      .expr(['Flatten', ['List', ['List', 1, ['List', 2]], ['List', 3]], 1])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[1,[2],3]`);
+  });
+
+  it('should flatten multiple levels with an explicit depth', () => {
+    const result = ce
+      .expr(['Flatten', ['List', ['List', 1, ['List', 2]], ['List', 3]], 2])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[1,2,3]`);
+  });
+
+  it('should leave nesting untouched at depth 0', () => {
+    const result = ce
+      .expr(['Flatten', ['List', ['List', 1, 2], ['List', 3, 4]], 0])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[1,2],[3,4]]`);
+  });
+
+  it('should keep the full-flatten behavior when no depth is given (regression)', () => {
+    const result = ce
+      .expr(['Flatten', ['List', ['List', 1, 2], ['List', 3, 4]]])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[1,2,3,4]`);
+  });
 });
 
 describe('Transpose', () => {

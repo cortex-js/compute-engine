@@ -786,6 +786,221 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
     )); // 11 elements: default materialization shows a 5-element head and tail
 });
 
+describe('ANY / ALL QUANTIFIERS', () => {
+  const gt = (n: number): Expression => ['Greater', '_', n];
+
+  test('Any with predicate: True when some element matches', () =>
+    expect(evaluate(['Any', list, gt(10)])).toMatchInlineSnapshot(`True`));
+
+  test('Any with predicate: False when no element matches', () =>
+    expect(evaluate(['Any', list, gt(100)])).toMatchInlineSnapshot(`False`));
+
+  test('All with predicate: True when every element matches', () =>
+    expect(evaluate(['All', list, gt(0)])).toMatchInlineSnapshot(`True`));
+
+  test('All with predicate: False when some element fails', () =>
+    expect(evaluate(['All', list, gt(10)])).toMatchInlineSnapshot(`False`));
+
+  test('Any without predicate: elements are the booleans', () =>
+    expect(
+      evaluate(['Any', ['List', 'False', 'True', 'False']])
+    ).toMatchInlineSnapshot(`True`));
+
+  test('All without predicate: elements are the booleans', () =>
+    expect(
+      evaluate(['All', ['List', 'True', 'False', 'True']])
+    ).toMatchInlineSnapshot(`False`));
+
+  test('All without predicate: all True', () =>
+    expect(
+      evaluate(['All', ['List', 'True', 'True']])
+    ).toMatchInlineSnapshot(`True`));
+
+  test('Empty collection: Any is False (vacuous)', () =>
+    expect(evaluate(['Any', emptyList, gt(0)])).toMatchInlineSnapshot(`False`));
+
+  test('Empty collection: All is True (vacuous)', () =>
+    expect(evaluate(['All', emptyList, gt(0)])).toMatchInlineSnapshot(`True`));
+
+  test('Any short-circuits over a huge lazy collection', () => {
+    const t0 = Date.now();
+    const result = engine
+      .box(['Any', ['Range', 1, 1_000_000_000], gt(5)])
+      .evaluate();
+    const elapsed = Date.now() - t0;
+    expect(result.symbol).toBe('True');
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test('All short-circuits to False over a huge lazy collection', () => {
+    const t0 = Date.now();
+    const result = engine
+      .box(['All', ['Range', 1, 1_000_000_000], gt(5)])
+      .evaluate();
+    const elapsed = Date.now() - t0;
+    expect(result.symbol).toBe('False');
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test('Any stays inert when the outcome is undetermined', () => {
+    // 'X' is an unbound (uppercase) symbol, so X > 5 is neither True nor
+    // False, and no earlier element short-circuits to True.
+    const result = engine.box(['Any', ['List', 1, 2, 'X'], gt(5)]).evaluate();
+    expect(result.operator).toBe('Any');
+  });
+
+  test('All stays inert when the outcome is undetermined', () => {
+    const result = engine.box(['All', ['List', 3, 4, 'X'], gt(2)]).evaluate();
+    expect(result.operator).toBe('All');
+  });
+
+  test('Any short-circuits to True even with an undetermined element present', () =>
+    // A definite True (10 > 5) wins over the undetermined X > 5.
+    expect(
+      engine.box(['Any', ['List', 10, 'X'], gt(5)]).evaluate().symbol
+    ).toBe('True'));
+});
+
+describe('SCAN / DIFFERENCES / TAKEWHILE / DROPWHILE / FLATMAP', () => {
+  const str = (expr: Expression): string =>
+    engine.box(expr).evaluate({ materialization: true }).toString();
+
+  const add: Expression = ['Function', ['Add', 'a', 'b'], 'a', 'b'];
+  const lessThan = (n: number): Expression => [
+    'Function',
+    ['Less', 'x', n],
+    'x',
+  ];
+  // Iterate uses a 2-argument function `(index, acc)` and does NOT emit the
+  // initial value as the first element: element k is f(k, element(k-1)).
+  const doubleAcc: Expression = [
+    'Function',
+    ['Multiply', 2, 'acc'],
+    'n',
+    'acc',
+  ];
+
+  // --- Scan --------------------------------------------------------------
+  test('Scan cumulative sum (same length as input)', () =>
+    expect(str(['Scan', ['List', 1, 2, 3, 4], add])).toEqual('[1,3,6,10]'));
+
+  test('Scan with an initial value seeds the first element', () =>
+    expect(str(['Scan', ['List', 1, 2, 3], add, 10])).toEqual('[11,13,16]'));
+
+  test('Scan is lazy: Take over a huge Range is fast', () => {
+    const t0 = Date.now();
+    const result = engine
+      .box(['Take', ['Scan', ['Range', 1, 1_000_000_000], add], 5])
+      .evaluate({ materialization: true });
+    const elapsed = Date.now() - t0;
+    expect(result.toString()).toEqual('[1,3,6,10,15]');
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test('Scan reports its count without enumerating', () => {
+    const t0 = Date.now();
+    const count = engine.box(['Scan', ['Range', 1, 1_000_000_000], add]).count;
+    const elapsed = Date.now() - t0;
+    expect(count).toBe(1_000_000_000);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test('Scan materializes to a List, not a Set (no generic-collection trap)', () => {
+    const result = engine
+      .box(['Scan', ['List', 1, 2, 3, 4], add])
+      .evaluate({ materialization: true });
+    expect(result.operator).toBe('List');
+    expect((result.json as unknown[])[0]).toBe('List');
+    expect(result.toString()).toEqual('[1,3,6,10]');
+  });
+
+  // --- Differences -------------------------------------------------------
+  test('Differences of successive elements (length n-1)', () =>
+    expect(str(['Differences', ['List', 1, 4, 9, 16]])).toEqual('[3,5,7]'));
+
+  test('Differences of exact rationals stays exact', () =>
+    expect(
+      str(['Differences', ['List', ['Rational', 1, 2], ['Rational', 3, 4]]])
+    ).toEqual('[1/4]'));
+
+  test('Differences of a single-element list is empty', () =>
+    expect(str(['Differences', ['List', 'x']])).toEqual('[]'));
+
+  test('Differences reports its count without enumerating', () => {
+    const t0 = Date.now();
+    const count = engine.box(['Differences', ['Range', 1, 1_000_000_000]])
+      .count;
+    const elapsed = Date.now() - t0;
+    expect(count).toBe(999_999_999);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test('Differences materializes to a List, not a Set', () => {
+    const result = engine
+      .box(['Differences', ['List', 1, 4, 9, 16]])
+      .evaluate({ materialization: true });
+    expect(result.operator).toBe('List');
+    expect((result.json as unknown[])[0]).toBe('List');
+  });
+
+  // --- TakeWhile / DropWhile --------------------------------------------
+  test('TakeWhile yields the leading run satisfying the predicate', () =>
+    expect(str(['TakeWhile', ['Range', 1, 100], lessThan(5)])).toEqual(
+      '[1,2,3,4]'
+    ));
+
+  test('DropWhile skips the leading run then yields the rest', () =>
+    expect(str(['DropWhile', ['Range', 1, 10], lessThan(8)])).toEqual(
+      '[8,9,10]'
+    ));
+
+  test('TakeWhile composes lazily with an infinite source', () => {
+    // Iterate((n, acc) -> 2*acc, 1) = 2, 4, 8, 16, ...; TakeWhile x < 100 keeps
+    // the leading run. Enumerate via `each()` to avoid materializing the
+    // infinite source.
+    const tw = engine.box([
+      'TakeWhile',
+      ['Iterate', doubleAcc, 1],
+      lessThan(100),
+    ]);
+    expect(Array.from(tw.each()).map((x) => x.toString())).toEqual([
+      '2',
+      '4',
+      '8',
+      '16',
+      '32',
+      '64',
+    ]);
+  });
+
+  // --- FlatMap -----------------------------------------------------------
+  test('FlatMap splices collection-valued results', () =>
+    expect(
+      str([
+        'FlatMap',
+        ['List', 1, 2, 3],
+        ['Function', ['List', 'x', ['Power', 'x', 2]], 'x'],
+      ])
+    ).toEqual('[1,1,2,4,3,9]'));
+
+  test('FlatMap coerces scalar results to singletons', () =>
+    expect(
+      str(['FlatMap', ['List', 1, 2], ['Function', ['Power', 'x', 2], 'x']])
+    ).toEqual('[1,4]'));
+
+  test('FlatMap materializes to a List, not a Set', () => {
+    const result = engine
+      .box([
+        'FlatMap',
+        ['List', 1, 2, 3],
+        ['Function', ['List', 'x', ['Power', 'x', 2]], 'x'],
+      ])
+      .evaluate({ materialization: true });
+    expect(result.operator).toBe('List');
+    expect((result.json as unknown[])[0]).toBe('List');
+  });
+});
+
 // describe('NON-ITERABLE OPERATIONS', () => {
 
 // })
