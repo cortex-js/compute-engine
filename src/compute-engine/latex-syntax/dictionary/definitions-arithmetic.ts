@@ -1429,9 +1429,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     associativity: 'any',
     precedence: ADDITION_PRECEDENCE,
     parse: (parser, lhs, until) => {
+      // Parse the right operand at `ADDITION_PRECEDENCE + 1` so a following
+      // `+` continuation is left for the caller's infix loop instead of being
+      // consumed by a nested `parseExpression`. This makes a flat `a+b+c+…`
+      // chain iterative (bounded stack) rather than right-recursive;
+      // `expandContinuationAdd`/`foldAssociativeOperator` below still flatten
+      // the result, so the parsed expression is unchanged.
       const rhs = parser.parseExpression({
         ...until,
-        minPrec: ADDITION_PRECEDENCE,
+        minPrec: ADDITION_PRECEDENCE + 1,
       });
       // If we did not see a valid rhs, it is important to return null
       // to give a chance to something else to continue the parsing

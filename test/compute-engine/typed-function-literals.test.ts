@@ -549,4 +549,42 @@ describe('BoxedOperatorDefinition.lambda — public function-body accessor', () 
     const sin = ce.lookupDefinition('Sin')!;
     expect((sin as any).operator.lambda).toBeUndefined();
   });
+
+  // A function declared with a MathJSON `evaluate` handler stores its literal
+  // in `form:'raw'` (non-canonical). The accessor must still return the SAME
+  // shape as the parse/assign route — a canonical scoped `Block` body — so a
+  // consumer can use the body in arithmetic without tripping the "cannot be
+  // used in arithmetic operations" asserts.
+  test('returns a canonical scoped body for a MathJSON-declared function', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', {
+      signature: '(number)->number',
+      evaluate: ['Function', ['Add', 'x', 1], 'x'],
+    });
+    const lambda = (ce.lookupDefinition('g') as any).operator.lambda;
+    expect(lambda).toBeDefined();
+    expect(lambda.parameters).toEqual([{ name: 'x', type: undefined }]);
+    // Same shape as the parse route: canonical, scoped Block.
+    expect(lambda.body.operator).toBe('Block');
+    expect(lambda.body.isCanonical).toBe(true);
+    expect(lambda.body.toString()).toBe('{x + 1}');
+    // The body is usable in arithmetic (no assert).
+    expect(lambda.body.add(ce.box(2)).toString()).toBe('{x + 1} + 2');
+  });
+
+  // Both declaration routes must yield an identical public view.
+  test('MathJSON-declared and parse-declared functions expose the same shape', () => {
+    const ce = new ComputeEngine();
+    ce.declare('gg', {
+      signature: '(number)->number',
+      evaluate: ['Function', ['Add', 'x', 1], 'x'],
+    });
+    ce.parse('k(x) := x + 1').evaluate();
+    const g = (ce.lookupDefinition('gg') as any).operator.lambda;
+    const h = (ce.lookupDefinition('k') as any).operator.lambda;
+    expect(g.parameters).toEqual(h.parameters);
+    expect(g.body.toString()).toBe(h.body.toString());
+    expect(g.body.operator).toBe(h.body.operator);
+    expect(g.body.isCanonical).toBe(h.body.isCanonical);
+  });
 });

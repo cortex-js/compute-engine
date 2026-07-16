@@ -9,7 +9,10 @@ import { toInteger } from '../boxed-expression/numerics.js';
 
 import {
   basicIndexedCollectionHandlers,
+  broadcastOverIndexedCollections,
   isDeclaredScalarNumber,
+  isFiniteIndexedCollection,
+  isTuple,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
@@ -21,6 +24,7 @@ import { ListType, Type } from '../../common/type/types.js';
 import {
   collectionElementType,
   functionResult,
+  functionSignature,
   widen,
 } from '../../common/type/utils.js';
 import { interval, intervalContains } from '../numerics/interval.js';
@@ -441,6 +445,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(any*) -> tuple',
     type: (ops) => parseType(`tuple<${ops.map((op) => op.type).join(', ')}>`),
     canonical: (ops, { engine }) => engine.tuple(...ops),
+    evaluate: (ops, { engine: ce, numericApproximation }) => {
+      // Desmos point-list idiom: a tuple with one or more finite-collection
+      // components transposes to the `List` of point-tuples (zip-to-shortest,
+      // scalars broadcast) — e.g. `(-6, n)` with `n` a 21-element list is 21
+      // points. Only fires when every component is point-like (a number, a
+      // tuple, or a finite collection), so tuples used as plain data (e.g.
+      // `(key, list)` inside a dictionary) stay inert. An infinite/unknown-
+      // length collection component fails closed (stays inert, no hang) via
+      // `broadcastOverIndexedCollections` returning `undefined`; an empty
+      // collection component yields an empty `List`.
+      const isListComponent = (op: Expression): boolean =>
+        isFiniteIndexedCollection(op) && !isTuple(op);
+      if (!ops.some(isListComponent)) return undefined;
+      if (!ops.every((op) => op.isNumber || isTuple(op) || isListComponent(op)))
+        return undefined;
+      return broadcastOverIndexedCollections(
+        ce,
+        'Tuple',
+        ops,
+        numericApproximation ?? false
+      );
+    },
     eq: defaultCollectionEq,
     collection: {
       ...basicIndexedCollectionHandlers(),
@@ -1103,44 +1129,119 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Map: {
     description: [
       'Return the collection where each element has been transformed by the mapping function.',
-      'Equivalent to `[f(x) for x in xs]`.',
+      'With a single collection, equivalent to `[f(x) for x in xs]`. With',
+      'multiple collections, combines them element-wise (like `zipWith`): ',
+      '`Map(xs, ys, f) = [f(x1, y1), f(x2, y2), …]`, with the length of the',
+      'shortest input. The mapping function is always the LAST argument.',
     ],
     complexity: 8200,
     lazy: true,
-    signature: '(collection, function) -> collection',
+    signature: '(collection+, function) -> indexed_collection',
     // The mapped collection keeps the source's shape/indexed-ness, but its
     // elements are the lambda's RESULT type — not the source element type.
     // (If the input collection is indexed, the output collection is indexed.)
+    // For the multi-collection (zipWith) form the result is always an indexed
+    // collection (like `Zip`) of the lambda's result type.
     type: (ops) => {
-      const resultType = functionResult(ops[1].type.type);
-      if (!resultType || resultType === 'unknown' || resultType === 'any')
-        return ops[0].type;
-      return mapResultType(ops[0].type.type, resultType);
+      if (ops.length <= 2) {
+        const resultType = functionResult(ops[1].type.type);
+        if (!resultType || resultType === 'unknown' || resultType === 'any')
+          return ops[0].type;
+        return mapResultType(ops[0].type.type, resultType);
+      }
+      const resultType = functionResult(ops[ops.length - 1].type.type);
+      return mapResultType(
+        'indexed_collection',
+        !resultType || resultType === 'unknown' || resultType === 'any'
+          ? 'unknown'
+          : resultType
+      );
     },
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0]?.canonical, 'collection');
-      const fn = canonicalFunctionLiteral(ops[1]);
-      if (!collection.isValid || !fn) return null;
+      // The mapping function is the LAST argument; every preceding argument is
+      // a source collection. Keep the single-collection form byte-for-byte
+      // identical to its historical behavior.
+      if (ops.length <= 2) {
+        const collection = checkType(engine, ops[0]?.canonical, 'collection');
+        const fn = canonicalFunctionLiteral(ops[1]);
+        if (!collection.isValid || !fn) return null;
 
-      return engine._fn('Map', [collection, fn]);
+        return engine._fn('Map', [collection, fn]);
+      }
+
+      const fn = canonicalFunctionLiteral(ops[ops.length - 1]);
+      const collections = ops
+        .slice(0, -1)
+        .map((c) => checkType(engine, c?.canonical, 'collection'));
+      if (!fn || collections.some((c) => !c.isValid)) return null;
+
+      return engine._fn('Map', [...collections, fn]);
     },
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
+        if (expr.nops > 2)
+          return minCount(expr.ops.slice(0, -1).map((c) => c.count));
         return expr.op1.count;
       },
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
+        if (expr.nops > 2) {
+          // Empty as soon as *any* source is empty (mirrors Zip).
+          let anyUnknown = false;
+          for (const x of expr.ops.slice(0, -1)) {
+            const e = x.isEmptyCollection;
+            if (e === true) return true;
+            if (e === undefined) anyUnknown = true;
+          }
+          return anyUnknown ? undefined : false;
+        }
         return expr.op1.isEmptyCollection;
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
+        if (expr.nops > 2) {
+          // Finite as soon as *any* source is finite (mirrors Zip).
+          let anyUnknown = false;
+          for (const x of expr.ops.slice(0, -1)) {
+            const f = x.isFiniteCollection;
+            if (f === true) return true;
+            if (f === undefined) anyUnknown = true;
+          }
+          return anyUnknown ? undefined : false;
+        }
         return expr.op1.isFiniteCollection;
       },
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
+
+        if (expr.nops > 2) {
+          // Multi-collection (zipWith): apply the mapping function to the
+          // element-wise tuple of the sources, bounded by the shortest
+          // input. Driven by each source's iterator — not by up-front
+          // counts — so a source with an unknown count (or an infinite one
+          // zipped with a finite one) still iterates; the zip ends as soon
+          // as any source ends.
+          const f = applicable(expr.ops[expr.nops - 1]);
+          if (!f) return { next: () => ({ value: undefined, done: true }) };
+          const sources = expr.ops.slice(0, -1).map((c) => c.each());
+          return {
+            next: () => {
+              const items: Expression[] = [];
+              for (const source of sources) {
+                const { value, done } = source.next();
+                if (done || value === undefined)
+                  return { value: undefined, done: true };
+                items.push(value);
+              }
+              const v = f(items) ?? expr.engine.Nothing;
+              return { value: v, done: false };
+            },
+          };
+        }
+
         const f = applicable(expr.op2);
         if (!f) return { next: () => ({ value: undefined, done: true }) };
 
@@ -1159,8 +1260,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       at: (expr: Expression, index: number | string) => {
         if (!isFunction(expr)) return undefined;
-        if (!expr.isIndexedCollection) return undefined;
         if (typeof index !== 'number') return undefined;
+
+        if (expr.nops > 2) {
+          // Multi-collection (zipWith): f of each source's element at `index`;
+          // undefined if any source has no element there — no up-front count
+          // needed (a source with an unknown count still answers `at`).
+          const collections = expr.ops.slice(0, -1);
+          if (index < 1) return undefined;
+          const items = collections.map((c) => c.at(index));
+          if (items.some((x) => x === undefined)) return undefined;
+          return applicable(expr.ops[expr.nops - 1])?.(items as Expression[]);
+        }
+
+        if (!expr.isIndexedCollection) return undefined;
         if (!Number.isFinite(index) || index === 0) return undefined;
         const item = expr.op1.at(index);
         if (!item) return undefined;
@@ -1439,8 +1552,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const collection = checkType(engine, ops[0]?.canonical, 'collection');
       const fn = canonicalFunctionLiteral(ops[1]);
       if (!collection.isValid || !fn) return null;
-      const initial = ops[2]?.canonical;
-      if (initial?.isValid) return engine._fn('Scan', [collection, fn, initial]);
+      // An initial value is optional, but when one is PROVIDED it must not be
+      // silently dropped if invalid — otherwise `Scan(xs, f, Divide(1))` would
+      // fold unseeded and diverge. Keep the (canonicalized) operand so the
+      // standard error machinery surfaces the error.
+      if (ops[2] !== undefined)
+        return engine._fn('Scan', [collection, fn, ops[2].canonical]);
       return engine._fn('Scan', [collection, fn]);
     },
     collection: {
@@ -2557,6 +2674,119 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
+  // Elixir `List.insert_at/3`: return a copy with `value` inserted before the
+  // 1-based `index`. Eager on finite indexed collections; inert otherwise. The
+  // result head is always `List` (rebuilding a Range/other structured source
+  // from its materialized operands would be wrong).
+  Insert: {
+    description: [
+      'Return a copy of the indexed collection with `value` inserted before the 1-based `index`.',
+      '`index` may range from 1 to n+1 (n+1 appends). A negative index counts from the end, with -1 appending at the end (Elixir semantics).',
+      'An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
+    ],
+    complexity: 8200,
+    signature: '(indexed_collection, integer, value) -> list',
+    // Element type widens to include the inserted value's type.
+    type: (ops) =>
+      parseType(
+        `list<${typeToString(
+          widen(collectionElementType(ops[0].type.type) ?? 'any', ops[2].type.type)
+        )}>`
+      ),
+    evaluate: ([xs, idx, value], { engine: ce }) => {
+      if (!xs.isFiniteCollection) return undefined;
+      const index = toInteger(idx);
+      if (index === null || index === 0) return undefined;
+      const all = Array.from(xs.each()) as Expression[];
+      const n = all.length;
+      // Convert the 1-based `index` (negative counts from the end, with -1
+      // appending) to a 0-based gap position in 0..n.
+      let gap: number;
+      if (index > 0) {
+        if (index > n + 1) return undefined;
+        gap = index - 1;
+      } else {
+        if (index < -(n + 1)) return undefined;
+        gap = n + 1 + index;
+      }
+      return ce.function('List', [
+        ...all.slice(0, gap),
+        value,
+        ...all.slice(gap),
+      ]);
+    },
+  },
+
+  // Elixir `List.delete_at/2`: return a copy with the element at the 1-based
+  // `index` removed. Eager on finite indexed collections; inert otherwise.
+  DeleteAt: {
+    description: [
+      'Return a copy of the indexed collection with the element at the 1-based `index` removed.',
+      'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
+    ],
+    complexity: 8200,
+    signature: '(indexed_collection, integer) -> list',
+    type: (ops) =>
+      parseType(
+        `list<${typeToString(collectionElementType(ops[0].type.type) ?? 'any')}>`
+      ),
+    evaluate: ([xs, idx], { engine: ce }) => {
+      if (!xs.isFiniteCollection) return undefined;
+      const index = toInteger(idx);
+      if (index === null) return undefined;
+      const all = Array.from(xs.each()) as Expression[];
+      const n = all.length;
+      // Convert the 1-based `index` (negative counts from the end) to a 0-based
+      // position in 0..n-1.
+      let i0: number;
+      if (index > 0) {
+        if (index > n) return undefined;
+        i0 = index - 1;
+      } else if (index < 0) {
+        if (index < -n) return undefined;
+        i0 = n + index;
+      } else return undefined;
+      return ce.function('List', [...all.slice(0, i0), ...all.slice(i0 + 1)]);
+    },
+  },
+
+  // Elixir `List.replace_at/3`: return a copy with the element at the 1-based
+  // `index` replaced by `value`. Eager on finite indexed collections; inert
+  // otherwise.
+  ReplaceAt: {
+    description: [
+      'Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.',
+      'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
+    ],
+    complexity: 8200,
+    signature: '(indexed_collection, integer, value) -> list',
+    // Element type widens to include the replacement value's type.
+    type: (ops) =>
+      parseType(
+        `list<${typeToString(
+          widen(collectionElementType(ops[0].type.type) ?? 'any', ops[2].type.type)
+        )}>`
+      ),
+    evaluate: ([xs, idx, value], { engine: ce }) => {
+      if (!xs.isFiniteCollection) return undefined;
+      const index = toInteger(idx);
+      if (index === null) return undefined;
+      const all = Array.from(xs.each()) as Expression[];
+      const n = all.length;
+      let i0: number;
+      if (index > 0) {
+        if (index > n) return undefined;
+        i0 = index - 1;
+      } else if (index < 0) {
+        if (index < -n) return undefined;
+        i0 = n + index;
+      } else return undefined;
+      const out = [...all];
+      out[i0] = value;
+      return ce.function('List', out);
+    },
+  },
+
   RotateLeft: {
     description:
       'Rotate the elements of the collection to the left by n positions.',
@@ -2818,6 +3048,103 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
+  // Return the element of the collection that maximizes/minimizes the unary
+  // key `f(x)`. First occurrence wins ties. Eager and inert (undefined) on a
+  // non-finite or empty collection, or when a key comparison is undetermined.
+  MaxBy: {
+    description:
+      'Return the element of the collection that maximizes the given key function.',
+    complexity: 8200,
+    lazy: true,
+    signature: '(collection, function) -> value',
+    canonical: (ops, { engine }) => {
+      const collection = checkType(engine, ops[0], 'collection');
+      const fn = canonicalFunctionLiteral(ops[1]);
+      if (!collection.isValid || !fn) return null;
+      return engine._fn('MaxBy', [collection, fn]);
+    },
+    type: (ops) => collectionElementType(ops[0].type.type) ?? 'any',
+    evaluate: ([xs, fn], { engine: ce }) => {
+      if (!xs.isFiniteCollection) return undefined;
+      const f = applicable(fn);
+      return run(extremumBy(xs, f, ce, 'max', 'element'), ce._timeRemaining);
+    },
+  },
+
+  MinBy: {
+    description:
+      'Return the element of the collection that minimizes the given key function.',
+    complexity: 8200,
+    lazy: true,
+    signature: '(collection, function) -> value',
+    canonical: (ops, { engine }) => {
+      const collection = checkType(engine, ops[0], 'collection');
+      const fn = canonicalFunctionLiteral(ops[1]);
+      if (!collection.isValid || !fn) return null;
+      return engine._fn('MinBy', [collection, fn]);
+    },
+    type: (ops) => collectionElementType(ops[0].type.type) ?? 'any',
+    evaluate: ([xs, fn], { engine: ce }) => {
+      if (!xs.isFiniteCollection) return undefined;
+      const f = applicable(fn);
+      return run(extremumBy(xs, f, ce, 'min', 'element'), ce._timeRemaining);
+    },
+  },
+
+  // Return the 1-based index (Julia semantics) of the element maximizing/
+  // minimizing the unary key `f(x)`, or the element itself as the key when `f`
+  // is absent. First occurrence wins ties. Inert on non-finite/empty
+  // collections or undetermined comparisons.
+  ArgMax: {
+    description:
+      'Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).',
+    complexity: 8200,
+    lazy: true,
+    signature: '(indexed_collection, function?) -> integer',
+    canonical: (ops, { engine }) => {
+      // An index result only makes sense for an INDEXED collection — match
+      // the declared signature (MaxBy/MinBy, which return the element,
+      // accept any collection).
+      const collection = checkType(engine, ops[0], 'indexed_collection');
+      if (!collection.isValid) return null;
+      if (ops[1] === undefined) return engine._fn('ArgMax', [collection]);
+      const fn = canonicalFunctionLiteral(ops[1]);
+      if (!fn) return null;
+      return engine._fn('ArgMax', [collection, fn]);
+    },
+    type: () => 'integer',
+    evaluate: ([xs, fn], { engine: ce }) => {
+      if (!xs.isFiniteCollection) return undefined;
+      const f = fn ? applicable(fn) : undefined;
+      return run(extremumBy(xs, f, ce, 'max', 'index'), ce._timeRemaining);
+    },
+  },
+
+  ArgMin: {
+    description:
+      'Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).',
+    complexity: 8200,
+    lazy: true,
+    signature: '(indexed_collection, function?) -> integer',
+    canonical: (ops, { engine }) => {
+      // An index result only makes sense for an INDEXED collection — match
+      // the declared signature (MaxBy/MinBy, which return the element,
+      // accept any collection).
+      const collection = checkType(engine, ops[0], 'indexed_collection');
+      if (!collection.isValid) return null;
+      if (ops[1] === undefined) return engine._fn('ArgMin', [collection]);
+      const fn = canonicalFunctionLiteral(ops[1]);
+      if (!fn) return null;
+      return engine._fn('ArgMin', [collection, fn]);
+    },
+    type: () => 'integer',
+    evaluate: ([xs, fn], { engine: ce }) => {
+      if (!xs.isFiniteCollection) return undefined;
+      const f = fn ? applicable(fn) : undefined;
+      return run(extremumBy(xs, f, ce, 'min', 'index'), ce._timeRemaining);
+    },
+  },
+
   // Randomize the order of the elements in the collection.
   Shuffle: {
     description:
@@ -3031,29 +3358,124 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
-  // Partition a collection into k nearly equal parts or by a predicate function
+  // Elixir `Enum.dedup` / R `rle`-style collapse: keep each element that
+  // differs from its immediate predecessor, collapsing consecutive runs of
+  // equal elements to a single element. This is NOT `Unique` (which removes
+  // ALL duplicates globally): `Dedup([1,1,2,2,1])` is `[1,2,1]` whereas
+  // `Unique([1,1,2,2,1])` is `[1,2]`. Lazy — keeps only the previous element.
+  Dedup: {
+    description: [
+      'Return the collection with consecutive duplicate elements collapsed to a single element.',
+      'Only immediately-adjacent equal elements are removed; unlike `Unique`, a value that recurs after a different element is kept.',
+    ],
+    complexity: 8200,
+    lazy: true,
+    signature: '(collection) -> collection',
+    // Preserve the source's element type / indexed-ness (mirrors TakeWhile).
+    type: (ops) => ops[0].type,
+    canonical: (ops, { engine }) => {
+      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      if (!collection.isValid) return null;
+      return engine._fn('Dedup', [collection]);
+    },
+    collection: {
+      isLazy: (_expr) => true,
+      // Length is unknown without enumeration. For a finite source we can count
+      // the deduped result (bounded); an infinite source stays unknown.
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.op1.isFiniteCollection !== true) return undefined;
+        let n = 0;
+        for (const _ of expr.each()) n++;
+        return n;
+      },
+      // Finite source ⇒ deduped result is finite; otherwise unknown.
+      isFinite: (expr) =>
+        isFunction(expr) && expr.op1.isFiniteCollection === true
+          ? true
+          : undefined,
+      // Empty iff the source is empty (dedup of a non-empty source is
+      // non-empty). Cheap and keeps the collection materializable.
+      isEmpty: (expr) =>
+        isFunction(expr) ? expr.op1.isEmptyCollection : undefined,
+      iterator: (expr) => {
+        if (!isFunction(expr))
+          return { next: () => ({ value: undefined, done: true }) };
+        const source = expr.op1.each();
+        // `.isSame()`: exact structural/symbolic equality (see ChunkBy note).
+        let prev: Expression | undefined = undefined;
+        let hasPrev = false;
+        return {
+          next: () => {
+            while (true) {
+              const { value, done } = source.next();
+              if (done) return { value: undefined, done: true };
+              if (hasPrev && prev!.isSame(value as Expression)) continue;
+              prev = value as Expression;
+              hasPrev = true;
+              return { value, done: false };
+            }
+          },
+        };
+      },
+      // The k-th deduped element: walk the source collapsing adjacent equals.
+      at: (expr, index) => {
+        if (typeof index !== 'number' || index < 1) return undefined;
+        if (!isFunction(expr)) return undefined;
+        let i = 0;
+        let prev: Expression | undefined = undefined;
+        let hasPrev = false;
+        for (const item of expr.op1.each()) {
+          if (hasPrev && prev!.isSame(item)) continue;
+          prev = item;
+          hasPrev = true;
+          i += 1;
+          if (i === index) return item;
+        }
+        return undefined;
+      },
+    },
+  },
+
+  // Partition a collection into fixed-size chunks, sliding windows, or by a
+  // predicate function. See `Chunk` for splitting into k nearly-equal groups.
   Partition: {
-    description:
-      'Partition a collection into a number of groups, or into two groups selected by a predicate.',
+    description: [
+      'Partition a collection into consecutive chunks each of size `n`; the trailing chunk may be shorter when `n` does not divide the length.',
+      'With a third argument `step`, produce sliding windows of length `n` whose starts are `step` apart, keeping only complete windows.',
+      'With a predicate function instead of an integer, split into two groups: elements for which the predicate is true, and those for which it is false.',
+      'Asymmetry: with no `step`, the trailing partial chunk is included; with an explicit `step`, only complete windows are returned.',
+      'See `Chunk` for splitting into a given number of nearly-equal groups.',
+    ],
     wikidata: 'Q381060',
     complexity: 8200,
-    signature: '(collection, integer | function) -> list',
+    signature: '(collection, integer | function, integer?) -> list',
     type: ([xs]) =>
-      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
-    evaluate: ([xs, arg], { engine: ce }) => {
+      `list<list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>>`,
+    evaluate: ([xs, arg, stepArg], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
 
-      // Partition(collection, integer)
-      const k = toInteger(arg);
-      if (k !== null && k > 0) {
+      // Partition(collection, n) and Partition(collection, n, step)
+      const n = toInteger(arg);
+      if (n !== null) {
+        if (n <= 0) return undefined;
         const all = Array.from(xs.each());
         const result: Expression[] = [];
-        const chunkSize = Math.ceil(all.length / k);
 
-        for (let i = 0; i < k; i++) {
-          const chunk = all.slice(i * chunkSize, (i + 1) * chunkSize);
-          result.push(ce.function('List', chunk));
+        // Partition(collection, n, step) → sliding windows of length `n`
+        // whose starts are `step` apart; only COMPLETE windows are emitted.
+        if (stepArg !== undefined) {
+          const step = toInteger(stepArg);
+          if (step === null || step <= 0) return undefined;
+          for (let i = 0; i + n <= all.length; i += step)
+            result.push(ce.function('List', all.slice(i, i + n)));
+          return ce.function('List', result);
         }
+
+        // Partition(collection, n) → consecutive chunks EACH of size `n`; the
+        // trailing chunk may be shorter when `n` does not divide the length.
+        for (let i = 0; i < all.length; i += n)
+          result.push(ce.function('List', all.slice(i, i + n)));
 
         return ce.function('List', result);
       }
@@ -3084,7 +3506,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Chunk: {
-    description: 'Split the collection into `k` nearly equal-sized chunks.',
+    description:
+      'Split the collection into `k` nearly equal-sized groups. See `Partition` for splitting into fixed-size chunks.',
     complexity: 8200,
     signature: '(collection, integer) -> list<list>',
     evaluate: ([xs, n], { engine: ce }) => {
@@ -3101,6 +3524,58 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
 
       return ce.function('List', result);
+    },
+  },
+
+  // Elixir `Enum.chunk_by` / Wolfram `Split` / Haskell `groupBy`-on-adjacent:
+  // split the collection into maximal runs of CONSECUTIVE elements over which
+  // the unary key `f(x)` yields the same value. Returns a list of lists.
+  ChunkBy: {
+    description: [
+      'Split the collection into maximal runs of consecutive elements over which the key function yields the same value.',
+      'Returns a list of lists. Unlike `GroupBy`, only adjacent elements are grouped, so a key value that recurs after a different run starts a new chunk.',
+    ],
+    complexity: 8200,
+    signature: '(collection, function) -> list<list>',
+    // Element types flow through from the source: list<list<elt>>.
+    type: (ops) =>
+      parseType(
+        `list<list<${typeToString(
+          collectionElementType(ops[0].type.type) ?? 'any'
+        )}>>`
+      ),
+    evaluate: ([xs, fn], { engine: ce }) => {
+      if (!xs.isFiniteCollection) return undefined;
+      const f = applicable(fn);
+      if (!f) return undefined;
+
+      const runs: Expression[][] = [];
+      let currentKey: Expression | undefined = undefined;
+      let current: Expression[] = [];
+      for (const item of xs.each()) {
+        const key = f([item]) ?? ce.Nothing;
+        // Compare run keys with `.isSame()` — exact structural/symbolic
+        // equality, the engine's internal-comparison convention. `.isEqual()`
+        // is deliberately avoided: it can be undetermined and can equate
+        // structurally-distinct exact values, which would make the run
+        // boundaries unstable.
+        if (current.length === 0) {
+          current = [item];
+          currentKey = key;
+        } else if (currentKey!.isSame(key)) {
+          current.push(item);
+        } else {
+          runs.push(current);
+          current = [item];
+          currentKey = key;
+        }
+      }
+      if (current.length > 0) runs.push(current);
+
+      return ce.function(
+        'List',
+        runs.map((r) => ce.function('List', r))
+      );
     },
   },
 
@@ -3176,33 +3651,32 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         return anyUnknown ? undefined : false;
       },
+      // Driven by each source's iterator — not by up-front counts — so a
+      // source with an unknown count (or an infinite one zipped with a
+      // finite one) still iterates; the zip ends as soon as any source ends.
       iterator: (expr) => {
-        if (!isFunction(expr))
+        if (!isFunction(expr) || expr.nops === 0)
           return { next: () => ({ value: undefined, done: true }) };
-        const minCount = zipCount(expr);
-        if (minCount === undefined || minCount <= 0)
-          return { next: () => ({ value: undefined, done: true }) };
-        let index = 1;
+        const sources = expr.ops.map((op) => op.each());
         return {
           next: () => {
-            if (index === minCount + 1) return { value: undefined, done: true };
-            index += 1;
-            const items = expr.ops.map((op) => op.at(index - 1));
-            if (items.some((x) => x === undefined))
-              return { value: undefined, done: true };
-            return {
-              value: expr.engine.tuple(...(items as Expression[])),
-              done: false,
-            };
+            const items: Expression[] = [];
+            for (const source of sources) {
+              const { value, done } = source.next();
+              if (done || value === undefined)
+                return { value: undefined, done: true };
+              items.push(value);
+            }
+            return { value: expr.engine.tuple(...items), done: false };
           },
         };
       },
       at: (expr, index) => {
         if (typeof index !== 'number' || index < 1) return undefined;
-        if (!isFunction(expr)) return undefined;
-        const minCount = zipCount(expr);
-        if (minCount === undefined || index < 1 || index > minCount)
-          return undefined;
+        if (!isFunction(expr) || expr.nops === 0) return undefined;
+        // No up-front count needed — a source with an unknown count still
+        // answers `at`, and any source without an element there bounds the
+        // zip.
         const items = expr.ops.map((op) => op.at(index));
         if (items.some((x) => x === undefined)) return undefined;
         return expr.engine.tuple(...(items as Expression[]));
@@ -4170,22 +4644,55 @@ export function sortedIndices(
   expr: Expression,
   fn: Expression | undefined = undefined
 ): number[] | undefined {
+  const l = expr.count;
+  if (l === undefined || !Number.isFinite(l) || l < 1) return undefined;
+
+  const indices = Array.from({ length: l }, (_, i) => i + 1);
+
+  const defaultCmp = (a: Expression, b: Expression) => {
+    if (a.isLess(b)) return -1;
+    if (a.isEqual(b)) return 0;
+    return 1;
+  };
+
   const f = fn ? applicable(fn) : undefined;
+
+  // A unary function is used as a sort KEY: sort ascending by `f(x)` using
+  // `compareKeys` (both comparison directions probed — the one-directional
+  // `defaultCmp` treats an undetermined comparison as "greater"). Compute
+  // each key once (decorate-sort-undecorate). A key that cannot be computed
+  // or an undetermined key comparison makes the whole sort undetermined
+  // (inert), matching `MaxBy`/`MinBy`/`ArgMax`/`ArgMin`. A binary function
+  // is used as a comparator (historical behavior); a statically-unknown
+  // arity (bare `function`) is also treated as a comparator, so nothing
+  // existing changes meaning.
+  if (f && fn && functionArity(fn) === 1) {
+    const keys = new Map<number, Expression>();
+    for (const i of indices) {
+      const key = f([expr.at(i)!]);
+      if (key === undefined) return undefined;
+      keys.set(i, key);
+    }
+    // Array.prototype.sort is stable, so elements with equal keys keep their
+    // original relative order (first-listed stays first).
+    let undetermined = false;
+    indices.sort((i, j) => {
+      const c = compareKeys(keys.get(i)!, keys.get(j)!);
+      if (c === undefined) {
+        undetermined = true;
+        return 0;
+      }
+      return c;
+    });
+    return undetermined ? undefined : indices;
+  }
+
   const cmpFn = f
     ? (a: Expression, b: Expression) => {
         const r = f([a, b]);
         return r?.isNegative ? -1 : r?.isSame(0) ? 0 : 1;
       }
-    : (a: Expression, b: Expression) => {
-        if (a.isLess(b)) return -1;
-        if (a.isEqual(b)) return 0;
-        return 1;
-      };
-
-  const l = expr.count;
-  if (l === undefined || !Number.isFinite(l) || l < 1) return undefined;
-
-  const indices = Array.from({ length: l }, (_, i) => i + 1);
+    : defaultCmp;
 
   indices.sort((i, j) => {
     const va = expr.at(i)!;
@@ -4194,6 +4701,73 @@ export function sortedIndices(
   });
 
   return indices;
+}
+
+/**
+ * Return the fixed arity of a function operand, read from its declared
+ * signature type: 1 for a unary function, 2 for a binary function, or
+ * `undefined` when the arity is not statically a single fixed value (a bare
+ * `function` type, a variadic or optional-argument signature, or a non-
+ * signature type).
+ */
+function functionArity(fn: Expression): number | undefined {
+  const sig = functionSignature(fn.type.type);
+  if (!sig || typeof sig === 'string' || sig.kind !== 'signature')
+    return undefined;
+  // Variadic or optional arguments make the arity ambiguous.
+  if (sig.variadicArg || (sig.optArgs && sig.optArgs.length > 0))
+    return undefined;
+  return sig.args?.length;
+}
+
+/** Compare two (already evaluated) key values with the default element
+ * ordering. Returns -1, 0, 1, or `undefined` when the order is undetermined
+ * (symbolic keys). `a.isLess(b)` being `false` is NOT the same as
+ * `b.isLess(a)` being `true`, so both directions are probed. */
+function compareKeys(a: Expression, b: Expression): -1 | 0 | 1 | undefined {
+  if (a.isEqual(b) === true) return 0;
+  if (a.isLess(b) === true) return -1;
+  if (b.isLess(a) === true) return 1;
+  return undefined;
+}
+
+/** Shared driver for `MaxBy`/`MinBy`/`ArgMax`/`ArgMin`. Enumerates a finite
+ * collection, computing the unary key `f(x)` (or the element itself when `f`
+ * is absent) once per element, and tracks the extremum. First occurrence wins
+ * ties. Yields per element for interruptibility. Returns the winning element
+ * (or its 1-based index when `want === 'index'`), or `undefined` (inert) on an
+ * empty collection or an undetermined key comparison. */
+function* extremumBy(
+  xs: Expression,
+  f: ((xs: ReadonlyArray<Expression>) => Expression | undefined) | undefined,
+  ce: ComputeEngine,
+  mode: 'max' | 'min',
+  want: 'element' | 'index'
+): Generator<undefined, Expression | undefined, unknown> {
+  let best: Expression | undefined = undefined;
+  let bestKey: Expression | undefined = undefined;
+  let index = 0;
+  for (const item of xs.each()) {
+    index += 1;
+    const key = f ? f([item]) : item;
+    if (key === undefined) return undefined;
+    const winner = want === 'index' ? ce.number(index) : item;
+    if (bestKey === undefined) {
+      bestKey = key;
+      best = winner;
+      yield undefined;
+      continue;
+    }
+    const cmp = compareKeys(bestKey, key);
+    if (cmp === undefined) return undefined;
+    const takeNew = mode === 'max' ? cmp === -1 : cmp === 1;
+    if (takeNew) {
+      bestKey = key;
+      best = winner;
+    }
+    yield undefined;
+  }
+  return best;
 }
 
 /**
@@ -4366,11 +4940,20 @@ function* tabulateIterator(
   for (let i = 1; i <= dims[0]; i++) yield tabulateElement(ce, fn, dims, i);
 }
 
-function zipCount(expr: Expression): number | undefined {
-  if (!isFunction(expr)) return undefined;
-  const counts = expr.ops.map((x) => x.count);
+// The length of an element-wise combination of collections (Zip, and the
+// multi-collection `Map`): the shortest input bounds the result, so `undefined`
+// as soon as any count is unknown, `Infinity` only if all are infinite, and
+// otherwise the minimum — a finite source bounds an infinite one
+// (`Math.min` handles `Infinity` operands directly).
+function minCount(
+  counts: ReadonlyArray<number | undefined>
+): number | undefined {
   if (counts.some((c) => c === undefined)) return undefined;
-  if (counts.some((c) => !Number.isFinite(c))) return Infinity;
   if (counts.length === 0) return 0;
   return Math.min(...(counts as number[]));
+}
+
+function zipCount(expr: Expression): number | undefined {
+  if (!isFunction(expr)) return undefined;
+  return minCount(expr.ops.map((x) => x.count));
 }

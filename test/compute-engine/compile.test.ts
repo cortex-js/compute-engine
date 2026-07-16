@@ -1403,9 +1403,10 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(runJs(e, ['Linspace', 10, 0, 3])).toEqual([10, 5, 0]);
   });
 
-  it('Chunk / Partition mirror the interpreter (k chunks of ceil(len/k))', () => {
+  it('Chunk / Partition mirror the interpreter (k groups / size-n chunks)', () => {
     const e = mkEngine();
     const L = ['List', 1, 5, 2, 4, 3];
+    // Chunk(xs, k): k nearly-equal GROUPS of ceil(len/k)
     expect(runJs(e, ['Chunk', L, 2])).toEqual([
       [1, 5, 2],
       [4, 3],
@@ -1418,9 +1419,22 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       [],
       [],
     ]);
+    // Partition(xs, n): chunks of SIZE n; trailing chunk may be shorter
     expect(runJs(e, ['Partition', L, 2])).toEqual([
-      [1, 5, 2],
+      [1, 5],
+      [2, 4],
+      [3],
+    ]);
+    // Partition(xs, n, step): complete sliding windows only
+    expect(runJs(e, ['Partition', L, 2, 1])).toEqual([
+      [1, 5],
+      [5, 2],
+      [2, 4],
       [4, 3],
+    ]);
+    expect(runJs(e, ['Partition', ['List', 1, 2, 3, 4, 5, 6], 2, 3])).toEqual([
+      [1, 2],
+      [4, 5],
     ]);
     // Predicate form: [[matching], [non-matching]]
     expect(
@@ -1515,6 +1529,215 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(() =>
       js.compile(e.box(['Shuffle', 'd', 42]), { realOnly: true })
     ).toThrow(/Fail closed/);
+  });
+
+  // Higher-order collection operators (Any/All/TakeWhile/DropWhile/FlatMap/
+  // Scan) and core scalars (Boole/KroneckerDelta/Element/Identity/Apply).
+  // Values verified against the interpreter.
+  it('Any / All compile the predicate to native some/every', () => {
+    const e = mkEngine();
+    const gt15 = ['Function', ['Greater', 'x', 15], 'x'];
+    const runBool = (mathjson: any) =>
+      compile(e.box(mathjson), { fallback: false })!.run!();
+    expect(runBool(['Any', 'd', gt15])).toBe(true);
+    expect(runBool(['Any', ['List'], gt15])).toBe(false); // vacuous
+    expect(runBool(['All', 'd', gt15])).toBe(false);
+    expect(runBool(['All', ['List'], gt15])).toBe(true); // vacuous
+  });
+
+  it('TakeWhile / DropWhile / FlatMap compile', () => {
+    const e = mkEngine();
+    const lt25 = ['Function', ['Less', 'x', 25], 'x'];
+    expect(runJs(e, ['TakeWhile', 'd', lt25])).toEqual([10, 20]);
+    expect(runJs(e, ['DropWhile', 'd', lt25])).toEqual([30]);
+    expect(
+      runJs(e, [
+        'FlatMap',
+        ['List', 1, 2],
+        ['Function', ['List', 'x', ['Multiply', 10, 'x']], 'x'],
+      ])
+    ).toEqual([1, 10, 2, 20]);
+    // A scalar-valued mapping is kept as-is (native flatMap semantics)
+    expect(
+      runJs(e, ['FlatMap', ['List', 1, 2], ['Function', ['Multiply', 10, 'x'], 'x']])
+    ).toEqual([10, 20]);
+  });
+
+  it('Scan compiles the running fold (initial value not emitted)', () => {
+    const e = mkEngine();
+    const sub = ['Function', ['Subtract', 'a', 'b'], 'a', 'b'];
+    expect(
+      runJs(e, ['Scan', ['List', 1, 2, 3], ['Function', ['Add', 'a', 'b'], 'a', 'b'], 0])
+    ).toEqual([1, 3, 6]);
+    // No initial value: first element seeds and is emitted as-is
+    expect(runJs(e, ['Scan', ['List', 10, 2, 3], sub])).toEqual([10, 8, 5]);
+    expect(runJs(e, ['Scan', ['List', 10, 2, 3], sub, 0])).toEqual([
+      -10, -12, -15,
+    ]);
+    expect(runJs(e, ['Scan', ['List', 1, 2, 3], 'Add'])).toEqual([1, 3, 6]);
+  });
+
+  it('Boole / KroneckerDelta / Element / Identity / Apply compile', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Boole', ['Greater', 3, 2]])).toBe(1);
+    expect(runJs(e, ['Boole', ['Greater', 2, 3]])).toBe(0);
+    expect(runJs(e, ['KroneckerDelta', 0])).toBe(1);
+    expect(runJs(e, ['KroneckerDelta', 3])).toBe(0);
+    expect(runJs(e, ['KroneckerDelta', 4, 4])).toBe(1);
+    expect(runJs(e, ['KroneckerDelta', 4, 5])).toBe(0);
+    expect(runJs(e, ['KroneckerDelta', 4, 4, 4])).toBe(1);
+    expect(runJs(e, ['KroneckerDelta', 4, 4, 5])).toBe(0);
+    const runBool = (mathjson: any) =>
+      compile(e.box(mathjson), { fallback: false })!.run!();
+    expect(runBool(['Element', 20, 'd'])).toBe(true);
+    expect(runBool(['Element', 99, 'd'])).toBe(false);
+    expect(runJs(e, ['Identity', 42])).toBe(42);
+    expect(
+      runJs(e, ['Apply', ['Function', ['Multiply', 'x', 2], 'x'], 21])
+    ).toBe(42);
+  });
+
+  // Linear algebra (parity with the Python target). Values verified against
+  // the interpreter.
+  it('Dot / MatrixMultiply dispatch on dimensionality', () => {
+    const e = mkEngine();
+    const M = ['List', ['List', 1, 2], ['List', 3, 4]];
+    const M23 = ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]];
+    expect(runJs(e, ['Dot', ['List', 1, 2, 3], ['List', 4, 5, 6]])).toBe(32);
+    expect(runJs(e, ['Dot', M, M])).toEqual([
+      [7, 10],
+      [15, 22],
+    ]);
+    expect(runJs(e, ['MatrixMultiply', M23, ['List', 1, 2, 3]])).toEqual([
+      14, 32,
+    ]);
+    expect(runJs(e, ['MatrixMultiply', ['List', 1, 2], M23])).toEqual([
+      9, 12, 15,
+    ]);
+    expect(runJs(e, ['MatrixMultiply', ['List', 1, 2, 3], ['List', 4, 5, 6]])).toBe(32);
+  });
+
+  it('Cross / Norm / Trace compile', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Cross', ['List', 1, 2, 3], ['List', 4, 5, 6]])).toEqual([
+      -3, 6, -3,
+    ]);
+    expect(runJs(e, ['Norm', ['List', 1, 2, 3]])).toBeCloseTo(Math.sqrt(14), 12);
+    expect(runJs(e, ['Norm', -5])).toBe(5);
+    // Frobenius norm of a matrix; L1 norm with an explicit p
+    expect(
+      runJs(e, ['Norm', ['List', ['List', 1, 2], ['List', 3, 4]]])
+    ).toBeCloseTo(Math.sqrt(30), 12);
+    expect(runJs(e, ['Norm', ['List', 1, 2, 3], 1])).toBe(6);
+    expect(runJs(e, ['Trace', ['List', ['List', 1, 2], ['List', 3, 4]]])).toBe(5);
+  });
+
+  it('Transpose / Determinant / Inverse compile', () => {
+    const e = mkEngine();
+    const M = ['List', ['List', 1, 2], ['List', 3, 4]];
+    expect(
+      runJs(e, ['Transpose', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]])
+    ).toEqual([
+      [1, 4],
+      [2, 5],
+      [3, 6],
+    ]);
+    // A vector transposes to itself, like the interpreter
+    expect(runJs(e, ['Transpose', ['List', 1, 2, 3]])).toEqual([1, 2, 3]);
+    expect(runJs(e, ['Determinant', M])).toBe(-2);
+    expect(
+      runJs(e, [
+        'Determinant',
+        ['List', ['List', 2, 0, 1], ['List', 1, 3, 2], ['List', 1, 1, 1]],
+      ])
+    ).toBe(0);
+    const inv = runJs(e, ['Inverse', M]) as number[][];
+    expect(inv[0][0]).toBeCloseTo(-2, 12);
+    expect(inv[0][1]).toBeCloseTo(1, 12);
+    expect(inv[1][0]).toBeCloseTo(1.5, 12);
+    expect(inv[1][1]).toBeCloseTo(-0.5, 12);
+    // A singular matrix yields NaN (interpreter stays inert)
+    expect(
+      Number.isNaN(
+        runJs(e, ['Inverse', ['List', ['List', 1, 2], ['List', 2, 4]]]) as number
+      )
+    ).toBe(true);
+  });
+
+  it('Range with no explicit step auto-descends, like the interpreter', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Range', 5, 1])).toEqual([5, 4, 3, 2, 1]);
+    expect(runJs(e, ['Range', -2])).toEqual([1, 0, -1, -2]);
+    expect(runJs(e, ['Range', 2, 6])).toEqual([2, 3, 4, 5, 6]);
+    // Symbolic bounds resolve the direction at runtime
+    e.declare('p', 'integer');
+    e.declare('q', 'integer');
+    const r = compile(e.box(['Range', 'p', 'q']), { fallback: false })!;
+    expect(r.run!({ p: 5, q: 1 })).toEqual([5, 4, 3, 2, 1]);
+    expect(r.run!({ p: 2, q: 4 })).toEqual([2, 3, 4]);
+  });
+
+  it('Norm matrix forms use operator norms; unsupported forms fail closed', () => {
+    const e = mkEngine();
+    const M = ['List', ['List', 1, 2], ['List', 3, 4]];
+    // p = 1 on a matrix is the max column abs sum (not the flattened L1)
+    expect(runJs(e, ['Norm', M, 1])).toBe(6);
+    // "Frobenius" is the default matrix norm
+    expect(runJs(e, ['Norm', M, { str: 'Frobenius' }])).toBeCloseTo(
+      Math.sqrt(30),
+      12
+    );
+    // The spectral 2-norm needs an SVD — NaN, never a silently-wrong number
+    expect(Number.isNaN(runJs(e, ['Norm', M, 2]) as number)).toBe(true);
+    const js = new JavaScriptTarget();
+    expect(() =>
+      js.compile(e.box(['Norm', M, { str: 'Nuclear' }]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+  });
+
+  it('rank > 2 Trace yields NaN; explicit Transpose/Trace axes fail closed', () => {
+    const e = mkEngine();
+    const rank3 = [
+      'List',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      ['List', ['List', 5, 6], ['List', 7, 8]],
+    ];
+    // Was: "01,27,8" — string concatenation behind success:true
+    expect(Number.isNaN(runJs(e, ['Trace', rank3]) as number)).toBe(true);
+    const js = new JavaScriptTarget();
+    expect(() =>
+      js.compile(
+        e.box(['Transpose', ['List', ['List', 1, 2], ['List', 3, 4]], 1, 2]),
+        { realOnly: true }
+      )
+    ).toThrow(/Fail closed/);
+  });
+
+  it('Flatten / Shape / Reshape compile', () => {
+    const e = mkEngine();
+    const deep = ['List', ['List', ['List', 1, 2], ['List', 3]], ['List', 4]];
+    expect(
+      runJs(e, ['Flatten', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]])
+    ).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(runJs(e, ['Flatten', deep])).toEqual([1, 2, 3, 4]);
+    expect(runJs(e, ['Flatten', deep, 1])).toEqual([[1, 2], [3], 4]);
+    expect(
+      runJs(e, ['Shape', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]])
+    ).toEqual([2, 3]);
+    expect(runJs(e, ['Shape', ['List', 1, 2, 3]])).toEqual([3]);
+    expect(
+      runJs(e, ['Reshape', ['List', 1, 2, 3, 4, 5, 6], ['Tuple', 2, 3]])
+    ).toEqual([
+      [1, 2, 3],
+      [4, 5, 6],
+    ]);
+    // Cyclic padding, like the interpreter
+    expect(
+      runJs(e, ['Reshape', ['List', 1, 2, 3, 4, 5], ['Tuple', 2, 3]])
+    ).toEqual([
+      [1, 2, 3],
+      [4, 5, 1],
+    ]);
   });
 
   it('a custom Sort comparator fails closed', () => {

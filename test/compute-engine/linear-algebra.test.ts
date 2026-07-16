@@ -699,6 +699,34 @@ describe('Flatten', () => {
       .evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`[1,2,3,4]`);
   });
+
+  it('should fully flatten a RAGGED nested list with no depth (finding 5)', () => {
+    // Non-uniform rows: not a tensor, so the fast `tensor.flatten()` path does
+    // not apply. The no-depth default is "flatten completely" (Wolfram), which
+    // must match `Flatten(list, ∞)` — previously this was a no-op that returned
+    // the input unchanged.
+    const result = ce
+      .expr(['Flatten', ['List', ['List', 1, 'x'], ['List', 2]]])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[1,x,2]`);
+  });
+
+  it('should fully flatten a deeply-nested ragged list with no depth (finding 5)', () => {
+    const result = ce
+      .expr([
+        'Flatten',
+        ['List', ['List', ['List', 1, 2]], ['List', ['List', 3], 'y']],
+      ])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[1,2,3,y]`);
+  });
+
+  it('no-depth ragged flatten equals depth-∞ flatten (finding 5)', () => {
+    const ragged = ['List', ['List', 1, 'x'], ['List', 2]];
+    const noDepth = ce.expr(['Flatten', ragged]).evaluate().toString();
+    const bigDepth = ce.expr(['Flatten', ragged, 1000]).evaluate().toString();
+    expect(noDepth).toEqual(bigDepth);
+  });
 });
 
 describe('Transpose', () => {

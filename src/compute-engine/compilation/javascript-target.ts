@@ -4,6 +4,7 @@ import {
   isSymbol,
   isNumber,
   isFunction,
+  isString,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { Complex } from 'complex-esm';
@@ -487,52 +488,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Reduce: cannot compile — first operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
       );
-    let combiner: string | undefined;
-    if (isSymbol(op)) {
-      switch (op.symbol) {
-        case 'Add':
-          combiner = '(_a, _b) => _a + _b';
-          break;
-        case 'Multiply':
-          combiner = '(_a, _b) => _a * _b';
-          break;
-        case 'Min':
-          combiner = '(_a, _b) => Math.min(_a, _b)';
-          break;
-        case 'Max':
-          combiner = '(_a, _b) => Math.max(_a, _b)';
-          break;
-      }
-    }
+    let combiner = builtinCombiner(op);
     if (combiner === undefined && (isFunction(op, 'Function') || isSymbol(op))) {
       if (init === undefined || init === null)
         throw new Error(
           `Reduce: a custom combiner compiles only with an explicit ` +
             `initial value. Fail closed (D6).`
         );
-      // Only accept a combiner that is structurally callable AND binary: a
-      // `Function` literal or a function-valued symbol whose arity is exactly 2
-      // (arity is statically knowable — `nops − 1` params — so a unary/ternary
-      // combiner fails closed at compile time rather than silently dropping or
-      // fabricating an argument at runtime, where the interpreter raises an
-      // arity error); or an operator symbol, which lowers to a binary lambda
-      // only for the binary arithmetic operators (enforced in
-      // `BaseCompiler.compile`, which fails closed for unary/relational/logical
-      // operator symbols). A value-bound or dangling symbol fails closed too.
-      let callable = false;
-      if (isFunction(op, 'Function')) {
-        callable = op.nops - 1 === 2;
-      } else if (isSymbol(op)) {
-        const literal = BaseCompiler.userFunctionLiteral(op.engine, op.symbol);
-        if (literal !== undefined) callable = literal.nops - 1 === 2;
-        else callable = target.operators?.(op.symbol) !== undefined;
-      }
-      // Wrap to a fixed binary arity: native `reduce` passes
-      // `(acc, x, index, array)` and the extra arguments must not leak into
-      // the combiner's parameters (the interpreter passes exactly
-      // `(acc, x)`). The combiner is hoisted so it is instantiated once.
-      if (callable)
-        combiner = `((_f) => (_a, _b) => _f(_a, _b))(${compile(op)})`;
+      combiner = customCombiner(op, compile, target);
     }
     if (combiner === undefined)
       throw new Error(
@@ -792,21 +755,32 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `((_l, _k) => { _k = Math.round(_k); if (!(Number.isFinite(_k) && _k > 0)) return []; const _sz = Math.ceil(_l.length / _k); return Array.from({ length: _k }, (_, _i) => _l.slice(_i * _sz, (_i + 1) * _sz)); })(${coll}, ${compile(args[1])})`;
   },
-  // Integer form is identical to `Chunk`; the predicate form yields
-  // [[matching], [non-matching]]. The predicate is hoisted and called
-  // unary, like the other higher-order operators.
+  // Integer form yields chunks of SIZE n (trailing chunk may be shorter);
+  // with a step, complete sliding windows only — mirroring the interpreter.
+  // The predicate form yields [[matching], [non-matching]]. The predicate is
+  // hoisted and called unary, like the other higher-order operators.
   Partition: (args, compile) => {
     const coll = collArg('Partition', args[0], compile);
     const arg = args[1];
     if (arg == null) throw new Error('Partition: missing operand');
     if (arg.type.matches('number')) {
-      const kConst = tryGetConstant(arg);
-      if (kConst !== undefined && !(Math.round(kConst) > 0))
+      const nConst = tryGetConstant(arg);
+      if (nConst !== undefined && !(Math.round(nConst) > 0))
         throw new Error(
-          `Partition: a statically non-positive group count (${kConst}) is ` +
+          `Partition: a statically non-positive chunk size (${nConst}) is ` +
             `inert in the interpreter. Fail closed (D6).`
         );
-      return `((_l, _k) => { _k = Math.round(_k); if (!(Number.isFinite(_k) && _k > 0)) return []; const _sz = Math.ceil(_l.length / _k); return Array.from({ length: _k }, (_, _i) => _l.slice(_i * _sz, (_i + 1) * _sz)); })(${coll}, ${compile(arg)})`;
+      const step = args[2];
+      if (step !== undefined) {
+        const stepConst = tryGetConstant(step);
+        if (stepConst !== undefined && !(Math.round(stepConst) > 0))
+          throw new Error(
+            `Partition: a statically non-positive step (${stepConst}) is ` +
+              `inert in the interpreter. Fail closed (D6).`
+          );
+        return `((_l, _n, _s) => { _n = Math.round(_n); _s = Math.round(_s); if (!(Number.isFinite(_n) && _n > 0 && Number.isFinite(_s) && _s > 0)) return []; const _r = []; for (let _i = 0; _i + _n <= _l.length; _i += _s) _r.push(_l.slice(_i, _i + _n)); return _r; })(${coll}, ${compile(arg)}, ${compile(step)})`;
+      }
+      return `((_l, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; const _r = []; for (let _i = 0; _i < _l.length; _i += _n) _r.push(_l.slice(_i, _i + _n)); return _r; })(${coll}, ${compile(arg)})`;
     }
     if (
       isFunction(arg, 'Function') ||
@@ -849,6 +823,204 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.shuffle(${coll}, ${s})`;
     }
     return `_SYS.shuffle(${coll})`;
+  },
+  // True if the predicate holds for at least one / every element (vacuously
+  // False / True on an empty collection, like `.some`/`.every`). Only the
+  // predicate form compiles: without a predicate the elements must be
+  // booleans, which a numeric collection cannot prove — the interpreter
+  // stays inert there.
+  Any: (args, compile) => {
+    const coll = collArg('Any', args[0], compile);
+    if (args[1] == null)
+      throw new Error(
+        `Any: only the predicate form compiles. Fail closed (D6).`
+      );
+    return `((_f) => (${coll}).some((_x) => _f(_x)))(${compile(args[1])})`;
+  },
+  All: (args, compile) => {
+    const coll = collArg('All', args[0], compile);
+    if (args[1] == null)
+      throw new Error(
+        `All: only the predicate form compiles. Fail closed (D6).`
+      );
+    return `((_f) => (${coll}).every((_x) => _f(_x)))(${compile(args[1])})`;
+  },
+  // Longest prefix satisfying the predicate / the rest after that prefix.
+  TakeWhile: (args, compile) => {
+    const coll = collArg('TakeWhile', args[0], compile);
+    if (args[1] == null) throw new Error('TakeWhile: missing predicate');
+    return `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? _l.slice() : _l.slice(0, _i); })(${compile(args[1])}, ${coll})`;
+  },
+  DropWhile: (args, compile) => {
+    const coll = collArg('DropWhile', args[0], compile);
+    if (args[1] == null) throw new Error('DropWhile: missing predicate');
+    return `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? [] : _l.slice(_i); })(${compile(args[1])}, ${coll})`;
+  },
+  // Map + flatten one level. Native `flatMap` matches the interpreter for
+  // both shapes: a collection-valued mapping is spliced, a scalar result is
+  // kept as-is.
+  FlatMap: (args, compile) => {
+    const coll = collArg('FlatMap', args[0], compile);
+    if (args[1] == null) throw new Error('FlatMap: missing mapping function');
+    return `((_f) => (${coll}).flatMap((_x) => _f(_x)))(${compile(args[1])})`;
+  },
+  // Running fold: the accumulator AFTER each element; the initial value is
+  // not emitted. Without an initial value the first element seeds the
+  // accumulator and is emitted as-is — unlike `Reduce`, both interpreter
+  // forms are deterministic, so both compile.
+  Scan: (args, compile, target) => {
+    const coll = args[0];
+    const op = args[1];
+    const init = args[2];
+    if (coll == null || op == null) throw new Error('Scan: missing argument');
+    if (!isIndexedCollectionOperand(coll))
+      throw new Error(
+        `Scan: cannot compile — first operand is not an indexed collection ` +
+          `(list/vector/range). Fail closed (D6).`
+      );
+    const combiner =
+      builtinCombiner(op) ??
+      (isFunction(op, 'Function') || isSymbol(op)
+        ? customCombiner(op, compile, target)
+        : undefined);
+    if (combiner === undefined)
+      throw new Error(
+        `Scan: the combiner does not compile to a function — only ` +
+          `Add/Multiply/Min/Max folds, function literals, and user-defined ` +
+          `functions compile on the JavaScript target. Fail closed (D6).`
+      );
+    const collCode = compile(coll);
+    if (init !== undefined && init !== null)
+      return `((_f, _l, _a) => _l.map((_x) => (_a = _f(_a, _x))))(${combiner}, ${collCode}, ${compile(init)})`;
+    return `((_f, _l) => { let _a; return _l.map((_x, _i) => (_a = _i === 0 ? _x : _f(_a, _x))); })(${combiner}, ${collCode})`;
+  },
+  // --- Core scalar operators ---------------------------------------------
+  // Iverson bracket: 1 if the boolean argument is true, 0 if false. A
+  // provably-boolean condition compiles bare; otherwise the `_SYS.cond`
+  // guard rethrows on a non-boolean at runtime (the interpreter stays
+  // symbolic for an undetermined predicate — no numeric equivalent).
+  Boole: (args, compile) => {
+    if (args[0] == null) throw new Error('Boole: missing argument');
+    const c = compile(args[0]);
+    if (BaseCompiler.isBooleanValued(args[0])) return `((${c}) ? 1 : 0)`;
+    return `(_SYS.cond(${c}) ? 1 : 0)`;
+  },
+  // δ: 1 when all arguments are equal — a single argument compares to 0 —
+  // else 0, using the same tolerance as compiled `Equal`. Arguments are
+  // hoisted into IIFE parameters so each is evaluated once.
+  KroneckerDelta: (args, compile) => {
+    if (args.length === 0 || args[0] == null)
+      throw new Error('KroneckerDelta: missing argument');
+    const tol = args[0].engine.tolerance ?? 1e-10;
+    if (args.length === 1)
+      return `(Math.abs(${compile(args[0])}) <= ${tol} ? 1 : 0)`;
+    return `((..._v) => _v.every((_x) => Math.abs(_x - _v[0]) <= ${tol}) ? 1 : 0)(${args.map((a) => compile(a)).join(', ')})`;
+  },
+  // Membership of a value in an indexed collection — `Contains` with the
+  // operands flipped. Same primitive-element restriction; a domain (e.g.
+  // `Element(x, Integers)`) is not an indexed collection and fails closed.
+  Element: (args, compile) => {
+    if (args[0] == null || args[1] == null)
+      throw new Error('Element: missing argument');
+    requirePrimitiveElements('Element', args[1]);
+    const coll = collArg('Element', args[1], compile);
+    return `(${coll}).includes(${compile(args[0])})`;
+  },
+  Identity: (args, compile) => {
+    if (args[0] == null) throw new Error('Identity: missing argument');
+    return compile(args[0]);
+  },
+  // Apply a function literal to arguments. (`Apply` with a *symbol* head
+  // canonicalizes to a direct call, so only the function-literal form
+  // reaches this handler.)
+  Apply: (args, compile) => {
+    if (args[0] == null) throw new Error('Apply: missing function');
+    return `(${compile(args[0])})(${args
+      .slice(1)
+      .map((a) => compile(a))
+      .join(', ')})`;
+  },
+  // --- Linear algebra ------------------------------------------------------
+  // `Dot` and `MatrixMultiply` share the interpreter's dimensionality
+  // dispatch: vector·vector → scalar, matrix·vector / vector·matrix →
+  // vector, matrix·matrix → matrix. Dimension mismatches yield NaN.
+  Dot: (args, compile) => {
+    if (args[0] == null || args[1] == null)
+      throw new Error('Dot: missing argument');
+    return `_SYS.matmul(${collArg('Dot', args[0], compile, 1)}, ${collArg('Dot', args[1], compile, 2)})`;
+  },
+  MatrixMultiply: (args, compile) => {
+    if (args[0] == null || args[1] == null)
+      throw new Error('MatrixMultiply: missing argument');
+    return `_SYS.matmul(${collArg('MatrixMultiply', args[0], compile, 1)}, ${collArg('MatrixMultiply', args[1], compile, 2)})`;
+  },
+  Cross: (args, compile) => {
+    if (args[0] == null || args[1] == null)
+      throw new Error('Cross: missing argument');
+    return `_SYS.cross(${collArg('Cross', args[0], compile, 1)}, ${collArg('Cross', args[1], compile, 2)})`;
+  },
+  // Norm accepts a scalar (absolute value) or a collection: 2-norm /
+  // Frobenius by default, vector p-norm or matrix 1-/∞-operator norm with a
+  // numeric second operand (`"Frobenius"` is the default; any other named
+  // norm fails closed).
+  Norm: (args, compile) => {
+    if (args[0] == null) throw new Error('Norm: missing argument');
+    if (args[1] != null) {
+      if (isString(args[1])) {
+        if (args[1].string === 'Frobenius')
+          return `_SYS.norm(${compile(args[0])})`;
+        throw new Error(
+          `Norm: the "${args[1].string}" norm does not compile. ` +
+            `Fail closed (D6).`
+        );
+      }
+      return `_SYS.norm(${compile(args[0])}, ${compile(args[1])})`;
+    }
+    return `_SYS.norm(${compile(args[0])})`;
+  },
+  // Explicit axis operands (rank > 2 tensor forms) do not compile.
+  Transpose: (args, compile) => {
+    if (args.length > 1)
+      throw new Error(
+        `Transpose: explicit axes do not compile. Fail closed (D6).`
+      );
+    return `_SYS.transpose(${collArg('Transpose', args[0], compile)})`;
+  },
+  Determinant: (args, compile) =>
+    `_SYS.det(${collArg('Determinant', args[0], compile)})`,
+  // A singular matrix yields NaN (the interpreter stays inert — no numeric
+  // equivalent on a real target).
+  Inverse: (args, compile) =>
+    `_SYS.inv(${collArg('Inverse', args[0], compile)})`,
+  Trace: (args, compile) => {
+    if (args.length > 1)
+      throw new Error(
+        `Trace: explicit axes do not compile. Fail closed (D6).`
+      );
+    return `_SYS.trace(${collArg('Trace', args[0], compile)})`;
+  },
+  Shape: (args, compile) => {
+    if (args[0] == null) throw new Error('Shape: missing argument');
+    return `_SYS.shape(${compile(args[0])})`;
+  },
+  // Flatten to a flat list (native `.flat`), or by an explicit number of
+  // levels when a depth operand is given.
+  Flatten: (args, compile) => {
+    const coll = collArg('Flatten', args[0], compile);
+    if (args[1] != null) return `(${coll}).flat(${compile(args[1])})`;
+    return `(${coll}).flat(Infinity)`;
+  },
+  // Reshape with cyclic padding, matching the interpreter. Only the 1-D and
+  // 2-D target shapes compile.
+  Reshape: (args, compile) => {
+    const coll = collArg('Reshape', args[0], compile);
+    const dims = args[1];
+    if (dims == null) throw new Error('Reshape: missing shape');
+    if (!isFunction(dims) || dims.ops.length === 0 || dims.ops.length > 2)
+      throw new Error(
+        `Reshape: only a 1-D or 2-D target shape compiles. Fail closed (D6).`
+      );
+    return `_SYS.reshape(${coll}, [${dims.ops.map((d) => compile(d)).join(', ')}])`;
   },
   Log: (args, compile) => {
     if (args.length === 1) return `Math.log10(${compile(args[0])})`;
@@ -1013,7 +1185,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       start = '1';
     }
     if (step === '0') throw new Error('Range: step cannot be zero');
-    if (parseFloat(step) === 1.0) {
+    if (args[2] === undefined || args[2] === null) {
+      // No explicit step: like the interpreter, the range auto-descends when
+      // stop < start (`Range(5, 1)` → [5,4,3,2,1]); the implicit step is
+      // ±1, never a fixed +1 (which silently compiled a descending range
+      // to []).
       const fStop = parseFloat(stop);
       const fStart = parseFloat(start);
 
@@ -1023,23 +1199,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // constants with `!isNaN`; symbolic bounds fall through to the runtime
       // length branch below.
       if (!isNaN(fStop) && !isNaN(fStart)) {
-        if (fStop - fStart < 50) {
-          return `[${Array.from(
-            { length: fStop - fStart + 1 },
-            (_, i) => fStart + i
-          ).join(', ')}]`;
+        const dir = fStop >= fStart ? 1 : -1;
+        const len = Math.floor(Math.abs(fStop - fStart)) + 1;
+        if (len < 50) {
+          return `[${Array.from({ length: len }, (_, i) => fStart + dir * i).join(', ')}]`;
         }
-        return `Array.from({length: ${fStop - fStart + 1} 
-        }, (_, i) => ${start} + i)`;
+        return `Array.from({length: ${len}}, (_e, i) => ${start} ${dir === 1 ? '+' : '-'} i)`;
       }
 
-      // The map callback's throwaway element parameter must not be named `_`:
-      // the compiled function binds its argument object to `_`, and a symbolic
+      // Symbolic bounds — the direction is resolved at runtime. The map
+      // callback's throwaway element parameter must not be named `_`: the
+      // compiled function binds its argument object to `_`, and a symbolic
       // bound compiles to a member access like `_.a`. A `_` callback param
-      // would shadow the argument object, so `_.a` in the body would read from
-      // the (undefined) array element. Use `_e` for the unused element.
-      return `Array.from({length: ${stop} - ${start} + 1
-      }, (_e, i) => ${start} + i)`;
+      // would shadow the argument object, so `_.a` in the body would read
+      // from the (undefined) array element. Use `_e` for the unused element.
+      return `((_a, _b) => Array.from({length: Math.floor(Math.abs(_b - _a)) + 1}, (_e, _i) => _b >= _a ? _a + _i : _a - _i))(${start}, ${stop})`;
     }
     return `Array.from({length: Math.floor((${stop} - ${start}) / ${step}) + 1}, (_e, i) => ${start} + i * ${step})`;
   },
@@ -2086,6 +2260,204 @@ const SYS_HELPERS = {
     }
     return l;
   },
+  // --- Linear algebra (real, nested-array representation) ----------------
+  // Dimension mismatches yield NaN (the interpreter's error/inert result
+  // projected onto a real target).
+  //
+  // Product dispatch on dimensionality, mirroring the interpreter's
+  // `Dot`/`MatrixMultiply`: vector·vector → scalar, matrix·vector → vector,
+  // vector·matrix → vector, matrix·matrix → matrix.
+  matmul: (a: any, b: any): any => {
+    const aM = Array.isArray(a?.[0]);
+    const bM = Array.isArray(b?.[0]);
+    if (!aM && !bM) {
+      if (a.length !== b.length) return NaN;
+      let s = 0;
+      for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+      return s;
+    }
+    if (aM && !bM)
+      return a.map((row: number[]) =>
+        row.length === b.length
+          ? row.reduce((s: number, v: number, i: number) => s + v * b[i], 0)
+          : NaN
+      );
+    if (!aM && bM) {
+      if (a.length !== b.length) return NaN;
+      const n = b[0].length;
+      const out = new Array(n).fill(0);
+      for (let i = 0; i < a.length; i++)
+        for (let j = 0; j < n; j++) out[j] += a[i] * b[i][j];
+      return out;
+    }
+    const m = a.length;
+    const k = a[0].length;
+    if (b.length !== k) return NaN;
+    const n = b[0].length;
+    const out: number[][] = [];
+    for (let i = 0; i < m; i++) {
+      const row = new Array(n).fill(0);
+      for (let p = 0; p < k; p++) {
+        const v = a[i][p];
+        for (let j = 0; j < n; j++) row[j] += v * b[p][j];
+      }
+      out.push(row);
+    }
+    return out;
+  },
+  cross: (a: number[], b: number[]): number[] | number =>
+    a.length === 3 && b.length === 3
+      ? [
+          a[1] * b[2] - a[2] * b[1],
+          a[2] * b[0] - a[0] * b[2],
+          a[0] * b[1] - a[1] * b[0],
+        ]
+      : NaN,
+  // Norm: |x| for a scalar; the 2-norm (Frobenius for a matrix) by default.
+  // With an explicit p: for a vector the p-norm (Σ|xᵢ|^p)^(1/p), p =
+  // Infinity → max |xᵢ|; for a matrix the operator norms the interpreter
+  // implements — p = 1 → max column abs sum, p = Infinity → max row abs
+  // sum. Other matrix p-norms (e.g. the spectral 2-norm, which needs an
+  // SVD) yield NaN.
+  norm: (x: unknown, p?: number): number => {
+    if (typeof x === 'number') return Math.abs(x);
+    if (!Array.isArray(x)) return NaN;
+    if (Array.isArray(x[0]) && p !== undefined) {
+      const m = x as number[][];
+      if (p === 1) {
+        let best = 0;
+        for (let j = 0; j < m[0].length; j++) {
+          let s = 0;
+          for (let i = 0; i < m.length; i++) s += Math.abs(m[i][j]);
+          best = Math.max(best, s);
+        }
+        return best;
+      }
+      if (p === Infinity) {
+        let best = 0;
+        for (const row of m) {
+          let s = 0;
+          for (const v of row) s += Math.abs(v);
+          best = Math.max(best, s);
+        }
+        return best;
+      }
+      return NaN;
+    }
+    const flat = x.flat(Infinity) as number[];
+    if (p === Infinity) {
+      let m = 0;
+      for (const v of flat) m = Math.max(m, Math.abs(v));
+      return m;
+    }
+    if (p === undefined || p === 2) {
+      let s = 0;
+      for (const v of flat) s += v * v;
+      return Math.sqrt(s);
+    }
+    let s = 0;
+    for (const v of flat) s += Math.pow(Math.abs(v), p);
+    return Math.pow(s, 1 / p);
+  },
+  // Transpose of a 2D matrix; a vector (or scalar) is returned unchanged,
+  // like the interpreter.
+  transpose: (m: any): any => {
+    if (!Array.isArray(m) || !Array.isArray(m[0])) return m;
+    return m[0].map((_: unknown, j: number) =>
+      m.map((row: number[]) => row[j])
+    );
+  },
+  // Determinant by Gaussian elimination with partial pivoting; a non-square
+  // input yields NaN.
+  det: (m: number[][]): number => {
+    const n = m?.length;
+    if (!n || m.some((row) => !Array.isArray(row) || row.length !== n))
+      return NaN;
+    const a = m.map((row) => row.slice());
+    let d = 1;
+    for (let i = 0; i < n; i++) {
+      let piv = i;
+      for (let r = i + 1; r < n; r++)
+        if (Math.abs(a[r][i]) > Math.abs(a[piv][i])) piv = r;
+      if (a[piv][i] === 0) return 0;
+      if (piv !== i) {
+        [a[i], a[piv]] = [a[piv], a[i]];
+        d = -d;
+      }
+      d *= a[i][i];
+      for (let r = i + 1; r < n; r++) {
+        const f = a[r][i] / a[i][i];
+        for (let c = i; c < n; c++) a[r][c] -= f * a[i][c];
+      }
+    }
+    return d;
+  },
+  // Inverse by Gauss–Jordan with partial pivoting; a non-square or singular
+  // input yields NaN (the interpreter stays inert for a singular matrix).
+  inv: (m: number[][]): number[][] | number => {
+    const n = m?.length;
+    if (!n || m.some((row) => !Array.isArray(row) || row.length !== n))
+      return NaN;
+    const a = m.map((row, i) => [
+      ...row,
+      ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)),
+    ]);
+    for (let i = 0; i < n; i++) {
+      let piv = i;
+      for (let r = i + 1; r < n; r++)
+        if (Math.abs(a[r][i]) > Math.abs(a[piv][i])) piv = r;
+      if (a[piv][i] === 0) return NaN;
+      if (piv !== i) [a[i], a[piv]] = [a[piv], a[i]];
+      const f = a[i][i];
+      for (let c = 0; c < 2 * n; c++) a[i][c] /= f;
+      for (let r = 0; r < n; r++) {
+        if (r === i) continue;
+        const g = a[r][i];
+        if (g === 0) continue;
+        for (let c = 0; c < 2 * n; c++) a[r][c] -= g * a[i][c];
+      }
+    }
+    return a.map((row) => row.slice(n));
+  },
+  trace: (m: number[][]): number => {
+    if (!Array.isArray(m) || !Array.isArray(m[0])) return NaN;
+    let s = 0;
+    for (let i = 0; i < Math.min(m.length, m[0].length); i++) {
+      // A rank > 2 tensor has array diagonal entries — adding one would
+      // string-concatenate. Only a numeric diagonal sums; anything else is
+      // NaN.
+      if (typeof m[i][i] !== 'number') return NaN;
+      s += m[i][i];
+    }
+    return s;
+  },
+  // Dimensions of a (regular) nested array, measured along first elements.
+  shape: (x: unknown): number[] => {
+    const dims: number[] = [];
+    let cur = x;
+    while (Array.isArray(cur)) {
+      dims.push(cur.length);
+      cur = cur[0];
+    }
+    return dims;
+  },
+  // Reshape with cyclic padding (Mathematica-style, matching the
+  // interpreter): the source is flattened, then elements fill the new shape,
+  // wrapping around when the source is shorter. 1-D and 2-D shapes.
+  reshape: (x: unknown[], dims: number[]): unknown => {
+    const flat = x.flat(Infinity);
+    if (flat.length === 0) return NaN;
+    const at = (i: number) => flat[i % flat.length];
+    if (dims.length === 1)
+      return Array.from({ length: Math.max(0, dims[0]) }, (_, i) => at(i));
+    if (dims.length === 2)
+      return Array.from({ length: Math.max(0, dims[0]) }, (_, i) =>
+        Array.from({ length: Math.max(0, dims[1]) }, (_, j) =>
+          at(i * dims[1] + j)
+        )
+      );
+    return NaN;
+  },
   // Positional access for compiled `At`. CE `At` is 1-based; a negative index
   // counts from the end. A zero or out-of-range index yields NaN (the
   // interpreter returns `Nothing`, projected to NaN on a real target).
@@ -2665,6 +3037,60 @@ function collArg(
 }
 
 /**
+ * The built-in `Reduce`/`Scan` combiners: the four associative folds that
+ * compile without an initial value (their seedless native fold agrees with
+ * the interpreter).
+ */
+function builtinCombiner(op: Expression): string | undefined {
+  if (!isSymbol(op)) return undefined;
+  switch (op.symbol) {
+    case 'Add':
+      return '(_a, _b) => _a + _b';
+    case 'Multiply':
+      return '(_a, _b) => _a * _b';
+    case 'Min':
+      return '(_a, _b) => Math.min(_a, _b)';
+    case 'Max':
+      return '(_a, _b) => Math.max(_a, _b)';
+  }
+  return undefined;
+}
+
+/**
+ * Compile a custom `Reduce`/`Scan` combiner, or `undefined` if it is not
+ * admissible. Only accept a combiner that is structurally callable AND
+ * binary: a `Function` literal or a function-valued symbol whose arity is
+ * exactly 2 (arity is statically knowable — `nops − 1` params — so a
+ * unary/ternary combiner fails closed at compile time rather than silently
+ * dropping or fabricating an argument at runtime, where the interpreter
+ * raises an arity error); or an operator symbol, which lowers to a binary
+ * lambda only for the binary arithmetic operators (enforced in
+ * `BaseCompiler.compile`, which fails closed for unary/relational/logical
+ * operator symbols). A value-bound or dangling symbol fails closed too.
+ *
+ * The result is wrapped to a fixed binary arity: native `reduce`/`map` pass
+ * extra arguments (index, array) that must not leak into the combiner's
+ * parameters (the interpreter passes exactly `(acc, x)`), and hoisted so it
+ * is instantiated once.
+ */
+function customCombiner(
+  op: Expression,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  let callable = false;
+  if (isFunction(op, 'Function')) {
+    callable = op.nops - 1 === 2;
+  } else if (isSymbol(op)) {
+    const literal = BaseCompiler.userFunctionLiteral(op.engine, op.symbol);
+    if (literal !== undefined) callable = literal.nops - 1 === 2;
+    else callable = target.operators?.(op.symbol) !== undefined;
+  }
+  if (!callable) return undefined;
+  return `((_f) => (_a, _b) => _f(_a, _b))(${compile(op)})`;
+}
+
+/**
  * Fail closed (D6) unless the collection's elements compile to JS primitives
  * with value equality. `includes`/`Set` use SameValueZero, which is reference
  * identity for compound elements (nested lists compile to arrays, tuples and
@@ -2675,7 +3101,7 @@ function collArg(
  * so complex *content* is caught by `isComplexValued` (which inspects literal
  * operands).
  */
-function requirePrimitiveElements(kind: string, arg: Expression): void {
+export function requirePrimitiveElements(kind: string, arg: Expression): void {
   const elt = collectionElementType(arg.type.type);
   const primitive =
     elt !== undefined &&

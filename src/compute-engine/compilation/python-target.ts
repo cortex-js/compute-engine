@@ -16,6 +16,8 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { requirePrimitiveElements } from './javascript-target.js';
 
 /**
  * Python mathematical constants, keyed by MathJSON symbol.
@@ -335,6 +337,52 @@ function isPyCollectionOperand(e: Expression): boolean {
 }
 
 /**
+ * Module-level runtime helper injected (once, only when referenced) so
+ * `ElementMax`/`ElementMin`/`Clamp` broadcast exactly like the interpreter's
+ * `broadcastOverIndexedCollections` — instead of NumPy's own broadcasting,
+ * which raises `ValueError` on a length mismatch that is not 1-vs-N.
+ *
+ * Semantics reproduced (verified empirically against `.evaluate()`):
+ * - array operands **zip to the shortest** participating length (each array is
+ *   trimmed to `n = min(len)` before the vectorized NumPy op is applied — so
+ *   the fast NumPy path is kept, no per-element Python loop);
+ * - scalar operands broadcast over the arrays;
+ * - a **length-1** result unwraps to a scalar (`ElementMax([1,2],[3]) → 3`);
+ * - all-scalar operands give a scalar.
+ *
+ * Divergence: an **empty** participating array yields an empty NumPy array
+ * here, whereas the interpreter returns `Nothing` (no numeric analogue).
+ * `_op` selects the op: `'max'`→`np.maximum`, `'min'`→`np.minimum`,
+ * `'clip'`→`np.clip(x, lo, hi)`.
+ */
+const PYTHON_BCAST_HELPER = `def _ce_bcast(_op, *args):
+    _arrs = [np.asarray(a) for a in args]
+    _lens = [a.shape[0] for a in _arrs if a.ndim > 0]
+    if _lens:
+        _n = min(_lens)
+        _arrs = [a[:_n] if a.ndim > 0 else a for a in _arrs]
+    if _op == 'clip':
+        _r = np.clip(_arrs[0], _arrs[1], _arrs[2])
+    else:
+        _pair = np.maximum if _op == 'max' else np.minimum
+        _r = _arrs[0]
+        for _a in _arrs[1:]:
+            _r = _pair(_r, _a)
+    _r = np.asarray(_r)
+    if _r.ndim > 0 and _r.shape[0] == 1:
+        return _r[0]
+    return _r
+`;
+
+/** Prepend the `_ce_bcast` helper definition when the compiled `code`
+ * references it. Idempotent per emission unit; a redefinition (if two units are
+ * concatenated) is harmless in Python. */
+function withPythonHelpers(code: string): string {
+  if (code.includes('_ce_bcast(')) return `${PYTHON_BCAST_HELPER}\n${code}`;
+  return code;
+}
+
+/**
  * Compile `Max`/`Min`, which **reduce** (fold every operand — including a
  * collection's elements — to a single extremum). A collection operand is
  * reduced with `np.max`/`np.min`; the per-operand results are then combined
@@ -367,6 +415,54 @@ function compilePythonExtremum(
  * Maps mathematical functions to their NumPy equivalents.
  * Most functions are available in the numpy module with np. prefix.
  */
+/**
+ * Compile a collection operand, failing closed (D6) if it is not an indexed
+ * collection (list/vector/range) — the Python analog of the JavaScript
+ * target's `collArg`. (Local copy of `isIndexedCollectionOperand` to avoid
+ * a cross-target import of a 2-line predicate.)
+ */
+function pyCollArg(
+  kind: string,
+  arg: Expression | undefined,
+  compile: (expr: Expression) => string,
+  position?: number
+): string {
+  if (!arg || !(arg.type.matches('list') || arg.type.matches('indexed_collection')))
+    throw new Error(
+      `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
+        `is not an indexed collection (list/vector/range). Fail closed (D6).`
+    );
+  return compile(arg);
+}
+
+/**
+ * Compile a mapping/predicate operand for the Python target. A `Function`
+ * literal compiles through the target's lambda handler; a bare binary
+ * arithmetic operator symbol lowers to a Python lambda. Anything else —
+ * notably a user-defined function symbol, which the shared user-function
+ * registry would emit as *JavaScript* source — fails closed (D6): without
+ * this guard the base compiler emits a JS arrow function inside otherwise
+ * valid Python.
+ */
+function pyFnArg(
+  kind: string,
+  op: Expression | undefined,
+  compile: (expr: Expression) => string
+): string {
+  if (op && isFunction(op, 'Function')) return compile(op);
+  if (op && isSymbol(op)) {
+    const glyph = { Add: '+', Subtract: '-', Multiply: '*', Divide: '/' }[
+      op.symbol
+    ];
+    if (glyph !== undefined) return `(lambda _a, _b: _a ${glyph} _b)`;
+  }
+  throw new Error(
+    `${kind}: the function operand does not compile on the Python target ` +
+      `(only function literals and binary arithmetic operator symbols ` +
+      `lower to a Python lambda). Fail closed (D6).`
+  );
+}
+
 const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Basic arithmetic (for when they're called as functions)
   Add: (args, compile) => {
@@ -591,35 +687,44 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     compilePythonExtremum('np.min', 'np.minimum', args, compile),
   Max: (args, compile) =>
     compilePythonExtremum('np.max', 'np.maximum', args, compile),
-  // Element-wise max/min and clamp. `np.maximum`/`np.minimum` are element-wise
-  // (and broadcast), matching `ElementMax`/`ElementMin`; both are binary, so an
-  // n-ary call folds. `Clamp(x, lo, hi)` maps to `np.clip`.
+  // Element-wise max/min and clamp, matching the interpreter's broadcasting.
   //
-  // KNOWN DIVERGENCE (finding A8): when two *array* operands have different
-  // lengths, the interpreter (and the JavaScript target's `_SYS.bcast`)
-  // zip-to-shortest — `ElementMax([1,2,3], [4,5]) → [4,5]` — whereas
-  // `np.maximum` broadcasts by NumPy rules and raises `ValueError` on a
-  // length mismatch that is not 1-vs-N. Aligning the two would require an
-  // injected preamble helper that trims both arrays to the common length, but
-  // this source-only target has no runtime-helper injection mechanism (unlike
-  // the JS target's `_SYS`), so wiring one through `withImports` /
-  // `compileFunction` / `compileToSource` is disproportionate for this
-  // edge case. Scalar-with-array and equal-length-array operands (the common
-  // plotting shapes) match exactly; only mismatched-length arrays diverge.
+  // When every operand is a scalar (statically), a length mismatch is
+  // impossible, so we keep the direct `np.maximum`/`np.minimum`/`np.clip` fast
+  // path (element-wise and broadcasting) — the common plotting shape and
+  // unchanged output. When any operand is a collection, we route through the
+  // injected `_ce_bcast` runtime helper (see PYTHON_BCAST_HELPER), which
+  // zip-to-shortest trims the arrays before applying the vectorized NumPy op —
+  // reproducing `broadcastOverIndexedCollections` (`ElementMax([1,2,3],[4,5]) →
+  // [4,5]`, a length-1 result unwrapping to a scalar) instead of NumPy's own
+  // broadcasting, which raises `ValueError` on a non-(1-vs-N) length mismatch.
   ElementMax: (args, compile) => {
-    let result = compile(args[0]);
-    for (let i = 1; i < args.length; i++)
-      result = `np.maximum(${result}, ${compile(args[i])})`;
-    return result;
+    if (!args.some(isPyCollectionOperand)) {
+      let result = compile(args[0]);
+      for (let i = 1; i < args.length; i++)
+        result = `np.maximum(${result}, ${compile(args[i])})`;
+      return result;
+    }
+    return `_ce_bcast('max', ${args.map((a) => compile(a)).join(', ')})`;
   },
   ElementMin: (args, compile) => {
-    let result = compile(args[0]);
-    for (let i = 1; i < args.length; i++)
-      result = `np.minimum(${result}, ${compile(args[i])})`;
-    return result;
+    if (!args.some(isPyCollectionOperand)) {
+      let result = compile(args[0]);
+      for (let i = 1; i < args.length; i++)
+        result = `np.minimum(${result}, ${compile(args[i])})`;
+      return result;
+    }
+    return `_ce_bcast('min', ${args.map((a) => compile(a)).join(', ')})`;
   },
-  Clamp: (args, compile) =>
-    `np.clip(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`,
+  Clamp: (args, compile) => {
+    if (!args.some(isPyCollectionOperand))
+      return `np.clip(${compile(args[0])}, ${compile(args[1])}, ${compile(
+        args[2]
+      )})`;
+    return `_ce_bcast('clip', ${compile(args[0])}, ${compile(
+      args[1]
+    )}, ${compile(args[2])})`;
+  },
 
   // Modulo. `np.mod` is floored (matches the interpreter and D1). `Remainder`
   // uses the interpreter's truncated/round-to-nearest-quotient semantics, NOT
@@ -780,15 +885,385 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     return `np.array([${args.map((x) => compile(x)).join(', ')}])`;
   },
   Range: (args, compile) => {
-    // np.arange(start, stop, step)
-    if (args.length === 1) return `np.arange(${compile(args[0])})`;
+    // CE `Range` is INCLUSIVE of both endpoints, `Range(n)` is 1..n, and a
+    // range with no explicit step auto-descends when stop < start
+    // (`Range(5, 1)` → [5,4,3,2,1]). (Previously emitted a bare `np.arange`,
+    // which excludes the stop, is 0-based in the one-argument form, and
+    // never descends — silently diverging from the interpreter.) The count
+    // is `⌊(stop − start)/step⌋ + 1`, computed explicitly so a fractional
+    // step never overshoots the endpoint; a zero step yields [].
+    if (args.length === 0) return '[]';
+    const start = args.length === 1 ? '1' : compile(args[0]);
+    const stop = args.length === 1 ? compile(args[0]) : compile(args[1]);
+    if (args.length <= 2)
+      return `(lambda _a, _b: [float(_a + (1 if _b >= _a else -1) * _i) for _i in range(int(np.floor(abs(_b - _a))) + 1)])(${start}, ${stop})`;
+    return `(lambda _a, _b, _s: [] if _s == 0 else [float(_a + _s * _i) for _i in range(max(0, int(np.floor((_b - _a) / _s)) + 1))])(${start}, ${stop}, ${compile(args[2])})`;
+  },
+
+  // --- Function literals ---------------------------------------------------
+  // A `Function` literal compiles to a Python lambda. Without this handler
+  // the base compiler emits a JavaScript arrow function — invalid Python.
+  // A lambda body must be a single expression, so a statement-shaped body
+  // (`Block`) fails closed.
+  Function: (args, compile, target) => {
+    if (args[0] == null) throw new Error('Function: missing body');
+    // Function-literal bodies canonicalize wrapped in a `Block`; a
+    // single-expression Block unwraps into the lambda body. A genuine
+    // multi-statement body fails closed — a Python lambda is
+    // expression-only.
+    let body = args[0];
+    while (isFunction(body, 'Block') && body.nops === 1) body = body.ops[0];
+    if (isFunction(body, 'Block'))
+      throw new Error(
+        `Function: a multi-statement (Block) body cannot compile to a ` +
+          `Python lambda. Fail closed (D6).`
+      );
+    const params = args
+      .slice(1)
+      .map((x) => functionLiteralParameterName(x) || '_');
+    const bodyCode = BaseCompiler.compile(body.canonical, {
+      ...target,
+      var: (id) => (params.includes(id) ? id : target.var(id)),
+    });
+    return `(lambda ${params.join(', ')}: ${bodyCode})`;
+  },
+
+  // --- List-shaped collection operators -------------------------------------
+  // Same fail-closed (D6) discipline and interpreter-verified semantics as
+  // the JavaScript target: 1-based indexes, `Nothing` → nan, counts clamped.
+  Length: (args, compile) => `len(${pyCollArg('Length', args[0], compile)})`,
+  Count: (args, compile) => `len(${pyCollArg('Count', args[0], compile)})`,
+  IsEmpty: (args, compile) =>
+    `(len(${pyCollArg('IsEmpty', args[0], compile)}) == 0)`,
+  At: (args, compile) => {
+    const coll = pyCollArg('At', args[0], compile);
+    if (args[1] == null || args.length !== 2)
+      throw new Error(
+        `At: only the single-index form compiles. Fail closed (D6).`
+      );
+    // 1-based; negative counts from the end; 0/out-of-range → nan
+    return `(lambda _l, _i: _l[int(_i) - 1] if 1 <= _i <= len(_l) else (_l[int(_i)] if -len(_l) <= _i <= -1 else float('nan')))(${coll}, ${compile(args[1])})`;
+  },
+  First: (args, compile) =>
+    `(lambda _l: _l[0] if len(_l) > 0 else float('nan'))(${pyCollArg('First', args[0], compile)})`,
+  Second: (args, compile) =>
+    `(lambda _l: _l[1] if len(_l) > 1 else float('nan'))(${pyCollArg('Second', args[0], compile)})`,
+  Third: (args, compile) =>
+    `(lambda _l: _l[2] if len(_l) > 2 else float('nan'))(${pyCollArg('Third', args[0], compile)})`,
+  Last: (args, compile) =>
+    `(lambda _l: _l[-1] if len(_l) > 0 else float('nan'))(${pyCollArg('Last', args[0], compile)})`,
+  Rest: (args, compile) => `${pyCollArg('Rest', args[0], compile)}[1:]`,
+  Most: (args, compile) => `${pyCollArg('Most', args[0], compile)}[:-1]`,
+  Take: (args, compile) => {
+    const coll = pyCollArg('Take', args[0], compile);
+    if (args[1] == null) throw new Error('Take: missing count');
+    return `${coll}[:max(0, int(${compile(args[1])}))]`;
+  },
+  Drop: (args, compile) => {
+    const coll = pyCollArg('Drop', args[0], compile);
+    if (args[1] == null) throw new Error('Drop: missing count');
+    return `${coll}[max(0, int(${compile(args[1])})):]`;
+  },
+  Reverse: (args, compile) =>
+    `${pyCollArg('Reverse', args[0], compile)}[::-1]`,
+  Sort: (args, compile) => {
+    if (args.length > 1)
+      throw new Error(
+        `Sort: a custom comparator does not compile; only the default ` +
+          `ascending numeric sort is supported. Fail closed (D6).`
+      );
+    return `sorted(${pyCollArg('Sort', args[0], compile)})`;
+  },
+  // 1-based indexes that sort ascending; `sorted` is stable, like the
+  // interpreter.
+  Ordering: (args, compile) => {
+    if (args.length > 1)
+      throw new Error(
+        `Ordering: a custom ordering function does not compile. ` +
+          `Fail closed (D6).`
+      );
+    return `(lambda _l: [_i + 1 for _i in sorted(range(len(_l)), key=lambda _j: _l[_j])])(${pyCollArg('Ordering', args[0], compile)})`;
+  },
+  Join: (args, compile) => {
+    if (args.length === 0) return '[]';
+    return `[${args
+      .map((a, i) => `*${pyCollArg('Join', a, compile, i + 1)}`)
+      .join(', ')}]`;
+  },
+  Append: (args, compile) => {
+    const coll = pyCollArg('Append', args[0], compile);
+    if (args[1] == null) throw new Error('Append: missing value');
+    return `[*${coll}, ${compile(args[1])}]`;
+  },
+  IndexOf: (args, compile) => {
+    const coll = pyCollArg('IndexOf', args[0], compile);
+    if (args[1] == null) throw new Error('IndexOf: missing value');
+    return `(lambda _l, _v: _l.index(_v) + 1 if _v in _l else 0)(${coll}, ${compile(args[1])})`;
+  },
+  Contains: (args, compile) => {
+    if (args[0]) requirePrimitiveElements('Contains', args[0]);
+    const coll = pyCollArg('Contains', args[0], compile);
+    if (args[1] == null) throw new Error('Contains: missing value');
+    return `(${compile(args[1])} in ${coll})`;
+  },
+  // First-occurrence order (`dict.fromkeys` preserves insertion order).
+  Unique: (args, compile) => {
+    if (args[0]) requirePrimitiveElements('Unique', args[0]);
+    return `list(dict.fromkeys(${pyCollArg('Unique', args[0], compile)}))`;
+  },
+  Zip: (args, compile) => {
+    if (args.length === 0) return '[]';
+    const colls = args.map((a, i) => pyCollArg('Zip', a, compile, i + 1));
+    return `[list(_t) for _t in zip(${colls.join(', ')})]`;
+  },
+  // Both endpoints included (native np.linspace); count truncated and
+  // clamped ≥ 0; defaults mirror the interpreter (start 1, count 50).
+  Linspace: (args, compile) => {
+    if (args[0] == null) throw new Error('Linspace: missing argument');
+    const start = args[1] == null ? '1' : compile(args[0]);
+    const end = args[1] == null ? compile(args[0]) : compile(args[1]);
+    const count = args[2] == null ? '50' : compile(args[2]);
+    return `[float(_v) for _v in np.linspace(${start}, ${end}, max(0, int(${count})))]`;
+  },
+  // --- Higher-order collection operators ------------------------------------
+  Map: (args, compile) => {
+    const coll = pyCollArg('Map', args[0], compile);
+    if (args.length > 2)
+      throw new Error('Map: multi-collection form is not compiled');
+    if (args[1] == null) throw new Error('Map: missing mapping function');
+    return `(lambda _f: [_f(_x) for _x in ${coll}])(${pyFnArg('Map', args[1], compile)})`;
+  },
+  Filter: (args, compile) => {
+    const coll = pyCollArg('Filter', args[0], compile);
+    if (args[1] == null) throw new Error('Filter: missing predicate');
+    return `(lambda _f: [_x for _x in ${coll} if _f(_x)])(${pyFnArg('Filter', args[1], compile)})`;
+  },
+  CountIf: (args, compile) => {
+    const coll = pyCollArg('CountIf', args[0], compile);
+    if (args[1] == null) throw new Error('CountIf: missing predicate');
+    return `(lambda _f: sum(1 for _x in ${coll} if _f(_x)))(${pyFnArg('CountIf', args[1], compile)})`;
+  },
+  Find: (args, compile) => {
+    const coll = pyCollArg('Find', args[0], compile);
+    if (args[1] == null) throw new Error('Find: missing predicate');
+    return `(lambda _f: next((_x for _x in ${coll} if _f(_x)), float('nan')))(${pyFnArg('Find', args[1], compile)})`;
+  },
+  IndexWhere: (args, compile) => {
+    const coll = pyCollArg('IndexWhere', args[0], compile);
+    if (args[1] == null) throw new Error('IndexWhere: missing predicate');
+    return `(lambda _f: next((_i + 1 for _i, _x in enumerate(${coll}) if _f(_x)), 0))(${pyFnArg('IndexWhere', args[1], compile)})`;
+  },
+  Position: (args, compile) => {
+    const coll = pyCollArg('Position', args[0], compile);
+    if (args[1] == null) throw new Error('Position: missing predicate');
+    return `(lambda _f: [_i + 1 for _i, _x in enumerate(${coll}) if _f(_x)])(${pyFnArg('Position', args[1], compile)})`;
+  },
+  Any: (args, compile) => {
+    const coll = pyCollArg('Any', args[0], compile);
+    if (args[1] == null)
+      throw new Error(
+        `Any: only the predicate form compiles. Fail closed (D6).`
+      );
+    return `(lambda _f: any(_f(_x) for _x in ${coll}))(${pyFnArg('Any', args[1], compile)})`;
+  },
+  All: (args, compile) => {
+    const coll = pyCollArg('All', args[0], compile);
+    if (args[1] == null)
+      throw new Error(
+        `All: only the predicate form compiles. Fail closed (D6).`
+      );
+    return `(lambda _f: all(_f(_x) for _x in ${coll}))(${pyFnArg('All', args[1], compile)})`;
+  },
+  TakeWhile: (args, compile) => {
+    const coll = pyCollArg('TakeWhile', args[0], compile);
+    if (args[1] == null) throw new Error('TakeWhile: missing predicate');
+    return `(lambda _f, _l: _l[:next((_i for _i, _x in enumerate(_l) if not _f(_x)), len(_l))])(${pyFnArg('TakeWhile', args[1], compile)}, ${coll})`;
+  },
+  DropWhile: (args, compile) => {
+    const coll = pyCollArg('DropWhile', args[0], compile);
+    if (args[1] == null) throw new Error('DropWhile: missing predicate');
+    return `(lambda _f, _l: _l[next((_i for _i, _x in enumerate(_l) if not _f(_x)), len(_l)):])(${pyFnArg('DropWhile', args[1], compile)}, ${coll})`;
+  },
+  // A collection-valued mapping is spliced; a scalar result is kept as-is.
+  FlatMap: (args, compile) => {
+    const coll = pyCollArg('FlatMap', args[0], compile);
+    if (args[1] == null) throw new Error('FlatMap: missing mapping function');
+    return `(lambda _f, _l: [_y for _x in _l for _y in (lambda _r: _r if isinstance(_r, list) else [_r])(_f(_x))])(${pyFnArg('FlatMap', args[1], compile)}, ${coll})`;
+  },
+  // Fold. Built-in combiners use the native reductions; an empty collection
+  // with no initial value yields nan (the interpreter's `Nothing`). A custom
+  // combiner must be a binary `Function` literal and requires an explicit
+  // initial value (same rule as the JavaScript target).
+  Reduce: (args, compile) => {
+    const coll = pyCollArg('Reduce', args[0], compile);
+    const op = args[1];
+    const init = args[2];
+    if (op == null) throw new Error('Reduce: missing combiner');
+    const builtin = isSymbol(op)
+      ? { Add: 'sum(_l)', Multiply: '__import__("math").prod(_l)', Min: 'min(_l)', Max: 'max(_l)' }[op.symbol]
+      : undefined;
+    if (builtin !== undefined) {
+      if (init !== undefined && init !== null) {
+        const seeded = {
+          'sum(_l)': `sum(_l, ${compile(init)})`,
+          '__import__("math").prod(_l)': `__import__("math").prod(_l, start=${compile(init)})`,
+          'min(_l)': `min([${compile(init)}, *_l])`,
+          'max(_l)': `max([${compile(init)}, *_l])`,
+        }[builtin]!;
+        return `(lambda _l: ${seeded})(${coll})`;
+      }
+      return `(lambda _l: float('nan') if len(_l) == 0 else ${builtin})(${coll})`;
+    }
+    if (
+      (isFunction(op, 'Function') && op.nops - 1 === 2) ||
+      isSymbol(op)
+    ) {
+      if (init === undefined || init === null)
+        throw new Error(
+          `Reduce: a custom combiner compiles only with an explicit ` +
+            `initial value. Fail closed (D6).`
+        );
+      return `__import__('functools').reduce(${pyFnArg('Reduce', op, compile)}, ${coll}, ${compile(init)})`;
+    }
+    throw new Error(
+      `Reduce: the combiner does not compile to a function on the Python ` +
+        `target. Fail closed (D6).`
+    );
+  },
+  // Running fold: `itertools.accumulate`. With an initial value the
+  // accumulated seed is not emitted (slice it off, matching the
+  // interpreter); without one the first element seeds and is emitted as-is.
+  Scan: (args, compile) => {
+    const coll = pyCollArg('Scan', args[0], compile);
+    const op = args[1];
+    const init = args[2];
+    if (op == null) throw new Error('Scan: missing combiner');
+    const builtin = isSymbol(op)
+      ? {
+          Add: '(lambda _a, _b: _a + _b)',
+          Multiply: '(lambda _a, _b: _a * _b)',
+          Min: '(lambda _a, _b: min(_a, _b))',
+          Max: '(lambda _a, _b: max(_a, _b))',
+        }[op.symbol]
+      : undefined;
+    const fn =
+      builtin ??
+      ((isFunction(op, 'Function') && op.nops - 1 === 2) || isSymbol(op)
+        ? pyFnArg('Scan', op, compile)
+        : undefined);
+    if (fn === undefined)
+      throw new Error(
+        `Scan: the combiner does not compile to a function on the Python ` +
+          `target. Fail closed (D6).`
+      );
+    if (init !== undefined && init !== null)
+      return `list(__import__('itertools').accumulate(${coll}, ${fn}, initial=${compile(init)}))[1:]`;
+    return `list(__import__('itertools').accumulate(${coll}, ${fn}))`;
+  },
+  // Apply the function to 1-based indexes; a statically non-positive
+  // dimension is inert in the interpreter and fails closed.
+  Tabulate: (args, compile) => {
+    if (args[0] == null || args[1] == null)
+      throw new Error('Tabulate: missing argument');
+    if (args.length > 3)
+      throw new Error(
+        `Tabulate: only the 1-D and 2-D forms compile. Fail closed (D6).`
+      );
+    for (let i = 1; i < args.length; i++) {
+      const dim = tryGetConstant(args[i]!);
+      if (dim !== undefined && Math.round(dim) <= 0)
+        throw new Error(
+          `Tabulate: a statically non-positive dimension (${dim}) is inert ` +
+            `in the interpreter. Fail closed (D6).`
+        );
+    }
+    const f = pyFnArg('Tabulate', args[0], compile);
+    const n = compile(args[1]);
     if (args.length === 2)
-      return `np.arange(${compile(args[0])}, ${compile(args[1])})`;
-    if (args.length === 3)
-      return `np.arange(${compile(args[0])}, ${compile(args[1])}, ${compile(
-        args[2]
-      )})`;
-    return 'np.arange';
+      return `(lambda _f: [_f(_i + 1) for _i in range(max(0, round(${n})))])(${f})`;
+    const m = compile(args[2]);
+    return `(lambda _f: [[_f(_i + 1, _j + 1) for _j in range(max(0, round(${m})))] for _i in range(max(0, round(${n})))])(${f})`;
+  },
+  Fill: (args, compile) => {
+    const dims = args[1];
+    if (args[0] == null || dims == null)
+      throw new Error('Fill: missing argument');
+    if (!isFunction(dims) || dims.ops.length !== 2)
+      throw new Error(
+        `Fill: only the (function, (rows, cols)) form compiles. ` +
+          `Fail closed (D6).`
+      );
+    const f = pyFnArg('Fill', args[0], compile);
+    const rows = compile(dims.ops[0]);
+    const cols = compile(dims.ops[1]);
+    return `(lambda _f: [[_f(_i + 1, _j + 1) for _j in range(max(0, round(${cols})))] for _i in range(max(0, round(${rows})))])(${f})`;
+  },
+  // --- Core scalar operators -------------------------------------------------
+  Boole: (args, compile) => {
+    if (args[0] == null) throw new Error('Boole: missing argument');
+    if (!BaseCompiler.isBooleanValued(args[0]))
+      throw new Error(
+        `Boole: the argument is not provably boolean. Fail closed (D6).`
+      );
+    return `(1 if ${compile(args[0])} else 0)`;
+  },
+  KroneckerDelta: (args, compile) => {
+    if (args.length === 0 || args[0] == null)
+      throw new Error('KroneckerDelta: missing argument');
+    const tol = args[0].engine.tolerance ?? 1e-10;
+    if (args.length === 1)
+      return `(1 if abs(${compile(args[0])}) <= ${tol} else 0)`;
+    return `(lambda *_v: 1 if all(abs(_x - _v[0]) <= ${tol} for _x in _v) else 0)(${args.map((a) => compile(a)).join(', ')})`;
+  },
+  Element: (args, compile) => {
+    if (args[0] == null || args[1] == null)
+      throw new Error('Element: missing argument');
+    requirePrimitiveElements('Element', args[1]);
+    return `(${compile(args[0])} in ${pyCollArg('Element', args[1], compile)})`;
+  },
+  Identity: (args, compile) => {
+    if (args[0] == null) throw new Error('Identity: missing argument');
+    return compile(args[0]);
+  },
+  Apply: (args, compile) => {
+    if (args[0] == null) throw new Error('Apply: missing function');
+    return `(${compile(args[0])})(${args
+      .slice(1)
+      .map((a) => compile(a))
+      .join(', ')})`;
+  },
+  // --- Linear algebra (numpy; regular arrays only) ---------------------------
+  Flatten: (args, compile) => {
+    if (args[1] != null)
+      throw new Error(
+        `Flatten: an explicit depth does not compile on the Python target. ` +
+          `Fail closed (D6).`
+      );
+    // Recursive self-passing lambda: flattens ragged (non-rectangular)
+    // nested lists, which np.asarray(...).ravel() rejects.
+    return `(lambda _l: (lambda _f: _f(_f, _l))(lambda _f, _x: [_y for _e in _x for _y in (_f(_f, _e) if isinstance(_e, list) else [_e])]))(${pyCollArg('Flatten', args[0], compile)})`;
+  },
+  Shape: (args, compile) => {
+    if (args[0] == null) throw new Error('Shape: missing argument');
+    return `list(np.shape(${compile(args[0])}))`;
+  },
+  // Cyclic padding (np.resize repeats the source), like the interpreter.
+  Reshape: (args, compile) => {
+    const coll = pyCollArg('Reshape', args[0], compile);
+    const dims = args[1];
+    if (dims == null) throw new Error('Reshape: missing shape');
+    if (!isFunction(dims) || dims.ops.length === 0 || dims.ops.length > 2)
+      throw new Error(
+        `Reshape: only a 1-D or 2-D target shape compiles. Fail closed (D6).`
+      );
+    return `np.resize(np.asarray(${coll}), (${dims.ops.map((d) => compile(d)).join(', ')},)).tolist()`;
+  },
+  Trace: (args, compile) => {
+    if (args.length > 1)
+      throw new Error(
+        `Trace: explicit axes do not compile. Fail closed (D6).`
+      );
+    return `float(np.trace(np.asarray(${pyCollArg('Trace', args[0], compile)})))`;
   },
 };
 
@@ -910,7 +1385,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     const target = this.createTarget({
       var: this.makeVarResolver(vars),
     });
-    let code = BaseCompiler.compile(expr, target);
+    let code = withPythonHelpers(BaseCompiler.compile(expr, target));
     if (this.includeImports) code = this.withImports(code);
 
     const result: CompilationResult<'python'> = {
@@ -949,7 +1424,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
   ): string {
     const vars = options.vars as Record<string, string> | undefined;
     const target = this.createTarget({ var: this.makeVarResolver(vars) });
-    const code = BaseCompiler.compile(expr, target);
+    const code = withPythonHelpers(BaseCompiler.compile(expr, target));
     return this.includeImports ? this.withImports(code) : code;
   }
 
@@ -987,6 +1462,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
       if (/\bmath\./.test(body)) code += 'import math\n';
       code += '\n';
     }
+
+    // Emit the broadcasting helper (once, at module level) when the body's
+    // ElementMax/ElementMin/Clamp routed through it.
+    if (body.includes('_ce_bcast(')) code += `${PYTHON_BCAST_HELPER}\n`;
 
     code += `def ${functionName}(${params}):\n`;
 
@@ -1059,6 +1538,15 @@ export class PythonTarget implements LanguageTarget<Expression> {
         'compileLambda: a multi-statement construct (loop-form Sum/Product, ' +
           'Loop, or Block) cannot be a Python lambda body — use ' +
           'compileFunction instead.'
+      );
+    // A collection-operand ElementMax/ElementMin/Clamp routes through the
+    // module-level `_ce_bcast` helper, which a bare lambda has no place to
+    // define. Fail closed rather than emit a reference to an undefined name.
+    if (body.includes('_ce_bcast('))
+      throw new Error(
+        'compileLambda: ElementMax/ElementMin/Clamp over a collection operand ' +
+          'needs the module-level _ce_bcast helper, which cannot ride along a ' +
+          'bare lambda — use compileFunction instead.'
       );
 
     const params = parameters.join(', ');

@@ -921,7 +921,15 @@ function makeParseHandler(
           return [h, lhs, rhs];
         };
       }
-      // "both"-associative: fold identical operators
+      // "both"/"any"-associative: fold identical operators.
+      //
+      // Parse the right operand at `prec + 1` so a same-precedence
+      // continuation (e.g. the next `\times` in `a \times b \times c`) is
+      // left for the caller's infix loop rather than being consumed by a
+      // nested `parseExpression`. This keeps a flat operator chain iterative
+      // (bounded stack) instead of right-recursive; `foldAssociativeOperator`
+      // flattens the accumulated left operand so the resulting expression is
+      // identical to the right-recursive form.
       return (
         parser: Parser,
         lhs: MathJsonExpression,
@@ -929,7 +937,7 @@ function makeParseHandler(
       ) => {
         if (lhs === null) return null;
         const rhs = missingIfEmpty(
-          parser.parseExpression({ ...until, minPrec: prec })
+          parser.parseExpression({ ...until, minPrec: prec + 1 })
         );
         if (typeof h !== 'string') return [h, lhs, rhs];
         return foldAssociativeOperator(h, lhs, rhs);

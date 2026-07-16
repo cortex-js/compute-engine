@@ -1,6 +1,41 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`Partition(xs, n)` now returns chunks of size `n`, not `n` groups.**
+  `Partition([1, 2, 3, 4, 5], 2)` now evaluates to
+  `[[1, 2], [3, 4], [5]]` (chunks of 2, trailing chunk short) instead of
+  splitting the collection into 2 nearly equal groups. **To split into a given
+  _number_ of groups, use [`Chunk`](/compute-engine/reference/collections/#chunk)
+  instead** (`Chunk([1, 2, 3, 4, 5], 2)` → `[[1, 2, 3], [4, 5]]`). A new
+  sliding-window form `Partition(xs, size, step)` returns the complete windows
+  of `size` elements whose starting positions are `step` apart
+  (`Partition([1, 2, 3, 4, 5], 2, 1)` →
+  `[[1, 2], [2, 3], [3, 4], [4, 5]]`). The predicate form
+  `Partition(xs, predicate)` (split into matching / non-matching groups) is
+  unchanged.
+
 ### Bug Fixes
+
+- **A canonical `Comprehension` now serializes to LaTeX that round-trips.** Its
+  `.latex` was an elided display preview (`\lbrack 1, 4, 9, \dots,
+  62\,500\rbrack`) that silently re-parsed to a corrupt 11-element `List`
+  containing a literal `\dots`; it now serializes through the faithful
+  `body \operatorname{for} var = domain` form, which re-parses to the identical
+  comprehension (including tuple bodies, dependent domains, and infinite
+  domains).
+- **Lazy `Comprehension` elements are memoized.** `.at(n)` re-walked the domain
+  on every call and each `.each()` recomputed from scratch, making repeated
+  indexed access quadratic (`at(100)`×100 on a 200-element comprehension:
+  ~5 s → ~23 ms; a repeat `.each()` walk: ~110 ms → ~0.2 ms). The prefix cache
+  is generation-stamped, so reassigning a free variable the body depends on
+  invalidates it, and it is capped (100k elements) beyond which access streams
+  as before.
+- **A broadcast condition no longer crashes `Which`/`If`.** A condition that
+  evaluates to a collection of booleans (e.g. a piecewise guard over a
+  broadcast function application inside a comprehension) threw
+  `Condition must evaluate to "True" or "False"`; it now stays symbolic
+  (held), letting the surrounding expression evaluate.
 
 Fixes from a review of the 0.78.0–0.80.0 changes:
 
@@ -69,9 +104,88 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
   complex infinity stays symbolic instead of saturating to `1`; compiled
   `Map`/`Filter` no longer leak JavaScript's 0-based callback index into
   two-parameter lambdas.
+- **Long flat operator chains no longer overflow the parser stack.** A flat
+  chain of a same-precedence associative operator (`1+1+\dots`, `a\times
+  b\times\dots`, chained `<`) recursed one parselet frame per term and
+  overflowed at ~1,300 terms; same-precedence continuations now iterate in the
+  parser's infix loop (a 20,000-term sum parses; same-operator chains produce
+  the same flattened n-ary trees as before). One deliberate tree change:
+  *mixed* same-precedence operators now group left-to-right — the
+  conventional reading — where they previously nested rightward as an
+  artifact of the recursion (`a\times b\otimes c` now parses as
+  `CircleTimes(Multiply(a,b), c)`, not `Multiply(a, CircleTimes(b,c))`).
+  Right-associative chains (`a=b=c`) still nest by construction.
+- **Only binary arithmetic operator symbols lower to first-class combiners.**
+  Passing a unary or relational operator symbol where a function is expected
+  (`Reduce([1,2,3], Negate, 0)`, `Map(xs, Negate)`, `Filter(xs, Less)`)
+  compiled to a wrong binary infix lambda (`Negate` folded like `Subtract`,
+  returning `-6` behind `success: true`). Non-arithmetic operator symbols and
+  combiners of the wrong arity now fail closed to the interpreter. Also:
+  compiled `Reduce` over an empty collection without an initial value returns
+  `NaN` instead of throwing, and `Tabulate` with a statically non-positive
+  dimension fails closed instead of returning `[]`.
+- **`Flatten` with no depth now fully flattens ragged lists.**
+  `Flatten([[1,x],[2]])` was a no-op (only uniform tensors flattened), which
+  became visibly inconsistent once `Flatten(expr, depth)` shipped; the
+  default now flattens completely, per the documented (Wolfram) semantics.
+- **`Scan` no longer silently drops an invalid initial value** — the error is
+  surfaced instead of computing the unseeded scan.
+- **`ElementMax`/`ElementMin`/`Clamp` on the `python` target now match the
+  interpreter's broadcasting.** Length-mismatched arrays previously raised a
+  NumPy `ValueError` (or size-1-broadcast) where the interpreter zips to the
+  shortest operand; an injected helper now aligns semantics while keeping the
+  vectorized NumPy fast path.
+- **`lambda.body` is canonical for every declaration route.** The public
+  accessor returned a raw, non-canonical body for functions declared with a
+  MathJSON `evaluate` handler (parse/assign routes were fine), tripping
+  canonical-only asserts in consumers; it now returns the canonical scoped
+  `Block` shape everywhere. And `analyzeReferences` now probes a custom
+  `compile` handler per target language, so an operator whose handler only
+  supports some targets is correctly reported in `unsupported` on the others.
 
 ### New Features
 
+- **New collection operators.** A batch of higher-order and structural
+  collection operators (see the
+  [Collections reference](/compute-engine/reference/collections/)):
+  - **Quantifiers** — `Any(xs, predicate?)` and `All(xs, predicate?)` test
+    whether some or every element satisfies a predicate (the elements
+    themselves, treated as booleans, when no predicate is given). Both
+    short-circuit, so they return a definite answer even on infinite
+    collections, and stay symbolic when the result depends on undetermined
+    elements. `Any([])` is `False`, `All([])` is `True`.
+  - **Cumulative** — `Scan(xs, f, initial?)` is the running fold (same length
+    as the input: `Scan([1, 2, 3, 4], Add)` → `[1, 3, 6, 10]`), and
+    `Differences(xs)` gives the successive differences (length `n − 1`,
+    computed exactly).
+  - **Prefix/suffix** — `TakeWhile(xs, predicate)` and `DropWhile(xs,
+    predicate)` take or drop leading elements while the predicate holds; both
+    are lazy and compose with infinite collections.
+  - **Mapping** — `FlatMap(xs, f)` maps `f` over `xs` and splices
+    collection-valued results into a single list (a scalar result is kept as a
+    single element).
+  - **Extrema** — `MaxBy(xs, f)` / `MinBy(xs, f)` return the _element_ with the
+    largest/smallest key `f(x)`; `ArgMax(xs, f?)` / `ArgMin(xs, f?)` return its
+    1-based _index_. The first occurrence wins ties, and all stay symbolic on
+    empty or infinite collections.
+  - **Grouping** — `ChunkBy(xs, f)` splits into maximal runs of consecutive
+    elements sharing the same key `f(x)`; `Dedup(xs)` collapses consecutive
+    duplicates only (contrast `Unique`, which removes all duplicates).
+  - **Functional element updates** — `Insert(xs, index, value)`,
+    `DeleteAt(xs, index)`, and `ReplaceAt(xs, index, value)` return a new list
+    with an element inserted, removed, or replaced at a 1-based index. Negative
+    indexes count from the end (Elixir-style); `Insert` at `-1` or `n + 1`
+    appends.
+- **`Map` is now variadic.** `Map(xs, ys, …, f)` applies `f` element-wise
+  across several collections (a `zipWith`), truncating to the shortest input;
+  the function is always the last argument
+  (`Map([1, 2, 3], [10, 20, 30], (x, y) ↦ x + y)` → `[11, 22, 33]`).
+- **`Sort` accepts a one-argument key function.** In addition to a
+  two-argument comparator, `Sort(xs, f)` with a unary `f` sorts ascending by
+  the key `f(x)` (stable on ties), discriminated from a comparator by arity.
+- **`Flatten` accepts an optional depth.** `Flatten(xs, depth)` flattens only
+  `depth` levels of nesting; without it, the collection is fully flattened
+  (`Flatten([[1, [2]], [3]], 1)` → `[1, [2], 3]`).
 - **More collection operators compile on the `javascript` target.**
   - **`Reduce` accepts a custom combiner**: a `Function` literal
     (`Reduce([1, 2, 3], (a, b) \mapsto a + 2b, 0)` → `12`), a user-defined
@@ -104,6 +218,38 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
     non-positive `Chunk`/`Partition` counts, and `Contains`/`Unique` over
     compound (nested-list, tuple, complex) elements, whose JS equality is
     referential rather than structural.
+  - **`Any`, `All`, `TakeWhile`, `DropWhile`, `FlatMap`, and `Scan`** compile
+    (predicate/mapping lambdas → native `some`/`every`/`flatMap` and slices;
+    `Scan` is the running fold, with the initial value not emitted and the
+    seedless form emitting the first element as-is, matching the
+    interpreter).
+- **Core scalar operators compile on the `javascript` target:** `Boole`
+  (Iverson bracket, with the same runtime boolean guard as `Which`/`When`),
+  `KroneckerDelta` (n-ary, tolerance-aware like compiled `Equal`),
+  `Element(x, list)` membership, `Identity`, and `Apply` of a function
+  literal.
+- **Linear algebra compiles on the `javascript` target** (closing the parity
+  gap with the `python` target): `Dot` and `MatrixMultiply` (with the
+  interpreter's dimensionality dispatch — vector·vector → scalar,
+  matrix·vector → vector, matrix·matrix → matrix), `Cross`, `Norm` (scalar,
+  2-/Frobenius, and p-norms), `Transpose`, `Determinant`, `Inverse`
+  (singular → `NaN`), `Trace`, `Flatten` (with optional depth), `Shape`, and
+  `Reshape` (with the interpreter's cyclic padding).
+- **The `python` compilation target now covers collections and function
+  literals.** `Function` literals compile to Python lambdas, and the
+  collection operators above (list access/slicing, `Map`/`Filter` and the
+  other higher-order operators, `Reduce`/`Scan`, `Tabulate`/`Fill`,
+  `Linspace`, `Zip`, `Ordering`, plus `Flatten`/`Shape`/`Reshape`/`Trace`
+  via NumPy) emit Python with the same interpreter-verified semantics,
+  validated by executing the emitted code (venv-gated parity suite). Also
+  fixed: **compiled `Range` was off by one on the Python target** —
+  `np.arange` excludes the stop value and is 0-based in the one-argument
+  form, so `Range(2, 6)` compiled to `[2..5]` and `Range(5)` to `[0..4]`;
+  CE `Range` is inclusive and 1-based.
+- **Compiled `Range` with no explicit step now auto-descends** on both
+  targets, like the interpreter: `Range(5, 1)` → `[5,4,3,2,1]` and
+  `Range(-2)` → `[1,0,-1,-2]` previously compiled to `[]` on the
+  JavaScript target (the implicit step was a fixed +1).
 
 ## 0.80.0 _2026-07-16_
 

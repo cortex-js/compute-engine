@@ -48,9 +48,7 @@
 },
 "declarations": {
 "AGMSequence": {"signature":"(integer, complex, complex) -> complex","description":"Convergents in AGM iteration","arity":3},
-"ArgMax": {"signature":"(function, set, any*) -> set","description":"Locations of maximum value","arity":2},
 "ArgMaxUnique": {"signature":"(function, set, any*) -> any","description":"Unique location of maximum value","arity":2},
-"ArgMin": {"signature":"(function, set, any*) -> set","description":"Locations of minimum value","arity":2},
 "BarnesG": {"signature":"(complex) -> complex","description":"Barnes G-function","arity":1},
 "BernoulliPolynomial": {"signature":"(integer, complex) -> complex","description":"Bernoulli polynomial","arity":2},
 "BernsteinEllipse": {"signature":"(real) -> set<complex>","description":null,"arity":1},

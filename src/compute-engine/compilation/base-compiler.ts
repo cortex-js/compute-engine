@@ -87,6 +87,21 @@ export class BaseCompiler {
   ]);
 
   /**
+   * Operator symbols that lower to a valid *binary infix* lambda
+   * (`(a, b) => a ∘ b`) when a bare operator symbol is used in value position —
+   * a first-class function such as a `Reduce` combiner. Only the binary
+   * arithmetic operators qualify: a unary operator (Negate/Not) would emit
+   * wrong-arity or invalid source (e.g. `(a, b) => a ! b`), and a relational or
+   * logical operator folds to a boolean that silently diverges from the
+   * interpreter. Any operator symbol NOT in this set fails closed (D6) so the
+   * engine falls back to the interpreter rather than emitting garbage behind
+   * `success: true`. Keyed by symbol (not operator glyph) so it is
+   * target-agnostic.
+   */
+  private static readonly BINARY_INFIX_VALUE_OPERATORS: ReadonlySet<string> =
+    new Set(['Add', 'Subtract', 'Multiply', 'Divide']);
+
+  /**
    * Compile `expr` as a **value operand** — a sub-expression spliced into a
    * surrounding expression. Behaves like `compile`, but on targets whose
    * multi-statement constructs are bare statement sequences
@@ -138,6 +153,19 @@ export class BaseCompiler {
       const s = expr.symbol;
       const op = target.operators?.(s);
       if (op !== undefined) {
+        // A bare operator symbol used in value position (a first-class function
+        // — e.g. a `Reduce` combiner or `Map` mapper). Only genuinely binary
+        // arithmetic operators lower to a valid binary infix lambda; unary
+        // (Negate/Not), relational, and logical operator symbols fail closed
+        // (D6) so the engine falls back to the interpreter instead of emitting
+        // wrong-arity, invalid, or silently-diverging source (finding: Reduce/
+        // Map over-accepted any operator symbol as a combiner/mapper).
+        if (!BaseCompiler.BINARY_INFIX_VALUE_OPERATORS.has(s))
+          throw new Error(
+            `${s}: cannot compile as a first-class function — only the binary ` +
+              `arithmetic operators (Add/Subtract/Multiply/Divide) lower to a ` +
+              `combiner lambda. Fail closed (D6).`
+          );
         // We're compiling something like "Add"
         return `(a,b) => a ${op[0]} b`;
       }
@@ -2417,16 +2445,44 @@ export class BaseCompiler {
           : undefined;
 
       // A head whose operator definition supplies a custom `compile` handler
-      // (the public per-operator extension point) is lowerable via that handler
-      // even with no operator/function mapping — so it must NOT be reported as
-      // unsupported (finding A4). Mirrors the handler consult in `compileExpr`,
-      // which is likewise skipped for the structural control-flow heads.
-      const customCompileDef = !BaseCompiler.CONTROL_FLOW_HEADS.has(h)
-        ? engine.lookupDefinition(h)
-        : undefined;
-      const hasCustomCompile =
-        isOperatorDef(customCompileDef) &&
-        typeof customCompileDef.operator.compile === 'function';
+      // (the public per-operator extension point) MAY be lowerable via that
+      // handler even with no operator/function mapping — so it must NOT be
+      // reported as unsupported (finding A4). But a handler can decline for the
+      // current target language, returning `undefined`/`null`/`''` (see the
+      // handler consult in `compileExpr`); assuming support unconditionally
+      // would under-report `unsupported` for e.g. a JavaScript-only handler on
+      // a glsl/python target. So probe the handler with the real recursive
+      // compile machinery in a throwaway context: a non-empty string return
+      // means it lowers this head, while `undefined`/`null`/`''`/throw means it
+      // declined. Executing the handler here is safe — the compile path would
+      // run the same handler on the same expression anyway. The probe only runs
+      // when no other lowering applies (structural/control-flow heads are not
+      // overridable and are excluded, matching the consult in `compileExpr`).
+      let hasCustomCompile = false;
+      if (
+        !BaseCompiler.CONTROL_FLOW_HEADS.has(h) &&
+        target.functions?.(h) === undefined &&
+        target.operators?.(h) === undefined &&
+        userLiteral === undefined
+      ) {
+        const customCompileDef = engine.lookupDefinition(h);
+        if (
+          isOperatorDef(customCompileDef) &&
+          typeof customCompileDef.operator.compile === 'function'
+        ) {
+          try {
+            const probe = customCompileDef.operator.compile(
+              ops,
+              (e) => BaseCompiler.compileValueOperand(e, target),
+              { language: target.language ?? 'javascript' }
+            );
+            hasCustomCompile =
+              probe !== undefined && probe !== null && probe !== '';
+          } catch {
+            hasCustomCompile = false;
+          }
+        }
+      }
 
       if (
         h !== 'Error' &&

@@ -1001,6 +1001,87 @@ describe('SCAN / DIFFERENCES / TAKEWHILE / DROPWHILE / FLATMAP', () => {
   });
 });
 
+describe('MAP (variadic / zipWith)', () => {
+  const str = (expr: Expression): string =>
+    engine.box(expr).evaluate({ materialization: true }).toString();
+
+  const add: Expression = ['Function', ['Add', 'a', 'b'], 'a', 'b'];
+  const mul: Expression = ['Function', ['Multiply', 'a', 'b'], 'a', 'b'];
+  const add3: Expression = [
+    'Function',
+    ['Add', 'a', 'b', 'c'],
+    'a',
+    'b',
+    'c',
+  ];
+
+  test('two collections combine element-wise', () =>
+    expect(
+      str(['Map', ['List', 1, 2, 3], ['List', 10, 20, 30], add])
+    ).toEqual('[11,22,33]'));
+
+  test('result has the length of the shortest input', () =>
+    expect(str(['Map', ['List', 1, 2, 3], ['List', 10, 20], add])).toEqual(
+      '[11,22]'
+    ));
+
+  test('three collections', () =>
+    expect(
+      str(['Map', ['List', 1, 2], ['List', 3, 4], ['List', 5, 6], add3])
+    ).toEqual('[9,12]'));
+
+  test('laziness: .count and head of two infinite ranges are fast', () => {
+    const expr = engine.box([
+      'Map',
+      ['Range', 1, 1e9],
+      ['Range', 1, 1e9],
+      add,
+    ]);
+    expect(expr.count).toBe(1e9);
+    expect(expr.isFiniteCollection).toBe(true);
+    expect(expr.at(2)?.toString()).toEqual('4');
+    expect(str(['Take', ['Map', ['Range', 1, 1e9], ['Range', 1, 1e9], add], 3])).toEqual(
+      '[2,4,6]'
+    );
+  });
+
+  test('mixed finite/infinite: bounded by the finite input', () => {
+    const expr = engine.box([
+      'Map',
+      ['Range', 1, 1e9],
+      ['List', 1, 2, 3],
+      mul,
+    ]);
+    expect(expr.count).toBe(3);
+    expect(str(['Map', ['Range', 1, 1e9], ['List', 1, 2, 3], mul])).toEqual(
+      '[1,4,9]'
+    );
+  });
+
+  test('single-collection form is unchanged', () =>
+    expect(
+      str(['Map', ['List', 1, 2, 3], ['Function', ['Power', 'x', 2], 'x']])
+    ).toEqual('[1,4,9]'));
+
+  test('arity mismatch: too few lambda params yields an evaluation error', () => {
+    // The mapping function declares one parameter but two collections are
+    // supplied. The call canonicalizes fine (isValid), but the existing
+    // arity-validation machinery reports the mismatch when the function is
+    // applied (documented behavior, not a new check): plain evaluate() yields
+    // an error value; forcing materialization (via .at() or materialization)
+    // throws the same "Too many arguments" error.
+    const expr = engine.box([
+      'Map',
+      ['List', 1, 2],
+      ['List', 3, 4],
+      ['Function', ['Power', 'x', 2], 'x'],
+    ]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.evaluate().toString()).toContain('Too many arguments');
+    expect(() => expr.at(1)).toThrow(/Too many arguments/);
+  });
+});
+
 // describe('NON-ITERABLE OPERATIONS', () => {
 
 // })
@@ -1728,4 +1809,367 @@ describe('COLLECTION EQUALITY IS REPRESENTATION-INSENSITIVE', () => {
     expect(T(['Equal', ['List', 1, 2], ['List', 2, 1]])).toEqual('False');
     expect(T(['Equal', ['Range', 1, 3], ['Range', 1, 4]])).toEqual('False');
   });
+});
+
+describe('Scan invalid initial value (finding 6)', () => {
+  const add = ['Function', ['Add', 'a', 'b'], 'a', 'b'] as Expression;
+
+  test('a valid seed is applied', () => {
+    expect(evaluate(['Scan', ['List', 1, 2], add, 10])).toEqual(
+      '["List", 11, 13]'
+    );
+  });
+
+  test('the unseeded form folds from the first element', () => {
+    expect(evaluate(['Scan', ['List', 1, 2], add])).toEqual('["List", 1, 3]');
+  });
+
+  test('an invalid initial value is NOT silently dropped', () => {
+    // `Divide(1)` is invalid (missing denominator). Previously the canonical
+    // handler dropped the invalid seed and returned the unseeded form
+    // `["List", 1, 3]`, silently diverging. It must instead surface the error
+    // rather than fold unseeded.
+    const expr = engine.box(['Scan', ['List', 1, 2], add, ['Divide', 1]]);
+    expect(expr.isValid).toBe(false);
+    expect(
+      evaluate(['Scan', ['List', 1, 2], add, ['Divide', 1]])
+    ).not.toEqual('["List", 1, 3]');
+  });
+});
+
+describe('SORT KEY MODE / MAXBY / MINBY / ARGMAX / ARGMIN', () => {
+  // A unary key function.
+  const square: Expression = ['Function', ['Power', 'x', 2], 'x'];
+  const lengthKey: Expression = ['Function', ['Length', 'xs'], 'xs'];
+  const identity: Expression = ['Function', 'x', 'x'];
+  // A binary comparator (descending: negative when b > a).
+  const descending: Expression = ['Function', ['Subtract', 'b', 'a'], 'a', 'b'];
+
+  test('Sort with a unary function sorts by key ascending', () =>
+    expect(evaluate(['Sort', ['List', -3, 1, -2], square])).toEqual(
+      '["List", 1, -2, -3]'
+    ));
+
+  test('Sort by a list-length key', () =>
+    // Note: evaluate without materialization to keep the nested sub-lists
+    // intact (materialization flattens list-of-lists for display).
+    expect(
+      engine
+        .box([
+          'Sort',
+          ['List', ['List', 1, 2, 3], ['List', 7], ['List', 4, 5]],
+          lengthKey,
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['List', 7], ['List', 4, 5], ['List', 1, 2, 3]]));
+
+  test('Sort with a binary function is a comparator (descending)', () =>
+    expect(evaluate(['Sort', ['List', 3, 1, 2], descending])).toEqual(
+      '["List", 3, 2, 1]'
+    ));
+
+  test('Sort with no function uses the default ascending order', () =>
+    expect(evaluate(['Sort', ['List', 3, 1, 2]])).toEqual(
+      '["List", 1, 2, 3]'
+    ));
+
+  test('Sort key mode is stable: equal keys keep their original order', () =>
+    // Keys: 3->9, -3->9, 2->4. The two elements with key 9 keep their
+    // listed order (3 before -3).
+    expect(evaluate(['Sort', ['List', 3, -3, 2], square])).toEqual(
+      '["List", 2, 3, -3]'
+    ));
+
+  test('MaxBy returns the element maximizing the key', () =>
+    expect(evaluate(['MaxBy', ['List', -3, 1, 2], square])).toEqual('-3'));
+
+  test('MinBy returns the element minimizing the key', () =>
+    expect(evaluate(['MinBy', ['List', -3, 1, 2], square])).toEqual('1'));
+
+  test('ArgMax without a key returns the 1-based index of the largest element', () =>
+    expect(evaluate(['ArgMax', ['List', 10, 30, 20]])).toEqual('2'));
+
+  test('ArgMax with a key returns the 1-based index maximizing the key', () =>
+    expect(evaluate(['ArgMax', ['List', -3, 1, 2], square])).toEqual('1'));
+
+  test('ArgMin without a key returns the 1-based index of the smallest element', () =>
+    expect(evaluate(['ArgMin', ['List', 10, 30, 20]])).toEqual('1'));
+
+  test('ArgMax ties: first occurrence wins', () =>
+    expect(evaluate(['ArgMax', ['List', 1, 3, 3]])).toEqual('2'));
+
+  test('MaxBy on an empty collection stays inert', () =>
+    expect(
+      engine.box(['MaxBy', emptyList, identity]).evaluate().operator
+    ).toBe('MaxBy'));
+
+  test('ArgMax on an empty collection stays inert', () =>
+    expect(engine.box(['ArgMax', emptyList]).evaluate().operator).toBe(
+      'ArgMax'
+    ));
+
+  test('MaxBy with symbolic keys stays inert', () =>
+    // 'X' and 'Y' are unbound (uppercase) symbols, so their keys cannot be
+    // ordered.
+    expect(
+      engine.box(['MaxBy', ['List', 'X', 'Y'], identity]).evaluate().operator
+    ).toBe('MaxBy'));
+});
+
+describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
+  const str = (expr: Expression): string =>
+    engine.box(expr).evaluate({ materialization: true }).toString();
+
+  const identity: Expression = ['Function', 'x', 'x'];
+  const square: Expression = ['Function', ['Power', 'x', 2], 'x'];
+  const doubleAcc: Expression = ['Function', ['Multiply', 2, 'acc'], 'n', 'acc'];
+
+  // --- ChunkBy -----------------------------------------------------------
+  test('ChunkBy splits into consecutive runs sharing the key', () =>
+    expect(str(['ChunkBy', ['List', 1, 1, 2, 2, 2, 1], identity])).toEqual(
+      '[[1,1],[2,2,2],[1]]'
+    ));
+
+  test('ChunkBy groups by a derived key (x^2), keeping adjacency', () =>
+    // Keys 1,1,4,4,9 → runs [1,-1], [2,-2], [3].
+    expect(str(['ChunkBy', ['List', 1, -1, 2, -2, 3], square])).toEqual(
+      '[[1,-1],[2,-2],[3]]'
+    ));
+
+  test('ChunkBy of an empty collection is an empty list', () =>
+    expect(str(['ChunkBy', ['List'], identity])).toEqual('[]'));
+
+  test('ChunkBy of a single-element collection is one singleton run', () =>
+    expect(str(['ChunkBy', ['List', 5], identity])).toEqual('[[5]]'));
+
+  test('ChunkBy is inert on a non-finite collection', () =>
+    expect(
+      engine
+        .box(['ChunkBy', ['Iterate', doubleAcc, 1], identity])
+        .evaluate().operator
+    ).toBe('ChunkBy'));
+
+  // --- Partition / Chunk -------------------------------------------------
+  // Fixed-size chunking: exact division, then a trailing partial chunk.
+  test('Partition(xs, n) chunks of size n, exact division', () =>
+    expect(str(['Partition', ['List', 1, 2, 3, 4], 2])).toEqual(
+      '[[1,2],[3,4]]'
+    ));
+
+  test('Partition(xs, n) keeps a shorter trailing chunk', () =>
+    expect(str(['Partition', ['List', 1, 2, 3, 4, 5], 2])).toEqual(
+      '[[1,2],[3,4],[5]]'
+    ));
+
+  // Sliding windows: only complete windows, step 1 and step > 1.
+  test('Partition(xs, n, 1) sliding windows step 1', () =>
+    expect(str(['Partition', ['List', 1, 2, 3, 4, 5], 2, 1])).toEqual(
+      '[[1,2],[2,3],[3,4],[4,5]]'
+    ));
+
+  test('Partition(xs, n, step) windows step > 1', () =>
+    expect(str(['Partition', ['List', 1, 2, 3, 4, 5, 6], 2, 3])).toEqual(
+      '[[1,2],[4,5]]'
+    ));
+
+  test('Partition(xs, n, step) drops the trailing partial window', () =>
+    // Windows start at 0, 2, 4; the window at 4 ([5]) is incomplete → dropped.
+    expect(str(['Partition', ['List', 1, 2, 3, 4, 5], 2, 2])).toEqual(
+      '[[1,2],[3,4]]'
+    ));
+
+  test('Partition(xs, 1) singletons', () =>
+    expect(str(['Partition', ['List', 1, 2, 3], 1])).toEqual('[[1],[2],[3]]'));
+
+  test('Partition(xs, n) with n ≥ length is a single chunk', () =>
+    expect(str(['Partition', ['List', 1, 2, 3], 10])).toEqual('[[1,2,3]]'));
+
+  test('Partition(xs, n) with n ≤ 0 is inert', () =>
+    expect(
+      engine.box(['Partition', ['List', 1, 2, 3], 0]).evaluate().operator
+    ).toBe('Partition'));
+
+  test('Partition(xs, n, step) with step ≤ 0 is inert', () =>
+    expect(
+      engine.box(['Partition', ['List', 1, 2, 3], 2, 0]).evaluate().operator
+    ).toBe('Partition'));
+
+  test('Partition(xs, predicate) splits into [matching, non-matching]', () =>
+    expect(
+      str(['Partition', ['List', 1, 2, 3, 4, 5], ['Function', ['Greater', 'x', 2], 'x']])
+    ).toEqual('[[3,4,5],[1,2]]'));
+
+  test('Partition is inert on a non-finite collection', () =>
+    expect(
+      engine.box(['Partition', ['Iterate', doubleAcc, 1], 2]).evaluate().operator
+    ).toBe('Partition'));
+
+  // Chunk stays the "count" form: k nearly-equal groups.
+  test('Chunk(xs, k) splits into k nearly-equal groups', () =>
+    expect(str(['Chunk', ['List', 1, 2, 3, 4, 5], 2])).toEqual(
+      '[[1,2,3],[4,5]]'
+    ));
+
+  // --- Dedup -------------------------------------------------------------
+  test('Dedup collapses consecutive duplicates', () =>
+    expect(str(['Dedup', ['List', 1, 1, 2, 2, 1]])).toEqual('[1,2,1]'));
+
+  test('Dedup of an already-unique list is unchanged', () =>
+    expect(str(['Dedup', ['List', 1, 2, 3]])).toEqual('[1,2,3]'));
+
+  test('Dedup of an empty collection is empty', () =>
+    expect(str(['Dedup', ['List']])).toEqual('[]'));
+
+  test('Dedup differs from Unique (local vs global dedup)', () => {
+    // Unique removes ALL duplicates; Dedup only collapses adjacent ones.
+    expect(str(['Unique', ['List', 1, 1, 2, 2, 1]])).toEqual('[1,2]');
+    expect(str(['Dedup', ['List', 1, 1, 2, 2, 1]])).toEqual('[1,2,1]');
+  });
+
+  test('Dedup composes lazily with an infinite source', () => {
+    // Iterate doubles: 2,4,8,16,… (all distinct); Take 4 without materializing
+    // the infinite source.
+    const d = engine.box([
+      'Take',
+      ['Dedup', ['Iterate', doubleAcc, 1]],
+      4,
+    ]);
+    expect(str(d)).toEqual('[2,4,8,16]');
+  });
+
+  test('Dedup streams a lazy Map source with adjacent repeats', () => {
+    // floor(k/2) for k=1..10 → 0,1,1,2,2,3,3,4,4,5; deduped → 0,1,2,3,4,5.
+    const src: Expression = [
+      'Map',
+      ['Range', 1, 10],
+      ['Function', ['Floor', ['Divide', 'x', 2]], 'x'],
+    ];
+    const d = engine.box(['Dedup', src]);
+    expect(Array.from(d.each()).map((x) => x.toString())).toEqual([
+      '0',
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+    ]);
+    // `at` and `count` handlers agree with the streamed result.
+    expect(str(['At', ['Dedup', src], 3])).toEqual('2');
+    expect(str(['Count', ['Dedup', src]])).toEqual('6');
+  });
+
+  // --- Insert ------------------------------------------------------------
+  test('Insert at 1 prepends', () =>
+    expect(str(['Insert', ['List', 10, 20, 30], 1, 99])).toEqual(
+      '[99,10,20,30]'
+    ));
+
+  test('Insert in the middle', () =>
+    expect(str(['Insert', ['List', 10, 20, 30], 2, 99])).toEqual(
+      '[10,99,20,30]'
+    ));
+
+  test('Insert at n+1 appends', () =>
+    expect(str(['Insert', ['List', 10, 20, 30], 4, 99])).toEqual(
+      '[10,20,30,99]'
+    ));
+
+  test('Insert with negative index -1 appends (Elixir semantics)', () =>
+    expect(str(['Insert', ['List', 10, 20, 30], -1, 99])).toEqual(
+      '[10,20,30,99]'
+    ));
+
+  test('Insert with negative index -2 inserts before the last element', () =>
+    expect(str(['Insert', ['List', 10, 20, 30], -2, 99])).toEqual(
+      '[10,20,99,30]'
+    ));
+
+  test('Insert with index 0 is inert', () =>
+    expect(
+      engine.box(['Insert', ['List', 10, 20, 30], 0, 99]).evaluate().operator
+    ).toBe('Insert'));
+
+  test('Insert with out-of-range index (n+2) is inert', () =>
+    expect(
+      engine.box(['Insert', ['List', 10, 20, 30], 5, 99]).evaluate().operator
+    ).toBe('Insert'));
+
+  test('Insert with a symbolic index is inert', () =>
+    expect(
+      engine.box(['Insert', ['List', 10, 20, 30], 'k', 99]).evaluate().operator
+    ).toBe('Insert'));
+
+  // --- DeleteAt ----------------------------------------------------------
+  test('DeleteAt first element', () =>
+    expect(str(['DeleteAt', ['List', 10, 20, 30], 1])).toEqual('[20,30]'));
+
+  test('DeleteAt middle element', () =>
+    expect(str(['DeleteAt', ['List', 10, 20, 30], 2])).toEqual('[10,30]'));
+
+  test('DeleteAt last element', () =>
+    expect(str(['DeleteAt', ['List', 10, 20, 30], 3])).toEqual('[10,20]'));
+
+  test('DeleteAt with negative index counts from the end', () =>
+    expect(str(['DeleteAt', ['List', 10, 20, 30], -1])).toEqual('[10,20]'));
+
+  test('DeleteAt out-of-range index is inert', () =>
+    expect(
+      engine.box(['DeleteAt', ['List', 10, 20, 30], 4]).evaluate().operator
+    ).toBe('DeleteAt'));
+
+  test('DeleteAt with index 0 is inert', () =>
+    expect(
+      engine.box(['DeleteAt', ['List', 10, 20, 30], 0]).evaluate().operator
+    ).toBe('DeleteAt'));
+
+  // --- ReplaceAt ---------------------------------------------------------
+  test('ReplaceAt replaces the element at a 1-based index', () =>
+    expect(str(['ReplaceAt', ['List', 10, 20, 30], 2, 99])).toEqual(
+      '[10,99,30]'
+    ));
+
+  test('ReplaceAt with negative index counts from the end', () =>
+    expect(str(['ReplaceAt', ['List', 10, 20, 30], -1, 99])).toEqual(
+      '[10,20,99]'
+    ));
+
+  test('ReplaceAt out-of-range index is inert', () =>
+    expect(
+      engine.box(['ReplaceAt', ['List', 10, 20, 30], 4, 99]).evaluate().operator
+    ).toBe('ReplaceAt'));
+
+  test('ReplaceAt with a symbolic index is inert', () =>
+    expect(
+      engine
+        .box(['ReplaceAt', ['List', 10, 20, 30], 'k', 99])
+        .evaluate().operator
+    ).toBe('ReplaceAt'));
+});
+
+describe('ZIP-SHAPED LAZINESS (review findings)', () => {
+  const add2: Expression = ['Function', ['Add', 'x', 'y'], 'x', 'y'];
+
+  test('variadic Map bounded by the finite source when zipped with an infinite one', () => {
+    const m = engine.box(['Map', ['Repeat', 7], ['List', 1, 2], add2]);
+    expect(m.count).toBe(2);
+    expect(m.evaluate().toString()).toBe('[8,9]');
+  });
+
+  test('Zip of an infinite and a finite source has the finite count', () => {
+    const z = engine.box(['Zip', ['Repeat', 7], ['List', 1, 2]]);
+    expect(z.count).toBe(2);
+    expect(z.evaluate().toString()).toBe('[(7, 1),(7, 2)]');
+  });
+
+  test('Sort with a key over symbolic elements stays inert', () =>
+    expect(
+      engine
+        .box(['Sort', ['List', 'q', 'r'], ['Function', ['Power', 'x', 2], 'x']])
+        .evaluate().operator
+    ).toBe('Sort'));
+
+  test('ArgMax over a non-indexed collection stays inert', () =>
+    expect(
+      engine.box(['ArgMax', ['Set', 1, 2]]).evaluate().operator
+    ).toBe('ArgMax'));
 });

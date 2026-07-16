@@ -165,8 +165,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             ...op1.tensor.flatten().map((x) => ce.expr(x)),
           ]);
 
+        // No depth means "flatten completely" (Wolfram semantics). Route the
+        // non-tensor case through the same machinery as the depth form with
+        // depth ∞: `[...op1.each()]` would remove only the outermost level and
+        // is a no-op on a ragged/non-uniform nested list (e.g.
+        // `Flatten([[1, x], [2]])`). Uniform tensors keep the `tensor.flatten()`
+        // fast path above.
         if (isFiniteIndexedCollection(op1))
-          return ce.function('List', [...op1.each()]);
+          return ce.function('List', flattenToDepth(op1, Infinity));
 
         return undefined;
       },

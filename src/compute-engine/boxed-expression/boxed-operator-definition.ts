@@ -117,9 +117,18 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     const literal = this._lambdaLiteral;
     if (literal === undefined || !isFunction(literal, 'Function'))
       return undefined;
-    const body = functionLiteralBody(literal);
+    // The stored literal may be non-canonical: a MathJSON `evaluate` handler is
+    // boxed with `form:'raw'` (see the constructor), so its body is a raw
+    // expression rather than the canonical scoped `Block` the parse/assign
+    // route produces. Canonicalize the literal (in its captured scope) so the
+    // public view mirrors that route — a consumer manipulating the body must
+    // get a canonical, scoped expression usable in arithmetic. Canonicalizing
+    // an already-canonical literal is a no-op.
+    const canonical = literal.canonical;
+    if (!isFunction(canonical, 'Function')) return undefined;
+    const body = functionLiteralBody(canonical);
     if (body === undefined) return undefined;
-    return { parameters: functionLiteralParameters(literal), body };
+    return { parameters: functionLiteralParameters(canonical), body };
   }
 
   type?: (

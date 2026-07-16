@@ -189,4 +189,46 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       expect(r.freeSymbols!.sort()).toEqual(['a', 'b', 'k']);
     });
   });
+
+  // A custom per-operator `compile` handler may decline for a given target
+  // language (returning `undefined`). The analysis must PROBE the handler, not
+  // assume any head with a handler is lowerable everywhere — otherwise it
+  // under-reports `unsupported` on the targets the handler doesn't cover.
+  describe('custom compile handler language support (probed)', () => {
+    it('reports a JS-only handler head as unsupported on glsl but not javascript', () => {
+      const ce = new ComputeEngine();
+      // `Quadrance` has no built-in mapping on any target, so the ONLY lowering
+      // is this handler — and it emits code for javascript only.
+      ce.declare('Quadrance', {
+        signature: '(number, number) -> number',
+        compile: (args, c, { language }) =>
+          language === 'javascript'
+            ? `((${c(args[0])})**2 + (${c(args[1])})**2)`
+            : undefined,
+      });
+      const expr = ce.parse('\\mathrm{Quadrance}(x, y)');
+
+      // JavaScript: the handler emits code → not unsupported.
+      const js = compile(expr);
+      expect(js.success).toBe(true);
+      expect(js.unsupported).toEqual([]);
+
+      // GLSL: the handler declines (returns undefined) and there is no built-in
+      // Quadrance lowering → the probe surfaces it as unsupported.
+      const glsl = compile(expr, { to: 'glsl' });
+      expect(glsl.unsupported).toContain('Quadrance');
+      expect(glsl.success).toBe(false);
+    });
+
+    it('a handler covering both languages is unsupported on neither', () => {
+      const ce = new ComputeEngine();
+      ce.declare('Quadrance2', {
+        signature: '(number, number) -> number',
+        compile: (args, c) => `((${c(args[0])})**2 + (${c(args[1])})**2)`,
+      });
+      const expr = ce.parse('\\mathrm{Quadrance2}(x, y)');
+      expect(compile(expr).unsupported).toEqual([]);
+      expect(compile(expr, { to: 'glsl' }).unsupported).toEqual([]);
+    });
+  });
 });
