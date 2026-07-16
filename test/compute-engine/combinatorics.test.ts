@@ -24,6 +24,105 @@ describe('integer-only functions stay symbolic for non-integer args', () => {
   });
 });
 
+describe('Permutations / Combinations are lazy collections', () => {
+  const list = (n: number) =>
+    ce.box(['List', ...Array.from({ length: n }, (_, i) => i + 1)]);
+
+  test('Permutations: evaluate stays lazy, count is the closed form', () => {
+    // 12! = 479001600 — materializing would be catastrophic; count must be O(k).
+    const p = ce.box(['Permutations', list(12)]).evaluate();
+    expect(p.operator).toBe('Permutations');
+    expect(p.isCollection).toBe(true);
+    expect(p.count).toBe(479001600);
+    // First element is the identity ordering; indexing walks only that far.
+    expect(p.at(1)?.toString()).toBe('[1,2,3,4,5,6,7,8,9,10,11,12]');
+  });
+
+  test('Permutations: full enumeration (small) and length-k form', () => {
+    const p3 = ce.box(['Permutations', list(3)]).evaluate();
+    expect([...p3.each()].map((x) => x.toString())).toEqual([
+      '[1,2,3]',
+      '[1,3,2]',
+      '[2,1,3]',
+      '[2,3,1]',
+      '[3,1,2]',
+      '[3,2,1]',
+    ]);
+    // P(3, 2) = 6
+    const p32 = ce.box(['Permutations', list(3), 2]).evaluate();
+    expect(p32.count).toBe(6);
+    expect([...p32.each()].map((x) => x.toString())).toEqual([
+      '[1,2]',
+      '[1,3]',
+      '[2,1]',
+      '[2,3]',
+      '[3,1]',
+      '[3,2]',
+    ]);
+  });
+
+  test('Combinations: count is C(n,k) without enumerating', () => {
+    // C(30, 15) = 155117520 — far too many to materialize.
+    const c = ce.box(['Combinations', list(30), 15]).evaluate();
+    expect(c.operator).toBe('Combinations');
+    expect(c.count).toBe(155117520);
+    const c42 = ce.box(['Combinations', list(4), 2]).evaluate();
+    expect([...c42.each()].map((x) => x.toString())).toEqual([
+      '[1,2]',
+      '[1,3]',
+      '[1,4]',
+      '[2,3]',
+      '[2,4]',
+      '[3,4]',
+    ]);
+  });
+
+  test('k = 0 is the single empty arrangement (count 1, one empty list)', () => {
+    for (const head of ['Permutations', 'Combinations']) {
+      const e = ce.box([head, list(3), 0]).evaluate();
+      expect(e.count).toBe(1); // P(n,0) = C(n,0) = 1
+      expect([...e.each()].map((x) => x.toString())).toEqual(['[]']);
+    }
+  });
+
+  test('infinite base: count/iterator/isFinite stay consistent', () => {
+    const inf = ce.box(['Range', 1, 'Infinity']);
+    // k validated BEFORE the infinite short-circuit.
+    expect(ce.box(['Permutations', inf, -5]).count).toBeUndefined();
+    expect(ce.box(['Combinations', inf, -1]).count).toBeUndefined();
+    expect(ce.box(['Combinations', list(3), 5]).count).toBeUndefined(); // k > n
+    // A valid k > 0 over an infinite base can't be enumerated: `count` and
+    // `isFinite` are both undefined (not Infinity / false) so the collection
+    // doesn't advertise elements the iterator can't produce.
+    const p2 = ce.box(['Permutations', inf, 2]).evaluate();
+    expect(p2.count).toBeUndefined();
+    expect(p2.isFiniteCollection).toBeUndefined();
+    expect([...p2.each()]).toEqual([]);
+    // k = 0 over an infinite source is still the single empty arrangement.
+    const p0 = ce.box(['Permutations', inf, 0]).evaluate();
+    expect(p0.count).toBe(1);
+    expect(p0.isFiniteCollection).toBe(true);
+    expect([...p0.each()].map((x) => x.toString())).toEqual(['[]']);
+  });
+
+  test('a huge-but-finite permutation collection stays finite even when count overflows', () => {
+    // 171! rounds to Infinity as a JS number, but the collection is finite — so
+    // `isFiniteCollection` must come from the base collection, not the count.
+    const p = ce.box(['Permutations', list(171)]).evaluate();
+    expect(p.isFiniteCollection).toBe(true);
+    // Small combination counts remain exact.
+    expect(ce.box(['Combinations', list(50), 25]).count).toBe(126410606437752);
+  });
+
+  test('count on an astronomically large domain returns Infinity without hanging', () => {
+    // Early-exit once the running product exceeds MAX_VALUE — must not grind
+    // through ~1e9 bigint multiplications.
+    const big = ce.box(['Range', 1, 1000000000]);
+    expect(ce.box(['Permutations', big]).count).toBe(Infinity);
+    expect(ce.box(['Combinations', big, 500000000]).count).toBe(Infinity);
+  });
+});
+
 describe('Subfactorial (derangements) — REVIEW.md B9', () => {
   // !n = n·!(n−1) + (−1)^n, with !0 = 1 (OEIS A000166). The previous
   // implementation reduced to result·(i−1), which is 0 at i = 1 and pinned

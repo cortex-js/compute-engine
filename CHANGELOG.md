@@ -1,3 +1,38 @@
+## [Unreleased]
+
+### Collections
+
+- **A list comprehension is now a lazy collection: `evaluate()` no longer walks
+  its whole domain.** A `Comprehension` (`[body \operatorname{for} i=…]`)
+  behaves like `Range`/`Map` — `evaluate()` returns the comprehension itself,
+  and its collection type, `.count`, and emptiness are reported from the
+  iterator-clause counts without enumerating a single element. Elements are
+  materialized only when actually consumed (a positive `at(n)` walks just the
+  first `n`); indexing, iteration, and aggregation (`Sum`, `Length`, `At`,
+  `Take`, `Map`, …) are unchanged. Binding an unread comprehension to a name is
+  therefore ~O(1) instead of materializing its whole domain up front — e.g. 25
+  dead 225-element weight tables dropped from ~6 s to negligible. (Reported by
+  the Tycho/Graph Paper team.)
+- **A bracket comprehension parses to the comprehension itself, not a
+  one-element `List` wrapping it.** `[body \operatorname{for} i=…]` previously
+  produced `["List", ["Comprehension", …]]`, which reported `count: 1` and
+  mis-indexed (`W[3]` → `NaN`); it now returns the `Comprehension` directly,
+  mirroring the `Range`/`Linspace` bracket passthrough. (Reported by the
+  Tycho/Graph Paper team.)
+- **`Tabulate` (and its `Table` alias) is now a lazy indexed collection.**
+  `evaluate()` returns the `Tabulate` itself rather than building the whole
+  array; `.count` is the outer dimension and an element is computed by applying
+  the function only when indexed or iterated. A `Tabulate(f, 1_000_000)` that is
+  bound but unread is now O(1) instead of hanging while it builds a
+  million-element list. The Mathematica-style `Table(i^2, {i, 1, n})` inherits
+  this (it canonicalizes to `Tabulate`).
+- **`Permutations` and `Combinations` are now lazy collections with closed-form
+  counts.** `Permutations(xs, k?)` and `Combinations(xs, k)` no longer
+  materialize their factorially-many elements to be bound, counted, or indexed:
+  `.count` is `P(n, k)` / `C(n, k)` computed directly (previously
+  `Permutations` of a 9-element list took ~33 s just to answer `.count`),
+  elements stream from the iterator, and `at(n)` walks only as far as needed.
+
 ## 0.79.3 _2026-07-15_
 
 ### Parsing
@@ -18,15 +53,16 @@
 
 - **Parsing a call no longer un-assigns a bare-symbol argument.** Parsing an
   application like `f(S)` runs argument-type inference on each operand. When the
-  callee's parameter type was `unknown` or `any` and the argument symbol had been
-  declared `unknown` and assigned a value, inference computed `unknown` (a no-op
-  narrowing) and wrote it back to the symbol's type — and the value-definition
-  type setter discards the held value whenever the type is set to `unknown`. So
-  merely _parsing_ `f(S)` (no `evaluate`/`N`) silently cleared `S`'s assigned
-  value, leaving it unbound and every dependent expression `NaN`. Inferring
-  `unknown` adds no information, so it is now skipped entirely and never
-  overwrites an existing binding; inference of a concrete parameter type still
-  narrows an open argument as before. (Reported by the Tycho/Graph Paper team.)
+  callee's parameter type was `unknown` or `any` and the argument symbol had
+  been declared `unknown` and assigned a value, inference computed `unknown` (a
+  no-op narrowing) and wrote it back to the symbol's type — and the
+  value-definition type setter discards the held value whenever the type is set
+  to `unknown`. So merely _parsing_ `f(S)` (no `evaluate`/`N`) silently cleared
+  `S`'s assigned value, leaving it unbound and every dependent expression `NaN`.
+  Inferring `unknown` adds no information, so it is now skipped entirely and
+  never overwrites an existing binding; inference of a concrete parameter type
+  still narrows an open argument as before. (Reported by the Tycho/Graph Paper
+  team.)
 
 ### Collections
 
@@ -35,33 +71,33 @@
   element-indexing operators. On a single point that is correct (`(3,4).x` = 3,
   since the first element of a 2-tuple is its x-coordinate), but on a _list of
   points_ the two diverge: `[(1,2),(3,4),(5,6)].x` returned the first _point_
-  `(1,2)` instead of the list of x-coordinates `[1,3,5]`. The accessors now parse
-  to dedicated `PointX`/`PointY`/`PointZ` operators that extract a coordinate and
-  map element-wise over a list of points (matching Desmos and the threadable
-  `.real`/`.imag` accessors), while a single point still returns the scalar
-  coordinate. `First`/`Second`/`Third` are unchanged and continue to index a
-  collection. The new operators broadcast on the `javascript` compile target
-  (`L.x` → `(L).map((p) => p[0])`) and, for a single point, swizzle on the GPU
-  target as before. (Reported by the Tycho/Graph Paper team.)
+  `(1,2)` instead of the list of x-coordinates `[1,3,5]`. The accessors now
+  parse to dedicated `PointX`/`PointY`/`PointZ` operators that extract a
+  coordinate and map element-wise over a list of points (matching Desmos and the
+  threadable `.real`/`.imag` accessors), while a single point still returns the
+  scalar coordinate. `First`/`Second`/`Third` are unchanged and continue to
+  index a collection. The new operators broadcast on the `javascript` compile
+  target (`L.x` → `(L).map((p) => p[0])`) and, for a single point, swizzle on
+  the GPU target as before. (Reported by the Tycho/Graph Paper team.)
 
 ### Compilation
 
 - **Element-wise (scalar↔list) arithmetic now broadcasts on the `javascript`
   compile target.** An arithmetic or element-wise math operator applied to a
-  list-valued operand — `x - L`, `2L`, `L^2`, `-L`, `\sin(L)`, `\sqrt{L}`, or two
-  lists `L + M` — previously compiled to scalar JavaScript that returned garbage
-  (`-_.L + _.x` → `NaN`) behind a `success: true`, unless an operand was a
-  _concrete_ collection at compile time (which failed closed). A symbolic
-  list-valued **parameter** (bound at run time — the normal compile case) slipped
-  through entirely. These now compile to a `_SYS.bcast` runtime helper that maps
-  the operator element-wise, matching the interpreter's broadcasting: scalars are
-  reused for every element, two lists zip to the shorter length, and nested lists
-  (matrices) recurse. The pure-scalar fast path is unchanged. A **complex**-valued
-  list still has no coverage and now fails closed correctly (`success: false` →
-  interpreter fallback) instead of silently returning garbage. Combined with the
-  `.x`/`.y` point-broadcast change above, a compiled Desmos expression such as
-  `\min((x - V.x)^2 + (y - V.y)^2)` over a list of points `V` now evaluates
-  correctly. (Reported by the Tycho/Graph Paper team.)
+  list-valued operand — `x - L`, `2L`, `L^2`, `-L`, `\sin(L)`, `\sqrt{L}`, or
+  two lists `L + M` — previously compiled to scalar JavaScript that returned
+  garbage (`-_.L + _.x` → `NaN`) behind a `success: true`, unless an operand was
+  a _concrete_ collection at compile time (which failed closed). A symbolic
+  list-valued **parameter** (bound at run time — the normal compile case)
+  slipped through entirely. These now compile to a `_SYS.bcast` runtime helper
+  that maps the operator element-wise, matching the interpreter's broadcasting:
+  scalars are reused for every element, two lists zip to the shorter length, and
+  nested lists (matrices) recurse. The pure-scalar fast path is unchanged. A
+  **complex**-valued list still has no coverage and now fails closed correctly
+  (`success: false` → interpreter fallback) instead of silently returning
+  garbage. Combined with the `.x`/`.y` point-broadcast change above, a compiled
+  Desmos expression such as `\min((x - V.x)^2 + (y - V.y)^2)` over a list of
+  points `V` now evaluates correctly. (Reported by the Tycho/Graph Paper team.)
 
 ## 0.79.2 _2026-07-15_
 

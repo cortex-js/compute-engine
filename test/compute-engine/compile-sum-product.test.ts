@@ -397,7 +397,10 @@ describe('COMPILE Sum/Product/Max/Min - collection form', () => {
       )
     );
     expect(r.success).toBe(true);
-    expect(r.run!({ P: [10, 20, 30] })).toEqual([[20, 40, 60]]);
+    // `[body \operatorname{for} n=…]` is the comprehension itself — NOT a
+    // one-element `List` wrapping it — so the result is the flat list of
+    // per-element totals, not a singleton `[[…]]`.
+    expect(r.run!({ P: [10, 20, 30] })).toEqual([20, 40, 60]);
   });
 
   test('indexing-set (range) form is unaffected', () => {

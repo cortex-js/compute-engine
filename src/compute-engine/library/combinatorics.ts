@@ -370,32 +370,36 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Return all permutations of length k (default full length) of a collection.',
       keywords: ['nPr'],
       signature: '(collection, integer?) -> list<list>',
-      evaluate: ([xs, kExpr], { engine: ce }) => {
-        if (!xs.isFiniteCollection) return undefined;
-
-        const all = Array.from(xs.each()) as Expression[];
-        const k = kExpr ? toInteger(kExpr) : all.length;
-        if (k === null || k < 0 || k > all.length) return undefined;
-
-        function* permute(
-          prefix: Expression[],
-          rest: Expression[]
-        ): Generator<Expression[]> {
-          if (prefix.length === k) {
-            yield prefix;
-            return;
-          }
-          for (let i = 0; i < rest.length; i++) {
-            const next = rest.slice();
-            const [item] = next.splice(i, 1);
-            yield* permute([...prefix, item], next);
-          }
-        }
-
-        return ce.function(
-          'List',
-          [...permute([], all)].map((perm) => ce.function('List', perm))
-        );
+      // A lazy indexed collection (like `CartesianProduct`/`PowerSet`): the
+      // result has `P(n, k)` elements — factorially many — so it is NEVER
+      // materialized up front. `.count` is the closed form `n·(n-1)···(n-k+1)`
+      // (no walk); elements stream from `iterator`, and `at(i)` yields only the
+      // first `i` ARRANGEMENTS (after reading the — typically small — base
+      // collection once). Binding an unread `Permutations` is O(1).
+      collection: {
+        isLazy: () => true,
+        count: (expr) => permutationsCount(expr),
+        isEmpty: (expr) => {
+          const c = permutationsCount(expr);
+          return c === undefined ? undefined : c === 0;
+        },
+        // Finiteness comes from the BASE collection, not `count`: a permutation
+        // of a finite collection is finite even when the count is so large it
+        // rounds to `Infinity` as a JS number. `k = 0` is the lone exception —
+        // the single empty arrangement is finite even over an infinite base.
+        // An infinite base with `k > 0` can't be enumerated, so report
+        // `undefined` (unknown) rather than `false` — which would advertise an
+        // infinite collection that yields nothing.
+        isFinite: (expr) => {
+          if (!isFunction(expr)) return undefined;
+          const k = expr.ops[1] ? toInteger(expr.ops[1]) : expr.op1.count;
+          if (k === 0) return true;
+          const f = expr.op1.isFiniteCollection;
+          return f === false ? undefined : f;
+        },
+        iterator: permutationsIterator,
+        at: (expr, index) =>
+          nthFromIterator(expr, index, permutationsIterator, permutationsCount),
       },
     },
 
@@ -403,30 +407,30 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Return all k-element combinations of a collection.',
       wikidata: 'Q193606',
       signature: '(collection, integer) -> list<list>',
-      evaluate: ([xs, kExpr], { engine: ce }) => {
-        if (!xs.isFiniteCollection) return undefined;
-
-        const all = Array.from(xs.each()) as Expression[];
-        const k = toInteger(kExpr);
-        if (k === null || k < 0 || k > all.length) return undefined;
-
-        function* combine(
-          start: number,
-          combo: Expression[]
-        ): Generator<Expression[]> {
-          if (combo.length === k) {
-            yield combo;
-            return;
-          }
-          for (let i = start; i < all.length; i++) {
-            yield* combine(i + 1, [...combo, all[i]]);
-          }
-        }
-
-        return ce.function(
-          'List',
-          [...combine(0, [])].map((combo) => ce.function('List', combo))
-        );
+      // Lazy indexed collection: `C(n, k)` elements, never materialized up
+      // front. `.count` is the closed form `P(n, k) / k!`; elements stream from
+      // `iterator`, and `at(i)` yields only the first `i` combinations (after
+      // reading the — typically small — base collection once).
+      collection: {
+        isLazy: () => true,
+        count: (expr) => combinationsCount(expr),
+        isEmpty: (expr) => {
+          const c = combinationsCount(expr);
+          return c === undefined ? undefined : c === 0;
+        },
+        // Finiteness comes from the BASE collection, not `count` (see
+        // `Permutations`); `k = 0` is finite even over an infinite base, and an
+        // infinite base with `k > 0` is `undefined` (unenumerable), not `false`.
+        isFinite: (expr) => {
+          if (!isFunction(expr)) return undefined;
+          const k = expr.ops[1] ? toInteger(expr.ops[1]) : expr.op1.count;
+          if (k === 0) return true;
+          const f = expr.op1.isFiniteCollection;
+          return f === false ? undefined : f;
+        },
+        iterator: combinationsIterator,
+        at: (expr, index) =>
+          nthFromIterator(expr, index, combinationsIterator, combinationsCount),
       },
     },
 
@@ -581,4 +585,185 @@ function* powerSetIterator(
     }
     yield subset.length === 0 ? ce.symbol('EmptySet') : ce._fn('Set', subset);
   }
+}
+
+// NOTE on precision: `count` returns a JS `number`, so values past 2^53 are not
+// exact and values past ~1.8e308 round to `Infinity` — the same ceiling every
+// collection `count` handler has (cf. `PowerSet`'s `2 ** n`). The products below
+// are accumulated in `bigint` so everything that DOES fit is exact and there is
+// no float rounding; only the final `Number(...)` conversion is lossy. The
+// `isFinite` handlers report finiteness from the BASE collection, not from
+// `count`, so a finite-but-huge result that rounds to `Infinity` is never
+// mistaken for an infinite collection.
+
+// Once a running count exceeds the largest finite JS number, `Number(...)` can
+// only ever yield `Infinity`, so the products below stop early at this bigint
+// threshold rather than grinding through (potentially billions of) remaining
+// terms for an astronomically large — but finite — collection.
+const MAX_FINITE_COUNT = BigInt(Number.MAX_VALUE);
+
+/**
+ * The number of length-`k` permutations of an `n`-element collection,
+ * `P(n, k) = n·(n-1)···(n-k+1)`, WITHOUT enumerating them. `k` defaults to the
+ * collection size. Returns `1` for `k = 0` (the empty arrangement); `undefined`
+ * when the size is unknown, `k` is out of range, or the base is infinite with
+ * `k > 0` (which the iterator cannot enumerate); `Infinity` only when a finite
+ * base's count exceeds the largest finite JS number.
+ */
+function permutationsCount(expr: Expression): number | undefined {
+  if (!isFunction(expr)) return undefined;
+  const n = expr.op1.count;
+  if (n === undefined) return undefined;
+  const kExpr = expr.ops[1];
+  const k = kExpr ? toInteger(kExpr) : n;
+  // Validate `k` BEFORE the infinite short-circuit: an out-of-range `k` is an
+  // invalid expression, not an infinite collection.
+  if (k === null || k < 0 || (Number.isFinite(n) && k > n)) return undefined;
+  if (k === 0) return 1; // P(n, 0) = 1
+  // A valid `k > 0` over an infinite base has infinitely many arrangements, but
+  // the iterator can't enumerate them (it can't materialize the source): report
+  // `undefined` (unsupported) rather than a count no consumer can back up.
+  if (!Number.isFinite(n)) return undefined;
+  let p = 1n;
+  const bn = BigInt(n);
+  for (let j = 0n; j < BigInt(k); j++) {
+    p *= bn - j;
+    if (p > MAX_FINITE_COUNT) return Infinity;
+  }
+  return Number(p);
+}
+
+/**
+ * The number of `k`-element combinations of an `n`-element collection,
+ * `C(n, k) = P(n, k) / k!`, WITHOUT enumerating them. Returns `1` for `k = 0`;
+ * `undefined` when the size is unknown, `k` is out of range, or the base is
+ * infinite with `k > 0`; `Infinity` only when a finite base's count exceeds the
+ * largest finite JS number.
+ */
+function combinationsCount(expr: Expression): number | undefined {
+  if (!isFunction(expr)) return undefined;
+  const n = expr.op1.count;
+  if (n === undefined) return undefined;
+  const k = toInteger(expr.ops[1]);
+  if (k === null || k < 0 || (Number.isFinite(n) && k > n)) return undefined;
+  if (k === 0) return 1; // C(n, 0) = 1
+  if (!Number.isFinite(n)) return undefined; // see `permutationsCount`
+  // Symmetry C(n,k) = C(n,n-k) keeps the running product smallest. Each step
+  // `c·(n-j)/(j+1)` is an exact integer division because the product of `j+1`
+  // consecutive integers is divisible by `(j+1)!`.
+  const bn = BigInt(n);
+  const kk = BigInt(Math.min(k, n - k));
+  let c = 1n;
+  for (let j = 0n; j < kk; j++) {
+    c = (c * (bn - j)) / (j + 1n);
+    if (c > MAX_FINITE_COUNT) return Infinity;
+  }
+  return Number(c);
+}
+
+/** Stream the length-`k` permutations of a (finite) collection as `List`s, in
+ * the same lexicographic-by-removal order as the former eager evaluator. */
+function* permutationsIterator(
+  expr: Expression
+): Generator<Expression, undefined, any> {
+  if (!isFunction(expr)) return;
+  const xs = expr.op1;
+  const ce = expr.engine;
+  const kExpr = expr.ops[1];
+  // P(n, 0) = 1: the single empty arrangement — yield it without touching the
+  // source (so it also works for an infinite source, which can't be
+  // enumerated). A negative/invalid explicit `k` yields nothing.
+  if (kExpr) {
+    const k0 = toInteger(kExpr);
+    if (k0 === null || k0 < 0) return;
+    if (k0 === 0) {
+      yield ce.function('List', []);
+      return;
+    }
+  }
+  if (!xs.isFiniteCollection) return;
+  const all = [...xs.each()] as Expression[];
+  const k = kExpr ? toInteger(kExpr) : all.length;
+  if (k === null || k < 0 || k > all.length) return;
+
+  function* permute(
+    prefix: Expression[],
+    rest: Expression[]
+  ): Generator<Expression[]> {
+    if (prefix.length === k) {
+      yield prefix;
+      return;
+    }
+    for (let i = 0; i < rest.length; i++) {
+      const next = rest.slice();
+      const [item] = next.splice(i, 1);
+      yield* permute([...prefix, item], next);
+    }
+  }
+  for (const perm of permute([], all)) yield ce.function('List', perm);
+}
+
+/** Stream the `k`-element combinations of a (finite) collection as `List`s, in
+ * ascending-index order (same as the former eager evaluator). */
+function* combinationsIterator(
+  expr: Expression
+): Generator<Expression, undefined, any> {
+  if (!isFunction(expr)) return;
+  const xs = expr.op1;
+  const ce = expr.engine;
+  const kExpr = expr.ops[1];
+  // C(n, 0) = 1: the single empty combination — yield it without touching the
+  // source (works for an infinite source too). Negative/invalid `k` → nothing.
+  const k0 = kExpr ? toInteger(kExpr) : null;
+  if (k0 === null || k0 < 0) return;
+  if (k0 === 0) {
+    yield ce.function('List', []);
+    return;
+  }
+  if (!xs.isFiniteCollection) return;
+  const all = [...xs.each()] as Expression[];
+  const k = k0;
+  if (k > all.length) return;
+
+  function* combine(
+    start: number,
+    combo: Expression[]
+  ): Generator<Expression[]> {
+    if (combo.length === k) {
+      yield combo;
+      return;
+    }
+    for (let i = start; i < all.length; i++) {
+      yield* combine(i + 1, [...combo, all[i]]);
+    }
+  }
+  for (const combo of combine(0, [])) yield ce.function('List', combo);
+}
+
+/**
+ * Return the element at `index` (1-based; negative counts from the end) of a
+ * lazy collection defined by a streaming `gen`, walking only as far as needed.
+ * A negative index needs the length, taken from `countFn` (closed form here),
+ * so it never forces a full materialization for a known count.
+ */
+function nthFromIterator(
+  expr: Expression,
+  index: number | string,
+  gen: (e: Expression) => Generator<Expression, undefined, any>,
+  countFn: (e: Expression) => number | undefined
+): Expression | undefined {
+  if (typeof index !== 'number' || !Number.isInteger(index) || index === 0)
+    return undefined;
+  let target = index;
+  if (index < 0) {
+    const c = countFn(expr);
+    if (c === undefined || !Number.isFinite(c)) return undefined;
+    target = c + index + 1;
+    if (target < 1) return undefined;
+  }
+  let i = 0;
+  for (const el of gen(expr)) {
+    if (++i === target) return el;
+  }
+  return undefined;
 }

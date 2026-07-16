@@ -49,7 +49,10 @@ describe('A5 — where+for composition (evaluation)', () => {
         'i \\operatorname{where} n \\coloneq 3 \\operatorname{for} i = \\operatorname{Range}(n)'
       )
       .evaluate();
-    expect(result.json).toEqual(['List', 1, 2, 3]);
+    // The comprehension is a lazy collection; materialize to read its
+    // elements. The where-binding is captured through the loop scope's parent
+    // chain, so it materializes correctly after the transient `where` scope.
+    expect([...result.each()].map((x) => x.json)).toEqual([1, 2, 3]);
   });
 
   test('Order 2: for before where — iter range can reference binding', () => {
@@ -58,7 +61,10 @@ describe('A5 — where+for composition (evaluation)', () => {
         'i \\operatorname{for} i = \\operatorname{Range}(n) \\operatorname{where} n \\coloneq 3'
       )
       .evaluate();
-    expect(result.json).toEqual(['List', 1, 2, 3]);
+    // The comprehension is a lazy collection; materialize to read its
+    // elements. The where-binding is captured through the loop scope's parent
+    // chain, so it materializes correctly after the transient `where` scope.
+    expect([...result.each()].map((x) => x.json)).toEqual([1, 2, 3]);
   });
 });
 
@@ -73,7 +79,11 @@ describe('A5 — where+for composition (scope hygiene)', () => {
           'i \\operatorname{where} n \\coloneq 3 \\operatorname{for} i = \\operatorname{Range}(n)'
         )
         .evaluate();
-      expect(result.json).toEqual(['List', 1, 2, 3]);
+      // The comprehension is a lazy collection; materialize to read its
+      // elements. The where-binding (`n`) is captured through the loop scope's
+      // parent chain, so it materializes correctly even after the transient
+      // `where` scope is discarded.
+      expect([...result.each()].map((x) => x.json)).toEqual([1, 2, 3]);
       // After the clause, outer n is unchanged.
       expect(ce.expr('n').evaluate().re).toEqual(100);
     } finally {
@@ -90,7 +100,11 @@ describe('A5 — where+for composition (scope hygiene)', () => {
           'i \\operatorname{where} n \\coloneq 3 \\operatorname{for} i = \\operatorname{Range}(n)'
         )
         .evaluate();
-      expect(result.json).toEqual(['List', 1, 2, 3]);
+      // The comprehension is a lazy collection; materialize to read its
+      // elements. The where-binding (`n`) is captured through the loop scope's
+      // parent chain, so it materializes correctly even after the transient
+      // `where` scope is discarded.
+      expect([...result.each()].map((x) => x.json)).toEqual([1, 2, 3]);
       // After the clause, `n` is still undefined in the outer scope —
       // it was created inside the Block's local scope and discarded.
       // A bare `n` reference would auto-declare as an unknown symbol,

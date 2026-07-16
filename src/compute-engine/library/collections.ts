@@ -2436,11 +2436,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Create a collection by applying a function to each index in the specified dimensions.',
     keywords: ['table'],
-    // @todo: do a lazy version of this (implemented as a collection handler)
     complexity: 8200,
 
     lazy: true,
-    signature: '(function, integer, integer?) -> collection',
+    signature: '(function, integer, integer?) -> indexed_collection',
+    // Tabulate is an INDEXED collection (ordered, `at`-addressable). Report the
+    // element type so it serializes as a list `[…]`, not a set `{…}`: for a 1-D
+    // tabulation the element is the function's result; for higher rank each
+    // element is itself a (nested) list.
+    type: (ops) => {
+      if (ops.length <= 1) return parseType('indexed_collection');
+      if (ops.length === 2) {
+        const elt = functionResult(ops[0].type.type) ?? 'any';
+        return parseType(`indexed_collection<${typeToString(elt)}>`);
+      }
+      return parseType('indexed_collection<list>');
+    },
     canonical: (ops, { engine }) => {
       const fn = canonicalFunctionLiteral(ops[0]);
       if (!fn) return null;
@@ -2457,44 +2468,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         checkType(engine, ops[2]?.canonical, 'integer'),
       ]);
     },
-    evaluate: (ops, { engine: ce }) => {
-      // treated as multidimensional indexes
-      const fn = applicable(ops[0]);
-      if (!fn) return undefined;
-      if (ops.length === 1) return ce._fn('List', []);
-      const dims = ops.slice(1).map((op) => toInteger(op));
-      if (dims.some((d) => d === null || d <= 0)) return undefined;
-      if (dims.length === 1) {
-        // @fastpath
-        return ce._fn(
-          'List',
-          Array.from(
-            { length: dims[0] ?? 0 },
-            (_, i) => fn([ce.number(i + 1)]) ?? ce.Nothing
-          )
-        );
-      }
-
-      const fillArray = (
-        dims: number[],
-        index: number[],
-        level = 0
-      ): ExpressionInput => {
-        // Apply the function `fn` to the current index array
-        if (level === dims.length) {
-          const idx = index.map((i) => ce.number(i));
-          return fn(idx) ?? ce.Nothing;
-        }
-
-        const arr: ['List', ...ExpressionInput[]] = ['List'];
-        for (let i = 1; i <= dims[level]; i++) {
-          index[level] = i;
-          arr.push(fillArray(dims, index, level + 1));
-        }
-        return arr;
-      };
-
-      return ce.expr(fillArray(dims as number[], Array(dims.length).fill(0)));
+    // A lazy indexed collection (like `Range`/`Map`): `evaluate()` returns the
+    // `Tabulate` itself. `.count` is the outer dimension (no walk); an element
+    // is computed by applying the function only when indexed or iterated, so a
+    // `Tabulate(f, 1_000_000)` bound but unread costs O(1) instead of building
+    // a million-element list.
+    collection: {
+      isLazy: () => true,
+      count: (expr) => tabulateCount(expr),
+      isEmpty: (expr) => {
+        const c = tabulateCount(expr);
+        return c === undefined ? undefined : c === 0;
+      },
+      isFinite: (expr) => {
+        const c = tabulateCount(expr);
+        return c === undefined ? undefined : Number.isFinite(c);
+      },
+      iterator: tabulateIterator,
+      at: (expr, index) => tabulateAt(expr, index),
     },
   },
 
@@ -3830,6 +3821,80 @@ function takeCount(expr: Expression): number | undefined {
   const n = Math.max(0, toInteger(op2) ?? 0);
   if (!Number.isFinite(n)) return Infinity;
   return Math.min(count, n);
+}
+
+/** The integer dimensions of a `Tabulate`, or `null` if any is missing,
+ * non-integer, or non-positive. `Tabulate(fn)` (no dimensions) returns `[]`. */
+function tabulateDims(expr: Expression): number[] | null {
+  if (!isFunction(expr)) return null;
+  const dims = expr.ops.slice(1).map((op) => toInteger(op));
+  if (dims.some((d) => d === null || d <= 0)) return null;
+  return dims as number[];
+}
+
+/** Element count of a `Tabulate` = its OUTER dimension (no enumeration).
+ * `Tabulate(fn)` with no dimensions is the empty list (count 0). */
+function tabulateCount(expr: Expression): number | undefined {
+  if (!isFunction(expr)) return undefined;
+  if (expr.ops.length <= 1) return 0;
+  const dims = tabulateDims(expr);
+  if (dims === null) return undefined;
+  return dims[0];
+}
+
+/** The element at 1-based outer index `outerIndex` of a `Tabulate`. For a 1-D
+ * tabulation this is `fn(outerIndex)`; for higher rank it is the nested sub-
+ * array over the remaining dimensions (built on demand). */
+function tabulateElement(
+  ce: ComputeEngine,
+  fn: (args: Expression[]) => Expression | undefined | null,
+  dims: number[],
+  outerIndex: number
+): Expression {
+  if (dims.length === 1) return fn([ce.number(outerIndex)]) ?? ce.Nothing;
+
+  const fillArray = (index: number[], level: number): ExpressionInput => {
+    if (level === dims.length)
+      return fn(index.map((v) => ce.number(v))) ?? ce.Nothing;
+    const arr: ['List', ...ExpressionInput[]] = ['List'];
+    for (let j = 1; j <= dims[level]; j++) {
+      index[level] = j;
+      arr.push(fillArray(index, level + 1));
+    }
+    return arr;
+  };
+  const index = Array(dims.length).fill(0);
+  index[0] = outerIndex;
+  return ce.expr(fillArray(index, 1));
+}
+
+function tabulateAt(
+  expr: Expression,
+  index: number | string
+): Expression | undefined {
+  if (typeof index !== 'number' || !Number.isInteger(index) || index === 0)
+    return undefined;
+  if (!isFunction(expr)) return undefined;
+  const dims = tabulateDims(expr);
+  if (dims === null || dims.length === 0) return undefined;
+  const fn = applicable(expr.op1);
+  if (!fn) return undefined;
+  let i = index;
+  if (i < 0) i = dims[0] + i + 1;
+  if (i < 1 || i > dims[0]) return undefined;
+  return tabulateElement(expr.engine, fn, dims, i);
+}
+
+function* tabulateIterator(
+  expr: Expression
+): Generator<Expression, undefined, any> {
+  if (!isFunction(expr)) return;
+  const dims = tabulateDims(expr);
+  if (dims === null || dims.length === 0) return;
+  const fn = applicable(expr.op1);
+  if (!fn) return;
+  const ce = expr.engine;
+  for (let i = 1; i <= dims[0]; i++) yield tabulateElement(ce, fn, dims, i);
 }
 
 function zipCount(expr: Expression): number | undefined {

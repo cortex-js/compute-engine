@@ -126,6 +126,19 @@ describe('Table (alias for Tabulate) with iterator specs', () => {
     );
   });
 
+  test('Tabulate is a lazy indexed collection — count is O(1), no materialization', () => {
+    // A million-element tabulation must NOT be materialized to be bound or
+    // counted (the old eager handler hung here).
+    const t = ce.box(['Tabulate', ['Function', ['Square', 'i'], 'i'], 1e6]);
+    const ev = t.evaluate();
+    expect(ev.operator).toBe('Tabulate');
+    expect(ev.isCollection).toBe(true);
+    expect(ev.count).toBe(1e6);
+    // Indexed (serializes as a list `[…]`, not a set `{…}`); elements on demand.
+    expect(ev.at(3)?.toString()).toBe('9');
+    expect(ev.at(-1)?.toString()).toBe('1000000000000');
+  });
+
   test('malformed iterator spec stays inert', () => {
     // The `{i, n}` two-element shorthand is deliberately out of scope: it must
     // not be guessed as `{i, 1, n}`. The expression stays an inert `Table`.

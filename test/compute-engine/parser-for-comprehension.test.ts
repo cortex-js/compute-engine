@@ -35,8 +35,8 @@ describe('Parser: for-comprehensions', () => {
       const result = ce.parse(
         '(x, y) \\operatorname{for} x = \\left[1...2\\right], y = \\left[1...2\\right]'
       ).evaluate();
-      // Result is a List/collection of 4 tuples
-      const items = result.ops ?? [];
+      // A comprehension is a lazy collection: materialize to count its tuples.
+      const items = [...result.each()];
       expect(items.length).toBe(4);
     });
   });
@@ -46,7 +46,7 @@ describe('Parser: for-comprehensions', () => {
       const result = ce.parse(
         '(x, y) \\operatorname{for} x = \\left[1...3\\right], y = \\left[1...x\\right]'
       ).evaluate();
-      const items = result.ops ?? [];
+      const items = [...result.each()];
       // 1+2+3 = 6 tuples: (1,1), (2,1), (2,2), (3,1), (3,2), (3,3)
       expect(items.length).toBe(6);
     });
@@ -81,12 +81,43 @@ describe('Parser: for-comprehensions', () => {
   });
 
   describe('round-trip', () => {
-    test('multi-Element for-comprehension round-trips', () => {
-      const ast: any = [
+    test('concrete finite comprehension serializes to its enumerated list', () => {
+      // Intentional (and consistent with `Range`/`Map`): a comprehension over
+      // CONCRETE finite ranges is an ordinary finite collection, so `toLatex()`
+      // enumerates its elements rather than emitting the `\operatorname{for}`
+      // surface form. This documents the (non-round-tripping) behavior that the
+      // symbolic test below deliberately steps around.
+      const expr = ce.expr([
         'Comprehension',
         ['Tuple', 'x', 'y'],
         ['Element', 'x', ['Range', 1, 2]],
         ['Element', 'y', ['Range', 3, 4]],
+      ]);
+      const latex = expr.toLatex();
+      expect(latex).not.toContain('\\operatorname{for}');
+      expect(ce.parse(latex).evaluate().json).toEqual([
+        'List',
+        ['Tuple', 1, 3],
+        ['Tuple', 1, 4],
+        ['Tuple', 2, 3],
+        ['Tuple', 2, 4],
+      ]);
+    });
+
+    test('multi-Element for-comprehension round-trips', () => {
+      // A comprehension over CONCRETE finite ranges enumerates its elements on
+      // serialize (like `Range`/`Map`); to round-trip the `\operatorname{for}`
+      // surface form the clauses must be over non-enumerable (symbolic)
+      // collections.
+      if (!ce.context.lexicalScope.bindings.has('L_1'))
+        ce.declare('L_1', 'list<number>');
+      if (!ce.context.lexicalScope.bindings.has('L_2'))
+        ce.declare('L_2', 'list<number>');
+      const ast: any = [
+        'Comprehension',
+        ['Tuple', 'x', 'y'],
+        ['Element', 'x', 'L_1'],
+        ['Element', 'y', 'L_2'],
       ];
       const expr = ce.expr(ast);
       const latex = expr.toLatex();

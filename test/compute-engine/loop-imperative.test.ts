@@ -228,10 +228,15 @@ describe('Comprehension (interpreter)', () => {
   });
 
   test('single clause → List of squares', () => {
+    // A `Comprehension` is a LAZY indexed collection (like `Range`/`Map`):
+    // `evaluate()` returns the comprehension itself; its elements are
+    // materialized only when consumed.
     const result = ce
       .expr(['Comprehension', ['Square', 'x'], ['Element', 'x', ['Range', 1, 3]]])
       .evaluate();
-    expect(result.json).toEqual(['List', 1, 4, 9]);
+    expect(result.operator).toBe('Comprehension');
+    expect(result.isCollection).toBe(true);
+    expect([...result.each()].map((x) => x.json)).toEqual([1, 4, 9]);
   });
 
   test('Cartesian product of two independent clauses', () => {
@@ -243,7 +248,9 @@ describe('Comprehension (interpreter)', () => {
         ['Element', 'y', ['Range', 3, 4]],
       ])
       .evaluate();
-    expect(result.ops?.length).toBe(4);
+    // Independent clauses have a cheap product count, no materialization.
+    expect(result.count).toBe(4);
+    expect([...result.each()].length).toBe(4);
   });
 
   test('dependent binding (triangle)', () => {
@@ -255,8 +262,9 @@ describe('Comprehension (interpreter)', () => {
         ['Element', 'y', ['Range', 1, 'x']],
       ])
       .evaluate();
-    // 1 + 2 + 3 = 6 tuples
-    expect(result.ops?.length).toBe(6);
+    // Dependent clause (`y` range references `x`): the count is not known
+    // without walking, so it materializes on iteration. 1 + 2 + 3 = 6 tuples.
+    expect([...result.each()].length).toBe(6);
   });
 
   test('scope hygiene: bound name does not leak', () => {
@@ -265,6 +273,169 @@ describe('Comprehension (interpreter)', () => {
       .expr(['Comprehension', 'x', ['Element', 'x', ['Range', 1, 3]]])
       .evaluate();
     expect(ce2.lookupDefinition('x')).toBeUndefined();
+  });
+
+  test('binding an unread comprehension is lazy (no materialization)', () => {
+    // Regression for the eager-materialization cost: an unread comprehension
+    // bound to a name must NOT walk its whole domain. Its collection type and
+    // `.count` are answered from the clause counts; elements materialize only
+    // when actually consumed.
+    const N = 1e6;
+    const comp = ce
+      .expr(['Comprehension', ['Square', 'i'], ['Element', 'i', ['Range', 1, N]]])
+      .evaluate();
+    // Stays lazy (does not become a materialized `List`).
+    expect(comp.operator).toBe('Comprehension');
+    expect(comp.isCollection).toBe(true);
+    // `.count` is the clause count — O(1), never enumerated (a materialized
+    // 1e6-element list would blow the iteration limit).
+    expect(comp.count).toBe(N);
+    expect(comp.type.toString()).toContain('indexed_collection');
+    // Consumption materializes a single element on demand.
+    expect(comp.at(3)?.json).toEqual(9);
+  });
+
+  test('bracket comprehension parses to the comprehension itself, not List(Comprehension)', () => {
+    // `[body \operatorname{for} …]` IS the collection — it must not be wrapped
+    // in a one-element `List` (which would report `count: 1` and mis-index).
+    const expr = ce.parse('[i^2 \\operatorname{for} i=[1...5]]');
+    expect(expr.operator).toBe('Comprehension');
+    expect(expr.count).toBe(5);
+    expect(ce.box(['At', expr, 3]).evaluate().json).toEqual(9);
+  });
+
+  test('dependent comprehension: .count is exact and stable across iteration', () => {
+    // Regression: a dependent comprehension has no closed-form count, so it is
+    // counted by enumeration — which is correct (6, the triangle number) and
+    // does NOT depend on scope state. Earlier bugs made this either a bogus
+    // product (9, from a stale x=3 left in the loop scope) or `undefined`
+    // (which broke `Length`/`Sum`). It must be 6 both before and after a walk.
+    const dep = ce
+      .expr([
+        'Comprehension',
+        ['Add', 'x', 'y'],
+        ['Element', 'x', ['Range', 1, 3]],
+        ['Element', 'y', ['Range', 1, 'x']],
+      ])
+      .evaluate();
+    expect(dep.count).toBe(6);
+    expect(dep.isFiniteCollection).toBe(true);
+    expect([...dep.each()].map((e) => e.toString())).toEqual([
+      '2',
+      '3',
+      '4',
+      '4',
+      '5',
+      '6',
+    ]);
+    expect(dep.count).toBe(6); // stable — not 9, not undefined
+    // Dependent comprehensions must work with finite reducers/aggregators.
+    expect(ce.box(['Sum', dep]).evaluate().toString()).toBe('24');
+    expect(ce.box(['Length', dep]).evaluate().toString()).toBe('6');
+  });
+
+  test('comprehension iteration does not leak the loop scope on early break', () => {
+    // Regression: an iterator that held the loop scope across `yield`s leaked it
+    // when a consumer broke early (`each()` does not forward `.return()`),
+    // corrupting later evaluation. The scope is now pushed only around each
+    // synchronous advance, never across a `yield`, so the eval-context stack
+    // stays balanced.
+    const stack = (ce as unknown as { _evalContextStack: unknown[] })
+      ._evalContextStack;
+    const before = stack.length;
+    const comp = ce.expr([
+      'Comprehension',
+      ['Square', 'i'],
+      ['Element', 'i', ['Range', 1, 100]],
+    ]);
+    let n = 0;
+    for (const _ of comp.each()) if (++n === 3) break;
+    expect(stack.length).toBe(before);
+  });
+
+  test('comprehension iteration is lazy: an infinite domain streams a prefix', () => {
+    // The iterator yields one element at a time, so consuming only a prefix of
+    // an infinite comprehension terminates instead of hitting the iteration
+    // limit. (A fully eager iterator would throw here.)
+    const inf = ce.expr([
+      'Comprehension',
+      ['Square', 'i'],
+      ['Element', 'i', ['Range', 1, Infinity]],
+    ]);
+    const out: string[] = [];
+    for (const x of inf.each()) {
+      out.push(x.toString());
+      if (out.length === 4) break;
+    }
+    expect(out).toEqual(['1', '4', '9', '16']);
+    expect(inf.at(3)?.toString()).toBe('9');
+    // It IS an infinite collection (independent, infinite clause).
+    expect(inf.isFiniteCollection).toBe(false);
+  });
+
+  test('comprehension .count is order-independent (empty beats unknown/infinite)', () => {
+    ce.declare('m', 'number'); // Range(1,m): a collection whose count is unknown
+    const unknownClause = ['Element', 'x', ['Range', 1, 'm']];
+    const emptyClause = ['Element', 'y', ['List']];
+    const infClause = ['Element', 'z', ['Range', 1, Infinity]];
+    // An empty clause makes the whole comprehension empty regardless of order.
+    for (const clauses of [
+      [unknownClause, emptyClause],
+      [emptyClause, unknownClause],
+      [infClause, emptyClause],
+    ]) {
+      const c = ce.box(['Comprehension', ['Add', 'x', 'y'], ...clauses]);
+      expect(c.count).toBe(0);
+      expect(c.isEmptyCollection).toBe(true);
+      expect(c.isFiniteCollection).toBe(true);
+    }
+    // Unknown × infinite (no empty) is genuinely unknown.
+    const u = ce.box(['Comprehension', ['Add', 'x', 'z'], unknownClause, infClause]);
+    expect(u.count).toBeUndefined();
+    expect(u.isFiniteCollection).toBeUndefined();
+  });
+
+  test('reading .count of a dependent comprehension does not evaluate its body', () => {
+    // Cardinality is a domain-only traversal — it must not run the body (which
+    // could assign, consume randomness, etc.).
+    const ce2 = new ComputeEngine();
+    let calls = 0;
+    ce2.declare('probe', {
+      signature: '(number) -> number',
+      evaluate: (args: any) => {
+        calls += 1;
+        return args[0];
+      },
+    } as any);
+    const dep = ce2.box([
+      'Comprehension',
+      ['probe', 'x'],
+      ['Element', 'x', ['Range', 1, 3]],
+      ['Element', 'y', ['Range', 1, 'x']],
+    ]);
+    expect(dep.count).toBe(6);
+    expect(calls).toBe(0); // count did NOT evaluate the body
+    // ...but iterating does.
+    [...dep.evaluate().each()];
+    expect(calls).toBe(6);
+  });
+
+  test('comprehension re-materializes after an outer binding changes (no stale cache)', () => {
+    // Regression: elements must not be cached across a binding change — the same
+    // boxed comprehension must reflect the current value of a free variable it
+    // references (correct for reactive/live documents).
+    const ce2 = new ComputeEngine();
+    ce2.assign('a', 10);
+    const comp = ce2
+      .expr(['Comprehension', ['Multiply', 'a', 'i'], ['Element', 'i', ['Range', 1, 3]]])
+      .evaluate();
+    expect([...comp.each()].map((e) => e.toString())).toEqual(['10', '20', '30']);
+    ce2.assign('a', 100);
+    expect([...comp.each()].map((e) => e.toString())).toEqual([
+      '100',
+      '200',
+      '300',
+    ]);
   });
 
   test('Break canonicalizes without error and stays inert', () => {

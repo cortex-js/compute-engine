@@ -3111,7 +3111,12 @@ function parseBrackets(
   if (isEmptySequence(body)) return ['List'];
 
   const h = operator(body);
-  if (h === 'Range' || h === 'Linspace') return body;
+  // A comprehension (`[body for i=…]`) IS the collection: return it directly
+  // rather than wrapping it in a one-element `List`. The wrapper would report
+  // `count: 1` and index to the comprehension itself, so any consumer indexing
+  // or aggregating the bracket would break. Mirrors the `Range`/`Linspace`
+  // passthrough — those are lazy collections too.
+  if (h === 'Range' || h === 'Linspace' || h === 'Comprehension') return body;
   if (h === 'Sequence') {
     const elems = operands(body);
     const inferred = tryInferRangeFromElements(elems, parser);

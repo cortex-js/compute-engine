@@ -18,6 +18,7 @@ import type {
   EvaluateOptions,
   IComputeEngine as ComputeEngine,
   Scope,
+  CollectionHandlers,
 } from '../global-types.js';
 import { spellCheckMessage } from '../boxed-expression/validate.js';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
@@ -150,14 +151,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       },
       canonical: (ops, options) =>
         canonicalLoopLike('Comprehension', ops, options),
-      evaluate: (ops, { engine: ce }) =>
-        run(runComprehension(ops[0], ops.slice(1), ce), ce._timeRemaining),
-      evaluateAsync: async (ops, { engine: ce, signal }) =>
-        runAsync(
-          runComprehension(ops[0], ops.slice(1), ce),
-          ce._timeRemaining,
-          signal
-        ),
+      // A `Comprehension` is a LAZY indexed collection, like `Range`/`Map`: it
+      // has no `evaluate` handler, so `evaluate()` returns the comprehension
+      // itself. Its `.count`/`.type`/collection-ness are answered without
+      // walking elements (see the `collection` handler below); elements are
+      // materialized only when actually indexed or iterated. Binding an unread
+      // comprehension is therefore O(1), rather than materializing its whole
+      // domain up front.
+      collection: comprehensionCollectionHandlers(),
     },
 
     // `Break`/`Continue` are inert: they have no `evaluate` handler, so they
@@ -700,30 +701,226 @@ function* runLoop(
 }
 
 /**
- * Value-producing `Comprehension`: collect each body evaluation into a flat
- * `List`. Control-flow inside a comprehension is a category error and is not
- * intercepted — body values are collected as-is.
+ * Stream a `Comprehension`'s body values one at a time.
+ *
+ * The loop scope (index variables pre-declared by `canonicalLoopLike`) is
+ * pushed ONLY around each synchronous `inner.next()` advance — the step that
+ * assigns the next index and evaluates the body — and popped again BEFORE the
+ * value is yielded. So the eval-context stack is never held across a `yield`:
+ * a consumer that stops early or abandons the iterator leaves nothing pushed to
+ * leak (this is safe even though `each()` does not forward `.return()` to us),
+ * and there is no interference if evaluation happens between `.next()` calls.
+ * Because each element is produced on demand, iterating an infinite domain and
+ * taking only a prefix (e.g. `Take`, `First`) works without hitting the
+ * iteration limit; a full drive of an infinite domain still terminates via the
+ * iteration-limit `CancellationError` from `runNested`.
  */
-function* runComprehension(
-  body: Expression,
-  elements: ReadonlyArray<Expression>,
-  ce: ComputeEngine
-): Generator<Expression> {
-  body ??= ce.Nothing;
+function* comprehensionStream(
+  expr: Expression
+): Generator<Expression, undefined, any> {
+  if (!isFunction(expr)) return;
+  const ce = expr.engine;
+  const body = expr.ops[0] ?? ce.Nothing;
+  const elements = expr.ops.slice(1);
 
-  const results: Expression[] = [];
+  const scoped = expr.isScoped && expr.localScope !== undefined;
   const state: LoopState = { stopped: false, count: 0 };
-  yield* runNestedElements(body, elements, ce, state, (result) => {
-    results.push(result);
-  });
+  const inner = runNestedElements(body, elements, ce, state, () => {});
+  while (true) {
+    let r: IteratorResult<Expression>;
+    if (scoped) ce._pushEvalContext(expr.localScope!);
+    try {
+      r = inner.next();
+    } finally {
+      if (scoped) ce._popEvalContext();
+    }
+    if (r.done) return;
+    yield r.value;
+  }
+}
 
-  return ce.function('List', results);
+/**
+ * A comprehension is DEPENDENT when a later clause's collection references an
+ * index bound by an earlier clause (e.g. `Element(j, Range(1, i))` after
+ * `Element(i, …)`). This is a purely structural test — it does NOT evaluate the
+ * clauses, so it is immune to any stale index binding a previous iteration may
+ * have left in the persistent loop scope (which would otherwise make a
+ * re-evaluated dependent range report a bogus finite count).
+ */
+function comprehensionIsDependent(
+  clauses: ReadonlyArray<Expression>
+): boolean {
+  const seen: string[] = [];
+  for (const clause of clauses) {
+    if (!isFunction(clause, 'Element')) return true;
+    const coll = clause.ops[1];
+    // `has(seen)` is true iff the collection references ANY earlier index.
+    if (coll && seen.length > 0 && coll.has(seen)) return true;
+    const idx = clause.ops[0];
+    if (idx && isSymbol(idx) && idx.symbol !== 'Nothing') seen.push(idx.symbol);
+  }
+  return false;
+}
+
+/**
+ * Count the elements of a dependent comprehension by traversing its iterator
+ * DOMAINS only — the nested iteration is driven with a trivial (`Nothing`) body,
+ * so reading `.count` never evaluates (or re-runs the side effects of) the real
+ * comprehension body. Returns `undefined` if the domain is unbounded (the
+ * iteration-limit cancellation); a genuine time-budget cancellation propagates.
+ */
+function comprehensionEnumeratedCount(expr: Expression): number | undefined {
+  if (!isFunction(expr)) return undefined;
+  const ce = expr.engine;
+  const elements = expr.ops.slice(1);
+  const scoped = expr.isScoped && expr.localScope !== undefined;
+  if (scoped) ce._pushEvalContext(expr.localScope!);
+  try {
+    let n = 0;
+    const state: LoopState = { stopped: false, count: 0 };
+    // Synchronous full drive under one push/pop — no external yield, so the
+    // scope is balanced; the `Nothing` body makes each leaf side-effect-free.
+    for (const _ of runNestedElements(ce.Nothing, elements, ce, state, () => {}))
+      n += 1;
+    return n;
+  } catch (e) {
+    if (e instanceof CancellationError && e.cause === 'iteration-limit-exceeded')
+      return undefined;
+    throw e;
+  } finally {
+    if (scoped) ce._popEvalContext();
+  }
+}
+
+/** The independent-clause tally: whether any clause is empty / unknown-count /
+ * infinite, and the product of the finite clause counts. `undefined` if a
+ * clause is not a collection. Shared by `count` and `isFinite` so the two never
+ * disagree — every clause is examined (order-independent), and an empty clause
+ * is recorded even when it appears after an unknown or infinite one. */
+function scanIndependentClauses(expr: Expression):
+  | { empty: boolean; unknown: boolean; infinite: boolean; product: number }
+  | undefined {
+  if (!isFunction(expr)) return undefined;
+  const ce = expr.engine;
+  const clauses = expr.ops.slice(1);
+  const scoped = expr.isScoped && expr.localScope !== undefined;
+  if (scoped) ce._pushEvalContext(expr.localScope!);
+  try {
+    let empty = false;
+    let unknown = false;
+    let infinite = false;
+    let product = 1;
+    for (const clause of clauses) {
+      if (!isFunction(clause, 'Element')) return undefined;
+      const coll = clause.ops[1]?.evaluate();
+      if (!coll?.isCollection) return undefined;
+      const c = coll.count;
+      if (coll.isEmptyCollection === true || c === 0) empty = true;
+      else if (c === undefined) unknown = true;
+      else if (!Number.isFinite(c)) infinite = true;
+      else product *= c;
+    }
+    return { empty, unknown, infinite, product };
+  } finally {
+    if (scoped) ce._popEvalContext();
+  }
+}
+
+/**
+ * Element count of a `Comprehension`. An INDEPENDENT comprehension gets a cheap
+ * product of its clause counts WITHOUT materializing. Precedence (independent of
+ * clause order): an empty clause ⇒ 0; else an unknown-count clause ⇒ undefined;
+ * else an infinite clause ⇒ Infinity; else the product. A DEPENDENT
+ * comprehension has no closed form, so it is counted by a domain-only traversal.
+ */
+function comprehensionCount(expr: Expression): number | undefined {
+  if (!isFunction(expr)) return undefined;
+  const clauses = expr.ops.slice(1);
+  if (clauses.length === 0) return undefined;
+  if (comprehensionIsDependent(clauses))
+    return comprehensionEnumeratedCount(expr);
+
+  const s = scanIndependentClauses(expr);
+  if (s === undefined) return undefined;
+  if (s.empty) return 0;
+  if (s.unknown) return undefined;
+  if (s.infinite) return Infinity;
+  return s.product;
+}
+
+/**
+ * Finiteness of a `Comprehension`. For an INDEPENDENT one it is read from the
+ * clauses without materializing (finite iff every clause is a finite collection;
+ * an empty clause makes it finite-empty even if another clause is infinite) —
+ * so a finite-but-astronomically-large comprehension whose count would overflow
+ * a JS number is still correctly reported finite. A DEPENDENT one can't be
+ * judged structurally (a later range's size depends on an earlier index), so a
+ * finite enumerated count is the evidence.
+ */
+function comprehensionIsFinite(expr: Expression): boolean | undefined {
+  if (!isFunction(expr)) return undefined;
+  const clauses = expr.ops.slice(1);
+  if (clauses.length === 0) return undefined;
+  if (comprehensionIsDependent(clauses)) {
+    const c = comprehensionCount(expr);
+    return c === undefined ? undefined : Number.isFinite(c);
+  }
+
+  const s = scanIndependentClauses(expr);
+  if (s === undefined) return undefined;
+  if (s.empty) return true; // 0 elements ⇒ finite
+  if (s.unknown) return undefined;
+  if (s.infinite) return false;
+  return true;
+}
+
+/**
+ * Lazy indexed-collection handlers for `Comprehension`. `count`/`isEmpty`/
+ * `isFinite` are answered from the (independent) clause counts without walking
+ * elements; iteration STREAMS one element at a time and a positive `at(n)` stops
+ * after the first `n`. A negative index needs the length, so it materializes —
+ * but only once the comprehension is known finite. An unread comprehension
+ * touches none of these, so binding it is O(1).
+ */
+function comprehensionCollectionHandlers(): CollectionHandlers {
+  return {
+    isLazy: () => true,
+
+    count: (expr) => comprehensionCount(expr),
+
+    isEmpty: (expr) => {
+      const c = comprehensionCount(expr);
+      return c === undefined ? undefined : c === 0;
+    },
+
+    isFinite: (expr) => comprehensionIsFinite(expr),
+
+    iterator: (expr) => comprehensionStream(expr),
+
+    at: (expr, index) => {
+      if (typeof index !== 'number' || !Number.isInteger(index) || index === 0)
+        return undefined;
+      if (index > 0) {
+        let i = 0;
+        for (const el of comprehensionStream(expr)) if (++i === index) return el;
+        return undefined;
+      }
+      // Negative index (from the end) needs the length: decline unless the
+      // comprehension is provably finite, so we never try to materialize an
+      // infinite domain just to index from the end.
+      if (comprehensionIsFinite(expr) !== true) return undefined;
+      const all = [...comprehensionStream(expr)];
+      const target = all.length + index;
+      return target >= 0 ? all[target] : undefined;
+    },
+  };
 }
 
 /**
  * Set up the fresh loop scope (index vars pre-declared) and drive the nested
- * iteration. Shared by `runLoop` and `runComprehension`; the per-result
- * behaviour is supplied via `onLeaf`.
+ * iteration. Shared by `runLoop`, `comprehensionStream`, and
+ * `comprehensionEnumeratedCount`; the per-result behaviour is supplied via
+ * `onLeaf` (and each result is also yielded).
  */
 function* runNestedElements(
   body: Expression,
