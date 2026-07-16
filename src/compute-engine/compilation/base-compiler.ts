@@ -128,7 +128,8 @@ export class BaseCompiler {
       //   - a **`vars`-mapped** key: the caller's external-input contract, which
       //     always wins (see `CompileTarget.vars`).
       const registry = target.userFunctions;
-      const isBoundOrMapped = resolved === s || target.varsKeys?.has(s) === true;
+      const isBoundOrMapped =
+        resolved === s || target.varsKeys?.has(s) === true;
       if (registry && !isBoundOrMapped && !registry.misses?.has(s)) {
         const userFn = BaseCompiler.ensureUserFunctionEmitted(
           expr.engine,

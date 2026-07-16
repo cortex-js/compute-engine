@@ -68,13 +68,7 @@ import {
   airyAi,
   airyBi,
 } from '../numerics/special-functions.js';
-import {
-  factorial2,
-  gcd,
-  lcm,
-  realGcd,
-  realLcm,
-} from '../numerics/numeric.js';
+import { factorial2, gcd, lcm, realGcd, realLcm } from '../numerics/numeric.js';
 import { rationalize } from '../numerics/rationals.js';
 import { isPrime } from '../boxed-expression/predicates.js';
 
@@ -3424,7 +3418,8 @@ function scalarExtremum(
 ): Expression | undefined {
   const ce = a.engine;
   if (a.isNaN === true || b.isNaN === true) return ce.NaN;
-  if ((isNumber(a) && a.im !== 0) || (isNumber(b) && b.im !== 0)) return undefined;
+  if ((isNumber(a) && a.im !== 0) || (isNumber(b) && b.im !== 0))
+    return undefined;
   // `isGreater`/`isLess` return `undefined` when the comparison is not
   // decidable (a free symbol); ties keep `a`.
   const bWins = upper ? b.isGreater(a) : b.isLess(a);

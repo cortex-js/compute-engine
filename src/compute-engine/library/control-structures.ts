@@ -747,9 +747,7 @@ function* comprehensionStream(
  * have left in the persistent loop scope (which would otherwise make a
  * re-evaluated dependent range report a bogus finite count).
  */
-function comprehensionIsDependent(
-  clauses: ReadonlyArray<Expression>
-): boolean {
+function comprehensionIsDependent(clauses: ReadonlyArray<Expression>): boolean {
   const seen: string[] = [];
   for (const clause of clauses) {
     if (!isFunction(clause, 'Element')) return true;
@@ -780,11 +778,20 @@ function comprehensionEnumeratedCount(expr: Expression): number | undefined {
     const state: LoopState = { stopped: false, count: 0 };
     // Synchronous full drive under one push/pop — no external yield, so the
     // scope is balanced; the `Nothing` body makes each leaf side-effect-free.
-    for (const _ of runNestedElements(ce.Nothing, elements, ce, state, () => {}))
+    for (const _ of runNestedElements(
+      ce.Nothing,
+      elements,
+      ce,
+      state,
+      () => {}
+    ))
       n += 1;
     return n;
   } catch (e) {
-    if (e instanceof CancellationError && e.cause === 'iteration-limit-exceeded')
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
       return undefined;
     throw e;
   } finally {
@@ -797,7 +804,9 @@ function comprehensionEnumeratedCount(expr: Expression): number | undefined {
  * clause is not a collection. Shared by `count` and `isFinite` so the two never
  * disagree — every clause is examined (order-independent), and an empty clause
  * is recorded even when it appears after an unknown or infinite one. */
-function scanIndependentClauses(expr: Expression):
+function scanIndependentClauses(
+  expr: Expression
+):
   | { empty: boolean; unknown: boolean; infinite: boolean; product: number }
   | undefined {
   if (!isFunction(expr)) return undefined;
@@ -902,7 +911,8 @@ function comprehensionCollectionHandlers(): CollectionHandlers {
         return undefined;
       if (index > 0) {
         let i = 0;
-        for (const el of comprehensionStream(expr)) if (++i === index) return el;
+        for (const el of comprehensionStream(expr))
+          if (++i === index) return el;
         return undefined;
       }
       // Negative index (from the end) needs the length: decline unless the
