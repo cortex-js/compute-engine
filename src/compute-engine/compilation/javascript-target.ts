@@ -9,6 +9,7 @@ import { functionLiteralParameterName } from '../boxed-expression/function-liter
 import { Complex } from 'complex-esm';
 import { tryGetConstant } from './constant-folding.js';
 import { collectionElementType } from '../../common/type/utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
 
 import {
   chop,
@@ -509,17 +510,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `Reduce: a custom combiner compiles only with an explicit ` +
             `initial value. Fail closed (D6).`
         );
-      // Only accept a combiner that is structurally callable: a `Function`
-      // literal, an operator symbol (compiled via the operators table to a
-      // binary lambda), or a symbol whose value is a function literal
-      // (emitted as a `_fn_<name>` local). A value-bound or dangling symbol
-      // fails closed at compile time — never at runtime.
-      const callable =
-        isFunction(op, 'Function') ||
-        (isSymbol(op) &&
-          (target.operators?.(op.symbol) !== undefined ||
-            BaseCompiler.userFunctionLiteral(op.engine, op.symbol) !==
-              undefined));
+      // Only accept a combiner that is structurally callable AND binary: a
+      // `Function` literal or a function-valued symbol whose arity is exactly 2
+      // (arity is statically knowable — `nops − 1` params — so a unary/ternary
+      // combiner fails closed at compile time rather than silently dropping or
+      // fabricating an argument at runtime, where the interpreter raises an
+      // arity error); or an operator symbol, which lowers to a binary lambda
+      // only for the binary arithmetic operators (enforced in
+      // `BaseCompiler.compile`, which fails closed for unary/relational/logical
+      // operator symbols). A value-bound or dangling symbol fails closed too.
+      let callable = false;
+      if (isFunction(op, 'Function')) {
+        callable = op.nops - 1 === 2;
+      } else if (isSymbol(op)) {
+        const literal = BaseCompiler.userFunctionLiteral(op.engine, op.symbol);
+        if (literal !== undefined) callable = literal.nops - 1 === 2;
+        else callable = target.operators?.(op.symbol) !== undefined;
+      }
       // Wrap to a fixed binary arity: native `reduce` passes
       // `(acc, x, index, array)` and the extra arguments must not leak into
       // the combiner's parameters (the interpreter passes exactly
@@ -536,10 +543,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const collCode = compile(coll);
     // With an initial value, seed the reduce; without one, the native reduce
     // uses the first element as the seed (matching the interpreter, which
-    // returns the sole/first element for a singleton and folds pairwise).
+    // returns the sole/first element for a singleton and folds pairwise). A
+    // seedless native `reduce` throws on an empty array, whereas the
+    // interpreter returns `Nothing` (numeric projection NaN) — so guard the
+    // empty case to yield NaN instead of throwing at runtime.
     if (init !== undefined && init !== null)
       return `(${collCode}).reduce(${combiner}, ${compile(init)})`;
-    return `(${collCode}).reduce(${combiner})`;
+    return `((_l) => _l.length === 0 ? NaN : _l.reduce(${combiner}))(${collCode})`;
   },
   // --- List-shaped collection operators ---------------------------------
   // Each lowers to a native array operation. Only an indexed collection
@@ -605,6 +615,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // interpreter passes exactly `(x)`). A mapping operand that does not
   // compile to a lambda fails closed.
   Map: (args, compile) => {
+    // The multi-collection (zipWith) form is not compiled; fail closed so the
+    // engine reports success:false and falls back to the interpreter.
+    if (args.length > 2)
+      throw new Error('Map: multi-collection form is not compiled');
     const coll = collArg('Map', args[0], compile);
     if (args[1] == null) throw new Error('Map: missing mapping function');
     return `((_f) => (${coll}).map((_x) => _f(_x)))(${compile(args[1])})`;
@@ -645,9 +659,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // outermost, matching the interpreter (and `Table`, which canonicalizes
   // to `Tabulate` or to `Map` over `Range`). The function and the dimensions
   // are hoisted into IIFE parameters so each is evaluated once (an impure
-  // dimension must not be re-evaluated per row), and dimensions are
-  // normalized like the interpreter's `toInteger`: rounded to the nearest
-  // integer and clamped to ≥ 0 (a NaN dimension yields an empty list).
+  // dimension must not be re-evaluated per row), and a *dynamic* dimension is
+  // normalized at runtime like the interpreter's `toInteger`: rounded to the
+  // nearest integer and clamped to ≥ 0 (a NaN dimension yields an empty list).
+  // A *statically* non-positive dimension (a literal ≤ 0) is inert in the
+  // interpreter (it stays symbolic, e.g. `Tabulate(f, 0)`), so it fails closed
+  // (D6) here rather than compiling to `[]` behind `success: true` — mirroring
+  // the `Range`/`Table` step-0 precedent.
   Tabulate: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Tabulate: missing argument');
@@ -655,6 +673,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Tabulate: only the 1-D and 2-D forms compile. Fail closed (D6).`
       );
+    for (let i = 1; i < args.length; i++) {
+      const dim = tryGetConstant(args[i]!);
+      if (dim !== undefined && Math.round(dim) <= 0)
+        throw new Error(
+          `Tabulate: a statically non-positive dimension (${dim}) is inert ` +
+            `in the interpreter. Fail closed (D6).`
+        );
+    }
     const f = compile(args[0]);
     const n = compile(args[1]);
     if (args.length === 2)
@@ -678,6 +704,151 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const rows = compile(dims.ops[0]);
     const cols = compile(dims.ops[1]);
     return `((_f, _r, _c) => Array.from({ length: Math.max(0, Math.round(_r)) }, (_, _i) => Array.from({ length: Math.max(0, Math.round(_c)) }, (_, _j) => _f(_i + 1, _j + 1))))(${f}, ${rows}, ${cols})`;
+  },
+  // Add one element at the end.
+  Append: (args, compile) => {
+    const coll = collArg('Append', args[0], compile);
+    if (args[1] == null) throw new Error('Append: missing value');
+    return `[...(${coll}), ${compile(args[1])}]`;
+  },
+  // All but the last element; an empty or singleton collection yields [].
+  Most: (args, compile) =>
+    `(${collArg('Most', args[0], compile)}).slice(0, -1)`,
+  // 1-based inclusive range. Mirrors the interpreter's Slice collection
+  // handler exactly: indexes are rounded (`toInteger`); a start/end < 1 is
+  // counted from the end (so a start of 0 resolves PAST the end → empty);
+  // start past the end → empty; end clamped to [1, len].
+  Slice: (args, compile) => {
+    const coll = collArg('Slice', args[0], compile);
+    if (args[1] == null || args[2] == null)
+      throw new Error('Slice: missing index');
+    return `((_l, _s, _e) => { _s = Math.round(_s); if (!Number.isFinite(_s)) _s = 1; _e = Math.round(_e); if (!Number.isFinite(_e)) _e = _l.length; if (_s < 1) _s = _l.length + 1 + _s; if (_s < 1) _s = 1; if (_s > _l.length) return []; if (_e < 1) _e = _l.length + 1 + _e; if (_e < 1) _e = 1; if (_e > _l.length) _e = _l.length; return _l.slice(_s - 1, _e); })(${coll}, ${compile(args[1])}, ${compile(args[2])})`;
+  },
+  IsEmpty: (args, compile) =>
+    `((${collArg('IsEmpty', args[0], compile)}).length === 0)`,
+  // Number of elements — same as `Length` for an indexed collection.
+  Count: (args, compile) =>
+    `(${collArg('Count', args[0], compile)}).length`,
+  // Membership via SameValueZero (`includes`) — value equality only for
+  // primitive elements, so compound element types fail closed.
+  Contains: (args, compile) => {
+    if (args[0]) requirePrimitiveElements('Contains', args[0]);
+    const coll = collArg('Contains', args[0], compile);
+    if (args[1] == null) throw new Error('Contains: missing value');
+    return `(${coll}).includes(${compile(args[1])})`;
+  },
+  // Unique elements in first-occurrence order (`Set` preserves insertion
+  // order and uses SameValueZero — value equality only for primitive
+  // elements, so compound element types fail closed).
+  Unique: (args, compile) => {
+    if (args[0]) requirePrimitiveElements('Unique', args[0]);
+    return `[...new Set(${collArg('Unique', args[0], compile)})]`;
+  },
+  // Rotate left/right by n positions (default 1). The shift is rounded and
+  // normalized modulo the length, matching the interpreter; a non-finite
+  // shift falls back to the default 1 (the interpreter's `toInteger` treats
+  // it as missing); an empty collection yields [].
+  RotateLeft: (args, compile) => {
+    const coll = collArg('RotateLeft', args[0], compile);
+    const n = args[1] == null ? '1' : compile(args[1]);
+    return `((_l, _n) => { if (_l.length === 0) return []; _n = Math.round(_n); if (!Number.isFinite(_n)) _n = 1; _n = ((_n % _l.length) + _l.length) % _l.length; return [..._l.slice(_n), ..._l.slice(0, _n)]; })(${coll}, ${n})`;
+  },
+  RotateRight: (args, compile) => {
+    const coll = collArg('RotateRight', args[0], compile);
+    const n = args[1] == null ? '1' : compile(args[1]);
+    return `((_l, _n) => { if (_l.length === 0) return []; _n = Math.round(_n); if (!Number.isFinite(_n)) _n = 1; _n = ((-_n % _l.length) + _l.length) % _l.length; return [..._l.slice(_n), ..._l.slice(0, _n)]; })(${coll}, ${n})`;
+  },
+  // Element-wise combination: a list of tuples (compiled as arrays), with
+  // the length of the shortest input.
+  Zip: (args, compile) => {
+    if (args.length === 0) return '[]';
+    const colls = args.map((a, i) => collArg('Zip', a, compile, i + 1));
+    return `((..._ls) => Array.from({ length: Math.min(..._ls.map((_l) => _l.length)) }, (_, _i) => _ls.map((_l) => _l[_i])))(${colls.join(', ')})`;
+  },
+  // Evenly spaced numbers, both endpoints included. Defaults mirror the
+  // interpreter: `Linspace(end)` → start 1; count defaults to 50 — also for
+  // a non-finite runtime count, like the interpreter — and is floored (not
+  // rounded) and clamped to ≥ 0; a count of 1 yields [start].
+  Linspace: (args, compile) => {
+    if (args[0] == null) throw new Error('Linspace: missing argument');
+    const start = args[1] == null ? '1' : compile(args[0]);
+    const end = args[1] == null ? compile(args[0]) : compile(args[1]);
+    const count = args[2] == null ? '50' : compile(args[2]);
+    return `((_s, _e, _c) => { _c = Math.floor(_c); if (!Number.isFinite(_c)) _c = 50; _c = Math.max(0, _c); if (_c === 1) return [_s]; return Array.from({ length: _c }, (_, _i) => _s + ((_e - _s) * _i) / (_c - 1)); })(${start}, ${end}, ${count})`;
+  },
+  // Split into k chunks of ceil(len/k) elements — mirroring the interpreter
+  // exactly, including k > len producing trailing empty chunks. A statically
+  // invalid k (literal ≤ 0) is inert in the interpreter, so it fails closed
+  // (D6) at compile time; a *dynamic* k that is non-positive or non-finite
+  // at runtime projects to [].
+  Chunk: (args, compile) => {
+    const coll = collArg('Chunk', args[0], compile);
+    if (args[1] == null) throw new Error('Chunk: missing count');
+    const kConst = tryGetConstant(args[1]);
+    if (kConst !== undefined && !(Math.round(kConst) > 0))
+      throw new Error(
+        `Chunk: a statically non-positive chunk count (${kConst}) is inert ` +
+          `in the interpreter. Fail closed (D6).`
+      );
+    return `((_l, _k) => { _k = Math.round(_k); if (!(Number.isFinite(_k) && _k > 0)) return []; const _sz = Math.ceil(_l.length / _k); return Array.from({ length: _k }, (_, _i) => _l.slice(_i * _sz, (_i + 1) * _sz)); })(${coll}, ${compile(args[1])})`;
+  },
+  // Integer form is identical to `Chunk`; the predicate form yields
+  // [[matching], [non-matching]]. The predicate is hoisted and called
+  // unary, like the other higher-order operators.
+  Partition: (args, compile) => {
+    const coll = collArg('Partition', args[0], compile);
+    const arg = args[1];
+    if (arg == null) throw new Error('Partition: missing operand');
+    if (arg.type.matches('number')) {
+      const kConst = tryGetConstant(arg);
+      if (kConst !== undefined && !(Math.round(kConst) > 0))
+        throw new Error(
+          `Partition: a statically non-positive group count (${kConst}) is ` +
+            `inert in the interpreter. Fail closed (D6).`
+        );
+      return `((_l, _k) => { _k = Math.round(_k); if (!(Number.isFinite(_k) && _k > 0)) return []; const _sz = Math.ceil(_l.length / _k); return Array.from({ length: _k }, (_, _i) => _l.slice(_i * _sz, (_i + 1) * _sz)); })(${coll}, ${compile(arg)})`;
+    }
+    if (
+      isFunction(arg, 'Function') ||
+      (isSymbol(arg) &&
+        BaseCompiler.userFunctionLiteral(arg.engine, arg.symbol) !== undefined)
+    )
+      return `((_f, _l) => { const _t = [], _u = []; for (const _x of _l) (_f(_x) ? _t : _u).push(_x); return [_t, _u]; })(${compile(arg)}, ${coll})`;
+    throw new Error(
+      `Partition: the second operand must be an integer or a function ` +
+        `literal. Fail closed (D6).`
+    );
+  },
+  // 1-based indexes that sort the collection ascending; ties keep their
+  // original order (native sort is stable, matching the interpreter). A
+  // custom ordering function does not compile, matching `Sort`.
+  Ordering: (args, compile) => {
+    const coll = collArg('Ordering', args[0], compile);
+    if (args.length > 1)
+      throw new Error(
+        `Ordering: a custom ordering function does not compile; only the ` +
+          `default ascending numeric order is supported. Fail closed (D6).`
+      );
+    return `((_l) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _l[_a - 1] - _l[_b - 1]))(${coll})`;
+  },
+  // Unbiased Fisher–Yates shuffle on a copy (`_SYS.shuffle`). When the
+  // engine's `randomSeed` is set at compile time, a per-node seed is baked
+  // in (the same mixing scheme as `Random`) so the compiled permutation is
+  // deterministic and reproducible; otherwise `Math.random` drives it. The
+  // explicit seed-operand form does not compile — fail closed.
+  Shuffle: (args, compile, target) => {
+    const coll = collArg('Shuffle', args[0], compile);
+    if (args.length > 1)
+      throw new Error(
+        `Shuffle: the seeded form does not compile. Fail closed (D6).`
+      );
+    const seed = target?.randomSeed;
+    if (seed !== undefined && seed !== null) {
+      const idx = target?.randomState ? target.randomState.counter++ : 0;
+      const s = (seed ^ Math.imul(idx + 1, 0x9e3779b1)) >>> 0;
+      return `_SYS.shuffle(${coll}, ${s})`;
+    }
+    return `_SYS.shuffle(${coll})`;
   },
   Log: (args, compile) => {
     if (args.length === 1) return `Math.log10(${compile(args[0])})`;
@@ -1902,6 +2073,19 @@ const SYS_HELPERS = {
     throw new Error('Condition must evaluate to "True" or "False".');
   },
   heaviside: (x: number) => (x < 0 ? 0 : x === 0 ? 0.5 : 1),
+  // Unbiased Fisher–Yates shuffle on a copy. With a seed (baked at compile
+  // time when the engine's `randomSeed` is set), the permutation is
+  // deterministic and reproducible across calls, matching the engine-level
+  // determinism contract that `Random` honors.
+  shuffle: (xs: unknown[], seed?: number): unknown[] => {
+    const rnd = seed === undefined ? Math.random : mulberry32(seed >>> 0);
+    const l = xs.slice();
+    for (let i = l.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [l[i], l[j]] = [l[j], l[i]];
+    }
+    return l;
+  },
   // Positional access for compiled `At`. CE `At` is 1-based; a negative index
   // counts from the end. A zero or out-of-range index yields NaN (the
   // interpreter returns `Nothing`, projected to NaN on a real target).
@@ -2478,6 +2662,33 @@ function collArg(
         `is not an indexed collection (list/vector/range). Fail closed (D6).`
     );
   return compile(arg);
+}
+
+/**
+ * Fail closed (D6) unless the collection's elements compile to JS primitives
+ * with value equality. `includes`/`Set` use SameValueZero, which is reference
+ * identity for compound elements (nested lists compile to arrays, tuples and
+ * complex numbers to objects), diverging from the interpreter's structural
+ * equality. Structural element types (tuple/list/vector) and declared-complex
+ * element types are rejected by the type check; a numeric collection reports
+ * the generic `number` element type whether its elements are real or complex,
+ * so complex *content* is caught by `isComplexValued` (which inspects literal
+ * operands).
+ */
+function requirePrimitiveElements(kind: string, arg: Expression): void {
+  const elt = collectionElementType(arg.type.type);
+  const primitive =
+    elt !== undefined &&
+    (elt === 'number' ||
+      isSubtype(elt, 'real') ||
+      isSubtype(elt, 'boolean') ||
+      isSubtype(elt, 'string'));
+  if (primitive && !BaseCompiler.isComplexValued(arg)) return;
+  throw new Error(
+    `${kind}: cannot compile — the interpreter compares elements ` +
+      `structurally, but only real/boolean/string elements compare by ` +
+      `value on the JavaScript target. Fail closed (D6).`
+  );
 }
 
 /**

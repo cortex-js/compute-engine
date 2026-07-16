@@ -1343,6 +1343,180 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ]);
   });
 
+  // Native-array collection operators (Tier 2). Every value below was
+  // verified against the interpreter's evaluate() result.
+  it('Append / Most / Slice compile to native array operations', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Append', 'd', 9])).toEqual([10, 20, 30, 9]);
+    expect(runJs(e, ['Most', 'd'])).toEqual([10, 20]);
+    expect(runJs(e, ['Most', ['List', 7]])).toEqual([]);
+    // Slice is 1-based inclusive; negative indexes count from the end;
+    // start of 0 resolves past the end (empty), like the interpreter
+    expect(runJs(e, ['Slice', 'd', 2, 3])).toEqual([20, 30]);
+    expect(runJs(e, ['Slice', 'd', -2, -1])).toEqual([20, 30]);
+    expect(runJs(e, ['Slice', 'd', 0, 99])).toEqual([]);
+    expect(runJs(e, ['Slice', 'd', 3, 2])).toEqual([]);
+  });
+
+  it('IsEmpty / Count / Contains / Unique compile', () => {
+    const e = mkEngine();
+    // IsEmpty/Contains are boolean-valued: compile without realOnly (a
+    // realOnly runner projects booleans to NaN, CO-P2-25)
+    const runBool = (mathjson: any) =>
+      compile(e.box(mathjson), { fallback: false })!.run!();
+    expect(runBool(['IsEmpty', 'd'])).toBe(false);
+    expect(runBool(['IsEmpty', ['List']])).toBe(true);
+    expect(runJs(e, ['Count', 'd'])).toBe(3);
+    expect(runBool(['Contains', 'd', 20])).toBe(true);
+    expect(runBool(['Contains', 'd', 99])).toBe(false);
+    expect(runJs(e, ['Unique', ['List', 3, 1, 3, 2, 1]])).toEqual([3, 1, 2]);
+  });
+
+  it('RotateLeft / RotateRight normalize the shift like the interpreter', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['RotateLeft', 'd', 2])).toEqual([30, 10, 20]);
+    expect(runJs(e, ['RotateLeft', 'd'])).toEqual([20, 30, 10]); // default 1
+    expect(runJs(e, ['RotateLeft', 'd', -1])).toEqual([30, 10, 20]);
+    expect(runJs(e, ['RotateLeft', 'd', 5])).toEqual([30, 10, 20]); // mod len
+    expect(runJs(e, ['RotateRight', 'd', 2])).toEqual([20, 30, 10]);
+    expect(runJs(e, ['RotateRight', 'd'])).toEqual([30, 10, 20]); // default 1
+  });
+
+  it('Zip truncates to the shortest input', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Zip', 'd', ['List', 1, 2]])).toEqual([
+      [10, 1],
+      [20, 2],
+    ]);
+    expect(
+      runJs(e, ['Zip', ['List', 1, 2], ['List', 10, 20], ['List', 100, 200]])
+    ).toEqual([
+      [1, 10, 100],
+      [2, 20, 200],
+    ]);
+  });
+
+  it('Linspace includes both endpoints (count 1 → [start])', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Linspace', 0, 1, 5])).toEqual([0, 0.25, 0.5, 0.75, 1]);
+    expect(runJs(e, ['Linspace', 0, 10, 1])).toEqual([0]);
+    expect(runJs(e, ['Linspace', 10, 0, 3])).toEqual([10, 5, 0]);
+  });
+
+  it('Chunk / Partition mirror the interpreter (k chunks of ceil(len/k))', () => {
+    const e = mkEngine();
+    const L = ['List', 1, 5, 2, 4, 3];
+    expect(runJs(e, ['Chunk', L, 2])).toEqual([
+      [1, 5, 2],
+      [4, 3],
+    ]);
+    // k > len produces trailing empty chunks, like the interpreter
+    expect(runJs(e, ['Chunk', ['List', 1, 2, 3], 5])).toEqual([
+      [1],
+      [2],
+      [3],
+      [],
+      [],
+    ]);
+    expect(runJs(e, ['Partition', L, 2])).toEqual([
+      [1, 5, 2],
+      [4, 3],
+    ]);
+    // Predicate form: [[matching], [non-matching]]
+    expect(
+      runJs(e, ['Partition', L, ['Function', ['Greater', 'x', 2], 'x']])
+    ).toEqual([
+      [5, 4, 3],
+      [1, 2],
+    ]);
+  });
+
+  it('Ordering returns 1-based sorting indexes, stable for ties', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Ordering', ['List', 30, 10, 20]])).toEqual([2, 3, 1]);
+    expect(runJs(e, ['Ordering', ['List', 2, 1, 2, 1]])).toEqual([2, 4, 1, 3]);
+  });
+
+  it('Shuffle compiles to an unbiased permutation of the source', () => {
+    const e = mkEngine();
+    const v = runJs(e, ['Shuffle', 'd']) as number[];
+    expect([...v].sort((a, b) => a - b)).toEqual([10, 20, 30]);
+    // the source is not mutated
+    expect(runJs(e, ['At', 'd', 1])).toBe(10);
+  });
+
+  it('Contains / Unique fail closed for compound element types', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    const nested = ['List', ['List', 1], ['List', 1]];
+    expect(() =>
+      js.compile(e.box(['Unique', nested]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+    expect(() =>
+      js.compile(e.box(['Contains', nested, ['List', 1]]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+  });
+
+  it('non-finite runtime counts/indexes use the interpreter defaults', () => {
+    const e = mkEngine();
+    e.declare('k', 'integer');
+    // Slice: a non-finite start defaults to 1 (like toInteger ?? 1)
+    const sl = compile(e.box(['Slice', 'd', 'k', 3]), { fallback: false })!;
+    expect(sl.run!({ k: Infinity })).toEqual([10, 20, 30]);
+    // Rotate: a non-finite shift defaults to 1
+    const rl = compile(e.box(['RotateLeft', 'd', 'k']), { fallback: false })!;
+    expect(rl.run!({ k: Infinity })).toEqual([20, 30, 10]);
+    // Linspace: a non-finite count defaults to 50 (no RangeError)
+    const ls = compile(e.box(['Linspace', 0, 1, 'k']), { fallback: false })!;
+    expect((ls.run!({ k: Infinity }) as number[]).length).toBe(50);
+    // Chunk: a non-finite or non-positive runtime count projects to []
+    const ch = compile(e.box(['Chunk', 'd', 'k']), { fallback: false })!;
+    expect(ch.run!({ k: NaN })).toEqual([]);
+    expect(ch.run!({ k: -2 })).toEqual([]);
+  });
+
+  it('a statically non-positive Chunk/Partition count fails closed', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    expect(() =>
+      js.compile(e.box(['Chunk', 'd', -2]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+    expect(() =>
+      js.compile(e.box(['Partition', 'd', 0]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+  });
+
+  it('Shuffle honors the engine randomSeed (deterministic permutation)', () => {
+    const e = mkEngine();
+    e.randomSeed = 12345;
+    const r = compile(e.box(['Shuffle', 'd']), { fallback: false })!;
+    const a = r.run!() as number[];
+    expect([...a].sort((x, y) => x - y)).toEqual([10, 20, 30]);
+    // The same compiled function redraws the same permutation…
+    expect(r.run!()).toEqual(a);
+    // …and an independent compile with the same seed agrees
+    const r2 = compile(e.box(['Shuffle', 'd']), { fallback: false })!;
+    expect(r2.run!()).toEqual(a);
+  });
+
+  it('custom Ordering function and seeded Shuffle fail closed', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    expect(() =>
+      js.compile(
+        e.box([
+          'Ordering',
+          'd',
+          ['Function', ['Greater', 'a', 'b'], 'a', 'b'],
+        ]),
+        { realOnly: true }
+      )
+    ).toThrow(/Fail closed/);
+    expect(() =>
+      js.compile(e.box(['Shuffle', 'd', 42]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+  });
+
   it('a custom Sort comparator fails closed', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
@@ -1703,5 +1877,98 @@ describe('COMPILE collection-op findings', () => {
       r.run as (v: Record<string, number>) => { value: { lo: number } }
     )({});
     expect(out.value.lo).toBe(45150);
+  });
+});
+
+describe('COMPILE higher-order combiner/mapper fail-closed', () => {
+  const L = ['List', 1, 2, 3];
+
+  it('Reduce with a non-binary-arithmetic operator symbol fails closed — finding 1', () => {
+    // A unary (Negate/Not) or relational (Less) operator symbol must NOT lower
+    // to a binary infix lambda: it would fold to garbage behind success:true
+    // (Negate → −6, Less → true) while the interpreter stays symbolic.
+    const e = new ComputeEngine();
+    const js = new JavaScriptTarget();
+    for (const op of ['Negate', 'Not', 'Less', 'Greater', 'And', 'Or']) {
+      expect(() =>
+        js.compile(e.box(['Reduce', L, op, 0]), { realOnly: true })
+      ).toThrow(/Fail closed/);
+    }
+    // Binary arithmetic operator symbols still compile.
+    expect(compile(e.box(['Reduce', L, 'Subtract', 0]), { fallback: false })!.run!()).toBe(-6);
+    expect(compile(e.box(['Reduce', L, 'Add', 0]), { fallback: false })!.run!()).toBe(6);
+  });
+
+  it('Map/Filter over an operator symbol fall back to the interpreter — finding 1', () => {
+    const e = new ComputeEngine();
+    const js = new JavaScriptTarget();
+    // Direct target compilation fails closed…
+    expect(() =>
+      js.compile(e.box(['Map', L, 'Negate']), { realOnly: true })
+    ).toThrow(/Fail closed/);
+    expect(() =>
+      js.compile(e.box(['Filter', L, 'Less']), { realOnly: true })
+    ).toThrow(/Fail closed/);
+    // …and the engine-level compile (with fallback) reports success:false and
+    // yields the interpreter's result rather than garbage.
+    const m = compile(e.box(['Map', L, 'Negate']));
+    expect(m?.success).toBe(false);
+    expect((m?.run as (v: Record<string, number>) => number[])({})).toEqual([
+      -1, -2, -3,
+    ]);
+  });
+
+  it('Reduce with a non-binary combiner arity fails closed — finding 2', () => {
+    const e = new ComputeEngine();
+    const js = new JavaScriptTarget();
+    // Unary Function literal: the interpreter raises an arity error; the
+    // compiled fold must not silently return 3.
+    expect(() =>
+      js.compile(
+        e.box(['Reduce', L, ['Function', ['Add', 'x', 1], 'x'], 0]),
+        { realOnly: true }
+      )
+    ).toThrow(/Fail closed/);
+    // Unary user-defined function symbol.
+    e.assign('inc', e.box(['Function', ['Add', 'a', 1], 'a']));
+    expect(() =>
+      js.compile(e.box(['Reduce', L, 'inc', 0]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+    // A binary Function literal still compiles.
+    expect(
+      compile(
+        e.box(['Reduce', L, ['Function', ['Add', 'a', 'b'], 'a', 'b'], 0]),
+        { fallback: false }
+      )!.run!()
+    ).toBe(6);
+  });
+
+  it('Tabulate with a statically non-positive dimension fails closed — finding 3', () => {
+    const e = new ComputeEngine();
+    const js = new JavaScriptTarget();
+    const f = ['Function', ['Multiply', 'x', 2], 'x'];
+    expect(() =>
+      js.compile(e.box(['Tabulate', f, 0]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+    expect(() =>
+      js.compile(e.box(['Tabulate', f, -2]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+    // 2-D: a non-positive second dimension also fails closed.
+    expect(() =>
+      js.compile(e.box(['Tabulate', f, 3, 0]), { realOnly: true })
+    ).toThrow(/Fail closed/);
+    // A positive dimension still compiles.
+    expect(compile(e.box(['Tabulate', f, 3]), { fallback: false })!.run!()).toEqual([2, 4, 6]);
+  });
+
+  it('Reduce over an empty collection with no initial value yields NaN — finding 4', () => {
+    const e = new ComputeEngine();
+    const r = compile(e.box(['Reduce', ['List'], 'Add']), { fallback: false })!;
+    expect(r.success).toBe(true);
+    // Native seedless reduce would throw on []; the guard yields NaN (the
+    // interpreter's `Nothing` projected onto a real target).
+    expect(Number.isNaN(r.run!() as number)).toBe(true);
+    // A non-empty seedless reduce still folds pairwise.
+    expect(compile(e.box(['Reduce', ['List', 1, 2, 3], 'Add']), { fallback: false })!.run!()).toBe(6);
   });
 });

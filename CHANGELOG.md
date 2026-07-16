@@ -88,6 +88,22 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
     lambda to native array operations, with the interpreter's conventions
     preserved: 1-based indexes, `IndexWhere` → `0` and `Find` → `NaN`
     (`Nothing` projected onto a real target) when no element matches.
+  - **`Append`, `Most`, `Slice`, `IsEmpty`, `Count`, `Contains`, `Unique`,
+    `RotateLeft`/`RotateRight`, `Zip`, `Linspace`, `Chunk`, `Partition`
+    (integer and predicate forms), `Ordering`, and `Shuffle`** compile to
+    native array operations, each verified element-for-element against the
+    interpreter (1-based inclusive `Slice` with negative-from-end indexes,
+    rotation shift normalized modulo the length, `Chunk`/`Partition` producing
+    `k` chunks of `⌈len/k⌉`, stable `Ordering` ties, `Zip` truncating to the
+    shortest input, `Linspace` including both endpoints). Non-finite runtime
+    counts/indexes fall back to the interpreter's defaults instead of
+    crashing or silently diverging, and `Shuffle` honors the engine's
+    `randomSeed` (a deterministic, reproducible permutation, like `Random`).
+    Forms with no numeric equivalent on the target fail closed: a custom
+    `Ordering` function, the explicit-seed `Shuffle` form, statically
+    non-positive `Chunk`/`Partition` counts, and `Contains`/`Unique` over
+    compound (nested-list, tuple, complex) elements, whose JS equality is
+    referential rather than structural.
 
 ## 0.80.0 _2026-07-16_
 
