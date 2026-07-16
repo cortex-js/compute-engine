@@ -117,6 +117,46 @@ describe('Max / Min — scalar+collection compile fix (reduction, was NaN)', () 
   });
 });
 
+describe('cross-target compilation', () => {
+  const compileOn = (target: string, mj: any) =>
+    ce.getCompilationTarget(target as any)!.compile(ce.box(mj));
+
+  test('interval-js: Clamp clamps an interval (restores break detection)', () => {
+    const r = compileOn('interval-js', ['Clamp', 'x', 0, 1]);
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: { lo: -0.5, hi: 2 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 0, hi: 1 },
+    });
+  });
+
+  test('interval-js: ElementMax/ElementMin fold over intervals', () => {
+    expect(
+      compileOn('interval-js', ['ElementMax', 'x', 0]).run!({
+        x: { lo: -1, hi: 0.5 },
+      })
+    ).toEqual({ kind: 'interval', value: { lo: 0, hi: 0.5 } });
+  });
+
+  test('glsl/wgsl: map to native clamp/max/min', () => {
+    for (const t of ['glsl', 'wgsl']) {
+      expect(compileOn(t, ['Clamp', 'x', 0, 1]).code).toContain('clamp(');
+      expect(compileOn(t, ['ElementMax', 'x', 0]).code).toContain('max(');
+      expect(compileOn(t, ['ElementMin', 'x', 0]).code).toContain('min(');
+    }
+  });
+
+  test('python: map to np.clip / np.maximum / np.minimum', () => {
+    expect(compileOn('python', ['Clamp', 'x', 0, 1]).code).toContain('np.clip');
+    expect(compileOn('python', ['ElementMax', 'x', 0]).code).toContain(
+      'np.maximum'
+    );
+    expect(compileOn('python', ['ElementMin', 'x', 0]).code).toContain(
+      'np.minimum'
+    );
+  });
+});
+
 describe('LaTeX round-trip', () => {
   test('ElementMax / Clamp serialize and re-parse', () => {
     for (const mj of [

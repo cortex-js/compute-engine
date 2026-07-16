@@ -68,7 +68,13 @@ import {
   airyAi,
   airyBi,
 } from '../numerics/special-functions.js';
-import { factorial2, gcd, lcm } from '../numerics/numeric.js';
+import {
+  factorial2,
+  gcd,
+  lcm,
+  realGcd,
+  realLcm,
+} from '../numerics/numeric.js';
 import { rationalize } from '../numerics/rationals.js';
 import { isPrime } from '../boxed-expression/predicates.js';
 

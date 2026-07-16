@@ -326,6 +326,41 @@ const PYTHON_OPERATORS: CompiledOperators = {
   Not: ['not', 14], // Unary operator
 };
 
+/** Whether an operand compiles to a NumPy array at run time — a concrete
+ * collection or a statically list/collection-typed value. Mirrors the JS
+ * target's `isIndexedCollectionOperand`. */
+function isPyCollectionOperand(e: Expression): boolean {
+  const t = e.type;
+  return t.matches('list') || t.matches('indexed_collection');
+}
+
+/**
+ * Compile `Max`/`Min`, which **reduce** (fold every operand — including a
+ * collection's elements — to a single extremum). A collection operand is
+ * reduced with `np.max`/`np.min`; the per-operand results are then combined
+ * with the element-wise `np.maximum`/`np.minimum`, which keeps scalar/array
+ * operands (the plot variable) vectorized. `np.maximum`/`np.minimum` are
+ * strictly binary, so an n-ary fold is emitted. (`np.maximum([…])` — a single
+ * list to the element-wise function — is a runtime error and element-wise
+ * anyway, which is why the old bare `'np.maximum'`/`'np.minimum'` string
+ * mapping was wrong for the reduction.)
+ */
+function compilePythonExtremum(
+  reduce: 'np.max' | 'np.min',
+  pairwise: 'np.maximum' | 'np.minimum',
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string
+): string {
+  const parts = args.map((a) =>
+    isPyCollectionOperand(a) ? `${reduce}(${compile(a)})` : compile(a)
+  );
+  if (parts.length === 0) return reduce === 'np.max' ? '-np.inf' : 'np.inf';
+  let result = parts[0];
+  for (let i = 1; i < parts.length; i++)
+    result = `${pairwise}(${result}, ${parts[i]})`;
+  return result;
+}
+
 /**
  * Python/NumPy function implementations
  *
@@ -548,9 +583,31 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Truncate: 'np.trunc',
 
-  // Min/Max
-  Min: 'np.minimum',
-  Max: 'np.maximum',
+  // Min/Max — REDUCTIONS: fold every operand (a collection to its own extremum)
+  // to a single value. `np.maximum`/`np.minimum` are element-wise and strictly
+  // binary, so a bare mapping mis-handled a collection operand (element-wise
+  // instead of reduced) and errored on 1 or 3+ arguments.
+  Min: (args, compile) =>
+    compilePythonExtremum('np.min', 'np.minimum', args, compile),
+  Max: (args, compile) =>
+    compilePythonExtremum('np.max', 'np.maximum', args, compile),
+  // Element-wise max/min and clamp. `np.maximum`/`np.minimum` are element-wise
+  // (and broadcast), matching `ElementMax`/`ElementMin`; both are binary, so an
+  // n-ary call folds. `Clamp(x, lo, hi)` maps to `np.clip`.
+  ElementMax: (args, compile) => {
+    let result = compile(args[0]);
+    for (let i = 1; i < args.length; i++)
+      result = `np.maximum(${result}, ${compile(args[i])})`;
+    return result;
+  },
+  ElementMin: (args, compile) => {
+    let result = compile(args[0]);
+    for (let i = 1; i < args.length; i++)
+      result = `np.minimum(${result}, ${compile(args[i])})`;
+    return result;
+  },
+  Clamp: (args, compile) =>
+    `np.clip(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`,
 
   // Modulo. `np.mod` is floored (matches the interpreter and D1). `Remainder`
   // uses the interpreter's truncated/round-to-nearest-quotient semantics, NOT

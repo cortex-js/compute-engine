@@ -14,8 +14,8 @@ import {
   chop,
   factorial,
   factorial2,
-  gcd,
-  lcm,
+  realGcd as gcd,
+  realLcm as lcm,
   limit,
 } from '../numerics/numeric.js';
 import {

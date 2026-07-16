@@ -180,6 +180,40 @@ const CASES: Case[] = [
     params: ['x'],
     inputs: [{ x: 0 }, { x: 5 }, { x: -3 }],
   },
+  // Max/Min are REDUCTIONS. `np.maximum`/`np.minimum` alone are element-wise and
+  // binary, so a collection operand mis-reduced (or errored). Verify the
+  // reduction agrees with `.N()` on scalar, single-list, mixed, and n-ary
+  // shapes — and that a scalar operand alongside a list stays a plain max.
+  {
+    name: 'max_list_reduce',
+    expr: ['Max', ['List', 3, 1, 4, 1, 5, 9, 2, 6]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'max_scalar_and_list',
+    expr: ['Max', 0, ['List', 1, 2, 3]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'max_nary_scalars',
+    expr: ['Max', 1, 5, 3],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'min_list_reduce',
+    expr: ['Min', ['List', 3, 1, 4, 1, 5]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'max_var_and_list',
+    expr: ['Max', 'x', ['List', 1, 2, 3]],
+    params: ['x'],
+    inputs: [{ x: 10 }, { x: 2 }],
+  },
 ];
 
 const describeMaybe = venvHasNumpy() ? describe : describe.skip;

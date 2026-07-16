@@ -209,6 +209,64 @@ export function lcm(a: number, b: number): number {
   return Number(res);
 }
 
+/**
+ * Default relative tolerance for the real (non-integer) GCD/LCM. Matches the
+ * engine's default `ce.tolerance`. The `evaluate()` path passes the live
+ * `ce.tolerance` instead; the compiled runtime (`_SYS.gcd`/`_SYS.lcm`) uses
+ * this default because it has no engine handle. A tighter tolerance yields
+ * fewer "commensurate" hits (sparser Desmos-style art); a looser one, more.
+ */
+export const REAL_GCD_TOLERANCE = 1e-10;
+
+/**
+ * GCD extended to non-integer reals via a tolerant floating Euclidean
+ * algorithm — the standard "float GCD" (repeated `a mod b`, terminating at a
+ * small `|b|` relative to the input scale rather than exact zero). Integer
+ * inputs take an exact path (no tolerance), so this never regresses integer
+ * GCD. This is an inherently discontinuous, tolerance-parameterized operation:
+ * it is meaningful for numeric approximation (`.N()`, compiled plots), not as a
+ * symbolic identity.
+ */
+export function realGcd(
+  a: number,
+  b: number,
+  eps = REAL_GCD_TOLERANCE
+): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return NaN;
+  if (a === 0) return b;
+  if (b === 0) return a;
+  // Exact integer path: preserves large-integer correctness, no tolerance.
+  if (Number.isInteger(a) && Number.isInteger(b)) {
+    while (b !== 0) [a, b] = [b, a % b];
+    return a;
+  }
+  // Tolerant floating Euclidean algorithm for non-integer reals.
+  const tol = eps * Math.max(a, b);
+  // Bounded loop: Euclid converges fast; the cap guards against a pathological
+  // float residue that never dips below `tol`.
+  for (let i = 0; i < 10000 && b > tol; i++) [a, b] = [b, a % b];
+  return a;
+}
+
+/**
+ * LCM extended to non-integer reals, consistent with {@linkcode realGcd}:
+ * `lcm(a, b) = |a·b| / gcd(a, b)`. Integer inputs go through the exact integer
+ * {@linkcode lcm}; non-integer inputs use the tolerant float GCD.
+ */
+export function realLcm(
+  a: number,
+  b: number,
+  eps = REAL_GCD_TOLERANCE
+): number {
+  if (a === 0 || b === 0) return 0;
+  if (Number.isInteger(a) && Number.isInteger(b)) return lcm(a, b);
+  const g = realGcd(a, b, eps);
+  if (!Number.isFinite(g) || g === 0) return NaN;
+  return Math.abs((a * b) / g);
+}
+
 export function factorial(n: number): number {
   if (!Number.isInteger(n) || n < 0) return NaN;
   if (n >= 170) return Infinity;

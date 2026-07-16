@@ -154,6 +154,27 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     return result;
   },
+  // Element-wise max/min and clamp. On the interval target every operand is a
+  // scalar/interval (no collections), so `ElementMax`/`ElementMin` reduce to the
+  // interval max/min fold, and `Clamp(x, lo, hi)` to `min(max(x, lo), hi)`.
+  // Interval max/min/clamp are monotonic, so they map endpoint-wise — enabling
+  // break detection for the common `Clamp(x, 0, 1)` line-series idiom.
+  ElementMax: (args, compile) => {
+    let result = compile(args[0]);
+    for (let i = 1; i < args.length; i++)
+      result = `_IA.max(${result}, ${compile(args[i])})`;
+    return result;
+  },
+  ElementMin: (args, compile) => {
+    let result = compile(args[0]);
+    for (let i = 1; i < args.length; i++)
+      result = `_IA.min(${result}, ${compile(args[i])})`;
+    return result;
+  },
+  Clamp: (args, compile) =>
+    `_IA.min(_IA.max(${compile(args[0])}, ${compile(args[1])}), ${compile(
+      args[2]
+    )})`,
   Power: (args, compile) => {
     const base = args[0];
     const exp = args[1];

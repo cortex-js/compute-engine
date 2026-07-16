@@ -9,12 +9,14 @@
   the per-element extremum (`ElementMax(0, [1, -2, 3])` → `[1, 0, 3]`),
   collections zip, and all-scalar arguments give a scalar. They are **variadic**
   (two or more arguments): `ElementMax(0, [1, -2, 3], 2)` → `[2, 2, 3]`.
-  Exactness is preserved (`ElementMax(√2, 1)` → `√2`), and they compile on the
-  JavaScript target (all-scalar arguments to a direct call, a collection
-  argument to a `_SYS.bcast`).
+  Exactness is preserved (`ElementMax(√2, 1)` → `√2`). They compile on every
+  target: `javascript` (all-scalar → a direct call, a collection operand → a
+  `_SYS.bcast`), `interval-js` (interval max/min — restoring break detection),
+  `glsl`/`wgsl` (native `max`/`min`), and `python` (`np.maximum`/`np.minimum`).
 - **`Clamp(x, lo, hi)` — clamp a value to a range** (`min(max(x, lo), hi)`),
   also broadcasting over collection arguments (`Clamp([-1, 0.5, 2], 0, 1)` →
-  `[0, 0.5, 1]`).
+  `[0, 0.5, 1]`). Compiles on all targets, including the native `clamp` on
+  `glsl`/`wgsl` and `np.clip` on `python`.
 
 ### Bug Fixes
 
@@ -25,6 +27,13 @@
   folds the scalar and every collection's elements into a single reduction,
   matching `evaluate()`. (Surfaced by the Tycho/Graph Paper team's `max(0, …)`
   plot expressions.)
+- **`Max`/`Min` compile correctly on the `python` target.** They were mapped to
+  the element-wise, strictly-binary `np.maximum`/`np.minimum`, so a collection
+  operand was mis-reduced (`Max(0, [1,2,3])` → `[1,2,3]` instead of `3`) and a
+  single-list or n-ary call errored at run time. `Max`/`Min` now reduce a
+  collection operand with `np.max`/`np.min` and combine the per-operand results
+  element-wise (keeping a scalar/array operand — e.g. the plot variable —
+  vectorized), matching `evaluate()` and the JavaScript target.
 
 ### Collections
 

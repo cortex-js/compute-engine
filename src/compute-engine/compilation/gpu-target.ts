@@ -772,6 +772,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // 2-argument calls: `max(max(a, b), c)`.
   Max: (args, compile) => foldNaryBuiltin('max', args, compile),
   Min: (args, compile) => foldNaryBuiltin('min', args, compile),
+  // Element-wise max/min. On a scalar (per-pixel) GPU value these are the same
+  // native `max`/`min` fold as `Max`/`Min`; a collection operand is unsupported
+  // on the GPU by design. (`Clamp` is mapped to the native `clamp` above.)
+  ElementMax: (args, compile) => foldNaryBuiltin('max', args, compile),
+  ElementMin: (args, compile) => foldNaryBuiltin('min', args, compile),
   Mix: 'mix',
   // Control-flow forms — the base compiler's default emits a JS ternary and a
   // bare `NaN`, neither of which is valid GPU code (WGSL has no `?:`, and no
