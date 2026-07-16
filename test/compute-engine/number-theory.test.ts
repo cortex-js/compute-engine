@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine as ce } from '../utils';
 
 const isOctahedral = (n: number | bigint) =>
@@ -715,5 +716,54 @@ describe('EX-15: infinite arguments never throw (toBigint null on non-finite)', 
       ce.box(['IsPrime', ['Subtract', ['Power', 2, 127], 1]]).evaluate()
         .symbol
     ).toEqual('True');
+  });
+});
+
+describe('GCD/LCM on non-integer reals (tolerant float Euclid)', () => {
+  // Exactness contract: an inexact (float) argument numericizes, so GCD/LCM of
+  // non-integer reals fold via a tolerant floating Euclidean algorithm (repeated
+  // `a mod b`, terminating at a small remainder relative to the input scale).
+  // Integer/exact-rational operands keep their exact/symbolic behavior.
+  const val = (arr: any) => ce.box(arr).evaluate().re;
+
+  it('gcd/lcm of non-integer reals numericize under evaluate()', () => {
+    expect(val(['GCD', 2.25, 2.1])).toBeCloseTo(0.15, 6);
+    expect(val(['LCM', 2.5, 1.5])).toBeCloseTo(7.5, 6);
+    expect(val(['GCD', 4, 2.5])).toBeCloseTo(0.5, 6);
+    expect(val(['GCD', 2.25, 2.1, 0.6])).toBeCloseTo(0.15, 6);
+  });
+
+  it('integer gcd/lcm stay exact', () => {
+    expect(ce.box(['GCD', 4, 6]).evaluate().toString()).toEqual('2');
+    expect(ce.box(['LCM', 4, 6]).evaluate().toString()).toEqual('12');
+    expect(ce.box(['GCD', 12, 18]).evaluate().toString()).toEqual('6');
+  });
+
+  it('exact rationals stay symbolic under evaluate(), numericize under N()', () => {
+    const g = ce.box(['GCD', ['Rational', 9, 4], ['Rational', 21, 10]]);
+    expect(g.evaluate().toString()).toEqual('gcd(9/4, 21/10)');
+    // The exact rational GCD of 9/4 and 21/10 is 3/20 = 0.15.
+    expect(g.N().re).toBeCloseTo(0.15, 6);
+  });
+
+  it('LCM of a non-integer real is typed number, not integer', () => {
+    expect(ce.box(['LCM', 2.5, 1.5]).type.toString()).toEqual('number');
+    expect(ce.box(['LCM', 4, 6]).type.toString()).toEqual('finite_integer');
+  });
+
+  it('compiles gcd of reals to a finite value (plot render, not NaN)', () => {
+    const engine = new ComputeEngine();
+    const target = engine.getCompilationTarget('javascript');
+    const g = target.compile(engine.parse('\\gcd(x, y)'));
+    expect(g.run!({ x: 2.25, y: 2.1 })).toBeCloseTo(0.15, 6);
+    // Integer inputs still exact through the compiled path.
+    expect(g.run!({ x: 12, y: 18 })).toEqual(6);
+    // Desmos-style gcd(θ², θ + a): finite (non-NaN) across the sampled domain,
+    // where the integer-only GCD produced NaN at every sample (blank render).
+    const r = target.compile(engine.parse('\\gcd(t^2, t + 0.6)'));
+    let allFinite = true;
+    for (let i = 0; i <= 750; i++)
+      if (!Number.isFinite(r.run!({ t: i / 10 }) as number)) allFinite = false;
+    expect(allFinite).toBe(true);
   });
 });

@@ -2539,9 +2539,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
-      signature: '(any*) -> integer',
-      type: () => 'finite_integer',
-      sgn: () => 'positive',
+      // Integer operands → a positive integer; non-integer real operands →
+      // a (non-negative) real via the tolerant float LCM.
+      signature: '(any*) -> number',
+      type: (ops) =>
+        ops.every((x) => x.isInteger) ? 'finite_integer' : 'number',
+      sgn: (ops) => (ops.every((x) => x.isInteger) ? 'positive' : undefined),
       evaluate: (xs) => evaluateGcdLcm(xs, 'LCM'),
     },
 
@@ -3500,6 +3503,23 @@ function evaluateGcdLcm(
   const ce = ops[0].engine;
   const fn = mode === 'LCM' ? lcm : gcd;
   const bigFn = mode === 'LCM' ? bigLcm : bigGcd;
+
+  // Exactness contract: an inexact (float) argument numericizes, like
+  // `cos(5.1) → 0.377`. GCD/LCM of non-integer reals fold via the tolerant
+  // floating Euclidean algorithm (`realGcd`/`realLcm`, ε = REAL_GCD_TOLERANCE).
+  // Applies only when every operand is a finite real number and at least one is
+  // inexact; exact integers/rationals and symbolic operands keep their
+  // exact/symbolic paths.
+  if (
+    ops.length > 0 &&
+    ops.some((x) => isNumber(x) && !x.isExact) &&
+    ops.every((x) => isNumber(x) && Number.isFinite(x.re) && !x.im)
+  ) {
+    const rfn = mode === 'LCM' ? realLcm : realGcd;
+    let acc = Math.abs(ops[0].re);
+    for (let i = 1; i < ops.length; i++) acc = rfn(acc, ops[i].re);
+    return ce.number(acc);
+  }
 
   const rest: Expression[] = [];
   if (bignumPreferred(ce)) {

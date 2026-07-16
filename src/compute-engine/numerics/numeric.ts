@@ -210,13 +210,17 @@ export function lcm(a: number, b: number): number {
 }
 
 /**
- * Default relative tolerance for the real (non-integer) GCD/LCM. Matches the
- * engine's default `ce.tolerance`. The `evaluate()` path passes the live
- * `ce.tolerance` instead; the compiled runtime (`_SYS.gcd`/`_SYS.lcm`) uses
- * this default because it has no engine handle. A tighter tolerance yields
- * fewer "commensurate" hits (sparser Desmos-style art); a looser one, more.
+ * Relative tolerance for the real (non-integer) GCD/LCM — the ε of the tolerant
+ * floating Euclidean algorithm (two reals are "commensurate" when a remainder
+ * falls below `ε · max(|a|, |b|)`). Deliberately its OWN constant, NOT tied to
+ * `ce.tolerance`: this ε governs float-commensurability, a different (and much
+ * looser) notion than the engine's numeric-equality tolerance — coupling them
+ * would force a consumer to corrupt every comparison in the engine to tune the
+ * GCD. `1e-6` is the de-facto float-GCD value (Desmos uses it). The result is
+ * inherently discontinuous in the inputs, so this is meaningful only for
+ * numeric approximation (`.N()`, compiled plots), never as a symbolic identity.
  */
-export const REAL_GCD_TOLERANCE = 1e-10;
+export const REAL_GCD_TOLERANCE = 1e-6;
 
 /**
  * GCD extended to non-integer reals via a tolerant floating Euclidean

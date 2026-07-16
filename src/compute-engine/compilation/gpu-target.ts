@@ -2474,13 +2474,17 @@ fn _fractal_julia(z_in: vec2f, c: vec2f, maxIter: i32) -> f32 {
 
 /**
  * GPU GCD preamble (GLSL syntax).
- * Euclidean algorithm over floats; works for integer-valued inputs.
+ * Tolerant floating Euclidean algorithm: terminates when the remainder falls
+ * below `ε · max(|a|, |b|)` (ε = 1e-6, the f32 float-GCD tolerance) rather than
+ * exact zero, so it handles non-integer reals (e.g. Desmos-style
+ * `gcd(θ², θ+a)`) as well as integer-valued inputs.
  */
 export const GPU_GCD_PREAMBLE_GLSL = `
 float _gpu_gcd(float a, float b) {
   a = abs(a); b = abs(b);
-  for (int i = 0; i < 32; i++) {
-    if (b < 0.5) break;
+  float tol = 1e-6 * max(a, b);
+  for (int i = 0; i < 64; i++) {
+    if (b <= tol) break;
     float t = mod(a, b);
     a = b;
     b = t;
@@ -2495,8 +2499,9 @@ float _gpu_gcd(float a, float b) {
 export const GPU_GCD_PREAMBLE_WGSL = `
 fn _gpu_gcd(a_in: f32, b_in: f32) -> f32 {
   var a = abs(a_in); var b = abs(b_in);
-  for (var i: i32 = 0; i < 32; i++) {
-    if (b < 0.5) { break; }
+  let tol = 1e-6 * max(a, b);
+  for (var i: i32 = 0; i < 64; i++) {
+    if (b <= tol) { break; }
     let t = a % b;
     a = b;
     b = t;

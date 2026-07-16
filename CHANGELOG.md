@@ -20,6 +20,21 @@
 
 ### Bug Fixes
 
+- **`GCD`/`LCM` now evaluate on non-integer real arguments.** `\gcd(2.25, 2.1)`
+  and `\operatorname{lcm}(2.5, 1.5)` previously stayed symbolic (and compiled to
+  `NaN`, blanking any plot that used them); they now fold via a tolerant
+  floating Euclidean algorithm — the standard "float GCD" that terminates when a
+  remainder falls below `ε · max(|a|, |b|)` (`ε = 1e-6`). This honors the
+  exactness contract: an inexact (float) argument numericizes, like
+  `\cos(5.1)`, while integer and exact-rational operands keep their exact
+  (`\gcd(4, 6) → 2`) and symbolic (`\gcd(9/4, 21/10)` under `evaluate()`, `0.15`
+  under `.N()`) behavior. The compiled `javascript`, `glsl`, and `wgsl` targets
+  fold reals the same way (the GPU `_gpu_gcd` cutoff was integer-tuned and is now
+  scale-relative). The tolerance is deliberately its own constant, not the
+  engine's numeric tolerance — float-commensurability is a much looser notion,
+  and the value that reproduces a given renderer's output is a consumer choice.
+  (Requested by the Tycho/Graph Paper team for Desmos "art" imports such as
+  `r ≤ gcd(θ², θ + a)`.)
 - **`Max`/`Min` of a scalar and a collection no longer mis-compiles to `NaN`.**
   `Max(0, [1, -2, 3])` evaluates to `3` (the reduction folds the collection's
   elements), but on the JavaScript target it compiled to `Math.max(0, [1,-2,3])`

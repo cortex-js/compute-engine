@@ -1835,10 +1835,14 @@ describe('GCD/LCM', () => {
       `42`
     ));
 
-  it('should compute the GCD of some numbers', () =>
-    expect(
-      ce.expr(['GCD', 60, 12, 3.1415]).evaluate().toString()
-    ).toMatchInlineSnapshot(`gcd(12, 3.1415)`));
+  // A non-integer (inexact) argument numericizes the whole GCD via the
+  // tolerant floating Euclidean algorithm (exactness contract): 12 and 3.1415
+  // are near-incommensurate, so their tolerant GCD is a small real.
+  it('numericizes the GCD when an argument is a non-integer real', () =>
+    expect(ce.expr(['GCD', 60, 12, 3.1415]).evaluate().re).toBeCloseTo(
+      0.0005,
+      6
+    ));
 
   it('should compute the GCD of a list', () =>
     expect(
@@ -1863,10 +1867,11 @@ describe('GCD/LCM', () => {
       `42`
     ));
 
-  it('should compute the LCM of some numbers', () =>
-    expect(
-      ce.expr(['LCM', 60, 12, 3.1415]).evaluate().toString()
-    ).toMatchInlineSnapshot(`lcm(60, 3.1415)`));
+  it('numericizes the LCM when an argument is a non-integer real', () =>
+    expect(ce.expr(['LCM', 60, 12, 3.1415]).evaluate().re).toBeCloseTo(
+      376980.0012,
+      3
+    ));
 
   it('should compute the LCM of a list', () =>
     expect(
@@ -2011,14 +2016,24 @@ describe('GCD/LCM machine-precision path (REVIEW.md B2)', () => {
   it('computes LCM of two integers', () =>
     expect(ceMachine.expr(['LCM', 4, 6]).evaluate().toString()).toEqual('12'));
 
-  it('folds integers and defers non-integers', () =>
-    expect(ceMachine.expr(['GCD', 60, 12, 3.1415]).evaluate().toString()).toEqual(
-      'gcd(12, 3.1415)'
-    ));
-
-  it('seeds the accumulator after a leading non-integer', () =>
+  // A non-integer (inexact) real argument numericizes the whole GCD via the
+  // tolerant floating Euclidean algorithm (exactness contract). A leading
+  // non-integer real that is exactly commensurate stays exact: GCD(3.5,4,6)=0.5.
+  it('numericizes when an argument is a non-integer real', () => {
+    expect(ceMachine.expr(['GCD', 60, 12, 3.1415]).evaluate().re).toBeCloseTo(
+      0.0005,
+      6
+    );
     expect(ceMachine.expr(['GCD', 3.5, 4, 6]).evaluate().toString()).toEqual(
-      'gcd(2, 3.5)'
+      '0.5'
+    );
+  });
+
+  // Integers still fold and a symbolic operand still defers: the accumulator is
+  // seeded after a leading non-foldable (symbolic) operand.
+  it('seeds the accumulator after a leading symbolic operand', () =>
+    expect(ceMachine.expr(['GCD', 'x', 4, 6]).evaluate().toString()).toEqual(
+      'gcd(2, x)'
     ));
 
   it('returns a single integer unchanged', () =>
