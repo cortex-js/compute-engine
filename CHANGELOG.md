@@ -1,5 +1,75 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+Fixes from a review of the 0.78.0–0.80.0 changes:
+
+- **Compiled n-ary and collection `GCD`/`LCM` returned wrong numbers.** The
+  compiled form passed a third operand into the internal tolerance slot
+  (`GCD(2.25, 2.1, 0.6)` compiled to `2.1`, silently consuming the `0.6` as ε;
+  `GCD(12, 18, 8)` → `6` instead of `2`; `LCM(4, 6, 10)` → `12` instead of
+  `60`), and a collection argument (`GCD([12, 18])`) compiled to `NaN`. All
+  forms now fold pairwise and match the interpreter; collection operands whose
+  elements can't be enumerated at run time fail closed to the interpreter.
+- **A user-defined function sharing its name with a loop index hijacked
+  compiled `Sum`/`Product`.** With `f(x) := x^2` declared, compiling
+  `\sum_{f=1}^{3} f` emitted references to the function instead of the loop
+  index (returning garbage with `success: true`; a null interval on
+  `interval-js`). Bound names are now tracked explicitly through every binding
+  form instead of being inferred from resolved code.
+- **Adaptive quadrature no longer poisoned by a `NaN` sample.** A single
+  integrand `NaN` at a quadrature node (e.g. the removable singularity of
+  `\sin(x)/x` at the midpoint of a symmetric interval) permanently corrupted
+  the convergence accumulators, silently falling back to slow, nondeterministic
+  Monte Carlo. Non-finite panels are now excluded until subdivided away:
+  `\int_{-1}^{1} \sin(x)/x \, dx` converges to `2\,\mathrm{Si}(1)`. Also,
+  `.N()` on an integral without a closed form now uses adaptive Gauss–Kronrod
+  before falling back to Monte Carlo, matching the compiled path's accuracy.
+- **Comprehension iteration state was shared across traversals.** Two
+  interleaved iterators over the same comprehension (or reading `.count`
+  mid-iteration on a dependent comprehension) corrupted each other's index
+  variables, yielding wrong elements. Each traversal now gets its own scope,
+  and a function literal produced by a comprehension body now captures the
+  per-iteration value of the loop variable (`[x \mapsto x + i \text{ for } i
+  \in 1..3]` applied to 10 gives `11, 12, 13`, not `13, 13, 13`).
+- **GPU `gcd` regressed on large integers.** The tolerant float loop shipped in
+  0.80.0 dropped the exact-integer path on `glsl`/`wgsl`: `gcd(4000000, 2)`
+  returned `4000000`. Exact Euclid is restored for integer inputs within f32
+  range.
+- **Tolerant `GCD`/`LCM` invariants.** Scale-mismatched inputs violated
+  `gcd ≤ min` / `lcm ≥ max` (`\gcd(2.5, 10^{21})` → `10^{21}`); zero-argument
+  `GCD()`/`LCM()` crashed (now the identities `0`/`1`); nested collections now
+  fold in a single evaluation.
+- **`Max`/`Min` absorb `NaN` found inside collections**: `Max([1, NaN, 3])`
+  now returns `NaN`, consistent with `Max(NaN, 5)` and with compiled code.
+- **`IndexOf` on infinite lazy collections hung indefinitely**, ignoring
+  `ce.timeLimit`. The search now streams (linear instead of quadratic on lazy
+  collections) with deadline checkpoints. Compiled `IndexOf` also now uses the
+  interpreter's tolerance-aware comparison instead of strict `===`.
+- **Sequence interpretation (`Interpret`) regressions.** The 0.79.0 anchor-search
+  optimization rejected legitimate non-monotonic polynomial sums (e.g.
+  `100 + 164 + 198 + 208 + \dots + 308`, which is `\sum_{k=1}^{14}
+  k^3-21k^2+120k`) and then ground for hours in an exact-rational recurrence
+  search that ignored `ce.timeLimit`. The break heuristic now requires a
+  sustained divergence streak, and the recurrence search honors the deadline.
+- **Parse-diagnostics false positives.** `f(x) \coloneq x^2` no longer emits
+  `juxtaposition-as-multiply`/`undeclared-symbol` for the definition's own
+  head, and symbols declared through the `getSymbolType` handler are no longer
+  reported as undeclared.
+- **Custom `compile` handler contract.** The handler now genuinely takes
+  precedence over built-in operator mappings (e.g. `Add`) as documented
+  (control-flow heads remain non-overridable, now stated explicitly), and
+  `analyzeReferences` no longer reports custom-compiled operators as
+  `unsupported`.
+- **Assorted**: applying a non-numeric symbol to a collection
+  (`t(\{1,2\})` with `t` a string) reports an application type error again
+  instead of a confusing `Multiply` error; `PointX`/`PointY` work on `Set`s of
+  points (previously returned `[]`); a provider timeout inside `Integrate` is
+  re-thrown instead of swallowed; `\operatorname{erf}` at a directionless
+  complex infinity stays symbolic instead of saturating to `1`; compiled
+  `Map`/`Filter` no longer leak JavaScript's 0-based callback index into
+  two-parameter lambdas.
+
 ### New Features
 
 - **More collection operators compile on the `javascript` target.**

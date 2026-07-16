@@ -247,11 +247,16 @@ export function realGcd(
     return a;
   }
   // Tolerant floating Euclidean algorithm for non-integer reals.
+  const mn = Math.min(a, b);
   const tol = eps * Math.max(a, b);
   // Bounded loop: Euclid converges fast; the cap guards against a pathological
   // float residue that never dips below `tol`.
   for (let i = 0; i < 10000 && b > tol; i++) [a, b] = [b, a % b];
-  return a;
+  // Scale-mismatch guard: when the operands differ in magnitude by more than
+  // 1/ε, the smaller starts below `tol` and Euclid terminates holding the
+  // LARGER operand — which would violate gcd ≤ min(|a|,|b|). Return the smaller
+  // operand instead (it divides the larger to within tolerance).
+  return a > mn ? mn : a;
 }
 
 /**

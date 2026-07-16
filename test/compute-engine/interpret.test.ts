@@ -159,6 +159,27 @@ describe('Interpret — polynomial (finite differences)', () => {
     expect(sum.json).toEqual(['Sum', ['Power', 'k', 2], ['Limits', 'k', 1, 10]]);
     expect(sum.evaluate().json).toEqual(385);
   });
+
+  test('non-monotonic cubic anchor 100 + 164 + 198 + 208 + … + 308 → Sum(k³−21k²+120k, (k,1,14))', () => {
+    // p(k) = k³ − 21k² + 120k dips (p(5)=200 … p(10)=100) before climbing back
+    // to the anchor p(14)=308. The anchor search must survive that bounded
+    // wrong-side dip and still find U=14 — a plain local "below-and-falling"
+    // break used to miss the anchor and hand the input to the recurrence grind.
+    const sum = interpret('100 + 164 + 198 + 208 + \\dots + 308');
+    expect(sum.json).toEqual([
+      'Sum',
+      [
+        'Add',
+        ['Power', 'k', 3],
+        ['Multiply', -21, ['Power', 'k', 2]],
+        ['Multiply', 120, 'k'],
+      ],
+      ['Limits', 'k', 1, 14],
+    ]);
+    // Numeric check: Σ_{k=1}^{14} p(k) = 100+164+198+208+200+180+154+128+108+100
+    //                                    +110+144+208+308 = 2310.
+    expect(sum.evaluate().json).toEqual(2310);
+  });
 });
 
 describe('Interpret — geometric', () => {
@@ -320,6 +341,34 @@ describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => 
     expect(sum.operator).toBe('Sum');
     expect((sum.json as unknown[])[2]).toEqual(['Limits', 'k', 1, 7]);
     expect(sum.N().re).toBeCloseTo(9, 6);
+  });
+
+  // Deadline safety net for the exact-rational recurrence grind: samples that
+  // fit a rational L=2 recurrence with |roots| = 1 (bounded magnitude) never
+  // trip the magnitude-overshoot guard, so the anchor search iterates while the
+  // exact denominators balloon. It must honor `ce.timeLimit` (findRecurrence-
+  // UpperBound checks the deadline every step) instead of running for minutes.
+  test('recurrence anchor search honors the evaluation deadline', () => {
+    // s(k) = (3/2)·s(k−1) − s(k−2): 0, 2, 3, 5/2, 3/4, −11/8, … (bounded,
+    // oscillating). Anchor 100 is never reached, so the search would grind.
+    const fast = new ComputeEngine();
+    fast.timeLimit = 1000;
+    const t0 = Date.now();
+    let threw: string | null = null;
+    try {
+      fast
+        .function('Interpret', [
+          fast.parse('0 + 2 + 3 + \\frac{5}{2} + \\frac{3}{4} - \\frac{11}{8} + \\dots + 100'),
+        ])
+        .evaluate();
+    } catch (e) {
+      threw = (e as Error).name;
+    }
+    const elapsed = Date.now() - t0;
+    // Either the cooperative deadline cancels it, or a guard rejects the fit —
+    // but it must finish within a small multiple of the 1 s budget, not minutes.
+    if (threw !== null) expect(threw).toBe('CancellationError');
+    expect(elapsed).toBeLessThan(8000);
   });
 });
 

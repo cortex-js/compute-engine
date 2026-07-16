@@ -743,6 +743,32 @@ export class _Parser implements Parser {
   }
 
   /**
+   * Retroactively remove `juxtaposition-as-multiply` diagnostics for the head
+   * `name`, collected at or after `checkpoint` (`_seq >= checkpoint`). Called by
+   * parselets that consume an application-shaped left operand as a function
+   * signature (e.g. `f(x) := …`): the `f(x)` shape is a definition, not a
+   * multiplication, so the code-2 diagnostic emitted while `f(x)` was parsed as
+   * a neutral juxtaposition is a false positive. Diagnostics-only — never
+   * affects parse output.
+   */
+  pruneJuxtaposition(name: string, checkpoint: number): void {
+    if (this.diagnostics === null) return;
+    const d = this.diagnostics;
+    let w = 0;
+    for (let r = 0; r < d.length; r++) {
+      const e = d[r];
+      if (
+        e.code === 'juxtaposition-as-multiply' &&
+        e._seq >= checkpoint &&
+        e.detail?.name === name
+      )
+        continue; // drop the spurious multiplication diagnostic
+      d[w++] = e;
+    }
+    d.length = w;
+  }
+
+  /**
    * The diagnostics checkpoint captured just before the left operand of the
    * innermost in-progress {@link parseExpression} was parsed. Infix binder
    * parselets (notably `\mapsto`, whose parameter is the already-parsed left
@@ -766,8 +792,14 @@ export class _Parser implements Parser {
       if (id in table.ids) return true;
       table = table.parent;
     }
-    if (this.options.isSymbolDeclared) return this.options.isSymbolDeclared(id);
-    // No declaration-presence hook: fall back to type knowledge.
+    // A declaration-presence hook (e.g. engine scope lookup) is authoritative
+    // when it reports the symbol declared, but it is not the whole story: the
+    // `getSymbolType` handler (which the parse-option handler REPLACES for
+    // typing) may know a non-`unknown` type for a symbol the presence hook does
+    // not find — Tycho's validator declares in-scope definitions purely through
+    // `getSymbolType`. Treat a known type as a declaration too, so the
+    // `undeclared-symbol` diagnostic never contradicts a resolved type.
+    if (this.options.isSymbolDeclared?.(id)) return true;
     return !this.getSymbolType(id).isUnknown;
   }
 

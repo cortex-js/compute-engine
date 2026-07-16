@@ -22,6 +22,7 @@ import type {
 } from '../global-types.js';
 import { spellCheckMessage } from '../boxed-expression/validate.js';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import { isValueDef } from '../boxed-expression/utils.js';
 import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
@@ -701,19 +702,72 @@ function* runLoop(
 }
 
 /**
+ * A fresh, per-walk binding scope for a `Comprehension`'s index variables.
+ *
+ * Every independent traversal of a comprehension — an `each()` stream, an
+ * `at(n)`, or a dependent-`.count` enumeration — must bind its index variables
+ * in its OWN scope, NOT in the shared, persistent `expr.localScope`. The loop
+ * scope is created once at canonicalization and outlives every walk, so if two
+ * walks assigned their indices into it they would clobber each other: a paused
+ * generator, resumed after another walk advanced, would re-read an index the
+ * other walk overwrote (interleaved iterators; reading `.count` mid-iteration).
+ *
+ * The fresh scope's parent IS `expr.localScope`, so `where`-clause captures and
+ * every enclosing binding still resolve up the chain, and dependent clauses
+ * (`Element(j, Range(1, i))`) still see this walk's own `i`. The pre-declared
+ * index names are re-declared per walk by `runNestedElements`' declare-if-absent
+ * pass (into this child scope, the current lexical scope), and `ce.assign`
+ * therefore writes them here — isolated from every other walk.
+ */
+function comprehensionWalkScope(expr: Expression): Scope | undefined {
+  if (!isFunction(expr)) return undefined;
+  if (!(expr.isScoped && expr.localScope !== undefined)) return undefined;
+  return { parent: expr.localScope, bindings: new Map() };
+}
+
+/** The index variable names of a comprehension's `Element` clauses, in order
+ * (the wildcard `Nothing` is skipped — it binds nothing). */
+function comprehensionIndexNames(
+  elements: ReadonlyArray<Expression>
+): string[] {
+  const names: string[] = [];
+  for (const el of elements) {
+    if (!isFunction(el, 'Element')) continue;
+    const idx = el.ops[0];
+    if (idx && isSymbol(idx) && idx.symbol !== 'Nothing') names.push(idx.symbol);
+  }
+  return names;
+}
+
+/** Snapshot the CURRENT value of every index bound in a walk scope, as a
+ * substitution map. Reads the per-walk bindings directly (each holds this
+ * iteration's index value), so it must be called while the walk scope is still
+ * live. Returns `undefined` when no index has a value yet. */
+function comprehensionIndexSubs(
+  walkScope: Scope
+): Record<string, Expression> | undefined {
+  let subs: Record<string, Expression> | undefined;
+  for (const [name, def] of walkScope.bindings) {
+    if (isValueDef(def) && def.value.value !== undefined)
+      (subs ??= {})[name] = def.value.value;
+  }
+  return subs;
+}
+
+/**
  * Stream a `Comprehension`'s body values one at a time.
  *
- * The loop scope (index variables pre-declared by `canonicalLoopLike`) is
- * pushed ONLY around each synchronous `inner.next()` advance — the step that
- * assigns the next index and evaluates the body — and popped again BEFORE the
- * value is yielded. So the eval-context stack is never held across a `yield`:
- * a consumer that stops early or abandons the iterator leaves nothing pushed to
- * leak (this is safe even though `each()` does not forward `.return()` to us),
- * and there is no interference if evaluation happens between `.next()` calls.
- * Because each element is produced on demand, iterating an infinite domain and
- * taking only a prefix (e.g. `Take`, `First`) works without hitting the
- * iteration limit; a full drive of an infinite domain still terminates via the
- * iteration-limit `CancellationError` from `runNested`.
+ * A fresh per-walk index scope (see `comprehensionWalkScope`) is pushed ONLY
+ * around each synchronous `inner.next()` advance — the step that assigns the
+ * next index and evaluates the body — and popped again BEFORE the value is
+ * yielded. So the eval-context stack is never held across a `yield`: a consumer
+ * that stops early or abandons the iterator leaves nothing pushed to leak (this
+ * is safe even though `each()` does not forward `.return()` to us), and there is
+ * no interference if evaluation happens between `.next()` calls. Because each
+ * element is produced on demand, iterating an infinite domain and taking only a
+ * prefix (e.g. `Take`, `First`) works without hitting the iteration limit; a
+ * full drive of an infinite domain still terminates via the iteration-limit
+ * `CancellationError` from `runNested`.
  */
 function* comprehensionStream(
   expr: Expression
@@ -723,19 +777,34 @@ function* comprehensionStream(
   const body = expr.ops[0] ?? ce.Nothing;
   const elements = expr.ops.slice(1);
 
-  const scoped = expr.isScoped && expr.localScope !== undefined;
+  const walkScope = comprehensionWalkScope(expr);
+  const indexNames = comprehensionIndexNames(elements);
   const state: LoopState = { stopped: false, count: 0 };
   const inner = runNestedElements(body, elements, ce, state, () => {});
   while (true) {
     let r: IteratorResult<Expression>;
-    if (scoped) ce._pushEvalContext(expr.localScope!);
+    // Capture this iteration's index values BY VALUE while the walk scope is
+    // still live (C2): a materialized body that is a function literal captures
+    // its free variables by reference against the scope active at apply time,
+    // so without this every element of `[x ↦ x + i for i in 1..3]` would share
+    // one `i` (resolving to its final value, or to nothing once the walk scope
+    // is gone) instead of closing over 1, 2, 3. Substituting the index values
+    // into the element is a no-op for a body that already resolved them.
+    let subs: Record<string, Expression> | undefined;
+    if (walkScope) ce._pushEvalContext(walkScope);
     try {
       r = inner.next();
+      if (!r.done && walkScope && indexNames.length > 0)
+        subs = comprehensionIndexSubs(walkScope);
     } finally {
-      if (scoped) ce._popEvalContext();
+      if (walkScope) ce._popEvalContext();
     }
     if (r.done) return;
-    yield r.value;
+    const value =
+      subs !== undefined && r.value.has(indexNames)
+        ? r.value.subs(subs)
+        : r.value;
+    yield value;
   }
 }
 
@@ -771,8 +840,10 @@ function comprehensionEnumeratedCount(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
   const ce = expr.engine;
   const elements = expr.ops.slice(1);
-  const scoped = expr.isScoped && expr.localScope !== undefined;
-  if (scoped) ce._pushEvalContext(expr.localScope!);
+  // Count in a FRESH per-walk scope, never the shared `localScope`: reading
+  // `.count` while another walk is paused must not clobber that walk's indices.
+  const walkScope = comprehensionWalkScope(expr);
+  if (walkScope) ce._pushEvalContext(walkScope);
   try {
     let n = 0;
     const state: LoopState = { stopped: false, count: 0 };
@@ -795,7 +866,7 @@ function comprehensionEnumeratedCount(expr: Expression): number | undefined {
       return undefined;
     throw e;
   } finally {
-    if (scoped) ce._popEvalContext();
+    if (walkScope) ce._popEvalContext();
   }
 }
 

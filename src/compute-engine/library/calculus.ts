@@ -26,6 +26,7 @@ import {
   canonicalFunctionLiteralArguments,
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
+import { adaptiveQuadrature } from '../numerics/gauss-kronrod.js';
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
 import {
   centeredDiff8thOrder,
@@ -47,6 +48,7 @@ import { symbolicLimit } from '../symbolic/limit.js';
 import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
 import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
+import { CancellationError } from '../../common/interruptible.js';
 
 //
 // ── Improper-integral endpoint limits (conditional-values Phase 3a) ──────
@@ -703,6 +705,21 @@ volumes
               ]);
           }
 
+          // (2) Deterministic adaptive Gauss–Kronrod (GK15) for finite or
+          // transformable (semi-infinite / doubly-infinite) bounds — near
+          // machine precision on smooth integrands, and matches the compiled
+          // integration path. Falls through to Monte Carlo only when it fails
+          // to converge (endpoint singularities, oscillatory tails).
+          if (compiled.success) {
+            const gk = adaptiveQuadrature(jsf, lower, upper);
+            if (gk.converged && Number.isFinite(gk.estimate))
+              return ce.expr([
+                'Measurement',
+                ce.number(gk.estimate),
+                ce.number(gk.error),
+              ]);
+          }
+
           const mce = monteCarloEstimate(
             jsf,
             lower,
@@ -762,7 +779,11 @@ volumes
           if (ce._integrationProvider) {
             try {
               antideriv = ce._integrationProvider(expr, variable);
-            } catch {
+            } catch (e) {
+              // A cancellation (deadline/interrupt) thrown inside the provider
+              // must propagate — swallowing it would turn a timeout into a
+              // silent fall-through to the built-in antiderivative.
+              if (e instanceof CancellationError) throw e;
               antideriv = null;
             }
           }

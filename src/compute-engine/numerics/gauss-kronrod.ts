@@ -108,6 +108,13 @@ function errorKey(e: number): number {
   return Number.isFinite(e) ? e : Number.POSITIVE_INFINITY;
 }
 
+/** A panel whose value or error is non-finite (e.g. the integrand hit a
+ * removable singularity at a node). It contributes 0 to the running totals but
+ * still blocks convergence until it is subdivided away. */
+function panelIsBad(p: Panel): boolean {
+  return !Number.isFinite(p.value) || !Number.isFinite(p.error);
+}
+
 /**
  * Adaptive GK15 over a finite interval `[a, b]`.
  */
@@ -121,14 +128,34 @@ function adaptiveFinite(
 ): { estimate: number; error: number; converged: boolean } {
   const first = gk15(f, a, b);
   const panels: Panel[] = [first];
-  let totalValue = first.value;
-  let totalError = first.error;
+
+  // Incremental accumulators. A non-finite panel contribution must NOT enter
+  // the running totals: subtracting a stale `NaN`/`±∞` parent when it is later
+  // subdivided into finite children would leave the totals poisoned forever
+  // (removable singularity at a node — see `panelIsBad`). Instead, bad panels
+  // add 0 to `totalValue`/`totalError` and are tallied in `badPanels`, which
+  // gates convergence until every one has been subdivided away.
+  let totalValue = Number.isFinite(first.value) ? first.value : 0;
+  let totalError = Number.isFinite(first.error) ? first.error : 0;
+  let badPanels = panelIsBad(first) ? 1 : 0;
   let roundoffStop = false;
 
   const tolerance = () => Math.max(atol, rtol * Math.abs(totalValue));
 
+  // Fold a panel into the running totals, skipping non-finite contributions.
+  const addPanel = (p: Panel) => {
+    if (Number.isFinite(p.value)) totalValue += p.value;
+    if (Number.isFinite(p.error)) totalError += p.error;
+    if (panelIsBad(p)) badPanels += 1;
+  };
+  const removePanel = (p: Panel) => {
+    if (Number.isFinite(p.value)) totalValue -= p.value;
+    if (Number.isFinite(p.error)) totalError -= p.error;
+    if (panelIsBad(p)) badPanels -= 1;
+  };
+
   while (panels.length < maxIntervals) {
-    if (Number.isFinite(totalError) && totalError <= tolerance()) break;
+    if (badPanels === 0 && totalError <= tolerance()) break;
 
     // Pick the panel with the largest (or non-finite) error.
     let worst = 0;
@@ -147,8 +174,9 @@ function adaptiveFinite(
     const left = gk15(f, iv.a, mid);
     const right = gk15(f, mid, iv.b);
 
-    totalValue += left.value + right.value - iv.value;
-    totalError += left.error + right.error - iv.error;
+    removePanel(iv);
+    addPanel(left);
+    addPanel(right);
 
     panels[worst] = left;
     panels.push(right);
@@ -156,6 +184,7 @@ function adaptiveFinite(
 
   const converged =
     !roundoffStop &&
+    badPanels === 0 &&
     Number.isFinite(totalValue) &&
     Number.isFinite(totalError) &&
     totalError <= tolerance();

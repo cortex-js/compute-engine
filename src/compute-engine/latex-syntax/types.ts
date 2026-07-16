@@ -980,6 +980,16 @@ export interface Parser {
 
   /**
    * @internal
+   * Diagnostics: retroactively remove `juxtaposition-as-multiply` diagnostics
+   * whose `detail.name` is `name`, collected at or after `checkpoint`. Used by
+   * parselets that reinterpret an application-shaped left operand (e.g.
+   * `f(x) := …`, where `f(x)` is consumed as a function signature, not a
+   * product) so the head no longer reports a spurious multiplication.
+   */
+  pruneJuxtaposition(name: string, checkpoint: number): void;
+
+  /**
+   * @internal
    * Diagnostics: checkpoint captured before the left operand of the innermost
    * in-progress `parseExpression`. Used by infix binder parselets (`\mapsto`).
    */

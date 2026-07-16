@@ -594,6 +594,18 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Element-wise max/min and clamp. `np.maximum`/`np.minimum` are element-wise
   // (and broadcast), matching `ElementMax`/`ElementMin`; both are binary, so an
   // n-ary call folds. `Clamp(x, lo, hi)` maps to `np.clip`.
+  //
+  // KNOWN DIVERGENCE (finding A8): when two *array* operands have different
+  // lengths, the interpreter (and the JavaScript target's `_SYS.bcast`)
+  // zip-to-shortest — `ElementMax([1,2,3], [4,5]) → [4,5]` — whereas
+  // `np.maximum` broadcasts by NumPy rules and raises `ValueError` on a
+  // length mismatch that is not 1-vs-N. Aligning the two would require an
+  // injected preamble helper that trims both arrays to the common length, but
+  // this source-only target has no runtime-helper injection mechanism (unlike
+  // the JS target's `_SYS`), so wiring one through `withImports` /
+  // `compileFunction` / `compileToSource` is disproportionate for this
+  // edge case. Scalar-with-array and equal-length-array operands (the common
+  // plotting shapes) match exactly; only mismatched-length arrays diverge.
   ElementMax: (args, compile) => {
     let result = compile(args[0]);
     for (let i = 1; i < args.length; i++)

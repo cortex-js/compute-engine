@@ -517,9 +517,17 @@ export type OperatorDefinition = Partial<BaseDefinition> &
     /**
      * A custom compilation handler for this operator: emit target-language
      * source for a call to this operator. Takes precedence over the target's
-     * built-in mapping (so it can override how a built-in operator compiles).
-     * Return `undefined` to fall back to the default compilation. See
-     * {@link OperatorCompileHandler}.
+     * built-in operator/function mapping and its broadcast lowering, so it can
+     * override how a built-in operator compiles (e.g. a custom-tolerance `GCD`,
+     * or a re-mapped `Add`/`Multiply`/`Power`/relational operator).
+     *
+     * It does NOT override the structural / control-flow heads, which have
+     * their own bespoke lowering: `Sum`, `Product`, `If`, `Which`, `When`,
+     * `Match`, `Block`, `Function`, `Loop`, `Comprehension`, `Sequence`. A
+     * handler declared on one of those heads is ignored.
+     *
+     * Return `undefined` (or `null`, or an empty string) to fall back to the
+     * default compilation. See {@link OperatorCompileHandler}.
      */
     compile?: OperatorCompileHandler;
 

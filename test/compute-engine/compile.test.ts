@@ -1556,5 +1556,152 @@ describe('COMPILE user-defined function calls', () => {
       const r = e.getCompilationTarget('glsl').compile(e.parse('\\gcd(a, b)'));
       expect(r.code).toContain('_gpu_gcd');
     });
+
+    it('overrides an operator-mapped head (Add) — finding A5', () => {
+      // The pre-fix handler dispatch ran AFTER the built-in operator mapping,
+      // so a handler on Add/Multiply/Power/relational heads was silently
+      // ignored. It must now win.
+      const e = new ComputeEngine();
+      e.declare('Add', {
+        signature: '(number, number) -> number',
+        compile: (args, compile, { language }) =>
+          language === 'javascript'
+            ? `__myadd(${compile(args[0])}, ${compile(args[1])})`
+            : undefined,
+      });
+      const code = e
+        .getCompilationTarget('javascript')
+        .compile(e.parse('a + b')).code;
+      expect(code).toEqual('__myadd(_.a, _.b)');
+    });
+
+    it('treats an empty-string handler return as fall-through — finding A5', () => {
+      const e = new ComputeEngine();
+      e.declare('GCD', {
+        signature: '(number, number) -> number',
+        compile: () => '',
+      });
+      // Empty string is "no code": fall through to the built-in GCD lowering.
+      const code = e
+        .getCompilationTarget('javascript')
+        .compile(e.box(['GCD', 12, 18])).code;
+      expect(code).toContain('_SYS.gcd');
+    });
+
+    it('does not report a custom-compiled head as unsupported — finding A4', () => {
+      const e = new ComputeEngine();
+      e.declare('Quadrance', {
+        signature: '(number, number) -> number',
+        compile: (args, compile, { language }) =>
+          language === 'javascript'
+            ? `((${compile(args[0])})**2 + (${compile(args[1])})**2)`
+            : undefined,
+      });
+      const r = compile(e.parse('\\mathrm{Quadrance}(x, y)'));
+      expect(r.success).toBe(true);
+      expect(r.unsupported).toEqual([]);
+      expect(r.freeSymbols).toEqual(['x', 'y']);
+    });
+  });
+});
+
+// Regression coverage for compile-target findings A1/A2/A3/A6/A7.
+describe('COMPILE collection-op findings', () => {
+  it('n-ary GCD/LCM fold pairwise, never as tolerance eps — finding A1', () => {
+    // `_SYS.gcd`/`_SYS.lcm` are binary with a third `eps`; a variadic call
+    // would consume the 3rd operand as the tolerance.
+    const cases: [any, number][] = [
+      [['GCD', 12, 18, 8], 2],
+      [['GCD', 2.25, 2.1, 0.6], 0.1499999999999999],
+      [['LCM', 4, 6, 10], 60],
+    ];
+    for (const [expr, expected] of cases) {
+      const b = ce.box(expr);
+      const r = compile(b);
+      expect((r.run as (v: Record<string, number>) => number)({})).toBeCloseTo(
+        b.evaluate().re,
+        10
+      );
+      expect(
+        (r.run as (v: Record<string, number>) => number)({})
+      ).toBeCloseTo(expected, 10);
+    }
+  });
+
+  it('GCD/LCM of a list compile (not silent NaN) — finding A3', () => {
+    const cases: any[] = [
+      ['GCD', ['List', 12, 18]],
+      ['LCM', ['List', 4, 6, 10]],
+      ['GCD', ['List', 12, 18, 8]],
+      ['GCD', ['List', 12]],
+      ['LCM', ['List', 2.5]],
+      ['GCD', ['List']], // → 0
+      ['LCM', ['List']], // → 1
+      ['GCD', ['List', 12, 18], 8], // mixed list + scalar
+    ];
+    for (const expr of cases) {
+      const b = ce.box(expr);
+      const r = compile(b);
+      expect(r.success).toBe(true);
+      const got = (r.run as (v: Record<string, number>) => number)({});
+      expect(got).not.toBeNaN();
+      expect(got).toBeCloseTo(b.evaluate().re, 10);
+    }
+  });
+
+  it('IndexOf uses tolerant compare like the interpreter — finding A6', () => {
+    // 0.1 + 0.2 ≈ 0.30000000000000004; a raw `===` would miss the 0.3 element.
+    const b = ce.box(['IndexOf', ['List', 0.3], ['Add', 0.1, 0.2]]);
+    const r = compile(b);
+    expect((r.run as (v: Record<string, number>) => number)({})).toBe(1);
+    expect((r.run as (v: Record<string, number>) => number)({})).toBe(
+      b.evaluate().re
+    );
+  });
+
+  it('Map/Filter do not leak the native callback index — finding A7', () => {
+    // The compiled lambda must be invoked with a single argument; the native
+    // `.map((el, index) => …)` index must NOT reach a lambda parameter.
+    const rMap = compile(
+      ce.box(['Map', ['List', 10, 20, 30], ['Function', ['Add', 'x', 1], 'x']])
+    );
+    expect(rMap.code).toContain('(_x) => _f(_x)');
+    expect(rMap.code).not.toMatch(/\.map\(\(_f\)/); // no bare fn to native map
+    expect(
+      (rMap.run as (v: Record<string, number>) => number[])({})
+    ).toEqual([11, 21, 31]);
+
+    const rFilter = compile(
+      ce.box([
+        'Filter',
+        ['List', 1, 2, 3, 4],
+        ['Function', ['Greater', 'x', 2], 'x'],
+      ])
+    );
+    expect(rFilter.code).toContain('(_x) => _f(_x)');
+    expect(
+      (rFilter.run as (v: Record<string, number>) => number[])({})
+    ).toEqual([3, 4]);
+  });
+
+  it('a Sum index shadowing a user function is a local, not _fn_ — finding A2', () => {
+    // UNROLL path: the index `f` resolves to a numeric literal, not its own
+    // identifier, so the pre-fix `resolved === s` heuristic missed it and
+    // captured the same-named user function `f`.
+    const e = new ComputeEngine();
+    e.parse('f(x) \\coloneq x^2').evaluate();
+    const r = compile(e.parse('\\sum_{f=1}^{3} f'));
+    expect(r.code).not.toContain('_fn_f');
+    expect((r.run as (v: Record<string, number>) => number)({})).toBe(6);
+  });
+
+  it('a Sum index shadowing a user function compiles on interval-js — finding A2', () => {
+    const e = new ComputeEngine();
+    e.parse('f(x) \\coloneq x^2').evaluate();
+    const r = compile(e.parse('\\sum_{f=1}^{300} f'), { to: 'interval-js' });
+    const out = (
+      r.run as (v: Record<string, number>) => { value: { lo: number } }
+    )({});
+    expect(out.value.lo).toBe(45150);
   });
 });

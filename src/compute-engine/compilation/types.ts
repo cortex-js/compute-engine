@@ -171,6 +171,20 @@ export interface CompileTarget<Expr = unknown> {
    */
   varsKeys?: ReadonlySet<string>;
 
+  /**
+   * The set of names currently **bound** by an enclosing binding form — lambda
+   * parameters, `Sum`/`Product`/`Loop` indices, `Block` locals, comprehension
+   * variables, `Match` captures. A bound name shadows any same-named engine
+   * symbol (including a user-defined function), so a value-position reference to
+   * it must NOT be captured as a free user-function reference (`_fn_f`). This is
+   * tracked EXPLICITLY (rather than inferred from whether the name resolves to
+   * its own identifier) because a binding form may resolve a bound name to
+   * non-identity code — a numeric literal in an unrolled `Sum`, an
+   * `_IA.point(i)` wrap in the interval target, a `subject[i]` accessor in a
+   * `Match` case. See `BaseCompiler.withBoundNames` and finding A2.
+   */
+  boundVars?: ReadonlySet<string>;
+
   /** Target language identifier (for debugging/logging) */
   language?: string;
 

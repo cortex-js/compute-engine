@@ -395,6 +395,20 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
       expect(ce.parse('f\\left(\\left[1,2,3\\right]\\right)').operator).toBe('f');
     }
   });
+
+  // E3: the number×collection→Multiply branch is restricted to NUMERIC-valued
+  // symbols. A non-numeric non-function value (a string) must NOT become a
+  // `Multiply` (whose type error would blame multiplication); it falls back to
+  // the application-of-non-function route, whose error correctly blames the
+  // illegal application of `t` (`function` expected, `string` given).
+  test('a string-valued symbol applied to a collection is an application error, not Multiply', () => {
+    const ce = new ComputeEngine();
+    ce.assign('t', ce.parse('"hello"'));
+    const e = ce.parse('t(\\{1,2\\})');
+    expect(e.operator).toBe('t'); // application, NOT Multiply
+    expect(e.evaluate().operator).toBe('Error');
+    expect(errorCode(e.evaluate())).toBe('incompatible-type');
+  });
 });
 
 // A list-broadcast such as `Multiply([...], x)` reports a dishonest
@@ -610,5 +624,34 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
     // tuple · tuple stays an error (no implicit dot/cross product)
     const tt = ce.box(['Multiply', ['Tuple', 1, 2], ['Tuple', 3, 4]]).evaluate();
     expect(errorCode(tt.op1) ?? errorCode(tt)).toBe('incompatible-type');
+  });
+});
+
+describe('POINT/TUPLE ARITHMETIC — component accessors on non-indexed collections', () => {
+  // C4: a non-indexed finite collection (a `Set`) has no `at()`, so the
+  // point-component accessor used to read its first element as `undefined` and
+  // misclassify a non-empty Set of points as empty (→ a silently-wrong `[]`).
+  test('PointX/PointY broadcast over a Set of points (C4)', () => {
+    const ce = new ComputeEngine();
+    const s = ce.box(['Set', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
+    expect(ce.box(['PointX', s]).evaluate().json).toEqual(['List', 1, 3]);
+    expect(ce.box(['PointY', s]).evaluate().json).toEqual(['List', 2, 4]);
+  });
+
+  test('PointX/PointY still broadcast over a List of points', () => {
+    const ce = new ComputeEngine();
+    const l = ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
+    expect(ce.box(['PointX', l]).evaluate().json).toEqual(['List', 1, 3]);
+    expect(ce.box(['PointY', l]).evaluate().json).toEqual(['List', 2, 4]);
+  });
+
+  test('PointZ over 2D points broadcasts a list of Nothing (unchanged)', () => {
+    const ce = new ComputeEngine();
+    const s = ce.box(['Set', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
+    expect(ce.box(['PointZ', s]).evaluate().json).toEqual([
+      'List',
+      'Nothing',
+      'Nothing',
+    ]);
   });
 });

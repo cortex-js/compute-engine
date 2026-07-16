@@ -59,6 +59,34 @@ export class BaseCompiler {
   );
 
   /**
+   * Structural / control-flow heads that `compileExpr` special-cases directly
+   * (their own bespoke lowering — loops, conditionals, blocks, sequences,
+   * bindings). A user operator definition's custom `compile` handler does NOT
+   * override these: their compilation is not a simple operand-wise call and a
+   * handler cannot express it. Every OTHER head — including operator-mapped
+   * arithmetic/relational heads and function-mapped heads — IS overridable by
+   * a custom handler (see the handler consult in `compileExpr`, finding A5).
+   */
+  private static readonly CONTROL_FLOW_HEADS: ReadonlySet<string> = new Set([
+    'Sequence',
+    'Sum',
+    'Product',
+    'Function',
+    'Declare',
+    'Assign',
+    'Return',
+    'Break',
+    'Continue',
+    'Loop',
+    'Comprehension',
+    'If',
+    'Which',
+    'When',
+    'Match',
+    'Block',
+  ]);
+
+  /**
    * Compile `expr` as a **value operand** — a sub-expression spliced into a
    * surrounding expression. Behaves like `compile`, but on targets whose
    * multi-statement constructs are bare statement sequences
@@ -128,8 +156,20 @@ export class BaseCompiler {
       //   - a **`vars`-mapped** key: the caller's external-input contract, which
       //     always wins (see `CompileTarget.vars`).
       const registry = target.userFunctions;
+      // A name is bound when an enclosing binding form recorded it in
+      // `boundVars` (lambda param, Sum/Product/Loop index, Block local,
+      // comprehension var, Match capture). `resolved === s` is kept as an
+      // additional signal for binding forms that resolve a bound name to its
+      // own bare identifier (the common loop path) and is harmless — the base
+      // resolver never returns a bare identifier for a free user-function
+      // symbol (it returns `_.<s>`). The explicit `boundVars` set covers the
+      // cases where a binding form resolves the name to NON-identity code
+      // (an unrolled-Sum numeric literal, an interval `_IA.point(i)` wrap, a
+      // Match `subject[i]` accessor), which `resolved === s` misses (A2).
       const isBoundOrMapped =
-        resolved === s || target.varsKeys?.has(s) === true;
+        resolved === s ||
+        target.boundVars?.has(s) === true ||
+        target.varsKeys?.has(s) === true;
       if (registry && !isBoundOrMapped && !registry.misses?.has(s)) {
         const userFn = BaseCompiler.ensureUserFunctionEmitted(
           expr.engine,
@@ -229,6 +269,33 @@ export class BaseCompiler {
           .join(', ')})`;
       }
       return BaseCompiler.compileLoop(h, args, target);
+    }
+
+    // A user operator definition may supply its own target-aware compile
+    // handler (the public per-operator compilation extension point). It is
+    // consulted HERE — before the target's built-in operator mappings, the
+    // broadcast lowering, and the broadcast fail-closed guard — so an explicit
+    // handler is an explicit opt-in that takes precedence over the built-in
+    // lowering, even for an operator-mapped head (e.g. a custom-tolerance `GCD`
+    // or a re-mapped `Add`). Structural/control-flow heads
+    // (`CONTROL_FLOW_HEADS`: Sum/Product/If/Which/When/Match/Block/Function/
+    // Loop/Comprehension/Sequence, …) are handled by their own bespoke lowering
+    // and are NOT overridable. A handler that returns `undefined`/`null` OR an
+    // empty string falls through to the default compilation (finding A5).
+    if (!BaseCompiler.CONTROL_FLOW_HEADS.has(h)) {
+      const customDef = engine.lookupDefinition(h);
+      if (
+        isOperatorDef(customDef) &&
+        typeof customDef.operator.compile === 'function'
+      ) {
+        const custom = customDef.operator.compile(
+          args,
+          (expr) => BaseCompiler.compileValueOperand(expr, target),
+          { language: target.language ?? 'javascript' }
+        );
+        if (custom !== undefined && custom !== null && custom !== '')
+          return custom;
+      }
     }
 
     // Element-wise broadcast of a `broadcastable` head (arithmetic + unary
@@ -460,6 +527,7 @@ export class BaseCompiler {
         {
           ...target,
           var: (id) => (params.includes(id) ? id : target.var(id)),
+          boundVars: BaseCompiler.withBoundNames(target, params),
         }
       )})`;
     }
@@ -611,22 +679,6 @@ export class BaseCompiler {
       return BaseCompiler.compileBlock(args, target);
     }
 
-    // A user operator definition may supply its own target-aware compile
-    // handler (the public per-operator compilation extension point). It takes
-    // precedence over the target's built-in mapping — so it can override how a
-    // built-in operator compiles (e.g. a custom-tolerance `GCD`) — and receives
-    // the same (args, compile, context) contract as a built-in handler.
-    // Returning undefined falls through to the default compilation.
-    const opDef = engine.lookupDefinition(h);
-    if (isOperatorDef(opDef) && typeof opDef.operator.compile === 'function') {
-      const custom = opDef.operator.compile(
-        args,
-        (expr) => BaseCompiler.compileValueOperand(expr, target),
-        { language: target.language ?? 'javascript' }
-      );
-      if (custom !== undefined && custom !== null) return custom;
-    }
-
     // Handle function calls
     const fn = target.functions?.(h);
     if (!fn) {
@@ -661,6 +713,7 @@ export class BaseCompiler {
         const innerTarget = {
           ...target,
           var: (id: string) => (id === v ? v : target.var(id)),
+          boundVars: BaseCompiler.withBoundNames(target, [v]),
         };
         return `(${BaseCompiler.compile(args[0], target)}).map((${v}) => ${fn(
           [args[0].engine.expr(v)],
@@ -831,6 +884,7 @@ export class BaseCompiler {
     const innerTarget: CompileTarget<Expression> = {
       ...target,
       var: (id: string) => (params.includes(id) ? id : target.var(id)),
+      boundVars: BaseCompiler.withBoundNames(target, params),
     };
     const scalarBody = fn(
       params.map((p) => engine.expr(p)),
@@ -927,6 +981,7 @@ export class BaseCompiler {
         if (locals.includes(id)) return id;
         return target.var(id);
       },
+      boundVars: BaseCompiler.withBoundNames(target, locals),
     };
 
     const result = args
@@ -1052,6 +1107,7 @@ export class BaseCompiler {
               ? target.number(0).replace('0', index)
               : index
             : target.var(id),
+        boundVars: BaseCompiler.withBoundNames(target, [index]),
       };
 
       const bodyStmts = BaseCompiler.compileLoopBody(body, bodyTarget);
@@ -1172,6 +1228,7 @@ export class BaseCompiler {
             ? target.number(0).replace('0', id)
             : id
           : target.var(id),
+      boundVars: BaseCompiler.withBoundNames(target, [...loopVarSet]),
     };
 
     // Build nested for-of loops from innermost to outermost. Inner collections
@@ -1410,6 +1467,7 @@ export class BaseCompiler {
         if (id === index) return index;
         return target.var(id);
       },
+      boundVars: BaseCompiler.withBoundNames(target, [index]),
     });
 
     const acc = BaseCompiler.tempVar();
@@ -1720,6 +1778,7 @@ export class BaseCompiler {
     return {
       ...target,
       var: (id) => accessors.get(id) ?? target.var(id),
+      boundVars: BaseCompiler.withBoundNames(target, [...accessors.keys()]),
     };
   }
 
@@ -2357,12 +2416,25 @@ export class BaseCompiler {
           ? BaseCompiler.userFunctionLiteral(engine, h)
           : undefined;
 
+      // A head whose operator definition supplies a custom `compile` handler
+      // (the public per-operator extension point) is lowerable via that handler
+      // even with no operator/function mapping — so it must NOT be reported as
+      // unsupported (finding A4). Mirrors the handler consult in `compileExpr`,
+      // which is likewise skipped for the structural control-flow heads.
+      const customCompileDef = !BaseCompiler.CONTROL_FLOW_HEADS.has(h)
+        ? engine.lookupDefinition(h)
+        : undefined;
+      const hasCustomCompile =
+        isOperatorDef(customCompileDef) &&
+        typeof customCompileDef.operator.compile === 'function';
+
       if (
         h !== 'Error' &&
         !BaseCompiler.STRUCTURAL_HEADS.has(h) &&
         target.functions?.(h) === undefined &&
         target.operators?.(h) === undefined &&
-        userLiteral === undefined
+        userLiteral === undefined &&
+        !hasCustomCompile
       )
         unsupported.add(h);
 
@@ -2467,6 +2539,27 @@ export class BaseCompiler {
       result,
       BaseCompiler.analyzeReferences(expr, target, varsKeys)
     );
+  }
+
+  /**
+   * Extend a target's `boundVars` set with additional locally-bound names
+   * (lambda parameters, loop indices, block locals, comprehension variables,
+   * `Match` captures). Returns a set suitable for spreading into an inner
+   * target alongside its `var` override, so `compile` recognizes a
+   * value-position reference to the bound name as a local — not a free
+   * user-function reference to capture — even when the binding form resolves
+   * the name to non-identity code. See finding A2. Empty `names` returns the
+   * existing set unchanged (no allocation).
+   */
+  static withBoundNames(
+    target: CompileTarget<Expression>,
+    names: ReadonlyArray<string>
+  ): ReadonlySet<string> | undefined {
+    const nonEmpty = names.filter((n) => n !== '' && n !== undefined);
+    if (nonEmpty.length === 0) return target.boundVars;
+    const s = new Set(target.boundVars);
+    for (const n of nonEmpty) s.add(n);
+    return s;
   }
 
   /**

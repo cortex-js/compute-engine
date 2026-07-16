@@ -138,4 +138,77 @@ describe('Parser: for-comprehensions', () => {
       expect(reparsed).toEqual(ast);
     });
   });
+
+  describe('per-walk isolation and capture (regressions)', () => {
+    // C1: two iterators over the same comprehension must not share the loop
+    // scope. A naive shared scope lets the second walk clobber the first
+    // walk's index, so the paused first walk resumes with a corrupted `i`.
+    test('interleaved iterators do not corrupt each other (C1)', () => {
+      const cc = ce
+        .expr([
+          'Comprehension',
+          ['Tuple', 'i', 'j'],
+          ['Element', 'i', ['Range', 1, 2]],
+          ['Element', 'j', ['Range', 1, 2]],
+        ])
+        .evaluate();
+      const itA = cc.each()[Symbol.iterator]();
+      itA.next(); // (1, 1)
+      itA.next(); // (1, 2)
+      itA.next(); // (2, 1)  — A is now at i = 2
+      const itB = cc.each()[Symbol.iterator]();
+      itB.next(); // (1, 1)  — B would reset i to 1 in a shared scope
+      // A must resume at i = 2, not the value B just wrote.
+      expect(itA.next().value?.toString()).toBe('(2, 2)');
+    });
+
+    // C1: reading `.count` (a full domain enumeration for a dependent
+    // comprehension) mid-iteration must not corrupt a paused iterator.
+    test('reading .count mid-iteration does not corrupt the iterator (C1)', () => {
+      const cc = ce
+        .expr([
+          'Comprehension',
+          ['Tuple', 'i', 'j'],
+          ['Element', 'i', ['Range', 1, 3]],
+          ['Element', 'j', ['Range', 1, 'i']],
+        ])
+        .evaluate();
+      const it = cc.each()[Symbol.iterator]();
+      expect(it.next().value?.toString()).toBe('(1, 1)');
+      expect(it.next().value?.toString()).toBe('(2, 1)');
+      expect(cc.count).toBe(6); // enumerates the domain mid-iteration
+      expect(it.next().value?.toString()).toBe('(2, 2)');
+      expect(it.next().value?.toString()).toBe('(3, 1)');
+    });
+
+    // C2: each materialized closure must capture its own value of the loop
+    // variable, not a single shared `i` (classic loop-variable capture bug).
+    test('closures capture the loop variable by value (C2)', () => {
+      const lams = ce
+        .expr([
+          'Comprehension',
+          ['Function', ['Add', 'x', 'i'], 'x'],
+          ['Element', 'i', ['Range', 1, 3]],
+        ])
+        .evaluate();
+      const applied = [...lams.each()].map((l) =>
+        ce.function('Apply', [l, 10]).evaluate().toString()
+      );
+      expect(applied).toEqual(['11', '12', '13']);
+    });
+
+    // C3: `IndexOf` over an infinite collection with no match must abort
+    // within the time budget rather than hang. Use a fresh engine with a
+    // small time limit so the shared engine's limit is untouched.
+    test('IndexOf on an infinite Range aborts within ce.timeLimit (C3)', () => {
+      const ce2 = new ComputeEngine();
+      ce2.timeLimit = 300; // ms
+      const t0 = Date.now();
+      expect(() =>
+        ce2.expr(['IndexOf', ['Range', 1, Infinity], 0.5]).evaluate()
+      ).toThrow();
+      // Aborts promptly, not after minutes.
+      expect(Date.now() - t0).toBeLessThan(5000);
+    });
+  });
 });

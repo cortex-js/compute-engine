@@ -2516,7 +2516,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops) =>
         ops.every((x) => x.isInteger) ? 'finite_integer' : 'number',
       sgn: (ops) => (ops.every((x) => x.isInteger) ? 'positive' : undefined),
-      evaluate: (xs) => {
+      evaluate: (xs, { engine }) => {
         // Integer operands take the fast numeric path. Otherwise, attempt a
         // univariate polynomial GCD (e.g. GCD(x²+3x+2, x²+4x+3) → x+1),
         // falling back to the numeric path — which folds any integer operands
@@ -2525,7 +2525,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const poly = polynomialGCDMulti(xs);
           if (poly !== undefined) return poly;
         }
-        return evaluateGcdLcm(xs, 'GCD');
+        return evaluateGcdLcm(engine, xs, 'GCD');
       },
     },
     LCM: {
@@ -2539,7 +2539,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops) =>
         ops.every((x) => x.isInteger) ? 'finite_integer' : 'number',
       sgn: (ops) => (ops.every((x) => x.isInteger) ? 'positive' : undefined),
-      evaluate: (xs) => evaluateGcdLcm(xs, 'LCM'),
+      evaluate: (xs, { engine }) => evaluateGcdLcm(engine, xs, 'LCM'),
     },
 
     Numerator: {
@@ -3376,6 +3376,11 @@ function processMinMaxItem(
     for (const op of item.each()) {
       const [val, others] = processMinMaxItem(op, mode);
       if (val) {
+        // NaN absorbs, mirroring the top-level convention: an indeterminate
+        // element makes the whole extremum indeterminate (Max([1, NaN, 3]) →
+        // NaN, matching Max(1, NaN, 3)). Returning NaN as this item's value
+        // lets the caller's top-level NaN check absorb it.
+        if (val.isNaN) return [ce.NaN, []];
         // A non-real (complex) value is unordered: keep it symbolic rather
         // than silently absorbing it in an order-dependent way.
         if (val.im !== 0) rest.push(val);
@@ -3492,32 +3497,42 @@ function evaluateMinMax(
 }
 
 function evaluateGcdLcm(
+  ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
   mode: 'LCM' | 'GCD'
 ): Expression {
-  const ce = ops[0].engine;
   const fn = mode === 'LCM' ? lcm : gcd;
   const bigFn = mode === 'LCM' ? bigLcm : bigGcd;
 
+  // Zero-argument identities, consistent with the empty-collection case below:
+  // `GCD() → 0`, `LCM() → 1`.
+  if (ops.length === 0) return mode === 'LCM' ? ce.One : ce.Zero;
+
   // A finite collection operand contributes its elements: `gcd([12, 18]) → 6`,
-  // `lcm([4, 6]) → 12` (a list argument is reduced, matching Desmos). An
-  // infinite or enumeration-declined collection would grind to the deadline or
-  // silently vanish, so it stays symbolic instead (mirrors the Min/Max fold).
+  // `lcm([4, 6]) → 12` (a list argument is reduced, matching Desmos). Nested
+  // collections are flattened by repeating the pass until no collection operand
+  // remains (`gcd([[12, 18], 24]) → 6` in one evaluation). An infinite or
+  // enumeration-declined collection would grind to the deadline or silently
+  // vanish, so it stays symbolic instead (mirrors the Min/Max fold).
   if (ops.some((x) => x.isCollection)) {
-    const expanded: Expression[] = [];
     let ok = true;
-    for (const op of ops) {
-      if (op.isCollection) {
-        if (op.isFiniteCollection !== true || enumerationDeclined(op)) {
-          ok = false;
-          break;
-        }
-        for (const el of op.each()) expanded.push(el);
-      } else expanded.push(op);
+    let current: Expression[] = [...ops];
+    while (ok && current.some((x) => x.isCollection)) {
+      const expanded: Expression[] = [];
+      for (const op of current) {
+        if (op.isCollection) {
+          if (op.isFiniteCollection !== true || enumerationDeclined(op)) {
+            ok = false;
+            break;
+          }
+          for (const el of op.each()) expanded.push(el);
+        } else expanded.push(op);
+      }
+      if (ok) current = expanded;
     }
     if (ok) {
-      if (expanded.length === 0) return mode === 'LCM' ? ce.One : ce.Zero;
-      ops = expanded;
+      if (current.length === 0) return mode === 'LCM' ? ce.One : ce.Zero;
+      ops = current;
     }
   }
 

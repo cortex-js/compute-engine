@@ -9,6 +9,7 @@ import {
   freshSymbolName,
   solveLinearSystem,
 } from './solver-utils.js';
+import { checkDeadline } from '../../common/interruptible.js';
 
 /**
  * Ellipsis interpretation — from *notation* to *meaning*.
@@ -478,18 +479,29 @@ function findRecurrenceUpperBound(
   rec: Rational[],
   L: number,
   anchor: Rational,
-  m: number
+  m: number,
+  deadline?: number
 ): number | null {
   const CAP = 10000;
+  // A non-integer (rational) recurrence — a spurious fit to non-recurrent data
+  // — makes the exact denominators balloon (~3 digits/step). Beyond this size
+  // each step's bigint arithmetic dominates the run for no benefit; the family
+  // we recognize has bounded (integer or small) denominators, so bail. Cheap
+  // secondary guard alongside the cooperative deadline below.
+  const MAX_DEN_BITS = 4096;
   const seq = samples.slice();
   const anchorMag = ratMagnitude(anchor);
   let prevMag = ratMagnitude(seq[seq.length - 1]);
   for (let u = m + 1; u <= CAP; u++) {
+    // Late steps carry large-magnitude bigints; check the deadline every step
+    // so a cancel lands within one step of the limit rather than after minutes.
+    checkDeadline(deadline);
     let acc = RAT_ZERO;
     for (let j = 1; j <= L; j++)
       acc = ratAdd(acc, ratMul(rec[j - 1], seq[u - 1 - j]));
     seq.push(acc);
     if (ratEq(acc, anchor)) return u;
+    if (acc.d !== 1n && acc.d.toString(2).length > MAX_DEN_BITS) return null;
     const mag = ratMagnitude(acc);
     if (ratCompare(mag, anchorMag) > 0 && ratCompare(mag, prevMag) > 0)
       return null;
@@ -661,7 +673,8 @@ function tryRecurrence(
     rec,
     L,
     anchorRational,
-    m
+    m,
+    ce._deadline
   );
   if (U === null) return null;
 
@@ -763,15 +776,29 @@ function findNumericUpperBound(
   // the degree-5 fit to Fibonacci samples, leading coefficient −1/40) climbs
   // like the samples yet eventually falls, so a sample-derived "increasing"
   // flag never fires and the search used to grind all `CAP` steps.
+  //
+  // But a *genuine* polynomial can dip on the wrong side of the anchor and
+  // still return to it (e.g. k³−21k²+120k for anchor 308 falls from k=5 to
+  // k=10 before climbing to hit the anchor at k=14). A single wrong-side-and-
+  // falling step must therefore not abort the search — only a sustained run of
+  // them (a term truly running away) is conclusive. The `AWAY_STREAK` bound is
+  // heuristic; the hard safety net for a runaway search is the CAP and the
+  // caller's evaluation deadline.
+  const AWAY_STREAK = 32;
   let prev: number | undefined;
+  let awayStreak = 0;
   for (let u = m + 1; u <= CAP; u++) {
     const value = term.subs({ [name]: u }).evaluate();
     if (value.isSame(anchor)) return ce.number(u);
     const numeric = value.N().re;
     if (!Number.isFinite(numeric)) break;
     if (prev !== undefined) {
-      if (numeric > anchorValue && numeric > prev) break; // above and rising
-      if (numeric < anchorValue && numeric < prev) break; // below and falling
+      const runningAway =
+        (numeric > anchorValue && numeric > prev) || // above and rising
+        (numeric < anchorValue && numeric < prev); // below and falling
+      if (runningAway) {
+        if (++awayStreak >= AWAY_STREAK) break;
+      } else awayStreak = 0;
     }
     prev = numeric;
   }

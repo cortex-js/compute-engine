@@ -229,4 +229,43 @@ describe('adaptiveQuadrature (unit)', () => {
     expect(Number.isNaN(r.estimate)).toBe(true);
     expect(r.converged).toBe(false);
   });
+
+  test('.N() of a definite integral uses GK15 (not Monte Carlo): near machine precision', () => {
+    // Regression for the accuracy inversion: the interpreter's `.N()` used to
+    // fall straight to Monte Carlo (~1e-3 relative error) while the compiled
+    // path used GK15. `.N()` now shares GK15, so a smooth finite-bound integral
+    // resolves to near machine precision. A hypersurface-fresh engine avoids
+    // cross-test state.
+    const local = new ComputeEngine();
+    // ∫_{-1}^1 √(1−x²)/(1+x²) dx = π(√2 − 1); no closed form is found, so this
+    // exercises the numeric path rather than the antiderivative. GK15 returns a
+    // `Measurement` (value ± error bound); Monte Carlo would too, but ~5 orders
+    // of magnitude looser.
+    const r = local.parse('\\int_{-1}^1 \\frac{\\sqrt{1-x^2}}{1+x^2} dx').N();
+    const v = r.operator === 'Measurement' ? r.op1.re : r.re;
+    expect(v).toBeCloseTo(Math.PI * (Math.SQRT2 - 1), 8);
+  });
+
+  test('removable singularity at the midpoint node does not poison the totals (∫_{-1}^1 sin x / x dx)', () => {
+    // sin(x)/x is NaN at the interval midpoint x = 0 (a GK node of the first
+    // panel), which used to leave the incremental accumulators permanently NaN
+    // and force a Monte-Carlo fallback. The panel is subdivided away and the
+    // routine must converge to 2·Si(1).
+    const f = (x: number) => Math.sin(x) / x;
+    const r = adaptiveQuadrature(f, -1, 1);
+    expect(r.converged).toBe(true);
+
+    // Independent reference: composite Simpson with the removable singularity
+    // patched (sin(x)/x → 1 at x = 0). N = 20000 panels → ~1e-14 accurate.
+    const sinc = (x: number) => (x === 0 ? 1 : Math.sin(x) / x);
+    const N = 20000;
+    const h = 2 / N; // over [-1, 1]
+    let s = sinc(-1) + sinc(1);
+    for (let i = 1; i < N; i++) s += (i % 2 === 0 ? 2 : 4) * sinc(-1 + i * h);
+    const simpson = (h / 3) * s;
+
+    expect(r.estimate).toBeCloseTo(simpson, 12);
+    // 2·Si(1) ≈ 1.8921661407343662
+    expect(r.estimate).toBeCloseTo(1.8921661407343662, 12);
+  });
 });

@@ -182,6 +182,21 @@ describe('SATURATING & RADICAL LIMITS AT INFINITY', () => {
     );
   });
 
+  test('Erf/Erfc do NOT saturate at a directionless (complex) infinity', () => {
+    // Only a *signed* real infinity saturates. A directionless infinity
+    // (ComplexInfinity — neither `isPositive` nor `isNegative` set) must not be
+    // treated as +∞: Erf must stay ComplexInfinity/symbolic, never collapse to
+    // the wrong 1 (and Erfc never to the wrong 0). `x/0` supplies a
+    // ComplexInfinity argument.
+    const erf = lim(['Erf', ['Divide', 'x', 0]], INF).evaluate();
+    expect(erf.isSame(ce.One)).toBe(false);
+    expect(erf.isSame(ce.number(-1))).toBe(false);
+
+    const erfc = lim(['Erfc', ['Divide', 'x', 0]], INF).evaluate();
+    expect(erfc.isSame(ce.Zero)).toBe(false);
+    expect(erfc.isSame(ce.number(2))).toBe(false);
+  });
+
   test('√x → +∞, ∛x → +∞ (radicals carry the radicand)', () => {
     expect(
       lim(['Sqrt', 'x'], INF).evaluate().isSame(ce.PositiveInfinity)

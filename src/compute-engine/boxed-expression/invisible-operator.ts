@@ -141,22 +141,19 @@ export function canonicalInvisibleOperator(
 
       // The single argument is non-numeric (e.g. a collection like `\cos(S)`
       // where `S` is bound to a list). If the leading symbol is KNOWN to be a
-      // non-function value — declared with a concrete type or assigned a value
-      // (a number, list, tuple, …) — it cannot be a function application, so
-      // the juxtaposition is multiplication (scaling / broadcast over the
-      // collection), matching the scalar-arg case above and the multi-operand
-      // invisible-multiplication path. Only an undeclared or unknown-typed
-      // symbol stays genuinely ambiguous and falls through to the function-call
-      // heuristic below. (Tycho item 13: `k(\cos(S))` with `k` a number and `S`
-      // a collection parsed as `k` applied — an illegal application of a
-      // number — instead of `k·\cos(S)`.)
-      if (
-        def &&
-        !isOperatorDef(def) &&
-        def.value?.type &&
-        !def.value.type.isUnknown &&
-        !def.value.type.matches('function')
-      ) {
+      // NUMERIC value — declared with a numeric type or assigned a number — it
+      // cannot be a function application, so the juxtaposition is multiplication
+      // (scaling / broadcast over the collection), matching the scalar-arg case
+      // above and the multi-operand invisible-multiplication path. Only a
+      // numeric value scales a collection: a non-numeric non-function value
+      // (e.g. a string) falls through to the function-call route below, which
+      // surfaces the actual mistake (an illegal application of a non-function)
+      // rather than a `Multiply` whose type error blames multiplication. An
+      // undeclared or unknown-typed symbol stays genuinely ambiguous and also
+      // falls through. (Tycho item 13: `k(\cos(S))` with `k` a number and `S` a
+      // collection parsed as `k` applied — an illegal application of a number —
+      // instead of `k·\cos(S)`.)
+      if (def && !isOperatorDef(def) && def.value?.type?.matches('number')) {
         return ce.function('Multiply', [lhsCanon, ...args]);
       }
 

@@ -3552,6 +3552,13 @@ function parseAssign(
     else if (delimBody) args = [delimBody!];
 
     pruneFunctionParams(parser, args, paramDiagCp);
+    // The `f(x)` LHS was parsed as a neutral juxtaposition (code 2 emitted for
+    // the head `f`) and, since `f` had no prior declaration, an
+    // `undeclared-symbol` for `f`. This is a definition, not a multiplication or
+    // an undeclared reference — the construct declares `f` — so drop both
+    // false positives for the head.
+    parser.pruneJuxtaposition(fn, paramDiagCp);
+    parser.pruneUndeclared([fn], paramDiagCp);
     return ['Assign', fn, ['Function', rhs, ...(args ?? [])]];
   }
 
@@ -3612,6 +3619,11 @@ function parseAssign(
     if (rhs === null) return null;
 
     pruneFunctionParams(parser, args, paramDiagCp);
+    // Same as the InvisibleOperator form above: the consumed application-shaped
+    // head is a definition target, so drop any spurious code-2 / undeclared
+    // diagnostics for it.
+    parser.pruneJuxtaposition(fn, paramDiagCp);
+    parser.pruneUndeclared([fn], paramDiagCp);
     return ['Assign', fn, ['Function', rhs, ...args]];
   }
 

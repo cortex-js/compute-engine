@@ -2482,6 +2482,22 @@ fn _fractal_julia(z_in: vec2f, c: vec2f, maxIter: i32) -> f32 {
 export const GPU_GCD_PREAMBLE_GLSL = `
 float _gpu_gcd(float a, float b) {
   a = abs(a); b = abs(b);
+  if (a == 0.0) return b;
+  if (b == 0.0) return a;
+  // Exact integer path (within the f32 exact-integer range, < 2^24): plain
+  // Euclid, no tolerance — mirrors the JS realGcd so integer inputs never
+  // regress (e.g. _gpu_gcd(4000000.0, 2.0) == 2.0).
+  if (floor(a) == a && floor(b) == b && a < 16777216.0 && b < 16777216.0) {
+    for (int i = 0; i < 64; i++) {
+      if (b == 0.0) break;
+      float t = mod(a, b);
+      a = b;
+      b = t;
+    }
+    return a;
+  }
+  // Tolerant floating Euclidean algorithm for non-integer reals.
+  float mn = min(a, b);
   float tol = 1e-6 * max(a, b);
   for (int i = 0; i < 64; i++) {
     if (b <= tol) break;
@@ -2489,7 +2505,8 @@ float _gpu_gcd(float a, float b) {
     a = b;
     b = t;
   }
-  return a;
+  // Scale-mismatch guard: keep gcd <= min(|a|,|b|).
+  return a > mn ? mn : a;
 }
 `;
 
@@ -2499,6 +2516,22 @@ float _gpu_gcd(float a, float b) {
 export const GPU_GCD_PREAMBLE_WGSL = `
 fn _gpu_gcd(a_in: f32, b_in: f32) -> f32 {
   var a = abs(a_in); var b = abs(b_in);
+  if (a == 0.0) { return b; }
+  if (b == 0.0) { return a; }
+  // Exact integer path (within the f32 exact-integer range, < 2^24): plain
+  // Euclid, no tolerance — mirrors the JS realGcd so integer inputs never
+  // regress (e.g. _gpu_gcd(4000000.0, 2.0) == 2.0).
+  if (floor(a) == a && floor(b) == b && a < 16777216.0 && b < 16777216.0) {
+    for (var i: i32 = 0; i < 64; i++) {
+      if (b == 0.0) { break; }
+      let t = a % b;
+      a = b;
+      b = t;
+    }
+    return a;
+  }
+  // Tolerant floating Euclidean algorithm for non-integer reals.
+  let mn = min(a, b);
   let tol = 1e-6 * max(a, b);
   for (var i: i32 = 0; i < 64; i++) {
     if (b <= tol) { break; }
@@ -2506,6 +2539,8 @@ fn _gpu_gcd(a_in: f32, b_in: f32) -> f32 {
     a = b;
     b = t;
   }
+  // Scale-mismatch guard: keep gcd <= min(|a|,|b|).
+  if (a > mn) { return mn; }
   return a;
 }
 `;

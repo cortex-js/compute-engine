@@ -1,6 +1,7 @@
 import { widen } from '../common/type/utils.js';
 import { isSubtype } from '../common/type/subtype.js';
 import { Type } from '../common/type/types.js';
+import { checkDeadline } from '../common/interruptible.js';
 import { Expression, CollectionHandlers } from './global-types.js';
 import {
   isFunction,
@@ -369,12 +370,18 @@ function collectionIndexWhere(
 ): number | undefined {
   if (expr.isIndexedCollection !== true) return undefined;
 
-  let i = 1;
-  let op = expr.at(i);
-  while (op !== undefined) {
-    if (predicate(op)) return i;
+  // Stream via `each()` rather than probing `at(1), at(2), …`: for a lazy
+  // collection with an O(n) `at()` (e.g. `Comprehension`) the repeated-`at`
+  // walk is O(k²); a single stream is linear. A deadline checkpoint (strided
+  // to amortize `Date.now()`) means an unbounded search — `IndexOf` of a
+  // never-matching value in an infinite collection — aborts at `ce.timeLimit`
+  // with the usual timeout `CancellationError` instead of hanging forever.
+  const deadline = expr.engine._deadline;
+  let i = 0;
+  for (const op of expr.each()) {
     i += 1;
-    op = expr.at(i);
+    if ((i & 0x3ff) === 0) checkDeadline(deadline);
+    if (predicate(op)) return i;
   }
 
   return undefined;

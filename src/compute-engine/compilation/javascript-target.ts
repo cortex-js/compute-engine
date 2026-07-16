@@ -400,9 +400,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return BaseCompiler.inlineExpression('${x} - Math.floor(${x})', compile(x));
   },
   Gamma: '_SYS.gamma',
-  GCD: '_SYS.gcd',
+  // n-ary GCD/LCM. The `_SYS.gcd`/`_SYS.lcm` runtime helpers are BINARY with a
+  // third `eps` (tolerance) argument, so a bare `_SYS.gcd(a, b, c)` string map
+  // would silently consume the third *operand* `c` as the tolerance. Instead
+  // fold pairwise so no operand can ever land in the `eps` slot, and handle
+  // list-valued operands by spread-and-reduce (mirroring `compileExtremum`).
+  GCD: (args, compile) => compileGcdLcm('GCD', args, compile),
   Integrate: (args, compile, target) => compileIntegrate(args, compile, target),
-  LCM: '_SYS.lcm',
+  LCM: (args, compile) => compileGcdLcm('LCM', args, compile),
   Product: (args, compile, target) =>
     compileSumProduct('Product', args, compile, target),
   Sum: (args, compile, target) =>
@@ -578,12 +583,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       .map((a, i) => `...(${collArg('Join', a, compile, i + 1)})`)
       .join(', ')}]`;
   },
-  // 1-based index of the first element strictly equal to `value`, or 0 if not
-  // found — `Array.indexOf` is 0-based and returns -1, so `+ 1` maps both.
+  // 1-based index of the first element equal to `value`, or 0 if not found.
+  // Uses the engine's numeric tolerance (like `compileJSEquality`), NOT a raw
+  // `Array.indexOf` (`===`): the interpreter compares within `engine.tolerance`,
+  // so `IndexOf([0.3], 0.1 + 0.2)` must find the element. `findIndex` is 0-based
+  // and returns -1 when absent, so `+ 1` maps both. The value is hoisted into an
+  // IIFE parameter so it is evaluated once.
   IndexOf: (args, compile) => {
     const coll = collArg('IndexOf', args[0], compile);
     if (args[1] == null) throw new Error('IndexOf: missing value');
-    return `((${coll}).indexOf(${compile(args[1])}) + 1)`;
+    const tol = args[0]?.engine?.tolerance ?? 1e-10;
+    return `((_v) => (${coll}).findIndex((_x) => Math.abs(_x - _v) <= ${tol}) + 1)(${compile(
+      args[1]
+    )})`;
   },
   // Higher-order: the mapping/predicate operand is compiled as a lambda
   // (`Function` literal → `(x) => …`), hoisted into an IIFE parameter so it
@@ -2304,6 +2316,7 @@ function compileToTarget(
     const body = BaseCompiler.compile(args[0].canonical, {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
+      boundVars: BaseCompiler.withBoundNames(target, params),
     });
     // A lambda body may call user-defined functions (`t ↦ f(t)`); emit their
     // definitions as a preamble inside the lambda's own body.
@@ -2503,6 +2516,45 @@ function compileExtremum(
 }
 
 /**
+ * Compile `GCD`/`LCM`. The runtime helpers `_SYS.gcd`/`_SYS.lcm` are BINARY
+ * (with a third `eps` tolerance argument), so the operands are folded PAIRWISE
+ * — a variadic `_SYS.gcd(a, b, c)` would silently pass the third operand `c` as
+ * the tolerance (finding A1).
+ *
+ * Shapes handled, matching `evaluateGcdLcm` (which flattens collection operands
+ * and folds pairwise):
+ *   - scalar variadic (`GCD(a, b, c)`) and list/mixed operands
+ *     (`GCD([a, b], c)`) are combined into a single array — each indexed
+ *     collection is spread, each scalar passed through — and reduced with the
+ *     binary helper. Folding from the first element (no seed) matches the
+ *     interpreter for a singleton (`LCM([2.5]) = 2.5`, not `lcm(1, 2.5)`); the
+ *     empty case falls back to the identity (`GCD([]) = 0`, `LCM([]) = 1`).
+ *   - an operand that is a collection but NOT an indexed collection
+ *     (dictionary / string / set) has no array lowering, so fail closed (D6)
+ *     rather than emit code that silently NaNs (finding A3).
+ */
+function compileGcdLcm(
+  kind: 'GCD' | 'LCM',
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+): string {
+  const helper = kind === 'GCD' ? '_SYS.gcd' : '_SYS.lcm';
+  const identity = kind === 'GCD' ? '0' : '1';
+  const parts = args.map((a) => {
+    if (isIndexedCollectionOperand(a)) return `...(${compile(a)})`;
+    if (a.isCollection || a.type.matches('collection'))
+      throw new Error(
+        `${kind}: cannot compile — operand is a collection but not an indexed ` +
+          `collection (list/vector/range). Fail closed (D6).`
+      );
+    return compile(a);
+  });
+  return `((_a) => _a.length ? _a.reduce((_x, _y) => ${helper}(_x, _y)) : ${identity})([${parts.join(
+    ', '
+  )}])`;
+}
+
+/**
  * Compile the collection form of `Sum`/`Product` — a reduce over the elements
  * of an indexed collection (e.g. `[3,4,5].total` → `Sum([3,4,5])`). The
  * identity seed (`0` for Sum, `1` for Product) makes the empty collection agree
@@ -2565,6 +2617,7 @@ function emitSumProduct(
         const innerTarget: CompileTarget<Expression> = {
           ...target,
           var: (id) => (id === index ? String(k) : target.var(id)),
+          boundVars: BaseCompiler.withBoundNames(target, [index]),
         };
         terms.push(`(${compileTerm(innerTarget)})`);
       }
@@ -2604,6 +2657,7 @@ function emitSumProduct(
   const bodyCode = compileTerm({
     ...target,
     var: (id) => (id === index ? index : target.var(id)),
+    boundVars: BaseCompiler.withBoundNames(target, [index]),
   });
 
   const acc = BaseCompiler.tempVar();
@@ -2723,6 +2777,7 @@ function compileIntegrate(
   const f = BaseCompiler.compile(bodyExpr, {
     ...target,
     var: (id) => (id === lambdaVar ? id : target.var(id)),
+    boundVars: BaseCompiler.withBoundNames(target, [lambdaVar]),
   });
 
   const lo = BaseCompiler.compile(lowerExpr, target);

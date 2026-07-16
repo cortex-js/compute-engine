@@ -489,6 +489,7 @@ function compileIntervalSumProduct(
         const innerTarget: CompileTarget<Expression> = {
           ...target,
           var: (id) => (id === index ? `_IA.point(${k})` : target.var(id)),
+          boundVars: BaseCompiler.withBoundNames(target, [index]),
         };
         terms.push(BaseCompiler.compile(args[0], innerTarget));
       }
@@ -509,6 +510,7 @@ function compileIntervalSumProduct(
   const bodyCode = BaseCompiler.compile(args[0], {
     ...target,
     var: (id) => (id === index ? `_IA.point(${index})` : target.var(id)),
+    boundVars: BaseCompiler.withBoundNames(target, [index]),
   });
 
   return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; for (let ${index} = ${lowerCode}; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;

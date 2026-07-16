@@ -440,9 +440,15 @@ function limitAtPosInf(
     const inner = limitAtPosInf(o1(e), x, ce, depth + 1);
     if (!inner) return undefined;
     if (inner.isInfinity === true) {
-      const neg = inner.isNegative === true;
-      if (op === 'Erf') return neg ? ce.number(-1) : ce.One;
-      return neg ? ce.number(2) : ce.Zero;
+      // Only a *signed* real infinity saturates. A directionless infinity
+      // (e.g. ComplexInfinity) has neither `isPositive` nor `isNegative` set —
+      // stay symbolic rather than defaulting to the +∞ branch (mirrors the
+      // Sqrt/Root guard above).
+      if (inner.isPositive === true)
+        return op === 'Erf' ? ce.One : ce.Zero;
+      if (inner.isNegative === true)
+        return op === 'Erf' ? ce.number(-1) : ce.number(2);
+      return undefined;
     }
     if (isDefiniteValue(inner)) return ce.function(op, [inner]).evaluate();
     return undefined;

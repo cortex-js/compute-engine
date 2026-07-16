@@ -202,3 +202,53 @@ New additive `detail` key (open shape, backward-compatible): **`lexedAs:
 "unit"`** is included on code 2 when the applied symbol was read as a unit —
 the "your `N` was read as a unit" hint for generated-LaTeX validators. It is
 absent for ordinary symbols and letter runs.
+
+### Addendum (2026-07-16): function-definition LHS is a declaration, not a use
+
+A function definition — `f(x) := …`, `f(x) \coloneq …`, and the other
+`:=`-family triggers — first parses its left operand `f(x)` as a **neutral
+juxtaposition** (the parser cannot yet know a definition follows), then the
+`:=` parselet consumes that operand as a *function signature*. Two diagnostics
+emitted while `f(x)` was speculatively read as a product are false positives at
+a definition site and are now pruned for the **head** symbol:
+
+- **`juxtaposition-as-multiply` (code 2)** for `f` — the LHS is a definition,
+  not a multiplication. (The parameter references were already pruned as bound
+  variables; this extends the same span-aware rollback to the head.)
+- **`undeclared-symbol` (code 1)** for `f` — the construct *declares* `f`, so
+  the definition target has no "prior declaration" in the sense code 1 flags. A
+  definition site is a declaration, not an undeclared reference.
+
+Only the head is pruned, and only on the definition route. A genuine
+application-shaped juxtaposition with no `:=` (`\mathrm{Frobnicate}(x)`,
+`a(x+1)`) is unchanged: it still fires both codes. The RHS is parsed normally,
+so a genuinely-undeclared symbol *used* in the body still fires code 1.
+
+### Addendum (2026-07-16): `undeclared-symbol` is per-engine order-dependent
+
+Code 1's predicate is "no **prior** declaration" (amendment 1). On a **warm,
+reused** engine this is stateful across parses: the first
+`ce.parse('u + 1', { diagnostics: true })` fires `undeclared-symbol` for `u`,
+but canonicalizing that result **auto-declares** `u` in the engine scope, so an
+identical second `ce.parse('u + 1', …)` returns `[]` — `u` now has a prior
+declaration. This is correct per the spec wording, but it is a surprise for a
+validation gate: whether a name is flagged depends on what the same engine
+parsed (and canonicalized) before.
+
+Recommendation for a validation gate: **validate on a fresh engine** (or one
+whose scope holds only your deliberately-declared in-scope definitions), so the
+diagnostic reflects the input alone and not accumulated parse history. A
+`ce.parse(latex, { diagnostics: true, canonical: false })` also avoids the
+auto-declaration side effect for the parse in hand, but does not undo
+declarations already accumulated on the engine.
+
+### Addendum (2026-07-16): `undeclared-symbol` honors the `getSymbolType` hook
+
+A symbol counts as **declared** for code 1 if the engine's declaration-presence
+lookup finds it **or** the effective `getSymbolType` handler returns a
+non-`unknown` type for it. The parse-option `getSymbolType` handler *replaces*
+scope lookup for typing (a documented precedence), and a consumer such as Tycho
+declares its in-scope definitions purely through that hook. Consequently
+`ce.parse('k + 1', { diagnostics: true, getSymbolType: (id) => id === 'k' ?
+'number' : 'unknown' })` does **not** fire `undeclared-symbol` for `k` (its
+type is known), while a symbol the hook types as `unknown` still fires.

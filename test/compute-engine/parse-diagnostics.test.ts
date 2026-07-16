@@ -644,3 +644,85 @@ describe('declared symbols suppress diagnostics', () => {
     }
   });
 });
+
+describe('function-definition LHS is a declaration (E1)', () => {
+  // The `f(x)` LHS of a definition is first parsed as a neutral juxtaposition,
+  // then consumed as a signature. Neither the juxtaposition (code 2) nor the
+  // undeclared head (code 1) is a real problem — the construct declares `f`.
+  for (const latex of ['f(x) := x^2', 'f(x) \\coloneq x^2']) {
+    test(`${latex} — no diagnostics for the head`, () => {
+      const ds = diags(latex);
+      expect(byCode(ds, 'juxtaposition-as-multiply')).toHaveLength(0);
+      // Parameter `x` is bound; head `f` is a declaration — neither is
+      // undeclared.
+      expect(byCode(ds, 'undeclared-symbol')).toHaveLength(0);
+    });
+  }
+
+  test('a genuinely-undeclared symbol USED in the body still fires', () => {
+    // `y` is neither a parameter nor the head — a free reference in the body.
+    const ds = diags('f(x) := x + y');
+    expect(
+      byCode(ds, 'undeclared-symbol').some((d) => d.detail?.name === 'y')
+    ).toBe(true);
+  });
+
+  test('a genuine application-shaped juxtaposition (no :=) still fires both codes', () => {
+    // Regression guard: pruning is scoped to the definition route only.
+    const ds = diags('a(x+1)');
+    expect(
+      byCode(ds, 'juxtaposition-as-multiply').some(
+        (d) => d.detail?.name === 'a'
+      )
+    ).toBe(true);
+    expect(
+      byCode(ds, 'undeclared-symbol').some((d) => d.detail?.name === 'a')
+    ).toBe(true);
+  });
+});
+
+describe('undeclared-symbol honors the getSymbolType hook (E2)', () => {
+  test('a symbol the hook types as non-unknown is treated as declared', () => {
+    // The parse-option `getSymbolType` replaces scope lookup for typing; a
+    // symbol it types as `number` is declared, so no undeclared diagnostic —
+    // and no self-contradiction (flagging undeclared while reporting a type).
+    const ds = diags('k + 1', {
+      getSymbolType: (id: string) => (id === 'k' ? 'number' : 'unknown'),
+    });
+    expect(
+      byCode(ds, 'undeclared-symbol').some((d) => d.detail?.name === 'k')
+    ).toBe(false);
+  });
+
+  test('a symbol the hook types as unknown still fires', () => {
+    const ds = diags('w + 1', {
+      getSymbolType: (id: string) => (id === 'k' ? 'number' : 'unknown'),
+    });
+    expect(
+      byCode(ds, 'undeclared-symbol').some((d) => d.detail?.name === 'w')
+    ).toBe(true);
+  });
+});
+
+describe('undeclared-symbol is per-engine order-dependent (E4, documented)', () => {
+  // Documents (does not change) the warm-engine statefulness of code 1: the
+  // first canonical parse of an undeclared name auto-declares it, so an
+  // identical second parse on the SAME engine no longer flags it. A validation
+  // gate should use a fresh engine (as `diags()` does).
+  test('same engine: second identical parse no longer flags the name', () => {
+    const ce = new ComputeEngine();
+    const first = ce.parse('u + 1', { diagnostics: true });
+    expect(
+      byCode(first.parseDiagnostics ?? [], 'undeclared-symbol').some(
+        (d) => d.detail?.name === 'u'
+      )
+    ).toBe(true);
+
+    const second = ce.parse('u + 1', { diagnostics: true });
+    expect(
+      byCode(second.parseDiagnostics ?? [], 'undeclared-symbol').some(
+        (d) => d.detail?.name === 'u'
+      )
+    ).toBe(false);
+  });
+});

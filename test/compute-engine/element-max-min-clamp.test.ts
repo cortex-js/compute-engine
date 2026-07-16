@@ -115,6 +115,14 @@ describe('Max / Min — scalar+collection compile fix (reduction, was NaN)', () 
   test('Max of a single collection is unchanged', () => {
     expect(run(['Max', ['List', 1, 2, 3]])).toBe(3);
   });
+  test('NaN inside a collection absorbs, matching top-level Max/Min (B5)', () => {
+    // Max(NaN, 5) → NaN, so Max([1, NaN, 3]) must also be NaN (was 3).
+    expect(evalStr(['Max', 'NaN', 5])).toBe('NaN');
+    expect(evalStr(['Max', ['List', 1, 'NaN', 3]])).toBe('NaN');
+    expect(evalStr(['Min', ['List', 1, 'NaN', 3]])).toBe('NaN');
+    // Nested collection: the NaN still absorbs.
+    expect(evalStr(['Max', ['List', ['List', 1, 'NaN'], 3]])).toBe('NaN');
+  });
 });
 
 describe('cross-target compilation', () => {

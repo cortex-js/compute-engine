@@ -776,6 +776,104 @@ describe('GCD/LCM on non-integer reals (tolerant float Euclid)', () => {
     ).toEqual('GCD');
   });
 
+  it('preserves gcd ≤ min / lcm ≥ max on scale-mismatched inputs (B2)', () => {
+    // A vastly larger operand must not swamp the tolerance and get returned as
+    // the gcd (which would exceed the smaller operand). Return the smaller.
+    expect(val(['GCD', 2.5, 1e21])).toBeCloseTo(2.5, 6);
+    expect(val(['GCD', 1, 1e-7])).toBeCloseTo(1e-7, 12);
+    // lcm ≥ max(|a|, |b|) (or NaN); here lcm(1e160, 1.5) ≈ 1e160.
+    expect(val(['LCM', 1e160, 1.5])).toBeGreaterThanOrEqual(1e160);
+    // Invariant sweep: gcd ≤ min, lcm ≥ max across mismatched scales.
+    for (const [a, b] of [
+      [2.5, 1e21],
+      [1, 1e-7],
+      [1e160, 1.5],
+      [3.5, 1e12],
+    ] as [number, number][]) {
+      const g = val(['GCD', a, b]);
+      expect(g).toBeLessThanOrEqual(Math.min(Math.abs(a), Math.abs(b)) * (1 + 1e-9));
+      const l = val(['LCM', a, b]);
+      if (Number.isFinite(l))
+        expect(l).toBeGreaterThanOrEqual(Math.max(Math.abs(a), Math.abs(b)) * (1 - 1e-9));
+    }
+  });
+
+  it('flattens nested finite collections in one evaluation (B3)', () => {
+    // Previously single-pass: GCD([[12,18],24]) → gcd(24,[12,18]), needing a
+    // second evaluate. Now the expansion loops until no collection remains.
+    expect(
+      ce.box(['GCD', ['List', ['List', 12, 18], 24]]).evaluate().toString()
+    ).toEqual('6');
+    expect(
+      ce.box(['LCM', ['List', ['List', 4, 6], 9]]).evaluate().toString()
+    ).toEqual('36');
+    expect(
+      ce
+        .box(['GCD', ['List', ['List', ['List', 12, 18]], 24]])
+        .evaluate()
+        .toString()
+    ).toEqual('6');
+  });
+
+  it('returns identities for zero-argument GCD/LCM (B4)', () => {
+    // Consistent with the empty-collection case: GCD() → 0, LCM() → 1.
+    expect(ce.box(['GCD']).evaluate().toString()).toEqual('0');
+    expect(ce.box(['LCM']).evaluate().toString()).toEqual('1');
+  });
+
+  it('GPU _gpu_gcd has an integer fast path (B1)', () => {
+    // The GPU preambles must mirror realGcd: an exact-integer path so that
+    // scale-mismatched integers (e.g. gcd(4000000, 2)) do not fall into the
+    // tolerant loop and return the larger operand.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const {
+      GPU_GCD_PREAMBLE_GLSL,
+      GPU_GCD_PREAMBLE_WGSL,
+    } = require('../../src/compute-engine/compilation/gpu-target');
+    expect(GPU_GCD_PREAMBLE_GLSL).toContain('floor(a) == a');
+    expect(GPU_GCD_PREAMBLE_WGSL).toContain('floor(a) == a');
+
+    // Transliterate the GLSL shader loop (f32 arithmetic) and verify behavior.
+    const f = Math.fround;
+    const glslMod = (a: number, b: number) =>
+      f(a - f(b * Math.floor(f(a / b))));
+    const gpuGcd = (a0: number, b0: number): number => {
+      let a = f(Math.abs(a0));
+      let b = f(Math.abs(b0));
+      if (a === 0) return b;
+      if (b === 0) return a;
+      if (
+        Math.floor(a) === a &&
+        Math.floor(b) === b &&
+        a < 16777216 &&
+        b < 16777216
+      ) {
+        for (let i = 0; i < 64; i++) {
+          if (b === 0) break;
+          const t = glslMod(a, b);
+          a = b;
+          b = t;
+        }
+        return a;
+      }
+      const mn = Math.min(a, b);
+      const tol = f(1e-6 * Math.max(a, b));
+      for (let i = 0; i < 64; i++) {
+        if (b <= tol) break;
+        const t = glslMod(a, b);
+        a = b;
+        b = t;
+      }
+      return a > mn ? mn : a;
+    };
+    expect(gpuGcd(4000000, 2)).toEqual(2); // was 4000000 before the fix
+    expect(gpuGcd(2, 4000000)).toEqual(2);
+    expect(gpuGcd(12, 18)).toEqual(6);
+    expect(gpuGcd(48, 36)).toEqual(12);
+    expect(gpuGcd(2.25, 1.5)).toBeCloseTo(0.75, 5);
+    expect(gpuGcd(0, 5)).toEqual(5);
+  });
+
   it('compiles gcd of reals to a finite value (plot render, not NaN)', () => {
     const engine = new ComputeEngine();
     const target = engine.getCompilationTarget('javascript');

@@ -190,7 +190,16 @@ function pointComponentAt(
   // point, broadcast the coordinate element-wise; otherwise fall back to O(1)
   // element indexing, like First/Second/Third.
   if (xs.isFiniteCollection) {
-    const first = xs.at(1);
+    // Peek via `each()` rather than `at(1)`: a non-indexed collection (a `Set`)
+    // has no `at()`, so `at(1)` is `undefined` and a non-empty Set of points
+    // was misread as empty (→ a silently-wrong `[]`). `each()` yields the first
+    // element for indexed and non-indexed collections alike, and taking just
+    // one element keeps the peek O(1) (no materialization of a large domain).
+    let first: Expression | undefined;
+    for (const e of xs.each()) {
+      first = e;
+      break;
+    }
     if (first !== undefined) {
       if (isPointLike(first))
         return ce.function(
