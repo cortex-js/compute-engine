@@ -1094,12 +1094,109 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(compile(e.box(['Reduce', 'd', 'Max']), { fallback: false })!.run!()).toBe(4);
   });
 
-  it('Reduce with an unsupported combiner fails closed', () => {
+  it('Reduce compiles a custom combiner when an initial value is present', () => {
+    const e = mkEngine();
+    // Function literal: f(acc, x) = acc + 2x over [1, 2, 3] from 0 → 12
+    expect(
+      runJs(e, [
+        'Reduce',
+        ['List', 1, 2, 3],
+        ['Function', ['Add', 'a', ['Multiply', 2, 'b']], 'a', 'b'],
+        0,
+      ])
+    ).toBe(12);
+    // Operator symbol (via the operators table): ((0-10)-20)-30 → -60
+    expect(runJs(e, ['Reduce', 'd', 'Subtract', 0])).toBe(-60);
+    // User-defined function symbol resolves to the emitted `_fn_` local
+    e.assign(
+      'combine',
+      e.box(['Function', ['Add', 'a', ['Multiply', 2, 'b']], 'a', 'b'])
+    );
+    expect(runJs(e, ['Reduce', ['List', 1, 2, 3], 'combine', 0])).toBe(12);
+  });
+
+  it('Fold canonicalizes to Reduce and compiles', () => {
+    const e = mkEngine();
+    expect(
+      runJs(e, [
+        'Fold',
+        ['Function', ['Add', 'a', ['Multiply', 2, 'b']], 'a', 'b'],
+        0,
+        ['List', 1, 2, 3],
+      ])
+    ).toBe(12);
+  });
+
+  it('Reduce with a custom combiner but no initial value fails closed', () => {
+    // Without an initial value the interpreter folds from `Nothing` (whose
+    // effect depends on the combiner); a native seedless reduce would seed
+    // with the first element — those diverge for non-commutative combiners.
     const e = mkEngine();
     const js = new JavaScriptTarget();
     expect(() =>
-      js.compile(e.box(['Reduce', 'd', 'Subtract', 0]), { realOnly: true })
+      js.compile(
+        e.box(['Reduce', 'd', ['Function', ['Subtract', 'a', 'b'], 'a', 'b']]),
+        { realOnly: true }
+      )
     ).toThrow(/Fail closed/);
+  });
+
+  it('Reduce with a non-function combiner fails closed', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    // Undeclared symbol
+    expect(() =>
+      js.compile(e.box(['Reduce', 'd', 'w', 0]), { realOnly: true })
+    ).toThrow(/Fail closed|invalid expression/);
+    // A value-bound (non-function) symbol must fail at COMPILE time, not
+    // produce `.reduce(<non-function>)` that throws at runtime
+    e.assign('v', e.box(['Add', 'x', 1]));
+    expect(() =>
+      js.compile(e.box(['Reduce', 'd', 'v', 0]), { realOnly: true })
+    ).toThrow(/Fail closed|invalid expression/);
+  });
+
+  it('native callback extra arguments do not leak into lambda parameters', () => {
+    // Native `.map` passes `(x, index, array)`; the interpreter passes only
+    // `(x)` (an under-applied CE function curries, it never sees the index).
+    // A binary mapping function must therefore NOT receive the element index
+    // as its second argument: the compiled result is NaN per element (missing
+    // argument on a real target), never index-polluted values like [10, 21, 32].
+    const e = mkEngine();
+    const v = runJs(e, [
+      'Map',
+      'd',
+      ['Function', ['Add', 'x', 'y'], 'x', 'y'],
+    ]) as number[];
+    expect(v).toEqual([NaN, NaN, NaN]);
+  });
+
+  it('Tabulate/Fill dimensions are rounded and clamped like the interpreter', () => {
+    const e = mkEngine();
+    e.declare('k', 'integer');
+    const r = compile(e.box(['Tabulate', ['Function', 'i', 'i'], 'k']), {
+      fallback: false,
+    })!;
+    // The interpreter rounds dimensions (toInteger); Array.from would truncate
+    expect(r.run!({ k: 2.7 })).toEqual([1, 2, 3]);
+    expect(r.run!({ k: -2 })).toEqual([]); // clamped to 0
+    expect(r.run!({ k: NaN })).toEqual([]);
+  });
+
+  it('Tabulate/Fill evaluate the function and dimensions once (hoisted)', () => {
+    const e = mkEngine();
+    const r = compile(
+      e.box([
+        'Tabulate',
+        ['Function', ['Add', ['Multiply', 10, 'i'], 'j'], 'i', 'j'],
+        2,
+        3,
+      ]),
+      { fallback: false }
+    )!;
+    // Dimensions and the lambda are IIFE parameters, evaluated once — an
+    // impure dimension (e.g. Random) must not be re-evaluated per row.
+    expect(r.code).toMatch(/^\(\(_f, _n, _m\) =>/);
   });
 
   it('Length compiles to array length (was: Unknown operator)', () => {
@@ -1184,6 +1281,66 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(
       runJs(e, ['Filter', 'd', ['Function', ['Greater', 'x', 15], 'x']])
     ).toEqual([20, 30]);
+  });
+
+  it('CountIf / Find / IndexWhere / Position compile the predicate lambda', () => {
+    const e = mkEngine();
+    const gt15 = ['Function', ['Greater', 'x', 15], 'x'];
+    const gt99 = ['Function', ['Greater', 'x', 99], 'x'];
+    expect(runJs(e, ['CountIf', 'd', gt15])).toBe(2);
+    expect(runJs(e, ['Find', 'd', gt15])).toBe(20);
+    // No match → NaN (the interpreter's `Nothing` projected onto a real target)
+    expect(Number.isNaN(runJs(e, ['Find', 'd', gt99]) as number)).toBe(true);
+    // 1-based index of the first match, or 0 when absent
+    expect(runJs(e, ['IndexWhere', 'd', gt15])).toBe(2);
+    expect(runJs(e, ['IndexWhere', 'd', gt99])).toBe(0);
+    // All 1-based indexes of the matches
+    expect(runJs(e, ['Position', 'd', gt15])).toEqual([2, 3]);
+    expect(runJs(e, ['Position', 'd', gt99])).toEqual([]);
+  });
+
+  it('Tabulate compiles 1-based 1-D and 2-D forms', () => {
+    const e = mkEngine();
+    expect(
+      runJs(e, ['Tabulate', ['Function', ['Square', 'i'], 'i'], 5])
+    ).toEqual([1, 4, 9, 16, 25]);
+    expect(
+      runJs(e, [
+        'Tabulate',
+        ['Function', ['Add', ['Multiply', 10, 'i'], 'j'], 'i', 'j'],
+        2,
+        3,
+      ])
+    ).toEqual([
+      [11, 12, 13],
+      [21, 22, 23],
+    ]);
+  });
+
+  it('Table (alias + iterator specs) canonicalizes and compiles', () => {
+    const e = mkEngine();
+    // All-ones iterator → Tabulate
+    expect(
+      runJs(e, ['Table', ['Square', 'i'], ['Set', 'i', 1, 4]])
+    ).toEqual([1, 4, 9, 16]);
+    // General lo/step iterator → Map over Range
+    expect(runJs(e, ['Table', 'i', ['Set', 'i', 0, 10, 5]])).toEqual([
+      0, 5, 10,
+    ]);
+  });
+
+  it('Fill compiles to a rows×cols matrix of f(i, j), 1-based', () => {
+    const e = mkEngine();
+    expect(
+      runJs(e, [
+        'Fill',
+        ['Function', ['Add', ['Multiply', 10, 'i'], 'j'], 'i', 'j'],
+        ['Tuple', 2, 2],
+      ])
+    ).toEqual([
+      [11, 12],
+      [21, 22],
+    ]);
   });
 
   it('a custom Sort comparator fails closed', () => {

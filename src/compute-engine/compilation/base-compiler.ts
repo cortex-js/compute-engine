@@ -2080,8 +2080,11 @@ export class BaseCompiler {
    *    `ce.assign(name, lambda)`), where the literal is kept on the operator
    *    definition as `_lambdaLiteral`; and
    *  - a plain symbol whose assigned value is itself a `Function` literal.
+   *
+   * Public so compilation targets can check whether a symbol operand is
+   * structurally callable (e.g. the `Reduce` combiner) before compiling it.
    */
-  private static userFunctionLiteral(
+  static userFunctionLiteral(
     engine: ComputeEngine,
     id: string
   ): (Expression & FunctionInterface) | undefined {

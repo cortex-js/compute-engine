@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+### New Features
+
+- **More collection operators compile on the `javascript` target.**
+  - **`Reduce` accepts a custom combiner**: a `Function` literal
+    (`Reduce([1, 2, 3], (a, b) \mapsto a + 2b, 0)` → `12`), a user-defined
+    function symbol, or an operator symbol such as `Subtract` — previously
+    only the `Add`/`Multiply`/`Min`/`Max` folds compiled. A custom combiner
+    requires an explicit initial value (without one the interpreter folds
+    from `Nothing`, which has no numeric equivalent — that form still fails
+    closed). **`Fold`**, which canonicalizes to `Reduce`, now compiles too.
+  - **`Tabulate`** (1-D and 2-D) and **`Fill`** compile to native array
+    construction with 1-based indexes — and therefore **`Table`**, in both
+    its alias and Mathematica-style iterator forms. Compiling is the natural
+    fast path for materializing these now-lazy collections.
+  - **`CountIf`, `Find`, `IndexWhere`, `Position`** compile their predicate
+    lambda to native array operations, with the interpreter's conventions
+    preserved: 1-based indexes, `IndexWhere` → `0` and `Find` → `NaN`
+    (`Nothing` projected onto a real target) when no element matches.
+
 ## 0.80.0 _2026-07-16_
 
 ### New Features

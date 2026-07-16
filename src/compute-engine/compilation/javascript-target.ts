@@ -460,10 +460,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.at(${compile(coll)}, ${compile(index)})`;
   },
-  // Fold a collection with one of the common associative folds. CE `Reduce`
-  // canonicalizes `\sum_{i=d}^{d} d` to `Reduce(d, Add, 0)`. Only the
-  // Add/Multiply/Min/Max folds compile; any other combiner fails closed (D6).
-  Reduce: (args, compile) => {
+  // Fold a collection. CE `Reduce` canonicalizes `\sum_{i=d}^{d} d` to
+  // `Reduce(d, Add, 0)`. The Add/Multiply/Min/Max folds compile, as does a
+  // custom combiner (`Function` literal or function-valued symbol, compiled
+  // as a lambda like `Map`/`Filter`) — but a custom combiner requires an
+  // explicit initial value: without one the interpreter folds from `Nothing`
+  // (whose effect depends on the combiner and has no numeric equivalent),
+  // while a native seedless reduce starts from the first element — those
+  // diverge for non-commutative combiners. Anything else fails closed (D6).
+  // `Fold(f, init, coll)` canonicalizes to `Reduce(coll, f, init)`, so this
+  // handler covers it too.
+  Reduce: (args, compile, target) => {
     const coll = args[0];
     const op = args[1];
     const init = args[2];
@@ -491,10 +498,35 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           break;
       }
     }
+    if (combiner === undefined && (isFunction(op, 'Function') || isSymbol(op))) {
+      if (init === undefined || init === null)
+        throw new Error(
+          `Reduce: a custom combiner compiles only with an explicit ` +
+            `initial value. Fail closed (D6).`
+        );
+      // Only accept a combiner that is structurally callable: a `Function`
+      // literal, an operator symbol (compiled via the operators table to a
+      // binary lambda), or a symbol whose value is a function literal
+      // (emitted as a `_fn_<name>` local). A value-bound or dangling symbol
+      // fails closed at compile time — never at runtime.
+      const callable =
+        isFunction(op, 'Function') ||
+        (isSymbol(op) &&
+          (target.operators?.(op.symbol) !== undefined ||
+            BaseCompiler.userFunctionLiteral(op.engine, op.symbol) !==
+              undefined));
+      // Wrap to a fixed binary arity: native `reduce` passes
+      // `(acc, x, index, array)` and the extra arguments must not leak into
+      // the combiner's parameters (the interpreter passes exactly
+      // `(acc, x)`). The combiner is hoisted so it is instantiated once.
+      if (callable)
+        combiner = `((_f) => (_a, _b) => _f(_a, _b))(${compile(op)})`;
+    }
     if (combiner === undefined)
       throw new Error(
-        `Reduce: only Add/Multiply/Min/Max folds compile on the JavaScript ` +
-          `target. Fail closed (D6).`
+        `Reduce: the combiner does not compile to a function — only ` +
+          `Add/Multiply/Min/Max folds, function literals, and user-defined ` +
+          `functions compile on the JavaScript target. Fail closed (D6).`
       );
     const collCode = compile(coll);
     // With an initial value, seed the reduce; without one, the native reduce
@@ -554,17 +586,86 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `((${coll}).indexOf(${compile(args[1])}) + 1)`;
   },
   // Higher-order: the mapping/predicate operand is compiled as a lambda
-  // (`Function` literal → `(x) => …`) and handed to native `.map`/`.filter`.
-  // A mapping operand that does not compile to a lambda fails closed.
+  // (`Function` literal → `(x) => …`), hoisted into an IIFE parameter so it
+  // is instantiated once (not once per element), and invoked with a fixed
+  // unary arity — the native callbacks pass `(x, index, array)` and the
+  // extra arguments must not leak into the lambda's parameters (the
+  // interpreter passes exactly `(x)`). A mapping operand that does not
+  // compile to a lambda fails closed.
   Map: (args, compile) => {
     const coll = collArg('Map', args[0], compile);
     if (args[1] == null) throw new Error('Map: missing mapping function');
-    return `(${coll}).map(${compile(args[1])})`;
+    return `((_f) => (${coll}).map((_x) => _f(_x)))(${compile(args[1])})`;
   },
   Filter: (args, compile) => {
     const coll = collArg('Filter', args[0], compile);
     if (args[1] == null) throw new Error('Filter: missing predicate');
-    return `(${coll}).filter(${compile(args[1])})`;
+    return `((_f) => (${coll}).filter((_x) => _f(_x)))(${compile(args[1])})`;
+  },
+  // Number of elements satisfying the predicate.
+  CountIf: (args, compile) => {
+    const coll = collArg('CountIf', args[0], compile);
+    if (args[1] == null) throw new Error('CountIf: missing predicate');
+    return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${compile(args[1])})`;
+  },
+  // First element satisfying the predicate; none → NaN (the interpreter's
+  // `Nothing` projected onto a real target, matching `Last`).
+  Find: (args, compile) => {
+    const coll = collArg('Find', args[0], compile);
+    if (args[1] == null) throw new Error('Find: missing predicate');
+    return `((_f) => ((${coll}).find((_x) => _f(_x)) ?? NaN))(${compile(args[1])})`;
+  },
+  // 1-based index of the first element satisfying the predicate, or 0 if
+  // none — `findIndex` is 0-based and returns -1, so `+ 1` maps both.
+  IndexWhere: (args, compile) => {
+    const coll = collArg('IndexWhere', args[0], compile);
+    if (args[1] == null) throw new Error('IndexWhere: missing predicate');
+    return `((_f) => (${coll}).findIndex((_x) => _f(_x)) + 1)(${compile(args[1])})`;
+  },
+  // List of the 1-based indexes of the elements satisfying the predicate.
+  Position: (args, compile) => {
+    const coll = collArg('Position', args[0], compile);
+    if (args[1] == null) throw new Error('Position: missing predicate');
+    return `((_f) => (${coll}).flatMap((_x, _i) => _f(_x) ? [_i + 1] : []))(${compile(args[1])})`;
+  },
+  // Apply the function to 1-based indexes: 1-D `Tabulate(f, n)` → list;
+  // 2-D `Tabulate(f, m, n)` → m×n nested list with the first dimension
+  // outermost, matching the interpreter (and `Table`, which canonicalizes
+  // to `Tabulate` or to `Map` over `Range`). The function and the dimensions
+  // are hoisted into IIFE parameters so each is evaluated once (an impure
+  // dimension must not be re-evaluated per row), and dimensions are
+  // normalized like the interpreter's `toInteger`: rounded to the nearest
+  // integer and clamped to ≥ 0 (a NaN dimension yields an empty list).
+  Tabulate: (args, compile) => {
+    if (args[0] == null || args[1] == null)
+      throw new Error('Tabulate: missing argument');
+    if (args.length > 3)
+      throw new Error(
+        `Tabulate: only the 1-D and 2-D forms compile. Fail closed (D6).`
+      );
+    const f = compile(args[0]);
+    const n = compile(args[1]);
+    if (args.length === 2)
+      return `((_f, _n) => Array.from({ length: Math.max(0, Math.round(_n)) }, (_, _i) => _f(_i + 1)))(${f}, ${n})`;
+    const m = compile(args[2]);
+    return `((_f, _n, _m) => Array.from({ length: Math.max(0, Math.round(_n)) }, (_, _i) => Array.from({ length: Math.max(0, Math.round(_m)) }, (_, _j) => _f(_i + 1, _j + 1))))(${f}, ${n}, ${m})`;
+  },
+  // `Fill(f, (rows, cols))` → rows×cols nested list of `f(i, j)` with
+  // 1-based row/column indexes, matching the interpreter. Same hoisting and
+  // dimension normalization as `Tabulate`.
+  Fill: (args, compile) => {
+    const dims = args[1];
+    if (args[0] == null || dims == null)
+      throw new Error('Fill: missing argument');
+    if (!isFunction(dims) || dims.ops.length !== 2)
+      throw new Error(
+        `Fill: only the (function, (rows, cols)) form compiles. ` +
+          `Fail closed (D6).`
+      );
+    const f = compile(args[0]);
+    const rows = compile(dims.ops[0]);
+    const cols = compile(dims.ops[1]);
+    return `((_f, _r, _c) => Array.from({ length: Math.max(0, Math.round(_r)) }, (_, _i) => Array.from({ length: Math.max(0, Math.round(_c)) }, (_, _j) => _f(_i + 1, _j + 1))))(${f}, ${rows}, ${cols})`;
   },
   Log: (args, compile) => {
     if (args.length === 1) return `Math.log10(${compile(args[0])})`;
