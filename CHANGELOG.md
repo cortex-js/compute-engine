@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Collection indexing (`At`) now serializes with brackets by default:
+  `["At", v, 1]` → `v[1]` instead of `v_1`.** The bracket form is the
+  round-trip-safe notation: `v[1]` always parses back to `At`, while the
+  subscript form `v_1` only does when `v` is declared as an indexed collection —
+  otherwise it re-parses as the unrelated subscripted symbol `v_1`, silently
+  changing the meaning on a serialize→parse cycle. The previous behavior remains
+  available engine-wide via `ce.latexOptions.indexStyle = () => 'subscript'` or
+  per call via `expr.toLatex({ indexStyle: () => 'subscript' })`. (Requested by
+  the Tycho/Graph Paper team, whose per-call `indexStyle` opt-ins were a
+  recurring source of forgotten-call-site round-trip bugs.)
+
 ### New Features
 
 - **Five linear-algebra operators now compile to the JavaScript and Python
@@ -55,6 +68,35 @@
   result now mirrors the operand's shape, matching how row matrices
   (`matrix<1xN>`) and plain rank-1 vectors already broadcast. Consumers reading
   the broadcast result should expect one nested list per row.
+
+- **A `Comprehension` body containing a scoped subexpression now sees the
+  iteration index correctly.** When the body contained a `Block` (e.g. a
+  `with`-style local), a big operator (`Sum`, `Product`), a nested
+  comprehension, or a user-function application whose evaluation was deferred by
+  any of these, the subexpression evaluated blind to the index value: the index
+  was bound in a runtime scope that scoped subexpressions' lexical chains never
+  reached. Results could be silently wrong — an applied function literal whose
+  piecewise guard could not be decided without the index escaped with its
+  **parameters** permanently unbound (e.g. `[total(f(n, 4)) for n in 1..3]` with
+  `f(a,b) := [{a>b: b, a}, a-b]` returned expressions still containing `a` and
+  `b`) — and, because the wrongly-symbolic elements never reduced, evaluation of
+  such comprehensions cascaded into orders-of-magnitude excess work. Index
+  values are now installed in the comprehension's own scope for the duration of
+  each element's evaluation (isolated per walk, so interleaved iterations and
+  `.count` reads during a paused iteration are unaffected), and evaluating a
+  canonical `Comprehension` no longer re-creates it with a detached scope.
+
+- **Multiplying or adding a scalar to a piecewise (`Which`) no longer evaluates
+  the selected branch twice.** `2 \cdot \{A=1: X, Y\}` evaluated the taken
+  branch once during conditional-threading detection and again in the arithmetic
+  handler, doubling the cost of every piecewise operand of `Add`/ `Multiply`
+  (untaken branches were, and are, never evaluated).
+
+- **Fixed a stack overflow when evaluating `Negate` of an indexed collection
+  that cannot be materialized**, such as a `Range` with symbolic bounds reached
+  inside a comprehension body (`-Range(0, m + 5)` with `m` unbound): the
+  element-wise distribution retried the same non-distributable negation without
+  progress.
 
 ## 0.82.0 _2026-07-17_
 

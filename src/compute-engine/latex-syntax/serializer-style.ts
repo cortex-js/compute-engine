@@ -153,7 +153,11 @@ export function getIndexStyle(
   _expr: MathJsonExpression,
   _level: number
 ): 'subscript' | 'bracket' {
-  return 'subscript';
+  // Bracket is the round-trip-safe default: `v[1]` always parses back to
+  // `At`, while `v_1` only does when `v` is declared as an indexed
+  // collection. Use `indexStyle: () => 'subscript'` for conventional
+  // mathematical notation.
+  return 'bracket';
 }
 
 // Apply template strings to the expression

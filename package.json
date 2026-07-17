@@ -45,6 +45,7 @@
   ],
   "license": "MIT",
   "files": [
+    "/CHANGELOG.md",
     "/dist/esm-min",
     "/dist/umd-min",
     "/dist/types"

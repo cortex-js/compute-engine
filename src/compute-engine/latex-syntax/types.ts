@@ -1384,11 +1384,12 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    * Notation used to serialize collection indexing (the `At` operator), e.g.
    * `["At", v, 1]`.
    *
-   * - `'subscript'` (default): `v_1`, `M_{i,j}` — conventional mathematical
-   *   notation, symmetric with how subscript indexing of an
-   *   `indexed_collection` parses.
-   * - `'bracket'`: `v[1]`, `M[i,j]` — programming-style indexing, which always
-   *   round-trips back to `At` even when the collection symbol is not declared.
+   * - `'bracket'` (default): `v[1]`, `M[i,j]` — programming-style indexing,
+   *   which always round-trips back to `At` even when the collection symbol
+   *   is not declared.
+   * - `'subscript'`: `v_1`, `M_{i,j}` — conventional mathematical notation,
+   *   symmetric with how subscript indexing of an `indexed_collection`
+   *   parses; only round-trips when the base is declared as a collection.
    */
   indexStyle: (
     expr: MathJsonExpression,

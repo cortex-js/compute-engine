@@ -1532,8 +1532,28 @@ export class BoxedFunction
         if (isScoped) this.engine._popEvalContext();
       }
 
-      // Fallback to a symbolic result if we could not evaluate
-      const result = evalResult ?? this.engine.function(this._operator, tail);
+      // Fallback to a symbolic result if we could not evaluate. For a SCOPED
+      // operator with NO evaluate handler (a lazy scoped collection —
+      // `Comprehension`), whose operands did not change (all held), return
+      // THIS instance rather than re-boxing: re-canonicalizing would create a
+      // FRESH local scope with fresh bindings while the already-canonical
+      // children keep their bindings into the original scope — a split that
+      // makes the children blind to any value later installed in the new
+      // scope (a comprehension walk's index values). All other operators must
+      // keep re-boxing: the re-canonicalization of the tail is load-bearing
+      // both for non-scoped operators (e.g. the broadcast/tensor contraction
+      // of `Multiply` on operands that became collections) and for scoped
+      // operators WITH a handler that declined (e.g. a symbolic `Sum`, whose
+      // re-canonicalization performs big-op cleanups the rubi pipeline
+      // depends on).
+      const result =
+        evalResult ??
+        (isScoped &&
+        def.evaluate === undefined &&
+        this.isCanonical &&
+        tail.every((x, i) => x === this._ops[i])
+          ? this
+          : this.engine.function(this._operator, tail));
 
       // 6b/ Pole-aware numeric evaluation: at a known pole, N() yields
       // ComplexInfinity rather than NaN/garbage (analytic-property store).
@@ -1705,7 +1725,19 @@ export class BoxedFunction
       }
 
       return Promise.resolve(evaluateFn).then((value) => {
-        const result = value ?? engine.function(this._operator, tail);
+        // Handler-less scoped-operator no-operand-change identity: see the
+        // matching comment in the sync path (avoids re-canonicalizing a lazy
+        // scoped collection into a fresh, split-off local scope; every other
+        // operator keeps the load-bearing re-box).
+        const result =
+          value ??
+          (isScoped &&
+          def.evaluate === undefined &&
+          def.evaluateAsync === undefined &&
+          this.isCanonical &&
+          tail.every((x, i) => x === this._ops[i])
+            ? this
+            : engine.function(this._operator, tail));
         // 5b/ Pole-aware numeric evaluation (see the sync path).
         if (numericApproximation)
           return applyPoleOverride(engine, this._operator, tail, result);

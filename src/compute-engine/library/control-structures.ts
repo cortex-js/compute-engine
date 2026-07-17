@@ -19,6 +19,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
   CollectionHandlers,
+  BoxedValueDefinition,
 } from '../global-types.js';
 import { spellCheckMessage } from '../boxed-expression/validate.js';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
@@ -719,30 +720,6 @@ function* runLoop(
   return ce.Nothing;
 }
 
-/**
- * A fresh, per-walk binding scope for a `Comprehension`'s index variables.
- *
- * Every independent traversal of a comprehension — an `each()` stream, an
- * `at(n)`, or a dependent-`.count` enumeration — must bind its index variables
- * in its OWN scope, NOT in the shared, persistent `expr.localScope`. The loop
- * scope is created once at canonicalization and outlives every walk, so if two
- * walks assigned their indices into it they would clobber each other: a paused
- * generator, resumed after another walk advanced, would re-read an index the
- * other walk overwrote (interleaved iterators; reading `.count` mid-iteration).
- *
- * The fresh scope's parent IS `expr.localScope`, so `where`-clause captures and
- * every enclosing binding still resolve up the chain, and dependent clauses
- * (`Element(j, Range(1, i))`) still see this walk's own `i`. The pre-declared
- * index names are re-declared per walk by `runNestedElements`' declare-if-absent
- * pass (into this child scope, the current lexical scope), and `ce.assign`
- * therefore writes them here — isolated from every other walk.
- */
-function comprehensionWalkScope(expr: Expression): Scope | undefined {
-  if (!isFunction(expr)) return undefined;
-  if (!(expr.isScoped && expr.localScope !== undefined)) return undefined;
-  return { parent: expr.localScope, bindings: new Map() };
-}
-
 /** The index variable names of a comprehension's `Element` clauses, in order
  * (the wildcard `Nothing` is skipped — it binds nothing). */
 function comprehensionIndexNames(
@@ -758,34 +735,88 @@ function comprehensionIndexNames(
   return names;
 }
 
-/** Snapshot the CURRENT value of every index bound in a walk scope, as a
- * substitution map. Reads the per-walk bindings directly (each holds this
- * iteration's index value), so it must be called while the walk scope is still
- * live. Returns `undefined` when no index has a value yet. */
-function comprehensionIndexSubs(
-  walkScope: Scope
-): Record<string, Expression> | undefined {
-  let subs: Record<string, Expression> | undefined;
-  for (const [name, def] of walkScope.bindings) {
-    if (isValueDef(def) && def.value.value !== undefined)
-      (subs ??= {})[name] = def.value.value;
+/**
+ * Per-walk isolation of a `Comprehension`'s index values, WITHOUT a separate
+ * binding scope.
+ *
+ * The index values must live in the comprehension's own `localScope` bindings
+ * — the scope every subexpression of the body resolves against. A scoped
+ * subexpression (a `Block`, a scoped big-op, a nested comprehension) follows
+ * its canonical parent chain, which reaches `localScope` but would never
+ * reach a runtime-created sibling scope: binding the indices anywhere else
+ * makes those subexpressions evaluate BLIND to the indices (an applied
+ * function literal whose piecewise guard was then undecidable escaped with
+ * its parameters permanently free — wrong values, not just wasted work).
+ *
+ * But `localScope` is created once at canonicalization and outlives every
+ * walk, and walks interleave (paused `each()` generators, a dependent
+ * `.count` read mid-iteration), so concurrent walks writing their indices
+ * into it directly would clobber each other. The isolation contract: each
+ * walk brackets every synchronous advance with save → install its own
+ * current values → advance → capture → restore. Since an advance never
+ * spans a `yield`, no other walk can observe the installed values.
+ */
+class ComprehensionIndexFrame {
+  private defs: (BoxedValueDefinition | undefined)[];
+  /** This walk's current index values, persisted across advances. */
+  private mine: (Expression | undefined)[];
+  private saved: (Expression | undefined)[] = [];
+
+  constructor(scope: Scope | undefined, names: string[]) {
+    this.defs = names.map((name) => {
+      const def = scope?.bindings.get(name);
+      return def !== undefined && isValueDef(def) && !def.value.isConstant
+        ? def.value
+        : undefined;
+    });
+    this.mine = names.map(() => undefined);
   }
-  return subs;
+
+  /** Save the scope's current index values and install this walk's. */
+  install(): void {
+    this.saved = this.defs.map((d) => d?.value);
+    this.defs.forEach((d, i) => {
+      // Skip no-op writes: the `value` setter bumps `ce._generation`, and a
+      // gratuitous bump invalidates generation-keyed caches engine-wide.
+      if (d && d.value !== this.mine[i]) d.value = this.mine[i];
+    });
+  }
+
+  /** Capture the (possibly advanced) index values, then restore the saved
+   * ones. Call in a `finally` paired with `install()`. */
+  captureAndRestore(): void {
+    this.mine = this.defs.map((d) => d?.value);
+    this.defs.forEach((d, i) => {
+      if (d && d.value !== this.saved[i]) d.value = this.saved[i];
+    });
+  }
+
+  /** This walk's current index values as a substitution map (C2), or
+   * `undefined` if no index has a value yet. */
+  subs(names: string[]): Record<string, Expression> | undefined {
+    let subs: Record<string, Expression> | undefined;
+    this.mine.forEach((v, i) => {
+      if (v !== undefined) (subs ??= {})[names[i]] = v;
+    });
+    return subs;
+  }
 }
 
 /**
  * Stream a `Comprehension`'s body values one at a time.
  *
- * A fresh per-walk index scope (see `comprehensionWalkScope`) is pushed ONLY
- * around each synchronous `inner.next()` advance — the step that assigns the
- * next index and evaluates the body — and popped again BEFORE the value is
- * yielded. So the eval-context stack is never held across a `yield`: a consumer
- * that stops early or abandons the iterator leaves nothing pushed to leak (this
- * is safe even though `each()` does not forward `.return()` to us), and there is
- * no interference if evaluation happens between `.next()` calls. Because each
- * element is produced on demand, iterating an infinite domain and taking only a
- * prefix (e.g. `Take`, `First`) works without hitting the iteration limit; a
- * full drive of an infinite domain still terminates via the iteration-limit
+ * The comprehension's own scope is pushed — and this walk's index values
+ * installed in it (see `ComprehensionIndexFrame`) — ONLY around each
+ * synchronous `inner.next()` advance: the step that assigns the next index
+ * and evaluates the body. Both are undone BEFORE the value is yielded. So
+ * neither the eval-context stack nor the installed index values are ever held
+ * across a `yield`: a consumer that stops early or abandons the iterator
+ * leaves nothing pushed to leak (this is safe even though `each()` does not
+ * forward `.return()` to us), and interleaved walks of the same comprehension
+ * cannot observe each other's indices. Because each element is produced on
+ * demand, iterating an infinite domain and taking only a prefix (e.g. `Take`,
+ * `First`) works without hitting the iteration limit; a full drive of an
+ * infinite domain still terminates via the iteration-limit
  * `CancellationError` from `runNested`.
  */
 function* comprehensionStream(
@@ -796,29 +827,39 @@ function* comprehensionStream(
   const body = expr.ops[0] ?? ce.Nothing;
   const elements = expr.ops.slice(1);
 
-  const walkScope = comprehensionWalkScope(expr);
+  const scope =
+    isFunction(expr) && expr.isScoped ? expr.localScope : undefined;
   const indexNames = comprehensionIndexNames(elements);
+  // The index values are installed in the comprehension's OWN `localScope`
+  // bindings for the duration of each advance (see ComprehensionIndexFrame):
+  // that is the scope every subexpression of the body — including scoped
+  // ones like a `Block` or a big-op, whose canonical parent chains never
+  // reach a runtime-created scope — resolves against, so the body evaluates
+  // with the indices actually visible.
+  const frame = new ComprehensionIndexFrame(scope, indexNames);
   const state: LoopState = { stopped: false, count: 0 };
   const inner = runNestedElements(body, elements, ce, state, () => {});
   while (true) {
     let r: IteratorResult<Expression>;
-    // Capture this iteration's index values BY VALUE while the walk scope is
-    // still live (C2): a materialized body that is a function literal captures
+    // Capture this iteration's index values BY VALUE while they are still
+    // installed (C2): a materialized body that is a function literal captures
     // its free variables by reference against the scope active at apply time,
-    // so without this every element of `[x ↦ x + i for i in 1..3]` would share
-    // one `i` (resolving to its final value, or to nothing once the walk scope
-    // is gone) instead of closing over 1, 2, 3. Substituting the index values
-    // into the element is a no-op for a body that already resolved them.
+    // so without the substitution below every element of
+    // `[x ↦ x + i for i in 1..3]` would share one `i` (resolving to its
+    // final value, or to nothing once the walk completes) instead of closing
+    // over 1, 2, 3. Substituting the index values into the element is a
+    // no-op for a body that already resolved them.
     let subs: Record<string, Expression> | undefined;
-    if (walkScope) ce._pushEvalContext(walkScope);
+    if (scope) ce._pushEvalContext(scope);
+    frame.install();
     try {
       r = inner.next();
-      if (!r.done && walkScope && indexNames.length > 0)
-        subs = comprehensionIndexSubs(walkScope);
     } finally {
-      if (walkScope) ce._popEvalContext();
+      frame.captureAndRestore();
+      if (scope) ce._popEvalContext();
     }
     if (r.done) return;
+    if (indexNames.length > 0) subs = frame.subs(indexNames);
     const value =
       subs !== undefined && r.value.has(indexNames)
         ? r.value.subs(subs)
@@ -859,10 +900,18 @@ function comprehensionEnumeratedCount(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
   const ce = expr.engine;
   const elements = expr.ops.slice(1);
-  // Count in a FRESH per-walk scope, never the shared `localScope`: reading
-  // `.count` while another walk is paused must not clobber that walk's indices.
-  const walkScope = comprehensionWalkScope(expr);
-  if (walkScope) ce._pushEvalContext(walkScope);
+  // The count drive binds the indices in the shared `localScope` (where
+  // dependent clause domains resolve them), bracketed by a
+  // ComprehensionIndexFrame: reading `.count` while another walk is paused
+  // must not clobber that walk's indices — the frame restores the scope's
+  // values when the (fully synchronous) drive completes.
+  const scope = expr.isScoped ? expr.localScope : undefined;
+  const frame = new ComprehensionIndexFrame(
+    scope,
+    comprehensionIndexNames(elements)
+  );
+  if (scope) ce._pushEvalContext(scope);
+  frame.install();
   try {
     let n = 0;
     const state: LoopState = { stopped: false, count: 0 };
@@ -885,7 +934,8 @@ function comprehensionEnumeratedCount(expr: Expression): number | undefined {
       return undefined;
     throw e;
   } finally {
-    if (walkScope) ce._popEvalContext();
+    frame.captureAndRestore();
+    if (scope) ce._popEvalContext();
   }
 }
 

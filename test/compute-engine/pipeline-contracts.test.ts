@@ -253,36 +253,41 @@ describe('CONTRACT 2b: non-canonical .latex round-trip fidelity', () => {
     expect(J(e2.json)).toBe(J(e1.json));
   });
 
-  // --- exception class (i): At with an undeclared base -------------------
-  describe('exception (i): At over an undeclared base does not round-trip by default', () => {
-    test('CONTRACT VIOLATION: a[1] serializes to a_1, reparsing yields a bare symbol', () => {
+  // --- former exception class (i): At with an undeclared base ------------
+  // CLOSED by the bracket default: `At` now serializes as `a[1]`, which
+  // parses back to `At` regardless of the base's declared type. The lossy
+  // subscript form remains only as an opt-in (`indexStyle: 'subscript'`).
+  describe('former exception (i): At round-trips by default (bracket serialization)', () => {
+    test('a[1] serializes to a[1] and round-trips to At over an undeclared base', () => {
       const ce = new ComputeEngine();
       const e1 = ce.parse('a[1]', { canonical: false });
       expect(J(e1.json)).toBe(J(['At', 'a', 1]));
-      expect(e1.latex).toBe('a_1'); // subscript serialization is lossy here
+      expect(e1.latex).toBe('a[1]');
       const e2 = ce.parse(e1.latex, { canonical: false });
+      expect(J(e2.json)).toBe(J(e1.json)); // ["At","a",1] both ways
+    });
+
+    test('RESIDUAL EXCEPTION: opt-in subscript style is lossy over an undeclared base', () => {
+      const ce = new ComputeEngine();
+      const e1 = ce.parse('a[1]', { canonical: false });
+      const subLatex = (e1 as any).toLatex({
+        indexStyle: () => 'subscript',
+      });
+      expect(subLatex).toBe('a_1');
       // Reparsing a_1 gives the symbol "a_1", NOT ["At","a",1].
+      const e2 = ce.parse(subLatex, { canonical: false });
       expect(e2.json).toBe('a_1');
       expect(J(e2.json)).not.toBe(J(e1.json));
     });
 
-    test('MITIGATION A: indexStyle:"bracket" serialization round-trips', () => {
-      const ce = new ComputeEngine();
-      const e1 = ce.parse('a[1]', { canonical: false });
-      const bracketLatex = (e1 as any).toLatex({
-        indexStyle: () => 'bracket',
-      });
-      expect(bracketLatex).toBe('a[1]');
-      const e2 = ce.parse(bracketLatex, { canonical: false });
-      expect(J(e2.json)).toBe(J(e1.json)); // ["At","a",1] both ways
-    });
-
-    test('MITIGATION B: a declared collection base round-trips through a_1', () => {
+    test('a declared collection base round-trips through subscript v_1 too', () => {
       const ce = new ComputeEngine();
       ce.declare('v', { type: 'list<number>' } as any);
       const e1 = ce.parse('v[1]', { canonical: false });
       expect(J(e1.json)).toBe(J(['At', 'v', 1]));
-      const e2 = ce.parse(e1.latex, { canonical: false });
+      const subLatex = (e1 as any).toLatex({ indexStyle: () => 'subscript' });
+      expect(subLatex).toBe('v_1');
+      const e2 = ce.parse(subLatex, { canonical: false });
       expect(J(e2.json)).toBe(J(['At', 'v', 1]));
     });
   });

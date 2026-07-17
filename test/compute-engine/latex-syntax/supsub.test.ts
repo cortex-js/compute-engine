@@ -676,35 +676,38 @@ describe('TYPE-AWARE SUBSCRIPT HANDLING', () => {
     `);
   });
 
-  test('At serializes as a subscript by default, brackets on request', () => {
+  test('At serializes with brackets by default, subscript on request', () => {
     const { ComputeEngine } = require('../../../src/compute-engine');
     const ce2 = new ComputeEngine();
     ce2.declare('v', 'list<number>');
     ce2.declare('A', 'matrix<number>');
 
-    // Default: subscript notation (symmetric with how subscript indexing parses)
-    expect(ce2.box(['At', 'v', 1]).latex).toMatchInlineSnapshot(`v_1`);
+    // Default: bracket notation (round-trip-safe — `v[1]` always parses back
+    // to At, even when the base is not declared as a collection)
+    expect(ce2.box(['At', 'v', 1]).latex).toMatchInlineSnapshot(`v[1]`);
     expect(ce2.box(['At', 'A', 'k', 'j']).latex).toMatchInlineSnapshot(
-      `A_{k,j}`
+      `A[k, j]`
     );
     expect(ce2.box(['At', 'v', ['Add', 'n', 1]]).latex).toMatchInlineSnapshot(
-      `v_{n+1}`
+      `v[n+1]`
     );
 
-    // Opt-in bracket (programming-style) notation
+    // Opt-in subscript (conventional mathematical) notation
     expect(
-      ce2.box(['At', 'v', 1]).toLatex({ indexStyle: () => 'bracket' })
-    ).toMatchInlineSnapshot(`v[1]`);
+      ce2.box(['At', 'v', 1]).toLatex({ indexStyle: () => 'subscript' })
+    ).toMatchInlineSnapshot(`v_1`);
     expect(
-      ce2.box(['At', 'A', 'k', 'j']).toLatex({ indexStyle: () => 'bracket' })
-    ).toMatchInlineSnapshot(`A[k, j]`);
+      ce2.box(['At', 'A', 'k', 'j']).toLatex({ indexStyle: () => 'subscript' })
+    ).toMatchInlineSnapshot(`A_{k,j}`);
 
     // A compound base is parenthesized so the index binds to the whole base,
     // not just its trailing operand (regression: `At(x+1, 2)` serialized to the
     // ambiguous `x+1_2`, dropping the base grouping). Built structurally to keep
     // the raw `At` (canonicalizing would flag indexing a scalar as a type error).
     expect(
-      ce2.box(['At', ['Add', 'x', 1], 2], { structural: true }).latex
+      ce2
+        .box(['At', ['Add', 'x', 1], 2], { structural: true })
+        .toLatex({ indexStyle: () => 'subscript' })
     ).toMatchInlineSnapshot(`(x+1)_2`);
     expect(
       ce2

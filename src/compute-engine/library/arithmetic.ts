@@ -1642,8 +1642,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // then misclassify it as a scalar and broadcast it over the other
         // matrix, producing a bogus higher-rank result. Evaluating the negation
         // distributes it element-wise. (Guarded so symbolic scalars like
-        // `Negate(a)` don't recurse.)
-        return evalX.isIndexedCollection ? neg.evaluate() : neg;
+        // `Negate(a)` don't recurse — and, via the `Negate`-operator check, so
+        // a symbolic collection the negation could NOT distribute over doesn't
+        // either: for e.g. a `Range` with symbolic bounds, `neg()` returns
+        // `Negate(Range(…))` unchanged, and re-evaluating it would re-enter
+        // this handler with the same operand, recursing without progress.)
+        return evalX.isIndexedCollection && !isFunction(neg, 'Negate')
+          ? neg.evaluate()
+          : neg;
       },
     },
 

@@ -1736,11 +1736,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const base = serializer.wrap(ops[0] ?? 'Nothing', POSTFIX_PRECEDENCE);
       const indices = ops.slice(1).map((i) => serializer.serialize(i));
       if (serializer.indexStyle(expr, serializer.level) === 'bracket') {
-        // Programming-style `v[1]` / `M[i,j]`. Uses literal brackets (not
-        // `\lbrack`), which is what the postfix `[` index parser accepts.
+        // Programming-style `v[1]` / `M[i,j]` (default). Uses literal
+        // brackets (not `\lbrack`), which is what the postfix `[` index
+        // parser accepts, so this form always round-trips back to `At`.
         return joinLatex([base, '[', indices.join(', '), ']']);
       }
-      // Subscript notation `v_1` / `M_{i,j}` (default).
+      // Subscript notation `v_1` / `M_{i,j}`.
       return supsub('_', base, indices.join(','));
     },
   },
