@@ -92,6 +92,11 @@ export interface SetTypeNode extends ASTNode {
   elementType: TypeNode;
 }
 
+export interface BroadcastableTypeNode extends ASTNode {
+  kind: 'broadcastable';
+  elementType: TypeNode;
+}
+
 export interface CollectionTypeNode extends ASTNode {
   kind: 'collection';
   elementType: TypeNode;
@@ -161,6 +166,7 @@ export type TypeNode =
   | RecordTypeNode
   | DictionaryTypeNode
   | SetTypeNode
+  | BroadcastableTypeNode
   | CollectionTypeNode
   | ExpressionTypeNode
   | SymbolTypeNode
@@ -183,6 +189,7 @@ export interface ASTVisitor<T> {
   visitRecordType(node: RecordTypeNode): T;
   visitDictionaryType(node: DictionaryTypeNode): T;
   visitSetType(node: SetTypeNode): T;
+  visitBroadcastableType(node: BroadcastableTypeNode): T;
   visitCollectionType(node: CollectionTypeNode): T;
   visitExpressionType(node: ExpressionTypeNode): T;
   visitSymbolType(node: SymbolTypeNode): T;
@@ -220,6 +227,8 @@ export function visitNode<T>(node: TypeNode, visitor: ASTVisitor<T>): T {
       return visitor.visitDictionaryType(node);
     case 'set':
       return visitor.visitSetType(node);
+    case 'broadcastable':
+      return visitor.visitBroadcastableType(node);
     case 'collection':
       return visitor.visitCollectionType(node);
     case 'expression':

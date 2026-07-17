@@ -16,6 +16,7 @@ import {
   RecordEntryNode,
   DictionaryTypeNode,
   SetTypeNode,
+  BroadcastableTypeNode,
   CollectionTypeNode,
   ExpressionTypeNode,
   SymbolTypeNode,
@@ -48,6 +49,7 @@ import { PRIMITIVE_TYPES_SET } from './primitive.js';
                  | <record_type>
                  | <dictionary_type>
                  | <set_type>
+                 | <broadcastable_type>
                  | <collection_type>
                  | <expression_type>
                  | <symbol_type>
@@ -101,6 +103,8 @@ import { PRIMITIVE_TYPES_SET } from './primitive.js';
 
 <set_type> ::= "set"
              | "set<" <type> ">"
+
+<broadcastable_type> ::= "broadcastable" ( "<" <type> ">" )?
 
 <collection_type> ::= ( "collection" | "indexed_collection" ) ( "<" <type> ">" )?
 
@@ -523,6 +527,7 @@ export class Parser {
       this.parseRecordType() ||
       this.parseDictionaryType() ||
       this.parseSetType() ||
+      this.parseBroadcastableType() ||
       this.parseCollectionType() ||
       this.parseExpressionType() ||
       this.parseSymbolType() ||
@@ -1063,6 +1068,34 @@ export class Parser {
       }
 
       return this.createNode<SetTypeNode>('set', { elementType });
+    }
+
+    return undefined;
+  }
+
+  private parseBroadcastableType(): BroadcastableTypeNode | undefined {
+    if (
+      this.current.type === 'IDENTIFIER' &&
+      this.current.value === 'broadcastable'
+    ) {
+      this.advance();
+
+      let elementType: TypeNode = this.createNode<PrimitiveTypeNode>(
+        'primitive',
+        { name: 'any' }
+      );
+
+      if (this.match('<')) {
+        const type = this.parseUnionType();
+        if (type) {
+          elementType = type;
+        }
+        this.expect('>');
+      }
+
+      return this.createNode<BroadcastableTypeNode>('broadcastable', {
+        elementType,
+      });
     }
 
     return undefined;

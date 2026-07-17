@@ -291,6 +291,14 @@ export function canonicalInvisibleOperator(
           // `isIndexedCollection` below.
           x.type.type === 'value' ||
           x.type.matches('number') ||
+          // A `broadcastable<…>`-typed operand — arithmetic over an
+          // unknown-return call, e.g. `(2h(x)-1)` with `h: (number) ->
+          // unknown` — is a number OR an indexed collection of numbers
+          // (see the `Add`/`Multiply` type handlers). Juxtaposition is
+          // multiplication in the scalar case and scaling in the collection
+          // case, never a silent `Tuple`.
+          (typeof x.type.type !== 'string' &&
+            x.type.type.kind === 'broadcastable') ||
           // Matrix-typed symbols (`M P` → matrix product) and function-typed
           // symbols (`2f`, `f x` → scaled/product) are value-like operands:
           // juxtaposition is multiplication, not a silent `Tuple`.

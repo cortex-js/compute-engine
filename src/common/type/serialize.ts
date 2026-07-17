@@ -154,6 +154,10 @@ export function typeToString(type: Type, precedence = 0): string {
       result = `set<${typeToString(type.elements)}>`;
       break;
 
+    case 'broadcastable':
+      result = `broadcastable<${typeToString(type.elements)}>`;
+      break;
+
     case 'collection':
       result = `collection<${typeToString(type.elements)}>`;
       break;
@@ -237,6 +241,7 @@ function getPrecedence(kind: string): number {
       return SET_PRECEDENCE;
     case 'collection':
     case 'indexed_collection':
+    case 'broadcastable':
       return COLLECTION_PRECEDENCE;
     case 'tuple':
       return TUPLE_PRECEDENCE;

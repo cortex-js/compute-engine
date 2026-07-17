@@ -67,6 +67,8 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
 
   if (type.kind === 'set') return type.elements;
 
+  if (type.kind === 'broadcastable') return type.elements;
+
   if (type.kind === 'tuple') return widen(...type.elements.map((x) => x.type));
 
   if (type.kind === 'dictionary')

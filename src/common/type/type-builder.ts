@@ -13,6 +13,7 @@ import {
   RecordTypeNode,
   DictionaryTypeNode,
   SetTypeNode,
+  BroadcastableTypeNode,
   CollectionTypeNode,
   ExpressionTypeNode,
   SymbolTypeNode,
@@ -178,6 +179,13 @@ export class TypeBuilder implements ASTVisitor<Type> {
     }
 
     return { kind: 'set', elements };
+  }
+
+  visitBroadcastableType(node: BroadcastableTypeNode): Type {
+    // Do NOT collapse `broadcastable<any>` to a primitive — keep the object
+    // form so the constructor is always object-only.
+    const elements = this.buildType(node.elementType);
+    return { kind: 'broadcastable', elements };
   }
 
   visitCollectionType(node: CollectionTypeNode): Type {

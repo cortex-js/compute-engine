@@ -203,6 +203,21 @@ export type SetType = {
   elements: Type;
 };
 
+/**
+ * A `broadcastable<T>` is either a `T`, or an indexed collection of `T`
+ * applied element-wise (runtime broadcasting). It is the static type of an
+ * arithmetic result whose operand's collection-ness is not statically visible.
+ *
+ * A `T` (and any subtype of `T`) is a subtype of `broadcastable<T>`, and so is
+ * any indexed collection whose elements are subtypes of `T`. It is *not* a
+ * subtype of `T` (it may be a collection) nor of `list<T>` (it may be a
+ * scalar). See `subtype.ts` for the full relation.
+ */
+export type BroadcastableType = {
+  kind: 'broadcastable';
+  elements: Type;
+};
+
 /** The elements of a tuple are indexed and may be named or unnamed.
  * If one element is named, all elements must be named.
  */
@@ -226,6 +241,7 @@ export type Type =
   | CollectionType
   | ListType
   | SetType
+  | BroadcastableType
   | RecordType
   | DictionaryType
   | TupleType
@@ -314,6 +330,8 @@ export type Type =
  * <multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
  *
  * <set> ::= "set<" <type> ">"
+ *
+ * <broadcastable> ::= "broadcastable" ( "<" <type> ">" )?
  *
  * <collection ::= "collection<" <type> ">"
  *

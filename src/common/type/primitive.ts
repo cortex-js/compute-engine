@@ -98,6 +98,7 @@ export function isValidType(t: any): t is Readonly<Type> {
     t.kind === 'record' ||
     t.kind === 'dictionary' ||
     t.kind === 'set' ||
+    t.kind === 'broadcastable' ||
     t.kind === 'symbol' ||
     t.kind === 'expression' ||
     t.kind === 'numeric' ||

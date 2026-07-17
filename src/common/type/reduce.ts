@@ -13,6 +13,7 @@ import type {
   CollectionType,
   ListType,
   SetType,
+  BroadcastableType,
   TupleType,
   FunctionSignature,
   NegationType,
@@ -57,6 +58,9 @@ export function reduceType(type: Type): Type {
 
     case 'set':
       return reduceSetType(type);
+
+    case 'broadcastable':
+      return reduceBroadcastableType(type);
 
     case 'tuple':
       return reduceTupleType(type);
@@ -423,6 +427,20 @@ function reduceSetType(type: SetType): Type {
 
   // A set of `any` is a set
   if (reducedType === 'any') return 'set';
+
+  return decorate({
+    ...type,
+    elements: reducedType,
+  });
+}
+
+function reduceBroadcastableType(type: BroadcastableType): Type {
+  // A `broadcastable<T>` is OPAQUE: it is never collapsed to `T` or to a
+  // union, even for `broadcastable<any>`. Only its element type is reduced and
+  // an `error` element propagates.
+  const reducedType = reduceType(type.elements);
+
+  if (reducedType === 'error') return 'error';
 
   return decorate({
     ...type,

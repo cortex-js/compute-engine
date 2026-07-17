@@ -12,6 +12,7 @@ import {
   VALUE_TYPES,
 } from './primitive.js';
 import type {
+  BroadcastableType,
   NumericPrimitiveType,
   PrimitiveType,
   Type,
@@ -384,6 +385,16 @@ export function isSubtype(
     if (typeof lhs === 'string')
       return isPrimitiveSubtype(lhs as PrimitiveType, rhs as PrimitiveType);
 
+    // `broadcastable<T> <: R` (R a primitive) iff `T <: R` and
+    // `indexed_collection<T> <: R` (it may be a scalar *or* an indexed
+    // collection, so it is a subtype of `R` only when both branches are).
+    if (lhs.kind === 'broadcastable') {
+      return (
+        isSubtype(lhs.elements, rhs) &&
+        isSubtype({ kind: 'indexed_collection', elements: lhs.elements }, rhs)
+      );
+    }
+
     if (lhs.kind === 'value') {
       if (typeof lhs.value === 'boolean') return rhs === 'boolean';
       if (typeof lhs.value === 'number') {
@@ -473,10 +484,22 @@ export function isSubtype(
   // single type they jointly cover before probing.
   if (rhs.kind === 'union') {
     const rhsMembers = unionCoveringMembers(rhs.types);
+    // A broadcastable lhs is the union `T | indexed_collection<T>`, so it fits
+    // a union rhs iff BOTH branches are covered — possibly by *different*
+    // members (`broadcastable<number> <: number | indexed_collection<number>`).
+    // The member-wise probe below would require a single member to cover the
+    // whole broadcastable and wrongly reject exactly that case.
+    const broadcastableFitsUnion = (b: BroadcastableType) =>
+      isSubtype(b.elements, rhs) &&
+      isSubtype({ kind: 'indexed_collection', elements: b.elements }, rhs);
+    if (typeof lhs !== 'string' && lhs.kind === 'broadcastable')
+      return broadcastableFitsUnion(lhs);
     if (typeof lhs !== 'string' && lhs.kind === 'union') {
       // lhs is a union, rhs is a union
       return lhs.types.every((lhsType) =>
-        rhsMembers.some((rhsType) => isSubtype(lhsType, rhsType))
+        typeof lhsType !== 'string' && lhsType.kind === 'broadcastable'
+          ? broadcastableFitsUnion(lhsType)
+          : rhsMembers.some((rhsType) => isSubtype(lhsType, rhsType))
       );
     }
     return rhsMembers.some((t) => isSubtype(lhs, t));
@@ -511,6 +534,46 @@ export function isSubtype(
       return lhs.operator === rhs.operator;
     }
     if (lhs.kind === 'symbol') return rhs.operator === 'Symbol';
+  }
+
+  //
+  // Handle broadcastable on the rhs: `broadcastable<T>` = a `T`, or an indexed
+  // collection of `T` applied element-wise. This must precede the
+  // `typeof lhs === 'string'` fall-through below (a string `lhs` such as
+  // `integer` would otherwise short-circuit to `false`).
+  //
+  if (rhs.kind === 'broadcastable') {
+    // BOTH broadcastable: covariant in the element type. Checked *before* the
+    // scalar branch so `broadcastable<integer> <: broadcastable<number>`
+    // matches on the element types rather than falling into the scalar branch.
+    if (typeof lhs !== 'string' && lhs.kind === 'broadcastable')
+      return isSubtype(lhs.elements, rhs.elements);
+
+    // A union is broadcastable iff each of its members is.
+    if (typeof lhs !== 'string' && lhs.kind === 'union')
+      return lhs.types.every((t) => isSubtype(t, rhs));
+
+    // Scalar branch: `S <: T ⟹ S <: broadcastable<T>`.
+    if (isSubtype(lhs, rhs.elements)) return true;
+
+    // Collection branch: an indexed collection of `S` with `S <: T`. Tuples
+    // are excluded (a runtime broadcast binds points atomically) and sets are
+    // not indexed, so both — and every non-collection — fail here.
+    const elem = broadcastableCollectionElementType(lhs as Type);
+    if (elem !== undefined) return isSubtype(elem, rhs.elements);
+
+    return false;
+  }
+
+  //
+  // Handle broadcastable on the lhs (rhs is a non-broadcastable object):
+  // `broadcastable<T> <: R ⟺ T <: R and indexed_collection<T> <: R`.
+  //
+  if (typeof lhs !== 'string' && lhs.kind === 'broadcastable') {
+    return (
+      isSubtype(lhs.elements, rhs) &&
+      isSubtype({ kind: 'indexed_collection', elements: lhs.elements }, rhs)
+    );
   }
 
   // A primitive type is not a subtype of a composite type (except a union)
@@ -859,6 +922,35 @@ function isCollection(type: Type): boolean {
 function isIndexedCollection(type: Type): boolean {
   if (typeof type === 'string') return false;
   return ['indexed_collection', 'list', 'tuple'].includes(type.kind);
+}
+
+/**
+ * The element type of an indexed collection eligible for broadcasting (a
+ * `list` or an `indexed_collection`), or `undefined` for anything else. Tuples
+ * are deliberately excluded (a runtime broadcast binds points atomically) and
+ * sets are not indexed. Mirrors `collectionElementType` (utils.ts) for the
+ * list/indexed-collection cases without importing it (which would reintroduce
+ * the subtype ↔ utils cycle).
+ */
+function broadcastableCollectionElementType(type: Type): Type | undefined {
+  if (typeof type === 'string') {
+    if (type === 'indexed_collection' || type === 'list') return 'any';
+    return undefined;
+  }
+  if (type.kind === 'indexed_collection') return type.elements;
+  if (type.kind === 'list') {
+    const dims = type.dimensions;
+    // A multi-dimensional list indexed by one index yields a sub-tensor with
+    // one fewer dimension, not its scalar element (see `collectionElementType`).
+    if (dims && dims.length > 1)
+      return {
+        kind: 'list',
+        elements: type.elements,
+        dimensions: dims.slice(1),
+      };
+    return type.elements;
+  }
+  return undefined;
 }
 
 function isValue(type: Type): boolean {

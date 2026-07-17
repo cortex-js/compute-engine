@@ -159,6 +159,8 @@ import {
   isNumericTuple,
   isLinearAlgebraCollection,
   isBroadcastCollectionType,
+  isPossiblyCollectionTyped,
+  broadcastableResultTypeOf,
 } from '../collection-utils.js';
 import { isTensor } from '../boxed-expression/boxed-tensor.js';
 import { signFromAssumedPart } from './complex.js';
@@ -1438,6 +1440,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (collectionOps.length === 1) return collectionOps[0].type;
         if (collectionOps.length > 1)
           return widen(...collectionOps.map((x) => x.type.type));
+        // An operand whose collection-ness is not statically visible (a top
+        // `unknown`/`any`/`value` leaf such as an undeclared `h(x)`, or an
+        // already-`broadcastable<…>` inner node) makes the product
+        // `broadcastable<T>`. Hoisted above the NaN/finiteness early-returns
+        // for the same reason as `addType`'s branch: a broadcastable inner node
+        // has no meaningful `isFinite`, and an `unknown`-typed leaf's
+        // `isNaN`/`isFinite` are `undefined`. The `imaginary` → `finite_complex`
+        // closure (i·i = −1 is real) is applied inside the helper.
+        if (ops.some((x) => isPossiblyCollectionTyped(x)))
+          return broadcastableResultTypeOf(ops);
         if (ops.some((x) => x.isNaN)) return 'number';
         if (ops.some((x) => x.isFinite === false)) {
           // 0 · ±∞ = NaN (indeterminate).

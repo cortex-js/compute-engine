@@ -1,4 +1,4 @@
-import { widen } from '../common/type/utils.js';
+import { widen, broadcastElementType } from '../common/type/utils.js';
 import { isSubtype } from '../common/type/subtype.js';
 import { Type } from '../common/type/types.js';
 import { checkDeadline } from '../common/interruptible.js';
@@ -117,6 +117,73 @@ function dimensionlessIndexedElement(t: Type): Type | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * True when `expr`'s collection-ness is **not statically visible**, so an
+ * element-wise numeric operator (`Add`/`Multiply`) over it must produce a
+ * `broadcastable<T>` result — the operand might broadcast at runtime (a
+ * list-returning call) or stay scalar. The two triggering shapes are:
+ *
+ * - an **application** (function expression) with a top type
+ *   (`unknown`/`any`/`value`) — a call whose collection-ness is entirely
+ *   unknown (e.g. an undeclared function call `h(x)`); or
+ * - an already-`broadcastable<…>` type — propagation through nested arithmetic
+ *   (`Add(Multiply(2, h(x)), -1)`), including a symbol *declared*
+ *   `broadcastable<…>`.
+ *
+ * Deliberately EXCLUDES a bare **symbol** with a top type: an undeclared
+ * symbol types `unknown` only until the surrounding arithmetic's
+ * `checkNumericArgs` infers it scalar-numeric, so treating it as
+ * possibly-a-collection is order-dependent (`2x` on a cold engine would type
+ * `broadcastable<number>` while a warm one gives `finite_number`) and
+ * mis-routes the invisible-operator multiply-vs-Tuple gate (`6n`,
+ * `(abc)(xyz)`). An application's top-typed result is never refined by
+ * inference, so it genuinely may resolve to a collection at runtime. It also
+ * excludes an inferred-`number` symbol: `Add(2, x)` stays `number` and
+ * `Multiply(2, x)` stays `finite_number` (see the "non-interference with
+ * scalars" pins in `list-broadcast-typing.test.ts`). Statically-visible
+ * collection/tuple/tensor operands are handled by the dedicated branches that
+ * fire before this predicate is consulted.
+ */
+export function isPossiblyCollectionTyped(expr: Expression): boolean {
+  const t = expr.type.type;
+  if (t === 'unknown' || t === 'any' || t === 'value')
+    return isFunction(expr);
+  return typeof t !== 'string' && t.kind === 'broadcastable';
+}
+
+/**
+ * The `broadcastable<T>` result type of an element-wise numeric operator
+ * (`Add`/`Multiply`) when at least one operand `isPossiblyCollectionTyped`.
+ *
+ * Each operand contributes a scalar element type: a `broadcastable<S>`
+ * contributes `S`; a top `unknown`/`any`/`value` contributes `number`
+ * (`Add`/`Multiply` are numeric, so the element-wise result over any valid
+ * runtime operand is a number); a collection type contributes its
+ * unwrapped scalar element (`broadcastElementType` — unions and collections
+ * contribute their element, scalars themselves). The
+ * widened element becomes the `broadcastable` element, with one adjustment: a
+ * widened `imaginary` element becomes `finite_complex`, because sums and
+ * products of imaginaries can cancel to a real (`i + i` … `i·i = −1`).
+ */
+export function broadcastableResultTypeOf(
+  ops: ReadonlyArray<Expression>
+): Type {
+  const contributions = ops.map((op): Type => {
+    const t = op.type.type;
+    if (typeof t !== 'string' && t.kind === 'broadcastable') return t.elements;
+    if (t === 'unknown' || t === 'any' || t === 'value') return 'number';
+    // `broadcastElementType`, not `collectionElementType`: a union-typed
+    // operand (e.g. a declared `number | list<number>` return) must
+    // contribute its unwrapped scalar element, not the raw union — otherwise
+    // the collection branch leaks into the broadcastable element
+    // (`broadcastable<number | list<number>>`).
+    return broadcastElementType(t);
+  });
+  let element = widen(...contributions);
+  if (element === 'imaginary') element = 'finite_complex';
+  return { kind: 'broadcastable', elements: element };
 }
 
 /**

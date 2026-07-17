@@ -27,6 +27,8 @@ import {
   isDeclaredScalarNumber,
   isFiniteIndexedCollection,
   broadcastOverIndexedCollections,
+  isPossiblyCollectionTyped,
+  broadcastableResultTypeOf,
 } from '../collection-utils.js';
 
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
@@ -296,6 +298,17 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // `finite_integer | matrix` union for a scalar-plus-matrix mix like `X+1`.
   if (args.some((x) => isLinearAlgebraCollection(x)))
     return widen(...args.map((x) => x.type.type));
+  // An operand whose collection-ness is not statically visible (a top
+  // `unknown`/`any`/`value` leaf such as an undeclared `h(x)`, or an already-
+  // `broadcastable<…>` inner node) makes the sum `broadcastable<T>`: it might
+  // broadcast at runtime or stay scalar. Hoisted above the NaN/finiteness
+  // early-returns for the same reason as the collection branch — a
+  // broadcastable inner node has no meaningful `isFinite`, and an
+  // `unknown`-typed leaf's `isNaN`/`isFinite` are `undefined`, so it would
+  // otherwise fall through to the scalar `widen` tail and mis-type. The
+  // `imaginary` → `finite_complex` closure is applied inside the helper.
+  if (args.some((x) => isPossiblyCollectionTyped(x)))
+    return broadcastableResultTypeOf(args);
   if (args.some((x) => x.isNaN)) return 'number';
   // (+∞) + (−∞) = NaN: two or more non-finite operands can cancel to NaN.
   const nonFinite = args.filter((x) => x.isFinite === false);

@@ -2131,7 +2131,11 @@ function isScalarType(t: Type): boolean {
     t.kind === 'set' ||
     t.kind === 'dictionary' ||
     t.kind === 'record' ||
-    t.kind === 'signature'
+    t.kind === 'signature' ||
+    // A `broadcastable<T>` parameter accepts a collection whole (it handles
+    // collections natively), so it is NOT a scalar — a lambda with such a
+    // parameter must not be mapped/broadcast over a collection argument.
+    t.kind === 'broadcastable'
   )
     return false;
   if (t.kind === 'union' || t.kind === 'intersection')

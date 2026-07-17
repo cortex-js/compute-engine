@@ -82,22 +82,35 @@ compile-target fail-closed misfires on "typed number, actually a list").
 type constructor** — "T, or an indexed collection of T, elementwise" — rather
 than ad-hoc unions propagated through every handler. Plan shape:
 
-1. Prototype on `Add`/`Multiply`/`At` only; measure snapshot/test blast
-   radius before committing to the sweep.
+1. ~~Prototype on `Add`/`Multiply`/`At` only; measure snapshot/test blast
+   radius before committing to the sweep.~~ **DONE 2026-07-16** (staged):
+   type constructor + subsumption in `src/common/type/`, producers in
+   `addType`/Multiply, `At` + validator integration; full suite green, zero
+   snapshot churn. Key design outcome: the trigger is **applications-only**
+   (a bare symbol's `unknown` is inference-pending — triggering on it made
+   typing order-dependent and mis-grouped juxtapositions into `Tuple`), so
+   lambda bodies over untyped params still type scalar — the Tycho-19.2
+   lambda-return case moves to step 2. The invisible-operator
+   multiply-vs-Tuple allowlist arm was pulled forward (else `2(2h(x)-1)`
+   parses as `Tuple`).
 2. Library-wide type-handler sweep (every operator that assumes scalar
    arithmetic results states its `broadcastable` behavior), signature
-   matching/inference integration, subsumption rules
-   (`number <: broadcastable<number>`, `list<number> <:
-   broadcastable<number>`).
+   matching/inference integration. Known step-2 items from the step-1
+   review: the generic broadcast-typing wrapper
+   (`boxed-function.ts` ~1945) does not fire on broadcastable-typed
+   operands, so `Sin(2h(x)-1)` still types scalar `number`
+   (Power/Sqrt/Divide likewise); compile targets do not recognize
+   `broadcastable`-typed operands (compiled `2·h(x)` with an array-returning
+   `h` emits scalar ops — route through `_SYS.bcast` or extend the
+   fail-closed guard); and the lambda-body/return-type question above.
 3. Retire the point patches: validator widenings, the declared-signature
    restriction on the application broadcast gate (inferred signatures then
-   participate), and the 0.76 "symbolic-length broadcast typing lift"
-   residual.
+   participate), the lenient-`At` `restsOnUnknown`/`hasIndexableMember`
+   gates, and the 0.76 "symbolic-length broadcast typing lift" residual.
 
 Interactions to respect: non-finite typing convention, `infer(unknown)`
 destructiveness, scalar-requiring contexts (exponents, comparisons, plot
-coordinates) which will surface as the churn to triage in step 1. Supersedes
-Tycho 19.2 and the durable half of 19.3.
+coordinates). Supersedes Tycho 19.2 and the durable half of 19.3.
 
 ### Decide the `At` default-serialization round-trip contract
 

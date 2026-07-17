@@ -35,7 +35,9 @@ function typeCouldBeCollection(type: Type): boolean {
     type.kind === 'indexed_collection' ||
     type.kind === 'list' ||
     type.kind === 'set' ||
-    type.kind === 'tuple'
+    type.kind === 'tuple' ||
+    // A `broadcastable<T>` operand COULD be an indexed collection at runtime.
+    type.kind === 'broadcastable'
   )
     return true;
   if (type.kind === 'union')
@@ -65,6 +67,20 @@ function typeCouldBeNumericCollection(type: Type): boolean {
     type.kind === 'set'
   )
     return true;
+  // A `broadcastable<S>` operand COULD be a numeric indexed collection at
+  // runtime. Mirroring the COULD-semantics above (which admit `list`/
+  // `collection` without inspecting elements), `broadcastable<any>` /
+  // `broadcastable<unknown>` qualify too; a numeric-ish element type is
+  // admitted, a plainly non-numeric one (e.g. `broadcastable<string>`) is not.
+  if (type.kind === 'broadcastable') {
+    const el = type.elements;
+    return (
+      el === 'any' ||
+      el === 'unknown' ||
+      isSubtype(el, 'number') ||
+      isSubtype('number', el)
+    );
+  }
   if (type.kind === 'union')
     return type.types.some((t) => typeCouldBeNumericCollection(t));
   return false;

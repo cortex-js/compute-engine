@@ -2281,18 +2281,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       //  - a *union* with an indexable member (e.g. `finite_integer |
       //    vector<3>`, or a declared `number | list<number>` return; see
       //    `hasIndexableMember`); or
+      //  - a `broadcastable<T>` base (e.g. `2h(x)-1` with `h` returning
+      //    `unknown`, now typed `broadcastable<number>`): it is not a subtype
+      //    of `number`, so the `value.type.matches('number')` arm is FALSE for
+      //    it — the direct kind check is what admits it; or
       //  - the bare `value` primitive (e.g. inferred through a `(value*)`
       //    signature such as `Max`/`Min`): `value` is a strict supertype of
       //    `number` that also includes collection types, so it is no evidence
       //    of scalar-ness (mirrors the `value` handling in `invisible-operator`).
       // A provably scalar base (`\pi`, `(5)`, `sin(3)`, `finite_integer |
       // rational`) is not restored and still errors loudly.
+      const valueType = value?.type.type;
       if (
         value?.isValid &&
         patched[0]?.operator === 'Error' &&
         ((value.type.matches('number') &&
           (!isDeclaredScalarNumber(value) || restsOnUnknown(value))) ||
           hasIndexableMember(value) ||
+          (typeof valueType !== 'string' &&
+            valueType?.kind === 'broadcastable') ||
           value.type.type === 'value')
       )
         patched[0] = value;
