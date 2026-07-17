@@ -1032,6 +1032,42 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(`Trace: explicit axes do not compile. Fail closed (D6).`);
     return `_SYS.trace(${collArg('Trace', args[0], compile)})`;
   },
+  // Transpose + element-wise complex conjugate. Explicit axes do not compile.
+  ConjugateTranspose: (args, compile) => {
+    if (args.length > 1)
+      throw new Error(
+        `ConjugateTranspose: explicit axes do not compile. Fail closed (D6).`
+      );
+    return `_SYS.conjTranspose(${collArg('ConjugateTranspose', args[0], compile)})`;
+  },
+  // Rank-dispatched: matrix → main-diagonal vector; vector → diagonal matrix.
+  // The offset/multi-argument forms do not compile.
+  Diagonal: (args, compile) => {
+    if (args.length > 1)
+      throw new Error(
+        `Diagonal: the offset/banded form does not compile. Fail closed (D6).`
+      );
+    return `_SYS.diagonal(${collArg('Diagonal', args[0], compile)})`;
+  },
+  // Integer matrix power (`M^0` identity, negative → inverse). A non-integer
+  // exponent or non-square matrix yields NaN at run time.
+  MatrixPower: (args, compile) => {
+    if (args[0] == null || args[1] == null)
+      throw new Error('MatrixPower: missing argument');
+    return `_SYS.matpow(${collArg('MatrixPower', args[0], compile)}, ${compile(
+      args[1]
+    )})`;
+  },
+  // Reduced row echelon form (Gauss–Jordan).
+  RowReduce: (args, compile) =>
+    `_SYS.rref(${collArg('RowReduce', args[0], compile)})`,
+  // CE `Rank` is the TENSOR rank — the number of axes (scalar 0, vector 1,
+  // matrix 2, …), NOT the linear-algebra (row) rank. It is the nesting depth of
+  // the compiled value, so it lowers for any operand (a scalar gives 0).
+  Rank: (args, compile) => {
+    if (args[0] == null) throw new Error('Rank: missing argument');
+    return `(_SYS.shape(${compile(args[0])}).length)`;
+  },
   Shape: (args, compile) => {
     if (args[0] == null) throw new Error('Shape: missing argument');
     return `_SYS.shape(${compile(args[0])})`;
@@ -2254,11 +2290,234 @@ function bcast(
 }
 
 /**
+ * Product dispatch on dimensionality, mirroring the interpreter's
+ * `Dot`/`MatrixMultiply`: vector·vector → scalar, matrix·vector → vector,
+ * vector·matrix → vector, matrix·matrix → matrix. Real, nested-array
+ * representation; a dimension mismatch yields NaN (the interpreter's
+ * error/inert result projected onto a real target).
+ */
+function matmul(a: any, b: any): any {
+  const aM = Array.isArray(a?.[0]);
+  const bM = Array.isArray(b?.[0]);
+  if (!aM && !bM) {
+    if (a.length !== b.length) return NaN;
+    let s = 0;
+    for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+    return s;
+  }
+  if (aM && !bM)
+    return a.map((row: number[]) =>
+      row.length === b.length
+        ? row.reduce((s: number, v: number, i: number) => s + v * b[i], 0)
+        : NaN
+    );
+  if (!aM && bM) {
+    if (a.length !== b.length) return NaN;
+    const n = b[0].length;
+    const out = new Array(n).fill(0);
+    for (let i = 0; i < a.length; i++)
+      for (let j = 0; j < n; j++) out[j] += a[i] * b[i][j];
+    return out;
+  }
+  const m = a.length;
+  const k = a[0].length;
+  if (b.length !== k) return NaN;
+  const n = b[0].length;
+  const out: number[][] = [];
+  for (let i = 0; i < m; i++) {
+    const row = new Array(n).fill(0);
+    for (let p = 0; p < k; p++) {
+      const v = a[i][p];
+      for (let j = 0; j < n; j++) row[j] += v * b[p][j];
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/**
+ * Interpreter-faithful `Multiply` over a mix of scalars and (possibly nested)
+ * real arrays — the runtime side of the compile target's tensor-Multiply
+ * lowering for operands whose collection-ness is not statically provable (a
+ * `broadcastable<T>` node or a top-typed application such as `h(x)`); see
+ * `tryCompileBroadcast`'s ≥2-possibly-collection branch.
+ *
+ * Mirrors `mulTensors` (`arithmetic-mul-div.ts`): scalar factors combine into a
+ * single factor that scales the tensor result; two rank-1 vectors take the
+ * element-wise (Hadamard) product — inert (NaN) on a length mismatch — while any
+ * rank-≥2 operand contracts via the matrix product (`matmul`), so no runtime
+ * shape (vector·vector, matrix·vector, matrix·matrix) silently diverges from the
+ * interpreter. Real-only, matching the scalar Multiply codegen it replaces;
+ * complex operands are deferred to the fail-closed path at compile time.
+ */
+function mulTensor(...args: BcastValue[]): BcastValue {
+  const tensors: BcastValue[][] = [];
+  let scalar = 1;
+  for (const x of args) {
+    if (Array.isArray(x)) tensors.push(x);
+    else scalar *= x as number;
+  }
+  if (tensors.length === 0) return scalar;
+  let product: BcastValue[] = tensors[0];
+  for (let i = 1; i < tensors.length; i++) {
+    const next = tensors[i];
+    const pRank1 = !Array.isArray(product[0]);
+    const nRank1 = !Array.isArray(next[0]);
+    if (pRank1 && nRank1) {
+      // Two rank-1 vectors: Hadamard (element-wise), inert on a length
+      // mismatch — matching the interpreter (Issue #29), NOT the dot product.
+      if (product.length !== next.length) return NaN;
+      const out: BcastValue[] = new Array(product.length);
+      for (let k = 0; k < product.length; k++)
+        out[k] = (product[k] as number) * (next[k] as number);
+      product = out;
+    } else {
+      // A rank-≥2 operand contracts via the matrix product. `matmul` returns a
+      // bare number only on a dimension mismatch (NaN) here — stay inert.
+      const r = matmul(product, next);
+      if (typeof r === 'number') return r;
+      product = r as BcastValue[];
+    }
+  }
+  if (scalar !== 1)
+    product = bcast((v) => (v as number) * scalar, product) as BcastValue[];
+  return product;
+}
+
+/**
+ * Inverse by Gauss–Jordan with partial pivoting; a non-square or singular input
+ * yields NaN (the interpreter stays inert for a singular matrix). Standalone so
+ * `matpow` can reuse it for a negative exponent.
+ */
+function matinv(m: number[][]): number[][] | number {
+  const n = m?.length;
+  if (!n || m.some((row) => !Array.isArray(row) || row.length !== n)) return NaN;
+  const a = m.map((row, i) => [
+    ...row,
+    ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)),
+  ]);
+  for (let i = 0; i < n; i++) {
+    let piv = i;
+    for (let r = i + 1; r < n; r++)
+      if (Math.abs(a[r][i]) > Math.abs(a[piv][i])) piv = r;
+    if (a[piv][i] === 0) return NaN;
+    if (piv !== i) [a[i], a[piv]] = [a[piv], a[i]];
+    const f = a[i][i];
+    for (let c = 0; c < 2 * n; c++) a[i][c] /= f;
+    for (let r = 0; r < n; r++) {
+      if (r === i) continue;
+      const g = a[r][i];
+      if (g === 0) continue;
+      for (let c = 0; c < 2 * n; c++) a[r][c] -= g * a[i][c];
+    }
+  }
+  return a.map((row) => row.slice(n));
+}
+
+/**
+ * Conjugate transpose: transpose the matrix and complex-conjugate every element
+ * (a real element is unchanged; a `{re,im}` element flips the sign of `im`). A
+ * vector conjugates in place (transpose of a rank-1 vector is itself), matching
+ * the interpreter and `_SYS.transpose`.
+ */
+function conjTranspose(m: any): any {
+  const conj = (v: any): any =>
+    v && typeof v === 'object' && 'im' in v ? { re: v.re, im: -v.im } : v;
+  if (!Array.isArray(m)) return m;
+  if (!Array.isArray(m[0])) return m.map(conj);
+  return m[0].map((_: unknown, j: number) => m.map((row: any[]) => conj(row[j])));
+}
+
+/**
+ * `Diagonal` dispatches on rank, matching the interpreter: a MATRIX yields its
+ * main-diagonal vector (length `min(rows, cols)`); a VECTOR yields the square
+ * matrix with that vector on the diagonal and zeros elsewhere.
+ */
+function diagonal(m: any): any {
+  if (!Array.isArray(m)) return NaN;
+  if (Array.isArray(m[0])) {
+    const n = Math.min(m.length, m[0].length);
+    const out: any[] = [];
+    for (let i = 0; i < n; i++) out.push(m[i][i]);
+    return out;
+  }
+  const n = m.length;
+  return Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => (i === j ? m[i] : 0))
+  );
+}
+
+/**
+ * Integer matrix power, mirroring the interpreter: `M^0` is the identity, `M^n`
+ * folds `n` matrix products, and a negative power inverts first (`M^-n =
+ * (M^-1)^n`). A non-square matrix, a singular matrix under a negative power, or
+ * a non-integer exponent yields NaN (the interpreter errors / stays inert).
+ */
+function matpow(m: number[][], p: number): number[][] | number {
+  if (!Array.isArray(m) || !Array.isArray(m[0])) return NaN;
+  const n = m.length;
+  if (m.some((r) => !Array.isArray(r) || r.length !== n)) return NaN;
+  if (!Number.isInteger(p)) return NaN;
+  let base: number[][] = m.map((r) => r.slice());
+  let e = p;
+  if (e < 0) {
+    const inv = matinv(m);
+    if (!Array.isArray(inv)) return NaN;
+    base = inv as number[][];
+    e = -e;
+  }
+  let result: number[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))
+  );
+  for (let k = 0; k < e; k++) result = matmul(result, base) as number[][];
+  return result;
+}
+
+/**
+ * Reduced row echelon form (Gauss–Jordan with partial pivoting), matching the
+ * interpreter's `RowReduce`. A non-matrix operand yields NaN. Float arithmetic:
+ * pivots are compared with an exact zero test (the same convention as `det`/
+ * `inv`), so near-singular inputs with floating-point noise may pivot
+ * differently than the exact interpreter.
+ */
+function rref(m: number[][]): number[][] | number {
+  if (!Array.isArray(m) || !Array.isArray(m[0])) return NaN;
+  const rows = m.length;
+  const cols = m[0].length;
+  const a = m.map((r) => r.slice());
+  let r = 0;
+  for (let c = 0; c < cols && r < rows; c++) {
+    let piv = r;
+    for (let i = r + 1; i < rows; i++)
+      if (Math.abs(a[i][c]) > Math.abs(a[piv][c])) piv = i;
+    if (a[piv][c] === 0) continue;
+    if (piv !== r) [a[piv], a[r]] = [a[r], a[piv]];
+    const lv = a[r][c];
+    for (let j = 0; j < cols; j++) a[r][j] /= lv;
+    for (let k = 0; k < rows; k++) {
+      if (k === r) continue;
+      const f = a[k][c];
+      if (f === 0) continue;
+      for (let j = 0; j < cols; j++) a[k][j] -= f * a[r][j];
+    }
+    r++;
+  }
+  return a;
+}
+
+/**
  * Runtime helpers injected as `_SYS` into compiled JavaScript functions.
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
  */
 const SYS_HELPERS = {
   bcast,
+  // Element-wise addition, mirroring the interpreter's `Add` broadcast
+  // (`addTensors`/`broadcastOverIndexedCollections`): scalar+scalar is ordinary
+  // addition; over (possibly nested) arrays it recurses element-wise. Used as
+  // the `Sum` collection-reduce combiner on the possibly-collection path, where
+  // the elements may themselves be vectors/matrices at run time.
+  add: (a: BcastValue, b: BcastValue): BcastValue =>
+    bcast((x, y) => (x as number) + (y as number), a, b),
   chop,
   factorial,
   factorial2,
@@ -2300,44 +2559,11 @@ const SYS_HELPERS = {
   // Product dispatch on dimensionality, mirroring the interpreter's
   // `Dot`/`MatrixMultiply`: vector·vector → scalar, matrix·vector → vector,
   // vector·matrix → vector, matrix·matrix → matrix.
-  matmul: (a: any, b: any): any => {
-    const aM = Array.isArray(a?.[0]);
-    const bM = Array.isArray(b?.[0]);
-    if (!aM && !bM) {
-      if (a.length !== b.length) return NaN;
-      let s = 0;
-      for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-      return s;
-    }
-    if (aM && !bM)
-      return a.map((row: number[]) =>
-        row.length === b.length
-          ? row.reduce((s: number, v: number, i: number) => s + v * b[i], 0)
-          : NaN
-      );
-    if (!aM && bM) {
-      if (a.length !== b.length) return NaN;
-      const n = b[0].length;
-      const out = new Array(n).fill(0);
-      for (let i = 0; i < a.length; i++)
-        for (let j = 0; j < n; j++) out[j] += a[i] * b[i][j];
-      return out;
-    }
-    const m = a.length;
-    const k = a[0].length;
-    if (b.length !== k) return NaN;
-    const n = b[0].length;
-    const out: number[][] = [];
-    for (let i = 0; i < m; i++) {
-      const row = new Array(n).fill(0);
-      for (let p = 0; p < k; p++) {
-        const v = a[i][p];
-        for (let j = 0; j < n; j++) row[j] += v * b[p][j];
-      }
-      out.push(row);
-    }
-    return out;
-  },
+  matmul,
+  // Interpreter-faithful `Multiply` over a mix of scalars and (possibly
+  // nested) real arrays whose collection-ness was not statically provable —
+  // see `tryCompileBroadcast`'s ≥2-possibly-collection branch.
+  mul: mulTensor,
   cross: (a: number[], b: number[]): number[] | number =>
     a.length === 3 && b.length === 3
       ? [
@@ -2427,31 +2653,13 @@ const SYS_HELPERS = {
   },
   // Inverse by Gauss–Jordan with partial pivoting; a non-square or singular
   // input yields NaN (the interpreter stays inert for a singular matrix).
-  inv: (m: number[][]): number[][] | number => {
-    const n = m?.length;
-    if (!n || m.some((row) => !Array.isArray(row) || row.length !== n))
-      return NaN;
-    const a = m.map((row, i) => [
-      ...row,
-      ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)),
-    ]);
-    for (let i = 0; i < n; i++) {
-      let piv = i;
-      for (let r = i + 1; r < n; r++)
-        if (Math.abs(a[r][i]) > Math.abs(a[piv][i])) piv = r;
-      if (a[piv][i] === 0) return NaN;
-      if (piv !== i) [a[i], a[piv]] = [a[piv], a[i]];
-      const f = a[i][i];
-      for (let c = 0; c < 2 * n; c++) a[i][c] /= f;
-      for (let r = 0; r < n; r++) {
-        if (r === i) continue;
-        const g = a[r][i];
-        if (g === 0) continue;
-        for (let c = 0; c < 2 * n; c++) a[r][c] -= g * a[i][c];
-      }
-    }
-    return a.map((row) => row.slice(n));
-  },
+  inv: matinv,
+  // Conjugate transpose, diagonal (rank-dispatched), integer matrix power, and
+  // reduced row echelon form — see the standalone helpers above.
+  conjTranspose,
+  diagonal,
+  matpow,
+  rref,
   trace: (m: number[][]): number => {
     if (!Array.isArray(m) || !Array.isArray(m[0])) return NaN;
     let s = 0;
@@ -3065,11 +3273,18 @@ function compileSumProduct(
   if (!args[1]) {
     // Collection form: `Sum(collection)` / `Product(collection)` with no
     // indexing set — this is what `.total` (→ `Sum`) and a bare list product
-    // canonicalize to. Reduce over the elements. Only an indexed collection
-    // lowers to a JS array; a dictionary/string/scalar operand fails closed
-    // (D6), matching `Length`/`At`/`Reduce`.
+    // canonicalize to. Reduce over the elements. A statically indexed
+    // collection lowers to a bare `.reduce`; a possibly-collection operand (a
+    // `broadcastable<T>` node or a top-typed application such as `h(x)`, e.g. a
+    // Tycho document helper typed `(number) -> unknown`) may be a scalar OR an
+    // array at run time, so it reduces under an `Array.isArray` guard (a runtime
+    // scalar returns itself, matching the interpreter's `Sum(scalar) = scalar`).
+    // A dictionary/string/statically-scalar operand fails closed (D6), matching
+    // `Length`/`At`/`Reduce`.
     if (isIndexedCollectionOperand(args[0]))
-      return emitCollectionReduce(kind, args[0], target);
+      return emitCollectionReduce(kind, args[0], target, false);
+    if (isPossiblyCollectionTypedJS(args[0]))
+      return emitCollectionReduce(kind, args[0], target, true);
     throw new Error(`${kind}: no indexing set`);
   }
   return emitSumProduct(kind, args[0], args.slice(1), target);
@@ -3259,12 +3474,29 @@ function compileGcdLcm(
 function emitCollectionReduce(
   kind: 'Sum' | 'Product',
   coll: Expression,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  guarded: boolean
 ): string {
   const code = BaseCompiler.compile(coll, target);
-  const op = kind === 'Sum' ? '+' : '*';
+  // A statically indexed collection has provably scalar elements (a
+  // `list<number>`/`vector<n>`), so it folds with the bare scalar operator and
+  // is always an array — no runtime guard.
+  if (!guarded) {
+    const op = kind === 'Sum' ? '+' : '*';
+    const identity = kind === 'Sum' ? '0' : '1';
+    return `(${code}).reduce((_a, _b) => _a ${op} _b, ${identity})`;
+  }
+  // A possibly-collection operand (`broadcastable<T>` / top-typed application)
+  // may be a scalar OR an array whose elements are themselves vectors/matrices
+  // at run time. Fold with the element-wise-aware combiner so a nested result
+  // matches the interpreter (`Add` broadcasts element-wise → `_SYS.add`;
+  // `Multiply` dispatches on rank → `_SYS.mul`, Hadamard for vectors and matrix
+  // product for matrices) rather than string-concatenating arrays under a bare
+  // `+`. Guard the scalar case so a runtime scalar returns itself (interpreter's
+  // `Sum(scalar) = scalar`).
+  const combiner = kind === 'Sum' ? '_SYS.add' : '_SYS.mul';
   const identity = kind === 'Sum' ? '0' : '1';
-  return `(${code}).reduce((_a, _b) => _a ${op} _b, ${identity})`;
+  return `((_c) => Array.isArray(_c) ? _c.reduce((_a, _b) => ${combiner}(_a, _b), ${identity}) : _c)(${code})`;
 }
 
 /**

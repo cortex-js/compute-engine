@@ -1,3 +1,61 @@
+## [Unreleased]
+
+### New Features
+
+- **Five linear-algebra operators now compile to the JavaScript and Python
+  targets:** `ConjugateTranspose`, `Diagonal` (rank-dispatched — a matrix gives
+  its main-diagonal vector, a vector gives the diagonal matrix), `MatrixPower`
+  (integer powers, with a negative power inverting first), `RowReduce` (reduced
+  row echelon form), and `Rank`. Previously these threw at compile time and fell
+  back to the interpreter. Note that `Rank` is the **tensor** rank — the number
+  of axes (scalar `0`, vector `1`, matrix `2`) — not the linear-algebra (row)
+  rank.
+
+### Bug Fixes
+
+- **The `javascript` compile target now lowers a reduce (`Sum`/`Product`) and
+  rank-dispatched multiplication over an `unknown`- or `broadcastable`-typed
+  collection operand**, where it previously failed closed and fell back to the
+  interpreter. A collection `Sum`/`Product` over such an operand reduces under a
+  runtime guard (a scalar at run time still matches `Sum(scalar) = scalar`),
+  with an element-wise-aware combiner so a nested (matrix-valued) element
+  reduces correctly rather than string-concatenating. A `Multiply` of two
+  possibly-collection operands compiles to a runtime helper that dispatches on
+  rank — element-wise for equal-length vectors, matrix product for matrices —
+  matching the interpreter. This lets a compiled function whose evidence-derived
+  signature is `(…) -> unknown` render through the compile path instead of only
+  the interpreter.
+
+- **A function declared with a fixed-length list return type (e.g.
+  `(number) -> vector<11>`) now compiles.** The value assignment wraps the body
+  in a `Typed` ascription, which the compile targets did not handle, so every
+  compiled call threw ``Unknown operator `Typed` ``. `Typed` is a transparent,
+  no-op-at-runtime ascription and now compiles to its value operand on every
+  target.
+
+- **`Multiply` of two matrices is now the matrix product regardless of how the
+  operands are presented.** A matrix _literal_ or a matrix-returning function
+  _application_ already contracted, but a _symbol_ whose value is a matrix
+  incorrectly broadcast element-wise (Hadamard) — the dispatch keyed on the node
+  kind and missed a matrix-valued symbol. All three now contract consistently,
+  so 0.82.0's per-step matrix-contraction rule holds for symbol operands too.
+  Vectors remain element-wise.
+
+- **The Python compile target no longer unwraps a one-element `ElementMax` /
+  `ElementMin` / `Clamp` broadcast to a scalar.** `ElementMax([1, 2], [3])` now
+  compiles to a value that runs to `[3]` (zipping to the shortest operand),
+  matching the interpreter and the JavaScript target, instead of the bare scalar
+  `3`.
+
+- **Broadcasting an element-wise operator over an `N×1` column matrix now
+  preserves its rank-2 shape.** For example,
+  `\bold{v} = \begin{pmatrix} 5 \\ -3 \end{pmatrix}` evaluates to the nested
+  `[[v === 5], [v === -3]]` (a 2×1 result) instead of the flattened rank-1
+  `[v === 5, v === -3]`. A column vector is a `matrix<Nx1>`, and the broadcast
+  result now mirrors the operand's shape, matching how row matrices
+  (`matrix<1xN>`) and plain rank-1 vectors already broadcast. Consumers reading
+  the broadcast result should expect one nested list per row.
+
 ## 0.82.0 _2026-07-17_
 
 ### Breaking Changes
@@ -7,18 +65,18 @@
   of the scalar `32`. This makes `Multiply` over lists consistent: element-wise
   is what `Add`, `Power` (`k^2`), scalar scaling (`2k`), and symbol-bound list
   operands (`k \cdot k` with `k := [1,3,10]`) already did — previously the
-  *same* product could zip or contract depending on whether an operand was a
+  _same_ product could zip or contract depending on whether an operand was a
   literal list, a bound symbol, or a computed expression (`\sqrt{k} \cdot k`
   silently collapsed a 3-element family to one scalar). **For the dot product,
-  use the explicit `Dot` or `MatrixMultiply` operators**, which are unchanged.
-  A product is folded left-to-right, one pair at a time: a step involving a
-  matrix (`matrix·matrix`, `matrix·vector`, `vector·matrix`) still contracts
-  (matrix product, unchanged), while a step between two vectors is
-  element-wise. Note this applies per step, so in a longer chain a contraction
-  that *produces* a vector then combines element-wise with a following vector:
-  `M·u·v` is `(M·u) ⊙ v`, no longer the scalar `(M·u)·v`. Vectors of differing
-  lengths stay inert (no implicit zip-to-shortest). The compiled targets follow
-  the same semantics: equal-length `vector·vector` compiles to the element-wise
+  use the explicit `Dot` or `MatrixMultiply` operators**, which are unchanged. A
+  product is folded left-to-right, one pair at a time: a step involving a matrix
+  (`matrix·matrix`, `matrix·vector`, `vector·matrix`) still contracts (matrix
+  product, unchanged), while a step between two vectors is element-wise. Note
+  this applies per step, so in a longer chain a contraction that _produces_ a
+  vector then combines element-wise with a following vector: `M·u·v` is
+  `(M·u) ⊙ v`, no longer the scalar `(M·u)·v`. Vectors of differing lengths stay
+  inert (no implicit zip-to-shortest). The compiled targets follow the same
+  semantics: equal-length `vector·vector` compiles to the element-wise
   broadcast; statically mismatched lengths and matrix contractions fall back to
   the interpreter.
 
@@ -26,82 +84,80 @@
   parses to its own head (`["Sum", body]` / `["Product", body]`) instead of
   `["Reduce", body, "Add"/"Multiply"]`.** This is a (non-canonical and
   canonical) parse-shape change, called out per the pipeline-contract rules:
-  consumers matching on the `Reduce` shape should match the big-op head
-  instead. It makes the serialization round-trip lossless — `["Sum", body]`
-  serializes to a bounds-less `\sum ⟨body⟩`, which previously re-parsed to a
-  different expression. Evaluation semantics are unchanged (a collection body
-  still reduces).
+  consumers matching on the `Reduce` shape should match the big-op head instead.
+  It makes the serialization round-trip lossless — `["Sum", body]` serializes to
+  a bounds-less `\sum ⟨body⟩`, which previously re-parsed to a different
+  expression. Evaluation semantics are unchanged (a collection body still
+  reduces).
 
-- **Broadcasting over a one-element collection now returns a one-element
-  `List` instead of unwrapping to the scalar.** `\sin(2 \cdot [5])` now
-  evaluates to `[\sin(10)]`, previously the bare scalar `\sin(10)`.
-  Broadcasting a scalar function over an `n`-element indexed collection now
-  produces an `n`-element `List` for every `n ≥ 1`, matching the expression's
-  static `list<…>` type (a `vector<1>` operand no longer types `list<number>`
-  while evaluating to a scalar) and the user-function broadcast path, which
-  already returned a `List` for single-element collections. An empty
-  broadcast still evaluates to `Nothing`.
+- **Broadcasting over a one-element collection now returns a one-element `List`
+  instead of unwrapping to the scalar.** `\sin(2 \cdot [5])` now evaluates to
+  `[\sin(10)]`, previously the bare scalar `\sin(10)`. Broadcasting a scalar
+  function over an `n`-element indexed collection now produces an `n`-element
+  `List` for every `n ≥ 1`, matching the expression's static `list<…>` type (a
+  `vector<1>` operand no longer types `list<number>` while evaluating to a
+  scalar) and the user-function broadcast path, which already returned a `List`
+  for single-element collections. An empty broadcast still evaluates to
+  `Nothing`.
 
 ### Bug Fixes
 
-- **`Sum`/`Product` over a *computed* list-valued body now reduces instead of
-  broadcasting.** `Sum(L)` of a literal collection reduced correctly, but a
-  body that only *evaluates* to a list — e.g. a broadcast chain over a list
-  literal, `\operatorname{Sum}(\operatorname{mod}(\operatorname{floor}(7/2^{[0...10]}),2))`
+- **`Sum`/`Product` over a _computed_ list-valued body now reduces instead of
+  broadcasting.** `Sum(L)` of a literal collection reduced correctly, but a body
+  that only _evaluates_ to a list — e.g. a broadcast chain over a list literal,
+  `\operatorname{Sum}(\operatorname{mod}(\operatorname{floor}(7/2^{[0...10]}),2))`
   — returned the broadcast list unchanged instead of its sum. The arity-1
   reducer form now reduces the evaluated value when it is a collection.
 
-- **A symbol operand naming an operator no longer leaks into `.unknowns`.**
-  A function reference held as a symbol operand (e.g. the `Add` of
+- **A symbol operand naming an operator no longer leaks into `.unknowns`.** A
+  function reference held as a symbol operand (e.g. the `Add` of
   `["Reduce", L, "Add"]`) was reported as a free variable by `.unknowns` /
   `.freeVariables`, so consumers walking unknowns saw a phantom unbound name.
   Operator names now resolve as function references, not free variables.
 
 - **`subs()` no longer corrupts a bound index named `i` (or any name that
   collides with a constant).** Substituting into a canonical big operator —
-  `ce.parse("\\sum_{i=1}^{n}2^{-i}").subs({n: 9})` — re-canonicalized the
-  held `Limits` index *outside* its binding scope, re-typing `i` as the
-  imaginary unit: the index slot became an `incompatible-type` error and
-  serialization dropped the index (`\sum_1^9…`). Held (non-canonical)
-  operands now stay raw through `subs()` and are re-bound by the parent's
-  canonical handler, exactly as when the expression was first built.
+  `ce.parse("\\sum_{i=1}^{n}2^{-i}").subs({n: 9})` — re-canonicalized the held
+  `Limits` index _outside_ its binding scope, re-typing `i` as the imaginary
+  unit: the index slot became an `incompatible-type` error and serialization
+  dropped the index (`\sum_1^9…`). Held (non-canonical) operands now stay raw
+  through `subs()` and are re-bound by the parent's canonical handler, exactly
+  as when the expression was first built.
 
 - **A bare numeric bounds pair on a big operator (`\sum_1^9 ⟨body⟩`) is no
   longer silently dropped at parse.** It now parses to an index-less
-  `["Limits", "Nothing", 1, 9]`: a constant body iterates
-  (`\sum_1^9 2` → `18`), and a body with free variables stays symbolic
-  rather than losing its bounds.
+  `["Limits", "Nothing", 1, 9]`: a constant body iterates (`\sum_1^9 2` → `18`),
+  and a body with free variables stays symbolic rather than losing its bounds.
 
 - **A divergent integral over `(-∞, ∞)` no longer numericizes to a clean `0`.**
   `.N()` of `\int_{-\infty}^{\infty} x\,dx` (and `x^3`, `\sin x`, any odd
   divergent integrand) returned an exact scalar `0`: the Gauss–Kronrod
-  quadrature mapped the doubly-infinite domain through a symmetric transform,
-  so an odd integrand cancelled to exactly 0 on the first panel with a 0 error
+  quadrature mapped the doubly-infinite domain through a symmetric transform, so
+  an odd integrand cancelled to exactly 0 on the first panel with a 0 error
   estimate — indistinguishable from a genuine result downstream. The
   doubly-infinite case is now split at 0 into two half-line integrals that must
-  *each* converge (the definition of improper-integral convergence); a
-  divergent half fails to converge and the result falls back to a
-  `Measurement` with an honest (large) error bar that consumers can reject.
-  Convergent integrands are unaffected (`\int_{-\infty}^{\infty} x e^{-x^2}\,dx`
-  → `0`, `\int_{-\infty}^{\infty} e^{-x^2}\,dx` → `√π`). Note this also means
-  no Cauchy principal value is implied: a symmetric divergent integral reports
+  _each_ converge (the definition of improper-integral convergence); a divergent
+  half fails to converge and the result falls back to a `Measurement` with an
+  honest (large) error bar that consumers can reject. Convergent integrands are
+  unaffected (`\int_{-\infty}^{\infty} x e^{-x^2}\,dx` → `0`,
+  `\int_{-\infty}^{\infty} e^{-x^2}\,dx` → `√π`). Note this also means no Cauchy
+  principal value is implied: a symmetric divergent integral reports
   non-convergence rather than its principal value.
 
 - **Compiled JavaScript arithmetic over a value that may be a list is now
-  correct for both outcomes.** Compiling `2h(x) - 1` where `h` may return a
-  list produced scalar code that yielded `NaN` on a list value at run time
-  (behind `success: true`). Such operands — typed `broadcastable<…>`, see New
-  Features — now compile through the runtime broadcast helper: the same
-  compiled artifact returns the scalar result for a scalar value and the
-  element-wise list for a list value, matching the interpreter. Cases the
-  helper cannot lower soundly now **fail closed** instead of emitting
-  silently-wrong scalar code: a product of two or more possibly-list operands
-  (a run-time matrix would need the matrix product, not an element-wise one),
-  `Equal`/`NotEqual` over a possibly-list operand, and — on the Python target,
-  where `*`/`+` repeat or concatenate a plain `list` — all arithmetic over
-  possibly-list operands. `compile()` reports these as compilation failures
-  (with the interpreter fallback available), rather than producing code that
-  computes the wrong value.
+  correct for both outcomes.** Compiling `2h(x) - 1` where `h` may return a list
+  produced scalar code that yielded `NaN` on a list value at run time (behind
+  `success: true`). Such operands — typed `broadcastable<…>`, see New Features —
+  now compile through the runtime broadcast helper: the same compiled artifact
+  returns the scalar result for a scalar value and the element-wise list for a
+  list value, matching the interpreter. Cases the helper cannot lower soundly
+  now **fail closed** instead of emitting silently-wrong scalar code: a product
+  of two or more possibly-list operands (a run-time matrix would need the matrix
+  product, not an element-wise one), `Equal`/`NotEqual` over a possibly-list
+  operand, and — on the Python target, where `*`/`+` repeat or concatenate a
+  plain `list` — all arithmetic over possibly-list operands. `compile()` reports
+  these as compilation failures (with the interpreter fallback available),
+  rather than producing code that computes the wrong value.
 
 ### New Features
 
@@ -109,42 +165,40 @@
   broadcast.** The engine broadcasts element-wise at run time (`2·[1,2,3]` →
   `[2,4,6]`), and statically-visible collections have carried honest types
   (`vector<3>`, `list<number>`) for a while — but the same arithmetic over a
-  value whose collection-ness is *not* statically visible (`2h(x,y)-1` with
-  `h` returning `unknown`) used to collapse to scalar `number`, even though
+  value whose collection-ness is _not_ statically visible (`2h(x,y)-1` with `h`
+  returning `unknown`) used to collapse to scalar `number`, even though
   evaluation broadcasts if `h` returns a list. Such expressions now type
   **`broadcastable<T>`** — "a `T`, or an indexed collection of `T`, applied
   element-wise". The type is produced by `Add`/`Multiply` and every
   broadcastable operator (`Sin`, `Sqrt`, `Power`, `Abs`, …) over an operand
-  whose type is a top type (an unknown-return call) or already
-  `broadcastable`; it propagates through nested arithmetic, juxtaposition
-  (`2(2h(x)-1)` is a product, not a tuple), function application, and
-  indexing (`(2h(x,y)-1)[1]` is valid, with element type `number`).
-  Relatedly, a scalar function over a **fixed-shape-typed intermediate** no
-  longer collapses either: `\sin(10^4 \cdot [1,2,3])` — whose inner product
-  types `vector<3>` — now types `list<number>` through every scalar-function
-  hop (`mod`, scaling, …), so indexing the end state is valid. Operators that
-  compute their own collection result (`-M`, `M+N`, `matrix + scalar`) are
-  unaffected.
-  Subtyping: `number <: broadcastable<number>` and
-  `list<number> <: broadcastable<number>`, but `broadcastable<number>` is
-  *not* a subtype of `number` (it may be a list). The type can be used in
-  declarations (`ce.declare('b', 'broadcastable<number>')`) and signatures.
-  Bare symbols are unaffected: an undeclared `x` in `2x` still types scalar
-  (inference pending), and tuples/points still bind atomically.
+  whose type is a top type (an unknown-return call) or already `broadcastable`;
+  it propagates through nested arithmetic, juxtaposition (`2(2h(x)-1)` is a
+  product, not a tuple), function application, and indexing (`(2h(x,y)-1)[1]` is
+  valid, with element type `number`). Relatedly, a scalar function over a
+  **fixed-shape-typed intermediate** no longer collapses either:
+  `\sin(10^4 \cdot [1,2,3])` — whose inner product types `vector<3>` — now types
+  `list<number>` through every scalar-function hop (`mod`, scaling, …), so
+  indexing the end state is valid. Operators that compute their own collection
+  result (`-M`, `M+N`, `matrix + scalar`) are unaffected. Subtyping:
+  `number <: broadcastable<number>` and `list<number> <: broadcastable<number>`,
+  but `broadcastable<number>` is _not_ a subtype of `number` (it may be a list).
+  The type can be used in declarations
+  (`ce.declare('b', 'broadcastable<number>')`) and signatures. Bare symbols are
+  unaffected: an undeclared `x` in `2x` still types scalar (inference pending),
+  and tuples/points still bind atomically.
 
-- **Applying a scalar function to a collection-valued expression now
-  broadcasts — for every function body.** Broadcasting a user function over a
-  literal collection (`f([1,2,3])` → `[f(1), f(2), f(3)]`) is long-standing;
-  it now also applies when the argument only *evaluates* to a collection
-  (`f(g(3))` where `g` returns a list), and for every body — previously a
-  non-arithmetic body such as `x \mapsto \operatorname{If}(x > 0, 1, -1)`
-  applied to a computed list stayed inert. The static type of such an
-  application is honest as well: `list<R>` for a visible collection argument,
-  `broadcastable<R>` for a possibly-collection argument, where `R` is the
-  function's return type (a list-returning function maps to a list of lists —
-  no flattening). Declaring a collection parameter type
-  (`(list<number>) -> …`) still binds the argument whole, and tuple arguments
-  still bind atomically.
+- **Applying a scalar function to a collection-valued expression now broadcasts
+  — for every function body.** Broadcasting a user function over a literal
+  collection (`f([1,2,3])` → `[f(1), f(2), f(3)]`) is long-standing; it now also
+  applies when the argument only _evaluates_ to a collection (`f(g(3))` where
+  `g` returns a list), and for every body — previously a non-arithmetic body
+  such as `x \mapsto \operatorname{If}(x > 0, 1, -1)` applied to a computed list
+  stayed inert. The static type of such an application is honest as well:
+  `list<R>` for a visible collection argument, `broadcastable<R>` for a
+  possibly-collection argument, where `R` is the function's return type (a
+  list-returning function maps to a list of lists — no flattening). Declaring a
+  collection parameter type (`(list<number>) -> …`) still binds the argument
+  whole, and tuple arguments still bind atomically.
 
 ## 0.81.0 _2026-07-16_
 

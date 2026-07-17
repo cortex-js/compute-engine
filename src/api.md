@@ -2644,7 +2644,8 @@ it receives the (canonical) operands, a `compile` callback to lower a
 sub-expression to target source, and the compilation `context` (branch on
 `context.language`). It returns target source, or `undefined` (or
 an empty string) to fall back to the target's default compilation of this
-operator.
+operator (a `null` returned from untyped JavaScript is tolerated and
+treated the same).
 
 Takes precedence over the target's built-in operator/function mapping and
 broadcast lowering, so it can override how a built-in operator compiles
@@ -3346,7 +3347,8 @@ their own bespoke lowering: `Sequence`, `Sum`, `Product`, `Function`,
 declared on one of those heads is ignored.
 
 Return `undefined` (or an empty string) to fall back to the
-default compilation. See [OperatorCompileHandler](#operatorcompilehandler).
+default compilation (a `null` returned from untyped JavaScript is
+tolerated and treated the same). See [OperatorCompileHandler](#operatorcompilehandler).
 
 </MemberCard>
 

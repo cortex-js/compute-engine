@@ -292,6 +292,58 @@ describe('Matrix addition', () => {
   });
 });
 
+describe('Multiply over matrices is presentation-independent (contracts)', () => {
+  // Regression: `Multiply` of two matrices must contract (matrix product) no
+  // matter how the operand is presented. Previously a matrix-valued SYMBOL
+  // Hadamard'd — `skipBroadcastForVectorOps` routed to the element-wise
+  // broadcast because `isTensor` keys on the node kind and misses a symbol whose
+  // *value* is a matrix — diverging from the matrix-literal and
+  // matrix-returning-application paths, which contract. Vectors stay Hadamard.
+  const M1: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];
+  const M2: Expression = ['List', ['List', 5, 6], ['List', 7, 8]];
+  const PRODUCT = '[[19,22],[43,50]]';
+
+  it('contracts two matrix literals', () => {
+    expect(ce.box(['Multiply', M1, M2]).evaluate().toString()).toBe(PRODUCT);
+  });
+
+  it('contracts two matrix-valued symbols (was Hadamard)', () => {
+    const engine = new ComputeEngine();
+    engine.assign('p', engine.box(M1));
+    engine.assign('q', engine.box(M2));
+    expect(engine.box(['Multiply', 'p', 'q']).evaluate().toString()).toBe(
+      PRODUCT
+    );
+  });
+
+  it('contracts two matrix-returning applications', () => {
+    const engine = new ComputeEngine();
+    engine.declare('w', '(number) -> unknown');
+    engine.assign('w', engine.parse('n \\mapsto [[n, n + 1],[n + 2, n + 3]]'));
+    expect(
+      engine.box(['Multiply', ['w', 1], ['w', 5]]).evaluate().toString()
+    ).toBe(PRODUCT);
+  });
+
+  it('still Hadamards two vectors (Issue #29, unchanged)', () => {
+    const engine = new ComputeEngine();
+    engine.assign('u', engine.box(['List', 1, 2, 3]));
+    engine.assign('v', engine.box(['List', 4, 5, 6]));
+    expect(engine.box(['Multiply', 'u', 'v']).evaluate().toString()).toBe(
+      '[4,10,18]'
+    );
+  });
+
+  it('adds matrix-valued symbols element-wise (unchanged)', () => {
+    const engine = new ComputeEngine();
+    engine.assign('p', engine.box(M1));
+    engine.assign('q', engine.box(M2));
+    expect(engine.box(['Add', 'p', 'q']).evaluate().toString()).toBe(
+      '[[6,8],[10,12]]'
+    );
+  });
+});
+
 describe('MatrixMultiply', () => {
   // Matrix × Matrix
   it('should multiply two square numeric matrices', () => {

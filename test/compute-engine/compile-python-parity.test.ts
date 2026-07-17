@@ -548,6 +548,36 @@ const COLLECTION_CASES: Array<{ name: string; expr: any; expected: any }> = (() 
     { name: 'shape', expr: ['Shape', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]], expected: [2, 3] },
     { name: 'reshape_pad', expr: ['Reshape', ['List', 1, 2, 3, 4, 5], ['Tuple', 2, 3]], expected: [[1, 2, 3], [4, 5, 1]] },
     { name: 'trace', expr: ['Trace', M], expected: 5 },
+    // Linear-algebra ops added alongside Tycho item 34. These return NumPy
+    // arrays (like Transpose/Inverse); `_ser` converts them.
+    {
+      name: 'conj_transpose',
+      expr: ['ConjugateTranspose', M],
+      expected: [[1, 3], [2, 4]],
+    },
+    { name: 'diagonal_mat', expr: ['Diagonal', M], expected: [1, 4] },
+    {
+      name: 'diagonal_vec',
+      expr: ['Diagonal', ['List', 5, 6, 7]],
+      expected: [[5, 0, 0], [0, 6, 0], [0, 0, 7]],
+    },
+    {
+      name: 'matrix_power',
+      expr: ['MatrixPower', M, 3],
+      expected: [[37, 54], [81, 118]],
+    },
+    {
+      name: 'matrix_power_neg',
+      expr: ['MatrixPower', M, -1],
+      expected: [[-2, 1], [1.5, -0.5]],
+    },
+    // CE `Rank` = tensor rank (ndim), not the linear-algebra rank.
+    { name: 'rank', expr: ['Rank', M], expected: 2 },
+    {
+      name: 'row_reduce',
+      expr: ['RowReduce', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]],
+      expected: [[1, 0, -1], [0, 1, 2]],
+    },
   ];
 })();
 
@@ -576,6 +606,7 @@ describeMaybe('PYTHON EXECUTION PARITY — collections (venv)', () => {
     // recurse.
     src +=
       '\ndef _ser(z):\n' +
+      '    if isinstance(z, np.ndarray): return _ser(z.tolist())\n' +
       '    if isinstance(z, (bool, np.bool_)): return bool(z)\n' +
       '    if isinstance(z, (list, tuple)): return [_ser(v) for v in z]\n' +
       '    return float(z)\n\n';

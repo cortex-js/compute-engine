@@ -1729,6 +1729,20 @@ function skipBroadcastForVectorOps(
 ): boolean {
   if (hasTensors && (operator === 'Add' || operator === 'Multiply'))
     return true;
+  // A matrix-valued operand that is NOT a raw tensor node — most often a SYMBOL
+  // whose value is a matrix (`isTensor` keys on the node kind, so `hasTensors`
+  // misses it), or any expression statically typed `matrix` — must also route to
+  // the dedicated tensor handling (`addTensors`/`mulTensors`). Otherwise
+  // element-wise broadcasting Hadamards two matrices where `Multiply` must
+  // contract (the matrix product), diverging from the matrix-literal and
+  // matrix-returning-application paths (which already reach `mulTensors`). Keyed
+  // on the static type, so no value is resolved on the scalar hot path; a
+  // `vector<n>` operand does not match `matrix`, so vector Hadamard is unchanged.
+  if (
+    (operator === 'Add' || operator === 'Multiply') &&
+    ops.some((x) => x.type.matches('matrix'))
+  )
+    return true;
   if (
     (operator === 'Add' ||
       operator === 'Multiply' ||
@@ -1798,7 +1812,10 @@ const CONDITIONAL_THREADING_SKIP = new Set([
  * strict operator.
  *
  * Returns `undefined` when there is nothing to thread, so the caller falls
- * through to normal evaluation.
+ * through to normal evaluation — except for a `lazy` operator whose tail was
+ * evaluated here and no longer holds a conditional, where the folded
+ * application of the already-evaluated tail is returned to avoid re-evaluating
+ * the operands.
  */
 function threadConditional(
   ce: ComputeEngine,
@@ -1873,6 +1890,18 @@ function threadConditional(
     }
     return ce._fn('Which', resultOps).evaluate(options);
   }
+
+  // Nothing (left) to thread. For a `lazy` operator we already evaluated the
+  // tail above to inspect it — a `When`/`Which` operand that reduced to a plain
+  // value during that evaluation (e.g. a `Which` whose selected branch has no
+  // free variables, `2·{cond: x, y}`) leaves no conditional to lift. Return the
+  // folded application of the already-evaluated tail so the caller does not
+  // evaluate the operands a *second* time: falling through to `undefined` would
+  // have the operator's own handler re-evaluate the raw tail, doubling the work
+  // (and re-running any effectful selected branch). For a non-`lazy` operator
+  // `tail === rawTail` was already evaluated by the caller, so there is nothing
+  // to reuse — fall through.
+  if (lazy) return ce._fn(op, tail).evaluate(options);
 
   return undefined;
 }

@@ -783,6 +783,14 @@ export class BaseCompiler {
       return BaseCompiler.compileBlock(args, target);
     }
 
+    // `Typed(value, type)` is a transparent runtime ascription — it constrains
+    // the static type but has no runtime effect, so it compiles to its value
+    // operand on every target (the interpreter ignores it likewise). Without
+    // this, a helper declared with a precise return type (e.g. `(number) ->
+    // vector<11>`) wraps its body in `Typed`, and every compiled call throws
+    // `Unknown operator \`Typed\`` at the dispatch below.
+    if (h === 'Typed') return BaseCompiler.compile(args[0], target);
+
     // Handle function calls
     const fn = target.functions?.(h);
     if (!fn) {
@@ -927,6 +935,19 @@ export class BaseCompiler {
     if (opMap !== undefined && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]))
       return null;
 
+    // A genuinely complex *element* type (`list<complex>`) — a `list<number>`
+    // is treated as real, mirroring the scalar `isComplexValued` convention
+    // (`number` matches neither `complex` nor `real`). Hoisted here so the
+    // `Multiply` ≥2-possibly-collection branch below can reuse it: the real-only
+    // `_SYS.mul` runtime helper cannot carry complex elements, so a complex
+    // operand there must defer to the fail-closed path.
+    const hasComplexElement = (a: Expression): boolean => {
+      const elt = collectionElementType(a.type.type);
+      if (elt === undefined) return false;
+      const t = engine.type(elt);
+      return t.matches('complex') && !t.matches('real');
+    };
+
     // A `broadcastable<T>`-typed operand is scalar OR an indexed collection at
     // run time (the static type of arithmetic over an unknown-return call, e.g.
     // `2·h(x)` with `h: (number) -> unknown`). Routing it through `_SYS.bcast`
@@ -984,13 +1005,26 @@ export class BaseCompiler {
       const collection = args.filter(isArrayish);
       if (collection.length >= 2) {
         // A possibly-collection operand (a declared `broadcastable<T>` OR a
-        // top-typed application such as `h(x)`) could materialize as a MATRIX at
-        // run time, where the interpreter contracts (matrix product) but
-        // `_SYS.bcast` would Hadamard. With ≥2 arrayish operands and any of them
-        // possibly-collection-typed, the shape is unprovable at compile time —
-        // fail closed to the existing scalar/fallback path so the JS D6 guard
-        // then rejects it.
-        if (collection.some(isBoundPossiblyCollectionTyped)) return null;
+        // top-typed application such as `h(x)`) could materialize as a scalar,
+        // a vector, OR a MATRIX at run time — the shape is unprovable at compile
+        // time. `_SYS.bcast` would Hadamard unconditionally, diverging from the
+        // interpreter's matrix contraction; instead emit the interpreter-faithful
+        // `_SYS.mul`, which dispatches on runtime rank (Hadamard for equal-length
+        // rank-1 vectors, matrix product for rank-≥2), so no shape silently
+        // diverges. Complex operands can't route through the real-only helper —
+        // defer those to the fail-closed path.
+        if (collection.some(isBoundPossiblyCollectionTyped)) {
+          if (
+            args.some(
+              (a) => BaseCompiler.isComplexValued(a) || hasComplexElement(a)
+            )
+          )
+            return null;
+          const compiledArgs = args
+            .map((a) => BaseCompiler.compile(a, target))
+            .join(', ');
+          return `_SYS.mul(${compiledArgs})`;
+        }
         const isMatrix = (a: Expression): boolean =>
           (isTensor(a) && a.shape.length >= 2) || a.type.matches('matrix');
         if (collection.some((a) => isNumericTuple(a)) || args.some(isMatrix))
@@ -1021,16 +1055,7 @@ export class BaseCompiler {
 
     // Complex-valued operands need complex scalar codegen, which the bare
     // element parameters below can't carry — defer (scalar / fail-closed path).
-    // For a list operand this means a genuinely complex *element* type
-    // (`list<complex>`); a `list<number>` is treated as real, mirroring the
-    // scalar `isComplexValued` convention (`number` matches neither `complex`
-    // nor `real`, so it stays on the real path).
-    const hasComplexElement = (a: Expression): boolean => {
-      const elt = collectionElementType(a.type.type);
-      if (elt === undefined) return false;
-      const t = engine.type(elt);
-      return t.matches('complex') && !t.matches('real');
-    };
+    // `hasComplexElement` (hoisted above) is the list-element complex test.
     if (
       args.some((a) => BaseCompiler.isComplexValued(a) || hasComplexElement(a))
     )

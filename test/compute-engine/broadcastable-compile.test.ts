@@ -76,37 +76,87 @@ describe('broadcastable<T> — JavaScript compile target', () => {
     );
   });
 
-  test('4. Multiply with >=2 broadcastable operands fails closed (D6 throw)', () => {
-    // A broadcastable operand could materialize as a matrix at run time, where
-    // the interpreter would contract (matrix product) rather than Hadamard.
-    // With >=2 arrayish operands and any broadcastable-typed, the shape is
-    // unprovable, so `tryCompileBroadcast` declines — and the widened D6 guard
-    // (which now matches possibly-collection-typed operands) fails closed rather
-    // than letting the scalar path emit `p * q` list garbage behind
-    // `success: true`. Codegen throws; the engine-level `compile()` catches it
-    // and falls back to the interpreter.
-    expect(() =>
-      jsCompile((ce) => {
-        ce.declare('p', 'broadcastable<number>');
-        ce.declare('q', 'broadcastable<number>');
-        return ce.box(['Multiply', 'p', 'q']);
+  test('4. Multiply with >=2 possibly-collection operands lowers to the rank-dispatching _SYS.mul (Tycho item 34)', () => {
+    // A possibly-collection operand (declared `broadcastable<number>` or a
+    // top-typed application) could materialize as a scalar, a vector, OR a
+    // matrix at run time — where the interpreter contracts (matrix product)
+    // rather than Hadamards. With >=2 arrayish operands the shape is unprovable
+    // at compile time, so instead of failing closed the target emits the
+    // interpreter-faithful `_SYS.mul`, which dispatches on runtime rank. No
+    // shape silently diverges.
+    const r = jsCompile((ce) => {
+      ce.declare('p', 'broadcastable<number>');
+      ce.declare('q', 'broadcastable<number>');
+      return ce.box(['Multiply', 'p', 'q']);
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.mul');
+    // scalar·scalar
+    expect(r.run!({ p: 3, q: 4 })).toBe(12);
+    // equal-length rank-1 vectors → Hadamard (Issue #29), not the dot product
+    expect(r.run!({ p: [1, 2, 3], q: [4, 5, 6] })).toEqual([4, 10, 18]);
+    // scalar·vector → scale
+    expect(r.run!({ p: 2, q: [4, 5, 6] })).toEqual([8, 10, 12]);
+    // matrix·matrix → contract (NOT Hadamard) — the item-19 divergence the old
+    // fail-closed guarded against, now handled correctly at run time.
+    expect(
+      r.run!({
+        p: [
+          [1, 2],
+          [3, 4],
+        ],
+        q: [
+          [5, 6],
+          [7, 8],
+        ],
       })
-    ).toThrow(/Fail closed/);
+    ).toEqual([
+      [19, 22],
+      [43, 50],
+    ]);
+
+    // Independent interpreter reference for the matrix case. `_SYS.mul` mirrors
+    // the interpreter's `mulTensors` (matrix product), the path taken for a
+    // matrix *literal*, a matrix-returning function application (Tycho's actual
+    // operand shape, `b(7)·b(13)`), and — since the `skipBroadcastForVectorOps`
+    // matrix-typed-symbol fix — a symbol statically typed `matrix`. The only
+    // residual interpreter divergence is a `broadcastable<number>` symbol *bound
+    // to a matrix* at run time, an ill-typed input (a rank-2 value in a rank≤1
+    // type) that the interpreter still Hadamards; `_SYS.mul` contracts it, which
+    // is the well-typed answer. Use the application form here so the reference
+    // exercises the matrix-product path unambiguously.
+    const ce2 = new ComputeEngine();
+    ce2.declare('w', '(number) -> unknown');
+    ce2.assign('w', ce2.parse('n \\mapsto [[n, n + 1],[n + 2, n + 3]]'));
+    // w(1) = [[1,2],[3,4]], w(5) = [[5,6],[7,8]]
+    expect(
+      ce2.box(['Multiply', ['w', 1], ['w', 5]]).evaluate().toString()
+    ).toBe('[[19,22],[43,50]]');
   });
 
-  test('4b. Multiply mixing a TOP-TYPED application with a broadcastable operand fails closed', () => {
-    // A bound top-typed application (`At(v, 1)` over `list<any>` types `any`)
-    // is admitted as possibly-collection by the widened gate; with >=2 arrayish
-    // operands the shape (matrix contraction vs Hadamard) is unprovable, so the
-    // Multiply carve-out declines for ANY possibly-collection operand — not
-    // just declared-`broadcastable` ones — and compilation fails closed.
-    expect(() =>
-      jsCompile((ce) => {
-        ce.declare('v', 'list<any>');
-        ce.declare('p', 'broadcastable<number>');
-        return ce.box(['Multiply', ['At', 'v', 1], 'p']);
+  test('4b. Multiply mixing a TOP-TYPED application with a broadcastable operand lowers to _SYS.mul', () => {
+    // A bound top-typed application (`At(v, 1)` over `list<any>` types `any`) is
+    // admitted as possibly-collection by the widened gate; with >=2 arrayish
+    // operands the Multiply lowers to `_SYS.mul` just like two declared
+    // `broadcastable` operands. Here `At(v, 1)` selects a row vector, which is
+    // then Hadamard-multiplied with the broadcastable operand at run time.
+    const r = jsCompile((ce) => {
+      ce.declare('v', 'list<any>');
+      ce.declare('p', 'broadcastable<number>');
+      return ce.box(['Multiply', ['At', 'v', 1], 'p']);
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.mul');
+    // v = [[1,2,3], …]; At(v,1) = [1,2,3]; p = [4,5,6] → Hadamard [4,10,18].
+    expect(
+      r.run!({
+        v: [
+          [1, 2, 3],
+          [9, 9, 9],
+        ],
+        p: [4, 5, 6],
       })
-    ).toThrow(/Fail closed|cannot compile/);
+    ).toEqual([4, 10, 18]);
   });
 
   test('broadcastable<complex> fails closed (declined broadcast, D6 throw)', () => {

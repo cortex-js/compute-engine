@@ -475,6 +475,65 @@ describe('COMPILE', () => {
     });
   });
 
+  describe('Linear-algebra operators compile and run (JS target)', () => {
+    // Previously these five threw and fell back to the interpreter; each now
+    // lowers to a `_SYS` runtime helper (or `_SYS.shape`). Each test compiles,
+    // runs, and checks the value against the interpreter's `.N()`.
+    const M = ['List', ['List', 1, 2], ['List', 3, 4]];
+    const M23 = ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]];
+    const V = ['List', 5, 6, 7];
+    const Msing = ['List', ['List', 1, 2], ['List', 2, 4]];
+
+    const run = (expr: any) => {
+      const r = compile(ce.box(expr), { fallback: false });
+      expect(r.success).toBe(true);
+      return (r.run as () => unknown)();
+    };
+
+    it('ConjugateTranspose (real → transpose)', () => {
+      expect(run(['ConjugateTranspose', M])).toEqual([[1, 3], [2, 4]]);
+      expect(run(['ConjugateTranspose', M23])).toEqual([[1, 4], [2, 5], [3, 6]]);
+    });
+
+    it('Diagonal is rank-dispatched (matrix → vector, vector → matrix)', () => {
+      expect(run(['Diagonal', M])).toEqual([1, 4]);
+      expect(run(['Diagonal', M23])).toEqual([1, 5]);
+      expect(run(['Diagonal', V])).toEqual([
+        [5, 0, 0],
+        [0, 6, 0],
+        [0, 0, 7],
+      ]);
+    });
+
+    it('MatrixPower (identity, powers, and negative → inverse)', () => {
+      expect(run(['MatrixPower', M, 0])).toEqual([[1, 0], [0, 1]]);
+      expect(run(['MatrixPower', M, 2])).toEqual([[7, 10], [15, 22]]);
+      expect(run(['MatrixPower', M, 3])).toEqual([[37, 54], [81, 118]]);
+      const inv = run(['MatrixPower', M, -1]) as number[][];
+      const expected = [
+        [-2, 1],
+        [1.5, -0.5],
+      ];
+      for (let i = 0; i < 2; i++)
+        for (let j = 0; j < 2; j++)
+          expect(inv[i][j]).toBeCloseTo(expected[i][j], 10);
+    });
+
+    it('Rank is the TENSOR rank (ndim), not the linear-algebra rank', () => {
+      expect(run(['Rank', 5])).toBe(0);
+      expect(run(['Rank', V])).toBe(1);
+      expect(run(['Rank', M])).toBe(2);
+      // A rank-deficient matrix still has tensor rank 2 (matches the interpreter).
+      expect(run(['Rank', Msing])).toBe(2);
+    });
+
+    it('RowReduce (reduced row echelon form)', () => {
+      expect(run(['RowReduce', M])).toEqual([[1, 0], [0, 1]]);
+      expect(run(['RowReduce', Msing])).toEqual([[1, 2], [0, 0]]);
+      expect(run(['RowReduce', M23])).toEqual([[1, 0, -1], [0, 1, 2]]);
+    });
+  });
+
   describe('Cross-reference: target functions exist in ComputeEngine library', () => {
     // Functions that are target-specific and intentionally not in the CE library.
     // These are GLSL graphics built-ins, Python-specific numpy/scipy functions,

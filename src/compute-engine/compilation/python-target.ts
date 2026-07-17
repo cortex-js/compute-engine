@@ -347,8 +347,12 @@ function isPyCollectionOperand(e: Expression): boolean {
  *   trimmed to `n = min(len)` before the vectorized NumPy op is applied — so
  *   the fast NumPy path is kept, no per-element Python loop);
  * - scalar operands broadcast over the arrays;
- * - a **length-1** result unwraps to a scalar (`ElementMax([1,2],[3]) → 3`);
- * - all-scalar operands give a scalar.
+ * - a **length-1** result stays a length-1 array (`ElementMax([1,2],[3]) → [3]`,
+ *   zipping to the shortest operand), matching the interpreter — which returns a
+ *   one-element `List`, never a bare scalar, whenever any operand is a
+ *   collection;
+ * - all-scalar operands give a scalar (handled on the direct fast path, not
+ *   here — this helper is only reached when some operand is a collection).
  *
  * Divergence: an **empty** participating array yields an empty NumPy array
  * here, whereas the interpreter returns `Nothing` (no numeric analogue).
@@ -379,18 +383,42 @@ const PYTHON_BCAST_HELPER = `def _ce_bcast(_op, *args):
         _r = _arrs[0]
         for _a in _arrs[1:]:
             _r = _pair(_r, _a)
-    _r = np.asarray(_r)
-    if _r.ndim > 0 and _r.shape[0] == 1:
-        return _r[0]
-    return _r
+    return np.asarray(_r)
 `;
 
-/** Prepend the `_ce_bcast` helper definition when the compiled `code`
- * references it. Idempotent per emission unit; a redefinition (if two units are
- * concatenated) is harmless in Python. */
+/**
+ * Reduced row echelon form (Gauss–Jordan with partial pivoting), the runtime
+ * side of the `RowReduce` lowering — NumPy has no built-in RREF. Mirrors the JS
+ * target's `_SYS.rref`; matches the interpreter's `RowReduce` on well-scaled
+ * inputs (float pivots, exact-zero test — the same convention as `np.linalg`).
+ */
+const PYTHON_RREF_HELPER = `def _ce_rref(_m):
+    _a = np.asarray(_m, dtype=float).copy()
+    _rows, _cols = _a.shape
+    _r = 0
+    for _c in range(_cols):
+        if _r >= _rows:
+            break
+        _piv = _r + int(np.argmax(np.abs(_a[_r:, _c])))
+        if _a[_piv, _c] == 0:
+            continue
+        _a[[_piv, _r]] = _a[[_r, _piv]]
+        _a[_r] = _a[_r] / _a[_r, _c]
+        for _k in range(_rows):
+            if _k != _r:
+                _a[_k] = _a[_k] - _a[_k, _c] * _a[_r]
+        _r += 1
+    return _a
+`;
+
+/** Prepend any referenced runtime helper definitions to the compiled `code`.
+ * Idempotent per emission unit; a redefinition (if two units are concatenated)
+ * is harmless in Python. */
 function withPythonHelpers(code: string): string {
-  if (code.includes('_ce_bcast(')) return `${PYTHON_BCAST_HELPER}\n${code}`;
-  return code;
+  let out = code;
+  if (out.includes('_ce_rref(')) out = `${PYTHON_RREF_HELPER}\n${out}`;
+  if (out.includes('_ce_bcast(')) out = `${PYTHON_BCAST_HELPER}\n${out}`;
+  return out;
 }
 
 /**
@@ -710,8 +738,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // injected `_ce_bcast` runtime helper (see PYTHON_BCAST_HELPER), which
   // zip-to-shortest trims the arrays before applying the vectorized NumPy op —
   // reproducing `broadcastOverIndexedCollections` (`ElementMax([1,2,3],[4,5]) →
-  // [4,5]`, a length-1 result unwrapping to a scalar) instead of NumPy's own
-  // broadcasting, which raises `ValueError` on a non-(1-vs-N) length mismatch.
+  // [4,5]`; a length-1 result stays a one-element array, `[3]`, matching the
+  // interpreter) instead of NumPy's own broadcasting, which raises `ValueError`
+  // on a non-(1-vs-N) length mismatch.
   ElementMax: (args, compile) => {
     if (!args.some(isPyCollectionOperand)) {
       let result = compile(args[0]);
@@ -799,6 +828,22 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Inverse: 'np.linalg.inv',
   Transpose: 'np.transpose',
   MatrixMultiply: 'np.matmul',
+  // Conjugate transpose: conjugate then transpose (a vector conjugates in
+  // place, matching the interpreter and `np.transpose`).
+  ConjugateTranspose: (args, compile) =>
+    `np.transpose(np.conjugate(${compile(args[0])}))`,
+  // `np.diag` is rank-dispatched exactly like the interpreter's `Diagonal`: a
+  // matrix → its main-diagonal vector; a vector → the diagonal matrix.
+  Diagonal: 'np.diag',
+  // Integer matrix power (`M^0` identity, negative → inverse), like the
+  // interpreter's `MatrixPower`.
+  MatrixPower: 'np.linalg.matrix_power',
+  // CE `Rank` is the TENSOR rank (number of axes), NOT the linear-algebra rank
+  // — `np.ndim` matches (scalar 0, vector 1, matrix 2, …).
+  Rank: 'np.ndim',
+  // Reduced row echelon form — NumPy has no built-in, so route through the
+  // injected `_ce_rref` runtime helper (Gauss–Jordan with partial pivoting).
+  RowReduce: (args, compile) => `_ce_rref(${compile(args[0])})`,
 
   // Comparison — tolerance-aware equality (see compilePythonEquality). The
   // `abs(a - b) <= tol` form is element-wise for NumPy arrays too, so it also
@@ -1500,8 +1545,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
       code += '\n';
     }
 
-    // Emit the broadcasting helper (once, at module level) when the body's
-    // ElementMax/ElementMin/Clamp routed through it.
+    // Emit the runtime helpers (once, at module level) when the body routed
+    // through them.
+    if (body.includes('_ce_rref(')) code += `${PYTHON_RREF_HELPER}\n`;
     if (body.includes('_ce_bcast(')) code += `${PYTHON_BCAST_HELPER}\n`;
 
     code += `def ${functionName}(${params}):\n`;
