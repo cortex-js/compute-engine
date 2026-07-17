@@ -2391,7 +2391,8 @@ function mulTensor(...args: BcastValue[]): BcastValue {
  */
 function matinv(m: number[][]): number[][] | number {
   const n = m?.length;
-  if (!n || m.some((row) => !Array.isArray(row) || row.length !== n)) return NaN;
+  if (!n || m.some((row) => !Array.isArray(row) || row.length !== n))
+    return NaN;
   const a = m.map((row, i) => [
     ...row,
     ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)),
@@ -2425,7 +2426,9 @@ function conjTranspose(m: any): any {
     v && typeof v === 'object' && 'im' in v ? { re: v.re, im: -v.im } : v;
   if (!Array.isArray(m)) return m;
   if (!Array.isArray(m[0])) return m.map(conj);
-  return m[0].map((_: unknown, j: number) => m.map((row: any[]) => conj(row[j])));
+  return m[0].map((_: unknown, j: number) =>
+    m.map((row: any[]) => conj(row[j]))
+  );
 }
 
 /**

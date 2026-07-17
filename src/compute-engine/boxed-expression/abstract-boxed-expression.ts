@@ -1265,7 +1265,8 @@ function getReferences(
 
     // A name bound to a value is resolved, not free (mirrors
     // `_getSymbolValue`: only a value definition carries a value).
-    const value = def !== undefined && 'value' in def ? def.value.value : undefined;
+    const value =
+      def !== undefined && 'value' in def ? def.value.value : undefined;
     if (value === undefined) freeVars.add(s);
     return;
   }

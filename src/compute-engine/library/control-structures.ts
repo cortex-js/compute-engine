@@ -827,8 +827,7 @@ function* comprehensionStream(
   const body = expr.ops[0] ?? ce.Nothing;
   const elements = expr.ops.slice(1);
 
-  const scope =
-    isFunction(expr) && expr.isScoped ? expr.localScope : undefined;
+  const scope = isFunction(expr) && expr.isScoped ? expr.localScope : undefined;
   const indexNames = comprehensionIndexNames(elements);
   // The index values are installed in the comprehension's OWN `localScope`
   // bindings for the duration of each advance (see ComprehensionIndexFrame):
