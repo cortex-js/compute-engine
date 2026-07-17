@@ -859,26 +859,56 @@ export class BaseCompiler {
     // Mirror the interpreter's `skipBroadcastForVectorOps` carve-outs
     // (`boxed-function.ts`) for the compile target, but only where element-wise
     // broadcast would produce a *different value* than the interpreter's
-    // dedicated tensor/tuple handling — namely `Multiply` of two or more
-    // tensors/numeric-tuples, which **contracts** (dot / matrix product via
-    // `mulTensors`) where `_SYS.bcast` would instead compute an element-wise
-    // Hadamard product. Decline so the fail-closed / interpreter path takes
-    // over (both operands are collection-typed, so the D6 `Multiply` guard
-    // below fails it closed → interpreter, which contracts correctly).
+    // dedicated tensor/tuple handling (`mulTensors`).
     //
-    // The interpreter's carve-out is broader (it skips broadcast for a *single*
-    // tensor `Add`/`Multiply` and for tuple `Add`/`Negate`/`Subtract`/`Divide`
-    // too), but there it merely reroutes to `addTensors`/`mulTensors`, which
-    // are element-wise for those cases — exactly what `_SYS.bcast` already
-    // produces. Failing those closed would only lose coverage (a `list<number>`
-    // is a `vector` tensor, so it would break the committed scalar↔list
-    // broadcast — see `compile-fallback.test.ts`). Only the contraction case
-    // genuinely diverges in value.
-    if (
-      h === 'Multiply' &&
-      args.filter((a) => isTensor(a) || isNumericTuple(a)).length >= 2
-    )
-      return null;
+    // After Issue #29, `mulTensors` computes the **element-wise** (Hadamard)
+    // product for two rank-1 vectors — exactly what `_SYS.bcast` produces — so
+    // pure vector·vector `Multiply` may broadcast-compile. Two cases involving
+    // ≥2 tensor/tuple operands still diverge from a plain broadcast and must
+    // fail closed to the interpreter:
+    //
+    //  - a **numeric tuple** operand: `tuple·tuple` is an interpreter error (no
+    //    implicit dot/cross), so keep it failing closed rather than silently
+    //    Hadamard-ing it;
+    //  - a **rank-≥2 tensor** (matrix): `matrix·matrix`, `matrix·vector`,
+    //    `vector·matrix` **contract** via the matrix product, which `_SYS.bcast`
+    //    would not reproduce.
+    //
+    // Two rank-1 vectors of statically-known, differing lengths are also
+    // declined: the interpreter stays inert (typically NaN in a real target)
+    // whereas `_SYS.bcast` zips to the shorter length — a value divergence we
+    // avoid where the mismatch is provable at compile time.
+    //
+    // Operands are counted by TYPE as well as by materialized value: a
+    // `vector<n>`/`list`-typed *symbol* is not a tensor but lowers to a JS
+    // array at run time, so it participates in the ≥2-operand test and a
+    // `matrix`-typed symbol fails closed like a literal matrix (compiling it
+    // through `_SYS.bcast` would Hadamard where the interpreter contracts).
+    // Equal- or unknown-length typed vectors still compile: for symbol
+    // operands the interpreter broadcasts element-wise too.
+    //
+    // Single-operand cases (scalar·vector, scalar·tuple) are untouched: they
+    // broadcast element-wise in both the interpreter and `_SYS.bcast` (see
+    // `compile-fallback.test.ts`).
+    if (h === 'Multiply') {
+      const isArrayish = (a: Expression): boolean =>
+        isTensor(a) ||
+        isNumericTuple(a) ||
+        a.type.matches('list') ||
+        a.type.matches('indexed_collection');
+      const collection = args.filter(isArrayish);
+      if (collection.length >= 2) {
+        const isMatrix = (a: Expression): boolean =>
+          (isTensor(a) && a.shape.length >= 2) || a.type.matches('matrix');
+        if (collection.some((a) => isNumericTuple(a)) || args.some(isMatrix))
+          return null;
+        // Statically-known mismatched rank-1 lengths: fail closed.
+        const lengths = collection
+          .filter((a) => isTensor(a) && a.shape.length === 1)
+          .map((a) => a.shape[0]);
+        if (lengths.length >= 2 && new Set(lengths).size > 1) return null;
+      }
+    }
 
     const fn = target.functions?.(h);
     if (typeof fn !== 'function') return null;

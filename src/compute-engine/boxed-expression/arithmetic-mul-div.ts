@@ -1590,16 +1590,23 @@ function mulTuples(
  *
  * - **Scalar × tensor**: scale every element by the product of the scalar
  *   factors (`2 * [1,2,3]` → `[2,4,6]`).
- * - **Two or more tensors**: matrix/dot product, folded left-to-right in the
- *   given order — `matrix·matrix`, `matrix·vector`, `vector·matrix`, and
- *   `vector·vector` (which reduces to the dot product). Matrix product is *not*
- *   commutative, so order matters: the canonical form of `Multiply` floats
- *   scalar factors to the front while preserving the relative order of the
- *   tensor operands, so `xs` is already in the order the user wrote.
+ * - **Two or more tensors**: folded left-to-right in the given order. Any fold
+ *   step involving a rank-2+ tensor (`matrix·matrix`, `matrix·vector`,
+ *   `vector·matrix`) is the **matrix product**. A step between two rank-1
+ *   vectors is the **element-wise (Hadamard) product** — `[1,2,3]·[4,5,6]` →
+ *   `[4,10,18]` — matching `Add`'s element-wise semantics (Issue #29); it is
+ *   *not* the dot product (use the explicit `Dot`/`MatrixMultiply` operators
+ *   for that). The rank test is **per step**, on the accumulated product: a
+ *   contraction that reduces to a vector then combines element-wise with a
+ *   following vector (`M·u·v` = `(M·u) ⊙ v`, not the scalar `(M·u)·v`) — a
+ *   step's semantics never depend on operands elsewhere in the chain. Matrix
+ *   product is *not* commutative, so order matters: the canonical form of
+ *   `Multiply` floats scalar factors to the front while preserving the
+ *   relative order of the tensor operands, so `xs` is already in the order the
+ *   user wrote.
  *
- * Element-wise (Hadamard) multiplication is intentionally *not* what `Multiply`
- * does here. Returns an inert `Multiply` when the tensors have incompatible
- * dimensions (so the input is preserved rather than silently dropped).
+ * Returns an inert `Multiply` when the tensors have incompatible dimensions (so
+ * the input is preserved rather than silently dropped).
  */
 function mulTensors(
   ce: ComputeEngine,
@@ -1623,11 +1630,38 @@ function mulTensors(
   let scalar: Expression | null = null;
   for (const s of scalars) scalar = scalar === null ? s : scalar.mul(s);
 
-  // Fold the tensors as matrix/dot products, left to right, in order.
+  // Fold the tensors left to right, in order.
   let product: Expression = tensors[0];
   for (let i = 1; i < tensors.length; i++) {
+    const nextTensor = tensors[i];
+
+    // Two rank-1 vectors: element-wise (Hadamard) product, not the dot product
+    // (Issue #29 — `Multiply` is element-wise for vectors, mirroring `Add`).
+    // Any rank-2+ operand falls through to the matrix product below.
+    if (
+      isTensor(product) &&
+      product.shape.length === 1 &&
+      nextTensor.shape.length === 1
+    ) {
+      // Mismatched lengths: stay inert (mirrors the incompatible-dimension
+      // behavior of the matrix-product fold below).
+      if (product.shape[0] !== nextTensor.shape[0])
+        return ce._fn('Multiply', xs);
+      const n = product.shape[0];
+      const elements: Expression[] = [];
+      for (let k = 1; k <= n; k++) {
+        const a = ce.expr(product.tensor.at(k) ?? ce.Zero);
+        const b = ce.expr(nextTensor.tensor.at(k) ?? ce.Zero);
+        // Use the module-level `mul`/`mulN` helpers (not `.mul()`) so exact
+        // elements stay exact under `evaluate()`.
+        elements.push(numericApproximation ? mulN(a, b) : mul(a, b));
+      }
+      product = ce.function('List', elements);
+      continue;
+    }
+
     const next = ce
-      .function('MatrixMultiply', [product, tensors[i]])
+      .function('MatrixMultiply', [product, nextTensor])
       .evaluate();
     // Incompatible dimensions, or a partial fold that didn't reduce (e.g. a
     // scalar dot-product result followed by another matrix): stay inert.

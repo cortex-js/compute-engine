@@ -1,4 +1,5 @@
 import { MathJsonExpression as Expression } from '../../src/math-json/types';
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine as ce } from '../utils';
 import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards';
 import { makeTensor } from '../../src/compute-engine/tensor/tensors';
@@ -464,11 +465,13 @@ describe('Multiply with tensors (matrix-product semantics)', () => {
     );
   });
 
-  // Vector × vector reduces to the dot product (a scalar)
-  it('computes the dot product of two vectors', () => {
+  // Vector × vector is the element-wise (Hadamard) product, mirroring Add
+  // (Issue #29). Use the explicit MatrixMultiply/Dot operator for the dot
+  // product.
+  it('computes the element-wise product of two vectors', () => {
     expect(
       ev(['Multiply', ['List', 1, 2, 3], ['List', 4, 5, 6]])
-    ).toMatchInlineSnapshot(`32`);
+    ).toMatchInlineSnapshot(`[4,10,18]`);
   });
 
   // Scalar factor applied to a matrix product
@@ -496,6 +499,72 @@ describe('Multiply with tensors (matrix-product semantics)', () => {
   // Pure scalar multiplication is unaffected
   it('does not affect scalar multiplication', () => {
     expect(ev(['Multiply', 2, 3, 'x'])).toMatchInlineSnapshot(`6x`);
+  });
+});
+
+// Issue #29: `Multiply` over two list/vector operands must be consistent and
+// element-wise, regardless of whether an operand is a plain list, an assigned
+// list-valued symbol, or a non-collection-typed head over a list (e.g.
+// `Sqrt(k)`). It must NOT contract to a dot product (that is `MatrixMultiply`).
+describe('Multiply list consistency (Issue #29)', () => {
+  const ce29 = new ComputeEngine();
+  ce29.assign('k', ce29.box(['List', 1, 3, 10]));
+  const ev = (expr: Expression) => ce29.box(expr).evaluate().toString();
+
+  it('k · k is element-wise', () => {
+    expect(ev(['Multiply', 'k', 'k'])).toMatchInlineSnapshot(`[1,9,100]`);
+  });
+
+  it('√k · k is element-wise and stays exact', () => {
+    // The `Sqrt(k)` operand is not collection-typed, so it exercises the
+    // literal-tensor path — which used to contract to a scalar dot product.
+    expect(ev(['Multiply', ['Sqrt', 'k'], 'k'])).toMatchInlineSnapshot(
+      `[1,3sqrt(3),10sqrt(10)]`
+    );
+  });
+
+  it('k · [1,3,10] is element-wise (was 110 dot)', () => {
+    expect(ev(['Multiply', 'k', ['List', 1, 3, 10]])).toMatchInlineSnapshot(
+      `[1,9,100]`
+    );
+  });
+
+  it('[1,2,3] · [4,5,6] is element-wise (was 32 dot)', () => {
+    expect(
+      ev(['Multiply', ['List', 1, 2, 3], ['List', 4, 5, 6]])
+    ).toMatchInlineSnapshot(`[4,10,18]`);
+  });
+
+  it('mismatched lengths stay inert', () => {
+    expect(
+      ev(['Multiply', ['List', 1, 2], ['List', 1, 2, 3]])
+    ).toMatchInlineSnapshot(`[1,2] * [1,2,3]`);
+  });
+
+  it('Multiply(matrix, vector) is unchanged (matrix product)', () => {
+    expect(
+      ev(['Multiply', ['List', ['List', 1, 2], ['List', 3, 4]], ['List', 1, 1]])
+    ).toMatchInlineSnapshot(`[3,7]`);
+  });
+
+  it('explicit MatrixMultiply(v, v) still contracts to the dot product', () => {
+    expect(
+      ev(['MatrixMultiply', ['List', 1, 2, 3], ['List', 4, 5, 6]])
+    ).toMatchInlineSnapshot(`32`);
+  });
+
+  // The rank test is PER FOLD STEP, on the accumulated product: a contraction
+  // that reduces to a vector then combines element-wise with a following
+  // vector. `M·u·v` = `(M·u) ⊙ v`, NOT the scalar `(M·u)·v` — a step's
+  // semantics never depend on operands elsewhere in the chain.
+  it('matrix·vector·vector chain: contract, then element-wise', () => {
+    const identity: Expression = ['List', ['List', 1, 0], ['List', 0, 1]];
+    expect(
+      ev(['Multiply', identity, ['List', 2, 3], ['List', 5, 7]])
+    ).toMatchInlineSnapshot(`[10,21]`);
+    expect(
+      ev(['Multiply', ['List', 2, 3], ['List', 5, 7], identity])
+    ).toMatchInlineSnapshot(`[10,21]`);
   });
 });
 

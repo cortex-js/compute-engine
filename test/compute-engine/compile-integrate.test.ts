@@ -230,6 +230,22 @@ describe('adaptiveQuadrature (unit)', () => {
     expect(r.converged).toBe(false);
   });
 
+  test('(-∞, ∞) convergent even integrand: ∫ 1/(1+x²) dx = π', () => {
+    // The doubly-infinite case is split at 0 into two semi-infinite integrals.
+    const r = adaptiveQuadrature((x) => 1 / (1 + x * x), -Infinity, Infinity);
+    expect(r.converged).toBe(true);
+    expect(r.estimate).toBeCloseTo(Math.PI, 8);
+  });
+
+  test('(-∞, ∞) divergent odd integrand does not falsely converge to 0 (∫ x dx)', () => {
+    // Divergence check: a single symmetric transform makes an odd integrand
+    // cancel to exactly 0 on the first panel (GK nodes are symmetric about the
+    // center), reporting a spurious converged 0. Splitting at 0 lets each
+    // divergent half hit the panel budget instead.
+    const r = adaptiveQuadrature((x) => x, -Infinity, Infinity);
+    expect(r.converged).toBe(false);
+  });
+
   test('.N() of a definite integral uses GK15 (not Monte Carlo): near machine precision', () => {
     // Regression for the accuracy inversion: the interpreter's `.N()` used to
     // fall straight to Monte Carlo (~1e-3 relative error) while the compiled

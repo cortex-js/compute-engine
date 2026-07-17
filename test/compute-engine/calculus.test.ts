@@ -1365,6 +1365,29 @@ describe('NUMERICAL INTEGRATION', () => {
   });
 });
 
+// Regression (Tycho #28): a doubly-infinite integral of an odd integrand used
+// to numericize to a clean scalar 0 because a single symmetric transform makes
+// the Gauss and Kronrod sums cancel to exactly 0 on the first panel, reporting
+// a spurious {estimate: 0, error: 0, converged: true}. The doubly-infinite case
+// is now split at 0 so a divergent half is detected (non-converged → Monte
+// Carlo → Measurement with a large error bar), never a bare 0.
+describe('DOUBLY-INFINITE NUMERIC INTEGRATION (Tycho #28)', () => {
+  test('divergent ∫_{−∞}^∞ x dx does not numericize to a clean scalar 0', () => {
+    const r = engine.parse('\\int_{-\\infty}^\\infty x dx').N();
+    // Not a bare 0 scalar: either a Measurement (large error) or inert/symbolic.
+    expect(r.isSame(0)).toBe(false);
+  });
+
+  test('convergent odd ∫_{−∞}^∞ x·e^(−x²) dx ≈ 0', () =>
+    expect(N('\\int_{-\\infty}^\\infty x e^{-x^2} dx')).toBeCloseTo(0, 6));
+
+  test('convergent ∫_{−∞}^∞ e^(−x²) dx ≈ √π', () =>
+    expect(N('\\int_{-\\infty}^\\infty e^{-x^2} dx')).toBeCloseTo(
+      Math.sqrt(Math.PI),
+      6
+    ));
+});
+
 describe('LIMIT', () => {
   expect(
     engine

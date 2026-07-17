@@ -201,9 +201,13 @@ function adaptiveFinite(
  * @param options.maxIntervals Panel budget before giving up (default 1500).
  *
  * Returns the `estimate`, an error `error` bound, and whether the requested
- * tolerance was met (`converged`). Infinite bounds are handled by variable
- * transform; `a === b` is 0; `a > b` negates the swapped result; a `NaN` bound
- * yields a non-converged `NaN` estimate.
+ * tolerance was met (`converged`). Semi-infinite bounds are handled by a
+ * variable transform; the doubly-infinite case `(-∞, ∞)` is split at 0 into two
+ * semi-infinite integrals (so a divergent half is detected instead of masked by
+ * symmetric cancellation of an odd integrand), each half receiving half the
+ * panel budget and the combined result re-checked against the tolerance;
+ * `a === b` is 0; `a > b` negates the swapped result; a `NaN` bound yields a
+ * non-converged `NaN` estimate.
  */
 export function adaptiveQuadrature(
   f: (x: number) => number,
@@ -234,13 +238,34 @@ export function adaptiveQuadrature(
   let hi: number;
 
   if (aInf && bInf) {
-    // (-∞, ∞): x = t/(1 - t²), t ∈ (-1, 1). dx = (1 + t²)/(1 - t²)² dt.
-    g = (t) => {
-      const om = 1 - t * t;
-      return (f(t / om) * (1 + t * t)) / (om * om);
-    };
-    lo = -1;
-    hi = 1;
+    // (-∞, ∞): split at 0 into two semi-infinite integrals. A single symmetric
+    // transform makes an odd integrand cancel to exactly 0 on the first panel
+    // (GK nodes are symmetric about the center), masking divergence; splitting
+    // lets each half's asymmetric transform detect a divergent tail. The two
+    // recursive calls are each semi-infinite, so they take non-recursive
+    // branches below. Each half gets half the panel budget so the caller's
+    // `maxIntervals` cap holds for the whole integral.
+    const halfOptions = { rtol, atol, maxIntervals: Math.ceil(maxIntervals / 2) };
+    const left = adaptiveQuadrature(f, a, 0, halfOptions);
+    const right = adaptiveQuadrature(f, 0, b, halfOptions);
+    const estimate = left.estimate + right.estimate;
+    const error = left.error + right.error;
+    // Each half converged against a tolerance scaled to its OWN magnitude, so
+    // re-check the summed error on the combined result. The relative scale is
+    // the halves' combined magnitude, not `|estimate|`: for a cancelling
+    // integrand (halves ±M) the achievable absolute accuracy is `rtol·M` —
+    // demanding `rtol·|estimate|` (→ `atol` at exact cancellation) would
+    // reject correct results like ∫x·e^(−x²) = 0. The reported `error` is the
+    // true bound either way. The finiteness test also forces
+    // `converged: false` when the sum is NaN (e.g. ∞ + (−∞)); `estimate` is
+    // only meaningful when `converged` is true.
+    const scale = Math.abs(left.estimate) + Math.abs(right.estimate);
+    const converged =
+      left.converged &&
+      right.converged &&
+      Number.isFinite(estimate) &&
+      error <= Math.max(atol, rtol * scale);
+    return { estimate, error, converged };
   } else if (bInf) {
     // [a, ∞): x = a + t/(1 - t), t ∈ [0, 1). dx = 1/(1 - t)² dt.
     g = (t) => {

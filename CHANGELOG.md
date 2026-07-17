@@ -1,3 +1,44 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **`Multiply` of two vectors (rank-1 lists) is now element-wise, not a dot
+  product.** `[1, 2, 3] \cdot [4, 5, 6]` now evaluates to `[4, 10, 18]` instead
+  of the scalar `32`. This makes `Multiply` over lists consistent: element-wise
+  is what `Add`, `Power` (`k^2`), scalar scaling (`2k`), and symbol-bound list
+  operands (`k \cdot k` with `k := [1,3,10]`) already did — previously the
+  *same* product could zip or contract depending on whether an operand was a
+  literal list, a bound symbol, or a computed expression (`\sqrt{k} \cdot k`
+  silently collapsed a 3-element family to one scalar). **For the dot product,
+  use the explicit `Dot` or `MatrixMultiply` operators**, which are unchanged.
+  A product is folded left-to-right, one pair at a time: a step involving a
+  matrix (`matrix·matrix`, `matrix·vector`, `vector·matrix`) still contracts
+  (matrix product, unchanged), while a step between two vectors is
+  element-wise. Note this applies per step, so in a longer chain a contraction
+  that *produces* a vector then combines element-wise with a following vector:
+  `M·u·v` is `(M·u) ⊙ v`, no longer the scalar `(M·u)·v`. Vectors of differing
+  lengths stay inert (no implicit zip-to-shortest). The compiled targets follow
+  the same semantics: equal-length `vector·vector` compiles to the element-wise
+  broadcast; statically mismatched lengths and matrix contractions fall back to
+  the interpreter.
+
+### Bug Fixes
+
+- **A divergent integral over `(-∞, ∞)` no longer numericizes to a clean `0`.**
+  `.N()` of `\int_{-\infty}^{\infty} x\,dx` (and `x^3`, `\sin x`, any odd
+  divergent integrand) returned an exact scalar `0`: the Gauss–Kronrod
+  quadrature mapped the doubly-infinite domain through a symmetric transform,
+  so an odd integrand cancelled to exactly 0 on the first panel with a 0 error
+  estimate — indistinguishable from a genuine result downstream. The
+  doubly-infinite case is now split at 0 into two half-line integrals that must
+  *each* converge (the definition of improper-integral convergence); a
+  divergent half fails to converge and the result falls back to a
+  `Measurement` with an honest (large) error bar that consumers can reject.
+  Convergent integrands are unaffected (`\int_{-\infty}^{\infty} x e^{-x^2}\,dx`
+  → `0`, `\int_{-\infty}^{\infty} e^{-x^2}\,dx` → `√π`). Note this also means
+  no Cauchy principal value is implied: a symmetric divergent integral reports
+  non-convergence rather than its principal value.
+
 ## 0.81.0 _2026-07-16_
 
 ### New Features
