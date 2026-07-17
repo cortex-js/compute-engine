@@ -12,6 +12,7 @@ import {
   isSymbol,
   isFunction,
   isString,
+  isTensor,
   sym,
 } from './boxed-expression/type-guards.js';
 import {
@@ -600,6 +601,80 @@ function captureClosures(
 }
 
 /**
+ * Capture-avoiding structural substitution.
+ *
+ * Behaves like `expr.subs(subs)`, except that a nested `Function` literal whose
+ * own parameter list binds a substituted name shadows it: the substitution is
+ * NOT applied to that name inside the literal, so a returned lambda that
+ * re-binds an outer parameter is not corrupted (e.g. `(x ↦ (x ↦ x))(1)` must
+ * keep the inner binder intact rather than rewrite it to `x ↦ 1`). Mirrors the
+ * `innerParamNames` exclusion used by `captureClosures`.
+ */
+function captureAvoidingSubs(
+  expr: Expression,
+  subs: Record<string, Expression>
+): Expression {
+  const ce = expr.engine;
+
+  // A `Function` literal binds its parameters: drop any shadowed name from the
+  // substitution before descending, so an inner binder's occurrences survive.
+  let map = subs;
+  if (isFunction(expr, 'Function')) {
+    const bound = expr.ops
+      .slice(1)
+      .map((op) => functionLiteralParameterName(op))
+      .filter((n): n is string => !!n);
+    if (bound.some((n) => n in subs)) {
+      map = { ...subs };
+      for (const n of bound) delete map[n];
+    }
+  }
+  if (Object.keys(map).length === 0) return expr;
+
+  // Bare symbol: substitute if matched.
+  const s = sym(expr);
+  if (s !== undefined) return map[s] ?? expr;
+
+  // Leaf (number/string) or tensor: no `Function` literal to capture inside, so
+  // the built-in substitution (which also handles rational/tensor structural
+  // forms) is safe.
+  if (!isFunction(expr) || isTensor(expr)) return expr.subs(map);
+
+  // Recurse into operands, rebuilding as `BoxedFunction.subs` does.
+  const ops = expr.ops.map((x) => captureAvoidingSubs(x, map));
+  const form = expr.isCanonical || expr.isStructural ? 'canonical' : 'raw';
+  if (!ops.every((x) => x.isValid))
+    return ce.function(expr.operator, ops, { form: 'raw' });
+  return ce.function(expr.operator, ops, { form });
+}
+
+/** Operators that hold (do not evaluate) their branch operands, so a branch can
+ * survive evaluation still referencing a raw parameter symbol. */
+const HELD_CONDITIONAL_OPERATORS: ReadonlySet<string> = new Set([
+  'If',
+  'Which',
+  'When',
+  'Match',
+]);
+
+/**
+ * Does `name` appear inside a HELD conditional (`If`/`Which`/…) within `expr`?
+ *
+ * Such an occurrence is a raw, unevaluated parameter reference (the branch was
+ * never evaluated), NOT the result of resolving the parameter to its value —
+ * so it is safe to substitute even when the argument itself references `name`.
+ */
+function referencesInHeldConditional(
+  expr: Expression,
+  name: string
+): boolean {
+  if (!isFunction(expr)) return false;
+  if (HELD_CONDITIONAL_OPERATORS.has(expr.operator) && expr.has(name))
+    return true;
+  return expr.ops.some((op) => referencesInHeldConditional(op, name));
+}
+
+/**
  * If `expr is a function literal (`["Function"]` expression), return a
  * JavaScript function that can be called with arguments.
  */
@@ -963,6 +1038,47 @@ function makeLambda(
       // the static defining scope, so outer-call parameters are lost once
       // freshScope is popped.
       result = captureClosures(ce, result, freshScope);
+
+      // Substitute each parameter's VALUE into a partially-symbolic result that
+      // still references the parameter symbol. A body that cannot fully evaluate
+      // (e.g. `Which`/`If` with an undetermined condition) returns itself inert,
+      // referencing the raw parameter symbol rather than the bound value; once
+      // `freshScope` is popped that symbol is unbound, so every element of a
+      // lazy `Map`/`Filter`/`Tabulate` stream would otherwise lose its argument
+      // (Tycho item 26). This mirrors the comprehension stream's
+      // `comprehensionIndexSubs` fix. It is a no-op for a body that already
+      // resolved its parameters.
+      //
+      // The substitution is capture-avoiding (`captureAvoidingSubs`): a returned
+      // lambda that re-binds the parameter (e.g. `(x ↦ (x ↦ x))(1)`) keeps its
+      // inner binder rather than having it rewritten.
+      //
+      // When the ARGUMENT itself references `name`, a naive substitution can
+      // double-apply a `name` that the body already resolved to its value — the
+      // `x` then present in the result came from the value, not from an
+      // unevaluated parameter reference. Examples that must be left alone:
+      // `Apply(x ↦ x, Hold(x))` (result `Hold(x)`, else `Hold(Hold(x))`),
+      // `Apply(x ↦ x + 1, x + 1)` (result `x + 2`, else `x + 3`). We still
+      // substitute in that ambiguous case when `name` survives inside a HELD
+      // conditional (`If`/`Which`/…) — an unevaluated branch that genuinely
+      // holds the raw parameter (Tycho item 26) — and the result is not simply
+      // the argument echoed back.
+      if (result.has(paramNames as string[])) {
+        let subs: Record<string, Expression> | undefined;
+        for (let i = 0; i < params.length; i++) {
+          const name = paramNames[i];
+          if (!name || !result.has(name)) continue;
+          const value = evaluatedArgs[i];
+          if (
+            value.has(name) &&
+            (result.isSame(value) ||
+              !referencesInHeldConditional(result, name))
+          )
+            continue;
+          (subs ??= {})[name] = value;
+        }
+        if (subs !== undefined) result = captureAvoidingSubs(result, subs);
+      }
 
       // Honor a numeric-approximation request (`N(f(2))`) by approximating
       // the (exactly-evaluated) result HERE, while the function's scope

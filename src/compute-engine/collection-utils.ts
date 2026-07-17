@@ -164,18 +164,32 @@ export function isDeclaredScalarNumber(expr: Expression): boolean {
 }
 
 /**
- * True when `expr`'s TYPE is a `tuple` kind — a point/vector in ℝⁿ *or* a
- * Desmos-style point-list (a tuple with a finite-collection component, e.g.
- * `(-6, n)` with `n` a list). Broader than `isNumericTuple`, which requires
- * every element to be a subtype of `number`: `isTuple` also matches a tuple
- * whose components include lists/collections. Used by the `Add`/`Multiply`
- * dispatch so a tuple is scaled/added **component-wise** (never broadcast as a
- * list); the transpose to a `List` of point-tuples happens at evaluation (the
- * `Tuple` evaluate handler), not here.
+ * True when `expr` is a `tuple` — a point/vector in ℝⁿ *or* a Desmos-style
+ * point-list (a tuple with a finite-collection component, e.g. `(-6, n)` with
+ * `n` a list). Broader than `isNumericTuple`, which requires every element to
+ * be a subtype of `number`: `isTuple` also matches a tuple whose components
+ * include lists/collections. Used by the `Add`/`Multiply` dispatch and the
+ * broadcast steps so a tuple is treated as an **atomic** value (scaled/added
+ * component-wise, never broadcast as a list); the transpose to a `List` of
+ * point-tuples happens at evaluation (the `Tuple` evaluate handler), not here.
+ *
+ * Matches on the static type first, then — mirroring the value-level
+ * `isFiniteIndexedCollection` — follows a symbol's runtime value binding. A
+ * lambda parameter inferred scalar (`number`) from its body (`2x`) but applied
+ * to a point has type `number` yet a tuple *value*; without the value check the
+ * body's arithmetic would broadcast the point into a list.
  */
 export function isTuple(expr: Expression): boolean {
   const t = expr.type.type;
-  return typeof t !== 'string' && t.kind === 'tuple';
+  if (typeof t !== 'string' && t.kind === 'tuple') return true;
+  if (isSymbol(expr)) {
+    const v = expr.value;
+    if (v !== undefined && !isSymbol(v)) {
+      const vt = v.type.type;
+      return typeof vt !== 'string' && vt.kind === 'tuple';
+    }
+  }
+  return false;
 }
 
 /** The element count of a tuple-typed expression when statically known. */

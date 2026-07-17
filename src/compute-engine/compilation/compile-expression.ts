@@ -1,13 +1,8 @@
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import type { Expression, JSSource } from '../global-types.js';
-import type {
-  CompileTarget,
-  CompilationResult,
-  CompiledRunner,
-} from './types.js';
+import type { CompileTarget, CompilationResult } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
-import { isFunction } from '../boxed-expression/type-guards.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 
 type CompileExpressionOptions<T extends string = string> = {
@@ -28,18 +23,6 @@ type CompileExpressionOptions<T extends string = string> = {
   iterationBudget?: number;
   quadrature?: 'adaptive' | 'monte-carlo';
 };
-
-/**
- * Materialize an interpreted (evaluated) result for a fallback `run`, matching
- * `evaluate()` semantics: a scalar collapses to its real part (the
- * compiled-runner numeric contract), while a finite indexed collection becomes
- * a nested JS array of element values. Used so the interpretation fallback
- * returns the right value for list-valued expressions instead of `NaN`.
- */
-function interpretedRunValue(expr: Expression): number | unknown[] {
-  if (expr.isCollection) return [...expr.each()].map(interpretedRunValue);
-  return expr.re;
-}
 
 /**
  * Compile a boxed expression.
@@ -133,92 +116,32 @@ export function compile<T extends string = 'javascript'>(
       console.warn(
         `Compilation fallback for "${expr.operator}" (target: ${options?.to ?? 'javascript'}): ${error}`
       );
-      const ce = expr.engine;
       const target = (options?.to ?? 'javascript') as T;
-
-      // Compute the declarative reference analysis so the (success: false)
-      // result still tells the caller *why* it could not be compiled —
-      // `unsupported` lists the unlowerable operators, `freeSymbols` the
-      // referenced inputs — without them having to parse `error`. Never let the
-      // analysis itself break the fallback.
-      let refs: { freeSymbols: string[]; unsupported: string[] } = {
-        freeSymbols: [],
-        unsupported: [],
-      };
-      try {
-        const compileTarget =
-          options?.target ??
-          expr.engine.getCompilationTarget(target as string)?.createTarget();
-        if (compileTarget)
-          refs = BaseCompiler.analyzeReferences(
-            expr,
-            compileTarget,
-            options?.vars ? new Set(Object.keys(options.vars)) : undefined
-          );
-      } catch {
-        /* keep the empty analysis */
+      // The interval target's own fallback wrapper produces an
+      // interval-shaped `run` (degenerate `{lo, hi}` intervals); the generic
+      // interpreter fallback below returns plain numbers, which would violate
+      // the interval-js result contract. Delegate to the target.
+      if ((target as string) === 'interval-js') {
+        const registered = expr.engine.getCompilationTarget('interval-js');
+        // `target === 'interval-js'` pins `T` to 'interval-js' at runtime,
+        // but TypeScript cannot correlate the narrowed string with the type
+        // parameter — hence the two-step conversion.
+        if (registered)
+          return registered.compile(expr, {
+            vars: options?.vars,
+            fallback: true,
+          }) as unknown as CompilationResult<T>;
       }
-
-      // A function literal (lambda) compiles to the 'lambda' calling
-      // convention — `run(a, b, ...)` with positional arguments (see
-      // `compileToTarget` in javascript-target.ts). The fallback must mirror
-      // that by applying the function to its positional arguments via the
-      // interpreter. Otherwise positional arguments are silently dropped and
-      // the unbound lambda evaluates to nothing.
-      if (isFunction(expr, 'Function')) {
-        const lambdaRun = ((...args: number[]) =>
-          ce
-            .function('Apply', [expr, ...args.map((a) => ce.expr(a))])
-            .evaluate().re) as unknown as CompiledRunner;
-        return {
-          target,
-          success: false,
-          code: '',
-          calling: 'lambda',
-          run: lambdaRun,
-          error,
-          ...refs,
-        } as CompilationResult<T>;
-      }
-
-      // Otherwise, the expression uses the 'expression' calling convention:
-      // `run({ x, y, ... })` with a variables object.
-      const fallbackRun = ((vars: Record<string, number>) => {
-        ce.pushScope();
-        try {
-          if (vars && typeof vars === 'object') {
-            for (const [k, v] of Object.entries(vars)) {
-              // Declare a fresh binding in the just-pushed scope *before*
-              // assigning. `ce.assign` mutates the binding in whatever scope the
-              // symbol was declared in; when the expression already boxed the
-              // symbol in an outer/global scope, a bare `assign` would mutate
-              // that outer binding and `popScope` could not restore it —
-              // permanently leaking the argument value engine-wide. Declaring a
-              // local shadow first makes `assign` target this scope, so
-              // `popScope` fully restores the previous state.
-              ce.declare(k, 'number');
-              ce.assign(k, v);
-            }
-          }
-          // Return the interpreted value with `evaluate()` semantics. A scalar
-          // result yields its real part (the compiled-runner contract); a
-          // list-valued result (e.g. the list-arithmetic fail-closed cases) is
-          // materialized to a nested JS array so the fallback still returns the
-          // correct value rather than a scalar `NaN`.
-          return interpretedRunValue(expr.evaluate());
-        } finally {
-          ce.popScope();
-        }
-      }) as unknown as CompiledRunner;
-      return {
-        target,
-        success: false,
-        code: '',
-        calling: 'expression',
-        run: fallbackRun,
+      const compileTarget =
+        options?.target ??
+        expr.engine.getCompilationTarget(target as string)?.createTarget();
+      return BaseCompiler.buildInterpreterFallback(
+        expr,
         error,
-        ...refs,
-      } as CompilationResult<T>;
+        target,
+        compileTarget,
+        options?.vars ? new Set(Object.keys(options.vars)) : undefined
+      );
     }
     throw e;
   }

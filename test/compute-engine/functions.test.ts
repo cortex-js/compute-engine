@@ -374,3 +374,57 @@ describe('MAPSTO BODY PRECEDENCE', () => {
         .toString()
     ).toBe('[103,104,105]'));
 });
+
+describe('makeLambda post-evaluation parameter substitution', () => {
+  beforeAll(() => {
+    engine.pushScope();
+    // Undetermined boolean condition so `If`/`Which` stays symbolic (held).
+    engine.declare('flm_M', 'boolean');
+  });
+  afterAll(() => engine.popScope());
+
+  // Finding 1 (capture avoidance): applying `(w ↦ (w ↦ w))` to `1` must NOT
+  // rewrite the INNER binder's `w`. The substitution of the outer parameter is
+  // capture-avoiding, so the returned lambda `w ↦ w` is preserved verbatim.
+  test('returned lambda that shadows the parameter is not captured', () => {
+    const inner = engine.expr(['Function', 'w', 'w']);
+    const outer = engine.expr(['Function', inner, 'w']);
+    const result = engine
+      .function('Apply', [outer, engine.number(1)])
+      .evaluate();
+    expect(result.json).toEqual(['Function', ['Block', 'w'], 'w']);
+  });
+
+  // Finding 2 (narrowed self-reference guard): applying `w ↦ If(flm_M, w, 0)`
+  // (held conditional, undetermined condition) to `w + 1` must substitute the
+  // held `w` even though the argument itself references `w`. Previously the
+  // guard suppressed all substitution when the argument contained the same
+  // symbol, leaving a bare `w` in the held branch.
+  test('held conditional branch is substituted when argument shares the symbol', () => {
+    const f = engine.expr(['Function', ['If', 'flm_M', 'w', 0], 'w']);
+    const result = engine
+      .function('Apply', [f, engine.box(['Add', 'w', 1])])
+      .evaluate();
+    expect(result.json).toEqual(['If', 'flm_M', ['Add', 'w', 1], 0]);
+  });
+
+  // Guard against regressing the double-wrap cases the original guard protected:
+  // a body that RESOLVED the parameter to its value must not re-substitute.
+  test('resolved self-referential argument is not double-wrapped', () => {
+    const id = engine.expr(['Function', 'w', 'w']);
+    // id(Hold(w)) stays Hold(w), not Hold(Hold(w)).
+    expect(
+      engine
+        .function('Apply', [id, engine.box(['Hold', 'w'])])
+        .evaluate().json
+    ).toEqual(['Hold', 'w']);
+    // (w ↦ w + 1)(w + 1) is w + 2, not w + 3.
+    const inc = engine.expr(['Function', ['Add', 'w', 1], 'w']);
+    expect(
+      engine
+        .function('Apply', [inc, engine.box(['Add', 'w', 1])])
+        .evaluate()
+        .toString()
+    ).toBe('w + 2');
+  });
+});

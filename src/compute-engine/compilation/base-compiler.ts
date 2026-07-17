@@ -32,7 +32,12 @@ import type {
   ElementPlan,
 } from '../boxed-expression/match-dispatch.js';
 
-import type { CompileTarget, TargetSource } from './types.js';
+import type {
+  CompileTarget,
+  CompilationResult,
+  CompiledRunner,
+  TargetSource,
+} from './types.js';
 
 /**
  * Base compiler class containing language-agnostic compilation logic
@@ -2595,6 +2600,105 @@ export class BaseCompiler {
       result,
       BaseCompiler.analyzeReferences(expr, target, varsKeys)
     );
+  }
+
+  /**
+   * Build the documented `success: false` compilation result for an expression
+   * that could not be lowered to the target, with `run` set to an
+   * interpreter-backed evaluator (the "fall back to interpretation" contract).
+   *
+   * This is the shared implementation behind both the engine-level free-function
+   * `compile()` (which always falls back unless `fallback: false`) and the
+   * built-in `LanguageTarget.compile()` methods (which throw by default, but
+   * fall back to this shape when the caller opts in with `fallback: true`). The
+   * `run` closure mirrors `evaluate()` semantics: a scalar collapses to its real
+   * part, a finite indexed collection materializes to a nested JS array, and a
+   * `Function` literal uses the positional `lambda` calling convention.
+   *
+   * `error` is preserved on the result so the caller can report *why* it could
+   * not be compiled without re-throwing; `compileTarget` (when available) drives
+   * the declarative `freeSymbols`/`unsupported` reference analysis. This method
+   * never throws for a compile reason — the reference analysis is guarded.
+   */
+  static buildInterpreterFallback<T extends string>(
+    expr: Expression,
+    error: string,
+    targetName: T,
+    compileTarget: CompileTarget<Expression> | undefined,
+    varsKeys: Set<string> | undefined
+  ): CompilationResult<T> {
+    const ce = expr.engine;
+
+    // Materialize an interpreted result matching `evaluate()`: a scalar yields
+    // its real part (the compiled-runner numeric contract), a finite indexed
+    // collection becomes a nested JS array of element values.
+    const interpretedRunValue = (e: Expression): number | unknown[] => {
+      if (e.isCollection) return [...e.each()].map(interpretedRunValue);
+      return e.re;
+    };
+
+    // Declarative reference analysis so the (success: false) result still tells
+    // the caller *why* it could not be compiled without parsing `error`. Never
+    // let the analysis itself break the fallback.
+    let refs: { freeSymbols: string[]; unsupported: string[] } = {
+      freeSymbols: [],
+      unsupported: [],
+    };
+    try {
+      if (compileTarget)
+        refs = BaseCompiler.analyzeReferences(expr, compileTarget, varsKeys);
+    } catch {
+      /* keep the empty analysis */
+    }
+
+    // A function literal (lambda) uses the positional `lambda` calling
+    // convention — `run(a, b, ...)`. The fallback must mirror that by applying
+    // the function to its positional arguments via the interpreter; otherwise
+    // positional arguments are silently dropped.
+    if (isFunction(expr, 'Function')) {
+      const lambdaRun = ((...args: number[]) =>
+        ce
+          .function('Apply', [expr, ...args.map((a) => ce.expr(a))])
+          .evaluate().re) as unknown as CompiledRunner;
+      return {
+        target: targetName,
+        success: false,
+        code: '',
+        calling: 'lambda',
+        run: lambdaRun,
+        error,
+        ...refs,
+      } as CompilationResult<T>;
+    }
+
+    // Otherwise the expression uses the `expression` calling convention:
+    // `run({ x, y, ... })` with a variables object.
+    const fallbackRun = ((vars: Record<string, number>) => {
+      ce.pushScope();
+      try {
+        if (vars && typeof vars === 'object') {
+          for (const [k, v] of Object.entries(vars)) {
+            // Declare a fresh local shadow before assigning so `popScope` fully
+            // restores the previous state (a bare `assign` would mutate an
+            // outer/global binding and leak the argument value engine-wide).
+            ce.declare(k, 'number');
+            ce.assign(k, v);
+          }
+        }
+        return interpretedRunValue(expr.evaluate());
+      } finally {
+        ce.popScope();
+      }
+    }) as unknown as CompiledRunner;
+    return {
+      target: targetName,
+      success: false,
+      code: '',
+      calling: 'expression',
+      run: fallbackRun,
+      error,
+      ...refs,
+    } as CompilationResult<T>;
   }
 
   /**

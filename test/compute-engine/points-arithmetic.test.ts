@@ -657,19 +657,23 @@ describe('POINT/TUPLE ARITHMETIC — component accessors on non-indexed collecti
 });
 
 /**
- * Symmetric completion of the Tuple⊗List transpose (Tycho item 25, the Desmos
- * point-list idiom). The OUTER form — a finite collection times a numeric
- * tuple (`n·(1,2)`) — broadcasts the collection into a `List` of `Tuple`s (see
- * the "ELEMENTWISE BROADCAST" block above). This block covers the INNER,
- * complementary form: a `Tuple` whose component is itself a finite collection
- * (`(-6, n)` with `n` a list) transposes — at EVALUATION, not
- * canonicalization — into the `List` of point-tuples. Zip-to-shortest across
- * multiple collection components, scalars broadcast, an empty component yields
- * an empty `List`, and an infinite/lazy component fails closed (stays inert,
- * never hangs). Arithmetic over such a tuple must broadcast, not reject the
- * operand at canonicalization.
+ * The Desmos point-list idiom now lives in an explicit `PointList` operator,
+ * NOT in the `Tuple` evaluate handler. A plain `Tuple` is inert data: `(-6, n)`
+ * with `n` a list stays a `Tuple` with a list component — it never transposes
+ * into a `List` of points. The zip-to-shortest / scalars-broadcast / fail-closed
+ * transpose is what `PointList(-6, n)` produces. Importers emit `PointList`;
+ * default parsing of `(a, b)` never produces it.
+ *
+ * Two contracts are locked here:
+ *   1. Plain tuples are data: they evaluate their operands but do not zip, and
+ *      arithmetic over a tuple-with-collection component neither zips nor bakes
+ *      an incompatible-type error (component-wise scaling is the arithmetic
+ *      `isTuple` path — see `arithmetic-mul-div.ts`).
+ *   2. `PointList` performs the zip: PointList(1,2)→a point, PointList with a
+ *      collection component→the List of point-tuples (zip-to-shortest, scalars
+ *      broadcast, empty→[], infinite/lazy→inert).
  */
-describe('POINT/TUPLE ARITHMETIC — Tuple⊗List transpose (inner form)', () => {
+describe('POINT/TUPLE ARITHMETIC — plain Tuple is data (no zip)', () => {
   // n := 2/20·[0…20] − 1 : 21 exact rationals from −1 to 1 in steps of 1/10.
   const declN = (ce: ComputeEngine) =>
     ce.assign(
@@ -677,38 +681,65 @@ describe('POINT/TUPLE ARITHMETIC — Tuple⊗List transpose (inner form)', () =>
       ce.parse('\\frac{2}{20}\\cdot\\lbrack0\\ldots20\\rbrack - 1').evaluate()
     );
 
-  test('probe 1: (-6, n) → 21-element List of Tuples', () => {
+  test('(a) (-6, n) evaluates to an INERT Tuple (list component intact)', () => {
     const ce = new ComputeEngine();
     declN(ce);
     const r = ce.parse('(-6, n)').evaluate();
-    expect(r.operator).toBe('List');
-    expect(r.count).toBe(21);
-    expect(r.at(1)!.json).toEqual(['Tuple', -6, -1]);
-    expect(r.at(21)!.json).toEqual(['Tuple', -6, 1]);
-    expect([...r.each()].every((x) => x.operator === 'Tuple')).toBe(true);
+    expect(r.operator).toBe('Tuple');
+    expect(r.op1.json).toEqual(-6);
+    // The list component is preserved, not transposed away.
+    expect(r.op2.operator).toBe('List');
+    expect(r.op2.count).toBe(21);
   });
 
-  test('probe 2: 2·(1, 0.3n) broadcasts (no incompatible-type error)', () => {
+  test('(a) explicit Tuple(-6, [1,2,3]) stays an inert Tuple', () => {
     const ce = new ComputeEngine();
-    declN(ce);
-    const r = ce.box(['Multiply', 2, ['Tuple', 1, ['Multiply', 0.3, 'n']]]).evaluate();
-    expect(r.operator).toBe('List');
-    expect(r.count).toBe(21);
-    expect(r.at(1)!.json).toEqual(['Tuple', 2, -0.6]);
-    // No baked Error anywhere in the result.
+    const r = ce.box(['Tuple', -6, ['List', 1, 2, 3]]).evaluate();
+    expect(r.json).toEqual(['Tuple', -6, ['List', 1, 2, 3]]);
+  });
+
+  test('(b) 2·(1, 0.3n) scales component-wise (numeric tuple), no error', () => {
+    // With `n` symbolic, `(1, 0.3n)` is a numeric tuple (a point), so scalar
+    // multiplication scales each component: `(2, 0.6n)`. No zip, no error.
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Multiply', 2, ['Tuple', 1, ['Multiply', 0.3, 'n']]])
+      .evaluate();
+    expect(r.json).toEqual(['Tuple', 2, ['Multiply', 0.6, 'n']]);
     expect(JSON.stringify(r.json).includes('Error')).toBe(false);
   });
 
-  test('probe 3: outer form n·(1,2) still broadcasts (regression)', () => {
+  test('(b) 2·(1, 0.3n) with n a list scales component-wise, no zip, no error', () => {
     const ce = new ComputeEngine();
     declN(ce);
-    const r = ce.box(['Multiply', 'n', ['Tuple', 1, 2]]).evaluate();
-    expect(r.operator).toBe('List');
-    expect(r.count).toBe(21);
-    expect(r.at(1)!.json).toEqual(['Tuple', -1, -2]);
+    const r = ce
+      .box(['Multiply', 2, ['Tuple', 1, ['Multiply', 0.3, 'n']]])
+      .evaluate();
+    // Component-wise: the tuple stays a tuple, the scalar distributes into the
+    // list component (`(2, 0.6n)`) — never transposes into a List of points.
+    expect(r.operator).toBe('Tuple');
+    expect(r.op1.isSame(2)).toBe(true);
+    expect(r.op2.operator).toBe('List');
+    expect(r.op2.count).toBe(21);
+    expect(r.op2.at(1)!.re).toBeCloseTo(-0.6, 12); // 0.6·(-1)
+    expect(r.op2.at(21)!.re).toBeCloseTo(0.6, 12); // 0.6·1
+    // No baked Error anywhere.
+    expect(JSON.stringify(r.json).includes('Error')).toBe(false);
   });
 
-  test('probe 4: m(P) := P + s(P)·(1, 0.3n) is a valid definition (no baked Error)', () => {
+  test('(b′) point-list + point broadcasts the point over the list', () => {
+    const ce = new ComputeEngine();
+    const pts = ce.box(['PointList', -6, ['List', 1, 2, 3]]).evaluate();
+    const r = ce.box(['Add', pts, ['Tuple', 1, 2]]).evaluate();
+    expect(r.json).toEqual([
+      'List',
+      ['Tuple', -5, 3],
+      ['Tuple', -5, 4],
+      ['Tuple', -5, 5],
+    ]);
+  });
+
+  test('(c) m(P) := P + s(P)·(1, 0.3n) is a valid definition (no baked Error)', () => {
     const ce = new ComputeEngine();
     declN(ce);
     ce.declare('s', '(number) -> number');
@@ -716,10 +747,40 @@ describe('POINT/TUPLE ARITHMETIC — Tuple⊗List transpose (inner form)', () =>
     expect(m.isValid).toBe(true);
     expect(JSON.stringify(m.json).includes('Error')).toBe(false);
   });
+});
 
-  test('small explicit tuple-with-list transposes', () => {
+/**
+ * The explicit `PointList` operator (the Desmos point-list surface form) carries
+ * the zip that used to live in the `Tuple` evaluate handler.
+ */
+describe('POINT/TUPLE ARITHMETIC — PointList zips', () => {
+  // n := 2/20·[0…20] − 1 : 21 exact rationals from −1 to 1 in steps of 1/10.
+  const declN = (ce: ComputeEngine) =>
+    ce.assign(
+      'n',
+      ce.parse('\\frac{2}{20}\\cdot\\lbrack0\\ldots20\\rbrack - 1').evaluate()
+    );
+
+  test('PointList(1, 2) → a plain point (Tuple)', () => {
     const ce = new ComputeEngine();
-    const r = ce.box(['Tuple', -6, ['List', 1, 2, 3]]).evaluate();
+    const r = ce.box(['PointList', 1, 2]).evaluate();
+    expect(r.json).toEqual(['Tuple', 1, 2]);
+  });
+
+  test('PointList(-6, n) → 21-element List of Tuples', () => {
+    const ce = new ComputeEngine();
+    declN(ce);
+    const r = ce.box(['PointList', -6, 'n']).evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.count).toBe(21);
+    expect(r.at(1)!.json).toEqual(['Tuple', -6, -1]);
+    expect(r.at(21)!.json).toEqual(['Tuple', -6, 1]);
+    expect([...r.each()].every((x) => x.operator === 'Tuple')).toBe(true);
+  });
+
+  test('PointList(-6, [1,2,3]) transposes to the List of point-tuples', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['PointList', -6, ['List', 1, 2, 3]]).evaluate();
     expect(r.json).toEqual([
       'List',
       ['Tuple', -6, 1],
@@ -731,33 +792,60 @@ describe('POINT/TUPLE ARITHMETIC — Tuple⊗List transpose (inner form)', () =>
   test('two list components of different lengths zip to the shorter', () => {
     const ce = new ComputeEngine();
     const r = ce
-      .box(['Tuple', ['List', 1, 2, 3], ['List', 10, 20]])
+      .box(['PointList', ['List', 1, 2, 3], ['List', 10, 20]])
       .evaluate();
-    expect(r.json).toEqual([
-      'List',
-      ['Tuple', 1, 10],
-      ['Tuple', 2, 20],
-    ]);
+    expect(r.json).toEqual(['List', ['Tuple', 1, 10], ['Tuple', 2, 20]]);
   });
 
   test('empty list component yields an empty List', () => {
     const ce = new ComputeEngine();
-    const r = ce.box(['Tuple', 1, ['List']]).evaluate();
+    const r = ce.box(['PointList', 1, ['List']]).evaluate();
     expect(r.operator).toBe('List');
     expect(r.json).toEqual(['List']);
   });
 
-  test('infinite Range component fails closed (stays an inert Tuple, no hang)', () => {
+  test('infinite Range component fails closed (stays inert, no hang)', () => {
     const ce = new ComputeEngine();
-    const r = ce.parse('(1, \\mathrm{Range}(1, \\infty))').evaluate();
-    expect(r.operator).toBe('Tuple');
+    const r = ce
+      .parse('\\operatorname{PointList}(1, \\mathrm{Range}(1, \\infty))')
+      .evaluate();
+    // A collection component that cannot be safely zipped (infinite or
+    // unknown-length) keeps the expression INERT — the point-list reading is
+    // preserved, never silently degraded to a plain point, and never a hang.
+    expect(r.operator).toBe('PointList');
     expect(r.op1.json).toEqual(1);
   });
 
-  test('PointX / PointY over the transposed point-list', () => {
+  test('a non-indexed collection component (Set) also stays inert', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['PointList', 1, ['Set', 1, 2]]).evaluate();
+    expect(r.operator).toBe('PointList');
+  });
+
+  test('PointList(1,2) compares equal to the Tuple it evaluates to', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Equal', ['PointList', 1, 2], ['Tuple', 1, 2]]).evaluate().symbol
+    ).toBe('True');
+  });
+
+  test('LaTeX round-trip identity (canonical and non-canonical parse)', () => {
+    const ce = new ComputeEngine();
+    const box = ce.box(['PointList', 1, ['List', 1, 2, 3]]);
+    expect(ce.parse(box.latex).json).toEqual(['PointList', 1, ['List', 1, 2, 3]]);
+    // The dedicated dictionary entry parses `PointList` at the non-canonical
+    // stage too (not just after canonicalization collapses InvisibleOperator).
+    expect(ce.parse('\\operatorname{PointList}(1, 2)', { canonical: false }).json).toEqual([
+      'PointList',
+      1,
+      2,
+    ]);
+  });
+
+  test('PointX / PointY over the PointList result', () => {
     const ce = new ComputeEngine();
     declN(ce);
-    const pts = ce.parse('(-6, n)').evaluate();
+    const pts = ce.box(['PointList', -6, 'n']).evaluate();
     const xs = ce.box(['PointX', pts]).evaluate();
     const ys = ce.box(['PointY', pts]).evaluate();
     expect(xs.count).toBe(21);
@@ -767,5 +855,168 @@ describe('POINT/TUPLE ARITHMETIC — Tuple⊗List transpose (inner form)', () =>
     expect(ys.at(1)!.json).toEqual(-1);
     expect(ys.at(11)!.json).toEqual(0);
     expect(ys.at(21)!.json).toEqual(1);
+  });
+});
+
+/**
+ * A `Tuple` operand is ATOMIC for broadcasting: applying a user function to a
+ * tuple binds the whole point to the parameter (never maps over its
+ * components), while a genuine List still broadcasts element-wise. See the
+ * `!isTuple` guards in `boxed-function.ts` (broadcast steps) and the
+ * value-following `isTuple` in `collection-utils.ts`.
+ */
+describe('POINT/TUPLE ARITHMETIC — Tuple is atomic for broadcast', () => {
+  test('f(x):=2x applied to a tuple scales it component-wise (stays a Tuple)', () => {
+    const ce = new ComputeEngine();
+    ce.parse('f(x) \\coloneq 2x').evaluate();
+    const r = ce.parse('f((1,2))').evaluate();
+    expect(r.operator).toBe('Tuple');
+    expect(r.json).toEqual(['Tuple', 2, 4]);
+  });
+
+  test('f(x):=2x applied to a List still broadcasts element-wise', () => {
+    const ce = new ComputeEngine();
+    ce.parse('f(x) \\coloneq 2x').evaluate();
+    const r = ce.parse('f([1,2])').evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.json).toEqual(['List', 2, 4]);
+  });
+
+  test('f(x):=2x broadcasts over a List of tuples, binding each tuple whole', () => {
+    const ce = new ComputeEngine();
+    ce.parse('f(x) \\coloneq 2x').evaluate();
+    const r = ce
+      .box(['f', ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]])
+      .evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.json).toEqual([
+      'List',
+      ['Tuple', 2, 4],
+      ['Tuple', 6, 8],
+    ]);
+  });
+
+  test('a body using Add keeps the tuple atomic too', () => {
+    const ce = new ComputeEngine();
+    ce.parse('h(x) \\coloneq x+x').evaluate();
+    const r = ce.parse('h((1,2))').evaluate();
+    expect(r.operator).toBe('Tuple');
+    expect(r.json).toEqual(['Tuple', 2, 4]);
+  });
+
+  test('a broadcastable builtin (Sin) does not broadcast into a Tuple', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Sin', ['Tuple', 1, 2]]).evaluate();
+    // Stays inert/symbolic rather than mapping into a List (Desmos also errors
+    // on sin of a point).
+    expect(r.operator).not.toBe('List');
+  });
+});
+
+/**
+ * The `gy1wdjvm2a` SDF-ray-marching chain — the item-25 retest triggers, via
+ * the TEXTUAL-EXPANSION route (each step's body inlined with the previous
+ * point-list substituted, as Tycho's `expandFunctionRefs` produces):
+ * `p_k = p_{k-1} + s(p_{k-1})·PointList(1, 0.3n)` for 5 steps, all lists of
+ * 21 points, `Join(p_0…p_5)` = 126 points.
+ *
+ * Load-bearing engine behavior locked here:
+ * - `Add`/`Multiply` never pre-evaluation-broadcast (boxed-function step 2):
+ *   their broadcast runs in `add()`/`mul()` on EVALUATED operands, so
+ *   `s(p_0)·PointList(…)` zips 21↔21 elementwise instead of repeating the raw
+ *   operand per element (a 21×21 cartesian blow-up, then timeout at p_2).
+ * - Equal-length list arithmetic zips positionally (the Desmos evaluation
+ *   model for a shared carrier `n`).
+ *
+ * The TRUE-APPLICATION route (`p_1 = m(p_0)` with `m` a registered function)
+ * additionally requires the parameter to bind the whole list: register with a
+ * DECLARED collection-accepting signature (`(tuple | list<tuple>) -> any`),
+ * which `:=` registration preserves (item 19.1) and which the application
+ * broadcast gate consults (a non-scalar declared param binds whole). An
+ * inferred/`any` signature counts as scalar (`paramsAreScalar` permissive
+ * default) and maps per element — correct for scalar functions, a cartesian
+ * blow-up for this body.
+ */
+describe('POINT/TUPLE ARITHMETIC — gy1wdjvm2a ray-marching chain (expansion route)', () => {
+  test('five expansion steps stay 21 points each; Join is 126 points', () => {
+    const ce = new ComputeEngine();
+    // n := 2/20·[0…20] − 1 : 21 exact rationals from −1 to 1
+    ce.assign(
+      'n',
+      ce.parse('\\frac{2}{20}\\cdot\\lbrack0\\ldots20\\rbrack - 1').evaluate()
+    );
+    // An SDF-ish scalar function of a point.
+    ce.parse('s(P) \\coloneq \\mathrm{PointY}(P) + 2').evaluate();
+    ce.assign('p_0', ce.parse('\\operatorname{PointList}(-6, n)').evaluate());
+
+    for (let k = 1; k <= 5; k++) {
+      const stepped = ce
+        .parse(
+          `p_${k - 1} + s(p_${k - 1})\\cdot\\operatorname{PointList}(1, 0.3n)`
+        )
+        .evaluate();
+      ce.assign(`p_${k}`, stepped);
+    }
+
+    for (let k = 0; k <= 5; k++) {
+      const p = ce.box(`p_${k}`).evaluate();
+      expect(p.count).toBe(21);
+      expect([...p.each()].every((x) => x.operator === 'Tuple')).toBe(true);
+    }
+
+    // First marched point: (-6,-1) + s((-6,-1))·(1, 0.3·(-1)) = (-5, -1.3)
+    const p1 = ce.box('p_1').evaluate();
+    expect(p1.at(1)!.json).toEqual(['Tuple', -5, -1.3]);
+
+    const joined = ce
+      .box(['Join', 'p_0', 'p_1', 'p_2', 'p_3', 'p_4', 'p_5'])
+      .evaluate();
+    expect(joined.count).toBe(126);
+  });
+
+  test('true application: declared union signature binds the point-list whole', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'n',
+      ce.parse('\\frac{2}{20}\\cdot\\lbrack0\\ldots20\\rbrack - 1').evaluate()
+    );
+    ce.parse('s(P) \\coloneq \\mathrm{PointY}(P) + 2').evaluate();
+    // The Tycho registration recipe: declare the collection-accepting
+    // signature, then register the body via `:=` (signature preserved).
+    ce.declare('m', '(tuple<number, number> | list<tuple<number, number>>) -> any');
+    ce.parse(
+      'm(P) \\coloneq P + s(P)\\cdot\\operatorname{PointList}(1, 0.3n)'
+    ).evaluate();
+
+    let p = ce.parse('\\operatorname{PointList}(-6, n)').evaluate();
+    const chain = [p];
+    for (let k = 1; k <= 5; k++) {
+      p = ce.box(['m', p]).evaluate();
+      chain.push(p);
+    }
+    for (const step of chain) {
+      expect(step.count).toBe(21);
+      expect([...step.each()].every((x) => x.operator === 'Tuple')).toBe(true);
+    }
+    expect(chain[1].at(1)!.json).toEqual(['Tuple', -5, -1.3]);
+    expect(ce.box(['Join', ...chain]).evaluate().count).toBe(126);
+  });
+
+  test('a single point through the registered step function marches once', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'n',
+      ce.parse('\\frac{2}{20}\\cdot\\lbrack0\\ldots20\\rbrack - 1').evaluate()
+    );
+    ce.parse('s(P) \\coloneq \\mathrm{PointY}(P) + 2').evaluate();
+    ce.parse(
+      'm(P) \\coloneq P + s(P)\\cdot\\operatorname{PointList}(1, 0.3n)'
+    ).evaluate();
+    // The Tuple argument binds ATOMICALLY (never mapped over its components);
+    // the body's 21-point list then broadcasts the point over it — the Desmos
+    // reading of point + point-list.
+    const r = ce.box(['m', ['Tuple', -6, -1]]).evaluate();
+    expect(r.count).toBe(21);
+    expect(r.at(1)!.json).toEqual(['Tuple', -5, -1.3]);
   });
 });

@@ -2235,3 +2235,99 @@ describe('COLLECTION NITS (Take preview, Sort boolean comparator, GroupBy typo)'
     ).toBe('{"dict":{"False":[1,3],"True":[2,4]}}');
   });
 });
+
+// Tycho item 26: iterating a lazy lambda-applying collection whose body cannot
+// fully evaluate must still substitute each element's VALUE into the held
+// result. A body like `Which`/`If` with an undetermined condition returns
+// itself inert, referencing the raw parameter symbol; the fix (in `makeLambda`)
+// substitutes the parameter's value into that partially-symbolic result so the
+// element is not lost. A fresh engine keeps the declared-but-unassigned `m`
+// (and the `k` parameter) isolated from the shared-engine tests above.
+describe('Lambda application substitutes the element into an undetermined body', () => {
+  // Fresh engine: `m` is declared-but-unassigned so the body can't fully
+  // evaluate, and the single-char symbol names keep the serialized output
+  // unquoted. Isolated from the shared-engine tests above.
+  const ce = new ComputeEngine();
+  ce.assign('d', ce.box(['List', 1, 2, 3]));
+  ce.declare('m', 'number');
+  const undeterminedFn: Expression = [
+    'Function',
+    ['Which', ['Equal', 'k', 'm'], 1e9, 'True', 'k'],
+    'k',
+  ];
+
+  test('Map each() holds the body but substitutes the element value', () => {
+    const e = ce.box(['Map', 'd', undeterminedFn]);
+    expect([...e.each()].map((x) => x.toString())).toEqual([
+      'Which(1 === m, 1000000000, "True", 1)',
+      'Which(2 === m, 1000000000, "True", 2)',
+      'Which(3 === m, 1000000000, "True", 3)',
+    ]);
+  });
+
+  test('Map evaluate() holds the body but substitutes the element value', () => {
+    expect(ce.box(['Map', 'd', undeterminedFn]).evaluate().toString()).toBe(
+      '[Which(1 === m, 1000000000, "True", 1),Which(2 === m, 1000000000, "True", 2),Which(3 === m, 1000000000, "True", 3)]'
+    );
+  });
+
+  test('Tabulate shares the same lambda choke point', () => {
+    expect(
+      [...ce.box(['Tabulate', undeterminedFn, 3]).each()].map((x) =>
+        x.toString()
+      )
+    ).toEqual([
+      'Which(1 === m, 1000000000, "True", 1)',
+      'Which(2 === m, 1000000000, "True", 2)',
+      'Which(3 === m, 1000000000, "True", 3)',
+    ]);
+  });
+
+  test('direct Apply substitutes the argument into an undetermined body', () => {
+    expect(ce.box(['Apply', undeterminedFn, 2]).evaluate().toString()).toBe(
+      'Which(2 === m, 1000000000, "True", 2)'
+    );
+  });
+
+  test('Filter shares the choke point: predicate sees the element value', () => {
+    // The predicate below cannot decide (m is undetermined), so once the
+    // element value is substituted the applied predicate is `1 === m`, not the
+    // old, corrupted `k === m`. Filter surfaces the undetermined predicate as
+    // an error rather than silently dropping the element.
+    const undeterminedPred: Expression = ['Function', ['Equal', 'k', 'm'], 'k'];
+    expect(() => [
+      ...ce.box(['Filter', 'd', undeterminedPred]).each(),
+    ]).toThrow(/True.+False/);
+    // A fully-decidable predicate still filters correctly (regression guard on
+    // the value flowing through the choke point).
+    ce.assign('q', ce.box(['List', 1, 2, 3, 4, 5]));
+    expect(
+      ce
+        .box(['Filter', 'q', ['Function', ['Greater', 'k', 2], 'k']])
+        .evaluate()
+        .toString()
+    ).toBe('[3,4,5]');
+  });
+
+  test('a fully-evaluable body is unchanged (substitution is a no-op)', () => {
+    expect(
+      ce
+        .box(['Map', 'd', ['Function', ['Power', 'k', 2], 'k']])
+        .evaluate()
+        .toString()
+    ).toBe('[1,4,9]');
+  });
+
+  test('Map over an infinite base stays lazy (Take 3 does not materialize)', () => {
+    expect(
+      ce
+        .box([
+          'Take',
+          ['Map', ['Range', 1, 'PositiveInfinity'], ['Function', ['Power', 'k', 2], 'k']],
+          3,
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[1,4,9]');
+  });
+});

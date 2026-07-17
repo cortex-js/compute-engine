@@ -103,6 +103,32 @@ export function _setFindUnivariateRoots(fn: FindUnivariateRootsFn) {
 
 const EXPANDABLE_OPS = ['Multiply', 'Power', 'Negate', 'Divide'];
 
+/**
+ * Lazy-collection operator heads whose *operator form* serializes faithfully
+ * (i.e. `parse(serialize(x))` is the same expression). For these, the `latex`
+ * getter and `toLatex` serialize the operator form directly rather than
+ * materializing the collection to a (possibly lossy or corrupt) preview List.
+ *
+ * Materialization of a lazy collection is lossy in two ways:
+ * - it drops the operator identity (a `Map`/`Filter`/`Range` becomes a bare
+ *   `List` of values, so `.latex` no longer round-trips), and
+ * - when the body can't fully evaluate (a free/undetermined symbol), the
+ *   preview leaks unsubstituted lambda bodies (see Tycho item 26), or bakes in
+ *   assigned values, both of which corrupt the serialization.
+ *
+ * `Comprehension` was the original member (Tycho item 22); the rest share the
+ * same faithful-operator-form property.
+ */
+const LATEX_FAITHFUL_LAZY_HEADS = new Set([
+  'Comprehension',
+  'Map',
+  'Filter',
+  'Zip',
+  'Tabulate',
+  'Range',
+  'Linspace',
+]);
+
 /** Return true if at least one side contains an operator where expansion could
  *  produce a structurally different result.  Uses `.has()` which recursively
  *  walks the expression tree, so nested cases like `Add(Multiply(a, Add(b,c)), 1)`
@@ -263,7 +289,7 @@ export abstract class _BoxedExpression implements Expression {
     // (`body \operatorname{for} x = domain`). Materializing it would replace
     // it with an elided preview List (e.g. `[1, 4, …, 62500]`) that re-parses
     // to a corrupt finite List, so serialize it directly instead.
-    if (this.isLazyCollection && this.operator !== 'Comprehension') {
+    if (this.isLazyCollection && !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator)) {
       const materialized = this.evaluate({ materialization: true });
       if (!materialized.isLazyCollection) return materialized.latex;
     }
@@ -294,10 +320,17 @@ export abstract class _BoxedExpression implements Expression {
       return this.verbatimLatex;
 
     // Materialize lazy collections before serializing.
-    // Exception: `Comprehension` has a faithful serializer that round-trips;
-    // materializing it would substitute an elided preview List that re-parses
-    // incorrectly (see the `latex` getter above).
-    if (this.isLazyCollection && this.operator !== 'Comprehension') {
+    // Exception: heads with a faithful round-trip serializer (see the `latex`
+    // getter above) stay in operator form BY DEFAULT — but an explicitly
+    // supplied `materialization` option (documented: `true` materializes all
+    // elements, a number bounds the preview) takes precedence over the
+    // faithful-head exemption.
+    const explicitMaterialization = options?.materialization !== undefined;
+    if (
+      this.isLazyCollection &&
+      (explicitMaterialization ||
+        !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator))
+    ) {
       const materialized = this.evaluate({
         materialization: options?.materialization ?? true,
       });

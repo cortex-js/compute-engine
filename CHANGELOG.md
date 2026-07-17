@@ -2,15 +2,20 @@
 
 ### New Features
 
-- **A `Tuple` with collection components transposes to a list of tuples**
-  (the Desmos point-list idiom, completing the outer `Tuple⊗List` transpose
-  shipped in 0.80.0): `(-6, n)` with `n` a 21-element list evaluates to the
-  21-element list of points, and arithmetic over such tuples broadcasts
-  (`2\cdot(1, 0.3n)` → the transposed list) instead of reporting an
-  `incompatible-type` error that invalidated any definition containing the
-  form. Zip-to-shortest for multiple list components; scalars broadcast; an
-  infinite or unknown-length component stays inert. The transpose happens at
-  evaluation, not canonicalization — tuples used as plain data are unaffected.
+- **New `PointList` operator (the Desmos point-list surface form).**
+  `PointList` is the explicit, importer-emitted operator that zips a
+  point-with-collection into a list of points: `PointList(-6, n)` with `n` a
+  21-element list evaluates to the 21-element list of points, while
+  `PointList(1, 2)` is just a plain point. Zip-to-shortest for multiple list
+  components; scalars broadcast; an empty component yields an empty list; an
+  infinite or unknown-length component fails closed (stays inert, no hang). It
+  round-trips through LaTeX as `\operatorname{PointList}(…)`. A plain `Tuple`
+  now stays inert data — it never transposes — so tuples used as data are
+  genuinely unaffected; tuple-with-collection arithmetic still scales
+  component-wise, with no baked `incompatible-type` error, so a definition such
+  as `m(P) \coloneq P + s(P)\cdot(1, 0.3n)` stays valid. (An earlier,
+  evaluate-time `Tuple`-transpose of this idiom was replaced by the explicit
+  `PointList` operator before it ever shipped in a release.)
 
 ### Breaking Changes
 
@@ -29,6 +34,60 @@
 
 ### Bug Fixes
 
+- **A `{…}` group after a function is now its argument list.** For a
+  dictionary-registered function that takes parenthesized arguments, a
+  brace group is accepted exactly as if it were `(...)`: `\gcd{a}` →
+  `GCD(a)`, `\gcd{2,4}` → `GCD(2, 4)`, `\operatorname{floor}{2.5}` →
+  `Floor(2.5)`, and consecutive groups are successive arguments
+  (`\mod{x}{2}` → `Mod(x, 2)`, the TeX multi-argument-macro habit).
+  Previously the function parsed as a bare symbol and the group multiplied
+  against it — silently wrong (`\gcd{a}` was `GCD · a`). Commands with
+  implicit (unparenthesized) arguments keep the transparent-grouping
+  convention — braces render invisibly, so the argument reads the way the
+  rendered formula does: `\sin{x}y` is `Sin(x·y)` and `\sin{x}^2` is
+  `Sin(x²)`, matching `\sin x y` and `\sin x^2`. A brace group after a
+  generic declared or unknown name (`f{x}`) keeps its juxtaposition
+  (multiply) reading.
+- **Function-style `\operatorname{…}` aliases now bind their call like
+  natively-spelled functions.** The parse-only aliases
+  (`\operatorname{mod}`, `var`, `cov`, `corr`, `count`, `length`, `nCr`,
+  `random`, `shuffle`, `repeat`, `join`, `range`, `histogram`, `pdf`, `cdf`)
+  parsed as a bare symbol, so a prefix minus captured the function symbol
+  itself (`-\operatorname{mod}(x,1)` → loud `incompatible-type` error) and a
+  postfix power stole the argument group
+  (`\operatorname{mod}(-x,1)^{2}` parsed **silently** as
+  `Mod · ((−x,1))²`, evaluating to NaN). They are now function-kind
+  dictionary entries: the call binds before prefix minus, and a postfix
+  power applies to the call result
+  (`\operatorname{mod}(-x,1)^{2}` → `Power(Mod(-x,1), 2)`).
+- **`target.compile()` can return a failure instead of throwing.** A
+  fail-closed compile error (e.g. `At` on a non-indexed base) always threw
+  out of a compilation target's `compile()`; passing the new
+  `{ fallback: true }` option returns the documented
+  `{ success: false, error, run }` shape instead, with `run` falling back to
+  the interpreter — matching the engine-level `compile()` contract. The
+  default remains throwing, so existing callers are unaffected.
+- **An over-arity function literal is rejected at registration.** Assigning
+  `f(x, y) \coloneq x + y` to a name declared `(number) -> number` was
+  silently accepted, and `f(3)` then silently partial-applied; it now reports
+  a clear error naming the literal's arity and the declared maximum. (The
+  declared signature was already authoritative for types; this closes the
+  arity gap.)
+- **Applying a function whose body stays partially symbolic no longer loses
+  the argument.** When a lambda body could not fully evaluate (e.g. a
+  `Which`/`If` guard over an undetermined symbol), the application returned
+  the body inert with the parameter unsubstituted — so `Map([1,2,3],
+  k \mapsto \operatorname{Which}(k = m, 10^9, k))` yielded three identical
+  copies of the raw body with `k` leaked free and the elements gone. The
+  parameter's value is now substituted into the held result, fixing `Map`,
+  `Filter`, `Tabulate`, `Zip`-with-function, and direct `Apply` in one place.
+- **Lazy collections serialize faithfully.** `.latex` of a canonical `Map`,
+  `Filter`, `Zip`, `Tabulate`, `Range`, `Linspace`, or `Comprehension` no
+  longer materializes an elided or value-baked preview (which could re-parse
+  to a corrupt expression — a `Map` over a bound symbol serialized as N
+  copies of its raw lambda body); each now emits its operator form, which
+  re-parses to the identical expression. `toString()` still shows the
+  materialized preview for display.
 - **Negative indexing on a lazy `Take` was off by one.** `Take(xs, n).at(-1)`
   returned the second-to-last element of the taken prefix (`at(-1)` on
   `Take([10, 20, 30], 2)` was `10` instead of `20`).

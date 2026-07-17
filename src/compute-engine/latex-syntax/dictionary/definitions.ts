@@ -814,7 +814,17 @@ function makeParseHandler(
       ('arguments' in entry ? entry.arguments : undefined) ?? 'enclosure';
     if (fnName)
       return (parser: Parser, until: Terminator) => {
-        const args = parser.parseArguments(argMode, until);
+        let args = parser.parseArguments(argMode, until);
+        // A `{...}` group after a function head is an argument list
+        // (`\gcd{a,b}`, `\mod{x}{2}`, `\operatorname{floor}{x}`): the braces
+        // render invisibly, but the writer's TeX-macro-style intent is
+        // unambiguous. Without this, the head parsed as a bare symbol and
+        // the group multiplied against it — silently wrong. Scoped to
+        // dictionary-registered heads: for a generic declared or unknown
+        // head (`f{x}`), a brace group keeps its juxtaposition (multiply)
+        // reading.
+        if (args === null && argMode === 'enclosure')
+          args = parser.parseBraceArguments();
         return args === null ? fnName : [fnName, ...args];
       };
   }

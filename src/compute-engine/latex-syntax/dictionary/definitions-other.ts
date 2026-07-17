@@ -792,10 +792,10 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   // The capitalized library entries already exist; these are pure parse
   // aliases so the lowercase names don't land in `unsupported-operator`.
   // ---------------------------------------------------------------------------
-  { latexTrigger: '\\operatorname{count}', parse: 'Length' },
-  { latexTrigger: '\\operatorname{length}', parse: 'Length' },
+  { latexTrigger: '\\operatorname{count}', kind: 'function', parse: 'Length' },
+  { latexTrigger: '\\operatorname{length}', kind: 'function', parse: 'Length' },
   // `nCr(n, r)` = binomial coefficient (Desmos/spreadsheet notation).
-  { latexTrigger: '\\operatorname{nCr}', parse: 'Choose' },
+  { latexTrigger: '\\operatorname{nCr}', kind: 'function', parse: 'Choose' },
   // `nPr(n, r)` = number of r-permutations of n = n!/(n−r)!. CE's
   // `Permutations` enumerates arrangements of a collection, so there is no
   // counting operator to alias to; lower to the equivalent `Choose(n,r)·r!`
@@ -812,14 +812,14 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       ] as MathJsonExpression;
     },
   },
-  { latexTrigger: '\\operatorname{random}', parse: 'Random' },
-  { latexTrigger: '\\operatorname{shuffle}', parse: 'Shuffle' },
-  { latexTrigger: '\\operatorname{repeat}', parse: 'Repeat' },
-  { latexTrigger: '\\operatorname{join}', parse: 'Join' },
-  { latexTrigger: '\\operatorname{range}', parse: 'Range' },
-  { latexTrigger: '\\operatorname{histogram}', parse: 'Histogram' },
-  { latexTrigger: '\\operatorname{pdf}', parse: 'PDF' },
-  { latexTrigger: '\\operatorname{cdf}', parse: 'CDF' },
+  { latexTrigger: '\\operatorname{random}', kind: 'function', parse: 'Random' },
+  { latexTrigger: '\\operatorname{shuffle}', kind: 'function', parse: 'Shuffle' },
+  { latexTrigger: '\\operatorname{repeat}', kind: 'function', parse: 'Repeat' },
+  { latexTrigger: '\\operatorname{join}', kind: 'function', parse: 'Join' },
+  { latexTrigger: '\\operatorname{range}', kind: 'function', parse: 'Range' },
+  { latexTrigger: '\\operatorname{histogram}', kind: 'function', parse: 'Histogram' },
+  { latexTrigger: '\\operatorname{pdf}', kind: 'function', parse: 'PDF' },
+  { latexTrigger: '\\operatorname{cdf}', kind: 'function', parse: 'CDF' },
 
   // Note: `\operatorname{with}` (Desmos's local-binding clause) is intentionally
   // NOT registered here. Use the math-notation equivalent `\operatorname{where}`
@@ -869,6 +869,16 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     kind: 'function',
     serialize: (serializer, expr) =>
       '\\operatorname{polygon}' + serializer.wrapArguments(expr),
+  },
+  // Desmos point-list surface form: `PointList(...)` zips collection components
+  // into a list of point-tuples. Importers emit `\operatorname{PointList}(...)`;
+  // this entry round-trips it (parse at the non-canonical stage too).
+  {
+    name: 'PointList',
+    latexTrigger: ['\\operatorname{PointList}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{PointList}' + serializer.wrapArguments(expr),
   },
 
   // --- Euclidean-geometry notation (inert; see the block comment above the

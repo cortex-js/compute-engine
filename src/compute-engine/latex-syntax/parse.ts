@@ -2123,6 +2123,38 @@ export class _Parser implements Parser {
   }
 
   /**
+   * Match one or more `{...}` groups as the argument list of a known
+   * function head, exactly as if they were a parenthesized argument list:
+   * `\gcd{a,b}` ≡ `\gcd(a,b)`, and consecutive groups are successive
+   * arguments (`\mod{x}{2}` ≡ `\mod(x,2)`, the TeX multi-argument-macro
+   * habit). A group whose content is a comma sequence contributes each
+   * element as an argument.
+   *
+   * An empty group is not an argument — `{}` is spacing/grouping decoration
+   * (see `skipSpace()`), so `\gcd{}` is left for other parsing paths.
+   */
+  parseBraceArguments(): ReadonlyArray<MathJsonExpression> | null {
+    const start = this.index;
+    const args: MathJsonExpression[] = [];
+    while (this.peek === '<{>') {
+      const groupStart = this.index;
+      const group = this.parseGroup();
+      if (group === null || group === 'Nothing') {
+        // Empty (or unparseable) group: not an argument. Leave it
+        // unconsumed and stop collecting.
+        this.index = groupStart;
+        break;
+      }
+      args.push(...(getSequence(group) ?? [group]));
+    }
+    if (args.length === 0) {
+      this.index = start;
+      return null;
+    }
+    return args;
+  }
+
+  /**
    * An enclosure is an opening matchfix operator, an optional expression,
    * optionally followed multiple times by a separator and another expression,
    * and finally a closing matching operator.

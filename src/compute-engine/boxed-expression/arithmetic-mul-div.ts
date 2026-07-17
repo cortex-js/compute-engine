@@ -1500,9 +1500,10 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
     if (r) return r;
   }
 
-  // Tuples (points/vectors): scalar · tuple scales component-wise. A tuple with
-  // a collection component stays a tuple here; the `Tuple` evaluate handler
-  // transposes it to a `List` of point-tuples.
+  // Tuples (points/vectors): scalar · tuple scales component-wise, including a
+  // tuple with a collection component (`2·(1, 0.3n)` → `(2, 0.6n)`); the
+  // explicit `PointList` operator — not plain `Tuple` — carries the Desmos
+  // list-of-points reading.
   if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, false);
 
   const exp = expandProducts(ce, xs);
@@ -1525,11 +1526,11 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
     );
   if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs, true);
   // Broadcast over a non-tensor finite indexed collection (see `mul`).
-  if (xs.some((x) => isFiniteIndexedCollection(x) && !isNumericTuple(x))) {
+  if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
     const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true);
     if (r) return r;
   }
-  if (xs.some((x) => isNumericTuple(x))) return mulTuples(ce, xs, true);
+  if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, true);
   xs = xs.map((x) => x.N());
   const exp = expandProducts(ce, xs);
   if (exp) {
@@ -1554,8 +1555,11 @@ function mulTuples(
   xs: ReadonlyArray<Expression>,
   numericApproximation: boolean
 ): Expression {
-  const tuples = xs.filter((x) => isNumericTuple(x));
-  const scalars = xs.filter((x) => !isNumericTuple(x));
+  // Any tuple-typed operand counts — including a tuple with a collection
+  // component (`(1, 0.3n)` with `n` a list), whose components scale via the
+  // ordinary scalar·list broadcast below.
+  const tuples = xs.filter((x) => isTuple(x));
+  const scalars = xs.filter((x) => !isTuple(x));
 
   if (tuples.length >= 2)
     return ce.error(['incompatible-type', 'number', 'tuple']);
@@ -1570,9 +1574,13 @@ function mulTuples(
   // `mul`/`mulN` short-circuit single-operand calls before reaching here.
   const scalar = numericApproximation ? mulN(...scalars) : mul(...scalars);
 
-  const components = tuple.ops.map((c) =>
-    numericApproximation ? mulN(scalar, c) : mul(scalar, c)
-  );
+  // Evaluate each component first (mirrors `mulTensors`): a raw component like
+  // `0.3n` with `n` a list must materialize before the scalar product, or the
+  // recursive `mul`/`mulN` sees a non-iterable operand and stays inert.
+  const components = tuple.ops.map((c) => {
+    const cv = numericApproximation ? c.N() : c.evaluate();
+    return numericApproximation ? mulN(scalar, cv) : mul(scalar, cv);
+  });
   return ce.tuple(...components);
 }
 

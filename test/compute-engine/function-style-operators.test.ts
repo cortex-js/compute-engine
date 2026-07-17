@@ -40,6 +40,92 @@ describe('Function-style aliases for existing operators', () => {
     expect(v).toBeGreaterThanOrEqual(0);
     expect(v).toBeLessThan(1);
   });
+
+  // The aliases must bind their call like natively-spelled functions
+  // (`\gcd`, `\sin`): the call binds before prefix minus, and a postfix
+  // power applies to the call result, not the bare argument group.
+  // Without `kind: 'function'` the alias parsed as a lone symbol, so
+  // `-mod(x,1)` negated the Mod symbol (loud type error) and
+  // `mod(-x,1)^2` parsed as `Mod · ((−x,1))²` (silently wrong, NaN).
+  test('prefix minus binds after the call: -\\operatorname{mod}(x, 1)', () => {
+    const expr = ce.parse('-\\operatorname{mod}\\left(x,1\\right)');
+    expect(expr.isValid).toBe(true);
+    expect(expr.json).toEqual(['Negate', ['Mod', 'x', 1]]);
+  });
+
+  test('postfix power applies to the call result: \\operatorname{mod}(-x, 1)^2', () => {
+    const expr = ce.parse('\\operatorname{mod}\\left(-x,1\\right)^{2}');
+    expect(expr.isValid).toBe(true);
+    expect(expr.json).toEqual(['Power', ['Mod', ['Negate', 'x'], 1], 2]);
+    expect(expr.subs({ x: 0.3 }).N().re).toBeCloseTo(0.49, 10);
+  });
+
+  // A `{...}` group after a dictionary-registered function head is an
+  // argument list, exactly as if it were `(...)`: the braces render
+  // invisibly, but the TeX-macro-style intent is unambiguous. Consecutive
+  // groups are successive arguments (the `\frac{}{}` habit). Without this,
+  // the head parsed as a bare symbol and the group multiplied against it —
+  // silently wrong (`\gcd{a}` was `GCD · a`).
+  test('a brace group after a function head is its argument list', () => {
+    expect(ce.parse('\\gcd{a}').json).toEqual(['GCD', 'a']);
+    expect(ce.parse('\\gcd{2,4}').json).toEqual(['GCD', 2, 4]);
+    expect(ce.parse('\\operatorname{floor}{2.5}').json).toEqual([
+      'Floor',
+      2.5,
+    ]);
+    expect(ce.parse('-\\gcd{4,6}').json).toEqual(['Negate', ['GCD', 4, 6]]);
+    expect(ce.parse('\\gcd{4,6}^2').json).toEqual([
+      'Power',
+      ['GCD', 4, 6],
+      2,
+    ]);
+  });
+
+  test('consecutive brace groups are successive arguments', () => {
+    expect(ce.parse('\\gcd{a}{b}').json).toEqual(['GCD', 'a', 'b']);
+    expect(ce.parse('\\mod{x}{2}').json).toEqual(['Mod', 'x', 2]);
+    expect(ce.parse('\\operatorname{mod}{x}{1}').json).toEqual([
+      'Mod',
+      'x',
+      1,
+    ]);
+  });
+
+  // Brace-group arguments are scoped to dictionary-registered heads with
+  // parenthesized (enclosure) argument style. Implicit-argument commands
+  // keep the transparent-grouping convention (braces render invisibly, so
+  // the argument reads the way the rendered formula does), and generic
+  // declared or unknown heads keep the juxtaposition (multiply) reading.
+  test('brace-argument scope boundaries are unchanged', () => {
+    // Implicit-argument commands: transparent grouping
+    expect(ce.parse('\\sin{x}y').json).toEqual([
+      'Sin',
+      ['Multiply', 'x', 'y'],
+    ]);
+    expect(ce.parse('\\sin{x}^2').json).toEqual(['Sin', ['Power', 'x', 2]]);
+    // Unknown head: juxtaposition
+    expect(ce.parse('\\operatorname{zzz}{x}').json).toEqual([
+      'Multiply',
+      'x',
+      'zzz',
+    ]);
+  });
+
+  test('call binding for the other function-style aliases', () => {
+    expect(ce.parse('-\\operatorname{var}([1,2,3])').json).toEqual([
+      'Negate',
+      ['Variance', ['List', 1, 2, 3]],
+    ]);
+    expect(ce.parse('\\operatorname{nCr}\\left(5,2\\right)^{2}').json).toEqual([
+      'Power',
+      ['Choose', 5, 2],
+      2,
+    ]);
+    expect(ce.parse('-\\operatorname{length}([1,2])').json).toEqual([
+      'Negate',
+      ['Length', ['List', 1, 2]],
+    ]);
+  });
 });
 
 describe('Distance', () => {

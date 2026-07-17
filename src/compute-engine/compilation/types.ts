@@ -417,6 +417,22 @@ export interface CompilationOptions<Expr = unknown> {
    *   (~1e-4 typical error, different result each call).
    */
   quadrature?: 'adaptive' | 'monte-carlo';
+
+  /**
+   * How a `LanguageTarget.compile()` call reports an expression it cannot lower
+   * to the target (an unsupported operator, or a `Fail closed (D6)` guard).
+   *
+   * - **Unset / `false`** (default) — **throw** the compile error. This is the
+   *   low-level contract the built-in targets have always had, so the engine
+   *   can decide whether to fall back to interpretation.
+   * - **`true`** — instead of throwing, return the documented failure shape
+   *   `{ success: false, error, run }`, where `run` is an interpreter-backed
+   *   evaluator (the "fall back to interpretation" contract). Use this when
+   *   calling a target directly and you want to branch on `success` rather than
+   *   catch an exception. The engine-level free-function `compile()` already
+   *   behaves this way by default (pass `fallback: false` there to throw).
+   */
+  fallback?: boolean;
 }
 
 /**

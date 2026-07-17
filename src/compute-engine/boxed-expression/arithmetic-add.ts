@@ -336,20 +336,23 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   const hasTensors = xs.some((x) => isTensor(x));
   if (hasTensors) return addTensors(xs[0].engine, xs);
 
-  // Tuples (points/vectors, incl. Desmos point-lists with a list component)
-  // add component-wise (never broadcast). The `Tuple` evaluate handler
-  // transposes a tuple with a collection component to a `List` of point-tuples.
-  if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, false);
-
   // Broadcast over a non-tensor finite indexed collection that only became a
   // collection through evaluation — e.g. `L^2 - 2` = `Add(-2, List(1,4,9))`,
   // where `Power(L, 2)` already evaluated to a plain (non-tensor) List. The
   // pre-evaluation broadcast in `_computeValue` misses these (the raw operand
   // was still a `Power`), and `Add` is lazy, so the shape only surfaces here.
-  if (xs.some((x) => isFiniteIndexedCollection(x))) {
+  // Checked BEFORE the tuple branch (mirroring `mul`) so a collection wins the
+  // dispatch and a mixed `List + Tuple` (point-list + point) broadcasts the
+  // tuple over the list instead of falling inert in `addTuples`. Tuples
+  // themselves are excluded — they add component-wise, never broadcast.
+  if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
     const r = broadcastOverIndexedCollections(xs[0].engine, 'Add', xs, false);
     if (r) return r;
   }
+
+  // Tuples (points/vectors, incl. a tuple with a collection component such as
+  // `(-6, n)` with `n` a list) add component-wise (never broadcast).
+  if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, false);
 
   return new Terms(xs[0].engine, xs).asExpression();
 }
@@ -373,14 +376,15 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
     return addTensors(xs[0].engine, xs);
   }
 
-  // Tuples (points/vectors, incl. Desmos point-lists) add component-wise.
-  if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, true);
-
-  // Broadcast over a non-tensor finite indexed collection (see `add`).
-  if (xs.some((x) => isFiniteIndexedCollection(x))) {
+  // Broadcast over a non-tensor finite indexed collection (see `add` — checked
+  // before the tuple branch so `List + Tuple` broadcasts; tuples excluded).
+  if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
     const r = broadcastOverIndexedCollections(xs[0].engine, 'Add', xs, true);
     if (r) return r;
   }
+
+  // Tuples (points/vectors) add component-wise (never broadcast).
+  if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, true);
 
   // Don't N() the number literals (fractions) to avoid losing precision
   xs = xs.map((x) => (isNumber(x) ? x.evaluate() : x.N()));
@@ -424,7 +428,13 @@ function addTuples(
   const n = isFunction(ops[0]) ? ops[0].nops : 0;
   const components: Expression[] = [];
   for (let i = 0; i < n; i++) {
-    const parts = ops.map((x) => (isFunction(x) ? x.ops[i] : x));
+    // Evaluate each part first: a raw component like `0.3n` with `n` a list
+    // must materialize before the sum, or the recursive `add`/`addN` sees a
+    // non-iterable operand and stays inert.
+    const parts = ops.map((x) => {
+      const c = isFunction(x) ? x.ops[i] : x;
+      return numericApproximation ? c.N() : c.evaluate();
+    });
     components.push(numericApproximation ? addN(...parts) : add(...parts));
   }
   return ce.tuple(...components);

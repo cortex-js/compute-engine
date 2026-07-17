@@ -1379,6 +1379,30 @@ export class PythonTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'python'> {
+    try {
+      return this.compileOrThrow(expr, options);
+    } catch (e) {
+      // Default: throw. With `fallback: true`, return the documented
+      // `success: false` shape with an interpreter-backed `run`.
+      if (options.fallback !== true) throw e;
+      const error = (e as Error).message;
+      console.warn(
+        `Compilation fallback for "${expr.operator}" (target: python): ${error}`
+      );
+      return BaseCompiler.buildInterpreterFallback(
+        expr,
+        error,
+        'python',
+        this.createTarget(),
+        options.vars ? new Set(Object.keys(options.vars)) : undefined
+      );
+    }
+  }
+
+  private compileOrThrow(
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
+  ): CompilationResult<'python'> {
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
     const vars = options.vars as Record<string, string> | undefined;

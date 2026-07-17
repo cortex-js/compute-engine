@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../../src/compute-engine';
 import { latex, engine } from '../../utils';
 
 describe('FOR LOOP - SERIALIZATION', () => {
@@ -51,6 +52,71 @@ describe('COMPREHENSION - SERIALIZATION', () => {
     const roundTripped = engine.parse(original.latex);
     expect(roundTripped.operator).toBe('Comprehension');
     expect(roundTripped.isSame(original)).toBe(true);
+  });
+});
+
+describe('MAP / FILTER - SERIALIZATION (Tycho item 26)', () => {
+  // A canonical `Map`/`Filter` is a lazy collection. Its `.latex` must be the
+  // faithful operator form, not a materialized preview List. Materializing is
+  // corrupt when the body cannot fully evaluate (the lazy stream leaks
+  // unsubstituted lambda bodies) and lossy when it can (value-baking / dropped
+  // operator identity). See Tycho item 26.
+
+  test('Map over a bound-symbol collection with an undetermined body serializes faithfully', () => {
+    const ce = new ComputeEngine();
+    ce.assign('d', ce.box(['List', 1, 2, 3]));
+    ce.declare('m', 'number'); // no value: the body can't fully evaluate
+    const e = ce.box([
+      'Map',
+      'd',
+      ['Function', ['Which', ['Equal', 'k', 'm'], 1e9, 'True', 'k'], 'k'],
+    ]);
+    const lx = e.latex;
+
+    // Faithful operator form, not a materialized preview of raw lambda bodies.
+    expect(lx).toMatchInlineSnapshot(
+      `\\mathrm{Map}(d, k\\mapsto\\begin{cases}1\\,000\\,000\\,000&k=m\\\\k&\\top\\end{cases})`
+    );
+
+    // Round-trips to the same expression.
+    expect(ce.parse(lx).json).toEqual(e.json);
+
+    // The lambda parameter `k` must be bound by the `\mapsto`, not leaked as a
+    // free preview element (the pre-fix bug emitted three identical `\bigl\lbrack
+    // {cases …}, …\bigr\rbrack` copies with `k` never substituted).
+    expect(lx).toContain('k\\mapsto');
+    expect(lx.startsWith('\\bigl\\lbrack')).toBe(false);
+  });
+
+  test('Map does not bake in assigned symbol values at serialization time', () => {
+    const ce = new ComputeEngine();
+    ce.assign('d', ce.box(['List', 1, 2, 3]));
+    ce.assign('m', ce.box(2)); // every referenced symbol has a value
+    const e = ce.box([
+      'Map',
+      'd',
+      ['Function', ['Which', ['Equal', 'k', 'm'], 1e9, 'True', 'k'], 'k'],
+    ]);
+    const lx = e.latex;
+
+    // Still the operator form (no evaluated-result list baked in).
+    expect(lx).toContain('\\mathrm{Map}(d,');
+    expect(ce.parse(lx).json).toEqual(e.json);
+  });
+
+  test('Filter over a bound-symbol collection serializes faithfully', () => {
+    const ce = new ComputeEngine();
+    ce.assign('d', ce.box(['List', 1, 2, 3]));
+    const e = ce.box([
+      'Filter',
+      'd',
+      ['Function', ['Greater', 'k', 1], 'k'],
+    ]);
+    const lx = e.latex;
+
+    expect(lx).toMatchInlineSnapshot(`\\mathrm{Filter}(d, k\\mapsto1\\lt k)`);
+    expect(ce.parse(lx).json).toEqual(e.json);
+    expect(lx.startsWith('\\bigl\\lbrack')).toBe(false);
   });
 });
 

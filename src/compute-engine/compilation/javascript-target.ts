@@ -2723,6 +2723,31 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
+    try {
+      return this.compileOrThrow(expr, options);
+    } catch (e) {
+      // By default a failure throws (the low-level contract). When the caller
+      // opts in with `fallback: true`, surface the documented `success: false`
+      // shape with an interpreter-backed `run` instead of throwing.
+      if (options.fallback !== true) throw e;
+      const error = (e as Error).message;
+      console.warn(
+        `Compilation fallback for "${expr.operator}" (target: javascript): ${error}`
+      );
+      return BaseCompiler.buildInterpreterFallback(
+        expr,
+        error,
+        'javascript',
+        this.createTarget(),
+        options.vars ? new Set(Object.keys(options.vars)) : undefined
+      );
+    }
+  }
+
+  private compileOrThrow(
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
+  ): CompilationResult<'javascript'> {
     // Compiled code is radian-based: reproduce the engine's `angularUnit`
     // semantics (scaled trig args, scaled inverse-trig results) so compiled
     // output agrees with evaluate().

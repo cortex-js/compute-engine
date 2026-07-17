@@ -1172,6 +1172,22 @@ export interface Parser {
   ): ReadonlyArray<MathJsonExpression> | null;
 
   /**
+   * Parse one or more `{...}` groups as an argument list, exactly as if
+   * they were a parenthesized argument list: `\gcd{a,b}` ≡ `\gcd(a,b)`,
+   * and consecutive groups are successive arguments (`\mod{x}{2}` ≡
+   * `\mod(x,2)`, the TeX multi-argument-macro habit). A group whose
+   * content is a comma sequence contributes each element as an argument.
+   *
+   * An empty group is not an argument (`{}` is spacing/grouping
+   * decoration), and no group at all returns `null`.
+   *
+   * Used as a fallback after `parseArguments('enclosure')` for
+   * dictionary-registered function heads, where the writer's intent is
+   * unambiguous even though the braces render invisibly.
+   */
+  parseBraceArguments(): ReadonlyArray<MathJsonExpression> | null;
+
+  /**
    * Parse a postfix operator, such as `'` or `!`.
    *
    * Prefix, infix and matchfix operators are handled by `parseExpression()`

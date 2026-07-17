@@ -6,7 +6,7 @@ import type {
 } from '../global-types.js';
 
 import { isRelationalOperator } from '../latex-syntax/utils.js';
-import { isFiniteIndexedCollection } from '../collection-utils.js';
+import { isFiniteIndexedCollection, isTuple } from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { eq } from '../boxed-expression/compare.js';
 import { isNumber, isFunction } from '../boxed-expression/type-guards.js';
@@ -772,7 +772,12 @@ function broadcastComparison(
   ops: ReadonlyArray<Expression>,
   numericApproximation: boolean | undefined
 ): Expression | undefined {
-  if (!ops.some((op) => isFiniteIndexedCollection(op))) return undefined;
+  // Tuples are excluded, matching the pre-evaluation broadcast (step 2 in
+  // boxed-function): a `Tuple` is an atomic value, never mapped over. Without
+  // the exclusion, a tuple-only comparison re-enters evaluate — whose step 2
+  // now skips tuples — and ping-pongs back here forever (stack overflow).
+  if (!ops.some((op) => isFiniteIndexedCollection(op) && !isTuple(op)))
+    return undefined;
   return ce._fn(operator, ops).evaluate({ numericApproximation });
 }
 

@@ -1343,12 +1343,23 @@ export class BoxedFunction
       //
       // 2/ Broadcast if applicable
       // Skip broadcasting for Add/Multiply with tensors - they have their own
-      // element-wise handling in addTensors/mulTensors
+      // element-wise handling in addTensors/mulTensors.
+      // Add/Multiply also skip when some operand is a RAW function expression
+      // that is not (yet) a collection: zipping it here would repeat it as a
+      // scalar, and its per-element re-evaluation could expand into a
+      // collection (e.g. `s(p_0)·PointList(…)`) — an N×N cartesian blow-up
+      // instead of the elementwise zip. Those shapes broadcast soundly in
+      // `add()`/`mul()`, which run on EVALUATED operands. (They are already
+      // excluded from the post-evaluation steps 3b/4b for the same reason.)
       //
       const hasTensors = this.ops!.some((x) => isTensor(x));
+      const hasRawOperand =
+        (this.operator === 'Add' || this.operator === 'Multiply') &&
+        this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
       if (
         def.broadcastable &&
-        this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
+        !hasRawOperand &&
+        this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
         !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
       ) {
         const items = zip(this._ops);
@@ -1371,13 +1382,13 @@ export class BoxedFunction
       // When a function defined via `ce.assign('f', x \mapsto ...)` is applied
       // to a list (or other finite indexed collection) and the function's
       // parameters are scalar, map the function over the collection.
-      // Note: tuples satisfy `isFiniteIndexedCollection` and are intentionally
-      // included — a fixed-size tuple of scalars behaves like a small vector.
+      // Note: tuples are excluded (`!isTuple`) — a `Tuple` is an atomic value
+      // (a point/vector), bound whole to the parameter, never mapped over.
       //
       if (
         def instanceof _BoxedOperatorDefinition &&
         def._isLambda &&
-        this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
+        this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
         paramsAreScalar(def)
       ) {
         const items = zip(this._ops);
@@ -1419,7 +1430,7 @@ export class BoxedFunction
         this.operator !== 'Add' &&
         this.operator !== 'Multiply' &&
         !skipBroadcastForVectorOps(this.operator, false, tail) &&
-        tail.some((x) => isFiniteIndexedCollection(x))
+        tail.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))
       ) {
         const items = zip(tail);
         if (items) {
@@ -1520,13 +1531,19 @@ export class BoxedFunction
 
       //
       // 2/ Broadcast if applicable
-      // Skip broadcasting for Add/Multiply with tensors - they have their own
-      // element-wise handling
+      // Add/Multiply skip when some operand is a RAW function expression that
+      // is not (yet) a collection — zipping it as a repeated scalar
+      // cartesian-explodes when it evaluates to a collection; `add()`/`mul()`
+      // broadcast those soundly on EVALUATED operands (see the sync path).
       //
       const hasTensors = this.ops!.some((x) => isTensor(x));
+      const hasRawOperand =
+        (this.operator === 'Add' || this.operator === 'Multiply') &&
+        this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
       if (
         def?.broadcastable &&
-        this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
+        !hasRawOperand &&
+        this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
         !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
       ) {
         const items = zip(this._ops);
@@ -1557,7 +1574,7 @@ export class BoxedFunction
       if (
         def instanceof _BoxedOperatorDefinition &&
         def._isLambda &&
-        this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
+        this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
         paramsAreScalar(def)
       ) {
         const items = zip(this._ops);
@@ -1595,7 +1612,7 @@ export class BoxedFunction
         this.operator !== 'Add' &&
         this.operator !== 'Multiply' &&
         !skipBroadcastForVectorOps(this.operator, false, tail) &&
-        tail.some((x) => isFiniteIndexedCollection(x))
+        tail.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))
       ) {
         const items = zip(tail);
         if (items) {
@@ -1929,7 +1946,9 @@ function type(expr: BoxedFunction): Type {
       const hasTensors = expr.ops.some((x) => isTensor(x));
       if (
         expr.ops.some(
-          (x) => isFiniteIndexedCollection(x) || isBroadcastCollectionType(x)
+          (x) =>
+            (isFiniteIndexedCollection(x) && !isTuple(x)) ||
+            isBroadcastCollectionType(x)
         ) &&
         !skipBroadcastForVectorOps(expr.operator, hasTensors, expr.ops)
       ) {
@@ -2021,11 +2040,21 @@ function applyFunctionLiteral(
 
   // Broadcast if any operand is a finite indexed collection and the
   // function's parameter types are scalar. Zip operands and apply
-  // pointwise, returning a List of results. Tuples count as indexed
-  // collections, so a tuple of scalars also triggers broadcasting.
+  // pointwise, returning a List of results. Tuples are excluded
+  // (`!isTuple`): a `Tuple` is an atomic value, bound whole, never mapped.
+  // The DECLARED signature is authoritative for the broadcast decision when
+  // present (a `:=` registration preserves it on the value definition — see
+  // the declared-signature reconciliation): a collection-typed parameter
+  // (e.g. `(tuple | list<tuple>) -> any`) binds its argument WHOLE. The
+  // literal's own inferred type is only the fallback.
+  const declaredType = def.type?.type;
+  const broadcastGateType =
+    typeof declaredType === 'object' && declaredType.kind === 'signature'
+      ? declaredType
+      : value.type.type;
   if (
-    ops.some((x) => isFiniteIndexedCollection(x)) &&
-    paramsAreScalar(value.type.type)
+    ops.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
+    paramsAreScalar(broadcastGateType)
   ) {
     const items = zip(ops);
     if (items) {

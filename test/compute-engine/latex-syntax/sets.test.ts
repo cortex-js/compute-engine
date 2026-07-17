@@ -16,11 +16,13 @@ describe('SERIALIZING SETS', () => {
     // ).toMatchInlineSnapshot(
     //   `\\mathrm{Set}(\\mathrm{Number}, \\mathrm{Condition}(0\\ne\\text{\\_}))`
     // );
-    // With predicate and named arguments
+    // With predicate and named arguments.
+    // `Filter` over an infinite base serializes as its faithful operator form
+    // (round-trips) instead of an elided, lossy materialized preview.
     expect(
       latex(['Filter', 'Numbers', ['NotEqual', '_', 0]])
     ).toMatchInlineSnapshot(
-      `\\lbrace1+\\imaginaryI, -1+\\imaginaryI, 1-\\imaginaryI, -1-\\imaginaryI, 0.5+0.5\\imaginaryI, \\dots\\rbrace`
+      `\\mathrm{Filter}(\\mathrm{Numbers}, ()\\mapsto\\operatorname{\\_1}\\ne0)`
     );
   });
 

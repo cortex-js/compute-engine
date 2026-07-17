@@ -1225,6 +1225,122 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toThrow(/Fail closed/);
   });
 
+  // Tycho item 19.4: a fail-closed compile error must be reportable via the
+  // documented `success: false` shape from `target.compile()`, not only as a
+  // thrown exception. Default stays throwing (the low-level contract); the
+  // caller opts into the failure shape with `fallback: true`.
+  describe('target.compile() fallback contract (item 19.4)', () => {
+    const mkDictEngine = () => {
+      const e = new ComputeEngine();
+      e.declare('d', 'dictionary<number>');
+      return e;
+    };
+
+    it('an uncompilable At base throws by default from target.compile()', () => {
+      const e = mkDictEngine();
+      const js = new JavaScriptTarget();
+      // A `dictionary` base type slips through boxing (At accepts
+      // `dictionary | indexed_collection`) but is not an indexed collection at
+      // compile time — the handler fails closed (D6).
+      expect(() => js.compile(e.box(['At', 'd', 1]), { realOnly: true })).toThrow(
+        /indexed collection.*Fail closed \(D6\)/
+      );
+    });
+
+    it('with fallback:true returns success:false + the D6 message, without throwing', () => {
+      const e = mkDictEngine();
+      const js = new JavaScriptTarget();
+      let r: ReturnType<JavaScriptTarget['compile']> | undefined;
+      expect(() => {
+        r = js.compile(e.box(['At', 'd', 1]), {
+          realOnly: true,
+          fallback: true,
+        });
+      }).not.toThrow();
+      expect(r!.success).toBe(false);
+      expect(r!.error).toMatch(/indexed collection.*Fail closed \(D6\)/);
+      expect(typeof r!.run).toBe('function');
+    });
+
+    it('the fallback run() still produces correct values via the interpreter', () => {
+      const e = new ComputeEngine();
+      // A real (non-indexed) dictionary value: `At` fails closed at compile
+      // time, but the interpreter resolves the key correctly.
+      e.assign('rec', e.box(['Dictionary', ['Tuple', { str: 'a' }, 7]]));
+      const js = new JavaScriptTarget();
+      const r = js.compile(e.box(['At', 'rec', { str: 'a' }]), {
+        fallback: true,
+      });
+      expect(r.success).toBe(false);
+      expect(r.run!()).toBe(7);
+    });
+
+    it('an already-working compile is unaffected by fallback:true', () => {
+      const e = new ComputeEngine();
+      e.declare('v', 'vector<number>');
+      const js = new JavaScriptTarget();
+      const withFlag = js.compile(e.box(['At', 'v', 1]), { fallback: true });
+      const without = js.compile(e.box(['At', 'v', 1]));
+      expect(withFlag.success).toBe(true);
+      expect(without.success).toBe(true);
+      expect(withFlag.code).toBe(without.code);
+    });
+  });
+
+  // The interval-js target reports an operator with no interval kernel as a
+  // non-throwing `success: false` (from `compileToIntervalTarget`), so the
+  // `compile()` wrapper's throwing `catch` never saw it — `fallback: true`
+  // returned a bare failure with no `run`. And when a fallback WAS built, its
+  // interpreter-backed `run` returned plain numbers, breaking the interval
+  // contract (`.lo`/`.hi` were `undefined`).
+  describe('interval-js target.compile() fallback contract', () => {
+    // GammaRegularized has no `_IA` kernel; the argument is fully numeric so
+    // the interpreter can still evaluate it. Q(1, 0.5) = e^{-0.5}.
+    const expected = Math.exp(-0.5);
+
+    it('without fallback returns a bare success:false (no run)', () => {
+      const iv = new IntervalJavaScriptTarget();
+      const r = iv.compile(ce.box(['GammaRegularized', 1, 0.5]));
+      expect(r.success).toBe(false);
+      expect(r.run).toBeUndefined();
+    });
+
+    it('with fallback:true returns success:false WITH an error and interval-shaped run', () => {
+      const iv = new IntervalJavaScriptTarget();
+      let r: ReturnType<IntervalJavaScriptTarget['compile']> | undefined;
+      expect(() => {
+        r = iv.compile(ce.box(['GammaRegularized', 1, 0.5]), {
+          fallback: true,
+        });
+      }).not.toThrow();
+      expect(r!.success).toBe(false);
+      expect(typeof r!.error).toBe('string');
+      expect(r!.error!.length).toBeGreaterThan(0);
+      expect(typeof r!.run).toBe('function');
+
+      const out = r!.run!() as { lo: number; hi: number };
+      expect(out.lo).toBeCloseTo(expected, 10);
+      expect(out.hi).toBeCloseTo(expected, 10);
+    });
+
+    it('the fallback run honors interval-shaped inputs (collapses to midpoint)', () => {
+      const iv = new IntervalJavaScriptTarget();
+      const r = iv.compile(ce.box(['GammaRegularized', 1, 'x']), {
+        fallback: true,
+      });
+      expect(r.success).toBe(false);
+      // A point interval and a bare number produce the same degenerate result.
+      const viaInterval = r.run!({ x: { lo: 0.5, hi: 0.5 } }) as {
+        lo: number;
+        hi: number;
+      };
+      const viaNumber = r.run!({ x: 0.5 }) as { lo: number; hi: number };
+      expect(viaInterval.lo).toBeCloseTo(expected, 10);
+      expect(viaInterval.hi).toBeCloseTo(expected, 10);
+      expect(viaNumber.lo).toBeCloseTo(expected, 10);
+    });
+  });
+
   // List-shaped collection operators (Last/Rest/Take/Drop/Join/Reverse/Sort/
   // IndexOf/Map/Filter) — previously `Unknown operator`, now native array ops.
   // `d = [10, 20, 30]`. Values checked against the interpreter's materialized

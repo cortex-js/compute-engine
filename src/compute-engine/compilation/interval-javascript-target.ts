@@ -569,6 +569,38 @@ function hasIntervalBounds(
   return isRecord(value) && 'lo' in value && 'hi' in value;
 }
 
+/**
+ * Wrap an interpreter fallback result as an interval-shaped value honoring the
+ * interval-js `run` contract. A scalar `v` becomes the degenerate interval
+ * `{ lo: v, hi: v }`; a non-scalar (a collection materialized to an array)
+ * cannot be bounded as a single interval, so it is reported as `entire` — the
+ * same "cannot bound" signal the runtime proxy uses.
+ */
+function toIntervalResult(
+  value: number | unknown[]
+): IntervalResult | Interval {
+  if (typeof value === 'number') return { lo: value, hi: value };
+  return { kind: 'entire' };
+}
+
+/**
+ * Collapse an interval-shaped fallback input (`{ lo, hi }`) to a representative
+ * scalar — its midpoint — so the number-based interpreter can consume it. A
+ * variables object has each interval-valued entry collapsed recursively; other
+ * values pass through unchanged.
+ */
+function collapseIntervalInput(value: unknown): unknown {
+  if (hasIntervalBounds(value))
+    return (Number(value.lo) + Number(value.hi)) / 2;
+  if (isRecord(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value))
+      out[k] = collapseIntervalInput(v);
+    return out;
+  }
+  return value;
+}
+
 function processInput(input: unknown): unknown {
   if (input === null || input === undefined) {
     return input;
@@ -641,6 +673,71 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
   }
 
   compile(
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
+  ): CompilationResult<'interval-js', IntervalResult | Interval> {
+    let result: CompilationResult<'interval-js', IntervalResult | Interval>;
+    try {
+      result = this.compileOrThrow(expr, options);
+    } catch (e) {
+      // Default: throw. With `fallback: true`, return the documented
+      // `success: false` shape with an interpreter-backed `run`.
+      if (options.fallback !== true) throw e;
+      return this.buildIntervalFallback(expr, (e as Error).message, options);
+    }
+    // The primary failure class never throws: `compileToIntervalTarget`
+    // reports an operator with no interval kernel as `success: false` (see its
+    // internal catch), so the `catch` above cannot build the fallback for it.
+    // When the caller opted into the failure-shape contract, normalize that
+    // `success: false` to the same interpreter-backed fallback, preserving the
+    // captured error detail (synthesizing a message only if none survived).
+    if (!result.success && options.fallback === true) {
+      const error =
+        result.error ??
+        `Cannot compile \`${expr.operator}\` to the interval-js target`;
+      return this.buildIntervalFallback(expr, error, options);
+    }
+    return result;
+  }
+
+  /**
+   * Build the documented `success: false` fallback for the interval-js target:
+   * an interpreter-backed `run` whose results honor the interval contract.
+   *
+   * `BaseCompiler.buildInterpreterFallback` produces a runner that returns plain
+   * numbers (and nested arrays for collections), so its scalar output is wrapped
+   * as a degenerate interval `{ lo: v, hi: v }`, and interval-shaped *inputs*
+   * (`{ lo, hi }`) are collapsed to their midpoint before interpretation. A
+   * non-scalar result cannot be bounded as a single interval, so it is reported
+   * as `{ kind: 'entire' }` — the same "cannot bound" signal the runtime proxy
+   * uses. Returning a properly interval-typed `run` lets the result carry the
+   * target's real value type without a force cast.
+   */
+  private buildIntervalFallback(
+    expr: Expression,
+    error: string,
+    options: CompilationOptions<Expression>
+  ): CompilationResult<'interval-js', IntervalResult | Interval> {
+    console.warn(
+      `Compilation fallback for "${expr.operator}" (target: interval-js): ${error}`
+    );
+    const base = BaseCompiler.buildInterpreterFallback(
+      expr,
+      error,
+      'interval-js',
+      this.createTarget(),
+      options.vars ? new Set(Object.keys(options.vars)) : undefined
+    );
+    // `run` is guaranteed present for an executable target (interval-js).
+    const interpreterRun = base.run as (...args: unknown[]) => number | unknown[];
+    const run: CompiledRunner<IntervalResult | Interval> = (
+      ...args: unknown[]
+    ): IntervalResult | Interval =>
+      toIntervalResult(interpreterRun(...args.map(collapseIntervalInput)));
+    return { ...base, run };
+  }
+
+  private compileOrThrow(
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'interval-js', IntervalResult | Interval> {
@@ -719,13 +816,16 @@ function compileToIntervalTarget(
   let js: string;
   try {
     js = BaseCompiler.compile(expr, target);
-  } catch {
+  } catch (e) {
     // Expression contains operators/functions not supported by the interval
-    // target. Report failure so the caller can fall back to another target.
+    // target. Report failure so the caller can fall back to another target,
+    // preserving the reason so `compile()` can surface it (this path does not
+    // throw, so the wrapper cannot recover the message otherwise).
     return {
       target: 'interval-js',
       success: false,
       code: '',
+      error: (e as Error).message,
     } as CompilationResult<'interval-js', IntervalResult | Interval>;
   }
   // Prepend any user-defined function definitions accumulated while compiling

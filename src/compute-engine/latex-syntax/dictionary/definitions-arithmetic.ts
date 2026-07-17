@@ -2233,7 +2233,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'Mod',
   },
   // Function-style alias: `\operatorname{mod}(a, b)`
-  { latexTrigger: '\\operatorname{mod}', parse: 'Mod' },
+  { latexTrigger: '\\operatorname{mod}', kind: 'function', parse: 'Mod' },
   // Bare-command function call `\mod(a, b)` (Desmos shorthand). The infix
   // form `a \mod b` above still applies in operator position.
   {

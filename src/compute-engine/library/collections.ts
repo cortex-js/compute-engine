@@ -445,28 +445,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(any*) -> tuple',
     type: (ops) => parseType(`tuple<${ops.map((op) => op.type).join(', ')}>`),
     canonical: (ops, { engine }) => engine.tuple(...ops),
-    evaluate: (ops, { engine: ce, numericApproximation }) => {
-      // Desmos point-list idiom: a tuple with one or more finite-collection
-      // components transposes to the `List` of point-tuples (zip-to-shortest,
-      // scalars broadcast) — e.g. `(-6, n)` with `n` a 21-element list is 21
-      // points. Only fires when every component is point-like (a number, a
-      // tuple, or a finite collection), so tuples used as plain data (e.g.
-      // `(key, list)` inside a dictionary) stay inert. An infinite/unknown-
-      // length collection component fails closed (stays inert, no hang) via
-      // `broadcastOverIndexedCollections` returning `undefined`; an empty
-      // collection component yields an empty `List`.
-      const isListComponent = (op: Expression): boolean =>
-        isFiniteIndexedCollection(op) && !isTuple(op);
-      if (!ops.some(isListComponent)) return undefined;
-      if (!ops.every((op) => op.isNumber || isTuple(op) || isListComponent(op)))
-        return undefined;
-      return broadcastOverIndexedCollections(
-        ce,
-        'Tuple',
-        ops,
-        numericApproximation ?? false
-      );
-    },
+    // A `Tuple` is inert data: it evaluates its operands but never transposes a
+    // collection component into a list of points. The Desmos point-list idiom
+    // (zip a tuple-with-collection into a `List` of point-tuples) lives in the
+    // explicit `PointList` operator that importers emit; plain tuples stay data.
     eq: defaultCollectionEq,
     collection: {
       ...basicIndexedCollectionHandlers(),
@@ -474,6 +456,60 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return ['first', 'second', 'last'];
       },
     },
+  } as OperatorDefinition,
+
+  // The Desmos point-list surface form. Explicit: importers emit it, default
+  // parsing NEVER produces it from `(a, b)` (that stays an inert `Tuple`). A
+  // `PointList` with one or more finite-collection components transposes to the
+  // `List` of point-tuples (zip-to-shortest, scalars broadcast) — e.g.
+  // `PointList(-6, n)` with `n` a 21-element list is 21 points. With no
+  // collection component it is just a plain point (`Tuple`). An empty
+  // collection component yields an empty `List`; an infinite/unknown-length
+  // component fails closed (stays inert, no hang) via
+  // `broadcastOverIndexedCollections` returning `undefined`.
+  //
+  // No compile handler in v1: compiling a `PointList` fails closed.
+  PointList: {
+    description:
+      'A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.',
+    complexity: 8200,
+    signature: '(any+) -> any',
+    type: (ops) => {
+      // A list component (for typing): an indexed-collection type that is not
+      // itself a tuple. Mirrors the `evaluate` predicate, but type-based.
+      const isListType = (op: Expression): boolean => {
+        const t = op.type.type;
+        const isTupleKind = typeof t !== 'string' && t.kind === 'tuple';
+        return !isTupleKind && op.type.matches('indexed_collection');
+      };
+      if (ops.some(isListType)) return parseType('list<tuple>');
+      return parseType(`tuple<${ops.map((op) => op.type).join(', ')}>`);
+    },
+    evaluate: (ops, { engine: ce, numericApproximation }) => {
+      const isListComponent = (op: Expression): boolean =>
+        isFiniteIndexedCollection(op) && !isTuple(op);
+      // Fail closed on a collection component that cannot be safely zipped —
+      // infinite or unknown-length (e.g. `Range(1,∞)`) or non-indexed (a
+      // Set): stay inert rather than silently degrading to a plain point.
+      if (
+        ops.some(
+          (op) => !isTuple(op) && op.isCollection && !isListComponent(op)
+        )
+      )
+        return undefined;
+      // No collection component: a plain point.
+      if (!ops.some(isListComponent)) return ce.tuple(...ops);
+      // Otherwise transpose into the `List` of point-tuples.
+      return broadcastOverIndexedCollections(
+        ce,
+        'Tuple',
+        ops,
+        numericApproximation ?? false
+      );
+    },
+    // No `eq` handler: a definitive structural comparison would make
+    // `PointList(1,2)` unequal to the `Tuple(1,2)` it evaluates to; the
+    // generic compare path evaluates both sides instead.
   } as OperatorDefinition,
 
   KeyValuePair: {

@@ -512,7 +512,16 @@ export function declareFn(
     ) {
       const declaredType =
         def.type instanceof BoxedType ? def.type.type : parseType(def.type);
-      if (functionSignature(declaredType) !== undefined)
+      if (functionSignature(declaredType) !== undefined) {
+        // The literal must be arity-compatible with the declared signature
+        // (mirrors the assign path); otherwise a declared-arity call would
+        // silently partial-apply.
+        assertFunctionLiteralArity(
+          id,
+          def.value as Expression,
+          declaredType,
+          ce.type(declaredType).toString()
+        );
         valueDef = {
           ...def,
           value: reconcileFunctionLiteralReturn(
@@ -521,6 +530,7 @@ export function declareFn(
             declaredType
           ),
         };
+      }
     }
     ce._declareSymbolValue(id, valueDef, scope);
     return ce;
@@ -596,6 +606,19 @@ export function assignFn(
     const literal = canonicalFunctionLiteral(ce.expr(arg2));
     if (literal !== undefined) {
       const declaredType = def.value.type;
+
+      // The literal must be arity-compatible with the declared signature (see
+      // `assertFunctionLiteralArity`); otherwise function subtyping would treat
+      // an over-arity literal as assignable to a lower-arity signature, or an
+      // optional/variadic declaration would let a legal call silently
+      // partial-apply on the fixed-arity body.
+      assertFunctionLiteralArity(
+        id,
+        literal,
+        declaredType.type,
+        declaredType.toString()
+      );
+
       const reconciled = reconcileFunctionLiteralReturn(
         ce,
         literal,
@@ -747,6 +770,73 @@ function assignValueAsOperatorDef(
 function functionLiteralHasAnnotation(literal: Expression): boolean {
   if (functionLiteralReturnType(literal) !== undefined) return true;
   return functionLiteralParameters(literal).some((p) => p.type !== undefined);
+}
+
+/**
+ * §6.3 declared-signature reconciliation — arity guard shared by the
+ * declare-with-value, `Declare(f, sig, value)` and assign paths.
+ *
+ * A `Function` literal defines a *fixed-arity* function of arity `L`: it can
+ * only service calls of exactly arity `L` (`function-utils.ts` curries calls
+ * below `L` into a partial application and throws on calls above `L`). It is
+ * therefore compatible with an explicit declared signature only when that
+ * signature's set of accepted call arities is exactly `{L}` — i.e. a signature
+ * with no optional and no variadic arguments whose required arity is `L`.
+ *
+ * A signature with optional or variadic arguments, or a different fixed arity,
+ * permits call arities the literal cannot handle (which would otherwise let a
+ * legal call silently partial-apply or throw at runtime), so it is a genuine
+ * conflict and is rejected here rather than stored. Function subtyping alone
+ * does not catch this: it treats an over-arity literal as assignable to a
+ * lower-arity signature.
+ *
+ * Does nothing when the literal is not a `Function` literal or the declared
+ * type is not a plain function signature (nothing to check).
+ */
+function assertFunctionLiteralArity(
+  id: MathJsonSymbol,
+  literal: Expression,
+  declaredType: Type,
+  declaredDisplay: string
+): void {
+  if (!isFunction(literal, 'Function')) return;
+
+  // Only a concrete declared *signature* constrains arity. The top `function`
+  // type (`ce.declare('f', 'function')`, stored as the primitive string
+  // `'function'`) is a wildcard: it promises callers nothing about arity, so a
+  // fixed-arity literal is a valid implementation. Use the raw declared type
+  // here rather than `functionSignature`, which would synthesize a variadic
+  // `(any*) -> unknown` signature for that wildcard and wrongly reject it.
+  if (typeof declaredType !== 'object' || declaredType.kind !== 'signature')
+    return;
+  const declaredSig = declaredType;
+
+  const literalArity = functionLiteralParameters(literal).length;
+  const requiredArity = declaredSig.args?.length ?? 0;
+  const optArity = declaredSig.optArgs?.length ?? 0;
+  const hasVariadic = declaredSig.variadicArg !== undefined;
+
+  // Compatible iff the signature accepts exactly one call arity, equal to the
+  // literal's arity.
+  if (!hasVariadic && optArity === 0 && requiredArity === literalArity) return;
+
+  // Describe the arity range the declaration accepts for the error message.
+  let accepted: string;
+  if (hasVariadic) {
+    const min = requiredArity + (declaredSig.variadicMin ?? 0);
+    accepted = `${min} or more`;
+  } else if (optArity > 0) {
+    accepted = `${requiredArity} to ${requiredArity + optArity}`;
+  } else {
+    accepted = `exactly ${requiredArity}`;
+  }
+
+  throw new Error(
+    [
+      `Symbol "${id}"`,
+      `The function literal "${literal.toString()}" takes ${literalArity} parameter(s), but the declared signature "${declaredDisplay}" accepts ${accepted}`,
+    ].join('\n|   ')
+  );
 }
 
 /**

@@ -494,6 +494,112 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     ).toThrow();
   });
 
+  test('Tycho 19.1 — a tuple-param declaration stays enforced after `:=` registration', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(tuple<number, number>) -> unknown');
+    // Register the body via the `:=` parse route. (The body scales the point:
+    // a `Tuple` argument binds ATOMICALLY — never mapped over its components —
+    // so `x + 1` would be the documented `scalar + tuple` rejection.)
+    ce.parse('f(x) \\coloneq 2x').evaluate();
+    // The declared signature is authoritative and preserved.
+    expect(ce.box('f').type.toString()).toBe('(tuple<number, number>) -> unknown');
+    // A scalar call still type-errors (tuple required)…
+    expect(ce.box(['f', 3]).json).toEqual([
+      'f',
+      [
+        'Error',
+        [
+          'ErrorCode',
+          "'incompatible-type'",
+          "'tuple<number, number>'",
+          "'finite_integer'",
+        ],
+      ],
+    ]);
+    // …and a tuple call evaluates: the point binds whole and scales
+    // component-wise (not the pre-atomic `[6,8]` List of per-component calls).
+    expect(ce.parse('f((3, 4))').evaluate().toString()).toBe('(6, 8)');
+  });
+
+  test('an over-arity literal is rejected (assign path)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(number) -> number');
+    // The literal takes two parameters but the declared signature accepts one.
+    // Function subtyping would otherwise treat this as assignable, so the
+    // reconciliation rejects it explicitly rather than storing a body that
+    // partial-applies on a declared-arity call.
+    expect(() =>
+      ce.assign('f', ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']))
+    ).toThrow();
+  });
+
+  test('an over-arity literal is rejected (`:=` parse path)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(number) -> number');
+    expect(() =>
+      ce.parse('f(x, y) \\coloneq x + y').evaluate()
+    ).toThrow();
+  });
+
+  test('an over-arity literal is rejected (declare-with-value path)', () => {
+    const ce = new ComputeEngine();
+    // `ce.declare(id, { type, value })` reconciles the literal against the
+    // declared signature. The 2-parameter literal cannot service a declared
+    // 1-arity call, so the declaration is rejected rather than silently stored.
+    expect(() =>
+      ce.declare('f', {
+        type: '(number) -> number',
+        value: ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']),
+      })
+    ).toThrow();
+  });
+
+  test('an over-arity literal is rejected (`Declare` operator surface)', () => {
+    const ce = new ComputeEngine();
+    // The fresh-declaration branch of the `Declare` operator routes through
+    // `ce.declare` and must reject the over-arity literal too.
+    expect(() =>
+      ce
+        .box([
+          'Declare',
+          'f',
+          "'(number) -> number'",
+          ['Function', ['Add', 'x', 'y'], 'x', 'y'],
+        ])
+        .evaluate()
+    ).toThrow();
+  });
+
+  test('a fixed-arity literal is rejected against an optional-arg signature', () => {
+    const ce = new ComputeEngine();
+    // `(number, number?) -> number` permits both `f(1)` and `f(1, 2)`. A
+    // 2-parameter fixed-arity literal cannot service the 1-arity call (it would
+    // partial-apply), so the declaration is a genuine conflict.
+    ce.declare('f', '(number, number?) -> number');
+    expect(() =>
+      ce.assign('f', ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']))
+    ).toThrow();
+  });
+
+  test('a fixed-arity literal is rejected against a variadic signature', () => {
+    const ce = new ComputeEngine();
+    // A variadic declaration accepts arbitrarily many call arities; a
+    // fixed-arity literal can only service one, so it is rejected.
+    ce.declare('f', '(number+) -> number');
+    expect(() =>
+      ce.assign('f', ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']))
+    ).toThrow();
+  });
+
+  test('an exact-arity literal against an exact declared signature is accepted', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(number, number) -> number');
+    expect(() =>
+      ce.assign('f', ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']))
+    ).not.toThrow();
+    expect(ce.box(['f', 3, 4]).evaluate().toString()).toBe('7');
+  });
+
   test('the `any`-return workaround stores the literal unchanged', () => {
     const ce = new ComputeEngine();
     ce.box([
