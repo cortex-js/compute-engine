@@ -489,7 +489,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `(list/vector/range). Fail closed (D6).`
       );
     let combiner = builtinCombiner(op);
-    if (combiner === undefined && (isFunction(op, 'Function') || isSymbol(op))) {
+    if (
+      combiner === undefined &&
+      (isFunction(op, 'Function') || isSymbol(op))
+    ) {
       if (init === undefined || init === null)
         throw new Error(
           `Reduce: a custom combiner compiles only with an explicit ` +
@@ -690,8 +693,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   IsEmpty: (args, compile) =>
     `((${collArg('IsEmpty', args[0], compile)}).length === 0)`,
   // Number of elements — same as `Length` for an indexed collection.
-  Count: (args, compile) =>
-    `(${collArg('Count', args[0], compile)}).length`,
+  Count: (args, compile) => `(${collArg('Count', args[0], compile)}).length`,
   // Membership via SameValueZero (`includes`) — value equality only for
   // primitive elements, so compound element types fail closed.
   Contains: (args, compile) => {
@@ -994,9 +996,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     `_SYS.inv(${collArg('Inverse', args[0], compile)})`,
   Trace: (args, compile) => {
     if (args.length > 1)
-      throw new Error(
-        `Trace: explicit axes do not compile. Fail closed (D6).`
-      );
+      throw new Error(`Trace: explicit axes do not compile. Fail closed (D6).`);
     return `_SYS.trace(${collArg('Trace', args[0], compile)})`;
   },
   Shape: (args, compile) => {

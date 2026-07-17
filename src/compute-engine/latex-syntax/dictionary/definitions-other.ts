@@ -813,11 +813,19 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     },
   },
   { latexTrigger: '\\operatorname{random}', kind: 'function', parse: 'Random' },
-  { latexTrigger: '\\operatorname{shuffle}', kind: 'function', parse: 'Shuffle' },
+  {
+    latexTrigger: '\\operatorname{shuffle}',
+    kind: 'function',
+    parse: 'Shuffle',
+  },
   { latexTrigger: '\\operatorname{repeat}', kind: 'function', parse: 'Repeat' },
   { latexTrigger: '\\operatorname{join}', kind: 'function', parse: 'Join' },
   { latexTrigger: '\\operatorname{range}', kind: 'function', parse: 'Range' },
-  { latexTrigger: '\\operatorname{histogram}', kind: 'function', parse: 'Histogram' },
+  {
+    latexTrigger: '\\operatorname{histogram}',
+    kind: 'function',
+    parse: 'Histogram',
+  },
   { latexTrigger: '\\operatorname{pdf}', kind: 'function', parse: 'PDF' },
   { latexTrigger: '\\operatorname{cdf}', kind: 'function', parse: 'CDF' },
 

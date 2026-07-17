@@ -444,8 +444,7 @@ function limitAtPosInf(
       // (e.g. ComplexInfinity) has neither `isPositive` nor `isNegative` set —
       // stay symbolic rather than defaulting to the +∞ branch (mirrors the
       // Sqrt/Root guard above).
-      if (inner.isPositive === true)
-        return op === 'Erf' ? ce.One : ce.Zero;
+      if (inner.isPositive === true) return op === 'Erf' ? ce.One : ce.Zero;
       if (inner.isNegative === true)
         return op === 'Erf' ? ce.number(-1) : ce.number(2);
       return undefined;

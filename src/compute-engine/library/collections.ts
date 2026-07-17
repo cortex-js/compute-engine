@@ -1721,7 +1721,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (!started) {
               started = true;
               acc = hasInitial
-                ? f([initial, value]) ?? expr.engine.Nothing
+                ? (f([initial, value]) ?? expr.engine.Nothing)
                 : value;
             } else {
               acc = f([acc!, value]) ?? expr.engine.Nothing;
@@ -1745,7 +1745,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         for (const item of expr.op1.each()) {
           i += 1;
           if (i === 1)
-            acc = hasInitial ? f([initial, item]) ?? expr.engine.Nothing : item;
+            acc = hasInitial
+              ? (f([initial, item]) ?? expr.engine.Nothing)
+              : item;
           else acc = f([acc!, item]) ?? expr.engine.Nothing;
           if (i === index) return acc;
         }
@@ -2847,7 +2849,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) =>
       parseType(
         `list<${typeToString(
-          widen(collectionElementType(ops[0].type.type) ?? 'any', ops[2].type.type)
+          widen(
+            collectionElementType(ops[0].type.type) ?? 'any',
+            ops[2].type.type
+          )
         )}>`
       ),
     evaluate: ([xs, idx, value], { engine: ce }) => {
@@ -2921,7 +2926,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) =>
       parseType(
         `list<${typeToString(
-          widen(collectionElementType(ops[0].type.type) ?? 'any', ops[2].type.type)
+          widen(
+            collectionElementType(ops[0].type.type) ?? 'any',
+            ops[2].type.type
+          )
         )}>`
       ),
     evaluate: ([xs, idx, value], { engine: ce }) => {

@@ -289,7 +289,10 @@ export abstract class _BoxedExpression implements Expression {
     // (`body \operatorname{for} x = domain`). Materializing it would replace
     // it with an elided preview List (e.g. `[1, 4, …, 62500]`) that re-parses
     // to a corrupt finite List, so serialize it directly instead.
-    if (this.isLazyCollection && !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator)) {
+    if (
+      this.isLazyCollection &&
+      !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator)
+    ) {
       const materialized = this.evaluate({ materialization: true });
       if (!materialized.isLazyCollection) return materialized.latex;
     }
@@ -328,8 +331,7 @@ export abstract class _BoxedExpression implements Expression {
     const explicitMaterialization = options?.materialization !== undefined;
     if (
       this.isLazyCollection &&
-      (explicitMaterialization ||
-        !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator))
+      (explicitMaterialization || !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator))
     ) {
       const materialized = this.evaluate({
         materialization: options?.materialization ?? true,

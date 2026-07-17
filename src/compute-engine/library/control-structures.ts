@@ -752,7 +752,8 @@ function comprehensionIndexNames(
   for (const el of elements) {
     if (!isFunction(el, 'Element')) continue;
     const idx = el.ops[0];
-    if (idx && isSymbol(idx) && idx.symbol !== 'Nothing') names.push(idx.symbol);
+    if (idx && isSymbol(idx) && idx.symbol !== 'Nothing')
+      names.push(idx.symbol);
   }
   return names;
 }

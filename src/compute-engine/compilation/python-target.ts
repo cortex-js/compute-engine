@@ -427,7 +427,10 @@ function pyCollArg(
   compile: (expr: Expression) => string,
   position?: number
 ): string {
-  if (!arg || !(arg.type.matches('list') || arg.type.matches('indexed_collection')))
+  if (
+    !arg ||
+    !(arg.type.matches('list') || arg.type.matches('indexed_collection'))
+  )
     throw new Error(
       `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
         `is not an indexed collection (list/vector/range). Fail closed (D6).`
@@ -964,8 +967,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args[1] == null) throw new Error('Drop: missing count');
     return `${coll}[max(0, int(${compile(args[1])})):]`;
   },
-  Reverse: (args, compile) =>
-    `${pyCollArg('Reverse', args[0], compile)}[::-1]`,
+  Reverse: (args, compile) => `${pyCollArg('Reverse', args[0], compile)}[::-1]`,
   Sort: (args, compile) => {
     if (args.length > 1)
       throw new Error(
@@ -1100,7 +1102,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const init = args[2];
     if (op == null) throw new Error('Reduce: missing combiner');
     const builtin = isSymbol(op)
-      ? { Add: 'sum(_l)', Multiply: '__import__("math").prod(_l)', Min: 'min(_l)', Max: 'max(_l)' }[op.symbol]
+      ? {
+          Add: 'sum(_l)',
+          Multiply: '__import__("math").prod(_l)',
+          Min: 'min(_l)',
+          Max: 'max(_l)',
+        }[op.symbol]
       : undefined;
     if (builtin !== undefined) {
       if (init !== undefined && init !== null) {
@@ -1114,10 +1121,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       }
       return `(lambda _l: float('nan') if len(_l) == 0 else ${builtin})(${coll})`;
     }
-    if (
-      (isFunction(op, 'Function') && op.nops - 1 === 2) ||
-      isSymbol(op)
-    ) {
+    if ((isFunction(op, 'Function') && op.nops - 1 === 2) || isSymbol(op)) {
       if (init === undefined || init === null)
         throw new Error(
           `Reduce: a custom combiner compiles only with an explicit ` +
@@ -1260,9 +1264,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Trace: (args, compile) => {
     if (args.length > 1)
-      throw new Error(
-        `Trace: explicit axes do not compile. Fail closed (D6).`
-      );
+      throw new Error(`Trace: explicit axes do not compile. Fail closed (D6).`);
     return `float(np.trace(np.asarray(${pyCollArg('Trace', args[0], compile)})))`;
   },
 };

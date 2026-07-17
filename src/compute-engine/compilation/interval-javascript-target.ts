@@ -729,7 +729,9 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       options.vars ? new Set(Object.keys(options.vars)) : undefined
     );
     // `run` is guaranteed present for an executable target (interval-js).
-    const interpreterRun = base.run as (...args: unknown[]) => number | unknown[];
+    const interpreterRun = base.run as (
+      ...args: unknown[]
+    ) => number | unknown[];
     const run: CompiledRunner<IntervalResult | Interval> = (
       ...args: unknown[]
     ): IntervalResult | Interval =>

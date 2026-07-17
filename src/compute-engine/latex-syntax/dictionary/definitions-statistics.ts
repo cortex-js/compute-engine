@@ -67,6 +67,14 @@ export const DEFINITIONS_STATISTICS: LatexDictionary = [
   // Function-style aliases: `\operatorname{var}(...)`, `\operatorname{cov}(...)`,
   // `\operatorname{corr}(...)`
   { latexTrigger: '\\operatorname{var}', kind: 'function', parse: 'Variance' },
-  { latexTrigger: '\\operatorname{cov}', kind: 'function', parse: 'Covariance' },
-  { latexTrigger: '\\operatorname{corr}', kind: 'function', parse: 'Correlation' },
+  {
+    latexTrigger: '\\operatorname{cov}',
+    kind: 'function',
+    parse: 'Covariance',
+  },
+  {
+    latexTrigger: '\\operatorname{corr}',
+    kind: 'function',
+    parse: 'Correlation',
+  },
 ];

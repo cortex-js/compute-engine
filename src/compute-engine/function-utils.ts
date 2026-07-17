@@ -664,10 +664,7 @@ const HELD_CONDITIONAL_OPERATORS: ReadonlySet<string> = new Set([
  * never evaluated), NOT the result of resolving the parameter to its value —
  * so it is safe to substitute even when the argument itself references `name`.
  */
-function referencesInHeldConditional(
-  expr: Expression,
-  name: string
-): boolean {
+function referencesInHeldConditional(expr: Expression, name: string): boolean {
   if (!isFunction(expr)) return false;
   if (HELD_CONDITIONAL_OPERATORS.has(expr.operator) && expr.has(name))
     return true;
@@ -1071,8 +1068,7 @@ function makeLambda(
           const value = evaluatedArgs[i];
           if (
             value.has(name) &&
-            (result.isSame(value) ||
-              !referencesInHeldConditional(result, name))
+            (result.isSame(value) || !referencesInHeldConditional(result, name))
           )
             continue;
           (subs ??= {})[name] = value;
