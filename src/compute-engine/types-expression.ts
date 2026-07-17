@@ -234,17 +234,19 @@ export type OperatorCompileContext = {
  * `OperatorDefinition`. It mirrors a built-in compiled-function handler:
  * it receives the (canonical) operands, a `compile` callback to lower a
  * sub-expression to target source, and the compilation `context` (branch on
- * `context.language`). It returns target source, or `undefined` (or `null`, or
+ * `context.language`). It returns target source, or `undefined` (or
  * an empty string) to fall back to the target's default compilation of this
- * operator.
+ * operator (a `null` returned from untyped JavaScript is tolerated and
+ * treated the same).
  *
  * Takes precedence over the target's built-in operator/function mapping and
  * broadcast lowering, so it can override how a built-in operator compiles
  * (e.g. a custom-tolerance `GCD`, or a re-mapped `Add`/`Multiply`/`Power`/
  * relational operator). It does NOT override the structural / control-flow
- * heads (`Sum`, `Product`, `If`, `Which`, `When`, `Match`, `Block`, `Function`,
- * `Loop`, `Comprehension`, `Sequence`), which have their own bespoke lowering;
- * a handler declared on one of those heads is ignored.
+ * heads (`Sequence`, `Sum`, `Product`, `Function`, `Declare`, `Assign`,
+ * `Return`, `Break`, `Continue`, `Loop`, `Comprehension`, `If`, `Which`,
+ * `When`, `Match`, `Block`), which have their own bespoke lowering; a handler
+ * declared on one of those heads is ignored.
  *
  * ```ts
  * ce.declare('MyGcd', {

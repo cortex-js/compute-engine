@@ -28,6 +28,8 @@ import type {
 import {
   isBroadcastCollectionType,
   isFiniteIndexedCollection,
+  isFixedShapeCollection,
+  isLinearAlgebraCollection,
   isNumericTuple,
   isPossiblyCollectionTyped,
   isTuple,
@@ -544,7 +546,17 @@ export class BoxedFunction
     if (options.canonical === undefined)
       options = { canonical: this.isCanonical || this.isStructural };
 
-    const ops = this._ops.map((x) => x.subs(sub, options));
+    // A non-canonical (held) child of a canonical parent — e.g. the index
+    // symbol of `Limits`, held by `lazy` so it is never canonicalized — must
+    // stay raw: canonicalizing it here happens OUTSIDE its binding scope (an
+    // index `i` would become the imaginary unit). The parent's canonical
+    // handler receives it raw, as it did when the expression was first built.
+    // (A raw symbol reports `isStructural: true`, so key on `isCanonical`.)
+    const ops = this._ops.map((x) =>
+      options!.canonical === true && !x.isCanonical
+        ? x.subs(sub, { canonical: false })
+        : x.subs(sub, options)
+    );
 
     const form =
       options.canonical === true
@@ -1375,7 +1387,9 @@ export class BoxedFunction
         }
 
         if (results.length === 0) return this.engine.Nothing;
-        if (results.length === 1) return results[0];
+        // Always wrap in a `List` — even a single-element broadcast — so the
+        // value matches the `list<E>` broadcast type (the type handler never
+        // unwraps a singleton). Mirrors the lambda broadcast in step 4b.
         return this.engine._fn('List', results);
       }
 
@@ -1460,10 +1474,9 @@ export class BoxedFunction
               this.engine._fn(this.operator, value).evaluate(options)
             );
           }
-          // A lambda broadcast always yields a `List` (mirroring step 2b),
-          // even for a single-element collection.
+          // A broadcast always yields a `List`, even for a single-element
+          // collection, so the value matches the `list<E>` broadcast type.
           if (lambdaBroadcast) return this.engine._fn('List', results);
-          if (results.length === 1) return results[0];
           if (results.length > 0) return this.engine._fn('List', results);
         }
       }
@@ -1581,8 +1594,8 @@ export class BoxedFunction
         }
 
         if (results.length === 0) return this.engine.Nothing;
-        if (results.length === 1) return results[0];
-
+        // Always wrap in a `List` — even a single-element broadcast — so the
+        // value matches the `list<E>` broadcast type (mirrors the sync path).
         return Promise.all(results).then((resolved) =>
           this.engine._fn('List', resolved)
         );
@@ -1657,7 +1670,6 @@ export class BoxedFunction
             return Promise.all(results).then((resolved) =>
               this.engine._fn('List', resolved)
             );
-          if (results.length === 1) return results[0];
           if (results.length > 0)
             return Promise.all(results).then((resolved) =>
               this.engine._fn('List', resolved)
@@ -1977,22 +1989,77 @@ function type(expr: BoxedFunction): Type {
     // typing) stay untouched via `skipBroadcastForVectorOps`.
     if (def.broadcastable) {
       const hasTensors = expr.ops.some((x) => isTensor(x));
-      if (!skipBroadcastForVectorOps(expr.operator, hasTensors, expr.ops)) {
+      // `Equal`/`NotEqual` over TWO OR MORE definite collections is
+      // whole-value equality — a scalar `boolean`, never a broadcast (see
+      // `skipBroadcastForVectorOps`). That skip tests value-level
+      // `isCollection`, which an unevaluated `Multiply`/`Add` intermediate
+      // (typed `vector<n>` but with no collection handler) does not satisfy —
+      // so mirror the same ≥2 rule at the TYPE level here, or
+      // `Equal(10⁴·[1,2,3], 10⁴·[4,5,6])` would type `list<boolean>` while
+      // evaluating to the scalar `False`. A SINGLE collection operand keeps
+      // the lift (a collection-vs-scalar comparison genuinely broadcasts to
+      // a boolean mask), and possibly-collection operands keep arm 2's
+      // `broadcastable<boolean>` (sound for every outcome, including the
+      // whole-value one).
+      const typeLevelEqualitySkip =
+        (expr.operator === 'Equal' || expr.operator === 'NotEqual') &&
+        expr.ops.filter((x) => x.isCollection || isLinearAlgebraCollection(x))
+          .length >= 2;
+      if (
+        !typeLevelEqualitySkip &&
+        !skipBroadcastForVectorOps(expr.operator, hasTensors, expr.ops)
+      ) {
         // Arm 1 (statically-visible collection) — PRIORITY. A materialized
-        // finite indexed collection, or an operand whose declared type is an
-        // unbounded list / indexed-collection, definitely produces a `List` at
-        // evaluation, so its honest type is the concrete `list<E>`.
+        // finite indexed collection, an operand whose declared type is an
+        // unbounded list / indexed-collection, or — when the handler's own
+        // result COLLAPSED to a scalar — an operand whose type is a
+        // FIXED-SHAPE (dimensioned) `vector<n>`/`matrix` unevaluated
+        // intermediate such as `10^4·[1,2,3]` (`isFixedShapeCollection`; Tycho
+        // 19.2's inlined-broadcast probe: without this trigger `sin(10^4·[…])`
+        // collapsed to scalar `number` and `At` hard-rejected a provably-list
+        // base). The fixed-shape trigger is deliberately NARROWER than
+        // `isLinearAlgebraCollection` — a generic `collection`-kind operand may
+        // be a non-indexed `set` the value path never broadcasts, and the
+        // dimensionless list/indexed-collection case is already covered by the
+        // `isBroadcastCollectionType` disjunct above. All matched operands
+        // definitely produce a `List` at evaluation, so the honest type is the
+        // concrete `list<E>`.
         //
-        // The handler computed the scalar per-element result. Some handlers
-        // leak the collection type (e.g. `Negate` returns `x.type`) or a
+        // The fixed-shape trigger DEFERS to a handler that GENUINELY computes
+        // collection results — an ALLOWLIST, not a shape test: only
+        // `Add`/`Multiply` (their own matrix/vector/union branches, incl. the
+        // deliberate honest `finite_integer | matrix` for `matrix + scalar`)
+        // and `Negate` (passes `x.type` through). Re-wrapping those would
+        // collapse an honest `matrix` to an unbounded `list<…>` (it broke
+        // `-M → matrix` and `det(M+N)`). Every OTHER handler that produces a
+        // collection-bearing type over a collection operand did so by naive
+        // `widen(…)` — e.g. `Remainder(10⁴·[1,2,3], 7)` widening to
+        // `finite_integer | vector<3>` while the value ALWAYS broadcasts to a
+        // list — and must be repaired to the definite `list<E>`, so the
+        // allowlist is the ONLY thing that defers (a shape test on
+        // `sigResult` cannot tell a deliberate union from a widen artifact).
+        //
+        // For the two pre-existing triggers the handler computed the scalar
+        // per-element result. Some handlers leak the collection type or a
         // `scalar | list<E>` union (a naive `widen(…)` over a collection
-        // operand); `broadcastElementType` unwraps both so the wrapper does not
-        // nest a list or a union inside the broadcast result.
+        // operand); `broadcastElementType` unwraps both so the wrapper does
+        // not nest a list or a union inside the broadcast result.
+        const handlerOwnsCollectionTyping =
+          expr.operator === 'Add' ||
+          expr.operator === 'Multiply' ||
+          expr.operator === 'Negate';
+        const deferToHandler =
+          handlerOwnsCollectionTyping &&
+          (isSubtype(sigResult, 'collection') ||
+            (typeof sigResult !== 'string' &&
+              sigResult.kind === 'union' &&
+              sigResult.types.some((m) => isSubtype(m, 'collection'))));
         if (
           expr.ops.some(
             (x) =>
               (isFiniteIndexedCollection(x) && !isTuple(x)) ||
-              isBroadcastCollectionType(x)
+              isBroadcastCollectionType(x) ||
+              (!deferToHandler && isFixedShapeCollection(x))
           )
         )
           return broadcastResultType(broadcastElementType(sigResult));

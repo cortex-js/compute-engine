@@ -51,8 +51,9 @@ export function isNumericTuple(expr: Expression): boolean {
  * elements (a Desmos-style point-list component like `(-6, n)` with `n` a
  * list).
  *
- * COULD-semantics, mirroring `typeCouldBeNumericTuple` in `validate.ts` (the
- * `checkNumericArgs` admission test): the `Add`/`Multiply` type handlers and
+ * COULD-semantics, delegating to `typeCouldBeNumericTuple` — the SAME
+ * predicate `checkNumericArgs` (`validate.ts`) uses for operand admission,
+ * so the two layers cannot diverge: the `Add`/`Multiply` type handlers and
  * the invisible-operator multiply-vs-`Tuple` gate use this so an
  * unknown-component tuple keeps its honest tuple type through arithmetic
  * instead of collapsing to `number` (Tycho item 30). It must NOT be used where
@@ -61,21 +62,98 @@ export function isNumericTuple(expr: Expression): boolean {
  * not proof).
  */
 export function couldBeNumericTuple(expr: Expression): boolean {
-  return typeCouldBeNumericTupleType(expr.type.type);
+  return typeCouldBeNumericTuple(expr.type.type);
 }
 
-function typeCouldBeNumericTupleType(t: Type): boolean {
-  const elementCouldBeNumeric = (el: Type): boolean =>
+/**
+ * A tuple/collection element type that **could** be numeric at runtime:
+ * `any`/`unknown`, a subtype or supertype of `number`, or itself a
+ * could-be-numeric collection or tuple (a Desmos-style point-list component
+ * like `(-6, n)` with `n` a list, or a nested point). A provably non-numeric
+ * element (`string`, `list<string>`, …) does not qualify.
+ *
+ * Fixed-shape (dimensioned) collection elements — `vector<n>`, `matrix` —
+ * DO qualify, matching what `checkNumericArgs` has always admitted (a
+ * `tuple<matrix, integer>` operand participates in tuple arithmetic and keeps
+ * its tuple type; pinned in `points-arithmetic.test.ts`). This deliberately
+ * differs from `dimensionlessIndexedElement`, which excludes fixed shapes
+ * because *broadcast* (not element-could-be-numeric) semantics leave those to
+ * tensor typing.
+ */
+function couldBeNumericElement(el: Type): boolean {
+  return (
     el === 'any' ||
     el === 'unknown' ||
     isSubtype(el, 'number') ||
     isSubtype('number', el) ||
-    dimensionlessIndexedElement(el) !== undefined;
-  if (typeof t === 'string') return t === 'tuple';
-  if (t.kind === 'tuple')
-    return t.elements.every((el) => elementCouldBeNumeric(el.type));
-  if (t.kind === 'union')
-    return t.types.some((b) => typeCouldBeNumericTupleType(b));
+    typeCouldBeNumericCollection(el) ||
+    typeCouldBeNumericTuple(el)
+  );
+}
+
+/**
+ * Return true if a type could be a numeric collection at runtime — a `list`,
+ * `set`, `collection`, or `indexed_collection` whose elements could be
+ * numeric, or a `broadcastable<S>` with a numeric-ish element. COULD-
+ * semantics: bare kinds (`list`, `collection`, …) and `any`/`unknown`
+ * elements qualify; a statically non-numeric element type (`list<string>`)
+ * does not.
+ *
+ * SINGLE SOURCE OF TRUTH shared by `checkNumericArgs` (`validate.ts`, the
+ * operand-admission gate) and — via `couldBeNumericTuple` — the
+ * `Add`/`Multiply` type handlers and the invisible-operator gate. The two
+ * layers must never diverge: an operand admitted by validation but missed by
+ * the type handlers collapses to `number` through the `isFinite === false`
+ * path and lets the `Add` scalar-plus-tuple guard bake `incompatible-type`
+ * (Tycho item 30).
+ */
+export function typeCouldBeNumericCollection(type: Type): boolean {
+  if (typeof type === 'string') {
+    return (
+      type === 'list' ||
+      type === 'set' ||
+      type === 'collection' ||
+      type === 'indexed_collection'
+    );
+  }
+  if (
+    type.kind === 'collection' ||
+    type.kind === 'indexed_collection' ||
+    type.kind === 'list' ||
+    type.kind === 'set'
+  )
+    return couldBeNumericElement(type.elements);
+  // A `broadcastable<S>` operand COULD be a numeric indexed collection at
+  // runtime. `broadcastable<any>`/`broadcastable<unknown>` qualify too; a
+  // plainly non-numeric element (e.g. `broadcastable<string>`) does not.
+  if (type.kind === 'broadcastable') {
+    const el = type.elements;
+    return (
+      el === 'any' ||
+      el === 'unknown' ||
+      isSubtype(el, 'number') ||
+      isSubtype('number', el)
+    );
+  }
+  if (type.kind === 'union')
+    return type.types.some((t) => typeCouldBeNumericCollection(t));
+  return false;
+}
+
+/**
+ * Return true if a type *could* be a numeric tuple (point/vector in ℝⁿ) at
+ * runtime — a `tuple` whose every element could be numeric (see
+ * `couldBeNumericElement`; an `any`/`unknown` element, e.g. `(w.x, w.y)` on
+ * an undeclared `w`, qualifies). Shared by `checkNumericArgs` and the
+ * arithmetic type handlers — see `typeCouldBeNumericCollection` on why the
+ * two layers must not diverge.
+ */
+export function typeCouldBeNumericTuple(type: Type): boolean {
+  if (typeof type === 'string') return type === 'tuple';
+  if (type.kind === 'tuple')
+    return type.elements.every((el) => couldBeNumericElement(el.type));
+  if (type.kind === 'union')
+    return type.types.some((t) => typeCouldBeNumericTuple(t));
   return false;
 }
 
@@ -100,6 +178,29 @@ export function isLinearAlgebraCollection(expr: Expression): boolean {
     (t.kind === 'list' ||
       t.kind === 'collection' ||
       t.kind === 'indexed_collection')
+  );
+}
+
+/**
+ * True when `expr`'s TYPE is a **fixed-shape (dimensioned)** list — a
+ * `vector<n>`, `matrix`, or higher-rank tensor: a `list`-kind type carrying
+ * `dimensions`. These are the un-evaluated linear-algebra intermediates (e.g.
+ * `10^4·[1,2,3]` typed `vector<3>`) that broadcast to a `List` at evaluation,
+ * but whose static type is not a plain dimensionless `list<E>` — so they are
+ * NOT caught by `isBroadcastCollectionType` (which excludes fixed shapes) and
+ * need their own trigger in the broadcast-typing arm.
+ *
+ * Deliberately NARROWER than `isLinearAlgebraCollection`: it does NOT match the
+ * generic `collection`/`indexed_collection` kinds (nor a bare `list`). A
+ * generic `collection<E>` operand may be a non-indexed `set` at runtime, which
+ * the evaluator's broadcast paths (all `isFiniteIndexedCollection`-gated) never
+ * broadcast — so admitting it here would type a `list<E>` the value path never
+ * produces.
+ */
+export function isFixedShapeCollection(expr: Expression): boolean {
+  const t = expr.type.type;
+  return (
+    typeof t !== 'string' && t.kind === 'list' && t.dimensions !== undefined
   );
 }
 
@@ -184,8 +285,7 @@ function dimensionlessIndexedElement(t: Type): Type | undefined {
  */
 export function isPossiblyCollectionTyped(expr: Expression): boolean {
   const t = expr.type.type;
-  if (t === 'unknown' || t === 'any' || t === 'value')
-    return isFunction(expr);
+  if (t === 'unknown' || t === 'any' || t === 'value') return isFunction(expr);
   return typeof t !== 'string' && t.kind === 'broadcastable';
 }
 

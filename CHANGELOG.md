@@ -22,7 +22,45 @@
   broadcast; statically mismatched lengths and matrix contractions fall back to
   the interpreter.
 
+- **A bounds-less big operator over LaTeX (`\sum ⟨body⟩`, `\prod ⟨body⟩`) now
+  parses to its own head (`["Sum", body]` / `["Product", body]`) instead of
+  `["Reduce", body, "Add"/"Multiply"]`.** This is a (non-canonical and
+  canonical) parse-shape change, called out per the pipeline-contract rules:
+  consumers matching on the `Reduce` shape should match the big-op head
+  instead. It makes the serialization round-trip lossless — `["Sum", body]`
+  serializes to a bounds-less `\sum ⟨body⟩`, which previously re-parsed to a
+  different expression. Evaluation semantics are unchanged (a collection body
+  still reduces).
+
 ### Bug Fixes
+
+- **`Sum`/`Product` over a *computed* list-valued body now reduces instead of
+  broadcasting.** `Sum(L)` of a literal collection reduced correctly, but a
+  body that only *evaluates* to a list — e.g. a broadcast chain over a list
+  literal, `\operatorname{Sum}(\operatorname{mod}(\operatorname{floor}(7/2^{[0...10]}),2))`
+  — returned the broadcast list unchanged instead of its sum. The arity-1
+  reducer form now reduces the evaluated value when it is a collection.
+
+- **A symbol operand naming an operator no longer leaks into `.unknowns`.**
+  A function reference held as a symbol operand (e.g. the `Add` of
+  `["Reduce", L, "Add"]`) was reported as a free variable by `.unknowns` /
+  `.freeVariables`, so consumers walking unknowns saw a phantom unbound name.
+  Operator names now resolve as function references, not free variables.
+
+- **`subs()` no longer corrupts a bound index named `i` (or any name that
+  collides with a constant).** Substituting into a canonical big operator —
+  `ce.parse("\\sum_{i=1}^{n}2^{-i}").subs({n: 9})` — re-canonicalized the
+  held `Limits` index *outside* its binding scope, re-typing `i` as the
+  imaginary unit: the index slot became an `incompatible-type` error and
+  serialization dropped the index (`\sum_1^9…`). Held (non-canonical)
+  operands now stay raw through `subs()` and are re-bound by the parent's
+  canonical handler, exactly as when the expression was first built.
+
+- **A bare numeric bounds pair on a big operator (`\sum_1^9 ⟨body⟩`) is no
+  longer silently dropped at parse.** It now parses to an index-less
+  `["Limits", "Nothing", 1, 9]`: a constant body iterates
+  (`\sum_1^9 2` → `18`), and a body with free variables stays symbolic
+  rather than losing its bounds.
 
 - **A divergent integral over `(-∞, ∞)` no longer numericizes to a clean `0`.**
   `.N()` of `\int_{-\infty}^{\infty} x\,dx` (and `x^3`, `\sin x`, any odd
@@ -71,6 +109,12 @@
   `broadcastable`; it propagates through nested arithmetic, juxtaposition
   (`2(2h(x)-1)` is a product, not a tuple), function application, and
   indexing (`(2h(x,y)-1)[1]` is valid, with element type `number`).
+  Relatedly, a scalar function over a **fixed-shape-typed intermediate** no
+  longer collapses either: `\sin(10^4 \cdot [1,2,3])` — whose inner product
+  types `vector<3>` — now types `list<number>` through every scalar-function
+  hop (`mod`, scaling, …), so indexing the end state is valid. Operators that
+  compute their own collection result (`-M`, `M+N`, `matrix + scalar`) are
+  unaffected.
   Subtyping: `number <: broadcastable<number>` and
   `list<number> <: broadcastable<number>`, but `broadcastable<number>` is
   *not* a subtype of `number` (it may be a list). The type can be used in

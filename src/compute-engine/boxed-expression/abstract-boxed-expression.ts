@@ -1251,7 +1251,21 @@ function getReferences(
 
     if (expr.operatorDefinition) return;
 
-    const value = expr.engine._getSymbolValue(s);
+    // A single scope-chain lookup serves both remaining cases (so the common
+    // free-variable path pays one walk, not two — this avoided a separate
+    // `_getSymbolValue` scope traversal).
+    const def = expr.engine.lookupDefinition(s);
+
+    // An unbound symbol operand that names an operator — e.g. the `Add` of
+    // `Reduce(L, Add)`, held raw by a lazy operator so it carries no bound
+    // definition — is a function reference, not a free variable. (The
+    // def-kind check is inlined, as in `isReferencedFunctionHead`, to avoid
+    // an import cycle.)
+    if (def !== undefined && 'operator' in def) return;
+
+    // A name bound to a value is resolved, not free (mirrors
+    // `_getSymbolValue`: only a value definition carries a value).
+    const value = def !== undefined && 'value' in def ? def.value.value : undefined;
     if (value === undefined) freeVars.add(s);
     return;
   }

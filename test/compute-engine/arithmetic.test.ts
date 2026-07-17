@@ -1035,6 +1035,62 @@ describe('SUM', () => {
     expect(mixed.type.toString()).toBe('error');
   });
 
+  // Tycho item 32.1: a body that is not *structurally* a collection but
+  // EVALUATES to one (a broadcast chain over a list literal) must reduce,
+  // not return the broadcast list whole.
+  it('reduces a computed list-valued body (Tycho item 32.1)', () => {
+    expect(
+      ce
+        .parse(
+          '\\operatorname{Sum}(\\operatorname{mod}(\\operatorname{floor}(7/2^{[0...10]}),2))'
+        )
+        .evaluate()
+        .toString()
+    ).toBe('3');
+    // Product has the same arity-1 reducer form.
+    expect(
+      ce
+        .box(['Product', ['Add', ['List', 1, 2, 3], 1]])
+        .evaluate()
+        .toString()
+    ).toBe('24');
+  });
+
+  // Tycho item 32.2: `["Sum", body]` serializes to a bounds-less `\sum` which
+  // must re-parse to `Sum` (not `Reduce(body, Add)`), and no operator name
+  // may leak into `.unknowns`.
+  it('bounds-less serialization round-trips without unknowns leak (Tycho item 32.2)', () => {
+    const body = ['Mod', ['Floor', ['Divide', 7, ['Power', 2, 'k']]], 2];
+    const reparsed = ce.parse(ce.box(['Sum', body]).latex);
+    expect(reparsed.operator).toBe('Sum');
+    expect(reparsed.unknowns).toEqual(['k']);
+  });
+
+  // Tycho item 33: `subs()` on a canonical Sum must not re-type the bound
+  // index `i` as the imaginary unit (the raw held `Limits` index was being
+  // canonicalized outside its binding scope).
+  it('subs() preserves a bound index named i (Tycho item 33)', () => {
+    const subbed = ce.parse('\\sum_{i=1}^{n}2^{-i}').subs({ n: 9 });
+    expect(subbed.json).toEqual([
+      'Sum',
+      ['Power', 2, ['Negate', 'i']],
+      ['Limits', 'i', 1, 9],
+    ]);
+    expect(subbed.latex).toBe('\\sum_{i=1}^92^{-i}');
+    expect(subbed.evaluate().toString()).toBe('511/512');
+  });
+
+  // Tycho item 33 (secondary): a bare numeric bounds pair (`\sum_1^9`) is
+  // preserved as an index-less `Limits`, not silently dropped.
+  it('preserves a numeric bounds pair with no index', () => {
+    expect(ce.parse('\\sum_1^9 2^{-k}').json).toEqual([
+      'Sum',
+      ['Power', 2, ['Negate', 'k']],
+      ['Limits', 'Nothing', 1, 9],
+    ]);
+    expect(ce.parse('\\sum_1^9 2').evaluate().toString()).toBe('18');
+  });
+
   it('should compute the sum of a function over two indices (with optional Hold)', () =>
     expect(
       ce

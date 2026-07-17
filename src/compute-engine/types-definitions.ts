@@ -522,12 +522,14 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * or a re-mapped `Add`/`Multiply`/`Power`/relational operator).
      *
      * It does NOT override the structural / control-flow heads, which have
-     * their own bespoke lowering: `Sum`, `Product`, `If`, `Which`, `When`,
-     * `Match`, `Block`, `Function`, `Loop`, `Comprehension`, `Sequence`. A
-     * handler declared on one of those heads is ignored.
+     * their own bespoke lowering: `Sequence`, `Sum`, `Product`, `Function`,
+     * `Declare`, `Assign`, `Return`, `Break`, `Continue`, `Loop`,
+     * `Comprehension`, `If`, `Which`, `When`, `Match`, `Block`. A handler
+     * declared on one of those heads is ignored.
      *
-     * Return `undefined` (or `null`, or an empty string) to fall back to the
-     * default compilation. See {@link OperatorCompileHandler}.
+     * Return `undefined` (or an empty string) to fall back to the
+     * default compilation (a `null` returned from untyped JavaScript is
+     * tolerated and treated the same). See {@link OperatorCompileHandler}.
      */
     compile?: OperatorCompileHandler;
 

@@ -173,6 +173,54 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     return ce;
   };
 
+  test('fixed-shape-typed intermediates lift through scalar-function hops (Tycho 19.2 probe)', () => {
+    // `sin(10^4·[1,2,3])`: the inner product types `vector<3>` (a fixed-shape
+    // TYPE, not a materialized collection), which fell through both of the
+    // wrapper's visible triggers — `Sin` collapsed to scalar `number`, every
+    // later hop stayed scalar, and `At` hard-rejected a provably-list base.
+    // The `isFixedShapeCollection` trigger lifts it: each hop types
+    // `list<number>` and `At` over the end state is valid.
+    const ce = new ComputeEngine();
+    const L = ['List', 1, 2, 3];
+    const probe = ce.box([
+      'Subtract',
+      ['Multiply', 2, ['Mod', ['Multiply', 10000, ['Sin', ['Multiply', 10000, L]]], 1]],
+      1,
+    ]);
+    expect(probe.type.toString()).toBe('list<number>');
+    const at = ce.box(['At', probe.json, 1]);
+    expect(at.isValid).toBe(true);
+  });
+
+  test('Equal/NotEqual over two type-level collections stay scalar boolean', () => {
+    // Whole-value equality: `Equal` of two definite collections is a scalar
+    // `boolean`, never a broadcast — and the skip must work at the TYPE level
+    // too (unevaluated `10⁴·[…]` intermediates type `vector<3>` but are not
+    // value-level collections). A single collection operand still lifts (a
+    // collection-vs-scalar comparison broadcasts to a boolean mask).
+    const ce = new ComputeEngine();
+    const v1 = ['Multiply', 10000, ['List', 1, 2, 3]];
+    const v2 = ['Multiply', 10000, ['List', 4, 5, 6]];
+    const eq = ce.box(['Equal', v1, v2]);
+    expect(eq.type.toString()).toBe('boolean');
+    expect(eq.evaluate().toString()).toBe('"False"');
+    expect(ce.box(['NotEqual', v1, v2]).type.toString()).toBe('boolean');
+    expect(ce.box(['Equal', v1, 5]).type.toString()).toBe('list<boolean>');
+  });
+
+  test('a widen-produced scalar|collection union is repaired to a definite list', () => {
+    // `Remainder` has no collection-aware handler — its naive `widen(…)` over
+    // a collection operand produced `finite_integer | vector<3>` while the
+    // value ALWAYS broadcasts to a list. Only `Add`/`Multiply`/`Negate`
+    // (handlers that genuinely compute collection results, incl. the
+    // deliberate `matrix + scalar` union) defer; everyone else lifts.
+    const ce = new ComputeEngine();
+    const v1 = ['Multiply', 10000, ['List', 1, 2, 3]];
+    const rem = ce.box(['Remainder', v1, 7]);
+    expect(rem.type.toString()).toBe('list<number>');
+    expect(rem.evaluate().operator).toBe('List');
+  });
+
   test('representative operators over a possibly-collection operand are broadcastable', () => {
     const ce = mkEngine();
     // arg = 2h(x)-1, which is broadcastable<number> (phase B).
@@ -447,5 +495,43 @@ describe('post-evaluation lambda broadcast', () => {
         .evaluate()
         .toString()
     ).toBe('[[1,1],[1,1]]');
+  });
+});
+
+describe('fixed-shape vs generic-collection broadcast typing', () => {
+  test('vector<1>-typed operand: broadcastable op types list<…>', () => {
+    const ce = new ComputeEngine();
+    // A fixed-shape (dimensioned) operand: the un-evaluated `2v` intermediate
+    // is typed `vector<1>`. `Sin` broadcasts over it at evaluation, so the
+    // honest type is a definite `list<…>` (arm 1, `isFixedShapeCollection`).
+    ce.declare('v', 'vector<1>');
+    expect(ce.box(['Sin', ['Multiply', 2, 'v']]).type.toString()).toBe(
+      'list<number>'
+    );
+  });
+
+  test('concrete singleton broadcast evaluates to a 1-element List', () => {
+    const ce = new ComputeEngine();
+    // A single-element broadcast must NOT unwrap to the bare scalar — the
+    // value has to match the `list<…>` broadcast type. The lone element equals
+    // the scalar result `Sin(10)`.
+    const scalar = ce.box(['Sin', 10]).evaluate();
+    const broadcast = ce.box(['Sin', ['Multiply', 2, ['List', 5]]]).evaluate();
+    expect(broadcast.operator).toBe('List');
+    expect(broadcast.ops).toHaveLength(1);
+    expect(broadcast.ops![0].isSame(scalar)).toBe(true);
+  });
+
+  test('generic collection<number>-typed operand does NOT type as a definite list', () => {
+    const ce = new ComputeEngine();
+    // A generic `collection<number>` operand may be a non-indexed `set` at
+    // runtime, which the evaluator never broadcasts (the broadcast paths are
+    // all `isFiniteIndexedCollection`-gated). So `Sin(c)` must NOT be typed a
+    // definite `list<…>`; it keeps the scalar per-element result `finite_number`
+    // (the sound type for the non-broadcasting value path).
+    ce.declare('c', 'collection<number>');
+    const t = ce.box(['Sin', 'c']).type.toString();
+    expect(t).toBe('finite_number');
+    expect(t.startsWith('list<')).toBe(false);
   });
 });

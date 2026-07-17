@@ -2414,7 +2414,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: '\\prod',
     precedence: MULTIPLICATION_PRECEDENCE,
     name: 'Product',
-    parse: parseBigOp('Product', 'Multiply', MULTIPLICATION_PRECEDENCE),
+    parse: parseBigOp('Product', MULTIPLICATION_PRECEDENCE),
     serialize: serializeBigOp('\\prod'),
   },
 
@@ -2491,7 +2491,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\sum'],
     precedence: ADDITION_PRECEDENCE,
     name: 'Sum',
-    parse: parseBigOp('Sum', 'Add', MULTIPLICATION_PRECEDENCE),
+    parse: parseBigOp('Sum', MULTIPLICATION_PRECEDENCE),
     serialize: serializeBigOp('\\sum'),
   },
   {
@@ -2602,6 +2602,11 @@ function getIndexAssignment(
   if (expr === null) return undefined;
   // We only have a symbol, e.g. `i`
   if (symbol(expr)) return { index: symbol(expr) ?? 'Nothing', upper };
+
+  // A bare numeric subscript, e.g. `\sum_1^9`: a bounds pair with no index
+  // symbol. Preserve it (`Limits(Nothing, 1, 9)`) rather than silently
+  // dropping the bounds.
+  if (isNumberExpression(expr)) return { index: 'Nothing', lower: expr, upper };
 
   // We have `i>=1` in the subscript
   if (operator(expr) === 'GreaterEqual') {
@@ -2795,7 +2800,7 @@ function boundVariableNames(
   return names;
 }
 
-function parseBigOp(name: string, reduceOp: string, minPrec: number) {
+function parseBigOp(name: string, minPrec: number) {
   return (parser: Parser): MathJsonExpression | null => {
     parser.skipSpace();
 
@@ -2833,10 +2838,14 @@ function parseBigOp(name: string, reduceOp: string, minPrec: number) {
 
     // If there are no sup/sub, this could be a bigop over a collection, i.e.
     // \sum \{ 1, 2, 3 \}
+    // Keep the bigop head (canonicalization rewrites a collection body to
+    // `Reduce` when appropriate): `["Sum", body]` serializes to a bounds-less
+    // `\sum ⟨body⟩`, so parsing back to `Reduce(body, op)` made the
+    // round-trip lossy.
     if (!sup && !sub) {
       const collection = parser.parseExpression({ minPrec: minPrec });
       parser.popSymbolTable();
-      if (collection) return ['Reduce', collection, reduceOp];
+      if (collection) return [name, collection];
       return null;
     }
 

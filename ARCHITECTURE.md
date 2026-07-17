@@ -353,6 +353,15 @@ the types of mathematical expressions. It models:
   variants and bounded ranges (e.g. `integer<5..10>`).
 - **Collections**: `list`, `set`, `tuple`, `record`, `dictionary`, with shapes
   (e.g. `matrix<number^(2x3)>` for a matrix).
+- **Broadcastable values**: `broadcastable<T>` — "a `T`, or an indexed
+  collection of `T`, element-wise". The static type of arithmetic whose
+  operand may broadcast at runtime (an unknown-return call such as
+  `2h(x) - 1`). `T <: broadcastable<T>` and
+  `list<T> <: broadcastable<T>`, but `broadcastable<T>` is not a subtype of
+  `T` or `list<T>`. Produced by the `Add`/`Multiply` type handlers and the
+  generic broadcast-typing wrapper in `boxed-function.ts`; the trigger is
+  applications-only (a bare symbol's `unknown` is inference-pending and
+  stays scalar). See the Broadcastable section of `doc/08-guide-types.md`.
 - **Function signatures**: `(x: number, number?) -> number`, including named,
   optional, and variadic arguments.
 - **Algebraic types**: union (`|`), intersection (`&`), negation (`!`), plus the

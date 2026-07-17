@@ -4,18 +4,16 @@ import { engine as ce, evaluate, latex } from '../../utils';
 
 describe('SUM parsing', () => {
   test('constant body (number literal)', () => {
-    expect(ce.parse(`\\sum 3`)).toMatchInlineSnapshot(`["Reduce", 3, "Add"]`);
+    expect(ce.parse(`\\sum 3`)).toMatchInlineSnapshot(`["Sum", 3]`);
   });
 
   test('constant body (symbol)', () => {
-    expect(ce.parse(`\\sum \\pi`)).toMatchInlineSnapshot(
-      `["Reduce", "Pi", "Add"]`
-    );
+    expect(ce.parse(`\\sum \\pi`)).toMatchInlineSnapshot(`["Sum", "Pi"]`);
   });
 
   test('constant body (expression)', () => {
     expect(ce.parse(`\\sum (1+\\pi)`)).toMatchInlineSnapshot(
-      `["Reduce", ["Delimiter", ["Add", 1, "Pi"]], "Add"]`
+      `["Sum", ["Add", 1, "Pi"]]`
     );
   });
 
@@ -103,7 +101,7 @@ describe('SUM parsing', () => {
   test('sum of a collection', () => {
     expect(
       ce.parse(`\\sum \\lbrack 1, 2, 3, 4, 5\\rbrack`)
-    ).toMatchInlineSnapshot(`["Reduce", ["List", 1, 2, 3, 4, 5], "Add"]`);
+    ).toMatchInlineSnapshot(`["Sum", ["List", 1, 2, 3, 4, 5]]`);
   });
 
   test('single range index', () => {

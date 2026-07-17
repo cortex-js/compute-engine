@@ -272,6 +272,9 @@ export type Type =
  *                | <tuple_type>
  *                | <signature>
  *                | <list_type>
+ *                | <set>
+ *                | <broadcastable>
+ *                | <collection>
  *
  * <primitive> ::= "any" | "unknown" | <value-type> | <symbolic-type> | <numeric-type>
  *
@@ -333,7 +336,7 @@ export type Type =
  *
  * <broadcastable> ::= "broadcastable" ( "<" <type> ">" )?
  *
- * <collection ::= "collection<" <type> ">"
+ * <collection> ::= ( "collection" | "indexed_collection" ) ( "<" <type> ">" )?
  *
  * <name> ::= <identifier> ":"
  *

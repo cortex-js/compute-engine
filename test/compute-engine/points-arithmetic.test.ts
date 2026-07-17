@@ -1100,3 +1100,83 @@ describe('POINT/TUPLE ARITHMETIC — unknown-component tuples (Tycho item 30)', 
     expect(ce.box(['InvisibleOperator', 2, 'h']).operator).toBe('Tuple');
   });
 });
+
+describe('POINT/TUPLE ARITHMETIC — could-be-numeric elements match the validation gate (item 30 review)', () => {
+  // `couldBeNumericTuple` and `checkNumericArgs` share ONE predicate: any
+  // tuple shape the validation layer admits must keep its tuple type through
+  // the Add/Multiply type handlers (a divergence collapses the product to
+  // `number` and re-bakes the item-30 error for that shape).
+  test('tuple with a broadcastable<number> component keeps its tuple type', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', '(number) -> unknown');
+    ce.assign('n', 4);
+    const p = ce.parse(String.raw`\frac{1}{n}(2h(x)-1, 1)`);
+    expect(p.operator).toBe('Multiply');
+    expect(p.type.toString()).toBe('tuple<broadcastable<number>, finite_integer>');
+    const sum = ce.parse(
+      String.raw`\frac{1}{n}(\lfloor nx\rfloor,\lfloor ny\rfloor)+\frac{1}{n}(2h(x)-1, 1)`
+    );
+    expect(sum.isValid).toBe(true);
+    expect(sum.operator).toBe('Add');
+  });
+
+  test('tuple with a collection<number> component multiplies (not a nested Tuple)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'collection<number>');
+    const p = ce.parse('2(c, 1)');
+    expect(p.operator).toBe('Multiply');
+    expect(p.isValid).toBe(true);
+  });
+
+  test('point-list component (scaled list) still admitted: 2·(1, 0.3m)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('m', ce.parse('[1,2,3]').evaluate());
+    const p = ce.parse('2(1, 0.3m)');
+    expect(p.operator).toBe('Multiply');
+    expect(p.type.toString()).toBe('tuple<finite_integer, list<number>>');
+  });
+
+  test('provably non-numeric component: tuple<number, list<string>> symbol still groups as Tuple', () => {
+    const ce = new ComputeEngine();
+    ce.declare('w', 'tuple<number, list<string>>');
+    expect(ce.box(['InvisibleOperator', 2, 'w']).operator).toBe('Tuple');
+  });
+
+  test('point + declared list<tuple<…>> (point-list) stays a valid symbolic Add', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'list<tuple<number, number>>');
+    const r = ce.parse('(1,2)+P');
+    expect(r.isValid).toBe(true);
+    expect(r.operator).toBe('Add');
+  });
+
+  // Pins the deliberate element-aware tightening of
+  // `typeCouldBeNumericCollection`: a bare `list<string>` DIRECT operand
+  // (not nested inside a tuple) of a threadable numeric op is rejected,
+  // since its element type could not be numeric.
+  test('list<string> direct operand of a threadable numeric op → Error(incompatible-type)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('lstr', 'list<string>');
+    const sum = ce.box(['Add', 'lstr', 1]);
+    expect(errorCode(sum.op1)).toBe('incompatible-type');
+    const sinExpr = ce.box(['Sin', 'lstr']);
+    expect(errorCode(sinExpr.op1)).toBe('incompatible-type');
+  });
+});
+
+describe('POINT/TUPLE ARITHMETIC — fixed-shape tuple components (deliberate widening)', () => {
+  // A dimensioned collection component (`matrix`, `vector<n>`) counts as
+  // could-be-numeric — matching what `checkNumericArgs` has always admitted —
+  // so a tuple carrying one participates in tuple arithmetic and keeps its
+  // honest tuple type instead of collapsing (see `couldBeNumericElement`).
+  test('tuple<matrix, integer> symbol scales and adds with the tuple type kept', () => {
+    const ce = new ComputeEngine();
+    ce.declare('w', 'tuple<matrix, integer>');
+    const p = ce.box(['InvisibleOperator', 2, 'w']);
+    expect(p.operator).toBe('Multiply');
+    expect(p.type.toString()).toBe('tuple<matrix, integer>');
+    const s = ce.parse('w+w');
+    expect(s.operator).toBe('Add');
+    expect(s.type.toString()).toBe('tuple<matrix, integer>');
+  });
+});

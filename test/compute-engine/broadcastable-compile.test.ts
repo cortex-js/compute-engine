@@ -43,6 +43,23 @@ describe('broadcastable<T> — JavaScript compile target', () => {
     expect(r.run!({ b: 0 })).toBe(2);
   });
 
+  test('3b. fixed-shape broadcast chain compiles end-to-end (Tycho item 31)', () => {
+    // `2·sin(3·[x,y])`: the inner product types `vector<2>`, so every scalar
+    // -function hop must type `list<number>` (not collapse to scalar) for the
+    // compile pipeline to lower the whole chain through `_SYS.bcast`. Before
+    // the fixed-shape wrapper trigger, `Sin(3·[x,y])` typed scalar `number`
+    // and the compiled chain returned a silent wrong result behind
+    // `success: true`.
+    const r = jsCompile((ce) =>
+      ce.box(['Multiply', 2, ['Sin', ['Multiply', 3, ['List', 'x', 'y']]]])
+    );
+    expect(r.code).toContain('_SYS.bcast');
+    const out = r.run!({ x: 0.5, y: 1.0 }) as number[];
+    expect(out).toHaveLength(2);
+    expect(out[0]).toBeCloseTo(2 * Math.sin(1.5), 12);
+    expect(out[1]).toBeCloseTo(2 * Math.sin(3), 12);
+  });
+
   test('3. array runtime value broadcasts element-wise, matching the interpreter', () => {
     const r = jsCompile((ce) => {
       ce.declare('b', 'broadcastable<number>');

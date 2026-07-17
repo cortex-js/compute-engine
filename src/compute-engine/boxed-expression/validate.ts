@@ -1,4 +1,8 @@
-import { isFiniteIndexedCollection } from '../collection-utils.js';
+import {
+  isFiniteIndexedCollection,
+  typeCouldBeNumericCollection,
+  typeCouldBeNumericTuple,
+} from '../collection-utils.js';
 
 import { flatten } from './flatten.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -45,77 +49,13 @@ function typeCouldBeCollection(type: Type): boolean {
   return false;
 }
 
-/**
- * Return true if a type could be a numeric collection at runtime.
- * Used in `checkNumericArgs` (the fastpath for threadable numeric functions)
- * to accept types like `list`, `number | list`, but not tuples
- * with non-numeric elements.
- */
-function typeCouldBeNumericCollection(type: Type): boolean {
-  if (typeof type === 'string') {
-    return (
-      type === 'list' ||
-      type === 'set' ||
-      type === 'collection' ||
-      type === 'indexed_collection'
-    );
-  }
-  if (
-    type.kind === 'collection' ||
-    type.kind === 'indexed_collection' ||
-    type.kind === 'list' ||
-    type.kind === 'set'
-  )
-    return true;
-  // A `broadcastable<S>` operand COULD be a numeric indexed collection at
-  // runtime. Mirroring the COULD-semantics above (which admit `list`/
-  // `collection` without inspecting elements), `broadcastable<any>` /
-  // `broadcastable<unknown>` qualify too; a numeric-ish element type is
-  // admitted, a plainly non-numeric one (e.g. `broadcastable<string>`) is not.
-  if (type.kind === 'broadcastable') {
-    const el = type.elements;
-    return (
-      el === 'any' ||
-      el === 'unknown' ||
-      isSubtype(el, 'number') ||
-      isSubtype('number', el)
-    );
-  }
-  if (type.kind === 'union')
-    return type.types.some((t) => typeCouldBeNumericCollection(t));
-  return false;
-}
-
-/**
- * Return true if a type *could* be a numeric tuple (point/vector in ℝⁿ) at
- * runtime — a `tuple` whose every element type could be numeric. Such tuples
- * participate in vector arithmetic (`z + (1,2)`, `2·z`), so `checkNumericArgs`
- * admits them as a pass-through (without inferring their elements to `real`).
- *
- * This mirrors the COULD-semantics of `typeCouldBeNumericCollection`: an
- * `any`/`unknown` element (e.g. `(w.x, w.y)` on an undeclared `w`, typed
- * `tuple<any, any>`) qualifies, so the expression stays symbolic instead of
- * erroring during validation. (The provable numeric-tuple guards at
- * canonicalization use the stricter `isNumericTuple`.)
- */
-function typeCouldBeNumericTuple(type: Type): boolean {
-  // A component may itself be a numeric collection (a Desmos-style point-list
-  // like `(-6, n)` with `n` a list): the tuple then transposes to a `List` of
-  // point-tuples at evaluation. Accept such a component here so the tuple is
-  // not rejected during arithmetic operand validation (`2·(1, 0.3n)`).
-  const elementCouldBeNumeric = (el: Type): boolean =>
-    el === 'any' ||
-    el === 'unknown' ||
-    isSubtype(el, 'number') ||
-    isSubtype('number', el) ||
-    typeCouldBeNumericCollection(el);
-  if (typeof type === 'string') return type === 'tuple';
-  if (type.kind === 'tuple')
-    return type.elements.every((el) => elementCouldBeNumeric(el.type));
-  if (type.kind === 'union')
-    return type.types.some((t) => typeCouldBeNumericTuple(t));
-  return false;
-}
+// `typeCouldBeNumericCollection` / `typeCouldBeNumericTuple` — the COULD-
+// semantics predicates `checkNumericArgs` uses to admit collection/tuple
+// operands — are imported from `collection-utils.ts`, where the
+// `Add`/`Multiply` type handlers and the invisible-operator gate share the
+// SAME predicates. Keeping a private copy here let the two layers diverge:
+// an operand admitted by validation but missed by the type handlers
+// collapsed to `number` and baked `incompatible-type` (Tycho item 30).
 
 /**
  * Check that the number of arguments is as expected.

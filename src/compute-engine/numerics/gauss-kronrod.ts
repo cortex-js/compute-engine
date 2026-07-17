@@ -245,7 +245,11 @@ export function adaptiveQuadrature(
     // recursive calls are each semi-infinite, so they take non-recursive
     // branches below. Each half gets half the panel budget so the caller's
     // `maxIntervals` cap holds for the whole integral.
-    const halfOptions = { rtol, atol, maxIntervals: Math.ceil(maxIntervals / 2) };
+    const halfOptions = {
+      rtol,
+      atol,
+      maxIntervals: Math.ceil(maxIntervals / 2),
+    };
     const left = adaptiveQuadrature(f, a, 0, halfOptions);
     const right = adaptiveQuadrature(f, 0, b, halfOptions);
     const estimate = left.estimate + right.estimate;

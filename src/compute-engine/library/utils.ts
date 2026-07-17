@@ -1195,7 +1195,20 @@ export function* reduceBigOp<T>(
 
   // If there are no indexes, the summation is a constant
   // i.e. Sum(3) = 3
-  if (indexes.length === 0) return fn(initial, body) ?? undefined;
+  if (indexes.length === 0) {
+    // A body that is not *structurally* a collection may still evaluate to
+    // one — e.g. a broadcast chain over a list literal,
+    // `Sum(mod(floor(7/2^[0...10]), 2))`. Reduce the value; returning
+    // `fn(initial, body)` would fold the broadcast list in whole (`0 + [...]`)
+    // and hand back the list unchanged.
+    const value = body.evaluate();
+    if (value.isCollection) {
+      if (value.isFiniteCollection !== true) return NON_ENUMERABLE_DOMAIN;
+      if (enumerationDeclined(value)) return NON_ENUMERABLE_DOMAIN;
+      return yield* reduceCollection(value, fn, initial);
+    }
+    return fn(initial, value) ?? undefined;
+  }
 
   const ce = body.engine;
 
@@ -1259,7 +1272,11 @@ export function* reduceBigOp<T>(
   //
   let result: T | undefined = initial;
   for (const element of cartesianArray) {
-    indexingSets.forEach((x, i) => ce.assign(x.index!, element[i]));
+    // An index-less bounds pair (`Limits(Nothing, 1, 9)`) iterates a constant
+    // body: there is no index variable to assign.
+    indexingSets.forEach((x, i) => {
+      if (x.index && x.index !== 'Nothing') ce.assign(x.index, element[i]);
+    });
     result = fn(result, body) ?? undefined;
     yield result;
     if (result === undefined) break;

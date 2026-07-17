@@ -820,6 +820,7 @@ type(type): BoxedType
   \| [`CollectionType`](#collectiontype)
   \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -1012,6 +1013,7 @@ declare(id, def, scope?): IComputeEngine
   \| [`CollectionType`](#collectiontype)
   \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -1029,6 +1031,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1054,6 +1057,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1071,6 +1075,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1107,6 +1112,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1132,6 +1138,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1149,6 +1156,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1200,6 +1208,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| [`CollectionType`](#collectiontype)
   \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -1217,6 +1226,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1242,6 +1252,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1259,6 +1270,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1295,6 +1307,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1320,6 +1333,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -1337,6 +1351,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -2627,7 +2642,7 @@ A custom compilation handler for an operator, set on an
 `OperatorDefinition`. It mirrors a built-in compiled-function handler:
 it receives the (canonical) operands, a `compile` callback to lower a
 sub-expression to target source, and the compilation `context` (branch on
-`context.language`). It returns target source, or `undefined` (or `null`, or
+`context.language`). It returns target source, or `undefined` (or
 an empty string) to fall back to the target's default compilation of this
 operator.
 
@@ -2635,9 +2650,10 @@ Takes precedence over the target's built-in operator/function mapping and
 broadcast lowering, so it can override how a built-in operator compiles
 (e.g. a custom-tolerance `GCD`, or a re-mapped `Add`/`Multiply`/`Power`/
 relational operator). It does NOT override the structural / control-flow
-heads (`Sum`, `Product`, `If`, `Which`, `When`, `Match`, `Block`, `Function`,
-`Loop`, `Comprehension`, `Sequence`), which have their own bespoke lowering;
-a handler declared on one of those heads is ignored.
+heads (`Sequence`, `Sum`, `Product`, `Function`, `Declare`, `Assign`,
+`Return`, `Break`, `Continue`, `Loop`, `Comprehension`, `If`, `Which`,
+`When`, `Match`, `Block`), which have their own bespoke lowering; a handler
+declared on one of those heads is ignored.
 
 ```ts
 ce.declare('MyGcd', {
@@ -3324,11 +3340,12 @@ override how a built-in operator compiles (e.g. a custom-tolerance `GCD`,
 or a re-mapped `Add`/`Multiply`/`Power`/relational operator).
 
 It does NOT override the structural / control-flow heads, which have
-their own bespoke lowering: `Sum`, `Product`, `If`, `Which`, `When`,
-`Match`, `Block`, `Function`, `Loop`, `Comprehension`, `Sequence`. A
-handler declared on one of those heads is ignored.
+their own bespoke lowering: `Sequence`, `Sum`, `Product`, `Function`,
+`Declare`, `Assign`, `Return`, `Break`, `Continue`, `Loop`,
+`Comprehension`, `If`, `Which`, `When`, `Match`, `Block`. A handler
+declared on one of those heads is ignored.
 
-Return `undefined` (or `null`, or an empty string) to fall back to the
+Return `undefined` (or an empty string) to fall back to the
 default compilation. See [OperatorCompileHandler](#operatorcompilehandler).
 
 </MemberCard>
@@ -4037,6 +4054,7 @@ optional type?: (ops, options) =>
   | CollectionType
   | ListType
   | SetType
+  | BroadcastableType
   | RecordType
   | DictionaryType
   | TupleType
@@ -8007,6 +8025,7 @@ type(type): BoxedType
   \| [`CollectionType`](#collectiontype)
   \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -8199,6 +8218,7 @@ declare(id, def, scope?): IComputeEngine
   \| [`CollectionType`](#collectiontype)
   \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -8216,6 +8236,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8241,6 +8262,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8258,6 +8280,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8294,6 +8317,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8319,6 +8343,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8336,6 +8361,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8387,6 +8413,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| [`CollectionType`](#collectiontype)
   \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -8404,6 +8431,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8429,6 +8457,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8446,6 +8475,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8482,6 +8512,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8507,6 +8538,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -8524,6 +8556,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`CollectionType`](#collectiontype)
      \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -11491,6 +11524,7 @@ set type(type:
   | CollectionType
   | ListType
   | SetType
+  | BroadcastableType
   | RecordType
   | DictionaryType
   | TupleType
@@ -12917,6 +12951,7 @@ new BoxedType(type, typeResolver?): BoxedType
   \| [`CollectionType`](#collectiontype)
   \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -13143,6 +13178,7 @@ matches(other): boolean
   \| [`CollectionType`](#collectiontype)
   \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -13705,6 +13741,28 @@ The elements of a set are not indexed.
 
 <MemberCard>
 
+### BroadcastableType
+
+```ts
+type BroadcastableType = {
+  kind: "broadcastable";
+  elements: Type;
+};
+```
+
+A `broadcastable<T>` is either a `T`, or an indexed collection of `T`
+applied element-wise (runtime broadcasting). It is the static type of an
+arithmetic result whose operand's collection-ness is not statically visible.
+
+A `T` (and any subtype of `T`) is a subtype of `broadcastable<T>`, and so is
+any indexed collection whose elements are subtypes of `T`. It is *not* a
+subtype of `T` (it may be a collection) nor of `list<T>` (it may be a
+scalar). See `subtype.ts` for the full relation.
+
+</MemberCard>
+
+<MemberCard>
+
 ### TupleType
 
 ```ts
@@ -13748,6 +13806,7 @@ type Type =
   | CollectionType
   | ListType
   | SetType
+  | BroadcastableType
   | RecordType
   | DictionaryType
   | TupleType
@@ -13788,6 +13847,9 @@ Types are described using the following BNF grammar:
                | <tuple_type>
                | <signature>
                | <list_type>
+               | <set>
+               | <broadcastable>
+               | <collection>
 
 <primitive> ::= "any" | "unknown" | <value-type> | <symbolic-type> | <numeric-type>
 
@@ -13847,7 +13909,9 @@ Types are described using the following BNF grammar:
 
 <set> ::= "set<" <type> ">"
 
-<collection ::= "collection<" <type> ">"
+<broadcastable> ::= "broadcastable" ( "<" <type> ">" )?
+
+<collection> ::= ( "collection" | "indexed_collection" ) ( "<" <type> ">" )?
 
 <name> ::= <identifier> ":"
 
