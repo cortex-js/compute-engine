@@ -44,6 +44,42 @@ export function isNumericTuple(expr: Expression): boolean {
 }
 
 /**
+ * True when `expr`'s TYPE is a tuple that **could** be a numeric tuple
+ * (point/vector in ℝⁿ) at runtime: every element type could be numeric —
+ * including `unknown`/`any` elements (e.g. `(S(x,y,0), S(x,y,1))` with
+ * `S: (…) -> unknown`, typed `tuple<unknown, unknown>`) and numeric-collection
+ * elements (a Desmos-style point-list component like `(-6, n)` with `n` a
+ * list).
+ *
+ * COULD-semantics, mirroring `typeCouldBeNumericTuple` in `validate.ts` (the
+ * `checkNumericArgs` admission test): the `Add`/`Multiply` type handlers and
+ * the invisible-operator multiply-vs-`Tuple` gate use this so an
+ * unknown-component tuple keeps its honest tuple type through arithmetic
+ * instead of collapsing to `number` (Tycho item 30). It must NOT be used where
+ * a *provable* numeric tuple is required (the `scalar + tuple` rejection guards
+ * use the strict `isNumericTuple`: an unknown element is retractable evidence,
+ * not proof).
+ */
+export function couldBeNumericTuple(expr: Expression): boolean {
+  return typeCouldBeNumericTupleType(expr.type.type);
+}
+
+function typeCouldBeNumericTupleType(t: Type): boolean {
+  const elementCouldBeNumeric = (el: Type): boolean =>
+    el === 'any' ||
+    el === 'unknown' ||
+    isSubtype(el, 'number') ||
+    isSubtype('number', el) ||
+    dimensionlessIndexedElement(el) !== undefined;
+  if (typeof t === 'string') return t === 'tuple';
+  if (t.kind === 'tuple')
+    return t.elements.every((el) => elementCouldBeNumeric(el.type));
+  if (t.kind === 'union')
+    return t.types.some((b) => typeCouldBeNumericTupleType(b));
+  return false;
+}
+
+/**
  * True when `expr`'s TYPE is a matrix/vector/list-style collection (a `list`,
  * `collection`, or `indexed_collection` kind) — i.e. the kind of collection
  * that participates in linear-algebra arithmetic (`Add`/`Multiply`). Numeric

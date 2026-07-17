@@ -7,7 +7,7 @@ import type {
 import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
-  isNumericTuple,
+  couldBeNumericTuple,
   isLinearAlgebraCollection,
 } from '../collection-utils.js';
 
@@ -287,7 +287,7 @@ export function canonicalInvisibleOperator(
           // carries no constraint at all. Like `any`/`expression`/`unknown`
           // above, the charitable default for juxtaposition is multiplication,
           // not a silent `Tuple`. Concrete collection/tuple operands are still
-          // caught by `isLinearAlgebraCollection`/`isNumericTuple`/
+          // caught by `isLinearAlgebraCollection`/`couldBeNumericTuple`/
           // `isIndexedCollection` below.
           x.type.type === 'value' ||
           x.type.matches('number') ||
@@ -319,7 +319,7 @@ export function canonicalInvisibleOperator(
           // scaling, not a silent `Tuple`. This is the same predicate the
           // `Add`/`Multiply` type handlers use, so the invisible-operator
           // decision stays consistent with them. It deliberately EXCLUDES
-          // `tuple` kinds — numeric tuples are handled by `isNumericTuple`
+          // `tuple` kinds — numeric tuples are handled by `couldBeNumericTuple`
           // just below, and heterogeneous tuples must stay a `Tuple` — and
           // `set` (no scaling semantics).
           isLinearAlgebraCollection(x) ||
@@ -327,9 +327,14 @@ export function canonicalInvisibleOperator(
           // with `z: tuple<number, number>`) are value-like: juxtaposition
           // is scaling. Literal tuples are already caught by the
           // `isIndexedCollection` test below; this covers tuple-typed
-          // symbols and unevaluated tuple-typed expressions. Heterogeneous
-          // tuples (e.g. `tuple<string, number>`) still group as `Tuple`.
-          isNumericTuple(x) ||
+          // symbols and unevaluated tuple-typed expressions — with
+          // COULD-semantics, so a tuple whose elements type `unknown`
+          // (e.g. `PointList(S(x,y,0), S(x,y,1))` with `S: (…) -> unknown`,
+          // typed `tuple<unknown, unknown>` and NOT an indexed collection)
+          // is scaling too, not a silent nested `Tuple` (Tycho item 30).
+          // Heterogeneous tuples (e.g. `tuple<string, number>`) still group
+          // as `Tuple`.
+          couldBeNumericTuple(x) ||
           isFunction(x, 'Matrix') ||
           (x.isIndexedCollection && !isString(x)))
     )

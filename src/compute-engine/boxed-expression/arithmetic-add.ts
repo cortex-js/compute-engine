@@ -20,6 +20,7 @@ import {
 } from './type-guards.js';
 import {
   isLinearAlgebraCollection,
+  couldBeNumericTuple,
   isNumericTuple,
   isTuple,
   numericTupleArity,
@@ -279,7 +280,10 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // `number`. When every operand is a tuple the widened tuple type is exact;
   // when a tuple is mixed with an unknown/scalar operand, `widen` reports the
   // honest heterogeneous type (e.g. `any`) rather than claiming `number`.
-  if (args.some((x) => isNumericTuple(x)))
+  // COULD-semantics (`couldBeNumericTuple`): a tuple whose elements type
+  // `unknown` (e.g. `(S(x,y,0), S(x,y,1))` with `S: (…) -> unknown`) is still
+  // statically a tuple, so its sums keep a tuple type too (Tycho item 30).
+  if (args.some((x) => couldBeNumericTuple(x)))
     return widen(...args.map((x) => x.type.type));
   // Element-wise sum of a single tensor (vector/matrix) with scalars keeps the
   // tensor's shape/type. The list-broadcast wrapper is skip-listed for tensor

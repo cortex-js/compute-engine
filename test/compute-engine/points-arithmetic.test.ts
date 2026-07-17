@@ -1020,3 +1020,83 @@ describe('POINT/TUPLE ARITHMETIC — gy1wdjvm2a ray-marching chain (expansion ro
     expect(r.at(1)!.json).toEqual(['Tuple', -5, -1.3]);
   });
 });
+
+describe('POINT/TUPLE ARITHMETIC — unknown-component tuples (Tycho item 30)', () => {
+  // A tuple whose components type `unknown` (calls of a `-> unknown` function,
+  // the shape a document engine's evidence-derived signatures produce) is
+  // still statically a tuple: arithmetic must keep its honest tuple type
+  // instead of collapsing to `number` and letting the `Add` scalar-plus-tuple
+  // guard bake `incompatible-type`.
+  const PAIR = String.raw`\frac{1}{n}(\lfloor nx\rfloor,\lfloor ny\rfloor)+\frac{1}{n}(S(x,y,0),S(x,y,0.5))`;
+
+  function engineWith(sig: string): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('S', sig);
+    ce.assign('n', 4);
+    return ce;
+  }
+
+  test('minimal pair parses valid with S: -> unknown (raw tuple spelling)', () => {
+    const ce = engineWith('(number, number, number) -> unknown');
+    const expr = ce.parse(PAIR);
+    expect(expr.isValid).toBe(true);
+    expect(expr.operator).toBe('Add');
+    expect(expr.type.toString()).toBe('tuple<unknown, unknown>');
+  });
+
+  test('minimal pair parses valid with S: -> unknown (PointList spelling)', () => {
+    const ce = engineWith('(number, number, number) -> unknown');
+    const expr = ce.parse(
+      String.raw`\frac{1}{n}(\lfloor nx\rfloor,\lfloor ny\rfloor)+\frac{1}{n}\operatorname{PointList}(S(x,y,0),S(x,y,0.5))`
+    );
+    expect(expr.isValid).toBe(true);
+    expect(expr.operator).toBe('Add');
+  });
+
+  test('scalar · unknown-component tuple keeps the tuple type', () => {
+    const ce = engineWith('(number, number, number) -> unknown');
+    const p = ce.parse(String.raw`\frac{1}{n}(S(x,y,0),S(x,y,0.5))`);
+    expect(p.operator).toBe('Multiply');
+    expect(p.type.toString()).toBe('tuple<unknown, unknown>');
+  });
+
+  test('scalar · PointList of unknown components multiplies (not a nested Tuple)', () => {
+    const ce = engineWith('(number, number, number) -> unknown');
+    const p = ce.parse(
+      String.raw`\frac{1}{n}\operatorname{PointList}(S(x,y,0),S(x,y,0.5))`
+    );
+    expect(p.operator).toBe('Multiply');
+    expect(p.isValid).toBe(true);
+  });
+
+  test('sum of two unknown-component tuples keeps the tuple type', () => {
+    const ce = engineWith('(number, number, number) -> unknown');
+    const s = ce.parse(String.raw`(S(x,y,0),S(x,y,0.5))+(S(x,y,1),S(x,y,2))`);
+    expect(s.isValid).toBe(true);
+    expect(s.type.toString()).toBe('tuple<unknown, unknown>');
+  });
+
+  test('unknown-component tuple + scalar stays symbolic (retractable evidence, no baked error)', () => {
+    const ce = engineWith('(number, number, number) -> unknown');
+    const s = ce.parse(String.raw`(S(x,y,0),S(x,y,0.5))+2`);
+    expect(s.isValid).toBe(true);
+    expect(s.operator).toBe('Add');
+  });
+
+  test('once S resolves to a scalar body, the pair computes component-wise', () => {
+    const ce = new ComputeEngine();
+    ce.assign('n', 4);
+    ce.parse(String.raw`S(a,b,c)\coloneq a+b+c`).evaluate();
+    ce.assign('x', 1);
+    ce.assign('y', 2);
+    const r = ce.parse(PAIR).evaluate();
+    expect(r.operator).toBe('Tuple');
+    expect(r.toString()).toBe('(7/4, 2.875)');
+  });
+
+  test('non-interference: declared heterogeneous tuple symbol still groups as Tuple', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', 'tuple<string, number>');
+    expect(ce.box(['InvisibleOperator', 2, 'h']).operator).toBe('Tuple');
+  });
+});

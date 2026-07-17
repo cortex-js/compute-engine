@@ -2627,11 +2627,17 @@ A custom compilation handler for an operator, set on an
 `OperatorDefinition`. It mirrors a built-in compiled-function handler:
 it receives the (canonical) operands, a `compile` callback to lower a
 sub-expression to target source, and the compilation `context` (branch on
-`context.language`). It returns target source, or `undefined` to fall back
-to the target's default compilation of this operator.
+`context.language`). It returns target source, or `undefined` (or `null`, or
+an empty string) to fall back to the target's default compilation of this
+operator.
 
-Takes precedence over the target's built-in mapping, so it can also override
-how a built-in operator compiles (e.g. a custom-tolerance `GCD`).
+Takes precedence over the target's built-in operator/function mapping and
+broadcast lowering, so it can override how a built-in operator compiles
+(e.g. a custom-tolerance `GCD`, or a re-mapped `Add`/`Multiply`/`Power`/
+relational operator). It does NOT override the structural / control-flow
+heads (`Sum`, `Product`, `If`, `Which`, `When`, `Match`, `Block`, `Function`,
+`Loop`, `Comprehension`, `Sequence`), which have their own bespoke lowering;
+a handler declared on one of those heads is ignored.
 
 ```ts
 ce.declare('MyGcd', {
@@ -3313,9 +3319,17 @@ optional compile?: OperatorCompileHandler;
 
 A custom compilation handler for this operator: emit target-language
 source for a call to this operator. Takes precedence over the target's
-built-in mapping (so it can override how a built-in operator compiles).
-Return `undefined` to fall back to the default compilation. See
-[OperatorCompileHandler](#operatorcompilehandler).
+built-in operator/function mapping and its broadcast lowering, so it can
+override how a built-in operator compiles (e.g. a custom-tolerance `GCD`,
+or a re-mapped `Add`/`Multiply`/`Power`/relational operator).
+
+It does NOT override the structural / control-flow heads, which have
+their own bespoke lowering: `Sum`, `Product`, `If`, `Which`, `When`,
+`Match`, `Block`, `Function`, `Loop`, `Comprehension`, `Sequence`. A
+handler declared on one of those heads is ignored.
+
+Return `undefined` (or `null`, or an empty string) to fall back to the
+default compilation. See [OperatorCompileHandler](#operatorcompilehandler).
 
 </MemberCard>
 
@@ -5527,6 +5541,31 @@ argument was found.
 ####### until?
 
 [`Terminator`](#terminator)
+
+</MemberCard>
+
+<MemberCard>
+
+##### Parser.parseBraceArguments()
+
+```ts
+parseBraceArguments(): 
+  | readonly MathJsonExpression[]
+  | null
+```
+
+Parse one or more `{...}` groups as an argument list, exactly as if
+they were a parenthesized argument list: `\gcd{a,b}` ≡ `\gcd(a,b)`,
+and consecutive groups are successive arguments (`\mod{x}{2}` ≡
+`\mod(x,2)`, the TeX multi-argument-macro habit). A group whose
+content is a comma sequence contributes each element as an argument.
+
+An empty group is not an argument (`{}` is spacing/grouping
+decoration), and no group at all returns `null`.
+
+Used as a fallback after `parseArguments('enclosure')` for
+dictionary-registered function heads, where the writer's intent is
+unambiguous even though the braces render invisibly.
 
 </MemberCard>
 

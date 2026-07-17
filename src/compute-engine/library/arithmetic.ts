@@ -156,7 +156,7 @@ import {
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { expand } from '../boxed-expression/expand.js';
 import {
-  isNumericTuple,
+  couldBeNumericTuple,
   isLinearAlgebraCollection,
   isBroadcastCollectionType,
   isPossiblyCollectionTyped,
@@ -1409,17 +1409,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (
           !ops.some((x) => isTensor(x)) &&
           ops.some((x) => isBroadcastCollectionType(x)) &&
-          ops.some((x) => isNumericTuple(x))
+          ops.some((x) => couldBeNumericTuple(x))
         )
           return broadcastResultType(
             widen(
-              ...ops.filter((x) => isNumericTuple(x)).map((x) => x.type.type)
+              ...ops.filter((x) => couldBeNumericTuple(x)).map((x) => x.type.type)
             )
           );
         // A numeric tuple (point/vector) scaled by scalars keeps the tuple
         // type. Hoisted above the NaN/finiteness early-returns (a tuple's
         // `isFinite` is `false`, which would otherwise collapse to `number`).
-        const tupleOps = ops.filter((x) => isNumericTuple(x));
+        // COULD-semantics (`couldBeNumericTuple`): a tuple with
+        // `unknown`-component elements (e.g. `(S(x,y,0), S(x,y,1))` with
+        // `S: (…) -> unknown`) is still statically a tuple — claiming `number`
+        // for its scalar product would let the enclosing `Add`'s
+        // scalar-plus-tuple guard bake `incompatible-type` (Tycho item 30).
+        const tupleOps = ops.filter((x) => couldBeNumericTuple(x));
         if (tupleOps.length === 1) return tupleOps[0].type;
         // Element-wise product of a single tensor (vector/matrix) with scalars
         // keeps the tensor's shape/type. The list-broadcast wrapper is
