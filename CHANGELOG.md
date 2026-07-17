@@ -39,6 +39,59 @@
   no Cauchy principal value is implied: a symmetric divergent integral reports
   non-convergence rather than its principal value.
 
+- **Compiled JavaScript arithmetic over a value that may be a list is now
+  correct for both outcomes.** Compiling `2h(x) - 1` where `h` may return a
+  list produced scalar code that yielded `NaN` on a list value at run time
+  (behind `success: true`). Such operands — typed `broadcastable<…>`, see New
+  Features — now compile through the runtime broadcast helper: the same
+  compiled artifact returns the scalar result for a scalar value and the
+  element-wise list for a list value, matching the interpreter. Cases the
+  helper cannot lower soundly now **fail closed** instead of emitting
+  silently-wrong scalar code: a product of two or more possibly-list operands
+  (a run-time matrix would need the matrix product, not an element-wise one),
+  `Equal`/`NotEqual` over a possibly-list operand, and — on the Python target,
+  where `*`/`+` repeat or concatenate a plain `list` — all arithmetic over
+  possibly-list operands. `compile()` reports these as compilation failures
+  (with the interpreter fallback available), rather than producing code that
+  computes the wrong value.
+
+### New Features
+
+- **New `broadcastable<T>` type: honest static typing for values that may
+  broadcast.** The engine broadcasts element-wise at run time (`2·[1,2,3]` →
+  `[2,4,6]`), and statically-visible collections have carried honest types
+  (`vector<3>`, `list<number>`) for a while — but the same arithmetic over a
+  value whose collection-ness is *not* statically visible (`2h(x,y)-1` with
+  `h` returning `unknown`) used to collapse to scalar `number`, even though
+  evaluation broadcasts if `h` returns a list. Such expressions now type
+  **`broadcastable<T>`** — "a `T`, or an indexed collection of `T`, applied
+  element-wise". The type is produced by `Add`/`Multiply` and every
+  broadcastable operator (`Sin`, `Sqrt`, `Power`, `Abs`, …) over an operand
+  whose type is a top type (an unknown-return call) or already
+  `broadcastable`; it propagates through nested arithmetic, juxtaposition
+  (`2(2h(x)-1)` is a product, not a tuple), function application, and
+  indexing (`(2h(x,y)-1)[1]` is valid, with element type `number`).
+  Subtyping: `number <: broadcastable<number>` and
+  `list<number> <: broadcastable<number>`, but `broadcastable<number>` is
+  *not* a subtype of `number` (it may be a list). The type can be used in
+  declarations (`ce.declare('b', 'broadcastable<number>')`) and signatures.
+  Bare symbols are unaffected: an undeclared `x` in `2x` still types scalar
+  (inference pending), and tuples/points still bind atomically.
+
+- **Applying a scalar function to a collection-valued expression now
+  broadcasts — for every function body.** Broadcasting a user function over a
+  literal collection (`f([1,2,3])` → `[f(1), f(2), f(3)]`) is long-standing;
+  it now also applies when the argument only *evaluates* to a collection
+  (`f(g(3))` where `g` returns a list), and for every body — previously a
+  non-arithmetic body such as `x \mapsto \operatorname{If}(x > 0, 1, -1)`
+  applied to a computed list stayed inert. The static type of such an
+  application is honest as well: `list<R>` for a visible collection argument,
+  `broadcastable<R>` for a possibly-collection argument, where `R` is the
+  function's return type (a list-returning function maps to a list of lists —
+  no flattening). Declaring a collection parameter type
+  (`(list<number>) -> …`) still binds the argument whole, and tuple arguments
+  still bind atomically.
+
 ## 0.81.0 _2026-07-16_
 
 ### New Features
