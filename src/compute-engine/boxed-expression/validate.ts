@@ -58,6 +58,25 @@ function typeCouldBeCollection(type: Type): boolean {
 // collapsed to `number` and baked `incompatible-type` (Tycho item 30).
 
 /**
+ * A `broadcastable<S>` operand COULD be a plain scalar `S` at runtime — that
+ * is the meaning of the lift (`S`, or an indexed collection of `S` that
+ * broadcasts). When the scalar base matches the parameter type, admit the
+ * operand instead of baking a type error: before the lift the same expression
+ * typed plain `S` and was admitted by the `matches(param)` check, so this
+ * exactly restores that admission (e.g. `Totient(p^e(k))` where `e(k)` is an
+ * unknown application lifts `Power` to `broadcastable<number>`, which a
+ * `number` parameter must still accept). Same COULD-semantics as
+ * `typeCouldBeNumericCollection`.
+ */
+function broadcastableBaseMatches(type: Type, param: Type): boolean {
+  if (typeof type === 'string') return false;
+  if (type.kind === 'broadcastable') return isSubtype(type.elements, param);
+  if (type.kind === 'union')
+    return type.types.some((t) => broadcastableBaseMatches(t, param));
+  return false;
+}
+
+/**
  * Check that the number of arguments is as expected.
  *
  * Converts the arguments to canonical, and flattens the sequence.
@@ -351,6 +370,9 @@ export function checkType(
 
   if (arg.type.matches(type)) return arg;
 
+  // Broadcastable operand: could be a plain scalar at runtime, admit it.
+  if (broadcastableBaseMatches(arg.type.type, type)) return arg;
+
   return ce.typeError(type, arg.type, arg);
 }
 
@@ -499,6 +521,13 @@ export function validateArguments(
       continue;
     }
 
+    // A broadcastable operand whose scalar base matches the parameter could
+    // be a plain scalar at runtime: admit it (see broadcastableBaseMatches).
+    if (broadcastableBaseMatches(op.type.type, param)) {
+      result.push(op);
+      continue;
+    }
+
     if (!op.type.matches(param)) {
       const repaired = repairFreshMatrixInference(
         ce,
@@ -574,6 +603,12 @@ export function validateArguments(
       i += 1;
       continue;
     }
+    // Broadcastable operand: could be a plain scalar at runtime, admit it.
+    if (broadcastableBaseMatches(op.type.type, param)) {
+      result.push(op);
+      i += 1;
+      continue;
+    }
     if (!op.type.matches(param)) {
       result.push(ce.typeError(param, op.type, op));
       isValid = false;
@@ -625,6 +660,11 @@ export function validateArguments(
         isSubtype(varParam, op.type.type)
       ) {
         op.infer(varParam, 'narrow');
+        result.push(op);
+        continue;
+      }
+      // Broadcastable operand: could be a plain scalar at runtime, admit it.
+      if (broadcastableBaseMatches(op.type.type, varParam)) {
         result.push(op);
         continue;
       }

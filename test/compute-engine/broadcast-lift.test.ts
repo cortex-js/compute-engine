@@ -231,3 +231,45 @@ describe('BROADCAST LIFT Phase 1 — boundaries not crossed', () => {
     expect(e.isValid).toBe(false);
   });
 });
+
+describe('BROADCAST LIFT — broadcastable operand admitted by non-threadable params', () => {
+  const ce = new ComputeEngine();
+
+  // Fungrim b9c36d: `e_(k)` is an application of an unknown symbol, so
+  // `Power(NthPrime(k), e_(k))` lifts to `broadcastable<number>`. A
+  // non-threadable `number` parameter (`Totient`) must still admit it — the
+  // operand COULD be a plain scalar at runtime, and before the lift the same
+  // expression typed plain `number` and was admitted.
+  test('Totient(NthPrime(k)^e_(k)) validates (Fungrim b9c36d)', () => {
+    const e = ce.box([
+      'Totient',
+      ['Power', ['NthPrime', 'k'], ['e_', 'k']],
+    ] as any);
+    expect(e.type.toString()).not.toBe('error');
+    expect(e.isValid).toBe(true);
+  });
+
+  test('full b9c36d formula boxes valid', () => {
+    const formula = [
+      'Equal',
+      [
+        'Totient',
+        [
+          'Product',
+          ['Power', ['NthPrime', 'k'], ['e_', 'k']],
+          ['Limits', 'k', 1, 'm'],
+        ],
+      ],
+      [
+        'Product',
+        ['Totient', ['Power', ['NthPrime', 'k'], ['e_', 'k']]],
+        ['Limits', 'k', 1, 'm'],
+      ],
+    ];
+    expect(ce.box(formula as any).isValid).toBe(true);
+  });
+
+  test('mismatched scalar base still rejects (Totient of a string)', () => {
+    expect(ce.box(['Totient', { str: 'hello' }] as any).isValid).toBe(false);
+  });
+});
