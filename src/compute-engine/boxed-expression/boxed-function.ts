@@ -28,6 +28,8 @@ import type {
 import {
   isBroadcastCollectionType,
   isFiniteIndexedCollection,
+  isNumericTuple,
+  isPossiblyCollectionTyped,
   isTuple,
   zip,
 } from '../collection-utils.js';
@@ -1425,10 +1427,26 @@ export class BoxedFunction
       // the already-evaluated `tail`, so scalar calls (`Sin(x)`) pay only a
       // cheap collection test.
       //
+      // The same post-evaluation lift also fires for a user function literal
+      // with scalar parameters (`ce.assign('k', x ↦ …)`) whose argument only
+      // EVALUATES to a finite indexed collection (e.g. `k(lst(3))`, where
+      // `lst(3)` reduces to `[3, -3]`). The pre-evaluation lambda broadcast
+      // (step 2b) misses these because the raw operand is not yet a collection;
+      // this maps ANY lambda body element-wise (not only arithmetic bodies that
+      // broadcast internally), returning a `List` — matching the
+      // `broadcastable<E>` application typing. Tuples stay atomic (`!isTuple`);
+      // a collection-typed parameter makes `paramsAreScalar` false so the
+      // argument binds whole.
+      //
+      const lambdaBroadcast =
+        def instanceof _BoxedOperatorDefinition &&
+        def._isLambda &&
+        paramsAreScalar(def);
       if (
-        def.broadcastable &&
-        this.operator !== 'Add' &&
-        this.operator !== 'Multiply' &&
+        (lambdaBroadcast ||
+          (def.broadcastable &&
+            this.operator !== 'Add' &&
+            this.operator !== 'Multiply')) &&
         !skipBroadcastForVectorOps(this.operator, false, tail) &&
         tail.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))
       ) {
@@ -1442,6 +1460,9 @@ export class BoxedFunction
               this.engine._fn(this.operator, value).evaluate(options)
             );
           }
+          // A lambda broadcast always yields a `List` (mirroring step 2b),
+          // even for a single-element collection.
+          if (lambdaBroadcast) return this.engine._fn('List', results);
           if (results.length === 1) return results[0];
           if (results.length > 0) return this.engine._fn('List', results);
         }
@@ -1605,12 +1626,19 @@ export class BoxedFunction
 
       //
       // 3b/ Broadcast over operands that only became collections after
-      // evaluation (mirrors `_computeValue` step 4b).
+      // evaluation (mirrors `_computeValue` step 4b, including the
+      // post-evaluation lambda broadcast for scalar-parameter function
+      // literals whose argument only becomes a collection after evaluation).
       //
+      const lambdaBroadcast =
+        def instanceof _BoxedOperatorDefinition &&
+        def._isLambda &&
+        paramsAreScalar(def);
       if (
-        def.broadcastable &&
-        this.operator !== 'Add' &&
-        this.operator !== 'Multiply' &&
+        (lambdaBroadcast ||
+          (def.broadcastable &&
+            this.operator !== 'Add' &&
+            this.operator !== 'Multiply')) &&
         !skipBroadcastForVectorOps(this.operator, false, tail) &&
         tail.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))
       ) {
@@ -1624,6 +1652,11 @@ export class BoxedFunction
               this.engine._fn(this.operator, value).evaluateAsync(options)
             );
           }
+          // A lambda broadcast always yields a `List` (mirroring step 2b).
+          if (lambdaBroadcast)
+            return Promise.all(results).then((resolved) =>
+              this.engine._fn('List', resolved)
+            );
           if (results.length === 1) return results[0];
           if (results.length > 0)
             return Promise.all(results).then((resolved) =>
@@ -1944,21 +1977,91 @@ function type(expr: BoxedFunction): Type {
     // typing) stay untouched via `skipBroadcastForVectorOps`.
     if (def.broadcastable) {
       const hasTensors = expr.ops.some((x) => isTensor(x));
-      if (
-        expr.ops.some(
-          (x) =>
-            (isFiniteIndexedCollection(x) && !isTuple(x)) ||
-            isBroadcastCollectionType(x)
-        ) &&
-        !skipBroadcastForVectorOps(expr.operator, hasTensors, expr.ops)
-      ) {
+      if (!skipBroadcastForVectorOps(expr.operator, hasTensors, expr.ops)) {
+        // Arm 1 (statically-visible collection) — PRIORITY. A materialized
+        // finite indexed collection, or an operand whose declared type is an
+        // unbounded list / indexed-collection, definitely produces a `List` at
+        // evaluation, so its honest type is the concrete `list<E>`.
+        //
         // The handler computed the scalar per-element result. Some handlers
         // leak the collection type (e.g. `Negate` returns `x.type`) or a
         // `scalar | list<E>` union (a naive `widen(…)` over a collection
         // operand); `broadcastElementType` unwraps both so the wrapper does not
         // nest a list or a union inside the broadcast result.
-        return broadcastResultType(broadcastElementType(sigResult));
+        if (
+          expr.ops.some(
+            (x) =>
+              (isFiniteIndexedCollection(x) && !isTuple(x)) ||
+              isBroadcastCollectionType(x)
+          )
+        )
+          return broadcastResultType(broadcastElementType(sigResult));
+
+        // Arm 2 (possibly-collection, step 2 phase C). No operand is a
+        // statically-visible collection, but some operand's collection-ness is
+        // not statically knowable — an application typed `unknown`/`any`/`value`
+        // (e.g. an undeclared `h(x)`), or an already-`broadcastable<…>` node
+        // (nested arithmetic). It might broadcast at runtime or stay scalar, so
+        // the honest result is `broadcastable<E>` (not a definite `list<E>`).
+        // `broadcastElementType(sigResult)` unwraps an already-broadcastable
+        // `sigResult` (Add/Multiply handlers compute their own broadcastable
+        // type), keeping the arm idempotent — never `broadcastable<broadcastable<…>>`.
+        if (expr.ops.some((x) => isPossiblyCollectionTyped(x)))
+          return {
+            kind: 'broadcastable',
+            elements: broadcastElementType(sigResult),
+          };
       }
+    }
+
+    // Honest typing for user function-literal broadcast (Tycho 19.2). A lambda
+    // operator definition (`ce.assign('g', x ↦ …)`) with scalar parameters:
+    //  - Applied to a statically-visible finite collection argument, the runtime
+    //    broadcasts element-wise (step 2b in `_computeValue`), producing a
+    //    `List` — so the honest type is the concrete `list<E>`, not the scalar
+    //    signature result computed above.
+    //  - Applied to a POSSIBLY-collection argument (`broadcastable<…>` or a
+    //    top-typed call, `isPossiblyCollectionTyped`), NO pre-evaluation step 2b
+    //    fires (that gate only matches statically-visible finite indexed
+    //    collections). The static type stays `broadcastable<E>` — NOT a definite
+    //    `List` — because collection-ness is not statically provable here. At
+    //    RUNTIME, however, the post-eval lambda-broadcast arm (step 4b sync /
+    //    step 3b async in `_computeValue`) maps EVERY body element-wise — not
+    //    only arithmetic bodies that broadcast internally — once the argument
+    //    evaluates to a finite indexed collection, producing a `List`. So a
+    //    non-arithmetic body (`x ↦ If(x > 0, 1, -1)`) applied to something that
+    //    evaluates to a list is now mapped, not left inert.
+    // The scalar-ness gate mirrors the runtime (declared signature authoritative
+    // via `paramsAreScalar`; tuples atomic, bound whole, never mapped). A
+    // collection-typed PARAMETER makes `paramsAreScalar` false, so a lambda that
+    // consumes a whole collection keeps its scalar result unchanged.
+    if (
+      def instanceof _BoxedOperatorDefinition &&
+      def._isLambda &&
+      paramsAreScalar(def)
+    ) {
+      // A numeric-tuple argument binds WHOLE to a scalar parameter (atomic,
+      // never mapped), then the body's own arithmetic broadcasts it
+      // element-wise (`g := x ↦ 2x`; `g((1,2))` evaluates `2·(1,2) = (2,4)`).
+      // The INFERRED scalar signature result therefore disagrees with the
+      // value, and we can't statically know the body's shape — return `any`.
+      // A DECLARED signature is authoritative (the user promised the result
+      // type), so it is left untouched below.
+      if (def.inferredSignature && expr.ops.some((x) => isNumericTuple(x)))
+        return 'any';
+      // For a lambda application the per-element result IS the signature result
+      // (`f := x ↦ [x, -x]` maps EACH element to `[x, -x]`, so the element type
+      // is `list<number>`, not its unwrapped `number`). Use `sigResult`
+      // verbatim — NOT `broadcastElementType(sigResult)`, which would unwrap a
+      // collection-valued return and mis-type `f([1, 2])` as `list<number>`
+      // instead of `list<list<number>>`.
+      if (expr.ops.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)))
+        return broadcastResultType(sigResult);
+      if (expr.ops.some((x) => isPossiblyCollectionTyped(x)))
+        return {
+          kind: 'broadcastable',
+          elements: sigResult,
+        };
     }
 
     return sigResult;
@@ -1966,8 +2069,40 @@ function type(expr: BoxedFunction): Type {
 
   // Is this a function literal?
   // e.g. f := (x) -> x + 1
-  if (expr.valueDefinition)
-    return functionResult(expr.valueDefinition.type.type) ?? 'unknown';
+  if (expr.valueDefinition) {
+    // A `:=` registration whose declared signature is preserved on the value
+    // definition (e.g. `ce.declare('f', '(number) -> number')` then assigning a
+    // matching lambda) resolves here rather than through an operator
+    // definition. Mirror the same application-site broadcast typing as the
+    // operator-def lambda path above, keeping the DECLARED signature
+    // authoritative: a collection-typed parameter binds its argument whole, so
+    // `paramsAreScalar` is false and the scalar result is preserved.
+    const sig = expr.valueDefinition.type.type;
+    const sigResult = functionResult(sig) ?? 'unknown';
+    if (paramsAreScalar(sig)) {
+      // As at the operator-def lambda site above: a numeric-tuple argument
+      // binds whole to a scalar parameter and the body broadcasts it, so an
+      // INFERRED signature result disagrees with the value — return `any`. A
+      // DECLARED signature (`inferredType` false) is authoritative and kept.
+      if (
+        expr.valueDefinition.inferredType &&
+        expr.ops.some((x) => isNumericTuple(x))
+      )
+        return 'any';
+      // The per-element result IS the signature result for a lambda application
+      // (see the operator-def lambda site above): use `sigResult` verbatim so a
+      // collection-valued return types as `list<list<…>>` rather than being
+      // flattened by `broadcastElementType`.
+      if (expr.ops.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)))
+        return broadcastResultType(sigResult);
+      if (expr.ops.some((x) => isPossiblyCollectionTyped(x)))
+        return {
+          kind: 'broadcastable',
+          elements: sigResult,
+        };
+    }
+    return sigResult;
+  }
 
   // We want to return the result of evaluating the function, so since
   // we don't know (somehow?) we return 'unknown', not 'function', which

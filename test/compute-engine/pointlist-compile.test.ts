@@ -168,7 +168,9 @@ describe('PointList compile — render-shaped case s(PointList(x,y))', () => {
     const tp = compile(ce.parse(tpBody)) as typeof pl;
     expect(pl.success).toBe(true);
     expect(tp.success).toBe(true);
-    // Byte-identical source.
+    // Byte-identical source. (A point accessor over an atomic tuple types
+    // its component `number` — see `pointComponentType` — so the body stays
+    // scalar-typed and compiles to plain scalar code, not `_SYS.bcast`.)
     expect(pl.code).toBe(tp.code);
     // Run parity + interpreter parity.
     for (const [gx, gy] of [

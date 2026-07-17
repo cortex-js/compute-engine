@@ -354,6 +354,17 @@ function isPyCollectionOperand(e: Expression): boolean {
  * here, whereas the interpreter returns `Nothing` (no numeric analogue).
  * `_op` selects the op: `'max'`→`np.maximum`, `'min'`→`np.minimum`,
  * `'clip'`→`np.clip(x, lo, hi)`.
+ *
+ * This helper is **op-name-keyed** (a fixed set of NumPy routines), not a
+ * generic scalar-closure broadcaster like the JavaScript target's `_SYS.bcast`.
+ * So it does NOT cover arithmetic (`+`/`*`/…) over a possibly-collection-typed
+ * operand (`2·h(x)` with an unknown-return `h`, or a `broadcastable<T>` symbol).
+ * Such arithmetic cannot be compiled soundly on Python: the `+`/`*` operators
+ * repeat/concatenate a plain `list` (`2 * [1, 2] → [1, 2, 1, 2]`) rather than
+ * broadcasting element-wise like the interpreter, and while a NumPy-array
+ * binding would broadcast, the artifact cannot constrain what the caller binds.
+ * `base-compiler` therefore FAILS CLOSED (D6) on that shape — the engine falls
+ * back to the interpreter — rather than emitting binding-dependent output.
  */
 const PYTHON_BCAST_HELPER = `def _ce_bcast(_op, *args):
     _arrs = [np.asarray(a) for a in args]

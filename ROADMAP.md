@@ -93,16 +93,32 @@ than ad-hoc unions propagated through every handler. Plan shape:
    lambda-return case moves to step 2. The invisible-operator
    multiply-vs-Tuple allowlist arm was pulled forward (else `2(2h(x)-1)`
    parses as `Tuple`).
-2. Library-wide type-handler sweep (every operator that assumes scalar
-   arithmetic results states its `broadcastable` behavior), signature
-   matching/inference integration. Known step-2 items from the step-1
-   review: the generic broadcast-typing wrapper
-   (`boxed-function.ts` ~1945) does not fire on broadcastable-typed
-   operands, so `Sin(2h(x)-1)` still types scalar `number`
-   (Power/Sqrt/Divide likewise); compile targets do not recognize
-   `broadcastable`-typed operands (compiled `2·h(x)` with an array-returning
-   `h` emits scalar ops — route through `_SYS.bcast` or extend the
-   fail-closed guard); and the lambda-body/return-type question above.
+2. ~~Library-wide type-handler sweep, signature matching/inference
+   integration.~~ **CORE DONE 2026-07-16** (staged): (a) the generic
+   broadcast-typing wrapper grew a second arm — every `broadcastable`
+   operator (`Sin`/`Sqrt`/`Power`/`Abs`/rounding/…) types `broadcastable<E>`
+   over a possibly-collection operand, no per-handler edits; (b) the JS
+   compile target routes `broadcastable`-typed operands through `_SYS.bcast`
+   (correct for scalar AND array runtime values; Multiply with ≥2
+   possibly-array operands fails closed — contraction vs Hadamard is
+   unprovable); GPU/interval targets keep scalar-slot compilation (the
+   load-bearing plot-body case), and point accessors over atomic tuples
+   type their component `number` so parsed plot bodies stay scalar-typed
+   (PointList↔Tuple byte-parity preserved); (c) application-site typing for
+   scalar-param lambdas mirrors the runtime broadcast — visible collection
+   arg → `list<E>`, possibly-collection arg → `broadcastable<E>` (the
+   durable Tycho 19.2 fix; tuples bind atomically, declared collection
+   params bind whole); (d) post-review hardening: JS bcast admission covers
+   bound top-typed applications, declined-bcast cases and compiled
+   `Equal`/`NotEqual` over possibly-collection operands fail closed (JS
+   D6), Python arithmetic over possibly-collection operands fails closed to
+   the interpreter (a generic Python bcast helper is the follow-up if the
+   compiled-NumPy path is ever needed); (e) USER-RATIFIED runtime change:
+   scalar-param lambdas applied to an argument that *evaluates* to a finite
+   indexed collection broadcast element-wise for ALL bodies (post-eval step
+   4b/3b arm — previously non-arithmetic bodies stayed inert). Residuals:
+   lambda BODIES over untyped params still type scalar (only applications
+   are lifted — revisit only with a param-type-driven design).
 3. Retire the point patches: validator widenings, the declared-signature
    restriction on the application broadcast gate (inferred signatures then
    participate), the lenient-`At` `restsOnUnknown`/`hasIndexableMember`

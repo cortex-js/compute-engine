@@ -10,8 +10,10 @@ import { toInteger } from '../boxed-expression/numerics.js';
 import {
   basicIndexedCollectionHandlers,
   broadcastOverIndexedCollections,
+  hasAccessibleComponents,
   isDeclaredScalarNumber,
   isFiniteIndexedCollection,
+  isPossiblyCollectionTyped,
   isTuple,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
@@ -217,8 +219,34 @@ function hasPointElementType(xs: Expression): boolean {
 // coordinates.
 function pointComponentType(xs: Expression, position: number): Type {
   const t = xs.type.type;
-  if (typeof t !== 'string' && t.kind === 'tuple')
-    return componentType(xs, position);
+  if (typeof t !== 'string' && t.kind === 'tuple') {
+    const ct = componentType(xs, position);
+    // An INFERENCE-PENDING component (`(x, y)` whose symbols get no numeric
+    // inference in tuple position types `unknown`) is a coordinate-to-be: point
+    // accessors read NUMERIC tuples, and a tuple component is atomic — never a
+    // broadcast collection. Fold `unknown` to `number` (mirroring the
+    // list-of-points fallback below) so downstream arithmetic doesn't type
+    // `broadcastable<…>` and JS-compile plot bodies through `_SYS.bcast`. An
+    // explicitly-declared `any` component is left as `any`: folding it would
+    // over-claim `number` for a `tuple<any, any>` that may hold non-numeric
+    // values.
+    if (ct === 'unknown') {
+      // Fold only inference-pending SYMBOL/literal components. When `xs` is a
+      // literal tuple expression whose component at `position` is a
+      // POSSIBLY-collection APPLICATION (`Tuple(h(1), y)` with
+      // `h: (number) -> unknown` — `h(1)` may return a list at run time), keep
+      // its honest type rather than over-claiming a scalar `number`. A symbol
+      // component (`Tuple(x, y)`) is not possibly-collection-typed, so it still
+      // folds. When `xs` is a tuple-TYPED symbol (no accessible components — the
+      // plot-body case), we can't inspect the operand, so keep the fold.
+      if (isFunction(xs) && hasAccessibleComponents(xs)) {
+        const comp = xs.ops?.[position - 1];
+        if (comp !== undefined && isPossiblyCollectionTyped(comp)) return ct;
+      }
+      return 'number';
+    }
+    return ct;
+  }
   // A list of points broadcasts. The coordinate type is not reliably
   // recoverable (a literal list of tuples is often mis-typed as `vector<n>`
   // with numeric elements), so use `number` — honest for the geometric point

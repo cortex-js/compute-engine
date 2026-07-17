@@ -222,6 +222,47 @@ describe('PYTHON TARGET', () => {
       ]);
       expect(() => python.compileLambda(block, ['x'])).toThrow(/lambda/);
     });
+
+    it('fails closed (D6) on arithmetic over a possibly-collection-typed operand', () => {
+      // Python's `*`/`+` repeat/concatenate a plain list instead of
+      // broadcasting element-wise, and the compiled artifact can't constrain
+      // the caller's binding — so arithmetic over a `broadcastable<T>` (or a
+      // top-typed call) fails closed rather than emit binding-dependent output.
+      const ce2 = new ComputeEngine();
+      ce2.declare('b', 'broadcastable<number>');
+      expect(() =>
+        python.compile(ce2.box(['Multiply', 2, 'b']))
+      ).toThrow(/Fail closed/);
+
+      const ce3 = new ComputeEngine();
+      ce3.declare('h', '(number) -> unknown');
+      expect(() =>
+        python.compile(ce3.box(['Add', ['h', 'x'], 1]))
+      ).toThrow(/Fail closed/);
+
+      // A statically-VISIBLE list-typed operand fails closed too (guard parity
+      // with the JS target): `v + 1` on a Python list binding raises TypeError
+      // (concatenation), and `2 * v` silently repeats the list.
+      const ce4 = new ComputeEngine();
+      ce4.declare('v', 'list<number>');
+      expect(() => python.compile(ce4.box(['Add', 'v', 1]))).toThrow(
+        /Fail closed/
+      );
+      expect(() => python.compile(ce4.box(['Multiply', 2, 'v']))).toThrow(
+        /Fail closed/
+      );
+    });
+
+    it('leaves scalar arithmetic and native-broadcast math functions untouched', () => {
+      // A bare unknown symbol is NOT possibly-collection-typed → plain scalar.
+      expect(python.compile(ce.box(['Add', ['Multiply', 2, 'x'], 1])).code).toBe(
+        '2 * x + 1'
+      );
+      // `Sin` lowers to `np.sin`, which broadcasts natively over a NumPy array.
+      const ce2 = new ComputeEngine();
+      ce2.declare('b', 'broadcastable<number>');
+      expect(python.compile(ce2.box(['Sin', 'b'])).code).toBe('np.sin(b)');
+    });
   });
 
   describe('Real-World Formulas', () => {

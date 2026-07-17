@@ -7,6 +7,7 @@ import { isOperatorDef } from '../boxed-expression/utils.js';
 import {
   isFiniteIndexedCollection,
   isNumericTuple,
+  isPossiblyCollectionTyped,
 } from '../collection-utils.js';
 import { collectionElementType } from '../../common/type/utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
@@ -38,6 +39,24 @@ import type {
   CompiledRunner,
   TargetSource,
 } from './types.js';
+
+/**
+ * Compile-time guard around `isPossiblyCollectionTyped`. A `broadcastable<T>`
+ * operand is an explicit declared type, reliable on any node. A top-typed
+ * APPLICATION (`unknown`/`any`/`value` call), however, is only a genuine
+ * possibly-collection signal when the node is BOUND: an UNBOUND (non-canonical,
+ * non-structural) arithmetic subexpression — e.g. the `{ canonical: false }`
+ * grouping-preservation path (P0-45), where binding is skipped — types
+ * `unknown` merely because it was never bound, not because its collection-ness
+ * is unknown. Admitting those would misroute plain scalar arithmetic through
+ * `_SYS.bcast` / the fail-closed guard, so require the application to be bound.
+ */
+function isBoundPossiblyCollectionTyped(a: Expression): boolean {
+  if (!isPossiblyCollectionTyped(a)) return false;
+  const t = a.type.type;
+  if (typeof t !== 'string' && t.kind === 'broadcastable') return true;
+  return a.isCanonical || a.isStructural;
+}
 
 /**
  * Base compiler class containing language-agnostic compilation logic
@@ -381,6 +400,14 @@ export class BaseCompiler {
     //     path, so it must fail closed).
     // The operand check is type-based (not just `isCollection`) so a symbolic
     // list *parameter* fails closed too, rather than silently emitting garbage.
+    // It also matches a possibly-collection-typed operand
+    // (`isPossiblyCollectionTyped`: a `broadcastable<T>` node or a top-typed
+    // application). After the F1 widening, most such operands compile through
+    // `_SYS.bcast` and never reach here; the residue that `tryCompileBroadcast`
+    // DECLINED — the `Multiply` ≥2-arrayish carve-out, a complex-element
+    // deferral, or a head with no function codegen — would otherwise fall
+    // through to scalar codegen and return array garbage behind `success:true`,
+    // so it must fail closed too.
     if (target.language === 'javascript') {
       const def = engine.lookupDefinition(h);
       const isBroadcastableHead =
@@ -395,7 +422,8 @@ export class BaseCompiler {
           (a) =>
             a.isCollection ||
             a.type.matches('list') ||
-            a.type.matches('indexed_collection')
+            a.type.matches('indexed_collection') ||
+            isBoundPossiblyCollectionTyped(a)
         )
       ) {
         const opMap = target.operators?.(h);
@@ -412,6 +440,49 @@ export class BaseCompiler {
             `${h}: cannot compile scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Fail closed (D6). Materialize the list with evaluate() and compile a scalar element function instead.`
           );
       }
+    }
+
+    // Python target: arithmetic over a collection-typed or possibly-collection
+    // operand (a concrete/declared `list`/`indexed_collection`, a
+    // `broadcastable<T>`, or a top-typed application such as `h(x)` — the same
+    // operand predicate as the JS D6 guard above) cannot be compiled soundly.
+    // Python's arithmetic operators do NOT broadcast a plain
+    // `list`: `2 * [1, 2]` REPEATS (`[1, 2, 1, 2]`), `[1, 2] - 1` raises — both
+    // diverge from the interpreter's element-wise result (`[2, 4]` / `[0, 1]`).
+    // A NumPy array WOULD broadcast, but the compiled artifact cannot constrain
+    // what the caller binds, so the outcome is binding-dependent. Unlike the JS
+    // target there is no `_SYS.bcast` closure path here (Python's arithmetic
+    // heads lower to infix operators, not scalar function codegen), so fail
+    // closed (D6) and let the engine fall back to the interpreter, which
+    // broadcasts correctly. Only infix-lowering arithmetic heads are affected;
+    // element-wise math functions (`Sin` → `np.sin`) broadcast natively over a
+    // NumPy array and are left untouched. Bare unknown symbols are NOT
+    // possibly-collection-typed, so plain scalar plot bodies are unaffected.
+    if (target.language === 'python') {
+      const def = engine.lookupDefinition(h);
+      const isArithmeticInfixHead =
+        BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h) ||
+        (isOperatorDef(def) &&
+          def.operator.broadcastable === true &&
+          !isRelationalOperator(h) &&
+          !BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h));
+      const opMap = target.operators?.(h);
+      const lowersToInfix =
+        opMap !== undefined && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]);
+      if (
+        isArithmeticInfixHead &&
+        lowersToInfix &&
+        args.some(
+          (a) =>
+            a.isCollection ||
+            a.type.matches('list') ||
+            a.type.matches('indexed_collection') ||
+            isBoundPossiblyCollectionTyped(a)
+        )
+      )
+        throw new Error(
+          `${h}: cannot compile arithmetic over a possibly-collection-typed operand on the Python target — Python's arithmetic operators repeat/concatenate a list instead of broadcasting element-wise, diverging from the interpreter. Fail closed (D6). Materialize the operand with evaluate() and compile a scalar element function instead.`
+        );
     }
 
     // Handle operators
@@ -856,6 +927,19 @@ export class BaseCompiler {
     if (opMap !== undefined && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]))
       return null;
 
+    // A `broadcastable<T>`-typed operand is scalar OR an indexed collection at
+    // run time (the static type of arithmetic over an unknown-return call, e.g.
+    // `2·h(x)` with `h: (number) -> unknown`). Routing it through `_SYS.bcast`
+    // is correct for BOTH runtime outcomes: `bcast` applies the scalar closure
+    // directly when no argument is an array and recurses element-wise otherwise.
+    // The array-operand admission below uses `isBoundPossiblyCollectionTyped`,
+    // which matches both the `broadcastable` kind AND a bound top-typed
+    // application (an `unknown`/`any`/`value` call whose collection-ness is
+    // unknowable); the `Multiply` ≥2-arrayish matrix-divergence carve-out uses
+    // the same predicate, so any operand whose shape is unprovable — a declared
+    // `broadcastable<…>` OR a top-typed application that could be a matrix at
+    // run time — makes the carve-out fail closed.
+
     // Mirror the interpreter's `skipBroadcastForVectorOps` carve-outs
     // (`boxed-function.ts`) for the compile target, but only where element-wise
     // broadcast would produce a *different value* than the interpreter's
@@ -895,9 +979,18 @@ export class BaseCompiler {
         isTensor(a) ||
         isNumericTuple(a) ||
         a.type.matches('list') ||
-        a.type.matches('indexed_collection');
+        a.type.matches('indexed_collection') ||
+        isBoundPossiblyCollectionTyped(a);
       const collection = args.filter(isArrayish);
       if (collection.length >= 2) {
+        // A possibly-collection operand (a declared `broadcastable<T>` OR a
+        // top-typed application such as `h(x)`) could materialize as a MATRIX at
+        // run time, where the interpreter contracts (matrix product) but
+        // `_SYS.bcast` would Hadamard. With ≥2 arrayish operands and any of them
+        // possibly-collection-typed, the shape is unprovable at compile time —
+        // fail closed to the existing scalar/fallback path so the JS D6 guard
+        // then rejects it.
+        if (collection.some(isBoundPossiblyCollectionTyped)) return null;
         const isMatrix = (a: Expression): boolean =>
           (isTensor(a) && a.shape.length >= 2) || a.type.matches('matrix');
         if (collection.some((a) => isNumericTuple(a)) || args.some(isMatrix))
@@ -914,12 +1007,16 @@ export class BaseCompiler {
     if (typeof fn !== 'function') return null;
 
     // An operand lowers to a JS array at run time when it is a concrete
-    // collection or is statically list/collection-typed (a symbolic list
-    // parameter). If none is, this is ordinary scalar code — leave it be.
+    // collection, is statically list/collection-typed (a symbolic list
+    // parameter), or is possibly-collection-typed — a `broadcastable<T>` node
+    // OR a top-typed application (`unknown`/`any`/`value` call such as `h(x)`),
+    // both scalar OR array at run time, which `_SYS.bcast` handles either way.
+    // If none is, this is ordinary scalar code — leave it be.
     const isArrayOperand = (a: Expression): boolean =>
       a.isCollection ||
       a.type.matches('list') ||
-      a.type.matches('indexed_collection');
+      a.type.matches('indexed_collection') ||
+      isBoundPossiblyCollectionTyped(a);
     if (!args.some(isArrayOperand)) return null;
 
     // Complex-valued operands need complex scalar codegen, which the bare

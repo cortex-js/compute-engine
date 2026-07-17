@@ -157,10 +157,19 @@ function compileJSEquality(
   // so the engine-level `compile()` reports `success: false` and falls back to
   // the interpreter. Uses the declared type (not `.isCollection`, which is
   // false for a `list<finite_number>` such as `Power(L, 2)`).
+  //
+  // A possibly-collection-typed operand (`isPossiblyCollectionTypedJS`: a
+  // `broadcastable<T>` node or a top-typed application such as `h(x)`) is
+  // rejected for the same reason — it may be an array at run time, where
+  // `Math.abs(array - scalar)` is NaN garbage. `broadcastable<T>` is NOT a
+  // subtype of `collection`, so it needs its own gate. A bare unknown SYMBOL is
+  // excluded by the predicate, so plot equalities (`x^2 + y^2 = 4`) still
+  // compile.
   for (const a of args)
-    if (a.type.matches('collection'))
+    if (a.type.matches('collection') || isPossiblyCollectionTypedJS(a))
       throw new Error(
-        `${kind}: cannot compile — operand is a collection-valued expression. ` +
+        `${kind}: cannot compile — operand may be a collection at run time ` +
+          `(collection-valued or possibly-collection-typed). ` +
           `Materialize the collection first. Fail closed (D6).`
       );
   const tol = args[0]?.engine?.tolerance ?? 1e-10;
@@ -204,6 +213,30 @@ function compileJSEquality(
 function isIndexedCollectionOperand(e: Expression): boolean {
   const t = e.type;
   return t.matches('list') || t.matches('indexed_collection');
+}
+
+/**
+ * Inline of `isPossiblyCollectionTyped` (collection-utils): an operand whose
+ * collection-ness is not statically visible and so may be a JS array at run
+ * time — a `broadcastable<T>` node, or a top-typed application
+ * (`unknown`/`any`/`value` call such as `h(x)`). A bare unknown SYMBOL is
+ * deliberately excluded (a free plot variable types `unknown` only until
+ * inference refines it scalar). Inlined rather than imported: importing
+ * `collection-utils` here reorders module init and breaks a runtime binding in
+ * the arithmetic broadcast path (see `isIndexedCollectionOperand`).
+ */
+function isPossiblyCollectionTypedJS(e: Expression): boolean {
+  const t = e.type.type;
+  // A top-typed APPLICATION is a genuine possibly-collection signal only when
+  // bound: an UNBOUND (non-canonical, non-structural) arithmetic subexpression
+  // (e.g. the `{ canonical: false }` grouping-preservation path) types
+  // `unknown` merely because binding was skipped, not because its
+  // collection-ness is unknown — so it must not fail closed here. A
+  // `broadcastable<T>` operand is an explicit declared type, reliable on any
+  // node.
+  if (t === 'unknown' || t === 'any' || t === 'value')
+    return isFunction(e) && (e.isCanonical || e.isStructural);
+  return typeof t !== 'string' && t.kind === 'broadcastable';
 }
 
 /**
