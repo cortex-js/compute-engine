@@ -1,3 +1,22 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **Fixed a 0.82.0 regression: an operand typed `broadcastable<T>` was rejected
+  by operators with a plain scalar parameter, baking an unrecoverable
+  `incompatible-type` error at canonicalization.** An application of an
+  _undeclared_ function symbol (`["f", "k"]`) flowing through `Add`, `Multiply`,
+  or `Power` lifts the surrounding expression to `broadcastable<number>`; a
+  non-threadable operator with a `number` parameter (`Binomial`, `Totient`, and
+  the rest of the number-theory family, among others) then rejected it — e.g.
+  `ce.box(["Binomial", ["Add", "n", ["f", "k"]], 2])` was invalid. A
+  `broadcastable<T>` operand could be a plain scalar `T` at runtime, so
+  validation now admits it whenever `T` matches the parameter, exactly
+  restoring the pre-0.82.0 admission. LaTeX input was largely unaffected
+  (undeclared `f(k)` parses as the product `f \cdot k`, and a declared function
+  types precisely); expressions built directly from MathJSON were the exposed
+  surface.
+
 ## 0.83.0 _2026-07-17_
 
 ### Breaking Changes
