@@ -65,43 +65,16 @@ const AT_SIGNATURE = parseType(
   '(value: indexed_collection | dictionary, index: (number|string|boolean|indexed_collection)+) -> unknown'
 );
 
-// Arithmetic operators over which a scalar `number` type can be *synthesized*
-// from an `unknown`-typed operand (Tycho item 19.3). `2·h(x,y)-1`, with `h`
-// declared to return `unknown`, narrows to scalar `number` even though the
-// call may resolve to a vector at runtime (Perlin/gradient-field helpers).
-const AT_NARROWING_OPERATORS = new Set([
-  'Add',
-  'Subtract',
-  'Negate',
-  'Multiply',
-  'Divide',
-  'Power',
-  'Root',
-  'Sqrt',
-  'Square',
-  'Rational',
-]);
-
-// True when `expr`'s `number` type may be an *over-narrowing*: it, or an
-// arithmetic/broadcast descendant, rests on an `unknown`-typed operand. Such a
-// base is not a provable scalar, so `At` keeps it inert and defers to runtime
-// instead of baking an `incompatible-type` error at canonicalization (short-term
-// half of Tycho item 19.3; the durable fix is a `broadcastable<T>` type). The
-// recursion descends through `AT_NARROWING_OPERATORS` arithmetic and through any
-// `broadcastable` operator (e.g. `sin`), since both synthesize a scalar `number`
-// from an operand that may resolve to a collection at runtime. A base grounded
-// purely in genuine numbers or declared scalars (e.g. `\pi`, `(5)`, `sin(3)`)
-// has no `unknown` descendant and still errors loudly.
-function restsOnUnknown(expr: Expression): boolean {
-  if (expr.type.type === 'unknown') return true;
-  if (
-    isFunction(expr) &&
-    (AT_NARROWING_OPERATORS.has(expr.operator) ||
-      expr.operatorDefinition?.broadcastable === true)
-  )
-    return (expr.ops ?? []).some(restsOnUnknown);
-  return false;
-}
+// NOTE (2026-07-17): the `restsOnUnknown` predicate and its
+// `AT_NARROWING_OPERATORS` set — the short-term half of Tycho item 19.3 —
+// were RETIRED after the `broadcastable<T>` lift landed. Arithmetic over a
+// top-typed APPLICATION (`2·h(x,y)-1`) now types `broadcastable<number>` and
+// is admitted by the At gate's direct kind arm; no constructible base still
+// types scalar `number` while resting on an `unknown` leaf (unknown SYMBOLS
+// are inferred numeric by the arithmetic itself, and non-broadcastable
+// numeric operators like `GCD` genuinely reduce — scalar is honest there).
+// The `!isDeclaredScalarNumber` arm below still covers inferred-number
+// symbols and inferred-signature calls (inference is retractable).
 
 // True when `expr`'s type is a *union* with at least one member compatible with
 // an indexable base — a broadcast-aware inference such as `finite_integer |
@@ -2303,9 +2276,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Restore the value operand when it failed only because its type is
       // retractable — the base may still resolve to a collection at runtime:
       //  - an *inferred* (not declared) scalar `number` type; or
-      //  - a scalar `number` *over-narrowed* from an `unknown`-typed operand
-      //    (e.g. `2·h(x,y)-1` with `h` returning `unknown`; see
-      //    `restsOnUnknown`); or
       //  - a *union* with an indexable member (e.g. `finite_integer |
       //    vector<3>`, or a declared `number | list<number>` return; see
       //    `hasIndexableMember`); or
@@ -2323,8 +2293,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (
         value?.isValid &&
         patched[0]?.operator === 'Error' &&
-        ((value.type.matches('number') &&
-          (!isDeclaredScalarNumber(value) || restsOnUnknown(value))) ||
+        ((value.type.matches('number') && !isDeclaredScalarNumber(value)) ||
           hasIndexableMember(value) ||
           (typeof valueType !== 'string' &&
             valueType?.kind === 'broadcastable') ||

@@ -119,10 +119,23 @@ than ad-hoc unions propagated through every handler. Plan shape:
    4b/3b arm — previously non-arithmetic bodies stayed inert). Residuals:
    lambda BODIES over untyped params still type scalar (only applications
    are lifted — revisit only with a param-type-driven design).
-3. Retire the point patches: validator widenings, the declared-signature
-   restriction on the application broadcast gate (inferred signatures then
-   participate), the lenient-`At` `restsOnUnknown`/`hasIndexableMember`
-   gates, and the 0.76 "symbolic-length broadcast typing lift" residual.
+3. ~~Retire the point patches.~~ **DISPOSITIONED 2026-07-17** (evidence-based
+   audit of all four candidates): `restsOnUnknown` + `AT_NARROWING_OPERATORS`
+   **RETIRED** (no constructible base still types scalar `number` while
+   resting on an `unknown` leaf — the kind arm admits what it used to; full
+   suite green with the removal). The rest are KEEP, not residue:
+   `typeCouldBeNumericTuple` is orthogonal tuple/point semantics
+   (broadcastable excludes tuples by design); the inferred-signature
+   validation skip protects lambda currying/partial application, and
+   retiring it gains nothing (lambdas aren't `broadcastable`, so the
+   threadable admission never fires for them); lenient-`At`'s
+   `!isDeclaredScalarNumber` + `hasIndexableMember` arms cover
+   inferred-number and declared-union shapes broadcastable never produces;
+   the "0.76 residual" machinery types statically-VISIBLE dimensionless
+   collections (`Range`) and is independent of the lift. Genuinely remaining
+   (deferred, separate items): the Phase-2 declared-type reconciliation for
+   symbolic-length ranges (`docs/plans/2026-07-11-broadcast-typing-lift-design.md`),
+   and the param-type-driven lambda-BODY typing design.
 
 Interactions to respect: non-finite typing convention, `infer(unknown)`
 destructiveness, scalar-requiring contexts (exponents, comparisons, plot

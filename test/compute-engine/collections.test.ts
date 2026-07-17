@@ -2332,11 +2332,17 @@ describe('Lambda application substitutes the element into an undetermined body',
   });
 });
 
-// Short-term half of Tycho item 19.3: arithmetic over an `unknown`-returning
-// function call narrows to scalar `number`, and `At` must NOT bake an
-// `incompatible-type` error for such an *over-narrowed* base — it stays inert
-// and defers to runtime (durable fix is a `broadcastable<T>` type). A genuinely
-// provable scalar base (`\pi`, `(5)`, `sin(3)`) must still error loudly.
+// Tycho item 19.3. Originally the short-term leniency for arithmetic over an
+// `unknown`-returning call narrowing to scalar `number`. The durable
+// `broadcastable<T>` fix has since LANDED: `2h(x,y)-1` now types
+// `broadcastable<number>`, so these bases are admitted by the At gate's
+// direct broadcastable-kind arm (collections.ts); the interim
+// `restsOnUnknown` predicate was RETIRED (2026-07-17 — no constructible base
+// still types scalar `number` while resting on an `unknown` leaf). The pins
+// below stay: they lock the end-to-end contract (inert at canonicalization,
+// resolve-or-error at evaluation), whichever gate admits the base. A
+// genuinely provable scalar base (`\pi`, `(5)`, `sin(3)`) must still error
+// loudly.
 describe('At: lenient over-narrowed base (Tycho 19.3)', () => {
   const errorCode = (expr: any): string | undefined => {
     const j = expr.json;
