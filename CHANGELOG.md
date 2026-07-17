@@ -32,6 +32,16 @@
   different expression. Evaluation semantics are unchanged (a collection body
   still reduces).
 
+- **Broadcasting over a one-element collection now returns a one-element
+  `List` instead of unwrapping to the scalar.** `\sin(2 \cdot [5])` now
+  evaluates to `[\sin(10)]`, previously the bare scalar `\sin(10)`.
+  Broadcasting a scalar function over an `n`-element indexed collection now
+  produces an `n`-element `List` for every `n ≥ 1`, matching the expression's
+  static `list<…>` type (a `vector<1>` operand no longer types `list<number>`
+  while evaluating to a scalar) and the user-function broadcast path, which
+  already returned a `List` for single-element collections. An empty
+  broadcast still evaluates to `Nothing`.
+
 ### Bug Fixes
 
 - **`Sum`/`Product` over a *computed* list-valued body now reduces instead of

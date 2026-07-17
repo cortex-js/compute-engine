@@ -65,81 +65,26 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
-### Broadcast typing lift — `broadcastable<T>` (agreed 2026-07-16)
+### Broadcast typing residue (`broadcastable<T>` lift landed 2026-07-17)
 
-Close the gap between runtime broadcasting and static typing: today
-`2·[1,2,3]` types as `vector<3>`, but the same arithmetic over an operand
-whose collection-ness is not statically visible (`2h(x,y)−1` with `h`
-returning `unknown`) collapses to scalar `number`, even though evaluation
-broadcasts. That over-narrowing is the root cause of Tycho items 19.2
-(inferred return types of broadcasting bodies are wrong) and 19.3 (arithmetic
-narrowing poisons `At` bases under structural substitution — mitigated
-short-term by the lenient-`At` change), and of the accumulated point patches
-(`typeCouldBeNumericTuple` widening, declared-signature-only broadcast gates,
-compile-target fail-closed misfires on "typed number, actually a list").
+The lift itself shipped: the `broadcastable<T>` type constructor and
+subsumption, the library-wide broadcast-typing arm, compile-target routing
+(JS `_SYS.bcast`; GPU/interval targets keep scalar-slot compilation), the
+application-site typing for scalar-param lambdas, and the point-patch
+disposition (`restsOnUnknown`/`AT_NARROWING_OPERATORS` retired; the other
+patches kept deliberately — see the design doc). Record in `CHANGELOG.md`
+and `docs/plans/2026-07-11-broadcast-typing-lift-design.md`. Genuinely
+remaining, as separate demand-gated items:
 
-**Design direction (user-ratified leaning): a first-class `broadcastable<T>`
-type constructor** — "T, or an indexed collection of T, elementwise" — rather
-than ad-hoc unions propagated through every handler. Plan shape:
-
-1. ~~Prototype on `Add`/`Multiply`/`At` only; measure snapshot/test blast
-   radius before committing to the sweep.~~ **DONE 2026-07-16** (staged):
-   type constructor + subsumption in `src/common/type/`, producers in
-   `addType`/Multiply, `At` + validator integration; full suite green, zero
-   snapshot churn. Key design outcome: the trigger is **applications-only**
-   (a bare symbol's `unknown` is inference-pending — triggering on it made
-   typing order-dependent and mis-grouped juxtapositions into `Tuple`), so
-   lambda bodies over untyped params still type scalar — the Tycho-19.2
-   lambda-return case moves to step 2. The invisible-operator
-   multiply-vs-Tuple allowlist arm was pulled forward (else `2(2h(x)-1)`
-   parses as `Tuple`).
-2. ~~Library-wide type-handler sweep, signature matching/inference
-   integration.~~ **CORE DONE 2026-07-16** (staged): (a) the generic
-   broadcast-typing wrapper grew a second arm — every `broadcastable`
-   operator (`Sin`/`Sqrt`/`Power`/`Abs`/rounding/…) types `broadcastable<E>`
-   over a possibly-collection operand, no per-handler edits; (b) the JS
-   compile target routes `broadcastable`-typed operands through `_SYS.bcast`
-   (correct for scalar AND array runtime values; Multiply with ≥2
-   possibly-array operands fails closed — contraction vs Hadamard is
-   unprovable); GPU/interval targets keep scalar-slot compilation (the
-   load-bearing plot-body case), and point accessors over atomic tuples
-   type their component `number` so parsed plot bodies stay scalar-typed
-   (PointList↔Tuple byte-parity preserved); (c) application-site typing for
-   scalar-param lambdas mirrors the runtime broadcast — visible collection
-   arg → `list<E>`, possibly-collection arg → `broadcastable<E>` (the
-   durable Tycho 19.2 fix; tuples bind atomically, declared collection
-   params bind whole); (d) post-review hardening: JS bcast admission covers
-   bound top-typed applications, declined-bcast cases and compiled
-   `Equal`/`NotEqual` over possibly-collection operands fail closed (JS
-   D6), Python arithmetic over possibly-collection operands fails closed to
-   the interpreter (a generic Python bcast helper is the follow-up if the
-   compiled-NumPy path is ever needed); (e) USER-RATIFIED runtime change:
-   scalar-param lambdas applied to an argument that *evaluates* to a finite
-   indexed collection broadcast element-wise for ALL bodies (post-eval step
-   4b/3b arm — previously non-arithmetic bodies stayed inert). Residuals:
-   lambda BODIES over untyped params still type scalar (only applications
-   are lifted — revisit only with a param-type-driven design).
-3. ~~Retire the point patches.~~ **DISPOSITIONED 2026-07-17** (evidence-based
-   audit of all four candidates): `restsOnUnknown` + `AT_NARROWING_OPERATORS`
-   **RETIRED** (no constructible base still types scalar `number` while
-   resting on an `unknown` leaf — the kind arm admits what it used to; full
-   suite green with the removal). The rest are KEEP, not residue:
-   `typeCouldBeNumericTuple` is orthogonal tuple/point semantics
-   (broadcastable excludes tuples by design); the inferred-signature
-   validation skip protects lambda currying/partial application, and
-   retiring it gains nothing (lambdas aren't `broadcastable`, so the
-   threadable admission never fires for them); lenient-`At`'s
-   `!isDeclaredScalarNumber` + `hasIndexableMember` arms cover
-   inferred-number and declared-union shapes broadcastable never produces;
-   the "0.76 residual" machinery types statically-VISIBLE dimensionless
-   collections (`Range`) and is independent of the lift. Genuinely remaining
-   (deferred, separate items): the Phase-2 declared-type reconciliation for
-   symbolic-length ranges (`docs/plans/2026-07-11-broadcast-typing-lift-design.md`),
-   and the param-type-driven lambda-BODY typing design.
+- **Phase-2 declared-type reconciliation** for symbolic-length ranges (see
+  the design doc).
+- **Param-type-driven lambda-body typing:** lambda BODIES over untyped
+  params still type scalar — only applications are lifted; revisit only
+  with a param-type-driven design.
 
 Interactions to respect: non-finite typing convention, `infer(unknown)`
 destructiveness, scalar-requiring contexts (exponents, comparisons, plot
-coordinates). Supersedes Tycho 19.2 and the durable half of 19.3.
+coordinates).
 
 ### Decide the `At` default-serialization round-trip contract
 
