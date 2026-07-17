@@ -2,137 +2,180 @@
 
 ### New Features
 
-- **New `PointList` operator (the Desmos point-list surface form).**
-  `PointList` is the explicit, importer-emitted operator that zips a
-  point-with-collection into a list of points: `PointList(-6, n)` with `n` a
-  21-element list evaluates to the 21-element list of points, while
-  `PointList(1, 2)` is just a plain point. Zip-to-shortest for multiple list
-  components; scalars broadcast; an empty component yields an empty list; an
-  infinite or unknown-length component fails closed (stays inert, no hang). It
-  round-trips through LaTeX as `\operatorname{PointList}(…)`. A plain `Tuple`
-  now stays inert data — it never transposes — so tuples used as data are
-  genuinely unaffected; tuple-with-collection arithmetic still scales
-  component-wise, with no baked `incompatible-type` error, so a definition such
-  as `m(P) \coloneq P + s(P)\cdot(1, 0.3n)` stays valid. (An earlier,
-  evaluate-time `Tuple`-transpose of this idiom was replaced by the explicit
-  `PointList` operator before it ever shipped in a release.)
+- **New `PointList` operator (the point-list surface form).** `PointList` is the
+  explicit, importer-emitted operator that zips a point-with-collection into a
+  list of points: `PointList(-6, n)` with `n` a 21-element list evaluates to the
+  21-element list of points, while `PointList(1, 2)` is just a plain point.
+  Zip-to-shortest for multiple list components; scalars broadcast; an empty
+  component yields an empty list; an infinite or unknown-length component fails
+  closed (stays inert, no hang). It round-trips through LaTeX as
+  `\operatorname{PointList}(…)`. A plain `Tuple` now stays inert data — it never
+  transposes — so tuples used as data are genuinely unaffected;
+  tuple-with-collection arithmetic still scales component-wise, with no baked
+  `incompatible-type` error, so a definition such as
+  `m(P) \coloneq P + s(P)\cdot(1, 0.3n)` stays valid. (An earlier, evaluate-time
+  `Tuple`-transpose of this idiom was replaced by the explicit `PointList`
+  operator before it ever shipped in a release.)
+- **`PointList` compiles on the `javascript`, `glsl`, and `wgsl` targets.** With
+  all-scalar components (including free plot variables), it emits
+  byte-identically to the equivalent `Tuple` (`[x, y]` / `vec2(x, y)` /
+  `vec2f(x, y)`), so point literals rewritten to `PointList` stay on the
+  compiled path (GPU grids, per-pixel bodies). Provably non-scalar components
+  (collection- or tuple-typed, or a union with a collection member) fail closed
+  to the interpreter, as does the `interval-js` target (where `Tuple` itself has
+  no lowering).
+- **`At` defers a possibly-collection base to runtime instead of baking a type
+  error.** Indexing an expression whose type was over-narrowed to a scalar by
+  arithmetic over an unresolved operand (`(2h(x,y)-1)[1]` with `h` returning
+  `unknown`), or whose type is a union with an indexable member
+  (`number | list<number>`), now stays symbolic and indexes once the base
+  resolves to a collection — enabling structural substitution over vector-valued
+  helper functions. Provably scalar bases (`(5)[1]`, `\pi[1]`, `\sin(3)[1]`)
+  still report `incompatible-type` at canonicalization, and a base that turns
+  out scalar at runtime errors at evaluation.
+- **Pipeline contract test suite.**
+  `test/compute-engine/pipeline-contracts.test.ts` pins the guarantees for
+  MathJSON-carrying pipelines: non-canonical `box(json).json` structural
+  fidelity (with its documented normalizations), non-canonical `.latex`
+  round-trip (with its three documented exception classes),
+  transform-then-canonicalize-once equivalence, cached-boxed re-binding rules,
+  compile-from-boxed parity, and the non-canonical shape vocabulary. Breaking a
+  test in this suite requires a CHANGELOG callout.
 
 ### Breaking Changes
 
 - **`Partition(xs, n)` now returns chunks of size `n`, not `n` groups.**
-  `Partition([1, 2, 3, 4, 5], 2)` now evaluates to
-  `[[1, 2], [3, 4], [5]]` (chunks of 2, trailing chunk short) instead of
-  splitting the collection into 2 nearly equal groups. **To split into a given
-  _number_ of groups, use [`Chunk`](/compute-engine/reference/collections/#chunk)
-  instead** (`Chunk([1, 2, 3, 4, 5], 2)` → `[[1, 2, 3], [4, 5]]`). A new
-  sliding-window form `Partition(xs, size, step)` returns the complete windows
-  of `size` elements whose starting positions are `step` apart
-  (`Partition([1, 2, 3, 4, 5], 2, 1)` →
-  `[[1, 2], [2, 3], [3, 4], [4, 5]]`). The predicate form
-  `Partition(xs, predicate)` (split into matching / non-matching groups) is
-  unchanged.
+  `Partition([1, 2, 3, 4, 5], 2)` now evaluates to `[[1, 2], [3, 4], [5]]`
+  (chunks of 2, trailing chunk short) instead of splitting the collection into 2
+  nearly equal groups. **To split into a given _number_ of groups, use
+  [`Chunk`](/compute-engine/reference/collections/#chunk) instead**
+  (`Chunk([1, 2, 3, 4, 5], 2)` → `[[1, 2, 3], [4, 5]]`). A new sliding-window
+  form `Partition(xs, size, step)` returns the complete windows of `size`
+  elements whose starting positions are `step` apart
+  (`Partition([1, 2, 3, 4, 5], 2, 1)` → `[[1, 2], [2, 3], [3, 4], [4, 5]]`). The
+  predicate form `Partition(xs, predicate)` (split into matching / non-matching
+  groups) is unchanged.
 
 ### Bug Fixes
 
+- **The two declare forms are equivalent under declare-then-assign.** Declaring
+  a function head with the object form (`ce.declare('f', {signature: …})`) and
+  then assigning a function literal (`f(x) \coloneq …` or `ce.assign`) silently
+  discarded the declared signature — a scalar call to a tuple-typed parameter
+  stopped type-erroring — while the string form (`ce.declare('f', '(…) -> …')`)
+  preserved it. The object form now runs the same reconciliation: the declared
+  signature is authoritative, arity mismatches error clearly, and the stored
+  definition is identical to the string form's.
+- **Juxtaposition with a `value`-typed symbol is multiplication again.** A
+  symbol inferred or declared with the wide `value` type (e.g. any bare symbol
+  that had passed through `Max`/`Min`-style `(value*)` signatures on the same
+  engine) made subsequent parses of `2x` silently produce `Tuple(2, x)` instead
+  of `Multiply(2, x)` — an order-dependent wrong-parse present in released
+  versions, affecting any warm engine. A wide type is not evidence of
+  point-ness; the juxtaposition gate now treats `value` like `unknown` and
+  multiplies. Locked by warm-engine order-independence tests in the
+  pipeline-contract suite.
+- **`\operatorname{sin}` (and every lowercase spelled-out native function name)
+  now binds as a function call.** `\operatorname{sin}(x)^{2}` parsed as the
+  unknown symbol `sin` times `x^2` with `isValid: true` — silent wrong math; it
+  now parses to `\sin(x)^2` with call-binding identical to the native command
+  (prefix minus after the call, postfix power on the result, `^{-1}` inverse,
+  base subscripts). Covers the trig/hyperbolic/inverse families,
+  `ln`/`log`/`lg`/`lb`, and `arg`; bare identifiers (`sin` without
+  `\operatorname`) are unchanged.
 - **A `{…}` group after a function is now its argument list.** For a
-  dictionary-registered function that takes parenthesized arguments, a
-  brace group is accepted exactly as if it were `(...)`: `\gcd{a}` →
-  `GCD(a)`, `\gcd{2,4}` → `GCD(2, 4)`, `\operatorname{floor}{2.5}` →
-  `Floor(2.5)`, and consecutive groups are successive arguments
-  (`\mod{x}{2}` → `Mod(x, 2)`, the TeX multi-argument-macro habit).
-  Previously the function parsed as a bare symbol and the group multiplied
-  against it — silently wrong (`\gcd{a}` was `GCD · a`). Commands with
-  implicit (unparenthesized) arguments keep the transparent-grouping
-  convention — braces render invisibly, so the argument reads the way the
-  rendered formula does: `\sin{x}y` is `Sin(x·y)` and `\sin{x}^2` is
-  `Sin(x²)`, matching `\sin x y` and `\sin x^2`. A brace group after a
-  generic declared or unknown name (`f{x}`) keeps its juxtaposition
+  dictionary-registered function that takes parenthesized arguments, a brace
+  group is accepted exactly as if it were `(...)`: `\gcd{a}` → `GCD(a)`,
+  `\gcd{2,4}` → `GCD(2, 4)`, `\operatorname{floor}{2.5}` → `Floor(2.5)`, and
+  consecutive groups are successive arguments (`\mod{x}{2}` → `Mod(x, 2)`, the
+  TeX multi-argument-macro habit). Previously the function parsed as a bare
+  symbol and the group multiplied against it — silently wrong (`\gcd{a}` was
+  `GCD · a`). Commands with implicit (unparenthesized) arguments keep the
+  transparent-grouping convention — braces render invisibly, so the argument
+  reads the way the rendered formula does: `\sin{x}y` is `Sin(x·y)` and
+  `\sin{x}^2` is `Sin(x²)`, matching `\sin x y` and `\sin x^2`. A brace group
+  after a generic declared or unknown name (`f{x}`) keeps its juxtaposition
   (multiply) reading.
 - **Function-style `\operatorname{…}` aliases now bind their call like
-  natively-spelled functions.** The parse-only aliases
-  (`\operatorname{mod}`, `var`, `cov`, `corr`, `count`, `length`, `nCr`,
-  `random`, `shuffle`, `repeat`, `join`, `range`, `histogram`, `pdf`, `cdf`)
-  parsed as a bare symbol, so a prefix minus captured the function symbol
-  itself (`-\operatorname{mod}(x,1)` → loud `incompatible-type` error) and a
-  postfix power stole the argument group
-  (`\operatorname{mod}(-x,1)^{2}` parsed **silently** as
-  `Mod · ((−x,1))²`, evaluating to NaN). They are now function-kind
-  dictionary entries: the call binds before prefix minus, and a postfix
-  power applies to the call result
+  natively-spelled functions.** The parse-only aliases (`\operatorname{mod}`,
+  `var`, `cov`, `corr`, `count`, `length`, `nCr`, `random`, `shuffle`, `repeat`,
+  `join`, `range`, `histogram`, `pdf`, `cdf`) parsed as a bare symbol, so a
+  prefix minus captured the function symbol itself (`-\operatorname{mod}(x,1)` →
+  loud `incompatible-type` error) and a postfix power stole the argument group
+  (`\operatorname{mod}(-x,1)^{2}` parsed **silently** as `Mod · ((−x,1))²`,
+  evaluating to NaN). They are now function-kind dictionary entries: the call
+  binds before prefix minus, and a postfix power applies to the call result
   (`\operatorname{mod}(-x,1)^{2}` → `Power(Mod(-x,1), 2)`).
-- **`target.compile()` can return a failure instead of throwing.** A
-  fail-closed compile error (e.g. `At` on a non-indexed base) always threw
-  out of a compilation target's `compile()`; passing the new
-  `{ fallback: true }` option returns the documented
-  `{ success: false, error, run }` shape instead, with `run` falling back to
-  the interpreter — matching the engine-level `compile()` contract. The
-  default remains throwing, so existing callers are unaffected.
+- **`target.compile()` can return a failure instead of throwing.** A fail-closed
+  compile error (e.g. `At` on a non-indexed base) always threw out of a
+  compilation target's `compile()`; passing the new `{ fallback: true }` option
+  returns the documented `{ success: false, error, run }` shape instead, with
+  `run` falling back to the interpreter — matching the engine-level `compile()`
+  contract. The default remains throwing, so existing callers are unaffected.
 - **An over-arity function literal is rejected at registration.** Assigning
-  `f(x, y) \coloneq x + y` to a name declared `(number) -> number` was
-  silently accepted, and `f(3)` then silently partial-applied; it now reports
-  a clear error naming the literal's arity and the declared maximum. (The
-  declared signature was already authoritative for types; this closes the
-  arity gap.)
-- **Applying a function whose body stays partially symbolic no longer loses
-  the argument.** When a lambda body could not fully evaluate (e.g. a
-  `Which`/`If` guard over an undetermined symbol), the application returned
-  the body inert with the parameter unsubstituted — so `Map([1,2,3],
-  k \mapsto \operatorname{Which}(k = m, 10^9, k))` yielded three identical
-  copies of the raw body with `k` leaked free and the elements gone. The
-  parameter's value is now substituted into the held result, fixing `Map`,
+  `f(x, y) \coloneq x + y` to a name declared `(number) -> number` was silently
+  accepted, and `f(3)` then silently partial-applied; it now reports a clear
+  error naming the literal's arity and the declared maximum. (The declared
+  signature was already authoritative for types; this closes the arity gap.)
+- **Applying a function whose body stays partially symbolic no longer loses the
+  argument.** When a lambda body could not fully evaluate (e.g. a `Which`/`If`
+  guard over an undetermined symbol), the application returned the body inert
+  with the parameter unsubstituted — so
+  `Map([1,2,3], k \mapsto \operatorname{Which}(k = m, 10^9, k))` yielded three
+  identical copies of the raw body with `k` leaked free and the elements gone.
+  The parameter's value is now substituted into the held result, fixing `Map`,
   `Filter`, `Tabulate`, `Zip`-with-function, and direct `Apply` in one place.
 - **Lazy collections serialize faithfully.** `.latex` of a canonical `Map`,
-  `Filter`, `Zip`, `Tabulate`, `Range`, `Linspace`, or `Comprehension` no
-  longer materializes an elided or value-baked preview (which could re-parse
-  to a corrupt expression — a `Map` over a bound symbol serialized as N
-  copies of its raw lambda body); each now emits its operator form, which
-  re-parses to the identical expression. `toString()` still shows the
-  materialized preview for display.
+  `Filter`, `Zip`, `Tabulate`, `Range`, `Linspace`, or `Comprehension` no longer
+  materializes an elided or value-baked preview (which could re-parse to a
+  corrupt expression — a `Map` over a bound symbol serialized as N copies of its
+  raw lambda body); each now emits its operator form, which re-parses to the
+  identical expression. `toString()` still shows the materialized preview for
+  display.
 - **Negative indexing on a lazy `Take` was off by one.** `Take(xs, n).at(-1)`
   returned the second-to-last element of the taken prefix (`at(-1)` on
   `Take([10, 20, 30], 2)` was `10` instead of `20`).
 - **The display preview of a lazy `Take` sampled the wrong tail.** Displaying
-  `Take(xs, 50)` over a lazily-enumerated source showed the *source's* last
+  `Take(xs, 50)` over a lazily-enumerated source showed the _source's_ last
   elements (`[1, 2, …, 98, 99]`) instead of the taken prefix's
   (`[1, 2, …, 49, 50]`): the operands were materialized to their own display
   preview — continuation placeholder included — before `Take` consumed them.
-- **A boolean `Sort` comparator now orders instead of silently doing
-  nothing.** A comparator returning `True`/`False` (e.g.
-  `(a, b) -> a > b`) never reordered — only signed-number comparators
-  worked. Boolean comparators are now interpreted Elixir-style: `True` means
-  the first argument sorts first, so `(a, b) -> a > b` sorts descending.
-- **A mistyped `GroupBy` key function is now reported.** `GroupBy(xs, Even)`
-  (an unknown symbol auto-declared by its own use) silently placed every
-  element in its own garbage group keyed `"Even(1)"`, `"Even(2)"`, …; it now
-  throws with a spell-check suggestion, like `Filter` and `Partition` do for
-  broken predicates. Grouping by explicitly declared symbolic functions is
-  unaffected.
+- **A boolean `Sort` comparator now orders instead of silently doing nothing.**
+  A comparator returning `True`/`False` (e.g. `(a, b) -> a > b`) never reordered
+  — only signed-number comparators worked. Boolean comparators are now
+  interpreted Elixir-style: `True` means the first argument sorts first, so
+  `(a, b) -> a > b` sorts descending.
+- **A mistyped `GroupBy` key function is now reported.** `GroupBy(xs, Even)` (an
+  unknown symbol auto-declared by its own use) silently placed every element in
+  its own garbage group keyed `"Even(1)"`, `"Even(2)"`, …; it now throws with a
+  spell-check suggestion, like `Filter` and `Partition` do for broken
+  predicates. Grouping by explicitly declared symbolic functions is unaffected.
 - **The optimization form of `ArgMax`/`ArgMin` canonicalizes its function
-  operand again.** `ArgMin(f, RealNumbers)` (the "locations of the minimum
-  over a domain" form, used by the identities library) short-circuited
-  canonicalization, leaving the function literal in a non-canonical shape
-  that no longer matched the identities library's stored rewrite patterns.
-  The form remains inert under evaluation; the collection form
-  (`ArgMin([3, 1, 2])` → `2`) is unchanged.
+  operand again.** `ArgMin(f, RealNumbers)` (the "locations of the minimum over
+  a domain" form, used by the identities library) short-circuited
+  canonicalization, leaving the function literal in a non-canonical shape that
+  no longer matched the identities library's stored rewrite patterns. The form
+  remains inert under evaluation; the collection form (`ArgMin([3, 1, 2])` →
+  `2`) is unchanged.
 - **A canonical `Comprehension` now serializes to LaTeX that round-trips.** Its
-  `.latex` was an elided display preview (`\lbrack 1, 4, 9, \dots,
-  62\,500\rbrack`) that silently re-parsed to a corrupt 11-element `List`
-  containing a literal `\dots`; it now serializes through the faithful
-  `body \operatorname{for} var = domain` form, which re-parses to the identical
-  comprehension (including tuple bodies, dependent domains, and infinite
-  domains).
+  `.latex` was an elided display preview
+  (`\lbrack 1, 4, 9, \dots, 62\,500\rbrack`) that silently re-parsed to a
+  corrupt 11-element `List` containing a literal `\dots`; it now serializes
+  through the faithful `body \operatorname{for} var = domain` form, which
+  re-parses to the identical comprehension (including tuple bodies, dependent
+  domains, and infinite domains).
 - **Lazy `Comprehension` elements are memoized.** `.at(n)` re-walked the domain
   on every call and each `.each()` recomputed from scratch, making repeated
-  indexed access quadratic (`at(100)`×100 on a 200-element comprehension:
-  ~5 s → ~23 ms; a repeat `.each()` walk: ~110 ms → ~0.2 ms). The prefix cache
-  is generation-stamped, so reassigning a free variable the body depends on
+  indexed access quadratic (`at(100)`×100 on a 200-element comprehension: ~5 s →
+  ~23 ms; a repeat `.each()` walk: ~110 ms → ~0.2 ms). The prefix cache is
+  generation-stamped, so reassigning a free variable the body depends on
   invalidates it, and it is capped (100k elements) beyond which access streams
   as before.
 - **A broadcast condition no longer crashes `Which`/`If`.** A condition that
-  evaluates to a collection of booleans (e.g. a piecewise guard over a
-  broadcast function application inside a comprehension) threw
-  `Condition must evaluate to "True" or "False"`; it now stays symbolic
-  (held), letting the surrounding expression evaluate.
+  evaluates to a collection of booleans (e.g. a piecewise guard over a broadcast
+  function application inside a comprehension) threw
+  `Condition must evaluate to "True" or "False"`; it now stays symbolic (held),
+  letting the surrounding expression evaluate.
 
 Fixes from a review of the 0.78.0–0.80.0 changes:
 
@@ -143,27 +186,28 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
   `60`), and a collection argument (`GCD([12, 18])`) compiled to `NaN`. All
   forms now fold pairwise and match the interpreter; collection operands whose
   elements can't be enumerated at run time fail closed to the interpreter.
-- **A user-defined function sharing its name with a loop index hijacked
-  compiled `Sum`/`Product`.** With `f(x) := x^2` declared, compiling
-  `\sum_{f=1}^{3} f` emitted references to the function instead of the loop
-  index (returning garbage with `success: true`; a null interval on
-  `interval-js`). Bound names are now tracked explicitly through every binding
-  form instead of being inferred from resolved code.
+- **A user-defined function sharing its name with a loop index hijacked compiled
+  `Sum`/`Product`.** With `f(x) := x^2` declared, compiling `\sum_{f=1}^{3} f`
+  emitted references to the function instead of the loop index (returning
+  garbage with `success: true`; a null interval on `interval-js`). Bound names
+  are now tracked explicitly through every binding form instead of being
+  inferred from resolved code.
 - **Adaptive quadrature no longer poisoned by a `NaN` sample.** A single
   integrand `NaN` at a quadrature node (e.g. the removable singularity of
-  `\sin(x)/x` at the midpoint of a symmetric interval) permanently corrupted
-  the convergence accumulators, silently falling back to slow, nondeterministic
+  `\sin(x)/x` at the midpoint of a symmetric interval) permanently corrupted the
+  convergence accumulators, silently falling back to slow, nondeterministic
   Monte Carlo. Non-finite panels are now excluded until subdivided away:
-  `\int_{-1}^{1} \sin(x)/x \, dx` converges to `2\,\mathrm{Si}(1)`. Also,
-  `.N()` on an integral without a closed form now uses adaptive Gauss–Kronrod
-  before falling back to Monte Carlo, matching the compiled path's accuracy.
+  `\int_{-1}^{1} \sin(x)/x \, dx` converges to `2\,\mathrm{Si}(1)`. Also, `.N()`
+  on an integral without a closed form now uses adaptive Gauss–Kronrod before
+  falling back to Monte Carlo, matching the compiled path's accuracy.
 - **Comprehension iteration state was shared across traversals.** Two
   interleaved iterators over the same comprehension (or reading `.count`
   mid-iteration on a dependent comprehension) corrupted each other's index
-  variables, yielding wrong elements. Each traversal now gets its own scope,
-  and a function literal produced by a comprehension body now captures the
-  per-iteration value of the loop variable (`[x \mapsto x + i \text{ for } i
-  \in 1..3]` applied to 10 gives `11, 12, 13`, not `13, 13, 13`).
+  variables, yielding wrong elements. Each traversal now gets its own scope, and
+  a function literal produced by a comprehension body now captures the
+  per-iteration value of the loop variable
+  (`[x \mapsto x + i \text{ for } i \in 1..3]` applied to 10 gives `11, 12, 13`,
+  not `13, 13, 13`).
 - **GPU `gcd` regressed on large integers.** The tolerant float loop shipped in
   0.80.0 dropped the exact-integer path on `glsl`/`wgsl`: `gcd(4000000, 2)`
   returned `4000000`. Exact Euclid is restored for integer inputs within f32
@@ -172,59 +216,59 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
   `gcd ≤ min` / `lcm ≥ max` (`\gcd(2.5, 10^{21})` → `10^{21}`); zero-argument
   `GCD()`/`LCM()` crashed (now the identities `0`/`1`); nested collections now
   fold in a single evaluation.
-- **`Max`/`Min` absorb `NaN` found inside collections**: `Max([1, NaN, 3])`
-  now returns `NaN`, consistent with `Max(NaN, 5)` and with compiled code.
+- **`Max`/`Min` absorb `NaN` found inside collections**: `Max([1, NaN, 3])` now
+  returns `NaN`, consistent with `Max(NaN, 5)` and with compiled code.
 - **`IndexOf` on infinite lazy collections hung indefinitely**, ignoring
   `ce.timeLimit`. The search now streams (linear instead of quadratic on lazy
   collections) with deadline checkpoints. Compiled `IndexOf` also now uses the
   interpreter's tolerance-aware comparison instead of strict `===`.
-- **Sequence interpretation (`Interpret`) regressions.** The 0.79.0 anchor-search
-  optimization rejected legitimate non-monotonic polynomial sums (e.g.
-  `100 + 164 + 198 + 208 + \dots + 308`, which is `\sum_{k=1}^{14}
-  k^3-21k^2+120k`) and then ground for hours in an exact-rational recurrence
-  search that ignored `ce.timeLimit`. The break heuristic now requires a
-  sustained divergence streak, and the recurrence search honors the deadline.
+- **Sequence interpretation (`Interpret`) regressions.** The 0.79.0
+  anchor-search optimization rejected legitimate non-monotonic polynomial sums
+  (e.g. `100 + 164 + 198 + 208 + \dots + 308`, which is
+  `\sum_{k=1}^{14} k^3-21k^2+120k`) and then ground for hours in an
+  exact-rational recurrence search that ignored `ce.timeLimit`. The break
+  heuristic now requires a sustained divergence streak, and the recurrence
+  search honors the deadline.
 - **Parse-diagnostics false positives.** `f(x) \coloneq x^2` no longer emits
-  `juxtaposition-as-multiply`/`undeclared-symbol` for the definition's own
-  head, and symbols declared through the `getSymbolType` handler are no longer
+  `juxtaposition-as-multiply`/`undeclared-symbol` for the definition's own head,
+  and symbols declared through the `getSymbolType` handler are no longer
   reported as undeclared.
 - **Custom `compile` handler contract.** The handler now genuinely takes
   precedence over built-in operator mappings (e.g. `Add`) as documented
   (control-flow heads remain non-overridable, now stated explicitly), and
   `analyzeReferences` no longer reports custom-compiled operators as
   `unsupported`.
-- **Assorted**: applying a non-numeric symbol to a collection
-  (`t(\{1,2\})` with `t` a string) reports an application type error again
-  instead of a confusing `Multiply` error; `PointX`/`PointY` work on `Set`s of
-  points (previously returned `[]`); a provider timeout inside `Integrate` is
-  re-thrown instead of swallowed; `\operatorname{erf}` at a directionless
-  complex infinity stays symbolic instead of saturating to `1`; compiled
-  `Map`/`Filter` no longer leak JavaScript's 0-based callback index into
-  two-parameter lambdas.
+- **Assorted**: applying a non-numeric symbol to a collection (`t(\{1,2\})` with
+  `t` a string) reports an application type error again instead of a confusing
+  `Multiply` error; `PointX`/`PointY` work on `Set`s of points (previously
+  returned `[]`); a provider timeout inside `Integrate` is re-thrown instead of
+  swallowed; `\operatorname{erf}` at a directionless complex infinity stays
+  symbolic instead of saturating to `1`; compiled `Map`/`Filter` no longer leak
+  JavaScript's 0-based callback index into two-parameter lambdas.
 - **Long flat operator chains no longer overflow the parser stack.** A flat
-  chain of a same-precedence associative operator (`1+1+\dots`, `a\times
-  b\times\dots`, chained `<`) recursed one parselet frame per term and
+  chain of a same-precedence associative operator (`1+1+\dots`,
+  `a\times b\times\dots`, chained `<`) recursed one parselet frame per term and
   overflowed at ~1,300 terms; same-precedence continuations now iterate in the
   parser's infix loop (a 20,000-term sum parses; same-operator chains produce
-  the same flattened n-ary trees as before). One deliberate tree change:
-  *mixed* same-precedence operators now group left-to-right — the
-  conventional reading — where they previously nested rightward as an
-  artifact of the recursion (`a\times b\otimes c` now parses as
-  `CircleTimes(Multiply(a,b), c)`, not `Multiply(a, CircleTimes(b,c))`).
-  Right-associative chains (`a=b=c`) still nest by construction.
+  the same flattened n-ary trees as before). One deliberate tree change: _mixed_
+  same-precedence operators now group left-to-right — the conventional reading —
+  where they previously nested rightward as an artifact of the recursion
+  (`a\times b\otimes c` now parses as `CircleTimes(Multiply(a,b), c)`, not
+  `Multiply(a, CircleTimes(b,c))`). Right-associative chains (`a=b=c`) still
+  nest by construction.
 - **Only binary arithmetic operator symbols lower to first-class combiners.**
   Passing a unary or relational operator symbol where a function is expected
-  (`Reduce([1,2,3], Negate, 0)`, `Map(xs, Negate)`, `Filter(xs, Less)`)
-  compiled to a wrong binary infix lambda (`Negate` folded like `Subtract`,
-  returning `-6` behind `success: true`). Non-arithmetic operator symbols and
-  combiners of the wrong arity now fail closed to the interpreter. Also:
-  compiled `Reduce` over an empty collection without an initial value returns
-  `NaN` instead of throwing, and `Tabulate` with a statically non-positive
-  dimension fails closed instead of returning `[]`.
+  (`Reduce([1,2,3], Negate, 0)`, `Map(xs, Negate)`, `Filter(xs, Less)`) compiled
+  to a wrong binary infix lambda (`Negate` folded like `Subtract`, returning
+  `-6` behind `success: true`). Non-arithmetic operator symbols and combiners of
+  the wrong arity now fail closed to the interpreter. Also: compiled `Reduce`
+  over an empty collection without an initial value returns `NaN` instead of
+  throwing, and `Tabulate` with a statically non-positive dimension fails closed
+  instead of returning `[]`.
 - **`Flatten` with no depth now fully flattens ragged lists.**
   `Flatten([[1,x],[2]])` was a no-op (only uniform tensors flattened), which
-  became visibly inconsistent once `Flatten(expr, depth)` shipped; the
-  default now flattens completely, per the documented (Wolfram) semantics.
+  became visibly inconsistent once `Flatten(expr, depth)` shipped; the default
+  now flattens completely, per the documented (Wolfram) semantics.
 - **`Scan` no longer silently drops an invalid initial value** — the error is
   surfaced instead of computing the unseeded scan.
 - **`ElementMax`/`ElementMin`/`Clamp` on the `python` target now match the
@@ -251,13 +295,13 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
     short-circuit, so they return a definite answer even on infinite
     collections, and stay symbolic when the result depends on undetermined
     elements. `Any([])` is `False`, `All([])` is `True`.
-  - **Cumulative** — `Scan(xs, f, initial?)` is the running fold (same length
-    as the input: `Scan([1, 2, 3, 4], Add)` → `[1, 3, 6, 10]`), and
-    `Differences(xs)` gives the successive differences (length `n − 1`,
-    computed exactly).
-  - **Prefix/suffix** — `TakeWhile(xs, predicate)` and `DropWhile(xs,
-    predicate)` take or drop leading elements while the predicate holds; both
-    are lazy and compose with infinite collections.
+  - **Cumulative** — `Scan(xs, f, initial?)` is the running fold (same length as
+    the input: `Scan([1, 2, 3, 4], Add)` → `[1, 3, 6, 10]`), and
+    `Differences(xs)` gives the successive differences (length `n − 1`, computed
+    exactly).
+  - **Prefix/suffix** — `TakeWhile(xs, predicate)` and
+    `DropWhile(xs, predicate)` take or drop leading elements while the predicate
+    holds; both are lazy and compose with infinite collections.
   - **Mapping** — `FlatMap(xs, f)` maps `f` over `xs` and splices
     collection-valued results into a single list (a scalar result is kept as a
     single element).
@@ -273,80 +317,76 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
     with an element inserted, removed, or replaced at a 1-based index. Negative
     indexes count from the end (Elixir-style); `Insert` at `-1` or `n + 1`
     appends.
-- **`Map` is now variadic.** `Map(xs, ys, …, f)` applies `f` element-wise
-  across several collections (a `zipWith`), truncating to the shortest input;
-  the function is always the last argument
+- **`Map` is now variadic.** `Map(xs, ys, …, f)` applies `f` element-wise across
+  several collections (a `zipWith`), truncating to the shortest input; the
+  function is always the last argument
   (`Map([1, 2, 3], [10, 20, 30], (x, y) ↦ x + y)` → `[11, 22, 33]`).
-- **`Sort` accepts a one-argument key function.** In addition to a
-  two-argument comparator, `Sort(xs, f)` with a unary `f` sorts ascending by
-  the key `f(x)` (stable on ties), discriminated from a comparator by arity.
+- **`Sort` accepts a one-argument key function.** In addition to a two-argument
+  comparator, `Sort(xs, f)` with a unary `f` sorts ascending by the key `f(x)`
+  (stable on ties), discriminated from a comparator by arity.
 - **`Flatten` accepts an optional depth.** `Flatten(xs, depth)` flattens only
   `depth` levels of nesting; without it, the collection is fully flattened
   (`Flatten([[1, [2]], [3]], 1)` → `[1, [2], 3]`).
 - **More collection operators compile on the `javascript` target.**
   - **`Reduce` accepts a custom combiner**: a `Function` literal
     (`Reduce([1, 2, 3], (a, b) \mapsto a + 2b, 0)` → `12`), a user-defined
-    function symbol, or an operator symbol such as `Subtract` — previously
-    only the `Add`/`Multiply`/`Min`/`Max` folds compiled. A custom combiner
-    requires an explicit initial value (without one the interpreter folds
-    from `Nothing`, which has no numeric equivalent — that form still fails
-    closed). **`Fold`**, which canonicalizes to `Reduce`, now compiles too.
+    function symbol, or an operator symbol such as `Subtract` — previously only
+    the `Add`/`Multiply`/`Min`/`Max` folds compiled. A custom combiner requires
+    an explicit initial value (without one the interpreter folds from `Nothing`,
+    which has no numeric equivalent — that form still fails closed). **`Fold`**,
+    which canonicalizes to `Reduce`, now compiles too.
   - **`Tabulate`** (1-D and 2-D) and **`Fill`** compile to native array
-    construction with 1-based indexes — and therefore **`Table`**, in both
-    its alias and Mathematica-style iterator forms. Compiling is the natural
-    fast path for materializing these now-lazy collections.
+    construction with 1-based indexes — and therefore **`Table`**, in both its
+    alias and Mathematica-style iterator forms. Compiling is the natural fast
+    path for materializing these now-lazy collections.
   - **`CountIf`, `Find`, `IndexWhere`, `Position`** compile their predicate
     lambda to native array operations, with the interpreter's conventions
-    preserved: 1-based indexes, `IndexWhere` → `0` and `Find` → `NaN`
-    (`Nothing` projected onto a real target) when no element matches.
+    preserved: 1-based indexes, `IndexWhere` → `0` and `Find` → `NaN` (`Nothing`
+    projected onto a real target) when no element matches.
   - **`Append`, `Most`, `Slice`, `IsEmpty`, `Count`, `Contains`, `Unique`,
-    `RotateLeft`/`RotateRight`, `Zip`, `Linspace`, `Chunk`, `Partition`
-    (integer and predicate forms), `Ordering`, and `Shuffle`** compile to
-    native array operations, each verified element-for-element against the
-    interpreter (1-based inclusive `Slice` with negative-from-end indexes,
-    rotation shift normalized modulo the length, `Chunk`/`Partition` producing
-    `k` chunks of `⌈len/k⌉`, stable `Ordering` ties, `Zip` truncating to the
-    shortest input, `Linspace` including both endpoints). Non-finite runtime
-    counts/indexes fall back to the interpreter's defaults instead of
-    crashing or silently diverging, and `Shuffle` honors the engine's
-    `randomSeed` (a deterministic, reproducible permutation, like `Random`).
-    Forms with no numeric equivalent on the target fail closed: a custom
-    `Ordering` function, the explicit-seed `Shuffle` form, statically
-    non-positive `Chunk`/`Partition` counts, and `Contains`/`Unique` over
-    compound (nested-list, tuple, complex) elements, whose JS equality is
-    referential rather than structural.
+    `RotateLeft`/`RotateRight`, `Zip`, `Linspace`, `Chunk`, `Partition` (integer
+    and predicate forms), `Ordering`, and `Shuffle`** compile to native array
+    operations, each verified element-for-element against the interpreter
+    (1-based inclusive `Slice` with negative-from-end indexes, rotation shift
+    normalized modulo the length, `Chunk`/`Partition` producing `k` chunks of
+    `⌈len/k⌉`, stable `Ordering` ties, `Zip` truncating to the shortest input,
+    `Linspace` including both endpoints). Non-finite runtime counts/indexes fall
+    back to the interpreter's defaults instead of crashing or silently
+    diverging, and `Shuffle` honors the engine's `randomSeed` (a deterministic,
+    reproducible permutation, like `Random`). Forms with no numeric equivalent
+    on the target fail closed: a custom `Ordering` function, the explicit-seed
+    `Shuffle` form, statically non-positive `Chunk`/`Partition` counts, and
+    `Contains`/`Unique` over compound (nested-list, tuple, complex) elements,
+    whose JS equality is referential rather than structural.
   - **`Any`, `All`, `TakeWhile`, `DropWhile`, `FlatMap`, and `Scan`** compile
     (predicate/mapping lambdas → native `some`/`every`/`flatMap` and slices;
     `Scan` is the running fold, with the initial value not emitted and the
-    seedless form emitting the first element as-is, matching the
-    interpreter).
-- **Core scalar operators compile on the `javascript` target:** `Boole`
-  (Iverson bracket, with the same runtime boolean guard as `Which`/`When`),
+    seedless form emitting the first element as-is, matching the interpreter).
+- **Core scalar operators compile on the `javascript` target:** `Boole` (Iverson
+  bracket, with the same runtime boolean guard as `Which`/`When`),
   `KroneckerDelta` (n-ary, tolerance-aware like compiled `Equal`),
-  `Element(x, list)` membership, `Identity`, and `Apply` of a function
-  literal.
-- **Linear algebra compiles on the `javascript` target** (closing the parity
-  gap with the `python` target): `Dot` and `MatrixMultiply` (with the
-  interpreter's dimensionality dispatch — vector·vector → scalar,
-  matrix·vector → vector, matrix·matrix → matrix), `Cross`, `Norm` (scalar,
-  2-/Frobenius, and p-norms), `Transpose`, `Determinant`, `Inverse`
-  (singular → `NaN`), `Trace`, `Flatten` (with optional depth), `Shape`, and
-  `Reshape` (with the interpreter's cyclic padding).
+  `Element(x, list)` membership, `Identity`, and `Apply` of a function literal.
+- **Linear algebra compiles on the `javascript` target** (closing the parity gap
+  with the `python` target): `Dot` and `MatrixMultiply` (with the interpreter's
+  dimensionality dispatch — vector·vector → scalar, matrix·vector → vector,
+  matrix·matrix → matrix), `Cross`, `Norm` (scalar, 2-/Frobenius, and p-norms),
+  `Transpose`, `Determinant`, `Inverse` (singular → `NaN`), `Trace`, `Flatten`
+  (with optional depth), `Shape`, and `Reshape` (with the interpreter's cyclic
+  padding).
 - **The `python` compilation target now covers collections and function
-  literals.** `Function` literals compile to Python lambdas, and the
-  collection operators above (list access/slicing, `Map`/`Filter` and the
-  other higher-order operators, `Reduce`/`Scan`, `Tabulate`/`Fill`,
-  `Linspace`, `Zip`, `Ordering`, plus `Flatten`/`Shape`/`Reshape`/`Trace`
-  via NumPy) emit Python with the same interpreter-verified semantics,
-  validated by executing the emitted code (venv-gated parity suite). Also
-  fixed: **compiled `Range` was off by one on the Python target** —
-  `np.arange` excludes the stop value and is 0-based in the one-argument
-  form, so `Range(2, 6)` compiled to `[2..5]` and `Range(5)` to `[0..4]`;
-  CE `Range` is inclusive and 1-based.
-- **Compiled `Range` with no explicit step now auto-descends** on both
-  targets, like the interpreter: `Range(5, 1)` → `[5,4,3,2,1]` and
-  `Range(-2)` → `[1,0,-1,-2]` previously compiled to `[]` on the
-  JavaScript target (the implicit step was a fixed +1).
+  literals.** `Function` literals compile to Python lambdas, and the collection
+  operators above (list access/slicing, `Map`/`Filter` and the other
+  higher-order operators, `Reduce`/`Scan`, `Tabulate`/`Fill`, `Linspace`, `Zip`,
+  `Ordering`, plus `Flatten`/`Shape`/`Reshape`/`Trace` via NumPy) emit Python
+  with the same interpreter-verified semantics, validated by executing the
+  emitted code (venv-gated parity suite). Also fixed: **compiled `Range` was off
+  by one on the Python target** — `np.arange` excludes the stop value and is
+  0-based in the one-argument form, so `Range(2, 6)` compiled to `[2..5]` and
+  `Range(5)` to `[0..4]`; CE `Range` is inclusive and 1-based.
+- **Compiled `Range` with no explicit step now auto-descends** on both targets,
+  like the interpreter: `Range(5, 1)` → `[5,4,3,2,1]` and `Range(-2)` →
+  `[1,0,-1,-2]` previously compiled to `[]` on the JavaScript target (the
+  implicit step was a fixed +1).
 
 ## 0.80.0 _2026-07-16_
 
@@ -394,14 +434,14 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
   scale-relative). The tolerance is deliberately its own constant, not the
   engine's numeric tolerance — float-commensurability is a much looser notion,
   and the value that reproduces a given renderer's output is a consumer choice.
-  (Requested by the Tycho/Graph Paper team for Desmos "art" imports such as
+  (Requested by the Tycho/Graph Paper team for expressions such as
   `r ≤ gcd(θ², θ + a)`.)
 - **`GCD`/`LCM` reduce a finite collection argument.** `\gcd([12, 18, 24])` →
   `6` and `\operatorname{lcm}([4, 6])` → `12` (a list argument is folded over
-  its elements, matching Desmos); previously the whole call stayed symbolic even
-  for integers. Mixed list-and-scalar arguments (`GCD([12, 18], 8)` → `2`) and
-  lists of reals are handled; an infinite or enumeration-declined collection
-  stays symbolic rather than grinding to the evaluation deadline.
+  its elements); previously the whole call stayed symbolic even for integers.
+  Mixed list-and-scalar arguments (`GCD([12, 18], 8)` → `2`) and lists of reals
+  are handled; an infinite or enumeration-declined collection stays symbolic
+  rather than grinding to the evaluation deadline.
 - **`Max`/`Min` of a scalar and a collection no longer mis-compiles to `NaN`.**
   `Max(0, [1, -2, 3])` evaluates to `3` (the reduction folds the collection's
   elements), but on the JavaScript target it compiled to `Math.max(0, [1,-2,3])`
@@ -525,12 +565,12 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
   points_ the two diverge: `[(1,2),(3,4),(5,6)].x` returned the first _point_
   `(1,2)` instead of the list of x-coordinates `[1,3,5]`. The accessors now
   parse to dedicated `PointX`/`PointY`/`PointZ` operators that extract a
-  coordinate and map element-wise over a list of points (matching Desmos and the
-  threadable `.real`/`.imag` accessors), while a single point still returns the
-  scalar coordinate. `First`/`Second`/`Third` are unchanged and continue to
-  index a collection. The new operators broadcast on the `javascript` compile
-  target (`L.x` → `(L).map((p) => p[0])`) and, for a single point, swizzle on
-  the GPU target as before. (Reported by the Tycho/Graph Paper team.)
+  coordinate and map element-wise over a list of points (matching the threadable
+  `.real`/`.imag` accessors), while a single point still returns the scalar
+  coordinate. `First`/`Second`/`Third` are unchanged and continue to index a
+  collection. The new operators broadcast on the `javascript` compile target
+  (`L.x` → `(L).map((p) => p[0])`) and, for a single point, swizzle on the GPU
+  target as before. (Reported by the Tycho/Graph Paper team.)
 
 ### Compilation
 
@@ -548,8 +588,8 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
   **complex**-valued list still has no coverage and now fails closed correctly
   (`success: false` → interpreter fallback) instead of silently returning
   garbage. Combined with the `.x`/`.y` point-broadcast change above, a compiled
-  Desmos expression such as `\min((x - V.x)^2 + (y - V.y)^2)` over a list of
-  points `V` now evaluates correctly. (Reported by the Tycho/Graph Paper team.)
+  expression such as `\min((x - V.x)^2 + (y - V.y)^2)` over a list of points `V`
+  now evaluates correctly. (Reported by the Tycho/Graph Paper team.)
 
 ## 0.79.2 _2026-07-15_
 

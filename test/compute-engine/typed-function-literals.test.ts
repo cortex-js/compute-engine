@@ -600,6 +600,120 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     expect(ce.box(['f', 3, 4]).evaluate().toString()).toBe('7');
   });
 
+  // Tycho 19.1 — the OBJECT-form declaration `ce.declare(f, { signature })`
+  // creates an OPERATOR definition (vs the string form's VALUE definition).
+  // Declare-then-assign must reconcile the operator slot the same way, so the
+  // two documented spellings are observably equivalent.
+  test('object-form declare preserves the signature after `:=` (operator slot)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', { signature: '(tuple<number, number>) -> unknown' });
+    ce.parse('f(x) \\coloneq 2x').evaluate();
+    // Declared signature preserved (authoritative), not replaced by inference.
+    expect(ce.box('f').type.toString()).toBe(
+      '(tuple<number, number>) -> unknown'
+    );
+    // Scalar call still type-errors (tuple required)…
+    expect(ce.box(['f', 3]).json).toEqual([
+      'f',
+      [
+        'Error',
+        [
+          'ErrorCode',
+          "'incompatible-type'",
+          "'tuple<number, number>'",
+          "'finite_integer'",
+        ],
+      ],
+    ]);
+    // …and a tuple call evaluates (the point binds atomically and scales).
+    expect(ce.parse('f((3, 4))').evaluate().toString()).toBe('(6, 8)');
+  });
+
+  test('object-form declare preserves the signature after ce.assign (operator slot)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', { signature: '(tuple<number, number>) -> unknown' });
+    ce.assign('f', ce.box(['Function', ['Multiply', 2, 'x'], 'x']));
+    expect(ce.box('f').type.toString()).toBe(
+      '(tuple<number, number>) -> unknown'
+    );
+    expect(ce.box(['f', 3]).json).toEqual([
+      'f',
+      [
+        'Error',
+        [
+          'ErrorCode',
+          "'incompatible-type'",
+          "'tuple<number, number>'",
+          "'finite_integer'",
+        ],
+      ],
+    ]);
+    expect(ce.parse('f((3, 4))').evaluate().toString()).toBe('(6, 8)');
+  });
+
+  test('object-form and string-form are byte-identical after `:=` (equivalence)', () => {
+    const decl = '(tuple<number, number>) -> unknown';
+    const cs = new ComputeEngine();
+    cs.declare('f', decl);
+    cs.parse('f(x) \\coloneq 2x').evaluate();
+    const co = new ComputeEngine();
+    co.declare('f', { signature: decl });
+    co.parse('f(x) \\coloneq 2x').evaluate();
+    expect(co.box('f').type.toString()).toBe(cs.box('f').type.toString());
+    expect((co.lookupDefinition('f') as any).value.value.json).toEqual(
+      (cs.lookupDefinition('f') as any).value.value.json
+    );
+  });
+
+  test('object-form: an over-arity literal is rejected', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', { signature: '(number) -> number' });
+    expect(() =>
+      ce.assign('f', ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']))
+    ).toThrow();
+    const ce2 = new ComputeEngine();
+    ce2.declare('f', { signature: '(number) -> number' });
+    expect(() => ce2.parse('f(x, y) \\coloneq x + y').evaluate()).toThrow();
+  });
+
+  test('object-form: a declared `unknown` return accepts the inferred body', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', { signature: '(number) -> unknown' });
+    ce.parse('f(x) \\coloneq x + 1').evaluate();
+    // The declared signature is preserved verbatim (as in the value-slot path);
+    // the `unknown` return accepts the literal's concrete inferred body.
+    expect(ce.box('f').type.toString()).toBe('(number) -> unknown');
+    expect(ce.box(['f', 3]).evaluate().json).toBe(4);
+  });
+
+  test('object-form: a declared concrete return stays pinned and is enforced', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', { signature: '(integer) -> integer' });
+    ce.parse('f(x) \\coloneq x + 1').evaluate();
+    expect(ce.box('f').type.toString()).toBe('(integer) -> integer');
+    expect(ce.box(['f', 2.5]).json).toEqual([
+      'f',
+      ['Error', ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"]],
+    ]);
+    expect(ce.box(['f', 3]).evaluate().json).toBe(4);
+  });
+
+  test('an inferred-signature operator def is still replaced (not reconciled)', () => {
+    const ce = new ComputeEngine();
+    // Assigning a literal to an undeclared name creates an OPERATOR def with an
+    // INFERRED signature. A subsequent assignment freely replaces it (today's
+    // behavior) — reconciliation applies only to explicitly-declared signatures.
+    ce.assign('f', ce.box(['Function', ['Power', 'x', 2], 'x']));
+    expect((ce.lookupDefinition('f') as any).operator.inferredSignature).toBe(
+      true
+    );
+    expect(() =>
+      ce.assign('f', ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']))
+    ).not.toThrow();
+    expect(ce.box('f').type.toString()).toBe('(unknown, unknown) -> number');
+    expect(ce.box(['f', 3, 4]).evaluate().json).toBe(7);
+  });
+
   test('the `any`-return workaround stores the literal unchanged', () => {
     const ce = new ComputeEngine();
     ce.box([

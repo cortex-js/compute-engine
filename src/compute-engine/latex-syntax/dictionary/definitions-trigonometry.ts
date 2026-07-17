@@ -486,4 +486,35 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     symbolTrigger: 'FresnelC',
     kind: 'function',
   },
+
+  // Function-style aliases for the spelled-out lowercase names of the
+  // natively-commanded trig functions: `\operatorname{sin}(x)`,
+  // `\operatorname{arctan}(x)`, etc. Without these the head lexed as a bare
+  // symbol, so `\operatorname{sin}(x)^2` parsed as `sin·x²` and
+  // `-\operatorname{sin}(x)` negated the symbol — silently wrong. Reusing
+  // `parseTrig` gives call-binding identical to the native `\sin` command
+  // (prefix minus binds after the call, postfix power applies to the call
+  // result, `^{-1}`/`^2` and implicit arguments all behave the same). These
+  // mirror the `arsinh`/`sech`/`csch` symbol-trigger aliases above; the `ar-`/
+  // `arc-` inverse-hyperbolic spellings are already covered there, so only the
+  // short `a-` forms (`asinh`, …) are added here.
+  { symbolTrigger: 'sin', parse: parseTrig('Sin') },
+  { symbolTrigger: 'cos', parse: parseTrig('Cos') },
+  { symbolTrigger: 'tan', parse: parseTrig('Tan') },
+  { symbolTrigger: 'sec', parse: parseTrig('Sec') },
+  { symbolTrigger: 'csc', parse: parseTrig('Csc') },
+  { symbolTrigger: 'cot', parse: parseTrig('Cot') },
+  { symbolTrigger: 'sinh', parse: parseTrig('Sinh') },
+  { symbolTrigger: 'cosh', parse: parseTrig('Cosh') },
+  { symbolTrigger: 'tanh', parse: parseTrig('Tanh') },
+  { symbolTrigger: 'coth', parse: parseTrig('Coth') },
+  { symbolTrigger: 'arcsin', parse: parseTrig('Arcsin') },
+  { symbolTrigger: 'asin', parse: parseTrig('Arcsin') },
+  { symbolTrigger: 'arccos', parse: parseTrig('Arccos') },
+  { symbolTrigger: 'acos', parse: parseTrig('Arccos') },
+  { symbolTrigger: 'arctan', parse: parseTrig('Arctan') },
+  { symbolTrigger: 'atan', parse: parseTrig('Arctan') },
+  { symbolTrigger: 'asinh', parse: parseTrig('Arsinh') },
+  { symbolTrigger: 'acosh', parse: parseTrig('Arcosh') },
+  { symbolTrigger: 'atanh', parse: parseTrig('Artanh') },
 ];

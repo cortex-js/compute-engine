@@ -128,6 +128,115 @@ describe('Function-style aliases for existing operators', () => {
   });
 });
 
+describe('Function-style aliases for natively-commanded functions', () => {
+  // Lowercase spelled-out names of the natively-commanded functions had no
+  // alias entry, so `\operatorname{sin}(x)^2` parsed as `sin·x²` and
+  // `-\operatorname{sin}(x)` negated the bare `sin` symbol — silently wrong
+  // math with `isValid: true`. The `\operatorname{name}` alias now binds its
+  // call exactly like the native `\sin`/`\ln`/... command.
+
+  test('\\operatorname{sin}(x)^2 → Power(Sin(x), 2)', () => {
+    const expr = ce.parse('\\operatorname{sin}(x)^{2}');
+    expect(expr.isValid).toBe(true);
+    expect(expr.json).toEqual(['Power', ['Sin', 'x'], 2]);
+    expect(expr.subs({ x: 0.3 }).N().re).toBeCloseTo(0.0873322, 6);
+  });
+
+  test('-\\operatorname{sin}(x) → Negate(Sin(x))', () => {
+    const expr = ce.parse('-\\operatorname{sin}(x)');
+    expect(expr.isValid).toBe(true);
+    expect(expr.json).toEqual(['Negate', ['Sin', 'x']]);
+  });
+
+  test('ln binds like the native command', () => {
+    expect(ce.parse('\\operatorname{ln}(x)^{2}').json).toEqual([
+      'Power',
+      ['Ln', 'x'],
+      2,
+    ]);
+    expect(ce.parse('-\\operatorname{ln}(x)').json).toEqual([
+      'Negate',
+      ['Ln', 'x'],
+    ]);
+  });
+
+  test('log carries the subscript base and binds its call', () => {
+    expect(ce.parse('\\operatorname{log}_2(x)').json).toEqual(['Log', 'x', 2]);
+    expect(ce.parse('\\operatorname{log}(x)^{2}').json).toEqual([
+      'Power',
+      ['Log', 'x'],
+      2,
+    ]);
+    expect(ce.parse('-\\operatorname{log}(x)').json).toEqual([
+      'Negate',
+      ['Log', 'x'],
+    ]);
+  });
+
+  test('inverse-trig alias (arcsin) binds its call', () => {
+    expect(ce.parse('\\operatorname{arcsin}(x)^{2}').json).toEqual([
+      'Power',
+      ['Arcsin', 'x'],
+      2,
+    ]);
+    expect(ce.parse('-\\operatorname{arcsin}(x)').json).toEqual([
+      'Negate',
+      ['Arcsin', 'x'],
+    ]);
+    // short `a-` spelling maps to the same operator
+    expect(ce.parse('\\operatorname{asin}(x)').json).toEqual(['Arcsin', 'x']);
+  });
+
+  test('hyperbolic alias (cosh) binds its call', () => {
+    expect(ce.parse('\\operatorname{cosh}(x)^{2}').json).toEqual([
+      'Power',
+      ['Cosh', 'x'],
+      2,
+    ]);
+    expect(ce.parse('-\\operatorname{cosh}(x)').json).toEqual([
+      'Negate',
+      ['Cosh', 'x'],
+    ]);
+  });
+
+  test('arg alias maps to Argument and binds its call', () => {
+    expect(ce.parse('\\operatorname{arg}(z)^{2}').json).toEqual([
+      'Power',
+      ['Argument', 'z'],
+      2,
+    ]);
+    expect(ce.parse('-\\operatorname{arg}(z)').json).toEqual([
+      'Negate',
+      ['Argument', 'z'],
+    ]);
+  });
+
+  test('already-covered name (max) is unchanged', () => {
+    expect(ce.parse('\\operatorname{max}(1, 2)^{2}').json).toEqual([
+      'Power',
+      ['Max', 1, 2],
+      2,
+    ]);
+    expect(ce.parse('-\\operatorname{max}(1, 2)').json).toEqual([
+      'Negate',
+      ['Max', 1, 2],
+    ]);
+  });
+
+  test('bare multi-letter names are unaffected (no \\operatorname)', () => {
+    // Bare `sin`/`ln` lex as letter-runs (a product of single-letter symbols),
+    // which the alias entries must not change.
+    expect(ce.parse('ln').json).toEqual(['Multiply', 'l', 'n']);
+    expect(ce.parse('cos').json).toEqual(['Multiply', 'c', 'o', 's']);
+  });
+
+  test('serialization round-trips to the native command', () => {
+    expect(ce.parse('\\operatorname{sin}(x)^{2}').toLatex()).toContain('\\sin');
+    expect(ce.parse('\\operatorname{ln}(x)').toLatex()).toContain('\\ln');
+    expect(ce.parse('\\operatorname{arg}(z)').toLatex()).toContain('\\arg');
+  });
+});
+
 describe('Distance', () => {
   test('2D Euclidean distance', () => {
     const expr = ce.expr(['Distance', ['Tuple', 0, 0], ['Tuple', 3, 4]]);

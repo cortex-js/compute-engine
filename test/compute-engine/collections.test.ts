@@ -2331,3 +2331,172 @@ describe('Lambda application substitutes the element into an undetermined body',
     ).toBe('[1,4,9]');
   });
 });
+
+// Short-term half of Tycho item 19.3: arithmetic over an `unknown`-returning
+// function call narrows to scalar `number`, and `At` must NOT bake an
+// `incompatible-type` error for such an *over-narrowed* base — it stays inert
+// and defers to runtime (durable fix is a `broadcastable<T>` type). A genuinely
+// provable scalar base (`\pi`, `(5)`, `sin(3)`) must still error loudly.
+describe('At: lenient over-narrowed base (Tycho 19.3)', () => {
+  const errorCode = (expr: any): string | undefined => {
+    const j = expr.json;
+    if (!Array.isArray(j) || j[0] !== 'At') return undefined;
+    const base = j[1];
+    if (!Array.isArray(base) || base[0] !== 'Error') return undefined;
+    const ec = base[1];
+    return Array.isArray(ec) ? ec[1]?.replace(/'/g, '') : undefined;
+  };
+
+  test('repro: arithmetic over an unknown-return call stays inert (subs)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', '(unknown, unknown) -> unknown');
+    const r = ce.parse('a[1]').subs({ a: ce.parse('2h(x,y)-1') });
+    expect(r.isValid).toBe(true);
+    expect(errorCode(r)).toBeUndefined();
+    expect(r.json).toEqual([
+      'At',
+      ['Add', ['Multiply', 2, ['h', 'x', 'y']], -1],
+      1,
+    ]);
+  });
+
+  test('repro: canonical-compose variant stays inert (box)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', '(unknown, unknown) -> unknown');
+    const b = ce.box(['At', ce.parse('2h(x,y)-1'), 1]);
+    expect(b.isValid).toBe(true);
+    expect(errorCode(b)).toBeUndefined();
+  });
+
+  test('base that resolves to a list at evaluation indexes correctly', () => {
+    const ce = new ComputeEngine();
+    ce.assign('h', ce.parse('(u, v) \\mapsto \\lbrack u, v, u+v \\rbrack'));
+    expect(
+      ce.parse('a[1]').subs({ a: ce.parse('h(3,4)') }).evaluate().toString()
+    ).toBe('3');
+    expect(
+      ce.parse('a[3]').subs({ a: ce.parse('h(3,4)') }).evaluate().toString()
+    ).toBe('7');
+  });
+
+  test('contract-3: nc-parse → subs → box → evaluate resolves to a list', () => {
+    const ce = new ComputeEngine();
+    ce.assign('h', ce.parse('(u, v) \\mapsto \\lbrack u, v, u+v \\rbrack'));
+    const nc = ce.parse('a[2]', { canonical: false });
+    const canon = ce.box(nc.subs({ a: ce.parse('h(10,20)') }).json);
+    expect(canon.evaluate().toString()).toBe('20');
+  });
+
+  test('genuinely-scalar runtime base produces the error at evaluation', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', '(unknown, unknown) -> unknown');
+    const inert = ce.box(['At', ce.parse('2h(x,y)-1'), 1]);
+    expect(inert.isValid).toBe(true);
+    // `h` now returns a scalar: the base evaluates to a number and `At` errors.
+    ce.assign('h', ce.parse('(u, v) \\mapsto u+v'));
+    const r = ce.parse('a[1]').subs({ a: ce.parse('2h(3,4)-1') }).evaluate();
+    expect(r.isValid).toBe(false);
+    expect(errorCode(r)).toBe('incompatible-type');
+  });
+
+  test('bare unknown-return call base is unchanged', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', '(unknown, unknown) -> unknown');
+    const r = ce.parse('h(x,y)[1]');
+    expect(r.isValid).toBe(true);
+    expect(errorCode(r)).toBeUndefined();
+  });
+
+  test('provable scalar bases still error loudly', () => {
+    const ce = new ComputeEngine();
+    // number literal
+    expect(errorCode(ce.box(['At', ce.box(5), 1]))).toBe('incompatible-type');
+    // declared scalar symbol (Pi)
+    expect(errorCode(ce.box(['At', ce.parse('\\pi'), 1]))).toBe(
+      'incompatible-type'
+    );
+    // declared-scalar-return call, no unknown descendant
+    expect(errorCode(ce.box(['At', ce.parse('\\sin(3)'), 1]))).toBe(
+      'incompatible-type'
+    );
+  });
+
+  test('declared list<number> base is unchanged (no error)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<number>');
+    const r = ce.parse('L[2]');
+    expect(r.isValid).toBe(true);
+    expect(errorCode(r)).toBeUndefined();
+  });
+
+  test('dictionary access is unchanged', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'At',
+        ['Dictionary', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]],
+        { str: 'b' },
+      ])
+      .evaluate();
+    expect(r.toString()).toBe('2');
+  });
+
+  // A broadcast-aware union base (`finite_integer | vector<3>`, from arithmetic
+  // over a list-returning lambda) must be lenient: it isn't a subtype of
+  // `dictionary | indexed_collection`, but one member IS indexable, so it stays
+  // inert and evaluates once the base resolves to a list.
+  test('union base with an indexable member stays inert and evaluates', () => {
+    const ce = new ComputeEngine();
+    ce.assign('h', ce.parse('(u, v) \\mapsto \\lbrack u, v, u+v \\rbrack'));
+    const at = ce.parse('(2h(3,4)-1)[1]');
+    expect(at.isValid).toBe(true);
+    expect(errorCode(at)).toBeUndefined();
+    expect(at.evaluate().toString()).toBe('5');
+  });
+
+  test('declared union return `number | list<number>` stays inert + valid', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(number) -> number | list<number>');
+    const at = ce.parse('g(1)[2]');
+    expect(at.isValid).toBe(true);
+    expect(errorCode(at)).toBeUndefined();
+  });
+
+  test('scalar-only union base still errors at parse', () => {
+    const ce = new ComputeEngine();
+    // A declared (provable) scalar symbol whose type is a union of only scalar
+    // members — no indexable member, so `At` must still reject it.
+    ce.declare('z', 'finite_integer | rational');
+    const at = ce.parse('z[1]');
+    expect(at.isValid).toBe(false);
+    expect(errorCode(at)).toBe('incompatible-type');
+  });
+
+  // A broadcastable operator (`sin`) over an unknown-return call narrows to
+  // scalar `number` at its node, but the unknown descendant still means the
+  // base may resolve to a collection at runtime — so `At` must stay lenient.
+  test('broadcast over an unknown-return call stays inert', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', '(unknown, unknown) -> unknown');
+    const at = ce.parse('(2\\sin(h(x,y))-1)[1]');
+    expect(at.isValid).toBe(true);
+    expect(errorCode(at)).toBeUndefined();
+  });
+
+  test('broadcast over a provable scalar still errors loudly', () => {
+    const ce = new ComputeEngine();
+    // `sin(3)` has no unknown descendant: a provable scalar, still rejected.
+    expect(errorCode(ce.parse('\\sin(3)[1]'))).toBe('incompatible-type');
+  });
+
+  // A base typed as the bare `value` primitive (e.g. inferred through a
+  // `(value*)` signature) is no evidence of scalar-ness — `value` also includes
+  // collection types — so `At` defers to runtime instead of erroring.
+  test('bare `value`-typed base stays inert', () => {
+    const ce = new ComputeEngine();
+    ce.declare('w', 'value');
+    const at = ce.parse('w[1]');
+    expect(at.isValid).toBe(true);
+    expect(errorCode(at)).toBeUndefined();
+  });
+});

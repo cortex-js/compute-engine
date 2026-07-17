@@ -65,6 +65,52 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### Broadcast typing lift — `broadcastable<T>` (agreed 2026-07-16)
+
+Close the gap between runtime broadcasting and static typing: today
+`2·[1,2,3]` types as `vector<3>`, but the same arithmetic over an operand
+whose collection-ness is not statically visible (`2h(x,y)−1` with `h`
+returning `unknown`) collapses to scalar `number`, even though evaluation
+broadcasts. That over-narrowing is the root cause of Tycho items 19.2
+(inferred return types of broadcasting bodies are wrong) and 19.3 (arithmetic
+narrowing poisons `At` bases under structural substitution — mitigated
+short-term by the lenient-`At` change), and of the accumulated point patches
+(`typeCouldBeNumericTuple` widening, declared-signature-only broadcast gates,
+compile-target fail-closed misfires on "typed number, actually a list").
+
+**Design direction (user-ratified leaning): a first-class `broadcastable<T>`
+type constructor** — "T, or an indexed collection of T, elementwise" — rather
+than ad-hoc unions propagated through every handler. Plan shape:
+
+1. Prototype on `Add`/`Multiply`/`At` only; measure snapshot/test blast
+   radius before committing to the sweep.
+2. Library-wide type-handler sweep (every operator that assumes scalar
+   arithmetic results states its `broadcastable` behavior), signature
+   matching/inference integration, subsumption rules
+   (`number <: broadcastable<number>`, `list<number> <:
+   broadcastable<number>`).
+3. Retire the point patches: validator widenings, the declared-signature
+   restriction on the application broadcast gate (inferred signatures then
+   participate), and the 0.76 "symbolic-length broadcast typing lift"
+   residual.
+
+Interactions to respect: non-finite typing convention, `infer(unknown)`
+destructiveness, scalar-requiring contexts (exponents, comparisons, plot
+coordinates) which will surface as the churn to triage in step 1. Supersedes
+Tycho 19.2 and the durable half of 19.3.
+
+### Decide the `At` default-serialization round-trip contract
+
+The pipeline-contract suite (`test/compute-engine/pipeline-contracts.test.ts`)
+pins, as `CONTRACT VIOLATION` tests, that `At(a, 1)` over an undeclared base
+serializes to the subscript `a_1` by default, which reparses as the bare
+symbol `a_1` — a lossy round-trip. The subscript default is intentional
+(Tycho item 21); the open decision is whether the consumer contract text in
+tycho's `COMPUTE_ENGINE.md` gets revised to document the exception formally
+(with the `indexStyle: 'bracket'` mitigation as the prescribed round-trip
+path), or the default serialization changes. Until decided, the violation
+tests stay as-is — do not loosen or "fix" them silently.
+
 ### Product feature track (agreed 2026-07-04)
 
 CE is the foundation for Tycho / Graph Paper: an app helping scientists,

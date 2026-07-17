@@ -1858,31 +1858,26 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       symbol(expr) !== null
         ? '\\lg'
         : '\\log_{10}' + serializer.wrapArguments(expr),
-    parse: (parser: Parser) => {
-      const sup = parseFunctionSup(parser);
-      let args = parser.parseArguments('implicit');
-      if (args === null && sup === null) return 'Lg' as MathJsonExpression;
-      // A superscript but no argument (`\lg^{-1}`): the topic marker stands
-      // in for the argument so a pipeline can fill it.
-      if (args === null) args = [PIPE_TOPIC_MARKER];
-      // `\lg^{-1} x` → `10^x` (inverse of base-10 log).
-      return applyFunctionSup(
-        ['Log', ...args, 10] as MathJsonExpression,
-        sup,
-        () => ['Power', 10, args[0]] as MathJsonExpression
-      );
-    },
+    parse: (parser: Parser) => parseLg(parser),
+  },
+  // Function-style alias: `\operatorname{lg}(x)`. Reuses the native `\lg`
+  // parser so call-binding is identical (prefix minus binds after the call,
+  // postfix power applies to the call result).
+  {
+    kind: 'function',
+    symbolTrigger: 'lg',
+    parse: (parser: Parser) => parseLg(parser),
   },
   {
     name: 'Lb',
     latexTrigger: '\\lb',
-    parse: (parser: Parser) => {
-      const args = parser.parseArguments('implicit');
-      // Bare `\lb` is the binary-log function symbol (`12 |> \lb` → log₂ 12),
-      // not `Log` (base 10).
-      if (args === null) return 'Lb' as MathJsonExpression;
-      return ['Log', args[0], 2] as MathJsonExpression;
-    },
+    parse: (parser: Parser) => parseLb(parser),
+  },
+  // Function-style alias: `\operatorname{lb}(x)` (binary log).
+  {
+    kind: 'function',
+    symbolTrigger: 'lb',
+    parse: (parser: Parser) => parseLb(parser),
   },
   {
     name: 'Ln',
@@ -1890,6 +1885,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser: Parser) => parseLog('Ln', parser),
     serialize: (serializer, expr) =>
       symbol(expr) !== null ? '\\ln' : '\\ln' + serializer.wrapArguments(expr),
+  },
+  // Function-style alias: `\operatorname{ln}(x)`. Reuses the native `\ln`
+  // parser (base subscript, `^{-1}` inverse and postfix power all identical).
+  {
+    kind: 'function',
+    symbolTrigger: 'ln',
+    parse: (parser: Parser) => parseLog('Ln', parser),
   },
   {
     name: 'Log',
@@ -1907,6 +1909,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         serializer.wrap(body),
       ]);
     },
+  },
+  // Function-style alias: `\operatorname{log}(x)`, `\operatorname{log}_b(x)`.
+  // Reuses the native `\log` parser so the base subscript, `^{-1}` inverse and
+  // call-binding are identical.
+  {
+    kind: 'function',
+    symbolTrigger: 'log',
+    parse: (parser: Parser) => parseLog('Log', parser),
   },
 
   {
@@ -3055,6 +3065,29 @@ function parseLog(command: string, parser: Parser): MathJsonExpression | null {
   else applied = ['Log', args[0], sub] as MathJsonExpression;
 
   return applyFunctionSup(applied, sup, inverse);
+}
+
+function parseLg(parser: Parser): MathJsonExpression {
+  const sup = parseFunctionSup(parser);
+  let args = parser.parseArguments('implicit');
+  if (args === null && sup === null) return 'Lg' as MathJsonExpression;
+  // A superscript but no argument (`\lg^{-1}`): the topic marker stands
+  // in for the argument so a pipeline can fill it.
+  if (args === null) args = [PIPE_TOPIC_MARKER];
+  // `\lg^{-1} x` → `10^x` (inverse of base-10 log).
+  return applyFunctionSup(
+    ['Log', ...args, 10] as MathJsonExpression,
+    sup,
+    () => ['Power', 10, args[0]] as MathJsonExpression
+  );
+}
+
+function parseLb(parser: Parser): MathJsonExpression {
+  const args = parser.parseArguments('implicit');
+  // Bare `\lb` is the binary-log function symbol (`12 |> \lb` → log₂ 12),
+  // not `Log` (base 10).
+  if (args === null) return 'Lb' as MathJsonExpression;
+  return ['Log', args[0], 2] as MathJsonExpression;
 }
 
 /**

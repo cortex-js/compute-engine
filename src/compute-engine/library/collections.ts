@@ -20,6 +20,7 @@ import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
 // (collections → compile-expression → base-compiler → library/utils → collections)
 import { parseType } from '../../common/type/parse.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { ListType, Type } from '../../common/type/types.js';
 import {
   collectionElementType,
@@ -61,6 +62,60 @@ export const DEFAULT_LINSPACE_COUNT = 50;
 const AT_SIGNATURE = parseType(
   '(value: indexed_collection | dictionary, index: (number|string|boolean|indexed_collection)+) -> unknown'
 );
+
+// Arithmetic operators over which a scalar `number` type can be *synthesized*
+// from an `unknown`-typed operand (Tycho item 19.3). `2·h(x,y)-1`, with `h`
+// declared to return `unknown`, narrows to scalar `number` even though the
+// call may resolve to a vector at runtime (Perlin/gradient-field helpers).
+const AT_NARROWING_OPERATORS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Root',
+  'Sqrt',
+  'Square',
+  'Rational',
+]);
+
+// True when `expr`'s `number` type may be an *over-narrowing*: it, or an
+// arithmetic/broadcast descendant, rests on an `unknown`-typed operand. Such a
+// base is not a provable scalar, so `At` keeps it inert and defers to runtime
+// instead of baking an `incompatible-type` error at canonicalization (short-term
+// half of Tycho item 19.3; the durable fix is a `broadcastable<T>` type). The
+// recursion descends through `AT_NARROWING_OPERATORS` arithmetic and through any
+// `broadcastable` operator (e.g. `sin`), since both synthesize a scalar `number`
+// from an operand that may resolve to a collection at runtime. A base grounded
+// purely in genuine numbers or declared scalars (e.g. `\pi`, `(5)`, `sin(3)`)
+// has no `unknown` descendant and still errors loudly.
+function restsOnUnknown(expr: Expression): boolean {
+  if (expr.type.type === 'unknown') return true;
+  if (
+    isFunction(expr) &&
+    (AT_NARROWING_OPERATORS.has(expr.operator) ||
+      expr.operatorDefinition?.broadcastable === true)
+  )
+    return (expr.ops ?? []).some(restsOnUnknown);
+  return false;
+}
+
+// True when `expr`'s type is a *union* with at least one member compatible with
+// an indexable base — a broadcast-aware inference such as `finite_integer |
+// vector<3>` (from `2·h(3,4)-1` with `h` a list-returning lambda), or a declared
+// `number | list<number>` return. Such a base *could* be a collection at
+// runtime, so `At` keeps it inert and defers to runtime rather than rejecting
+// the whole union for not being a subtype of `dictionary | indexed_collection`.
+// A union of only scalar members (e.g. `finite_integer | rational`) has no such
+// member and still errors loudly.
+function hasIndexableMember(expr: Expression): boolean {
+  const t = expr.type.type;
+  if (typeof t === 'string' || t.kind !== 'union') return false;
+  return t.types.some(
+    (m) => isSubtype(m, 'indexed_collection') || isSubtype(m, 'dictionary')
+  );
+}
 
 // Shared instance of the basic handlers, used by the `Set` handlers to
 // delegate the literal (non-comprehension) cases.
@@ -468,7 +523,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // component fails closed (stays inert, no hang) via
   // `broadcastOverIndexedCollections` returning `undefined`.
   //
-  // No compile handler in v1: compiling a `PointList` fails closed.
+  // Compile handler (v1): when no component is provably non-scalar (a subtype
+  // of `collection`), a `PointList` is a plain point and compiles
+  // byte-identically to the equivalent `Tuple(...)` on each target — a JS array
+  // on the `javascript` target, a `vecN`/`float[N]` on `glsl` (and `vecNf`/
+  // `array<f32,N>` on `wgsl`). This includes free plot variables (typed
+  // `unknown`), which the compile model treats as numeric parameters exactly as
+  // `Tuple` does. A provably non-scalar component (list/set/tuple, or a union
+  // with such a member), and every other target (e.g. `interval-javascript`,
+  // `python`, which have no `Tuple` lowering either), fail closed — the handler
+  // returns `undefined` and the default compilation reports `PointList` as
+  // uncompilable.
   PointList: {
     description:
       'A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.',
@@ -510,6 +575,42 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // No `eq` handler: a definitive structural comparison would make
     // `PointList(1,2)` unequal to the `Tuple(1,2)` it evaluates to; the
     // generic compare path evaluates both sides instead.
+    compile: (args, compile, { language }) => {
+      // v1: fail closed only for a *provably non-scalar* component — one whose
+      // type (or any member of a union) is a subtype of `collection` (a list,
+      // set, tuple, map, …). Everything else — `unknown`, `value`, and every
+      // numeric type — is a scalar slot that `Tuple` compiles as
+      // `compile(component)`, so it passes here too. This matters for the
+      // load-bearing case: a per-pixel body is parsed LaTeX with *free* plot
+      // variables, which type as `unknown`; the compile model treats free
+      // unknown symbols as numeric parameters, and `Tuple(x, y)` compiles them
+      // as scalar slots, so `PointList(x, y)` must as well. A non-scalar
+      // component returns `undefined` → default compilation, which has no
+      // `PointList` lowering and reports it as uncompilable (fail closed).
+      const isProvablyNonScalar = (t: Type): boolean => {
+        if (typeof t !== 'string' && t.kind === 'union')
+          return t.types.some(isProvablyNonScalar);
+        return isSubtype(t, 'collection');
+      };
+      if (args.some((a) => isProvablyNonScalar(a.type.type))) return undefined;
+      // Emit byte-identically to the equivalent `Tuple(...)`. Targets with no
+      // `Tuple` lowering (`interval-javascript`) are not enumerated, so
+      // `PointList` fails closed there too — matching `Tuple`.
+      const parts = args.map((a) => compile(a));
+      if (language === 'javascript') return `[${parts.join(', ')}]`;
+      if (language === 'python') return `(${parts.join(', ')})`;
+      if (language === 'glsl' || language === 'wgsl') {
+        const suffix = language === 'wgsl' ? 'f' : '';
+        if (parts.length >= 2 && parts.length <= 4)
+          return `vec${parts.length}${suffix}(${parts.join(', ')})`;
+        const arrayType =
+          language === 'wgsl'
+            ? `array<f32, ${parts.length}>`
+            : `float[${parts.length}]`;
+        return `${arrayType}(${parts.join(', ')})`;
+      }
+      return undefined;
+    },
   } as OperatorDefinition,
 
   KeyValuePair: {
@@ -2169,13 +2270,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       const patched = [...adjusted];
       const value = ops[0];
-      // Restore the value operand when it failed only because its number type
-      // is inferred and thus retractable (may still resolve to a collection).
+      // Restore the value operand when it failed only because its type is
+      // retractable — the base may still resolve to a collection at runtime:
+      //  - an *inferred* (not declared) scalar `number` type; or
+      //  - a scalar `number` *over-narrowed* from an `unknown`-typed operand
+      //    (e.g. `2·h(x,y)-1` with `h` returning `unknown`; see
+      //    `restsOnUnknown`); or
+      //  - a *union* with an indexable member (e.g. `finite_integer |
+      //    vector<3>`, or a declared `number | list<number>` return; see
+      //    `hasIndexableMember`); or
+      //  - the bare `value` primitive (e.g. inferred through a `(value*)`
+      //    signature such as `Max`/`Min`): `value` is a strict supertype of
+      //    `number` that also includes collection types, so it is no evidence
+      //    of scalar-ness (mirrors the `value` handling in `invisible-operator`).
+      // A provably scalar base (`\pi`, `(5)`, `sin(3)`, `finite_integer |
+      // rational`) is not restored and still errors loudly.
       if (
         value?.isValid &&
         patched[0]?.operator === 'Error' &&
-        value.type.matches('number') &&
-        !isDeclaredScalarNumber(value)
+        ((value.type.matches('number') &&
+          (!isDeclaredScalarNumber(value) || restsOnUnknown(value))) ||
+          hasIndexableMember(value) ||
+          value.type.type === 'value')
       )
         patched[0] = value;
 

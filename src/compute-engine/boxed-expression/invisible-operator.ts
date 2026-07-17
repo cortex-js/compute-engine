@@ -280,6 +280,16 @@ export function canonicalInvisibleOperator(
         (x.type.isUnknown ||
           x.type.type === 'any' ||
           x.type.type === 'expression' ||
+          // `value` is the widest value type — a supertype spanning BOTH
+          // scalars and collections (see VALUE_TYPES in common/type). A
+          // symbol typed `value` (e.g. inferred from a `(value*)` signature
+          // such as `Max`/`Min`) is NOT evidence of collection/point-ness: it
+          // carries no constraint at all. Like `any`/`expression`/`unknown`
+          // above, the charitable default for juxtaposition is multiplication,
+          // not a silent `Tuple`. Concrete collection/tuple operands are still
+          // caught by `isLinearAlgebraCollection`/`isNumericTuple`/
+          // `isIndexedCollection` below.
+          x.type.type === 'value' ||
           x.type.matches('number') ||
           // Matrix-typed symbols (`M P` → matrix product) and function-typed
           // symbols (`2f`, `f x` → scaled/product) are value-like operands:

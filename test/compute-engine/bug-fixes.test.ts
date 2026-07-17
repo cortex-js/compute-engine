@@ -364,4 +364,50 @@ describe('Playground regressions', () => {
       expect(ce.box('y').type.toString()).toBe('integer');
     });
   });
+
+  // A symbol widened to `value` — the widest value type, spanning both scalars
+  // and collections — is NOT evidence of collection/point-ness. The
+  // invisible-operator juxtaposition gate used to mis-read such a wide type as
+  // a possible collection and emit `Tuple(2,x)` instead of `Multiply(2,x)`.
+  // Because canonicalizing `Max(x, …)` (signature `(value*)`) infers `x :
+  // value`, a bare `2x` parse turned into a `Tuple` for the rest of the
+  // engine's life — an order-dependent, silent wrong-parse.
+  describe('juxtaposition with a value-typed symbol is Multiply, not Tuple', () => {
+    const M = (s: string) => ['Multiply', 2, s];
+
+    test('directly-declared value symbol: 2w → Multiply', () => {
+      const ce = new ComputeEngine();
+      ce.declare('w', 'value');
+      expect(ce.parse('2w').json).toEqual(M('w'));
+    });
+
+    test('boxing non-canonical Max json does not poison later 2x parse', () => {
+      const ce = new ComputeEngine();
+      const nc = ce.parse('\\max(x, 2x-1)', { canonical: false });
+      ce.box(nc.json); // canonicalize; widens x to `value`
+      expect(ce.parse('2x').json).toEqual(M('x'));
+    });
+
+    test('canonical-parse Max does not poison later 2x parse', () => {
+      const ce = new ComputeEngine();
+      ce.parse('\\max(x, 2x-1)'); // widens x to `value`
+      expect(ce.parse('2x').json).toEqual(M('x'));
+    });
+
+    test('order independence: box-first and parse-first agree', () => {
+      const boxFirst = (() => {
+        const ce = new ComputeEngine();
+        const nc = ce.parse('\\max(x, 2x-1)', { canonical: false });
+        ce.box(nc.json);
+        return ce.parse('2x').json;
+      })();
+      const parseFirst = (() => {
+        const ce = new ComputeEngine();
+        ce.parse('\\max(x, 2x-1)');
+        return ce.parse('2x').json;
+      })();
+      expect(boxFirst).toEqual(parseFirst);
+      expect(boxFirst).toEqual(M('x'));
+    });
+  });
 });

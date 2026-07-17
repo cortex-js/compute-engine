@@ -650,6 +650,72 @@ export function assignFn(
       return ce;
     }
 
+    // Phase 3 §6.3 — declared-signature reconciliation (operator-slot). A
+    // symbol declared with an EXPLICIT function signature and no built-in
+    // evaluate handler — the object form `ce.declare(f, { signature: … })`, or
+    // a symbol already carrying a reconciled user lambda — is authoritative
+    // over its signature. Assigning a function literal to it must PRESERVE the
+    // declared signature, exactly as the value-slot case above, instead of
+    // replacing it with one inferred from the literal (which is what
+    // `assignValueAsOperatorDef` + `updateDef` would otherwise do). This makes
+    // the two documented declare spellings — string `"(…) -> …"` (value slot)
+    // and object `{ signature: "(…) -> …" }` (operator slot) — equivalent under
+    // declare-then-assign. Built-in / native operators (a defined `evaluate`
+    // handler that is not a user lambda) and inferred-signature operators
+    // (auto-declared from usage) keep today's replace behavior.
+    if (
+      !def.operator.inferredSignature &&
+      (def.operator.evaluate === undefined ||
+        def.operator.lambda !== undefined) &&
+      arg2 !== undefined &&
+      arg2 !== null &&
+      typeof arg2 !== 'function' &&
+      functionSignature(def.operator.signature.type) !== undefined
+    ) {
+      const literal = canonicalFunctionLiteral(ce.expr(arg2));
+      if (literal !== undefined) {
+        const declaredType = def.operator.signature;
+
+        // The literal must be arity-compatible with the declared signature
+        // (mirrors the value-slot path); otherwise a declared-arity call would
+        // silently partial-apply on the fixed-arity body.
+        assertFunctionLiteralArity(
+          id,
+          literal,
+          declaredType.type,
+          declaredType.toString()
+        );
+
+        const reconciled = reconcileFunctionLiteralReturn(
+          ce,
+          literal,
+          declaredType.type
+        );
+        if (!reconciled.type.matches(declaredType))
+          throw new Error(
+            [
+              `Symbol "${id}"`,
+              `The value "${reconciled.toString()}" of type "${
+                reconciled.type
+              }" is not compatible with the type "${declaredType}"`,
+            ].join('\n|   ')
+          );
+
+        // Store the reconciled literal as a VALUE under the declared signature
+        // — the SAME representation the string-form (value-slot) declaration
+        // produces. This makes the two spellings observably identical: `f(3)`
+        // type-errors against the declared param, and a well-typed call applies
+        // the lambda (an operator def cannot apply a bare tuple argument, so
+        // keeping it an operator would leave `f((3, 4))` unevaluated).
+        updateDef(ce, id, def, {
+          value: reconciled,
+          type: declaredType.type,
+        });
+        ce._setSymbolValue(id, reconciled);
+        return ce;
+      }
+    }
+
     // Update the operator definition.
     const fnDef = assignValueAsOperatorDef(ce, arg2);
     if (!fnDef) throw Error(`Invalid definition for symbol "${id}"`);

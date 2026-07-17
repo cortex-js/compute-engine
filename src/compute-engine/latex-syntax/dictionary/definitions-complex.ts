@@ -19,6 +19,15 @@ export const DEFINITIONS_COMPLEX: LatexDictionary = [
     latexTrigger: ['\\arg'],
     arguments: 'implicit',
   },
+  // Function-style alias: `\operatorname{arg}(z)`. Without it the head lexed as
+  // a bare symbol, so `\operatorname{arg}(z)^2` was `arg·z²`. Call-binding
+  // matches the native `\arg` command.
+  {
+    symbolTrigger: 'arg',
+    kind: 'function',
+    parse: 'Argument',
+    arguments: 'implicit',
+  },
   {
     name: 'Conjugate',
     latexTrigger: ['^', '\\star'],
