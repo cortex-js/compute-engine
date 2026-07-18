@@ -1,6 +1,11 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-12.
+**Last updated:** 2026-07-18.
+
+(2026-07-17: the `At` default-serialization decision closed — bracket
+notation `a[1]` is the default and round-trips; the lossy subscript form is
+opt-in via `indexStyle: 'subscript'`. The pipeline-contract suite and
+consumer contract were updated; the item left this file.)
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -85,18 +90,6 @@ remaining, as separate demand-gated items:
 Interactions to respect: non-finite typing convention, `infer(unknown)`
 destructiveness, scalar-requiring contexts (exponents, comparisons, plot
 coordinates).
-
-### Decide the `At` default-serialization round-trip contract
-
-The pipeline-contract suite (`test/compute-engine/pipeline-contracts.test.ts`)
-pins, as `CONTRACT VIOLATION` tests, that `At(a, 1)` over an undeclared base
-serializes to the subscript `a_1` by default, which reparses as the bare
-symbol `a_1` — a lossy round-trip. The subscript default is intentional
-(Tycho item 21); the open decision is whether the consumer contract text in
-tycho's `COMPUTE_ENGINE.md` gets revised to document the exception formally
-(with the `indexStyle: 'bracket'` mitigation as the prescribed round-trip
-path), or the default serialization changes. Until decided, the violation
-tests stay as-is — do not loosen or "fix" them silently.
 
 ### Product feature track (agreed 2026-07-04)
 
@@ -350,11 +343,10 @@ systems.** Ranked next steps (good contributor territory):
   the characteristic-polynomial / root-multiplicity machinery for linear
   constant-coefficient recurrences, with an `rⁿ·n^k` basis instead of
   `e^{rx}·x^k`.)
-- **Small artifact from the audit:** the second derivative of `|u|`
-  produces a `Derivative(Sign, 1)` (Dirac) term that `.N()` leaves
-  unevaluated → `NaN` in numeric residual checks (it is 0 a.e.; the audit
-  oracle zeroes it at generic sample points). Either evaluate it to 0 away
-  from the singular set or introduce a proper `DiracDelta`.
+- *(The former "small artifact" — `Derivative(Sign, 1)` left unevaluated →
+  `NaN` in numeric residual checks — was fixed 2026-07-18: `Sign` joined the
+  step-function group in the derivative table (0 a.e., like `Floor`/`Ceil`/
+  `Round`). A proper `DiracDelta` remains a possible future refinement.)*
 
 #### B13. Wester capability gaps — the skip ledger in `wester.test.ts`
 
@@ -1169,7 +1161,8 @@ is in git history. The only items deliberately left open:
   scope at fusion time) — too broad for a LOW finding. Workaround: the call form
   `["a_", "k"]` (which the Fungrim corpus uses).
 - **G7** (bound-variable identity stability across re-boxing) — resolved by
-  intervening work; now passes but has no dedicated regression test pinning it.
+  intervening work; pinned 2026-07-18 by the regression suite in
+  `serialization.test.ts` ("Bound-variable identity across re-boxing").
 
 **Lessons worth keeping in mind** (the durable ones are in CLAUDE.md): the
 `undefined → false` collapse in three-valued predicates was the single most

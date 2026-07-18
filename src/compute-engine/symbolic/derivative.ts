@@ -182,6 +182,7 @@ const DERIVATIVES_TABLE = {
   Floor: 0,
   Ceil: 0,
   Round: 0,
+  Sign: 0,
   // https://proofwiki.org/wiki/Derivative_of_Error_Function
   Erf: [
     'Multiply',

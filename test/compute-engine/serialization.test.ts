@@ -372,6 +372,50 @@ describe('String round-trip (REVIEW.md G6)', () => {
   });
 });
 
+// REVIEW.md G7: re-boxing the canonical JSON of an expression with bound
+// variables (Sum/Product/Integrate, incl. Function-wrapped) was once not
+// `isSame`-equal to the original — bound-variable identity was unstable
+// across boxings. Resolved by intervening boxing work; pinned here.
+describe('Bound-variable identity across re-boxing (REVIEW.md G7)', () => {
+  const shapes: [string, any][] = [
+    ['plain Sum (Limits)', ['Sum', ['Power', 'k', 2], ['Limits', 'k', 1, 'n']]],
+    [
+      'Function-wrapped Sum',
+      ['Function', ['Sum', ['Power', 'k', 2], ['Limits', 'k', 1, 'n']], 'n'],
+    ],
+    [
+      'Function-wrapped Product',
+      ['Function', ['Product', 'k', ['Limits', 'k', 1, 'n']], 'n'],
+    ],
+    [
+      'Function-wrapped Integrate',
+      [
+        'Function',
+        ['Integrate', ['Power', 'x', 2], ['Tuple', 'x', 0, 'n']],
+        'n',
+      ],
+    ],
+    ['Tuple-form Sum', ['Sum', 'k', ['Tuple', 'k', 1, 10]]],
+  ];
+
+  for (const [name, json] of shapes) {
+    test(`${name} is isSame-stable across re-boxing`, () => {
+      const original = ce.box(json);
+      const reboxed = ce.box(original.json as any);
+      expect(original.isSame(reboxed)).toBe(true);
+      expect(reboxed.isSame(original)).toBe(true);
+      // Triple re-box: identity must not degrade with repetition
+      const tripled = ce.box(ce.box(reboxed.json as any).json as any);
+      expect(original.isSame(tripled)).toBe(true);
+    });
+  }
+
+  test('parsed sum is isSame-stable across re-boxing', () => {
+    const parsed = ce.parse('\\sum_{k=1}^n k^2');
+    expect(parsed.isSame(ce.box(parsed.json as any))).toBe(true);
+  });
+});
+
 // Display-digits control (`digits` option): significant figures and decimal
 // places, applied at serialization time (a display concern, not the value).
 describe('DISPLAY DIGITS', () => {

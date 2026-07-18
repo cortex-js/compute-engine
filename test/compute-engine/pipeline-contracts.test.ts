@@ -14,11 +14,11 @@
  * requires (a) a CHANGELOG callout and (b) a consumer notice, per the written
  * commitment — not a quiet snapshot update.
  *
- * A handful of tests are marked `// CONTRACT VIOLATION:` — these document
- * *current* behavior that contradicts (or is more restrictive than) the
- * stated guarantee. They are here so the divergence is tracked; the deciding
- * task lives in ROADMAP.md ("Decide the `At` default-serialization round-trip
- * contract"). Do NOT "fix" them by loosening the assertion silently.
+ * The former `CONTRACT VIOLATION` class (lossy `At` subscript round-trip) was
+ * CLOSED by the bracket-serialization default (2026-07-17); the one residual
+ * divergence — the opt-in `indexStyle: 'subscript'` form is still lossy over
+ * an undeclared base — is pinned below as `RESIDUAL EXCEPTION` and documented
+ * in the consumer contract. Do NOT loosen these assertions silently.
  *
  * Empirical basis: every assertion was derived from executing the probe
  * scripts in scratchpad/contracts/ against the current tree. Fresh
