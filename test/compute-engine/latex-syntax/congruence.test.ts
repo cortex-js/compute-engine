@@ -265,6 +265,45 @@ describe('MathNet Tier-3 Task 5: divisibility', () => {
     }
   });
 
+  // Tycho item 37: a `Mod` factor in a product (or a power base) must be
+  // parenthesized — juxtaposition and superscripts re-parse *tighter* than
+  // `\bmod`, so an unparenthesized `Mod` absorbs the adjacent notation into
+  // its trailing operand (`Mod(A,2)·Mod(B,2)` → `A\bmod2B\bmod2` re-parsed
+  // as `Mod(A, Mod(2B, 2))` = `A mod 0` = NaN).
+  test('Mod in a product or power base is parenthesized (round-trips)', () => {
+    const ce = freshEngine();
+    const roundTrips = (mathjson: any) => {
+      const boxed = ce.box(mathjson);
+      return JSON.stringify(ce.parse(boxed.latex).json) === JSON.stringify(boxed.json);
+    };
+    expect(ce.box(['Multiply', ['Mod', 'A', 2], ['Mod', 'B', 2]]).latex).toBe(
+      '(A\\bmod2)(B\\bmod2)'
+    );
+    expect(ce.box(['Multiply', 'x', ['Mod', 'A', 2]]).latex).toBe(
+      'x(A\\bmod2)'
+    );
+    expect(ce.box(['Power', ['Mod', 'A', 2], 'x']).latex).toBe(
+      '(A\\bmod2)^{x}'
+    );
+    for (const c of [
+      ['Multiply', ['Mod', 'A', 2], ['Mod', 'B', 2]],
+      ['Multiply', 'x', ['Mod', 'A', 2]],
+      ['Multiply', 2, ['Mod', 'A', 2]],
+      ['Multiply', ['Mod', 'A', 2], ['Mod', 'B', 2], ['Mod', 'C', 2]],
+      ['Power', ['Mod', 'A', 2], 2],
+      ['Power', ['Mod', 'A', 2], 'x'],
+      ['Factorial', ['Mod', 'A', 2]],
+    ]) {
+      expect(roundTrips(c)).toBe(true);
+    }
+    // The value survives the round trip (the item-37 repro evaluated to 1
+    // before serialization and NaN after).
+    const repro = ce.box(['Multiply', ['Mod', 12, 5], ['Mod', 7, 3]]);
+    expect(ce.parse(repro.latex).evaluate().json).toEqual(
+      repro.evaluate().json
+    );
+  });
+
   test('a \\mid b parses to Divides(a, b)', () => {
     const ce = freshEngine();
     expect(ce.parse('a \\mid b').json).toEqual(['Divides', 'a', 'b']);

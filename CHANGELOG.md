@@ -1,3 +1,21 @@
+## Unreleased
+
+### Bug Fixes
+
+- **A `Mod` in a product or a power base now serializes parenthesized,
+  fixing a round-trip corruption.** Juxtaposition (invisible multiply) and
+  superscripts bind *tighter* than infix `\bmod` on re-parse, so an
+  unparenthesized `Mod` factor absorbed the adjacent notation into its
+  trailing operand: `["Multiply", ["Mod", "A", 2], ["Mod", "B", 2]]`
+  serialized to `A\bmod2B\bmod2`, which re-parses as
+  `A mod (2B mod 2)` = `A mod 0` = NaN. It now serializes as
+  `(A\bmod2)(B\bmod2)`; similarly `["Power", ["Mod", "A", 2], "x"]` is now
+  `(A\bmod2)^{x}` instead of `A\bmod2^{x}` (which re-parsed as
+  `A mod 2^x`). Same class as the 0.79.2 compound-operand `Mod`
+  parenthesization fix, on the other side of the operator. (Reported by the
+  Tycho/Graph Paper team — a hex-grid Desmos state rendered blank because
+  a product of two `Mod(Floor(…), 2)` factors round-tripped to NaN.)
+
 ## 0.83.1 _2026-07-17_
 
 ### Bug Fixes

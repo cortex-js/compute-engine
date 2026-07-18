@@ -205,12 +205,17 @@ export class Serializer {
     // If the default Delimiter (i.e. using parens), don't wrap
     const h = operator(expr);
     if (h === 'Delimiter' && nops(expr) === 1) return exprStr;
+    // `Mod` serializes as open infix (`a\bmod b`): in a tight context
+    // (power base, solidus fraction) the adjacent notation binds tighter
+    // than `\bmod` and would absorb its trailing operand on re-parse
+    // (`Mod(A,2)^x` → `A\bmod2^x` = `Mod(A, 2^x)`), so it must be wrapped.
     if (
       h !== 'Add' &&
       h !== 'Negate' &&
       h !== 'Subtract' &&
       h !== 'Measurement' &&
-      h !== 'Multiply'
+      h !== 'Multiply' &&
+      h !== 'Mod'
     )
       return exprStr;
 

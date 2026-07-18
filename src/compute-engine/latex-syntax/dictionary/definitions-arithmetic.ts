@@ -671,7 +671,18 @@ function serializeMultiply(
     }
     // 2.1 Wrap the term if necessary
     // (if it's an operator of precedence less than MULTIPLICATION_PRECEDENCE)
-    term = serializer.wrap(arg, MULTIPLICATION_PRECEDENCE);
+    //
+    // A 2-operand `Mod` serializes as open infix (`a\bmod b`, at
+    // DIVISION_PRECEDENCE), but the factors of this product are joined by
+    // juxtaposition, which re-parses at INVISIBLE_OP_PRECEDENCE — *tighter*
+    // than `\bmod`. Unparenthesized, an adjacent factor would be absorbed
+    // into the `Mod` on either side (`x·Mod(A,2)` → `xA\bmod2` re-parses as
+    // `Mod(xA,2)`), so wrap `Mod` factors above their own precedence to
+    // force parens.
+    term =
+      operator(arg) === 'Mod' && nops(arg) === 2
+        ? serializer.wrap(arg, DIVISION_PRECEDENCE + 1)
+        : serializer.wrap(arg, MULTIPLICATION_PRECEDENCE);
 
     // 2.2. The terms can be separated by an invisible multiply.
     const isContinuation = symbol(arg) === 'ContinuationPlaceholder';
