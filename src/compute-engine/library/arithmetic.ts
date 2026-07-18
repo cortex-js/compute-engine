@@ -2138,9 +2138,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (isNumber(x))
           return x.im! >= 0.5 || x.im! <= -0.5
             ? 'unsigned'
-            : numberSgn(
-                x.re < 0 ? -Math.round(-x.re) : Math.round(x.re)
-              );
+            : numberSgn(x.re < 0 ? -Math.round(-x.re) : Math.round(x.re));
         if (x.isGreaterEqual(0.5)) return 'positive';
         if (x.isLessEqual(-0.5)) return 'negative';
         if (x.isLess(0.5) && x.isGreater(-0.5)) return 'zero';
