@@ -190,9 +190,13 @@ export function symbolicSumClosedForm(
   const upper = limits.op3;
   if (!index || !lower || !upper) return undefined;
 
-  // Geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio (infinite upper bound).
+  // Geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio (infinite upper
+  // bound), and the named families that admit a free variable (exponential
+  // `Σ xᵏ/k!`, first-moment `Σ k·xᵏ`, logarithmic `Σ xᵏ/k`).
   if (upper.isInfinity === true && upper.isPositive === true) {
-    const geo = geometricSumClosedForm(body, index, lower, ce);
+    const geo =
+      geometricSumClosedForm(body, index, lower, ce) ??
+      namedSeriesClosedForm(body, index, lower, ce);
     if (geo) return geo;
   }
 
@@ -446,6 +450,341 @@ function geometricSumClosedForm(
 }
 
 /**
+ * Multiplicative decomposition of a series body `f(k)` into the features the
+ * named-series recognizers dispatch on. The body is flattened across
+ * `Divide`/`Multiply`/`Negate`/integer-`Power` into factors, each classified
+ * as one of:
+ *   - an index-free constant (folded into `coeff`),
+ *   - a geometric factor `rᵏ` or `r^(k+m)` (`m` an integer literal; `r^m`
+ *     folds into `coeff`, `r` accumulates into `ratio` — a denominator
+ *     `1/rᵏ` contributes ratio `1/r`),
+ *   - a power of the bare index `k^p` (`kPower` accumulates signed `p`),
+ *   - a denominator factor `(2k + b)^s` with integer `b`, `s ≥ 1` (`linear`),
+ *   - a denominator `k!` (`factorialDen`).
+ * Any other factor makes the decomposition fail (`undefined`).
+ */
+type SeriesBodyParts = {
+  coeff: Expression;
+  ratio: Expression | undefined;
+  kPower: number;
+  linear: { b: number; s: number } | undefined;
+  factorialDen: boolean;
+};
+
+function decomposeSeriesBody(
+  body: Expression,
+  index: string,
+  ce: ComputeEngine
+): SeriesBodyParts | undefined {
+  const coeffNum: Expression[] = [];
+  const coeffDen: Expression[] = [];
+  const ratioNum: Expression[] = [];
+  const ratioDen: Expression[] = [];
+  let kPower = 0;
+  let linear: { b: number; s: number } | undefined = undefined;
+  let factorialDen = false;
+
+  // `expr` is the exponent of a geometric factor: `k` or `k + m` (integer
+  // literal `m`). Returns `m`, or undefined if not of that shape.
+  const geometricShift = (expr: Expression): number | undefined => {
+    if (isSymbol(expr) && expr.symbol === index) return 0;
+    if (isFunction(expr, 'Add') && expr.nops === 2) {
+      const [a, b] = expr.ops;
+      if (isSymbol(a) && a.symbol === index && isNumber(b) && b.isInteger)
+        return b.re;
+      if (isSymbol(b) && b.symbol === index && isNumber(a) && a.isInteger)
+        return a.re;
+    }
+    return undefined;
+  };
+
+  // `2k + b` with integer literal `b` → `b`.
+  const oddLinearShift = (expr: Expression): number | undefined => {
+    if (!isFunction(expr, 'Add') || expr.nops !== 2) return undefined;
+    for (const [t, other] of [
+      [expr.op1, expr.op2],
+      [expr.op2, expr.op1],
+    ] as const) {
+      if (
+        isFunction(t, 'Multiply') &&
+        t.nops === 2 &&
+        t.op1.isSame(2) &&
+        isSymbol(t.op2) &&
+        t.op2.symbol === index &&
+        isNumber(other) &&
+        other.isInteger
+      )
+        return other.re;
+    }
+    return undefined;
+  };
+
+  // `inDen`: this factor sits in the denominator.
+  const addFactor = (f: Expression, inDen: boolean): boolean => {
+    if (!f.has(index)) {
+      (inDen ? coeffDen : coeffNum).push(f);
+      return true;
+    }
+    if (isSymbol(f) && f.symbol === index) {
+      kPower += inDen ? -1 : 1;
+      return true;
+    }
+    if (isFunction(f, 'Negate')) {
+      coeffNum.push(ce.NegativeOne);
+      return addFactor(f.op1, inDen);
+    }
+    if (isFunction(f, 'Factorial')) {
+      if (!inDen || factorialDen) return false;
+      if (!(isSymbol(f.op1) && f.op1.symbol === index)) return false;
+      factorialDen = true;
+      return true;
+    }
+    // A bare linear `2k + b` denominator is `(2k + b)^1` (the s = 1 case,
+    // e.g. the Leibniz series `Σ (−1)ᵏ/(2k+1)`).
+    if (inDen) {
+      const b = oddLinearShift(f);
+      if (b !== undefined) {
+        if (linear !== undefined) return false;
+        linear = { b, s: 1 };
+        return true;
+      }
+    }
+    if (isFunction(f, 'Divide'))
+      return addFactor(f.op1, inDen) && addFactor(f.op2, !inDen);
+    if (isFunction(f, 'Multiply'))
+      return f.ops.every((op) => addFactor(op, inDen));
+    if (isFunction(f, 'Power')) {
+      const base = f.op1;
+      const exp = f.op2;
+      // Geometric factor r^(k+m), index-free base.
+      if (!base.has(index)) {
+        const m = geometricShift(exp);
+        if (m === undefined) return false;
+        (inDen ? ratioDen : ratioNum).push(base);
+        if (m !== 0)
+          (inDen ? coeffDen : coeffNum).push(
+            ce.function('Power', [base, ce.number(m)])
+          );
+        return true;
+      }
+      // Index-dependent base with integer-literal exponent.
+      if (!(isNumber(exp) && exp.isInteger)) return false;
+      const p = exp.re;
+      if (!Number.isSafeInteger(p)) return false;
+      if (isSymbol(base) && base.symbol === index) {
+        kPower += inDen ? -p : p;
+        return true;
+      }
+      const b = oddLinearShift(base);
+      if (b !== undefined) {
+        // Only a single denominator factor (2k + b)^s is recognized.
+        const s = inDen ? p : -p;
+        if (s < 1 || linear !== undefined) return false;
+        linear = { b, s };
+        return true;
+      }
+      return false;
+    }
+    return false;
+  };
+
+  if (!addFactor(body, false)) return undefined;
+
+  const build = (nums: Expression[], dens: Expression[]): Expression => {
+    const num =
+      nums.length === 0
+        ? ce.One
+        : nums.length === 1
+          ? nums[0]
+          : ce.function('Multiply', nums);
+    if (dens.length === 0) return num;
+    const den =
+      dens.length === 1 ? dens[0] : ce.function('Multiply', dens);
+    return ce.function('Divide', [num, den]);
+  };
+
+  const coeff = build(coeffNum, coeffDen).evaluate();
+  const ratio =
+    ratioNum.length === 0 && ratioDen.length === 0
+      ? undefined
+      : build(ratioNum, ratioDen).evaluate();
+  return { coeff, ratio, kPower, linear, factorialDen };
+}
+
+/** `expr` is exactly the integer literal −1. */
+function isNegativeOne(expr: Expression | undefined): boolean {
+  return expr !== undefined && isNumber(expr) && expr.isSame(-1);
+}
+
+/**
+ * Closed forms for the named series families beyond the plain p-series and
+ * geometric entries (each identity numerically verified — see
+ * `test/compute-engine/infinite-series.test.ts`):
+ *
+ *   - alternating p-series `Σ_{k=1}^∞ (−1)^{k+m}/k^s = ±η(s)` with
+ *     `η(1) = ln 2`, `η(s) = (1 − 2^{1−s})·ζ(s)` for `s > 1`;
+ *   - odd p-series `Σ (2k+b)^{−s} = λ(s) = (1 − 2^{−s})·ζ(s)` for `s > 1`,
+ *     when the odd denominators start at 1 (`2·lower + b = 1`);
+ *   - Dirichlet beta `Σ (−1)^{k+m}/(2k+b)^s = ±β(s)` for
+ *     `s ∈ {1, 2, 3, 5}`: `β(1) = π/4`, `β(2) = G` (Catalan),
+ *     `β(3) = π³/32`, `β(5) = 5π⁵/1536`;
+ *   - exponential series `Σ_{k=a}^∞ c·rᵏ/k! = c·(e^r − Σ_{j<a} r^j/j!)`
+ *     (entire — no convergence guard; symbolic `r` allowed);
+ *   - first-moment geometric `Σ_{k∈{0,1}}^∞ c·k·rᵏ = c·r/(1−r)²` for
+ *     `|r| < 1` (guard routed through `conditionalValue`, like the
+ *     geometric entry);
+ *   - logarithmic series `Σ_{k=1}^∞ c·rᵏ/k = −c·ln(1−r)` for `|r| < 1`.
+ *
+ * Returns undefined when no family matches (caller keeps the sum symbolic).
+ */
+function namedSeriesClosedForm(
+  body: Expression,
+  index: string,
+  lower: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!lower.isInteger) return undefined;
+  const a = lower.re;
+  if (!Number.isSafeInteger(a)) return undefined;
+
+  const parts = decomposeSeriesBody(body, index, ce);
+  if (!parts) return undefined;
+  const { coeff, ratio, kPower, linear, factorialDen } = parts;
+
+  const times = (v: Expression): Expression =>
+    coeff.isSame(1)
+      ? v
+      : asReadableFraction(
+          ce.function('Multiply', [coeff, v]).evaluate(),
+          ce
+        );
+
+  // Exponential series: c·rᵏ/k! (kPower = 0, no linear factor).
+  if (factorialDen) {
+    if (kPower !== 0 || linear !== undefined || a < 0) return undefined;
+    const r = ratio ?? ce.One;
+    let value: Expression = ce.function('Exp', [r]);
+    if (a > 0) {
+      const terms: Expression[] = [value];
+      for (let j = 0, fact = 1; j < a; fact *= ++j)
+        terms.push(
+          ce
+            .function('Divide', [
+              ce.function('Power', [r, ce.number(j)]),
+              ce.number(fact),
+            ])
+            .evaluate()
+            .neg()
+        );
+      value = ce.function('Add', terms);
+    }
+    return times(value.evaluate());
+  }
+
+  // Odd-denominator families: a single (2k+b)^{−s} factor, no kᵖ.
+  if (linear !== undefined) {
+    if (kPower !== 0) return undefined;
+    const { b, s } = linear;
+    // The odd denominators must start at 1 (scope: the textbook shapes
+    // `Σ_{k=1} (2k−1)^{−s}` and `Σ_{k=0} (2k+1)^{−s}`).
+    if (2 * a + b !== 1) return undefined;
+
+    if (ratio === undefined) {
+      // λ(s) = (1 − 2^{−s})·ζ(s), s > 1 (s = 1 diverges).
+      if (s <= 1) return undefined;
+      const z = ce.function('Zeta', [ce.number(s)]).evaluate();
+      const scaledZ = ce
+        .box([
+          'Multiply',
+          ['Subtract', 1, ['Power', 2, -s]],
+          z.json as any,
+        ])
+        .evaluate();
+      return times(asReadableFraction(scaledZ, ce));
+    }
+
+    if (isNegativeOne(ratio)) {
+      // Dirichlet beta: the first term (k = a) has sign (−1)^a.
+      const table: Record<number, Expression> = {
+        1: ce.function('Divide', [ce.Pi, ce.number(4)]),
+        2: ce.symbol('CatalanConstant'),
+        3: ce.function('Divide', [
+          ce.function('Power', [ce.Pi, ce.number(3)]),
+          ce.number(32),
+        ]),
+        5: ce.function('Divide', [
+          ce.function('Multiply', [
+            ce.number(5),
+            ce.function('Power', [ce.Pi, ce.number(5)]),
+          ]),
+          ce.number(1536),
+        ]),
+      };
+      const beta = table[s];
+      if (!beta) return undefined;
+      const signed = a % 2 === 0 ? beta : beta.neg();
+      return times(signed);
+    }
+    return undefined;
+  }
+
+  // Alternating p-series: c·(−1)ᵏ·k^{−s} from k = 1 → −c·η(s).
+  if (isNegativeOne(ratio) && kPower <= -1) {
+    if (a !== 1) return undefined;
+    const s = -kPower;
+    const eta: Expression =
+      s === 1
+        ? ce.function('Ln', [ce.number(2)])
+        : asReadableFraction(
+            ce
+              .box([
+                'Multiply',
+                ['Subtract', 1, ['Power', 2, 1 - s]],
+                ce.function('Zeta', [ce.number(s)]).evaluate().json as any,
+              ])
+              .evaluate(),
+            ce
+          );
+    // First term (k = 1) has sign −1: Σ (−1)ᵏ/kˢ = −η(s).
+    return times(eta.neg());
+  }
+
+  if (ratio === undefined) return undefined;
+
+  // First-moment geometric: c·k·rᵏ → c·r/(1−r)², valid for |r| < 1.
+  if (kPower === 1 && (a === 0 || a === 1)) {
+    const value = times(
+      ce
+        .function('Divide', [
+          ratio,
+          ce.function('Power', [
+            ce.function('Subtract', [ce.One, ratio]),
+            2,
+          ]),
+        ])
+        .simplify()
+    );
+    const guard = ce.function('Less', [ce.function('Abs', [ratio]), ce.One]);
+    return conditionalValue(ce, value, guard) ?? undefined;
+  }
+
+  // Logarithmic series: c·rᵏ/k → −c·ln(1−r), valid for |r| < 1.
+  if (kPower === -1 && a === 1) {
+    const value = times(
+      ce
+        .function('Negate', [
+          ce.function('Ln', [ce.function('Subtract', [ce.One, ratio])]),
+        ])
+        .simplify()
+    );
+    const guard = ce.function('Less', [ce.function('Abs', [ratio]), ce.One]);
+    return conditionalValue(ce, value, guard) ?? undefined;
+  }
+
+  return undefined;
+}
+
+/**
  * Attempt a closed form for `Sum(body, [index, lower, +∞])` on an infinite
  * upper domain. Handles:
  *   - p-series `Σ_{k=a}^∞ k^{-s} = ζ(s) − Σ_{k=1}^{a−1} k^{-s}`
@@ -483,7 +822,8 @@ export function infiniteSumClosedForm(
 
   return (
     pSeriesClosedForm(body, index, lower, ce) ??
-    geometricSumClosedForm(body, index, lower, ce)
+    geometricSumClosedForm(body, index, lower, ce) ??
+    namedSeriesClosedForm(body, index, lower, ce)
   );
 }
 
@@ -507,6 +847,21 @@ export function infiniteProductClosedForm(
   if (!index || !lower || !upper) return undefined;
   if (!(upper.isInfinity === true && upper.isPositive === true))
     return undefined;
+
+  // Π_{k=a}^∞ (1 − 1/k²) = (a − 1)/a for integer a ≥ 2 (telescoping:
+  // (k−1)(k+1)/k²). Numerically verified (a = 2 → 1/2, a = 3 → 2/3).
+  const oneMinusInvSq = ce.box([
+    'Subtract',
+    1,
+    ['Divide', 1, ['Power', index, 2]],
+  ]);
+  if (oneMinusInvSq.isSame(body)) {
+    if (!lower.isInteger) return undefined;
+    const a = lower.re;
+    if (!Number.isSafeInteger(a) || a < 2) return undefined;
+    return ce.function('Divide', [ce.number(a - 1), ce.number(a)]);
+  }
+
   if (!lower.isSame(1)) return undefined;
 
   // Wallis: Π_{k=1}^∞ (1 − 1/(2k)²) = 2/π. Match the canonicalized body.
@@ -516,6 +871,24 @@ export function infiniteProductClosedForm(
     ['Divide', 1, ['Power', ['Multiply', 2, index], 2]],
   ]);
   if (wallis.isSame(body)) return ce.function('Divide', [ce.number(2), ce.Pi]);
+
+  // Odd-index Wallis analog: Π_{k=1}^∞ (1 − 1/(2k+1)²) = π/4.
+  const wallisOdd = ce.box([
+    'Subtract',
+    1,
+    ['Divide', 1, ['Power', ['Add', ['Multiply', 2, index], 1], 2]],
+  ]);
+  if (wallisOdd.isSame(body))
+    return ce.function('Divide', [ce.Pi, ce.number(4)]);
+
+  // Π_{k=1}^∞ (1 + 1/k²) = sinh(π)/π (from the sin product formula at z = i).
+  const onePlusInvSq = ce.box([
+    'Add',
+    1,
+    ['Divide', 1, ['Power', index, 2]],
+  ]);
+  if (onePlusInvSq.isSame(body))
+    return ce.function('Divide', [ce.function('Sinh', [ce.Pi]), ce.Pi]);
 
   return undefined;
 }

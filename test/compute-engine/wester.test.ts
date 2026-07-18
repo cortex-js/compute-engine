@@ -518,8 +518,13 @@ describe('Sums and products', () => {
       ['Add', 1, ['Power', 'k', -2]],
       ['Tuple', 'k', 1, 'PositiveInfinity'],
     ]);
-    // No exact table entry: exact evaluation remains symbolic.
-    expect(product.evaluate().operator).toBe('Product');
+    // Exact table entry (2026-07-18): sinh(π)/π, from the sin product
+    // formula at z = i.
+    expect(product.evaluate().json).toEqual([
+      'Divide',
+      ['Sinh', 'Pi'],
+      'Pi',
+    ]);
     expect(product.N().re).toBeCloseTo(Math.sinh(Math.PI) / Math.PI, 9);
   });
 });

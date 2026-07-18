@@ -392,8 +392,19 @@ separate tracking is needed. Grouped by theme:
   trinomial cube, and both `simplify()` and `.N()` return exact/finite results.
 - **Sum/Product closed forms (telescoping sums/products, `Π k → n!`,
   p-series `→ ζ(s)`, Wallis `→ 2/π`, and Richardson tail acceleration for
-  `.N()` of infinite sums/products ALL LANDED by 2026-07-11).** Remaining small
-  tail: the closed-form table is minimal (p-series + Wallis) and could grow.
+  `.N()` of infinite sums/products ALL LANDED by 2026-07-11; closed-form
+  table growth LANDED 2026-07-18).** The table now also covers, all
+  numerically verified (`test/compute-engine/infinite-series.test.ts`,
+  recognizers in `library/utils.ts` `namedSeriesClosedForm`): alternating
+  p-series `±η(s)` (`Σ(−1)^{k+1}/k → ln 2`, `η(2) → π²/12`), odd p-series
+  `λ(s)` (`Σ1/(2k−1)² → π²/8`), Dirichlet `β(1,2,3,5)` (Leibniz `π/4`,
+  Catalan, `π³/32`, `5π⁵/1536`), exponential `Σrᵏ/k! → eʳ` (partial-term
+  adjustment for shifted starts; symbolic ratio allowed), first-moment
+  geometric `Σk·rᵏ → r/(1−r)²` and logarithmic `Σrᵏ/k → −ln(1−r)` (both
+  `When`-guarded on `|r| < 1` for symbolic ratios), and products
+  `Π_{k≥a}(1−1/k²) → (a−1)/a`, `Π(1−1/(2k+1)²) → π/4`,
+  `Π(1+1/k²) → sinh(π)/π`. Further growth (e.g. `β(4)`, Hurwitz-shifted
+  bases `(k+m)^{−s}`, higher moments `Σk²rᵏ`) remains demand-paced.
 - **Trigonometric simplification (Pythagorean factoring LANDED 2026-07-09;
   trig-matrix rank-1 detection LANDED 2026-07-10** via the symbolic
   determinant rank path with a `TrigReduce` fallback — see the

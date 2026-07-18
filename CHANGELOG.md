@@ -1,93 +1,102 @@
-## Unreleased
+## [Unreleased]
 
 ### Improvements
 
 - **`NDSolve` now uses adaptive stepping (Dormand–Prince 5(4)) with dense
-  output.** The output is unchanged in shape — a `List` of `steps + 1`
-  uniform `[x, y]` samples — but the values are now tolerance-controlled:
-  integration adapts its internal step size (embedded 4th/5th-order error
-  control) and the uniform grid is emitted from the quartic dense-output
-  interpolant. Fixed-step RK4 silently lost accuracy near rapid transients
-  (`y′ = −50(y − cos x)` over `[0, 3]` with 100 steps erred at ~4·10⁻⁵; now
-  ~2·10⁻¹²). Non-integrable problems (finite-time blow-up, tolerance
-  failure) leave `NDSolve` inert rather than returning inaccurate samples.
+  output.** The output is unchanged in shape — a `List` of `steps + 1` uniform
+  `[x, y]` samples — but the values are now tolerance-controlled: integration
+  adapts its internal step size (embedded 4th/5th-order error control) and the
+  uniform grid is emitted from the quartic dense-output interpolant. Fixed-step
+  RK4 silently lost accuracy near rapid transients (`y′ = −50(y − cos x)` over
+  `[0, 3]` with 100 steps erred at ~4·10⁻⁵; now ~2·10⁻¹²). Non-integrable
+  problems (finite-time blow-up, tolerance failure) leave `NDSolve` inert rather
+  than returning inaccurate samples.
 
 - **Truncation dots after a repeating decimal tail now parse exactly.**
   `0.999\ldots` → `1`, `0.333\ldots` → `1/3`, `0.1212\ldots` → `4/33`: a
-  truncation marker after decimal digits ending in an evident repetend (a
-  block repeated at least 3 times for single digits, at least twice for
-  longer blocks) is read as the exact repeating decimal. Non-repeating
-  tails (`3.1415\ldots`) keep the previous behavior (the marker is
-  display-only).
+  truncation marker after decimal digits ending in an evident repetend (a block
+  repeated at least 3 times for single digits, at least twice for longer blocks)
+  is read as the exact repeating decimal. Non-repeating tails (`3.1415\ldots`)
+  keep the previous behavior (the marker is display-only).
 
 - **`nPr(n, k)` parses in lenient mode** as the k-permutation count
   `P(n, k) = C(n, k)·k!`, joining the existing `nCr(n, k)` → `Binomial`.
+
+- **The infinite Sum/Product closed-form table grew substantially.** New
+  exactly-evaluated families (each numerically verified): alternating p-series
+  (`Σ (−1)^{k+1}/k → ln 2`, `Σ (−1)^{k+1}/k² → π²/12`), odd p-series
+  (`Σ 1/(2k−1)² → π²/8`), Dirichlet beta (Leibniz `Σ (−1)^k/(2k+1) → π/4`;
+  `β(2) →` Catalan's constant; `β(3) → π³/32`; `β(5) → 5π⁵/1536`), the
+  exponential series (`Σ 1/k! → e`, `Σ xᵏ/k! → eˣ`, shifted starts adjusted
+  exactly), the first-moment geometric series (`Σ k/2ᵏ → 2`; symbolic ratio →
+  `x/(1−x)²` guarded on `|x| < 1`), and the logarithmic series
+  (`Σ 1/(k·2ᵏ) → ln 2`; symbolic ratio → `−ln(1−x)`, same guard). New
+  infinite-product entries: `Π_{k≥a} (1 − 1/k²) → (a−1)/a`,
+  `Π (1 − 1/(2k+1)²) → π/4`, and `Π (1 + 1/k²) → sinh(π)/π` (previously
+  numeric-only). Divergent or out-of-table shapes stay symbolic, as before.
 
 ## 0.84.2 _2026-07-18_
 
 ### Performance
 
-- **Removed a per-call inference-snapshot tax that had slowed the whole
-  engine by ~1.4× since 0.74.0.** Every top-level boxing or parsing
-  operation eagerly snapshotted the set of inferred symbols by walking every
-  binding in every scope — including the entire standard library — to
-  provide provenance for the fresh-matrix-inference repair
-  (`Determinant(A + B)` inferring `A`, `B` as matrices), a consumer that
-  runs only when a matrix-typed parameter mismatches. The provenance is now
-  computed forward: `BoxedSymbol.infer()` records a definition when its type
-  first transitions unknown → concrete during a boxing operation, and the
-  repair's eligibility reads that log. Matrix inference behavior is
-  unchanged (pinned by a 13-case matrix in
+- **Removed a per-call inference-snapshot tax that had slowed the whole engine
+  by ~1.4× since 0.74.0.** Every top-level boxing or parsing operation eagerly
+  snapshotted the set of inferred symbols by walking every binding in every
+  scope — including the entire standard library — to provide provenance for the
+  fresh-matrix-inference repair (`Determinant(A + B)` inferring `A`, `B` as
+  matrices), a consumer that runs only when a matrix-typed parameter mismatches.
+  The provenance is now computed forward: `BoxedSymbol.infer()` records a
+  definition when its type first transitions unknown → concrete during a boxing
+  operation, and the repair's eligibility reads that log. Matrix inference
+  behavior is unchanged (pinned by a 13-case matrix in
   `matrix-operator-typing.test.ts`); eligibility is now keyed on definition
-  identity rather than name, so a name whose fresh inner-scope definition
-  was popped no longer masks an outer definition. Measured recovery:
-  `π.N()` at 200 digits 2.5 µs → 0.12 µs (21×, faster than 0.73.0);
-  `∫ 1/(x³+1)` 5.8 ms → 1.6 ms (3.7×); the drift vs 0.73.0 across the
-  benchmark suite is eliminated.
+  identity rather than name, so a name whose fresh inner-scope definition was
+  popped no longer masks an outer definition. Measured recovery: `π.N()` at 200
+  digits 2.5 µs → 0.12 µs (21×, faster than 0.73.0); `∫ 1/(x³+1)` 5.8 ms → 1.6
+  ms (3.7×); the drift vs 0.73.0 across the benchmark suite is eliminated.
 
 ### Improvements
 
-- **The sign of integer powers of pure-imaginary bases is now determined.**
-  For `z` of type `imaginary`, `z²` reports `negative`, `z⁴` `positive` (the
-  cycle `(βi)^p = (-1)^{p/2}·β^p` for even `p`, including negative exponents:
-  `(2i)^{-2} = -1/4`), and odd powers report `unsigned` (pure imaginary).
-  Powers of a general finite non-real base report `not-zero` — a non-real
-  value is necessarily nonzero. Previously all of these were indeterminate:
-  the handler branch that addressed non-real bases was unreachable, and wrong
-  as written (it claimed *every* even power of a non-real base was negative —
-  but `i⁴ = 1` and `(1+i)² = 2i`).
+- **The sign of integer powers of pure-imaginary bases is now determined.** For
+  `z` of type `imaginary`, `z²` reports `negative`, `z⁴` `positive` (the cycle
+  `(βi)^p = (-1)^{p/2}·β^p` for even `p`, including negative exponents:
+  `(2i)^{-2} = -1/4`), and odd powers report `unsigned` (pure imaginary). Powers
+  of a general finite non-real base report `not-zero` — a non-real value is
+  necessarily nonzero. Previously all of these were indeterminate: the handler
+  branch that addressed non-real bases was unreachable, and wrong as written (it
+  claimed _every_ even power of a non-real base was negative — but `i⁴ = 1` and
+  `(1+i)² = 2i`).
 
 ### Improvements
 
-- **`Abs` typing now follows the operand's finiteness.** `|x|` of a
-  provably finite operand (real or complex) types `finite_real` instead of
-  the signature's generic `real`; a provably infinite operand types
+- **`Abs` typing now follows the operand's finiteness.** `|x|` of a provably
+  finite operand (real or complex) types `finite_real` instead of the
+  signature's generic `real`; a provably infinite operand types
   `non_finite_number`, and a literal `NaN` types `number`. Finiteness also
-  propagates structurally (`|x|` is finite iff `x` is), which makes signs
-  of products of absolute values determinate: `|x|·|y|` for finite `x`, `y`
-  now reports `non-negative` (this path previously hit a latent inverted
-  parity claim in `Multiply` — see the sgn audit below — and before that
-  was masked entirely).
+  propagates structurally (`|x|` is finite iff `x` is), which makes signs of
+  products of absolute values determinate: `|x|·|y|` for finite `x`, `y` now
+  reports `non-negative` (this path previously hit a latent inverted parity
+  claim in `Multiply` — see the sgn audit below — and before that was masked
+  entirely).
 
 ### Bug Fixes
 
-- **Sign (`sgn`) handler audit.** A mathematical-correctness pass over all
-  ~69 `sgn` handlers fixed a dozen wrong claims (each could mislead
-  simplifications or comparisons built on `isPositive`/`isNegative`):
-  `Gamma(0)` and `Gamma(-n)` reported `zero`/indeterminate instead of
-  recognizing poles; `Log` with a negative base claimed a real sign (the
-  sign only flips for a base in (0,1)); `Truncate(1/2)` claimed `positive`
-  (truncation of |x| < 1 is 0); `Round(-1/2)` claimed `zero` while
-  `evaluate` rounds halves away from zero (−1); `GCD(0,0)` and `LCM(0,n)`
-  claimed `positive` (both are 0); `Floor`/`Ceil` of a complex number used
-  the sign of the raw real part instead of the rounded one
-  (`⌊0.5+0.5i⌋ = 0`); `Factorial(-1/2)` claimed non-real (it is `Γ(1/2) =
-  √π`; only negative *integers* are poles, same fix for `Factorial2`);
-  `Abs(NaN)` claimed `positive`; `Random(-5, 5)` claimed `non-negative`;
-  tensor `Rank` of a scalar claimed `positive` (it is 0); and a latent
-  parity inversion in `Multiply` swapped `non-negative`/`non-positive` for
-  products of sign-indefinite factors. `Arctan` now reports the sign of its
-  argument (it previously never produced one).
+- **Sign (`sgn`) handler audit.** A mathematical-correctness pass over all ~69
+  `sgn` handlers fixed a dozen wrong claims (each could mislead simplifications
+  or comparisons built on `isPositive`/`isNegative`): `Gamma(0)` and `Gamma(-n)`
+  reported `zero`/indeterminate instead of recognizing poles; `Log` with a
+  negative base claimed a real sign (the sign only flips for a base in (0,1));
+  `Truncate(1/2)` claimed `positive` (truncation of |x| < 1 is 0); `Round(-1/2)`
+  claimed `zero` while `evaluate` rounds halves away from zero (−1); `GCD(0,0)`
+  and `LCM(0,n)` claimed `positive` (both are 0); `Floor`/`Ceil` of a complex
+  number used the sign of the raw real part instead of the rounded one
+  (`⌊0.5+0.5i⌋ = 0`); `Factorial(-1/2)` claimed non-real (it is `Γ(1/2) = √π`;
+  only negative _integers_ are poles, same fix for `Factorial2`); `Abs(NaN)`
+  claimed `positive`; `Random(-5, 5)` claimed `non-negative`; tensor `Rank` of a
+  scalar claimed `positive` (it is 0); and a latent parity inversion in
+  `Multiply` swapped `non-negative`/`non-positive` for products of
+  sign-indefinite factors. `Arctan` now reports the sign of its argument (it
+  previously never produced one).
 
 - **A single-letter builtin operator used as a variable now stays connected to
   later assignments.** Prose-style input like `N \equiv 1 \pmod 5` devolves the
