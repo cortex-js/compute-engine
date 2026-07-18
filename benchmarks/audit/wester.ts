@@ -212,8 +212,27 @@ function refSamples(c: Case): (number | null)[] {
     return hi == null || lo == null ? null : (hi - lo) / (2 * H);
   });
   if (c.op === 'limit') {                                                                     // near-point estimate
-    if (c.point === 'PositiveInfinity') return [numAt(ce, f, c.varName, 1e6)];
-    if (c.point === 'NegativeInfinity') return [numAt(ce, f, c.varName, -1e6)];
+    // A limit-at-∞ reference is only trustworthy when (a) no var-containing
+    // subexpression overflows at the probe point — otherwise a finite result
+    // is an artifact of `finite/∞ → 0`-style collapse (the Gruntz
+    // `ln ln(x²+2e^(e^(3x³ln x)))` case probes as 0, not 1/3) — and (b) two
+    // probe magnitudes agree, mirroring the two-sided check at finite points
+    // (slow-converging limits like `ln x/(ln x+sin x) → 1` read ~1.026 at
+    // x=1e6; no float-range probe can resolve an O(1/ln x) tail). When either
+    // guard trips, return no reference: grading falls back to solved-status
+    // + the CE-vs-SymPy cross-check.
+    if (c.point === 'PositiveInfinity' || c.point === 'NegativeInfinity') {
+      const sgn = c.point === 'PositiveInfinity' ? 1 : -1;
+      const subtreeOverflows = (e: any): boolean => {
+        if (!e?.ops) return false;
+        if (e.has?.(c.varName) && numAt(ce, e, c.varName, sgn * 1e6) == null) return true;
+        return e.ops.some(subtreeOverflows);
+      };
+      const near = numAt(ce, f, c.varName, sgn * 1e6), far = numAt(ce, f, c.varName, sgn * 1e5);
+      if (near == null || far == null || Math.abs(near - far) > 1e-3 * (1 + Math.abs(near))) return [null];
+      if (subtreeOverflows(f)) return [null];
+      return [near];
+    }
     const a0 = Number(c.point);
     const hi = numAt(ce, f, c.varName, a0 + H), lo = numAt(ce, f, c.varName, a0 - H);
     if (hi == null || lo == null || Math.abs(hi - lo) > 1e-3 * (1 + Math.abs(hi))) return [null];
