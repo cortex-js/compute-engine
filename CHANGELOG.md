@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **A single-letter builtin operator used as a variable now stays connected to
+  later assignments.** Prose-style input like `N \equiv 1 \pmod 5` devolves the
+  un-applied builtin `N` to an unknown symbol, but when every other operand
+  validated cleanly the devolved symbol was discarded and the expression kept
+  the original symbol, still bound to the builtin operator: a later
+  `N \coloneq 11` was invisible and the expression stayed stuck symbolic. The
+  substituted operand is now retained (same fix for operands re-typed by
+  matrix-context inference repair), so assigning the variable evaluates as
+  expected.
+
 ## 0.84.1 _2026-07-17_
 
 ### Bug Fixes
