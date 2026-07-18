@@ -1492,7 +1492,13 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
   // this (its `count` is known-finite). Tuples stay atomic
   // (`isBroadcastableCollection` excludes them).
   if (xs.some(isUnknownLengthBroadcast))
-    return lazyBroadcastMap(ce, 'Multiply', xs, isBroadcastableCollection, false);
+    return lazyBroadcastMap(
+      ce,
+      'Multiply',
+      xs,
+      isBroadcastableCollection,
+      false
+    );
 
   // Tensor (matrix/vector) operands follow matrix-product / scalar-scaling
   // semantics rather than the scalar Product machinery.
@@ -1542,7 +1548,13 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   // documents why this precedes the tensor branch); the `N`-wrap threads
   // through so elements float on access.
   if (xs.some(isUnknownLengthBroadcast))
-    return lazyBroadcastMap(ce, 'Multiply', xs, isBroadcastableCollection, true);
+    return lazyBroadcastMap(
+      ce,
+      'Multiply',
+      xs,
+      isBroadcastableCollection,
+      true
+    );
   if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs, true);
   // Broadcast over a non-tensor finite indexed collection (see `mul`).
   if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {

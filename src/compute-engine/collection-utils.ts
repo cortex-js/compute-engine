@@ -558,7 +558,13 @@ export function broadcastOverIndexedCollections(
   // size (e.g. `PointList`, whose `List<Tuple>` shape is a consumer contract)
   // leave `allowLazy` false and always get the eager materialization.
   if (allowLazy && n > MAX_SIZE_EAGER_COLLECTION)
-    return lazyBroadcastMap(ce, operator, xs, isBroadcast, numericApproximation);
+    return lazyBroadcastMap(
+      ce,
+      operator,
+      xs,
+      isBroadcast,
+      numericApproximation
+    );
 
   const options = { numericApproximation };
   const results: Expression[] = [];

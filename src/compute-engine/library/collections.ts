@@ -139,8 +139,9 @@ function peekWrappers(
 }
 
 // Strip count-preserving wrappers (Sort/Shuffle/Reverse) from `op`.
-const peekCountPreserving = (op: Expression | undefined): Expression | undefined =>
-  peekWrappers(op, COUNT_PRESERVING_WRAPPERS);
+const peekCountPreserving = (
+  op: Expression | undefined
+): Expression | undefined => peekWrappers(op, COUNT_PRESERVING_WRAPPERS);
 
 // Strip membership-preserving wrappers (Sort/Shuffle/Reverse/Unique) from `op`.
 // NOTE: `Unique` is membership-preserving but NOT count-preserving, so it is
