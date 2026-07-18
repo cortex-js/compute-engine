@@ -280,6 +280,8 @@ const BARE_FUNCTION_MAP: Record<string, string> = {
   // Combinatorics
   binom: 'Binomial',
   nCr: 'Binomial',
+  nPr: 'Permutations', // Special-cased in `tryParseBareFunction`:
+  // `nPr(n, k)` → the k-permutation count P(n, k) = C(n, k)·k!
 };
 
 /** Mapping of special tokens to their LaTeX string, as used by
@@ -2667,6 +2669,17 @@ export class _Parser implements Parser {
     // Special case: cbrt(x) -> ['Root', x, 3]
     if (name === 'cbrt') {
       const result: MathJsonExpression = ['Root', args[0] ?? 'Nothing', 3];
+      return exponent !== null ? ['Power', result, exponent] : result;
+    }
+
+    // Special case: nPr(n, k) -> the k-permutation count P(n, k) = C(n, k)·k!
+    // (`Permutations` proper is the collection of arrangements, not the count)
+    if (name === 'nPr') {
+      const result: MathJsonExpression = [
+        'Multiply',
+        ['Binomial', args[0] ?? 'Nothing', args[1] ?? 'Nothing'],
+        ['Factorial', args[1] ?? 'Nothing'],
+      ];
       return exponent !== null ? ['Power', result, exponent] : result;
     }
 

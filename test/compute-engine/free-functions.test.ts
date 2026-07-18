@@ -36,3 +36,15 @@ describe('Free functions: lenient parsing and strict escape hatch', () => {
     expect(simplify('sin(alpha)').json).toEqual(['Sin', 'alpha']);
   });
 });
+
+describe('Bare combinatorics function names (lenient mode)', () => {
+  // `nPr(n, k)` is the k-permutation count P(n, k) = C(n, k)·k!; it was
+  // formerly absent from BARE_FUNCTION_MAP and parsed as letter soup.
+  test('nPr(5, 2) is the permutation count 20', () => {
+    expect(evaluate('nPr(5, 2)').json).toEqual(20);
+  });
+
+  test('nCr(5, 2) is the binomial coefficient 10', () => {
+    expect(evaluate('nCr(5, 2)').json).toEqual(10);
+  });
+});

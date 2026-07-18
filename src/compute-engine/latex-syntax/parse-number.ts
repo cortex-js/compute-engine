@@ -179,6 +179,31 @@ function dotOverDigit(parser: Parser): string | null {
   return null;
 }
 
+/**
+ * If the digit string ends in an evident repetend — a trailing block repeated
+ * consecutively at least 3 times for single digits, at least twice for longer
+ * blocks — return `[prefix, block]` with every trailing repetition stripped
+ * from the prefix. Otherwise return `null`.
+ *
+ * Used to read a truncation marker after decimal digits as a repeating
+ * decimal when the repetition is unambiguous: `0.999…` → `0.(9)`,
+ * `0.1666…` → `0.1(6)`, `0.121212…` → `0.(12)`. A tail with no evident
+ * repetend (`3.1415…`) or too few repetitions (`0.99…`) yields `null` — the
+ * marker is then display-only truncation.
+ */
+function detectRepetend(digits: string): [string, string] | null {
+  const n = digits.length;
+  for (let len = 1; len <= n >> 1; len++) {
+    const block = digits.slice(n - len);
+    let reps = 1;
+    while ((reps + 1) * len <= n && digits.startsWith(block, n - (reps + 1) * len))
+      reps += 1;
+    if (reps >= (len === 1 ? 3 : 2))
+      return [digits.slice(0, n - reps * len), block];
+  }
+  return null;
+}
+
 /** Check if upcoming tokens might represent repeating digits notation. */
 function mayBeRepeatingDigits(parser: Parser): boolean {
   const peek = parser.peek;
@@ -344,7 +369,17 @@ export function parseNumber(
       parser.match('\\ldots') ||
       parser.matchAll(fmt.truncationMarkerTokens)
     ) {
-      // We got a truncation marker, just ignore it.
+      // A truncation marker after the fractional digits. If the displayed
+      // digits end in an evident repetend, read it as a repeating decimal
+      // (`0.999\ldots` → `0.(9)` = 1, `0.1212\ldots` → `0.(12)`); otherwise
+      // it is display-only truncation (`3.1415\ldots`) and is ignored.
+      if (!hasRepeatingPart) {
+        const repetend = detectRepetend(fractionalPart);
+        if (repetend) {
+          fractionalPart = `${repetend[0]}(${repetend[1]})`;
+          hasRepeatingPart = true;
+        }
+      }
     }
   }
 

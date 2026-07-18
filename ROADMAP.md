@@ -257,9 +257,21 @@ Still open from its ranked list:
 - **Perf tail** (measurement-gated): per-opDef `allParamsNumeric` cache,
   cold-start bundle size, serialization cache / sort-comparator allocs.
 - **Loose-parsing low items:** `sqrt2x` → `√(2x)` divergence from AsciiMath
-  convention; `min x` → `Min(x)`; explicit `_a` wildcards in arrow-string
-  rules are a silent no-op (redundant there — auto-wildcarding covers it).
-- **Doc/cosmetic tail:** `0.999\ldots` drops the ellipsis; locale separators.
+  convention (left as-is 2026-07-18: implicit arguments are the documented
+  bare-function convention — `cos 2x` → `Cos(2x)` — so following AsciiMath
+  here would be internally inconsistent; a deliberate-policy note, not a
+  bug); explicit `_a` wildcards in arrow-string rules are a silent no-op
+  (redundant there — auto-wildcarding covers it). *(Closed 2026-07-18:
+  `min x`/`acot`/`asec`/`acsc`/`alpha2` had been fixed by intervening work;
+  `nPr(n, k)` now parses as the permutation count C(n,k)·k!, joining `nCr`.
+  Infix calculator notation `5 nPr 2` remains unsupported — a new-notation
+  design item, not a map gap.)*
+- **Doc/cosmetic tail:** locale separators. *(`0.999\ldots` fixed
+  2026-07-18: a truncation marker after decimal digits ending in an evident
+  repetend — ≥3 reps for single digits, ≥2 for longer blocks — now parses
+  as the exact repeating decimal (`0.999\ldots` → 1, `0.1212\ldots` →
+  4/33); non-repeating tails (`3.1415\ldots`) keep the old
+  drop-the-marker behavior.)*
 - ODE P2s — folded into the DSolve/NDSolve track below (**B12**).
 
 ### Symbolic capability gaps
@@ -328,11 +340,20 @@ five `unsupported` rows are the coverage frontier (SymPy solves four):
 second order, nonhomogeneous Cauchy–Euler, repeated-eigenvalue linear
 systems.** Ranked next steps (good contributor territory):
 
-- **`NDSolve` numerics.** Adaptive stepping (RK45 / Dormand–Prince) with an
-  error tolerance — fixed-step RK4 silently loses accuracy near rapid
-  transients; expose first-order vector IVPs in the API (`rk4System` already
-  exists internally); dense-output/interpolating result usable at arbitrary
-  `x` instead of a raw sample `List` (composes with `compile()`).
+- **`NDSolve` numerics — adaptive stepping LANDED 2026-07-18.** `NDSolve`
+  now integrates with adaptive Dormand–Prince 5(4) (embedded error control,
+  rtol 1e-11 / atol 1e-13 defaults, RMS norm; `rk45System` in
+  `numerics/differential-equations.ts`) and emits its unchanged uniform
+  `steps + 1` output grid from the quartic dense-output interpolant, so
+  `steps` is now purely sampling resolution and accuracy is
+  tolerance-controlled (rapid-transient case `y' = −50(y − cos x)`: grid
+  error 4e-5 → 2e-12). Failure modes (blow-up, step underflow, step cap)
+  stay inert. First-order vector IVPs were already exposed (the
+  `List`-of-equations form). Remaining, demand-paced: a **public
+  interpolating-function surface** — arbitrary-`x` evaluation of the dense
+  output (the kernel exposes `rk45Sample`; the open decision is the result
+  representation: an opaque `InterpolatingFunction`-style head vs. a
+  piecewise `Function` literal that composes with `compile()`).
 - **Tolerance hardening** in the numeric characteristic-root clustering, so
   near-degenerate roots are grouped reliably as coverage of higher-order
   nonhomogeneous problems grows.
@@ -432,8 +453,9 @@ matrix ∞-`Norm`, `BaseForm`, finite-domain `ForAll`/`Exists`).
   catalogued here for completeness, not planned.
 - **Matrix decompositions & functions:** `MatrixExp` / general matrix
   functions (note: `Exp` of a matrix currently **broadcasts elementwise** —
-  arguably a footgun worth an error or a doc warning even before the real
-  matrix exponential exists); symbolic singular values (`SVD` is
+  the footgun is now documented: warning admonition in the linear-algebra
+  guide + reference-table note + operator description, 2026-07-18; an
+  actual matrix exponential remains future work); symbolic singular values (`SVD` is
   float-only); Jordan / Smith normal forms; symbolic Frobenius norm
   (`Norm(M, 'Frobenius')` for symbolic entries).
 - **Hypothesis testing:** `MeanTest` etc. — undeclared; only worth pursuing
