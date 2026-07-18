@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.84.2 _2026-07-18_
 
 ### Performance
 
