@@ -244,6 +244,16 @@ export type FactIndex = {
    * `relationFromChains` for transitive-closure / antisymmetry reasoning.
    */
   geEdges: Map<string, GeEdge[]>;
+  /**
+   * Every subject mentioned in any normalized inequality entry (as a bare
+   * term, `Negate(term)`, `Subtract` operand, or `Add` summand) — collected
+   * regardless of the entry's truth value. A subject absent from this set
+   * provably cannot be decided by the legacy linear-scan sign inference, so
+   * callers may skip that O(#assumptions) fallback without changing any
+   * answer (the gate over-approximates the scan's reach; it never turns
+   * "unknown" into a definite sign).
+   */
+  inequalitySubjects: Set<string>;
 };
 
 /** A single ≥ edge `u ≥ to` (strict = `u > to`) in the assumed-inequality graph. */
@@ -253,6 +263,7 @@ const EMPTY_FACT_INDEX: FactIndex = Object.freeze({
   bySubject: new Map<string, SubjectFacts>(),
   membership: new Map<string, MembershipFacts>(),
   geEdges: new Map<string, GeEdge[]>(),
+  inequalitySubjects: new Set<string>(),
 });
 
 type FactIndexCacheEntry = {
@@ -287,7 +298,14 @@ function subjectsInNormalizedLhs(lhs: Expression): Subject[] {
     if (s !== undefined) found.set(subjectKey(s), s);
   };
   if (isFunction(lhs, 'Add')) for (const term of lhs.ops) consider(term);
-  else consider(lhs);
+  else if (isFunction(lhs, 'Subtract') && lhs.ops.length === 2) {
+    // Not produced by canonical normalization, but the legacy scan matches
+    // `Subtract` operands, so the `inequalitySubjects` gate must see them.
+    // Harmless for the bounds path (`boundsFromNormalizedInequality`
+    // recognizes no `Subtract` shape and yields no bound for these).
+    consider(lhs.ops[0]);
+    consider(lhs.ops[1]);
+  } else consider(lhs);
   return [...found.values()];
 }
 
@@ -326,6 +344,7 @@ function buildFactIndex(
   const bySubject = new Map<string, SubjectFacts>();
   const membership = new Map<string, MembershipFacts>();
   const geEdges = new Map<string, GeEdge[]>();
+  const inequalitySubjects = new Set<string>();
 
   const addGeEdge = (from: string, to: string, strict: boolean): void => {
     let arr = geEdges.get(from);
@@ -356,9 +375,20 @@ function buildFactIndex(
   };
 
   for (const [assumption, val] of assumptions) {
-    if (val !== true) continue;
     const op = assumption.operator;
     if (!op || !isFunction(assumption)) continue;
+
+    // Collect the legacy-scan gate set BEFORE the truth-value filter: the
+    // legacy scan iterates every stored entry regardless of its value, so
+    // the gate must over-approximate its reach to stay fail-closed.
+    if (op === 'Less' || op === 'LessEqual') {
+      const ops = assumption.ops;
+      if (ops.length === 2 && ops[1].isSame(0))
+        for (const subject of subjectsInNormalizedLhs(ops[0]))
+          inequalitySubjects.add(subjectKey(subject));
+    }
+
+    if (val !== true) continue;
 
     //
     // Normalized inequalities: Less/LessEqual(lhs, 0)
@@ -406,7 +436,7 @@ function buildFactIndex(
     }
   }
 
-  return { bySubject, membership, geEdges };
+  return { bySubject, membership, geEdges, inequalitySubjects };
 }
 
 /**

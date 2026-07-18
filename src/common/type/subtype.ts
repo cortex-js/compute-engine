@@ -342,6 +342,21 @@ function provablyDisjoint(a: Type, b: Type): boolean {
   return false;
 }
 
+// NOT memoized (perf review, P2-2 — measured 2026-07-18, do not re-attempt
+// without a new profile): a resolver-safe memo (identity-keyed WeakMap on the
+// interned `Type` objects, gated to pairs with no embedded `reference` type —
+// references are the one mutable spot: `declareType` patches `.def` post-
+// construction, and their meaning is resolver-dependent) was implemented and
+// A/B-measured (interleaved, one process) at 0.85–0.91× on the boxing
+// microloop across repeated clean runs: the hot call shapes (instrumented:
+// mostly `primitive <: list/matrix/collection` against a small interned set
+// of ~1.5k Type objects) resolve in a handful of branches in the walk, so
+// cache machinery (WeakMap+Map lookups) costs more than the walk it skips.
+// Differential over 2,724 type pairs was identical. The cheap wins here
+// already exist: `parseType`'s resolver-less string cache and the
+// `PRIMITIVE_SUBTYPES_CLOSURE` O(1) primitive lattice. Any future gain is in
+// reducing CALL COUNT (checkNumericArgs / type handlers), not per-call cost.
+
 /** Return true if lhs is a subtype of rhs */
 export function isSubtype(
   lhs: Type | TypeString,

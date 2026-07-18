@@ -1224,7 +1224,9 @@ export function getSignFromAssumptions(
   // whereas the legacy scan only saw the *sign* of the constant (`≥ 0`) and
   // returned `non-negative`, leaving `n.isPositive` undefined while
   // `verify(n > 0)` was already `true`.
-  const facts = getFactIndex(ce).bySubject.get(subjectKey(subj));
+  const index = getFactIndex(ce);
+  const key = subjectKey(subj);
+  const facts = index.bySubject.get(key);
   if (facts !== undefined) {
     let s = signFromBounds(facts.bounds);
     // Refine a non-strict sign to strict using a disequality-from-zero fact
@@ -1244,6 +1246,12 @@ export function getSignFromAssumptions(
   // `assume(x + y < 0)` with `y` non-negative ⇒ `x` negative). Every case it
   // decides is decided identically or more sharply by the bounds path above,
   // so this preserves the historical envelope as a strict superset.
+  //
+  // Gate (Perf P2-3): the scan can only decide subjects that appear in some
+  // normalized inequality entry; for any other subject it provably returns
+  // `undefined`, so skip the O(#assumptions) walk. This never turns
+  // "unknown" into a definite sign — it only avoids recomputing "unknown".
+  if (!index.inequalitySubjects.has(key)) return undefined;
   return getSignFromAssumptionsLegacy(ce, subj);
 }
 
