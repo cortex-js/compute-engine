@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Improvements
+
+- **The sign of integer powers of pure-imaginary bases is now determined.**
+  For `z` of type `imaginary`, `z²` reports `negative`, `z⁴` `positive` (the
+  cycle `(βi)^p = (-1)^{p/2}·β^p` for even `p`, including negative exponents:
+  `(2i)^{-2} = -1/4`), and odd powers report `unsigned` (pure imaginary).
+  Powers of a general finite non-real base report `not-zero` — a non-real
+  value is necessarily nonzero. Previously all of these were indeterminate:
+  the handler branch that addressed non-real bases was unreachable, and wrong
+  as written (it claimed *every* even power of a non-real base was negative —
+  but `i⁴ = 1` and `(1+i)² = 2i`).
+
 ### Bug Fixes
 
 - **A single-letter builtin operator used as a variable now stays connected to

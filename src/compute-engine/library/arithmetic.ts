@@ -1797,6 +1797,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       sgn: ([a, b]) => {
         //Missing some cases like (-1)^{1/3}
+        // A finite, provably non-real base is necessarily nonzero (0 is
+        // real), so its finite integer powers are nonzero. A *pure-imaginary*
+        // base cycles with period 4: (βi)^p is real with sign (-1)^(p/2) for
+        // even integer p, and pure imaginary — hence unsigned — for odd p.
+        // (Both exactness guards matter: `integer` admits ±∞, and β^∞ can be
+        // 0 for |β| < 1.)
+        if (
+          isNonRealNumber(a.type.type) &&
+          a.isFinite === true &&
+          b.isInteger === true &&
+          b.isFinite === true
+        ) {
+          if (a.type.matches('imaginary')) {
+            if (b.isEven === true) {
+              const p = b.re;
+              if (Number.isSafeInteger(p))
+                return (p / 2) % 2 === 0 ? 'positive' : 'negative';
+              return 'not-zero';
+            }
+            if (b.isOdd === true) return 'unsigned';
+          }
+          return 'not-zero';
+        }
         const aSgn = a.sgn;
         const bSgn = b.sgn;
         if (
@@ -1828,7 +1851,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ? 'positive'
               : 'non-negative';
           }
-          if (isNonRealNumber(a.type.type)) return 'negative';
+          // Non-real bases were handled before the `isReal === false` bail
+          // above; here `a.isReal` is undefined.
           return !a.isSame(0) ? 'not-zero' : undefined; //already accounted for a.is(0)
         }
 
@@ -2248,8 +2272,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? 'positive'
             : 'non-negative';
         }
-        if (isNonRealNumber(x.type.type)) return 'negative';
-        if (x.isReal == false || x.isNaN) return 'unsigned';
+        // x² of a pure-imaginary x is real and negative: (βi)² = -β², with
+        // β ≠ 0 since `imaginary` excludes 0. For any other finite non-real
+        // x, x² is nonzero but may be negative-real (x pure imaginary at
+        // runtime) or non-real, so only `not-zero` is sound — `unsigned`
+        // would claim a definite imaginary part.
+        if (x.type.matches('imaginary')) return 'negative';
+        if (isNonRealNumber(x.type.type) && x.isFinite === true)
+          return 'not-zero';
+        if (x.isNaN) return 'unsigned';
         return undefined;
       },
       canonical: (args, { engine }) => {
