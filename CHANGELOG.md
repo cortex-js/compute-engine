@@ -1,3 +1,28 @@
+## Unreleased
+
+### Improvements
+
+- **`NDSolve` now uses adaptive stepping (Dormand–Prince 5(4)) with dense
+  output.** The output is unchanged in shape — a `List` of `steps + 1`
+  uniform `[x, y]` samples — but the values are now tolerance-controlled:
+  integration adapts its internal step size (embedded 4th/5th-order error
+  control) and the uniform grid is emitted from the quartic dense-output
+  interpolant. Fixed-step RK4 silently lost accuracy near rapid transients
+  (`y′ = −50(y − cos x)` over `[0, 3]` with 100 steps erred at ~4·10⁻⁵; now
+  ~2·10⁻¹²). Non-integrable problems (finite-time blow-up, tolerance
+  failure) leave `NDSolve` inert rather than returning inaccurate samples.
+
+- **Truncation dots after a repeating decimal tail now parse exactly.**
+  `0.999\ldots` → `1`, `0.333\ldots` → `1/3`, `0.1212\ldots` → `4/33`: a
+  truncation marker after decimal digits ending in an evident repetend (a
+  block repeated at least 3 times for single digits, at least twice for
+  longer blocks) is read as the exact repeating decimal. Non-repeating
+  tails (`3.1415\ldots`) keep the previous behavior (the marker is
+  display-only).
+
+- **`nPr(n, k)` parses in lenient mode** as the k-permutation count
+  `P(n, k) = C(n, k)·k!`, joining the existing `nCr(n, k)` → `Binomial`.
+
 ## 0.84.2 _2026-07-18_
 
 ### Performance

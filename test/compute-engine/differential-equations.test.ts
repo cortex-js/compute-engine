@@ -1665,3 +1665,101 @@ describe('NDSolve', () => {
     }
   });
 });
+
+/**
+ * NDSolve integrates with adaptive Dormand–Prince 5(4) and emits the uniform
+ * `steps + 1` output grid from the dense-output interpolant. The output SHAPE
+ * is identical to the former fixed-step RK4 (same grid, same nesting); the
+ * VALUES are tolerance-controlled — in particular accurate near rapid
+ * transients, where fixed-step RK4 silently lost accuracy.
+ */
+describe('NDSolve adaptive stepping (RK45 + dense output)', () => {
+  test('rapid transient is resolved to near machine accuracy', () => {
+    // y' = −50(y − cos x), y(0) = 0 over [0, 3]:
+    // y = (2500·cos x + 50·sin x)/2501 − (2500/2501)·e^(−50x).
+    // Fixed-step RK4 with 100 steps errs at ~4e-5 here.
+    const result = engine
+      .expr([
+        'NDSolve',
+        [
+          'Equal',
+          ['D', ['y', 'x'], 'x'],
+          ['Multiply', -50, ['Subtract', ['y', 'x'], ['Cos', 'x']]],
+        ],
+        'y',
+        ['Limits', 'x', 0, 3],
+        0,
+        100,
+      ])
+      .evaluate();
+
+    expect(result.operator).toBe('List');
+    expect(result.ops.length).toBe(101);
+
+    const exact = (x: number) =>
+      (2500 * Math.cos(x) + 50 * Math.sin(x)) / 2501 -
+      (2500 / 2501) * Math.exp(-50 * x);
+    // Every grid point — including the ones between adaptive integration
+    // steps, which exercise the dense-output interpolant — is accurate.
+    for (const sample of result.ops) {
+      const x = sample.op1.N().re;
+      const y = sample.op2.N().re;
+      expect(Math.abs(y - exact(x))).toBeLessThan(1e-9);
+    }
+  });
+
+  test('output grid is uniform with exact endpoints (unchanged shape)', () => {
+    const result = engine
+      .expr([
+        'NDSolve',
+        ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+        'y',
+        ['Limits', 'x', 0, 1],
+        1,
+        10,
+      ])
+      .evaluate();
+
+    expect(result.ops.length).toBe(11);
+    expect(result.ops[0].op1.N().re).toBe(0);
+    expect(result.ops[10].op1.N().re).toBe(1);
+    for (let i = 0; i <= 10; i++)
+      expect(result.ops[i].op1.N().re).toBeCloseTo(i / 10, 12);
+    expect(result.ops[10].op2.N().re).toBeCloseTo(Math.E, 10);
+  });
+
+  test('integrating toward decreasing x works', () => {
+    // y' = y from x = 1 back to x = 0 with y(1) = e: y(0) = 1.
+    const result = engine
+      .expr([
+        'NDSolve',
+        ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+        'y',
+        ['Limits', 'x', 1, 0],
+        Math.E,
+        10,
+      ])
+      .evaluate();
+
+    expect(result.operator).toBe('List');
+    expect(result.ops[10].op1.N().re).toBe(0);
+    expect(result.ops[10].op2.N().re).toBeCloseTo(1, 9);
+  });
+
+  test('a finite-time blow-up stays inert rather than returning garbage', () => {
+    // y' = y², y(0) = 1 blows up at x = 1; integrating past it must not
+    // produce values.
+    const result = engine
+      .expr([
+        'NDSolve',
+        ['Equal', ['D', ['y', 'x'], 'x'], ['Power', ['y', 'x'], 2]],
+        'y',
+        ['Limits', 'x', 0, 2],
+        1,
+        50,
+      ])
+      .evaluate();
+
+    expect(result.operator).toBe('NDSolve');
+  });
+});

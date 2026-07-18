@@ -1,6 +1,39 @@
 import type { Expression, IComputeEngine } from './global-types.js';
 import { isFunction, isSymbol, sym } from './boxed-expression/type-guards.js';
-import { rk4, rk4System } from './numerics/differential-equations.js';
+import {
+  rk45System,
+  rk45Sample,
+  type RK45Solution,
+} from './numerics/differential-equations.js';
+
+/**
+ * Integrate `y' = f(x, y)` adaptively (Dormand–Prince 5(4)) and sample the
+ * dense-output interpolant on the uniform grid of `steps + 1` points over
+ * `[x0, x1]` — the same output shape the former fixed-step RK4 produced, at
+ * tolerance-controlled accuracy. Returns `undefined` (→ inert `NDSolve`)
+ * when the integration fails (non-finite derivative, blow-up, step cap).
+ */
+function solveOnGrid(
+  f: (x: number, y: readonly number[]) => readonly number[] | undefined,
+  x0: number,
+  y0: readonly number[],
+  x1: number,
+  steps: number,
+  deadline?: number
+): [x: number, y: readonly number[]][] | undefined {
+  const solution: RK45Solution | undefined = rk45System(f, x0, y0, x1, {
+    deadline,
+  });
+  if (!solution) return undefined;
+
+  const samples: [number, readonly number[]][] = [];
+  for (let i = 0; i < steps; i++) {
+    const x = x0 + (i * (x1 - x0)) / steps;
+    samples.push([x, rk45Sample(solution, x)]);
+  }
+  samples.push([x1, solution.y1]);
+  return samples;
+}
 
 export function symbolArg(
   engine: IComputeEngine,
@@ -285,7 +318,7 @@ export function nDSolve(
       runs.push(compiled.run as (vars: Record<string, number>) => number);
     }
 
-    const samples = rk4System(
+    const samples = solveOnGrid(
       (x, y) => {
         const vars: Record<string, number> = { [independentName]: x };
         stateNames.forEach((name, i) => {
@@ -297,7 +330,8 @@ export function nDSolve(
       x0,
       initialValues,
       x1,
-      { steps, deadline: ce._deadline }
+      steps,
+      ce._deadline
     );
     if (!samples) return undefined;
 
@@ -347,7 +381,7 @@ export function nDSolve(
     if (!compiled.success) return undefined;
     const run = compiled.run as (vars: Record<string, number>) => number;
 
-    const samples = rk4System(
+    const samples = solveOnGrid(
       (x, y) => {
         const vars: Record<string, number> = { [independentName]: x };
         stateNames.forEach((name, i) => {
@@ -360,7 +394,8 @@ export function nDSolve(
       x0,
       initialValues,
       x1,
-      { steps, deadline: ce._deadline }
+      steps,
+      ce._deadline
     );
     if (!samples) return undefined;
 
@@ -381,17 +416,21 @@ export function nDSolve(
   if (!compiled.success) return undefined;
   const run = compiled.run as (vars: Record<string, number>) => number;
 
-  const samples = rk4(
-    (x, y) => run({ [independentName]: x, [stateName]: y }),
+  const samples = solveOnGrid(
+    (x, [y]) => {
+      const v = run({ [independentName]: x, [stateName]: y });
+      return Number.isFinite(v) ? [v] : undefined;
+    },
     x0,
-    initialValues[0],
+    [initialValues[0]],
     x1,
-    { steps, deadline: ce._deadline }
+    steps,
+    ce._deadline
   );
   if (!samples) return undefined;
 
   return ce._fn(
     'List',
-    samples.map(([x, y]) => ce._fn('List', [ce.number(x), ce.number(y)]))
+    samples.map(([x, y]) => ce._fn('List', [ce.number(x), ce.number(y[0])]))
   );
 }
