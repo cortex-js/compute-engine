@@ -847,10 +847,16 @@ volumes
             const resolved =
               raw.isNaN === true ? null : resolveEndpointLeaks(raw, ce);
             if (resolved !== null && isSymbol(resolved.guard, 'True')) {
-              // Leak-free: preserve the original evaluation path exactly,
-              // except when a limit re-resolved an improper endpoint (then `at`
-              // itself still collapses to NaN, so keep the limit value).
-              expr = viaLimit !== undefined ? viaLimit : at;
+              // Leak-free: keep the original evaluation path's RESULT. `raw`
+              // IS `at.evaluate({numericApproximation})`, so returning it is
+              // value-identical to re-evaluating `at` — but skips a second
+              // full FTC endpoint pass (measured ~35–40% of the whole
+              // definite-Gaussian evaluation; the tail's `expr.evaluate()`
+              // on an already-evaluated value is an idempotent cheap walk).
+              // When a limit re-resolved an improper endpoint, `raw` holds
+              // that limit value already (and `at` itself would still
+              // collapse to NaN), so `raw` covers both cases.
+              expr = raw;
             } else {
               const guarded =
                 resolved === null
