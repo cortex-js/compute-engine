@@ -613,6 +613,76 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
     expect(rc.evaluate().isSame(rc)).toBe(true);
   });
 
+  // Regression: canonicalizing a numeric function over a large *lazy* indexed
+  // collection must not materialize its elements. `checkNumericArgs` used to
+  // walk `op.each()` to type-check every element, which enumerated the whole
+  // collection at canonicalization time (item 16: `\frac{[1...1e8]}{2}` hung
+  // `ce.parse`). A concrete lazy collection with no free variables is now
+  // accepted without walking; element validation is deferred to evaluate time.
+  test('numeric op over a huge lazy Range canonicalizes without materializing', () => {
+    const ce = new ComputeEngine();
+    let start = Date.now();
+    const a = ce.box(['Add', ['Range', 1, 1e8], 1]);
+    expect(a.operator).toBe('Add');
+    expect(Date.now() - start).toBeLessThan(2000);
+
+    // item-16 shape via LaTeX.
+    start = Date.now();
+    const f = ce.parse('\\frac{[1...100000000]}{2}');
+    expect(f.isValid).toBe(true);
+    expect(Date.now() - start).toBeLessThan(2000);
+
+    // A lazy collection with a FREE VARIABLE (`k`) in its mapping function must
+    // still canonicalize fast. Walking it to type-check/infer elements would
+    // materialize all 2e5 — and the walk cost does not depend on free
+    // variables, so the lazy fast path must skip it REGARDLESS of `unknowns`
+    // (previously the `unknowns.length === 0` guard forced a ~5s materializing
+    // walk here). Element type is numeric, so it stays valid.
+    start = Date.now();
+    const m = ce.box([
+      'Add',
+      ['Map', ['Range', 1, 200000], ['Function', ['Add', 'x', 'k'], 'x']],
+      1,
+    ]);
+    expect(m.isValid).toBe(true);
+    expect(Date.now() - start).toBeLessThan(2000);
+
+    // A lazy collection whose static element type is genuinely indeterminate
+    // (`indexed_collection<unknown>`) — with a free variable in the body — also
+    // reaches the fail-open lazy path: element validation is deferred to
+    // evaluate time, so canonicalization stays fast and valid.
+    ce.declare('col', ce.type('indexed_collection<unknown>'));
+    start = Date.now();
+    const u = ce.box([
+      'Add',
+      ['Map', 'col', ['Function', ['Add', 'x', 'k'], 'x']],
+      1,
+    ]);
+    expect(u.isValid).toBe(true);
+    expect(Date.now() - start).toBeLessThan(2000);
+  });
+
+  // Regression (companion to the fast-path test above): a lazy collection whose
+  // static element type is concrete and PROVABLY NON-NUMERIC
+  // (`indexed_collection<string>`) is rejected by `checkNumericArgs` WITHOUT
+  // walking its elements — the element type already disproves numericity. Under
+  // the old fail-open lazy guard such an operand was silently ACCEPTED (its
+  // runtime elements were never checked at canonicalization time).
+  test('a lazy string-typed collection is rejected by a numeric op without walking', () => {
+    const ce = new ComputeEngine();
+    ce.declare('sfn', ce.type('(integer) -> string'));
+    const start = Date.now();
+    const r = ce.box([
+      'Add',
+      ['Map', ['Range', 1, 2000000], ['Function', ['sfn', 'x'], 'x']],
+      1,
+    ]);
+    expect(r.isValid).toBe(false);
+    expect(errorCode(r.op1) ?? errorCode(r)).toBe('incompatible-type');
+    // Rejected on the static type alone — no 2e6-element walk.
+    expect(Date.now() - start).toBeLessThan(2000);
+  });
+
   test('scalar · tuple and tuple · tuple are unchanged', () => {
     const ce = new ComputeEngine();
     // scalar · tuple scales component-wise (stays a Tuple)
@@ -624,6 +694,217 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
     // tuple · tuple stays an error (no implicit dot/cross product)
     const tt = ce.box(['Multiply', ['Tuple', 1, 2], ['Tuple', 3, 4]]).evaluate();
     expect(errorCode(tt.op1) ?? errorCode(tt)).toBe('incompatible-type');
+  });
+});
+
+describe('ELEMENTWISE BROADCAST — hybrid laziness (huge collections)', () => {
+  // Below/at the eager threshold, broadcast is materialized to a `List`,
+  // byte-identical to the historical behavior. Above the threshold, a lazy
+  // `Map` form is returned instead of enumerating every element.
+  test('small Add stays an eager List (byte-identical)', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Add', ['List', 1, 2, 3], 1]).evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.isLazyCollection).toBe(false);
+    expect(r.json).toEqual(['List', 2, 3, 4]);
+  });
+
+  test('threshold boundary: 100 eager, 101 lazy', () => {
+    const ce = new ComputeEngine();
+    const at100 = ce.box(['Add', ['Range', 1, 100], 1]).evaluate();
+    expect(at100.operator).toBe('List');
+    expect(at100.isLazyCollection).toBe(false);
+    expect(at100.count).toBe(100);
+
+    const at101 = ce.box(['Add', ['Range', 1, 101], 1]).evaluate();
+    expect(at101.operator).toBe('Map');
+    expect(at101.isLazyCollection).toBe(true);
+    expect(at101.count).toBe(101);
+  });
+
+  test('Add(Range(1,1e8), 1) evaluates promptly to a lazy Map', () => {
+    const ce = new ComputeEngine();
+    const start = Date.now();
+    const r = ce.box(['Add', ['Range', 1, 1e8], 1]).evaluate();
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(r.operator).toBe('Map');
+    expect(r.isLazyCollection).toBe(true);
+    expect(r.count).toBe(1e8);
+    expect(r.at(5)?.json).toEqual(6);
+    // `Take` over a lazy Map stays lazy; materialize via `each()`.
+    expect(
+      [...ce.box(['Take', r, 3]).evaluate().each()].map((x) => x.json)
+    ).toEqual([2, 3, 4]);
+  });
+
+  test('Multiply(Range(1,1e8), 2) is lazy', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Multiply', ['Range', 1, 1e8], 2]).evaluate();
+    expect(r.operator).toBe('Map');
+    expect(r.count).toBe(1e8);
+    expect(r.at(5)?.json).toEqual(10);
+    expect(
+      [...ce.box(['Take', r, 3]).evaluate().each()].map((x) => x.json)
+    ).toEqual([2, 4, 6]);
+  });
+
+  test('a broadcastable unary op over a huge Range is lazy', () => {
+    const ce = new ComputeEngine();
+    const start = Date.now();
+    const r = ce.box(['Sin', ['Range', 1, 1e8]]).evaluate();
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(r.operator).toBe('Map');
+    expect(r.isLazyCollection).toBe(true);
+    expect(r.count).toBe(1e8);
+    expect(r.at(1)?.json).toEqual(['Sin', 1]);
+  });
+
+  test('two huge collections broadcast to a lazy variadic Map', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Add', ['Range', 1, 1e8], ['Range', 1, 1e8]])
+      .evaluate();
+    expect(r.operator).toBe('Map');
+    expect(r.isLazyCollection).toBe(true);
+    expect(r.at(3)?.json).toEqual(6);
+  });
+
+  test('small two-collection Add stays an eager List', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Add', ['List', 1, 2], ['List', 3, 4]]).evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.json).toEqual(['List', 4, 6]);
+  });
+
+  test('a user lambda over a huge Range maps lazily', () => {
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.parse('x \\mapsto x^2 + 1'));
+    const r = ce.box(['f', ['Range', 1, 1e8]]).evaluate();
+    expect(r.operator).toBe('Map');
+    expect(r.isLazyCollection).toBe(true);
+    expect(r.count).toBe(1e8);
+    expect(r.at(3)?.json).toEqual(10);
+    // Small case unchanged (eager List).
+    expect(ce.box(['f', ['Range', 1, 3]]).evaluate().json).toEqual([
+      'List',
+      2,
+      5,
+      10,
+    ]);
+  });
+
+  test('a spliced scalar cannot be captured by the map parameter', () => {
+    const ce = new ComputeEngine();
+    ce.assign('_1', ce.box(7));
+    const r = ce.box(['Add', ['Range', 1, 1e8], '_1']).evaluate();
+    expect(r.operator).toBe('Map');
+    // 5 + 7 = 12: the free `_1` resolves to 7, not to the map parameter.
+    expect(r.at(5)?.json).toEqual(12);
+  });
+
+  test('an infinite collection broadcasts to a lazy Map', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Add', ['Cycle', ['List', 1, 2]], 1]).evaluate();
+    // A `Cycle` is an infinite indexed collection: it can't be materialized or
+    // eagerly zipped, so the broadcast returns the lazy `Map` form rather than
+    // staying inert (or hanging).
+    expect(r.operator).toBe('Map');
+    expect(r.isFiniteCollection).toBe(false);
+    expect(ce.box(['First', r]).evaluate().json).toEqual(2);
+    // `Multiply` over an infinite source is lazy too; `Take` yields the cycle.
+    const m = ce.box(['Multiply', ['Cycle', ['List', 1, 2]], 3]).evaluate();
+    expect(m.operator).toBe('Map');
+    expect(
+      [...ce.box(['Take', m, 4]).evaluate().each()].map((x) => x.json)
+    ).toEqual([3, 6, 3, 6]);
+  });
+
+  test('an unknown-length collection (Filter) broadcasts to a lazy Map, not a truncated List', () => {
+    const ce = new ComputeEngine();
+    // `Filter`'s count is `undefined` (it reports `isFiniteCollection === true`
+    // yet an unknown size). The eager zip path treats an unknown count as 1 and
+    // used to truncate this to the single-element `["List", 4]`. It must instead
+    // produce the lazy `Map` form.
+    const F = [
+      'Filter',
+      ['Range', 1, 100000],
+      ['Function', ['Greater', 'x', 2], 'x'],
+    ];
+    const r = ce.box(['Add', F, 1]).evaluate();
+    expect(r.operator).toBe('Map');
+    expect(ce.box(['First', ['Add', F, 1]]).evaluate().json).toEqual(4);
+    expect(
+      [...ce.box(['Take', ['Add', F, 1], 3]).evaluate().each()].map((x) => x.json)
+    ).toEqual([4, 5, 6]);
+  });
+
+  test('a symbolic-length Range broadcasts to a lazy Map that is reactive', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    // `Range(1, n)` with `n` undeclared-valued has `isFiniteCollection` and
+    // `count` both `undefined`: the broadcast is lazy and picks up `n`'s binding
+    // when the resulting `Map` is later evaluated.
+    const r = ce.box(['Add', ['Range', 1, 'n'], 1]).evaluate();
+    expect(r.operator).toBe('Map');
+    // Serialization must not throw (round-trippable surface form).
+    expect(typeof r.toString()).toBe('string');
+    expect(typeof r.latex).toBe('string');
+    // Reactivity: bind `n`, then re-evaluate the Map handle (still a lazy Map;
+    // materialize via `each()`).
+    ce.assign('n', 5);
+    expect([...r.evaluate().each()].map((x) => x.json)).toEqual([
+      2, 3, 4, 5, 6,
+    ]);
+  });
+
+  test('a generic op broadcasts symbolic-length Range to a lazy Map (finding 3)', () => {
+    // A NON-lazy threadable operator (`Sin`) over a symbolic-length `Range`
+    // (`isFiniteCollection === undefined`) must lazify into a `Map`, just like
+    // the arithmetic `Add(Range(1,n),1)` path — its post-eval broadcast gate
+    // admits the unresolved-finiteness source. (A LAZY operator keeps the strict
+    // whole-collection fold: `Equal(Characters(s), Reverse(Characters(s)))` in
+    // test/cortex/programs.test.ts "anagram and palindrome checks".)
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    const r = ce.box(['Sin', ['Range', 1, 'n']]).evaluate();
+    expect(r.operator).toBe('Map');
+    expect(typeof r.toString()).toBe('string');
+    ce.assign('n', 3);
+    expect([...r.evaluate().each()].map((x) => x.N().re)).toEqual([
+      Math.sin(1),
+      Math.sin(2),
+      Math.sin(3),
+    ]);
+    // The async gate composes identically (findings 3 + 4).
+    const ce2 = new ComputeEngine();
+    ce2.declare('m', 'integer');
+    return ce2
+      .box(['Sin', ['Range', 1, 'm']])
+      .evaluateAsync()
+      .then((a) => expect(a.operator).toBe('Map'));
+  });
+
+  test('a mixed finite + infinite sum maps all collections as Map sources', () => {
+    const ce = new ComputeEngine();
+    // When any broadcast operand is infinite/unknown, the whole result is a
+    // single variadic `Map` (shortest-input semantics) — NOT the finite operand
+    // broadcast with the infinite one spliced whole (which would cartesian).
+    const r = ce
+      .box(['Add', ['List', 10, 20, 30], ['Cycle', ['List', 1, 2]]])
+      .evaluate();
+    expect(r.operator).toBe('Map');
+    expect([...r.each()].map((x) => x.json)).toEqual([11, 22, 31]);
+  });
+
+  test('.N() over an infinite source threads the numeric wrap', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Sin', ['Cycle', ['List', 1, 2]]]).N();
+    expect(r.operator).toBe('Map');
+    // First element floats on access rather than staying symbolic `sin(1)`.
+    expect(ce.box(['First', r]).evaluate().re).toBeCloseTo(
+      Math.sin(1),
+      10
+    );
   });
 });
 
@@ -787,6 +1068,33 @@ describe('POINT/TUPLE ARITHMETIC — PointList zips', () => {
       ['Tuple', -6, 2],
       ['Tuple', -6, 3],
     ]);
+  });
+
+  // Shape pin (findings 1 + 4): `PointList` must materialize an eager `List`
+  // of point-`Tuple`s at ANY finite size — its `List<Tuple>` shape is a
+  // consumer contract. The shared broadcast helper's hybrid-laziness arm (past
+  // the eager threshold) is OPT-IN and off for `PointList`, so a >100-point
+  // transpose is a plain `List`, never a lazy `Map`.
+  test('PointList with >100 components stays an eager List of Tuples', () => {
+    const ce = new ComputeEngine();
+    const ys = Array.from({ length: 200 }, (_, i) => i);
+    const r = ce.box(['PointList', -6, ['List', ...ys]]).evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.isLazyCollection).toBe(false);
+    expect(r.count).toBe(200);
+    expect(r.at(1)?.json).toEqual(['Tuple', -6, 0]);
+    expect(r.at(200)?.json).toEqual(['Tuple', -6, 199]);
+  });
+
+  test('PointList(...).N() with >100 components yields numeric point-tuples', () => {
+    const ce = new ComputeEngine();
+    const ys = Array.from({ length: 200 }, (_, i) => i);
+    const r = ce.box(['PointList', -6, ['List', ...ys]]).N();
+    expect(r.operator).toBe('List');
+    expect(r.isLazyCollection).toBe(false);
+    expect(r.count).toBe(200);
+    expect(r.at(1)?.json).toEqual(['Tuple', -6, 0]);
+    expect(r.at(200)?.json).toEqual(['Tuple', -6, 199]);
   });
 
   test('two list components of different lengths zip to the shorter', () => {

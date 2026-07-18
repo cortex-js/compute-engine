@@ -107,6 +107,11 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   /** Release resources owned by this definition when its scope is disposed. */
   dispose(): void;
 
+  /** Bumped on every semantic change to this definition (value write, type
+   * change, disposal). Used to validate per-dependency caches.
+   * @internal */
+  _writeVersion: number;
+
   holdUntil: 'never' | 'evaluate' | 'N';
   value: Expression | undefined;
   readonly isSelfReferential: boolean;

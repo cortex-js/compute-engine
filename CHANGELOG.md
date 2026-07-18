@@ -1,20 +1,158 @@
-## Unreleased
+## [Unreleased]
 
 ### Bug Fixes
 
-- **A `Mod` in a product or a power base now serializes parenthesized,
-  fixing a round-trip corruption.** Juxtaposition (invisible multiply) and
-  superscripts bind *tighter* than infix `\bmod` on re-parse, so an
-  unparenthesized `Mod` factor absorbed the adjacent notation into its
-  trailing operand: `["Multiply", ["Mod", "A", 2], ["Mod", "B", 2]]`
-  serialized to `A\bmod2B\bmod2`, which re-parses as
-  `A mod (2B mod 2)` = `A mod 0` = NaN. It now serializes as
-  `(A\bmod2)(B\bmod2)`; similarly `["Power", ["Mod", "A", 2], "x"]` is now
-  `(A\bmod2)^{x}` instead of `A\bmod2^{x}` (which re-parsed as
-  `A mod 2^x`). Same class as the 0.79.2 compound-operand `Mod`
-  parenthesization fix, on the other side of the operator. (Reported by the
-  Tycho/Graph Paper team — a hex-grid Desmos state rendered blank because
-  a product of two `Mod(Floor(…), 2)` factors round-tripped to NaN.)
+- **`Sort` and `Shuffle` of a non-`List` collection returned corrupt results.**
+  Both rebuilt their result with the _source_ collection's operator, so the
+  sorted/shuffled elements were reinterpreted as constructor arguments:
+  `Sort(Range(1, 10))` produced `Range(1, 2, 3)` — the one-element list `[1]` —
+  and `Shuffle(Range(1, 5))` could produce an empty collection. Both now return
+  a `List`, matching every other eager collection operation. `Sort` of an
+  infinite or unknown-length collection now stays inert instead of returning an
+  empty collection.
+
+- **Negative indices now work uniformly across all indexed collections.**
+  Negative-index normalization (`-1` = last element) was implemented
+  per-collection and most lazy collections lacked it, so `Last`, `At(xs, -1)`
+  and anything built on end-relative access silently returned `Nothing` — or
+  worse: `Reverse` walks its source from the end, so
+  `ListFrom(Reverse(Range(1, 5)))` returned `[]` instead of `[5,4,3,2,1]`.
+  Normalization is now centralized in the index dispatcher and works for
+  `Range`, `Linspace`, `Zip`, `Scan`, `Differences` and every other indexed
+  collection with a known finite length; infinite or unknown-length collections
+  correctly return `Nothing` without enumerating.
+
+- **A `Filter` over more than ~1000 elements crashed numeric canonicalization.**
+  Determining whether a `Filter` result was finite ran its `count` handler,
+  which walks the source applying the predicate — and throws
+  `iteration-limit-exceeded` past the iteration limit. Boxing an expression as
+  simple as `Filter(Range(1, 100000), p) + 1` threw. Finiteness and emptiness
+  of a `Filter` are now answered structurally (a filter of a finite collection
+  is finite) without running the predicate, and `count` of a filter of an
+  infinite or unknown-length collection now correctly reports unknown instead
+  of claiming `Infinity` (a filter of an infinite collection can be finite:
+  `Filter(Range(1, ∞), x < 5)` has 4 elements).
+
+- **`IsEmpty` and `Contains` no longer answer `False` when the answer is
+  unknown.** Both coerced an undetermined result to a definite `False`:
+  `IsEmpty(Filter(Range(1, 10^5), x ↦ False))` — a collection that _is_ empty,
+  but whose emptiness can't be established within the iteration limit —
+  returned `False`. Both predicates are now three-valued and stay inert
+  (unevaluated) when the answer cannot be determined.
+
+### Collections
+
+- **A comprehension's element memo now survives unrelated evaluations.**
+  Elements of a comprehension (`[x^2 for x in xs]`) are cached per instance,
+  but the cache was keyed on an engine-wide counter that every scoped
+  evaluation — any `\sum`, `Block` or big operator — bumps on exit, so in a
+  live document the cache never survived between two reads and every re-read
+  re-evaluated the body per element (the Tycho/Graph Paper team measured a
+  document that bound comprehensions lazily analyzing ~3× slower than one
+  that eagerly materialized them). The cache is now invalidated only by
+  semantic mutations: reassigning a free variable the body reads (directly or
+  through a helper function it calls), redeclaring or inferring an operator,
+  `assume()` and `forget()` — including the implicit revert when a scope
+  that assumed exits — all refresh it, and a comprehension nested under a
+  `Sum`/`Product` refills for each value of the enclosing binder. Unrelated
+  evaluations between reads leave the cache intact.
+
+- **`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix` and `Diagonal` of a vector are
+  now safe at huge dimensions.** These constructors eagerly built the full m×n
+  matrix with no size limit — `IdentityMatrix(10^6)` attempted 10¹² elements.
+  Above 10,000 total elements they now produce a lazy indexed collection with
+  O(1) construction and element access; at or below, the result is the same
+  materialized matrix as before, compatible with `Determinant`, `Inverse` and
+  the rest of the dense linear-algebra operations.
+
+- **`.N()` of a lazily-broadcast operation yields numeric elements.** When a
+  broadcast returns a lazy `Map` (see below), requesting a numeric
+  approximation now wraps the mapped function so each element is computed as a
+  float on access: `Sin(Range(1, 10^8)).N()` elements are numbers, while
+  `evaluate()` keeps them exact (`sin(1)`, `sin(2)`, …).
+
+- **Element-wise operations over infinite and unknown-length collections are
+  now lazy instead of inert — or truncated.** Broadcasting an element-wise
+  operator over an infinite collection (`Cycle`), a finite collection of
+  unknown size (`Filter`), or a symbolic-length `Range` now returns a lazy
+  `Map` supporting `First`, `At`, `Take` and `Length`, rather than staying an
+  inert expression: `Add(Cycle([1,2]), 1)` is the lazy `[2,3,2,3,…]`, and
+  `Add(Range(1, n), 1)` with `n` a declared, unassigned integer becomes
+  `Map(Range(1, n), _ ↦ _ + 1)`, which picks up `n`'s value reactively when
+  later evaluated. This also fixes a wrong-answer bug: the eager broadcast
+  read a `Filter`'s unknown length as 1, so
+  `Add(Filter(Range(1, 100000), x ↦ x > 2), 1)` truncated to the
+  single-element list `[4]`; it now yields the full lazy sequence `[4,5,6,…]`.
+  A mixed broadcast folds with shortest-input semantics:
+  `Add([10,20,30], Cycle([1,2]))` → `[11,22,31]`.
+
+- **Element-wise operations over large collections are now lazy.** Applying an
+  element-wise operator (`Add`, `Multiply`, `Sin`, a user function literal, …)
+  to finite indexed collections of more than 100 elements returns a lazy `Map`
+  instead of materializing every element: `Add(Range(1, 10^8), 1)` and
+  `Sin(Range(1, 10^8))` evaluate instantly to a lazy collection supporting
+  `At`, `Take`, `First`, `Last` and `Length` without enumeration. Collections
+  of 100 elements or fewer are unchanged and still evaluate eagerly to a
+  `List`.
+
+- **`Length`, `Count`, `IsEmpty` and `Contains` see through wrappers that
+  cannot change their answer.** `Sort`, `Shuffle` and `Reverse` preserve
+  element count, and (together with `Unique`, for `Contains`) preserve
+  membership, so these consumers now strip such wrappers at canonicalization:
+  `Count(Sort(xs))` becomes `Count(xs)` and no longer sorts —
+  `Count(Sort(Range(1, 10^5)))` went from ~15 s to ~1 ms.
+
+- **Numeric argument validation no longer enumerates large lazy collections.**
+  A lazy collection passed to a numeric operator was fully enumerated at
+  canonicalization to check or infer its elements — even a `Map` over millions
+  of elements. Validation now decides on the static element type: provably
+  numeric or provably non-numeric collections are accepted or rejected without
+  enumeration, and a collection whose element type is genuinely indeterminate
+  is accepted structurally and fails at evaluation time if an element turns
+  out non-numeric. Only eager, literal collections still have their elements
+  inspected individually.
+
+## 0.83.2 _2026-07-17_
+
+### New Features
+
+- **Operator definitions can now supply a custom compilation handler.** A
+  `compile` handler on an operator definition emits target source for that
+  operator when the expression is compiled; returning `undefined` falls back
+  to the target's default lowering:
+
+  ```ts
+  ce.declare('MyGcd', {
+    signature: '(number, number) -> number',
+    compile: (args, compile, { language }) =>
+      language === 'javascript'
+        ? `_gcd(${compile(args[0])}, ${compile(args[1])})`
+        : undefined,
+  });
+  ```
+
+  The handler receives the canonical operands, a callback to lower
+  sub-expressions, and the compilation context (branch on `context.language`
+  — `javascript` or `python`). It takes precedence over the target's built-in
+  operator mapping, so it can also re-map how a built-in operator compiles;
+  structural and control-flow heads (`Sum`, `If`, `Block`, …) keep their
+  bespoke lowering and ignore the handler.
+
+### Bug Fixes
+
+- **A `Mod` in a product or a power base now serializes parenthesized, fixing a
+  round-trip corruption.** Juxtaposition (invisible multiply) and superscripts
+  bind _tighter_ than infix `\bmod` on re-parse, so an unparenthesized `Mod`
+  factor absorbed the adjacent notation into its trailing operand:
+  `["Multiply", ["Mod", "A", 2], ["Mod", "B", 2]]` serialized to
+  `A\bmod2B\bmod2`, which re-parses as `A mod (2B mod 2)` = `A mod 0` = NaN. It
+  now serializes as `(A\bmod2)(B\bmod2)`; similarly
+  `["Power", ["Mod", "A", 2], "x"]` is now `(A\bmod2)^{x}` instead of
+  `A\bmod2^{x}` (which re-parsed as `A mod 2^x`). Same class as the 0.79.2
+  compound-operand `Mod` parenthesization fix, on the other side of the
+  operator. (Reported by the Tycho/Graph Paper team — a hex-grid Desmos state
+  rendered blank because a product of two `Mod(Floor(…), 2)` factors
+  round-tripped to NaN.)
 
 ## 0.83.1 _2026-07-17_
 
@@ -29,11 +167,10 @@
   the rest of the number-theory family, among others) then rejected it — e.g.
   `ce.box(["Binomial", ["Add", "n", ["f", "k"]], 2])` was invalid. A
   `broadcastable<T>` operand could be a plain scalar `T` at runtime, so
-  validation now admits it whenever `T` matches the parameter, exactly
-  restoring the pre-0.82.0 admission. LaTeX input was largely unaffected
-  (undeclared `f(k)` parses as the product `f \cdot k`, and a declared function
-  types precisely); expressions built directly from MathJSON were the exposed
-  surface.
+  validation now admits it whenever `T` matches the parameter, exactly restoring
+  the pre-0.82.0 admission. LaTeX input was largely unaffected (undeclared
+  `f(k)` parses as the product `f \cdot k`, and a declared function types
+  precisely); expressions built directly from MathJSON were the exposed surface.
 
 ## 0.83.0 _2026-07-17_
 

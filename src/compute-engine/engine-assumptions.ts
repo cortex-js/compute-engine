@@ -411,6 +411,10 @@ export function assumeFn(
 
     // The new assumption could affect existing expressions
     ce._generation += 1;
+    ce._mutationGeneration += 1;
+    // Popping this context silently reverts the assumption: mark it so the
+    // pop bumps `_mutationGeneration` too (clean pops don't).
+    if (ce.context) ce.context._assumptionsDirty = true;
 
     return assumeImpl(pred);
   } catch (e) {
@@ -452,6 +456,8 @@ export function forget(
 
     // The removed assumptions could affect existing expressions
     ce._generation += 1;
+    ce._mutationGeneration += 1;
+    if (ce.context) ce.context._assumptionsDirty = true;
 
     return;
   }
@@ -489,4 +495,6 @@ export function forget(
   }
   // The removed assumptions could affect existing expressions
   ce._generation += 1;
+  ce._mutationGeneration += 1;
+  if (ce.context) ce.context._assumptionsDirty = true;
 }

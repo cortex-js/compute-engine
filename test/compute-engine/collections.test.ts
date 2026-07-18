@@ -633,6 +633,86 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
   });
 });
 
+describe('SORT/SHUFFLE REBUILD AS LIST (regression)', () => {
+  // Regression: Sort/Shuffle rebuilt the result with the source's operator
+  // head. For a `Range` source, that reinterpreted the sorted elements as
+  // lo/hi/step (`Sort(Range(1,10))` → `["Range",1,2,3]` == `[1]`).
+  test('Sort(Range) rebuilds as List', () =>
+    expect(evaluate(['Sort', ['Range', 1, 10]])).toMatchInlineSnapshot(
+      `["List", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]`
+    ));
+
+  test('Sort(Range) result has a List head', () => {
+    const e = engine.box(['Sort', ['Range', 1, 10]]).evaluate();
+    expect(e.operator).toEqual('List');
+  });
+
+  test('Shuffle(Range) rebuilds as List (deterministic seed)', () => {
+    const e = engine.box(['Shuffle', ['Range', 1, 5], 42]).evaluate();
+    expect(e.operator).toEqual('List');
+    const elements = [...e.each()].map((x) => x.re).sort((a, b) => a! - b!);
+    expect(elements).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  test('Sort of an infinite collection stays inert', () => {
+    // Plain evaluate (no materialization): the inert Sort is returned unchanged.
+    const e = engine.box(['Sort', ['Cycle', ['List', 1, 2]]]).evaluate();
+    expect(e.operator).toEqual('Sort');
+  });
+});
+
+describe('NEGATIVE INDEX NORMALIZATION IN at() DISPATCHER (regression)', () => {
+  // Regression: ~25 collection `at` handlers reject `index < 1`, so negative
+  // indexing (`Last`, `At(xs, -1)`, `Reverse`'s back-to-front walk) yielded
+  // Nothing/empty for `Range`, `Linspace`, `Zip`, `Scan`, etc. Negative-index
+  // normalization is now centralized in the `at()` dispatcher.
+  test('Last(Range)', () =>
+    expect(evaluate(['Last', ['Range', 1, 10]])).toMatchInlineSnapshot(`10`));
+
+  test('At(Range, -1)', () =>
+    expect(evaluate(['At', ['Range', 1, 10], -1])).toMatchInlineSnapshot(`10`));
+
+  test('At(Range, out-of-range negative) is Nothing', () =>
+    expect(evaluate(['At', ['Range', 1, 10], -11])).toMatchInlineSnapshot(
+      `Nothing`
+    ));
+
+  test('At(Linspace, -1)', () =>
+    expect(evaluate(['At', ['Linspace', 0, 1, 5], -1])).toMatchInlineSnapshot(
+      `1`
+    ));
+
+  test('Last(Zip)', () =>
+    expect(
+      evaluate(['Last', ['Zip', ['List', 1, 2, 3], ['List', 4, 5, 6]]])
+    ).toMatchInlineSnapshot(`["Pair", 3, 6]`));
+
+  test('Last(Scan)', () =>
+    expect(
+      evaluate([
+        'Last',
+        ['Scan', ['List', 1, 2, 3], ['Function', ['Add', 'a', 'b'], 'a', 'b']],
+      ])
+    ).toMatchInlineSnapshot(`6`));
+
+  test('First(Reverse(Range))', () =>
+    expect(
+      evaluate(['First', ['Reverse', ['Range', 1, 10]]])
+    ).toMatchInlineSnapshot(`10`));
+
+  test('ListFrom(Reverse(Range))', () =>
+    expect(
+      evaluate(['ListFrom', ['Reverse', ['Range', 1, 5]]])
+    ).toMatchInlineSnapshot(`["List", 5, 4, 3, 2, 1]`));
+
+  test('Last of an infinite collection does not hang and stays inert', () => {
+    // Negative-index normalization requires a finite, known count; an infinite
+    // source keeps returning undefined (no materialization, no hang).
+    const e = engine.box(['Last', ['Cycle', ['List', 1, 2]]]).evaluate();
+    expect(e.operator === 'Nothing' || e.symbol === 'Nothing').toBe(true);
+  });
+});
+
 describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
   test('Tally', () =>
     expect(evaluate(['Tally', list3])).toMatchInlineSnapshot(
@@ -1379,6 +1459,149 @@ describe('Binning, Reduce, Filter, Zip (REVIEW.md B15/B17/B18)', () => {
     expect(
       engine.expr(['Zip', ['List', 1, 2], ['List', 3, 4]]).isEmptyCollection
     ).toBe(false);
+  });
+});
+
+describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
+  // Filter over a large finite source used to THROW `iteration-limit-exceeded`
+  // during canonicalization: the synthesized `isFinite` default derived its
+  // answer from `count`, whose walk enforces `ce.iterationLimit`. Filter now
+  // provides structural, O(1) `isFinite`/`isEmpty` handlers that never walk.
+  const pred: Expression = ['Function', ['Greater', 'x', 2], 'x'];
+
+  it('canonicalizes a large Filter without throwing', () => {
+    expect(() =>
+      engine.box(['Add', ['Filter', ['Range', 1, 100000], pred], 1])
+    ).not.toThrow();
+  });
+
+  it('reports isFinite=true instantly for a finite source (no walk)', () => {
+    expect(
+      engine.box(['Filter', ['Range', 1, 100000], pred]).isFiniteCollection
+    ).toBe(true);
+  });
+
+  it('reports an unknown count (undefined, never Infinity) past the iteration limit', () => {
+    expect(
+      engine.box(['Filter', ['Range', 1, 100000], pred]).count
+    ).toBeUndefined();
+  });
+
+  it('still counts exactly for a finite source under the iteration limit', () => {
+    expect(
+      engine.box([
+        'Filter',
+        ['Range', 1, 50],
+        ['Function', ['Greater', 'x', 10], 'x'],
+      ]).count
+    ).toBe(40);
+  });
+
+  it('reports an unknown count (not Infinity) for a non-finite source', () => {
+    // `Range(1, n)` with an unbound `n` is not a finite collection.
+    expect(
+      engine.box(['Filter', ['Range', 1, 'n'], pred]).count
+    ).toBeUndefined();
+  });
+
+  it('reports unknown finiteness for an infinite source', () => {
+    expect(
+      engine.box(['Filter', ['Cycle', ['List', 1, 2]], pred]).isFiniteCollection
+    ).toBeUndefined();
+  });
+
+  it('B18 (regression guard): Sum over a small finite Filter still evaluates', () => {
+    expect(
+      evaluate([
+        'Sum',
+        ['Filter', ['List', 1, 2, 3], ['Function', ['Greater', '_', 1], '_']],
+      ])
+    ).toBe('5');
+  });
+});
+
+describe('ISEMPTY / CONTAINS ARE THREE-VALUED (regression)', () => {
+  // `IsEmpty`/`Contains` must not coerce an INDETERMINATE emptiness/membership
+  // (e.g. a bounded Filter walk that hits its iteration limit and returns
+  // `undefined`) to a definite `False`. The expression stays inert.
+  const neverMatch: Expression = ['Function', 'False', '_'];
+
+  it('IsEmpty stays inert when emptiness is indeterminate (large Filter)', () => {
+    const result = engine
+      .box(['IsEmpty', ['Filter', ['Range', 1, 100000], neverMatch]])
+      .evaluate();
+    // Not collapsed to a boolean: the operator survives.
+    expect(result.operator).toBe('IsEmpty');
+  });
+
+  it('Contains stays inert when membership is indeterminate (large Filter)', () => {
+    // A Filter whose membership test would require walking past the iteration
+    // limit: `contains` returns undefined, so the expression stays inert.
+    const result = engine
+      .box(['Contains', ['Filter', ['Range', 1, 100000], neverMatch], 5])
+      .evaluate();
+    // Either it stays inert (`Contains`), or membership is definitely refuted
+    // (the boolean `False`) — never an undefined-coerced crash. It must not
+    // spuriously report `True`.
+    const stayedInert = result.operator === 'Contains';
+    expect(stayedInert || result.symbol === 'False').toBe(true);
+  });
+
+  it('IsEmpty still resolves for a small never-matching Filter (walk completes)', () => {
+    expect(
+      evaluate(['IsEmpty', ['Filter', ['List', 1, 2], neverMatch]])
+    ).toBe('True');
+  });
+
+  it('IsEmpty resolves for a non-empty literal list', () => {
+    expect(evaluate(['IsEmpty', ['List', 1]])).toBe('False');
+  });
+
+  it('IsEmpty resolves for an empty literal list', () => {
+    expect(evaluate(['IsEmpty', ['List']])).toBe('True');
+  });
+
+  it('Contains resolves definite membership for a literal list', () => {
+    expect(evaluate(['Contains', ['List', 1, 2, 3], 2])).toBe('True');
+    expect(evaluate(['Contains', ['List', 1, 2, 3], 9])).toBe('False');
+  });
+});
+
+describe('LAZY BROADCAST N-WRAP HONORS numericApproximation (regression)', () => {
+  // A large broadcast returns a lazy `Map`. Under `.N()`, each element must
+  // float on access; under `evaluate()` it stays exact. Previously the Map
+  // body did not know `numericApproximation` was requested, so `.N()` elements
+  // evaluated exactly (symbolic `sin(1)` instead of `0.841…`).
+  it('evaluate() keeps lazy elements exact', () => {
+    const e = engine.box(['Sin', ['Range', 1, 200]]).evaluate();
+    expect(e.operator).toBe('Map');
+    expect(e.at(1)?.toString()).toBe('sin(1)');
+  });
+
+  it('N() floats lazy elements on access', () => {
+    const e = engine.box(['Sin', ['Range', 1, 200]]).N();
+    expect(e.operator).toBe('Map');
+    expect(e.at(1)?.isNumberLiteral).toBe(true);
+    expect(e.at(1)?.re).toBeCloseTo(0.8414709848, 9);
+  });
+
+  it('re-evaluating an N-wrapped Map does not double-wrap or regress', () => {
+    const e = engine.box(['Sin', ['Range', 1, 200]]).N();
+    expect(e.evaluate().at(1)?.re).toBeCloseTo(0.8414709848, 9);
+    expect(e.N().at(1)?.re).toBeCloseTo(0.8414709848, 9);
+  });
+
+  it('small (eager) broadcast still floats under N()', () => {
+    const e = engine.box(['Sin', ['List', 1, 2]]).N();
+    expect(e.operator).toBe('List');
+    expect(e.at(1)?.re).toBeCloseTo(0.8414709848, 9);
+    expect(e.at(2)?.re).toBeCloseTo(0.9092974268, 9);
+  });
+
+  it('lazy Add broadcast floats element on access under N()', () => {
+    const e = engine.box(['Add', ['Range', 1, 100000000], 0.5]).N();
+    expect(e.operator).toBe('Map');
+    expect(e.at(1)?.re).toBe(1.5);
   });
 });
 
@@ -2504,5 +2727,133 @@ describe('At: lenient over-narrowed base (Tycho 19.3)', () => {
     const at = ce.parse('w[1]');
     expect(at.isValid).toBe(true);
     expect(errorCode(at)).toBeUndefined();
+  });
+});
+
+// Canonical-time peek through count/membership-preserving wrappers. A consumer
+// like Count evaluates its operand first, so an eager Sort/Shuffle would
+// materialize the whole collection before the count is read. The rewrite
+// strips these wrappers at canonicalization since they don't change the answer.
+describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
+  const ce = new ComputeEngine();
+
+  test('Count strips an eager Sort at canonicalization', () => {
+    const expr = ce.box(['Count', ['Sort', ['Range', 1, 100000]]]);
+    expect(expr.json).toEqual(['Count', ['Range', 1, 100000]]);
+    // Reading the count no longer materializes/sorts 1e5 elements.
+    expect(expr.evaluate().toString()).toBe('100000');
+  });
+
+  test('Length strips Shuffle', () => {
+    const expr = ce.box(['Length', ['Shuffle', ['Range', 1, 50]]]);
+    expect(expr.json).toEqual(['Length', ['Range', 1, 50]]);
+    expect(expr.evaluate().toString()).toBe('50');
+  });
+
+  test('IsEmpty strips Sort', () => {
+    const expr = ce.box(['IsEmpty', ['Sort', ['List']]]);
+    expect(expr.json).toEqual(['IsEmpty', ['List']]);
+    expect(expr.evaluate().symbol).toBe('True');
+  });
+
+  test('nested wrappers are fully stripped (Count(Reverse(Sort(x))))', () => {
+    const expr = ce.box(['Count', ['Reverse', ['Sort', ['Range', 1, 10]]]]);
+    expect(expr.json).toEqual(['Count', ['Range', 1, 10]]);
+    expect(expr.evaluate().toString()).toBe('10');
+  });
+
+  test('Sort comparator/Shuffle seed is dropped by the strip', () => {
+    const expr = ce.box(['Count', ['Sort', ['List', 3, 1, 2], 'cmp']]);
+    expect(expr.json).toEqual(['Count', ['List', 3, 1, 2]]);
+    expect(expr.evaluate().toString()).toBe('3');
+  });
+
+  test('Unique is NOT stripped for Count (not count-preserving)', () => {
+    const expr = ce.box(['Count', ['Unique', ['List', 1, 1, 2]]]);
+    expect(expr.json).toEqual(['Count', ['Unique', ['List', 1, 1, 2]]]);
+    expect(expr.evaluate().toString()).toBe('2');
+  });
+
+  test('Contains strips Sort (membership-preserving)', () => {
+    const expr = ce.box(['Contains', ['Sort', ['List', 3, 1, 2]], 2]);
+    expect(expr.json).toEqual(['Contains', ['List', 3, 1, 2], 2]);
+    expect(expr.evaluate().symbol).toBe('True');
+  });
+
+  test('Contains strips Unique (membership-preserving)', () => {
+    const expr = ce.box(['Contains', ['Unique', ['List', 1, 1, 2]], 2]);
+    expect(expr.json).toEqual(['Contains', ['List', 1, 1, 2], 2]);
+    expect(expr.evaluate().symbol).toBe('True');
+  });
+
+  test('symbolic operand: Count(Sort(xs)) canonicalizes to Count(xs)', () => {
+    const local = new ComputeEngine();
+    const expr = local.box(['Count', ['Sort', 'xs']]);
+    expect(expr.json).toEqual(['Count', 'xs']);
+    expect(expr.isValid).toBe(true);
+  });
+
+  // Semantics footnote: because the strip happens at canonicalization, a Sort
+  // comparator that WOULD throw is never invoked when the consumer only needs
+  // the count/membership. This is intended — the answer is independent of the
+  // ordering the comparator would impose.
+  test('a would-throw Sort comparator is never invoked for Count', () => {
+    const badFn: Expression = ['Function', ['Divide', 1, 0], 'a', 'b'];
+    const expr = ce.box(['Count', ['Sort', ['List', 3, 1, 2], badFn]]);
+    expect(expr.json).toEqual(['Count', ['List', 3, 1, 2]]);
+    expect(expr.evaluate().toString()).toBe('3');
+  });
+
+  // Operand validation is preserved: a non-collection operand still errors.
+  test('non-collection operand still errors (validation preserved)', () => {
+    const expr = ce.box(['Count', 5]);
+    expect(expr.isValid).toBe(false);
+  });
+
+  // The peek handlers must run the framework's default flatten step
+  // (Sequence-splice + Nothing-drop) they would otherwise short-circuit, so a
+  // peeked operator behaves identically to a non-peeked one (e.g. `First`).
+  // Compare argument handling (json without the head) against `First`, since
+  // the operator names naturally differ.
+  const args = (e: ReturnType<typeof ce.box>) =>
+    (e.json as Expression[]).slice(1);
+
+  test('Length(Nothing) flattens like a non-peeked operator (First)', () => {
+    const length = ce.box(['Length', 'Nothing']);
+    const first = ce.box(['First', 'Nothing']);
+    // Nothing is dropped by flatten -> a missing-argument error, matching First.
+    expect(args(length)).toEqual(args(first));
+    expect(length.isValid).toBe(false);
+  });
+
+  test('Count(Sequence(...)) splices like a non-peeked operator (First)', () => {
+    const count = ce.box(['Count', ['Sequence', ['List', 1, 2], 'b']]);
+    const first = ce.box(['First', ['Sequence', ['List', 1, 2], 'b']]);
+    // The Sequence is spliced by flatten, exposing the extra arg as an error.
+    expect(args(count)).toEqual(args(first));
+    expect(count.isValid).toBe(false);
+  });
+
+  // An INVALID wrapper argument (e.g. a non-function `Sort` comparator) must
+  // not be silently erased by the strip: stop peeking and let the error
+  // surface. Contrast with the valid-comparator strip above, which is intended.
+  test('Count(Sort(xs, 5)) surfaces the invalid comparator (not silently 2)', () => {
+    const expr = ce.box(['Count', ['Sort', ['List', 1, 2], 5]]);
+    expect(expr.isValid).toBe(false);
+    // The invalid Sort wrapper is NOT stripped — its error subexpression is
+    // preserved so validation surfaces it (rather than a silent `Count` of 2).
+    expect(expr.operator).toBe('Count');
+    expect(expr.op1.operator).toBe('Sort');
+  });
+
+  test('Contains(Sort(xs, 5), v) surfaces the invalid comparator', () => {
+    const expr = ce.box(['Contains', ['Sort', ['List', 1, 2], 5], 1]);
+    expect(expr.isValid).toBe(false);
+  });
+
+  test('a valid comparator is still stripped (regression guard)', () => {
+    const expr = ce.box(['Count', ['Sort', ['List', 3, 1, 2], 'Less']]);
+    expect(expr.json).toEqual(['Count', ['List', 3, 1, 2]]);
+    expect(expr.isValid).toBe(true);
   });
 });

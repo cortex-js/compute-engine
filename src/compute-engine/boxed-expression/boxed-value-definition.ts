@@ -81,6 +81,12 @@ export class _BoxedValueDefinition
   // If `true`, the value or type cannot be changed
   _isConstant = false;
 
+  // Bumped on every semantic change to THIS definition (value write, type
+  // change, disposal). Used with binding-identity re-resolution to validate
+  // per-dependency caches (the `Comprehension` element memo) without an
+  // engine-global invalidation.
+  _writeVersion = 0;
+
   // If 'never', the symbol is replaced by its value during canonicalization.
   // If 'evaluate', the symbol is replaced by its value during evaluation.
   // If 'N', the symbol is replaced during a numeric evaluation.
@@ -230,6 +236,12 @@ export class _BoxedValueDefinition
     this._value = v;
     this._isSelfReferential = isSelfReferentialValue(this.name, v);
     this._engine._generation += 1;
+    this._writeVersion += 1;
+    // Ephemeral loop-index writes (big-op/comprehension index assigns) are
+    // tracked per-definition only: they must not invalidate mutation-keyed
+    // caches of expressions that don't reference the index.
+    if (this._engine._ephemeralWriteDepth === 0)
+      this._engine._mutationGeneration += 1;
   }
 
   get type(): BoxedType {
@@ -244,6 +256,7 @@ export class _BoxedValueDefinition
 
     this._type =
       t instanceof BoxedType ? t : new BoxedType(t, this._engine._typeResolver);
+    this._writeVersion += 1;
 
     // Are we resetting the type/value?
     if (this._type.isUnknown) {
@@ -258,6 +271,7 @@ export class _BoxedValueDefinition
   }
 
   dispose(): void {
+    this._writeVersion += 1;
     this._unsubscribeFromConfigurationChange?.();
     this._unsubscribeFromConfigurationChange = undefined;
   }

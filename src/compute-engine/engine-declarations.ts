@@ -720,6 +720,9 @@ export function assignFn(
     const fnDef = assignValueAsOperatorDef(ce, arg2);
     if (!fnDef) throw Error(`Invalid definition for symbol "${id}"`);
     updateDef(ce, id, def, fnDef);
+    // Redefining an existing operator is a semantic mutation (no value-setter
+    // write happens on this path, so bump explicitly).
+    ce._mutationGeneration += 1;
     return ce;
   }
 
@@ -771,6 +774,7 @@ export function assignFn(
     // updateDef removes def.value and sets def.operator — no separate
     // _setSymbolValue call needed to clear the old value.
     updateDef(ce, id, def, fnDef);
+    ce._mutationGeneration += 1;
   } else {
     // No previous definition: create a new one
     ce.declare(id, fnDef);

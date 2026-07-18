@@ -27,6 +27,9 @@ import {
   hasAccessibleComponents,
   isDeclaredScalarNumber,
   isFiniteIndexedCollection,
+  isBroadcastableCollection,
+  isUnknownLengthBroadcast,
+  lazyBroadcastMap,
   broadcastOverIndexedCollections,
   isPossiblyCollectionTyped,
   broadcastableResultTypeOf,
@@ -349,6 +352,25 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
       xs.map((x) => x.canonical)
     );
 
+  // An unknown/infinite-length indexed collection (a `Cycle`, a `Filter`, a
+  // symbolic-length `Range`) can't be materialized or eagerly zipped without
+  // truncating — return the lazy `Map` form. Checked BEFORE the tensor and
+  // finite-broadcast branches so a mixed finite+infinite sum (`Add(List(…),
+  // Cycle(…))`, where the finite `List` is a rank-1 tensor) maps ALL
+  // collections as `Map` sources rather than routing to `addTensors`, which
+  // would broadcast over the finite operand and splice the infinite one whole.
+  // A finite tensor never triggers this (its `count` is known-finite), so pure
+  // tensor sums fall through unchanged. Tuples stay atomic
+  // (`isBroadcastableCollection` excludes them).
+  if (xs.some(isUnknownLengthBroadcast))
+    return lazyBroadcastMap(
+      xs[0].engine,
+      'Add',
+      xs,
+      isBroadcastableCollection,
+      false
+    );
+
   // Check if any operands are tensors
   const hasTensors = xs.some((x) => isTensor(x));
   if (hasTensors) return addTensors(xs[0].engine, xs);
@@ -363,7 +385,13 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   // tuple over the list instead of falling inert in `addTuples`. Tuples
   // themselves are excluded — they add component-wise, never broadcast.
   if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
-    const r = broadcastOverIndexedCollections(xs[0].engine, 'Add', xs, false);
+    const r = broadcastOverIndexedCollections(
+      xs[0].engine,
+      'Add',
+      xs,
+      false,
+      true
+    );
     if (r) return r;
   }
 
@@ -385,6 +413,18 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
       xs.map((x) => x.canonical)
     );
 
+  // Unknown/infinite-length indexed collection → lazy `Map` (see `add`, which
+  // documents why this precedes the tensor branch); the `N`-wrap threads
+  // through so elements float on access.
+  if (xs.some(isUnknownLengthBroadcast))
+    return lazyBroadcastMap(
+      xs[0].engine,
+      'Add',
+      xs,
+      isBroadcastableCollection,
+      true
+    );
+
   // Check if any operands are tensors
   const hasTensors = xs.some((x) => isTensor(x));
   if (hasTensors) {
@@ -396,7 +436,13 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
   // Broadcast over a non-tensor finite indexed collection (see `add` — checked
   // before the tuple branch so `List + Tuple` broadcasts; tuples excluded).
   if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
-    const r = broadcastOverIndexedCollections(xs[0].engine, 'Add', xs, true);
+    const r = broadcastOverIndexedCollections(
+      xs[0].engine,
+      'Add',
+      xs,
+      true,
+      true
+    );
     if (r) return r;
   }
 

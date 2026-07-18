@@ -64,6 +64,13 @@ export function popEvalContext(ce: IComputeEngine): void {
   // needed: `pushEvalContext` copies the current assumptions unchanged, and any
   // assumption added inside the scope goes through `assume()`, which bumps.)
   ce._generation += 1;
+
+  // `_mutationGeneration` (the key of the `Comprehension` element memo) is
+  // bumped by the pop ONLY when this context's assumptions were modified —
+  // that revert is the one semantic change a pop can make. A clean pop leaves
+  // it untouched so mutation-keyed caches survive unrelated scoped
+  // evaluations (Tycho item 38).
+  if (context?._assumptionsDirty) ce._mutationGeneration += 1;
 }
 
 export function inScope<T>(
@@ -83,7 +90,10 @@ export function inScope<T>(
   try {
     return f();
   } finally {
-    ce._evalContextStack.pop();
+    const popped = ce._evalContextStack.pop();
+    // Mirror popEvalContext: reverting assumptions modified inside the
+    // temporary context is a semantic change.
+    if (popped?._assumptionsDirty) ce._mutationGeneration += 1;
   }
 }
 

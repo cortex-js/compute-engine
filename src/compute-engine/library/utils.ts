@@ -554,7 +554,7 @@ export function acceleratedInfiniteSum(
 
   // Numeric value of the body at integer index `k` (real series only).
   const term = (k: number): number => {
-    ce.assign(index, k);
+    assignLoopIndex(ce, index, k);
     const v = body.N();
     if (!isNumber(v) || v.im !== 0) return NaN;
     return v.re;
@@ -635,7 +635,7 @@ export function acceleratedInfiniteProduct(
 
   let invalid = false;
   const logTerm = (k: number): number => {
-    ce.assign(index, k);
+    assignLoopIndex(ce, index, k);
     const value = body.N();
     if (!isNumber(value) || value.im !== 0 || !(value.re > 0)) {
       invalid = true;
@@ -1163,6 +1163,28 @@ export type BigOpResult<T> =
   | { status: 'error'; reason: string };
 
 /**
+ * Assign a big-op loop index as an EPHEMERAL write: it bumps `_generation`
+ * and the index definition's `_writeVersion` (so anything that actually
+ * references the index still invalidates), but not `ce._mutationGeneration`
+ * — an interleaved `Sum`/`Product` evaluation must not invalidate
+ * mutation-keyed caches (the `Comprehension` element memo) of expressions
+ * that never mention its index (Tycho item 38). Only the assign itself is
+ * wrapped: any side effect of evaluating the BODY still bumps normally.
+ */
+export function assignLoopIndex(
+  ce: ComputeEngine,
+  index: string,
+  value: Expression | number
+): void {
+  ce._ephemeralWriteDepth += 1;
+  try {
+    ce.assign(index, value);
+  } finally {
+    ce._ephemeralWriteDepth -= 1;
+  }
+}
+
+/**
  * Process an expression of the form
  * - ['Operator', body, ['Tuple', index1, lower, upper]]
  * - ['Operator', body, ['Tuple', index1, lower, upper], ['Tuple', index2, lower, upper], ...]
@@ -1275,7 +1297,8 @@ export function* reduceBigOp<T>(
     // An index-less bounds pair (`Limits(Nothing, 1, 9)`) iterates a constant
     // body: there is no index variable to assign.
     indexingSets.forEach((x, i) => {
-      if (x.index && x.index !== 'Nothing') ce.assign(x.index, element[i]);
+      if (x.index && x.index !== 'Nothing')
+        assignLoopIndex(ce, x.index, element[i]);
     });
     result = fn(result, body) ?? undefined;
     yield result;
@@ -1405,7 +1428,8 @@ function* reduceElementIndexingSets<T>(
   while (true) {
     // Apply current combination of assignments
     for (let i = 0; i < elementDomains.length; i++) {
-      ce.assign(
+      assignLoopIndex(
+        ce,
         elementDomains[i].variable,
         elementDomains[i].values[indices[i]]
       );

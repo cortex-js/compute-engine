@@ -11,6 +11,8 @@ type ResetHooks = {
 
 export class EngineConfigurationLifecycle {
   private _generation = 0;
+  private _mutationGeneration = 0;
+  private _ephemeralWriteDepth = 0;
   private _tracker = new ConfigurationChangeTracker();
 
   get generation(): number {
@@ -21,8 +23,25 @@ export class EngineConfigurationLifecycle {
     this._generation = value;
   }
 
+  get mutationGeneration(): number {
+    return this._mutationGeneration;
+  }
+
+  set mutationGeneration(value: number) {
+    this._mutationGeneration = value;
+  }
+
+  get ephemeralWriteDepth(): number {
+    return this._ephemeralWriteDepth;
+  }
+
+  set ephemeralWriteDepth(value: number) {
+    this._ephemeralWriteDepth = value;
+  }
+
   reset(hooks: ResetHooks): void {
     this._generation += 1;
+    this._mutationGeneration += 1;
     hooks.refreshNumericConstants();
     hooks.resetCommonSymbols();
     hooks.purgeCaches();

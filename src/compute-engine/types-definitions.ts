@@ -917,6 +917,11 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
   /** Release resources owned by this definition when its scope is disposed. */
   dispose(): void;
 
+  /** Bumped on every semantic change to this definition (value write, type
+   * change, disposal). Used to validate per-dependency caches.
+   * @internal */
+  _writeVersion: number;
+
   /**
     * If the symbol has a value, it is held as indicated in the table below.
     * A green checkmark indicate that the symbol is substituted.

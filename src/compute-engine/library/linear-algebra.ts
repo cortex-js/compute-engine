@@ -7,6 +7,7 @@ import { checkArity } from '../boxed-expression/validate.js';
 import { isFiniteIndexedCollection } from '../collection-utils.js';
 import {
   Expression,
+  ExpressionInput,
   IComputeEngine as ComputeEngine,
   SymbolDefinitions,
   Sign,
@@ -18,6 +19,46 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { asRational, toInteger } from '../boxed-expression/numerics.js';
+
+// Total number of elements (m·n) at or below which a constant matrix
+// constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`, and the vector
+// form of `Diagonal`) materializes its full nested `List`. Above this bound the
+// result is a fully-lazy nested `Tabulate` instead, so e.g.
+// `IdentityMatrix(1_000_000)` no longer attempts to allocate 10^12 boxed
+// entries. The threshold is deliberately larger than `MAX_SIZE_EAGER_COLLECTION`
+// (100): matrix-algebra operations (`Determinant`, `Inverse`, …) require a
+// materialized `List` tensor — a lazy collection is not recognized as a matrix —
+// so dense matrices up to 100×100 stay eager and remain usable by those
+// operations, while only genuinely huge matrices (where dense linear algebra is
+// impractical and full materialization would exhaust memory) fall back to the
+// lazy form. No existing test uses a matrix larger than this bound, so the eager
+// snapshots are unaffected.
+const MAX_SIZE_EAGER_TENSOR = 10000;
+
+/**
+ * Build an m×n matrix as a fully-lazy nested `Tabulate`: an outer 1-D
+ * tabulation of `m` rows, each row itself a lazy 1-D tabulation of `n` cells.
+ * Both dimensions stay lazy, so construction, `.count`/`Length`, and element
+ * access are O(1) regardless of `m`/`n`.
+ *
+ * `cell` is the MathJSON body evaluated for each entry; it may reference the
+ * 1-based row-index symbol `i` and column-index symbol `j`. The whole nested
+ * expression is boxed in a single `ce.expr` call so the enclosing `Function`
+ * scopes bind `i`/`j` as parameters — building the pieces separately would let a
+ * bare `i` canonicalize to the imaginary unit before it is bound.
+ */
+function lazyConstantMatrix(
+  ce: ComputeEngine,
+  m: number,
+  n: number,
+  cell: ExpressionInput
+): Expression {
+  return ce.expr([
+    'Tabulate',
+    ['Function', ['Tabulate', ['Function', cell, 'j'], n], 'i'],
+    m,
+  ]);
+}
 
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
@@ -1097,6 +1138,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // Vector → create diagonal matrix
           if (shape.length === 1) {
             const n = shape[0];
+            // Huge diagonal matrix: return a fully-lazy nested `Tabulate` whose
+            // entry i,j is δ_{i,j}·vᵢ (the i-th vector element on the diagonal,
+            // 0 elsewhere) instead of allocating n² boxed entries.
+            if (n * n > MAX_SIZE_EAGER_TENSOR)
+              return lazyConstantMatrix(ce, n, n, [
+                'Multiply',
+                ['KroneckerDelta', 'i', 'j'],
+                ['At', op1, 'i'],
+              ]);
             const rows: Expression[] = [];
             const elements = [...op1.each()];
             for (let i = 0; i < n; i++) {
@@ -1137,8 +1187,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const nExpr = ops[0].evaluate();
         const n = nExpr.re;
 
-        if (n === undefined || !Number.isInteger(n) || n < 1)
+        if (n === undefined || !Number.isSafeInteger(n) || n < 1)
           return ce.error('expected-positive-integer', nExpr.toString());
+
+        // Huge matrix: return a fully-lazy nested `Tabulate` (entry i,j is
+        // δ_{i,j} = 1 on the diagonal, 0 elsewhere) instead of allocating n²
+        // boxed entries.
+        if (n * n > MAX_SIZE_EAGER_TENSOR)
+          return lazyConstantMatrix(ce, n, n, ['KroneckerDelta', 'i', 'j']);
 
         const rows: Expression[] = [];
         for (let i = 0; i < n; i++) {
@@ -1161,7 +1217,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const mExpr = ops[0].evaluate();
         const m = mExpr.re;
 
-        if (m === undefined || !Number.isInteger(m) || m < 1)
+        if (m === undefined || !Number.isSafeInteger(m) || m < 1)
           return ce.error('expected-positive-integer', mExpr.toString());
 
         // If only one argument, create m×m matrix
@@ -1169,9 +1225,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (ops.length > 1) {
           const nExpr = ops[1].evaluate();
           n = nExpr.re ?? m;
-          if (!Number.isInteger(n) || n < 1)
+          if (!Number.isSafeInteger(n) || n < 1)
             return ce.error('expected-positive-integer', nExpr.toString());
         }
+
+        // Huge matrix: return a fully-lazy nested `Tabulate` of zeros instead of
+        // allocating m·n boxed entries.
+        if (m * n > MAX_SIZE_EAGER_TENSOR)
+          return lazyConstantMatrix(ce, m, n, 0);
 
         const rows: Expression[] = [];
         for (let i = 0; i < m; i++) {
@@ -1194,7 +1255,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const mExpr = ops[0].evaluate();
         const m = mExpr.re;
 
-        if (m === undefined || !Number.isInteger(m) || m < 1)
+        if (m === undefined || !Number.isSafeInteger(m) || m < 1)
           return ce.error('expected-positive-integer', mExpr.toString());
 
         // If only one argument, create m×m matrix
@@ -1202,9 +1263,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (ops.length > 1) {
           const nExpr = ops[1].evaluate();
           n = nExpr.re ?? m;
-          if (!Number.isInteger(n) || n < 1)
+          if (!Number.isSafeInteger(n) || n < 1)
             return ce.error('expected-positive-integer', nExpr.toString());
         }
+
+        // Huge matrix: return a fully-lazy nested `Tabulate` of ones instead of
+        // allocating m·n boxed entries.
+        if (m * n > MAX_SIZE_EAGER_TENSOR)
+          return lazyConstantMatrix(ce, m, n, 1);
 
         const rows: Expression[] = [];
         for (let i = 0; i < m; i++) {

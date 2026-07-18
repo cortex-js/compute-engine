@@ -490,6 +490,39 @@ export class ComputeEngine implements IComputeEngine {
     this._configurationLifecycle.generation = value;
   }
 
+  /**
+   * Bumped on SEMANTIC mutations only: value/type writes to bindings,
+   * `assume()`/`forget()`, signature inference on a shared definition, and
+   * popping an eval context that added assumptions. NOT bumped by plain
+   * scope push/pop or by ephemeral loop-index writes (big-op and
+   * comprehension index assigns, see `_ephemeralWriteDepth`), so caches
+   * keyed on it (the `Comprehension` element memo) survive unrelated scoped
+   * evaluations. Leaves `_generation` semantics untouched.
+   * @internal
+   */
+  get _mutationGeneration(): number {
+    return this._configurationLifecycle.mutationGeneration;
+  }
+
+  set _mutationGeneration(value: number) {
+    this._configurationLifecycle.mutationGeneration = value;
+  }
+
+  /**
+   * When > 0, value writes are ephemeral loop-index writes: they bump
+   * `_generation` and the definition's `_writeVersion` but not
+   * `_mutationGeneration`. Incremented/decremented (try/finally) around the
+   * index assigns of `reduceBigOp` and `ComprehensionIndexFrame`.
+   * @internal
+   */
+  get _ephemeralWriteDepth(): number {
+    return this._configurationLifecycle.ephemeralWriteDepth;
+  }
+
+  set _ephemeralWriteDepth(value: number) {
+    this._configurationLifecycle.ephemeralWriteDepth = value;
+  }
+
   /** In strict mode (the default) the Compute Engine performs
    * validation of domains and signature and may report errors.
    *

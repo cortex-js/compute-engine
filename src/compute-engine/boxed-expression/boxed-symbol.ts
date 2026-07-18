@@ -441,6 +441,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       if (newType.matches('function')) {
         // The function signature was modified
         def.operator.signature = newType;
+        // Signature inference mutates a SHARED operator definition in place: a
+        // semantic change other expressions may depend on.
+        this.engine._mutationGeneration += 1;
         return true;
       }
       // The type is no longer a function, use a value definition
@@ -932,10 +935,30 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   at(index: number): Expression | undefined {
-    return (
-      this._asCollection?.at?.(this._value ?? this, index) ??
-      this._value?.at?.(index)
-    );
+    // When dispatching to a value-def's own collection handler, centralize
+    // negative-index normalization (mirroring `BoxedFunction.at`): the handler
+    // gets a 1-based positive index. The `_value.at` fallback is left to
+    // normalize itself (it dispatches to another expression's `at`).
+    const handler = this._asCollection?.at;
+    if (handler) {
+      const target = this._value ?? this;
+      if (index < 0) {
+        if (this.isFiniteCollection !== true) return this._value?.at?.(index);
+        const count = this.count;
+        if (count !== undefined && Number.isFinite(count)) {
+          const normalized = count + 1 + index;
+          if (normalized >= 1) {
+            const result = handler(target, normalized);
+            if (result !== undefined) return result;
+          }
+          return this._value?.at?.(index);
+        }
+        return this._value?.at?.(index);
+      }
+      const result = handler(target, index);
+      if (result !== undefined) return result;
+    }
+    return this._value?.at?.(index);
   }
 
   get(index: Expression | string): Expression | undefined {

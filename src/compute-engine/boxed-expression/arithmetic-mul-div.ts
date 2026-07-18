@@ -18,6 +18,9 @@ import {
   isTuple,
   hasAccessibleComponents,
   isFiniteIndexedCollection,
+  isBroadcastableCollection,
+  isUnknownLengthBroadcast,
+  lazyBroadcastMap,
   broadcastOverIndexedCollections,
 } from '../collection-utils.js';
 import { NumericValue } from '../numeric-value/types.js';
@@ -1480,6 +1483,17 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
       xs.map((x) => x.canonical)
     );
 
+  // An unknown/infinite-length indexed collection (a `Cycle`, a `Filter`, a
+  // symbolic-length `Range`) can't be materialized or eagerly zipped without
+  // truncating — return the lazy `Map` form. Checked BEFORE the tensor and
+  // finite-broadcast branches so a mixed finite+infinite product (where a
+  // finite `List` factor is a rank-1 tensor) maps ALL collections as `Map`
+  // sources rather than routing to `mulTensors`. A finite tensor never triggers
+  // this (its `count` is known-finite). Tuples stay atomic
+  // (`isBroadcastableCollection` excludes them).
+  if (xs.some(isUnknownLengthBroadcast))
+    return lazyBroadcastMap(ce, 'Multiply', xs, isBroadcastableCollection, false);
+
   // Tensor (matrix/vector) operands follow matrix-product / scalar-scaling
   // semantics rather than the scalar Product machinery.
   if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs);
@@ -1496,7 +1510,7 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
   // list component) are EXCLUDED — they scale component-wise via `mulTuples`,
   // never broadcast as a list.
   if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
-    const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, false);
+    const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, false, true);
     if (r) return r;
   }
 
@@ -1524,10 +1538,15 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
       'Multiply',
       xs.map((x) => x.canonical)
     );
+  // Unknown/infinite-length indexed collection → lazy `Map` (see `mul`, which
+  // documents why this precedes the tensor branch); the `N`-wrap threads
+  // through so elements float on access.
+  if (xs.some(isUnknownLengthBroadcast))
+    return lazyBroadcastMap(ce, 'Multiply', xs, isBroadcastableCollection, true);
   if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs, true);
   // Broadcast over a non-tensor finite indexed collection (see `mul`).
   if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
-    const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true);
+    const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
     if (r) return r;
   }
   if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, true);

@@ -45,6 +45,7 @@ import { BoxedType } from '../types.js';
 import { typeToString } from '../../common/type/serialize.js';
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils.js';
+import { flatten } from '../boxed-expression/flatten.js';
 import {
   isDictionary,
   isFunction,
@@ -90,6 +91,80 @@ function hasIndexableMember(expr: Expression): boolean {
   return t.types.some(
     (m) => isSubtype(m, 'indexed_collection') || isSubtype(m, 'dictionary')
   );
+}
+
+// Canonical-time "peek" through eager collection wrappers that don't change
+// the answer a consumer is about to read.
+//
+// Soundness: `Length`/`Count`/`IsEmpty` depend only on the multiset of
+// elements, so any COUNT-PRESERVING wrapper (`Sort`, `Shuffle`, `Reverse`) can
+// be stripped — the wrapped and unwrapped collections have the same number of
+// elements, whether the operand is concrete or symbolic, evaluated or not.
+// `Contains` depends only on the SET of elements, so it may additionally strip
+// `Unique` (which drops duplicates but preserves membership).
+//
+// Why it matters: consumers evaluate their operand first, so an EAGER wrapper
+// (Sort/Shuffle) would materialize and reorder the whole collection before the
+// consumer reads a count/membership — e.g. `Count(Sort(Range(1,1e5)))` sorted
+// 1e5 elements (~15s) only to discard the order. `Reverse` is lazy and cheap,
+// but is included for structural uniformity (the same soundness argument
+// applies); the real win is the eager wrappers.
+//
+// The strip keeps only the wrapper's first operand and drops any extra
+// arguments (a `Sort` comparator, a `Shuffle` seed) — by design, since those
+// cannot change the count/membership. Loops to collapse nesting, e.g.
+// `Count(Reverse(Sort(x))) → Count(x)`.
+const COUNT_PRESERVING_WRAPPERS = ['Sort', 'Shuffle', 'Reverse'];
+const MEMBERSHIP_PRESERVING_WRAPPERS = ['Sort', 'Shuffle', 'Reverse', 'Unique'];
+
+function peekWrappers(
+  op: Expression | undefined,
+  wrappers: string[]
+): Expression | undefined {
+  let result = op;
+  while (
+    isFunction(result) &&
+    wrappers.includes(result.operator) &&
+    result.nops >= 1 &&
+    // Only strip a wrapper whose own canonical form is valid. The operand
+    // arriving here is already canonicalized, so an invalid wrapper argument
+    // (e.g. a non-function `Sort` comparator) shows up as an error
+    // subexpression. Stripping it would silently erase that static type error;
+    // instead, stop peeking and let the validation path surface it.
+    result.isValid
+  ) {
+    result = result.op1;
+  }
+  return result;
+}
+
+// Strip count-preserving wrappers (Sort/Shuffle/Reverse) from `op`.
+const peekCountPreserving = (op: Expression | undefined): Expression | undefined =>
+  peekWrappers(op, COUNT_PRESERVING_WRAPPERS);
+
+// Strip membership-preserving wrappers (Sort/Shuffle/Reverse/Unique) from `op`.
+// NOTE: `Unique` is membership-preserving but NOT count-preserving, so it is
+// only stripped for `Contains`, never for `Length`/`Count`/`IsEmpty`.
+const peekMembershipPreserving = (
+  op: Expression | undefined
+): Expression | undefined => peekWrappers(op, MEMBERSHIP_PRESERVING_WRAPPERS);
+
+// Parsed signatures (kept in sync with the `signature:` strings on the
+// respective definitions) for the count/membership canonical handlers to
+// delegate operand validation to `validateArguments`.
+const LENGTH_SIGNATURE = parseType('(any) -> integer');
+const COUNT_SIGNATURE = parseType('(collection) -> integer');
+const ISEMPTY_SIGNATURE = parseType('(collection) -> boolean');
+const CONTAINS_SIGNATURE = parseType('(collection, element: any) -> boolean');
+
+// Rebuild the operand list with `first` in place of `op1`, dropping nothing
+// else. Used by the peek handlers after stripping a wrapper from op1.
+function withFirst(
+  first: Expression | undefined,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (first === undefined) return ops;
+  return [first, ...ops.slice(1)];
 }
 
 // Shared instance of the basic handlers, used by the `Set` handlers to
@@ -484,6 +559,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 4000,
     signature: '(any) -> integer',
     type: () => 'integer' as Type,
+    // Peek through count-preserving wrappers so an eager Sort/Shuffle isn't
+    // materialized just to read a length (see `peekCountPreserving`).
+    canonical: (ops, { engine: ce }) => {
+      // Run the framework's default flatten step (Sequence-splice + Nothing-
+      // drop) that this custom canonical handler would otherwise short-circuit.
+      ops = flatten(ops);
+      const stripped = withFirst(peekCountPreserving(ops[0]), ops);
+      const adjusted = validateArguments(
+        ce,
+        stripped,
+        LENGTH_SIGNATURE,
+        false,
+        false
+      );
+      return ce._fn('Length', adjusted ?? stripped);
+    },
     evaluate: ([xs], { engine }) => {
       // Guard non-collection inputs (e.g. Length(5), Length(x+y)).
       if (!xs.isCollection) return undefined;
@@ -1183,8 +1274,29 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return True if the collection contains the given element, False otherwise.',
     complexity: 8200,
     signature: '(collection, element: any) -> boolean',
+    // Peek through membership-preserving wrappers (incl. `Unique`) so an eager
+    // Sort/Shuffle isn't materialized just to test membership (see
+    // `peekMembershipPreserving`).
+    canonical: (ops, { engine: ce }) => {
+      // Run the framework's default flatten step (Sequence-splice + Nothing-
+      // drop) that this custom canonical handler would otherwise short-circuit.
+      ops = flatten(ops);
+      const stripped = withFirst(peekMembershipPreserving(ops[0]), ops);
+      const adjusted = validateArguments(
+        ce,
+        stripped,
+        CONTAINS_SIGNATURE,
+        false,
+        false
+      );
+      return ce._fn('Contains', adjusted ?? stripped);
+    },
     evaluate: ([xs, value], { engine: ce }) => {
-      return xs.contains(value) ? ce.True : ce.False;
+      // Three-valued: an indeterminate membership (e.g. a bounded walk that
+      // hits its iteration limit) stays inert rather than collapsing to False.
+      const found = xs.contains(value);
+      if (found === undefined) return undefined;
+      return found ? ce.True : ce.False;
     },
   },
 
@@ -1193,6 +1305,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     keywords: ['cardinality'],
     complexity: 8200,
     signature: '(collection) -> integer',
+    // Peek through count-preserving wrappers so an eager Sort/Shuffle isn't
+    // materialized just to read a count (see `peekCountPreserving`).
+    canonical: (ops, { engine: ce }) => {
+      // Run the framework's default flatten step (Sequence-splice + Nothing-
+      // drop) that this custom canonical handler would otherwise short-circuit.
+      ops = flatten(ops);
+      const stripped = withFirst(peekCountPreserving(ops[0]), ops);
+      const adjusted = validateArguments(
+        ce,
+        stripped,
+        COUNT_SIGNATURE,
+        false,
+        false
+      );
+      return ce._fn('Count', adjusted ?? stripped);
+    },
     evaluate: ([xs], { engine }) => {
       if (xs.isEmptyCollection) return engine.Zero;
       // An indeterminate count (e.g. a set-builder over a symbolic domain)
@@ -1213,8 +1341,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: ['Return True if the collection is empty, False otherwise.'],
     complexity: 8200,
     signature: '(collection) -> boolean',
-    evaluate: ([xs], { engine: ce }) =>
-      xs.isEmptyCollection ? ce.True : ce.False,
+    // Peek through count-preserving wrappers so an eager Sort/Shuffle isn't
+    // materialized just to test emptiness (see `peekCountPreserving`).
+    canonical: (ops, { engine: ce }) => {
+      // Run the framework's default flatten step (Sequence-splice + Nothing-
+      // drop) that this custom canonical handler would otherwise short-circuit.
+      ops = flatten(ops);
+      const stripped = withFirst(peekCountPreserving(ops[0]), ops);
+      const adjusted = validateArguments(
+        ce,
+        stripped,
+        ISEMPTY_SIGNATURE,
+        false,
+        false
+      );
+      return ce._fn('IsEmpty', adjusted ?? stripped);
+    },
+    evaluate: ([xs], { engine: ce }) => {
+      // Three-valued: an indeterminate emptiness (e.g. a bounded Filter walk
+      // that hits its iteration limit) stays inert rather than collapsing to
+      // False.
+      const empty = xs.isEmptyCollection;
+      if (empty === undefined) return undefined;
+      return empty ? ce.True : ce.False;
+    },
   },
 
   // Any(collection, predicate?): True if the predicate holds for at least one
@@ -1439,16 +1589,64 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      // Structural, O(1), never walks the source: a filter of a finite source
+      // is finite; a filter of an infinite/unknown source may be finite or
+      // infinite, so the finiteness is unknown (`undefined`). Providing an
+      // explicit handler is essential — the synthesized default derives
+      // `isFinite` from `count`, whose walk enforces `ce.iterationLimit` and
+      // would throw during canonicalization of a large source.
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        return expr.op1.isFiniteCollection === true ? true : undefined;
+      },
+      // A filter of an empty source is empty (O(1)). Otherwise emptiness
+      // depends on the predicate — a finite source may filter down to nothing
+      // (`Min(9, Filter([1,2], _ > 5))` needs `true`) or keep elements (needed
+      // by materialization). So walk to the FIRST matching element: `false` as
+      // soon as one is found, `true` if the source is exhausted with no match.
+      // The walk is bounded by `ce.iterationLimit`; if that trips before a
+      // verdict, report `undefined` (unknown) rather than let the cancellation
+      // escape — any other cancellation (deadline/timeout) propagates.
+      isEmpty: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.op1.isEmptyCollection === true) return true;
+        try {
+          for (const _ of expr.each()) return false;
+          return true;
+        } catch (e) {
+          if (
+            e instanceof CancellationError &&
+            e.cause === 'iteration-limit-exceeded'
+          )
+            return undefined;
+          throw e;
+        }
+      },
       count: (expr) => {
         // The filtered count is unknown without testing the predicate. For a
         // finite source, count the matching elements (so e.g.
         // `Sum(Filter([1,2,3], _ > 1))` can evaluate instead of bailing on an
-        // `Infinity` count); an infinite source stays `Infinity`.
+        // unknown count). For an infinite or unknown source the count is
+        // unknown (`undefined`) — never `Infinity`, since a filter of an
+        // infinite source may still have a finite count.
         if (!isFunction(expr)) return undefined;
-        if (!expr.op1.isFiniteCollection) return Infinity;
-        let n = 0;
-        for (const _ of expr.each()) n++;
-        return n;
+        if (expr.op1.isFiniteCollection !== true) return undefined;
+        // The exact walk enforces `ce.iterationLimit` on SOURCE elements; if
+        // that limit trips, report the count as unknown rather than letting
+        // the cancellation escape (mirrors `comprehensionEnumeratedCount`).
+        // Any other cancellation (deadline/timeout) must propagate.
+        try {
+          let n = 0;
+          for (const _ of expr.each()) n++;
+          return n;
+        } catch (e) {
+          if (
+            e instanceof CancellationError &&
+            e.cause === 'iteration-limit-exceeded'
+          )
+            return undefined;
+          throw e;
+        }
       },
       contains: (expr, target) => {
         // True if target is in the source collection and the predicate returns
@@ -2357,7 +2555,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             for (const m of indices) {
               const k = m.re;
               if (!Number.isInteger(k)) return undefined;
-              const v = at(expr, k);
+              // Route through the dispatcher so negative indices normalize.
+              const v = expr.at(k);
               if (v !== undefined) picked.push(v);
             }
           }
@@ -2367,10 +2566,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           continue;
         }
 
-        // Case C: primitive integer index.
+        // Case C: primitive integer index. Route through the dispatcher so
+        // negative indices normalize (count from the end).
         const i = opAtIndex.re;
         if (!Number.isInteger(i)) return undefined;
-        expr = at(expr, i) ?? ce.Nothing;
+        expr = expr.at(i) ?? ce.Nothing;
         index += 1;
       }
       return expr;
@@ -3207,11 +3407,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(indexed_collection, function?) -> indexed_collection',
     type: (ops) => ops[0].type,
     evaluate: ([xs, fn], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return ce.function(xs.operator, []);
+      // Eager collection results rebuild as `List`, never the source's head
+      // (a `Range`/`Linspace` head would reinterpret the sorted elements as
+      // lo/hi/step). Stay inert on non-finite or unknown-length input.
+      if (xs.isFiniteCollection !== true) return undefined;
       const indices = sortedIndices(xs, fn);
       if (!indices) return undefined;
       return ce.function(
-        xs.operator,
+        'List',
         indices.map((i) => xs.at(i)!)
       );
     },
@@ -3355,7 +3558,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
       }
 
-      return ce.function(xs.operator, data);
+      // Eager collection results rebuild as `List`, never the source's head
+      // (a `Range`/`Linspace` head would reinterpret the shuffled elements as
+      // lo/hi/step).
+      return ce.function('List', data);
     },
   },
 

@@ -1,7 +1,7 @@
 import { widen, broadcastElementType } from '../common/type/utils.js';
 import { isSubtype } from '../common/type/subtype.js';
 import { Type } from '../common/type/types.js';
-import { checkDeadline } from '../common/interruptible.js';
+import { CancellationError, checkDeadline } from '../common/interruptible.js';
 import { Expression, CollectionHandlers } from './global-types.js';
 import {
   isFunction,
@@ -22,6 +22,61 @@ export const MAX_SIZE_EAGER_COLLECTION = 100;
 
 export function isFiniteIndexedCollection(col: Expression): boolean {
   return (col.isFiniteCollection ?? false) && col.isIndexedCollection;
+}
+
+/**
+ * A broadcast-eligible indexed-collection operand: an indexed collection that
+ * is not a tuple (tuples carry point/vector semantics and stay atomic). Unlike
+ * `isFiniteIndexedCollection`, this covers finite, unknown-length AND infinite
+ * indexed collections — the element-wise operators (`Add`/`Multiply`, `Sin`, a
+ * scalar-parameter lambda) broadcast over all of them; the known-finite vs.
+ * unknown/infinite split (below) decides eager materialization vs. the lazy
+ * `Map` form.
+ */
+export function isBroadcastableCollection(x: Expression): boolean {
+  return x.isIndexedCollection === true && !isTuple(x);
+}
+
+/**
+ * A broadcast-eligible operand whose length is NOT a known-finite number: an
+ * infinite collection (`Cycle`, whose `count` is `Infinity`), or one whose
+ * count is statically unknown (`Filter`, or a symbolic-length `Range` whose
+ * `isFiniteCollection` is `undefined`). These cannot be eagerly zipped or
+ * materialized — the eager `zip`/`at` loops would truncate to a single element
+ * (`zip` treats an undefined count as `1`) — so a broadcast over them must
+ * produce the lazy `Map` form. Note that `Filter` reports `isFiniteCollection
+ * === true` yet `count === undefined`, so the `count === undefined` clause is
+ * load-bearing, not redundant.
+ */
+export function isUnknownLengthBroadcast(x: Expression): boolean {
+  return (
+    isBroadcastableCollection(x) &&
+    (x.isFiniteCollection !== true || x.count === undefined)
+  );
+}
+
+/**
+ * A broadcast-eligible operand whose finiteness is **statically settled** —
+ * either provably finite (`isFiniteCollection === true`, including the uncountable
+ * `Filter`) or provably infinite (`isFiniteCollection === false`, e.g. `Cycle`).
+ * A collection whose `isFiniteCollection` is `undefined` is deliberately
+ * EXCLUDED: that is a not-yet-resolved collection expression whose length only
+ * becomes known at evaluation — a symbolic-length `Range` before its bound
+ * resolves, or a raw operand held unevaluated by a lazy operator (e.g.
+ * `Reverse(Characters(s))` held by `Equal`). Broadcasting such an operand now
+ * would freeze its unresolved form into the lazy `Map` and rob the operator of
+ * the chance to fold it (a whole-collection `Equal`) once its operands
+ * evaluate.
+ *
+ * Used to gate the POST-evaluation broadcast (`_computeValue` step 4b /
+ * `_computeValueAsync` step 3b), whose `tail` may still hold raw operands for a
+ * lazy operator. The pre-evaluation sites (step 2/2b) instead gate on
+ * `isFiniteIndexedCollection` (settled-finite only); the value-path arithmetic
+ * (`add`/`mul`) operates on already-evaluated operands and uses the wider
+ * `isUnknownLengthBroadcast` so a genuinely symbolic-length `Range` lazifies.
+ */
+export function isKnownFinitenessBroadcast(x: Expression): boolean {
+  return isBroadcastableCollection(x) && x.isFiniteCollection !== undefined;
 }
 
 /** Operators that construct a tuple. All canonicalize to `Tuple`. */
@@ -137,6 +192,45 @@ export function typeCouldBeNumericCollection(type: Type): boolean {
   }
   if (type.kind === 'union')
     return type.types.some((t) => typeCouldBeNumericCollection(t));
+  return false;
+}
+
+/**
+ * Return true when a type is a collection whose element type is **concrete and
+ * provably non-numeric** — e.g. `indexed_collection<string>`,
+ * `list<string>`, `broadcastable<boolean>`. This is the strict complement of
+ * {@link typeCouldBeNumericCollection} restricted to concrete-element
+ * collections: a bare kind (`list`) or an `any`/`unknown` element is NOT
+ * provably non-numeric (it *could* be numeric at runtime), so it does not
+ * qualify.
+ *
+ * Companion to {@link typeCouldBeNumericCollection}, kept next to it so the two
+ * stay in lockstep. Used by `checkNumericArgs` (`validate.ts`) to reject a
+ * statically non-numeric collection operand of a threadable numeric operator
+ * (`Add`/`Multiply`/…) *without walking its elements* — the element type
+ * already disproves numericity.
+ */
+export function typeIsProvablyNonNumericCollection(type: Type): boolean {
+  if (typeof type === 'string') return false; // bare kind: could be numeric
+  if (
+    type.kind === 'collection' ||
+    type.kind === 'indexed_collection' ||
+    type.kind === 'list' ||
+    type.kind === 'set'
+  ) {
+    const el = type.elements;
+    if (el === 'any' || el === 'unknown') return false;
+    return !couldBeNumericElement(el);
+  }
+  if (type.kind === 'broadcastable') {
+    const el = type.elements;
+    if (el === 'any' || el === 'unknown') return false;
+    return !(isSubtype(el, 'number') || isSubtype('number', el));
+  }
+  // A union is provably non-numeric only if EVERY member is (any could-be-
+  // numeric member keeps the whole union admissible).
+  if (type.kind === 'union')
+    return type.types.every((t) => typeIsProvablyNonNumericCollection(t));
   return false;
 }
 
@@ -436,7 +530,8 @@ export function broadcastOverIndexedCollections(
   ce: Expression['engine'],
   operator: string,
   xs: ReadonlyArray<Expression>,
-  numericApproximation: boolean
+  numericApproximation: boolean,
+  allowLazy = false
 ): Expression | undefined {
   const isBroadcast = (x: Expression): boolean =>
     isFiniteIndexedCollection(x) && !isTuple(x);
@@ -454,6 +549,17 @@ export function broadcastOverIndexedCollections(
   }
   if (!Number.isFinite(n)) return undefined;
 
+  // Hybrid laziness (OPT-IN via `allowLazy`): past the eager threshold, return
+  // the lazy `Map` form instead of materializing the whole result. `Add(Range(
+  // 1,1e8), 1)` becomes `Map(Range(1,1e8), _1 ↦ Add(_1, 1))` — consumable via
+  // `at`/`Take`/`count` without building 1e8 elements. Below/at the threshold
+  // the eager loop below runs unchanged, so small collections stay
+  // byte-identical. Callers that require an eager `List` shape at any finite
+  // size (e.g. `PointList`, whose `List<Tuple>` shape is a consumer contract)
+  // leave `allowLazy` false and always get the eager materialization.
+  if (allowLazy && n > MAX_SIZE_EAGER_COLLECTION)
+    return lazyBroadcastMap(ce, operator, xs, isBroadcast, numericApproximation);
+
   const options = { numericApproximation };
   const results: Expression[] = [];
   for (let i = 1; i <= n; i++) {
@@ -461,6 +567,122 @@ export function broadcastOverIndexedCollections(
     results.push(ce._fn(operator, args).evaluate(options));
   }
   return ce._fn('List', results);
+}
+
+/**
+ * Build the lazy `Map` form of an element-wise broadcast of `operator` over the
+ * broadcast operands of `ops` (those for which `isBroadcastOperand` is true).
+ * Every broadcast operand becomes a source collection of the `Map` and a fresh,
+ * non-capturing parameter in the mapping-function body; every other operand
+ * (scalars, tuples) is spliced whole into the body. So:
+ * - `Add(Range(1,N), 1)` → `Map(Range(1,N), _1 ↦ Add(_1, 1))`
+ * - `Add(Range(1,N), Range(1,N))` → `Map(Range(1,N), Range(1,N), (_1,_2) ↦ Add(_1,_2))`
+ * - `Multiply(Range(1,N), Tuple(2,3))` → `Map(Range(1,N), _1 ↦ Multiply(_1, Tuple(2,3)))`
+ *
+ * The mapping function is a proper canonical `Function` literal (position-bound
+ * by `Map`), so the shortest-input / `at` / `count` / lazy-iterator semantics of
+ * the multi-collection `Map` carry through. Parameter names are chosen to avoid
+ * every free symbol of a spliced operand, so a spliced scalar can never be
+ * captured by a parameter.
+ */
+export function lazyBroadcastMap(
+  ce: Expression['engine'],
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  isBroadcastOperand: (x: Expression) => boolean,
+  numericApproximation = false
+): Expression {
+  // Parameter names must not shadow a free symbol of a spliced (whole) operand
+  // once the body is canonicalized in the function-literal scope.
+  const avoid = new Set<string>();
+  for (const x of ops)
+    if (!isBroadcastOperand(x)) for (const s of x.symbols) avoid.add(s);
+
+  const cols: Expression[] = [];
+  const params: Expression[] = [];
+  const bodyArgs: Expression[] = [];
+  let i = 0;
+  for (const x of ops) {
+    if (isBroadcastOperand(x)) {
+      let name: string;
+      do {
+        i += 1;
+        name = `_${i}`;
+      } while (avoid.has(name));
+      const p = ce.symbol(name, { canonical: false });
+      params.push(p);
+      bodyArgs.push(p);
+      cols.push(x);
+    } else {
+      bodyArgs.push(x);
+    }
+  }
+
+  let body = ce._fn(operator, bodyArgs, { canonical: false });
+  // When a numeric approximation was requested (`.N()`), wrap each element's
+  // body in `N(…)` so it floats on access — otherwise a lazy element would
+  // evaluate EXACTLY (e.g. `Sin(Range(1,1e8)).N()` element 1 → symbolic
+  // `sin(1)` instead of `0.841…`). The body is built fresh here, so there is
+  // no risk of double-wrapping on re-evaluation of the returned `Map`.
+  if (numericApproximation) body = ce._fn('N', [body], { canonical: false });
+  const fn = ce.function('Function', [body, ...params]);
+  return ce.function('Map', [...cols, fn]);
+}
+
+/**
+ * Return the lazy `Map` form ({@link lazyBroadcastMap}) of the element-wise
+ * broadcast of `operator` over `ops` (broadcast operands identified by
+ * `isBroadcastOperand`) when the broadcast should be lazified, otherwise
+ * `undefined` so the caller runs its existing eager loop. It is lazified when
+ * either:
+ * - some broadcast operand is of **unknown or infinite** length (`Cycle`,
+ *   `Filter`, a symbolic-length `Range`): these cannot be eagerly zipped —
+ *   `zip` would truncate to a single element — so the lazy `Map` is the only
+ *   sound result; or
+ * - every broadcast operand is known-finite but the **shortest** length is
+ *   past `MAX_SIZE_EAGER_COLLECTION`: materialize lazily instead of building
+ *   the whole result.
+ *
+ * When every broadcast operand is known-finite and small (≤ threshold), returns
+ * `undefined` so the caller's eager loop runs byte-identically. If any operand
+ * is unknown/infinite, `isBroadcastOperand` MUST admit finite operands too
+ * (e.g. `isBroadcastableCollection`), so a mixed finite+infinite broadcast maps
+ * all collections as `Map` sources and the variadic `Map` enforces
+ * shortest-input semantics at iteration time.
+ */
+export function lazyBroadcastMapIfNeeded(
+  ce: Expression['engine'],
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  isBroadcastOperand: (x: Expression) => boolean,
+  numericApproximation = false
+): Expression | undefined {
+  let minKnown = Infinity;
+  let hasBroadcast = false;
+  let hasUnknownOrInfinite = false;
+  for (const x of ops) {
+    if (!isBroadcastOperand(x)) continue;
+    hasBroadcast = true;
+    const c = x.count;
+    if (
+      x.isFiniteCollection === true &&
+      typeof c === 'number' &&
+      Number.isFinite(c) &&
+      c >= 0
+    )
+      minKnown = Math.min(minKnown, c);
+    else hasUnknownOrInfinite = true;
+  }
+  if (!hasBroadcast) return undefined;
+  if (!hasUnknownOrInfinite && minKnown <= MAX_SIZE_EAGER_COLLECTION)
+    return undefined;
+  return lazyBroadcastMap(
+    ce,
+    operator,
+    ops,
+    isBroadcastOperand,
+    numericApproximation
+  );
 }
 
 export function repeat(
@@ -691,6 +913,31 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
   };
 }
 
+/**
+ * Call a collection's `count` handler, treating an `iteration-limit-exceeded`
+ * cancellation as "unknown count" (`undefined`) rather than letting it escape.
+ * Any other cancellation (deadline/timeout) or error propagates.
+ *
+ * Used by the synthesized `isEmpty`/`isFinite` defaults: those derive their
+ * answer from `count`, whose walk may enforce `ce.iterationLimit` on a large
+ * source and throw during canonicalization.
+ */
+function countOrUndefinedOnIterationLimit(
+  count: (expr: Expression) => number | undefined,
+  expr: Expression
+): number | undefined {
+  try {
+    return count(expr);
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
+}
+
 export function defaultCollectionHandlers(
   def: undefined | CollectionHandlers
 ): CollectionHandlers | undefined {
@@ -714,14 +961,14 @@ export function defaultCollectionHandlers(
     isEmpty:
       def.isEmpty ??
       ((expr) => {
-        const count = def.count(expr);
+        const count = countOrUndefinedOnIterationLimit(def.count, expr);
         if (count === undefined) return undefined;
-        return def.count(expr) === 0;
+        return count === 0;
       }),
     isFinite:
       def.isFinite ??
       ((expr) => {
-        const count = def.count(expr);
+        const count = countOrUndefinedOnIterationLimit(def.count, expr);
         if (count === undefined) return undefined;
         return Number.isFinite(count);
       }),

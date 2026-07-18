@@ -200,11 +200,24 @@ describe('BROADCAST LIFT Phase 2 — declared type agrees with the broadcast val
   describe('symbolic-length shape — declared list<…> before the bound resolves', () => {
     // `Mod(Range(0,3N),N)` / `Remainder(Range(0,3N),N)`: valid since Phase 1,
     // now declared `list<…>` even while N is symbolic (declared, unassigned).
+    // While N is unresolved the value lazifies to an element-wise `Map`
+    // (uniform with Add/Sin over a symbolic-length Range) instead of staying
+    // inert. The lazy Map's computed type is `indexed_collection<…>`, wider
+    // than the declared `list<…>` — the same precision gap the Add path has
+    // always had. Narrowing the lazy-Map type to honor the declared type is
+    // the Phase-2 declared-type reconciliation follow-up; these pins assert
+    // the declared type and the lazy value form, not evaluated-type subtyping.
     test.each([
       ['Mod', ['Mod', ['Range', 0, ['Multiply', 3, 'N']], 'N']],
       ['Remainder', ['Remainder', ['Range', 0, ['Multiply', 3, 'N']], 'N']],
-    ])('%s(Range(0,3N),N) declares list<…>', (_label, mj) => {
-      expectListTyped(ce.box(mj as any));
+    ])('%s(Range(0,3N),N) declares list<…>, lazifies to Map', (_label, mj) => {
+      const expr = ce.box(mj as any);
+      expect(expr.isValid).toBe(true);
+      expect(expr.type.matches('list<any>')).toBe(true);
+      expect(expr.type.matches('number')).toBe(false);
+      // No `scalar | list<…>` union at the top level.
+      expect(expr.type.toString()).not.toContain('|');
+      expect(expr.evaluate().operator).toBe('Map');
     });
 
     test('Mod value broadcasts once N resolves == element-wise Map', () => {

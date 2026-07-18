@@ -694,7 +694,7 @@ describe('CONTRACT 6: documented non-canonical head vocabulary', () => {
     ['(1,2)', 'Delimiter'],
     ['(1,2,3)', 'Delimiter'],
     ['\\{1,2\\}', 'Set'],
-    ['[x^2 \\text{ for } x \\in [1..10]]', 'List'], // List(ForAll(...))
+    ['[x^2 \\text{ for } x \\in [1..10]]', 'List'], // trailing-qualifier ForAll in a List — NOT a comprehension (see pin below)
     ['1..250', 'Range'],
     ['\\begin{cases} 1 & x<0 \\\\ 2 \\end{cases}', 'Which'],
     ['\\sum_{k=1}^{10} k^2', 'Sum'],
@@ -718,13 +718,38 @@ describe('CONTRACT 6: documented non-canonical head vocabulary', () => {
   });
 
   // Structural sub-shape assertions that pin documented conventions.
-  test('comprehension is List(ForAll(Element(...), body))', () => {
+  //
+  // The `∈` spelling is NOT a comprehension: `for x \in …` is the
+  // trailing-qualifier annotation form (as in `x^2 \text{ for } x \in \R`),
+  // so inside a list literal it stays List(ForAll(…)) — an inert quantified
+  // statement — through EVERY route (non-canonical parse, canonical parse,
+  // canonical box; probed 2026-07-17, published 0.83.2 and source agree).
+  // The comprehension surface syntax is the `=` binding (`for x = L`,
+  // Desmos convention), which emits the Comprehension head already in the
+  // raw AST — there is no List(ForAll)→Comprehension desugar stage anywhere.
+  test('the ∈ qualifier spelling stays List(ForAll(Element(...), body)) — not a comprehension', () => {
     const ce = new ComputeEngine();
-    const e = ce.parse('[x^2 \\text{ for } x \\in [1..10]]', {
+    const shape = [
+      'List',
+      ['ForAll', ['Element', 'x', ['Range', 1, 10]], ['Power', 'x', 2]],
+    ];
+    const nc = ce.parse('[x^2 \\text{ for } x \\in [1..10]]', {
       canonical: false,
     });
+    expect(J(nc.json)).toBe(J(shape));
+    // Canonical parse and canonical box agree with the non-canonical shape:
+    // no route performs a Comprehension conversion (contract 5 has no
+    // exception here).
+    const can = ce.parse('[x^2 \\text{ for } x \\in [1..10]]');
+    expect(J(can.json)).toBe(J(shape));
+    expect(J(ce.box(nc.json).json)).toBe(J(shape));
+  });
+
+  test('the = binding comprehension has a Comprehension head even non-canonically', () => {
+    const ce = new ComputeEngine();
+    const e = ce.parse('[x^2 \\text{ for } x = 1..10]', { canonical: false });
     expect(J(e.json)).toBe(
-      J(['List', ['ForAll', ['Element', 'x', ['Range', 1, 10]], ['Power', 'x', 2]]])
+      J(['Comprehension', ['Power', 'x', 2], ['Element', 'x', ['Range', 1, 10]]])
     );
   });
 

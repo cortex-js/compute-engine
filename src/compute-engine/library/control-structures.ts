@@ -1,5 +1,6 @@
 import {
   evaluateStatements,
+  lookup,
   resolveEscapingLambda,
 } from '../function-utils.js';
 import { checkConditions } from '../boxed-expression/rules.js';
@@ -19,12 +20,14 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
   CollectionHandlers,
+  BoxedDefinition,
   BoxedValueDefinition,
 } from '../global-types.js';
 import { spellCheckMessage } from '../boxed-expression/validate.js';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 import { isValueDef } from '../boxed-expression/utils.js';
 import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
+import { assignLoopIndex } from './utils.js';
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
@@ -757,12 +760,14 @@ function comprehensionIndexNames(
  * spans a `yield`, no other walk can observe the installed values.
  */
 class ComprehensionIndexFrame {
+  private ce: ComputeEngine;
   private defs: (BoxedValueDefinition | undefined)[];
   /** This walk's current index values, persisted across advances. */
   private mine: (Expression | undefined)[];
   private saved: (Expression | undefined)[] = [];
 
-  constructor(scope: Scope | undefined, names: string[]) {
+  constructor(ce: ComputeEngine, scope: Scope | undefined, names: string[]) {
+    this.ce = ce;
     this.defs = names.map((name) => {
       const def = scope?.bindings.get(name);
       return def !== undefined && isValueDef(def) && !def.value.isConstant
@@ -775,20 +780,33 @@ class ComprehensionIndexFrame {
   /** Save the scope's current index values and install this walk's. */
   install(): void {
     this.saved = this.defs.map((d) => d?.value);
-    this.defs.forEach((d, i) => {
-      // Skip no-op writes: the `value` setter bumps `ce._generation`, and a
-      // gratuitous bump invalidates generation-keyed caches engine-wide.
-      if (d && d.value !== this.mine[i]) d.value = this.mine[i];
-    });
+    // Ephemeral index writes: bump `_generation` and the per-def
+    // `_writeVersion`, not `_mutationGeneration` — installing/restoring a
+    // walk's indices is not a semantic mutation of the document.
+    this.ce._ephemeralWriteDepth += 1;
+    try {
+      this.defs.forEach((d, i) => {
+        // Skip no-op writes: the `value` setter bumps `ce._generation`, and a
+        // gratuitous bump invalidates generation-keyed caches engine-wide.
+        if (d && d.value !== this.mine[i]) d.value = this.mine[i];
+      });
+    } finally {
+      this.ce._ephemeralWriteDepth -= 1;
+    }
   }
 
   /** Capture the (possibly advanced) index values, then restore the saved
    * ones. Call in a `finally` paired with `install()`. */
   captureAndRestore(): void {
     this.mine = this.defs.map((d) => d?.value);
-    this.defs.forEach((d, i) => {
-      if (d && d.value !== this.saved[i]) d.value = this.saved[i];
-    });
+    this.ce._ephemeralWriteDepth += 1;
+    try {
+      this.defs.forEach((d, i) => {
+        if (d && d.value !== this.saved[i]) d.value = this.saved[i];
+      });
+    } finally {
+      this.ce._ephemeralWriteDepth -= 1;
+    }
   }
 
   /** This walk's current index values as a substitution map (C2), or
@@ -835,7 +853,7 @@ function* comprehensionStream(
   // ones like a `Block` or a big-op, whose canonical parent chains never
   // reach a runtime-created scope — resolves against, so the body evaluates
   // with the indices actually visible.
-  const frame = new ComprehensionIndexFrame(scope, indexNames);
+  const frame = new ComprehensionIndexFrame(ce, scope, indexNames);
   const state: LoopState = { stopped: false, count: 0 };
   const inner = runNestedElements(body, elements, ce, state, () => {});
   while (true) {
@@ -906,6 +924,7 @@ function comprehensionEnumeratedCount(expr: Expression): number | undefined {
   // values when the (fully synchronous) drive completes.
   const scope = expr.isScoped ? expr.localScope : undefined;
   const frame = new ComprehensionIndexFrame(
+    ce,
     scope,
     comprehensionIndexNames(elements)
   );
@@ -1031,9 +1050,25 @@ function comprehensionIsFinite(expr: Expression): boolean | undefined {
  * `elements` holds the materialized prefix (`elements[i-1]` is the 1-based
  * `at(i)`); `complete` is set once the whole finite domain has been drained.
  */
+interface ComprehensionCacheDep {
+  name: string;
+  /** Binding wrapper resolved through the comprehension's scope chain at
+   * fill time. An identity change means the name now resolves elsewhere
+   * (shadowing declaration, redeclaration). */
+  binding: BoxedDefinition | undefined;
+  /** The inner value definition at fill time — `updateDef` swaps this on the
+   * same wrapper. */
+  valueDef: BoxedValueDefinition | undefined;
+  /** `valueDef._writeVersion` at fill time. */
+  version: number;
+}
+
 interface ComprehensionCache {
-  /** `ce._generation` snapshot taken AFTER the prefix was filled. */
-  generation: number;
+  /** `ce._mutationGeneration` snapshot taken AFTER the prefix was filled. */
+  mutationGeneration: number;
+  /** The comprehension's free-symbol dependencies at fill time (see
+   * `comprehensionDeps`). */
+  deps: ComprehensionCacheDep[];
   elements: Expression[];
   complete: boolean;
 }
@@ -1052,22 +1087,89 @@ const comprehensionCaches = new WeakMap<Expression, ComprehensionCache>();
 const COMPREHENSION_CACHE_CAP = 100_000;
 
 /**
- * Correctness: the cache is invalidated whenever `ce._generation` differs from
- * the stamped value. `_generation` is bumped by every `ce.assign`/`declare`/
- * `assume`/`forget`, so rebinding a FREE variable the comprehension reads (the
- * `[k*n for n in 1..3]` → reassign `k` case) invalidates the memo. This is
- * sound even though the walk ITSELF bumps `_generation` (it assigns the index
- * variables per iteration): a cache HIT performs no walk, so the generation is
- * stable across hits, and the stamp is taken AFTER a (re)fill, so the walk's
- * own bumps are absorbed. Any external rebind between reads is the only thing
- * that can move the generation while the cache is untouched.
+ * The scope the comprehension's free symbols resolve against: its own
+ * `localScope` (whose parent chain is the canonical lexical chain). A
+ * non-scoped (non-canonical / structural) instance has no stable lexical scope
+ * of its own, so it returns `undefined` — matching the sibling walkers
+ * (`comprehensionStream`, `comprehensionEnumeratedCount`,
+ * `scanIndependentClauses`). Falling back to the ambient call-time scope would
+ * key the memo off an incidental context (fill-time and validation-time may run
+ * under different ambient scopes), so `undefined` instead signals the cache
+ * paths (`comprehensionDeps` / `comprehensionValidCache`) to treat such an
+ * instance as "do not cache / always invalid".
+ */
+function comprehensionScope(expr: Expression): Scope | undefined {
+  if (!isFunction(expr)) return undefined;
+  return expr.isScoped ? expr.localScope : undefined;
+}
+
+/**
+ * Snapshot the comprehension's free-symbol dependencies: every operand
+ * symbol except its own indices, resolved through its scope chain. Only
+ * OPERAND symbols matter — a change to an operator (redeclaration, signature
+ * inference) always bumps `ce._mutationGeneration`, while ephemeral
+ * loop-index writes (the one mutation class that does NOT bump it) can only
+ * target symbols that appear as operands.
+ */
+function comprehensionDeps(expr: Expression): ComprehensionCacheDep[] {
+  if (!isFunction(expr)) return [];
+  const scope = comprehensionScope(expr);
+  if (!scope) return [];
+  const indexNames = new Set(comprehensionIndexNames(expr.ops.slice(1)));
+  const deps: ComprehensionCacheDep[] = [];
+  for (const name of expr.symbols) {
+    if (indexNames.has(name)) continue;
+    const binding = lookup(name, scope);
+    const valueDef =
+      binding !== undefined && isValueDef(binding) ? binding.value : undefined;
+    deps.push({
+      name,
+      binding,
+      valueDef,
+      version: valueDef?._writeVersion ?? 0,
+    });
+  }
+  return deps;
+}
+
+/**
+ * Correctness (Tycho item 38): the cache is validated on TWO axes.
+ *
+ * - `ce._mutationGeneration` — bumped by every semantic mutation (value/type
+ *   writes, `assume`/`forget` and their silent revert on a dirty scope pop,
+ *   operator redefinition, signature inference) but NOT by plain scope
+ *   push/pop or by ephemeral loop-index writes. So an unrelated scoped
+ *   evaluation (`\sum_{i=1}^{5} i^2`) between two reads no longer
+ *   invalidates the memo, while rebinding a free variable the comprehension
+ *   reads (the `[k*n for n in 1..3]` → reassign `k` case) still does.
+ *
+ * - Per-dependency versions — ephemeral index writes bump only the index
+ *   definition's `_writeVersion`, so a memoized comprehension that
+ *   REFERENCES an enclosing binder's index (nested in a `Sum`, say) is
+ *   still refilled per iteration. Binding identity is re-resolved to catch
+ *   shadowing declarations, which bump no counter at all.
+ *
+ * The stamp is taken AFTER a (re)fill, so any bump the walk itself causes
+ * (a side-effecting body) is absorbed, as before.
  */
 function comprehensionValidCache(
   expr: Expression
 ): ComprehensionCache | undefined {
   const entry = comprehensionCaches.get(expr);
-  if (entry && entry.generation === expr.engine._generation) return entry;
-  return undefined;
+  if (!entry) return undefined;
+  if (entry.mutationGeneration !== expr.engine._mutationGeneration)
+    return undefined;
+  const scope = comprehensionScope(expr);
+  if (!scope) return undefined;
+  for (const d of entry.deps) {
+    const binding = lookup(d.name, scope);
+    if (binding !== d.binding) return undefined;
+    const valueDef =
+      binding !== undefined && isValueDef(binding) ? binding.value : undefined;
+    if (valueDef !== d.valueDef) return undefined;
+    if (valueDef && valueDef._writeVersion !== d.version) return undefined;
+  }
+  return entry;
 }
 
 /**
@@ -1094,8 +1196,14 @@ function comprehensionFillTo(expr: Expression, n: number): ComprehensionCache {
     }
     elements.push(r.value);
   }
-  // Stamp AFTER the walk (the walk bumped `_generation` via its index assigns).
-  entry = { generation: ce._generation, elements, complete };
+  // Stamp AFTER the walk, so a bump caused by the walk itself (a
+  // side-effecting body) is absorbed.
+  entry = {
+    mutationGeneration: ce._mutationGeneration,
+    deps: comprehensionDeps(expr),
+    elements,
+    complete,
+  };
   comprehensionCaches.set(expr, entry);
   return entry;
 }
@@ -1126,7 +1234,8 @@ function* comprehensionCachedStream(
   }
   if (!overflow)
     comprehensionCaches.set(expr, {
-      generation: ce._generation,
+      mutationGeneration: ce._mutationGeneration,
+      deps: comprehensionDeps(expr),
       elements: buffer,
       complete: true,
     });
@@ -1268,7 +1377,9 @@ function* runNested(
   // the parent scope looking for a binding to assign into.
   const skipAssign = name === 'Nothing';
   for (const value of collection.each()) {
-    if (!skipAssign) ce.assign(name, value);
+    // Ephemeral index write: bumps `_generation` and the index def's
+    // `_writeVersion`, not `_mutationGeneration` (see `assignLoopIndex`).
+    if (!skipAssign) assignLoopIndex(ce, name, value);
     yield* runNested(body, elements, index + 1, ce, state, onLeaf);
     if (state.stopped) return;
   }

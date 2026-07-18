@@ -215,6 +215,14 @@ export interface IComputeEngine {
   /** @internal */
   _generation: number;
 
+  /** Semantic-mutation counter (see `ComputeEngine._mutationGeneration`).
+   * @internal */
+  _mutationGeneration: number;
+
+  /** When > 0, value writes are ephemeral loop-index writes.
+   * @internal */
+  _ephemeralWriteDepth: number;
+
   timeLimit: number;
 
   iterationLimit: number;

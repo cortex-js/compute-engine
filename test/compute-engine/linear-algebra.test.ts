@@ -1459,6 +1459,76 @@ describe('OnesMatrix', () => {
   });
 });
 
+describe('Constant matrices: hybrid laziness for huge dimensions', () => {
+  // Constant-matrix constructors materialize a full nested `List` only for
+  // small matrices (m·n ≤ MAX_SIZE_EAGER_TENSOR = 10000). Above that they
+  // return a fully-lazy nested `Tabulate`, so a million-square identity is O(1)
+  // to build and to index instead of allocating 10^12 entries.
+
+  it('keeps small IdentityMatrix eager (byte-identical nested List)', () => {
+    const result = ce.expr(['IdentityMatrix', 3]).evaluate();
+    expect(JSON.stringify(result.json)).toBe(
+      '["List",["List",1,0,0],["List",0,1,0],["List",0,0,1]]'
+    );
+  });
+
+  it('builds IdentityMatrix(1000000) lazily without OOM', () => {
+    const result = ce.expr(['IdentityMatrix', 1000000]).evaluate();
+    // Outer length is the row count, computed without enumeration.
+    expect(ce.box(['Length', result]).evaluate().re).toBe(1000000);
+    // Diagonal element is 1, off-diagonal is 0.
+    expect(ce.box(['At', result, 5, 5]).evaluate().re).toBe(1);
+    expect(ce.box(['At', result, 5, 6]).evaluate().re).toBe(0);
+    // Lazy result is an indexed collection (serializes as a list, not a set).
+    expect(result.type.toString()).toBe(
+      'indexed_collection<indexed_collection<integer>>'
+    );
+  });
+
+  it('builds ZeroMatrix(100000, 100000) lazily without OOM', () => {
+    const result = ce.expr(['ZeroMatrix', 100000, 100000]).evaluate();
+    expect(ce.box(['Length', result]).evaluate().re).toBe(100000);
+    expect(ce.box(['At', result, 5, 5]).evaluate().re).toBe(0);
+  });
+
+  it('builds OnesMatrix(100000) lazily without OOM', () => {
+    const result = ce.expr(['OnesMatrix', 100000]).evaluate();
+    expect(ce.box(['Length', result]).evaluate().re).toBe(100000);
+    expect(ce.box(['At', result, 9, 9]).evaluate().re).toBe(1);
+  });
+
+  it('preserves validation on the lazy path (n < 1 / symbolic n)', () => {
+    expect(ce.expr(['IdentityMatrix', 0]).evaluate().toString()).toBe(
+      'Error("expected-positive-integer", "0")'
+    );
+    expect(ce.expr(['ZeroMatrix', 100000, -1]).evaluate().toString()).toBe(
+      'Error("expected-positive-integer", "-1")'
+    );
+  });
+
+  it('rejects unsafe-integer dimensions instead of building an unusable lazy matrix', () => {
+    expect(ce.expr(['IdentityMatrix', 1e16]).evaluate().toString()).toBe(
+      'Error("expected-positive-integer", "10000000000000000")'
+    );
+  });
+
+  it('builds a huge Diagonal matrix from a vector lazily', () => {
+    const vec = ce.box(['List', ...Array.from({ length: 150 }, (_, k) => k + 1)]);
+    const result = ce.box(['Diagonal', vec]).evaluate();
+    expect(ce.box(['Length', result]).evaluate().re).toBe(150);
+    // Entry (7,7) is the 7th vector element; off-diagonal is 0.
+    expect(ce.box(['At', result, 7, 7]).evaluate().re).toBe(7);
+    expect(ce.box(['At', result, 7, 8]).evaluate().re).toBe(0);
+  });
+
+  it('keeps a small Diagonal eager (byte-identical nested List)', () => {
+    const result = ce.box(['Diagonal', ['List', 10, 20, 30]]).evaluate();
+    expect(JSON.stringify(result.json)).toBe(
+      '["List",["List",10,0,0],["List",0,20,0],["List",0,0,30]]'
+    );
+  });
+});
+
 describe('Norm', () => {
   // Scalar norm (absolute value)
   it('should compute the norm of a scalar', () => {

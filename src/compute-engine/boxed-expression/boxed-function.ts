@@ -26,13 +26,17 @@ import type {
 } from '../global-types.js';
 
 import {
+  isBroadcastableCollection,
   isBroadcastCollectionType,
   isFiniteIndexedCollection,
   isFixedShapeCollection,
+  isKnownFinitenessBroadcast,
   isLinearAlgebraCollection,
   isNumericTuple,
   isPossiblyCollectionTyped,
   isTuple,
+  isUnknownLengthBroadcast,
+  lazyBroadcastMapIfNeeded,
   zip,
 } from '../collection-utils.js';
 import { isTensor } from './boxed-tensor.js';
@@ -239,6 +243,9 @@ export class BoxedFunction
     }
 
     this.engine._generation += 1;
+    // Signature inference mutates a SHARED operator definition in place: a
+    // semantic change other expressions may depend on.
+    this.engine._mutationGeneration += 1;
 
     return true;
   }
@@ -1296,7 +1303,28 @@ export class BoxedFunction
   }
 
   at(index: number): Expression | undefined {
-    return this.operatorDefinition?.collection?.at?.(this, index);
+    const handler = this.operatorDefinition?.collection?.at;
+    if (!handler) return undefined;
+
+    // Centralize negative-index normalization so every collection `at`
+    // handler gets a 1-based positive index. Most handlers reject `index < 1`
+    // outright (e.g. `Range`, `Linspace`, `Zip`, `Scan`); only a handful
+    // normalize negatives themselves. Normalizing here makes negative indexing
+    // uniform (so `Last`, `At(xs, -1)`, and `Reverse`'s back-to-front walk all
+    // work) without materializing infinite or unknown-length sources.
+    if (index < 0) {
+      // A negative index only makes sense for a finite collection with a known
+      // count. Infinite or unknown-count sources stay undefined (no
+      // materialization, no hang).
+      if (this.isFiniteCollection !== true) return undefined;
+      const count = this.count;
+      if (count === undefined || !Number.isFinite(count)) return undefined;
+      const normalized = count + 1 + index;
+      if (normalized < 1) return undefined;
+      return handler(this, normalized);
+    }
+
+    return handler(this, index);
   }
 
   get(index: Expression | string): Expression | undefined {
@@ -1376,6 +1404,23 @@ export class BoxedFunction
         this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
         !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
       ) {
+        // Hybrid laziness: past the eager threshold — or for a provably-finite
+        // collection of unknown size (`Sin(Filter(…))`, whose count is
+        // `undefined`; the eager zip would truncate it to one element) — return
+        // the lazy `Map` form (e.g. `Sin(Range(1,1e8))` → `Map(Range(1,1e8),
+        // Sin)`) instead of materializing every element. Operands whose
+        // collection-ness or size only resolves at evaluation (a symbolic-length
+        // `Range`, an infinite `Cycle`) are not finite-reported here and are left
+        // to the post-evaluation broadcast (step 4b) once their count is known.
+        const lazy = lazyBroadcastMapIfNeeded(
+          this.engine,
+          this.operator,
+          this._ops,
+          isBroadcastableCollection,
+          numericApproximation
+        );
+        if (lazy) return lazy;
+
         const items = zip(this._ops);
         if (!items) return this.engine.Nothing;
 
@@ -1407,6 +1452,19 @@ export class BoxedFunction
         this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
         paramsAreScalar(def)
       ) {
+        // Hybrid laziness: past the eager threshold — or for a provably-finite
+        // collection of unknown size (`Filter`) — map the lambda lazily.
+        // Symbolic-length/infinite sources are deferred to the post-evaluation
+        // broadcast (step 4b/3b) once their count resolves.
+        const lazy = lazyBroadcastMapIfNeeded(
+          this.engine,
+          this.operator,
+          this._ops,
+          isBroadcastableCollection,
+          numericApproximation
+        );
+        if (lazy) return lazy;
+
         const items = zip(this._ops);
         if (items) {
           const results: Expression[] = [];
@@ -1456,14 +1514,39 @@ export class BoxedFunction
         def instanceof _BoxedOperatorDefinition &&
         def._isLambda &&
         paramsAreScalar(def);
+      // For a LAZY operator the `tail` may still hold RAW operands whose
+      // finiteness is unresolved (`Equal(Characters(s), Reverse(Characters(s)))`):
+      // those must fold whole-collection, so the gate stays on the strict
+      // `isKnownFinitenessBroadcast` (excludes `isFiniteCollection ===
+      // undefined`). For a NON-lazy operator the operands reaching this gate are
+      // already evaluated, so unknown finiteness is a genuinely-unresolved source
+      // (a symbolic-length `Range`) — admit it too via `isUnknownLengthBroadcast`
+      // so `Sin(Range(1,n))` lazifies into a `Map` like `Add(Range(1,n),1)` does.
+      const isPostEvalBroadcastOperand = (x: Expression): boolean =>
+        isKnownFinitenessBroadcast(x) ||
+        (def.lazy !== true && isUnknownLengthBroadcast(x));
       if (
         (lambdaBroadcast ||
           (def.broadcastable &&
             this.operator !== 'Add' &&
             this.operator !== 'Multiply')) &&
         !skipBroadcastForVectorOps(this.operator, false, tail) &&
-        tail.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))
+        tail.some(isPostEvalBroadcastOperand)
       ) {
+        // Hybrid laziness: past the eager threshold — and for a materialized
+        // infinite (`Cycle`) or uncountable-finite (`Filter`) source, gated by
+        // `isKnownFinitenessBroadcast` so a not-yet-resolved operand held raw by
+        // a lazy operator is left to fold — return the lazy `Map` form over the
+        // already-evaluated `tail`.
+        const lazy = lazyBroadcastMapIfNeeded(
+          this.engine,
+          this.operator,
+          tail,
+          isBroadcastableCollection,
+          numericApproximation
+        );
+        if (lazy) return lazy;
+
         const items = zip(tail);
         if (items) {
           const results: Expression[] = [];
@@ -1600,6 +1683,19 @@ export class BoxedFunction
         this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
         !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
       ) {
+        // Hybrid laziness: past the eager threshold — or for a provably-finite
+        // collection of unknown size (`Filter`) — return the lazy `Map` form.
+        // Symbolic-length/infinite sources are deferred to the post-evaluation
+        // broadcast (mirrors the sync path).
+        const lazy = lazyBroadcastMapIfNeeded(
+          this.engine,
+          this.operator,
+          this._ops,
+          isBroadcastableCollection,
+          numericApproximation
+        );
+        if (lazy) return lazy;
+
         const items = zip(this._ops);
         if (!items) return this.engine.Nothing;
 
@@ -1631,6 +1727,19 @@ export class BoxedFunction
         this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
         paramsAreScalar(def)
       ) {
+        // Hybrid laziness: past the eager threshold — or for a provably-finite
+        // collection of unknown size (`Filter`) — map the lambda lazily.
+        // Symbolic-length/infinite sources are deferred to the post-evaluation
+        // broadcast (step 4b/3b) once their count resolves.
+        const lazy = lazyBroadcastMapIfNeeded(
+          this.engine,
+          this.operator,
+          this._ops,
+          isBroadcastableCollection,
+          numericApproximation
+        );
+        if (lazy) return lazy;
+
         const items = zip(this._ops);
         if (items) {
           const results: Promise<Expression>[] = [];
@@ -1667,14 +1776,41 @@ export class BoxedFunction
         def instanceof _BoxedOperatorDefinition &&
         def._isLambda &&
         paramsAreScalar(def);
+      // Same post-eval finiteness refinement as the sync path (finding 3):
+      // a lazy operator keeps the strict gate; a non-lazy one also admits an
+      // unresolved-finiteness source (symbolic-length `Range`).
+      const isPostEvalBroadcastOperand = (x: Expression): boolean =>
+        isKnownFinitenessBroadcast(x) ||
+        (def.lazy !== true && isUnknownLengthBroadcast(x));
+      // The lazy `Map` returned here applies its mapping SYNCHRONOUSLY on
+      // `at`/iteration, so take the lazy arm only when the per-element call is
+      // sync-applicable: the operator has a synchronous `evaluate` handler, or
+      // this is a function-literal application (`lambdaBroadcast`, always sync).
+      // An operator with ONLY an `evaluateAsync` handler would otherwise yield
+      // inert per-element results and bypass async cancellation, so it falls
+      // through to the async materialization/inert behavior below.
+      const isSyncApplicable = lambdaBroadcast || def.evaluate !== undefined;
       if (
         (lambdaBroadcast ||
           (def.broadcastable &&
             this.operator !== 'Add' &&
             this.operator !== 'Multiply')) &&
+        isSyncApplicable &&
         !skipBroadcastForVectorOps(this.operator, false, tail) &&
-        tail.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))
+        tail.some(isPostEvalBroadcastOperand)
       ) {
+        // Hybrid laziness: past the eager threshold — and always for an
+        // unknown/infinite-length source — return the lazy `Map` form over the
+        // already-evaluated `tail` (mirrors the sync path).
+        const lazy = lazyBroadcastMapIfNeeded(
+          this.engine,
+          this.operator,
+          tail,
+          isBroadcastableCollection,
+          numericApproximation
+        );
+        if (lazy) return lazy;
+
         const items = zip(tail);
         if (items) {
           const results: Promise<Expression>[] = [];

@@ -2,6 +2,7 @@ import {
   isFiniteIndexedCollection,
   typeCouldBeNumericCollection,
   typeCouldBeNumericTuple,
+  typeIsProvablyNonNumericCollection,
 } from '../collection-utils.js';
 
 import { flatten } from './flatten.js';
@@ -17,6 +18,11 @@ import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isTensor } from './boxed-tensor.js';
 import { isSymbol, isFunction, isContinuationOperand } from './type-guards.js';
+
+// Parsed once: the type of an indexed collection whose every element is a
+// number. Used in `checkNumericArgs` to accept collections for broadcasting on
+// the strength of their static element type.
+const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
 
 /**
  * Return true if a type could be a collection type at runtime.
@@ -266,20 +272,47 @@ export function checkNumericArgs(
       // (shape compatibility, etc.) happens in the evaluate function.
       xs.push(op);
     } else if (isFiniteIndexedCollection(op)) {
-      // The argument is a list. Check that all elements are numbers
-      // and infer the type of the elements
-      for (const x of op.each()) {
-        if (!x.isNumber) {
-          isValid = false;
-          break;
+      if (op.type.matches(INDEXED_COLLECTION_OF_NUMBER)) {
+        // (1) The static type already proves every element is a number (mirror
+        // the indeterminate-size branch below). Accept without walking.
+        xs.push(op);
+      } else if (typeIsProvablyNonNumericCollection(op.type.type)) {
+        // (2) The static element type is concrete and provably non-numeric
+        // (e.g. `indexed_collection<string>`). The element type already
+        // disproves numericity, so reject WITHOUT walking. Derived from the
+        // shared `typeIsProvablyNonNumericCollection` predicate so this stays
+        // in lockstep with the `Add`/`Multiply` type handlers (item 30).
+        isValid = false;
+        xs.push(ce.typeError('number', op.type, op));
+      } else if (op.isLazyCollection) {
+        // (3) The static element type is indeterminate (`any`/`unknown`), and
+        // this is a lazy collection: `.each()` would materialize every element
+        // just to type-check it. For a large lazy source (item 16:
+        // `\frac{[1...1e8]}{2}` hung `ce.parse`) that is O(size) at
+        // canonicalization time — and the cost does not depend on free
+        // variables. Accept on the strength of laziness REGARDLESS of
+        // `unknowns` and defer element validation to evaluate time — fail-open:
+        // a lazy weak-typed collection of non-numbers now fails at evaluate
+        // rather than erroring at canonicalization.
+        xs.push(op);
+      } else {
+        // (3, eager) An eager, operand-backed collection (e.g. a literal
+        // `List`) with an indeterminate element type: its elements are already
+        // stored, so walking is cheap. Check that all elements are numbers and
+        // infer the type of the elements.
+        for (const x of op.each()) {
+          if (!x.isNumber) {
+            isValid = false;
+            break;
+          }
         }
+        if (!isValid) xs.push(ce.typeError('number', op.type, op));
+        else xs.push(op);
       }
-      if (!isValid) xs.push(ce.typeError('number', op.type, op));
-      else xs.push(op);
     } else if (
       op.isIndexedCollection &&
       op.isFiniteCollection === undefined &&
-      op.type.matches(parseType('indexed_collection<number>'))
+      op.type.matches(INDEXED_COLLECTION_OF_NUMBER)
     ) {
       // An indexed collection of numbers whose size is indeterminate (e.g.
       // `Range(1, n)` with symbolic `n`). Accept it for broadcasting on the
@@ -333,16 +366,20 @@ export function checkNumericArgs(
       if (isFiniteIndexedCollection(x)) {
         // `.each()` on a *lazy* collection (e.g. a large `Range`) materializes
         // every element, so walking it just to run no-op inferences enumerates
-        // the whole range at parse time (item 16: `\frac{[1...1e8]}{2}` hung
-        // `ce.parse`). Skip the walk for a lazy collection with no free
-        // variables — `unknowns` reads the structural operands (the range's
-        // bounds), never the materialized elements, so this guard is O(1) for
-        // a Range. Eager collections (e.g. `List`) already store their
-        // elements as operands, so walking them is cheap regardless of
-        // `unknowns`: `BoxedFunction.infer()` also narrows an inferred
-        // *result signature* (not just free symbols), so a concrete literal
-        // list containing an inferred function call still needs the walk.
-        if (x.isLazyCollection && x.unknowns.length === 0) continue;
+        // the whole collection at parse time (item 16: `\frac{[1...1e8]}{2}`
+        // hung `ce.parse`). Skip the walk for ANY lazy collection: the
+        // materialization cost is O(size) and does NOT depend on free variables,
+        // so a lazy source with a free variable (`Map(Range(1,2e5), x ↦ x+k)`)
+        // must be skipped just like a variable-free `Range` — walking it just to
+        // run element inferences that narrow nothing (`k` stays `unknown`) is
+        // pure overhead. Element validation/inference is deferred to evaluate
+        // time (fail-open), mirroring the admission-branch guard above. Eager
+        // collections (e.g. a literal `List`) already store their elements as
+        // operands, so walking them is cheap regardless of `unknowns`:
+        // `BoxedFunction.infer()` also narrows an inferred *result signature*
+        // (not just free symbols), so a concrete literal list containing an
+        // inferred function call still needs the walk.
+        if (x.isLazyCollection) continue;
         for (const y of x.each()) y.infer(inferredType);
       } else x.infer(inferredType);
   }
@@ -769,6 +806,7 @@ function repairFreshMatrixInference(
     def.value.inferredType = false;
   }
   ce._generation += 1;
+  ce._mutationGeneration += 1;
 
   const repaired = ce.box(op.json);
   if (repaired.type.matches(expected)) {
@@ -787,6 +825,7 @@ function repairFreshMatrixInference(
     }
   }
   ce._generation += 1;
+  ce._mutationGeneration += 1;
   return null;
 }
 
