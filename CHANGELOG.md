@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.84.1 _2026-07-17_
 
 ### Bug Fixes
@@ -21,8 +23,8 @@
   evaluation (the opaque call not yet being a collection), then broadcast again
   element-wise once it was — yielding a 2×2 list of lists of booleans. It now
   follows the documented, representation-independent rule that literal,
-  symbol-bound and lazy collections already follow: two collections compare as
-  a single boolean (`L(1) = [1,2]` → `True`), and a runtime scalar against a
+  symbol-bound and lazy collections already follow: two collections compare as a
+  single boolean (`L(1) = [1,2]` → `True`), and a runtime scalar against a
   literal list still broadcasts element-wise.
 
 - **`.N()` of an already-evaluated lazy `Map` now yields numeric elements.** The
