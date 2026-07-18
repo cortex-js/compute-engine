@@ -41,9 +41,12 @@ import { dSolve } from '../symbolic/differential-equations.js';
 import { rSolve } from '../symbolic/recurrences.js';
 import {
   nDSolve,
+  nDSolveFunction,
+  interpolatingFunctionRows,
   symbolArg,
   symbolOrListArg,
 } from '../differential-equation-utils.js';
+import { evalDenseRows } from '../numerics/differential-equations.js';
 import { symbolicLimit } from '../symbolic/limit.js';
 import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
@@ -1036,6 +1039,82 @@ volumes
       },
       evaluate: ([equation, dependent, limits, initialValue, steps]) =>
         nDSolve(equation, dependent, limits, initialValue, steps),
+    },
+
+    NDSolveFunction: {
+      description:
+        'Numerically solve an ordinary differential equation and return ' +
+        'the solution as an applicable function (a `Function` literal ' +
+        'wrapping an `InterpolatingFunction`), usable at any point of the ' +
+        'integration interval. Same arguments as `NDSolve`, without the ' +
+        'sample count.',
+      broadcastable: false,
+      lazy: true,
+      signature:
+        '(expression, symbol, limits:(tuple|symbol), number) -> function',
+      canonical: (ops, { engine }) => {
+        const missing = engine.error('missing');
+        const limits =
+          ops[2] && isFunction(ops[2])
+            ? canonicalLimits(ops[2].ops, { engine })
+            : canonicalLimits(ops[2] ? [ops[2]] : [], { engine });
+
+        const dependent = symbolOrListArg(engine, ops[1]);
+        const equation = ops[0]
+          ? repairDependentApplications(ops[0], dependentSymbolNames(dependent))
+          : missing;
+
+        return engine._fn('NDSolveFunction', [
+          equation,
+          dependent,
+          limits ?? missing,
+          ops[3]?.canonical ?? missing,
+        ]);
+      },
+      evaluate: ([equation, dependent, limits, initialValue]) =>
+        nDSolveFunction(equation, dependent, limits, initialValue),
+    },
+
+    InterpolatingFunction: {
+      description:
+        'Piecewise-quartic dense-output interpolant of a numeric ODE ' +
+        'solution (produced by `NDSolveFunction`). The first operand is the ' +
+        'per-step coefficient table; applied to a number, it evaluates the ' +
+        'solution there (clamping to the covered interval outside it). ' +
+        'Stays symbolic for a non-numeric argument.',
+      broadcastable: false,
+      lazy: true,
+      signature: '(list, number?) -> number',
+      evaluate: ([data, x], { engine }) => {
+        if (x === undefined) return undefined;
+        const xv = x.N().re;
+        if (!Number.isFinite(xv)) return undefined;
+        const rows = interpolatingFunctionRows(data);
+        if (!rows) return undefined;
+        const value = evalDenseRows(rows, xv);
+        return Number.isFinite(value) ? engine.number(value) : undefined;
+      },
+      compile: (args, compile, { language }) => {
+        if (language !== 'javascript') return undefined;
+        if (args.length !== 2) return undefined;
+        const rows = interpolatingFunctionRows(args[0]);
+        if (!rows) return undefined;
+        // Embed the dense table and interpolate inline: binary search for
+        // the step interval, then the nested (Horner-like) quartic.
+        const table = JSON.stringify(rows);
+        return (
+          `((_x)=>{const _D=${table};` +
+          `let _lo=0,_hi=_D.length-1;` +
+          `const _dir=_D[_hi][0]+_D[_hi][1]>=_D[0][0]?1:-1;` +
+          `while(_lo<_hi){const _m=(_lo+_hi)>>1;` +
+          `if(_dir*(_x-_D[_m][0]-_D[_m][1])>0)_lo=_m+1;else _hi=_m;}` +
+          `const _s=_D[_lo],_h=_s[1];` +
+          `let _t=_h===0?0:(_x-_s[0])/_h;` +
+          `_t=Math.min(1,Math.max(0,_t));const _u=1-_t;` +
+          `return _s[2]+_t*(_s[3]+_u*(_s[4]+_t*(_s[5]+_u*_s[6])));` +
+          `})(${compile(args[1])})`
+        );
+      },
     },
 
     // This is used to represent the indexing set/limits (i.e.

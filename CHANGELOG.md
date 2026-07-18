@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+### New Features
+
+- **`NDSolveFunction` — ODE solutions as applicable functions.** Where
+  `NDSolve` returns a sample `List`, the new `NDSolveFunction` (same
+  arguments, without the sample count) returns the solution as a callable
+  function — a `Function` literal wrapping the new `InterpolatingFunction`
+  operator, which holds the adaptive solver's piecewise-quartic dense-output
+  table. Assign it and evaluate anywhere in the integration interval
+  (`f := NDSolveFunction(y′ = y, y, (x, 0, 1), 1)`; `f(0.5)` → `1.6487…`),
+  at the integration accuracy; outside the interval the value clamps to the
+  nearest endpoint, and a symbolic argument stays symbolic. The applied form
+  compiles to plain JavaScript (`compile(f(t))`, ~1 µs per evaluation), and
+  LaTeX display elides the data table
+  (`\operatorname{InterpolatingFunction}_{[0, 1]}(x)`); the full table
+  round-trips through MathJSON. Scalar equations (first-order and
+  higher-order) are supported; the multi-dependent system form stays inert.
+
 ### Improvements
 
 - **`NDSolve` now uses adaptive stepping (Dormand–Prince 5(4)) with dense

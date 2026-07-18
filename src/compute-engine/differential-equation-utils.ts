@@ -254,13 +254,28 @@ function substituteDependentState(
   );
 }
 
-export function nDSolve(
+/**
+ * The compiled right-hand side and numeric problem data shared by the
+ * `NDSolve` (sample-grid) and `NDSolveFunction` (interpolating-function)
+ * evaluate paths. `vector` is true for the multi-dependent system form,
+ * whose solution values are vectors; scalar forms (first-order and
+ * higher-order reduced to a system) expose the solution as component 0.
+ */
+type PreparedODE = {
+  f: (x: number, y: readonly number[]) => readonly number[] | undefined;
+  x0: number;
+  x1: number;
+  y0: readonly number[];
+  independentName: string;
+  vector: boolean;
+};
+
+function prepareODE(
   equation: Expression,
   dependent: Expression,
   limits: Expression,
-  initialValue: Expression,
-  stepsExpr?: Expression
-): Expression | undefined {
+  initialValue: Expression
+): PreparedODE | undefined {
   const ce = equation.engine;
   const names = dependentNames(dependent);
   if (!names) return undefined;
@@ -271,15 +286,6 @@ export function nDSolve(
 
   const [x0, x1] = [limits.op2.N().re, limits.op3.N().re];
   if (![x0, x1].every(Number.isFinite)) return undefined;
-
-  const steps = stepsExpr === undefined ? 100 : stepsExpr.N().re;
-  if (
-    !Number.isInteger(steps) ||
-    steps <= 0 ||
-    steps > ce.iterationLimit ||
-    steps + 1 > ce.maxCollectionSize
-  )
-    return undefined;
 
   if (names.length > 1 || isFunction(equation, 'List')) {
     if (
@@ -318,8 +324,8 @@ export function nDSolve(
       runs.push(compiled.run as (vars: Record<string, number>) => number);
     }
 
-    const samples = solveOnGrid(
-      (x, y) => {
+    return {
+      f: (x, y) => {
         const vars: Record<string, number> = { [independentName]: x };
         stateNames.forEach((name, i) => {
           vars[name] = y[i];
@@ -328,25 +334,11 @@ export function nDSolve(
         return values.every(Number.isFinite) ? values : undefined;
       },
       x0,
-      initialValues,
       x1,
-      steps,
-      ce._deadline
-    );
-    if (!samples) return undefined;
-
-    return ce._fn(
-      'List',
-      samples.map(([x, y]) =>
-        ce._fn('List', [
-          ce.number(x),
-          ce._fn(
-            'List',
-            y.map((yi) => ce.number(yi))
-          ),
-        ])
-      )
-    );
+      y0: initialValues,
+      independentName,
+      vector: true,
+    };
   }
 
   const dependentName = names[0];
@@ -381,8 +373,8 @@ export function nDSolve(
     if (!compiled.success) return undefined;
     const run = compiled.run as (vars: Record<string, number>) => number;
 
-    const samples = solveOnGrid(
-      (x, y) => {
+    return {
+      f: (x, y) => {
         const vars: Record<string, number> = { [independentName]: x };
         stateNames.forEach((name, i) => {
           vars[name] = y[i];
@@ -392,17 +384,11 @@ export function nDSolve(
         return [...y.slice(1), highest];
       },
       x0,
-      initialValues,
       x1,
-      steps,
-      ce._deadline
-    );
-    if (!samples) return undefined;
-
-    return ce._fn(
-      'List',
-      samples.map(([x, y]) => ce._fn('List', [ce.number(x), ce.number(y[0])]))
-    );
+      y0: initialValues,
+      independentName,
+      vector: false,
+    };
   }
 
   const stateName = `ndsolve${dependentName}state`;
@@ -416,21 +402,128 @@ export function nDSolve(
   if (!compiled.success) return undefined;
   const run = compiled.run as (vars: Record<string, number>) => number;
 
-  const samples = solveOnGrid(
-    (x, [y]) => {
+  return {
+    f: (x, [y]) => {
       const v = run({ [independentName]: x, [stateName]: y });
       return Number.isFinite(v) ? [v] : undefined;
     },
     x0,
-    [initialValues[0]],
     x1,
-    steps,
-    ce._deadline
-  );
+    y0: [initialValues[0]],
+    independentName,
+    vector: false,
+  };
+}
+
+export function nDSolve(
+  equation: Expression,
+  dependent: Expression,
+  limits: Expression,
+  initialValue: Expression,
+  stepsExpr?: Expression
+): Expression | undefined {
+  const ce = equation.engine;
+
+  const steps = stepsExpr === undefined ? 100 : stepsExpr.N().re;
+  if (
+    !Number.isInteger(steps) ||
+    steps <= 0 ||
+    steps > ce.iterationLimit ||
+    steps + 1 > ce.maxCollectionSize
+  )
+    return undefined;
+
+  const prepared = prepareODE(equation, dependent, limits, initialValue);
+  if (!prepared) return undefined;
+  const { f, x0, x1, y0, vector } = prepared;
+
+  const samples = solveOnGrid(f, x0, y0, x1, steps, ce._deadline);
   if (!samples) return undefined;
+
+  if (vector)
+    return ce._fn(
+      'List',
+      samples.map(([x, y]) =>
+        ce._fn('List', [
+          ce.number(x),
+          ce._fn(
+            'List',
+            y.map((yi) => ce.number(yi))
+          ),
+        ])
+      )
+    );
 
   return ce._fn(
     'List',
     samples.map(([x, y]) => ce._fn('List', [ce.number(x), ce.number(y[0])]))
   );
+}
+
+/**
+ * `NDSolveFunction` evaluate path: solve the IVP adaptively and package the
+ * scalar dense-output table as an applicable function literal
+ * `Function(InterpolatingFunction(data, x), x)` — `data` is a `List` of
+ * per-step rows `[x, h, r1, r2, r3, r4, r5]` (see `evalDenseRows`).
+ *
+ * Scalar forms only (first-order and higher-order scalar — the solution
+ * component is the dependent value itself); the multi-dependent system form
+ * stays inert (a vector-valued interpolating function would need a
+ * result-shape decision).
+ */
+export function nDSolveFunction(
+  equation: Expression,
+  dependent: Expression,
+  limits: Expression,
+  initialValue: Expression
+): Expression | undefined {
+  const ce = equation.engine;
+
+  const prepared = prepareODE(equation, dependent, limits, initialValue);
+  if (!prepared || prepared.vector) return undefined;
+  const { f, x0, x1, y0, independentName } = prepared;
+
+  const solution = rk45System(f, x0, y0, x1, { deadline: ce._deadline });
+  if (!solution || solution.steps.length === 0) return undefined;
+
+  const data = ce._fn(
+    'List',
+    solution.steps.map((s) =>
+      ce._fn('List', [
+        ce.number(s.x),
+        ce.number(s.h),
+        ce.number(s.r1[0]),
+        ce.number(s.r2[0]),
+        ce.number(s.r3[0]),
+        ce.number(s.r4[0]),
+        ce.number(s.r5[0]),
+      ])
+    )
+  );
+
+  const param = ce.symbol(independentName);
+  return ce.function('Function', [
+    ce.function('InterpolatingFunction', [data, param]),
+    param,
+  ]);
+}
+
+/**
+ * Extract the numeric per-step rows `[x, h, r1..r5]` from an
+ * `InterpolatingFunction` data operand. Returns undefined for anything that
+ * is not a `List` of 7-number `List` rows (the expression then stays
+ * symbolic).
+ */
+export function interpolatingFunctionRows(
+  data: Expression | undefined
+): number[][] | undefined {
+  if (!data || !isFunction(data, 'List') || data.nops === 0) return undefined;
+  const rows: number[][] = [];
+  for (const row of data.ops) {
+    if (!isFunction(row, 'List') || row.nops !== 7) return undefined;
+    const values = row.ops.map((op) => op.re);
+    if (!values.every(Number.isFinite)) return undefined;
+    rows.push(values);
+  }
+  return rows;
 }

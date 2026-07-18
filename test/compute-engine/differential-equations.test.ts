@@ -1763,3 +1763,150 @@ describe('NDSolve adaptive stepping (RK45 + dense output)', () => {
     expect(result.operator).toBe('NDSolve');
   });
 });
+
+/**
+ * NDSolveFunction returns the ODE solution as an applicable function
+ * literal wrapping an `InterpolatingFunction` (the RK45 dense-output
+ * table), usable at any point of the integration interval and composable
+ * with `compile()`.
+ */
+describe('NDSolveFunction (interpolating-function result surface)', () => {
+  const solveExp = () =>
+    engine
+      .expr([
+        'NDSolveFunction',
+        ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+        'y',
+        ['Limits', 'x', 0, 1],
+        1,
+      ])
+      .evaluate();
+
+  test('returns an applicable Function literal', () => {
+    const f = solveExp();
+    expect(f.operator).toBe('Function');
+    const applied = engine.function('Apply', [f, engine.number(0.5)]);
+    expect(applied.evaluate().N().re).toBeCloseTo(Math.exp(0.5), 9);
+  });
+
+  test('assigned function evaluates at arbitrary points (y′ = y → eˣ)', () => {
+    engine.pushScope();
+    try {
+      engine.assign('ndsfExp', solveExp());
+      for (const x of [0, 0.1, 0.25, 0.6180339887, 1]) {
+        expect(engine.box(['ndsfExp', x]).N().re).toBeCloseTo(
+          Math.exp(x),
+          9
+        );
+      }
+    } finally {
+      engine.popScope();
+    }
+  });
+
+  test('LaTeX display elides the data table to the covered interval', () => {
+    const latex = solveExp().latex;
+    expect(latex).toContain('\\operatorname{InterpolatingFunction}');
+    expect(latex).toContain('\\left[0, 1\\right]');
+    // The dense table itself (dozens of rows) must not leak into LaTeX.
+    expect(latex.length).toBeLessThan(200);
+  });
+
+  test('higher-order scalar IVP (y″ = −y, y(0) = 0, y′(0) = 1 → sin x)', () => {
+    const f = engine
+      .expr([
+        'NDSolveFunction',
+        [
+          'Equal',
+          ['D', ['y', 'x'], 'x', 'x'],
+          ['Negate', ['y', 'x']],
+        ],
+        'y',
+        ['Limits', 'x', 0, 3],
+        ['List', 0, 1],
+      ])
+      .evaluate();
+    expect(f.operator).toBe('Function');
+    for (const x of [0.5, 1.5707963268, 2.9]) {
+      expect(
+        engine.function('Apply', [f, engine.number(x)]).N().re
+      ).toBeCloseTo(Math.sin(x), 8);
+    }
+  });
+
+  test('outside the covered interval the value clamps to the endpoint', () => {
+    const f = solveExp();
+    expect(
+      engine.function('Apply', [f, engine.number(5)]).N().re
+    ).toBeCloseTo(Math.E, 8);
+    expect(
+      engine.function('Apply', [f, engine.number(-3)]).N().re
+    ).toBeCloseTo(1, 8);
+  });
+
+  test('a symbolic argument stays symbolic', () => {
+    const f = solveExp();
+    const applied = engine
+      .function('Apply', [f, engine.symbol('q')])
+      .evaluate();
+    expect(applied.operator).toBe('InterpolatingFunction');
+  });
+
+  test('the multi-dependent system form stays inert', () => {
+    const result = engine
+      .expr([
+        'NDSolveFunction',
+        [
+          'List',
+          ['Equal', ['D', ['u', 'x'], 'x'], ['v', 'x']],
+          ['Equal', ['D', ['v', 'x'], 'x'], ['Negate', ['u', 'x']]],
+        ],
+        ['List', 'u', 'v'],
+        ['Limits', 'x', 0, 1],
+        ['List', 0, 1],
+      ])
+      .evaluate();
+    expect(result.operator).toBe('NDSolveFunction');
+  });
+
+  test('composes with compile(): the applied form lowers to plain JS', async () => {
+    const { compile } = await import(
+      '../../src/compute-engine/compilation/compile-expression'
+    );
+    engine.pushScope();
+    try {
+      engine.assign('ndsfC', solveExp());
+      const applied = engine.parse('\\operatorname{ndsfC}(t)').evaluate();
+      const compiled = compile(applied, {
+        to: 'javascript',
+        fallback: false,
+      } as any);
+      expect(compiled.success).toBe(true);
+      const run = compiled.run as (args: { t: number }) => number;
+      expect(run({ t: 0.5 })).toBeCloseTo(Math.exp(0.5), 9);
+      expect(run({ t: 0.9 })).toBeCloseTo(Math.exp(0.9), 9);
+    } finally {
+      engine.popScope();
+    }
+  });
+
+  test('MathJSON round-trip preserves the solution (via N())', () => {
+    // KNOWN LIMITATION (pre-existing engine behavior for lazy operators
+    // inside re-boxed Function literals): plain `evaluate()` of an
+    // application of the *re-boxed* literal resolves the interpolation one
+    // evaluate later; `N()` — and any subsequent evaluate — produce the
+    // value. The value is never wrong, only deferred.
+    const f = solveExp();
+    const reboxed = engine.box(f.json as any);
+    expect(
+      engine.function('Apply', [reboxed, engine.number(0.5)]).N().re
+    ).toBeCloseTo(Math.exp(0.5), 9);
+  });
+
+  test('malformed InterpolatingFunction data stays inert', () => {
+    const bad = engine
+      .box(['InterpolatingFunction', ['List', ['List', 1, 2, 3]], 0.5])
+      .evaluate();
+    expect(bad.operator).toBe('InterpolatingFunction');
+  });
+});

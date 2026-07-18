@@ -332,6 +332,34 @@ export function rk45System(
   return undefined;
 }
 
+/**
+ * Evaluate a scalar dense-output table at `x`. Each row is the flat 7-tuple
+ * `[x, h, r1, r2, r3, r4, r5]` of one accepted step's interpolant (one
+ * solution component of `RK45DenseStep`, as stored by
+ * `InterpolatingFunction`). Rows are ordered in integration direction; `x`
+ * outside the covered domain clamps to the nearest endpoint value.
+ */
+export function evalDenseRows(
+  rows: ReadonlyArray<ReadonlyArray<number>>,
+  x: number
+): number {
+  if (rows.length === 0) return NaN;
+  const dir = rows[rows.length - 1][0] + rows[rows.length - 1][1] >= rows[0][0] ? 1 : -1;
+  let lo = 0;
+  let hi = rows.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const end = rows[mid][0] + rows[mid][1];
+    if (dir * (x - end) > 0) lo = mid + 1;
+    else hi = mid;
+  }
+  const [x0, h, r1, r2, r3, r4, r5] = rows[lo];
+  const theta = h === 0 ? 0 : (x - x0) / h;
+  const t = Math.min(1, Math.max(0, theta));
+  const t1 = 1 - t;
+  return r1 + t * (r2 + t1 * (r3 + t * (r4 + t1 * r5)));
+}
+
 /** Evaluate an `rk45System` solution at `x` via its dense output. */
 export function rk45Sample(
   solution: RK45Solution,

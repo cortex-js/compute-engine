@@ -349,11 +349,18 @@ systems.** Ranked next steps (good contributor territory):
   tolerance-controlled (rapid-transient case `y' = −50(y − cos x)`: grid
   error 4e-5 → 2e-12). Failure modes (blow-up, step underflow, step cap)
   stay inert. First-order vector IVPs were already exposed (the
-  `List`-of-equations form). Remaining, demand-paced: a **public
-  interpolating-function surface** — arbitrary-`x` evaluation of the dense
-  output (the kernel exposes `rk45Sample`; the open decision is the result
-  representation: an opaque `InterpolatingFunction`-style head vs. a
-  piecewise `Function` literal that composes with `compile()`).
+  `List`-of-equations form). **The public interpolating-function surface
+  LANDED 2026-07-18** (user-ratified opaque-head design): `NDSolveFunction`
+  (same arguments as `NDSolve`, no sample count) returns
+  `Function(InterpolatingFunction(data, x), x)` — applicable at any point
+  of the integration interval (clamping outside it), symbolic-argument
+  inert, LaTeX display eliding the dense table to the covered interval,
+  and lowering to plain JS via the per-operator `compile` handler
+  (`compile(g(t))` ≈ 0.9 µs/eval). Scalar forms only; the multi-dependent
+  system form stays inert (a vector-valued interpolating result needs a
+  shape decision — demand-paced). Known engine-level quirk (pre-existing,
+  pinned in tests): applying a MathJSON-**re-boxed** literal resolves the
+  interpolation one `evaluate()` late (`N()` is immediate).
 - **Tolerance hardening** in the numeric characteristic-root clustering, so
   near-degenerate roots are grouped reliably as coverage of higher-order
   nonhomogeneous problems grows.

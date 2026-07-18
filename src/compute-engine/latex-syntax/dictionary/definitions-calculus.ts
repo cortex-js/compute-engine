@@ -536,6 +536,43 @@ export const DEFINITIONS_CALCULUS: LatexDictionary = [
       '\\operatorname{Normal}' + serializer.wrapArguments(expr),
   },
   {
+    // The dense-output data table of an `InterpolatingFunction` (produced by
+    // `NDSolveFunction`) is elided in LaTeX: only the covered interval (and
+    // the applied argument, if any) is displayed. The full data round-trips
+    // through MathJSON, not LaTeX.
+    kind: 'expression',
+    name: 'InterpolatingFunction',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const data = operand(expr, 1);
+      // data = List of rows [x, h, r1..r5]: the domain is the first row's x
+      // to the last row's x + h.
+      let domain = '';
+      if (operator(data) === 'List' && nops(data) > 0) {
+        const rows = operands(data);
+        const firstRow = rows[0];
+        const lastRow = rows[rows.length - 1];
+        const toNum = (e: MathJsonExpression | null): number | null => {
+          if (typeof e === 'number') return e;
+          if (e !== null && typeof e === 'object' && 'num' in e)
+            return parseFloat(e.num);
+          return null;
+        };
+        const x0 = toNum(operand(firstRow, 1));
+        const xLast = toNum(operand(lastRow, 1));
+        const hLast = toNum(operand(lastRow, 2));
+        if (x0 !== null && xLast !== null && hLast !== null) {
+          const fmt = (v: number): string =>
+            serializer.serialize(Math.round(v * 1e6) / 1e6);
+          domain = `\\left[${fmt(x0)}, ${fmt(xLast + hLast)}\\right]`;
+        }
+      }
+      const arg = nops(expr) > 1 ? operand(expr, 2) : null;
+      const argLatex =
+        arg === null ? '' : `\\left(${serializer.serialize(arg)}\\right)`;
+      return `\\operatorname{InterpolatingFunction}_{${domain}}${argLatex}`;
+    },
+  },
+  {
     kind: 'expression',
     name: 'BigO',
     latexTrigger: ['\\mathcal', '<{>', 'O', '<}>'],
