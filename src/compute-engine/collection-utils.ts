@@ -3,6 +3,7 @@ import { isSubtype } from '../common/type/subtype.js';
 import { Type } from '../common/type/types.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
 import { Expression, CollectionHandlers } from './global-types.js';
+import type { MathJsonExpression } from '../math-json/types.js';
 import {
   isFunction,
   isNumber,
@@ -689,6 +690,51 @@ export function lazyBroadcastMapIfNeeded(
     isBroadcastOperand,
     numericApproximation
   );
+}
+
+/**
+ * `.N()` of an already-evaluated lazy `Map` — typically the hybrid-laziness
+ * broadcast form (`Sin(Range(1, 10^8)).evaluate()`) — would otherwise be an
+ * identity: the `Map` is already evaluated, it has no `evaluate` handler, and
+ * without one the `numericApproximation` flag never reaches the elements, so
+ * `each()`/`at()` keep producing EXACT values (`sin(1)`, `sin(2)`, …). This
+ * breaks the `x.evaluate().N()` ≡ `x.N()` contract (`lazyBroadcastMap` wraps
+ * the body in `N` only when the broadcast is CONSTRUCTED under `.N()`).
+ *
+ * Return a `Map` over the same sources whose mapping-function body is wrapped
+ * in `N(…)`, so every element numericizes on access — laziness preserved.
+ * Returns `undefined` when `expr` is not such a `Map`, or its body is already
+ * `N`-wrapped (idempotence: `x.N().N()` must not grow the wrapping).
+ */
+export function lazyMapNumericApproximation(
+  ce: Expression['engine'],
+  expr: Expression
+): Expression | undefined {
+  if (!isFunction(expr, 'Map')) return undefined;
+  const fn = expr.ops[expr.nops - 1];
+  if (!isFunction(fn, 'Function') || fn.nops < 1) return undefined;
+
+  // Wrap the body INSIDE the canonical `Block` wrapper: `Block` evaluates its
+  // result without propagating the approximation flag, so `N(Block(sin(_)))`
+  // stays exact — the `N` must sit directly on the returned expression.
+  let body: Expression = fn.op1;
+  if (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
+  // Idempotence: the body already numericizes.
+  if (body.operator === 'N') return undefined;
+
+  // Rebuild the function literal from MathJSON rather than re-hosting the
+  // canonical body: a canonical body is bound into the ORIGINAL literal's
+  // parameter scope, and grafting it under a new `Function` would split the
+  // bindings between the old and new scopes.
+  const fnJson = fn.json;
+  if (!Array.isArray(fnJson)) return undefined;
+  const wrappedFn = ce.box([
+    'Function',
+    ['N', body.json],
+    ...fnJson.slice(2),
+  ] as MathJsonExpression);
+  if (!wrappedFn.isValid) return undefined;
+  return ce.function('Map', [...expr.ops.slice(0, -1), wrappedFn]);
 }
 
 export function repeat(

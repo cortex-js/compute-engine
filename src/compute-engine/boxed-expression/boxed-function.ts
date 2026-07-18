@@ -37,6 +37,7 @@ import {
   isTuple,
   isUnknownLengthBroadcast,
   lazyBroadcastMapIfNeeded,
+  lazyMapNumericApproximation,
   zip,
 } from '../collection-utils.js';
 import { isTensor } from './boxed-tensor.js';
@@ -1486,6 +1487,19 @@ export class BoxedFunction
         return materialize(this, def, options);
 
       //
+      // 3b/ `.N()` of an already-evaluated lazy `Map` (the hybrid-laziness
+      // broadcast form): the `Map` has no `evaluate` handler, so without this
+      // step the `numericApproximation` flag would be dropped and elements
+      // would keep evaluating EXACTLY on access. Rewrap the mapping function
+      // in `N` so elements float on access — laziness preserved. Runs after
+      // step 3 so an explicit materialization still wins.
+      //
+      if (numericApproximation && !def.evaluate && this.isLazyCollection) {
+        const nLazy = lazyMapNumericApproximation(this.engine, this);
+        if (nLazy) return nLazy;
+      }
+
+      //
       // 4/ Evaluate the applicable operands in the current scope
       //
       const tail = holdMap(this, (x) => x.evaluate(options));
@@ -1754,6 +1768,16 @@ export class BoxedFunction
             this.engine._fn('List', resolved)
           );
         }
+      }
+
+      //
+      // 2c/ `.N()` of an already-evaluated lazy `Map` — mirrors the sync
+      // path's step 3b (the async path has no materialization step, so this
+      // runs unconditionally under `numericApproximation`).
+      //
+      if (numericApproximation && !def.evaluate && this.isLazyCollection) {
+        const nLazy = lazyMapNumericApproximation(this.engine, this);
+        if (nLazy) return nLazy;
       }
 
       //

@@ -1603,6 +1603,44 @@ describe('LAZY BROADCAST N-WRAP HONORS numericApproximation (regression)', () =>
     expect(e.operator).toBe('Map');
     expect(e.at(1)?.re).toBe(1.5);
   });
+
+  // Tycho item 39: `.N()` of an ALREADY-EVALUATED lazy Map was an identity —
+  // the Map has no evaluate handler, so the numericApproximation flag never
+  // reached the elements and both access routes (each()/at) stayed exact.
+  // `x.evaluate().N()` must behave like `x.N()`.
+  it('N() of an already-evaluated lazy Map floats elements (evaluate-then-N route)', () => {
+    const e = engine.box(['Sin', ['Range', 1, 200]]).evaluate().N();
+    expect(e.operator).toBe('Map');
+    // at() route
+    expect(e.at(1)?.isNumberLiteral).toBe(true);
+    expect(e.at(1)?.re).toBeCloseTo(0.8414709848, 9);
+    // each() route
+    const first = e.each().next().value;
+    expect(first?.re).toBeCloseTo(0.8414709848, 9);
+    // At() operator route (Tycho's probe)
+    expect(
+      engine.box(['At', e.json, 1]).evaluate().re
+    ).toBeCloseTo(0.8414709848, 9);
+  });
+
+  it('evaluate-then-N is idempotent and shape-stable', () => {
+    const direct = engine.box(['Sin', ['Range', 1, 200]]).N();
+    const staged = engine.box(['Sin', ['Range', 1, 200]]).evaluate().N();
+    // The rewrapped Map has the same shape as the directly-N'd one
+    expect(staged.json).toEqual(direct.json);
+    // Repeated N() does not grow the wrapping
+    expect(staged.N().json).toEqual(staged.json);
+    expect(staged.N().at(1)?.re).toBeCloseTo(0.8414709848, 9);
+  });
+
+  it('evaluate-then-N floats elements of a multi-collection (zipWith) lazy Map', () => {
+    const e = engine
+      .box(['Add', ['Range', 1, 200], ['Range', 1, 200]])
+      .evaluate()
+      .N();
+    expect(e.operator).toBe('Map');
+    expect(e.at(1)?.re).toBe(2);
+  });
 });
 
 describe('SYMBOLIC-BOUND COLLECTIONS STAY INERT', () => {
