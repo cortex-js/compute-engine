@@ -640,6 +640,9 @@ export class BoxedFunction
     const isNonZero = (x: Expression): boolean =>
       x.isPositive === true || x.isNegative === true;
     switch (this.operator) {
+      case 'Abs':
+        // |x| is finite iff x is finite (real or complex).
+        return this.op1.isFinite;
       case 'Sqrt':
         // √x is finite iff x is finite (real or complex).
         return this.op1.isFinite;

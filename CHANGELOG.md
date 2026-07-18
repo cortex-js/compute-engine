@@ -32,6 +32,18 @@
   as written (it claimed *every* even power of a non-real base was negative —
   but `i⁴ = 1` and `(1+i)² = 2i`).
 
+### Improvements
+
+- **`Abs` typing now follows the operand's finiteness.** `|x|` of a
+  provably finite operand (real or complex) types `finite_real` instead of
+  the signature's generic `real`; a provably infinite operand types
+  `non_finite_number`, and a literal `NaN` types `number`. Finiteness also
+  propagates structurally (`|x|` is finite iff `x` is), which makes signs
+  of products of absolute values determinate: `|x|·|y|` for finite `x`, `y`
+  now reports `non-negative` (this path previously hit a latent inverted
+  parity claim in `Multiply` — see the sgn audit below — and before that
+  was masked entirely).
+
 ### Bug Fixes
 
 - **Sign (`sgn`) handler audit.** A mathematical-correctness pass over all

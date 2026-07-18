@@ -113,6 +113,7 @@ import {
   elementaryFunctionType,
   gammaPoleType,
   roundingFunctionType,
+  absFunctionType,
   measurementType,
 } from './type-handlers.js';
 import {
@@ -266,6 +267,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       idempotent: true,
       complexity: 1200,
       signature: '(number) -> real',
+      type: ([x]) => absFunctionType(x),
       sgn: ([x], { engine: ce }) => {
         if (x.isNaN) return 'unsigned'; // |NaN| = NaN
         if (x.isSame(0)) return 'zero';

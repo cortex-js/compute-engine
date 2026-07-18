@@ -85,4 +85,32 @@ describe('SGN HANDLER AUDIT', () => {
     expect(ce.box(['Rank', 5]).evaluate().toString()).toBe('0');
     expect(ce.box(['Rank', 5]).sgn).toBe('non-negative');
   });
+
+  it('Abs type follows the operand finiteness', () => {
+    ce.declare('ff', 'finite_real');
+    ce.declare('rr', 'real');
+    expect(ce.box(['Abs', 'ff']).type.toString()).toBe('finite_real');
+    expect(ce.box(['Abs', 'ff']).isFinite).toBe(true);
+    // `real` admits ±∞, so no finiteness claim.
+    expect(ce.box(['Abs', 'rr']).type.toString()).toBe('real');
+    expect(ce.box(['Abs', ['Complex', 2, 3]]).type.toString()).toBe(
+      'finite_real'
+    );
+    expect(ce.box(['Abs', 'PositiveInfinity']).type.toString()).toBe(
+      'non_finite_number'
+    );
+  });
+
+  it('Multiply: parity of weak-signed finite factors', () => {
+    // The parity result was inverted (a product of non-negatives claimed
+    // 'non-positive'); it was latent while |x| dropped finiteness and the
+    // ∞·0 guard preempted the branch.
+    ce.declare('m1', 'finite_real');
+    ce.declare('m2', 'finite_real');
+    const nn = ce.box(['Multiply', ['Abs', 'm1'], ['Abs', 'm2']]);
+    expect(nn.sgn).toBe('non-negative');
+    expect(nn.isNonNegative).toBe(true);
+    const np = ce.box(['Multiply', ['Abs', 'm1'], ['Negate', ['Abs', 'm2']]]);
+    expect(np.sgn).toBe('non-positive');
+  });
 });

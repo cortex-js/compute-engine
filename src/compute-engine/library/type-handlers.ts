@@ -1,6 +1,7 @@
 import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
+import { isNumber } from '../boxed-expression/type-guards.js';
 
 /**
  * Type handlers for the standard library follow the **non-finite typing
@@ -158,6 +159,32 @@ export function roundingFunctionType(x: Expression | undefined): Type {
   if (x.isReal === false)
     return x.isFinite === true ? 'finite_complex' : 'number';
   return 'finite_integer';
+}
+
+/**
+ * `Abs` — |x| is a non-negative real whose finiteness follows the operand:
+ * |±∞| = |~oo| = +∞, |NaN| = NaN, and a finite x (real or complex) has a
+ * finite magnitude. `finite_real` is only claimed when finiteness is
+ * *provable from the static type* so downstream finiteness guards (e.g.
+ * `Multiply`'s ∞·0 protection in its sgn handler) can rely on it; an
+ * operand of unknown finiteness keeps the signature's `real`.
+ *
+ * Deliberately type-driven, NOT `x.isFinite`-driven: the type is
+ * generation-cached, while `isFinite` walks the structural sgn machinery on
+ * every call (a measured ~2.5× whole-suite slowdown when this handler used
+ * it), and a possibly-collection operand — whose `isFinite` is not `true` —
+ * must fall through to the scalar default for the broadcast lift to wrap
+ * (`broadcastable<real>`), not be branded non-finite.
+ */
+export function absFunctionType(x: Expression | undefined): Type {
+  if (!x) return 'number';
+  // NaN's static type is just `number`; only a literal can prove it (and
+  // only a literal's `isNaN` is a cheap field read).
+  if (isNumber(x) && x.isNaN) return 'number';
+  const t = x.type;
+  if (t.matches('finite_number')) return 'finite_real';
+  if (t.matches('non_finite_number')) return 'non_finite_number';
+  return 'real';
 }
 
 /**
