@@ -20,6 +20,11 @@
   // strip contextual typing from operator `evaluate` handlers, producing
   // spurious "[any, any] is not assignable to readonly Expression[]" errors.
   "compilerOptions": {},
+  // Skip the TS diagnostics pass: it accounted for ~44s of the ~47s typedoc
+  // run, and type errors already fail the build in the declaration-emit step
+  // (and `npm run typecheck` during development). Only side effect: a one-time
+  // cosmetic reordering of union members in api.md (checker type-ID order).
+  "skipErrorChecking": true,
   // "includes": "./src/compute-engine/**/*",
   "externalPattern": ["**/node_modules/**", "./cortex/**"],
   "excludeInternal": true,

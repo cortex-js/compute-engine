@@ -844,7 +844,7 @@ rules(rules, options?): BoxedRuleSet
 
 ####### rules
 
-`Rule` \| `BoxedRuleSet` \| readonly Rule \| BoxedRule[] \| `null` \| `undefined`
+`Rule` \| readonly Rule \| BoxedRule[] \| `BoxedRuleSet` \| `null` \| `undefined`
 
 ####### options?
 
@@ -8052,7 +8052,7 @@ rules(rules, options?): BoxedRuleSet
 
 ####### rules
 
-`Rule` \| `BoxedRuleSet` \| readonly Rule \| BoxedRule[] \| `null` \| `undefined`
+`Rule` \| readonly Rule \| BoxedRule[] \| `BoxedRuleSet` \| `null` \| `undefined`
 
 ####### options?
 
@@ -10398,7 +10398,7 @@ For simple symbol substitution, consider using `subs()` instead.
 
 ####### rules
 
-`Rule` \| `BoxedRuleSet` \| `Rule`[]
+`BoxedRuleSet` \| `Rule` \| `Rule`[]
 
 ####### options?
 
@@ -12225,9 +12225,9 @@ cast(x, dtype):
   | number[]
   | Expression
   | Complex
+  | Expression[]
   | Complex[]
   | boolean[]
-  | Expression[]
   | undefined
 ```
 
