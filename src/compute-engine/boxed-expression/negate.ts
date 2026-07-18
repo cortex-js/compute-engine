@@ -3,7 +3,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isNumber, isFunction } from './type-guards.js';
-import { addOrder, sortProductOperands } from './order.js';
+import { sortAddTerms, sortProductOperands } from './order.js';
 import {
   isNumericTuple,
   hasAccessibleComponents,
@@ -59,7 +59,7 @@ export function negate(expr: Expression): Expression {
     // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
     if (expr.operator === 'Add') {
       const negated = expr.ops.map((x) => negate(x));
-      return ce._fn('Add', [...negated].sort(addOrder));
+      return ce._fn('Add', sortAddTerms(negated));
     }
 
     // Distribute over multiplication

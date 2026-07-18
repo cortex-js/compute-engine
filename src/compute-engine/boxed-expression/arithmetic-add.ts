@@ -1,7 +1,7 @@
 import { getImaginaryFactor } from './utils.js';
 
 import { flatten } from './flatten.js';
-import { addOrder, order } from './order.js';
+import { order, sortAddTerms } from './order.js';
 import { Type } from '../../common/type/types.js';
 import { widen } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -271,7 +271,7 @@ export function canonicalAdd(
   if (xs.length === 1) return xs[0];
 
   // Commutative: sort
-  return ce._fn('Add', [...xs].sort(addOrder));
+  return ce._fn('Add', sortAddTerms(xs));
 }
 
 export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {

@@ -47,9 +47,12 @@ export function isTensorProductOperand(x: Expression): boolean {
 export function sortProductOperands(
   xs: ReadonlyArray<Expression>
 ): Expression[] {
-  if (xs.filter(isTensorProductOperand).length >= 2) {
-    const scalars = xs.filter((y) => !isTensorProductOperand(y)).sort(order);
-    const tensors = xs.filter(isTensorProductOperand);
+  // The tensor predicate does type-matching work: evaluate it once per
+  // operand, not once per filter pass.
+  const isTensor = xs.map(isTensorProductOperand);
+  if (isTensor.filter(Boolean).length >= 2) {
+    const scalars = xs.filter((_, i) => !isTensor[i]).sort(order);
+    const tensors = xs.filter((_, i) => isTensor[i]);
     return [...scalars, ...tensors];
   }
   return [...xs].sort(order);
@@ -120,6 +123,37 @@ export function addOrder(a: Expression, b: Expression): number {
     if (aLex > bLex) return +1;
   }
   return order(a, b);
+}
+
+/**
+ * Sort terms of a sum with `addOrder` semantics, computing each term's
+ * degree/lexicographic keys once instead of on every comparison (`addOrder`
+ * re-walks both expressions per comparison — O(n log n) walks per sort).
+ * The comparator chain below returns exactly the values `addOrder` would,
+ * and `Array.sort` is stable, so the result order is identical.
+ */
+export function sortAddTerms(
+  xs: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (xs.length <= 1) return [...xs];
+  const keyed = xs.map((x) => ({
+    x,
+    total: totalDegree(x),
+    max: maxDegree(x),
+    lex: revlex(x),
+  }));
+  keyed.sort((a, b) => {
+    if (a.total !== b.total) return b.total - a.total;
+    if (a.max !== b.max) return b.max - a.max;
+    if (a.lex || b.lex) {
+      if (!a.lex) return +1;
+      if (!b.lex) return -1;
+      if (a.lex < b.lex) return -1;
+      if (a.lex > b.lex) return +1;
+    }
+    return order(a.x, b.x);
+  });
+  return keyed.map((k) => k.x);
 }
 
 export function equalOrder(a: Expression, b: Expression): number {
@@ -474,7 +508,7 @@ export function sortOperands(
   const ce = xs[0].engine;
 
   // @fastpath
-  if (operator === 'Add') return [...xs].sort(addOrder);
+  if (operator === 'Add') return sortAddTerms(xs);
   // Products with ≥2 matrix/vector operands are non-commutative: preserve
   // the tensors' written order (CORRECTNESS_FINDINGS P0-26).
   if (operator === 'Multiply') return sortProductOperands(xs);
