@@ -173,27 +173,33 @@ describe('broadcastable<T> — JavaScript compile target', () => {
     ).toThrow(/Fail closed/);
   });
 
-  test('Equal over a broadcastable operand fails closed (D6 throw)', () => {
-    // A `broadcastable<T>` operand may be an array at run time, where
-    // `Math.abs(array - scalar)` is NaN garbage. `broadcastable<T>` is not a
-    // subtype of `collection`, so `compileJSEquality` now has its own
-    // possibly-collection gate — Equal/NotEqual fail closed instead of emitting
-    // a wrong boolean behind `success: true`.
-    expect(() =>
-      jsCompile((ce) => {
-        ce.declare('b', 'broadcastable<number>');
-        return ce.box(['Equal', ['Multiply', 2, 'b'], 4]); // 2b = 4
-      })
-    ).toThrow(/Fail closed/);
+  test('Equal over a broadcastable operand lowers to _SYS.eq (Tycho item 41)', () => {
+    // Previously failed closed (a raw `Math.abs(array - scalar)` would be NaN
+    // garbage). The binary form now lowers to the interpreter-faithful runtime
+    // dispatch: a scalar binding gives a tolerant boolean, an array binding
+    // gives the element-wise array of booleans (matching `[1,4,4] = 4` →
+    // `[False, True, True]` in the interpreter).
+    const r = jsCompile((ce) => {
+      ce.declare('b', 'broadcastable<number>');
+      return ce.box(['Equal', ['Multiply', 2, 'b'], 4]); // 2b = 4
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.eq');
+    expect(r.run!({ b: 2 })).toBe(true);
+    expect(r.run!({ b: 3 })).toBe(false);
+    expect(r.run!({ b: [1, 2, 3] })).toEqual([false, true, false]);
   });
 
-  test('NotEqual over a broadcastable operand fails closed (D6 throw)', () => {
-    expect(() =>
-      jsCompile((ce) => {
-        ce.declare('b', 'broadcastable<number>');
-        return ce.box(['NotEqual', ['Multiply', 2, 'b'], 4]);
-      })
-    ).toThrow(/Fail closed/);
+  test('NotEqual over a broadcastable operand lowers to _SYS.neq (Tycho item 41)', () => {
+    const r = jsCompile((ce) => {
+      ce.declare('b', 'broadcastable<number>');
+      return ce.box(['NotEqual', ['Multiply', 2, 'b'], 4]);
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.neq');
+    expect(r.run!({ b: 2 })).toBe(false);
+    expect(r.run!({ b: 3 })).toBe(true);
+    expect(r.run!({ b: [1, 2, 3] })).toEqual([true, false, true]);
   });
 });
 

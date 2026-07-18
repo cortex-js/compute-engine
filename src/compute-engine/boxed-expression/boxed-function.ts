@@ -1951,9 +1951,23 @@ function skipBroadcastForVectorOps(
   // counts, not just finite indexed ones: `Equal(Set(…), List(…))` must not
   // broadcast over the list either. See
   // docs/plans/2026-07-07-desmos-list-filtering.md (highest-risk item).
+  //
+  // An operand that may only BECOME a collection at evaluation — a top-typed
+  // application such as `q(2)` declared `(number) -> unknown`, or a
+  // `broadcastable<T>` node — counts too (Tycho item 41): fanning the literal
+  // out pre-evaluation while the opaque operand later evaluates to a
+  // collection compounded two broadcasts into a cartesian nest
+  // (`L(1) = [1,2]` → 2×2 lists of booleans) instead of the documented
+  // whole-collection boolean. Skipping defers to the `Equal`/`NotEqual`
+  // evaluate handler, which sees EVALUATED operands and re-applies the same
+  // rule with full information (element-wise for list-vs-scalar via
+  // `broadcastComparison`, whole-collection equality for two collections) —
+  // so a possibly-collection operand that turns out scalar still broadcasts
+  // element-wise, unchanged.
   if (
     (operator === 'Equal' || operator === 'NotEqual') &&
-    ops.filter((x) => x.isCollection).length >= 2
+    ops.filter((x) => x.isCollection || isPossiblyCollectionTyped(x)).length >=
+      2
   )
     return true;
   return false;

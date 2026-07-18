@@ -445,3 +445,37 @@ describe('Equal / NotEqual broadcast over a named list operand (Tycho)', () => {
     ]);
   });
 });
+
+describe('Equal over an operand that only becomes a collection at evaluation (Tycho item 41)', () => {
+  // A type-opaque application (`(number) -> unknown`) that returns a list at
+  // run time must follow the same documented rules as a literal/symbol-bound
+  // list: whole-collection equality against another collection (a single
+  // boolean), element-wise against a scalar. Previously the pre-evaluation
+  // broadcast fanned the literal out while the opaque operand was still raw,
+  // compounding two broadcasts into a cartesian nest of lists of booleans.
+  const oce = new ComputeEngine();
+  oce.declare('L', '(number) -> unknown');
+  oce.assign('L', oce.parse('v \\mapsto [v, 2]'));
+  oce.declare('q', '(number) -> unknown');
+  oce.assign('q', oce.parse('v \\mapsto v^2+5'));
+
+  it('runtime list = literal list is a single boolean (was a 2×2 cartesian nest)', () => {
+    expect(oce.parse('L(1) = [1,2]').evaluate().json).toBe('True');
+    expect(oce.parse('L(1) = [1,3]').evaluate().json).toBe('False');
+    expect(oce.parse('L(1) = [1,2,3]').evaluate().json).toBe('False');
+    expect(oce.parse('L(1) \\ne [1,3]').evaluate().json).toBe('True');
+  });
+
+  it('runtime scalar = literal list still broadcasts element-wise', () => {
+    expect(oce.parse('q(2) = [9, 10]').evaluate().json).toEqual([
+      'List',
+      'True',
+      'False',
+    ]);
+  });
+
+  it('runtime scalar = scalar is unchanged', () => {
+    expect(oce.parse('q(2) = 9').evaluate().json).toBe('True');
+    expect(oce.parse('q(2) \\ne 9').evaluate().json).toBe('False');
+  });
+});

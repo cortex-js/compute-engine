@@ -2,6 +2,29 @@
 
 ### Bug Fixes
 
+- **`Equal`/`NotEqual` over a possibly-collection operand now compile on the
+  `javascript` target with an interpreter-faithful runtime dispatch.** A
+  comparison like `q(2) = 9` where `q` is declared `(number) -> unknown` — so
+  the call _may_ return a collection at run time — previously failed closed
+  (`success: false`, interpreter fallback). The binary form now lowers to a
+  runtime helper mirroring the interpreter shape by shape: scalar operands
+  compare tolerantly (within `engine.tolerance`, complex via the modulus), an
+  array-vs-scalar pair is element-wise (`[1,4,4] = 4` → `[false, true, true]`),
+  and an array-vs-array pair is whole-collection equality — a single boolean,
+  `false` on a length or shape mismatch, recursive over nested arrays. The
+  chained (n-ary) form over a possibly-collection operand still fails closed:
+  its pairwise `&&` conjunction is only sound over scalar booleans.
+
+- **Equality with an operand that only becomes a collection at evaluation no
+  longer produces a cartesian nest.** `L(1) = [1,2]` where `L` is declared
+  `(number) -> unknown` and returns a list fanned the literal out _before_
+  evaluation (the opaque call not yet being a collection), then broadcast again
+  element-wise once it was — yielding a 2×2 list of lists of booleans. It now
+  follows the documented, representation-independent rule that literal,
+  symbol-bound and lazy collections already follow: two collections compare as
+  a single boolean (`L(1) = [1,2]` → `True`), and a runtime scalar against a
+  literal list still broadcasts element-wise.
+
 - **`.N()` of an already-evaluated lazy `Map` now yields numeric elements.** The
   0.84.0 fix wrapped a lazy broadcast's elements in `N` only when the broadcast
   was _constructed_ under `.N()`; calling `.N()` on an already-evaluated lazy

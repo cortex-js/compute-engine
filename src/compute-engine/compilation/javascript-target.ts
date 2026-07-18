@@ -150,29 +150,39 @@ function compileJSEquality(
 ): string {
   if (args.length < 2)
     throw new Error(`${kind}: expected at least two arguments`);
-  // Scalar equality over a collection-valued operand has no committed coverage
-  // on the JavaScript target: a raw `Math.abs(a - b)` over a list silently
-  // coerces (`[1,2,3] - 2` → NaN), so `Equal`/`NotEqual` would return a wrong
-  // boolean behind a `success: true`. Fail closed (D6) with the offending head
-  // so the engine-level `compile()` reports `success: false` and falls back to
-  // the interpreter. Uses the declared type (not `.isCollection`, which is
-  // false for a `list<finite_number>` such as `Power(L, 2)`).
+  // Equality over a (possibly-)collection operand: a raw `Math.abs(a - b)`
+  // over a list silently coerces (`[1,2,3] - 2` → NaN), so the scalar codegen
+  // below would return a wrong boolean behind a `success: true`. The BINARY
+  // form lowers to the interpreter-faithful runtime dispatch `_SYS.eq`/
+  // `_SYS.neq` instead (Tycho item 41, the item-34 treatment): scalar
+  // operands compare tolerantly, an array-vs-scalar pair is element-wise, an
+  // array-vs-array pair is whole-collection equality — see `eqTensor`. The
+  // gate uses the declared type (not `.isCollection`, which is false for a
+  // `list<finite_number>` such as `Power(L, 2)`), plus
+  // `isPossiblyCollectionTypedJS` (a `broadcastable<T>` node or a top-typed
+  // application such as `h(x)` — `broadcastable<T>` is NOT a subtype of
+  // `collection`, so it needs its own test). A bare unknown SYMBOL is
+  // excluded by the predicate, so plot equalities (`x^2 + y^2 = 4`) stay on
+  // the scalar fast path below.
   //
-  // A possibly-collection-typed operand (`isPossiblyCollectionTypedJS`: a
-  // `broadcastable<T>` node or a top-typed application such as `h(x)`) is
-  // rejected for the same reason — it may be an array at run time, where
-  // `Math.abs(array - scalar)` is NaN garbage. `broadcastable<T>` is NOT a
-  // subtype of `collection`, so it needs its own gate. A bare unknown SYMBOL is
-  // excluded by the predicate, so plot equalities (`x^2 + y^2 = 4`) still
-  // compile.
-  for (const a of args)
-    if (a.type.matches('collection') || isPossiblyCollectionTypedJS(a))
-      throw new Error(
-        `${kind}: cannot compile — operand may be a collection at run time ` +
-          `(collection-valued or possibly-collection-typed). ` +
-          `Materialize the collection first. Fail closed (D6).`
-      );
+  // The CHAINED (n-ary) form keeps failing closed (D6): its pairwise `&&`
+  // conjunction is only sound over scalar booleans — an element-wise array
+  // result would be truthy garbage.
   const tol = args[0]?.engine?.tolerance ?? 1e-10;
+  const collectionish = (a: Expression): boolean =>
+    a.type.matches('collection') || isPossiblyCollectionTypedJS(a);
+  if (args.some(collectionish)) {
+    if (args.length === 2) {
+      const helper = kind === 'Equal' ? 'eq' : 'neq';
+      return `_SYS.${helper}((${compile(args[0])}), (${compile(args[1])}), ${tol})`;
+    }
+    throw new Error(
+      `${kind}: cannot compile — chained (n-ary) comparison over an operand ` +
+        `that may be a collection at run time (collection-valued or ` +
+        `possibly-collection-typed). Materialize the collection first. ` +
+        `Fail closed (D6).`
+    );
+  }
   const cmp = kind === 'Equal' ? '<=' : '>';
   const distance = (a: Expression, b: Expression): string => {
     const anyComplex =
@@ -2385,6 +2395,65 @@ function mulTensor(...args: BcastValue[]): BcastValue {
 }
 
 /**
+ * Interpreter-faithful `Equal` over operands whose collection-ness is not
+ * statically provable (a `broadcastable<T>` node or a top-typed application
+ * such as `q(x)`) — the runtime side of `compileJSEquality`'s
+ * possibly-collection lowering (Tycho item 41). Mirrors the interpreter's
+ * dispatch, probe-verified shape by shape:
+ * - scalar = scalar → tolerant boolean (`|a − b| <= tol`; a complex operand
+ *   compares on the modulus of the difference)
+ * - array = scalar (either order) → element-wise array of booleans
+ *   (`[1,4,4] = 4` → `[false, true, true]`), recursing into nested arrays
+ * - array = array → a single boolean: equal lengths and every element pair
+ *   equal (recursive, so matrices compare element-wise; a length mismatch or
+ *   an element-shape mismatch is `false`) — collection equality, not a
+ *   broadcast
+ */
+function eqTensor(
+  a: unknown,
+  b: unknown,
+  tol: number
+): boolean | (boolean | unknown[])[] {
+  const aArr = Array.isArray(a);
+  const bArr = Array.isArray(b);
+  if (aArr && bArr) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++)
+      if (eqTensor(a[i], b[i], tol) !== true) return false;
+    return true;
+  }
+  if (aArr) return a.map((x) => eqTensor(x, b, tol)) as (boolean | unknown[])[];
+  if (bArr) return b.map((y) => eqTensor(a, y, tol)) as (boolean | unknown[])[];
+  const part = (v: unknown): { re: number; im: number } =>
+    typeof v === 'object' && v !== null && 're' in v
+      ? (v as { re: number; im: number })
+      : { re: v as number, im: 0 };
+  const pa = part(a);
+  const pb = part(b);
+  return Math.hypot(pa.re - pb.re, pa.im - pb.im) <= tol;
+}
+
+/**
+ * Interpreter-faithful `NotEqual` (see `eqTensor`): element-wise negation for
+ * an array-vs-scalar pair, a single negated boolean for array-vs-array and
+ * scalar-vs-scalar.
+ */
+function neqTensor(
+  a: unknown,
+  b: unknown,
+  tol: number
+): boolean | (boolean | unknown[])[] {
+  const aArr = Array.isArray(a);
+  const bArr = Array.isArray(b);
+  if (aArr && bArr) return eqTensor(a, b, tol) !== true;
+  if (aArr)
+    return a.map((x) => neqTensor(x, b, tol)) as (boolean | unknown[])[];
+  if (bArr)
+    return b.map((y) => neqTensor(a, y, tol)) as (boolean | unknown[])[];
+  return eqTensor(a, b, tol) !== true;
+}
+
+/**
  * Inverse by Gauss–Jordan with partial pivoting; a non-square or singular input
  * yields NaN (the interpreter stays inert for a singular matrix). Standalone so
  * `matpow` can reuse it for a negative exponent.
@@ -2567,6 +2636,11 @@ const SYS_HELPERS = {
   // nested) real arrays whose collection-ness was not statically provable —
   // see `tryCompileBroadcast`'s ≥2-possibly-collection branch.
   mul: mulTensor,
+  // Interpreter-faithful `Equal`/`NotEqual` over operands whose
+  // collection-ness was not statically provable — see `compileJSEquality`'s
+  // possibly-collection lowering (Tycho item 41).
+  eq: eqTensor,
+  neq: neqTensor,
   cross: (a: number[], b: number[]): number[] | number =>
     a.length === 3 && b.length === 3
       ? [

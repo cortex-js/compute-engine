@@ -1092,12 +1092,41 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     return e;
   };
 
-  it('Equal over a collection operand fails closed (was success:true → null)', () => {
+  it('binary Equal over a collection operand lowers to _SYS.eq (Tycho item 41; was fail-closed)', () => {
+    // `d = [10,20,30]`, `m = 2`: the interpreter broadcasts list-vs-scalar
+    // element-wise (`[False, False, False]`); the compiled dispatch matches.
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    const r = js.compile(e.parse('d = m', { strict: false }), {
+      realOnly: true,
+    });
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toEqual([false, false, false]);
+  });
+
+  it('Equal over a top-typed application compiles and runs (Tycho item 41 retest trigger)', () => {
+    // `q: (number) -> unknown` assigned `v ↦ v² + 5`: the call types
+    // `unknown` (possibly-collection), which failed closed before the
+    // `_SYS.eq` dispatch. Tycho's visibility-gate shape.
+    const e = new ComputeEngine();
+    e.declare('q', '(number) -> unknown');
+    e.assign('q', e.parse('v \\mapsto v^2+5'));
+    const js = new JavaScriptTarget();
+    const eq = js.compile(e.parse('q(2) = 9', { strict: false }));
+    expect(eq.success).toBe(true);
+    expect(eq.run!({})).toBe(true);
+    const neq = js.compile(e.parse('q(2) \\ne 9', { strict: false }));
+    expect(neq.success).toBe(true);
+    expect(neq.run!({})).toBe(false);
+  });
+
+  it('chained (n-ary) Equal over a collection operand still fails closed (D6)', () => {
+    // The pairwise `&&` conjunction is only sound over scalar booleans.
     const e = mkEngine();
     const js = new JavaScriptTarget();
     expect(() =>
-      js.compile(e.parse('d = m', { strict: false }), { realOnly: true })
-    ).toThrow(/collection-valued/);
+      js.compile(e.parse('d = m = m', { strict: false }), { realOnly: true })
+    ).toThrow(/Fail closed/);
   });
 
   it('Which with a collection condition fails closed (was success:true, wrong branch)', () => {
@@ -1120,8 +1149,10 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   });
 
   it('the free-function compile() converts the throw to success:false + fallback', () => {
+    // The chained collection Equal still fails closed (the binary form now
+    // lowers — see the item-41 test above), so it exercises the conversion.
     const e = mkEngine();
-    const r = compile(e.parse('d = m', { strict: false }));
+    const r = compile(e.parse('d = m = m', { strict: false }));
     // Fallback path still returns a runnable interpreter-backed function.
     expect(r?.success).toBe(false);
     expect(typeof r?.run).toBe('function');
