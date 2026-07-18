@@ -266,17 +266,38 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
-  test('stays inert for first-order linear systems with repeated eigenvalues', () => {
-    const result = dsolve(
-      [
-        'List',
-        ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']],
-        ['Equal', ['D', ['z', 'x'], 'x'], ['z', 'x']],
-      ],
-      ['List', 'y', 'z']
-    );
+  test('solves diagonal first-order linear systems with repeated eigenvalues', () => {
+    const equations = [
+      ['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+      ['Equal', ['D', ['z', 'x'], 'x'], ['z', 'x']],
+    ];
+    const solution = dsolve(['List', ...equations], ['List', 'y', 'z']);
 
-    expect(result.operator).toBe('DSolve');
+    expect(solution.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * e^x,z(x) === "c_2" * e^x]`
+    );
+    expect(
+      verifySystemSolution(equations, solution, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
+  });
+
+  test('solves defective first-order linear systems via a generalized eigenvector', () => {
+    // y' = 3y + z, z' = z − y: eigenvalue 2 with algebraic multiplicity 2
+    // and a one-dimensional eigenspace.
+    const equations = [
+      [
+        'Equal',
+        ['D', ['y', 'x'], 'x'],
+        ['Add', ['Multiply', 3, ['y', 'x']], ['z', 'x']],
+      ],
+      ['Equal', ['D', ['z', 'x'], 'x'], ['Subtract', ['z', 'x'], ['y', 'x']]],
+    ];
+    const solution = dsolve(['List', ...equations], ['List', 'y', 'z']);
+
+    expect(solution.operator).toBe('List');
+    expect(
+      verifySystemSolution(equations, solution, { c_1: 2, c_2: 3, x: 0.75 })
+    ).toBe(true);
   });
 
   test('stays inert for first-order linear systems with near-repeated eigenvalues', () => {
@@ -505,16 +526,23 @@ describe('DSolve', () => {
     );
   });
 
-  test('stays inert for Riccati equations without a small constant particular solution', () => {
-    // `y' = y² + x` (an Airy-type Riccati): no constant particular solution
-    // exists, so the constant-particular Riccati path must not fire.
-    const result = dsolve([
+  test('solves Airy-type Riccati equations via the Airy linearization', () => {
+    // `y' = y² + x`: no constant particular solution exists, so the
+    // constant-particular path declines and the `y = −u′/u` linearization
+    // produces the Airy-function solution family.
+    const equation = [
       'Equal',
       ['D', ['y', 'x'], 'x'],
       ['Add', ['Power', ['y', 'x'], 2], 'x'],
-    ]);
+    ];
+    const result = dsolve(equation);
 
-    expect(result.operator).toBe('DSolve');
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === ("c_1" * AiryBiPrime(-x) + AiryAiPrime(-x)) / ("c_1" * AiryBi(-x) + AiryAi(-x))]`
+    );
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 0.7, x: 0.4 })
+    ).toBe(true);
   });
 
   test('solves exact first-order equations implicitly', () => {
@@ -569,11 +597,33 @@ describe('DSolve', () => {
     expect(verifyEquationSolution(equation, solution, { x: 0.75 })).toBe(true);
   });
 
+  test('stays inert when a nonstandard dependent call appears in coefficients', () => {
+    // `y(0)` is a reference to the unknown function, not a constant — the
+    // Riccati→Airy, Airy, and Cauchy–Euler rungs must not embed it in a
+    // purported solution.
+    const riccati = dsolve([
+      'Equal',
+      ['D', ['y', 'x'], 'x'],
+      ['Add', 'x', ['y', 0], ['Power', ['y', 'x'], 2]],
+    ]);
+    expect(riccati.operator).toBe('DSolve');
+
+    const airy = dsolve([
+      'Equal',
+      ['D', ['D', ['y', 'x'], 'x'], 'x'],
+      ['Multiply', ['Add', 'x', ['y', 0]], ['y', 'x']],
+    ]);
+    expect(airy.operator).toBe('DSolve');
+  });
+
   test('stays inert for unsupported nonlinear first-order equations', () => {
+    // `y' = x + y³`: cubic in `y` with an `x`-dependent term — outside every
+    // first-order class (the quadratic case `y' = x + y²` is now solved via
+    // the Riccati→Airy linearization).
     const result = dsolve([
       'Equal',
       ['D', ['y', 'x'], 'x'],
-      ['Add', 'x', ['Power', ['y', 'x'], 2]],
+      ['Add', 'x', ['Power', ['y', 'x'], 3]],
     ]);
 
     expect(result.operator).toBe('DSolve');
@@ -970,6 +1020,61 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
+  test('solves the Airy equation', () => {
+    // y'' = x y
+    const equation = [
+      'Equal',
+      ['D', ['D', ['y', 'x'], 'x'], 'x'],
+      ['Multiply', 'x', ['y', 'x']],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * AiryAi(x) + "c_2" * AiryBi(x)]`
+    );
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 1.7 })
+    ).toBe(true);
+  });
+
+  test('solves the reflected Airy equation', () => {
+    // y'' + x y = 0 → Ai(−x), Bi(−x)
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['D', ['D', ['y', 'x'], 'x'], 'x'],
+        ['Multiply', 'x', ['y', 'x']],
+      ],
+      0,
+    ];
+    const result = dsolve(equation);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * AiryAi(-x) + "c_2" * AiryBi(-x)]`
+    );
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 1.7 })
+    ).toBe(true);
+  });
+
+  test('solves scaled and shifted Airy-form equations', () => {
+    // y'' = (8x + 2) y → t = 2x + 1/2
+    const equation = [
+      'Equal',
+      ['D', ['D', ['y', 'x'], 'x'], 'x'],
+      ['Multiply', ['Add', ['Multiply', 8, 'x'], 2], ['y', 'x']],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" * AiryAi(2x + 1/2) + "c_2" * AiryBi(2x + 1/2)]`
+    );
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.9 })
+    ).toBe(true);
+  });
+
   test('solves the ordinary Bessel equation', () => {
     const equation = [
       'Equal',
@@ -1148,9 +1253,11 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
-  test('stays inert (no Error node) for nonhomogeneous Cauchy-Euler equation', () => {
-    // x^2 y'' + x y' = x. Previously produced a corrupted Error-node "solution".
-    const result = dsolve([
+  test('solves nonhomogeneous Cauchy-Euler equation (x-power resonance)', () => {
+    // x^2 y'' + x y' = x: the indicial root 0 is repeated and the forcing
+    // power m = 1 is non-resonant (P(1) = 1), so the x-power ansatz yields
+    // the particular solution `x`.
+    const equation = [
       'Equal',
       [
         'Add',
@@ -1158,11 +1265,79 @@ describe('DSolve', () => {
         ['Multiply', 'x', ['D', ['y', 'x'], 'x']],
       ],
       'x',
-    ]);
+    ];
+    const result = dsolve(equation);
 
-    // Either inert, or a valid solution - but never an Error-bearing result.
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === "c_1" + x + "c_2" * ln(x)]`
+    );
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 2 })
+    ).toBe(true);
+  });
+
+  test('solves nonhomogeneous Cauchy-Euler equation with distinct roots', () => {
+    // x^2 y'' - 2 y = x^3 + 5: term-by-term x-power particular solution.
+    const equation = [
+      'Equal',
+      [
+        'Subtract',
+        ['Multiply', ['Power', 'x', 2], ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['Multiply', 2, ['y', 'x']],
+      ],
+      ['Add', ['Power', 'x', 3], 5],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === 1/4 * x^3 + "c_1" * x^2 + "c_2" / x - 5/2]`
+    );
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 2 })
+    ).toBe(true);
+  });
+
+  test('solves nonhomogeneous Cauchy-Euler equation with complex roots', () => {
+    // x^2 y'' + x y' + y = x: P(1) = 2, particular x/2.
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['Multiply', ['Power', 'x', 2], ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['Multiply', 'x', ['D', ['y', 'x'], 'x']],
+        ['y', 'x'],
+      ],
+      'x',
+    ];
+    const result = dsolve(equation);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) === 1/2 * x + "c_1" * cos(ln(x)) + "c_2" * sin(ln(x))]`
+    );
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 2 })
+    ).toBe(true);
+  });
+
+  test('solves resonant nonhomogeneous Cauchy-Euler equation via variation of parameters', () => {
+    // x^2 y'' + x y' = 1: the forcing power m = 0 hits the repeated indicial
+    // root (P(0) = 0), so the x-power ansatz declines and variation of
+    // parameters produces the `ln²` particular solution.
+    const equation = [
+      'Equal',
+      [
+        'Add',
+        ['Multiply', ['Power', 'x', 2], ['D', ['D', ['y', 'x'], 'x'], 'x']],
+        ['Multiply', 'x', ['D', ['y', 'x'], 'x']],
+      ],
+      1,
+    ];
+    const result = dsolve(equation);
+
     expect(hasNoErrorNode(result)).toBe(true);
-    expect(result.operator).toBe('DSolve');
+    expect(
+      verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 2 })
+    ).toBe(true);
   });
 
   test('stays inert (no Error node) for variable-coefficient second-order equation', () => {

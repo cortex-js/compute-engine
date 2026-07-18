@@ -515,19 +515,22 @@ CASES = [
     ("SY1", "system", "y'=z, z'=y (coupled linear)",
      ["List", EQ(d1(yx), zx), EQ(d1(zx), yx)], ["y", "z"], False),
 
-    # ---- beyond current coverage (expected inert; map the gap) -------------
+    # ---- former "beyond coverage" rows now claimed (2026-07-18): BY1 via the
+    # Riccati→Airy linearization, BY3 via nonhomogeneous Cauchy–Euler, BY4 via
+    # the Airy rung, BY5 via repeated-eigenvalue systems. Only BY2
+    # (variable-coefficient second order) remains expected-inert.
     ("BY1", "beyond", "y' = x + y² (Riccati)",
-     EQ(d1(yx), ["Add", "x", ["Power", yx, 2]]), "y", True),
+     EQ(d1(yx), ["Add", "x", ["Power", yx, 2]]), "y", False),
     ("BY2", "beyond", "sin(x)y'' + y' = cos x (var-coeff 2nd order)",
      EQ(["Add", ["Multiply", ["Sin", "x"], d2(yx)], d1(yx)], ["Cos", "x"]),
      "y", True),
     ("BY3", "beyond", "x²y'' + xy' = x (nonhomog Cauchy–Euler)",
      EQ(["Add", ["Multiply", ["Power", "x", 2], d2(yx)],
-         ["Multiply", "x", d1(yx)]], "x"), "y", True),
+         ["Multiply", "x", d1(yx)]], "x"), "y", False),
     ("BY4", "beyond", "y''=xy (Airy, variable coeff)",
-     EQ(d2(yx), ["Multiply", "x", yx]), "y", True),
+     EQ(d2(yx), ["Multiply", "x", yx]), "y", False),
     ("BY5", "beyond", "y'=y, z'=z (repeated eigenvalue system)",
-     ["List", EQ(d1(yx), yx), EQ(d1(zx), zx)], ["y", "z"], True),
+     ["List", EQ(d1(yx), yx), EQ(d1(zx), zx)], ["y", "z"], False),
 ]
 
 

@@ -764,6 +764,65 @@ describe('AIRY Bi FUNCTION', () => {
   });
 });
 
+// Reference values: mpmath @25 digits, airyai(x, 1) / airybi(x, 1).
+describe("AIRY Ai' FUNCTION (derivative)", () => {
+  test("Ai'(0) ≈ -0.2588194037928068", () => {
+    expectApprox(ce.expr(['AiryAiPrime', 0]), -0.2588194037928068, 1e-12);
+  });
+
+  test("Ai'(1) ≈ -0.15914744129679321 (dd series)", () => {
+    expectApprox(ce.expr(['AiryAiPrime', 1]), -0.15914744129679321, 1e-12);
+  });
+
+  test("Ai'(-5) ≈ 0.32719281855444314 (dd series)", () => {
+    expectApprox(ce.expr(['AiryAiPrime', -5]), 0.32719281855444314, 1e-12);
+  });
+
+  test("Ai'(5.1) ≈ -0.0001985325478818054 (dd series)", () => {
+    expectApprox(ce.expr(['AiryAiPrime', 5.1]), -0.0001985325478818054, 1e-12);
+  });
+
+  test("Ai'(10) ≈ -3.520633676738924e-10 (x>9 asymptotic)", () => {
+    expectApprox(ce.expr(['AiryAiPrime', 10]), -3.520633676738924e-10, 1e-12);
+  });
+
+  test("Ai'(-10) ≈ 0.9962650441327901 (x<-9 P/Q asymptotic)", () => {
+    expectApprox(ce.expr(['AiryAiPrime', -10]), 0.9962650441327901, 1e-12);
+  });
+
+  test('AiryAiPrime without numericApproximation returns unevaluated', () => {
+    const result = ce.expr(['AiryAiPrime', 1]).evaluate();
+    expect(result.operator).toBe('AiryAiPrime');
+  });
+});
+
+// Reference values: mpmath @25 digits, airybi(x, 1).
+describe("AIRY Bi' FUNCTION (derivative)", () => {
+  test("Bi'(0) ≈ 0.44828835735382636", () => {
+    expectApprox(ce.expr(['AiryBiPrime', 0]), 0.44828835735382636, 1e-12);
+  });
+
+  test("Bi'(1) ≈ 0.9324359333927756 (dd series)", () => {
+    expectApprox(ce.expr(['AiryBiPrime', 1]), 0.9324359333927756, 1e-12);
+  });
+
+  test("Bi'(-5) ≈ 0.7784117730018992 (dd series)", () => {
+    expectApprox(ce.expr(['AiryBiPrime', -5]), 0.7784117730018992, 1e-12);
+  });
+
+  test("Bi'(5.1) ≈ 1807.3344813513663 (dd series)", () => {
+    expectApprox(ce.expr(['AiryBiPrime', 5.1]), 1807.3344813513663, 1e-12);
+  });
+
+  test("Bi'(10) ≈ 1429236134.4828658 (x>9 asymptotic)", () => {
+    expectApprox(ce.expr(['AiryBiPrime', 10]), 1429236134.4828658, 1e-12);
+  });
+
+  test("Bi'(-10) ≈ 0.11941411339990924 (x<-9 P/Q asymptotic)", () => {
+    expectApprox(ce.expr(['AiryBiPrime', -10]), 0.11941411339990924, 1e-12);
+  });
+});
+
 describe('BIGNUM SPECIAL FUNCTIONS', () => {
   let bigCe: InstanceType<typeof ComputeEngine>;
   beforeAll(() => {

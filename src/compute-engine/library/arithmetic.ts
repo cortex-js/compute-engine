@@ -67,6 +67,8 @@ import {
   besselK,
   airyAi,
   airyBi,
+  airyAiPrime,
+  airyBiPrime,
 } from '../numerics/special-functions.js';
 import { factorial2, gcd, lcm, realGcd, realLcm } from '../numerics/numeric.js';
 import { rationalize } from '../numerics/rationals.js';
@@ -1140,6 +1142,34 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation }) =>
         shouldNumericize(numericApproximation, x)
           ? apply(x, airyBi)
+          : undefined,
+    },
+
+    // Derivative of the Airy function of the first kind Ai'(x)
+    AiryAiPrime: {
+      description: 'Derivative of the Airy function of the first kind',
+      wikidata: 'Q403629',
+      complexity: 8400,
+      broadcastable: true,
+      signature: '(number) -> number',
+      type: (ops) => numericTypeHandler(ops),
+      evaluate: ([x], { numericApproximation }) =>
+        shouldNumericize(numericApproximation, x)
+          ? apply(x, airyAiPrime)
+          : undefined,
+    },
+
+    // Derivative of the Airy function of the second kind Bi'(x)
+    AiryBiPrime: {
+      description: 'Derivative of the Airy function of the second kind',
+      wikidata: 'Q403629',
+      complexity: 8400,
+      broadcastable: true,
+      signature: '(number) -> number',
+      type: (ops) => numericTypeHandler(ops),
+      evaluate: ([x], { numericApproximation }) =>
+        shouldNumericize(numericApproximation, x)
+          ? apply(x, airyBiPrime)
           : undefined,
     },
 

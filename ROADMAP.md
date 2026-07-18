@@ -306,23 +306,35 @@ constant-coefficient homogeneous up to order _n_ (numeric characteristic roots
 with clustering), nonhomogeneous constant-coefficient with polynomial, sine,
 and exponential forcing via undetermined coefficients — including resonance
 (forcing `sin(ωx)` when `±iω` is a characteristic root) and orders ≥ 3 —
-second-order Cauchy–Euler homogeneous, the first-order nonlinear classes
-(separable with _implicit_ `F(y) = G(x) + C` solutions, Bernoulli `v = y^{1−n}`,
-first-order homogeneous `y′ = F(y/x)`, and exact `M dx + N dy = 0`), and
-initial/boundary conditions (solving the linear system for the integration
-constants). `NDSolve` integrates adaptively (Dormand–Prince 5(4) with dense
-output; scalar, higher-order reduction, and first-order-system forms).
-Unsupported forms stay **inert rather than wrong** — preserve that contract
-as coverage grows.
+second-order Cauchy–Euler (homogeneous and, since 2026-07-18, nonhomogeneous
+via an x-power indicial ansatz with a variation-of-parameters fallback), the
+Airy family `y″ = (px+q)y` (`AiryAi`/`AiryBi`, with new `AiryAiPrime`/
+`AiryBiPrime` operators and full derivative closure), the first-order
+nonlinear classes (separable with _implicit_ `F(y) = G(x) + C` solutions,
+Bernoulli `v = y^{1−n}`, first-order homogeneous `y′ = F(y/x)`, exact
+`M dx + N dy = 0`, and Riccati — constant-particular, plus the
+`y = −u′/(q₂u)` Airy linearization for `y′ = q₀(x) + q₂y²` with linear `q₀`),
+first-order linear systems (distinct eigenvalues, diagonal with repeats, and
+defective 2×2 via a generalized eigenvector, gated on an exact `(A−λI)² = 0`
+check so near-repeated numeric eigenvalues stay inert), and initial/boundary
+conditions (solving the linear system for the integration constants).
+`NDSolve` integrates adaptively (Dormand–Prince 5(4) with dense output;
+scalar, higher-order reduction, and first-order-system forms). Unsupported
+forms stay **inert rather than wrong** — preserve that contract as coverage
+grows. (The constant-coefficient Abel rung — dead code shadowed by the
+separable rung — was removed 2026-07-18.)
 
 The CE-vs-SymPy audit harness (`benchmarks/audit/dsolve.ts` +
 `gen_dsolve.py`, substitute-back residual oracle, 51-case corpus seeded from
-SymPy's `test_ode.py`; landed 2026-07-10) grades **CE 46/51 correct, 0
-wrong** vs SymPy 50/51 — CE solves every case in its claimed classes. The
-five `unsupported` rows are the coverage frontier (SymPy solves four):
-**Riccati, Airy `y″ = x·y` (special-function solutions), variable-coefficient
-second order, nonhomogeneous Cauchy–Euler, repeated-eigenvalue linear
-systems.** Ranked next steps (good contributor territory):
+SymPy's `test_ode.py`; landed 2026-07-10) grades **CE 50/51 correct, 0
+wrong — at parity with SymPy (50/51)** after the 2026-07-18 frontier round
+(BY1 Riccati→Airy — which SymPy errors on —, BY3 nonhomogeneous
+Cauchy–Euler, BY4 Airy, BY5 repeated-eigenvalue system). The one remaining
+`unsupported` row is **variable-coefficient second order**
+(`sin(x)y″ + y′ = cos x`), where SymPy's "solution" is nested unevaluated
+integrals — a `p = y′` reduction-of-order rung would need to emit
+inert-integral-carrying results to match, a contract question before it is a
+coding task. Ranked next steps (good contributor territory):
 
 - **`NDSolveFunction` system form:** `NDSolve` is adaptive (Dormand–Prince
   5(4) with dense output, landed 2026-07-18) and `NDSolveFunction` returns a
@@ -335,11 +347,6 @@ systems.** Ranked next steps (good contributor territory):
 - **Tolerance hardening** in the numeric characteristic-root clustering, so
   near-degenerate roots are grouped reliably as coverage of higher-order
   nonhomogeneous problems grows.
-- **Abel rung disposition (PR #320 residue):**
-  `solveConstantCoefficientAbelFirstKind` is dead code — the separable rung
-  earlier in the chain always handles or fails its cases first (both "Abel"
-  tests exercise the separable path). Removing it is a debatable-direction
-  change — needs a call.
 - **Adjacent, reusing the same kernel:** a
   `LaplaceTransform`/`InverseLaplaceTransform` pair (currently inert) — a
   capability on its own and a second, independent route to constant-coefficient

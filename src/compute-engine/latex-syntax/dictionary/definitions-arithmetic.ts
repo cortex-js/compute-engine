@@ -1843,6 +1843,22 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) =>
       '\\operatorname{Bi}' + serializer.wrapArguments(expr),
   },
+  // Airy-function derivatives. Parsing `\operatorname{Ai}'(x)` is handled by
+  // the generic prime notation (→ `Apply(Derivative(AiryAi, 1), x)`, which
+  // evaluates to `AiryAiPrime(x)`); these entries provide the matching
+  // serialization.
+  {
+    name: 'AiryAiPrime',
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      "\\operatorname{Ai}'" + serializer.wrapArguments(expr),
+  },
+  {
+    name: 'AiryBiPrime',
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      "\\operatorname{Bi}'" + serializer.wrapArguments(expr),
+  },
   {
     name: 'GCD',
     latexTrigger: ['\\gcd'], // command from amsmath package

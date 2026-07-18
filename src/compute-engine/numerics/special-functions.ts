@@ -2577,6 +2577,165 @@ export function airyBi(x: number): number {
   return ddMul(SQRT3_DD, ddAdd(ddMul(AIRY_C1, f), ddMul(AIRY_C2, g)))[0];
 }
 
+/**
+ * Termwise derivatives of the DLMF 9.4.1 series (companion to
+ * `airySeriesFG`): returns f′(x) and g′(x), where
+ *   f(x) = Σ_{k≥0} a_k x^{3k},  a_0 = 1, a_k = a_{k−1}/((3k−1)·3k)
+ *   g(x) = Σ_{k≥0} b_k x^{3k+1}, b_0 = 1, b_k = b_{k−1}/(3k·(3k+1))
+ * so, differentiating each monomial,
+ *   f′(x) = Σ_{k≥1} 3k·a_k x^{3k−1}   (first term = x²/2)
+ *   g′(x) = Σ_{k≥0} (3k+1)·b_k x^{3k} (constant term = 1)
+ * The term ratios collapse to
+ *   dtermF_{k+1}/dtermF_k = x³/(3k·(3k+2)),
+ *   dtermG_k/dtermG_{k−1} = x³/((3k−2)·3k),
+ * accumulated in double-double with the same convergence idiom.
+ */
+function airySeriesFGPrime(x: number): [fp: DD, gp: DD] {
+  const x2 = twoProd(x, x); // x²
+  const x3 = ddMulD(x2, x); // x³
+  let dtermF: DD = ddDivD(x2, 2); // f′ term at k = 1: 3·a_1·x² = x²/2
+  let dtermG: DD = [1, 0]; // g′ term at k = 0: (3·0+1)·b_0 = 1
+  let fp: DD = dtermF;
+  let gp: DD = dtermG;
+  for (let k = 1; k <= 200; k++) {
+    const k3 = 3 * k;
+    // advance f′ term from index k to k+1, g′ term from index k−1 to k
+    dtermF = ddDivD(ddMul(dtermF, x3), k3 * (k3 + 2));
+    dtermG = ddDivD(ddMul(dtermG, x3), (k3 - 2) * k3);
+    fp = ddAdd(fp, dtermF);
+    gp = ddAdd(gp, dtermG);
+    if (
+      Math.abs(dtermF[0]) + Math.abs(dtermG[0]) <
+      1e-34 * (Math.abs(fp[0]) + Math.abs(gp[0]))
+    )
+      break;
+  }
+  return [fp, gp];
+}
+
+/** P/Q phase sums for Ai′(−x) and Bi′(−x), x > 9 (DLMF 9.7.10/9.7.12),
+ *  built from the v-coefficients v_k = u_k·(6k+1)/(1−6k):
+ *    Ai′(−x) = (x^{1/4}/√π)·[ sin(ξ−π/4)·P(ξ) − cos(ξ−π/4)·Q(ξ)]
+ *    Bi′(−x) = (x^{1/4}/√π)·[ cos(ξ−π/4)·P(ξ) + sin(ξ−π/4)·Q(ξ)]
+ *    P(ξ) = Σ (−1)^k v_{2k}/ξ^{2k},   Q(ξ) = Σ (−1)^k v_{2k+1}/ξ^{2k+1}
+ *  Same optimal-truncation and phase machinery as `airyNegParts`; the u_j/ξ^j
+ *  running term is converted to v_j/ξ^j by the (6j+1)/(1−6j) factor. */
+function airyNegPartsPrime(
+  x: number
+): [P: number, Q: number, cosA: number, sinA: number, pref: number] {
+  const xi = airyXi(x);
+  const xiHi = xi[0];
+  const A = ddAdd(xi, ddNeg(PI_OVER_4_DD)); // ξ − π/4
+  const c0 = Math.cos(A[0]);
+  const s0 = Math.sin(A[0]);
+  const cosA = c0 - s0 * A[1];
+  const sinA = s0 + c0 * A[1];
+  let P = 1; // j = 0 term: v_0 = 1
+  let Q = 0;
+  let t = 1; // u_j/ξ^j
+  let prevAbs = Infinity;
+  for (let j = 1; j <= 60; j++) {
+    t *= airyURatio(j) / xiHi;
+    const v = (t * (6 * j + 1)) / (1 - 6 * j); // v_j/ξ^j
+    const av = Math.abs(v);
+    if (av >= prevAbs) break; // divergent tail: stop at smallest term
+    prevAbs = av;
+    // sign (−1)^k for v_{2k} in P and v_{2k+1} in Q → +,+,−,− over j mod 4
+    const sv = j % 4 === 0 || j % 4 === 1 ? v : -v;
+    if (j % 2 === 0) P += sv;
+    else Q += sv;
+    if (av < 1e-18) break;
+  }
+  const pref = Math.pow(x, 0.25) / Math.sqrt(Math.PI);
+  return [P, Q, cosA, sinA, pref];
+}
+
+/**
+ * Derivative of the Airy function of the first kind, Ai′(x).
+ *
+ * - x > 9: asymptotic expansion (DLMF 9.7.6)
+ * - x < −9: oscillatory asymptotic P/Q form (DLMF 9.7.10)
+ * - |x| ≤ 9: termwise-differentiated Maclaurin series (DLMF 9.4.2)
+ *
+ * Reference: NIST DLMF 9.2, 9.4, 9.7
+ */
+export function airyAiPrime(x: number): number {
+  if (!isFinite(x)) return NaN;
+
+  if (x > 9) {
+    // Ai′(x) ~ −x^{1/4} e^{−ξ}/(2√π) Σ (−1)^k v_k/ξ^k  (DLMF 9.7.6)
+    const xi = airyXi(x);
+    const xiHi = xi[0];
+    if (!Number.isFinite(xiHi)) return 0; // e^{−ξ} underflows long before
+    let sum = 1;
+    let t = 1; // u_k/ξ^k
+    let prevAbs = Infinity;
+    for (let k = 1; k <= 60; k++) {
+      t *= airyURatio(k) / xiHi;
+      const v = (t * (6 * k + 1)) / (1 - 6 * k); // v_k/ξ^k
+      const av = Math.abs(v);
+      if (av >= prevAbs) break; // divergent tail: stop at smallest term
+      sum += k % 2 === 0 ? v : -v;
+      prevAbs = av;
+      if (av < 1e-18 * Math.abs(sum)) break;
+    }
+    // e^{−ξ} = e^{−hi}·e^{−lo} ≈ e^{−hi}·(1 − lo)
+    const expNegXi = Math.exp(-xiHi) * (1 - xi[1]);
+    return -(expNegXi * Math.pow(x, 0.25)) / (2 * Math.sqrt(Math.PI)) * sum;
+  }
+
+  if (x < -9) {
+    const [P, Q, cosA, sinA, pref] = airyNegPartsPrime(-x);
+    return pref * (sinA * P - cosA * Q); // DLMF 9.7.10
+  }
+
+  const [fp, gp] = airySeriesFGPrime(x);
+  return ddAdd(ddMul(AIRY_C1, fp), ddNeg(ddMul(AIRY_C2, gp)))[0];
+}
+
+/**
+ * Derivative of the Airy function of the second kind, Bi′(x).
+ *
+ * - x > 9: asymptotic expansion (DLMF 9.7.8)
+ * - x < −9: oscillatory asymptotic P/Q form (DLMF 9.7.12)
+ * - |x| ≤ 9: termwise-differentiated Maclaurin series (DLMF 9.4.4)
+ *
+ * Reference: NIST DLMF 9.2, 9.4, 9.7
+ */
+export function airyBiPrime(x: number): number {
+  if (!isFinite(x)) return NaN;
+
+  if (x > 9) {
+    // Bi′(x) ~ x^{1/4} e^{ξ}/√π Σ v_k/ξ^k  (DLMF 9.7.8)
+    const xi = airyXi(x);
+    const xiHi = xi[0];
+    if (!Number.isFinite(xiHi)) return Infinity; // e^{ξ} overflows first
+    let sum = 1;
+    let t = 1; // u_k/ξ^k
+    let prevAbs = Infinity;
+    for (let k = 1; k <= 60; k++) {
+      t *= airyURatio(k) / xiHi;
+      const v = (t * (6 * k + 1)) / (1 - 6 * k); // v_k/ξ^k
+      const av = Math.abs(v);
+      if (av >= prevAbs) break; // divergent tail: stop at smallest term
+      sum += v;
+      prevAbs = av;
+      if (av < 1e-18 * Math.abs(sum)) break;
+    }
+    // e^{ξ} = e^{hi}·e^{lo} ≈ e^{hi}·(1 + lo)
+    const expXi = Math.exp(xiHi) * (1 + xi[1]);
+    return (expXi * Math.pow(x, 0.25)) / Math.sqrt(Math.PI) * sum;
+  }
+
+  if (x < -9) {
+    const [P, Q, cosA, sinA, pref] = airyNegPartsPrime(-x);
+    return pref * (cosA * P + sinA * Q); // DLMF 9.7.12
+  }
+
+  const [fp, gp] = airySeriesFGPrime(x);
+  return ddMul(SQRT3_DD, ddAdd(ddMul(AIRY_C1, fp), ddMul(AIRY_C2, gp)))[0];
+}
+
 // ──────────────────────────────────────────────────────────────────
 // Fresnel integrals
 //

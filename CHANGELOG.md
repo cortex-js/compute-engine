@@ -2,6 +2,29 @@
 
 ### New Features
 
+- **`DSolve` frontier round — parity with SymPy on the ODE audit (50/51, 0
+  wrong).** Four new solvable classes:
+  - **Nonhomogeneous Cauchy–Euler** (`x²y″ + bxy′ + cy = g(x)`): an x-power
+    indicial ansatz for power forcing (`x²y″ + xy′ = x` →
+    `c₁ + c₂·ln x + x`), with a variation-of-parameters fallback for
+    resonant or non-power forcing.
+  - **The Airy family** `y″ = (px + q)·y`: solutions as
+    `c₁·AiryAi(t) + c₂·AiryBi(t)` with `t = ∛p·x + q/∛p²` (real cube root,
+    either sign of `p`).
+  - **Airy-type Riccati** `y′ = q₀(x) + q₂·y²` (constant `q₂`, linear `q₀`):
+    the `y = −u′/(q₂u)` linearization yields the one-parameter
+    `(Ai′ + C·Bi′)/(Ai + C·Bi)` family — `y′ = x + y²` now solves (SymPy
+    errors on it).
+  - **Repeated-eigenvalue first-order linear systems**: diagonal systems of
+    any size and defective 2×2 systems via a generalized eigenvector, gated
+    on an exact `(A−λI)² = 0` check so near-repeated numeric eigenvalues
+    stay inert rather than producing an approximately-wrong solution.
+- **`AiryAiPrime` / `AiryBiPrime` operators** (derivatives of the Airy
+  functions), with machine-precision numerics across all three DLMF regimes
+  and full derivative closure (`Ai′ → AiryAiPrime`, `AiryAiPrime′ → x·Ai(x)`
+  — so repeated differentiation of Airy expressions evaluates and
+  numericizes).
+
 - **`NDSolveFunction` — ODE solutions as applicable functions.** Where
   `NDSolve` returns a sample `List`, the new `NDSolveFunction` (same
   arguments, without the sample count) returns the solution as a callable

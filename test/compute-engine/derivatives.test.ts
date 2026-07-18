@@ -925,38 +925,40 @@ describe('Inverse secant/cosecant derivatives (E2)', () => {
 });
 
 // REVIEW.md G8: applying the derivative of a function with no derivative table
-// (e.g. AiryAi) used to recurse forever ("Maximum call stack size exceeded").
+// (e.g. Zeta) used to recurse forever ("Maximum call stack size exceeded").
 // `Derivative(f, n)` represents the unresolved derivative as a self-applied
 // lambda `Apply(Derivative(f, n), _)`; beta-reducing and re-evaluating it
-// regenerated the lambda. It must now stay symbolic.
+// regenerated the lambda. It must now stay symbolic. (AiryAi was the original
+// example; it now has a derivative table entry — AiryAiPrime — so this test
+// uses Zeta, which still has no elementary derivative.)
 describe('Derivative of a function with no derivative table (G8)', () => {
-  it('Apply(Derivative(Function(AiryAi(z), z), 1), 0) stays symbolic', () => {
+  it('Apply(Derivative(Function(Zeta(z), z), 1), 0) stays symbolic', () => {
     const expr = engine.expr([
       'Apply',
-      ['Derivative', ['Function', ['AiryAi', 'z'], 'z'], 1],
+      ['Derivative', ['Function', ['Zeta', 'z'], 'z'], 1],
       0,
     ]);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Apply(Derivative("AiryAi", 1), 0)`
+      `Apply(Derivative("Zeta", 1), 0)`
     );
   });
 
   it('re-evaluating the symbolic result is stable (no recursion)', () => {
-    const r = engine.expr(['Apply', ['Derivative', 'AiryAi', 1], 0]).evaluate();
+    const r = engine.expr(['Apply', ['Derivative', 'Zeta', 1], 0]).evaluate();
     expect(r.evaluate().isSame(r)).toBe(true);
   });
 
-  it('chain rule factor is preserved: d/dz AiryAi(2z) at 0', () => {
+  it('chain rule factor is preserved: d/dz Zeta(2z) at 0', () => {
     const result = engine
       .expr([
         'Apply',
-        ['Derivative', ['Function', ['AiryAi', ['Multiply', 2, 'z']], 'z'], 1],
+        ['Derivative', ['Function', ['Zeta', ['Multiply', 2, 'z']], 'z'], 1],
         0,
       ])
       .evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `2Apply(Derivative("AiryAi", 1), 0)`
+      `2Apply(Derivative("Zeta", 1), 0)`
     );
   });
 

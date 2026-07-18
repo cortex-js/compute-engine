@@ -21,8 +21,8 @@ Corpus seeded from SymPy’s `test_ode.py` classes and classic textbook ODEs. Ea
 | ivp | 4 | 4 | 0 | 0 | 0 | 4 |
 | bvp | 1 | 1 | 0 | 0 | 0 | 1 |
 | system | 1 | 1 | 0 | 0 | 0 | 1 |
-| beyond | 5 | 0 | 5 | 0 | 0 | 4 |
-| **all** | **51** | **46** | **5** | **0** | **0** | **50** |
+| beyond | 5 | 4 | 1 | 0 | 0 | 4 |
+| **all** | **51** | **50** | **1** | **0** | **0** | **50** |
 
 ## Cases
 
@@ -74,11 +74,11 @@ Corpus seeded from SymPy’s `test_ode.py` classes and classic textbook ODEs. Ea
 | IV4 | ivp | exact IVP, y(1)=1 | ✅ | ✅ |
 | BV1 | bvp | y'' + y = 0, y(0)=0, y(π/2)=1 | ✅ | ✅ |
 | SY1 | system | y'=z, z'=y (coupled linear) | ✅ | ✅ |
-| BY1 | beyond | y' = x + y² (Riccati) | ➖ | ∅ |
+| BY1 | beyond | y' = x + y² (Riccati) | ✅ | ∅ |
 | BY2 | beyond | sin(x)y'' + y' = cos x (var-coeff 2nd order) | ➖ | ✅ |
-| BY3 | beyond | x²y'' + xy' = x (nonhomog Cauchy–Euler) | ➖ | ✅ |
-| BY4 | beyond | y''=xy (Airy, variable coeff) | ➖ | ✅ |
-| BY5 | beyond | y'=y, z'=z (repeated eigenvalue system) | ➖ | ✅ |
+| BY3 | beyond | x²y'' + xy' = x (nonhomog Cauchy–Euler) | ✅ | ✅ |
+| BY4 | beyond | y''=xy (Airy, variable coeff) | ✅ | ✅ |
+| BY5 | beyond | y'=y, z'=z (repeated eigenvalue system) | ✅ | ✅ |
 
 ## Oracle methodology
 
@@ -89,7 +89,7 @@ Corpus seeded from SymPy’s `test_ode.py` classes and classic textbook ODEs. Ea
 
 ## Findings
 
-CE solved **46/51** (5 correctly-inert unsupported, 0 gap, 0 wrong, 0 not-evaluable, 0 error). SymPy solved **50/51**.
+CE solved **50/51** (1 correctly-inert unsupported, 0 gap, 0 wrong, 0 not-evaluable, 0 error). SymPy solved **50/51**.
 
 **Engine observations (found while building the oracle):**
 

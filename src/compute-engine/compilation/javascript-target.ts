@@ -57,6 +57,8 @@ import {
   besselK,
   airyAi,
   airyBi,
+  airyAiPrime,
+  airyBiPrime,
   fresnelS,
   fresnelC,
   sinc,
@@ -1651,6 +1653,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Airy functions
   AiryAi: '_SYS.airyAi',
   AiryBi: '_SYS.airyBi',
+  AiryAiPrime: '_SYS.airyAiPrime',
+  AiryBiPrime: '_SYS.airyBiPrime',
 
   // Exponential / trigonometric / logarithmic integrals. These are the closed
   // forms the antiderivative engine emits (e.g. ∫sin x/x dx = SinIntegral(x)),
@@ -2834,6 +2838,8 @@ const SYS_HELPERS = {
   besselK,
   airyAi,
   airyBi,
+  airyAiPrime,
+  airyBiPrime,
   sinc,
   fresnelS,
   fresnelC,

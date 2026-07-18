@@ -800,6 +800,90 @@ function listOps(expr: Expression): readonly Expression[] | undefined {
   return isFunction(expr, 'List') ? expr.ops : undefined;
 }
 
+/**
+ * First-order linear system `x′ = A·x` whose eigenvalues are not all
+ * distinct. Two shapes are handled:
+ *
+ * - a diagonal `A` (fully decoupled, any size): `yᵢ = cᵢ·e^{Aᵢᵢ·x}`;
+ * - a 2×2 with a single repeated eigenvalue λ and `A ≠ λI`: defective by
+ *   Cayley–Hamilton (`(A−λI)² = 0`), so a generalized eigenvector `w` with
+ *   `v = (A−λI)·w ≠ 0` gives the basis `v·e^{λx}`, `(w + x·v)·e^{λx}`.
+ *
+ * Anything else (larger defective or partially-repeated systems) stays
+ * inert.
+ */
+function solveRepeatedEigenvalueSystem(
+  equation: Expression,
+  rows: Expression[][],
+  distinctEigenvalues: Expression[],
+  dependentCalls: Expression[],
+  independentName: string
+): Expression | undefined {
+  const ce = equation.engine;
+  const n = dependentCalls.length;
+  const constants = integrationConstants(equation, n);
+  const x = ce.symbol(independentName);
+
+  const isDiagonal = rows.every((row, i) =>
+    row.every((entry, j) => i === j || entry.isSame(0))
+  );
+  if (isDiagonal)
+    return ce.function(
+      'List',
+      dependentCalls.map((call, i) =>
+        ce.function('Equal', [
+          call,
+          constants[i]
+            .mul(ce.function('Exp', [rows[i][i].mul(x).simplify()]))
+            .simplify(),
+        ])
+      )
+    );
+
+  if (n !== 2 || distinctEigenvalues.length !== 1) return undefined;
+
+  const lambda = distinctEigenvalues[0];
+  const shifted = rows.map((row, i) =>
+    row.map((entry, j) => (i === j ? entry.sub(lambda).simplify() : entry))
+  );
+  const applyShifted = (vector: Expression[]) =>
+    shifted.map((row) =>
+      row[0].mul(vector[0]).add(row[1].mul(vector[1])).simplify()
+    );
+
+  // The generalized-eigenvector construction is only valid when λ is an
+  // exact double eigenvalue, i.e. (A−λI)² = 0. Near-repeated numeric
+  // eigenvalues that `Eigen` clustered fail this check and stay inert
+  // rather than producing an approximately-wrong solution.
+  for (let i = 0; i < 2; i++) {
+    const squaredRow = applyShifted([shifted[0][i], shifted[1][i]]);
+    if (!squaredRow.every((entry) => entry.isSame(0))) return undefined;
+  }
+
+  let w = [ce.One, ce.Zero];
+  let v = applyShifted(w);
+  if (v.every((component) => component.isSame(0))) {
+    w = [ce.Zero, ce.One];
+    v = applyShifted(w);
+  }
+  if (v.every((component) => component.isSame(0))) return undefined;
+
+  const exponential = ce.function('Exp', [lambda.mul(x).simplify()]);
+  const solutions = [0, 1].map((i) =>
+    constants[0]
+      .mul(v[i])
+      .add(constants[1].mul(w[i].add(x.mul(v[i]))))
+      .mul(exponential)
+      .simplify()
+  );
+  return ce.function(
+    'List',
+    dependentCalls.map((call, i) =>
+      ce.function('Equal', [call, solutions[i]])
+    )
+  );
+}
+
 function solveLinearHomogeneousSystem(
   equation: Expression,
   dependent: Expression,
@@ -869,7 +953,16 @@ function solveLinearHomogeneousSystem(
   const distinctEigenvalues: Expression[] = [];
   for (const eigenvalue of eigenvalues)
     appendDistinctRoot(distinctEigenvalues, eigenvalue);
-  if (distinctEigenvalues.length !== eigenvalues.length) return undefined;
+  // `Eigen` duplicates eigenvectors for repeated eigenvalues, so the
+  // repeated case needs its own eigenspace construction.
+  if (distinctEigenvalues.length !== eigenvalues.length)
+    return solveRepeatedEigenvalueSystem(
+      equation,
+      rows,
+      distinctEigenvalues,
+      dependentCalls,
+      independentName
+    );
 
   const constants = integrationConstants(equation, dependentNames.length);
   const x = ce.symbol(independentName);
@@ -1845,7 +1938,7 @@ function riccatiCoefficients(
   | { quadratic: Expression; linear: Expression; constant: Expression }
   | undefined {
   const ce = rhs.engine;
-  const terms = isFunction(rhs, 'Add') ? rhs.ops : [rhs];
+  const terms = flattenAddends(rhs);
   const quadraticTerms: Expression[] = [];
   const linearTerms: Expression[] = [];
   const constantTerms: Expression[] = [];
@@ -1944,56 +2037,26 @@ function solveRiccatiWithConstantParticular(
   return ceListSolution(dependentCall, solution);
 }
 
-function abelFirstKindCoefficients(
-  rhs: Expression,
-  dependentCall: Expression,
-  dependentName: string,
-  independentName: string
-): Map<number, Expression> | undefined {
-  const ce = rhs.engine;
-  const terms = isFunction(rhs, 'Add') ? rhs.ops : [rhs];
-  const coefficients = new Map<number, Expression>();
-
-  for (const term of terms) {
-    const split = termDependentPower(term, dependentCall);
-    if (!split) {
-      if (hasDependentOrDerivative(term, dependentName, independentName))
-        return undefined;
-      coefficients.set(
-        0,
-        structuralSum(ce, [coefficients.get(0) ?? ce.Zero, term])
-      );
-      continue;
-    }
-
-    if (
-      hasDependentOrDerivative(
-        split.coefficient,
-        dependentName,
-        independentName
-      )
-    )
-      return undefined;
-
-    const power = split.power.N().re;
-    if (!Number.isInteger(power) || power < 1 || power > 3) return undefined;
-    coefficients.set(
-      power,
-      structuralSum(ce, [coefficients.get(power) ?? ce.Zero, split.coefficient])
-    );
-  }
-
-  const cubic = coefficients.get(3);
-  if (!cubic || cubic.isSame(0)) return undefined;
-  return coefficients;
-}
-
-function solveConstantCoefficientAbelFirstKind(
+/**
+ * Riccati equation with a linear forcing and no linear term:
+ * `y′ = q0(x) + q2·y²` with constant `q2 ≠ 0` and `q0` linear in `x` with a
+ * nonzero slope. The standard linearization `y = −u′/(q2·u)` turns it into
+ * the Airy-form equation `u″ = −q2·q0(x)·u`; with `t = c·x + Q/c²`
+ * (`c³ = −q2·slope(q0)`, `Q = −q2·q0(0)`), the one-parameter solution family
+ * is
+ *
+ *   `y = −c·(Ai′(t) + C·Bi′(t)) / (q2·(Ai(t) + C·Bi(t)))`.
+ *
+ * (The boundary member `C → ∞`, `y = −c·Bi′/(q2·Bi)`, is not representable —
+ * the conventional trade-off for a single-constant Riccati family.)
+ */
+function solveRiccatiAiry(
   equation: Expression,
   dependentCall: Expression,
   dependentName: string,
   independentName: string
 ): Expression | undefined {
+  const ce = equation.engine;
   const rhsInfo = explicitDerivativeRhs(
     equation.structural,
     dependentName,
@@ -2001,47 +2064,54 @@ function solveConstantCoefficientAbelFirstKind(
   );
   if (!rhsInfo || rhsInfo.order !== 1) return undefined;
 
-  const coefficients = abelFirstKindCoefficients(
+  const coefficients = riccatiCoefficients(
     rhsInfo.rhs.structural,
     dependentCall,
     dependentName,
     independentName
   );
   if (!coefficients) return undefined;
+  if (!coefficients.linear.simplify().isSame(0)) return undefined;
 
-  for (const coefficient of coefficients.values()) {
-    if (
-      coefficient.has(independentName) ||
-      hasDependentOrDerivative(coefficient, dependentName, independentName)
-    )
-      return undefined;
-  }
+  const q2 = coefficients.quadratic.simplify();
+  if (q2.has(independentName)) return undefined;
+  const q0 = coefficients.constant.simplify();
+  // `riccatiCoefficients` only rejects the literal `y(x)`/`y′(x)` forms — a
+  // nonstandard reference such as `y(0)` must not be treated as a constant.
+  if (
+    referencesDependent(q2, dependentName) ||
+    referencesDependent(q0, dependentName)
+  )
+    return undefined;
+  const poly = getPolynomialCoefficients(q0, independentName);
+  if (!poly || poly.length !== 2) return undefined;
 
-  const ce = equation.engine;
-  const ySymbolName = freshSymbolName(
-    `${dependentName}_value`,
-    collectSymbols(equation)
+  const slope = ce.function('Multiply', [q2.neg(), poly[1]]).simplify();
+  const shift = ce.function('Multiply', [q2.neg(), poly[0]]).simplify();
+  if (slope.isSame(0)) return undefined;
+
+  let c: Expression;
+  if (slope.isPositive === true)
+    c = ce.function('Root', [slope, ce.number(3)]).simplify();
+  else if (slope.isNegative === true)
+    c = ce.function('Root', [slope.neg(), ce.number(3)]).neg().simplify();
+  else return undefined;
+
+  const x = ce.symbol(independentName);
+  const t = c.mul(x).add(shift.div(c.pow(2))).simplify();
+  const [constant] = integrationConstants(equation, 1);
+  const numerator = c
+    .neg()
+    .mul(
+      ce
+        .function('AiryAiPrime', [t])
+        .add(constant.mul(ce.function('AiryBiPrime', [t])))
+    );
+  const denominator = q2.mul(
+    ce.function('AiryAi', [t]).add(constant.mul(ce.function('AiryBi', [t])))
   );
-  const y = ce.symbol(ySymbolName);
-  const polynomial = structuralSum(
-    ce,
-    [0, 1, 2, 3].map((power) => {
-      const coefficient = coefficients.get(power) ?? ce.Zero;
-      return power === 0 ? coefficient : coefficient.mul(y.pow(power));
-    })
-  ).simplify();
-  if (polynomial.isSame(0)) return undefined;
-
-  const left = dSolveAntiderivative(polynomial.pow(-1).simplify(), ySymbolName);
-  if (hasOperator(left, 'Integrate')) return undefined;
-
-  const [c] = integrationConstants(equation, 1);
-  return ce.function('List', [
-    ce.function('Equal', [
-      replaceSymbol(left, ySymbolName, dependentCall).simplify(),
-      ce.symbol(independentName).add(c).simplify(),
-    ]),
-  ]);
+  const solution = numerator.div(denominator).simplify();
+  return ceListSolution(dependentCall, solution);
 }
 
 function solveExactFirstOrder(
@@ -2265,6 +2335,77 @@ function solveSecondOrderBesselFamily(
   }
 
   return undefined;
+}
+
+/**
+ * Airy-form second-order equation: `a₂·y″ + a₀(x)·y = 0` with constant `a₂`
+ * and `a₀` linear in `x`, i.e. `y″ = (p·x + q)·y` with constant `p ≠ 0`, `q`.
+ * With the real cube root `c` (`c³ = p`) and `t = c·x + q/c²`, the solutions
+ * are the Airy functions: `y = c₁·Ai(t) + c₂·Bi(t)` (`(Ai(t))″ = c²·t·Ai(t)
+ * = (p·x + q)·Ai(t)`).
+ */
+function solveSecondOrderAiry(
+  equation: Expression,
+  dependentCall: Expression,
+  dependentName: string,
+  independentName: string
+): Expression | undefined {
+  const ce = equation.engine;
+  const collected = equationDerivativeCoefficients(
+    equation,
+    dependentName,
+    independentName
+  );
+  if (!collected.rest.isSame(0)) return undefined;
+  if ([...collected.coefficients.keys()].some((order) => order > 2))
+    return undefined;
+
+  const a2 = (collected.coefficients.get(2) ?? ce.Zero).simplify();
+  const a1 = (collected.coefficients.get(1) ?? ce.Zero).simplify();
+  const a0 = (collected.coefficients.get(0) ?? ce.Zero).simplify();
+  if (a2.isSame(0) || !a1.isSame(0)) return undefined;
+  if (!isConstantCoefficient(a2, dependentName, independentName))
+    return undefined;
+  // Reject any reference to the dependent function (including nonstandard
+  // calls such as `y(0)`, which are not caught by the derivative-term
+  // collectors and must not be treated as constants).
+  if (
+    referencesDependent(a2, dependentName) ||
+    referencesDependent(a0, dependentName)
+  )
+    return undefined;
+
+  const rhsCoefficient = a0.neg().div(a2).simplify();
+  const poly = getPolynomialCoefficients(rhsCoefficient, independentName);
+  if (!poly || poly.length !== 2) return undefined;
+  const q = poly[0].simplify();
+  const p = poly[1].simplify();
+  if (p.isSame(0)) return undefined;
+  if (
+    ![p, q].every((coefficient) =>
+      isConstantCoefficient(coefficient, dependentName, independentName)
+    )
+  )
+    return undefined;
+
+  // Real cube root: `Root` is the principal (real-branch) root for positive
+  // arguments; take `−Root(−p, 3)` for negative `p`. An undecidable sign
+  // stays inert.
+  let c: Expression;
+  if (p.isPositive === true)
+    c = ce.function('Root', [p, ce.number(3)]).simplify();
+  else if (p.isNegative === true)
+    c = ce.function('Root', [p.neg(), ce.number(3)]).neg().simplify();
+  else return undefined;
+
+  const x = ce.symbol(independentName);
+  const t = c.mul(x).add(q.div(c.pow(2))).simplify();
+  const [c1, c2] = integrationConstants(equation, 2);
+  const solution = c1
+    .mul(ce.function('AiryAi', [t]))
+    .add(c2.mul(ce.function('AiryBi', [t])))
+    .simplify();
+  return ceListSolution(dependentCall, solution);
 }
 
 function secondOrderConstantCoefficientBasis(
@@ -2759,7 +2900,87 @@ function coefficientWithoutPowerOfX(
   return scaled;
 }
 
-function solveSecondOrderCauchyEulerHomogeneous(
+function splitPowerOfXTerm(
+  term: Expression,
+  independentName: string
+): { coefficient: Expression; power: Expression } | undefined {
+  const ce = term.engine;
+  if (!term.has(independentName))
+    return { coefficient: term, power: ce.Zero };
+
+  if (isFunction(term, 'Negate')) {
+    const inner = splitPowerOfXTerm(term.op1, independentName);
+    return inner
+      ? { coefficient: inner.coefficient.neg(), power: inner.power }
+      : undefined;
+  }
+
+  if (sym(term) === independentName)
+    return { coefficient: ce.One, power: ce.One };
+
+  if (
+    isFunction(term, 'Power') &&
+    sym(term.op1) === independentName &&
+    isNumber(term.op2)
+  )
+    return { coefficient: ce.One, power: term.op2 };
+
+  if (!isFunction(term, 'Multiply')) return undefined;
+
+  let power: Expression | undefined;
+  const rest: Expression[] = [];
+  for (const factor of term.ops) {
+    if (!factor.has(independentName)) {
+      rest.push(factor);
+      continue;
+    }
+    if (power !== undefined) return undefined;
+    const split = splitPowerOfXTerm(factor, independentName);
+    if (!split || !split.coefficient.isSame(1)) return undefined;
+    power = split.power;
+  }
+  if (power === undefined) return undefined;
+  return { coefficient: productExpression(ce, rest), power };
+}
+
+/**
+ * Undetermined-coefficient particular solution for a Cauchy–Euler equation
+ * `a·x²y″ + b·x·y′ + c0·y = g` with `g` a sum of `k·x^m` terms: each term
+ * contributes `k/P(m)·x^m` where `P(m) = a·m(m−1) + b·m + c0` is the indicial
+ * polynomial. Declines on resonance (`P(m) = 0`, handled by variation of
+ * parameters via the `ln x` factor) and on non-power forcing terms.
+ */
+function cauchyEulerPowerParticular(
+  g: Expression,
+  a: Expression,
+  b: Expression,
+  c0: Expression,
+  independentName: string
+): Expression | undefined {
+  const ce = g.engine;
+  const x = ce.symbol(independentName);
+  const terms = isFunction(g, 'Add') ? g.ops : [g];
+  const parts: Expression[] = [];
+  for (const term of terms) {
+    const split = splitPowerOfXTerm(term.simplify(), independentName);
+    if (!split) return undefined;
+    if (split.coefficient.has(independentName) || !isNumber(split.power))
+      return undefined;
+    const m = split.power;
+    const indicial = a
+      .mul(m)
+      .mul(m.sub(ce.One))
+      .add(b.mul(m))
+      .add(c0)
+      .simplify();
+    if (indicial.isSame(0)) return undefined;
+    parts.push(split.coefficient.mul(x.pow(m)).div(indicial).simplify());
+  }
+  if (parts.length === 0) return undefined;
+  return structuralSum(ce, parts).simplify();
+}
+
+function solveSecondOrderCauchyEuler(
   equation: Expression,
   dependentCall: Expression,
   dependentName: string,
@@ -2771,8 +2992,9 @@ function solveSecondOrderCauchyEulerHomogeneous(
     dependentName,
     independentName
   );
-  if (!collected.rest.isSame(0)) return undefined;
   if ([...collected.coefficients.keys()].some((order) => order > 2))
+    return undefined;
+  if (hasDependentOrDerivative(collected.rest, dependentName, independentName))
     return undefined;
 
   const a = coefficientWithoutPowerOfX(
@@ -2791,6 +3013,14 @@ function solveSecondOrderCauchyEulerHomogeneous(
     0
   )?.simplify();
   if (!a || !b || !c0 || a.isSame(0)) return undefined;
+  // Reject any reference to the dependent function (including nonstandard
+  // calls such as `y(0)`) in the coefficients or the forcing.
+  if (
+    [a, b, c0, collected.rest].some((expr) =>
+      referencesDependent(expr, dependentName)
+    )
+  )
+    return undefined;
 
   const [c1, c2] = integrationConstants(equation, 2);
   const x = ce.symbol(independentName);
@@ -2798,13 +3028,16 @@ function solveSecondOrderCauchyEulerHomogeneous(
   const twoA = a.mul(2).simplify();
   const discriminant = effectiveB.pow(2).sub(a.mul(c0).mul(4)).simplify();
 
-  let solution: Expression | undefined;
+  let homogeneous: Expression | undefined;
+  let basis: [Expression, Expression] | undefined;
   if (discriminant.isSame(0)) {
     const root = effectiveB.neg().div(twoA).simplify();
-    solution = c1
+    const power = x.pow(root).simplify();
+    homogeneous = c1
       .add(c2.mul(ce.function('Ln', [x])))
       .mul(x.pow(root))
       .simplify();
+    basis = [power, power.mul(ce.function('Ln', [x])).simplify()];
   } else if (discriminant.isPositive === true) {
     const sqrtDiscriminant = ce.function('Sqrt', [discriminant]).simplify();
     const root1 = ce.function('Divide', [
@@ -2815,10 +3048,11 @@ function solveSecondOrderCauchyEulerHomogeneous(
       ce.function('Subtract', [effectiveB.neg(), sqrtDiscriminant]),
       twoA,
     ]);
-    solution = c1
+    homogeneous = c1
       .mul(x.pow(root1))
       .add(c2.mul(x.pow(root2)))
       .simplify();
+    basis = [x.pow(root1).simplify(), x.pow(root2).simplify()];
   } else if (discriminant.isNegative === true) {
     const alpha = effectiveB.neg().div(twoA).simplify();
     const beta = ce.function('Sqrt', [discriminant.neg()]).div(twoA).simplify();
@@ -2827,10 +3061,62 @@ function solveSecondOrderCauchyEulerHomogeneous(
       .mul(ce.function('Cos', [beta.mul(logX).simplify()]))
       .add(c2.mul(ce.function('Sin', [beta.mul(logX).simplify()])))
       .simplify();
-    solution = x.pow(alpha).mul(oscillatory).simplify();
+    homogeneous = x.pow(alpha).mul(oscillatory).simplify();
+    basis = [
+      x
+        .pow(alpha)
+        .mul(ce.function('Cos', [beta.mul(logX).simplify()]))
+        .simplify(),
+      x
+        .pow(alpha)
+        .mul(ce.function('Sin', [beta.mul(logX).simplify()]))
+        .simplify(),
+    ];
   }
+  if (!homogeneous || !basis) return undefined;
 
-  return solution ? ceListSolution(dependentCall, solution) : undefined;
+  if (collected.rest.isSame(0))
+    return ceListSolution(dependentCall, homogeneous);
+
+  const g = collected.rest.neg().simplify();
+  const powerParticular = cauchyEulerPowerParticular(
+    g,
+    a,
+    b,
+    c0,
+    independentName
+  );
+  if (powerParticular)
+    return ceListSolution(
+      dependentCall,
+      homogeneous.add(powerParticular).simplify()
+    );
+
+  // Nonhomogeneous: variation of parameters with the Cauchy–Euler basis and
+  // leading coefficient A(x) = a·x². The antiderivatives must close — a
+  // residual `Integrate` keeps the equation inert rather than wrong.
+  const [y1, y2] = basis;
+  const y1Prime = ce.function('D', [y1, x]).evaluate();
+  const y2Prime = ce.function('D', [y2, x]).evaluate();
+  const wronskian = y1.mul(y2Prime).sub(y1Prime.mul(y2)).simplify();
+  if (wronskian.isSame(0)) return undefined;
+
+  const denominator = a.mul(x.pow(2)).mul(wronskian).simplify();
+  const u1Integrand = normalizeVariationIntegrand(
+    y2.neg().mul(g).div(denominator).simplify(),
+    independentName
+  );
+  const u2Integrand = normalizeVariationIntegrand(
+    y1.mul(g).div(denominator).simplify(),
+    independentName
+  );
+  const u1 = dSolveAntiderivative(u1Integrand, independentName);
+  const u2 = dSolveAntiderivative(u2Integrand, independentName);
+  if (hasOperator(u1, 'Integrate') || hasOperator(u2, 'Integrate'))
+    return undefined;
+
+  const solution = homogeneous.add(y1.mul(u1)).add(y2.mul(u2)).simplify();
+  return ceListSolution(dependentCall, solution);
 }
 
 /**
@@ -2877,7 +3163,7 @@ export function dSolve(
   );
   if (higherOrder) return finalize(higherOrder);
 
-  const cauchyEuler = solveSecondOrderCauchyEulerHomogeneous(
+  const cauchyEuler = solveSecondOrderCauchyEuler(
     problem.equation,
     dependentCall,
     dependentName,
@@ -2892,6 +3178,14 @@ export function dSolve(
     independentName
   );
   if (besselFamily) return finalize(besselFamily);
+
+  const airy = solveSecondOrderAiry(
+    problem.equation,
+    dependentCall,
+    dependentName,
+    independentName
+  );
+  if (airy) return finalize(airy);
 
   const higherOrderNonhomogeneous =
     solveHigherOrderNonhomogeneousConstantCoefficient(
@@ -2953,13 +3247,13 @@ export function dSolve(
   );
   if (riccati) return finalize(riccati);
 
-  const constantCoefficientAbel = solveConstantCoefficientAbelFirstKind(
+  const riccatiAiry = solveRiccatiAiry(
     problem.equation,
     dependentCall,
     dependentName,
     independentName
   );
-  if (constantCoefficientAbel) return finalize(constantCoefficientAbel);
+  if (riccatiAiry) return finalize(riccatiAiry);
 
   const homogeneousFirstOrder = solveHomogeneousFirstOrder(
     problem.equation,

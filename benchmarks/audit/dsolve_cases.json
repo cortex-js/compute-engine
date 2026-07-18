@@ -2211,7 +2211,7 @@
    "id": "BY1",
    "class": "beyond",
    "title": "y' = x + y\u00b2 (Riccati)",
-   "expectInert": true,
+   "expectInert": false,
    "ce": {
     "equation": [
      "Equal",
@@ -2301,7 +2301,7 @@
    "id": "BY3",
    "class": "beyond",
    "title": "x\u00b2y'' + xy' = x (nonhomog Cauchy\u2013Euler)",
-   "expectInert": true,
+   "expectInert": false,
    "ce": {
     "equation": [
      "Equal",
@@ -2355,7 +2355,7 @@
    "id": "BY4",
    "class": "beyond",
    "title": "y''=xy (Airy, variable coeff)",
-   "expectInert": true,
+   "expectInert": false,
    "ce": {
     "equation": [
      "Equal",
@@ -2393,7 +2393,7 @@
    "id": "BY5",
    "class": "beyond",
    "title": "y'=y, z'=z (repeated eigenvalue system)",
-   "expectInert": true,
+   "expectInert": false,
    "ce": {
     "equation": [
      "List",

@@ -234,10 +234,16 @@ const DERIVATIVES_TABLE = {
   ExpIntegralEi: ['Divide', ['Exp', '_'], '_'],
   // d/dx li(x) = 1/ln(x) where li is the logarithmic integral
   LogIntegral: ['Divide', 1, ['Ln', '_']],
-  // Note: Bessel functions (BesselJ, BesselY, BesselI, BesselK) and Airy functions
-  // (AiryAi, AiryBi) have been omitted because their derivatives involve functions
-  // of different orders or related derivative functions that are not in the standard
-  // function set. For example, d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2.
+  // d/dx Ai(x) = Ai'(x); d/dx Bi(x) = Bi'(x)
+  AiryAi: ['AiryAiPrime', '_'],
+  AiryBi: ['AiryBiPrime', '_'],
+  // From the Airy ODE y'' = x·y: d/dx Ai'(x) = x·Ai(x), d/dx Bi'(x) = x·Bi(x)
+  AiryAiPrime: ['Multiply', '_', ['AiryAi', '_']],
+  AiryBiPrime: ['Multiply', '_', ['AiryBi', '_']],
+  // Note: Bessel functions (BesselJ, BesselY, BesselI, BesselK) have been
+  // omitted from this table because their derivatives involve functions of
+  // different orders (handled by a dedicated special-case block below). For
+  // example, d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2.
   //
   // Similarly, Zeta, PolyGamma, and Beta derivatives are omitted because
   // they either don't have simple closed forms or involve the polygamma function
