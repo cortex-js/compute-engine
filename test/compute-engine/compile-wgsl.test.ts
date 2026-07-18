@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
@@ -521,6 +522,21 @@ describe('WGSL COMPILATION', () => {
       expect(code).not.toContain('() =>');
       expect(code).not.toContain('{ re');
     });
+
+    it('a collection-valued Sum body fails closed (D6)', () => {
+      // `Σ h(i)·(1/1.4^i)·a(…)` where `a` returns a vector — the interpreter's
+      // elementwise zip-broadcast Sum. Scalar accumulation over arrays would
+      // silently produce a wrong value, so it must throw (mirrors JS/base gate).
+      const e = new ComputeEngine();
+      e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
+      e.parse(
+        'h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)'
+      ).evaluate();
+      const expr = e.parse('\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))');
+      expect(() => wgsl.compile(expr)).toThrow(
+        /collection-valued body.*Fail closed/s
+      );
+    });
   });
 
   describe('Loop', () => {
@@ -703,5 +719,29 @@ describe('WGSL COMPILATION', () => {
       expect(code).toContain('return s;');
       expect(code).not.toMatch(/return for/);
     });
+  });
+});
+
+// WGSL side of Tycho item 49: `select` requires both operands to share one
+// type, so a tuple-valued `When` body needs a vec2f NaN, not a scalar bitcast.
+describe('WGSL When NaN branch matches the value shape (Tycho item 49)', () => {
+  it('restricted parametric tuple body emits a vec2f NaN branch', () => {
+    const code = wgsl.compile(
+      ce.box([
+        'When',
+        ['Tuple', ['Cos', 't'], ['Sin', 't']],
+        ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]],
+      ])
+    ).code;
+    expect(code).toContain('vec2f(cos(t), sin(t))');
+    expect(code).toContain('vec2f(bitcast<f32>(0x7fc00000u))');
+  });
+
+  it('scalar bodies keep the scalar NaN bit pattern', () => {
+    const code = wgsl.compile(
+      ce.box(['When', ['Cos', 't'], ['LessEqual', 't', 1]])
+    ).code;
+    expect(code).toContain('bitcast<f32>(0x7fc00000u)');
+    expect(code).not.toContain('vec2f(bitcast');
   });
 });

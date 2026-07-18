@@ -557,6 +557,22 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     ).toMatchInlineSnapshot(`11`);
   });
 
+  test('At on a tuple with a literal index types the selected slot', () => {
+    // Regression (Tycho item 44b): a literal integer index into a tuple-typed
+    // operand types the SLOT (1-based; negatives count from the end), not the
+    // widened union of every slot type. A non-literal index still widens.
+    const ce = new ComputeEngine();
+    ce.declare('tpl', ce.type('tuple<integer, string, boolean>'));
+    expect(ce.box(['At', 'tpl', 1]).type.toString()).toEqual('integer');
+    expect(ce.box(['At', 'tpl', 2]).type.toString()).toEqual('string');
+    expect(ce.box(['At', 'tpl', 3]).type.toString()).toEqual('boolean');
+    expect(ce.box(['At', 'tpl', -1]).type.toString()).toEqual('boolean');
+    // Out-of-range or non-literal index widens across all slot types.
+    expect(ce.box(['At', 'tpl', 5]).type.toString()).toEqual(
+      'boolean | integer | string'
+    );
+  });
+
   test('First', () =>
     expect(evaluate(['First', list])).toMatchInlineSnapshot(`7`));
 

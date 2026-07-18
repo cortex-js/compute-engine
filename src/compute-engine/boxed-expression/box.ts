@@ -53,6 +53,7 @@ import { isSubtype } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
 import { isValueDef } from './utils.js';
+import { lookupApplicable } from '../function-utils.js';
 import { canonicalNegate } from './negate.js';
 import { canonical } from './canonical-utils.js';
 import { isNumber, isFunction } from './type-guards.js';
@@ -662,9 +663,15 @@ function makeCanonicalFunction(
   }
 
   //
-  // Didn't match a short path, look for a definition
+  // Didn't match a short path, look for a definition.
   //
-  const def = ce.lookupDefinition(name);
+  // Function-application position: an inner binding that provably cannot be
+  // applied (a user symbol `N = 85` shadowing the built-in `N` operator)
+  // defers to an outer applicable definition — see `lookupApplicable` — so
+  // the operator path (with its canonical handler) runs. `bind()` performs
+  // the same resolution, keeping construction and binding consistent.
+  //
+  const def = lookupApplicable(name, scope ?? ce.context.lexicalScope);
   if (!def) {
     // No def. This is for example `["f", 2]` where "f" is not declared.
     ce.declare(name, { type: 'function', inferred: true });

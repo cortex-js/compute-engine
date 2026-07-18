@@ -732,6 +732,21 @@ describe('PYTHON TARGET', () => {
         'lambda n: sum(i ** 2 for i in range(1, n + 1))'
       );
     });
+
+    it('a collection-valued Sum body fails closed instead of emitting sum() over lists (D6)', () => {
+      // `Σ h(i)·(1/1.4^i)·a(…)` where `a` returns a vector — the interpreter's
+      // elementwise zip-broadcast Sum. `sum(<array> for i in …)` would silently
+      // produce a wrong value, so it must throw (mirrors the JS/base gate).
+      const e = new ComputeEngine();
+      e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
+      e.parse(
+        'h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)'
+      ).evaluate();
+      const sum = '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))';
+      expect(() => new PythonTarget().compile(e.parse(sum))).toThrow(
+        /collection-valued body.*Fail closed/s
+      );
+    });
   });
 
   // Loop compiles to a Python statement loop (`while True:` / `for … in

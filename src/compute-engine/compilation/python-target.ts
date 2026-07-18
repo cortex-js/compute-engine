@@ -113,6 +113,12 @@ function compilePythonSumProduct(
   if (!args[0]) throw new Error(`${kind}: no body`);
   if (!args[1]) throw new Error(`${kind}: no indexing set`);
 
+  // Reject a collection-valued body for the indexed form (see
+  // `BaseCompiler.assertScalarBigOpBody`): `sum(generator)`/`math.prod(...)`
+  // over arrays would silently produce a wrong value. Reached only for the
+  // indexed form (the `!args[1]` guard above rules out the reduce form).
+  BaseCompiler.assertScalarBigOpBody(kind, args[0]);
+
   const body = args[0];
   const clauses = args.slice(1);
   const forClauses: string[] = [];

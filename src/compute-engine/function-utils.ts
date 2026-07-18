@@ -1190,3 +1190,52 @@ export function lookup(
   }
   return undefined;
 }
+
+/** Could this definition satisfy a function-application (operator) position?
+ * An operator def always can; a value def can unless its declared type
+ * PROVABLY excludes functions (a plain `number`, `string`, collection, …).
+ * A value def with an indeterminate type (`unknown`/`any`/`value`) may hold a
+ * function literal, so it can. (Inline property checks, not
+ * `isValueDef`/`isOperatorDef` from `boxed-expression/utils`, to avoid a
+ * dependency cycle.)
+ */
+function isApplicableDef(def: BoxedDefinition): boolean {
+  if ('operator' in def) return true;
+  if ('value' in def) {
+    const t = (def as { value: BoxedValueDefinition }).value.type;
+    if (t.isUnknown) return true;
+    const tt = t.type;
+    if (tt === 'any' || tt === 'value' || tt === 'unknown') return true;
+    return t.matches('function');
+  }
+  return true;
+}
+
+/**
+ * Lookup a definition for a symbol in FUNCTION-APPLICATION (operator)
+ * position. Like {@link lookup}, but an inner binding that PROVABLY cannot be
+ * applied — a value def whose type excludes functions, e.g. a user symbol
+ * `N = 85` shadowing the built-in `N` operator — defers to an outer
+ * applicable definition of the same name. A bare-symbol reference still
+ * resolves to the inner value (`N + 1` is `86`); only the operator position
+ * skips it (`N(x)` numericizes). If no applicable definition exists anywhere
+ * in the chain, the innermost binding is returned unchanged so the ordinary
+ * "not a function" diagnostics still apply.
+ */
+export function lookupApplicable(
+  id: MathJsonSymbol,
+  scope: Scope
+): undefined | BoxedDefinition {
+  console.assert(typeof id === 'string' && id.length > 0);
+  let innermost: BoxedDefinition | undefined;
+  let currentScope: Scope | null = scope;
+  while (currentScope) {
+    const def = currentScope.bindings.get(id);
+    if (def) {
+      if (isApplicableDef(def)) return def;
+      innermost ??= def;
+    }
+    currentScope = currentScope.parent;
+  }
+  return innermost;
+}

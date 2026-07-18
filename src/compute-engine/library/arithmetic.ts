@@ -117,6 +117,7 @@ import {
   roundingFunctionType,
   absFunctionType,
   measurementType,
+  bigOpResultType,
 } from './type-handlers.js';
 import {
   isQuantity,
@@ -2980,6 +2981,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature:
         '((number+) -> number, (tuple<integer>|tuple<integer, integer>)+) -> number',
+      type: bigOpResultType,
 
       canonical: ([body, ...bounds], { scope }) =>
         canonicalBigop('Product', body, bounds, scope),
@@ -3079,6 +3081,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       scoped: true,
       lazy: true,
       signature: '(any, tuple*) -> number',
+      type: bigOpResultType,
 
       canonical: ([body, ...bounds], { scope, engine: ce }) => {
         // Arity-1 collection-reducer form: bypass canonicalBigop, which would

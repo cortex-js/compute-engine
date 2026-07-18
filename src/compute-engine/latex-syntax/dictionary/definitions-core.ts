@@ -3174,6 +3174,58 @@ function signedMachineValue(expr: MathJsonExpression): number | null {
 }
 
 /**
+ * Provenance set of `Range` nodes produced by the range *infix* operators
+ * (`..`, `...`, `\ldots`, `\dots` — see `parseRange`). Membership distinguishes
+ * a range written with the ellipsis/`..` idiom (which, as a trailing element of
+ * a bracketed sample list, denotes a continuation: `[0, 15...210]`,
+ * `[1, 3..10]`) from a range written explicitly as a `\operatorname{Range}(…)`
+ * function call (which is a literal list element: `[3, Range(1, 5)]` stays a
+ * `List`). Keyed on the raw MathJSON array object, which is preserved by
+ * reference from `parseRange` through to `tryInferRangeFromElements`.
+ */
+const continuationRanges = new WeakSet<object>();
+
+/**
+ * Desmos emits stepped/endpoint ellipsis ranges with the comma AFTER the
+ * ellipsis elided: `[0,...300]`, `[1,...N]`, `[0,...3N^2-1]`. With no comma to
+ * terminate it, the `\dots` parses as a bare `ContinuationPlaceholder` symbol
+ * that the following endpoint then absorbs as a leading factor
+ * (`InvisibleOperator(ContinuationPlaceholder, 300)`) or, for an additive
+ * endpoint, buries at the head of the additive chain
+ * (`Subtract(InvisibleOperator(ContinuationPlaceholder, 3, N^2), 1)`).
+ *
+ * Strip that head-position placeholder and return the recovered endpoint, or
+ * `null` when `expr` does not carry a leading `ContinuationPlaceholder`.
+ */
+function stripLeadingContinuation(
+  expr: MathJsonExpression
+): MathJsonExpression | null {
+  const h = operator(expr);
+  if (h === 'InvisibleOperator' || h === 'Multiply') {
+    const args = operands(expr);
+    if (args.length >= 2 && symbol(args[0]) === 'ContinuationPlaceholder') {
+      const rest = args.slice(1);
+      return rest.length === 1 ? rest[0] : [h, ...rest];
+    }
+    return null;
+  }
+  if (h === 'Negate') {
+    const inner = stripLeadingContinuation(operand(expr, 1)!);
+    return inner === null ? null : ['Negate', inner];
+  }
+  if (h === 'Subtract') {
+    const inner = stripLeadingContinuation(operand(expr, 1)!);
+    return inner === null ? null : ['Subtract', inner, operand(expr, 2)!];
+  }
+  if (h === 'Add') {
+    const args = operands(expr);
+    const inner = stripLeadingContinuation(args[0]);
+    return inner === null ? null : ['Add', inner, ...args.slice(1)];
+  }
+  return null;
+}
+
+/**
  * Detect the inferred-step list-range form: elements ending with
  * `[..., s0, s1, ..., sk, ContinuationPlaceholder, end]`.
  *
@@ -3184,6 +3236,40 @@ export function tryInferRangeFromElements(
   elems: readonly MathJsonExpression[],
   parser: Parser
 ): MathJsonExpression | null {
+  // Normalize the Desmos "elided comma after ellipsis" shapes into the
+  // canonical `[..., ContinuationPlaceholder, end]` form so the shared
+  // inference below applies. These arise when there is no comma after the
+  // `\dots`, so the placeholder was NOT parsed as its own sequence element:
+  //  - `[0,15...210]`: the tail parsed as a bare `Range(15, 210)` from the
+  //    `...` infix — 15 is another leading sample, 210 the endpoint. The
+  //    `continuationRanges` provenance guard restricts this rewrite to
+  //    infix-produced ranges (`..`/`...`/`\ldots`/`\dots`), so an explicit
+  //    `\operatorname{Range}(1,5)` element stays a literal `List` entry.
+  //  - `[0,...300]` / `[0,...3N^2-1]`: the tail absorbed the placeholder as a
+  //    leading factor / additive head (see `stripLeadingContinuation`).
+  if (elems.length >= 2) {
+    const last = elems[elems.length - 1];
+    const penult = elems[elems.length - 2];
+    if (symbol(penult) !== 'ContinuationPlaceholder') {
+      if (
+        operator(last) === 'Range' &&
+        operands(last).length === 2 &&
+        continuationRanges.has(last as object)
+      ) {
+        elems = [
+          ...elems.slice(0, -1),
+          operand(last, 1)!,
+          'ContinuationPlaceholder',
+          operand(last, 2)!,
+        ];
+      } else {
+        const end = stripLeadingContinuation(last);
+        if (end !== null)
+          elems = [...elems.slice(0, -1), 'ContinuationPlaceholder', end];
+      }
+    }
+  }
+
   // Need at least 3 elements: s0, ContinuationPlaceholder, end
   if (elems.length < 3) return null;
 
@@ -3244,7 +3330,12 @@ export function tryInferRangeFromElements(
   // gate rejects it (distinct symbols), as do mixed numeric/symbolic samples
   // and any non `(coefficient · symbol)` shape.
   const pairs = samples.map(extractCoeffAndSymbol);
-  if (pairs.some((p) => p === null)) return null;
+  if (pairs.some((p) => p === null)) {
+    // Not a `(coefficient · symbol)` progression. Try the additive-base class
+    // (`[m+n, m+n+15, ..., m+n+60]`): identical non-numeric base, numeric
+    // offsets. Any other shape stays a placeholder List.
+    return tryInferAdditiveBaseRange(samples, endExpr, tol);
+  }
   const coeffs = (pairs as { coeff: number; sym: string }[]).map(
     (p) => p.coeff
   );
@@ -3329,6 +3420,83 @@ function coeffTimesSymbol(coeff: number, sym: string): MathJsonExpression {
   return ['Multiply', coeff, sym];
 }
 
+/**
+ * Split a raw additive sample into its non-numeric base and a numeric offset:
+ * `m+n+15` → `{ base: ['Add','m','n'], offset: 15 }`, `m+n` →
+ * `{ base: ['Add','m','n'], offset: 0 }`, a bare `p` → `{ base: 'p', offset: 0 }`.
+ * Numeric terms (recognized by `signedMachineValue`) are summed into the
+ * offset; the remaining terms form the base (collapsed to the single term when
+ * only one remains). Returns `null` for a pure number (handled by the numeric
+ * path) — i.e. when there is no non-numeric term.
+ */
+function extractBaseAndOffset(
+  expr: MathJsonExpression
+): { base: MathJsonExpression; offset: number } | null {
+  if (operator(expr) === 'Add') {
+    const baseTerms: MathJsonExpression[] = [];
+    let offset = 0;
+    for (const term of operands(expr)) {
+      const v = signedMachineValue(term);
+      if (v !== null) offset += v;
+      else baseTerms.push(term);
+    }
+    if (baseTerms.length === 0) return null; // pure numeric → numeric path
+    const base: MathJsonExpression =
+      baseTerms.length === 1 ? baseTerms[0] : ['Add', ...baseTerms];
+    return { base, offset };
+  }
+  // A non-additive, non-numeric sample is its own base (offset 0). A bare
+  // number is handled by the numeric path, not here.
+  if (signedMachineValue(expr) !== null) return null;
+  return { base: expr, offset: 0 };
+}
+
+/** Reconstruct `base + offset` as raw MathJSON (the base itself when `offset`
+ *  is 0), flattening into an existing leading `Add`. */
+function addNumericOffset(
+  base: MathJsonExpression,
+  offset: number
+): MathJsonExpression {
+  if (offset === 0) return base;
+  if (operator(base) === 'Add') return ['Add', ...operands(base), offset];
+  return ['Add', base, offset];
+}
+
+/**
+ * Infer a stepped range from samples that share a structurally identical
+ * non-numeric additive base and differ only by a numeric offset:
+ * `[m+n, m+n+15, ..., m+n+60]` → `Range(m+n, m+n+60, 15)` (the first sample may
+ * be the bare base, i.e. offset 0). Requires the end anchor to be the same base
+ * plus a numeric offset. Returns `null` (→ `List`) for any other shape —
+ * differing bases, non-numeric offsets, or a non-arithmetic offset progression
+ * — so only this narrow class is recognized (no general symbolic differencing).
+ */
+function tryInferAdditiveBaseRange(
+  samples: readonly MathJsonExpression[],
+  endExpr: MathJsonExpression,
+  tol: number
+): MathJsonExpression | null {
+  const parts = samples.map(extractBaseAndOffset);
+  if (parts.some((p) => p === null)) return null;
+  const ps = parts as { base: MathJsonExpression; offset: number }[];
+
+  // Every sample (and the end anchor) must share a structurally identical base.
+  const baseKey = JSON.stringify(ps[0].base);
+  if (ps.some((p) => JSON.stringify(p.base) !== baseKey)) return null;
+
+  const endPart = extractBaseAndOffset(endExpr);
+  if (endPart === null || JSON.stringify(endPart.base) !== baseKey) return null;
+
+  // Offsets must form an arithmetic progression (step from the last two).
+  const offsets = ps.map((p) => p.offset);
+  const step = offsets[offsets.length - 1] - offsets[offsets.length - 2];
+  if (Math.abs(step) < tol) return null;
+  for (let i = 1; i < offsets.length; i++)
+    if (Math.abs(offsets[i] - offsets[i - 1] - step) > tol) return null;
+
+  return ['Range', addNumericOffset(ps[0].base, offsets[0]), endExpr, step];
+}
+
 /** A "List" expression can represent a collection of arbitrary elements,
  * or a system of equations.
  */
@@ -3411,7 +3579,14 @@ function parseRange(
     return null;
   }
 
-  return ['Range', lhs, second];
+  // Record the provenance: this range came from the `..`/ellipsis infix, so as
+  // a trailing element of a bracket sample list it denotes a continuation (see
+  // `continuationRanges` / `tryInferRangeFromElements`). An explicit
+  // `\operatorname{Range}(…)` call never flows through here, so it is never
+  // marked and stays a literal `List` element.
+  const range: MathJsonExpression = ['Range', lhs, second];
+  continuationRanges.add(range);
+  return range;
 }
 
 export const DELIMITERS_SHORTHAND = {

@@ -59,15 +59,21 @@ describe('un-applied builtin operator devolves to a symbol', () => {
     expect(ce.parse('N(3.14159, 2)').evaluate().json).toBe(3.1);
   });
 
-  test('use-order dependence: N(...) after N+1 is a symbolic application', () => {
-    // Documented trade-off: once devolved, `N` refers to the variable for
-    // the rest of the scope. The application stays symbolic — no crash, no
-    // wrong numeric result.
+  test('use-order dependence: N(...) after N+1 re-resolves the builtin', () => {
+    // Once devolved, `N` refers to the variable in VALUE position (`N + 1`)
+    // for the rest of the scope. In OPERATOR position, however, the devolved
+    // binding provably cannot be applied (its type is numeric), so
+    // `lookupApplicable` defers to the shadowed builtin: `N(3.14159, 2)`
+    // numericizes. (Until the Tycho item-42 round this application stayed
+    // symbolic; resolving the builtin is strictly more useful and matches
+    // the `N = 85` shadowing fix for the lazy-broadcast `.N()` wrapper.)
     const ce = new ComputeEngine();
     ce.parse('N + 1');
     const later = ce.parse('N(3.14159, 2)').evaluate();
     expect(later.isValid).toBe(true);
-    expect(later.json).not.toBe(3.1);
+    expect(later.json).toBe(3.1);
+    // The value-position devolution is unaffected:
+    expect(ce.parse('N + 1').json).toEqual(['Add', 'N', 1]);
   });
 
   test('user-declared functions are NOT devolved', () => {

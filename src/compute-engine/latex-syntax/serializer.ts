@@ -168,6 +168,14 @@ export class Serializer {
     const name = operator(expr);
     if (name && name !== 'Delimiter' && name !== 'Subscript') {
       const def = this.dictionary.ids.get(name);
+      // `..` parses its END operand at minPrec 270 (below Add, 275) even
+      // though the infix itself is declared tight (800) for its LHS — so
+      // anything a parent places after a serialized `Range` is absorbed
+      // into the range end on re-parse (`Add(Range(0, L-1), 3)` →
+      // `0..(L-1)+3` → `Range(0, L+2)`, wrong values). For wrapping
+      // purposes the effective precedence of a `Range` operand is its
+      // end-binding. (Same round-trip class as the `Mod` handling in
+      // `wrapShort`.)
       if (
         def &&
         (def.kind === 'symbol' ||
@@ -175,7 +183,7 @@ export class Serializer {
           def.kind === 'prefix' ||
           def.kind === 'infix' ||
           def.kind === 'postfix') &&
-        def.precedence < prec
+        (name === 'Range' ? 270 : def.precedence) < prec
       )
         return this.wrapString(
           this.serialize(expr),
@@ -209,13 +217,16 @@ export class Serializer {
     // (power base, solidus fraction) the adjacent notation binds tighter
     // than `\bmod` and would absorb its trailing operand on re-parse
     // (`Mod(A,2)^x` → `A\bmod2^x` = `Mod(A, 2^x)`), so it must be wrapped.
+    // `Range` has the same hazard on its END operand (parsed at minPrec
+    // 270): `Range(1,n)^2` → `1..n^2` re-parses as `Range(1, n²)`.
     if (
       h !== 'Add' &&
       h !== 'Negate' &&
       h !== 'Subtract' &&
       h !== 'Measurement' &&
       h !== 'Multiply' &&
-      h !== 'Mod'
+      h !== 'Mod' &&
+      h !== 'Range'
     )
       return exprStr;
 

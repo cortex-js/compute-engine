@@ -96,7 +96,7 @@ import {
   sgn,
 } from './sgn.js';
 import { cachedValue, CachedValue } from './cache.js';
-import { apply, lookup } from '../function-utils.js';
+import { apply, lookupApplicable } from '../function-utils.js';
 import {
   functionLiteralParameters,
   functionLiteralReturnType,
@@ -227,6 +227,13 @@ export class BoxedFunction
     } else if (isSignatureType(def.signature.type)) {
       // Preserve the argument information when updating the result type
       const oldSig = def.signature.type;
+      // A widen driven by a usage-site parameter constraint must not discard a
+      // more precise inferred result: when the result already satisfies the
+      // constraint (`vector<2>` used where `indexed_collection` is expected),
+      // `widen(vector<2>, indexed_collection)` would coarsen it to the loose
+      // constraint. Keep the precise type. (Narrowing is authoritative and is
+      // left untouched.)
+      if (inferenceMode !== 'narrow' && isSubtype(oldSig.result, t)) return true;
       def.signature = new BoxedType(
         {
           kind: 'signature',
@@ -252,7 +259,10 @@ export class BoxedFunction
   }
 
   bind(): void {
-    this._def = lookup(
+    // Operator (function-application) position: an inner binding that
+    // provably cannot be applied — a user symbol `N = 85` shadowing the
+    // built-in `N` operator — defers to an outer applicable definition.
+    this._def = lookupApplicable(
       this._operator,
       this._localScope ?? this.engine.context.lexicalScope
     );
@@ -2610,7 +2620,23 @@ function materialize(
   if (typeof materialization === 'boolean')
     materialization = DEFAULT_MATERIALIZATION;
 
-  const isIndexed = expr.isIndexedCollection;
+  // Static-type indexed-ness, with a value-aware fallback: a lazy wrapper
+  // over a declared-`unknown` symbol holding an indexed collection (e.g. a
+  // `Filter(L, …)` whose type is its source's `unknown`) sheds indexed-ness
+  // statically — without the fallback its preview would render with a
+  // misleading `Set` head and no tail. The fallback only applies when the
+  // static type is indeterminate, and consults the SOURCE operand's
+  // value-aware indexed-ness (a symbol holding a `List` reports indexed; one
+  // holding a `Set` does not) — NOT an `at(1)` probe, which misclassifies
+  // operators like `Filter` that answer `at` by sequential scan over
+  // non-indexed sources.
+  const t = expr.type.type;
+  const isIndexed =
+    expr.isIndexedCollection ||
+    ((t === 'unknown' || t === 'any' || t === 'value') &&
+      def.collection?.at !== undefined &&
+      expr.nops > 0 &&
+      expr.op1.isIndexedCollection === true);
   const isFinite = expr.isFiniteCollection;
 
   // Leave oversized indexed collections in their lazy form. Consumers

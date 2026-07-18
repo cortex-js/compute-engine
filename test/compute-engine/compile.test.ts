@@ -877,6 +877,25 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
       parity(['Mod', 'x', 'y'], { x, y });
   });
 
+  it('floored-Mod fragment is parenthesized inside a product (Tycho item 43)', () => {
+    // The floored-mod emission `((a % b) + b) % b` lacked outer parentheses;
+    // composed as a `Multiply`/`Divide` factor, JS left-assoc `%` reduced the
+    // whole product mod b: `c * ((x % 1) + 1) % 1` ≡ `(c·(x%1+1)) % 1`.
+    for (const [c, x] of [
+      [3, 7.5],
+      [-2, -7.5],
+      [10, 0.9],
+    ])
+      parity(['Multiply', 'c', ['Mod', 'x', 1]], { c, x });
+    // The exact filed repro: Neyret hash terms summed with cosine weights.
+    const expr = ce.parse(
+      '\\sum_{i=0}^6\\cos(i)(10^{4}\\sin(10^{4}i)\\bmod 1)'
+    );
+    const r = compile(expr)!;
+    expect(r.success).toBe(true);
+    expect(r.run!({}) as number).toBeCloseTo(expr.N().re, 9);
+  });
+
   it('Remainder uses round-to-nearest quotient, not floored (P0-7)', () => {
     for (const [x, y] of [
       [7, 4],
@@ -1118,6 +1137,38 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const neq = js.compile(e.parse('q(2) \\ne 9', { strict: false }));
     expect(neq.success).toBe(true);
     expect(neq.run!({})).toBe(false);
+  });
+
+  it('At over a TYPED-collection application compiles (Tycho item 45)', () => {
+    // `a(x)[1]` with `a(t) := [cos t, sin t]`: the operand is not a
+    // SYNTACTIC list, but it types `vector<2>`, so the At handler's
+    // `isIndexedCollectionOperand` gate passes and `_SYS.at` is emitted.
+    const e = new ComputeEngine();
+    e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
+    const r = compile(e.parse('a(x)[1]'), { fallback: false })!;
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: 0.3 })).toBeCloseTo(Math.cos(0.3), 12);
+  });
+
+  it('a collection-valued Sum body fails closed instead of emitting NaN (Tycho item 45)', () => {
+    // `Σ h(i)·(1/1.4^i)·a(…)` — the interpreter's elementwise zip-broadcast
+    // Sum. The scalar accumulation would emit `<array> + <array>` (NaN /
+    // string concatenation), a silently WRONG value; it must throw (D6).
+    const e = new ComputeEngine();
+    e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
+    e.parse('h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)').evaluate();
+    const sum = '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))';
+    expect(() => compile(e.parse(sum), { fallback: false })).toThrow(
+      /collection-valued body/
+    );
+    // The fallback run interprets correctly.
+    const viaFallback = compile(e.parse(`(${sum})[1]`))!;
+    expect(viaFallback.success).toBe(false);
+    e.pushScope();
+    e.assign('t', 0.3);
+    const want = e.parse(`(${sum})[1]`).N().re;
+    e.popScope();
+    expect(viaFallback.run!({ t: 0.3 })).toBeCloseTo(want, 10);
   });
 
   it('chained (n-ary) Equal over a collection operand still fails closed (D6)', () => {

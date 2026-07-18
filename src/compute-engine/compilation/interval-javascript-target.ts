@@ -462,6 +462,12 @@ function compileIntervalSumProduct(
   if (!args[0]) throw new Error(`${kind}: no body`);
   if (!args[1]) throw new Error(`${kind}: no indexing set`);
 
+  // Reject a collection-valued body for the indexed form (see
+  // `BaseCompiler.assertScalarBigOpBody`): interval scalar accumulation over
+  // arrays would silently produce a wrong value. Reached only for the indexed
+  // form (the `!args[1]` guard above rules out the reduce form).
+  BaseCompiler.assertScalarBigOpBody(kind, args[0]);
+
   // Multi-index Sum/Product would drop the trailing indexing sets. Fail closed
   // (D6) rather than emit code with a dangling index.
   if (args.length > 2)

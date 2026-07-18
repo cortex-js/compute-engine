@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 const glsl = new GLSLTarget();
@@ -753,6 +754,21 @@ describe('GLSL COMPILATION', () => {
       expect(code).not.toContain('() =>');
       expect(code).not.toContain('{ re');
     });
+
+    it('a collection-valued Sum body fails closed (D6)', () => {
+      // `Σ h(i)·(1/1.4^i)·a(…)` where `a` returns a vector — the interpreter's
+      // elementwise zip-broadcast Sum. Scalar accumulation over arrays would
+      // silently produce a wrong value, so it must throw (mirrors JS/base gate).
+      const e = new ComputeEngine();
+      e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
+      e.parse(
+        'h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)'
+      ).evaluate();
+      const expr = e.parse('\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))');
+      expect(() => glsl.compile(expr)).toThrow(
+        /collection-valued body.*Fail closed/s
+      );
+    });
   });
 
   describe('Loop', () => {
@@ -948,5 +964,40 @@ describe('GLSL Length/Norm name collision (Tycho round)', () => {
   it('CE Norm lowers to the length() builtin', () => {
     const code = glsl.compile(ce.box(['Norm', ['List', 3, 4]])).code;
     expect(code).toBe('length(vec2(3.0, 4.0))');
+  });
+});
+
+// A masked (`When`/`Which` else) branch whose value is a tuple body compiles
+// to a vecN; the NaN branch must match that shape — GLSL has no implicit
+// float→vecN conversion in a ternary, so `cond ? vec2(…) : _gpu_nan()` is
+// rejected by the driver (every restricted parametric member lost its GPU
+// sampling path).
+describe('GLSL When/Which NaN branch matches the value shape (Tycho item 49)', () => {
+  it('restricted parametric tuple body emits a vec2 NaN branch', () => {
+    const code = glsl.compile(
+      ce.box([
+        'When',
+        ['Tuple', ['Cos', 't'], ['Sin', 't']],
+        ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]],
+      ])
+    ).code;
+    expect(code).toContain('vec2(cos(t), sin(t))');
+    expect(code).toContain('vec2(_gpu_nan())');
+    expect(code).not.toMatch(/: \(_gpu_nan\(\)\)/);
+  });
+
+  it('scalar bodies keep the scalar NaN', () => {
+    const code = glsl.compile(
+      ce.box(['When', ['Cos', 't'], ['LessEqual', 't', 1]])
+    ).code;
+    expect(code).toContain(': (_gpu_nan())');
+    expect(code).not.toContain('vec2(_gpu_nan())');
+  });
+
+  it('Which fall-through NaN follows the branch value shape', () => {
+    const code = glsl.compile(
+      ce.box(['Which', ['LessEqual', 't', 1], ['Tuple', 1, 2]])
+    ).code;
+    expect(code).toContain('vec2(_gpu_nan())');
   });
 });

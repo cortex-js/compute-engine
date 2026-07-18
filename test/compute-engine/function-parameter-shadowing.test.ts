@@ -100,3 +100,64 @@ describe('Closure capture is preserved (no early value-defs)', () => {
     );
   });
 });
+
+/**
+ * Tycho item 46 (2026-07-18): applying a user lambda to a SYMBOLIC argument
+ * that mentions the parameter's own free name — `a(t + 1)` for
+ * `a(t) := [cos t, sin t]` with `t` unbound in the caller — overflowed the
+ * call stack under `.N()`: `BoxedSymbol.N()` recursed into the call-frame
+ * value (`t → t+1 → t → …`; symbol values resolve BY NAME through the
+ * current eval context). Plain `evaluate()` substitutes the context value
+ * once, without recursing; `.N()` now does the same for a self-referential
+ * context binding.
+ */
+describe('Symbolic argument mentioning the parameter’s own name (Tycho item 46)', () => {
+  const defs = (ce: ComputeEngine) => {
+    ce.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
+    ce.parse('h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)').evaluate();
+    ce.parse(
+      'A(t)\\coloneq\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
+    ).evaluate();
+  };
+
+  it('a(t+1) with unbound t substitutes once, correctly', () => {
+    const ce = new ComputeEngine();
+    ce.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
+    expect(ce.parse('a(t+1)').evaluate().json).toEqual([
+      'List',
+      ['Cos', ['Add', 't', 1]],
+      ['Sin', ['Add', 't', 1]],
+    ]);
+    expect(ce.parse('a(2t)').evaluate().json).toEqual([
+      'List',
+      ['Cos', ['Multiply', 2, 't']],
+      ['Sin', ['Multiply', 2, 't']],
+    ]);
+  });
+
+  it('the filed PointList repro evaluates symbolically without overflowing', () => {
+    const ce = new ComputeEngine();
+    defs(ce);
+    const sym = ce
+      .parse('\\operatorname{PointList}(A(t)[1], A(t)[2])')
+      .evaluate();
+    expect(sym.isValid).toBe(true);
+    // The symbolic result agrees with direct numeric evaluation at t = 0.7.
+    const atPoint = sym.subs({ t: 0.7 }).N();
+    const ce2 = new ComputeEngine();
+    defs(ce2);
+    ce2.assign('t', 0.7);
+    const direct = ce2.parse('\\operatorname{PointList}(A(t)[1], A(t)[2])').N();
+    expect(atPoint.op1.re).toBeCloseTo(direct.op1.re, 10);
+    expect(atPoint.op2.re).toBeCloseTo(direct.op2.re, 10);
+  });
+
+  it('numeric evaluation with a bound t is unaffected', () => {
+    const ce = new ComputeEngine();
+    ce.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
+    ce.assign('t', 0.5);
+    const r = ce.parse('a(t+1)').N();
+    expect(r.op1.re).toBeCloseTo(Math.cos(1.5), 12);
+    expect(r.op2.re).toBeCloseTo(Math.sin(1.5), 12);
+  });
+});

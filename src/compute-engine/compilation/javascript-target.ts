@@ -1474,7 +1474,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isNonNegative(a)
     )
       return `(${ca} % ${cb})`;
-    return `((${ca} % ${cb}) + ${cb}) % ${cb}`;
+    return `(((${ca} % ${cb}) + ${cb}) % ${cb})`;
   },
   Truncate: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
@@ -3594,6 +3594,11 @@ function emitSumProduct(
   clauses: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
 ): string {
+  // Reject a collection-valued body for the indexed form (see
+  // `BaseCompiler.assertScalarBigOpBody`, Tycho item 45). `emitSumProduct` is
+  // only reached for the indexed Sum/Product form, so this is unconditional.
+  BaseCompiler.assertScalarBigOpBody(kind, body);
+
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(
     clauses[0]
   );

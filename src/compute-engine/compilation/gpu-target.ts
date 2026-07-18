@@ -357,6 +357,53 @@ function gpuNaN(target?: CompileTarget<Expression>): string {
 }
 
 /**
+ * Number of vector components a value expression occupies on the GPU (2–4),
+ * or `undefined` for a scalar. Structural for `Tuple`/`List` literals (the
+ * parametric-body shape `(x(t), y(t))` → `vec2`), type-based for typed
+ * operands (`tuple<…>`, a 1-axis `list`), and 2 for a complex value (lowered
+ * as `vec2(re, im)`).
+ */
+function gpuComponentCount(expr: Expression | null): 2 | 3 | 4 | undefined {
+  if (expr === null) return undefined;
+  if (isFunction(expr, 'Tuple') || isFunction(expr, 'List')) {
+    const n = expr.nops;
+    return n >= 2 && n <= 4 ? (n as 2 | 3 | 4) : undefined;
+  }
+  if (BaseCompiler.isComplexValued(expr)) return 2;
+  const t = expr.type.type;
+  if (typeof t !== 'string') {
+    if (t.kind === 'tuple') {
+      const n = t.elements.length;
+      return n >= 2 && n <= 4 ? (n as 2 | 3 | 4) : undefined;
+    }
+    if (t.kind === 'list' && t.dimensions?.length === 1) {
+      const n = t.dimensions[0];
+      return n >= 2 && n <= 4 ? (n as 2 | 3 | 4) : undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * A NaN matching the SHAPE of `val`: scalar NaN for a scalar value, a
+ * broadcast vector constructor (`vec2(_gpu_nan())` / `vec2f(bitcast<…>)`)
+ * for a vector-valued one. GLSL has no implicit float→vecN conversion in a
+ * ternary, so a masked (`When`/`Which` else) branch whose value is a tuple
+ * body (a restricted parametric `(x(t), y(t))`) must emit a NaN of the same
+ * component count or the driver rejects the shader (Tycho item 49). WGSL's
+ * `select` likewise requires both operands to share one type.
+ */
+function gpuNaNFor(
+  val: Expression | null,
+  target?: CompileTarget<Expression>
+): string {
+  const n = gpuComponentCount(val);
+  if (n === undefined) return gpuNaN(target);
+  const ctor = target?.language === 'wgsl' ? `vec${n}f` : `vec${n}`;
+  return `${ctor}(${gpuNaN(target)})`;
+}
+
+/**
  * Emit a conditional `cond ? whenTrue : whenFalse` for the target language.
  *
  * GLSL has the ternary operator; WGSL does not and uses
@@ -472,6 +519,12 @@ function compileGPUSumProduct(
 ): string {
   if (!args[0]) throw new Error(`${kind}: no body`);
   if (!args[1]) throw new Error(`${kind}: no indexing set`);
+
+  // Reject a collection-valued body for the indexed form (see
+  // `BaseCompiler.assertScalarBigOpBody`): scalar accumulation over arrays
+  // would silently produce a wrong value. Reached only for the indexed form
+  // (the `!args[1]` guard above rules out the reduce form).
+  BaseCompiler.assertScalarBigOpBody(kind, args[0]);
 
   if (BaseCompiler.isComplexValued(args[0]))
     throw new Error(
@@ -801,19 +854,27 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length !== 2)
       throw new Error('When: expected exactly 2 arguments (expr, cond)');
     if (isSymbol(args[1], 'True')) return `(${compile(args[0])})`;
-    if (isSymbol(args[1], 'False')) return gpuNaN(target);
+    // The masked branch's NaN must match the value's SHAPE (a tuple-valued
+    // body compiles to a vecN) — see `gpuNaNFor` (Tycho item 49).
+    if (isSymbol(args[1], 'False')) return gpuNaNFor(args[0], target);
     return gpuConditional(
       compile(args[1]),
       compile(args[0]),
-      gpuNaN(target),
+      gpuNaNFor(args[0], target),
       target
     );
   },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
       throw new Error('Which: expected condition/value pairs');
+    // The fall-through NaN must match the branch values' shape (see
+    // `gpuNaNFor`); every branch of a well-typed `Which` shares one shape,
+    // so the first determinable value decides.
+    const shapeRef =
+      args.filter((_, i) => i % 2 === 1).find((v) => gpuComponentCount(v)) ??
+      null;
     const build = (i: number): string => {
-      if (i >= args.length) return gpuNaN(target);
+      if (i >= args.length) return gpuNaNFor(shapeRef, target);
       const cond = args[i];
       const val = args[i + 1];
       // `True` marks the default branch.

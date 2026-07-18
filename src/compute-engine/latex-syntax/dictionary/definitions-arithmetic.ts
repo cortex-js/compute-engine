@@ -522,7 +522,16 @@ function serializeAdd(
       }
     }
 
-    result = serializer.serialize(ops[0]);
+    // The leading term normally needs no wrap (nothing precedes it that
+    // could capture it), but a `Range` absorbs TRAILING material into its
+    // end operand on re-parse (`0..(L-1)+3` → `Range(0, L+2)` — its end
+    // parses at minPrec 270, below Add), so it must be parenthesized even
+    // in first position (Tycho item 48; same class as the `Mod` handling
+    // in `serializeMultiply`).
+    result =
+      operator(ops[0]) === 'Range'
+        ? serializer.wrap(ops[0], ADDITION_PRECEDENCE)
+        : serializer.serialize(ops[0]);
     for (let i = 1; i < ops.length; i++) {
       arg = ops[i];
       if (serializer.options.prettify) {

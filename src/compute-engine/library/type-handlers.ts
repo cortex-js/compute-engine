@@ -199,6 +199,23 @@ export function measurementType(
 }
 
 /**
+ * Result type of a big-op (`Sum`/`Product`) in its `(body, limits…)` form.
+ * Elementwise accumulation over a collection-valued body yields the same
+ * indexed-collection type: summing (or multiplying) a `vector<2>`-, `list<T>`-
+ * or tuple-valued body gives that same collection type. A scalar body — or the
+ * arity-1 reducer form `Sum(L)`, which sums a collection's elements to a
+ * scalar — types as `number`.
+ */
+export function bigOpResultType(
+  ops: ReadonlyArray<Expression>
+): Type | BoxedType {
+  const body = ops[0];
+  if (ops.length > 1 && body?.type.matches('indexed_collection'))
+    return body.type;
+  return 'number';
+}
+
+/**
  * Result type for the elementary/inverse trig and log functions, dispatched by
  * operator so that pole-capable and domain-restricted operators do not claim
  * `finite_real` where their values are complex/infinite/NaN (SYM P0-12).

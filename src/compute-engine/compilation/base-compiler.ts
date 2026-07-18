@@ -1648,6 +1648,11 @@ export class BaseCompiler {
       })`;
     }
 
+    // Reject a collection-valued body for the indexed form (see
+    // `assertScalarBigOpBody`); the `!index` collection-reduce arm above is
+    // exempt.
+    BaseCompiler.assertScalarBigOpBody(h, args[0]);
+
     const fn = BaseCompiler.compile(args[0], {
       ...target,
       var: (id) => {
@@ -1738,6 +1743,29 @@ export class BaseCompiler {
     }
 
     return false;
+  }
+
+  /**
+   * Fail-closed guard (D6) for the INDEXED big-op form (`Sum`/`Product` with a
+   * body plus an indexing set). A collection-valued body (`Σ h(i)·a(…)` where
+   * `a` returns a vector — the interpreter's zip-broadcast elementwise Sum) has
+   * no scalar accumulation: the emitters would produce `acc + <array>` (NaN,
+   * string concatenation, or a dangling array), a silently WRONG value. Throw
+   * until an element-wise accumulation arm exists; consumers can distribute the
+   * element access through the big op (`At(Σ…, k)` → `Σ At(…, k)`), which
+   * compiles as a scalar loop.
+   *
+   * Call this ONLY on the indexed form's body, never on the no-index
+   * collection-reduce form (`Sum(collection)`), whose body is legitimately a
+   * collection.
+   */
+  static assertScalarBigOpBody(kind: string, body: Expression): void {
+    if (body.type.matches('list') || body.type.matches('indexed_collection'))
+      throw new Error(
+        `${kind}: a collection-valued body does not compile — distribute the ` +
+          `element access through the ${kind} (At(${kind}(…), k) → ` +
+          `${kind}(At(…, k))) or evaluate instead. Fail closed (D6).`
+      );
   }
 
   /**

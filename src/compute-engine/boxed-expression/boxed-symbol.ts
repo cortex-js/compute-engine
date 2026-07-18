@@ -73,7 +73,7 @@ import {
 import { matchesSymbol } from '../../math-json/utils.js';
 import { getSignFromAssumptions } from '../assume.js';
 import { getFactIndex, hasAssumptions } from './constraint-subject.js';
-import { isSymbol } from './type-guards.js';
+import { isNumber, isSymbol } from './type-guards.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
 /**
@@ -847,7 +847,26 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // recursing forever.
     if (def && !def.isConstant) {
       const contextValue = this._value;
-      return contextValue ? contextValue.N() : this;
+      if (!contextValue) return this;
+      // Self-referential CONTEXT binding: the scope walk can resolve to a
+      // different def than the statically-bound one `_value` guards — e.g. a
+      // call-frame parameter bound to an argument mentioning the parameter's
+      // own name (`a(t + 1)` for `a(t) := …` with `t` unbound in the
+      // caller). Recursing with `.N()` would re-resolve this symbol through
+      // the same binding forever (Tycho item 46). Substitute the value ONCE,
+      // without numericizing through it — mirroring what plain `evaluate()`
+      // does for symbol values. The number-literal short-circuit keeps the
+      // hot path (loop indices, numeric call arguments) O(1). The scan uses
+      // `symbols`, which over-approximates: an occurrence BOUND inside the
+      // value (a nested big-op index sharing this name) also suppresses the
+      // recursion, degrading to a symbolic result — the same deliberate
+      // trade as `isSelfReferentialValue` (boxed-value-definition.ts).
+      // `freeVariables` cannot be used here: it resolves bindings against
+      // the CURRENT eval context, where this very call-frame binding makes
+      // the name look bound, so the guard would never fire.
+      if (isNumber(contextValue)) return contextValue.N();
+      if (contextValue.symbols.includes(this._id)) return contextValue;
+      return contextValue.N();
     }
     return def?.value?.N() ?? this;
   }

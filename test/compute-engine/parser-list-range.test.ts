@@ -8,6 +8,10 @@ function parse(latex: string): Expression {
   return ce.parse(latex).json;
 }
 
+function operatorOf(expr: Expression): string | null {
+  return Array.isArray(expr) ? (expr[0] as string) : null;
+}
+
 describe('Parser: list range ellipsis', () => {
   describe('endpoint-only form [a ... b]', () => {
     test('`[1...9]` parses to Range(1, 9)', () => {
@@ -279,6 +283,144 @@ describe('Parser: list range ellipsis', () => {
     });
   });
 
+  // Desmos emits these ellipsis ranges with the comma AFTER the `\dots`
+  // elided: `[0,...300]`, `[1,...N]`, `[0,15...210]`. Without a terminating
+  // comma the placeholder is absorbed by the following endpoint (as a leading
+  // factor or additive head) or the tail parses as a bare `Range`; the parser
+  // recovers the intended stepped/endpoint range. (Tycho item 47 regression.)
+  describe('elided comma after ellipsis (Desmos idiom)', () => {
+    // Baseline: the comma-terminated forms these mirror (must stay correct).
+    test('`[0,...,300]` → Range(0, 300)', () => {
+      expect(parse('[0,...,300]')).toEqual(['Range', 0, 300]);
+    });
+    test('`[1...5]` → Range(1, 5)', () => {
+      expect(parse('[1...5]')).toEqual(['Range', 1, 5]);
+    });
+    test('`[-3N...3N]` → Range(-3N, 3N)', () => {
+      expect(parse('[-3N...3N]')).toEqual([
+        'Range',
+        ['Multiply', -3, 'N'],
+        ['Multiply', 3, 'N'],
+      ]);
+    });
+    test('`[0,15,...,210]` → Range(0, 210, 15)', () => {
+      expect(parse('[0,15,...,210]')).toEqual(['Range', 0, 210, 15]);
+    });
+
+    // Elided-comma endpoint-only forms: `,...end` with no comma after.
+    test('`[0,...300]` → Range(0, 300)', () => {
+      expect(parse('[0,...300]')).toEqual(['Range', 0, 300]);
+    });
+    test('`[1,...N]` (symbolic endpoint) → Range(1, N)', () => {
+      expect(parse('[1,...N]')).toEqual(['Range', 1, 'N']);
+    });
+    test('`[0,...3N^2-1]` (additive endpoint) → Range(0, 3N^2 - 1)', () => {
+      expect(parse('[0,...3N^{2}-1]')).toEqual([
+        'Range',
+        0,
+        ['Add', ['Multiply', 3, ['Power', 'N', 2]], -1],
+      ]);
+    });
+
+    // Elided-comma stepped form: `a,b...end` — b is a second sample.
+    test('`[0,15...210]` (stepped) → Range(0, 210, 15)', () => {
+      expect(parse('[0,15...210]')).toEqual(['Range', 0, 210, 15]);
+    });
+
+    test('does not leak ContinuationPlaceholder', () => {
+      for (const s of ['[0,...300]', '[1,...N]', '[0,15...210]']) {
+        expect(JSON.stringify(parse(s))).not.toContain(
+          'ContinuationPlaceholder'
+        );
+      }
+    });
+
+    // Nested-group commas must NOT be captured as sequence separators: the
+    // comma-less `f(a,b)...5` keeps `f(a,b)` as the range start.
+    test('`[f(a,b)...5]` keeps f(a,b) as the start anchor', () => {
+      expect(parse('[f(a,b)...5]')).toEqual(['Range', ['f', 'a', 'b'], 5]);
+    });
+
+    // Compound-symbolic stepped anchor: all samples share a structurally
+    // identical non-numeric additive base (`m+n`) and differ only by a numeric
+    // offset (0, 15, …, 60). This narrow class is recognized structurally on
+    // the raw MathJSON (no general symbolic differencing) → Range(m+n, m+n+60,
+    // 15). The first sample is the bare base (offset 0).
+    test('compound-symbolic stepped anchor → Range(m+n, m+n+60, 15)', () => {
+      expect(parse('[m+n,m+n+15,...,m+n+60]')).toEqual([
+        'Range',
+        ['Add', 'm', 'n'],
+        ['Add', 'm', 'n', 60],
+        15,
+      ]);
+    });
+
+    test('additive-base with intermediate sample validates the progression', () => {
+      expect(parse('[m+n,m+n+15,m+n+30,...,m+n+60]')).toEqual([
+        'Range',
+        ['Add', 'm', 'n'],
+        ['Add', 'm', 'n', 60],
+        15,
+      ]);
+    });
+
+    test('single-symbol base `[p, p+15, ..., p+60]` → Range(p, p+60, 15)', () => {
+      expect(parse('[p, p+15, ..., p+60]')).toEqual([
+        'Range',
+        'p',
+        ['Add', 'p', 60],
+        15,
+      ]);
+    });
+
+    // Negative: samples with differing bases (`m+n` vs `m+k`) are not a shared
+    // progression → placeholder List.
+    test('differing additive bases stay a placeholder List', () => {
+      const result = parse('[m+n, m+k+15, ..., m+n+60]');
+      expect(operatorOf(result)).toBe('List');
+      expect(JSON.stringify(result)).toContain('ContinuationPlaceholder');
+    });
+
+    // Negative: a non-numeric offset (`+x`) is not a numeric progression → List.
+    test('non-numeric offset stays a placeholder List', () => {
+      const result = parse('[m+n, m+n+x, ..., m+n+60]');
+      expect(operatorOf(result)).toBe('List');
+      expect(JSON.stringify(result)).toContain('ContinuationPlaceholder');
+    });
+
+    // Negative: a non-arithmetic offset progression (0, 15, 31, …) → List.
+    test('inconsistent additive offsets stay a placeholder List', () => {
+      const result = parse('[m+n,m+n+15,m+n+31,...,m+n+60]');
+      expect(operatorOf(result)).toBe('List');
+    });
+  });
+
+  // An explicit `\operatorname{Range}(a,b)` element is a literal list entry,
+  // NOT an ellipsis/`..` continuation: the range-inference normalization must
+  // fire only for infix-produced (`..`/`...`/`\ldots`/`\dots`) ranges.
+  describe('explicit Range() element is not a continuation', () => {
+    test('`[3, \\operatorname{Range}(1,5)]` → List(3, Range(1, 5))', () => {
+      expect(parse('[3, \\operatorname{Range}(1,5)]')).toEqual([
+        'List',
+        3,
+        ['Range', 1, 5],
+      ]);
+    });
+
+    test('`[x, \\operatorname{Range}(2,9)]` → List(x, Range(2, 9))', () => {
+      expect(parse('[x, \\operatorname{Range}(2,9)]')).toEqual([
+        'List',
+        'x',
+        ['Range', 2, 9],
+      ]);
+    });
+
+    // The programmatic `..` idiom IS a continuation and stays a Range.
+    test('programmatic `[1, 3..10]` still infers Range(1, 10, 2)', () => {
+      expect(parse('[1, 3..10]')).toEqual(['Range', 1, 10, 2]);
+    });
+  });
+
   describe('error cases', () => {
     test('inconsistent intermediate sample → parse error', () => {
       // step is 0.1 but third element is 0.5 (not 0.2)
@@ -389,5 +531,51 @@ describe('Parser: list range ellipsis', () => {
     test('`\\{1, 2, 3\\}` stays a Set (no ellipsis)', () => {
       expect(parse('\\{1, 2, 3\\}')).toEqual(['Set', 1, 2, 3]);
     });
+  });
+});
+
+describe('Range under arithmetic parents round-trips (Tycho item 48)', () => {
+  // `..` parses its END operand at minPrec 270 (below Add), so a serialized
+  // `Range` operand must be parenthesized under any tighter-binding parent —
+  // `Add(Range(0, L-1), 3)` used to serialize as `0..(L-1)+3`, which
+  // re-parses as `Range(0, L+2)`: WRONG values (8 elements instead of a
+  // shifted 5). Item-12/21/37 precedence class, `..`-serializer side.
+  it('Add(Range(0, L-1), 3) round-trips value-stable', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box(['Add', ['Range', 0, ['Subtract', 'L', 1]], 3], {
+      canonical: false,
+    });
+    const rt = ce.parse(e.latex);
+    expect(rt.operator).toBe('Add');
+    ce.assign('L', 5);
+    expect(rt.evaluate().json).toEqual(['List', 3, 4, 5, 6, 7]);
+  });
+
+  it('Range wraps under Multiply, Power, and Subtract parents', () => {
+    const ce = new ComputeEngine();
+    const mul = ce.box(['Multiply', 2, ['Range', 1, 'n']], {
+      canonical: false,
+    });
+    expect(ce.parse(mul.latex).operator).toBe('Multiply');
+    const pow = ce.box(['Power', ['Range', 1, 'n'], 2], { canonical: false });
+    expect(ce.parse(pow.latex).operator).toBe('Power');
+    const sub = ce.box(['Subtract', ['Range', 0, 'L'], 3], {
+      canonical: false,
+    });
+    const rtSub = ce.parse(sub.latex);
+    expect(rtSub.operator === 'Subtract' || rtSub.operator === 'Add').toBe(
+      true
+    );
+    expect(JSON.stringify(rtSub.json)).toContain('"Range",0,"L"');
+  });
+
+  it('bare and stepped Range serialization is unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Range', 0, 210, 15], { canonical: false }).latex).toBe(
+      '0..15..210'
+    );
+    expect(
+      ce.parse(ce.box(['Range', 0, 210, 15], { canonical: false }).latex).json
+    ).toEqual(['Range', 0, 210, 15]);
   });
 });

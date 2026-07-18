@@ -699,6 +699,22 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
     expect(result.value.lo).toBe(24);
     expect(result.value.hi).toBe(24);
   });
+
+  test('a collection-valued Sum body fails closed (D6)', () => {
+    // `Σ h(i)·(1/1.4^i)·a(…)` where `a` returns a vector — the interpreter's
+    // elementwise zip-broadcast Sum. Interval scalar accumulation over arrays
+    // would silently produce a wrong value, so compilation must fail closed
+    // (mirrors the JS/base/python/gpu gate).
+    const e = new ComputeEngine();
+    e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
+    e.parse('h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)').evaluate();
+    const expr = e.parse(
+      '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
+    );
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toMatch(/collection-valued body.*Fail closed/s);
+  });
 });
 
 /**

@@ -1056,6 +1056,43 @@ describe('SUM', () => {
     ).toBe('24');
   });
 
+  // Tycho item 44a: a big-op `Sum`/`Product` over a collection-valued body
+  // (here `a(...)` returns `vector<2>`) must type as that collection, not
+  // `number` — its evaluation is an elementwise `List`. The critical
+  // consequence: `At` over such a Sum must canonicalize without baking an
+  // incompatible-type error, and index into the element type.
+  it('Sum/Product over a vector-valued body type as the vector (Tycho item 44a)', () => {
+    const engine = new ComputeEngine();
+    engine.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
+    engine.parse('h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)').evaluate();
+    engine
+      .parse('A(t)\\coloneq\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))')
+      .evaluate();
+
+    const sum = engine.parse(
+      '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
+    );
+    expect(sum.type.toString()).toBe('vector<2>');
+    const prod = engine.parse('\\prod_{i=0}^{2}a(i)');
+    expect(prod.type.toString()).toBe('vector<2>');
+
+    // At over the list-valued Sum no longer bakes an incompatible-type error.
+    const at = engine.parse(
+      '(\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i)))[1]'
+    );
+    expect(at.isValid).toBe(true);
+
+    // A's inferred result is the vector, so A(t)[1] types the element (not
+    // `any`) and evaluates to a number once `t` is bound.
+    expect(engine.parse('A(t)').type.toString()).toBe('vector<2>');
+    expect(engine.parse('A(t)[1]').type.toString()).toBe('number');
+    engine.assign('t', 0.5);
+    expect(engine.parse('A(t)[1]').evaluate().re).toBeCloseTo(-0.3883979339);
+
+    // A scalar body still types as `number` (no over-eager collection claim).
+    expect(engine.parse('\\sum_{i=0}^{6}i^2').type.toString()).toBe('number');
+  });
+
   // Tycho item 32.2: `["Sum", body]` serializes to a bounds-less `\sum` which
   // must re-parse to `Sum` (not `Reduce(body, Add)`), and no operator name
   // may leak into `.unknowns`.

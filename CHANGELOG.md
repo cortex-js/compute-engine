@@ -122,6 +122,103 @@
 
 ### Bug Fixes
 
+- **Lazy broadcast over a declared-`unknown` symbol no longer throws
+  `Not canonical` (Tycho item 42).** Evaluating `mod(L, N)/N` with `L` a
+  declared-`unknown` symbol holding a >100-element list built the lazy
+  `Map(L, …)` over the SYMBOL, whose static type is `unknown`; every lazy
+  collection operator's canonical handler hard-rejected such a source and
+  `boxFunction` fell back to a silently NON-canonical expression, which the
+  first arithmetic composition rejected with a thrown assert. Lazy collection
+  canonical handlers now admit operands whose type is merely indeterminate
+  (`unknown`/`any`/`value`/`broadcastable`) — provably-scalar operands still
+  reject — and `Map` over such a source keeps value-aware indexed-ness
+  (`type`, `at`, `count`, and the display preview, which no longer renders
+  with a misleading `Set` head). The composed lazy result is consumable and
+  honors `x.N() ≡ x.evaluate().N()`.
+
+- **A user symbol shadowing a builtin no longer breaks function application
+  of that builtin.** With `N := 85` declared (ubiquitous in Desmos-style
+  documents), any `["N", …]` application — including the engine's own
+  internal `N(…)` wrapper that makes lazy `.N()` elements float on access —
+  resolved to the user's number and produced an `incompatible-type` error
+  (surfacing as `Nothing` elements in lazy maps). Operator-position binding
+  now defers a value definition that provably cannot be applied (a plain
+  number, string, collection…) to an outer applicable definition of the same
+  name; value-position references (`N + 1`) still resolve to the user's
+  value. (Consequence: after prose-style devolution of an un-applied builtin
+  — `N + 1` — a later `N(3.14159, 2)` now numericizes instead of staying
+  symbolic.)
+
+- **The JavaScript compile target's floored-`Mod` emission is parenthesized
+  (Tycho item 43).** The fragment `((a % b) + b) % b` was emitted without
+  outer parentheses; composed as a `Multiply`/`Divide` factor, JS's
+  left-associative same-precedence `%` reduced the whole product mod `b`
+  (`c * ((x % 1) + 1) % 1` ≡ `(c·(x%1+1)) % 1`), silently value-wrong
+  whenever the product's magnitude reached the divisor. The standalone form
+  was correct, which is why it survived. Compiled and interpreted now agree
+  on the Neyret-hash idiom `Σ cos(i)·mod(10⁴sin(10⁴i), 1)`.
+
+- **`Sum`/`Product` over a collection-valued body type as the collection, and
+  `At` extracts element types (Tycho item 44).** A big-op whose body types
+  `vector<2>` (e.g. summing scaled calls of `a(t) := [cos t, sin t]`) typed
+  `number`, so indexing the sum baked an `incompatible-type` error at parse
+  time; it now types `vector<2>`. `At` on a `tuple`-typed operand with a
+  literal index types the selected slot, and an inference widen-guard stops a
+  loose parameter type from coarsening an already-precise inferred function
+  result (this made `A(t)[1]` type `any`; it now types `number`).
+
+- **`At` over a typed-collection application compiles; a collection-valued
+  big-op body fails closed instead of emitting wrong code (Tycho item 45).**
+  `a(x)[1]` with `a` returning `vector<2>` now compiles (the collection gate
+  is type-aware, so `_SYS.at` is emitted). A compiled `Sum`/`Product` whose
+  body is collection-typed previously emitted scalar accumulation over
+  arrays — NaN or string concatenation, silently wrong; it now fails closed
+  (D6) with a hint to distribute the element access through the big op.
+
+- **Applying a function to a symbolic argument that mentions the parameter's
+  own name no longer overflows the stack under `.N()` (Tycho item 46).**
+  `a(t+1)` for `a(t) := [cos t, sin t]` with `t` unbound: symbol values
+  resolve by name through the evaluation context, so `BoxedSymbol.N()`
+  recursed through the call-frame binding forever (`t → t+1 → t → …`).
+  `.N()` now substitutes a self-referential context value once without
+  numericizing through it — mirroring plain `evaluate()` — so nested
+  helper-call expressions (the Tycho item-46 `PointList(A(t)[1], A(t)[2])`
+  repro) evaluate symbolically, verified against direct numeric evaluation.
+
+- **Desmos-style range ellipsis with an elided comma parses again (Tycho
+  item 47, regression of the 0.76.0 "request 6" class).** `[0,...300]` →
+  `Range(0,300)` (was an inert `List(0, ContinuationPlaceholder·300)`),
+  `[1,...N]` and `[0,...3N^{2}-1]` likewise, and the stepped `[0,15...210]` →
+  `Range(0, 210, 15)` (was the silently WRONG `List(0, Range(15,210))`).
+  Fully-comma'd, bare-fused (`[1...5]`, `[-3N...3N]`), and nested-group
+  (`[f(a,b)...5]`) forms are unchanged. Compound-symbolic stepped anchors
+  sharing an identical additive base with numeric offsets now infer too:
+  `[m+n, m+n+15, ..., m+n+60]` → `Range(m+n, m+n+60, 15)`; differing bases
+  or non-numeric offsets stay a literal `List`. Stepped-range inference only
+  applies to ranges the ellipsis syntax itself produced — a list literal
+  ending in an explicit `\operatorname{Range}(a,b)` element stays a `List`.
+
+- **A `Range` operand of a tighter-binding parent now serializes
+  parenthesized (Tycho item 48).** `..` parses its end operand at a
+  precedence below `Add`, so `Add(Range(0, L-1), 3)` serialized as
+  `0..(L-1)+3`, which re-parses as `Range(0, L+2)` — wrong values on any
+  serialize→re-parse round-trip (with `L = 5`, an 8-element list instead of
+  the shifted 5-element one). A `Range` under `Add`/`Subtract`/`Multiply`/
+  `Power`/solidus-`Divide` parents now wraps in parentheses
+  (`(0..(L-1))+3`); bare and stepped ranges serialize unchanged. Same
+  round-trip precedence class as the 0.83.2 `Mod` fix.
+
+- **GPU targets emit a shape-matched NaN for masked conditional branches
+  (Tycho item 49).** A `When`/`Which` whose value is a tuple body — a
+  restricted parametric `(x(t), y(t))` with `\{0 \le t \le 1\}` — compiles
+  the value to a `vec2`, but the masked branch emitted a scalar NaN:
+  GLSL has no implicit float→vecN conversion in a ternary, so the driver
+  rejected the shader and every restricted parametric member lost its GPU
+  sampling path. The NaN branch is now vectorized to the value's component
+  count (`vec2(_gpu_nan())` on GLSL, `vec2f(bitcast<f32>(…))` on WGSL —
+  WGSL's `select` requires matching operand types); scalar bodies are
+  unchanged.
+
 - **Sign (`sgn`) handler audit.** A mathematical-correctness pass over all ~69
   `sgn` handlers fixed a dozen wrong claims (each could mislead simplifications
   or comparisons built on `isPositive`/`isNegative`): `Gamma(0)` and `Gamma(-n)`

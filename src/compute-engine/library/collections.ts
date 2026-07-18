@@ -158,6 +158,45 @@ const COUNT_SIGNATURE = parseType('(collection) -> integer');
 const ISEMPTY_SIGNATURE = parseType('(collection) -> boolean');
 const CONTAINS_SIGNATURE = parseType('(collection, element: any) -> boolean');
 
+// Validate the collection operand of a LAZY collection operator's canonical
+// handler — like `checkType(engine, op, type)` but fail-open: an operand whose
+// type is not PROVABLY incompatible (`unknown`/`any`/`value`, or a
+// `broadcastable<T>`) is admitted as-is instead of rejected. A hard reject
+// here is worse than useless: the canonical handler returns `null`, and for a
+// lazy operator `boxFunction` then falls back to a silently NON-canonical
+// expression — valid-looking, but tripping the `Not canonical` asserts in
+// arithmetic (`div`/`mul`) the moment it participates in a computation. The
+// lazy-broadcast machinery hits exactly this: `mod(L, N)` over a
+// declared-`unknown` symbol `L` holding a >100-element `List` builds
+// `Map(L, …)` over the SYMBOL, whose static type is `unknown` even though its
+// value is a collection. Mirrors the free-variable leniency of the
+// signature-validation path in `box.ts` (an operand whose type is provisional
+// may satisfy the parameter at runtime).
+function checkCollectionOperand(
+  engine: ComputeEngine,
+  arg: Expression | undefined | null,
+  type: 'collection' | 'indexed_collection' = 'collection'
+): Expression {
+  if (arg === undefined || arg === null) return engine.error('missing');
+  const x = arg.canonical;
+  if (!x.isValid) return x;
+  const t = x.type.type;
+  if (t === 'unknown' || t === 'any' || t === 'value') {
+    // Value-aware refinement: an indeterminate-TYPED operand with a concrete
+    // bound value that is provably NOT a collection (a declared-`unknown`
+    // symbol assigned `5`) must still reject — admitting it would silently
+    // canonicalize e.g. `Any(x)` and quantify over an empty element stream
+    // (`Any(5)` → False). `isCollection` on a symbol consults its value, so
+    // an unresolved symbol (no value yet) and a non-symbol (an application,
+    // whose value is undefined) stay fail-open.
+    if (x.value !== undefined && !x.isCollection)
+      return checkType(engine, x, type);
+    return x;
+  }
+  if (typeof t !== 'string' && t.kind === 'broadcastable') return x;
+  return checkType(engine, x, type);
+}
+
 // Rebuild the operand list with `first` in place of `op1`, dropping nothing
 // else. Used by the peek handlers after stripping a wrapper from op1.
 function withFirst(
@@ -1379,7 +1418,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     signature: '(collection, function?) -> boolean',
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0], 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('Any', [collection]);
       const fn = canonicalFunctionLiteral(ops[1]);
@@ -1401,7 +1440,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     signature: '(collection, function?) -> boolean',
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0], 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('All', [collection]);
       const fn = canonicalFunctionLiteral(ops[1]);
@@ -1432,11 +1471,32 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // For the multi-collection (zipWith) form the result is always an indexed
     // collection (like `Zip`) of the lambda's result type.
     type: (ops) => {
+      // Source type for shape propagation. When the source's STATIC type is
+      // indeterminate (a declared-`unknown` symbol holding a collection
+      // value — the lazy-broadcast `Map(L, …)` shape), fall back to its
+      // value-aware indexed-ness so the Map types `indexed_collection<T>`
+      // rather than shedding indexed-ness to `collection<T>`.
+      const sourceType = (x: Expression): Type => {
+        const t = x.type.type;
+        if (
+          (t === 'unknown' || t === 'any' || t === 'value') &&
+          x.isIndexedCollection
+        )
+          return 'indexed_collection';
+        return t;
+      };
       if (ops.length <= 2) {
         const resultType = functionResult(ops[1].type.type);
-        if (!resultType || resultType === 'unknown' || resultType === 'any')
+        if (!resultType || resultType === 'unknown' || resultType === 'any') {
+          // Unknown element type: still preserve value-aware indexed-ness
+          // (the `.N()` route wraps the body in `N`, whose lazy result types
+          // `unknown` — without this the whole Map would type `unknown` and
+          // the arithmetic broadcast would treat it as a scalar).
+          const s = sourceType(ops[0]);
+          if (s === 'indexed_collection' && ops[0].type.type !== s) return s;
           return ops[0].type;
-        return mapResultType(ops[0].type.type, resultType);
+        }
+        return mapResultType(sourceType(ops[0]), resultType);
       }
       const resultType = functionResult(ops[ops.length - 1].type.type);
       return mapResultType(
@@ -1451,7 +1511,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // a source collection. Keep the single-collection form byte-for-byte
       // identical to its historical behavior.
       if (ops.length <= 2) {
-        const collection = checkType(engine, ops[0]?.canonical, 'collection');
+        const collection = checkCollectionOperand(engine, ops[0]);
         const fn = canonicalFunctionLiteral(ops[1]);
         if (!collection.isValid || !fn) return null;
 
@@ -1461,7 +1521,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalFunctionLiteral(ops[ops.length - 1]);
       const collections = ops
         .slice(0, -1)
-        .map((c) => checkType(engine, c?.canonical, 'collection'));
+        .map((c) => checkCollectionOperand(engine, c));
       if (!fn || collections.some((c) => !c.isValid)) return null;
 
       return engine._fn('Map', [...collections, fn]);
@@ -1562,7 +1622,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return applicable(expr.ops[expr.nops - 1])?.(items as Expression[]);
         }
 
-        if (!expr.isIndexedCollection) return undefined;
+        // Gate on the SOURCE's indexed-ness (value-aware for a symbol
+        // holding a collection), not the Map's own static type: a lazy
+        // broadcast over a declared-`unknown` symbol types `unknown`, but its
+        // source still answers `at`. A genuinely non-indexed source returns
+        // `undefined` from `op1.at` below anyway.
+        if (expr.op1.isIndexedCollection === false) return undefined;
         if (!Number.isFinite(index) || index === 0) return undefined;
         const item = expr.op1.at(index);
         if (!item) return undefined;
@@ -1582,7 +1647,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // If the input collection is indexed, the output collection is indexed.
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
       if (!collection.isValid || !fn) return null;
 
@@ -1765,7 +1830,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     signature: '(collection, function, initial:value?) -> value',
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0], 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
       if (!collection.isValid || !fn) return null;
 
@@ -1860,7 +1925,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: (ops, { engine }) => {
       const fn = canonicalFunctionLiteral(ops[0]);
       const initial = ops[1]?.canonical;
-      const collection = checkType(engine, ops[2], 'collection');
+      const collection = checkCollectionOperand(engine, ops[2]);
       if (!fn || !initial?.isValid || !collection.isValid) return null;
       return engine._fn('Reduce', [collection, fn, initial]);
     },
@@ -1886,7 +1951,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return mapResultType(ops[0].type.type, resultType);
     },
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
       if (!collection.isValid || !fn) return null;
       // An initial value is optional, but when one is PROVIDED it must not be
@@ -1970,7 +2035,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return parseType(`list<${typeToString(elt)}>`);
     },
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
       return engine._fn('Differences', [collection]);
     },
@@ -2030,7 +2095,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Preserve the source's element type / indexed-ness (mirrors Filter).
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
       if (!collection.isValid || !fn) return null;
       return engine._fn('TakeWhile', [collection, fn]);
@@ -2132,7 +2197,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection, predicate: function) -> collection',
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
       if (!collection.isValid || !fn) return null;
       return engine._fn('DropWhile', [collection, fn]);
@@ -2206,7 +2271,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return parseType(`list<${typeToString(inner ?? resultType)}>`);
     },
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
       if (!collection.isValid || !fn) return null;
       return engine._fn('FlatMap', [collection, fn]);
@@ -2441,6 +2506,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           if (fieldType) return fieldType;
         }
         return widen(...Object.values(t.elements)) as Type;
+      } else if (t.kind === 'tuple') {
+        // A literal integer index selects that slot's type (1-based, negatives
+        // count from the end); otherwise `collectionElementType` widens across
+        // all slot types.
+        const key = ops[1];
+        if (ops.length === 2 && key?.isInteger === true) {
+          const n = t.elements.length;
+          const raw = key.re;
+          if (typeof raw === 'number' && Number.isFinite(raw)) {
+            const i = raw < 0 ? n + raw + 1 : raw;
+            if (i >= 1 && i <= n) return t.elements[i - 1].type;
+          }
+        }
       }
       return (
         xs.operatorDefinition?.collection?.elttype?.(xs) ??
@@ -3431,7 +3509,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     signature: '(collection, function) -> value',
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0], 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
       if (!collection.isValid || !fn) return null;
       return engine._fn('MaxBy', [collection, fn]);
@@ -3451,7 +3529,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     signature: '(collection, function) -> value',
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0], 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
       if (!collection.isValid || !fn) return null;
       return engine._fn('MinBy', [collection, fn]);
@@ -3486,7 +3564,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // An index result only makes sense for an INDEXED collection — match
       // the declared signature (MaxBy/MinBy, which return the element,
       // accept any collection).
-      const collection = checkType(engine, ops[0], 'indexed_collection');
+      const collection = checkCollectionOperand(engine, ops[0], 'indexed_collection');
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('ArgMax', [collection]);
       const fn = canonicalFunctionLiteral(ops[1]);
@@ -3514,7 +3592,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // An index result only makes sense for an INDEXED collection — match
       // the declared signature (MaxBy/MinBy, which return the element,
       // accept any collection).
-      const collection = checkType(engine, ops[0], 'indexed_collection');
+      const collection = checkCollectionOperand(engine, ops[0], 'indexed_collection');
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('ArgMin', [collection]);
       const fn = canonicalFunctionLiteral(ops[1]);
@@ -3761,7 +3839,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Preserve the source's element type / indexed-ness (mirrors TakeWhile).
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
-      const collection = checkType(engine, ops[0]?.canonical, 'collection');
+      const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
       return engine._fn('Dedup', [collection]);
     },
