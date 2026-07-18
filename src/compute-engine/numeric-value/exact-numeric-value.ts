@@ -34,6 +34,20 @@ import { isSubtype } from '../../common/type/subtype.js';
 // fields referencing it are only ever *reassigned* by `normalize()`).
 const ZERO_IM_RATIONAL: Rational = Object.freeze([0, 1]) as unknown as Rational;
 
+/** Construction-time writable view of `ExactNumericValue`'s `readonly` value
+ * fields. The `readonly` markers are compile-time-only, so this cast erases
+ * to nothing: the private normalization methods use it to mutate in place
+ * (no intermediate object on the per-instance hot path) while every other
+ * assignment site in the codebase is a compile error. Do NOT export or use
+ * outside the constructor-called normalization methods. */
+type WritableExact = {
+  rational: Rational;
+  radical: number;
+  im: number;
+  imRational: Rational;
+  imRadical: number;
+};
+
 /** An exact component: a rational multiple of the square root of a positive
  * integer. Used for the per-component arithmetic of complex exact values. */
 type ExactComponent = { rat: Rational; rad: number };
@@ -61,34 +75,34 @@ type ExactComponent = { rat: Rational; rad: number };
 export class ExactNumericValue extends NumericValue {
   declare __brand: 'ExactNumericValue';
 
-  // NOTE (perf review, P2-5B): these are declared mutable (not `readonly`)
-  // and `normalize()` below does mutate them in place. As of this check
-  // (2026-07), the *only* call site for `normalize()` in the whole repo is
-  // the constructor itself (before `this` escapes to any caller), and no
-  // code anywhere assigns to `.rational`/`.radical` (or the `im*` fields)
-  // directly — so in practice instances are immutable post-construction.
-  // That is a convention, not a type-enforced guarantee: nothing stops a
-  // future `ev.radical = …` or a new `normalize()` call site from
-  // invalidating a cached derived value. `bignumRe` below deliberately
-  // stays uncached for that reason — see the note there before memoizing
-  // it. (The `im` field IS a cached derived value — it is only written by
-  // the constructor/`normalize()`, consistent with the convention above.)
+  // NOTE (perf review, P2-5B): instances are immutable post-construction,
+  // and since 2026-07-18 the compiler enforces it: the value fields are
+  // `readonly`, and the only writers besides the constructor are the
+  // construction-time `private` normalization methods (`normalize`,
+  // `_normalizeIm`, `_clearIm`), which mutate in place through a localized
+  // `WritableExact` cast rather than building an intermediate object (the
+  // constructor is on the hot path of every exact number). Any new
+  // assignment site — or any post-construction `normalize()` call — is now
+  // a compile error instead of a convention violation. (The `im` field IS a
+  // cached derived value, written only by those same construction-time
+  // paths.) `bignumRe` below still deliberately stays uncached — see the
+  // note there before memoizing it.
   //
   // Hidden-class note: all fields are initialized for every instance in the
   // same order (field initializers + constructor), so all instances share a
   // single shape regardless of whether they are real or complex.
-  rational: Rational;
-  radical: number; // An integer > 0
+  readonly rational: Rational;
+  readonly radical: number; // An integer > 0
 
   // Cached machine value of the imaginary part (0 for real values): the
   // read path of `.im` is a plain data-field load, never a conversion.
-  im = 0;
+  readonly im: number = 0;
 
   // The exact imaginary component: imRational · √imRadical.
   // For real values these stay at the shared frozen defaults (no
   // per-instance allocation on the real path).
-  imRational: Rational = ZERO_IM_RATIONAL;
-  imRadical: number = 1; // An integer > 0
+  readonly imRational: Rational = ZERO_IM_RATIONAL;
+  readonly imRadical: number = 1; // An integer > 0
 
   factory: NumericValueFactory;
 
@@ -237,17 +251,24 @@ export class ExactNumericValue extends NumericValue {
 
   // NOT memoized (perf review, P2-5B): this recomputes `new
   // BigDecimal(p).div(q)` on every access, which is real but small
-  // repeated-conversion overhead. Verified (2026-07): `rational`/`radical`
-  // are only ever written by `normalize()`, which itself is only ever
-  // called from the constructor — so instances ARE immutable in current
-  // practice. But the fields are plain mutable properties, not `readonly`,
-  // and `normalize()` is a public method any future caller could invoke
-  // again (e.g. from a new call site added elsewhere) — a memo here would
-  // go stale silently in that case, with no invalidation hook to catch it.
-  // Do not memoize without first making `rational`/`radical` `readonly` (a
-  // separate, wider change — this class is constructed pervasively) so the
-  // immutability becomes a compiler-checked invariant instead of a
-  // convention.
+  // repeated-conversion overhead. The field-immutability precondition is
+  // now compiler-enforced (`rational`/`radical` are `readonly` as of
+  // 2026-07-18), but a memo has a SECOND staleness axis: the result depends
+  // on the process-global `BigDecimal.precision` (computed at
+  // `max(current, 25)` digits, see `_bignumComponent`). A naive lazy cache
+  // would serve a low-precision value after `ce.precision` is raised — or
+  // cache an inflated value if first accessed inside a guard-digits window.
+  // Any memo must therefore store `{value, precision}` and recompute on
+  // mismatch. Instrumented (2026-07-18) across representative workloads
+  // (solve/integrate/Gaussian/simplify/Γ at 21d; ζ/Γ, Σ1/n², radical and
+  // rational-matrix arithmetic at 50d): `_bignumComponent` runs 0–54 times
+  // per *operation* (ζ and Σ folds: zero — the numeric kernels do BigDecimal
+  // math directly and never convert through here), the integer shape
+  // (radical = 1, denominator = 1, the one precision-independent, safely
+  // cacheable case) is 0–15% of calls (small integers live as machine
+  // numbers in BoxedNumber, not here), and NO instance was ever read twice —
+  // a memo has no repeat accesses to serve and would only retain extra
+  // memory. This is a cold path; it stays uncached.
   get bignumRe(): BigDecimal {
     return this._bignumComponent(this.rational, this.radical);
   }
@@ -332,7 +353,8 @@ export class ExactNumericValue extends NumericValue {
     return null;
   }
 
-  normalize(): void {
+  private normalize(): void {
+    const w = this as WritableExact;
     console.assert(
       Number.isInteger(this.radical) &&
         this.radical > 0 &&
@@ -354,8 +376,8 @@ export class ExactNumericValue extends NumericValue {
     // 1/ Propagate NaN
     //
     if (isNaN(this.radical)) {
-      this.rational = [NaN, 1];
-      this.radical = 1;
+      w.rational = [NaN, 1];
+      w.radical = 1;
       if (this.im !== 0) this._clearIm();
       return;
     }
@@ -363,8 +385,8 @@ export class ExactNumericValue extends NumericValue {
     const [n, d] = this.rational;
     // Use double equal to catch both number and bigint
     if (d == 0) {
-      this.rational = [NaN, 1];
-      this.radical = 1;
+      w.rational = [NaN, 1];
+      w.radical = 1;
       if (this.im !== 0) this._clearIm();
       return;
     }
@@ -373,8 +395,8 @@ export class ExactNumericValue extends NumericValue {
     // 2/ Is the rational or radical zero?
     //
     if (this.radical === 0 || n === 0) {
-      this.rational = [0, 1];
-      this.radical = 1;
+      w.rational = [0, 1];
+      w.radical = 1;
       return;
     }
 
@@ -384,15 +406,15 @@ export class ExactNumericValue extends NumericValue {
     //
     if (this.radical >= 4) {
       const [factor, root] = canonicalInteger(this.radical, 2);
-      if (factor !== 1) this.rational = mul(this.rational, [factor, 1]);
-      this.radical = root;
+      if (factor !== 1) w.rational = mul(this.rational, [factor, 1]);
+      w.radical = root;
     }
 
     //
     // 3/ Reduce rational
     //
 
-    this.rational = reducedRational(this.rational);
+    w.rational = reducedRational(this.rational);
 
     // Representable-set invariant: a value with BOTH non-zero components can
     // carry no radical on either. (Callers must check before constructing.)
@@ -408,9 +430,10 @@ export class ExactNumericValue extends NumericValue {
 
   /** Reset the imaginary component to (the shared) zero. */
   private _clearIm(): void {
-    this.imRational = ZERO_IM_RATIONAL;
-    this.imRadical = 1;
-    this.im = 0;
+    const w = this as WritableExact;
+    w.imRational = ZERO_IM_RATIONAL;
+    w.imRadical = 1;
+    w.im = 0;
   }
 
   /** Normalize the imaginary component (`imRational · √imRadical`) and cache
@@ -418,6 +441,7 @@ export class ExactNumericValue extends NumericValue {
    * whole value NaN (the exact lane has no complex-infinity representation).
    */
   private _normalizeIm(): void {
+    const w = this as WritableExact;
     console.assert(
       Number.isInteger(this.imRadical) &&
         this.imRadical >= 0 &&
@@ -430,8 +454,8 @@ export class ExactNumericValue extends NumericValue {
       d == 0 ||
       (typeof n === 'number' && !Number.isFinite(n))
     ) {
-      this.rational = [NaN, 1];
-      this.radical = 1;
+      w.rational = [NaN, 1];
+      w.radical = 1;
       this._clearIm();
       return;
     }
@@ -441,11 +465,11 @@ export class ExactNumericValue extends NumericValue {
     }
     if (this.imRadical >= 4) {
       const [factor, root] = canonicalInteger(this.imRadical, 2);
-      if (factor !== 1) this.imRational = mul(this.imRational, [factor, 1]);
-      this.imRadical = root;
+      if (factor !== 1) w.imRational = mul(this.imRational, [factor, 1]);
+      w.imRadical = root;
     }
-    this.imRational = reducedRational(this.imRational);
-    this.im =
+    w.imRational = reducedRational(this.imRational);
+    w.im =
       rationalAsFloat(this.imRational) *
       (this.imRadical === 1 ? 1 : Math.sqrt(this.imRadical));
   }
