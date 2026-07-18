@@ -366,6 +366,32 @@ const FUNCTIONS: Record<
   Norm: (expr: Expression, serialize) =>
     `||${serialize((expr as FnExpr).op1)}||`,
 
+  // The dense-output table of an `InterpolatingFunction` (see
+  // `NDSolveFunction`) is elided: only the covered interval and the applied
+  // argument are displayed. (The LaTeX serializer elides identically; the
+  // full table is carried by MathJSON.)
+  InterpolatingFunction: (expr: Expression, serialize) => {
+    const fn = expr as FnExpr;
+    const data = fn.op1 as FnExpr;
+    let domain = '';
+    if (data.operator === 'List' && data.nops > 0) {
+      const first = data.ops[0] as FnExpr;
+      const last = data.ops[data.nops - 1] as FnExpr;
+      const x0 = first.ops?.[0]?.re;
+      const xl = last.ops?.[0]?.re;
+      const hl = last.ops?.[1]?.re;
+      if (
+        Number.isFinite(x0) &&
+        xl !== undefined &&
+        hl !== undefined &&
+        Number.isFinite(xl + hl)
+      )
+        domain = `[${Math.round(x0 * 1e6) / 1e6}, ${Math.round((xl + hl) * 1e6) / 1e6}]`;
+    }
+    const arg = fn.nops > 1 ? `(${serialize(fn.ops[1])})` : '';
+    return `InterpolatingFunction_${domain}${arg}`;
+  },
+
   // Trigonometric functions
   Sin: 'sin',
   Cos: 'cos',

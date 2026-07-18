@@ -1869,6 +1869,19 @@ describe('NDSolveFunction (interpolating-function result surface)', () => {
     expect(result.operator).toBe('NDSolveFunction');
   });
 
+  test('composes with compile(): the literal compiles as a lambda', async () => {
+    const { compile } = await import(
+      '../../src/compute-engine/compilation/compile-expression'
+    );
+    // A top-level Function literal compiles with `calling: 'lambda'` — its
+    // `run` takes POSITIONAL arguments, not a `{vars}` record.
+    const compiled = compile(solveExp(), { to: 'javascript' });
+    expect(compiled.success).toBe(true);
+    expect((compiled as any).calling).toBe('lambda');
+    const run = compiled.run as unknown as (x: number) => number;
+    expect(run(0.5)).toBeCloseTo(Math.exp(0.5), 9);
+  });
+
   test('composes with compile(): the applied form lowers to plain JS', async () => {
     const { compile } = await import(
       '../../src/compute-engine/compilation/compile-expression'

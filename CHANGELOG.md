@@ -10,9 +10,10 @@
   table. Assign it and evaluate anywhere in the integration interval
   (`f := NDSolveFunction(y′ = y, y, (x, 0, 1), 1)`; `f(0.5)` → `1.6487…`),
   at the integration accuracy; outside the interval the value clamps to the
-  nearest endpoint, and a symbolic argument stays symbolic. The applied form
-  compiles to plain JavaScript (`compile(f(t))`, ~1 µs per evaluation), and
-  LaTeX display elides the data table
+  nearest endpoint, and a symbolic argument stays symbolic. The solution
+  compiles to plain JavaScript — `compile(f)` yields a positional lambda
+  (`run(0.5)`), and `compile(f(t))` an expression over `t` (~1 µs per
+  evaluation) — and LaTeX display elides the data table
   (`\operatorname{InterpolatingFunction}_{[0, 1]}(x)`); the full table
   round-trips through MathJSON. Scalar equations (first-order and
   higher-order) are supported; the multi-dependent system form stays inert.
