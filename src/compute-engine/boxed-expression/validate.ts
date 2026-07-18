@@ -65,6 +65,18 @@ function typeCouldBeCollection(type: Type): boolean {
 // collapsed to `number` and baked `incompatible-type` (Tycho item 30).
 
 /**
+ * A threadable operand that broadcasting may consume as a collection: either
+ * the *value* is an actual finite indexed collection (regardless of how
+ * precise its static type is), or the static *type* admits a collection at
+ * runtime (`list`, `number | list`, `broadcastable<T>`, …) even though no
+ * value is materialized. Neither check subsumes the other. Such an operand is
+ * admitted as-is and excluded from scalar parameter-type inference.
+ */
+function couldBeCollectionOperand(op: Expression): boolean {
+  return isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type);
+}
+
+/**
  * A `broadcastable<S>` operand COULD be a plain scalar `S` at runtime — that
  * is the meaning of the lift (`S`, or an indexed collection of `S` that
  * broadcasts). When the scalar base matches the parameter type, admit the
@@ -545,10 +557,7 @@ export function validateArguments(
       result.push(op);
       continue;
     }
-    if (
-      threadable &&
-      (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))
-    ) {
+    if (threadable && couldBeCollectionOperand(op)) {
       result.push(op);
       continue;
     }
@@ -633,10 +642,7 @@ export function validateArguments(
       i += 1;
       continue;
     }
-    if (
-      threadable &&
-      (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))
-    ) {
+    if (threadable && couldBeCollectionOperand(op)) {
       result.push(op);
       i += 1;
       continue;
@@ -693,10 +699,7 @@ export function validateArguments(
         result.push(op);
         continue;
       }
-      if (
-        threadable &&
-        (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))
-      ) {
+      if (threadable && couldBeCollectionOperand(op)) {
         result.push(op);
         continue;
       }
@@ -755,34 +758,21 @@ export function validateArguments(
   i = 0;
   for (const param of params) {
     if (!lazy)
-      if (
-        !threadable ||
-        (!isFiniteIndexedCollection(finalOps[i]) &&
-          !typeCouldBeCollection(finalOps[i].type.type))
-      )
+      if (!threadable || !couldBeCollectionOperand(finalOps[i]))
         finalOps[i].infer(param);
     i += 1;
   }
   for (const param of optParams) {
     if (!finalOps[i]) break;
     if (!lazy)
-      if (
-        !threadable ||
-        (!isFiniteIndexedCollection(finalOps[i]) &&
-          !typeCouldBeCollection(finalOps[i].type.type))
-      )
+      if (!threadable || !couldBeCollectionOperand(finalOps[i]))
         finalOps[i].infer(param);
     i += 1;
   }
   if (varParam) {
     for (const op of finalOps.slice(i)) {
       if (!lazy)
-        if (
-          !threadable ||
-          (!isFiniteIndexedCollection(op) &&
-            !typeCouldBeCollection(op.type.type))
-        )
-          op.infer(varParam);
+        if (!threadable || !couldBeCollectionOperand(op)) op.infer(varParam);
       i += 1;
     }
   }
