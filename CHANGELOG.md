@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+### Performance
+
+- **Removed a per-call inference-snapshot tax that had slowed the whole
+  engine by ~1.4× since 0.74.0.** Every top-level boxing or parsing
+  operation eagerly snapshotted the set of inferred symbols by walking every
+  binding in every scope — including the entire standard library — to
+  provide provenance for the fresh-matrix-inference repair
+  (`Determinant(A + B)` inferring `A`, `B` as matrices), a consumer that
+  runs only when a matrix-typed parameter mismatches. The provenance is now
+  computed forward: `BoxedSymbol.infer()` records a definition when its type
+  first transitions unknown → concrete during a boxing operation, and the
+  repair's eligibility reads that log. Matrix inference behavior is
+  unchanged (pinned by a 13-case matrix in
+  `matrix-operator-typing.test.ts`); eligibility is now keyed on definition
+  identity rather than name, so a name whose fresh inner-scope definition
+  was popped no longer masks an outer definition. Measured recovery:
+  `π.N()` at 200 digits 2.5 µs → 0.12 µs (21×, faster than 0.73.0);
+  `∫ 1/(x³+1)` 5.8 ms → 1.6 ms (3.7×); the drift vs 0.73.0 across the
+  benchmark suite is eliminated.
+
 ### Improvements
 
 - **The sign of integer powers of pure-imaginary bases is now determined.**
@@ -13,6 +33,24 @@
   but `i⁴ = 1` and `(1+i)² = 2i`).
 
 ### Bug Fixes
+
+- **Sign (`sgn`) handler audit.** A mathematical-correctness pass over all
+  ~69 `sgn` handlers fixed a dozen wrong claims (each could mislead
+  simplifications or comparisons built on `isPositive`/`isNegative`):
+  `Gamma(0)` and `Gamma(-n)` reported `zero`/indeterminate instead of
+  recognizing poles; `Log` with a negative base claimed a real sign (the
+  sign only flips for a base in (0,1)); `Truncate(1/2)` claimed `positive`
+  (truncation of |x| < 1 is 0); `Round(-1/2)` claimed `zero` while
+  `evaluate` rounds halves away from zero (−1); `GCD(0,0)` and `LCM(0,n)`
+  claimed `positive` (both are 0); `Floor`/`Ceil` of a complex number used
+  the sign of the raw real part instead of the rounded one
+  (`⌊0.5+0.5i⌋ = 0`); `Factorial(-1/2)` claimed non-real (it is `Γ(1/2) =
+  √π`; only negative *integers* are poles, same fix for `Factorial2`);
+  `Abs(NaN)` claimed `positive`; `Random(-5, 5)` claimed `non-negative`;
+  tensor `Rank` of a scalar claimed `positive` (it is 0); and a latent
+  parity inversion in `Multiply` swapped `non-negative`/`non-positive` for
+  products of sign-indefinite factors. `Arctan` now reports the sign of its
+  argument (it previously never produced one).
 
 - **A single-letter builtin operator used as a variable now stays connected to
   later assignments.** Prose-style input like `N \equiv 1 \pmod 5` devolves the

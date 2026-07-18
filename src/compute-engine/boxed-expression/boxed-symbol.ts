@@ -412,6 +412,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       if (def.value.isConstant) return false;
 
       if (def.value.inferredType || def.value.type.isUnknown) {
+        const wasUnknown = def.value.type.isUnknown;
         const inferred = this.engine.type(
           inferenceMode === 'widen'
             ? widen(def.value.type.type, t)
@@ -426,6 +427,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // parameter type (e.g. `f(S)` with `f: (unknown) -> unknown`).
         if (inferred.isUnknown) return false;
         def.value.type = inferred;
+        // A first inference (unknown → concrete) during a boxing operation is
+        // recorded as forward provenance for the fresh-matrix-inference
+        // repair ("first inferred while canonicalizing this argument"); a
+        // re-inference of an already-concrete type is not "fresh" and is
+        // deliberately not recorded.
+        if (wasUnknown && this.engine._inferenceTxDepth > 0)
+          (this.engine._freshlyInferred ??= new Set()).add(def.value);
         return true;
       }
       return false;

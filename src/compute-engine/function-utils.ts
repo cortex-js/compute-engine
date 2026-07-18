@@ -2,6 +2,7 @@ import { MathJsonSymbol } from '../math-json.js';
 import { cmp } from './boxed-expression/compare.js';
 import type {
   BoxedDefinition,
+  BoxedValueDefinition,
   EvaluateOptions,
   Expression,
   FunctionInterface,
@@ -32,7 +33,7 @@ type ValidateArgumentsFn = (
   signature: Type,
   lazy?: boolean,
   threadable?: boolean,
-  inferredBefore?: ReadonlySet<string>
+  freshlyInferred?: ReadonlySet<BoxedValueDefinition>
 ) => ReadonlyArray<Expression> | null;
 
 let _validateArguments: ValidateArgumentsFn | undefined;

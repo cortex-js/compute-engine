@@ -54,6 +54,7 @@ import type {
   SymbolInfo,
   DefinitionSearchResult,
   ParseDiagnostic,
+  BoxedValueDefinition,
 } from './global-types.js';
 
 import type {
@@ -86,6 +87,7 @@ import { MachineNumericValue } from './numeric-value/machine-numeric-value.js';
 
 import {
   beginInferenceTransaction,
+  endInferenceTransaction,
   box,
   boxFunction,
   optionsToInternal,
@@ -522,6 +524,20 @@ export class ComputeEngine implements IComputeEngine {
   set _ephemeralWriteDepth(value: number) {
     this._configurationLifecycle.ephemeralWriteDepth = value;
   }
+
+  /** Depth of nested top-level boxing operations (see
+   * `beginInferenceTransaction` in `box.ts`).
+   * @internal
+   */
+  _inferenceTxDepth = 0;
+
+  /** Value definitions whose type was first inferred (unknown → concrete)
+   * during the current top-level boxing operation — forward-computed
+   * provenance for the fresh-matrix-inference repair. Lazily allocated by
+   * `BoxedSymbol.infer()`; reset when the outermost boxing ends.
+   * @internal
+   */
+  _freshlyInferred: Set<BoxedValueDefinition> | null = null;
 
   /** In strict mode (the default) the Compute Engine performs
    * validation of domains and signature and may report errors.
@@ -2024,7 +2040,7 @@ export class ComputeEngine implements IComputeEngine {
       };
     }
 
-    const endInferenceTransaction = beginInferenceTransaction(this);
+    beginInferenceTransaction(this);
     try {
       const result = syntax.parse(latex, {
         getSymbolType: (id) => {
@@ -2118,7 +2134,7 @@ export class ComputeEngine implements IComputeEngine {
 
       return boxed;
     } finally {
-      endInferenceTransaction();
+      endInferenceTransaction(this);
     }
   }
 

@@ -14,6 +14,7 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
   Scope,
+  BoxedValueDefinition,
 } from '../global-types.js';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
@@ -492,7 +493,7 @@ export function validateArguments(
   signature: Type,
   lazy?: boolean,
   threadable?: boolean,
-  inferredBefore?: ReadonlySet<string>
+  freshlyInferred?: ReadonlySet<BoxedValueDefinition>
 ): ReadonlyArray<Expression> | null {
   // @fastpath
   if (!ce.strict) {
@@ -593,7 +594,7 @@ export function validateArguments(
         ce,
         op,
         param,
-        inferredBefore
+        freshlyInferred
       );
       if (repaired) {
         result.push(repaired);
@@ -790,15 +791,24 @@ function repairFreshMatrixInference(
   ce: ComputeEngine,
   op: Expression,
   expected: Type,
-  inferredBefore?: ReadonlySet<string>
+  freshlyInferred?: ReadonlySet<BoxedValueDefinition>
 ): Expression | null {
-  if (!inferredBefore || !ce.type(expected).matches('matrix')) return null;
+  if (!freshlyInferred || !ce.type(expected).matches('matrix')) return null;
 
   const eligible = new Set<string>();
   for (const name of op.freeVariables) {
-    if (inferredBefore.has(name)) continue;
     const def = ce.lookupDefinition(name);
-    if (def && isValueDef(def) && def.value.inferredType) eligible.add(name);
+    if (!def || !isValueDef(def) || !def.value.inferredType) continue;
+    // "Fresh" = the definition's type was first inferred (unknown → concrete)
+    // during this boxing operation — the forward log recorded by
+    // `BoxedSymbol.infer()` — or is still unknown (never inferred; the
+    // previous snapshot-based provenance excluded unknown-typed definitions
+    // from "inferred before", making them always eligible). Keying on the
+    // definition's identity rather than its name also means a symbol whose
+    // fresh inner-scope definition has been popped, and which now resolves to
+    // an outer definition inferred before this box, is correctly ineligible.
+    if (freshlyInferred.has(def.value) || def.value.type.isUnknown)
+      eligible.add(name);
   }
   if (eligible.size === 0) return null;
 

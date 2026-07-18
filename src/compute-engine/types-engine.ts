@@ -34,6 +34,7 @@ import type {
   OEISSequenceInfo,
   OEISOptions,
   InterpretResult,
+  BoxedValueDefinition,
 } from './types-definitions.js';
 import type {
   AssumeResult,
@@ -222,6 +223,18 @@ export interface IComputeEngine {
   /** When > 0, value writes are ephemeral loop-index writes.
    * @internal */
   _ephemeralWriteDepth: number;
+
+  /** Depth of nested top-level boxing operations (see
+   * `beginInferenceTransaction` in `box.ts`).
+   * @internal */
+  _inferenceTxDepth: number;
+
+  /** Value definitions whose type was first inferred (unknown → concrete)
+   * during the current top-level boxing operation — the forward-computed
+   * provenance for `repairFreshMatrixInference`'s eligibility. Lazily
+   * allocated; `null` when empty or no boxing is in progress.
+   * @internal */
+  _freshlyInferred: Set<BoxedValueDefinition> | null;
 
   timeLimit: number;
 

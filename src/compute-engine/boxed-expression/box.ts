@@ -7,6 +7,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Metadata,
   Scope,
+  BoxedValueDefinition,
 } from '../global-types.js';
 import type { FormOption } from '../types-serialization.js';
 
@@ -417,23 +418,26 @@ export function boxFunction(
  *
  */
 
-const inferenceTransactions = new WeakMap<
-  ComputeEngine,
-  { depth: number; inferredBefore: ReadonlySet<string> }
->();
-
-export function beginInferenceTransaction(ce: ComputeEngine): () => void {
-  let transaction = inferenceTransactions.get(ce);
-  if (!transaction) {
-    transaction = { depth: 0, inferredBefore: inferredSymbolNames(ce) };
-    inferenceTransactions.set(ce, transaction);
-  }
-  transaction.depth += 1;
-  return () => {
-    transaction!.depth -= 1;
-    if (transaction!.depth === 0) inferenceTransactions.delete(ce);
-  };
+/**
+ * Mark the start of a (possibly nested) boxing operation. While at least one
+ * is in progress, `BoxedSymbol.infer()` records every value definition whose
+ * type transitions unknown → concrete into `ce._freshlyInferred` — the
+ * forward-computed provenance for `repairFreshMatrixInference`'s "first
+ * inferred while canonicalizing this argument" eligibility test. This
+ * replaced an eager snapshot of all inferred symbols (a walk over every
+ * binding in every scope, per outermost box) that dominated the per-call
+ * cost of small operations engine-wide.
+ */
+export function beginInferenceTransaction(ce: ComputeEngine): void {
+  ce._inferenceTxDepth += 1;
 }
+
+export function endInferenceTransaction(ce: ComputeEngine): void {
+  ce._inferenceTxDepth -= 1;
+  if (ce._inferenceTxDepth === 0) ce._freshlyInferred = null;
+}
+
+const EMPTY_FRESHLY_INFERRED: ReadonlySet<BoxedValueDefinition> = new Set();
 
 export function box(
   ce: ComputeEngine,
@@ -444,11 +448,11 @@ export function box(
     scope?: Scope;
   }
 ): Expression {
-  const endTransaction = beginInferenceTransaction(ce);
+  beginInferenceTransaction(ce);
   try {
     return boxInternal(ce, expr, options);
   } finally {
-    endTransaction();
+    endInferenceTransaction(ce);
   }
 }
 
@@ -876,7 +880,12 @@ function makeCanonicalFunction(
         opDef.signature.type,
         opDef.lazy,
         opDef.broadcastable,
-        inferenceTransactions.get(ce)?.inferredBefore
+        // The repair is enabled whenever a boxing operation is in progress
+        // (matching the old always-present snapshot); an empty log means "no
+        // fresh inference happened", not "repair disabled".
+        ce._inferenceTxDepth > 0
+          ? (ce._freshlyInferred ?? EMPTY_FRESHLY_INFERRED)
+          : undefined
       );
 
   if (adjustedArgs) {
@@ -919,22 +928,6 @@ function makeCanonicalFunction(
     canonical: true,
     scope,
   });
-}
-
-function inferredSymbolNames(ce: ComputeEngine): ReadonlySet<string> {
-  const result = new Set<string>();
-  let scope: Scope | null = ce.context.lexicalScope;
-  while (scope) {
-    for (const [name, binding] of scope.bindings)
-      if (
-        isValueDef(binding) &&
-        binding.value.inferredType &&
-        !binding.value.type.isUnknown
-      )
-        result.add(name);
-    scope = scope.parent;
-  }
-  return result;
 }
 
 function makeNumericFunction(

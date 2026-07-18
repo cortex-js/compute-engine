@@ -133,3 +133,142 @@ describe('Multiply numeric typing (regression — must be unchanged)', () => {
     expect(ce.parse('2x').type.toString()).toBe('finite_number');
   });
 });
+
+/**
+ * Fresh-matrix-inference repair — the P1–P11 behavior matrix (probe-verified
+ * 2026-07-18, pinned when the repair's provenance moved from an eager
+ * inferred-symbol snapshot to the forward log recorded by
+ * `BoxedSymbol.infer()`; see
+ * docs/plans/2026-07-18-expected-type-inference-context.md §0). Each test
+ * uses a fresh engine: the repair retypes symbols for the engine's lifetime.
+ */
+describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
+  const sym = (ce: ComputeEngine, name: string) =>
+    ce.box(name).type.toString();
+
+  test('P1: Det(A+B), both fresh → valid, both matrix', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Determinant', ['Add', 'A', 'B']]).isValid).toBe(true);
+    expect(sym(ce, 'A')).toBe('matrix');
+    expect(sym(ce, 'B')).toBe('matrix');
+  });
+
+  test('P2: prior numeric inference wins — invalid, A stays number', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Add', 'A', 1]).evaluate();
+    expect(ce.box(['Determinant', ['Add', 'A', 'B']]).isValid).toBe(false);
+    expect(sym(ce, 'A')).toBe('number');
+  });
+
+  test('P3: Det(a·A), both fresh → ambiguous product never guessed', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Determinant', ['Multiply', 'a', 'A']]).isValid).toBe(
+      false
+    );
+    expect(sym(ce, 'a')).toBe('number');
+    expect(sym(ce, 'A')).toBe('number');
+  });
+
+  test('P4: Det(2·A) → literal scalar is unambiguous, A matrix', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Determinant', ['Multiply', 2, 'A']]).isValid).toBe(true);
+    expect(sym(ce, 'A')).toBe('matrix');
+  });
+
+  test('P5: Negate / integer Power / Subtract forms all promote', () => {
+    {
+      const ce = new ComputeEngine();
+      expect(ce.box(['Determinant', ['Negate', 'A']]).isValid).toBe(true);
+      expect(sym(ce, 'A')).toBe('matrix');
+    }
+    {
+      const ce = new ComputeEngine();
+      expect(ce.box(['Determinant', ['Power', 'A', 2]]).isValid).toBe(true);
+      expect(sym(ce, 'A')).toBe('matrix');
+    }
+    {
+      const ce = new ComputeEngine();
+      expect(ce.box(['Determinant', ['Subtract', 'A', 'B']]).isValid).toBe(
+        true
+      );
+      expect(sym(ce, 'A')).toBe('matrix');
+      expect(sym(ce, 'B')).toBe('matrix');
+    }
+  });
+
+  test('P6: non-strict engine — no repair, fresh symbols infer number', () => {
+    const ce = new ComputeEngine();
+    ce.strict = false;
+    expect(ce.box(['Determinant', ['Add', 'A', 'B']]).isValid).toBe(true);
+    expect(sym(ce, 'A')).toBe('number');
+  });
+
+  test('P7: nested sub-operator — Det(Dot(u,v)): inner signature governs, no matrix promotion', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box(['Determinant', ['Dot', 'u', 'v']]);
+    // Dot returns a scalar, so the outer Determinant(matrix) mismatches; the
+    // repair must not promote u/v — they carry Dot's own parameter typing.
+    expect(e.isValid).toBe(false);
+    expect(sym(ce, 'u')).toBe('list<number> | matrix');
+    expect(sym(ce, 'v')).toBe('list<number> | matrix');
+  });
+
+  test('P8: Det(A·M) with declared M: matrix — no unnecessary promotion', () => {
+    const ce = new ComputeEngine();
+    ce.declare('M', 'matrix');
+    expect(ce.box(['Determinant', ['Multiply', 'A', 'M']]).isValid).toBe(
+      true
+    );
+    expect(sym(ce, 'A')).toBe('number');
+  });
+
+  test('P9: Det(A·v) with declared v: vector — failed repair rolls A back to number', () => {
+    const ce = new ComputeEngine();
+    ce.declare('v', 'vector');
+    expect(ce.box(['Determinant', ['Multiply', 'A', 'v']]).isValid).toBe(
+      false
+    );
+    expect(sym(ce, 'A')).toBe('number');
+  });
+
+  test('P10: Det(A/A) — argument folds to 1, invalid, A ends number', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Determinant', ['Divide', 'A', 'A']]).isValid).toBe(false);
+    expect(sym(ce, 'A')).toBe('number');
+  });
+
+  test('P11: Det(f(A)) — A never enters numeric inference, not force-typed', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Determinant', ['f', 'A']]).isValid).toBe(true);
+    expect(sym(ce, 'A')).toBe('unknown');
+  });
+
+  test('supplied optional argument still repairs (CharacteristicPolynomial)', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['CharacteristicPolynomial', ['Add', 'A', 'B'], 'x']).isValid
+    ).toBe(true);
+    expect(sym(ce, 'A')).toBe('matrix');
+  });
+
+  test('union parameter (matrix|vector) still repairs (LinearSolve)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('M', 'matrix');
+    expect(ce.box(['LinearSolve', 'M', ['Add', 'A', 'B']]).isValid).toBe(
+      true
+    );
+    expect(sym(ce, 'A')).toBe('matrix');
+  });
+
+  test('non-plannable term excludes only itself: Det(A + Cos(t)·B)', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Determinant',
+      ['Add', 'A', ['Multiply', ['Cos', 't'], 'B']],
+    ]);
+    expect(e.isValid).toBe(true);
+    expect(sym(ce, 't')).toBe('number');
+    expect(sym(ce, 'A')).toBe('matrix');
+    expect(sym(ce, 'B')).toBe('matrix');
+  });
+});
