@@ -267,6 +267,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       signature: '(number) -> real',
       sgn: ([x], { engine: ce }) => {
+        if (x.isNaN) return 'unsigned'; // |NaN| = NaN
         if (x.isSame(0)) return 'zero';
         if (isNumber(x)) return 'positive';
         // Symbol with no value: assumed bounds on `abs:x` may sharpen the
@@ -369,8 +370,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonNegative) return 'non-negative';
         if (x.isNonPositive && x.isGreater(-1)) return 'zero';
         if (x.isNonPositive) return 'non-positive';
+        // Component-wise ceiling of a complex: real result iff ⌈im⌉ = 0
+        // (im ∈ (-1, 0]), and then the sign is that of ⌈re⌉ — not of re
+        // itself (⌈-0.5 - 0.5i⌉ = 0, not negative).
         if (x.isReal == false && isNumber(x))
-          return x.im! > 0 || x.im! <= -1 ? 'unsigned' : numberSgn(x.re); //.re and .im should be more general.
+          return x.im! > 0 || x.im! <= -1
+            ? 'unsigned'
+            : numberSgn(Math.ceil(x.re)); //.re and .im should be more general.
         return undefined;
       },
       evaluate: ([x]) =>
@@ -585,11 +591,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return numericTypeHandler([x]);
       },
 
-      // Assumes that the inside of the factorial is an integer
+      // x! = Γ(x+1): positive for x ≥ 0; a pole (~oo) at negative integers.
+      // For a negative NON-integer the value is real with alternating sign
+      // between consecutive poles (Γ(1/2) = √π > 0, Γ(-1/2) < 0), so no
+      // uniform claim is possible.
       sgn: ([x]) =>
         x.isNonNegative
           ? 'positive'
-          : x.isNegative || x.isReal === false
+          : (x.isNegative && x.isInteger) || x.isReal === false
             ? 'unsigned'
             : undefined,
       canonical: (args, { engine }) => engine._fn('Factorial', [args[0]]),
@@ -682,12 +691,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x?.isInteger === true && x.isNegative === true) return 'number';
         return numericTypeHandler([x]);
       },
-      sgn: (
-        [x] //Assumes that the inside of the factorial is an integer
-      ) =>
+      // Positive for x ≥ 0; NaN at negative integers (see evaluate). A
+      // negative non-integer stays symbolic (its continuation value can be a
+      // positive real, e.g. (-1/2)!!), so make no claim.
+      sgn: ([x]) =>
         x.isNonNegative
           ? 'positive'
-          : x.isNegative || x.isReal === false
+          : (x.isNegative && x.isInteger) || x.isReal === false
             ? 'unsigned'
             : undefined,
       evaluate: (ops) => {
@@ -722,8 +732,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isGreaterEqual(1)) return 'positive';
         if (x.isNonNegative && x.isLess(1)) return 'zero';
         if (x.isNonNegative) return 'non-negative';
+        // Component-wise floor of a complex: real result iff ⌊im⌋ = 0
+        // (im ∈ [0, 1)), and then the sign is that of ⌊re⌋ — not of re
+        // itself (⌊0.5 + 0.5i⌋ = 0, not positive).
         if (x.isReal == false && isNumber(x))
-          return x.im! < 0 || x.im! >= 1 ? 'unsigned' : numberSgn(x.re); //.re and .im should be more general.
+          return x.im! < 0 || x.im! >= 1
+            ? 'unsigned'
+            : numberSgn(Math.floor(x.re)); //.re and .im should be more general.
         return undefined;
       },
       evaluate: ([x]) =>
@@ -775,12 +790,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops) =>
         ops.length === 1 ? gammaPoleType(ops[0]) : numericTypeHandler(ops),
 
+      // Γ is positive on the positive reals; 0 and the negative integers are
+      // poles (value ~oo, hence 'unsigned' — NOT 'zero': Γ never vanishes).
+      // On a negative non-integer the sign alternates between consecutive
+      // poles, so make no claim.
       sgn: (ops) =>
         ops.length === 1
           ? ops[0].isPositive
             ? 'positive'
-            : ops[0].isSame(0)
-              ? 'zero'
+            : ops[0].isSame(0) ||
+                (ops[0].isNegative && ops[0].isInteger) ||
+                ops[0].isReal === false
+              ? 'unsigned'
               : undefined
           : undefined,
       evaluate: (ops, { numericApproximation, engine }) => {
@@ -1171,7 +1192,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (!base) return lnSign(x);
         if (base.isSame(1) || base.isReal == false) return 'unsigned';
         if (base.isGreater(1)) return lnSign(x);
-        if (base.isLess(1)) return oppositeSgn(lnSign(x));
+        // The sign only flips for a base in (0, 1) — a NEGATIVE base makes
+        // ln(base) complex, so the quotient is not real.
+        if (base.isPositive && base.isLess(1)) return oppositeSgn(lnSign(x));
+        if (base.isNegative) return 'unsigned';
         return undefined;
       },
       // @fastpath: this doesn't get called. See makeNumericFunction()
@@ -1550,11 +1574,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return sumNeg % 2 === 0 ? 'positive' : 'negative';
         }
         if (ops.every((x) => x.isNonPositive || x.isNonNegative)) {
+          // An even number of non-positive factors gives a non-NEGATIVE
+          // product (all factors non-negative → product ≥ 0).
           let sumNeg = 0;
           ops.forEach((x) => {
             if (x.isNonPositive) sumNeg++;
           });
-          return sumNeg % 2 === 0 ? 'non-positive' : 'non-negative';
+          return sumNeg % 2 === 0 ? 'non-negative' : 'non-positive';
         }
         if (
           ops.every(
@@ -2104,10 +2130,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // below no longer holds.
         if (n !== undefined) return undefined;
         if (x.isNaN) return 'unsigned';
+        // The evaluate handler rounds halves AWAY from zero in every lane
+        // (Round(-1/2) = -1); Math.round ties toward +∞, so negate-and-round
+        // for negative reals or `.sgn` and `.evaluate()` disagree at -0.5.
         if (isNumber(x))
           return x.im! >= 0.5 || x.im! <= -0.5
             ? 'unsigned'
-            : numberSgn(Math.round(x.re));
+            : numberSgn(
+                x.re < 0 ? -Math.round(-x.re) : Math.round(x.re)
+              );
         if (x.isGreaterEqual(0.5)) return 'positive';
         if (x.isLessEqual(-0.5)) return 'negative';
         if (x.isLess(0.5) && x.isGreater(-0.5)) return 'zero';
@@ -2314,7 +2345,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> integer',
       type: ([x]) => roundingFunctionType(x),
-      sgn: ([x]) => x.sgn,
+      // trunc(x) = 0 for |x| < 1, so the sign of x alone is not enough
+      // (trunc(1/2) = 0, not positive). Mirror the Floor/Ceil interval logic.
+      sgn: ([x]) => {
+        if (x.isGreaterEqual(1)) return 'positive';
+        if (x.isLessEqual(-1)) return 'negative';
+        if (x.isGreater(-1) && x.isLess(1)) return 'zero';
+        if (x.isNonNegative) return 'non-negative';
+        if (x.isNonPositive) return 'non-positive';
+        // Component-wise truncation of a complex: real result iff |im| < 1,
+        // and then the sign is that of trunc(re).
+        if (x.isReal === false && isNumber(x))
+          return x.im! >= 1 || x.im! <= -1
+            ? 'unsigned'
+            : numberSgn(Math.trunc(x.re));
+        return undefined;
+      },
       evaluate: ([x]) =>
         apply(
           x,
@@ -2575,7 +2621,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (monic) polynomial whose type and sign aren't known statically.
       type: (ops) =>
         ops.every((x) => x.isInteger) ? 'finite_integer' : 'number',
-      sgn: (ops) => (ops.every((x) => x.isInteger) ? 'positive' : undefined),
+      // gcd ≥ 0, and positive iff some argument is nonzero (gcd(0,…,0) = 0).
+      sgn: (ops) => {
+        if (!ops.every((x) => x.isInteger)) return undefined;
+        if (
+          ops.some((x) => {
+            const s = x.sgn;
+            return s === 'positive' || s === 'negative' || s === 'not-zero';
+          })
+        )
+          return 'positive';
+        return 'non-negative';
+      },
       evaluate: (xs, { engine }) => {
         // Integer operands take the fast numeric path. Otherwise, attempt a
         // univariate polynomial GCD (e.g. GCD(x²+3x+2, x²+4x+3) → x+1),
@@ -2598,7 +2655,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(any*) -> number',
       type: (ops) =>
         ops.every((x) => x.isInteger) ? 'finite_integer' : 'number',
-      sgn: (ops) => (ops.every((x) => x.isInteger) ? 'positive' : undefined),
+      // lcm ≥ 0; zero as soon as ANY argument is zero (lcm(0, n) = 0), and
+      // positive only when every argument is provably nonzero.
+      sgn: (ops) => {
+        if (!ops.every((x) => x.isInteger)) return undefined;
+        if (
+          ops.every((x) => {
+            const s = x.sgn;
+            return s === 'positive' || s === 'negative' || s === 'not-zero';
+          })
+        )
+          return 'positive';
+        if (ops.some((x) => x.isSame(0))) return 'zero';
+        return 'non-negative';
+      },
       evaluate: (xs, { engine }) => evaluateGcdLcm(engine, xs, 'LCM'),
     },
 
@@ -2733,7 +2803,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return ops.some((x) => x.isSame(0)) ? 'zero' : 'non-positive';
         if (ops.some((x) => x.isNonNegative)) return 'non-negative';
         if (ops.every((x) => x.isNegative)) return 'negative';
-        if (ops.some((x) => !x.isSame(0))) return 'not-zero';
+        // The max of operands that are EACH provably nonzero is one of them,
+        // hence nonzero. (Some-quantified this would be wrong: one nonzero
+        // negative operand does not prevent the max from being 0.)
+        if (
+          ops.every((x) => {
+            const s = x.sgn;
+            return s === 'positive' || s === 'negative' || s === 'not-zero';
+          })
+        )
+          return 'not-zero';
         return undefined;
       },
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Max'),

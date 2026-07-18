@@ -1313,7 +1313,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (first.type.matches('integer')) return 'finite_integer';
         return 'finite_number';
       },
-      sgn: () => 'non-negative',
+      // No-arg Random() ∈ [0, 1). With bounds the value lies in [m, n), so
+      // it is only non-negative when the bounds are (Random(-5, 5) can be
+      // negative).
+      sgn: (ops) =>
+        ops.every((x) => x.isNonNegative) ? 'non-negative' : undefined,
       evaluate: (ops, { engine: ce }) => {
         // No-arg: draws from the engine's seeded stream when `ce.randomSeed`
         // is set, otherwise non-deterministic (`Math.random()`).

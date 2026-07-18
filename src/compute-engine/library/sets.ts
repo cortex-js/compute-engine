@@ -174,7 +174,9 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           (!strict || sym(other) !== 'Numbers')
         );
       },
-      eltsgn: () => 'unsigned',
+      // Elements include the reals, so no sign claim ('unsigned' would
+      // assert a definite imaginary part or NaN).
+      eltsgn: () => undefined,
       elttype: () => 'number',
     },
   },
@@ -197,7 +199,8 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           (!strict || sym(rhs) !== 'ComplexNumbers')
         );
       },
-      eltsgn: () => 'unsigned',
+      // real ⊂ complex: elements include the reals, so no sign claim.
+      eltsgn: () => undefined,
       elttype: () => 'finite_complex',
     },
   },
@@ -220,7 +223,8 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           (!strict || sym(rhs) !== 'ExtendedComplexNumbers')
         );
       },
-      eltsgn: () => 'unsigned',
+      // real ⊂ complex: elements include the reals, so no sign claim.
+      eltsgn: () => undefined,
       elttype: () => 'complex',
     },
   },

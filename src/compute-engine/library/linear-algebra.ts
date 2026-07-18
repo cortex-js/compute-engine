@@ -108,7 +108,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'The length of the shape of the expression. Note this is not the matrix rank (the number of linearly independent rows or columns in the matrix)',
       complexity: 8200,
       signature: '(value) -> number',
-      sgn: (): Sign => 'positive',
+      // The rank (number of dimensions) of a scalar is 0.
+      sgn: (): Sign => 'non-negative',
       evaluate: ([xs], { engine: ce }) => ce.number(xs.rank),
     },
 

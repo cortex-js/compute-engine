@@ -211,7 +211,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => elementaryFunctionType('Arctan', ops),
-      sgn: ([x]) => trigSign('Arctan', x),
+      // arctan is odd and strictly increasing with arctan(0) = 0, so it
+      // preserves the sign of its (real) argument; a non-real argument gives
+      // `x.sgn` = 'unsigned'/undefined, which is also correct. (The generic
+      // `trigSign` is quadrant-based — meaningless for an inverse function —
+      // and returned undefined for every input.)
+      sgn: ([x]) => x.sgn,
       evaluate: ([x], { numericApproximation, engine }) => {
         // arctan(±∞) = ±π/2 (the horizontal asymptotes). Needed for improper
         // integrals: ∫₀^∞ 1/(1+x²) = arctan(∞) − arctan(0) = π/2.
