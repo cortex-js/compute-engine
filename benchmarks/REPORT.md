@@ -14,7 +14,7 @@ This report compares the **current Compute Engine build** against the **last pub
 
 | Tool | Version | Runtime |
 |---|---|---|
-| Compute Engine — current build | `0.84.1` @ `9c2a90bb` (freshly built from `src/`) | Node v22.13.1 |
+| Compute Engine — current build | `0.84.1` @ `bdf45d6b` (freshly built from `src/`) | Node v22.13.1 |
 | Compute Engine — current + Rubi + Fungrim | same minified bundle + published `integration-rules` (Rubi) + `identities` (Fungrim) packs | Node v22.13.1 |
 | Compute Engine — published | `0.73.0` (npm) | Node v22.13.1 |
 | SymPy | `1.14.0` | Python 3.14.2 |
@@ -57,71 +57,71 @@ Correct (✅) results per category (count varies by category). Cells in parenthe
 | # | Case | CE·cur | CE+R/F | CE·0.73.0 | SymPy | math.js | NumPy | Wolfram |
 |---|---|---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |  |  |
-| N01 | $\pi^2$ <sub>(50d)</sub> | 10 | 13 | 7.6 | 175 | 40 | 🟡 <sub>16 digits</sub> 3.7 | 3.9 |
-| N02 | $e$ <sub>(50d)</sub> | 3.0 | 6.7 | 0.6 | 158 | 9.9 | 🟡 <sub>16 digits</sub> 3.1 | 2.9 |
-| N03 | $\sqrt2$ <sub>(50d)</sub> | 9.1 | 12 | 7.3 | 229 | 75 | 🟡 <sub>17 digits</sub> 5.0 | 4.5 |
-| N04 | $100!$ <sub>(exact)</sub> | 11 | 14 | 8.2 | 262 | 112 | ❌ <sub>inexact</sub> 10 | 2.7 |
-| N05 | $e^{\pi}$ <sub>(40d)</sub> | 11 | 15 | 9.7 | 191 | 344 | 🟡 <sub>17 digits</sub> 5.1 | 3.3 |
+| N01 | $\pi^2$ <sub>(50d)</sub> | 7.6 | 7.0 | 8.0 | 180 | 126 | 🟡 <sub>16 digits</sub> 3.9 | 3.8 |
+| N02 | $e$ <sub>(50d)</sub> | 0.42 | 0.42 | 0.58 | 156 | 11 | 🟡 <sub>16 digits</sub> 3.2 | 3.0 |
+| N03 | $\sqrt2$ <sub>(50d)</sub> | 6.0 | 6.0 | 7.5 | 235 | 74 | 🟡 <sub>17 digits</sub> 5.0 | 4.5 |
+| N04 | $100!$ <sub>(exact)</sub> | 8.5 | 8.2 | 8.0 | 262 | 113 | ❌ <sub>inexact</sub> 10 | 2.6 |
+| N05 | $e^{\pi}$ <sub>(40d)</sub> | 8.6 | 8.3 | 9.9 | 193 | 365 | 🟡 <sub>17 digits</sub> 4.8 | 3.3 |
 | | **Hard tier** |  |  |  |  |  |  |  |
-| N06 | $\pi$ <sub>(200d)</sub> | 3.1 | 6.8 | 0.5 | 156 | 12 | 🟡 <sub>16 digits</sub> 3.2 | 2.3 |
-| N07 | $\zeta(3)$ <sub>(40d)</sub> | 290 | 249 | 312 | 270 | ❌ <sub>8 digits</sub> 4103 | — | 14 |
-| N08 | $\Gamma(\tfrac13)$ <sub>(40d)</sub> | 161 | 151 | 163 | 247 | ⚠️ | — | 47 |
-| N09 | $W(1)$ <sub>(40d)</sub> | 54 | 58 | 60 | 662 | — | — | 39 |
-|  | **median µs** | **11** | **14** | **8.2** | **229** | **75** | **5.0** | **3.9** |
+| N06 | $\pi$ <sub>(200d)</sub> | 0.42 | 0.42 | 0.54 | 158 | 13 | 🟡 <sub>16 digits</sub> 3.2 | 3.0 |
+| N07 | $\zeta(3)$ <sub>(40d)</sub> | 302 | 268 | 319 | 286 | ❌ <sub>8 digits</sub> 3695 | — | 13 |
+| N08 | $\Gamma(\tfrac13)$ <sub>(40d)</sub> | 155 | 143 | 169 | 240 | ⚠️ | — | 47 |
+| N09 | $W(1)$ <sub>(40d)</sub> | 52 | 52 | 60 | 687 | — | — | 39 |
+|  | **median µs** | **8.5** | **8.2** | **8.0** | **235** | **113** | **4.8** | **3.8** |
 
 ### Simplification
 
 | # | Case | CE·cur | CE+R/F | CE·0.73.0 | SymPy | math.js | Wolfram |
 |---|---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |  |
-| S01 | $\frac{x^2-1}{x-1}$ | 0.19 | 0.29 | 0.21 | 8.49 | 🟡 <sub>not simplified</sub> 0.95 | 0.17 |
-| S02 | $\sin^2 x+\cos^2 x$ | 0.12 | 0.36 | 0.10 | 8.41 | 🟡 <sub>not simplified</sub> 0.79 | 0.08 |
-| S03 | $(x+1)^2-(x-1)^2$ | 0.32 | 0.54 | 0.30 | 5.80 | 🟡 <sub>not simplified</sub> 0.98 | 0.16 |
-| S04 | $\frac{x^3-x}{x}$ | 0.20 | 0.32 | 0.14 | 4.58 | 1.20 | 0.62 |
-| S05 | $x^{-1/2}-\frac{1}{\sqrt x}$ | 0.10 | 0.14 | 0.08 | 0.24 | 🟡 <sub>not simplified</sub> 1.38 | 0.03 |
+| S01 | $\frac{x^2-1}{x-1}$ | 0.13 | 0.14 | 0.21 | 8.22 | 🟡 <sub>not simplified</sub> 0.82 | 0.17 |
+| S02 | $\sin^2 x+\cos^2 x$ | 0.08 | 0.20 | 0.10 | 8.56 | 🟡 <sub>not simplified</sub> 0.82 | 0.08 |
+| S03 | $(x+1)^2-(x-1)^2$ | 0.22 | 0.27 | 0.30 | 5.85 | 🟡 <sub>not simplified</sub> 1.09 | 0.16 |
+| S04 | $\frac{x^3-x}{x}$ | 0.11 | 0.12 | 0.16 | 4.23 | 1.59 | 0.63 |
+| S05 | $x^{-1/2}-\frac{1}{\sqrt x}$ | 0.08 | 0.07 | 0.08 | 0.24 | 🟡 <sub>not simplified</sub> 1.32 | 0.03 |
 | | **Hard tier** |  |  |  |  |  |  |
-| S06 | $\sqrt6\,x+\sqrt2\,x$ | 0.31 | 1.61 | 0.28 | 5.91 | 2.10 | 18.7 |
-| S07 | $\ln x+\ln(x+1)$ | 0.28 | 0.73 | 0.19 | 10.1 | 🟡 <sub>not simplified</sub> 1.31 | 1.47 |
-| S08 | $\sqrt{3+2\sqrt2}$ | 0.11 | 0.19 | 0.09 | 🟡 <sub>not simplified</sub> 3.64 | 🟡 <sub>numeric only</sub> 0.83 | 3.33 |
-| S09 | $\frac{x^3-1}{x-1}$ | 0.19 | 0.32 | 0.13 | 9.68 | 🟡 <sub>not simplified</sub> 0.86 | 1.00 |
-|  | **median ms** | **0.19** | **0.32** | **0.14** | **5.91** | **0.98** | **0.62** |
+| S06 | $\sqrt6\,x+\sqrt2\,x$ | 0.23 | 0.42 | 0.30 | 5.58 | 1.08 | 18.5 |
+| S07 | $\ln x+\ln(x+1)$ | 0.16 | 0.33 | 0.19 | 6.24 | 🟡 <sub>not simplified</sub> 0.78 | 1.40 |
+| S08 | $\sqrt{3+2\sqrt2}$ | 0.09 | 0.12 | 0.10 | 🟡 <sub>not simplified</sub> 3.41 | 🟡 <sub>numeric only</sub> 0.75 | 3.45 |
+| S09 | $\frac{x^3-1}{x-1}$ | 0.12 | 0.12 | 0.14 | 10.2 | 🟡 <sub>not simplified</sub> 0.88 | 1.03 |
+|  | **median ms** | **0.12** | **0.14** | **0.16** | **5.85** | **0.88** | **0.63** |
 
 ### Differentiation
 
 | # | Case | CE·cur | CE+R/F | CE·0.73.0 | SymPy | math.js | Wolfram |
 |---|---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |  |
-| D01 | $\tfrac{d}{dx}\sin x$ | 0.02 | 0.04 | 0.01 | 0.34 | 0.74 | 0.0034 |
-| D02 | $\tfrac{d}{dx}x^5$ | 0.11 | 0.17 | 0.06 | 0.48 | 1.02 | 0.0032 |
-| D03 | $\tfrac{d}{dx}\tan x$ | 0.05 | 0.08 | 0.02 | 2.15 | 0.95 | 0.0036 |
-| D04 | $\tfrac{d}{dx}x^2\sin x$ | 0.21 | 0.29 | 0.15 | 2.08 | 1.90 | 0.0054 |
-| D05 | $\tfrac{d}{dx}\sin(x^2)$ | 0.10 | 0.14 | 0.06 | 1.42 | 1.93 | 0.0044 |
+| D01 | $\tfrac{d}{dx}\sin x$ | 0.0095 | 0.01 | 0.01 | 0.33 | 0.59 | 0.0031 |
+| D02 | $\tfrac{d}{dx}x^5$ | 0.06 | 0.05 | 0.06 | 0.51 | 1.10 | 0.0031 |
+| D03 | $\tfrac{d}{dx}\tan x$ | 0.02 | 0.02 | 0.02 | 2.18 | 0.90 | 0.0036 |
+| D04 | $\tfrac{d}{dx}x^2\sin x$ | 0.15 | 0.15 | 0.17 | 2.05 | 1.84 | 0.0054 |
+| D05 | $\tfrac{d}{dx}\sin(x^2)$ | 0.07 | 0.07 | 0.07 | 1.46 | 1.13 | 0.0041 |
 | | **Hard tier** |  |  |  |  |  |  |
-| D06 | $\tfrac{d}{dx}x^x$ | 0.08 | 0.11 | 0.05 | 1.76 | 1.88 | 0.0043 |
-| D07 | $\tfrac{d}{dx}\arcsin x$ | 0.19 | 0.28 | 0.13 | 3.07 | 1.08 | 0.0047 |
-| D08 | $\tfrac{d}{dx}\ln(\sin x)$ | 0.05 | 0.08 | 0.03 | 1.11 | 1.09 | 0.0044 |
-| D09 | $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.45 | 0.65 | 0.32 | 7.29 | 2.32 | 0.0072 |
-|  | **median ms** | **0.10** | **0.14** | **0.06** | **1.76** | **1.09** | **0.0044** |
+| D06 | $\tfrac{d}{dx}x^x$ | 0.06 | 0.06 | 0.05 | 1.86 | 1.99 | 0.0042 |
+| D07 | $\tfrac{d}{dx}\arcsin x$ | 0.13 | 0.13 | 0.15 | 2.92 | 1.11 | 0.0046 |
+| D08 | $\tfrac{d}{dx}\ln(\sin x)$ | 0.04 | 0.04 | 0.04 | 1.12 | 1.19 | 0.0036 |
+| D09 | $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.34 | 0.35 | 0.32 | 6.40 | 2.42 | 0.0079 |
+|  | **median ms** | **0.06** | **0.06** | **0.06** | **1.86** | **1.13** | **0.0041** |
 
 ### Antiderivation (symbolic integration)
 
 | # | Case | CE·cur | CE+R/F | CE·0.73.0 | SymPy | Wolfram |
 |---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |
-| A01 | $\int x^2\,dx$ | 0.16 | 0.24 | 0.11 | 0.38 | 0.03 |
-| A02 | $\int\sin x\,dx$ | 0.04 | 0.38 | 0.03 | 1.17 | 0.58 |
-| A03 | $\int x e^x\,dx$ | 0.20 | 1.08 | 0.12 | 6.36 | 0.57 |
-| A04 | $\int\frac{1}{1+x^2}\,dx$ | 0.06 | 0.33 | 0.07 | 9.30 | 0.86 |
-| A05 | $\int\frac{x}{x^2+1}\,dx$ | 0.29 | 2.07 | 0.23 | 6.97 | 0.59 |
+| A01 | $\int x^2\,dx$ | 0.10 | 0.11 | 0.11 | 0.37 | 0.03 |
+| A02 | $\int\sin x\,dx$ | 0.03 | 0.18 | 0.03 | 1.17 | 0.60 |
+| A03 | $\int x e^x\,dx$ | 0.14 | 0.80 | 0.13 | 7.03 | 0.58 |
+| A04 | $\int\frac{1}{1+x^2}\,dx$ | 0.05 | 0.15 | 0.07 | 9.34 | 0.89 |
+| A05 | $\int\frac{x}{x^2+1}\,dx$ | 0.20 | 0.99 | 0.23 | 6.90 | 0.59 |
 | | **Hard tier** |  |  |  |  |  |
-| A06 | $\int\frac{1}{x^3+1}\,dx$ | 5.89 | 11.9 | 1.77 | 24.8 | 8.07 |
-| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 0.08 | 0.39 | 0.07 | 0.75 | 0.35 |
-| A08 | $\int e^{-x^2}\,dx$ | 0.33 | 2.04 | 0.28 | 25.2 | 0.44 |
-| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 0.35 | 2.84 | 0.23 | 23.1 | 2.12 |
-| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | **∅** | 2.04 | ∅ | 24.5 | 2.18 |
-| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | **∅** | 1.66 | ∅ | 117 | 1.12 |
-| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | **∅** | 2.30 | ∅ | 205 | 1.47 |
-|  | **median ms** | **0.20** | **2.04** | **0.12** | **23.1** | **0.86** |
+| A06 | $\int\frac{1}{x^3+1}\,dx$ | 1.51 | 10.2 | 1.86 | 25.7 | 9.16 |
+| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 0.05 | 0.12 | 0.06 | 0.74 | 0.36 |
+| A08 | $\int e^{-x^2}\,dx$ | 0.26 | 0.50 | 0.27 | 25.8 | 0.43 |
+| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 0.21 | 1.39 | 0.24 | 22.5 | 2.09 |
+| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | **∅** | 1.14 | ∅ | 21.3 | 2.20 |
+| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | **∅** | 0.87 | ∅ | 115 | 1.12 |
+| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | **∅** | 1.17 | ∅ | 206 | 1.48 |
+|  | **median ms** | **0.14** | **0.87** | **0.13** | **21.3** | **0.89** |
 
 ## Rule packs — coverage & true warm overhead
 
@@ -131,56 +131,31 @@ Correct (✅) results per category (count varies by category). Cells in parenthe
 
 | # | Case | CE·cur | CE+R/F | Overhead |
 |---|---|---|---|---|
-| A02 | $\int\sin x\,dx$ | 44 | 376 | 8.63× |
-| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 352 | 2845 | 8.08× |
-| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | 287 | 2041 | 7.11× |
-| A05 | $\int\frac{x}{x^2+1}\,dx$ | 292 | 2069 | 7.10× |
-| A08 | $\int e^{-x^2}\,dx$ | 334 | 2036 | 6.10× |
-| A04 | $\int\frac{1}{1+x^2}\,dx$ | 55 | 331 | 6.00× |
-| A03 | $\int x e^x\,dx$ | 202 | 1081 | 5.34× |
-| S06 | $\sqrt6\,x+\sqrt2\,x$ | 310 | 1615 | 5.22× |
-| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 78 | 387 | 4.98× |
-| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | 462 | 2300 | 4.97× |
-| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | 400 | 1655 | 4.14× |
-| CE1 | $\lim_{x\to0}\tfrac{\sin x}{x}$ | 78 | 264 | 3.37× |
-| CE2 | $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 975 | 3182 | 3.26× |
-| CE4 | $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 298 | 959 | 3.22× |
-| S02 | $\sin^2 x+\cos^2 x$ | 125 | 355 | 2.85× |
-| S07 | $\ln x+\ln(x+1)$ | 282 | 728 | 2.58× |
-| N02 | $e$ | 3.0 | 6.7 | 2.21× |
-| N06 | $\pi$ | 3.1 | 6.8 | 2.16× |
-| A06 | $\int\frac{1}{x^3+1}\,dx$ | 5895 | 11904 | 2.02× |
-| CS1 | $x^4+x^2-1=0$ | 3252 | 5969 | 1.84× |
-| S09 | $\frac{x^3-1}{x-1}$ | 193 | 325 | 1.69× |
-| S08 | $\sqrt{3+2\sqrt2}$ | 114 | 191 | 1.67× |
-| D01 | $\tfrac{d}{dx}\sin x$ | 24 | 41 | 1.67× |
-| S03 | $(x+1)^2-(x-1)^2$ | 322 | 536 | 1.66× |
-| D03 | $\tfrac{d}{dx}\tan x$ | 47 | 76 | 1.62× |
-| S04 | $\frac{x^3-x}{x}$ | 200 | 317 | 1.59× |
-| D02 | $\tfrac{d}{dx}x^5$ | 106 | 168 | 1.58× |
-| A01 | $\int x^2\,dx$ | 159 | 241 | 1.52× |
-| D08 | $\tfrac{d}{dx}\ln(\sin x)$ | 54 | 80 | 1.48× |
-| S01 | $\frac{x^2-1}{x-1}$ | 194 | 286 | 1.47× |
-| D05 | $\tfrac{d}{dx}\sin(x^2)$ | 99 | 145 | 1.46× |
-| S05 | $x^{-1/2}-\frac{1}{\sqrt x}$ | 99 | 144 | 1.45× |
-| D09 | $\tfrac{d}{dx}\sqrt{1-x^2}$ | 450 | 647 | 1.44× |
-| D07 | $\tfrac{d}{dx}\arcsin x$ | 194 | 276 | 1.42× |
-| CN1 | $\pi^2$ | 9.3 | 13 | 1.41× |
-| N05 | $e^{\pi}$ | 11 | 15 | 1.40× |
-| D04 | $\tfrac{d}{dx}x^2\sin x$ | 208 | 286 | 1.38× |
-| D06 | $\tfrac{d}{dx}x^x$ | 80 | 108 | 1.35× |
-| N03 | $\sqrt2$ | 9.1 | 12 | 1.35× |
-| CS2 | $x^3-x-1=0$ | 228 | 307 | 1.35× |
-| N04 | $100!$ | 11 | 14 | 1.31× |
-| CE3 | $\int_1^2\tfrac1x\,dx$ | 60 | 76 | 1.26× |
-| N01 | $\pi^2$ | 10 | 13 | 1.26× |
-| CN3 | $e^{\pi}$ | 15 | 18 | 1.24× |
-| CN11 | $\ln 2$ | 16 | 20 | 1.20× |
-| CN10 | $\cos 1$ | 23 | 26 | 1.15× |
-| CN9 | $\sin 1$ | 23 | 26 | 1.13× |
-| N07 | $\zeta(3)$ | 290 | 249 | **0.86× (win)** |
+| A06 | $\int\frac{1}{x^3+1}\,dx$ | 1511 | 10159 | 6.73× |
+| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 215 | 1392 | 6.48× |
+| A02 | $\int\sin x\,dx$ | 29 | 184 | 6.26× |
+| A03 | $\int x e^x\,dx$ | 140 | 804 | 5.74× |
+| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | 214 | 1137 | 5.31× |
+| A05 | $\int\frac{x}{x^2+1}\,dx$ | 196 | 987 | 5.03× |
+| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | 281 | 1166 | 4.15× |
+| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | 266 | 872 | 3.28× |
+| A04 | $\int\frac{1}{1+x^2}\,dx$ | 50 | 150 | 3.02× |
+| S02 | $\sin^2 x+\cos^2 x$ | 75 | 196 | 2.60× |
+| CE4 | $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 212 | 463 | 2.19× |
+| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 55 | 120 | 2.19× |
+| CE1 | $\lim_{x\to0}\tfrac{\sin x}{x}$ | 34 | 72 | 2.13× |
+| S07 | $\ln x+\ln(x+1)$ | 164 | 331 | 2.02× |
+| A08 | $\int e^{-x^2}\,dx$ | 259 | 501 | 1.93× |
+| S06 | $\sqrt6\,x+\sqrt2\,x$ | 231 | 417 | 1.80× |
+| CE2 | $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 689 | 1133 | 1.64× |
+| S08 | $\sqrt{3+2\sqrt2}$ | 92 | 121 | 1.32× |
+| S03 | $(x+1)^2-(x-1)^2$ | 220 | 266 | 1.21× |
+| D01 | $\tfrac{d}{dx}\sin x$ | 9.5 | 11 | 1.13× |
+| A01 | $\int x^2\,dx$ | 102 | 114 | 1.12× |
+| N07 | $\zeta(3)$ | 302 | 268 | **0.89× (win)** |
+| D02 | $\tfrac{d}{dx}x^5$ | 61 | 54 | **0.88× (win)** |
 
-_Times in µs (warm median). 5 row(s) within ±10% (no measurable pack overhead — numeric / differentiation) omitted._
+_Times in µs (warm median). 30 row(s) within ±10% (no measurable pack overhead — numeric / differentiation) omitted._
 
 ## Current build vs published `0.73.0`
 
