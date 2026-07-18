@@ -819,7 +819,8 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // differencing F.N() (sampled inside |x|<1, the arcsin real domain).
   describe('the InvTrig^n multiple-angle → CosIntegral reduction (Chapter-5, R23)', () => {
     const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    ce.timeLimit = 30_000; // arcsin Subst chains are slow under ts-jest contention
     const verify = (latex: string, xs = [0.17, 0.31, 0.52, 0.73]) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
