@@ -3564,7 +3564,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // An index result only makes sense for an INDEXED collection — match
       // the declared signature (MaxBy/MinBy, which return the element,
       // accept any collection).
-      const collection = checkCollectionOperand(engine, ops[0], 'indexed_collection');
+      const collection = checkCollectionOperand(
+        engine,
+        ops[0],
+        'indexed_collection'
+      );
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('ArgMax', [collection]);
       const fn = canonicalFunctionLiteral(ops[1]);
@@ -3592,7 +3596,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // An index result only makes sense for an INDEXED collection — match
       // the declared signature (MaxBy/MinBy, which return the element,
       // accept any collection).
-      const collection = checkCollectionOperand(engine, ops[0], 'indexed_collection');
+      const collection = checkCollectionOperand(
+        engine,
+        ops[0],
+        'indexed_collection'
+      );
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('ArgMin', [collection]);
       const fn = canonicalFunctionLiteral(ops[1]);

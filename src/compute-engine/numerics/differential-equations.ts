@@ -230,7 +230,7 @@ export function rk45System(
 
   let x = x0;
   let y = [...y0];
-  let k1 = f(x, y);
+  const k1 = f(x, y);
   if (!k1 || k1.length !== n || !k1.every(Number.isFinite)) return undefined;
 
   // Initial step: a conservative fraction of the span, bounded away from 0.
@@ -344,7 +344,8 @@ export function evalDenseRows(
   x: number
 ): number {
   if (rows.length === 0) return NaN;
-  const dir = rows[rows.length - 1][0] + rows[rows.length - 1][1] >= rows[0][0] ? 1 : -1;
+  const dir =
+    rows[rows.length - 1][0] + rows[rows.length - 1][1] >= rows[0][0] ? 1 : -1;
   let lo = 0;
   let hi = rows.length - 1;
   while (lo < hi) {

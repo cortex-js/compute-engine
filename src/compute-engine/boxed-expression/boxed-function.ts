@@ -233,7 +233,8 @@ export class BoxedFunction
       // `widen(vector<2>, indexed_collection)` would coarsen it to the loose
       // constraint. Keep the precise type. (Narrowing is authoritative and is
       // left untouched.)
-      if (inferenceMode !== 'narrow' && isSubtype(oldSig.result, t)) return true;
+      if (inferenceMode !== 'narrow' && isSubtype(oldSig.result, t))
+        return true;
       def.signature = new BoxedType(
         {
           kind: 'signature',

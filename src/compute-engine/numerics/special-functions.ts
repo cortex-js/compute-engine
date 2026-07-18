@@ -2681,7 +2681,7 @@ export function airyAiPrime(x: number): number {
     }
     // e^{−ξ} = e^{−hi}·e^{−lo} ≈ e^{−hi}·(1 − lo)
     const expNegXi = Math.exp(-xiHi) * (1 - xi[1]);
-    return -(expNegXi * Math.pow(x, 0.25)) / (2 * Math.sqrt(Math.PI)) * sum;
+    return (-(expNegXi * Math.pow(x, 0.25)) / (2 * Math.sqrt(Math.PI))) * sum;
   }
 
   if (x < -9) {
@@ -2724,7 +2724,7 @@ export function airyBiPrime(x: number): number {
     }
     // e^{ξ} = e^{hi}·e^{lo} ≈ e^{hi}·(1 + lo)
     const expXi = Math.exp(xiHi) * (1 + xi[1]);
-    return (expXi * Math.pow(x, 0.25)) / Math.sqrt(Math.PI) * sum;
+    return ((expXi * Math.pow(x, 0.25)) / Math.sqrt(Math.PI)) * sum;
   }
 
   if (x < -9) {

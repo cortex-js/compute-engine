@@ -598,8 +598,7 @@ function decomposeSeriesBody(
           ? nums[0]
           : ce.function('Multiply', nums);
     if (dens.length === 0) return num;
-    const den =
-      dens.length === 1 ? dens[0] : ce.function('Multiply', dens);
+    const den = dens.length === 1 ? dens[0] : ce.function('Multiply', dens);
     return ce.function('Divide', [num, den]);
   };
 
@@ -654,10 +653,7 @@ function namedSeriesClosedForm(
   const times = (v: Expression): Expression =>
     coeff.isSame(1)
       ? v
-      : asReadableFraction(
-          ce.function('Multiply', [coeff, v]).evaluate(),
-          ce
-        );
+      : asReadableFraction(ce.function('Multiply', [coeff, v]).evaluate(), ce);
 
   // Exponential series: c·rᵏ/k! (kPower = 0, no linear factor).
   if (factorialDen) {
@@ -694,11 +690,7 @@ function namedSeriesClosedForm(
       if (s <= 1) return undefined;
       const z = ce.function('Zeta', [ce.number(s)]).evaluate();
       const scaledZ = ce
-        .box([
-          'Multiply',
-          ['Subtract', 1, ['Power', 2, -s]],
-          z.json as any,
-        ])
+        .box(['Multiply', ['Subtract', 1, ['Power', 2, -s]], z.json as any])
         .evaluate();
       return times(asReadableFraction(scaledZ, ce));
     }
@@ -757,10 +749,7 @@ function namedSeriesClosedForm(
       ce
         .function('Divide', [
           ratio,
-          ce.function('Power', [
-            ce.function('Subtract', [ce.One, ratio]),
-            2,
-          ]),
+          ce.function('Power', [ce.function('Subtract', [ce.One, ratio]), 2]),
         ])
         .simplify()
     );
@@ -882,11 +871,7 @@ export function infiniteProductClosedForm(
     return ce.function('Divide', [ce.Pi, ce.number(4)]);
 
   // Π_{k=1}^∞ (1 + 1/k²) = sinh(π)/π (from the sin product formula at z = i).
-  const onePlusInvSq = ce.box([
-    'Add',
-    1,
-    ['Divide', 1, ['Power', index, 2]],
-  ]);
+  const onePlusInvSq = ce.box(['Add', 1, ['Divide', 1, ['Power', index, 2]]]);
   if (onePlusInvSq.isSame(body))
     return ce.function('Divide', [ce.function('Sinh', [ce.Pi]), ce.Pi]);
 

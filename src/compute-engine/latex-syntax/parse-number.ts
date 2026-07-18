@@ -196,7 +196,10 @@ function detectRepetend(digits: string): [string, string] | null {
   for (let len = 1; len <= n >> 1; len++) {
     const block = digits.slice(n - len);
     let reps = 1;
-    while ((reps + 1) * len <= n && digits.startsWith(block, n - (reps + 1) * len))
+    while (
+      (reps + 1) * len <= n &&
+      digits.startsWith(block, n - (reps + 1) * len)
+    )
       reps += 1;
     if (reps >= (len === 1 ? 3 : 2))
       return [digits.slice(0, n - reps * len), block];

@@ -878,9 +878,7 @@ function solveRepeatedEigenvalueSystem(
   );
   return ce.function(
     'List',
-    dependentCalls.map((call, i) =>
-      ce.function('Equal', [call, solutions[i]])
-    )
+    dependentCalls.map((call, i) => ce.function('Equal', [call, solutions[i]]))
   );
 }
 
@@ -2094,11 +2092,17 @@ function solveRiccatiAiry(
   if (slope.isPositive === true)
     c = ce.function('Root', [slope, ce.number(3)]).simplify();
   else if (slope.isNegative === true)
-    c = ce.function('Root', [slope.neg(), ce.number(3)]).neg().simplify();
+    c = ce
+      .function('Root', [slope.neg(), ce.number(3)])
+      .neg()
+      .simplify();
   else return undefined;
 
   const x = ce.symbol(independentName);
-  const t = c.mul(x).add(shift.div(c.pow(2))).simplify();
+  const t = c
+    .mul(x)
+    .add(shift.div(c.pow(2)))
+    .simplify();
   const [constant] = integrationConstants(equation, 1);
   const numerator = c
     .neg()
@@ -2395,11 +2399,17 @@ function solveSecondOrderAiry(
   if (p.isPositive === true)
     c = ce.function('Root', [p, ce.number(3)]).simplify();
   else if (p.isNegative === true)
-    c = ce.function('Root', [p.neg(), ce.number(3)]).neg().simplify();
+    c = ce
+      .function('Root', [p.neg(), ce.number(3)])
+      .neg()
+      .simplify();
   else return undefined;
 
   const x = ce.symbol(independentName);
-  const t = c.mul(x).add(q.div(c.pow(2))).simplify();
+  const t = c
+    .mul(x)
+    .add(q.div(c.pow(2)))
+    .simplify();
   const [c1, c2] = integrationConstants(equation, 2);
   const solution = c1
     .mul(ce.function('AiryAi', [t]))
@@ -2905,8 +2915,7 @@ function splitPowerOfXTerm(
   independentName: string
 ): { coefficient: Expression; power: Expression } | undefined {
   const ce = term.engine;
-  if (!term.has(independentName))
-    return { coefficient: term, power: ce.Zero };
+  if (!term.has(independentName)) return { coefficient: term, power: ce.Zero };
 
   if (isFunction(term, 'Negate')) {
     const inner = splitPowerOfXTerm(term.op1, independentName);
