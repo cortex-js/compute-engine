@@ -7,6 +7,7 @@ import {
 
 import { flatten } from './flatten.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { couldBeNonRealNumber } from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { Type } from '../../common/type/types.js';
 import type {
@@ -218,7 +219,7 @@ export function checkNumericArgs(
     // If any of the arguments is a complex or imaginary number,
     // we'll infer the type as number
     for (const x of xs)
-      if (isSubtype('complex', x.type.type)) {
+      if (couldBeNonRealNumber(x.type.type)) {
         inferredType = 'number';
         break;
       }
@@ -232,7 +233,8 @@ export function checkNumericArgs(
   count ??= ops.length;
 
   const xs: Expression[] = [];
-  for (let i = 0; i <= Math.max(count - 1, ops.length - 1); i++) {
+  const last = Math.max(count - 1, ops.length - 1);
+  for (let i = 0; i <= last; i++) {
     const op = ops[i];
     if (i > count - 1) {
       isValid = false;
@@ -299,15 +301,20 @@ export function checkNumericArgs(
         // (3, eager) An eager, operand-backed collection (e.g. a literal
         // `List`) with an indeterminate element type: its elements are already
         // stored, so walking is cheap. Check that all elements are numbers and
-        // infer the type of the elements.
+        // infer the type of the elements. Use a local flag: `isValid` may
+        // already be false from an earlier operand, which must not brand this
+        // one with a type error.
+        let allNumbers = true;
         for (const x of op.each()) {
           if (!x.isNumber) {
-            isValid = false;
+            allNumbers = false;
             break;
           }
         }
-        if (!isValid) xs.push(ce.typeError('number', op.type, op));
-        else xs.push(op);
+        if (!allNumbers) {
+          isValid = false;
+          xs.push(ce.typeError('number', op.type, op));
+        } else xs.push(op);
       }
     } else if (
       op.isIndexedCollection &&
@@ -358,7 +365,7 @@ export function checkNumericArgs(
     let inferredType: Type = 'real';
     // If any of the arguments is a complex number, we'll infer the type as `number`
     for (const x of xs)
-      if (isSubtype('complex', x.type.type)) {
+      if (couldBeNonRealNumber(x.type.type)) {
         inferredType = 'number';
         break;
       }
@@ -500,6 +507,13 @@ export function validateArguments(
 
   const result: Expression[] = [];
   let isValid = true;
+  // Set when an operand was replaced (devolved to an unknown symbol, or
+  // repaired by matrix inference). The substituted list must then be returned
+  // even if validation succeeds: returning `null` tells the caller to use the
+  // original operands, and the original boxed symbol keeps its stale operator
+  // binding (`N \equiv 1 \pmod k` stayed bound to the builtin `N`, so a later
+  // `N := 11` was invisible to the expression).
+  let substituted = false;
 
   const params = signature.args?.map((x) => x.type) ?? [];
   const optParams = signature.optArgs?.map((x) => x.type) ?? [];
@@ -574,6 +588,7 @@ export function validateArguments(
       );
       if (repaired) {
         result.push(repaired);
+        substituted = true;
         continue;
       }
       // A bare uppercase symbol bound to a standard-library operator (`N`,
@@ -583,6 +598,7 @@ export function validateArguments(
       const devolved = devolveUnappliedOperator(ce, op);
       if (devolved !== null) {
         result.push(devolved);
+        substituted = true;
         continue;
       }
       result.push(ce.typeError(param, op.type, op));
@@ -732,29 +748,34 @@ export function validateArguments(
   //
   // All arguments are valid, we can infer the domain of the arguments
   //
+  // When an operand was substituted, infer on (and return) the substituted
+  // list: `result` and `ops` are index-aligned on the valid path (one entry
+  // pushed per consumed operand).
+  const finalOps = substituted ? result : ops;
   i = 0;
   for (const param of params) {
     if (!lazy)
       if (
         !threadable ||
-        (!isFiniteIndexedCollection(ops[i]) &&
-          !typeCouldBeCollection(ops[i].type.type))
+        (!isFiniteIndexedCollection(finalOps[i]) &&
+          !typeCouldBeCollection(finalOps[i].type.type))
       )
-        ops[i].infer(param);
+        finalOps[i].infer(param);
     i += 1;
   }
   for (const param of optParams) {
-    if (!ops[i]) break;
-    if (
-      !threadable ||
-      (!isFiniteIndexedCollection(ops[i]) &&
-        !typeCouldBeCollection(ops[i].type.type))
-    )
-      ops[i]?.infer(param);
+    if (!finalOps[i]) break;
+    if (!lazy)
+      if (
+        !threadable ||
+        (!isFiniteIndexedCollection(finalOps[i]) &&
+          !typeCouldBeCollection(finalOps[i].type.type))
+      )
+        finalOps[i].infer(param);
     i += 1;
   }
   if (varParam) {
-    for (const op of ops.slice(i)) {
+    for (const op of finalOps.slice(i)) {
       if (!lazy)
         if (
           !threadable ||
@@ -765,7 +786,7 @@ export function validateArguments(
       i += 1;
     }
   }
-  return null;
+  return substituted ? result : null;
 }
 
 /**
@@ -781,8 +802,7 @@ function repairFreshMatrixInference(
   expected: Type,
   inferredBefore?: ReadonlySet<string>
 ): Expression | null {
-  if (!inferredBefore || !ce.type(expected).matches(parseType('matrix')))
-    return null;
+  if (!inferredBefore || !ce.type(expected).matches('matrix')) return null;
 
   const eligible = new Set<string>();
   for (const name of op.freeVariables) {
@@ -871,65 +891,48 @@ function matrixInferencePlan(
  * that don't have a definition, suggest an alternative name.
  */
 function spellcheckSymbols(expr: Expression): Record<string, string> {
-  let suggestions: Record<string, string> = {};
-  const knownSymbols = getSymbolNames(expr.engine);
-  const knownOperators = getOperatorNames(expr.engine);
+  const { symbols, operators } = getKnownNames(expr.engine);
+  const suggestions: Record<string, string> = {};
 
-  if (
-    isSymbol(expr) &&
-    !suggestions[expr.symbol] &&
-    !expr.symbol.startsWith('_')
-  ) {
-    if (!knownSymbols.includes(expr.symbol)) {
-      const match = fuzzyStringMatch(expr.symbol, knownSymbols);
-      if (match) suggestions[expr.symbol] = match;
+  const visit = (expr: Expression): void => {
+    if (isSymbol(expr) && !expr.symbol.startsWith('_')) {
+      if (!(expr.symbol in suggestions) && !symbols.includes(expr.symbol)) {
+        const match = fuzzyStringMatch(expr.symbol, symbols);
+        if (match) suggestions[expr.symbol] = match;
+      }
+    } else if (isFunction(expr) && !expr.operator.startsWith('_')) {
+      const operator = expr.operator;
+      if (!(operator in suggestions) && !operators.includes(operator)) {
+        const match = fuzzyStringMatch(operator, operators);
+        if (match) suggestions[operator] = match;
+      }
+      for (const op of expr.ops) visit(op);
     }
-  } else if (
-    isFunction(expr) &&
-    !suggestions[expr.operator] &&
-    !expr.operator.startsWith('_')
-  ) {
-    const operator = expr.operator;
-    if (!knownOperators.includes(operator)) {
-      const match = fuzzyStringMatch(operator, knownOperators);
-      if (match) suggestions[operator] = match;
-    }
-    for (const op of expr.ops)
-      suggestions = { ...suggestions, ...spellcheckSymbols(op) };
-  }
+  };
 
+  visit(expr);
   return suggestions;
 }
 
-function getOperatorNames(ce: ComputeEngine): string[] {
-  const names: string[] = [];
+/** Collect, in a single walk of the scope chain, the names of all known
+ * symbols (value defs) and operators (operator defs) visible in the current
+ * scope. A name bound to both appears in both lists. */
+function getKnownNames(ce: ComputeEngine): {
+  symbols: string[];
+  operators: string[];
+} {
+  const symbols: string[] = [];
+  const operators: string[] = [];
   let currentScope: Scope | null = ce.context.lexicalScope;
   while (currentScope) {
-    for (const key of currentScope.bindings.keys()) {
-      const def = currentScope.bindings.get(key);
-      if (isOperatorDef(def)) names.push(key);
+    for (const [key, def] of currentScope.bindings) {
+      if (isValueDef(def)) symbols.push(key);
+      if (isOperatorDef(def)) operators.push(key);
     }
-
     currentScope = currentScope.parent;
   }
 
-  return names;
-}
-
-/** Get the list of all known symbols in the current scope */
-function getSymbolNames(ce: ComputeEngine): string[] {
-  const names: string[] = [];
-  let currentScope: Scope | null = ce.context.lexicalScope;
-  while (currentScope) {
-    for (const key of currentScope.bindings.keys()) {
-      const def = currentScope.bindings.get(key);
-      if (isValueDef(def)) names.push(key);
-    }
-
-    currentScope = currentScope.parent;
-  }
-
-  return names;
+  return { symbols, operators };
 }
 
 export function spellCheckMessage(expr: Expression): string {

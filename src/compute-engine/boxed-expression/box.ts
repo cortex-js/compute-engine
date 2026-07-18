@@ -860,7 +860,10 @@ function makeCanonicalFunction(
   // Flatten any sequence
   // f(a, Sequence(b, c), Sequence(), d) -> f(a, b, c, d)
   //
-  const args: Expression[] = flatten(xs, opDef.associative ? name : undefined);
+  let args: ReadonlyArray<Expression> = flatten(
+    xs,
+    opDef.associative ? name : undefined
+  );
 
   // Skip validation for function literals with inferred signatures.
   // These will be validated during evaluation by the lambda function,
@@ -876,14 +879,19 @@ function makeCanonicalFunction(
         inferenceTransactions.get(ce)?.inferredBefore
       );
 
-  // If we have some adjusted arguments, the arguments did not
-  // match the parameters of the signature. We're done.
   if (adjustedArgs) {
-    return new BoxedFunction(ce, name, adjustedArgs, {
-      metadata,
-      canonical: true,
-      scope,
-    });
+    // If any adjusted argument is invalid, the arguments did not match the
+    // parameters of the signature. We're done.
+    if (adjustedArgs.some((x) => !x.isValid))
+      return new BoxedFunction(ce, name, adjustedArgs, {
+        metadata,
+        canonical: true,
+        scope,
+      });
+    // All valid: an operand was substituted (devolved to an unknown symbol,
+    // or repaired by matrix inference). Continue canonicalization with the
+    // substituted operands.
+    args = adjustedArgs;
   }
 
   //

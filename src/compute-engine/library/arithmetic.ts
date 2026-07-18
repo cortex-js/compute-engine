@@ -103,7 +103,11 @@ import {
   root,
 } from '../boxed-expression/arithmetic-power.js';
 import { parseType } from '../../common/type/parse.js';
-import { broadcastResultType, widen } from '../../common/type/utils.js';
+import {
+  broadcastResultType,
+  isNonRealNumber,
+  widen,
+} from '../../common/type/utils.js';
 import {
   numericTypeHandler,
   elementaryFunctionType,
@@ -1824,7 +1828,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ? 'positive'
               : 'non-negative';
           }
-          if (a.type.matches('complex')) return 'negative';
+          if (isNonRealNumber(a.type.type)) return 'negative';
           return !a.isSame(0) ? 'not-zero' : undefined; //already accounted for a.is(0)
         }
 
@@ -2244,7 +2248,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? 'positive'
             : 'non-negative';
         }
-        if (x.type.matches('complex')) return 'negative';
+        if (isNonRealNumber(x.type.type)) return 'negative';
         if (x.isReal == false || x.isNaN) return 'unsigned';
         return undefined;
       },

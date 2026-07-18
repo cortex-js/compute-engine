@@ -5,7 +5,12 @@ import type {
 import { isValidSymbol, validateSymbol } from '../../math-json/symbols.js';
 
 import type { Type, TypeString } from '../../common/type/types.js';
-import { isSignatureType, widen, narrow } from '../../common/type/utils.js';
+import {
+  isSignatureType,
+  isNonRealNumber,
+  widen,
+  narrow,
+} from '../../common/type/utils.js';
 import { reduceType } from '../../common/type/reduce.js';
 import type { OneOf } from '../../common/one-of.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -726,7 +731,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // `number`/`finite_number` overlap the reals unless they are genuinely
     // complex (`complex`/`imaginary`/`finite_complex`, which are non-integer
     // by the same convention `isReal` uses).
-    if (t.matches('number')) return t.matches('complex') ? false : undefined;
+    if (t.matches('number')) return isNonRealNumber(t.type) ? false : undefined;
     // Non-numeric / composite types (e.g. `!string`): definitely-not only when
     // provably disjoint from the integers.
     if (
@@ -742,7 +747,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (t.isUnknown) return undefined;
     if (t.matches('rational')) return true;
     if (t.matches('real')) return undefined;
-    if (t.matches('number')) return t.matches('complex') ? false : undefined;
+    if (t.matches('number')) return isNonRealNumber(t.type) ? false : undefined;
     if (
       reduceType({ kind: 'intersection', types: [t.type, 'rational'] }) ===
       'nothing'
@@ -768,7 +773,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // `false`. Other number types (`number`, `finite_number`, ...) overlap
     // `real`, so without a refuting fact the answer is indeterminate
     // (three-valued discipline, design §5.2).
-    if (t.matches('number') && !t.matches('complex')) return undefined;
+    if (t.matches('number') && !isNonRealNumber(t.type)) return undefined;
     return false;
   }
 

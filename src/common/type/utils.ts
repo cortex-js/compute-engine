@@ -1,7 +1,7 @@
 import { parseType } from './parse.js';
 import { isValidType } from './primitive.js';
 import { typeToString } from './serialize.js';
-import { widen } from './subtype.js';
+import { isSubtype, widen } from './subtype.js';
 
 // Re-export isValidType from primitive for backward compatibility
 export { isValidType };
@@ -118,4 +118,41 @@ export function broadcastElementType(type: Readonly<Type>): Type {
   if (typeof type !== 'string' && type.kind === 'union')
     return widen(...type.types.map((t) => broadcastElementType(t)));
   return collectionElementType(type) ?? (type as Type);
+}
+
+/**
+ * True if `t` provably denotes a non-real number: a subtype of `complex` that
+ * is not a subtype of `real` (`complex`, `imaginary`, `finite_complex`, …).
+ *
+ * Note that under the `real ⊂ complex` convention a bare
+ * `isSubtype(t, 'complex')` is also true for every real type, so it cannot be
+ * used on its own as an "is complex-valued" test.
+ */
+export function isNonRealNumber(t: Readonly<Type>): boolean {
+  return isSubtype(t as Type, 'complex') && !isSubtype(t as Type, 'real');
+}
+
+/**
+ * True if an operand of type `t` could be a non-real number: either the type
+ * is a supertype of `complex` (`number`, `any`), or it is a numeric type
+ * outside `real` (a complex literal types as `finite_complex`, `i` as
+ * `imaginary` — neither is a *supertype* of `complex`, so the first check
+ * alone misses actual complex-valued operands).
+ *
+ * Used to decide whether numeric arguments should be inferred as `number`
+ * rather than `real`.
+ *
+ * Note the argument order in the first check: `isSubtype('complex', t)` asks
+ * whether `t` is a *supertype* of `complex` — it is NOT true for `real` and
+ * its subtypes:
+ *
+ * - `real`, `finite_real`, `integer`, `rational` → `false`
+ * - `number`, `finite_number`, `any`, `unknown` → `true` (could be non-real)
+ * - `complex`, `finite_complex`, `imaginary` → `true` (is non-real)
+ */
+export function couldBeNonRealNumber(t: Readonly<Type>): boolean {
+  return (
+    isSubtype('complex', t as Type) ||
+    (isSubtype(t as Type, 'number') && !isSubtype(t as Type, 'real'))
+  );
 }

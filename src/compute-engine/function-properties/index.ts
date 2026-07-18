@@ -20,6 +20,7 @@ import dataJson from './function-properties-data.json';
 
 import type { IComputeEngine } from '../types-engine.js';
 import type { Expression, ExpressionInput } from '../types-expression.js';
+import { isNonRealNumber } from '../../common/type/utils.js';
 
 /** A single analytic-property record for an operator. The MathJSON fields are
  * raw (as translated from Fungrim); box them with `ce.expr` to query. */
@@ -258,11 +259,7 @@ export function onBranchCut(
  *   values (`complex`/`imaginary`/`finite_complex`); `true` otherwise.
  */
 export function isEligibleRealRewrite(x: Expression): boolean {
-  // A type that matches `complex` but not `real` admits genuinely non-real
-  // values (note `finite_real` matches `complex` too, hence `!matches('real')`).
-  const t = x.type;
-  if (t.matches('complex') && !t.matches('real')) return false;
-  return true;
+  return !isNonRealNumber(x.type.type);
 }
 
 // Operators that carry at least one Poles record — a cheap gate so the numeric

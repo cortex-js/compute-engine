@@ -856,7 +856,7 @@ function makeLambda(
       );
 
       // Evaluate body with known args in a fresh scope
-      const evaluatedKnownArgs = args.map((a) => a.evaluate());
+      let evaluatedKnownArgs = args.map((a) => a.evaluate());
 
       // Validate the applied prefix against the declared parameter types
       // (§6.4/§6.5). On mismatch, return the inert application with the
@@ -874,8 +874,14 @@ function makeLambda(
             evaluatedKnownArgs,
             prefixSig
           );
-          if (validated !== null)
-            return ce._fn('Apply', [fnExpr, ...validated]);
+          if (validated !== null) {
+            // Any invalid operand: mismatch — return the inert application.
+            if (validated.some((x) => !x.isValid))
+              return ce._fn('Apply', [fnExpr, ...validated]);
+            // All valid: an operand was substituted (e.g. devolved); proceed
+            // with the substituted arguments.
+            evaluatedKnownArgs = [...validated];
+          }
         }
       }
       const capturedScope =
@@ -944,7 +950,7 @@ function makeLambda(
     //
     // 4/ Evaluate arguments in the calling scope before switching context
     //
-    const evaluatedArgs = args.map((a) => a.evaluate());
+    let evaluatedArgs = args.map((a) => a.evaluate());
 
     //
     // 4b/ In strict mode, validate the evaluated arguments against the
@@ -956,7 +962,14 @@ function makeLambda(
     //
     if (ce.strict && hasAnnotatedParam && _validateArguments) {
       const validated = _validateArguments(ce, evaluatedArgs, fnExpr.type.type);
-      if (validated !== null) return ce._fn('Apply', [fnExpr, ...validated]);
+      if (validated !== null) {
+        // Any invalid operand: mismatch — return the inert application.
+        if (validated.some((x) => !x.isValid))
+          return ce._fn('Apply', [fnExpr, ...validated]);
+        // All valid: an operand was substituted (e.g. devolved); proceed with
+        // the substituted arguments.
+        evaluatedArgs = [...validated];
+      }
     }
 
     //

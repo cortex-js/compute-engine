@@ -2,6 +2,10 @@ import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 
 import { isSubtype, narrow } from '../../src/common/type/subtype';
+import {
+  isNonRealNumber,
+  couldBeNonRealNumber,
+} from '../../src/common/type/utils';
 import { reduceType } from '../../src/common/type/reduce';
 import { isValidType } from '../../src/common/type/primitive';
 import { TypeReference } from '../../src/common/type/types';
@@ -1417,5 +1421,41 @@ describe('Type-system correctness (REVIEW.md F11–F17)', () => {
     expect(() => parseType('integer<nan..10>')).toThrow();
     // Valid ranges still parse.
     expect(ts(parseType('integer<0..10>')!)).toBe('integer<0..10>');
+  });
+});
+
+describe('NON-REAL NUMBER PREDICATES', () => {
+  // `isNonRealNumber`: provably non-real (subtype of `complex`, not of
+  // `real`). `couldBeNonRealNumber`: not provably real (also true for
+  // supertypes of `complex` such as `number`/`any`/`unknown`). Note the
+  // argument order in the latter's first check — `isSubtype('complex', t)`
+  // tests that `t` is a SUPERTYPE of complex, so `real` (⊂ complex under
+  // D10) does NOT satisfy it.
+  it('real types are neither non-real nor possibly non-real', () => {
+    for (const t of ['real', 'finite_real', 'integer', 'rational'] as const) {
+      expect(isNonRealNumber(t)).toBe(false);
+      expect(couldBeNonRealNumber(t)).toBe(false);
+    }
+  });
+
+  it('wide numeric types could be non-real but are not provably so', () => {
+    for (const t of ['number', 'finite_number', 'any', 'unknown'] as const) {
+      expect(isNonRealNumber(t)).toBe(false);
+      expect(couldBeNonRealNumber(t)).toBe(true);
+    }
+  });
+
+  it('complex types are provably non-real', () => {
+    for (const t of ['complex', 'finite_complex', 'imaginary'] as const) {
+      expect(isNonRealNumber(t)).toBe(true);
+      expect(couldBeNonRealNumber(t)).toBe(true);
+    }
+  });
+
+  it('non-numeric types are neither', () => {
+    for (const t of ['string', 'boolean', 'list<number>'] as const) {
+      expect(isNonRealNumber(parseType(t))).toBe(false);
+      expect(couldBeNonRealNumber(parseType(t))).toBe(false);
+    }
   });
 });

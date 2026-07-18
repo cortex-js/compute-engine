@@ -9,7 +9,10 @@ import {
   isNumericTuple,
   isPossiblyCollectionTyped,
 } from '../collection-utils.js';
-import { collectionElementType } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  isNonRealNumber,
+} from '../../common/type/utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { normalizeIndexingSet } from '../library/utils.js';
 import {
@@ -944,8 +947,7 @@ export class BaseCompiler {
     const hasComplexElement = (a: Expression): boolean => {
       const elt = collectionElementType(a.type.type);
       if (elt === undefined) return false;
-      const t = engine.type(elt);
-      return t.matches('complex') && !t.matches('real');
+      return isNonRealNumber(elt);
     };
 
     // A `broadcastable<T>`-typed operand is scalar OR an indexed collection at
@@ -1720,13 +1722,13 @@ export class BaseCompiler {
       if (expr.symbol === 'ImaginaryUnit') return true;
       const t = expr.type;
       if (!t) return false;
-      return t.matches('complex') && !t.matches('real');
+      return isNonRealNumber(t.type);
     }
 
     if (isFunction(expr)) {
       // Check the function's return type from its operator definition
       const t = expr.type;
-      if (t.matches('complex') && !t.matches('real')) return true;
+      if (isNonRealNumber(t.type)) return true;
       if (t.matches('real')) return false;
 
       // Return type is unknown — fall back to checking whether any
