@@ -2,11 +2,6 @@
 
 **Last updated:** 2026-07-18.
 
-(2026-07-17: the `At` default-serialization decision closed — bracket
-notation `a[1]` is the default and round-trips; the lossy subscript form is
-opt-in via `indexStyle: 'subscript'`. The pipeline-contract suite and
-consumer contract were updated; the item left this file.)
-
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
 files, and `docs/rubi/RUBI.md` / `docs/fungrim/`.
@@ -38,13 +33,17 @@ clean-parse 3/345 → 278/345, throws 9 → 0). Fresh unseen-sample validation
 measured 97.4% clean parse with 0 throws/0 hangs; the remaining MathNet work
 is a small notation tail tracked below.
 
-**0.73.0 released 2026-07-09** (solving parity 38/40 with SymPy/Mathematica,
-Rubi R13–R16, `Interpret`, number theory; earlier 0.7x releases carried the
-`Measurement`/uncertainty MVP, the control-flow/scoping overhaul, `digits`
-display control, numeric tuples as points/vectors, and the
-Desmos-compatibility lists wave). Neyret-corpus parse coverage 78.6% → 92.9%;
-the remaining Desmos gaps are importer-side (tracked in tycho's
-`COMPUTE_ENGINE.md`), not engine items.
+**0.84.2 released 2026-07-18** (latest). The 0.74–0.84 line carried the
+Tycho-compatibility rounds, the collection-operator-gaps + laziness waves,
+the `broadcastable<T>` typing lift, conditional values (`When`/`Which`),
+typed function literals, Mathematica-style surface forms, `NDSolve` adaptive
+stepping + `NDSolveFunction`, and the disposition of the 2026-07
+correctness/symbolic/performance reviews — see `CHANGELOG.md`. Earlier
+milestones: **0.73.0** (2026-07-09; solving parity 38/40 with
+SymPy/Mathematica, Rubi R13–R16, `Interpret`, number theory) and the 0.7x
+`Measurement` MVP / control-flow-scoping / Desmos-lists releases.
+Neyret-corpus parse coverage 92.9%; the remaining Desmos gaps are
+importer-side (tracked in tycho's `COMPUTE_ENGINE.md`), not engine items.
 
 **Cortex language shipped (2026-07-09):** the revived Cortex language
 (parser, serializer, `executeCortex` interpreter — phases 0–5 of the revival)
@@ -72,20 +71,23 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ### Broadcast typing residue (`broadcastable<T>` lift landed 2026-07-17)
 
-The lift itself shipped: the `broadcastable<T>` type constructor and
-subsumption, the library-wide broadcast-typing arm, compile-target routing
-(JS `_SYS.bcast`; GPU/interval targets keep scalar-slot compilation), the
-application-site typing for scalar-param lambdas, and the point-patch
-disposition (`restsOnUnknown`/`AT_NARROWING_OPERATORS` retired; the other
-patches kept deliberately — see the design doc). Record in `CHANGELOG.md`
-and `docs/plans/2026-07-11-broadcast-typing-lift-design.md`. Genuinely
+The lift itself shipped (record in `CHANGELOG.md` and
+`docs/plans/2026-07-11-broadcast-typing-lift-design.md`). Genuinely
 remaining, as separate demand-gated items:
 
 - **Phase-2 declared-type reconciliation** for symbolic-length ranges (see
-  the design doc).
+  the design doc). Two broadcast-lift Phase-2 test pins currently assert the
+  declared type + Map form pending this item.
 - **Param-type-driven lambda-body typing:** lambda BODIES over untyped
   params still type scalar — only applications are lifted; revisit only
   with a param-type-driven design.
+- **Python broadcast compilation:** the Python target lowers arithmetic to
+  infix and has no generic `_ce_bcastf` helper, so possibly-collection
+  operands fail closed (interpreter fallback is sound). Build the helper
+  only if a compiled-NumPy binding path is ever needed.
+- **Matrix rank preservation in `broadcastResultType`:** matrix
+  intermediates flatten to `list<number>` (rank lost) — pre-existing
+  convention, someday-fix.
 
 Interactions to respect: non-finite typing convention, `infer(unknown)`
 destructiveness, scalar-requiring contexts (exponents, comparisons, plot
@@ -97,16 +99,11 @@ CE is the foundation for Tycho / Graph Paper: an app helping scientists,
 students and educators collaborate and communicate about scientific topics.
 The 2026-07-04 capability survey against that goal found the engine strong on
 plotting/compile targets, units & quantities, logic/sets, linear algebra,
-equation systems, and number formatting — and thin in the areas below. Of the
-items agreed 2026-07-04, `Series` (Phases 1–2), the trig rewrites
-(`TrigExpand`/`TrigToExp`/`TrigReduce`), **statistics** Phases 1–2, the
-**explain API** (all three phases: simplify + solve + D),
-**significant-figures display** (the `digits` serializer option, former item
-7), and the **`Measurement` MVP** (item 5) have all landed and left this
-list — the record lives in `CHANGELOG.md` and the design docs under
-`docs/plans/` (`2026-07-04-statistics-design.md`,
-`2026-07-04-explain-design.md`, `2026-07-07-uncertainty-design.md`). What
-remains (effort S/M/L):
+equation systems, and number formatting — and thin in the areas below. The
+agreed items (`Series`, trig rewrites, statistics Phases 1–2, the explain
+API, significant-figures display, the `Measurement` MVP) have all landed —
+the record lives in `CHANGELOG.md` and the design docs under `docs/plans/`.
+What remains (effort S/M/L):
 
 **Statistics residue (demand-gated Phase 3, design doc §10):** inverse
 regularized incomplete gamma/beta kernels and the distributions that need
@@ -116,7 +113,14 @@ execution-parity suite for the new scipy mappings is guarded/skipped until
 scipy is installed in `./venv`.
 
 **Series residue:** bare `O(…)` parsing remains deferred (design doc §8 Q3);
-revisit for lenient mode once the parser work settles.
+revisit for lenient mode once the parser work settles. From the Puiseux/log
+round (landed 2026-07-12), deliberate defers that could be revisited on
+demand: log-carrying expansions at ±∞ (`1/ln x`, `ln(ln x)`, `sin(ln x)`,
+`e^{1/x}` defer — correct-over-wrong), exact terminating expansions still
+emit a conservative `BigO` (`assembleLaurent` has no exactness notion),
+combined distinct radicals grow `lcm(d)` uncapped inside add/mul (bounded by
+the deadline → clean defer), and `diffLaurent` asserts `d === 1` (polygamma
+ladder only).
 
 **Typed function literals residue (demand-gated, design doc
 `docs/plans/2026-07-12-typed-function-literals-design.md` §10):** the typed
@@ -130,45 +134,15 @@ result against the declared return type (returns are pure ascriptions today),
 (`["Function", body, "'(x: integer) -> real'"]` canonicalizing into the
 structural form).
 
-**MathNet parser tail (S/M; corpus at 371/428 after the 2026-07-09 rounds —
-trailing-`?`/`\ldots` recovery, Unicode `±`/`∓`/`ℓ`, un-applied-operator
-devolution (`N`, `D`), `\measuredangle`/`\Varangle`, decorated operators
-(`\oplus` → `CirclePlus`, …), structure tuples `(A,+,\cdot)`, geometry
-`\cap` label tolerance, trailing equation labels (`\quad (2)`,
-`\textcircled{1}`), trailing qualifier clauses (`\text{for } n \ge 2` →
-`ForAll`, incl. infix `for all` and the English enumeration `, \text{and}`),
-subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
-(`CapitalPi`) all landed):**
+**MathNet parser tail (S/M; corpus at 371/428 CI-gated after the
+2026-07-09 rounds):**
 
 *Next up (agreed 2026-07-09):*
 
-- **MATH genre-gap fixes (S/M; top tier + cheap recoveries EXECUTED
-  2026-07-09):** the genre-coverage sweep ran over Hendrycks MATH (15,546
-  fragments incl. worked solutions across all 7 subjects; report:
+- **MATH genre-gap tail (S/M):** the Hendrycks MATH genre sweep (report:
   `docs/mathnet/math-genre-sweep.md`, tagged failures:
-  `math-genre-failures.json`): 95.27% clean, 0 throws — the MathNet clean
-  rate generalizes. The top five gaps landed same day (`\frac`/`\binom`
-  mixed-brace bug, styling commands, `\|` norm, infix `\choose`, bare
-  `\pmod` + `\equiv…\implies` chain → 97.09%), followed by the cheap
-  recoveries (ordinal `13^{\text{th}}`, empty scripts `^{}`/`_{}`, `{,}`
-  thousands separator with the `decimalSeparator: '{,}'` precedence guard,
-  `\cancel`/`\cancelto`, `\not`-prefixed relations, `Factorial2` symbolic
-  signature, standalone-`\pmod` operand order — see CHANGELOG), taking the
-  corpus to **97.38%** (327 of 735 failures fixed). Base-subscript numerals
-  then landed too (`10111_2` → the numeric `BaseForm(value, base)` head,
-  12 of 16 tagged fixed; the rest are symbolic-base `161_b`, inert by
-  design), as did sequence braces (`\{a_n\}_{n=1}^{\infty}` → inert
-  `IndexedSequence`, 3/3). The prime/pmod/empty-subscript round then
-  closed prime-after-arg 13/13 (`Prime` now mirrors its base's type),
-  symbolic-modulus congruences + `N`/`D` devolution in `validateArguments`,
-  congruence chains (→ conjunction) and leading-`\equiv` recovery, and
-  `\alpha_{}` — genre corpus at **97.63%** (365 of 735 fixed). Units-in-text
-  then landed (English word→canonical-symbol aliases at the parse boundary
-  in `definitions-units.ts`, compound leaves normalized, outside-exponent
-  folded into the trailing factor; `ton(s)` deliberately NOT aliased —
-  short ton ≠ tonne; of the 46 tagged rows only 13 were unit-bearing, 6
-  fully fixed + 1 partial) — genre corpus at **97.66%** (371 of 735).
-  Remaining ranked tail:
+  `math-genre-failures.json`) stands at **97.66%** clean (371 of 735
+  failures fixed) after the 2026-07-09 rounds. Remaining ranked tail:
   (1) styling remnants (11, mostly array-env/prose — low value);
   (2) units residue: `yd`/`qt`/`pt` and currency (`USD`, `cents`, `euro`)
   have no `unit-data.ts` symbols (adding them is a units-subsystem call,
@@ -198,15 +172,9 @@ subscripted-relation sets (`\mathbb{N}_{\geqslant 0}`), and the `\Pi` glyph
 2026-07-09 — the explicit `Interpret(expr)` head turns continuation-bearing
 sums/products into formal `Sum`/`Product` under a strict arithmetic-
 progression gate (`1+2+\dots+n` → `Sum(k,(k,1,n))`; parity mismatches and
-anything unproven stay inert). Remaining rungs, demand-paced:
-
-  (v2 — finite differences → polynomial terms + constant-ratio geometric —
-  and v3 — exact-rational Berlekamp–Massey → recurrence → verified
-  `RSolve` closed form, `Fibonacci`-head display mapping, numeric anchors
-  by exact recurrence iteration — both landed 2026-07-09, along with the
-  subtraction-ellipsis fold-barrier extension, `isContinuationOperand`.
-  v4 — the async `ce.interpret(expr)`: same offline recognizer plus OEIS-
-  attributed, sample-verified closed-form candidates — landed 2026-07-10.)
+anything unproven stay inert); v2–v4 (polynomial/geometric recognition,
+Berlekamp–Massey → `RSolve`, async OEIS-backed `ce.interpret`) followed.
+Remaining, demand-paced:
 
 - **Known edge:** `simplify()` on `-(2·4·\dots·2n)` distributes the outer
   sign into the product and folds (pre-existing).
@@ -232,6 +200,16 @@ Deferred:
 - **Relative-error notation** (`±5%`) and **distribution/`RandomVariate`
   links** (reuse the statistics RNG/seed policy).
 
+**Mathematica surface forms — deferred tail (need user steer before
+attempting; landed record in the 2026-07-14 commits):** Tier 3 heads
+(`NSolve` — cheap as Solve+N —, `FindRoot` with `{x, x0}`, `Reduce`); the
+`{i, n}` 2-element iterator shorthand and bare-count `Table(expr, n)`
+(rejected as malformed for cross-operator consistency — adopt everywhere at
+once if ever); symbolic directional limits (`lim_{x→a⁺}` at a symbolic
+point stays inert — representation correct, evaluation gap). Related open
+parse question (not filed): number-juxtaposed bracket lists (`2[1,2,3]`)
+don't parse; `2\cdot[1,2,3]` does.
+
 **Not yet agreed (proposed 2026-07-04, awaiting a call):**
 
 6. **MathML output + speakable text (M).** Communication and accessibility:
@@ -254,43 +232,48 @@ Still open from its ranked list:
 
 - **defint error bar 1.6× optimistic on endpoint-singular integrands** —
   large (tanh-sinh quadrature).
-- **Perf tail** (measurement-gated): per-opDef `allParamsNumeric` cache,
-  cold-start bundle size, serialization cache / sort-comparator allocs.
-- **Loose-parsing low items:** `sqrt2x` → `√(2x)` divergence from AsciiMath
-  convention (left as-is 2026-07-18: implicit arguments are the documented
-  bare-function convention — `cos 2x` → `Cos(2x)` — so following AsciiMath
-  here would be internally inconsistent; a deliberate-policy note, not a
-  bug); explicit `_a` wildcards in arrow-string rules are a silent no-op
-  (redundant there — auto-wildcarding covers it). *(Closed 2026-07-18:
-  `min x`/`acot`/`asec`/`acsc`/`alpha2` had been fixed by intervening work;
-  `nPr(n, k)` now parses as the permutation count C(n,k)·k!, joining `nCr`.
-  Infix calculator notation `5 nPr 2` remains unsupported — a new-notation
-  design item, not a map gap.)*
-- **Doc/cosmetic tail:** locale separators. *(`0.999\ldots` fixed
-  2026-07-18: a truncation marker after decimal digits ending in an evident
-  repetend — ≥3 reps for single digits, ≥2 for longer blocks — now parses
-  as the exact repeating decimal (`0.999\ldots` → 1, `0.1212\ldots` →
-  4/33); non-repeating tails (`3.1415\ldots`) keep the old
-  drop-the-marker behavior.)*
+- **Perf tail.** The 2026-07-01 performance review (P0–P3,
+  `PERFORMANCE_FINDINGS.md`) fully closed 2026-07-18 — its status table
+  records what shipped and, importantly, what was **measured unprofitable
+  and must not be re-attempted without a new profile** (P2-2 `isSubtype`
+  memo, P2-4 simplify-history scan, the `bignumRe` memo, P3-1 `.json`
+  cache). Still open, measurement-gated: cold-start bundle size, and the
+  post-drift-fix residual tail — 6 benchmark cases still < 0.95× vs 0.73.0,
+  worst CE4 erf-integral 0.62× (case-specific integrate/simplify machinery
+  growth, not box tax) — a candidate future perf item.
+- **Loose-parsing low items:** infix calculator notation `5 nPr 2` is
+  unsupported (a new-notation design item, not a map gap); explicit `_a`
+  wildcards in arrow-string rules are a silent no-op (redundant there —
+  auto-wildcarding covers it). `sqrt2x` → `√(2x)` is a deliberate policy
+  (consistent with the bare-function convention `cos 2x` → `Cos(2x)`), not
+  a bug.
+- **Doc/cosmetic tail:** locale separators.
 - ODE P2s — folded into the DSolve/NDSolve track below (**B12**).
 
 ### Symbolic capability gaps
 
 #### B9. `Solve` — beyond the Wester ceiling
 
-Base CE solves 14/21 of the Wester equations (substitution and zero-product
-factoring already landed). The last two Wester gaps (`xˣ = x`, `sin x = tan x`)
-are harness artifacts — the harness grades SymPy's arbitrary finite root-slices,
-not a CE capability gap — so the Wester `Solve` score is saturated at our
-principled ceiling. CE now _exceeds_ SymPy on the two inverse-trig equations
-SymPy errors on — `arcsin x = arctan x → {0}` and
-`arccos x = arctan x → √((√5−1)/2)` (solved by applying `tan` to both sides) —
-and the `Solve(eq, x)` operator now dispatches to `.solve()` instead of letting
-its `Equal` collapse to `False` (both landed). The LambertW / Ln-Exp inverse
-forms landed too (solve templates + the native W₋₁ branch — see the Fungrim
-coverage track, at 38/40 parity with SymPy/Mathematica on its own benchmark),
-so **no open items remain here**; the section is kept for the
-harness-artifact explanation the Fungrim track cross-references.
+The Wester `Solve` score is saturated at our principled ceiling (14/21; the
+last two gaps — `xˣ = x`, `sin x = tan x` — are harness artifacts: the
+harness grades SymPy's arbitrary finite root-slices, not a CE capability
+gap). The section is kept for that harness-artifact explanation, which the
+Fungrim track cross-references. Genuinely open Solve items:
+
+- **Diophantine deferrals** (Phase 3 shipped linear n-variable + Pell +
+  Pythagorean triples; design record in
+  `docs/plans/2026-07-04-solve-domain-design.md` Phase 3): sum-of-squares
+  tier (fits a representation function better than Solve), general binary
+  quadratics via `transformation_to_DN`, half-bounded-Range instantiation
+  (currently inert by design), `factor_list`-style auto-factoring. Ternary
+  quadratics deliberately skipped (low value); weighted-coefficient /
+  ≥4-square parametrizations deliberately refused (textbook families are
+  provably incomplete — the contract emits only complete families).
+- **Inequality and system solving via `Solve`** remain partial (see
+  `test/compute-engine/solve.test.ts` commented `@todo` cases); linear
+  inequality systems are handled, general ones are not.
+- The solve rule set is acknowledged incomplete (`solve.ts` "MOAR RULES",
+  plus two deferred side-condition checks noted in-file).
 
 #### B11. Multivariate polynomial GCD — Stage C (Fateman-scale)
 
@@ -327,9 +310,10 @@ second-order Cauchy–Euler homogeneous, the first-order nonlinear classes
 (separable with _implicit_ `F(y) = G(x) + C` solutions, Bernoulli `v = y^{1−n}`,
 first-order homogeneous `y′ = F(y/x)`, and exact `M dx + N dy = 0`), and
 initial/boundary conditions (solving the linear system for the integration
-constants). `NDSolve` provides fixed-step RK4 (scalar + higher-order reduction
-to systems). Unsupported forms stay **inert rather than wrong** — preserve that
-contract as coverage grows.
+constants). `NDSolve` integrates adaptively (Dormand–Prince 5(4) with dense
+output; scalar, higher-order reduction, and first-order-system forms).
+Unsupported forms stay **inert rather than wrong** — preserve that contract
+as coverage grows.
 
 The CE-vs-SymPy audit harness (`benchmarks/audit/dsolve.ts` +
 `gen_dsolve.py`, substitute-back residual oracle, 51-case corpus seeded from
@@ -340,30 +324,22 @@ five `unsupported` rows are the coverage frontier (SymPy solves four):
 second order, nonhomogeneous Cauchy–Euler, repeated-eigenvalue linear
 systems.** Ranked next steps (good contributor territory):
 
-- **`NDSolve` numerics — adaptive stepping LANDED 2026-07-18.** `NDSolve`
-  now integrates with adaptive Dormand–Prince 5(4) (embedded error control,
-  rtol 1e-11 / atol 1e-13 defaults, RMS norm; `rk45System` in
-  `numerics/differential-equations.ts`) and emits its unchanged uniform
-  `steps + 1` output grid from the quartic dense-output interpolant, so
-  `steps` is now purely sampling resolution and accuracy is
-  tolerance-controlled (rapid-transient case `y' = −50(y − cos x)`: grid
-  error 4e-5 → 2e-12). Failure modes (blow-up, step underflow, step cap)
-  stay inert. First-order vector IVPs were already exposed (the
-  `List`-of-equations form). **The public interpolating-function surface
-  LANDED 2026-07-18** (user-ratified opaque-head design): `NDSolveFunction`
-  (same arguments as `NDSolve`, no sample count) returns
-  `Function(InterpolatingFunction(data, x), x)` — applicable at any point
-  of the integration interval (clamping outside it), symbolic-argument
-  inert, LaTeX display eliding the dense table to the covered interval,
-  and lowering to plain JS via the per-operator `compile` handler
-  (`compile(g(t))` ≈ 0.9 µs/eval). Scalar forms only; the multi-dependent
-  system form stays inert (a vector-valued interpolating result needs a
-  shape decision — demand-paced). Known engine-level quirk (pre-existing,
-  pinned in tests): applying a MathJSON-**re-boxed** literal resolves the
-  interpolation one `evaluate()` late (`N()` is immediate).
+- **`NDSolveFunction` system form:** `NDSolve` is adaptive (Dormand–Prince
+  5(4) with dense output, landed 2026-07-18) and `NDSolveFunction` returns a
+  callable `Function(InterpolatingFunction(data, x), x)` — but **scalar
+  forms only**; the multi-dependent system form stays inert. A
+  vector-valued interpolating result needs a shape decision — demand-paced.
+  Known engine-level quirk (pre-existing, pinned in tests): applying a
+  MathJSON-**re-boxed** literal resolves the interpolation one `evaluate()`
+  late (`N()` is immediate).
 - **Tolerance hardening** in the numeric characteristic-root clustering, so
   near-degenerate roots are grouped reliably as coverage of higher-order
   nonhomogeneous problems grows.
+- **Abel rung disposition (PR #320 residue):**
+  `solveConstantCoefficientAbelFirstKind` is dead code — the separable rung
+  earlier in the chain always handles or fails its cases first (both "Abel"
+  tests exercise the separable path). Removing it is a debatable-direction
+  change — needs a call.
 - **Adjacent, reusing the same kernel:** a
   `LaplaceTransform`/`InverseLaplaceTransform` pair (currently inert) — a
   capability on its own and a second, independent route to constant-coefficient
@@ -371,75 +347,37 @@ systems.** Ranked next steps (good contributor territory):
   the characteristic-polynomial / root-multiplicity machinery for linear
   constant-coefficient recurrences, with an `rⁿ·n^k` basis instead of
   `e^{rx}·x^k`.)
-- *(The former "small artifact" — `Derivative(Sign, 1)` left unevaluated →
-  `NaN` in numeric residual checks — was fixed 2026-07-18: `Sign` joined the
-  step-function group in the derivative table (0 a.e., like `Floor`/`Ceil`/
-  `Round`). A proper `DiracDelta` remains a possible future refinement.)*
+- A proper `DiracDelta` (for derivatives of step functions, currently 0
+  a.e.) remains a possible future refinement.
 
 #### B13. Wester capability gaps — the skip ledger in `wester.test.ts`
 
 `test/compute-engine/wester.test.ts` is the CI correctness suite transcribed
 from Wester's CAS review (the categories the `benchmarks/audit/wester.ts`
-harness cannot ingest). Every gap below exists there as a `test.skip`
-asserting the **correct** answer — unskipping is the acceptance test, so no
-separate tracking is needed. Grouped by theme:
+harness cannot ingest). The convention: a gap exists there as a `test.skip`
+asserting the **correct** answer — unskipping is the acceptance test. The
+2026-07 campaign worked the ledger from 18 skips down to **one**:
 
-- **Radical arithmetic & denesting** (the largest cluster; rational-radicand
-  extraction `(1029/1000)^{1/3} → 7·3^{1/3}/10`, the Wester-28 float-leak
-  fix, rationalizing denominators (`(√3+√2)/(√3−√2) → 5+2√6`, in the
-  simplify subsystem next to `denestSqrt`), three-surd denesting
-  (`√(10+2√6+2√10+2√15) → √2+√3+√5`), and same-base `Root`/`Power`
-  combination (`2^{1/3}·2^{2/3} → 2`, `2^{1/3}·4^{1/3} → 2`, positive
-  rational bases) all landed 2026-07-09; cube-root denesting
-  (`(90+34√7)^{1/3} → 3+√7`) landed 2026-07-11). Denesting still open beyond
-  those cases: recursive Wester 9 (the Putnam radical). Exact
-  zero-recognition over `ℚ(2^{1/3})` (Wester 28) now lands end-to-end:
-  perfect-power bases normalize (`4^{2/3} → 2·2^{1/3}`), compatible cube-root
-  powers combine exactly, the existing cost-gated expansion pass exposes the
-  trinomial cube, and both `simplify()` and `.N()` return exact/finite results.
-- **Sum/Product closed forms (telescoping sums/products, `Π k → n!`,
-  p-series `→ ζ(s)`, Wallis `→ 2/π`, and Richardson tail acceleration for
-  `.N()` of infinite sums/products ALL LANDED by 2026-07-11; closed-form
-  table growth LANDED 2026-07-18).** The table now also covers, all
-  numerically verified (`test/compute-engine/infinite-series.test.ts`,
-  recognizers in `library/utils.ts` `namedSeriesClosedForm`): alternating
-  p-series `±η(s)` (`Σ(−1)^{k+1}/k → ln 2`, `η(2) → π²/12`), odd p-series
-  `λ(s)` (`Σ1/(2k−1)² → π²/8`), Dirichlet `β(1,2,3,5)` (Leibniz `π/4`,
-  Catalan, `π³/32`, `5π⁵/1536`), exponential `Σrᵏ/k! → eʳ` (partial-term
-  adjustment for shifted starts; symbolic ratio allowed), first-moment
-  geometric `Σk·rᵏ → r/(1−r)²` and logarithmic `Σrᵏ/k → −ln(1−r)` (both
-  `When`-guarded on `|r| < 1` for symbolic ratios), and products
-  `Π_{k≥a}(1−1/k²) → (a−1)/a`, `Π(1−1/(2k+1)²) → π/4`,
-  `Π(1+1/k²) → sinh(π)/π`. Further growth (e.g. `β(4)`, Hurwitz-shifted
-  bases `(k+m)^{−s}`, higher moments `Σk²rᵏ`) remains demand-paced.
-- **Trigonometric simplification (Pythagorean factoring LANDED 2026-07-09;
-  trig-matrix rank-1 detection LANDED 2026-07-10** via the symbolic
-  determinant rank path with a `TrigReduce` fallback — see the
-  linear-algebra bullet**).**
-- **Complex/abs simplification (LANDED 2026-07-10).** Kahan's
-  `|3−√7+i·√(6√7−15)| → 1` exactly, via the exact `√(a²+b²)` split with a
-  numeric cross-check rejecting invalid real/imaginary decompositions.
-- **Assumptions (LANDED 2026-07-10).** Transitive ≥-chain closure with
-  antisymmetry (Wester 21) and even-power monotonicity on ordered positives
-  (Wester 22), scoped narrowly so solve()'s conservative root filtering is
-  unchanged.
-- **Linear algebra (2026-07-10 round ALL LANDED: exact rational elimination
-  extended to `Kernel`/`MatrixRank`/eigenvectors, joining `RowReduce`;
-  `M·M⁻¹ → I` via same-denominator fraction combining + `simplify()`
-  recursing into `List` elements; symbolic small-matrix rank from the
-  simplified determinant; Vandermonde determinants return the difference
-  product; QR eigensolver rebuilt as Hessenberg + Francis double-shift with
-  deflation — the 8×8 Rosser matrix converges; `MatrixPower(M, 1/2)`
-  principal square root for exact 2×2; new `SingularValues` head, exact for
-  ≤2×2 Gram matrices; elementwise `D` over `List` literals — the
-  rotation-matrix second derivative; the matrix-valued-`Add`-into-
-  `MatrixMultiply` type rejection turned out already fixed by the
-  matrix-typing work).** Remaining: matrix square root beyond exact
-  2×2 (n×n wants eigendecomposition or Denman–Beavers); exact singular
-  values beyond a 2×2 Gram matrix. Missing heads noted in comments:
-  `MatrixExp` (`Exp` of a matrix broadcasts elementwise — it is *not* the
-  matrix exponential), matrix functions generally (sine of a matrix),
-  Jordan / Smith normal forms.
+- **Wester 9 — recursive denesting** (the Putnam radical
+  `√(14+3√(3+2√(5−12√(3−2√2)))) → 3+√2`): only single-level
+  `√(a+b√c)` denesting is implemented; the multi-level/recursive case is a
+  deliberate algorithmic project (Landau/Blömer-style).
+- **Linear algebra residue** (not skip-representable, tracked here):
+  matrix square root beyond exact 2×2 (n×n wants eigendecomposition or
+  Denman–Beavers); exact singular values beyond a 2×2 Gram matrix. Two
+  wester tests are active-but-weakened rather than skipped (stale "skipped"
+  comments in-file): fused-form `row-vector · (a·M1 + M2)` asserts the
+  current `MatrixMultiply` type rejection, and the symbolic Vandermonde
+  determinant is spot-checked numerically because `Factor`/`simplify`
+  leave it unfactored (a `/(−w+x)` division artifact).
+- Missing heads noted in comments: `MatrixExp` (`Exp` of a matrix
+  broadcasts elementwise — it is *not* the matrix exponential), matrix
+  functions generally (sine of a matrix), Jordan / Smith normal forms
+  (→ B14).
+- Closed-form table growth for infinite sums/products (beyond the
+  `namedSeriesClosedForm` table landed 2026-07-18 — e.g. `β(4)`,
+  Hurwitz-shifted bases `(k+m)^{−s}`, higher moments `Σk²rᵏ`) remains
+  demand-paced.
 
 Untranscribed corpus categories (future tranches): systems of equations /
 congruence solving, special functions, transforms, ODEs/PDEs (→ B12),
@@ -458,89 +396,74 @@ under CE names: `NthPrime`, `NPartition`, `PowerMod`, `ModularInverse`,
 `StirlingS1`, `Rationalize`, `PrimitiveRoot`, `ContinuedFraction`,
 matrix ∞-`Norm`, `BaseForm`, finite-domain `ForAll`/`Exists`).
 
-- **Repeating-decimal representation (consumer side DONE 2026-07-09):**
-  repeating-decimal literals now box as exact rationals
-  (`0.(142857)`/`0.\overline{142857}` → `1/7`), so arithmetic on such forms
-  is exact. The residual is the *producer* direction: an equivalent of
-  `ToPeriodicForm` — an operator that renders an exact rational as its
-  periodic-decimal object (the LaTeX serializer's `repeatingDecimal` option
-  covers only float display).
+- **Repeating-decimal representation — producer direction:** an equivalent
+  of `ToPeriodicForm`, rendering an exact rational as its periodic-decimal
+  object (the LaTeX serializer's `repeatingDecimal` option covers only
+  float display; the consumer direction — repeating-decimal literals boxing
+  as exact rationals — is done).
 - **Quantifier elimination over ℝ:** `ForAll`/`Exists` evaluate only over
   finite domains; the Wester/Liska–Steinberg stability problems need QE over
   real closed fields (CAD or virtual substitution) — a major subsystem,
   catalogued here for completeness, not planned.
 - **Matrix decompositions & functions:** `MatrixExp` / general matrix
-  functions (note: `Exp` of a matrix currently **broadcasts elementwise** —
-  the footgun is now documented: warning admonition in the linear-algebra
-  guide + reference-table note + operator description, 2026-07-18; an
-  actual matrix exponential remains future work); symbolic singular values (`SVD` is
-  float-only); Jordan / Smith normal forms; symbolic Frobenius norm
-  (`Norm(M, 'Frobenius')` for symbolic entries).
+  functions (`Exp` of a matrix **broadcasts elementwise** — the footgun is
+  documented, but an actual matrix exponential remains future work);
+  symbolic singular values (`SVD` is float-only); Jordan / Smith normal
+  forms; symbolic Frobenius norm (`Norm(M, 'Frobenius')` for symbolic
+  entries).
 - **Hypothesis testing:** `MeanTest` etc. — undeclared; only worth pursuing
   if the statistics track (GP items) calls for it.
 
-#### B15. Parameter-conditional results — producers never emit `Which`
+#### B15. Parameter-conditional results — the last `Which` producer
 
-The **representation** side is done: `Which` stays inert while its conditions
-are undecidable, resolves once `ce.assume()` decides one (assuming `a > 2`
-collapses `Which(|a| < 1, 2π, |a| > 1, 0)` to `0`), and serializes to a LaTeX
-`cases` environment. The gap is the **producer** side — no operation ever
-*returns* a parameter-conditioned result; each either picks the generic
-branch, silently drops the validity condition, or stays inert:
+The conditional-values design
+([`docs/plans/2026-07-12-conditional-values-design.md`](./docs/plans/2026-07-12-conditional-values-design.md))
+is ratified and its Phases 1–3b landed: `When` threading algebra, the Solve
+adopter (trig/hyperbolic validity + radical extraneous-root guards), and the
+convergence-conditions adopter (improper-integral endpoint guards, geometric
+series `1/(1−x) {|x|<1}`). Remaining:
 
-- **Definite integration:** results that are genuinely piecewise in a free
-  parameter stay inert. Motivating case (2026-07-10):
+- **Definite-integration region splitting (`Which`) — the only open
+  producer.** Motivating case:
   `∫_{−π}^{π} (1 − x·cos t)/(x² − 2x·cos t + 1) dt` = `2π` for `|x| < 1`,
-  `0` for `|x| > 1` — CE returns the unevaluated integral (correctly, since
-  emitting either branch would be wrong; `.N()` at concrete `x` is right).
-- **Solve:** the trig rules admit symbolic ratios unconditionally —
-  `a·sin(x) + b = 0 → arcsin(−b/a)` is emitted without recording the
-  `|b/a| ≤ 1` validity condition the rule's own guard checks for numeric
-  ratios. Same for the extraneous-root conditions on radical equations.
-- **Sum/Limit:** convergence conditions are dropped or block evaluation —
-  `Σ xⁿ = 1/(1−x)` holds only for `|x| < 1`; a conditional result would
-  let the closed form be returned with its region attached.
-
-**Design ratified 2026-07-12**
-([`docs/plans/2026-07-12-conditional-values-design.md`](./docs/plans/2026-07-12-conditional-values-design.md)):
-no new head — `When` is the guarded value (= `ConditionalExpression`;
-Solve/Sum) and `Which` the case split (= `Piecewise`; integration), split by
-"what is the answer where the condition is false?" (a genuine other value →
-`Which`; no value → `When`). Threading rules T1–T7 (conjunction-of-guards
-vs. cross-product-of-regions), a single `conditionalValue` emission helper
-consulting the assumption store, guards exempt from generic folds
-(fat-complement argument), conservative predicate threading, and a
-solution-set pruning contract.
-
-**Phases 1–2 landed 2026-07-12** (zero snapshot churn; solve benchmark held
-at 38/40): the threading algebra (step-4c pre-pass in `boxed-function.ts`,
-which also fixed the pre-existing `When − When → 0` guard-dropping fold) and
-the Solve adopter (14 trig/hyperbolic validity rules emit `When`-guarded
-roots — `Solve(sin x = a, x)` → `When(arcsin a, |a| ≤ 1)` — with pruning in
-root assembly and the audit oracle grading guarded roots). Remaining:
-
-- **Convergence-conditions adopter landed 2026-07-12 (Phase 3a):** improper
-  integrals emit endpoint convergence guards (`∫₀^∞e^(−ax)dx → 1/a {0<a}`),
-  fixing the pre-existing `0^(n+1)`/`∞^(1−s)` FTC endpoint leaks
-  (fail-closed outside the `x^p`/`e^{px}` table), and the geometric series
-  gets its closed form (`Σ(1/2)ⁿ → 2` exact; symbolic ratio →
-  `1/(1−x) {|x|<1}`). Policy ratified: measure-zero exceptional parameter
-  points (`∫xⁿ`'s `n=−1`) stay generic (Rubi-consistent); only fat
-  convergence regions guard.
-- **Phase 3b landed 2026-07-12:** radical extraneous-root guards
-  (`Solve(√(x+3) = a) → a²−3 {0 ≤ a}`, was `[]`; the guard is exact
-  per-root for an x-free RHS) and the `e^{−a·x}` antiderivative gap fixed
-  at the source (`∫e^{−ax}dx → −e^{−ax}/a`, was inert; any linear exponent
-  integrates; the Phase-3a improper-path fallback retired).
-- **Remaining (the only open producer):** definite-integration region
-  splitting (`Which` — locating where poles cross the contour is the
-  hardest part and stays with that adopter). Cosmetic residual: an
-  unsatisfiable conjoined guard (`∫₀^∞xᵖdx`) displays rather than
-  collapsing — needs contradiction detection in assumptions; not worth it
-  standalone.
+  `0` for `|x| > 1` — CE correctly stays inert today; locating where poles
+  cross the contour is the hardest part and stays with this adopter.
+- **Cosmetic residual:** an unsatisfiable conjoined guard (`∫₀^∞xᵖdx`)
+  displays rather than collapsing — needs contradiction detection in
+  assumptions; not worth it standalone.
 - **Known Phase-1 limitation** (accepted, revisit on evidence): a
   conditional nested under a lazy operand (`5 − When(x,c)`) lifts fully
   only on a second `evaluate()`; the guard is never dropped.
+
+### Collections — laziness & fusion backlog
+
+The 2026-07 laziness audits (rounds 1–2 + review rounds, all landed by
+2026-07-17) left a ranked backlog:
+
+- **Finiteness guards / lazy delegation (T1/T2):**
+  `DictionaryFrom`/`RecordFrom`/`Position`/`CountIf` full-walk with no
+  `isFiniteCollection` guard (hang on infinite input); `Find` hangs on
+  infinite-no-match; `Insert`/`DeleteAt`/`ReplaceAt` are lazy-feasible via
+  index-arithmetic delegation (Append/Rest recipe); `Partition` size-n/step
+  forms, `SlidingWindow`, `ChunkBy` are streaming-feasible. Lower priority
+  (T3): `Keys`/`Values` (dicts are small), `Chunk` (needs count only).
+- **Fusion/rewrite layer — open design decision (user has not ruled).** No
+  structural rewrite layer exists; lazy facet delegation gives O(1)
+  `Count`/`At` through lazy chains, and canonical peeks now cover
+  `Length`/`Count`/`IsEmpty`/`Contains` over `Sort`/`Shuffle`/`Reverse`/
+  `Unique` — but any broader `Count(f(x))`-through-eager-op cheapness needs
+  canonical-level rewrites, a churn-heavy direction to decide deliberately.
+- **Latent issues flagged, not fixed:** `Apply(inline-lambda,
+  unknown-collection)` maps over a dangling scoped param (pre-existing
+  `applyFunctionLiteral` capture); `.N()`-inertness of a *user-written*
+  `Map(...).N()` body (the broadcast-built arm was fixed); the validate.ts
+  `isFiniteIndexedCollection` inference loop eagerly counts
+  `Filter(Range(1e5))` and can throw iteration-limit before the lazy guard
+  (pre-existing); `Sort`/`Shuffle` `type:` handler is slightly loose for a
+  List result (harmless, untested).
+- `At`'s evaluate handler carries an in-file `@todo` — "implementation does
+  not match the description" (`library/collections.ts` ~2507) — needs a
+  think-through pass.
 
 ### Coverage tracks
 
@@ -575,72 +498,12 @@ Inverse hyperbolic (R22): 7.1 sine 79/120, 7.2 cosine 51,
 ungated `containsHyperbolic` fallback)**, **ch1 1.1 Binomial products 112/120
 (post-R28)**, **1.1.3 General 185/200 s200 (post-R28: unsolved 6 → 1; the
 survivor #259 is an integer-power rational)**, ch1 exhaustive ≈90–91%,
-ch2 ≈72% effective (seed 42), **ch6 Hyperbolics 71/120 (s120 seed 5,
-post-R30: 62 → 71, +9 rational-in-hyperbolic cyclotomic-factored flips over the
-post-R29 baseline; 0 wrongs — see R30/R29)**,
-Wester indefinite-∫ 6/8.
-**R28 (2026-07-11)** — two composable parts; the "elliptic route" premise
-dissolved under diagnosis (atomic elliptic terminals already close and
-numericize; new elliptic kernels would buy ~0 rows in 1.1.3, ~2 in ch6).
-**R28a (`RUBI_NO_R28`):** mixed-parity linearity split — Rubi rule 2424
-(bundled 1.1.3.7 #37 / 1.1.3.8 #17) never fires because its
-`Sum`/`Coeff`/`Expon` regroup-RHS is non-functional in `build()`, so
-`(c·x²+d·x+e)/√(a+b·x⁴)`-class integrands matched no rule at all; a late
-fail-closed driver fallback splits a ≥2-monomial Laurent numerator over a
-single binomial-radical factor, integrates the monomial pieces, and
-D-verifies the sum. 1.1.3 **180 → 185** (flips #213/#468/#471/#502/#544),
-ch1 1.1 **111 → 112**, 5.3 **61 → 64**, zero new genuine wrongs.
-**R28b (core engine, no toggle):** inverse trig/hyperbolic functions now
-numericize to their **complex principal values** off the real domain and
-for complex arguments (`apply()` cascades a real-kernel NaN to the complex
-kernel, mirroring `applyN`; `Artanh(2).N()`, `Arcsin(2).N()` work; exact
-arguments still stay symbolic under `evaluate()`). Fixed two pre-existing
-complex-kernel bugs en route (`Arcoth` wrong cut side on (−1,0); `Arsech`
-formula dropped a sqrt — wrong even in-domain), and hardened the solve()
-trig/hyperbolic rule guards that had silently relied on non-numericizable
-roots (`ExactNumericValue` bindings bypassed the `typeof === 'number'`
-domain check; cosh/tanh rules had no domain guards at all). CHANGELOG-worthy
-at release (user-facing capability + two wrong-value fixes). Side effect:
-ch6 6.4.2 #158 (`∫√(Coth[a+b·Log[c·xⁿ]])/x`, pre-R28 `inconclusive`) is now
-honestly graded a **genuine wrong** — the exp-substitution route's
-`arcosh(−u)`-form antiderivative fails the real-axis D-check now that it
-evaluates; Rubi's reference form is `[artanh(√coth) − arctan(√coth)]/(b·n)`
-(fixed by R29 below).
-**R29 (2026-07-11, `RUBI_NO_R29`)** — algebraic-in-hyperbolic substitution
-plumbing (the former "R7"). A ch6 integrand algebraic in one hyperbolic family
-with a common linear argument `v` (`(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh²)`,
-half-integer hyperbolic powers) is not a rational function of `e^v`, so the
-exp-substitution fallback strands it as inert. A LAST-resort driver fallback
-substitutes `u = Sinh/Cosh/Tanh[v]`, routes the resulting `∫R(u,√(a+b·u²)) du`
-algebraic subproblem through the bundled 1.1.2 quadratic-radical rules
-(elementary artanh form), and back-substitutes; fail-closed with a branch-safe
-mixed-sign D-check (rejecting the `u=Cosh` sign ambiguity and elliptic
-double-radicals). ch6 **46 → 62/120** (+16, A/B byte-identical under
-`RUBI_NO_R29=1`), and it resolved the R28-named genuine wrong **6.4.2 #158**
-(→ branch-artifact solved-formal; its Log-sub sub-integral `∫√(Coth w) dw`
-now hits R29) — ch6 genuine wrongs **1 → 0**. #463/#500 (thought elliptic)
-also flipped correct. Guards byte-identical (R29 is inert off ch6).
-**R26 (2026-07-10)** — two parts. **R26A (P0 correctness, no toggle):** the
-driver returned wrong answers for ANY integration variable not literally
-named `x` (`∫t² dt → x³/3`; `∫t·cos t dt` mixed-corrupted) — rule-RHS `"x"`
-tokens fell through to the literal symbol because the match env never bound
-the variable pattern; fixed by binding `env['x']` to the actual variable at
-dispatch. Invisible to every suite (the whole corpus integrates wrt `x`);
-CHANGELOG-worthy at release. **R26B (`RUBI_NO_R26`):** symbolic-coefficient
-reciprocal hyperbolics (`∫1/(a+b·sinh x)`, cosh/tanh/coth/sech/csch
-variants) close via a rational-normal-form retry (`rationalNormalFormX`) in
-the exp-substitution fallback — ch6 35→46/120, +11 flips, wrongs 0, ch2
-proven no-op by per-problem A/B.
-**R25 (2026-07-10)** closed the symbolic-coefficient quartic-denominator rational
-family `∫(d+e·x²)/(a+b·x⁴)` and its reductions (`∫x^m/(a+b·x⁴)`, `∫Pq/(a+b·x⁴)`,
-quartic products) — an ExpandIntegrand ⇄ binomial-split ping-pong, fixed by
-failing the distribution on the `(d+e·x^(n/2))/(a+b·x^n)` shape so the driver
-reaches the 1.2.2.3 trinomial terminal rules (behind `RUBI_NO_R25`; A/B: 1.1.3
-General 173→180/200, ch1 1.1 109/5w→111/4w fixing one genuine wrong, and the
-R20-noted arctan/arccot(a·x²) chains 5.3 60→61 / 5.4 60→62); genuine wrongs 0.
-**Genuine wrongs are 0 across all suites** (incl. ch3 after the R17
-back-substitution fix, and ch7's 11 flags — all symbolic-exponent /
-complex-log-branch / fractional-power false-wrongs) — every flagged "wrong" is a documented
+ch2 ≈72% effective (seed 42), **ch6 Hyperbolics 73/120 (s120 seed 5,
+post-R30-reorder 2026-07-11; 0 wrongs)**,
+Wester indefinite-∫ 6/8. Per-rung history (R1–R30, each rung's mechanism,
+score deltas and dead ends) lives in `docs/rubi/RUBI.md` §5 and git history
+— it is deliberately not repeated here.
+**Genuine wrongs are 0 across all suites** — every flagged "wrong" is a documented
 **verification false-wrong** (numeric ₂F₁/AppellF1
 mis-grading at non-integer symbolic-exponent substitution; `√(sin²)=|sin|`;
 cube-root/fractional-power branch at negative x): before believing a wrong
@@ -680,17 +543,15 @@ linearity split), `RUBI_NO_R29` (R29 algebraic-in-hyperbolic
 rational-in-hyperbolic cyclotomic-factored `t = e^v` substitution fallback),
 `RUBI_NO_R8` (R8 poly×single-angle-hyperbolic → single-exponential `y = e^w`
 PolyLog fallback).
-**Fixed (R17 follow-up, 2026-07-10):** the nested `Log[c·(b·x^n)^p]`
-power-in-log family (ch3 §3.1.5 / §3.3, e.g. `∫Log[c(b x^n)^p]²/x⁴`) that first
-shipped malformed. Root cause: rule 3.3 #60 (and the 5 other compound-`Subst`
-rules) use Rubi's general `Subst[u, expr, repl] := u /. expr -> repl`, but the
-`build()` `Subst` handler substituted the integration variable instead of the
-`expr` subexpression. Fixed by dispatching on the middle argument
-(`replaceSubexpr` in `rubi-utils.ts`). ch3 s120 seed5: 65→67 correct, genuine
-wrongs 0. See `docs/rubi/RUBI.md` §5 R17.
-Per-rung blow-by-blow
-(R1–R18, incl. the cofunction-audit table and each rung's dead ends):
-`docs/rubi/RUBI.md` §5; the rest is git history.
+
+**Driver-determinism residual (2026-07-18):** route selection still has
+wall-clock-sensitive seams (budget-relative simplify slices
+`min(remaining, 5000)`, `ce._timeRemaining` guards) — under extreme
+synthetic load heavy families can still flake between solved and inert. The
+principled follow-up is O(nodes) pre-filters / absolute caps on speculative
+sub-routes, replacing budget-relative slicing. (Two independent budgets
+trap: `loadIntegrationRules(ce, { timeLimitMs })` (default 10 s) is
+independent of `ce.timeLimit` — heavy tests must raise both.)
 
 **Benchmark protocol.** `npx tsx scripts/rubi/benchmark.ts --rubi
 "data/rubi/corpus/4 Trig functions" --chapter "4 Trig functions/4.1 Sine"
@@ -707,20 +568,10 @@ so no foundation loads and the driver-only score (58) understates the shipped
 bundle, not `--rubi` on the subsection.
 
 **Kernel status.** The complex-argument `ExpIntegralEi`/`SinIntegral`/
-`CosIntegral` and negative-order incomplete Γ kernels landed 2026-07-09 (commit
-2980a5a8, mpmath-validated ~1e-15 all quadrants), and **R18 consumed them**: the
-`∫xᵐ·sin(a+b/x)` reciprocal-argument class (4.1.12) now closes via the R9 exp
-route, and the complex-Si family R15 declined (4.1.11 #61/#71/#72 —
-irreducible-quadratic denominators) closes via the R18 complex-linear split.
-Both are D-verified on the real axis (the complex Ei/Si and conjugate-pair terms
-recombine to a real antiderivative). Remaining hard cubic-and-higher x-denominator
-Si/Ci shapes still decline cleanly (unsolved, not wrong). **R21 added the
-hyperbolic sine/cosine integral kernels Shi/Chi** (`SinhIntegral`/`CoshIntegral`,
-previously inert generic heads): real via Ei, complex via Shi(z)=−i·Si(iz) /
-Chi(z)=Ci(iz)−iπ/2 reflected into the left half-plane, mpmath-validated ≲1e-13
-(a naïve Ei-composition fails off-axis — mpmath's complex `ei` branch; and the
-positive-imaginary-axis case needs a signed-zero +iπ branch restoration). They
-close the ch7 §7.2.6 reciprocal-arccosh family end-to-end.
+`CosIntegral`, negative-order incomplete Γ, and hyperbolic `Shi`/`Chi`
+kernels are all in (mpmath-validated; see `docs/rubi/RUBI.md` §5 R18/R21 for
+the branch subtleties). Remaining: hard cubic-and-higher x-denominator
+Si/Ci shapes still decline cleanly (unsolved, not wrong).
 
 **Method note (hard-won).** The "unimplemented-predicate" trace census is
 *misleading* for picking levers: the late catch-all rules
@@ -748,15 +599,10 @@ note — trace the residual integrand, don't trust the predicate census.
   unevaluated — CE's inert `Integrate` is the correct match, not a defect) and
   **~30 genuinely deep**. Next-rung shopping list from the census (see
   `docs/rubi/RUBI.md` §5 R19/R20 for the full family table):
-  - **Biggest family (was 13): poly×log by-parts residuals** bottoming in
-    `∫arctan(kx)/x`, `∫artanh(√)/x`, symbolic-order-`k` `PolyLog` recurrences,
-    or `ArcSinh·Log` (3.1.4/3.1.5). **R20 bundled ch5, which supplied the
-    `∫arctan(kx)/x → PolyLog[2,±i·x]` producer: family-C members #31 and #226
-    flipped to solved (ch3 69 → 71).** **R21 bundled ch7 (inverse hyperbolic),
-    but ch3 s120 seed5 is unchanged at 71/4w — no additional family-C member
-    flips** (the `ArcSinh·Log/x` and symbolic-order `PolyLog` residuals still
-    bottom out in shapes ch7's bundled base cases don't reach, or fall outside
-    this sample). A symbolic-order `PolyLog` recurrence remains the lever.
+  - **Biggest family: poly×log by-parts residuals** bottoming in
+    `∫artanh(√)/x`, symbolic-order-`k` `PolyLog` recurrences, or
+    `ArcSinh·Log` (3.1.4/3.1.5) — shapes the bundled ch5/ch7 base cases
+    don't reach. A symbolic-order `PolyLog` recurrence remains the lever.
   - **6: `∫Log[Sin/Tan/Csc²]`** (3.5) — a two-part gap: an inert-trig `D`
     reduction (CE's `D` knows `Tan`, not the inert `tan` head the driver
     carries) PLUS a Chapter-4 trig-integration foundation for the by-parts
@@ -794,88 +640,26 @@ note — trace the residual integrand, don't trust the predicate census.
   fallback).
 
 **Exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules) are
-DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty).
-The former R6 item (symbolic-coefficient rational integration) landed as R25
-(quartic denominators) + R26 (integration-variable soundness + the
-rational-normal-form retry that closes the parametric reciprocal families
-`∫1/(a+b·Sinh x)` etc.); what survives of it is folded into the residual
-below. The Chapter-6 residual (69 unsolved at s120 seed 5, post-R26; census
-2026-07-10 by expected-antiderivative content: 21 algebraic-in-hyperbolic,
-29 rational-in-hyperbolic, 9 polylog, 4 CoshIntegral/Erfi nonlinear-arg,
-**7 expected-`Unintegrable`** — Rubi itself returns unevaluated there, so
-CE's inert `Integrate` is the correct match — 1 ₚFq, 4 Weierstrass-form
-`∞`-collapse pathology) is mostly shared capability rather than
-Ch6-specific:
+bundled; the former R6/R7/R8 items all landed as rungs R25/R26/R29/R30 (see
+`docs/rubi/RUBI.md` §5). The remaining Chapter-6 residual is mostly shared
+capability rather than Ch6-specific:
 
-- **R6′ — rational-in-hyperbolic cyclotomic-factored substitution — LANDED as
-  R30 (2026-07-11, behind `RUBI_NO_R30`).** Premise correction: the blocker was
-  NOT "genuine polynomial factoring over free parameters." A rational
-  (integer-power) hyperbolic of a common linear argument substitutes (`t = e^v`)
-  to a rational function of `t` whose denominator ALWAYS factors as
-  `x^m·(x²+1)^p·(x²−1)^q·S(x)` — cyclotomic factors NUMERIC (from `sinh/cosh =
-  (t∓1/t)/2`), `S` the low-degree `(a+b·hyp)` residual. The bundled 1.2.x
-  partial-fraction rules already close symbolic biquadratic denominators AND the
-  FACTORED integrand, but the R26B `rationalNormalFormX` retry EXPANDS the
-  denominator into one high-degree polynomial no rule factors, stranding the row.
-  A LAST-resort driver fallback keeps the cyclotomic factors factored (peeling
-  them by exact coefficient-array division after a new `clearNegatives`
-  normal-form pass), routes the factored rational through the driver, and
-  back-substitutes; fail-closed with a branch-safe (mixed-sign x, three
-  parameter seeds) D-check. ch6 **62 → 71/120** (+9, s120 seed5, clean
-  per-problem A/B via `RUBI_NO_R30=1`: 9 flips, 0 regressions, 0 wrongs).
-  **Residual
-  (still unsolved):** the residual-degree-≥4 fn-of-exp rows (`Sinh⁶/(a+b·Cosh²)`,
-  `Csch⁴/(I+Sinh)²`, `Sinh⁴/(a+b·Sech²)²`, `Coth⁵/(a+b·Coth)`) whose symbolic
-  quartic-or-higher residual needs a genuine root-finder — the true R6′ tail, out
-  of a contained rung's reach — plus 7 expected-`Unintegrable`. See
-  docs/rubi/RUBI.md §5 R30.
-- **R8 — poly×hyperbolic single-exponential PolyLog fallback — LANDED
-  (2026-07-11, behind `RUBI_NO_R8`).** The former "11 poly×hyperbolic
-  `(e+f·x)^m·hyp^n/(a+b·hyp)` by-parts" residual, closed NOT by by-parts but by
-  the real-exponential (`y = e^w`) analog of R17's trig telescope: rewrite the
-  same-angle hyperbolics via `y = e^w`, linear-factor partial fraction, and route
-  each `∫P(x)·e^{k·w}/(a+b·e^w)^s` piece through the §2.2 → Ch3 → §8.8 PolyLog
-  telescope the bundle already closes (→ `Log + PolyLog[2]/PolyLog[3]`). Placed
-  last among the hyperbolic fallbacks, fail-closed with a branch-safe 3-seed
-  D-check, disjoint from R30 via a nontrivial-polynomial gate. ch6 **+3**
-  (#230/#233/#47, clean per-problem A/B, 0 wrongs/0 regressions). See
-  docs/rubi/RUBI.md §5 R8. **Residual:** (1) the heavier same-family rows
-  (#243/#408/#455) decline structurally — their y-rational has REPEATED
-  (`Csch²`/`Coth²` → `(y−1)²(y+1)²`) or COMPLEX (`Tanh` → `y²+1`) denominator
-  roots that the shared linear-factor partial fraction (`expandRationalOverLinears`)
-  does not split; extending it to repeated/complex roots (also reaching the
-  analogous R17 trig rows) is the natural R8 follow-up; (2) the by-parts-only
-  tail (rows whose numerator hyperbolic is itself a POWER in the additive
-  denominator, e.g. `a+b·Sinh⁴`) still wants genuine by-parts machinery.
-- **R7 — algebraic-in-hyperbolic substitution plumbing — LANDED as R29
-  (2026-07-11, behind `RUBI_NO_R29`).** The 21-row algebraic-in-hyperbolic
-  class (`(a+b·Sinh²)^(p/2)`, `√(a+b·Tanh²)`, half-integer hyperbolic powers)
-  closed via a driver fallback that substitutes `u = Sinh/Cosh/Tanh[v]`
-  (common linear arg `v`), routes the resulting `∫R(u,√(a+b·u²)) du` algebraic
-  subproblem through the bundled 1.1.2 quadratic-radical rules, and
-  back-substitutes; fail-closed with a branch-safe mixed-sign D-check. ch6
-  **46 → 62/120** (+16, s120 seed5, A/B byte-identical under `RUBI_NO_R29=1`),
-  and it **fixed the R28-named genuine wrong 6.4.2 #158** (solved-wrong →
-  branch-artifact solved-formal: its Log-substitution sub-integral `∫√(Coth w)
-  dw` now hits R29). Surprise: **#463/#500** — flagged "genuinely elliptic" —
-  flipped to correct too (a substitution found an elementary D-verifying form;
-  Rubi's EllipticE/F reference was non-optimal). **Residual (still unsolved):**
-  the bare `(a+b·Sinh²)^(3/2)` even-parity shape (genuinely EllipticE/F), the
-  pFq #518, and the `√(Sinh·Tanh)`/`√(Cosh·Coth)` quarter-power oddballs
-  (6.7.1 #560/#563). See docs/rubi/RUBI.md §5 R29.
-- **Engine-side fix LANDED (found by R29): `ComputeEngine._numericValue` no
-  longer throws on exact-radical `.N()` results.** `_numericValue`
-  (`src/compute-engine/index.ts`) used to throw "Unexpected value for radical
-  part" when a numeric evaluation landed on an exact radical whose radicand was
-  non-integer, or an integer at/above `SMALL_INTEGER` (1_000_000) — e.g. a
-  random parameter substitution hits `a+b = 2` and the antiderivative's value
-  contains `√2`. Every call site in the Rubi driver caught it (throw →
-  decline), so it never produced a wrong answer, but it made D-verified
-  closures **seed-fragile**: 6.4.7 #36 closed under the benchmark seed yet went
-  inert under `evaluate()`'s fixed seed. Fixed by extracting any perfect-square
-  factor (`√(k²·r) = k·√r`) and either staying exact (square-free part below
-  `SMALL_INTEGER`) or falling back to the float lane, instead of throwing.
-  Regression tests in `test/compute-engine/radical-arithmetic.test.ts`.
+- **R6′ tail:** the residual-degree-≥4 function-of-exp rows
+  (`Sinh⁶/(a+b·Cosh²)`, `Csch⁴/(I+Sinh)²`, `Sinh⁴/(a+b·Sech²)²`,
+  `Coth⁵/(a+b·Coth)`) whose symbolic quartic-or-higher residual needs a
+  genuine root-finder — out of a contained rung's reach — plus 7
+  expected-`Unintegrable` (Rubi itself returns unevaluated there; CE's
+  inert `Integrate` is the correct match).
+- **R8 follow-ups:** (1) extend the shared linear-factor partial fraction
+  (`expandRationalOverLinears`) to REPEATED (`Csch²`/`Coth²` →
+  `(y−1)²(y+1)²`) and COMPLEX (`Tanh` → `y²+1`) denominator roots —
+  #243/#408/#455 decline structurally today, and the extension also reaches
+  the analogous R17 trig rows; (2) the by-parts-only tail (rows whose
+  numerator hyperbolic is itself a POWER in the additive denominator, e.g.
+  `a+b·Sinh⁴`) still wants genuine by-parts machinery.
+- **R29 residual:** the bare `(a+b·Sinh²)^(3/2)` even-parity shape
+  (genuinely EllipticE/F), the ₚFq row #518, and the
+  `√(Sinh·Tanh)`/`√(Cosh·Coth)` quarter-power oddballs (6.7.1 #560/#563).
 
 #### F. Fungrim — solving coverage
 
@@ -884,10 +668,8 @@ artifacts (B9), so additional Fungrim solve rules will **not** move that number
 — the Wester `Solve` rows are saturated at our principled ceiling (14/21). On
 the track's own benchmark (`benchmarks/audit/solve.ts` / `REPORT-solve.md`,
 40 SymPy-derived univariate cases) **CE+Fungrim is at parity — 38/40 = SymPy
-= Mathematica (base CE 33) — and this track is done as a coverage effort**
-(shipping in the next release: native inverse-trig/hyperbolic/two-`Abs`
-solving, LambertW W₋₁ 2-arg branch, Lambert solve templates on both real
-branches). Residual, none benchmark-reachable:
+= Mathematica (base CE 33) — and this track is done as a coverage effort.**
+Residual, none benchmark-reachable:
 
 - **FR1/FR3** (Dottie-style transcendental fixed points): unsolved by SymPy
   and Mathematica too — outside the closed-form ceiling, not a gap to chase.
@@ -1010,26 +792,17 @@ the store are only partially built:
   addition would be a _new capability_ (CE doesn't combine inverse-trig today),
   and its validity region (`xy < 1`) is an arithmetic condition, not an
   `onBranchCut` cut-membership test — so the store doesn't serve it.
-  Complex-domain Fungrim rules already carry their own loader guards.
-  _(Landed since: even powers now use the always-sound `ln(x²) → 2ln|x|` and
-  `√(x²) → |x|`; odd and irrational exponents keep the optimistic generic-real
-  convention (`ln(x³) → 3ln(x)`) for unconstrained symbols, and symbols declared
-  `complex` are excluded from these rewrites entirely — see
-  [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md#generic-real-simplification-policy).)_
+  Complex-domain Fungrim rules already carry their own loader guards. (The
+  generic-real simplification policy for even/odd/irrational exponents is
+  settled and documented in
+  [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md#generic-real-simplification-policy).)
 
-- **(c) Exact asymptotics at special-function poles — LANDED 2026-07-10**
-  (the limit guard and `Residue` are wired to the exact Laurent kernel;
-  design + record in
-  [`docs/plans/2026-07-10-pole-asymptotics-design.md`](./docs/plans/2026-07-10-pole-asymptotics-design.md)).
-  The follow-up rungs landed the same day: **residue at infinity**
-  (`Res_∞ f = −Res_{s=0} f(1/s)/s²`, any infinite point naming the
-  Riemann-sphere point), **signed pole limits** (convention decision:
-  directional limits at poles resolve to `±∞`, two-sided only on even
-  valuation — `lim 1/x²` at 0 is `+∞`, `lim 1/x` at 0 stays inert; no
-  `ComplexInfinity` limits; `ln`/`log` divergence rides the argument's
-  expansion), and **`Beta` pole data** via the `Γ`-quotient rewrite in the
-  kernel (`GammaLn` remains a genuine non-goal: logarithmic branch point,
-  not meromorphic). One rung remains, demand-paced:
+- **(c) Exact asymptotics at special-function poles — one rung remains**
+  (the kernel, residue-at-∞, signed pole limits, and `Beta` pole data all
+  landed; design + record in
+  [`docs/plans/2026-07-10-pole-asymptotics-design.md`](./docs/plans/2026-07-10-pole-asymptotics-design.md);
+  `GammaLn` is a genuine non-goal — logarithmic branch point, not
+  meromorphic). Demand-paced:
   - **Sum-of-residues-in-a-region helper** — needs a pole-enumeration API
     over the analytic-property store.
 
@@ -1105,6 +878,19 @@ not a hack.
 
 **Effort:** small once the ecosystem is ready.
 
+#### 11. Expected-type inference context — structural redesign (ratified direction)
+
+The 0.84.1 inference-transaction drift was fixed surgically (`cfae300a`:
+incremental `_freshlyInferred` log instead of the per-box scope-chain walk),
+but the **structural** fix — an expected-type context threaded through
+canonicalization ("ambient propagation, defer-only-the-guess, self-healing
+resolution") — is a user-ratified future direction. Spec + corrected
+doctrine: `docs/plans/2026-07-18-expected-type-inference-context.md` §0
+(round-1 findings in `docs/scratch/…_SPEC_REVIEW.md`). Unsolved edges if
+revived: Sequence-fed matrix params, exception-path deferral stranding.
+Don't re-derive the masking doctrine — it was falsified four ways in review
+round 2 (recorded in the spec).
+
 ### Correctness & symbolic findings (2026-07) — residue
 
 The July 2026 correctness and symbolic reviews are fully dispositioned: every
@@ -1124,8 +910,10 @@ residual tail: the item-4 filed residuals (Artanh/Arcoth-class literal
 poles, `∞+i` numeric-value finiteness, the `~oo` lattice question, the
 `Multiply(x, +∞)` fold positivity review), the non-blocking tracked
 residuals (fu `sin⁴−cos⁴`, defint error-bar/tanh-sinh, machine `gamma()`
-mid-range digits, …), and the item-5 perf levers (per-opDef signature
-caches, bundle cold-start).
+mid-range digits, …), and the item-5 perf levers — of which only bundle
+cold-start survives: the cache-shaped levers were closed measured-unprofitable
+by the 2026-07-18 P2/P3 tail (see `PERFORMANCE_FINDINGS.md`; do not
+re-attempt without a new profile).
 
 **Stage-2 corpus audit findings (2026-07-10)** — the per-topic numeric sweep
 (all 57 topics; the two upstream formula bugs it caught — a172c7, b16177 —
@@ -1164,25 +952,78 @@ Two design-level residues are deliberately carried forward:
   `library/calculus.ts`); it is blocked on evaluate-recursion and
   underscore-lambda LaTeX serialization, so it waits on those.
 
-### Cortex examples sweep 2 (2026-07-11) — engine residuals
+### Test-suite ledger — skips and `@fixme` markers (sweep 2026-07-18)
 
-The second Cortex examples sweep (units, calculus, linear algebra,
-dictionaries/sets, closures, strings) surfaced and same-day **fixed**: plain
-string escape double-processing (Cortex), `N()` not numericizing through
-user-function application (threaded inside the closure's scope frame —
-re-evaluating outside it breaks lexical scoping), exact `Inverse` +
-matrix-typed results + new `LinearSolve`, 3-arg `Limit(expr, var, point)`,
-`Quantity` string units, dictionary `Keys`/`Values`, and `Intersection` on
-lists; a follow-up round fixed the `Intersection(Filter, Filter)` stack
-overflow (`Filter.contains` recursed into itself) and representation-sensitive
-collection equality (computed/lazy/symbol-valued collections now compare equal
-to literals with the same elements, and collection-vs-collection `Equal` no
-longer broadcasts), and landed multi-variable `Solve([eq1, eq2], [x, y])`
-(ratified shape: a `List` of `Tuple`s in variable-list order, matching the
-multi-domain enumeration contract), and moved the interval reading of
-ambiguous bracket pairs to the LaTeX boundary (`x \in [1, 5]` unchanged;
-MathJSON/Cortex 2-element `List`s in set operations are now collections, so
-`Intersection([1,2], [2,3])` → `Set(2)`).
+Deferred capability recorded directly in the test suite (beyond the Wester
+ledger, B13). Each entry's acceptance test already exists:
+
+- **Simplification gaps** — 13 `test.skip` in `simplify.test.ts`, with
+  rationale mirrored as `test.todo` in `simplify-noskip.test.ts`: common
+  denominator for rational expressions (`1/(x+1) − 1/x → −1/(x²+x)`);
+  ln→inverse-hyperbolic recognition (six identities, e.g.
+  `ln(x+√(x²+1)) → arsinh x`); inverse-trig conversion
+  (`arctan(x/√(1−x²)) → arcsin x`); `factor()` extracting common factors
+  from `Add` (`2π+2πe < 4π → 1+e < 2`); `(−x)^{3/4}`;
+  `ln((x+1)/e^{2x})` (canonicalization expands before log rules fire); the
+  Fu-paper Phase-14 multi-step trig identity.
+- **Parser `@fixme` clusters** (latex-syntax tests): pre-sub/superscripts
+  (`_p^qx`, `\vec{AB}` over multi-letter args — `supsub.test.ts`); chained
+  `\over` mis-association (`errors.test.ts`); postfix `\degree` precedence
+  (`trigonometry.test.ts`); range endpoints leaking outside `Range`
+  (`n+1..n+10` — `collections.test.ts`); partial-derivative fraction forms
+  `\frac{\partial^2}{\partial_{x,y}} f(x,y)` (2 skips,
+  `operators.test.ts`); Set round-trip failure (serializer emits
+  `\lbrace`, parser expects `\{` — `arithmetic.test.ts`); malformed
+  integrand `\int\frac{3x}{5dx}` not rejected (`calculus.test.ts`);
+  lowercase-arrow `Implies`/`Equivalent` expectations outdated by the
+  issue-#156 `\rightarrow`→`To` change (`logic.test.ts`).
+- **Numeric known-wrongs** (nightly + unit markers): bignum `Arccos` near 1
+  loses ~8 digits (endpoint cancellation; per-case skip in
+  `mpmath-kernels.test.ts`); `ζ(−0.5)` ~4 ulp (tolerance-relaxed); bignum
+  `Complex` components truncated at canonicalization regardless of
+  precision (`canonical-form.test.ts` `@fixme`); one `Multiply` inexact
+  case where the big-precision path is worse than machine evaluate
+  (`arithmetic.test.ts` `@fixme`).
+- **Misc:** dictionary error validation (invalid/empty/extra tuple keys
+  don't throw — 3 `@fixme` skips in `dictionary.test.ts`); SymPy-interop
+  literal parses `0`/`0e0` (`test/math-json/sympy.test.ts`, see the interop
+  stubs below); range/interval membership assumptions not wired
+  (`assumptions.test.ts` `@fixme` setup lines); malformed
+  positional-parameter name `_1_0` in a `Function` snapshot
+  (`functions.test.ts`); the `grudnitski.test.ts` equivalence benchmark
+  keeps 9 `describe.skip` groups (equation-scaling / identity-based
+  `isEquivalent` capabilities).
+
+`test/playground.ts` remains the tracker for its own residue (notation
+decisions, Iverson/Boole and inequality→`Range` wishlist, matcher
+internals).
+
+### Source-marker backlog (`src/` sweep 2026-07-18)
+
+Significant in-code `@todo`/`@fixme` not already covered by a section above:
+
+- **SymPy interop is stubbed:** `math-json/serialize-sympy.ts` (special
+  values/heads, lambdas, strings unhandled) and `math-json/parse-sympy.ts`
+  (atom/attributeref/subscription/slicing/call grammar not covered). Decide
+  whether this surface is worth finishing or should be retired.
+- **Operator-signature type arguments:** the result-type/`at`-handler
+  consistency warning in `boxed-operator-definition.ts` is disabled — needs
+  generic type arguments in signatures (`Map`/`Filter` return an indexed
+  collection iff the input is indexed).
+- **Declared-symbol validation** deferred at `latex-syntax/parse.ts` ~2459
+  (declared symbols not checked against existing symbol/function/inferred
+  uses; likely belongs in canonicalization).
+- **Issue #189** simplification case referenced in `simplify-rules.ts`.
+- **Compile targets:** GLSL `TODO(E3-GLSL)` (needs loop unrolling or
+  fixed-size arrays, `base-compiler.ts`); the public per-operator `compile`
+  handler has no preamble/helper-injection hook, so GLSL/WGSL custom loops
+  aren't ergonomic — extend `OperatorCompileContext` if a real need
+  appears.
+- **Risch algorithm** noted as the principled endpoint for
+  `symbolic/antiderivative.ts` (the Rubi track is the practical lever; kept
+  as a marker, not planned).
+- **Fractional calculus** (`library/calculus.ts` `@todo`: Liouville–Riemann
+  derivative) — unplanned, catalogued.
 
 ### Review residue (open low-priority items)
 
@@ -1200,9 +1041,12 @@ is in git history. The only items deliberately left open:
   needs binder-aware canonicalization (the canonicalizer has no enclosing-binder
   scope at fusion time) — too broad for a LOW finding. Workaround: the call form
   `["a_", "k"]` (which the Fungrim corpus uses).
-- **G7** (bound-variable identity stability across re-boxing) — resolved by
-  intervening work; pinned 2026-07-18 by the regression suite in
-  `serialization.test.ts` ("Bound-variable identity across re-boxing").
+- **validate.ts round (2026-07-18), flagged not fixed:** the
+  optional/variadic parameter loops lack the devolve fallback and
+  `inferredSignature` acceptance the required-param loop has (probably
+  intentional; no observed hits); `arithmetic-power.ts` ~:345 carries an
+  order-dependent `matches('complex')` with its own `fix?` comment
+  (narrowing to literals).
 
 **Lessons worth keeping in mind** (the durable ones are in CLAUDE.md): the
 `undefined → false` collapse in three-valued predicates was the single most
