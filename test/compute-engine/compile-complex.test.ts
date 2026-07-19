@@ -548,11 +548,65 @@ describe('COMPILE COMPLEX - literal square fast path and recursive lambdas', () 
     expect(v.im).toBeCloseTo(0.24, 12);
   });
 
-  it('a literal cube still routes through cpow (fast path is square-only)', () => {
+  it('literal integer powers 3–8 inline a square-and-multiply chain', () => {
     const { ComputeEngine } = require('../../src/compute-engine');
     const e = new ComputeEngine();
-    const res = compile(e.parse('(x+\\imaginaryI y)^3'), { fallback: false });
+    for (let k = 3; k <= 8; k++) {
+      const res = compile(e.parse(`(x+\\imaginaryI y)^{${k}}`), {
+        fallback: false,
+      });
+      expect(res.code).not.toContain('cpow');
+      const v = res.run!({ x: 0.318, y: 0.417 }) as { re: number; im: number };
+      const interp = e.box(['Power', ['Complex', 0.318, 0.417], k]).N();
+      // The interpreter goes through transcendental pow for k ≥ 3, so the
+      // multiply chain agrees to ~1 ulp, not digit-for-digit.
+      expect(v.re).toBeCloseTo(interp.re, 12);
+      expect(v.im).toBeCloseTo(interp.im, 12);
+    }
+  });
+
+  it('a literal 9th power still routes through cpow (chain capped at 8)', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    const res = compile(e.parse('(x+\\imaginaryI y)^9'), { fallback: false });
     expect(res.code).toContain('cpow');
+  });
+
+  it('box-then-assign recursive lambda compiles regardless of function name', () => {
+    // Pre-fix, a literal canonicalized BEFORE ce.assign left its self-call
+    // bound to a stale auto-declaration; names with no shell pre-declaration
+    // typed the application `any` (top) and the Add collection guard
+    // fail-closed. `M2` is such a name (`K`, a shell-declared letter, masked
+    // the bug). ce.assign now re-ties the recursion knot. Also exercises the
+    // signature-string sugar in the compile pipeline.
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.assign(
+      'M2',
+      e.box([
+        'Function',
+        [
+          'Which',
+          ['LessEqual', 'n', 0],
+          'z',
+          'True',
+          [
+            'Add',
+            ['Power', ['M2', ['Subtract', 'n', 1], 'z'], 3],
+            ['Complex', 0.35, 0.4],
+          ],
+        ],
+        "'(n: integer, z: number) -> complex'",
+      ])
+    );
+    const res = compile(
+      e.box(['M2', 5, ['Add', 'x', ['Multiply', ['Complex', 0, 1], 'y']]]),
+      { fallback: false }
+    );
+    const v = res.run!({ x: 0.13, y: 0.21 }) as { re: number; im: number };
+    const interp = e.box(['M2', 5, ['Complex', 0.13, 0.21]]).N();
+    expect(v.re).toBeCloseTo(interp.re, 12);
+    expect(v.im).toBeCloseTo(interp.im, 12);
   });
 
   it('a recursive complex lambda (iterated Julia map, typed return) compiles with digit parity', () => {

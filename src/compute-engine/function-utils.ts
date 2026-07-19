@@ -21,6 +21,8 @@ import {
   functionLiteralParameterType,
 } from './boxed-expression/function-literal.js';
 import type { Type } from '../common/type/types.js';
+import { parseType } from '../common/type/parse.js';
+import { typeToString } from '../common/type/serialize.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
 // A static import would create a cycle: `validate.ts → utils.ts →
@@ -251,6 +253,20 @@ export function canonicalFunctionLiteralArguments(
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
 
+  // Signature-string sugar (typed-literals design §3.2/§10):
+  // `["Function", body, "'(n: integer) -> complex'"]` desugars into the
+  // structural form — each named argument becomes a `["Typed", name, type]`
+  // parameter and a non-`unknown` result becomes the body's return-type
+  // ascription. Applied only when the single parameter operand is a string
+  // parsing to a signature type with every argument named and no
+  // optional/variadic markers (those need `makeLambda` arity support);
+  // anything else falls through to the standard expected-a-symbol error.
+  if (ops.length === 2 && isString(ops[1])) {
+    const desugared = desugarSignatureString(ce, ops[0], ops[1].string);
+    if (desugared !== undefined)
+      return canonicalFunctionLiteralArguments(ce, desugared);
+  }
+
   // Parameters: a bare symbol (inferred type) or an annotated parameter
   // `["Typed", symbol, type]`. Anything else is an error. An annotated
   // parameter keeps its `Typed` wrapper, normalized so the type operand is a
@@ -341,6 +357,43 @@ export function canonicalFunctionLiteralArguments(
       ce.declare(name, { inferred: true, type: 'unknown' }, block.localScope);
   }
   return ce._fn('Function', [block, ...params]);
+}
+
+/** Desugar a signature-string `Function` parameter (typed-literals design
+ * §3.2 sugar) into structural operands `[body, ...params]`, or `undefined`
+ * when the string is not a fully-named, non-variadic signature type. An
+ * `unknown`/`any` argument or result type stays unannotated; an explicit
+ * `Typed` body ascription is kept over the signature's result type. */
+function desugarSignatureString(
+  ce: ComputeEngine,
+  body: Expression,
+  signature: string
+): Expression[] | undefined {
+  let type: Type;
+  try {
+    type = parseType(signature);
+  } catch {
+    return undefined;
+  }
+  if (typeof type === 'string' || type.kind !== 'signature') return undefined;
+  if (type.optArgs || type.variadicArg) return undefined;
+  const args = type.args ?? [];
+  if (args.some((a) => !a.name)) return undefined;
+
+  const isWide = (t: Type): boolean => t === 'unknown' || t === 'any';
+  const params = args.map((a) =>
+    isWide(a.type)
+      ? ce.symbol(a.name!)
+      : ce._fn('Typed', [ce.symbol(a.name!), ce.string(typeToString(a.type))], {
+          canonical: false,
+        })
+  );
+  let newBody = body;
+  if (!isWide(type.result) && !isFunction(body, 'Typed'))
+    newBody = ce._fn('Typed', [body, ce.string(typeToString(type.result))], {
+      canonical: false,
+    });
+  return [newBody, ...params];
 }
 
 /** Normalize a `Typed` type operand (a string literal or a type-name symbol)

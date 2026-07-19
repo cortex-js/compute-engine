@@ -127,15 +127,16 @@ ladder only).
 
 **Typed function literals residue (demand-gated, design doc
 `docs/plans/2026-07-12-typed-function-literals-design.md` §10):** the typed
-`Function`/`Typed` core landed 2026-07-12 (652a20fc). Deferred until a
+`Function`/`Typed` core landed 2026-07-12 (652a20fc); the signature-string
+sugar (`["Function", body, "'(x: integer) -> real'"]` canonicalizing into
+the structural form) landed 2026-07-19. Deferred until a
 consumer asks: **(S/M)** optional/variadic parameter annotations
 (`["Typed", "xs", "'number+'"]` — the encoding already admits it; needs
-`makeLambda` arity handling), **(S)** a strict-mode runtime check of the
+`makeLambda` arity handling — the sugar rejects these markers until then),
+**(S)** a strict-mode runtime check of the
 result against the declared return type (returns are pure ascriptions today),
-**(S)** LaTeX typed-parameter notation behind a serialization style flag
-(annotations currently drop in LaTeX), and **(S)** signature-string sugar
-(`["Function", body, "'(x: integer) -> real'"]` canonicalizing into the
-structural form).
+and **(S)** LaTeX typed-parameter notation behind a serialization style flag
+(annotations currently drop in LaTeX).
 
 **Compiled recursive lambdas — SHIPPED 2026-07-19 as lenient true
 recursion** (design ratified same day, superseding the unrolling-first
@@ -148,17 +149,18 @@ within ~1 ms (the original "frozen tab" rationale was wrong for recursion:
 JS stacks self-terminate, and compiled unbounded `Loop` already emits
 `while (true)`). Complex-valued recursion needs a `Typed` `complex` return
 ascription (untyped applications type `broadcastable<number>` and hit the
-complex-bcast deferral). Shipped alongside: the JS-target **complex
-literal-square fast path** (inline multiply instead of polar `_SYS.cpow` —
-depth-10 Julia: recursive 0.18 µs/pt, closed form 1.25 → 0.14 µs/pt).
+complex-bcast deferral) — ergonomically written via the signature-string
+sugar, landed the same day. Shipped alongside: the JS-target **complex
+literal-power fast path** (inline square-and-multiply chains for exponents
+2–8 instead of polar `_SYS.cpow` — depth-10 Julia: recursive 0.18 µs/pt,
+closed form 1.25 → 0.14 µs/pt) and the `ce.assign` recursion-knot fix for
+pre-boxed literals.
 Remaining follow-ups, both demand-gated:
 
 - **(M) GPU literal-depth unrolling** (WGSL/GLSL cannot recurse; GPU stays
   fail-closed): the v1 memoized literal-argument specialization design
   (preserved in the design doc's git history) is the route — gate on a GPU
   consumer.
-- **(S) Extend the complex power fast path** beyond squares (literal small
-  integer exponents) if profiles warrant.
 - **(M) Interpreter perf**: symbolic-argument literal-depth recursion
   evaluates exponentially (`Add.evaluate → addN → .N()` re-walk; depth 10
   > 60 s where linear is expected) — surfaced during this design round,
@@ -484,7 +486,9 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
 - **T3 (deferred, low value):** `Keys`/`Values` (dicts are small), `Chunk`
   (needs count only).
 - **Auto-compile lazy-`Map` element lambdas on numeric drains (ratified
-  2026-07-19, from the Tycho item-42 addendum).** Draining a lazy `Map`
+  2026-07-19, from the Tycho item-42 addendum; design at
+  [`docs/plans/2026-07-19-map-auto-compile-design.md`](./docs/plans/2026-07-19-map-auto-compile-design.md),
+  awaiting ratification).** Draining a lazy `Map`
   whose lambda applies an interpreted user function costs the full
   symbolic-evaluation pipeline per element — ~15 ms/element on the filed
   repro (a 40-term `Sum` of a user function over a 2469-element broadcast),

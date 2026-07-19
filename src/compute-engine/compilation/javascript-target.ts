@@ -1239,16 +1239,46 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(base) ||
       BaseCompiler.isComplexValued(exp)
     ) {
-      // Literal square of a complex base: inline the multiply instead of the
-      // polar-form `_SYS.cpow` — an order of magnitude faster in iterated-map
-      // loops, and matches the interpreter's rounding (which multiplies).
+      // Small literal integer power of a complex base: inline a
+      // square-and-multiply chain instead of the polar-form `_SYS.cpow` — an
+      // order of magnitude faster in iterated-map loops. The square is
+      // digit-exact with the interpreter (which multiplies); for exponents
+      // ≥ 3 the interpreter itself goes through transcendental pow, so both
+      // routes differ by ~1 ulp and the multiply chain loses nothing.
       // The base is always bound once: even a symbol may be `vars`-mapped to
       // arbitrary target source, and `cpow` evaluated it exactly once. The
-      // imaginary term is `2 * (re·im)` — `(2·re)·im` would overflow the
-      // intermediate for |re| > MAX_VALUE/2 where the multiply order doesn't.
-      if (BaseCompiler.isComplexValued(base) && tryGetConstant(exp) === 2) {
+      // squared imaginary term is `2 * (re·im)` — `(2·re)·im` would overflow
+      // the intermediate for |re| > MAX_VALUE/2 where the multiply order
+      // doesn't.
+      const eInt = tryGetConstant(exp);
+      if (
+        BaseCompiler.isComplexValued(base) &&
+        eInt !== undefined &&
+        Number.isInteger(eInt) &&
+        eInt >= 2 &&
+        eInt <= 8
+      ) {
         const t = BaseCompiler.tempVar();
-        return `(() => { const ${t} = ${compile(base)}; return ({ re: ${t}.re * ${t}.re - ${t}.im * ${t}.im, im: 2 * (${t}.re * ${t}.im) }); })()`;
+        const stmts: string[] = [`const ${t} = ${compile(base)};`];
+        let n = 0;
+        const sq = (src: string): string => {
+          const v = `${t}_${++n}`;
+          stmts.push(
+            `const ${v} = { re: ${src}.re * ${src}.re - ${src}.im * ${src}.im, im: 2 * (${src}.re * ${src}.im) };`
+          );
+          return v;
+        };
+        const mulBase = (a: string): string => {
+          const v = `${t}_${++n}`;
+          stmts.push(
+            `const ${v} = { re: ${a}.re * ${t}.re - ${a}.im * ${t}.im, im: ${a}.re * ${t}.im + ${a}.im * ${t}.re };`
+          );
+          return v;
+        };
+        const pow = (k: number): string =>
+          k === 1 ? t : k % 2 === 0 ? sq(pow(k / 2)) : mulBase(pow(k - 1));
+        const result = pow(eInt);
+        return `(() => { ${stmts.join(' ')} return ${result}; })()`;
       }
       return `_SYS.cpow(${compile(base)}, ${compile(exp)})`;
     }

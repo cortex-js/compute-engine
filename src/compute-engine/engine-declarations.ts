@@ -585,6 +585,34 @@ export function assignFn(
   // @todo: could have a 'locked' attribute on the definition
   if (id === 'Nothing') return ce;
 
+  // Tie the recursion knot for a programmatic box-then-assign (mirroring the
+  // `Assign` operator's canonicalization): when the assigned value is a
+  // `Function` literal whose body references `id`, the literal may have been
+  // canonicalized BEFORE `id` was known to be a function — its self-call is
+  // then bound to a stale auto-declaration (an undeclared name types the
+  // application `any`, a shell-declared one `unknown`), and every downstream
+  // consumer of the body's types misfires (e.g. the compile targets'
+  // collection guard fail-closes on the top-typed self-call). Pre-declare
+  // `id` as function-typed, then re-canonicalize the literal from its JSON so
+  // the self-reference binds and types against the real definition.
+  if (arg2 !== null && typeof arg2 === 'object') {
+    const boxedFn = isFunction(arg2 as Expression, 'Function')
+      ? (arg2 as Expression)
+      : undefined;
+    const rawFn =
+      boxedFn === undefined && Array.isArray(arg2) && arg2[0] === 'Function';
+    if (
+      (boxedFn || rawFn) &&
+      JSON.stringify(boxedFn ? boxedFn.json : arg2).includes(`"${id}"`)
+    ) {
+      if (!ce.lookupDefinition(id)) ce.symbol(id);
+      const selfDef = ce.lookupDefinition(id);
+      if (selfDef && isValueDef(selfDef) && selfDef.value.inferredType)
+        selfDef.value.type = ce.type('function');
+      if (boxedFn) arg2 = ce.box(boxedFn.json) as AssignValue;
+    }
+  }
+
   const def = ce.lookupDefinition(id);
 
   // Phase 3 §6.3 — declared-signature reconciliation (assign path).

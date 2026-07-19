@@ -19,15 +19,38 @@
   magnitude faster than the equivalent hand-unrolled closed form compiled
   before this release.
 
+- **Function literals accept a signature-string shorthand.**
+  `["Function", body, "'(n: integer, z: number) -> complex'"]` desugars at
+  canonicalization into the structural `Typed` form (typed parameters plus a
+  return-type ascription) — one compact string instead of nested `Typed`
+  wrappers, reusing the full type grammar. Signatures must name every
+  parameter; optional/variadic markers are not yet supported and fall through
+  to the standard parameter validation error.
+
 ### Performance
 
-- **Literal squares of complex values compile to an inline multiply.**
-  `z^2` with a complex-valued `z` emitted the general polar-form power helper
-  (`hypot`/`atan2`/`exp`/…) per evaluation; it is now the direct
-  `(a+bi)² = a²−b² + 2abi` multiply, with compound bases bound to a const
-  exactly once. Iterated-map workloads speed up ~9× (depth-10 Julia closed
-  form: 1.25 → 0.14 µs/pt), and rounding now matches the interpreter, which
-  also multiplies. Higher literal powers still use the general helper.
+- **Small literal integer powers of complex values compile to inline
+  multiply chains.** `z^k` for literal `k` = 2…8 with a complex-valued `z`
+  emitted the general polar-form power helper (`hypot`/`atan2`/`exp`/…) per
+  evaluation; it is now an inline square-and-multiply chain, with the base
+  bound to a const exactly once. Iterated-map workloads speed up ~9×
+  (depth-10 Julia closed form: 1.25 → 0.14 µs/pt). The square is
+  digit-compatible with the interpreter; for k ≥ 3 both routes go through
+  different roundings and agree to ~1 ulp. Exponents ≥ 9, negative, and
+  non-integer still use the general helper.
+
+### Bug Fixes
+
+- **`ce.assign(name, fn)` ties the recursion knot for pre-boxed function
+  literals.** A `Function` literal canonicalized *before* `ce.assign(name, …)`
+  (the programmatic box-then-assign route) left its self-reference bound to a
+  stale auto-declaration, so the body's types were wrong — for most names the
+  self-call typed `any` and compiling the function fail-closed on the
+  collection guard, while a lucky subset of names (pre-declared shells such
+  as `K` or `J`) masked the bug. `ce.assign` now pre-declares the target as
+  function-typed and re-canonicalizes such a literal, matching the behavior
+  of the `Assign` operator and of `f(n) := …` parsing. (Naming a function
+  after a built-in operator, e.g. `N`, still collides — unchanged.)
 
 ## 0.86.2 _2026-07-19_
 

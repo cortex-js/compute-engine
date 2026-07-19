@@ -808,3 +808,54 @@ describe('BoxedOperatorDefinition.lambda — public function-body accessor', () 
     expect(g.body.isCanonical).toBe(h.body.isCanonical);
   });
 });
+
+describe('Signature-string sugar (§3.2/§10)', () => {
+  test('desugars into the structural form', () => {
+    const ce = new ComputeEngine();
+    const f = ce.box(['Function', ['Divide', 'x', 2], "'(x: integer) -> real'"]);
+    // Identical canonical form to the explicit `Typed` spelling: the return
+    // ascription moves inside the Block, params get `Typed` wrappers.
+    expect(f.json).toEqual([
+      'Function',
+      ['Block', ['Typed', ['Multiply', ['Rational', 1, 2], 'x'], "'real'"]],
+      ['Typed', 'x', "'integer'"],
+    ]);
+  });
+
+  test('an unknown result type stays unannotated', () => {
+    const ce = new ComputeEngine();
+    const f = ce.box(['Function', ['Add', 'x', 1], "'(x: integer) -> unknown'"]);
+    const body = f.ops[0];
+    expect(body.operator).toBe('Block');
+    expect(body.ops[body.nops - 1].operator).not.toBe('Typed');
+  });
+
+  test('a nullary signature annotates the return only', () => {
+    const ce = new ComputeEngine();
+    const f = ce.box(['Function', ['Add', 1, 2], "'() -> integer'"]);
+    expect(f.nops).toBe(1); // body only, no params
+    expect(ce.box(['Apply', f]).evaluate().json).toEqual(3);
+  });
+
+  test('an unnamed argument falls through to the standard param error', () => {
+    const ce = new ComputeEngine();
+    const f = ce.box(['Function', ['Add', 'x', 1], "'(integer) -> real'"]);
+    expect(f.ops[1].operator).toBe('Error');
+  });
+
+  test('a variadic signature falls through to the standard param error', () => {
+    const ce = new ComputeEngine();
+    const f = ce.box(['Function', 'xs', "'(xs: number+) -> number'"]);
+    expect(f.ops[1].operator).toBe('Error');
+  });
+
+  test('a sugared function evaluates and types like the explicit form', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'halve',
+      ce.box(['Function', ['Divide', 'x', 2], "'(x: integer) -> real'"])
+    );
+    expect(ce.box(['halve', 7]).evaluate().json).toEqual(['Rational', 7, 2]);
+    expect(ce.box(['halve', 7]).type.toString()).toBe('real');
+  });
+});
