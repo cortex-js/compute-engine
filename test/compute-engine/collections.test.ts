@@ -225,6 +225,22 @@ describe('TAKE', () => {
       ]
     `);
   });
+
+  // Regression: `Take`'s `isFinite` handler ignored its own bound and only
+  // reported the source's finiteness, so `Take(<infinite>, n)` claimed count
+  // `n` yet `isFiniteCollection === false` — which left `ListFrom(...)` inert.
+  test('Take of an infinite source with a finite bound is a finite collection', () => {
+    const e = engine.box(['Take', ['Range', 1, 'PositiveInfinity'], 3]);
+    expect(e.isFiniteCollection).toBe(true);
+    expect(e.count).toBe(3);
+  });
+
+  test('ListFrom(Take(infinite, n)) materializes the n elements', () => {
+    const e = engine
+      .box(['ListFrom', ['Take', ['Range', 1, 'PositiveInfinity'], 3]])
+      .evaluate();
+    expect(e.json).toEqual(['List', 1, 2, 3]);
+  });
 });
 
 describe('DROP 2', () => {
@@ -418,6 +434,19 @@ describe('SLICE (2,3)', () => {
       ]
     `);
   });
+
+  // Finding (Fix B companion): unlike `Take`, `Slice` already answers
+  // correctly for a bounded positive-index range over an infinite source —
+  // its `count` resolves the explicit end and its `isFinite` is `true`. Pin
+  // that (no code change was needed here).
+  test('Slice of an infinite source with a bounded index range is finite', () => {
+    const e = engine.box(['Slice', ['Range', 1, 'PositiveInfinity'], 1, 5]);
+    expect(e.count).toBe(5);
+    expect(e.isFiniteCollection).toBe(true);
+    expect(
+      engine.box(['ListFrom', e]).evaluate().json
+    ).toEqual(['List', 1, 2, 3, 4, 5]);
+  });
 });
 
 describe('SLICE -1,1', () => {
@@ -518,6 +547,35 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
 
   test('At with multi-index on 2D matrix', () =>
     expect(evaluate(['At', matrix, 1, 2])).toMatchInlineSnapshot(`3`)); // Row 1, Column 2 → 3
+
+  // At description-audit pins (2026-07-19): mask/pick forms and the edge
+  // conventions documented at the evaluate handler.
+  test('At with a boolean mask keeps the True positions (short mask = prefix)', () =>
+    expect(
+      evaluate(['At', list, ['List', 'True', 'False', 'True']])
+    ).toMatchInlineSnapshot(`["List", 7, 5]`));
+
+  test('At with an integer-list pick selects those indices, in order', () =>
+    expect(evaluate(['At', list, ['List', 3, 1]])).toMatchInlineSnapshot(
+      `["List", 5, 7]`
+    ));
+
+  test('At pick normalizes negative indices', () =>
+    expect(evaluate(['At', list, ['List', 2, -1]])).toMatchInlineSnapshot(
+      `["List", 13, 11]`
+    ));
+
+  test('At out-of-range: scalar yields Nothing, pick entries are dropped', () => {
+    expect(evaluate(['At', list, 10])).toMatchInlineSnapshot(`Nothing`);
+    expect(evaluate(['At', list, ['List', 10]])).toMatchInlineSnapshot(
+      `["List"]`
+    );
+  });
+
+  test('At with a scalar boolean index stays unevaluated', () =>
+    expect(evaluate(['At', ['List', 7, 13], 'True'])).toMatchInlineSnapshot(
+      `["At", ["List", 7, 13], "True"]`
+    ));
 
   test('Chained At on a matrix-typed symbol (m[2][1])', () => {
     // Regression: `At(matrix, i)` must type as a row (a sub-tensor), so that a
@@ -675,6 +733,21 @@ describe('SORT/SHUFFLE REBUILD AS LIST (regression)', () => {
     const e = engine.box(['Sort', ['Cycle', ['List', 1, 2]]]).evaluate();
     expect(e.operator).toEqual('Sort');
   });
+
+  // Regression: Sort/Shuffle always rebuild as `List`, but their `type`
+  // handler returned the source's type — so `Sort(Range(1,5))` statically
+  // claimed an indexed_collection/Range shape instead of a list.
+  test('Sort static type is list<elt>, not the source type', () => {
+    expect(engine.box(['Sort', ['Range', 1, 5]]).type.toString()).toEqual(
+      'list<integer>'
+    );
+  });
+
+  test('Shuffle static type is list<elt>, not the source type', () => {
+    expect(engine.box(['Shuffle', ['Range', 1, 5]]).type.toString()).toEqual(
+      'list<integer>'
+    );
+  });
 });
 
 describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM (regression)', () => {
@@ -761,6 +834,61 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
       .box(['RecordFrom', ['Cycle', ['List', ['Tuple', { str: 'a' }, 1]]]])
       .evaluate();
     expect(e.operator).toEqual('RecordFrom');
+  });
+});
+
+describe('MATERIALIZATION PRESERVES STRUCTURAL ELEMENTS (enlist regression)', () => {
+  // `List.evaluate`'s materialization branch used `enlist`, which spliced ANY
+  // sub-collection recursively — destroying eager structural elements (a
+  // `Tuple`, a nested `List`) and spreading an infinite lazy child (a `Cycle`)
+  // until the deadline burned. It must flatten ONLY finite lazy children.
+  test('materialization keeps a list of Tuples intact (pairs preserved)', () => {
+    const e = engine
+      .box(['List', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]])
+      .evaluate({ materialization: true });
+    expect(e.json).toEqual([
+      'List',
+      ['Tuple', "'a'", 1],
+      ['Tuple', "'b'", 2],
+    ]);
+  });
+
+  test('materialization keeps a nested literal List nested', () => {
+    const e = engine
+      .box(['List', ['List', 1, 2], 3])
+      .evaluate({ materialization: true });
+    expect(e.json).toEqual(['List', ['List', 1, 2], 3]);
+  });
+
+  test('materialization splices a finite lazy sub-collection (Range)', () => {
+    const e = engine
+      .box(['List', ['Range', 1, 3]])
+      .evaluate({ materialization: true });
+    expect(e.json).toEqual(['List', 1, 2, 3]);
+  });
+
+  test('materialization keeps an infinite lazy child as an element (no deadline burn)', () => {
+    const start = Date.now();
+    const e = engine
+      .box(['List', ['Cycle', ['List', 1, 2]]])
+      .evaluate({ materialization: true });
+    // The Cycle is kept as a single element (materialized to a bounded
+    // placeholder list), not spread into the outer list.
+    expect(e.operator).toEqual('List');
+    expect(e.count).toEqual(1);
+    expect([...e.each()][0].isCollection).toBe(true);
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  test('DictionaryFrom of a materialized pair-list yields a Dictionary', () => {
+    // The motivating flow: materialize a pair-list, then build a Dictionary
+    // from it. Before the fix the pairs were flattened and this stayed inert.
+    const pairs = engine
+      .box(['List', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]])
+      .evaluate({ materialization: true });
+    const e = engine.box(['DictionaryFrom', pairs]).evaluate();
+    expect(e.operator).toEqual('Dictionary');
+    expect(e.json).toEqual({ dict: { a: 1, b: 2 } });
   });
 });
 
@@ -1262,6 +1390,22 @@ describe('MAP (variadic / zipWith)', () => {
     expect(expr.isValid).toBe(true);
     expect(expr.evaluate().toString()).toContain('Too many arguments');
     expect(() => expr.at(1)).toThrow(/Too many arguments/);
+  });
+
+  // Regression pin: `.N()` on a user-written lazy Map keeps the lazy Map form,
+  // and its elements numericize on access — `.at(2)` is the FLOAT √2, not the
+  // exact symbolic `Sqrt(2)`.
+  test('.N() of a lazy user-written Map stays lazy and numericizes on access', () => {
+    const e = engine
+      .box(['Map', ['Range', 1, 200], ['Function', ['Sqrt', 'x'], 'x']])
+      .N();
+    expect(e.operator).toEqual('Map');
+    expect(e.isLazyCollection).toBe(true);
+    const el = e.at(2)!;
+    expect(el.re).toBeCloseTo(1.4142135623730951, 12);
+    expect(el.isNumber).toBe(true);
+    // Not the exact symbolic form.
+    expect(el.operator).not.toEqual('Sqrt');
   });
 });
 

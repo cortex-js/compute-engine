@@ -2685,7 +2685,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
 
     evaluate: (ops, { engine: ce }) => {
-      // @todo: the implementation does not match the description. Need to think this through...
+      // Audited against the description 2026-07-19 — behaviors agree. Edge
+      // conventions, on the record: an out-of-range SCALAR index yields
+      // `Nothing`; out-of-range entries of an integer-list pick are DROPPED
+      // (mask/pick always return a `List`, possibly empty); a mask shorter
+      // than the source selects from its prefix only; a scalar boolean or a
+      // non-string dictionary index leaves `At` unevaluated.
       let expr = ops[0];
       let index = 1;
       while (ops[index]) {
@@ -2793,6 +2798,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
+        // A non-positive bound yields an empty (finite) collection regardless
+        // of the source.
+        const n = toInteger(expr.op2);
+        if (n !== null && n <= 0) return true;
+        // Otherwise the result is finite when its own element count is
+        // known-finite — i.e. a finite bound over a source that is finite or
+        // provably infinite (`Take(Range(1,∞), 3)` → count 3). When the
+        // source's length is genuinely unknown, `takeCount` is `undefined`
+        // and the result's finiteness is unknown too: defer to the source.
+        const count = takeCount(expr);
+        if (count !== undefined && Number.isFinite(count)) return true;
         return expr.op1.isFiniteCollection;
       },
       iterator: takeIterator,
@@ -3772,7 +3788,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the elements of the collection sorted according to the given comparison function.',
     complexity: 8200,
     signature: '(indexed_collection, function?) -> indexed_collection',
-    type: (ops) => ops[0].type,
+    // The result always rebuilds as a `List` (see `evaluate`), so the static
+    // type must be `list<elt>`, not the source's (possibly indexed/Range) type.
+    type: ([xs]) =>
+      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
     evaluate: ([xs, fn], { engine: ce }) => {
       // Eager collection results rebuild as `List`, never the source's head
       // (a `Range`/`Linspace` head would reinterpret the sorted elements as
@@ -3910,7 +3929,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'With an optional `seed` argument, the shuffle is deterministic.',
     complexity: 8200,
     signature: '(indexed_collection, real?) -> indexed_collection',
-    type: (ops) => ops[0].type,
+    // The result always rebuilds as a `List` (see `evaluate`), so the static
+    // type must be `list<elt>`, not the source's (possibly indexed/Range) type.
+    type: ([xs]) =>
+      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
     evaluate: ([xs, seedOp], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
 
@@ -5797,7 +5819,12 @@ function enlist(xs: ReadonlyArray<Expression>): Expression[] {
       // if (s === undefined) s = '';
       // s += x.string;
       result.push(x);
-    } else if (x.isCollection) {
+    } else if (x.isLazyCollection && x.isFiniteCollection === true) {
+      // Only flatten and materialize finite lazy sub-collections (e.g. a
+      // `Range`). Eager literals (a `Tuple`, a nested `List`) are structural
+      // elements and must be preserved as-is; an infinite lazy child (e.g. a
+      // `Cycle`) is kept as an element rather than spread (which would burn
+      // the evaluation deadline).
       result.push(...enlist([...x.each()]));
     } else {
       result.push(x);

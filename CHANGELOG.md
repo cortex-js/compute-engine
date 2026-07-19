@@ -1,3 +1,31 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **Materializing a list no longer restructures its eager elements.**
+  `evaluate({materialization: true})` on a literal list spliced the
+  contents of ANY collection-valued element into the parent — a list of
+  `Tuple` pairs came back flattened (`[("a",1), ("b",2)]` →
+  `["a",1,"b",2]`, so the result no longer fed `DictionaryFrom`), a nested
+  list literal lost its nesting, and an *infinite* lazy element (`Cycle`)
+  was spread until the evaluation deadline. Only finite **lazy**
+  sub-collections are now flattened-and-materialized (the documented
+  intent: `[Range(1,3)]` still materializes to `[1,2,3]`); eager literals
+  are preserved, and an infinite lazy element stays put as a bounded
+  preview.
+- **`Take` of an infinite collection with a finite bound is now finite.**
+  `Take(Range(1,+∞), 3)` reported `count` 3 but `isFiniteCollection`
+  false (it propagated the *source's* finiteness), which left
+  `ListFrom(Take(<infinite>, n))` symbolic. `Take` now reports finite
+  whenever its own element count is known-finite; `ListFrom(Take(Range(1,
+  +∞), 3))` → `[1,2,3]`. (When the source's count is genuinely unknown —
+  `Take(ChunkBy(<infinite>, f), 3)` — finiteness stays unknown, keeping
+  materialization previews honest.)
+- **`Sort` and `Shuffle` type as `list<…>`.** Both always rebuild a
+  `List`, but their static type claimed the *source's* type
+  (`Sort(Range(1,5))` typed as an `indexed_collection`-shaped Range). Both
+  now report `list<element-type>`, matching `Take`.
+
 ## 0.86.0 _2026-07-19_
 
 ### New Features

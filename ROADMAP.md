@@ -459,22 +459,21 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
   `Length`/`Count`/`IsEmpty`/`Contains` over `Sort`/`Shuffle`/`Reverse`/
   `Unique` — but any broader `Count(f(x))`-through-eager-op cheapness needs
   canonical-level rewrites, a churn-heavy direction to decide deliberately.
-- **Latent issues flagged, not fixed:** `Apply(inline-lambda,
-  unknown-collection)` maps over a dangling scoped param (pre-existing
-  `applyFunctionLiteral` capture); `.N()`-inertness of a *user-written*
-  `Map(...).N()` body (the broadcast-built arm was fixed);
-  `Sort`/`Shuffle` `type:` handler is slightly loose for a List result
-  (harmless, untested); `evaluate({materialization: true})` flattens the
-  `Tuple`s of a literal `List` of pairs, so a materialized pair-list no
-  longer feeds `DictionaryFrom`/`RecordFrom` (found 2026-07-19 writing
-  their first tests); `ListFrom` does not force a lazy `Take` (even over
-  the pre-existing lazy `Rest`), so `ListFrom(Take(<lazy>, n))` stays
-  symbolic — a `Take`-finiteness/materialization gap. (The formerly-listed
-  validate.ts `Filter(Range(1e5))` eager-count throw was verified fixed,
-  2026-07-19.)
-- `At`'s evaluate handler carries an in-file `@todo` — "implementation does
-  not match the description" (`library/collections.ts` ~2507) — needs a
-  think-through pass.
+- **Latent issue (one remaining, found 2026-07-19):**
+  `Slice(Range(1,+∞), 5, -1)` reports `count === Infinity` with
+  `isFiniteCollection === true` — Slice's unconditional `isFinite: () =>
+  true` over-claims finiteness for a negative-end slice of an infinite
+  source; a correct answer needs the source count for negative indices.
+  (The 2026-07-19 latent sweep dispositioned the rest of the former list:
+  the `enlist` materialization restructuring of literal pair-lists, the
+  `Take.isFinite` gap that kept `ListFrom(Take(<infinite>, n))` symbolic,
+  and the loose `Sort`/`Shuffle` `type:` handlers are FIXED; the
+  `Apply(inline-lambda, unknown-collection)` dangling-param hazard could
+  not be reproduced — the fresh-param `lazyBroadcastMap` hardening covers
+  the path, verified by capture-poison probes; user-written `Map(...).N()`
+  laziness was verified already fixed; and the `At` evaluate `@todo` was
+  audited against its description — behaviors agree, marker replaced with
+  the edge-convention record and mask/pick pins.)
 
 ### Coverage tracks
 
