@@ -1,12 +1,13 @@
 # Expected-Type Inference Context
 
-**Status:** FUTURE DIRECTION — not scheduled. Two dual-reviewer rounds
+**Status:** CLOSED — not planned (re-assessed and closed 2026-07-18, round
+3; see end of §0). Two dual-reviewer rounds
 (round 1: `docs/scratch/2026-07-18-expected-type-inference-context_SPEC_REVIEW.md`;
 round 2 findings summarized in §0) plus a doctrine discussion led to a
 **user-ratified disposition (2026-07-18)**: the performance defect is fixed
-by the *surgical* forward-log change described in §0 instead; this
-structural design is retained as the foundation if expected-type contexts
-are ever wanted beyond matrices.
+by the *surgical* forward-log change described in §0 instead; this document
+is the design record and the starting point if a revival trigger (below)
+ever fires.
 **Date:** 2026-07-18
 
 ## 0. Disposition (read this first)
@@ -58,6 +59,42 @@ it, and no provenance exists to resolve) and exception-path semantics
 Both are non-issues for the post-hoc repair. If this design is revived,
 those two edges plus P1–P11 and the round-1/round-2 findings are the
 acceptance suite.
+
+**Round 3 — re-assessment and closure (2026-07-18, later the same day).**
+The roadmap item tracking this design was revisited and **closed**:
+
+- *Performance:* extinguished. The forward-log fix measures exactly at the
+  no-op-stub ceiling (`π.N()@200d` 0.120 µs; benchmark median 1.09× faster
+  than 0.73.0). The structural design can recover nothing further.
+- *Architecture:* doesn't stand alone. What v3 deletes (failure-path
+  re-boxing, transaction counters, rollback bookkeeping — ~100 pinned lines
+  whose expensive part runs only on the near-never matrix-mismatch path) is
+  roughly matched by what it adds (context slot, deferral set, operand-map
+  eligibility gate, `checkNumericArgs` strict-path changes, a resolution
+  pass that still needs promote-verify-fallback). Zero behavior change by
+  contract; risk concentrated in the hottest construction path.
+- *Generalization:* no consumer. Signature-driven inference already covers
+  declared parameters of every type; the only gap a context fills is the
+  fresh-symbol bottom-up guess under a non-`number` expected type, and
+  matrices are the only algebra where that guess has ever been wrong.
+- *The two "unsolved edges" are resolved on the record* (don't re-derive):
+  the Sequence-fed matrix parameter was never actually unsolved — probed:
+  `Det(Sequence(A+B))` is valid today with `A`,`B` → matrix, because the
+  repair sits **post-flattening in `validateArguments`**; a v3 that keeps
+  resolution at that same site inherits the solution for free (the v2
+  per-raw-operand siting *created* the problem — and re-siting there makes
+  v3 converge structurally toward what the repair already is, shrinking the
+  payoff further). Exception-path stranding: a finally-default at the
+  context boundary (unresolved deferrals default to `number` on exit) —
+  the self-healing doctrine made mechanical.
+- *User rulings (2026-07-18):* the 16 pins in
+  `matrix-operator-typing.test.ts` are non-negotiable; documented drift on
+  the unpinned edge paths is acceptable if this is ever built.
+
+**Revival trigger:** a concrete non-matrix expected-type consumer (a
+parameter type whose fresh-symbol guess must differ from `number` and is
+not covered by signature inference or the repair pattern), or a profile
+showing the transaction counters matter (unmeasurable today).
 
 Everything below is the v2 draft, kept as the design record. §3.1–§3.2's
 masking discipline is **superseded** by the corrected doctrine above.

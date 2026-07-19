@@ -885,19 +885,6 @@ not a hack.
 
 **Effort:** small once the ecosystem is ready.
 
-#### 11. Expected-type inference context — structural redesign (ratified direction)
-
-The 0.84.1 inference-transaction drift was fixed surgically (`cfae300a`:
-incremental `_freshlyInferred` log instead of the per-box scope-chain walk),
-but the **structural** fix — an expected-type context threaded through
-canonicalization ("ambient propagation, defer-only-the-guess, self-healing
-resolution") — is a user-ratified future direction. Spec + corrected
-doctrine: `docs/plans/2026-07-18-expected-type-inference-context.md` §0
-(round-1 findings in `docs/scratch/…_SPEC_REVIEW.md`). Unsolved edges if
-revived: Sequence-fed matrix params, exception-path deferral stranding.
-Don't re-derive the masking doctrine — it was falsified four ways in review
-round 2 (recorded in the spec).
-
 ### Correctness & symbolic findings (2026-07) — residue
 
 The July 2026 correctness and symbolic reviews are fully dispositioned: every
