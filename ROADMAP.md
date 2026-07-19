@@ -488,7 +488,9 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
 - **Auto-compile lazy-`Map` element lambdas on numeric drains (ratified
   2026-07-19, from the Tycho item-42 addendum; design at
   [`docs/plans/2026-07-19-map-auto-compile-design.md`](./docs/plans/2026-07-19-map-auto-compile-design.md),
-  awaiting ratification).** Draining a lazy `Map`
+  RATIFIED 2026-07-19 — normative, ready to implement; includes the
+  `ce.jit: 'auto' | 'off'` engine flag governing ALL implicit compilation
+  incl. the existing quadrature path).** Draining a lazy `Map`
   whose lambda applies an interpreted user function costs the full
   symbolic-evaluation pipeline per element — ~15 ms/element on the filed
   repro (a 40-term `Sum` of a user function over a 2469-element broadcast),
