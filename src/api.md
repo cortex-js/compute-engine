@@ -403,6 +403,22 @@ strict: boolean;
 
 <MemberCard>
 
+##### ExpressionComputeEngine.jit
+
+```ts
+jit: "auto" | "off";
+```
+
+Whether the engine may implicitly generate and execute compiled code as
+a performance optimization (auto-compiled `Map` drains, compiled numeric
+quadrature/limit kernels). `'auto'` (default) attempts implicit
+compilation and latches to `'off'` engine-wide on the first CSP
+`EvalError`; `'off'` never attempts it. Explicit `compile()` is exempt.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.trace
 
 ```ts
@@ -7606,6 +7622,22 @@ The rules used by `solve()` to transform an equation into equivalent,
 ```ts
 strict: boolean;
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.jit
+
+```ts
+jit: "auto" | "off";
+```
+
+Whether the engine may implicitly generate and execute compiled code as
+a performance optimization (auto-compiled `Map` drains, compiled numeric
+quadrature/limit kernels). `'auto'` (default) attempts implicit
+compilation and latches to `'off'` engine-wide on the first CSP
+`EvalError`; `'off'` never attempts it. Explicit `compile()` is exempt.
 
 </MemberCard>
 
