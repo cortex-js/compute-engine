@@ -2824,7 +2824,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
-      signature: '(value*) -> number | list',
+      signature: '(value*) -> number',
       sgn: (ops) => {
         if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
         if (ops.some((x) => x.isReal == false || x.isNaN !== false))
@@ -2854,7 +2854,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
-      signature: '(value+) -> number | list',
+      signature: '(value+) -> number',
       sgn: (ops) => {
         if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
         if (ops.some((x) => x.isReal == false || x.isNaN !== false))
@@ -2918,7 +2918,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
 
-      signature: '(value*) -> number | list',
+      signature: '(value*) -> number',
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Supremum'),
     },
 
@@ -2928,7 +2928,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
 
-      signature: '(value*) -> number | list',
+      signature: '(value*) -> number',
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Infimum'),
     },
 

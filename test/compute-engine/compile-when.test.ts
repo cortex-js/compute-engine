@@ -140,3 +140,35 @@ describe('COMPILE When', () => {
     });
   });
 });
+
+// Tycho item 56: n-ary Max/Min over all-scalar arguments typed
+// `list | number`, so a comparison over one typed `list<boolean>` and the
+// branch-condition assert fail-closed EVERY When mask containing a
+// reduction (`y = x {max(a,x) < 2}` masked its whole curve). Max/Min now
+// type `number` — they always reduce to a scalar (ElementMax/ElementMin
+// are the broadcasting variants).
+describe('When condition containing Max/Min compiles (Tycho item 56)', () => {
+  it('Max over scalars types number, and the comparison types boolean', () => {
+    expect(ce.box(['Max', 'x', ['Add', 'x', -4]]).type.toString()).toBe(
+      'number'
+    );
+    expect(ce.parse('\\max(x,x-4)<2').type.toString()).toBe('boolean');
+  });
+
+  it('a When mask with a Max condition compiles and masks correctly', () => {
+    const w = ce.box(['When', 'x', ['Less', ['Max', 'x', ['Add', 'x', -4]], 2]]);
+    const res = compile(w, { to: 'javascript' });
+    expect(res.success).toBe(true);
+    const run = (res as any).run;
+    expect(run({ x: 1 })).toBe(1); // max(1, −3) = 1 < 2 → visible
+    expect(run({ x: 5 })).toBeNaN(); // max(5, 1) = 5 ≥ 2 → masked
+  });
+
+  it('Max still reduces collections to a scalar extremum', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('L', ce2.box(['List', 1, 7, 3]).evaluate());
+    const m = ce2.box(['Max', 'L']);
+    expect(m.type.toString()).toBe('number');
+    expect(m.evaluate().re).toBe(7);
+  });
+});

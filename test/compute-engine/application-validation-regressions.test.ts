@@ -34,9 +34,15 @@ describe('SYM P1-14 — numeric operators validate their arguments', () => {
   });
 
   it('a numeric bound that is a union with a collection is not rejected', () => {
-    // `Max(_q, 2)` types as `number | list`; `Range` must still accept it —
-    // this is the leniency that keeps the fungrim DirichletGroup rule valid.
+    // The leniency that keeps the fungrim DirichletGroup rule valid: a
+    // union-with-collection type is accepted where a number is expected.
+    // (`Max(_q, 2)` used to be the witness, but since the item-56 narrowing
+    // it types plain `number` — pin the leniency with an explicitly
+    // union-typed symbol instead.)
     const ce = strictEngine();
+    ce.declare('u', 'number | list');
+    expect(ce.box(['Range', 1, 'u']).isValid).toBe(true);
+    // The original fungrim shape stays valid too (now trivially: `number`).
     const e = ce.box(['Range', 1, ['Add', ['Max', 'q', 2], -1]]);
     expect(e.isValid).toBe(true);
   });

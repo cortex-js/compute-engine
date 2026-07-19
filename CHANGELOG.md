@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **`Max`/`Min` (and `Supremum`/`Infimum`) now type as `number`.** Their
+  declared result type was the vestigial union `number | list`, so even
+  `Max(1, 2)` typed as `list | number`, a comparison over one typed
+  `list<boolean>`, and the compilation targets' scalar-condition assert
+  fail-closed every `When` restriction containing a reduction
+  (`y = x \{\max(a,x) < 2\}` masked its whole curve). These operators
+  always REDUCE — including a collection argument's elements — to a single
+  scalar extremum (`ElementMax`/`ElementMin` are the broadcasting
+  variants), so the result type is `number` unconditionally. Evaluation is
+  unchanged.
+
 ## 0.86.1 _2026-07-19_
 
 ### Bug Fixes
