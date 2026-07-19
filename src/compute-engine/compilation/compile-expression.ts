@@ -22,6 +22,7 @@ type CompileExpressionOptions<T extends string = string> = {
   realOnly?: boolean;
   iterationBudget?: number;
   quadrature?: 'adaptive' | 'monte-carlo';
+  symbolDeps?: Set<MathJsonSymbol>;
 };
 
 /**
@@ -109,6 +110,7 @@ export function compile<T extends string = 'javascript'>(
       realOnly: options?.realOnly,
       iterationBudget: options?.iterationBudget,
       quadrature: options?.quadrature,
+      symbolDeps: options?.symbolDeps,
     }) as CompilationResult<T>;
   } catch (e) {
     if (options?.fallback ?? true) {

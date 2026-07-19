@@ -154,6 +154,10 @@ Route-by-route disposition:
   randomness is excluded by the purity gate, so `randomSeed` needs no
   stamp. These are the only two compiler-baked engine inputs identified;
   the implementation must keep this inventory next to the stamp fields.
+  *(Implementation correction, 2026-07-19: post-implementation review found
+  a third compiler-baked input this inventory missed — `ce.angularUnit`,
+  baked by `rewriteAngularUnit`. It is stamped and checked identically to
+  `ce.tolerance`: a change forces a recompile, never a re-stamp.)*
 
 ## D4 — Fallback and failure semantics (review 8, 19, 23, 24)
 

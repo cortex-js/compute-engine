@@ -35,6 +35,8 @@ import {
 import { interval, intervalContains } from '../numerics/interval.js';
 import { deterministicRandom, nextSeed } from '../numerics/random.js';
 import { CancellationError, run } from '../../common/interruptible.js';
+import { mapAutoCompileRunner } from './map-auto-compile.js';
+import { implicitCompile } from '../implicit-compile.js';
 import type {
   Expression,
   OperatorDefinition,
@@ -1669,6 +1671,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
 
+        // Auto-compile trigger (see `map-auto-compile.ts`): when the element
+        // lambda carries the numeric `Block(N(body))` marker and the engine
+        // is at machine precision, elements are served by a cached compiled
+        // function, with silent per-element interpreter fallback. A new
+        // iterator is a new drain (resets the once-per-drain attempt bound).
+        const auto = mapAutoCompileRunner(expr, { drainStart: true });
+
         if (expr.nops > 2) {
           // Multi-collection (zipWith): apply the mapping function to the
           // element-wise tuple of the sources, bounded by the shortest
@@ -1688,6 +1697,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                   return { value: undefined, done: true };
                 items.push(value);
               }
+              const compiled = auto?.(items);
+              if (compiled !== undefined)
+                return { value: compiled, done: false };
               const v = f(items) ?? expr.engine.Nothing;
               return { value: v, done: false };
             },
@@ -1704,6 +1716,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             while (true) {
               const { value, done } = source.next();
               if (done) return { value: undefined, done: true };
+              const compiled = auto?.([value]);
+              if (compiled !== undefined)
+                return { value: compiled, done: false };
               const v = f([value]) ?? expr.engine.Nothing;
               return { value: v, done: false };
             }
@@ -1722,6 +1737,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           if (index < 1) return undefined;
           const items = collections.map((c) => c.at(index));
           if (items.some((x) => x === undefined)) return undefined;
+          // Each at() access is its own micro-drain (resets the
+          // once-per-drain attempt bound, so a cleared `{symbol}` mark can
+          // re-attempt on an at()-only access pattern).
+          const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.(
+            items as Expression[]
+          );
+          if (compiled !== undefined) return compiled;
           return applicable(expr.ops[expr.nops - 1])?.(items as Expression[]);
         }
 
@@ -1734,6 +1756,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!Number.isFinite(index) || index === 0) return undefined;
         const item = expr.op1.at(index);
         if (!item) return undefined;
+        // Each at() access is its own micro-drain (see the zip form above).
+        const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.([
+          item,
+        ]);
+        if (compiled !== undefined) return compiled;
         return applicable(expr.op2)?.([item]);
       },
     },
@@ -1975,11 +2002,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         collection.type.matches(ce.type('collection<real>'))
       ) {
         // If we're dealing with real numbers, we can compile.
-        const compiled = ce._compile(fn);
+        const compiled = implicitCompile(ce, fn);
         // Only take the compiled fast path if the function actually compiled
         // to a lambda; otherwise fall through to the interpreted path below
         // (previously this returned `undefined`, leaving Reduce unevaluated).
-        if (compiled.calling === 'lambda' && compiled.run) {
+        if (compiled && compiled.calling === 'lambda' && compiled.run) {
           return run(
             (function* () {
               // With an explicit initial value, fold it in from the start; do

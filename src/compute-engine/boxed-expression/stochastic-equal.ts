@@ -1,4 +1,5 @@
 import type { Expression } from '../global-types.js';
+import { CancellationError } from '../../common/interruptible.js';
 
 // Lazy reference to break circular dependency:
 // compare → stochastic-equal → compile-expression → base-compiler → utils → ...
@@ -50,17 +51,21 @@ export function stochasticEqual(
   let evalA: ((vars: Record<string, number>) => ComplexValue) | null = null;
   let evalB: ((vars: Record<string, number>) => ComplexValue) | null = null;
 
+  // A `CancellationError` (deadline expiry mid-compile) must unwind per the
+  // `withTimeLimit` contract — only ordinary compile failures fall back.
   try {
     const compiledA = _compile(a);
     if (compiledA.run) evalA = (vars) => toComplex(compiledA.run!(vars));
-  } catch {
+  } catch (e) {
+    if (e instanceof CancellationError) throw e;
     /* fall back to subs */
   }
 
   try {
     const compiledB = _compile(b);
     if (compiledB.run) evalB = (vars) => toComplex(compiledB.run!(vars));
-  } catch {
+  } catch (e) {
+    if (e instanceof CancellationError) throw e;
     /* fall back to subs */
   }
 

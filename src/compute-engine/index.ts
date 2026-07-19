@@ -551,6 +551,28 @@ export class ComputeEngine implements IComputeEngine {
   strict: boolean;
 
   /**
+   * Whether the engine may **implicitly** generate and execute compiled code
+   * (the `Function` constructor) as a performance optimization — the
+   * auto-compilation of lazy-`Map` element lambdas on numeric drains, and the
+   * compiled numeric kernels behind `NIntegrate`/`ND`/`NLimit` and the
+   * `Integrate`/`Limit` numeric fallbacks.
+   *
+   * - `'auto'` (default): implicit compilation attempts run. On the first
+   *   environment-level failure to *construct* a function (a CSP `EvalError` —
+   *   distinct from an ordinary compile failure), the engine latches to
+   *   `'off'` engine-wide, so a strict-CSP host generates at most one
+   *   violation report.
+   * - `'off'`: no implicit code generation is ever attempted; every implicit
+   *   path uses the interpreter. Set this up front on strict-CSP pages
+   *   (no `'unsafe-eval'`), MV3 extensions, or hardened runtimes — or as a
+   *   diagnostic kill switch to bisect interpreter-vs-compiled behavior.
+   *
+   * Explicit `compile()` calls are exempt: a direct user request keeps
+   * failing loudly with the environment's own error, regardless of this flag.
+   */
+  jit: 'auto' | 'off';
+
+  /**
    * Return symbol tables suitable for the specified categories, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
    *
@@ -592,6 +614,7 @@ export class ComputeEngine implements IComputeEngine {
       throw Error('Unexpected argument');
 
     this.strict = true;
+    this.jit = 'auto';
 
     this._numericConfiguration = new EngineNumericConfiguration({
       precision: options?.precision,

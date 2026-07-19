@@ -722,11 +722,23 @@ export function lazyBroadcastMapIfNeeded(
  * in `N(…)`, so every element numericizes on access — laziness preserved.
  * Returns `undefined` when `expr` is not such a `Map`, or its body is already
  * `N`-wrapped (idempotence: `x.N().N()` must not grow the wrapping).
+ *
+ * The rewrap is **memoized per original instance**: repeated `.N()` calls on
+ * one logical `Map` return the *same* rewrapped instance, so any per-instance
+ * state keyed on the rewrapped `Map` (the auto-compile cache in
+ * `library/map-auto-compile.ts`) survives across top-level drains. The rewrap
+ * is purely structural (built from `fn.json`), so the memo needs no
+ * invalidation. Per-instance semantics stay as item 40 ratified: a `subs()`
+ * or re-boxed copy is a new original and runs cold.
  */
+const lazyMapNRewraps = new WeakMap<Expression, Expression>();
+
 export function lazyMapNumericApproximation(
   ce: Expression['engine'],
   expr: Expression
 ): Expression | undefined {
+  const memo = lazyMapNRewraps.get(expr);
+  if (memo !== undefined) return memo;
   if (!isFunction(expr, 'Map')) return undefined;
   const fn = expr.ops[expr.nops - 1];
   if (!isFunction(fn, 'Function') || fn.nops < 1) return undefined;
@@ -751,7 +763,9 @@ export function lazyMapNumericApproximation(
     ...fnJson.slice(2),
   ] as MathJsonExpression);
   if (!wrappedFn.isValid) return undefined;
-  return ce.function('Map', [...expr.ops.slice(0, -1), wrappedFn]);
+  const rewrapped = ce.function('Map', [...expr.ops.slice(0, -1), wrappedFn]);
+  lazyMapNRewraps.set(expr, rewrapped);
+  return rewrapped;
 }
 
 /**

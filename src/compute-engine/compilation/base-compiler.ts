@@ -2414,6 +2414,10 @@ export class BaseCompiler {
   ): string | undefined {
     const value = engine._getSymbolValue(id);
     if (value === undefined) return undefined;
+    // The generated code bakes this symbol's current value: record it in the
+    // capture set (see `CompileTarget.symbolDeps`). Nested symbols inside the
+    // value are recorded by the recursive compile below.
+    target.symbolDeps?.add(id);
     return BaseCompiler.compile(value, target, BaseCompiler.FOLD_OPERAND_PREC);
   }
 
@@ -2517,6 +2521,11 @@ export class BaseCompiler {
 
     const literal = BaseCompiler.userFunctionLiteral(engine, h);
     if (literal === undefined) return undefined;
+
+    // The generated code bakes this user function's current definition: record
+    // it in the capture set (see `CompileTarget.symbolDeps`). Symbols its body
+    // consults are recorded by the body compile below.
+    target.symbolDeps?.add(h);
 
     const name = BaseCompiler.userFunctionName(h);
 

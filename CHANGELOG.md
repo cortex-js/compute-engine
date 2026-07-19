@@ -1,56 +1,101 @@
+## [Unreleased]
+
+### New Features
+
+- **New engine flag `ce.jit: 'auto' | 'off'`** governing every **implicit**
+  compilation path — the new lazy-`Map` auto-compilation (below) and the
+  pre-existing compiled numeric kernels (`NIntegrate`/`ND`/`NLimit`, the
+  `Integrate`/`Limit` numeric fallbacks, `NDSolve` right-hand sides, the
+  solve-domain enumeration sieve, the stochastic-equality probes, the compiled
+  `Reduce` fast path). Default `'auto'`: attempts run, and on the first
+  environment-level `EvalError` (a strict-CSP host refusing dynamic code) the
+  engine latches to `'off'` engine-wide, capping CSP violation reports at one.
+  Set `'off'` up front on strict-CSP pages, MV3 extensions, or hardened runtimes
+  — or as a diagnostic kill switch. Explicit `compile()` is exempt and keeps
+  failing loudly. Implicit compile failures now fall back to the interpreter
+  **silently** (previously some of these paths logged a `Compilation fallback`
+  warning).
+
+### Performance
+
+- **Lazy-`Map` element lambdas auto-compile on numeric drains.** Draining a lazy
+  broadcast (`f(Range(1, 10^5)).N()`, a `PointList` sweep, an `addN`/`mulN`
+  broadcast) whose element lambda applies interpreted user-defined functions
+  previously paid the full symbolic pipeline per element (~ms/element). At
+  **machine precision** (the gate: the default engine precision is bignum and
+  never triggers this), such drains now compile the element lambda once per
+  logical `Map` — eligibility-gated (pure bodies, literal-bounded loops, no
+  unbound free symbols, ambient-scope captures only) — and serve elements from
+  the compiled function, ~30–2500× faster with digit parity against the
+  machine-precision interpreter. The compiled function is validated before every
+  invocation against the same two-axis mutation keys as the comprehension memo,
+  so reassigning a captured symbol (even mid-drain) recompiles, while unrelated
+  assignments don't thrash the cache. Per-element fallback to the interpreter is
+  silent and exact: non-numeric rows, NaN results (re-checked through the
+  interpreter so `√x` over a sign-crossing source still yields complex values),
+  and ineligible bodies (e.g. containing `Random`) behave exactly as before.
+
 ## 0.86.3 _2026-07-19_
 
 ### New Features
 
-- **Recursive user-defined functions now compile.** Self- and mutually
-  recursive functions (`fact(n) := n ≤ 1 ? 1 : n · fact(n-1)`) compile on the
-  `javascript` and `interval-js` targets to true recursion, instead of failing
-  closed. Termination is the caller's contract, matching compiled unbounded
-  `Loop`: on the `javascript` target runaway recursion throws a catchable
-  `RangeError`; on `interval-js` the runner converts runtime errors to the
-  *entire* interval ("cannot bound"), per that target's error philosophy. (The
-  interpreter throws `CancellationError` on its time limit instead.) A complex-valued
-  recursive function needs a `Typed` `complex` **return** ascription on the
-  function literal so the self-call types as a scalar — without it the
-  application types `broadcastable<number>` and complex arithmetic over it
-  does not compile. GPU targets (GLSL/WGSL) are unchanged: shaders cannot
-  recurse, so recursion stays fail-closed there. Measured on a depth-10
-  iterated Julia map, the recursive form runs ~0.18 µs/pt — about an order of
-  magnitude faster than the equivalent hand-unrolled closed form compiled
-  before this release.
+- **Recursive user-defined functions now compile.** Self- and mutually recursive
+  functions (`fact(n) := n ≤ 1 ? 1 : n · fact(n-1)`) compile on the `javascript`
+  and `interval-js` targets to true recursion, instead of failing closed.
+  Termination is the caller's contract, matching compiled unbounded `Loop`: on
+  the `javascript` target runaway recursion throws a catchable `RangeError`; on
+  `interval-js` the runner converts runtime errors to the _entire_ interval
+  ("cannot bound"), per that target's error philosophy. (The interpreter throws
+  `CancellationError` on its time limit instead.) A complex-valued recursive
+  function needs a `Typed` `complex` **return** ascription on the function
+  literal so the self-call types as a scalar — without it the application types
+  `broadcastable<number>` and complex arithmetic over it does not compile. GPU
+  targets (GLSL/WGSL) are unchanged: shaders cannot recurse, so recursion stays
+  fail-closed there. Measured on a depth-10 iterated Julia map, the recursive
+  form runs ~0.18 µs/pt — about an order of magnitude faster than the equivalent
+  hand-unrolled closed form compiled before this release.
 
 - **Function literals accept a signature-string shorthand.**
   `["Function", body, "'(n: integer, z: number) -> complex'"]` desugars at
   canonicalization into the structural `Typed` form (typed parameters plus a
   return-type ascription) — one compact string instead of nested `Typed`
-  wrappers, reusing the full type grammar. Signatures must name every
-  parameter; optional/variadic markers are not yet supported and fall through
-  to the standard parameter validation error.
+  wrappers, reusing the full type grammar. Signatures must name every parameter;
+  optional/variadic markers are not yet supported and fall through to the
+  standard parameter validation error.
 
 ### Performance
 
-- **Small literal integer powers of complex values compile to inline
-  multiply chains.** `z^k` for literal `k` = 2…8 with a complex-valued `z`
-  emitted the general polar-form power helper (`hypot`/`atan2`/`exp`/…) per
-  evaluation; it is now an inline square-and-multiply chain, with the base
-  bound to a const exactly once. Iterated-map workloads speed up ~9×
-  (depth-10 Julia closed form: 1.25 → 0.14 µs/pt). The square is
-  digit-compatible with the interpreter; for k ≥ 3 both routes go through
-  different roundings and agree to ~1 ulp. Exponents ≥ 9, negative, and
-  non-integer still use the general helper.
+- **Small literal integer powers of complex values compile to inline multiply
+  chains.** `z^k` for literal `k` = 2…8 with a complex-valued `z` emitted the
+  general polar-form power helper (`hypot`/`atan2`/`exp`/…) per evaluation; it
+  is now an inline square-and-multiply chain, with the base bound to a const
+  exactly once. Iterated-map workloads speed up ~9× (depth-10 Julia closed form:
+  1.25 → 0.14 µs/pt). The square is digit-compatible with the interpreter; for k
+  ≥ 3 both routes go through different roundings and agree to ~1 ulp. Exponents
+  ≥ 9, negative, and non-integer still use the general helper.
 
 ### Bug Fixes
 
+- **Degree-mode compilation now reaches user-defined function bodies.** The
+  angular-unit rewrite (scaling trig arguments/results so radian-based
+  compiled math reproduces `angularUnit` semantics) was applied only to the
+  top-level expression: compiling `t ↦ f(t)` where `f(x) := sin(x)` under
+  `angularUnit: 'deg'` emitted radian-based trig inside `f`'s definition,
+  while the inlined `t ↦ sin(t)` correctly scaled. The rewrite is now applied
+  to each emitted user-function body. (Compiled-vs-interpreted agreement for
+  unit-scaled trig is ~1 ulp, not digit-exact — the two routes round the unit
+  conversion in different orders.)
+
 - **`ce.assign(name, fn)` ties the recursion knot for pre-boxed function
-  literals.** A `Function` literal canonicalized *before* `ce.assign(name, …)`
+  literals.** A `Function` literal canonicalized _before_ `ce.assign(name, …)`
   (the programmatic box-then-assign route) left its self-reference bound to a
   stale auto-declaration, so the body's types were wrong — for most names the
-  self-call typed `any` and compiling the function fail-closed on the
-  collection guard, while a lucky subset of names (pre-declared shells such
-  as `K` or `J`) masked the bug. `ce.assign` now pre-declares the target as
-  function-typed and re-canonicalizes such a literal, matching the behavior
-  of the `Assign` operator and of `f(n) := …` parsing. (Naming a function
-  after a built-in operator, e.g. `N`, still collides — unchanged.)
+  self-call typed `any` and compiling the function fail-closed on the collection
+  guard, while a lucky subset of names (pre-declared shells such as `K` or `J`)
+  masked the bug. `ce.assign` now pre-declares the target as function-typed and
+  re-canonicalizes such a literal, matching the behavior of the `Assign`
+  operator and of `f(n) := …` parsing. (Naming a function after a built-in
+  operator, e.g. `N`, still collides — unchanged.)
 
 ## 0.86.2 _2026-07-19_
 

@@ -19,8 +19,7 @@ import { getPolynomialCoefficients, polynomialDegree } from './polynomials.js';
 
 import { findUnivariateRoots } from './solve.js';
 
-// eslint-disable-next-line import/no-restricted-paths
-import { compile } from '../compilation/compile-expression.js';
+import { implicitCompile } from '../implicit-compile.js';
 import { _setCompile } from './stochastic-equal.js';
 
 import { validateArguments } from './validate.js';
@@ -30,7 +29,11 @@ _setExpand(expand);
 _setExpandForIs(expand);
 _setSerializeJson(serializeJson);
 _setProduct(Product);
-_setCompile(compile);
+// The stochastic-equality probes are an implicit compilation path: route them
+// through `implicitCompile` so they honor the `ce.jit` flag (and its CSP
+// latch); a no-compile returns an empty record, and the caller's interpreter
+// fallback takes over.
+_setCompile((expr) => implicitCompile(expr.engine, expr) ?? {});
 _setGetPolynomialCoefficients(getPolynomialCoefficients);
 _setGetPolynomialDegree(polynomialDegree);
 _setFindUnivariateRoots(findUnivariateRoots);

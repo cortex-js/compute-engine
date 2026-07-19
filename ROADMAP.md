@@ -485,28 +485,11 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
 
 - **T3 (deferred, low value):** `Keys`/`Values` (dicts are small), `Chunk`
   (needs count only).
-- **Auto-compile lazy-`Map` element lambdas on numeric drains (ratified
-  2026-07-19, from the Tycho item-42 addendum; design at
-  [`docs/plans/2026-07-19-map-auto-compile-design.md`](./docs/plans/2026-07-19-map-auto-compile-design.md),
-  RATIFIED 2026-07-19 — normative, ready to implement; includes the
-  `ce.jit: 'auto' | 'off'` engine flag governing ALL implicit compilation
-  incl. the existing quadrature path).** Draining a lazy `Map`
-  whose lambda applies an interpreted user function costs the full
-  symbolic-evaluation pipeline per element — ~15 ms/element on the filed
-  repro (a 40-term `Sum` of a user function over a 2469-element broadcast),
-  a CPU profile of which is diffuse (canonical ordering, type checks,
-  exact-rational machinery: architectural, no single defect). The same
-  lambda through the existing compile route measures **6.1 µs/element**
-  (full sweep 15 ms vs ~38 s, ~2500×) with digit-for-digit parity. Design
-  questions to settle before building: when to attempt compilation (float
-  drains only — `.N()`/machine-precision contexts — so the exactness
-  contract is never routed around), fallback semantics on non-compilable
-  bodies (silent interpreter fallback, one attempt per instance), and
-  caching the compiled function per collection instance alongside the
-  items-39/40 per-instance element memos (invalidation must follow the
-  same two-axis keying as the element memos). Until it lands, consumers
-  bound interpreted drains with `ce.withTimeLimit()` (0.86.0) or migrate
-  hot paths to the explicit compile route.
+- **Map auto-compile v1 gaps (shipped 2026-07-19; revisit on a profile):**
+  the explicit-materialization route stays interpreted (ratified non-goal —
+  do not reorder `_computeValue` steps 3/3b), and non-`Map` lazy collections
+  (`Filter`, `Comprehension` bodies) and bignum drains are not attempted.
+  See [`docs/plans/2026-07-19-map-auto-compile-design.md`](./docs/plans/2026-07-19-map-auto-compile-design.md).
 - **Fusion/rewrite layer — open design decision (user has not ruled).** No
   structural rewrite layer exists; lazy facet delegation gives O(1)
   `Count`/`At` through lazy chains, and canonical peeks now cover

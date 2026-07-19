@@ -303,6 +303,14 @@ export interface IComputeEngine {
 
   strict: boolean;
 
+  /** Whether the engine may implicitly generate and execute compiled code as
+   * a performance optimization (auto-compiled `Map` drains, compiled numeric
+   * quadrature/limit kernels). `'auto'` (default) attempts implicit
+   * compilation and latches to `'off'` engine-wide on the first CSP
+   * `EvalError`; `'off'` never attempts it. Explicit `compile()` is exempt.
+   */
+  jit: 'auto' | 'off';
+
   expr(
     expr: NumericValue | ExpressionInput,
     options?: {

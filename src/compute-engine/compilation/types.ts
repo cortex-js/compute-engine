@@ -207,6 +207,20 @@ export interface CompileTarget<Expr = unknown> {
   randomState?: { counter: number };
 
   /**
+   * When provided, the compiler records into this set the id of every symbol
+   * whose engine **value or function-literal definition it actually consults**
+   * while emitting code — the constant-baking folds (`tryFoldKnownSymbol`) and
+   * the user-defined function emissions (`ensureUserFunctionEmitted`), both of
+   * which recurse, so transitively referenced symbols are recorded too. This is
+   * the capture set of the generated code: a later change to any recorded
+   * symbol's definition can invalidate the compiled result. Consumed by the
+   * implicit (auto-)compilation paths to know when a cached compiled function
+   * must be revalidated. Survives the compiler's `{ ...target }` spreads by
+   * reference.
+   */
+  symbolDeps?: Set<MathJsonSymbol>;
+
+  /**
    * Mutable per-compile registry for user-defined functions — a symbol whose
    * engine definition is a `Function` literal (`f(x) := …`, `x ↦ …`, or an
    * `ce.assign(name, lambda)`) encountered as an *operator* (`f(2)`). Each such
@@ -417,6 +431,13 @@ export interface CompilationOptions<Expr = unknown> {
    *   (~1e-4 typical error, different result each call).
    */
   quadrature?: 'adaptive' | 'monte-carlo';
+
+  /**
+   * When provided, the compiler records the id of every symbol whose engine
+   * value or function-literal definition it consults while emitting code (the
+   * generated code's capture set). See `CompileTarget.symbolDeps`.
+   */
+  symbolDeps?: Set<MathJsonSymbol>;
 
   /**
    * How a `LanguageTarget.compile()` call reports an expression it cannot lower

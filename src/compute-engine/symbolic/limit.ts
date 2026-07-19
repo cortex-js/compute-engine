@@ -9,6 +9,7 @@ import {
   getPolynomialCoefficients,
 } from '../boxed-expression/polynomials.js';
 import { reduceTransformerHead } from '../boxed-expression/utils.js';
+import { implicitCompile } from '../implicit-compile.js';
 import { laurentData } from './series.js';
 import {
   limit as numericLimit,
@@ -865,9 +866,9 @@ function compiledProbe(
     // Budgeted so a probe of a Sum/Product with a variable-dependent (or
     // infinite) bound stays cheap — over-budget calls read as NaN, which the
     // growth oracles already treat as "unreliable, bail".
-    const compiled = ce._compile(lit, {
+    const compiled = implicitCompile(ce, lit, {
       iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
-    }) as { run?: (x: number) => number };
+    }) as { run?: (x: number) => number } | undefined;
     if (typeof compiled?.run === 'function') fn = compiled.run;
   } catch {
     fn = null;

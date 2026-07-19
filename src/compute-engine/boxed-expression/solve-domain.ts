@@ -1,6 +1,7 @@
 import type { Type } from '../../common/type/types.js';
 import { collectionElementType } from '../../common/type/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { implicitCompile } from '../implicit-compile.js';
 
 import type {
   IComputeEngine as ComputeEngine,
@@ -675,8 +676,9 @@ export function solveOverDomain(
   // compilation (`success`) enables the larger budget and the float sieve; the
   // interpreter fallback (`success: false`) uses the exact path directly.
   const fnLit = ce.function('Function', [predBody, ce.symbol(unknown)]);
-  const compiled = ce._compile(fnLit);
+  const compiled = implicitCompile(ce, fnLit);
   const useCompiled =
+    compiled !== undefined &&
     compiled.success === true &&
     (compiled as any).calling === 'lambda' &&
     typeof (compiled as any).run === 'function';
@@ -826,8 +828,9 @@ export function solveOverMultipleDomains(
     predBody,
     ...unknowns.map((u) => ce.symbol(u)),
   ]);
-  const compiled = ce._compile(fnLit);
+  const compiled = implicitCompile(ce, fnLit);
   const useCompiled =
+    compiled !== undefined &&
     compiled.success === true &&
     (compiled as any).calling === 'lambda' &&
     typeof (compiled as any).run === 'function';

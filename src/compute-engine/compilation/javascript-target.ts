@@ -3237,6 +3237,9 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // Opt in to compiling calls to user-defined function literals (`f(x) :=
       // …`) as named local functions collected into the preamble.
       userFunctions: { defs: new Map(), compiling: new Set() },
+      // Capture-set collector for implicit-compilation callers (see
+      // `CompileTarget.symbolDeps`).
+      symbolDeps: options.symbolDeps,
     });
 
     const result = compileToTarget(expr, target, realOnly);

@@ -1,4 +1,5 @@
 import type { Expression, IComputeEngine } from './global-types.js';
+import { implicitCompile } from './implicit-compile.js';
 import { isFunction, isSymbol, sym } from './boxed-expression/type-guards.js';
 import {
   rk45System,
@@ -319,8 +320,8 @@ function prepareODE(
         independentName,
         stateNames
       );
-      const compiled = ce._compile(compiledRhs, { realOnly: true });
-      if (!compiled.success) return undefined;
+      const compiled = implicitCompile(ce, compiledRhs, { realOnly: true });
+      if (!compiled?.success) return undefined;
       runs.push(compiled.run as (vars: Record<string, number>) => number);
     }
 
@@ -369,8 +370,8 @@ function prepareODE(
       independentName,
       stateNames
     );
-    const compiled = ce._compile(compiledRhs, { realOnly: true });
-    if (!compiled.success) return undefined;
+    const compiled = implicitCompile(ce, compiledRhs, { realOnly: true });
+    if (!compiled?.success) return undefined;
     const run = compiled.run as (vars: Record<string, number>) => number;
 
     return {
@@ -398,8 +399,8 @@ function prepareODE(
     independentName,
     stateName
   );
-  const compiled = ce._compile(compiledRhs, { realOnly: true });
-  if (!compiled.success) return undefined;
+  const compiled = implicitCompile(ce, compiledRhs, { realOnly: true });
+  if (!compiled?.success) return undefined;
   const run = compiled.run as (vars: Record<string, number>) => number;
 
   return {

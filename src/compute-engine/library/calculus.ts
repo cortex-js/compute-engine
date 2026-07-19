@@ -51,6 +51,7 @@ import { symbolicLimit } from '../symbolic/limit.js';
 import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
 import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
+import { implicitCompile } from '../implicit-compile.js';
 import { CancellationError } from '../../common/interruptible.js';
 
 //
@@ -606,9 +607,9 @@ volumes
         const xValue = x.N().re;
         if (isNaN(xValue)) return undefined;
 
-        const compiled = engine._compile(body);
+        const compiled = implicitCompile(engine, body);
         const fn =
-          (compiled.run as (x: number) => number) ?? applicableN1(body);
+          (compiled?.run as (x: number) => number) ?? applicableN1(body);
         return new BoxedNumber(engine, centeredDiff8thOrder(fn, xValue));
       },
     },
@@ -681,9 +682,9 @@ volumes
           // This converts e.g. 'x' to ['Function', 'x', 'x'] -> (x) => x
           const fnExpr =
             f.operator === 'Function' ? f : ce.expr(['Function', f, variable]);
-          const compiled = ce._compile(fnExpr);
+          const compiled = implicitCompile(ce, fnExpr);
           const jsf =
-            (compiled.run as (x: number) => number) ?? applicableN1(fnExpr);
+            (compiled?.run as (x: number) => number) ?? applicableN1(fnExpr);
 
           // Semi-infinite interval: a conditionally-convergent oscillatory
           // integrand (∫₀^∞ sin x/x, ∫₀^∞ sin(x²)) defeats Monte-Carlo
@@ -713,7 +714,7 @@ volumes
           // machine precision on smooth integrands, and matches the compiled
           // integration path. Falls through to Monte Carlo only when it fails
           // to converge (endpoint singularities, oscillatory tails).
-          if (compiled.success) {
+          if (compiled?.success) {
             const gk = adaptiveQuadrature(jsf, lower, upper);
             if (gk.converged && Number.isFinite(gk.estimate))
               return ce.expr([
@@ -727,7 +728,7 @@ volumes
             jsf,
             lower,
             upper,
-            compiled.success ? 1e7 : 1e4,
+            compiled?.success ? 1e7 : 1e4,
             ce._deadline
           );
           // KNOWN LIMITATION (CORRECTNESS_FINDINGS #29 / C15): the reported
@@ -905,8 +906,9 @@ volumes
         // Uses compiled JS functions (machine arithmetic)
         const [lower, upper] = [a.N().re, b.N().re];
         if (isNaN(lower) || isNaN(upper)) return undefined;
-        const compiled = engine._compile(f);
-        const jsf = (compiled.run as (x: number) => number) ?? applicableN1(f);
+        const compiled = implicitCompile(engine, f);
+        const jsf =
+          (compiled?.run as (x: number) => number) ?? applicableN1(f);
 
         // Dedicated oscillatory quadrature for semi-infinite intervals (see
         // the `Integrate` numeric path); null → fall back to Monte Carlo.
@@ -929,7 +931,7 @@ volumes
             jsf,
             lower,
             upper,
-            compiled.success ? 1e7 : 1e4,
+            compiled?.success ? 1e7 : 1e4,
             engine._deadline
           ).estimate
         );
@@ -1232,10 +1234,11 @@ volumes
         if (numericApproximation) {
           const target = x.N().re;
           if (Number.isNaN(target)) return undefined;
-          const compiled = engine._compile(f, {
+          const compiled = implicitCompile(engine, f, {
             iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
           });
-          const fn = (compiled.run as (x: number) => number) ?? applicableN1(f);
+          const fn =
+            (compiled?.run as (x: number) => number) ?? applicableN1(f);
           return new BoxedNumber(
             engine,
             limit(fn, target, dir ? dir.re : 1, engine._deadline)
@@ -1282,10 +1285,11 @@ volumes
         // same reason as Limit's numeric fallback above.
         const target = x.N().re;
         if (Number.isNaN(target)) return undefined;
-        const compiled = engine._compile(f, {
+        const compiled = implicitCompile(engine, f, {
           iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
         });
-        const fn = (compiled.run as (x: number) => number) ?? applicableN1(f);
+        const fn =
+          (compiled?.run as (x: number) => number) ?? applicableN1(f);
         return new BoxedNumber(
           engine,
           limit(fn, target, dir ? dir.re : 1, engine._deadline)
