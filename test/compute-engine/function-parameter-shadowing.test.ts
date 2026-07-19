@@ -137,6 +137,10 @@ describe('Symbolic argument mentioning the parameter’s own name (Tycho item 46
 
   it('the filed PointList repro evaluates symbolically without overflowing', () => {
     const ce = new ComputeEngine();
+    // This test guards against the item-46 stack overflow, not evaluation
+    // speed: the symbolic Sum evaluation sits near the default 2 s
+    // `timeLimit` under jest overhead and flakes on a loaded machine.
+    ce.timeLimit = 20_000;
     defs(ce);
     const sym = ce
       .parse('\\operatorname{PointList}(A(t)[1], A(t)[2])')

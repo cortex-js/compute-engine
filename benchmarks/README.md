@@ -208,8 +208,8 @@ mkdir -p benchmarks/.competitors/mathjs-host
 ( cd benchmarks/.competitors/mathjs-host && npm init -y >/dev/null && npm install mathjs )
 
 # the published Compute Engine release to compare against
-( cd benchmarks/.competitors && npm pack @cortex-js/compute-engine@0.85.0 \
-  && mkdir -p ce-0.85.0 && tar xzf cortex-js-compute-engine-0.85.0.tgz -C ce-0.85.0 --strip-components=1 )
+( cd benchmarks/.competitors && npm pack @cortex-js/compute-engine@0.86.1 \
+  && mkdir -p ce-0.86.1 && tar xzf cortex-js-compute-engine-0.86.1.tgz -C ce-0.86.1 --strip-components=1 )
 
 # Mathematica: a licensed `wolframscript` on PATH (nothing is vendored)
 wolframscript -version   # confirm it is available
@@ -236,7 +236,7 @@ of the report still builds.
 | Variable | Default | Purpose |
 |---|---|---|
 | `CE_CURRENT_BUNDLE` | `dist/esm-min/compute-engine.js` | Path to the "current build" ESM bundle. |
-| `CE_PUBLISHED_VERSION` | `0.85.0` | Label for the published column. |
+| `CE_PUBLISHED_VERSION` | `0.86.1` | Label for the published column. |
 | `CE_PUBLISHED_BUNDLE` | `.competitors/ce-<version>/dist/esm-min/compute-engine.js` | Path to the published bundle. |
 | `CE_CURRENT_LABEL` | `CE (current)` | Override the current column label in the CHANGELOG tables. |
 
@@ -334,7 +334,7 @@ capability:
   — the **primitive-operation** microbench: per-op cost (ns/op) of `add`/`sub`/
   `mul`/`div`/`sqrt`/`round`/`normalize`/`cmp` plus composite consumers
   (`ln`/`exp`/`cos`/Apéry ζ(3)) at 21/50/100/200/500 digits, comparing CE HEAD
-  vs published 0.85.0 vs mpmath. Where the transcendental tables measure whole
+  vs published 0.86.1 vs mpmath. Where the transcendental tables measure whole
   kernels, this isolates the primitives whose wins propagate to every kernel
   (e.g. the `div` normalize-skip). One command: `node
   big-decimal/run-ops.mjs` (writes `ops-results.json` + the Markdown tables that
