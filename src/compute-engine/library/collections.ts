@@ -393,9 +393,7 @@ function projectLazyPointList(
     if (!isSymbol(p) || names.has(p.symbol)) return undefined;
     names.add(p.symbol);
   }
-  const j = params.findIndex(
-    (p) => isSymbol(p) && p.symbol === slot.symbol
-  );
+  const j = params.findIndex((p) => isSymbol(p) && p.symbol === slot.symbol);
   if (j < 0 || j >= sources.length) return undefined;
   if (sources.some((s) => s.isIndexedCollection !== true)) return undefined;
   const counts = sources.map((s) => s.count);
