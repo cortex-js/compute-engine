@@ -62,6 +62,22 @@ describe('COMPILE: assigned-symbol folding', () => {
       // The mapped literal (7), not the assigned value (1.5), is emitted.
       expect(code).toBe('-_.y + Math.sin(7 * _.x)');
     });
+
+    it('a string vars mapping is spliced as source, keeping the symbol live', () => {
+      // The live-path contract for JS: `{ a: '_.a' }` keeps `a` a runtime
+      // argument of the compiled function even though it has an assigned
+      // value — one engine state serves both the compile-once path and the
+      // fold-early evaluate path. (Previously the source string was
+      // JSON-stringified into a string literal, yielding NaN at run time.)
+      const ce = new ComputeEngine();
+      ce.assign('a', 1.5);
+      const expr = ce.parse('\\sin(a x) - y');
+      const r = ce
+        .getCompilationTarget('javascript')!
+        .compile(expr, { vars: { a: '_.a' } });
+      expect(r.code).toBe('-_.y + Math.sin(_.a * _.x)');
+      expect(r.run!({ a: 2, x: 1, y: 0 })).toBeCloseTo(Math.sin(2), 12);
+    });
   });
 
   describe('GLSL target', () => {

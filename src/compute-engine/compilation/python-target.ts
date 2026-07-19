@@ -1429,7 +1429,12 @@ export class PythonTarget implements LanguageTarget<Expression> {
   ): (id: string) => string | undefined {
     return (id: string) => {
       if (shadowed?.includes(id)) return id;
-      if (vars && id in vars) return JSON.stringify(vars[id]);
+      // A string `vars` value is source spliced in as-is (the live-path
+      // contract); a non-string value is a constant to bake.
+      if (vars && id in vars) {
+        const v = vars[id];
+        return typeof v === 'string' ? v : JSON.stringify(v);
+      }
       return PYTHON_CONSTANTS[id];
     };
   }

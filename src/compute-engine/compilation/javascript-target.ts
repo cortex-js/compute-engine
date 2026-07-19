@@ -3135,7 +3135,13 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       functions: (id) =>
         namedFunctions?.[id] ? namedFunctions[id] : JAVASCRIPT_FUNCTIONS[id],
       var: (id) => {
-        if (vars && id in vars) return JSON.stringify(vars[id]);
+        // A string `vars` value is JS source spliced in as-is (the live-path
+        // contract: `{ s: '_.s' }` keeps `s` a runtime argument even when it
+        // has an assigned value). A non-string value is a constant to bake.
+        if (vars && id in vars) {
+          const v = vars[id];
+          return typeof v === 'string' ? v : JSON.stringify(v);
+        }
         const result = {
           Pi: 'Math.PI',
           ExponentialE: 'Math.E',
