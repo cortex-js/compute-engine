@@ -319,7 +319,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // operand is a notational object; leave it unchanged rather than summing
         // across the elided terms.
         if (ops.some((x) => isContinuationOperand(x))) return undefined;
-        // Check if any operand is a Quantity expression
+        // `Add` is `lazy`, so the driver did NOT evaluate the operands —
+        // this map is the (single) operand evaluation, not a re-evaluation.
         const evaluated = ops.map((x) => x.evaluate());
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityAdd(engine!, evaluated);
@@ -347,14 +348,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `ExponentialE`, …) — `Add(0.5, Pi)` → 3.64…, matching
         // `Add(0.5, Sqrt(2))` (which already folds via the numeric-literal
         // path since `Sqrt(2)` is itself a number literal). Only when the
-        // sum has no free variables: `0.5 + x` must stay symbolic.
+        // sum is a closed constant: `0.5 + x` must stay symbolic. The gate
+        // is `isConstant` (lexical: every symbol is a constant binding), NOT
+        // `unknowns.length === 0`: `unknowns` resolves through the *dynamic*
+        // scope chain, so inside a function application a bound parameter
+        // counts as known and a symbolic `0.3 + z²` body would fire a
+        // full-subtree `N()` walk that cannot make progress — and since
+        // nested `Add`/`Power` evaluates re-fire it at every level, the
+        // cost compounds exponentially with nesting depth (the 2026-07-19
+        // recursive-unwind blowup). `evaluate()` has already substituted
+        // every valued symbol, so constants are exactly the symbols `N()`
+        // can still numericize.
         // `isExactNumber` (not plain `isExact`) additionally protects a
         // Gaussian-integer term still carried by the inexact lane (e.g. the
         // machine `i` constant); exact complex literals (`1/2 + i`, since
         // D12-A an ExactNumericValue) are already covered by `isExact`.
         if (
           result.operator === 'Add' &&
-          result.unknowns.length === 0 &&
+          result.isConstant &&
           evaluated.some((x) => !isExactNumber(x))
         )
           return result.N();
@@ -496,8 +507,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return result;
       },
       evaluate: ([num, den], { numericApproximation, engine }) => {
-        const evalNum = num.evaluate();
-        const evalDen = den.evaluate();
+        // Non-lazy operator: operands arrive already evaluated by the
+        // driver (`_computeValue` step 4) — do not re-evaluate them.
+        const evalNum = num;
+        const evalDen = den;
         if (
           evalNum.operator === 'Quantity' ||
           evalDen.operator === 'Quantity'
@@ -1186,7 +1199,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // @fastpath: this doesn't get called. See makeNumericFunction()
       evaluate: ([z], { numericApproximation, engine }) => {
         // Ln(a, b) = Log(a, b), so no need to check second argument
-        const evalZ = z.evaluate();
+        // Non-lazy: `z` is already evaluated by the driver.
+        const evalZ = z;
         if (isMeasurement(evalZ)) {
           const r = measurementLn(engine, evalZ);
           return numericApproximation ? r?.N() : r;
@@ -1237,9 +1251,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //   return x.ln(base ?? 10);
       // },
       evaluate: (ops, { numericApproximation, engine }) => {
-        const evalArg = ops[0]?.evaluate();
+        // Non-lazy: operands are already evaluated by the driver.
+        const evalArg = ops[0];
         if (evalArg && isMeasurement(evalArg)) {
-          const base = ops[1]?.evaluate() ?? engine.number(10);
+          const base = ops[1] ?? engine.number(10);
           const r = measurementLog(engine, evalArg, base);
           return numericApproximation ? r?.N() : r;
         }
@@ -1631,7 +1646,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `ContinuationPlaceholder` operand is a notational object; leave it
         // unchanged rather than multiplying across the elided terms.
         if (ops.some((x) => isContinuationOperand(x))) return undefined;
-        // Check if any operand is a Quantity expression
+        // `Multiply` is `lazy`, so the driver did NOT evaluate the operands —
+        // this map is the (single) operand evaluation, not a re-evaluation.
         const evaluated = ops.map((x) => x.evaluate());
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityMultiply(engine!, evaluated);
@@ -1654,10 +1670,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // D2: see the matching comment in `Add` — an inexact (float) operand
         // numericizes the whole product even when mixed with an exact
         // symbolic constant (`Multiply(0.5, Pi)` → 1.57…). Only when the
-        // product has no free variables: `0.5 * x` must stay symbolic.
+        // product is a closed constant (`isConstant`, lexical — NOT the
+        // dynamic-scope `unknowns`; see `Add`): `0.5 * x` must stay
+        // symbolic, including a bound parameter `x` inside an application.
         if (
           result.operator === 'Multiply' &&
-          result.unknowns.length === 0 &&
+          result.isConstant &&
           evaluated.some((x) => !isExactNumber(x))
         )
           return result.N();
@@ -1680,7 +1698,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return args[0].neg();
       },
       evaluate: ([x], { numericApproximation, engine }) => {
-        const evalX = x.evaluate();
+        // Non-lazy: `x` is already evaluated by the driver.
+        const evalX = x;
         if (isQuantity(evalX)) {
           if (isMeasurement(evalX.op1)) {
             const negM = measurementNegate(engine, evalX.op1);
@@ -1926,9 +1945,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // x^n
       // evaluate: (ops) => ops[0].pow(ops[1]),
       evaluate: ([x, n], { numericApproximation, engine }) => {
-        const evalBase = x.evaluate();
+        // Non-lazy operator: operands arrive already evaluated by the driver
+        // (`_computeValue` step 4/`holdMap`) — do not re-evaluate them.
+        // Handler-side re-evaluation re-descends the whole (unmemoized)
+        // operand subtree; under nesting that compounded to 2^depth (the
+        // 2026-07-19 symbolic-recursion re-walk). Only LAZY operators
+        // (`Add`, `Multiply`, `Sum`, …) receive raw operands and own their
+        // evaluation.
+        const evalBase = x;
         if (evalBase.operator === 'Quantity') {
-          const r = quantityPower(engine!, evalBase, n.evaluate());
+          const r = quantityPower(engine!, evalBase, n);
           if (
             numericApproximation &&
             r &&
@@ -1938,7 +1964,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return r.N();
           return r;
         }
-        const evalExp = n.evaluate();
+        const evalExp = n;
         if (
           evalBase.operator === 'Measurement' ||
           evalExp.operator === 'Measurement'
@@ -2091,7 +2117,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return canonicalRoot(base, exp);
       },
       evaluate: ([x, n], { numericApproximation, engine }) => {
-        const evalX = x.evaluate();
+        // Non-lazy: operands are already evaluated by the driver.
+        const evalX = x;
         if (evalX.operator === 'Quantity') {
           const nVal = n.re;
           if (nVal !== undefined && nVal !== 0) {
@@ -2107,7 +2134,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           }
         }
         if (isMeasurement(evalX)) {
-          const r = measurementRoot(engine, evalX, n.evaluate());
+          const r = measurementRoot(engine, evalX, n);
           return numericApproximation ? r?.N() : r;
         }
         // D2: an inexact (float) radicand or index numericizes even under
@@ -2288,7 +2315,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation, engine }) => {
-        const evalX = x.evaluate();
+        // Non-lazy: `x` is already evaluated by the driver.
+        const evalX = x;
         if (evalX.operator === 'Quantity') {
           const r = quantityPower(engine, evalX, engine.number(0.5));
           if (
@@ -3378,10 +3406,13 @@ function evaluateAbs(
   // radical whose radicand is actually negative, so √(…) is itself imaginary)
   // and keeps every non-reducing complex `Abs` symbolic.
   //
-  // Gate on an unknown-free operand first: a symbolic `Abs(f(x))` can never
-  // fold to a numeric modulus, and this cheap cached check avoids the `arg.N()`
+  // Gate on a closed-constant operand first: a symbolic `Abs(f(x))` can never
+  // fold to a numeric modulus, and this cheap check avoids the `arg.N()`
   // numeric probe below on every symbolic Abs in a hot simplify loop.
-  if (arg.unknowns.length === 0) {
+  // (`isConstant`, not the dynamic-scope `unknowns` — a bound parameter
+  // inside a function application is not a foldable constant; see the D2
+  // comment on `Add`.)
+  if (arg.isConstant) {
     const zn = arg.N();
     const zre = zn.re;
     const zim = zn.im;

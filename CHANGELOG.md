@@ -2,6 +2,36 @@
 
 ### Bug Fixes
 
+- **Exponential blowup evaluating float-carrying symbolic bodies inside
+  function applications.** The "inexact operand numericizes a closed-constant
+  sum/product" rule (`0.5 + π` → `3.64…`) decided "closed constant" by
+  resolving symbols through the *dynamic* scope chain, so inside a function
+  application a bound-but-symbolic parameter counted as known: a body term
+  like `z² + 0.3` fired a full-subtree `N()` walk that could make no
+  progress, at every nested level, mutually recursive with `evaluate` —
+  ~×7.5 work per nesting level. The canonical victim was interpreted
+  evaluation of a recursive function over a symbolic argument
+  (`Q(n, z) = Q(n-1, z)² + 0.3`, the iterated-map shape): depth 7 took ~8 s
+  and depth 8+ hit the time limit, where the same recursion with an exact
+  constant (`3/10`) unwound in milliseconds. The gate is now the lexical
+  `isConstant` (every symbol a constant binding) — depth 7 drops ~500× to
+  ~15 ms, float and exact now cost the same, and `0.5 + π`, `0.5 + √2`, and
+  `0.5 + x` all behave exactly as before. Two neighboring sites sharing the
+  wrong predicate returned flat-wrong *values* inside applications and are
+  fixed the same way: `KroneckerDelta(w)` over a bound symbolic parameter
+  returned `0` (now stays symbolic), and `Degree(w²)` returned `0`
+  (now `2`).
+
+  Relatedly, several **non-lazy** arithmetic evaluate handlers (`Power`,
+  `Sqrt`, `Root`, `Divide`, `Ln`, `Log`, `Negate`) re-evaluated operands the
+  evaluation driver had already evaluated. Each such call re-descends the
+  whole operand subtree, so under nesting the waste compounded — a residual
+  ×2-per-level re-walk on top of the bug above. The handlers now trust their
+  pre-evaluated operands (the handler contract: a `lazy` operator's handler
+  owns its operands' single evaluation; a non-lazy handler receives them
+  already evaluated), making symbolic recursive unwinding linear: depth 80
+  unwinds in ~95 ms where depth ~20 previously hit the time limit.
+
 - **One-time cache builds are no longer charged against the time limit.** The
   engine builds some internal tables lazily on first use (constructible trig
   values on the first `sin(π/6)`-style evaluation, the standard simplification

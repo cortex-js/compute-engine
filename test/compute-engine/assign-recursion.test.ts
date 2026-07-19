@@ -56,17 +56,23 @@ describe('Assign + Function recursion knot-tying', () => {
     expect(ce.box(['quad', 3]).evaluate().json).toEqual(12);
   });
 
-  // @fixme: evaluating literal-depth recursion over a SYMBOLIC argument is
-  // exponential in depth (depth 5 ≈ 300 ms, depth 10 ≫ 60 s): each level
-  // re-walks the growing nested operand through both `evaluate` and `N`
-  // (`Add.evaluate → addN → ops.map(op => op.N())`, arithmetic-add.ts). With
-  // numeric arguments each level collapses to a number and evaluation is
-  // linear. Surfaced 2026-07-19 during the compiled-recursive-lambdas design
-  // round; tracked in ROADMAP.md ("Interpreter perf" follow-up). Unskip when
-  // fixed — the expectation below is the desired (linear-time) behavior.
-  test.skip('literal-depth recursion over a symbolic argument evaluates in linear time', () => {
+  // Regression pin for the 2026-07-19 symbolic-argument recursion blowup.
+  // Two compounding causes (contrary to this comment's original `addN`
+  // attribution):
+  // (1) the D2 numericize tail of `Add`/`Multiply`'s evaluate gated on the
+  //     *dynamic-scope* `unknowns`, so inside the application the bound
+  //     parameter `z` counted as known and every nested `Add` fired a
+  //     full-subtree `N()` walk that could make no progress — ~×7.5 work per
+  //     level (depth 5 ≈ 300 ms, depth 8+ ≫ 60 s). Gate is now the lexical
+  //     `isConstant` (arithmetic.ts, D2 comments).
+  // (2) non-lazy handlers (`Power`, `Sqrt`, `Divide`, …) re-evaluated
+  //     operands the driver had already evaluated — a ×2-per-level re-walk.
+  //     They now trust their pre-evaluated operands (only `lazy` operators'
+  //     handlers own operand evaluation).
+  // Unwinding is now linear: depth 40 ≈ 30 ms (was: timeout at depth 8).
+  test('literal-depth recursion over a symbolic argument unwinds in linear time', () => {
     const ce = new ComputeEngine();
-    ce.timeLimit = 5000; // generous — linear-time unrolling needs a fraction
+    ce.timeLimit = 5000; // depth 40 needs ~30 ms; generous margin for CI
     ce.box([
       'Assign',
       'Q',
@@ -82,7 +88,7 @@ describe('Assign + Function recursion knot-tying', () => {
         'z',
       ],
     ]).evaluate();
-    const r = ce.box(['Q', 12, 'z']).evaluate();
+    const r = ce.box(['Q', 40, 'z']).evaluate();
     expect(r.has('Q')).toBe(false); // fully unrolled, recursion-free closed form
   });
 });

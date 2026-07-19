@@ -237,7 +237,11 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
         if (a.isSame(b)) return 1;
         const diff = a.sub(b).simplify();
         if (diff.isSame(0)) return 1;
-        if (diff.unknowns.length === 0) return 0; // non-zero constant
+        // `isConstant` (lexical), not the dynamic-scope `unknowns`: inside a
+        // function application a bound parameter counts as known to
+        // `unknowns`, so `KroneckerDelta(w)` in a body wrongly returned 0
+        // for a symbolic `w` (see the D2 comment on `Add` in arithmetic.ts).
+        if (diff.isConstant) return 0; // non-zero constant
         return undefined; // depends on free variables → stay symbolic
       };
 

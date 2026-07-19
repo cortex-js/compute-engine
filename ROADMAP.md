@@ -161,10 +161,50 @@ Remaining follow-ups, both demand-gated:
   fail-closed): the v1 memoized literal-argument specialization design
   (preserved in the design doc's git history) is the route — gate on a GPU
   consumer.
-- **(M) Interpreter perf**: symbolic-argument literal-depth recursion
-  evaluates exponentially (`Add.evaluate → addN → .N()` re-walk; depth 10
-  > 60 s where linear is expected) — surfaced during this design round,
-  needs its own triage.
+- **(M) Interpreter perf** (triaged + main fix landed 2026-07-19; the
+  original `addN` attribution was wrong): the ×7.5-per-level blowup was the
+  D2 numericize tail of `Add`/`Multiply` gating on the dynamic-scope
+  `unknowns`, which counts a bound-but-symbolic parameter as known inside a
+  function application — fixed by gating on the lexical `isConstant`
+  (arithmetic.ts; also fixed the same-predicate wrong *values* from
+  `KroneckerDelta`/`Degree` over bound parameters). Remaining, all
+  demand-gated:
+  - the residual **×2-per-level** re-walk is FIXED for `arithmetic.ts`
+    (same day): **non-lazy** operator handlers were re-evaluating operands
+    the driver (`_computeValue` step 4/`holdMap`) had already evaluated —
+    `Power`, `Sqrt`, `Root`, `Divide`, `Ln`, `Log`, `Negate` now trust their
+    pre-evaluated operands, collapsing symbolic recursive unwinding from
+    exponential to linear (depth 80 ≈ 95 ms; previously walled at ~20). The
+    governing **evaluate-handler contract** (this is the one to enforce in
+    review): a `lazy: true` operator receives RAW operands and its handler
+    owns their (single) evaluation — `Add`/`Multiply`/`Sum`/`Product`/
+    `Measurement`/`NumeratorDenominator` re-evaluate legitimately; a
+    non-lazy operator receives EVALUATED operands and must not re-evaluate
+    them (each call re-descends the unmemoized subtree; under nesting that
+    compounds exponentially). An intermediate experiment deleted the lazy
+    `Add`/`Multiply` maps too — that froze recursive unrolling at one level
+    per pass (`Q(2,z)` stuck at `Q(1,z)²+0.3`), which is what confirmed the
+    lazy/non-lazy split is the real contract. Remaining same-class cleanup
+    (audited, not yet applied — cold paths, one wasted subtree-walk each,
+    not exponential): ~25 non-lazy handlers in `linear-algebra.ts`
+    (`Reshape`/`Transpose`/`Determinant`/`Norm`/eigen-family/…) and
+    `core.ts` `Timing` still re-evaluate operands.
+  - two sites carry the same dynamic-scope `unknowns.length === 0` predicate
+    as a *latent* instance of the trap, with no demonstrated observable
+    misbehavior — leave them until one surfaces: the equation-equivalence
+    `eq` in `relational-operator.ts` is reachable only via a direct
+    `.isEqual()` on two equation objects (normal `Equal(eq1, eq2)`
+    canonicalizes to a chain and never compares them as equations), and that
+    path runs at top level where `unknowns` is correct; `isPolynomialExpression`
+    in `linear-algebra.ts` ×3 sits behind callers that pre-evaluate operands.
+    A naive `isConstant` swap at either would change classification of
+    assigned symbols in unevaluated input, so it is not a free rename.
+  - **Separately** (pre-existing, unrelated to the D2 predicate): a binary
+    `Equal(w, 1)` with a bound-but-symbolic parameter evaluates to `False`
+    inside a function application rather than staying inert (`w === 1`) as it
+    does at top level — the low-level `eq(lhs, arg)` in `Equal.evaluate`
+    (`relational-operator.ts`) decides the bound param `w` unequal to `1`
+    instead of undecidable. Own triage; not touched by the D2 fix.
 
 **MathNet parser tail (S/M; corpus at 371/428 CI-gated after the
 2026-07-09 rounds):**

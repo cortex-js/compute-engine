@@ -676,8 +676,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([object], { engine: ce }) => {
         const op = object.evaluate();
 
-        // Constants have degree 0
-        if (op.unknowns.length === 0) return ce.Zero;
+        // Constants have degree 0. Gate on `isConstant` (lexical), not the
+        // dynamic-scope `unknowns` — inside a function application a bound
+        // parameter counts as known to `unknowns`, so `Degree(w²)` in a body
+        // wrongly returned 0 (see the D2 comment on `Add` in arithmetic.ts).
+        if (op.isConstant) return ce.Zero;
 
         // A bare symbol is ambiguous (variable vs named polynomial object),
         // keep it symbolic.
