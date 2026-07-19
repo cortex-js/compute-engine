@@ -1,5 +1,19 @@
 ## 0.85.1 _2026-07-18_
 
+### Bug Fixes
+
+- **String `vars` values now splice into compiled JavaScript and Python as
+  source, not as string literals.** The `vars` compile option is the live-path
+  contract: a mapped symbol always stays a runtime input instead of having its
+  assigned value folded into the emitted code — so one engine state can serve
+  both a compile-once path (sliders as runtime arguments) and a fold-early
+  evaluate path. The GLSL and interval targets honored it, but the JavaScript
+  and Python targets JSON-stringified the mapping, so
+  `compile(expr, { vars: { s: '_.s' } })` emitted `Math.sin("_.s" * _.x)` — a
+  string literal yielding `NaN` at run time. A string value is now spliced
+  verbatim (`Math.sin(_.s * _.x)`); a non-string value still bakes as a
+  constant (`vars: { a: 7 }` → `7`), unchanged.
+
 ## 0.85.0 _2026-07-18_
 
 ### New Features
