@@ -651,3 +651,163 @@ describe('COMPILE COMPLEX - literal square fast path and recursive lambdas', () 
     expect(v.im).toBeCloseTo(interp.im, 12);
   });
 });
+
+describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', () => {
+  // A constant base-case `Which` arm inside a complex-ascribed recursive
+  // function used to compile to a plain real value while the recursion's
+  // calling convention expects `{ re, im }` slots — NaN at EVERY point,
+  // including points that never leave the base arm (`M(0, z) = 0` is the
+  // canonical Desmos base-case shape). Arms provably real are now coerced to
+  // the complex convention; wide-typed pass-through arms stay bare.
+
+  it('a constant base-case arm in a complex recursion compiles correctly', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.declare('M', { type: '(number, complex) -> complex' });
+    e.assign(
+      'M',
+      e.box([
+        'Function',
+        [
+          'Which',
+          ['Equal', 'n', 0],
+          0,
+          'True',
+          ['Subtract', ['Square', ['M', ['Subtract', 'n', 1], 'z']], 'z'],
+        ],
+        'n',
+        'z',
+      ])
+    );
+    // |M(10, x+iy-2)| - 4, realOnly — the item-60 minimal repro.
+    const res = compile(
+      e.box([
+        'Subtract',
+        [
+          'Abs',
+          [
+            'M',
+            10,
+            [
+              'Subtract',
+              ['Add', 'x', ['Multiply', ['Complex', 0, 1], 'y']],
+              2,
+            ],
+          ],
+        ],
+        4,
+      ]),
+      { realOnly: true, fallback: false }
+    );
+    expect(res.success).toBe(true);
+    // (2,0): seed = 0, M(10, 0) = 0 entirely through the base clause.
+    expect(res.run!({ x: 2, y: 0 })).toBe(-4);
+    // Off the base clause: digit parity with the interpreter.
+    expect(res.run!({ x: 1.9, y: 0.1 })).toBeCloseTo(-3.845387494413912, 12);
+    expect(res.run!({ x: 2.2, y: 0.3 })).toBeCloseTo(-3.704870928610795, 12);
+  });
+
+  it('a non-zero constant arm and a real literal seed argument coerce too', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.declare('P', { type: '(number, complex) -> complex' });
+    e.assign(
+      'P',
+      e.box([
+        'Function',
+        [
+          'Which',
+          ['Equal', 'n', 0],
+          1,
+          'True',
+          ['Subtract', ['Square', ['P', ['Subtract', 'n', 1], 'z']], 'z'],
+        ],
+        'n',
+        'z',
+      ])
+    );
+    // `Complex(0, 0)` canonicalizes back to the real literal 0: the call-site
+    // argument to the complex parameter is coerced to `{ re, im }`.
+    const res = compile(e.box(['Abs', ['P', 3, ['Complex', 0, 0]]]), {
+      realOnly: true,
+      fallback: false,
+    });
+    expect(res.run!({})).toBe(1);
+  });
+
+  it('an all-real body under a complex return ascription is coerced by Typed', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.declare('Q', { type: '(number, complex) -> complex' });
+    e.assign(
+      'Q',
+      e.box(['Function', ['Which', ['Equal', 'n', 0], 3, 'True', 5], 'n', 'z'])
+    );
+    const res = compile(e.box(['Abs', ['Q', 0, ['Complex', 1, 1]]]), {
+      realOnly: true,
+      fallback: false,
+    });
+    expect(res.run!({})).toBe(3);
+  });
+
+  it('If with mixed real/complex arms produces one convention', () => {
+    const res = compile(
+      ce.box(['Abs', ['If', ['Less', 'x', 0], 0, ['Complex', 3, 4]]]),
+      { realOnly: true, fallback: false }
+    );
+    expect(res.run!({ x: -1 })).toBe(0);
+    expect(res.run!({ x: 1 })).toBe(5);
+  });
+
+  it('When with a complex arm keeps the masked branch in the complex convention', () => {
+    const res = compile(
+      ce.box([
+        'Abs',
+        ['When', ['Multiply', ['Complex', 0, 1], 'x'], ['Less', 'x', 0]],
+      ]),
+      { realOnly: true, fallback: false }
+    );
+    expect(res.run!({ x: -2 })).toBe(2);
+    expect(res.run!({ x: 2 })).toBeNaN();
+  });
+
+  it('a wide-typed pass-through arm is NOT wrapped (carries the object bare)', () => {
+    // K's z slot is declared `number` (wide): the base arm `z` must stay
+    // bare — at run time it holds the complex object, and wrapping it would
+    // nest it. Guards the refinement over the naive "coerce every non-complex
+    // arm" rule.
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.assign(
+      'K2',
+      e.box([
+        'Function',
+        [
+          'Typed',
+          [
+            'Which',
+            ['LessEqual', 'n', 0],
+            'z',
+            'True',
+            [
+              'Add',
+              ['Power', ['K2', ['Subtract', 'n', 1], 'z'], 2],
+              ['Complex', 0.35, 0.4],
+            ],
+          ],
+          { str: 'complex' },
+        ],
+        ['Typed', 'n', { str: 'integer' }],
+        'z',
+      ])
+    );
+    const res = compile(
+      e.box(['K2', 6, ['Add', 'x', ['Multiply', ['Complex', 0, 1], 'y']]]),
+      { fallback: false }
+    );
+    const v = res.run!({ x: 0.13, y: 0.21 }) as { re: number; im: number };
+    const interp = e.box(['K2', 6, ['Complex', 0.13, 0.21]]).N();
+    expect(v.re).toBeCloseTo(interp.re, 12);
+    expect(v.im).toBeCloseTo(interp.im, 12);
+  });
+});

@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Compiled real/complex convention mismatch in branch arms** (js target). A
+  provably-real branch arm (`If`/`Which`/`When`) alongside a complex-valued arm
+  compiled to a plain number while consumers of the branch read `{ re, im }`
+  slots — so a constant base-case arm in a complex-ascribed recursive function
+  (`M(0, z) = 0`, the canonical base-case shape) returned NaN at **every**
+  point, including points that never left the base clause. Real arms are now
+  coerced to the complex convention when any arm is complex (the no-match
+  default likewise emits `{ re: NaN, im: NaN }`); wide-typed pass-through arms
+  (a `z` slot declared `number` carrying a complex value at run time) stay
+  bare. The same coercion now applies at the two sibling seams: a `Typed`
+  complex ascription over a provably-real operand (previously silently inert
+  in compiled code — an all-real body under a declared `-> complex` return),
+  and a provably-real call-site argument bound to a complex-typed parameter of
+  a user-defined function (`M(10, 0)` — `Complex(0, 0)` canonicalizes to the
+  real literal `0`).
+
 ### New Features
 
 - **New engine flag `ce.jit: 'auto' | 'off'`** governing every **implicit**

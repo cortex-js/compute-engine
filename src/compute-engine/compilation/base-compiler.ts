@@ -13,6 +13,8 @@ import {
   collectionElementType,
   isNonRealNumber,
 } from '../../common/type/utils.js';
+import { parseType } from '../../common/type/parse.js';
+import type { Type } from '../../common/type/types.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { normalizeIndexingSet } from '../library/utils.js';
 import {
@@ -24,6 +26,7 @@ import {
   isTensor,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { rewriteAngularUnit } from './angular-unit.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
   getMatchPlan,
@@ -719,13 +722,20 @@ export class BaseCompiler {
           .map((x) => BaseCompiler.compile(x, target))
           .join(', ')})`;
       }
+      // Mixed real/complex arms: coerce to one convention (Tycho item 60 —
+      // see `branchComplexCoercion`).
+      const coerce = BaseCompiler.branchComplexCoercion(
+        [args[1], args[2]],
+        target
+      );
+      const arm = (v: Expression): TargetSource => {
+        const code = BaseCompiler.compile(v, target);
+        return coerce ? coerce(v, code) : code;
+      };
       return `((${BaseCompiler.compile(
         args[0],
         target
-      )}) ? (${BaseCompiler.compile(
-        args[1],
-        target
-      )}) : (${BaseCompiler.compile(args[2], target)}))`;
+      )}) ? (${arm(args[1])}) : (${arm(args[2])}))`;
     }
 
     if (h === 'Which') {
@@ -746,19 +756,31 @@ export class BaseCompiler {
           .map((x) => BaseCompiler.compile(x, target))
           .join(', ')})`;
       }
-      // Compile to chained ternaries
+      // Compile to chained ternaries. When arms mix real and complex values,
+      // coerce every arm — including the no-match NaN default — to the complex
+      // convention (Tycho item 60: a constant base-case arm in a
+      // complex-valued recursion compiled to a plain number, NaN-poisoning
+      // every consumer of the `{ re, im }` slots).
+      const coerce = BaseCompiler.branchComplexCoercion(
+        args.filter((_x, i) => i % 2 === 1),
+        target
+      );
       const compilePair = (i: number): string => {
-        if (i >= args.length) return 'NaN';
+        if (i >= args.length)
+          return coerce ? '({ re: NaN, im: NaN })' : 'NaN';
         const cond = args[i];
         const val = args[i + 1];
+        const valCode = coerce
+          ? coerce(val, BaseCompiler.compile(val, target))
+          : BaseCompiler.compile(val, target);
         // If condition is the symbol True, it's the default branch
         if (isSymbol(cond, 'True')) {
-          return `(${BaseCompiler.compile(val, target)})`;
+          return `(${valCode})`;
         }
         return `((${BaseCompiler.guardCondition(
           cond,
           target
-        )}) ? (${BaseCompiler.compile(val, target)}) : ${compilePair(i + 2)})`;
+        )}) ? (${valCode}) : ${compilePair(i + 2)})`;
       };
       return compilePair(0);
     }
@@ -779,14 +801,18 @@ export class BaseCompiler {
           .map((x) => BaseCompiler.compile(x, target))
           .join(', ')})`;
       }
-      // Compile to ternary: cond ? expr : NaN
+      // Compile to ternary: cond ? expr : NaN. A complex-valued arm keeps the
+      // masked branch in the same `{ re, im }` convention (see
+      // `branchComplexCoercion`).
+      const coerce = BaseCompiler.branchComplexCoercion([args[0]], target);
+      const nan = coerce ? '({ re: NaN, im: NaN })' : 'NaN';
       // Special-case constant True/False conditions to avoid bare symbol refs
       if (isSymbol(args[1], 'True'))
         return `(${BaseCompiler.compile(args[0], target)})`;
-      if (isSymbol(args[1], 'False')) return 'NaN';
+      if (isSymbol(args[1], 'False')) return nan;
       const val = BaseCompiler.compile(args[0], target);
       const cond = BaseCompiler.guardCondition(args[1], target);
-      return `((${cond}) ? (${val}) : NaN)`;
+      return `((${cond}) ? (${val}) : ${nan})`;
     }
 
     if (h === 'Match') {
@@ -813,7 +839,37 @@ export class BaseCompiler {
     // this, a helper declared with a precise return type (e.g. `(number) ->
     // vector<11>`) wraps its body in `Typed`, and every compiled call throws
     // `Unknown operator \`Typed\`` at the dispatch below.
-    if (h === 'Typed') return BaseCompiler.compile(args[0], target);
+    //
+    // One exception on the plain JavaScript target: the ascription changes the
+    // emitted CONVENTION when it promises a complex value over an operand
+    // whose own analysis is real. Consumers read the ascribed type
+    // (`isComplexValued` sees `complex`) and access `{ re, im }` slots, so a
+    // real-emitted operand would NaN-poison them — e.g. the declared-signature
+    // canonicalization wraps an all-real function body in
+    // `Typed(body, "complex")` (Tycho item 60). Emit the complex object the
+    // ascription promises.
+    if (h === 'Typed') {
+      const code = BaseCompiler.compile(args[0], target);
+      if (
+        target.language === 'javascript' &&
+        BaseCompiler.isProvablyRealValued(args[0])
+      ) {
+        const s = isString(args[1])
+          ? args[1].string
+          : isSymbol(args[1])
+            ? args[1].symbol
+            : undefined;
+        if (s !== undefined) {
+          let ascribed: Type | undefined = undefined;
+          try {
+            ascribed = parseType(s, engine._typeResolver);
+          } catch {}
+          if (ascribed !== undefined && isNonRealNumber(ascribed))
+            return `({ re: ${code}, im: 0 })`;
+        }
+      }
+      return code;
+    }
 
     // Handle function calls
     const fn = target.functions?.(h);
@@ -1817,6 +1873,54 @@ export class BaseCompiler {
   }
 
   /**
+   * On the plain JavaScript target a complex value is a `{ re, im }` object
+   * and a real value a plain number — two incompatible runtime conventions. A
+   * branch form (`If`/`Which`/`When`) whose value arms mix the two hands
+   * consumers a value whose slots are sometimes missing (`(0).re` →
+   * `undefined` → NaN at every point — Tycho item 60: a constant base-case
+   * arm under a complex-ascribed recursive function). When any value arm is
+   * complex-valued, coerce every real arm to the complex convention, so the
+   * branch produces the ONE convention `isComplexValued` reports to consumers
+   * (its operand fallback sees the complex arm).
+   *
+   * Returns `undefined` when no coercion applies — an all-real branch, or a
+   * target with its own complex representation (Python's native `complex`
+   * mixes freely with floats; GPU targets fail closed on complex earlier) —
+   * and arms are then emitted unchanged.
+   */
+  private static branchComplexCoercion(
+    values: ReadonlyArray<Expression | undefined>,
+    target: CompileTarget<Expression>
+  ):
+    | ((val: Expression | undefined, code: TargetSource) => TargetSource)
+    | undefined {
+    if (target.language !== 'javascript') return undefined;
+    if (!values.some((v) => v !== undefined && BaseCompiler.isComplexValued(v)))
+      return undefined;
+    // Coerce ONLY provably-real arms. A wide-typed arm (`number`, `unknown` —
+    // e.g. a pass-through parameter `z` in `Which(n ≤ 0, z, True, K(n-1,z)²+c)`
+    // whose declared slot is `number`) may hold a complex object at run time;
+    // wrapping it would nest the object (`{ re: { re, im }, im: 0 }`). Such
+    // arms are emitted bare, preserving the pass-through convention.
+    return (val, code) =>
+      val === undefined || BaseCompiler.isProvablyRealValued(val)
+        ? `({ re: ${code}, im: 0 })`
+        : code;
+  }
+
+  /**
+   * True when the expression PROVABLY produces a plain real number at run
+   * time on the JavaScript target — a real number literal or an expression
+   * whose type is a subtype of `real`. Wide types (`number`, `unknown`) are
+   * NOT provably real: they may carry a `{ re, im }` object at run time, so
+   * convention coercion must leave them untouched.
+   */
+  private static isProvablyRealValued(expr: Expression): boolean {
+    if (isNumber(expr)) return expr.im === 0;
+    return expr.type.matches('real');
+  }
+
+  /**
    * Fail-closed guard (D6) for the INDEXED big-op form (`Sum`/`Product` with a
    * body plus an indexing set). A collection-valued body (`Σ h(i)·a(…)` where
    * `a` returns a vector — the interpreter's zip-broadcast elementwise Sum) has
@@ -2491,10 +2595,56 @@ export class BaseCompiler {
     const name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
     if (name === undefined) return undefined;
 
+    // A real-analyzed argument bound to a complex-typed parameter is coerced
+    // to the `{ re, im }` convention (the call-boundary face of the Tycho
+    // item-60 convention-mismatch class): the body consumes such a parameter
+    // through complex slots, so a plain number argument — e.g. the seed `0`
+    // in `M(10, 0)`, after `Complex(0, 0)` canonicalizes to a real literal —
+    // would NaN-poison the whole call.
     const callArgs = args
-      .map((a) => BaseCompiler.compileValueOperand(a, target))
+      .map((a, i) => {
+        const code = BaseCompiler.compileValueOperand(a, target);
+        if (
+          target.language === 'javascript' &&
+          BaseCompiler.isProvablyRealValued(a)
+        ) {
+          const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+          if (pt !== undefined && isNonRealNumber(pt))
+            return `({ re: ${code}, im: 0 })`;
+        }
+        return code;
+      })
       .join(', ');
     return `${name}(${callArgs})`;
+  }
+
+  /**
+   * The declared type of positional parameter `i` of user-defined function
+   * `h`, from its value definition's function type or its operator
+   * definition's signature (required, then optional, then variadic).
+   * `undefined` when no signature is known.
+   */
+  private static userFunctionParamType(
+    engine: ComputeEngine,
+    h: string,
+    i: number
+  ): Type | undefined {
+    const def = engine.lookupDefinition(h);
+    if (!def) return undefined;
+    const boxed =
+      'value' in def && def.value !== undefined
+        ? def.value.type
+        : 'operator' in def
+          ? def.operator.signature
+          : undefined;
+    const t = boxed?.type;
+    if (t === undefined || typeof t === 'string' || t.kind !== 'signature')
+      return undefined;
+    const nArgs = t.args?.length ?? 0;
+    if (i < nArgs) return t.args![i].type;
+    const nOpt = t.optArgs?.length ?? 0;
+    if (i < nArgs + nOpt) return t.optArgs![i - nArgs].type;
+    return t.variadicArg?.type;
   }
 
   /**
@@ -2550,11 +2700,19 @@ export class BaseCompiler {
         // compiles to its bare name rather than a folded value or `_.<name>`.
         // Compiling the body here may register nested user-function
         // dependencies first, so they are emitted before this definition.
-        const body = BaseCompiler.compile(literal.ops[0].canonical, {
-          ...target,
-          var: (id) => (params.includes(id) ? id : target.var(id)),
-          boundVars: BaseCompiler.withBoundNames(target, params),
-        });
+        // The angular-unit rewrite is applied per emitted body: the entry
+        // points rewrite only the TOP-LEVEL expression tree, and this literal
+        // comes from the engine definition — without the rewrite here, a
+        // degree-mode compile of `t ↦ f(t)` emitted radian-based trig inside
+        // `f`'s definition while `t ↦ sin(t)` correctly scaled.
+        const body = BaseCompiler.compile(
+          rewriteAngularUnit(literal.ops[0].canonical),
+          {
+            ...target,
+            var: (id) => (params.includes(id) ? id : target.var(id)),
+            boundVars: BaseCompiler.withBoundNames(target, params),
+          }
+        );
         registry.defs.set(
           name,
           `const ${name} = (${params.join(', ')}) => ${body};`
