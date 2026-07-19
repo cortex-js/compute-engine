@@ -1,174 +1,197 @@
+## [Unreleased]
+
+### New Features
+
+- **Recursive user-defined functions now compile.** Self- and mutually
+  recursive functions (`fact(n) := n ≤ 1 ? 1 : n · fact(n-1)`) compile on the
+  `javascript` and `interval-js` targets to true recursion, instead of failing
+  closed. Termination is the caller's contract, matching compiled unbounded
+  `Loop`: on the `javascript` target runaway recursion throws a catchable
+  `RangeError`; on `interval-js` the runner converts runtime errors to the
+  *entire* interval ("cannot bound"), per that target's error philosophy. (The
+  interpreter throws `CancellationError` on its time limit instead.) A complex-valued
+  recursive function needs a `Typed` `complex` **return** ascription on the
+  function literal so the self-call types as a scalar — without it the
+  application types `broadcastable<number>` and complex arithmetic over it
+  does not compile. GPU targets (GLSL/WGSL) are unchanged: shaders cannot
+  recurse, so recursion stays fail-closed there. Measured on a depth-10
+  iterated Julia map, the recursive form runs ~0.18 µs/pt — about an order of
+  magnitude faster than the equivalent hand-unrolled closed form compiled
+  before this release.
+
+### Performance
+
+- **Literal squares of complex values compile to an inline multiply.**
+  `z^2` with a complex-valued `z` emitted the general polar-form power helper
+  (`hypot`/`atan2`/`exp`/…) per evaluation; it is now the direct
+  `(a+bi)² = a²−b² + 2abi` multiply, with compound bases bound to a const
+  exactly once. Iterated-map workloads speed up ~9× (depth-10 Julia closed
+  form: 1.25 → 0.14 µs/pt), and rounding now matches the interpreter, which
+  also multiplies. Higher literal powers still use the general helper.
+
 ## 0.86.2 _2026-07-19_
 
 ### Bug Fixes
 
 - **An assigned complex symbol now compiles as complex without an explicit
   declaration.** `ce.assign("z_0", <complex value>)` then compiling an
-  expression using `z_0` emitted the binding as a complex object literal
-  while the operand analysis read only the DECLARED type (wide `number` /
-  `unknown` ⇒ real) — `number + {re, im}` arithmetic, silently `NaN` at
-  every point. The analysis now derives complex-ness from the assigned
-  value, mirroring the fold. Compile-bound variables (loop indices, lambda
-  parameters) shadow the engine, so an index named `i` does not pick up the
-  imaginary unit.
-- **`Block`/`\coloneq` locals infer complex-ness from their assigned
-  right-hand side.** In `w_1 ⩴ (x+iy)² + z_0; w_2 ⩴ w_1² + z_0` the local
-  `w_1` was emitted as a complex object but consumed as REAL by later
-  statements (its type defaulted to real; outer declares don't reach block
-  locals) — silent all-NaN. Locals' complex-ness is now inferred in
-  statement order — a later local reading an earlier complex local is
-  itself recognized — shared by every target (this also extends the GPU
-  `vec2` local hints to chained locals).
-- **Complex `Add` binds compound operands once — nested complex arithmetic
-  now compiles in O(tree size).** Each `{re: …, im: …}` slot spliced the
-  full operand subexpression twice, doubling code size and runtime per
-  nesting level: the depth-10 Julia closed form compiled to ~360 KB
-  (~713 µs/pt). Compound complex operands are now bound to consts emitted
-  exactly once: the same form compiles to ~1.9 KB and runs ~1.3 µs/pt,
-  with digit-for-digit interpreter parity. Symbols and number literals stay
-  inline, so simple shapes emit byte-identically.
+  expression using `z_0` emitted the binding as a complex object literal while
+  the operand analysis read only the DECLARED type (wide `number` / `unknown` ⇒
+  real) — `number + {re, im}` arithmetic, silently `NaN` at every point. The
+  analysis now derives complex-ness from the assigned value, mirroring the fold.
+  Compile-bound variables (loop indices, lambda parameters) shadow the engine,
+  so an index named `i` does not pick up the imaginary unit.
+- **`Block`/`\coloneq` locals infer complex-ness from their assigned right-hand
+  side.** In `w_1 ⩴ (x+iy)² + z_0; w_2 ⩴ w_1² + z_0` the local `w_1` was emitted
+  as a complex object but consumed as REAL by later statements (its type
+  defaulted to real; outer declares don't reach block locals) — silent all-NaN.
+  Locals' complex-ness is now inferred in statement order — a later local
+  reading an earlier complex local is itself recognized — shared by every target
+  (this also extends the GPU `vec2` local hints to chained locals).
+- **Complex `Add` binds compound operands once — nested complex arithmetic now
+  compiles in O(tree size).** Each `{re: …, im: …}` slot spliced the full
+  operand subexpression twice, doubling code size and runtime per nesting level:
+  the depth-10 Julia closed form compiled to ~360 KB (~713 µs/pt). Compound
+  complex operands are now bound to consts emitted exactly once: the same form
+  compiles to ~1.9 KB and runs ~1.3 µs/pt, with digit-for-digit interpreter
+  parity. Symbols and number literals stay inline, so simple shapes emit
+  byte-identically.
 - **`Max`/`Min` (and `Supremum`/`Infimum`) now type as `number`.** Their
   declared result type was the vestigial union `number | list`, so even
   `Max(1, 2)` typed as `list | number`, a comparison over one typed
   `list<boolean>`, and the compilation targets' scalar-condition assert
   fail-closed every `When` restriction containing a reduction
-  (`y = x \{\max(a,x) < 2\}` masked its whole curve). These operators
-  always REDUCE — including a collection argument's elements — to a single
-  scalar extremum (`ElementMax`/`ElementMin` are the broadcasting
-  variants), so the result type is `number` unconditionally. Evaluation is
-  unchanged.
+  (`y = x \{\max(a,x) < 2\}` masked its whole curve). These operators always
+  REDUCE — including a collection argument's elements — to a single scalar
+  extremum (`ElementMax`/`ElementMin` are the broadcasting variants), so the
+  result type is `number` unconditionally. Evaluation is unchanged.
 
 ## 0.86.1 _2026-07-19_
 
 ### Bug Fixes
 
 - **Materializing a list no longer restructures its eager elements.**
-  `evaluate({materialization: true})` on a literal list spliced the
-  contents of ANY collection-valued element into the parent — a list of
-  `Tuple` pairs came back flattened (`[("a",1), ("b",2)]` →
-  `["a",1,"b",2]`, so the result no longer fed `DictionaryFrom`), a nested
-  list literal lost its nesting, and an *infinite* lazy element (`Cycle`)
-  was spread until the evaluation deadline. Only finite **lazy**
-  sub-collections are now flattened-and-materialized (the documented
-  intent: `[Range(1,3)]` still materializes to `[1,2,3]`); eager literals
-  are preserved, and an infinite lazy element stays put as a bounded
+  `evaluate({materialization: true})` on a literal list spliced the contents of
+  ANY collection-valued element into the parent — a list of `Tuple` pairs came
+  back flattened (`[("a",1), ("b",2)]` → `["a",1,"b",2]`, so the result no
+  longer fed `DictionaryFrom`), a nested list literal lost its nesting, and an
+  _infinite_ lazy element (`Cycle`) was spread until the evaluation deadline.
+  Only finite **lazy** sub-collections are now flattened-and-materialized (the
+  documented intent: `[Range(1,3)]` still materializes to `[1,2,3]`); eager
+  literals are preserved, and an infinite lazy element stays put as a bounded
   preview.
 - **`Take` of an infinite collection with a finite bound is now finite.**
-  `Take(Range(1,+∞), 3)` reported `count` 3 but `isFiniteCollection`
-  false (it propagated the *source's* finiteness), which left
-  `ListFrom(Take(<infinite>, n))` symbolic. `Take` now reports finite
-  whenever its own element count is known-finite; `ListFrom(Take(Range(1,
-  +∞), 3))` → `[1,2,3]`. (When the source's count is genuinely unknown —
+  `Take(Range(1,+∞), 3)` reported `count` 3 but `isFiniteCollection` false (it
+  propagated the _source's_ finiteness), which left
+  `ListFrom(Take(<infinite>, n))` symbolic. `Take` now reports finite whenever
+  its own element count is known-finite; `ListFrom(Take(Range(1, +∞), 3))` →
+  `[1,2,3]`. (When the source's count is genuinely unknown —
   `Take(ChunkBy(<infinite>, f), 3)` — finiteness stays unknown, keeping
   materialization previews honest.)
-- **`Sort` and `Shuffle` type as `list<…>`.** Both always rebuild a
-  `List`, but their static type claimed the *source's* type
-  (`Sort(Range(1,5))` typed as an `indexed_collection`-shaped Range). Both
-  now report `list<element-type>`, matching `Take`.
-- **`Slice` facets are now coherent over infinite and unknown-length
-  sources.** `Slice` claimed `isFiniteCollection` unconditionally, and a
-  negative *start* over an infinite source produced a `NaN` count while
-  `at(1)` fabricated the element `+oo` (from `source.at(Infinity)`). The
-  facets now share one bounds resolver: a negative **end** over an
-  infinite source means "through the end" — an honest infinite tail
-  (`Slice(Range(1,+∞), 5, -1)`: count `∞`, not finite, `at(1)` = 5,
-  `Take(…, 3)` → `[5,6,7]`); a negative **start** over an infinite source
-  ("the last k elements") is unresolvable and stays inert; an
-  unknown-length source now reports finiteness as unknown rather than
-  true. Bounded positive windows are unchanged
-  (`ListFrom(Slice(Range(1,+∞), 1, 5))` → `[1,2,3,4,5]`).
-- **`Sum`/`Product` bodies that bind looser than multiplication are now
-  fenced when serialized.** The big-op body is parsed back at multiplication
+- **`Sort` and `Shuffle` type as `list<…>`.** Both always rebuild a `List`, but
+  their static type claimed the _source's_ type (`Sort(Range(1,5))` typed as an
+  `indexed_collection`-shaped Range). Both now report `list<element-type>`,
+  matching `Take`.
+- **`Slice` facets are now coherent over infinite and unknown-length sources.**
+  `Slice` claimed `isFiniteCollection` unconditionally, and a negative _start_
+  over an infinite source produced a `NaN` count while `at(1)` fabricated the
+  element `+oo` (from `source.at(Infinity)`). The facets now share one bounds
+  resolver: a negative **end** over an infinite source means "through the end" —
+  an honest infinite tail (`Slice(Range(1,+∞), 5, -1)`: count `∞`, not finite,
+  `at(1)` = 5, `Take(…, 3)` → `[5,6,7]`); a negative **start** over an infinite
+  source ("the last k elements") is unresolvable and stays inert; an
+  unknown-length source now reports finiteness as unknown rather than true.
+  Bounded positive windows are unchanged (`ListFrom(Slice(Range(1,+∞), 1, 5))` →
+  `[1,2,3,4,5]`).
+- **`Sum`/`Product` bodies that bind looser than multiplication are now fenced
+  when serialized.** The big-op body is parsed back at multiplication
   precedence, so an additive body's trailing terms escaped the operator on
   re-parse: `Sum(i + 1, i=1..3)` serialized as `\sum_{i=1}^3i+1`, which
-  re-parses as `(\sum_{i=1}^{3}i)+1` — 9 became 7 — and a body-bound index
-  in the escaped terms degenerated to a free symbol (`i` → the imaginary
-  unit, turning real product expansions complex-valued). Additive (and other
+  re-parses as `(\sum_{i=1}^{3}i)+1` — 9 became 7 — and a body-bound index in
+  the escaped terms degenerated to a free symbol (`i` → the imaginary unit,
+  turning real product expansions complex-valued). Additive (and other
   looser-than-multiplication) bodies now serialize parenthesized
   (`\sum_{i=1}^3(i+1)`); tighter-binding bodies (`2i`, `\frac{1}{i}`, a bare
   symbol) are unchanged.
-- **Fused stepped ranges with a fraction or compound second anchor now
-  parse to the intended `Range`.** `[0,\frac{1}{6}...1]` parsed to
-  `List(0, Range(1/6, 1))` — silently wrong values — because the sample
-  reader did not recognize fraction literals; it now yields
-  `Range(0, 1, 1/6)` with an EXACT rational step (a float `0.1666…` step
-  would drift and miss the end anchor; the range lands exactly on `1`).
-  And `[m+n,m+n+15...m+n+60]` parsed to a nested-`Range` `List` — the
-  `...` infix binds its left operand tight, so the continuation range was
-  embedded in the additive tail (`Add(m, n, Range(15, m+n+60))`); the
-  normalization now recovers the true second sample and end anchor,
-  yielding `Range(m+n, m+n+60, 15)`. Both rewrites keep the provenance
-  guard: only ellipsis/`..`-written ranges participate — an explicit
-  `\operatorname{Range}(…)` element (bare or embedded in a sum) stays a
+- **Fused stepped ranges with a fraction or compound second anchor now parse to
+  the intended `Range`.** `[0,\frac{1}{6}...1]` parsed to
+  `List(0, Range(1/6, 1))` — silently wrong values — because the sample reader
+  did not recognize fraction literals; it now yields `Range(0, 1, 1/6)` with an
+  EXACT rational step (a float `0.1666…` step would drift and miss the end
+  anchor; the range lands exactly on `1`). And `[m+n,m+n+15...m+n+60]` parsed to
+  a nested-`Range` `List` — the `...` infix binds its left operand tight, so the
+  continuation range was embedded in the additive tail
+  (`Add(m, n, Range(15, m+n+60))`); the normalization now recovers the true
+  second sample and end anchor, yielding `Range(m+n, m+n+60, 15)`. Both rewrites
+  keep the provenance guard: only ellipsis/`..`-written ranges participate — an
+  explicit `\operatorname{Range}(…)` element (bare or embedded in a sum) stays a
   literal `List` entry.
 
 ## 0.86.0 _2026-07-19_
 
 ### New Features
 
-- **`ce.withTimeLimit(ms, fn)`** — run a block of work under a single
-  evaluation deadline. Ordinarily each top-level `evaluate()` arms its own
-  `timeLimit` budget, so a long sequence of short evaluations — e.g. draining
-  a lazy collection element by element via `each()`/`at()` — can run
-  unboundedly without ever tripping the limit. Wrapping the loop in
-  `withTimeLimit()` arms one shared deadline for its full duration: any
-  evaluation inside throws `CancellationError` (`cause: 'timeout'`) once the
-  deadline is exceeded. Re-entrant (an inner call can only shorten the
-  effective deadline, never extend it).
+- **`ce.withTimeLimit(ms, fn)`** — run a block of work under a single evaluation
+  deadline. Ordinarily each top-level `evaluate()` arms its own `timeLimit`
+  budget, so a long sequence of short evaluations — e.g. draining a lazy
+  collection element by element via `each()`/`at()` — can run unboundedly
+  without ever tripping the limit. Wrapping the loop in `withTimeLimit()` arms
+  one shared deadline for its full duration: any evaluation inside throws
+  `CancellationError` (`cause: 'timeout'`) once the deadline is exceeded.
+  Re-entrant (an inner call can only shorten the effective deadline, never
+  extend it).
 
 ### Bug Fixes
 
 - **`.N()` of `Tuple ± scalar·Tuple` no longer throws at machine precision.**
   When every term of a component sum was an integer-valued machine float
-  (`20 − 0.1·20`), the exact summation path read `bignumRe` — which is
-  undefined on a machine numeric value — and threw
-  `TypeError: Cannot read properties of undefined (reading 'toFixed')`. At
-  scale this killed composed lazy streams mid-drain (a 4001-point
-  `PointList − scalar·PointList` died at the first integer-valued element)
-  and made `at(k)` return `undefined` at the crashing indices. The integer
-  fold now converts the integral machine value directly.
+  (`20 − 0.1·20`), the exact summation path read `bignumRe` — which is undefined
+  on a machine numeric value — and threw
+  `TypeError: Cannot read properties of undefined (reading 'toFixed')`. At scale
+  this killed composed lazy streams mid-drain (a 4001-point
+  `PointList − scalar·PointList` died at the first integer-valued element) and
+  made `at(k)` return `undefined` at the crashing indices. The integer fold now
+  converts the integral machine value directly.
 - **A solidus-rendered fraction juxtaposed with following material keeps
   explicit grouping.** Serializing a non-canonical
   `InvisibleOperator(Divide(1, 2), Delimiter(…))` at nesting depth > 3 (where
-  the default fraction style switches to an inline solidus) emitted
-  `1/2(sq)` — which re-parses as `1/(2·s·q)`, silently changing the value.
-  The solidus form is now parenthesized (`(1/2)(sq)`); `\frac`-rendered
-  fractions and trailing-position solidus fractions are unchanged.
-- **`Multiply(symbol, Tuple)` serializes with an explicit multiplication
-  sign.** `s(1,2,3)` re-parses as a function CALL `["s", 1, 2, 3]` for any
-  symbol the parser cannot prove non-applicable, silently turning a product
-  into an application. A bare-symbol factor followed by a parenthesized
-  comma-group now serializes as `s\times(1,2,3)`. Single-expression groups
-  (`s(x+1)`) and number-led products (`2(1,2)`), which re-parse as products,
-  keep juxtaposition.
-- **`CountIf`, `Position`, `Ordering`, `DictionaryFrom`, and `RecordFrom`
-  stay inert on an infinite or unknown-length collection.** These operators
-  require walking every element, so on an infinite input (`Range(1, +∞)`,
-  `Cycle`, `Iterate`) they previously consumed the entire evaluation time
-  limit and then threw `CancellationError` instead of returning a result.
-  They now detect the non-finite input structurally and stay symbolic
-  immediately. (`Ordering` previously returned a spurious *empty list*,
-  claiming a complete ordering it never computed.) Huge-but-finite inputs
-  still walk under the deadline as before, and `Find` is unchanged: it
-  streams and short-circuits, so `Find(Range(1, +∞), x ↦ x > 5)` still
-  returns `6`.
+  the default fraction style switches to an inline solidus) emitted `1/2(sq)` —
+  which re-parses as `1/(2·s·q)`, silently changing the value. The solidus form
+  is now parenthesized (`(1/2)(sq)`); `\frac`-rendered fractions and
+  trailing-position solidus fractions are unchanged.
+- **`Multiply(symbol, Tuple)` serializes with an explicit multiplication sign.**
+  `s(1,2,3)` re-parses as a function CALL `["s", 1, 2, 3]` for any symbol the
+  parser cannot prove non-applicable, silently turning a product into an
+  application. A bare-symbol factor followed by a parenthesized comma-group now
+  serializes as `s\times(1,2,3)`. Single-expression groups (`s(x+1)`) and
+  number-led products (`2(1,2)`), which re-parse as products, keep
+  juxtaposition.
+- **`CountIf`, `Position`, `Ordering`, `DictionaryFrom`, and `RecordFrom` stay
+  inert on an infinite or unknown-length collection.** These operators require
+  walking every element, so on an infinite input (`Range(1, +∞)`, `Cycle`,
+  `Iterate`) they previously consumed the entire evaluation time limit and then
+  threw `CancellationError` instead of returning a result. They now detect the
+  non-finite input structurally and stay symbolic immediately. (`Ordering`
+  previously returned a spurious _empty list_, claiming a complete ordering it
+  never computed.) Huge-but-finite inputs still walk under the deadline as
+  before, and `Find` is unchanged: it streams and short-circuits, so
+  `Find(Range(1, +∞), x ↦ x > 5)` still returns `6`.
 
 ### Collections
 
 - **`Insert`, `DeleteAt`, `ReplaceAt`, `Partition` (chunk and window forms),
-  `SlidingWindow`, and `ChunkBy` are now hybrid-lazy.** Inputs at or below
-  the 100-element eager threshold evaluate to an eager `List` exactly as
-  before (byte-identical shapes); larger, lazy, or infinite inputs stay
-  symbolic and serve their elements on demand through `count`/`at`/
-  iteration, following the same convention as the hybrid-lazy broadcast
-  forms. `Insert` into a million-element `Range` no longer materializes the
-  whole list to answer `Count` or an index probe, and streaming prefixes of
-  infinite results now work: `Take(Partition(Range(1, +∞), 3), 2)` →
-  `[[1,2,3],[4,5,6]]`, `Take(ChunkBy(Cycle([1,1,2]), x ↦ x), 3)` →
-  `[[1,1],[2],[1,1]]`. `Partition`'s predicate form
-  (`Partition(xs, pred)` → `[trueGroup, falseGroup]`) requires a finite
-  input and is unchanged. Materializing consumers (`ListFrom`, …) behave as
-  before.
+  `SlidingWindow`, and `ChunkBy` are now hybrid-lazy.** Inputs at or below the
+  100-element eager threshold evaluate to an eager `List` exactly as before
+  (byte-identical shapes); larger, lazy, or infinite inputs stay symbolic and
+  serve their elements on demand through `count`/`at`/ iteration, following the
+  same convention as the hybrid-lazy broadcast forms. `Insert` into a
+  million-element `Range` no longer materializes the whole list to answer
+  `Count` or an index probe, and streaming prefixes of infinite results now
+  work: `Take(Partition(Range(1, +∞), 3), 2)` → `[[1,2,3],[4,5,6]]`,
+  `Take(ChunkBy(Cycle([1,1,2]), x ↦ x), 3)` → `[[1,1],[2],[1,1]]`. `Partition`'s
+  predicate form (`Partition(xs, pred)` → `[trueGroup, falseGroup]`) requires a
+  finite input and is unchanged. Materializing consumers (`ListFrom`, …) behave
+  as before.
 
 ## 0.85.1 _2026-07-18_
 

@@ -2098,26 +2098,69 @@ describe('COMPILE user-defined function calls', () => {
     expect(r.run({})).toBeCloseTo(want, 12);
   });
 
-  it('fails closed (D6) on a directly recursive definition', () => {
+  // Recursive definitions compile to true self-reference by emitted name
+  // (lenient-recursion design, ratified 2026-07-19 — see
+  // docs/plans/2026-07-19-compiled-recursive-lambdas-design.md). Termination
+  // is backstopped by the JS call stack: runaway recursion throws a catchable
+  // RangeError, consistent with compiled unbounded Loop being unguarded.
+  it('compiles a directly recursive definition (fact(5) = 120)', () => {
     const e = new ComputeEngine();
     e.parse(
       '\\mathrm{fact}(n) \\coloneq \\mathrm{If}(n \\le 1, 1, n \\cdot \\mathrm{fact}(n-1))'
     ).evaluate();
     const js = new JavaScriptTarget();
-    expect(() => js.compile(e.box(['fact', 5]), { realOnly: true })).toThrow(
-      /[Rr]ecursive user-defined function `fact`/
-    );
+    const r = js.compile(e.box(['fact', 5]), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run({})).toBe(120);
   });
 
-  it('fails closed (D6) on mutual recursion', () => {
+  it('compiles recursion with a runtime (non-literal) depth argument', () => {
+    const e = new ComputeEngine();
+    e.parse(
+      '\\mathrm{fact}(n) \\coloneq \\mathrm{If}(n \\le 1, 1, n \\cdot \\mathrm{fact}(n-1))'
+    ).evaluate();
+    const js = new JavaScriptTarget();
+    const r = js.compile(e.box(['fact', 'm']), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run({ m: 6 })).toBe(720);
+  });
+
+  it('recursive compiled result matches the interpreter digit-for-digit', () => {
+    const e = new ComputeEngine();
+    e.parse(
+      'Q(n, z) \\coloneq \\mathrm{If}(n \\le 0, z, Q(n-1, z)^2 + 0.3)'
+    ).evaluate();
+    const js = new JavaScriptTarget();
+    const r = js.compile(e.box(['Q', 6, 'w']), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run({ w: 0.17 })).toBe(e.box(['Q', 6, 0.17]).N().re);
+  });
+
+  it('compiles terminating mutual recursion (even/odd)', () => {
+    const e = new ComputeEngine();
+    e.parse('\\mathrm{od}(n) \\coloneq 0').evaluate(); // stub so ev's od(…) is a call
+    e.parse(
+      '\\mathrm{ev}(n) \\coloneq \\mathrm{If}(n = 0, 1, \\mathrm{od}(n-1))'
+    ).evaluate();
+    e.parse(
+      '\\mathrm{od}(n) \\coloneq \\mathrm{If}(n = 0, 0, \\mathrm{ev}(n-1))'
+    ).evaluate();
+    const js = new JavaScriptTarget();
+    const r = js.compile(e.box(['ev', 7]), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run({})).toBe(0);
+    expect(js.compile(e.box(['ev', 8]), { realOnly: true }).run({})).toBe(1);
+  });
+
+  it('runaway recursion throws a catchable RangeError at run time', () => {
     const e = new ComputeEngine();
     e.parse('f(x) \\coloneq x').evaluate(); // stub so g's f(x) is a call
     e.parse('g(x) \\coloneq f(x) + 1').evaluate();
-    e.parse('f(x) \\coloneq g(x) - 1').evaluate(); // redefine → f↔g mutual
+    e.parse('f(x) \\coloneq g(x) - 1').evaluate(); // redefine → f↔g mutual, non-terminating
     const js = new JavaScriptTarget();
-    expect(() => js.compile(e.box(['f', 3]), { realOnly: true })).toThrow(
-      /[Rr]ecursive user-defined function/
-    );
+    const r = js.compile(e.box(['f', 3]), { realOnly: true });
+    expect(r.success).toBe(true); // compiles — termination is the caller's contract
+    expect(() => r.run({})).toThrow(RangeError);
   });
 
   it('keeps throwing Unknown operator for a truly unknown head', () => {

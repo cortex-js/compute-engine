@@ -1239,6 +1239,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(base) ||
       BaseCompiler.isComplexValued(exp)
     ) {
+      // Literal square of a complex base: inline the multiply instead of the
+      // polar-form `_SYS.cpow` — an order of magnitude faster in iterated-map
+      // loops, and matches the interpreter's rounding (which multiplies).
+      // The base is always bound once: even a symbol may be `vars`-mapped to
+      // arbitrary target source, and `cpow` evaluated it exactly once. The
+      // imaginary term is `2 * (re·im)` — `(2·re)·im` would overflow the
+      // intermediate for |re| > MAX_VALUE/2 where the multiply order doesn't.
+      if (BaseCompiler.isComplexValued(base) && tryGetConstant(exp) === 2) {
+        const t = BaseCompiler.tempVar();
+        return `(() => { const ${t} = ${compile(base)}; return ({ re: ${t}.re * ${t}.re - ${t}.im * ${t}.im, im: 2 * (${t}.re * ${t}.im) }); })()`;
+      }
       return `_SYS.cpow(${compile(base)}, ${compile(exp)})`;
     }
     const bConst = tryGetConstant(base);

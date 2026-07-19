@@ -2463,10 +2463,13 @@ export class BaseCompiler {
    * definition — the caller then throws), or when the target opts out of user
    * functions by not providing a `userFunctions` registry.
    *
-   * Recursion (including mutual recursion) is not compiled in this pass: while a
-   * definition's body is being compiled its name sits in `compiling`, so a
-   * (mutually) recursive reference is detected and **fails closed (D6)** with an
-   * explanatory error rather than looping.
+   * Recursion (including mutual recursion) compiles to true self/cross
+   * reference by emitted name: while a definition's body is being compiled its
+   * name sits in `compiling`, and a re-entrant reference emits a call to that
+   * name rather than re-emitting (or looping on) the definition. Termination
+   * is not guaranteed by the emitted code — runaway recursion surfaces as the
+   * host's stack-exhaustion error (a catchable `RangeError` in JS), matching
+   * the contract of compiled unbounded `Loop`.
    *
    * Capture semantics: the body is compiled once, at compile time, through the
    * *same* `target` var/fold rules as the surrounding expression (only the
@@ -2500,8 +2503,9 @@ export class BaseCompiler {
    * local rather than inlining or emitting a dangling identifier.
    *
    * Returns `undefined` when `h` is not a user function or the target opts out
-   * of user functions (no registry — GPU / raw direct targets). Recursion is
-   * detected via `registry.compiling` and fails closed (D6).
+   * of user functions (no registry — GPU / raw direct targets, where recursion
+   * therefore stays fail-closed). A re-entrant name (in `registry.compiling`)
+   * is a recursive reference and compiles to a call by name.
    */
   static ensureUserFunctionEmitted(
     engine: ComputeEngine,
@@ -2517,10 +2521,16 @@ export class BaseCompiler {
     const name = BaseCompiler.userFunctionName(h);
 
     if (!registry.defs.has(name)) {
-      if (registry.compiling.has(name))
-        throw new Error(
-          `Recursive user-defined function \`${h}\` cannot be compiled. Fail closed (D6).`
-        );
+      // Re-entrant reference: `h`'s definition is on the in-flight compile
+      // stack, so this is a (mutually) recursive call — emit the call by name.
+      // The definition lands in `registry.defs` when its body compile
+      // completes, and every def executes in the preamble before any call
+      // runs, so the name is bound by call time (a mutually recursive def
+      // referencing a later `const` is safe for the same reason). Runaway
+      // recursion is backstopped by the JS call stack — a catchable
+      // `RangeError` within milliseconds — consistent with compiled
+      // unbounded `Loop`, which is likewise unguarded at run time.
+      if (registry.compiling.has(name)) return name;
       registry.compiling.add(name);
       try {
         const params = literal.ops

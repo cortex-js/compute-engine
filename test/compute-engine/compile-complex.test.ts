@@ -534,3 +534,66 @@ describe('COMPILE COMPLEX - assigned/local typing and CSE (Tycho items 57-59)', 
     expect(res.code).not.toContain('=>');
   });
 });
+
+describe('COMPILE COMPLEX - literal square fast path and recursive lambdas', () => {
+  it('a literal square of a complex base inlines the multiply (no cpow)', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    const res = compile(e.parse('(x+\\imaginaryI y)^2'), { fallback: false });
+    // Polar-form cpow is both ~10× slower per call and rounds differently
+    // from the interpreter's multiply.
+    expect(res.code).not.toContain('cpow');
+    const v = res.run!({ x: 0.3, y: 0.4 }) as { re: number; im: number };
+    expect(v.re).toBeCloseTo(-0.07, 12); // (0.3+0.4i)² = -0.07+0.24i
+    expect(v.im).toBeCloseTo(0.24, 12);
+  });
+
+  it('a literal cube still routes through cpow (fast path is square-only)', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    const res = compile(e.parse('(x+\\imaginaryI y)^3'), { fallback: false });
+    expect(res.code).toContain('cpow');
+  });
+
+  it('a recursive complex lambda (iterated Julia map, typed return) compiles with digit parity', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    // K(n, z) = n ≤ 0 ? z : K(n-1, z)² + (0.35+0.4i). The `complex` return
+    // ascription pins the self-call scalar — without it the application types
+    // `broadcastable<number>` and the complex-element bcast deferral fails
+    // the compile closed (documented consumer requirement in the design doc).
+    e.assign(
+      'K',
+      e.box([
+        'Function',
+        [
+          'Typed',
+          [
+            'Which',
+            ['LessEqual', 'n', 0],
+            'z',
+            'True',
+            [
+              'Add',
+              ['Power', ['K', ['Subtract', 'n', 1], 'z'], 2],
+              ['Complex', 0.35, 0.4],
+            ],
+          ],
+          { str: 'complex' },
+        ],
+        ['Typed', 'n', { str: 'integer' }],
+        'z',
+      ])
+    );
+    const res = compile(
+      e.box(['K', 10, ['Add', 'x', ['Multiply', ['Complex', 0, 1], 'y']]]),
+      { fallback: false }
+    );
+    // True recursion: the emitted call references the named local.
+    expect(res.code).toContain('_fn_K(');
+    const v = res.run!({ x: 0.13, y: 0.21 }) as { re: number; im: number };
+    const interp = e.box(['K', 10, ['Complex', 0.13, 0.21]]).N();
+    expect(v.re).toBeCloseTo(interp.re, 12);
+    expect(v.im).toBeCloseTo(interp.im, 12);
+  });
+});
