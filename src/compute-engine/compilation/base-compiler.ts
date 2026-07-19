@@ -174,6 +174,28 @@ export class BaseCompiler {
         `Cannot compile invalid expression: "${expr.toString()}"`
       );
     }
+    // Keep the compile-bound-variables context in sync for the contextless
+    // analysis helpers (`isComplexValued`): every recursive compilation flows
+    // through here with the innermost target, so the static always reflects
+    // the names currently shadowing the engine (loop indices, lambda
+    // parameters, broadcast elements).
+    const prevBoundCtx = BaseCompiler._boundVarsCtx;
+    BaseCompiler._boundVarsCtx = target.boundVars ?? prevBoundCtx;
+    try {
+      return BaseCompiler._compileInner(expr, target, prec);
+    } finally {
+      BaseCompiler._boundVarsCtx = prevBoundCtx;
+    }
+  }
+
+  /** The innermost compile target's `boundVars`, synced by `compile()`. */
+  private static _boundVarsCtx: ReadonlySet<string> | undefined;
+
+  private static _compileInner(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    prec = 0
+  ): TargetSource {
 
     // Is it a symbol?
     if (isSymbol(expr)) {
@@ -1126,89 +1148,102 @@ export class BaseCompiler {
       return BaseCompiler.compile(args[0], target);
     }
 
-    // Infer GPU type hints for block locals.
-    //
-    // GPU shader scalars are always `float`/`f32`. We intentionally never
-    // infer `int`/`i32` for an integer-valued local: GPU number literals are
-    // always emitted with a decimal point (`3` → `3.0`, see formatGPUNumber)
-    // and scalar shader arithmetic is float, so an `int`-typed declaration
-    // would disagree with its own float assignment (`int r; r = 3.0;` — not
-    // valid GLSL) and poison every downstream use in float math. Only a
-    // complex-valued local needs a non-default hint (`vec2`/`vec2f`);
-    // everything else uses the `float` default in `target.declare`.
-    const typeHints: Record<string, string | undefined> = {};
-    if (target.declare && target.language) {
-      const isWGSL = target.language === 'wgsl';
-      const vec2 = isWGSL ? 'vec2f' : 'vec2';
-      for (const local of locals) {
-        for (const arg of args) {
-          // Honor an explicit complex type on the `Declare` itself.
-          if (
-            isFunction(arg, 'Declare') &&
-            isSymbol(arg.ops[0], local) &&
-            isSymbol(arg.ops[1], 'complex')
-          ) {
-            typeHints[local] = vec2;
-            break;
-          }
-          // Otherwise infer from the assigned value (complex ⇒ vec2;
-          // all real/integer scalars fall through to the float default).
-          if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0], local)) {
-            if (BaseCompiler.isComplexValued(arg.ops[1]))
-              typeHints[local] = vec2;
-            break;
-          }
+    // Infer each local's complex-ness, in statement order, so a later local
+    // whose RHS reads an earlier complex local is itself recognized as
+    // complex (`w_1 ⩴ (x+iy)² + z_0; w_2 ⩴ w_1² + z_0` — Tycho item 58).
+    // The frame is pushed while inferring AND while compiling the
+    // statements, so `isComplexValued` — in every target — sees the locals
+    // the emitter is about to bind. Sources, per local: an explicit
+    // `complex` type on the `Declare`, a `Declare` initial value, or the
+    // first `Assign` RHS.
+    const complexFrame = new Map<string, boolean>();
+    for (const local of locals) complexFrame.set(local, false);
+    BaseCompiler._localComplex.push(complexFrame);
+    try {
+      for (const arg of args) {
+        if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0])) {
+          const name = arg.ops[0].symbol;
+          if (isSymbol(arg.ops[1], 'complex')) complexFrame.set(name, true);
+          const value = BaseCompiler.declareValueOperand(arg.ops);
+          if (value !== undefined && BaseCompiler.isComplexValued(value))
+            complexFrame.set(name, true);
+        } else if (
+          isFunction(arg, 'Assign') &&
+          isSymbol(arg.ops[0]) &&
+          complexFrame.get(arg.ops[0].symbol) === false &&
+          BaseCompiler.isComplexValued(arg.ops[1])
+        ) {
+          complexFrame.set(arg.ops[0].symbol, true);
         }
       }
+
+      // GPU type hints for block locals.
+      //
+      // GPU shader scalars are always `float`/`f32`. We intentionally never
+      // infer `int`/`i32` for an integer-valued local: GPU number literals are
+      // always emitted with a decimal point (`3` → `3.0`, see formatGPUNumber)
+      // and scalar shader arithmetic is float, so an `int`-typed declaration
+      // would disagree with its own float assignment (`int r; r = 3.0;` — not
+      // valid GLSL) and poison every downstream use in float math. Only a
+      // complex-valued local needs a non-default hint (`vec2`/`vec2f`);
+      // everything else uses the `float` default in `target.declare`.
+      const typeHints: Record<string, string | undefined> = {};
+      if (target.declare && target.language) {
+        const vec2 = target.language === 'wgsl' ? 'vec2f' : 'vec2';
+        for (const local of locals)
+          if (complexFrame.get(local)) typeHints[local] = vec2;
+      }
+
+      const localTarget: CompileTarget<Expression> = {
+        ...target,
+        var: (id) => {
+          if (locals.includes(id)) return id;
+          return target.var(id);
+        },
+        boundVars: BaseCompiler.withBoundNames(target, locals),
+      };
+
+      const result = args
+        .filter((a) => !isSymbol(a, 'Nothing'))
+        .flatMap((arg) => {
+          // For Declare, pass inferred type hint to the target hook
+          if (
+            isFunction(arg, 'Declare') &&
+            isSymbol(arg.ops[0]) &&
+            target.declare
+          ) {
+            const name = arg.ops[0].symbol;
+            const decl = target.declare(name, typeHints[name]);
+            // A `Declare` may carry an initial value (`Declare(sym, type, value)`
+            // or a `value` key in a trailing attributes dictionary). Emit it as a
+            // separate assignment statement, mirroring how a hoisted
+            // `Declare`+`Assign` pair compiles. (Two statements — not a combined
+            // initializer — so the declaration stays a plain `let`/`float`, which
+            // is what the subsequent assignment requires.)
+            const value = BaseCompiler.declareValueOperand(arg.ops);
+            if (value !== undefined)
+              return [
+                decl,
+                `${name} = ${BaseCompiler.compile(value, localTarget)}`,
+              ];
+            return [decl];
+          }
+          return [BaseCompiler.compile(arg, localTarget)];
+        })
+        .filter((s) => s !== '');
+
+      if (result.length === 0) return '';
+
+      if (target.block) return target.block(result);
+
+      // Default: JavaScript IIFE
+      result[result.length - 1] = `return ${result[result.length - 1]}`;
+      return `(() => {${target.ws('\n')}${result.join(
+        `;${target.ws('\n')}`
+      )}${target.ws('\n')}})()`;
+    } finally {
+      BaseCompiler._localComplex.pop();
     }
-
-    const localTarget: CompileTarget<Expression> = {
-      ...target,
-      var: (id) => {
-        if (locals.includes(id)) return id;
-        return target.var(id);
-      },
-      boundVars: BaseCompiler.withBoundNames(target, locals),
-    };
-
-    const result = args
-      .filter((a) => !isSymbol(a, 'Nothing'))
-      .flatMap((arg) => {
-        // For Declare, pass inferred type hint to the target hook
-        if (
-          isFunction(arg, 'Declare') &&
-          isSymbol(arg.ops[0]) &&
-          target.declare
-        ) {
-          const name = arg.ops[0].symbol;
-          const decl = target.declare(name, typeHints[name]);
-          // A `Declare` may carry an initial value (`Declare(sym, type, value)`
-          // or a `value` key in a trailing attributes dictionary). Emit it as a
-          // separate assignment statement, mirroring how a hoisted
-          // `Declare`+`Assign` pair compiles. (Two statements — not a combined
-          // initializer — so the declaration stays a plain `let`/`float`, which
-          // is what the subsequent assignment requires.)
-          const value = BaseCompiler.declareValueOperand(arg.ops);
-          if (value !== undefined)
-            return [
-              decl,
-              `${name} = ${BaseCompiler.compile(value, localTarget)}`,
-            ];
-          return [decl];
-        }
-        return [BaseCompiler.compile(arg, localTarget)];
-      })
-      .filter((s) => s !== '');
-
-    if (result.length === 0) return '';
-
-    if (target.block) return target.block(result);
-
-    // Default: JavaScript IIFE
-    result[result.length - 1] = `return ${result[result.length - 1]}`;
-    return `(() => {${target.ws('\n')}${result.join(
-      `;${target.ws('\n')}`
-    )}${target.ws('\n')}})()`;
   }
 
   /**
@@ -1714,20 +1749,57 @@ export class BaseCompiler {
   }
 
   /**
+   * Lexical frames of `Block` locals, innermost last, each mapping a local's
+   * name to its inferred complex-ness. Pushed/popped by `compileBlock` around
+   * the compilation of its statements (compilation is synchronous, so a
+   * static stack is safe), and consulted by `isComplexValued` so that every
+   * target's operand analysis agrees with the emitted local bindings.
+   */
+  private static _localComplex: Map<string, boolean>[] = [];
+
+  /**
    * Determine at compile time whether an expression produces a complex value.
    *
    * Uses the expression's declared type (from operator signatures) when
    * available. Falls back to operand inspection for functions whose
    * return type is unknown.
+   *
+   * A symbol bound in the compile context (`_boundVarsCtx`, synced from
+   * `target.boundVars` by `compile()` — a loop index, lambda parameter,
+   * broadcast element) shadows any same-named engine symbol, so the
+   * engine-value fallback below must not read through it (a loop counter
+   * named `i` must not pick up the imaginary unit's value).
    */
   static isComplexValued(expr: Expression): boolean {
     if (isNumber(expr)) return expr.im !== 0;
 
     if (isSymbol(expr)) {
       if (expr.symbol === 'ImaginaryUnit') return true;
+      // A `Block` local's complex-ness is inferred from its assigned RHS
+      // (`w_1 ⩴ (x+iy)² + z_0; w_2 ⩴ w_1² + z_0`: the type system defaults
+      // the local to real, but the emitter binds it to a complex object —
+      // the analysis must agree or later statements consume the object as a
+      // number; Tycho item 58). Innermost frame containing the name decides
+      // (a shadowing inner local is not poisoned by an outer complex one).
+      for (let i = BaseCompiler._localComplex.length - 1; i >= 0; i--) {
+        const frame = BaseCompiler._localComplex[i];
+        const known = frame.get(expr.symbol);
+        if (known !== undefined) return known;
+      }
       const t = expr.type;
       if (!t) return false;
-      return isNonRealNumber(t.type);
+      if (isNonRealNumber(t.type)) return true;
+      if (t.matches('real')) return false;
+      // The declared type is wide (`number`, `unknown`) — but the symbol may
+      // carry an assigned complex VALUE, which `tryFoldKnownSymbol` folds as
+      // a complex object literal. The operand analysis must agree with the
+      // fold, or the target emits structurally wrong arithmetic
+      // (`number + {re, im}` → NaN at every point; Tycho item 57). Does NOT
+      // apply to compile-bound variables, which shadow the engine.
+      if (BaseCompiler._boundVarsCtx?.has(expr.symbol)) return false;
+      const v = expr.engine._getSymbolValue(expr.symbol);
+      if (v !== undefined) return BaseCompiler.isComplexValued(v);
+      return false;
     }
 
     if (isFunction(expr)) {
@@ -2463,6 +2535,7 @@ export class BaseCompiler {
         const body = BaseCompiler.compile(literal.ops[0].canonical, {
           ...target,
           var: (id) => (params.includes(id) ? id : target.var(id)),
+          boundVars: BaseCompiler.withBoundNames(target, params),
         });
         registry.defs.set(
           name,

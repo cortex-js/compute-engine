@@ -156,6 +156,7 @@ function compilePythonSumProduct(
     idxTarget = {
       ...prev,
       var: (id) => (id === index ? index : prev.var(id)),
+      boundVars: BaseCompiler.withBoundNames(prev, [index]),
     };
   }
 
@@ -289,6 +290,7 @@ function compilePythonLoop(
     bodyTarget = {
       ...prev,
       var: (id) => (id === index ? index : prev.var(id)),
+      boundVars: BaseCompiler.withBoundNames(prev, [index]),
     };
   }
 
@@ -989,6 +991,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const bodyCode = BaseCompiler.compile(body.canonical, {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
+      boundVars: BaseCompiler.withBoundNames(target, params),
     });
     return `(lambda ${params.join(', ')}: ${bodyCode})`;
   },

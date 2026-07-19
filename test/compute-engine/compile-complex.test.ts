@@ -458,3 +458,79 @@ describe('COMPILE COMPLEX - runtime variables', () => {
     expect(result.code).not.toContain('_SYS.csin');
   });
 });
+
+// Tycho items 57/58/59 — the complex-compile emission class from the
+// c062d54000 Julia-set session. All three shapes share the reference value
+// of the depth-2 iteration |((x+iy)²+z₀)²+z₀|−4 at (0.3, 0.4) with
+// z₀ = −0.524−0.566i.
+describe('COMPILE COMPLEX - assigned/local typing and CSE (Tycho items 57-59)', () => {
+  const REF = -3.6699834359551025;
+  const Z0 = '-.524-.566\\imaginaryI';
+  const CLOSED = '\\vert((x+\\imaginaryI y)^2+z_0)^2+z_0\\vert-4';
+
+  it('item 57: an ASSIGNED complex symbol compiles complex without a declare', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.assign('z_0', e.parse(Z0).evaluate());
+    const res = compile(e.parse(CLOSED), { fallback: false });
+    expect(res.run!({ x: 0.3, y: 0.4 })).toBeCloseTo(REF, 12);
+  });
+
+  it('item 57: a declared-unknown assigned complex symbol compiles complex', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.declare('z_0', 'unknown');
+    e.assign('z_0', e.parse(Z0).evaluate());
+    const res = compile(e.parse(CLOSED), { fallback: false });
+    expect(res.run!({ x: 0.3, y: 0.4 })).toBeCloseTo(REF, 12);
+  });
+
+  it('item 58: a coloneq chain of complex locals compiles complex end-to-end', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.assign('z_0', e.parse(Z0).evaluate());
+    const res = compile(
+      e.parse(
+        'w_{1}\\coloneq(x+\\imaginaryI y)^{2}+z_0; w_{2}\\coloneq w_{1}^{2}+z_0; \\vert w_{2}\\vert-4'
+      ),
+      { fallback: false }
+    );
+    expect(res.run!({ x: 0.3, y: 0.4 })).toBeCloseTo(REF, 12);
+  });
+
+  it('item 58: a real local chain is unaffected', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    const res = compile(e.parse('a\\coloneq x+1; a^2'), { fallback: false });
+    expect(res.run!({ x: 2 })).toBe(9);
+  });
+
+  it('item 59: nested complex Add binds compound operands once (linear code size)', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.assign('z_0', e.parse(Z0).evaluate());
+    let body = '(x+\\imaginaryI y)';
+    for (let i = 0; i < 10; i++) body = `(${body}^{2}+z_0)`;
+    const res = compile(e.parse(`\\vert${body}\\vert-4`), {
+      fallback: false,
+    });
+    // Was ~360 KB (each Add spliced its compound operand twice — doubling
+    // per nesting level); with once-binding the emission is O(tree size).
+    expect(res.code!.length).toBeLessThan(10_000);
+    // Interpreter parity at a sample point.
+    const interp = e
+      .parse(`\\vert${body}\\vert-4`)
+      .subs({ x: 0.3, y: 0.4 })
+      .N().re;
+    expect(res.run!({ x: 0.3, y: 0.4 })).toBeCloseTo(interp, 10);
+  });
+
+  it('item 59: a simple complex Add keeps the direct object-literal emission', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.declare('w', 'complex');
+    const res = compile(e.expr(['Add', 'w', 2]), { fallback: false });
+    // Symbol + number operands need no binding: no IIFE wrapper.
+    expect(res.code).not.toContain('=>');
+  });
+});

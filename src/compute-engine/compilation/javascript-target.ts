@@ -330,15 +330,35 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `(${nonZero.map((x) => compile(x)).join(' + ')})`;
     }
 
+    // A complex operand's code is spliced once per `.re`/`.im` slot. For a
+    // compound operand that would DUPLICATE the whole subexpression — code
+    // size and runtime double per nesting level (`((z²+c)²+c)…` compiled to
+    // hundreds of KB at depth 10; Tycho item 59) — so bind each compound
+    // complex operand to a const, emitted exactly once. Symbols and number
+    // literals stay inline (free to duplicate; keeps simple shapes
+    // byte-identical to the previous emission).
+    const bindings: Array<[name: string, value: string]> = [];
     const parts = args.map((a) => {
       const code = compile(a);
-      return { code, isComplex: BaseCompiler.isComplexValued(a) };
+      const isComplex = BaseCompiler.isComplexValued(a);
+      if (isComplex && !isSymbol(a) && !isNumber(a)) {
+        const name = BaseCompiler.tempVar();
+        bindings.push([name, code]);
+        return { code: name, isComplex, bound: true };
+      }
+      return { code, isComplex, bound: false };
     });
-    const reTerms = parts.map((p) => (p.isComplex ? `(${p.code}).re` : p.code));
+    const reTerms = parts.map((p) =>
+      p.isComplex ? (p.bound ? `${p.code}.re` : `(${p.code}).re`) : p.code
+    );
     const imTerms = parts
       .filter((p) => p.isComplex)
-      .map((p) => `(${p.code}).im`);
-    return `({ re: ${reTerms.join(' + ')}, im: ${imTerms.join(' + ')} })`;
+      .map((p) => (p.bound ? `${p.code}.im` : `(${p.code}).im`));
+    const body = `({ re: ${reTerms.join(' + ')}, im: ${imTerms.join(' + ')} })`;
+    if (bindings.length === 0) return body;
+    return `(() => { const ${bindings
+      .map(([n, v]) => `${n} = ${v}`)
+      .join(', ')}; return ${body}; })()`;
   },
   Arccos: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))

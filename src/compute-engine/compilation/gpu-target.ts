@@ -572,6 +572,7 @@ function compileGPUSumProduct(
       const innerTarget: CompileTarget<Expression> = {
         ...target,
         var: (id) => (id === index ? kStr : target.var(id)),
+        boundVars: BaseCompiler.withBoundNames(target, [index]),
       };
       terms.push(`(${BaseCompiler.compile(args[0], innerTarget)})`);
     }
@@ -591,6 +592,7 @@ function compileGPUSumProduct(
           ? `f32(${index})`
           : `float(${index})`
         : target.var(id),
+    boundVars: BaseCompiler.withBoundNames(target, [index]),
   };
   const body = BaseCompiler.compile(args[0], bodyTarget);
 
@@ -1558,6 +1560,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const bodyCode = BaseCompiler.compile(args[0], {
       ...target,
       var: (id) => (id === index ? indexAsFloat : target.var(id)),
+      // The counter shadows any same-named engine symbol (an index named `i`
+      // must not resolve to the imaginary unit in the operand analysis).
+      boundVars: BaseCompiler.withBoundNames(target, [index]),
     });
 
     const indexDecl = isWGSL

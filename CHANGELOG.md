@@ -2,6 +2,31 @@
 
 ### Bug Fixes
 
+- **An assigned complex symbol now compiles as complex without an explicit
+  declaration.** `ce.assign("z_0", <complex value>)` then compiling an
+  expression using `z_0` emitted the binding as a complex object literal
+  while the operand analysis read only the DECLARED type (wide `number` /
+  `unknown` ⇒ real) — `number + {re, im}` arithmetic, silently `NaN` at
+  every point. The analysis now derives complex-ness from the assigned
+  value, mirroring the fold. Compile-bound variables (loop indices, lambda
+  parameters) shadow the engine, so an index named `i` does not pick up the
+  imaginary unit.
+- **`Block`/`\coloneq` locals infer complex-ness from their assigned
+  right-hand side.** In `w_1 ⩴ (x+iy)² + z_0; w_2 ⩴ w_1² + z_0` the local
+  `w_1` was emitted as a complex object but consumed as REAL by later
+  statements (its type defaulted to real; outer declares don't reach block
+  locals) — silent all-NaN. Locals' complex-ness is now inferred in
+  statement order — a later local reading an earlier complex local is
+  itself recognized — shared by every target (this also extends the GPU
+  `vec2` local hints to chained locals).
+- **Complex `Add` binds compound operands once — nested complex arithmetic
+  now compiles in O(tree size).** Each `{re: …, im: …}` slot spliced the
+  full operand subexpression twice, doubling code size and runtime per
+  nesting level: the depth-10 Julia closed form compiled to ~360 KB
+  (~713 µs/pt). Compound complex operands are now bound to consts emitted
+  exactly once: the same form compiles to ~1.9 KB and runs ~1.3 µs/pt,
+  with digit-for-digit interpreter parity. Symbols and number literals stay
+  inline, so simple shapes emit byte-identically.
 - **`Max`/`Min` (and `Supremum`/`Infimum`) now type as `number`.** Their
   declared result type was the vestigial union `number | list`, so even
   `Max(1, 2)` typed as `list | number`, a comparison over one typed
