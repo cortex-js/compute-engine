@@ -137,6 +137,33 @@ result against the declared return type (returns are pure ascriptions today),
 (`["Function", body, "'(x: integer) -> real'"]` canonicalizing into the
 structural form).
 
+**Compiled recursive lambdas (ratified 2026-07-19; DESIGN PHASE FIRST —
+from the Tycho item-59 secondary ask, c062d54000 iterated-map session):**
+a self-recursive user lambda (`J(n,z) := n≤0 ? z : J(n-1,z)²+z₀`) evaluates
+correctly via `.N()` but `compile()` fails closed (D6, deliberate:
+`registry.compiling` re-entry detection in `ensureUserFunctionEmitted`) —
+the emitted code would lose the engine's termination guarantees
+(`timeLimit`/`CancellationError`), and a runaway inside a per-pixel render
+loop is a frozen tab, not a catchable error. Two rungs, in likely order:
+
+- **(M) Compile-time unrolling for literal depths:** `J(10, z)` with a
+  structurally decrementing first argument unrolls to straight-line code —
+  no runtime guard, zero semantic divergence, works on GPU targets (where
+  true recursion is impossible), and lands exactly on the post-item-59
+  emission (the depth-10 Julia closed form compiles to ~1.9 KB / ~1.3
+  µs/pt). Covers iterated-map documents; limited to literal depths and
+  simple decrement patterns.
+- **(M/L) Opt-in depth-guarded general form** (`recursion: { maxDepth }`):
+  emit self-recursion with a per-function depth counter returning NaN past
+  the limit (NaN matches plot-mask semantics). Design questions: counter
+  reset discipline across top-level `run()` calls and thrown exceptions;
+  the documented parity divergence (interpreter throws `CancellationError`
+  on runaway, compiled returns NaN — acceptable only because opt-in);
+  mutual recursion stays excluded (dependency-ordered `const` emission
+  can't express cycles); GPU stays fail-closed. Gate on a consumer needing
+  non-literal depths — Tycho is NOT blocked (their real-pair `⩴`-chain
+  lowering is their stated permanent shape).
+
 **MathNet parser tail (S/M; corpus at 371/428 CI-gated after the
 2026-07-09 rounds):**
 
