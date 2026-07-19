@@ -15,6 +15,7 @@ import {
   isFiniteIndexedCollection,
   isPossiblyCollectionTyped,
   isTuple,
+  lazyBroadcastMap,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
@@ -343,6 +344,68 @@ function pointComponentType(xs: Expression, position: number): Type {
   return componentType(xs, position);
 }
 
+// Project a coordinate straight out of the LAZY point-list transpose form —
+// `Map(s1, …, sk, (p1, …, pk) ↦ Tuple(…))` as built by `lazyBroadcastMap` for
+// a large `PointList` — returning the source collection the projected slot
+// binds to. `PointX(PointList(a, b, c))` is then just `a`: no per-element
+// Tuple construction and `At` extraction on drain (Tycho item 52). Sound only
+// when the slot is a plain parameter reference, every source is an INDEXED
+// collection (the lazy-transpose contract — a `Map` over a `Set`, though it
+// can look identical, must keep the generic path's indexed-`List` result),
+// and every source has the same known count (`Map` zips to the shortest
+// source, so projecting one source of a ragged zip would yield extra
+// elements). Anything else returns `undefined` and the caller falls through
+// to the generic path.
+//
+// Under `numericApproximation` the projection is returned as its lazy `.N()`
+// form: the source itself is the EXACT collection (the transpose body's
+// `N(…)` wrap belongs to the whole tuple, and is discarded with it), so
+// returning it bare would let `PointX(pts).N()` yield exact elements —
+// violating `x.N() ≡ x.evaluate().N()` parity.
+function projectLazyPointList(
+  xs: Expression,
+  position: number,
+  numericApproximation: boolean
+): Expression | undefined {
+  if (!isFunction(xs) || xs.operator !== 'Map' || xs.nops < 2) return undefined;
+  const fn = xs.ops[xs.nops - 1];
+  if (!isFunction(fn) || fn.operator !== 'Function') return undefined;
+  let body = fn.ops[0];
+  // The canonical function literal wraps its body in a single-statement
+  // `Block`, and `.N()` on the lazy form wraps it in `N(…)` — unwrap both
+  // for the match.
+  if (isFunction(body) && body.operator === 'Block' && body.nops === 1)
+    body = body.ops[0];
+  if (isFunction(body) && body.operator === 'N') body = body.ops[0];
+  if (!isFunction(body) || body.operator !== 'Tuple') return undefined;
+  const slot = body.ops[position - 1];
+  if (slot === undefined || !isSymbol(slot)) return undefined;
+  const params = fn.ops.slice(1);
+  const sources = xs.ops.slice(0, -1);
+  // The transpose contract binds parameters one-to-one to sources, each a
+  // distinct plain symbol. A user-authored lookalike with extra or duplicate
+  // parameter names could otherwise select the wrong source (`findIndex`
+  // takes the FIRST duplicate; invocation binds the last) or index past the
+  // source list.
+  if (params.length !== sources.length) return undefined;
+  const names = new Set<string>();
+  for (const p of params) {
+    if (!isSymbol(p) || names.has(p.symbol)) return undefined;
+    names.add(p.symbol);
+  }
+  const j = params.findIndex(
+    (p) => isSymbol(p) && p.symbol === slot.symbol
+  );
+  if (j < 0 || j >= sources.length) return undefined;
+  if (sources.some((s) => s.isIndexedCollection !== true)) return undefined;
+  const counts = sources.map((s) => s.count);
+  if (counts.some((c) => c === undefined || c !== counts[0])) return undefined;
+  // `.N()` on a lazy `Map` source stays lazy (the N-wrap threads into its
+  // mapping body — Tycho items 39/40); a literal `List` source floats
+  // element-wise, which is the correct eager behavior at that size.
+  return numericApproximation ? sources[j].N() : sources[j];
+}
+
 // Evaluate a point-component accessor, broadcasting the coordinate over a list
 // of points. We inspect the actual elements (not the declared element type,
 // which is unreliable for a literal list of points) to decide whether to
@@ -351,7 +414,8 @@ function pointComponentType(xs: Expression, position: number): Type {
 function pointComponentAt(
   xs: Expression,
   position: number,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  numericApproximation = false
 ): Expression | undefined {
   // A single point (tuple): the coordinate.
   const t = xs.type.type;
@@ -365,6 +429,10 @@ function pointComponentAt(
   // point, broadcast the coordinate element-wise; otherwise fall back to O(1)
   // element indexing, like First/Second/Third.
   if (xs.isFiniteCollection) {
+    // Projection fast-path over the lazy transpose form (see
+    // `projectLazyPointList`).
+    const projected = projectLazyPointList(xs, position, numericApproximation);
+    if (projected !== undefined) return projected;
     // Peek via `each()` rather than `at(1)`: a non-indexed collection (a `Set`)
     // has no `at()`, so `at(1)` is `undefined` and a non-empty Set of points
     // was misread as empty (→ a silently-wrong `[]`). `each()` yields the first
@@ -376,11 +444,35 @@ function pointComponentAt(
       break;
     }
     if (first !== undefined) {
-      if (isPointLike(first))
-        return ce.function(
-          'List',
-          [...xs.each()].map((e) => e.at(position) ?? ce.Nothing)
-        );
+      if (isPointLike(first)) {
+        // Hybrid laziness (Tycho item 52): past the eager threshold — or for
+        // an indexed collection of unknown size — return the lazy projection
+        // `Map(xs, p ↦ At(p, position))` instead of materializing every
+        // coordinate. At or below the threshold the eager `List` is built
+        // unchanged, so small point lists stay byte-identical.
+        const n = xs.count;
+        if (
+          xs.isIndexedCollection === true &&
+          (n === undefined || n > MAX_SIZE_EAGER_COLLECTION)
+        )
+          return lazyBroadcastMap(
+            ce,
+            'At',
+            [xs, ce.number(position)],
+            (x) => x === xs,
+            numericApproximation
+          );
+        // Build with `ce.function`, keeping the full canonicalization pass:
+        // its tensor detection is what makes a numeric coordinate list a
+        // rank-1 `BoxedTensor` (tensor-only consumers like `MatrixMultiply`
+        // rely on it). The pass is O(n), but this eager branch only runs at
+        // or below `MAX_SIZE_EAGER_COLLECTION` (or for non-indexed sources),
+        // so the cost is bounded — the large-list case took the lazy arm
+        // above (Tycho item 52).
+        const comps: Expression[] = [];
+        for (const e of xs.each()) comps.push(e.at(position) ?? ce.Nothing);
+        return ce.function('List', comps);
+      }
       // Elements are not points → element indexing, like First/Second/Third.
       return componentAt(xs, position, ce);
     }
@@ -647,10 +739,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // The Desmos point-list surface form. Explicit: importers emit it, default
   // parsing NEVER produces it from `(a, b)` (that stays an inert `Tuple`). A
-  // `PointList` with one or more finite-collection components transposes to the
-  // `List` of point-tuples (zip-to-shortest, scalars broadcast) — e.g.
-  // `PointList(-6, n)` with `n` a 21-element list is 21 points. With no
-  // collection component it is just a plain point (`Tuple`). An empty
+  // `PointList` with one or more finite-collection components transposes to
+  // the list of point-tuples (zip-to-shortest, scalars broadcast) — e.g.
+  // `PointList(-6, n)` with `n` a 21-element list is 21 points. The transpose
+  // is HYBRID-lazy (Tycho item 52): at or below `MAX_SIZE_EAGER_COLLECTION`
+  // it is an eager `List` of `Tuple`s; past the threshold it is the lazy
+  // `Map` form (consumable via `at`/`each`/`count`). Note a large
+  // MULTI-collection `PointList` evaluated first and THEN compiled is a
+  // multi-source `Map`, which the JS/Python compile targets reject — compile
+  // the canonical `PointList` form (its own compile handler) instead. With
+  // no collection component it is just a plain point (`Tuple`). An empty
   // collection component yields an empty `List`; an infinite/unknown-length
   // component fails closed (stays inert, no hang) via
   // `broadcastOverIndexedCollections` returning `undefined`.
@@ -696,12 +794,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return undefined;
       // No collection component: a plain point.
       if (!ops.some(isListComponent)) return ce.tuple(...ops);
-      // Otherwise transpose into the `List` of point-tuples.
+      // Otherwise transpose into the `List` of point-tuples. Hybrid laziness
+      // (Tycho item 52): at or below `MAX_SIZE_EAGER_COLLECTION` the eager
+      // `List<Tuple>` shape is built unchanged (the consumer contract for
+      // small point lists); past it, the transpose is the lazy `Map` form —
+      // consumable via `at`/`each`/`count` — so a large point list is no
+      // longer materialized (and re-materialized per coordinate projection).
       return broadcastOverIndexedCollections(
         ce,
         'Tuple',
         ops,
-        numericApproximation ?? false
+        numericApproximation ?? false,
+        true
       );
     },
     // No `eq` handler: a definitive structural comparison would make
@@ -2825,7 +2929,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(any) -> any',
     type: ([xs]) => pointComponentType(xs, 1),
-    evaluate: ([xs], { engine: ce }) => pointComponentAt(xs, 1, ce),
+    evaluate: ([xs], { engine: ce, numericApproximation }) =>
+      pointComponentAt(xs, 1, ce, numericApproximation ?? false),
   },
 
   PointY: {
@@ -2834,7 +2939,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(any) -> any',
     type: ([xs]) => pointComponentType(xs, 2),
-    evaluate: ([xs], { engine: ce }) => pointComponentAt(xs, 2, ce),
+    evaluate: ([xs], { engine: ce, numericApproximation }) =>
+      pointComponentAt(xs, 2, ce, numericApproximation ?? false),
   },
 
   PointZ: {
@@ -2843,7 +2949,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(any) -> any',
     type: ([xs]) => pointComponentType(xs, 3),
-    evaluate: ([xs], { engine: ce }) => pointComponentAt(xs, 3, ce),
+    evaluate: ([xs], { engine: ce, numericApproximation }) =>
+      pointComponentAt(xs, 3, ce, numericApproximation ?? false),
   },
 
   Last: {

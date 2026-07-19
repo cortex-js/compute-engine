@@ -568,9 +568,26 @@ export function broadcastOverIndexedCollections(
     );
 
   const options = { numericApproximation };
+  // Stream the broadcast operands with hoisted `each()` iterators instead of
+  // indexing `x.at(i)` per element: `at()` re-resolves the accessor chain on
+  // every call — for a lazy `Map` source it re-instantiates the mapping
+  // lambda per access — so an n-element zip paid O(n) lambda constructions
+  // and O(n·ops) collection-type checks (Tycho item 52: a 4001-element
+  // `PointList` transpose ground for ~300 ms per consumer).
+  const broadcast = xs.map((x) => isBroadcast(x));
+  const iters = xs.map((x, k) => (broadcast[k] ? x.each() : undefined));
   const results: Expression[] = [];
   for (let i = 1; i <= n; i++) {
-    const args = xs.map((x) => (isBroadcast(x) ? (x.at(i) ?? ce.Nothing) : x));
+    const args: Expression[] = [];
+    for (let k = 0; k < xs.length; k++) {
+      const it = iters[k];
+      if (it === undefined) {
+        args.push(xs[k]);
+        continue;
+      }
+      const { value, done } = it.next();
+      args.push(done || value === undefined ? ce.Nothing : value);
+    }
     results.push(ce._fn(operator, args).evaluate(options));
   }
   return ce._fn('List', results);

@@ -1561,8 +1561,38 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
     const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
     if (r) return r;
   }
-  if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, true);
+  // An INERT result (still a `Multiply`) falls through to the post-evaluation
+  // re-dispatch, mirroring `addN` (Tycho item 52).
+  let tupleInert = false;
+  if (xs.some((x) => isTuple(x))) {
+    const r = mulTuples(ce, xs, true);
+    if (r.operator !== 'Multiply') return r;
+    tupleInert = true;
+  }
   xs = xs.map((x) => x.N());
+  // Post-evaluation re-dispatch (Tycho item 52): an operand may only have
+  // BECOME a collection through the numeric evaluation above (`Mod(L,11)`
+  // over a list `L` → a lazy `Map`) — the raw-operand dispatches missed it
+  // and the product was left inert (`0.2·collection` unreduced). Mirrors the
+  // pre-evaluation branches (see the matching comment in `addN`); linear, no
+  // re-entry, and gated so the hot all-numeric path pays a single cheap
+  // `isFunction` sweep.
+  if (tupleInert || xs.some((x) => isFunction(x))) {
+    if (xs.some(isUnknownLengthBroadcast))
+      return lazyBroadcastMap(
+        ce,
+        'Multiply',
+        xs,
+        isBroadcastableCollection,
+        true
+      );
+    if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs, true);
+    if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
+      const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
+      if (r) return r;
+    }
+    if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, true);
+  }
   const exp = expandProducts(ce, xs);
   if (exp) {
     if (exp.operator !== 'Multiply') return exp;

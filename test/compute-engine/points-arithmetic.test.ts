@@ -1070,28 +1070,31 @@ describe('POINT/TUPLE ARITHMETIC — PointList zips', () => {
     ]);
   });
 
-  // Shape pin (findings 1 + 4): `PointList` must materialize an eager `List`
-  // of point-`Tuple`s at ANY finite size — its `List<Tuple>` shape is a
-  // consumer contract. The shared broadcast helper's hybrid-laziness arm (past
-  // the eager threshold) is OPT-IN and off for `PointList`, so a >100-point
-  // transpose is a plain `List`, never a lazy `Map`.
-  test('PointList with >100 components stays an eager List of Tuples', () => {
+  // Shape pin (revised for Tycho item 52): `PointList` is HYBRID-lazy like
+  // every other broadcast form. At or below `MAX_SIZE_EAGER_COLLECTION` (100)
+  // the transpose materializes the eager `List` of point-`Tuple`s
+  // (byte-identical to the original consumer contract — see the ≤100 pins
+  // above); PAST the threshold it is the lazy `Map` form, consumable via
+  // `at`/`each`/`count`, so a large point list is no longer materialized —
+  // and re-materialized per coordinate projection — eagerly (a 4001-point
+  // transpose cost ~300 ms per consumer).
+  test('PointList with >100 components is the lazy Map transpose', () => {
     const ce = new ComputeEngine();
     const ys = Array.from({ length: 200 }, (_, i) => i);
     const r = ce.box(['PointList', -6, ['List', ...ys]]).evaluate();
-    expect(r.operator).toBe('List');
-    expect(r.isLazyCollection).toBe(false);
+    expect(r.operator).toBe('Map');
+    expect(r.isLazyCollection).toBe(true);
     expect(r.count).toBe(200);
     expect(r.at(1)?.json).toEqual(['Tuple', -6, 0]);
     expect(r.at(200)?.json).toEqual(['Tuple', -6, 199]);
   });
 
-  test('PointList(...).N() with >100 components yields numeric point-tuples', () => {
+  test('PointList(...).N() with >100 components projects numeric point-tuples', () => {
     const ce = new ComputeEngine();
     const ys = Array.from({ length: 200 }, (_, i) => i);
     const r = ce.box(['PointList', -6, ['List', ...ys]]).N();
-    expect(r.operator).toBe('List');
-    expect(r.isLazyCollection).toBe(false);
+    expect(r.operator).toBe('Map');
+    expect(r.isLazyCollection).toBe(true);
     expect(r.count).toBe(200);
     expect(r.at(1)?.json).toEqual(['Tuple', -6, 0]);
     expect(r.at(200)?.json).toEqual(['Tuple', -6, 199]);

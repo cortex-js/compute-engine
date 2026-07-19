@@ -446,11 +446,52 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
     if (r) return r;
   }
 
-  // Tuples (points/vectors) add component-wise (never broadcast).
-  if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, true);
+  // Tuples (points/vectors) add component-wise (never broadcast). An INERT
+  // result (still an `Add`) falls through: a raw sibling operand (an
+  // unevaluated `Multiply` that yields a tuple, say) blocks the combine
+  // here, but becomes visible to the post-evaluation re-dispatch below,
+  // whose tuple branch returns unconditionally (Tycho item 52).
+  let tupleInert = false;
+  if (xs.some((x) => isTuple(x))) {
+    const r = addTuples(xs[0].engine, xs, true);
+    if (r.operator !== 'Add') return r;
+    tupleInert = true;
+  }
 
   // Don't N() the number literals (fractions) to avoid losing precision
   xs = xs.map((x) => (isNumber(x) ? x.evaluate() : x.N()));
+
+  // Post-evaluation re-dispatch (Tycho item 52): an operand may only have
+  // BECOME a collection through the numeric evaluation above (`Mod(L,11)`
+  // over a list `L` → a lazy `Map`) — the raw-operand dispatches missed it
+  // and the sum was left inert (`0.2·collection + k` unreduced). Mirrors the
+  // pre-evaluation branches; linear (no re-entry), so a non-broadcastable
+  // fall-through can't loop. Gated on a function-headed mapped operand so
+  // the hot all-numeric path (every element of a broadcast drain) pays a
+  // single cheap `isFunction` sweep, not per-operand type computations.
+  if (tupleInert || xs.some((x) => isFunction(x))) {
+    if (xs.some(isUnknownLengthBroadcast))
+      return lazyBroadcastMap(
+        xs[0].engine,
+        'Add',
+        xs,
+        isBroadcastableCollection,
+        true
+      );
+    if (xs.some((x) => isTensor(x))) return addTensors(xs[0].engine, xs);
+    if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
+      const r = broadcastOverIndexedCollections(
+        xs[0].engine,
+        'Add',
+        xs,
+        true,
+        true
+      );
+      if (r) return r;
+    }
+    if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, true);
+  }
+
   return new Terms(xs[0].engine, xs).N();
 }
 

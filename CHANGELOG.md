@@ -1,5 +1,37 @@
 ## 0.85.1 _2026-07-18_
 
+### Performance
+
+- **Large `PointList` transposes and point-coordinate projections are now
+  hybrid-lazy, and scalar arithmetic over lazy broadcasts composes lazily
+  instead of grinding (or staying inert).** Numeric evaluation of
+  `scalar × (PointX(P), PointY(P), …)` over a 4001-point `PointList` of
+  broadcast components took ~600–1000 ms per product — each coordinate
+  projection eagerly transposed the whole point list into n `Tuple`s (at
+  ~150 µs/element of per-element boxed re-canonicalization) only to project
+  one slot back out — and could exceed the 2 s `timeLimit` on a full plot
+  row. Three coordinated changes, all hybrid (collections at or below the
+  100-element eager threshold are byte-identical to the previous shapes):
+  - `PointList` past the threshold transposes to the lazy `Map` form
+    (consumable via `at`/`each`/`count`) instead of materializing every
+    point-`Tuple`. **BREAKING (shape)**: a >100-point `PointList` now
+    evaluates to a lazy `Map`, not an eager `List` — element values are
+    unchanged.
+  - `PointX`/`PointY`/`PointZ` project lazily past the threshold, and
+    project straight to the source collection when the operand is the lazy
+    transpose form (`PointX(PointList(a, b, c))` ≡ `a` for equal-length
+    components; ragged or scalar slots keep transpose semantics).
+  - `addN`/`mulN` re-dispatch their broadcast branches after numeric operand
+    evaluation, so an operand that only becomes a collection through
+    evaluation (`Mod(L, 11)` over a list `L`) now composes into the lazy
+    `Map` form — previously the product/sum was silently left inert
+    (`0.2 · ⟨collection⟩` unreduced). The eager broadcast zip also streams
+    its operands with hoisted iterators instead of per-index `at()` calls
+    (which re-instantiated a lazy `Map`'s mapping lambda on every access).
+  The filed repro (a 4001-member 3D `vector` row) went from a 2 s timeout to
+  ~10 ms of lazy composition, with materialization deferred to the consumer
+  sweep.
+
 ### Bug Fixes
 
 - **String `vars` values now splice into compiled JavaScript and Python as
