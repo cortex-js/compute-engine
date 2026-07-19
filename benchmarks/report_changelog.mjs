@@ -54,7 +54,7 @@ try {
 const matrix = results.matrix || {};
 const versions = results.versions || {};
 
-const PUB_VERSION = versions.cePublished || '0.84.1';
+const PUB_VERSION = versions.cePublished || '0.85.0';
 const CUR_LABEL = process.env.CE_CURRENT_LABEL || 'CE (current)';
 const PUB_LABEL = `CE ${PUB_VERSION}`;
 
