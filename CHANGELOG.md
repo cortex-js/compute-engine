@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.85.0 _2026-07-18_
 
 ### New Features
@@ -5,41 +7,39 @@
 - **`DSolve` frontier round — parity with SymPy on the ODE audit (50/51, 0
   wrong).** Four new solvable classes:
   - **Nonhomogeneous Cauchy–Euler** (`x²y″ + bxy′ + cy = g(x)`): an x-power
-    indicial ansatz for power forcing (`x²y″ + xy′ = x` →
-    `c₁ + c₂·ln x + x`), with a variation-of-parameters fallback for
-    resonant or non-power forcing.
+    indicial ansatz for power forcing (`x²y″ + xy′ = x` → `c₁ + c₂·ln x + x`),
+    with a variation-of-parameters fallback for resonant or non-power forcing.
   - **The Airy family** `y″ = (px + q)·y`: solutions as
     `c₁·AiryAi(t) + c₂·AiryBi(t)` with `t = ∛p·x + q/∛p²` (real cube root,
     either sign of `p`).
-  - **Airy-type Riccati** `y′ = q₀(x) + q₂·y²` (constant `q₂`, linear `q₀`):
-    the `y = −u′/(q₂u)` linearization yields the one-parameter
-    `(Ai′ + C·Bi′)/(Ai + C·Bi)` family — `y′ = x + y²` now solves (SymPy
-    errors on it).
-  - **Repeated-eigenvalue first-order linear systems**: diagonal systems of
-    any size and defective 2×2 systems via a generalized eigenvector, gated
-    on an exact `(A−λI)² = 0` check so near-repeated numeric eigenvalues
-    stay inert rather than producing an approximately-wrong solution.
+  - **Airy-type Riccati** `y′ = q₀(x) + q₂·y²` (constant `q₂`, linear `q₀`): the
+    `y = −u′/(q₂u)` linearization yields the one-parameter
+    `(Ai′ + C·Bi′)/(Ai + C·Bi)` family — `y′ = x + y²` now solves (SymPy errors
+    on it).
+  - **Repeated-eigenvalue first-order linear systems**: diagonal systems of any
+    size and defective 2×2 systems via a generalized eigenvector, gated on an
+    exact `(A−λI)² = 0` check so near-repeated numeric eigenvalues stay inert
+    rather than producing an approximately-wrong solution.
 - **`AiryAiPrime` / `AiryBiPrime` operators** (derivatives of the Airy
-  functions), with machine-precision numerics across all three DLMF regimes
-  and full derivative closure (`Ai′ → AiryAiPrime`, `AiryAiPrime′ → x·Ai(x)`
-  — so repeated differentiation of Airy expressions evaluates and
-  numericizes).
+  functions), with machine-precision numerics across all three DLMF regimes and
+  full derivative closure (`Ai′ → AiryAiPrime`, `AiryAiPrime′ → x·Ai(x)` — so
+  repeated differentiation of Airy expressions evaluates and numericizes).
 
-- **`NDSolveFunction` — ODE solutions as applicable functions.** Where
-  `NDSolve` returns a sample `List`, the new `NDSolveFunction` (same
-  arguments, without the sample count) returns the solution as a callable
-  function — a `Function` literal wrapping the new `InterpolatingFunction`
-  operator, which holds the adaptive solver's piecewise-quartic dense-output
-  table. Assign it and evaluate anywhere in the integration interval
-  (`f := NDSolveFunction(y′ = y, y, (x, 0, 1), 1)`; `f(0.5)` → `1.6487…`),
-  at the integration accuracy; outside the interval the value clamps to the
-  nearest endpoint, and a symbolic argument stays symbolic. The solution
-  compiles to plain JavaScript — `compile(f)` yields a positional lambda
-  (`run(0.5)`), and `compile(f(t))` an expression over `t` (~1 µs per
-  evaluation) — and LaTeX display elides the data table
+- **`NDSolveFunction` — ODE solutions as applicable functions.** Where `NDSolve`
+  returns a sample `List`, the new `NDSolveFunction` (same arguments, without
+  the sample count) returns the solution as a callable function — a `Function`
+  literal wrapping the new `InterpolatingFunction` operator, which holds the
+  adaptive solver's piecewise-quartic dense-output table. Assign it and evaluate
+  anywhere in the integration interval
+  (`f := NDSolveFunction(y′ = y, y, (x, 0, 1), 1)`; `f(0.5)` → `1.6487…`), at
+  the integration accuracy; outside the interval the value clamps to the nearest
+  endpoint, and a symbolic argument stays symbolic. The solution compiles to
+  plain JavaScript — `compile(f)` yields a positional lambda (`run(0.5)`), and
+  `compile(f(t))` an expression over `t` (~1 µs per evaluation) — and LaTeX
+  display elides the data table
   (`\operatorname{InterpolatingFunction}_{[0, 1]}(x)`); the full table
-  round-trips through MathJSON. Scalar equations (first-order and
-  higher-order) are supported; the multi-dependent system form stays inert.
+  round-trips through MathJSON. Scalar equations (first-order and higher-order)
+  are supported; the multi-dependent system form stays inert.
 
 ### Improvements
 
@@ -131,93 +131,90 @@
   first arithmetic composition rejected with a thrown assert. Lazy collection
   canonical handlers now admit operands whose type is merely indeterminate
   (`unknown`/`any`/`value`/`broadcastable`) — provably-scalar operands still
-  reject — and `Map` over such a source keeps value-aware indexed-ness
-  (`type`, `at`, `count`, and the display preview, which no longer renders
-  with a misleading `Set` head). The composed lazy result is consumable and
-  honors `x.N() ≡ x.evaluate().N()`.
+  reject — and `Map` over such a source keeps value-aware indexed-ness (`type`,
+  `at`, `count`, and the display preview, which no longer renders with a
+  misleading `Set` head). The composed lazy result is consumable and honors
+  `x.N() ≡ x.evaluate().N()`.
 
-- **A user symbol shadowing a builtin no longer breaks function application
-  of that builtin.** With `N := 85` declared (ubiquitous in Desmos-style
-  documents), any `["N", …]` application — including the engine's own
-  internal `N(…)` wrapper that makes lazy `.N()` elements float on access —
-  resolved to the user's number and produced an `incompatible-type` error
-  (surfacing as `Nothing` elements in lazy maps). Operator-position binding
-  now defers a value definition that provably cannot be applied (a plain
-  number, string, collection…) to an outer applicable definition of the same
-  name; value-position references (`N + 1`) still resolve to the user's
-  value. (Consequence: after prose-style devolution of an un-applied builtin
-  — `N + 1` — a later `N(3.14159, 2)` now numericizes instead of staying
-  symbolic.)
+- **A user symbol shadowing a builtin no longer breaks function application of
+  that builtin.** With `N := 85` declared (ubiquitous in Desmos-style
+  documents), any `["N", …]` application — including the engine's own internal
+  `N(…)` wrapper that makes lazy `.N()` elements float on access — resolved to
+  the user's number and produced an `incompatible-type` error (surfacing as
+  `Nothing` elements in lazy maps). Operator-position binding now defers a value
+  definition that provably cannot be applied (a plain number, string,
+  collection…) to an outer applicable definition of the same name;
+  value-position references (`N + 1`) still resolve to the user's value.
+  (Consequence: after prose-style devolution of an un-applied builtin — `N + 1`
+  — a later `N(3.14159, 2)` now numericizes instead of staying symbolic.)
 
 - **The JavaScript compile target's floored-`Mod` emission is parenthesized
-  (Tycho item 43).** The fragment `((a % b) + b) % b` was emitted without
-  outer parentheses; composed as a `Multiply`/`Divide` factor, JS's
-  left-associative same-precedence `%` reduced the whole product mod `b`
-  (`c * ((x % 1) + 1) % 1` ≡ `(c·(x%1+1)) % 1`), silently value-wrong
-  whenever the product's magnitude reached the divisor. The standalone form
-  was correct, which is why it survived. Compiled and interpreted now agree
-  on the Neyret-hash idiom `Σ cos(i)·mod(10⁴sin(10⁴i), 1)`.
+  (Tycho item 43).** The fragment `((a % b) + b) % b` was emitted without outer
+  parentheses; composed as a `Multiply`/`Divide` factor, JS's left-associative
+  same-precedence `%` reduced the whole product mod `b` (`c * ((x % 1) + 1) % 1`
+  ≡ `(c·(x%1+1)) % 1`), silently value-wrong whenever the product's magnitude
+  reached the divisor. The standalone form was correct, which is why it
+  survived. Compiled and interpreted now agree on the Neyret-hash idiom
+  `Σ cos(i)·mod(10⁴sin(10⁴i), 1)`.
 
 - **`Sum`/`Product` over a collection-valued body type as the collection, and
   `At` extracts element types (Tycho item 44).** A big-op whose body types
   `vector<2>` (e.g. summing scaled calls of `a(t) := [cos t, sin t]`) typed
   `number`, so indexing the sum baked an `incompatible-type` error at parse
-  time; it now types `vector<2>`. `At` on a `tuple`-typed operand with a
-  literal index types the selected slot, and an inference widen-guard stops a
-  loose parameter type from coarsening an already-precise inferred function
-  result (this made `A(t)[1]` type `any`; it now types `number`).
+  time; it now types `vector<2>`. `At` on a `tuple`-typed operand with a literal
+  index types the selected slot, and an inference widen-guard stops a loose
+  parameter type from coarsening an already-precise inferred function result
+  (this made `A(t)[1]` type `any`; it now types `number`).
 
 - **`At` over a typed-collection application compiles; a collection-valued
   big-op body fails closed instead of emitting wrong code (Tycho item 45).**
-  `a(x)[1]` with `a` returning `vector<2>` now compiles (the collection gate
-  is type-aware, so `_SYS.at` is emitted). A compiled `Sum`/`Product` whose
-  body is collection-typed previously emitted scalar accumulation over
-  arrays — NaN or string concatenation, silently wrong; it now fails closed
-  (D6) with a hint to distribute the element access through the big op.
+  `a(x)[1]` with `a` returning `vector<2>` now compiles (the collection gate is
+  type-aware, so `_SYS.at` is emitted). A compiled `Sum`/`Product` whose body is
+  collection-typed previously emitted scalar accumulation over arrays — NaN or
+  string concatenation, silently wrong; it now fails closed (D6) with a hint to
+  distribute the element access through the big op.
 
-- **Applying a function to a symbolic argument that mentions the parameter's
-  own name no longer overflows the stack under `.N()` (Tycho item 46).**
-  `a(t+1)` for `a(t) := [cos t, sin t]` with `t` unbound: symbol values
-  resolve by name through the evaluation context, so `BoxedSymbol.N()`
-  recursed through the call-frame binding forever (`t → t+1 → t → …`).
-  `.N()` now substitutes a self-referential context value once without
-  numericizing through it — mirroring plain `evaluate()` — so nested
-  helper-call expressions (the Tycho item-46 `PointList(A(t)[1], A(t)[2])`
-  repro) evaluate symbolically, verified against direct numeric evaluation.
+- **Applying a function to a symbolic argument that mentions the parameter's own
+  name no longer overflows the stack under `.N()` (Tycho item 46).** `a(t+1)`
+  for `a(t) := [cos t, sin t]` with `t` unbound: symbol values resolve by name
+  through the evaluation context, so `BoxedSymbol.N()` recursed through the
+  call-frame binding forever (`t → t+1 → t → …`). `.N()` now substitutes a
+  self-referential context value once without numericizing through it —
+  mirroring plain `evaluate()` — so nested helper-call expressions (the Tycho
+  item-46 `PointList(A(t)[1], A(t)[2])` repro) evaluate symbolically, verified
+  against direct numeric evaluation.
 
-- **Desmos-style range ellipsis with an elided comma parses again (Tycho
-  item 47, regression of the 0.76.0 "request 6" class).** `[0,...300]` →
+- **Desmos-style range ellipsis with an elided comma parses again (Tycho item
+  47, regression of the 0.76.0 "request 6" class).** `[0,...300]` →
   `Range(0,300)` (was an inert `List(0, ContinuationPlaceholder·300)`),
   `[1,...N]` and `[0,...3N^{2}-1]` likewise, and the stepped `[0,15...210]` →
   `Range(0, 210, 15)` (was the silently WRONG `List(0, Range(15,210))`).
   Fully-comma'd, bare-fused (`[1...5]`, `[-3N...3N]`), and nested-group
   (`[f(a,b)...5]`) forms are unchanged. Compound-symbolic stepped anchors
   sharing an identical additive base with numeric offsets now infer too:
-  `[m+n, m+n+15, ..., m+n+60]` → `Range(m+n, m+n+60, 15)`; differing bases
-  or non-numeric offsets stay a literal `List`. Stepped-range inference only
-  applies to ranges the ellipsis syntax itself produced — a list literal
-  ending in an explicit `\operatorname{Range}(a,b)` element stays a `List`.
+  `[m+n, m+n+15, ..., m+n+60]` → `Range(m+n, m+n+60, 15)`; differing bases or
+  non-numeric offsets stay a literal `List`. Stepped-range inference only
+  applies to ranges the ellipsis syntax itself produced — a list literal ending
+  in an explicit `\operatorname{Range}(a,b)` element stays a `List`.
 
-- **A `Range` operand of a tighter-binding parent now serializes
-  parenthesized (Tycho item 48).** `..` parses its end operand at a
-  precedence below `Add`, so `Add(Range(0, L-1), 3)` serialized as
-  `0..(L-1)+3`, which re-parses as `Range(0, L+2)` — wrong values on any
-  serialize→re-parse round-trip (with `L = 5`, an 8-element list instead of
-  the shifted 5-element one). A `Range` under `Add`/`Subtract`/`Multiply`/
-  `Power`/solidus-`Divide` parents now wraps in parentheses
-  (`(0..(L-1))+3`); bare and stepped ranges serialize unchanged. Same
-  round-trip precedence class as the 0.83.2 `Mod` fix.
+- **A `Range` operand of a tighter-binding parent now serializes parenthesized
+  (Tycho item 48).** `..` parses its end operand at a precedence below `Add`, so
+  `Add(Range(0, L-1), 3)` serialized as `0..(L-1)+3`, which re-parses as
+  `Range(0, L+2)` — wrong values on any serialize→re-parse round-trip (with
+  `L = 5`, an 8-element list instead of the shifted 5-element one). A `Range`
+  under `Add`/`Subtract`/`Multiply`/ `Power`/solidus-`Divide` parents now wraps
+  in parentheses (`(0..(L-1))+3`); bare and stepped ranges serialize unchanged.
+  Same round-trip precedence class as the 0.83.2 `Mod` fix.
 
-- **GPU targets emit a shape-matched NaN for masked conditional branches
-  (Tycho item 49).** A `When`/`Which` whose value is a tuple body — a
-  restricted parametric `(x(t), y(t))` with `\{0 \le t \le 1\}` — compiles
-  the value to a `vec2`, but the masked branch emitted a scalar NaN:
-  GLSL has no implicit float→vecN conversion in a ternary, so the driver
-  rejected the shader and every restricted parametric member lost its GPU
-  sampling path. The NaN branch is now vectorized to the value's component
-  count (`vec2(_gpu_nan())` on GLSL, `vec2f(bitcast<f32>(…))` on WGSL —
-  WGSL's `select` requires matching operand types); scalar bodies are
-  unchanged.
+- **GPU targets emit a shape-matched NaN for masked conditional branches (Tycho
+  item 49).** A `When`/`Which` whose value is a tuple body — a restricted
+  parametric `(x(t), y(t))` with `\{0 \le t \le 1\}` — compiles the value to a
+  `vec2`, but the masked branch emitted a scalar NaN: GLSL has no implicit
+  float→vecN conversion in a ternary, so the driver rejected the shader and
+  every restricted parametric member lost its GPU sampling path. The NaN branch
+  is now vectorized to the value's component count (`vec2(_gpu_nan())` on GLSL,
+  `vec2f(bitcast<f32>(…))` on WGSL — WGSL's `select` requires matching operand
+  types); scalar bodies are unchanged.
 
 - **Sign (`sgn`) handler audit.** A mathematical-correctness pass over all ~69
   `sgn` handlers fixed a dozen wrong claims (each could mislead simplifications
@@ -250,47 +247,56 @@
 
 #### Numeric performance (200-digit precision)
 
-Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
 
-| Expression | CE (current) | CE 0.84.1 | SymPy | math.js | Mathematica |
-| --- | --: | --: | --: | --: | --: |
-| $\pi^2$ | 7.0 | 12 | 184 | 110 | 4.0 |
-| $\sin 1$ | 21 | 26 | 226 | 479 | 5.3 |
-| $\cos 1$ | 21 | 25 | 230 | 667 | 7.1 |
-| $\ln 2$ | 14 | 18 | 356 | 5,093 | 3.1 |
-| $e^{\pi}$ | 12 | 17 | 215 | 4,862 | 4.5 |
-| $\zeta(3)$ | 1,573 | 1,620 | 268 | — | 49 |
-| $\Gamma(\tfrac13)$ | 914 | 921 | 366 | — | 225 |
-| $\psi(\tfrac13)$ | 749 | 743 | 6,854 | — | 188 |
+| Expression         | CE (current) | CE 0.84.1 | SymPy | math.js | Mathematica |
+| ------------------ | -----------: | --------: | ----: | ------: | ----------: |
+| $\pi^2$            |          7.0 |        12 |   184 |     110 |         4.0 |
+| $\sin 1$           |           21 |        26 |   226 |     479 |         5.3 |
+| $\cos 1$           |           21 |        25 |   230 |     667 |         7.1 |
+| $\ln 2$            |           14 |        18 |   356 |   5,093 |         3.1 |
+| $e^{\pi}$          |           12 |        17 |   215 |   4,862 |         4.5 |
+| $\zeta(3)$         |        1,573 |     1,620 |   268 |       — |          49 |
+| $\Gamma(\tfrac13)$ |          914 |       921 |   366 |       — |         225 |
+| $\psi(\tfrac13)$   |          749 |       743 | 6,854 |       — |         188 |
 
 #### Symbolic capability & performance
 
-Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.84.1** columns to see what is *new this release* (a `—` under `0.84.1` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE (current)** and **CE 0.84.1** columns to see
+what is _new this release_ (a `—` under `0.84.1` next to a number under the
+current build). The **CE + R/F** column is the current build with the opt-in
+Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
 
-| Operation | CE (current) | CE + R/F | CE 0.84.1 | SymPy | math.js | Mathematica |
-| --- | :--: | :--: | :--: | :--: | :--: | :--: |
-| **Antiderivatives** |  |  |  |  |  |  |
-| $\int\frac{1}{\sqrt x}\,dx$ | 6.4× | 2.7× | 3.4× | 0.4× | — | 1× |
-| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 9.6× | 1.7× | 6.0× | 0.09× | — | 1× |
-| $\int\frac{1}{x^3+1}\,dx$ | 7.5× | 0.9× | 1.1× | 0.4× | — | 1× |
-| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 1.9× | — | 0.09× | — | 1× |
-| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 1.3× | — | 0.01× | — | 1× |
-| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 1.1× | — | 0.007× | — | 1× |
-| **Derivatives** |  |  |  |  |  |  |
-| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.03× | 0.02× | 0.01× | 0.001× | 0.004× | 1× |
-| **Simplification** |  |  |  |  |  |  |
-| $\sqrt{3+2\sqrt2}$ | 39× | 29× | 23× | — | — | 1× |
-| $\sqrt6\,x+\sqrt2\,x$ | 79× | 45× | 43× | 2.8× | 15× | 1× |
-| **Evaluation** |  |  |  |  |  |  |
-| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 59× | 29× | 21× | 1.2× | — | 1× |
-| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 9.6× | 5.1× | 4.5× | 2.3× | — | 1× |
-| $\int_1^2\tfrac1x\,dx$ | 6653× | 6680× | 2654× | 63× | — | 1× |
-| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 402× | 104× | 159× | 2.5× | — | 1× |
-| **Solving** |  |  |  |  |  |  |
-| $x^4+x^2-1=0$ | 0.2× | 0.2× | 0.1× | 0.07× | — | 1× |
-| $x^3-x-1=0$ | 1.6× | 1.8× | 1.0× | 0.03× | — | 1× |
+| Operation                              | CE (current) | CE + R/F | CE 0.84.1 | SymPy  | math.js | Mathematica |
+| -------------------------------------- | :----------: | :------: | :-------: | :----: | :-----: | :---------: |
+| **Antiderivatives**                    |              |          |           |        |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |     6.4×     |   2.7×   |   3.4×    |  0.4×  |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |     9.6×     |   1.7×   |   6.0×    | 0.09×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |     7.5×     |   0.9×   |   1.1×    |  0.4×  |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |      —       |   1.9×   |     —     | 0.09×  |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |      —       |   1.3×   |     —     | 0.01×  |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |      —       |   1.1×   |     —     | 0.007× |    —    |     1×      |
+| **Derivatives**                        |              |          |           |        |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |    0.03×     |  0.02×   |   0.01×   | 0.001× | 0.004×  |     1×      |
+| **Simplification**                     |              |          |           |        |         |             |
+| $\sqrt{3+2\sqrt2}$                     |     39×      |   29×    |    23×    |   —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |     79×      |   45×    |    43×    |  2.8×  |   15×   |     1×      |
+| **Evaluation**                         |              |          |           |        |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |     59×      |   29×    |    21×    |  1.2×  |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |     9.6×     |   5.1×   |   4.5×    |  2.3×  |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |    6653×     |  6680×   |   2654×   |  63×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |     402×     |   104×   |   159×    |  2.5×  |    —    |     1×      |
+| **Solving**                            |              |          |           |        |         |             |
+| $x^4+x^2-1=0$                          |     0.2×     |   0.2×   |   0.1×    | 0.07×  |    —    |     1×      |
+| $x^3-x-1=0$                            |     1.6×     |   1.8×   |   1.0×    | 0.03×  |    —    |     1×      |
 
-Across the cases both solve, Compute Engine is a **median 7.5× faster than Mathematica** (up to 6653×) — in the browser, not a proprietary kernel.
+Across the cases both solve, Compute Engine is a **median 7.5× faster than
+Mathematica** (up to 6653×) — in the browser, not a proprietary kernel.
 
 <sub>
 Measured 2026-07-18 · Compute Engine `0.84.2` @ `40cc077a` (current build) · published `0.84.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
