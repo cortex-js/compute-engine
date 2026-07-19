@@ -196,7 +196,6 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     prec = 0
   ): TargetSource {
-
     // Is it a symbol?
     if (isSymbol(expr)) {
       const s = expr.symbol;
