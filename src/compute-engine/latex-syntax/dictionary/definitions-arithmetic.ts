@@ -3057,7 +3057,17 @@ function serializeBigOp(command: string) {
         decoratedCommand = supsub('^', decoratedCommand, sups.join(', '));
     }
 
-    return joinLatex([decoratedCommand, serializer.serialize(body)]);
+    // The body is parsed back at `MULTIPLICATION_PRECEDENCE` (see
+    // `parseBigOp`), so a body that binds looser — `Add`/`Subtract`/
+    // `Negate`, relations — must be fenced or its trailing terms escape the
+    // operator on re-parse: `\sum_{i=1}^{3}i+1` re-parses as
+    // `(\sum_{i=1}^{3}i)+1`, and a body-bound index in the escaped terms
+    // degenerates to a free symbol (Tycho item 55; same serialize→re-parse
+    // class as the `Mod` handling in `serializeMultiply`).
+    return joinLatex([
+      decoratedCommand,
+      serializer.wrap(body, MULTIPLICATION_PRECEDENCE),
+    ]);
   };
 }
 

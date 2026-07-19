@@ -37,6 +37,16 @@
   unknown-length source now reports finiteness as unknown rather than
   true. Bounded positive windows are unchanged
   (`ListFrom(Slice(Range(1,+∞), 1, 5))` → `[1,2,3,4,5]`).
+- **`Sum`/`Product` bodies that bind looser than multiplication are now
+  fenced when serialized.** The big-op body is parsed back at multiplication
+  precedence, so an additive body's trailing terms escaped the operator on
+  re-parse: `Sum(i + 1, i=1..3)` serialized as `\sum_{i=1}^3i+1`, which
+  re-parses as `(\sum_{i=1}^{3}i)+1` — 9 became 7 — and a body-bound index
+  in the escaped terms degenerated to a free symbol (`i` → the imaginary
+  unit, turning real product expansions complex-valued). Additive (and other
+  looser-than-multiplication) bodies now serialize parenthesized
+  (`\sum_{i=1}^3(i+1)`); tighter-binding bodies (`2i`, `\frac{1}{i}`, a bare
+  symbol) are unchanged.
 - **Fused stepped ranges with a fraction or compound second anchor now
   parse to the intended `Range`.** `[0,\frac{1}{6}...1]` parsed to
   `List(0, Range(1/6, 1))` — silently wrong values — because the sample

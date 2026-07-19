@@ -649,4 +649,44 @@ describe('DISPLAY DIGITS', () => {
       expect(t.latex).toEqual('2(1,2)');
     });
   });
+
+  // A big-op body is parsed back at MULTIPLICATION_PRECEDENCE, so an
+  // additive body must be fenced or its trailing terms escape the operator
+  // on re-parse — and a body-bound index in the escaped terms degenerates to
+  // a free symbol (`i` → the imaginary unit). Tycho item 55.
+  describe('Sum/Product additive bodies are fenced (Tycho item 55)', () => {
+    test('an Add body round-trips value-for-value', () => {
+      const s = ce.box(
+        ce.parse('\\sum_{i=1}^{3}\\left(i+1\\right)', { canonical: false })
+          .json
+      );
+      expect(s.latex).toEqual('\\sum_{i=1}^3(i+1)');
+      expect(ce.parse(s.latex).evaluate().re).toBe(9); // was 7: (\sum i)+1
+    });
+
+    test('a Subtract body keeps its bound index on re-parse', () => {
+      const p = ce.box(
+        ce.parse('\\prod_{i=1}^{5}\\left(x-\\frac{i}{5}\\right)', {
+          canonical: false,
+        }).json
+      );
+      const rt = ce.parse(p.latex, { strict: false });
+      expect(rt.operator).toBe('Product'); // not Add(Product, …)
+      // The index `i` must still be bound inside the body, not a free
+      // imaginary unit.
+      expect(JSON.stringify(rt.json)).not.toContain('Complex');
+    });
+
+    test('tighter-binding bodies stay unfenced', () => {
+      expect(
+        ce.box(['Sum', ['Multiply', 2, 'i'], ['Limits', 'i', 1, 3]]).latex
+      ).toEqual('\\sum_{i=1}^32i');
+      expect(
+        ce.box(['Sum', ['Divide', 1, 'i'], ['Limits', 'i', 1, 3]]).latex
+      ).toEqual('\\sum_{i=1}^3\\frac{1}{i}');
+      expect(ce.box(['Sum', 'i', ['Limits', 'i', 1, 3]]).latex).toEqual(
+        '\\sum_{i=1}^3i'
+      );
+    });
+  });
 });

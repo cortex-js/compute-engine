@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-18.
+**Last updated:** 2026-07-19.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -33,11 +33,14 @@ clean-parse 3/345 → 278/345, throws 9 → 0). Fresh unseen-sample validation
 measured 97.4% clean parse with 0 throws/0 hangs; the remaining MathNet work
 is a small notation tail tracked below.
 
-**0.84.2 released 2026-07-18** (latest). The 0.74–0.84 line carried the
-Tycho-compatibility rounds, the collection-operator-gaps + laziness waves,
-the `broadcastable<T>` typing lift, conditional values (`When`/`Which`),
-typed function literals, Mathematica-style surface forms, `NDSolve` adaptive
-stepping + `NDSolveFunction`, and the disposition of the 2026-07
+**0.86.0 released 2026-07-19** (latest). The 0.74–0.86 line carried the
+Tycho-compatibility rounds (through items 50–54: hybrid-lazy `PointList`
+transposes, the serialize→re-parse juxtaposition fixes, machine-precision
+exact-sum crash, `ce.withTimeLimit`), the collection-operator-gaps +
+laziness waves, the `broadcastable<T>` typing lift, conditional values
+(`When`/`Which`), typed function literals, Mathematica-style surface forms,
+`NDSolve` adaptive stepping + `NDSolveFunction`, the DSolve frontier round
+(SymPy parity on the ODE audit), and the disposition of the 2026-07
 correctness/symbolic/performance reviews — see `CHANGELOG.md`. Earlier
 milestones: **0.73.0** (2026-07-09; solving parity 38/40 with
 SymPy/Mathematica, Rubi R13–R16, `Interpret`, number theory) and the 0.7x
@@ -453,6 +456,24 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
 
 - **T3 (deferred, low value):** `Keys`/`Values` (dicts are small), `Chunk`
   (needs count only).
+- **Auto-compile lazy-`Map` element lambdas on numeric drains (ratified
+  2026-07-19, from the Tycho item-42 addendum).** Draining a lazy `Map`
+  whose lambda applies an interpreted user function costs the full
+  symbolic-evaluation pipeline per element — ~15 ms/element on the filed
+  repro (a 40-term `Sum` of a user function over a 2469-element broadcast),
+  a CPU profile of which is diffuse (canonical ordering, type checks,
+  exact-rational machinery: architectural, no single defect). The same
+  lambda through the existing compile route measures **6.1 µs/element**
+  (full sweep 15 ms vs ~38 s, ~2500×) with digit-for-digit parity. Design
+  questions to settle before building: when to attempt compilation (float
+  drains only — `.N()`/machine-precision contexts — so the exactness
+  contract is never routed around), fallback semantics on non-compilable
+  bodies (silent interpreter fallback, one attempt per instance), and
+  caching the compiled function per collection instance alongside the
+  items-39/40 per-instance element memos (invalidation must follow the
+  same two-axis keying as the element memos). Until it lands, consumers
+  bound interpreted drains with `ce.withTimeLimit()` (0.86.0) or migrate
+  hot paths to the explicit compile route.
 - **Fusion/rewrite layer — open design decision (user has not ruled).** No
   structural rewrite layer exists; lazy facet delegation gives O(1)
   `Count`/`At` through lazy chains, and canonical peeks now cover
