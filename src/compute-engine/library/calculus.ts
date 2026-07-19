@@ -907,8 +907,7 @@ volumes
         const [lower, upper] = [a.N().re, b.N().re];
         if (isNaN(lower) || isNaN(upper)) return undefined;
         const compiled = implicitCompile(engine, f);
-        const jsf =
-          (compiled?.run as (x: number) => number) ?? applicableN1(f);
+        const jsf = (compiled?.run as (x: number) => number) ?? applicableN1(f);
 
         // Dedicated oscillatory quadrature for semi-infinite intervals (see
         // the `Integrate` numeric path); null → fall back to Monte Carlo.
@@ -1288,8 +1287,7 @@ volumes
         const compiled = implicitCompile(engine, f, {
           iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
         });
-        const fn =
-          (compiled?.run as (x: number) => number) ?? applicableN1(f);
+        const fn = (compiled?.run as (x: number) => number) ?? applicableN1(f);
         return new BoxedNumber(
           engine,
           limit(fn, target, dir ? dir.re : 1, engine._deadline)

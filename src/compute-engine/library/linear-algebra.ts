@@ -697,10 +697,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value*) -> value',
       evaluate: (ops, { engine: ce }) => {
-        return ce._fn(
-          'Hom',
-          ops
-        );
+        return ce._fn('Hom', ops);
       },
     },
 

@@ -291,7 +291,10 @@ export function assertCompilationOptionsContract(
     );
   }
 
-  if (options.symbolDeps !== undefined && !(options.symbolDeps instanceof Set)) {
+  if (
+    options.symbolDeps !== undefined &&
+    !(options.symbolDeps instanceof Set)
+  ) {
     throw new Error(
       'Invalid compilation option "symbolDeps": expected a Set of symbol ids'
     );

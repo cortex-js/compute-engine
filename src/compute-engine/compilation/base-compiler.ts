@@ -766,8 +766,7 @@ export class BaseCompiler {
         target
       );
       const compilePair = (i: number): string => {
-        if (i >= args.length)
-          return coerce ? '({ re: NaN, im: NaN })' : 'NaN';
+        if (i >= args.length) return coerce ? '({ re: NaN, im: NaN })' : 'NaN';
         const cond = args[i];
         const val = args[i + 1];
         const valCode = coerce
