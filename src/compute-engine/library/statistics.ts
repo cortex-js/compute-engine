@@ -256,7 +256,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(ops);
           if (vals) return exactMean(engine, vals);
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
             ? bigMean(flattenBigScalars(xs))
@@ -277,7 +277,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(ops);
           if (vals) return exactMedianOf(engine, sortExact(vals));
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
             ? bigMedian(flattenBigScalars(xs))
@@ -301,7 +301,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(ops);
           if (vals) return exactVariance(engine, vals, false);
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
             ? bigVariance(flattenBigScalars(xs))
@@ -321,7 +321,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(ops);
           if (vals) return exactVariance(engine, vals, true);
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
             ? bigPopulationVariance(flattenBigScalars(xs))
@@ -349,7 +349,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
               .function('Sqrt', [exactVariance(engine, vals, false)])
               .evaluate();
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
             ? bigVariance(flattenBigScalars(xs)).sqrt()
@@ -372,7 +372,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
               .function('Sqrt', [exactVariance(engine, vals, true)])
               .evaluate();
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
             ? bigPopulationVariance(flattenBigScalars(xs)).sqrt()
@@ -392,7 +392,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(ops);
           if (vals) return exactKurtosis(engine, vals);
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
             ? bigKurtosis(flattenBigScalars(xs))
@@ -412,7 +412,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(ops);
           if (vals) return exactSkewness(engine, vals);
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
             ? bigSkewness(flattenBigScalars(xs))
@@ -432,7 +432,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const vals = exactData(ops);
           if (vals) return exactMode(engine, vals);
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
             ? bigMode(flattenBigScalars(xs))
@@ -462,7 +462,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return engine.tuple(q1, q2, q3);
           }
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         const [mid, lower, upper] = (
           bignumPreferred(engine)
             ? bigQuartiles(flattenBigScalars(xs))
@@ -487,7 +487,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return subtract(engine, q3, q1);
           }
         }
-        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
             ? bigInterquartileRange(flattenBigScalars(xs))

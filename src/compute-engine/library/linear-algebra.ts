@@ -135,7 +135,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         );
       },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        let op1 = ops[0].evaluate();
+        let op1 = ops[0];
         const targetShape = isFunction(ops[1])
           ? ops[1].ops.map((op) => op.re)
           : [];
@@ -183,7 +183,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value, integer?) -> list',
       evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0].evaluate();
+        const op1 = ops[0];
 
         // With an explicit depth, flatten only that many nesting levels
         // (Wolfram `Flatten[list, n]`). This path is guarded behind the
@@ -228,7 +228,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
       evaluate: (ops, { engine: ce }) => {
-        let op1 = ops[0].evaluate();
+        let op1 = ops[0];
 
         // Transpose of scalar is the scalar itself
         if (op1.isNumber) return op1;
@@ -270,7 +270,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
       evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0].evaluate();
+        const op1 = ops[0];
 
         // Conjugate transpose of scalar is its conjugate
         if (op1.isNumber) return ce.expr(['Conjugate', op1]).evaluate();
@@ -312,7 +312,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix) -> number',
       evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0].evaluate();
+        const op1 = ops[0];
 
         // Determinant of scalar (1x1 matrix) is the scalar itself
         if (op1.isNumber) return op1;
@@ -358,7 +358,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(matrix) -> matrix',
       type: ([matrix]) => matrix.type,
       evaluate: ([matrix], { engine: ce, numericApproximation }) => {
-        const op1 = matrix.evaluate();
+        const op1 = matrix;
 
         // Inverse of scalar is 1/scalar
         if (op1.isNumber) return ce.expr(['Divide', 1, op1]).evaluate();
@@ -423,7 +423,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix) -> matrix',
       evaluate: ([matrix], { engine: ce }) => {
-        const op1 = matrix.evaluate();
+        const op1 = matrix;
 
         // Pseudoinverse of scalar is 1/scalar (or 0 if scalar is 0)
         if (op1.isNumber) {
@@ -444,8 +444,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8300,
       signature: '(matrix, matrix|vector) -> value',
       evaluate: ([a, b], { engine: ce, numericApproximation }) => {
-        const A = a.evaluate({ numericApproximation });
-        const B = b.evaluate({ numericApproximation });
+        const A = a;
+        const B = b;
 
         if (!isTensor(A) || !isTensor(B)) return undefined;
 
@@ -485,7 +485,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix) -> matrix',
       evaluate: (ops) => {
-        const op1 = ops[0].evaluate();
+        const op1 = ops[0];
         if (isTensor(op1)) return op1.tensor.adjugateMatrix()?.expression;
 
         return undefined;
@@ -530,7 +530,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         return 'value';
       },
       evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0].evaluate();
+        const op1 = ops[0];
 
         // Trace of scalar is the scalar itself
         if (op1.isNumber) return op1;
@@ -585,7 +585,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value) -> list',
       evaluate: ([map], { engine: ce }) => {
-        const op = map.evaluate();
+        const op = map;
 
         // Kernel of scalar map x -> a*x over R
         if (op.isNumber) {
@@ -639,7 +639,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value) -> integer',
       sgn: (): Sign => 'non-negative',
       evaluate: ([object], { engine: ce }) => {
-        const op = object.evaluate();
+        const op = object;
 
         // Structural check on the *unevaluated* expression: we pattern-match
         // on the literal Kernel(...) / Hom(...) form so that
@@ -655,8 +655,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // dim(Hom(V, W)) = dim(V) * dim(W) for finite-dimensional objects.
         // Same structural matching caveat as Kernel above.
         if (isFunction(object, 'Hom') && object.ops.length >= 2) {
-          const domainDim = finiteDimension(object.ops[0].evaluate());
-          const codomainDim = finiteDimension(object.ops[1].evaluate());
+          const domainDim = finiteDimension(object.ops[0]);
+          const codomainDim = finiteDimension(object.ops[1]);
           if (domainDim !== undefined && codomainDim !== undefined)
             return ce.number(domainDim * codomainDim);
         }
@@ -674,7 +674,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value) -> integer',
       sgn: (): Sign => 'non-negative',
       evaluate: ([object], { engine: ce }) => {
-        const op = object.evaluate();
+        const op = object;
 
         // Constants have degree 0. Gate on `isConstant` (lexical), not the
         // dynamic-scope `unknowns` — inside a function application a bound
@@ -699,7 +699,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }) => {
         return ce._fn(
           'Hom',
-          ops.map((op) => op.evaluate())
+          ops
         );
       },
     },
@@ -711,8 +711,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> matrix|vector',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const A = ops[0].evaluate();
-        const B = ops[1].evaluate();
+        const A = ops[0];
+        const B = ops[1];
 
         // Both operands must be tensors
         if (!isTensor(A) || !isTensor(B)) return undefined;
@@ -826,8 +826,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> matrix|vector',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const A = ops[0].evaluate();
-        const B = ops[1].evaluate();
+        const A = ops[0];
+        const B = ops[1];
 
         // Both operands must be tensors of the same shape.
         if (!isTensor(A) || !isTensor(B)) return undefined;
@@ -855,7 +855,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value) -> integer',
       sgn: (): Sign => 'non-negative',
       evaluate: ([map], { engine: ce }) => {
-        const op = map.evaluate();
+        const op = map;
 
         // Rank of a scalar map x ↦ a·x: 1 if non-zero, 0 if zero.
         if (op.isNumber) return ce.number(op.isSame(0) ? 0 : 1);
@@ -930,7 +930,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value) -> boolean',
       evaluate: ([m], { engine: ce }) => {
-        const op = m.evaluate();
+        const op = m;
         if (!isTensor(op)) return ce.False;
         return op.tensor.isSquare ? ce.True : ce.False;
       },
@@ -941,7 +941,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value) -> boolean',
       evaluate: ([m], { engine: ce }) => {
-        const op = m.evaluate();
+        const op = m;
         if (!isTensor(op)) return ce.False;
         return op.tensor.isSymmetric ? ce.True : ce.False;
       },
@@ -953,7 +953,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value) -> boolean',
       evaluate: ([m], { engine: ce }) => {
-        const op = m.evaluate();
+        const op = m;
         if (!isTensor(op)) return ce.False;
         return op.tensor.isDiagonal ? ce.True : ce.False;
       },
@@ -964,8 +964,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8300,
       signature: '(vector, vector) -> vector',
       evaluate: ([a, b], { engine: ce }) => {
-        const A = a.evaluate();
-        const B = b.evaluate();
+        const A = a;
+        const B = b;
         if (!isTensor(A) || !isTensor(B)) return undefined;
         if (
           A.shape.length !== 1 ||
@@ -1003,7 +1003,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8300,
       signature: '(matrix, number) -> matrix',
       evaluate: ([mat, exponent], { engine: ce }) => {
-        const A = mat.evaluate();
+        const A = mat;
         if (!isTensor(A)) return undefined;
         if (!A.tensor.isSquare)
           return ce.error('expected-square-matrix', A.toString());
@@ -1057,7 +1057,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // signature check. The evaluate handler validates it with `isSymbol`.
       signature: '(matrix, any?) -> expression',
       evaluate: ([mat, variable], { engine: ce }) => {
-        const A = mat.evaluate();
+        const A = mat;
         if (!isTensor(A)) return undefined;
         if (!A.tensor.isSquare)
           return ce.error('expected-square-matrix', A.toString());
@@ -1087,7 +1087,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix) -> matrix',
       evaluate: ([m], { engine: ce }) => {
-        const op = m.evaluate();
+        const op = m;
         if (!isTensor(op)) return undefined;
 
         const shape = op.shape;
@@ -1131,7 +1131,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value) -> value',
       evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0].evaluate();
+        const op1 = ops[0];
 
         // Scalar → return as-is
         if (op1.isNumber) return op1;
@@ -1188,7 +1188,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8100,
       signature: '(integer) -> matrix',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const nExpr = ops[0].evaluate();
+        const nExpr = ops[0];
         const n = nExpr.re;
 
         if (n === undefined || !Number.isSafeInteger(n) || n < 1)
@@ -1218,7 +1218,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8100,
       signature: '(integer, integer?) -> matrix',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const mExpr = ops[0].evaluate();
+        const mExpr = ops[0];
         const m = mExpr.re;
 
         if (m === undefined || !Number.isSafeInteger(m) || m < 1)
@@ -1227,7 +1227,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // If only one argument, create m×m matrix
         let n = m;
         if (ops.length > 1) {
-          const nExpr = ops[1].evaluate();
+          const nExpr = ops[1];
           n = nExpr.re ?? m;
           if (!Number.isSafeInteger(n) || n < 1)
             return ce.error('expected-positive-integer', nExpr.toString());
@@ -1256,7 +1256,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8100,
       signature: '(integer, integer?) -> matrix',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const mExpr = ops[0].evaluate();
+        const mExpr = ops[0];
         const m = mExpr.re;
 
         if (m === undefined || !Number.isSafeInteger(m) || m < 1)
@@ -1265,7 +1265,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // If only one argument, create m×m matrix
         let n = m;
         if (ops.length > 1) {
-          const nExpr = ops[1].evaluate();
+          const nExpr = ops[1];
           n = nExpr.re ?? m;
           if (!Number.isSafeInteger(n) || n < 1)
             return ce.error('expected-positive-integer', nExpr.toString());
@@ -1301,8 +1301,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value, number|string?) -> number',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const x = ops[0].evaluate();
-        const normTypeExpr = ops.length > 1 ? ops[1].evaluate() : undefined;
+        const x = ops[0];
+        const normTypeExpr = ops.length > 1 ? ops[1] : undefined;
 
         // Scalar: |x| (absolute value)
         if (x.isNumber) {
@@ -1474,7 +1474,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       signature: '(matrix) -> list',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const M = ops[0].evaluate();
+        const M = ops[0];
 
         if (!isTensor(M)) return undefined;
 
@@ -1542,7 +1542,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       signature: '(matrix) -> list',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const M = ops[0].evaluate();
+        const M = ops[0];
 
         if (!isTensor(M)) return undefined;
 
@@ -1589,7 +1589,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8700,
       signature: '(matrix) -> tuple',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const M = ops[0].evaluate();
+        const M = ops[0];
 
         if (!isTensor(M)) return undefined;
 
@@ -1616,7 +1616,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       signature: '(matrix) -> tuple',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const M = ops[0].evaluate();
+        const M = ops[0];
 
         if (!isTensor(M)) return undefined;
 
@@ -1642,7 +1642,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       signature: '(matrix) -> tuple',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const M = ops[0].evaluate();
+        const M = ops[0];
 
         if (!isTensor(M)) return undefined;
 
@@ -1668,7 +1668,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       signature: '(matrix) -> matrix',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const M = ops[0].evaluate();
+        const M = ops[0];
 
         if (!isTensor(M)) return undefined;
 
@@ -1690,7 +1690,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8700,
       signature: '(matrix) -> tuple',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const M = ops[0].evaluate();
+        const M = ops[0];
 
         if (!isTensor(M)) return undefined;
 
@@ -1718,7 +1718,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8700,
       signature: '(matrix) -> list',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
-        const M = ops[0].evaluate();
+        const M = ops[0];
         if (!isTensor(M)) return undefined;
 
         const shape = M.shape;

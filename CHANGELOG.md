@@ -22,15 +22,27 @@
   returned `0` (now stays symbolic), and `Degree(w²)` returned `0`
   (now `2`).
 
-  Relatedly, several **non-lazy** arithmetic evaluate handlers (`Power`,
-  `Sqrt`, `Root`, `Divide`, `Ln`, `Log`, `Negate`) re-evaluated operands the
+  Relatedly, many **non-lazy** evaluate handlers re-evaluated operands the
   evaluation driver had already evaluated. Each such call re-descends the
   whole operand subtree, so under nesting the waste compounded — a residual
-  ×2-per-level re-walk on top of the bug above. The handlers now trust their
-  pre-evaluated operands (the handler contract: a `lazy` operator's handler
-  owns its operands' single evaluation; a non-lazy handler receives them
-  already evaluated), making symbolic recursive unwinding linear: depth 80
+  ×2-per-level re-walk on top of the bug above. All library handlers now
+  follow the handler contract (a `lazy` operator's handler owns its
+  operands' single evaluation; a non-lazy handler receives them already
+  evaluated and must not re-evaluate): `Power`, `Sqrt`, `Root`, `Divide`,
+  `Ln`, `Log`, `Negate` in arithmetic; the linear-algebra operators
+  (`Transpose`, `Determinant`, `Inverse`, `MatrixMultiply`, `Norm`, the
+  eigen/decomposition family, matrix constructors and predicates, ~30
+  sites); the statistics reducers (`Mean`/`Median`/`Variance`/… — 11
+  sites); and `Text`. Symbolic recursive unwinding is now linear: depth 80
   unwinds in ~95 ms where depth ~20 previously hit the time limit.
+
+- **`Timing` now measures the actual evaluation.** `Timing` was a non-lazy
+  operator, so the engine evaluated its argument *before* the handler ran
+  and the handler then timed a redundant second walk of the
+  already-evaluated result — reported times measured cache-warm re-walks,
+  not the computation. `Timing` is now `lazy`: the handler receives the raw
+  argument, canonicalizes it outside the timed region, and times the real
+  evaluation.
 
 - **One-time cache builds are no longer charged against the time limit.** The
   engine builds some internal tables lazily on first use (constructible trig

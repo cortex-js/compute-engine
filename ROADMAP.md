@@ -184,11 +184,14 @@ Remaining follow-ups, both demand-gated:
     compounds exponentially). An intermediate experiment deleted the lazy
     `Add`/`Multiply` maps too — that froze recursive unrolling at one level
     per pass (`Q(2,z)` stuck at `Q(1,z)²+0.3`), which is what confirmed the
-    lazy/non-lazy split is the real contract. Remaining same-class cleanup
-    (audited, not yet applied — cold paths, one wasted subtree-walk each,
-    not exponential): ~25 non-lazy handlers in `linear-algebra.ts`
-    (`Reshape`/`Transpose`/`Determinant`/`Norm`/eigen-family/…) and
-    `core.ts` `Timing` still re-evaluate operands.
+    lazy/non-lazy split is the real contract. The full library sweep landed
+    the same day: linear-algebra (~30 sites), statistics reducers (11),
+    `Text`, plus a semantic fix to `Timing` (now `lazy`, so it times the
+    real evaluation instead of a cache-warm re-walk; its handler
+    canonicalizes the raw operand outside the timed region — `lazy`
+    operands arrive raw and non-canonical, and evaluating a non-canonical
+    expression is a no-op, the item-52 "lazy leaks raw ops" trap).
+    `evaluateAsync` handlers audited clean.
   - two sites carry the same dynamic-scope `unknowns.length === 0` predicate
     as a *latent* instance of the trap, with no demonstrated observable
     misbehavior — leave them until one surfaces: the equation-equivalence

@@ -445,7 +445,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const unwrapped = isFunction(op, 'Annotated') ? op.op1 : op;
           if (isString(unwrapped)) parts.push(unwrapped.string);
           else {
-            const evaluated = unwrapped.evaluate();
+            const evaluated = unwrapped;
             if (isString(evaluated)) parts.push(evaluated.string);
             else parts.push(evaluated.toString());
           }
@@ -1662,24 +1662,33 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         '`Timing(expr)` evaluates `expr` and return a `Pair` of the number of second elapsed for the evaluation, and the value of the evaluation',
       signature:
         '(value, repeat: integer?) -> tuple<result:value, time:number>',
+      // `lazy` so the handler receives the RAW operand: `Timing` must time
+      // the evaluation itself. As a non-lazy operator the driver evaluated
+      // the operand *before* the handler, so the handler was timing a
+      // redundant re-walk of an already-evaluated result.
+      lazy: true,
       evaluate: (ops, { engine: ce }) => {
-        if (sym(ops[1]) === 'Nothing') {
+        // `lazy` operands arrive RAW: canonicalize explicitly, outside the
+        // timed region, so the timer measures pure evaluation.
+        const expr = ops[0].canonical;
+        const repeat = ops[1]?.canonical.evaluate();
+        if (repeat === undefined || sym(repeat) === 'Nothing') {
           // Evaluate once
           const start = globalThis.performance.now();
-          const result = ops[0].evaluate();
+          const result = expr.evaluate();
           const timing = 1000 * (globalThis.performance.now() - start);
 
           return ce.tuple(ce.number(timing), result);
         }
 
         // Evaluate multiple times
-        let n = Math.max(3, toInteger(ops[1]) ?? 3);
+        let n = Math.max(3, toInteger(repeat) ?? 3);
 
         let timings: number[] = [];
         let result: Expression;
         while (n > 0) {
           const start = globalThis.performance.now();
-          result = ops[0].evaluate();
+          result = expr.evaluate();
           timings.push(1000 * (globalThis.performance.now() - start));
           n -= 1;
         }
