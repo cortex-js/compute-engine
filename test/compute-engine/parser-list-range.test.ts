@@ -579,3 +579,68 @@ describe('Range under arithmetic parents round-trips (Tycho item 48)', () => {
     ).toEqual(['Range', 0, 210, 15]);
   });
 });
+
+// Fused stepped forms whose second anchor is a fraction or compound
+// expression (Tycho item 47 residual). The fraction form needs an EXACT
+// step (a float `0.1666…` drifts and can miss the end anchor); the additive
+// form's continuation range is EMBEDDED in the additive tail (`...` binds
+// its LHS tight, so `m+n+15...m+n+60` parses as
+// `Add(m, n, Range(15, m+n+60))`).
+describe('fused ranges with fraction/compound second anchor (Tycho item 47 residual)', () => {
+  test('`[0,\\frac{1}{6}...1]` → Range(0, 1, 1/6), exact step', () => {
+    expect(parse('\\left[0,\\frac{1}{6}...1\\right]')).toEqual([
+      'Range',
+      0,
+      1,
+      ['Rational', 1, 6],
+    ]);
+    // The exact step makes the end anchor land exactly: 7 elements, last = 1.
+    const r = ce
+      .parse('\\left[0,\\frac{1}{6}...1\\right]', { strict: false })
+      .evaluate();
+    expect(r.count).toBe(7);
+    const els = [...r.each()];
+    expect(els[els.length - 1].isSame(1)).toBe(true);
+  });
+
+  test('`[1,\\frac{3}{2}...4]` → Range(1, 4, 1/2)', () => {
+    expect(parse('\\left[1,\\frac{3}{2}...4\\right]')).toEqual([
+      'Range',
+      1,
+      4,
+      ['Rational', 1, 2],
+    ]);
+  });
+
+  test('`[m+n,m+n+15...m+n+60]` → Range(m+n, m+n+60, 15)', () => {
+    expect(parse('\\left[m+n,m+n+15...m+n+60\\right]')).toEqual([
+      'Range',
+      ['Add', 'm', 'n'],
+      ['Add', 'm', 'n', 60],
+      15,
+    ]);
+  });
+
+  test('inconsistent fraction samples → parse error', () => {
+    const result = parse(
+      '\\left[0,\\frac{1}{6},\\frac{1}{2}...1\\right]'
+    ) as Expression[];
+    expect(JSON.stringify(result)).toContain('inconsistent-range-samples');
+  });
+
+  test('an explicit Range() element still stays a literal List entry', () => {
+    expect(parse('\\left[3,\\operatorname{Range}(1,5)\\right]')).toEqual([
+      'List',
+      3,
+      ['Range', 1, 5],
+    ]);
+  });
+
+  test('an embedded EXPLICIT Range in an additive tail stays a List', () => {
+    // No ellipsis provenance → no continuation rewrite.
+    const result = parse(
+      '\\left[m+n,m+n+\\operatorname{Range}(15,60)\\right]'
+    );
+    expect(operatorOf(result)).toBe('List');
+  });
+});

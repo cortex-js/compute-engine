@@ -37,6 +37,20 @@
   unknown-length source now reports finiteness as unknown rather than
   true. Bounded positive windows are unchanged
   (`ListFrom(Slice(Range(1,+∞), 1, 5))` → `[1,2,3,4,5]`).
+- **Fused stepped ranges with a fraction or compound second anchor now
+  parse to the intended `Range`.** `[0,\frac{1}{6}...1]` parsed to
+  `List(0, Range(1/6, 1))` — silently wrong values — because the sample
+  reader did not recognize fraction literals; it now yields
+  `Range(0, 1, 1/6)` with an EXACT rational step (a float `0.1666…` step
+  would drift and miss the end anchor; the range lands exactly on `1`).
+  And `[m+n,m+n+15...m+n+60]` parsed to a nested-`Range` `List` — the
+  `...` infix binds its left operand tight, so the continuation range was
+  embedded in the additive tail (`Add(m, n, Range(15, m+n+60))`); the
+  normalization now recovers the true second sample and end anchor,
+  yielding `Range(m+n, m+n+60, 15)`. Both rewrites keep the provenance
+  guard: only ellipsis/`..`-written ranges participate — an explicit
+  `\operatorname{Range}(…)` element (bare or embedded in a sum) stays a
+  literal `List` entry.
 
 ## 0.86.0 _2026-07-19_
 

@@ -3234,6 +3234,80 @@ function signedMachineValue(expr: MathJsonExpression): number | null {
 const continuationRanges = new WeakSet<object>();
 
 /**
+ * Read a raw numeric sample as an exact rational: a plain machine number
+ * (`{num: v, den: 1}`), a `Negate` of one, or a `Divide`/`Rational` of two
+ * integer literals (`\frac{1}{6}` → `{num: 1, den: 6}`). Returns `null` for
+ * any other shape. The float view is `num/den`; `den !== 1` marks a true
+ * fraction literal, which requires EXACT step emission — a float step like
+ * `0.1666…` drifts and can miss the range's end anchor.
+ */
+function rationalSampleValue(
+  expr: MathJsonExpression
+): { num: number; den: number } | null {
+  const v = machineValue(expr);
+  if (v !== null) return { num: v, den: 1 };
+  const h = operator(expr);
+  if (h === 'Negate') {
+    const arg = operand(expr, 1);
+    if (arg === null || arg === undefined) return null;
+    const inner = rationalSampleValue(arg);
+    return inner === null ? null : { num: -inner.num, den: inner.den };
+  }
+  if (h === 'Divide' || h === 'Rational') {
+    if (nops(expr) !== 2) return null;
+    const n = signedMachineValue(operand(expr, 1)!);
+    const d = signedMachineValue(operand(expr, 2)!);
+    if (n === null || d === null) return null;
+    if (!Number.isInteger(n) || !Number.isInteger(d) || d === 0) return null;
+    return { num: n, den: d };
+  }
+  return null;
+}
+
+/** Raw MathJSON for an exact rational: the integer when `den` divides out. */
+function rationalToExpression(num: number, den: number): MathJsonExpression {
+  if (den < 0) [num, den] = [-num, -den];
+  const g = gcdInt(Math.abs(num), den);
+  [num, den] = [num / g, den / g];
+  return den === 1 ? num : ['Divide', num, den];
+}
+
+function gcdInt(a: number, b: number): number {
+  while (b !== 0) [a, b] = [b, a % b];
+  return a === 0 ? 1 : a;
+}
+
+/**
+ * Strip a continuation `Range` embedded as the LAST term of an additive
+ * chain. In `[m+n, m+n+15...m+n+60]` the tail parses as
+ * `Add(m, n, Range(15, Add(m, n, 60)))` — the `..`/`...` infix binds its LHS
+ * tight (just `15`) while its end absorbs the full additive endpoint — so the
+ * actual second sample is `m+n+15` and the end anchor `m+n+60`. Only fires on
+ * a provenance-tagged 2-operand continuation `Range` (the same guard as the
+ * bare-`Range` normalization arm). Returns the recovered
+ * `{ sample, end }`, or `null` when `expr` does not carry an embedded
+ * continuation range.
+ */
+function stripEmbeddedContinuationRange(
+  expr: MathJsonExpression
+): { sample: MathJsonExpression; end: MathJsonExpression } | null {
+  const h = operator(expr);
+  if (h !== 'Add' && h !== 'Subtract') return null;
+  const args = operands(expr);
+  if (args.length < 2) return null;
+  const tail = args[args.length - 1];
+  if (
+    operator(tail) !== 'Range' ||
+    operands(tail).length !== 2 ||
+    !continuationRanges.has(tail as object)
+  )
+    return null;
+  const rest = args.slice(0, -1);
+  const sample: MathJsonExpression = [h, ...rest, operand(tail, 1)!];
+  return { sample, end: operand(tail, 2)! };
+}
+
+/**
  * Desmos emits stepped/endpoint ellipsis ranges with the comma AFTER the
  * ellipsis elided: `[0,...300]`, `[1,...N]`, `[0,...3N^2-1]`. With no comma to
  * terminate it, the `\dots` parses as a bare `ContinuationPlaceholder` symbol
@@ -3311,9 +3385,22 @@ export function tryInferRangeFromElements(
           operand(last, 2)!,
         ];
       } else {
-        const end = stripLeadingContinuation(last);
-        if (end !== null)
-          elems = [...elems.slice(0, -1), 'ContinuationPlaceholder', end];
+        // `[m+n, m+n+15...m+n+60]`: the continuation range is EMBEDDED as
+        // the last term of the additive tail (the infix bound only `15` as
+        // its LHS) — recover the true second sample and end anchor.
+        const emb = stripEmbeddedContinuationRange(last);
+        if (emb !== null) {
+          elems = [
+            ...elems.slice(0, -1),
+            emb.sample,
+            'ContinuationPlaceholder',
+            emb.end,
+          ];
+        } else {
+          const end = stripLeadingContinuation(last);
+          if (end !== null)
+            elems = [...elems.slice(0, -1), 'ContinuationPlaceholder', end];
+        }
       }
     }
   }
@@ -3346,13 +3433,15 @@ export function tryInferRangeFromElements(
 
   const tol = parser.options.tolerance;
 
-  // Numeric path: all samples reduce to signed numbers. At parse time the
-  // samples are raw MathJSON, so a negative literal is `["Negate", <numeric>]`
-  // rather than a negative number — unwrap it so signed leading samples are
-  // recognized.
-  const sampleNums = samples.map(signedMachineValue);
-  if (sampleNums.every((n) => n !== null)) {
-    const nums = sampleNums as number[];
+  // Numeric path: all samples reduce to signed numbers or exact rational
+  // literals. At parse time the samples are raw MathJSON, so a negative
+  // literal is `["Negate", <numeric>]` rather than a negative number, and a
+  // fraction is `["Divide", 1, 6]` — unwrap both so signed and fractional
+  // samples are recognized.
+  const sampleRats = samples.map(rationalSampleValue);
+  if (sampleRats.every((r) => r !== null)) {
+    const rats = sampleRats as { num: number; den: number }[];
+    const nums = rats.map((r) => r.num / r.den);
 
     // Step = difference between the last two samples
     const step = nums[nums.length - 1] - nums[nums.length - 2];
@@ -3365,6 +3454,20 @@ export function tryInferRangeFromElements(
     for (let i = 1; i < nums.length; i++) {
       if (Math.abs(nums[i] - nums[i - 1] - step) > tol)
         return parser.error('inconsistent-range-samples', parser.index);
+    }
+
+    // A true fraction literal among the samples (`[0, \frac{1}{6}...1]`)
+    // requires the start and step to be emitted EXACTLY — a float step
+    // (`0.1666…`) accumulates drift and can miss the end anchor.
+    if (rats.some((r) => r.den !== 1)) {
+      const a = rats[rats.length - 1];
+      const b = rats[rats.length - 2];
+      return [
+        'Range',
+        rationalToExpression(rats[0].num, rats[0].den),
+        endExpr,
+        rationalToExpression(a.num * b.den - b.num * a.den, a.den * b.den),
+      ];
     }
 
     return ['Range', nums[0], endExpr, step];
