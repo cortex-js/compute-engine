@@ -246,6 +246,56 @@
   matrix-context inference repair), so assigning the variable evaluates as
   expected.
 
+### Benchmarks
+
+#### Numeric performance (200-digit precision)
+
+Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+
+| Expression | CE (current) | CE 0.84.1 | SymPy | math.js | Mathematica |
+| --- | --: | --: | --: | --: | --: |
+| $\pi^2$ | 7.0 | 12 | 184 | 110 | 4.0 |
+| $\sin 1$ | 21 | 26 | 226 | 479 | 5.3 |
+| $\cos 1$ | 21 | 25 | 230 | 667 | 7.1 |
+| $\ln 2$ | 14 | 18 | 356 | 5,093 | 3.1 |
+| $e^{\pi}$ | 12 | 17 | 215 | 4,862 | 4.5 |
+| $\zeta(3)$ | 1,573 | 1,620 | 268 | — | 49 |
+| $\Gamma(\tfrac13)$ | 914 | 921 | 366 | — | 225 |
+| $\psi(\tfrac13)$ | 749 | 743 | 6,854 | — | 188 |
+
+#### Symbolic capability & performance
+
+Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.84.1** columns to see what is *new this release* (a `—` under `0.84.1` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+
+| Operation | CE (current) | CE + R/F | CE 0.84.1 | SymPy | math.js | Mathematica |
+| --- | :--: | :--: | :--: | :--: | :--: | :--: |
+| **Antiderivatives** |  |  |  |  |  |  |
+| $\int\frac{1}{\sqrt x}\,dx$ | 6.4× | 2.7× | 3.4× | 0.4× | — | 1× |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 9.6× | 1.7× | 6.0× | 0.09× | — | 1× |
+| $\int\frac{1}{x^3+1}\,dx$ | 7.5× | 0.9× | 1.1× | 0.4× | — | 1× |
+| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 1.9× | — | 0.09× | — | 1× |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 1.3× | — | 0.01× | — | 1× |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 1.1× | — | 0.007× | — | 1× |
+| **Derivatives** |  |  |  |  |  |  |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.03× | 0.02× | 0.01× | 0.001× | 0.004× | 1× |
+| **Simplification** |  |  |  |  |  |  |
+| $\sqrt{3+2\sqrt2}$ | 39× | 29× | 23× | — | — | 1× |
+| $\sqrt6\,x+\sqrt2\,x$ | 79× | 45× | 43× | 2.8× | 15× | 1× |
+| **Evaluation** |  |  |  |  |  |  |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 59× | 29× | 21× | 1.2× | — | 1× |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 9.6× | 5.1× | 4.5× | 2.3× | — | 1× |
+| $\int_1^2\tfrac1x\,dx$ | 6653× | 6680× | 2654× | 63× | — | 1× |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 402× | 104× | 159× | 2.5× | — | 1× |
+| **Solving** |  |  |  |  |  |  |
+| $x^4+x^2-1=0$ | 0.2× | 0.2× | 0.1× | 0.07× | — | 1× |
+| $x^3-x-1=0$ | 1.6× | 1.8× | 1.0× | 0.03× | — | 1× |
+
+Across the cases both solve, Compute Engine is a **median 7.5× faster than Mathematica** (up to 6653×) — in the browser, not a proprietary kernel.
+
+<sub>
+Measured 2026-07-18 · Compute Engine `0.84.2` @ `40cc077a` (current build) · published `0.84.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+</sub>
+
 ## 0.84.1 _2026-07-17_
 
 ### Bug Fixes
