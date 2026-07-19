@@ -754,6 +754,144 @@ export function lazyMapNumericApproximation(
   return ce.function('Map', [...expr.ops.slice(0, -1), wrappedFn]);
 }
 
+/**
+ * Window geometry extracted from a windowing operator expression by
+ * {@link windowedCollectionOps}.
+ * - `src`: the source collection being windowed.
+ * - `size`: window length.
+ * - `step`: distance between consecutive window starts.
+ * - `keepPartial`: whether the trailing partial window is emitted (chunk form)
+ *   or dropped (complete-windows-only form).
+ */
+export interface WindowedParams {
+  src: Expression;
+  size: number;
+  step: number;
+  keepPartial: boolean;
+}
+
+/**
+ * A parameterized builder for the lazy `collection` handlers shared by the
+ * windowing operators — `Partition` (chunk form `Partition(xs, n)` and
+ * sliding-window form `Partition(xs, n, step)`) and `SlidingWindow(xs, k,
+ * step?)`. `getParams(expr)` extracts the window geometry from a given operator
+ * expression, or returns `undefined` for a form that has no lazy view (e.g.
+ * `Partition`'s predicate form) or has invalid parameters (`size <= 0`,
+ * `step <= 0`, non-integer) — in which case EVERY facet returns `undefined`,
+ * leaving the expression fully inert.
+ *
+ * Forms (mirror the eager evaluate paths exactly):
+ * - Chunk (`Partition(xs, n)`): consecutive size-`n` chunks; the trailing
+ *   partial chunk is KEPT → `size = step = n`, `keepPartial = true`.
+ * - Sliding window (`Partition(xs, n, step)`, `SlidingWindow(xs, k, step?)`):
+ *   only COMPLETE windows are emitted → `keepPartial = false`.
+ */
+export function windowedCollectionOps(
+  getParams: (collection: Expression) => WindowedParams | undefined
+): CollectionHandlers {
+  // Number of windows produced from a source of length `n`.
+  const windowCount = (p: WindowedParams, n: number): number => {
+    if (!Number.isFinite(n)) return Infinity;
+    if (p.keepPartial) return Math.ceil(n / p.size);
+    return n >= p.size ? Math.floor((n - p.size) / p.step) + 1 : 0;
+  };
+
+  return {
+    isLazy: () => true,
+    count: (expr) => {
+      const p = getParams(expr);
+      if (p === undefined) return undefined;
+      const n = p.src.count;
+      if (n === undefined) return undefined;
+      return windowCount(p, n);
+    },
+    isFinite: (expr) => {
+      const p = getParams(expr);
+      if (p === undefined) return undefined;
+      return p.src.isFiniteCollection;
+    },
+    isEmpty: (expr) => {
+      const p = getParams(expr);
+      if (p === undefined) return undefined;
+      const n = p.src.count;
+      if (n === undefined) return undefined;
+      return windowCount(p, n) === 0;
+    },
+    at: (expr, index) => {
+      if (typeof index !== 'number' || index < 1) return undefined;
+      const p = getParams(expr);
+      if (p === undefined) return undefined;
+      const { src, size, step, keepPartial } = p;
+      const n = src.count;
+      if (n === undefined) return undefined;
+      const start = (index - 1) * step + 1;
+      const end = start + size - 1;
+      let last = end;
+      if (Number.isFinite(n)) {
+        if (keepPartial) {
+          if (start > n) return undefined; // past the last (partial) chunk
+          if (last > n) last = n; // clamp the trailing partial chunk
+        } else if (end > n) return undefined; // incomplete window: out of range
+      }
+      const items: Expression[] = [];
+      for (let j = start; j <= last; j++) {
+        const el = src.at(j);
+        if (el === undefined) return undefined; // non-indexed source
+        items.push(el);
+      }
+      return expr.engine.function('List', items);
+    },
+    iterator: (expr) => {
+      const p = getParams(expr);
+      if (p === undefined) return undefined;
+      const { src, size, step, keepPartial } = p;
+      const ce = expr.engine;
+      const source = src.each();
+      const buffer: Expression[] = [];
+      let skip = 0; // leading source elements still to discard (when step > size)
+      let done = false;
+      return {
+        next: () => {
+          if (done) return { value: undefined, done: true };
+          // Discard elements skipped between windows (only when step > size).
+          while (skip > 0) {
+            const r = source.next();
+            if (r.done) {
+              done = true;
+              return { value: undefined, done: true };
+            }
+            skip -= 1;
+          }
+          // Fill the buffer up to a full window.
+          while (buffer.length < size) {
+            const r = source.next();
+            if (r.done) {
+              done = true;
+              // Trailing partial: only the chunk form keeps it (step === size,
+              // so any buffered elements are un-emitted).
+              if (keepPartial && buffer.length > 0) {
+                const w = buffer.splice(0, buffer.length);
+                return { value: ce.function('List', w), done: false };
+              }
+              return { value: undefined, done: true };
+            }
+            buffer.push(r.value);
+          }
+          // Emit a complete window (a copy of the buffered elements).
+          const window = buffer.slice(0, size);
+          if (step < size)
+            buffer.splice(0, step); // retain the overlap
+          else {
+            buffer.length = 0;
+            skip = step - size;
+          }
+          return { value: ce.function('List', window), done: false };
+        },
+      };
+    },
+  };
+}
+
 export function repeat(
   value: Expression,
   count?: number

@@ -444,16 +444,15 @@ series `1/(1−x) {|x|<1}`). Remaining:
 
 ### Collections — laziness & fusion backlog
 
-The 2026-07 laziness audits (rounds 1–2 + review rounds, all landed by
-2026-07-17) left a ranked backlog:
+The 2026-07 laziness audits (rounds 1–2 + review rounds, landed by
+2026-07-17) and the T1/T2 follow-up round (landed 2026-07-19: finiteness
+guards on `CountIf`/`Position`/`Ordering`/`DictionaryFrom`/`RecordFrom`;
+threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
+`Partition` chunk/window forms, `SlidingWindow`, `ChunkBy` via the shared
+`windowedCollectionOps` helper) leave this backlog:
 
-- **Finiteness guards / lazy delegation (T1/T2):**
-  `DictionaryFrom`/`RecordFrom`/`Position`/`CountIf` full-walk with no
-  `isFiniteCollection` guard (hang on infinite input); `Find` hangs on
-  infinite-no-match; `Insert`/`DeleteAt`/`ReplaceAt` are lazy-feasible via
-  index-arithmetic delegation (Append/Rest recipe); `Partition` size-n/step
-  forms, `SlidingWindow`, `ChunkBy` are streaming-feasible. Lower priority
-  (T3): `Keys`/`Values` (dicts are small), `Chunk` (needs count only).
+- **T3 (deferred, low value):** `Keys`/`Values` (dicts are small), `Chunk`
+  (needs count only).
 - **Fusion/rewrite layer — open design decision (user has not ruled).** No
   structural rewrite layer exists; lazy facet delegation gives O(1)
   `Count`/`At` through lazy chains, and canonical peeks now cover
@@ -463,11 +462,16 @@ The 2026-07 laziness audits (rounds 1–2 + review rounds, all landed by
 - **Latent issues flagged, not fixed:** `Apply(inline-lambda,
   unknown-collection)` maps over a dangling scoped param (pre-existing
   `applyFunctionLiteral` capture); `.N()`-inertness of a *user-written*
-  `Map(...).N()` body (the broadcast-built arm was fixed); the validate.ts
-  `isFiniteIndexedCollection` inference loop eagerly counts
-  `Filter(Range(1e5))` and can throw iteration-limit before the lazy guard
-  (pre-existing); `Sort`/`Shuffle` `type:` handler is slightly loose for a
-  List result (harmless, untested).
+  `Map(...).N()` body (the broadcast-built arm was fixed);
+  `Sort`/`Shuffle` `type:` handler is slightly loose for a List result
+  (harmless, untested); `evaluate({materialization: true})` flattens the
+  `Tuple`s of a literal `List` of pairs, so a materialized pair-list no
+  longer feeds `DictionaryFrom`/`RecordFrom` (found 2026-07-19 writing
+  their first tests); `ListFrom` does not force a lazy `Take` (even over
+  the pre-existing lazy `Rest`), so `ListFrom(Take(<lazy>, n))` stays
+  symbolic — a `Take`-finiteness/materialization gap. (The formerly-listed
+  validate.ts `Filter(Range(1e5))` eager-count throw was verified fixed,
+  2026-07-19.)
 - `At`'s evaluate handler carries an in-file `@todo` — "implementation does
   not match the description" (`library/collections.ts` ~2507) — needs a
   think-through pass.

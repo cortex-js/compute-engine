@@ -199,3 +199,38 @@ describe('Tycho item 52 — lazy PointList transpose and projections', () => {
     expect(r.at(150)?.re).toBe(-6);
   });
 });
+
+describe('Tycho item 54 — machine-precision Tuple ± scalar·Tuple', () => {
+  // At machine precision, a component sum whose terms are all integer-valued
+  // floats routes into `ExactNumericValue.sum`, whose integer fold read
+  // `bignumRe` — undefined on `MachineNumericValue` → TypeError (reading
+  // 'toFixed'). Killed composed lazy streams mid-drain and made `at()`
+  // return undefined at the crashing indices.
+
+  test('.N() of Tuple − scalar·Tuple with an integer-valued component', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    // z-component: 20 − 0.1·20 = 20 − 2, an integer+integer machine sum.
+    const r = ce.parse('(-5,-5,20)-0.1(-5,-5,20)').N();
+    expect(r.operator).toBe('Tuple');
+    expect(r.ops!.map((o) => o.re)).toEqual([-4.5, -4.5, 18]);
+  });
+
+  test('composed transpose drains fully; at() works at exact-sum indices', () => {
+    const ce = engineWithL(400);
+    const diff = ce
+      .box(['Subtract', PT_LIST, ['Multiply', 0.5, PT_LIST]])
+      .N();
+    expect(diff.operator).toBe('Map');
+    expect(diff.count).toBe(401);
+    // Element 2 (k=1): c = mod(1,11)−5 = −4; c − 0.5c = −2 — the
+    // integer+integer machine sum that crashed mid-stream.
+    expect(diff.at(2)?.ops?.map((o) => o.re)).toEqual([-2, -2, -2]);
+    let n = 0;
+    for (const el of diff.each()) {
+      expect(el.operator).toBe('Tuple');
+      if (++n >= 401) break;
+    }
+    expect(n).toBe(401);
+  });
+});

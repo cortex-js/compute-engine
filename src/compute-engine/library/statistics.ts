@@ -10,7 +10,15 @@ import {
 } from '../numerics/special-functions.js';
 import { erfComplex, erfiComplex } from '../numerics/numeric-complex.js';
 import { apply, shouldNumericize } from '../boxed-expression/apply.js';
-import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
+import {
+  MAX_SIZE_EAGER_COLLECTION,
+  windowedCollectionOps,
+} from '../collection-utils.js';
 import {
   bigCorrelation,
   bigCovariance,
@@ -542,6 +550,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       ],
       evaluate: ([xs, winArg, stepArg], { engine: ce }) => {
         if (!xs.isFiniteCollection) return undefined;
+        // Small finite sources materialize eagerly (all existing semantics);
+        // larger — or unknown-length — sources stay symbolic and are served
+        // lazily by the `collection` handlers below (Tycho item 52).
+        const size = xs.count;
+        if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
+          return undefined;
         const windowSize = toInteger(winArg);
         const stepSize = stepArg ? toInteger(stepArg) : 1;
         if (
@@ -561,6 +575,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
         return ce.function('List', result);
       },
+      // Lazy view: complete windows only (`keepPartial = false`), default
+      // step 1. Invalid params (`size <= 0`, `step <= 0`, non-integer) make
+      // `getParams` return `undefined`, leaving every facet inert.
+      collection: windowedCollectionOps((expr) => {
+        if (!isFunction(expr)) return undefined;
+        const winSize = toInteger(expr.op2);
+        if (winSize === null || winSize <= 0) return undefined;
+        const step = expr.nops >= 3 ? toInteger(expr.op3) : 1;
+        if (step === null || step <= 0) return undefined;
+        return { src: expr.op1, size: winSize, step, keepPartial: false };
+      }),
     },
   },
   {

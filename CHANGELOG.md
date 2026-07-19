@@ -37,6 +37,34 @@
   comma-group now serializes as `s\times(1,2,3)`. Single-expression groups
   (`s(x+1)`) and number-led products (`2(1,2)`), which re-parse as products,
   keep juxtaposition.
+- **`CountIf`, `Position`, `Ordering`, `DictionaryFrom`, and `RecordFrom`
+  stay inert on an infinite or unknown-length collection.** These operators
+  require walking every element, so on an infinite input (`Range(1, +∞)`,
+  `Cycle`, `Iterate`) they previously consumed the entire evaluation time
+  limit and then threw `CancellationError` instead of returning a result.
+  They now detect the non-finite input structurally and stay symbolic
+  immediately. (`Ordering` previously returned a spurious *empty list*,
+  claiming a complete ordering it never computed.) Huge-but-finite inputs
+  still walk under the deadline as before, and `Find` is unchanged: it
+  streams and short-circuits, so `Find(Range(1, +∞), x ↦ x > 5)` still
+  returns `6`.
+
+### Collections
+
+- **`Insert`, `DeleteAt`, `ReplaceAt`, `Partition` (chunk and window forms),
+  `SlidingWindow`, and `ChunkBy` are now hybrid-lazy.** Inputs at or below
+  the 100-element eager threshold evaluate to an eager `List` exactly as
+  before (byte-identical shapes); larger, lazy, or infinite inputs stay
+  symbolic and serve their elements on demand through `count`/`at`/
+  iteration, following the same convention as the hybrid-lazy broadcast
+  forms. `Insert` into a million-element `Range` no longer materializes the
+  whole list to answer `Count` or an index probe, and streaming prefixes of
+  infinite results now work: `Take(Partition(Range(1, +∞), 3), 2)` →
+  `[[1,2,3],[4,5,6]]`, `Take(ChunkBy(Cycle([1,1,2]), x ↦ x), 3)` →
+  `[[1,1],[2],[1,1]]`. `Partition`'s predicate form
+  (`Partition(xs, pred)` → `[trueGroup, falseGroup]`) requires a finite
+  input and is unchanged. Materializing consumers (`ListFrom`, …) behave as
+  before.
 
 ## 0.85.1 _2026-07-18_
 

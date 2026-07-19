@@ -17,6 +17,7 @@ import {
   isTuple,
   lazyBroadcastMap,
   MAX_SIZE_EAGER_COLLECTION,
+  windowedCollectionOps,
 } from '../collection-utils.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
@@ -3245,6 +3246,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
+      // Small finite sources materialize eagerly (all existing semantics);
+      // larger — or unknown-length — sources stay symbolic and are served
+      // lazily by the `collection` handlers below (Tycho item 52).
+      const size = xs.count;
+      if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
+        return undefined;
       const index = toInteger(idx);
       if (index === null || index === 0) return undefined;
       const all = Array.from(xs.each()) as Expression[];
@@ -3265,6 +3272,66 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ...all.slice(gap),
       ]);
     },
+    collection: {
+      isLazy: (_expr) => true,
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (insertPosition(expr) === undefined) return undefined;
+        const n = expr.op1.count;
+        if (n === undefined) return undefined;
+        return Number.isFinite(n) ? n + 1 : Infinity;
+      },
+      // A valid Insert always contains at least the inserted value.
+      isEmpty: (expr) =>
+        insertPosition(expr) === undefined ? undefined : false,
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (insertPosition(expr) === undefined) return undefined;
+        return expr.op1.isFiniteCollection;
+      },
+      at: (
+        expr: Expression,
+        index: number | string
+      ): undefined | Expression => {
+        if (typeof index !== 'number' || !isFunction(expr)) return undefined;
+        const g = insertPosition(expr);
+        if (g === undefined) return undefined;
+        if (index < 1) return undefined;
+        if (index < g) return expr.op1.at(index);
+        if (index === g) return expr.op3;
+        return expr.op1.at(index - 1);
+      },
+      iterator: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const g = insertPosition(expr);
+        if (g === undefined) return undefined;
+        const source = expr.op1.each();
+        const value = expr.op3;
+        let yielded = 0;
+        let injected = false;
+        return {
+          next: () => {
+            // Inject the value at result position `g`, once the preceding
+            // `g-1` source items have been yielded.
+            if (!injected && yielded === g - 1) {
+              injected = true;
+              return { value, done: false };
+            }
+            const { value: v, done } = source.next();
+            if (!done) {
+              yielded += 1;
+              return { value: v, done: false };
+            }
+            // Source exhausted before the value was injected (append case).
+            if (!injected) {
+              injected = true;
+              return { value, done: false };
+            }
+            return { value: undefined, done: true };
+          },
+        };
+      },
+    },
   },
 
   // Elixir `List.delete_at/2`: return a copy with the element at the 1-based
@@ -3282,6 +3349,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     evaluate: ([xs, idx], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
+      // Small finite sources materialize eagerly; larger — or unknown-length —
+      // sources stay symbolic and are served lazily by the `collection`
+      // handlers below (Tycho item 52).
+      const size = xs.count;
+      if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
+        return undefined;
       const index = toInteger(idx);
       if (index === null) return undefined;
       const all = Array.from(xs.each()) as Expression[];
@@ -3297,6 +3370,56 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         i0 = n + index;
       } else return undefined;
       return ce.function('List', [...all.slice(0, i0), ...all.slice(i0 + 1)]);
+    },
+    collection: {
+      isLazy: (_expr) => true,
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (targetPosition(expr) === undefined) return undefined;
+        const n = expr.op1.count;
+        if (n === undefined) return undefined;
+        return Number.isFinite(n) ? n - 1 : Infinity;
+      },
+      isEmpty: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (targetPosition(expr) === undefined) return undefined;
+        const n = expr.op1.count;
+        if (n === undefined) return undefined;
+        return Number.isFinite(n) ? n - 1 <= 0 : false;
+      },
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (targetPosition(expr) === undefined) return undefined;
+        return expr.op1.isFiniteCollection;
+      },
+      at: (
+        expr: Expression,
+        index: number | string
+      ): undefined | Expression => {
+        if (typeof index !== 'number' || !isFunction(expr)) return undefined;
+        const g = targetPosition(expr);
+        if (g === undefined) return undefined;
+        if (index < 1) return undefined;
+        return index < g ? expr.op1.at(index) : expr.op1.at(index + 1);
+      },
+      iterator: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const g = targetPosition(expr);
+        if (g === undefined) return undefined;
+        const source = expr.op1.each();
+        let pos = 0;
+        return {
+          next: () => {
+            for (;;) {
+              const { value, done } = source.next();
+              if (done) return { value: undefined, done: true };
+              pos += 1;
+              if (pos === g) continue; // skip the deleted position
+              return { value, done: false };
+            }
+          },
+        };
+      },
     },
   },
 
@@ -3322,6 +3445,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
+      // Small finite sources materialize eagerly; larger — or unknown-length —
+      // sources stay symbolic and are served lazily by the `collection`
+      // handlers below (Tycho item 52).
+      const size = xs.count;
+      if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
+        return undefined;
       const index = toInteger(idx);
       if (index === null) return undefined;
       const all = Array.from(xs.each()) as Expression[];
@@ -3337,6 +3466,52 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const out = [...all];
       out[i0] = value;
       return ce.function('List', out);
+    },
+    collection: {
+      isLazy: (_expr) => true,
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (targetPosition(expr) === undefined) return undefined;
+        return expr.op1.count;
+      },
+      isEmpty: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (targetPosition(expr) === undefined) return undefined;
+        const n = expr.op1.count;
+        if (n === undefined) return undefined;
+        return Number.isFinite(n) ? n <= 0 : false;
+      },
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (targetPosition(expr) === undefined) return undefined;
+        return expr.op1.isFiniteCollection;
+      },
+      at: (
+        expr: Expression,
+        index: number | string
+      ): undefined | Expression => {
+        if (typeof index !== 'number' || !isFunction(expr)) return undefined;
+        const g = targetPosition(expr);
+        if (g === undefined) return undefined;
+        if (index < 1) return undefined;
+        return index === g ? expr.op3 : expr.op1.at(index);
+      },
+      iterator: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const g = targetPosition(expr);
+        if (g === undefined) return undefined;
+        const source = expr.op1.each();
+        const value = expr.op3;
+        let pos = 0;
+        return {
+          next: () => {
+            const { value: v, done } = source.next();
+            if (done) return { value: undefined, done: true };
+            pos += 1;
+            return { value: pos === g ? value : v, done: false };
+          },
+        };
+      },
     },
   },
 
@@ -3526,6 +3701,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Zero;
+      // Stay inert on non-finite or unknown-length input: a count requires
+      // totality (walking every element).
+      if (xs.isFiniteCollection !== true) return undefined;
       let count = 0;
       for (const item of xs.each()) {
         const pred = sym(f([item]));
@@ -3551,6 +3729,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.function('List', []);
+      // Stay inert on non-finite or unknown-length input: reporting positions
+      // requires totality (walking every element).
+      if (xs.isFiniteCollection !== true) return undefined;
       const indices: Expression[] = [];
       let index = 1;
       for (const item of xs.each()) {
@@ -3577,7 +3758,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(indexed_collection, function?) -> list<integer>',
     evaluate: ([xs, fn], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return ce.function('List', []);
+      // Stay inert on non-finite or unknown-length input, aligning with Sort:
+      // an empty List would falsely claim a complete ordering.
+      if (xs.isFiniteCollection !== true) return undefined;
       const indices = sortedIndices(xs, fn);
       if (!indices) return ce.function('List', []);
       return ce.function('List', indices);
@@ -4037,6 +4220,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const n = toInteger(arg);
       if (n !== null) {
         if (n <= 0) return undefined;
+        // Small finite sources materialize eagerly (all existing semantics);
+        // larger — or unknown-length — sources stay symbolic and are served
+        // lazily by the `collection` handlers below (Tycho item 52). The
+        // predicate form below is EXEMPT (it needs totality — no lazy view).
+        const size = xs.count;
+        if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
+          return undefined;
         const all = Array.from(xs.each());
         const result: Expression[] = [];
 
@@ -4081,6 +4271,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ce.function('List', falseGroup),
       ]);
     },
+    // Lazy view for the chunk/window forms past the eager threshold. The
+    // predicate form has no lazy view (it needs totality over the source), so
+    // `partitionWindowParams` returns `undefined` for it and every facet stays
+    // inert — `Count(Partition(<inf>, <pred>))` remains symbolic.
+    collection: windowedCollectionOps((expr) => {
+      if (!isFunction(expr)) return undefined;
+      const n = toInteger(expr.op2);
+      if (n === null || n <= 0) return undefined; // predicate form or invalid
+      if (expr.nops >= 3) {
+        // Sliding-window form: complete windows only.
+        const step = toInteger(expr.op3);
+        if (step === null || step <= 0) return undefined;
+        return { src: expr.op1, size: n, step, keepPartial: false };
+      }
+      // Chunk form: consecutive size-`n` chunks; trailing partial kept.
+      return { src: expr.op1, size: n, step: n, keepPartial: true };
+    }),
   },
 
   Chunk: {
@@ -4124,6 +4331,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
+      // Small finite sources materialize eagerly (all existing semantics);
+      // larger — or unknown-length — sources stay symbolic and are served
+      // lazily by the `collection` handlers below (Tycho item 52).
+      const size = xs.count;
+      if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
+        return undefined;
       const f = applicable(fn);
       if (!f) return undefined;
 
@@ -4154,6 +4367,93 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         'List',
         runs.map((r) => ce.function('List', r))
       );
+    },
+    // Lazy view (Dedup-shape streaming). Runs of an infinite source are
+    // unknowable, so `count`/`isFinite` mirror `Dedup`: known only for a finite
+    // source.
+    collection: {
+      isLazy: (_expr) => true,
+      // Number of runs: for a finite source, walk our own iterator (bounded);
+      // an infinite/unknown source stays unknown.
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.op1.isFiniteCollection !== true) return undefined;
+        let n = 0;
+        for (const _ of expr.each()) n++;
+        return n;
+      },
+      // Finite source ⇒ finite number of runs; otherwise unknown.
+      isFinite: (expr) =>
+        isFunction(expr) && expr.op1.isFiniteCollection === true
+          ? true
+          : undefined,
+      // Empty iff the source is empty (a non-empty source has ≥ 1 run).
+      isEmpty: (expr) =>
+        isFunction(expr) ? expr.op1.isEmptyCollection : undefined,
+      iterator: (expr) => {
+        if (!isFunction(expr))
+          return { next: () => ({ value: undefined, done: true }) };
+        const f = applicable(expr.op2);
+        if (!f) return { next: () => ({ value: undefined, done: true }) };
+        const ce = expr.engine;
+        const source = expr.op1.each();
+        // The first element of the next run, read ahead (and its key), so a run
+        // boundary can be detected before the run is emitted.
+        let pending: Expression | undefined = undefined;
+        let pendingKey: Expression | undefined = undefined;
+        let done = false;
+        return {
+          next: () => {
+            if (done && pending === undefined)
+              return { value: undefined, done: true };
+            // Seed the run with the pending element, or read the first one.
+            let run: Expression[];
+            let key: Expression;
+            if (pending !== undefined) {
+              run = [pending];
+              key = pendingKey!;
+              pending = undefined;
+              pendingKey = undefined;
+            } else {
+              const first = source.next();
+              if (first.done) {
+                done = true;
+                return { value: undefined, done: true };
+              }
+              run = [first.value];
+              key = f([first.value]) ?? ce.Nothing;
+            }
+            // Extend the run while the key (compared with `.isSame()`, matching
+            // the eager path) stays constant; hold the first differing element.
+            for (;;) {
+              const { value, done: d } = source.next();
+              if (d) {
+                done = true;
+                break;
+              }
+              const k = f([value]) ?? ce.Nothing;
+              if (key.isSame(k)) run.push(value);
+              else {
+                pending = value;
+                pendingKey = k;
+                break;
+              }
+            }
+            return { value: ce.function('List', run), done: false };
+          },
+        };
+      },
+      // The k-th run: walk our own run iterator.
+      at: (expr, index) => {
+        if (typeof index !== 'number' || index < 1) return undefined;
+        if (!isFunction(expr)) return undefined;
+        let i = 0;
+        for (const run of expr.each()) {
+          i += 1;
+          if (i === index) return run;
+        }
+        return undefined;
+      },
     },
   },
 
@@ -4619,6 +4919,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (isFunction(xs, 'Record'))
         return ce.function('Dictionary', [...xs.ops]);
 
+      // Stay inert on non-finite or unknown-length input: building the
+      // dictionary requires walking every entry.
+      if (!xs.isFiniteCollection) return undefined;
+
       const entries: Expression[] = [];
       for (const keyValue of xs.each()) {
         if (!isFunction(keyValue) || keyValue.nops !== 2) {
@@ -4649,6 +4953,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (isFunction(xs, 'Dictionary'))
         return ce.function('Record', [...xs.ops]);
 
+      // Stay inert on non-finite or unknown-length input: building the
+      // record requires walking every entry.
+      if (!xs.isFiniteCollection) return undefined;
+
       const entries: Expression[] = [];
       for (const keyValue of xs.each()) {
         if (!isFunction(keyValue) || keyValue.nops !== 2) {
@@ -4667,6 +4975,62 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 };
+
+//
+// Hybrid-lazy resolution helpers for `Insert` / `DeleteAt` / `ReplaceAt`.
+//
+// The large/infinite/unknown-length branch of these ops keeps the expression
+// symbolic and serves the result through the `collection` handlers above via
+// index arithmetic (Tycho item 52; same recipe as `Append`/`Rest`/`Drop`).
+// Each facet first resolves the normalized 1-based target position and returns
+// `undefined` on an invalid form, so an out-of-range/zero/symbolic index (or a
+// negative index against a non-finite source) stays fully inert — matching the
+// eager path.
+//
+
+/**
+ * `Insert`: the 1-based position in the RESULT at which the value lands
+ * (`gap + 1`, mirroring the eager arithmetic — a positive index ranges over
+ * 1..n+1, a negative index counts from the end with -1 appending). Returns
+ * `undefined` for an invalid form.
+ */
+function insertPosition(expr: Expression): number | undefined {
+  if (!isFunction(expr)) return undefined;
+  const n = expr.op1.count;
+  if (n === undefined) return undefined;
+  const index = toInteger(expr.op2);
+  if (index === null || index === 0) return undefined;
+  if (index > 0) {
+    if (Number.isFinite(n) && index > n + 1) return undefined;
+    return index; // g = gap + 1 = index
+  }
+  // A negative index counts from the end; that requires a finite length.
+  if (!Number.isFinite(n)) return undefined;
+  if (index < -(n + 1)) return undefined;
+  return n + 2 + index; // g = (n + 1 + index) + 1
+}
+
+/**
+ * `DeleteAt` / `ReplaceAt`: the 1-based position of the existing element the
+ * op targets (`i0 + 1`, mirroring the eager arithmetic — a positive index
+ * ranges over 1..n, a negative index counts from the end). Returns `undefined`
+ * for an invalid form.
+ */
+function targetPosition(expr: Expression): number | undefined {
+  if (!isFunction(expr)) return undefined;
+  const n = expr.op1.count;
+  if (n === undefined) return undefined;
+  const index = toInteger(expr.op2);
+  if (index === null || index === 0) return undefined;
+  if (index > 0) {
+    if (Number.isFinite(n) && index > n) return undefined;
+    return index; // g = i0 + 1 = index
+  }
+  // A negative index counts from the end; that requires a finite length.
+  if (!Number.isFinite(n)) return undefined;
+  if (index < -n) return undefined;
+  return n + index + 1; // g = (n + index) + 1
+}
 
 /**
  * Does this `Range` expression have a bound with no concrete numeric value

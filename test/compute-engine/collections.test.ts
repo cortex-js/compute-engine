@@ -677,6 +677,93 @@ describe('SORT/SHUFFLE REBUILD AS LIST (regression)', () => {
   });
 });
 
+describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM (regression)', () => {
+  // These evaluate handlers full-walk their input via `each()`. On a provably
+  // infinite collection they used to burn the evaluation deadline then throw
+  // CancellationError; now they cheaply stay inert (return undefined, so the
+  // original operator is preserved), matching Sort's idiom.
+  const pred: Expression = ['Function', ['Greater', 'x', 1], 'x'];
+
+  test('CountIf of an infinite Cycle stays inert', () => {
+    const e = engine
+      .box(['CountIf', ['Cycle', ['List', 1, 2, 3]], pred])
+      .evaluate();
+    expect(e.operator).toEqual('CountIf');
+  });
+
+  test('CountIf of an infinite Range stays inert', () => {
+    const e = engine
+      .box(['CountIf', ['Range', 1, 'PositiveInfinity'], pred])
+      .evaluate();
+    expect(e.operator).toEqual('CountIf');
+  });
+
+  test('Position over an infinite collection stays inert', () => {
+    const e = engine
+      .box(['Position', ['Cycle', ['List', 1, 2, 3]], pred])
+      .evaluate();
+    expect(e.operator).toEqual('Position');
+  });
+
+  test('Ordering over an infinite collection stays inert (not an empty List)', () => {
+    const e = engine.box(['Ordering', ['Cycle', ['List', 1, 2, 3]]]).evaluate();
+    expect(e.operator).toEqual('Ordering');
+  });
+
+  test('Find over an infinite Range still streams and returns the first match', () => {
+    // Streaming capability must not regress: Find short-circuits on the first
+    // matching element without walking the whole (infinite) collection.
+    const e = engine
+      .box([
+        'Find',
+        ['Range', 1, 'PositiveInfinity'],
+        ['Function', ['Greater', 'x', 5], 'x'],
+      ])
+      .evaluate();
+    expect(e.re).toEqual(6);
+  });
+
+  test('DictionaryFrom of a finite collection of pairs', () => {
+    const e = engine
+      .box([
+        'DictionaryFrom',
+        ['List', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]],
+      ])
+      .evaluate();
+    expect(e.operator).toEqual('Dictionary');
+    expect(e.json).toEqual({ dict: { a: 1, b: 2 } });
+  });
+
+  test('DictionaryFrom of an infinite collection stays inert', () => {
+    const e = engine
+      .box(['DictionaryFrom', ['Cycle', ['List', ['Tuple', { str: 'a' }, 1]]]])
+      .evaluate();
+    expect(e.operator).toEqual('DictionaryFrom');
+  });
+
+  test('RecordFrom of a finite collection of pairs', () => {
+    const e = engine
+      .box([
+        'RecordFrom',
+        ['List', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]],
+      ])
+      .evaluate();
+    expect(e.operator).toEqual('Record');
+    expect(e.json).toEqual([
+      'Record',
+      ['Tuple', "'a'", 1],
+      ['Tuple', "'b'", 2],
+    ]);
+  });
+
+  test('RecordFrom of an infinite collection stays inert', () => {
+    const e = engine
+      .box(['RecordFrom', ['Cycle', ['List', ['Tuple', { str: 'a' }, 1]]]])
+      .evaluate();
+    expect(e.operator).toEqual('RecordFrom');
+  });
+});
+
 describe('NEGATIVE INDEX NORMALIZATION IN at() DISPATCHER (regression)', () => {
   // Regression: ~25 collection `at` handlers reject `index < 1`, so negative
   // indexing (`Last`, `At(xs, -1)`, `Reverse`'s back-to-front walk) yielded
@@ -2281,6 +2368,124 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
       engine.box(['Partition', ['Iterate', doubleAcc, 1], 2]).evaluate().operator
     ).toBe('Partition'));
 
+  // --- Hybrid-lazy Partition / SlidingWindow / ChunkBy (Tycho item 52) ----
+  // Small finite sources stay eager (all the pins above); larger, unknown, or
+  // infinite sources keep the operator inert and serve a lazy `collection`
+  // view (count / at / iterator). The predicate form is EXEMPT (no lazy view).
+
+  // Large finite: evaluate stays symbolic, facets serve the view cheaply.
+  test('Partition(large, n) is inert and served lazily', () => {
+    const t0 = Date.now();
+    const p = engine.box(['Partition', ['Range', 1, 1_000_000], 1000]);
+    expect(p.evaluate().operator).toBe('Partition');
+    expect(engine.box(['Count', p]).evaluate().toString()).toBe('1000');
+    // 2nd chunk is [1001..2000]; its first element is 1001.
+    expect(engine.box(['At', ['At', p, 2], 1]).evaluate().toString()).toBe(
+      '1001'
+    );
+    expect(Date.now() - t0).toBeLessThan(1500);
+  });
+
+  test('SlidingWindow(large, k, step) is inert and served lazily', () => {
+    const sw = engine.box(['SlidingWindow', ['Range', 1, 1_000_000], 1000, 1]);
+    expect(sw.evaluate().operator).toBe('SlidingWindow');
+    // Complete windows only: floor((1e6 - 1000)/1) + 1 = 999001.
+    expect(engine.box(['Count', sw]).evaluate().toString()).toBe('999001');
+    // 2nd window is [2..1001]; its first element is 2.
+    expect(engine.box(['At', ['At', sw, 2], 1]).evaluate().toString()).toBe(
+      '2'
+    );
+  });
+
+  test('ChunkBy(large) reports its run count without materializing', () => {
+    const t0 = Date.now();
+    // 300 singleton runs (every element distinct under the identity key).
+    const cb = engine.box(['ChunkBy', ['Range', 1, 300], identity]);
+    expect(cb.evaluate().operator).toBe('ChunkBy');
+    expect(engine.box(['Count', cb]).evaluate().toString()).toBe('300');
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
+  // Infinite sources: the lazy view streams windows lazily under Take.
+  test('Partition(infinite, n) streams chunks lazily', () =>
+    expect(
+      str(['Take', ['Partition', ['Range', 1, 'PositiveInfinity'], 3], 2])
+    ).toEqual('[[1,2,3],[4,5,6]]'));
+
+  test('Partition(infinite, n, step) streams windows lazily', () =>
+    expect(
+      str(['Take', ['Partition', ['Range', 1, 'PositiveInfinity'], 2, 3], 2])
+    ).toEqual('[[1,2],[4,5]]'));
+
+  test('SlidingWindow(infinite, k) streams windows lazily', () =>
+    expect(
+      str(['Take', ['SlidingWindow', ['Range', 1, 'PositiveInfinity'], 3], 3])
+    ).toEqual('[[1,2,3],[2,3,4],[3,4,5]]'));
+
+  test('ChunkBy(infinite) streams runs lazily', () =>
+    // Cycle([1,1,2]) → runs [1,1], [2], [1,1], ...
+    expect(
+      str(['Take', ['ChunkBy', ['Cycle', ['List', 1, 1, 2]], identity], 3])
+    ).toEqual('[[1,1],[2],[1,1]]'));
+
+  // SlidingWindow eager happy-paths (it previously had no tests anywhere).
+  test('SlidingWindow(xs, k) overlapping windows', () =>
+    expect(str(['SlidingWindow', ['List', 1, 2, 3, 4, 5, 6], 3])).toEqual(
+      '[[1,2,3],[2,3,4],[3,4,5],[4,5,6]]'
+    ));
+
+  test('SlidingWindow(xs, k, step) with step > 1', () =>
+    expect(str(['SlidingWindow', ['List', 1, 2, 3, 4, 5, 6], 2, 2])).toEqual(
+      '[[1,2],[3,4],[5,6]]'
+    ));
+
+  test('SlidingWindow(xs, k) with k ≤ 0 is inert', () =>
+    expect(
+      engine.box(['SlidingWindow', ['List', 1, 2, 3], 0]).evaluate().operator
+    ).toBe('SlidingWindow'));
+
+  test('SlidingWindow(xs, k, step) with step ≤ 0 is inert', () =>
+    expect(
+      engine.box(['SlidingWindow', ['List', 1, 2, 3], 2, 0]).evaluate().operator
+    ).toBe('SlidingWindow'));
+
+  // Predicate form is EXEMPT from the threshold: eager whenever finite (any
+  // size), and fully inert (facets included) on an infinite source.
+  test('Partition(predicate) stays eager past the threshold', () => {
+    // 101-element source, predicate x > 50 → [ [51..101], [1..50] ].
+    const pred: Expression = ['Function', ['Greater', 'x', 50], 'x'];
+    const p: Expression = ['Partition', ['Range', 1, 101], pred];
+    expect(engine.box(p).evaluate().operator).toBe('List');
+    expect(engine.box(['Count', ['At', p, 1]]).evaluate().toString()).toBe(
+      '51'
+    );
+    expect(engine.box(['Count', ['At', p, 2]]).evaluate().toString()).toBe(
+      '50'
+    );
+    expect(engine.box(['At', ['At', p, 1], 1]).evaluate().toString()).toBe(
+      '51'
+    );
+    expect(engine.box(['At', ['At', p, 2], 1]).evaluate().toString()).toBe('1');
+  });
+
+  test('Partition(predicate) on an infinite source is fully inert', () => {
+    const pred: Expression = ['Function', ['Greater', 'x', 0], 'x'];
+    const p: Expression = ['Partition', ['Range', 1, 'PositiveInfinity'], pred];
+    expect(engine.box(p).evaluate().operator).toBe('Partition');
+    // Facets stay inert: Count cannot resolve, so it stays symbolic.
+    expect(engine.box(['Count', p]).evaluate().operator).toBe('Count');
+  });
+
+  // A lazy windowing view materializes to a List, not a Set (the static
+  // `list<list>` type keeps it indexed — no generic-collection Set trap).
+  test('Partition lazy view materializes to a List, not a Set', () => {
+    const result = engine
+      .box(['Partition', ['Range', 1, 300], 3])
+      .evaluate({ materialization: true });
+    expect(result.operator).toBe('List');
+    expect((result.json as unknown[])[0]).toBe('List');
+  });
+
   // Chunk stays the "count" form: k nearly-equal groups.
   test('Chunk(xs, k) splits into k nearly-equal groups', () =>
     expect(str(['Chunk', ['List', 1, 2, 3, 4, 5], 2])).toEqual(
@@ -2421,6 +2626,98 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
         .box(['ReplaceAt', ['List', 10, 20, 30], 'k', 99])
         .evaluate().operator
     ).toBe('ReplaceAt'));
+});
+
+describe('HYBRID-LAZY INSERT / DELETEAT / REPLACEAT (threshold views)', () => {
+  const big: Expression = ['Range', 1, 1_000_000];
+  const inf: Expression = ['Range', 1, 'PositiveInfinity'];
+  const val = (expr: Expression): string =>
+    engine.box(expr).evaluate().toString();
+
+  // (1) A large finite source stays symbolic and is served lazily by index
+  //     arithmetic — the wall-clock bound pins non-materialization.
+  test('large finite Insert/DeleteAt/ReplaceAt stay lazy views', () => {
+    const t0 = Date.now();
+
+    expect(engine.box(['Insert', big, 2, 99]).evaluate().operator).toBe(
+      'Insert'
+    );
+    expect(val(['Count', ['Insert', big, 2, 99]])).toBe('1000001');
+    expect(val(['At', ['Insert', big, 2, 99], 2])).toBe('99');
+    expect(val(['At', ['Insert', big, 2, 99], 3])).toBe('2');
+    expect(val(['Last', ['Insert', big, 2, 99]])).toBe('1000000');
+
+    expect(engine.box(['DeleteAt', big, 2]).evaluate().operator).toBe(
+      'DeleteAt'
+    );
+    expect(val(['Count', ['DeleteAt', big, 2]])).toBe('999999');
+    expect(val(['At', ['DeleteAt', big, 2], 2])).toBe('3');
+
+    expect(engine.box(['ReplaceAt', big, 3, 99]).evaluate().operator).toBe(
+      'ReplaceAt'
+    );
+    expect(val(['At', ['ReplaceAt', big, 3, 99], 3])).toBe('99');
+    expect(val(['At', ['ReplaceAt', big, 3, 99], 4])).toBe('4');
+
+    expect(Date.now() - t0).toBeLessThan(1500);
+  });
+
+  // (2) An infinite source is served by pure index arithmetic, plus one
+  //     streamed composition.
+  test('infinite Insert/DeleteAt/ReplaceAt serve elements by index', () => {
+    expect(val(['At', ['Insert', inf, 2, 99], 2])).toBe('99');
+    expect(val(['At', ['Insert', inf, 2, 99], 3])).toBe('2');
+    expect(val(['At', ['DeleteAt', inf, 2], 2])).toBe('3');
+    expect(val(['At', ['ReplaceAt', inf, 3, 99], 3])).toBe('99');
+    expect(val(['At', ['ReplaceAt', inf, 3, 99], 4])).toBe('4');
+    // `ListFrom` does not force a lazy `Take`, so pin the streamed `Take` view
+    // directly: DeleteAt(inf, 1) drops the first element, so 1,2,3,4,… → 2,3,4.
+    expect(val(['Take', ['DeleteAt', inf, 1], 3])).toBe('[2,3,4]');
+  });
+
+  // (3) A small finite source stays eager — zero contract change below the
+  //     threshold.
+  test('small finite input materializes eagerly', () => {
+    expect(
+      engine.box(['Insert', ['List', 1, 2, 3], 2, 99]).evaluate().operator
+    ).toBe('List');
+    expect(
+      engine.box(['DeleteAt', ['List', 1, 2, 3], 2]).evaluate().operator
+    ).toBe('List');
+    expect(
+      engine.box(['ReplaceAt', ['List', 1, 2, 3], 2, 99]).evaluate().operator
+    ).toBe('List');
+  });
+
+  // (4) An invalid-index form stays fully inert (operator preserved AND facets
+  //     symbolic), matching the eager path.
+  test('invalid-index large/infinite forms stay inert', () => {
+    expect(engine.box(['Insert', big, 0, 99]).evaluate().operator).toBe(
+      'Insert'
+    );
+    expect(
+      engine.box(['Count', ['Insert', big, 0, 99]]).evaluate().operator
+    ).toBe('Count');
+    // A negative index needs a finite end to count from; an infinite source
+    // has none, so the form is inert.
+    expect(engine.box(['DeleteAt', inf, -1]).evaluate().operator).toBe(
+      'DeleteAt'
+    );
+    expect(
+      engine.box(['Count', ['DeleteAt', inf, -1]]).evaluate().operator
+    ).toBe('Count');
+  });
+
+  // (5) When a lazy view is materialized, its head is a `List`, not a `Set`
+  //     (no generic-collection trap). Range(1, 200) is finite but over the
+  //     eager threshold, so it takes the lazy path.
+  test('a materialized lazy view is a List, not a Set', () => {
+    const result = engine
+      .box(['Insert', ['Range', 1, 200], 2, 99])
+      .evaluate({ materialization: true });
+    expect(result.operator).toBe('List');
+    expect((result.json as unknown[])[0]).toBe('List');
+  });
 });
 
 describe('ZIP-SHAPED LAZINESS (review findings)', () => {
