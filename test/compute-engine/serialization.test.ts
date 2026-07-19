@@ -576,4 +576,77 @@ describe('DISPLAY DIGITS', () => {
       ).toThrow(/Invalid `digits` option/);
     });
   });
+
+  // A solidus-rendered fraction juxtaposed with FOLLOWING material absorbs it
+  // on re-parse (`1/2(sq)` → `1/(2(sq))`, a different value). A non-canonical
+  // `InvisibleOperator` must keep explicit grouping around a solidus-styled
+  // `Divide`/`Rational` operand when more material follows (Tycho item 53).
+  describe('juxtaposed solidus Divide keeps grouping (Tycho item 53)', () => {
+    test('deep non-canonical InvisibleOperator(Divide, Delimiter) round-trips', () => {
+      // The Subtract operand sits at level 4, where the default fraction
+      // style flips to inline-solidus; the Add operand sits at level 3 and
+      // keeps `\frac`.
+      const nc = ce.parse(
+        'F_{s}(x, y, Z, s)=\\operatorname{vector}((x,y,Z)-\\frac{1}{2}(sF_1(x, y, Z)), \\frac{1}{2}(sF_1(x, y, Z))+(x,y,Z))',
+        { canonical: false }
+      );
+      const out = nc.latex;
+      expect(out).toContain('(1/2)(sF_1(x,y,Z))');
+      expect(out).not.toMatch(/[^(]1\/2\(/);
+    });
+
+    test('a trailing solidus fraction needs no wrap (value-equivalent)', () => {
+      // `x·(1/2)` and `(x·1)/2` are the same value: no churn in last position.
+      const t = ce.box(['InvisibleOperator', 'x', ['Divide', 1, 2]], {
+        canonical: false,
+      });
+      expect(t.latex).toEqual('x\\frac{1}{2}');
+    });
+
+    test('quotient-styled fractions are unchanged', () => {
+      const t = ce.box(['InvisibleOperator', ['Divide', 1, 2], 'x'], {
+        canonical: false,
+      });
+      expect(t.latex).toEqual('\\frac{1}{2}x');
+    });
+  });
+
+  // A bare symbol juxtaposed with a parenthesized comma-group re-parses as a
+  // function CALL (`s(1,2,3)` → `["s",1,2,3]`) — a `Multiply` must emit an
+  // explicit multiplication separator between them (Tycho item 50).
+  describe('symbol × tuple keeps explicit multiply (Tycho item 50)', () => {
+    test('Multiply(symbol, Tuple) round-trips as a product', () => {
+      const t = ce.box(['Multiply', 's', ['Tuple', 1, 2, 3]], {
+        canonical: false,
+      });
+      expect(t.latex).toEqual('s\\times(1,2,3)');
+      expect(ce.parse(t.latex, { canonical: false }).canonical.json).toEqual(
+        ce.parse('s\\times(1,2,3)', { canonical: false }).canonical.json
+      );
+    });
+
+    test('Multiply(symbol, Delimiter(Sequence)) round-trips as a product', () => {
+      const t = ce.box(
+        ['Multiply', 's', ['Delimiter', ['Sequence', 'x', 'y', 'z']]],
+        { canonical: false }
+      );
+      expect(ce.parse(t.latex, { strict: false }).json).toMatchObject([
+        'Multiply',
+        's',
+        ['Tuple', 'x', 'y', 'z'],
+      ]);
+    });
+
+    test('a single-expression group stays juxtaposed (re-parses as a product)', () => {
+      const t = ce.box(['Multiply', 's', ['Delimiter', ['Add', 'x', 1]]], {
+        canonical: false,
+      });
+      expect(t.latex).toEqual('s(x+1)');
+    });
+
+    test('a number × tuple stays juxtaposed (a number cannot head a call)', () => {
+      const t = ce.box(['Multiply', 2, ['Tuple', 1, 2]], { canonical: false });
+      expect(t.latex).toEqual('2(1,2)');
+    });
+  });
 });

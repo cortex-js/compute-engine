@@ -500,3 +500,52 @@ describe('Symbolic polynomial GCD terminates', () => {
     expect(r.isValid).toBe(true);
   });
 });
+
+// Each top-level evaluate() arms its own timeLimit budget, so a loop of many
+// SHORT evaluations — a lazy-collection drain via each()/at() — can run
+// unboundedly without tripping the limit. `withTimeLimit` arms ONE deadline
+// across the whole span (Tycho item 42 addendum).
+describe('withTimeLimit', () => {
+  it('interrupts a long lazy-collection drain mid-stream', () => {
+    const engine = new ComputeEngine();
+    engine.precision = 'machine';
+    engine
+      .parse('H(x):=\\operatorname{mod}(10^{4}\\sin(10^{4}x),1)\\cdot2-1', {
+        strict: false,
+      })
+      .evaluate();
+    engine
+      .parse('g(x):=\\frac{1}{\\sqrt{40}}\\sum_{i=1}^{40}H(x+i)', {
+        strict: false,
+      })
+      .evaluate();
+    engine.assign(
+      'X',
+      engine.parse('\\frac{\\left[1...2469\\right]}{2469}').evaluate()
+    );
+    const r = engine.parse('g(X)', { strict: false }).evaluate();
+    let drained = 0;
+    expect(() =>
+      engine.withTimeLimit(150, () => {
+        for (const _el of r.each()) drained++;
+      })
+    ).toThrow(CancellationError);
+    // It got partway through, then the shared deadline fired.
+    expect(drained).toBeLessThan(2469);
+    // The deadline is restored: the engine still evaluates normally.
+    expect(engine.deadline).toBeUndefined();
+    expect(engine.parse('1+1').evaluate().re).toBe(2);
+  });
+
+  it('is re-entrant: an inner call cannot extend the outer deadline', () => {
+    const engine = new ComputeEngine();
+    expect(() =>
+      engine.withTimeLimit(50, () => {
+        engine.withTimeLimit(60_000, () => {
+          // The effective deadline is still the outer 50ms one.
+          while (true) engine.parse('(700!)!').evaluate();
+        });
+      })
+    ).toThrow(CancellationError);
+  });
+});

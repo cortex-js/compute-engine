@@ -618,6 +618,54 @@ function serializeSequence(
   return joinLatex(ys);
 }
 
+/**
+ * True when `op` is a two-operand `Divide`/`Rational` that will render with a
+ * solidus (`a/b`) under the current style options. The style callback is
+ * consulted with the level the operand will actually serialize at
+ * (`serializer.level + 1`), mirroring `serializeFraction`.
+ */
+function rendersAsSolidus(
+  serializer: Serializer,
+  op: MathJsonExpression
+): boolean {
+  const h = operator(op);
+  if ((h !== 'Divide' && h !== 'Rational') || nops(op) !== 2) return false;
+  if (!serializer.options.prettify) return false;
+  const style = serializer.options.fractionStyle(op, serializer.level + 1);
+  return style === 'inline-solidus' || style === 'nice-solidus';
+}
+
+/**
+ * Serializer for a non-canonical `InvisibleOperator`: join the operands by
+ * juxtaposition. A solidus-rendered fraction absorbs the FOLLOWING factor on
+ * re-parse (`1/2(sq)` → `1/(2(sq))`, a different value), so a
+ * `Divide`/`Rational` operand that will render with a solidus keeps explicit
+ * grouping when more material follows (Tycho item 53 — same round-trip class
+ * as the `Mod` handling in `serializeMultiply`). A `\frac` needs no wrap: it
+ * is visually grouped and re-parses as a single factor.
+ */
+function serializeInvisibleOperator(
+  serializer: Serializer,
+  expr: MathJsonExpression | null
+): string {
+  if (!expr) return '';
+  const xs = operands(expr);
+  if (xs.length === 0) return '';
+  if (xs.length === 1) return serializer.serialize(xs[0]);
+
+  return joinLatex(
+    xs.map((op, i) => {
+      const s = serializer.serialize(op);
+      if (i < xs.length - 1 && rendersAsSolidus(serializer, op))
+        return serializer.wrapString(
+          s,
+          serializer.groupStyle(expr, serializer.level + 1)
+        );
+      return s;
+    })
+  );
+}
+
 function serializeOps(sep = '') {
   return (serializer: Serializer, expr: MathJsonExpression | null): string => {
     if (!expr) return '';
@@ -1525,7 +1573,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     name: 'InvisibleOperator',
-    serialize: serializeOps(''),
+    serialize: serializeInvisibleOperator,
   },
   {
     // The first argument is a function expression.

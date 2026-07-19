@@ -1353,8 +1353,13 @@ export class ExactNumericValue extends NumericValue {
             (Number.isInteger(value.re) && Number.isInteger(value.im))
         );
         if (value.im !== 0) imRationalSum = add(imRationalSum, [value.im, 1]);
-        // Use bignumRe to avoid precision loss for large integers
-        const intValue = BigInt(value.bignumRe!.toFixed(0));
+        // Use bignumRe to avoid precision loss for large integers. A
+        // MachineNumericValue has no bignumRe: its integral `re` converts
+        // to BigInt exactly.
+        const intValue =
+          value.bignumRe !== undefined
+            ? BigInt(value.bignumRe.toFixed(0))
+            : BigInt(value.re);
         rationalSum = add(rationalSum, [intValue, BigInt(1)]);
       }
     }

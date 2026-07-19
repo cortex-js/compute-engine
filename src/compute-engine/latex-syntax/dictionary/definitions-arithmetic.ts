@@ -8,6 +8,7 @@ import {
   operator,
   operands,
   symbol,
+  stringValue,
   isEmptySequence,
   missingIfEmpty,
   isNumberExpression,
@@ -614,6 +615,9 @@ function serializeMultiply(
   // Track a `ContinuationPlaceholder` (`…`) operand so the next factor gets an
   // explicit multiplication separator (see the join logic below).
   let prevWasContinuation = false;
+  // Track a bare-symbol factor: juxtaposed with a following parenthesized
+  // comma-group it would re-parse as a function CALL (see the join logic).
+  let prevWasSymbol = false;
   for (let i = 1; i < count; i++) {
     arg = xs[i - 1];
     if (arg === null) continue;
@@ -636,6 +640,7 @@ function serializeMultiply(
       }
       prevWasNumber = true;
       prevWasContinuation = false;
+      prevWasSymbol = false;
       continue;
     }
 
@@ -654,6 +659,7 @@ function serializeMultiply(
           );
           prevWasNumber = false;
           prevWasContinuation = false;
+          prevWasSymbol = false;
           continue;
         }
       }
@@ -671,6 +677,7 @@ function serializeMultiply(
 
       prevWasNumber = true;
       prevWasContinuation = false;
+      prevWasSymbol = false;
       continue;
     }
 
@@ -723,6 +730,15 @@ function serializeMultiply(
       else if (isContinuation || prevWasContinuation) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
+      // A bare symbol juxtaposed with a parenthesized COMMA-group re-parses
+      // as a function CALL (`s(1,2,3)` → `["s",1,2,3]`) whenever the parser
+      // cannot prove the symbol non-applicable — the product silently
+      // becomes an application (Tycho item 50). Force an explicit
+      // multiplication separator. A single-expression group (`s(x+1)`)
+      // re-parses as a product and stays juxtaposed.
+      else if (prevWasSymbol && isCommaGroup(arg)) {
+        result = latexTemplate(serializer.options.multiply, result, term);
+      }
       // Not first term, use invisible multiply
       else if (!serializer.options.invisibleMultiply) {
         // Replace, joining the terms correctly
@@ -738,12 +754,32 @@ function serializeMultiply(
     }
     prevWasNumber = false;
     prevWasContinuation = isContinuation;
+    prevWasSymbol = symbol(arg) !== null && !isContinuation;
   }
 
   // Restore the level
   serializer.level += 1;
 
   return isNegative ? '-' + result : result;
+}
+
+/**
+ * True for an operand that serializes as a parenthesized COMMA-group —
+ * `(a, b, …)` — which, juxtaposed after a symbol, re-parses as a function
+ * call rather than a product (Tycho item 50). A `Delimiter` with custom
+ * fences only qualifies when it opens with a parenthesis.
+ */
+function isCommaGroup(expr: MathJsonExpression | null): boolean {
+  if (expr === null) return false;
+  const h = operator(expr);
+  if (h === 'Tuple' || h === 'Pair' || h === 'Triple') return nops(expr) >= 2;
+  if (h === 'Delimiter') {
+    const inner = operand(expr, 1);
+    if (operator(inner) !== 'Sequence' || nops(inner) < 2) return false;
+    const delims = stringValue(operand(expr, 2));
+    return delims === null || delims === undefined || delims.startsWith('(');
+  }
+  return false;
 }
 
 /** Parse a single `\frac`/`\binom` argument. In TeX, each argument is

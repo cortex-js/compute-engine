@@ -784,6 +784,38 @@ export class ComputeEngine implements IComputeEngine {
     this._runtimeState.timeLimit = t;
   }
 
+  /**
+   * Run `fn` under a single evaluation deadline of `ms` milliseconds.
+   *
+   * Ordinarily each top-level `evaluate()` call arms its own `timeLimit`
+   * budget, so a long sequence of SHORT evaluations — e.g. draining a lazy
+   * collection element by element via `each()`/`at()` — can run unboundedly
+   * without ever tripping the limit. Wrapping the whole loop in
+   * `withTimeLimit()` arms one shared deadline for its full duration: any
+   * evaluation performed inside `fn` throws a `CancellationError` (with
+   * `cause: 'timeout'`) once the deadline is exceeded.
+   *
+   * ```ts
+   * ce.withTimeLimit(2000, () => {
+   *   for (const el of collection.each()) process(el);
+   * });
+   * ```
+   *
+   * Nested calls are re-entrant: an inner `withTimeLimit` may only shorten
+   * the effective deadline, never extend it past the outer one.
+   */
+  withTimeLimit<T>(ms: number, fn: () => T): T {
+    const prev = this._runtimeState.deadline;
+    const deadline = Date.now() + ms;
+    this._runtimeState.deadline =
+      prev === undefined ? deadline : Math.min(prev, deadline);
+    try {
+      return fn();
+    } finally {
+      this._runtimeState.deadline = prev;
+    }
+  }
+
   /** Absolute time beyond which evaluation should not proceed.
    * @internal
    */

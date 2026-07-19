@@ -1,3 +1,43 @@
+## [Unreleased]
+
+### New Features
+
+- **`ce.withTimeLimit(ms, fn)`** — run a block of work under a single
+  evaluation deadline. Ordinarily each top-level `evaluate()` arms its own
+  `timeLimit` budget, so a long sequence of short evaluations — e.g. draining
+  a lazy collection element by element via `each()`/`at()` — can run
+  unboundedly without ever tripping the limit. Wrapping the loop in
+  `withTimeLimit()` arms one shared deadline for its full duration: any
+  evaluation inside throws `CancellationError` (`cause: 'timeout'`) once the
+  deadline is exceeded. Re-entrant (an inner call can only shorten the
+  effective deadline, never extend it).
+
+### Bug Fixes
+
+- **`.N()` of `Tuple ± scalar·Tuple` no longer throws at machine precision.**
+  When every term of a component sum was an integer-valued machine float
+  (`20 − 0.1·20`), the exact summation path read `bignumRe` — which is
+  undefined on a machine numeric value — and threw
+  `TypeError: Cannot read properties of undefined (reading 'toFixed')`. At
+  scale this killed composed lazy streams mid-drain (a 4001-point
+  `PointList − scalar·PointList` died at the first integer-valued element)
+  and made `at(k)` return `undefined` at the crashing indices. The integer
+  fold now converts the integral machine value directly.
+- **A solidus-rendered fraction juxtaposed with following material keeps
+  explicit grouping.** Serializing a non-canonical
+  `InvisibleOperator(Divide(1, 2), Delimiter(…))` at nesting depth > 3 (where
+  the default fraction style switches to an inline solidus) emitted
+  `1/2(sq)` — which re-parses as `1/(2·s·q)`, silently changing the value.
+  The solidus form is now parenthesized (`(1/2)(sq)`); `\frac`-rendered
+  fractions and trailing-position solidus fractions are unchanged.
+- **`Multiply(symbol, Tuple)` serializes with an explicit multiplication
+  sign.** `s(1,2,3)` re-parses as a function CALL `["s", 1, 2, 3]` for any
+  symbol the parser cannot prove non-applicable, silently turning a product
+  into an application. A bare-symbol factor followed by a parenthesized
+  comma-group now serializes as `s\times(1,2,3)`. Single-expression groups
+  (`s(x+1)`) and number-led products (`2(1,2)`), which re-parse as products,
+  keep juxtaposition.
+
 ## 0.85.1 _2026-07-18_
 
 ### Performance
@@ -7,30 +47,28 @@
   instead of grinding (or staying inert).** Numeric evaluation of
   `scalar × (PointX(P), PointY(P), …)` over a 4001-point `PointList` of
   broadcast components took ~600–1000 ms per product — each coordinate
-  projection eagerly transposed the whole point list into n `Tuple`s (at
-  ~150 µs/element of per-element boxed re-canonicalization) only to project
-  one slot back out — and could exceed the 2 s `timeLimit` on a full plot
-  row. Three coordinated changes, all hybrid (collections at or below the
-  100-element eager threshold are byte-identical to the previous shapes):
-  - `PointList` past the threshold transposes to the lazy `Map` form
-    (consumable via `at`/`each`/`count`) instead of materializing every
-    point-`Tuple`. **BREAKING (shape)**: a >100-point `PointList` now
-    evaluates to a lazy `Map`, not an eager `List` — element values are
-    unchanged.
-  - `PointX`/`PointY`/`PointZ` project lazily past the threshold, and
-    project straight to the source collection when the operand is the lazy
-    transpose form (`PointX(PointList(a, b, c))` ≡ `a` for equal-length
-    components; ragged or scalar slots keep transpose semantics).
+  projection eagerly transposed the whole point list into n `Tuple`s (at ~150
+  µs/element of per-element boxed re-canonicalization) only to project one slot
+  back out — and could exceed the 2 s `timeLimit` on a full plot row. Three
+  coordinated changes, all hybrid (collections at or below the 100-element eager
+  threshold are byte-identical to the previous shapes):
+  - `PointList` past the threshold transposes to the lazy `Map` form (consumable
+    via `at`/`each`/`count`) instead of materializing every point-`Tuple`.
+    **BREAKING (shape)**: a >100-point `PointList` now evaluates to a lazy
+    `Map`, not an eager `List` — element values are unchanged.
+  - `PointX`/`PointY`/`PointZ` project lazily past the threshold, and project
+    straight to the source collection when the operand is the lazy transpose
+    form (`PointX(PointList(a, b, c))` ≡ `a` for equal-length components; ragged
+    or scalar slots keep transpose semantics).
   - `addN`/`mulN` re-dispatch their broadcast branches after numeric operand
-    evaluation, so an operand that only becomes a collection through
-    evaluation (`Mod(L, 11)` over a list `L`) now composes into the lazy
-    `Map` form — previously the product/sum was silently left inert
-    (`0.2 · ⟨collection⟩` unreduced). The eager broadcast zip also streams
-    its operands with hoisted iterators instead of per-index `at()` calls
-    (which re-instantiated a lazy `Map`'s mapping lambda on every access).
-  The filed repro (a 4001-member 3D `vector` row) went from a 2 s timeout to
-  ~10 ms of lazy composition, with materialization deferred to the consumer
-  sweep.
+    evaluation, so an operand that only becomes a collection through evaluation
+    (`Mod(L, 11)` over a list `L`) now composes into the lazy `Map` form —
+    previously the product/sum was silently left inert (`0.2 · ⟨collection⟩`
+    unreduced). The eager broadcast zip also streams its operands with hoisted
+    iterators instead of per-index `at()` calls (which re-instantiated a lazy
+    `Map`'s mapping lambda on every access). The filed repro (a 4001-member 3D
+    `vector` row) went from a 2 s timeout to ~10 ms of lazy composition, with
+    materialization deferred to the consumer sweep.
 
 ### Bug Fixes
 
@@ -43,8 +81,8 @@
   and Python targets JSON-stringified the mapping, so
   `compile(expr, { vars: { s: '_.s' } })` emitted `Math.sin("_.s" * _.x)` — a
   string literal yielding `NaN` at run time. A string value is now spliced
-  verbatim (`Math.sin(_.s * _.x)`); a non-string value still bakes as a
-  constant (`vars: { a: 7 }` → `7`), unchanged.
+  verbatim (`Math.sin(_.s * _.x)`); a non-string value still bakes as a constant
+  (`vars: { a: 7 }` → `7`), unchanged.
 
 ## 0.85.0 _2026-07-18_
 
