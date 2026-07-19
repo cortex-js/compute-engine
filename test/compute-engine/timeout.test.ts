@@ -548,4 +548,28 @@ describe('withTimeLimit', () => {
       })
     ).toThrow(CancellationError);
   });
+
+  it('does not charge one-time cache builds against the deadline', () => {
+    // A lazily-built engine cache (e.g. constructible trig values) is
+    // warm-up work, not part of the user's evaluation: the deadline is
+    // suspended during the build, then pushed back by the build's duration.
+    const engine = new ComputeEngine();
+    engine.withTimeLimit(10_000, () => {
+      const before = engine.deadline!;
+      engine._cache('test-deadline-exclusion', () => {
+        // The deadline is suspended during the build...
+        expect(engine.deadline).toBeUndefined();
+        const t0 = Date.now();
+        while (Date.now() - t0 < 30) {
+          /* busy-wait ≥30ms */
+        }
+        return 1;
+      });
+      // ...and afterwards restored, shifted by at least the build time.
+      expect(engine.deadline).toBeGreaterThanOrEqual(before + 30);
+    });
+    // Cache hits don't shift anything: no deadline armed, none created.
+    engine._cache('test-deadline-exclusion', () => 2);
+    expect(engine.deadline).toBeUndefined();
+  });
 });

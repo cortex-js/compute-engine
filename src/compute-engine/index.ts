@@ -1930,7 +1930,25 @@ export class ComputeEngine implements IComputeEngine {
     build: () => T,
     purge?: (t: T) => T | undefined
   ): T {
-    return this._cacheStore.getOrBuild(cacheName, build, purge);
+    return this._cacheStore.getOrBuild(
+      cacheName,
+      () => {
+        // A one-time cache build is engine warm-up, not part of the user's
+        // evaluation: suspend the deadline while it runs (a partial cache
+        // is useless), then push the deadline back by the build's duration
+        // so the caller's time budget is not charged for it.
+        const deadline = this._runtimeState.deadline;
+        if (deadline === undefined) return build();
+        this._runtimeState.deadline = undefined;
+        const start = Date.now();
+        try {
+          return build();
+        } finally {
+          this._runtimeState.deadline = deadline + (Date.now() - start);
+        }
+      },
+      purge
+    );
   }
 
   /** Return a boxed expression from a number, string or expression input.

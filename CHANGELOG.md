@@ -2,6 +2,19 @@
 
 ### Bug Fixes
 
+- **One-time cache builds are no longer charged against the time limit.** The
+  engine builds some internal tables lazily on first use (constructible trig
+  values on the first `sin(π/6)`-style evaluation, the standard simplification
+  rule set, etc.). Previously this warm-up ran inside the caller's
+  `timeLimit`/`withTimeLimit()` budget, so a tight deadline on a fresh engine
+  could lose a large fraction of its budget — or fire mid-build — on the very
+  first call. The deadline is now suspended while a cache builds and then
+  pushed back by the build's duration, so a time budget measures only the
+  caller's own evaluation. Relatedly, a timeout that did fire during a cache
+  build was swallowed and resurfaced as an unrelated `TypeError`; an
+  interruption now propagates as the `CancellationError` it is, leaving the
+  cache unbuilt so a later call retries.
+
 - **Compiled real/complex convention mismatch in branch arms** (js target). A
   provably-real branch arm (`If`/`Which`/`When`) alongside a complex-valued arm
   compiled to a plain number while consumers of the branch read `{ re, im }`

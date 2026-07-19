@@ -8,6 +8,8 @@
  *
  * @internal
  */
+import { CancellationError } from '../common/interruptible';
+
 type CacheEntry = {
   value: unknown;
   build: () => unknown;
@@ -30,6 +32,11 @@ export class EngineCacheStore {
           value: build(),
         };
       } catch (e) {
+        // An interruption (timeout/abort) is not a cache failure: let it
+        // propagate, and leave the entry unbuilt so a later call retries.
+        // Swallowing it would return `undefined` to the caller and surface as
+        // an unrelated TypeError downstream.
+        if (e instanceof CancellationError) throw e;
         console.error(`Fatal error building cache "${cacheName}":\n\t ${e}`);
       }
     }
