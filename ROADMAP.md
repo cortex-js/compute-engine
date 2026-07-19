@@ -459,12 +459,13 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
   `Length`/`Count`/`IsEmpty`/`Contains` over `Sort`/`Shuffle`/`Reverse`/
   `Unique` — but any broader `Count(f(x))`-through-eager-op cheapness needs
   canonical-level rewrites, a churn-heavy direction to decide deliberately.
-- **Latent issue (one remaining, found 2026-07-19):**
-  `Slice(Range(1,+∞), 5, -1)` reports `count === Infinity` with
-  `isFiniteCollection === true` — Slice's unconditional `isFinite: () =>
-  true` over-claims finiteness for a negative-end slice of an infinite
-  source; a correct answer needs the source count for negative indices.
-  (The 2026-07-19 latent sweep dispositioned the rest of the former list:
+- **Latent issues: none remaining.** The 2026-07-19 latent sweep
+  dispositioned the whole former list, including its last survivor — the
+  `Slice` finiteness over-claim (fixed via a shared `sliceBounds`
+  resolver: negative end over an infinite source is an honest infinite
+  tail; negative start over one is unresolvable and inert — this also
+  killed a `NaN`-count/`at(1) = +∞` fabrication; unknown-length sources
+  report finiteness unknown). Rest of the disposition:
   the `enlist` materialization restructuring of literal pair-lists, the
   `Take.isFinite` gap that kept `ListFrom(Take(<infinite>, n))` symbolic,
   and the loose `Sort`/`Shuffle` `type:` handlers are FIXED; the

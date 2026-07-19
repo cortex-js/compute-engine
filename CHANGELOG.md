@@ -25,6 +25,18 @@
   `List`, but their static type claimed the *source's* type
   (`Sort(Range(1,5))` typed as an `indexed_collection`-shaped Range). Both
   now report `list<element-type>`, matching `Take`.
+- **`Slice` facets are now coherent over infinite and unknown-length
+  sources.** `Slice` claimed `isFiniteCollection` unconditionally, and a
+  negative *start* over an infinite source produced a `NaN` count while
+  `at(1)` fabricated the element `+oo` (from `source.at(Infinity)`). The
+  facets now share one bounds resolver: a negative **end** over an
+  infinite source means "through the end" — an honest infinite tail
+  (`Slice(Range(1,+∞), 5, -1)`: count `∞`, not finite, `at(1)` = 5,
+  `Take(…, 3)` → `[5,6,7]`); a negative **start** over an infinite source
+  ("the last k elements") is unresolvable and stays inert; an
+  unknown-length source now reports finiteness as unknown rather than
+  true. Bounded positive windows are unchanged
+  (`ListFrom(Slice(Range(1,+∞), 1, 5))` → `[1,2,3,4,5]`).
 
 ## 0.86.0 _2026-07-19_
 

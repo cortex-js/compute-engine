@@ -3109,70 +3109,49 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        const count = expr.op1.count;
-        if (count === undefined) return undefined;
-        // Resolve start/end the same way the `at` and `iterator` handlers do,
-        // so all three agree (negative indices count from the end).
-        let start = toInteger(expr.op2) ?? 1;
-        if (start < 1) start = count + 1 + start;
-        if (start < 1) start = 1;
-        if (start > count) return 0;
-        let end = toInteger(expr.op3) ?? count;
-        if (end < 1) end = count + 1 + end;
-        if (end < 1) end = 1;
-        if (end > count) end = count;
-        return Math.max(0, end - start + 1);
+        const bounds = sliceBounds(expr);
+        if (!bounds) return undefined;
+        return Math.max(0, bounds.end - bounds.start + 1);
       },
-      isFinite: (_expr) => true,
+      isFinite: (expr) => {
+        const bounds = sliceBounds(expr);
+        if (!bounds) return undefined;
+        return Number.isFinite(Math.max(0, bounds.end - bounds.start + 1));
+      },
       at: (
         expr: Expression,
         index: number | string
       ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
+        const bounds = sliceBounds(expr);
+        if (!bounds) return undefined;
         if (!isFunction(expr)) return undefined;
-        const count = expr.op1.count;
-        if (count === undefined) return undefined;
-        let start = toInteger(expr.op2) ?? 1;
-        if (start < 1) start = count + 1 + start; // Convert negative index to positive
-        if (start < 1) start = 1; // Ensure start is at least 1
-        if (start > count) return undefined; // Start is beyond the end of the collection
-        let end = toInteger(expr.op3) ?? count;
-        if (end < 1) end = count + 1 + end; // Convert negative index to positive
-        if (end < 1) end = 1; // Ensure end is at least 1
-        if (end > count) end = count; // Ensure end is within bounds
 
         // `index` is 1-based within the slice; a negative index counts from
         // the end of the slice. Return the element at that position.
-        const length = end - start + 1;
+        const length = bounds.end - bounds.start + 1;
         if (length <= 0) return undefined;
-        if (index < 0) index = length + 1 + index;
+        if (index < 0) {
+          // Counting from the end of an infinite tail is unresolvable.
+          if (!Number.isFinite(length)) return undefined;
+          index = length + 1 + index;
+        }
         if (index < 1 || index > length) return undefined;
-        return expr.op1.at(start + index - 1);
+        return expr.op1.at(bounds.start + index - 1);
       },
       iterator: (expr) => {
-        if (!isFunction(expr))
+        const bounds = sliceBounds(expr);
+        if (!bounds || !isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
-        let start = toInteger(expr.op2) ?? 1;
-        const count = expr.op1.count;
-        if (count === undefined)
-          return { next: () => ({ value: undefined, done: true }) };
-        if (start < 1) start = count + 1 + start; // Convert negative index to positive
-        if (start < 1) start = 1; // Ensure start is at least 1
-        if (start > count)
-          return { next: () => ({ value: undefined, done: true }) };
-        let end = toInteger(expr.op3) ?? count;
-        if (end < 1) end = count + 1 + end; // Convert negative index to positive
-        if (end < 1) end = 1; // Ensure end is at least 1
-        if (end > count) end = count;
 
-        let index = start;
-        const last = end;
+        let index = bounds.start;
+        const last = bounds.end; // May be Infinity: an unbounded tail streams.
 
         return {
           next: () => {
             if (index > last) return { value: undefined, done: true };
-            const value = expr.op1.at(index)!;
+            const value = expr.op1.at(index);
+            if (value === undefined) return { value: undefined, done: true };
             index += 1;
             return { value, done: false };
           },
@@ -5784,6 +5763,35 @@ function* extremumBy(
     yield undefined;
   }
   return best;
+}
+
+/** Resolve a `Slice` expression's normalized 1-based [start, end] window
+ * against its source's count, so every facet (`count`/`isFinite`/`at`/
+ * `iterator`) agrees. Negative indices count from the end of the source.
+ *
+ * Returns `undefined` (unresolvable — all facets decline) when the source
+ * count is unknown, or when a negative START is applied to an infinite
+ * source: "the last k elements" of an infinite collection do not exist.
+ * A negative END over an infinite source resolves to `Infinity` — the
+ * "through the end" reading — yielding an infinite tail whose `count` is
+ * `Infinity` and whose iterator streams unboundedly. */
+function sliceBounds(
+  expr: Expression
+): { start: number; end: number } | undefined {
+  if (!isFunction(expr)) return undefined;
+  const count = expr.op1.count;
+  if (count === undefined) return undefined;
+  let start = toInteger(expr.op2) ?? 1;
+  if (start < 1) {
+    if (!Number.isFinite(count)) return undefined;
+    start = count + 1 + start;
+  }
+  if (start < 1) start = 1;
+  let end = toInteger(expr.op3) ?? count;
+  if (end < 1) end = count + 1 + end;
+  if (end < 1) end = 1;
+  if (end > count) end = count;
+  return { start, end };
 }
 
 /**

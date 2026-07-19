@@ -351,6 +351,55 @@ describe('DROP 2', () => {
   });
 });
 
+describe('SLICE facet coherence over infinite/unknown sources (2026-07-19)', () => {
+  const inf = ['Range', 1, 'PositiveInfinity'];
+
+  test('negative END over infinite = unbounded tail: count ∞, not finite, streams', () => {
+    const s = engine.box(['Slice', inf, 5, -1]);
+    expect(s.count).toBe(Infinity);
+    expect(s.isFiniteCollection).toBe(false);
+    expect(s.at(1)?.toString()).toBe('5');
+    // Counting from the end of an infinite tail is unresolvable.
+    expect(s.at(-1)).toBeUndefined();
+    expect(
+      engine.box(['Take', ['Slice', inf, 5, -1], 3]).evaluate().toString()
+    ).toBe('[5,6,7]');
+  });
+
+  test('negative START over infinite is unresolvable: all facets decline, stays inert', () => {
+    // "The last 3 elements" of an infinite collection do not exist.
+    // Previously: count was NaN and at(1) fabricated the element +oo.
+    const s = engine.box(['Slice', inf, -3, -1]);
+    expect(s.count).toBeUndefined();
+    expect(s.isFiniteCollection).toBeUndefined();
+    expect(s.at(1)).toBeUndefined();
+    expect(s.evaluate().operator).toBe('Slice');
+    expect(
+      engine.box(['ListFrom', ['Slice', inf, -3, -1]]).evaluate().operator
+    ).toBe('ListFrom');
+  });
+
+  test('unknown-count source: finiteness is unknown, not true', () => {
+    const s = engine.box([
+      'Slice',
+      ['ChunkBy', ['Cycle', ['List', 1, 1, 2]], ['Function', 'x', 'x']],
+      1,
+      5,
+    ]);
+    expect(s.count).toBeUndefined();
+    expect(s.isFiniteCollection).toBeUndefined();
+  });
+
+  test('bounded positive window over infinite stays finite and materializes', () => {
+    const s = engine.box(['Slice', inf, 1, 5]);
+    expect(s.count).toBe(5);
+    expect(s.isFiniteCollection).toBe(true);
+    expect(
+      engine.box(['ListFrom', ['Slice', inf, 1, 5]]).evaluate().toString()
+    ).toBe('[1,2,3,4,5]');
+  });
+});
+
 describe('SLICE (2,3)', () => {
   test('empty list', () =>
     expect(evaluate(['Slice', emptyList, 2, 3])).toMatchInlineSnapshot(
