@@ -1967,12 +1967,7 @@ export class BaseCompiler {
         .filter((p): p is string => p !== undefined);
       return { bodies: expr.ops.slice(0, 1), real: [], shielded: params };
     }
-    if (
-      h !== 'Sum' &&
-      h !== 'Product' &&
-      h !== 'Loop' &&
-      h !== 'Comprehension'
-    )
+    if (h !== 'Sum' && h !== 'Product' && h !== 'Loop' && h !== 'Comprehension')
       return null;
 
     const real: string[] = [];
@@ -2189,9 +2184,7 @@ export class BaseCompiler {
    * `(x(t), y(t))` → `vec2`), type-based for typed operands (`tuple<…>`, a
    * 1-axis `list`), and 2 for a complex value (lowered as `vec2(re, im)`).
    */
-  static vectorComponentCount(
-    expr: Expression | null
-  ): 2 | 3 | 4 | undefined {
+  static vectorComponentCount(expr: Expression | null): 2 | 3 | 4 | undefined {
     const n = BaseCompiler.aggregateComponentCount(expr);
     return n !== undefined && n >= 2 && n <= 4 ? (n as 2 | 3 | 4) : undefined;
   }
