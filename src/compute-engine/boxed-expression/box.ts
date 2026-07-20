@@ -522,8 +522,12 @@ function boxInternal(
   //
   // Box a number
   //
+  // `bigint` is part of `ExpressionInput` and preserves exact integer-ness
+  // regardless of magnitude or engine precision (a large integer literal
+  // routed through a float would silently become inexact).
   if (
     typeof expr === 'number' ||
+    typeof expr === 'bigint' ||
     expr instanceof BigDecimal ||
     expr instanceof Complex
   )

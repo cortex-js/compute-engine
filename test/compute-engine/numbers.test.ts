@@ -26,6 +26,22 @@ describe('BOXING OF NUMBER', () => {
     expect(ce.expr({ num: 'infinity' }).numericValue).toEqual(Infinity);
   });
 
+  test('Native bigint primitives box as exact integers', () => {
+    // `bigint` is part of `ExpressionInput`; it used to fall through box()'s
+    // primitive dispatch and silently become the `Undefined` symbol.
+    expect(ce.expr(123n).isInteger).toBe(true);
+    expect(ce.expr(123n).isSame(123)).toBe(true);
+    expect(ce.expr(-42n).re).toBe(-42);
+    expect(ce.expr(0n).isSame(0)).toBe(true);
+    // Exactness survives magnitudes beyond engine precision: byte-identical
+    // to the ce.number() path, never routed through a float.
+    const big = 5316911983139663487003542222693990401n; // 37 digits
+    expect(ce.expr(big).isInteger).toBe(true);
+    expect(ce.expr(big).json).toEqual(ce.number(big).json);
+    // bigint operands inside a function expression box and evaluate
+    expect(ce.expr(['Add', 10n, 5]).evaluate().re).toBe(15);
+  });
+
   test('Bigints', () => {
     // expect(latex({ num: 12n })).toMatchInlineSnapshot();
     expect(ce.expr({ num: '12n' }).numericValue).toEqual(12);

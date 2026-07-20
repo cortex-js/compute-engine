@@ -57,6 +57,13 @@
 
 ### Fixes
 
+- **`ce.box()` now accepts native `bigint` values.** `bigint` was declared in
+  `ExpressionInput` but unhandled by the boxing dispatch, so `ce.box(123n)` —
+  bare or as an operand in `ce.box(['Add', 10n, 5])` — silently became the
+  `Undefined` symbol. Bigints now box as exact integer literals, preserving
+  exactness at any magnitude (never routed through a float), identical to the
+  `ce.number(bigint)` path.
+
 - **Unbounded collection walks over infinite lazy sources.** `First`/`At` on a
   `Filter` or `TakeWhile` whose predicate never (or eventually never) matches,
   and any walk over a `Dedup` of a source with infinitely repeating duplicates
