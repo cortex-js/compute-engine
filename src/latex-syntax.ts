@@ -43,6 +43,8 @@ export type {
   SerializeLatexOptions,
   ParseLatexOptions,
   LatexString,
+  Parser,
+  Serializer,
 } from './compute-engine/latex-syntax/types.js';
 
 export type { ParseDiagnostic } from './compute-engine/types-kernel-serialization.js';
