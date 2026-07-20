@@ -9699,12 +9699,32 @@ readonly isValid: boolean;
 `false` if this expression or any of its subexpressions is an `["Error"]`
 expression.
 
+The check is **deep**: an `["Error"]` anywhere in the expression tree
+invalidates the whole expression. This includes the *elements* of a list,
+vector or matrix — `(1,2) + [3,4]` broadcasts to a list of
+`incompatible-type` errors, and that list is invalid — and operands held
+unevaluated, such as the body of a `["Hold"]`.
+
 :::info[Note]
 Applicable to canonical and non-canonical expressions. For
 non-canonical expression, this may indicate a syntax error while parsing
 LaTeX. For canonical expression, this may indicate argument type
 mismatch, or missing or unexpected arguments.
 :::
+
+This is a check for **well-formedness, not for meaningfulness**: it
+answers "is this expression free of errors?", not "will it evaluate to a
+useful value?". An expression is still valid when it contains free
+symbols (`x + 1`), calls an undeclared function, or evaluates to `NaN` or
+`±∞` (`0/0` and `1/0` are both valid). Conversely, a valid expression may
+still fail to evaluate for reasons this property does not report.
+
+Use it as an **admission gate** — check `isValid` before compiling,
+plotting, or otherwise consuming an expression built from untrusted or
+user-supplied input, since malformed input surfaces as an `["Error"]`
+expression rather than as a thrown exception. To find out *what* is
+wrong, walk the expression for `["Error"]` subexpressions; each carries
+an error code and the offending operand.
 
 </MemberCard>
 
