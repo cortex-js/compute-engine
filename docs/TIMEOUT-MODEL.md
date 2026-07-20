@@ -644,3 +644,70 @@ a prerequisite rather than a nicety.
 
 Steps 1 and 2 are safe to land immediately and independently — neither depends
 on the deprecation decision.
+
+## 9. Non-time limits: considered and declined (decision record, 2026-07-20)
+
+After release N shipped, we considered whether the other limits —
+`iterationLimit` (1024), `recursionLimit` (256), `maxCollectionSize` (10_000) —
+should follow the same pattern: a `withIterationLimit()` span, or a general
+`withLimits()`. **Decision: leave them ambient.** Do not re-litigate without
+new evidence; the reasoning is semantic, not inertial.
+
+### The distinction that decides it
+
+The timeout redesign worked because it identified what `timeLimit` actually
+was: a **depleting budget masquerading as configuration**. A deadline is
+wall-clock-anchored and shared across the whole call tree — which is why
+"what does it apply to?" had no answer, why nesting needed `min()`
+composition, and why expiry needed attribution. Spans fixed a *scoping* bug.
+
+`iterationLimit`, `recursionLimit`, and `maxCollectionSize` are **genuine
+configuration**. They are per-construct: every loop, every collection walk,
+every call stack gets its own allowance — nothing depletes across the tree,
+two sequential loops do not share a budget, and there is no mid-span refresh
+or composition question. Their ambient scoping is crisp and already correct.
+They belong to the same family as `precision` and `tolerance`, not to
+`timeLimit`'s.
+
+The one-sentence model: **budgets compose, configs shadow.** Nested time spans
+take `min()` (an inner span can never escape its caller's bound — load-bearing,
+§3.4). A nested iteration override would have to *shadow* (inner 10 replaces
+outer 1e6 for inner constructs; `min()` would be nonsense there).
+
+### Why each rejected option is rejected
+
+- **`withIterationLimit(n, fn)`** — rejected *specifically because of the
+  name*. It would look symmetric to `withTimeLimit` while composing
+  differently (shadow vs. `min()`). Two same-shaped APIs with divergent
+  nesting semantics is precisely the "two mechanisms that interact unclearly"
+  trap this whole document exists to remove. Surface symmetry with hidden
+  semantic asymmetry is worse than honest asymmetry.
+- **`withLimits({timeMs, iterations, ...}, fn)`** — rejected harder. Bundling
+  a min-composing budget and shadow-composing configs behind one call forces
+  the API either to pick one composition rule (wrong for half its arguments)
+  or to document per-field semantics (the ambiguity reborn as a parameter
+  list).
+- **Converting the counters to depleting span budgets** — rejected: it would
+  be a semantic change (sequential loops sharing an iteration pool) with real
+  churn and no bug driving it. Every issue in the consumer ledger was about
+  timeouts; none about iteration-limit scoping.
+
+### If scoped ergonomics are ever wanted
+
+The honest shape is `ce.withConfig({iterationLimit: 1e6}, fn)` — shadowing
+semantics, exception-safe restore, and it generalizes to `precision` /
+`tolerance`. Its *name* says "configuration", which keeps the two-concept
+model clean. Build it when a consumer asks, not before. It would need the
+same async-callback type guard as `withTimeLimit` (a Promise-returning
+callback escapes a synchronously-restored scope).
+
+### The real gap, if diagnostics demand appears
+
+Iteration-limit errors are unattributed: `cause: 'iteration-limit-exceeded'`
+says *what kind* of limit fired but not *which construct*. The targeted fix is
+synthesizing an origin on those errors (operator name, mirroring the
+`engine.timeLimit:<operator>` labels) and populating `spans` from the active
+frame (usually available for free, since the walk typically runs under one).
+That is independent of any `with*` API and delivers the actual diagnostic
+value a span API would only have pretended to. Not scheduled; recorded here
+for when a consumer reports a hard-to-localize iteration-limit error.
