@@ -25,17 +25,28 @@
   the honest union — a non-indexed collection is never broadcast by the value
   path, so a scalar outcome stays reachable there.
 
-- **`isValid` is now deep through a list/tensor.** `BoxedTensor.isValid`
-  returned `true` unconditionally, so a `List` whose every element was an
-  `Error` still reported `isValid: true` — `(1,2)+[3,4]` broadcasts to a list of
-  `incompatible-type` errors and passed the gate. An embedded `Error` element
-  now poisons the enclosing expression, matching what `BoxedFunction.isValid`
-  already did. Consumers that use `isValid` as an admission gate before
-  compiling or plotting will now correctly reject these expressions.
+### Bug Fixes
+
+- **`isValid` now honors its documented contract through a list/tensor.**
+  `isValid` is specified as `false` if the expression "or any of its
+  subexpressions" is an `["Error"]`, but `BoxedTensor.isValid` returned `true`
+  unconditionally — so a `List` whose every element was an `Error` reported
+  `isValid: true`. `(1,2)+[3,4]` broadcasts to a list of `incompatible-type`
+  errors and passed the gate. An embedded `Error` element now poisons the
+  enclosing expression, matching what `BoxedFunction.isValid` already did.
+
+  Behavior change worth noting even though the contract is unchanged:
+  consumers using `isValid` as an admission gate before compiling or plotting
+  will now correctly reject expressions they previously admitted.
 
   Only `expression`-dtype tensors are scanned; `float64`/`complex128`/`bool`
   fields cannot hold an `Error` by construction and keep the O(1) answer, so
   this does not add a per-element walk to large numeric tensors.
+
+  The `isValid` documentation has been expanded to spell out the contract: the
+  check is deep (including list elements and held operands), and it tests
+  well-formedness rather than meaningfulness — free symbols, undeclared
+  functions, `NaN` and `±∞` are all valid.
 
 ## 0.87.1 _2026-07-20_
 
