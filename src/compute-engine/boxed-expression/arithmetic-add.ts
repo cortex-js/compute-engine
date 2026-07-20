@@ -323,7 +323,9 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
     const shaped = args.filter(isBroadcastShaped);
     if (
       shaped.length > 0 &&
-      args.every((x) => isBroadcastShaped(x) || isSubtype(x.type.type, 'number'))
+      args.every(
+        (x) => isBroadcastShaped(x) || isSubtype(x.type.type, 'number')
+      )
     )
       return widen(...shaped.map((x) => x.type.type));
     return widen(...args.map((x) => x.type.type));
