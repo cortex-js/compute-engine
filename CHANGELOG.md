@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.88.0 _2026-07-20_
 
 ### Deprecations
 
